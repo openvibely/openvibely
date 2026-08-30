@@ -990,7 +990,7 @@ const docTemplate = `{
         },
         "/api/tasks/{id}/lifecycle-executions": {
             "get": {
-                "description": "Returns lifecycle hook invocations (routing, before-run preparation, after-complete learning) recorded for the given task.",
+                "description": "Returns one bounded page of lifecycle hook invocations (routing, before-run preparation, after-complete learning) recorded for the given task. Results are newest-first; use next_cursor with before for older activity and the newest execution ID with after for live inserts.",
                 "produces": [
                     "application/json"
                 ],
@@ -1005,26 +1005,107 @@ const docTemplate = `{
                         "name": "id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Project ID",
+                        "name": "project_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page size (default 20, maximum 50)",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Opaque cursor for the next older page",
+                        "name": "before",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Newest execution ID or newer-page cursor",
+                        "name": "after",
+                        "in": "query"
                     }
                 ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/viewmodels.LifecycleExecutionView"
-                            }
+                            "$ref": "#/definitions/viewmodels.LifecycleExecutionPageView"
                         }
                     },
                     "400": {
-                        "description": "Invalid task ID",
+                        "description": "Invalid task ID or page cursor",
                         "schema": {
                             "$ref": "#/definitions/handler.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Task not found",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/tasks/{id}/lifecycle-executions/{executionID}": {
+            "get": {
+                "description": "Returns the prompt-safe current state of one lifecycle hook invocation when it belongs to the requested task and project.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Lifecycle"
+                ],
+                "summary": "Get one lifecycle execution for a task",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Task ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Lifecycle execution ID",
+                        "name": "executionID",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Project ID",
+                        "name": "project_id",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/viewmodels.LifecycleExecutionView"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid task or execution ID",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Task or lifecycle execution not found",
                         "schema": {
                             "$ref": "#/definitions/handler.ErrorResponse"
                         }
@@ -2543,6 +2624,23 @@ const docTemplate = `{
                 },
                 "seq": {
                     "type": "integer"
+                }
+            }
+        },
+        "viewmodels.LifecycleExecutionPageView": {
+            "type": "object",
+            "properties": {
+                "has_more": {
+                    "type": "boolean"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/viewmodels.LifecycleExecutionView"
+                    }
+                },
+                "next_cursor": {
+                    "type": "string"
                 }
             }
         },

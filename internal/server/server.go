@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -690,6 +691,10 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	discordAuthRepo := repository.NewDiscordAuthRepo(db)
 	discordTaskContextRepo := repository.NewDiscordTaskContextRepo(db)
 	discordUserProjectRepo := repository.NewDiscordUserProjectRepo(db)
+	xAuthRepo := repository.NewXAuthRepo(db)
+	xUserProjectRepo := repository.NewXUserProjectRepo(db)
+	xTaskContextRepo := repository.NewXTaskContextRepo(db)
+	xInboundReceiptRepo := repository.NewXInboundReceiptRepo(db)
 	channelTargetRepo := repository.NewChannelTargetRepo(db)
 
 	// Custom personalities
@@ -789,6 +794,13 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	slackSvc.SetAgentRepo(agentRepo)
 	emailSvc := service.NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, scheduleRepo, taskSvc, llmSvc, workerSvc, emailAuthRepo, emailTaskContextRepo)
 	channelMessageRouter := service.NewChannelMessageRouter(channelTargetRepo, settingsRepo)
+	xSettingValues, _ := settingsRepo.GetMany(context.Background(), []string{service.XSettingConsumerKey, service.XSettingConsumerSecret, service.XSettingAccessToken, service.XSettingAccessTokenSecret, service.XSettingPollIntervalSeconds})
+	xCredentials := service.XCredentials{ConsumerKey: xSettingValues[service.XSettingConsumerKey], ConsumerSecret: xSettingValues[service.XSettingConsumerSecret], AccessToken: xSettingValues[service.XSettingAccessToken], AccessTokenSecret: xSettingValues[service.XSettingAccessTokenSecret]}
+	xSvc := service.NewXService(xCredentials, settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, scheduleRepo, taskSvc)
+	xSvc.SetRepositories(xAuthRepo, xUserProjectRepo, xTaskContextRepo, xInboundReceiptRepo, repository.NewThreadInputRepo(db))
+	if seconds, err := strconv.Atoi(strings.TrimSpace(xSettingValues[service.XSettingPollIntervalSeconds])); err == nil {
+		xSvc.SetPollInterval(time.Duration(seconds) * time.Second)
+	}
 	llmSvc.SetChannelMessageRouter(channelMessageRouter)
 	channelMessageRouter.SetSlackService(slackSvc)
 	channelMessageRouter.SetSlackAuthStore(slackAuthRepo)
@@ -894,6 +906,18 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 		return service.ProjectSkillRootForResolver(ctx, projectRepo, projectID)
 	})
 	lifecycleRunner := lifecycle.NewRunner(lifecycleRepo, llmHookInvoker, skillResolver)
+	lifecycleRunner.SetExecutionChangedObserver(func(_ context.Context, projectID string, exec models.LifecycleExecution) {
+		if broadcaster == nil {
+			return
+		}
+		broadcaster.Publish(events.TaskEvent{
+			Type:      events.TaskLifecycleExecutionChanged,
+			ProjectID: projectID,
+			TaskID:    exec.TaskID,
+			ExecID:    exec.ID,
+			Status:    string(exec.Status),
+		})
+	})
 	workerSvc.SetLifecycleRunner(lifecycleRunner)
 	workerSvc.SetLifecycleSkillRoot(globalSkillRoot)
 	// Give the LLM service the same root used for global skill catalog and
@@ -1099,6 +1123,8 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	h.SetSlackTaskContextRepo(slackTaskContextRepo)
 	h.SetDiscordAuthRepo(discordAuthRepo)
 	h.SetDiscordTaskContextRepo(discordTaskContextRepo)
+	h.SetXRepositories(xAuthRepo, xUserProjectRepo, xTaskContextRepo, xInboundReceiptRepo)
+	h.SetXService(xSvc)
 	h.SetReviewCommentRepo(reviewCommentRepo)
 	h.SetCustomPersonalityRepo(customPersonalityRepo)
 	h.SetWorktreeService(worktreeSvc)
@@ -1125,6 +1151,14 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	discordSvc.SetQueuedTaskThreadPromoter(h.PromoteQueuedTaskThreadInput)
 	discordSvc.SetChannelChatRunner(h.StartChannelChatRun)
 	discordSvc.SetChannelTaskRunner(h.StartChannelTaskRun)
+	xSvc.SetRuntime(agentRepo, customPersonalityRepo, chatBroadcaster, executionStreamHub, h.StartChannelChatRun, h.StartChannelTaskRun, h.PromoteQueuedChatInput, h.PromoteQueuedTaskThreadInput, channelMessageRouter)
+	if xCredentials.Ready() {
+		if err := xSvc.Start(); err != nil {
+			applog.Infof("warning: failed to start X mention polling: %v", err)
+		} else {
+			channelMessageRouter.SetXService(xSvc)
+		}
+	}
 	if telegramSvc != nil {
 		telegramSvc.SetChannelMessageRouter(channelMessageRouter)
 		channelMessageRouter.SetTelegramService(telegramSvc)
@@ -1246,6 +1280,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 		if discordSvc != nil {
 			discordSvc.Stop()
 		}
+		h.StopXService()
 		e.Close()
 		closeDatabase()
 		close(shutdownDone)

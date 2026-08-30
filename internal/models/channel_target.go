@@ -12,6 +12,8 @@ func DefaultChannelTargetKind(platform string) string {
 		return "chat"
 	case "email":
 		return "email"
+	case "x":
+		return "account"
 	default:
 		return "channel"
 	}

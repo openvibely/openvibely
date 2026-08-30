@@ -150,6 +150,23 @@ func TestSidebar_AutomationsUsesRecognizableOutlineLightningBolt(t *testing.T) {
 	}
 }
 
+func TestSidebar_RoutesTaskBoardUpdatesThroughSharedTaskEvents(t *testing.T) {
+	projects := []models.Project{{ID: "p1", Name: "Test"}}
+
+	var buf bytes.Buffer
+	if err := Sidebar(projects, "p1").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("failed to render Sidebar: %v", err)
+	}
+
+	html := buf.String()
+	if !strings.Contains(html, `'task_board_updated': handleLiveEvent`) {
+		t.Fatal("shared live SSE listener map must subscribe to task_board_updated")
+	}
+	if !strings.Contains(html, "eventType === 'task_board_updated'") {
+		t.Fatal("shared live SSE dispatch must route task_board_updated through task listeners")
+	}
+}
+
 func TestSidebar_DispatchesMixtureProgressToChatAndTaskListeners(t *testing.T) {
 	projects := []models.Project{{ID: "p1", Name: "Test"}}
 
@@ -518,5 +535,11 @@ func TestSidebar_ForwardsChatTurnSteeredEvents(t *testing.T) {
 	}
 	if !strings.Contains(html, "'task_thread_input_steered': handleLiveEvent") {
 		t.Fatal("shared live SSE must subscribe to task thread steering events")
+	}
+	if !strings.Contains(html, "|| eventType === 'task_lifecycle_execution_changed'") {
+		t.Fatal("sidebar dispatcher must forward lifecycle execution changes to task pages")
+	}
+	if !strings.Contains(html, "'task_lifecycle_execution_changed': handleLiveEvent") {
+		t.Fatal("shared live SSE must subscribe to lifecycle execution changes")
 	}
 }

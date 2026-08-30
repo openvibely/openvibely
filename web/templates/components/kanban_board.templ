@@ -27,8 +27,8 @@ func filterByCategory(tasks []models.Task, cat models.TaskCategory) []models.Tas
 }
 
 // filterActiveColumn returns tasks for the active column: all active-category tasks,
-// plus scheduled-category tasks that are currently running (so users can see scheduled
-// tasks executing alongside active tasks without them being invisible on the kanban board).
+// scheduled-category tasks that are currently running, and scheduled Automation tasks
+// whose occurrence is queued for worker capacity.
 func filterActiveColumn(tasks []models.Task) []models.Task {
 	var result []models.Task
 	for _, t := range tasks {
@@ -37,11 +37,21 @@ func filterActiveColumn(tasks []models.Task) []models.Task {
 		}
 		if boardCategory(t) == models.CategoryActive {
 			result = append(result, t)
+		} else if boardCategory(t) == models.CategoryScheduled &&
+			isAutomationTask(t) && (t.Status == models.StatusPending || t.Status == models.StatusQueued) {
+			// Scheduled Automation tasks are normally managed on the Schedule page,
+			// but a capacity-queued occurrence is runnable work and belongs in the
+			// board's pending dropzone while it waits for worker admission.
+			result = append(result, t)
 		} else if boardCategory(t) == models.CategoryScheduled && t.Status == models.StatusRunning {
 			result = append(result, t)
 		}
 	}
 	return result
+}
+
+func isAutomationTask(task models.Task) bool {
+	return task.AutomationCapacityQueued
 }
 
 func hasRunnableSwarmChild(task models.Task) bool {
@@ -252,20 +262,22 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 						</li>
 						if len(tasks) > 0 {
 							<li class="menu-title mt-2"><span>Actions</span></li>
-							<li>
-								<a
-									hx-delete={ fmt.Sprintf("/tasks/completed?project_id=%s", projectID) }
-									hx-target="#kanban-board"
-									hx-swap="outerHTML"
-									hx-confirm="Are you sure you want to delete all completed tasks? This action cannot be undone."
-									class="text-error min-h-11"
-								>
-									<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
-									</svg>
-									Delete All
-								</a>
-							</li>
+								<li>
+									<button
+										type="button"
+										data-delete-all-tasks-category="completed"
+										data-delete-all-tasks-name="completed tasks"
+										data-project-id={ projectID }
+										aria-label="Delete all completed tasks"
+										onclick="openDeleteAllTasksConfirm(this)"
+										class="text-error min-h-11"
+									>
+										<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+										</svg>
+										Delete All
+									</button>
+								</li>
 						}
 					</ul>
 				</div>
@@ -405,20 +417,22 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 									Activate All
 								</a>
 							</li>
-							<li>
-								<a
-									hx-delete={ fmt.Sprintf("/tasks/backlog?project_id=%s", projectID) }
-									hx-target="#kanban-board"
-									hx-swap="outerHTML"
-									hx-confirm="Are you sure you want to delete all backlog tasks? This action cannot be undone."
-									class="text-error min-h-11"
-								>
-									<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
-									</svg>
-									Delete All
-								</a>
-							</li>
+								<li>
+									<button
+										type="button"
+										data-delete-all-tasks-category="backlog"
+										data-delete-all-tasks-name="backlog tasks"
+										data-project-id={ projectID }
+										aria-label="Delete all backlog tasks"
+										onclick="openDeleteAllTasksConfirm(this)"
+										class="text-error min-h-11"
+									>
+										<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+										</svg>
+										Delete All
+									</button>
+								</li>
 						}
 					</ul>
 				</div>

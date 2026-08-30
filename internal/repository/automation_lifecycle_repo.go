@@ -251,6 +251,43 @@ func (r *AutomationRepo) SetAutomationLifecycle(ctx context.Context, projectID, 
 		WHERE id IN (SELECT schedule_id FROM automation_trigger_owners WHERE project_id = ? AND automation_id = ?)`, projectID, automationID); err != nil {
 		return err
 	}
+	if state == models.AutomationPaused || state == models.AutomationArchived {
+		cancellationMessage := "Automation lifecycle changed before dispatch"
+		if state == models.AutomationPaused {
+			cancellationMessage = "Automation was paused before dispatch"
+		} else if state == models.AutomationArchived {
+			cancellationMessage = "Automation was archived before dispatch"
+		}
+		if _, err := conn.ExecContext(ctx, `UPDATE automation_invocations SET status = 'cancelled', error_message = ?,
+			completed_at = COALESCE(completed_at, CURRENT_TIMESTAMP), updated_at = CURRENT_TIMESTAMP
+			WHERE id IN (
+				SELECT d.invocation_id FROM automation_dispatch_outbox d
+				JOIN automation_invocations i ON i.id = d.invocation_id
+				WHERE i.project_id = ? AND i.automation_id = ?
+				AND d.execution_id IS NULL AND d.status IN ('pending', 'processing', 'submitted')
+			)`, cancellationMessage, projectID, automationID); err != nil {
+			return err
+		}
+		if _, err := conn.ExecContext(ctx, `DELETE FROM automation_task_run_reservations
+			WHERE dispatch_id IN (
+				SELECT d.id FROM automation_dispatch_outbox d
+				JOIN automation_invocations i ON i.id = d.invocation_id
+				WHERE i.project_id = ? AND i.automation_id = ?
+				AND d.execution_id IS NULL AND d.status IN ('pending', 'processing', 'submitted')
+			)`, projectID, automationID); err != nil {
+			return err
+		}
+		if _, err := conn.ExecContext(ctx, `UPDATE automation_dispatch_outbox SET status = 'failed', last_error = ?,
+			claimed_by = '', claim_expires_at = NULL, updated_at = CURRENT_TIMESTAMP
+			WHERE id IN (
+				SELECT d.id FROM automation_dispatch_outbox d
+				JOIN automation_invocations i ON i.id = d.invocation_id
+				WHERE i.project_id = ? AND i.automation_id = ?
+				AND d.execution_id IS NULL AND d.status IN ('pending', 'processing', 'submitted')
+			)`, cancellationMessage, projectID, automationID); err != nil {
+			return err
+		}
+	}
 	if state == models.AutomationPaused {
 		if _, err := conn.ExecContext(ctx, `INSERT INTO automation_paused_task_admissions
 			(task_id, project_id, automation_id, version_id)
@@ -270,7 +307,7 @@ func (r *AutomationRepo) SetAutomationLifecycle(ctx context.Context, projectID, 
 		return err
 	}
 	if _, err := conn.ExecContext(ctx, `UPDATE tasks SET category = 'backlog', updated_at = CURRENT_TIMESTAMP
-		WHERE project_id = ? AND category = 'active' AND status = 'pending'
+		WHERE project_id = ? AND category IN ('active', 'scheduled') AND status = 'pending'
 		  AND (id IN (SELECT resource_id FROM automation_definition_resources
 			WHERE project_id = ? AND automation_id = ? AND version_id = ? AND resource_type = 'task')
 		  OR id IN (SELECT resource.resource_id FROM automation_activity_resources resource

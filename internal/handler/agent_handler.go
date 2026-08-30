@@ -1468,6 +1468,58 @@ func buildAgentModelOptions(configs []models.LLMConfig) []models.AgentModelOptio
 	return options
 }
 
+func (h *Handler) materializeDBAgentsInPages(c echo.Context) error {
+	if h == nil || h.agentRepo == nil || h.agentSkillRoot == "" {
+		return nil
+	}
+	ctx := c.Request().Context()
+	projectRoot := h.currentProjectSkillRoot(c)
+	usedKeys := h.usedAgentKeys(nil, projectRoot)
+
+	// Reserve every existing key before generating any legacy key so page
+	// boundaries cannot cause two rows to receive the same directory name.
+	for offset := 0; ; {
+		rows, err := h.agentRepo.ListPage(ctx, cardPageMaxSize+1, offset, "")
+		if err != nil {
+			return err
+		}
+		agents, hasMore := cardPageItems(rows, cardPageMaxSize)
+		for _, agent := range agents {
+			if key := strings.TrimSpace(agent.Key); key != "" {
+				usedKeys[key] = true
+			}
+		}
+		if !hasMore || len(agents) == 0 {
+			break
+		}
+		offset += len(agents)
+	}
+
+	for offset := 0; ; {
+		rows, err := h.agentRepo.ListPage(ctx, cardPageMaxSize+1, offset, "")
+		if err != nil {
+			return err
+		}
+		agents, hasMore := cardPageItems(rows, cardPageMaxSize)
+		for i := range agents {
+			agent := agents[i]
+			agentProjectRoot := h.projectRootForAgentMaterialization(c, &agent)
+			if err := h.materializeAgentToDiskWithUsedKeys(c, &agent, agentProjectRoot, usedKeys, false); err != nil {
+				applog.Infof("[handler] ListAgents materialize DB agent warning: %v", err)
+				continue
+			}
+			if err := h.migrateLegacyAgentSkills(c, &agent, agentProjectRoot); err != nil {
+				applog.Infof("[handler] ListAgents migrate legacy agent skills warning: %v", err)
+			}
+		}
+		if !hasMore || len(agents) == 0 {
+			break
+		}
+		offset += len(agents)
+	}
+	return nil
+}
+
 func (h *Handler) ListAgents(c echo.Context) error {
 	isHtmx := isHTMX(c)
 	// applog.Debugf("[handler] ListAgents requested htmx=%v", isHtmx)
@@ -1487,22 +1539,19 @@ func (h *Handler) ListAgents(c echo.Context) error {
 			applog.Infof("[handler] ListAgents sync root declarations warning: %v", err)
 		}
 	}
-	agents, err := h.agentRepo.List(c.Request().Context())
+	page := parseCardPageRequest(c)
+	if page.Page == 0 && page.Search == "" {
+		if err := h.materializeDBAgentsInPages(c); err != nil {
+			applog.Infof("[handler] ListAgents maintenance list warning: %v", err)
+		}
+	}
+
+	agents, err := h.agentRepo.ListPage(c.Request().Context(), page.PageSize+1, page.Offset, page.Search)
 	if err != nil {
 		applog.Infof("[handler] ListAgents error: %v", err)
 		return err
 	}
-	materialized, materializeErr := h.materializeDBAgentsToDisk(c, agents)
-	if materializeErr != nil {
-		applog.Infof("[handler] ListAgents materialize DB agents warning: %v", materializeErr)
-	} else if materialized {
-		agents, err = h.agentRepo.List(c.Request().Context())
-		if err != nil {
-			applog.Infof("[handler] ListAgents reload after materialize error: %v", err)
-			return err
-		}
-	}
-	// applog.Debugf("[handler] ListAgents found %d agents", len(agents))
+	agents, hasMore := cardPageItems(agents, page.PageSize)
 
 	modelPickerOptions, err := h.llmConfigRepo.ListPickerOptions(c.Request().Context())
 	if err != nil {
@@ -1511,13 +1560,16 @@ func (h *Handler) ListAgents(c echo.Context) error {
 	}
 	modelOptions := buildAgentModelOptions(modelPickerOptions)
 
-	if isHtmx {
-		return render(c, http.StatusOK, pages.AgentsContent(agents, modelOptions))
+	if isHtmx || page.IsFragment {
+		if page.IsFragment {
+			setCardPageResponse(c, hasMore)
+		}
+		return render(c, http.StatusOK, pages.AgentsContentPage(agents, modelOptions, hasMore))
 	}
 
 	currentProjectID, _ := h.getCurrentProjectID(c)
 	projects, _ := h.projectSvc.ListSelectorOptions(c.Request().Context())
-	return render(c, http.StatusOK, pages.Agents(projects, currentProjectID, agents, modelOptions))
+	return render(c, http.StatusOK, pages.AgentsPage(projects, currentProjectID, agents, modelOptions, hasMore))
 }
 
 func agentNameValidationHTTPError(err error) error {

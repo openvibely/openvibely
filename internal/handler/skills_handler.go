@@ -78,17 +78,59 @@ type skillDetailResponse struct {
 }
 
 func (h *Handler) ListSkills(c echo.Context) error {
-	skills, err := h.listStandaloneSkills(c)
+	allSkills, err := h.listStandaloneSkills(c)
 	if err != nil {
 		return err
 	}
-	canManage := h.agentSkillRoot != "" || h.currentProjectSkillRoot(c) != ""
-	if isHTMX(c) {
-		return render(c, http.StatusOK, pages.SkillsContent(skills, canManage))
+	page := parseCardPageRequest(c)
+	skills := make([]pages.SkillCard, 0, len(allSkills))
+	search := strings.ToLower(page.Search)
+	for _, skill := range allSkills {
+		if search != "" && !skillCardMatchesSearch(skill, search) {
+			continue
+		}
+		skills = append(skills, skill)
 	}
+	start := page.Offset
+	if start > len(skills) {
+		start = len(skills)
+	}
+	end := start + page.PageSize + 1
+	if end > len(skills) {
+		end = len(skills)
+	}
+	pageItems := skills[start:end]
+	pageItems, hasMore := cardPageItems(pageItems, page.PageSize)
+	canManage := h.agentSkillRoot != "" || h.currentProjectSkillRoot(c) != ""
 	currentProjectID, _ := h.getCurrentProjectID(c)
+	if page.IsFragment {
+		setCardPageResponse(c, hasMore)
+	}
+	if isHTMX(c) || page.IsFragment {
+		return render(c, http.StatusOK, pages.SkillsContentForProjectPage(pageItems, canManage, currentProjectID, hasMore))
+	}
 	projects, _ := h.projectSvc.ListSelectorOptions(c.Request().Context())
-	return render(c, http.StatusOK, pages.Skills(projects, currentProjectID, skills, canManage))
+	return render(c, http.StatusOK, pages.SkillsPage(projects, currentProjectID, pageItems, canManage, hasMore))
+}
+
+func skillCardMatchesSearch(skill pages.SkillCard, search string) bool {
+	status := "active"
+	if skill.Archived {
+		status = "archived"
+	}
+	enabledStatus := "enabled"
+	if !skill.Enabled {
+		enabledStatus = "disabled"
+	}
+	alwaysUseStatus := ""
+	if skill.AlwaysUse {
+		alwaysUseStatus = "always use"
+	}
+	text := strings.ToLower(strings.TrimSpace(strings.Join([]string{
+		skill.Handle, skill.Name, skill.Description, skill.Scope, skill.Source,
+		status, enabledStatus, alwaysUseStatus,
+	}, " ")))
+	return strings.Contains(text, search)
 }
 
 func (h *Handler) GetSkillDetail(c echo.Context) error {

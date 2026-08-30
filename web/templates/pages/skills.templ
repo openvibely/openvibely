@@ -22,12 +22,26 @@ type SkillCard struct {
 
 templ Skills(projects []models.Project, currentProjectID string, skills []SkillCard, canManage bool) {
 	@layout.Base("Skills", projects, currentProjectID) {
-		@skillsContent(skills, canManage)
+		@skillsContent(skills, canManage, currentProjectID, false)
+	}
+}
+
+templ SkillsPage(projects []models.Project, currentProjectID string, skills []SkillCard, canManage bool, hasMore bool) {
+	@layout.Base("Skills", projects, currentProjectID) {
+		@skillsContent(skills, canManage, currentProjectID, hasMore)
 	}
 }
 
 templ SkillsContent(skills []SkillCard, canManage bool) {
-	@skillsContent(skills, canManage)
+	@skillsContent(skills, canManage, "", false)
+}
+
+templ SkillsContentForProject(skills []SkillCard, canManage bool, currentProjectID string) {
+	@skillsContent(skills, canManage, currentProjectID, false)
+}
+
+templ SkillsContentForProjectPage(skills []SkillCard, canManage bool, currentProjectID string, hasMore bool) {
+	@skillsContent(skills, canManage, currentProjectID, hasMore)
 }
 
 func skillSearchText(skill SkillCard) string {
@@ -58,9 +72,8 @@ func defaultSkillBodyTemplate() string {
 		"---\n\nDescribe when to use this skill and the workflow the agent should follow.\n"
 }
 
-templ skillsContent(skills []SkillCard, canManage bool) {
-	<div id="skills-container" data-search-container>
-		@layout.PageTitle("Skills")
+templ skillsContent(skills []SkillCard, canManage bool, currentProjectID string, hasMore bool) {
+		<div id="skills-container" data-search-container data-card-pagination-root data-card-pagination-replacement-managed="true" data-card-pagination-url={ "/skills?project_id=" + currentProjectID } data-card-pagination-list="#skills-card-list" data-card-pagination-card-selector="[data-skill-handle]" data-card-pagination-key="data-skill-handle" data-card-pagination-page-size="20" data-card-pagination-has-more={ cardPaginationHasMoreAttribute(hasMore) }>		@layout.PageTitle("Skills")
 		<div class="flex items-center justify-between mb-6">
 			<h2 class="text-2xl font-bold">Skills</h2>
 			<div class="dropdown dropdown-end">
@@ -85,8 +98,9 @@ templ skillsContent(skills []SkillCard, canManage bool) {
 			</div>
 		</div>
 		@CardSearchInput("skills", "Search skills...")
-		if len(skills) == 0 {
-			<div class="text-center py-12">
+			<div id="skills-card-list" data-card-pagination-list>
+			if len(skills) == 0 {
+				<div class="text-center py-12" data-search-empty-state>
 				<p class="opacity-50 mb-4">No standalone skills found yet.</p>
 				<button
 					class="btn btn-primary"
@@ -176,7 +190,8 @@ templ skillsContent(skills []SkillCard, canManage bool) {
 				}
 			</div>
 		}
-				@DestructiveConfirmDialog("delete_skill_confirm_modal", "Close delete skill confirmation", "Delete Skill", "Are you sure you want to delete ", "delete_skill_confirm_name", "", "? This action cannot be undone.", templ.ComponentScript{Call: "delete_skill_confirm_modal.close()"}, templ.ComponentScript{Call: "confirmDeleteSkill()"}) {
+		</div>
+			@CardPaginationStatusWithBoundary(hasMore)		@DestructiveConfirmDialog("delete_skill_confirm_modal", "Close delete skill confirmation", "Delete Skill", "Are you sure you want to delete ", "delete_skill_confirm_name", "", "? This action cannot be undone.", templ.ComponentScript{Call: "delete_skill_confirm_modal.close()"}, templ.ComponentScript{Call: "confirmDeleteSkill()"}) {
 					The skill package and its indexed registration will be removed from the selected scope.
 				}
 
@@ -282,11 +297,16 @@ templ skillsContent(skills []SkillCard, canManage bool) {
 					'---\n\nDescribe when to use this skill and the workflow the agent should follow.\n';
 			}
 
-			function currentSkillsProjectQuery() {
-				var selector = document.getElementById('project-selector');
-				var projectID = selector && selector.value ? selector.value : new URLSearchParams(window.location.search).get('project_id');
-				return projectID ? '?project_id=' + encodeURIComponent(projectID) : '';
-			}
+				function currentSkillsProjectQuery() {
+					var selector = document.getElementById('project-selector');
+					var projectID = selector && selector.value ? selector.value : new URLSearchParams(window.location.search).get('project_id');
+					return projectID ? '?project_id=' + encodeURIComponent(projectID) : '';
+				}
+
+				function skillsRefreshURL(url) {
+					if (typeof window.cardPaginationRefreshURL !== 'function') return url;
+					return window.cardPaginationRefreshURL(document.getElementById('skills-container'), url);
+				}
 
 				function refreshSkillsContainerSearch() {
 					if (typeof window.refreshCardSearches === 'function') {
@@ -606,7 +626,7 @@ templ skillsContent(skills []SkillCard, canManage bool) {
 				if (!handle) return;
 				var action = enable ? 'Enable' : 'Disable';
 				if (!confirm(action + ' skill "' + handle + '"?')) return;
-				fetch('/skills/' + encodeURIComponent(handle) + '/enabled' + currentSkillsProjectQuery(), {
+				fetch(skillsRefreshURL('/skills/' + encodeURIComponent(handle) + '/enabled' + currentSkillsProjectQuery()), {
 					method: 'POST',
 					headers: {'Content-Type': 'application/json', 'HX-Request': 'true'},
 					body: JSON.stringify({enabled: enable, scope: scope})
@@ -628,7 +648,7 @@ templ skillsContent(skills []SkillCard, canManage bool) {
 				if (!handle) return;
 				var action = alwaysUse ? 'Set always use for' : 'Remove always use from';
 				if (!confirm(action + ' skill "' + handle + '"?')) return;
-				fetch('/skills/' + encodeURIComponent(handle) + '/always_use' + currentSkillsProjectQuery(), {
+				fetch(skillsRefreshURL('/skills/' + encodeURIComponent(handle) + '/always_use' + currentSkillsProjectQuery()), {
 					method: 'POST',
 					headers: {'Content-Type': 'application/json', 'HX-Request': 'true'},
 					body: JSON.stringify({always_use: alwaysUse, scope: scope})
@@ -657,7 +677,7 @@ templ skillsContent(skills []SkillCard, canManage bool) {
 				submit.disabled = true;
 				submit.textContent = 'Importing...';
 				setSkillImportError('');
-				fetch('/skills/import' + currentSkillsProjectQuery(), {
+				fetch(skillsRefreshURL('/skills/import' + currentSkillsProjectQuery()), {
 					method: 'POST',
 					headers: {'HX-Request': 'true'},
 					body: data
@@ -705,7 +725,7 @@ templ skillsContent(skills []SkillCard, canManage bool) {
 				submit.disabled = true;
 				submit.textContent = 'Saving...';
 				setSkillModalError('');
-				fetch(url + currentSkillsProjectQuery(), {
+				fetch(skillsRefreshURL(url + currentSkillsProjectQuery()), {
 					method: method,
 					headers: {'Content-Type': 'application/json', 'HX-Request': 'true'},
 					body: JSON.stringify(payload)
@@ -720,7 +740,7 @@ templ skillsContent(skills []SkillCard, canManage bool) {
 					if (alwaysUse === originalAlwaysUse) return html;
 					var auHandle = form.dataset.originalHandle || handle;
 					var auScope = document.getElementById('skill_scope').value;
-					return fetch('/skills/' + encodeURIComponent(auHandle) + '/always_use' + currentSkillsProjectQuery(), {
+					return fetch(skillsRefreshURL('/skills/' + encodeURIComponent(auHandle) + '/always_use' + currentSkillsProjectQuery()), {
 						method: 'POST',
 						headers: {'Content-Type': 'application/json', 'HX-Request': 'true'},
 						body: JSON.stringify({always_use: alwaysUse, scope: auScope})

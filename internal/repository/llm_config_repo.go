@@ -175,7 +175,7 @@ func (r *LLMConfigRepo) HasAny(ctx context.Context) (bool, error) {
 func (r *LLMConfigRepo) ListCards(ctx context.Context) ([]models.LLMConfig, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT `+llmConfigCardColumns+`
-					 FROM agent_configs ORDER BY is_default DESC, name ASC`)
+						 FROM agent_configs ORDER BY is_default DESC, name ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("listing model cards: %w", err)
 	}
@@ -200,6 +200,81 @@ func (r *LLMConfigRepo) ListCards(ctx context.Context) ([]models.LLMConfig, erro
 		}
 		if hasOAuthKey {
 			a.OAuthAccessToken = "present"
+		}
+		configs = append(configs, a)
+	}
+	return configs, rows.Err()
+}
+
+// ListCardsPage returns one bounded, ordered Models-page projection. Search
+// matches the same visible card metadata as the browser card-search helper.
+func (r *LLMConfigRepo) ListCardsPage(ctx context.Context, limit, offset int, search string) ([]models.LLMConfig, error) {
+	limit, offset = normalizeCardPageArgs(limit, offset)
+	query := `SELECT ` + llmConfigCardColumns + ` FROM agent_configs`
+	args := make([]any, 0, 3)
+	if search = strings.TrimSpace(search); search != "" {
+		query += ` WHERE INSTR(LOWER(
+			COALESCE(name, '') || ' ' || COALESCE(provider, '') || ' ' ||
+			COALESCE(model, '') || ' ' ||
+			CASE WHEN is_default = 1 THEN 'default' ELSE 'active' END || ' ' ||
+				CASE WHEN auth_method = 'oauth' AND provider IN ('anthropic', 'openai', 'openai_compatible') AND COALESCE(oauth_access_token, '') != '' AND (
+					(provider = 'openai_compatible' AND COALESCE(oauth_expires_at, 0) = 0) OR
+					COALESCE(oauth_expires_at, 0) > CAST(strftime('%s', 'now') AS INTEGER) * 1000
+				) THEN 'connected'
+				ELSE CASE WHEN auth_method = 'oauth' AND provider IN ('anthropic', 'openai', 'openai_compatible') THEN 'not connected' ELSE '' END END
+		), ?) > 0`
+		args = append(args, strings.ToLower(search))
+	}
+	query += ` ORDER BY is_default DESC, name ASC, id ASC LIMIT ? OFFSET ?`
+	args = append(args, limit, offset)
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("listing model card page: %w", err)
+	}
+	defer rows.Close()
+
+	configs := make([]models.LLMConfig, 0, limit)
+	for rows.Next() {
+		var (
+			a           models.LLMConfig
+			hasAPIKey   bool
+			hasOAuthKey bool
+		)
+		if err := rows.Scan(&a.ID, &a.Name, &a.Provider, &a.Model, &a.ReasoningEffort,
+			&hasAPIKey, &a.Temperature, &a.IsDefault, &a.AuthMethod,
+			&hasOAuthKey, &a.OAuthExpiresAt, &a.MaxWorkers, &a.WorkerTimeout,
+			&a.OllamaBaseURL, &a.BaseURL, &a.MixtureAggregatorID,
+			&a.MixtureAggregatorLabel, &a.MixtureReferenceCount); err != nil {
+			return nil, fmt.Errorf("scanning model card page: %w", err)
+		}
+		if hasAPIKey {
+			a.APIKey = "present"
+		}
+		if hasOAuthKey {
+			a.OAuthAccessToken = "present"
+		}
+		configs = append(configs, a)
+	}
+	return configs, rows.Err()
+}
+
+// ListModelCardOptions returns the small set of fields needed by Models-page
+// dialogs. It is separate from the paged card rows so modal option semantics do
+// not force provider credentials or card payloads into every page response.
+func (r *LLMConfigRepo) ListModelCardOptions(ctx context.Context) ([]models.LLMConfig, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT id, name, provider, model, is_default, auth_method
+		 FROM agent_configs AS configs ORDER BY is_default DESC, name ASC, id ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("listing model card options: %w", err)
+	}
+	defer rows.Close()
+
+	var configs []models.LLMConfig
+	for rows.Next() {
+		var a models.LLMConfig
+		if err := rows.Scan(&a.ID, &a.Name, &a.Provider, &a.Model, &a.IsDefault, &a.AuthMethod); err != nil {
+			return nil, fmt.Errorf("scanning model card option: %w", err)
 		}
 		configs = append(configs, a)
 	}

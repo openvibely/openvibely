@@ -668,25 +668,23 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 												}
 											</div>
 											<div class="flex gap-1">
-												if s.Enabled {
-													<button
-														class="btn btn-xs btn-ghost"
-														hx-post={ fmt.Sprintf("/schedules/%s/toggle", s.ID) }
-														hx-target="#task-detail-content"
-														hx-swap="outerHTML"
-													>
-														Pause
-													</button>
-												} else {
-													<button
-														class="btn btn-xs btn-outline btn-warning"
-														hx-post={ fmt.Sprintf("/schedules/%s/toggle", s.ID) }
-														hx-target="#task-detail-content"
-														hx-swap="outerHTML"
-													>
-														Resume
-													</button>
-												}
+												<form
+													method="post"
+													action={ fmt.Sprintf("/schedules/%s/toggle?project_id=%s", s.ID, task.ProjectID) }
+													hx-post={ fmt.Sprintf("/schedules/%s/toggle?project_id=%s", s.ID, task.ProjectID) }
+													hx-target="#task-detail-content"
+													hx-swap="outerHTML"
+												>
+													if s.Enabled {
+														<button type="submit" class="btn btn-xs btn-ghost" aria-label="Pause schedule">
+															Pause
+														</button>
+													} else {
+														<button type="submit" class="btn btn-xs btn-outline btn-warning" aria-label="Resume schedule">
+															Resume
+														</button>
+													}
+												</form>
 												<button
 													class="btn btn-xs btn-ghost"
 													onclick={ templ.ComponentScript{Call: fmt.Sprintf("document.getElementById('schedule-view-%s').classList.add('hidden'); document.getElementById('schedule-edit-%s').classList.remove('hidden')", s.ID, s.ID)} }
@@ -918,33 +916,150 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 			</div>
 		</div>
 		<!-- End Tab: Attachments -->
-		<!-- Tab: Lifecycle (runbook §Rollout step 17) -->
-		<div id="tab-lifecycle" class={ "task-tab-panel flex-shrink-0", templ.KV("hidden", defaultTab != "lifecycle") }>
-			<div class="card bg-base-100 shadow-sm border border-base-300">
-				<div class="card-body">
-					<div class="flex items-center justify-between mb-3">
-						<h4 class="text-lg font-bold">Lifecycle Activity</h4>
-						<button type="button" class="btn btn-ghost btn-xs" onclick={ templ.ComponentScript{Call: "refreshLifecycleActivity('" + task.ID + "', '" + task.ProjectID + "')"} }>Refresh</button>
-					</div>
-						<p class="text-sm opacity-70 mb-3">Lifecycle hook invocations recorded for this task. Includes routing, before-run preparation, and after-complete learning.</p>
-						<div id="lifecycle-activity-list" data-task-id={ task.ID } data-project-id={ task.ProjectID } class="space-y-2">
-							<p class="text-sm opacity-50">Loading lifecycle activity...</p>
+			<!-- Tab: Lifecycle (runbook §Rollout step 17) -->
+			<div id="tab-lifecycle" class={ "task-tab-panel flex-1 flex flex-col min-h-0", templ.KV("hidden", defaultTab != "lifecycle") }>
+				<div class="card bg-base-100 shadow-sm border border-base-300 flex-1 min-h-0">
+					<div class="card-body flex flex-col min-h-0">
+						<div class="flex items-center justify-between mb-3 flex-shrink-0">
+							<h4 class="text-lg font-bold">Lifecycle Activity</h4>
+							<button type="button" class="btn btn-ghost btn-xs" onclick={ templ.ComponentScript{Call: "refreshLifecycleActivity('" + task.ID + "', '" + task.ProjectID + "')"} }>Refresh</button>
 						</div>
+						<p class="text-sm opacity-70 mb-3 flex-shrink-0">Lifecycle hook invocations recorded for this task. Includes routing, before-run preparation, and after-complete learning.</p>
+						<div id="lifecycle-activity-scroll" data-task-id={ task.ID } data-project-id={ task.ProjectID } data-lifecycle-scrollport="true" tabindex="0" aria-label="Lifecycle activity" class="flex-1 min-h-0 overflow-y-auto pr-1">
+							<div id="lifecycle-activity-list" data-task-id={ task.ID } data-project-id={ task.ProjectID } class="space-y-2">
+								<p class="text-sm opacity-50">Loading lifecycle activity...</p>
+							</div>
+						</div>
+					</div>
 				</div>
-			</div>
-			<script>
-				(function() {
-					function statusBadge(status) {
-						var map = { completed: 'badge-success', failed: 'badge-error', skipped: 'badge-ghost', queued: 'badge-info', running: 'badge-warning' };
-						var cls = map[status] || 'badge-ghost';
-						return '<span class="badge ' + cls + ' badge-sm">' + status + '</span>';
-					}
+				<script>
+					(function() {
+						var pageSize = 20;
+						var states = window._taskLifecycleActivityStates = window._taskLifecycleActivityStates || {};
+						var previousHandlers = window._taskLifecycleActivityHandlers;
+						if (previousHandlers && previousHandlers.cleanup) previousHandlers.cleanup();
+
+						function stateKey(taskID, projectID) {
+							return String(projectID || '') + ':' + String(taskID || '');
+						}
+
+						function getState(taskID, projectID) {
+							var key = stateKey(taskID, projectID);
+							var state = states[key];
+							if (!state) {
+								state = {
+									taskID: taskID,
+									projectID: projectID,
+									records: Object.create(null),
+									order: [],
+									initialized: false,
+									olderCursor: '',
+									olderHasMore: false,
+									loadedOlder: false,
+									olderLoading: false,
+										olderError: '',
+										newerLoading: false,
+										newerPending: false,
+										newerRetryTimer: null,
+										newerError: '',
+										refreshPending: false,
+										refreshRetryTimer: null,
+										refreshLoading: false,
+										refreshError: '',
+										refreshExecutionIDs: Object.create(null),
+										gaps: [],
+										gapSerial: 0,
+										gapScrollIntent: false,
+										initialLoading: false,
+										requestVersion: 0,
+										requestSerial: 0,
+										refreshRequestID: 0,
+										olderRequestID: 0,
+										newerRequestID: 0,
+										container: null,
+										scrollTop: 0,
+										anchorID: '',
+										anchorOffset: 0,
+										savedScrollTop: null,
+										savedAnchorID: '',
+										savedAnchorOffset: 0,
+										restoreSerial: 0,
+										newerLiveTimer: null,
+										refreshLiveTimer: null
+								};
+								states[key] = state;
+							}
+							state.taskID = taskID;
+							state.projectID = projectID;
+							if (!state.refreshExecutionIDs) state.refreshExecutionIDs = Object.create(null);
+							if (!Array.isArray(state.gaps)) state.gaps = [];
+							if (!state.gapSerial) state.gapSerial = 0;
+							return state;
+						}
+
+						function lifecycleContainer(taskID, projectID) {
+							var container = document.getElementById('lifecycle-activity-list');
+							if (!container) return null;
+							if (taskID && container.dataset.taskId !== taskID) return null;
+							if (projectID && container.dataset.projectId !== projectID) return null;
+							return container;
+						}
+
+						function scrollport(container) {
+							var current = container;
+							while (current) {
+								if (current.hasAttribute && current.hasAttribute('data-lifecycle-scrollport')) return current;
+								current = current.parentElement;
+							}
+							return container;
+						}
+
+						function captureScroll(state, container) {
+							var port = scrollport(container);
+							if (!port) return;
+							state.scrollTop = port.scrollTop || 0;
+							var bounds = port.getBoundingClientRect();
+							var rows = container.querySelectorAll('[data-lifecycle-execution-id]');
+							state.anchorID = '';
+							state.anchorOffset = 0;
+							for (var i = 0; i < rows.length; i++) {
+								var rect = rows[i].getBoundingClientRect();
+								if (rect.bottom > bounds.top + 1 && rect.top < bounds.bottom + 1) {
+									state.anchorID = rows[i].getAttribute('data-lifecycle-execution-id') || '';
+									state.anchorOffset = rect.top - bounds.top;
+									break;
+								}
+							}
+						}
+
+						function rememberAllScroll() {
+							Object.keys(states).forEach(function(key) {
+								var state = states[key];
+								if (!state.container || !document.documentElement || !document.documentElement.contains(state.container)) return;
+								captureScroll(state, state.container);
+								state.savedScrollTop = state.scrollTop;
+								state.savedAnchorID = state.anchorID;
+								state.savedAnchorOffset = state.anchorOffset;
+							});
+						}
+
 						function escapeText(value) {
 							return String(value == null ? '' : value)
 								.replace(/&/g, '&amp;')
 								.replace(/</g, '&lt;')
 								.replace(/>/g, '&gt;');
 						}
+
+						function escapeAttribute(value) {
+							return escapeText(value).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+						}
+
+						function statusBadge(status) {
+							var map = { completed: 'badge-success', failed: 'badge-error', skipped: 'badge-ghost', queued: 'badge-info', running: 'badge-warning', pending: 'badge-info' };
+							var cls = map[status] || 'badge-ghost';
+							return '<span class="badge ' + cls + ' badge-sm">' + escapeText(status) + '</span>';
+						}
+
 						function renderBadgeRow(label, values) {
 							if (!Array.isArray(values) || values.length === 0) return '';
 							var seen = Object.create(null);
@@ -955,65 +1070,735 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 								badges.push('<span class="font-mono text-xs badge badge-outline">' + escapeText(value) + '</span>');
 							});
 							if (badges.length === 0) return '';
-							return '<p class="text-sm mt-1 flex items-center gap-2 flex-wrap">' +
-								'<span>' + escapeText(label) + ':</span> ' + badges.join(' ') +
-							'</p>';
+							return '<p class="text-sm mt-1 flex items-center gap-2 flex-wrap"><span>' + escapeText(label) + ':</span> ' + badges.join(' ') + '</p>';
 						}
+
 						function memoryLabels(memories) {
 							if (!Array.isArray(memories)) return [];
-							return memories.map(function(m) { return m.file || m.topic || ''; });
+							return memories.map(function(memory) { return memory && (memory.file || memory.topic) || ''; });
 						}
-							window.refreshLifecycleActivity = async function(taskID, projectID) {
-								var container = document.getElementById('lifecycle-activity-list');
-								if (!container) return;
-								projectID = projectID || container.dataset.projectId || '';
-								var query = projectID ? '?project_id=' + encodeURIComponent(projectID) : '';
-								try {
-									var response = await fetch('/api/tasks/' + encodeURIComponent(taskID) + '/lifecycle-executions' + query, { headers: { 'Accept': 'application/json' } });
+
+						function displayTime(value) {
+							var date = new Date(value);
+							return isNaN(date.getTime()) ? String(value || '') : date.toLocaleString();
+						}
+
+						function timestamp(value) {
+							var parsed = Date.parse(value || '');
+							return isNaN(parsed) ? 0 : parsed;
+						}
+
+						function sortRecords(state) {
+							state.order = Object.keys(state.records).sort(function(leftID, rightID) {
+								var left = state.records[leftID] || {};
+								var right = state.records[rightID] || {};
+								var timeDifference = timestamp(right.started_at) - timestamp(left.started_at);
+								if (timeDifference !== 0) return timeDifference;
+								if (String(right.id || '') === String(left.id || '')) return 0;
+								return String(left.id || '') < String(right.id || '') ? 1 : -1;
+							});
+						}
+
+						function mergeRows(state, rows) {
+							if (!Array.isArray(rows)) return;
+							rows.forEach(function(row) {
+								if (!row || !row.id) return;
+								state.records[String(row.id)] = row;
+							});
+						sortRecords(state);
+						}
+
+						function rowMarkup(row) {
+							var selectedSkills = renderBadgeRow('Selected skills', row.selected_skills);
+							var selectedMemories = renderBadgeRow('Selected memories', memoryLabels(row.selected_memories));
+							var hasStructuredRoute = selectedSkills || selectedMemories;
+							var summary = row.summary && !hasStructuredRoute ? '<p class="text-sm mt-1">' + escapeText(row.summary) + '</p>' : '';
+							var error = row.error ? '<p class="text-xs text-error mt-1">' + escapeText(row.error) + '</p>' : '';
+							var when = row.completed_at ? displayTime(row.completed_at) : displayTime(row.started_at);
+							return '<div data-lifecycle-execution-id="' + escapeAttribute(row.id) + '" class="border border-base-300 rounded-lg p-3">' +
+								'<div class="flex items-center justify-between flex-wrap gap-2">' +
+								'<div class="flex items-center gap-2 flex-wrap">' +
+								'<span class="font-mono text-xs opacity-70">' + escapeText(row.when || '') + '</span>' +
+								'<span class="text-sm font-medium">' + escapeText(row.skill_key || '') + '</span>' +
+								statusBadge(row.status || '') +
+								'</div><span class="text-xs opacity-60">' + escapeText(when) + '</span></div>' +
+								summary + selectedSkills + selectedMemories + error + '</div>';
+						}
+
+						function gapMarkup(gap) {
+							var content = '<button type="button" data-lifecycle-load-gap="' + escapeAttribute(gap.id) + '" class="btn btn-ghost btn-sm">Load missed lifecycle activity</button>';
+							if (gap.loading) content = '<span class="text-xs opacity-50">Loading missed lifecycle activity...</span>';
+							if (gap.error) content = '<span class="text-xs text-error">' + escapeText(gap.error) + ' <button type="button" data-lifecycle-retry-gap="' + escapeAttribute(gap.id) + '" class="btn btn-ghost btn-xs">Retry</button></span>';
+							return '<div data-lifecycle-gap="' + escapeAttribute(gap.id) + '" class="text-center py-2">' + content + '</div>';
+						}
+
+						function renderState(state, container, preservePosition) {
+							var previousContainer = state.container;
+							if (preservePosition && previousContainer === container) captureScroll(state, container);
+							var anchorID = state.anchorID;
+							var anchorOffset = state.anchorOffset;
+							var savedScrollTop = state.scrollTop;
+							if (preservePosition && previousContainer !== container && state.savedAnchorID) {
+								anchorID = state.savedAnchorID;
+								anchorOffset = state.savedAnchorOffset;
+								savedScrollTop = state.savedScrollTop == null ? 0 : state.savedScrollTop;
+							}
+							state.container = container;
+							var html = '';
+							if (state.order.length === 0) {
+								if (state.initialLoading) {
+									html = '<p data-lifecycle-loading class="text-sm opacity-50">Loading lifecycle activity...</p>';
+												} else if (state.refreshLoading) {
+													html = '<p data-lifecycle-refresh-loading class="text-sm opacity-50">Refreshing lifecycle activity...</p>';
+												} else if (state.refreshError) {									html = '<p data-lifecycle-error class="text-sm text-error">' + escapeText(state.refreshError) + ' <button type="button" data-lifecycle-retry="refresh" class="btn btn-ghost btn-xs">Retry</button></p>';
+								} else if (state.initialized) {
+									html = '<p data-lifecycle-empty class="text-sm opacity-50">No lifecycle activity recorded yet.</p>';
+								}
+								} else {
+									state.order.forEach(function(id) {
+										state.gaps.forEach(function(gap) {
+											if (gap.boundaryID === id) html += gapMarkup(gap);
+										});
+										html += rowMarkup(state.records[id]);
+									});
+									if (state.olderLoading) {
+										html += '<p data-lifecycle-loading-older class="text-xs opacity-50 text-center py-2">Loading older lifecycle activity...</p>';
+									} else if (state.olderError) {
+									html += '<p data-lifecycle-older-error class="text-xs text-error text-center py-2">' + escapeText(state.olderError) + ' <button type="button" data-lifecycle-retry="older" class="btn btn-ghost btn-xs">Retry</button></p>';
+								} else if (state.olderHasMore) {
+									html += '<p class="text-center py-2"><button type="button" data-lifecycle-load-older class="btn btn-ghost btn-sm">Load older lifecycle activity</button></p>';
+									} else {
+										html += '<p data-lifecycle-no-more class="text-xs opacity-40 text-center py-2">No more lifecycle activity.</p>';
+									}
+									if (state.refreshLoading) html += '<p data-lifecycle-refresh-loading class="text-xs opacity-50">Refreshing lifecycle activity...</p>';
+									if (state.refreshError) html += '<p data-lifecycle-refresh-error class="text-xs text-error">' + escapeText(state.refreshError) + ' <button type="button" data-lifecycle-retry="refresh" class="btn btn-ghost btn-xs">Retry</button></p>';
+									if (state.newerLoading) html += '<p data-lifecycle-loading-newer class="text-xs opacity-50 text-center py-2">Checking for new lifecycle activity...</p>';								if (state.newerError) html += '<p data-lifecycle-newer-error class="text-xs text-error text-center py-2">' + escapeText(state.newerError) + ' <button type="button" data-lifecycle-retry="newer" class="btn btn-ghost btn-xs">Retry</button></p>';
+							}
+							container.innerHTML = html;
+							var renderID = ++state.restoreSerial;
+							if (!preservePosition) return;
+							var apply = function() {
+								if (state.container !== container || state.restoreSerial !== renderID) return;
+								var port = scrollport(container);
+								var row = anchorID && container.querySelector('[data-lifecycle-execution-id="' + escapeAttribute(anchorID) + '"]');
+								state.restoring = true;
+								if (row) {
+									var portRect = port.getBoundingClientRect();
+									var rowRect = row.getBoundingClientRect();
+									port.scrollTop += (rowRect.top - portRect.top) - anchorOffset;
+								} else {
+									port.scrollTop = savedScrollTop || 0;
+								}
+								setTimeout(function() {
+									if (state.container === container && state.restoreSerial === renderID) state.restoring = false;
+								}, 0);
+							};
+							apply();
+							if (window.requestAnimationFrame) window.requestAnimationFrame(apply); else setTimeout(apply, 0);
+							if (previousContainer !== container) {
+								state.savedScrollTop = null;
+								state.savedAnchorID = '';
+							}
+						}
+
+						function normalizePage(payload) {
+							if (Array.isArray(payload)) return { items: payload, hasMore: false, nextCursor: '' };
+							if (!payload || !Array.isArray(payload.items)) throw new Error('invalid lifecycle page response');
+							return {
+								items: payload.items,
+								hasMore: payload.has_more === true && !!payload.next_cursor,
+								nextCursor: String(payload.next_cursor || '')
+							};
+						}
+
+						function fetchPage(taskID, projectID, direction, cursor) {
+							var params = ['project_id=' + encodeURIComponent(projectID || ''), 'limit=' + pageSize];
+							if (cursor) params.push((direction === 'older' ? 'before=' : 'after=') + encodeURIComponent(cursor));
+							return fetch('/api/tasks/' + encodeURIComponent(taskID) + '/lifecycle-executions?' + params.join('&'), { headers: { 'Accept': 'application/json' } }).then(function(response) {
 								if (!response.ok) throw new Error('failed to load lifecycle executions');
-								var rows = await response.json();
-								if (!Array.isArray(rows) || rows.length === 0) {
-									container.innerHTML = '<p class="text-sm opacity-50">No lifecycle activity recorded yet.</p>';
+								return response.json();
+							}).then(normalizePage);
+						}
+
+						function fetchExecution(taskID, projectID, executionID) {
+							var url = '/api/tasks/' + encodeURIComponent(taskID) + '/lifecycle-executions/' + encodeURIComponent(executionID) + '?project_id=' + encodeURIComponent(projectID || '');
+							return fetch(url, { headers: { 'Accept': 'application/json' } }).then(function(response) {
+								if (!response.ok) throw new Error('failed to refresh lifecycle execution');
+								return response.json();
+							}).then(function(row) {
+								if (!row || String(row.id || '') !== String(executionID)) throw new Error('invalid lifecycle execution response');
+								return row;
+							});
+						}
+
+						function markExecutionForRefresh(state, executionID) {
+							executionID = String(executionID || '');
+							if (executionID && state.records[executionID]) state.refreshExecutionIDs[executionID] = true;
+						}
+
+						function markRetainedNonterminalExecutions(state) {
+							state.order.forEach(function(executionID) {
+								var row = state.records[executionID] || {};
+								if (row.status === 'pending' || row.status === 'queued' || row.status === 'running') state.refreshExecutionIDs[executionID] = true;
+							});
+						}
+
+						function addLifecycleGap(state, cursor, boundaryID) {
+							cursor = String(cursor || '');
+							boundaryID = String(boundaryID || '');
+							if (!cursor || !boundaryID) return;
+							var duplicate = state.gaps.some(function(gap) { return gap.cursor === cursor || gap.boundaryID === boundaryID; });
+							if (duplicate) return;
+							state.gaps.push({
+								id: String(++state.gapSerial),
+								cursor: cursor,
+								boundaryID: boundaryID,
+								loading: false,
+								error: '',
+								requestID: 0
+							});
+						}
+
+						function removeLifecycleGap(state, gap) {
+							state.gaps = state.gaps.filter(function(candidate) { return candidate !== gap; });
+						}
+
+						function findLifecycleGap(state, gapID) {
+							for (var i = 0; i < state.gaps.length; i++) {
+								if (state.gaps[i].id === String(gapID || '')) return state.gaps[i];
+							}
+							return null;
+						}
+
+						function reconcileRefreshGap(state, previousNewestID, latestPage) {
+							if (!previousNewestID || !latestPage.hasMore) return;
+							var latestContainsPrevious = latestPage.items.some(function(row) {
+								return row && String(row.id || '') === String(previousNewestID);
+							});
+							if (!latestContainsPrevious) addLifecycleGap(state, previousNewestID, previousNewestID);
+						}
+
+						function gapRequestIsCurrent(state, container, version, gap, requestID) {
+							return requestIsCurrent(state, container, version, requestID, 'gap') && gap.requestID === requestID && findLifecycleGap(state, gap.id) === gap;
+						}
+
+						function loadLifecycleGap(taskID, projectID, gapID) {
+							var container = lifecycleContainer(taskID, projectID);
+							if (!container) return Promise.resolve();
+							projectID = projectID || container.dataset.projectId || '';
+							var state = getState(taskID, projectID);
+							var gap = findLifecycleGap(state, gapID);
+							if (!gap || hasActiveLifecycleRequest(state)) return Promise.resolve();
+							var knownIDs = Object.create(null);
+							state.order.forEach(function(id) { knownIDs[id] = true; });
+							var version = state.requestVersion;
+							var requestID = ++state.requestSerial;
+							gap.requestID = requestID;
+							gap.loading = true;
+							gap.error = '';
+							renderState(state, container, true);
+							return fetchPage(taskID, projectID, 'newer', gap.cursor).then(function(page) {
+								if (!gapRequestIsCurrent(state, container, version, gap, requestID)) return;
+								var rows = [];
+								var reachedKnownRow = false;
+								for (var i = 0; i < page.items.length; i++) {
+									var row = page.items[i];
+									if (!row || !row.id) continue;
+									if (knownIDs[String(row.id)]) {
+										reachedKnownRow = true;
+										break;
+									}
+									rows.push(row);
+								}
+								mergeRows(state, rows);
+								gap.loading = false;
+								gap.requestID = 0;
+								if (reachedKnownRow || !page.hasMore || rows.length === 0) {
+									removeLifecycleGap(state, gap);
+								} else {
+									gap.cursor = page.nextCursor;
+									gap.boundaryID = String(rows[rows.length - 1].id);
+								}
+								renderState(state, container, true);
+								schedulePendingRefresh(state, taskID, projectID);
+								schedulePendingNewer(state, taskID, projectID);
+							}).catch(function(error) {
+								if (!gapRequestIsCurrent(state, container, version, gap, requestID)) return;
+								gap.loading = false;
+								gap.requestID = 0;
+								gap.error = error && error.message || 'Unable to load missed lifecycle activity';
+								renderState(state, container, true);
+								schedulePendingRefresh(state, taskID, projectID);
+								schedulePendingNewer(state, taskID, projectID);
+							});
+						}
+
+						function fetchRetainedExecutions(state, taskID, projectID, page, gapRows) {
+							gapRows = Array.isArray(gapRows) ? gapRows : [];
+							var pageIDs = Object.create(null);
+							page.items.concat(gapRows).forEach(function(row) {
+								if (row && row.id) pageIDs[String(row.id)] = true;
+							});
+							var executionIDs = Object.keys(state.refreshExecutionIDs).filter(function(executionID) {
+								return !pageIDs[executionID];
+							});
+							return Promise.all(executionIDs.map(function(executionID) {
+								return fetchExecution(taskID, projectID, executionID);
+							})).then(function(rows) {
+								return { page: page, gapRows: gapRows, pageIDs: pageIDs, executionIDs: executionIDs, rows: rows };
+							});
+						}
+
+						function requestIsCurrent(state, container, version, requestID, direction) {
+							if (state.requestVersion !== version || state.container !== container) return false;
+							if (!document.documentElement || !document.documentElement.contains(container)) return false;
+							if (direction === 'refresh') return state.refreshRequestID === requestID;
+							if (direction === 'older') return state.olderRequestID === requestID;
+							if (direction === 'gap') return true;
+							return state.newerRequestID === requestID;
+						}
+
+						function hasActiveLifecycleRequest(state) {
+							var gapLoading = state.gaps.some(function(gap) { return gap.loading; });
+							return state.refreshLoading || state.olderLoading || state.newerLoading || gapLoading;
+						}
+
+						function schedulePendingNewer(state, taskID, projectID) {
+							if (!state.newerPending || hasActiveLifecycleRequest(state) || state.refreshPending || state.refreshLiveTimer || state.refreshRetryTimer || state.newerRetryTimer || state.newerLiveTimer) return;
+							state.newerPending = false;
+							state.newerRetryTimer = setTimeout(function() {
+								state.newerRetryTimer = null;
+								loadNewer(taskID, projectID, 0, true);
+							}, 0);
+						}
+
+						function schedulePendingRefresh(state, taskID, projectID) {
+							if (!state.refreshPending || hasActiveLifecycleRequest(state) || state.refreshRetryTimer || state.refreshLiveTimer) return;
+							state.refreshRetryTimer = setTimeout(function() {
+								state.refreshRetryTimer = null;
+								if (hasActiveLifecycleRequest(state)) {
+									state.refreshPending = true;
 									return;
 								}
-									container.innerHTML = rows.map(function(r) {
-										var selectedSkills = renderBadgeRow('Selected skills', r.selected_skills);
-										var selectedMemories = renderBadgeRow('Selected memories', memoryLabels(r.selected_memories));
-										var hasStructuredRoute = selectedSkills || selectedMemories;
-										var summary = r.summary && !hasStructuredRoute ? '<p class="text-sm mt-1">' + escapeText(r.summary) + '</p>' : '';
-										var error = r.error ? '<p class="text-xs text-error mt-1">' + escapeText(r.error) + '</p>' : '';
-										var when = r.completed_at ? new Date(r.completed_at).toLocaleString() : new Date(r.started_at).toLocaleString();
-										return '<div class="border border-base-300 rounded-lg p-3">' +
-											'<div class="flex items-center justify-between flex-wrap gap-2">' +
-												'<div class="flex items-center gap-2 flex-wrap">' +
-													'<span class="font-mono text-xs opacity-70">' + escapeText(r.when || '') + '</span>' +
-													'<span class="text-sm font-medium">' + escapeText(r.skill_key || '') + '</span>' +
-													statusBadge(r.status || '') +
-												'</div>' +
-												'<span class="text-xs opacity-60">' + escapeText(when) + '</span>' +
-											'</div>' +
-											summary + selectedSkills + selectedMemories + error +
-										'</div>';
-									}).join('');
-							} catch (err) {
-							container.innerHTML = '<p class="text-sm text-error">' + escapeText(err.message || err) + '</p>';
+								refreshLifecycleActivity(taskID, projectID, true);
+							}, 0);
 						}
-					};
+
+						function refreshLifecycleActivity(taskID, projectID, fromPending) {
+							var container = lifecycleContainer(taskID, projectID);
+							if (!container) return Promise.resolve();
+							projectID = projectID || container.dataset.projectId || '';
+							var state = getState(taskID, projectID);
+							var previousNewestID = state.initialized && state.order.length > 0 ? state.order[0] : '';
+							markRetainedNonterminalExecutions(state);
+							if (fromPending && hasActiveLifecycleRequest(state)) {
+								state.refreshPending = true;
+								return Promise.resolve();
+							}
+							if (state.refreshLiveTimer) {
+								clearTimeout(state.refreshLiveTimer);
+								state.refreshLiveTimer = null;
+							}
+							if (state.refreshRetryTimer) {
+								clearTimeout(state.refreshRetryTimer);
+								state.refreshRetryTimer = null;
+							}
+							if (state.newerLiveTimer) {
+								clearTimeout(state.newerLiveTimer);
+								state.newerLiveTimer = null;
+							}
+							if (state.newerRetryTimer) {
+								clearTimeout(state.newerRetryTimer);
+								state.newerRetryTimer = null;
+							}
+							state.refreshPending = false;
+							state.gapScrollIntent = false;
+							state.gaps.forEach(function(gap) {
+								gap.loading = false;
+								gap.requestID = 0;
+							});
+							var version = ++state.requestVersion;
+							var requestID = ++state.requestSerial;
+							state.refreshRequestID = requestID;
+							state.olderRequestID = 0;
+							state.newerRequestID = 0;
+							state.olderLoading = false;
+							state.newerLoading = false;
+							state.olderError = '';
+							state.newerError = '';
+							state.refreshLoading = true;
+							state.refreshError = '';
+							state.initialLoading = !state.initialized && state.order.length === 0;
+							renderState(state, container, state.order.length > 0);
+							return fetchPage(taskID, projectID, 'initial', '').then(function(page) {
+								if (!requestIsCurrent(state, container, version, requestID, 'refresh')) return null;
+								reconcileRefreshGap(state, previousNewestID, page);
+								return fetchRetainedExecutions(state, taskID, projectID, page, []);
+							}).then(function(result) {
+								if (!result || !requestIsCurrent(state, container, version, requestID, 'refresh')) return;
+								var page = result.page;
+								var firstLoad = !state.initialized;
+								var wasEmpty = state.order.length === 0;
+								if (page.items.length === 0) {
+									state.records = Object.create(null);
+									state.order = [];
+									state.gaps = [];
+									state.loadedOlder = false;
+									state.olderCursor = '';
+									state.olderHasMore = false;
+								} else if (firstLoad || wasEmpty) {
+									state.records = Object.create(null);
+									state.order = [];
+								}
+								mergeRows(state, page.items);
+								mergeRows(state, result.gapRows);
+								mergeRows(state, result.rows);
+								Object.keys(result.pageIDs).forEach(function(executionID) { delete state.refreshExecutionIDs[executionID]; });
+								result.executionIDs.forEach(function(executionID) { delete state.refreshExecutionIDs[executionID]; });
+								if (Object.keys(state.refreshExecutionIDs).length > 0) state.refreshPending = true;
+								if (firstLoad || wasEmpty) {
+									state.olderCursor = page.nextCursor || '';
+									state.olderHasMore = page.hasMore;
+								}
+								state.initialized = true;
+								state.initialLoading = false;
+								state.refreshLoading = false;
+								state.refreshError = '';
+								state.newerError = '';
+								renderState(state, container, true);
+								schedulePendingRefresh(state, taskID, projectID);
+								schedulePendingNewer(state, taskID, projectID);
+							}).catch(function(error) {
+								if (!requestIsCurrent(state, container, version, requestID, 'refresh')) return;
+								state.initialLoading = false;
+								state.refreshLoading = false;
+								state.refreshError = error && error.message || 'Unable to load lifecycle activity';
+								renderState(state, container, state.order.length > 0);
+								schedulePendingRefresh(state, taskID, projectID);
+								schedulePendingNewer(state, taskID, projectID);
+							});
+						}
+
+						function loadOlder(taskID, projectID) {
+							var container = lifecycleContainer(taskID, projectID);
+							if (!container) return Promise.resolve();
+							projectID = projectID || container.dataset.projectId || '';
+							var state = getState(taskID, projectID);
+							if (!state.initialized || !state.olderHasMore || hasActiveLifecycleRequest(state)) return Promise.resolve();
+							var cursor = state.olderCursor;
+							if (!cursor) {
+								state.olderHasMore = false;
+								renderState(state, container, true);
+								return Promise.resolve();
+							}
+							var version = state.requestVersion;
+							var requestID = ++state.requestSerial;
+							state.olderRequestID = requestID;
+							state.olderLoading = true;
+							state.olderError = '';
+							renderState(state, container, true);
+							return fetchPage(taskID, projectID, 'older', cursor).then(function(page) {
+								if (!requestIsCurrent(state, container, version, requestID, 'older')) return;
+								mergeRows(state, page.items);
+								state.loadedOlder = true;
+								state.olderCursor = page.nextCursor || '';
+								state.olderHasMore = page.hasMore && page.items.length > 0;
+								state.olderLoading = false;
+								state.olderError = '';
+								renderState(state, container, true);
+								schedulePendingRefresh(state, taskID, projectID);
+								schedulePendingNewer(state, taskID, projectID);
+							}).catch(function(error) {
+								if (!requestIsCurrent(state, container, version, requestID, 'older')) return;
+								state.olderLoading = false;
+								state.olderError = error && error.message || 'Unable to load older lifecycle activity';
+								renderState(state, container, true);
+								schedulePendingRefresh(state, taskID, projectID);
+								schedulePendingNewer(state, taskID, projectID);
+							});
+						}
+
+						function loadNewer(taskID, projectID, catchupCount, fromPending) {
+							var container = lifecycleContainer(taskID, projectID);
+							if (!container) return Promise.resolve();
+							projectID = projectID || container.dataset.projectId || '';
+							var state = getState(taskID, projectID);
+							if (state.newerLoading) {
+								state.newerPending = true;
+								return Promise.resolve();
+							}
+							if (state.gaps.some(function(gap) { return gap.loading; })) {
+								state.newerPending = true;
+								return Promise.resolve();
+							}
+							if (state.refreshPending || state.refreshLoading || state.refreshLiveTimer || state.refreshRetryTimer) return Promise.resolve();
+							if (state.olderLoading) {
+								state.newerPending = true;
+								return Promise.resolve();
+							}
+							if (!state.initialized) {
+								if (!fromPending) state.newerPending = true;
+								return refreshLifecycleActivity(taskID, projectID);
+							}
+							var newest = state.order.length > 0 && state.records[state.order[0]];
+							if (!newest || !newest.id) {
+								if (!fromPending) state.newerPending = true;
+								return refreshLifecycleActivity(taskID, projectID);
+							}
+							var version = state.requestVersion;
+							var requestID = ++state.requestSerial;
+							state.newerRequestID = requestID;
+							state.newerLoading = true;
+							state.newerError = '';
+							renderState(state, container, true);
+							return fetchPage(taskID, projectID, 'newer', newest.id).then(function(page) {
+								if (!requestIsCurrent(state, container, version, requestID, 'newer')) return;
+								mergeRows(state, page.items);
+								if (page.hasMore && page.items.length > 0) {
+									addLifecycleGap(state, page.nextCursor, String(page.items[page.items.length - 1].id || ''));
+								}
+								state.newerLoading = false;
+								state.newerError = '';
+								state.refreshError = '';
+								renderState(state, container, true);
+								schedulePendingRefresh(state, taskID, projectID);
+								schedulePendingNewer(state, taskID, projectID);
+							}).catch(function(error) {
+								if (!requestIsCurrent(state, container, version, requestID, 'newer')) return;
+								state.newerLoading = false;
+								state.newerError = error && error.message || 'Unable to check for new lifecycle activity';
+								renderState(state, container, true);
+								schedulePendingRefresh(state, taskID, projectID);
+								schedulePendingNewer(state, taskID, projectID);
+							});
+						}
+						function scheduleLiveRefresh(taskID, projectID, mode) {
+							var state = getState(taskID, projectID);
+							if (mode === 'newer') {
+								if (state.refreshPending || state.refreshLiveTimer || state.refreshRetryTimer) return;
+								if (hasActiveLifecycleRequest(state)) {
+									state.newerPending = true;
+									return;
+								}
+								if (state.newerLiveTimer) return;
+								state.newerLiveTimer = setTimeout(function() {
+									state.newerLiveTimer = null;
+									if (state.refreshPending || state.refreshLiveTimer || state.refreshRetryTimer || hasActiveLifecycleRequest(state)) {
+										if (!state.refreshPending && !state.refreshLiveTimer && !state.refreshRetryTimer) state.newerPending = true;
+										return;
+									}
+									loadNewer(taskID, projectID, 0);
+								}, 150);
+								return;
+							}
+
+							state.refreshPending = true;
+							if (state.newerLiveTimer) {
+								clearTimeout(state.newerLiveTimer);
+								state.newerLiveTimer = null;
+							}
+							if (state.newerRetryTimer) {
+								clearTimeout(state.newerRetryTimer);
+								state.newerRetryTimer = null;
+							}
+							state.newerPending = false;
+							if (hasActiveLifecycleRequest(state) || state.refreshLiveTimer || state.refreshRetryTimer) return;
+							state.refreshLiveTimer = setTimeout(function() {
+								state.refreshLiveTimer = null;
+								if (hasActiveLifecycleRequest(state)) {
+									state.refreshPending = true;
+									return;
+								}
+								refreshLifecycleActivity(taskID, projectID, true);
+							}, 150);
+						}
+
+						function handleGapScrollIntent(event) {
+							var port = document.getElementById('lifecycle-activity-scroll');
+							if (!port || !(event.target === port || port.contains(event.target))) return;
+							if (event.type === 'keydown') {
+								var key = event.key || '';
+								if (key !== 'ArrowDown' && key !== 'PageDown' && key !== 'End' && key !== ' ') return;
+							}
+							var container = document.getElementById('lifecycle-activity-list');
+							if (!container) return;
+							getState(container.dataset.taskId, container.dataset.projectId || '').gapScrollIntent = true;
+						}
+
+						function handleScroll() {
+							var container = document.getElementById('lifecycle-activity-list');
+							var panel = document.getElementById('tab-lifecycle');
+							if (!container || (panel && panel.classList.contains('hidden'))) return;
+							var state = getState(container.dataset.taskId, container.dataset.projectId || '');
+							if (!state.initialized || state.restoring || state.olderLoading || (state.gaps.length === 0 && !state.olderHasMore)) return;
+							captureScroll(state, container);
+							var port = scrollport(container);
+							if (state.gaps.length > 0 && state.gapScrollIntent) {
+								var bounds = port.getBoundingClientRect();
+								var markers = container.querySelectorAll('[data-lifecycle-gap]');
+								for (var i = 0; i < markers.length; i++) {
+									var markerRect = markers[i].getBoundingClientRect();
+									if (markerRect.top < bounds.bottom + 180 && markerRect.bottom > bounds.top - 180) {
+										state.gapScrollIntent = false;
+										loadLifecycleGap(state.taskID, state.projectID, markers[i].getAttribute('data-lifecycle-gap'));
+										return;
+									}
+								}
+							}
+							var nearBottom = port !== container ? port.scrollHeight - port.scrollTop - port.clientHeight < 180 : container.getBoundingClientRect().bottom - window.innerHeight < 180;
+							if (nearBottom && state.olderHasMore) loadOlder(state.taskID, state.projectID);
+						}
+
+						function handleClick(event) {
+							var target = event.target;
+							var gapButton = target && target.closest && target.closest('[data-lifecycle-load-gap], [data-lifecycle-retry-gap]');
+							if (gapButton) {
+								event.preventDefault();
+								var gapContainer = document.getElementById('lifecycle-activity-list');
+								if (gapContainer) {
+									var gapID = gapButton.getAttribute('data-lifecycle-load-gap') || gapButton.getAttribute('data-lifecycle-retry-gap');
+									loadLifecycleGap(gapContainer.dataset.taskId, gapContainer.dataset.projectId || '', gapID);
+								}
+								return;
+							}
+							var olderButton = target && target.closest && target.closest('[data-lifecycle-load-older]');
+							if (olderButton) {
+								event.preventDefault();
+								var olderContainer = document.getElementById('lifecycle-activity-list');
+								if (olderContainer) loadOlder(olderContainer.dataset.taskId, olderContainer.dataset.projectId || '');
+								return;
+							}
+							var retry = target && target.closest && target.closest('[data-lifecycle-retry]');
+							if (retry) {
+								event.preventDefault();
+								var retryContainer = document.getElementById('lifecycle-activity-list');
+								if (retryContainer) {
+									if (retry.getAttribute('data-lifecycle-retry') === 'older') loadOlder(retryContainer.dataset.taskId, retryContainer.dataset.projectId || '');
+									else if (retry.getAttribute('data-lifecycle-retry') === 'newer') loadNewer(retryContainer.dataset.taskId, retryContainer.dataset.projectId || '', 0);
+									else refreshLifecycleActivity(retryContainer.dataset.taskId, retryContainer.dataset.projectId || '');
+								}
+								return;
+							}
+							var tab = target && target.closest && target.closest('[data-tab="lifecycle"]');
+							if (!tab) return;
+							var tabContainer = document.getElementById('lifecycle-activity-list');
+							if (tabContainer) refreshLifecycleActivity(tabContainer.dataset.taskId, tabContainer.dataset.projectId || '');
+						}
+
+						function handleLiveConnected(event) {
+							var detail = event && event.detail || {};
+							if (!detail.reconnected) return;
+							var container = document.getElementById('lifecycle-activity-list');
+							if (!container) return;
+							var state = getState(container.dataset.taskId, container.dataset.projectId || '');
+							markRetainedNonterminalExecutions(state);
+							scheduleLiveRefresh(container.dataset.taskId, container.dataset.projectId || '', 'refresh');
+						}
+
+						function handleTaskEvent(event) {
+							var data = event && event.detail || {};
+							if (typeof data === 'string') {
+								try { data = JSON.parse(data); } catch (error) { return; }
+							}
+							var container = document.getElementById('lifecycle-activity-list');
+							if (!container || !data || data.task_id !== container.dataset.taskId) return;
+							if (data.project_id && data.project_id !== container.dataset.projectId) return;
+							var relevant = {
+								task_status_changed: true,
+								task_category_changed: true,
+								task_thread_execution_started: true,
+								task_lifecycle_execution_changed: true,
+								task_thread_input_applied: true,
+								task_thread_input_queued: true,
+								task_thread_input_steered: true
+							};
+							if (data.type === 'task_lifecycle_execution_changed' && data.exec_id) {
+								var state = getState(container.dataset.taskId, container.dataset.projectId || '');
+								markExecutionForRefresh(state, data.exec_id);
+							}
+							if (relevant[data.type]) scheduleLiveRefresh(container.dataset.taskId, container.dataset.projectId || '', data.type === 'task_thread_execution_started' || data.type === 'task_thread_input_applied' ? 'newer' : 'refresh');
+						}
+
+						function handleBeforeSwap(event) {
+							var target = event && event.detail && event.detail.target;
+							if (!target) return;
+							if (target.id === 'main-content' || target.id === 'task-detail-content' || (target.querySelector && target.querySelector('#lifecycle-activity-list'))) {
+								rememberAllScroll();
+								cleanup();
+							}
+						}
+
+						function cleanup() {
+							rememberAllScroll();
+							document.removeEventListener('click', handleClick);
+							document.removeEventListener('scroll', handleScroll, true);
+							document.removeEventListener('wheel', handleGapScrollIntent, true);
+							document.removeEventListener('touchmove', handleGapScrollIntent, true);
+							document.removeEventListener('pointerdown', handleGapScrollIntent, true);
+							document.removeEventListener('keydown', handleGapScrollIntent, true);
+							window.removeEventListener('scroll', handleScroll, true);
+							window.removeEventListener('sse-task-event', handleTaskEvent);
+							window.removeEventListener('sse-live-connected', handleLiveConnected);
+							document.body && document.body.removeEventListener('htmx:beforeSwap', handleBeforeSwap);
+							Object.keys(states).forEach(function(key) {
+								var state = states[key];
+								if (state.liveTimer) {
+									clearTimeout(state.liveTimer);
+									state.liveTimer = null;
+								}
+								if (state.newerLiveTimer) {
+									clearTimeout(state.newerLiveTimer);
+									state.newerLiveTimer = null;
+								}
+								if (state.refreshLiveTimer) {
+									clearTimeout(state.refreshLiveTimer);
+									state.refreshLiveTimer = null;
+								}
+								if (state.newerRetryTimer) {
+									clearTimeout(state.newerRetryTimer);
+									state.newerRetryTimer = null;
+								}
+								if (state.refreshRetryTimer) {
+									clearTimeout(state.refreshRetryTimer);
+									state.refreshRetryTimer = null;
+								}
+									state.newerPending = false;
+									state.gapScrollIntent = false;
+									state.refreshPending = false;								state.refreshLoading = false;
+								state.olderLoading = false;
+								state.newerLoading = false;
+								state.initialLoading = false;
+								state.refreshRequestID = 0;
+								state.olderRequestID = 0;
+									state.newerRequestID = 0;
+									state.gaps.forEach(function(gap) {
+										gap.loading = false;
+										gap.requestID = 0;
+									});
+									state.requestVersion++;							});
+						}
+
+						window.refreshLifecycleActivity = refreshLifecycleActivity;
+						window._taskLifecycleActivityHandlers = { cleanup: cleanup };
+						document.addEventListener('click', handleClick);
+							document.addEventListener('scroll', handleScroll, true);
+							document.addEventListener('wheel', handleGapScrollIntent, true);
+							document.addEventListener('touchmove', handleGapScrollIntent, true);
+							document.addEventListener('pointerdown', handleGapScrollIntent, true);
+							document.addEventListener('keydown', handleGapScrollIntent, true);
+							window.addEventListener('scroll', handleScroll, true);						window.addEventListener('sse-task-event', handleTaskEvent);
+						window.addEventListener('sse-live-connected', handleLiveConnected);
+						if (document.body) document.body.addEventListener('htmx:beforeSwap', handleBeforeSwap);
+
 					if (document.querySelector('[data-tab="lifecycle"].tab-active')) {
-						var el = document.getElementById('lifecycle-activity-list');
-						if (el) window.refreshLifecycleActivity(el.dataset.taskId);
+						var initial = document.getElementById('lifecycle-activity-list');
+						if (initial) refreshLifecycleActivity(initial.dataset.taskId, initial.dataset.projectId || '');
 					}
-					document.addEventListener('click', function(ev) {
-						var tab = ev.target.closest && ev.target.closest('[data-tab="lifecycle"]');
-						if (!tab) return;
-						var el = document.getElementById('lifecycle-activity-list');
-						if (el) window.refreshLifecycleActivity(el.dataset.taskId);
-					});
 				})();
-			</script>
-		</div>
-		<!-- End Tab: Lifecycle -->
-		<!-- Tab: Changes -->
+				</script>
+			</div>
+			<!-- End Tab: Lifecycle -->
+			<!-- Tab: Changes -->
 		<div id="tab-changes" class={ "task-tab-panel flex-shrink-0", templ.KV("hidden", defaultTab != "changes") }>
 			<div
 				id="changes-content"

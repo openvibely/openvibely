@@ -175,7 +175,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 							const eventType = data.type || event.type;
 							if (!eventType) return;
 
-							if (eventType === 'task_status_changed' || eventType === 'task_category_changed' || eventType === 'task_thread_execution_started' || eventType === 'task_thread_input_applied' || eventType === 'task_thread_input_queued' || eventType === 'task_thread_input_steered' || eventType === 'task_thread_input_cancelled' || eventType === 'alert_created' || eventType.indexOf('automation_') === 0) {
+							if (eventType === 'task_board_updated' || eventType === 'task_status_changed' || eventType === 'task_category_changed' || eventType === 'task_thread_execution_started' || eventType === 'task_lifecycle_execution_changed' || eventType === 'task_thread_input_applied' || eventType === 'task_thread_input_queued' || eventType === 'task_thread_input_steered' || eventType === 'task_thread_input_cancelled' || eventType === 'alert_created' || eventType.indexOf('automation_') === 0) {
 								window._tabVisibility.dispatchSSEEvent('sse-task-event', data);
 								if (eventType.indexOf('automation_') === 0) {
 									window._tabVisibility.dispatchSSEEvent('sse-automation-event', data);
@@ -243,13 +243,16 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 							console.error('[SSE-Live] Connection error:', err);
 						},
 						listeners: {
+							'task_board_updated': handleLiveEvent,
 							'task_status_changed': handleLiveEvent,
 							'task_category_changed': handleLiveEvent,
 							'task_thread_execution_started': handleLiveEvent,
-								'task_thread_input_applied': handleLiveEvent,
-								'task_thread_input_queued': handleLiveEvent,
-								'task_thread_input_steered': handleLiveEvent,
-								'task_thread_input_cancelled': handleLiveEvent,							'alert_created': handleLiveEvent,
+							'task_lifecycle_execution_changed': handleLiveEvent,
+							'task_thread_input_applied': handleLiveEvent,
+							'task_thread_input_queued': handleLiveEvent,
+							'task_thread_input_steered': handleLiveEvent,
+							'task_thread_input_cancelled': handleLiveEvent,
+							'alert_created': handleLiveEvent,
 							'automation_definition_updated': handleLiveEvent,
 							'automation_invocation_started': handleLiveEvent,
 							'automation_invocation_updated': handleLiveEvent,

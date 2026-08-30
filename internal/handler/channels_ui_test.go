@@ -18,6 +18,49 @@ import (
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
+func TestChannelsPageRendersConfiguredXWithoutOAuthSecrets(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	ctx := context.Background()
+	secrets := map[string]string{
+		service.XSettingConsumerKey:       "browser-x-consumer-key",
+		service.XSettingConsumerSecret:    "browser-x-consumer-secret",
+		service.XSettingAccessToken:       "browser-x-access-token",
+		service.XSettingAccessTokenSecret: "browser-x-access-token-secret",
+	}
+	for key, value := range secrets {
+		if err := h.settingsRepo.Set(ctx, key, value); err != nil {
+			t.Fatalf("save X setting %s: %v", key, err)
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/channels?project_id=default", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, expected := range []string{
+		`data-channel-type="x"`,
+		`id="x_config_modal"`,
+		`hx-post="/channels/x/configure"`,
+		`name="x_consumer_key"`,
+		`name="x_consumer_secret"`,
+		`name="x_access_token"`,
+		`name="x_access_token_secret"`,
+		`type="password"`,
+	} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("expected configured X page to contain %q", expected)
+		}
+	}
+	for _, secret := range secrets {
+		if strings.Contains(body, secret) {
+			t.Fatalf("configured X page exposed OAuth secret %q", secret)
+		}
+	}
+}
+
 func cardSectionByType(body, channelType string) string {
 	start := strings.Index(body, `data-channel-type="`+channelType+`"`)
 	if start == -1 {
@@ -272,12 +315,13 @@ func TestChannelsPageOutboundTargetsRenderAsPermanentTopEditCard(t *testing.T) {
 	targetRepo := repository.NewChannelTargetRepo(db)
 	h.SetChannelTargetRepo(targetRepo)
 	seedTarget := models.ChannelTarget{
-		ID:        repository.NewID(),
-		ProjectID: "default",
-		Platform:  "email",
-		Name:      "client",
-		TargetID:  "client@example.com",
-		Home:      true,
+		ID:             repository.NewID(),
+		ProjectID:      "default",
+		Platform:       "email",
+		Name:           "client",
+		TargetID:       "client@example.com",
+		Home:           true,
+		DefaultSubject: "Original subject",
 	}
 	if err := targetRepo.Upsert(context.Background(), seedTarget); err != nil {
 		t.Fatalf("failed to seed outbound target: %v", err)
@@ -332,6 +376,30 @@ func TestChannelsPageOutboundTargetsRenderAsPermanentTopEditCard(t *testing.T) {
 	}
 	if !strings.Contains(body, `onsubmit="return addOutboundTargetDraft(event)"`) || !strings.Contains(body, `client@example.com`) {
 		t.Fatal("expected staged outbound target controls inside modal")
+	}
+	savedRowStart := strings.Index(body, `<tr data-outbound-target-draft-key="`)
+	if savedRowStart == -1 {
+		t.Fatalf("expected saved outbound target row markup, body=%q", body)
+	}
+	savedRowEnd := strings.Index(body[savedRowStart:], `</tr>`)
+	if savedRowEnd == -1 {
+		t.Fatalf("expected saved outbound target row to close, body=%q", body)
+	}
+	savedRow := body[savedRowStart : savedRowStart+savedRowEnd+len(`</tr>`)]
+	if strings.Count(savedRow, `onclick="editOutboundTargetDraft(this)"`) != 1 {
+		t.Fatalf("expected one discoverable Edit action for the saved outbound target, row=%q", savedRow)
+	}
+	for _, want := range []string{
+		"function editOutboundTargetDraft",
+		"outboundTargetsFindDraftGroup",
+		"form.dataset.editingRowKey",
+		"Update Target",
+		"const fieldsID = 'outbound-target-draft-fields-'",
+		"const id = outboundTargetsDraftValue(editingGroup, 'target_row_id');", `name="target_default_subject" value="Original subject"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("expected saved target edit flow to contain %q, body=%q", want, body)
+		}
 	}
 	if strings.Count(body, `data-channel-type="outbound-targets"`) != 1 {
 		t.Fatalf("expected exactly one outbound targets card on page, got %d", strings.Count(body, `data-channel-type="outbound-targets"`))

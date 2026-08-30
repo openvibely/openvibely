@@ -291,25 +291,13 @@ func (w *WorkerService) dispatchNext() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	if w.ctx == nil {
-		return // not started yet
-	}
-	if w.admissionOpen != nil && !w.admissionOpen() {
-		return
-	}
-
 	i := 0
 	for i < len(w.queue) {
-		// Check global capacity
-		running := int(atomic.LoadInt32(&w.totalRunning))
-		if !hasGlobalWorkerCapacity(w.numWorkers, running) {
-			return // globally at capacity, nothing more to dispatch
-		}
-
 		task := w.queue[i]
 		prepared, isPrepared := w.prepared[task.ID]
 
-		// Prune stale tasks (status/category changed while queued)
+		// Prune stale tasks before checking capacity. A full global pool must not
+		// keep cancelled, demoted, or otherwise invalid queue entries alive forever.
 		if w.taskRepo != nil {
 			dbTask, err := w.taskRepo.GetByID(context.Background(), task.ID)
 			validStatus := dbTask != nil && dbTask.Status == models.StatusPending
@@ -319,9 +307,9 @@ func (w *WorkerService) dispatchNext() {
 			if err != nil || dbTask == nil || !validStatus ||
 				(dbTask.Category != models.CategoryActive && dbTask.Category != models.CategoryScheduled) {
 				w.queue = append(w.queue[:i], w.queue[i+1:]...)
-				if isPrepared && prepared.ExecutionID == "" && w.automationRepo != nil {
-					if abandonErr := w.automationRepo.AbandonQueuedDispatch(context.Background(), prepared.Envelope.DispatchID, "Automation task was cancelled or is no longer runnable"); abandonErr != nil {
-						applog.Infof("[worker] abandoning queued automation dispatch=%s failed: %v", prepared.Envelope.DispatchID, abandonErr)
+				if isPrepared && w.automationRepo != nil {
+					if cancelErr := w.automationRepo.CancelDispatchesForTask(context.Background(), task.ID, "Automation task was cancelled or is no longer runnable"); cancelErr != nil {
+						applog.Infof("[worker] cancelling queued automation task=%s failed: %v", task.ID, cancelErr)
 					}
 				}
 				delete(w.pending, task.ID)
@@ -355,17 +343,15 @@ func (w *WorkerService) dispatchNext() {
 			}
 		}
 
-		// Check project capacity
-		if !w.tryAcquireProjectSlot(task.ProjectID) {
-			i++ // skip this task, try next one
-			continue
+		// A worker may be stopped or draining while stale entries are still
+		// cleaned above. Do not admit new work until it is started and open.
+		if w.ctx == nil || (w.admissionOpen != nil && !w.admissionOpen()) {
+			return
 		}
 
-		// Check model capacity
 		agentConfigID := w.resolveAgentConfigID(w.ctx, task)
-		if !w.tryAcquireModelSlot(agentConfigID) {
-			w.releaseProjectSlot(task.ProjectID)
-			i++ // skip this task, try next one
+		if !w.tryAcquireWorkerSlotsLocked(task.ProjectID, agentConfigID) {
+			i++ // skip this task, try the next project/model pool
 			continue
 		}
 
@@ -414,6 +400,7 @@ func (w *WorkerService) executeTask(task models.Task, agentConfigID string, prep
 	claimed := w.taskRepo == nil || (isPrepared && prepared.ExecutionID != "")
 	completionAttempted := w.taskRepo == nil || (isPrepared && prepared.ExecutionID != "")
 	logOutcome := true
+	capacityAcquired := true
 
 	defer func() {
 		if r := recover(); r != nil {
@@ -444,9 +431,13 @@ func (w *WorkerService) executeTask(task models.Task, agentConfigID string, prep
 		delete(w.pending, task.ID)
 		w.mu.Unlock()
 
-		// Release slots unconditionally for every path after dispatch acquired them.
-		w.releaseProjectSlot(task.ProjectID)
-		w.releaseModelSlot(agentConfigID)
+		// Release slots only while this execution owns them. A model transfer
+		// temporarily releases all capacity while waiting for the new model.
+		if capacityAcquired {
+			w.releaseProjectSlot(task.ProjectID)
+			w.releaseModelSlot(agentConfigID)
+			capacityAcquired = false
+		}
 
 		if isPrepared && prepared.ExecutionID != "" && w.automationRepo != nil {
 			status := preparedTerminalStatus
@@ -521,6 +512,11 @@ func (w *WorkerService) executeTask(task models.Task, agentConfigID string, prep
 		claim, claimErr := w.taskRepo.ClaimQueuedAutomationDispatch(taskCtx, prepared.Envelope.DispatchID)
 		if claimErr != nil {
 			applog.Infof("[worker] queued automation task=%s claim failed: %v", task.ID, claimErr)
+			if errors.Is(claimErr, repository.ErrAutomationTaskBusy) && w.automationRepo != nil {
+				if cancelErr := w.automationRepo.CancelDispatchesForTask(context.Background(), task.ID, "Automation task is no longer runnable"); cancelErr != nil {
+					applog.Infof("[worker] cancelling rejected automation task=%s failed: %v", task.ID, cancelErr)
+				}
+			}
 			logOutcome = false
 			return
 		}
@@ -536,19 +532,25 @@ func (w *WorkerService) executeTask(task models.Task, agentConfigID string, prep
 		// lifecycle hooks or provider execution use the admitted Task.
 		claimedAgentConfigID := w.resolveAgentConfigID(taskCtx, task)
 		if claimedAgentConfigID != agentConfigID {
+			w.releaseProjectSlot(task.ProjectID)
 			w.releaseModelSlot(agentConfigID)
+			capacityAcquired = false
 			agentConfigID = ""
-			if err := w.AcquireModelSlot(taskCtx, claimedAgentConfigID); err != nil {
-				executionErr = fmt.Errorf("acquiring claimed automation task model capacity: %w", err)
+			// The revised model may remain saturated while unrelated queued
+			// work can use the released global/project capacity.
+			w.dispatchNext()
+			if err := w.acquireWorkerSlots(taskCtx, task.ProjectID, claimedAgentConfigID, false); err != nil {
+				executionErr = fmt.Errorf("acquiring claimed automation task capacity: %w", err)
 				preparedTerminalStatus = models.ExecFailed
 				preparedTerminalMessage = executionErr.Error()
 				if errors.Is(err, context.Canceled) {
 					preparedTerminalStatus = models.ExecCancelled
-					preparedTerminalMessage = "automation task cancelled during model capacity transfer"
+					preparedTerminalMessage = "automation task cancelled during capacity transfer"
 				}
 				return
 			}
 			agentConfigID = claimedAgentConfigID
+			capacityAcquired = true
 		}
 	}
 	if w.taskRepo != nil && !isPrepared {
@@ -582,16 +584,22 @@ func (w *WorkerService) executeTask(task models.Task, agentConfigID string, prep
 		// reservation before executing the authoritative Task.
 		claimedAgentConfigID := w.resolveAgentConfigID(taskCtx, task)
 		if claimedAgentConfigID != agentConfigID {
+			w.releaseProjectSlot(task.ProjectID)
 			w.releaseModelSlot(agentConfigID)
+			capacityAcquired = false
 			agentConfigID = ""
-			if err := w.AcquireModelSlot(taskCtx, claimedAgentConfigID); err != nil {
-				executionErr = fmt.Errorf("acquiring claimed task model capacity: %w", err)
+			// The revised model may remain saturated while unrelated queued
+			// work can use the released global/project capacity.
+			w.dispatchNext()
+			if err := w.acquireWorkerSlots(taskCtx, task.ProjectID, claimedAgentConfigID, false); err != nil {
+				executionErr = fmt.Errorf("acquiring claimed task capacity: %w", err)
 				if updateErr := w.taskRepo.UpdateStatus(context.Background(), task.ID, models.StatusFailed); updateErr != nil {
-					applog.Infof("[worker] task=%s failed status update after model capacity error: %v", task.ID, updateErr)
+					applog.Infof("[worker] task=%s failed status update after capacity error: %v", task.ID, updateErr)
 				}
 				return
 			}
 			agentConfigID = claimedAgentConfigID
+			capacityAcquired = true
 		}
 		// Tag the context so executeTaskWithAgent knows the task has
 		// already been claimed and won't skip it as "already running".
@@ -917,6 +925,49 @@ func (w *WorkerService) CancelRunningTask(taskID string) bool {
 	return false
 }
 
+// CancelQueuedTask removes queued worker work for a task and terminalizes any
+// associated Automation dispatch state. It is safe to call after a running task
+// cancellation as well: the durable operation only touches unfinished dispatches
+// and the running worker's cancellation path remains authoritative.
+func (w *WorkerService) CancelQueuedTask(ctx context.Context, taskID, message string) error {
+	if w == nil || taskID == "" {
+		return nil
+	}
+	removed := false
+	w.mu.Lock()
+	for i := 0; i < len(w.queue); {
+		if w.queue[i].ID != taskID {
+			i++
+			continue
+		}
+		w.queue = append(w.queue[:i], w.queue[i+1:]...)
+		removed = true
+	}
+	if removed {
+		delete(w.pending, taskID)
+		delete(w.prepared, taskID)
+	}
+	w.mu.Unlock()
+
+	if w.automationRepo != nil {
+		if err := w.automationRepo.CancelDispatchesForTask(context.WithoutCancel(ctx), taskID, message); err != nil {
+			return err
+		}
+	}
+	if removed {
+		w.dispatchNext()
+	}
+	return nil
+}
+
+// PruneQueuedWork rechecks queued tasks against durable status/category and is
+// used after lifecycle changes that demote Automation work without a task edit.
+func (w *WorkerService) PruneQueuedWork() {
+	if w != nil {
+		w.dispatchNext()
+	}
+}
+
 // tryAcquireProjectSlot attempts to acquire a concurrency slot for the given project.
 // Returns true if the task can execute, false if the project's max_workers limit is reached.
 func (w *WorkerService) tryAcquireProjectSlot(projectID string) bool {
@@ -1080,11 +1131,67 @@ func (w *WorkerService) TryAcquireModelSlot(agentConfigID string) bool {
 	return w.tryAcquireModelSlot(agentConfigID)
 }
 
+// tryAcquireWorkerSlotsLocked atomically reserves the global, project, and
+// model pools. The caller must hold w.mu. Releasing the project reservation on
+// a model miss keeps a blocked model from consuming unrelated capacity.
+func (w *WorkerService) tryAcquireWorkerSlotsLocked(projectID, agentConfigID string) bool {
+	running := int(atomic.LoadInt32(&w.totalRunning))
+	if !hasGlobalWorkerCapacity(w.numWorkers, running) {
+		return false
+	}
+	if !w.tryAcquireProjectSlot(projectID) {
+		return false
+	}
+	if !w.tryAcquireModelSlot(agentConfigID) {
+		w.releaseProjectSlot(projectID)
+		return false
+	}
+	return true
+}
+
+func (w *WorkerService) tryAcquireWorkerSlots(projectID, agentConfigID string, respectAdmissionGate bool) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if respectAdmissionGate && w.admissionOpen != nil && !w.admissionOpen() {
+		return false
+	}
+	return w.tryAcquireWorkerSlotsLocked(projectID, agentConfigID)
+}
+
+func (w *WorkerService) acquireWorkerSlots(ctx context.Context, projectID, agentConfigID string, respectAdmissionGate bool) error {
+	for {
+		if w.tryAcquireWorkerSlots(projectID, agentConfigID, respectAdmissionGate) {
+			return nil
+		}
+		timer := time.NewTimer(500 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+// AcquireWorkerSlots blocks until all worker capacity required by a task is
+// available or the context is cancelled. Reserving all pools together avoids
+// holding global/project capacity while waiting on a model pool.
+func (w *WorkerService) AcquireWorkerSlots(ctx context.Context, projectID, agentConfigID string) error {
+	return w.acquireWorkerSlots(ctx, projectID, agentConfigID, true)
+}
+
+// ReleaseWorkerSlots releases the project and model reservations acquired by
+// AcquireWorkerSlots.
+func (w *WorkerService) ReleaseWorkerSlots(projectID, agentConfigID string) {
+	w.releaseProjectSlot(projectID)
+	w.releaseModelSlot(agentConfigID)
+}
+
 // tryAcquireGlobalProjectSlot atomically reserves both global and project
 // capacity for execution paths outside dispatchNext, such as task-thread
-// follow-ups. dispatchNext already holds w.mu while checking global capacity and
-// acquiring its project slot, so it continues to call tryAcquireProjectSlot
-// directly.
+// follow-ups.
 func (w *WorkerService) tryAcquireGlobalProjectSlot(projectID string) bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()

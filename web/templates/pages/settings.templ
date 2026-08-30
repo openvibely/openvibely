@@ -160,9 +160,16 @@ templ SettingsContent(view ChannelsSettingsView) {
 templ settingsContent(view ChannelsSettingsView) {
 	<div
 		id="channels-container"
-		data-search-container
-		hx-get={ "/channels?project_id=" + view.CurrentProjectID }
-		hx-trigger="channels-refresh from:body"
+			data-search-container
+			data-card-pagination-root
+			data-card-pagination-url={ "/channels?project_id=" + view.CurrentProjectID }
+			data-card-pagination-list="#webhook-card-list"
+			data-card-pagination-card-selector="[data-webhook-id]"
+			data-card-pagination-replacement-card-selector="[data-channel-type]"
+			data-card-pagination-replacement-scope="root"
+			data-card-pagination-key="data-webhook-id"
+				data-card-pagination-page-size="20"
+				data-card-pagination-has-more={ cardPaginationHasMoreAttribute(view.WebhooksHasMore) }			hx-get={ "/channels?project_id=" + view.CurrentProjectID }		hx-trigger="channels-refresh from:body"
 		hx-target="this"
 		hx-swap="outerHTML"
 	>
@@ -202,6 +209,9 @@ templ settingsContent(view ChannelsSettingsView) {
 							</button>
 						</li>
 					}
+					if !view.HasXChannel {
+						<li><button type="button" onclick="openXConfigModal()">X (formerly Twitter)</button></li>
+					}
 					if !view.HasEmailChannel {
 						<li>
 							<button type="button" onclick="openEmailChannelFromMenu(event)">
@@ -214,7 +224,7 @@ templ settingsContent(view ChannelsSettingsView) {
 							Webhook
 						</button>
 					</li>
-					if view.HasGitHubChannel && view.HasTelegramChannel && view.HasSlackChannel && view.HasDiscordChannel && view.HasEmailChannel {
+					if view.HasGitHubChannel && view.HasTelegramChannel && view.HasSlackChannel && view.HasDiscordChannel && view.HasXChannel && view.HasEmailChannel {
 						<li class="hidden"></li>
 					}
 				</ul>
@@ -226,6 +236,31 @@ templ settingsContent(view ChannelsSettingsView) {
 			<!-- Active Channels -->
 			<div class="grid gap-4 mb-8">
 				@OutboundTargetsCard(view.CurrentProjectID, view.ChannelTargets, view.SendMessageExplicitTargets)
+				if view.HasXChannel {
+					<div class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40" data-channel-type="x" data-search-card data-search-text="X formerly Twitter mentions posts" onclick="openXConfigModal()">
+						<div class="card-body p-5">
+							<div class="flex items-start justify-between gap-3">
+								<div><h3 class="card-title">X (formerly Twitter)</h3><p class="text-sm opacity-60">Receive authorized mentions and post replies using X API v2.</p></div>
+								<div class="dropdown dropdown-end" onclick="event.stopPropagation()"><button class="btn btn-ghost btn-sm" aria-label="X channel actions">⋮</button><ul class="dropdown-content menu bg-base-100 rounded-box shadow z-10 w-32"><li><button type="button" onclick="openXConfigModal()">Edit</button></li><li><button type="button" class="text-error" onclick="openDeleteChannelConfirm('X (formerly Twitter)', '/channels/x/remove', 'POST')">Delete</button></li></ul></div>
+							</div>
+							<div class="mt-3 flex gap-2">
+								if view.XStatus.Connected {
+									<span class="badge badge-success">Connected</span>
+							} else if view.XStatus.Configured {
+								<span class="badge badge-warning">Configured, polling offline</span>
+							} else {
+								<span class="badge badge-ghost">Not configured</span>
+							}
+							if view.XStatus.Username != "" {
+								<span class="badge badge-ghost">{ "@" + view.XStatus.Username }</span>
+							}
+						</div>
+						if view.XStatus.LastError != "" {
+							<p class="text-xs text-warning mt-2">{ view.XStatus.LastError }</p>
+						}
+						</div>
+					</div>
+				}
 
 				if view.HasGitHubChannel {
 				<!-- GitHub Card -->
@@ -557,7 +592,9 @@ templ settingsContent(view ChannelsSettingsView) {
 						</div>
 					</div>
 				}
-				for _, wh := range view.Webhooks {
+				<div id="webhook-card-list" data-card-pagination-list>
+					<div class="grid gap-4">
+					for _, wh := range view.Webhooks {
 					<!-- Webhook Card -->
 					<div
 						class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
@@ -636,15 +673,18 @@ templ settingsContent(view ChannelsSettingsView) {
 					</div>
 				</div>
 			}
-				if !view.HasGitHubChannel && !view.HasTelegramChannel && !view.HasSlackChannel && !view.HasDiscordChannel && !view.HasEmailChannel && len(view.Webhooks) == 0 {
-					<div class="card bg-base-100 shadow-sm border border-dashed border-base-300" data-search-card data-search-text="No channels added yet">
+					</div>
+				</div>
+				@CardPaginationStatusWithBoundary(view.WebhooksHasMore)
+				if !view.HasGitHubChannel && !view.HasTelegramChannel && !view.HasSlackChannel && !view.HasDiscordChannel && !view.HasXChannel && !view.HasEmailChannel && len(view.Webhooks) == 0 && view.WebhooksPageOffset == 0 && view.WebhooksSearch == "" {
+					<div class="card bg-base-100 shadow-sm border border-dashed border-base-300" data-search-empty-state data-search-card data-search-text="No channels added yet">
 						<div class="card-body">
 							<h3 class="font-semibold">No channels added yet</h3>
-							<p class="text-sm opacity-70">Use `Add Channel` to configure GitHub, Slack, Discord, Telegram Bot, Email, or Webhooks.</p>
+							<p class="text-sm opacity-70">Use `Add Channel` to configure GitHub, Slack, Discord, Telegram Bot, X, Email, or Webhooks.</p>
 						</div>
 					</div>
-				}		</div>
-
+				}
+			</div>
 					@OutboundTargetsModal(view.CurrentProjectID, view.ChannelTargets, view.SendMessageExplicitTargets)
 			<dialog id="delete_channel_confirm_modal" class="modal">
 				<div class="modal-box">
@@ -663,6 +703,46 @@ templ settingsContent(view ChannelsSettingsView) {
 				<form method="dialog" class="modal-backdrop">
 					<button>close</button>
 				</form>
+			</dialog>
+
+			<dialog id="x_config_modal" class="modal">
+				<div class="modal-box max-w-2xl">
+					<button type="button" class="btn btn-circle btn-ghost btn-xs ov-modal-close" onclick="closeXConfigModal()" aria-label="Close X configuration" title="Close X configuration">×</button>
+					<h3 class="font-bold text-lg mb-2">Configure X (formerly Twitter)</h3>
+					<div class="alert alert-info text-sm mb-4"><span>Requires an X developer app with OAuth 1.0a user authentication and read/write permissions. Mention polling and posting remain subject to your X API access tier. OpenVibely cannot create or upgrade provider credentials.</span></div>
+					<form method="post" action="/channels/x/configure" hx-post="/channels/x/configure" hx-swap="none" class="space-y-3">
+						<input type="hidden" name="project_id" value={ view.CurrentProjectID }/>
+						<div class="grid md:grid-cols-2 gap-3">
+							<label class="form-control"><span class="label-text">Consumer key</span><input class="input input-bordered" type="password" name="x_consumer_key" autocomplete="off" placeholder="Leave blank to preserve existing"/></label>
+							<label class="form-control"><span class="label-text">Consumer secret</span><input class="input input-bordered" type="password" name="x_consumer_secret" autocomplete="off" placeholder="Leave blank to preserve existing"/></label>
+							<label class="form-control"><span class="label-text">Access token</span><input class="input input-bordered" type="password" name="x_access_token" autocomplete="off" placeholder="Leave blank to preserve existing"/></label>
+							<label class="form-control"><span class="label-text">Access token secret</span><input class="input input-bordered" type="password" name="x_access_token_secret" autocomplete="off" placeholder="Leave blank to preserve existing"/></label>
+						</div>
+						<label class="form-control"><span class="label-text">Poll interval (seconds)</span><input class="input input-bordered" type="number" min="15" max="300" name="x_poll_interval_seconds" value={ view.XPollIntervalSeconds } required/></label>
+						<label class="label cursor-pointer justify-start gap-3"><input type="checkbox" class="checkbox checkbox-primary" name="x_send_responses" value="true" if view.XSendResponses { checked }/><span>Post assistant responses as replies</span></label>
+						<div class="flex items-center justify-between"><div><button type="button" class="btn btn-outline btn-sm" hx-post="/channels/x/test" hx-target="#x-test-feedback" hx-swap="innerHTML">Test connection</button><span id="x-test-feedback" class="ml-2"></span></div><div class="flex gap-2"><button type="button" class="btn btn-ghost" onclick="closeXConfigModal()">Cancel</button><button type="submit" class="btn btn-primary">Save X</button></div></div>
+					</form>
+					<div class="divider">Authorized mention authors for this project</div>
+					<form method="post" action="/channels/x/authorized-users" hx-post="/channels/x/authorized-users" hx-swap="none" class="flex gap-2">
+						<input type="hidden" name="project_id" value={ view.CurrentProjectID }/><input class="input input-bordered flex-1" name="x_user_id" inputmode="numeric" placeholder="Numeric X user ID" required/><input class="input input-bordered flex-1" name="x_username" placeholder="Username (optional)"/><button class="btn btn-secondary" type="submit">Add</button>
+					</form>
+					<div class="mt-3 space-y-2">
+						for _, user := range view.XAuthorizedUsers {
+							<div class="flex items-center justify-between rounded-box bg-base-200 px-3 py-2">
+								<span>
+								if user.Username != "" {
+									<span>{ "@" + user.Username + " " }</span>
+								}
+								<span class="opacity-60">ID { user.XUserID }</span>
+								</span>
+								<button class="btn btn-ghost btn-xs text-error" hx-delete={ "/channels/x/authorized-users/" + user.ID + "?project_id=" + view.CurrentProjectID } hx-swap="none">Delete</button>
+							</div>
+						}
+						if len(view.XAuthorizedUsers) == 0 {
+							<p class="text-sm opacity-60">No users authorized. Inbound mentions are denied until a user is added.</p>
+						}					</div>
+				</div>
+				<form method="dialog" class="modal-backdrop"><button onclick="closeXConfigModal()">close</button></form>
 			</dialog>
 
 			<!-- Channel Configuration Modal -->
@@ -1714,6 +1794,15 @@ templ settingsContent(view ChannelsSettingsView) {
 					});
 				}
 
+			function openXConfigModal() {
+				const modal = document.getElementById('x_config_modal');
+				if (modal) modal.showModal();
+			}
+			function closeXConfigModal() {
+				const modal = document.getElementById('x_config_modal');
+				if (modal) modal.close();
+			}
+
 			function openTelegramChannelFromMenu(event) {
 				if (event) event.stopPropagation();
 				closeAllDropdownMenus();
@@ -1825,7 +1914,25 @@ templ settingsContent(view ChannelsSettingsView) {
 						if (!wrapper) return;
 						const kindSel = wrapper.querySelector('select[name="target_kind"]');
 						const fixedLabel = document.getElementById('outbound-target-kind-fixed-label');
-						const fixedKind = platform === 'telegram' ? 'Chat' : platform === 'email' ? 'Email' : null;
+						const fixedKind = platform === 'telegram' ? 'Chat' : platform === 'email' ? 'Email' : platform === 'x' ? 'Account' : null;
+						const form = platformSel ? platformSel.closest('form') : null;
+						const targetInput = form ? form.querySelector('input[name="target_id"]') : null;
+						const threadInput = form ? form.querySelector('input[name="thread_id"]') : null;
+						if (targetInput) {
+							if (platform === 'x') {
+								targetInput.value = 'me';
+								targetInput.readOnly = true;
+								targetInput.placeholder = 'authenticated account';
+							} else {
+								if (targetInput.readOnly && targetInput.value === 'me') targetInput.value = '';
+								targetInput.readOnly = false;
+								targetInput.placeholder = 'channel/chat/user ID or email';
+							}
+						}
+						if (threadInput) {
+							if (platform === 'x') threadInput.value = '';
+							threadInput.disabled = platform === 'x';
+						}
 						if (fixedKind) {
 							if (kindSel) kindSel.classList.add('hidden');
 							if (fixedLabel) { fixedLabel.textContent = fixedKind; fixedLabel.classList.remove('hidden'); }
@@ -1837,7 +1944,12 @@ templ settingsContent(view ChannelsSettingsView) {
 
 					function resetOutboundTargetAddForm() {
 						const form = document.getElementById('outbound-target-add-form');
-						if (form) form.reset();
+						if (form) {
+							form.reset();
+							delete form.dataset.editingRowKey;
+							const submit = form.querySelector('button[type="submit"]');
+							if (submit) submit.textContent = 'Add Target';
+						}
 						const platformSel = document.getElementById('outbound-target-platform-select');
 						if (platformSel) outboundTargetKindOnPlatformChange(platformSel);
 					}
@@ -1877,12 +1989,42 @@ templ settingsContent(view ChannelsSettingsView) {
 						return input;
 					}
 
+					function outboundTargetsFindDraftGroup(rowKey) {
+						const fields = document.getElementById('outbound-targets-draft-fields');
+						if (!fields) return null;
+						const groups = fields.querySelectorAll('[data-outbound-target-draft-key]');
+						for (let i = 0; i < groups.length; i++) {
+							if (groups[i].getAttribute('data-outbound-target-draft-key') === rowKey) return groups[i];
+						}
+						return null;
+					}
+
+					function outboundTargetsFindDraftRow(rowKey) {
+						const tbody = document.getElementById('outbound-targets-draft-tbody');
+						if (!tbody) return null;
+						const rows = tbody.querySelectorAll('tr[data-outbound-target-draft-key]');
+						for (let i = 0; i < rows.length; i++) {
+							if (rows[i].getAttribute('data-outbound-target-draft-key') === rowKey) return rows[i];
+						}
+						return null;
+					}
+
+					function outboundTargetsDraftValue(group, name) {
+						const input = group ? group.querySelector('input[name="' + name + '"]') : null;
+						return input ? input.value : '';
+					}
+
 					function outboundTargetsAppendDraftFields(rowKey, id, platform, targetKind, name, targetID, threadID, isHome, defaultSubject) {
 						const fields = document.getElementById('outbound-targets-draft-fields');
 						if (!fields) return;
-						const group = document.createElement('div');
-						group.id = 'outbound-target-draft-fields-' + rowKey;
-						group.setAttribute('data-outbound-target-draft-key', rowKey);
+						let group = outboundTargetsFindDraftGroup(rowKey);
+						if (!group) {
+							group = document.createElement('div');
+							group.id = 'outbound-target-draft-fields-' + rowKey;
+							group.setAttribute('data-outbound-target-draft-key', rowKey);
+							fields.appendChild(group);
+						}
+						while (group.firstChild) group.removeChild(group.firstChild);
 						group.appendChild(outboundTargetsDraftInput('target_row_id', id));
 						group.appendChild(outboundTargetsDraftInput('target_platform', platform));
 						group.appendChild(outboundTargetsDraftInput('target_kind', targetKind));
@@ -1891,7 +2033,6 @@ templ settingsContent(view ChannelsSettingsView) {
 						group.appendChild(outboundTargetsDraftInput('target_thread_id', threadID));
 						group.appendChild(outboundTargetsDraftInput('target_is_home', isHome ? 'true' : 'false'));
 						group.appendChild(outboundTargetsDraftInput('target_default_subject', defaultSubject));
-						fields.appendChild(group);
 					}
 
 					function outboundTargetsEscape(value) {
@@ -1926,13 +2067,53 @@ templ settingsContent(view ChannelsSettingsView) {
 								}
 							}
 
-						function addOutboundTargetDraft(event) {
+					function outboundTargetsRenderDraftRow(rowKey, platform, targetKind, name, targetID, threadID, isHome) {
+						const escapedRowKey = outboundTargetsEscape(rowKey);
+						const fieldsID = 'outbound-target-draft-fields-' + escapedRowKey;
+						const testLabelID = 'outbound-target-test-label-' + escapedRowKey;
+						const typeCell = targetKind === 'user' ? '<span class="badge badge-sm badge-outline">User DM</span>' : '<span class="opacity-60 text-xs">' + outboundTargetsEscape(targetKind) + '</span>';
+						return '<td>' + outboundTargetsEscape(platform) + '</td>' +
+							'<td>' + typeCell + '</td>' +
+							'<td>' + (name ? '<span>#' + outboundTargetsEscape(name) + '</span>' : '<span class="opacity-50">unnamed</span>') + '</td>' +
+							'<td class="font-mono text-xs break-all">' + outboundTargetsEscape(targetID) + '</td>' +
+							'<td class="font-mono text-xs">' + outboundTargetsEscape(threadID) + '</td>' +
+							'<td class="outbound-target-home-cell">' + (isHome ? '<span class="badge badge-sm badge-primary">Home</span>' : '') + '</td>' +
+							'<td class="text-right whitespace-nowrap"><span class="badge badge-sm badge-ghost mr-2">Unsaved</span><button type="button" class="btn btn-xs mr-1" onclick="editOutboundTargetDraft(this)">Edit</button><button type="button" class="btn btn-xs mr-1" hx-post="/channels/outbound-targets/test-draft" hx-include="#' + fieldsID + ', #outbound-targets-policy-form input[name=project_id]" hx-target="#' + testLabelID + '" hx-swap="innerHTML" hx-on::before-request="outboundTargetTestBefore(this)" hx-on::after-request="outboundTargetTestAfter(this, event)"><span id="' + testLabelID + '" data-outbound-target-test-label aria-live="polite">Test</span></button><button type="button" class="btn btn-xs btn-error" onclick="removeOutboundTargetDraft(this)">Delete</button></td>';
+					}
+
+					function editOutboundTargetDraft(button) {
+						const row = button ? button.closest('tr[data-outbound-target-draft-key]') : null;
+						const form = document.getElementById('outbound-target-add-form');
+						if (!row || !form) return;
+						const rowKey = row.getAttribute('data-outbound-target-draft-key') || '';
+						const group = outboundTargetsFindDraftGroup(rowKey);
+						if (!rowKey || !group) return;
+						form.reset();
+						form.elements.platform.value = outboundTargetsDraftValue(group, 'target_platform');
+						form.elements.target_kind.value = outboundTargetsDraftValue(group, 'target_kind') || 'channel';
+						form.elements.name.value = outboundTargetsDraftValue(group, 'target_name');
+						form.elements.target_id.value = outboundTargetsDraftValue(group, 'target_target_id');
+						form.elements.thread_id.value = outboundTargetsDraftValue(group, 'target_thread_id');
+						form.elements.is_home.checked = outboundTargetsDraftValue(group, 'target_is_home') === 'true';
+						form.elements.default_subject.value = outboundTargetsDraftValue(group, 'target_default_subject');
+						form.dataset.editingRowKey = rowKey;
+						const submit = form.querySelector('button[type="submit"]');
+						if (submit) submit.textContent = 'Update Target';
+						const platformSel = document.getElementById('outbound-target-platform-select');
+						if (platformSel) outboundTargetKindOnPlatformChange(platformSel);
+					}
+
+					function addOutboundTargetDraft(event) {
 						if (event) event.preventDefault();
 						const form = document.getElementById('outbound-target-add-form');
 						const tbody = document.getElementById('outbound-targets-draft-tbody');
 						if (!form || !tbody) return false;
+						const editingRowKey = form.dataset.editingRowKey || '';
+						const editingRow = editingRowKey ? outboundTargetsFindDraftRow(editingRowKey) : null;
+						const editingGroup = editingRowKey ? outboundTargetsFindDraftGroup(editingRowKey) : null;
+						if (editingRowKey && (!editingRow || !editingGroup)) return false;
 						const platform = (form.elements.platform.value || '').trim().toLowerCase();
-						const targetKind = platform === 'telegram' ? 'chat' : platform === 'email' ? 'email' : (form.elements.target_kind.value || 'channel').trim().toLowerCase();
+						const targetKind = platform === 'telegram' ? 'chat' : platform === 'email' ? 'email' : platform === 'x' ? 'account' : (form.elements.target_kind.value || 'channel').trim().toLowerCase();
 						const name = (form.elements.name.value || '').trim().replace(/^#+/, '').toLowerCase();
 						const targetID = (form.elements.target_id.value || '').trim();
 						const threadID = (form.elements.thread_id.value || '').trim();
@@ -1949,22 +2130,24 @@ templ settingsContent(view ChannelsSettingsView) {
 								if (platformInput && homeInput && platformInput.value === platform) homeInput.value = 'false';
 							});
 						}
-						const rowKey = 'draft-' + Date.now() + '-' + Math.random().toString(36).slice(2);
-						const emptyRow = document.getElementById('outbound-targets-empty-row');
-						if (emptyRow) emptyRow.remove();
-						const row = document.createElement('tr');
-						row.setAttribute('data-outbound-target-draft-key', rowKey);
-						row.setAttribute('data-platform', platform);
-						const typeCell = targetKind === 'user' ? '<span class="badge badge-sm badge-outline">User DM</span>' : '<span class="opacity-60 text-xs">' + outboundTargetsEscape(targetKind) + '</span>';
-						row.innerHTML = '<td>' + outboundTargetsEscape(platform) + '</td>' +
-							'<td>' + typeCell + '</td>' +
-							'<td>' + (name ? '<span>#' + outboundTargetsEscape(name) + '</span>' : '<span class="opacity-50">unnamed</span>') + '</td>' +
-							'<td class="font-mono text-xs break-all">' + outboundTargetsEscape(targetID) + '</td>' +
-							'<td class="font-mono text-xs">' + outboundTargetsEscape(threadID) + '</td>' +
-							'<td class="outbound-target-home-cell">' + (isHome ? '<span class="badge badge-sm badge-primary">Home</span>' : '') + '</td>' +
-								'<td class="text-right whitespace-nowrap"><span class="badge badge-sm badge-ghost mr-2">Unsaved</span><button type="button" class="btn btn-xs mr-1" hx-post="/channels/outbound-targets/test-draft" hx-include="#outbound-target-draft-fields-' + rowKey + ', #outbound-targets-policy-form input[name=project_id]" hx-target="#outbound-target-test-label-' + rowKey + '" hx-swap="innerHTML" hx-on::before-request="outboundTargetTestBefore(this)" hx-on::after-request="outboundTargetTestAfter(this, event)"><span id="outbound-target-test-label-' + rowKey + '" data-outbound-target-test-label aria-live="polite">Test</span></button><button type="button" class="btn btn-xs btn-error" onclick="removeOutboundTargetDraft(this)">Delete</button></td>';						tbody.appendChild(row);
-						outboundTargetsAppendDraftFields(rowKey, '', platform, targetKind, name, targetID, threadID, isHome, defaultSubject);
-						if (window.htmx && typeof window.htmx.process === 'function') window.htmx.process(row);
+						if (!editingRowKey) {
+							const rowKey = 'draft-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+							const emptyRow = document.getElementById('outbound-targets-empty-row');
+							if (emptyRow) emptyRow.remove();
+							const row = document.createElement('tr');
+							row.setAttribute('data-outbound-target-draft-key', rowKey);
+							row.setAttribute('data-platform', platform);
+							row.innerHTML = outboundTargetsRenderDraftRow(rowKey, platform, targetKind, name, targetID, threadID, isHome);
+							tbody.appendChild(row);
+							outboundTargetsAppendDraftFields(rowKey, '', platform, targetKind, name, targetID, threadID, isHome, defaultSubject);
+							if (window.htmx && typeof window.htmx.process === 'function') window.htmx.process(row);
+						} else {
+							const id = outboundTargetsDraftValue(editingGroup, 'target_row_id');
+							editingRow.setAttribute('data-platform', platform);
+							editingRow.innerHTML = outboundTargetsRenderDraftRow(editingRowKey, platform, targetKind, name, targetID, threadID, isHome);
+							outboundTargetsAppendDraftFields(editingRowKey, id, platform, targetKind, name, targetID, threadID, isHome, defaultSubject);
+							if (window.htmx && typeof window.htmx.process === 'function') window.htmx.process(editingRow);
+						}
 						resetOutboundTargetAddForm();
 						return false;
 					}
@@ -1973,9 +2156,11 @@ templ settingsContent(view ChannelsSettingsView) {
 						const row = button ? button.closest('tr[data-outbound-target-draft-key]') : null;
 						if (!row) return;
 						const rowKey = row.getAttribute('data-outbound-target-draft-key');
+						const form = document.getElementById('outbound-target-add-form');
 						row.remove();
-						const group = document.querySelector('#outbound-targets-draft-fields [data-outbound-target-draft-key="' + rowKey + '"]');
+						const group = outboundTargetsFindDraftGroup(rowKey);
 						if (group) group.remove();
+						if (form && form.dataset.editingRowKey === rowKey) resetOutboundTargetAddForm();
 						const tbody = document.getElementById('outbound-targets-draft-tbody');
 						if (tbody && !tbody.querySelector('tr[data-outbound-target-draft-key]')) {
 							const empty = document.createElement('tr');
@@ -2114,7 +2299,7 @@ templ OutboundTargetsCard(currentProjectID string, targets []models.ChannelTarge
 		class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
 		data-channel-type="outbound-targets"
 		data-search-card
-		data-search-text="Outbound Message Targets send_message Slack Telegram Email Discord"
+		data-search-text="Outbound Message Targets send_message Slack Telegram Email Discord X"
 		hx-get={ "/channels/outbound-targets/card?project_id=" + currentProjectID }
 		hx-trigger="outbound-targets-card-refresh from:body"
 		hx-target="this"
@@ -2202,6 +2387,7 @@ templ OutboundTargetsSection(currentProjectID string, targets []models.ChannelTa
 					<option value="telegram">Telegram</option>
 					<option value="email">Email</option>
 					<option value="discord">Discord</option>
+					<option value="x">X</option>
 				</select>
 				<div id="outbound-target-kind-wrapper">
 					<select name="target_kind" class="select select-bordered select-sm w-full">
@@ -2256,15 +2442,17 @@ templ OutboundTargetsSection(currentProjectID string, targets []models.ChannelTa
 									</td>
 									<td class="font-mono text-xs break-all">{ target.TargetID }</td>
 									<td class="font-mono text-xs">{ target.ThreadID }</td>
-										<td class="outbound-target-home-cell">
-											if target.Home {
-												<span class="badge badge-sm badge-primary">Home</span>
-											}
-										</td>
-											<td class="text-right whitespace-nowrap">
-												<button type="button" class="btn btn-xs mr-1" hx-post={ "/channels/outbound-targets/" + target.ID + "/test?project_id=" + currentProjectID } hx-target={ "#outbound-target-test-label-" + target.ID } hx-swap="innerHTML" hx-on::before-request="outboundTargetTestBefore(this)" hx-on::after-request="outboundTargetTestAfter(this, event)"><span id={ "outbound-target-test-label-" + target.ID } data-outbound-target-test-label aria-live="polite">Test</span></button>
-												<button type="button" class="btn btn-xs btn-error" onclick="removeOutboundTargetDraft(this)">Delete</button>
-											</td>								</tr>
+									<td class="outbound-target-home-cell">
+										if target.Home {
+											<span class="badge badge-sm badge-primary">Home</span>
+										}
+									</td>
+									<td class="text-right whitespace-nowrap">
+										<button type="button" class="btn btn-xs mr-1" onclick="editOutboundTargetDraft(this)">Edit</button>
+										<button type="button" class="btn btn-xs mr-1" hx-post={ "/channels/outbound-targets/" + target.ID + "/test?project_id=" + currentProjectID } hx-target={ "#outbound-target-test-label-" + target.ID } hx-swap="innerHTML" hx-on::before-request="outboundTargetTestBefore(this)" hx-on::after-request="outboundTargetTestAfter(this, event)"><span id={ "outbound-target-test-label-" + target.ID } data-outbound-target-test-label aria-live="polite">Test</span></button>
+										<button type="button" class="btn btn-xs btn-error" onclick="removeOutboundTargetDraft(this)">Delete</button>
+									</td>
+								</tr>
 							}
 						</tbody>
 					</table>

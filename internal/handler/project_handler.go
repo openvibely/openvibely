@@ -435,6 +435,9 @@ func (h *Handler) UpdateProject(c echo.Context) error {
 		return err
 	}
 	applog.Infof("[handler] UpdateProject success id=%s", projectID)
+	if h.workerSvc != nil {
+		h.workerSvc.DispatchNext()
+	}
 
 	// Return to current page
 	if isHTMX(c) {

@@ -14,6 +14,7 @@ type ThreadInputRepo struct {
 	slackTaskContextRepo   *SlackTaskContextRepo
 	emailTaskContextRepo   *EmailTaskContextRepo
 	discordTaskContextRepo *DiscordTaskContextRepo
+	xTaskContextRepo       *XTaskContextRepo
 }
 
 var (
@@ -29,6 +30,7 @@ func NewThreadInputRepo(db *sql.DB) *ThreadInputRepo {
 		slackTaskContextRepo:   NewSlackTaskContextRepo(db),
 		emailTaskContextRepo:   NewEmailTaskContextRepo(db),
 		discordTaskContextRepo: NewDiscordTaskContextRepo(db),
+		xTaskContextRepo:       NewXTaskContextRepo(db),
 	}
 }
 
@@ -39,7 +41,7 @@ func defaultThreadTaskJSON(raw string) string {
 	return raw
 }
 
-const threadInputSelectColumns = `id, scope, project_id, COALESCE(task_id, ''), COALESCE(run_execution_id, ''), COALESCE(agent_config_id, ''), input_mode, input_status, COALESCE(turn_id, ''), COALESCE(expected_turn_id, ''), content, COALESCE(attachment_session_id, ''), queue_position, COALESCE(chat_mode, ''), COALESCE(source, ''), COALESCE(origin_agent, ''), COALESCE(telegram_chat_id, 0), COALESCE(slack_team_id, ''), COALESCE(slack_channel_id, ''), COALESCE(slack_thread_ts, ''), COALESCE(slack_user_id, ''), COALESCE(email_from, ''), COALESCE(email_message_id, ''), COALESCE(email_references, ''), COALESCE(email_subject, ''), COALESCE(email_session_key, ''), COALESCE(discord_channel_id, ''), COALESCE(discord_thread_id, ''), COALESCE(discord_message_id, ''), COALESCE(discord_user_id, ''), created_at, updated_at, applied_at`
+const threadInputSelectColumns = `id, scope, project_id, COALESCE(task_id, ''), COALESCE(run_execution_id, ''), COALESCE(agent_config_id, ''), input_mode, input_status, COALESCE(turn_id, ''), COALESCE(expected_turn_id, ''), content, COALESCE(attachment_session_id, ''), queue_position, COALESCE(chat_mode, ''), COALESCE(source, ''), COALESCE(origin_agent, ''), COALESCE(telegram_chat_id, 0), COALESCE(slack_team_id, ''), COALESCE(slack_channel_id, ''), COALESCE(slack_thread_ts, ''), COALESCE(slack_user_id, ''), COALESCE(email_from, ''), COALESCE(email_message_id, ''), COALESCE(email_references, ''), COALESCE(email_subject, ''), COALESCE(email_session_key, ''), COALESCE(discord_channel_id, ''), COALESCE(discord_thread_id, ''), COALESCE(discord_message_id, ''), COALESCE(discord_user_id, ''), COALESCE(x_account_id, ''), COALESCE(x_conversation_id, ''), COALESCE(x_reply_to_tweet_id, ''), COALESCE(x_user_id, ''), COALESCE(x_username, ''), created_at, updated_at, applied_at`
 
 func scanThreadInput(scanner interface {
 	Scan(dest ...interface{}) error
@@ -76,6 +78,11 @@ func scanThreadInput(scanner interface {
 		&input.DiscordThreadID,
 		&input.DiscordMessageID,
 		&input.DiscordUserID,
+		&input.XAccountID,
+		&input.XConversationID,
+		&input.XReplyToTweetID,
+		&input.XUserID,
+		&input.XUsername,
 		&input.CreatedAt,
 		&input.UpdatedAt,
 		&input.AppliedAt,
@@ -168,14 +175,14 @@ func (r *ThreadInputRepo) CreateSteeringForActiveExecution(ctx context.Context, 
 		row := tx.QueryRowContext(ctx, `
 				INSERT INTO thread_inputs (
 					id, scope, project_id, task_id, run_execution_id, agent_config_id, input_mode, input_status,
-						turn_id, expected_turn_id, content, attachment_session_id, queue_position, chat_mode,
-							source, origin_agent, telegram_chat_id, slack_team_id, slack_channel_id, slack_thread_ts, slack_user_id,
-							email_from, email_message_id, email_references, email_subject, email_session_key,
-							discord_channel_id, discord_thread_id, discord_message_id, discord_user_id
-						)
-						SELECT lower(hex(randomblob(16))), ?, ?, NULLIF(?, ''), ?, NULLIF(?, ''), ?, ?, ?, ?, ?, NULLIF(?, ''), ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-					WHERE EXISTS (
-					SELECT 1 FROM executions e JOIN tasks t ON t.id = e.task_id
+					turn_id, expected_turn_id, content, attachment_session_id, queue_position, chat_mode,
+					source, origin_agent, telegram_chat_id, slack_team_id, slack_channel_id, slack_thread_ts, slack_user_id,
+					email_from, email_message_id, email_references, email_subject, email_session_key,
+					discord_channel_id, discord_thread_id, discord_message_id, discord_user_id,
+					x_account_id, x_conversation_id, x_reply_to_tweet_id, x_user_id, x_username
+				)
+				SELECT lower(hex(randomblob(16))), ?, ?, NULLIF(?, ''), ?, NULLIF(?, ''), ?, ?, ?, ?, ?, NULLIF(?, ''), ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+				WHERE EXISTS (					SELECT 1 FROM executions e JOIN tasks t ON t.id = e.task_id
 					WHERE e.id = ? AND e.status = 'running'
 					  AND (
 					    (? = ? AND e.task_id = ?)
@@ -212,8 +219,12 @@ func (r *ThreadInputRepo) CreateSteeringForActiveExecution(ctx context.Context, 
 			input.DiscordThreadID,
 			input.DiscordMessageID,
 			input.DiscordUserID,
-			activeExecutionID,
-			input.Scope,
+			input.XAccountID,
+			input.XConversationID,
+			input.XReplyToTweetID,
+			input.XUserID,
+			input.XUsername,
+			activeExecutionID, input.Scope,
 			models.ThreadInputScopeTask,
 			input.TaskID,
 			input.Scope,
@@ -243,15 +254,15 @@ func (r *ThreadInputRepo) createWithExecutor(ctx context.Context, exec sqlExecut
 		}
 	}
 	row := exec.QueryRowContext(ctx, `
-			INSERT INTO thread_inputs (
-				id, scope, project_id, task_id, run_execution_id, agent_config_id, input_mode, input_status,
-					turn_id, expected_turn_id, content, attachment_session_id, queue_position, chat_mode,
-						source, origin_agent, telegram_chat_id, slack_team_id, slack_channel_id, slack_thread_ts, slack_user_id,
-						email_from, email_message_id, email_references, email_subject, email_session_key,
-						discord_channel_id, discord_thread_id, discord_message_id, discord_user_id
-					) VALUES (lower(hex(randomblob(16))), ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, NULLIF(?, ''), ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-			RETURNING `+threadInputSelectColumns,
-		input.Scope,
+		INSERT INTO thread_inputs (
+			id, scope, project_id, task_id, run_execution_id, agent_config_id, input_mode, input_status,
+			turn_id, expected_turn_id, content, attachment_session_id, queue_position, chat_mode,
+			source, origin_agent, telegram_chat_id, slack_team_id, slack_channel_id, slack_thread_ts, slack_user_id,
+			email_from, email_message_id, email_references, email_subject, email_session_key,
+			discord_channel_id, discord_thread_id, discord_message_id, discord_user_id,
+			x_account_id, x_conversation_id, x_reply_to_tweet_id, x_user_id, x_username
+		) VALUES (lower(hex(randomblob(16))), ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, NULLIF(?, ''), ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		RETURNING `+threadInputSelectColumns, input.Scope,
 		input.ProjectID,
 		input.TaskID,
 		input.RunExecutionID,
@@ -280,6 +291,11 @@ func (r *ThreadInputRepo) createWithExecutor(ctx context.Context, exec sqlExecut
 		input.DiscordThreadID,
 		input.DiscordMessageID,
 		input.DiscordUserID,
+		input.XAccountID,
+		input.XConversationID,
+		input.XReplyToTweetID,
+		input.XUserID,
+		input.XUsername,
 	)
 	created, err := scanThreadInput(row)
 	if err != nil {
@@ -883,6 +899,11 @@ func (r *ThreadInputRepo) ClaimQueuedForChatExecution(ctx context.Context, input
 			discordContext.TaskID = task.ID
 			if err := r.discordTaskContextRepo.UpsertWithExecutor(ctx, tx, discordContext); err != nil {
 				return fmt.Errorf("creating queued discord context: %w", err)
+			}
+		}
+		if promoted.Source == models.TaskOriginX {
+			if err := r.xTaskContextRepo.UpsertWithExecutor(ctx, tx, &models.XTaskContext{TaskID: task.ID, ProjectID: promoted.ProjectID, AccountID: promoted.XAccountID, ConversationID: promoted.XConversationID, ReplyToTweetID: promoted.XReplyToTweetID, XUserID: promoted.XUserID, Username: promoted.XUsername}); err != nil {
+				return fmt.Errorf("creating queued X context: %w", err)
 			}
 		}
 

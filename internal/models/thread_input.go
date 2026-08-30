@@ -55,6 +55,11 @@ type ThreadInput struct {
 	DiscordThreadID     string            `json:"discord_thread_id"`
 	DiscordMessageID    string            `json:"discord_message_id"`
 	DiscordUserID       string            `json:"discord_user_id"`
+	XAccountID          string            `json:"x_account_id"`
+	XConversationID     string            `json:"x_conversation_id"`
+	XReplyToTweetID     string            `json:"x_reply_to_tweet_id"`
+	XUserID             string            `json:"x_user_id"`
+	XUsername           string            `json:"x_username"`
 	CreatedAt           time.Time         `json:"created_at"`
 	UpdatedAt           time.Time         `json:"updated_at"`
 	AppliedAt           *time.Time        `json:"applied_at"`

@@ -2996,6 +2996,157 @@ func TestQueuedTaskFollowupRoutesMemoryFromFollowupMessageAfterInitialMemoryTask
 	}
 }
 
+func TestStartQueuedXTaskThreadInputCarriesAuthorizedRuntimeTools(t *testing.T) {
+	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
+	var providerMu sync.Mutex
+	providerRequests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		providerMu.Lock()
+		providerRequests++
+		requestNumber := providerRequests
+		providerMu.Unlock()
+		w.Header().Set("Content-Type", "text/event-stream")
+		if requestNumber == 1 {
+			_, _ = w.Write([]byte(
+				"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"switch_project\",\"arguments\":\"{\\\"project\\\":\\\"Queued X Runtime Target\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n" +
+					"data: [DONE]\n\n",
+			))
+			return
+		}
+		_, _ = w.Write([]byte(
+			"data: {\"choices\":[{\"delta\":{\"content\":\"switched\"}}]}\n\n" +
+				"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+				"data: [DONE]\n\n",
+		))
+	}))
+	defer server.Close()
+
+	agent := createAgent(t, llmConfigRepo, func(config *models.LLMConfig) {
+		config.Provider = models.ProviderOpenAICompatible
+		config.Model = "provider/model"
+		config.APIKey = "test-key"
+		config.AuthMethod = models.AuthMethodAPIKey
+		config.BaseURL = server.URL + "/v1/"
+		config.Transport = "chat_completions"
+		config.PresetSlug = "vllm"
+	})
+	project := createProject(t, h, "Queued X Runtime Project")
+	targetProject := createProject(t, h, "Queued X Runtime Target")
+	task := createTask(t, h, project.ID, "Queued X Runtime Task", func(tk *models.Task) {
+		tk.Category = models.CategoryCompleted
+		tk.Status = models.StatusCompleted
+		tk.AgentID = &agent.ID
+	})
+	auth := repository.NewXAuthRepo(db)
+	selections := repository.NewXUserProjectRepo(db)
+	h.SetXRepositories(auth, selections, repository.NewXTaskContextRepo(db), repository.NewXInboundReceiptRepo(db))
+	require.NoError(t, auth.Create(ctx, &models.XAuthorizedUser{ProjectID: project.ID, XUserID: "123"}))
+	require.NoError(t, auth.Create(ctx, &models.XAuthorizedUser{ProjectID: targetProject.ID, XUserID: "123"}))
+	input := &models.ThreadInput{
+		Scope:           models.ThreadInputScopeTask,
+		ProjectID:       project.ID,
+		TaskID:          task.ID,
+		AgentConfigID:   agent.ID,
+		InputMode:       models.ThreadInputModeQueued,
+		InputStatus:     models.ThreadInputPending,
+		Content:         "switch if needed",
+		Source:          models.TaskOriginX,
+		XAccountID:      "bot-account",
+		XConversationID: "conversation",
+		XReplyToTweetID: "tweet",
+		XUserID:         "123",
+		XUsername:       "alice",
+	}
+	require.NoError(t, h.threadInputRepo.CreateQueued(ctx, input))
+
+	require.NoError(t, h.startQueuedTaskThreadInput(ctx, *input))
+	require.Eventually(t, func() bool {
+		selected, err := selections.GetUserProject(ctx, "123")
+		return err == nil && selected == targetProject.ID
+	}, 2*time.Second, 25*time.Millisecond)
+	providerMu.Lock()
+	require.Equal(t, 2, providerRequests)
+	providerMu.Unlock()
+	require.Eventually(t, func() bool {
+		updated, err := h.taskRepo.GetByID(ctx, task.ID)
+		return err == nil && updated != nil && updated.Status != models.StatusRunning && updated.Status != models.StatusQueued
+	}, 2*time.Second, 25*time.Millisecond)
+}
+
+func TestStartImmediateXTaskThreadRunCarriesAuthorizedRuntimeTools(t *testing.T) {
+	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
+	var providerMu sync.Mutex
+	providerRequests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		providerMu.Lock()
+		providerRequests++
+		requestNumber := providerRequests
+		providerMu.Unlock()
+		w.Header().Set("Content-Type", "text/event-stream")
+		if requestNumber == 1 {
+			_, _ = w.Write([]byte(
+				"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"switch_project\",\"arguments\":\"{\\\"project\\\":\\\"Immediate X Runtime Target\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n" +
+					"data: [DONE]\n\n",
+			))
+			return
+		}
+		_, _ = w.Write([]byte(
+			"data: {\"choices\":[{\"delta\":{\"content\":\"switched\"}}]}\n\n" +
+				"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+				"data: [DONE]\n\n",
+		))
+	}))
+	defer server.Close()
+
+	agent := createAgent(t, llmConfigRepo, func(config *models.LLMConfig) {
+		config.Provider = models.ProviderOpenAICompatible
+		config.Model = "provider/model"
+		config.APIKey = "test-key"
+		config.AuthMethod = models.AuthMethodAPIKey
+		config.BaseURL = server.URL + "/v1/"
+		config.Transport = "chat_completions"
+		config.PresetSlug = "vllm"
+	})
+	project := createProject(t, h, "Immediate X Runtime Project")
+	targetProject := createProject(t, h, "Immediate X Runtime Target")
+	task := createTask(t, h, project.ID, "Immediate X Runtime Task", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusQueued
+		tk.AgentID = &agent.ID
+	})
+	exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecQueued
+		ex.PromptSent = "switch if needed"
+		ex.IsFollowup = true
+	})
+	auth := repository.NewXAuthRepo(db)
+	selections := repository.NewXUserProjectRepo(db)
+	h.SetXRepositories(auth, selections, repository.NewXTaskContextRepo(db), repository.NewXInboundReceiptRepo(db))
+	require.NoError(t, auth.Create(ctx, &models.XAuthorizedUser{ProjectID: project.ID, XUserID: "123"}))
+	require.NoError(t, auth.Create(ctx, &models.XAuthorizedUser{ProjectID: targetProject.ID, XUserID: "123"}))
+	input := models.ThreadInput{Source: models.TaskOriginX, ProjectID: project.ID, XAccountID: "bot-account", XUserID: "123", XConversationID: "conversation", XReplyToTweetID: "tweet", XUsername: "alice"}
+
+	h.StartChannelTaskRun(ctx, service.ChannelTaskRunRequest{
+		ExecID: exec.ID, TaskID: task.ID, ProjectID: project.ID, Message: "switch if needed", Agent: *agent,
+		Surface: chatcontrol.SurfaceX, ReplyContext: channelReplyFromThreadInput(input), RuntimeTools: h.xRuntimeToolsForThreadInput(task.ID, input),
+	})
+	require.Eventually(t, func() bool {
+		selected, err := selections.GetUserProject(ctx, "123")
+		return err == nil && selected == targetProject.ID
+	}, 2*time.Second, 25*time.Millisecond)
+	providerMu.Lock()
+	require.Equal(t, 2, providerRequests)
+	providerMu.Unlock()
+	require.Eventually(t, func() bool {
+		updated, err := h.taskRepo.GetByID(ctx, task.ID)
+		return err == nil && updated != nil && updated.Status != models.StatusRunning && updated.Status != models.StatusQueued
+	}, 2*time.Second, 25*time.Millisecond)
+}
+
 func TestStartQueuedTaskThreadInputPreparesSelectedMemoryForQueuedFollowup(t *testing.T) {
 	h, _, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()

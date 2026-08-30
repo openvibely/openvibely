@@ -77,6 +77,7 @@ func (h *Handler) handleChannels(c echo.Context) error {
 	}
 
 	ctx := c.Request().Context()
+	page := parseCardPageRequest(c)
 	resolvedProjectID := projectID
 	if id, err := h.getCurrentProjectID(c); err == nil && id != "" {
 		resolvedProjectID = id
@@ -105,8 +106,13 @@ func (h *Handler) handleChannels(c echo.Context) error {
 			service.SlackSettingSendResponses,
 			service.DiscordSettingBotToken,
 			service.DiscordSettingSendResponses,
-			service.EmailSettingProvider,
-			service.EmailSettingAddress,
+			service.XSettingConsumerKey,
+			service.XSettingConsumerSecret,
+			service.XSettingAccessToken,
+			service.XSettingAccessTokenSecret,
+			service.XSettingPollIntervalSeconds,
+			service.XSettingSendResponses,
+			service.EmailSettingProvider, service.EmailSettingAddress,
 			service.EmailSettingPassword,
 			service.EmailSettingIMAPHost,
 			service.EmailSettingIMAPPort,
@@ -152,6 +158,11 @@ func (h *Handler) handleChannels(c echo.Context) error {
 		discordAuthorizedUsers, _ = h.discordAuthRepo.ListByProject(ctx, resolvedProjectID)
 	}
 
+	var xAuthorizedUsers []models.XAuthorizedUser
+	if h.xAuthRepo != nil && resolvedProjectID != "" {
+		xAuthorizedUsers, _ = h.xAuthRepo.ListByProject(ctx, resolvedProjectID)
+	}
+
 	// Load Telegram settings (default: enabled)
 	sendResponses := true
 	richMessagesV2 := true
@@ -187,6 +198,21 @@ func (h *Handler) handleChannels(c echo.Context) error {
 	discordStatus := service.DiscordConnectionStatus{SendResponses: true}
 	discordBotToken := ""
 	discordSendResponses := true
+	xStatus := service.XConnectionStatus{}
+	xPollIntervalSeconds := strings.TrimSpace(setting(service.XSettingPollIntervalSeconds))
+	if xPollIntervalSeconds == "" {
+		xPollIntervalSeconds = "30"
+	}
+	xSendResponses := !strings.EqualFold(strings.TrimSpace(setting(service.XSettingSendResponses)), "false")
+	xHasConsumerKey := strings.TrimSpace(setting(service.XSettingConsumerKey)) != ""
+	xHasConsumerSecret := strings.TrimSpace(setting(service.XSettingConsumerSecret)) != ""
+	xHasAccessToken := strings.TrimSpace(setting(service.XSettingAccessToken)) != ""
+	xHasAccessTokenSecret := strings.TrimSpace(setting(service.XSettingAccessTokenSecret)) != ""
+	if xService := h.getXService(); xService != nil {
+		xStatus = xService.Status()
+	} else {
+		xStatus.Configured = xHasConsumerKey && xHasConsumerSecret && xHasAccessToken && xHasAccessTokenSecret
+	}
 	emailStatus := service.EmailConnectionStatus{Provider: service.EmailProviderCustom, IMAPPort: 993, SMTPPort: 587}
 	emailPasswordValue := ""
 	emailHasPassword := false
@@ -291,6 +317,7 @@ func (h *Handler) handleChannels(c echo.Context) error {
 		slackHasClientID || slackHasClientSecret || slackHasAppToken || slackHasBotToken || slackHasOAuthBotToken
 	hasEmailChannel := emailStatus.Configured || emailStatus.Running || strings.TrimSpace(emailStatus.Address) != "" || strings.TrimSpace(emailStatus.IMAPHost) != "" || strings.TrimSpace(emailStatus.SMTPHost) != "" || emailHasPassword
 	hasDiscordChannel := discordStatus.Configured || discordStatus.Connected || strings.TrimSpace(discordBotToken) != ""
+	hasXChannel := xStatus.Configured || xStatus.Connected || xHasConsumerKey || xHasConsumerSecret || xHasAccessToken || xHasAccessTokenSecret
 
 	var channelTargets []models.ChannelTarget
 	sendMessageExplicitTargets := false
@@ -303,11 +330,17 @@ func (h *Handler) handleChannels(c echo.Context) error {
 		}
 	}
 
-	// Load webhooks for current project
+	// Load webhooks for current project using the bounded card projection.
 	var webhooks []models.WebhookEndpoint
+	var webhooksHasMore bool
 	if resolvedProjectID != "" && h.webhookRepo != nil {
-		webhooks, _ = h.webhookRepo.ListCardsByProject(ctx, resolvedProjectID)
+		pageItems, err := h.webhookRepo.ListCardsByProjectPage(ctx, resolvedProjectID, page.PageSize+1, page.Offset, page.Search)
+		if err != nil {
+			return err
+		}
+		webhooks, webhooksHasMore = cardPageItems(pageItems, page.PageSize)
 	}
+	setCardPageResponse(c, webhooksHasMore)
 
 	// Load compact agents for webhook agent selection in the current project.
 	var agentPickerOptions []repository.AgentPickerOption
@@ -323,6 +356,14 @@ func (h *Handler) handleChannels(c echo.Context) error {
 		AuthorizedUsers:              authorizedUsers,
 		SlackAuthorizedUsers:         slackAuthorizedUsers,
 		DiscordAuthorizedUsers:       discordAuthorizedUsers,
+		XAuthorizedUsers:             xAuthorizedUsers,
+		XStatus:                      xStatus,
+		XHasConsumerKey:              xHasConsumerKey,
+		XHasConsumerSecret:           xHasConsumerSecret,
+		XHasAccessToken:              xHasAccessToken,
+		XHasAccessTokenSecret:        xHasAccessTokenSecret,
+		XPollIntervalSeconds:         xPollIntervalSeconds,
+		XSendResponses:               xSendResponses,
 		CurrentProjectID:             resolvedProjectID,
 		SendResponses:                sendResponses,
 		RichMessagesV2:               richMessagesV2,
@@ -360,15 +401,18 @@ func (h *Handler) handleChannels(c echo.Context) error {
 		HasGitHubChannel:             hasGitHubChannel,
 		HasSlackChannel:              hasSlackChannel,
 		HasDiscordChannel:            hasDiscordChannel,
+		HasXChannel:                  hasXChannel,
 		HasEmailChannel:              hasEmailChannel,
 		Webhooks:                     webhooks,
+		WebhooksPageOffset:           page.Offset,
+		WebhooksSearch:               page.Search,
+		WebhooksHasMore:              webhooksHasMore,
 		AgentPickerOptions:           agentPickerOptions,
 		WebhookAgents:                webhookAgents,
 		ChannelTargets:               channelTargets,
 		SendMessageExplicitTargets:   sendMessageExplicitTargets,
 	}
-
-	if isHTMX(c) {
+	if isHTMX(c) || page.IsFragment {
 		return render(c, http.StatusOK, pages.SettingsContent(channelView))
 	}
 	return render(c, http.StatusOK, pages.SettingsPage(projects, channelView))
@@ -377,6 +421,7 @@ func (h *Handler) handleChannels(c echo.Context) error {
 // handleAppSettings renders the application settings page (personality, etc.)
 func (h *Handler) handleAppSettings(c echo.Context) error {
 	projectID := c.QueryParam("project_id")
+	page := parseCardPageRequest(c)
 
 	// Get projects for sidebar
 	projects, err := h.projectSvc.ListSelectorOptions(c.Request().Context())
@@ -390,16 +435,17 @@ func (h *Handler) handleAppSettings(c echo.Context) error {
 		personality, _ = h.settingsRepo.Get(c.Request().Context(), "personality")
 	}
 
-	// Load custom personalities
-	var customPersonalities []models.CustomPersonality
-	if h.customPersonalityRepo != nil {
-		customPersonalities, _ = h.customPersonalityRepo.List(c.Request().Context())
+	// Load custom personalities using the bounded card projection.
+	customPersonalities, customPersonalitiesHasMore, err := h.listPersonalityCardPage(c.Request().Context(), page, personality)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to load custom personalities")
 	}
+	setCardPageResponse(c, customPersonalitiesHasMore)
 
-	if isHTMX(c) {
-		return render(c, http.StatusOK, pages.AppSettingsContent(personality, projectID, customPersonalities))
+	if isHTMX(c) || page.IsFragment {
+		return render(c, http.StatusOK, pages.AppSettingsContentWithPagination(personality, projectID, customPersonalities, customPersonalitiesHasMore))
 	}
-	return render(c, http.StatusOK, pages.AppSettingsPage(personality, projects, projectID, customPersonalities))
+	return render(c, http.StatusOK, pages.AppSettingsPageWithPagination(personality, projects, projectID, customPersonalities, customPersonalitiesHasMore))
 }
 
 // handleTelegramSave saves the Telegram bot token and starts the bot

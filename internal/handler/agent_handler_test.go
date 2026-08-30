@@ -68,7 +68,9 @@ func TestHandler_ListAgents_DeleteConfirmationDialog(t *testing.T) {
 		`onclick="openDeleteAgentConfirm(this)"`,
 		`modal.showModal()`,
 		`async function confirmDeleteAgent()`,
-		`fetch(withCurrentProject('/agents/' + encodeURIComponent(id))`,
+		`var deleteURL = withCurrentProject('/agents/' + encodeURIComponent(id));`,
+		`window.cardPaginationRefreshURL(container, deleteURL)`,
+		`fetch(deleteURL`,
 		`method: 'DELETE'`,
 		`function withCurrentProject(url)`,
 		`function currentProjectQueryString()`,
@@ -112,7 +114,7 @@ func TestHandler_ListAgents_NewAgentModalPreservesCurrentProject(t *testing.T) {
 		`form.action = withCurrentProject('/agents');`,
 		`form.setAttribute('hx-post', withCurrentProject('/agents'));`,
 		`form.action = withCurrentProject('/agents/' + id);`,
-		`fetch(withCurrentProject('/agents/' + encodeURIComponent(id))`,
+		`var deleteURL = withCurrentProject('/agents/' + encodeURIComponent(id));`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("expected New/Edit/Delete agent paths to preserve current project with %q", want)
@@ -3681,7 +3683,9 @@ func TestHandler_ListAgents_DeleteUsesDurableDeleteRequest(t *testing.T) {
 	for _, want := range []string{
 		`onclick="openDeleteAgentConfirm(this)"`,
 		`async function confirmDeleteAgent()`,
-		`fetch(withCurrentProject('/agents/' + encodeURIComponent(id))`,
+		`var deleteURL = withCurrentProject('/agents/' + encodeURIComponent(id));`,
+		`window.cardPaginationRefreshURL(container, deleteURL)`,
+		`fetch(deleteURL`,
 		`method: 'DELETE'`,
 		`function withCurrentProject(url)`,
 	} {

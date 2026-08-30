@@ -97,6 +97,11 @@ func (s *AlertService) ListSummariesByProject(ctx context.Context, projectID str
 	return s.alertRepo.ListSummariesByProject(ctx, projectID, limit)
 }
 
+// ListSummariesPage returns one bounded, project-scoped notification page.
+func (s *AlertService) ListSummariesPage(ctx context.Context, projectID string, filter models.AlertListFilter) ([]models.AlertSummary, error) {
+	return s.alertRepo.ListFilteredSummaries(ctx, projectID, filter)
+}
+
 func (s *AlertService) ListFiltered(ctx context.Context, projectID string, filter models.AlertListFilter) ([]models.Alert, error) {
 	return s.alertRepo.ListFiltered(ctx, projectID, filter)
 }
