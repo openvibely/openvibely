@@ -330,7 +330,7 @@ func TaskChangesWorktreeContent(diffOutput string, task *models.Task, fileStats 
 			templ_7745c5c3_Var17 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = TaskChangesWorktreeContentWithView(diffOutput, task, fileStats, reviewComments, taskPR, localMergeUnavailable, rebaseAvailable, "inline").Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = TaskChangesWorktreeContentWithView(diffOutput, task, fileStats, reviewComments, taskPR, localMergeUnavailable, task.MergeStatus == models.MergeStatusConflict && !localMergeUnavailable, rebaseAvailable, "inline").Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -338,7 +338,7 @@ func TaskChangesWorktreeContent(diffOutput string, task *models.Task, fileStats 
 	})
 }
 
-func TaskChangesWorktreeContentWithView(diffOutput string, task *models.Task, fileStats []service.WorktreeFileStat, reviewComments []models.ReviewComment, taskPR *models.TaskPullRequest, localMergeUnavailable bool, rebaseAvailable bool, diffView string) templ.Component {
+func TaskChangesWorktreeContentWithView(diffOutput string, task *models.Task, fileStats []service.WorktreeFileStat, reviewComments []models.ReviewComment, taskPR *models.TaskPullRequest, localMergeUnavailable bool, conflictRecovery bool, rebaseAvailable bool, diffView string) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -394,7 +394,7 @@ func TaskChangesWorktreeContentWithView(diffOutput string, task *models.Task, fi
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			if task.MergeStatus == models.MergeStatusConflict && !localMergeUnavailable {
+			if conflictRecovery {
 				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "<li class=\"menu-title\"><span>Conflict recovery</span></li><li><button type=\"button\" hx-post=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
@@ -565,7 +565,7 @@ func TaskChangesWorktreeContentWithView(diffOutput string, task *models.Task, fi
 				return templ_7745c5c3_Err
 			}
 		}
-		if task.MergeStatus == models.MergeStatusConflict {
+		if conflictRecovery {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 52, "<div class=\"alert alert-warning mb-4 text-sm\" role=\"status\" data-merge-conflict-guidance><span>A merge conflict is active. Resolve the conflicting files or abort the merge before retrying.</span></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err

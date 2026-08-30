@@ -529,7 +529,7 @@ func (h *Handler) GetTaskChangesWorktree(c echo.Context) error {
 			taskPR, _ = h.taskPullRequestRepo.GetByTaskID(ctx, taskID)
 		}
 		return render(c, http.StatusOK, pages.TaskChangesWorktreeContentWithView(
-			state.DiffOutput, task, state.FileStats, reviewComments, taskPR, state.BranchAlreadyMerged, state.RebaseAvailable, diffView,
+			state.DiffOutput, task, state.FileStats, reviewComments, taskPR, state.LocalMergeUnavailable, state.ConflictRecovery, state.RebaseAvailable, diffView,
 		))
 	}
 

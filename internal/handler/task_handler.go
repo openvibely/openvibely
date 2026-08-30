@@ -874,6 +874,7 @@ type taskChangesWorktreeState struct {
 	FileStats             []service.WorktreeFileStat
 	BranchAlreadyMerged   bool
 	LocalMergeUnavailable bool
+	ConflictRecovery      bool
 	RebaseAvailable       bool
 }
 
@@ -987,6 +988,7 @@ func (h *Handler) resolveTaskChangesWorktreeState(ctx context.Context, task *mod
 	state.BranchAlreadyMerged = h.reconcileAlreadyMergedBranch(ctx, task)
 	mergeEligibility := h.resolveTaskMergeEligibility(ctx, task, project, state.BranchAlreadyMerged)
 	state.LocalMergeUnavailable = !mergeEligibility.MergeAvailable && !mergeEligibility.ConflictRecovery
+	state.ConflictRecovery = mergeEligibility.ConflictRecovery
 	state.RebaseAvailable = mergeEligibility.MergeAvailable && h.taskRebaseAvailable(task, project, state.BranchAlreadyMerged)
 	isActive := task.Status == models.StatusRunning || task.Status == models.StatusQueued
 
@@ -1123,7 +1125,7 @@ func (h *Handler) GetTaskChanges(c echo.Context) error {
 			taskPR, _ = h.taskPullRequestRepo.GetByTaskID(ctx, taskID)
 		}
 		return render(c, http.StatusOK, pages.TaskChangesWorktreeContentWithView(
-			state.DiffOutput, task, state.FileStats, reviewComments, taskPR, state.LocalMergeUnavailable, state.RebaseAvailable, diffView,
+			state.DiffOutput, task, state.FileStats, reviewComments, taskPR, state.LocalMergeUnavailable, state.ConflictRecovery, state.RebaseAvailable, diffView,
 		))
 	}
 

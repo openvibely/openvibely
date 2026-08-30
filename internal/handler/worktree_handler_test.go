@@ -639,6 +639,76 @@ func TestHandler_MergeTaskBranch_ChangesTabSquashConflictRefreshesRetryWithoutRe
 	}
 }
 
+func TestHandler_GetTaskChanges_LiveConflictRecoverySurvivesStatusPersistenceFailure(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	defer db.Close()
+	ctx := context.Background()
+	repoDir := createHandlerTestGitRepo(t)
+	targetBranch := service.GetCurrentBranch(repoDir)
+
+	conflictFile := filepath.Join(repoDir, "persistence-conflict.txt")
+	if err := os.WriteFile(conflictFile, []byte("base\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repoDir, "add", "persistence-conflict.txt")
+	runGit(t, repoDir, "commit", "-m", "conflict base")
+	branchName := "task/live-conflict-persistence-failure"
+	runGit(t, repoDir, "checkout", "-b", branchName)
+	if err := os.WriteFile(conflictFile, []byte("task branch\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repoDir, "add", "persistence-conflict.txt")
+	runGit(t, repoDir, "commit", "-m", "task conflict")
+	runGit(t, repoDir, "checkout", targetBranch)
+	if err := os.WriteFile(conflictFile, []byte("target branch\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repoDir, "add", "persistence-conflict.txt")
+	runGit(t, repoDir, "commit", "-m", "target conflict")
+	mergeCmd := exec.Command("git", "merge", "--no-ff", branchName)
+	mergeCmd.Dir = repoDir
+	if out, err := mergeCmd.CombinedOutput(); err == nil {
+		t.Fatalf("expected fixture merge conflict, got success: %s", out)
+	}
+
+	project := &models.Project{Name: "Conflict persistence failure", RepoPath: repoDir, IsDefault: true}
+	if err := h.projectSvc.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	task := &models.Task{
+		ProjectID: project.ID, Title: "Live conflict persistence failure", Prompt: "test", Category: models.CategoryCompleted,
+		Status: models.StatusCompleted, WorktreeBranch: branchName, MergeTargetBranch: targetBranch, MergeStatus: models.MergeStatusPending,
+	}
+	if err := h.taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`CREATE TRIGGER reject_conflict_status BEFORE UPDATE OF merge_status ON tasks WHEN NEW.merge_status = 'conflict' BEGIN SELECT RAISE(ABORT, 'injected conflict status failure'); END`); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes", nil)
+	rec := worktreeExecute(e, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET Changes returned %d: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, want := range []string{"AI Resolve Conflicts", "Abort Merge", "merge conflict is active"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("expected live conflict recovery content %q despite persistence failure, got %s", want, body)
+		}
+	}
+	if strings.Contains(body, "/tasks/"+task.ID+"/worktree/merge") {
+		t.Fatalf("live conflict exposed ordinary merge actions after persistence failure: %s", body)
+	}
+	stored, err := h.taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.MergeStatus != models.MergeStatusPending {
+		t.Fatalf("fixture did not preserve stale pending status, got %q", stored.MergeStatus)
+	}
+}
+
 func TestHandler_MergeTaskBranch_Conflict_ReturnsHTMXToast(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	ctx := context.Background()
