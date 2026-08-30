@@ -2583,6 +2583,101 @@ func TestLLMService_ExecuteTask_MemoryConsolidationUsesNormalExecutionPath(t *te
 	}
 }
 
+func TestLLMService_ExecuteTaskKeepsTaskRunningWhileManagedFinalizationWaitsForLease(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+
+	repoDir := createTestGitRepo(t)
+	project := &models.Project{Name: "Finalization lease", RepoPath: repoDir}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	agent := ensureDefaultAgent(t, llmConfigRepo)
+	task := &models.Task{ProjectID: project.ID, Title: "Finalize under lease", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "finish", AgentID: &agent.ID}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
+	svc.SetWorktreeService(NewWorktreeService(taskRepo, projectRepo, settingsRepo))
+	modelEntered := make(chan struct{})
+	releaseModel := make(chan struct{})
+	var modelOnce sync.Once
+	mock := &testutil.MockLLMCaller{Response: "done", TextOnly: "done"}
+	mock.OnCall = func(context.Context, testutil.MockLLMCall) {
+		modelOnce.Do(func() { close(modelEntered) })
+		<-releaseModel
+	}
+	svc.SetLLMCaller(mock)
+
+	executionDone := make(chan error, 1)
+	go func() {
+		_, err := svc.ExecuteTaskWithAgent(ctx, *task, *agent)
+		executionDone <- err
+	}()
+	select {
+	case <-modelEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("model execution did not start")
+	}
+
+	leaseEntered := make(chan struct{})
+	releaseLease := make(chan struct{})
+	leaseDone := make(chan error, 1)
+	go func() {
+		leaseDone <- WithRepositoryMutation(repoDir, func() error {
+			close(leaseEntered)
+			<-releaseLease
+			return nil
+		})
+	}()
+	<-leaseEntered
+	close(releaseModel)
+
+	select {
+	case err := <-executionDone:
+		close(releaseLease)
+		t.Fatalf("execution bypassed finalization lease: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	current, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		close(releaseLease)
+		t.Fatalf("load task during finalization: %v", err)
+	}
+	if current.Status != models.StatusRunning {
+		close(releaseLease)
+		t.Fatalf("task became merge-eligible before managed finalization completed: %s", current.Status)
+	}
+
+	close(releaseLease)
+	if err := <-leaseDone; err != nil {
+		t.Fatalf("repository mutation lease: %v", err)
+	}
+	select {
+	case err := <-executionDone:
+		if err != nil {
+			t.Fatalf("ExecuteTaskWithAgent: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("execution did not complete after finalization lease release")
+	}
+	current, err = taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("load completed task: %v", err)
+	}
+	if current.Status != models.StatusCompleted {
+		t.Fatalf("task status after finalization = %s, want completed", current.Status)
+	}
+}
+
 func TestLLMService_ExecuteTask_GitWorktreeIsolation(t *testing.T) {
 	tests := []struct {
 		name           string

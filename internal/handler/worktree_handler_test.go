@@ -41,6 +41,7 @@ func worktreeExecute(e *echo.Echo, req *http.Request) *httptest.ResponseRecorder
 func TestHandler_TaskCardMergeOptionsUseAuthoritativeStateAndProjectOwnership(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
 	h.taskPullRequestRepo = repository.NewTaskPullRequestRepo(db)
+	h.SetGitHubService(&fakeGitHubService{})
 	h.worktreeSvc = service.NewWorktreeService(h.taskRepo, h.projectRepo, nil)
 	ctx := context.Background()
 	repoDir := t.TempDir()
@@ -103,6 +104,13 @@ func TestHandler_TaskCardMergeOptionsUseAuthoritativeStateAndProjectOwnership(t 
 		if !strings.Contains(rec.Body.String(), want) {
 			t.Fatalf("eligible options missing %q: %s", want, rec.Body.String())
 		}
+	}
+	if err := h.taskPullRequestRepo.Upsert(ctx, &models.TaskPullRequest{TaskID: task.ID, PRNumber: 42, PRURL: "https://github.com/example/repo/pull/42", PRState: "closed"}); err != nil {
+		t.Fatal(err)
+	}
+	rec = worktreeExecute(e, httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/card/merge-options?project_id="+project.ID, nil))
+	if strings.Contains(rec.Body.String(), "View PR #42") || !strings.Contains(rec.Body.String(), "data-task-card-pr-action") || !strings.Contains(rec.Body.String(), "Create PR") {
+		t.Fatalf("closed historical PR should expose current Create PR action, body=%s", rec.Body.String())
 	}
 
 	foreign := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/card/merge-options?project_id=foreign", nil)

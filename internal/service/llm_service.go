@@ -1627,12 +1627,6 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 		completedExecution = true
 	}
 	RecordUsageFromResult(finalizeCtx, s.usageRepo, UsageCapture{ProjectID: task.ProjectID, TaskID: task.ID, ExecutionID: exec.ID, TurnID: exec.ID, Operation: string(llmcontracts.OperationTask), Status: string(models.ExecCompleted), LatencyMs: durationMs, OccurredAt: time.Now().UTC()}, agent, result)
-	if statusErr := s.taskRepo.UpdateStatus(finalizeCtx, task.ID, models.StatusCompleted); statusErr != nil {
-		applog.Infof("[agent-svc] ExecuteTaskWithAgent error updating task status to completed: %v", statusErr)
-	}
-	if completedExecution {
-		s.publishExecutionTerminal(exec.ID, models.ExecCompleted, "")
-	}
 
 	// Capture git diff of changes made during execution. Only a worktree
 	// successfully established for this execution may use target-relative review
@@ -1658,6 +1652,15 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	// established for this execution, never from retained task metadata alone.
 	if managedWorktree && s.worktreeSvc != nil && repoDir != "" {
 		s.worktreeSvc.HandlePostExecution(finalizeCtx, &task, exec, repoDir)
+	}
+	// Keep the task non-terminal until all managed-worktree commit, diff, merge,
+	// and cleanup writers have left the shared repository mutation boundary.
+	// Card/manual actions gate on this status and cannot enter finalization early.
+	if statusErr := s.taskRepo.UpdateStatus(finalizeCtx, task.ID, models.StatusCompleted); statusErr != nil {
+		applog.Infof("[agent-svc] ExecuteTaskWithAgent error updating task status to completed: %v", statusErr)
+	}
+	if completedExecution {
+		s.publishExecutionTerminal(exec.ID, models.ExecCompleted, "")
 	}
 
 	// Check for follow-up marker (task still completed, but alert created)
@@ -1973,6 +1976,17 @@ func (s *LLMService) captureWorktreeDiffAfterExecution(ctx context.Context, exec
 	if exec == nil || task == nil || task.WorktreePath == "" || repoDir == "" {
 		return ""
 	}
+	var diffOutput string
+	if err := WithRepositoryMutation(repoDir, func() error {
+		diffOutput = s.captureWorktreeDiffAfterExecutionUnlocked(ctx, exec, task, repoDir, outputSummary, agent)
+		return nil
+	}); err != nil {
+		applog.Infof("[agent-svc] ExecuteTaskWithAgent error acquiring finalization lease task=%s worktree=%s: %v", task.ID, task.WorktreePath, err)
+	}
+	return diffOutput
+}
+
+func (s *LLMService) captureWorktreeDiffAfterExecutionUnlocked(ctx context.Context, exec *models.Execution, task *models.Task, repoDir string, outputSummary string, agent models.LLMConfig) string {
 	worktreeBranch := GetCurrentBranch(task.WorktreePath)
 	if worktreeBranch == "" {
 		worktreeBranch = task.WorktreeBranch

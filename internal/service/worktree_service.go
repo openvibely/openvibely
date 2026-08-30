@@ -29,6 +29,23 @@ var ErrMergeInProgress = errors.New("repository merge, rebase, or conflict recov
 // ineligible after the request's initial check but before lease-held mutation.
 var ErrMergeEligibilityChanged = errors.New("merge eligibility changed before mutation")
 
+var repositoryWriterLocks sync.Map // canonical Git common directory -> *sync.Mutex
+
+// WithRepositoryMutation serializes every repository-scoped Git writer using
+// the same canonical common-directory identity as merge/rebase recovery leases.
+func WithRepositoryMutation(repoDir string, mutate func() error) error {
+	key := canonicalRepositoryMutationKey(repoDir)
+	value, _ := repositoryWriterLocks.LoadOrStore(key, &sync.Mutex{})
+	lock := value.(*sync.Mutex)
+	lock.Lock()
+	defer lock.Unlock()
+	return mutate()
+}
+
+func (ws *WorktreeService) WithRepositoryMutation(repoDir string, mutate func() error) error {
+	return WithRepositoryMutation(repoDir, mutate)
+}
+
 // WorktreeService manages git worktrees for task isolation.
 type WorktreeService struct {
 	taskRepo     *repository.TaskRepo

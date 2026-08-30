@@ -187,6 +187,7 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 				if (!trigger) return;
 				taskCardMergePendingFocusTaskID = '';
 				trigger.focus({preventScroll: true});
+				if (window.closeKanbanMenu) window.closeKanbanMenu(trigger.closest('[data-kanban-menu-key]'), true);
 			}
 
 				if (!window._taskCardMergeHandlersAttached) {
@@ -218,7 +219,7 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 							});
 						});
 					}
-					document.body.addEventListener('htmx:afterSettle', function(event) {
+				document.body.addEventListener('htmx:afterSettle', function(event) {
 					var target = event.detail && event.detail.target;
 					if (!target || (target.id !== 'kanban-board' && !target.querySelector?.('#kanban-board'))) return;
 					restoreTaskCardMergeFocus();
@@ -230,11 +231,11 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 					setTaskCardMergeBusy(false);
 					var status = detail.xhr && detail.xhr.status || 0;
 					var modal = document.getElementById('task_card_merge_confirm_modal');
-						if (status >= 200 && status < 300) {
-							taskCardMergePendingFocusTaskID = taskCardMergeRequest.invokerTaskID;
-							taskCardMergeRequest = null;
-							taskCardMergeInvoker = null;
-							if (window.clearTaskCardMenuState) window.clearTaskCardMenuState();
+					if (status >= 200 && status < 300) {
+						taskCardMergePendingFocusTaskID = taskCardMergeRequest.invokerTaskID;
+						taskCardMergeRequest = null;
+						taskCardMergeInvoker = null;
+						if (window.closeKanbanMenu) window.closeKanbanMenu(null, false);
 						if (modal && modal.open) modal.close();
 						requestAnimationFrame(restoreTaskCardMergeFocus);
 						return;

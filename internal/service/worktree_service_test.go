@@ -73,6 +73,91 @@ func TestWorktreeServiceRepositoryMutationSerializesCanonicalAliasesAcrossInstan
 	}
 }
 
+func TestWorktreeServiceRepositoryMutationSerializesLinkedWorktreeAndMainCheckout(t *testing.T) {
+	repoDir := createTestGitRepo(t)
+	worktreePath := filepath.Join(t.TempDir(), "linked-worktree")
+	runGitTest(t, repoDir, "branch", "task/linked-lease")
+	runGitTest(t, repoDir, "worktree", "add", worktreePath, "task/linked-lease")
+
+	leaseEntered := make(chan struct{})
+	releaseLease := make(chan struct{})
+	leaseDone := make(chan error, 1)
+	go func() {
+		leaseDone <- WithRepositoryMutation(repoDir, func() error {
+			close(leaseEntered)
+			<-releaseLease
+			return nil
+		})
+	}()
+	<-leaseEntered
+
+	linkedDone := make(chan error, 1)
+	go func() {
+		linkedDone <- WithRepositoryMutation(worktreePath, func() error { return nil })
+	}()
+	select {
+	case err := <-linkedDone:
+		close(releaseLease)
+		t.Fatalf("linked worktree bypassed main repository mutation lease: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(releaseLease)
+	if err := <-leaseDone; err != nil {
+		t.Fatalf("main repository mutation lease: %v", err)
+	}
+	select {
+	case err := <-linkedDone:
+		if err != nil {
+			t.Fatalf("linked repository mutation: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("linked repository mutation did not resume")
+	}
+}
+
+func TestInitialManagedTaskFinalizationUsesRepositoryMutationBoundary(t *testing.T) {
+	repoDir := createTestGitRepo(t)
+	worktreePath := filepath.Join(t.TempDir(), "finalization-worktree")
+	runGitTest(t, repoDir, "branch", "task/finalization")
+	runGitTest(t, repoDir, "worktree", "add", worktreePath, "task/finalization")
+
+	leaseEntered := make(chan struct{})
+	releaseLease := make(chan struct{})
+	leaseDone := make(chan error, 1)
+	go func() {
+		leaseDone <- WithRepositoryMutation(repoDir, func() error {
+			close(leaseEntered)
+			<-releaseLease
+			return nil
+		})
+	}()
+	<-leaseEntered
+
+	finalizationDone := make(chan string, 1)
+	svc := NewLLMService(nil, nil, nil, nil, nil, nil)
+	go func() {
+		finalizationDone <- svc.captureWorktreeDiffAfterExecution(context.Background(),
+			&models.Execution{ID: "finalization-exec"},
+			&models.Task{ID: "finalization-task", Title: "Finalize task", WorktreePath: worktreePath, WorktreeBranch: "task/finalization", MergeTargetBranch: "main"},
+			repoDir, "done", models.LLMConfig{})
+	}()
+	select {
+	case <-finalizationDone:
+		close(releaseLease)
+		t.Fatal("initial managed-task finalization bypassed repository mutation lease")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(releaseLease)
+	if err := <-leaseDone; err != nil {
+		t.Fatalf("main repository mutation lease: %v", err)
+	}
+	select {
+	case <-finalizationDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("initial managed-task finalization did not resume")
+	}
+}
+
 func TestWorktreeRepositoryWritersShareCanonicalMutationBoundary(t *testing.T) {
 	tests := []struct {
 		name   string

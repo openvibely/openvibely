@@ -217,9 +217,9 @@ window.addEventListener('DOMContentLoaded', function() {
       taskMenuTrigger.dispatchEvent(new MouseEvent('mousedown', {bubbles:true, cancelable:true}));
       taskMenuTrigger.focus();
       taskMenuTrigger.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true, detail:1}));
-      if (taskMenuTrigger.getAttribute('aria-expanded') !== 'true') fail('task menu must expose its open state');
-      if (document.querySelector('#kanban-board').getAttribute('data-open-kanban-menu-key') !== 'task-task-active-status-drag') fail('task menu open key was not recorded before refresh');
-      var focusedTaskOption = Array.from(selectedActiveTask.querySelectorAll('[data-kanban-menu-content] a, [data-kanban-menu-content] button')).find(function(option) { return option.textContent.trim() === 'Edit'; });
+	      if (taskMenuTrigger.getAttribute('aria-expanded') !== 'true') fail('task menu must expose its open state');
+	      await waitFor(function() { return selectedActiveTask.querySelector('[data-task-card-merge-options] .htmx-indicator') === null; }, 'authoritative task merge options before board refresh');
+	      if (document.querySelector('#kanban-board').getAttribute('data-open-kanban-menu-key') !== 'task-task-active-status-drag') fail('task menu open key was not recorded before refresh');      var focusedTaskOption = Array.from(selectedActiveTask.querySelectorAll('[data-kanban-menu-content] a, [data-kanban-menu-content] button')).find(function(option) { return option.textContent.trim() === 'Edit'; });
       if (!focusedTaskOption) fail('task menu must render the pre-refresh Edit option');
       focusedTaskOption.focus();
       if (document.activeElement !== focusedTaskOption) fail('task menu option did not receive focus before refresh');
@@ -229,8 +229,7 @@ window.addEventListener('DOMContentLoaded', function() {
       taskMenuTrigger = selectedActiveTask.querySelector('[data-kanban-menu-trigger]');
       if (!selectedTask.classList.contains('task-selected') || !selectedActiveTask.classList.contains('task-selected')) fail('authoritative refresh cleared multi-selection');
       if (document.querySelector('#kanban-board').getAttribute('data-open-kanban-menu-key') !== 'task-task-active-status-drag') fail('task menu open key was not restored: key=' + document.querySelector('#kanban-board').getAttribute('data-open-kanban-menu-key'));
-      await waitFor(function() { return document.activeElement === taskMenuTrigger && taskMenuTrigger.getAttribute('aria-expanded') === 'true'; }, 'removed task option fallback to menu trigger after settle');
-      if (!selectedActiveTask.querySelector('[data-kanban-menu-content]').textContent.includes('Cancel')) fail('task menu did not retain authoritative running options');
+	      await waitFor(function() { return document.activeElement === taskMenuTrigger && taskMenuTrigger.getAttribute('aria-expanded') === 'true'; }, 'removed task option fallback to menu trigger after settle (active=' + (document.activeElement && document.activeElement.outerHTML) + ', connected=' + !!(document.activeElement && document.activeElement.isConnected) + ', activeCardStatus=' + (document.activeElement && document.activeElement.closest('[data-task-status]') && document.activeElement.closest('[data-task-status]').getAttribute('data-task-status')) + ', expanded=' + taskMenuTrigger.getAttribute('aria-expanded') + ', open=' + taskMenuTrigger.closest('[data-kanban-menu-key]').hasAttribute('data-kanban-menu-open') + ')');      if (!selectedActiveTask.querySelector('[data-kanban-menu-content]').textContent.includes('Cancel')) fail('task menu did not retain authoritative running options');
       var columnMenu = document.querySelector('[data-kanban-menu-key="column-backlog"]');
       var columnMenuTrigger = columnMenu.querySelector('[data-kanban-menu-trigger]');
       columnMenuTrigger.dispatchEvent(new MouseEvent('mousedown', {bubbles:true, cancelable:true}));
@@ -347,6 +346,8 @@ window.addEventListener('DOMContentLoaded', function() {
 			page := strings.Replace(out.String(), "https://unpkg.com/htmx.org@2.0.4", "/htmx-2.0.4.min.js", 1)
 			page = strings.Replace(page, "</head>", runner+"</head>", 1)
 			_, _ = w.Write([]byte(page))
+		case "/tasks/task-active-status-drag/card/merge-options":
+			_, _ = w.Write([]byte(`<li data-task-card-merge-options hx-get="/tasks/task-active-status-drag/card/merge-options"><span>Merge unavailable</span></li>`))
 		case "/refresh-kanban":
 			refreshedTasks := append([]models.Task(nil), tasks...)
 			if r.URL.Query().Get("state") == "removed" {

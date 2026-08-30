@@ -737,7 +737,7 @@ func TaskCardMergeOptions(task *models.Task, projectID string, eligible bool, re
 				return templ_7745c5c3_Err
 			}
 		}
-		if taskPR != nil && taskPR.PRURL != "" {
+		if taskPR != nil && taskPR.PRURL != "" && strings.EqualFold(strings.TrimSpace(taskPR.PRState), "open") {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, "<a class=\"text-sm min-h-11\" href=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
@@ -951,14 +951,14 @@ func TaskCard(task models.Task, projectID string, viewingCategory string, llmMod
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 58, "\" onclick=\"event.stopPropagation()\"><label tabindex=\"0\" role=\"button\" aria-haspopup=\"menu\" aria-expanded=\"false\" class=\"btn btn-ghost btn-xs min-h-11 h-11 w-11 p-0 lg:min-h-6 lg:h-6 lg:w-6\" onclick=\"handleDropdownToggle(event)\" data-kanban-menu-trigger data-task-card-menu-trigger aria-label=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 58, "\" onclick=\"event.stopPropagation()\"><label tabindex=\"0\" aria-expanded=\"false\" class=\"btn btn-ghost btn-xs min-h-11 h-11 w-11 p-0 lg:min-h-6 lg:h-6 lg:w-6\" onclick=\"handleDropdownToggle(event)\" data-kanban-menu-trigger data-task-card-menu-trigger aria-label=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var42 string
 		templ_7745c5c3_Var42, templ_7745c5c3_Err = templ.ResolveAttributeValue("More actions for " + task.Title)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 398, Col: 293}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 398, Col: 258}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var42)
 		if templ_7745c5c3_Err != nil {

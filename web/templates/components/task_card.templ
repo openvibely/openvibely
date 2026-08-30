@@ -372,7 +372,7 @@ templ TaskCardMergeOptions(task *models.Task, projectID string, eligible bool, r
 		} else {
 			<span class="text-sm min-h-11 opacity-50" aria-disabled="true" title={ unavailableReason }>Merge unavailable</span>
 		}
-		if taskPR != nil && taskPR.PRURL != "" {
+		if taskPR != nil && taskPR.PRURL != "" && strings.EqualFold(strings.TrimSpace(taskPR.PRState), "open") {
 			<a class="text-sm min-h-11" href={ templ.SafeURL(taskPR.PRURL) } target="_blank" rel="noopener noreferrer">View PR #{ fmt.Sprintf("%d", taskPR.PRNumber) }</a>
 		} else if prEligible {
 			<button type="button" class="text-sm min-h-11" data-task-card-pr-action data-task-id={ task.ID } data-project-id={ projectID } data-task-title={ task.Title } data-target-branch={ task.MergeTargetBranch } data-merge-type="pr" onclick="openTaskCardMergeConfirm(this)">Create PR</button>
@@ -395,7 +395,7 @@ templ TaskCard(task models.Task, projectID string, viewingCategory string, llmMo
 	>
 		<!-- Kebab menu in top right corner -->
 		<div class="dropdown dropdown-end absolute top-2 right-14 lg:right-8 z-30" data-kanban-menu-key={ "task-" + task.ID } onclick="event.stopPropagation()">
-			<label tabindex="0" role="button" aria-haspopup="menu" aria-expanded="false" class="btn btn-ghost btn-xs min-h-11 h-11 w-11 p-0 lg:min-h-6 lg:h-6 lg:w-6" onclick="handleDropdownToggle(event)" data-kanban-menu-trigger data-task-card-menu-trigger aria-label={ "More actions for " + task.Title }>
+			<label tabindex="0" aria-expanded="false" class="btn btn-ghost btn-xs min-h-11 h-11 w-11 p-0 lg:min-h-6 lg:h-6 lg:w-6" onclick="handleDropdownToggle(event)" data-kanban-menu-trigger data-task-card-menu-trigger aria-label={ "More actions for " + task.Title }>
 				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
 				</svg>

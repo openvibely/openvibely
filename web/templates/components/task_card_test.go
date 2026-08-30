@@ -401,6 +401,24 @@ func TestTaskCardMergeOptionsRemainRefreshableAndExposeCreatePR(t *testing.T) {
 	}
 }
 
+func TestTaskCardMergeOptionsClosedHistoricalPRExposesCreatePR(t *testing.T) {
+	task := models.Task{ID: "merge-card-task", ProjectID: "project-1", Title: "Merge card task", MergeTargetBranch: "main"}
+	closedPR := &models.TaskPullRequest{TaskID: task.ID, PRNumber: 17, PRURL: "https://github.com/example/repo/pull/17", PRState: "closed"}
+	var buf bytes.Buffer
+	if err := TaskCardMergeOptions(&task, "project-1", true, false, "", closedPR, true, "").Render(context.Background(), &buf); err != nil {
+		t.Fatal(err)
+	}
+	body := buf.String()
+	if strings.Contains(body, "View PR #17") {
+		t.Fatalf("closed historical PR must not suppress current Create PR action: %s", body)
+	}
+	for _, want := range []string{`data-task-card-pr-action`, `data-merge-type="pr"`, `Create PR`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("closed historical PR should expose %q: %s", want, body)
+		}
+	}
+}
+
 func TestTaskCard_GoalMetIconMatchesDocumentedStandardGlyph(t *testing.T) {
 	doc, err := os.ReadFile("../../../docs/task-status-icon-options.html")
 	if err != nil {
