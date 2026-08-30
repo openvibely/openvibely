@@ -553,18 +553,69 @@ func TestAutomationTemplateBuilderAddsAndSavesCustomNodes(t *testing.T) {
 	// The browser synchronizes all rendered template settings into candidate_json.
 	// These stale extra-node values model a form submission from before the controls
 	// were removed; the handler must not merge template-only settings into custom nodes.
-	saved := post(url.Values{
-		"save_changes":                         {"true"},
+	staleTemplateFields := url.Values{
 		"node_vision_suggestions_skills":       {""},
 		"node_vision_suggestions_source_files": {""},
 		"node_extra_review_skills":             {"example:review"},
 		"node_extra_review_source_files":       {"README.md"},
 		"node_extra_follow_up_skills":          {"example:review"},
 		"node_extra_follow_up_source_files":    {"README.md"},
-	})
+	}
+	preview := post(staleTemplateFields)
+	require.Equal(t, http.StatusOK, preview.Code, preview.Body.String())
+	for _, key := range []string{"extra_review", "extra_follow_up"} {
+		node := automationDraftNodeByKeyHandler(t, candidate, key)
+		_, hasSkills := node.Config["skills"]
+		require.False(t, hasSkills, "preview must remove stale skills from custom node %s", key)
+		_, hasSourceFiles := node.Config["source_files"]
+		require.False(t, hasSourceFiles, "preview must remove stale source_files from custom node %s", key)
+	}
+
+	// Save the same browser-local candidate only after the preview mutation.
+	saved := post(url.Values{"save_changes": {"true"}})
 	require.Equal(t, http.StatusNoContent, saved.Code, saved.Body.String())
 	require.NotEmpty(t, saved.Header().Get("HX-Redirect"))
 	require.Equal(t, 1, tableCountHandler(t, tc, "automations"))
+
+	// Reintroduce the stale browser fields and exercise the same mutation sequence
+	// through the existing-Automation builder before any edit Save.
+	for i := range candidate.Nodes {
+		switch candidate.Nodes[i].Key {
+		case "extra_review", "extra_follow_up":
+			candidate.Nodes[i].Config["skills"] = []string{"example:review"}
+			candidate.Nodes[i].Config["source_files"] = []string{"README.md"}
+		}
+	}
+	rawEditCandidate, err := json.Marshal(candidate)
+	require.NoError(t, err)
+	var automationID string
+	require.NoError(t, tc.db.QueryRow(`SELECT id FROM automations WHERE project_id = ?`, project.ID).Scan(&automationID))
+	editedPreview := tc.HTMX().Post("/automations/" + automationID + "/builder?project_id=" + project.ID).WithForm(url.Values{
+		"project_id":                        {project.ID},
+		"builder_source":                    {"template"},
+		"candidate_json":                    {string(rawEditCandidate)},
+		"automation_name":                   {"Edited template preview"},
+		"builder_action":                    {"create_node"},
+		"node_kind":                         {"outcome"},
+		"node_name":                         {"Edit preview result"},
+		"node_extra_review_skills":          {"example:review"},
+		"node_extra_review_source_files":    {"README.md"},
+		"node_extra_follow_up_skills":       {"example:review"},
+		"node_extra_follow_up_source_files": {"README.md"},
+	}).Execute()
+	require.Equal(t, http.StatusOK, editedPreview.Code, editedPreview.Body.String())
+	editedCandidate := automationCandidateFromResponse(t, editedPreview)
+	require.Equal(t, "Edited template preview", editedCandidate.Name)
+	require.Equal(t, "Edit preview result", automationDraftNodeByKeyHandler(t, editedCandidate, "edit_preview_result").Name)
+	for _, key := range []string{"extra_review", "extra_follow_up"} {
+		node := automationDraftNodeByKeyHandler(t, editedCandidate, key)
+		_, hasSkills := node.Config["skills"]
+		require.False(t, hasSkills, "edit preview must remove stale skills from custom node %s", key)
+		_, hasSourceFiles := node.Config["source_files"]
+		require.False(t, hasSourceFiles, "edit preview must remove stale source_files from custom node %s", key)
+	}
+	require.Equal(t, 1, tableCountHandler(t, tc, "automation_versions"), "edit preview must remain browser-local")
+
 	countNodeResources := func(nodeKey, resourceType string) int {
 		t.Helper()
 		var count int
