@@ -1225,9 +1225,29 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 							});
 						}
 
-						function fetchRetainedExecutions(state, taskID, projectID, page) {
+						function fetchRefreshGap(taskID, projectID, previousNewestID, latestPage, isCurrent) {
+							if (!previousNewestID || !latestPage.hasMore) return Promise.resolve([]);
+							var latestContainsPrevious = latestPage.items.some(function(row) {
+								return row && String(row.id || '') === String(previousNewestID);
+							});
+							if (latestContainsPrevious) return Promise.resolve([]);
+							var rows = [];
+							function next(cursor) {
+								if (!isCurrent()) return Promise.resolve(null);
+								return fetchPage(taskID, projectID, 'newer', cursor).then(function(page) {
+									if (!isCurrent()) return null;
+									Array.prototype.push.apply(rows, page.items);
+									if (page.hasMore && page.items.length > 0) return next(page.nextCursor);
+									return rows;
+								});
+							}
+							return next(previousNewestID);
+						}
+
+						function fetchRetainedExecutions(state, taskID, projectID, page, gapRows) {
+							gapRows = Array.isArray(gapRows) ? gapRows : [];
 							var pageIDs = Object.create(null);
-							page.items.forEach(function(row) {
+							page.items.concat(gapRows).forEach(function(row) {
 								if (row && row.id) pageIDs[String(row.id)] = true;
 							});
 							var executionIDs = Object.keys(state.refreshExecutionIDs).filter(function(executionID) {
@@ -1236,7 +1256,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 							return Promise.all(executionIDs.map(function(executionID) {
 								return fetchExecution(taskID, projectID, executionID);
 							})).then(function(rows) {
-								return { page: page, pageIDs: pageIDs, executionIDs: executionIDs, rows: rows };
+								return { page: page, gapRows: gapRows, pageIDs: pageIDs, executionIDs: executionIDs, rows: rows };
 							});
 						}
 
@@ -1278,6 +1298,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 							if (!container) return Promise.resolve();
 							projectID = projectID || container.dataset.projectId || '';
 							var state = getState(taskID, projectID);
+							var previousNewestID = state.initialized && state.order.length > 0 ? state.order[0] : '';
 							markRetainedNonterminalExecutions(state);
 							if (fromPending && hasActiveLifecycleRequest(state)) {
 								state.refreshPending = true;
@@ -1315,7 +1336,11 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 							renderState(state, container, state.order.length > 0);
 							return fetchPage(taskID, projectID, 'initial', '').then(function(page) {
 								if (!requestIsCurrent(state, container, version, requestID, 'refresh')) return null;
-								return fetchRetainedExecutions(state, taskID, projectID, page);
+								var isCurrent = function() { return requestIsCurrent(state, container, version, requestID, 'refresh'); };
+								return fetchRefreshGap(taskID, projectID, previousNewestID, page, isCurrent).then(function(gapRows) {
+									if (!gapRows || !isCurrent()) return null;
+									return fetchRetainedExecutions(state, taskID, projectID, page, gapRows);
+								});
 							}).then(function(result) {
 								if (!result || !requestIsCurrent(state, container, version, requestID, 'refresh')) return;
 								var page = result.page;
@@ -1332,6 +1357,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 									state.order = [];
 								}
 								mergeRows(state, page.items);
+								mergeRows(state, result.gapRows);
 								mergeRows(state, result.rows);
 								Object.keys(result.pageIDs).forEach(function(executionID) { delete state.refreshExecutionIDs[executionID]; });
 								result.executionIDs.forEach(function(executionID) { delete state.refreshExecutionIDs[executionID]; });
@@ -1437,7 +1463,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 								var pendingNewer = state.newerPending;
 								schedulePendingRefresh(state, taskID, projectID);
 								schedulePendingNewer(state, taskID, projectID);
-								if (!pendingNewer && !state.refreshPending && !state.refreshLiveTimer && !state.refreshRetryTimer && page.hasMore && page.items.length > 0 && (catchupCount || 0) < 4) {
+								if (!pendingNewer && !state.refreshPending && !state.refreshLiveTimer && !state.refreshRetryTimer && page.hasMore && page.items.length > 0) {
 									setTimeout(function() { loadNewer(taskID, projectID, (catchupCount || 0) + 1, false); }, 0);
 								}
 							}).catch(function(error) {

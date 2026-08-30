@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"sync"
 	"testing"
@@ -1260,7 +1261,7 @@ func TestTaskDetailLifecycleReconnectReconcilesInChrome(t *testing.T) {
 	if err := TaskDetailContent(task, nil, nil, nil, nil, nil, nil, "lifecycle", nil).Render(context.Background(), &fragment); err != nil {
 		t.Fatalf("render TaskDetailContent: %v", err)
 	}
-	row := func(id string, hour int) map[string]any {
+	row := func(id string, sequence int) map[string]any {
 		return map[string]any{
 			"id":              id,
 			"when":            "after_complete",
@@ -1268,16 +1269,31 @@ func TestTaskDetailLifecycleReconnectReconcilesInChrome(t *testing.T) {
 			"status":          "completed",
 			"output_contract": "activity_summary",
 			"summary":         "summary for " + id,
-			"started_at":      time.Date(2026, time.January, 1, hour, 0, 0, 0, time.UTC).Format(time.RFC3339),
+			"started_at":      time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC).Add(time.Duration(sequence) * time.Minute).Format(time.RFC3339),
 		}
 	}
-	writePage := func(w http.ResponseWriter, items []map[string]any) {
+	rows := func(first, last int, descending bool) []map[string]any {
+		items := make([]map[string]any, 0, last-first+1)
+		if descending {
+			for sequence := last; sequence >= first; sequence-- {
+				items = append(items, row("event-"+strconv.Itoa(sequence), sequence))
+			}
+			return items
+		}
+		for sequence := first; sequence <= last; sequence++ {
+			items = append(items, row("event-"+strconv.Itoa(sequence), sequence))
+		}
+		return items
+	}
+	writePage := func(w http.ResponseWriter, items []map[string]any, hasMore bool, cursor string) {
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"items": items, "has_more": false, "next_cursor": ""})
+		_ = json.NewEncoder(w).Encode(map[string]any{"items": items, "has_more": hasMore, "next_cursor": cursor})
 	}
 
 	var mu sync.Mutex
 	initialCalls := 0
+	newerCalls := 0
+	newerCursors := make([]string, 0, 3)
 	sawProject := false
 	sawLimit := false
 	page := ""
@@ -1302,10 +1318,6 @@ func TestTaskDetailLifecycleReconnectReconcilesInChrome(t *testing.T) {
 		}
 
 		query := r.URL.Query()
-		if query.Get("before") != "" || query.Get("after") != "" {
-			http.Error(w, "unexpected lifecycle cursor", http.StatusBadRequest)
-			return
-		}
 		mu.Lock()
 		if query.Get("project_id") == task.ProjectID {
 			sawProject = true
@@ -1313,14 +1325,41 @@ func TestTaskDetailLifecycleReconnectReconcilesInChrome(t *testing.T) {
 		if query.Get("limit") == "20" {
 			sawLimit = true
 		}
-		initialCalls++
+		after := query.Get("after")
+		if after != "" {
+			newerCalls++
+			newerCursors = append(newerCursors, after)
+		}
+		if query.Get("before") == "" && after == "" {
+			initialCalls++
+		}
 		currentInitialCall := initialCalls
 		mu.Unlock()
-		if currentInitialCall == 1 {
-			writePage(w, []map[string]any{row("event-0", 0)})
+
+		if query.Get("before") != "" {
+			http.Error(w, "unexpected older lifecycle cursor", http.StatusBadRequest)
 			return
 		}
-		writePage(w, []map[string]any{row("event-1", 1), row("event-0", 0)})
+		switch after {
+		case "event-0":
+			writePage(w, rows(1, 20, false), true, "gap-cursor-20")
+			return
+		case "gap-cursor-20":
+			writePage(w, rows(21, 40, false), true, "gap-cursor-40")
+			return
+		case "gap-cursor-40":
+			writePage(w, rows(41, 45, false), false, "")
+			return
+		case "":
+		default:
+			http.Error(w, "unexpected newer lifecycle cursor", http.StatusBadRequest)
+			return
+		}
+		if currentInitialCall == 1 {
+			writePage(w, rows(0, 0, true), false, "")
+			return
+		}
+		writePage(w, rows(26, 45, true), true, "latest-before-cursor")
 	})
 	server := httptest.NewServer(fixtureHandler)
 	defer server.Close()
@@ -1342,13 +1381,22 @@ window.addEventListener('DOMContentLoaded', function() {
   function report(status, message) {
     return fetch('/browser-result?status=' + encodeURIComponent(status) + '&message=' + encodeURIComponent(message || ''), {method:'POST'}).catch(function() {});
   }
-  function row(id) { return document.querySelector('[data-lifecycle-execution-id="' + id + '"]'); }
-  async function run() {
-    await waitFor(function() { return !!row('event-0'); }, 'initial lifecycle row');
-    window.dispatchEvent(new CustomEvent('sse-live-connected', {detail:{reconnected:true}}));
-    await waitFor(function() { return !!row('event-1'); }, 'lifecycle reconnect reconciliation', 3000);
-    await report('pass', '');
-  }
+	  function row(id) { return document.querySelector('[data-lifecycle-execution-id="' + id + '"]'); }
+	  function ids() { return Array.prototype.map.call(document.querySelectorAll('[data-lifecycle-execution-id]'), function(item) { return item.getAttribute('data-lifecycle-execution-id'); }); }
+	  async function run() {
+	    await waitFor(function() { return !!row('event-0'); }, 'initial lifecycle row');
+	    window.dispatchEvent(new CustomEvent('sse-live-connected', {detail:{reconnected:true}}));
+	    await waitFor(function() { return !!row('event-45'); }, 'newest lifecycle reconnect page', 3000);
+	    await waitFor(function() { return !!row('event-1'); }, 'oldest missed lifecycle event', 4000);
+	    var rendered = ids();
+	    var unique = Object.create(null);
+	    rendered.forEach(function(id) { unique[id] = true; });
+	    if (rendered.length !== 46 || Object.keys(unique).length !== 46) throw new Error('reconnect did not render 46 unique lifecycle rows: rendered=' + rendered.length + ' unique=' + Object.keys(unique).length);
+	    for (var sequence = 0; sequence <= 45; sequence++) {
+	      if (!unique['event-' + sequence]) throw new Error('reconnect skipped lifecycle event-' + sequence);
+	    }
+	    await report('pass', '');
+	  }
   run().catch(function(error) { report('fail', String(error && error.stack || error)); });
 });
 </script>`
@@ -1388,11 +1436,16 @@ window.addEventListener('DOMContentLoaded', function() {
 	}
 
 	mu.Lock()
-	gotInitialCalls := initialCalls
+	gotInitialCalls, gotNewerCalls := initialCalls, newerCalls
+	gotNewerCursors := append([]string(nil), newerCursors...)
 	gotProject, gotLimit := sawProject, sawLimit
 	mu.Unlock()
-	if gotInitialCalls != 2 {
-		t.Fatalf("reconnect lifecycle fixture received %d initial-page requests, want initial page and reconnect refresh", gotInitialCalls)
+	if gotInitialCalls != 2 || gotNewerCalls != 3 {
+		t.Fatalf("reconnect lifecycle fixture received initial=%d newer=%d requests, want two latest pages and three bounded gap pages", gotInitialCalls, gotNewerCalls)
+	}
+	wantNewerCursors := []string{"event-0", "gap-cursor-20", "gap-cursor-40"}
+	if !reflect.DeepEqual(gotNewerCursors, wantNewerCursors) {
+		t.Fatalf("reconnect lifecycle gap cursors = %v, want %v", gotNewerCursors, wantNewerCursors)
 	}
 	if !gotProject || !gotLimit {
 		t.Fatalf("reconnect lifecycle requests did not preserve project scope and bounded limit: project=%v limit=%v", gotProject, gotLimit)
