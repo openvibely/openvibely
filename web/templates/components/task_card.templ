@@ -361,13 +361,13 @@ templ TaskCard(task models.Task, projectID string, viewingCategory string, llmMo
 		onpointerdown="handleTaskPointerDown(event)"
 	>
 		<!-- Kebab menu in top right corner -->
-		<div class="dropdown dropdown-end absolute top-2 right-14 lg:right-8 z-30" onclick="event.stopPropagation()">
-			<label tabindex="0" class="btn btn-ghost btn-xs min-h-11 h-11 w-11 p-0 lg:min-h-6 lg:h-6 lg:w-6" onclick="handleDropdownToggle(event)">
+		<div class="dropdown dropdown-end absolute top-2 right-14 lg:right-8 z-30" data-kanban-menu-key={ "task-" + task.ID } onclick="event.stopPropagation()">
+			<label tabindex="0" class="btn btn-ghost btn-xs min-h-11 h-11 w-11 p-0 lg:min-h-6 lg:h-6 lg:w-6" onclick="handleDropdownToggle(event)" data-kanban-menu-trigger aria-label={ "More actions for " + task.Title } aria-haspopup="menu" aria-expanded="false">
 				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
 				</svg>
 			</label>
-			<ul tabindex="0" class="dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-32 max-w-[calc(100vw-2rem)] border border-base-300">
+			<ul tabindex="0" class="dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-32 max-w-[calc(100vw-2rem)] border border-base-300" data-kanban-menu-content role="menu">
 				<!-- Run option (hide in Active column) -->
 				if viewingCategory != "active" {
 					<li>

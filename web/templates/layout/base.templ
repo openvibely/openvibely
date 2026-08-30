@@ -3245,11 +3245,154 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					};
 
 				// Scroll position restoration for drop zones
+				// Interaction state is restored across the same authoritative kanban swaps.
 				let savedScrollPositions = new Map();
+				let savedKanbanInteraction = null;
+				let openKanbanMenuKey = '';
 
-				// Save scroll positions before kanban board swap
+				function kanbanMenuItemKey(element) {
+					if (!element) return '';
+					return [
+						element.tagName,
+						element.getAttribute('href') || '',
+						element.getAttribute('hx-get') || '',
+						element.getAttribute('hx-post') || '',
+						element.getAttribute('hx-delete') || '',
+						(element.textContent || '').trim().replace(/\s+/g, ' ')
+					].join('|');
+				}
+
+				function snapshotKanbanInteraction(board) {
+					const active = document.activeElement;
+					let dropdown = active && board.contains(active) && active.closest ? active.closest('[data-kanban-menu-key]') : null;
+					const durableMenuKey = board.getAttribute('data-open-kanban-menu-key') || openKanbanMenuKey;
+					if (!dropdown && durableMenuKey) {
+						dropdown = Array.from(board.querySelectorAll('[data-kanban-menu-key]')).find(function(candidate) {
+							return candidate.getAttribute('data-kanban-menu-key') === durableMenuKey;
+						}) || null;
+					}
+					let focusRole = dropdown && (!active || !dropdown.contains(active)) ? 'trigger' : '';
+					let focusKey = '';
+					if (dropdown && active && dropdown.contains(active)) {
+						if (active.matches('[data-kanban-menu-trigger]')) focusRole = 'trigger';
+						else if (active.matches('[data-kanban-menu-content]')) focusRole = 'content';
+						else {
+							focusRole = 'item';
+							focusKey = kanbanMenuItemKey(active);
+						}
+					}
+					savedKanbanInteraction = {
+						selectedTaskIDs: Array.from(selectedTasks),
+						menuKey: dropdown ? dropdown.getAttribute('data-kanban-menu-key') : '',
+						focusRole: focusRole,
+						focusKey: focusKey
+					};
+				}
+
+				function setKanbanMenuExpanded(dropdown, expanded) {
+					const trigger = dropdown && dropdown.querySelector('[data-kanban-menu-trigger]');
+					if (trigger) trigger.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+				}
+
+				function restoreKanbanInteraction(board) {
+					const snapshot = savedKanbanInteraction;
+					if (!snapshot) return;
+					selectedTasks.clear();
+					snapshot.selectedTaskIDs.forEach(function(id) {
+						const card = document.getElementById('task-' + id);
+						if (!card || !board.contains(card)) return;
+						selectedTasks.add(id);
+						card.classList.add('task-selected');
+					});
+					const menuKey = snapshot.menuKey || openKanbanMenuKey;
+					if (!menuKey) return;
+					const dropdown = Array.from(board.querySelectorAll('[data-kanban-menu-key]')).find(function(candidate) {
+						return candidate.getAttribute('data-kanban-menu-key') === menuKey;
+					});
+					if (!dropdown) {
+						openKanbanMenuKey = '';
+						return;
+					}
+					const trigger = dropdown.querySelector('[data-kanban-menu-trigger]');
+					let focusTarget = trigger;
+					if (snapshot.focusRole === 'content') focusTarget = dropdown.querySelector('[data-kanban-menu-content]') || trigger;
+					if (snapshot.focusRole === 'item') {
+						focusTarget = Array.from(dropdown.querySelectorAll('a, button, [tabindex]')).find(function(candidate) {
+							return kanbanMenuItemKey(candidate) === snapshot.focusKey;
+						}) || trigger;
+					}
+					if (focusTarget) {
+						focusTarget.focus({preventScroll: true});
+						setKanbanMenuExpanded(dropdown, true);
+						positionDropdownForViewport(trigger);
+					}
+				}
+
+				document.addEventListener('focusin', function(event) {
+					const dropdown = event.target && event.target.closest ? event.target.closest('[data-kanban-menu-key]') : null;
+					if (!dropdown) return;
+					openKanbanMenuKey = dropdown.getAttribute('data-kanban-menu-key');
+					const board = dropdown.closest('#kanban-board');
+					if (board) {
+						board.setAttribute('data-open-kanban-menu-key', openKanbanMenuKey);
+						snapshotKanbanInteraction(board);
+					}
+					document.querySelectorAll('[data-kanban-menu-key]').forEach(function(candidate) {
+						setKanbanMenuExpanded(candidate, candidate === dropdown);
+					});
+				});
+				document.addEventListener('pointerdown', function(event) {
+					if (!event.target || !event.target.closest || !event.target.closest('[data-kanban-menu-key]')) {
+						openKanbanMenuKey = '';
+						savedKanbanInteraction = null;
+						const board = document.getElementById('kanban-board');
+						if (board) board.removeAttribute('data-open-kanban-menu-key');
+					}
+				}, true);
+				document.addEventListener('keydown', function(event) {
+					if (event.key === 'Escape') {
+						openKanbanMenuKey = '';
+						savedKanbanInteraction = null;
+						const board = document.getElementById('kanban-board');
+						if (board) board.removeAttribute('data-open-kanban-menu-key');
+					}
+					if (event.key === 'Tab') {
+						setTimeout(function() {
+							if (!document.activeElement || !document.activeElement.closest || !document.activeElement.closest('[data-kanban-menu-key]')) {
+								openKanbanMenuKey = '';
+								savedKanbanInteraction = null;
+								const board = document.getElementById('kanban-board');
+								if (board) board.removeAttribute('data-open-kanban-menu-key');
+							}
+						}, 0);
+					}
+				}, true);
+				document.addEventListener('focusout', function(event) {
+					const dropdown = event.target && event.target.closest ? event.target.closest('[data-kanban-menu-key]') : null;
+					if (!dropdown) return;
+					setTimeout(function() {
+						if (!dropdown.contains(document.activeElement)) setKanbanMenuExpanded(dropdown, false);
+					}, 0);
+				});
+
+				// Capture at the earliest HTMX request boundary, before request setup can move focus.
+				document.addEventListener('htmx:configRequest', function(event) {
+					if (event.detail.target && event.detail.target.id === 'kanban-board' && !savedKanbanInteraction) {
+						snapshotKanbanInteraction(event.detail.target);
+					}
+				});
+
+				// Retain compatibility with request paths that do not emit configRequest.
+				document.addEventListener('htmx:beforeRequest', function(event) {
+					if (event.detail.target && event.detail.target.id === 'kanban-board' && !savedKanbanInteraction) {
+						snapshotKanbanInteraction(event.detail.target);
+					}
+				});
+
+				// Save scroll positions and provide a fallback snapshot for direct swaps.
 				document.addEventListener('htmx:beforeSwap', function(event) {
 					if (event.detail.target && event.detail.target.id === 'kanban-board') {
+						if (!savedKanbanInteraction) snapshotKanbanInteraction(event.detail.target);
 						savedScrollPositions.clear();
 						// Save scroll positions of all scrollable drop zones
 						const dropZones = document.querySelectorAll('.category-drop-zone, .task-drop-zone');
@@ -3266,12 +3409,11 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					}
 				});
 
-				// Clear selection when kanban board is replaced via HTMX
-				// Use document.addEventListener instead of document.body.addEventListener
-				// because this script runs in <head> where document.body may not exist yet.
+				// Restore surviving selections, menu focus, and scroll after authoritative board replacement.
 				document.addEventListener('htmx:afterSwap', function(event) {
 					if (event.detail.target && event.detail.target.id === 'kanban-board') {
-						clearSelection();
+						const liveBoard = document.getElementById('kanban-board');
+						if (liveBoard) restoreKanbanInteraction(liveBoard);
 
 						// Restore scroll positions after board is re-rendered
 						if (savedScrollPositions.size > 0) {
@@ -3291,6 +3433,16 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 								savedScrollPositions.clear();
 							}, 0);
 						}
+					}
+				});
+
+				// HTMX may perform its own focus handling during settle; restore the
+				// authoritative menu focus once more, then release the snapshot.
+				document.addEventListener('htmx:afterSettle', function(event) {
+					if (event.detail.target && event.detail.target.id === 'kanban-board') {
+						const liveBoard = document.getElementById('kanban-board');
+						if (liveBoard) restoreKanbanInteraction(liveBoard);
+						savedKanbanInteraction = null;
 					}
 				});
 			</script>

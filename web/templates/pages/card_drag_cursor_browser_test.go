@@ -16,6 +16,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/web/templates/components"
 )
 
 func TestTaskAndScheduleCardsUsePointerDragWithGrabCursor(t *testing.T) {
@@ -179,14 +180,61 @@ window.addEventListener('DOMContentLoaded', function() {
   (async function() {
     if (location.pathname === '/tasks') {
       if (document.getElementById('selection-counter')) fail('tasks page must not render a selection counter');
+      if (new URLSearchParams(location.search).get('drag_only') === '1') {
+        var toggleTask = document.querySelector('#task-task-drag-cursor');
+        toggleTask.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true, ctrlKey:true}));
+        if (!toggleTask.classList.contains('task-selected')) fail('tasks page modifier click must still select a card');
+        toggleTask.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true, ctrlKey:true}));
+        if (toggleTask.classList.contains('task-selected')) fail('tasks page second modifier click must clear card selection');
+        await exerciseOuterAutoScrollDrop('#task-task-drag-cursor', '#kanban-board', 'y', '.category-drop-zone[data-category="completed"]', 'task category card', 9);
+        await exerciseOuterAutoScrollDrop('#task-task-active-status-drag', '#kanban-board', 'y', '.task-drop-zone[data-status="running"]', 'task status card', 10);
+        location.href = '/schedule?project_id=project-card-drag-cursor';
+        return;
+      }
       var selectedTask = document.querySelector('#task-task-drag-cursor');
+      var selectedActiveTask = document.querySelector('#task-task-active-status-drag');
       selectedTask.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true, ctrlKey:true}));
-      if (!selectedTask.classList.contains('task-selected')) fail('tasks page modifier click must still select a card');
+      selectedActiveTask.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true, ctrlKey:true}));
+      if (!selectedTask.classList.contains('task-selected') || !selectedActiveTask.classList.contains('task-selected')) fail('tasks page modifier clicks must select both cards');
+      var taskMenuTrigger = selectedActiveTask.querySelector('[data-kanban-menu-trigger]');
+      taskMenuTrigger.dispatchEvent(new MouseEvent('mousedown', {bubbles:true, cancelable:true}));
+      taskMenuTrigger.focus();
+      taskMenuTrigger.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true}));
+      if (taskMenuTrigger.getAttribute('aria-expanded') !== 'true') fail('task menu must expose its open state');
+      if (document.querySelector('#kanban-board').getAttribute('data-open-kanban-menu-key') !== 'task-task-active-status-drag') fail('task menu open key was not recorded before refresh');
+      await htmx.ajax('GET', '/refresh-kanban?state=running', {target:'#kanban-board', swap:'outerHTML'});
+      selectedTask = document.querySelector('#task-task-drag-cursor');
+      selectedActiveTask = document.querySelector('#task-task-active-status-drag');
+      taskMenuTrigger = selectedActiveTask.querySelector('[data-kanban-menu-trigger]');
+      if (!selectedTask.classList.contains('task-selected') || !selectedActiveTask.classList.contains('task-selected')) fail('authoritative refresh cleared multi-selection');
+      if (document.querySelector('#kanban-board').getAttribute('data-open-kanban-menu-key') !== 'task-task-active-status-drag') fail('task menu open key was not restored: key=' + document.querySelector('#kanban-board').getAttribute('data-open-kanban-menu-key'));
+      await waitFor(function() { return document.activeElement === taskMenuTrigger && taskMenuTrigger.getAttribute('aria-expanded') === 'true'; }, 'task menu focus restoration after settle');
+      if (!selectedActiveTask.querySelector('[data-kanban-menu-content]').textContent.includes('Cancel')) fail('task menu did not retain authoritative running options');
+      var columnMenuTrigger = document.querySelector('[data-kanban-menu-key="column-backlog"] [data-kanban-menu-trigger]');
+      columnMenuTrigger.dispatchEvent(new MouseEvent('mousedown', {bubbles:true, cancelable:true}));
+      columnMenuTrigger.focus();
+      columnMenuTrigger.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true}));
+      await htmx.ajax('GET', '/refresh-kanban?state=running', {target:'#kanban-board', swap:'outerHTML'});
+      columnMenuTrigger = document.querySelector('[data-kanban-menu-key="column-backlog"] [data-kanban-menu-trigger]');
+      await waitFor(function() { return document.activeElement === columnMenuTrigger && columnMenuTrigger.getAttribute('aria-expanded') === 'true'; }, 'dropzone menu focus restoration after settle');
+      var outside = document.createElement('button');
+      document.body.appendChild(outside);
+      outside.dispatchEvent(new PointerEvent('pointerdown', {bubbles:true, cancelable:true, pointerId:18, pointerType:'mouse', button:0}));
+      outside.focus();
+      await new Promise(function(resolve) { setTimeout(resolve, 0); });
+      if (columnMenuTrigger.getAttribute('aria-expanded') !== 'false') fail('intentional outside focus must close the menu accessibly');
+      selectedTask = document.querySelector('#task-task-drag-cursor');
+      selectedActiveTask = document.querySelector('#task-task-active-status-drag');
       selectedTask.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true, ctrlKey:true}));
-      if (selectedTask.classList.contains('task-selected')) fail('tasks page second modifier click must clear card selection');
-      await exerciseOuterAutoScrollDrop('#task-task-drag-cursor', '#kanban-board', 'y', '.category-drop-zone[data-category="completed"]', 'task category card', 9);
-      await exerciseOuterAutoScrollDrop('#task-task-active-status-drag', '#kanban-board', 'y', '.task-drop-zone[data-status="running"]', 'task status card', 10);
-      location.href = '/schedule?project_id=project-card-drag-cursor';
+      selectedActiveTask.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true, ctrlKey:true}));
+      if (selectedTask.classList.contains('task-selected') || selectedActiveTask.classList.contains('task-selected')) fail('modifier click must still clear restored selection');
+      selectedActiveTask = document.querySelector('#task-task-active-status-drag');
+      taskMenuTrigger = selectedActiveTask.querySelector('[data-kanban-menu-trigger]');
+      taskMenuTrigger.focus();
+      await htmx.ajax('GET', '/refresh-kanban?state=removed', {target:'#kanban-board', swap:'outerHTML'});
+      if (document.querySelector('#task-task-active-status-drag')) fail('removed menu invoker survived authoritative refresh');
+      if (document.activeElement && document.activeElement.closest && document.activeElement.closest('[data-kanban-menu-key="task-task-active-status-drag"]')) fail('removed invoker retained stale menu focus');
+      location.href = '/tasks?project_id=project-card-drag-cursor&drag_only=1';
       return;
     }
     if (location.pathname === '/schedule') {
@@ -226,6 +274,18 @@ window.addEventListener('DOMContentLoaded', function() {
 			page := strings.Replace(out.String(), "https://unpkg.com/htmx.org@2.0.4", "/htmx-2.0.4.min.js", 1)
 			page = strings.Replace(page, "</head>", runner+"</head>", 1)
 			_, _ = w.Write([]byte(page))
+		case "/refresh-kanban":
+			refreshedTasks := append([]models.Task(nil), tasks...)
+			if r.URL.Query().Get("state") == "removed" {
+				refreshedTasks = refreshedTasks[:1]
+			} else {
+				refreshedTasks[1].Status = models.StatusRunning
+			}
+			var out bytes.Buffer
+			if err := components.KanbanBoard(refreshedTasks, project.ID, "created_desc", "completed_desc", nil, nil).Render(context.Background(), &out); err != nil {
+				t.Fatalf("render refreshed kanban: %v", err)
+			}
+			_, _ = w.Write(out.Bytes())
 		case "/schedule":
 			if r.Header.Get("HX-Request") == "true" {
 				_, _ = w.Write([]byte(`<div id="schedule-content" data-project-id="project-card-drag-cursor"></div>`))

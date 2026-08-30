@@ -5,11 +5,45 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
 )
+
+func TestKanbanBoardRefreshPreservesSelectionAndOpenMenus(t *testing.T) {
+	var buf bytes.Buffer
+	tasks := []models.Task{{ID: "selected-task", ProjectID: "project-1", Title: "Selected", Category: models.CategoryBacklog, Status: models.StatusPending}}
+	if err := KanbanBoard(tasks, "project-1", "", "", nil, nil).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render kanban board: %v", err)
+	}
+	html := buf.String()
+	for _, required := range []string{
+		`data-kanban-menu-key="column-backlog"`,
+		`data-kanban-menu-key="column-completed"`,
+		`data-kanban-menu-key="task-selected-task"`,
+		`data-kanban-menu-trigger`,
+		`aria-haspopup="menu"`,
+		`aria-expanded="false"`,
+		`data-kanban-menu-content`,
+		`role="menu"`,
+	} {
+		if !strings.Contains(html, required) {
+			t.Fatalf("kanban refresh state requires rendered contract %q", required)
+		}
+	}
+
+	layoutSource, err := os.ReadFile(filepath.Join("..", "layout", "base.templ"))
+	if err != nil {
+		t.Fatalf("read base template: %v", err)
+	}
+	for _, required := range []string{"savedKanbanInteraction", "restoreKanbanInteraction", "selectedTaskIDs", "focusKey", "aria-expanded"} {
+		if !bytes.Contains(layoutSource, []byte(required)) {
+			t.Fatalf("kanban refresh script must preserve %q", required)
+		}
+	}
+}
 
 func TestActiveColumnContent_GroupsOnlyRunningTasksInProgress(t *testing.T) {
 	tasks := []models.Task{
@@ -50,7 +84,8 @@ func TestKanbanColumn_DropdownTriggersUseLabelForDesktopWebviewCompatibility(t *
 	html := buf.String()
 
 	if !strings.Contains(html, `<label tabindex="0" class="btn btn-xs btn-ghost`) ||
-		!strings.Contains(html, `title="More actions" onclick="handleDropdownToggle(event)">`) {
+		!strings.Contains(html, `title="More actions" onclick="handleDropdownToggle(event)"`) ||
+		!strings.Contains(html, `data-kanban-menu-trigger aria-label="More actions" aria-haspopup="menu" aria-expanded="false"`) {
 		t.Fatal("expected backlog kebab trigger to use <label> for stable dropdown focus behavior")
 	}
 	if strings.Contains(html, `<button tabindex="0" class="btn btn-xs btn-ghost`) {
@@ -64,7 +99,8 @@ func TestKanbanColumn_DropdownTriggersUseLabelForDesktopWebviewCompatibility(t *
 	}
 	html = buf.String()
 	if !strings.Contains(html, `<label tabindex="0" class="btn btn-xs btn-ghost`) ||
-		!strings.Contains(html, `title="More actions" onclick="handleDropdownToggle(event)">`) {
+		!strings.Contains(html, `title="More actions" onclick="handleDropdownToggle(event)"`) ||
+		!strings.Contains(html, `data-kanban-menu-trigger aria-label="More actions" aria-haspopup="menu" aria-expanded="false"`) {
 		t.Fatal("expected completed kebab trigger to use <label> for stable dropdown focus behavior")
 	}
 	if strings.Contains(html, `<button tabindex="0" class="btn btn-xs btn-ghost`) {

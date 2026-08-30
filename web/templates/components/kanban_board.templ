@@ -174,13 +174,13 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 				}
 			</div>
 			if category == models.CategoryCompleted {
-				<div class="dropdown dropdown-end">
-					<label tabindex="0" class="btn btn-xs btn-ghost min-h-11 h-11 w-11 p-0" title="More actions" onclick="handleDropdownToggle(event)">
+				<div class="dropdown dropdown-end" data-kanban-menu-key="column-completed">
+					<label tabindex="0" class="btn btn-xs btn-ghost min-h-11 h-11 w-11 p-0" title="More actions" onclick="handleDropdownToggle(event)" data-kanban-menu-trigger aria-label="More actions" aria-haspopup="menu" aria-expanded="false">
 						<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
 						</svg>
 					</label>
-					<ul tabindex="0" class="dropdown-content menu p-2 shadow bg-base-100 rounded-box w-56 max-w-[calc(100vw-2rem)] z-[100]">
+					<ul tabindex="0" class="dropdown-content menu p-2 shadow bg-base-100 rounded-box w-56 max-w-[calc(100vw-2rem)] z-[100]" data-kanban-menu-content role="menu">
 						<li class="menu-title"><span>Sort By</span></li>
 						<li>
 							<a
@@ -262,34 +262,34 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 						</li>
 						if len(tasks) > 0 {
 							<li class="menu-title mt-2"><span>Actions</span></li>
-								<li>
-									<button
-										type="button"
-										data-delete-all-tasks-category="completed"
-										data-delete-all-tasks-name="completed tasks"
-										data-project-id={ projectID }
-										aria-label="Delete all completed tasks"
-										onclick="openDeleteAllTasksConfirm(this)"
-										class="text-error min-h-11"
-									>
-										<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
-										</svg>
-										Delete All
-									</button>
-								</li>
+							<li>
+								<button
+									type="button"
+									data-delete-all-tasks-category="completed"
+									data-delete-all-tasks-name="completed tasks"
+									data-project-id={ projectID }
+									aria-label="Delete all completed tasks"
+									onclick="openDeleteAllTasksConfirm(this)"
+									class="text-error min-h-11"
+								>
+									<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+									</svg>
+									Delete All
+								</button>
+							</li>
 						}
 					</ul>
 				</div>
 			}
 			if category == models.CategoryBacklog {
-				<div class="dropdown dropdown-end">
-					<label tabindex="0" class="btn btn-xs btn-ghost min-h-11 h-11 w-11 p-0" title="More actions" onclick="handleDropdownToggle(event)">
+				<div class="dropdown dropdown-end" data-kanban-menu-key="column-backlog">
+					<label tabindex="0" class="btn btn-xs btn-ghost min-h-11 h-11 w-11 p-0" title="More actions" onclick="handleDropdownToggle(event)" data-kanban-menu-trigger aria-label="More actions" aria-haspopup="menu" aria-expanded="false">
 						<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
 						</svg>
 					</label>
-					<ul tabindex="0" class="dropdown-content menu p-2 shadow bg-base-100 rounded-box w-56 max-w-[calc(100vw-2rem)] z-[100]">
+					<ul tabindex="0" class="dropdown-content menu p-2 shadow bg-base-100 rounded-box w-56 max-w-[calc(100vw-2rem)] z-[100]" data-kanban-menu-content role="menu">
 						<li class="menu-title"><span>Sort By</span></li>
 						<li>
 							<a
@@ -417,22 +417,22 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 									Activate All
 								</a>
 							</li>
-								<li>
-									<button
-										type="button"
-										data-delete-all-tasks-category="backlog"
-										data-delete-all-tasks-name="backlog tasks"
-										data-project-id={ projectID }
-										aria-label="Delete all backlog tasks"
-										onclick="openDeleteAllTasksConfirm(this)"
-										class="text-error min-h-11"
-									>
-										<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
-										</svg>
-										Delete All
-									</button>
-								</li>
+							<li>
+								<button
+									type="button"
+									data-delete-all-tasks-category="backlog"
+									data-delete-all-tasks-name="backlog tasks"
+									data-project-id={ projectID }
+									aria-label="Delete all backlog tasks"
+									onclick="openDeleteAllTasksConfirm(this)"
+									class="text-error min-h-11"
+								>
+									<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+									</svg>
+									Delete All
+								</button>
+							</li>
 						}
 					</ul>
 				</div>
