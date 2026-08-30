@@ -609,6 +609,96 @@ func TestHandler_ChangesMergeEligibilityBlocksUnsafeAndMissingStates(t *testing.
 	}
 }
 
+func TestHandler_TaskCardRebaseRevalidatesEligibilityAfterRepositoryLease(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	h.SetWorktreeService(service.NewWorktreeService(h.taskRepo, h.projectRepo, h.settingsRepo))
+	ctx := context.Background()
+	repoDir := createHandlerTestGitRepo(t)
+	target := service.GetCurrentBranch(repoDir)
+	project := &models.Project{Name: "Card rebase lease", RepoPath: repoDir, IsDefault: true}
+	if err := h.projectSvc.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	task := &models.Task{
+		ProjectID: project.ID, Title: "Card rebase lease", Prompt: "test", Category: models.CategoryCompleted,
+		Status: models.StatusCompleted, MergeTargetBranch: target, MergeStatus: models.MergeStatusPending,
+	}
+	if err := h.taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	wtPath, branchName, err := h.worktreeSvc.SetupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.taskRepo.UpdateWorktreeInfo(ctx, task.ID, wtPath, branchName); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wtPath, "task-change.txt"), []byte("task change\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.CommitWorktreeChanges(wtPath, "add task change"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "target-change.txt"), []byte("target change\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repoDir, "add", "target-change.txt")
+	runGit(t, repoDir, "commit", "-m", "advance target")
+
+	leaseEntered := make(chan struct{})
+	releaseLease := make(chan struct{})
+	leaseDone := make(chan error, 1)
+	go func() {
+		leaseDone <- h.worktreeSvc.WithRepositoryMutation(repoDir, func() error {
+			close(leaseEntered)
+			<-releaseLease
+			return nil
+		})
+	}()
+	<-leaseEntered
+
+	result := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		req := worktreeFormRequest(http.MethodPost, "/tasks/"+task.ID+"/worktree/rebase", url.Values{
+			"merge_source": {"task_card"}, "project_id": {project.ID},
+		})
+		req.Header.Set("HX-Request", "true")
+		result <- worktreeExecute(e, req)
+	}()
+	select {
+	case rec := <-result:
+		close(releaseLease)
+		t.Fatalf("card rebase bypassed repository lease: %d %s", rec.Code, rec.Body.String())
+	case <-time.After(100 * time.Millisecond):
+	}
+	if err := h.taskRepo.UpdateStatus(ctx, task.ID, models.StatusBlocked); err != nil {
+		close(releaseLease)
+		t.Fatal(err)
+	}
+	close(releaseLease)
+	if err := <-leaseDone; err != nil {
+		t.Fatalf("release repository mutation lease: %v", err)
+	}
+
+	select {
+	case rec := <-result:
+		if rec.Code != http.StatusConflict {
+			t.Fatalf("stale card rebase returned %d, want 409: %s", rec.Code, rec.Body.String())
+		}
+		if !strings.Contains(strings.ToLower(rec.Body.String()), "blocked") {
+			t.Fatalf("stale card rebase response missing authoritative reason: %s", rec.Body.String())
+		}
+		if trigger := rec.Header().Get("HX-Trigger"); !strings.Contains(trigger, "openvibelyToast") || !strings.Contains(strings.ToLower(trigger), "blocked") {
+			t.Fatalf("stale card rebase response missing failure toast: %q", trigger)
+		}
+		if strings.Contains(rec.Body.String(), "changes-actions-dropdown") {
+			t.Fatalf("stale card rebase returned Changes markup to the Kanban target: %s", rec.Body.String())
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("card rebase did not resume after repository lease release")
+	}
+}
+
 func TestHandler_RebaseTaskBranchRejectsForgedIneligibleRequests(t *testing.T) {
 	tests := []struct {
 		name       string

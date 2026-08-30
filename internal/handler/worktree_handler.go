@@ -388,6 +388,9 @@ func (h *Handler) RebaseTaskBranch(c echo.Context) error {
 	if rebaseErr != nil {
 		applog.Infof("[handler] RebaseTaskBranch error: %v", rebaseErr)
 		if errors.Is(rebaseErr, service.ErrMergeEligibilityChanged) {
+			if fromTaskCard {
+				return rejectTaskCardMutation(c, rebaseErr.Error())
+			}
 			if isHTMX(c) {
 				setHTMXToast(c, rebaseErr.Error(), "failed")
 			}
