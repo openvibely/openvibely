@@ -15,21 +15,7 @@ import (
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
 
-// lockWorktreeMutation serializes Git writers for a repository. The fixed
-// stripe set avoids unbounded lock-map growth while ensuring every operation
-// for the same repository uses the same lock.
-func (h *Handler) lockWorktreeMutation(repoPath string) func() {
-	const offset32 = uint32(2166136261)
-	const prime32 = uint32(16777619)
-	hash := offset32
-	for i := 0; i < len(repoPath); i++ {
-		hash ^= uint32(repoPath[i])
-		hash *= prime32
-	}
-	lock := &h.worktreeMutationLocks[int(hash%uint32(len(h.worktreeMutationLocks)))]
-	lock.Lock()
-	return lock.Unlock
-}
+var errTaskMutationEligibilityChanged = errors.New("task mutation eligibility changed")
 
 func (h *Handler) taskCardMergeEligibility(ctx context.Context, task *models.Task, mergeType string) (taskMergeActionState, bool, string) {
 	var state taskMergeActionState
@@ -175,8 +161,6 @@ func (h *Handler) MergeTaskBranch(c echo.Context) error {
 	if err != nil || project == nil || project.RepoPath == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "project has no repo path")
 	}
-	unlock := h.lockWorktreeMutation(project.RepoPath)
-	defer unlock()
 	task, err = h.taskSvc.GetByID(c.Request().Context(), taskID)
 	if err != nil || task == nil {
 		return echo.NewHTTPError(http.StatusNotFound, "task not found")
@@ -226,6 +210,11 @@ func (h *Handler) MergeTaskBranch(c echo.Context) error {
 			return fmt.Errorf("%w: task is no longer available", service.ErrMergeEligibilityChanged)
 		}
 		h.recoverTaskWorktreeState(c.Request().Context(), freshTask, project)
+		if fromTaskCard {
+			if _, eligible, reason := h.taskCardMergeEligibility(c.Request().Context(), freshTask, mergeType); !eligible {
+				return fmt.Errorf("%w: %s", service.ErrMergeEligibilityChanged, reason)
+			}
+		}
 		freshEligibility := h.resolveTaskMergeEligibility(c.Request().Context(), freshTask, project, h.reconcileAlreadyMergedBranch(c.Request().Context(), freshTask))
 		if !freshEligibility.MergeAvailable {
 			reason := freshEligibility.Reason
@@ -335,8 +324,6 @@ func (h *Handler) RebaseTaskBranch(c echo.Context) error {
 	if err != nil || project == nil || project.RepoPath == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "project has no repo path")
 	}
-	unlock := h.lockWorktreeMutation(project.RepoPath)
-	defer unlock()
 	task, err = h.taskSvc.GetByID(c.Request().Context(), taskID)
 	if err != nil || task == nil {
 		return echo.NewHTTPError(http.StatusNotFound, "task not found")
@@ -376,6 +363,11 @@ func (h *Handler) RebaseTaskBranch(c echo.Context) error {
 			return fmt.Errorf("%w: task is no longer available", service.ErrMergeEligibilityChanged)
 		}
 		h.recoverTaskWorktreeState(c.Request().Context(), freshTask, project)
+		if fromTaskCard {
+			if _, eligible, reason := h.taskCardMergeEligibility(c.Request().Context(), freshTask, "rebase"); !eligible {
+				return fmt.Errorf("%w: %s", service.ErrMergeEligibilityChanged, reason)
+			}
+		}
 		freshAlreadyMerged := h.reconcileAlreadyMergedBranch(c.Request().Context(), freshTask)
 		freshEligibility := h.resolveTaskMergeEligibility(c.Request().Context(), freshTask, project, freshAlreadyMerged)
 		if !freshEligibility.MergeAvailable || !h.taskRebaseAvailable(freshTask, project, freshAlreadyMerged) {

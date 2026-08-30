@@ -31,12 +31,15 @@ var ErrMergeEligibilityChanged = errors.New("merge eligibility changed before mu
 
 var repositoryWriterLocks sync.Map // canonical Git common directory -> *sync.Mutex
 
+func repositoryWriterLock(key string) *sync.Mutex {
+	value, _ := repositoryWriterLocks.LoadOrStore(key, &sync.Mutex{})
+	return value.(*sync.Mutex)
+}
+
 // WithRepositoryMutation serializes every repository-scoped Git writer using
 // the same canonical common-directory identity as merge/rebase recovery leases.
 func WithRepositoryMutation(repoDir string, mutate func() error) error {
-	key := canonicalRepositoryMutationKey(repoDir)
-	value, _ := repositoryWriterLocks.LoadOrStore(key, &sync.Mutex{})
-	lock := value.(*sync.Mutex)
+	lock := repositoryWriterLock(canonicalRepositoryMutationKey(repoDir))
 	lock.Lock()
 	defer lock.Unlock()
 	return mutate()
@@ -547,7 +550,7 @@ func (ws *WorktreeService) syncWorktreeFromMainAtStartUnlocked(ctx context.Conte
 	if mergeErr != nil {
 		conflictFiles := detectConflicts(task.WorktreePath)
 		if len(conflictFiles) > 0 {
-			abortErr := AbortMerge(task.WorktreePath)
+			abortErr := abortMergeLocked(task.WorktreePath)
 			if ws.taskRepo != nil {
 				_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusConflict)
 			}
@@ -1159,10 +1162,15 @@ func canonicalRepositoryMutationKey(repoDir string) string {
 func beginRepositoryMutation(repoDir string) (string, bool) {
 	key := canonicalRepositoryMutationKey(repoDir)
 	value, _ := repositoryMutationLeases.LoadOrStore(key, &atomic.Bool{})
-	return key, value.(*atomic.Bool).CompareAndSwap(false, true)
+	if !value.(*atomic.Bool).CompareAndSwap(false, true) {
+		return key, false
+	}
+	repositoryWriterLock(key).Lock()
+	return key, true
 }
 
 func endRepositoryMutation(key string) {
+	repositoryWriterLock(key).Unlock()
 	if value, ok := repositoryMutationLeases.Load(key); ok {
 		value.(*atomic.Bool).Store(false)
 	}
@@ -1188,6 +1196,10 @@ func (ws *WorktreeService) MergeBranchValidated(ctx context.Context, task *model
 		if err := validate(); err != nil {
 			return &MergeResult{ErrorMessage: err.Error()}, err
 		}
+	}
+	if len(ActiveConflictFiles(repoDir)) > 0 {
+		err := fmt.Errorf("a repository merge conflict is already active")
+		return &MergeResult{ErrorMessage: err.Error()}, err
 	}
 	return ws.mergeBranchLocked(ctx, task, repoDir, mergeType)
 }
