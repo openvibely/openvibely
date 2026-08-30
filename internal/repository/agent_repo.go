@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 )
@@ -57,6 +58,23 @@ type AgentSkillCatalogRef struct {
 	ProjectID string
 }
 
+// AgentListSummary is the compact projection needed by the lifecycle agent_list
+// inspector. It excludes full prompt, model, tool, plugin, MCP, permission,
+// model-default, source-reference, and timestamp fields. Skill names are
+// extracted in SQL so skill descriptions and content are never decoded here.
+type AgentListSummary struct {
+	Key                 string
+	Name                string
+	Description         string
+	Scope               models.AgentScope
+	SelectableAsPrimary bool
+	Enabled             bool
+	GeneratedStatus     models.AgentGeneratedStatus
+	SystemKind          string
+	ArchivedAt          *time.Time
+	AttachedSkillNames  []string
+}
+
 func scanChatAssignableAgentDefinition(row interface{ Scan(dest ...any) error }) (*models.ChatAssignableAgentDefinition, error) {
 	var a models.ChatAssignableAgentDefinition
 	var selectableInt, enabledInt int
@@ -73,6 +91,49 @@ func scanChatAssignableAgentDefinition(row interface{ Scan(dest ...any) error })
 		a.ArchivedAt = &t
 	}
 	return &a, nil
+}
+
+const agentListSummaryColumns = `COALESCE(key, ''), name, description, COALESCE(scope, 'global'), ` +
+	`COALESCE(selectable_as_primary, 1), COALESCE(enabled, 1), ` +
+	`COALESCE(generated_status, 'user_edited'), COALESCE(system_kind, ''), archived_at, ` +
+	`COALESCE((` +
+	`SELECT json_group_array(skill_name) FROM (` +
+	`SELECT json_extract(skill.value, '$.name') AS skill_name ` +
+	`FROM json_each(CASE WHEN TRIM(COALESCE(agents.skills, '')) = '' THEN '[]' ELSE agents.skills END) AS skill ` +
+	`ORDER BY CAST(skill.key AS INTEGER)` +
+	`)), '[]')`
+
+func scanAgentListSummary(row interface{ Scan(dest ...any) error }) (*AgentListSummary, error) {
+	var summary AgentListSummary
+	var (
+		scope, generatedStatus, skillNamesJSON string
+		selectableInt, enabledInt              int
+		archivedAt                             sql.NullTime
+	)
+	if err := row.Scan(
+		&summary.Key, &summary.Name, &summary.Description, &scope,
+		&selectableInt, &enabledInt, &generatedStatus, &summary.SystemKind,
+		&archivedAt, &skillNamesJSON,
+	); err != nil {
+		return nil, err
+	}
+	summary.Scope = models.AgentScope(scope)
+	summary.SelectableAsPrimary = selectableInt != 0
+	summary.Enabled = enabledInt != 0
+	summary.GeneratedStatus = models.AgentGeneratedStatus(generatedStatus)
+	if archivedAt.Valid {
+		t := archivedAt.Time
+		summary.ArchivedAt = &t
+	}
+	if s := strings.TrimSpace(skillNamesJSON); s != "" && s != "[]" {
+		if err := json.Unmarshal([]byte(s), &summary.AttachedSkillNames); err != nil {
+			return nil, fmt.Errorf("unmarshaling agent list skill names: %w", err)
+		}
+	}
+	if summary.AttachedSkillNames == nil {
+		summary.AttachedSkillNames = []string{}
+	}
+	return &summary, nil
 }
 
 func scanAgent(row interface{ Scan(dest ...any) error }) (*models.Agent, error) {
@@ -224,6 +285,27 @@ func normalizeAgentToolConfig(a *models.Agent) {
 
 func (r *AgentRepo) List(ctx context.Context) ([]models.Agent, error) {
 	return r.list(ctx, `SELECT `+agentColumns+` FROM agents WHERE COALESCE(generated_status, 'user_edited') <> 'archived' ORDER BY name ASC`)
+}
+
+// ListAgentListSummaries returns the prompt-safe lifecycle agent_list projection.
+// It keeps filtering metadata needed by the inspector while avoiding full Agent
+// hydration and decoding only the attached skill names.
+func (r *AgentRepo) ListAgentListSummaries(ctx context.Context) ([]AgentListSummary, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT `+agentListSummaryColumns+` FROM agents WHERE COALESCE(generated_status, 'user_edited') <> 'archived' ORDER BY name ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("listing agent list summaries: %w", err)
+	}
+	defer rows.Close()
+
+	var summaries []AgentListSummary
+	for rows.Next() {
+		summary, err := scanAgentListSummary(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scanning agent list summary: %w", err)
+		}
+		summaries = append(summaries, *summary)
+	}
+	return summaries, rows.Err()
 }
 
 // ListPage returns one bounded Models-page-compatible agent projection. The
