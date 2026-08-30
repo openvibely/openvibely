@@ -177,7 +177,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						--ov-link-color-visited: #7480ff;
 						--ov-link-focus-ring: rgba(116, 128, 255, 0.45);
 						--ov-link-decoration: rgba(116, 128, 255, 0.85);
-						--ov-task-running: #646fe4;
+						--ov-primary-action-color: #646fe4;
 							--ov-diff-add-bg: #1E3A38;
 							--ov-diff-del-bg: #3D2C34;
 							--ov-diff-add-fg: #559B70;
@@ -194,8 +194,12 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							transparent 6px
 						);
 					}
+					.chat-send-button {
+						background-color: var(--ov-primary-action-color) !important;
+						border-color: var(--ov-primary-action-color) !important;
+					}
 					.task-state-running {
-						color: var(--ov-task-running);
+						color: var(--ov-primary-action-color);
 					}
 					/* Canonical "Default" badge styling used across major settings pages. */
 					.ov-badge-default {
@@ -981,7 +985,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					--su: 0.7 0.12 145;
 					--wa: 0.79 0.08 84;
 					--er: 0.68 0.15 26;
-					--ov-task-running: #7480ff;
+					--ov-primary-action-color: #7480ff;
 
 					/* Light 2026 semantic aliases — indigo/purple accent palette. */
 					--ov-l-bg: #FAFAFA;

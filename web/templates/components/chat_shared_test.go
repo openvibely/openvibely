@@ -1012,6 +1012,27 @@ func TestChatAutoScrollScript_ToolHeaderUsesTextNodesNotInnerHTML(t *testing.T) 
 	}
 }
 
+func TestChatInputForm_SendButtonUsesSharedPrimaryActionColorClass(t *testing.T) {
+	var buf bytes.Buffer
+	if err := ChatInputForm(ChatInputFormConfig{
+		FormID:       "chat-form",
+		InputID:      "message-input",
+		PostEndpoint: "/chat/send",
+		TargetID:     "chat-messages",
+	}).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render ChatInputForm: %v", err)
+	}
+	body := buf.String()
+	for _, want := range []string{
+		`class="btn btn-primary btn-sm chat-send-button rounded-full`,
+		`(kind === 'stop' ? '' : ' chat-send-button')`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("initial and dynamically rebuilt send buttons must consume the shared primary action color class %q, got %s", want, body)
+		}
+	}
+}
+
 func TestChatInputForm_SubmitButtonUsesRequestSubmit(t *testing.T) {
 	var buf bytes.Buffer
 	err := ChatInputForm(ChatInputFormConfig{

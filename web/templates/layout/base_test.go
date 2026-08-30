@@ -1214,15 +1214,21 @@ func TestTaskRunningStateMatchesChatSendButtonByTheme(t *testing.T) {
 
 	for _, fragment := range []string{
 		":root {",
-		"--ov-task-running: #646fe4;",
+		"--ov-primary-action-color: #646fe4;",
 		"[data-theme=\"light\"] {",
-		"--ov-task-running: #7480ff;",
+		"--ov-primary-action-color: #7480ff;",
+		".chat-send-button {",
+		"background-color: var(--ov-primary-action-color) !important;",
+		"border-color: var(--ov-primary-action-color) !important;",
 		".task-state-running {",
-		"color: var(--ov-task-running);",
+		"color: var(--ov-primary-action-color);",
 	} {
 		if !strings.Contains(html, fragment) {
-			t.Errorf("expected task running state to match chat send button via %q", fragment)
+			t.Errorf("expected chat send button and task running state to share primary action token via %q", fragment)
 		}
+	}
+	if strings.Contains(html, "--ov-task-running:") {
+		t.Error("task running state must not retain a separate color token")
 	}
 }
 
