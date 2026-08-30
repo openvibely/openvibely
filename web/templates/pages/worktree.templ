@@ -154,15 +154,13 @@ templ WorktreeInfoPanel(task *models.Task, fileStats []service.WorktreeFileStat)
 
 // TaskChangesWorktreeContent renders the changes tab for worktree-based tasks.
 //
-// branchAlreadyMerged is true when the task's worktree branch is already merged
-// into its target branch in git. When true, local merge actions are suppressed
-// regardless of the stored merge_status, because re-running a merge would be
-// redundant.
-templ TaskChangesWorktreeContent(diffOutput string, task *models.Task, fileStats []service.WorktreeFileStat, reviewComments []models.ReviewComment, taskPR *models.TaskPullRequest, branchAlreadyMerged bool, rebaseAvailable bool) {
-	@TaskChangesWorktreeContentWithView(diffOutput, task, fileStats, reviewComments, taskPR, branchAlreadyMerged, rebaseAvailable, "inline")
+// localMergeUnavailable is true when current task/Git state does not safely
+// permit local merge or conflict-recovery actions.
+templ TaskChangesWorktreeContent(diffOutput string, task *models.Task, fileStats []service.WorktreeFileStat, reviewComments []models.ReviewComment, taskPR *models.TaskPullRequest, localMergeUnavailable bool, rebaseAvailable bool) {
+	@TaskChangesWorktreeContentWithView(diffOutput, task, fileStats, reviewComments, taskPR, localMergeUnavailable, rebaseAvailable, "inline")
 }
 
-templ TaskChangesWorktreeContentWithView(diffOutput string, task *models.Task, fileStats []service.WorktreeFileStat, reviewComments []models.ReviewComment, taskPR *models.TaskPullRequest, branchAlreadyMerged bool, rebaseAvailable bool, diffView string) {
+templ TaskChangesWorktreeContentWithView(diffOutput string, task *models.Task, fileStats []service.WorktreeFileStat, reviewComments []models.ReviewComment, taskPR *models.TaskPullRequest, localMergeUnavailable bool, rebaseAvailable bool, diffView string) {
 	<div class="card bg-base-100 shadow-sm border border-base-300">
 		<div class="card-body">
 			// Worktree branch info header
@@ -186,7 +184,7 @@ templ TaskChangesWorktreeContentWithView(diffOutput string, task *models.Task, f
 								</svg>
 							</div>
 							<ul tabindex="0" class="dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-52 max-w-[calc(100vw-2rem)] border border-base-300">
-								if task.MergeStatus == models.MergeStatusConflict {
+								if task.MergeStatus == models.MergeStatusConflict && !localMergeUnavailable {
 									<li class="menu-title"><span>Conflict recovery</span></li>
 									<li>
 										<button
@@ -194,7 +192,7 @@ templ TaskChangesWorktreeContentWithView(diffOutput string, task *models.Task, f
 											hx-post={ fmt.Sprintf("/tasks/%s/worktree/resolve", task.ID) }
 											hx-target="#changes-content"
 											hx-swap="innerHTML"
-											hx-disabled-elt="this"
+											hx-disabled-elt="#changes-actions-dropdown button"
 											hx-vals='{"merge_source": "changes_tab"}'
 										>
 											AI Resolve Conflicts
@@ -206,13 +204,13 @@ templ TaskChangesWorktreeContentWithView(diffOutput string, task *models.Task, f
 											hx-post={ fmt.Sprintf("/tasks/%s/worktree/abort", task.ID) }
 											hx-target="#changes-content"
 											hx-swap="innerHTML"
-											hx-disabled-elt="this"
+											hx-disabled-elt="#changes-actions-dropdown button"
 											hx-vals='{"merge_source": "changes_tab"}'
 										>
 											Abort Merge
 										</button>
 									</li>
-								} else if !branchAlreadyMerged && task.MergeStatus != models.MergeStatusMerged {
+								} else if !localMergeUnavailable && task.MergeStatus != models.MergeStatusMerged {
 								<li class="menu-title"><span>Local</span></li>
 								<li>
 									<button
@@ -220,7 +218,7 @@ templ TaskChangesWorktreeContentWithView(diffOutput string, task *models.Task, f
 										hx-post={ fmt.Sprintf("/tasks/%s/worktree/merge", task.ID) }
 										hx-target="#changes-content"
 										hx-swap="innerHTML"
-										hx-disabled-elt="this"
+										hx-disabled-elt="#changes-actions-dropdown button"
 										hx-vals='{"merge_type": "merge", "merge_source": "changes_tab"}'
 									>
 										<span class="htmx-indicator" id="merge-changes-indicator">
@@ -235,7 +233,7 @@ templ TaskChangesWorktreeContentWithView(diffOutput string, task *models.Task, f
 										hx-post={ fmt.Sprintf("/tasks/%s/worktree/merge", task.ID) }
 										hx-target="#changes-content"
 										hx-swap="innerHTML"
-										hx-disabled-elt="this"
+										hx-disabled-elt="#changes-actions-dropdown button"
 										hx-vals='{"merge_type": "ff", "merge_source": "changes_tab"}'
 									>
 										<span class="htmx-indicator" id="merge-changes-indicator-ff">
@@ -251,7 +249,7 @@ templ TaskChangesWorktreeContentWithView(diffOutput string, task *models.Task, f
 											hx-post={ fmt.Sprintf("/tasks/%s/worktree/rebase", task.ID) }
 											hx-target="#changes-content"
 											hx-swap="innerHTML"
-											hx-disabled-elt="this"
+											hx-disabled-elt="#changes-actions-dropdown button"
 										>
 											<span class="htmx-indicator" id="rebase-changes-indicator">
 												<span class="loading loading-spinner loading-xs"></span>
@@ -266,7 +264,7 @@ templ TaskChangesWorktreeContentWithView(diffOutput string, task *models.Task, f
 										hx-post={ fmt.Sprintf("/tasks/%s/worktree/merge", task.ID) }
 										hx-target="#changes-content"
 										hx-swap="innerHTML"
-										hx-disabled-elt="this"
+										hx-disabled-elt="#changes-actions-dropdown button"
 										hx-vals='{"merge_type": "squash", "merge_source": "changes_tab"}'
 									>
 										<span class="htmx-indicator" id="merge-changes-indicator-squash">

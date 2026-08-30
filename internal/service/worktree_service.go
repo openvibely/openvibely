@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -9,6 +10,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -18,12 +21,17 @@ import (
 	"github.com/openvibely/openvibely/internal/repository"
 )
 
+// ErrMergeInProgress is returned when another local merge is already mutating
+// the same repository.
+var ErrMergeInProgress = errors.New("merge already in progress for repository")
+
 // WorktreeService manages git worktrees for task isolation.
 type WorktreeService struct {
-	taskRepo     *repository.TaskRepo
-	projectRepo  *repository.ProjectRepo
-	settingsRepo *repository.SettingsRepo
-	llmSvc       *LLMService
+	taskRepo          *repository.TaskRepo
+	projectRepo       *repository.ProjectRepo
+	settingsRepo      *repository.SettingsRepo
+	llmSvc            *LLMService
+	mergeRepositories sync.Map // canonical repository path -> *atomic.Bool
 }
 
 func NewWorktreeService(taskRepo *repository.TaskRepo, projectRepo *repository.ProjectRepo, settingsRepo *repository.SettingsRepo) *WorktreeService {
@@ -1079,9 +1087,33 @@ type RebaseResult struct {
 	ErrorMessage  string
 }
 
+func (ws *WorktreeService) beginRepositoryMerge(repoDir string) bool {
+	key := filepath.Clean(repoDir)
+	if absolute, err := filepath.Abs(key); err == nil {
+		key = absolute
+	}
+	value, _ := ws.mergeRepositories.LoadOrStore(key, &atomic.Bool{})
+	return value.(*atomic.Bool).CompareAndSwap(false, true)
+}
+
+func (ws *WorktreeService) endRepositoryMerge(repoDir string) {
+	key := filepath.Clean(repoDir)
+	if absolute, err := filepath.Abs(key); err == nil {
+		key = absolute
+	}
+	if value, ok := ws.mergeRepositories.Load(key); ok {
+		value.(*atomic.Bool).Store(false)
+	}
+}
+
 // MergeBranch merges the task branch into the target branch.
 // mergeType: "merge" (merge commit), "ff" (fast-forward only), "squash"
 func (ws *WorktreeService) MergeBranch(ctx context.Context, task *models.Task, repoDir string, mergeType string) (*MergeResult, error) {
+	if !ws.beginRepositoryMerge(repoDir) {
+		return &MergeResult{ErrorMessage: ErrMergeInProgress.Error()}, ErrMergeInProgress
+	}
+	defer ws.endRepositoryMerge(repoDir)
+
 	if task.WorktreeBranch == "" {
 		return nil, fmt.Errorf("task has no worktree branch")
 	}
@@ -1510,6 +1542,23 @@ func ResetSquashMergeChanges(repoDir string, squashPaths []string) error {
 		return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
 	}
 	return nil
+}
+
+// HasActiveMerge reports whether Git has an in-progress merge in the repository,
+// including the resolved-but-not-yet-committed phase where no unmerged files remain.
+func HasActiveMerge(repoDir string) bool {
+	return worktreeHasActiveMerge(repoDir)
+}
+
+// ActiveMergeMatchesBranch reports whether the repository's current MERGE_HEAD
+// is the tip of the supplied task branch.
+func ActiveMergeMatchesBranch(repoDir, branchName string) bool {
+	if !worktreeHasActiveMerge(repoDir) || branchName == "" {
+		return false
+	}
+	mergeHead, mergeErr := gitCommitSHA(repoDir, "MERGE_HEAD")
+	branchHead, branchErr := gitCommitSHA(repoDir, branchName)
+	return mergeErr == nil && branchErr == nil && mergeHead != "" && mergeHead == branchHead
 }
 
 // ActiveConflictFiles returns files with active merge conflicts in the given repository.

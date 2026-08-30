@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -53,37 +54,22 @@ func (h *Handler) MergeTaskBranch(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "project has no repo path")
 	}
 	h.recoverTaskWorktreeState(c.Request().Context(), task, project)
-	if task.WorktreeBranch == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "task has no worktree branch")
-	}
-
-	// Defense-in-depth: if the branch is already merged into its target,
-	// back-fill merge_status and reject the redundant merge request instead
-	// of attempting it.
-	// Performed before the worktreeSvc check so a stale UI cannot drive
-	// duplicate merges even on installs where the worktree service is missing.
-	targetBranch := task.MergeTargetBranch
-	if targetBranch == "" {
-		targetBranch = service.GetDefaultBranch(project.RepoPath)
-	}
-	if len(service.ActiveConflictFiles(project.RepoPath)) > 0 {
-		msg := "A merge conflict is already active. Resolve conflicts or abort the merge before trying another merge."
+	branchAlreadyMerged := h.reconcileAlreadyMergedBranch(c.Request().Context(), task)
+	eligibility := h.resolveTaskMergeEligibility(c.Request().Context(), task, project, branchAlreadyMerged)
+	if !eligibility.MergeAvailable {
+		msg := eligibility.Reason
+		if eligibility.ConflictRecovery {
+			msg = "A merge conflict is already active. Resolve conflicts or abort the merge before trying another merge."
+		}
+		if msg == "" {
+			msg = "Task branch is not currently eligible to merge"
+		}
 		if isHTMX(c) {
 			setHTMXToast(c, msg, "failed")
 		}
 		return c.String(http.StatusConflict, msg)
 	}
-	if targetBranch != "" && service.IsBranchTipMergedInto(project.RepoPath, task.WorktreeBranch, targetBranch) {
-		if task.MergeStatus != models.MergeStatusMerged {
-			_ = h.taskRepo.UpdateMergeStatus(c.Request().Context(), task.ID, models.MergeStatusMerged)
-			task.MergeStatus = models.MergeStatusMerged
-		}
-		msg := fmt.Sprintf("Branch %s is already merged into %s", task.WorktreeBranch, targetBranch)
-		if isHTMX(c) {
-			setHTMXToast(c, msg, "info")
-		}
-		return c.String(http.StatusConflict, msg)
-	}
+	targetBranch := eligibility.TargetBranch
 
 	if h.worktreeSvc == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "worktree service not available")
@@ -93,6 +79,9 @@ func (h *Handler) MergeTaskBranch(c echo.Context) error {
 	if mergeType == "" {
 		mergeType = "merge"
 	}
+	if mergeType != "merge" && mergeType != "ff" && mergeType != "squash" {
+		return c.String(http.StatusBadRequest, "unsupported merge type")
+	}
 
 	fromChangesTab := c.FormValue("merge_source") == "changes_tab"
 
@@ -100,6 +89,13 @@ func (h *Handler) MergeTaskBranch(c echo.Context) error {
 	if mergeErr != nil {
 		applog.Infof("[handler] MergeTaskBranch error: %v", mergeErr)
 		errMessage := "Local merge failed"
+		if errors.Is(mergeErr, service.ErrMergeInProgress) {
+			errMessage = "A local merge is already in progress for this repository. Wait for it to finish before trying another merge."
+			if isHTMX(c) {
+				setHTMXToast(c, errMessage, "failed")
+			}
+			return c.String(http.StatusConflict, errMessage)
+		}
 		if result != nil && result.ErrorMessage != "" {
 			errMessage = fmt.Sprintf("Local merge failed: %s", result.ErrorMessage)
 		} else if mergeErr.Error() != "" {
@@ -323,6 +319,19 @@ func (h *Handler) ResolveTaskConflicts(c echo.Context) error {
 	if err != nil || project == nil || project.RepoPath == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "project has no repo path")
 	}
+	h.recoverTaskWorktreeState(c.Request().Context(), task, project)
+	eligibility := h.resolveTaskMergeEligibility(c.Request().Context(), task, project, h.reconcileAlreadyMergedBranch(c.Request().Context(), task))
+	fromChangesTab := c.FormValue("merge_source") == "changes_tab"
+	if !eligibility.ConflictRecovery {
+		msg := "No active merge conflicts remain. Merge actions have been refreshed."
+		if isHTMX(c) {
+			setHTMXToast(c, msg, "info")
+		}
+		if fromChangesTab {
+			return h.GetTaskChanges(c)
+		}
+		return c.String(http.StatusConflict, msg)
+	}
 
 	result, resolveErr := h.worktreeSvc.ResolveConflictsWithAI(c.Request().Context(), task, project.RepoPath)
 	if resolveErr != nil {
@@ -335,6 +344,10 @@ func (h *Handler) ResolveTaskConflicts(c echo.Context) error {
 		}
 		if isHTMX(c) {
 			setHTMXToast(c, errMessage, "failed")
+		}
+		if fromChangesTab {
+			task, _ = h.taskSvc.GetByID(c.Request().Context(), taskID)
+			return h.GetTaskChanges(c)
 		}
 		return c.String(http.StatusBadRequest, errMessage)
 	}
@@ -368,11 +381,28 @@ func (h *Handler) AbortTaskMerge(c echo.Context) error {
 	if err != nil || project == nil || project.RepoPath == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "project has no repo path")
 	}
+	h.recoverTaskWorktreeState(c.Request().Context(), task, project)
+	eligibility := h.resolveTaskMergeEligibility(c.Request().Context(), task, project, h.reconcileAlreadyMergedBranch(c.Request().Context(), task))
+	fromChangesTab := c.FormValue("merge_source") == "changes_tab"
+	if !eligibility.ConflictRecovery {
+		msg := "No active merge remains. Merge actions have been refreshed."
+		if isHTMX(c) {
+			setHTMXToast(c, msg, "info")
+		}
+		if fromChangesTab {
+			return h.GetTaskChanges(c)
+		}
+		return c.String(http.StatusConflict, msg)
+	}
 
 	if abortErr := service.AbortMerge(project.RepoPath); abortErr != nil {
 		errMessage := fmt.Sprintf("Failed to abort merge: %v", abortErr)
 		if isHTMX(c) {
 			setHTMXToast(c, errMessage, "failed")
+		}
+		if fromChangesTab {
+			task, _ = h.taskSvc.GetByID(c.Request().Context(), taskID)
+			return h.GetTaskChanges(c)
 		}
 		return c.String(http.StatusBadRequest, errMessage)
 	}

@@ -249,54 +249,160 @@ func TestHandler_CreateTask_WithAutoMerge(t *testing.T) {
 	}
 }
 
+func TestHandler_ChangesMergeEligibilityBlocksUnsafeAndMissingStates(t *testing.T) {
+	tests := []struct {
+		name         string
+		status       models.TaskStatus
+		branch       string
+		target       string
+		wantPostCode int
+		wantReason   string
+	}{
+		{name: "blocked task", status: models.StatusBlocked, branch: "task/blocked", target: "main", wantPostCode: http.StatusConflict, wantReason: "blocked"},
+		{name: "missing task branch", status: models.StatusCompleted, branch: "task/missing", target: "main", wantPostCode: http.StatusConflict, wantReason: "does not exist"},
+		{name: "missing target branch", status: models.StatusCompleted, branch: "task/existing", target: "missing-target", wantPostCode: http.StatusConflict, wantReason: "target branch"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h, e, _ := setupTestHandler(t)
+			h.SetWorktreeService(service.NewWorktreeService(h.taskRepo, h.projectRepo, h.settingsRepo))
+			ctx := context.Background()
+			repoDir := createHandlerTestGitRepo(t)
+			target := service.GetCurrentBranch(repoDir)
+			project := &models.Project{Name: tt.name, RepoPath: repoDir, IsDefault: true}
+			if err := h.projectSvc.Create(ctx, project); err != nil {
+				t.Fatal(err)
+			}
+			branch := tt.branch
+			if branch == "task/existing" {
+				runGit(t, repoDir, "branch", branch, target)
+			}
+			mergeTarget := tt.target
+			if mergeTarget == "main" {
+				mergeTarget = target
+			}
+			task := &models.Task{
+				ProjectID: project.ID, Title: tt.name, Prompt: "test", Category: models.CategoryCompleted,
+				Status: tt.status, WorktreeBranch: branch, MergeTargetBranch: mergeTarget, MergeStatus: models.MergeStatusPending,
+			}
+			if err := h.taskRepo.Create(ctx, task); err != nil {
+				t.Fatal(err)
+			}
+
+			getReq := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes", nil)
+			getRec := worktreeExecute(e, getReq)
+			if getRec.Code != http.StatusOK {
+				t.Fatalf("GET Changes returned %d: %s", getRec.Code, getRec.Body.String())
+			}
+			if strings.Contains(getRec.Body.String(), "/tasks/"+task.ID+"/worktree/merge") {
+				t.Fatalf("ineligible state exposed merge action: %s", getRec.Body.String())
+			}
+
+			form := url.Values{"merge_type": {"merge"}, "merge_source": {"changes_tab"}}
+			postReq := worktreeFormRequest(http.MethodPost, "/tasks/"+task.ID+"/worktree/merge", form)
+			postReq.Header.Set("HX-Request", "true")
+			postRec := worktreeExecute(e, postReq)
+			if postRec.Code != tt.wantPostCode || !strings.Contains(strings.ToLower(postRec.Body.String()), tt.wantReason) {
+				t.Fatalf("POST merge got %d %q, want %d containing %q", postRec.Code, postRec.Body.String(), tt.wantPostCode, tt.wantReason)
+			}
+		})
+	}
+}
+
+func TestHandler_StaleTerminalConflictRecoversChangesAndRecoveryPosts(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	h.SetWorktreeService(service.NewWorktreeService(h.taskRepo, h.projectRepo, h.settingsRepo))
+	ctx := context.Background()
+	repoDir := createHandlerTestGitRepo(t)
+	target := service.GetCurrentBranch(repoDir)
+	project := &models.Project{Name: "Stale conflict recovery", RepoPath: repoDir, IsDefault: true}
+	if err := h.projectSvc.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	task := &models.Task{
+		ProjectID: project.ID, Title: "Stale conflict", Prompt: "test", Category: models.CategoryCompleted,
+		Status: models.StatusCompleted, MergeTargetBranch: target, MergeStatus: models.MergeStatusConflict,
+	}
+	if err := h.taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	wtPath, branchName, err := h.worktreeSvc.SetupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task.WorktreePath, task.WorktreeBranch = wtPath, branchName
+	if err := h.taskRepo.UpdateWorktreeInfo(ctx, task.ID, wtPath, branchName); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wtPath, "stale-conflict.txt"), []byte("recover\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.CommitWorktreeChanges(wtPath, "stale conflict recovery"); err != nil {
+		t.Fatal(err)
+	}
+
+	getReq := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes", nil)
+	getRec := worktreeExecute(e, getReq)
+	if getRec.Code != http.StatusOK || !strings.Contains(getRec.Body.String(), "/tasks/"+task.ID+"/worktree/merge") {
+		t.Fatalf("stale conflict did not recover merge actions: %d %s", getRec.Code, getRec.Body.String())
+	}
+	updated, err := h.taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.MergeStatus != models.MergeStatusPending {
+		t.Fatalf("stale conflict status = %q, want pending", updated.MergeStatus)
+	}
+
+	if err := h.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusConflict); err != nil {
+		t.Fatal(err)
+	}
+	form := url.Values{"merge_source": {"changes_tab"}}
+	for _, path := range []string{"resolve", "abort"} {
+		req := worktreeFormRequest(http.MethodPost, "/tasks/"+task.ID+"/worktree/"+path, form)
+		req.Header.Set("HX-Request", "true")
+		rec := worktreeExecute(e, req)
+		if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "/tasks/"+task.ID+"/worktree/merge") {
+			t.Fatalf("stale conflict %s did not refresh recoverable Changes: %d %s", path, rec.Code, rec.Body.String())
+		}
+		if err := h.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusConflict); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func TestHandler_MergeTaskBranch_CommitFailure_ReturnsHTMXErrorWithToast(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	ctx := context.Background()
 
-	repoDir := t.TempDir()
-	mustRun := func(name string, args ...string) {
-		t.Helper()
-		cmd := exec.Command(name, args...)
-		cmd.Dir = repoDir
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("%s %v failed: %v\n%s", name, args, err, out)
-		}
-	}
-	mustRun("git", "init")
-	mustRun("git", "config", "user.email", "test@example.com")
-	mustRun("git", "config", "user.name", "Test User")
-	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("hello\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	mustRun("git", "add", "README.md")
-	mustRun("git", "commit", "-m", "initial")
-
-	project := &models.Project{
-		Name: "Test Project", Description: "Test", RepoPath: repoDir, IsDefault: true,
-	}
+	repoDir := createHandlerTestGitRepo(t)
+	targetBranch := service.GetCurrentBranch(repoDir)
+	project := &models.Project{Name: "Test Project", Description: "Test", RepoPath: repoDir, IsDefault: true}
 	if err := h.projectSvc.Create(ctx, project); err != nil {
 		t.Fatal(err)
 	}
-
 	h.SetWorktreeService(service.NewWorktreeService(h.taskRepo, h.projectRepo, h.settingsRepo))
-
-	worktreePath := t.TempDir()
+	task := &models.Task{
+		ProjectID: project.ID, Title: "Merge Failure", Prompt: "test", Category: models.CategoryCompleted,
+		Status: models.StatusCompleted, MergeTargetBranch: targetBranch, MergeStatus: models.MergeStatusPending,
+	}
+	if err := h.taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	worktreePath, branchName, err := h.worktreeSvc.SetupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task.WorktreePath, task.WorktreeBranch = worktreePath, branchName
+	if err := h.taskRepo.UpdateWorktreeInfo(ctx, task.ID, worktreePath, branchName); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(worktreePath, "dirty.txt"), []byte("dirty\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-
-	task := &models.Task{
-		ProjectID:         project.ID,
-		Title:             "Merge Failure",
-		Prompt:            "test",
-		Category:          models.CategoryActive,
-		Status:            models.StatusCompleted,
-		WorktreePath:      worktreePath,
-		WorktreeBranch:    "task/fail-merge",
-		MergeTargetBranch: "main",
-		MergeStatus:       models.MergeStatusPending,
-	}
-	if err := h.taskRepo.Create(ctx, task); err != nil {
+	hook := filepath.Join(repoDir, ".git", "hooks", "pre-commit")
+	if err := os.WriteFile(hook, []byte("#!/bin/sh\nexit 1\n"), 0755); err != nil {
 		t.Fatal(err)
 	}
 
@@ -513,6 +619,31 @@ func TestHandler_MergeTaskBranch_Conflict_ReturnsHTMXToast(t *testing.T) {
 	}
 	if updated.MergeStatus != models.MergeStatusConflict {
 		t.Fatalf("expected merge_status=conflict, got %s", updated.MergeStatus)
+	}
+
+	unrelatedBranch := "task/unrelated-during-conflict"
+	mustRun("git", "branch", unrelatedBranch, defaultBranch)
+	unrelated := &models.Task{
+		ProjectID: project.ID, Title: "Unrelated conflict task", Prompt: "test", Category: models.CategoryCompleted,
+		Status: models.StatusCompleted, WorktreeBranch: unrelatedBranch, MergeTargetBranch: defaultBranch, MergeStatus: models.MergeStatusPending,
+	}
+	if err := h.taskRepo.Create(ctx, unrelated); err != nil {
+		t.Fatal(err)
+	}
+	unrelatedReq := httptest.NewRequest(http.MethodGet, "/tasks/"+unrelated.ID+"/changes", nil)
+	unrelatedRec := worktreeExecute(e, unrelatedReq)
+	if unrelatedRec.Code != http.StatusOK {
+		t.Fatalf("unrelated Changes returned %d: %s", unrelatedRec.Code, unrelatedRec.Body.String())
+	}
+	if strings.Contains(unrelatedRec.Body.String(), "/tasks/"+unrelated.ID+"/worktree/resolve") || strings.Contains(unrelatedRec.Body.String(), "/tasks/"+unrelated.ID+"/worktree/abort") {
+		t.Fatalf("unrelated task exposed another task's conflict recovery controls: %s", unrelatedRec.Body.String())
+	}
+	unrelatedUpdated, err := h.taskRepo.GetByID(ctx, unrelated.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unrelatedUpdated.MergeStatus == models.MergeStatusConflict {
+		t.Fatal("unrelated task inherited active repository conflict status")
 	}
 }
 

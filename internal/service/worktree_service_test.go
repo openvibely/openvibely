@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -2052,6 +2053,99 @@ func TestWorktreeRepo_UpdateAndClear(t *testing.T) {
 	}
 	if got.WorktreeBranch != "" {
 		t.Errorf("expected empty worktree_branch after clear, got %q", got.WorktreeBranch)
+	}
+}
+
+func TestMergeBranchRejectsConcurrentRepositoryMerge(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+
+	repoDir := createTestGitRepo(t)
+	ws := NewWorktreeService(taskRepo, projectRepo, settingsRepo)
+	task := &models.Task{
+		ProjectID:         "default",
+		Title:             "Concurrent merge",
+		Category:          models.CategoryCompleted,
+		Status:            models.StatusCompleted,
+		MergeTargetBranch: GetCurrentBranch(repoDir),
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	wtPath, branchName, err := ws.SetupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task.WorktreePath = wtPath
+	task.WorktreeBranch = branchName
+	if err := os.WriteFile(filepath.Join(wtPath, "concurrent.txt"), []byte("merge once\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	otherTask := &models.Task{
+		ProjectID:         "default",
+		Title:             "Concurrent repository merge",
+		Category:          models.CategoryCompleted,
+		Status:            models.StatusCompleted,
+		MergeTargetBranch: task.MergeTargetBranch,
+	}
+	if err := taskRepo.Create(ctx, otherTask); err != nil {
+		t.Fatal(err)
+	}
+	otherPath, otherBranch, err := ws.SetupWorktree(ctx, otherTask, repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherTask.WorktreePath = otherPath
+	otherTask.WorktreeBranch = otherBranch
+	if err := os.WriteFile(filepath.Join(otherPath, "other-concurrent.txt"), []byte("must wait\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := CommitWorktreeChanges(otherPath, "other concurrent merge"); err != nil {
+		t.Fatal(err)
+	}
+
+	started := filepath.Join(t.TempDir(), "pre-commit-started")
+	hook := filepath.Join(repoDir, ".git", "hooks", "pre-commit")
+	hookBody := fmt.Sprintf("#!/bin/sh\ntouch %q\nsleep 2\n", started)
+	if err := os.WriteFile(hook, []byte(hookBody), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	firstDone := make(chan error, 1)
+	go func() {
+		_, mergeErr := ws.MergeBranch(ctx, task, repoDir, "merge")
+		firstDone <- mergeErr
+	}()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		if _, statErr := os.Stat(started); statErr == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("first merge did not reach pre-commit hook")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	secondDone := make(chan error, 1)
+	go func() {
+		_, mergeErr := ws.MergeBranch(ctx, otherTask, repoDir, "squash")
+		secondDone <- mergeErr
+	}()
+	select {
+	case secondErr := <-secondDone:
+		if secondErr == nil || !strings.Contains(secondErr.Error(), "merge already in progress") {
+			t.Fatalf("expected immediate concurrent merge rejection, got %v", secondErr)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("concurrent merge was not rejected promptly")
+	}
+	if firstErr := <-firstDone; firstErr != nil {
+		t.Fatalf("first merge failed: %v", firstErr)
 	}
 }
 

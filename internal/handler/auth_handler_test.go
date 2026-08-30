@@ -165,6 +165,22 @@ func TestAuthMiddleware_HTMXGets401WithHXRedirect(t *testing.T) {
 	}
 }
 
+func TestAuthMiddleware_HTMXRejectsUnauthenticatedMergeMutation(t *testing.T) {
+	_, e := authTestHandler(t)
+	req := httptest.NewRequest(http.MethodPost, "/tasks/unauthorized/worktree/merge", strings.NewReader("merge_type=merge"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected unauthenticated merge mutation to return 401, got %d", rec.Code)
+	}
+	if !strings.HasPrefix(rec.Header().Get("HX-Redirect"), "/login?next=") {
+		t.Fatalf("expected merge mutation to redirect authentication through HTMX, got %q", rec.Header().Get("HX-Redirect"))
+	}
+}
+
 func TestAuthMiddleware_RejectsLocalSessionAtExpirationBoundary(t *testing.T) {
 	h, e := authTestHandler(t)
 	cfg := *h.authCfg

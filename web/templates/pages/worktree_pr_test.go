@@ -205,7 +205,7 @@ func TestTaskChangesWorktreeContent_RebaseOnlyWhenAvailable(t *testing.T) {
 	if !strings.Contains(out, "Rebase onto main") {
 		t.Fatal("expected Rebase action label to include target branch")
 	}
-	if !strings.Contains(out, `hx-disabled-elt="this"`) {
+	if !strings.Contains(out, `hx-disabled-elt="#changes-actions-dropdown button"`) {
 		t.Fatal("expected Rebase action to disable while request is in flight")
 	}
 }
@@ -281,7 +281,7 @@ func TestTaskChangesWorktreeContent_FailedStatusShowsRetryActions(t *testing.T) 
 		t.Fatalf("render failed: %v", err)
 	}
 	out := buf.String()
-	for _, want := range []string{"Merge commit", "Fast-forward only", "Squash merge", `hx-disabled-elt="this"`} {
+	for _, want := range []string{"Merge commit", "Fast-forward only", "Squash merge", `hx-disabled-elt="#changes-actions-dropdown button"`} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("expected failed status retry content %q, body=%s", want, out)
 		}

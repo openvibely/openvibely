@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"net/http"
@@ -16,7 +15,6 @@ import (
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/service"
-	"github.com/openvibely/openvibely/web/templates/pages"
 )
 
 func TestChangesMergeFailureRetryAndIneligibleStatesInChrome(t *testing.T) {
@@ -73,6 +71,43 @@ func TestChangesMergeFailureRetryAndIneligibleStatesInChrome(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	conflictRepo := createHandlerTestGitRepo(t)
+	conflictTarget := service.GetCurrentBranch(conflictRepo)
+	conflictFile := filepath.Join(conflictRepo, "browser-conflict.txt")
+	if err := os.WriteFile(conflictFile, []byte("base\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, conflictRepo, "add", "browser-conflict.txt")
+	runGit(t, conflictRepo, "commit", "-m", "conflict base")
+	conflictBranch := "task/browser-conflict-recovery"
+	runGit(t, conflictRepo, "checkout", "-b", conflictBranch)
+	if err := os.WriteFile(conflictFile, []byte("task branch\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, conflictRepo, "add", "browser-conflict.txt")
+	runGit(t, conflictRepo, "commit", "-m", "task conflict")
+	runGit(t, conflictRepo, "checkout", conflictTarget)
+	if err := os.WriteFile(conflictFile, []byte("target branch\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, conflictRepo, "add", "browser-conflict.txt")
+	runGit(t, conflictRepo, "commit", "-m", "target conflict")
+	conflictProject := &models.Project{Name: "Browser conflict recovery", RepoPath: conflictRepo}
+	if err := h.projectSvc.Create(ctx, conflictProject); err != nil {
+		t.Fatal(err)
+	}
+	conflictTask := &models.Task{
+		ProjectID: conflictProject.ID, Title: "Browser conflict recovery", Prompt: "test", Category: models.CategoryCompleted,
+		Status: models.StatusCompleted, WorktreeBranch: conflictBranch, MergeTargetBranch: conflictTarget, MergeStatus: models.MergeStatusPending,
+	}
+	if err := h.taskRepo.Create(ctx, conflictTask); err != nil {
+		t.Fatal(err)
+	}
+	conflictResult, conflictErr := h.worktreeSvc.MergeBranch(ctx, conflictTask, conflictRepo, "merge")
+	if conflictErr != nil || conflictResult == nil || len(conflictResult.ConflictFiles) == 0 {
+		t.Fatalf("create active browser conflict: result=%#v err=%v", conflictResult, conflictErr)
+	}
+
 	var mergeRequests atomic.Int32
 	app := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost && r.URL.Path == "/tasks/"+task.ID+"/worktree/merge" {
@@ -92,17 +127,6 @@ func TestChangesMergeFailureRetryAndIneligibleStatesInChrome(t *testing.T) {
 			t.Errorf("remove blocking target file: %v", err)
 		}
 		w.WriteHeader(http.StatusNoContent)
-	})
-	mux.HandleFunc("/conflict-fragment", func(w http.ResponseWriter, r *http.Request) {
-		conflictTask := *task
-		conflictTask.MergeStatus = models.MergeStatusConflict
-		pr := &models.TaskPullRequest{TaskID: task.ID, PRNumber: 42, PRURL: "https://example.test/pull/42", PRState: "open"}
-		var out bytes.Buffer
-		if err := pages.TaskChangesWorktreeContent("diff --git", &conflictTask, nil, nil, pr, false, false).Render(r.Context(), &out); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		_, _ = w.Write(out.Bytes())
 	})
 	mux.HandleFunc("/browser-result", func(w http.ResponseWriter, r *http.Request) {
 		result <- r.URL.Query().Get("status") + ":" + r.URL.Query().Get("message")
@@ -134,31 +158,43 @@ func TestChangesMergeFailureRetryAndIneligibleStatesInChrome(t *testing.T) {
       poll();
     });
   }
-  function mergeButton() { return document.querySelector('#changes-content button[hx-post$="/worktree/merge"][hx-vals*="merge_type"]'); }
-  window.addEventListener('DOMContentLoaded', function() {
-    (async function() {
-      await waitFor(function() { return !!mergeButton(); }, 'initial merge action');
-      var first = mergeButton();
-      if (first.getAttribute('hx-disabled-elt') !== 'this') throw new Error('merge action lacks duplicate-submit guard');
-      first.click();
-      first.click();
-      await waitFor(function() { var current = mergeButton(); return current && current !== first; }, 'failed-state authoritative retry menu');
-      await new Promise(function(resolve) { setTimeout(resolve, 50); });
-      if (!document.querySelector('#changes-content button[hx-vals*="fast-forward"]') && !document.body.textContent.includes('Fast-forward only')) throw new Error('failed state lost retry actions');
-      await fetch('/unblock', {method:'POST'});
-      mergeButton().click();
-      await waitFor(function() { return !mergeButton(); }, 'terminal merged state');
-      var conflictHTML = await (await fetch('/conflict-fragment')).text();
-      document.getElementById('changes-content').innerHTML = conflictHTML;
-      htmx.process(document.getElementById('changes-content'));
-      if (mergeButton()) throw new Error('conflict state exposed ordinary merge action');
-      if (!document.querySelector('[data-merge-conflict-guidance]') || !document.body.textContent.includes('AI Resolve Conflicts') || !document.body.textContent.includes('Abort Merge')) throw new Error('conflict recovery guidance/actions missing');
-      if (!document.body.textContent.includes('View PR #42')) throw new Error('conflict recovery replaced View PR');
-      await report('pass', 'ok');
-    })().catch(function(error) { report('fail', error && error.message ? error.message : String(error)); });
-  });
-})();
-</script></body></html>`, initialRec.Body.String())
+	  function mergeButton() { return document.querySelector('#changes-content button[hx-post$="/worktree/merge"][hx-vals*="merge_type"]'); }
+	  function mergeButtonFor(type) { return Array.from(document.querySelectorAll('#changes-content button[hx-post$="/worktree/merge"]')).find(function(button) { return (button.getAttribute('hx-vals') || '').includes('"merge_type": "' + type + '"'); }); }
+	  window.addEventListener('DOMContentLoaded', function() {
+	    (async function() {
+	      await waitFor(function() { return !!mergeButton(); }, 'initial merge action');
+	      var first = mergeButtonFor('merge') || mergeButton();
+	      if (first.getAttribute('hx-disabled-elt') !== '#changes-actions-dropdown button') throw new Error('merge action lacks menu-wide duplicate-submit guard');
+	      var alternate = mergeButtonFor('squash');
+	      first.click();
+	      await waitFor(function() { return first.disabled && alternate && alternate.disabled; }, 'all merge options disabled');
+	      alternate.click();
+	      await waitFor(function() { var current = mergeButton(); return current && current !== first; }, 'failed-state authoritative retry menu');
+	      await new Promise(function(resolve) { setTimeout(resolve, 50); });
+	      if (!document.body.textContent.includes('Fast-forward only')) throw new Error('failed state lost retry actions');
+	      await fetch('/unblock', {method:'POST'});
+	      mergeButton().click();
+	      await waitFor(function() { return !mergeButton(); }, 'terminal merged state');
+
+	      var conflictHTML = await (await fetch('/tasks/%s/changes', {headers: {'HX-Request': 'true'}})).text();
+	      document.getElementById('changes-content').innerHTML = conflictHTML;
+	      htmx.process(document.getElementById('changes-content'));
+	      if (mergeButton()) throw new Error('conflict state exposed ordinary merge action');
+	      if (!document.querySelector('[data-merge-conflict-guidance]')) throw new Error('conflict recovery guidance missing');
+	      var resolve = document.querySelector('#changes-content button[hx-post$="/worktree/resolve"]');
+	      var abort = document.querySelector('#changes-content button[hx-post$="/worktree/abort"]');
+	      if (!resolve || !abort) throw new Error('conflict recovery actions missing');
+	      resolve.click();
+	      await waitFor(function() { var current = document.querySelector('#changes-content button[hx-post$="/worktree/resolve"]'); return current && current !== resolve; }, 'failed recovery authoritative refresh');
+	      if (mergeButton()) throw new Error('failed conflict recovery exposed ordinary merge action');
+	      await new Promise(function(resolve) { setTimeout(resolve, 50); });
+	      abort = document.querySelector('#changes-content button[hx-post$="/worktree/abort"]');
+	      abort.click();
+	      await waitFor(function() { return !!mergeButton(); }, 'aborted conflict retry actions');
+	      await report('pass', 'ok');
+	    })().catch(function(error) { report('fail', error && error.message ? error.message : String(error)); });
+	  });})();
+	</script></body></html>`, initialRec.Body.String(), conflictTask.ID)
 	})
 
 	server := httptest.NewServer(mux)

@@ -869,11 +869,85 @@ func (h *Handler) reconcileAlreadyMergedBranch(ctx context.Context, task *models
 }
 
 type taskChangesWorktreeState struct {
-	UseWorktreeContent  bool
-	DiffOutput          string
-	FileStats           []service.WorktreeFileStat
-	BranchAlreadyMerged bool
-	RebaseAvailable     bool
+	UseWorktreeContent    bool
+	DiffOutput            string
+	FileStats             []service.WorktreeFileStat
+	BranchAlreadyMerged   bool
+	LocalMergeUnavailable bool
+	RebaseAvailable       bool
+}
+
+type taskMergeEligibility struct {
+	MergeAvailable   bool
+	ConflictRecovery bool
+	Reason           string
+	TargetBranch     string
+}
+
+func (h *Handler) resolveTaskMergeEligibility(ctx context.Context, task *models.Task, project *models.Project, branchAlreadyMerged bool) taskMergeEligibility {
+	if task == nil || project == nil || project.RepoPath == "" || !service.IsGitRepo(project.RepoPath) {
+		return taskMergeEligibility{Reason: "project repository is unavailable"}
+	}
+
+	targetBranch := task.MergeTargetBranch
+	if targetBranch == "" {
+		targetBranch = service.GetDefaultBranch(project.RepoPath)
+	}
+	result := taskMergeEligibility{TargetBranch: targetBranch}
+
+	hasActiveMerge := service.HasActiveMerge(project.RepoPath)
+	activeConflictFiles := service.ActiveConflictFiles(project.RepoPath)
+	ownsLiveConflict := (hasActiveMerge && service.ActiveMergeMatchesBranch(project.RepoPath, task.WorktreeBranch)) ||
+		(!hasActiveMerge && task.MergeStatus == models.MergeStatusConflict && len(activeConflictFiles) > 0)
+	if ownsLiveConflict {
+		if task.MergeStatus != models.MergeStatusConflict {
+			if err := h.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusConflict); err == nil {
+				task.MergeStatus = models.MergeStatusConflict
+			}
+		}
+		result.ConflictRecovery = true
+		return result
+	}
+	if hasActiveMerge || len(activeConflictFiles) > 0 {
+		result.Reason = "another merge or conflict is active in the project repository"
+		return result
+	}
+
+	if task.MergeStatus == models.MergeStatusConflict {
+		switch task.Status {
+		case models.StatusCompleted, models.StatusFailed, models.StatusCancelled:
+			if err := h.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusPending); err != nil {
+				result.Reason = "merge conflict status could not be refreshed"
+				return result
+			}
+			task.MergeStatus = models.MergeStatusPending
+		default:
+			result.Reason = "task conflict recovery is not ready"
+			return result
+		}
+	}
+
+	if branchAlreadyMerged || task.MergeStatus == models.MergeStatusMerged {
+		result.Reason = "task branch is already merged"
+		return result
+	}
+	switch task.Status {
+	case models.StatusCompleted, models.StatusFailed, models.StatusCancelled:
+	default:
+		result.Reason = fmt.Sprintf("task status %s is not mergeable", task.Status)
+		return result
+	}
+	if task.WorktreeBranch == "" || !gitRefExists(project.RepoPath, task.WorktreeBranch) {
+		result.Reason = "task branch does not exist"
+		return result
+	}
+	if targetBranch == "" || !gitRefExists(project.RepoPath, targetBranch) {
+		result.Reason = "target branch does not exist"
+		return result
+	}
+
+	result.MergeAvailable = true
+	return result
 }
 
 // resolveTaskChangesWorktreeState is the canonical handler-level resolver for
@@ -911,7 +985,9 @@ func (h *Handler) resolveTaskChangesWorktreeState(ctx context.Context, task *mod
 
 	state.UseWorktreeContent = true
 	state.BranchAlreadyMerged = h.reconcileAlreadyMergedBranch(ctx, task)
-	state.RebaseAvailable = h.taskRebaseAvailable(task, project, state.BranchAlreadyMerged)
+	mergeEligibility := h.resolveTaskMergeEligibility(ctx, task, project, state.BranchAlreadyMerged)
+	state.LocalMergeUnavailable = !mergeEligibility.MergeAvailable && !mergeEligibility.ConflictRecovery
+	state.RebaseAvailable = mergeEligibility.MergeAvailable && h.taskRebaseAvailable(task, project, state.BranchAlreadyMerged)
 	isActive := task.Status == models.StatusRunning || task.Status == models.StatusQueued
 
 	// For non-active merged tasks, live git diff is empty after integration;
@@ -1047,7 +1123,7 @@ func (h *Handler) GetTaskChanges(c echo.Context) error {
 			taskPR, _ = h.taskPullRequestRepo.GetByTaskID(ctx, taskID)
 		}
 		return render(c, http.StatusOK, pages.TaskChangesWorktreeContentWithView(
-			state.DiffOutput, task, state.FileStats, reviewComments, taskPR, state.BranchAlreadyMerged, state.RebaseAvailable, diffView,
+			state.DiffOutput, task, state.FileStats, reviewComments, taskPR, state.LocalMergeUnavailable, state.RebaseAvailable, diffView,
 		))
 	}
 

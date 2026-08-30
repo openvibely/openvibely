@@ -466,24 +466,36 @@ func TestHandler_GetTaskChanges_ShowsMergeOptions(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	ctx := context.Background()
 
-	repoPath := t.TempDir()
-	worktreePath := t.TempDir()
+	repoPath := createHandlerTestGitRepo(t)
+	targetBranch := service.GetCurrentBranch(repoPath)
 	project := &models.Project{Name: "Merge Options Project", RepoPath: repoPath, IsDefault: true}
 	if err := h.projectSvc.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
+	h.SetWorktreeService(service.NewWorktreeService(h.taskRepo, h.projectRepo, h.settingsRepo))
 	task := &models.Task{
 		ProjectID:         project.ID,
 		Title:             "Merge Options Task",
-		Category:          models.CategoryActive,
+		Category:          models.CategoryCompleted,
 		Status:            models.StatusCompleted,
-		WorktreePath:      worktreePath,
-		WorktreeBranch:    "task/merge-options",
-		MergeTargetBranch: "main",
+		MergeTargetBranch: targetBranch,
 		MergeStatus:       models.MergeStatusPending,
 	}
 	if err := h.taskRepo.Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
+	}
+	worktreePath, branchName, err := h.worktreeSvc.SetupWorktree(ctx, task, repoPath)
+	if err != nil {
+		t.Fatalf("setup worktree: %v", err)
+	}
+	if err := h.taskRepo.UpdateWorktreeInfo(ctx, task.ID, worktreePath, branchName); err != nil {
+		t.Fatalf("update worktree info: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(worktreePath, "merge-options.txt"), []byte("merge options\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.CommitWorktreeChanges(worktreePath, "merge options"); err != nil {
+		t.Fatal(err)
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes", nil)
