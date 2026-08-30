@@ -662,6 +662,10 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 							window.openVibelyAutomationLiveRefresh('GET');
 						}, 250);
 					});
+					window.addEventListener('sse-live-connected', function() {
+						if (!document.getElementById('automation-live')) return;
+						window.openVibelyAutomationLiveRefresh('GET');
+					});
 					document.addEventListener('visibilitychange', function() {
 						if (document.visibilityState !== 'visible') return;
 						if (!document.getElementById('automation-live')) return;

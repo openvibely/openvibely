@@ -341,6 +341,12 @@ func automationRunNowFreshnessBrowserRunner(automationID string) string {
 	      if (!stateNode('running') || stateNode('failed')) throw new Error('subsequent refresh restored stale failure');
 	      await new Promise(function(resolve) { setTimeout(resolve, 650); });
 	      if (!stateNode('running') || stateNode('failed')) throw new Error('delayed pre-dispatch response won the refresh race');
+	      var staleResponse = await fetch('/stale-live');
+	      var staleDocument = new DOMParser().parseFromString(await staleResponse.text(), 'text/html');
+	      document.getElementById('automation-live').replaceWith(staleDocument.getElementById('automation-live'));
+	      if (!stateNode('failed') || stateNode('running')) throw new Error('failed to restore disconnected stale snapshot');
+	      window.dispatchEvent(new CustomEvent('sse-live-connected', {detail: {connected: true}}));
+	      await waitFor(function() { return stateNode('running') && !stateNode('failed'); }, 'authoritative running state after SSE reconnect');
 	      sessionStorage.setItem('automation-run-now-freshness', 'reloaded');
 	      location.reload();
 	      return;
