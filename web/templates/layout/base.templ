@@ -607,8 +607,20 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						max-height: calc(100vh - 4rem);
 						overflow-y: auto;
 					}
-					/* Chat actions are explicitly state-driven so focus alone never opens the destructive menu. */
-					#chat-page-root [data-chat-actions-dropdown]:not([data-chat-actions-open="true"]) > .dropdown-content {
+				/* Kanban dropdowns are explicitly state-driven so dismissal can
+				   return focus to the trigger without focus reopening the menu. */
+				#kanban-board [data-kanban-menu-key]:not([data-kanban-menu-open="true"]) > [data-kanban-menu-content] {
+					visibility: hidden !important;
+					opacity: 0 !important;
+					pointer-events: none !important;
+				}
+				#kanban-board [data-kanban-menu-key][data-kanban-menu-open="true"] > [data-kanban-menu-content] {
+					visibility: visible !important;
+					opacity: 1 !important;
+					pointer-events: auto !important;
+				}
+				/* Chat actions are explicitly state-driven so focus alone never opens the destructive menu. */
+				#chat-page-root [data-chat-actions-dropdown]:not([data-chat-actions-open="true"]) > .dropdown-content {
 						visibility: hidden !important;
 						opacity: 0 !important;
 						pointer-events: none !important;
@@ -2679,14 +2691,18 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				};
 			})();
 
-			// Track which element was focused before mousedown to properly detect dropdown toggle
+			// Track which element was focused before mousedown to properly detect dropdown toggle.
+			// Also record whether a Kanban menu was open so focus changes during the click
+			// do not invert first-click behavior.
 			let focusedBeforeClick = null;
+			let kanbanMenuWasOpenBeforeClick = false;
 
 			document.addEventListener('mousedown', function(e) {
-				// Record what was focused before this interaction starts
+				// Record state before this interaction starts.
 				focusedBeforeClick = document.activeElement;
+				const kanbanDropdown = e.target && e.target.closest ? e.target.closest('[data-kanban-menu-key]') : null;
+				kanbanMenuWasOpenBeforeClick = !!(kanbanDropdown && kanbanDropdown.getAttribute('data-kanban-menu-open') === 'true');
 			}, true);
-
 			function closestDropdownScrollBoundary(element) {
 				let current = element ? element.parentElement : null;
 				while (current && current !== document.body) {
@@ -2724,20 +2740,24 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				event.stopPropagation(); // Prevent event from bubbling to parent handlers
 				const label = event.currentTarget;
 				const dropdown = label && label.closest ? label.closest('[data-chat-actions-dropdown]') : null;
+				const kanbanDropdown = label && label.closest ? label.closest('[data-kanban-menu-key]') : null;
 				const desktopChatStartupFocus = dropdown && document.documentElement.getAttribute('data-openvibely-runtime') === 'desktop' && dropdown.getAttribute('data-chat-actions-open') !== 'true';
 
 				// Check if this dropdown was already open before the click. A desktop Chat
 				// trigger may only be focused by WebView startup, which is not an open action.
-				if (focusedBeforeClick === label && !desktopChatStartupFocus) {
-					// Dropdown was already open, close it
+				if ((kanbanDropdown && kanbanMenuWasOpenBeforeClick) || (focusedBeforeClick === label && !kanbanDropdown && !desktopChatStartupFocus)) {
+					// Dropdown was already open, close it.
 					event.preventDefault();
-					label.blur();
+					if (kanbanDropdown && window.closeKanbanMenu) {
+						window.closeKanbanMenu(kanbanDropdown, true);
+					} else {
+						label.blur();
+					}
 					return;
 				}
 				// Otherwise, let the default focus behavior open the dropdown, then place it in the visible viewport/scrollport.
 				requestAnimationFrame(function() { positionDropdownForViewport(label); });
 			}
-
 			function handleTaskSelect(event) {
 					const clickedTaskID = event.currentTarget.getAttribute('data-task-id');
 					if (clickedTaskID && clickedTaskID === suppressedTaskClickID) {
@@ -3249,6 +3269,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				let savedScrollPositions = new Map();
 				let savedKanbanInteraction = null;
 				let openKanbanMenuKey = '';
+				let suppressKanbanMenuFocusOpen = false;
 
 				function kanbanMenuItemKey(element) {
 					if (!element) return '';
@@ -3265,6 +3286,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				function snapshotKanbanInteraction(board) {
 					const active = document.activeElement;
 					let dropdown = active && board.contains(active) && active.closest ? active.closest('[data-kanban-menu-key]') : null;
+					if (dropdown && dropdown.getAttribute('data-kanban-menu-open') !== 'true') dropdown = null;
 					const durableMenuKey = board.getAttribute('data-open-kanban-menu-key') || openKanbanMenuKey;
 					if (!dropdown && durableMenuKey) {
 						dropdown = Array.from(board.querySelectorAll('[data-kanban-menu-key]')).find(function(candidate) {
@@ -3292,7 +3314,31 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				function setKanbanMenuExpanded(dropdown, expanded) {
 					const trigger = dropdown && dropdown.querySelector('[data-kanban-menu-trigger]');
 					if (trigger) trigger.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+					if (dropdown) {
+						if (expanded) dropdown.setAttribute('data-kanban-menu-open', 'true');
+						else dropdown.removeAttribute('data-kanban-menu-open');
+					}
 				}
+
+				function closeKanbanMenu(dropdown, restoreTriggerFocus) {
+					openKanbanMenuKey = '';
+					savedKanbanInteraction = null;
+					const board = document.getElementById('kanban-board');
+					if (board) board.removeAttribute('data-open-kanban-menu-key');
+					document.querySelectorAll('[data-kanban-menu-key]').forEach(function(candidate) {
+						setKanbanMenuExpanded(candidate, false);
+					});
+					if (restoreTriggerFocus && dropdown) {
+						const trigger = dropdown.querySelector('[data-kanban-menu-trigger]');
+						if (trigger && document.contains(trigger)) {
+							suppressKanbanMenuFocusOpen = true;
+							trigger.focus({preventScroll: true});
+							suppressKanbanMenuFocusOpen = false;
+							setKanbanMenuExpanded(dropdown, false);
+						}
+					}
+				}
+				window.closeKanbanMenu = closeKanbanMenu;
 
 				function restoreKanbanInteraction(board) {
 					const snapshot = savedKanbanInteraction;
@@ -3310,7 +3356,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						return candidate.getAttribute('data-kanban-menu-key') === menuKey;
 					});
 					if (!dropdown) {
-						openKanbanMenuKey = '';
+						closeKanbanMenu(null, false);
 						return;
 					}
 					const trigger = dropdown.querySelector('[data-kanban-menu-trigger]');
@@ -3322,15 +3368,17 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						}) || trigger;
 					}
 					if (focusTarget) {
-						focusTarget.focus({preventScroll: true});
+						openKanbanMenuKey = menuKey;
+						board.setAttribute('data-open-kanban-menu-key', menuKey);
 						setKanbanMenuExpanded(dropdown, true);
+						focusTarget.focus({preventScroll: true});
 						positionDropdownForViewport(trigger);
 					}
 				}
 
 				document.addEventListener('focusin', function(event) {
 					const dropdown = event.target && event.target.closest ? event.target.closest('[data-kanban-menu-key]') : null;
-					if (!dropdown) return;
+					if (!dropdown || suppressKanbanMenuFocusOpen) return;
 					openKanbanMenuKey = dropdown.getAttribute('data-kanban-menu-key');
 					const board = dropdown.closest('#kanban-board');
 					if (board) {
@@ -3343,26 +3391,22 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				});
 				document.addEventListener('pointerdown', function(event) {
 					if (!event.target || !event.target.closest || !event.target.closest('[data-kanban-menu-key]')) {
-						openKanbanMenuKey = '';
-						savedKanbanInteraction = null;
-						const board = document.getElementById('kanban-board');
-						if (board) board.removeAttribute('data-open-kanban-menu-key');
+						closeKanbanMenu(null, false);
 					}
 				}, true);
 				document.addEventListener('keydown', function(event) {
 					if (event.key === 'Escape') {
-						openKanbanMenuKey = '';
-						savedKanbanInteraction = null;
-						const board = document.getElementById('kanban-board');
-						if (board) board.removeAttribute('data-open-kanban-menu-key');
+						const dropdown = event.target && event.target.closest ? event.target.closest('[data-kanban-menu-key]') : null;
+						if (dropdown) {
+							event.preventDefault();
+							event.stopPropagation();
+							closeKanbanMenu(dropdown, true);
+						}
 					}
 					if (event.key === 'Tab') {
 						setTimeout(function() {
 							if (!document.activeElement || !document.activeElement.closest || !document.activeElement.closest('[data-kanban-menu-key]')) {
-								openKanbanMenuKey = '';
-								savedKanbanInteraction = null;
-								const board = document.getElementById('kanban-board');
-								if (board) board.removeAttribute('data-open-kanban-menu-key');
+								closeKanbanMenu(null, false);
 							}
 						}, 0);
 					}
@@ -3371,7 +3415,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					const dropdown = event.target && event.target.closest ? event.target.closest('[data-kanban-menu-key]') : null;
 					if (!dropdown) return;
 					setTimeout(function() {
-						if (!dropdown.contains(document.activeElement)) setKanbanMenuExpanded(dropdown, false);
+						if (!dropdown.contains(document.activeElement) && dropdown.getAttribute('data-kanban-menu-open') !== 'true') setKanbanMenuExpanded(dropdown, false);
 					}, 0);
 				});
 
@@ -3384,6 +3428,9 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 
 				// Retain compatibility with request paths that do not emit configRequest.
 				document.addEventListener('htmx:beforeRequest', function(event) {
+					const source = event.detail && event.detail.elt;
+					const menuContent = source && source.closest ? source.closest('[data-kanban-menu-content]') : null;
+					if (menuContent) closeKanbanMenu(menuContent.closest('[data-kanban-menu-key]'), false);
 					if (event.detail.target && event.detail.target.id === 'kanban-board' && !savedKanbanInteraction) {
 						snapshotKanbanInteraction(event.detail.target);
 					}
@@ -3391,6 +3438,9 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 
 				// Save scroll positions and provide a fallback snapshot for direct swaps.
 				document.addEventListener('htmx:beforeSwap', function(event) {
+					if (event.detail.target && event.detail.target.id === 'main-content') {
+						closeKanbanMenu(null, false);
+					}
 					if (event.detail.target && event.detail.target.id === 'kanban-board') {
 						if (!savedKanbanInteraction) snapshotKanbanInteraction(event.detail.target);
 						savedScrollPositions.clear();
@@ -4107,8 +4157,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					});
 				})();
 				</script>
-				<!-- Card Pagination Loader -->
-				<script>
+			<!-- Card Pagination Loader -->
+			<script>
 					(function() {
 						var rootSelector = '[data-card-pagination-root]';
 						var pageHeader = 'X-OpenVibely-Card-Page-Has-More';
@@ -4796,7 +4846,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						}
 					})();
 				</script>
-				<!-- Desktop external-link bridge -->			<script>
+			<!-- Desktop external-link bridge -->
+			<script>
 					// In Wails desktop mode, the embedded WebView does not handle
 					// target="_blank" or new-window navigation, so clicks on anchors
 					// like the Task Changes "View PR" link silently do nothing.
@@ -4920,5 +4971,6 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					};
 				})();
 			</script>
-		</body>	</html>
+		</body>
+	</html>
 }

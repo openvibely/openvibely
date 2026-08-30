@@ -24,13 +24,17 @@ func TestKanbanBoardRefreshPreservesSelectionAndOpenMenus(t *testing.T) {
 		`data-kanban-menu-key="column-completed"`,
 		`data-kanban-menu-key="task-selected-task"`,
 		`data-kanban-menu-trigger`,
-		`aria-haspopup="menu"`,
 		`aria-expanded="false"`,
 		`data-kanban-menu-content`,
-		`role="menu"`,
 	} {
 		if !strings.Contains(html, required) {
 			t.Fatalf("kanban refresh state requires rendered contract %q", required)
+		}
+	}
+
+	for _, unsupported := range []string{`aria-haspopup="menu"`, `role="menu"`} {
+		if strings.Contains(html, unsupported) {
+			t.Fatalf("kanban dropdown must not claim unsupported ARIA menu semantics %q", unsupported)
 		}
 	}
 
@@ -85,7 +89,7 @@ func TestKanbanColumn_DropdownTriggersUseLabelForDesktopWebviewCompatibility(t *
 
 	if !strings.Contains(html, `<label tabindex="0" class="btn btn-xs btn-ghost`) ||
 		!strings.Contains(html, `title="More actions" onclick="handleDropdownToggle(event)"`) ||
-		!strings.Contains(html, `data-kanban-menu-trigger aria-label="More actions" aria-haspopup="menu" aria-expanded="false"`) {
+		!strings.Contains(html, `data-kanban-menu-trigger aria-label="More actions" aria-expanded="false"`) {
 		t.Fatal("expected backlog kebab trigger to use <label> for stable dropdown focus behavior")
 	}
 	if strings.Contains(html, `<button tabindex="0" class="btn btn-xs btn-ghost`) {
@@ -100,7 +104,7 @@ func TestKanbanColumn_DropdownTriggersUseLabelForDesktopWebviewCompatibility(t *
 	html = buf.String()
 	if !strings.Contains(html, `<label tabindex="0" class="btn btn-xs btn-ghost`) ||
 		!strings.Contains(html, `title="More actions" onclick="handleDropdownToggle(event)"`) ||
-		!strings.Contains(html, `data-kanban-menu-trigger aria-label="More actions" aria-haspopup="menu" aria-expanded="false"`) {
+		!strings.Contains(html, `data-kanban-menu-trigger aria-label="More actions" aria-expanded="false"`) {
 		t.Fatal("expected completed kebab trigger to use <label> for stable dropdown focus behavior")
 	}
 	if strings.Contains(html, `<button tabindex="0" class="btn btn-xs btn-ghost`) {

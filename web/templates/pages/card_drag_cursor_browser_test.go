@@ -199,24 +199,59 @@ window.addEventListener('DOMContentLoaded', function() {
       var taskMenuTrigger = selectedActiveTask.querySelector('[data-kanban-menu-trigger]');
       taskMenuTrigger.dispatchEvent(new MouseEvent('mousedown', {bubbles:true, cancelable:true}));
       taskMenuTrigger.focus();
-      taskMenuTrigger.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true}));
+      taskMenuTrigger.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true, detail:1}));
       if (taskMenuTrigger.getAttribute('aria-expanded') !== 'true') fail('task menu must expose its open state');
       if (document.querySelector('#kanban-board').getAttribute('data-open-kanban-menu-key') !== 'task-task-active-status-drag') fail('task menu open key was not recorded before refresh');
+      var focusedTaskOption = Array.from(selectedActiveTask.querySelectorAll('[data-kanban-menu-content] a, [data-kanban-menu-content] button')).find(function(option) { return option.textContent.trim() === 'Edit'; });
+      if (!focusedTaskOption) fail('task menu must render the pre-refresh Edit option');
+      focusedTaskOption.focus();
+      if (document.activeElement !== focusedTaskOption) fail('task menu option did not receive focus before refresh');
       await htmx.ajax('GET', '/refresh-kanban?state=running', {target:'#kanban-board', swap:'outerHTML'});
       selectedTask = document.querySelector('#task-task-drag-cursor');
       selectedActiveTask = document.querySelector('#task-task-active-status-drag');
       taskMenuTrigger = selectedActiveTask.querySelector('[data-kanban-menu-trigger]');
       if (!selectedTask.classList.contains('task-selected') || !selectedActiveTask.classList.contains('task-selected')) fail('authoritative refresh cleared multi-selection');
       if (document.querySelector('#kanban-board').getAttribute('data-open-kanban-menu-key') !== 'task-task-active-status-drag') fail('task menu open key was not restored: key=' + document.querySelector('#kanban-board').getAttribute('data-open-kanban-menu-key'));
-      await waitFor(function() { return document.activeElement === taskMenuTrigger && taskMenuTrigger.getAttribute('aria-expanded') === 'true'; }, 'task menu focus restoration after settle');
+      await waitFor(function() { return document.activeElement === taskMenuTrigger && taskMenuTrigger.getAttribute('aria-expanded') === 'true'; }, 'removed task option fallback to menu trigger after settle');
       if (!selectedActiveTask.querySelector('[data-kanban-menu-content]').textContent.includes('Cancel')) fail('task menu did not retain authoritative running options');
-      var columnMenuTrigger = document.querySelector('[data-kanban-menu-key="column-backlog"] [data-kanban-menu-trigger]');
+      var columnMenu = document.querySelector('[data-kanban-menu-key="column-backlog"]');
+      var columnMenuTrigger = columnMenu.querySelector('[data-kanban-menu-trigger]');
       columnMenuTrigger.dispatchEvent(new MouseEvent('mousedown', {bubbles:true, cancelable:true}));
       columnMenuTrigger.focus();
-      columnMenuTrigger.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true}));
+      columnMenuTrigger.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true, detail:1}));
+      var focusedColumnOption = columnMenu.querySelector('[data-kanban-menu-content] a');
+      focusedColumnOption.focus();
+      if (document.activeElement !== focusedColumnOption) fail('dropzone menu option is not keyboard focusable before refresh');
+      var focusedColumnOptionKey = focusedColumnOption.getAttribute('hx-post');
       await htmx.ajax('GET', '/refresh-kanban?state=running', {target:'#kanban-board', swap:'outerHTML'});
-      columnMenuTrigger = document.querySelector('[data-kanban-menu-key="column-backlog"] [data-kanban-menu-trigger]');
-      await waitFor(function() { return document.activeElement === columnMenuTrigger && columnMenuTrigger.getAttribute('aria-expanded') === 'true'; }, 'dropzone menu focus restoration after settle');
+      columnMenu = document.querySelector('[data-kanban-menu-key="column-backlog"]');
+      columnMenuTrigger = columnMenu.querySelector('[data-kanban-menu-trigger]');
+      focusedColumnOption = Array.from(columnMenu.querySelectorAll('[data-kanban-menu-content] a')).find(function(option) { return option.getAttribute('hx-post') === focusedColumnOptionKey; });
+      if (!focusedColumnOption) fail('surviving dropzone option was removed by authoritative refresh');
+      await waitFor(function() { return document.activeElement === focusedColumnOption && columnMenuTrigger.getAttribute('aria-expanded') === 'true'; }, 'surviving dropzone menu option focus restoration after settle (active=' + (document.activeElement && document.activeElement.outerHTML) + ', expanded=' + columnMenuTrigger.getAttribute('aria-expanded') + ', open=' + columnMenu.hasAttribute('data-kanban-menu-open') + ')');
+
+      columnMenuTrigger.dispatchEvent(new MouseEvent('mousedown', {bubbles:true, cancelable:true}));
+      columnMenuTrigger.focus();
+      columnMenuTrigger.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true, detail:1}));
+      if (columnMenuTrigger.getAttribute('aria-expanded') !== 'false' || columnMenu.hasAttribute('data-kanban-menu-open')) fail('trigger dismissal must close the dropzone menu');
+      await htmx.ajax('GET', '/refresh-kanban?state=running', {target:'#kanban-board', swap:'outerHTML'});
+      columnMenu = document.querySelector('[data-kanban-menu-key="column-backlog"]');
+      columnMenuTrigger = columnMenu.querySelector('[data-kanban-menu-trigger]');
+      if (columnMenuTrigger.getAttribute('aria-expanded') !== 'false' || columnMenu.hasAttribute('data-kanban-menu-open')) fail('trigger-dismissed menu reopened after refresh');
+
+      columnMenuTrigger.dispatchEvent(new MouseEvent('mousedown', {bubbles:true, cancelable:true}));
+      columnMenuTrigger.focus();
+      columnMenuTrigger.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true, detail:1}));
+      focusedColumnOption = columnMenu.querySelector('[data-kanban-menu-content] a');
+      focusedColumnOption.focus();
+      focusedColumnOption.dispatchEvent(new KeyboardEvent('keydown', {key:'Escape', bubbles:true, cancelable:true}));
+      if (document.activeElement !== columnMenuTrigger || columnMenuTrigger.getAttribute('aria-expanded') !== 'false' || columnMenu.hasAttribute('data-kanban-menu-open')) fail('Escape must close the menu and restore trigger focus');
+      await htmx.ajax('GET', '/refresh-kanban?state=running', {target:'#kanban-board', swap:'outerHTML'});
+      columnMenu = document.querySelector('[data-kanban-menu-key="column-backlog"]');
+      columnMenuTrigger = columnMenu.querySelector('[data-kanban-menu-trigger]');
+      if (columnMenuTrigger.getAttribute('aria-expanded') !== 'false' || columnMenu.hasAttribute('data-kanban-menu-open')) fail('Escape-dismissed menu reopened after refresh');
+
+      columnMenuTrigger.focus();
       var outside = document.createElement('button');
       document.body.appendChild(outside);
       outside.dispatchEvent(new PointerEvent('pointerdown', {bubbles:true, cancelable:true, pointerId:18, pointerType:'mouse', button:0}));
@@ -234,6 +269,17 @@ window.addEventListener('DOMContentLoaded', function() {
       await htmx.ajax('GET', '/refresh-kanban?state=removed', {target:'#kanban-board', swap:'outerHTML'});
       if (document.querySelector('#task-task-active-status-drag')) fail('removed menu invoker survived authoritative refresh');
       if (document.activeElement && document.activeElement.closest && document.activeElement.closest('[data-kanban-menu-key="task-task-active-status-drag"]')) fail('removed invoker retained stale menu focus');
+
+      selectedTask = document.querySelector('#task-task-drag-cursor');
+      taskMenuTrigger = selectedTask.querySelector('[data-kanban-menu-trigger]');
+      taskMenuTrigger.dispatchEvent(new MouseEvent('mousedown', {bubbles:true, cancelable:true}));
+      taskMenuTrigger.focus();
+      taskMenuTrigger.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true, detail:1}));
+      var editTask = Array.from(selectedTask.querySelectorAll('[data-kanban-menu-content] a')).find(function(option) { return option.textContent.trim() === 'Edit'; });
+      htmx.process(selectedTask);
+      editTask.click();
+      await waitFor(function() { return document.querySelector('[data-browser-task-detail]'); }, 'task menu navigation');
+      if (taskMenuTrigger.getAttribute('aria-expanded') !== 'false') fail('task menu navigation did not clear open state before replacement');
       location.href = '/tasks?project_id=project-card-drag-cursor&drag_only=1';
       return;
     }
@@ -286,6 +332,11 @@ window.addEventListener('DOMContentLoaded', function() {
 				t.Fatalf("render refreshed kanban: %v", err)
 			}
 			_, _ = w.Write(out.Bytes())
+		case "/tasks/task-drag-cursor":
+			if r.Header.Get("HX-Request") != "true" {
+				t.Fatalf("expected task menu navigation to use HTMX")
+			}
+			_, _ = w.Write([]byte(`<div data-browser-task-detail>Task detail</div>`))
 		case "/schedule":
 			if r.Header.Get("HX-Request") == "true" {
 				_, _ = w.Write([]byte(`<div id="schedule-content" data-project-id="project-card-drag-cursor"></div>`))

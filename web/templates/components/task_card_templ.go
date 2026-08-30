@@ -543,7 +543,7 @@ func TaskCard(task models.Task, projectID string, viewingCategory string, llmMod
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "\" aria-haspopup=\"menu\" aria-expanded=\"false\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z\"></path></svg></label><ul tabindex=\"0\" class=\"dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-32 max-w-[calc(100vw-2rem)] border border-base-300\" data-kanban-menu-content role=\"menu\"><!-- Run option (hide in Active column) -->")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "\" aria-expanded=\"false\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z\"></path></svg></label><ul tabindex=\"0\" class=\"dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-32 max-w-[calc(100vw-2rem)] border border-base-300\" data-kanban-menu-content><!-- Run option (hide in Active column) -->")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

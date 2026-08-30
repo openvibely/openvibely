@@ -284,7 +284,7 @@ func KanbanColumn(tasks []models.Task, projectID string, category models.TaskCat
 			return templ_7745c5c3_Err
 		}
 		if category == models.CategoryCompleted {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "<div class=\"dropdown dropdown-end\" data-kanban-menu-key=\"column-completed\"><label tabindex=\"0\" class=\"btn btn-xs btn-ghost min-h-11 h-11 w-11 p-0\" title=\"More actions\" onclick=\"handleDropdownToggle(event)\" data-kanban-menu-trigger aria-label=\"More actions\" aria-haspopup=\"menu\" aria-expanded=\"false\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-5 w-5\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z\"></path></svg></label><ul tabindex=\"0\" class=\"dropdown-content menu p-2 shadow bg-base-100 rounded-box w-56 max-w-[calc(100vw-2rem)] z-[100]\" data-kanban-menu-content role=\"menu\"><li class=\"menu-title\"><span>Sort By</span></li><li>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "<div class=\"dropdown dropdown-end\" data-kanban-menu-key=\"column-completed\"><label tabindex=\"0\" class=\"btn btn-xs btn-ghost min-h-11 h-11 w-11 p-0\" title=\"More actions\" onclick=\"handleDropdownToggle(event)\" data-kanban-menu-trigger aria-label=\"More actions\" aria-expanded=\"false\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-5 w-5\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z\"></path></svg></label><ul tabindex=\"0\" class=\"dropdown-content menu p-2 shadow bg-base-100 rounded-box w-56 max-w-[calc(100vw-2rem)] z-[100]\" data-kanban-menu-content><li class=\"menu-title\"><span>Sort By</span></li><li>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -293,7 +293,7 @@ func KanbanColumn(tasks []models.Task, projectID string, category models.TaskCat
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "<a hx-post=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "<a tabindex=\"0\" hx-post=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -328,7 +328,7 @@ func KanbanColumn(tasks []models.Task, projectID string, category models.TaskCat
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "<a hx-post=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "<a tabindex=\"0\" hx-post=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -363,7 +363,7 @@ func KanbanColumn(tasks []models.Task, projectID string, category models.TaskCat
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "<a hx-post=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "<a tabindex=\"0\" hx-post=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -398,7 +398,7 @@ func KanbanColumn(tasks []models.Task, projectID string, category models.TaskCat
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "<a hx-post=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "<a tabindex=\"0\" hx-post=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -433,7 +433,7 @@ func KanbanColumn(tasks []models.Task, projectID string, category models.TaskCat
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "<a hx-post=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "<a tabindex=\"0\" hx-post=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -468,7 +468,7 @@ func KanbanColumn(tasks []models.Task, projectID string, category models.TaskCat
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "<a hx-post=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "<a tabindex=\"0\" hx-post=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -523,7 +523,7 @@ func KanbanColumn(tasks []models.Task, projectID string, category models.TaskCat
 			}
 		}
 		if category == models.CategoryBacklog {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "<div class=\"dropdown dropdown-end\" data-kanban-menu-key=\"column-backlog\"><label tabindex=\"0\" class=\"btn btn-xs btn-ghost min-h-11 h-11 w-11 p-0\" title=\"More actions\" onclick=\"handleDropdownToggle(event)\" data-kanban-menu-trigger aria-label=\"More actions\" aria-haspopup=\"menu\" aria-expanded=\"false\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-5 w-5\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z\"></path></svg></label><ul tabindex=\"0\" class=\"dropdown-content menu p-2 shadow bg-base-100 rounded-box w-56 max-w-[calc(100vw-2rem)] z-[100]\" data-kanban-menu-content role=\"menu\"><li class=\"menu-title\"><span>Sort By</span></li><li>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "<div class=\"dropdown dropdown-end\" data-kanban-menu-key=\"column-backlog\"><label tabindex=\"0\" class=\"btn btn-xs btn-ghost min-h-11 h-11 w-11 p-0\" title=\"More actions\" onclick=\"handleDropdownToggle(event)\" data-kanban-menu-trigger aria-label=\"More actions\" aria-expanded=\"false\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-5 w-5\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z\"></path></svg></label><ul tabindex=\"0\" class=\"dropdown-content menu p-2 shadow bg-base-100 rounded-box w-56 max-w-[calc(100vw-2rem)] z-[100]\" data-kanban-menu-content><li class=\"menu-title\"><span>Sort By</span></li><li>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -532,7 +532,7 @@ func KanbanColumn(tasks []models.Task, projectID string, category models.TaskCat
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "<a hx-post=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "<a tabindex=\"0\" hx-post=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -567,7 +567,7 @@ func KanbanColumn(tasks []models.Task, projectID string, category models.TaskCat
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "<a hx-post=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "<a tabindex=\"0\" hx-post=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -602,7 +602,7 @@ func KanbanColumn(tasks []models.Task, projectID string, category models.TaskCat
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "<a hx-post=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "<a tabindex=\"0\" hx-post=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -637,7 +637,7 @@ func KanbanColumn(tasks []models.Task, projectID string, category models.TaskCat
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "<a hx-post=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "<a tabindex=\"0\" hx-post=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -672,7 +672,7 @@ func KanbanColumn(tasks []models.Task, projectID string, category models.TaskCat
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "<a hx-post=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "<a tabindex=\"0\" hx-post=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -707,7 +707,7 @@ func KanbanColumn(tasks []models.Task, projectID string, category models.TaskCat
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "<a hx-post=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "<a tabindex=\"0\" hx-post=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -743,7 +743,7 @@ func KanbanColumn(tasks []models.Task, projectID string, category models.TaskCat
 					return templ_7745c5c3_Err
 				}
 				if hasEligibleBacklogTasks(tasks) {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 52, "<li><a hx-post=\"")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 52, "<li><a tabindex=\"0\" hx-post=\"")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
@@ -788,7 +788,7 @@ func KanbanColumn(tasks []models.Task, projectID string, category models.TaskCat
 					}
 					for _, priority := range []int{4, 3, 2, 1} {
 						if count := countEligibleBacklogByPriority(tasks, priority); count > 0 {
-							templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 56, "<li><a hx-post=\"")
+							templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 56, "<li><a tabindex=\"0\" hx-post=\"")
 							if templ_7745c5c3_Err != nil {
 								return templ_7745c5c3_Err
 							}
@@ -834,7 +834,7 @@ func KanbanColumn(tasks []models.Task, projectID string, category models.TaskCat
 						}
 					}
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 60, " <li><a hx-post=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 60, " <li><a tabindex=\"0\" hx-post=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}

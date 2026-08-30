@@ -175,15 +175,15 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 			</div>
 			if category == models.CategoryCompleted {
 				<div class="dropdown dropdown-end" data-kanban-menu-key="column-completed">
-					<label tabindex="0" class="btn btn-xs btn-ghost min-h-11 h-11 w-11 p-0" title="More actions" onclick="handleDropdownToggle(event)" data-kanban-menu-trigger aria-label="More actions" aria-haspopup="menu" aria-expanded="false">
+					<label tabindex="0" class="btn btn-xs btn-ghost min-h-11 h-11 w-11 p-0" title="More actions" onclick="handleDropdownToggle(event)" data-kanban-menu-trigger aria-label="More actions" aria-expanded="false">
 						<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
 						</svg>
 					</label>
-					<ul tabindex="0" class="dropdown-content menu p-2 shadow bg-base-100 rounded-box w-56 max-w-[calc(100vw-2rem)] z-[100]" data-kanban-menu-content role="menu">
+					<ul tabindex="0" class="dropdown-content menu p-2 shadow bg-base-100 rounded-box w-56 max-w-[calc(100vw-2rem)] z-[100]" data-kanban-menu-content>
 						<li class="menu-title"><span>Sort By</span></li>
 						<li>
-							<a
+							<a tabindex="0"
 								hx-post={ fmt.Sprintf("/tasks/completed/sort?project_id=%s&sort=title_asc", projectID) }
 								hx-target="#kanban-board"
 								hx-swap="outerHTML"
@@ -196,7 +196,7 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 							</a>
 						</li>
 						<li>
-							<a
+							<a tabindex="0"
 								hx-post={ fmt.Sprintf("/tasks/completed/sort?project_id=%s&sort=title_desc", projectID) }
 								hx-target="#kanban-board"
 								hx-swap="outerHTML"
@@ -209,7 +209,7 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 							</a>
 						</li>
 						<li class="border-t border-base-300 mt-1 pt-1">
-							<a
+							<a tabindex="0"
 								hx-post={ fmt.Sprintf("/tasks/completed/sort?project_id=%s&sort=completed_desc", projectID) }
 								hx-target="#kanban-board"
 								hx-swap="outerHTML"
@@ -222,7 +222,7 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 							</a>
 						</li>
 						<li>
-							<a
+							<a tabindex="0"
 								hx-post={ fmt.Sprintf("/tasks/completed/sort?project_id=%s&sort=completed_asc", projectID) }
 								hx-target="#kanban-board"
 								hx-swap="outerHTML"
@@ -235,7 +235,7 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 							</a>
 						</li>
 						<li class="border-t border-base-300 mt-1 pt-1">
-							<a
+							<a tabindex="0"
 								hx-post={ fmt.Sprintf("/tasks/completed/sort?project_id=%s&sort=priority_desc", projectID) }
 								hx-target="#kanban-board"
 								hx-swap="outerHTML"
@@ -248,7 +248,7 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 							</a>
 						</li>
 						<li>
-							<a
+							<a tabindex="0"
 								hx-post={ fmt.Sprintf("/tasks/completed/sort?project_id=%s&sort=priority_asc", projectID) }
 								hx-target="#kanban-board"
 								hx-swap="outerHTML"
@@ -284,15 +284,15 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 			}
 			if category == models.CategoryBacklog {
 				<div class="dropdown dropdown-end" data-kanban-menu-key="column-backlog">
-					<label tabindex="0" class="btn btn-xs btn-ghost min-h-11 h-11 w-11 p-0" title="More actions" onclick="handleDropdownToggle(event)" data-kanban-menu-trigger aria-label="More actions" aria-haspopup="menu" aria-expanded="false">
+					<label tabindex="0" class="btn btn-xs btn-ghost min-h-11 h-11 w-11 p-0" title="More actions" onclick="handleDropdownToggle(event)" data-kanban-menu-trigger aria-label="More actions" aria-expanded="false">
 						<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
 						</svg>
 					</label>
-					<ul tabindex="0" class="dropdown-content menu p-2 shadow bg-base-100 rounded-box w-56 max-w-[calc(100vw-2rem)] z-[100]" data-kanban-menu-content role="menu">
+					<ul tabindex="0" class="dropdown-content menu p-2 shadow bg-base-100 rounded-box w-56 max-w-[calc(100vw-2rem)] z-[100]" data-kanban-menu-content>
 						<li class="menu-title"><span>Sort By</span></li>
 						<li>
-							<a
+							<a tabindex="0"
 								hx-post={ fmt.Sprintf("/tasks/backlog/sort?project_id=%s&sort=title_asc", projectID) }
 								hx-target="#kanban-board"
 								hx-swap="outerHTML"
@@ -305,7 +305,7 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 							</a>
 						</li>
 						<li>
-							<a
+							<a tabindex="0"
 								hx-post={ fmt.Sprintf("/tasks/backlog/sort?project_id=%s&sort=title_desc", projectID) }
 								hx-target="#kanban-board"
 								hx-swap="outerHTML"
@@ -318,7 +318,7 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 							</a>
 						</li>
 						<li class="border-t border-base-300 mt-1 pt-1">
-							<a
+							<a tabindex="0"
 								hx-post={ fmt.Sprintf("/tasks/backlog/sort?project_id=%s&sort=created_desc", projectID) }
 								hx-target="#kanban-board"
 								hx-swap="outerHTML"
@@ -331,7 +331,7 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 							</a>
 						</li>
 						<li>
-							<a
+							<a tabindex="0"
 								hx-post={ fmt.Sprintf("/tasks/backlog/sort?project_id=%s&sort=created_asc", projectID) }
 								hx-target="#kanban-board"
 								hx-swap="outerHTML"
@@ -344,7 +344,7 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 							</a>
 						</li>
 						<li class="border-t border-base-300 mt-1 pt-1">
-							<a
+							<a tabindex="0"
 								hx-post={ fmt.Sprintf("/tasks/backlog/sort?project_id=%s&sort=priority_desc", projectID) }
 								hx-target="#kanban-board"
 								hx-swap="outerHTML"
@@ -357,7 +357,7 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 							</a>
 						</li>
 						<li>
-							<a
+							<a tabindex="0"
 								hx-post={ fmt.Sprintf("/tasks/backlog/sort?project_id=%s&sort=priority_asc", projectID) }
 								hx-target="#kanban-board"
 								hx-swap="outerHTML"
@@ -373,7 +373,7 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 							<li class="menu-title mt-2"><span>Actions</span></li>
 							if hasEligibleBacklogTasks(tasks) {
 								<li>
-									<a
+									<a tabindex="0"
 										hx-post={ fmt.Sprintf("/tasks/backlog/execute?project_id=%s", projectID) }
 										hx-target="#kanban-board"
 										hx-swap="outerHTML"
@@ -390,7 +390,7 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 								for _, priority := range []int{4, 3, 2, 1} {
 									if count := countEligibleBacklogByPriority(tasks, priority); count > 0 {
 										<li>
-											<a
+											<a tabindex="0"
 												hx-post={ fmt.Sprintf("/tasks/backlog/execute?project_id=%s&priority=%d", projectID, priority) }
 												hx-target="#kanban-board"
 												hx-swap="outerHTML"
@@ -404,7 +404,7 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 								}
 							}
 							<li>
-								<a
+								<a tabindex="0"
 									hx-post={ fmt.Sprintf("/tasks/backlog/activate?project_id=%s", projectID) }
 									hx-target="#kanban-board"
 									hx-swap="outerHTML"
