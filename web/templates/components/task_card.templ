@@ -295,37 +295,46 @@ templ taskCardStateIcon(task models.Task) {
 		switch state.Key {
 			case "merged":
 				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 3v12a4 4 0 004 4h6m0 0l-3-3m3 3l-3 3M17 3v6a4 4 0 01-4 4H7m0-10L4 6m3-3l3 3"></path>
+					<circle cx="6.5" cy="4.5" r="2.5" stroke-width="2"></circle>
+					<circle cx="6.5" cy="19.5" r="2.5" stroke-width="2"></circle>
+					<circle cx="18" cy="12" r="2.5" stroke-width="2"></circle>
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6.5 7v10M6.5 7c0 3.2 3.4 5 9 5"></path>
 				</svg>
 			case "queued":
 				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 2m6-2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+					<circle cx="5" cy="7" r="1" fill="currentColor" stroke="none"></circle>
+					<circle cx="5" cy="12" r="1" fill="currentColor" stroke="none"></circle>
+					<circle cx="5" cy="17" r="1" fill="currentColor" stroke="none"></circle>
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 7h10M9 12h10M9 17h7"></path>
 				</svg>
 			case "running":
 				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path>
-					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+					<circle cx="12" cy="12" r="9" stroke-width="2"></circle>
+					<path d="m10 8 6 4-6 4z" fill="currentColor" stroke="none"></path>
 				</svg>
 			case "completed":
 				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+					<circle cx="12" cy="12" r="9" stroke-width="2"></circle>
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m7.5 12 3 3 6-6"></path>
 				</svg>
 			case "failed":
 				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m8 3-5 5v8l5 5h8l5-5V8l-5-5zM12 7.5v6m0 3h.01"></path>
 				</svg>
 			case "cancelled":
 				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 5.636l-12.728 12.728M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+					<rect x="4" y="4" width="16" height="16" rx="4" stroke-width="2"></rect>
+					<path d="M9 9h6v6H9z" fill="currentColor" stroke="none"></path>
 				</svg>
 			case "blocked":
 				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+					<rect x="5" y="10" width="14" height="10" rx="2" stroke-width="2"></rect>
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10V7a4 4 0 0 1 8 0v3"></path>
 				</svg>
 			default:
 				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
 					<circle cx="12" cy="12" r="9" stroke-width="2"></circle>
-					<circle cx="12" cy="12" r="2" fill="currentColor" stroke="none"></circle>
+					<circle cx="12" cy="12" r="1.75" fill="currentColor" stroke="none"></circle>
 				</svg>
 		}
 	</span>
