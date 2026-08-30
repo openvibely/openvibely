@@ -113,6 +113,7 @@ type AlertListFilter struct {
 	Read                     *bool
 	ImplementationTaskLinked *bool
 	AutomationInboxBindings  []AutomationBinding
+	Search                   string
 	Limit                    int
 	Offset                   int
 }

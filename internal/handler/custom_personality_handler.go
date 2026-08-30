@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"net/http"
 	"strings"
 
@@ -9,6 +10,45 @@ import (
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
+
+// listPersonalityCardPage returns the bounded custom-card page plus the small
+// fixed set needed to render preset overrides and the selected custom card.
+func (h *Handler) listPersonalityCardPage(ctx context.Context, page cardPageRequest, selected string) ([]models.CustomPersonality, bool, error) {
+	if h.customPersonalityRepo == nil {
+		return nil, false, nil
+	}
+	keys := make([]string, 0, len(service.AllPersonalities())+1)
+	excludedKeys := make([]string, 0, len(service.AllPersonalities()))
+	if selected = strings.TrimSpace(selected); selected != "" {
+		keys = append(keys, selected)
+	}
+	for _, preset := range service.AllPersonalities() {
+		if key := strings.TrimSpace(preset.Key); key != "" {
+			keys = append(keys, key)
+			excludedKeys = append(excludedKeys, key)
+		}
+	}
+
+	pageItems, err := h.customPersonalityRepo.ListPageExcludingKeys(ctx, page.PageSize+1, page.Offset, page.Search, excludedKeys)
+	if err != nil {
+		return nil, false, err
+	}
+	pageItems, hasMore := cardPageItems(pageItems, page.PageSize)
+	fixed, err := h.customPersonalityRepo.ListCardsByKeys(ctx, keys)
+	if err != nil {
+		return nil, false, err
+	}
+	merged := make([]models.CustomPersonality, 0, len(pageItems)+len(fixed))
+	seen := make(map[string]struct{}, len(pageItems)+len(fixed))
+	for _, personality := range append(pageItems, fixed...) {
+		if _, ok := seen[personality.Key]; ok {
+			continue
+		}
+		seen[personality.Key] = struct{}{}
+		merged = append(merged, personality)
+	}
+	return merged, hasMore, nil
+}
 
 // renderPersonalitySection re-renders the personality section with current data.
 func (h *Handler) renderPersonalitySection(c echo.Context) error {
@@ -19,12 +59,14 @@ func (h *Handler) renderPersonalitySection(c echo.Context) error {
 		personality, _ = h.settingsRepo.Get(ctx, "personality")
 	}
 
-	var customs []models.CustomPersonality
-	if h.customPersonalityRepo != nil {
-		customs, _ = h.customPersonalityRepo.List(ctx)
+	page := parseCardPageRequest(c)
+	customs, hasMore, err := h.listPersonalityCardPage(ctx, page, personality)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to load custom personalities")
 	}
+	setCardPageResponse(c, hasMore)
 
-	return render(c, http.StatusOK, pages.PersonalitySection(personality, customs))
+	return render(c, http.StatusOK, pages.PersonalitySectionPageWithPagination(personality, customs, hasMore))
 }
 
 type customPersonalitySavePayload struct {

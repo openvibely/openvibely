@@ -61,6 +61,9 @@ type ChannelsSettingsView struct {
 	HasXChannel                  bool
 	HasEmailChannel              bool
 	Webhooks                     []models.WebhookEndpoint
+	WebhooksPageOffset           int
+	WebhooksSearch               string
+	WebhooksHasMore              bool
 	AgentPickerOptions           []repository.AgentPickerOption
 	WebhookAgents                map[string][]models.WebhookEndpointAgent
 	ChannelTargets               []models.ChannelTarget

@@ -351,6 +351,28 @@ func buildAlertListQuery(columns, projectID string, filter models.AlertListFilte
 			query += ` AND implementation_task_id IS NULL`
 		}
 	}
+	if strings.TrimSpace(filter.Search) != "" {
+		query += ` AND INSTR(LOWER(
+				COALESCE(title, '') || ' ' || COALESCE(message, '') || ' ' ||
+				COALESCE(severity, '') || ' ' || COALESCE(decision_state, '') || ' ' ||
+				COALESCE(processing_state, '') || ' ' || COALESCE(source, '') || ' ' ||
+				COALESCE(
+				CASE strftime('%m', created_at, 'localtime')
+					WHEN '01' THEN 'Jan' WHEN '02' THEN 'Feb' WHEN '03' THEN 'Mar'
+					WHEN '04' THEN 'Apr' WHEN '05' THEN 'May' WHEN '06' THEN 'Jun'
+					WHEN '07' THEN 'Jul' WHEN '08' THEN 'Aug' WHEN '09' THEN 'Sep'
+					WHEN '10' THEN 'Oct' WHEN '11' THEN 'Nov' WHEN '12' THEN 'Dec'
+				END || ' ' ||
+				CAST(CAST(strftime('%d', created_at, 'localtime') AS INTEGER) AS TEXT) || ', ' ||
+				strftime('%Y', created_at, 'localtime') || ' ' ||
+				CAST(((CAST(strftime('%H', created_at, 'localtime') AS INTEGER) + 11) % 12) + 1 AS TEXT) || ':' ||
+				strftime('%M', created_at, 'localtime') || ' ' ||
+				CASE WHEN CAST(strftime('%H', created_at, 'localtime') AS INTEGER) < 12 THEN 'AM' ELSE 'PM' END,
+				''
+			)
+		), ?) > 0`
+		args = append(args, strings.ToLower(strings.TrimSpace(filter.Search)))
+	}
 	if len(filter.AutomationInboxBindings) > 0 {
 		query += ` AND (`
 		for i, binding := range filter.AutomationInboxBindings {

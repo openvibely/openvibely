@@ -160,9 +160,14 @@ templ SettingsContent(view ChannelsSettingsView) {
 templ settingsContent(view ChannelsSettingsView) {
 	<div
 		id="channels-container"
-		data-search-container
-		hx-get={ "/channels?project_id=" + view.CurrentProjectID }
-		hx-trigger="channels-refresh from:body"
+			data-search-container
+			data-card-pagination-root
+			data-card-pagination-url={ "/channels?project_id=" + view.CurrentProjectID }
+			data-card-pagination-list="#webhook-card-list"
+				data-card-pagination-card-selector="[data-webhook-id]"
+				data-card-pagination-key="data-webhook-id"
+				data-card-pagination-page-size="20"
+				data-card-pagination-has-more={ cardPaginationHasMoreAttribute(view.WebhooksHasMore) }			hx-get={ "/channels?project_id=" + view.CurrentProjectID }		hx-trigger="channels-refresh from:body"
 		hx-target="this"
 		hx-swap="outerHTML"
 	>
@@ -585,7 +590,9 @@ templ settingsContent(view ChannelsSettingsView) {
 						</div>
 					</div>
 				}
-				for _, wh := range view.Webhooks {
+				<div id="webhook-card-list" data-card-pagination-list>
+					<div class="grid gap-4">
+					for _, wh := range view.Webhooks {
 					<!-- Webhook Card -->
 					<div
 						class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
@@ -664,15 +671,18 @@ templ settingsContent(view ChannelsSettingsView) {
 					</div>
 				</div>
 			}
-				if !view.HasGitHubChannel && !view.HasTelegramChannel && !view.HasSlackChannel && !view.HasDiscordChannel && !view.HasXChannel && !view.HasEmailChannel && len(view.Webhooks) == 0 {
-					<div class="card bg-base-100 shadow-sm border border-dashed border-base-300" data-search-card data-search-text="No channels added yet">
+					</div>
+				</div>
+				@CardPaginationStatusWithBoundary(view.WebhooksHasMore)
+				if !view.HasGitHubChannel && !view.HasTelegramChannel && !view.HasSlackChannel && !view.HasDiscordChannel && !view.HasXChannel && !view.HasEmailChannel && len(view.Webhooks) == 0 && view.WebhooksPageOffset == 0 && view.WebhooksSearch == "" {
+					<div class="card bg-base-100 shadow-sm border border-dashed border-base-300" data-search-empty-state data-search-card data-search-text="No channels added yet">
 						<div class="card-body">
 							<h3 class="font-semibold">No channels added yet</h3>
 							<p class="text-sm opacity-70">Use `Add Channel` to configure GitHub, Slack, Discord, Telegram Bot, X, Email, or Webhooks.</p>
 						</div>
 					</div>
-				}		</div>
-
+				}
+			</div>
 					@OutboundTargetsModal(view.CurrentProjectID, view.ChannelTargets, view.SendMessageExplicitTargets)
 			<dialog id="delete_channel_confirm_modal" class="modal">
 				<div class="modal-box">

@@ -84,15 +84,18 @@ func (h *Handler) ListAutomations(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	cards, err := h.automationGraphSvc.List(ctx, projectID)
+	page := parseCardPageRequest(c)
+	cards, err := h.automationGraphSvc.ListPage(ctx, projectID, page.PageSize+1, page.Offset, page.Search)
 	if err != nil {
 		return err
 	}
-	if isHTMX(c) {
-		return render(c, http.StatusOK, pages.AutomationsContent(cards, projectID))
+	cards, hasMore := cardPageItems(cards, page.PageSize)
+	if page.IsFragment || isHTMX(c) {
+		setCardPageResponse(c, hasMore)
+		return render(c, http.StatusOK, pages.AutomationsContentPage(cards, projectID, hasMore))
 	}
 	projects, _ := h.projectSvc.ListSelectorOptions(ctx)
-	return render(c, http.StatusOK, pages.Automations(projects, projectID, cards))
+	return render(c, http.StatusOK, pages.AutomationsPage(projects, projectID, cards, hasMore))
 }
 
 func (h *Handler) GetAutomationLive(c echo.Context) error {

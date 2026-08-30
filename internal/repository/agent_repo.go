@@ -226,6 +226,39 @@ func (r *AgentRepo) List(ctx context.Context) ([]models.Agent, error) {
 	return r.list(ctx, `SELECT `+agentColumns+` FROM agents WHERE COALESCE(generated_status, 'user_edited') <> 'archived' ORDER BY name ASC`)
 }
 
+// ListPage returns one bounded Models-page-compatible agent projection. The
+// Agents card currently carries its edit metadata, so this method retains the
+// existing row shape while bounding both the result count and response HTML.
+func (r *AgentRepo) ListPage(ctx context.Context, limit, offset int, search string) ([]models.Agent, error) {
+	limit, offset = normalizeCardPageArgs(limit, offset)
+	query := `SELECT ` + agentColumns + ` FROM agents WHERE COALESCE(generated_status, 'user_edited') <> 'archived'`
+	args := make([]any, 0, 3)
+	if search = strings.TrimSpace(search); search != "" {
+		query += ` AND INSTR(LOWER(
+			COALESCE(name, '') || ' ' || COALESCE(description, '') || ' ' ||
+			COALESCE(model, '') || ' ' || COALESCE(system_prompt, '')
+		), ?) > 0`
+		args = append(args, strings.ToLower(search))
+	}
+	query += ` ORDER BY name ASC, id ASC LIMIT ? OFFSET ?`
+	args = append(args, limit, offset)
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("listing agent page: %w", err)
+	}
+	defer rows.Close()
+
+	agents := make([]models.Agent, 0, limit)
+	for rows.Next() {
+		agent, err := scanAgent(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scanning agent page: %w", err)
+		}
+		agents = append(agents, *agent)
+	}
+	return agents, rows.Err()
+}
+
 func (r *AgentRepo) ListChatAssignableDefinitions(ctx context.Context) ([]models.ChatAssignableAgentDefinition, error) {
 	rows, err := r.db.QueryContext(ctx, `
 			SELECT id, name, COALESCE(description, ''), COALESCE(key, ''), COALESCE(system_kind, ''),

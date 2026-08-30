@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"fmt"
+	"strings"
 
 	"github.com/openvibely/openvibely/internal/models"
 )
@@ -150,6 +151,36 @@ func (r *WebhookRepo) ListCardsByProject(ctx context.Context, projectID string) 
 		var enabled int
 		if err := rows.Scan(&w.ID, &w.ProjectID, &w.Name, &enabled, &w.PathToken, &w.DefaultPriority, &w.CreatedAt, &w.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scanning webhook endpoint card: %w", err)
+		}
+		w.Enabled = enabled != 0
+		endpoints = append(endpoints, w)
+	}
+	return endpoints, rows.Err()
+}
+
+// ListCardsByProjectPage returns one bounded, project-scoped webhook card page.
+func (r *WebhookRepo) ListCardsByProjectPage(ctx context.Context, projectID string, limit, offset int, search string) ([]models.WebhookEndpoint, error) {
+	limit, offset = normalizeCardPageArgs(limit, offset)
+	query := `SELECT ` + webhookCardColumns + ` FROM webhook_endpoints WHERE project_id = ?`
+	args := []any{projectID}
+	if search = strings.TrimSpace(search); search != "" {
+		query += ` AND INSTR(LOWER('webhook ' || COALESCE(name, '')), ?) > 0`
+		args = append(args, strings.ToLower(search))
+	}
+	query += ` ORDER BY name ASC, id ASC LIMIT ? OFFSET ?`
+	args = append(args, limit, offset)
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("listing webhook endpoint card page: %w", err)
+	}
+	defer rows.Close()
+
+	endpoints := make([]models.WebhookEndpoint, 0, limit)
+	for rows.Next() {
+		var w models.WebhookEndpoint
+		var enabled int
+		if err := rows.Scan(&w.ID, &w.ProjectID, &w.Name, &enabled, &w.PathToken, &w.DefaultPriority, &w.CreatedAt, &w.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scanning webhook endpoint card page: %w", err)
 		}
 		w.Enabled = enabled != 0
 		endpoints = append(endpoints, w)

@@ -77,6 +77,7 @@ func (h *Handler) handleChannels(c echo.Context) error {
 	}
 
 	ctx := c.Request().Context()
+	page := parseCardPageRequest(c)
 	resolvedProjectID := projectID
 	if id, err := h.getCurrentProjectID(c); err == nil && id != "" {
 		resolvedProjectID = id
@@ -329,11 +330,17 @@ func (h *Handler) handleChannels(c echo.Context) error {
 		}
 	}
 
-	// Load webhooks for current project
+	// Load webhooks for current project using the bounded card projection.
 	var webhooks []models.WebhookEndpoint
+	var webhooksHasMore bool
 	if resolvedProjectID != "" && h.webhookRepo != nil {
-		webhooks, _ = h.webhookRepo.ListCardsByProject(ctx, resolvedProjectID)
+		pageItems, err := h.webhookRepo.ListCardsByProjectPage(ctx, resolvedProjectID, page.PageSize+1, page.Offset, page.Search)
+		if err != nil {
+			return err
+		}
+		webhooks, webhooksHasMore = cardPageItems(pageItems, page.PageSize)
 	}
+	setCardPageResponse(c, webhooksHasMore)
 
 	// Load compact agents for webhook agent selection in the current project.
 	var agentPickerOptions []repository.AgentPickerOption
@@ -395,14 +402,17 @@ func (h *Handler) handleChannels(c echo.Context) error {
 		HasSlackChannel:              hasSlackChannel,
 		HasDiscordChannel:            hasDiscordChannel,
 		HasXChannel:                  hasXChannel,
-		HasEmailChannel:              hasEmailChannel, Webhooks: webhooks,
-		AgentPickerOptions:         agentPickerOptions,
-		WebhookAgents:              webhookAgents,
-		ChannelTargets:             channelTargets,
-		SendMessageExplicitTargets: sendMessageExplicitTargets,
+		HasEmailChannel:              hasEmailChannel,
+		Webhooks:                     webhooks,
+		WebhooksPageOffset:           page.Offset,
+		WebhooksSearch:               page.Search,
+		WebhooksHasMore:              webhooksHasMore,
+		AgentPickerOptions:           agentPickerOptions,
+		WebhookAgents:                webhookAgents,
+		ChannelTargets:               channelTargets,
+		SendMessageExplicitTargets:   sendMessageExplicitTargets,
 	}
-
-	if isHTMX(c) {
+	if isHTMX(c) || page.IsFragment {
 		return render(c, http.StatusOK, pages.SettingsContent(channelView))
 	}
 	return render(c, http.StatusOK, pages.SettingsPage(projects, channelView))
@@ -411,6 +421,7 @@ func (h *Handler) handleChannels(c echo.Context) error {
 // handleAppSettings renders the application settings page (personality, etc.)
 func (h *Handler) handleAppSettings(c echo.Context) error {
 	projectID := c.QueryParam("project_id")
+	page := parseCardPageRequest(c)
 
 	// Get projects for sidebar
 	projects, err := h.projectSvc.ListSelectorOptions(c.Request().Context())
@@ -424,16 +435,17 @@ func (h *Handler) handleAppSettings(c echo.Context) error {
 		personality, _ = h.settingsRepo.Get(c.Request().Context(), "personality")
 	}
 
-	// Load custom personalities
-	var customPersonalities []models.CustomPersonality
-	if h.customPersonalityRepo != nil {
-		customPersonalities, _ = h.customPersonalityRepo.List(c.Request().Context())
+	// Load custom personalities using the bounded card projection.
+	customPersonalities, customPersonalitiesHasMore, err := h.listPersonalityCardPage(c.Request().Context(), page, personality)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to load custom personalities")
 	}
+	setCardPageResponse(c, customPersonalitiesHasMore)
 
-	if isHTMX(c) {
-		return render(c, http.StatusOK, pages.AppSettingsContent(personality, projectID, customPersonalities))
+	if isHTMX(c) || page.IsFragment {
+		return render(c, http.StatusOK, pages.AppSettingsContentWithPagination(personality, projectID, customPersonalities, customPersonalitiesHasMore))
 	}
-	return render(c, http.StatusOK, pages.AppSettingsPage(personality, projects, projectID, customPersonalities))
+	return render(c, http.StatusOK, pages.AppSettingsPageWithPagination(personality, projects, projectID, customPersonalities, customPersonalitiesHasMore))
 }
 
 // handleTelegramSave saves the Telegram bot token and starts the bot

@@ -10,16 +10,28 @@ import (
 
 templ Alerts(projects []models.Project, currentProjectID string, alerts []models.AlertSummary, unreadCount int) {
 	@layout.Base("Alerts", projects, currentProjectID) {
-		@alertsContent(alerts, currentProjectID, unreadCount)
+		@alertsContent(alerts, currentProjectID, unreadCount, false)
+	}
+}
+
+// AlertsPage renders the initial bounded alert page with its page boundary.
+templ AlertsPage(projects []models.Project, currentProjectID string, alerts []models.AlertSummary, unreadCount int, hasMore bool) {
+	@layout.Base("Alerts", projects, currentProjectID) {
+		@alertsContent(alerts, currentProjectID, unreadCount, hasMore)
 	}
 }
 
 templ AlertsContent(alerts []models.AlertSummary, currentProjectID string, unreadCount int) {
-	@alertsContent(alerts, currentProjectID, unreadCount)
+	@alertsContent(alerts, currentProjectID, unreadCount, false)
 }
 
-templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unreadCount int) {
-	<div id="alerts-container" class="h-full overflow-y-auto overflow-x-hidden max-w-full min-w-0" data-search-container>
+// AlertsContentPage renders a bounded alert page with its page boundary.
+templ AlertsContentPage(alerts []models.AlertSummary, currentProjectID string, unreadCount int, hasMore bool) {
+	@alertsContent(alerts, currentProjectID, unreadCount, hasMore)
+}
+
+templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unreadCount int, hasMore bool) {
+		<div id="alerts-container" class="h-full overflow-y-auto overflow-x-hidden max-w-full min-w-0" data-search-container data-card-pagination-root data-card-pagination-replacement-managed="true" data-card-pagination-url={ fmt.Sprintf("/alerts?project_id=%s", currentProjectID) } data-card-pagination-list="#alerts-card-list" data-card-pagination-card-selector="[data-alert-id]" data-card-pagination-key="data-alert-id" data-card-pagination-page-size="20" data-card-pagination-has-more={ cardPaginationHasMoreAttribute(hasMore) }>
 		<div id="alerts-content"
 			hx-get={ fmt.Sprintf("/alerts?project_id=%s", currentProjectID) }
 			hx-trigger="alertUpdate from:body"
@@ -73,7 +85,7 @@ templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unrea
 					</div>
 				}
 			</div>
-		</div>
+			</div>
 			<div id="system-update-card" hx-preserve class="card bg-base-200 border border-base-300 mb-4 hidden">
 				<div class="card-body gap-3">
 					<div class="flex items-start justify-between gap-4">
@@ -94,9 +106,10 @@ templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unrea
 			</div>
 			<div class="mb-4 rounded-box bg-base-200/60 px-4 py-3 text-sm text-base-content/70">			Showing notifications for the selected project only. Approval permits creation of an implementation task; it does not authorize merge, release, or deployment.
 		</div>
-		@CardSearchInput("alerts", "Search alerts...")
-		if len(alerts) == 0 {
-			<div class="text-center py-12">
+			@CardSearchInput("alerts", "Search alerts...")
+			<div id="alerts-card-list" data-card-pagination-list>
+			if len(alerts) == 0 {
+				<div class="text-center py-12" data-search-empty-state>
 				<svg xmlns="http://www.w3.org/2000/svg" class="h-16 w-16 mx-auto opacity-30 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"></path>
 				</svg>
@@ -109,10 +122,10 @@ templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unrea
 				}
 			</div>
 		}
+			</div>
+			@CardPaginationStatusWithBoundary(hasMore)
 		</div>
-	</div>
-	<!-- Task Detail Dialog Container -->
-	<script>
+		<!-- Task Detail Dialog Container -->	<script>
 		function renderSystemUpdateCard(data) {
 				var card = document.getElementById('system-update-card');
 				if (!card || !window.openVibelyNormalizeSystemUpdateSnapshot) return;
@@ -351,7 +364,8 @@ templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unrea
 				if (focusTarget) focusTarget.focus({preventScroll: true});
 			});
 		})();
-	</script>
+		</script>
+	</div>
 }
 
 // alertSearchText intentionally excludes the full body and metadata so the
