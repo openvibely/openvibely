@@ -454,12 +454,11 @@ func taskPullRequestFailure(c echo.Context, fromTaskCard bool, message string) e
 // CreateTaskPullRequest creates or reuses a pull request for a task worktree branch.
 func (h *Handler) CreateTaskPullRequest(c echo.Context) error {
 	taskID := c.Param("taskId")
+	fromTaskCard := cardMutationSource(c)
 	task, err := h.taskSvc.GetByID(c.Request().Context(), taskID)
 	if err != nil || task == nil {
-		setHTMXToast(c, "Task not found", "failed")
-		return c.NoContent(http.StatusNoContent)
+		return taskPullRequestFailure(c, fromTaskCard, "Task not found")
 	}
-	fromTaskCard := cardMutationSource(c)
 	if fromTaskCard {
 		projectID := strings.TrimSpace(c.FormValue("project_id"))
 		if projectID == "" || task.ProjectID != projectID {

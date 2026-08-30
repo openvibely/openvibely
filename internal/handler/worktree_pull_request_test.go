@@ -46,6 +46,28 @@ func TestCreateTaskPullRequest_RequiresWorktreeBranch(t *testing.T) {
 	}
 }
 
+func TestCreateTaskPullRequest_MissingTaskCardRequestReturnsNonSuccess(t *testing.T) {
+	_, e, _, _ := setupTestHandlerWithDB(t)
+
+	form := url.Values{"merge_source": {"task_card"}, "project_id": {"project-1"}}
+	req := httptest.NewRequest(http.MethodPost, "/tasks/missing-task/worktree/pull-request", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("missing task-card PR should return 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+	trigger := rec.Header().Get("HX-Trigger")
+	if !strings.Contains(trigger, "openvibelyToast") || !strings.Contains(trigger, "Task not found") {
+		t.Fatalf("missing task-card PR should emit a failure toast, got %s", trigger)
+	}
+	if strings.Contains(rec.Body.String(), "kanban-board") || strings.Contains(rec.Body.String(), "changes-actions-dropdown") {
+		t.Fatalf("missing task-card PR should not return a replacement fragment: %s", rec.Body.String())
+	}
+}
+
 func TestCreateTaskPullRequest_RejectsForeignTaskCardProject(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
 	h.SetTaskPullRequestRepo(repository.NewTaskPullRequestRepo(db))
