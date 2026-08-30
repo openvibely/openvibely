@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -193,8 +194,11 @@ func TestAutomationRunNowSupersedesFailedLiveStateAcrossRefreshAndReloadInChrome
 
 	tc := NewTestContext(t)
 	ctx := context.Background()
+	broadcaster := events.NewBroadcaster()
+	tc.handler.broadcaster = broadcaster
 	project := tc.CreateProject().WithName("Automation failed Run now freshness").Build()
 	automationRepo := repository.NewAutomationRepo(tc.db)
+	automationRepo.SetBroadcaster(broadcaster)
 	registration := service.NewAutomationRegistrationService(automationRepo, service.NewAutomationAdapterRegistry())
 	lifecycle := service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo)
 	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), registration)
@@ -248,11 +252,6 @@ func TestAutomationRunNowSupersedesFailedLiveStateAcrossRefreshAndReloadInChrome
 	}
 
 	browserResult := make(chan string, 1)
-	tc.echo.GET("/htmx-2.0.4.min.js", func(c echo.Context) error { return c.Blob(http.StatusOK, "text/javascript; charset=utf-8", htmxJS) })
-	tc.echo.GET("/browser-fixture", func(c echo.Context) error {
-		runner := automationRunNowFreshnessBrowserRunner(definition.Automation.ID)
-		return c.HTML(http.StatusOK, `<!doctype html><html><head><script src="/htmx-2.0.4.min.js"></script>`+runner+`</head><body><main id="main-content" hx-get="/automations/`+definition.Automation.ID+`?project_id=`+project.ID+`" hx-trigger="load"></main></body></html>`)
-	})
 	tc.echo.GET("/stale-live", func(c echo.Context) error {
 		time.Sleep(500 * time.Millisecond)
 		return c.HTML(http.StatusOK, stale.String())
@@ -283,7 +282,52 @@ func TestAutomationRunNowSupersedesFailedLiveStateAcrossRefreshAndReloadInChrome
 		return c.NoContent(http.StatusNoContent)
 	})
 
-	server := httptest.NewServer(tc.echo)
+	var sseConnections atomic.Int32
+	var firstSSEMu sync.Mutex
+	var firstSSECancel context.CancelFunc
+	liveEcho := echo.New()
+	liveEcho.GET("/events/live", func(c echo.Context) error {
+		connection := sseConnections.Add(1)
+		if connection == 1 {
+			streamCtx, cancel := context.WithCancel(c.Request().Context())
+			firstSSEMu.Lock()
+			firstSSECancel = cancel
+			firstSSEMu.Unlock()
+			c.SetRequest(c.Request().WithContext(streamCtx))
+		}
+		return tc.handler.LiveEventsSSE(c)
+	})
+
+	mux := http.NewServeMux()
+	mux.Handle("/events/live", liveEcho)
+	mux.HandleFunc("/disconnect-live", func(w http.ResponseWriter, _ *http.Request) {
+		firstSSEMu.Lock()
+		cancel := firstSSECancel
+		firstSSEMu.Unlock()
+		if cancel == nil {
+			http.Error(w, "initial SSE stream is not connected", http.StatusConflict)
+			return
+		}
+		cancel()
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("/htmx-2.0.4.min.js", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		_, _ = w.Write(htmxJS)
+	})
+	mux.HandleFunc("/browser-fixture", func(w http.ResponseWriter, r *http.Request) {
+		var out bytes.Buffer
+		if err := pages.AutomationLive([]models.Project{*project}, project.ID, *failedGraph, true).Render(r.Context(), &out); err != nil {
+			t.Fatalf("render Automation Live fixture: %v", err)
+		}
+		page := strings.Replace(out.String(), "https://unpkg.com/htmx.org@2.0.4", "/htmx-2.0.4.min.js", 1)
+		page = strings.Replace(page, "</head>", automationRunNowFreshnessBrowserRunner(definition.Automation.ID)+"</head>", 1)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(page))
+	})
+	mux.Handle("/", tc.echo)
+
+	server := httptest.NewServer(mux)
 	defer server.Close()
 	stderrPath := filepath.Join(t.TempDir(), "automation-run-now-freshness.stderr")
 	stderrFile, err := os.Create(stderrPath)
@@ -311,11 +355,16 @@ func TestAutomationRunNowSupersedesFailedLiveStateAcrossRefreshAndReloadInChrome
 		stderr, _ := os.ReadFile(stderrPath)
 		t.Fatalf("Run now freshness browser regression failed: %s\nChrome:\n%s", outcome, strings.TrimSpace(string(stderr)))
 	}
+	if got := sseConnections.Load(); got < 2 {
+		t.Fatalf("shared SSE connections = %d, want at least 2 to prove native EventSource reconnection", got)
+	}
 }
 
 func automationRunNowFreshnessBrowserRunner(automationID string) string {
 	return fmt.Sprintf(`<script>
-	document.addEventListener('DOMContentLoaded', function() {
+		window._automationRunNowSSEConnections = 0;
+		window.addEventListener('sse-live-connected', function() { window._automationRunNowSSEConnections++; });
+		document.addEventListener('DOMContentLoaded', function() {
 	  function report(status, message) { return fetch('/browser-result?status=' + encodeURIComponent(status) + '&message=' + encodeURIComponent(message || ''), {method:'POST'}); }
 	  function waitFor(check, label) {
 	    var started = performance.now();
@@ -330,7 +379,8 @@ func automationRunNowFreshnessBrowserRunner(automationID string) string {
 	  }
 	  function stateNode(state) { return document.querySelector('.automation-graph-node--' + state); }
 	  (async function() {
-	    await waitFor(function() { return document.getElementById('automation-live') && window.openVibelyAutomationLiveRefresh; }, 'initial Automation Live');
+		    await waitFor(function() { return document.getElementById('automation-live') && window.openVibelyAutomationLiveRefresh; }, 'initial Automation Live');
+		    await waitFor(function() { return window._automationRunNowSSEConnections >= 1; }, 'initial shared SSE connection');
 	    var phase = sessionStorage.getItem('automation-run-now-freshness');
 	    if (!phase) {
 	      if (!stateNode('failed')) throw new Error('initial failed scheduled task was not rendered');
@@ -344,9 +394,11 @@ func automationRunNowFreshnessBrowserRunner(automationID string) string {
 	      var staleResponse = await fetch('/stale-live');
 	      var staleDocument = new DOMParser().parseFromString(await staleResponse.text(), 'text/html');
 	      document.getElementById('automation-live').replaceWith(staleDocument.getElementById('automation-live'));
-	      if (!stateNode('failed') || stateNode('running')) throw new Error('failed to restore disconnected stale snapshot');
-	      window.dispatchEvent(new CustomEvent('sse-live-connected', {detail: {connected: true}}));
-	      await waitFor(function() { return stateNode('running') && !stateNode('failed'); }, 'authoritative running state after SSE reconnect');
+		      if (!stateNode('failed') || stateNode('running')) throw new Error('failed to restore disconnected stale snapshot');
+		      var disconnectResponse = await fetch('/disconnect-live', {method:'POST'});
+		      if (!disconnectResponse.ok) throw new Error('failed to disconnect production shared SSE stream: ' + disconnectResponse.status);
+		      await waitFor(function() { return window._automationRunNowSSEConnections >= 2; }, 'native shared SSE reconnection');
+		      await waitFor(function() { return stateNode('running') && !stateNode('failed'); }, 'authoritative running state after SSE reconnect');
 	      sessionStorage.setItem('automation-run-now-freshness', 'reloaded');
 	      location.reload();
 	      return;
