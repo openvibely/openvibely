@@ -358,12 +358,26 @@ func TestCardPaginationPersonalityHandlerKeepsFixedOverridesOutsidePageWindow(t 
 		}))
 	}
 
-	first := serveCardPageRequest(t, e, "/personality?page=0&page_size=2&search=paged+custom&card_page=1")
+	first := serveCardPageRequest(t, e, "/personality?page=0&page_size=20&search=paged+custom&card_page=1")
 	require.Equal(t, http.StatusOK, first.Code)
 	require.Equal(t, "true", first.Header().Get(cardPageHasMoreHeader))
 	require.Contains(t, first.Body.String(), `data-personality-key="paged_custom_21"`)
 	require.Contains(t, first.Body.String(), `data-personality-key="`+presets[1].Key+`"`)
 	require.Contains(t, first.Body.String(), `data-personality-name="Overridden preset"`)
+	require.Equal(t, 20, strings.Count(first.Body.String(), `data-personality-pagination-card="true"`))
+	require.Equal(t, 1, strings.Count(first.Body.String(), `data-personality-pagination-card="false"`))
+	for i := 0; i < 20; i++ {
+		require.Contains(t, first.Body.String(), fmt.Sprintf(`data-personality-key="paged_custom_%02d"`, i))
+	}
+	require.NotContains(t, first.Body.String(), `data-personality-key="paged_custom_20"`)
+
+	continuationOffset := strings.Count(first.Body.String(), `data-personality-pagination-card="true"`)
+	continuation := serveCardPageRequest(t, e, fmt.Sprintf("/personality?page=1&page_size=20&offset=%d&search=paged+custom&card_page=1", continuationOffset))
+	require.Equal(t, http.StatusOK, continuation.Code)
+	require.Equal(t, "false", continuation.Header().Get(cardPageHasMoreHeader))
+	require.Equal(t, 1, strings.Count(continuation.Body.String(), `data-personality-pagination-card="true"`))
+	require.Contains(t, continuation.Body.String(), `data-personality-key="paged_custom_20"`)
+	require.Contains(t, continuation.Body.String(), `data-personality-key="paged_custom_21"`)
 }
 
 func TestCardPaginationProductionBrowserLoadsSequentialPagesAndResetsSearch(t *testing.T) {

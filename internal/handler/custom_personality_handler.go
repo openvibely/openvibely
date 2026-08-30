@@ -18,14 +18,17 @@ func (h *Handler) listPersonalityCardPage(ctx context.Context, page cardPageRequ
 		return nil, false, nil
 	}
 	keys := make([]string, 0, len(service.AllPersonalities())+1)
-	excludedKeys := make([]string, 0, len(service.AllPersonalities()))
+	excludedKeys := make([]string, 0, len(service.AllPersonalities())+1)
 	if selected = strings.TrimSpace(selected); selected != "" {
 		keys = append(keys, selected)
+		excludedKeys = append(excludedKeys, selected)
 	}
 	for _, preset := range service.AllPersonalities() {
 		if key := strings.TrimSpace(preset.Key); key != "" {
 			keys = append(keys, key)
-			excludedKeys = append(excludedKeys, key)
+			if key != selected {
+				excludedKeys = append(excludedKeys, key)
+			}
 		}
 	}
 

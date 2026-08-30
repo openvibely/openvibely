@@ -164,7 +164,7 @@ templ builtInPersonalityCard(p service.PersonalityInfo, personality string, cust
 	</div>
 }
 
-templ customPersonalityCard(cp models.CustomPersonality, personality string) {
+templ customPersonalityCard(cp models.CustomPersonality, personality string, paginationCard bool) {
 	<div
 		class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
 		data-personality-key={ cp.Key }
@@ -172,6 +172,7 @@ templ customPersonalityCard(cp models.CustomPersonality, personality string) {
 		data-personality-description={ cp.Description }
 		data-personality-preview={ cp.SystemPromptPreview }
 		data-personality-is-preset="false"
+		data-personality-pagination-card={ cardPaginationHasMoreAttribute(paginationCard) }
 		data-personality-has-custom="true"
 		data-search-card
 		data-search-text={ cp.Name + " " + cp.Description + " " + cp.SystemPromptPreview }
@@ -254,7 +255,7 @@ templ PersonalitySectionPageWithPagination(personality string, customPersonaliti
 }
 
 templ personalitySection(personality string, customPersonalities []models.CustomPersonality, hasMore bool) {
-		<div id="personality-section" data-selected-personality={ personality } data-search-container data-card-pagination-root data-card-pagination-url="/personality" data-card-pagination-list="#personality-card-list" data-card-pagination-card-selector="[data-personality-is-preset='false']" data-card-pagination-key="data-personality-key" data-card-pagination-page-size="20" data-card-pagination-has-more={ cardPaginationHasMoreAttribute(hasMore) }>		<div class="flex items-center justify-between mb-6">
+		<div id="personality-section" data-selected-personality={ personality } data-search-container data-card-pagination-root data-card-pagination-url="/personality" data-card-pagination-list="#personality-card-list" data-card-pagination-card-selector="[data-personality-pagination-card='true']" data-card-pagination-key="data-personality-key" data-card-pagination-page-size="20" data-card-pagination-has-more={ cardPaginationHasMoreAttribute(hasMore) }>		<div class="flex items-center justify-between mb-6">
 			<h2 class="text-2xl font-bold">Personality</h2>
 			<button class="btn btn-primary btn-sm" onclick="openNewPersonalityModal()">
 				+ Add Personality
@@ -271,7 +272,7 @@ templ personalitySection(personality string, customPersonalities []models.Custom
 				}
 				for _, cp := range nonPresetCustoms(customPersonalities) {
 					if cp.Key == personality {
-						@customPersonalityCard(cp, personality)
+						@customPersonalityCard(cp, personality, false)
 					}
 				}
 			}
@@ -330,7 +331,7 @@ templ personalitySection(personality string, customPersonalities []models.Custom
 			<!-- Non-preset custom personality cards -->
 			for _, cp := range nonPresetCustoms(customPersonalities) {
 				if cp.Key != personality {
-					@customPersonalityCard(cp, personality)
+					@customPersonalityCard(cp, personality, true)
 				}
 			}
 		</div>
