@@ -370,16 +370,18 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					}
 					.schedule-selected {
 						position: relative;
+						overflow: visible !important;
 						background: oklch(var(--p) / 0.35) !important;
 					}
 					.schedule-selected::after {
 						content: '';
 						position: absolute;
-						inset: 0;
+						inset: 0 0 0 -2px;
 						border: 2px solid oklch(var(--p));
 						border-radius: inherit;
 						box-sizing: border-box;
 						pointer-events: none;
+						z-index: 1;
 					}
 				/* Modal layering */
 				dialog.modal {

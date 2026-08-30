@@ -363,7 +363,8 @@ window.addEventListener('DOMContentLoaded', function() {
     if (firstStyle.outlineStyle !== 'none' || secondStyle.outlineStyle !== 'none') fail('schedule selection must not use a floating outline');
     if (firstStyle.boxShadow !== 'none' || secondStyle.boxShadow !== 'none') fail('schedule selection must not use an external shadow ring');
     var firstSelectionStroke = getComputedStyle(first, '::after');
-    if (firstSelectionStroke.borderTopWidth === '0px' || firstSelectionStroke.borderRightWidth === '0px' || firstSelectionStroke.borderBottomWidth === '0px') fail('schedule selection must draw an inset card border on every side');
+    if (firstSelectionStroke.borderTopWidth === '0px' || firstSelectionStroke.borderRightWidth === '0px' || firstSelectionStroke.borderBottomWidth === '0px' || firstSelectionStroke.borderLeftWidth === '0px') fail('schedule selection must draw an inset card border on every side');
+    if (firstSelectionStroke.left !== '-2px') fail('schedule selection must cover the card own left accent border: left=' + firstSelectionStroke.left);
     var firstRect = first.getBoundingClientRect(), secondRect = second.getBoundingClientRect();
     if (firstRect.bottom > secondRect.top) fail('selected schedules in one time block must not overlap');
     var source = first.closest('.drop-zone');
