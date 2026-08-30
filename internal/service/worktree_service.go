@@ -25,6 +25,10 @@ import (
 // the same repository.
 var ErrMergeInProgress = errors.New("merge already in progress for repository")
 
+// ErrMergeEligibilityChanged is returned when live task/Git state becomes
+// ineligible after the request's initial check but before lease-held mutation.
+var ErrMergeEligibilityChanged = errors.New("merge eligibility changed before mutation")
+
 // WorktreeService manages git worktrees for task isolation.
 type WorktreeService struct {
 	taskRepo          *repository.TaskRepo
@@ -1109,11 +1113,27 @@ func (ws *WorktreeService) endRepositoryMerge(repoDir string) {
 // MergeBranch merges the task branch into the target branch.
 // mergeType: "merge" (merge commit), "ff" (fast-forward only), "squash"
 func (ws *WorktreeService) MergeBranch(ctx context.Context, task *models.Task, repoDir string, mergeType string) (*MergeResult, error) {
+	return ws.MergeBranchValidated(ctx, task, repoDir, mergeType, nil)
+}
+
+// MergeBranchValidated acquires the repository merge lease and then runs
+// validate immediately before any Git or task-status mutation. Handler callers
+// use this to close the render/check-to-mutation race with live eligibility and
+// ancestry state; internal callers without additional policy use MergeBranch.
+func (ws *WorktreeService) MergeBranchValidated(ctx context.Context, task *models.Task, repoDir string, mergeType string, validate func() error) (*MergeResult, error) {
 	if !ws.beginRepositoryMerge(repoDir) {
 		return &MergeResult{ErrorMessage: ErrMergeInProgress.Error()}, ErrMergeInProgress
 	}
 	defer ws.endRepositoryMerge(repoDir)
+	if validate != nil {
+		if err := validate(); err != nil {
+			return &MergeResult{ErrorMessage: err.Error()}, err
+		}
+	}
+	return ws.mergeBranchLocked(ctx, task, repoDir, mergeType)
+}
 
+func (ws *WorktreeService) mergeBranchLocked(ctx context.Context, task *models.Task, repoDir string, mergeType string) (*MergeResult, error) {
 	if task.WorktreeBranch == "" {
 		return nil, fmt.Errorf("task has no worktree branch")
 	}
@@ -1193,6 +1213,23 @@ func (ws *WorktreeService) MergeBranch(ctx context.Context, task *models.Task, r
 		// Check if it's a conflict
 		conflictFiles := detectConflicts(repoDir)
 		if len(conflictFiles) > 0 {
+			if mergeType == "squash" {
+				// A squash conflict has no MERGE_HEAD, so advertising `git merge
+				// --abort` would strand the recovery UI. Restore only paths added by
+				// this squash attempt, preserving unrelated pre-existing staged work,
+				// and return a retryable failed state instead.
+				squashPaths, pathErr := SquashMergePaths(repoDir, stagedBeforeSquash)
+				if pathErr == nil {
+					squashPaths = appendUniquePaths(squashPaths, conflictFiles...)
+					pathErr = ResetSquashMergeChanges(repoDir, squashPaths)
+				}
+				if pathErr == nil {
+					mergeErrMsg := strings.TrimSpace(string(mergeOut))
+					_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusFailed)
+					return &MergeResult{ErrorMessage: mergeErrMsg}, fmt.Errorf("squash merge conflicted and was restored: %w", mergeErr)
+				}
+				applog.Infof("[worktree] failed to restore squash conflict for task %s: %v", task.ID, pathErr)
+			}
 			_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusConflict)
 			return &MergeResult{
 				ConflictFiles: conflictFiles,
@@ -1529,6 +1566,20 @@ func SquashMergePaths(repoDir string, stagedBefore map[string]bool) ([]string, e
 	return changed, nil
 }
 
+func appendUniquePaths(paths []string, additions ...string) []string {
+	seen := make(map[string]bool, len(paths)+len(additions))
+	for _, path := range paths {
+		seen[path] = true
+	}
+	for _, path := range additions {
+		if path != "" && !seen[path] {
+			paths = append(paths, path)
+			seen[path] = true
+		}
+	}
+	return paths
+}
+
 // ResetSquashMergeChanges restores only files changed by a failed squash merge
 // attempt. Unlike `git reset --hard`, this does not reset the whole target
 // checkout or touch staged user changes that existed before the squash attempt.
@@ -1587,6 +1638,33 @@ func AbortMerge(repoDir string) error {
 	cmd.Dir = repoDir
 	_, err := cmd.CombinedOutput()
 	return err
+}
+
+// AbortMergeForTask aborts a normal merge or restores task-branch paths from a
+// legacy/incomplete squash conflict, which has unmerged files but no MERGE_HEAD.
+func AbortMergeForTask(repoDir, branchName, targetBranch string) error {
+	if HasActiveMerge(repoDir) {
+		return AbortMerge(repoDir)
+	}
+	conflicts := detectConflicts(repoDir)
+	if len(conflicts) == 0 {
+		return fmt.Errorf("no active merge conflicts found")
+	}
+	out, err := gitOutput(repoDir, "diff", "--name-only", "-z", targetBranch+"..."+branchName)
+	if err != nil {
+		return fmt.Errorf("resolving squash conflict paths: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	paths := make([]string, 0)
+	for _, path := range strings.Split(string(out), "\x00") {
+		if path != "" {
+			paths = append(paths, path)
+		}
+	}
+	paths = appendUniquePaths(paths, conflicts...)
+	if len(paths) == 0 {
+		return fmt.Errorf("no task paths found for squash conflict")
+	}
+	return ResetSquashMergeChanges(repoDir, paths)
 }
 
 // ResolveConflictsWithAI uses the LLM service to resolve merge conflicts.

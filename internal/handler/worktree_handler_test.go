@@ -310,6 +310,64 @@ func TestHandler_ChangesMergeEligibilityBlocksUnsafeAndMissingStates(t *testing.
 	}
 }
 
+func TestHandler_RebaseTaskBranchRejectsForgedIneligibleRequests(t *testing.T) {
+	tests := []struct {
+		name       string
+		status     models.TaskStatus
+		target     string
+		wantReason string
+	}{
+		{name: "blocked task", status: models.StatusBlocked, wantReason: "blocked"},
+		{name: "missing target", status: models.StatusCompleted, target: "missing-target", wantReason: "target branch"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h, e, _ := setupTestHandler(t)
+			h.SetWorktreeService(service.NewWorktreeService(h.taskRepo, h.projectRepo, h.settingsRepo))
+			ctx := context.Background()
+			repoDir := createHandlerTestGitRepo(t)
+			target := service.GetCurrentBranch(repoDir)
+			project := &models.Project{Name: "Forged rebase " + tt.name, RepoPath: repoDir, IsDefault: true}
+			if err := h.projectSvc.Create(ctx, project); err != nil {
+				t.Fatal(err)
+			}
+			mergeTarget := target
+			task := &models.Task{
+				ProjectID: project.ID, Title: "Forged rebase " + tt.name, Prompt: "test", Category: models.CategoryCompleted,
+				Status: tt.status, MergeTargetBranch: mergeTarget, MergeStatus: models.MergeStatusPending,
+			}
+			if err := h.taskRepo.Create(ctx, task); err != nil {
+				t.Fatal(err)
+			}
+			wtPath, branchName, err := h.worktreeSvc.SetupWorktree(ctx, task, repoDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := h.taskRepo.UpdateWorktreeInfo(ctx, task.ID, wtPath, branchName); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(wtPath, "rebase-ahead.txt"), []byte("task change\n"), 0644); err != nil {
+				t.Fatal(err)
+			}
+			if err := service.CommitWorktreeChanges(wtPath, "rebase gate fixture"); err != nil {
+				t.Fatal(err)
+			}
+			if tt.target != "" {
+				if err := h.taskRepo.UpdateAutoMerge(ctx, task.ID, false, tt.target); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			req := worktreeFormRequest(http.MethodPost, "/tasks/"+task.ID+"/worktree/rebase", nil)
+			req.Header.Set("HX-Request", "true")
+			rec := worktreeExecute(e, req)
+			if rec.Code != http.StatusConflict || !strings.Contains(strings.ToLower(rec.Body.String()), tt.wantReason) {
+				t.Fatalf("forged rebase got %d %q, want 409 containing %q", rec.Code, rec.Body.String(), tt.wantReason)
+			}
+		})
+	}
+}
+
 func TestHandler_StaleTerminalConflictRecoversChangesAndRecoveryPosts(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	h.SetWorktreeService(service.NewWorktreeService(h.taskRepo, h.projectRepo, h.settingsRepo))
@@ -509,6 +567,75 @@ func TestHandler_MergeTaskBranch_ChangesTabRecoverableFailureRendersRetryAndSucc
 	}
 	if mergedTask.MergeStatus != models.MergeStatusMerged {
 		t.Fatalf("expected merged status after retry, got %s", mergedTask.MergeStatus)
+	}
+}
+
+func TestHandler_MergeTaskBranch_ChangesTabSquashConflictRefreshesRetryWithoutRecoveryActions(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	h.SetWorktreeService(service.NewWorktreeService(h.taskRepo, h.projectRepo, h.settingsRepo))
+	ctx := context.Background()
+	repoDir := createHandlerTestGitRepo(t)
+	target := service.GetCurrentBranch(repoDir)
+	conflictPath := filepath.Join(repoDir, "changes-squash-conflict.txt")
+	if err := os.WriteFile(conflictPath, []byte("base\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repoDir, "add", "changes-squash-conflict.txt")
+	runGit(t, repoDir, "commit", "-m", "squash conflict base")
+	project := &models.Project{Name: "Changes squash conflict", RepoPath: repoDir, IsDefault: true}
+	if err := h.projectSvc.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	task := &models.Task{
+		ProjectID: project.ID, Title: "Changes squash conflict", Prompt: "test", Category: models.CategoryCompleted,
+		Status: models.StatusCompleted, MergeTargetBranch: target, MergeStatus: models.MergeStatusPending,
+	}
+	if err := h.taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	wtPath, branchName, err := h.worktreeSvc.SetupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task.WorktreePath, task.WorktreeBranch = wtPath, branchName
+	if err := h.taskRepo.UpdateWorktreeInfo(ctx, task.ID, wtPath, branchName); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wtPath, "changes-squash-conflict.txt"), []byte("task\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.CommitWorktreeChanges(wtPath, "task squash conflict"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(conflictPath, []byte("target\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repoDir, "add", "changes-squash-conflict.txt")
+	runGit(t, repoDir, "commit", "-m", "target squash conflict")
+
+	form := url.Values{"merge_type": {"squash"}, "merge_source": {"changes_tab"}}
+	req := worktreeFormRequest(http.MethodPost, "/tasks/"+task.ID+"/worktree/merge", form)
+	req.Header.Set("HX-Request", "true")
+	rec := worktreeExecute(e, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected authoritative retry fragment, got %d: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "Merge commit") || !strings.Contains(body, "Squash merge") {
+		t.Fatalf("cleaned squash conflict did not restore retry actions: %s", body)
+	}
+	if strings.Contains(body, "/worktree/resolve") || strings.Contains(body, "/worktree/abort") {
+		t.Fatalf("cleaned squash conflict exposed unusable recovery actions: %s", body)
+	}
+	if service.HasActiveMerge(repoDir) || len(service.ActiveConflictFiles(repoDir)) != 0 {
+		t.Fatalf("squash conflict remained active after response: merge=%v conflicts=%v", service.HasActiveMerge(repoDir), service.ActiveConflictFiles(repoDir))
+	}
+	updated, err := h.taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.MergeStatus != models.MergeStatusFailed {
+		t.Fatalf("merge status=%q, want failed", updated.MergeStatus)
 	}
 }
 

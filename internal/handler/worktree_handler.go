@@ -85,10 +85,40 @@ func (h *Handler) MergeTaskBranch(c echo.Context) error {
 
 	fromChangesTab := c.FormValue("merge_source") == "changes_tab"
 
-	result, mergeErr := h.worktreeSvc.MergeBranch(c.Request().Context(), task, project.RepoPath, mergeType)
+	result, mergeErr := h.worktreeSvc.MergeBranchValidated(c.Request().Context(), task, project.RepoPath, mergeType, func() error {
+		freshTask, err := h.taskSvc.GetByID(c.Request().Context(), taskID)
+		if err != nil || freshTask == nil {
+			return fmt.Errorf("%w: task is no longer available", service.ErrMergeEligibilityChanged)
+		}
+		h.recoverTaskWorktreeState(c.Request().Context(), freshTask, project)
+		freshEligibility := h.resolveTaskMergeEligibility(c.Request().Context(), freshTask, project, h.reconcileAlreadyMergedBranch(c.Request().Context(), freshTask))
+		if !freshEligibility.MergeAvailable {
+			reason := freshEligibility.Reason
+			if freshEligibility.ConflictRecovery {
+				reason = "a merge conflict is now active"
+			}
+			if reason == "" {
+				reason = "task branch is no longer eligible to merge"
+			}
+			return fmt.Errorf("%w: %s", service.ErrMergeEligibilityChanged, reason)
+		}
+		*task = *freshTask
+		targetBranch = freshEligibility.TargetBranch
+		return nil
+	})
 	if mergeErr != nil {
 		applog.Infof("[handler] MergeTaskBranch error: %v", mergeErr)
 		errMessage := "Local merge failed"
+		if errors.Is(mergeErr, service.ErrMergeEligibilityChanged) {
+			errMessage = mergeErr.Error()
+			if isHTMX(c) {
+				setHTMXToast(c, errMessage, "failed")
+			}
+			if fromChangesTab {
+				return h.GetTaskChanges(c)
+			}
+			return c.String(http.StatusConflict, errMessage)
+		}
 		if errors.Is(mergeErr, service.ErrMergeInProgress) {
 			errMessage = "A local merge is already in progress for this repository. Wait for it to finish before trying another merge."
 			if isHTMX(c) {
@@ -158,28 +188,28 @@ func (h *Handler) RebaseTaskBranch(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "project has no repo path")
 	}
 	h.recoverTaskWorktreeState(c.Request().Context(), task, project)
-	if task.WorktreeBranch == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "task has no worktree branch")
-	}
-	if h.worktreeSvc == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "worktree service not available")
-	}
-
-	targetBranch := task.MergeTargetBranch
-	if targetBranch == "" {
-		targetBranch = service.GetDefaultBranch(project.RepoPath)
-	}
-	if targetBranch == "" {
-		targetBranch = "main"
-	}
-
-	if len(service.ActiveConflictFiles(project.RepoPath)) > 0 || task.MergeStatus == models.MergeStatusConflict {
-		msg := "A merge conflict is already active. Resolve conflicts or abort the merge before rebasing."
+	branchAlreadyMerged := h.reconcileAlreadyMergedBranch(c.Request().Context(), task)
+	eligibility := h.resolveTaskMergeEligibility(c.Request().Context(), task, project, branchAlreadyMerged)
+	if !eligibility.MergeAvailable || !h.taskRebaseAvailable(task, project, branchAlreadyMerged) {
+		msg := eligibility.Reason
+		if eligibility.ConflictRecovery {
+			msg = "A merge conflict is already active. Resolve conflicts or abort the merge before rebasing."
+		} else if eligibility.MergeAvailable {
+			msg = "Task branch is not currently eligible to rebase onto its target"
+		}
+		if msg == "" {
+			msg = "Task branch is not currently eligible to rebase"
+		}
 		if isHTMX(c) {
 			setHTMXToast(c, msg, "failed")
 		}
 		return c.String(http.StatusConflict, msg)
 	}
+	if h.worktreeSvc == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "worktree service not available")
+	}
+
+	targetBranch := eligibility.TargetBranch
 
 	result, rebaseErr := h.worktreeSvc.RebaseBranch(c.Request().Context(), task, project.RepoPath)
 	if rebaseErr != nil {
@@ -395,7 +425,7 @@ func (h *Handler) AbortTaskMerge(c echo.Context) error {
 		return c.String(http.StatusConflict, msg)
 	}
 
-	if abortErr := service.AbortMerge(project.RepoPath); abortErr != nil {
+	if abortErr := service.AbortMergeForTask(project.RepoPath, task.WorktreeBranch, eligibility.TargetBranch); abortErr != nil {
 		errMessage := fmt.Sprintf("Failed to abort merge: %v", abortErr)
 		if isHTMX(c) {
 			setHTMXToast(c, errMessage, "failed")
