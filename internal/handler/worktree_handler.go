@@ -108,6 +108,15 @@ func (h *Handler) MergeTaskBranch(c echo.Context) error {
 		if isHTMX(c) {
 			setHTMXToast(c, errMessage, "failed")
 		}
+		// The Changes tab owns an authoritative fragment. A recoverable merge
+		// refusal persists merge_status=failed, so re-render from fresh task/Git
+		// state instead of leaving the menu in its in-flight or stale state. The
+		// toast carries the failure while a 200 response lets HTMX apply the
+		// refreshed retry/recovery actions. Other callers retain the error status.
+		if fromChangesTab {
+			task, _ = h.taskSvc.GetByID(c.Request().Context(), taskID)
+			return h.GetTaskChanges(c)
+		}
 		return c.String(http.StatusBadRequest, errMessage)
 	}
 
@@ -341,6 +350,9 @@ func (h *Handler) ResolveTaskConflicts(c echo.Context) error {
 	}
 
 	task, _ = h.taskSvc.GetByID(c.Request().Context(), taskID)
+	if c.FormValue("merge_source") == "changes_tab" {
+		return h.GetTaskChanges(c)
+	}
 	return h.renderWorktreeInfo(c, task)
 }
 
@@ -367,6 +379,9 @@ func (h *Handler) AbortTaskMerge(c echo.Context) error {
 	_ = h.taskRepo.UpdateMergeStatus(c.Request().Context(), taskID, models.MergeStatusPending)
 
 	task, _ = h.taskSvc.GetByID(c.Request().Context(), taskID)
+	if c.FormValue("merge_source") == "changes_tab" {
+		return h.GetTaskChanges(c)
+	}
 	return h.renderWorktreeInfo(c, task)
 }
 

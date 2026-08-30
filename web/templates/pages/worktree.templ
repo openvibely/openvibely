@@ -186,7 +186,33 @@ templ TaskChangesWorktreeContentWithView(diffOutput string, task *models.Task, f
 								</svg>
 							</div>
 							<ul tabindex="0" class="dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-52 max-w-[calc(100vw-2rem)] border border-base-300">
-									if !branchAlreadyMerged && task.MergeStatus != models.MergeStatusMerged && task.MergeStatus != models.MergeStatusConflict {
+								if task.MergeStatus == models.MergeStatusConflict {
+									<li class="menu-title"><span>Conflict recovery</span></li>
+									<li>
+										<button
+											type="button"
+											hx-post={ fmt.Sprintf("/tasks/%s/worktree/resolve", task.ID) }
+											hx-target="#changes-content"
+											hx-swap="innerHTML"
+											hx-disabled-elt="this"
+											hx-vals='{"merge_source": "changes_tab"}'
+										>
+											AI Resolve Conflicts
+										</button>
+									</li>
+									<li>
+										<button
+											type="button"
+											hx-post={ fmt.Sprintf("/tasks/%s/worktree/abort", task.ID) }
+											hx-target="#changes-content"
+											hx-swap="innerHTML"
+											hx-disabled-elt="this"
+											hx-vals='{"merge_source": "changes_tab"}'
+										>
+											Abort Merge
+										</button>
+									</li>
+								} else if !branchAlreadyMerged && task.MergeStatus != models.MergeStatusMerged {
 								<li class="menu-title"><span>Local</span></li>
 								<li>
 									<button
@@ -194,7 +220,8 @@ templ TaskChangesWorktreeContentWithView(diffOutput string, task *models.Task, f
 										hx-post={ fmt.Sprintf("/tasks/%s/worktree/merge", task.ID) }
 										hx-target="#changes-content"
 										hx-swap="innerHTML"
-											hx-vals='{"merge_type": "merge", "merge_source": "changes_tab"}'
+										hx-disabled-elt="this"
+										hx-vals='{"merge_type": "merge", "merge_source": "changes_tab"}'
 									>
 										<span class="htmx-indicator" id="merge-changes-indicator">
 											<span class="loading loading-spinner loading-xs"></span>
@@ -208,7 +235,8 @@ templ TaskChangesWorktreeContentWithView(diffOutput string, task *models.Task, f
 										hx-post={ fmt.Sprintf("/tasks/%s/worktree/merge", task.ID) }
 										hx-target="#changes-content"
 										hx-swap="innerHTML"
-											hx-vals='{"merge_type": "ff", "merge_source": "changes_tab"}'
+										hx-disabled-elt="this"
+										hx-vals='{"merge_type": "ff", "merge_source": "changes_tab"}'
 									>
 										<span class="htmx-indicator" id="merge-changes-indicator-ff">
 											<span class="loading loading-spinner loading-xs"></span>
@@ -238,7 +266,8 @@ templ TaskChangesWorktreeContentWithView(diffOutput string, task *models.Task, f
 										hx-post={ fmt.Sprintf("/tasks/%s/worktree/merge", task.ID) }
 										hx-target="#changes-content"
 										hx-swap="innerHTML"
-											hx-vals='{"merge_type": "squash", "merge_source": "changes_tab"}'
+										hx-disabled-elt="this"
+										hx-vals='{"merge_type": "squash", "merge_source": "changes_tab"}'
 									>
 										<span class="htmx-indicator" id="merge-changes-indicator-squash">
 											<span class="loading loading-spinner loading-xs"></span>
@@ -273,9 +302,14 @@ templ TaskChangesWorktreeContentWithView(diffOutput string, task *models.Task, f
 						</div>
 					</div>
 				}
-			// File change summary list
-			if len(fileStats) > 0 {
-				<div class="mb-4 p-3 bg-base-200 rounded-lg min-w-0 max-w-full overflow-hidden">
+				if task.MergeStatus == models.MergeStatusConflict {
+					<div class="alert alert-warning mb-4 text-sm" role="status" data-merge-conflict-guidance>
+						<span>A merge conflict is active. Resolve the conflicting files or abort the merge before retrying.</span>
+					</div>
+				}
+				// File change summary list
+				if len(fileStats) > 0 {
+					<div class="mb-4 p-3 bg-base-200 rounded-lg min-w-0 max-w-full overflow-hidden">
 					<div class="text-sm font-semibold mb-2 min-w-0">
 						{ fmt.Sprintf("%d file(s) changed", len(fileStats)) }
 					</div>

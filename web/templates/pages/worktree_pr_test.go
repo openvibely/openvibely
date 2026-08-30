@@ -243,7 +243,7 @@ func TestTaskChangesWorktreeContent_MergedStatusWithoutDiffHidesLocalSection(t *
 	}
 }
 
-func TestTaskChangesWorktreeContent_ConflictStatusHidesLocalSection(t *testing.T) {
+func TestTaskChangesWorktreeContent_ConflictStatusShowsRecoveryWithoutMergeActions(t *testing.T) {
 	task := &models.Task{
 		ID:             "task-1",
 		WorktreeBranch: "task/feature",
@@ -256,11 +256,38 @@ func TestTaskChangesWorktreeContent_ConflictStatusHidesLocalSection(t *testing.T
 		t.Fatalf("render: %v", err)
 	}
 	out := buf.String()
-	if strings.Contains(out, "Fast-forward only") || strings.Contains(out, "Squash merge") || strings.Contains(out, "merge_source") {
-		t.Fatalf("expected Local merge section hidden while conflict is active, body=%s", out)
+	if strings.Contains(out, "/worktree/merge") || strings.Contains(out, "Fast-forward only") || strings.Contains(out, "Squash merge") {
+		t.Fatalf("expected ordinary merge actions hidden while conflict is active, body=%s", out)
+	}
+	for _, want := range []string{"Conflict recovery", "AI Resolve Conflicts", "Abort Merge", `data-merge-conflict-guidance`, `hx-vals='{"merge_source": "changes_tab"}'`} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected conflict recovery content %q, body=%s", want, out)
+		}
 	}
 	if !strings.Contains(out, "GitHub") {
 		t.Fatalf("expected GitHub section to remain available, body=%s", out)
+	}
+}
+
+func TestTaskChangesWorktreeContent_FailedStatusShowsRetryActions(t *testing.T) {
+	task := &models.Task{
+		ID:             "task-1",
+		WorktreeBranch: "task/feature",
+		MergeStatus:    models.MergeStatusFailed,
+		Status:         models.StatusCompleted,
+	}
+	var buf bytes.Buffer
+	if err := TaskChangesWorktreeContent("diff --git", task, nil, nil, nil, false, false).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render failed: %v", err)
+	}
+	out := buf.String()
+	for _, want := range []string{"Merge commit", "Fast-forward only", "Squash merge", `hx-disabled-elt="this"`} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected failed status retry content %q, body=%s", want, out)
+		}
+	}
+	if strings.Contains(out, "Conflict recovery") {
+		t.Fatalf("failed status must not show conflict recovery actions, body=%s", out)
 	}
 }
 

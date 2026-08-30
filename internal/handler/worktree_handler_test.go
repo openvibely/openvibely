@@ -320,6 +320,92 @@ func TestHandler_MergeTaskBranch_CommitFailure_ReturnsHTMXErrorWithToast(t *test
 	}
 }
 
+func TestHandler_MergeTaskBranch_ChangesTabRecoverableFailureRendersRetryAndSucceeds(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	h.SetWorktreeService(service.NewWorktreeService(h.taskRepo, h.projectRepo, h.settingsRepo))
+	ctx := context.Background()
+
+	repoDir := createHandlerTestGitRepo(t)
+	targetBranch := service.GetCurrentBranch(repoDir)
+	project := &models.Project{Name: "Retry Merge Project", RepoPath: repoDir, IsDefault: true}
+	if err := h.projectSvc.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	task := &models.Task{
+		ProjectID:         project.ID,
+		Title:             "Retry failed merge",
+		Prompt:            "test",
+		Category:          models.CategoryCompleted,
+		Status:            models.StatusCompleted,
+		MergeTargetBranch: targetBranch,
+		MergeStatus:       models.MergeStatusPending,
+	}
+	if err := h.taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	wtPath, branchName, err := h.worktreeSvc.SetupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task.WorktreePath = wtPath
+	task.WorktreeBranch = branchName
+	if err := h.taskRepo.UpdateWorktreeInfo(ctx, task.ID, wtPath, branchName); err != nil {
+		t.Fatal(err)
+	}
+
+	blockingName := "retry-after-refusal.txt"
+	if err := os.WriteFile(filepath.Join(wtPath, blockingName), []byte("task branch\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.CommitWorktreeChanges(wtPath, "add retry fixture"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, blockingName), []byte("user checkout work\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	form := url.Values{"merge_type": {"merge"}, "merge_source": {"changes_tab"}}
+	firstReq := worktreeFormRequest(http.MethodPost, "/tasks/"+task.ID+"/worktree/merge", form)
+	firstReq.Header.Set("HX-Request", "true")
+	first := worktreeExecute(e, firstReq)
+	if first.Code != http.StatusOK {
+		t.Fatalf("expected recoverable failure to refresh Changes with 200, got %d: %s", first.Code, first.Body.String())
+	}
+	if body := first.Body.String(); !strings.Contains(body, "Worktree Changes") || !strings.Contains(body, "Merge commit") || !strings.Contains(body, "Fast-forward only") {
+		t.Fatalf("expected failed merge response to retain retry actions, got %s", body)
+	}
+	failedTask, err := h.taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if failedTask.MergeStatus != models.MergeStatusFailed {
+		t.Fatalf("expected failed merge status, got %s", failedTask.MergeStatus)
+	}
+	if got, err := os.ReadFile(filepath.Join(repoDir, blockingName)); err != nil || string(got) != "user checkout work\n" {
+		t.Fatalf("target checkout work was not preserved: %q, %v", got, err)
+	}
+
+	if err := os.Remove(filepath.Join(repoDir, blockingName)); err != nil {
+		t.Fatal(err)
+	}
+	secondReq := worktreeFormRequest(http.MethodPost, "/tasks/"+task.ID+"/worktree/merge", form)
+	secondReq.Header.Set("HX-Request", "true")
+	second := worktreeExecute(e, secondReq)
+	if second.Code != http.StatusOK {
+		t.Fatalf("expected retry to succeed, got %d: %s", second.Code, second.Body.String())
+	}
+	if body := second.Body.String(); strings.Contains(body, "/worktree/merge") || strings.Contains(body, "Merge commit") {
+		t.Fatalf("expected terminal merged response to hide retry actions, got %s", body)
+	}
+	mergedTask, err := h.taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mergedTask.MergeStatus != models.MergeStatusMerged {
+		t.Fatalf("expected merged status after retry, got %s", mergedTask.MergeStatus)
+	}
+}
+
 func TestHandler_MergeTaskBranch_Conflict_ReturnsHTMXToast(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	ctx := context.Background()
@@ -397,15 +483,13 @@ func TestHandler_MergeTaskBranch_Conflict_ReturnsHTMXToast(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	form := url.Values{"merge_type": {"merge"}}
+	form := url.Values{"merge_type": {"merge"}, "merge_source": {"changes_tab"}}
 	req := worktreeFormRequest(http.MethodPost, "/tasks/"+task.ID+"/worktree/merge", form)
 	req.Header.Set("HX-Request", "true")
 	rec := worktreeExecute(e, req)
-
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
-
 	hxTrigger := rec.Header().Get("HX-Trigger")
 	if !strings.Contains(hxTrigger, "openvibelyToast") {
 		t.Fatalf("expected conflict toast trigger, got %q", hxTrigger)
@@ -413,8 +497,14 @@ func TestHandler_MergeTaskBranch_Conflict_ReturnsHTMXToast(t *testing.T) {
 	if !strings.Contains(hxTrigger, "Local merge has conflicts") {
 		t.Fatalf("expected conflict toast message, got %q", hxTrigger)
 	}
-	if !strings.Contains(rec.Body.String(), "Conflicts") {
-		t.Fatalf("expected conflict badge in worktree panel, got %s", rec.Body.String())
+	body := rec.Body.String()
+	for _, want := range []string{"Worktree Changes", "AI Resolve Conflicts", "Abort Merge", "merge conflict is active"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("expected Changes conflict recovery content %q, got %s", want, body)
+		}
+	}
+	if strings.Contains(body, "/worktree/merge") || strings.Contains(body, "Fast-forward only") {
+		t.Fatalf("conflicted Changes response must hide ordinary merge actions, got %s", body)
 	}
 
 	updated, err := h.taskSvc.GetByID(ctx, task.ID)
