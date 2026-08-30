@@ -4020,26 +4020,33 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							try { return root.querySelector(selector); } catch (_) { return null; }
 						}
 
-							function cardsFor(list, root) {
-								if (!list) return [];
-								var selector = root.getAttribute('data-card-pagination-card-selector');
-								if (!selector) return [];
-								try {
-									var matches = Array.prototype.slice.call(list.querySelectorAll(selector));
-									var keyAttribute = root.getAttribute('data-card-pagination-key') || '';
-									var seen = Object.create(null);
-									var cards = [];
-									for (var i = 0; i < matches.length; i++) {
-										var key = cardKey(matches[i], keyAttribute);
-										if (seen[key]) continue;
-										seen[key] = true;
-										cards.push(matches[i]);
-									}
-									return cards;
-								} catch (_) {
-									return [];
+						function cardsMatching(list, root, selector) {
+							if (!list || !selector) return [];
+							try {
+								var matches = Array.prototype.slice.call(list.querySelectorAll(selector));
+								var keyAttribute = root.getAttribute('data-card-pagination-key') || '';
+								var seen = Object.create(null);
+								var cards = [];
+								for (var i = 0; i < matches.length; i++) {
+									var key = cardKey(matches[i], keyAttribute);
+									if (seen[key]) continue;
+									seen[key] = true;
+									cards.push(matches[i]);
 								}
+								return cards;
+							} catch (_) {
+								return [];
 							}
+						}
+
+						function cardsFor(list, root) {
+							return cardsMatching(list, root, root.getAttribute('data-card-pagination-card-selector'));
+						}
+
+						function replacementCardsFor(list, root) {
+							var selector = root.getAttribute('data-card-pagination-replacement-card-selector') || root.getAttribute('data-card-pagination-card-selector');
+							return cardsMatching(list, root, selector);
+						}
 
 						function cardKey(card, keyAttribute) {
 							var key = keyAttribute ? card.getAttribute(keyAttribute) : '';
@@ -4265,7 +4272,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 								};
 								var active = document.activeElement;
 								var keyAttribute = state.root.getAttribute('data-card-pagination-key') || '';
-								var cards = cardsFor(state.list, state.root);
+								var cards = replacementCardsFor(state.list, state.root);
 								for (var cardIndex = 0; cardIndex < cards.length; cardIndex++) {
 									snapshot.cardKeys.push(cardKey(cards[cardIndex], keyAttribute));
 								}
@@ -4311,7 +4318,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						function findCardByKey(state, key) {
 							if (!key) return null;
 							var keyAttribute = state.root.getAttribute('data-card-pagination-key') || '';
-							var cards = cardsFor(state.list, state.root);
+							var cards = replacementCardsFor(state.list, state.root);
 							for (var i = 0; i < cards.length; i++) {
 								if (cardKey(cards[i], keyAttribute) === key) return cards[i];
 							}

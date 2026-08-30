@@ -691,6 +691,127 @@ func TestCardPaginationProductionBrowserDoesNotRestoreClearedURLSearchAfterRefre
 	require.Equal(t, int32(1), clearedSearchRequests.Load())
 }
 
+func TestCardPaginationProductionBrowserRestoresFocusFromFixedPersonalityCard(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping browser regression in short mode")
+	}
+	chrome := findChromeForBrowserTest(t)
+	if chrome == "" {
+		t.Skip("Chrome/Chromium executable not found")
+	}
+
+	selected := models.CustomPersonality{
+		Key:                 "fixed-selected",
+		Name:                "Fixed selected",
+		Description:         "selected fixed card",
+		SystemPromptPreview: "A selected custom personality preview.",
+	}
+	pageable := models.CustomPersonality{
+		Key:                 "page-owned",
+		Name:                "Page owned",
+		Description:         "page-owned card",
+		SystemPromptPreview: "A pageable custom personality preview.",
+	}
+	render := func(personality string, cards []models.CustomPersonality) string {
+		var buf bytes.Buffer
+		require.NoError(t, pages.PersonalitySectionPageWithPagination(personality, cards, false).Render(context.Background(), &buf))
+		return buf.String()
+	}
+	initialHTML := render(selected.Key, []models.CustomPersonality{selected, pageable})
+	replacementHTMLJSON, err := json.Marshal(render("", []models.CustomPersonality{pageable}))
+	require.NoError(t, err)
+
+	var base bytes.Buffer
+	require.NoError(t, layout.Base("Fixed Personality focus fixture", nil, "").Render(context.Background(), &base))
+	var localBaseLines []string
+	for _, line := range strings.Split(base.String(), "\n") {
+		if strings.Contains(line, "<script src=") || strings.Contains(line, "<link href=") || strings.Contains(line, `<link rel="stylesheet" href=`) {
+			continue
+		}
+		localBaseLines = append(localBaseLines, line)
+	}
+	page := strings.Replace(strings.Join(localBaseLines, "\n"), "</main>", initialHTML+"</main>", 1)
+	page = strings.Replace(page, "</head>", `<style>
+	.dropdown-content { visibility: hidden; opacity: 0; }
+	.dropdown:focus-within > .dropdown-content { visibility: visible; opacity: 1; }
+	</style></head>`, 1)
+	page = strings.Replace(page, "</body>", `<script>
+(function() {
+  function result(status, message) {
+    var node = document.createElement('div');
+    node.id = 'browser-result';
+    node.setAttribute('data-status', status);
+    node.textContent = message || status;
+    document.body.appendChild(node);
+  }
+  function fail(message) { result('fail', String(message && message.stack || message)); }
+  function visibleEnabled(node) {
+    if (!node || node.disabled || node.getAttribute('aria-disabled') === 'true') return false;
+    var style = window.getComputedStyle(node);
+    return style.display !== 'none' && style.visibility !== 'hidden' && node.getClientRects().length > 0;
+  }
+  function menuVisible(card) {
+    var menu = card && card.querySelector('.dropdown-content');
+    return !!(menu && window.getComputedStyle(menu).visibility !== 'hidden');
+  }
+  function waitForInitial() {
+    var root = document.getElementById('personality-section');
+    var card = document.querySelector('[data-personality-key="fixed-selected"]');
+    if (!root || !root._openVibelyCardPaginationState || !card) return setTimeout(waitForInitial, 30);
+    var toggle = card.querySelector('.dropdown > [tabindex="0"]');
+    var actions = card.querySelectorAll('.dropdown-content button');
+    var deletion = null;
+    for (var i = 0; i < actions.length; i++) if (actions[i].textContent.trim() === 'Delete') deletion = actions[i];
+    if (!toggle || !deletion) return fail('fixed selected card actions were not rendered');
+    toggle.focus();
+    deletion.focus();
+    if (document.activeElement !== deletion || !visibleEnabled(deletion)) return fail('fixed selected delete action could not be focused while open');
+    window.replaceSearchableCardContainer(root, `+string(replacementHTMLJSON)+`);
+    var focused = document.activeElement;
+    if (!focused || !focused.matches('[data-personality-key]') || !visibleEnabled(focused)) return fail('fixed selected deletion did not focus a visible surviving Personality card');
+    if (focused.getAttribute('data-personality-key') === 'fixed-selected') return fail('focus remained on the deleted fixed selected card');
+    if (menuVisible(focused)) return fail('fixed selected deletion reopened a surviving dropdown');
+    result('pass', 'fixed selected Personality focus restored');
+  }
+  window.addEventListener('load', function() { setTimeout(waitForInitial, 50); });
+  setTimeout(function() {
+    if (!document.getElementById('browser-result')) fail('fixed Personality focus fixture timed out');
+  }, 8000);
+})();
+</script></body>`, 1)
+
+	fixture := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(page))
+	}))
+	defer fixture.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, chrome,
+		"--headless=new", "--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage",
+		"--disable-background-networking", "--disable-extensions", "--no-default-browser-check",
+		"--no-first-run", "--window-size=1280,900", "--virtual-time-budget=9000", "--dump-dom", fixture.URL,
+	)
+	out, err := cmd.CombinedOutput()
+	if ctx.Err() != nil {
+		t.Fatalf("Chrome timed out: %v\n%s", ctx.Err(), out)
+	}
+	require.NoError(t, err, "Chrome output: %s", out)
+	dom := string(out)
+	if !strings.Contains(dom, `id="browser-result" data-status="pass"`) {
+		idx := strings.Index(dom, `id="browser-result"`)
+		if idx >= 0 {
+			end := idx + 700
+			if end > len(dom) {
+				end = len(dom)
+			}
+			t.Fatalf("fixed Personality browser focus regression failed: %s", html.UnescapeString(dom[idx:end]))
+		}
+		t.Fatalf("fixed Personality browser focus regression did not report a result; DOM length=%d", len(dom))
+	}
+}
+
 func TestCardPaginationProductionBrowserPreservesGenericFocusAndPartialWindowOffset(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping browser regression in short mode")

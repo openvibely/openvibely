@@ -825,14 +825,14 @@ func personalitySection(personality string, customPersonalities []models.CustomP
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "\" data-search-container data-card-pagination-root data-card-pagination-url=\"/personality\" data-card-pagination-list=\"#personality-card-list\" data-card-pagination-card-selector=\"[data-personality-pagination-card='true']\" data-card-pagination-key=\"data-personality-key\" data-card-pagination-page-size=\"20\" data-card-pagination-has-more=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "\" data-search-container data-card-pagination-root data-card-pagination-url=\"/personality\" data-card-pagination-list=\"#personality-card-list\" data-card-pagination-card-selector=\"[data-personality-pagination-card='true']\" data-card-pagination-replacement-card-selector=\"[data-personality-key]\" data-card-pagination-key=\"data-personality-key\" data-card-pagination-page-size=\"20\" data-card-pagination-has-more=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var37 string
 		templ_7745c5c3_Var37, templ_7745c5c3_Err = templ.ResolveAttributeValue(cardPaginationHasMoreAttribute(hasMore))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 258, Col: 447}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 258, Col: 519}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var37)
 		if templ_7745c5c3_Err != nil {
