@@ -180,12 +180,12 @@ func (i *agentInspector) ListAgents(ctx context.Context) ([]agentskills.AgentSum
 	if i == nil || i.agentRepo == nil {
 		return nil, nil
 	}
-	agents, err := i.agentRepo.List(ctx)
+	agentSummaries, err := i.agentRepo.ListAgentListSummaries(ctx)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]agentskills.AgentSummary, 0, len(agents))
-	for _, agent := range agents {
+	out := make([]agentskills.AgentSummary, 0, len(agentSummaries))
+	for _, agent := range agentSummaries {
 		if !agent.Enabled || agent.GeneratedStatus == models.AgentStatusProtected || agent.GeneratedStatus == models.AgentStatusArchived || agent.ArchivedAt != nil || strings.TrimSpace(agent.SystemKind) != "" || isBuiltInSystemAgentKeyForList(agent.Key) {
 			continue
 		}
@@ -197,7 +197,7 @@ func (i *agentInspector) ListAgents(ctx context.Context) ([]agentskills.AgentSum
 			Enabled:         agent.Enabled,
 			Selectable:      agent.SelectableAsPrimary,
 			GeneratedStatus: string(agent.GeneratedStatus),
-			AttachedSkills:  embeddedAgentSkillNames(agent.Skills),
+			AttachedSkills:  trimmedAgentSkillNames(agent.AttachedSkillNames),
 		})
 	}
 	return out, nil
@@ -251,6 +251,17 @@ func embeddedAgentSkillNames(skills []models.SkillConfig) []string {
 	out := make([]string, 0, len(skills))
 	for _, skill := range skills {
 		name := strings.TrimSpace(skill.Name)
+		if name != "" {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+func trimmedAgentSkillNames(names []string) []string {
+	out := make([]string, 0, len(names))
+	for _, name := range names {
+		name = strings.TrimSpace(name)
 		if name != "" {
 			out = append(out, name)
 		}
