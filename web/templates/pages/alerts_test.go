@@ -3,7 +3,7 @@ package pages
 import (
 	"bytes"
 	"context"
-	"html"
+	"encoding/base64"
 	"strings"
 	"testing"
 	"time"
@@ -152,12 +152,31 @@ func TestAlertsContent_ListOmitsBodyAndMetadataAndLazyLoadsDetail(t *testing.T) 
 	for _, forbidden := range []string{
 		largeBody,
 		"secret payload",
-		`<pre class="hidden" data-alert-copy-text aria-hidden="true">`,
+		base64.StdEncoding.EncodeToString([]byte(largeBody)),
 	} {
 		if strings.Contains(html, forbidden) {
 			t.Fatalf("list fragment unexpectedly embedded detail content %q", forbidden)
 		}
 	}
+}
+
+func decodedAlertCopyBody(t *testing.T, detailHTML string) string {
+	t.Helper()
+	const prefix = `data-alert-copy-base64="`
+	start := strings.Index(detailHTML, prefix)
+	if start < 0 {
+		t.Fatal("encoded copy payload missing")
+	}
+	start += len(prefix)
+	end := strings.IndexByte(detailHTML[start:], '"')
+	if end < 0 {
+		t.Fatal("encoded copy payload is unterminated")
+	}
+	decoded, err := base64.StdEncoding.DecodeString(detailHTML[start : start+end])
+	if err != nil {
+		t.Fatalf("decode copy payload: %v", err)
+	}
+	return string(decoded)
 }
 
 func TestAlertDetail_IncludesBodyAndMetadataForSelectedAlert(t *testing.T) {
@@ -191,12 +210,10 @@ func TestAlertDetail_IncludesBodyAndMetadataForSelectedAlert(t *testing.T) {
 		}
 	}
 
-	payloadStart := strings.Index(html, `<pre class="hidden" data-alert-copy-text aria-hidden="true">`)
-	payloadEnd := strings.Index(html[payloadStart:], `</pre>`)
-	if payloadStart < 0 || payloadEnd < 0 {
-		t.Fatal("copy payload missing")
+	payload := decodedAlertCopyBody(t, html)
+	if payload != alert.Body {
+		t.Fatalf("body-only copy payload changed: got %q, want %q", payload, alert.Body)
 	}
-	payload := html[payloadStart : payloadStart+payloadEnd]
 	for _, forbidden := range []string{"OpenVibely", "ID:", "Title:", "hidden-idempotency-key"} {
 		if strings.Contains(payload, forbidden) {
 			t.Fatalf("body-only copy payload unexpectedly contains %q", forbidden)
@@ -233,17 +250,7 @@ func TestAlertDetail_UsesSharedMarkdownSurfaceWithoutChangingCopySource(t *testi
 		t.Fatal("detail body must not be emitted as a second plain-text rendering")
 	}
 
-	const copyPrefix = `<pre class="hidden" data-alert-copy-text aria-hidden="true">`
-	copyStart := strings.Index(detailHTML, copyPrefix)
-	if copyStart < 0 {
-		t.Fatal("exact raw copy source is missing")
-	}
-	copyStart += len(copyPrefix)
-	copyEnd := strings.Index(detailHTML[copyStart:], `</pre>`)
-	if copyEnd < 0 {
-		t.Fatal("exact raw copy source is unterminated")
-	}
-	if got := html.UnescapeString(detailHTML[copyStart : copyStart+copyEnd]); got != body {
+	if got := decodedAlertCopyBody(t, detailHTML); got != body {
 		t.Fatalf("copy source changed the raw body: got %q, want %q", got, body)
 	}
 
@@ -257,6 +264,8 @@ func TestAlertDetail_UsesSharedMarkdownSurfaceWithoutChangingCopySource(t *testi
 		`window.renderChatMarkdown(raw)`,
 		`window.addCodeCopyButtons(markdown)`,
 		`hydrateAlertMarkdown(container)`,
+		`function decodeAlertCopyText(copyText)`,
+		`new TextDecoder('utf-8', {fatal: true}).decode(bytes)`,
 	} {
 		if !strings.Contains(contentHTML, required) {
 			t.Fatalf("Alerts detail hydration missing shared renderer contract %q", required)

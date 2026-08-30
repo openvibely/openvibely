@@ -1,6 +1,7 @@
 package pages
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 
@@ -210,11 +211,24 @@ templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unrea
 					container.innerHTML = '<p class="text-sm text-error">Could not load detail. Close and reopen to retry.</p>';
 				});
 			}
+			function decodeAlertCopyText(copyText) {
+				if (!copyText) return '';
+				var encoded = copyText.getAttribute('data-alert-copy-base64') || '';
+				if (!encoded) return copyText.textContent || '';
+				try {
+					var binary = window.atob(encoded);
+					var bytes = new Uint8Array(binary.length);
+					for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+					return new TextDecoder('utf-8', {fatal: true}).decode(bytes);
+				} catch (_) {
+					return '';
+				}
+			}
 			function copyAlertDetails(button) {
 				if (!button) return;
 				var scope = button.closest('[data-alert-detail-loaded]') || button.closest('details') || button.parentElement;
 				var copyText = scope && scope.querySelector('[data-alert-copy-text]');
-				var text = copyText ? copyText.textContent : '';
+				var text = decodeAlertCopyText(copyText);
 				var defaultLabel = button.dataset.defaultLabel || 'Copy body';
 				var feedback = button.querySelector('[data-alert-copy-feedback]');
 				var copyIcon = button.querySelector('[data-alert-copy-icon]');
@@ -391,6 +405,10 @@ func alertSearchText(alert models.AlertSummary) string {
 	return alert.Title + " " + alert.Message + " " + string(alert.Severity) + " " + string(alert.DecisionState) + " " + string(alert.ProcessingState) + " " + alert.Source + " " + alert.CreatedAt.Local().Format("Jan 2, 2006 3:04 PM")
 }
 
+func alertBodyBase64(body string) string {
+	return base64.StdEncoding.EncodeToString([]byte(body))
+}
+
 func alertMetadataJSON(alert models.Alert) string {
 	if len(alert.Metadata) == 0 {
 		return ""
@@ -432,7 +450,7 @@ templ alertDetailBody(alert models.Alert) {
 				<pre class={ "max-w-full overflow-x-auto whitespace-pre-wrap break-all rounded bg-base-300 p-2 text-xs", templ.KV("mt-3", alert.Body != "") }>{ alertMetadataJSON(alert) }</pre>
 			}
 			if alert.Body != "" {
-				<pre class="hidden" data-alert-copy-text aria-hidden="true">{ alert.Body }</pre>
+				<pre class="hidden" data-alert-copy-text data-alert-copy-base64={ alertBodyBase64(alert.Body) } aria-hidden="true"></pre>
 				<button
 					type="button"
 					class="btn btn-xs btn-ghost btn-square absolute right-0 top-0"

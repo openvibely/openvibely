@@ -156,7 +156,7 @@ func TestAlertsInspectCopyFeedbackInChrome(t *testing.T) {
 func TestAlertsInspectMarkdownAndHTMXDetailLoadingInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	projectID := "project-alerts-markdown"
-	body := "# Heading\n\n**emphasis**\n\n- first\n- second\n\n[external](https://example.test/link) [internal](/tasks/internal)\n\n```go\nline 1\nline 2\n```\n\n<img src=x onerror=alert(1)>"
+	body := "# Heading\r\n\r\n**emphasis**\r\n\r\n- first\r\n- second\r\n\r\n[external](https://example.test/link) [internal](/tasks/internal)\r\n\r\n```go\r\nline 1\r\nline 2\r\n```\r\n\r\n<img src=x onerror=alert(1)>\rbare carriage return café"
 	emptyAlert := models.AlertSummary{
 		ID: "empty-detail-1", ProjectID: projectID, Title: "Empty detail", Message: "No extra content",
 		Type: models.AlertCustom, Severity: models.SeverityInfo, DecisionState: models.AlertDecisionNotRequired,
