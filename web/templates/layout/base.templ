@@ -4045,7 +4045,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 
 						function replacementCardsFor(list, root) {
 							var selector = root.getAttribute('data-card-pagination-replacement-card-selector') || root.getAttribute('data-card-pagination-card-selector');
-							return cardsMatching(list, root, selector);
+							var scope = root.getAttribute('data-card-pagination-replacement-scope') === 'root' ? root : list;
+							return cardsMatching(scope, root, selector);
 						}
 
 						function cardKey(card, keyAttribute) {

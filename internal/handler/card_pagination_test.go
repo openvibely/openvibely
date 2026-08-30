@@ -812,6 +812,131 @@ func TestCardPaginationProductionBrowserRestoresFocusFromFixedPersonalityCard(t 
 	}
 }
 
+func TestCardPaginationProductionBrowserRestoresFocusFromFixedChannelCard(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping browser regression in short mode")
+	}
+	chrome := findChromeForBrowserTest(t)
+	if chrome == "" {
+		t.Skip("Chrome/Chromium executable not found")
+	}
+
+	render := func(connected bool) string {
+		var buf bytes.Buffer
+		require.NoError(t, pages.SettingsContent(pages.ChannelsSettingsView{
+			CurrentProjectID: "channels-focus-project",
+			HasGitHubChannel: true,
+			GitHubStatus: service.GitHubConnectionStatus{
+				Configured:     true,
+				Connected:      connected,
+				AuthMode:       service.GitHubAuthModeApp,
+				InstallationID: "12345",
+			},
+		}).Render(context.Background(), &buf))
+		return buf.String()
+	}
+	initialHTML := render(true)
+	replacementHTMLJSON, err := json.Marshal(render(false))
+	require.NoError(t, err)
+
+	var base bytes.Buffer
+	require.NoError(t, layout.Base("Fixed Channel focus fixture", nil, "").Render(context.Background(), &base))
+	var localBaseLines []string
+	for _, line := range strings.Split(base.String(), "\n") {
+		if strings.Contains(line, "<script src=") || strings.Contains(line, "<link href=") || strings.Contains(line, `<link rel="stylesheet" href=`) {
+			continue
+		}
+		localBaseLines = append(localBaseLines, line)
+	}
+	page := strings.Replace(strings.Join(localBaseLines, "\n"), "</main>", initialHTML+"</main>", 1)
+	page = strings.Replace(page, "</head>", `<style>
+	.dropdown-content { visibility: hidden; opacity: 0; }
+	.dropdown:focus-within > .dropdown-content { visibility: visible; opacity: 1; }
+	</style></head>`, 1)
+	page = strings.Replace(page, "</body>", `<script>
+(function() {
+  function result(status, message) {
+    var node = document.createElement('div');
+    node.id = 'browser-result';
+    node.setAttribute('data-status', status);
+    node.textContent = message || status;
+    document.body.appendChild(node);
+  }
+  function fail(message) { result('fail', String(message && message.stack || message)); }
+  function visibleEnabled(node) {
+    if (!node || node.disabled || node.getAttribute('aria-disabled') === 'true') return false;
+    var style = window.getComputedStyle(node);
+    return style.display !== 'none' && style.visibility !== 'hidden' && node.getClientRects().length > 0;
+  }
+  function menuVisible(card) {
+    var menu = card && card.querySelector('.dropdown-content');
+    return !!(menu && window.getComputedStyle(menu).visibility !== 'hidden');
+  }
+  function waitForInitial() {
+    var root = document.getElementById('channels-container');
+    var card = root && root.querySelector('[data-channel-type="github"]');
+    if (!root || !root._openVibelyCardPaginationState || !card) return setTimeout(waitForInitial, 30);
+    var disconnect = null;
+    var buttons = card.querySelectorAll('button');
+    for (var i = 0; i < buttons.length; i++) if (buttons[i].textContent.trim() === 'Disconnect') disconnect = buttons[i];
+    if (!disconnect) return fail('fixed GitHub Disconnect action was not rendered');
+    disconnect.focus();
+    if (document.activeElement !== disconnect || !visibleEnabled(disconnect)) return fail('fixed GitHub Disconnect action could not be focused');
+    document.body.dispatchEvent(new CustomEvent('htmx:beforeSwap', {detail: {target: root}}));
+    root.outerHTML = `+string(replacementHTMLJSON)+`;
+    var replacement = document.getElementById('channels-container');
+    document.body.dispatchEvent(new CustomEvent('htmx:afterSettle', {detail: {elt: replacement}}));
+    setTimeout(checkRestoredFocus, 30);
+  }
+  function checkRestoredFocus() {
+    var root = document.getElementById('channels-container');
+    var focused = document.activeElement;
+    var card = focused && focused.closest ? focused.closest('[data-channel-type]') : null;
+    if (!root || !card || !root.contains(card) || !visibleEnabled(focused)) return fail('fixed Channel refresh did not focus a visible surviving card');
+    if (menuVisible(card)) return fail('fixed Channel refresh reopened a surviving dropdown');
+    var state = root._openVibelyCardPaginationState;
+    if (!state || state.nextOffset !== 0) return fail('fixed Channel cards changed the empty webhook offset');
+    result('pass', 'fixed Channel focus restored without changing webhook offset');
+  }
+  window.addEventListener('load', function() { setTimeout(waitForInitial, 50); });
+  setTimeout(function() {
+    if (!document.getElementById('browser-result')) fail('fixed Channel focus fixture timed out');
+  }, 8000);
+})();
+</script></body>`, 1)
+
+	fixture := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(page))
+	}))
+	defer fixture.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, chrome,
+		"--headless=new", "--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage",
+		"--disable-background-networking", "--disable-extensions", "--no-default-browser-check",
+		"--no-first-run", "--window-size=1280,900", "--virtual-time-budget=9000", "--dump-dom", fixture.URL,
+	)
+	out, err := cmd.CombinedOutput()
+	if ctx.Err() != nil {
+		t.Fatalf("Chrome timed out: %v\n%s", ctx.Err(), out)
+	}
+	require.NoError(t, err, "Chrome output: %s", out)
+	dom := string(out)
+	if !strings.Contains(dom, `id="browser-result" data-status="pass"`) {
+		idx := strings.Index(dom, `id="browser-result"`)
+		if idx >= 0 {
+			end := idx + 700
+			if end > len(dom) {
+				end = len(dom)
+			}
+			t.Fatalf("fixed Channel browser focus regression failed: %s", html.UnescapeString(dom[idx:end]))
+		}
+		t.Fatalf("fixed Channel browser focus regression did not report a result; DOM length=%d", len(dom))
+	}
+}
+
 func TestCardPaginationProductionBrowserPreservesGenericFocusAndPartialWindowOffset(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping browser regression in short mode")

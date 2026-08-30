@@ -164,8 +164,10 @@ templ settingsContent(view ChannelsSettingsView) {
 			data-card-pagination-root
 			data-card-pagination-url={ "/channels?project_id=" + view.CurrentProjectID }
 			data-card-pagination-list="#webhook-card-list"
-				data-card-pagination-card-selector="[data-webhook-id]"
-				data-card-pagination-key="data-webhook-id"
+			data-card-pagination-card-selector="[data-webhook-id]"
+			data-card-pagination-replacement-card-selector="[data-channel-type]"
+			data-card-pagination-replacement-scope="root"
+			data-card-pagination-key="data-webhook-id"
 				data-card-pagination-page-size="20"
 				data-card-pagination-has-more={ cardPaginationHasMoreAttribute(view.WebhooksHasMore) }			hx-get={ "/channels?project_id=" + view.CurrentProjectID }		hx-trigger="channels-refresh from:body"
 		hx-target="this"
