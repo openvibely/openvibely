@@ -2950,6 +2950,31 @@ type WorktreeInfo struct {
 	Path   string
 	Branch string
 	IsMain bool
+	Locked bool
+}
+
+func IsGitWorktreeLocked(repoDir, worktreePath string) bool {
+	if strings.TrimSpace(repoDir) == "" || strings.TrimSpace(worktreePath) == "" {
+		return false
+	}
+	worktrees, err := ListGitWorktrees(repoDir)
+	if err != nil {
+		return false
+	}
+	resolvedWanted, err := filepath.EvalSymlinks(worktreePath)
+	if err != nil {
+		resolvedWanted = filepath.Clean(worktreePath)
+	}
+	for _, worktree := range worktrees {
+		resolvedPath, err := filepath.EvalSymlinks(worktree.Path)
+		if err != nil {
+			resolvedPath = filepath.Clean(worktree.Path)
+		}
+		if resolvedPath == resolvedWanted {
+			return worktree.Locked
+		}
+	}
+	return false
 }
 
 // ListGitWorktrees lists all worktrees for a git repository.
@@ -3005,6 +3030,8 @@ func ListGitWorktreesContext(ctx context.Context, repoDir string) ([]WorktreeInf
 		} else if strings.HasPrefix(line, "HEAD ") && current.Branch == "" {
 			// Detached HEAD, not on a branch
 			current.Branch = ""
+		} else if line == "locked" || strings.HasPrefix(line, "locked ") {
+			current.Locked = true
 		}
 	}
 

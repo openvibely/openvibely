@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
@@ -97,7 +98,7 @@ func TestHandler_TaskCardMergeOptionsUseAuthoritativeStateAndProjectOwnership(t 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("eligible options status=%d body=%s", rec.Code, rec.Body.String())
 	}
-	for _, want := range []string{"Merge commit", "Fast-forward only", "Rebase onto main", "Squash merge", "View PR #42"} {
+	for _, want := range []string{"Merge commit", "Fast-forward only", "Rebase onto main", "Squash merge", "View PR #42", `hx-trigger="task-card-menu-open"`} {
 		if !strings.Contains(rec.Body.String(), want) {
 			t.Fatalf("eligible options missing %q: %s", want, rec.Body.String())
 		}
@@ -117,12 +118,76 @@ func TestHandler_TaskCardMergeOptionsUseAuthoritativeStateAndProjectOwnership(t 
 		t.Fatal("foreign card request mutated the target branch")
 	}
 
+	if err := os.WriteFile(filepath.Join(worktreePath, "dirty.txt"), []byte("dirty\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rec = worktreeExecute(e, httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/card/merge-options?project_id="+project.ID, nil))
+	if strings.Contains(rec.Body.String(), "Rebase onto") || !strings.Contains(rec.Body.String(), "Merge commit") {
+		t.Fatalf("dirty worktree should suppress rebase but retain supported commit merge, body=%s", rec.Body.String())
+	}
+	dirtyRebase := worktreeFormRequest(http.MethodPost, "/tasks/"+task.ID+"/worktree/rebase", url.Values{
+		"merge_source": {"task_card"}, "project_id": {project.ID},
+	})
+	if got := worktreeExecute(e, dirtyRebase); got.Code != http.StatusConflict {
+		t.Fatalf("dirty stale card rebase should receive 409, got %d: %s", got.Code, got.Body.String())
+	}
+	if err := os.Remove(filepath.Join(worktreePath, "dirty.txt")); err != nil {
+		t.Fatal(err)
+	}
+	run("worktree", "lock", worktreePath)
+	rec = worktreeExecute(e, httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/card/merge-options?project_id="+project.ID, nil))
+	if !strings.Contains(rec.Body.String(), "Merge unavailable") || !strings.Contains(rec.Body.String(), "locked") {
+		t.Fatalf("locked worktree should suppress local merge actions, body=%s", rec.Body.String())
+	}
+	run("worktree", "unlock", worktreePath)
+
 	if err := h.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusConflict); err != nil {
 		t.Fatal(err)
 	}
 	rec = worktreeExecute(e, httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/card/merge-options?project_id="+project.ID, nil))
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Merge unavailable") || strings.Contains(rec.Body.String(), "data-task-card-merge-action") {
 		t.Fatalf("conflict state should suppress actions, status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	conflictPost := worktreeFormRequest(http.MethodPost, "/tasks/"+task.ID+"/worktree/merge", url.Values{
+		"merge_type": {"merge"}, "merge_source": {"task_card"}, "project_id": {project.ID},
+	})
+	conflictPost.Header.Set("HX-Request", "true")
+	if got := worktreeExecute(e, conflictPost); got.Code != http.StatusConflict {
+		t.Fatalf("stale conflict card merge should receive 409, got %d: %s", got.Code, got.Body.String())
+	}
+	if got := run("rev-parse", "main"); got == run("rev-parse", "task/card-merge") {
+		t.Fatal("stale conflict card request mutated the target branch")
+	}
+
+	if err := h.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusPending); err != nil {
+		t.Fatal(err)
+	}
+	unlock := h.lockWorktreeMutation(repoDir)
+	concurrentResult := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		req := worktreeFormRequest(http.MethodPost, "/tasks/"+task.ID+"/worktree/merge", url.Values{
+			"merge_type": {"merge"}, "merge_source": {"task_card"}, "project_id": {project.ID},
+		})
+		concurrentResult <- worktreeExecute(e, req)
+	}()
+	select {
+	case got := <-concurrentResult:
+		unlock()
+		t.Fatalf("concurrent card mutation bypassed repository lock: %d %s", got.Code, got.Body.String())
+	case <-time.After(100 * time.Millisecond):
+	}
+	if err := h.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusConflict); err != nil {
+		unlock()
+		t.Fatal(err)
+	}
+	unlock()
+	select {
+	case got := <-concurrentResult:
+		if got.Code != http.StatusConflict {
+			t.Fatalf("serialized card mutation did not revalidate stale state: %d %s", got.Code, got.Body.String())
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("serialized card mutation did not resume after repository lock release")
 	}
 }
 

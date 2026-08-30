@@ -2576,8 +2576,10 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				// No JavaScript workaround needed
 
 				let draggedElement = null;
+
 				let selectedTasks = new Set();
 				let draggedTaskIds = [];
+
 				window.isDragging = false;
 				let autoScrollInterval = null;
 				let currentScrollZone = null;
@@ -2762,6 +2764,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					}
 					return;
 				}
+
 					// Otherwise, let the default focus behavior open the dropdown, then place it in the visible viewport/scrollport.
 					requestAnimationFrame(function() { positionDropdownForViewport(label); });
 					if (kanbanDropdown && label.matches('[data-task-card-menu-trigger]') && window.htmx) {
@@ -2769,7 +2772,10 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						const refreshURL = options && options.getAttribute('hx-get');
 						if (options && refreshURL) htmx.ajax('GET', refreshURL, {target: options, swap: 'outerHTML'});
 					}
-				}			function handleTaskSelect(event) {
+				}
+
+				function handleTaskSelect(event) {
+
 					const clickedTaskID = event.currentTarget.getAttribute('data-task-id');
 					if (clickedTaskID && clickedTaskID === suppressedTaskClickID) {
 						event.preventDefault();
@@ -2820,6 +2826,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					selectedTasks.clear();
 					draggedTaskIds = [];
 				}
+
+
 
 				function beginPointerCardMotion(card) {
 					const rect = card.getBoundingClientRect();
@@ -3487,11 +3495,13 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					}
 				});
 
+
 				// Restore surviving selections, menu focus, and scroll after authoritative board replacement.
 				document.addEventListener('htmx:afterSwap', function(event) {
 					if (event.detail.target && event.detail.target.id === 'kanban-board') {
 						const liveBoard = document.getElementById('kanban-board');
 						if (liveBoard) restoreKanbanInteraction(liveBoard);
+
 
 						// Restore scroll positions after board is re-rendered
 						if (savedScrollPositions.size > 0) {

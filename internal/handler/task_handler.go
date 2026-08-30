@@ -825,7 +825,10 @@ func (h *Handler) taskRebaseAvailable(task *models.Task, project *models.Project
 	if branchAlreadyMerged || task.MergeStatus == models.MergeStatusMerged || task.MergeStatus == models.MergeStatusConflict {
 		return false
 	}
-	if len(service.ActiveConflictFiles(project.RepoPath)) > 0 {
+	if len(service.ActiveConflictFiles(project.RepoPath)) > 0 || service.IsGitWorktreeLocked(project.RepoPath, task.WorktreePath) {
+		return false
+	}
+	if status, err := service.GitStatusPorcelain(task.WorktreePath); err != nil || strings.TrimSpace(status) != "" {
 		return false
 	}
 	targetBranch := task.MergeTargetBranch

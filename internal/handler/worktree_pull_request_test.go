@@ -46,6 +46,30 @@ func TestCreateTaskPullRequest_RequiresWorktreeBranch(t *testing.T) {
 	}
 }
 
+func TestCreateTaskPullRequest_RejectsForeignTaskCardProject(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	h.SetTaskPullRequestRepo(repository.NewTaskPullRequestRepo(db))
+
+	project := &models.Project{Name: "PR Project", RepoPath: "/tmp/repo", RepoURL: "https://github.com/openvibely/openvibely"}
+	if err := h.projectSvc.Create(context.Background(), project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Scoped PR", Category: models.CategoryCompleted, Status: models.StatusCompleted, WorktreeBranch: "task/scoped-pr"}
+	if err := h.taskRepo.Create(context.Background(), task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	form := url.Values{"merge_source": {"task_card"}, "project_id": {"foreign"}}
+	req := httptest.NewRequest(http.MethodPost, "/tasks/"+task.ID+"/worktree/pull-request", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("foreign task-card PR should receive 404, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestCreateTaskPullRequest_UsesGlobalEnterpriseEndpointAndIgnoresRequestOverride(t *testing.T) {
 	const enterpriseEndpoint = "https://github.example.com/api/v3"
 	h, e, _, db := setupTestHandlerWithDB(t)
@@ -133,14 +157,15 @@ func TestCreateTaskPullRequest_CreatesAndPersistsPR(t *testing.T) {
 		t.Fatalf("create task: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/tasks/"+task.ID+"/worktree/pull-request", strings.NewReader(url.Values{}.Encode()))
+	form := url.Values{"merge_source": {"task_card"}, "project_id": {project.ID}}
+	req := httptest.NewRequest(http.MethodPost, "/tasks/"+task.ID+"/worktree/pull-request", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("HX-Request", "true")
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d (%s)", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `id="kanban-board"`) {
+		t.Fatalf("expected authoritative board status 200, got %d (%s)", rec.Code, rec.Body.String())
 	}
 	trigger := rec.Header().Get("HX-Trigger")
 	if !strings.Contains(trigger, "openvibelyToast") {

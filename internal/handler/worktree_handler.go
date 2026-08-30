@@ -15,6 +15,70 @@ import (
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
 
+// lockWorktreeMutation serializes Git writers for a repository. The fixed
+// stripe set avoids unbounded lock-map growth while ensuring every operation
+// for the same repository uses the same lock.
+func (h *Handler) lockWorktreeMutation(repoPath string) func() {
+	const offset32 = uint32(2166136261)
+	const prime32 = uint32(16777619)
+	hash := offset32
+	for i := 0; i < len(repoPath); i++ {
+		hash ^= uint32(repoPath[i])
+		hash *= prime32
+	}
+	lock := &h.worktreeMutationLocks[int(hash%uint32(len(h.worktreeMutationLocks)))]
+	lock.Lock()
+	return lock.Unlock
+}
+
+func (h *Handler) taskCardMergeEligibility(ctx context.Context, task *models.Task, mergeType string) (taskMergeActionState, bool, string) {
+	var state taskMergeActionState
+	if task == nil {
+		return state, false, "Task not found."
+	}
+	project, _ := h.projectRepo.GetByID(ctx, task.ProjectID)
+	if project == nil || project.RepoPath == "" {
+		return state, false, "The project has no repository path."
+	}
+	state = h.resolveTaskMergeActionState(ctx, task)
+	if task.Status == models.StatusRunning || task.Status == models.StatusQueued {
+		return state, false, "The task worktree is currently in use."
+	}
+	if service.IsGitWorktreeLocked(project.RepoPath, task.WorktreePath) {
+		return state, false, "The task worktree is locked."
+	}
+	if state.BranchAlreadyMerged || task.MergeStatus == models.MergeStatusMerged {
+		return state, false, "This task branch is already merged."
+	}
+	if len(service.ActiveConflictFiles(project.RepoPath)) > 0 || task.MergeStatus == models.MergeStatusConflict {
+		return state, false, "Resolve or abort the active merge conflict first."
+	}
+	if !state.UseWorktreeContent {
+		return state, false, "No mergeable task branch is available."
+	}
+	if mergeType == "rebase" && !state.RebaseAvailable {
+		return state, false, "Rebase is not available for the current branch state."
+	}
+	if mergeType == "ff" && task.WorktreePath != "" {
+		status, err := service.GitStatusPorcelain(task.WorktreePath)
+		if err != nil || strings.TrimSpace(status) != "" {
+			return state, false, "Fast-forward requires a clean task worktree."
+		}
+	}
+	return state, true, ""
+}
+
+func cardMutationSource(c echo.Context) bool {
+	return c.FormValue("merge_source") == "task_card"
+}
+
+func rejectTaskCardMutation(c echo.Context, message string) error {
+	if isHTMX(c) {
+		setHTMXToast(c, message, "failed")
+	}
+	return c.String(http.StatusConflict, message)
+}
+
 // GetTaskCardMergeOptions returns freshly validated merge actions for one Kanban card.
 func (h *Handler) GetTaskCardMergeOptions(c echo.Context) error {
 	projectID := strings.TrimSpace(c.QueryParam("project_id"))
@@ -29,16 +93,8 @@ func (h *Handler) GetTaskCardMergeOptions(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, "task not found")
 	}
 
-	state := h.resolveTaskMergeActionState(c.Request().Context(), task)
+	state, eligible, reason := h.taskCardMergeEligibility(c.Request().Context(), task, "merge")
 	project, _ := h.projectRepo.GetByID(c.Request().Context(), projectID)
-	activeConflict := project != nil && project.RepoPath != "" && len(service.ActiveConflictFiles(project.RepoPath)) > 0
-	eligible := state.UseWorktreeContent && !state.BranchAlreadyMerged && !activeConflict && task.MergeStatus != models.MergeStatusMerged && task.MergeStatus != models.MergeStatusConflict
-	reason := "No mergeable task branch is available."
-	if state.BranchAlreadyMerged || task.MergeStatus == models.MergeStatusMerged {
-		reason = "This task branch is already merged."
-	} else if activeConflict || task.MergeStatus == models.MergeStatusConflict {
-		reason = "Resolve or abort the active merge conflict first."
-	}
 
 	if task.MergeTargetBranch == "" && project != nil && project.RepoPath != "" {
 		task.MergeTargetBranch = service.GetDefaultBranch(project.RepoPath)
@@ -96,6 +152,27 @@ func (h *Handler) MergeTaskBranch(c echo.Context) error {
 	if err != nil || project == nil || project.RepoPath == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "project has no repo path")
 	}
+	unlock := h.lockWorktreeMutation(project.RepoPath)
+	defer unlock()
+	task, err = h.taskSvc.GetByID(c.Request().Context(), taskID)
+	if err != nil || task == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "task not found")
+	}
+	mergeType := c.FormValue("merge_type")
+	if mergeType == "" {
+		mergeType = "merge"
+	}
+	if mergeType != "merge" && mergeType != "ff" && mergeType != "squash" {
+		if fromTaskCard {
+			return rejectTaskCardMutation(c, "Unsupported merge mode.")
+		}
+		return c.String(http.StatusBadRequest, "unsupported merge type")
+	}
+	if fromTaskCard {
+		if _, eligible, reason := h.taskCardMergeEligibility(c.Request().Context(), task, mergeType); !eligible {
+			return rejectTaskCardMutation(c, reason)
+		}
+	}
 	h.recoverTaskWorktreeState(c.Request().Context(), task, project)
 	branchAlreadyMerged := h.reconcileAlreadyMergedBranch(c.Request().Context(), task)
 	eligibility := h.resolveTaskMergeEligibility(c.Request().Context(), task, project, branchAlreadyMerged)
@@ -116,14 +193,6 @@ func (h *Handler) MergeTaskBranch(c echo.Context) error {
 
 	if h.worktreeSvc == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "worktree service not available")
-	}
-
-	mergeType := c.FormValue("merge_type")
-	if mergeType == "" {
-		mergeType = "merge"
-	}
-	if mergeType != "merge" && mergeType != "ff" && mergeType != "squash" {
-		return c.String(http.StatusBadRequest, "unsupported merge type")
 	}
 
 	fromChangesTab := c.FormValue("merge_source") == "changes_tab"
@@ -243,6 +312,17 @@ func (h *Handler) RebaseTaskBranch(c echo.Context) error {
 	if err != nil || project == nil || project.RepoPath == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "project has no repo path")
 	}
+	unlock := h.lockWorktreeMutation(project.RepoPath)
+	defer unlock()
+	task, err = h.taskSvc.GetByID(c.Request().Context(), taskID)
+	if err != nil || task == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "task not found")
+	}
+	if fromTaskCard {
+		if _, eligible, reason := h.taskCardMergeEligibility(c.Request().Context(), task, "rebase"); !eligible {
+			return rejectTaskCardMutation(c, reason)
+		}
+	}
 	h.recoverTaskWorktreeState(c.Request().Context(), task, project)
 	branchAlreadyMerged := h.reconcileAlreadyMergedBranch(c.Request().Context(), task)
 	eligibility := h.resolveTaskMergeEligibility(c.Request().Context(), task, project, branchAlreadyMerged)
@@ -343,6 +423,17 @@ func (h *Handler) RebaseTaskBranch(c echo.Context) error {
 	return h.GetTaskChanges(c)
 }
 
+func taskPullRequestFailure(c echo.Context, fromTaskCard bool, message string) error {
+	if fromTaskCard {
+		if isHTMX(c) {
+			setHTMXToast(c, message, "failed")
+		}
+		return c.String(http.StatusBadRequest, message)
+	}
+	setHTMXToast(c, message, "failed")
+	return c.NoContent(http.StatusNoContent)
+}
+
 // CreateTaskPullRequest creates or reuses a pull request for a task worktree branch.
 func (h *Handler) CreateTaskPullRequest(c echo.Context) error {
 	taskID := c.Param("taskId")
@@ -351,40 +442,61 @@ func (h *Handler) CreateTaskPullRequest(c echo.Context) error {
 		setHTMXToast(c, "Task not found", "failed")
 		return c.NoContent(http.StatusNoContent)
 	}
+	fromTaskCard := cardMutationSource(c)
+	if fromTaskCard {
+		projectID := strings.TrimSpace(c.FormValue("project_id"))
+		if projectID == "" || task.ProjectID != projectID {
+			return echo.NewHTTPError(http.StatusNotFound, "task not found")
+		}
+	}
 	if task.WorktreeBranch == "" {
-		setHTMXToast(c, "Task has no worktree branch", "failed")
-		return c.NoContent(http.StatusNoContent)
+		return taskPullRequestFailure(c, fromTaskCard, "Task has no worktree branch")
 	}
 	if h.githubSvc == nil {
+		if fromTaskCard {
+			return taskPullRequestFailure(c, true, "GitHub integration is not configured")
+		}
 		setHTMXToastWithLink(c, "GitHub integration is not configured", "failed", "/channels", "Open Channels")
 		return c.NoContent(http.StatusNoContent)
 	}
 	if h.taskPullRequestRepo == nil {
-		setHTMXToast(c, "Task pull request repository not available", "failed")
-		return c.NoContent(http.StatusNoContent)
+		return taskPullRequestFailure(c, fromTaskCard, "Task pull request repository not available")
 	}
 
 	project, err := h.projectRepo.GetByID(c.Request().Context(), task.ProjectID)
 	if err != nil || project == nil || project.RepoPath == "" {
-		setHTMXToast(c, "Project has no repository path configured", "failed")
-		return c.NoContent(http.StatusNoContent)
+		return taskPullRequestFailure(c, fromTaskCard, "Project has no repository path configured")
+	}
+	unlock := h.lockWorktreeMutation(project.RepoPath)
+	defer unlock()
+	task, err = h.taskSvc.GetByID(c.Request().Context(), taskID)
+	if err != nil || task == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "task not found")
+	}
+	if fromTaskCard {
+		if task.Status == models.StatusRunning || task.Status == models.StatusQueued {
+			return rejectTaskCardMutation(c, "The task worktree is currently in use.")
+		}
+		if task.WorktreeBranch == "" {
+			return rejectTaskCardMutation(c, "Task has no worktree branch.")
+		}
+		if service.IsGitWorktreeLocked(project.RepoPath, task.WorktreePath) {
+			return rejectTaskCardMutation(c, "The task worktree is locked.")
+		}
 	}
 	repoRef, err := h.githubSvc.ResolveRepo(c.Request().Context(), project.RepoURL, project.RepoPath)
 	if err != nil {
-		setHTMXToast(c, formatTaskPullRequestError(fmt.Errorf("resolving repository: %w", err)), "failed")
-		return c.NoContent(http.StatusNoContent)
+		return taskPullRequestFailure(c, fromTaskCard, formatTaskPullRequestError(fmt.Errorf("resolving repository: %w", err)))
 	}
 	if err := service.ConfigureGitHubRepoEndpoint(repoRef, h.githubSvc.GlobalAPIEndpoint(c.Request().Context())); err != nil {
-		setHTMXToast(c, err.Error(), "failed")
-		return c.NoContent(http.StatusNoContent)
+		return taskPullRequestFailure(c, fromTaskCard, err.Error())
 	}
 
 	result, err := h.newTaskPullRequestService().OpenForTask(c.Request().Context(), project, task, service.OpenTaskPullRequestOptions{
 		CommitMessage: h.buildPullRequestPrepCommitMessage(c.Request().Context(), task),
 	})
 	if err != nil {
-		setHTMXToast(c, formatTaskPullRequestError(err), "failed")
-		return c.NoContent(http.StatusNoContent)
+		return taskPullRequestFailure(c, fromTaskCard, formatTaskPullRequestError(err))
 	}
 
 	if result.ReusedExistingRecord {
@@ -393,6 +505,9 @@ func (h *Handler) CreateTaskPullRequest(c echo.Context) error {
 		setHTMXToast(c, fmt.Sprintf("GitHub PR created (#%d)", result.PullRequest.Number), "success")
 	} else {
 		setHTMXToast(c, fmt.Sprintf("GitHub PR reused (#%d)", result.PullRequest.Number), "success")
+	}
+	if fromTaskCard {
+		return h.renderTaskBoardRefresh(c, task.ProjectID, nil)
 	}
 	return h.GetTaskChanges(c)
 }

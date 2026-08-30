@@ -381,6 +381,26 @@ func TestTaskCard_LazilyLoadsAuthoritativeMergeOptions(t *testing.T) {
 	}
 }
 
+func TestTaskCardMergeOptionsRemainRefreshableAndExposeCreatePR(t *testing.T) {
+	task := models.Task{ID: "merge-card-task", ProjectID: "project-1", Title: "Merge card task", MergeTargetBranch: "main"}
+	var buf bytes.Buffer
+	if err := TaskCardMergeOptions(&task, "project-1", true, false, "", nil).Render(context.Background(), &buf); err != nil {
+		t.Fatal(err)
+	}
+	body := buf.String()
+	for _, want := range []string{
+		`hx-get="/tasks/merge-card-task/card/merge-options?project_id=project-1"`,
+		`hx-trigger="task-card-menu-open"`,
+		`data-task-card-pr-action`,
+		`data-merge-type="pr"`,
+		`Create PR`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("expected authoritative card action contract %q, body=%s", want, body)
+		}
+	}
+}
+
 func TestTaskCard_GoalMetIconMatchesDocumentedStandardGlyph(t *testing.T) {
 	doc, err := os.ReadFile("../../../docs/task-status-icon-options.html")
 	if err != nil {
