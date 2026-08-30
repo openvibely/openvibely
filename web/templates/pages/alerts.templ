@@ -163,6 +163,21 @@ templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unrea
 			if (typeof window.refreshGlobalSystemUpdateIndicators === 'function') window.refreshGlobalSystemUpdateIndicators();
 			else refreshSystemUpdateCard();
 
+			function hydrateAlertMarkdown(container) {
+				if (!container) return;
+				var markdown = container.querySelector('[data-alert-markdown][data-raw-content]');
+				if (!markdown) return;
+				var raw = markdown.getAttribute('data-raw-content') || '';
+				if (!raw) return;
+				if (typeof window.renderChatMarkdown !== 'function') {
+					markdown.textContent = raw;
+					return;
+				}
+				markdown.classList.add('chat-markdown');
+				markdown.innerHTML = window.renderChatMarkdown(raw);
+				if (window.addCodeCopyButtons) window.addCodeCopyButtons(markdown);
+			}
+
 			function loadAlertDetail(details) {
 				if (!details || !details.open) return;
 				var container = details.querySelector('[data-alert-detail-container]');
@@ -175,6 +190,7 @@ templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unrea
 					return response.text();
 				}).then(function(html) {
 					container.innerHTML = html;
+					hydrateAlertMarkdown(container);
 					container.dataset.alertDetailState = 'loaded';
 				}).catch(function() {
 					container.dataset.alertDetailState = '';
@@ -396,7 +412,7 @@ templ alertDetailBody(alert models.Alert) {
 	} else {
 		<div class={ "relative min-w-0 max-w-full", templ.KV("min-h-6 pr-8", alert.Body != "") } data-alert-detail-loaded>
 			if alert.Body != "" {
-				<p class="whitespace-pre-wrap break-words text-sm">{ alert.Body }</p>
+				<div class="chat-markdown" data-alert-markdown data-raw-content={ alert.Body }></div>
 			}
 			if alertMetadataJSON(alert) != "" {
 				<pre class={ "max-w-full overflow-x-auto whitespace-pre-wrap break-all rounded bg-base-300 p-2 text-xs", templ.KV("mt-3", alert.Body != "") }>{ alertMetadataJSON(alert) }</pre>

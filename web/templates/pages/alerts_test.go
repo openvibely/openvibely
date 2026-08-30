@@ -3,6 +3,7 @@ package pages
 import (
 	"bytes"
 	"context"
+	"html"
 	"strings"
 	"testing"
 	"time"
@@ -200,6 +201,69 @@ func TestAlertDetail_IncludesBodyAndMetadataForSelectedAlert(t *testing.T) {
 		if strings.Contains(payload, forbidden) {
 			t.Fatalf("body-only copy payload unexpectedly contains %q", forbidden)
 		}
+	}
+}
+
+func TestAlertDetail_UsesSharedMarkdownSurfaceWithoutChangingCopySource(t *testing.T) {
+	body := "# Heading\r\n\r\n**emphasis**\r\n\r\n- first\r\n- second\r\n\r\n[link](https://example.test)\r\n\r\n```go\r\nline 1\r\nline 2\r\n```\r\n\r\n<img src=x onerror=alert(1)>"
+	alert := models.Alert{
+		ID: "markdown-detail-1", ProjectID: "project-1", Title: "Markdown detail", Body: body,
+		Metadata:      map[string]any{"attempt": float64(2)},
+		DecisionState: models.AlertDecisionNotRequired, ProcessingState: models.AlertProcessingNotApplicable,
+	}
+
+	var detail bytes.Buffer
+	if err := AlertDetail(alert).Render(context.Background(), &detail); err != nil {
+		t.Fatalf("render alert detail: %v", err)
+	}
+	detailHTML := detail.String()
+	for _, required := range []string{
+		`data-alert-detail-loaded`,
+		`class="chat-markdown"`,
+		`data-alert-markdown`,
+		`data-raw-content=`,
+		`data-alert-copy-text`,
+		`attempt`,
+	} {
+		if !strings.Contains(detailHTML, required) {
+			t.Fatalf("Markdown detail fragment missing %q", required)
+		}
+	}
+	if strings.Contains(detailHTML, `class="whitespace-pre-wrap break-words text-sm"`) {
+		t.Fatal("detail body must not be emitted as a second plain-text rendering")
+	}
+
+	const copyPrefix = `<pre class="hidden" data-alert-copy-text aria-hidden="true">`
+	copyStart := strings.Index(detailHTML, copyPrefix)
+	if copyStart < 0 {
+		t.Fatal("exact raw copy source is missing")
+	}
+	copyStart += len(copyPrefix)
+	copyEnd := strings.Index(detailHTML[copyStart:], `</pre>`)
+	if copyEnd < 0 {
+		t.Fatal("exact raw copy source is unterminated")
+	}
+	if got := html.UnescapeString(detailHTML[copyStart : copyStart+copyEnd]); got != body {
+		t.Fatalf("copy source changed the raw body: got %q, want %q", got, body)
+	}
+
+	var content bytes.Buffer
+	if err := AlertsContent(nil, "project-1", 0).Render(context.Background(), &content); err != nil {
+		t.Fatalf("render Alerts content: %v", err)
+	}
+	contentHTML := content.String()
+	for _, required := range []string{
+		`function hydrateAlertMarkdown(container)`,
+		`window.renderChatMarkdown(raw)`,
+		`window.addCodeCopyButtons(markdown)`,
+		`hydrateAlertMarkdown(container)`,
+	} {
+		if !strings.Contains(contentHTML, required) {
+			t.Fatalf("Alerts detail hydration missing shared renderer contract %q", required)
+		}
+	}
+	if strings.Contains(contentHTML, `marked.parse(`) || strings.Contains(contentHTML, `sanitizeChatHTML`) {
+		t.Fatal("Alerts detail must delegate Markdown parsing and sanitization to the shared pipeline")
 	}
 }
 

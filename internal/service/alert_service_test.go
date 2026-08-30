@@ -11,6 +11,58 @@ import (
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
+func TestAlertService_GetByIDPreservesMarkdownDetailAndProjectScope(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	alertRepo := repository.NewAlertRepo(db)
+	projectRepo := repository.NewProjectRepo(db)
+	alertSvc := NewAlertService(alertRepo, nil)
+
+	project := &models.Project{Name: "Markdown detail project"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	foreign := &models.Project{Name: "Foreign detail project"}
+	if err := projectRepo.Create(ctx, foreign); err != nil {
+		t.Fatal(err)
+	}
+
+	rawBody := "# Heading\r\n\r\n**emphasis**\r\n\r\n```text\r\nline 1\r\nline 2\r\n```"
+	alert := &models.Alert{
+		ProjectID: project.ID, Type: models.AlertCustom, Severity: models.SeverityInfo,
+		Title: "Markdown notification", Body: rawBody, Source: "test",
+		Metadata:      map[string]any{"attempt": float64(2)},
+		DecisionState: models.AlertDecisionPending, ProcessingState: models.AlertProcessingUnclaimed,
+	}
+	if err := alertSvc.Create(ctx, alert); err != nil {
+		t.Fatal(err)
+	}
+
+	detail, err := alertSvc.GetByID(ctx, project.ID, alert.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail == nil || detail.Body != rawBody {
+		t.Fatalf("detail body changed: got %#v, want %q", detail, rawBody)
+	}
+	if detail.Metadata["attempt"] != float64(2) {
+		t.Fatalf("detail metadata changed: %#v", detail.Metadata)
+	}
+
+	summaries, err := alertSvc.ListSummariesByProject(ctx, project.ID, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(summaries) != 1 || summaries[0].ID != alert.ID {
+		t.Fatalf("unexpected compact summaries: %#v", summaries)
+	}
+
+	foreignDetail, err := alertSvc.GetByID(ctx, foreign.ID, alert.ID)
+	if err == nil || foreignDetail != nil {
+		t.Fatalf("foreign project detail unexpectedly visible: detail=%#v err=%v", foreignDetail, err)
+	}
+}
+
 func TestAlertService_CreateTaskFailedAlert(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	alertRepo := repository.NewAlertRepo(db)

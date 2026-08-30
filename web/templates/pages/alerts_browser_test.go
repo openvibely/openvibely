@@ -3,6 +3,7 @@ package pages
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -149,6 +150,235 @@ func TestAlertsInspectCopyFeedbackInChrome(t *testing.T) {
 	if !strings.HasPrefix(outcome, "pass:") {
 		stderr, _ := os.ReadFile(stderrPath)
 		t.Fatalf("Alerts inspect copy browser regression failed: %s\nLast browser progress: %s\nChrome stderr:\n%s", outcome, lastProgress, stderr)
+	}
+}
+
+func TestAlertsInspectMarkdownAndHTMXDetailLoadingInChrome(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	projectID := "project-alerts-markdown"
+	body := "# Heading\n\n**emphasis**\n\n- first\n- second\n\n[external](https://example.test/link) [internal](/tasks/internal)\n\n```go\nline 1\nline 2\n```\n\n<img src=x onerror=alert(1)>"
+	emptyAlert := models.AlertSummary{
+		ID: "empty-detail-1", ProjectID: projectID, Title: "Empty detail", Message: "No extra content",
+		Type: models.AlertCustom, Severity: models.SeverityInfo, DecisionState: models.AlertDecisionNotRequired,
+		ProcessingState: models.AlertProcessingNotApplicable,
+	}
+	summary := models.AlertSummary{
+		ID: "markdown-detail-1", ProjectID: projectID, Title: "Markdown detail", Message: "Inspect this notification",
+		Type: models.AlertCustom, Severity: models.SeverityInfo, DecisionState: models.AlertDecisionNotRequired,
+		ProcessingState: models.AlertProcessingNotApplicable,
+	}
+	fullAlert := models.Alert{
+		ID: summary.ID, ProjectID: projectID, Title: summary.Title, Message: summary.Message, Body: body,
+		Type: summary.Type, Severity: summary.Severity, Source: "browser-test",
+		DecisionState: summary.DecisionState, ProcessingState: summary.ProcessingState,
+		Metadata: map[string]any{"attempt": float64(2)},
+	}
+
+	renderList := func() string {
+		var rendered bytes.Buffer
+		if err := AlertsContent([]models.AlertSummary{summary, emptyAlert}, projectID, 0).Render(context.Background(), &rendered); err != nil {
+			t.Fatalf("render Alerts content: %v", err)
+		}
+		return rendered.String()
+	}
+	var renderedPage bytes.Buffer
+	if err := Alerts(nil, projectID, []models.AlertSummary{summary, emptyAlert}, 0).Render(context.Background(), &renderedPage); err != nil {
+		t.Fatalf("render Alerts page: %v", err)
+	}
+	page := strings.Replace(renderedPage.String(), "https://unpkg.com/htmx.org@2.0.4", "/htmx-2.0.4.min.js", 1)
+	page = strings.Replace(page, "https://cdn.jsdelivr.net/npm/marked@15.0.4/marked.min.js", "/marked.min.js", 1)
+	expectedBody, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal expected Markdown body: %v", err)
+	}
+	markedScript := `window.marked = {
+  setOptions: function(options) { this.options = options; },
+  parse: function(value) {
+    window.__markedInput = value;
+    if (value.indexOf('&lt;img src=x onerror=alert(1)>') === -1) throw new Error('raw HTML was not escaped before parsing');
+    return '<h1>Heading</h1>' +
+      '<p><strong>emphasis</strong></p>' +
+      '<ul><li>first</li><li>second</li></ul>' +
+      '<p><a data-case="external" href="https://example.test/link">external</a> <a data-case="internal" href="/tasks/internal">internal</a></p>' +
+      '<pre><code class="language-go">line 1\nline 2</code></pre>' +
+      '<p class="raw-html-example">&lt;img src=x onerror=alert(1)&gt;</p>' +
+      '<script>alert(1)</script>' +
+      '<a data-case="unsafe" href="javascript:alert(1)" onclick="alert(1)">unsafe</a>';
+  }
+};`
+	runner := `<script>
+window.addEventListener('DOMContentLoaded', function() {
+  function report(status, message) { return fetch('/browser-result?status=' + encodeURIComponent(status) + '&message=' + encodeURIComponent(message || ''), {method:'POST'}).catch(function() {}); }
+  function fail(message) { throw new Error(message); }
+  function wait(ms) { return new Promise(function(resolve) { setTimeout(resolve, ms); }); }
+  function waitFor(check, label) {
+    var started = performance.now();
+    return new Promise(function(resolve, reject) {
+      function poll() {
+        try { if (check()) return resolve(); } catch (error) { return reject(error); }
+        if (performance.now() - started > 5000) return reject(new Error('timed out waiting for ' + label));
+        setTimeout(poll, 10);
+      }
+      poll();
+    });
+  }
+  function detailRow(id) { return document.querySelector('[data-alert-id="' + id + '"]'); }
+  function openDetails(row) {
+    var details = row && row.querySelector('details');
+    if (!details) fail('missing inspection details');
+    details.open = true;
+    details.dispatchEvent(new Event('toggle'));
+    return details;
+  }
+  function renderFallback(text, label) {
+    var host = document.createElement('div');
+    host.innerHTML = window.renderChatMarkdown(text);
+    var fallback = host.querySelector('[data-chat-markdown-fallback="true"]');
+    if (!fallback) fail(label + ' did not use the shared fallback');
+    if (fallback.textContent !== text) fail(label + ' changed fallback text');
+    if (host.querySelector('img,script,iframe')) fail(label + ' left dangerous HTML active');
+  }
+  window.addEventListener('error', function(event) { report('fail', String(event.error && event.error.stack || event.message)); });
+  (async function() {
+    var expectedBody = ` + string(expectedBody) + `;
+    await waitFor(function() { return window.htmx && detailRow('markdown-detail-1'); }, 'initial Alerts page');
+    var initialRow = detailRow('markdown-detail-1');
+    if (initialRow.querySelector('[data-raw-content]')) fail('initial compact summary embedded full Markdown body');
+
+    var initialContent = document.getElementById('alerts-content');
+    htmx.process(document.body);
+    htmx.trigger(document.body, 'alertUpdate');
+    await waitFor(function() { return document.getElementById('alerts-content') !== initialContent; }, 'HTMX Alerts refresh');
+    var row = detailRow('markdown-detail-1');
+    if (!row || row.querySelector('[data-raw-content]')) fail('HTMX compact summary embedded full Markdown body');
+
+    openDetails(row);
+    await waitFor(function() {
+      var markdown = row.querySelector('[data-alert-markdown]');
+      return markdown && markdown.querySelector('h1');
+    }, 'Markdown detail hydration');
+    var markdown = row.querySelector('[data-alert-markdown]');
+    if (!markdown.classList.contains('chat-markdown')) fail('detail body did not use chat Markdown styling');
+    if (!markdown.querySelector('h1') || markdown.querySelector('h1').textContent !== 'Heading') fail('heading did not render');
+    if (!markdown.querySelector('strong') || markdown.querySelector('strong').textContent !== 'emphasis') fail('emphasis did not render');
+    if (!markdown.querySelectorAll('ul > li') || markdown.querySelectorAll('ul > li').length !== 2) fail('list did not render');
+    var external = markdown.querySelector('a[data-case="external"]');
+    if (!external || external.getAttribute('target') !== '_blank' || external.getAttribute('rel') !== 'noopener noreferrer' || external.getAttribute('data-openvibely-chat-external-link') !== 'true') fail('safe external link was not marked for outside-app opening');
+    var internal = markdown.querySelector('a[data-case="internal"]');
+    if (!internal || internal.hasAttribute('target') || internal.hasAttribute('rel') || internal.hasAttribute('data-openvibely-chat-external-link')) fail('internal link received external-link behavior');
+    var code = markdown.querySelector('pre code');
+    if (!code || code.textContent !== 'line 1\nline 2') fail('fenced multiline code changed');
+    if (!markdown.querySelector('pre .code-copy-btn')) fail('rendered code block did not receive shared code-copy control');
+    if (markdown.querySelector('script, iframe, img')) fail('dangerous HTML survived detail sanitization');
+    var unsafe = markdown.querySelector('a[data-case="unsafe"]');
+    if (!unsafe || unsafe.hasAttribute('href') || unsafe.hasAttribute('onclick')) fail('dangerous URL or event handler survived sanitization');
+    if (!window.__markedInput || window.__markedInput.indexOf('&lt;img src=x onerror=alert(1)>') === -1) fail('shared renderer did not escape raw HTML before Marked');
+
+    var copied = '';
+    Object.defineProperty(navigator, 'clipboard', {configurable:true, value:{writeText:function(text) { copied = text; return Promise.resolve(); }}});
+    var copyButton = row.querySelector('[data-alert-copy]');
+    if (!copyButton) fail('missing detail copy control');
+    copyButton.click();
+    await wait(0);
+    if (copied !== expectedBody) fail('copy payload was not the exact raw body: ' + JSON.stringify(copied));
+
+    var emptyRow = detailRow('empty-detail-1');
+    openDetails(emptyRow);
+    await waitFor(function() { return emptyRow.textContent.indexOf('No additional detail.') !== -1; }, 'empty detail');
+    if (emptyRow.querySelector('[data-alert-copy]')) fail('empty detail exposed a copy control');
+
+    var parser = window.marked;
+    parser.parse = function() { throw new Error('malformed Markdown'); };
+    renderFallback('malformed <img src=x onerror=alert(1)>', 'parse failure fallback');
+    parser.parse = function(value) { return '<p>' + value + '</p>'; };
+    parser.setOptions = function() { throw new Error('Markdown configuration failed'); };
+    window._chatMarkedConfiguredFor = null;
+    renderFallback('configuration failure <img src=x onerror=alert(1)>', 'configuration failure fallback');
+    await report('pass', '');
+  })().catch(function(error) { report('fail', String(error && error.stack || error)); });
+});
+</script>`
+	page = strings.Replace(page, "</head>", "<script>"+markedScript+"</script>"+runner+"</head>", 1)
+
+	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))
+	if err != nil {
+		t.Fatalf("read pinned HTMX fixture: %v", err)
+	}
+	browserResult := make(chan string, 8)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/htmx-2.0.4.min.js":
+			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+			_, _ = w.Write(htmxJS)
+		case r.URL.Path == "/marked.min.js":
+			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+			_, _ = w.Write([]byte(markedScript))
+		case r.URL.Path == "/alerts" && r.Method == http.MethodGet && r.Header.Get("HX-Request") == "true":
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(renderList()))
+		case r.URL.Path == "/alerts/markdown-detail-1/details" && r.Method == http.MethodGet:
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			var detail bytes.Buffer
+			if err := AlertDetail(fullAlert).Render(context.Background(), &detail); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			_, _ = w.Write(detail.Bytes())
+		case r.URL.Path == "/alerts/empty-detail-1/details" && r.Method == http.MethodGet:
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			var detail bytes.Buffer
+			if err := AlertDetail(models.Alert{ID: emptyAlert.ID, ProjectID: projectID, Title: emptyAlert.Title, Message: emptyAlert.Message}).Render(context.Background(), &detail); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			_, _ = w.Write(detail.Bytes())
+		case r.URL.Path == "/api/system/update" && r.Method == http.MethodGet:
+			w.WriteHeader(http.StatusNoContent)
+		case r.URL.Path == "/browser-result":
+			browserResult <- r.URL.Query().Get("status") + ":" + r.URL.Query().Get("message")
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(page))
+		}
+	}))
+	defer server.Close()
+
+	stderrPath := filepath.Join(t.TempDir(), "alerts-markdown-browser.stderr")
+	stderrFile, err := os.Create(stderrPath)
+	if err != nil {
+		t.Fatalf("create Chrome stderr: %v", err)
+	}
+	defer stderrFile.Close()
+	cmd := exec.Command(chrome,
+		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
+		"--disable-dev-shm-usage", "--disable-background-networking",
+		"--no-first-run", "--no-default-browser-check",
+		"--user-data-dir="+filepath.Join(t.TempDir(), "alerts-markdown-browser-profile"),
+		server.URL+"/alerts?project_id="+projectID,
+	)
+	cmd.Stderr = stderrFile
+	if err := startBrowserProcess(cmd); err != nil {
+		t.Fatalf("start Chrome: %v", err)
+	}
+	var outcome, lastProgress string
+	deadline := time.After(20 * time.Second)
+	for outcome == "" {
+		select {
+		case result := <-browserResult:
+			if strings.HasPrefix(result, "progress:") {
+				lastProgress = strings.TrimPrefix(result, "progress:")
+				continue
+			}
+			outcome = result
+		case <-deadline:
+			outcome = "fail:timed out waiting for browser result; last progress=" + lastProgress
+		}
+	}
+	stopBrowserProcess(cmd)
+	if !strings.HasPrefix(outcome, "pass:") {
+		stderr, _ := os.ReadFile(stderrPath)
+		t.Fatalf("Alerts Markdown browser regression failed: %s\nChrome stderr:\n%s", outcome, strings.TrimSpace(string(stderr)))
 	}
 }
 
