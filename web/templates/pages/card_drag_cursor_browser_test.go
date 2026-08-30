@@ -178,12 +178,19 @@ window.addEventListener('DOMContentLoaded', function() {
   window.addEventListener('error', function(event) { report('fail', String(event.error && event.error.stack || event.message)); });
   (async function() {
     if (location.pathname === '/tasks') {
+      if (document.getElementById('selection-counter')) fail('tasks page must not render a selection counter');
+      var selectedTask = document.querySelector('#task-task-drag-cursor');
+      selectedTask.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true, ctrlKey:true}));
+      if (!selectedTask.classList.contains('task-selected')) fail('tasks page modifier click must still select a card');
+      selectedTask.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true, ctrlKey:true}));
+      if (selectedTask.classList.contains('task-selected')) fail('tasks page second modifier click must clear card selection');
       await exerciseOuterAutoScrollDrop('#task-task-drag-cursor', '#kanban-board', 'y', '.category-drop-zone[data-category="completed"]', 'task category card', 9);
       await exerciseOuterAutoScrollDrop('#task-task-active-status-drag', '#kanban-board', 'y', '.task-drop-zone[data-status="running"]', 'task status card', 10);
       location.href = '/schedule?project_id=project-card-drag-cursor';
       return;
     }
     if (location.pathname === '/schedule') {
+      if (document.getElementById('selection-counter')) fail('schedule page must not render a selection counter');
       var scheduleCard = document.querySelector('[data-schedule-id="schedule-drag-cursor"]');
       var sourceZone = scheduleCard && scheduleCard.closest('.drop-zone');
       if (!sourceZone) fail('schedule off-screen drop: source zone missing');
@@ -340,22 +347,23 @@ window.addEventListener('DOMContentLoaded', function() {
     var second = document.querySelector('[data-schedule-id="schedule-multi-b"]');
     var single = document.querySelector('[data-schedule-id="schedule-single-c"]');
     if (!first || !second || !single) fail('expected all schedule cards');
+    if (document.getElementById('selection-counter')) fail('selection counter must not render');
+    var singleHeight = single.getBoundingClientRect().height;
     click(single, true);
-    if (!single.classList.contains('schedule-selected') || document.querySelector('#selection-count').textContent !== '1') fail('modifier click must select one schedule');
-    if (document.querySelector('#selection-label').textContent.trim() !== 'schedule selected') fail('counter must use schedule-specific singular semantics');
-    document.querySelector('#selection-counter button').click();
-    if (single.classList.contains('schedule-selected') || document.getElementById('selection-counter').classList.contains('visible')) fail('Clear button must clear schedule selection');
+    if (!single.classList.contains('schedule-selected')) fail('modifier click must select one schedule');
+    if (single.getBoundingClientRect().height !== singleHeight) fail('schedule selection must not change card height');
     click(single, true);
-    click(single, true);
-    if (single.classList.contains('schedule-selected') || document.getElementById('selection-counter').classList.contains('visible')) fail('second modifier click must clear selection');
+    if (single.classList.contains('schedule-selected')) fail('second modifier click must clear selection');
 
+    var firstHeight = first.getBoundingClientRect().height, secondHeight = second.getBoundingClientRect().height;
     click(first, true); click(second, true);
-    if (document.querySelector('#selection-label').textContent.trim() !== 'schedules selected') fail('counter must use schedule-specific plural semantics');
     if (!first.classList.contains('schedule-selected') || !second.classList.contains('schedule-selected')) fail('modifier clicks must select both schedules');
+    if (first.getBoundingClientRect().height !== firstHeight || second.getBoundingClientRect().height !== secondHeight) fail('multi-selection must not change schedule card heights');
     var firstStyle = getComputedStyle(first), secondStyle = getComputedStyle(second);
     if (firstStyle.outlineStyle !== 'none' || secondStyle.outlineStyle !== 'none') fail('schedule selection must not use a floating outline');
     if (firstStyle.boxShadow !== 'none' || secondStyle.boxShadow !== 'none') fail('schedule selection must not use an external shadow ring');
-    if (firstStyle.borderTopWidth === '0px' || firstStyle.borderRightWidth === '0px' || firstStyle.borderBottomWidth === '0px') fail('schedule selection must change the card border on every side');
+    var firstSelectionStroke = getComputedStyle(first, '::after');
+    if (firstSelectionStroke.borderTopWidth === '0px' || firstSelectionStroke.borderRightWidth === '0px' || firstSelectionStroke.borderBottomWidth === '0px') fail('schedule selection must draw an inset card border on every side');
     var firstRect = first.getBoundingClientRect(), secondRect = second.getBoundingClientRect();
     if (firstRect.bottom > secondRect.top) fail('selected schedules in one time block must not overlap');
     var source = first.closest('.drop-zone');
@@ -369,7 +377,7 @@ window.addEventListener('DOMContentLoaded', function() {
     first.dispatchEvent(new PointerEvent('pointerup', {bubbles:true,cancelable:true,pointerId:31,pointerType:'mouse',button:0,buttons:0,clientX:drop.x,clientY:drop.y}));
     await waitFor(function() { return !first.classList.contains('dragging') && !second.classList.contains('dragging'); }, 'failed grouped drag rollback');
     if (first.style.transform || second.style.transform || document.querySelector('[data-pointer-drag-placeholder]')) fail('failed grouped drag must restore every card');
-    if (document.getElementById('selection-counter').classList.contains('visible')) fail('drag completion must clear schedule selection');
+    if (first.classList.contains('schedule-selected') || second.classList.contains('schedule-selected')) fail('drag completion must clear schedule selection');
     await new Promise(function(resolve) { setTimeout(resolve, 20); });
 
     click(first, true); click(second, true);
@@ -379,7 +387,7 @@ window.addEventListener('DOMContentLoaded', function() {
     await new Promise(function(resolve) { setTimeout(resolve, 20); });
     var refreshed = document.querySelector('[data-schedule-id="schedule-single-c"]');
     click(refreshed, true);
-    if (!refreshed.classList.contains('schedule-selected') || document.querySelector('#selection-count').textContent !== '1') fail('selection must reinitialize after authoritative refresh');
+    if (!refreshed.classList.contains('schedule-selected')) fail('selection must reinitialize after authoritative refresh');
     await report('pass', '');
   })().catch(function(error) { report('fail', String(error && error.stack || error)); });
 });

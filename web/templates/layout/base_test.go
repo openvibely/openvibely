@@ -13,6 +13,19 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
+func TestBaseOmitsMultiSelectionCounter(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Base("Selection", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render Base: %v", err)
+	}
+	html := buf.String()
+	for _, forbidden := range []string{`id="selection-counter"`, `id="selection-count"`, `id="selection-label"`, `clearActiveSelection`} {
+		if strings.Contains(html, forbidden) {
+			t.Fatalf("base layout must not render the multi-selection counter contract %q", forbidden)
+		}
+	}
+}
+
 func TestBaseRuntimeModeAndChatLinkPolicyHooks(t *testing.T) {
 	var buf bytes.Buffer
 	if err := Base("Runtime", []models.Project{}, "").Render(context.Background(), &buf); err != nil {

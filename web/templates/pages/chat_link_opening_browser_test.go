@@ -123,10 +123,14 @@ func chatLinkOpeningBrowserFixture(t *testing.T, baseHTML string) string {
 		t.Fatal("could not isolate production Markdown sanitizer script")
 	}
 	desktopStart := strings.Index(baseHTML, "<!-- Desktop external-link bridge -->")
-	desktopEnd := strings.Index(baseHTML[desktopStart:], "<!-- Selection Counter -->")
-	if desktopStart < 0 || desktopEnd < 0 {
+	if desktopStart < 0 {
 		t.Fatal("could not isolate production desktop external-link bridge")
 	}
+	desktopScriptEnd := strings.Index(baseHTML[desktopStart:], "</script>")
+	if desktopScriptEnd < 0 {
+		t.Fatal("could not isolate production desktop external-link bridge")
+	}
+	desktopEnd := desktopScriptEnd + len("</script>")
 	return `<!DOCTYPE html><html lang="en" data-openvibely-runtime="web" data-runtime="web"><head><meta charset="UTF-8"><title>Chat links</title></head><body><script>` +
 		baseHTML[markdownStart:markdownStart+markdownEnd] +
 		`</script>` +

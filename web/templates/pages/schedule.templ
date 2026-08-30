@@ -916,24 +916,10 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 			// openTaskDialog navigates away and the user never sees the reschedule.
 			var _schedDragActive = false;
 
-			function updateScheduleSelectionCounter() {
-				var counter = document.getElementById('selection-counter');
-				if (!counter) return;
-				if (selectedScheduleCards.size > 0) {
-					counter.querySelector('#selection-count').textContent = selectedScheduleCards.size;
-					counter.querySelector('#selection-label').textContent = selectedScheduleCards.size === 1 ? 'schedule selected' : 'schedules selected';
-					window.clearActiveSelection = clearScheduleSelection;
-					counter.classList.add('visible');
-				} else {
-					counter.classList.remove('visible');
-				}
-			}
-
 			function clearScheduleSelection() {
 				selectedScheduleCards.forEach(function(card) { card.classList.remove('schedule-selected'); });
 				selectedScheduleCards.clear();
 				draggedScheduleIds = [];
-				updateScheduleSelectionCounter();
 			}
 
 			function handleScheduleSelect(event) {
@@ -952,7 +938,6 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 						selectedScheduleCards.add(card);
 						card.classList.add('schedule-selected');
 					}
-					updateScheduleSelectionCounter();
 					return;
 				}
 				openTaskDialog(card.dataset.taskId);

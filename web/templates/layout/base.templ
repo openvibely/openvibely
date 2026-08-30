@@ -369,8 +369,17 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						display: none;
 					}
 					.schedule-selected {
-						border: 2px solid oklch(var(--p)) !important;
+						position: relative;
 						background: oklch(var(--p) / 0.35) !important;
+					}
+					.schedule-selected::after {
+						content: '';
+						position: absolute;
+						inset: 0;
+						border: 2px solid oklch(var(--p));
+						border-radius: inherit;
+						box-sizing: border-box;
+						pointer-events: none;
 					}
 				/* Modal layering */
 				dialog.modal {
@@ -553,24 +562,6 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					background: var(--ov-loading-dot-color-soft);
 				}
 			}
-			#selection-counter {
-					position: fixed;
-					bottom: 24px;
-					right: 24px;
-					background: hsl(var(--p));
-					color: white;
-					padding: 12px 20px;
-					border-radius: 12px;
-					font-weight: bold;
-					box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-					z-index: 50;
-					display: none;
-					align-items: center;
-					gap: 12px;
-				}
-				#selection-counter.visible {
-					display: flex;
-				}
 				/* Ensure dropdown menus appear above other cards */
 				.card:has(.dropdown:focus-within),
 				.card:has(.dropdown:hover),
@@ -1658,11 +1649,6 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					color: var(--ov-l-text-strong);
 				}
 
-				/* --- Selection counter shadow fix --- */
-				[data-theme="light"] #selection-counter {
-					box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-				}
-
 				/* --- Modal dialogs --- */
 				[data-theme="light"] .modal-box {
 					background-color: var(--ov-l-bg);
@@ -2566,20 +2552,6 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				let autoScrollInterval = null;
 				let currentScrollZone = null;
 
-					function updateSelectionCounter() {
-						const counter = document.getElementById('selection-counter');
-						if (!counter) return;
-
-						if (selectedTasks.size > 0) {
-							counter.querySelector('#selection-count').textContent = selectedTasks.size;
-							counter.querySelector('#selection-label').textContent = selectedTasks.size === 1 ? 'task selected' : 'tasks selected';
-							window.clearActiveSelection = clearSelection;
-							counter.classList.add('visible');
-						} else {
-							counter.classList.remove('visible');
-						}
-					}
-
 				// ── Tab Visibility Manager ──			// Centralized manager to pause/resume SSE connections and HTMX polling
 			// when a tab is hidden/visible. Prevents resource exhaustion with multiple tabs.
 			window._tabVisibility = (function() {
@@ -2789,7 +2761,6 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							card.classList.add('task-selected');
 						}
 
-						updateSelectionCounter();
 						return;
 					}
 
@@ -2806,7 +2777,6 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					});
 					selectedTasks.clear();
 					draggedTaskIds = [];
-					updateSelectionCounter();
 				}
 
 				function beginPointerCardMotion(card) {
@@ -4787,11 +4757,5 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					};
 				})();
 			</script>
-			<!-- Selection Counter -->
-			<div id="selection-counter">
-				<span id="selection-count">0</span>
-				<span id="selection-label">tasks selected</span>
-				<button onclick="if (window.clearActiveSelection) window.clearActiveSelection()" class="btn btn-sm btn-ghost">Clear</button>
-			</div>
 		</body>	</html>
 }
