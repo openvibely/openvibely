@@ -276,7 +276,7 @@ func taskCardDisplayState(task models.Task) taskCardState {
 	case models.StatusQueued:
 		return taskCardState{Key: "queued", Label: label, TextClass: "text-info"}
 	case models.StatusRunning:
-		return taskCardState{Key: "running", Label: label, TextClass: "text-warning"}
+		return taskCardState{Key: "running", Label: label, TextClass: "task-state-running"}
 	case models.StatusCompleted:
 		return taskCardState{Key: "completed", Label: label, TextClass: "text-success"}
 	case models.StatusFailed:
