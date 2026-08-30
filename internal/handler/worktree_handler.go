@@ -494,7 +494,7 @@ func (h *Handler) AbortTaskMerge(c echo.Context) error {
 
 	abortBranch := task.WorktreeBranch
 	abortTarget := eligibility.TargetBranch
-	abortErr := service.AbortMergeForTaskValidated(project.RepoPath, abortBranch, abortTarget, func() error {
+	abortErr := h.worktreeSvc.AbortMergeForTaskValidated(c.Request().Context(), taskID, project.RepoPath, abortBranch, abortTarget, models.MergeStatusPending, func() error {
 		freshEligibility, err := h.revalidateTaskConflictRecovery(c.Request().Context(), taskID, task, project)
 		if err != nil {
 			return err
@@ -524,7 +524,6 @@ func (h *Handler) AbortTaskMerge(c echo.Context) error {
 		}
 		return c.String(status, errMessage)
 	}
-	_ = h.taskRepo.UpdateMergeStatus(c.Request().Context(), taskID, models.MergeStatusPending)
 
 	task, _ = h.taskSvc.GetByID(c.Request().Context(), taskID)
 	if c.FormValue("merge_source") == "changes_tab" {

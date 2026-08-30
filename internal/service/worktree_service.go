@@ -1726,6 +1726,54 @@ func AbortMergeForTaskValidated(repoDir, branchName, targetBranch string, valida
 	return abortMergeForTaskLocked(repoDir, branchName, targetBranch)
 }
 
+// AbortMergeForTaskValidated aborts task-owned conflict state and persists the
+// resulting merge status before releasing the canonical repository lease.
+func (ws *WorktreeService) AbortMergeForTaskValidated(ctx context.Context, taskID, repoDir, branchName, targetBranch string, status models.MergeStatus, validate func() error) error {
+	leaseKey, acquired := beginRepositoryMutation(repoDir)
+	if !acquired {
+		return ErrMergeInProgress
+	}
+	defer endRepositoryMutation(leaseKey)
+	if validate != nil {
+		if err := validate(); err != nil {
+			return err
+		}
+	}
+	if err := abortMergeForTaskLocked(repoDir, branchName, targetBranch); err != nil {
+		return err
+	}
+	if ws.taskRepo == nil {
+		return fmt.Errorf("task repository not available")
+	}
+	return ws.taskRepo.UpdateMergeStatus(ctx, taskID, status)
+}
+
+func (ws *WorktreeService) validateAutoConflictRecovery(ctx context.Context, task *models.Task, repoDir string) error {
+	if ws.taskRepo == nil || task == nil || task.ID == "" {
+		return fmt.Errorf("%w: task conflict metadata is unavailable", ErrMergeEligibilityChanged)
+	}
+	fresh, err := ws.taskRepo.GetByID(ctx, task.ID)
+	if err != nil || fresh == nil {
+		return fmt.Errorf("%w: task could not be refreshed", ErrMergeEligibilityChanged)
+	}
+	freshTarget := fresh.MergeTargetBranch
+	if freshTarget == "" {
+		freshTarget = GetDefaultBranch(repoDir)
+	}
+	expectedTarget := task.MergeTargetBranch
+	if expectedTarget == "" {
+		expectedTarget = GetDefaultBranch(repoDir)
+	}
+	if fresh.WorktreeBranch == "" || fresh.WorktreeBranch != task.WorktreeBranch || freshTarget == "" || freshTarget != expectedTarget {
+		return fmt.Errorf("%w: task conflict metadata changed", ErrMergeEligibilityChanged)
+	}
+	if !ActiveMergeMatchesBranch(repoDir, fresh.WorktreeBranch) || len(detectConflicts(repoDir)) == 0 {
+		return fmt.Errorf("%w: active conflict no longer belongs to this task", ErrMergeEligibilityChanged)
+	}
+	*task = *fresh
+	return nil
+}
+
 func abortMergeForTaskLocked(repoDir, branchName, targetBranch string) error {
 	if HasActiveMerge(repoDir) {
 		return abortMergeLocked(repoDir)
@@ -2550,17 +2598,19 @@ func (ws *WorktreeService) HandlePostExecution(ctx context.Context, task *models
 		}
 		if !result.Success && len(result.ConflictFiles) > 0 {
 			applog.Infof("[worktree] auto-merge has conflicts for task %s, attempting AI resolution", task.ID)
-			aiResult, aiErr := ws.ResolveConflictsWithAI(ctx, task, repoDir)
+			validateConflictOwner := func() error {
+				return ws.validateAutoConflictRecovery(ctx, task, repoDir)
+			}
+			aiResult, aiErr := ws.ResolveConflictsWithAIValidated(ctx, task, repoDir, validateConflictOwner)
 			if aiErr != nil || (aiResult != nil && !aiResult.Success) {
 				applog.Infof("[worktree] AI conflict resolution failed for task %s, aborting merge", task.ID)
 				targetBranch := task.MergeTargetBranch
 				if targetBranch == "" {
 					targetBranch = GetDefaultBranch(repoDir)
 				}
-				if abortErr := AbortMergeForTask(repoDir, task.WorktreeBranch, targetBranch); abortErr != nil {
+				if abortErr := ws.AbortMergeForTaskValidated(ctx, task.ID, repoDir, task.WorktreeBranch, targetBranch, models.MergeStatusConflict, validateConflictOwner); abortErr != nil {
 					applog.Infof("[worktree] failed to abort unresolved auto-merge for task %s: %v", task.ID, abortErr)
 				}
-				_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusConflict)
 				return
 			}
 		}

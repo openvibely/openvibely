@@ -2225,6 +2225,97 @@ func TestMergeBranchRejectsConcurrentRepositoryMutations(t *testing.T) {
 	}
 }
 
+func TestAbortMergeForTaskValidatedPersistsStatusUnderRepositoryLease(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	taskRepo := repository.NewTaskRepo(db, nil)
+	ws := NewWorktreeService(taskRepo, repository.NewProjectRepo(db), repository.NewSettingsRepo(db))
+	repoDir := createTestGitRepo(t)
+
+	writeAndCommitTestFile(t, repoDir, "abort-status.txt", "base\n", "abort status base")
+	runGitTest(t, repoDir, "checkout", "-b", "task/abort-status")
+	writeAndCommitTestFile(t, repoDir, "abort-status.txt", "task\n", "abort status task")
+	runGitTest(t, repoDir, "checkout", "main")
+	writeAndCommitTestFile(t, repoDir, "abort-status.txt", "target\n", "abort status target")
+	mergeCmd := exec.Command("git", "merge", "--no-ff", "task/abort-status")
+	mergeCmd.Dir = repoDir
+	if out, err := mergeCmd.CombinedOutput(); err == nil {
+		t.Fatalf("expected active conflict, got success: %s", out)
+	}
+
+	task := &models.Task{
+		ProjectID: "default", Title: "Atomic abort status", Category: models.CategoryCompleted,
+		Status: models.StatusCompleted, WorktreeBranch: "task/abort-status", MergeTargetBranch: "main", MergeStatus: models.MergeStatusConflict,
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ws.AbortMergeForTaskValidated(ctx, task.ID, repoDir, task.WorktreeBranch, task.MergeTargetBranch, models.MergeStatusPending, func() error {
+		if !ActiveMergeMatchesBranch(repoDir, task.WorktreeBranch) {
+			return errors.New("task no longer owns active conflict")
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("abort with atomic status: %v", err)
+	}
+	if HasActiveMerge(repoDir) || len(ActiveConflictFiles(repoDir)) != 0 {
+		t.Fatal("abort left active Git conflict state")
+	}
+	persisted, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.MergeStatus != models.MergeStatusPending {
+		t.Fatalf("abort persisted status = %q, want pending before lease release", persisted.MergeStatus)
+	}
+}
+
+func TestAutoConflictRecoveryValidationRejectsForeignMergeHead(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	taskRepo := repository.NewTaskRepo(db, nil)
+	ws := NewWorktreeService(taskRepo, repository.NewProjectRepo(db), repository.NewSettingsRepo(db))
+	repoDir := createTestGitRepo(t)
+
+	writeAndCommitTestFile(t, repoDir, "foreign-conflict.txt", "base\n", "foreign conflict base")
+	runGitTest(t, repoDir, "branch", "task/auto-owner")
+	runGitTest(t, repoDir, "checkout", "-b", "task/foreign-owner")
+	writeAndCommitTestFile(t, repoDir, "foreign-conflict.txt", "foreign\n", "foreign conflict task")
+	runGitTest(t, repoDir, "checkout", "main")
+	writeAndCommitTestFile(t, repoDir, "foreign-conflict.txt", "target\n", "foreign conflict target")
+	mergeCmd := exec.Command("git", "merge", "--no-ff", "task/foreign-owner")
+	mergeCmd.Dir = repoDir
+	if out, err := mergeCmd.CombinedOutput(); err == nil {
+		t.Fatalf("expected active foreign conflict, got success: %s", out)
+	}
+
+	task := &models.Task{
+		ProjectID: "default", Title: "Auto recovery owner", Category: models.CategoryCompleted,
+		Status: models.StatusCompleted, WorktreeBranch: "task/auto-owner", MergeTargetBranch: "main", MergeStatus: models.MergeStatusConflict,
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	validateOwner := func() error { return ws.validateAutoConflictRecovery(ctx, task, repoDir) }
+	if _, err := ws.ResolveConflictsWithAIValidated(ctx, task, repoDir, validateOwner); !errors.Is(err, ErrMergeEligibilityChanged) {
+		t.Fatalf("foreign active conflict Resolve validation = %v, want ErrMergeEligibilityChanged", err)
+	}
+	if err := ws.AbortMergeForTaskValidated(ctx, task.ID, repoDir, task.WorktreeBranch, task.MergeTargetBranch, models.MergeStatusConflict, validateOwner); !errors.Is(err, ErrMergeEligibilityChanged) {
+		t.Fatalf("foreign active conflict Abort validation = %v, want ErrMergeEligibilityChanged", err)
+	}
+	if !ActiveMergeMatchesBranch(repoDir, "task/foreign-owner") || len(ActiveConflictFiles(repoDir)) == 0 {
+		t.Fatal("validated auto recovery altered the foreign active conflict")
+	}
+	persisted, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.MergeStatus != models.MergeStatusConflict {
+		t.Fatalf("foreign recovery changed task status to %q", persisted.MergeStatus)
+	}
+}
+
 func TestConflictRecoverySharesRepositoryMutationLease(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ws := NewWorktreeService(repository.NewTaskRepo(db, nil), repository.NewProjectRepo(db), repository.NewSettingsRepo(db))

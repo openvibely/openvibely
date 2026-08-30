@@ -903,6 +903,26 @@ func TestHandler_MergeTaskBranch_Conflict_ReturnsHTMXToast(t *testing.T) {
 	if unrelatedUpdated.MergeStatus == models.MergeStatusConflict {
 		t.Fatal("unrelated task inherited active repository conflict status")
 	}
+
+	finalAbortReq := worktreeFormRequest(http.MethodPost, "/tasks/"+task.ID+"/worktree/abort", abortForm)
+	finalAbortReq.Header.Set("HX-Request", "true")
+	finalAbortRec := worktreeExecute(e, finalAbortReq)
+	if finalAbortRec.Code != http.StatusOK {
+		t.Fatalf("successful Abort returned %d: %s", finalAbortRec.Code, finalAbortRec.Body.String())
+	}
+	if service.HasActiveMerge(repoDir) || len(service.ActiveConflictFiles(repoDir)) != 0 {
+		t.Fatal("successful Abort left active Git conflict state")
+	}
+	abortedTask, err := h.taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if abortedTask.MergeStatus != models.MergeStatusPending {
+		t.Fatalf("successful Abort persisted status = %q, want pending", abortedTask.MergeStatus)
+	}
+	if body := finalAbortRec.Body.String(); !strings.Contains(body, "/tasks/"+task.ID+"/worktree/merge") || strings.Contains(body, "/tasks/"+task.ID+"/worktree/abort") {
+		t.Fatalf("successful Abort did not refresh retryable Changes actions: %s", body)
+	}
 }
 
 func TestHandler_MergeTaskBranch_ActiveConflictBlocksDuplicateMerge(t *testing.T) {
