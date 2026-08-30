@@ -361,6 +361,7 @@ func TestTaskCard_RendersPersistentAccessibleStateIconBeforeTitle(t *testing.T) 
 		status      models.TaskStatus
 		category    models.TaskCategory
 		mergeStatus models.MergeStatus
+		goalMet     bool
 		wantState   string
 		wantLabel   string
 	}{
@@ -369,10 +370,13 @@ func TestTaskCard_RendersPersistentAccessibleStateIconBeforeTitle(t *testing.T) 
 		{name: "queued", status: models.StatusQueued, category: models.CategoryActive, wantState: "queued", wantLabel: "Queued"},
 		{name: "running", status: models.StatusRunning, category: models.CategoryActive, wantState: "running", wantLabel: "In Progress"},
 		{name: "completed", status: models.StatusCompleted, category: models.CategoryCompleted, wantState: "completed", wantLabel: "Completed"},
+		{name: "completed with met goal", status: models.StatusCompleted, category: models.CategoryCompleted, goalMet: true, wantState: "goal-met", wantLabel: "Goal met"},
 		{name: "failed", status: models.StatusFailed, category: models.CategoryBacklog, wantState: "failed", wantLabel: "Failed"},
 		{name: "cancelled", status: models.StatusCancelled, category: models.CategoryBacklog, wantState: "cancelled", wantLabel: "Cancelled"},
 		{name: "blocked", status: models.StatusBlocked, category: models.CategoryActive, wantState: "blocked", wantLabel: "Waiting for Parent"},
 		{name: "merged overrides completion", status: models.StatusCompleted, category: models.CategoryCompleted, mergeStatus: models.MergeStatusMerged, wantState: "merged", wantLabel: "Merged"},
+		{name: "merged overrides met goal", status: models.StatusCompleted, category: models.CategoryCompleted, mergeStatus: models.MergeStatusMerged, goalMet: true, wantState: "merged", wantLabel: "Merged"},
+		{name: "stale met goal does not override running", status: models.StatusRunning, category: models.CategoryActive, goalMet: true, wantState: "running", wantLabel: "In Progress"},
 		{name: "stale merged does not override running", status: models.StatusRunning, category: models.CategoryActive, mergeStatus: models.MergeStatusMerged, wantState: "running", wantLabel: "In Progress"},
 		{name: "stale merged does not override failed", status: models.StatusFailed, category: models.CategoryBacklog, mergeStatus: models.MergeStatusMerged, wantState: "failed", wantLabel: "Failed"},
 		{name: "stale merged does not override cancelled", status: models.StatusCancelled, category: models.CategoryBacklog, mergeStatus: models.MergeStatusMerged, wantState: "cancelled", wantLabel: "Cancelled"},
@@ -387,6 +391,7 @@ func TestTaskCard_RendersPersistentAccessibleStateIconBeforeTitle(t *testing.T) 
 				Category:    tt.category,
 				Status:      tt.status,
 				MergeStatus: tt.mergeStatus,
+				GoalMet:     tt.goalMet,
 			}
 			var buf bytes.Buffer
 			if err := TaskCard(task, "default", string(tt.category), nil, nil).Render(context.Background(), &buf); err != nil {

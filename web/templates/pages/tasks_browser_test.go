@@ -152,16 +152,18 @@ window.addEventListener('DOMContentLoaded', function() {
     assertStateIconBeforeTitle('backlog-old', 'pending');
     assertStateIconBeforeTitle('active-move', 'queued');
     assertStateIconBeforeTitle('completed-old', 'completed');
+    assertStateIconBeforeTitle('completed-new', 'completed');
     if (!activeSort('backlog', 'created_desc')) fail('Backlog default sort control is not active');
     if (!activeSort('completed', 'completed_desc')) fail('Completed default sort control is not active');
 
     await fetch('/browser-add?phase=default', {method:'POST'});
     window.dispatchEvent(new CustomEvent('sse-task-event', {detail:{type:'task_updated', project_id:'project-tasks-browser'}}));
-    await waitFor(function() { return document.getElementById('task-backlog-live') && ids('backlog')[0] === 'backlog-live' && taskState('backlog-old') === 'failed' && taskState('completed-old') === 'merged'; }, 'default live refresh and state icon morph');
+    await waitFor(function() { return document.getElementById('task-backlog-live') && ids('backlog')[0] === 'backlog-live' && taskState('backlog-old') === 'failed' && taskState('completed-old') === 'merged' && taskState('completed-new') === 'goal-met'; }, 'default live refresh and state icon morph');
     assertOrder('backlog', ['backlog-live', 'backlog-new', 'backlog-old'], 'live Backlog creation order');
     assertOrder('completed', ['completed-live', 'completed-new', 'completed-legacy', 'completed-old'], 'live Completed completion order');
     assertStateIconBeforeTitle('backlog-old', 'failed');
     assertStateIconBeforeTitle('completed-old', 'merged');
+    assertStateIconBeforeTitle('completed-new', 'goal-met');
 
     var card = document.getElementById('task-active-move');
     var completedZone = zone('completed');
@@ -251,6 +253,9 @@ window.addEventListener('DOMContentLoaded', function() {
 						tasks[i].Status = models.StatusFailed
 					case "completed-old":
 						tasks[i].MergeStatus = models.MergeStatusMerged
+						tasks[i].GoalMet = true
+					case "completed-new":
+						tasks[i].GoalMet = true
 					}
 				}
 				tasks = append(tasks,

@@ -268,6 +268,46 @@ func TestTaskRepo_ListByProject_SetsHasGoalForActiveGoal(t *testing.T) {
 	}
 }
 
+func TestTaskRepo_ListBoardByProject_ProjectsGoalMetState(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewTaskRepo(db, nil)
+	goalRepo := NewTaskGoalRepo(db)
+	ctx := context.Background()
+
+	activeGoal := &models.Task{ProjectID: "default", Title: "Active Goal", Category: models.CategoryCompleted, Status: models.StatusCompleted, Prompt: "p"}
+	metGoal := &models.Task{ProjectID: "default", Title: "Met Goal", Category: models.CategoryCompleted, Status: models.StatusCompleted, Prompt: "p"}
+	withoutGoal := &models.Task{ProjectID: "default", Title: "Without Goal", Category: models.CategoryCompleted, Status: models.StatusCompleted, Prompt: "p"}
+	for _, task := range []*models.Task{activeGoal, metGoal, withoutGoal} {
+		if err := repo.Create(ctx, task); err != nil {
+			t.Fatalf("create task %q: %v", task.Title, err)
+		}
+	}
+	if err := goalRepo.CreateOrReplace(ctx, &models.TaskGoal{TaskID: activeGoal.ID, GoalID: "goal-active", Objective: "finish", Status: models.TaskGoalStatusActive}); err != nil {
+		t.Fatalf("create active goal: %v", err)
+	}
+	if err := goalRepo.CreateOrReplace(ctx, &models.TaskGoal{TaskID: metGoal.ID, GoalID: "goal-met", Objective: "finish", Status: models.TaskGoalStatusAchieved}); err != nil {
+		t.Fatalf("create met goal: %v", err)
+	}
+
+	tasks, err := repo.ListBoardByProjectWithCategorySorts(ctx, "default", "completed", "", "")
+	if err != nil {
+		t.Fatalf("ListBoardByProjectWithCategorySorts: %v", err)
+	}
+	byID := make(map[string]models.Task, len(tasks))
+	for _, task := range tasks {
+		byID[task.ID] = task
+	}
+	if got := byID[activeGoal.ID]; !got.HasGoal || got.GoalMet {
+		t.Fatalf("active goal projection = HasGoal %t GoalMet %t, want true/false", got.HasGoal, got.GoalMet)
+	}
+	if got := byID[metGoal.ID]; !got.HasGoal || !got.GoalMet {
+		t.Fatalf("met goal projection = HasGoal %t GoalMet %t, want true/true", got.HasGoal, got.GoalMet)
+	}
+	if got := byID[withoutGoal.ID]; got.HasGoal || got.GoalMet {
+		t.Fatalf("missing goal projection = HasGoal %t GoalMet %t, want false/false", got.HasGoal, got.GoalMet)
+	}
+}
+
 func TestTaskRepo_ListByProject_OrderingFIFO(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewTaskRepo(db, nil)
