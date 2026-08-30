@@ -255,28 +255,39 @@ func (s *SchedulerService) checkDueTasks(ctx context.Context) {
 // checkActiveTasks finds tasks in the Active category that are pending and auto-submits them.
 // Also recovers stale "queued" tasks (orphaned by crashed thread follow-up goroutines).
 func (s *SchedulerService) checkActiveTasks(ctx context.Context) {
-	tasks, err := s.taskRepo.ListActivePending(ctx)
+	admissions, err := s.taskRepo.ListActivePendingAdmissions(ctx)
 	if err != nil {
 		applog.Infof("[scheduler] checkActiveTasks error: %v", err)
 		return
 	}
 
-	if len(tasks) > 0 {
-		applog.Infof("[scheduler] checkActiveTasks found %d pending active tasks", len(tasks))
+	if len(admissions) > 0 {
+		applog.Infof("[scheduler] checkActiveTasks found %d pending active tasks", len(admissions))
 	}
 
-	for _, task := range tasks {
-		if task.SwarmRole == models.SwarmRoleParent && s.swarmStarter != nil {
+	for _, admission := range admissions {
+		if admission.SwarmRole == models.SwarmRoleParent && s.swarmStarter != nil {
 			applog.Infof("[scheduler] checkActiveTasks starting swarm planner task id=%s title=%q project=%s",
-				task.ID, task.Title, task.ProjectID)
-			if err := s.swarmStarter.StartPlanner(ctx, task.ID); err != nil {
-				applog.Infof("[scheduler] checkActiveTasks error starting swarm planner task=%s: %v", task.ID, err)
+				admission.ID, admission.Title, admission.ProjectID)
+			if err := s.swarmStarter.StartPlanner(ctx, admission.ID); err != nil {
+				applog.Infof("[scheduler] checkActiveTasks error starting swarm planner task=%s: %v", admission.ID, err)
 			}
 			continue
 		}
 		applog.Infof("[scheduler] checkActiveTasks auto-submitting task id=%s title=%q project=%s",
-			task.ID, task.Title, task.ProjectID)
-		s.workerSvc.Submit(task)
+			admission.ID, admission.Title, admission.ProjectID)
+		s.workerSvc.Submit(models.Task{
+			ID:                admission.ID,
+			ProjectID:         admission.ProjectID,
+			Title:             admission.Title,
+			Category:          admission.Category,
+			Priority:          admission.Priority,
+			Status:            admission.Status,
+			AgentID:           admission.AgentID,
+			AgentDefinitionID: admission.AgentDefinitionID,
+			ParentTaskID:      admission.ParentTaskID,
+			SwarmRole:         admission.SwarmRole,
+		})
 	}
 
 	// Recover stale queued tasks. The "queued" status is set by TaskThreadSend

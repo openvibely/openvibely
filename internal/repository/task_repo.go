@@ -17,6 +17,11 @@ var ErrDuplicateTask = errors.New("task with this name already exists in this pr
 
 const taskSelectColumns = `id, project_id, title, category, priority, status, prompt, agent_id, agent_definition_id, tag, display_order, parent_task_id, chain_config, swarm_role, swarm_status, swarm_config, swarm_sequence, worktree_path, worktree_branch, auto_merge, merge_target_branch, merge_status, base_branch, base_commit_sha, lineage_depth, created_via, telegram_chat_id, created_at, updated_at, completed_at`
 
+// activeTaskAdmissionSelectColumns contains only the task fields needed by the
+// scheduler to order, log, route, and enqueue active pending work. Full task
+// payloads remain on the authoritative worker claim/detail path.
+const activeTaskAdmissionSelectColumns = `id, project_id, title, category, priority, status, agent_id, agent_definition_id, parent_task_id, swarm_role`
+
 const taskThreadRenderMetadataColumns = `id, project_id, category, status, agent_id, agent_definition_id`
 
 const worktreeCleanupTaskSelectColumns = `id, project_id, status, worktree_path, worktree_branch, merge_target_branch, merge_status`
@@ -42,6 +47,23 @@ var taskBoardSelectColumnsWithGoal = fmt.Sprintf(`t.id, t.project_id, t.title, t
 type TaskRepo struct {
 	db          *sql.DB
 	broadcaster *events.Broadcaster
+}
+
+// ActiveTaskAdmission is the compact row returned by
+// ListActivePendingAdmissions. It is an admission hint, not a complete task;
+// callers that need prompt, workflow, worktree, or other execution detail must
+// reload the task through GetByID.
+type ActiveTaskAdmission struct {
+	ID                string
+	ProjectID         string
+	Title             string
+	Category          models.TaskCategory
+	Priority          int
+	Status            models.TaskStatus
+	AgentID           *string
+	AgentDefinitionID *string
+	ParentTaskID      *string
+	SwarmRole         models.SwarmRole
 }
 
 func NewTaskRepo(db *sql.DB, broadcaster *events.Broadcaster) *TaskRepo {
@@ -1349,6 +1371,39 @@ func (r *TaskRepo) UpdateSwarmFields(ctx context.Context, id string, role models
 		return fmt.Errorf("updating swarm fields: %w", err)
 	}
 	return nil
+}
+
+// ListActivePendingAdmissions returns the compact scheduler admission rows for
+// active pending tasks. Keep these eligibility predicates in sync with the
+// authoritative dispatch guards: reservations, queued/running executions, and
+// pending task-thread inputs own admission and must remain excluded.
+func (r *TaskRepo) ListActivePendingAdmissions(ctx context.Context) ([]ActiveTaskAdmission, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT `+activeTaskAdmissionSelectColumns+`
+			 FROM tasks WHERE category = 'active' AND status = 'pending'
+			 AND NOT EXISTS (SELECT 1 FROM automation_task_run_reservations r WHERE r.task_id = tasks.id)
+			 AND NOT EXISTS (SELECT 1 FROM executions e WHERE e.task_id = tasks.id AND e.status IN ('queued', 'running'))
+			 AND NOT `+taskThreadInputOwnsAdmissionPredicate+`
+			 ORDER BY priority DESC, display_order ASC, created_at ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("listing active pending task admissions: %w", err)
+	}
+	defer rows.Close()
+
+	var admissions []ActiveTaskAdmission
+	for rows.Next() {
+		var admission ActiveTaskAdmission
+		if err := rows.Scan(&admission.ID, &admission.ProjectID, &admission.Title,
+			&admission.Category, &admission.Priority, &admission.Status, &admission.AgentID,
+			&admission.AgentDefinitionID, &admission.ParentTaskID, &admission.SwarmRole); err != nil {
+			return nil, fmt.Errorf("scanning active pending task admission: %w", err)
+		}
+		admissions = append(admissions, admission)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return admissions, nil
 }
 
 func (r *TaskRepo) ListActivePending(ctx context.Context) ([]models.Task, error) {
