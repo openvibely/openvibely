@@ -1217,8 +1217,9 @@ func TestTaskRunningStateMatchesChatSendButtonByTheme(t *testing.T) {
 		"--ov-primary-action-color: #7480ff;",
 		"[data-theme=\"light\"] {",
 		"--ov-primary-action-color: #7480ff;",
-		"[data-color-theme=\"openvibely-dark\"] .btn-primary.chat-send-button,",
-		"[data-color-theme=\"openvibely-light\"] .btn-primary.chat-send-button {",
+		"[data-color-theme]:not([data-color-theme=\"openvibely-dark\"]):not([data-color-theme=\"openvibely-light\"]) {",
+		"--ov-primary-action-color: oklch(var(--p) / 1);",
+		"[data-color-theme] .btn-primary.chat-send-button {",
 		"background-color: var(--ov-primary-action-color);",
 		"border-color: var(--ov-primary-action-color);",
 		".task-state-running {",
@@ -1231,20 +1232,21 @@ func TestTaskRunningStateMatchesChatSendButtonByTheme(t *testing.T) {
 	for _, forbidden := range []string{
 		"background-color: var(--ov-primary-action-color) !important;",
 		"border-color: var(--ov-primary-action-color) !important;",
+		"[data-color-theme=\"openvibely-dark\"] .btn-primary.chat-send-button,",
 		"\n\t\t\t\t\t.chat-send-button {",
 	} {
 		if strings.Contains(html, forbidden) {
-			t.Errorf("shared normal send color must not override hover or imported-theme button styling via %q", forbidden)
+			t.Errorf("shared normal send color must remain theme-aware without suppressing hover via %q", forbidden)
 		}
 	}
-	nativeRule := strings.Index(html, `[data-color-theme="openvibely-dark"] .btn-primary.chat-send-button,`)
+	sharedRule := strings.Index(html, `[data-color-theme] .btn-primary.chat-send-button {`)
 	for _, hoverSelector := range []string{
 		`[data-theme="dark"] .btn-primary:hover {`,
 		`[data-theme="light"] .btn-primary:hover {`,
 	} {
 		hoverRule := strings.Index(html, hoverSelector)
-		if nativeRule < 0 || hoverRule < nativeRule {
-			t.Errorf("native send normal rule must precede %q so hover remains authoritative", hoverSelector)
+		if sharedRule < 0 || hoverRule < sharedRule {
+			t.Errorf("shared send normal rule must precede %q so hover remains authoritative", hoverSelector)
 		}
 	}
 	if strings.Contains(html, "--ov-task-running:") {

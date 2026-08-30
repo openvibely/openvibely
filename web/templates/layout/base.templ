@@ -194,8 +194,10 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							transparent 6px
 						);
 					}
-					[data-color-theme="openvibely-dark"] .btn-primary.chat-send-button,
-					[data-color-theme="openvibely-light"] .btn-primary.chat-send-button {
+					[data-color-theme]:not([data-color-theme="openvibely-dark"]):not([data-color-theme="openvibely-light"]) {
+						--ov-primary-action-color: oklch(var(--p) / 1);
+					}
+					[data-color-theme] .btn-primary.chat-send-button {
 						background-color: var(--ov-primary-action-color);
 						border-color: var(--ov-primary-action-color);
 					}

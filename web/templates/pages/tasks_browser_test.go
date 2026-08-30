@@ -486,7 +486,7 @@ data: {"type":"task_board_updated","project_id":"` + project.ID + `","task_id":"
 	}
 }
 
-func TestTaskRunningIconSharesNativeSendColorWithoutOverridingImportedThemeInChrome(t *testing.T) {
+func TestTaskRunningIconSharesThemeAwareSendColorWithoutSuppressingHoverInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	var page bytes.Buffer
 	if err := layout.Base("Primary action color", nil, "").Render(context.Background(), &page); err != nil {
@@ -494,22 +494,35 @@ func TestTaskRunningIconSharesNativeSendColorWithoutOverridingImportedThemeInChr
 	}
 
 	html := page.String()
-	importedCSS := `<style>[data-color-theme="vscode-test"][data-theme="dark"] .btn-primary { background-color: rgb(1, 2, 3) !important; border-color: rgb(1, 2, 3) !important; }</style>`
+	importedCSS := `<style>
+	[data-color-theme="vscode-test"][data-theme="dark"] { --p: 0.7 0.12 190; }
+	[data-color-theme="vscode-test"][data-theme="dark"] .btn-primary:hover { background-color: rgb(4, 5, 6); border-color: rgb(4, 5, 6); }
+	</style>`
 	html = strings.Replace(html, "</head>", importedCSS+"</head>", 1)
 	fixture := `<button class="btn btn-primary chat-send-button" data-test-send>Send</button><span class="task-state-running" data-test-running>Running</span><script>
 	window.addEventListener('DOMContentLoaded', function() {
 	  function color(selector, property) { return getComputedStyle(document.querySelector(selector))[property]; }
 	  function setTheme(mode, id) { document.documentElement.setAttribute('data-theme', mode); document.documentElement.setAttribute('data-color-theme', id); }
-	  function fail(message) { throw new Error(message); }
+	  function assertParity(label) {
+	    var send = color('[data-test-send]', 'backgroundColor');
+	    var running = color('[data-test-running]', 'color');
+	    if (send !== running) throw new Error(label + ' send and running colors differ: ' + send + ' vs ' + running);
+	    return send;
+	  }
 	  try {
 	    setTheme('dark', 'openvibely-dark');
-	    if (color('[data-test-send]', 'backgroundColor') !== color('[data-test-running]', 'color')) fail('dark send and running colors differ');
+	    var nativeDark = assertParity('dark');
 	    setTheme('light', 'openvibely-light');
-	    if (color('[data-test-send]', 'backgroundColor') !== color('[data-test-running]', 'color')) fail('light send and running colors differ');
+	    assertParity('light');
 	    setTheme('dark', 'vscode-test');
 	    setTimeout(function() {
 	      try {
-	        if (color('[data-test-send]', 'backgroundColor') !== 'rgb(1, 2, 3)') fail('imported theme primary color was overridden: ' + color('[data-test-send]', 'backgroundColor'));
+	        var imported = assertParity('imported');
+	        if (imported === nativeDark) throw new Error('imported primary token fell back to native color: ' + imported);
+	        var hoverRule = Array.from(document.styleSheets).some(function(sheet) {
+	          try { return Array.from(sheet.cssRules || []).some(function(rule) { return rule.selectorText && rule.selectorText.indexOf('[data-color-theme="vscode-test"]') >= 0 && rule.selectorText.indexOf('.btn-primary:hover') >= 0 && rule.style.backgroundColor === 'rgb(4, 5, 6)'; }); } catch (_) { return false; }
+	        });
+	        if (!hoverRule) throw new Error('imported hover rule was lost');
 	        fetch('/browser-result?status=pass', {method:'POST'});
 	      } catch (error) { fetch('/browser-result?status=fail&message=' + encodeURIComponent(String(error && error.stack || error)), {method:'POST'}); }
 	    }, 400);
