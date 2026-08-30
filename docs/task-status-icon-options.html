@@ -20,12 +20,13 @@
       --accent-bg: #293055;
       --pending: #929bad;
       --queued: #69a8ff;
-      --running: #f2b84b;
+      --running: #a78bfa;
       --completed: #55ca89;
       --failed: #ff6f76;
       --cancelled: #929bad;
       --blocked: #d895ee;
       --merged: #55ca89;
+      --goal-met: #55ca89;
       --shadow: 0 16px 48px rgba(0, 0, 0, .26);
     }
 
@@ -44,12 +45,13 @@
       --accent-bg: #e8ebff;
       --pending: #697386;
       --queued: #2779d8;
-      --running: #ad6b00;
+      --running: #7c3aed;
       --completed: #16814a;
       --failed: #d43542;
       --cancelled: #697386;
       --blocked: #8e43a7;
       --merged: #16814a;
+      --goal-met: #16814a;
       --shadow: 0 16px 48px rgba(32, 39, 57, .1);
     }
 
@@ -206,7 +208,7 @@
       display: grid;
       width: 100%;
       min-width: 0;
-      grid-template-columns: repeat(8, minmax(76px, 1fr));
+      grid-template-columns: repeat(9, minmax(70px, 1fr));
       align-items: stretch;
     }
 
@@ -243,6 +245,7 @@
     .state-cancelled { --state-color: var(--cancelled); }
     .state-blocked { --state-color: var(--blocked); }
     .state-merged { --state-color: var(--merged); }
+    .state-goal-met { --state-color: var(--goal-met); }
 
     .family-token {
       border-radius: 7px;
@@ -392,7 +395,7 @@
     @media (max-width: 980px) {
       .option-main { grid-template-columns: minmax(0, 1fr); }
       .option-copy { border-right: 0; border-bottom: 1px solid var(--border); }
-      .icon-grid { overflow-x: auto; grid-template-columns: repeat(8, 84px); }
+      .icon-grid { overflow-x: auto; grid-template-columns: repeat(9, 84px); }
       .board { grid-template-columns: 1fr 1fr; }
       .column:last-child { grid-column: 1 / -1; }
     }
@@ -461,6 +464,7 @@
       { key: 'queued', label: 'Queued' },
       { key: 'running', label: 'In progress' },
       { key: 'completed', label: 'Completed' },
+      { key: 'goal-met', label: 'Goal met' },
       { key: 'failed', label: 'Failed' },
       { key: 'cancelled', label: 'Cancelled' },
       { key: 'blocked', label: 'Waiting' },
@@ -471,15 +475,25 @@
     // compact branch that bends right into the third node.
     const mergeGlyph = '<circle cx="6.5" cy="4.5" r="2.5"/><circle cx="6.5" cy="19.5" r="2.5"/><circle cx="18" cy="12" r="2.5"/><path d="M6.5 7v10M6.5 7c0 3.2 3.4 5 9 5"/>';
 
+    // Goal completion uses restrained achievement symbols rather than another
+    // generic checkmark: finish flag, trophy, or medal depending on the family.
+    const goalMetFlagGlyph = '<path d="M6 21V4m0 1h11l-2 3.5 2 3.5H6"/>';
+    const goalMetTrophyGlyph = '<path d="M8 4h8v5a4 4 0 0 1-8 0V4Z"/><path d="M8 6H5v1a4 4 0 0 0 4 4m7-5h3v1a4 4 0 0 1-4 4M12 13v5m-4 3h8m-6-3h4"/>';
+    const goalMetMedalGlyph = '<circle cx="12" cy="9" r="5"/><path d="m9 14-1 7 4-2 4 2-1-7"/><path d="m10 9 1.3 1.3L14 7.5"/>';
+
     const paths = {
       standardPending: {
         pending: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="1.75" fill="currentColor" stroke="none"/>'
+      },
+      standardGoal: {
+        'goal-met': '<circle cx="12" cy="8.5" r="7.5"/><path d="m8 14-2 8 6-3.5 6 3.5-2-8"/><path d="m9 8.5 2 2 4-4"/>'
       },
       signal: {
         pending: '<circle cx="12" cy="12" r="7.5"/><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/>',
         queued: '<path d="M7 7h10M7 12h10M7 17h7"/>',
         running: '<path d="M12 3a9 9 0 1 1-6.36 2.64"/><path d="m5.64 2.8v2.84H2.8"/>',
         completed: '<path d="m5 12 4.2 4.2L19 6.5"/>',
+        'goal-met': goalMetFlagGlyph,
         failed: '<path d="m6.5 6.5 11 11m0-11-11 11"/>',
         cancelled: '<circle cx="12" cy="12" r="8.5"/><path d="M6 18 18 6"/>',
         blocked: '<path d="M8 9v6m8-6v6"/><rect x="3.5" y="3.5" width="17" height="17" rx="5"/>',
@@ -490,6 +504,7 @@
         queued: '<rect x="4" y="5" width="16" height="4" rx="1"/><rect x="4" y="11" width="16" height="4" rx="1"/><path d="M4 19h10"/>',
         running: '<path d="m13.5 2.5-8 11h6l-1 8 8-11h-6z"/>',
         completed: '<circle cx="12" cy="12" r="9"/><path d="m7.5 12 3 3 6-6"/>',
+        'goal-met': goalMetTrophyGlyph,
         failed: '<path d="M12 3 2.8 20h18.4z"/><path d="M12 9v4m0 3h.01"/>',
         cancelled: '<path d="M6 6h12v12H6z"/><path d="m8.5 8.5 7 7m0-7-7 7"/>',
         blocked: '<rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>',
@@ -500,6 +515,7 @@
         queued: '<circle cx="8" cy="12" r="3"/><circle cx="16" cy="12" r="3"/>',
         running: '<path d="m9 6 8 6-8 6z" fill="currentColor" stroke="none"/>',
         completed: '<path d="m12 3 9 9-9 9-9-9z"/><path d="m8 12 2.5 2.5L16 9"/>',
+        'goal-met': goalMetMedalGlyph,
         failed: '<path d="m12 3 9 17H3z"/><path d="M12 9v4m0 3h.01"/>',
         cancelled: '<path d="M5 5h14v14H5z"/><path d="m8 8 8 8m0-8-8 8"/>',
         blocked: '<path d="M3.5 7h17v10h-17z"/><path d="M9 7v10m6-10v10"/>',
@@ -510,6 +526,7 @@
         queued: '<path d="M5 8h14M5 12h14M5 16h9"/>',
         running: '<path d="M5 12h11m-4-4 4 4-4 4"/>',
         completed: '<path d="m5 12 4.5 4.5L19 7"/>',
+        'goal-met': goalMetFlagGlyph,
         failed: '<path d="M12 5v9m0 4h.01"/>',
         cancelled: '<path d="M5 19 19 5"/>',
         blocked: '<path d="M8 6v12m8-12v12"/>',
@@ -520,6 +537,7 @@
         queued: '<circle cx="5" cy="7" r="1" fill="currentColor" stroke="none"/><circle cx="5" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="5" cy="17" r="1" fill="currentColor" stroke="none"/><path d="M9 7h10M9 12h10M9 17h7"/>',
         running: '<circle cx="12" cy="12" r="9"/><path d="m10 8 6 4-6 4z" fill="currentColor" stroke="none"/>',
         completed: '<circle cx="12" cy="12" r="9"/><path d="m7.5 12 3 3 6-6"/>',
+        'goal-met': goalMetTrophyGlyph,
         failed: '<path d="m8 3-5 5v8l5 5h8l5-5V8l-5-5z"/><path d="M12 7.5v6m0 3h.01"/>',
         cancelled: '<rect x="4" y="4" width="16" height="16" rx="4"/><path d="M9 9h6v6H9z" fill="currentColor" stroke="none"/>',
         blocked: '<rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>',
@@ -530,6 +548,7 @@
         queued: '<path d="M4 6h12M4 12h12M4 18h8"/><path d="m17 15 3 3-3 3"/>',
         running: '<path d="m8 5 11 7-11 7z" fill="currentColor" stroke="none"/>',
         completed: '<path d="m4.5 12.5 4.5 4.5L19.5 6.5"/>',
+        'goal-met': goalMetMedalGlyph,
         failed: '<path d="M6 6l12 12M18 6 6 18"/>',
         cancelled: '<rect x="5" y="5" width="14" height="14" rx="2" fill="currentColor" stroke="none"/>',
         blocked: '<path d="M8 5v14M16 5v14"/>',
@@ -543,7 +562,7 @@
       { id: 'solid', letter: 'C', name: 'Solid signals', description: 'Highest contrast and fastest to scan on a dense board.', className: 'family-solid', source: 'minimal' },
       { id: 'workflow', letter: 'D', name: 'Workflow objects', description: 'Literal metaphors favor recognition over minimalism.', className: 'family-symbol', source: 'workflow' },
       { id: 'mini', letter: 'E', name: 'Compact tiles', description: 'A restrained square system suited to technical interfaces.', className: 'family-mini', source: 'geometric' },
-      { id: 'standard', letter: 'F', name: 'Standard status', description: 'Canonical product icons: not-started dot, list, play, check, warning, stop, lock, and merge.', className: 'family-heavy', source: 'conventional', pendingSource: 'standardPending' },
+      { id: 'standard', letter: 'F', name: 'Standard status', description: 'Canonical product icons: not-started dot, list, play, check, award ribbon, warning, stop, lock, and merge.', className: 'family-heavy', source: 'conventional', pendingSource: 'standardPending', goalSource: 'standardGoal' },
       { id: 'ring', letter: 'G', name: 'Outlined buttons', description: 'Familiar status symbols inside a quiet circular control shape.', className: 'family-ring', source: 'controls' },
       { id: 'shield', letter: 'H', name: 'Status shields', description: 'Compact, substantial markers designed for fast scanning without visual noise.', className: 'family-shield', source: 'conventional' },
       { id: 'disc', letter: 'I', name: 'Soft discs', description: 'Conventional workflow symbols with a gentle background for dependable contrast.', className: 'family-disc', source: 'controls' }
@@ -556,6 +575,7 @@
       { column: 'Active', state: 'queued', title: 'Audit responsive task cards', copy: 'Waiting for an available worker', tags: ['Frontend', 'Normal'] },
       { column: 'Active', state: 'blocked', title: 'Publish signed desktop build', copy: 'Waiting for parent task', tags: ['Release', 'Urgent'] },
       { column: 'Completed', state: 'merged', title: 'Improve task search filters', copy: 'Merged into main', tags: ['Feature', 'Normal'] },
+      { column: 'Completed', state: 'goal-met', title: 'Reach release quality target', copy: 'All goal criteria satisfied', tags: ['Goal', 'High'] },
       { column: 'Completed', state: 'completed', title: 'Update agent model picker', copy: 'Completed 18 minutes ago', tags: ['Frontend', 'Normal'] },
       { column: 'Completed', state: 'cancelled', title: 'Prototype legacy migration', copy: 'Cancelled by user', tags: ['Chore', 'Low'] }
     ];
@@ -563,7 +583,9 @@
     let selected = 'signal';
 
     function iconMarkup(family, state) {
-      const source = state === 'pending' && family.pendingSource ? family.pendingSource : family.source;
+      let source = family.source;
+      if (state === 'pending' && family.pendingSource) source = family.pendingSource;
+      if (state === 'goal-met' && family.goalSource) source = family.goalSource;
       const body = paths[source][state];
       return `<span class="state-icon state-${state} ${family.className}" title="${states.find(s => s.key === state).label}" role="img" aria-label="Task state: ${states.find(s => s.key === state).label}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg></span>`;
     }
