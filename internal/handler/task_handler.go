@@ -868,6 +868,28 @@ func (h *Handler) reconcileAlreadyMergedBranch(ctx context.Context, task *models
 	return service.IsBranchTipMergedInto(project.RepoPath, task.WorktreeBranch, targetBranch)
 }
 
+type taskMergeActionState struct {
+	UseWorktreeContent  bool
+	BranchAlreadyMerged bool
+	RebaseAvailable     bool
+}
+
+func (h *Handler) resolveTaskMergeActionState(ctx context.Context, task *models.Task) taskMergeActionState {
+	var state taskMergeActionState
+	if task == nil {
+		return state
+	}
+	project, _ := h.projectRepo.GetByID(ctx, task.ProjectID)
+	h.recoverTaskWorktreeState(ctx, task, project)
+	if task.WorktreeBranch == "" {
+		return state
+	}
+	state.UseWorktreeContent = true
+	state.BranchAlreadyMerged = h.reconcileAlreadyMergedBranch(ctx, task)
+	state.RebaseAvailable = h.taskRebaseAvailable(task, project, state.BranchAlreadyMerged)
+	return state
+}
+
 type taskChangesWorktreeState struct {
 	UseWorktreeContent    bool
 	DiffOutput            string
@@ -961,12 +983,7 @@ func (h *Handler) resolveTaskChangesWorktreeState(ctx context.Context, task *mod
 		return state
 	}
 
-	// Lazy file/live requests can arrive directly, without the full Changes
-	// endpoint first repairing conventional worktree metadata. Recover here so
-	// every Changes surface resolves the same current lineage and comparison base.
 	project, _ := h.projectRepo.GetByID(ctx, task.ProjectID)
-	h.recoverTaskWorktreeState(ctx, task, project)
-
 	var preservedDiffOnce struct {
 		val  string
 		done bool
@@ -979,17 +996,18 @@ func (h *Handler) resolveTaskChangesWorktreeState(ctx context.Context, task *mod
 		return preservedDiffOnce.val
 	}
 
-	if task.WorktreeBranch == "" {
+	mergeState := h.resolveTaskMergeActionState(ctx, task)
+	if !mergeState.UseWorktreeContent {
 		state.DiffOutput = preservedDiff()
 		return state
 	}
 
 	state.UseWorktreeContent = true
-	state.BranchAlreadyMerged = h.reconcileAlreadyMergedBranch(ctx, task)
+	state.BranchAlreadyMerged = mergeState.BranchAlreadyMerged
 	mergeEligibility := h.resolveTaskMergeEligibility(ctx, task, project, state.BranchAlreadyMerged)
 	state.LocalMergeUnavailable = !mergeEligibility.MergeAvailable && !mergeEligibility.ConflictRecovery
 	state.ConflictRecovery = mergeEligibility.ConflictRecovery
-	state.RebaseAvailable = mergeEligibility.MergeAvailable && h.taskRebaseAvailable(task, project, state.BranchAlreadyMerged)
+	state.RebaseAvailable = mergeEligibility.MergeAvailable && mergeState.RebaseAvailable
 	isActive := task.Status == models.StatusRunning || task.Status == models.StatusQueued
 
 	// For non-active merged tasks, live git diff is empty after integration;

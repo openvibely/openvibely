@@ -946,6 +946,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.POST("/webhooks/inbound/:pathToken", h.HandleWebhookInbound)
 
 	// Git Worktree
+	e.GET("/tasks/:taskId/card/merge-options", h.GetTaskCardMergeOptions)
 	e.GET("/tasks/:taskId/worktree", h.GetTaskWorktreeInfo)
 	e.POST("/tasks/:taskId/worktree/auto-merge", h.UpdateTaskAutoMerge)
 	e.POST("/tasks/:taskId/worktree/merge", h.MergeTaskBranch)

@@ -356,6 +356,31 @@ func activeStatusDropZone(t *testing.T, body, status string) string {
 	return body[start : start+len(marker)+next]
 }
 
+func TestTaskCard_LazilyLoadsAuthoritativeMergeOptions(t *testing.T) {
+	task := models.Task{
+		ID:        "merge-card-task",
+		ProjectID: "project-1",
+		Title:     "Merge card task",
+		Category:  models.CategoryCompleted,
+		Status:    models.StatusCompleted,
+	}
+	var buf bytes.Buffer
+	if err := TaskCard(task, "project-1", "completed", nil, nil).Render(context.Background(), &buf); err != nil {
+		t.Fatal(err)
+	}
+	body := buf.String()
+	for _, want := range []string{
+		`data-task-card-menu-trigger`,
+		`data-task-card-merge-options`,
+		`hx-get="/tasks/merge-card-task/card/merge-options?project_id=project-1"`,
+		`hx-trigger="task-card-menu-open"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("expected task card merge menu contract %q, body=%s", want, body)
+		}
+	}
+}
+
 func TestTaskCard_GoalMetIconMatchesDocumentedStandardGlyph(t *testing.T) {
 	doc, err := os.ReadFile("../../../docs/task-status-icon-options.html")
 	if err != nil {

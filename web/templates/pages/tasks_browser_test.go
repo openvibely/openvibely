@@ -784,6 +784,106 @@ func TestTaskCardStateIconStaysVisibleWithLongTitleAtMobileWidthInChrome(t *test
 	}
 }
 
+func TestTasksRendersSharedTaskCardMergeConfirmation(t *testing.T) {
+	project := models.Project{ID: "project-merge", Name: "Merge Project"}
+	var out bytes.Buffer
+	if err := Tasks([]models.Project{project}, &project, nil, nil, nil, "", "").Render(context.Background(), &out); err != nil {
+		t.Fatal(err)
+	}
+	body := out.String()
+	for _, want := range []string{
+		`id="task_card_merge_confirm_modal"`,
+		`id="task_card_merge_confirm_button"`,
+		`id="task_card_merge_error"`,
+		`openTaskCardMergeConfirm`,
+		`confirmTaskCardMerge`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("expected shared task-card merge confirmation contract %q", want)
+		}
+	}
+}
+
+func TestTaskCardMergeMenuConfirmationFailureRetryAndBoardRefreshInChrome(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	project := models.Project{ID: "project-card-merge-browser", Name: "Card Merge Browser"}
+	task := models.Task{ID: "merge-browser-task", ProjectID: project.ID, Title: "Merge Browser Task", Category: models.CategoryCompleted, Status: models.StatusCompleted, WorktreeBranch: "task/merge-browser", MergeTargetBranch: "main", MergeStatus: models.MergeStatusPending}
+	var posts int
+	var mu sync.Mutex
+	result := make(chan string, 2)
+	fixtureCSS := `<style>
+	#kanban-board{display:grid;grid-template-columns:1fr;height:420px;overflow-y:auto}.kanban-column{min-width:0}.card{position:relative;min-height:120px}.dropdown{position:relative}.card>.dropdown{position:absolute}.dropdown-content{display:none;position:absolute;right:0;top:100%;width:210px;background:white;border:1px solid #333;z-index:100}.dropdown:focus-within>.dropdown-content{display:block}.modal{display:none}.modal[open]{display:grid;position:fixed;inset:0;z-index:999;background:rgba(0,0,0,.2)}.modal-box{margin:auto;background:white;padding:16px;max-width:340px}.hidden{display:none!important}.task-selected{outline:3px solid blue}.btn{min-height:32px}</style>`
+	runner := `<script>window.addEventListener('DOMContentLoaded',function(){
+	function report(s,m){return fetch('/browser-result?status='+encodeURIComponent(s)+'&message='+encodeURIComponent(m||''),{method:'POST'})}function fail(m){throw new Error(m)}function waitFor(fn,label){return new Promise(function(resolve,reject){var end=Date.now()+4000;(function poll(){if(fn())return resolve();if(Date.now()>end)return reject(new Error('timeout '+label));setTimeout(poll,20)})()})}function frame(){return new Promise(function(r){requestAnimationFrame(function(){requestAnimationFrame(r)})})}
+	(async function(){await frame();var card=document.getElementById('task-merge-browser-task');handleTaskSelect({currentTarget:card,target:card,metaKey:true,ctrlKey:false,preventDefault:function(){},stopPropagation:function(){}});if(!card.classList.contains('task-selected'))fail('card selection was not established');var trigger=card.querySelector('[data-task-card-menu-trigger]');trigger.focus();trigger.click();await waitFor(function(){return card.querySelector('[data-task-card-merge-action]')},'merge options');var menu=card.querySelector('.dropdown-content'),rect=menu.getBoundingClientRect();if(rect.left<0||rect.right>window.innerWidth+1)fail('responsive menu escaped viewport '+JSON.stringify({left:rect.left,right:rect.right,width:window.innerWidth}));card.querySelector('[data-merge-type="merge"]').click();var modal=document.getElementById('task_card_merge_confirm_modal');if(!modal.open)fail('confirmation modal did not open');var confirm=document.getElementById('task_card_merge_confirm_button');confirm.click();confirm.click();await waitFor(function(){return !document.getElementById('task_card_merge_error').classList.contains('hidden')},'merge failure');var count=await fetch('/post-count').then(function(r){return r.text()});if(count.trim()!=='1')fail('duplicate submit was not blocked, posts='+count);if(confirm.disabled)fail('confirm remained disabled after failure');confirm.click();await waitFor(function(){return !document.getElementById('task_card_merge_confirm_modal').open},'successful retry');await waitFor(function(){var restored=document.getElementById('task-merge-browser-task');return restored&&restored.classList.contains('task-selected')},'settled selection restoration');var next=document.getElementById('task-merge-browser-task');if(!next)fail('authoritative board replacement lost card');if(!next.classList.contains('task-selected'))fail('selection was not restored after board replacement');var nextTrigger=next.querySelector('[data-task-card-menu-trigger]');if(document.activeElement!==nextTrigger)fail('focus was not restored to replacement card trigger');var options=next.querySelector('[data-task-card-merge-options]');htmx.ajax('GET',options.getAttribute('hx-get'),{target:options,swap:'outerHTML'});await waitFor(function(){var live=next.querySelector('[data-task-card-merge-options]');return live&&live.textContent.indexOf('Merge unavailable')>=0&&!live.querySelector('[data-task-card-merge-action]')},'stale eligibility refresh');count=await fetch('/post-count').then(function(r){return r.text()});if(count.trim()!=='2')fail('retry did not issue exactly one additional request, posts='+count);await report('pass','')})().catch(function(e){report('fail',String(e&&e.stack||e))})});</script>`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/htmx-2.0.4.min.js":
+			w.Header().Set("Content-Type", "text/javascript")
+			_, _ = w.Write(htmxJS)
+		case "/tasks":
+			var out bytes.Buffer
+			if err := Tasks([]models.Project{project}, &project, []models.Task{task}, nil, nil, "", "").Render(context.Background(), &out); err != nil {
+				t.Fatal(err)
+			}
+			page := strings.Replace(out.String(), "https://unpkg.com/htmx.org@2.0.4", "/htmx-2.0.4.min.js", 1)
+			page = strings.Replace(page, "</head>", fixtureCSS+runner+"</head>", 1)
+			_, _ = w.Write([]byte(page))
+		case "/tasks/merge-browser-task/card/merge-options":
+			eligible := task.MergeStatus != models.MergeStatusMerged
+			reason := ""
+			if !eligible {
+				reason = "This task branch is already merged."
+			}
+			_ = components.TaskCardMergeOptions(&task, project.ID, eligible, false, reason, nil).Render(r.Context(), w)
+		case "/tasks/merge-browser-task/worktree/merge":
+			mu.Lock()
+			posts++
+			n := posts
+			mu.Unlock()
+			if n == 1 {
+				http.Error(w, "simulated merge failure", http.StatusBadRequest)
+				return
+			}
+			task.MergeStatus = models.MergeStatusMerged
+			_ = components.KanbanBoard([]models.Task{task}, project.ID, "", "", nil, nil).Render(r.Context(), w)
+		case "/post-count":
+			mu.Lock()
+			defer mu.Unlock()
+			_, _ = fmt.Fprintf(w, "%d", posts)
+		case "/browser-result":
+			result <- r.URL.Query().Get("status") + ":" + r.URL.Query().Get("message")
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	stderrPath := filepath.Join(t.TempDir(), "task-card-merge-browser.stderr")
+	stderr, _ := os.Create(stderrPath)
+	defer stderr.Close()
+	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--disable-background-networking", "--window-size=390,760", "--user-data-dir="+filepath.Join(t.TempDir(), "profile"), server.URL+"/tasks?project_id="+project.ID)
+	cmd.Stderr = stderr
+	if err := startBrowserProcess(cmd); err != nil {
+		t.Fatal(err)
+	}
+	var outcome string
+	select {
+	case outcome = <-result:
+	case <-time.After(15 * time.Second):
+		outcome = "fail:timeout"
+	}
+	stopBrowserProcess(cmd)
+	if !strings.HasPrefix(outcome, "pass:") {
+		data, _ := os.ReadFile(stderrPath)
+		t.Fatalf("task card merge browser regression failed: %s\n%s", outcome, data)
+	}
+}
+
 func TestTaskCardKebabMenuEscapesCardAndRepositionsAtDropZoneBottomInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))

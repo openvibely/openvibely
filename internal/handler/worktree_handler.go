@@ -11,8 +11,44 @@ import (
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/service"
+	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
+
+// GetTaskCardMergeOptions returns freshly validated merge actions for one Kanban card.
+func (h *Handler) GetTaskCardMergeOptions(c echo.Context) error {
+	projectID := strings.TrimSpace(c.QueryParam("project_id"))
+	if projectID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "project_id required")
+	}
+	task, err := h.taskSvc.GetByID(c.Request().Context(), c.Param("taskId"))
+	if err != nil {
+		return err
+	}
+	if task == nil || task.ProjectID != projectID {
+		return echo.NewHTTPError(http.StatusNotFound, "task not found")
+	}
+
+	state := h.resolveTaskMergeActionState(c.Request().Context(), task)
+	project, _ := h.projectRepo.GetByID(c.Request().Context(), projectID)
+	activeConflict := project != nil && project.RepoPath != "" && len(service.ActiveConflictFiles(project.RepoPath)) > 0
+	eligible := state.UseWorktreeContent && !state.BranchAlreadyMerged && !activeConflict && task.MergeStatus != models.MergeStatusMerged && task.MergeStatus != models.MergeStatusConflict
+	reason := "No mergeable task branch is available."
+	if state.BranchAlreadyMerged || task.MergeStatus == models.MergeStatusMerged {
+		reason = "This task branch is already merged."
+	} else if activeConflict || task.MergeStatus == models.MergeStatusConflict {
+		reason = "Resolve or abort the active merge conflict first."
+	}
+
+	if task.MergeTargetBranch == "" && project != nil && project.RepoPath != "" {
+		task.MergeTargetBranch = service.GetDefaultBranch(project.RepoPath)
+	}
+	var taskPR *models.TaskPullRequest
+	if h.taskPullRequestRepo != nil {
+		taskPR, _ = h.taskPullRequestRepo.GetByTaskID(c.Request().Context(), task.ID)
+	}
+	return render(c, http.StatusOK, components.TaskCardMergeOptions(task, projectID, eligible, state.RebaseAvailable, reason, taskPR))
+}
 
 // UpdateTaskAutoMerge toggles auto-merge for a task.
 func (h *Handler) UpdateTaskAutoMerge(c echo.Context) error {
@@ -46,6 +82,13 @@ func (h *Handler) MergeTaskBranch(c echo.Context) error {
 	task, err := h.taskSvc.GetByID(c.Request().Context(), taskID)
 	if err != nil || task == nil {
 		return echo.NewHTTPError(http.StatusNotFound, "task not found")
+	}
+	fromTaskCard := c.FormValue("merge_source") == "task_card"
+	if fromTaskCard {
+		projectID := strings.TrimSpace(c.FormValue("project_id"))
+		if projectID == "" || task.ProjectID != projectID {
+			return echo.NewHTTPError(http.StatusNotFound, "task not found")
+		}
 	}
 
 	// Get the repo path from the project
@@ -152,6 +195,9 @@ func (h *Handler) MergeTaskBranch(c echo.Context) error {
 		}
 		// Conflicts detected - refresh the view to show conflict status
 		task, _ = h.taskSvc.GetByID(c.Request().Context(), taskID)
+		if fromTaskCard {
+			return c.String(http.StatusConflict, "Local merge has conflicts. Resolve conflicts or abort merge.")
+		}
 		if fromChangesTab {
 			return h.GetTaskChanges(c)
 		}
@@ -169,6 +215,9 @@ func (h *Handler) MergeTaskBranch(c echo.Context) error {
 		"refreshChanges": true,
 	})
 
+	if fromTaskCard {
+		return h.renderTaskBoardRefresh(c, task.ProjectID, nil)
+	}
 	if fromChangesTab {
 		return h.GetTaskChanges(c)
 	}
@@ -181,6 +230,13 @@ func (h *Handler) RebaseTaskBranch(c echo.Context) error {
 	task, err := h.taskSvc.GetByID(c.Request().Context(), taskID)
 	if err != nil || task == nil {
 		return echo.NewHTTPError(http.StatusNotFound, "task not found")
+	}
+	fromTaskCard := c.FormValue("merge_source") == "task_card"
+	if fromTaskCard {
+		projectID := strings.TrimSpace(c.FormValue("project_id"))
+		if projectID == "" || task.ProjectID != projectID {
+			return echo.NewHTTPError(http.StatusNotFound, "task not found")
+		}
 	}
 
 	project, err := h.projectRepo.GetByID(c.Request().Context(), task.ProjectID)
@@ -270,6 +326,9 @@ func (h *Handler) RebaseTaskBranch(c echo.Context) error {
 		if isHTMX(c) {
 			setHTMXToast(c, msg, "failed")
 		}
+		if fromTaskCard {
+			return c.String(http.StatusConflict, msg)
+		}
 		return h.GetTaskChanges(c)
 	}
 
@@ -277,6 +336,9 @@ func (h *Handler) RebaseTaskBranch(c echo.Context) error {
 		setHTMXToast(c, fmt.Sprintf("Task branch is already up to date with %s", targetBranch), "completed")
 	} else {
 		setHTMXToast(c, fmt.Sprintf("Rebased task branch onto %s", targetBranch), "completed")
+	}
+	if fromTaskCard {
+		return h.renderTaskBoardRefresh(c, task.ProjectID, nil)
 	}
 	return h.GetTaskChanges(c)
 }

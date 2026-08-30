@@ -15,6 +15,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
 )
 
@@ -34,6 +35,95 @@ func worktreeExecute(e *echo.Echo, req *http.Request) *httptest.ResponseRecorder
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 	return rec
+}
+
+func TestHandler_TaskCardMergeOptionsUseAuthoritativeStateAndProjectOwnership(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	h.taskPullRequestRepo = repository.NewTaskPullRequestRepo(db)
+	ctx := context.Background()
+	repoDir := t.TempDir()
+	run := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repoDir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	run("init", "-b", "main")
+	run("config", "user.email", "test@example.com")
+	run("config", "user.name", "Test User")
+	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("base\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run("add", "README.md")
+	run("commit", "-m", "base")
+	run("checkout", "-b", "task/card-merge")
+	if err := os.WriteFile(filepath.Join(repoDir, "feature.txt"), []byte("feature\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run("add", "feature.txt")
+	run("commit", "-m", "feature")
+	run("checkout", "main")
+	if err := os.WriteFile(filepath.Join(repoDir, "target.txt"), []byte("target\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run("add", "target.txt")
+	run("commit", "-m", "advance target")
+	worktreePath := filepath.Join(t.TempDir(), "task-worktree")
+	run("worktree", "add", worktreePath, "task/card-merge")
+
+	project := &models.Project{Name: "Merge Cards", RepoPath: repoDir, IsDefault: true}
+	if err := h.projectSvc.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	task := &models.Task{
+		ProjectID: project.ID, Title: "Card merge", Prompt: "merge", Category: models.CategoryCompleted,
+		Status: models.StatusCompleted, WorktreePath: worktreePath, WorktreeBranch: "task/card-merge", MergeTargetBranch: "main", MergeStatus: models.MergeStatusPending,
+	}
+	if err := h.taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	if h.taskPullRequestRepo != nil {
+		if err := h.taskPullRequestRepo.Upsert(ctx, &models.TaskPullRequest{TaskID: task.ID, PRNumber: 42, PRURL: "https://github.com/example/repo/pull/42", PRState: "open"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/card/merge-options?project_id="+project.ID, nil)
+	rec := worktreeExecute(e, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("eligible options status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	for _, want := range []string{"Merge commit", "Fast-forward only", "Rebase onto main", "Squash merge", "View PR #42"} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Fatalf("eligible options missing %q: %s", want, rec.Body.String())
+		}
+	}
+
+	foreign := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/card/merge-options?project_id=foreign", nil)
+	if got := worktreeExecute(e, foreign); got.Code != http.StatusNotFound {
+		t.Fatalf("foreign project should receive 404, got %d: %s", got.Code, got.Body.String())
+	}
+	foreignPost := worktreeFormRequest(http.MethodPost, "/tasks/"+task.ID+"/worktree/merge", url.Values{
+		"merge_type": {"ff"}, "merge_source": {"task_card"}, "project_id": {"foreign"},
+	})
+	if got := worktreeExecute(e, foreignPost); got.Code != http.StatusNotFound {
+		t.Fatalf("foreign card merge should receive 404, got %d: %s", got.Code, got.Body.String())
+	}
+	if got := run("rev-parse", "main"); got == run("rev-parse", "task/card-merge") {
+		t.Fatal("foreign card request mutated the target branch")
+	}
+
+	if err := h.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusConflict); err != nil {
+		t.Fatal(err)
+	}
+	rec = worktreeExecute(e, httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/card/merge-options?project_id="+project.ID, nil))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Merge unavailable") || strings.Contains(rec.Body.String(), "data-task-card-merge-action") {
+		t.Fatalf("conflict state should suppress actions, status=%d body=%s", rec.Code, rec.Body.String())
+	}
 }
 
 func TestHandler_UpdateTask_UnchecksAutoMerge(t *testing.T) {
