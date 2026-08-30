@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -594,6 +596,230 @@ func TestSchedulerService_CheckActiveTasks_DoesNotRecoverStaleQueuedFollowup(t *
 	if stored.Status != models.StatusQueued {
 		t.Fatalf("active follow-up ownership must preserve queued task status, got %s", stored.Status)
 	}
+}
+
+func TestSchedulerService_CheckActiveTasksSubmitsAdmissionWithoutPayload(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	taskRepo := repository.NewTaskRepo(db, nil)
+	workerSvc := newTestWorkerService(t)
+
+	task := &models.Task{
+		ProjectID:      "default",
+		Title:          "Large admission payload",
+		Category:       models.CategoryActive,
+		Priority:       3,
+		Status:         models.StatusPending,
+		Prompt:         strings.Repeat("prompt payload ", 4096),
+		ChainConfig:    strings.Repeat("chain payload ", 1024),
+		SwarmConfig:    strings.Repeat("swarm payload ", 1024),
+		WorktreePath:   "/tmp/task-worktree",
+		WorktreeBranch: "task/large-admission-payload",
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	NewSchedulerService(repository.NewScheduleRepo(db), taskRepo, workerSvc).checkActiveTasks(ctx)
+
+	select {
+	case submitted := <-workerSvc.Submitted():
+		if submitted.ID != task.ID || submitted.Title != task.Title || submitted.ProjectID != task.ProjectID {
+			t.Fatalf("unexpected submitted task identity: %#v", submitted)
+		}
+		if submitted.Prompt != "" || submitted.ChainConfig != "" || submitted.SwarmConfig != "" || submitted.WorktreePath != "" || submitted.WorktreeBranch != "" {
+			t.Fatalf("scheduler submission carried execution-only payload: prompt=%d chain=%d swarm=%d worktree=%q branch=%q",
+				len(submitted.Prompt), len(submitted.ChainConfig), len(submitted.SwarmConfig), submitted.WorktreePath, submitted.WorktreeBranch)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("expected active pending task to be submitted")
+	}
+}
+
+func TestSchedulerService_CheckActiveTasksUsesBoundedAdmissionQuery(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	ctx := context.Background()
+	taskRepo := repository.NewTaskRepo(db, nil)
+	workerSvc := newTestWorkerService(t)
+	task := &models.Task{
+		ProjectID:   "default",
+		Title:       "Counted active admission",
+		Category:    models.CategoryActive,
+		Status:      models.StatusPending,
+		Prompt:      strings.Repeat("large prompt ", 4096),
+		ChainConfig: strings.Repeat("large chain ", 1024),
+		SwarmConfig: strings.Repeat("large swarm ", 1024),
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	NewSchedulerService(repository.NewScheduleRepo(db), taskRepo, workerSvc).checkActiveTasks(ctx)
+	counter.SetEnabled(false)
+
+	statements := counter.Statements()
+	admissionQueries := 0
+	for _, statement := range statements {
+		query := strings.ToLower(statement)
+		if strings.Contains(query, "from tasks where category = 'active' and status = 'pending'") {
+			admissionQueries++
+			projection := strings.SplitN(query, " from ", 2)[0]
+			if strings.Contains(projection, "prompt") || strings.Contains(projection, "chain_config") || strings.Contains(projection, "swarm_config") {
+				t.Fatalf("scheduler admission query selected full payload: %s", statement)
+			}
+		}
+		if strings.Contains(query, "where id = ?") {
+			t.Fatalf("scheduler admission introduced a per-task read: %s", statement)
+		}
+	}
+	if admissionQueries != 1 {
+		t.Fatalf("expected one scheduler admission query, got %d: %#v", admissionQueries, statements)
+	}
+	if len(statements) != 2 {
+		t.Fatalf("expected one admission query plus one stale-queue query, got %d: %#v", len(statements), statements)
+	}
+}
+
+func BenchmarkWorkerSchedulerActivePendingProjection(b *testing.B) {
+	fixtures := []struct {
+		name         string
+		taskCount    int
+		promptSize   int
+		workflowSize int
+	}{
+		{name: "20_SmallPayloads", taskCount: 20, promptSize: 4 * 1024, workflowSize: 2 * 1024},
+		{name: "20_LargePayloads", taskCount: 20, promptSize: 64 * 1024, workflowSize: 16 * 1024},
+		{name: "200_SmallPayloads", taskCount: 200, promptSize: 4 * 1024, workflowSize: 2 * 1024},
+		{name: "200_LargePayloads", taskCount: 200, promptSize: 64 * 1024, workflowSize: 16 * 1024},
+		{name: "1000_SmallPayloads", taskCount: 1000, promptSize: 4 * 1024, workflowSize: 2 * 1024},
+		{name: "1000_LargePayloads", taskCount: 1000, promptSize: 64 * 1024, workflowSize: 16 * 1024},
+	}
+
+	for _, fixture := range fixtures {
+		fixture := fixture
+		b.Run(fixture.name, func(b *testing.B) {
+			db, counter := testutil.NewStatementCountingTestDB(b)
+			repo := repository.NewTaskRepo(db, nil)
+			seedActivePendingProjectionBenchmark(b, repo, fixture.taskCount, fixture.promptSize, fixture.workflowSize)
+
+			fullRows, fullPayload, fullStatements := measureFullActivePendingProjection(b, repo, counter)
+			admissionRows, admissionPayload, admissionStatements := measureActivePendingAdmissionProjection(b, repo, counter)
+			if fullRows != fixture.taskCount || admissionRows != fixture.taskCount {
+				b.Fatalf("projection row counts differ: full=%d admission=%d want=%d", fullRows, admissionRows, fixture.taskCount)
+			}
+			if fullStatements != 1 || admissionStatements != 1 {
+				b.Fatalf("projection query counts must remain bounded: full=%d admission=%d", fullStatements, admissionStatements)
+			}
+
+			b.Run("CurrentFullProjection", func(b *testing.B) {
+				benchmarkFullActivePendingProjection(b, repo, fullPayload, fullRows, fullStatements)
+			})
+			b.Run("AdmissionProjection", func(b *testing.B) {
+				benchmarkActivePendingAdmissionProjection(b, repo, admissionPayload, admissionRows, admissionStatements)
+			})
+		})
+	}
+}
+
+func seedActivePendingProjectionBenchmark(b *testing.B, repo *repository.TaskRepo, taskCount, promptSize, workflowSize int) {
+	b.Helper()
+	ctx := context.Background()
+	prompt := strings.Repeat("p", promptSize)
+	chainConfig := strings.Repeat("c", workflowSize)
+	swarmConfig := strings.Repeat("s", workflowSize)
+	for i := 0; i < taskCount; i++ {
+		task := &models.Task{
+			ProjectID:   "default",
+			Title:       fmt.Sprintf("Scheduler projection benchmark task %04d", i),
+			Category:    models.CategoryActive,
+			Priority:    (i % 4) + 1,
+			Status:      models.StatusPending,
+			Prompt:      prompt,
+			ChainConfig: chainConfig,
+			SwarmConfig: swarmConfig,
+		}
+		if err := repo.Create(ctx, task); err != nil {
+			b.Fatalf("create benchmark task %d: %v", i, err)
+		}
+	}
+}
+
+func measureFullActivePendingProjection(b *testing.B, repo *repository.TaskRepo, counter *testutil.SQLStatementCounter) (int, int64, int) {
+	b.Helper()
+	counter.Reset()
+	counter.SetEnabled(true)
+	tasks, err := repo.ListActivePending(context.Background())
+	counter.SetEnabled(false)
+	if err != nil {
+		b.Fatalf("measure full active pending projection: %v", err)
+	}
+	return len(tasks), activePendingExecutionPayloadBytes(tasks), len(counter.Statements())
+}
+
+func measureActivePendingAdmissionProjection(b *testing.B, repo *repository.TaskRepo, counter *testutil.SQLStatementCounter) (int, int64, int) {
+	b.Helper()
+	counter.Reset()
+	counter.SetEnabled(true)
+	admissions, err := repo.ListActivePendingAdmissions(context.Background())
+	counter.SetEnabled(false)
+	if err != nil {
+		b.Fatalf("measure active pending admission projection: %v", err)
+	}
+	return len(admissions), 0, len(counter.Statements())
+}
+
+func benchmarkFullActivePendingProjection(b *testing.B, repo *repository.TaskRepo, selectedPayloadBytes int64, expectedRows, statementCount int) {
+	b.Helper()
+	ctx := context.Background()
+	var rows int
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		tasks, err := repo.ListActivePending(ctx)
+		if err != nil {
+			b.Fatalf("list full active pending tasks: %v", err)
+		}
+		rows = len(tasks)
+	}
+	b.StopTimer()
+	if rows != expectedRows {
+		b.Fatalf("full projection returned %d rows, want %d", rows, expectedRows)
+	}
+	b.ReportMetric(float64(rows), "rows/op")
+	b.ReportMetric(float64(selectedPayloadBytes), "selected_payload_bytes/op")
+	b.ReportMetric(float64(statementCount), "sql_statements/op")
+}
+
+func benchmarkActivePendingAdmissionProjection(b *testing.B, repo *repository.TaskRepo, selectedPayloadBytes int64, expectedRows, statementCount int) {
+	b.Helper()
+	ctx := context.Background()
+	var rows int
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		admissions, err := repo.ListActivePendingAdmissions(ctx)
+		if err != nil {
+			b.Fatalf("list active pending admissions: %v", err)
+		}
+		rows = len(admissions)
+	}
+	b.StopTimer()
+	if rows != expectedRows {
+		b.Fatalf("admission projection returned %d rows, want %d", rows, expectedRows)
+	}
+	b.ReportMetric(float64(rows), "rows/op")
+	b.ReportMetric(float64(selectedPayloadBytes), "selected_payload_bytes/op")
+	b.ReportMetric(float64(statementCount), "sql_statements/op")
+}
+
+func activePendingExecutionPayloadBytes(tasks []models.Task) int64 {
+	var total int64
+	for _, task := range tasks {
+		total += int64(len(task.Prompt) + len(task.ChainConfig) + len(task.SwarmConfig))
+	}
+	return total
 }
 
 func TestSchedulerService_CheckActiveTasks(t *testing.T) {
