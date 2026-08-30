@@ -967,6 +967,9 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 										refreshLoading: false,
 										refreshError: '',
 										refreshExecutionIDs: Object.create(null),
+										gaps: [],
+										gapSerial: 0,
+										gapScrollIntent: false,
 										initialLoading: false,
 										requestVersion: 0,
 										requestSerial: 0,
@@ -989,6 +992,8 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 							state.taskID = taskID;
 							state.projectID = projectID;
 							if (!state.refreshExecutionIDs) state.refreshExecutionIDs = Object.create(null);
+							if (!Array.isArray(state.gaps)) state.gaps = [];
+							if (!state.gapSerial) state.gapSerial = 0;
 							return state;
 						}
 
@@ -1120,6 +1125,13 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 								summary + selectedSkills + selectedMemories + error + '</div>';
 						}
 
+						function gapMarkup(gap) {
+							var content = '<button type="button" data-lifecycle-load-gap="' + escapeAttribute(gap.id) + '" class="btn btn-ghost btn-sm">Load missed lifecycle activity</button>';
+							if (gap.loading) content = '<span class="text-xs opacity-50">Loading missed lifecycle activity...</span>';
+							if (gap.error) content = '<span class="text-xs text-error">' + escapeText(gap.error) + ' <button type="button" data-lifecycle-retry-gap="' + escapeAttribute(gap.id) + '" class="btn btn-ghost btn-xs">Retry</button></span>';
+							return '<div data-lifecycle-gap="' + escapeAttribute(gap.id) + '" class="text-center py-2">' + content + '</div>';
+						}
+
 						function renderState(state, container, preservePosition) {
 							var previousContainer = state.container;
 							if (preservePosition && previousContainer === container) captureScroll(state, container);
@@ -1143,9 +1155,15 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 									html = '<p data-lifecycle-empty class="text-sm opacity-50">No lifecycle activity recorded yet.</p>';
 								}
 								} else {
-									state.order.forEach(function(id) { html += rowMarkup(state.records[id]); });
-									if (state.olderLoading) {									html += '<p data-lifecycle-loading-older class="text-xs opacity-50 text-center py-2">Loading older lifecycle activity...</p>';
-								} else if (state.olderError) {
+									state.order.forEach(function(id) {
+										state.gaps.forEach(function(gap) {
+											if (gap.boundaryID === id) html += gapMarkup(gap);
+										});
+										html += rowMarkup(state.records[id]);
+									});
+									if (state.olderLoading) {
+										html += '<p data-lifecycle-loading-older class="text-xs opacity-50 text-center py-2">Loading older lifecycle activity...</p>';
+									} else if (state.olderError) {
 									html += '<p data-lifecycle-older-error class="text-xs text-error text-center py-2">' + escapeText(state.olderError) + ' <button type="button" data-lifecycle-retry="older" class="btn btn-ghost btn-xs">Retry</button></p>';
 								} else if (state.olderHasMore) {
 									html += '<p class="text-center py-2"><button type="button" data-lifecycle-load-older class="btn btn-ghost btn-sm">Load older lifecycle activity</button></p>';
@@ -1225,23 +1243,94 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 							});
 						}
 
-						function fetchRefreshGap(taskID, projectID, previousNewestID, latestPage, isCurrent) {
-							if (!previousNewestID || !latestPage.hasMore) return Promise.resolve([]);
+						function addLifecycleGap(state, cursor, boundaryID) {
+							cursor = String(cursor || '');
+							boundaryID = String(boundaryID || '');
+							if (!cursor || !boundaryID) return;
+							var duplicate = state.gaps.some(function(gap) { return gap.cursor === cursor || gap.boundaryID === boundaryID; });
+							if (duplicate) return;
+							state.gaps.push({
+								id: String(++state.gapSerial),
+								cursor: cursor,
+								boundaryID: boundaryID,
+								loading: false,
+								error: '',
+								requestID: 0
+							});
+						}
+
+						function removeLifecycleGap(state, gap) {
+							state.gaps = state.gaps.filter(function(candidate) { return candidate !== gap; });
+						}
+
+						function findLifecycleGap(state, gapID) {
+							for (var i = 0; i < state.gaps.length; i++) {
+								if (state.gaps[i].id === String(gapID || '')) return state.gaps[i];
+							}
+							return null;
+						}
+
+						function reconcileRefreshGap(state, previousNewestID, latestPage) {
+							if (!previousNewestID || !latestPage.hasMore) return;
 							var latestContainsPrevious = latestPage.items.some(function(row) {
 								return row && String(row.id || '') === String(previousNewestID);
 							});
-							if (latestContainsPrevious) return Promise.resolve([]);
-							var rows = [];
-							function next(cursor) {
-								if (!isCurrent()) return Promise.resolve(null);
-								return fetchPage(taskID, projectID, 'newer', cursor).then(function(page) {
-									if (!isCurrent()) return null;
-									Array.prototype.push.apply(rows, page.items);
-									if (page.hasMore && page.items.length > 0) return next(page.nextCursor);
-									return rows;
-								});
-							}
-							return next(previousNewestID);
+							if (!latestContainsPrevious) addLifecycleGap(state, previousNewestID, previousNewestID);
+						}
+
+						function gapRequestIsCurrent(state, container, version, gap, requestID) {
+							return requestIsCurrent(state, container, version, requestID, 'gap') && gap.requestID === requestID && findLifecycleGap(state, gap.id) === gap;
+						}
+
+						function loadLifecycleGap(taskID, projectID, gapID) {
+							var container = lifecycleContainer(taskID, projectID);
+							if (!container) return Promise.resolve();
+							projectID = projectID || container.dataset.projectId || '';
+							var state = getState(taskID, projectID);
+							var gap = findLifecycleGap(state, gapID);
+							if (!gap || hasActiveLifecycleRequest(state)) return Promise.resolve();
+							var knownIDs = Object.create(null);
+							state.order.forEach(function(id) { knownIDs[id] = true; });
+							var version = state.requestVersion;
+							var requestID = ++state.requestSerial;
+							gap.requestID = requestID;
+							gap.loading = true;
+							gap.error = '';
+							renderState(state, container, true);
+							return fetchPage(taskID, projectID, 'newer', gap.cursor).then(function(page) {
+								if (!gapRequestIsCurrent(state, container, version, gap, requestID)) return;
+								var rows = [];
+								var reachedKnownRow = false;
+								for (var i = 0; i < page.items.length; i++) {
+									var row = page.items[i];
+									if (!row || !row.id) continue;
+									if (knownIDs[String(row.id)]) {
+										reachedKnownRow = true;
+										break;
+									}
+									rows.push(row);
+								}
+								mergeRows(state, rows);
+								gap.loading = false;
+								gap.requestID = 0;
+								if (reachedKnownRow || !page.hasMore || rows.length === 0) {
+									removeLifecycleGap(state, gap);
+								} else {
+									gap.cursor = page.nextCursor;
+									gap.boundaryID = String(rows[rows.length - 1].id);
+								}
+								renderState(state, container, true);
+								schedulePendingRefresh(state, taskID, projectID);
+								schedulePendingNewer(state, taskID, projectID);
+							}).catch(function(error) {
+								if (!gapRequestIsCurrent(state, container, version, gap, requestID)) return;
+								gap.loading = false;
+								gap.requestID = 0;
+								gap.error = error && error.message || 'Unable to load missed lifecycle activity';
+								renderState(state, container, true);
+								schedulePendingRefresh(state, taskID, projectID);
+								schedulePendingNewer(state, taskID, projectID);
+							});
 						}
 
 						function fetchRetainedExecutions(state, taskID, projectID, page, gapRows) {
@@ -1265,15 +1354,17 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 							if (!document.documentElement || !document.documentElement.contains(container)) return false;
 							if (direction === 'refresh') return state.refreshRequestID === requestID;
 							if (direction === 'older') return state.olderRequestID === requestID;
+							if (direction === 'gap') return true;
 							return state.newerRequestID === requestID;
 						}
 
 						function hasActiveLifecycleRequest(state) {
-							return state.refreshLoading || state.olderLoading || state.newerLoading;
+							var gapLoading = state.gaps.some(function(gap) { return gap.loading; });
+							return state.refreshLoading || state.olderLoading || state.newerLoading || gapLoading;
 						}
 
 						function schedulePendingNewer(state, taskID, projectID) {
-							if (!state.newerPending || state.newerLoading || state.refreshLoading || state.olderLoading || state.refreshPending || state.refreshLiveTimer || state.refreshRetryTimer || state.newerRetryTimer || state.newerLiveTimer) return;
+							if (!state.newerPending || hasActiveLifecycleRequest(state) || state.refreshPending || state.refreshLiveTimer || state.refreshRetryTimer || state.newerRetryTimer || state.newerLiveTimer) return;
 							state.newerPending = false;
 							state.newerRetryTimer = setTimeout(function() {
 								state.newerRetryTimer = null;
@@ -1321,6 +1412,11 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 								state.newerRetryTimer = null;
 							}
 							state.refreshPending = false;
+							state.gapScrollIntent = false;
+							state.gaps.forEach(function(gap) {
+								gap.loading = false;
+								gap.requestID = 0;
+							});
 							var version = ++state.requestVersion;
 							var requestID = ++state.requestSerial;
 							state.refreshRequestID = requestID;
@@ -1336,11 +1432,8 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 							renderState(state, container, state.order.length > 0);
 							return fetchPage(taskID, projectID, 'initial', '').then(function(page) {
 								if (!requestIsCurrent(state, container, version, requestID, 'refresh')) return null;
-								var isCurrent = function() { return requestIsCurrent(state, container, version, requestID, 'refresh'); };
-								return fetchRefreshGap(taskID, projectID, previousNewestID, page, isCurrent).then(function(gapRows) {
-									if (!gapRows || !isCurrent()) return null;
-									return fetchRetainedExecutions(state, taskID, projectID, page, gapRows);
-								});
+								reconcileRefreshGap(state, previousNewestID, page);
+								return fetchRetainedExecutions(state, taskID, projectID, page, []);
 							}).then(function(result) {
 								if (!result || !requestIsCurrent(state, container, version, requestID, 'refresh')) return;
 								var page = result.page;
@@ -1349,6 +1442,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 								if (page.items.length === 0) {
 									state.records = Object.create(null);
 									state.order = [];
+									state.gaps = [];
 									state.loadedOlder = false;
 									state.olderCursor = '';
 									state.olderHasMore = false;
@@ -1390,7 +1484,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 							if (!container) return Promise.resolve();
 							projectID = projectID || container.dataset.projectId || '';
 							var state = getState(taskID, projectID);
-							if (!state.initialized || !state.olderHasMore || state.olderLoading || state.refreshLoading) return Promise.resolve();
+							if (!state.initialized || !state.olderHasMore || hasActiveLifecycleRequest(state)) return Promise.resolve();
 							var cursor = state.olderCursor;
 							if (!cursor) {
 								state.olderHasMore = false;
@@ -1433,6 +1527,10 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 								state.newerPending = true;
 								return Promise.resolve();
 							}
+							if (state.gaps.some(function(gap) { return gap.loading; })) {
+								state.newerPending = true;
+								return Promise.resolve();
+							}
 							if (state.refreshPending || state.refreshLoading || state.refreshLiveTimer || state.refreshRetryTimer) return Promise.resolve();
 							if (state.olderLoading) {
 								state.newerPending = true;
@@ -1456,16 +1554,15 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 							return fetchPage(taskID, projectID, 'newer', newest.id).then(function(page) {
 								if (!requestIsCurrent(state, container, version, requestID, 'newer')) return;
 								mergeRows(state, page.items);
+								if (page.hasMore && page.items.length > 0) {
+									addLifecycleGap(state, page.nextCursor, String(page.items[page.items.length - 1].id || ''));
+								}
 								state.newerLoading = false;
 								state.newerError = '';
 								state.refreshError = '';
 								renderState(state, container, true);
-								var pendingNewer = state.newerPending;
 								schedulePendingRefresh(state, taskID, projectID);
 								schedulePendingNewer(state, taskID, projectID);
-								if (!pendingNewer && !state.refreshPending && !state.refreshLiveTimer && !state.refreshRetryTimer && page.hasMore && page.items.length > 0) {
-									setTimeout(function() { loadNewer(taskID, projectID, (catchupCount || 0) + 1, false); }, 0);
-								}
 							}).catch(function(error) {
 								if (!requestIsCurrent(state, container, version, requestID, 'newer')) return;
 								state.newerLoading = false;
@@ -1479,14 +1576,14 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 							var state = getState(taskID, projectID);
 							if (mode === 'newer') {
 								if (state.refreshPending || state.refreshLiveTimer || state.refreshRetryTimer) return;
-								if (state.refreshLoading || state.newerLoading || state.olderLoading) {
+								if (hasActiveLifecycleRequest(state)) {
 									state.newerPending = true;
 									return;
 								}
 								if (state.newerLiveTimer) return;
 								state.newerLiveTimer = setTimeout(function() {
 									state.newerLiveTimer = null;
-									if (state.refreshPending || state.refreshLoading || state.refreshLiveTimer || state.refreshRetryTimer || state.olderLoading || state.newerLoading) {
+									if (state.refreshPending || state.refreshLiveTimer || state.refreshRetryTimer || hasActiveLifecycleRequest(state)) {
 										if (!state.refreshPending && !state.refreshLiveTimer && !state.refreshRetryTimer) state.newerPending = true;
 										return;
 									}
@@ -1516,20 +1613,54 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 							}, 150);
 						}
 
+						function handleGapScrollIntent(event) {
+							var port = document.getElementById('lifecycle-activity-scroll');
+							if (!port || !(event.target === port || port.contains(event.target))) return;
+							if (event.type === 'keydown') {
+								var key = event.key || '';
+								if (key !== 'ArrowDown' && key !== 'PageDown' && key !== 'End' && key !== ' ') return;
+							}
+							var container = document.getElementById('lifecycle-activity-list');
+							if (!container) return;
+							getState(container.dataset.taskId, container.dataset.projectId || '').gapScrollIntent = true;
+						}
+
 						function handleScroll() {
 							var container = document.getElementById('lifecycle-activity-list');
 							var panel = document.getElementById('tab-lifecycle');
 							if (!container || (panel && panel.classList.contains('hidden'))) return;
 							var state = getState(container.dataset.taskId, container.dataset.projectId || '');
-							if (!state.initialized || state.restoring || state.olderLoading || !state.olderHasMore) return;
+							if (!state.initialized || state.restoring || state.olderLoading || (state.gaps.length === 0 && !state.olderHasMore)) return;
 							captureScroll(state, container);
 							var port = scrollport(container);
+							if (state.gaps.length > 0 && state.gapScrollIntent) {
+								var bounds = port.getBoundingClientRect();
+								var markers = container.querySelectorAll('[data-lifecycle-gap]');
+								for (var i = 0; i < markers.length; i++) {
+									var markerRect = markers[i].getBoundingClientRect();
+									if (markerRect.top < bounds.bottom + 180 && markerRect.bottom > bounds.top - 180) {
+										state.gapScrollIntent = false;
+										loadLifecycleGap(state.taskID, state.projectID, markers[i].getAttribute('data-lifecycle-gap'));
+										return;
+									}
+								}
+							}
 							var nearBottom = port !== container ? port.scrollHeight - port.scrollTop - port.clientHeight < 180 : container.getBoundingClientRect().bottom - window.innerHeight < 180;
-							if (nearBottom) loadOlder(state.taskID, state.projectID);
+							if (nearBottom && state.olderHasMore) loadOlder(state.taskID, state.projectID);
 						}
 
 						function handleClick(event) {
 							var target = event.target;
+							var gapButton = target && target.closest && target.closest('[data-lifecycle-load-gap], [data-lifecycle-retry-gap]');
+							if (gapButton) {
+								event.preventDefault();
+								var gapContainer = document.getElementById('lifecycle-activity-list');
+								if (gapContainer) {
+									var gapID = gapButton.getAttribute('data-lifecycle-load-gap') || gapButton.getAttribute('data-lifecycle-retry-gap');
+									loadLifecycleGap(gapContainer.dataset.taskId, gapContainer.dataset.projectId || '', gapID);
+								}
+								return;
+							}
 							var olderButton = target && target.closest && target.closest('[data-lifecycle-load-older]');
 							if (olderButton) {
 								event.preventDefault();
@@ -1601,6 +1732,10 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 							rememberAllScroll();
 							document.removeEventListener('click', handleClick);
 							document.removeEventListener('scroll', handleScroll, true);
+							document.removeEventListener('wheel', handleGapScrollIntent, true);
+							document.removeEventListener('touchmove', handleGapScrollIntent, true);
+							document.removeEventListener('pointerdown', handleGapScrollIntent, true);
+							document.removeEventListener('keydown', handleGapScrollIntent, true);
 							window.removeEventListener('scroll', handleScroll, true);
 							window.removeEventListener('sse-task-event', handleTaskEvent);
 							window.removeEventListener('sse-live-connected', handleLiveConnected);
@@ -1627,25 +1762,31 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 									clearTimeout(state.refreshRetryTimer);
 									state.refreshRetryTimer = null;
 								}
-								state.newerPending = false;
-								state.refreshPending = false;
-								state.refreshLoading = false;
+									state.newerPending = false;
+									state.gapScrollIntent = false;
+									state.refreshPending = false;								state.refreshLoading = false;
 								state.olderLoading = false;
 								state.newerLoading = false;
 								state.initialLoading = false;
 								state.refreshRequestID = 0;
 								state.olderRequestID = 0;
-								state.newerRequestID = 0;
-								state.requestVersion++;
-							});
+									state.newerRequestID = 0;
+									state.gaps.forEach(function(gap) {
+										gap.loading = false;
+										gap.requestID = 0;
+									});
+									state.requestVersion++;							});
 						}
 
 						window.refreshLifecycleActivity = refreshLifecycleActivity;
 						window._taskLifecycleActivityHandlers = { cleanup: cleanup };
 						document.addEventListener('click', handleClick);
-						document.addEventListener('scroll', handleScroll, true);
-						window.addEventListener('scroll', handleScroll, true);
-						window.addEventListener('sse-task-event', handleTaskEvent);
+							document.addEventListener('scroll', handleScroll, true);
+							document.addEventListener('wheel', handleGapScrollIntent, true);
+							document.addEventListener('touchmove', handleGapScrollIntent, true);
+							document.addEventListener('pointerdown', handleGapScrollIntent, true);
+							document.addEventListener('keydown', handleGapScrollIntent, true);
+							window.addEventListener('scroll', handleScroll, true);						window.addEventListener('sse-task-event', handleTaskEvent);
 						window.addEventListener('sse-live-connected', handleLiveConnected);
 						if (document.body) document.body.addEventListener('htmx:beforeSwap', handleBeforeSwap);
 

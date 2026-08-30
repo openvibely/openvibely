@@ -1307,6 +1307,13 @@ func TestTaskDetailLifecycleReconnectReconcilesInChrome(t *testing.T) {
 			}
 			w.WriteHeader(http.StatusNoContent)
 			return
+		case "/browser-stats":
+			mu.Lock()
+			stats := map[string]any{"newer_calls": newerCalls, "newer_cursors": append([]string(nil), newerCursors...)}
+			mu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(stats)
+			return
 		case "/tasks/task-lifecycle-reconnect-browser":
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			_, _ = w.Write([]byte(page))
@@ -1382,12 +1389,34 @@ window.addEventListener('DOMContentLoaded', function() {
     return fetch('/browser-result?status=' + encodeURIComponent(status) + '&message=' + encodeURIComponent(message || ''), {method:'POST'}).catch(function() {});
   }
 	  function row(id) { return document.querySelector('[data-lifecycle-execution-id="' + id + '"]'); }
+	  function gap() { return document.querySelector('[data-lifecycle-gap]'); }
 	  function ids() { return Array.prototype.map.call(document.querySelectorAll('[data-lifecycle-execution-id]'), function(item) { return item.getAttribute('data-lifecycle-execution-id'); }); }
+	  function stats() { return fetch('/browser-stats').then(function(response) { return response.json(); }); }
+	  function scrollGapIntoView() {
+	    var marker = gap();
+	    var port = document.getElementById('lifecycle-activity-scroll');
+	    if (!marker || !port) throw new Error('missing lifecycle gap marker or scrollport');
+	    port.dispatchEvent(new WheelEvent('wheel', {bubbles:true, deltaY:120}));
+	    port.scrollTop += marker.getBoundingClientRect().top - port.getBoundingClientRect().bottom + 40;
+	    port.dispatchEvent(new Event('scroll', {bubbles:true}));
+	  }
 	  async function run() {
 	    await waitFor(function() { return !!row('event-0'); }, 'initial lifecycle row');
 	    window.dispatchEvent(new CustomEvent('sse-live-connected', {detail:{reconnected:true}}));
-	    await waitFor(function() { return !!row('event-45'); }, 'newest lifecycle reconnect page', 3000);
-	    await waitFor(function() { return !!row('event-1'); }, 'oldest missed lifecycle event', 4000);
+	    await waitFor(function() { return !!row('event-45') && !!gap(); }, 'newest lifecycle reconnect page and gap marker', 3000);
+	    await wait(250);
+	    var initialStats = await stats();
+	    if (initialStats.newer_calls !== 0) throw new Error('reconnect eagerly requested gap pages before scrolling: ' + initialStats.newer_calls);
+	    if (row('event-1')) throw new Error('reconnect eagerly rendered missed lifecycle rows before scrolling');
+
+	    scrollGapIntoView();
+	    await waitFor(function() { return !!row('event-1') && !!row('event-20') && !!gap(); }, 'first bounded missed lifecycle page', 3000);
+	    var firstStats = await stats();
+	    if (firstStats.newer_calls !== 1) throw new Error('first gap scroll requested ' + firstStats.newer_calls + ' pages, want exactly one');
+	    if (row('event-21')) throw new Error('first gap scroll rendered more than one missed page');
+
+	    scrollGapIntoView();
+	    await waitFor(function() { return !!row('event-25') && !gap(); }, 'second bounded missed lifecycle page', 3000);
 	    var rendered = ids();
 	    var unique = Object.create(null);
 	    rendered.forEach(function(id) { unique[id] = true; });
@@ -1395,6 +1424,8 @@ window.addEventListener('DOMContentLoaded', function() {
 	    for (var sequence = 0; sequence <= 45; sequence++) {
 	      if (!unique['event-' + sequence]) throw new Error('reconnect skipped lifecycle event-' + sequence);
 	    }
+	    var finalStats = await stats();
+	    if (finalStats.newer_calls !== 2) throw new Error('two gap scrolls requested ' + finalStats.newer_calls + ' pages, want exactly two');
 	    await report('pass', '');
 	  }
   run().catch(function(error) { report('fail', String(error && error.stack || error)); });
@@ -1440,10 +1471,10 @@ window.addEventListener('DOMContentLoaded', function() {
 	gotNewerCursors := append([]string(nil), newerCursors...)
 	gotProject, gotLimit := sawProject, sawLimit
 	mu.Unlock()
-	if gotInitialCalls != 2 || gotNewerCalls != 3 {
-		t.Fatalf("reconnect lifecycle fixture received initial=%d newer=%d requests, want two latest pages and three bounded gap pages", gotInitialCalls, gotNewerCalls)
+	if gotInitialCalls != 2 || gotNewerCalls != 2 {
+		t.Fatalf("reconnect lifecycle fixture received initial=%d newer=%d requests, want two latest pages and two scroll-driven bounded gap pages", gotInitialCalls, gotNewerCalls)
 	}
-	wantNewerCursors := []string{"event-0", "gap-cursor-20", "gap-cursor-40"}
+	wantNewerCursors := []string{"event-0", "gap-cursor-20"}
 	if !reflect.DeepEqual(gotNewerCursors, wantNewerCursors) {
 		t.Fatalf("reconnect lifecycle gap cursors = %v, want %v", gotNewerCursors, wantNewerCursors)
 	}
