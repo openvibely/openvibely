@@ -80,11 +80,9 @@ func TestAgentInspectorListAgentsUsesCompactProjection(t *testing.T) {
 		t.Fatalf("archive agent by timestamp: %v", err)
 	}
 
-	counter.Reset()
-	counter.SetEnabled(true)
+	counter.SetEnabled(false)
 	inspector := newAgentInspector(repo, nil, nil)
 	got, err := inspector.ListAgents(ctx)
-	counter.SetEnabled(false)
 	if err != nil {
 		t.Fatalf("ListAgents: %v", err)
 	}
@@ -112,7 +110,10 @@ func TestAgentInspectorListAgentsUsesCompactProjection(t *testing.T) {
 	}
 
 	runtimeTools := agentskills.SkillRuntimeTools(agentskills.NewCatalog("agent-list-test", nil), "", "", inspector)
+	counter.Reset()
+	counter.SetEnabled(true)
 	encoded, handled, isErr, err := runtimeTools.Executor(ctx, "agent_list", json.RawMessage(`{}`))
+	counter.SetEnabled(false)
 	if !handled || isErr || err != nil {
 		t.Fatalf("agent_list runtime execution failed handled=%v isErr=%v err=%v output=%q", handled, isErr, err, encoded)
 	}
