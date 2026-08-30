@@ -1205,6 +1205,27 @@ func TestThemeToggle_UsesImmediateSwitch(t *testing.T) {
 	}
 }
 
+func TestTaskRunningStateMatchesChatSendButtonByTheme(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Base("Test", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("failed to render Base: %v", err)
+	}
+	html := buf.String()
+
+	for _, fragment := range []string{
+		":root {",
+		"--ov-task-running: #646fe4;",
+		"[data-theme=\"light\"] {",
+		"--ov-task-running: #7480ff;",
+		".task-state-running {",
+		"color: var(--ov-task-running);",
+	} {
+		if !strings.Contains(html, fragment) {
+			t.Errorf("expected task running state to match chat send button via %q", fragment)
+		}
+	}
+}
+
 // TestLoadingDots_UsesPrimaryThemeToken ensures the shared three-dot loader
 // stays tied to the same primary token used by primary buttons (chat send button).
 func TestLoadingDots_UsesPrimaryThemeToken(t *testing.T) {
