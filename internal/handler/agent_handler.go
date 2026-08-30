@@ -1618,6 +1618,9 @@ func (h *Handler) UpdateAgent(c echo.Context) error {
 	if err != nil || existing == nil {
 		return echo.NewHTTPError(http.StatusNotFound, "Agent not found")
 	}
+	if err := h.ensureAgentProjectAccess(c, existing); err != nil {
+		return err
+	}
 	if existing.GeneratedStatus == models.AgentStatusProtected {
 		return echo.NewHTTPError(http.StatusForbidden, "protected system agents are read-only in the dialog")
 	}
@@ -1713,10 +1716,16 @@ func (h *Handler) DeleteAgent(c echo.Context) error {
 
 // GetAgentJSON returns a single agent as JSON (for edit modal population).
 func (h *Handler) GetAgentJSON(c echo.Context) error {
+	if h.agentRepo == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "agent repo not configured")
+	}
 	id := c.Param("id")
 	agent, err := h.agentRepo.GetByID(c.Request().Context(), id)
 	if err != nil || agent == nil {
 		return echo.NewHTTPError(http.StatusNotFound, "Agent not found")
+	}
+	if err := h.ensureAgentProjectAccess(c, agent); err != nil {
+		return err
 	}
 	return c.JSON(http.StatusOK, agent)
 }
