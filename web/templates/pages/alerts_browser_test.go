@@ -156,7 +156,7 @@ func TestAlertsInspectCopyFeedbackInChrome(t *testing.T) {
 func TestAlertsInspectMarkdownAndHTMXDetailLoadingInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	projectID := "project-alerts-markdown"
-	body := "# Heading\r\n\r\n**emphasis**\r\n\r\n- first\r\n- second\r\n\r\n[external](https://example.test/link) [internal](/tasks/internal)\r\n\r\n```go\r\nline 1\r\nline 2\r\n```\r\n\r\n<img src=x onerror=alert(1)>\rbare carriage return café"
+	body := "# Heading\r\n\r\n**emphasis** with `getJSON`\r\n\r\n- first\r\n- second\r\n\r\n[external](https://example.test/link) [internal](/tasks/internal)\r\n\r\n```go\r\nline 1\r\nline 2\r\n```\r\n\r\n<img src=x onerror=alert(1)>\rbare carriage return café"
 	emptyAlert := models.AlertSummary{
 		ID: "empty-detail-1", ProjectID: projectID, Title: "Empty detail", Message: "No extra content",
 		Type: models.AlertCustom, Severity: models.SeverityInfo, DecisionState: models.AlertDecisionNotRequired,
@@ -197,7 +197,7 @@ func TestAlertsInspectMarkdownAndHTMXDetailLoadingInChrome(t *testing.T) {
     window.__markedInput = value;
     if (value.indexOf('&lt;img src=x onerror=alert(1)>') === -1) throw new Error('raw HTML was not escaped before parsing');
     return '<h1>Heading</h1>' +
-      '<p><strong>emphasis</strong></p>' +
+      '<p><strong>emphasis</strong> with <code data-case="inline-code">getJSON</code></p>' +
       '<ul><li>first</li><li>second</li></ul>' +
       '<p><a data-case="external" href="https://example.test/link">external</a> <a data-case="internal" href="/tasks/internal">internal</a></p>' +
       '<pre><code class="language-go">line 1\nline 2</code></pre>' +
@@ -238,6 +238,23 @@ window.addEventListener('DOMContentLoaded', function() {
     if (fallback.textContent !== text) fail(label + ' changed fallback text');
     if (host.querySelector('img,script,iframe')) fail(label + ' left dangerous HTML active');
   }
+  function rgbChannels(value) {
+    var match = String(value || '').match(/[\d.]+/g);
+    if (!match || match.length < 3) fail('could not parse computed color: ' + value);
+    return match.slice(0, 3).map(Number);
+  }
+  function luminance(rgb) {
+    var channels = rgb.map(function(value) {
+      value /= 255;
+      return value <= 0.04045 ? value / 12.92 : Math.pow((value + 0.055) / 1.055, 2.4);
+    });
+    return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
+  }
+  function contrast(foreground, background) {
+    var first = luminance(rgbChannels(foreground));
+    var second = luminance(rgbChannels(background));
+    return (Math.max(first, second) + 0.05) / (Math.min(first, second) + 0.05);
+  }
   window.addEventListener('error', function(event) { report('fail', String(event.error && event.error.stack || event.message)); });
   (async function() {
     var expectedBody = ` + string(expectedBody) + `;
@@ -261,6 +278,12 @@ window.addEventListener('DOMContentLoaded', function() {
     if (!markdown.classList.contains('chat-markdown')) fail('detail body did not use chat Markdown styling');
     if (!markdown.querySelector('h1') || markdown.querySelector('h1').textContent !== 'Heading') fail('heading did not render');
     if (!markdown.querySelector('strong') || markdown.querySelector('strong').textContent !== 'emphasis') fail('emphasis did not render');
+    document.documentElement.setAttribute('data-theme', 'light');
+    var inlineCode = markdown.querySelector('code[data-case="inline-code"]');
+    if (!inlineCode || inlineCode.textContent !== 'getJSON') fail('inline code did not render');
+    var inlineStyle = getComputedStyle(inlineCode);
+    var inlineContrast = contrast(inlineStyle.color, inlineStyle.backgroundColor);
+    if (inlineContrast < 4.5) fail('light-mode inline code contrast was ' + inlineContrast.toFixed(2) + ': ' + inlineStyle.color + ' on ' + inlineStyle.backgroundColor);
     if (!markdown.querySelectorAll('ul > li') || markdown.querySelectorAll('ul > li').length !== 2) fail('list did not render');
     var external = markdown.querySelector('a[data-case="external"]');
     if (!external || external.getAttribute('target') !== '_blank' || external.getAttribute('rel') !== 'noopener noreferrer' || external.getAttribute('data-openvibely-chat-external-link') !== 'true') fail('safe external link was not marked for outside-app opening');

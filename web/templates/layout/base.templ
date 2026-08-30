@@ -1719,6 +1719,10 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					padding: 0.15em 0.35em;
 					border-radius: 0.25rem;
 				}
+				[data-theme="light"] [data-alert-markdown] :not(pre) > code {
+					background: var(--ov-l-surface-active);
+					color: var(--ov-l-text-strong);
+				}
 				.chat-markdown pre {
 					margin: 0.5em 0;
 					padding: 0.75em 1em;
