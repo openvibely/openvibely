@@ -178,6 +178,185 @@ func TestAutomationClaimsRefreshCapacityQueuedBoardThroughLiveEventsInChrome(t *
 	}
 }
 
+func TestAutomationRunNowSupersedesFailedLiveStateAcrossRefreshAndReloadInChrome(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping browser regression in short mode")
+	}
+	chrome := findChromeForBrowserTest(t)
+	if chrome == "" {
+		t.Skip("Chrome/Chromium executable not found")
+	}
+	htmxJS, err := os.ReadFile(filepath.Join("..", "..", "web", "templates", "components", "testdata", "htmx-2.0.4.min.js"))
+	if err != nil {
+		t.Fatalf("read pinned HTMX fixture: %v", err)
+	}
+
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().WithName("Automation failed Run now freshness").Build()
+	automationRepo := repository.NewAutomationRepo(tc.db)
+	registration := service.NewAutomationRegistrationService(automationRepo, service.NewAutomationAdapterRegistry())
+	lifecycle := service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo)
+	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), registration)
+	tc.handler.SetAutomationBuilderServices(nil, nil, nil, nil, nil, lifecycle)
+
+	task := createAutomationLiveBoardTask(t, ctx, tc.taskRepo, project.ID, "Previously failed scheduled task", models.CategoryScheduled)
+	runAt := time.Now().UTC().Add(time.Hour)
+	schedule := models.Schedule{TaskID: task.ID, RunAt: runAt, NextRun: &runAt, RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: true}
+	if err := tc.scheduleRepo.Create(ctx, &schedule); err != nil {
+		t.Fatalf("create schedule: %v", err)
+	}
+	definition, _, err := registration.Register(ctx, service.AutomationRegistrationRequest{
+		ProjectID: project.ID, AdapterKey: service.AutomationAdapterNativeSDLC, StableKey: "native-sdlc/failed-run-now-live",
+		Resources: []models.AutomationResourceBinding{
+			{NodeKey: "vision_suggestions", ResourceType: "task", ResourceID: task.ID},
+			{NodeKey: "vision_suggestions", ResourceType: "schedule", ResourceID: schedule.ID},
+		},
+	})
+	if err != nil {
+		t.Fatalf("register Automation: %v", err)
+	}
+	triggerNode := automationNodeByKeyHandler(definition.Nodes, "vision_suggestions")
+	if triggerNode == nil {
+		t.Fatal("vision_suggestions trigger node not found")
+	}
+	if _, err := tc.db.ExecContext(ctx, `INSERT INTO automation_invocations
+		(id, project_id, automation_id, version_id, trigger_node_id, trigger_resource_type, trigger_resource_id, occurrence_key, status, started_at, completed_at)
+		VALUES ('browser-previous-failure', ?, ?, ?, ?, 'manual', ?, 'manual:browser-previous-failure', 'failed', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+		project.ID, definition.Automation.ID, definition.Version.ID, triggerNode.ID, schedule.ID); err != nil {
+		t.Fatalf("insert prior failed invocation: %v", err)
+	}
+	if _, _, err := automationRepo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+		Context: models.AutomationContext{ProjectID: project.ID},
+		Binding: models.AutomationBinding{AutomationID: definition.Automation.ID, VersionID: definition.Version.ID,
+			NodeID: triggerNode.ID, InvocationID: "browser-previous-failure"},
+		ActivityKey: "browser-previous-failure:task", ActivityType: "task_execution", ActivityStatus: models.AutomationActivityFailed,
+		Resources: []models.AutomationActivityResource{{ResourceType: "task", ResourceID: task.ID}},
+	}); err != nil {
+		t.Fatalf("record prior failed projection: %v", err)
+	}
+	if _, err := tc.db.ExecContext(ctx, `UPDATE tasks SET status = 'failed' WHERE id = ?`, task.ID); err != nil {
+		t.Fatalf("fail scheduled task: %v", err)
+	}
+	failedGraph, err := service.NewAutomationGraphService(automationRepo).GetLive(ctx, project.ID, definition.Automation.ID, time.Now().UTC())
+	if err != nil || failedGraph == nil {
+		t.Fatalf("load failed Live snapshot: %#v, %v", failedGraph, err)
+	}
+	var stale bytes.Buffer
+	if err := pages.AutomationLiveContent(*failedGraph, project.ID, true).Render(ctx, &stale); err != nil {
+		t.Fatalf("render stale Live snapshot: %v", err)
+	}
+
+	browserResult := make(chan string, 1)
+	tc.echo.GET("/htmx-2.0.4.min.js", func(c echo.Context) error { return c.Blob(http.StatusOK, "text/javascript; charset=utf-8", htmxJS) })
+	tc.echo.GET("/browser-fixture", func(c echo.Context) error {
+		runner := automationRunNowFreshnessBrowserRunner(definition.Automation.ID)
+		return c.HTML(http.StatusOK, `<!doctype html><html><head><script src="/htmx-2.0.4.min.js"></script>`+runner+`</head><body><main id="main-content" hx-get="/automations/`+definition.Automation.ID+`?project_id=`+project.ID+`" hx-trigger="load"></main></body></html>`)
+	})
+	tc.echo.GET("/stale-live", func(c echo.Context) error {
+		time.Sleep(500 * time.Millisecond)
+		return c.HTML(http.StatusOK, stale.String())
+	})
+	tc.echo.POST("/terminal-failure", func(c echo.Context) error {
+		var invocationID string
+		if err := tc.db.QueryRowContext(c.Request().Context(), `SELECT id FROM automation_invocations
+			WHERE project_id = ? AND automation_id = ? AND status IN ('claimed','dispatched','running') ORDER BY rowid DESC LIMIT 1`,
+			project.ID, definition.Automation.ID).Scan(&invocationID); err != nil {
+			return err
+		}
+		if _, err := tc.db.ExecContext(c.Request().Context(), `UPDATE automation_invocations SET status = 'failed', completed_at = CURRENT_TIMESTAMP WHERE id = ?`, invocationID); err != nil {
+			return err
+		}
+		if _, _, err := automationRepo.RecordProjectionEvent(c.Request().Context(), repository.AutomationProjectionEvent{
+			Context: models.AutomationContext{ProjectID: project.ID},
+			Binding: models.AutomationBinding{AutomationID: definition.Automation.ID, VersionID: definition.Version.ID,
+				NodeID: triggerNode.ID, InvocationID: invocationID},
+			ActivityKey: "browser-current-failure:task", ActivityType: "task_execution", ActivityStatus: models.AutomationActivityFailed,
+			Resources: []models.AutomationActivityResource{{ResourceType: "task", ResourceID: task.ID}},
+		}); err != nil {
+			return err
+		}
+		return c.NoContent(http.StatusNoContent)
+	})
+	tc.echo.POST("/browser-result", func(c echo.Context) error {
+		browserResult <- c.QueryParam("status") + ":" + c.QueryParam("message")
+		return c.NoContent(http.StatusNoContent)
+	})
+
+	server := httptest.NewServer(tc.echo)
+	defer server.Close()
+	stderrPath := filepath.Join(t.TempDir(), "automation-run-now-freshness.stderr")
+	stderrFile, err := os.Create(stderrPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(chrome,
+		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer", "--disable-dev-shm-usage",
+		"--disable-background-networking", "--disable-background-timer-throttling", "--no-first-run", "--no-default-browser-check",
+		"--window-size=1280,900", "--user-data-dir="+filepath.Join(t.TempDir(), "profile"), server.URL+"/browser-fixture")
+	cmd.Stderr = stderrFile
+	if err := startHandlerBrowserProcess(cmd); err != nil {
+		_ = stderrFile.Close()
+		t.Fatalf("start Chrome: %v", err)
+	}
+	var outcome string
+	select {
+	case outcome = <-browserResult:
+	case <-time.After(20 * time.Second):
+		outcome = "fail:timed out waiting for browser result"
+	}
+	stopHandlerBrowserProcess(cmd)
+	_ = stderrFile.Close()
+	if !strings.HasPrefix(outcome, "pass:") {
+		stderr, _ := os.ReadFile(stderrPath)
+		t.Fatalf("Run now freshness browser regression failed: %s\nChrome:\n%s", outcome, strings.TrimSpace(string(stderr)))
+	}
+}
+
+func automationRunNowFreshnessBrowserRunner(automationID string) string {
+	return fmt.Sprintf(`<script>
+	document.addEventListener('DOMContentLoaded', function() {
+	  function report(status, message) { return fetch('/browser-result?status=' + encodeURIComponent(status) + '&message=' + encodeURIComponent(message || ''), {method:'POST'}); }
+	  function waitFor(check, label) {
+	    var started = performance.now();
+	    return new Promise(function(resolve, reject) {
+	      function poll() {
+	        try { if (check()) return resolve(); } catch (error) { return reject(error); }
+	        if (performance.now() - started > 8000) return reject(new Error('timed out waiting for ' + label));
+	        setTimeout(poll, 10);
+	      }
+	      poll();
+	    });
+	  }
+	  function stateNode(state) { return document.querySelector('.automation-graph-node--' + state); }
+	  (async function() {
+	    await waitFor(function() { return document.getElementById('automation-live') && window.openVibelyAutomationLiveRefresh; }, 'initial Automation Live');
+	    var phase = sessionStorage.getItem('automation-run-now-freshness');
+	    if (!phase) {
+	      if (!stateNode('failed')) throw new Error('initial failed scheduled task was not rendered');
+	      window.openVibelyAutomationLiveRefresh('GET', '/stale-live');
+	      document.querySelector('[data-automation-live-run-now="%s"]').click();
+	      await waitFor(function() { return stateNode('running') && !stateNode('failed'); }, 'authoritative running state after Run now');
+	      await window.openVibelyAutomationLiveRefresh('GET');
+	      if (!stateNode('running') || stateNode('failed')) throw new Error('subsequent refresh restored stale failure');
+	      await new Promise(function(resolve) { setTimeout(resolve, 650); });
+	      if (!stateNode('running') || stateNode('failed')) throw new Error('delayed pre-dispatch response won the refresh race');
+	      sessionStorage.setItem('automation-run-now-freshness', 'reloaded');
+	      location.reload();
+	      return;
+	    }
+	    if (phase !== 'reloaded') throw new Error('unexpected browser phase ' + phase);
+	    await waitFor(function() { return stateNode('running') && !stateNode('failed'); }, 'running state after hard reload');
+	    await fetch('/terminal-failure', {method:'POST'});
+	    await window.openVibelyAutomationLiveRefresh('GET');
+	    await waitFor(function() { return stateNode('failed') && !stateNode('running'); }, 'new terminal failure state');
+	    sessionStorage.removeItem('automation-run-now-freshness');
+	    await report('pass', '');
+	  })().catch(function(error) { report('fail', String(error && error.stack || error)); });
+	});
+	</script>`, automationID)
+}
+
 func createAutomationLiveBoardTask(t *testing.T, ctx context.Context, repo *repository.TaskRepo, projectID, title string, category models.TaskCategory) *models.Task {
 	t.Helper()
 	task := &models.Task{ProjectID: projectID, Title: title, Category: category, Status: models.StatusPending, Priority: 2, Prompt: title}

@@ -206,6 +206,22 @@ func TestGitHubIssueRuntimeMyAssignedIssuesValidatesPaginationBeforeRepoResoluti
 func TestAutomationManualRunUsesExistingDispatchWithoutChangingSchedule(t *testing.T) {
 	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
 	ctx := context.Background()
+	triggerNode := automationNodeByKey(t, fixture.definition, "vision_suggestions")
+	_, err := fixture.repo.DB().Exec(`INSERT INTO automation_invocations
+		(id, project_id, automation_id, version_id, trigger_node_id, trigger_resource_type, trigger_resource_id, occurrence_key, status, started_at, completed_at)
+		VALUES (?, ?, ?, ?, ?, 'manual', ?, 'manual:previous-failed', 'failed', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+		"previous-failed-manual-run", fixture.project.ID, fixture.definition.Automation.ID, fixture.definition.Version.ID, triggerNode.ID, fixture.schedule.ID)
+	require.NoError(t, err)
+	_, _, err = fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+		Context: models.AutomationContext{ProjectID: fixture.project.ID},
+		Binding: models.AutomationBinding{AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID,
+			NodeID: triggerNode.ID, InvocationID: "previous-failed-manual-run"},
+		ActivityKey: "previous-failed-manual-run:task", ActivityType: "task_execution", ActivityStatus: models.AutomationActivityFailed,
+		Resources: []models.AutomationActivityResource{{ResourceType: "task", ResourceID: fixture.task.ID}},
+	})
+	require.NoError(t, err)
+	_, err = fixture.repo.DB().Exec(`UPDATE tasks SET status = 'failed' WHERE id = ?`, fixture.task.ID)
+	require.NoError(t, err)
 	before, err := fixture.schedRepo.GetByID(ctx, fixture.schedule.ID)
 	require.NoError(t, err)
 
@@ -221,7 +237,6 @@ func TestAutomationManualRunUsesExistingDispatchWithoutChangingSchedule(t *testi
 	liveAfterClaim, err := NewAutomationGraphService(fixture.repo).GetLive(ctx, fixture.project.ID, fixture.definition.Automation.ID, time.Now().UTC())
 	require.NoError(t, err)
 	require.NotNil(t, liveAfterClaim)
-	triggerNode := automationNodeByKey(t, fixture.definition, "vision_suggestions")
 	var triggerLiveNode *models.AutomationLiveNode
 	for i := range liveAfterClaim.Nodes {
 		if liveAfterClaim.Nodes[i].ID == triggerNode.ID {

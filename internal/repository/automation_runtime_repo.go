@@ -56,6 +56,16 @@ const liveNodeCountsSQL = `WITH operational_state AS (
 				WHERE state.project_id = ? AND state.automation_id = ? AND state.version_id = ?
 					AND state.activity_status IN ('pending','running','waiting','failed')
 					AND NOT (state.work_item_id IS NOT NULL AND work_item.status = 'completed')
+					AND NOT EXISTS (
+						SELECT 1 FROM automation_invocations active_invocation
+						JOIN schedules trigger_schedule ON trigger_schedule.id = active_invocation.trigger_resource_id
+						WHERE active_invocation.project_id = state.project_id
+							AND active_invocation.automation_id = state.automation_id
+							AND active_invocation.version_id = state.version_id
+							AND active_invocation.trigger_node_id = state.node_id
+							AND active_invocation.status IN ('claimed','dispatched','running')
+							AND state.state_key = 'task:' || trigger_schedule.task_id
+							AND COALESCE(state.invocation_id, '') <> active_invocation.id)
 			UNION ALL
 			SELECT node_id, 'recent', state_key
 			FROM automation_live_activity_states
