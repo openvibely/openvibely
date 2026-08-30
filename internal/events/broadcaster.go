@@ -30,6 +30,7 @@ const (
 	TaskGoalCleared             TaskEventType = "task_goal_cleared"
 	TaskGoalEvaluated           TaskEventType = "task_goal_evaluated"
 	TaskGoalFollowupQueued      TaskEventType = "task_goal_followup_queued"
+	TaskBoardUpdated            TaskEventType = "task_board_updated"
 	MixtureProgress             TaskEventType = "mixture_progress"
 	AlertCreated                TaskEventType = "alert_created"
 	AutomationDefinitionUpdated TaskEventType = "automation_definition_updated"

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
@@ -355,6 +356,56 @@ func TestAutomationRepoScheduledDispatchLifecycle(t *testing.T) {
 	}
 }
 
+func TestAutomationRepoClaimsPublishBoardProjectionEventWithoutTaskColumnChange(t *testing.T) {
+	for _, trigger := range []string{"scheduled", "manual"} {
+		t.Run(trigger, func(t *testing.T) {
+			db := testutil.NewTestDB(t)
+			ctx := context.Background()
+			fixture := seedAutomationLiveCountsDefinition(t, db, map[string]string{"trigger": "trigger"})
+			repo := NewAutomationRepo(db)
+			broadcaster := events.NewBroadcaster()
+			repo.SetBroadcaster(broadcaster)
+			subscriber, err := broadcaster.Subscribe()
+			if err != nil {
+				t.Fatalf("subscribe: %v", err)
+			}
+			defer broadcaster.Unsubscribe(subscriber)
+
+			taskRepo := NewTaskRepo(db, nil)
+			task := createRuntimeScheduledTask(t, ctx, taskRepo, fixture.ProjectID, "First "+trigger+" capacity queue")
+			now := time.Now().UTC()
+			schedule := createRuntimeAutomationSchedule(t, ctx, db, fixture, task.ID, fixture.Nodes["trigger"], now.Add(-time.Minute))
+
+			switch trigger {
+			case "scheduled":
+				if _, dispatch, err := repo.ClaimScheduledOccurrence(ctx, schedule, now, schedule.ComputeNextRun(now)); err != nil || dispatch == nil {
+					t.Fatalf("claim scheduled occurrence = %#v, %v", dispatch, err)
+				}
+			case "manual":
+				if _, dispatches, err := repo.ClaimManualAutomationRun(ctx, fixture.ProjectID, fixture.AutomationID, now); err != nil || len(dispatches) != 1 {
+					t.Fatalf("claim manual run dispatches = %#v, %v", dispatches, err)
+				}
+			}
+
+			timeout := time.After(time.Second)
+			for {
+				select {
+				case event := <-subscriber:
+					if event.Type != events.TaskEventType("task_board_updated") {
+						continue
+					}
+					if event.ProjectID != fixture.ProjectID || event.TaskID != task.ID {
+						t.Fatalf("board event = %#v, want project %q task %q", event, fixture.ProjectID, task.ID)
+					}
+					return
+				case <-timeout:
+					t.Fatal("capacity queue projection did not publish a task-board refresh event")
+				}
+			}
+		})
+	}
+}
+
 func TestAutomationRepoDispatchRetryAndAbandonQueued(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
@@ -383,6 +434,16 @@ func TestAutomationRepoDispatchRetryAndAbandonQueued(t *testing.T) {
 	}
 	if err := repo.FailDispatch(ctx, leasedAgain.ID, "retry-owner", "permanent", 2, leaseNow.Add(3*time.Second)); err != nil {
 		t.Fatalf("FailDispatch terminal: %v", err)
+	}
+	var failedStatus, failedCategory string
+	var failedCompletedAt sql.NullTime
+	if err := db.QueryRowContext(ctx, `SELECT status, category, completed_at FROM tasks WHERE id = ?`, retryTask.ID).
+		Scan(&failedStatus, &failedCategory, &failedCompletedAt); err != nil {
+		t.Fatalf("load terminal dispatch task: %v", err)
+	}
+	if failedStatus != string(models.StatusFailed) || failedCategory != string(models.CategoryCompleted) || !failedCompletedAt.Valid {
+		t.Fatalf("terminal dispatch task = %q/%q completed=%v, want failed/completed with completion time",
+			failedStatus, failedCategory, failedCompletedAt.Valid)
 	}
 
 	abandonTask := createRuntimeScheduledTask(t, ctx, taskRepo, fixture.ProjectID, "Abandon dispatch")
@@ -529,6 +590,42 @@ func TestAutomationRepoCancelsQueuedDispatchAndPreparedExecution(t *testing.T) {
 				taskStatus, taskCategory, executionStatus, dispatchStatus, invocationStatus, activityStatus, reservations)
 		}
 	})
+}
+
+func TestAutomationRepoTerminalDispatchFailurePreservesCancelledTask(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	fixture := seedAutomationLiveCountsDefinition(t, db, map[string]string{"trigger": "trigger"})
+	repo := NewAutomationRepo(db)
+	taskRepo := NewTaskRepo(db, nil)
+	task := createRuntimeScheduledTask(t, ctx, taskRepo, fixture.ProjectID, "Cancelled during dispatch retry")
+	now := time.Now().UTC()
+	schedule := createRuntimeAutomationSchedule(t, ctx, db, fixture, task.ID, fixture.Nodes["trigger"], now.Add(-time.Minute))
+	_, dispatch, err := repo.ClaimScheduledOccurrence(ctx, schedule, now, schedule.ComputeNextRun(now))
+	if err != nil {
+		t.Fatalf("claim occurrence: %v", err)
+	}
+	leased, err := repo.LeaseNextDispatch(ctx, "cancel-race-owner", now, time.Minute)
+	if err != nil || leased == nil || leased.ID != dispatch.ID {
+		t.Fatalf("lease dispatch = %#v, %v", leased, err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE tasks SET status = 'cancelled', category = 'backlog', updated_at = CURRENT_TIMESTAMP WHERE id = ?`, task.ID); err != nil {
+		t.Fatalf("cancel task: %v", err)
+	}
+	if err := repo.FailDispatch(ctx, dispatch.ID, "cancel-race-owner", "cancelled during retry", 1, now); err != nil {
+		t.Fatalf("terminalize cancelled dispatch: %v", err)
+	}
+
+	var taskStatus, taskCategory, invocationStatus string
+	if err := db.QueryRowContext(ctx, `SELECT status, category FROM tasks WHERE id = ?`, task.ID).Scan(&taskStatus, &taskCategory); err != nil {
+		t.Fatalf("load cancelled task: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT status FROM automation_invocations WHERE id = ?`, dispatch.InvocationID).Scan(&invocationStatus); err != nil {
+		t.Fatalf("load cancelled invocation: %v", err)
+	}
+	if taskStatus != string(models.StatusCancelled) || taskCategory != string(models.CategoryBacklog) || invocationStatus != string(models.AutomationInvocationCancelled) {
+		t.Fatalf("cancel race state task=%q/%q invocation=%q", taskStatus, taskCategory, invocationStatus)
+	}
 }
 
 func TestAutomationRepoTerminalAutomationFailureMovesScheduledTaskToCompleted(t *testing.T) {

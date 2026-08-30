@@ -2244,6 +2244,12 @@ func TestAutomationRuntimeDispatchFailureBackoffIsOwnerOnlyAndTerminal(t *testin
 	require.NoError(t, err)
 	require.NotNil(t, leased)
 	require.NoError(t, fixture.repo.FailDispatch(ctx, dispatch.ID, "owner", "terminal", 2, nextAttempt.Add(time.Millisecond)))
+	storedTask, err := fixture.taskRepo.GetByID(ctx, fixture.task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusFailed, storedTask.Status)
+	require.Equal(t, models.CategoryCompleted, storedTask.Category)
+	require.NotNil(t, storedTask.CompletedAt)
+	require.ErrorIs(t, fixture.repo.FailDispatch(ctx, dispatch.ID, "owner", "duplicate terminal retry", 2, nextAttempt.Add(2*time.Millisecond)), repository.ErrAutomationDispatchLease)
 	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT status FROM automation_dispatch_outbox WHERE id = ?`, dispatch.ID).Scan(&status))
 	require.Equal(t, "failed", status)
 	var invocationStatus string

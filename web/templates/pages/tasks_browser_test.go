@@ -288,12 +288,23 @@ func TestCapacityQueuedAutomationAndTerminalTasksAreVisibleInChrome(t *testing.T
 	}
 
 	project := models.Project{ID: "project-automation-capacity-browser", Name: "Automation Capacity Browser"}
-	tasks := []models.Task{
-		{ID: "automation-capacity", ProjectID: project.ID, Title: "Queued Automation", Category: models.CategoryScheduled, Status: models.StatusPending, AutomationCapacityQueued: true},
-		{ID: "automation-future", ProjectID: project.ID, Title: "Future Automation", Category: models.CategoryScheduled, Status: models.StatusPending, CreatedVia: "automation:auto:future"},
-		{ID: "ordinary-scheduled", ProjectID: project.ID, Title: "Ordinary Scheduled", Category: models.CategoryScheduled, Status: models.StatusPending},
-		{ID: "terminal-failed", ProjectID: project.ID, Title: "Failed Automation", Category: models.CategoryBacklog, Status: models.StatusFailed, CreatedVia: "automation:auto:worker"},
-		{ID: "terminal-cancelled", ProjectID: project.ID, Title: "Cancelled Automation", Category: models.CategoryBacklog, Status: models.StatusCancelled, CreatedVia: "automation:auto:worker"},
+	completedAt := time.Now().UTC()
+	var stateMu sync.Mutex
+	stage := 0
+	boardTasks := func() []models.Task {
+		stateMu.Lock()
+		defer stateMu.Unlock()
+		tasks := []models.Task{
+			{ID: "automation-future", ProjectID: project.ID, Title: "Future Automation", Category: models.CategoryScheduled, Status: models.StatusPending, CreatedVia: "automation:auto:future"},
+			{ID: "ordinary-scheduled", ProjectID: project.ID, Title: "Ordinary Scheduled", Category: models.CategoryScheduled, Status: models.StatusPending},
+			{ID: "terminal-cancelled", ProjectID: project.ID, Title: "Cancelled Automation", Category: models.CategoryBacklog, Status: models.StatusCancelled, CreatedVia: "automation:auto:worker"},
+		}
+		if stage == 1 {
+			tasks = append(tasks, models.Task{ID: "automation-capacity", ProjectID: project.ID, Title: "Queued Automation", Category: models.CategoryScheduled, Status: models.StatusPending, AutomationCapacityQueued: true})
+		} else if stage == 2 {
+			tasks = append(tasks, models.Task{ID: "terminal-failed", ProjectID: project.ID, Title: "Failed Automation", Category: models.CategoryCompleted, Status: models.StatusFailed, CreatedVia: "automation:auto:worker", CompletedAt: &completedAt})
+		}
+		return tasks
 	}
 	runner := `<script>
 window.addEventListener('DOMContentLoaded', function() {
@@ -312,15 +323,31 @@ window.addEventListener('DOMContentLoaded', function() {
   }
   window.addEventListener('error', function(event) { report('fail', String(event.error && event.error.stack || event.message)); });
   (async function() {
-    await waitFor(function() { return document.getElementById('task-automation-capacity'); }, 'Tasks board');
-    var pending = document.querySelector('.task-drop-zone[data-status="pending"][data-category="active"]');
-    if (!pending || !pending.contains(document.getElementById('task-automation-capacity'))) fail('capacity-queued Automation is not in Active pending dropzone');
-    var queued = document.getElementById('task-automation-capacity');
-    if (queued.dataset.taskCategory !== 'scheduled' || queued.dataset.taskStatus !== 'pending') fail('queued Automation card lost its persisted category/status');
+    await waitFor(function() { return document.getElementById('kanban-board'); }, 'initial Tasks board');
+    if (document.getElementById('task-automation-capacity')) fail('capacity task was visible before its occurrence was queued');
     if (document.getElementById('task-automation-future')) fail('future Automation schedule was incorrectly projected as queued');
     if (document.getElementById('task-ordinary-scheduled')) fail('ordinary scheduled task was incorrectly projected onto the board');
+
+    await fetch('/claim', {method:'POST'});
+    window.dispatchEvent(new CustomEvent('sse-task-event', {detail:{type:'task_board_updated', project_id:'foreign-project', task_id:'automation-capacity'}}));
+    await new Promise(function(resolve) { setTimeout(resolve, 700); });
+    if (document.getElementById('task-automation-capacity')) fail('foreign-project board event refreshed the selected project');
+    window.dispatchEvent(new CustomEvent('sse-task-event', {detail:{type:'task_board_updated', project_id:'` + project.ID + `', task_id:'automation-capacity'}}));
+    await waitFor(function() { return document.getElementById('task-automation-capacity'); }, 'capacity-queued live projection');
+    var pending = document.querySelector('.task-drop-zone[data-status="pending"][data-category="active"]');
+    var queued = document.getElementById('task-automation-capacity');
+    if (!pending || !pending.contains(queued)) fail('capacity-queued Automation is not in Active pending dropzone');
+    if (queued.dataset.taskCategory !== 'scheduled' || queued.dataset.taskStatus !== 'pending') fail('queued Automation card lost its persisted category/status');
+
+    await fetch('/fail', {method:'POST'});
+    window.dispatchEvent(new CustomEvent('sse-task-event', {detail:{type:'task_board_updated', project_id:'` + project.ID + `', task_id:'automation-capacity'}}));
+    await waitFor(function() {
+      return !document.getElementById('task-automation-capacity') && document.getElementById('task-terminal-failed');
+    }, 'terminal failed live projection');
+    var completed = document.querySelector('.category-drop-zone[data-category="completed"]');
     var backlog = document.querySelector('.category-drop-zone[data-category="backlog"]');
-    if (!backlog || !backlog.contains(document.getElementById('task-terminal-failed')) || !backlog.contains(document.getElementById('task-terminal-cancelled'))) fail('terminal Automation cards are not visible in Backlog');
+    if (!completed || !completed.contains(document.getElementById('task-terminal-failed'))) fail('terminal failed Automation is not visible in Completed');
+    if (!backlog || !backlog.contains(document.getElementById('task-terminal-cancelled'))) fail('terminal cancelled Automation is not visible in Backlog');
     await report('pass', '');
   })().catch(function(error) { report('fail', String(error && error.stack || error)); });
 });
@@ -333,13 +360,25 @@ window.addEventListener('DOMContentLoaded', function() {
 		case "/htmx-2.0.4.min.js":
 			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 			_, _ = w.Write(htmxJS)
+		case "/claim":
+			stateMu.Lock()
+			stage = 1
+			stateMu.Unlock()
+			w.WriteHeader(http.StatusNoContent)
+		case "/fail":
+			stateMu.Lock()
+			stage = 2
+			stateMu.Unlock()
+			w.WriteHeader(http.StatusNoContent)
 		case "/tasks":
 			var out bytes.Buffer
-			if err := Tasks([]models.Project{project}, &project, tasks, nil, nil, "created_desc", "completed_desc").Render(context.Background(), &out); err != nil {
+			if err := Tasks([]models.Project{project}, &project, boardTasks(), nil, nil, "created_desc", "completed_desc").Render(context.Background(), &out); err != nil {
 				t.Fatalf("render Tasks page: %v", err)
 			}
 			page := strings.Replace(out.String(), "https://unpkg.com/htmx.org@2.0.4", "/htmx-2.0.4.min.js", 1)
-			page = strings.Replace(page, "</head>", runner+"</head>", 1)
+			if r.Header.Get("HX-Request") == "" {
+				page = strings.Replace(page, "</head>", runner+"</head>", 1)
+			}
 			_, _ = w.Write([]byte(page))
 		case "/browser-result":
 			browserResult <- r.URL.Query().Get("status") + ":" + r.URL.Query().Get("message")
@@ -378,6 +417,7 @@ window.addEventListener('DOMContentLoaded', function() {
 		t.Fatalf("Automation capacity browser regression failed: %s\nChrome:\n%s", outcome, strings.TrimSpace(string(stderr)))
 	}
 }
+
 func TestTaskCardStateIconStaysVisibleWithLongTitleAtMobileWidthInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	task := models.Task{

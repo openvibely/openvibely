@@ -258,10 +258,11 @@ func (r *AutomationRepo) ClaimManualAutomationRun(ctx context.Context, projectID
 		scheduleID string
 		nodeID     string
 		taskID     string
+		taskTitle  string
 		status     models.TaskStatus
 		category   models.TaskCategory
 	}
-	rows, err := conn.QueryContext(ctx, `SELECT o.schedule_id, o.node_id, s.task_id, t.status, t.category
+	rows, err := conn.QueryContext(ctx, `SELECT o.schedule_id, o.node_id, s.task_id, t.title, t.status, t.category
 		FROM automation_trigger_owners o
 		JOIN schedules s ON s.id = o.schedule_id AND s.enabled = 1
 		JOIN tasks t ON t.id = s.task_id AND t.project_id = o.project_id
@@ -279,7 +280,7 @@ func (r *AutomationRepo) ClaimManualAutomationRun(ctx context.Context, projectID
 	var entries []manualEntry
 	for rows.Next() {
 		var entry manualEntry
-		if err := rows.Scan(&entry.scheduleID, &entry.nodeID, &entry.taskID, &entry.status, &entry.category); err != nil {
+		if err := rows.Scan(&entry.scheduleID, &entry.nodeID, &entry.taskID, &entry.taskTitle, &entry.status, &entry.category); err != nil {
 			rows.Close()
 			return nil, nil, err
 		}
@@ -294,6 +295,7 @@ func (r *AutomationRepo) ClaimManualAutomationRun(ctx context.Context, projectID
 
 	invocations := make([]models.AutomationInvocation, 0, len(entries))
 	dispatches := make([]models.AutomationDispatch, 0, len(entries))
+	boardEvents := make([]events.TaskEvent, 0, len(entries))
 	for _, entry := range entries {
 		occurrenceKey := "manual:" + NewID()
 		if occurrenceKey == "manual:" {
@@ -367,6 +369,10 @@ func (r *AutomationRepo) ClaimManualAutomationRun(ctx context.Context, projectID
 		}
 		invocations = append(invocations, invocation)
 		dispatches = append(dispatches, dispatch)
+		boardEvents = append(boardEvents, events.TaskEvent{
+			Type: events.TaskBoardUpdated, TaskID: entry.taskID, TaskName: entry.taskTitle,
+			ProjectID: projectID, Status: string(models.StatusPending), Category: string(preparedCategory),
+		})
 	}
 
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
@@ -385,6 +391,11 @@ func (r *AutomationRepo) ClaimManualAutomationRun(ctx context.Context, projectID
 		r.PublishInvalidation(eventType, projectID, models.AutomationBinding{
 			AutomationID: automationID, AutomationName: automationName, VersionID: versionID, InvocationID: invocation.ID, NodeID: invocation.TriggerNodeID,
 		})
+	}
+	if r.broadcaster != nil {
+		for _, event := range boardEvents {
+			r.broadcaster.Publish(event)
+		}
 	}
 	return invocations, dispatches, nil
 }
@@ -585,6 +596,10 @@ func (r *AutomationRepo) ClaimScheduledOccurrence(ctx context.Context, schedule 
 	r.PublishInvalidation(eventType, owner.ProjectID, models.AutomationBinding{
 		AutomationID: owner.AutomationID, AutomationName: automationName, VersionID: owner.VersionID, InvocationID: invocation.ID, NodeID: owner.NodeID,
 	})
+	if dispatch != nil && r.broadcaster != nil {
+		r.broadcaster.Publish(events.TaskEvent{Type: events.TaskBoardUpdated, TaskID: taskID, TaskName: taskTitle,
+			ProjectID: owner.ProjectID, Status: string(models.StatusPending), Category: string(preparedCategory)})
+	}
 	return invocation, dispatch, nil
 }
 
@@ -932,22 +947,61 @@ func (r *AutomationRepo) FailDispatch(ctx context.Context, dispatchID, claimant,
 	}
 	defer finishImmediate()
 	var attempts int
-	var invocationID string
-	if err := conn.QueryRowContext(ctx, `SELECT attempts, invocation_id FROM automation_dispatch_outbox
-		WHERE id = ? AND status = 'processing' AND claimed_by = ?`, dispatchID, claimant).Scan(&attempts, &invocationID); err != nil {
+	var invocationID, taskID, projectID, automationID, versionID, nodeID, taskTitle string
+	var taskStatus models.TaskStatus
+	var taskCategory models.TaskCategory
+	if err := conn.QueryRowContext(ctx, `SELECT d.attempts, d.invocation_id, d.task_id,
+		i.project_id, i.automation_id, i.version_id, i.trigger_node_id, t.title, t.status, t.category
+		FROM automation_dispatch_outbox d
+		JOIN automation_invocations i ON i.id = d.invocation_id
+		JOIN tasks t ON t.id = d.task_id AND t.project_id = i.project_id
+		WHERE d.id = ? AND d.status = 'processing' AND d.claimed_by = ?`, dispatchID, claimant).
+		Scan(&attempts, &invocationID, &taskID, &projectID, &automationID, &versionID, &nodeID,
+			&taskTitle, &taskStatus, &taskCategory); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrAutomationDispatchLease
 		}
 		return err
 	}
-	if attempts >= maxAttempts {
+	terminal := attempts >= maxAttempts
+	taskChanged := false
+	oldTaskCategory := taskCategory
+	if terminal {
 		if _, err := conn.ExecContext(ctx, `UPDATE automation_dispatch_outbox SET status = 'failed', last_error = ?,
 			claimed_by = '', claim_expires_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, strings.TrimSpace(message), dispatchID); err != nil {
 			return err
 		}
-		if _, err := conn.ExecContext(ctx, `UPDATE automation_invocations SET status = 'failed', error_message = ?,
-			completed_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, strings.TrimSpace(message), now.UTC(), invocationID); err != nil {
+		invocationStatus := models.AutomationInvocationFailed
+		if taskStatus == models.StatusCancelled {
+			invocationStatus = models.AutomationInvocationCancelled
+		}
+		if _, err := conn.ExecContext(ctx, `UPDATE automation_invocations SET status = ?, error_message = ?,
+			completed_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, invocationStatus, strings.TrimSpace(message), now.UTC(), invocationID); err != nil {
 			return err
+		}
+		if taskStatus == models.StatusPending {
+			terminalCategory := models.CategoryBacklog
+			var completedAt any
+			if taskCategory == models.CategoryScheduled {
+				terminalCategory = models.CategoryCompleted
+				completedAt = now.UTC()
+			}
+			result, err := conn.ExecContext(ctx, `UPDATE tasks SET status = 'failed', category = ?, completed_at = ?,
+				updated_at = CURRENT_TIMESTAMP WHERE id = ? AND project_id = ? AND status = 'pending'
+				AND EXISTS (SELECT 1 FROM automation_task_run_reservations r WHERE r.dispatch_id = ? AND r.task_id = tasks.id)`,
+				terminalCategory, completedAt, taskID, projectID, dispatchID)
+			if err != nil {
+				return err
+			}
+			changed, err := result.RowsAffected()
+			if err != nil {
+				return err
+			}
+			taskChanged = changed == 1
+			if taskChanged {
+				taskStatus = models.StatusFailed
+				taskCategory = terminalCategory
+			}
 		}
 		if _, err := conn.ExecContext(ctx, `DELETE FROM automation_task_run_reservations WHERE dispatch_id = ?`, dispatchID); err != nil {
 			return err
@@ -963,7 +1017,22 @@ func (r *AutomationRepo) FailDispatch(ctx context.Context, dispatchID, claimant,
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 		return err
 	}
-	if attempts >= maxAttempts {
+	if terminal {
+		if r.broadcaster != nil {
+			r.broadcaster.Publish(events.TaskEvent{Type: events.TaskBoardUpdated, TaskID: taskID, TaskName: taskTitle,
+				ProjectID: projectID, Status: string(taskStatus), Category: string(taskCategory)})
+			if taskChanged {
+				r.broadcaster.Publish(events.TaskEvent{Type: events.TaskStatusChanged, TaskID: taskID, TaskName: taskTitle,
+					ProjectID: projectID, Status: string(taskStatus), OldStatus: string(models.StatusPending), Category: string(taskCategory)})
+				if taskCategory != oldTaskCategory {
+					r.broadcaster.Publish(events.TaskEvent{Type: events.TaskCategoryChanged, TaskID: taskID, TaskName: taskTitle,
+						ProjectID: projectID, Status: string(taskStatus), Category: string(taskCategory), OldCategory: string(oldTaskCategory)})
+				}
+			}
+		}
+		r.PublishInvalidation(events.AutomationInvocationUpdated, projectID, models.AutomationBinding{
+			AutomationID: automationID, VersionID: versionID, InvocationID: invocationID, NodeID: nodeID,
+		})
 		automationobs.Event("automation.dispatch.failed",
 			automationobs.String("dispatch_id", dispatchID), automationobs.String("invocation_id", invocationID),
 			automationobs.String("attempts", strconv.Itoa(attempts)))
