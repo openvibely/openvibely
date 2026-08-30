@@ -26,6 +26,7 @@ func TestKanbanBoardRefreshPreservesSelectionAndOpenMenus(t *testing.T) {
 		`data-kanban-menu-trigger`,
 		`aria-expanded="false"`,
 		`data-kanban-menu-content`,
+		`<button type="button" tabindex="0"`,
 	} {
 		if !strings.Contains(html, required) {
 			t.Fatalf("kanban refresh state requires rendered contract %q", required)
@@ -36,6 +37,10 @@ func TestKanbanBoardRefreshPreservesSelectionAndOpenMenus(t *testing.T) {
 		if strings.Contains(html, unsupported) {
 			t.Fatalf("kanban dropdown must not claim unsupported ARIA menu semantics %q", unsupported)
 		}
+	}
+
+	if strings.Contains(html, `<a tabindex="0"`) {
+		t.Fatal("column HTMX actions must use native keyboard-operable buttons, not focusable anchors without href")
 	}
 
 	layoutSource, err := os.ReadFile(filepath.Join("..", "layout", "base.templ"))

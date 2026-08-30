@@ -180,6 +180,23 @@ window.addEventListener('DOMContentLoaded', function() {
   (async function() {
     if (location.pathname === '/tasks') {
       if (document.getElementById('selection-counter')) fail('tasks page must not render a selection counter');
+      var groupedDrag = new URLSearchParams(location.search).get('grouped_drag');
+      if (groupedDrag === 'category' || groupedDrag === 'active') {
+        var groupedBacklogTask = document.querySelector('#task-task-drag-cursor');
+        var groupedActiveTask = document.querySelector('#task-task-active-status-drag');
+        groupedBacklogTask.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true, ctrlKey:true}));
+        groupedActiveTask.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true, ctrlKey:true}));
+        if (!groupedBacklogTask.classList.contains('task-selected') || !groupedActiveTask.classList.contains('task-selected')) fail('grouped drag setup must select both task cards');
+        var groupedTarget = groupedDrag === 'active' ? '.task-drop-zone[data-status="running"]' : '.category-drop-zone[data-category="completed"]';
+        await exerciseOuterAutoScrollDrop('#task-task-drag-cursor', '#kanban-board', 'y', groupedTarget, 'grouped task ' + groupedDrag + ' cards', groupedDrag === 'active' ? 12 : 8);
+        await waitFor(function() {
+          return document.querySelectorAll('#kanban-board .task-selected').length === 0;
+        }, 'grouped task ' + groupedDrag + ' selection cleanup after authoritative swap');
+        location.href = groupedDrag === 'category'
+          ? '/tasks?project_id=project-card-drag-cursor&grouped_drag=active'
+          : '/tasks?project_id=project-card-drag-cursor&drag_only=1';
+        return;
+      }
       if (new URLSearchParams(location.search).get('drag_only') === '1') {
         var toggleTask = document.querySelector('#task-task-drag-cursor');
         toggleTask.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true, ctrlKey:true}));
@@ -219,14 +236,14 @@ window.addEventListener('DOMContentLoaded', function() {
       columnMenuTrigger.dispatchEvent(new MouseEvent('mousedown', {bubbles:true, cancelable:true}));
       columnMenuTrigger.focus();
       columnMenuTrigger.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true, detail:1}));
-      var focusedColumnOption = columnMenu.querySelector('[data-kanban-menu-content] a');
+      var focusedColumnOption = columnMenu.querySelector('[data-kanban-menu-content] button[hx-post]');
       focusedColumnOption.focus();
       if (document.activeElement !== focusedColumnOption) fail('dropzone menu option is not keyboard focusable before refresh');
       var focusedColumnOptionKey = focusedColumnOption.getAttribute('hx-post');
       await htmx.ajax('GET', '/refresh-kanban?state=running', {target:'#kanban-board', swap:'outerHTML'});
       columnMenu = document.querySelector('[data-kanban-menu-key="column-backlog"]');
       columnMenuTrigger = columnMenu.querySelector('[data-kanban-menu-trigger]');
-      focusedColumnOption = Array.from(columnMenu.querySelectorAll('[data-kanban-menu-content] a')).find(function(option) { return option.getAttribute('hx-post') === focusedColumnOptionKey; });
+      focusedColumnOption = Array.from(columnMenu.querySelectorAll('[data-kanban-menu-content] button[hx-post]')).find(function(option) { return option.getAttribute('hx-post') === focusedColumnOptionKey; });
       if (!focusedColumnOption) fail('surviving dropzone option was removed by authoritative refresh');
       await waitFor(function() { return document.activeElement === focusedColumnOption && columnMenuTrigger.getAttribute('aria-expanded') === 'true'; }, 'surviving dropzone menu option focus restoration after settle (active=' + (document.activeElement && document.activeElement.outerHTML) + ', expanded=' + columnMenuTrigger.getAttribute('aria-expanded') + ', open=' + columnMenu.hasAttribute('data-kanban-menu-open') + ')');
 
@@ -242,7 +259,7 @@ window.addEventListener('DOMContentLoaded', function() {
       columnMenuTrigger.dispatchEvent(new MouseEvent('mousedown', {bubbles:true, cancelable:true}));
       columnMenuTrigger.focus();
       columnMenuTrigger.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true, detail:1}));
-      focusedColumnOption = columnMenu.querySelector('[data-kanban-menu-content] a');
+      focusedColumnOption = columnMenu.querySelector('[data-kanban-menu-content] button[hx-post]');
       focusedColumnOption.focus();
       focusedColumnOption.dispatchEvent(new KeyboardEvent('keydown', {key:'Escape', bubbles:true, cancelable:true}));
       if (document.activeElement !== columnMenuTrigger || columnMenuTrigger.getAttribute('aria-expanded') !== 'false' || columnMenu.hasAttribute('data-kanban-menu-open')) fail('Escape must close the menu and restore trigger focus');
@@ -271,6 +288,8 @@ window.addEventListener('DOMContentLoaded', function() {
       if (document.activeElement && document.activeElement.closest && document.activeElement.closest('[data-kanban-menu-key="task-task-active-status-drag"]')) fail('removed invoker retained stale menu focus');
 
       selectedTask = document.querySelector('#task-task-drag-cursor');
+      selectedTask.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true, ctrlKey:true}));
+      if (!selectedTask.classList.contains('task-selected')) fail('navigation setup must select the surviving task');
       taskMenuTrigger = selectedTask.querySelector('[data-kanban-menu-trigger]');
       taskMenuTrigger.dispatchEvent(new MouseEvent('mousedown', {bubbles:true, cancelable:true}));
       taskMenuTrigger.focus();
@@ -280,7 +299,15 @@ window.addEventListener('DOMContentLoaded', function() {
       editTask.click();
       await waitFor(function() { return document.querySelector('[data-browser-task-detail]'); }, 'task menu navigation');
       if (taskMenuTrigger.getAttribute('aria-expanded') !== 'false') fail('task menu navigation did not clear open state before replacement');
-      location.href = '/tasks?project_id=project-card-drag-cursor&drag_only=1';
+      history.back();
+      await waitFor(function() { return document.querySelector('#kanban-board #task-task-drag-cursor'); }, 'Tasks history restoration');
+      if (document.querySelectorAll('#kanban-board .task-selected').length !== 0) fail('history restoration revived cached task selection');
+      if (document.querySelector('#kanban-board [data-kanban-menu-open]') || document.querySelector('#kanban-board').hasAttribute('data-open-kanban-menu-key')) fail('history restoration revived cached Kanban menu state');
+      var restoredTask = document.querySelector('#task-task-drag-cursor');
+      restoredTask.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true, ctrlKey:true}));
+      if (!restoredTask.classList.contains('task-selected')) fail('history-restored board retained stale internal selection state');
+      restoredTask.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true, ctrlKey:true}));
+      location.href = '/tasks?project_id=project-card-drag-cursor&grouped_drag=category';
       return;
     }
     if (location.pathname === '/schedule') {
@@ -352,6 +379,15 @@ window.addEventListener('DOMContentLoaded', function() {
 		case "/browser-result":
 			browserResult <- r.URL.Query().Get("status") + ":" + r.URL.Query().Get("message")
 			w.WriteHeader(http.StatusNoContent)
+		case "/tasks/batch-category":
+			if r.Method != http.MethodPatch {
+				t.Fatalf("expected grouped task category move to use PATCH, got %s", r.Method)
+			}
+			var out bytes.Buffer
+			if err := components.KanbanBoard(tasks, project.ID, "created_desc", "completed_desc", nil, nil).Render(context.Background(), &out); err != nil {
+				t.Fatalf("render grouped task drop response: %v", err)
+			}
+			_, _ = w.Write(out.Bytes())
 		case "/tasks/task-drag-cursor/category":
 			if r.Method != http.MethodPatch {
 				t.Fatalf("expected task category move to use PATCH, got %s", r.Method)
@@ -412,6 +448,7 @@ window.addEventListener('DOMContentLoaded', function() {
 		t.Fatalf("Card drag cursor browser regression failed: %s\nRequests:\n%s\nChrome:\n%s", outcome, requestList, strings.TrimSpace(string(stderr)))
 	}
 	for _, want := range []string{
+		"PATCH /tasks/batch-category",
 		"PATCH /tasks/task-drag-cursor/category",
 		"PATCH /tasks/task-active-status-drag/status",
 		"PATCH /schedules/schedule-drag-cursor/reschedule",

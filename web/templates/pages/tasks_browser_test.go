@@ -133,12 +133,12 @@ window.addEventListener('DOMContentLoaded', function() {
     if (actual.join(',') !== expected.join(',')) fail(label + ': expected ' + expected.join(',') + ', got ' + actual.join(','));
   }
   function activeSort(category, key) {
-    var link = document.querySelector('a[hx-post*="/tasks/' + category + '/sort"][hx-post*="sort=' + key + '"]');
+    var link = document.querySelector('button[hx-post*="/tasks/' + category + '/sort"][hx-post*="sort=' + key + '"]');
     return link && link.classList.contains('active');
   }
   function clickSort(category, key) {
     htmx.process(document.getElementById('kanban-board'));
-    var link = document.querySelector('a[hx-post*="/tasks/' + category + '/sort"][hx-post*="sort=' + key + '"]');
+    var link = document.querySelector('button[hx-post*="/tasks/' + category + '/sort"][hx-post*="sort=' + key + '"]');
     if (!link) fail('missing ' + category + ' ' + key + ' sort control');
     link.click();
     return waitFor(function() { return activeSort(category, key); }, category + ' ' + key + ' sort');

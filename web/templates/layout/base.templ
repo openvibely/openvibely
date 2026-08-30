@@ -3091,11 +3091,14 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							});
 						}
 					} else {
-						// Multi-select batch category change
+						// Multi-select batch category change. Clear selection before HTMX
+						// request hooks snapshot the board, while retaining the payload IDs.
+						const batchTaskIDs = draggedTaskIds.slice();
+						clearSelection();
 						htmx.ajax('PATCH', `/tasks/batch-category`, {
 							target: '#kanban-board',
 							swap: 'outerHTML',
-							values: { task_ids: draggedTaskIds.join(','), category: targetCategory, project_id: projectID }
+							values: { task_ids: batchTaskIDs.join(','), category: targetCategory, project_id: projectID }
 						}).catch(function(err) {
 							console.error('[drag] Batch category change failed:', err);
 							// Show error message to user
@@ -3198,11 +3201,14 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							});
 						}
 					} else {
-						// Multi-select drop into Active — batch category change
+						// Multi-select drop into Active. Clear selection before HTMX
+						// request hooks snapshot the board, while retaining the payload IDs.
+						const batchTaskIDs = draggedTaskIds.slice();
+						clearSelection();
 						htmx.ajax('PATCH', `/tasks/batch-category`, {
 							target: '#kanban-board',
 							swap: 'outerHTML',
-							values: { task_ids: draggedTaskIds.join(','), category: 'active', project_id: projectID }
+							values: { task_ids: batchTaskIDs.join(','), category: 'active', project_id: projectID }
 						}).catch(function(err) {
 							console.error('[drag] Batch category change to active failed:', err);
 							if (err.xhr && err.xhr.status === 400) {
@@ -3250,7 +3256,10 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					}
 
 					document.addEventListener('htmx:afterSwap', syncOpenVibelyTitleFromHTMX);
-					document.addEventListener('htmx:historyRestore', syncOpenVibelyTitleFromHTMX);
+					document.addEventListener('htmx:historyRestore', function(event) {
+						resetKanbanInteractionForNavigation();
+						syncOpenVibelyTitleFromHTMX(event);
+					});
 
 					window.openVibelySubmitNavigate = function(form) {
 						if (!form || !window.htmx) return Promise.reject(new Error('HTMX navigation unavailable'));
@@ -3339,6 +3348,14 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					}
 				}
 				window.closeKanbanMenu = closeKanbanMenu;
+
+				function resetKanbanInteractionForNavigation() {
+					clearSelection();
+					closeKanbanMenu(null, false);
+					document.querySelectorAll('#kanban-board .task-selected').forEach(function(card) {
+						card.classList.remove('task-selected');
+					});
+				}
 
 				function restoreKanbanInteraction(board) {
 					const snapshot = savedKanbanInteraction;
@@ -3439,7 +3456,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				// Save scroll positions and provide a fallback snapshot for direct swaps.
 				document.addEventListener('htmx:beforeSwap', function(event) {
 					if (event.detail.target && event.detail.target.id === 'main-content') {
-						closeKanbanMenu(null, false);
+						resetKanbanInteractionForNavigation();
 					}
 					if (event.detail.target && event.detail.target.id === 'kanban-board') {
 						if (!savedKanbanInteraction) snapshotKanbanInteraction(event.detail.target);
