@@ -3,6 +3,7 @@ package components
 import (
 	"bytes"
 	"context"
+	"os"
 	"strings"
 	"testing"
 
@@ -353,6 +354,38 @@ func activeStatusDropZone(t *testing.T, body, status string) string {
 		return body[start:]
 	}
 	return body[start : start+len(marker)+next]
+}
+
+func TestTaskCard_GoalMetIconMatchesDocumentedStandardGlyph(t *testing.T) {
+	doc, err := os.ReadFile("../../../docs/task-status-icon-options.html")
+	if err != nil {
+		t.Fatalf("read task status icon options: %v", err)
+	}
+	for _, want := range []string{
+		`{ key: 'goal-met', label: 'Goal met' }`,
+		`standardGoal: {`,
+		`'goal-met': '<circle cx="12" cy="8.5" r="7.5"/><path d="m8 14-2 8 6-3.5 6 3.5-2-8"/><path d="m9 8.5 2 2 4-4"/>'`,
+		`goalSource: 'standardGoal'`,
+	} {
+		if !bytes.Contains(doc, []byte(want)) {
+			t.Fatalf("task status icon options must define the standard goal-met glyph %q", want)
+		}
+	}
+
+	task := models.Task{ID: "goal-met", ProjectID: "default", Title: "Met goal", Category: models.CategoryCompleted, Status: models.StatusCompleted, GoalMet: true}
+	var rendered bytes.Buffer
+	if err := TaskCard(task, "default", "completed", nil, nil).Render(context.Background(), &rendered); err != nil {
+		t.Fatalf("render goal-met task card: %v", err)
+	}
+	for _, want := range []string{
+		`<circle cx="12" cy="8.5" r="7.5" stroke-width="2"></circle>`,
+		`d="m8 14-2 8 6-3.5 6 3.5-2-8"`,
+		`d="m9 8.5 2 2 4-4"`,
+	} {
+		if !strings.Contains(rendered.String(), want) {
+			t.Fatalf("rendered goal-met icon must use documented geometry %q, got %s", want, rendered.String())
+		}
+	}
 }
 
 func TestTaskCard_RendersPersistentAccessibleStateIconBeforeTitle(t *testing.T) {
