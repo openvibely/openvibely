@@ -451,18 +451,29 @@ func taskPullRequestFailure(c echo.Context, fromTaskCard bool, message string) e
 	return c.NoContent(http.StatusNoContent)
 }
 
+func taskCardPullRequestNotFound(c echo.Context) error {
+	const message = "Task not found"
+	if isHTMX(c) {
+		setHTMXToast(c, message, "failed")
+	}
+	return c.String(http.StatusNotFound, message)
+}
+
 // CreateTaskPullRequest creates or reuses a pull request for a task worktree branch.
 func (h *Handler) CreateTaskPullRequest(c echo.Context) error {
 	taskID := c.Param("taskId")
 	fromTaskCard := cardMutationSource(c)
 	task, err := h.taskSvc.GetByID(c.Request().Context(), taskID)
 	if err != nil || task == nil {
-		return taskPullRequestFailure(c, fromTaskCard, "Task not found")
+		if fromTaskCard {
+			return taskCardPullRequestNotFound(c)
+		}
+		return taskPullRequestFailure(c, false, "Task not found")
 	}
 	if fromTaskCard {
 		projectID := strings.TrimSpace(c.FormValue("project_id"))
 		if projectID == "" || task.ProjectID != projectID {
-			return echo.NewHTTPError(http.StatusNotFound, "task not found")
+			return taskCardPullRequestNotFound(c)
 		}
 	}
 	if task.WorktreeBranch == "" {

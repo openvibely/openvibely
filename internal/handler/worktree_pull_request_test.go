@@ -46,29 +46,7 @@ func TestCreateTaskPullRequest_RequiresWorktreeBranch(t *testing.T) {
 	}
 }
 
-func TestCreateTaskPullRequest_MissingTaskCardRequestReturnsNonSuccess(t *testing.T) {
-	_, e, _, _ := setupTestHandlerWithDB(t)
-
-	form := url.Values{"merge_source": {"task_card"}, "project_id": {"project-1"}}
-	req := httptest.NewRequest(http.MethodPost, "/tasks/missing-task/worktree/pull-request", strings.NewReader(form.Encode()))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("HX-Request", "true")
-	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("missing task-card PR should return 400, got %d: %s", rec.Code, rec.Body.String())
-	}
-	trigger := rec.Header().Get("HX-Trigger")
-	if !strings.Contains(trigger, "openvibelyToast") || !strings.Contains(trigger, "Task not found") {
-		t.Fatalf("missing task-card PR should emit a failure toast, got %s", trigger)
-	}
-	if strings.Contains(rec.Body.String(), "kanban-board") || strings.Contains(rec.Body.String(), "changes-actions-dropdown") {
-		t.Fatalf("missing task-card PR should not return a replacement fragment: %s", rec.Body.String())
-	}
-}
-
-func TestCreateTaskPullRequest_RejectsForeignTaskCardProject(t *testing.T) {
+func TestCreateTaskPullRequest_TaskCardOwnershipFailuresAreIndistinguishable(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
 	h.SetTaskPullRequestRepo(repository.NewTaskPullRequestRepo(db))
 
@@ -81,14 +59,34 @@ func TestCreateTaskPullRequest_RejectsForeignTaskCardProject(t *testing.T) {
 		t.Fatalf("create task: %v", err)
 	}
 
-	form := url.Values{"merge_source": {"task_card"}, "project_id": {"foreign"}}
-	req := httptest.NewRequest(http.MethodPost, "/tasks/"+task.ID+"/worktree/pull-request", strings.NewReader(form.Encode()))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("HX-Request", "true")
-	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("foreign task-card PR should receive 404, got %d: %s", rec.Code, rec.Body.String())
+	request := func(taskID string) *httptest.ResponseRecorder {
+		t.Helper()
+		form := url.Values{"merge_source": {"task_card"}, "project_id": {"foreign"}}
+		req := httptest.NewRequest(http.MethodPost, "/tasks/"+taskID+"/worktree/pull-request", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("HX-Request", "true")
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		return rec
+	}
+
+	missing := request("missing-task")
+	foreign := request(task.ID)
+	for name, rec := range map[string]*httptest.ResponseRecorder{"missing": missing, "foreign": foreign} {
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("%s task-card PR should return 404, got %d: %s", name, rec.Code, rec.Body.String())
+		}
+		trigger := rec.Header().Get("HX-Trigger")
+		if !strings.Contains(trigger, "openvibelyToast") || !strings.Contains(strings.ToLower(trigger), "task not found") {
+			t.Fatalf("%s task-card PR should emit the same failure toast, got %s", name, trigger)
+		}
+		if strings.Contains(rec.Body.String(), "kanban-board") || strings.Contains(rec.Body.String(), "changes-actions-dropdown") {
+			t.Fatalf("%s task-card PR should not return a replacement fragment: %s", name, rec.Body.String())
+		}
+	}
+	if missing.Body.String() != foreign.Body.String() || missing.Header().Get("HX-Trigger") != foreign.Header().Get("HX-Trigger") {
+		t.Fatalf("missing and foreign task-card ownership responses must be indistinguishable: missing=%d %q %q foreign=%d %q %q",
+			missing.Code, missing.Body.String(), missing.Header().Get("HX-Trigger"), foreign.Code, foreign.Body.String(), foreign.Header().Get("HX-Trigger"))
 	}
 }
 
