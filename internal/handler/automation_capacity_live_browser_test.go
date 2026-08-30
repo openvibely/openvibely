@@ -155,7 +155,7 @@ func TestAutomationClaimsRefreshCapacityQueuedBoardThroughLiveEventsInChrome(t *
 				"--window-size=1280,900", "--user-data-dir="+filepath.Join(t.TempDir(), "profile"), server.URL+"/tasks?project_id="+project.ID,
 			)
 			cmd.Stderr = stderrFile
-			if err := cmd.Start(); err != nil {
+			if err := startHandlerBrowserProcess(cmd); err != nil {
 				_ = stderrFile.Close()
 				t.Fatalf("start Chrome: %v", err)
 			}
@@ -165,10 +165,7 @@ func TestAutomationClaimsRefreshCapacityQueuedBoardThroughLiveEventsInChrome(t *
 			case <-time.After(20 * time.Second):
 				outcome = "fail:timed out waiting for browser result"
 			}
-			if cmd.Process != nil {
-				_ = cmd.Process.Kill()
-			}
-			_ = cmd.Wait()
+			stopHandlerBrowserProcess(cmd)
 			_ = stderrFile.Close()
 			if !strings.HasPrefix(outcome, "pass:") {
 				stderr, _ := os.ReadFile(stderrPath)

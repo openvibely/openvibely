@@ -1037,7 +1037,8 @@ window.addEventListener('DOMContentLoaded', function() {
     var modalRect = modal.getBoundingClientRect();
     var modalBox = modal.querySelector('.modal-box');
     var modalBoxRect = modalBox.getBoundingClientRect();
-    if (Math.abs(modalRect.width - window.innerWidth) > 1 || Math.abs(modalBoxRect.width - window.innerWidth) > 1) fail('mobile confirmation is not viewport width: dialog=' + modalRect.width + ' box=' + modalBoxRect.width + ' viewport=' + window.innerWidth);
+    var layoutViewportWidth = document.documentElement.clientWidth;
+    if (Math.abs(modalRect.width - layoutViewportWidth) > 1 || Math.abs(modalBoxRect.width - layoutViewportWidth) > 1) fail('mobile confirmation is not layout viewport width: dialog=' + modalRect.width + ' box=' + modalBoxRect.width + ' viewport=' + layoutViewportWidth);
     var cancel = modal.querySelector('.modal-action button:not(.btn-error)');
     if (!cancel || document.activeElement !== cancel) fail('mobile confirmation did not focus Cancel');
     cancel.click();
