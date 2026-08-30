@@ -429,13 +429,18 @@ data: {"type":"task_board_updated","project_id":"` + project.ID + `","task_id":"
 			}
 		case "/tasks":
 			var out bytes.Buffer
+			if r.Header.Get("HX-Request") != "" {
+				if err := components.KanbanBoard(boardTasks(), project.ID, "created_desc", "completed_desc", nil, nil).Render(context.Background(), &out); err != nil {
+					t.Fatalf("render Tasks board: %v", err)
+				}
+				_, _ = w.Write(out.Bytes())
+				return
+			}
 			if err := Tasks([]models.Project{project}, &project, boardTasks(), nil, nil, "created_desc", "completed_desc").Render(context.Background(), &out); err != nil {
 				t.Fatalf("render Tasks page: %v", err)
 			}
 			page := strings.Replace(out.String(), "https://unpkg.com/htmx.org@2.0.4", "/htmx-2.0.4.min.js", 1)
-			if r.Header.Get("HX-Request") == "" {
-				page = strings.Replace(page, "</head>", runner+"</head>", 1)
-			}
+			page = strings.Replace(page, "</head>", runner+"</head>", 1)
 			_, _ = w.Write([]byte(page))
 		case "/browser-result":
 			browserResult <- r.URL.Query().Get("status") + ":" + r.URL.Query().Get("message")
