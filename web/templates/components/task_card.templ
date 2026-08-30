@@ -287,7 +287,7 @@ templ taskCardStateIcon(task models.Task) {
 	<span
 		data-task-state-icon
 		data-task-state={ state.Key }
-		class={ "tooltip tooltip-bottom inline-flex h-5 w-5 shrink-0 items-center justify-center", state.TextClass }
+		class={ "tooltip tooltip-right inline-flex h-5 w-5 shrink-0 items-center justify-center", state.TextClass }
 		data-tip={ state.Label }
 		role="img"
 		aria-label={ "Task state: " + state.Label }

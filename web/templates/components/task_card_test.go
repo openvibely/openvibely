@@ -401,11 +401,15 @@ func TestTaskCard_RendersPersistentAccessibleStateIconBeforeTitle(t *testing.T) 
 				`role="img"`,
 				`aria-label="Task state: ` + tt.wantLabel + `"`,
 				`data-tip="` + tt.wantLabel + `"`,
+				`tooltip-right`,
 				`aria-hidden="true"`,
 			} {
 				if !strings.Contains(body, want) {
 					t.Fatalf("expected accessible state icon markup %q, got %s", want, body)
 				}
+			}
+			if strings.Contains(body, `tooltip-bottom`) {
+				t.Fatalf("state tooltip must open inward from the card's left edge, got %s", body)
 			}
 			if !strings.Contains(body, `</span><span data-task-title class="min-w-0 flex-1 break-words sm:truncate">State title</span>`) {
 				t.Fatalf("state icon must render immediately before the shrink-safe title, got %s", body)
