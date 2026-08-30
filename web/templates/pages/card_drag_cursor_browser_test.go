@@ -319,7 +319,7 @@ func TestScheduleCardsSupportModifierMultiSelectGroupedPointerDragAndRollback(t 
 		runAt := time.Date(start.Year(), start.Month(), start.Day(), hour, 0, 0, 0, time.Local)
 		return repository.TaskWithSchedule{Task: models.Task{ID: "task-" + id, ProjectID: project.ID, Title: id, Category: models.CategoryScheduled, Status: models.StatusPending, CreatedAt: start, UpdatedAt: start}, Schedule: &models.Schedule{ID: id, TaskID: "task-" + id, RunAt: runAt, NextRun: &runAt, RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: true}}
 	}
-	scheduled := []repository.TaskWithSchedule{makeScheduled("schedule-multi-a", 8), makeScheduled("schedule-multi-b", 10), makeScheduled("schedule-single-c", 12)}
+	scheduled := []repository.TaskWithSchedule{makeScheduled("schedule-multi-a", 8), makeScheduled("schedule-multi-b", 8), makeScheduled("schedule-single-c", 12)}
 
 	runner := `<script>
 window.addEventListener('DOMContentLoaded', function() {
@@ -352,6 +352,12 @@ window.addEventListener('DOMContentLoaded', function() {
     click(first, true); click(second, true);
     if (document.querySelector('#selection-label').textContent.trim() !== 'schedules selected') fail('counter must use schedule-specific plural semantics');
     if (!first.classList.contains('schedule-selected') || !second.classList.contains('schedule-selected')) fail('modifier clicks must select both schedules');
+    var firstStyle = getComputedStyle(first), secondStyle = getComputedStyle(second);
+    if (firstStyle.outlineStyle !== 'none' || secondStyle.outlineStyle !== 'none') fail('schedule selection must not use a floating outline');
+    if (firstStyle.boxShadow !== 'none' || secondStyle.boxShadow !== 'none') fail('schedule selection must not use an external shadow ring');
+    if (firstStyle.borderTopWidth === '0px' || firstStyle.borderRightWidth === '0px' || firstStyle.borderBottomWidth === '0px') fail('schedule selection must change the card border on every side');
+    var firstRect = first.getBoundingClientRect(), secondRect = second.getBoundingClientRect();
+    if (firstRect.bottom > secondRect.top) fail('selected schedules in one time block must not overlap');
     var source = first.closest('.drop-zone');
     var targetHour = Number(source.dataset.hour) + 4;
     var target = document.querySelector('.drop-zone[data-date="' + source.dataset.date + '"][data-hour="' + targetHour + '"]');

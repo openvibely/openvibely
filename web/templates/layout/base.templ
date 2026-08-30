@@ -369,10 +369,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						display: none;
 					}
 					.schedule-selected {
-						outline: 2px solid oklch(var(--p));
-						outline-offset: 1px;
+						border: 2px solid oklch(var(--p)) !important;
 						background: oklch(var(--p) / 0.35) !important;
-						box-shadow: 0 0 0 2px oklch(var(--p) / 0.2);
 					}
 				/* Modal layering */
 				dialog.modal {
