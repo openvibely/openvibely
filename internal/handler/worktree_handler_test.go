@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -816,6 +817,66 @@ func TestHandler_MergeTaskBranch_Conflict_ReturnsHTMXToast(t *testing.T) {
 	}
 	if updated.MergeStatus != models.MergeStatusConflict {
 		t.Fatalf("expected merge_status=conflict, got %s", updated.MergeStatus)
+	}
+
+	leaseStarted := make(chan struct{})
+	leaseRelease := make(chan struct{})
+	leaseDone := make(chan error, 1)
+	stopLease := errors.New("stop handler recovery lease")
+	go func() {
+		_, leaseErr := h.worktreeSvc.MergeBranchValidated(ctx, &models.Task{}, repoDir, "merge", func() error {
+			close(leaseStarted)
+			<-leaseRelease
+			return stopLease
+		})
+		leaseDone <- leaseErr
+	}()
+	<-leaseStarted
+	abortForm := url.Values{"merge_source": {"changes_tab"}}
+	abortReq := worktreeFormRequest(http.MethodPost, "/tasks/"+task.ID+"/worktree/abort", abortForm)
+	abortReq.Header.Set("HX-Request", "true")
+	abortRec := worktreeExecute(e, abortReq)
+	if abortRec.Code != http.StatusOK {
+		close(leaseRelease)
+		<-leaseDone
+		t.Fatalf("expected busy Abort to refresh Changes, got %d: %s", abortRec.Code, abortRec.Body.String())
+	}
+	if !strings.Contains(abortRec.Body.String(), "/tasks/"+task.ID+"/worktree/abort") || strings.Contains(abortRec.Body.String(), "/tasks/"+task.ID+"/worktree/merge") {
+		close(leaseRelease)
+		<-leaseDone
+		t.Fatalf("busy Abort did not preserve conflict recovery controls: %s", abortRec.Body.String())
+	}
+	if trigger := abortRec.Header().Get("HX-Trigger"); !strings.Contains(trigger, "already in progress") {
+		close(leaseRelease)
+		<-leaseDone
+		t.Fatalf("busy Abort did not emit repository mutation feedback: %q", trigger)
+	}
+	if !service.HasActiveMerge(repoDir) || len(service.ActiveConflictFiles(repoDir)) == 0 {
+		close(leaseRelease)
+		<-leaseDone
+		t.Fatal("busy Abort mutated the active conflict")
+	}
+	resolveReq := worktreeFormRequest(http.MethodPost, "/tasks/"+task.ID+"/worktree/resolve", abortForm)
+	resolveReq.Header.Set("HX-Request", "true")
+	resolveRec := worktreeExecute(e, resolveReq)
+	if resolveRec.Code != http.StatusOK || !strings.Contains(resolveRec.Body.String(), "/tasks/"+task.ID+"/worktree/resolve") {
+		close(leaseRelease)
+		<-leaseDone
+		t.Fatalf("expected busy Resolve to preserve conflict Changes, got %d: %s", resolveRec.Code, resolveRec.Body.String())
+	}
+	if trigger := resolveRec.Header().Get("HX-Trigger"); !strings.Contains(trigger, "already in progress") {
+		close(leaseRelease)
+		<-leaseDone
+		t.Fatalf("busy Resolve did not emit repository mutation feedback: %q", trigger)
+	}
+	if !service.HasActiveMerge(repoDir) || len(service.ActiveConflictFiles(repoDir)) == 0 {
+		close(leaseRelease)
+		<-leaseDone
+		t.Fatal("busy Resolve mutated the active conflict")
+	}
+	close(leaseRelease)
+	if leaseErr := <-leaseDone; !errors.Is(leaseErr, stopLease) {
+		t.Fatalf("lease holder returned %v, want validator stop", leaseErr)
 	}
 
 	unrelatedBranch := "task/unrelated-during-conflict"

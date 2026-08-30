@@ -369,6 +369,27 @@ func (h *Handler) buildPullRequestPrepCommitMessage(ctx context.Context, task *m
 	return service.BuildWorktreeCommitMessage(task.WorktreePath, commitCtx)
 }
 
+// revalidateTaskConflictRecovery reloads task and Git state while the canonical
+// repository mutation lease is held. Recovery must only mutate a conflict that
+// still belongs to this task branch.
+func (h *Handler) revalidateTaskConflictRecovery(ctx context.Context, taskID string, task *models.Task, project *models.Project) (taskMergeEligibility, error) {
+	freshTask, err := h.taskSvc.GetByID(ctx, taskID)
+	if err != nil || freshTask == nil {
+		return taskMergeEligibility{}, fmt.Errorf("%w: task is no longer available", service.ErrMergeEligibilityChanged)
+	}
+	h.recoverTaskWorktreeState(ctx, freshTask, project)
+	freshEligibility := h.resolveTaskMergeEligibility(ctx, freshTask, project, h.reconcileAlreadyMergedBranch(ctx, freshTask))
+	if !freshEligibility.ConflictRecovery {
+		reason := freshEligibility.Reason
+		if reason == "" {
+			reason = "the active conflict no longer belongs to this task"
+		}
+		return freshEligibility, fmt.Errorf("%w: %s", service.ErrMergeEligibilityChanged, reason)
+	}
+	*task = *freshTask
+	return freshEligibility, nil
+}
+
 // ResolveTaskConflicts triggers AI-assisted conflict resolution.
 func (h *Handler) ResolveTaskConflicts(c echo.Context) error {
 	taskID := c.Param("taskId")
@@ -399,11 +420,21 @@ func (h *Handler) ResolveTaskConflicts(c echo.Context) error {
 		return c.String(http.StatusConflict, msg)
 	}
 
-	result, resolveErr := h.worktreeSvc.ResolveConflictsWithAI(c.Request().Context(), task, project.RepoPath)
+	result, resolveErr := h.worktreeSvc.ResolveConflictsWithAIValidated(c.Request().Context(), task, project.RepoPath, func() error {
+		_, err := h.revalidateTaskConflictRecovery(c.Request().Context(), taskID, task, project)
+		return err
+	})
 	if resolveErr != nil {
 		applog.Infof("[handler] ResolveTaskConflicts error: %v", resolveErr)
 		errMessage := "Failed to resolve merge conflicts"
-		if result != nil && result.ErrorMessage != "" {
+		status := http.StatusBadRequest
+		if errors.Is(resolveErr, service.ErrMergeInProgress) {
+			errMessage = "Another merge, rebase, or conflict recovery is already in progress for this repository. Wait for it to finish before resolving conflicts."
+			status = http.StatusConflict
+		} else if errors.Is(resolveErr, service.ErrMergeEligibilityChanged) {
+			errMessage = resolveErr.Error()
+			status = http.StatusConflict
+		} else if result != nil && result.ErrorMessage != "" {
 			errMessage = result.ErrorMessage
 		} else if resolveErr.Error() != "" {
 			errMessage = resolveErr.Error()
@@ -415,7 +446,7 @@ func (h *Handler) ResolveTaskConflicts(c echo.Context) error {
 			task, _ = h.taskSvc.GetByID(c.Request().Context(), taskID)
 			return h.GetTaskChanges(c)
 		}
-		return c.String(http.StatusBadRequest, errMessage)
+		return c.String(status, errMessage)
 	}
 
 	if result != nil && !result.Success {
@@ -461,8 +492,29 @@ func (h *Handler) AbortTaskMerge(c echo.Context) error {
 		return c.String(http.StatusConflict, msg)
 	}
 
-	if abortErr := service.AbortMergeForTask(project.RepoPath, task.WorktreeBranch, eligibility.TargetBranch); abortErr != nil {
+	abortBranch := task.WorktreeBranch
+	abortTarget := eligibility.TargetBranch
+	abortErr := service.AbortMergeForTaskValidated(project.RepoPath, abortBranch, abortTarget, func() error {
+		freshEligibility, err := h.revalidateTaskConflictRecovery(c.Request().Context(), taskID, task, project)
+		if err != nil {
+			return err
+		}
+		if task.WorktreeBranch != abortBranch || freshEligibility.TargetBranch != abortTarget {
+			return fmt.Errorf("%w: task conflict metadata changed before abort", service.ErrMergeEligibilityChanged)
+		}
+		eligibility = freshEligibility
+		return nil
+	})
+	if abortErr != nil {
 		errMessage := fmt.Sprintf("Failed to abort merge: %v", abortErr)
+		status := http.StatusBadRequest
+		if errors.Is(abortErr, service.ErrMergeInProgress) {
+			errMessage = "Another merge, rebase, or conflict recovery is already in progress for this repository. Wait for it to finish before aborting."
+			status = http.StatusConflict
+		} else if errors.Is(abortErr, service.ErrMergeEligibilityChanged) {
+			errMessage = abortErr.Error()
+			status = http.StatusConflict
+		}
 		if isHTMX(c) {
 			setHTMXToast(c, errMessage, "failed")
 		}
@@ -470,7 +522,7 @@ func (h *Handler) AbortTaskMerge(c echo.Context) error {
 			task, _ = h.taskSvc.GetByID(c.Request().Context(), taskID)
 			return h.GetTaskChanges(c)
 		}
-		return c.String(http.StatusBadRequest, errMessage)
+		return c.String(status, errMessage)
 	}
 	_ = h.taskRepo.UpdateMergeStatus(c.Request().Context(), taskID, models.MergeStatusPending)
 

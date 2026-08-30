@@ -21,9 +21,9 @@ import (
 	"github.com/openvibely/openvibely/internal/repository"
 )
 
-// ErrMergeInProgress is returned when another local merge or rebase is already
-// mutating the same repository.
-var ErrMergeInProgress = errors.New("merge or rebase already in progress for repository")
+// ErrMergeInProgress is returned when another repository merge, rebase, or
+// conflict-recovery mutation is already in progress.
+var ErrMergeInProgress = errors.New("repository merge, rebase, or conflict recovery already in progress")
 
 // ErrMergeEligibilityChanged is returned when live task/Git state becomes
 // ineligible after the request's initial check but before lease-held mutation.
@@ -1686,8 +1686,18 @@ func detectConflicts(repoDir string) []string {
 	return splitNULPaths(out)
 }
 
-// AbortMerge aborts an in-progress merge.
+// AbortMerge serializes a low-level git merge abort with every repository
+// mutation. Task-aware callers should prefer AbortMergeForTask.
 func AbortMerge(repoDir string) error {
+	leaseKey, acquired := beginRepositoryMutation(repoDir)
+	if !acquired {
+		return ErrMergeInProgress
+	}
+	defer endRepositoryMutation(leaseKey)
+	return abortMergeLocked(repoDir)
+}
+
+func abortMergeLocked(repoDir string) error {
 	cmd := exec.Command("git", "merge", "--abort")
 	cmd.Dir = repoDir
 	_, err := cmd.CombinedOutput()
@@ -1697,8 +1707,28 @@ func AbortMerge(repoDir string) error {
 // AbortMergeForTask aborts a normal merge or restores task-branch paths from a
 // legacy/incomplete squash conflict, which has unmerged files but no MERGE_HEAD.
 func AbortMergeForTask(repoDir, branchName, targetBranch string) error {
+	return AbortMergeForTaskValidated(repoDir, branchName, targetBranch, nil)
+}
+
+// AbortMergeForTaskValidated serializes abort with every repository mutation and
+// validates live conflict ownership while the canonical repository lease is held.
+func AbortMergeForTaskValidated(repoDir, branchName, targetBranch string, validate func() error) error {
+	leaseKey, acquired := beginRepositoryMutation(repoDir)
+	if !acquired {
+		return ErrMergeInProgress
+	}
+	defer endRepositoryMutation(leaseKey)
+	if validate != nil {
+		if err := validate(); err != nil {
+			return err
+		}
+	}
+	return abortMergeForTaskLocked(repoDir, branchName, targetBranch)
+}
+
+func abortMergeForTaskLocked(repoDir, branchName, targetBranch string) error {
 	if HasActiveMerge(repoDir) {
-		return AbortMerge(repoDir)
+		return abortMergeLocked(repoDir)
 	}
 	conflicts := detectConflicts(repoDir)
 	if len(conflicts) == 0 {
@@ -1708,12 +1738,7 @@ func AbortMergeForTask(repoDir, branchName, targetBranch string) error {
 	if err != nil {
 		return fmt.Errorf("resolving squash conflict paths: %w: %s", err, strings.TrimSpace(string(out)))
 	}
-	paths := make([]string, 0)
-	for _, path := range strings.Split(string(out), "\x00") {
-		if path != "" {
-			paths = append(paths, path)
-		}
-	}
+	paths := splitNULPaths(out)
 	paths = appendUniquePaths(paths, conflicts...)
 	if len(paths) == 0 {
 		return fmt.Errorf("no task paths found for squash conflict")
@@ -1723,6 +1748,27 @@ func AbortMergeForTask(repoDir, branchName, targetBranch string) error {
 
 // ResolveConflictsWithAI uses the LLM service to resolve merge conflicts.
 func (ws *WorktreeService) ResolveConflictsWithAI(ctx context.Context, task *models.Task, repoDir string) (*MergeResult, error) {
+	return ws.ResolveConflictsWithAIValidated(ctx, task, repoDir, nil)
+}
+
+// ResolveConflictsWithAIValidated serializes AI conflict resolution with every
+// repository mutation and validates live conflict ownership while the canonical
+// repository lease is held.
+func (ws *WorktreeService) ResolveConflictsWithAIValidated(ctx context.Context, task *models.Task, repoDir string, validate func() error) (*MergeResult, error) {
+	leaseKey, acquired := beginRepositoryMutation(repoDir)
+	if !acquired {
+		return &MergeResult{ErrorMessage: ErrMergeInProgress.Error()}, ErrMergeInProgress
+	}
+	defer endRepositoryMutation(leaseKey)
+	if validate != nil {
+		if err := validate(); err != nil {
+			return &MergeResult{ErrorMessage: err.Error()}, err
+		}
+	}
+	return ws.resolveConflictsWithAILocked(ctx, task, repoDir)
+}
+
+func (ws *WorktreeService) resolveConflictsWithAILocked(ctx context.Context, task *models.Task, repoDir string) (*MergeResult, error) {
 	if ws.llmSvc == nil {
 		return nil, fmt.Errorf("LLM service not available for conflict resolution")
 	}
@@ -2507,12 +2553,17 @@ func (ws *WorktreeService) HandlePostExecution(ctx context.Context, task *models
 			aiResult, aiErr := ws.ResolveConflictsWithAI(ctx, task, repoDir)
 			if aiErr != nil || (aiResult != nil && !aiResult.Success) {
 				applog.Infof("[worktree] AI conflict resolution failed for task %s, aborting merge", task.ID)
-				AbortMerge(repoDir)
+				targetBranch := task.MergeTargetBranch
+				if targetBranch == "" {
+					targetBranch = GetDefaultBranch(repoDir)
+				}
+				if abortErr := AbortMergeForTask(repoDir, task.WorktreeBranch, targetBranch); abortErr != nil {
+					applog.Infof("[worktree] failed to abort unresolved auto-merge for task %s: %v", task.ID, abortErr)
+				}
 				_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusConflict)
 				return
 			}
 		}
-
 		// Cleanup after successful merge if policy says so
 		policy := ws.GetCleanupPolicy(ctx)
 		if policy == "after_merge" {

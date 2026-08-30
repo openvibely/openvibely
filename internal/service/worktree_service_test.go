@@ -2225,6 +2225,63 @@ func TestMergeBranchRejectsConcurrentRepositoryMutations(t *testing.T) {
 	}
 }
 
+func TestConflictRecoverySharesRepositoryMutationLease(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ws := NewWorktreeService(repository.NewTaskRepo(db, nil), repository.NewProjectRepo(db), repository.NewSettingsRepo(db))
+	repoDir := createTestGitRepo(t)
+	stopValidation := errors.New("stop after recovery lease test")
+
+	assertBlocked := func(t *testing.T, hold func(started chan<- struct{}, release <-chan struct{}) error, blocked func() error) {
+		t.Helper()
+		started := make(chan struct{})
+		release := make(chan struct{})
+		done := make(chan error, 1)
+		go func() { done <- hold(started, release) }()
+		<-started
+		if err := blocked(); !errors.Is(err, ErrMergeInProgress) {
+			close(release)
+			<-done
+			t.Fatalf("concurrent repository mutation returned %v, want ErrMergeInProgress", err)
+		}
+		close(release)
+		if err := <-done; !errors.Is(err, stopValidation) {
+			t.Fatalf("lease holder returned %v, want validator stop", err)
+		}
+	}
+
+	holdResolve := func(started chan<- struct{}, release <-chan struct{}) error {
+		_, err := ws.ResolveConflictsWithAIValidated(context.Background(), &models.Task{}, repoDir, func() error {
+			close(started)
+			<-release
+			return stopValidation
+		})
+		return err
+	}
+	assertBlocked(t, holdResolve, func() error {
+		return AbortMergeForTask(repoDir, "task/recovery", "main")
+	})
+	assertBlocked(t, holdResolve, func() error {
+		_, err := ws.MergeBranch(context.Background(), &models.Task{}, repoDir, "merge")
+		return err
+	})
+	assertBlocked(t, holdResolve, func() error {
+		_, err := ws.RebaseBranch(context.Background(), &models.Task{}, repoDir)
+		return err
+	})
+
+	holdAbort := func(started chan<- struct{}, release <-chan struct{}) error {
+		return AbortMergeForTaskValidated(repoDir, "task/recovery", "main", func() error {
+			close(started)
+			<-release
+			return stopValidation
+		})
+	}
+	assertBlocked(t, holdAbort, func() error {
+		_, err := ws.ResolveConflictsWithAI(context.Background(), &models.Task{}, repoDir)
+		return err
+	})
+}
+
 func TestRepositoryMutationLeaseCanonicalizesAliasesAcrossServices(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	taskRepo := repository.NewTaskRepo(db, nil)
