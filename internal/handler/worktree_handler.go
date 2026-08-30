@@ -211,9 +211,45 @@ func (h *Handler) RebaseTaskBranch(c echo.Context) error {
 
 	targetBranch := eligibility.TargetBranch
 
-	result, rebaseErr := h.worktreeSvc.RebaseBranch(c.Request().Context(), task, project.RepoPath)
+	result, rebaseErr := h.worktreeSvc.RebaseBranchValidated(c.Request().Context(), task, project.RepoPath, func() error {
+		freshTask, err := h.taskSvc.GetByID(c.Request().Context(), taskID)
+		if err != nil || freshTask == nil {
+			return fmt.Errorf("%w: task is no longer available", service.ErrMergeEligibilityChanged)
+		}
+		h.recoverTaskWorktreeState(c.Request().Context(), freshTask, project)
+		freshAlreadyMerged := h.reconcileAlreadyMergedBranch(c.Request().Context(), freshTask)
+		freshEligibility := h.resolveTaskMergeEligibility(c.Request().Context(), freshTask, project, freshAlreadyMerged)
+		if !freshEligibility.MergeAvailable || !h.taskRebaseAvailable(freshTask, project, freshAlreadyMerged) {
+			reason := freshEligibility.Reason
+			if freshEligibility.ConflictRecovery {
+				reason = "a merge conflict is now active"
+			} else if freshEligibility.MergeAvailable {
+				reason = "task branch is no longer eligible to rebase onto its target"
+			}
+			if reason == "" {
+				reason = "task branch is no longer eligible to rebase"
+			}
+			return fmt.Errorf("%w: %s", service.ErrMergeEligibilityChanged, reason)
+		}
+		*task = *freshTask
+		targetBranch = freshEligibility.TargetBranch
+		return nil
+	})
 	if rebaseErr != nil {
 		applog.Infof("[handler] RebaseTaskBranch error: %v", rebaseErr)
+		if errors.Is(rebaseErr, service.ErrMergeEligibilityChanged) {
+			if isHTMX(c) {
+				setHTMXToast(c, rebaseErr.Error(), "failed")
+			}
+			return h.GetTaskChanges(c)
+		}
+		if errors.Is(rebaseErr, service.ErrMergeInProgress) {
+			errMessage := "A local merge or rebase is already in progress for this repository. Wait for it to finish before rebasing."
+			if isHTMX(c) {
+				setHTMXToast(c, errMessage, "failed")
+			}
+			return c.String(http.StatusConflict, errMessage)
+		}
 		errMessage := "Rebase failed"
 		if result != nil && result.ErrorMessage != "" {
 			errMessage = fmt.Sprintf("Rebase failed: %s", result.ErrorMessage)

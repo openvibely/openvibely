@@ -21,9 +21,9 @@ import (
 	"github.com/openvibely/openvibely/internal/repository"
 )
 
-// ErrMergeInProgress is returned when another local merge is already mutating
-// the same repository.
-var ErrMergeInProgress = errors.New("merge already in progress for repository")
+// ErrMergeInProgress is returned when another local merge or rebase is already
+// mutating the same repository.
+var ErrMergeInProgress = errors.New("merge or rebase already in progress for repository")
 
 // ErrMergeEligibilityChanged is returned when live task/Git state becomes
 // ineligible after the request's initial check but before lease-held mutation.
@@ -31,12 +31,16 @@ var ErrMergeEligibilityChanged = errors.New("merge eligibility changed before mu
 
 // WorktreeService manages git worktrees for task isolation.
 type WorktreeService struct {
-	taskRepo          *repository.TaskRepo
-	projectRepo       *repository.ProjectRepo
-	settingsRepo      *repository.SettingsRepo
-	llmSvc            *LLMService
-	mergeRepositories sync.Map // canonical repository path -> *atomic.Bool
+	taskRepo     *repository.TaskRepo
+	projectRepo  *repository.ProjectRepo
+	settingsRepo *repository.SettingsRepo
+	llmSvc       *LLMService
 }
+
+// repositoryMutationLeases is process-wide because handler, worker, and
+// scheduler wiring can hold separate WorktreeService instances while targeting
+// the same Git repository.
+var repositoryMutationLeases sync.Map // canonical Git common directory -> *atomic.Bool
 
 func NewWorktreeService(taskRepo *repository.TaskRepo, projectRepo *repository.ProjectRepo, settingsRepo *repository.SettingsRepo) *WorktreeService {
 	return &WorktreeService{
@@ -1091,21 +1095,43 @@ type RebaseResult struct {
 	ErrorMessage  string
 }
 
-func (ws *WorktreeService) beginRepositoryMerge(repoDir string) bool {
+func canonicalRepositoryMutationKey(repoDir string) string {
 	key := filepath.Clean(repoDir)
 	if absolute, err := filepath.Abs(key); err == nil {
 		key = absolute
 	}
-	value, _ := ws.mergeRepositories.LoadOrStore(key, &atomic.Bool{})
-	return value.(*atomic.Bool).CompareAndSwap(false, true)
+	if resolved, err := filepath.EvalSymlinks(key); err == nil {
+		key = resolved
+	}
+
+	cmd := exec.Command("git", "rev-parse", "--git-common-dir")
+	cmd.Dir = key
+	if out, err := cmd.Output(); err == nil {
+		commonDir := strings.TrimSpace(string(out))
+		if commonDir != "" {
+			if !filepath.IsAbs(commonDir) {
+				commonDir = filepath.Join(key, commonDir)
+			}
+			if absolute, absErr := filepath.Abs(commonDir); absErr == nil {
+				commonDir = absolute
+			}
+			if resolved, resolveErr := filepath.EvalSymlinks(commonDir); resolveErr == nil {
+				commonDir = resolved
+			}
+			return filepath.Clean(commonDir)
+		}
+	}
+	return filepath.Clean(key)
 }
 
-func (ws *WorktreeService) endRepositoryMerge(repoDir string) {
-	key := filepath.Clean(repoDir)
-	if absolute, err := filepath.Abs(key); err == nil {
-		key = absolute
-	}
-	if value, ok := ws.mergeRepositories.Load(key); ok {
+func beginRepositoryMutation(repoDir string) (string, bool) {
+	key := canonicalRepositoryMutationKey(repoDir)
+	value, _ := repositoryMutationLeases.LoadOrStore(key, &atomic.Bool{})
+	return key, value.(*atomic.Bool).CompareAndSwap(false, true)
+}
+
+func endRepositoryMutation(key string) {
+	if value, ok := repositoryMutationLeases.Load(key); ok {
 		value.(*atomic.Bool).Store(false)
 	}
 }
@@ -1121,10 +1147,11 @@ func (ws *WorktreeService) MergeBranch(ctx context.Context, task *models.Task, r
 // use this to close the render/check-to-mutation race with live eligibility and
 // ancestry state; internal callers without additional policy use MergeBranch.
 func (ws *WorktreeService) MergeBranchValidated(ctx context.Context, task *models.Task, repoDir string, mergeType string, validate func() error) (*MergeResult, error) {
-	if !ws.beginRepositoryMerge(repoDir) {
+	leaseKey, acquired := beginRepositoryMutation(repoDir)
+	if !acquired {
 		return &MergeResult{ErrorMessage: ErrMergeInProgress.Error()}, ErrMergeInProgress
 	}
-	defer ws.endRepositoryMerge(repoDir)
+	defer endRepositoryMutation(leaseKey)
 	if validate != nil {
 		if err := validate(); err != nil {
 			return &MergeResult{ErrorMessage: err.Error()}, err
@@ -1290,6 +1317,26 @@ func (ws *WorktreeService) mergeBranchLocked(ctx context.Context, task *models.T
 
 // RebaseBranch rebases the task worktree branch onto its target branch without merging it.
 func (ws *WorktreeService) RebaseBranch(ctx context.Context, task *models.Task, repoDir string) (*RebaseResult, error) {
+	return ws.RebaseBranchValidated(ctx, task, repoDir, nil)
+}
+
+// RebaseBranchValidated serializes rebase with every merge/rebase mutation for
+// the same Git repository and validates live handler policy under that lease.
+func (ws *WorktreeService) RebaseBranchValidated(ctx context.Context, task *models.Task, repoDir string, validate func() error) (*RebaseResult, error) {
+	leaseKey, acquired := beginRepositoryMutation(repoDir)
+	if !acquired {
+		return &RebaseResult{ErrorMessage: ErrMergeInProgress.Error()}, ErrMergeInProgress
+	}
+	defer endRepositoryMutation(leaseKey)
+	if validate != nil {
+		if err := validate(); err != nil {
+			return &RebaseResult{ErrorMessage: err.Error()}, err
+		}
+	}
+	return ws.rebaseBranchLocked(ctx, task, repoDir)
+}
+
+func (ws *WorktreeService) rebaseBranchLocked(ctx context.Context, task *models.Task, repoDir string) (*RebaseResult, error) {
 	if task == nil || task.WorktreeBranch == "" {
 		return nil, fmt.Errorf("task has no worktree branch")
 	}
@@ -1536,13 +1583,24 @@ func gitOutput(repoDir string, args ...string) ([]byte, error) {
 	return cmd.CombinedOutput()
 }
 
+func splitNULPaths(out []byte) []string {
+	parts := strings.Split(string(out), "\x00")
+	paths := make([]string, 0, len(parts))
+	for _, path := range parts {
+		if path != "" {
+			paths = append(paths, path)
+		}
+	}
+	return paths
+}
+
 func StagedPaths(repoDir string) (map[string]bool, error) {
-	out, err := gitOutput(repoDir, "diff", "--name-only", "--cached")
+	out, err := gitOutput(repoDir, "diff", "--name-only", "-z", "--cached")
 	if err != nil {
 		return nil, fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
 	}
 	paths := make(map[string]bool)
-	for _, path := range strings.Fields(string(out)) {
+	for _, path := range splitNULPaths(out) {
 		paths[path] = true
 	}
 	return paths, nil
@@ -1619,17 +1677,13 @@ func ActiveConflictFiles(repoDir string) []string {
 
 // detectConflicts returns a list of files with merge conflicts.
 func detectConflicts(repoDir string) []string {
-	cmd := exec.Command("git", "diff", "--name-only", "--diff-filter=U")
+	cmd := exec.Command("git", "diff", "--name-only", "-z", "--diff-filter=U")
 	cmd.Dir = repoDir
 	out, err := cmd.Output()
 	if err != nil {
 		return nil
 	}
-	raw := strings.TrimSpace(string(out))
-	if raw == "" {
-		return nil
-	}
-	return strings.Split(raw, "\n")
+	return splitNULPaths(out)
 }
 
 // AbortMerge aborts an in-progress merge.
