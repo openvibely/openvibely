@@ -156,12 +156,17 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 
 			function setTaskCardMergeBusy(busy) {
 				taskCardMergeInFlight = busy;
+				var modal = document.getElementById('task_card_merge_confirm_modal');
 				var button = document.getElementById('task_card_merge_confirm_button');
 				if (button) button.disabled = busy;
+				if (modal) {
+					modal.querySelectorAll('.ov-modal-close, .modal-action .btn:not(#task_card_merge_confirm_button), .modal-backdrop button').forEach(function(control) {
+						control.disabled = busy;
+					});
+				}
 				var spinner = button && button.querySelector('[data-task-card-merge-spinner]');
 				if (spinner) spinner.classList.toggle('hidden', !busy);
 			}
-
 			function confirmTaskCardMerge() {
 				if (taskCardMergeInFlight || !taskCardMergeRequest || !window.htmx) return;
 				setTaskCardMergeBusy(true);
@@ -192,7 +197,13 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 							if (taskCardMergeInFlight) event.preventDefault();
 						});
 						mergeModal.addEventListener('close', function() {
-							if (taskCardMergeInFlight || !taskCardMergeRequest) return;
+							if (taskCardMergeInFlight) {
+								requestAnimationFrame(function() {
+									if (taskCardMergeInFlight && !mergeModal.open) mergeModal.showModal();
+								});
+								return;
+							}
+							if (!taskCardMergeRequest) return;
 							var taskID = taskCardMergeRequest.invokerTaskID;
 							var invoker = taskCardMergeInvoker;
 							taskCardMergeRequest = null;

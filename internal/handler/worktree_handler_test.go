@@ -41,6 +41,7 @@ func worktreeExecute(e *echo.Echo, req *http.Request) *httptest.ResponseRecorder
 func TestHandler_TaskCardMergeOptionsUseAuthoritativeStateAndProjectOwnership(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
 	h.taskPullRequestRepo = repository.NewTaskPullRequestRepo(db)
+	h.worktreeSvc = service.NewWorktreeService(h.taskRepo, h.projectRepo, nil)
 	ctx := context.Background()
 	repoDir := t.TempDir()
 	run := func(args ...string) string {
@@ -162,7 +163,17 @@ func TestHandler_TaskCardMergeOptionsUseAuthoritativeStateAndProjectOwnership(t 
 	if err := h.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusPending); err != nil {
 		t.Fatal(err)
 	}
-	unlock := h.lockWorktreeMutation(repoDir)
+	leaseEntered := make(chan struct{})
+	releaseLease := make(chan struct{})
+	leaseDone := make(chan error, 1)
+	go func() {
+		leaseDone <- h.worktreeSvc.WithRepositoryMutation(repoDir, func() error {
+			close(leaseEntered)
+			<-releaseLease
+			return nil
+		})
+	}()
+	<-leaseEntered
 	concurrentResult := make(chan *httptest.ResponseRecorder, 1)
 	go func() {
 		req := worktreeFormRequest(http.MethodPost, "/tasks/"+task.ID+"/worktree/merge", url.Values{
@@ -172,15 +183,18 @@ func TestHandler_TaskCardMergeOptionsUseAuthoritativeStateAndProjectOwnership(t 
 	}()
 	select {
 	case got := <-concurrentResult:
-		unlock()
+		close(releaseLease)
 		t.Fatalf("concurrent card mutation bypassed repository lock: %d %s", got.Code, got.Body.String())
 	case <-time.After(100 * time.Millisecond):
 	}
 	if err := h.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusConflict); err != nil {
-		unlock()
+		close(releaseLease)
 		t.Fatal(err)
 	}
-	unlock()
+	close(releaseLease)
+	if err := <-leaseDone; err != nil {
+		t.Fatalf("release repository mutation lease: %v", err)
+	}
 	select {
 	case got := <-concurrentResult:
 		if got.Code != http.StatusConflict {

@@ -18,6 +18,91 @@ import (
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
+func TestWorktreeServiceRepositoryMutationSerializesCanonicalAliasesAcrossInstances(t *testing.T) {
+	repoDir := t.TempDir()
+	aliasRoot := t.TempDir()
+	alias := filepath.Join(aliasRoot, "repo-alias")
+	if err := os.Symlink(repoDir, alias); err != nil {
+		t.Skipf("symlink repository alias: %v", err)
+	}
+
+	first := &WorktreeService{}
+	second := &WorktreeService{}
+	firstEntered := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	firstDone := make(chan error, 1)
+	go func() {
+		firstDone <- first.WithRepositoryMutation(repoDir, func() error {
+			close(firstEntered)
+			<-releaseFirst
+			return nil
+		})
+	}()
+	select {
+	case <-firstEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first repository mutation did not acquire lease")
+	}
+
+	secondDone := make(chan error, 1)
+	go func() {
+		_, err := second.MergeBranch(context.Background(), &models.Task{}, alias, "merge")
+		secondDone <- err
+	}()
+	select {
+	case err := <-secondDone:
+		t.Fatalf("canonical repository alias bypassed mutation serialization: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(releaseFirst)
+	select {
+	case err := <-firstDone:
+		if err != nil {
+			t.Fatalf("first repository mutation: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("first repository mutation did not finish")
+	}
+	select {
+	case err := <-secondDone:
+		if err == nil || !strings.Contains(err.Error(), "worktree branch") {
+			t.Fatalf("aliased production merge returned unexpected result: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("aliased production merge did not resume")
+	}
+}
+
+func TestMergeBranchRejectsQueuedWriterWhenRepositoryHasActiveConflict(t *testing.T) {
+	repoDir := createTestGitRepo(t)
+	runGitTest(t, repoDir, "checkout", "-b", "task/conflicting")
+	if err := os.WriteFile(filepath.Join(repoDir, "initial.txt"), []byte("task\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGitTest(t, repoDir, "add", "initial.txt")
+	runGitTest(t, repoDir, "commit", "-m", "task change")
+	runGitTest(t, repoDir, "checkout", "main")
+	if err := os.WriteFile(filepath.Join(repoDir, "initial.txt"), []byte("target\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGitTest(t, repoDir, "add", "initial.txt")
+	runGitTest(t, repoDir, "commit", "-m", "target change")
+	cmd := exec.Command("git", "merge", "task/conflicting")
+	cmd.Dir = repoDir
+	if err := cmd.Run(); err == nil {
+		t.Fatal("expected fixture merge conflict")
+	}
+
+	ws := &WorktreeService{}
+	result, err := ws.MergeBranch(context.Background(), &models.Task{WorktreeBranch: "task/conflicting", MergeTargetBranch: "main"}, repoDir, "merge")
+	if err == nil || result == nil || !strings.Contains(result.ErrorMessage, "already active") {
+		t.Fatalf("queued merge should reject active conflict, result=%+v err=%v", result, err)
+	}
+	if conflicts := ActiveConflictFiles(repoDir); len(conflicts) == 0 {
+		t.Fatal("queued merge unexpectedly changed active conflict state")
+	}
+}
+
 // createTestGitRepo creates a temporary git repository with an initial commit.
 func createTestGitRepo(t *testing.T) string {
 	t.Helper()

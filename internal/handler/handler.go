@@ -116,7 +116,6 @@ type Handler struct {
 	pendingRemovalHook         func(string)
 	pendingPublicationHook     func(string)
 	githubRuntimeHook          func()
-	worktreeMutationLocks      [64]sync.Mutex
 
 	loginFailuresMu   sync.Mutex
 	loginFailureTimes []time.Time
