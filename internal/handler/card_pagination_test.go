@@ -472,8 +472,9 @@ func TestCardPaginationProductionBrowserLoadsSequentialPagesAndResetsSearch(t *t
     var list = cards();
     var late = document.querySelector('[data-model-id="browser-late"]');
     if (list.length === 1 && late && !document.querySelector('[data-model-id="browser-22"]')) {
-      var end = document.querySelector('[data-card-pagination-end]');
-      if (end && !end.classList.contains('hidden')) return result('pass', 'sequential pages and search reset applied');
+      var root = document.getElementById('models-container');
+      var state = root && root._openVibelyCardPaginationState;
+      if (state && state.hasMore === false) return result('pass', 'sequential pages and search reset applied');
     }
     setTimeout(waitForSearch, 50);
   }
@@ -1305,9 +1306,10 @@ func TestCardPaginationProductionBrowserRejectsStalePagesAndRecoversLiveRefresh(
     var card = document.querySelector('[data-model-id="live-later"]');
     var old = document.querySelector('[data-model-id="retry-result"]');
     if (card && cards().length === 21 && !old) {
-      var end = document.querySelector('[data-card-pagination-end]');
+      var root = document.getElementById('models-container');
+      var state = root && root._openVibelyCardPaginationState;
       var locationStable = window._paginationInitialLocation === window.location.href;
-      if (end && !end.classList.contains('hidden') && locationStable) {
+      if (state && state.hasMore === false && locationStable) {
         return result('pass', 'stale page ignored, retry recovered, and live refresh reset pagination');
       }
     }

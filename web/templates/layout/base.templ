@@ -4108,16 +4108,13 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						function setStatus(state, mode) {
 							if (!isCurrent(state)) return;
 							var status = state.root.querySelector('[data-card-pagination-status]');
-							var cards = cardsFor(state.list, state.root);
 							var loading = status && status.querySelector('[data-card-pagination-loading]');
-							var end = status && status.querySelector('[data-card-pagination-end]');
 							var error = status && status.querySelector('[data-card-pagination-error]');
 							var retry = status && status.querySelector('[data-card-pagination-retry]');
 							var sentinel = status && status.querySelector('[data-card-pagination-sentinel]');
 							setHidden(loading, mode !== 'loading');
 							setHidden(error, mode !== 'error');
 							setHidden(retry, mode !== 'error');
-							setHidden(end, mode !== 'idle' || state.hasMore || cards.length === 0);
 							setHidden(sentinel, !state.hasMore);
 							state.root.setAttribute('aria-busy', mode === 'loading' ? 'true' : 'false');
 							state.list.setAttribute('aria-busy', mode === 'loading' ? 'true' : 'false');
