@@ -150,6 +150,23 @@ func TestSidebar_AutomationsUsesRecognizableOutlineLightningBolt(t *testing.T) {
 	}
 }
 
+func TestSidebar_RoutesTaskBoardUpdatesThroughSharedTaskEvents(t *testing.T) {
+	projects := []models.Project{{ID: "p1", Name: "Test"}}
+
+	var buf bytes.Buffer
+	if err := Sidebar(projects, "p1").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("failed to render Sidebar: %v", err)
+	}
+
+	html := buf.String()
+	if !strings.Contains(html, `'task_board_updated': handleLiveEvent`) {
+		t.Fatal("shared live SSE listener map must subscribe to task_board_updated")
+	}
+	if !strings.Contains(html, "eventType === 'task_board_updated'") {
+		t.Fatal("shared live SSE dispatch must route task_board_updated through task listeners")
+	}
+}
+
 func TestSidebar_DispatchesMixtureProgressToChatAndTaskListeners(t *testing.T) {
 	projects := []models.Project{{ID: "p1", Name: "Test"}}
 

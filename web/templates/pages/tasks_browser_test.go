@@ -291,6 +291,7 @@ func TestCapacityQueuedAutomationAndTerminalTasksAreVisibleInChrome(t *testing.T
 	completedAt := time.Now().UTC()
 	var stateMu sync.Mutex
 	stage := 0
+	liveEvents := make(chan string, 8)
 	boardTasks := func() []models.Task {
 		stateMu.Lock()
 		defer stateMu.Unlock()
@@ -329,10 +330,9 @@ window.addEventListener('DOMContentLoaded', function() {
     if (document.getElementById('task-ordinary-scheduled')) fail('ordinary scheduled task was incorrectly projected onto the board');
 
     await fetch('/claim', {method:'POST'});
-    window.dispatchEvent(new CustomEvent('sse-task-event', {detail:{type:'task_board_updated', project_id:'foreign-project', task_id:'automation-capacity'}}));
     await new Promise(function(resolve) { setTimeout(resolve, 700); });
     if (document.getElementById('task-automation-capacity')) fail('foreign-project board event refreshed the selected project');
-    window.dispatchEvent(new CustomEvent('sse-task-event', {detail:{type:'task_board_updated', project_id:'` + project.ID + `', task_id:'automation-capacity'}}));
+    await fetch('/publish-claim', {method:'POST'});
     await waitFor(function() { return document.getElementById('task-automation-capacity'); }, 'capacity-queued live projection');
     var pending = document.querySelector('.task-drop-zone[data-status="pending"][data-category="active"]');
     var queued = document.getElementById('task-automation-capacity');
@@ -340,7 +340,6 @@ window.addEventListener('DOMContentLoaded', function() {
     if (queued.dataset.taskCategory !== 'scheduled' || queued.dataset.taskStatus !== 'pending') fail('queued Automation card lost its persisted category/status');
 
     await fetch('/fail', {method:'POST'});
-    window.dispatchEvent(new CustomEvent('sse-task-event', {detail:{type:'task_board_updated', project_id:'` + project.ID + `', task_id:'automation-capacity'}}));
     await waitFor(function() {
       return !document.getElementById('task-automation-capacity') && document.getElementById('task-terminal-failed');
     }, 'terminal failed live projection');
@@ -364,12 +363,44 @@ window.addEventListener('DOMContentLoaded', function() {
 			stateMu.Lock()
 			stage = 1
 			stateMu.Unlock()
+			liveEvents <- `event: task_board_updated
+data: {"type":"task_board_updated","project_id":"foreign-project","task_id":"automation-capacity"}
+
+`
+			w.WriteHeader(http.StatusNoContent)
+		case "/publish-claim":
+			liveEvents <- `event: task_board_updated
+data: {"type":"task_board_updated","project_id":"` + project.ID + `","task_id":"automation-capacity"}
+
+`
 			w.WriteHeader(http.StatusNoContent)
 		case "/fail":
 			stateMu.Lock()
 			stage = 2
 			stateMu.Unlock()
+			liveEvents <- `event: task_board_updated
+data: {"type":"task_board_updated","project_id":"` + project.ID + `","task_id":"automation-capacity"}
+
+`
 			w.WriteHeader(http.StatusNoContent)
+		case "/events/live":
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.Header().Set("Cache-Control", "no-cache")
+			flusher, ok := w.(http.Flusher)
+			if !ok {
+				t.Fatal("test response writer does not support SSE flushing")
+			}
+			w.WriteHeader(http.StatusOK)
+			flusher.Flush()
+			for {
+				select {
+				case event := <-liveEvents:
+					_, _ = w.Write([]byte(event))
+					flusher.Flush()
+				case <-r.Context().Done():
+					return
+				}
+			}
 		case "/tasks":
 			var out bytes.Buffer
 			if err := Tasks([]models.Project{project}, &project, boardTasks(), nil, nil, "created_desc", "completed_desc").Render(context.Background(), &out); err != nil {

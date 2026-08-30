@@ -406,6 +406,150 @@ func TestAutomationRepoClaimsPublishBoardProjectionEventWithoutTaskColumnChange(
 	}
 }
 
+func TestAutomationRepoFailedCompletedCustomTaskCanBeClaimedAgain(t *testing.T) {
+	for _, trigger := range []string{"scheduled", "manual"} {
+		t.Run(trigger, func(t *testing.T) {
+			db := testutil.NewTestDB(t)
+			ctx := context.Background()
+			fixture := seedAutomationLiveCountsDefinition(t, db, map[string]string{"trigger": "trigger"})
+			repo := NewAutomationRepo(db)
+			taskRepo := NewTaskRepo(db, nil)
+			task := createRuntimeScheduledTask(t, ctx, taskRepo, fixture.ProjectID, "Retry "+trigger+" failed Automation")
+			now := time.Now().UTC()
+			schedule := createRuntimeAutomationSchedule(t, ctx, db, fixture, task.ID, fixture.Nodes["trigger"], now.Add(-time.Minute))
+			if _, err := db.ExecContext(ctx, `UPDATE tasks SET status = 'failed', category = 'completed', completed_at = ? WHERE id = ?`, now, task.ID); err != nil {
+				t.Fatalf("seed terminal task: %v", err)
+			}
+
+			var dispatch *models.AutomationDispatch
+			var err error
+			if trigger == "scheduled" {
+				_, dispatch, err = repo.ClaimScheduledOccurrence(ctx, schedule, now, schedule.ComputeNextRun(now))
+			} else {
+				var dispatches []models.AutomationDispatch
+				_, dispatches, err = repo.ClaimManualAutomationRun(ctx, fixture.ProjectID, fixture.AutomationID, now)
+				if len(dispatches) == 1 {
+					dispatch = &dispatches[0]
+				}
+			}
+			if err != nil || dispatch == nil {
+				t.Fatalf("claim failed/completed task = %#v, %v", dispatch, err)
+			}
+			stored, err := taskRepo.GetByID(ctx, task.ID)
+			if err != nil {
+				t.Fatalf("load readmitted task: %v", err)
+			}
+			var reservations int
+			if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_task_run_reservations WHERE dispatch_id = ?`, dispatch.ID).Scan(&reservations); err != nil {
+				t.Fatalf("load readmitted reservation: %v", err)
+			}
+			if stored == nil || stored.Status != models.StatusPending || stored.Category != models.CategoryScheduled || stored.CompletedAt != nil || reservations != 1 {
+				t.Fatalf("readmitted task = %#v reservations=%d, want pending/scheduled without completion and one reservation", stored, reservations)
+			}
+		})
+	}
+}
+
+func TestAutomationRepoTerminalExecutionBearingDispatchFailureConvergesAndAllowsLaterOccurrence(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	fixture := seedAutomationLiveCountsDefinition(t, db, map[string]string{"trigger": "trigger"})
+	repo := NewAutomationRepo(db)
+	taskRepo := NewTaskRepo(db, nil)
+	now := time.Now().UTC().Truncate(time.Second)
+	task := createRuntimeScheduledTask(t, ctx, taskRepo, fixture.ProjectID, "Recovered prepared dispatch failure")
+	schedule := createRuntimeAutomationSchedule(t, ctx, db, fixture, task.ID, fixture.Nodes["trigger"], now.Add(-time.Minute))
+	schedule.RunAt = now.Add(-time.Hour)
+	schedule.RepeatType = models.RepeatHours
+	schedule.RepeatInterval = 1
+	if err := NewScheduleRepo(db).Update(ctx, &schedule); err != nil {
+		t.Fatalf("make dispatch schedule repeating: %v", err)
+	}
+
+	_, dispatch, err := repo.ClaimScheduledOccurrence(ctx, schedule, now, schedule.ComputeNextRun(now))
+	if err != nil {
+		t.Fatalf("claim first occurrence: %v", err)
+	}
+	leased, err := repo.LeaseNextDispatch(ctx, "prepared-failure-owner", now.Add(time.Second), time.Minute)
+	if err != nil || leased == nil || leased.ID != dispatch.ID {
+		t.Fatalf("lease first dispatch = %#v, %v", leased, err)
+	}
+	execution, err := taskRepo.ClaimAutomationDispatch(ctx, dispatch.ID, "prepared-failure-owner")
+	if err != nil {
+		t.Fatalf("claim prepared execution: %v", err)
+	}
+	failedAt := now.Add(2 * time.Second)
+	if err := repo.FailDispatch(ctx, dispatch.ID, "prepared-failure-owner", "prepared recovery exhausted", 1, failedAt); err != nil {
+		t.Fatalf("terminalize prepared dispatch: %v", err)
+	}
+
+	var taskStatus, taskCategory, executionStatus, executionError, dispatchStatus, invocationStatus, activityStatus string
+	var taskCompletedAt, executionCompletedAt, invocationCompletedAt, activityCompletedAt sql.NullTime
+	var reservations int
+	if err := db.QueryRowContext(ctx, `SELECT status, category, completed_at FROM tasks WHERE id = ?`, task.ID).
+		Scan(&taskStatus, &taskCategory, &taskCompletedAt); err != nil {
+		t.Fatalf("load terminal task: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT status, error_message, completed_at FROM executions WHERE id = ?`, execution.ID).
+		Scan(&executionStatus, &executionError, &executionCompletedAt); err != nil {
+		t.Fatalf("load terminal execution: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT status FROM automation_dispatch_outbox WHERE id = ?`, dispatch.ID).Scan(&dispatchStatus); err != nil {
+		t.Fatalf("load terminal dispatch: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT status, completed_at FROM automation_invocations WHERE id = ?`, dispatch.InvocationID).
+		Scan(&invocationStatus, &invocationCompletedAt); err != nil {
+		t.Fatalf("load terminal invocation: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT status, completed_at FROM automation_activities WHERE invocation_id = ? AND activity_key = ?`,
+		dispatch.InvocationID, "dispatch:"+dispatch.ID+":execute").Scan(&activityStatus, &activityCompletedAt); err != nil {
+		t.Fatalf("load terminal activity: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_task_run_reservations WHERE dispatch_id = ?`, dispatch.ID).Scan(&reservations); err != nil {
+		t.Fatalf("load terminal reservation count: %v", err)
+	}
+	if taskStatus != string(models.StatusFailed) || taskCategory != string(models.CategoryCompleted) || !taskCompletedAt.Valid ||
+		executionStatus != string(models.ExecFailed) || executionError != "prepared recovery exhausted" || !executionCompletedAt.Valid ||
+		dispatchStatus != "failed" || invocationStatus != string(models.AutomationInvocationFailed) || !invocationCompletedAt.Valid ||
+		activityStatus != string(models.AutomationActivityFailed) || !activityCompletedAt.Valid || reservations != 0 {
+		t.Fatalf("terminal prepared state task=%q/%q completed=%v execution=%q/%q completed=%v dispatch=%q invocation=%q completed=%v activity=%q completed=%v reservations=%d",
+			taskStatus, taskCategory, taskCompletedAt.Valid, executionStatus, executionError, executionCompletedAt.Valid,
+			dispatchStatus, invocationStatus, invocationCompletedAt.Valid, activityStatus, activityCompletedAt.Valid, reservations)
+	}
+	recoverable, err := repo.ListRecoverablePreparedDispatches(ctx, 10)
+	if err != nil || len(recoverable) != 0 {
+		t.Fatalf("terminal dispatch remained recoverable = %#v, %v", recoverable, err)
+	}
+
+	storedSchedule, err := NewScheduleRepo(db).GetByID(ctx, schedule.ID)
+	if err != nil || storedSchedule == nil || storedSchedule.NextRun == nil {
+		t.Fatalf("load later schedule = %#v, %v", storedSchedule, err)
+	}
+	laterDue := storedSchedule.NextRun.UTC()
+	_, laterDispatch, err := repo.ClaimScheduledOccurrence(ctx, *storedSchedule, laterDue, storedSchedule.ComputeNextRun(laterDue))
+	if err != nil || laterDispatch == nil || laterDispatch.ID == dispatch.ID {
+		t.Fatalf("claim later occurrence = %#v, %v", laterDispatch, err)
+	}
+	laterLease, err := repo.LeaseNextDispatch(ctx, "later-owner", laterDue.Add(time.Second), time.Minute)
+	if err != nil || laterLease == nil || laterLease.ID != laterDispatch.ID {
+		t.Fatalf("lease later dispatch = %#v, %v", laterLease, err)
+	}
+	if err := repo.MarkDispatchQueued(ctx, laterDispatch.ID, "later-owner"); err != nil {
+		t.Fatalf("queue later dispatch: %v", err)
+	}
+	recoverable, err = repo.ListRecoverablePreparedDispatches(ctx, 10)
+	if err != nil || len(recoverable) != 1 || recoverable[0].ID != laterDispatch.ID {
+		t.Fatalf("later dispatch recovery candidates = %#v, %v", recoverable, err)
+	}
+	laterExecution, err := taskRepo.ClaimQueuedAutomationDispatch(ctx, laterDispatch.ID)
+	if err != nil {
+		t.Fatalf("claim recovered later dispatch: %v", err)
+	}
+	if err := repo.CompleteDispatch(ctx, laterDispatch.ID, laterExecution.Execution.ID, models.ExecCompleted, "later occurrence completed"); err != nil {
+		t.Fatalf("complete later occurrence: %v", err)
+	}
+}
+
 func TestAutomationRepoDispatchRetryAndAbandonQueued(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
@@ -609,6 +753,10 @@ func TestAutomationRepoTerminalDispatchFailurePreservesCancelledTask(t *testing.
 	if err != nil || leased == nil || leased.ID != dispatch.ID {
 		t.Fatalf("lease dispatch = %#v, %v", leased, err)
 	}
+	execution, err := taskRepo.ClaimAutomationDispatch(ctx, dispatch.ID, "cancel-race-owner")
+	if err != nil {
+		t.Fatalf("claim execution before cancellation: %v", err)
+	}
 	if _, err := db.ExecContext(ctx, `UPDATE tasks SET status = 'cancelled', category = 'backlog', updated_at = CURRENT_TIMESTAMP WHERE id = ?`, task.ID); err != nil {
 		t.Fatalf("cancel task: %v", err)
 	}
@@ -616,15 +764,25 @@ func TestAutomationRepoTerminalDispatchFailurePreservesCancelledTask(t *testing.
 		t.Fatalf("terminalize cancelled dispatch: %v", err)
 	}
 
-	var taskStatus, taskCategory, invocationStatus string
+	var taskStatus, taskCategory, executionStatus, invocationStatus, activityStatus string
 	if err := db.QueryRowContext(ctx, `SELECT status, category FROM tasks WHERE id = ?`, task.ID).Scan(&taskStatus, &taskCategory); err != nil {
 		t.Fatalf("load cancelled task: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT status FROM executions WHERE id = ?`, execution.ID).Scan(&executionStatus); err != nil {
+		t.Fatalf("load cancelled execution: %v", err)
 	}
 	if err := db.QueryRowContext(ctx, `SELECT status FROM automation_invocations WHERE id = ?`, dispatch.InvocationID).Scan(&invocationStatus); err != nil {
 		t.Fatalf("load cancelled invocation: %v", err)
 	}
-	if taskStatus != string(models.StatusCancelled) || taskCategory != string(models.CategoryBacklog) || invocationStatus != string(models.AutomationInvocationCancelled) {
-		t.Fatalf("cancel race state task=%q/%q invocation=%q", taskStatus, taskCategory, invocationStatus)
+	if err := db.QueryRowContext(ctx, `SELECT status FROM automation_activities WHERE invocation_id = ? AND activity_key = ?`,
+		dispatch.InvocationID, "dispatch:"+dispatch.ID+":execute").Scan(&activityStatus); err != nil {
+		t.Fatalf("load cancelled activity: %v", err)
+	}
+	if taskStatus != string(models.StatusCancelled) || taskCategory != string(models.CategoryBacklog) ||
+		executionStatus != string(models.ExecCancelled) || invocationStatus != string(models.AutomationInvocationCancelled) ||
+		activityStatus != string(models.AutomationActivityCancelled) {
+		t.Fatalf("cancel race state task=%q/%q execution=%q invocation=%q activity=%q",
+			taskStatus, taskCategory, executionStatus, invocationStatus, activityStatus)
 	}
 }
 
