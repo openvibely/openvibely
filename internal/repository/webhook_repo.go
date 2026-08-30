@@ -5,11 +5,15 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/openvibely/openvibely/internal/models"
 )
+
+// ErrWebhookNotFound indicates that a webhook mutation matched no endpoint.
+var ErrWebhookNotFound = errors.New("webhook not found")
 
 // WebhookRepo manages webhook endpoint CRUD and agent assignments.
 type WebhookRepo struct {
@@ -207,9 +211,16 @@ func (r *WebhookRepo) Update(ctx context.Context, w *models.WebhookEndpoint) err
 }
 
 func (r *WebhookRepo) Delete(ctx context.Context, id string) error {
-	_, err := execBoundSQLite(ctx, r.db, `DELETE FROM webhook_endpoints WHERE id = ?`, id)
+	result, err := execBoundSQLite(ctx, r.db, `DELETE FROM webhook_endpoints WHERE id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("deleting webhook endpoint: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("checking deleted webhook endpoint: %w", err)
+	}
+	if affected == 0 {
+		return ErrWebhookNotFound
 	}
 	return nil
 }
@@ -220,11 +231,18 @@ func (r *WebhookRepo) RotateSecret(ctx context.Context, id string) (string, erro
 	if err != nil {
 		return "", fmt.Errorf("generating new secret: %w", err)
 	}
-	_, err = execBoundSQLite(ctx, r.db,
+	result, err := execBoundSQLite(ctx, r.db,
 		`UPDATE webhook_endpoints SET secret = ?, updated_at = datetime('now') WHERE id = ?`,
 		newSecret, id)
 	if err != nil {
 		return "", fmt.Errorf("rotating webhook secret: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return "", fmt.Errorf("checking rotated webhook endpoint: %w", err)
+	}
+	if affected == 0 {
+		return "", ErrWebhookNotFound
 	}
 	return newSecret, nil
 }

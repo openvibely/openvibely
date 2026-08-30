@@ -453,6 +453,9 @@ func (h *Handler) HandleWebhookDelete(c echo.Context) error {
 
 	id := c.Param("id")
 	if err := h.webhookRepo.Delete(c.Request().Context(), id); err != nil {
+		if errors.Is(err, repository.ErrWebhookNotFound) {
+			return echo.NewHTTPError(http.StatusNotFound, "webhook not found")
+		}
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to delete webhook")
 	}
 
@@ -470,6 +473,9 @@ func (h *Handler) HandleWebhookRotateSecret(c echo.Context) error {
 	id := c.Param("id")
 	newSecret, err := h.webhookRepo.RotateSecret(c.Request().Context(), id)
 	if err != nil {
+		if errors.Is(err, repository.ErrWebhookNotFound) {
+			return echo.NewHTTPError(http.StatusNotFound, "webhook not found")
+		}
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to rotate secret")
 	}
 

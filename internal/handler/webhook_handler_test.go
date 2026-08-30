@@ -1161,9 +1161,75 @@ func TestWebhookCRUD_RotateSecret(t *testing.T) {
 		t.Fatalf("expected 200, got %d; body=%s", rec.Code, rec.Body.String())
 	}
 
+	var response map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode rotate response: %v", err)
+	}
+	if response["secret"] == "" {
+		t.Fatalf("expected rotate response to include a secret: %s", rec.Body.String())
+	}
+
 	got, _ := wtc.webhookRepo.GetByID(context.Background(), endpoint.ID)
+	if got.Secret != response["secret"] {
+		t.Errorf("persisted secret = %q, want response secret %q", got.Secret, response["secret"])
+	}
 	if got.Secret == origSecret {
 		t.Error("expected different secret after rotation")
+	}
+}
+
+func TestWebhookCRUD_MissingMutationsReturnNotFound(t *testing.T) {
+	wtc := newWebhookTestContext(t)
+	project := wtc.CreateProject().WithName("WH Missing Mutations").Build()
+	endpoint := wtc.createEndpoint(t, project.ID, "Stale Endpoint", true)
+	if err := wtc.webhookRepo.Delete(context.Background(), endpoint.ID); err != nil {
+		t.Fatalf("delete endpoint before stale requests: %v", err)
+	}
+
+	tests := []struct {
+		name   string
+		method string
+		id     string
+		htmx   bool
+		rotate bool
+	}{
+		{name: "delete fabricated id", method: http.MethodDelete, id: "missing-webhook"},
+		{name: "rotate fabricated id", method: http.MethodPost, id: "missing-webhook", rotate: true},
+		{name: "delete stale id via htmx", method: http.MethodDelete, id: endpoint.ID, htmx: true},
+		{name: "rotate stale id via htmx", method: http.MethodPost, id: endpoint.ID, htmx: true, rotate: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			path := "/channels/webhooks/" + test.id
+			if test.rotate {
+				path += "/rotate-secret"
+			}
+			req := httptest.NewRequest(test.method, path, nil)
+			if test.htmx {
+				req.Header.Set("HX-Request", "true")
+			}
+			rec := httptest.NewRecorder()
+			wtc.echo.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusNotFound {
+				t.Fatalf("expected 404, got %d; body=%s", rec.Code, rec.Body.String())
+			}
+			if trigger := rec.Header().Get("HX-Trigger"); trigger != "" {
+				t.Fatalf("expected no channels refresh trigger, got %q", trigger)
+			}
+			if strings.Contains(rec.Body.String(), `"secret"`) {
+				t.Fatalf("missing webhook response exposed a secret: %s", rec.Body.String())
+			}
+		})
+	}
+
+	got, err := wtc.webhookRepo.GetByID(context.Background(), endpoint.ID)
+	if err != nil {
+		t.Fatalf("get stale endpoint: %v", err)
+	}
+	if got != nil {
+		t.Fatalf("stale endpoint was recreated or changed: %#v", got)
 	}
 }
 
