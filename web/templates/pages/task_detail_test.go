@@ -284,6 +284,37 @@ func TestTaskDetailContent_FileChangesListenersRebindAndCleanup(t *testing.T) {
 	}
 }
 
+func TestTaskDetailContent_LifecycleTabFillsRemainingHeight(t *testing.T) {
+	task := &models.Task{
+		ID:        "task-lifecycle-layout",
+		Title:     "Lifecycle layout",
+		ProjectID: "project-1",
+		Status:    models.StatusCompleted,
+		Category:  models.CategoryCompleted,
+	}
+
+	var buf bytes.Buffer
+	if err := TaskDetailContent(task, nil, nil, nil, nil, nil, nil, "lifecycle", nil).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render failed: %v", err)
+	}
+
+	output := buf.String()
+	for _, required := range []string{
+		`id="tab-lifecycle" class="task-tab-panel flex-1 flex flex-col min-h-0"`,
+		`class="card bg-base-100 shadow-sm border border-base-300 flex-1 min-h-0"`,
+		`class="card-body flex flex-col min-h-0"`,
+		`id="lifecycle-activity-scroll"`,
+		`class="flex-1 min-h-0 overflow-y-auto pr-1"`,
+	} {
+		if !strings.Contains(output, required) {
+			t.Fatalf("expected viewport-filling lifecycle layout to contain %q", required)
+		}
+	}
+	if strings.Contains(output, `max-height: 32rem`) || strings.Contains(output, `max-h-128`) {
+		t.Fatal("lifecycle scrollport must not retain the fixed 32rem height cap")
+	}
+}
+
 func TestTaskDetailContent_DetailsTabRendersScrollableMatchedSectionCards(t *testing.T) {
 	task := &models.Task{
 		ID:                "task-layout-1",

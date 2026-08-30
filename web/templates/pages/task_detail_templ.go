@@ -1703,7 +1703,7 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var90 = []any{"task-tab-panel flex-shrink-0", templ.KV("hidden", defaultTab != "lifecycle")}
+		var templ_7745c5c3_Var90 = []any{"task-tab-panel flex-1 flex flex-col min-h-0", templ.KV("hidden", defaultTab != "lifecycle")}
 		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var90...)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
@@ -1721,7 +1721,7 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 177, "\"><div class=\"card bg-base-100 shadow-sm border border-base-300\"><div class=\"card-body\"><div class=\"flex items-center justify-between mb-3\"><h4 class=\"text-lg font-bold\">Lifecycle Activity</h4>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 177, "\"><div class=\"card bg-base-100 shadow-sm border border-base-300 flex-1 min-h-0\"><div class=\"card-body flex flex-col min-h-0\"><div class=\"flex items-center justify-between mb-3 flex-shrink-0\"><h4 class=\"text-lg font-bold\">Lifecycle Activity</h4>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1738,7 +1738,7 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 179, "\">Refresh</button></div><p class=\"text-sm opacity-70 mb-3\">Lifecycle hook invocations recorded for this task. Includes routing, before-run preparation, and after-complete learning.</p><div id=\"lifecycle-activity-scroll\" data-task-id=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 179, "\">Refresh</button></div><p class=\"text-sm opacity-70 mb-3 flex-shrink-0\">Lifecycle hook invocations recorded for this task. Includes routing, before-run preparation, and after-complete learning.</p><div id=\"lifecycle-activity-scroll\" data-task-id=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1764,7 +1764,7 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 181, "\" data-lifecycle-scrollport=\"true\" tabindex=\"0\" aria-label=\"Lifecycle activity\" class=\"max-h-128 overflow-y-auto pr-1\" style=\"max-height: 32rem;\"><div id=\"lifecycle-activity-list\" data-task-id=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 181, "\" data-lifecycle-scrollport=\"true\" tabindex=\"0\" aria-label=\"Lifecycle activity\" class=\"flex-1 min-h-0 overflow-y-auto pr-1\"><div id=\"lifecycle-activity-list\" data-task-id=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

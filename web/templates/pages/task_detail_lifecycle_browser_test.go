@@ -2311,3 +2311,122 @@ window.addEventListener('DOMContentLoaded', function() {
 		t.Fatalf("retained finalization requests did not preserve project scope and bounded page size: project=%v limit=%v target_project=%v", gotProject, gotLimit, gotTargetProject)
 	}
 }
+
+func TestTaskDetailLifecycleFillsRemainingHeightInChrome(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	task := &models.Task{
+		ID:        "task-lifecycle-fill-browser",
+		ProjectID: "project-lifecycle-fill-browser",
+		Title:     "Lifecycle fill browser fixture",
+		Status:    models.StatusCompleted,
+		Category:  models.CategoryCompleted,
+	}
+	var fragment bytes.Buffer
+	if err := TaskDetailContent(task, nil, nil, nil, nil, nil, nil, "lifecycle", nil).Render(context.Background(), &fragment); err != nil {
+		t.Fatalf("render TaskDetailContent: %v", err)
+	}
+
+	items := make([]map[string]any, 0, 20)
+	for hour := 19; hour >= 0; hour-- {
+		items = append(items, map[string]any{
+			"id":              "event-" + strconv.Itoa(hour),
+			"when":            "after_complete",
+			"skill_key":       "hook-" + strconv.Itoa(hour),
+			"status":          "completed",
+			"output_contract": "activity_summary",
+			"summary":         "summary for event " + strconv.Itoa(hour),
+			"started_at":      time.Date(2026, time.January, 1, hour, 0, 0, 0, time.UTC).Format(time.RFC3339),
+		})
+	}
+
+	page := ""
+	browserResult := make(chan string, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/browser-result":
+			select {
+			case browserResult <- r.URL.Query().Get("status") + ":" + r.URL.Query().Get("message"):
+			default:
+			}
+			w.WriteHeader(http.StatusNoContent)
+		case "/tasks/task-lifecycle-fill-browser":
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(page))
+		case "/api/tasks/task-lifecycle-fill-browser/lifecycle-executions":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"items": items, "has_more": false, "next_cursor": ""})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	runner := `<script>
+window.addEventListener('DOMContentLoaded', function() {
+  function waitFor(check, label) {
+    var started = performance.now();
+    return new Promise(function(resolve, reject) {
+      function poll() {
+        try { if (check()) { resolve(); return; } } catch (error) { reject(error); return; }
+        if (performance.now() - started > 6000) { reject(new Error('timed out waiting for ' + label)); return; }
+        setTimeout(poll, 10);
+      }
+      poll();
+    });
+  }
+  function report(status, message) {
+    return fetch('/browser-result?status=' + encodeURIComponent(status) + '&message=' + encodeURIComponent(message || ''), {method:'POST'}).catch(function() {});
+  }
+  async function run() {
+    await waitFor(function() { return document.querySelectorAll('#lifecycle-activity-list [data-lifecycle-execution-id]').length === 20; }, 'lifecycle rows');
+    await new Promise(function(resolve) { requestAnimationFrame(function() { requestAnimationFrame(resolve); }); });
+    var root = document.getElementById('task-detail-content');
+    var panel = document.getElementById('tab-lifecycle');
+    var card = panel.querySelector('.card');
+    var port = document.getElementById('lifecycle-activity-scroll');
+    var rootRect = root.getBoundingClientRect();
+    var cardRect = card.getBoundingClientRect();
+    if (Math.abs(cardRect.bottom - rootRect.bottom) > 2) throw new Error('lifecycle card does not fill remaining height: card=' + cardRect.bottom + ' root=' + rootRect.bottom);
+    if (port.clientHeight < 500) throw new Error('lifecycle scrollport is unexpectedly short: ' + port.clientHeight);
+    if (port.scrollHeight <= port.clientHeight) throw new Error('lifecycle rows do not overflow their internal scrollport');
+    if (root.scrollHeight > root.clientHeight + 2) throw new Error('lifecycle rows escaped into page-level overflow');
+    if (getComputedStyle(port).overflowY !== 'auto') throw new Error('lifecycle activity is not the vertical scroll owner');
+    await report('pass', '');
+  }
+  run().catch(function(error) { report('fail', String(error && error.stack || error)); });
+});
+</script>`
+	page = "<!doctype html><html><head><meta charset=\"utf-8\"><style>html,body{margin:0;padding:0;}#task-detail-content{height:900px;display:flex;flex-direction:column;box-sizing:border-box;}.flex{display:flex}.flex-col{flex-direction:column}.flex-1{flex:1 1 0%}.flex-shrink-0{flex-shrink:0}.min-h-0{min-height:0}.hidden{display:none!important}.card{display:flex;flex-direction:column}.card-body{display:flex;flex:1 1 auto;flex-direction:column;min-height:0;padding:32px;box-sizing:border-box}.mb-6{margin-bottom:24px}.mb-3{margin-bottom:12px}#lifecycle-activity-scroll{overflow-y:auto}.space-y-2>[data-lifecycle-execution-id]{min-height:80px;margin-bottom:8px;box-sizing:border-box}</style></head><body>" + fragment.String() + runner + "</body></html>"
+
+	stderrPath := filepath.Join(t.TempDir(), "task-detail-lifecycle-fill.stderr")
+	stderrFile, err := os.Create(stderrPath)
+	if err != nil {
+		t.Fatalf("create Chrome stderr: %v", err)
+	}
+	defer stderrFile.Close()
+	cmd := exec.Command(chrome,
+		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
+		"--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling",
+		"--no-first-run", "--no-default-browser-check", "--user-data-dir="+filepath.Join(t.TempDir(), "task-detail-lifecycle-fill-profile"),
+		server.URL+"/tasks/task-lifecycle-fill-browser",
+	)
+	cmd.Stderr = stderrFile
+	if err := startBrowserProcess(cmd); err != nil {
+		t.Fatalf("start Chrome lifecycle fill fixture: %v", err)
+	}
+
+	var outcome string
+	select {
+	case outcome = <-browserResult:
+	case <-time.After(30 * time.Second):
+		outcome = "fail: timed out waiting for lifecycle browser result"
+	}
+	stopBrowserProcess(cmd)
+	if outcome != "pass:" {
+		stderr, _ := os.ReadFile(stderrPath)
+		if len(stderr) > 8000 {
+			stderr = stderr[len(stderr)-8000:]
+		}
+		t.Fatalf("Task Detail Lifecycle fill browser regression failed: %s\nChrome stderr tail:\n%s", outcome, stderr)
+	}
+}

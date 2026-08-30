@@ -917,15 +917,15 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 		</div>
 		<!-- End Tab: Attachments -->
 			<!-- Tab: Lifecycle (runbook §Rollout step 17) -->
-			<div id="tab-lifecycle" class={ "task-tab-panel flex-shrink-0", templ.KV("hidden", defaultTab != "lifecycle") }>
-				<div class="card bg-base-100 shadow-sm border border-base-300">
-					<div class="card-body">
-						<div class="flex items-center justify-between mb-3">
+			<div id="tab-lifecycle" class={ "task-tab-panel flex-1 flex flex-col min-h-0", templ.KV("hidden", defaultTab != "lifecycle") }>
+				<div class="card bg-base-100 shadow-sm border border-base-300 flex-1 min-h-0">
+					<div class="card-body flex flex-col min-h-0">
+						<div class="flex items-center justify-between mb-3 flex-shrink-0">
 							<h4 class="text-lg font-bold">Lifecycle Activity</h4>
 							<button type="button" class="btn btn-ghost btn-xs" onclick={ templ.ComponentScript{Call: "refreshLifecycleActivity('" + task.ID + "', '" + task.ProjectID + "')"} }>Refresh</button>
 						</div>
-						<p class="text-sm opacity-70 mb-3">Lifecycle hook invocations recorded for this task. Includes routing, before-run preparation, and after-complete learning.</p>
-						<div id="lifecycle-activity-scroll" data-task-id={ task.ID } data-project-id={ task.ProjectID } data-lifecycle-scrollport="true" tabindex="0" aria-label="Lifecycle activity" class="max-h-128 overflow-y-auto pr-1" style="max-height: 32rem;">
+						<p class="text-sm opacity-70 mb-3 flex-shrink-0">Lifecycle hook invocations recorded for this task. Includes routing, before-run preparation, and after-complete learning.</p>
+						<div id="lifecycle-activity-scroll" data-task-id={ task.ID } data-project-id={ task.ProjectID } data-lifecycle-scrollport="true" tabindex="0" aria-label="Lifecycle activity" class="flex-1 min-h-0 overflow-y-auto pr-1">
 							<div id="lifecycle-activity-list" data-task-id={ task.ID } data-project-id={ task.ProjectID } class="space-y-2">
 								<p class="text-sm opacity-50">Loading lifecycle activity...</p>
 							</div>
