@@ -1,0 +1,118 @@
+package components
+
+import (
+	"fmt"
+
+	"github.com/openvibely/openvibely/internal/models"
+)
+
+// TaskWorktreeMergeActionDescriptor is the shared identity for a local task
+// worktree action. Surface templates provide only their presentation and
+// request context.
+type TaskWorktreeMergeActionDescriptor struct {
+	MergeType                 string
+	Label                     string
+	Endpoint                  string
+	IncludeTarget             bool
+	RequiresRebaseEligibility bool
+	IncludeMergeType          bool
+	IndicatorSuffix           string
+}
+
+// TaskWorktreeMergeActions returns the supported local task worktree actions
+// in their display order.
+func TaskWorktreeMergeActions() []TaskWorktreeMergeActionDescriptor {
+	return []TaskWorktreeMergeActionDescriptor{
+		{MergeType: "merge", Label: "Merge commit", Endpoint: "merge", IncludeMergeType: true},
+		{MergeType: "ff", Label: "Fast-forward only", Endpoint: "merge", IncludeMergeType: true, IndicatorSuffix: "-ff"},
+		{MergeType: "rebase", Label: "Rebase", Endpoint: "rebase", IncludeTarget: true, RequiresRebaseEligibility: true},
+		{MergeType: "squash", Label: "Squash merge", Endpoint: "merge", IncludeMergeType: true, IndicatorSuffix: "-squash"},
+	}
+}
+
+func (a TaskWorktreeMergeActionDescriptor) DisplayLabel(target string) string {
+	if a.IncludeTarget {
+		return fmt.Sprintf("%s onto %s", a.Label, target)
+	}
+	return a.Label
+}
+
+// TaskWorktreeMergeTarget returns the target branch text shared by local
+// task-worktree action labels and surrounding merge controls.
+func TaskWorktreeMergeTarget(task *models.Task) string {
+	if task != nil && task.MergeTargetBranch != "" {
+		return task.MergeTargetBranch
+	}
+	return "main"
+}
+
+func taskWorktreeMergeActionValues(action TaskWorktreeMergeActionDescriptor, mergeSource string) string {
+	if mergeSource == "" {
+		return fmt.Sprintf(`{"merge_type": "%s"}`, action.MergeType)
+	}
+	return fmt.Sprintf(`{"merge_type": "%s", "merge_source": "%s"}`, action.MergeType, mergeSource)
+}
+
+func taskWorktreeMergeIndicatorID(action TaskWorktreeMergeActionDescriptor, surface string) string {
+	prefix := "merge"
+	if action.IncludeTarget {
+		prefix = "rebase"
+	}
+	if surface == "changes" {
+		prefix += "-changes"
+	}
+	return prefix + "-indicator" + action.IndicatorSuffix
+}
+
+// TaskCardWorktreeMergeAction renders one card action from the shared local
+// action descriptor. Card confirmation and board request behavior remain
+// owned by the Tasks page script.
+templ TaskCardWorktreeMergeAction(task *models.Task, projectID string, action TaskWorktreeMergeActionDescriptor) {
+	<li>
+		<button
+			type="button"
+			class="text-sm min-h-11"
+			data-task-card-merge-action
+			data-task-id={ task.ID }
+			data-project-id={ projectID }
+			data-task-title={ task.Title }
+			data-target-branch={ TaskWorktreeMergeTarget(task) }
+			data-merge-type={ action.MergeType }
+			data-merge-label={ action.Label }
+			data-merge-endpoint={ action.Endpoint }
+			onclick="openTaskCardMergeConfirm(this)"
+		>
+			{ action.DisplayLabel(TaskWorktreeMergeTarget(task)) }
+		</button>
+	</li>
+}
+
+// TaskWorktreeMergeActionItem renders one local HTMX action for the Worktree
+// panel or Changes view. The caller supplies only surface-specific request
+// context such as target, swap, and merge source.
+templ TaskWorktreeMergeActionItem(task *models.Task, action TaskWorktreeMergeActionDescriptor, surface string, hxTarget string, hxSwap string, hxDisabledElt string, mergeSource string) {
+	<li>
+		<button
+			type="button"
+			class="text-xs"
+			data-task-worktree-merge-action
+			data-merge-type={ action.MergeType }
+			data-merge-label={ action.Label }
+			data-merge-endpoint={ action.Endpoint }
+			hx-post={ fmt.Sprintf("/tasks/%s/worktree/%s", task.ID, action.Endpoint) }
+			hx-target={ hxTarget }
+			hx-swap={ hxSwap }
+			if hxDisabledElt != "" {
+				hx-disabled-elt={ hxDisabledElt }
+			}
+			if action.IncludeMergeType {
+				hx-vals={ taskWorktreeMergeActionValues(action, mergeSource) }
+			}
+		>
+			<span class="htmx-indicator" id={ taskWorktreeMergeIndicatorID(action, surface) }>
+				<span class="loading loading-spinner loading-xs"></span>
+			</span>
+			{ action.DisplayLabel(TaskWorktreeMergeTarget(task)) }
+		</button>
+	</li>
+}

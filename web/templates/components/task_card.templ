@@ -361,12 +361,11 @@ templ TaskCardMergeOptions(task *models.Task, projectID string, eligible bool, r
 			<details open class="w-full">
 				<summary class="text-sm min-h-11">Merge</summary>
 				<ul class="menu menu-sm p-0 w-full">
-					<li><button type="button" class="text-sm min-h-11" data-task-card-merge-action data-task-id={ task.ID } data-project-id={ projectID } data-task-title={ task.Title } data-target-branch={ task.MergeTargetBranch } data-merge-type="merge" onclick="openTaskCardMergeConfirm(this)">Merge commit</button></li>
-					<li><button type="button" class="text-sm min-h-11" data-task-card-merge-action data-task-id={ task.ID } data-project-id={ projectID } data-task-title={ task.Title } data-target-branch={ task.MergeTargetBranch } data-merge-type="ff" onclick="openTaskCardMergeConfirm(this)">Fast-forward only</button></li>
-					if rebaseAvailable {
-						<li><button type="button" class="text-sm min-h-11" data-task-card-merge-action data-task-id={ task.ID } data-project-id={ projectID } data-task-title={ task.Title } data-target-branch={ task.MergeTargetBranch } data-merge-type="rebase" onclick="openTaskCardMergeConfirm(this)">Rebase onto { task.MergeTargetBranch }</button></li>
+					for _, action := range TaskWorktreeMergeActions() {
+						if !action.RequiresRebaseEligibility || rebaseAvailable {
+							@TaskCardWorktreeMergeAction(task, projectID, action)
+						}
 					}
-					<li><button type="button" class="text-sm min-h-11" data-task-card-merge-action data-task-id={ task.ID } data-project-id={ projectID } data-task-title={ task.Title } data-target-branch={ task.MergeTargetBranch } data-merge-type="squash" onclick="openTaskCardMergeConfirm(this)">Squash merge</button></li>
 				</ul>
 			</details>
 		} else {
@@ -375,7 +374,7 @@ templ TaskCardMergeOptions(task *models.Task, projectID string, eligible bool, r
 		if taskPR != nil && taskPR.PRURL != "" && strings.EqualFold(strings.TrimSpace(taskPR.PRState), "open") {
 			<a class="text-sm min-h-11" href={ templ.SafeURL(taskPR.PRURL) } target="_blank" rel="noopener noreferrer">View PR #{ fmt.Sprintf("%d", taskPR.PRNumber) }</a>
 		} else if prEligible {
-			<button type="button" class="text-sm min-h-11" data-task-card-pr-action data-task-id={ task.ID } data-project-id={ projectID } data-task-title={ task.Title } data-target-branch={ task.MergeTargetBranch } data-merge-type="pr" onclick="openTaskCardMergeConfirm(this)">Create PR</button>
+			<button type="button" class="text-sm min-h-11" data-task-card-pr-action data-task-id={ task.ID } data-project-id={ projectID } data-task-title={ task.Title } data-target-branch={ TaskWorktreeMergeTarget(task) } data-merge-type="pr" data-merge-label="Create PR" data-merge-endpoint="pull-request" onclick="openTaskCardMergeConfirm(this)">Create PR</button>
 		} else {
 			<span class="text-sm min-h-11 opacity-50" aria-disabled="true" title={ prUnavailableReason }>Create PR unavailable</span>
 		}

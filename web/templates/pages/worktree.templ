@@ -78,55 +78,15 @@ templ WorktreeInfoPanel(task *models.Task, fileStats []service.WorktreeFileStat)
 							// Merge buttons with dropdown
 							<div class="dropdown dropdown-end" id="merge-dropdown">
 								<div tabindex="0" role="button" class="btn btn-primary btn-xs">
-									Merge to { mergeTargetDisplay(task) }
+									Merge to { components.TaskWorktreeMergeTarget(task) }
 								</div>
 								<ul tabindex="0" class="dropdown-content z-[1] menu p-2 shadow bg-base-100 rounded-box w-52 border border-base-300">
 									<li class="menu-title"><span>Local</span></li>
-									<li>
-										<button
-											type="button"
-											class="text-xs"
-											hx-post={ fmt.Sprintf("/tasks/%s/worktree/merge", task.ID) }
-											hx-target="#worktree-info-panel"
-											hx-swap="outerHTML"
-											hx-vals='{"merge_type": "merge"}'
-										>
-											<span class="htmx-indicator" id="merge-indicator">
-												<span class="loading loading-spinner loading-xs"></span>
-											</span>
-											Merge commit
-										</button>
-									</li>
-									<li>
-										<button
-											type="button"
-											class="text-xs"
-											hx-post={ fmt.Sprintf("/tasks/%s/worktree/merge", task.ID) }
-											hx-target="#worktree-info-panel"
-											hx-swap="outerHTML"
-											hx-vals='{"merge_type": "ff"}'
-										>
-											<span class="htmx-indicator" id="merge-indicator-ff">
-												<span class="loading loading-spinner loading-xs"></span>
-											</span>
-											Fast-forward only
-										</button>
-									</li>
-									<li>
-										<button
-											type="button"
-											class="text-xs"
-											hx-post={ fmt.Sprintf("/tasks/%s/worktree/merge", task.ID) }
-											hx-target="#worktree-info-panel"
-											hx-swap="outerHTML"
-											hx-vals='{"merge_type": "squash"}'
-										>
-											<span class="htmx-indicator" id="merge-indicator-squash">
-												<span class="loading loading-spinner loading-xs"></span>
-											</span>
-											Squash merge
-										</button>
-									</li>
+									for _, action := range components.TaskWorktreeMergeActions() {
+										if !action.RequiresRebaseEligibility {
+											@components.TaskWorktreeMergeActionItem(task, action, "worktree", "#worktree-info-panel", "outerHTML", "", "")
+										}
+									}
 								</ul>
 							</div>
 						}
@@ -172,7 +132,7 @@ templ TaskChangesWorktreeContentWithView(diffOutput string, task *models.Task, f
 							Changes on branch
 							<code class="bg-base-200 px-1.5 py-0.5 rounded text-xs break-all">{ task.WorktreeBranch }</code>
 							vs
-							<code class="bg-base-200 px-1.5 py-0.5 rounded text-xs break-all">{ mergeTargetDisplay(task) }</code>
+							<code class="bg-base-200 px-1.5 py-0.5 rounded text-xs break-all">{ components.TaskWorktreeMergeTarget(task) }</code>
 						</p>
 					</div>
 						// Unified actions dropdown with Local and GitHub sections
@@ -212,67 +172,11 @@ templ TaskChangesWorktreeContentWithView(diffOutput string, task *models.Task, f
 									</li>
 								} else if !localMergeUnavailable && task.MergeStatus != models.MergeStatusMerged {
 								<li class="menu-title"><span>Local</span></li>
-								<li>
-									<button
-										type="button"
-										hx-post={ fmt.Sprintf("/tasks/%s/worktree/merge", task.ID) }
-										hx-target="#changes-content"
-										hx-swap="innerHTML"
-										hx-disabled-elt="#changes-actions-dropdown button"
-										hx-vals='{"merge_type": "merge", "merge_source": "changes_tab"}'
-									>
-										<span class="htmx-indicator" id="merge-changes-indicator">
-											<span class="loading loading-spinner loading-xs"></span>
-										</span>
-										Merge commit
-									</button>
-								</li>
-								<li>
-									<button
-										type="button"
-										hx-post={ fmt.Sprintf("/tasks/%s/worktree/merge", task.ID) }
-										hx-target="#changes-content"
-										hx-swap="innerHTML"
-										hx-disabled-elt="#changes-actions-dropdown button"
-										hx-vals='{"merge_type": "ff", "merge_source": "changes_tab"}'
-									>
-										<span class="htmx-indicator" id="merge-changes-indicator-ff">
-											<span class="loading loading-spinner loading-xs"></span>
-										</span>
-										Fast-forward only
-									</button>
-								</li>
-								if rebaseAvailable {
-									<li>
-										<button
-											type="button"
-											hx-post={ fmt.Sprintf("/tasks/%s/worktree/rebase", task.ID) }
-											hx-target="#changes-content"
-											hx-swap="innerHTML"
-											hx-disabled-elt="#changes-actions-dropdown button"
-										>
-											<span class="htmx-indicator" id="rebase-changes-indicator">
-												<span class="loading loading-spinner loading-xs"></span>
-											</span>
-											Rebase onto { mergeTargetDisplay(task) }
-										</button>
-									</li>
+								for _, action := range components.TaskWorktreeMergeActions() {
+									if !action.RequiresRebaseEligibility || rebaseAvailable {
+										@components.TaskWorktreeMergeActionItem(task, action, "changes", "#changes-content", "innerHTML", "#changes-actions-dropdown button", "changes_tab")
+									}
 								}
-								<li>
-									<button
-										type="button"
-										hx-post={ fmt.Sprintf("/tasks/%s/worktree/merge", task.ID) }
-										hx-target="#changes-content"
-										hx-swap="innerHTML"
-										hx-disabled-elt="#changes-actions-dropdown button"
-										hx-vals='{"merge_type": "squash", "merge_source": "changes_tab"}'
-									>
-										<span class="htmx-indicator" id="merge-changes-indicator-squash">
-											<span class="loading loading-spinner loading-xs"></span>
-										</span>
-										Squash merge
-									</button>
-								</li>
 							}
 							<li class="menu-title"><span>GitHub</span></li>
 							if taskPR != nil {
@@ -358,13 +262,6 @@ func mergeStatusLabel(status models.MergeStatus) string {
 	default:
 		return ""
 	}
-}
-
-func mergeTargetDisplay(task *models.Task) string {
-	if task.MergeTargetBranch != "" {
-		return task.MergeTargetBranch
-	}
-	return "main"
 }
 
 func fileStatusBadgeClass(status string) string {

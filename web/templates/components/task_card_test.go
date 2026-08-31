@@ -401,6 +401,67 @@ func TestTaskCardMergeOptionsRemainRefreshableAndExposeCreatePR(t *testing.T) {
 	}
 }
 
+func TestTaskCardMergeOptionsExposeSharedLocalActionMetadata(t *testing.T) {
+	task := models.Task{ID: "merge-card-task", ProjectID: "project-1", Title: "Merge card task", MergeTargetBranch: "main"}
+	var buf bytes.Buffer
+	if err := TaskCardMergeOptions(&task, "project-1", true, true, "", nil, true, "").Render(context.Background(), &buf); err != nil {
+		t.Fatal(err)
+	}
+	body := buf.String()
+	for _, want := range []string{
+		`data-merge-type="merge"`,
+		`data-merge-type="ff"`,
+		`data-merge-type="rebase"`,
+		`data-merge-type="squash"`,
+		`data-merge-label="Merge commit"`,
+		`data-merge-label="Fast-forward only"`,
+		`data-merge-label="Rebase"`,
+		`data-merge-label="Squash merge"`,
+		`data-merge-endpoint="merge"`,
+		`data-merge-endpoint="rebase"`,
+		`data-target-branch="main"`,
+		`Rebase onto main`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("expected shared card merge metadata %q, body=%s", want, body)
+		}
+	}
+}
+
+func TestTaskWorktreeMergeActionsDefineCanonicalLocalMapping(t *testing.T) {
+	actions := TaskWorktreeMergeActions()
+	want := []struct {
+		mergeType        string
+		label            string
+		endpoint         string
+		includeTarget    bool
+		requiresRebase   bool
+		includeMergeType bool
+	}{
+		{mergeType: "merge", label: "Merge commit", endpoint: "merge", includeMergeType: true},
+		{mergeType: "ff", label: "Fast-forward only", endpoint: "merge", includeMergeType: true},
+		{mergeType: "rebase", label: "Rebase", endpoint: "rebase", includeTarget: true, requiresRebase: true},
+		{mergeType: "squash", label: "Squash merge", endpoint: "merge", includeMergeType: true},
+	}
+	if len(actions) != len(want) {
+		t.Fatalf("expected %d local merge actions, got %d", len(want), len(actions))
+	}
+	for i, expected := range want {
+		got := actions[i]
+		if got.MergeType != expected.mergeType || got.Label != expected.label || got.Endpoint != expected.endpoint || got.IncludeTarget != expected.includeTarget || got.RequiresRebaseEligibility != expected.requiresRebase || got.IncludeMergeType != expected.includeMergeType {
+			t.Fatalf("action %d mismatch: got %#v, want %#v", i, got, expected)
+		}
+	}
+	if got := actions[2].DisplayLabel("develop"); got != "Rebase onto develop" {
+		t.Fatalf("target-aware Rebase label = %q", got)
+	}
+	if got := TaskWorktreeMergeTarget(&models.Task{MergeTargetBranch: "develop"}); got != "develop" {
+		t.Fatalf("target display = %q", got)
+	}
+	if got := TaskWorktreeMergeTarget(nil); got != "main" {
+		t.Fatalf("empty target display = %q", got)
+	}
+}
 func TestTaskCardMergeOptionsClosedHistoricalPRExposesCreatePR(t *testing.T) {
 	task := models.Task{ID: "merge-card-task", ProjectID: "project-1", Title: "Merge card task", MergeTargetBranch: "main"}
 	closedPR := &models.TaskPullRequest{TaskID: task.ID, PRNumber: 17, PRURL: "https://github.com/example/repo/pull/17", PRState: "closed"}

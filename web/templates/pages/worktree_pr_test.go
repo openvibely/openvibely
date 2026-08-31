@@ -192,6 +192,58 @@ func TestTaskChangesWorktreeContent_LocalAndGitHubSections(t *testing.T) {
 	}
 }
 
+func TestTaskWorktreeMergeActionsShareMetadataAcrossWorktreeAndChanges(t *testing.T) {
+	task := &models.Task{ID: "task-1", WorktreeBranch: "task/feature", MergeTargetBranch: "develop", MergeStatus: models.MergeStatusPending}
+
+	var worktreeBuf bytes.Buffer
+	if err := WorktreeInfoPanel(task, nil).Render(context.Background(), &worktreeBuf); err != nil {
+		t.Fatalf("render worktree panel: %v", err)
+	}
+	worktree := worktreeBuf.String()
+	for _, want := range []string{
+		`data-task-worktree-merge-action`,
+		`data-merge-type="merge"`,
+		`data-merge-type="ff"`,
+		`data-merge-type="squash"`,
+		`data-merge-label="Merge commit"`,
+		`data-merge-label="Fast-forward only"`,
+		`data-merge-label="Squash merge"`,
+		`data-merge-endpoint="merge"`,
+		`hx-post="/tasks/task-1/worktree/merge"`,
+		`hx-target="#worktree-info-panel"`,
+		`Merge to develop`,
+	} {
+		if !strings.Contains(worktree, want) {
+			t.Fatalf("expected Worktree action metadata %q, body=%s", want, worktree)
+		}
+	}
+	if strings.Contains(worktree, `data-merge-type="rebase"`) {
+		t.Fatalf("Worktree panel must preserve its existing lack of a Rebase action, body=%s", worktree)
+	}
+
+	var changesBuf bytes.Buffer
+	if err := TaskChangesWorktreeContent("diff --git", task, nil, nil, nil, false, true).Render(context.Background(), &changesBuf); err != nil {
+		t.Fatalf("render Changes content: %v", err)
+	}
+	changes := changesBuf.String()
+	for _, want := range []string{
+		`data-merge-type="merge"`,
+		`data-merge-type="ff"`,
+		`data-merge-type="rebase"`,
+		`data-merge-type="squash"`,
+		`data-merge-label="Rebase"`,
+		`data-merge-endpoint="rebase"`,
+		`hx-post="/tasks/task-1/worktree/rebase"`,
+		`hx-target="#changes-content"`,
+		`Rebase onto develop`,
+		`merge_source`,
+		`changes_tab`,
+	} {
+		if !strings.Contains(changes, want) {
+			t.Fatalf("expected Changes action metadata %q, body=%s", want, changes)
+		}
+	}
+}
 func TestTaskChangesWorktreeContent_RebaseOnlyWhenAvailable(t *testing.T) {
 	task := &models.Task{ID: "task-1", WorktreeBranch: "task/feature", MergeStatus: models.MergeStatusPending}
 	var buf bytes.Buffer
