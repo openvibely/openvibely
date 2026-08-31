@@ -2076,6 +2076,10 @@ const docTemplate = `{
                 "display_order": {
                     "type": "integer"
                 },
+                "goal_met": {
+                    "description": "Derived: task's persisted goal is achieved",
+                    "type": "boolean"
+                },
                 "has_goal": {
                     "description": "Derived: task has a non-cleared persisted goal",
                     "type": "boolean"

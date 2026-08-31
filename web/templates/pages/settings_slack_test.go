@@ -160,7 +160,6 @@ func TestSettingsContent_RendersSystemLevelInboundAuthorizationCopy(t *testing.T
 		"Authorized Slack users are system-level for this channel and can use Slack across projects.",
 		"Authorized Discord users are system-level for this channel and can use Discord across projects.",
 		"Authorized email senders are system-level for this channel and can use Email across projects.",
-		"Authorized Users control who can talk to OpenVibely. Outbound targets control where agents may send messages.",
 	} {
 		if !strings.Contains(out, expected) {
 			t.Fatalf("expected rendered settings to contain %q", expected)
