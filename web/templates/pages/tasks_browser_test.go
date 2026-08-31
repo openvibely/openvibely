@@ -613,21 +613,38 @@ func TestTaskRunningIconSharesThemeAwareSendColorWithoutSuppressingHoverInChrome
 		t.Helper()
 		var response struct {
 			Result struct {
-				Value string `json:"value"`
+				Type        string          `json:"type"`
+				Value       json.RawMessage `json:"value"`
+				Description string          `json:"description"`
 			} `json:"result"`
+			ExceptionDetails json.RawMessage `json:"exceptionDetails"`
 		}
 		call("Runtime.evaluate", map[string]any{"expression": expression, "returnByValue": true}, &response)
-		return response.Result.Value
+		if len(response.ExceptionDetails) > 0 {
+			t.Fatalf("evaluate JavaScript %q: %s", expression, response.ExceptionDetails)
+		}
+		if response.Result.Type != "string" || len(response.Result.Value) == 0 {
+			t.Fatalf("evaluate JavaScript %q returned type %q without a string value: %s", expression, response.Result.Type, response.Result.Description)
+		}
+		var value string
+		if err := json.Unmarshal(response.Result.Value, &value); err != nil {
+			t.Fatalf("decode JavaScript result for %q: %v", expression, err)
+		}
+		return value
 	}
 	movePointer := func(x, y float64) {
 		t.Helper()
 		call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": x, "y": y}, nil)
 	}
 
-	for time.Now().Before(deadline) && evaluate(`document.readyState`) != "complete" {
+	pageReadyDeadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(pageReadyDeadline) && evaluate(`document.readyState`) != "complete" {
 		time.Sleep(25 * time.Millisecond)
 	}
-	evaluate(`document.body.innerHTML='<button class="btn btn-primary chat-send-button" style="position:fixed;left:20px;top:20px;width:100px;transform:none;transition:none;z-index:2147483647" data-test-send>Send</button><span class="task-state-running" style="position:fixed;left:20px;top:80px;z-index:2147483647" data-test-running>Running</span>'; ''`)
+	evaluate(`(function(){var b=document.createElement('button'),r=document.createElement('span');b.className='btn btn-primary chat-send-button';b.dataset.testSend='';b.textContent='Send';b.style.cssText='position:fixed;left:20px;top:20px;width:100px;transform:none;transition:none;z-index:2147483647';r.className='task-state-running';r.dataset.testRunning='';r.textContent='Running';r.style.cssText='position:fixed;left:20px;top:80px;z-index:2147483647';document.body.replaceChildren(b,r);return 'fixture-ready';})()`)
+	if evaluate(`document.readyState + ':' + Boolean(document.querySelector('[data-test-send]')) + ':' + Boolean(document.querySelector('[data-test-running]'))`) != "complete:true:true" {
+		t.Fatal("Chrome page did not finish loading the primary-action fixture")
+	}
 	type themeCase struct {
 		name      string
 		mode      string
