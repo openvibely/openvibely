@@ -3,6 +3,8 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -14,6 +16,8 @@ import (
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/web/templates/pages"
 )
 
 // ---- CreateSchedule ----
@@ -476,6 +480,266 @@ func TestCreateSchedule_DefaultRepeatType(t *testing.T) {
 	}
 }
 
+func TestViewSchedule_UsesCompactAgentScheduleProjection(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	h, e, _ := setupTestHandlerForDB(t, db)
+	project := createProject(t, h, "Schedule Agent Projection")
+	agentRepo := repository.NewAgentRepo(db)
+	h.SetAgentRepo(agentRepo)
+	agent := &models.Agent{
+		Name:                "Rich Schedule Runner",
+		SystemPrompt:        strings.Repeat("schedule agent prompt ", 512),
+		Model:               "sonnet",
+		Tools:               []string{"Read", "Write"},
+		ToolConfig:          models.AgentToolConfig{ScopedFiles: []models.ScopedFilesConfig{{Directory: "src", Permissions: []string{"read"}}}},
+		Plugins:             []string{"github@marketplace"},
+		MCPServers:          []models.MCPServerConfig{{Name: "playwright", Command: []string{"npx", "server"}}},
+		Skills:              []models.SkillConfig{{Name: "schedule", Content: strings.Repeat("skill content ", 256)}},
+		PermissionDefaults:  models.AgentPermissionDefaults{ReadAgents: true, ReadSkills: true},
+		ModelDefaults:       models.AgentModelDefaults{Model: "gpt-5", MaxTokens: 8192},
+		SourceRefs:          []string{"agents/schedule/SKILLS.md"},
+		Scope:               models.AgentScopeGlobal,
+		Enabled:             true,
+		SelectableAsPrimary: true,
+	}
+	if err := agentRepo.Create(context.Background(), agent); err != nil {
+		t.Fatalf("create rich schedule agent: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name string
+		htmx bool
+		path string
+	}{
+		{name: "full page", path: "/schedule?project_id=" + project.ID},
+		{name: "HTMX week navigation", htmx: true, path: "/schedule?project_id=" + project.ID + "&week=1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			counter.Reset()
+			counter.SetEnabled(true)
+			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			if tc.htmx {
+				req.Header.Set("HX-Request", "true")
+			}
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+			counter.SetEnabled(false)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+			}
+			body := rec.Body.String()
+			for _, expected := range []string{agent.Name, "(" + agent.Model + ")", `>No Agent</option>`} {
+				if !strings.Contains(body, expected) {
+					t.Fatalf("schedule response missing %q", expected)
+				}
+			}
+
+			var agentQueries []string
+			for _, statement := range counter.Statements() {
+				normalized := strings.Join(strings.Fields(statement), " ")
+				if strings.Contains(strings.ToLower(normalized), "from agents") {
+					agentQueries = append(agentQueries, normalized)
+				}
+			}
+			if len(agentQueries) != 1 {
+				t.Fatalf("expected exactly one Schedule agent query, got %d in %q", len(agentQueries), counter.Statements())
+			}
+			query := strings.ToLower(agentQueries[0])
+			projection := strings.Split(query, " from agents ")[0]
+			if projection != "select id, name, model" {
+				t.Fatalf("Schedule agent query projection = %q, want only selector fields: %s", projection, agentQueries[0])
+			}
+			for _, forbidden := range []string{"description", "system_prompt", "tools", "tool_config", "plugins", "mcp_servers", "skills", "permission_defaults_json", "model_defaults_json", "source_refs_json", "created_by", "absorbed_into", "created_at", "updated_at"} {
+				if strings.Contains(projection, forbidden) {
+					t.Fatalf("Schedule agent query selected forbidden column %q: %s", forbidden, agentQueries[0])
+				}
+			}
+			for _, requiredPredicate := range []string{"coalesce(generated_status, 'user_edited') <> 'archived'", "archived_at is null", "coalesce(enabled, 1) = 1", "coalesce(selectable_as_primary, 1) = 1", "coalesce(scope, 'global') <> 'project'", "order by name asc"} {
+				if !strings.Contains(query, requiredPredicate) {
+					t.Fatalf("Schedule agent query is missing predicate/order %q: %s", requiredPredicate, agentQueries[0])
+				}
+			}
+		})
+	}
+
+	full, err := agentRepo.GetByID(context.Background(), agent.ID)
+	if err != nil {
+		t.Fatalf("get full schedule agent: %v", err)
+	}
+	if full == nil || full.SystemPrompt == "" || len(full.Tools) == 0 || len(full.ToolConfig.ScopedFiles) == 0 || len(full.Plugins) == 0 || len(full.MCPServers) == 0 || len(full.Skills) == 0 || len(full.SourceRefs) == 0 || !full.PermissionDefaults.ReadAgents || full.ModelDefaults.Model != "gpt-5" {
+		t.Fatalf("full detail path lost hydrated fields: %#v", full)
+	}
+}
+
+func TestCreateScheduledTaskFromScheduleUsesCompactAgentProjection(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	h, e, _ := setupTestHandlerForDB(t, db)
+	project := createProject(t, h, "Schedule Create Projection")
+	agentRepo := repository.NewAgentRepo(db)
+	h.SetAgentRepo(agentRepo)
+	agent := createScheduleTestAgent(t, agentRepo, "Schedule Create Runner", models.AgentScopeGlobal, "", true)
+	agent.Model = "opus"
+	if err := agentRepo.Update(context.Background(), agent); err != nil {
+		t.Fatalf("update schedule create agent: %v", err)
+	}
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	req := httptest.NewRequest(http.MethodPost, "/tasks?project_id="+project.ID+"&from=schedule&week=2", strings.NewReader(url.Values{
+		"title":           {"Schedule Create Projection Task"},
+		"prompt":          {"Run the scheduled task"},
+		"category":        {"scheduled"},
+		"priority":        {"2"},
+		"run_at":          {time.Now().Add(time.Hour).Format("2006-01-02T15:04")},
+		"repeat_type":     {"daily"},
+		"repeat_interval": {"1"},
+	}.Encode()))
+	req.Header.Set("HX-Request", "true")
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationForm)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	counter.SetEnabled(false)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), agent.Name) || !strings.Contains(rec.Body.String(), "("+agent.Model+")") {
+		t.Fatalf("schedule create refresh omitted the selected Agent option: %s", rec.Body.String())
+	}
+
+	var agentQueries []string
+	for _, statement := range counter.Statements() {
+		normalized := strings.Join(strings.Fields(statement), " ")
+		if strings.Contains(strings.ToLower(normalized), "from agents") {
+			agentQueries = append(agentQueries, normalized)
+		}
+	}
+	if len(agentQueries) != 1 {
+		t.Fatalf("expected exactly one compact Agent query during schedule create refresh, got %d in %q", len(agentQueries), counter.Statements())
+	}
+	query := strings.ToLower(agentQueries[0])
+	projection := strings.Split(query, " from agents ")[0]
+	if projection != "select id, name, model" {
+		t.Fatalf("schedule create query projection = %q, want only selector fields: %s", projection, agentQueries[0])
+	}
+	for _, forbidden := range []string{"description", "system_prompt", "tools", "tool_config", "plugins", "mcp_servers", "skills", "permission_defaults_json", "model_defaults_json", "source_refs_json", "created_at", "updated_at"} {
+		if strings.Contains(projection, forbidden) {
+			t.Fatalf("schedule create query selected forbidden column %q: %s", forbidden, agentQueries[0])
+		}
+	}
+}
+
+func BenchmarkScheduleAgentOptionProjectionAndContent(b *testing.B) {
+	db := testutil.NewTestDB(b)
+	agentRepo := repository.NewAgentRepo(db)
+	projectRepo := repository.NewProjectRepo(db)
+	project := &models.Project{Name: "Schedule Benchmark Project"}
+	if err := projectRepo.Create(context.Background(), project); err != nil {
+		b.Fatalf("create benchmark project: %v", err)
+	}
+	if _, err := db.ExecContext(context.Background(), `DELETE FROM agents WHERE id IS NOT NULL`); err != nil {
+		b.Fatalf("clear benchmark agents: %v", err)
+	}
+	for i := 0; i < 1000; i++ {
+		agent := &models.Agent{
+			Name:                fmt.Sprintf("Schedule Agent %04d", i),
+			SystemPrompt:        strings.Repeat("large schedule benchmark prompt with instructions and examples. ", 320),
+			Model:               "inherit",
+			Tools:               []string{"Read", "Write", "Edit", "Bash", models.AgentToolScopedFiles},
+			ToolConfig:          models.AgentToolConfig{ScopedFiles: []models.ScopedFilesConfig{{Directory: "src", Permissions: []string{"read", "write"}}}},
+			Plugins:             []string{"github@marketplace", "playwright@claude-plugins-official"},
+			MCPServers:          []models.MCPServerConfig{{Name: "playwright", Command: []string{"npx", "-y", "@playwright/mcp"}}},
+			Skills:              []models.SkillConfig{{Name: "schedule", Description: "schedule benchmark skill", Content: strings.Repeat("schedule skill instructions ", 256)}},
+			PermissionDefaults:  models.AgentPermissionDefaults{ReadAgents: true, ReadSkills: true, ReadRepositoryFiles: true, UseShellOrTools: true},
+			ModelDefaults:       models.AgentModelDefaults{Model: "gpt-5", Temperature: 0.3, MaxTokens: 8192},
+			SourceRefs:          []string{fmt.Sprintf("agents/schedule-%04d/SKILLS.md", i)},
+			Enabled:             true,
+			SelectableAsPrimary: true,
+		}
+		if err := agentRepo.Create(context.Background(), agent); err != nil {
+			b.Fatalf("create benchmark agent %d: %v", i, err)
+		}
+	}
+
+	ctx := context.Background()
+	renderScheduleContent := func(options []repository.AgentScheduleOption) error {
+		return pages.ScheduleContent(project, nil, 0, nil, options).Render(ctx, io.Discard)
+	}
+
+	b.Run("full_agent_loading", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			options, err := fullScheduleAgentOptionsForBenchmark(ctx, agentRepo, project.ID)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if len(options) != 1000 {
+				b.Fatalf("full schedule options len = %d, want 1000", len(options))
+			}
+		}
+	})
+
+	b.Run("compact_agent_loading", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			options, err := agentRepo.ListScheduleOptions(ctx, project.ID)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if len(options) != 1000 {
+				b.Fatalf("compact schedule options len = %d, want 1000", len(options))
+			}
+		}
+	})
+
+	b.Run("full_schedule_content", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			options, err := fullScheduleAgentOptionsForBenchmark(ctx, agentRepo, project.ID)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if err := renderScheduleContent(options); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+
+	b.Run("compact_schedule_content", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			options, err := agentRepo.ListScheduleOptions(ctx, project.ID)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if err := renderScheduleContent(options); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+}
+
+func fullScheduleAgentOptionsForBenchmark(ctx context.Context, repo *repository.AgentRepo, projectID string) ([]repository.AgentScheduleOption, error) {
+	agents, err := repo.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	eligible := selectableTaskAgentDefinitionsForProject(agents, projectID)
+	options := make([]repository.AgentScheduleOption, 0, len(eligible))
+	for _, agent := range eligible {
+		options = append(options, repository.AgentScheduleOption{
+			ID:    agent.ID,
+			Name:  agent.Name,
+			Model: agent.Model,
+		})
+	}
+	return options, nil
+}
 func createScheduleTestAgent(t *testing.T, repo *repository.AgentRepo, name string, scope models.AgentScope, projectID string, selectable bool) *models.Agent {
 	t.Helper()
 	agent := &models.Agent{
