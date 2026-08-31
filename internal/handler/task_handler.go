@@ -183,6 +183,18 @@ func (h *Handler) listTaskFormAgentDefinitions(ctx context.Context, projectID st
 	return out
 }
 
+func (h *Handler) listScheduleAgentOptions(ctx context.Context, projectID string) []repository.AgentScheduleOption {
+	if h.agentRepo == nil {
+		return nil
+	}
+	options, err := h.agentRepo.ListScheduleOptions(ctx, projectID)
+	if err != nil {
+		applog.Infof("[handler] listScheduleAgentOptions error: %v", err)
+		return nil
+	}
+	return options
+}
+
 func (h *Handler) taskDetailAgentLabel(ctx context.Context, projectID string, agentDefinitionID *string) string {
 	if h.agentRepo == nil || agentDefinitionID == nil || *agentDefinitionID == "" {
 		return ""
@@ -477,7 +489,7 @@ func (h *Handler) CreateTask(c echo.Context) error {
 		project, _ := h.projectSvc.GetByID(c.Request().Context(), projectID)
 		scheduledTasks, _ := h.taskSvc.GetTasksWithSchedulesByProject(c.Request().Context(), projectID)
 		agents, _ := h.llmConfigRepo.ListBadgeOptions(c.Request().Context())
-		agentDefs := h.listTaskFormAgentDefinitions(c.Request().Context(), projectID, t.AgentDefinitionID)
+		agentDefs := h.listScheduleAgentOptions(c.Request().Context(), projectID)
 		weekOffset := 0
 		if weekParam := c.QueryParam("week"); weekParam != "" {
 			if w, err := strconv.Atoi(weekParam); err == nil {

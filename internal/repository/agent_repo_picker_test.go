@@ -141,6 +141,104 @@ func TestAgentRepoListPickerOptionsForProjectExcludesForeignProjectAgents(t *tes
 	}
 }
 
+func TestAgentRepoListScheduleOptionsUsesCompactProjectionAndAvailability(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	repo := NewAgentRepo(db)
+	ctx := context.Background()
+	clearAgentsForRuntimeSummaryTest(t, db)
+	projectRepo := NewProjectRepo(db)
+	project := &models.Project{Name: "Schedule Projection Project"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create schedule project: %v", err)
+	}
+	otherProject := &models.Project{Name: "Other Schedule Projection Project"}
+	if err := projectRepo.Create(ctx, otherProject); err != nil {
+		t.Fatalf("create other schedule project: %v", err)
+	}
+	projectID := project.ID
+
+	global := createPickerAgent(t, repo, "Global Schedule Agent")
+	global.Model = "sonnet"
+	if err := repo.Update(ctx, global); err != nil {
+		t.Fatalf("update global schedule agent: %v", err)
+	}
+	projectAgent := createPickerAgent(t, repo, "Project Schedule Agent")
+	projectAgent.Scope = models.AgentScopeProject
+	projectAgent.ProjectID = projectID
+	if err := repo.Update(ctx, projectAgent); err != nil {
+		t.Fatalf("update project schedule agent: %v", err)
+	}
+	foreign := createPickerAgent(t, repo, "Foreign Schedule Agent")
+	foreign.Scope = models.AgentScopeProject
+	foreign.ProjectID = otherProject.ID
+	if err := repo.Update(ctx, foreign); err != nil {
+		t.Fatalf("update foreign schedule agent: %v", err)
+	}
+	disabled := createPickerAgent(t, repo, "Disabled Schedule Agent")
+	disabled.Enabled = false
+	if err := repo.Update(ctx, disabled); err != nil {
+		t.Fatalf("update disabled schedule agent: %v", err)
+	}
+	nonPrimary := createPickerAgent(t, repo, "Non Primary Schedule Agent")
+	nonPrimary.SelectableAsPrimary = false
+	if err := repo.Update(ctx, nonPrimary); err != nil {
+		t.Fatalf("update non-primary schedule agent: %v", err)
+	}
+	generatedArchived := createPickerAgent(t, repo, "Generated Archived Schedule Agent")
+	generatedArchived.GeneratedStatus = models.AgentStatusArchived
+	if err := repo.Update(ctx, generatedArchived); err != nil {
+		t.Fatalf("archive generated schedule agent: %v", err)
+	}
+	archivedAt := createPickerAgent(t, repo, "Archived Timestamp Schedule Agent")
+	if _, err := db.ExecContext(ctx, `UPDATE agents SET archived_at = datetime('now') WHERE id = ?`, archivedAt.ID); err != nil {
+		t.Fatalf("archive timestamp schedule agent: %v", err)
+	}
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	options, err := repo.ListScheduleOptions(ctx, projectID)
+	counter.SetEnabled(false)
+	if err != nil {
+		t.Fatalf("ListScheduleOptions: %v", err)
+	}
+	if len(options) != 2 {
+		t.Fatalf("schedule options = %#v, want global and project-scoped options only", options)
+	}
+	if options[0].ID != global.ID || options[0].Name != global.Name || options[0].Model != global.Model {
+		t.Fatalf("global schedule option = %#v, want %s/%s/%s", options[0], global.ID, global.Name, global.Model)
+	}
+	if options[1].ID != projectAgent.ID || options[1].Name != projectAgent.Name || options[1].Model != projectAgent.Model {
+		t.Fatalf("project schedule option = %#v, want %s/%s/%s", options[1], projectAgent.ID, projectAgent.Name, projectAgent.Model)
+	}
+
+	statements := counter.Statements()
+	if len(statements) != 1 {
+		t.Fatalf("statements = %#v, want exactly one compact schedule query", statements)
+	}
+	query := strings.ToLower(strings.Join(strings.Fields(statements[0]), " "))
+	projection := strings.Split(query, " from agents ")[0]
+	if projection != "select id, name, model" {
+		t.Fatalf("schedule projection = %q, want only selector fields: %s", projection, statements[0])
+	}
+	for _, forbidden := range []string{"description", "system_prompt", "tools", "tool_config", "plugins", "mcp_servers", "skills", "permission_defaults_json", "model_defaults_json", "source_refs_json", "created_by", "absorbed_into", "created_at", "updated_at"} {
+		if strings.Contains(projection, forbidden) {
+			t.Fatalf("schedule query selected forbidden column %q: %s", forbidden, statements[0])
+		}
+	}
+	for _, requiredPredicate := range []string{"coalesce(generated_status, 'user_edited') <> 'archived'", "archived_at is null", "coalesce(enabled, 1) = 1", "coalesce(selectable_as_primary, 1) = 1", "coalesce(scope, 'global') <> 'project'", "project_id = ?", "order by name asc"} {
+		if !strings.Contains(query, requiredPredicate) {
+			t.Fatalf("schedule query is missing predicate/order %q: %s", requiredPredicate, statements[0])
+		}
+	}
+
+	full, err := repo.GetByID(ctx, global.ID)
+	if err != nil {
+		t.Fatalf("GetByID full schedule agent: %v", err)
+	}
+	if full == nil || full.SystemPrompt == "" || len(full.Tools) == 0 || len(full.ToolConfig.ScopedFiles) == 0 || len(full.Plugins) == 0 || len(full.MCPServers) == 0 || len(full.Skills) == 0 || len(full.SourceRefs) == 0 || !full.PermissionDefaults.ReadAgents || full.ModelDefaults.Model != "gpt-5" {
+		t.Fatalf("full detail path lost hydrated fields: %#v", full)
+	}
+}
 func containsString(values []string, want string) bool {
 	for _, value := range values {
 		if value == want {

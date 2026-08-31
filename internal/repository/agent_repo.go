@@ -50,6 +50,15 @@ type AgentPickerOption struct {
 	Name string
 }
 
+// AgentScheduleOption is the compact projection needed by the Schedule primary
+// Agent selector. Availability is enforced by ListScheduleOptions; this type
+// contains only the display fields rendered by the selector.
+type AgentScheduleOption struct {
+	ID    string
+	Name  string
+	Model string
+}
+
 // AgentSkillCatalogRef is the compact projection needed to discover agent-owned
 // skill catalogs without hydrating prompt/config/plugin/skill JSON fields.
 type AgentSkillCatalogRef struct {
@@ -73,6 +82,16 @@ type AgentListSummary struct {
 	SystemKind          string
 	ArchivedAt          *time.Time
 	AttachedSkillNames  []string
+}
+
+const agentScheduleOptionColumns = `id, name, model`
+
+func scanAgentScheduleOption(row interface{ Scan(dest ...any) error }) (*AgentScheduleOption, error) {
+	var option AgentScheduleOption
+	if err := row.Scan(&option.ID, &option.Name, &option.Model); err != nil {
+		return nil, err
+	}
+	return &option, nil
 }
 
 func scanChatAssignableAgentDefinition(row interface{ Scan(dest ...any) error }) (*models.ChatAssignableAgentDefinition, error) {
@@ -285,6 +304,35 @@ func normalizeAgentToolConfig(a *models.Agent) {
 
 func (r *AgentRepo) List(ctx context.Context) ([]models.Agent, error) {
 	return r.list(ctx, `SELECT `+agentColumns+` FROM agents WHERE COALESCE(generated_status, 'user_edited') <> 'archived' ORDER BY name ASC`)
+}
+
+// ListScheduleOptions returns active primary-Agent options available to a
+// project without selecting or hydrating the Agent's rich configuration.
+func (r *AgentRepo) ListScheduleOptions(ctx context.Context, projectID string) ([]AgentScheduleOption, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT `+agentScheduleOptionColumns+` FROM agents
+		WHERE COALESCE(generated_status, 'user_edited') <> 'archived'
+		  AND archived_at IS NULL
+		  AND COALESCE(enabled, 1) = 1
+		  AND COALESCE(selectable_as_primary, 1) = 1
+		  AND (
+			COALESCE(scope, 'global') <> 'project'
+			OR (project_id IS NOT NULL AND project_id <> '' AND project_id = ?)
+		  )
+		ORDER BY name ASC`, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("listing schedule agent options: %w", err)
+	}
+	defer rows.Close()
+
+	var options []AgentScheduleOption
+	for rows.Next() {
+		option, err := scanAgentScheduleOption(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scanning schedule agent option: %w", err)
+		}
+		options = append(options, *option)
+	}
+	return options, rows.Err()
 }
 
 // ListAgentListSummaries returns the prompt-safe lifecycle agent_list projection.

@@ -436,18 +436,18 @@ templ SchedulePrimaryAgentSelector(selected *string, agentDefs []models.Agent, s
 	</select>
 }
 
-templ Schedule(projects []models.Project, currentProject *models.Project, tasks []repository.TaskWithSchedule, weekOffset int, agents []models.LLMConfig, agentDefs []models.Agent) {
+templ Schedule(projects []models.Project, currentProject *models.Project, tasks []repository.TaskWithSchedule, weekOffset int, agents []models.LLMConfig, agentDefs []repository.AgentScheduleOption) {
 	@layout.Base("Schedule", projects, projectID(currentProject)) {
 		@scheduleContent(currentProject, buildWeekData(tasks, weekOffset), weekOffset, agents, agentDefs)
 	}
 }
 
 // ScheduleContent renders just the schedule content for HTMX requests
-templ ScheduleContent(currentProject *models.Project, tasks []repository.TaskWithSchedule, weekOffset int, agents []models.LLMConfig, agentDefs []models.Agent) {
+templ ScheduleContent(currentProject *models.Project, tasks []repository.TaskWithSchedule, weekOffset int, agents []models.LLMConfig, agentDefs []repository.AgentScheduleOption) {
 	@scheduleContent(currentProject, buildWeekData(tasks, weekOffset), weekOffset, agents, agentDefs)
 }
 
-templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOffset int, agents []models.LLMConfig, agentDefs []models.Agent) {
+templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOffset int, agents []models.LLMConfig, agentDefs []repository.AgentScheduleOption) {
 	<div id="schedule-content" class="flex flex-col h-full" data-project-id={ projectID(currentProject) }>
 		@layout.PageTitle("Schedule")
 		<!-- Header: Row 1 – Title + New Task button -->
@@ -667,7 +667,7 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 						</div>
 						<div class="form-control min-w-0">
 							<label class="label"><span class="label-text">Primary Agent</span></label>
-							@SchedulePrimaryAgentSelector(nil, agentDefs, "select select-bordered w-full max-w-full")
+							@SchedulePrimaryAgentOptionSelector(nil, agentDefs, "select select-bordered w-full max-w-full")
 							<label class="label"><span class="label-text-alt opacity-60">Agent definition used for scheduled runs</span></label>
 						</div>
 					</div>
@@ -1463,5 +1463,30 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 			}
 		</script>
 	</div>
+}
+
+templ SchedulePrimaryAgentOptionSelector(selected *string, agentDefs []repository.AgentScheduleOption, selectClass string) {
+	<input type="hidden" name="schedule_agent_definition_present" value="1"/>
+	<select name="agent_definition_id" class={ selectClass }>
+		<option
+			value=""
+			if selected == nil || *selected == "" {
+				selected
+			}
+		>No Agent</option>
+		for _, ad := range agentDefs {
+			<option
+				value={ ad.ID }
+				if selected != nil && *selected == ad.ID {
+					selected
+				}
+			>
+				{ ad.Name }
+				if ad.Model != "inherit" {
+					({ ad.Model })
+				}
+			</option>
+		}
+	</select>
 }
 
