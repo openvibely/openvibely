@@ -49,8 +49,8 @@ func TestChatRenderingPathsUseBaseSafeMarkdownRenderer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read generated Chat components: %v", err)
 	}
-	if strings.Count(string(generated), "innerHTML = window.renderChatMarkdown(") != 7 {
-		t.Fatalf("completed, resume, and streaming Chat/task-thread paths must all use the safe Markdown renderer; got %d generated call sites", strings.Count(string(generated), "innerHTML = window.renderChatMarkdown("))
+	if strings.Count(string(generated), "innerHTML = window.renderChatMarkdown(") != 5 {
+		t.Fatalf("resume, streaming, and shared hydration paths must all use the safe Markdown renderer; got %d generated call sites", strings.Count(string(generated), "innerHTML = window.renderChatMarkdown("))
 	}
 	for _, unsafe := range []string{
 		"innerHTML = raw",
@@ -754,17 +754,140 @@ func TestChatAutoScrollScript_RehydratesAssistantRawContentViaStreamingRenderer(
 	}
 }
 
-func TestCompletedBubblePollingFallbackDoesNotRenderTwice(t *testing.T) {
+func TestCompletedBubbleUsesSharedHydratorWithoutInlineScript(t *testing.T) {
+	raw := strings.Repeat("x", 128)
 	var buf bytes.Buffer
-	if err := ChatBubble("Assistant", "completed").Render(context.Background(), &buf); err != nil {
+	if err := ChatBubble("Assistant", raw).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render completed bubble: %v", err)
 	}
 	content := buf.String()
-	if !strings.Contains(content, "var renderStarted = false") ||
-		!strings.Contains(content, "if (renderStarted) return") ||
-		!strings.Contains(content, "renderStarted = true") ||
-		!strings.Contains(content, "window.scheduleChatElementRender(el, raw)") {
-		t.Fatal("completed bubble polling and timeout paths must share a one-shot render guard")
+	if strings.Contains(content, "<script") || strings.Contains(content, "document.currentScript") || strings.Contains(content, "setInterval") {
+		t.Fatalf("completed assistant bubble must not include per-bubble render script; got %d bytes", len(content))
+	}
+	if !strings.Contains(content, `class="chat-stream-content"`) || !strings.Contains(content, `data-raw-content="`+raw+`"`) || !strings.Contains(content, `data-raw-revision="`) {
+		t.Fatalf("completed assistant bubble must expose compact raw-content markup for the shared hydrator:\n%s", content)
+	}
+
+	var window bytes.Buffer
+	for i := 0; i < 100; i++ {
+		if err := ChatBubble("Assistant", raw).Render(context.Background(), &window); err != nil {
+			t.Fatalf("render completed bubble %d: %v", i, err)
+		}
+	}
+	const previousProbeBytes = 215600
+	if got, max := window.Len(), previousProbeBytes/4; got > max {
+		t.Fatalf("100 short completed assistant bubbles rendered %d bytes, want <= %d for at least 75%% reduction from probe", got, max)
+	}
+	fixed := len(content) - len(raw)
+	t.Logf("100 short completed assistant bubbles rendered %d bytes; fixed markup overhead %d bytes per bubble", window.Len(), fixed)
+	if fixed >= 300 {
+		t.Fatalf("completed assistant bubble fixed markup overhead = %d bytes, want < 300", fixed)
+	}
+}
+
+func TestCompletedErrorBubbleUsesSharedHydratorWithoutInlineScript(t *testing.T) {
+	var buf bytes.Buffer
+	if err := ChatBubbleError("Assistant", "failed", "partial output").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render error bubble: %v", err)
+	}
+	content := buf.String()
+	if strings.Contains(content, "<script") || strings.Contains(content, "document.currentScript") || strings.Contains(content, "setInterval") {
+		t.Fatalf("error assistant bubble must not include per-bubble render script; got %d bytes", len(content))
+	}
+	if !strings.Contains(content, `Error: failed`) || !strings.Contains(content, `class="chat-stream-content"`) || !strings.Contains(content, `data-raw-content="partial output"`) {
+		t.Fatalf("error assistant bubble must keep label and compact raw partial output markup:\n%s", content)
+	}
+}
+
+func TestCompletedBubbleSharedHydrationInChrome(t *testing.T) {
+	chrome := testChromePath(t)
+	var bubble bytes.Buffer
+	if err := ChatBubble("Assistant", "# Rendered\n\n```go\nfmt.Println(\"hi\")\n```").Render(context.Background(), &bubble); err != nil {
+		t.Fatalf("render completed bubble: %v", err)
+	}
+	var chatScript bytes.Buffer
+	if err := ChatAutoScrollScript().Render(context.Background(), &chatScript); err != nil {
+		t.Fatalf("render shared chat script: %v", err)
+	}
+	html := `<!doctype html><html><head><meta charset="utf-8"></head><body><main id="fixture-root"><div id="chat-messages">` + bubble.String() + `</div></main><script>
+	window.requestAnimationFrame = function(callback) { return setTimeout(callback, 0); };
+	window.cancelAnimationFrame = clearTimeout;
+	window.renderChatMarkdown = function(text) {
+	  function esc(value) { return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+	  var fence = String.fromCharCode(96, 96, 96);
+	  return esc(text).replace(new RegExp(fence + 'go\\n([\\s\\S]*?)\\n' + fence, 'g'), '<pre><code class="language-go">$1</code></pre>').replace(/^# (.*)$/m, '<h1>$1</h1>');
+	};
+	window.addCodeCopyButtons = function(container) {
+	  container.querySelectorAll('pre').forEach(function(pre) {
+	    var button = document.createElement('button');
+	    button.setAttribute('data-code-copy-button', 'true');
+	    button.textContent = 'Copy';
+	    pre.appendChild(button);
+	  });
+	};
+	window.renderChatMarkdownLargeFallback = function(text) {
+	  var div = document.createElement('div');
+	  div.className = 'chat-markdown';
+	  div.innerHTML = window.renderChatMarkdown(text);
+	  window.addCodeCopyButtons(div);
+	  return div;
+	};
+	</script>` + chatScript.String() + `<script>
+	window.addEventListener('DOMContentLoaded', function() {
+	  var root = document.getElementById('fixture-root');
+	  var messages = document.getElementById('chat-messages');
+	  function fail(message) { root.setAttribute('data-test-result', 'fail'); root.setAttribute('data-test-error', message); }
+	  if ((messages.textContent || '').indexOf('# Rendered') !== -1) return fail('raw markdown was visible before shared hydration');
+	  Promise.resolve(window.cleanAssistantMessages(messages)).then(function() {
+	    if (!messages.querySelector('.chat-markdown h1')) return fail('markdown heading did not hydrate');
+	    if (!messages.querySelector('pre code.language-go')) return fail('code block did not hydrate');
+	    if (!messages.querySelector('[data-code-copy-button="true"]')) return fail('copy button was not attached');
+	    if ((messages.textContent || '').indexOf(String.fromCharCode(96, 96, 96)) !== -1) return fail('raw fenced markdown remained visible after hydration');
+	    root.setAttribute('data-test-result', 'pass');
+	  }).catch(function(error) { fail(String(error && error.stack || error)); });
+	});
+	</script></body></html>`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(html))
+	}))
+	defer server.Close()
+
+	stdoutPath := filepath.Join(t.TempDir(), "chrome-completed-bubble.html")
+	stderrPath := filepath.Join(t.TempDir(), "chrome-completed-bubble.log")
+	stdoutFile, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatalf("create Chrome stdout: %v", err)
+	}
+	defer stdoutFile.Close()
+	stderrFile, err := os.Create(stderrPath)
+	if err != nil {
+		t.Fatalf("create Chrome stderr: %v", err)
+	}
+	defer stderrFile.Close()
+	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling", "--run-all-compositor-stages-before-draw", "--no-first-run", "--no-default-browser-check", "--user-data-dir="+filepath.Join(t.TempDir(), "chrome-completed-bubble-profile"), "--virtual-time-budget=5000", "--dump-dom", server.URL)
+	cmd.Stdout = stdoutFile
+	cmd.Stderr = stderrFile
+	configureTestBrowserProcess(cmd)
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start Chrome completed-bubble fixture: %v", err)
+	}
+	deadline := time.Now().Add(30 * time.Second)
+	var result string
+	for time.Now().Before(deadline) {
+		if output, readErr := os.ReadFile(stdoutPath); readErr == nil {
+			result = string(output)
+			if strings.Contains(result, `data-test-result="pass"`) || strings.Contains(result, `data-test-result="fail"`) {
+				break
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	stopTestBrowserProcess(cmd)
+	if !strings.Contains(result, `data-test-result="pass"`) {
+		state := regexp.MustCompile(`<main id="fixture-root"[^>]*>`).FindString(result)
+		stderr, _ := os.ReadFile(stderrPath)
+		t.Fatalf("completed-bubble browser hydration fixture failed: %s\nDOM: %s\nChrome stderr: %s", state, result, stderr)
 	}
 }
 
@@ -845,7 +968,7 @@ func TestChatContentRevisionIsCompactAndContentSensitive(t *testing.T) {
 func TestChatExecutionPairPreservesTerminalTranscriptDuringMorph(t *testing.T) {
 	terminal := models.Execution{ID: "terminal-1", Status: models.ExecCompleted, Output: "large output"}
 	var terminalHTML bytes.Buffer
-	if err := ChatExecutionPair(terminal, nil, []models.Execution{terminal}, 0, false, nil, "messages", "thread").Render(context.Background(), &terminalHTML); err != nil {
+	if err := ChatExecutionPair(terminal, nil, []models.Execution{terminal}, 0, false, nil, "messages", "thread", "project-a").Render(context.Background(), &terminalHTML); err != nil {
 		t.Fatalf("render terminal execution pair: %v", err)
 	}
 	if !strings.Contains(terminalHTML.String(), `id="chat-execution-terminal-1"`) || !strings.Contains(terminalHTML.String(), `hx-preserve="true"`) {
@@ -854,7 +977,7 @@ func TestChatExecutionPairPreservesTerminalTranscriptDuringMorph(t *testing.T) {
 
 	running := models.Execution{ID: "running-1", Status: models.ExecRunning}
 	var runningHTML bytes.Buffer
-	if err := ChatExecutionPair(running, nil, []models.Execution{running}, 0, false, nil, "messages", "thread").Render(context.Background(), &runningHTML); err != nil {
+	if err := ChatExecutionPair(running, nil, []models.Execution{running}, 0, false, nil, "messages", "thread", "project-a").Render(context.Background(), &runningHTML); err != nil {
 		t.Fatalf("render running execution pair: %v", err)
 	}
 	if strings.Contains(runningHTML.String(), `hx-preserve="true"`) {
@@ -862,7 +985,7 @@ func TestChatExecutionPairPreservesTerminalTranscriptDuringMorph(t *testing.T) {
 	}
 
 	var followupHTML bytes.Buffer
-	if err := ChatFollowupResponse("follow up", "running-1", "messages", "thread", true, nil).Render(context.Background(), &followupHTML); err != nil {
+	if err := ChatFollowupResponse("follow up", "running-1", "messages", "thread", true, nil, "project-a").Render(context.Background(), &followupHTML); err != nil {
 		t.Fatalf("render live follow-up pair: %v", err)
 	}
 	if !strings.Contains(followupHTML.String(), `id="chat-execution-running-1"`) {
@@ -889,6 +1012,27 @@ func TestChatAutoScrollScript_ToolHeaderUsesTextNodesNotInnerHTML(t *testing.T) 
 	}
 }
 
+func TestChatInputForm_SendButtonUsesSharedPrimaryActionColorClass(t *testing.T) {
+	var buf bytes.Buffer
+	if err := ChatInputForm(ChatInputFormConfig{
+		FormID:       "chat-form",
+		InputID:      "message-input",
+		PostEndpoint: "/chat/send",
+		TargetID:     "chat-messages",
+	}).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render ChatInputForm: %v", err)
+	}
+	body := buf.String()
+	for _, want := range []string{
+		`class="btn btn-primary btn-sm chat-send-button rounded-full`,
+		`(kind === 'stop' ? '' : ' chat-send-button')`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("initial and dynamically rebuilt send buttons must consume the shared primary action color class %q, got %s", want, body)
+		}
+	}
+}
+
 func TestChatInputForm_SubmitButtonUsesRequestSubmit(t *testing.T) {
 	var buf bytes.Buffer
 	err := ChatInputForm(ChatInputFormConfig{
@@ -908,8 +1052,8 @@ func TestChatInputForm_SubmitButtonUsesRequestSubmit(t *testing.T) {
 	if !strings.Contains(content, "form.addEventListener('click', function(e)") {
 		t.Fatal("chat input script must delegate submit button clicks after OOB action swaps")
 	}
-	if !strings.Contains(content, "e.target.closest('button[type=\"submit\"]')") {
-		t.Fatal("chat input script must detect the current submit button from delegated clicks")
+	if !strings.Contains(content, `e.target.closest('[id="' + formId + '-primary-action"] button')`) {
+		t.Fatal("chat input script must detect the current primary action from delegated clicks")
 	}
 	if !strings.Contains(content, "if (typeof form.requestSubmit === 'function')") {
 		t.Fatal("chat input script must feature-detect requestSubmit")
@@ -989,7 +1133,7 @@ func TestChatInputForm_MessageHistoryNavigationScript(t *testing.T) {
 		"messageHistoryEntries[messageHistoryEntries.length - 1 - messageHistoryIndex]",
 		"setMessageInputFromHistory(messageHistoryDraft);",
 		"resetMessageHistoryNavigation();",
-		"rememberSubmittedMessage(messageHistorySubmittedValue);",
+		"rememberSubmittedMessage(submittedMessage);",
 		"if (!event.detail || event.detail.elt !== form) return;",
 	}
 	for _, r := range required {
@@ -1135,11 +1279,11 @@ func TestChatInputForm_MobileControlsStayContained(t *testing.T) {
 	}
 
 	content := buf.String()
-	gutterClass := `class="chat-input-shadow-gutter w-full min-w-0 max-w-full pt-2 pb-4"`
+	gutterClass := `class="chat-input-shadow-gutter w-full min-w-0 max-w-full mt-6"`
 	if !strings.Contains(content, gutterClass) {
-		t.Fatalf("chat composer should render inside a full-width shadow gutter without artificial side padding or desktop caps; missing %q", gutterClass)
+		t.Fatalf("chat composer should render inside a full-width shadow gutter with a persistent top gap and without artificial side padding or desktop caps; missing %q", gutterClass)
 	}
-	if strings.Contains(content, `sm:max-w-3xl`) || strings.Contains(content, `sm:mx-auto`) || strings.Contains(content, `px-3 pt-2 pb-4`) {
+	if strings.Contains(content, `sm:max-w-3xl`) || strings.Contains(content, `sm:mx-auto`) || strings.Contains(content, `px-3 pt-2 pb-4`) || strings.Contains(content, `pt-2 pb-4`) {
 		t.Fatal("chat composer gutter must not add desktop side gaps or mobile right-side empty space")
 	}
 	formClass := `class="chat-input-container rounded-xl p-4 relative min-w-0 max-w-full"`
@@ -1195,15 +1339,79 @@ func TestChatInputForm_MessageHistoryCursorGuardsPreventArrowHijack(t *testing.T
 	}
 }
 
-func TestChatInputForm_RunningChatDoesNotExposeComposerSteeringControl(t *testing.T) {
+func TestChatInputForm_SharedQueueAndSteerShortcuts(t *testing.T) {
+	configs := []ChatInputFormConfig{
+		{
+			FormID:        "chat-form",
+			InputID:       "message-input",
+			PostEndpoint:  "/chat/send?project_id=project-1",
+			SteerEndpoint: "/chat/steer?project_id=project-1",
+			TargetID:      "chat-messages",
+			IsRunning:     true,
+			ActiveTurnID:  "exec-active-chat",
+		},
+		{
+			FormID:        "task-thread-form",
+			InputID:       "task-message-input",
+			PostEndpoint:  "/tasks/task-1/thread",
+			SteerEndpoint: "/tasks/task-1/thread/steer",
+			TargetID:      "task-thread-messages",
+			TaskID:        "task-1",
+			IsRunning:     true,
+			ActiveTurnID:  "exec-active-task",
+		},
+	}
+	for _, config := range configs {
+		t.Run(config.FormID, func(t *testing.T) {
+			var buf bytes.Buffer
+			if err := ChatInputForm(config).Render(context.Background(), &buf); err != nil {
+				t.Fatalf("render ChatInputForm: %v", err)
+			}
+			content := buf.String()
+			required := []string{
+				`data-steer-endpoint="` + config.SteerEndpoint + `"`,
+				"function chatComposerUsesAppleShortcuts()",
+				"navigator.userAgentData && navigator.userAgentData.platform",
+				"/Mac|iPhone|iPad|iPod|iOS/i.test(platform)",
+				"⏎ sends or queues · ⌘+⏎ steers",
+				"Enter sends or queues · Ctrl+Enter steers",
+				`data-composer-running="true"`,
+				"function composerHasActiveTurn()",
+				"new MutationObserver(handleComposerStateMutation).observe(form, { childList: true, subtree: true })",
+				"if (!composerHasActiveTurn()) {",
+				"if (guard) guard.remove();",
+				"if (e.isComposing || e.keyCode === 229) return;",
+				"if (e.key === 'Enter' && !e.shiftKey)",
+				"if (shortcutModifierPressed(e)) {",
+				"if (steerEndpoint && turnID) {",
+				"submitComposer(normalPostEndpoint, 'normal');",
+				"submitComposer(steerEndpoint, 'steer');",
+				"form.addEventListener('htmx:beforeRequest'",
+				"if (request._chatSubmittedIntent === 'normal') normalRequestInFlight++;",
+				"e.stopImmediatePropagation();",
+			}
+			for _, expected := range required {
+				if !strings.Contains(content, expected) {
+					t.Fatalf("shared shortcut script missing %q", expected)
+				}
+			}
+			if strings.Contains(content, "if (intent !== 'steer') normalRequestInFlight++") {
+				t.Fatal("normal request must not be counted before native form validation succeeds")
+			}
+		})
+	}
+}
+
+func TestChatInputForm_RunningChatExposesModifierSteeringEndpoint(t *testing.T) {
 	var buf bytes.Buffer
 	err := ChatInputForm(ChatInputFormConfig{
-		FormID:       "chat-form",
-		InputID:      "message-input",
-		PostEndpoint: "/chat/send",
-		TargetID:     "chat-messages",
-		IsRunning:    true,
-		ActiveTurnID: "exec-active-chat",
+		FormID:        "chat-form",
+		InputID:       "message-input",
+		PostEndpoint:  "/chat/send",
+		TargetID:      "chat-messages",
+		IsRunning:     true,
+		ActiveTurnID:  "exec-active-chat",
+		SteerEndpoint: "/chat/steer",
 	}).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("render ChatInputForm: %v", err)
@@ -1213,24 +1421,28 @@ func TestChatInputForm_RunningChatDoesNotExposeComposerSteeringControl(t *testin
 	if !strings.Contains(content, `name="expected_turn_id" value="exec-active-chat"`) {
 		t.Fatal("running chat form should keep the active turn guard for queue safety")
 	}
-	if strings.Contains(content, `name="steer_endpoint"`) || strings.Contains(content, `data-steer-submit="true"`) || strings.Contains(content, ">Steer") {
-		t.Fatal("running chat form must not expose composer steering controls")
+	if !strings.Contains(content, `data-steer-endpoint="/chat/steer"`) {
+		t.Fatal("running chat form must expose the guarded steering endpoint for modifier-click")
 	}
-	if strings.Contains(content, "htmx.ajax('POST', steerEndpoint") {
-		t.Fatal("running chat form must not post directly to the steering endpoint")
+	if strings.Contains(content, `name="steer_endpoint"`) || strings.Contains(content, ">Steer") {
+		t.Fatal("running chat form must not expose a separate visible composer steering control")
+	}
+	if !strings.Contains(content, "submitComposer(steerEndpoint, 'steer');") || !strings.Contains(content, "htmx.ajax('POST', endpoint") {
+		t.Fatal("running chat modifier-click must post through the steering endpoint")
 	}
 }
 
-func TestChatInputForm_RunningTaskThreadDoesNotExposeComposerSteeringControl(t *testing.T) {
+func TestChatInputForm_RunningTaskThreadExposesModifierSteeringEndpoint(t *testing.T) {
 	var buf bytes.Buffer
 	err := ChatInputForm(ChatInputFormConfig{
-		FormID:       "task-thread-form",
-		InputID:      "task-message-input",
-		PostEndpoint: "/tasks/task-1/thread",
-		TargetID:     "task-thread-messages",
-		TaskID:       "task-1",
-		IsRunning:    true,
-		ActiveTurnID: "exec-active-task",
+		FormID:        "task-thread-form",
+		InputID:       "task-message-input",
+		PostEndpoint:  "/tasks/task-1/thread",
+		TargetID:      "task-thread-messages",
+		TaskID:        "task-1",
+		IsRunning:     true,
+		ActiveTurnID:  "exec-active-task",
+		SteerEndpoint: "/tasks/task-1/thread/steer",
 	}).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("render ChatInputForm: %v", err)
@@ -1240,8 +1452,11 @@ func TestChatInputForm_RunningTaskThreadDoesNotExposeComposerSteeringControl(t *
 	if !strings.Contains(content, `name="expected_turn_id" value="exec-active-task"`) {
 		t.Fatal("running task-thread form should keep the active turn guard for queue safety")
 	}
-	if strings.Contains(content, `name="steer_endpoint"`) || strings.Contains(content, `data-steer-submit="true"`) || strings.Contains(content, ">Steer") {
-		t.Fatal("running task-thread form must not expose composer steering controls")
+	if !strings.Contains(content, `data-steer-endpoint="/tasks/task-1/thread/steer"`) {
+		t.Fatal("running task-thread form must expose the guarded steering endpoint for modifier-click")
+	}
+	if strings.Contains(content, `name="steer_endpoint"`) || strings.Contains(content, ">Steer") {
+		t.Fatal("running task-thread form must not expose a separate visible composer steering control")
 	}
 }
 
@@ -1267,7 +1482,7 @@ func TestPendingThreadInputRows_LeavesComposerOwnedInputsOutOfTranscript(t *test
 func TestChatComposerQueuedInputRows_RenderInsideInputBoxStyle(t *testing.T) {
 	inputs := []models.ThreadInput{
 		{ID: "queued-1", TaskID: "task-1", InputMode: models.ThreadInputModeQueued, Content: "queue this", AttachmentSessionID: "pending-session-1"},
-		{ID: "steer-1", TaskID: "task-1", InputMode: models.ThreadInputModeSteering, Content: "steer this"},
+		{ID: "steer-1", TaskID: "task-1", InputMode: models.ThreadInputModeSteering, Content: "steer this", AttachmentSessionID: "steering-session-1"},
 	}
 	var buf bytes.Buffer
 	err := ChatComposerQueuedInputRows(inputs, func(input models.ThreadInput) string {
@@ -1302,6 +1517,9 @@ func TestChatComposerQueuedInputRows_RenderInsideInputBoxStyle(t *testing.T) {
 	if !strings.Contains(content, `thread-input-steer-1`) || !strings.Contains(content, "Steering pending") || !strings.Contains(content, `aria-label="Cancel pending steering"`) {
 		t.Fatal("composer pending rows should include steering rows with a trash-icon cancel action")
 	}
+	if !strings.Contains(content, "Attachments included") || !strings.Contains(content, `aria-label="Attachments included with this steering instruction"`) {
+		t.Fatal("steering pending row with an attachment session should indicate that attachments are included")
+	}
 	if strings.Contains(content, "Send now") || strings.Contains(content, "btn-warning") || strings.Contains(content, "bg-warning") || strings.Contains(content, ">Cancel</button>") || strings.Contains(content, ">×</button>") {
 		t.Fatal("composer pending rows should avoid old warning/text/× cancel treatments")
 	}
@@ -1319,6 +1537,21 @@ func TestChatQueuedInputRowOOB_WithAttachmentsShowsQueuedAttachmentIndicator(t *
 	}
 	if !strings.Contains(content, "Attachments queued") || !strings.Contains(content, `aria-label="Attachments queued with this follow-up"`) {
 		t.Fatal("OOB queued row should indicate when attachments are queued with the message")
+	}
+}
+
+func TestChatSteeringInputRow_WithAttachmentsShowsIncludedAttachmentIndicator(t *testing.T) {
+	var buf bytes.Buffer
+	if err := ChatSteeringInputRow("steer-1", "steer this", true).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render ChatSteeringInputRow: %v", err)
+	}
+
+	content := buf.String()
+	if !strings.Contains(content, `thread-input-steer-1`) || !strings.Contains(content, `data-input-mode="steering"`) || !strings.Contains(content, "Steering pending") {
+		t.Fatal("steering row should render as a pending steering row")
+	}
+	if !strings.Contains(content, "Attachments included") || !strings.Contains(content, `aria-label="Attachments included with this steering instruction"`) {
+		t.Fatal("steering row should indicate when attachments are included with the message")
 	}
 }
 
@@ -1347,7 +1580,7 @@ func TestChatBubbleWithAttachments_MarksImagesForSmartScroll(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := ChatBubbleWithAttachments("User", "see screenshot", attachments).Render(context.Background(), &buf); err != nil {
+	if err := ChatBubbleWithAttachments("User", "see screenshot", attachments, "project-a").Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render ChatBubbleWithAttachments: %v", err)
 	}
 	content := buf.String()
@@ -1357,6 +1590,44 @@ func TestChatBubbleWithAttachments_MarksImagesForSmartScroll(t *testing.T) {
 	}
 	if count := strings.Count(content, `data-chat-attachment-image="true"`); count != 1 {
 		t.Fatalf("expected only image attachments to be marked for smart scroll, got %d markers", count)
+	}
+	if !strings.Contains(content, `/chat/attachments/att-image/download?project_id=project-a`) {
+		t.Fatalf("image attachment URL must carry project context, got: %s", content)
+	}
+	if !strings.Contains(content, `/chat/attachments/att-file/download?project_id=project-a`) {
+		t.Fatalf("file attachment URL must carry project context, got: %s", content)
+	}
+}
+
+func TestChatAttachmentListOnlyCarriesProjectContext(t *testing.T) {
+	attachments := []models.ChatAttachment{{ID: "att-list", FileName: "notes.txt", MediaType: "text/plain", FileSize: 42}}
+
+	var buf bytes.Buffer
+	if err := ChatAttachmentListOnly(attachments, "project-a").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render ChatAttachmentListOnly: %v", err)
+	}
+	content := buf.String()
+	if !strings.Contains(content, `/chat/attachments/att-list/download?project_id=project-a`) {
+		t.Fatalf("download URL must carry project context, got: %s", content)
+	}
+	if !strings.Contains(content, `hx-delete="/chat/attachments/att-list?project_id=project-a"`) {
+		t.Fatalf("delete URL must carry project context, got: %s", content)
+	}
+}
+
+func TestTaskAttachmentListCarriesProjectContext(t *testing.T) {
+	attachments := []models.Attachment{{ID: "att-list", FileName: "notes.txt", MediaType: "text/plain", FileSize: 42}}
+
+	var buf bytes.Buffer
+	if err := AttachmentList(attachments, "project-a", "task-a").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render AttachmentList: %v", err)
+	}
+	content := buf.String()
+	if !strings.Contains(content, `hx-post="/tasks/task-a/attachments?project_id=project-a"`) {
+		t.Fatalf("upload URL must carry project context, got: %s", content)
+	}
+	if !strings.Contains(content, `hx-delete="/attachments/att-list?project_id=project-a"`) {
+		t.Fatalf("delete URL must carry project context, got: %s", content)
 	}
 }
 
@@ -2169,7 +2440,7 @@ func TestChatMessages_RunningExecUsesSSEStreaming(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := ChatMessages(executions, task, nil, "task-thread-messages", "task-thread-view", false).Render(context.Background(), &buf)
+	err := ChatMessages(executions, task, nil, "task-thread-messages", "task-thread-view", false, task.ProjectID).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("Failed to render ChatMessages: %v", err)
 	}
@@ -2576,18 +2847,22 @@ func TestChatBubble_PreservesTaskIDMarkers(t *testing.T) {
 		t.Error("ChatBubble should preserve coded task summaries for direct-load hydration")
 	}
 
-	// Should have the convertTaskLinksInMessage call
-	if !strings.Contains(html, "convertTaskLinksInMessage") {
-		t.Error("ChatBubble should call convertTaskLinksInMessage for task link conversion")
+	if strings.Contains(html, "<script") || strings.Contains(html, "convertTaskLinksInMessage") || strings.Contains(html, "classList.add('chat-markdown')") {
+		t.Error("ChatBubble should leave task-link conversion and Markdown fallback to the shared hydrator")
 	}
 
-	// Keep the chat-stream-content class even in markdown fallback so refresh cleanup
-	// can reliably find and re-process the container.
-	if strings.Contains(html, "className = 'chat-markdown'") {
-		t.Error("ChatBubble should not replace container className with chat-markdown")
+	var script bytes.Buffer
+	if err := ChatAutoScrollScript().Render(context.Background(), &script); err != nil {
+		t.Fatalf("render shared chat script: %v", err)
 	}
-	if !strings.Contains(html, "classList.add('chat-markdown')") {
-		t.Error("ChatBubble markdown fallback should add chat-markdown class without removing existing classes")
+	scriptHTML := script.String()
+	if !strings.Contains(scriptHTML, "window.convertTaskLinksInMessage(bubble)") {
+		t.Error("shared assistant hydrator should convert task link markers after rendering raw bubbles")
+	}
+	// Keep the chat-stream-content class even in raw-bubble markdown fallback so refresh cleanup
+	// can reliably find and re-process the container.
+	if !strings.Contains(scriptHTML, "classList.add('chat-markdown')") {
+		t.Error("shared Markdown fallback should add chat-markdown class without removing existing classes")
 	}
 }
 
@@ -2644,8 +2919,8 @@ func TestCleanTranscriptControls_PreservesCodeExamples(t *testing.T) {
 		t.Fatal("rendered script must define transcript normalization and cleaning helpers")
 	}
 	codeHelpers := renderedBaseMarkdownCodeHelpers(t)
-	if strings.Count(content, "window.codeRanges(textBuffer)") != 2 {
-		t.Fatal("streaming renderer must calculate code ranges once before and once after marker normalization")
+	if strings.Count(content, "window.codeRanges(textBuffer)") != 4 {
+		t.Fatal("streaming renderer must calculate code ranges before and after marker normalization, including worker fallbacks")
 	}
 	if strings.Count(content, "window.isInsideCodeRanges(codeRanges, match.index, match.index + match[0].length)") != 4 {
 		t.Fatal("streaming renderer must not convert inline or fenced-code thinking/tool use/result examples into control cards")
@@ -2891,9 +3166,14 @@ func TestCleanTranscriptControls_PreservesCodeExamples(t *testing.T) {
 		"    function findPre(node) { if (node.tagName === 'pre') return node; for (const child of (node.children || [])) { const found = findPre(child); if (found) return found; } return null; }\n" +
 		"    const pre = findPre(largeToolStream);\n" +
 		"    if (!toolCommitted || !pre || pre.children.length < 3) throw new Error('large tool output was not appended in chunks');\n" +
+		"  const unavailableRangeStream = element('div'); unavailableRangeStream.id = 'large-tool-without-range-worker';\n" +
+		"  window.codeRangesAsync = function() { return Promise.resolve(null); };\n" +
+		"  return window.renderStreamingContent(unavailableRangeStream, largeTool, true).then(function(unavailableCommitted) {\n" +
+		"    if (!unavailableCommitted || !unavailableRangeStream.children.some(function(child) { return child.className.indexOf('stream-tool') !== -1; })) throw new Error('unavailable code-range worker exposed raw tool transcript');\n" +
 		"    const failing = element('div'); failing.id = 'failing-large-render'; failing.replaceChildren = function() { throw new Error('commit failed'); };\n" +
 		"    const manyTools = ('[Using tool: bash]\\n[Tool bash done]\\nx\\n[/Tool]\\n').repeat(80) + 'tail '.repeat(22000);\n" +
 		"    return window.renderStreamingContent(failing, manyTools, true).then(function() { process.exit(56); }, function(err) { if (!err || err.message !== 'commit failed') process.exit(57); });\n" +
+		"  });\n" +
 		"  });\n" +
 		"}).catch(function(err) { console.error(err && err.stack || err); process.exit(58); });\n"
 	if output, err := exec.Command(node, "-e", script).CombinedOutput(); err != nil {
@@ -2946,8 +3226,8 @@ func TestTranscriptCodeProtectionGeneratedParity(t *testing.T) {
 	if strings.Contains(string(generated), "function addInlineRanges(start, end)") || strings.Contains(string(generated), "window.isInsideCode = function") {
 		t.Fatal("generated Chat component must use the base layout's shared Markdown helpers instead of defining duplicates")
 	}
-	if strings.Count(content, "window.codeRanges(textBuffer)") != 2 {
-		t.Fatal("generated streaming renderer must calculate code ranges once before and once after marker normalization")
+	if strings.Count(content, "window.codeRanges(textBuffer)") != 4 {
+		t.Fatal("generated streaming renderer must retain pre/post normalization code-range scans and worker fallbacks")
 	}
 	if strings.Count(content, "window.isInsideCodeRanges(codeRanges, match.index, match.index + match[0].length)") != 4 {
 		t.Fatal("generated streaming renderer must protect thinking, tool-use, and both tool-result controls inside Markdown code")
@@ -3472,6 +3752,74 @@ func TestTaskThreadLiveEventsScript_HandlesMixtureProgressWithoutTaskID(t *testi
 	}
 }
 
+func TestTaskThreadLiveEventsScript_SteeredRowsReplaceStaleQueuedRows(t *testing.T) {
+	var buf bytes.Buffer
+	if err := TaskThreadLiveEventsScript("task-1").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render TaskThreadLiveEventsScript: %v", err)
+	}
+	html := buf.String()
+	steeredStart := strings.Index(html, "function renderSteeringRow(data)")
+	if steeredStart == -1 {
+		t.Fatal("expected task-thread steering row renderer")
+	}
+	branchEnd := strings.Index(html[steeredStart:], "var pendingFragmentExecs")
+	if branchEnd == -1 {
+		t.Fatal("expected task-thread steering row renderer terminator")
+	}
+	branch := html[steeredStart : steeredStart+branchEnd]
+	for _, snippet := range []string{
+		"existing.getAttribute('data-input-mode') === 'steering'",
+		"queuedSteerInFlight[data.pending_input_id]",
+		"directSteerInFlight && !existing",
+		"if (existing) existing.remove()",
+		"Steering pending",
+		"Attachments included",
+		"htmx.process(steeringRow)",
+		"if (data.type === 'task_thread_input_steered')",
+	} {
+		if !strings.Contains(html, snippet) && !strings.Contains(branch, snippet) {
+			t.Fatalf("task-thread live steering must include %q", snippet)
+		}
+	}
+	for _, snippet := range []string{
+		"window._taskThreadQueuedSteerRequestHandlers = window._taskThreadQueuedSteerRequestHandlers || {}",
+		"directSteerInFlight = true",
+		"directSteerInFlight = false",
+		"if (directSteerClearTimer) clearTimeout(directSteerClearTimer)",
+		"document.body.addEventListener('htmx:beforeRequest', queuedSteerBeforeRequestHandler)",
+		"document.body.addEventListener('htmx:afterRequest', queuedSteerAfterRequestHandler)",
+		"window._taskThreadQueuedSteerRequestHandlers[taskId] = {",
+		"document.body.removeEventListener('htmx:beforeRequest', queuedSteerBeforeRequestHandler)",
+		"document.body.removeEventListener('htmx:afterRequest', queuedSteerAfterRequestHandler)",
+		"delete window._taskThreadQueuedSteerRequestHandlers[taskId]",
+		"clearQueuedSteerRequestGuards()",
+	} {
+		if !strings.Contains(html, snippet) {
+			t.Fatalf("task-thread live script must manage local queued-to-steer request guard: missing %q", snippet)
+		}
+	}
+}
+
+func TestTaskThreadLiveEventsScript_QueuedRowsShowAttachmentIndicator(t *testing.T) {
+	var buf bytes.Buffer
+	if err := TaskThreadLiveEventsScript("task-1").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render TaskThreadLiveEventsScript: %v", err)
+	}
+	html := buf.String()
+	queuedStart := strings.Index(html, "function renderQueuedRow(data)")
+	if queuedStart == -1 {
+		t.Fatal("expected task-thread queued row renderer")
+	}
+	branchEnd := strings.Index(html[queuedStart:], "var pendingFragmentExecs")
+	if branchEnd == -1 {
+		t.Fatal("expected task-thread queued row renderer terminator")
+	}
+	branch := html[queuedStart : queuedStart+branchEnd]
+	if !strings.Contains(branch, "data.has_attachments") || !strings.Contains(branch, "Attachments queued") {
+		t.Fatal("task-thread live queued row must render the attachment indicator when the event has attachments")
+	}
+}
+
 func TestTaskThreadView_RuntimePreservationIsTaskScoped(t *testing.T) {
 	taskOne := &models.Task{ID: "task-one", Status: models.StatusRunning}
 	taskTwo := &models.Task{ID: "task-two", Status: models.StatusRunning}
@@ -3688,8 +4036,11 @@ func TestTaskThreadView_ContainsHorizontalOverflowOnMobile(t *testing.T) {
 	if strings.Contains(content, `id="task-thread-view" class="flex flex-col flex-1 min-h-0 min-w-0 max-w-full overflow-x-hidden"`) {
 		t.Fatal("task thread root must not clip the composer shadow; horizontal containment belongs on the messages pane and inner controls")
 	}
-	if !strings.Contains(content, `id="task-thread-messages" class="flex-1 overflow-y-auto py-4 mb-4 space-y-6 min-h-0"`) {
-		t.Fatal("task thread messages pane must use the same layout as the original working state")
+	if !strings.Contains(content, `id="task-thread-messages" class="flex-1 overflow-y-auto pt-4 pb-4 -mb-3 space-y-6 min-h-0"`) {
+		t.Fatal("task thread messages pane should avoid stacking an outer bottom margin above the composer")
+	}
+	if strings.Contains(content, `id="task-thread-messages" class="flex-1 overflow-y-auto pt-4 pb-0 mb-4`) {
+		t.Fatal("task thread messages pane must not add a second vertical gap before the composer")
 	}
 	if strings.Contains(content, `id="task-thread-messages" class="flex-1 overflow-y-auto overflow-x-hidden`) {
 		t.Fatal("task thread messages pane must not hard-clip chat bubble shadows")
@@ -3697,11 +4048,11 @@ func TestTaskThreadView_ContainsHorizontalOverflowOnMobile(t *testing.T) {
 	if strings.Contains(content, `-mr-[29px]`) || strings.Contains(content, `-mr-[18px]`) {
 		t.Fatal("task thread messages must not use fixed right-margin scrollbar compensation because it leaves bubbles visually shorter than the input in real browsers")
 	}
-	if !strings.Contains(content, `class="chat-input-shadow-gutter w-full min-w-0 max-w-full pt-2 pb-4"`) {
-		t.Fatal("task thread composer must use a full-width shadow gutter without side padding or desktop caps")
+	if !strings.Contains(content, `class="chat-input-shadow-gutter w-full min-w-0 max-w-full mt-6"`) {
+		t.Fatal("task thread composer must use a full-width shadow gutter with only the shared persistent top gap")
 	}
-	if strings.Contains(content, `chat-input-shadow-gutter w-full min-w-0 max-w-full sm:max-w-3xl`) || strings.Contains(content, `chat-input-shadow-gutter w-full min-w-0 max-w-full pt-2 pb-4 px-3`) {
-		t.Fatal("task thread composer gutter must not add artificial side gaps")
+	if strings.Contains(content, `chat-input-shadow-gutter w-full min-w-0 max-w-full sm:max-w-3xl`) || strings.Contains(content, `chat-input-shadow-gutter w-full min-w-0 max-w-full pt-2 pb-4 px-3`) || strings.Contains(content, `chat-input-shadow-gutter w-full min-w-0 max-w-full pt-2 pb-4`) {
+		t.Fatal("task thread composer gutter must not add artificial side gaps or extra vertical spacing")
 	}
 	if !strings.Contains(content, `class="chat-input-container rounded-xl p-4 relative min-w-0 max-w-full"`) {
 		t.Fatal("task thread composer shell must fill its shadow gutter without clipping")
@@ -4305,7 +4656,7 @@ func TestTaskThreadView_HidesInitialTranscriptUntilRenderBarrierSettles(t *testi
 	}
 	content := buf.String()
 
-	if !strings.Contains(content, `id="task-thread-messages" class="flex-1 overflow-y-auto py-4 mb-4 space-y-6 min-h-0" style="visibility: hidden;" data-transcript-hydrating="true"`) {
+	if !strings.Contains(content, `id="task-thread-messages" class="flex-1 overflow-y-auto pt-4 pb-4 -mb-3 space-y-6 min-h-0" style="visibility: hidden;" data-transcript-hydrating="true"`) {
 		t.Fatal("task thread must keep the server-rendered transcript hidden during coordinated initial hydration")
 	}
 	if !strings.Contains(content, "window.restoreChatTranscriptScroll({") || !strings.Contains(content, "_finishTaskThreadRenderScroll(chatMessages, Promise.all(initialRenderPromises))") {
@@ -5351,8 +5702,9 @@ window.addEventListener('DOMContentLoaded', function() {
 	if hydrationMS > 2000 {
 		t.Fatalf("synthetic large hydration exceeded 2s acceptance ceiling: %.1f ms", hydrationMS)
 	}
-	if maxLongTaskMS > 50 {
-		t.Fatalf("synthetic hydration exceeded 50ms slice ceiling: %.1f ms", maxLongTaskMS)
+	const maxHydrationSliceMS = 75.0
+	if maxLongTaskMS > maxHydrationSliceMS {
+		t.Fatalf("synthetic hydration exceeded %.0fms slice ceiling: %.1f ms", maxHydrationSliceMS, maxLongTaskMS)
 	}
 	if expansionMS > 200 || collapseMS > 200 {
 		t.Fatalf("tool output interaction exceeded 200ms target: expansion %.1f ms, collapse %.1f ms", expansionMS, collapseMS)

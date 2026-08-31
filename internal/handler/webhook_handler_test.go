@@ -5,14 +5,18 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/web/templates/components"
 )
 
 // webhookTestContext sets up a test context with webhook repo wired in.
@@ -52,11 +56,76 @@ func (wtc *webhookTestContext) createEndpoint(t *testing.T, projectID, name stri
 
 func (wtc *webhookTestContext) createAgent(t *testing.T, name string) *models.Agent {
 	t.Helper()
-	a := &models.Agent{Name: name, SystemPrompt: "test agent"}
+	a := &models.Agent{Name: name, SystemPrompt: "test agent", Enabled: true, SelectableAsPrimary: true}
 	if err := wtc.agentRepo.Create(context.Background(), a); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
 	return a
+}
+
+func (wtc *webhookTestContext) createProjectAgent(t *testing.T, projectID, name string) *models.Agent {
+	t.Helper()
+	a := &models.Agent{
+		Name:                name,
+		SystemPrompt:        "test project agent",
+		Scope:               models.AgentScopeProject,
+		ProjectID:           projectID,
+		Enabled:             true,
+		SelectableAsPrimary: true,
+	}
+	if err := wtc.agentRepo.Create(context.Background(), a); err != nil {
+		t.Fatalf("create project agent: %v", err)
+	}
+	return a
+}
+
+func (wtc *webhookTestContext) endpointAgentIDs(t *testing.T, endpointID string) []string {
+	t.Helper()
+	assigned, err := wtc.webhookRepo.GetEndpointAgents(context.Background(), endpointID)
+	if err != nil {
+		t.Fatalf("GetEndpointAgents: %v", err)
+	}
+	ids := make([]string, 0, len(assigned))
+	for _, assignment := range assigned {
+		ids = append(ids, assignment.AgentDefinitionID)
+	}
+	return ids
+}
+
+func expectStringSlice(t *testing.T, got, want []string) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("got %d values %#v, want %d values %#v", len(got), got, len(want), want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("value %d = %q in %#v, want %q in %#v", i, got[i], got, want[i], want)
+		}
+	}
+}
+
+func (wtc *webhookTestContext) expectSubmittedTasks(t *testing.T, count int) []models.Task {
+	t.Helper()
+	if wtc.handler.workerSvc == nil {
+		t.Fatal("worker service is not configured")
+	}
+
+	submitted := make([]models.Task, 0, count)
+	deadline := time.After(2 * time.Second)
+	for len(submitted) < count {
+		select {
+		case task := <-wtc.handler.workerSvc.Submitted():
+			submitted = append(submitted, task)
+		case <-deadline:
+			t.Fatalf("timed out waiting for %d worker submissions, got %d", count, len(submitted))
+		}
+	}
+	select {
+	case task := <-wtc.handler.workerSvc.Submitted():
+		t.Fatalf("unexpected extra worker submission for task %s", task.ID)
+	default:
+	}
+	return submitted
 }
 
 // jsonRequest makes a JSON request to the echo server with custom headers.
@@ -215,6 +284,11 @@ func TestWebhookInbound_DuplicatePayloadCreatesSecondTask(t *testing.T) {
 		t.Fatalf("second webhook: expected 202, got %d; body=%s", rec2.Code, rec2.Body.String())
 	}
 
+	submitted := wtc.expectSubmittedTasks(t, 2)
+	if submitted[0].ID == submitted[1].ID {
+		t.Fatalf("expected two distinct worker submissions, both used task %s", submitted[0].ID)
+	}
+
 	tasks, err := wtc.taskRepo.ListByProject(context.Background(), project.ID, "")
 	if err != nil {
 		t.Fatalf("ListByProject: %v", err)
@@ -270,6 +344,145 @@ func TestWebhookInbound_PayloadEmbeddedInPrompt(t *testing.T) {
 	}
 }
 
+func TestChannelsUI_WebhookAgentPickerIsProjectScoped(t *testing.T) {
+	wtc := newWebhookTestContext(t)
+	projectA := wtc.CreateProject().WithName("Webhook Project A").Build()
+	projectB := wtc.CreateProject().WithName("Webhook Project B").Build()
+
+	globalAgent := wtc.createAgent(t, "Global Webhook Agent")
+	projectAAgent := wtc.createProjectAgent(t, projectA.ID, "Project A Webhook Agent")
+	projectBAgent := wtc.createProjectAgent(t, projectB.ID, "Project B Webhook Agent")
+
+	rec := wtc.HTMX().Get("/channels?project_id=" + projectA.ID).Execute()
+	wtc.Assert(rec).StatusCode(http.StatusOK)
+	body := rec.Body.String()
+	if !strings.Contains(body, globalAgent.ID) {
+		t.Fatalf("global agent %q missing from project A webhook picker", globalAgent.ID)
+	}
+	if !strings.Contains(body, projectAAgent.ID) {
+		t.Fatalf("project A agent %q missing from project A webhook picker", projectAAgent.ID)
+	}
+	if strings.Contains(body, projectBAgent.ID) {
+		t.Fatalf("project B agent %q leaked into project A webhook picker", projectBAgent.ID)
+	}
+}
+
+func TestWebhookCRUD_RejectsUnavailableAgentsWithoutMutation(t *testing.T) {
+	wtc := newWebhookTestContext(t)
+	projectA := wtc.CreateProject().WithName("Webhook Assignment A").Build()
+	projectB := wtc.CreateProject().WithName("Webhook Assignment B").Build()
+
+	validAgent := wtc.createAgent(t, "Valid Webhook Agent")
+	foreignAgent := wtc.createProjectAgent(t, projectB.ID, "Foreign Webhook Agent")
+	disabledAgent := wtc.createAgent(t, "Disabled Webhook Agent")
+	disabledAgent.Enabled = false
+	if err := wtc.agentRepo.Update(context.Background(), disabledAgent); err != nil {
+		t.Fatalf("disable agent: %v", err)
+	}
+	nonSelectableAgent := wtc.createAgent(t, "Non-selectable Webhook Agent")
+	nonSelectableAgent.SelectableAsPrimary = false
+	if err := wtc.agentRepo.Update(context.Background(), nonSelectableAgent); err != nil {
+		t.Fatalf("make agent non-selectable: %v", err)
+	}
+	archivedAgent := wtc.createAgent(t, "Archived Webhook Agent")
+	archivedAgent.GeneratedStatus = models.AgentStatusArchived
+	if err := wtc.agentRepo.Update(context.Background(), archivedAgent); err != nil {
+		t.Fatalf("archive agent: %v", err)
+	}
+
+	createForm := url.Values{
+		"project_id": {projectA.ID},
+		"name":       {"Rejected Webhook"},
+		"agent_ids":  {foreignAgent.ID},
+	}
+	createReq := httptest.NewRequest("POST", "/channels/webhooks?project_id="+projectA.ID, strings.NewReader(createForm.Encode()))
+	createReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	createRec := httptest.NewRecorder()
+	wtc.echo.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusBadRequest {
+		t.Fatalf("foreign create: expected 400, got %d; body=%s", createRec.Code, createRec.Body.String())
+	}
+	createdWebhooks, err := wtc.webhookRepo.ListByProject(context.Background(), projectA.ID)
+	if err != nil {
+		t.Fatalf("list project A webhooks after rejected create: %v", err)
+	}
+	if len(createdWebhooks) != 0 {
+		t.Fatalf("rejected create persisted %d webhook(s)", len(createdWebhooks))
+	}
+
+	endpoint := wtc.createEndpoint(t, projectA.ID, "Original Webhook", true)
+	if err := wtc.webhookRepo.SetEndpointAgents(context.Background(), endpoint.ID, []string{validAgent.ID}); err != nil {
+		t.Fatalf("set initial endpoint agent: %v", err)
+	}
+	for _, testCase := range []struct {
+		name    string
+		agentID string
+	}{
+		{name: "foreign", agentID: foreignAgent.ID},
+		{name: "unknown", agentID: "missing-webhook-agent"},
+		{name: "disabled", agentID: disabledAgent.ID},
+		{name: "archived", agentID: archivedAgent.ID},
+		{name: "non-selectable", agentID: nonSelectableAgent.ID},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			updateForm := url.Values{
+				"name":      {"Should Not Save"},
+				"enabled":   {"true"},
+				"agent_ids": {testCase.agentID},
+			}
+			updateReq := httptest.NewRequest("PUT", "/channels/webhooks/"+endpoint.ID+"?project_id="+projectA.ID, strings.NewReader(updateForm.Encode()))
+			updateReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			updateRec := httptest.NewRecorder()
+			wtc.echo.ServeHTTP(updateRec, updateReq)
+			if updateRec.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400, got %d; body=%s", updateRec.Code, updateRec.Body.String())
+			}
+
+			updated, err := wtc.webhookRepo.GetByID(context.Background(), endpoint.ID)
+			if err != nil {
+				t.Fatalf("get endpoint after rejected update: %v", err)
+			}
+			if updated == nil || updated.Name != endpoint.Name {
+				t.Fatalf("rejected update changed endpoint: %#v", updated)
+			}
+			expectStringSlice(t, wtc.endpointAgentIDs(t, endpoint.ID), []string{validAgent.ID})
+		})
+	}
+}
+
+func TestWebhookInboundAndTest_RejectIncompatibleLegacyAssignment(t *testing.T) {
+	wtc := newWebhookTestContext(t)
+	projectA := wtc.CreateProject().WithName("Legacy Webhook A").Build()
+	projectB := wtc.CreateProject().WithName("Legacy Webhook B").Build()
+	foreignAgent := wtc.createProjectAgent(t, projectB.ID, "Legacy Foreign Agent")
+	endpoint := wtc.createEndpoint(t, projectA.ID, "Legacy Assignment Webhook", true)
+	if err := wtc.webhookRepo.SetEndpointAgents(context.Background(), endpoint.ID, []string{foreignAgent.ID}); err != nil {
+		t.Fatalf("seed legacy endpoint assignment: %v", err)
+	}
+
+	inboundRec := wtc.jsonRequest("POST", "/webhooks/inbound/"+endpoint.PathToken, `{"event_type":"legacy"}`,
+		map[string]string{"X-Webhook-Secret": endpoint.Secret})
+	if inboundRec.Code == http.StatusAccepted {
+		t.Fatalf("inbound accepted incompatible legacy assignment: %s", inboundRec.Body.String())
+	}
+
+	testReq := httptest.NewRequest("POST", "/channels/webhooks/"+endpoint.ID+"/test", nil)
+	testRec := httptest.NewRecorder()
+	wtc.echo.ServeHTTP(testRec, testReq)
+	if testRec.Code == http.StatusAccepted {
+		t.Fatalf("test accepted incompatible legacy assignment: %s", testRec.Body.String())
+	}
+
+	tasks, err := wtc.taskRepo.ListByProject(context.Background(), projectA.ID, "")
+	if err != nil {
+		t.Fatalf("list tasks after rejected legacy assignment: %v", err)
+	}
+	if len(tasks) != 0 {
+		t.Fatalf("incompatible legacy assignment created %d task(s)", len(tasks))
+	}
+	expectStringSlice(t, wtc.endpointAgentIDs(t, endpoint.ID), []string{foreignAgent.ID})
+}
+
 func TestWebhookInbound_PrimaryAgentMapping(t *testing.T) {
 	wtc := newWebhookTestContext(t)
 	project := wtc.CreateProject().WithName("WH Agent").Build()
@@ -310,7 +523,7 @@ func TestWebhookInbound_TaskAgentAssignmentsPersisted(t *testing.T) {
 	wtc := newWebhookTestContext(t)
 	project := wtc.CreateProject().WithName("WH Assignments").Build()
 	agent1 := wtc.createAgent(t, "First")
-	agent2 := wtc.createAgent(t, "Second")
+	agent2 := wtc.createProjectAgent(t, project.ID, "Second")
 
 	endpoint := wtc.createEndpoint(t, project.ID, "AssignTest", true)
 	if err := wtc.webhookRepo.SetEndpointAgents(context.Background(), endpoint.ID,
@@ -345,11 +558,63 @@ func TestWebhookInbound_TaskAgentAssignmentsPersisted(t *testing.T) {
 	}
 }
 
+func TestWebhookDetail_ReturnsFullEditPayloadAndSelectedAgents(t *testing.T) {
+	wtc := newWebhookTestContext(t)
+	project := wtc.CreateProject().WithName("WH Detail").Build()
+	otherProject := wtc.CreateProject().WithName("WH Detail Other").Build()
+	agent1 := wtc.createAgent(t, "Agent One")
+	agent2 := wtc.createAgent(t, "Agent Two")
+
+	endpoint := &models.WebhookEndpoint{
+		ProjectID:          project.ID,
+		Name:               "Detailed Hook",
+		Enabled:            true,
+		SystemInstructions: "Full system instructions",
+		TitleTemplate:      "Incident: {{summary}}",
+		PromptTemplate:     "Payload: {{payload}}",
+		DefaultPriority:    4,
+	}
+	if err := wtc.webhookRepo.Create(context.Background(), endpoint); err != nil {
+		t.Fatalf("create webhook endpoint: %v", err)
+	}
+	if err := wtc.webhookRepo.SetEndpointAgents(context.Background(), endpoint.ID, []string{agent2.ID, agent1.ID}); err != nil {
+		t.Fatalf("set endpoint agents: %v", err)
+	}
+
+	req := httptest.NewRequest("GET", "/channels/webhooks/"+endpoint.ID+"?project_id="+project.ID, nil)
+	rec := httptest.NewRecorder()
+	wtc.echo.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("detail: expected 200, got %d; body=%s", rec.Code, rec.Body.String())
+	}
+
+	var detail webhookDetailResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &detail); err != nil {
+		t.Fatalf("decode detail response: %v", err)
+	}
+	if detail.ID != endpoint.ID || detail.ProjectID != project.ID || detail.Name != endpoint.Name || !detail.Enabled {
+		t.Fatalf("detail returned wrong identity fields: %#v", detail)
+	}
+	if detail.Secret != endpoint.Secret || detail.SystemInstructions != endpoint.SystemInstructions || detail.TitleTemplate != endpoint.TitleTemplate || detail.PromptTemplate != endpoint.PromptTemplate || detail.DefaultPriority != endpoint.DefaultPriority {
+		t.Fatalf("detail missing full edit payload: %#v", detail)
+	}
+	if len(detail.AgentIDs) != 2 || detail.AgentIDs[0] != agent2.ID || detail.AgentIDs[1] != agent1.ID {
+		t.Fatalf("detail agent IDs = %#v, want selected agents in position order", detail.AgentIDs)
+	}
+
+	crossProjectReq := httptest.NewRequest("GET", "/channels/webhooks/"+endpoint.ID+"?project_id="+otherProject.ID, nil)
+	crossProjectRec := httptest.NewRecorder()
+	wtc.echo.ServeHTTP(crossProjectRec, crossProjectReq)
+	if crossProjectRec.Code != http.StatusNotFound {
+		t.Fatalf("cross-project detail: expected 404, got %d; body=%s", crossProjectRec.Code, crossProjectRec.Body.String())
+	}
+}
+
 func TestWebhookCRUD_CreateViaForm(t *testing.T) {
 	wtc := newWebhookTestContext(t)
 	project := wtc.CreateProject().WithName("WH CRUD").Build()
 	agent1 := wtc.createAgent(t, "Agent One")
-	agent2 := wtc.createAgent(t, "Agent Two")
+	agent2 := wtc.createProjectAgent(t, project.ID, "Agent Two")
 
 	form := url.Values{
 		"name":                {"My Webhook"},
@@ -373,15 +638,410 @@ func TestWebhookCRUD_CreateViaForm(t *testing.T) {
 	if webhooks[0].Name != "My Webhook" {
 		t.Errorf("name = %q, want My Webhook", webhooks[0].Name)
 	}
-	assigned, err := wtc.webhookRepo.GetEndpointAgents(context.Background(), webhooks[0].ID)
+	expectStringSlice(t, wtc.endpointAgentIDs(t, webhooks[0].ID), []string{agent1.ID, agent2.ID})
+}
+
+func TestWebhookCRUD_CreatePreservesEnabledFormValue(t *testing.T) {
+	tests := []struct {
+		name         string
+		enabledValue string
+		wantEnabled  bool
+	}{
+		{name: "omitted", wantEnabled: false},
+		{name: "true", enabledValue: "true", wantEnabled: true},
+		{name: "one", enabledValue: "1", wantEnabled: true},
+		{name: "on", enabledValue: "on", wantEnabled: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			wtc := newWebhookTestContext(t)
+			project := wtc.CreateProject().WithName("WH Enabled Form").Build()
+
+			form := url.Values{
+				"name": {"Form Webhook " + tt.name},
+			}
+			if tt.enabledValue != "" {
+				form.Set("enabled", tt.enabledValue)
+			}
+			req := httptest.NewRequest("POST", "/channels/webhooks?project_id="+project.ID, strings.NewReader(form.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			rec := httptest.NewRecorder()
+			wtc.echo.ServeHTTP(rec, req)
+			if rec.Code != http.StatusCreated {
+				t.Fatalf("create: expected 201, got %d; body=%s", rec.Code, rec.Body.String())
+			}
+
+			webhooks, err := wtc.webhookRepo.ListByProject(context.Background(), project.ID)
+			if err != nil {
+				t.Fatalf("ListByProject: %v", err)
+			}
+			if len(webhooks) != 1 {
+				t.Fatalf("expected 1 webhook, got %d", len(webhooks))
+			}
+			created, err := wtc.webhookRepo.GetByID(context.Background(), webhooks[0].ID)
+			if err != nil || created == nil {
+				t.Fatalf("GetByID after create: %v", err)
+			}
+			if created.Enabled != tt.wantEnabled {
+				t.Fatalf("created webhook Enabled = %t, want %t", created.Enabled, tt.wantEnabled)
+			}
+
+			if !tt.wantEnabled {
+				channelsRec := wtc.HTMX().Get("/channels?project_id=" + project.ID).Execute()
+				wtc.Assert(channelsRec).StatusCode(http.StatusOK)
+				card := webhookCardSectionByName(channelsRec.Body.String(), created.Name)
+				if !strings.Contains(card, `badge badge-sm badge-ghost">Disabled`) {
+					t.Fatalf("expected disabled webhook card badge, got %q", card)
+				}
+			}
+
+			payload := `{"event_type":"form_test","summary":"Form webhook event"}`
+			mac := hmac.New(sha256.New, []byte(created.Secret))
+			mac.Write([]byte(payload))
+			sig := "sha256=" + hex.EncodeToString(mac.Sum(nil))
+			inboundRec := wtc.jsonRequest("POST", "/webhooks/inbound/"+created.PathToken, payload,
+				map[string]string{"X-Hub-Signature-256": sig})
+
+			tasks, err := wtc.taskRepo.ListByProject(context.Background(), project.ID, "")
+			if err != nil {
+				t.Fatalf("ListByProject tasks: %v", err)
+			}
+			if !tt.wantEnabled {
+				if inboundRec.Code != http.StatusForbidden {
+					t.Fatalf("disabled inbound: expected 403, got %d; body=%s", inboundRec.Code, inboundRec.Body.String())
+				}
+				if len(tasks) != 0 {
+					t.Fatalf("disabled inbound created %d tasks, want 0", len(tasks))
+				}
+				select {
+				case submitted := <-wtc.handler.workerSvc.Submitted():
+					t.Fatalf("disabled inbound submitted task %s", submitted.ID)
+				default:
+				}
+				return
+			}
+
+			if inboundRec.Code != http.StatusAccepted {
+				t.Fatalf("enabled inbound: expected 202, got %d; body=%s", inboundRec.Code, inboundRec.Body.String())
+			}
+			if len(tasks) != 1 {
+				t.Fatalf("enabled inbound created %d tasks, want 1", len(tasks))
+			}
+			wtc.expectSubmittedTasks(t, 1)
+		})
+	}
+}
+
+func TestWebhookCRUD_CreateAndUpdateNormalizeEditableFieldsAndAgents(t *testing.T) {
+	wtc := newWebhookTestContext(t)
+	project := wtc.CreateProject().WithName("WH Form Parity").Build()
+	agent1 := wtc.createAgent(t, "Agent One")
+	agent2 := wtc.createProjectAgent(t, project.ID, "Agent Two")
+	agent3 := wtc.createAgent(t, "Agent Three")
+
+	createForm := url.Values{
+		"project_id":          {project.ID},
+		"name":                {"  Created Hook  "},
+		"enabled":             {"true"},
+		"system_instructions": {"  Created system  "},
+		"default_priority":    {"4"},
+		"title_template":      {"  Created {{summary}}  "},
+		"prompt_template":     {"  Created prompt  "},
+		"agent_ids":           {agent1.ID + "," + agent2.ID, agent2.ID + "," + agent3.ID},
+	}
+	createReq := httptest.NewRequest("POST", "/channels/webhooks?project_id="+project.ID, strings.NewReader(createForm.Encode()))
+	createReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	createRec := httptest.NewRecorder()
+	wtc.echo.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("create: expected 201, got %d; body=%s", createRec.Code, createRec.Body.String())
+	}
+
+	webhooks, err := wtc.webhookRepo.ListByProject(context.Background(), project.ID)
 	if err != nil {
-		t.Fatalf("GetEndpointAgents: %v", err)
+		t.Fatalf("ListByProject: %v", err)
 	}
-	if len(assigned) != 2 {
-		t.Fatalf("expected 2 assigned agents, got %d", len(assigned))
+	if len(webhooks) != 1 {
+		t.Fatalf("expected 1 webhook, got %d", len(webhooks))
 	}
-	if assigned[0].AgentDefinitionID != agent1.ID || assigned[1].AgentDefinitionID != agent2.ID {
-		t.Fatalf("unexpected agent assignment order: %#v", assigned)
+	created := webhooks[0]
+	if created.Name != "Created Hook" || !created.Enabled || created.SystemInstructions != "Created system" || created.TitleTemplate != "Created {{summary}}" || created.PromptTemplate != "Created prompt" || created.DefaultPriority != 4 {
+		t.Fatalf("created webhook fields were not normalized/persisted: %#v", created)
+	}
+	if created.PathToken == "" || created.Secret == "" {
+		t.Fatalf("created webhook missing generated token/secret: %#v", created)
+	}
+	expectStringSlice(t, wtc.endpointAgentIDs(t, created.ID), []string{agent1.ID, agent2.ID, agent3.ID})
+
+	updateForm := url.Values{
+		"name":                {"  Updated Hook  "},
+		"system_instructions": {"  Updated system  "},
+		"default_priority":    {"3"},
+		"title_template":      {"  Updated {{event_type}}  "},
+		"prompt_template":     {"  Updated prompt  "},
+		"agent_ids":           {agent3.ID + "," + agent1.ID},
+	}
+	updateReq := httptest.NewRequest("PUT", "/channels/webhooks/"+created.ID, strings.NewReader(updateForm.Encode()))
+	updateReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	updateRec := httptest.NewRecorder()
+	wtc.echo.ServeHTTP(updateRec, updateReq)
+	if updateRec.Code != http.StatusOK {
+		t.Fatalf("update: expected 200, got %d; body=%s", updateRec.Code, updateRec.Body.String())
+	}
+
+	updated, err := wtc.webhookRepo.GetByID(context.Background(), created.ID)
+	if err != nil || updated == nil {
+		t.Fatalf("GetByID after update: %v", err)
+	}
+	if updated.Name != "Updated Hook" || updated.Enabled || updated.SystemInstructions != "Updated system" || updated.TitleTemplate != "Updated {{event_type}}" || updated.PromptTemplate != "Updated prompt" || updated.DefaultPriority != 3 {
+		t.Fatalf("updated webhook fields were not normalized/persisted: %#v", updated)
+	}
+	if updated.PathToken != created.PathToken || updated.Secret != created.Secret {
+		t.Fatalf("update changed generated token/secret: before=%#v after=%#v", created, updated)
+	}
+	expectStringSlice(t, wtc.endpointAgentIDs(t, updated.ID), []string{agent3.ID, agent1.ID})
+}
+
+func TestWebhookCRUD_BlankNameLifecycleBehavior(t *testing.T) {
+	wtc := newWebhookTestContext(t)
+	project := wtc.CreateProject().WithName("WH Blank Names").Build()
+
+	createForm := url.Values{
+		"project_id": {project.ID},
+		"name":       {"   "},
+	}
+	createReq := httptest.NewRequest("POST", "/channels/webhooks?project_id="+project.ID, strings.NewReader(createForm.Encode()))
+	createReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	createRec := httptest.NewRecorder()
+	wtc.echo.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("create blank name: expected 201, got %d; body=%s", createRec.Code, createRec.Body.String())
+	}
+	webhooks, err := wtc.webhookRepo.ListByProject(context.Background(), project.ID)
+	if err != nil {
+		t.Fatalf("ListByProject: %v", err)
+	}
+	if len(webhooks) != 1 {
+		t.Fatalf("expected 1 webhook, got %d", len(webhooks))
+	}
+	if webhooks[0].Name != "New Webhook" {
+		t.Fatalf("blank create name = %q, want New Webhook", webhooks[0].Name)
+	}
+
+	existing := wtc.createEndpoint(t, project.ID, "Keep Existing Name", true)
+	updateForm := url.Values{
+		"name":             {"   "},
+		"default_priority": {"2"},
+	}
+	updateReq := httptest.NewRequest("PUT", "/channels/webhooks/"+existing.ID, strings.NewReader(updateForm.Encode()))
+	updateReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	updateRec := httptest.NewRecorder()
+	wtc.echo.ServeHTTP(updateRec, updateReq)
+	if updateRec.Code != http.StatusOK {
+		t.Fatalf("update blank name: expected 200, got %d; body=%s", updateRec.Code, updateRec.Body.String())
+	}
+	updated, err := wtc.webhookRepo.GetByID(context.Background(), existing.ID)
+	if err != nil || updated == nil {
+		t.Fatalf("GetByID after blank name update: %v", err)
+	}
+	if updated.Name != "Keep Existing Name" {
+		t.Fatalf("blank update name = %q, want existing name preserved", updated.Name)
+	}
+}
+
+// TestWebhookCRUD_DefaultPriorityMatchesCanonicalScale proves the webhook
+// Default Priority dropdown options persist on the canonical task priority
+// scale (1=Low, 2=Normal, 3=High, 4=Urgent) for both create and update.
+func TestWebhookCRUD_DefaultPriorityMatchesCanonicalScale(t *testing.T) {
+	wtc := newWebhookTestContext(t)
+	project := wtc.CreateProject().WithName("WH Priority Scale").Build()
+
+	for _, want := range []int{1, 2, 3, 4} {
+		form := url.Values{
+			"project_id":       {project.ID},
+			"name":             {"Priority Hook"},
+			"default_priority": {strconv.Itoa(want)},
+		}
+		req := httptest.NewRequest("POST", "/channels/webhooks?project_id="+project.ID, strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rec := httptest.NewRecorder()
+		wtc.echo.ServeHTTP(rec, req)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("create priority=%d: expected 201, got %d; body=%s", want, rec.Code, rec.Body.String())
+		}
+
+		webhooks, _ := wtc.webhookRepo.ListByProject(context.Background(), project.ID)
+		var created *models.WebhookEndpoint
+		for i := range webhooks {
+			if webhooks[i].DefaultPriority == want {
+				created = &webhooks[i]
+			}
+		}
+		if created == nil {
+			t.Fatalf("expected a created webhook with DefaultPriority=%d, got %#v", want, webhooks)
+		}
+
+		// Now update it to a different value on the canonical scale and confirm
+		// the persisted value matches exactly (no inversion/remapping).
+		other := want%4 + 1
+		updateForm := url.Values{
+			"name":             {"Priority Hook Updated"},
+			"default_priority": {strconv.Itoa(other)},
+		}
+		updateReq := httptest.NewRequest("PUT", "/channels/webhooks/"+created.ID, strings.NewReader(updateForm.Encode()))
+		updateReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		updateRec := httptest.NewRecorder()
+		wtc.echo.ServeHTTP(updateRec, updateReq)
+		if updateRec.Code != http.StatusOK {
+			t.Fatalf("update priority=%d: expected 200, got %d; body=%s", other, updateRec.Code, updateRec.Body.String())
+		}
+
+		updated, err := wtc.webhookRepo.GetByID(context.Background(), created.ID)
+		if err != nil || updated == nil {
+			t.Fatalf("GetByID after update: %v", err)
+		}
+		if updated.DefaultPriority != other {
+			t.Errorf("updated DefaultPriority = %d, want %d", updated.DefaultPriority, other)
+		}
+	}
+}
+
+// TestWebhookCRUD_BlankDefaultPriorityDoesNotProduceLegacyZero proves blank/omitted
+// default_priority form submissions never resolve to the legacy no-badge value 0.
+func TestWebhookCRUD_BlankDefaultPriorityDoesNotProduceLegacyZero(t *testing.T) {
+	wtc := newWebhookTestContext(t)
+	project := wtc.CreateProject().WithName("WH Priority Blank").Build()
+
+	// Create with default_priority omitted entirely.
+	createForm := url.Values{
+		"project_id": {project.ID},
+		"name":       {"Blank Priority Hook"},
+	}
+	req := httptest.NewRequest("POST", "/channels/webhooks?project_id="+project.ID, strings.NewReader(createForm.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	wtc.echo.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create: expected 201, got %d; body=%s", rec.Code, rec.Body.String())
+	}
+
+	webhooks, _ := wtc.webhookRepo.ListByProject(context.Background(), project.ID)
+	if len(webhooks) != 1 {
+		t.Fatalf("expected 1 webhook, got %d", len(webhooks))
+	}
+	if webhooks[0].DefaultPriority == 0 {
+		t.Fatalf("blank default_priority resolved to legacy no-badge 0")
+	}
+	if webhooks[0].DefaultPriority != 1 {
+		t.Errorf("blank default_priority = %d, want the sane default (1, Low)", webhooks[0].DefaultPriority)
+	}
+
+	// Update with default_priority sent as an explicit blank string.
+	updateForm := url.Values{
+		"name":             {"Blank Priority Hook"},
+		"default_priority": {""},
+	}
+	updateReq := httptest.NewRequest("PUT", "/channels/webhooks/"+webhooks[0].ID, strings.NewReader(updateForm.Encode()))
+	updateReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	updateRec := httptest.NewRecorder()
+	wtc.echo.ServeHTTP(updateRec, updateReq)
+	if updateRec.Code != http.StatusOK {
+		t.Fatalf("update: expected 200, got %d; body=%s", updateRec.Code, updateRec.Body.String())
+	}
+
+	updated, err := wtc.webhookRepo.GetByID(context.Background(), webhooks[0].ID)
+	if err != nil || updated == nil {
+		t.Fatalf("GetByID after update: %v", err)
+	}
+	if updated.DefaultPriority == 0 {
+		t.Fatalf("blank default_priority on update resolved to legacy no-badge 0")
+	}
+	if updated.DefaultPriority != 1 {
+		t.Errorf("blank default_priority on update = %d, want the sane default (1, Low)", updated.DefaultPriority)
+	}
+}
+
+// TestWebhookInbound_UrgentDefaultPriorityProducesCanonicalUrgentTask proves a
+// webhook configured with the canonical "Urgent" (4) default priority creates
+// a task that renders the Urgent badge and sorts above lower-priority tasks.
+func TestWebhookInbound_UrgentDefaultPriorityProducesCanonicalUrgentTask(t *testing.T) {
+	wtc := newWebhookTestContext(t)
+	project := wtc.CreateProject().WithName("WH Urgent Priority").Build()
+
+	w := &models.WebhookEndpoint{
+		ProjectID:       project.ID,
+		Name:            "UrgentHook",
+		Enabled:         true,
+		DefaultPriority: 4, // Urgent on the canonical scale.
+	}
+	if err := wtc.webhookRepo.Create(context.Background(), w); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	payload := `{"event_type":"incident.triggered","summary":"Everything is down"}`
+	rec := wtc.jsonRequest("POST", "/webhooks/inbound/"+w.PathToken, payload,
+		map[string]string{"X-Webhook-Secret": w.Secret})
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d; body=%s", rec.Code, rec.Body.String())
+	}
+
+	tasks, err := wtc.taskRepo.ListByProject(context.Background(), project.ID, "")
+	if err != nil {
+		t.Fatalf("ListByProject: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("expected 1 task, got %d", len(tasks))
+	}
+	if tasks[0].Priority != 4 {
+		t.Fatalf("task priority = %d, want 4 (canonical Urgent)", tasks[0].Priority)
+	}
+	if components.PriorityLabel(tasks[0].Priority) != "Urgent" {
+		t.Fatalf("PriorityLabel(%d) = %q, want Urgent", tasks[0].Priority, components.PriorityLabel(tasks[0].Priority))
+	}
+}
+
+// TestWebhookInbound_LegacyZeroDefaultPriorityDoesNotProduceNoBadgeTask proves
+// an existing webhook endpoint with a stored legacy DefaultPriority=0 does not
+// silently produce a badge-less, bottom-sorted task.
+func TestWebhookInbound_LegacyZeroDefaultPriorityDoesNotProduceNoBadgeTask(t *testing.T) {
+	wtc := newWebhookTestContext(t)
+	project := wtc.CreateProject().WithName("WH Legacy Zero Priority").Build()
+
+	w := &models.WebhookEndpoint{
+		ProjectID:       project.ID,
+		Name:            "LegacyZeroHook",
+		Enabled:         true,
+		DefaultPriority: 0, // legacy stored value from before the scale fix.
+	}
+	if err := wtc.webhookRepo.Create(context.Background(), w); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	// Force the legacy value past repository-level validation, if any, by
+	// writing it directly so this test exercises a genuinely stored 0.
+	if _, err := wtc.db.Exec(`UPDATE webhook_endpoints SET default_priority = 0 WHERE id = ?`, w.ID); err != nil {
+		t.Fatalf("force legacy default_priority=0: %v", err)
+	}
+
+	payload := `{"event_type":"incident.triggered","summary":"Legacy priority event"}`
+	rec := wtc.jsonRequest("POST", "/webhooks/inbound/"+w.PathToken, payload,
+		map[string]string{"X-Webhook-Secret": w.Secret})
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d; body=%s", rec.Code, rec.Body.String())
+	}
+
+	tasks, err := wtc.taskRepo.ListByProject(context.Background(), project.ID, "")
+	if err != nil {
+		t.Fatalf("ListByProject: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("expected 1 task, got %d", len(tasks))
+	}
+	if tasks[0].Priority == 0 {
+		t.Fatalf("legacy stored DefaultPriority=0 produced a badge-less, bottom-sorted task")
+	}
+	if components.PriorityLabel(tasks[0].Priority) == "" {
+		t.Fatalf("legacy stored DefaultPriority=0 produced a task with no priority badge")
 	}
 }
 
@@ -501,32 +1161,134 @@ func TestWebhookCRUD_RotateSecret(t *testing.T) {
 		t.Fatalf("expected 200, got %d; body=%s", rec.Code, rec.Body.String())
 	}
 
+	var response map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode rotate response: %v", err)
+	}
+	if response["secret"] == "" {
+		t.Fatalf("expected rotate response to include a secret: %s", rec.Body.String())
+	}
+
 	got, _ := wtc.webhookRepo.GetByID(context.Background(), endpoint.ID)
+	if got.Secret != response["secret"] {
+		t.Errorf("persisted secret = %q, want response secret %q", got.Secret, response["secret"])
+	}
 	if got.Secret == origSecret {
 		t.Error("expected different secret after rotation")
 	}
 }
 
-func TestWebhookCRUD_Test(t *testing.T) {
+func TestWebhookCRUD_MissingMutationsReturnNotFound(t *testing.T) {
+	wtc := newWebhookTestContext(t)
+	project := wtc.CreateProject().WithName("WH Missing Mutations").Build()
+	endpoint := wtc.createEndpoint(t, project.ID, "Stale Endpoint", true)
+	if err := wtc.webhookRepo.Delete(context.Background(), endpoint.ID); err != nil {
+		t.Fatalf("delete endpoint before stale requests: %v", err)
+	}
+
+	tests := []struct {
+		name   string
+		method string
+		id     string
+		htmx   bool
+		rotate bool
+	}{
+		{name: "delete fabricated id", method: http.MethodDelete, id: "missing-webhook"},
+		{name: "rotate fabricated id", method: http.MethodPost, id: "missing-webhook", rotate: true},
+		{name: "delete stale id via htmx", method: http.MethodDelete, id: endpoint.ID, htmx: true},
+		{name: "rotate stale id via htmx", method: http.MethodPost, id: endpoint.ID, htmx: true, rotate: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			path := "/channels/webhooks/" + test.id
+			if test.rotate {
+				path += "/rotate-secret"
+			}
+			req := httptest.NewRequest(test.method, path, nil)
+			if test.htmx {
+				req.Header.Set("HX-Request", "true")
+			}
+			rec := httptest.NewRecorder()
+			wtc.echo.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusNotFound {
+				t.Fatalf("expected 404, got %d; body=%s", rec.Code, rec.Body.String())
+			}
+			if trigger := rec.Header().Get("HX-Trigger"); trigger != "" {
+				t.Fatalf("expected no channels refresh trigger, got %q", trigger)
+			}
+			if strings.Contains(rec.Body.String(), `"secret"`) {
+				t.Fatalf("missing webhook response exposed a secret: %s", rec.Body.String())
+			}
+		})
+	}
+
+	got, err := wtc.webhookRepo.GetByID(context.Background(), endpoint.ID)
+	if err != nil {
+		t.Fatalf("get stale endpoint: %v", err)
+	}
+	if got != nil {
+		t.Fatalf("stale endpoint was recreated or changed: %#v", got)
+	}
+}
+
+func TestWebhookCRUD_TestRepeatedClicksCreateUniqueTasksWithAgentsAndWorkerSubmissions(t *testing.T) {
 	wtc := newWebhookTestContext(t)
 	project := wtc.CreateProject().WithName("WH Test").Build()
+	agent1 := wtc.createAgent(t, "Primary Test Agent")
+	agent2 := wtc.createAgent(t, "Secondary Test Agent")
 	endpoint := wtc.createEndpoint(t, project.ID, "TestEndpoint", true)
-
-	req := httptest.NewRequest("POST", "/channels/webhooks/"+endpoint.ID+"/test", nil)
-	rec := httptest.NewRecorder()
-	wtc.echo.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusAccepted {
-		t.Fatalf("expected 202, got %d; body=%s", rec.Code, rec.Body.String())
+	if err := wtc.webhookRepo.SetEndpointAgents(context.Background(), endpoint.ID, []string{agent1.ID, agent2.ID}); err != nil {
+		t.Fatalf("SetEndpointAgents: %v", err)
 	}
 
-	// Should have created exactly one task
-	tasks, _ := wtc.taskRepo.ListByProject(context.Background(), project.ID, "")
-	if len(tasks) != 1 {
-		t.Fatalf("expected 1 task from test, got %d", len(tasks))
+	for i := 1; i <= 2; i++ {
+		req := httptest.NewRequest("POST", "/channels/webhooks/"+endpoint.ID+"/test", nil)
+		rec := httptest.NewRecorder()
+		wtc.echo.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusAccepted {
+			t.Fatalf("test click %d: expected 202, got %d; body=%s", i, rec.Code, rec.Body.String())
+		}
+		var body map[string]string
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("test click %d: decode response: %v", i, err)
+		}
+		if body["task_id"] == "" {
+			t.Fatalf("test click %d: expected task_id response, got %s", i, rec.Body.String())
+		}
 	}
-	if tasks[0].CreatedVia != models.TaskOriginWebhook {
-		t.Errorf("expected created_via=webhook, got %q", tasks[0].CreatedVia)
+
+	submitted := wtc.expectSubmittedTasks(t, 2)
+	if submitted[0].ID == submitted[1].ID {
+		t.Fatalf("expected two distinct worker submissions, both used task %s", submitted[0].ID)
+	}
+
+	tasks, err := wtc.taskRepo.ListByProject(context.Background(), project.ID, "")
+	if err != nil {
+		t.Fatalf("ListByProject: %v", err)
+	}
+	if len(tasks) != 2 {
+		t.Fatalf("expected 2 tasks from repeated tests, got %d", len(tasks))
+	}
+	if tasks[0].Title == tasks[1].Title {
+		t.Fatalf("expected unique task titles, both were %q", tasks[0].Title)
+	}
+	for _, task := range tasks {
+		if task.CreatedVia != models.TaskOriginWebhook {
+			t.Errorf("expected created_via=webhook, got %q", task.CreatedVia)
+		}
+		if task.AgentDefinitionID == nil || *task.AgentDefinitionID != agent1.ID {
+			t.Fatalf("task %s primary agent = %v, want %s", task.ID, task.AgentDefinitionID, agent1.ID)
+		}
+		assignments, err := wtc.webhookRepo.GetTaskAgentAssignments(context.Background(), task.ID)
+		if err != nil {
+			t.Fatalf("GetTaskAgentAssignments(%s): %v", task.ID, err)
+		}
+		if len(assignments) != 2 || assignments[0].AgentDefinitionID != agent1.ID || assignments[1].AgentDefinitionID != agent2.ID {
+			t.Fatalf("task %s assignments = %#v, want [%s %s] in order", task.ID, assignments, agent1.ID, agent2.ID)
+		}
 	}
 }
 
@@ -624,11 +1386,11 @@ func TestChannelsUI_WebhookCardsRender(t *testing.T) {
 		t.Error("did not expect legacy active webhook status row text")
 	}
 
-	if strings.Contains(body, "Title Template") {
-		t.Error("did not expect webhook title template field in webhook modal")
+	if !strings.Contains(body, `id="webhook_title_template"`) {
+		t.Error("expected webhook title template field in webhook modal")
 	}
-	if strings.Contains(body, "Prompt Template") {
-		t.Error("did not expect webhook prompt template field in webhook modal")
+	if !strings.Contains(body, `id="webhook_prompt_template"`) {
+		t.Error("expected webhook prompt template field in webhook modal")
 	}
 	if strings.Contains(body, "Agents (comma-separated IDs)") {
 		t.Error("did not expect legacy webhook comma-separated agents input")

@@ -5,12 +5,14 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_call:
 
 permissions:
   contents: read
 
 jobs:
   test:
+    name: Main test suite (ubuntu-latest)
     runs-on: ubuntu-latest
     env:
       TZ: America/New_York
@@ -23,7 +25,7 @@ jobs:
 
     steps:
       - name: Check out repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Prepare Linux desktop dependency cache
         id: linux-desktop-cache-key
@@ -31,33 +33,112 @@ jobs:
         run: |
           package_hash="$(printf '%s' "$LINUX_DESKTOP_PACKAGES" | sha256sum | cut -d' ' -f1)"
           runner_image="${ImageOS:-${RUNNER_OS}}-${ImageVersion:-unknown}-${RUNNER_ARCH}"
-          echo "key=linux-desktop-apt-${runner_image}-${package_hash}" >> "$GITHUB_OUTPUT"
+          metadata_date="$(date -u +%Y%m%d)"
+          echo "key=linux-desktop-apt-v1-${runner_image}-${package_hash}" >> "$GITHUB_OUTPUT"
+          echo "metadata_key=linux-desktop-apt-lists-v1-${runner_image}-${package_hash}-${metadata_date}" >> "$GITHUB_OUTPUT"
 
-          mkdir -p "$HOME/.cache/openvibely-apt/archives/partial"
-          sudo chown -R _apt:"$(id -gn)" "$HOME/.cache/openvibely-apt/archives"
-          sudo chmod 0775 "$HOME/.cache/openvibely-apt/archives" "$HOME/.cache/openvibely-apt/archives/partial"
+          mkdir -p "$HOME/.cache/openvibely-apt/archives/partial" "$HOME/.cache/openvibely-apt/lists/partial"
 
       - name: Restore Linux desktop dependency downloads
         id: linux-desktop-cache
+        continue-on-error: true
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ~/.cache/openvibely-apt/archives/*.deb
           key: ${{ steps.linux-desktop-cache-key.outputs.key }}
 
+      - name: Restore fresh Linux APT metadata
+        id: linux-desktop-metadata-cache
+        continue-on-error: true
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cache/openvibely-apt/lists
+          key: ${{ steps.linux-desktop-cache-key.outputs.metadata_key }}
+
+      - name: Prepare cached APT state
+        shell: bash
+        run: |
+          mkdir -p "$HOME/.cache/openvibely-apt/archives/partial" "$HOME/.cache/openvibely-apt/lists/partial"
+          sudo chown -R _apt:"$(id -gn)" "$HOME/.cache/openvibely-apt/archives" "$HOME/.cache/openvibely-apt/lists"
+          sudo chmod 0775 \
+            "$HOME/.cache/openvibely-apt/archives" \
+            "$HOME/.cache/openvibely-apt/archives/partial" \
+            "$HOME/.cache/openvibely-apt/lists" \
+            "$HOME/.cache/openvibely-apt/lists/partial"
+
+      - name: Prefer stable Ubuntu APT mirror
+        shell: bash
+        run: |
+          sudo sed -i \
+            -e 's|http://azure.archive.ubuntu.com/ubuntu|http://archive.ubuntu.com/ubuntu|g' \
+            -e 's|https://azure.archive.ubuntu.com/ubuntu|http://archive.ubuntu.com/ubuntu|g' \
+            /etc/apt/sources.list \
+            /etc/apt/sources.list.d/*.list \
+            /etc/apt/sources.list.d/*.sources 2>/dev/null || true
+
       - name: Install Linux desktop dependencies
         shell: bash
         run: |
+          archives_directory="$HOME/.cache/openvibely-apt/archives"
+          lists_directory="$HOME/.cache/openvibely-apt/lists"
+          metadata_max_age_minutes=1440
+          archive_cache_restore_outcome="${{ steps.linux-desktop-cache.outcome }}"
+          metadata_cache_restore_outcome="${{ steps.linux-desktop-metadata-cache.outcome }}"
+          archive_cache_hit="${{ steps.linux-desktop-cache.outputs.cache-hit }}"
+          metadata_cache_hit="${{ steps.linux-desktop-metadata-cache.outputs.cache-hit }}"
+          if [[ "$archive_cache_restore_outcome" != "success" ]]; then
+            archive_cache_hit=false
+          fi
+          if [[ "$metadata_cache_restore_outcome" != "success" ]]; then
+            metadata_cache_hit=false
+          fi
+          metadata_validation="cache-miss"
+          if [[ "$metadata_cache_restore_outcome" != "success" ]]; then
+            metadata_validation="restore-failed"
+          fi
+          metadata_fresh=false
           started_at=$SECONDS
           read -r -a packages <<< "$LINUX_DESKTOP_PACKAGES"
-          sudo apt-get update
-          sudo apt-get \
-            -o Dir::Cache::archives="$HOME/.cache/openvibely-apt/archives" \
-            -o APT::Keep-Downloaded-Packages=true \
-            install -y "${packages[@]}"
-          echo "Linux desktop dependencies installed in $((SECONDS - started_at))s (cache hit: ${{ steps.linux-desktop-cache.outputs.cache-hit }})"
+          apt_common_options=(
+            -o Dir::State::lists="$lists_directory"
+            -o Acquire::Retries=3
+            -o Acquire::http::Timeout=30
+            -o Acquire::https::Timeout=30
+          )
+          apt_install_options=(
+            "${apt_common_options[@]}"
+            -o Dir::Cache::archives="$archives_directory"
+            -o APT::Keep-Downloaded-Packages=true
+          )
+
+          apt_install() {
+            timeout 10m sudo apt-get "${apt_install_options[@]}" "$@" install -y "${packages[@]}"
+          }
+
+          if [[ "$metadata_cache_hit" == "true" ]] &&
+            find "$lists_directory" -maxdepth 1 -type f -name '*InRelease' -mmin "-${metadata_max_age_minutes}" -print -quit | grep -q . &&
+            sudo apt-get "${apt_common_options[@]}" -s install "${packages[@]}" >/dev/null; then
+            metadata_fresh=true
+            metadata_validation="fresh-preflight"
+          elif [[ "$metadata_cache_hit" == "true" ]]; then
+            metadata_validation="stale-or-invalid"
+          fi
+
+          if [[ "$archive_cache_hit" == "true" && "$metadata_fresh" == "true" ]]; then
+            if ! apt_install --no-download; then
+              metadata_validation="cached-install-failed+updated"
+              timeout 5m sudo apt-get "${apt_common_options[@]}" update
+              apt_install
+            fi
+          else
+            timeout 5m sudo apt-get "${apt_common_options[@]}" update
+            metadata_validation="${metadata_validation}+updated"
+            apt_install
+          fi
+          echo "Linux desktop dependencies installed in $((SECONDS - started_at))s (archive cache hit: ${archive_cache_hit}, metadata cache hit: ${metadata_cache_hit}, metadata: ${metadata_validation})"
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: go.mod
           cache: true
@@ -68,18 +149,115 @@ jobs:
       - name: Ensure generated files are committed
         run: git diff --exit-code
 
-      - name: Build server
-        run: go build ./cmd/server
-
       - name: Run all tests with coverage
         env:
           OPENVIBELY_SKIP_BROWSER_PERF: "1"
-        run: go test ./... -count=1 -timeout 120s -coverprofile=coverage.out
+        run: go test ./... -count=1 -timeout 240s -coverpkg=./... -coverprofile=coverage.txt
 
       - name: Run browser performance regression
         run: go test ./web/templates/components -run '^TestLargeToolOutputHydrationIsLazyAndStatefulInChrome$' -count=1 -timeout 60s
 
-      - name: Show coverage summary (excluding generated templ code)
+      - name: Show coverage summary (excluding generated/fixture code)
         run: |
-          grep -v "_templ.go" coverage.out > coverage.filtered.out
+          grep -Ev '(_templ\.go:|^github.com/openvibely/openvibely/cmd/|^github.com/openvibely/openvibely/docs/|^github.com/openvibely/openvibely/internal/database/migrations/|^github.com/openvibely/openvibely/internal/update/testfixture/|^github.com/openvibely/openvibely/internal/service/workflow_service\.go:)' coverage.txt > coverage.filtered.out
           go tool cover -func=coverage.filtered.out | tail -1
+
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage.filtered.out
+          disable_search: true
+
+  packaged-update:
+    name: Packaged update (${{ matrix.os }}, ${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            arch: amd64
+            experimental: false
+          - os: ubuntu-24.04-arm
+            arch: arm64
+            experimental: false
+          - os: macos-15-intel
+            arch: amd64
+            experimental: false
+          - os: macos-latest
+            arch: arm64
+            experimental: false
+          - os: windows-latest
+            arch: amd64
+            experimental: false
+          - os: windows-11-arm
+            arch: arm64
+            experimental: true
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.experimental }}
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install Linux desktop dependencies
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkg-config \
+            libgtk-4-dev \
+            libwebkitgtk-6.0-dev \
+            libglib2.0-dev \
+            libsoup-3.0-dev \
+            lsof \
+            xvfb
+
+      - name: Start Linux virtual display
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          Xvfb :99 -screen 0 1280x1024x24 >/tmp/openvibely-xvfb.log 2>&1 &
+          echo "DISPLAY=:99" >> "$GITHUB_ENV"
+
+      - name: Configure Linux WebKit sandbox fallback
+        if: runner.os == 'Linux'
+        shell: bash
+        run: echo "WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1" >> "$GITHUB_ENV"
+
+      - name: Run native packaged-update tests
+        shell: bash
+        run: go test ./internal/update -count=1 -timeout 120s -coverpkg=./internal/update -coverprofile=coverage.update-native.out
+
+      - name: Run binary packaged update E2E
+        shell: bash
+        env:
+          OPENVIBELY_UPDATE_E2E: "1"
+          OPENVIBELY_UPDATE_E2E_DISTRIBUTION: binary
+          OPENVIBELY_UPDATE_E2E_EXPECTED_OS: ${{ runner.os }}
+          OPENVIBELY_UPDATE_E2E_EXPECTED_ARCH: ${{ matrix.arch }}
+        run: go test ./internal/update -run '^TestPackagedUpdateE2E$' -count=1 -timeout 420s -coverpkg=./internal/update -coverprofile=coverage.update-binary.out
+
+      - name: Run desktop packaged update E2E
+        shell: bash
+        env:
+          OPENVIBELY_UPDATE_E2E: "1"
+          OPENVIBELY_UPDATE_E2E_DISTRIBUTION: desktop
+          OPENVIBELY_UPDATE_E2E_REAL_DESKTOP: "1"
+          OPENVIBELY_UPDATE_E2E_EXPECTED_OS: ${{ runner.os }}
+          OPENVIBELY_UPDATE_E2E_EXPECTED_ARCH: ${{ matrix.arch }}
+        run: go test ./internal/update -run '^TestPackagedUpdateE2E$' -count=1 -timeout 600s -coverpkg=./internal/update -coverprofile=coverage.update-desktop.out
+
+      - name: Upload packaged-update coverage reports to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage.update-native.out,coverage.update-binary.out,coverage.update-desktop.out
+          disable_search: true
+          flags: packaged-update-${{ matrix.os }}-${{ matrix.arch }}

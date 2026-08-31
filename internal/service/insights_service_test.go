@@ -2,6 +2,9 @@ package service
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
@@ -141,6 +144,281 @@ func TestInsightsService_DetectBugPatterns(t *testing.T) {
 	}
 }
 
+func TestInsightsService_RunAnalysisCreatesReportAcrossDetectors(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	insightsRepo := repository.NewInsightsRepo(db)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	svc := NewInsightsService(insightsRepo, taskRepo, projectRepo, llmConfigRepo, execRepo)
+
+	project := &models.Project{Name: "Run Analysis Project"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	agent := &models.LLMConfig{Name: "analysis-agent", Provider: models.ProviderTest, Model: "test-model", IsDefault: true}
+	if err := llmConfigRepo.Create(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	failingTask := &models.Task{ProjectID: project.ID, Title: "Deploy regression", Prompt: "deploy", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2, AgentID: &agent.ID}
+	if err := taskRepo.Create(ctx, failingTask); err != nil {
+		t.Fatalf("create failing task: %v", err)
+	}
+	for i := 0; i < 11; i++ {
+		exec := &models.Execution{TaskID: failingTask.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "deploy"}
+		if err := execRepo.Create(ctx, exec); err != nil {
+			t.Fatalf("create failed exec: %v", err)
+		}
+		if err := execRepo.Complete(ctx, exec.ID, models.ExecFailed, "", "deploy timeout", 0, 0); err != nil {
+			t.Fatalf("complete failed exec: %v", err)
+		}
+	}
+
+	for i := 0; i < 6; i++ {
+		task := &models.Task{ProjectID: project.ID, Title: fmt.Sprintf("Bug fix %d", i), Prompt: "fix", Category: models.CategoryCompleted, Status: models.StatusCompleted, Priority: 2, Tag: models.TagBug}
+		if err := taskRepo.Create(ctx, task); err != nil {
+			t.Fatalf("create bug task: %v", err)
+		}
+	}
+	for i := 0; i < 4; i++ {
+		task := &models.Task{ProjectID: project.ID, Title: fmt.Sprintf("Stale active %d", i), Prompt: "finish", Category: models.CategoryActive, Status: models.StatusPending, Priority: 2}
+		if err := taskRepo.Create(ctx, task); err != nil {
+			t.Fatalf("create stale task: %v", err)
+		}
+		if _, err := db.ExecContext(ctx, `UPDATE tasks SET created_at = datetime('now', '-96 hours') WHERE id = ?`, task.ID); err != nil {
+			t.Fatalf("age stale task: %v", err)
+		}
+	}
+	for i := 0; i < 4; i++ {
+		task := &models.Task{ProjectID: project.ID, Title: fmt.Sprintf("Slow task %d", i), Prompt: "slow", Category: models.CategoryCompleted, Status: models.StatusCompleted, Priority: 2, AgentID: &agent.ID}
+		if err := taskRepo.Create(ctx, task); err != nil {
+			t.Fatalf("create slow task: %v", err)
+		}
+		exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "slow"}
+		if err := execRepo.Create(ctx, exec); err != nil {
+			t.Fatalf("create slow exec: %v", err)
+		}
+		if err := execRepo.Complete(ctx, exec.ID, models.ExecCompleted, "done", "", 0, 0); err != nil {
+			t.Fatalf("complete slow exec: %v", err)
+		}
+		if _, err := db.ExecContext(ctx, `UPDATE executions SET started_at = datetime('now', '-10 minutes'), completed_at = datetime('now') WHERE id = ?`, exec.ID); err != nil {
+			t.Fatalf("slow exec timestamps: %v", err)
+		}
+	}
+
+	report, err := svc.RunAnalysis(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("RunAnalysis: %v", err)
+	}
+	if report.ID == "" || report.Summary == "" || report.AnalysisLog == "" {
+		t.Fatalf("report missing expected fields: %#v", report)
+	}
+	for _, want := range []string{"Bug patterns: found 1", "Incomplete features: found 2", "Tech debt: found 1", "Optimizations: found 1"} {
+		if !strings.Contains(report.AnalysisLog, want) {
+			t.Fatalf("analysis log missing %q:\n%s", want, report.AnalysisLog)
+		}
+	}
+	ids, err := report.ParseInsightIDs()
+	if err != nil {
+		t.Fatalf("ParseInsightIDs: %v", err)
+	}
+	if len(ids) != 5 {
+		t.Fatalf("expected five detector insights, got %d (%v)", len(ids), ids)
+	}
+
+	duplicateReport, err := svc.RunAnalysis(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("RunAnalysis duplicate: %v", err)
+	}
+	duplicateIDs, err := duplicateReport.ParseInsightIDs()
+	if err != nil {
+		t.Fatalf("ParseInsightIDs duplicate: %v", err)
+	}
+	if len(duplicateIDs) != 0 {
+		t.Fatalf("duplicate analysis should not create duplicate insights: %v", duplicateIDs)
+	}
+}
+
+func TestInsightsService_GenerateProactiveSuggestionsParsesAndDeduplicates(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	insightsRepo := repository.NewInsightsRepo(db)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, repository.NewScheduleRepo(db), repository.NewAttachmentRepo(db))
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = `[{"title":"Split deployment checks","description":"Deployment work is failing often.","suggestion":"Split smoke tests from release steps.","impact":"Faster diagnosis","severity":"high","confidence":0.95},{"title":"Document retry limits","description":"Retries are implicit.","suggestion":"Write down retry boundaries.","impact":"Fewer duplicate side effects","severity":"medium","confidence":2}]`
+	llmSvc.SetLLMCaller(mock)
+
+	svc := NewInsightsService(insightsRepo, taskRepo, projectRepo, llmConfigRepo, execRepo)
+	svc.SetLLMService(llmSvc)
+	project := &models.Project{Name: "Proactive Project", RepoPath: t.TempDir()}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	agent := &models.LLMConfig{Name: "suggestion-agent", Provider: models.ProviderTest, Model: "test-model", IsDefault: true}
+	if err := llmConfigRepo.Create(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	insights, err := svc.generateProactiveSuggestions(ctx, project, 3, 2, 1, 4)
+	if err != nil {
+		t.Fatalf("generateProactiveSuggestions: %v", err)
+	}
+	if len(insights) != 2 {
+		t.Fatalf("insights len=%d, want 2", len(insights))
+	}
+	if insights[0].Type != models.InsightProactiveSuggestion || insights[0].Severity != models.InsightSeverityHigh || insights[0].Confidence != 0.95 {
+		t.Fatalf("unexpected first suggestion: %#v", insights[0])
+	}
+	if insights[1].Confidence != 0.5 {
+		t.Fatalf("out-of-range confidence should default to 0.5, got %#v", insights[1])
+	}
+
+	again, err := svc.generateProactiveSuggestions(ctx, project, 3, 2, 1, 4)
+	if err != nil {
+		t.Fatalf("generateProactiveSuggestions duplicate: %v", err)
+	}
+	if len(again) != 0 {
+		t.Fatalf("duplicate suggestions should be skipped, got %#v", again)
+	}
+}
+
+func TestInsightsService_AIBackedWorkflowsPersistAndListResults(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	insightsRepo := repository.NewInsightsRepo(db)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, repository.NewScheduleRepo(db), attachmentRepo)
+	mock := testutil.NewMockLLMCaller()
+	llmSvc.SetLLMCaller(mock)
+
+	svc := NewInsightsService(insightsRepo, taskRepo, projectRepo, llmConfigRepo, execRepo)
+	svc.SetLLMService(llmSvc)
+
+	project := &models.Project{Name: "AI Insights Project", RepoPath: t.TempDir()}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	agent := &models.LLMConfig{Name: "insights-agent", Provider: models.ProviderTest, Model: "test-model", IsDefault: true}
+	if err := llmConfigRepo.Create(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	for i := 0; i < 5; i++ {
+		status := models.StatusCompleted
+		category := models.CategoryCompleted
+		tag := models.TagBug
+		if i == 3 {
+			status = models.StatusFailed
+			category = models.CategoryActive
+			tag = models.TagFeature
+		}
+		if i == 4 {
+			status = models.StatusPending
+			category = models.CategoryBacklog
+			tag = models.TagFeature
+		}
+		task := &models.Task{ProjectID: project.ID, Title: fmt.Sprintf("AI insight task %d", i), Prompt: strings.Repeat("meaningful task prompt ", 12), Category: category, Status: status, Priority: i%5 + 1, Tag: tag, AgentID: &agent.ID}
+		if err := taskRepo.Create(ctx, task); err != nil {
+			t.Fatalf("create task %d: %v", i, err)
+		}
+		if status == models.StatusCompleted {
+			exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: task.Prompt}
+			if err := execRepo.Create(ctx, exec); err != nil {
+				t.Fatalf("create exec %d: %v", i, err)
+			}
+			if err := execRepo.Complete(ctx, exec.ID, models.ExecCompleted, "implemented", "", 12, 6); err != nil {
+				t.Fatalf("complete exec %d: %v", i, err)
+			}
+		}
+	}
+
+	mock.Response = `{"grade":"B+","strengths":"consistent delivery","improvements":"trim backlog","assessment":"healthy and improving","how_to_improve":"ship smaller slices"}`
+	health, err := svc.RunHealthCheck(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("RunHealthCheck: %v", err)
+	}
+	if health.Grade != "B+" || health.TasksTotal != 5 || health.TasksCompleted != 3 || health.TasksFailed != 1 || health.BacklogSize != 1 {
+		t.Fatalf("unexpected health check: %#v", health)
+	}
+	latestHealth, err := svc.GetLatestHealthCheck(ctx, project.ID)
+	if err != nil || latestHealth == nil || latestHealth.ID != health.ID {
+		t.Fatalf("latest health = %#v err=%v, want %s", latestHealth, err, health.ID)
+	}
+	healthHistory, err := svc.ListHealthChecks(ctx, project.ID, 10)
+	if err != nil || len(healthHistory) != 1 {
+		t.Fatalf("health history len=%d err=%v", len(healthHistory), err)
+	}
+
+	mock.Response = `{"grade":"B","next_grade":"B+","summary":"clear enough","strengths":"specific bug fixes","improvements":"more strategy","how_to_next_grade":"connect related work","clarity_score":80,"ambition_score":70,"follow_through":60,"diversity_score":75,"strategy_score":65}`
+	grade, err := svc.GradeIdeas(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("GradeIdeas: %v", err)
+	}
+	if grade.Grade != "B" || grade.NextGrade != "B+" || grade.TasksEvaluated != 5 || grade.ClarityScore != 80 {
+		t.Fatalf("unexpected idea grade: %#v", grade)
+	}
+	latestGrade, err := svc.GetLatestIdeaGrade(ctx, project.ID)
+	if err != nil || latestGrade == nil || latestGrade.ID != grade.ID {
+		t.Fatalf("latest grade = %#v err=%v, want %s", latestGrade, err, grade.ID)
+	}
+	gradeHistory, err := svc.ListIdeaGrades(ctx, project.ID, 10)
+	if err != nil || len(gradeHistory) != 1 {
+		t.Fatalf("grade history len=%d err=%v", len(gradeHistory), err)
+	}
+
+	mock.Response = `[{"topic":"Retry policy","content":"Retries were bounded to avoid duplicate side effects.","tags":["retries","reliability"]},{"topic":"Attachment validation","content":"Files are sniffed before routing to vision models.","tags":["attachments","safety"]}]`
+	knowledge, err := svc.ExtractKnowledge(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("ExtractKnowledge: %v", err)
+	}
+	if len(knowledge) != 2 {
+		t.Fatalf("knowledge len=%d, want 2", len(knowledge))
+	}
+	tags, err := knowledge[0].ParseTags()
+	if err != nil || len(tags) == 0 {
+		t.Fatalf("knowledge tags=%v err=%v", tags, err)
+	}
+	if err := svc.DeleteKnowledge(ctx, project.ID, knowledge[0].ID); err != nil {
+		t.Fatalf("DeleteKnowledge: %v", err)
+	}
+	if deleted, err := insightsRepo.GetKnowledge(ctx, project.ID, knowledge[0].ID); err != nil || deleted != nil {
+		t.Fatalf("knowledge should be deleted, got %#v err=%v", deleted, err)
+	}
+
+	manual := &models.Insight{ProjectID: project.ID, Type: models.InsightOptimization, Severity: models.InsightSeverityLow, Status: models.InsightStatusNew, Title: "Trim slow startup", Evidence: "{}", Confidence: 0.7}
+	if err := insightsRepo.CreateInsight(ctx, manual); err != nil {
+		t.Fatalf("create manual insight: %v", err)
+	}
+	gotInsight, err := svc.GetInsight(ctx, project.ID, manual.ID)
+	if err != nil || gotInsight == nil || gotInsight.Title != manual.Title {
+		t.Fatalf("GetInsight = %#v err=%v", gotInsight, err)
+	}
+	byType, err := svc.ListByType(ctx, project.ID, models.InsightOptimization)
+	if err != nil || len(byType) != 1 {
+		t.Fatalf("ListByType len=%d err=%v", len(byType), err)
+	}
+	if err := svc.DeleteInsight(ctx, project.ID, manual.ID); err != nil {
+		t.Fatalf("DeleteInsight: %v", err)
+	}
+	reports, err := svc.ListReports(ctx, project.ID, 10)
+	if err != nil || len(reports) != 0 {
+		t.Fatalf("ListReports len=%d err=%v", len(reports), err)
+	}
+}
+
 func TestInsightsService_UpdateAndAcceptInsight(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
@@ -172,21 +450,136 @@ func TestInsightsService_UpdateAndAcceptInsight(t *testing.T) {
 	}
 
 	// Accept without task
-	if err := svc.AcceptInsight(ctx, insight.ID, nil); err != nil {
+	if err := svc.AcceptInsight(ctx, project.ID, insight.ID, nil); err != nil {
 		t.Fatalf("accept insight: %v", err)
 	}
-	got, _ := insightsRepo.GetInsight(ctx, insight.ID)
+	got, _ := insightsRepo.GetInsight(ctx, project.ID, insight.ID)
 	if got.Status != models.InsightStatusAccepted {
 		t.Errorf("status: got %q, want accepted", got.Status)
 	}
 
 	// Update to resolved
-	if err := svc.UpdateInsightStatus(ctx, insight.ID, models.InsightStatusResolved); err != nil {
+	if err := svc.UpdateInsightStatus(ctx, project.ID, insight.ID, models.InsightStatusResolved); err != nil {
 		t.Fatalf("update status: %v", err)
 	}
-	got, _ = insightsRepo.GetInsight(ctx, insight.ID)
+	got, _ = insightsRepo.GetInsight(ctx, project.ID, insight.ID)
 	if got.Status != models.InsightStatusResolved {
 		t.Errorf("status: got %q, want resolved", got.Status)
+	}
+}
+
+func TestInsightsService_ProjectScopedMutations(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+
+	projectRepo := repository.NewProjectRepo(db)
+	insightsRepo := repository.NewInsightsRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	svc := NewInsightsService(insightsRepo, taskRepo, projectRepo, llmConfigRepo, execRepo)
+
+	projectA := &models.Project{Name: "Project A"}
+	projectB := &models.Project{Name: "Project B"}
+	if err := projectRepo.Create(ctx, projectA); err != nil {
+		t.Fatalf("create project A: %v", err)
+	}
+	if err := projectRepo.Create(ctx, projectB); err != nil {
+		t.Fatalf("create project B: %v", err)
+	}
+
+	insight := &models.Insight{
+		ProjectID:  projectB.ID,
+		Type:       models.InsightOptimization,
+		Severity:   models.InsightSeverityMedium,
+		Status:     models.InsightStatusNew,
+		Title:      "Project B insight",
+		Evidence:   "{}",
+		Confidence: 0.7,
+	}
+	if err := insightsRepo.CreateInsight(ctx, insight); err != nil {
+		t.Fatalf("create insight: %v", err)
+	}
+
+	if foreign, err := svc.GetInsight(ctx, projectA.ID, insight.ID); err != nil || foreign != nil {
+		t.Fatalf("foreign insight lookup = %#v, err=%v; want not found", foreign, err)
+	}
+	if err := svc.AcceptInsight(ctx, projectA.ID, insight.ID, nil); !errors.Is(err, ErrInsightNotFound) {
+		t.Fatalf("foreign accept error = %v, want %v", err, ErrInsightNotFound)
+	}
+	if err := svc.UpdateInsightStatus(ctx, projectA.ID, insight.ID, models.InsightStatusRejected); !errors.Is(err, ErrInsightNotFound) {
+		t.Fatalf("foreign status update error = %v, want %v", err, ErrInsightNotFound)
+	}
+	unchanged, err := svc.GetInsight(ctx, projectB.ID, insight.ID)
+	if err != nil || unchanged == nil || unchanged.Status != models.InsightStatusNew || unchanged.ResolvedAt != nil {
+		t.Fatalf("foreign insight changed after rejected service mutations: %#v err=%v", unchanged, err)
+	}
+
+	if err := svc.UpdateInsightStatus(ctx, projectB.ID, insight.ID, models.InsightStatusAccepted); err != nil {
+		t.Fatalf("same-project accept: %v", err)
+	}
+	if err := svc.UpdateInsightStatus(ctx, projectB.ID, insight.ID, models.InsightStatusResolved); err != nil {
+		t.Fatalf("same-project resolve: %v", err)
+	}
+	resolved, err := svc.GetInsight(ctx, projectB.ID, insight.ID)
+	if err != nil || resolved == nil || resolved.Status != models.InsightStatusResolved || resolved.ResolvedAt == nil {
+		t.Fatalf("same-project resolved insight = %#v err=%v", resolved, err)
+	}
+	resolvedAt := *resolved.ResolvedAt
+	if err := svc.UpdateInsightStatus(ctx, projectB.ID, insight.ID, models.InsightStatusRejected); err != nil {
+		t.Fatalf("same-project reject: %v", err)
+	}
+	preserved, err := svc.GetInsight(ctx, projectB.ID, insight.ID)
+	if err != nil || preserved == nil || preserved.Status != models.InsightStatusRejected || preserved.ResolvedAt == nil || !preserved.ResolvedAt.Equal(resolvedAt) {
+		t.Fatalf("same-project resolved_at preservation failed: %#v err=%v", preserved, err)
+	}
+
+	if err := svc.DeleteInsight(ctx, projectA.ID, insight.ID); !errors.Is(err, ErrInsightNotFound) {
+		t.Fatalf("foreign insight delete error = %v, want %v", err, ErrInsightNotFound)
+	}
+	if stillThere, err := svc.GetInsight(ctx, projectB.ID, insight.ID); err != nil || stillThere == nil {
+		t.Fatalf("foreign insight disappeared after rejected service delete: %#v err=%v", stillThere, err)
+	}
+
+	knowledge := &models.KnowledgeEntry{
+		ProjectID: projectB.ID,
+		Topic:     "Project B knowledge",
+		Content:   "Project B content",
+		Source:    "test",
+		SourceRef: "project-b",
+		Tags:      "[]",
+	}
+	if err := insightsRepo.CreateKnowledge(ctx, knowledge); err != nil {
+		t.Fatalf("create knowledge: %v", err)
+	}
+	if err := svc.DeleteKnowledge(ctx, projectA.ID, knowledge.ID); !errors.Is(err, ErrKnowledgeNotFound) {
+		t.Fatalf("foreign knowledge delete error = %v, want %v", err, ErrKnowledgeNotFound)
+	}
+	if stillThere, err := insightsRepo.GetKnowledge(ctx, projectB.ID, knowledge.ID); err != nil || stillThere == nil {
+		t.Fatalf("foreign knowledge disappeared after rejected service delete: %#v err=%v", stillThere, err)
+	}
+	if err := svc.DeleteKnowledge(ctx, projectB.ID, knowledge.ID); err != nil {
+		t.Fatalf("same-project knowledge delete: %v", err)
+	}
+	if err := svc.DeleteInsight(ctx, projectB.ID, insight.ID); err != nil {
+		t.Fatalf("same-project insight delete: %v", err)
+	}
+}
+
+func TestParseKnowledgeEntriesExtractsJSONArrays(t *testing.T) {
+	entries, err := parseKnowledgeEntries(`Here you go:
+[
+  {"topic":"deploys","content":"Use staged rollouts","tags":["release","safety"]},
+  {"topic":"tests","content":"Keep fixtures small","tags":[]}
+]`)
+	if err != nil {
+		t.Fatalf("parseKnowledgeEntries: %v", err)
+	}
+	if len(entries) != 2 || entries[0].Topic != "deploys" || entries[0].Tags[1] != "safety" || entries[1].Content != "Keep fixtures small" {
+		t.Fatalf("unexpected entries: %#v", entries)
+	}
+	if _, err := parseKnowledgeEntries("not json"); err == nil {
+		t.Fatal("expected invalid knowledge JSON to fail")
 	}
 }
 

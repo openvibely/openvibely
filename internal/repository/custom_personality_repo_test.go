@@ -2,6 +2,8 @@ package repository
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
@@ -91,6 +93,68 @@ func TestCustomPersonalityRepo_List(t *testing.T) {
 	assert.Len(t, list, 2)
 	assert.Equal(t, "Alpha Personality", list[0].Name)
 	assert.Equal(t, "Zebra Personality", list[1].Name)
+}
+
+func TestCustomPersonalityRepo_ListUsesBoundedPromptPreviewProjection(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewCustomPersonalityRepo(db)
+	ctx := context.Background()
+
+	promptPrefix := strings.Repeat("visible preview text ", 10)
+	promptTail := "FULL_PROMPT_BODY_SHOULD_ONLY_APPEAR_IN_DETAIL"
+	longPrompt := promptPrefix + strings.Repeat("x", 32*1024-len(promptPrefix)-len(promptTail)) + promptTail
+	for i := 0; i < 100; i++ {
+		require.NoError(t, repo.Create(ctx, &models.CustomPersonality{
+			Name:         fmt.Sprintf("Large Personality %03d", i),
+			Key:          fmt.Sprintf("large_personality_%03d", i),
+			Description:  "Large prompt fixture",
+			SystemPrompt: longPrompt,
+		}))
+	}
+
+	list, err := repo.List(ctx)
+	require.NoError(t, err)
+	require.Len(t, list, 100)
+
+	for _, p := range list {
+		assert.Empty(t, p.SystemPrompt, "list projection must not load full prompt bodies")
+		assert.NotEmpty(t, p.SystemPromptPreview)
+		assert.LessOrEqual(t, len(p.SystemPromptPreview), customPersonalityPromptPreviewLength)
+		assert.NotContains(t, p.SystemPromptPreview, promptTail)
+	}
+
+	detail, err := repo.GetByKey(ctx, "large_personality_000")
+	require.NoError(t, err)
+	require.NotNil(t, detail)
+	assert.Contains(t, detail.SystemPrompt, promptTail)
+}
+
+func BenchmarkCustomPersonalityRepo_List100LargePrompts(b *testing.B) {
+	db := testutil.NewTestDB(b)
+	repo := NewCustomPersonalityRepo(db)
+	ctx := context.Background()
+
+	longPrompt := strings.Repeat("p", 32*1024)
+	for i := 0; i < 100; i++ {
+		require.NoError(b, repo.Create(ctx, &models.CustomPersonality{
+			Name:         fmt.Sprintf("Large Personality %03d", i),
+			Key:          fmt.Sprintf("large_personality_%03d", i),
+			Description:  "Large prompt benchmark fixture",
+			SystemPrompt: longPrompt,
+		}))
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		list, err := repo.List(ctx)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if len(list) != 100 {
+			b.Fatalf("expected 100 personalities, got %d", len(list))
+		}
+	}
 }
 
 func TestCustomPersonalityRepo_Update(t *testing.T) {

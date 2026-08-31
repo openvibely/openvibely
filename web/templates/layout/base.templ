@@ -1,6 +1,38 @@
 package layout
 
-import "github.com/openvibely/openvibely/internal/models"
+import (
+	"context"
+
+	"github.com/openvibely/openvibely/internal/models"
+)
+
+type desktopModeContextKey struct{}
+type uiPreferencesContextKey struct{}
+
+type UIPreferences struct {
+	Theme            string
+	SidebarCollapsed string
+}
+
+func WithDesktopMode(ctx context.Context, desktop bool) context.Context {
+	return context.WithValue(ctx, desktopModeContextKey{}, desktop)
+}
+
+func WithUIPreferences(ctx context.Context, prefs UIPreferences) context.Context {
+	return context.WithValue(ctx, uiPreferencesContextKey{}, prefs)
+}
+
+func serverRuntimeMode(ctx context.Context) string {
+	if desktop, _ := ctx.Value(desktopModeContextKey{}).(bool); desktop {
+		return "desktop"
+	}
+	return "web"
+}
+
+func uiPreferences(ctx context.Context) UIPreferences {
+	prefs, _ := ctx.Value(uiPreferencesContextKey{}).(UIPreferences)
+	return prefs
+}
 
 func documentTitle(title string) string {
 	if title == "" {
@@ -15,7 +47,14 @@ templ PageTitle(title string) {
 
 templ Base(title string, projects []models.Project, currentProjectID string) {
 	<!DOCTYPE html>
-	<html lang="en" data-theme="dark">
+	<html
+		lang="en"
+		data-theme="dark"
+		data-openvibely-runtime={ serverRuntimeMode(ctx) }
+		data-runtime={ serverRuntimeMode(ctx) }
+		data-ui-theme={ uiPreferences(ctx).Theme }
+		data-ui-sidebar-collapsed={ uiPreferences(ctx).SidebarCollapsed }
+	>
 		<head>
 			<meta charset="UTF-8"/>
 			<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
@@ -23,16 +62,52 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 			<!-- Theme init: must run before any CSS to prevent flash -->
 			<script>
 				(function() {
-					var saved = localStorage.getItem('theme');
-					if (saved === 'light' || saved === 'dark') {
-						document.documentElement.setAttribute('data-theme', saved);
-					} else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) {
-						document.documentElement.setAttribute('data-theme', 'light');
-					}
-					// else: keep the default "dark" from HTML attribute
+						var nativeThemeByMode = { light: 'openvibely-light', dark: 'openvibely-dark' };
+						var nativeThemeModes = { 'openvibely-light': 'light', 'openvibely-dark': 'dark' };
+						function normalizeStoredTheme(value) {
+							value = String(value || '').trim();
+							if (nativeThemeModes[value]) return value;
+							if (value === 'light' || value === 'dark') return nativeThemeByMode[value];
+							if (/^[a-z0-9][a-z0-9._:-]*$/i.test(value)) return value;
+							return '';
+						}
+						function modeForTheme(themeID) {
+							if (nativeThemeModes[themeID]) return nativeThemeModes[themeID];
+							return /light/i.test(themeID) && !/dark/i.test(themeID) ? 'light' : 'dark';
+						}
+						function persistUIPreference(payload) {
+							try {
+								fetch('/ui/preferences', {
+									method: 'POST',
+									headers: { 'Content-Type': 'application/json' },
+									body: JSON.stringify(payload),
+									keepalive: true
+								}).catch(function() {});
+							} catch (_) {}
+						}
+						function applyStoredTheme(themeID, persistLocal, persistDB) {
+							var mode = modeForTheme(themeID);
+							document.documentElement.setAttribute('data-theme', mode);
+							document.documentElement.setAttribute('data-color-theme', themeID);
+							if (persistLocal) {
+								try { localStorage.setItem('theme', themeID); } catch (_) {}
+							}
+							if (persistDB) {
+								persistUIPreference({ theme: themeID });
+							}
+						}
+						var rawSaved = document.documentElement.getAttribute('data-ui-theme') || '';
+						var saved = normalizeStoredTheme(rawSaved);
+						if (saved) {
+							applyStoredTheme(saved, true, rawSaved !== saved);
+						} else {
+							applyStoredTheme('openvibely-dark', true, false);
+						}
 					function detectDesktopRuntime() {
 						try {
 							if (typeof window === 'undefined') return false;
+							var serverRuntime = document.documentElement.getAttribute('data-openvibely-runtime');
+							if (serverRuntime === 'desktop') return true;
 							if (window.location && window.location.protocol === 'wails:') return true;
 							if (typeof window.runtime !== 'undefined') return true;
 							if (typeof window.go !== 'undefined') return true;
@@ -46,6 +121,38 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						document.documentElement.setAttribute('data-runtime', detectDesktopRuntime() ? 'desktop' : 'web');
 					};
 					window.__ov_applyRuntimeMode();
+				})();
+			</script>
+			<script>
+				(function() {
+					window.__ov_purgeSensitiveHTMXHistory = function() {
+						var cacheKey = 'htmx-history-cache';
+						try {
+							var raw = localStorage.getItem(cacheKey);
+							if (!raw) return;
+							var entries = JSON.parse(raw);
+							if (!Array.isArray(entries)) {
+								localStorage.removeItem(cacheKey);
+								return;
+							}
+							var retained = entries.filter(function(entry) {
+								if (!entry || typeof entry.url !== 'string') return true;
+								try {
+									return new URL(entry.url, window.location.href).pathname !== '/models';
+								} catch (_) {
+									return entry.url.split(/[?#]/, 1)[0] !== '/models';
+								}
+							});
+							if (retained.length === entries.length) return;
+							if (retained.length === 0) localStorage.removeItem(cacheKey);
+							else localStorage.setItem(cacheKey, JSON.stringify(retained));
+						} catch (_) {
+							try {
+								localStorage.removeItem(cacheKey);
+							} catch (_) {}
+						}
+					};
+					window.__ov_purgeSensitiveHTMXHistory();
 				})();
 			</script>
 			<link href="https://cdn.jsdelivr.net/npm/daisyui@4.12.14/dist/full.min.css" rel="stylesheet" type="text/css"/>
@@ -70,6 +177,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						--ov-link-color-visited: #7480ff;
 						--ov-link-focus-ring: rgba(116, 128, 255, 0.45);
 						--ov-link-decoration: rgba(116, 128, 255, 0.85);
+						--ov-primary-action-color: #7480ff;
 							--ov-diff-add-bg: #1E3A38;
 							--ov-diff-del-bg: #3D2C34;
 							--ov-diff-add-fg: #559B70;
@@ -85,6 +193,16 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							transparent 4px,
 							transparent 6px
 						);
+					}
+					[data-color-theme]:not([data-color-theme="openvibely-dark"]):not([data-color-theme="openvibely-light"]) {
+						--ov-primary-action-color: oklch(var(--p) / 1);
+					}
+					[data-color-theme] .btn-primary.chat-send-button {
+						background-color: var(--ov-primary-action-color);
+						border-color: var(--ov-primary-action-color);
+					}
+					.task-state-running {
+						color: var(--ov-primary-action-color);
 					}
 					/* Canonical "Default" badge styling used across major settings pages. */
 					.ov-badge-default {
@@ -202,8 +320,24 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					height: 100vh;
 					width: 100vw;
 				}
+				.drag-cursor-surface {
+					cursor: grab;
+				}
+				.drag-cursor-surface:active,
+				.drag-cursor-surface:active *,
+				.drag-cursor-surface.dragging,
+				.drag-cursor-surface.dragging *,
+				html.drag-cursor-active,
+				html.drag-cursor-active *,
+				body.drag-cursor-active,
+				body.drag-cursor-active * {
+					cursor: grabbing !important;
+				}
 				.dragging {
-					opacity: 0.5;
+					opacity: 0.85;
+					pointer-events: none;
+					transition: none !important;
+					will-change: transform;
 				}
 				.drag-over {
 					border-color: hsl(var(--p)) !important;
@@ -242,9 +376,24 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					z-index: 10;
 					box-shadow: 0 3px 8px rgba(0,0,0,0.5);
 				}
-				.task-selected .btn-circle {
-					display: none;
-				}
+					.task-selected .btn-circle {
+						display: none;
+					}
+					.schedule-selected {
+						position: relative;
+						overflow: visible !important;
+						background: oklch(var(--p) / 0.35) !important;
+					}
+					.schedule-selected::after {
+						content: '';
+						position: absolute;
+						inset: 0 0 0 -2px;
+						border: 2px solid oklch(var(--p));
+						border-radius: inherit;
+						box-sizing: border-box;
+						pointer-events: none;
+						z-index: 1;
+					}
 				/* Modal layering */
 				dialog.modal {
 					z-index: 1200;
@@ -319,13 +468,27 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					outline: 2px solid currentColor;
 					outline-offset: 2px;
 				}
-				.toast-notification:hover {
-					transform: scale(1.02);
-				}
 				.toast-notification.toast-dismiss {
 					animation: toast-slide-out 0.3s ease-in forwards;
 					transition: none;
 					pointer-events: none;
+				}
+				.system-update-toast {
+					background-color: #646fe4 !important;
+					border-color: #7480ff !important;
+					color: #090b23 !important;
+				}
+				.system-update-toast .toast-close {
+					color: #090b23 !important;
+				}
+				.system-update-toast .toast-close:hover,
+				.system-update-toast .toast-close:focus-visible {
+					background-color: rgba(9, 11, 35, 0.12) !important;
+				}
+				[data-theme="light"] .system-update-toast {
+					background-color: #7480ff !important;
+					border-color: #8b93ff !important;
+					color: #090b23 !important;
 				}
 				@keyframes toast-slide-in {
 					from {
@@ -412,24 +575,6 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					background: var(--ov-loading-dot-color-soft);
 				}
 			}
-			#selection-counter {
-					position: fixed;
-					bottom: 24px;
-					right: 24px;
-					background: hsl(var(--p));
-					color: white;
-					padding: 12px 20px;
-					border-radius: 12px;
-					font-weight: bold;
-					box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-					z-index: 50;
-					display: none;
-					align-items: center;
-					gap: 12px;
-				}
-				#selection-counter.visible {
-					display: flex;
-				}
 				/* Ensure dropdown menus appear above other cards */
 				.card:has(.dropdown:focus-within),
 				.card:has(.dropdown:hover),
@@ -469,6 +614,30 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						max-height: calc(100vh - 4rem);
 						overflow-y: auto;
 					}
+				/* Kanban dropdowns are explicitly state-driven so dismissal can
+				   return focus to the trigger without focus reopening the menu. */
+				#kanban-board [data-kanban-menu-key]:not([data-kanban-menu-open="true"]) > [data-kanban-menu-content] {
+					visibility: hidden !important;
+					opacity: 0 !important;
+					pointer-events: none !important;
+				}
+				#kanban-board [data-kanban-menu-key][data-kanban-menu-open="true"] > [data-kanban-menu-content] {
+					visibility: visible !important;
+					opacity: 1 !important;
+					pointer-events: auto !important;
+				}
+				/* Chat actions are explicitly state-driven so focus alone never opens the destructive menu. */
+				#chat-page-root [data-chat-actions-dropdown]:not([data-chat-actions-open="true"]) > .dropdown-content {
+						visibility: hidden !important;
+						opacity: 0 !important;
+						pointer-events: none !important;
+					}
+					#chat-page-root [data-chat-actions-dropdown][data-chat-actions-open="true"] > .dropdown-content {
+						visibility: visible !important;
+						opacity: 1 !important;
+						pointer-events: auto !important;
+					}
+
 				/* Chat bubble redesign - distinct card-style per message */
 				/* Scrollports and input gutter are shifted left 16px so bubble bodies
 				   align with other page card left-edges (kanban columns / models cards).
@@ -597,7 +766,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					transition: width 0.2s ease;
 					overflow: hidden;
 				}
-				.sidebar-aside.sidebar-collapsed {
+				body.sidebar-collapsed-pending .sidebar-aside,
+					.sidebar-aside.sidebar-collapsed {
 					width: 3.5rem !important;
 				}
 				.sidebar-aside .sidebar-text {
@@ -605,29 +775,47 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					white-space: nowrap;
 					overflow: hidden;
 				}
-				.sidebar-aside.sidebar-collapsed .sidebar-text {
+				body.sidebar-collapsed-pending .sidebar-aside .sidebar-text,
+					.sidebar-aside.sidebar-collapsed .sidebar-text {
 					opacity: 0;
 					pointer-events: none;
 					width: 0;
 					display: none;
 				}
-				.sidebar-aside.sidebar-collapsed .sidebar-hide-collapsed {
+				.sidebar-alert-indicators {
+					margin-left: auto;
+					display: inline-flex;
+					align-items: center;
+					justify-content: flex-end;
+					gap: 0.375rem;
+					min-width: 0;
+					flex-shrink: 0;
+				}
+				.sidebar-update-badge {
+					padding: 0 0.5rem;
+					flex-shrink: 0;
+				}
+				body.sidebar-collapsed-pending .sidebar-aside .sidebar-hide-collapsed,
+					.sidebar-aside.sidebar-collapsed .sidebar-hide-collapsed {
 					display: none !important;
 				}
 				.sidebar-aside .sidebar-toggle-icon {
 					transition: transform 0.2s ease;
 				}
-				.sidebar-aside.sidebar-collapsed .sidebar-toggle-icon {
+				body.sidebar-collapsed-pending .sidebar-aside .sidebar-toggle-icon,
+					.sidebar-aside.sidebar-collapsed .sidebar-toggle-icon {
 					transform: rotate(180deg);
 				}
-				/* Collapsed sidebar: flex column, perfectly centered icons */
-				.sidebar-aside.sidebar-collapsed .sidebar-inner {
+					/* Collapsed sidebar: flex column, perfectly centered icons */
+					body.sidebar-collapsed-pending .sidebar-aside .sidebar-inner,
+					.sidebar-aside.sidebar-collapsed .sidebar-inner {
 					padding: 0.375rem 0 !important;
 					display: flex !important;
 					flex-direction: column !important;
 					align-items: center !important;
 				}
-				.sidebar-aside.sidebar-collapsed .sidebar-header {
+				body.sidebar-collapsed-pending .sidebar-aside .sidebar-header,
+					.sidebar-aside.sidebar-collapsed .sidebar-header {
 					display: flex !important;
 					flex-direction: column !important;
 					justify-content: center !important;
@@ -637,7 +825,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					width: 2.5rem !important;
 					gap: 2px !important;
 				}
-				.sidebar-aside.sidebar-collapsed .sidebar-header .btn {
+				body.sidebar-collapsed-pending .sidebar-aside .sidebar-header .btn,
+					.sidebar-aside.sidebar-collapsed .sidebar-header .btn {
 					width: 2.5rem !important;
 					height: 2.5rem !important;
 					min-height: 2.5rem !important;
@@ -647,13 +836,15 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					align-items: center !important;
 					justify-content: center !important;
 				}
-				.sidebar-aside.sidebar-collapsed .menu {
+				body.sidebar-collapsed-pending .sidebar-aside .menu,
+					.sidebar-aside.sidebar-collapsed .menu {
 					padding: 0 !important;
 					margin: 0 !important;
 					gap: 2px !important;
 					width: 2.5rem !important;
 				}
-				.sidebar-aside.sidebar-collapsed .menu li:not(.sidebar-hide-collapsed):not(.sidebar-divider) {
+				body.sidebar-collapsed-pending .sidebar-aside .menu li:not(.sidebar-hide-collapsed):not(.sidebar-divider),
+					.sidebar-aside.sidebar-collapsed .menu li:not(.sidebar-hide-collapsed):not(.sidebar-divider) {
 					display: flex !important;
 					justify-content: center !important;
 					align-items: center !important;
@@ -661,12 +852,15 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					margin: 0 !important;
 					width: 2.5rem !important;
 				}
-				.sidebar-aside.sidebar-collapsed .menu :where(li ul) {
+				body.sidebar-collapsed-pending .sidebar-aside .menu :where(li ul),
+					.sidebar-aside.sidebar-collapsed .menu :where(li ul) {
 					padding: 0 !important;
 					margin: 0 !important;
 				}
-				.sidebar-aside.sidebar-collapsed .menu a,
-				.sidebar-aside.sidebar-collapsed .menu summary {
+					body.sidebar-collapsed-pending .sidebar-aside .menu a,
+					body.sidebar-collapsed-pending .sidebar-aside .menu summary,
+					.sidebar-aside.sidebar-collapsed .menu a,
+					.sidebar-aside.sidebar-collapsed .menu summary {
 					display: flex !important;
 					align-items: center !important;
 					justify-content: center !important;
@@ -678,19 +872,23 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					min-height: 2.5rem !important;
 					border-radius: 0.5rem;
 				}
-				.sidebar-aside.sidebar-collapsed .sidebar-divider {
+				body.sidebar-collapsed-pending .sidebar-aside .sidebar-divider,
+					.sidebar-aside.sidebar-collapsed .sidebar-divider {
 					display: none;
 				}
 					/* Collapsed sidebar: disable custom hover tooltip boxes next to icons */
-					.sidebar-aside.sidebar-collapsed [data-tip] {
+					body.sidebar-collapsed-pending .sidebar-aside [data-tip],
+						.sidebar-aside.sidebar-collapsed [data-tip] {
 						position: relative;
 					}
-					.sidebar-aside.sidebar-collapsed [data-tip]::after {
+					body.sidebar-collapsed-pending .sidebar-aside [data-tip]::after,
+						.sidebar-aside.sidebar-collapsed [data-tip]::after {
 						content: none !important;
 						display: none !important;
 						opacity: 0 !important;
 					}
-					.sidebar-aside.sidebar-collapsed [data-tip]:hover::after {
+					body.sidebar-collapsed-pending .sidebar-aside [data-tip]:hover::after,
+						.sidebar-aside.sidebar-collapsed [data-tip]:hover::after {
 						opacity: 0 !important;
 					}
 						/* Theme toggle shared styling */					.theme-toggle-pill {
@@ -701,12 +899,15 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						width: 46px;
 						height: 24px;
 						border-radius: 9999px;
-						background: #3a4455;
+						background: #E8E8E8;
 						cursor: pointer;
 						padding: 0 4px;
 						transition: background 0.2s;
 						user-select: none;
 						flex-shrink: 0;
+					}
+					[data-theme="dark"] .theme-toggle-pill {
+						background: #3a4455;
 					}
 					.theme-toggle-icon {
 						display: flex;
@@ -787,6 +988,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					--su: 0.7 0.12 145;
 					--wa: 0.79 0.08 84;
 					--er: 0.68 0.15 26;
+					--ov-primary-action-color: #7480ff;
 
 					/* Light 2026 semantic aliases — indigo/purple accent palette. */
 					--ov-l-bg: #FAFAFA;
@@ -967,11 +1169,11 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 
 					/* --- Buttons --- */
 					/* Dark-mode hover parity across web and desktop (deterministic, engine-agnostic). */
-					[data-theme="dark"] .btn:hover {
+					[data-color-theme="openvibely-dark"][data-theme="dark"] .btn:hover {
 						background-color: #2f3540 !important;
 						border-color: #2f3540 !important;
 					}
-					[data-theme="dark"] .btn-primary:hover {
+					[data-color-theme="openvibely-dark"][data-theme="dark"] .btn-primary:hover {
 						background-color: #646fe4 !important;
 						border-color: #646fe4 !important;
 					}
@@ -1046,16 +1248,16 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						border-color: #e66465 !important;
 					}
 					/* Light-mode hover parity matrix (mirrors dark-mode coverage). */
-					[data-theme="light"] .btn:hover {
+					[data-color-theme="openvibely-light"][data-theme="light"] .btn:hover {
 						background-color: var(--ov-l-surface-hover);
 						border-color: var(--ov-l-border);
 					}
-					[data-theme="light"] .btn-primary {
+					[data-color-theme="openvibely-light"][data-theme="light"] .btn-primary {
 						background-color: var(--ov-l-accent);
 						border-color: var(--ov-l-accent);
 						color: #FFFFFF;
 					}
-					[data-theme="light"] .btn-primary:hover {
+					[data-color-theme="openvibely-light"][data-theme="light"] .btn-primary:hover {
 						background-color: var(--ov-l-accent-hover);
 						border-color: var(--ov-l-accent-hover);
 					}
@@ -1473,11 +1675,6 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					color: var(--ov-l-text-strong);
 				}
 
-				/* --- Selection counter shadow fix --- */
-				[data-theme="light"] #selection-counter {
-					box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-				}
-
 				/* --- Modal dialogs --- */
 				[data-theme="light"] .modal-box {
 					background-color: var(--ov-l-bg);
@@ -1545,6 +1742,10 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					background: hsl(var(--b2, var(--b1)) / 0.8);
 					padding: 0.15em 0.35em;
 					border-radius: 0.25rem;
+				}
+				[data-theme="light"] [data-alert-markdown] :not(pre) > code {
+					background: var(--ov-l-surface-active);
+					color: var(--ov-l-text-strong);
 				}
 				.chat-markdown pre {
 					margin: 0.5em 0;
@@ -2048,18 +2249,27 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					}
 					return escaped;
 				};
-				// Defense in depth for HTML emitted by Marked/highlight.js. Browser HTML
-				// parsing normalizes quoted, unquoted, and malformed attributes before
-				// this allow/deny pass, avoiding regex-only sanitizer gaps.
-				window.sanitizeChatHTMLTemplate = function(html) {
-					if (!html || typeof document === 'undefined' || !document.createElement) return null;
-					var template = document.createElement('template');
-					if (!template.content || !template.content.querySelectorAll) return null;
-					template.innerHTML = html;
-					template.content.querySelectorAll('script, style, iframe, object, embed, link, meta, base, form, svg, math').forEach(function(element) {
-						element.remove();
-					});
-					template.content.querySelectorAll('*').forEach(function(element) {
+						window.chatLinkOpensOutsideApp = function(href) {
+							if (!href) return false;
+							try {
+								var parsed = new URL(href, window.location && window.location.href ? window.location.href : 'http://openvibely.local/');
+								if (parsed.protocol === 'mailto:') return true;
+								if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+								if (window.location && window.location.origin && parsed.origin === window.location.origin) return false;
+								return true;
+							} catch (_) {
+								return false;
+							}
+						};
+						window.chatLinkAbsoluteExternalURL = function(href) {
+							if (!window.chatLinkOpensOutsideApp || !window.chatLinkOpensOutsideApp(href)) return '';
+							try {
+								return new URL(href, window.location && window.location.href ? window.location.href : 'http://openvibely.local/').toString();
+							} catch (_) {
+								return '';
+							}
+						};
+					window.sanitizeChatHTMLElement = function(element) {
 						Array.prototype.slice.call(element.attributes || []).forEach(function(attr) {
 							var name = attr.name.toLowerCase();
 							if (/^on/i.test(attr.name) || name === 'srcdoc' || name === 'srcset' || name === 'style') {
@@ -2071,9 +2281,37 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 								if (/^(?:javascript:|vbscript:|data:)/.test(normalized)) element.removeAttribute(attr.name);
 							}
 						});
-					});
-					return template;
-				};
+						if (element.tagName === 'A') {
+							var externalURL = element.hasAttribute('href') && window.chatLinkAbsoluteExternalURL ? window.chatLinkAbsoluteExternalURL(element.getAttribute('href')) : '';
+							if (externalURL) {
+								element.setAttribute('target', '_blank');
+								element.setAttribute('rel', 'noopener noreferrer');
+								element.setAttribute('data-openvibely-chat-external-link', 'true');
+								element.setAttribute('data-openvibely-external-url', externalURL);
+							} else {
+								element.removeAttribute('target');
+								element.removeAttribute('rel');
+								element.removeAttribute('data-openvibely-chat-external-link');
+								element.removeAttribute('data-openvibely-external-url');
+							}
+						}
+					};
+					// Defense in depth for HTML emitted by Marked/highlight.js. Browser HTML
+					// parsing normalizes quoted, unquoted, and malformed attributes before
+					// this allow/deny pass, avoiding regex-only sanitizer gaps.
+					window.sanitizeChatHTMLTemplate = function(html) {
+						if (!html || typeof document === 'undefined' || !document.createElement) return null;
+						var template = document.createElement('template');
+						if (!template.content || !template.content.querySelectorAll) return null;
+						template.innerHTML = html;
+						template.content.querySelectorAll('script, style, iframe, object, embed, link, meta, base, form, svg, math').forEach(function(element) {
+							element.remove();
+						});
+						template.content.querySelectorAll('*').forEach(function(element) {
+							window.sanitizeChatHTMLElement(element);
+						});
+						return template;
+					};
 				window.sanitizeChatHTML = function(html) {
 					if (!html) return html;
 					var template = window.sanitizeChatHTMLTemplate(html);
@@ -2138,17 +2376,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 								if (/^(?:SCRIPT|STYLE|IFRAME|OBJECT|EMBED|LINK|META|BASE|FORM|SVG|MATH)$/.test(element.tagName || '')) {
 									element.remove();
 								} else {
-									Array.prototype.slice.call(element.attributes || []).forEach(function(attr) {
-										var name = attr.name.toLowerCase();
-										if (/^on/i.test(attr.name) || name === 'srcdoc' || name === 'srcset' || name === 'style') {
-											element.removeAttribute(attr.name);
-											return;
-										}
-										if (name === 'href' || name === 'src' || name === 'xlink:href' || name === 'action' || name === 'formaction') {
-											var normalized = String(attr.value || '').replace(/[\u0000-\u0020\u007f-\u009f]/g, '').toLowerCase();
-											if (/^(?:javascript:|vbscript:|data:)/.test(normalized)) element.removeAttribute(attr.name);
-										}
-									});
+									window.sanitizeChatHTMLElement(element);
 								}
 								if (processed >= 256 || ((window.performance && performance.now ? performance.now() : Date.now()) - startedAt) >= 8) {
 									setTimeout(sanitizeBatch, 0);
@@ -2279,55 +2507,84 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						pre.appendChild(btn);
 					});
 				};
-// Theme toggle function
-				window.toggleTheme = function() {
-					var html = document.documentElement;
-					var current = html.getAttribute('data-theme');
-					var next = (current === 'dark') ? 'light' : 'dark';
+	// Theme toggle function
+					(function() {
+						var nativeThemeByMode = { light: 'openvibely-light', dark: 'openvibely-dark' };
+						var nativeThemeModes = { 'openvibely-light': 'light', 'openvibely-dark': 'dark' };
 
-					html.setAttribute('data-theme', next);
-					localStorage.setItem('theme', next);
-
-					// Update toggle icon
-					var icons = document.querySelectorAll('.theme-toggle-icon');
-					icons.forEach(function(icon) {
-						icon.setAttribute('data-theme-current', next);
-					});
-				};
-
-				// Listen for system theme changes (when no manual preference is saved)
-				if (window.matchMedia) {
-					window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function(e) {
-						if (!localStorage.getItem('theme')) {
-							document.documentElement.setAttribute('data-theme', e.matches ? 'dark' : 'light');
+						function normalizeThemeID(value) {
+							value = String(value || '').trim();
+							if (nativeThemeModes[value]) return value;
+							if (value === 'light' || value === 'dark') return nativeThemeByMode[value];
+							if (/^[a-z0-9][a-z0-9._:-]*$/i.test(value)) return value;
+							return '';
 						}
-					});
-				}
+
+						function modeForTheme(themeID) {
+							if (nativeThemeModes[themeID]) return nativeThemeModes[themeID];
+							return /light/i.test(themeID) && !/dark/i.test(themeID) ? 'light' : 'dark';
+						}
+
+						function persistUIPreference(payload) {
+							try {
+								fetch('/ui/preferences', {
+									method: 'POST',
+									headers: { 'Content-Type': 'application/json' },
+									body: JSON.stringify(payload),
+									keepalive: true
+								}).catch(function() {});
+							} catch (_) {}
+						}
+
+						window.applyOpenVibelyTheme = function(themeID, persist) {
+							themeID = normalizeThemeID(themeID) || nativeThemeByMode.dark;
+							var mode = modeForTheme(themeID);
+							var html = document.documentElement;
+							html.setAttribute('data-theme', mode);
+							html.setAttribute('data-color-theme', themeID);
+							if (persist) {
+								try { localStorage.setItem('theme', themeID); } catch (_) {}
+								persistUIPreference({ theme: themeID });
+							}
+
+							// Update toggle icon
+							var icons = document.querySelectorAll('.theme-toggle-icon');
+							icons.forEach(function(icon) {
+								icon.setAttribute('data-theme-current', mode);
+							});
+						};
+
+						window.toggleTheme = function() {
+							var current = document.documentElement.getAttribute('data-theme');
+							var nextMode = (current === 'dark') ? 'light' : 'dark';
+							window.applyOpenVibelyTheme(nativeThemeByMode[nextMode], true);
+						};
+
+						window.applyOpenVibelyTheme(document.documentElement.getAttribute('data-color-theme'), false);
+
+						// Listen for system theme changes (when no manual preference is saved)
+						if (window.matchMedia) {
+							window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function(e) {
+								if (!localStorage.getItem('theme')) {
+									window.applyOpenVibelyTheme(e.matches ? nativeThemeByMode.dark : nativeThemeByMode.light, false);
+								}
+							});
+						}
+					})();
 
 				// Scrollbar gutter and CSS overflow-y: scroll handle layout shifts in modern browsers
 				// No JavaScript workaround needed
 
 				let draggedElement = null;
+
 				let selectedTasks = new Set();
 				let draggedTaskIds = [];
+
 				window.isDragging = false;
 				let autoScrollInterval = null;
 				let currentScrollZone = null;
 
-				function updateSelectionCounter() {
-					const counter = document.getElementById('selection-counter');
-					if (!counter) return;
-
-					if (selectedTasks.size > 0) {
-						counter.querySelector('#selection-count').textContent = selectedTasks.size;
-						counter.classList.add('visible');
-					} else {
-						counter.classList.remove('visible');
-					}
-				}
-
-			// ── Tab Visibility Manager ──
-			// Centralized manager to pause/resume SSE connections and HTMX polling
+				// ── Tab Visibility Manager ──			// Centralized manager to pause/resume SSE connections and HTMX polling
 			// when a tab is hidden/visible. Prevents resource exhaustion with multiple tabs.
 			window._tabVisibility = (function() {
 				let sseConnections = {}; // name → { url, onmessage, onerror, onopen, instance }
@@ -2443,28 +2700,96 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				};
 			})();
 
-			// Track which element was focused before mousedown to properly detect dropdown toggle
+			// Track which element was focused before mousedown to properly detect dropdown toggle.
+			// Also record whether a Kanban menu was open so focus changes during the click
+			// do not invert first-click behavior.
 			let focusedBeforeClick = null;
+			let kanbanMenuWasOpenBeforeClick = false;
 
 			document.addEventListener('mousedown', function(e) {
-				// Record what was focused before this interaction starts
+				// Record state before this interaction starts.
 				focusedBeforeClick = document.activeElement;
+				const kanbanDropdown = e.target && e.target.closest ? e.target.closest('[data-kanban-menu-key]') : null;
+				kanbanMenuWasOpenBeforeClick = !!(kanbanDropdown && kanbanDropdown.getAttribute('data-kanban-menu-open') === 'true');
 			}, true);
+			function closestDropdownScrollBoundary(element) {
+				let current = element ? element.parentElement : null;
+				while (current && current !== document.body) {
+					const styles = getComputedStyle(current);
+					const overflowY = styles.overflowY;
+					if ((overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'hidden') && current.clientHeight > 0) return current;
+					current = current.parentElement;
+				}
+				return null;
+			}
+
+			function positionDropdownForViewport(label) {
+				const dropdown = label && label.closest ? label.closest('.dropdown') : null;
+				if (!dropdown) return;
+				if (!dropdown.dataset.originalDropdownTop) dropdown.dataset.originalDropdownTop = dropdown.classList.contains('dropdown-top') ? 'true' : 'false';
+				const content = dropdown.querySelector('.dropdown-content');
+				if (!content) return;
+				const labelRect = label.getBoundingClientRect();
+				const boundary = closestDropdownScrollBoundary(dropdown);
+				const boundaryRect = boundary ? boundary.getBoundingClientRect() : { top: 0, bottom: window.innerHeight };
+				const visibleTop = Math.max(0, boundaryRect.top);
+				const visibleBottom = Math.min(window.innerHeight, boundaryRect.bottom);
+				const menuHeight = Math.min(content.scrollHeight || content.getBoundingClientRect().height || 0, window.innerHeight - 16);
+				const roomBelow = visibleBottom - labelRect.bottom;
+				const roomAbove = labelRect.top - visibleTop;
+				const shouldOpenUp = menuHeight > 0 && roomBelow < menuHeight && roomAbove > roomBelow;
+				if (shouldOpenUp) {
+					dropdown.classList.add('dropdown-top');
+				} else if (dropdown.dataset.originalDropdownTop !== 'true') {
+					dropdown.classList.remove('dropdown-top');
+				}
+			}
 
 			function handleDropdownToggle(event) {
 				event.stopPropagation(); // Prevent event from bubbling to parent handlers
 				const label = event.currentTarget;
+				const dropdown = label && label.closest ? label.closest('[data-chat-actions-dropdown]') : null;
+				const kanbanDropdown = label && label.closest ? label.closest('[data-kanban-menu-key]') : null;
+				const desktopChatStartupFocus = dropdown && document.documentElement.getAttribute('data-openvibely-runtime') === 'desktop' && dropdown.getAttribute('data-chat-actions-open') !== 'true';
 
-				// Check if this dropdown was already open before the click
-				if (focusedBeforeClick === label) {
-					// Dropdown was already open, close it
-					event.preventDefault();
-					label.blur();
+					// Check if this dropdown was already open before the click. A desktop Chat
+					// trigger may only be focused by WebView startup, which is not an open action.
+					if ((kanbanDropdown && kanbanMenuWasOpenBeforeClick) || (focusedBeforeClick === label && !kanbanDropdown && !desktopChatStartupFocus)) {
+						// Dropdown was already open, close it.
+						event.preventDefault();
+						if (kanbanDropdown && window.closeKanbanMenu) {
+							window.closeKanbanMenu(kanbanDropdown, true);
+						} else {
+							label.blur();
+						}
+						return;
+					}
+
+					// Otherwise, open the dropdown explicitly, then place it in the visible viewport/scrollport.
+					if (kanbanDropdown) {
+						openKanbanMenuKey = kanbanDropdown.getAttribute('data-kanban-menu-key') || '';
+						const board = kanbanDropdown.closest('#kanban-board');
+						if (board && openKanbanMenuKey) board.setAttribute('data-open-kanban-menu-key', openKanbanMenuKey);
+						setKanbanMenuExpanded(kanbanDropdown, true);
+					}
+					requestAnimationFrame(function() { positionDropdownForViewport(label); });
+					if (kanbanDropdown && label.matches('[data-task-card-menu-trigger]') && window.htmx) {
+						const options = kanbanDropdown.querySelector('[data-task-card-merge-options]');
+						const refreshURL = options && options.getAttribute('hx-get');
+						if (options && refreshURL) htmx.ajax('GET', refreshURL, {target: options, swap: 'outerHTML'});
+					}
 				}
-				// Otherwise, let the default focus behavior open the dropdown
-			}
 
 				function handleTaskSelect(event) {
+
+
+					const clickedTaskID = event.currentTarget.getAttribute('data-task-id');
+					if (clickedTaskID && clickedTaskID === suppressedTaskClickID) {
+						event.preventDefault();
+						event.stopPropagation();
+						suppressedTaskClickID = '';
+						return;
+					}
 					// Ignore clicks on links or their children (let HTMX handle them)
 					if (event.target.tagName === 'A' || event.target.closest('a')) {
 						return;
@@ -2491,7 +2816,6 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							card.classList.add('task-selected');
 						}
 
-						updateSelectionCounter();
 						return;
 					}
 
@@ -2508,52 +2832,176 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					});
 					selectedTasks.clear();
 					draggedTaskIds = [];
-					updateSelectionCounter();
 				}
 
-				function handleDragStart(event) {
+
+
+				function beginPointerCardMotion(card) {
+					const rect = card.getBoundingClientRect();
+					const placeholder = document.createElement('div');
+					placeholder.setAttribute('aria-hidden', 'true');
+					placeholder.setAttribute('data-pointer-drag-placeholder', '');
+					placeholder.style.height = rect.height + 'px';
+					placeholder.style.marginBottom = getComputedStyle(card).marginBottom;
+					card.parentNode.insertBefore(placeholder, card);
+					const originalStyle = card.getAttribute('style');
+					card.style.position = 'fixed';
+					card.style.left = rect.left + 'px';
+					card.style.top = rect.top + 'px';
+					card.style.width = rect.width + 'px';
+					card.style.height = rect.height + 'px';
+					card.style.margin = '0';
+					card.style.zIndex = '1000';
+					card.style.pointerEvents = 'none';
+					return { card: card, placeholder: placeholder, originalStyle: originalStyle };
+				}
+
+				function movePointerCard(motion, deltaX, deltaY) {
+					if (motion) motion.card.style.transform = 'translate3d(' + deltaX + 'px, ' + deltaY + 'px, 0)';
+				}
+
+				function endPointerCardMotion(motion) {
+					if (!motion) return;
+					if (motion.placeholder) motion.placeholder.remove();
+					if (motion.originalStyle === null) motion.card.removeAttribute('style');
+					else motion.card.setAttribute('style', motion.originalStyle);
+				}
+
+				window.beginPointerCardMotion = beginPointerCardMotion;
+				window.movePointerCard = movePointerCard;
+				window.endPointerCardMotion = endPointerCardMotion;
+
+				let taskPointerDrag = null;
+				let suppressedTaskClickID = '';
+
+				function taskPointerDropZoneAt(clientX, clientY) {
+					const hit = document.elementFromPoint(clientX, clientY);
+					return hit ? hit.closest('.category-drop-zone, .task-drop-zone') : null;
+				}
+
+				function beginTaskPointerDrag(event) {
+					const state = taskPointerDrag;
+					if (!state || state.started) return;
+					state.started = true;
 					window.isDragging = true;
-					draggedElement = event.currentTarget;
-					const taskID = draggedElement.getAttribute('data-task-id');
-					const cat = draggedElement.getAttribute('data-task-category');
-					console.log('[drag] START task=' + taskID + ' category=' + cat);
+					document.documentElement.classList.add('drag-cursor-active');
+					document.body.classList.add('drag-cursor-active');
+					draggedElement = state.card;
+					const taskID = state.card.getAttribute('data-task-id');
 
 					if (selectedTasks.has(taskID) && selectedTasks.size > 1) {
-						// Dragging a selected task — include all selected
 						draggedTaskIds = Array.from(selectedTasks);
 					} else {
-						// Single drag — clear any selection
 						clearSelection();
 						draggedTaskIds = [taskID];
 					}
-
-					// Add dragging class to all dragged cards
 					draggedTaskIds.forEach(id => {
-						const el = document.getElementById('task-' + id);
-						if (el) el.classList.add('dragging');
+						const card = document.getElementById('task-' + id);
+						if (card) card.classList.add('dragging');
 					});
-
-					event.dataTransfer.effectAllowed = 'move';
-					event.dataTransfer.setData('text/plain', draggedTaskIds.join(','));
+					state.motion = beginPointerCardMotion(state.card);
 				}
 
-				function handleDragEnd(event) {
-					window.isDragging = false;
+				function refreshTaskPointerDropZone(clientX, clientY) {
+					const state = taskPointerDrag;
+					if (!state || !state.started) return null;
+					const zone = taskPointerDropZoneAt(clientX, clientY);
+					if (state.dropZone !== zone) {
+						if (state.dropZone) state.dropZone.classList.remove('drag-over');
+						state.dropZone = zone;
+						if (zone) zone.classList.add('drag-over');
+					}
+					return zone;
+				}
+
+				function updateTaskPointerDropZone(event) {
+					const zone = refreshTaskPointerDropZone(event.clientX, event.clientY);
+					const board = document.getElementById('kanban-board');
+					handlePointerAutoScroll(event, board, zone, function() {
+						refreshTaskPointerDropZone(event.clientX, event.clientY);
+					});
+				}
+
+				function handleTaskPointerMove(event) {
+					const state = taskPointerDrag;
+					if (!state || event.pointerId !== state.pointerId) return;
+					const deltaX = event.clientX - state.startX;
+					const deltaY = event.clientY - state.startY;
+					if (!state.started && Math.hypot(deltaX, deltaY) < 4) return;
+					beginTaskPointerDrag(event);
+					event.preventDefault();
+					movePointerCard(state.motion, deltaX, deltaY);
+					updateTaskPointerDropZone(event);
+				}
+
+				function cleanupTaskPointerDrag() {
+					const state = taskPointerDrag;
 					stopAutoScroll();
-					// Remove dragging class from all cards - use both the ID list AND
-					// a DOM query as fallback, because handleCategoryDrop/handleActiveDrop
-					// call clearSelection() (which empties draggedTaskIds) before dragend fires.
-					draggedTaskIds.forEach(id => {
-						const el = document.getElementById('task-' + id);
-						if (el) el.classList.remove('dragging');
+					if (state && state.dropZone) state.dropZone.classList.remove('drag-over');
+					if (state) endPointerCardMotion(state.motion);
+					document.querySelectorAll('.dragging').forEach(card => {
+						card.classList.remove('dragging');
 					});
-					document.querySelectorAll('.dragging').forEach(el => {
-						el.classList.remove('dragging');
-					});
-					document.querySelectorAll('.category-drop-zone, .task-drop-zone').forEach(zone => {
-						zone.classList.remove('drag-over');
-					});
+					document.documentElement.classList.remove('drag-cursor-active');
+					document.body.classList.remove('drag-cursor-active');
+					window.removeEventListener('pointermove', handleTaskPointerMove, true);
+					window.removeEventListener('pointerup', handleTaskPointerUp, true);
+					window.removeEventListener('pointercancel', handleTaskPointerCancel, true);
+					window.isDragging = false;
+					taskPointerDrag = null;
+					draggedElement = null;
+					draggedTaskIds = [];
+					if (state && state.started) document.dispatchEvent(new CustomEvent('task-pointer-dragend'));
 				}
+
+				function handleTaskPointerUp(event) {
+					const state = taskPointerDrag;
+					if (!state || event.pointerId !== state.pointerId) return;
+					const dropZone = taskPointerDropZoneAt(event.clientX, event.clientY) || state.dropZone;
+					if (state.started) {
+						suppressedTaskClickID = state.card.getAttribute('data-task-id');
+						if (dropZone) {
+							const dropEvent = {
+								currentTarget: dropZone,
+								target: dropZone,
+								clientY: event.clientY,
+								stopPropagation: function() {},
+								preventDefault: function() {}
+							};
+							if (dropZone.getAttribute('data-drop-type') === 'status') handleActiveDrop(dropEvent);
+							else handleCategoryDrop(dropEvent);
+						}
+						setTimeout(function() { suppressedTaskClickID = ''; }, 0);
+					}
+					cleanupTaskPointerDrag();
+				}
+
+				function handleTaskPointerCancel(event) {
+					const state = taskPointerDrag;
+					if (!state || event.pointerId !== state.pointerId) return;
+					cleanupTaskPointerDrag();
+					draggedTaskIds = [];
+				}
+
+				function handleTaskPointerDown(event) {
+					if (event.button !== 0 || taskPointerDrag) return;
+					if (event.target && event.target.closest('button, a, input, select, textarea, summary, label, [role="button"], .dropdown')) return;
+					const card = event.currentTarget;
+					taskPointerDrag = {
+						card: card,
+						pointerId: event.pointerId,
+						startX: event.clientX,
+						startY: event.clientY,
+						started: false,
+						dropZone: null
+					};
+					try { card.setPointerCapture(event.pointerId); } catch (_) {}
+					window.addEventListener('pointermove', handleTaskPointerMove, true);
+					window.addEventListener('pointerup', handleTaskPointerUp, true);
+					window.addEventListener('pointercancel', handleTaskPointerCancel, true);
+				}
+
+				window.handleTaskPointerDown = handleTaskPointerDown;
 
 				function stopAutoScroll() {
 					if (autoScrollInterval) {
@@ -2561,89 +3009,66 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						autoScrollInterval = null;
 					}
 					currentScrollZone = null;
+					currentScrollDeltaX = 0;
+					currentScrollDeltaY = 0;
+					currentScrollRefresh = null;
 				}
 
-				function startAutoScroll(scrollZone, direction, speed) {
-					// Don't restart if already scrolling the same zone in the same direction
-					if (autoScrollInterval && currentScrollZone === scrollZone) {
-						return;
-					}
+				let currentScrollDeltaX = 0;
+				let currentScrollDeltaY = 0;
+				let currentScrollRefresh = null;
 
+				function startAutoScroll(scrollZone, deltaX, deltaY, refresh) {
+					currentScrollRefresh = refresh || null;
+					if (autoScrollInterval && currentScrollZone === scrollZone && currentScrollDeltaX === deltaX && currentScrollDeltaY === deltaY) return;
 					stopAutoScroll();
 					currentScrollZone = scrollZone;
-
-					autoScrollInterval = setInterval(() => {
-						if (!scrollZone) {
-							stopAutoScroll();
-							return;
-						}
-
-						// Scroll the zone
-						scrollZone.scrollTop += direction * speed;
-
-						// Stop if we've reached the edge
-						if (direction < 0 && scrollZone.scrollTop <= 0) {
-							stopAutoScroll();
-						} else if (direction > 0 && scrollZone.scrollTop + scrollZone.clientHeight >= scrollZone.scrollHeight) {
-							stopAutoScroll();
-						}
-					}, 16); // ~60fps
+					currentScrollDeltaX = deltaX;
+					currentScrollDeltaY = deltaY;
+					currentScrollRefresh = refresh || null;
+					autoScrollInterval = setInterval(function() {
+						if (!currentScrollZone) return stopAutoScroll();
+						const previousLeft = currentScrollZone.scrollLeft;
+						const previousTop = currentScrollZone.scrollTop;
+						currentScrollZone.scrollLeft += currentScrollDeltaX;
+						currentScrollZone.scrollTop += currentScrollDeltaY;
+						if (currentScrollZone.scrollLeft === previousLeft && currentScrollZone.scrollTop === previousTop) return stopAutoScroll();
+						if (currentScrollRefresh) currentScrollRefresh();
+					}, 16);
 				}
 
-				function handleAutoScroll(event, dropZone) {
-					// Only auto-scroll if the zone is scrollable
-					if (dropZone.scrollHeight <= dropZone.clientHeight) {
-						stopAutoScroll();
-						return;
+				function pointerAutoScrollDelta(event, scrollZone) {
+					if (!scrollZone) return null;
+					const rect = scrollZone.getBoundingClientRect();
+					if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) return null;
+					const styles = getComputedStyle(scrollZone);
+					const canScrollX = (styles.overflowX === 'auto' || styles.overflowX === 'scroll') && scrollZone.scrollWidth > scrollZone.clientWidth;
+					const canScrollY = (styles.overflowY === 'auto' || styles.overflowY === 'scroll') && scrollZone.scrollHeight > scrollZone.clientHeight;
+					const thresholdX = Math.min(80, rect.width / 3);
+					const thresholdY = Math.min(80, rect.height / 3);
+					let deltaX = 0;
+					let deltaY = 0;
+					if (canScrollX) {
+						if (event.clientX - rect.left < thresholdX && scrollZone.scrollLeft > 0) deltaX = -8;
+						else if (rect.right - event.clientX < thresholdX && scrollZone.scrollLeft + scrollZone.clientWidth < scrollZone.scrollWidth) deltaX = 8;
 					}
-
-					const rect = dropZone.getBoundingClientRect();
-					const mouseY = event.clientY;
-					const scrollThreshold = 80; // pixels from edge to trigger scroll
-					const scrollSpeed = 8; // pixels per frame
-
-					const distanceFromTop = mouseY - rect.top;
-					const distanceFromBottom = rect.bottom - mouseY;
-
-					if (distanceFromTop < scrollThreshold && distanceFromTop >= 0) {
-						// Near top edge - scroll up
-						startAutoScroll(dropZone, -1, scrollSpeed);
-					} else if (distanceFromBottom < scrollThreshold && distanceFromBottom >= 0) {
-						// Near bottom edge - scroll down
-						startAutoScroll(dropZone, 1, scrollSpeed);
-					} else {
-						// Not near any edge
-						stopAutoScroll();
+					if (canScrollY) {
+						if (event.clientY - rect.top < thresholdY && scrollZone.scrollTop > 0) deltaY = -8;
+						else if (rect.bottom - event.clientY < thresholdY && scrollZone.scrollTop + scrollZone.clientHeight < scrollZone.scrollHeight) deltaY = 8;
 					}
+					return deltaX || deltaY ? { x: deltaX, y: deltaY } : null;
 				}
 
-				function handleDragOver(event) {
-					event.preventDefault();
-					event.dataTransfer.dropEffect = 'move';
-
-					// Auto-scroll when dragging near edges of scrollable dropzones
-					const dropZone = event.currentTarget;
-					if (dropZone && (dropZone.classList.contains('category-drop-zone') || dropZone.classList.contains('task-drop-zone'))) {
-						handleAutoScroll(event, dropZone);
-					}
-
-					return false;
+				function handlePointerAutoScroll(event, outerContainer, innerContainer, refresh) {
+					const outerDelta = pointerAutoScrollDelta(event, outerContainer);
+					if (outerDelta) return startAutoScroll(outerContainer, outerDelta.x, outerDelta.y, refresh);
+					const innerDelta = pointerAutoScrollDelta(event, innerContainer);
+					if (innerDelta) return startAutoScroll(innerContainer, innerDelta.x, innerDelta.y, refresh);
+					stopAutoScroll();
 				}
 
-				function handleDragEnter(event) {
-					event.currentTarget.classList.add('drag-over');
-				}
-
-				function handleDragLeave(event) {
-					const dropZone = event.currentTarget;
-					if (event.target === dropZone) {
-						dropZone.classList.remove('drag-over');
-						// Stop auto-scrolling when leaving the zone
-						if (currentScrollZone === dropZone) {
-							stopAutoScroll();
-						}
-					}
-				}
+				window.handlePointerAutoScroll = handlePointerAutoScroll;
+				window.stopPointerAutoScroll = stopAutoScroll;
 
 				// Drop handler for non-Active category columns (category change + reordering)
 				function handleCategoryDrop(event) {
@@ -2692,11 +3117,14 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							});
 						}
 					} else {
-						// Multi-select batch category change
+						// Multi-select batch category change. Clear selection before HTMX
+						// request hooks snapshot the board, while retaining the payload IDs.
+						const batchTaskIDs = draggedTaskIds.slice();
+						clearSelection();
 						htmx.ajax('PATCH', `/tasks/batch-category`, {
 							target: '#kanban-board',
 							swap: 'outerHTML',
-							values: { task_ids: draggedTaskIds.join(','), category: targetCategory, project_id: projectID }
+							values: { task_ids: batchTaskIDs.join(','), category: targetCategory, project_id: projectID }
 						}).catch(function(err) {
 							console.error('[drag] Batch category change failed:', err);
 							// Show error message to user
@@ -2799,11 +3227,14 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							});
 						}
 					} else {
-						// Multi-select drop into Active — batch category change
+						// Multi-select drop into Active. Clear selection before HTMX
+						// request hooks snapshot the board, while retaining the payload IDs.
+						const batchTaskIDs = draggedTaskIds.slice();
+						clearSelection();
 						htmx.ajax('PATCH', `/tasks/batch-category`, {
 							target: '#kanban-board',
 							swap: 'outerHTML',
-							values: { task_ids: draggedTaskIds.join(','), category: 'active', project_id: projectID }
+							values: { task_ids: batchTaskIDs.join(','), category: 'active', project_id: projectID }
 						}).catch(function(err) {
 							console.error('[drag] Batch category change to active failed:', err);
 							if (err.xhr && err.xhr.status === 400) {
@@ -2851,7 +3282,13 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					}
 
 					document.addEventListener('htmx:afterSwap', syncOpenVibelyTitleFromHTMX);
-					document.addEventListener('htmx:historyRestore', syncOpenVibelyTitleFromHTMX);
+					document.addEventListener('htmx:historyRestore', function(event) {
+						if (typeof resetKanbanInteractionForNavigation === 'function') resetKanbanInteractionForNavigation();
+						syncOpenVibelyTitleFromHTMX(event);
+					});
+					if (window.addEventListener) window.addEventListener('popstate', function() {
+						if (typeof resetKanbanInteractionForNavigation === 'function') resetKanbanInteractionForNavigation();
+					});
 
 					window.openVibelySubmitNavigate = function(form) {
 						if (!form || !window.htmx) return Promise.reject(new Error('HTMX navigation unavailable'));
@@ -2866,11 +3303,195 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					};
 
 				// Scroll position restoration for drop zones
+				// Interaction state is restored across the same authoritative kanban swaps.
 				let savedScrollPositions = new Map();
+				let savedKanbanInteraction = null;
+				let openKanbanMenuKey = '';
+				let suppressKanbanMenuFocusOpen = false;
 
-				// Save scroll positions before kanban board swap
+				function kanbanMenuItemKey(element) {
+					if (!element) return '';
+					return [
+						element.tagName,
+						element.getAttribute('href') || '',
+						element.getAttribute('hx-get') || '',
+						element.getAttribute('hx-post') || '',
+						element.getAttribute('hx-delete') || '',
+						(element.textContent || '').trim().replace(/\s+/g, ' ')
+					].join('|');
+				}
+
+				function snapshotKanbanInteraction(board) {
+					const active = document.activeElement;
+					let dropdown = active && board.contains(active) && active.closest ? active.closest('[data-kanban-menu-key]') : null;
+					if (dropdown && dropdown.getAttribute('data-kanban-menu-open') !== 'true') dropdown = null;
+					const durableMenuKey = board.getAttribute('data-open-kanban-menu-key') || openKanbanMenuKey;
+					if (!dropdown && durableMenuKey) {
+						dropdown = Array.from(board.querySelectorAll('[data-kanban-menu-key]')).find(function(candidate) {
+							return candidate.getAttribute('data-kanban-menu-key') === durableMenuKey;
+						}) || null;
+					}
+					let focusRole = dropdown && (!active || !dropdown.contains(active)) ? 'trigger' : '';
+					let focusKey = '';
+					if (dropdown && active && dropdown.contains(active)) {
+						if (active.matches('[data-kanban-menu-trigger]')) focusRole = 'trigger';
+						else if (active.matches('[data-kanban-menu-content]')) focusRole = 'content';
+						else {
+							focusRole = 'item';
+							focusKey = kanbanMenuItemKey(active);
+						}
+					}
+						savedKanbanInteraction = {
+							selectedTaskIDs: Array.from(selectedTasks),
+							menuKey: dropdown ? dropdown.getAttribute('data-kanban-menu-key') : '',
+							focusRole: focusRole,
+							focusKey: focusKey,
+							refreshTaskOptions: !!(active && active.closest && active.closest('[data-task-card-merge-options]'))
+						};				}
+
+				function setKanbanMenuExpanded(dropdown, expanded) {
+					const trigger = dropdown && dropdown.querySelector('[data-kanban-menu-trigger]');
+					if (trigger) trigger.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+					if (dropdown) {
+						if (expanded) dropdown.setAttribute('data-kanban-menu-open', 'true');
+						else dropdown.removeAttribute('data-kanban-menu-open');
+					}
+				}
+
+					function closeKanbanMenu(dropdown, restoreTriggerFocus) {
+						openKanbanMenuKey = '';
+						savedKanbanInteraction = null;
+						const activeMenu = document.activeElement && document.activeElement.closest ? document.activeElement.closest('[data-kanban-menu-key]') : null;
+						if (!restoreTriggerFocus && activeMenu && document.activeElement.blur) document.activeElement.blur();
+						const board = document.getElementById('kanban-board');
+						if (board) board.removeAttribute('data-open-kanban-menu-key');
+						document.querySelectorAll('[data-kanban-menu-key]').forEach(function(candidate) {
+							setKanbanMenuExpanded(candidate, false);
+						});
+						if (restoreTriggerFocus && dropdown) {
+							const trigger = dropdown.querySelector('[data-kanban-menu-trigger]');
+							if (trigger && document.contains(trigger)) {
+								suppressKanbanMenuFocusOpen = true;
+								trigger.focus({preventScroll: true});
+								suppressKanbanMenuFocusOpen = false;
+								setKanbanMenuExpanded(dropdown, false);
+							}
+						}
+					}				window.closeKanbanMenu = closeKanbanMenu;
+
+				function resetKanbanInteractionForNavigation() {
+					clearSelection();
+					closeKanbanMenu(null, false);
+					document.querySelectorAll('#kanban-board .task-selected').forEach(function(card) {
+						card.classList.remove('task-selected');
+					});
+				}
+
+				function restoreKanbanInteraction(board) {
+					const snapshot = savedKanbanInteraction;
+					if (!snapshot) return;
+					selectedTasks.clear();
+					snapshot.selectedTaskIDs.forEach(function(id) {
+						const card = document.getElementById('task-' + id);
+						if (!card || !board.contains(card)) return;
+						selectedTasks.add(id);
+						card.classList.add('task-selected');
+					});
+					const menuKey = snapshot.menuKey || openKanbanMenuKey;
+					if (!menuKey) return;
+					const dropdown = Array.from(board.querySelectorAll('[data-kanban-menu-key]')).find(function(candidate) {
+						return candidate.getAttribute('data-kanban-menu-key') === menuKey;
+					});
+					if (!dropdown) {
+						closeKanbanMenu(null, false);
+						return;
+					}
+					const trigger = dropdown.querySelector('[data-kanban-menu-trigger]');
+					let focusTarget = trigger;
+					if (snapshot.focusRole === 'content') focusTarget = dropdown.querySelector('[data-kanban-menu-content]') || trigger;
+					if (snapshot.focusRole === 'item') {
+						focusTarget = Array.from(dropdown.querySelectorAll('a, button, [tabindex]')).find(function(candidate) {
+							return kanbanMenuItemKey(candidate) === snapshot.focusKey;
+						}) || trigger;
+					}
+					if (focusTarget) {
+						openKanbanMenuKey = menuKey;
+						board.setAttribute('data-open-kanban-menu-key', menuKey);
+						setKanbanMenuExpanded(dropdown, true);
+						suppressKanbanMenuFocusOpen = true;
+						focusTarget.focus({preventScroll: true});
+						suppressKanbanMenuFocusOpen = false;
+						positionDropdownForViewport(trigger);
+					}
+				}
+
+				document.addEventListener('focusin', function(event) {
+					const dropdown = event.target && event.target.closest ? event.target.closest('[data-kanban-menu-key]') : null;
+					if (!dropdown || suppressKanbanMenuFocusOpen) return;
+					openKanbanMenuKey = dropdown.getAttribute('data-kanban-menu-key');
+					const board = dropdown.closest('#kanban-board');
+					if (board) {
+						board.setAttribute('data-open-kanban-menu-key', openKanbanMenuKey);
+						snapshotKanbanInteraction(board);
+					}
+					document.querySelectorAll('[data-kanban-menu-key]').forEach(function(candidate) {
+						setKanbanMenuExpanded(candidate, candidate === dropdown);
+					});
+				});
+				document.addEventListener('pointerdown', function(event) {
+					if (!event.target || !event.target.closest || !event.target.closest('[data-kanban-menu-key]')) {
+						closeKanbanMenu(null, false);
+					}
+				}, true);
+				document.addEventListener('keydown', function(event) {
+					if (event.key === 'Escape') {
+						const dropdown = event.target && event.target.closest ? event.target.closest('[data-kanban-menu-key]') : null;
+						if (dropdown) {
+							event.preventDefault();
+							event.stopPropagation();
+							closeKanbanMenu(dropdown, true);
+						}
+					}
+					if (event.key === 'Tab') {
+						setTimeout(function() {
+							if (!document.activeElement || !document.activeElement.closest || !document.activeElement.closest('[data-kanban-menu-key]')) {
+								closeKanbanMenu(null, false);
+							}
+						}, 0);
+					}
+				}, true);
+				document.addEventListener('focusout', function(event) {
+					const dropdown = event.target && event.target.closest ? event.target.closest('[data-kanban-menu-key]') : null;
+					if (!dropdown) return;
+					setTimeout(function() {
+						if (!dropdown.contains(document.activeElement) && dropdown.getAttribute('data-kanban-menu-open') !== 'true') setKanbanMenuExpanded(dropdown, false);
+					}, 0);
+				});
+
+				// Capture at the earliest HTMX request boundary, before request setup can move focus.
+				document.addEventListener('htmx:configRequest', function(event) {
+					if (event.detail.target && event.detail.target.id === 'kanban-board' && !savedKanbanInteraction) {
+						snapshotKanbanInteraction(event.detail.target);
+					}
+				});
+
+				// Retain compatibility with request paths that do not emit configRequest.
+				document.addEventListener('htmx:beforeRequest', function(event) {
+					const source = event.detail && event.detail.elt;
+					const menuContent = source && source.closest ? source.closest('[data-kanban-menu-content]') : null;
+					if (menuContent) closeKanbanMenu(menuContent.closest('[data-kanban-menu-key]'), false);
+					if (event.detail.target && event.detail.target.id === 'kanban-board' && !savedKanbanInteraction) {
+						snapshotKanbanInteraction(event.detail.target);
+					}
+				});
+
+				// Save scroll positions and provide a fallback snapshot for direct swaps.
 				document.addEventListener('htmx:beforeSwap', function(event) {
+					if (event.detail.target && event.detail.target.id === 'main-content') {
+						resetKanbanInteractionForNavigation();
+					}
 					if (event.detail.target && event.detail.target.id === 'kanban-board') {
+						if (!savedKanbanInteraction) snapshotKanbanInteraction(event.detail.target);
 						savedScrollPositions.clear();
 						// Save scroll positions of all scrollable drop zones
 						const dropZones = document.querySelectorAll('.category-drop-zone, .task-drop-zone');
@@ -2887,12 +3508,13 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					}
 				});
 
-				// Clear selection when kanban board is replaced via HTMX
-				// Use document.addEventListener instead of document.body.addEventListener
-				// because this script runs in <head> where document.body may not exist yet.
+
+				// Restore surviving selections, menu focus, and scroll after authoritative board replacement.
 				document.addEventListener('htmx:afterSwap', function(event) {
 					if (event.detail.target && event.detail.target.id === 'kanban-board') {
-						clearSelection();
+						const liveBoard = document.getElementById('kanban-board');
+						if (liveBoard) restoreKanbanInteraction(liveBoard);
+
 
 						// Restore scroll positions after board is re-rendered
 						if (savedScrollPositions.size > 0) {
@@ -2914,9 +3536,50 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						}
 					}
 				});
-			</script>
-		</head>
+
+				// HTMX may perform its own focus handling during settle; restore the
+				// authoritative menu focus once more, then release the snapshot.
+					document.addEventListener('htmx:afterSettle', function(event) {
+						const target = event.detail && event.detail.target;
+						if (target && target.id === 'kanban-board') {
+							const liveBoard = document.getElementById('kanban-board');
+							if (liveBoard) restoreKanbanInteraction(liveBoard);
+							const openDropdown = openKanbanMenuKey && liveBoard && Array.from(liveBoard.querySelectorAll('[data-kanban-menu-key]')).find(function(candidate) {
+								return candidate.getAttribute('data-kanban-menu-key') === openKanbanMenuKey;
+							});
+							if (openDropdown && (!document.activeElement || !liveBoard.contains(document.activeElement))) {
+								const fallbackTrigger = openDropdown.querySelector('[data-kanban-menu-trigger]');
+								if (fallbackTrigger) {
+									suppressKanbanMenuFocusOpen = true;
+									fallbackTrigger.focus({preventScroll: true});
+									suppressKanbanMenuFocusOpen = false;
+									setKanbanMenuExpanded(openDropdown, true);
+								}
+							}
+							const options = savedKanbanInteraction && savedKanbanInteraction.refreshTaskOptions && openDropdown && openDropdown.querySelector('[data-task-card-merge-options]');
+							const refreshURL = options && options.getAttribute('hx-get');
+							if (options && refreshURL && window.htmx) {
+								htmx.ajax('GET', refreshURL, {target: options, swap: 'outerHTML'});
+								return;
+							}
+							savedKanbanInteraction = null;
+							return;
+						}
+						if (target && target.matches && target.matches('[data-task-card-merge-options]')) {
+							const liveBoard = document.getElementById('kanban-board');
+							if (liveBoard) restoreKanbanInteraction(liveBoard);
+							savedKanbanInteraction = null;
+						}
+					});
+			</script>		</head>
 		<body class="h-screen bg-base-200 overflow-hidden" hx-ext="morph">
+			<script>
+						(function() {
+							var collapsed = document.documentElement.getAttribute('data-ui-sidebar-collapsed') === 'true';
+							if (collapsed) {
+								document.body.classList.add('sidebar-collapsed-pending');
+							}
+						})();				</script>
 			<div class="drawer lg:drawer-open h-full">
 				<input id="sidebar-toggle" type="checkbox" class="drawer-toggle"/>
 				<div class="drawer-content flex flex-col h-full overflow-hidden">
@@ -2938,20 +3601,20 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						{ children... }
 					</main>
 				</div>
-					<!-- Sidebar -->
-					<div class="drawer-side z-[200] lg:z-auto">
-						<label for="sidebar-toggle" aria-label="close sidebar" class="drawer-overlay z-[190] lg:z-auto"></label>
-						@Sidebar(projects, currentProjectID)
-					</div>
-					<!-- Apply sidebar collapsed state immediately to prevent flash -->
+				<!-- Sidebar -->
+				<div class="drawer-side z-[200] lg:z-auto">
+					<label for="sidebar-toggle" aria-label="close sidebar" class="drawer-overlay z-[190] lg:z-auto"></label>
+					@Sidebar(projects, currentProjectID)
+				</div>
+				<!-- Apply sidebar collapsed state immediately after insertion; body marker was set before insertion to avoid layout jump. -->
 				<script>
-					(function() {
-						if (localStorage.getItem('sidebar-collapsed') === 'true') {
-							var s = document.getElementById('sidebar');
-							if (s) s.classList.add('sidebar-collapsed');
-						}
-					})();
-				</script>
+						(function() {
+								var collapsed = document.documentElement.getAttribute('data-ui-sidebar-collapsed') === 'true';
+								if (collapsed) {
+									var s = document.getElementById('sidebar');
+									if (s) s.classList.add('sidebar-collapsed');
+								}						})();
+					</script>
 			</div>
 			<!-- Toast Notification Container -->
 			<div id="toast-container"></div>
@@ -2990,6 +3653,11 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				function findVisibleTaskToast(taskId) {
 					if (!taskId) return null;
 					return document.querySelector('.toast-notification[data-task-id="' + taskId + '"]:not(.toast-dismiss)');
+				}
+
+				function findVisibleToastKey(toastKey) {
+					if (!toastKey) return null;
+					return document.querySelector('.toast-notification[data-toast-key="' + toastKey + '"]:not(.toast-dismiss)');
 				}
 
 				function syncToastContainerHost() {
@@ -3069,9 +3737,14 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					const container = getToastContainer();
 					if (!container) return;
 					options = options || {};
+					var toastKey = String(options.toastKey || '').trim();
+					var clickURL = String(options.clickURL || options.clickUrl || '').trim();
 
-					// Deduplicate: skip if a toast for this task is already visible
+					// Deduplicate: skip if a toast for this task or explicit toast key is already visible
 					if (taskId && findVisibleTaskToast(taskId)) {
+						return;
+					}
+					if (toastKey && findVisibleToastKey(toastKey)) {
 						return;
 					}
 
@@ -3112,6 +3785,9 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					if (taskId) {
 						toast.setAttribute('data-task-id', taskId);
 					}
+					if (toastKey) {
+						toast.setAttribute('data-toast-key', toastKey);
+					}
 					toast.innerHTML = icon +
 						'<div class="toast-message-container flex flex-col gap-0 min-w-0 flex-1 overflow-hidden">' +
 							'<span class="font-semibold text-xs uppercase tracking-wider opacity-80">' + escapeToastHtml(statusLabel) + '</span>' +
@@ -3146,12 +3822,14 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						}
 					}
 
-					// Click to navigate to task detail page (if taskId provided)
-					if (taskId) {
+					// Click to navigate when a target is provided. Task toasts keep their task-detail default.
+					var navigateURL = clickURL || (taskId ? '/tasks/' + taskId : '');
+					if (navigateURL) {
+						toast.classList.add('cursor-pointer');
 						toast.addEventListener('click', function() {
 							closeOpenModalsForToastNavigation();
-							window.openVibelyNavigate('/tasks/' + taskId).catch(function(err) {
-								console.error('[toast] Failed to load task detail:', err);
+							window.openVibelyNavigate(navigateURL).catch(function(err) {
+								console.error('[toast] Failed to load toast target:', err);
 							});
 							dismissToast(toast);
 						});
@@ -3160,10 +3838,12 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					container.appendChild(toast);
 
 					// Auto-dismiss after 5 seconds
-					const autoDismiss = setTimeout(function() {
-						dismissToast(toast);
-					}, 5000);
-					toast._autoDismiss = autoDismiss;
+					if (!options.sticky) {
+						const autoDismiss = setTimeout(function() {
+							dismissToast(toast);
+						}, 5000);
+						toast._autoDismiss = autoDismiss;
+					}
 
 					// Limit to 5 visible toasts
 					const toasts = container.querySelectorAll('.toast-notification:not(.toast-dismiss)');
@@ -3189,7 +3869,9 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						var taskId = detail.taskId || detail.task_id || '';
 						var linkURL = detail.linkURL || detail.link_url || '';
 						var linkText = detail.linkText || detail.link_text || '';
-						window.showToast(message, status, taskId, { linkURL: linkURL, linkText: linkText });
+						var toastKey = detail.toastKey || detail.toast_key || '';
+						var clickURL = detail.clickURL || detail.click_url || '';
+						window.showToast(message, status, taskId, { linkURL: linkURL, linkText: linkText, toastKey: toastKey, clickURL: clickURL });
 					});
 				}
 
@@ -3206,8 +3888,242 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						if (toast.parentNode) toast.remove();
 					}, 400);
 				};
-			</script>
 
+				function normalizeSystemUpdateSnapshot(data) {
+					var release = data && data.release ? data.release : {};
+					var metadata = release.metadata || {};
+					var target = release.target || {};
+					var available = metadata.version || '';
+					var hidden = !!(!data || data.state === 'succeeded' || (available && data.current_version === available));
+					var applySupported = release.apply_supported !== false;
+					var readyForLocalApply = !!data && (data.distribution === 'docker' || data.manual || data.staged);
+					var stateAllowsApply = !!data && (data.state === 'available' || data.state === 'failed');
+					var actionable = !hidden && !!available && applySupported && data.distribution !== 'hosted' && readyForLocalApply && stateAllowsApply;
+					var active = data && data.drain && data.drain.active ? data.drain.active : {};
+					var activeTotal = (active.task_executions || 0) + (active.chat_executions || 0) + (active.automation_activities || 0);
+					var distribution = data && data.distribution ? data.distribution : '';
+					var ownerText = distribution === 'hosted' ? 'A Hosted administrator starts the rollout.' : distribution === 'docker' && data && data.manual ? 'The container operator performs the replacement after OpenVibely is safe to restart.' : distribution === 'docker' ? 'An OpenVibely administrator approves the host updater agent request.' : 'An OpenVibely administrator approves restart and installation.';
+					var workText = data && data.state === 'waiting_for_idle' ? 'Waiting for AI work to finish · ' + activeTotal + ' active' : (data && data.state === 'ready' ? 'Safe to restart' : activeTotal + ' active AI operations');
+					return {
+						data: data || null,
+						available: available,
+						currentVersion: data && data.current_version ? data.current_version : '',
+						state: data && data.state ? data.state : '',
+						distribution: distribution,
+						channel: data && data.channel ? data.channel : '',
+						hidden: hidden,
+						applySupported: applySupported,
+						readyForLocalApply: readyForLocalApply,
+						stateAllowsApply: stateAllowsApply,
+						actionable: actionable,
+						activeTotal: activeTotal,
+						ownerText: ownerText,
+						workText: workText,
+						imageRef: target.image_ref || '',
+						notesURL: metadata.release_notes_url || '',
+						errorText: data ? (data.configuration_error || data.error || '') : '',
+						acceptText: data && data.manual ? 'Prepare for update' : (distribution === 'docker' ? 'Update container' : 'Update OpenVibely'),
+						showAcceptance: !hidden && !!available && applySupported && distribution !== 'hosted',
+						showCancel: !!data && distribution !== 'hosted' && (data.state === 'waiting_for_idle' || data.state === 'ready')
+					};
+				}
+				window.openVibelyNormalizeSystemUpdateSnapshot = normalizeSystemUpdateSnapshot;
+
+				function setSystemUpdateIndicators(visible) {
+					var badge = document.getElementById('system-update-nav-badge');
+					if (badge) badge.classList.toggle('hidden', !visible);
+				}
+
+				function systemUpdateNoticeKey(data) {
+					var release = data && data.release ? data.release : {};
+					var metadata = release.metadata || {};
+					var target = release.target || {};
+					return [
+						data && data.current_version ? data.current_version : '',
+						metadata.version || '',
+						metadata.commit || '',
+						metadata.published_at || '',
+						target.sha256 || target.url || ''
+					].join('|');
+				}
+
+				function systemUpdatePendingSuccessFromData(data) {
+					var version = data && data.release && data.release.metadata ? data.release.metadata.version || '' : '';
+					if (!version) return null;
+					return { version: version, noticeKey: systemUpdateNoticeKey(data) };
+				}
+
+				function rememberSystemUpdatePendingSuccess(data) {
+					var pending = systemUpdatePendingSuccessFromData(data);
+					if (!pending) return;
+					try {
+						localStorage.setItem('openvibely-system-update-pending-success', JSON.stringify(pending));
+					} catch (_) {}
+				}
+
+				function consumeSystemUpdatePendingSuccess() {
+					try {
+						var raw = localStorage.getItem('openvibely-system-update-pending-success');
+						if (!raw) return null;
+						localStorage.removeItem('openvibely-system-update-pending-success');
+						var pending = JSON.parse(raw);
+						if (!pending || !pending.version || !pending.noticeKey) return null;
+						return pending;
+					} catch (_) {
+						try { localStorage.removeItem('openvibely-system-update-pending-success'); } catch (_) {}
+						return null;
+					}
+				}
+
+				function clearSystemUpdatePendingSuccess() {
+					try { localStorage.removeItem('openvibely-system-update-pending-success'); } catch (_) {}
+				}
+
+				function navigateSystemUpdateToAlerts() {
+					closeOpenModalsForToastNavigation();
+					if (window.openVibelyNavigate) {
+						window.openVibelyNavigate('/alerts').catch(function(err) {
+							console.error('[system-update] failed to navigate to alerts:', err);
+						});
+					} else {
+						window.location.href = '/alerts';
+					}
+				}
+
+				function applySystemUpdateFromToast(toast) {
+					if (!toast || toast.dataset.systemUpdateApplying === 'true') return;
+					toast.dataset.systemUpdateApplying = 'true';
+					fetch('/api/system/update/apply', { method: 'POST', headers: { 'Accept': 'application/json' } })
+						.then(function(response) {
+							if (!response.ok) return null;
+							return response.json().catch(function() { return null; });
+						})
+						.then(function(data) {
+							if (data) rememberSystemUpdatePendingSuccess(data);
+						})
+						.catch(function(err) { console.error('[system-update] apply failed:', err); })
+						.finally(function() {
+							navigateSystemUpdateToAlerts();
+							dismissToast(toast);
+						});
+				}
+
+				window.openVibelyClearSystemUpdatePendingSuccess = clearSystemUpdatePendingSuccess;
+
+				function showSystemUpdateSucceededToast(data, pending) {
+					if (!pending && (!data || data.state !== 'succeeded')) return;
+					var version = pending ? pending.version : (data.release && data.release.metadata ? data.release.metadata.version || '' : data.current_version || '');
+					if (!version) return;
+					var noticeKey = pending ? pending.noticeKey : systemUpdateNoticeKey(data);
+					var successKey = 'succeeded|' + noticeKey;
+					try {
+						if (localStorage.getItem('openvibely-system-update-success-toast') === successKey) return;
+						localStorage.setItem('openvibely-system-update-success-toast', successKey);
+					} catch (_) {}
+					if (window.showToast) {
+						window.showToast('OpenVibely updated to ' + version, 'completed');
+					}
+				}
+
+				function dismissSystemUpdateNotice(noticeKey) {
+					var toast = document.querySelector('[data-system-update-toast]');
+					if (toast) dismissToast(toast);
+					if (noticeKey) {
+						try { localStorage.setItem('openvibely-system-update-dismissed-version', noticeKey); } catch (_) {}
+					}
+				}
+
+				function showSystemUpdateNotice(data) {
+					var version = data && data.release && data.release.metadata ? data.release.metadata.version || '' : '';
+					if (!version) return;
+					var noticeKey = systemUpdateNoticeKey(data);
+					try {
+						if (localStorage.getItem('openvibely-system-update-dismissed-version') === noticeKey) return;
+					} catch (_) {}
+					var existing = document.querySelector('[data-system-update-toast]');
+					if (existing) {
+						if (existing.getAttribute('data-system-update-toast') === noticeKey) return;
+						dismissToast(existing);
+					}
+					var container = getToastContainer();
+					if (!container) return;
+					var toast = document.createElement('div');
+					toast.className = 'toast-notification alert system-update-toast shadow-lg';
+					toast.setAttribute('role', 'alert');
+					toast.setAttribute('data-system-update-toast', noticeKey);
+					toast.innerHTML =
+						'<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>' +
+						'<div class="toast-message-container flex flex-col gap-1 min-w-0 flex-1 overflow-hidden">' +
+							'<span class="font-semibold text-xs uppercase tracking-wider opacity-80">Update available</span>' +
+							'<span class="text-sm break-words">OpenVibely ' + escapeToastHtml(version) + ' is ready to install.</span>' +
+						'</div>' +
+						'<button type="button" class="toast-close btn btn-ghost btn-circle" aria-label="Dismiss update notification" data-system-update-dismiss>' +
+							'<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>' +
+						'</button>';
+					toast.addEventListener('click', function(event) {
+						if (event.target && event.target.closest && event.target.closest('button')) return;
+						applySystemUpdateFromToast(toast);
+					});
+					var dismissButton = toast.querySelector('[data-system-update-dismiss]');
+					if (dismissButton) {
+						dismissButton.addEventListener('click', function(event) {
+							event.preventDefault();
+							event.stopPropagation();
+							dismissSystemUpdateNotice(noticeKey);
+						});
+					}
+					container.appendChild(toast);
+				}
+
+				async function refreshGlobalSystemUpdateIndicators() {
+					try {
+						var response = await fetch('/api/system/update', { headers: { 'Accept': 'application/json' } });
+						if (response.status === 204) {
+							handleGlobalSystemUpdateSnapshot(null);
+							return;
+						}
+						if (!response.ok) return;
+						var data = await response.json();
+						handleGlobalSystemUpdateSnapshot(data);
+					} catch (_) {}
+				}
+
+				function handleGlobalSystemUpdateSnapshot(data) {
+					var view = normalizeSystemUpdateSnapshot(data);
+					if (!data) {
+						setSystemUpdateIndicators(false);
+						dismissSystemUpdateNotice('');
+						showSystemUpdateSucceededToast(null, consumeSystemUpdatePendingSuccess());
+						if (typeof window.openVibelyRenderSystemUpdateCard === 'function') window.openVibelyRenderSystemUpdateCard(null);
+						return;
+					}
+					setSystemUpdateIndicators(view.actionable);
+					if (typeof window.openVibelyRenderSystemUpdateCard === 'function') window.openVibelyRenderSystemUpdateCard(data);
+					if (view.actionable) showSystemUpdateNotice(data);
+					else {
+						dismissSystemUpdateNotice('');
+						if (view.state === 'waiting_for_idle' || view.state === 'ready' || view.state === 'applying' || view.state === 'restarting' || view.state === 'validating') {
+							rememberSystemUpdatePendingSuccess(data);
+						}
+						showSystemUpdateSucceededToast(data);
+						if (view.available && view.currentVersion === view.available) {
+							showSystemUpdateSucceededToast(null, consumeSystemUpdatePendingSuccess());
+						} else if (view.state === 'failed' || view.state === 'rolled_back' || view.state === 'idle') {
+							clearSystemUpdatePendingSuccess();
+						}
+					}
+				}
+
+				window.refreshGlobalSystemUpdateIndicators = refreshGlobalSystemUpdateIndicators;
+				window.openVibelyHandleSystemUpdateSnapshot = handleGlobalSystemUpdateSnapshot;
+
+				if (!window._openVibelySystemUpdateIndicatorsRegistered) {
+					window._openVibelySystemUpdateIndicatorsRegistered = true;
+					refreshGlobalSystemUpdateIndicators();
+					window.openVibelySystemUpdateIndicatorPoll = setInterval(refreshGlobalSystemUpdateIndicators, 30000);
+					document.body.addEventListener('alertUpdate', refreshGlobalSystemUpdateIndicators);
+				}
+			</script>
 			<!-- Card Search Helper -->
 			<script>
 				(function() {
@@ -3249,7 +4165,12 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 								if (match) visibleCount++;
 							}
 
-							// Show/hide no-results message
+								var emptyState = container.querySelector('[data-search-empty-state]');
+								if (emptyState) {
+									emptyState.style.display = term ? 'none' : '';
+								}
+
+								// Show/hide no-results message
 							var noResults = container.querySelector('[data-search-no-results]');
 							if (noResults) {
 								noResults.style.display = (term && visibleCount === 0) ? '' : 'none';
@@ -3284,6 +4205,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						var pageKey = input ? input.getAttribute('data-card-search') : '';
 						var activeTerm = input ? input.value || '' : (pageKey ? loadCardSearchTerm(pageKey) : '');
 						if (pageKey) storeCardSearchTerm(pageKey, activeTerm);
+						if (typeof window.destroyCardPagination === 'function') window.destroyCardPagination(container, true);
 						container.outerHTML = html;
 						var nextContainer = container.id ? document.getElementById(container.id) : null;
 						if (!nextContainer) return null;
@@ -3291,10 +4213,10 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						if (nextInput && pageKey && nextInput.getAttribute('data-card-search') === pageKey) {
 							nextInput.value = activeTerm;
 						}
-						if (window.htmx) htmx.process(nextContainer);
-						initAllCardSearches(nextContainer);
-						return nextContainer;
-					}
+							if (window.htmx) htmx.process(nextContainer);
+							initAllCardSearches(nextContainer);
+							if (typeof window.refreshCardPagination === 'function') window.refreshCardPagination(nextContainer);
+							return nextContainer;					}
 
 					window.refreshCardSearches = initAllCardSearches;
 					window.replaceSearchableCardContainer = replaceSearchableCardContainer;
@@ -3309,8 +4231,696 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						}
 					});
 				})();
-			</script>
+				</script>
+			<!-- Card Pagination Loader -->
+			<script>
+					(function() {
+						var rootSelector = '[data-card-pagination-root]';
+						var pageHeader = 'X-OpenVibely-Card-Page-Has-More';
+						var replacementSnapshots = Object.create(null);
 
+						function pageNumber(value, fallback) {
+							var parsed = parseInt(value, 10);
+							return isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+						}
+
+						function matchesRoot(node) {
+							return node && node.nodeType === 1 && typeof node.matches === 'function' && node.matches(rootSelector);
+						}
+
+						function closestPaginationRoot(node) {
+							if (!node || node === document || node === document.body || node.nodeType !== 1) return null;
+							if (matchesRoot(node)) return node;
+							return typeof node.closest === 'function' ? node.closest(rootSelector) : null;
+						}
+
+						function rootsIn(scope) {
+							var roots = [];
+							var node = scope && scope.nodeType === 1 ? scope : null;
+							if (matchesRoot(node)) roots.push(node);
+							if (node && typeof node.closest === 'function') {
+								var ancestor = node.closest(rootSelector);
+								if (ancestor && roots.indexOf(ancestor) === -1) roots.push(ancestor);
+							}
+							var queryRoot = scope && typeof scope.querySelectorAll === 'function' ? scope : document;
+							var found = queryRoot.querySelectorAll(rootSelector);
+							for (var i = 0; i < found.length; i++) {
+								if (roots.indexOf(found[i]) === -1) roots.push(found[i]);
+							}
+							return roots;
+						}
+
+						function listFor(root) {
+							var selector = root.getAttribute('data-card-pagination-list');
+							if (!selector) return null;
+							try { return root.querySelector(selector); } catch (_) { return null; }
+						}
+
+						function cardsMatching(list, root, selector) {
+							if (!list || !selector) return [];
+							try {
+								var matches = Array.prototype.slice.call(list.querySelectorAll(selector));
+								var keyAttribute = root.getAttribute('data-card-pagination-key') || '';
+								var seen = Object.create(null);
+								var cards = [];
+								for (var i = 0; i < matches.length; i++) {
+									var key = cardKey(matches[i], keyAttribute);
+									if (seen[key]) continue;
+									seen[key] = true;
+									cards.push(matches[i]);
+								}
+								return cards;
+							} catch (_) {
+								return [];
+							}
+						}
+
+						function cardsFor(list, root) {
+							return cardsMatching(list, root, root.getAttribute('data-card-pagination-card-selector'));
+						}
+
+						function replacementCardsFor(list, root) {
+							var selector = root.getAttribute('data-card-pagination-replacement-card-selector') || root.getAttribute('data-card-pagination-card-selector');
+							var scope = root.getAttribute('data-card-pagination-replacement-scope') === 'root' ? root : list;
+							return cardsMatching(scope, root, selector);
+						}
+
+						function cardKey(card, keyAttribute) {
+							var key = keyAttribute ? card.getAttribute(keyAttribute) : '';
+							if (key) return key;
+							return (card.getAttribute('data-search-text') || '') + '|' + (card.innerHTML || '');
+						}
+
+						function cardPaginationRefreshURL(scope, rawURL) {
+							var roots = rootsIn(scope || document);
+							var root = roots.length ? roots[0] : null;
+							if (!root || !rawURL) return rawURL;
+							var list = listFor(root);
+							var count = cardsFor(list, root).length;
+							var pageSize = pageNumber(root.getAttribute('data-card-pagination-page-size'), 20);
+							var input = root.querySelector('input[data-card-search]');
+							var search = input ? (input.value || '').trim() : '';
+							var url;
+							try { url = new URL(rawURL, window.location.href); } catch (_) { return rawURL; }
+							url.searchParams.set('card_window', '1');
+							url.searchParams.set('page_size', String(Math.max(pageSize, count)));
+							url.searchParams.set('page', '0');
+							if (search) url.searchParams.set('search', search);
+							else url.searchParams.delete('search');
+							return url.pathname + url.search + url.hash;
+						}
+
+						function rememberCards(state, cards, clear) {
+							if (clear) state.keys = Object.create(null);
+							var keyAttribute = state.root.getAttribute('data-card-pagination-key') || '';
+							for (var i = 0; i < cards.length; i++) {
+								state.keys[cardKey(cards[i], keyAttribute)] = true;
+							}
+						}
+
+						function scrollContainer(root) {
+							var node = root;
+							while (node && node !== document.body) {
+								try {
+									var overflow = window.getComputedStyle(node).overflowY;
+									if (overflow === 'auto' || overflow === 'scroll' || overflow === 'overlay') return node;
+								} catch (_) {}
+								node = node.parentElement;
+							}
+							return null;
+						}
+
+						function isCurrent(state) {
+							if (!state || !state.root || !state.list) return false;
+							if (state.root._openVibelyCardPaginationState !== state) return false;
+							if (typeof document.documentElement.contains === 'function' && !document.documentElement.contains(state.root)) return false;
+							return listFor(state.root) === state.list;
+						}
+
+						function setHidden(element, hidden) {
+							if (element) element.classList.toggle('hidden', hidden);
+						}
+
+						function setStatus(state, mode) {
+							if (!isCurrent(state)) return;
+							var status = state.root.querySelector('[data-card-pagination-status]');
+							var loading = status && status.querySelector('[data-card-pagination-loading]');
+							var error = status && status.querySelector('[data-card-pagination-error]');
+							var retry = status && status.querySelector('[data-card-pagination-retry]');
+							var sentinel = status && status.querySelector('[data-card-pagination-sentinel]');
+							setHidden(loading, mode !== 'loading');
+							setHidden(error, mode !== 'error');
+							setHidden(retry, mode !== 'error');
+							setHidden(sentinel, !state.hasMore);
+							state.root.setAttribute('aria-busy', mode === 'loading' ? 'true' : 'false');
+							state.list.setAttribute('aria-busy', mode === 'loading' ? 'true' : 'false');
+							if (retry && retry._openVibelyCardPaginationState !== state) {
+								retry._openVibelyCardPaginationState = state;
+								retry.addEventListener('click', function() {
+									if (!isCurrent(state) || state.loading) return;
+									var failedPage = state.failedPage === null ? state.nextPage : state.failedPage;
+									requestPage(state, failedPage, state.failedReplace);
+								});
+							}
+						}
+
+						function disconnectTrigger(state) {
+							if (state.observer) {
+								state.observer.disconnect();
+								state.observer = null;
+							}
+							if (state.scrollTarget && state.scrollHandler) {
+								state.scrollTarget.removeEventListener('scroll', state.scrollHandler);
+							}
+							state.scrollTarget = null;
+							state.scrollHandler = null;
+							state.sentinel = null;
+						}
+
+						function nearEnd(state) {
+							if (!isCurrent(state) || state.loading || !state.hasMore || !state.sentinel) return;
+							try {
+								var boundary = state.scrollTarget && state.scrollTarget !== window ? state.scrollTarget.getBoundingClientRect().bottom : window.innerHeight;
+								if (state.sentinel.getBoundingClientRect().top <= boundary + 480) requestPage(state, state.nextPage, false);
+							} catch (_) {}
+						}
+
+						function connectTrigger(state) {
+							if (!isCurrent(state)) return;
+							var status = state.root.querySelector('[data-card-pagination-status]');
+							var sentinel = status && status.querySelector('[data-card-pagination-sentinel]');
+							if (!sentinel || sentinel === state.sentinel) return;
+							disconnectTrigger(state);
+							state.sentinel = sentinel;
+							state.scrollTarget = scrollContainer(state.root) || window;
+							state.scrollHandler = function() { nearEnd(state); };
+							state.scrollTarget.addEventListener('scroll', state.scrollHandler, {passive: true});
+							if ('IntersectionObserver' in window) {
+								state.observer = new IntersectionObserver(function(entries) {
+									for (var i = 0; i < entries.length; i++) {
+										if (entries[i].isIntersecting) {
+											requestPage(state, state.nextPage, false);
+											break;
+										}
+									}
+								}, { root: state.scrollTarget === window ? null : state.scrollTarget, rootMargin: '0px 0px 480px 0px' });
+							state.observer.observe(sentinel);
+							}
+							nearEnd(state);
+						}
+
+						function bindSearch(state) {
+							var input = state.root.querySelector('input[data-card-search]');
+							if (!input || state.input === input) return;
+							state.input = input;
+							input.addEventListener('input', function() {
+								var term = (input.value || '').trim();
+								if (state.searchTimer) clearTimeout(state.searchTimer);
+								state.searchTimer = setTimeout(function() {
+									if (isCurrent(state)) resetSearch(state, term);
+								}, 150);
+							});
+						}
+
+							function relativeFocusSelector(card, active) {
+								if (!card || !active || !card.contains(active)) return null;
+								if (card === active) return '';
+								var parts = [];
+								var node = active;
+								while (node && node !== card) {
+									var tag = (node.localName || '').toLowerCase();
+									if (!tag || !node.parentElement) return null;
+									var siblings = node.parentElement.children;
+									var position = 0;
+									for (var i = 0; i < siblings.length; i++) {
+										if ((siblings[i].localName || '').toLowerCase() === tag) position++;
+										if (siblings[i] === node) break;
+									}
+									parts.unshift(tag + ':nth-of-type(' + position + ')');
+									node = node.parentElement;
+								}
+								return node === card ? parts.join(' > ') : null;
+							}
+
+								function visibleEnabledFocusTarget(target) {
+									if (!target || target.disabled || target.getAttribute('aria-disabled') === 'true') return null;
+									if (typeof target.matches === 'function' && target.matches(':disabled')) return null;
+									if (typeof target.closest === 'function' && target.closest('[hidden], [inert]')) return null;
+									try {
+										var style = window.getComputedStyle(target);
+										if (style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse') return null;
+										if (!target.getClientRects().length) return null;
+									} catch (_) {
+										return null;
+									}
+									return target;
+								}
+
+								function cardFallbackFocusTarget(card) {
+									if (!visibleEnabledFocusTarget(card)) return null;
+									if (!card.hasAttribute('tabindex')) card.setAttribute('tabindex', '-1');
+									return card;
+								}
+
+								function cardFocusTarget(card, snapshot) {
+									if (!card) return null;
+									if (snapshot.focusSelector === '') return cardFallbackFocusTarget(card);
+									var tag = snapshot.focusTag || '';
+									if (tag && (snapshot.focusAriaLabel || snapshot.focusText)) {
+										var controls = card.querySelectorAll(tag);
+										for (var i = 0; i < controls.length; i++) {
+											if (snapshot.focusAriaLabel && controls[i].getAttribute('aria-label') === snapshot.focusAriaLabel) {
+												var ariaMatch = visibleEnabledFocusTarget(controls[i]);
+												if (ariaMatch) return ariaMatch;
+											}
+											if (!snapshot.focusAriaLabel && (controls[i].textContent || '').trim() === snapshot.focusText) {
+												var textMatch = visibleEnabledFocusTarget(controls[i]);
+												if (textMatch) return textMatch;
+											}
+										}
+									}
+									if (!snapshot.focusAriaLabel && !snapshot.focusText && snapshot.focusSelector) {
+										try {
+											var matching = visibleEnabledFocusTarget(card.querySelector(snapshot.focusSelector));
+											if (matching) return matching;
+										} catch (_) {}
+									}
+									return cardFallbackFocusTarget(card);
+								}
+
+							function captureReplacementState(state) {
+								var scrollTarget = scrollContainer(state.root) || window;
+								var snapshot = {
+									scrollTarget: scrollTarget,
+									scrollTargetIsRoot: scrollTarget === state.root,
+									scrollTop: scrollTarget === window ? window.scrollY : scrollTarget.scrollTop,
+									activeKey: null,
+									activeIndex: -1,
+									cardKeys: [],
+									focusSelector: null,
+									focusTag: '',
+									focusText: '',
+									focusAriaLabel: '',
+									anchorKey: null,
+									anchorTop: null
+								};
+								var active = document.activeElement;
+								var keyAttribute = state.root.getAttribute('data-card-pagination-key') || '';
+								var cards = replacementCardsFor(state.list, state.root);
+								for (var cardIndex = 0; cardIndex < cards.length; cardIndex++) {
+									snapshot.cardKeys.push(cardKey(cards[cardIndex], keyAttribute));
+								}
+								if (active && state.root.contains(active)) {
+									var activeCard = null;
+									for (var activeIndex = 0; activeIndex < cards.length; activeIndex++) {
+										if (cards[activeIndex] === active || cards[activeIndex].contains(active)) {
+											activeCard = cards[activeIndex];
+											break;
+										}
+									}
+									if (activeCard) {
+										snapshot.activeKey = cardKey(activeCard, keyAttribute);
+										snapshot.activeIndex = snapshot.cardKeys.indexOf(snapshot.activeKey);
+										snapshot.focusSelector = relativeFocusSelector(activeCard, active);
+										snapshot.focusTag = (active.localName || '').toLowerCase();
+										snapshot.focusText = (active.textContent || '').trim();
+										snapshot.focusAriaLabel = active.getAttribute ? (active.getAttribute('aria-label') || '') : '';
+									}
+								}
+								var viewportTop = scrollTarget === window ? 0 : scrollTarget.getBoundingClientRect().top;
+								var viewportBottom = scrollTarget === window ? window.innerHeight : scrollTarget.getBoundingClientRect().bottom;
+								var anchorDistance = Infinity;
+								for (var i = 0; i < cards.length; i++) {
+									var rect = cards[i].getBoundingClientRect();
+									if (!rect || rect.bottom <= viewportTop || rect.top >= viewportBottom) continue;
+									var distance = Math.abs(rect.top - viewportTop);
+									if (distance < anchorDistance) {
+										anchorDistance = distance;
+										snapshot.anchorKey = cardKey(cards[i], keyAttribute);
+										snapshot.anchorTop = rect.top;
+									}
+								}
+								return snapshot;
+							}
+
+						function rememberReplacementSnapshot(state) {
+							if (!state || !state.root || !state.root.id) return;
+							if (state.root.getAttribute('data-card-pagination-replacement-managed') === 'true') return;
+							replacementSnapshots[state.root.id] = captureReplacementState(state);
+						}
+
+						function findCardByKey(state, key) {
+							if (!key) return null;
+							var keyAttribute = state.root.getAttribute('data-card-pagination-key') || '';
+							var cards = replacementCardsFor(state.list, state.root);
+							for (var i = 0; i < cards.length; i++) {
+								if (cardKey(cards[i], keyAttribute) === key) return cards[i];
+							}
+							return null;
+						}
+
+							function replacementFocusTarget(state, snapshot) {
+								if (!snapshot || !snapshot.activeKey) return null;
+								var card = findCardByKey(state, snapshot.activeKey);
+								var target = card ? cardFocusTarget(card, snapshot) : null;
+								if (target) return target;
+								var keys = snapshot.cardKeys || [];
+								var index = snapshot.activeIndex;
+								for (var next = index + 1; next < keys.length; next++) {
+									card = findCardByKey(state, keys[next]);
+									target = card ? cardFallbackFocusTarget(card) : null;
+									if (target) return target;
+								}
+								for (var previous = index - 1; previous >= 0; previous--) {
+									card = findCardByKey(state, keys[previous]);
+									target = card ? cardFallbackFocusTarget(card) : null;
+									if (target) return target;
+								}
+								return visibleEnabledFocusTarget(state.root.querySelector('input[data-card-search]'));
+							}
+
+						function restoreReplacementState(state, snapshot) {
+							if (!snapshot || !isCurrent(state)) return;
+							var scrollTarget = snapshot.scrollTargetIsRoot ? state.root : snapshot.scrollTarget;
+							if (scrollTarget === window) window.scrollTo(0, snapshot.scrollTop);
+							else if (scrollTarget) scrollTarget.scrollTop = snapshot.scrollTop;
+							var anchor = findCardByKey(state, snapshot.anchorKey);
+							if (anchor && snapshot.anchorTop !== null) {
+								var delta = anchor.getBoundingClientRect().top - snapshot.anchorTop;
+								if (Math.abs(delta) > 0.5) {
+									if (scrollTarget === window) window.scrollBy(0, delta);
+									else if (scrollTarget) scrollTarget.scrollTop += delta;
+								}
+							}
+							var focusTarget = replacementFocusTarget(state, snapshot);
+							if (focusTarget && typeof focusTarget.focus === 'function') focusTarget.focus({preventScroll: true});
+						}
+
+						function resetSearch(state, term) {
+							if (!isCurrent(state) || state.search === term && state.nextPage === 1 && !state.failedPage) return;
+							state.replaceSnapshot = captureReplacementState(state);
+							state.search = term;
+							state.generation++;
+							if (state.controller) state.controller.abort();
+							state.controller = null;
+							state.loading = false;
+							state.hasMore = true;
+							state.nextPage = 0;
+							state.nextOffset = 0;
+							state.requestedPages = Object.create(null);
+							state.keys = Object.create(null);
+							state.failedPage = null;
+							state.failedReplace = false;
+							requestPage(state, 0, true);
+						}
+
+						function parseResponse(html, selector) {
+							var documentFragment = new DOMParser().parseFromString(html, 'text/html');
+							var incomingList;
+							try { incomingList = documentFragment.querySelector(selector); } catch (_) { incomingList = null; }
+							if (!incomingList) throw new Error('paged card list missing');
+							return incomingList;
+						}
+
+						function appendCards(state, incomingList) {
+							var incomingCards = cardsFor(incomingList, state.root);
+							var currentCards = cardsFor(state.list, state.root);
+							var keyAttribute = state.root.getAttribute('data-card-pagination-key') || '';
+							var target = currentCards.length ? currentCards[0].parentElement : null;
+								if (!target && incomingCards.length) {
+									state.list.innerHTML = incomingList.innerHTML;
+									rememberCards(state, cardsFor(state.list, state.root), true);
+									if (window.htmx && typeof window.htmx.process === 'function') window.htmx.process(state.list);
+									return incomingCards.length;
+								}
+								var appended = [];
+								for (var i = 0; i < incomingCards.length; i++) {
+									var key = cardKey(incomingCards[i], keyAttribute);
+									if (state.keys[key]) continue;
+									var clone = incomingCards[i].cloneNode(true);
+									target.appendChild(clone);
+									appended.push(clone);
+									state.keys[key] = true;
+								}
+								if (window.htmx && typeof window.htmx.process === 'function') {
+									for (var j = 0; j < appended.length; j++) window.htmx.process(appended[j]);
+								}
+								return incomingCards.length;						}
+
+						function requestPage(state, page, replace) {
+							if (!isCurrent(state) || state.loading) return;
+							if (!replace && (!state.hasMore || page !== state.nextPage || state.requestedPages[page])) return;
+							state.requestedPages[page] = true;
+							var generation = state.generation;
+							var controller = typeof AbortController === 'function' ? new AbortController() : null;
+							state.controller = controller;
+							state.loading = true;
+							state.failedPage = null;
+							state.failedReplace = false;
+							setStatus(state, 'loading');
+							var endpoint = state.root.getAttribute('data-card-pagination-url');
+							if (!endpoint) endpoint = window.location.pathname + window.location.search;
+							var url;
+							try {
+								url = new URL(endpoint, window.location.href);
+							} catch (_) {
+								url = null;
+							}
+							if (!url) {
+								state.loading = false;
+								delete state.requestedPages[page];
+								state.failedPage = page;
+								state.failedReplace = replace;
+									state.hasMore = true;
+									setStatus(state, 'error');
+									disconnectTrigger(state);
+								return;
+							}
+							url.searchParams.set('page', String(page));
+							url.searchParams.set('page_size', String(state.pageSize));
+							url.searchParams.set('offset', String(replace ? 0 : state.nextOffset));
+							url.searchParams.set('card_page', '1');
+							if (state.search) url.searchParams.set('search', state.search);
+							else url.searchParams.delete('search');
+							var options = {
+								method: 'GET',
+								credentials: 'same-origin',
+								headers: {'HX-Request': 'true', 'Accept': 'text/html'}
+							};
+							if (controller) options.signal = controller.signal;
+							window.fetch(url.toString(), options).then(function(response) {
+								if (!response.ok) throw new Error('paged card request failed');
+								var header = response.headers.get(pageHeader);
+								return response.text().then(function(html) { return {html: html, header: header}; });
+							}).then(function(payload) {
+								if (!isCurrent(state) || state.generation !== generation) return;
+								var selector = state.root.getAttribute('data-card-pagination-list');
+								var incomingList = parseResponse(payload.html, selector);
+								var received = cardsFor(incomingList, state.root).length;
+									if (replace) {
+										state.list.innerHTML = incomingList.innerHTML;
+										rememberCards(state, cardsFor(state.list, state.root), true);
+										if (window.htmx && typeof window.htmx.process === 'function') window.htmx.process(state.list);
+									} else {
+										appendCards(state, incomingList);
+									}
+									if (typeof window.refreshCardSearches === 'function') window.refreshCardSearches(state.root);
+									state.nextPage = page + 1;
+									state.nextOffset = replace ? received : state.nextOffset + received;
+									state.hasMore = payload.header === null ? received >= state.pageSize : payload.header === 'true';
+									state.loading = false;
+									state.controller = null;
+									delete state.requestedPages[page];
+
+									var replacementSnapshot = state.replaceSnapshot;
+									state.replaceSnapshot = null;
+									restoreReplacementState(state, replacementSnapshot);
+									setStatus(state, 'idle');								connectTrigger(state);
+							}).catch(function(error) {
+								if (!isCurrent(state) || state.generation !== generation || error && error.name === 'AbortError') return;
+								state.loading = false;
+								state.controller = null;
+								delete state.requestedPages[page];
+								state.failedPage = page;
+								state.failedReplace = replace;
+									state.hasMore = true;
+									setStatus(state, 'error');
+									disconnectTrigger(state);
+							});
+						}
+
+						function createState(root, list, initialSearch) {
+							var pageSize = pageNumber(root.getAttribute('data-card-pagination-page-size'), 20);
+							if (pageSize < 1) pageSize = 20;
+							var initialHasMore = root.getAttribute('data-card-pagination-has-more');
+							var status = root.querySelector('[data-card-pagination-status]');
+							var statusHasMore = status && status.getAttribute('data-card-pagination-has-more');
+							if (statusHasMore !== null) initialHasMore = statusHasMore;
+							var initialCardCount = cardsFor(list, root).length;
+							var hasMore = initialHasMore === null ? initialCardCount >= pageSize : initialHasMore === 'true';
+							var state = {
+								root: root,
+								list: list,
+								pageSize: pageSize,
+								nextPage: Math.max(1, Math.ceil(initialCardCount / pageSize)),
+								nextOffset: initialCardCount,
+								hasMore: hasMore,
+								loading: false,
+								generation: 0,
+								controller: null,
+								requestedPages: Object.create(null),
+								keys: Object.create(null),
+								search: initialSearch || '',
+								searchTimer: null,
+								input: null,
+								observer: null,
+								scrollTarget: null,
+								scrollHandler: null,
+								sentinel: null,
+								failedPage: null,
+									failedReplace: false,
+									resetPending: false,
+									replaceSnapshot: null,
+									invalidated: false							};
+							rememberCards(state, cardsFor(list, root), true);
+							return state;
+						}
+
+						function destroyState(state) {
+							if (!state) return;
+							state.generation++;
+							if (state.controller) state.controller.abort();
+							if (state.searchTimer) clearTimeout(state.searchTimer);
+							disconnectTrigger(state);
+							state.loading = false;
+						}
+
+						function initRoot(root, initialDocument) {
+							var list = listFor(root);
+							if (!list) return;
+							var state = root._openVibelyCardPaginationState;
+							if (state && (state.list !== list || state.invalidated)) {
+								destroyState(state);
+								state = null;
+							}
+							var listChanged = !state;
+							var input = root.querySelector('input[data-card-search]');
+							var inputTerm = input ? (input.value || '').trim() : '';
+							var locationTerm = '';
+							try {
+								locationTerm = (new URL(window.location.href)).searchParams.get('search') || '';
+								locationTerm = locationTerm.trim();
+							} catch (_) {}
+							var useLocationSearch = !!(initialDocument && listChanged && locationTerm);
+								var term = useLocationSearch ? locationTerm : inputTerm;
+								var replacementSnapshot = root.id ? replacementSnapshots[root.id] : null;								if (!state) {
+									state = createState(root, list, useLocationSearch || replacementSnapshot ? term : '');
+									root._openVibelyCardPaginationState = state;
+								}							if (initialDocument && locationTerm && input && input.value !== locationTerm) {
+								input.value = locationTerm;
+								if (typeof window.refreshCardSearches === 'function') window.refreshCardSearches(root);
+							}
+							bindSearch(state);
+							setStatus(state, 'idle');
+							if (state.resetPending) return;
+								if (listChanged && term && state.search !== term) {								state.resetPending = true;
+								setTimeout(function() {
+									if (!isCurrent(state)) return;
+									state.resetPending = false;
+									resetSearch(state, term);
+								}, 0);
+									return;
+								}
+								if (replacementSnapshot && root.id) {
+									delete replacementSnapshots[root.id];
+									restoreReplacementState(state, replacementSnapshot);
+								}
+								connectTrigger(state);						}
+
+						function initRoots(scope, initialDocument) {
+							var roots = rootsIn(scope);
+							for (var i = 0; i < roots.length; i++) initRoot(roots[i], initialDocument);
+						}
+
+						function clearDetachedReplacementSnapshots() {
+							for (var id in replacementSnapshots) {
+								if (!document.getElementById(id)) delete replacementSnapshots[id];
+							}
+						}
+
+						function destroyCardPagination(scope, preserveReplacement) {
+							var roots = rootsIn(scope || document);
+							for (var i = 0; i < roots.length; i++) {
+								var state = roots[i]._openVibelyCardPaginationState;
+								if (!state) continue;
+								if (preserveReplacement) rememberReplacementSnapshot(state);
+								destroyState(state);
+								state.invalidated = true;
+								roots[i]._openVibelyCardPaginationState = null;
+							}
+						}
+
+						window.refreshCardPagination = function(scope) {
+							initRoots(scope || document, false);
+						};
+						window.cardPaginationRefreshURL = cardPaginationRefreshURL;
+						window.destroyCardPagination = destroyCardPagination;
+
+							function invalidateRoots(scope) {							var roots = rootsIn(scope);
+							for (var i = 0; i < roots.length; i++) {
+								var state = roots[i]._openVibelyCardPaginationState;
+								if (state) {
+									state.generation++;
+									if (state.controller) state.controller.abort();
+									state.controller = null;
+									state.loading = false;
+									state.invalidated = true;
+									disconnectTrigger(state);
+								}
+							}
+						}
+
+						setTimeout(function() {
+							initRoots(document, true);
+						}, 0);
+						if (document.body) {
+							document.body.addEventListener('htmx:configRequest', function(event) {
+								var detail = event.detail || {};
+								if (!detail.path) return;
+								var root = closestPaginationRoot(detail.elt) || closestPaginationRoot(detail.target);
+								if (!root) return;
+								var list = listFor(root);
+								var target = detail.target;
+								var replacesWindow = target === root || target === list || (target && list && typeof target.contains === 'function' && target.contains(list));
+								if (replacesWindow) detail.path = cardPaginationRefreshURL(root, detail.path);
+							});
+							document.body.addEventListener('htmx:beforeSwap', function(event) {
+								var target = event.detail && event.detail.target;
+								if (!target) return;
+								var roots = rootsIn(target);
+								for (var i = 0; i < roots.length; i++) {
+									var state = roots[i]._openVibelyCardPaginationState;
+									if (!state) continue;
+									var selector = roots[i].getAttribute('data-card-pagination-list');
+									var replacesList = target === state.root || target === state.list || (target.querySelector && selector && target.querySelector(selector));
+									if (replacesList) {
+										rememberReplacementSnapshot(state);
+										invalidateRoots(roots[i]);
+									}
+								}
+							});
+							document.body.addEventListener('htmx:afterSettle', function(event) {
+								var scope = event.detail && event.detail.elt ? event.detail.elt : document;
+								initRoots(scope);
+								if (scope !== document) initRoots(document);
+								setTimeout(function() {
+									initRoots(document);
+									clearDetachedReplacementSnapshots();
+								}, 0);
+							});
+						}
+					})();
+				</script>
 			<!-- Desktop external-link bridge -->
 			<script>
 					// In Wails desktop mode, the embedded WebView does not handle
@@ -3321,20 +4931,22 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					// so they open in the user's real system browser. In web/server
 					// mode this helper is inert, preserving normal anchor behavior.
 				(function() {
-					function isDesktopRuntime() {
-						try {
-							if (typeof window === 'undefined') return false;
-							if (window.location && window.location.protocol === 'wails:') return true;
-							if (typeof window.wails !== 'undefined') return true;
-							if (typeof window._wails !== 'undefined') return true;
-							if (typeof window.runtime !== 'undefined') return true;
-							if (typeof window.__WAILS__ !== 'undefined') return true;
-							return false;
-						} catch (_) {
-							return false;
+						function isDesktopRuntime() {
+							try {
+								if (typeof window === 'undefined') return false;
+								var serverRuntime = document.documentElement.getAttribute('data-openvibely-runtime');
+								if (serverRuntime === 'desktop') return true;
+								if (window.location && window.location.protocol === 'wails:') return true;
+								if (typeof window.wails !== 'undefined') return true;
+								if (typeof window._wails !== 'undefined') return true;
+								if (typeof window.runtime !== 'undefined') return true;
+								if (typeof window.__WAILS__ !== 'undefined') return true;
+								return false;
+							} catch (_) {
+								return false;
+							}
 						}
-					}
-					function isExternalHref(href) {
+						function isExternalHref(href) {
 						if (!href) return false;
 						var lower = String(href).toLowerCase();
 						return lower.indexOf('http://') === 0 || lower.indexOf('https://') === 0 || lower.indexOf('mailto:') === 0;
@@ -3382,34 +4994,47 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						openExternalViaBackend(url);
 						return true; // handled asynchronously
 					}
-					function handleAnchorClick(event) {
-						if (!isDesktopRuntime()) return;
-						// Allow modifier-clicks to fall through.
-						if (event.defaultPrevented) return;
-						if (event.button !== undefined && event.button !== 0) return;
-						if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-						var target = event.target;
-						var anchor = target && target.closest ? target.closest('a[href]') : null;
-						if (!anchor) return;
-						var href = anchor.getAttribute('href');
-						if (!href) return;
-						// Only act on external links or links explicitly marked target="_blank".
-						var blank = anchor.getAttribute('target') === '_blank';
-						if (!isExternalHref(href) && !blank) return;
-						// If it's target="_blank" but a relative URL, resolve to absolute first
-						// so the system browser receives a usable URL.
-						var absolute = href;
-						try {
-							absolute = new URL(href, window.location.href).toString();
-						} catch (_) {}
-						if (!isExternalHref(absolute)) {
-							// Same-origin relative link in a new tab: let default behavior happen.
-							return;
+						function isChatMessageExternalLink(anchor) {
+							return !!(anchor && anchor.getAttribute('data-openvibely-chat-external-link') === 'true' && anchor.closest && anchor.closest('.chat-stream-content, [id^="streaming-message-"], [data-raw-content]'));
 						}
-						event.preventDefault();
-						event.stopPropagation();
-						callWailsOpenURL(absolute);
-					}
+						function handleAnchorClick(event) {
+							// Allow modifier-clicks to fall through.
+							if (event.defaultPrevented) return;
+							if (event.button !== undefined && event.button !== 0) return;
+							if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+							var target = event.target;
+							var anchor = target && target.closest ? target.closest('a[href]') : null;
+							if (!anchor) return;
+							var href = anchor.getAttribute('href');
+							if (!href) return;
+							var desktop = isDesktopRuntime();
+							var chatExternal = isChatMessageExternalLink(anchor);
+							if (!desktop && !chatExternal) return;
+							// Only act on external links or links explicitly marked target="_blank".
+							var blank = anchor.getAttribute('target') === '_blank';
+							if (!isExternalHref(href) && !blank && !chatExternal) return;
+							// If it's target="_blank" but a relative URL, resolve to absolute first
+							// so the system browser receives a usable URL.
+							var absolute = anchor.getAttribute('data-openvibely-external-url') || href;
+							try {
+								absolute = new URL(absolute, window.location.href).toString();
+							} catch (_) {}
+							if (!isExternalHref(absolute)) {
+								// Same-origin relative link in a new tab: let default behavior happen.
+								return;
+							}
+							event.preventDefault();
+							event.stopPropagation();
+							if (desktop) {
+								callWailsOpenURL(absolute);
+								return;
+							}
+							try {
+								window.open(absolute, '_blank', 'noopener,noreferrer');
+							} catch (_) {
+								if (window.showToast) window.showToast('Failed to open link: ' + absolute, 'failed');
+							}
+						}
 					document.addEventListener('click', handleAnchorClick, true);
 					// Expose for callers that need an explicit opener (e.g., dropdown item buttons).
 					window.openExternalURL = function(url) {
@@ -3421,13 +5046,6 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					};
 				})();
 			</script>
-
-			<!-- Selection Counter -->
-			<div id="selection-counter">
-				<span id="selection-count">0</span>
-				<span>tasks selected</span>
-				<button onclick="clearSelection()" class="btn btn-sm btn-ghost">Clear</button>
-			</div>
 		</body>
 	</html>
 }

@@ -2,11 +2,15 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/url"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/lifecycle"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
@@ -21,7 +25,7 @@ func TestTaskGoalRoutes_HTMXEditPauseResumeClear(t *testing.T) {
 		t.Fatalf("create task: %v", err)
 	}
 
-	rec := tc.HTMX().Post("/tasks/" + task.ID + "/goal").WithForm(url.Values{"goal": {"All checks pass"}}).Execute()
+	rec := tc.HTMX().Post("/tasks/" + task.ID + "/goal?project_id=" + project.ID).WithForm(url.Values{"goal": {"All checks pass"}}).Execute()
 	if rec.Code != http.StatusOK {
 		t.Fatalf("set goal status=%d body=%s", rec.Code, rec.Body.String())
 	}
@@ -33,7 +37,7 @@ func TestTaskGoalRoutes_HTMXEditPauseResumeClear(t *testing.T) {
 	}
 
 	for _, path := range []string{"/pause", "/resume", "/clear"} {
-		rec = tc.HTMX().Post("/tasks/" + task.ID + "/goal" + path).Execute()
+		rec = tc.HTMX().Post("/tasks/" + task.ID + "/goal" + path + "?project_id=" + project.ID).Execute()
 		if rec.Code != http.StatusOK {
 			t.Fatalf("post %s status=%d body=%s", path, rec.Code, rec.Body.String())
 		}
@@ -45,6 +49,153 @@ func TestTaskGoalRoutes_HTMXEditPauseResumeClear(t *testing.T) {
 	if goal.Status != models.TaskGoalStatusCleared {
 		t.Fatalf("goal status = %s", goal.Status)
 	}
+}
+
+func TestTaskGoalRoutesRejectForeignTaskFromExplicitAndSelectedProjects(t *testing.T) {
+	routes := []struct {
+		name   string
+		suffix string
+		method string
+		body   string
+	}{
+		{name: "get", suffix: "/goal", method: http.MethodGet},
+		{name: "set", suffix: "/goal", method: http.MethodPost, body: url.Values{"goal": {"Changed from Project B"}}.Encode()},
+		{name: "pause", suffix: "/goal/pause", method: http.MethodPost},
+		{name: "resume", suffix: "/goal/resume", method: http.MethodPost},
+		{name: "clear", suffix: "/goal/clear", method: http.MethodPost},
+	}
+
+	for _, route := range routes {
+		for _, scope := range []struct {
+			name          string
+			useExplicitID bool
+		}{
+			{name: "explicit", useExplicitID: true},
+			{name: "selected", useExplicitID: false},
+		} {
+			t.Run(scope.name+"/"+route.name, func(t *testing.T) {
+				tc, projectB, task, originalGoal := newForeignTaskGoalRouteFixture(t)
+				if !scope.useExplicitID {
+					if err := tc.settingsRepo.Set(context.Background(), uiPreferenceSelectedProjectIDKey, projectB.ID); err != nil {
+						t.Fatalf("select project B: %v", err)
+					}
+				}
+
+				path := "/tasks/" + task.ID + route.suffix
+				if scope.useExplicitID {
+					path += "?project_id=" + projectB.ID
+				}
+				rec := requestWithAccept(tc, route.method, path, "application/json", route.body)
+				if rec.Code != http.StatusBadRequest {
+					t.Fatalf("foreign %s status=%d body=%s", route.name, rec.Code, rec.Body.String())
+				}
+				body := rec.Body.String()
+				for _, leaked := range []string{originalGoal.Objective, originalGoal.Reason, originalGoal.BlockerKey, originalGoal.BlockerReason} {
+					if leaked != "" && strings.Contains(body, leaked) {
+						t.Fatalf("foreign %s response leaked %q: %s", route.name, leaked, body)
+					}
+				}
+
+				currentGoal, err := tc.handler.taskGoalSvc.GetGoal(context.Background(), task.ID)
+				if err != nil {
+					t.Fatalf("get foreign goal after rejected %s: %v", route.name, err)
+				}
+				if !reflect.DeepEqual(originalGoal, currentGoal) {
+					t.Fatalf("foreign goal changed after rejected %s:\noriginal=%#v\ncurrent=%#v", route.name, originalGoal, currentGoal)
+				}
+			})
+		}
+	}
+}
+
+func TestTaskGoalRoutesRejectKnownTaskWithoutProjectContext(t *testing.T) {
+	routes := []struct {
+		name   string
+		suffix string
+		method string
+		body   string
+	}{
+		{name: "get", suffix: "/goal", method: http.MethodGet},
+		{name: "set", suffix: "/goal", method: http.MethodPost, body: url.Values{"goal": {"Changed without a project"}}.Encode()},
+		{name: "pause", suffix: "/goal/pause", method: http.MethodPost},
+		{name: "resume", suffix: "/goal/resume", method: http.MethodPost},
+		{name: "clear", suffix: "/goal/clear", method: http.MethodPost},
+	}
+
+	for _, route := range routes {
+		t.Run(route.name, func(t *testing.T) {
+			tc, _, task, originalGoal := newForeignTaskGoalRouteFixture(t)
+			selectedProjectID, err := tc.settingsRepo.Get(context.Background(), uiPreferenceSelectedProjectIDKey)
+			if err != nil {
+				t.Fatalf("get selected project: %v", err)
+			}
+			if strings.TrimSpace(selectedProjectID) != "" {
+				t.Fatalf("test unexpectedly has selected project %q", selectedProjectID)
+			}
+
+			rec := requestWithAccept(tc, route.method, "/tasks/"+task.ID+route.suffix, "application/json", route.body)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("unscoped %s status=%d body=%s", route.name, rec.Code, rec.Body.String())
+			}
+			body := rec.Body.String()
+			for _, leaked := range []string{originalGoal.Objective, originalGoal.Reason, originalGoal.BlockerKey, originalGoal.BlockerReason} {
+				if leaked != "" && strings.Contains(body, leaked) {
+					t.Fatalf("unscoped %s response leaked %q: %s", route.name, leaked, body)
+				}
+			}
+
+			currentGoal, err := tc.handler.taskGoalSvc.GetGoal(context.Background(), task.ID)
+			if err != nil {
+				t.Fatalf("get goal after rejected unscoped %s: %v", route.name, err)
+			}
+			if !reflect.DeepEqual(originalGoal, currentGoal) {
+				t.Fatalf("goal changed after rejected unscoped %s:\noriginal=%#v\ncurrent=%#v", route.name, originalGoal, currentGoal)
+			}
+		})
+	}
+}
+
+func TestTaskGoalRoutesUnknownTaskReturnNotFound(t *testing.T) {
+	tc := NewTestContext(t)
+	for _, route := range []struct {
+		name   string
+		suffix string
+		method string
+		body   string
+	}{
+		{name: "get", suffix: "/goal", method: http.MethodGet},
+		{name: "set", suffix: "/goal", method: http.MethodPost, body: url.Values{"goal": {"Unknown task goal"}}.Encode()},
+		{name: "pause", suffix: "/goal/pause", method: http.MethodPost},
+		{name: "resume", suffix: "/goal/resume", method: http.MethodPost},
+		{name: "clear", suffix: "/goal/clear", method: http.MethodPost},
+	} {
+		t.Run(route.name, func(t *testing.T) {
+			rec := requestWithAccept(tc, route.method, "/tasks/missing"+route.suffix, "application/json", route.body)
+			if rec.Code != http.StatusNotFound {
+				t.Fatalf("unknown %s status=%d body=%s", route.name, rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
+func newForeignTaskGoalRouteFixture(t *testing.T) (*TestContext, *models.Project, *models.Task, *models.TaskGoal) {
+	t.Helper()
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	projectA := tc.CreateProject().WithName("Project A").Build()
+	projectB := tc.CreateProject().WithName("Project B").Build()
+	task := tc.CreateTask(projectA.ID).WithTitle("Project A goal task").WithCategory(models.CategoryBacklog).Build()
+	goal, err := tc.handler.taskGoalSvc.SetGoal(ctx, task.ID, "Foreign objective", service.GoalOptions{Actor: "seed"})
+	if err != nil {
+		t.Fatalf("set foreign goal: %v", err)
+	}
+	for i := 0; i < 3; i++ {
+		goal, err = tc.handler.taskGoalSvc.RecordBlockedReport(ctx, task.ID, goal.GoalID, "dependency", "waiting on dependency")
+		if err != nil {
+			t.Fatalf("record blocker report %d: %v", i+1, err)
+		}
+	}
+	return tc, projectB, task, goal
 }
 
 func TestUpdateTask_EditFormSavesGoalAndRefreshesReadOnlySummary(t *testing.T) {
@@ -97,6 +248,162 @@ func TestUpdateTask_EditFormSavesGoalAndRefreshesReadOnlySummary(t *testing.T) {
 	}
 }
 
+func TestSetTaskGoalOnCompletedTaskDoesNotStartWork(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().Build()
+	agent := tc.CreateLLMConfig().Build()
+	task := &models.Task{ProjectID: project.ID, Title: "Completed Goal Save", Category: models.CategoryCompleted, Status: models.StatusCompleted, Prompt: "original prompt", Priority: 2}
+	if err := tc.taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	tc.CreateSchedule(task.ID).WithRunAt(time.Now().Add(time.Hour)).Build()
+	tc.CreateExecution(task.ID, agent.ID).WithStatus(models.ExecCompleted).WithPromptSent(task.Prompt).WithOutput("done").Build()
+
+	rec := tc.HTMX().Post("/tasks/" + task.ID + "/goal?project_id=" + project.ID).WithForm(url.Values{"goal": {"New metadata-only goal"}}).Execute()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("set goal status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	assertCompletedTaskEditDidNotStartWork(t, tc, task.ID, models.CategoryCompleted, models.StatusCompleted, 1)
+	goal, err := tc.handler.taskGoalSvc.GetGoal(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("get goal: %v", err)
+	}
+	if goal == nil || goal.Objective != "New metadata-only goal" || goal.Status != models.TaskGoalStatusActive {
+		t.Fatalf("unexpected goal after save: %#v", goal)
+	}
+}
+
+func TestUpdateTaskGoalOnCompletedTaskDoesNotReactivateFromOriginalPrompt(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().Build()
+	agent := tc.CreateLLMConfig().Build()
+	task := &models.Task{ProjectID: project.ID, Title: "Completed Edit Goal", Category: models.CategoryCompleted, Status: models.StatusCompleted, Prompt: "original task prompt", Priority: 2, AgentID: &agent.ID}
+	if err := tc.taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	tc.CreateSchedule(task.ID).WithRunAt(time.Now().Add(time.Hour)).Build()
+	tc.CreateExecution(task.ID, agent.ID).WithStatus(models.ExecCompleted).WithPromptSent(task.Prompt).WithOutput("done").Build()
+
+	form := url.Values{
+		"title":              {task.Title},
+		"category":           {string(models.CategoryActive)},
+		"priority":           {"3"},
+		"prompt":             {task.Prompt},
+		"tag":                {""},
+		"agent_id":           {agent.ID},
+		"goal_present":       {"1"},
+		"goal":               {"Review the completed work later"},
+		"auto_merge_present": {"1"},
+	}
+	rec := tc.HTMX().Put("/tasks/" + task.ID).WithForm(form).Execute()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("update task status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	assertCompletedTaskEditDidNotStartWork(t, tc, task.ID, models.CategoryActive, models.StatusCompleted, 1)
+	goal, err := tc.handler.taskGoalSvc.GetGoal(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("get goal: %v", err)
+	}
+	if goal == nil || goal.Objective != "Review the completed work later" {
+		t.Fatalf("unexpected goal after edit: %#v", goal)
+	}
+}
+
+func TestUpdateTaskMetadataOnCompletedTaskDoesNotStartWork(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().Build()
+	agent := tc.CreateLLMConfig().WithName("Original Model").Build()
+	newAgent := tc.CreateLLMConfig().WithName("New Model").AsDefault().Build()
+	task := &models.Task{ProjectID: project.ID, Title: "Completed Metadata", Category: models.CategoryCompleted, Status: models.StatusCompleted, Prompt: "original prompt", Priority: 2, AgentID: &agent.ID}
+	if err := tc.taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	tc.CreateSchedule(task.ID).WithRunAt(time.Now().Add(time.Hour)).Build()
+	tc.CreateExecution(task.ID, agent.ID).WithStatus(models.ExecCompleted).WithPromptSent(task.Prompt).WithOutput("done").Build()
+
+	form := url.Values{
+		"title":              {"Renamed Completed Metadata"},
+		"category":           {string(models.CategoryCompleted)},
+		"priority":           {"4"},
+		"prompt":             {"edited prompt should not run"},
+		"tag":                {string(models.TagBug)},
+		"agent_id":           {newAgent.ID},
+		"auto_merge_present": {"1"},
+	}
+	rec := tc.HTMX().Put("/tasks/" + task.ID).WithForm(form).Execute()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("update task status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	assertCompletedTaskEditDidNotStartWork(t, tc, task.ID, models.CategoryCompleted, models.StatusCompleted, 1)
+	updated, err := tc.taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if updated.Title != "Renamed Completed Metadata" || updated.Prompt != "edited prompt should not run" || updated.Priority != 4 || updated.AgentID == nil || *updated.AgentID != newAgent.ID {
+		t.Fatalf("metadata was not saved: %#v", updated)
+	}
+}
+
+func assertCompletedTaskEditDidNotStartWork(t *testing.T, tc *TestContext, taskID string, wantCategory models.TaskCategory, wantStatus models.TaskStatus, wantExecutions int) {
+	t.Helper()
+	ctx := context.Background()
+	updated, err := tc.taskRepo.GetByID(ctx, taskID)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if updated == nil || updated.Category != wantCategory || updated.Status != wantStatus {
+		t.Fatalf("task after metadata save = %#v, want category=%s status=%s", updated, wantCategory, wantStatus)
+	}
+	execs, err := tc.execRepo.ListByTaskChronological(ctx, taskID)
+	if err != nil {
+		t.Fatalf("list executions: %v", err)
+	}
+	if len(execs) != wantExecutions {
+		t.Fatalf("execution count after metadata save = %d, want %d; executions=%#v", len(execs), wantExecutions, execs)
+	}
+	for _, exec := range execs {
+		if exec.Status == models.ExecRunning || exec.PromptSent == "edited prompt should not run" {
+			t.Fatalf("metadata save created or started execution: %#v", exec)
+		}
+	}
+	var inputCount int
+	if err := tc.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM thread_inputs WHERE task_id = ?`, taskID).Scan(&inputCount); err != nil {
+		t.Fatalf("count thread inputs: %v", err)
+	}
+	if inputCount != 0 {
+		t.Fatalf("thread input count after metadata save = %d, want 0", inputCount)
+	}
+	if got := tc.handler.workerSvc.QueueSize(); got != 0 {
+		t.Fatalf("worker queue size after metadata save = %d, want 0", got)
+	}
+	if got := tc.handler.workerSvc.TotalRunning(); got != 0 {
+		t.Fatalf("worker running count after metadata save = %d, want 0", got)
+	}
+	if got := tc.handler.workerSvc.ProjectRunning(updated.ProjectID); got != 0 {
+		t.Fatalf("project worker running count after metadata save = %d, want 0", got)
+	}
+	var lifecycleCount int
+	if err := tc.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM lifecycle_executions WHERE task_id = ?`, taskID).Scan(&lifecycleCount); err != nil {
+		t.Fatalf("count lifecycle executions: %v", err)
+	}
+	if lifecycleCount != 0 {
+		t.Fatalf("lifecycle execution count after metadata save = %d, want 0", lifecycleCount)
+	}
+	var scheduleRuns int
+	if err := tc.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM schedules WHERE task_id = ? AND last_run IS NOT NULL`, taskID).Scan(&scheduleRuns); err != nil {
+		t.Fatalf("count schedule runs: %v", err)
+	}
+	if scheduleRuns != 0 {
+		t.Fatalf("schedule run count after metadata save = %d, want 0", scheduleRuns)
+	}
+}
+
 func TestTaskGoalPanelLabelsUserStoppedPause(t *testing.T) {
 	tc := NewTestContext(t)
 	ctx := context.Background()
@@ -112,7 +419,7 @@ func TestTaskGoalPanelLabelsUserStoppedPause(t *testing.T) {
 		t.Fatalf("pause after user stop: %v", err)
 	}
 
-	rec := tc.HTMX().Get("/tasks/" + task.ID + "/goal").Execute()
+	rec := tc.HTMX().Get("/tasks/" + task.ID + "/goal?project_id=" + project.ID).Execute()
 	if rec.Code != http.StatusOK {
 		t.Fatalf("goal panel status=%d body=%s", rec.Code, rec.Body.String())
 	}
@@ -211,12 +518,21 @@ func TestGoalAgentSendToTaskQueuesWhenGoalStillActive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("active goal continuation rejected: out=%q err=%v", out, err)
 	}
-	pending, err := tc.handler.threadInputRepo.ListPendingForTask(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("list pending: %v", err)
+	var result struct {
+		QueuedMessageID string `json:"queued_message_id"`
 	}
-	if len(pending) != 1 || pending[0].Content != "Continue because goal remains unmet" || pending[0].Source != models.TaskOriginSystemAgent || pending[0].OriginAgent != models.AgentSystemKindGoal {
-		t.Fatalf("active goal continuation pending = %+v", pending)
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatalf("decode send_to_task result %q: %v", out, err)
+	}
+	queued, err := tc.handler.threadInputRepo.GetByID(ctx, result.QueuedMessageID)
+	if err != nil {
+		t.Fatalf("load queued continuation: %v", err)
+	}
+	if queued == nil {
+		t.Fatalf("queued continuation %q was not persisted", result.QueuedMessageID)
+	}
+	if queued.Content != "Continue because goal remains unmet" || queued.Source != models.TaskOriginSystemAgent || queued.OriginAgent != models.AgentSystemKindGoal {
+		t.Fatalf("queued continuation details = %+v", queued)
 	}
 }
 
@@ -256,15 +572,150 @@ func TestGoalAgentSendToTaskQueuesCurrentRunWhenOlderAfterCompleteRowsAreLate(t 
 	if err != nil {
 		t.Fatalf("current goal continuation rejected: out=%q err=%v", out, err)
 	}
+	var result struct {
+		QueuedMessageID string `json:"queued_message_id"`
+	}
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatalf("decode send_to_task result %q: %v", out, err)
+	}
+	queued, err := tc.handler.threadInputRepo.GetByID(ctx, result.QueuedMessageID)
+	if err != nil {
+		t.Fatalf("load queued continuation: %v", err)
+	}
+	if queued == nil {
+		t.Fatalf("queued continuation %q was not persisted", result.QueuedMessageID)
+	}
+	if queued.Content != "Continue because audit found a material issue" || queued.Source != models.TaskOriginSystemAgent || queued.OriginAgent != models.AgentSystemKindGoal {
+		t.Fatalf("queued continuation details = %+v", queued)
+	}
+}
+
+func TestLifecycleSendToTaskRejectsCancelledSourceOrDestination(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().Build()
+	agent := tc.CreateLLMConfig().Build()
+	sourceTask := &models.Task{ProjectID: project.ID, Title: "Cancelled source lifecycle task", Category: models.CategoryBacklog, Status: models.StatusCancelled, Prompt: "source", Priority: 2, AgentID: &agent.ID}
+	if err := tc.taskRepo.Create(ctx, sourceTask); err != nil {
+		t.Fatalf("create source task: %v", err)
+	}
+	destinationTask := &models.Task{ProjectID: project.ID, Title: "Cancelled destination lifecycle task", Category: models.CategoryBacklog, Status: models.StatusCancelled, Prompt: "destination", Priority: 2, AgentID: &agent.ID}
+	if err := tc.taskRepo.Create(ctx, destinationTask); err != nil {
+		t.Fatalf("create destination task: %v", err)
+	}
+	activeTask := &models.Task{ProjectID: project.ID, Title: "Active lifecycle task", Category: models.CategoryActive, Status: models.StatusRunning, Prompt: "active", Priority: 2, AgentID: &agent.ID}
+	if err := tc.taskRepo.Create(ctx, activeTask); err != nil {
+		t.Fatalf("create active task: %v", err)
+	}
+	params := streamingResponseParams{TaskID: sourceTask.ID, ProjectID: project.ID, IsTaskFollowup: true, AgentDefinition: &models.Agent{Tools: []string{"send_to_task"}}}
+	handlers := tc.handler.chatActionHandlers(params, nil, models.ChatModeOrchestrate, "web")
+	cancelledSourceCtx := lifecycle.WithHookAgent(context.Background(), lifecycle.HookAgent{AgentID: "hook-agent", Tools: []string{"send_to_task"}, TaskID: sourceTask.ID, TaskRunID: "run-cancelled-source"})
+	out, err := handlers["send_to_task"](cancelledSourceCtx, []byte(`{"task_id":"`+activeTask.ID+`","message":"do not queue from cancelled source"}`))
+	if err == nil || !strings.Contains(err.Error(), "cancelled lifecycle task") {
+		t.Fatalf("expected cancelled source continuation rejection, out=%q err=%v", out, err)
+	}
+
+	params.TaskID = activeTask.ID
+	handlers = tc.handler.chatActionHandlers(params, nil, models.ChatModeOrchestrate, "web")
+	activeSourceCtx := lifecycle.WithHookAgent(context.Background(), lifecycle.HookAgent{AgentID: "hook-agent", Tools: []string{"send_to_task"}, TaskID: activeTask.ID, TaskRunID: "run-active-source"})
+	out, err = handlers["send_to_task"](activeSourceCtx, []byte(`{"task_id":"`+destinationTask.ID+`","message":"do not queue to cancelled destination"}`))
+	if err == nil || !strings.Contains(err.Error(), "cancelled lifecycle task") {
+		t.Fatalf("expected cancelled destination continuation rejection, out=%q err=%v", out, err)
+	}
+	for _, taskID := range []string{sourceTask.ID, destinationTask.ID, activeTask.ID} {
+		pending, err := tc.handler.threadInputRepo.ListPendingForTask(ctx, taskID)
+		if err != nil {
+			t.Fatalf("list pending for %s: %v", taskID, err)
+		}
+		if len(pending) != 0 {
+			t.Fatalf("cancelled lifecycle continuation queued pending inputs for %s: %+v", taskID, pending)
+		}
+	}
+}
+
+func TestLifecycleSendToTaskRejectsCancellationRequestBeforeStatusCancelled(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().Build()
+	agent := tc.CreateLLMConfig().Build()
+	sourceTask := &models.Task{ProjectID: project.ID, Title: "Stopping source lifecycle task", Category: models.CategoryActive, Status: models.StatusRunning, Prompt: "source", Priority: 2, AgentID: &agent.ID}
+	if err := tc.taskRepo.Create(ctx, sourceTask); err != nil {
+		t.Fatalf("create source task: %v", err)
+	}
+	destinationTask := &models.Task{ProjectID: project.ID, Title: "Stopping destination lifecycle task", Category: models.CategoryActive, Status: models.StatusRunning, Prompt: "destination", Priority: 2, AgentID: &agent.ID}
+	if err := tc.taskRepo.Create(ctx, destinationTask); err != nil {
+		t.Fatalf("create destination task: %v", err)
+	}
+	params := streamingResponseParams{TaskID: sourceTask.ID, ProjectID: project.ID, IsTaskFollowup: true, AgentDefinition: &models.Agent{Tools: []string{"send_to_task"}}}
+	handlers := tc.handler.chatActionHandlers(params, nil, models.ChatModeOrchestrate, "web")
+
+	tc.handler.workerSvc.MarkCancellationRequested(sourceTask.ID)
+	cancelledSourceCtx := lifecycle.WithHookAgent(context.Background(), lifecycle.HookAgent{AgentID: "hook-agent", Tools: []string{"send_to_task"}, TaskID: sourceTask.ID, TaskRunID: "run-stopping-source"})
+	out, err := handlers["send_to_task"](cancelledSourceCtx, []byte(`{"task_id":"`+destinationTask.ID+`","message":"do not queue during source stop"}`))
+	if err == nil || !strings.Contains(err.Error(), "cancelled lifecycle task") {
+		t.Fatalf("expected cancellation-request source continuation rejection, out=%q err=%v", out, err)
+	}
+	tc.handler.workerSvc.ClearCancellationRequested(sourceTask.ID)
+	tc.handler.workerSvc.MarkCancellationRequested(destinationTask.ID)
+	activeSourceCtx := lifecycle.WithHookAgent(context.Background(), lifecycle.HookAgent{AgentID: "hook-agent", Tools: []string{"send_to_task"}, TaskID: sourceTask.ID, TaskRunID: "run-active-source"})
+	out, err = handlers["send_to_task"](activeSourceCtx, []byte(`{"task_id":"`+destinationTask.ID+`","message":"do not queue during destination stop"}`))
+	if err == nil || !strings.Contains(err.Error(), "cancelled lifecycle task") {
+		t.Fatalf("expected cancellation-request destination continuation rejection, out=%q err=%v", out, err)
+	}
+	for _, taskID := range []string{sourceTask.ID, destinationTask.ID} {
+		pending, err := tc.handler.threadInputRepo.ListPendingForTask(ctx, taskID)
+		if err != nil {
+			t.Fatalf("list pending for %s: %v", taskID, err)
+		}
+		if len(pending) != 0 {
+			t.Fatalf("cancellation-request lifecycle continuation queued pending inputs for %s: %+v", taskID, pending)
+		}
+	}
+}
+
+func TestLifecycleSendToTaskRejectsDuringCancelTaskBeforeStatusCancelled(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().Build()
+	agent := tc.CreateLLMConfig().Build()
+	task := &models.Task{ProjectID: project.ID, Title: "Cancel race lifecycle task", Category: models.CategoryActive, Status: models.StatusRunning, Prompt: "source", Priority: 2, AgentID: &agent.ID}
+	if err := tc.taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	params := streamingResponseParams{TaskID: task.ID, ProjectID: project.ID, IsTaskFollowup: true, AgentDefinition: &models.Agent{Tools: []string{"send_to_task"}}}
+	handlers := tc.handler.chatActionHandlers(params, nil, models.ChatModeOrchestrate, "web")
+	hookCtx := lifecycle.WithHookAgent(context.Background(), lifecycle.HookAgent{AgentID: "hook-agent", Tools: []string{"send_to_task"}, TaskID: task.ID, TaskRunID: "run-cancel-race"})
+	callbackRan := false
+	tc.handler.workerSvc.RegisterCancel(task.ID, func() {
+		callbackRan = true
+		current, err := tc.taskRepo.GetByID(context.Background(), task.ID)
+		if err != nil {
+			t.Errorf("load task during cancel callback: %v", err)
+			return
+		}
+		if current == nil || current.Status == models.StatusCancelled {
+			t.Errorf("cancel callback did not run before durable cancelled status: %+v", current)
+		}
+		out, err := handlers["send_to_task"](hookCtx, []byte(`{"task_id":"current","message":"do not queue during cancel race"}`))
+		if err == nil || !strings.Contains(err.Error(), "cancelled lifecycle task") {
+			t.Errorf("expected cancellation-request continuation rejection during cancel callback, out=%q err=%v", out, err)
+		}
+	})
+	if err := tc.handler.threadInputRepo.CancelPendingForTask(ctx, task.ID); err != nil {
+		t.Fatalf("cancel pending before task cancel: %v", err)
+	}
+	if err := tc.handler.taskSvc.CancelTask(ctx, task.ID); err != nil {
+		t.Fatalf("CancelTask: %v", err)
+	}
+	if !callbackRan {
+		t.Fatal("expected registered cancel callback to run")
+	}
 	pending, err := tc.handler.threadInputRepo.ListPendingForTask(ctx, task.ID)
 	if err != nil {
 		t.Fatalf("list pending: %v", err)
 	}
-	if len(pending) != 1 {
-		t.Fatalf("expected one queued continuation, got %+v", pending)
-	}
-	if pending[0].Content != "Continue because audit found a material issue" || pending[0].Source != models.TaskOriginSystemAgent || pending[0].OriginAgent != models.AgentSystemKindGoal {
-		t.Fatalf("queued continuation details = %+v", pending[0])
+	if len(pending) != 0 {
+		t.Fatalf("lifecycle continuation queued during cancel race: %+v", pending)
 	}
 }
 
@@ -424,6 +875,95 @@ func TestGoalAgentSendToTaskRejectsNonActiveGoalStates(t *testing.T) {
 	}
 }
 
+func TestTaskGoalRuntimeToolsRejectForeignRawTaskID(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	projectA := tc.CreateProject().WithName("Runtime Project A").Build()
+	projectB := tc.CreateProject().WithName("Runtime Project B").Build()
+	sharedTitle := "Shared Runtime Goal Task"
+	localTask := &models.Task{ProjectID: projectA.ID, Title: sharedTitle, Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "local prompt", Priority: 2}
+	if err := tc.taskRepo.Create(ctx, localTask); err != nil {
+		t.Fatalf("create local task: %v", err)
+	}
+	foreignTask := &models.Task{ProjectID: projectB.ID, Title: sharedTitle, Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "foreign prompt", Priority: 2}
+	if err := tc.taskRepo.Create(ctx, foreignTask); err != nil {
+		t.Fatalf("create foreign task: %v", err)
+	}
+	foreignGoal, err := tc.handler.taskGoalSvc.SetGoal(ctx, foreignTask.ID, "Foreign objective", service.GoalOptions{Actor: "test"})
+	if err != nil {
+		t.Fatalf("set foreign goal: %v", err)
+	}
+
+	params := streamingResponseParams{ProjectID: projectA.ID, AgentDefinition: &models.Agent{Tools: []string{"mark_task_goal_achieved", "report_task_goal_blocked"}}}
+	handlers := tc.handler.chatActionHandlers(params, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
+	expectForeignTaskRejected := func(name, payload string) {
+		t.Helper()
+		out, err := handlers[name](ctx, []byte(payload))
+		if err == nil || !strings.Contains(err.Error(), "belongs to a different project") {
+			t.Fatalf("expected %s to reject foreign task id, out=%q err=%v", name, out, err)
+		}
+	}
+
+	expectForeignTaskRejected("set_task_goal", `{"task_id":"`+foreignTask.ID+`","goal":"changed from Project A"}`)
+	goal, err := tc.handler.taskGoalSvc.GetGoal(ctx, foreignTask.ID)
+	if err != nil {
+		t.Fatalf("get foreign goal after rejected set: %v", err)
+	}
+	if goal == nil || goal.Objective != "Foreign objective" || goal.Status != models.TaskGoalStatusActive {
+		t.Fatalf("foreign goal mutated by rejected set: %#v", goal)
+	}
+
+	out, err := handlers["get_task_goal"](ctx, []byte(`{"task_id":"`+foreignTask.ID+`"}`))
+	if err == nil || !strings.Contains(err.Error(), "belongs to a different project") {
+		t.Fatalf("expected get_task_goal to reject foreign task id, out=%q err=%v", out, err)
+	}
+	if strings.Contains(out, "Foreign objective") {
+		t.Fatalf("get_task_goal leaked foreign goal output: %s", out)
+	}
+
+	expectForeignTaskRejected("pause_task_goal", `{"task_id":"`+foreignTask.ID+`"}`)
+	goal, err = tc.handler.taskGoalSvc.GetGoal(ctx, foreignTask.ID)
+	if err != nil {
+		t.Fatalf("get foreign goal after rejected pause: %v", err)
+	}
+	if goal == nil || goal.Status != models.TaskGoalStatusActive {
+		t.Fatalf("foreign goal status mutated by rejected pause: %#v", goal)
+	}
+
+	expectForeignTaskRejected("send_to_task", `{"task_id":"`+foreignTask.ID+`","message":"queued from Project A"}`)
+	pending, err := tc.handler.threadInputRepo.ListPendingForTask(ctx, foreignTask.ID)
+	if err != nil {
+		t.Fatalf("list foreign pending inputs: %v", err)
+	}
+	if len(pending) != 0 {
+		t.Fatalf("send_to_task queued foreign pending inputs: %+v", pending)
+	}
+
+	out, err = handlers["set_task_goal"](ctx, []byte(`{"title":"`+sharedTitle+`","goal":"Local objective"}`))
+	if err != nil {
+		t.Fatalf("set_task_goal by shared title should resolve current project task: out=%q err=%v", out, err)
+	}
+	localGoal, err := tc.handler.taskGoalSvc.GetGoal(ctx, localTask.ID)
+	if err != nil {
+		t.Fatalf("get local title goal: %v", err)
+	}
+	if localGoal == nil || localGoal.Objective != "Local objective" {
+		t.Fatalf("title resolution did not set local task goal: %#v", localGoal)
+	}
+	goal, err = tc.handler.taskGoalSvc.GetGoal(ctx, foreignTask.ID)
+	if err != nil {
+		t.Fatalf("get foreign goal after title set: %v", err)
+	}
+	if goal == nil || goal.GoalID != foreignGoal.GoalID || goal.Objective != "Foreign objective" || goal.Status != models.TaskGoalStatusActive {
+		t.Fatalf("title resolution touched foreign goal: %#v", goal)
+	}
+
+	out, err = handlers["set_task_goal"](ctx, []byte(`{"task_id":"current","goal":"should fail outside follow-up"}`))
+	if err == nil || !strings.Contains(err.Error(), "only valid in a persisted task thread") {
+		t.Fatalf("expected current alias outside follow-up to reject, out=%q err=%v", out, err)
+	}
+}
+
 func TestTaskGoalTools_CurrentAliasAndSendToTaskQueuesOnly(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().Build()
@@ -445,6 +985,21 @@ func TestTaskGoalTools_CurrentAliasAndSendToTaskQueuesOnly(t *testing.T) {
 	goal, err := tc.handler.taskGoalSvc.GetGoal(context.Background(), task.ID)
 	if err != nil || goal == nil {
 		t.Fatalf("get goal after set: %v %#v", err, goal)
+	}
+	getOut, err := handlers["get_task_goal"](context.Background(), []byte(`{"task_id":"current"}`))
+	if err != nil {
+		t.Fatalf("get current goal: %v", err)
+	}
+	if !strings.Contains(getOut, "Ship complete") || !strings.Contains(getOut, task.ID) {
+		t.Fatalf("get current goal output = %s", getOut)
+	}
+	apiHandlers := tc.handler.chatActionHandlers(params, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceAPI)
+	apiGetOut, err := apiHandlers["get_task_goal"](context.Background(), []byte(`{"task_id":"current"}`))
+	if err != nil {
+		t.Fatalf("api get current goal: %v", err)
+	}
+	if !strings.Contains(apiGetOut, "Ship complete") || !strings.Contains(apiGetOut, task.ID) {
+		t.Fatalf("api get current goal output = %s", apiGetOut)
 	}
 	if _, err := handlers["mark_task_goal_achieved"](context.Background(), []byte(`{"task_id":"current","goal_id":"`+goal.GoalID+`","reason":"done"}`)); err == nil || !strings.Contains(err.Error(), "explicit agent tool grant") {
 		t.Fatalf("ungranted assistant marked goal achieved, err=%v", err)

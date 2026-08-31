@@ -46,6 +46,9 @@ lifecycle_hooks:
     blocking: false
     output_contract: activity_summary
     run_policy: always
+    payload:
+      - conversation_transcript
+      - assigned_agent
     permissions:
       read_task_prompt: true
       read_task_execution: true

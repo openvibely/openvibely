@@ -3,18 +3,52 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/web/templates/pages"
 )
 
 // ---- CreateSchedule ----
+
+func TestParseScheduleForm_ValidatesIntervalBeforeDate(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(url.Values{
+		"run_at":          {"not-a-date"},
+		"repeat_interval": {"366"},
+	}.Encode()))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationForm)
+
+	_, err := parseScheduleForm(e.NewContext(req, httptest.NewRecorder()), models.RepeatDaily)
+	httpErr, ok := err.(*echo.HTTPError)
+	if !ok {
+		t.Fatalf("expected interval HTTP error before date error, got %T: %v", err, err)
+	}
+	if httpErr.Code != http.StatusBadRequest || httpErr.Message != "repeat interval must be between 1 and 365" {
+		t.Fatalf("unexpected interval error: %#v", httpErr)
+	}
+}
+
+func assertSchedulesTaskDetailFragment(t *testing.T, body string) {
+	t.Helper()
+	if !strings.Contains(body, `id="task-detail-content"`) {
+		t.Fatal("expected task-detail-content in HTMX response")
+	}
+	if !strings.Contains(body, `class="tab tab-active" data-tab="schedules"`) {
+		t.Fatal("expected schedules tab to be active in HTMX response")
+	}
+}
 
 func TestCreateSchedule_InvalidDate(t *testing.T) {
 	tc := NewTestContext(t)
@@ -29,6 +63,241 @@ func TestCreateSchedule_InvalidDate(t *testing.T) {
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for invalid date, got %d", rec.Code)
+	}
+}
+
+func TestCreateSchedule_RejectsOversizedIntervalWithoutPersistence(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().Build()
+	task := tc.CreateTask(project.ID).Build()
+
+	rec := tc.HTTP().Post("/tasks/" + task.ID + "/schedule").WithForm(url.Values{
+		"run_at":          {time.Now().Add(time.Hour).Format("2006-01-02T15:04")},
+		"repeat_type":     {"seconds"},
+		"repeat_interval": {"366"},
+	}).Execute()
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for oversized interval, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	schedules, err := tc.scheduleRepo.ListByTask(context.Background(), task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(schedules) != 0 {
+		t.Fatalf("expected oversized schedule not to be persisted, got %d schedules", len(schedules))
+	}
+}
+
+func TestScheduleMutationRoutesRejectForeignProjectContext(t *testing.T) {
+	validScheduleForm := func(runAt time.Time) url.Values {
+		return url.Values{
+			"run_at":          {runAt.Format("2006-01-02T15:04")},
+			"repeat_type":     {"daily"},
+			"repeat_interval": {"1"},
+		}
+	}
+
+	scheduleUnchanged := func(t *testing.T, got, want *models.Schedule) {
+		t.Helper()
+		if got == nil {
+			t.Fatal("expected schedule to remain present")
+		}
+		if got.TaskID != want.TaskID || !got.RunAt.Equal(want.RunAt) || got.RepeatType != want.RepeatType || got.RepeatInterval != want.RepeatInterval || got.Enabled != want.Enabled || got.ClearContextOnStart != want.ClearContextOnStart {
+			t.Fatalf("schedule changed unexpectedly: got=%+v want=%+v", got, want)
+		}
+		if (got.NextRun == nil) != (want.NextRun == nil) {
+			t.Fatalf("next_run changed unexpectedly: got=%v want=%v", got.NextRun, want.NextRun)
+		}
+		if got.NextRun != nil && !got.NextRun.Equal(*want.NextRun) {
+			t.Fatalf("next_run changed unexpectedly: got=%v want=%v", got.NextRun, want.NextRun)
+		}
+	}
+
+	t.Run("create without agent assignment field", func(t *testing.T) {
+		tc := NewTestContext(t)
+		projectA := tc.CreateProject().WithName("Project A").Build()
+		projectB := tc.CreateProject().WithName("Project B").Build()
+		task := tc.CreateTask(projectA.ID).Build()
+
+		rec := tc.HTTP().Post("/tasks/" + task.ID + "/schedule?project_id=" + projectB.ID).WithForm(validScheduleForm(time.Now().Add(time.Hour))).Execute()
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d body=%s", rec.Code, rec.Body.String())
+		}
+		schedules, err := tc.scheduleRepo.ListByTask(context.Background(), task.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(schedules) != 0 {
+			t.Fatalf("foreign create persisted %d schedules", len(schedules))
+		}
+	})
+
+	for _, method := range []string{http.MethodPut, http.MethodPost} {
+		t.Run("update "+method, func(t *testing.T) {
+			tc := NewTestContext(t)
+			projectA := tc.CreateProject().WithName("Project A").Build()
+			projectB := tc.CreateProject().WithName("Project B").Build()
+			task := tc.CreateTask(projectA.ID).Build()
+			originalRunAt := time.Now().Add(2 * time.Hour).UTC().Truncate(time.Second)
+			schedule := tc.CreateSchedule(task.ID).WithRunAt(originalRunAt).WithRepeatType(models.RepeatOnce).Build()
+			before, err := tc.scheduleRepo.GetByID(context.Background(), schedule.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			path := "/schedules/" + schedule.ID + "?project_id=" + projectB.ID
+			var rec *httptest.ResponseRecorder
+			if method == http.MethodPut {
+				rec = tc.HTTP().Put(path).WithForm(validScheduleForm(time.Now().Add(3 * time.Hour))).Execute()
+			} else {
+				rec = tc.HTTP().Post(path).WithForm(validScheduleForm(time.Now().Add(3 * time.Hour))).Execute()
+			}
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400, got %d body=%s", rec.Code, rec.Body.String())
+			}
+			after, err := tc.scheduleRepo.GetByID(context.Background(), schedule.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			scheduleUnchanged(t, after, before)
+		})
+	}
+
+	for _, endpoint := range []struct {
+		name               string
+		path               func(string, string) string
+		useSelectedProject bool
+	}{
+		{name: "browser toggle", path: func(scheduleID, projectID string) string {
+			return "/schedules/" + scheduleID + "/toggle?project_id=" + projectID
+		}},
+		{name: "api toggle query", path: func(scheduleID, projectID string) string {
+			return "/api/schedules/" + scheduleID + "/toggle?project_id=" + projectID
+		}},
+		{name: "api toggle selected project", useSelectedProject: true, path: func(scheduleID, projectID string) string {
+			return "/api/schedules/" + scheduleID + "/toggle"
+		}},
+	} {
+		t.Run(endpoint.name, func(t *testing.T) {
+			tc := NewTestContext(t)
+			projectA := tc.CreateProject().WithName("Project A").Build()
+			projectB := tc.CreateProject().WithName("Project B").Build()
+			task := tc.CreateTask(projectA.ID).Build()
+			schedule := tc.CreateSchedule(task.ID).WithRunAt(time.Now().Add(time.Hour)).Build()
+			if endpoint.useSelectedProject {
+				if err := tc.settingsRepo.Set(context.Background(), uiPreferenceSelectedProjectIDKey, projectB.ID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			before, err := tc.scheduleRepo.GetByID(context.Background(), schedule.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			rec := tc.HTTP().Post(endpoint.path(schedule.ID, projectB.ID)).Execute()
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400, got %d body=%s", rec.Code, rec.Body.String())
+			}
+			after, err := tc.scheduleRepo.GetByID(context.Background(), schedule.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			scheduleUnchanged(t, after, before)
+		})
+	}
+
+	t.Run("delete", func(t *testing.T) {
+		tc := NewTestContext(t)
+		projectA := tc.CreateProject().WithName("Project A").Build()
+		projectB := tc.CreateProject().WithName("Project B").Build()
+		task := tc.CreateTask(projectA.ID).Build()
+		schedule := tc.CreateSchedule(task.ID).WithRunAt(time.Now().Add(time.Hour)).Build()
+		before, err := tc.scheduleRepo.GetByID(context.Background(), schedule.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		rec := tc.HTTP().Delete("/schedules/" + schedule.ID + "?project_id=" + projectB.ID).Execute()
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d body=%s", rec.Code, rec.Body.String())
+		}
+		after, err := tc.scheduleRepo.GetByID(context.Background(), schedule.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		scheduleUnchanged(t, after, before)
+	})
+
+	t.Run("reschedule", func(t *testing.T) {
+		tc := NewTestContext(t)
+		projectA := tc.CreateProject().WithName("Project A").Build()
+		projectB := tc.CreateProject().WithName("Project B").Build()
+		task := tc.CreateTask(projectA.ID).Build()
+		originalRunAt := time.Now().Add(24 * time.Hour).UTC().Truncate(time.Second)
+		schedule := tc.CreateSchedule(task.ID).WithRunAt(originalRunAt).WithRepeatType(models.RepeatDaily).Build()
+		before, err := tc.scheduleRepo.GetByID(context.Background(), schedule.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		rec := tc.HTMX().Patch("/schedules/" + schedule.ID + "/reschedule?project_id=" + projectB.ID).WithForm(url.Values{
+			"new_date": {time.Now().AddDate(0, 0, 2).Format("2006-01-02")},
+			"hour":     {"10"},
+		}).Execute()
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d body=%s", rec.Code, rec.Body.String())
+		}
+		after, err := tc.scheduleRepo.GetByID(context.Background(), schedule.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		scheduleUnchanged(t, after, before)
+	})
+}
+
+func TestCreateAndUpdateSchedule_NativeRedirectParity(t *testing.T) {
+	for _, tcse := range []struct {
+		name            string
+		operation       string
+		explicitProject bool
+	}{
+		{name: "create explicit project", operation: "create", explicitProject: true},
+		{name: "update explicit project", operation: "update", explicitProject: true},
+		{name: "create inferred project", operation: "create"},
+		{name: "update inferred project", operation: "update"},
+	} {
+		t.Run(tcse.name, func(t *testing.T) {
+			tc := NewTestContext(t)
+			project := tc.CreateProject().Build()
+			task := tc.CreateTask(project.ID).Build()
+			runAt := time.Now().Add(time.Hour).Format("2006-01-02T15:04")
+			form := url.Values{
+				"run_at":          {runAt},
+				"repeat_type":     {"once"},
+				"repeat_interval": {"1"},
+			}
+			projectQuery := ""
+			if tcse.explicitProject {
+				projectQuery = "?project_id=" + project.ID
+			}
+
+			var rec *httptest.ResponseRecorder
+			if tcse.operation == "create" {
+				rec = tc.HTTP().Post("/tasks/" + task.ID + "/schedule" + projectQuery).WithForm(form).Execute()
+			} else {
+				schedule := tc.CreateSchedule(task.ID).Build()
+				rec = tc.HTTP().Put("/schedules/" + schedule.ID + projectQuery).WithForm(form).Execute()
+			}
+
+			if rec.Code != http.StatusSeeOther {
+				t.Fatalf("expected 303 redirect, got %d body=%s", rec.Code, rec.Body.String())
+			}
+			wantLocation := "/tasks/" + task.ID + "?tab=schedules&project_id=" + project.ID
+			if location := rec.Header().Get("Location"); location != wantLocation {
+				t.Fatalf("redirect location = %q, want %q", location, wantLocation)
+			}
+		})
 	}
 }
 
@@ -55,8 +324,57 @@ func TestCreateSchedule_Success_Redirect(t *testing.T) {
 	if len(schedules) != 1 {
 		t.Fatalf("expected 1 schedule, got %d", len(schedules))
 	}
+	if !schedules[0].Enabled {
+		t.Fatal("new schedules must default Enabled to true")
+	}
+	if schedules[0].RepeatInterval != 1 {
+		t.Fatalf("new schedules must default repeat interval to 1, got %d", schedules[0].RepeatInterval)
+	}
 	if !schedules[0].ClearContextOnStart {
 		t.Fatal("new schedules must default ClearContextOnStart to true")
+	}
+	if schedules[0].NextRun == nil || !schedules[0].NextRun.Equal(schedules[0].RunAt) {
+		t.Fatalf("new schedules must start NextRun at RunAt, run_at=%v next_run=%v", schedules[0].RunAt, schedules[0].NextRun)
+	}
+}
+
+func TestCreateSchedule_OneTimeResetsCompletedScheduledTask(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().Build()
+	task := tc.CreateTask(project.ID).
+		WithCategory(models.CategoryScheduled).
+		WithStatus(models.StatusCompleted).
+		Build()
+
+	runAt := time.Now().Add(time.Hour).Format("2006-01-02T15:04")
+	rec := tc.HTTP().Post("/tasks/" + task.ID + "/schedule").WithForm(url.Values{
+		"run_at":          {runAt},
+		"repeat_type":     {"once"},
+		"repeat_interval": {"1"},
+	}).Execute()
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303 redirect, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	schedules, err := tc.scheduleRepo.ListByTask(context.Background(), task.ID)
+	if err != nil {
+		t.Fatalf("list schedules: %v", err)
+	}
+	if len(schedules) != 1 {
+		t.Fatalf("expected one persisted schedule, got %d", len(schedules))
+	}
+	if schedules[0].RepeatType != models.RepeatOnce || schedules[0].NextRun == nil {
+		t.Fatalf("expected runnable one-time schedule, got repeat=%s next_run=%v", schedules[0].RepeatType, schedules[0].NextRun)
+	}
+	stored, err := tc.taskRepo.GetByID(context.Background(), task.ID)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if stored.Category != models.CategoryScheduled {
+		t.Fatalf("category = %s, want %s", stored.Category, models.CategoryScheduled)
+	}
+	if stored.Status != models.StatusPending {
+		t.Fatalf("status = %s, want %s", stored.Status, models.StatusPending)
 	}
 }
 
@@ -74,6 +392,63 @@ func TestCreateSchedule_HTMX_Success(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200 for HTMX create, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	assertSchedulesTaskDetailFragment(t, rec.Body.String())
+}
+
+func TestCreateSchedule_HTMX_UsesMainTaskDetailExecutionOrdering(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().Build()
+	agent := tc.CreateLLMConfig().Build()
+	task := tc.CreateTask(project.ID).
+		WithStatus(models.StatusCompleted).
+		WithCategory(models.CategoryCompleted).
+		Build()
+
+	older := tc.CreateExecution(task.ID, agent.ID).WithStatus(models.ExecCompleted).Build()
+	if err := tc.execRepo.Complete(ctx, older.ID, models.ExecCompleted, "older output", "", 10, 1000); err != nil {
+		t.Fatalf("complete older execution: %v", err)
+	}
+	newer := tc.CreateExecution(task.ID, agent.ID).WithStatus(models.ExecCompleted).Build()
+	if err := tc.execRepo.Complete(ctx, newer.ID, models.ExecCompleted, "newer output", "", 10, 5000); err != nil {
+		t.Fatalf("complete newer execution: %v", err)
+	}
+	baseStartedAt := time.Now().UTC().Add(-2 * time.Hour)
+	if _, err := tc.db.ExecContext(ctx, `UPDATE executions SET started_at = ? WHERE id = ?`, baseStartedAt, older.ID); err != nil {
+		t.Fatalf("set older execution start: %v", err)
+	}
+	if _, err := tc.db.ExecContext(ctx, `UPDATE executions SET started_at = ? WHERE id = ?`, baseStartedAt.Add(time.Hour), newer.ID); err != nil {
+		t.Fatalf("set newer execution start: %v", err)
+	}
+
+	mainRec := tc.HTMX().Get("/tasks/" + task.ID).Execute()
+	if mainRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for HTMX task detail, got %d body=%s", mainRec.Code, mainRec.Body.String())
+	}
+	if !strings.Contains(mainRec.Body.String(), ">5s</span>") {
+		t.Fatalf("expected main task detail to show latest execution duration; body=%s", mainRec.Body.String())
+	}
+	if strings.Contains(mainRec.Body.String(), ">1s</span>") {
+		t.Fatalf("main task detail showed older execution duration; body=%s", mainRec.Body.String())
+	}
+
+	runAt := time.Now().Add(time.Hour).Format("2006-01-02T15:04")
+	scheduleRec := tc.HTMX().Post("/tasks/" + task.ID + "/schedule").WithForm(url.Values{
+		"run_at":          {runAt},
+		"repeat_type":     {"daily"},
+		"repeat_interval": {"1"},
+	}).Execute()
+	if scheduleRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for HTMX create, got %d body=%s", scheduleRec.Code, scheduleRec.Body.String())
+	}
+	body := scheduleRec.Body.String()
+	assertSchedulesTaskDetailFragment(t, body)
+	if !strings.Contains(body, ">5s</span>") {
+		t.Fatalf("expected schedule HTMX refresh to show latest execution duration like main task detail; body=%s", body)
+	}
+	if strings.Contains(body, ">1s</span>") {
+		t.Fatalf("schedule HTMX refresh used non-chronological execution ordering; body=%s", body)
 	}
 }
 
@@ -105,6 +480,266 @@ func TestCreateSchedule_DefaultRepeatType(t *testing.T) {
 	}
 }
 
+func TestViewSchedule_UsesCompactAgentScheduleProjection(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	h, e, _ := setupTestHandlerForDB(t, db)
+	project := createProject(t, h, "Schedule Agent Projection")
+	agentRepo := repository.NewAgentRepo(db)
+	h.SetAgentRepo(agentRepo)
+	agent := &models.Agent{
+		Name:                "Rich Schedule Runner",
+		SystemPrompt:        strings.Repeat("schedule agent prompt ", 512),
+		Model:               "sonnet",
+		Tools:               []string{"Read", "Write"},
+		ToolConfig:          models.AgentToolConfig{ScopedFiles: []models.ScopedFilesConfig{{Directory: "src", Permissions: []string{"read"}}}},
+		Plugins:             []string{"github@marketplace"},
+		MCPServers:          []models.MCPServerConfig{{Name: "playwright", Command: []string{"npx", "server"}}},
+		Skills:              []models.SkillConfig{{Name: "schedule", Content: strings.Repeat("skill content ", 256)}},
+		PermissionDefaults:  models.AgentPermissionDefaults{ReadAgents: true, ReadSkills: true},
+		ModelDefaults:       models.AgentModelDefaults{Model: "gpt-5", MaxTokens: 8192},
+		SourceRefs:          []string{"agents/schedule/SKILLS.md"},
+		Scope:               models.AgentScopeGlobal,
+		Enabled:             true,
+		SelectableAsPrimary: true,
+	}
+	if err := agentRepo.Create(context.Background(), agent); err != nil {
+		t.Fatalf("create rich schedule agent: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name string
+		htmx bool
+		path string
+	}{
+		{name: "full page", path: "/schedule?project_id=" + project.ID},
+		{name: "HTMX week navigation", htmx: true, path: "/schedule?project_id=" + project.ID + "&week=1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			counter.Reset()
+			counter.SetEnabled(true)
+			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			if tc.htmx {
+				req.Header.Set("HX-Request", "true")
+			}
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+			counter.SetEnabled(false)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+			}
+			body := rec.Body.String()
+			for _, expected := range []string{agent.Name, "(" + agent.Model + ")", `>No Agent</option>`} {
+				if !strings.Contains(body, expected) {
+					t.Fatalf("schedule response missing %q", expected)
+				}
+			}
+
+			var agentQueries []string
+			for _, statement := range counter.Statements() {
+				normalized := strings.Join(strings.Fields(statement), " ")
+				if strings.Contains(strings.ToLower(normalized), "from agents") {
+					agentQueries = append(agentQueries, normalized)
+				}
+			}
+			if len(agentQueries) != 1 {
+				t.Fatalf("expected exactly one Schedule agent query, got %d in %q", len(agentQueries), counter.Statements())
+			}
+			query := strings.ToLower(agentQueries[0])
+			projection := strings.Split(query, " from agents ")[0]
+			if projection != "select id, name, model" {
+				t.Fatalf("Schedule agent query projection = %q, want only selector fields: %s", projection, agentQueries[0])
+			}
+			for _, forbidden := range []string{"description", "system_prompt", "tools", "tool_config", "plugins", "mcp_servers", "skills", "permission_defaults_json", "model_defaults_json", "source_refs_json", "created_by", "absorbed_into", "created_at", "updated_at"} {
+				if strings.Contains(projection, forbidden) {
+					t.Fatalf("Schedule agent query selected forbidden column %q: %s", forbidden, agentQueries[0])
+				}
+			}
+			for _, requiredPredicate := range []string{"coalesce(generated_status, 'user_edited') <> 'archived'", "archived_at is null", "coalesce(enabled, 1) = 1", "coalesce(selectable_as_primary, 1) = 1", "coalesce(scope, 'global') <> 'project'", "order by name asc"} {
+				if !strings.Contains(query, requiredPredicate) {
+					t.Fatalf("Schedule agent query is missing predicate/order %q: %s", requiredPredicate, agentQueries[0])
+				}
+			}
+		})
+	}
+
+	full, err := agentRepo.GetByID(context.Background(), agent.ID)
+	if err != nil {
+		t.Fatalf("get full schedule agent: %v", err)
+	}
+	if full == nil || full.SystemPrompt == "" || len(full.Tools) == 0 || len(full.ToolConfig.ScopedFiles) == 0 || len(full.Plugins) == 0 || len(full.MCPServers) == 0 || len(full.Skills) == 0 || len(full.SourceRefs) == 0 || !full.PermissionDefaults.ReadAgents || full.ModelDefaults.Model != "gpt-5" {
+		t.Fatalf("full detail path lost hydrated fields: %#v", full)
+	}
+}
+
+func TestCreateScheduledTaskFromScheduleUsesCompactAgentProjection(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	h, e, _ := setupTestHandlerForDB(t, db)
+	project := createProject(t, h, "Schedule Create Projection")
+	agentRepo := repository.NewAgentRepo(db)
+	h.SetAgentRepo(agentRepo)
+	agent := createScheduleTestAgent(t, agentRepo, "Schedule Create Runner", models.AgentScopeGlobal, "", true)
+	agent.Model = "opus"
+	if err := agentRepo.Update(context.Background(), agent); err != nil {
+		t.Fatalf("update schedule create agent: %v", err)
+	}
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	req := httptest.NewRequest(http.MethodPost, "/tasks?project_id="+project.ID+"&from=schedule&week=2", strings.NewReader(url.Values{
+		"title":           {"Schedule Create Projection Task"},
+		"prompt":          {"Run the scheduled task"},
+		"category":        {"scheduled"},
+		"priority":        {"2"},
+		"run_at":          {time.Now().Add(time.Hour).Format("2006-01-02T15:04")},
+		"repeat_type":     {"daily"},
+		"repeat_interval": {"1"},
+	}.Encode()))
+	req.Header.Set("HX-Request", "true")
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationForm)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	counter.SetEnabled(false)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), agent.Name) || !strings.Contains(rec.Body.String(), "("+agent.Model+")") {
+		t.Fatalf("schedule create refresh omitted the selected Agent option: %s", rec.Body.String())
+	}
+
+	var agentQueries []string
+	for _, statement := range counter.Statements() {
+		normalized := strings.Join(strings.Fields(statement), " ")
+		if strings.Contains(strings.ToLower(normalized), "from agents") {
+			agentQueries = append(agentQueries, normalized)
+		}
+	}
+	if len(agentQueries) != 1 {
+		t.Fatalf("expected exactly one compact Agent query during schedule create refresh, got %d in %q", len(agentQueries), counter.Statements())
+	}
+	query := strings.ToLower(agentQueries[0])
+	projection := strings.Split(query, " from agents ")[0]
+	if projection != "select id, name, model" {
+		t.Fatalf("schedule create query projection = %q, want only selector fields: %s", projection, agentQueries[0])
+	}
+	for _, forbidden := range []string{"description", "system_prompt", "tools", "tool_config", "plugins", "mcp_servers", "skills", "permission_defaults_json", "model_defaults_json", "source_refs_json", "created_at", "updated_at"} {
+		if strings.Contains(projection, forbidden) {
+			t.Fatalf("schedule create query selected forbidden column %q: %s", forbidden, agentQueries[0])
+		}
+	}
+}
+
+func BenchmarkScheduleAgentOptionProjectionAndContent(b *testing.B) {
+	db := testutil.NewTestDB(b)
+	agentRepo := repository.NewAgentRepo(db)
+	projectRepo := repository.NewProjectRepo(db)
+	project := &models.Project{Name: "Schedule Benchmark Project"}
+	if err := projectRepo.Create(context.Background(), project); err != nil {
+		b.Fatalf("create benchmark project: %v", err)
+	}
+	if _, err := db.ExecContext(context.Background(), `DELETE FROM agents WHERE id IS NOT NULL`); err != nil {
+		b.Fatalf("clear benchmark agents: %v", err)
+	}
+	for i := 0; i < 1000; i++ {
+		agent := &models.Agent{
+			Name:                fmt.Sprintf("Schedule Agent %04d", i),
+			SystemPrompt:        strings.Repeat("large schedule benchmark prompt with instructions and examples. ", 320),
+			Model:               "inherit",
+			Tools:               []string{"Read", "Write", "Edit", "Bash", models.AgentToolScopedFiles},
+			ToolConfig:          models.AgentToolConfig{ScopedFiles: []models.ScopedFilesConfig{{Directory: "src", Permissions: []string{"read", "write"}}}},
+			Plugins:             []string{"github@marketplace", "playwright@claude-plugins-official"},
+			MCPServers:          []models.MCPServerConfig{{Name: "playwright", Command: []string{"npx", "-y", "@playwright/mcp"}}},
+			Skills:              []models.SkillConfig{{Name: "schedule", Description: "schedule benchmark skill", Content: strings.Repeat("schedule skill instructions ", 256)}},
+			PermissionDefaults:  models.AgentPermissionDefaults{ReadAgents: true, ReadSkills: true, ReadRepositoryFiles: true, UseShellOrTools: true},
+			ModelDefaults:       models.AgentModelDefaults{Model: "gpt-5", Temperature: 0.3, MaxTokens: 8192},
+			SourceRefs:          []string{fmt.Sprintf("agents/schedule-%04d/SKILLS.md", i)},
+			Enabled:             true,
+			SelectableAsPrimary: true,
+		}
+		if err := agentRepo.Create(context.Background(), agent); err != nil {
+			b.Fatalf("create benchmark agent %d: %v", i, err)
+		}
+	}
+
+	ctx := context.Background()
+	renderScheduleContent := func(options []repository.AgentScheduleOption) error {
+		return pages.ScheduleContent(project, nil, 0, nil, options).Render(ctx, io.Discard)
+	}
+
+	b.Run("full_agent_loading", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			options, err := fullScheduleAgentOptionsForBenchmark(ctx, agentRepo, project.ID)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if len(options) != 1000 {
+				b.Fatalf("full schedule options len = %d, want 1000", len(options))
+			}
+		}
+	})
+
+	b.Run("compact_agent_loading", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			options, err := agentRepo.ListScheduleOptions(ctx, project.ID)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if len(options) != 1000 {
+				b.Fatalf("compact schedule options len = %d, want 1000", len(options))
+			}
+		}
+	})
+
+	b.Run("full_schedule_content", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			options, err := fullScheduleAgentOptionsForBenchmark(ctx, agentRepo, project.ID)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if err := renderScheduleContent(options); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+
+	b.Run("compact_schedule_content", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			options, err := agentRepo.ListScheduleOptions(ctx, project.ID)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if err := renderScheduleContent(options); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+}
+
+func fullScheduleAgentOptionsForBenchmark(ctx context.Context, repo *repository.AgentRepo, projectID string) ([]repository.AgentScheduleOption, error) {
+	agents, err := repo.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	eligible := selectableTaskAgentDefinitionsForProject(agents, projectID)
+	options := make([]repository.AgentScheduleOption, 0, len(eligible))
+	for _, agent := range eligible {
+		options = append(options, repository.AgentScheduleOption{
+			ID:    agent.ID,
+			Name:  agent.Name,
+			Model: agent.Model,
+		})
+	}
+	return options, nil
+}
 func createScheduleTestAgent(t *testing.T, repo *repository.AgentRepo, name string, scope models.AgentScope, projectID string, selectable bool) *models.Agent {
 	t.Helper()
 	agent := &models.Agent{
@@ -295,7 +930,7 @@ func TestViewSchedule_PrimaryAgentOptionsAreEligibleAndProjectScoped(t *testing.
 func TestCreateScheduledTask_NativeFormRedirectsToProjectSchedule(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().Build()
-	runAt := time.Now().Add(time.Hour).Format("2006-01-02T15:04")
+	runAt := time.Now().Add(-2 * time.Minute).Format("2006-01-02T15:04")
 
 	rec := tc.HTTP().Post("/tasks?project_id=" + project.ID + "&from=schedule").WithForm(url.Values{
 		"title":           {"Native Scheduled Task"},
@@ -320,6 +955,21 @@ func TestCreateScheduledTask_NativeFormRedirectsToProjectSchedule(t *testing.T) 
 	schedules, err := tc.scheduleRepo.ListByTask(context.Background(), tasks[0].ID)
 	if err != nil || len(schedules) != 1 {
 		t.Fatalf("list schedules: count=%d err=%v", len(schedules), err)
+	}
+	if schedules[0].RepeatType != models.RepeatDaily {
+		t.Fatalf("scheduled task repeat type = %q, want daily", schedules[0].RepeatType)
+	}
+	if schedules[0].RepeatInterval != 1 {
+		t.Fatalf("scheduled task repeat interval = %d, want 1", schedules[0].RepeatInterval)
+	}
+	if !schedules[0].Enabled {
+		t.Fatal("scheduled task schedule must default Enabled to true")
+	}
+	if !schedules[0].ClearContextOnStart {
+		t.Fatal("scheduled task schedule must default ClearContextOnStart to true")
+	}
+	if schedules[0].NextRun == nil || !schedules[0].NextRun.Equal(schedules[0].RunAt) {
+		t.Fatalf("scheduled task schedule must start NextRun at RunAt, run_at=%v next_run=%v", schedules[0].RunAt, schedules[0].NextRun)
 	}
 }
 
@@ -403,6 +1053,65 @@ func TestUpdateSchedule_InvalidDate(t *testing.T) {
 	}
 }
 
+func TestUpdateSchedule_RejectsOversizedIntervalWithoutPersistence(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().Build()
+	task := tc.CreateTask(project.ID).Build()
+	schedule := tc.CreateSchedule(task.ID).WithRepeatType(models.RepeatDaily).WithRepeatInterval(2).Build()
+	originalRunAt := schedule.RunAt
+
+	rec := tc.HTTP().Put("/schedules/" + schedule.ID).WithForm(url.Values{
+		"run_at":          {time.Now().Add(2 * time.Hour).Format("2006-01-02T15:04")},
+		"repeat_type":     {"hours"},
+		"repeat_interval": {"366"},
+	}).Execute()
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for oversized interval, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	persisted, err := tc.scheduleRepo.GetByID(context.Background(), schedule.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.RepeatInterval != 2 || persisted.RepeatType != models.RepeatDaily || !persisted.RunAt.Equal(originalRunAt) {
+		t.Fatalf("oversized update changed persisted schedule: %+v", persisted)
+	}
+}
+
+func TestUpdateSchedule_ClearsCancellationRequestWhenResettingScheduledTaskPending(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().Build()
+	task := tc.CreateTask(project.ID).
+		WithCategory(models.CategoryScheduled).
+		WithStatus(models.StatusCancelled).
+		Build()
+	schedule := tc.CreateSchedule(task.ID).Build()
+	tc.handler.workerSvc.MarkCancellationRequested(task.ID)
+	if !tc.handler.workerSvc.IsCancellationRequested(task.ID) {
+		t.Fatal("expected test setup cancellation marker")
+	}
+
+	rec := tc.HTTP().Put("/schedules/" + schedule.ID).WithForm(url.Values{
+		"run_at":          {time.Now().Add(time.Hour).Format("2006-01-02T15:04")},
+		"repeat_type":     {"daily"},
+		"repeat_interval": {"1"},
+	}).Execute()
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected redirect, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if tc.handler.workerSvc.IsCancellationRequested(task.ID) {
+		t.Fatal("schedule edit pending reset should clear stale cancellation marker")
+	}
+	updated, err := tc.taskRepo.GetByID(context.Background(), task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Status != models.StatusPending {
+		t.Fatalf("status=%s, want pending", updated.Status)
+	}
+}
+
 func TestUpdateSchedule_Success_Redirect(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().Build()
@@ -437,6 +1146,7 @@ func TestUpdateSchedule_HTMX_Success(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200 for HTMX update, got %d body=%s", rec.Code, rec.Body.String())
 	}
+	assertSchedulesTaskDetailFragment(t, rec.Body.String())
 }
 
 func TestUpdateSchedule_WithoutAgentFieldPreservesExistingAssignment(t *testing.T) {
@@ -554,6 +1264,36 @@ func TestDeleteSchedule_Redirect(t *testing.T) {
 	}
 }
 
+func TestDeleteSchedule_BrowserDeletePreservesScheduledTaskCategory(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().Build()
+	task := tc.CreateTask(project.ID).
+		WithCategory(models.CategoryScheduled).
+		WithStatus(models.StatusPending).
+		Build()
+	schedule := tc.CreateSchedule(task.ID).Build()
+
+	rec := tc.HTTP().Delete("/schedules/" + schedule.ID).Execute()
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303 for non-HTMX delete, got %d", rec.Code)
+	}
+	stored, err := tc.taskRepo.GetByID(context.Background(), task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Category != models.CategoryScheduled {
+		t.Fatalf("browser delete changed category to %s, want %s", stored.Category, models.CategoryScheduled)
+	}
+	schedules, err := tc.scheduleRepo.ListByTask(context.Background(), task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(schedules) != 0 {
+		t.Fatalf("expected browser delete to remove schedule row, got %d", len(schedules))
+	}
+}
+
 // ---- RescheduleTask ----
 
 func TestRescheduleTask_InvalidDate(t *testing.T) {
@@ -648,14 +1388,51 @@ func TestGetExecution_NotFound(t *testing.T) {
 func TestGetExecution_Success(t *testing.T) {
 	tc := NewTestContext(t)
 	agent := tc.CreateLLMConfig().Build()
-	project := tc.CreateProject().Build()
-	task := tc.CreateTask(project.ID).Build()
-	exec := tc.CreateExecution(task.ID, agent.ID).WithStatus(models.ExecCompleted).WithOutput("done").Build()
+	project := tc.CreateProject().WithName("Execution Detail Project").Build()
+	task := tc.CreateTask(project.ID).WithPrompt("same-project task prompt").Build()
+	exec := tc.CreateExecution(task.ID, agent.ID).
+		WithStatus(models.ExecRunning).
+		WithPromptSent("same-project prompt sent").
+		Build()
+	if err := tc.execRepo.Complete(context.Background(), exec.ID, models.ExecCompleted, "same-project output", "", 0, 0); err != nil {
+		t.Fatalf("complete execution: %v", err)
+	}
 
-	rec := tc.HTTP().Get("/executions/" + exec.ID).Execute()
+	rec := tc.HTTP().Get("/executions/" + exec.ID + "?project_id=" + url.QueryEscape(project.ID)).Execute()
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
+	tc.Assert(rec).
+		Contains("same-project prompt sent").
+		Contains("same-project output")
+}
+
+func TestGetExecution_RejectsForeignProjectExecution(t *testing.T) {
+	tc := NewTestContext(t)
+	agent := tc.CreateLLMConfig().Build()
+	projectA := tc.CreateProject().WithName("Execution Detail Project A").Build()
+	projectB := tc.CreateProject().WithName("Execution Detail Project B").Build()
+	foreignTask := tc.CreateTask(projectA.ID).
+		WithTitle("foreign execution task").
+		WithPrompt("foreign task prompt sentinel").
+		Build()
+	exec := tc.CreateExecution(foreignTask.ID, agent.ID).
+		WithStatus(models.ExecRunning).
+		WithPromptSent("foreign prompt sentinel").
+		Build()
+	if err := tc.execRepo.Complete(context.Background(), exec.ID, models.ExecFailed, "foreign output sentinel", "foreign error sentinel", 0, 0); err != nil {
+		t.Fatalf("complete foreign execution: %v", err)
+	}
+
+	rec := tc.HTTP().Get("/executions/" + exec.ID + "?project_id=" + url.QueryEscape(projectB.ID)).Execute()
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	tc.Assert(rec).
+		NotContains("foreign task prompt sentinel").
+		NotContains("foreign prompt sentinel").
+		NotContains("foreign output sentinel").
+		NotContains("foreign error sentinel")
 }
 
 // ---- WorkerSettings ----
@@ -897,6 +1674,94 @@ func TestToggleScheduleEnabled_HTMX_Returns200(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200 HTMX response, got %d", rec.Code)
 	}
+	assertSchedulesTaskDetailFragment(t, rec.Body.String())
+	if !strings.Contains(rec.Body.String(), `Disabled`) || !strings.Contains(rec.Body.String(), `Resume`) {
+		t.Fatalf("expected refreshed paused schedule fragment, body=%s", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "/schedules/"+s.ID+"/toggle?project_id="+project.ID) {
+		t.Fatalf("expected project-scoped toggle URL in refreshed fragment, body=%s", rec.Body.String())
+	}
+	var trigger struct {
+		Toast struct {
+			Message string `json:"message"`
+			Status  string `json:"status"`
+		} `json:"openvibelyToast"`
+	}
+	if err := json.Unmarshal([]byte(rec.Header().Get("HX-Trigger")), &trigger); err != nil {
+		t.Fatalf("expected JSON toast trigger, got %q: %v", rec.Header().Get("HX-Trigger"), err)
+	}
+	if trigger.Toast.Message != "Schedule paused" || trigger.Toast.Status != "success" {
+		t.Fatalf("unexpected pause toast: %#v", trigger.Toast)
+	}
+
+	rec = tc.HTMX().Post("/schedules/" + s.ID + "/toggle?project_id=" + project.ID).Execute()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 HTMX resume response, got %d", rec.Code)
+	}
+	if strings.Contains(rec.Body.String(), `Disabled`) || !strings.Contains(rec.Body.String(), `Pause`) {
+		t.Fatalf("expected refreshed enabled schedule fragment, body=%s", rec.Body.String())
+	}
+	trigger = struct {
+		Toast struct {
+			Message string `json:"message"`
+			Status  string `json:"status"`
+		} `json:"openvibelyToast"`
+	}{}
+	if err := json.Unmarshal([]byte(rec.Header().Get("HX-Trigger")), &trigger); err != nil {
+		t.Fatalf("expected JSON resume toast trigger, got %q: %v", rec.Header().Get("HX-Trigger"), err)
+	}
+	if trigger.Toast.Message != "Schedule resumed" || trigger.Toast.Status != "success" {
+		t.Fatalf("unexpected resume toast: %#v", trigger.Toast)
+	}
+}
+
+func TestToggleScheduleEnabled_FiredOneTimeReturnsBadRequestWithoutMutation(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().Build()
+	task := tc.CreateTask(project.ID).Build()
+	s := tc.CreateSchedule(task.ID).WithRunAt(time.Now().Add(-time.Hour)).Build()
+	if err := tc.scheduleRepo.MarkRan(context.Background(), s.ID, time.Now(), nil); err != nil {
+		t.Fatalf("mark one-time schedule ran: %v", err)
+	}
+	if err := tc.scheduleRepo.ToggleEnabled(context.Background(), s.ID, false); err != nil {
+		t.Fatalf("pause one-time schedule: %v", err)
+	}
+
+	rec := tc.HTMX().Post("/schedules/" + s.ID + "/toggle?project_id=" + project.ID).Execute()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 HTMX response with visible validation feedback, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	assertSchedulesTaskDetailFragment(t, rec.Body.String())
+	if !strings.Contains(rec.Body.String(), "Resume") {
+		t.Fatalf("expected fired schedule to remain resumable after rejected toggle, body=%s", rec.Body.String())
+	}
+	var trigger struct {
+		Toast struct {
+			Message string `json:"message"`
+			Status  string `json:"status"`
+		} `json:"openvibelyToast"`
+	}
+	if err := json.Unmarshal([]byte(rec.Header().Get("HX-Trigger")), &trigger); err != nil {
+		t.Fatalf("expected JSON failure toast trigger, got %q: %v", rec.Header().Get("HX-Trigger"), err)
+	}
+	if trigger.Toast.Message != "one-time schedule has already run; supply a new time before resuming" || trigger.Toast.Status != "failed" {
+		t.Fatalf("unexpected fired-schedule toast: %#v", trigger.Toast)
+	}
+	stored, err := tc.scheduleRepo.GetByID(context.Background(), s.ID)
+	if err != nil {
+		t.Fatalf("get schedule after rejected HTMX resume: %v", err)
+	}
+	if stored.Enabled || stored.NextRun != nil {
+		t.Fatalf("rejected HTMX resume changed fired schedule: %#v", stored)
+	}
+
+	rec = tc.HTTP().Post("/schedules/" + s.ID + "/toggle?project_id=" + project.ID).Execute()
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for native resume of fired one-time schedule, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "supply a new time") {
+		t.Fatalf("expected actionable native time error, body=%s", rec.Body.String())
+	}
 }
 
 func TestToggleScheduleEnabled_NonHTMX_RedirectContainsTaskID(t *testing.T) {
@@ -910,7 +1775,7 @@ func TestToggleScheduleEnabled_NonHTMX_RedirectContainsTaskID(t *testing.T) {
 		t.Fatalf("expected 303, got %d", rec.Code)
 	}
 	loc := rec.Header().Get("Location")
-	expected := "/tasks/" + task.ID
+	expected := "/tasks/" + task.ID + "?tab=schedules&project_id=" + project.ID
 	if loc != expected {
 		t.Errorf("expected redirect to %q, got %q", expected, loc)
 	}
@@ -971,6 +1836,65 @@ func TestToggleScheduleEnabled_DisabledExcludedFromListDue(t *testing.T) {
 		if d.ID == s.ID {
 			t.Error("expected disabled schedule to be excluded from ListDue")
 		}
+	}
+}
+
+func TestScheduleToggleEndpoints_StaleNextRunParity(t *testing.T) {
+	endpoints := []struct {
+		name       string
+		path       func(string) string
+		statusCode int
+	}{
+		{
+			name:       "browser",
+			path:       func(id string) string { return "/schedules/" + id + "/toggle" },
+			statusCode: http.StatusSeeOther,
+		},
+		{
+			name:       "API",
+			path:       func(id string) string { return "/api/schedules/" + id + "/toggle" },
+			statusCode: http.StatusOK,
+		},
+	}
+
+	for _, endpoint := range endpoints {
+		t.Run(endpoint.name, func(t *testing.T) {
+			tc := NewTestContext(t)
+			project := tc.CreateProject().Build()
+			task := tc.CreateTask(project.ID).Build()
+			stale := time.Now().Add(-25 * time.Hour)
+			schedule := tc.CreateSchedule(task.ID).WithRunAt(stale).WithRepeatType("daily").Build()
+
+			rec := tc.HTTP().Post(endpoint.path(schedule.ID)).Execute()
+			if rec.Code != endpoint.statusCode {
+				t.Fatalf("disable: expected %d, got %d (body: %s)", endpoint.statusCode, rec.Code, rec.Body.String())
+			}
+			disabled, err := tc.scheduleRepo.GetByID(context.Background(), schedule.ID)
+			if err != nil {
+				t.Fatalf("disable: get schedule: %v", err)
+			}
+			if disabled.Enabled {
+				t.Fatal("disable: expected schedule to be disabled")
+			}
+			if disabled.NextRun == nil || !disabled.NextRun.Equal(stale) {
+				t.Fatalf("disable: expected stale NextRun %v to be preserved, got %v", stale, disabled.NextRun)
+			}
+
+			rec = tc.HTTP().Post(endpoint.path(schedule.ID)).Execute()
+			if rec.Code != endpoint.statusCode {
+				t.Fatalf("re-enable: expected %d, got %d (body: %s)", endpoint.statusCode, rec.Code, rec.Body.String())
+			}
+			reEnabled, err := tc.scheduleRepo.GetByID(context.Background(), schedule.ID)
+			if err != nil {
+				t.Fatalf("re-enable: get schedule: %v", err)
+			}
+			if !reEnabled.Enabled {
+				t.Fatal("re-enable: expected schedule to be enabled")
+			}
+			if reEnabled.NextRun == nil || !reEnabled.NextRun.After(time.Now()) {
+				t.Fatalf("re-enable: expected NextRun to be recomputed into the future, got %v", reEnabled.NextRun)
+			}
+		})
 	}
 }
 

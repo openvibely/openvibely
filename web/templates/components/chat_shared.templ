@@ -106,6 +106,7 @@ type ChatInputFormConfig struct {
 	IsRunning              bool
 	ActiveTurnID           string
 	StopEndpoint           string // non-empty turns the send button into a stop button while IsRunning
+	SteerEndpoint          string // guarded explicit steering endpoint used by the platform modifier-click shortcut
 	ProjectID              string // non-empty enables model selection persistence via localStorage
 	SelectedAgentID        string // initial model selection; defaults to auto when empty
 	PendingInputs          []models.ThreadInput
@@ -205,45 +206,6 @@ templ ChatBubble(role, content string) {
 				<div class="whitespace-pre-wrap leading-relaxed text-sm" style="word-wrap: break-word;">{ CleanDisplayContent(content) }</div>
 			} else {
 				<div class="chat-stream-content" data-raw-revision={ chatContentRevision(content) } data-raw-content={ NormalizeDisplayMarkers(content) }></div>
-				<script>
-					(function() {
-						var el = document.currentScript.previousElementSibling;
-						var renderStarted = false;
-						function render() {
-							if (renderStarted) return;
-							renderStarted = true;
-							var raw = el.getAttribute('data-raw-content');
-							if (window.scheduleChatElementRender && raw) {
-								window.scheduleChatElementRender(el, raw);
-							} else if (window.renderStreamingContent && raw) {
-								window.renderStreamingContent(el, raw);
-							} else if (window.renderChatMarkdown && raw) {
-								el.classList.add('chat-markdown');
-								el.innerHTML = window.renderChatMarkdown(raw);
-								if (window.addCodeCopyButtons) window.addCodeCopyButtons(el);
-							} else {
-								el.textContent = raw;
-								el.classList.add('whitespace-pre-wrap');
-							}
-						// After rendering, convert task-result metadata and clean transcript controls
-						var bubble = el.closest('.chat-bubble-user-msg, .chat-bubble-assistant-msg');
-						if (bubble) {
-							if (window.convertTaskLinksInMessage) window.convertTaskLinksInMessage(bubble);
-							if (window.convertTaskEditLinksInMessage) window.convertTaskEditLinksInMessage(bubble);
-							if (window.cleanBubbleContent) window.cleanBubbleContent(bubble);
-						}
-						}
-						// renderStreamingContent may not be defined yet (defined later in page).
-						if (window.renderStreamingContent) { render(); }
-						else {
-							// Poll until renderStreamingContent is defined (defined by ChatAutoScrollScript later in page)
-							var poll = setInterval(function() {
-								if (window.renderStreamingContent) { clearInterval(poll); render(); }
-							}, 10);
-							setTimeout(function() { clearInterval(poll); render(); }, 2000); // fallback
-						}
-					})();
-				</script>
 			}
 		</div>
 	</div>
@@ -261,36 +223,6 @@ templ ChatBubbleError(role, errorMsg, output string) {
 			}
 			if output != "" {
 				<div class="chat-stream-content" data-raw-revision={ chatContentRevision(output) } data-raw-content={ NormalizeDisplayMarkers(output) }></div>
-				<script>
-					(function() {
-						var el = document.currentScript.previousElementSibling;
-						var renderStarted = false;
-						function render() {
-							if (renderStarted) return;
-							renderStarted = true;
-							var raw = el.getAttribute('data-raw-content');
-							if (window.scheduleChatElementRender && raw) {
-								window.scheduleChatElementRender(el, raw);
-							} else if (window.renderStreamingContent && raw) {
-								window.renderStreamingContent(el, raw);
-							} else if (window.renderChatMarkdown && raw) {
-								el.classList.add('chat-markdown');
-								el.innerHTML = window.renderChatMarkdown(raw);
-								if (window.addCodeCopyButtons) window.addCodeCopyButtons(el);
-							} else {
-								el.textContent = raw;
-								el.classList.add('whitespace-pre-wrap');
-							}
-						}
-						if (window.renderStreamingContent) { render(); }
-						else {
-							var poll = setInterval(function() {
-								if (window.renderStreamingContent) { clearInterval(poll); render(); }
-							}, 10);
-							setTimeout(function() { clearInterval(poll); render(); }, 2000);
-						}
-					})();
-				</script>
 			}
 		</div>
 	</div>
@@ -334,7 +266,7 @@ templ ChatBubbleRunning(role, partialOutput string) {
 }
 
 // ChatBubbleWithAttachments renders a message with inline attachment display.
-templ ChatBubbleWithAttachments(role, content string, attachments []models.ChatAttachment) {
+templ ChatBubbleWithAttachments(role, content string, attachments []models.ChatAttachment, projectID string) {
 	<div class={ chatBubbleClass(role), "rounded-xl p-4" }>
 		<div class="text-xs font-semibold opacity-50 mb-2 flex items-center gap-2">
 			{ role }
@@ -355,9 +287,9 @@ templ ChatBubbleWithAttachments(role, content string, attachments []models.ChatA
 					for _, att := range attachments {
 						if IsImageMediaType(att.MediaType) {
 							<div class="mb-3">
-								<a href={ templ.SafeURL(fmt.Sprintf("/chat/attachments/%s/download", att.ID)) } target="_blank" class="block">
+								<a href={ templ.SafeURL(ChatAttachmentDownloadURL(att.ID, projectID)) } target="_blank" class="block">
 									<img
-										src={ templ.SafeURL(fmt.Sprintf("/chat/attachments/%s/download", att.ID)) }
+										src={ templ.SafeURL(ChatAttachmentDownloadURL(att.ID, projectID)) }
 										alt={ att.FileName }
 										class="max-w-full rounded-lg border border-base-content/10 hover:opacity-90 transition-opacity cursor-pointer"
 										style="max-height: 400px; object-fit: contain;"
@@ -378,7 +310,7 @@ templ ChatBubbleWithAttachments(role, content string, attachments []models.ChatA
 								<svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"></path>
 								</svg>
-								<a href={ templ.SafeURL(fmt.Sprintf("/chat/attachments/%s/download", att.ID)) } class="hover:underline font-medium" target="_blank">
+								<a href={ templ.SafeURL(ChatAttachmentDownloadURL(att.ID, projectID)) } class="hover:underline font-medium" target="_blank">
 									{ att.FileName }
 								</a>
 								<span class="opacity-60">({ FormatFileSize(att.FileSize) })</span>
@@ -400,22 +332,22 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 		<div class="text-xs font-semibold opacity-50 mb-2">
 			{ role }
 		</div>
-			<div class="chat-bubble-inner">
-				<div id={ "streaming-thinking-" + execID } class="flex flex-col items-start gap-1">
-					<span class="block h-5" aria-hidden="true"></span>
-					@ChatLoadingDots("sm")
-				</div>
-				<div id={ "mixture-progress-" + execID } class="mixture-progress hidden mb-2 text-xs opacity-70" data-exec-id={ execID } role="status" aria-live="polite"></div>
-				<div
-					id={ "streaming-message-" + execID }
-					class="whitespace-pre-wrap leading-relaxed text-sm hidden"
-					data-exec-id={ execID }
-					data-messages-container={ messagesContainerID }
-					data-pause-polling-target={ pausePollingTargetID }
-					data-is-thread={ boolStr(isThread) }
-					style="word-wrap: break-word;"
-				></div>
-				<div id={ "streaming-dots-" + execID } class="hidden flex items-center gap-1 mt-2 opacity-40">
+		<div class="chat-bubble-inner">
+			<div id={ "streaming-thinking-" + execID } class="flex flex-col items-start gap-1">
+				<span class="block h-5" aria-hidden="true"></span>
+				@ChatLoadingDots("sm")
+			</div>
+			<div id={ "mixture-progress-" + execID } class="mixture-progress hidden mb-2 text-xs opacity-70" data-exec-id={ execID } role="status" aria-live="polite"></div>
+			<div
+				id={ "streaming-message-" + execID }
+				class="whitespace-pre-wrap leading-relaxed text-sm hidden"
+				data-exec-id={ execID }
+				data-messages-container={ messagesContainerID }
+				data-pause-polling-target={ pausePollingTargetID }
+				data-is-thread={ boolStr(isThread) }
+				style="word-wrap: break-word;"
+			></div>
+			<div id={ "streaming-dots-" + execID } class="hidden flex items-center gap-1 mt-2 opacity-40">
 				@ChatLoadingDots("xs")
 			</div>
 			<script type="text/javascript">
@@ -478,7 +410,7 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 							var form = document.getElementById('task-thread-form');
 							if (form) {
 								var textarea = document.getElementById('task-message-input');
-								if (textarea) textarea.setAttribute('placeholder', 'Type your message... (Enter to send, Shift+Enter for new line)');
+								if (textarea && window.refreshChatComposerShortcutHint) window.refreshChatComposerShortcutHint(textarea);
 								refreshThreadComposerAction();
 							}
 							var messages = document.getElementById(messagesId);
@@ -559,6 +491,11 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 									return;
 								}
 								renderScheduled = false;
+								if (Object.prototype.hasOwnProperty.call(container, '_authoritativeTerminalContent') && String(container._authoritativeTerminalContent || '') !== renderText) {
+									textBuffer = String(container._authoritativeTerminalContent || '');
+									renderBufferedOutput(true, false);
+									return;
+								}
 								lastRenderedSourceLength = sourceLength;
 								lastRenderFinishedAt = Date.now();
 								// Auto-scroll only if the viewport was pinned before this render grew the DOM.
@@ -832,15 +769,15 @@ templ ChatBubbleStreamingResume(role, partialContent, execID, messagesContainerI
 		<div class="text-xs font-semibold opacity-50 mb-2">
 			{ role }
 		</div>
-			<div class="chat-bubble-inner">
-				if partialContent == "" {
-					<div id={ "streaming-thinking-resume-" + execID } class="flex flex-col items-start gap-1">
-						<span class="block h-5" aria-hidden="true"></span>
-						@ChatLoadingDots("sm")
-					</div>
-				}
-				<div id={ "mixture-progress-" + execID } class="mixture-progress hidden mb-2 text-xs opacity-70" data-exec-id={ execID } role="status" aria-live="polite"></div>
-				<div id={ "streaming-message-" + execID } class={ "leading-relaxed text-sm", templ.KV("hidden", partialContent == "") } data-exec-id={ execID } data-initial-byte-length={ fmt.Sprintf("%d", len(partialContent)) } data-messages-container={ messagesContainerID } data-pause-polling-target={ pausePollingTargetID } data-streaming-resume="true" data-raw-revision={ chatContentRevision(partialContent) } data-raw-content={ NormalizeDisplayMarkers(partialContent) } style="word-wrap: break-word;"></div>
+		<div class="chat-bubble-inner">
+			if partialContent == "" {
+				<div id={ "streaming-thinking-resume-" + execID } class="flex flex-col items-start gap-1">
+					<span class="block h-5" aria-hidden="true"></span>
+					@ChatLoadingDots("sm")
+				</div>
+			}
+			<div id={ "mixture-progress-" + execID } class="mixture-progress hidden mb-2 text-xs opacity-70" data-exec-id={ execID } role="status" aria-live="polite"></div>
+			<div id={ "streaming-message-" + execID } class={ "leading-relaxed text-sm", templ.KV("hidden", partialContent == "") } data-exec-id={ execID } data-initial-byte-length={ fmt.Sprintf("%d", len(partialContent)) } data-messages-container={ messagesContainerID } data-pause-polling-target={ pausePollingTargetID } data-streaming-resume="true" data-raw-revision={ chatContentRevision(partialContent) } data-raw-content={ NormalizeDisplayMarkers(partialContent) } style="word-wrap: break-word;"></div>
 			<script>
 				(function() {
 					var el = document.currentScript.previousElementSibling;
@@ -972,7 +909,7 @@ templ ChatStreamingResumeInitScript() {
 							var form = document.getElementById('task-thread-form');
 							if (form) {
 								var textarea = document.getElementById('task-message-input');
-								if (textarea) textarea.setAttribute('placeholder', 'Type your message... (Enter to send, Shift+Enter for new line)');
+								if (textarea && window.refreshChatComposerShortcutHint) window.refreshChatComposerShortcutHint(textarea);
 								refreshThreadComposerAction();
 							}
 							var messages = document.getElementById(messagesId);
@@ -1047,6 +984,11 @@ templ ChatStreamingResumeInitScript() {
 								return;
 							}
 							renderScheduled = false;
+							if (Object.prototype.hasOwnProperty.call(container, '_authoritativeTerminalContent') && String(container._authoritativeTerminalContent || '') !== renderText) {
+								cumulativeContent = String(container._authoritativeTerminalContent || '');
+								renderCumulativeContent(true, false);
+								return;
+							}
 							lastRenderedSourceLength = sourceLength;
 							lastRenderFinishedAt = Date.now();
 							if (shouldScroll) {
@@ -1276,16 +1218,20 @@ templ ChatQueuedInputRow(inputID, message, steerEndpoint string, hasAttachments 
 	@ChatQueuedInputRowForTask(inputID, message, steerEndpoint, hasAttachments, "")
 }
 
+templ pendingAttachmentBadge(label, title string) {
+	<div class="badge badge-ghost badge-sm shrink-0 gap-1 text-xs" title={ title } aria-label={ title }>
+		<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+			<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.586-6.586a4 4 0 00-5.657-5.657L5.757 10.757a6 6 0 108.486 8.486L21 12.486"></path>
+		</svg>
+		<span>{ label }</span>
+	</div>
+}
+
 templ ChatQueuedInputRowForTask(inputID, message, steerEndpoint string, hasAttachments bool, taskID string) {
 	<div id={ "thread-input-" + inputID } class="queued-input-row flex min-h-8 items-center gap-3 rounded-lg bg-base-300/45 px-3 py-1.5 text-sm text-base-content/80" data-thread-input-id={ inputID } data-task-id={ taskID } data-input-mode="queued" title="Queued follow-up will run after the active response finishes">
 		<div class="min-w-0 flex-1 truncate">{ message }</div>
 		if hasAttachments {
-			<div class="badge badge-ghost badge-sm shrink-0 gap-1 text-xs" title="Attachments queued with this follow-up" aria-label="Attachments queued with this follow-up">
-				<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.586-6.586a4 4 0 00-5.657-5.657L5.757 10.757a6 6 0 108.486 8.486L21 12.486"></path>
-				</svg>
-				<span>Attachments queued</span>
-			</div>
+			@pendingAttachmentBadge("Attachments queued", "Attachments queued with this follow-up")
 		}
 		<div class="ml-auto flex shrink-0 items-center gap-2">
 			<button type="button" class="btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-xs font-medium" hx-post={ steerEndpoint } hx-target={ "#thread-input-" + inputID } hx-swap="outerHTML" title="Convert queued follow-up to steering">Steer</button>
@@ -1308,17 +1254,20 @@ templ ChatQueuedInputRowOOBForTask(inputID, message, steerEndpoint string, hasAt
 	</div>
 }
 
-templ ChatSteeringInputRow(inputID, message string) {
-	@ChatSteeringInputRowForTask(inputID, message, "")
+templ ChatSteeringInputRow(inputID, message string, hasAttachments bool) {
+	@ChatSteeringInputRowForTask(inputID, message, hasAttachments, "")
 }
 
-templ ChatSteeringInputRowForTask(inputID, message, taskID string) {
+templ ChatSteeringInputRowForTask(inputID, message string, hasAttachments bool, taskID string) {
 	<div id={ "thread-input-" + inputID } class="steering-input-row flex min-h-8 items-center gap-3 rounded-lg bg-base-300/45 px-3 py-1.5 text-sm text-base-content/80" data-thread-input-id={ inputID } data-task-id={ taskID } data-input-mode="steering" title="Steering instruction will be applied before the active run's next model step">
 		<div class="min-w-0 flex-1">
 			<div class="text-xs font-semibold opacity-70">Steering pending</div>
 			<div class="truncate">{ message }</div>
 			<div class="text-xs opacity-60">Will be applied before the active run's next model step.</div>
 		</div>
+		if hasAttachments {
+			@pendingAttachmentBadge("Attachments included", "Attachments included with this steering instruction")
+		}
 		<div class="ml-auto flex shrink-0 items-center gap-2">
 			<button type="button" class="btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-xs text-error" hx-post={ "/thread-inputs/" + inputID + "/cancel" } hx-target={ "#thread-input-" + inputID } hx-swap="outerHTML" title="Cancel pending steering" aria-label="Cancel pending steering">
 				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1339,7 +1288,7 @@ templ ChatComposerQueuedInputRowsForTask(inputs []models.ThreadInput, steerEndpo
 			if input.InputMode == models.ThreadInputModeQueued && steerEndpointFor != nil {
 				@ChatQueuedInputRowForTask(input.ID, input.Content, steerEndpointFor(input), input.AttachmentSessionID != "", taskID)
 			} else if input.InputMode == models.ThreadInputModeSteering {
-				@ChatSteeringInputRowForTask(input.ID, input.Content, taskID)
+				@ChatSteeringInputRowForTask(input.ID, input.Content, input.AttachmentSessionID != "", taskID)
 			}
 		}
 	</div>
@@ -1376,53 +1325,53 @@ func chatExecutionIsTerminal(exec models.Execution) bool {
 	return exec.Status == models.ExecCompleted || exec.Status == models.ExecFailed || exec.Status == models.ExecCancelled
 }
 
-templ chatExecutionPairContent(exec models.Execution, task *models.Task, executions []models.Execution, index int, hasEarlier bool, attachments map[string][]models.ChatAttachment, messagesContainerID, pausePollingTargetID string) {
-		<!-- User message: show for followups and first non-followup only -->
-		if exec.IsFollowup || (!hasEarlier && !hasEarlierNonFollowup(executions, index)) {
-			if atts, hasAtts := attachments[exec.ID]; hasAtts && len(atts) > 0 {
-				@ChatBubbleWithAttachments("User", chatUserContent(exec, task, executions, index), atts)
-			} else {
-				@ChatBubble("User", chatUserContent(exec, task, executions, index))
-			}
+templ chatExecutionPairContent(exec models.Execution, task *models.Task, executions []models.Execution, index int, hasEarlier bool, attachments map[string][]models.ChatAttachment, messagesContainerID, pausePollingTargetID, projectID string) {
+	<!-- User message: show for followups and first non-followup only -->
+	if exec.IsFollowup || (!hasEarlier && !hasEarlierNonFollowup(executions, index)) {
+		if atts, hasAtts := attachments[exec.ID]; hasAtts && len(atts) > 0 {
+			@ChatBubbleWithAttachments("User", chatUserContent(exec, task, executions, index), atts, projectID)
+		} else {
+			@ChatBubble("User", chatUserContent(exec, task, executions, index))
 		}
-		<!-- Assistant response -->
-		if exec.Status == models.ExecCompleted {
-			@ChatBubble("Assistant", exec.Output)
-		} else if exec.Status == models.ExecFailed {
-			@ChatBubbleError("Assistant", exec.ErrorMessage, exec.Output)
-		} else if exec.Status == models.ExecCancelled {
-			@ChatBubbleError("Assistant", "Cancelled", exec.Output)
-		} else if exec.Status == models.ExecRunning {
-			@ChatBubbleStreamingResume("Assistant", exec.Output, exec.ID, messagesContainerID, pausePollingTargetID)
-		}
+	}
+	<!-- Assistant response -->
+	if exec.Status == models.ExecCompleted {
+		@ChatBubble("Assistant", exec.Output)
+	} else if exec.Status == models.ExecFailed {
+		@ChatBubbleError("Assistant", exec.ErrorMessage, exec.Output)
+	} else if exec.Status == models.ExecCancelled {
+		@ChatBubbleError("Assistant", "Cancelled", exec.Output)
+	} else if exec.Status == models.ExecRunning {
+		@ChatBubbleStreamingResume("Assistant", exec.Output, exec.ID, messagesContainerID, pausePollingTargetID)
+	}
 }
 
-templ ChatExecutionPair(exec models.Execution, task *models.Task, executions []models.Execution, index int, hasEarlier bool, attachments map[string][]models.ChatAttachment, messagesContainerID, pausePollingTargetID string) {
+templ ChatExecutionPair(exec models.Execution, task *models.Task, executions []models.Execution, index int, hasEarlier bool, attachments map[string][]models.ChatAttachment, messagesContainerID, pausePollingTargetID, projectID string) {
 	if chatExecutionIsTerminal(exec) {
 		<div id={ "chat-execution-" + exec.ID } class="chat-execution-pair space-y-6" data-execution-pair="true" data-exec-id={ exec.ID } data-exec-status={ string(exec.Status) } data-execution-revision={ ChatExecutionRevision(exec) } data-started-at={ exec.StartedAt.Format(time.RFC3339Nano) } hx-preserve="true">
-			@chatExecutionPairContent(exec, task, executions, index, hasEarlier, attachments, messagesContainerID, pausePollingTargetID)
+			@chatExecutionPairContent(exec, task, executions, index, hasEarlier, attachments, messagesContainerID, pausePollingTargetID, projectID)
 		</div>
 	} else {
 		<div id={ "chat-execution-" + exec.ID } class="chat-execution-pair space-y-6" data-execution-pair="true" data-exec-id={ exec.ID } data-exec-status={ string(exec.Status) } data-execution-revision={ ChatExecutionRevision(exec) } data-started-at={ exec.StartedAt.Format(time.RFC3339Nano) }>
-			@chatExecutionPairContent(exec, task, executions, index, hasEarlier, attachments, messagesContainerID, pausePollingTargetID)
+			@chatExecutionPairContent(exec, task, executions, index, hasEarlier, attachments, messagesContainerID, pausePollingTargetID, projectID)
 		</div>
 	}
 }
 
-templ ChatExecutionPairPoll(exec models.Execution, task *models.Task, executions []models.Execution, index int, hasEarlier bool, attachments map[string][]models.ChatAttachment, messagesContainerID, pausePollingTargetID string, preservedExecIDs map[string]bool) {
+templ ChatExecutionPairPoll(exec models.Execution, task *models.Task, executions []models.Execution, index int, hasEarlier bool, attachments map[string][]models.ChatAttachment, messagesContainerID, pausePollingTargetID, projectID string, preservedExecIDs map[string]bool) {
 	if chatExecutionIsTerminal(exec) && preservedExecIDs[exec.ID] {
 		<div id={ "chat-execution-" + exec.ID } class="chat-execution-pair space-y-6" data-execution-pair="true" data-exec-id={ exec.ID } data-exec-status={ string(exec.Status) } data-execution-revision={ ChatExecutionRevision(exec) } data-started-at={ exec.StartedAt.Format(time.RFC3339Nano) } hx-preserve="true"></div>
 	} else {
-		@ChatExecutionPair(exec, task, executions, index, hasEarlier, attachments, messagesContainerID, pausePollingTargetID)
+		@ChatExecutionPair(exec, task, executions, index, hasEarlier, attachments, messagesContainerID, pausePollingTargetID, projectID)
 	}
 }
 
 // ChatFollowupResponse renders user message + streaming assistant for a follow-up.
 // Used by both ChatSend (main chat) and TaskThreadSend (task thread).
-templ ChatFollowupResponse(message, execID, messagesContainerID, pausePollingTargetID string, isThread bool, attachments []models.ChatAttachment) {
+templ ChatFollowupResponse(message, execID, messagesContainerID, pausePollingTargetID string, isThread bool, attachments []models.ChatAttachment, projectID string) {
 	<div id={ "chat-execution-" + execID } class="chat-execution-pair space-y-6" data-execution-pair="true" data-exec-id={ execID } data-exec-status="running">
 		if len(attachments) > 0 {
-			@ChatBubbleWithAttachments("User", message, attachments)
+			@ChatBubbleWithAttachments("User", message, attachments, projectID)
 		} else {
 			@ChatBubble("User", message)
 		}
@@ -1434,15 +1383,15 @@ templ ChatFollowupResponse(message, execID, messagesContainerID, pausePollingTar
 // This is the shared message rendering loop used by both /chat and task thread.
 // For task thread, deduplicates the original task prompt: only shows it for the
 // first non-followup execution. Subsequent re-runs skip the user bubble.
-templ ChatMessages(executions []models.Execution, task *models.Task, attachments map[string][]models.ChatAttachment, messagesContainerID, pausePollingTargetID string, hasEarlier bool) {
+templ ChatMessages(executions []models.Execution, task *models.Task, attachments map[string][]models.ChatAttachment, messagesContainerID, pausePollingTargetID string, hasEarlier bool, projectID string) {
 	for i, exec := range executions {
-		@ChatExecutionPair(exec, task, executions, i, hasEarlier, attachments, messagesContainerID, pausePollingTargetID)
+		@ChatExecutionPair(exec, task, executions, i, hasEarlier, attachments, messagesContainerID, pausePollingTargetID, projectID)
 	}
 }
 
-templ ChatMessagesPoll(executions []models.Execution, task *models.Task, attachments map[string][]models.ChatAttachment, messagesContainerID, pausePollingTargetID string, hasEarlier bool, preservedExecIDs map[string]bool) {
+templ ChatMessagesPoll(executions []models.Execution, task *models.Task, attachments map[string][]models.ChatAttachment, messagesContainerID, pausePollingTargetID string, hasEarlier bool, projectID string, preservedExecIDs map[string]bool) {
 	for i, exec := range executions {
-		@ChatExecutionPairPoll(exec, task, executions, i, hasEarlier, attachments, messagesContainerID, pausePollingTargetID, preservedExecIDs)
+		@ChatExecutionPairPoll(exec, task, executions, i, hasEarlier, attachments, messagesContainerID, pausePollingTargetID, projectID, preservedExecIDs)
 	}
 }
 
@@ -1456,8 +1405,16 @@ templ ChatEmptyState(message string) {
 	</div>
 }
 
-templ ChatComposerActionButtonOOB(targetID, stopEndpoint string, isRunning bool) {
-	<div id={ targetID } hx-swap-oob="outerHTML">
+templ ChatComposerActionButtonOOB(targetID, stopEndpoint string, isRunning bool, activeTurnID string) {
+	<div
+		id={ targetID }
+		data-composer-running={ boolStr(isRunning) }
+		data-active-turn-id={ activeTurnID }
+		if isRunning && stopEndpoint != "" {
+			data-composer-stop-endpoint={ stopEndpoint }
+		}
+		hx-swap-oob="outerHTML"
+	>
 		@chatComposerActionButton(stopEndpoint, isRunning)
 	</div>
 }
@@ -1472,12 +1429,15 @@ templ chatComposerActionButton(stopEndpoint string, isRunning bool) {
 			title="Stop response"
 			aria-label="Stop response"
 		>
-			<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+			<svg data-composer-stop-icon="true" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
 				<rect x="6" y="6" width="12" height="12" rx="2"></rect>
+			</svg>
+			<svg data-composer-steer-icon="true" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 hidden" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+				<path d="M2 3l20 9-20 9 5-9-5-9z"></path>
 			</svg>
 		</button>
 	} else {
-		<button type="submit" class="btn btn-primary btn-sm rounded-full min-h-0 h-8 w-8 p-0 flex-shrink-0" title="Send message" aria-label="Send message">
+		<button type="submit" class="btn btn-primary btn-sm chat-send-button rounded-full min-h-0 h-8 w-8 p-0 flex-shrink-0" title="Send message" aria-label="Send message">
 			<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
 				<path d="M2 3l20 9-20 9 5-9-5-9z"></path>
 			</svg>
@@ -1487,7 +1447,7 @@ templ chatComposerActionButton(stopEndpoint string, isRunning bool) {
 
 // ChatInputForm renders a shared chat input form with attachment support.
 templ ChatInputForm(config ChatInputFormConfig) {
-	<div class="chat-input-shadow-gutter w-full min-w-0 max-w-full pt-2 pb-4">
+	<div class="chat-input-shadow-gutter w-full min-w-0 max-w-full mt-6">
 		<form
 			id={ config.FormID }
 			method="post"
@@ -1498,9 +1458,13 @@ templ ChatInputForm(config ChatInputFormConfig) {
 			data-clear-func-name={ config.FormID + "ClearAttachments" }
 			data-message-history-key={ chatMessageHistoryStorageKey(config) }
 			data-attachment-state-key={ chatAttachmentStateKey(config) }
+			data-steer-endpoint={ config.SteerEndpoint }
 			if config.TaskID != "" {
 				data-scroll-intent-scope={ config.TaskID }
-			} else if config.ProjectID != "" {
+				data-model-select-endpoint={ "/tasks/" + config.TaskID + "/thread/model" }
+			}
+			else
+			if config.ProjectID != "" {
 				data-scroll-intent-scope={ config.ProjectID }
 			}
 			class="chat-input-container rounded-xl p-4 relative min-w-0 max-w-full"
@@ -1542,7 +1506,8 @@ templ ChatInputForm(config ChatInputFormConfig) {
 					id={ config.InputID }
 					name="message"
 					class="w-full resize-none bg-transparent text-sm leading-relaxed focus:outline-none placeholder:opacity-40 p-0 text-left"
-					placeholder="Type your message... (Enter to send, Shift+Enter for new line)"
+					placeholder="Enter sends or queues"
+					title="Enter sends or queues"
 					rows="3"
 					enterkeyhint="send"
 					required
@@ -1612,7 +1577,14 @@ templ ChatInputForm(config ChatInputFormConfig) {
 							<rect x="6" y="6" width="12" height="12" rx="2"></rect>
 						</svg>
 					</button>
-					<div id={ config.FormID + "-primary-action" }>
+					<div
+						id={ config.FormID + "-primary-action" }
+						data-composer-running={ boolStr(config.IsRunning) }
+						data-active-turn-id={ config.ActiveTurnID }
+						if config.IsRunning && config.StopEndpoint != "" {
+							data-composer-stop-endpoint={ config.StopEndpoint }
+						}
+					>
 						@chatComposerActionButton(config.StopEndpoint, config.IsRunning)
 					</div>
 				</div>
@@ -1814,26 +1786,260 @@ templ ChatInputForm(config ChatInputFormConfig) {
 				var agentInput = agentSelect ? document.getElementById(agentSelect.getAttribute('data-agent-input')) : null;
 					var modeSelect = form.querySelector('[id$="-mode-select"]');
 					var modeInput = modeSelect ? document.getElementById(modeSelect.getAttribute('data-mode-input')) : null;
-							var normalPostEndpoint = form.getAttribute('hx-post') || form.getAttribute('action') || '';
-							function currentSubmitButton() {
-								return form.querySelector('button[type="submit"]');
+						var normalPostEndpoint = form.getAttribute('hx-post') || form.getAttribute('action') || '';
+						var steerEndpoint = form.getAttribute('data-steer-endpoint') || '';
+						function chatComposerUsesAppleShortcuts() {
+							var platform = '';
+							if (navigator.userAgentData && navigator.userAgentData.platform) platform = navigator.userAgentData.platform;
+							else platform = navigator.platform || navigator.userAgent || '';
+							return /Mac|iPhone|iPad|iPod|iOS/i.test(platform);
+						}
+							var usesAppleShortcuts = chatComposerUsesAppleShortcuts();
+							var shortcutModifierHeld = false;
+							var steerRequestInFlight = false;
+							var steerRequestSignature = '';
+							var steerFallbackPending = false;
+							var queuedSteerSubmissions = [];
+							function shortcutModifierPressed(event) {
+							return usesAppleShortcuts ? event.metaKey : event.ctrlKey;
+						}
+						function shortcutHint() {
+							return usesAppleShortcuts
+								? '⏎ sends or queues · ⌘+⏎ steers'
+								: 'Enter sends or queues · Ctrl+Enter steers';
+						}
+						window.refreshChatComposerShortcutHint = function(textarea) {
+							if (!textarea) return;
+							textarea.setAttribute('placeholder', shortcutHint());
+							textarea.setAttribute('title', shortcutHint());
+						};
+						window.refreshChatComposerShortcutHint(messageInput);
+								function currentSubmitButton() {
+									return form.querySelector('button[type="submit"]');
+								}
+								function buildPrimaryActionButton(kind, stopEndpoint) {
+									var button = document.createElement('button');
+									button.className = 'btn btn-primary btn-sm' + (kind === 'stop' ? '' : ' chat-send-button') + ' rounded-full min-h-0 h-8 w-8 p-0 flex-shrink-0';
+									if (kind === 'stop') {
+										button.type = 'button';
+										button.setAttribute('hx-post', stopEndpoint);
+										button.setAttribute('hx-swap', 'none');
+										button.title = 'Stop response';
+										button.setAttribute('aria-label', 'Stop response');
+										button.innerHTML = '<svg data-composer-stop-icon="true" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"></rect></svg><svg data-composer-steer-icon="true" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 hidden" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M2 3l20 9-20 9 5-9-5-9z"></path></svg>';
+										return button;
+									}
+									button.type = 'submit';
+									button.title = 'Send message';
+									button.setAttribute('aria-label', 'Send message');
+									button.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M2 3l20 9-20 9 5-9-5-9z"></path></svg>';
+									return button;
+								}
+								function primaryActionStopEndpoint(action) {
+									if (!action) return '';
+									var endpoint = action.getAttribute('data-composer-stop-endpoint') || '';
+									var stopButton = action.querySelector('button[aria-label="Stop response"][hx-post]');
+									if (!endpoint && stopButton) endpoint = stopButton.getAttribute('hx-post') || '';
+									if (endpoint) action.setAttribute('data-composer-stop-endpoint', endpoint);
+									return endpoint;
+								}
+								function refreshPrimaryActionForInput() {
+									var action = document.getElementById(formId + '-primary-action');
+									if (!action) return;
+									var running = action.getAttribute('data-composer-running') === 'true';
+									var hasContent = !!(messageInput && messageInput.value.trim() !== '');
+									var stopEndpoint = primaryActionStopEndpoint(action);
+									var wantStop = running && !hasContent && !!stopEndpoint;
+									var wantLabel = wantStop ? 'Stop response' : 'Send message';
+									var currentButton = action.querySelector('button');
+									if (currentButton && currentButton.getAttribute('aria-label') === wantLabel) {
+										updatePrimaryActionModifierVisual();
+										return;
+									}
+									action.innerHTML = '';
+									action.appendChild(buildPrimaryActionButton(wantStop ? 'stop' : 'send', stopEndpoint));
+									if (typeof htmx !== 'undefined') htmx.process(action);
+									updatePrimaryActionModifierVisual();
+								}
+									function updatePrimaryActionModifierVisual() {
+										var action = document.getElementById(formId + '-primary-action');
+										var showSteer = shortcutModifierHeld && action && action.getAttribute('data-composer-running') === 'true';
+								var stopIcon = action ? action.querySelector('[data-composer-stop-icon]') : null;
+								var steerIcon = action ? action.querySelector('[data-composer-steer-icon]') : null;
+								if (stopIcon) stopIcon.classList.toggle('hidden', !!showSteer);
+								if (steerIcon) steerIcon.classList.toggle('hidden', !showSteer);
 							}
-								function safeSubmit() {
-									var submitBtn = currentSubmitButton();
+							function consumeShortcutModifierVisual() {
+								shortcutModifierHeld = false;
+								updatePrimaryActionModifierVisual();
+							}
+							function isShortcutModifierKey(event) {
+								return usesAppleShortcuts ? event.key === 'Meta' : event.key === 'Control';
+							}
+							document.addEventListener('keydown', function(event) {
+								if (!isShortcutModifierKey(event)) return;
+								shortcutModifierHeld = true;
+								updatePrimaryActionModifierVisual();
+							});
+							document.addEventListener('keyup', function(event) {
+								if (!isShortcutModifierKey(event)) return;
+								consumeShortcutModifierVisual();
+							});
+							window.addEventListener('blur', consumeShortcutModifierVisual);
+						function safeSubmit() {
+							var submitBtn = currentSubmitButton();
 									if (typeof form.requestSubmit === 'function') {
 										form.requestSubmit(submitBtn || undefined);
 										return;
 									}
-								var submitEvent = new Event('submit', { bubbles: true, cancelable: true });
-								form.dispatchEvent(submitEvent);
+							var submitEvent = new Event('submit', { bubbles: true, cancelable: true });
+							form.dispatchEvent(submitEvent);
+						}
+							function submitComposer(endpoint, intent, payload) {
+								if (!endpoint) return;
+								if (intent === 'steer' && typeof htmx !== 'undefined') {
+									var expectedTurnInput = form.querySelector('input[name="expected_turn_id"]');
+									payload = payload || {
+										message: messageInput ? messageInput.value : '',
+										attachmentSessionID: sessionInput ? sessionInput.value : '',
+										expectedTurnID: expectedTurnInput ? expectedTurnInput.value : ''
+									};
+									var signature = JSON.stringify([payload.message, payload.attachmentSessionID, payload.expectedTurnID]);
+									if (steerRequestInFlight) {
+										if (signature === steerRequestSignature || queuedSteerSubmissions.some(function(submission) { return submission.signature === signature; })) return;
+										queuedSteerSubmissions.push({signature: signature, payload: payload});
+										return;
+									}
+									steerRequestSignature = signature;
+								}
+								var visibleMessageBeforePayload = messageInput ? messageInput.value : '';
+								var visibleSessionBeforePayload = sessionInput ? sessionInput.value : '';
+								var restorePayloadValues = !!payload;
+								if (restorePayloadValues) {
+									if (messageInput && typeof payload.message === 'string') messageInput.value = payload.message;
+									if (sessionInput && typeof payload.attachmentSessionID === 'string') sessionInput.value = payload.attachmentSessionID;
+								}
+								form.setAttribute('data-submit-intent', intent || 'normal');
+								form._chatNextSubmissionPayload = payload || null;
+								if (intent === 'steer' && typeof htmx !== 'undefined') {
+									steerRequestInFlight = true;
+									steerFallbackPending = false;
+									var options = {
+									source: form,
+									target: '#pending-thread-inputs',
+									swap: form.getAttribute('hx-swap') || 'beforeend'
+								};
+										if (payload) {
+											options.values = {
+												message: payload.message,
+												attachment_session_id: payload.attachmentSessionID,
+												expected_turn_id: payload.expectedTurnID
+											};
+										}
+									try {
+										var steerRequest = htmx.ajax('POST', endpoint, options);
+										if (steerRequest && typeof steerRequest.then === 'function') {
+											steerRequest.then(finishSteerRequest, finishSteerRequest);
+										}
+									} catch (error) {
+										finishSteerRequest();
+										throw error;
+									} finally {
+										if (restorePayloadValues) {
+											if (messageInput) messageInput.value = visibleMessageBeforePayload;
+											if (sessionInput) sessionInput.value = visibleSessionBeforePayload;
+										}
+									}
+								return;
 							}
+							form.setAttribute('hx-post', endpoint);
+							try {
+								safeSubmit();
+							} finally {
+								if (restorePayloadValues) {
+									if (messageInput) messageInput.value = visibleMessageBeforePayload;
+									if (sessionInput) sessionInput.value = visibleSessionBeforePayload;
+								}
+							}
+							}
+							function finishSteerRequest() {
+								if (steerFallbackPending) return;
+								steerRequestInFlight = false;
+								steerRequestSignature = '';
+								if (!queuedSteerSubmissions.length) return;
+								var nextSubmission = queuedSteerSubmissions.shift();
+								submitComposer(steerEndpoint, 'steer', nextSubmission.payload);
+							}
+						function composerHasActiveTurn() {
+							var action = document.getElementById(formId + '-primary-action');
+							return !!action && action.getAttribute('data-composer-running') === 'true';
+						}
+						function clearExpectedTurnIDWhenIdle() {
+							if (composerHasActiveTurn()) return;
+							var guard = form.querySelector('input[name="expected_turn_id"]');
+							if (guard) guard.remove();
+						}
+						function activeTurnID() {
+							var targetSelector = form.getAttribute('hx-target') || '';
+							var target = targetSelector && targetSelector.charAt(0) === '#' ? document.getElementById(targetSelector.slice(1)) : null;
+							var pairs = target ? target.querySelectorAll('[data-execution-pair="true"][data-exec-status="running"], [data-execution-pair="true"][data-exec-status="queued"]') : [];
+								if (pairs.length) return pairs[pairs.length - 1].getAttribute('data-exec-id') || '';
+								var action = document.getElementById(formId + '-primary-action');
+								var actionTurnID = action ? action.getAttribute('data-active-turn-id') || '' : '';
+								if (actionTurnID) return actionTurnID;
+								if (!composerHasActiveTurn()) {
+								clearExpectedTurnIDWhenIdle();
+								return '';
+							}
+							var guard = form.querySelector('input[name="expected_turn_id"]');
+							return guard ? guard.value : '';
+						}
+						function setExpectedTurnID(turnID) {
+							var guard = form.querySelector('input[name="expected_turn_id"]');
+							if (!guard) {
+								guard = document.createElement('input');
+								guard.type = 'hidden';
+								guard.name = 'expected_turn_id';
+								form.appendChild(guard);
+							}
+							guard.value = turnID;
+						}
+						function deferSteerWhileSendPending() {
+							if (normalRequestInFlight < 1 || !steerEndpoint || !messageInput || !messageInput.value.trim()) return false;
+							deferredSteer = {
+								message: messageInput.value,
+								attachmentSessionID: sessionInput ? sessionInput.value : ''
+							};
+							return true;
+						}
+						function flushDeferredSteer() {
+							if (!deferredSteer || normalRequestInFlight > 0) return;
+							var turnID = activeTurnID();
+							if (!turnID) return;
+							var payload = deferredSteer;
+							deferredSteer = null;
+							payload.expectedTurnID = turnID;
+							setExpectedTurnID(turnID);
+							submitComposer(steerEndpoint, 'steer', payload);
+						}
+									function handleComposerStateMutation() {
+										clearExpectedTurnIDWhenIdle();
+										refreshPrimaryActionForInput();
+										flushDeferredSteer();
+									}
+									if (typeof MutationObserver !== 'undefined') {
+										new MutationObserver(handleComposerStateMutation).observe(form, { childList: true, subtree: true });
+						}
+							clearExpectedTurnIDWhenIdle();
+							refreshPrimaryActionForInput();
 
-				var messageHistoryStorageKey = form.getAttribute('data-message-history-key') || '';
-				var messageHistoryLimit = 50;
+					var messageHistoryStorageKey = form.getAttribute('data-message-history-key') || '';
+					var messageHistoryLimit = 50;
 				var messageHistoryEntries = [];
 				var messageHistoryIndex = -1;
 				var messageHistoryDraft = '';
-				var messageHistorySubmittedValue = '';
+				var normalRequestInFlight = 0;
+				var deferredSteer = null;
 				var suppressMessageHistoryInputReset = false;
 
 				function loadMessageHistory() {
@@ -2048,27 +2254,66 @@ templ ChatInputForm(config ChatInputFormConfig) {
 
 						// Keyboard submission and message history navigation
 						if (messageInput) {
-							messageInput.addEventListener('keydown', function(e) {
-								if (handleMessageHistoryKeydown(e)) return;
-								if (e.key === 'Enter' && !e.shiftKey) {
-									e.preventDefault();
-									safeSubmit();
-								}
-							});
-							messageInput.addEventListener('input', function() {
-								if (!suppressMessageHistoryInputReset) resetMessageHistoryNavigation();
-							});
-						}
-
-					// Normalize send-button clicks to the same submit path as Enter, even after
-					// the primary action button is replaced out-of-band between Send and Stop.
-							form.addEventListener('click', function(e) {
-								var clickedSubmit = e.target && e.target.closest ? e.target.closest('button[type="submit"]') : null;
-								if (!clickedSubmit || !form.contains(clickedSubmit)) return;
+						messageInput.addEventListener('keydown', function(e) {
+							if (handleMessageHistoryKeydown(e)) return;
+							if (e.isComposing || e.keyCode === 229) return;
+							if (e.key === 'Enter' && !e.shiftKey) {
 								e.preventDefault();
-								form.setAttribute('hx-post', normalPostEndpoint);
-								safeSubmit();
+								if (shortcutModifierPressed(e)) {
+									consumeShortcutModifierVisual();
+									var turnID = activeTurnID();
+									if (steerEndpoint && turnID) {
+										setExpectedTurnID(turnID);
+										submitComposer(steerEndpoint, 'steer');
+										return;
+									}
+									if (deferSteerWhileSendPending()) return;
+								}
+								submitComposer(normalPostEndpoint, 'normal');
+							}
 							});
+								messageInput.addEventListener('input', function() {
+									refreshPrimaryActionForInput();
+									if (!suppressMessageHistoryInputReset) resetMessageHistoryNavigation();
+								});
+							}
+
+					// Normalize primary-action clicks to the shared submit paths, even after
+					// the button is replaced out-of-band between Send and Stop. A platform
+					// modifier on the primary control requests guarded steering whenever the
+					// transcript already has an active turn, even if the action swap still shows Send;
+					// an unavailable/stale steering request leaves the draft untouched.
+					form.addEventListener('click', function(e) {
+						var primaryAction = e.target && e.target.closest ? e.target.closest('[id="' + formId + '-primary-action"] button') : null;
+						if (!primaryAction || !form.contains(primaryAction)) return;
+						var isStopAction = primaryAction.getAttribute('aria-label') === 'Stop response';
+						if (shortcutModifierPressed(e)) {
+							consumeShortcutModifierVisual();
+							var turnID = activeTurnID();
+							if (steerEndpoint && turnID) {
+								e.preventDefault();
+								e.stopImmediatePropagation();
+								setExpectedTurnID(turnID);
+								submitComposer(steerEndpoint, 'steer');
+								return;
+							}
+							if (deferSteerWhileSendPending()) {
+								e.preventDefault();
+								e.stopImmediatePropagation();
+								return;
+							}
+							if (isStopAction) {
+								e.preventDefault();
+								e.stopImmediatePropagation();
+								return;
+							}
+						}
+						if (isStopAction) return;
+						if (primaryAction.type !== 'submit') return;
+						e.preventDefault();
+						e.stopImmediatePropagation();
+						submitComposer(normalPostEndpoint, 'normal');
+					}, true);
 			// Model selector -> hidden input sync + localStorage persistence
 			var projectIdInput = form.querySelector('input[name="_project_id"]');
 			var projectId = projectIdInput ? projectIdInput.value : '';
@@ -2098,10 +2343,20 @@ templ ChatInputForm(config ChatInputFormConfig) {
 						}
 					}
 				}
+				var modelSelectEndpoint = form.getAttribute('data-model-select-endpoint');
 				agentSelect.addEventListener('chat-select-change', function(e) {
 					agentInput.value = e.detail.value;
 					if (modelStorageKey) {
 						localStorage.setItem(modelStorageKey, e.detail.value);
+					}
+					// Task threads have no localStorage persistence (keyed by
+					// ProjectID, which task threads omit); persist the
+					// selection server-side immediately so navigating away
+					// and back does not silently revert to the task default.
+					if (modelSelectEndpoint) {
+						var body = new URLSearchParams();
+						body.set('agent_id', e.detail.value);
+						fetch(modelSelectEndpoint, { method: 'POST', body: body }).catch(function() {});
 					}
 				});
 			}
@@ -2557,30 +2812,65 @@ templ ChatInputForm(config ChatInputFormConfig) {
 				});
 			})();
 
-					// Clear input and attachments after successful composer submission.
-					// Ignore bubbled HTMX events from nested composer controls such as queued-input actions.
+					// Clear only the draft and attachment session accepted by this request.
+					// A user may type or attach a steering update while an earlier send is still in flight.
 					form.addEventListener('htmx:beforeRequest', function(event) {
 						if (!event.detail || event.detail.elt !== form) return;
-						form.setAttribute('hx-post', normalPostEndpoint);
-						messageHistorySubmittedValue = messageInput ? messageInput.value : '';
-					});
+						var payload = form._chatNextSubmissionPayload || null;
+						form._chatNextSubmissionPayload = null;
+						var request = event.detail.xhr || {};
+						request._chatSubmittedIntent = form.getAttribute('data-submit-intent') || 'normal';
+						request._chatSubmittedWasQueued = request._chatSubmittedIntent === 'normal' && composerHasActiveTurn();
+						if (request._chatSubmittedIntent === 'normal') normalRequestInFlight++;
+								request._chatSubmittedMessage = payload ? payload.message : (messageInput ? messageInput.value : '');
+								request._chatSubmittedAttachmentSession = payload ? payload.attachmentSessionID : (sessionInput ? sessionInput.value : '');
+								request._chatSubmittedFallbackFromSteer = !!(payload && payload.fallbackFromSteer);					});
 
 					form.addEventListener('htmx:afterRequest', function(event) {
 						if (!event.detail || event.detail.elt !== form) return;
+						var request = event.detail.xhr || {};
+						var completedIntent = request._chatSubmittedIntent || 'normal';
+						var submittedMessage = request._chatSubmittedMessage || '';
+						var submittedAttachmentSession = request._chatSubmittedAttachmentSession || '';
+						var accepted = false;
+						var replayAsNormal = false;
 						if (event.detail.successful) {
-							var xhr = event.detail.xhr;
-							var responseText = xhr ? (xhr.responseText || '') : '';
+							var responseText = request.responseText || '';
 							// Keep user draft intact when the handler intentionally returns no content
 							// (e.g. model-setup guard toasts) so users don't lose their message.
 							if (responseText.trim() !== '') {
+								accepted = true;
 								if (window.markChatSendScrollIntent) window.markChatSendScrollIntent(form);
-								rememberSubmittedMessage(messageHistorySubmittedValue);
+								rememberSubmittedMessage(submittedMessage);
 								resetMessageHistoryNavigation();
-								if (messageInput) messageInput.value = '';
-								if (window[clearFuncName]) window[clearFuncName]();
-							}
+									if (messageInput && messageInput.value === submittedMessage) {
+										messageInput.value = '';
+										refreshPrimaryActionForInput();
+									}
+									if (sessionInput && sessionInput.value === submittedAttachmentSession && window[clearFuncName]) window[clearFuncName]();
+								}
+						} else if (completedIntent === 'steer' && !request._chatSubmittedFallbackFromSteer && submittedMessage.trim() !== '' && request.status === 409) {
+							replayAsNormal = true;
+							steerFallbackPending = true;
 						}
-						messageHistorySubmittedValue = '';
+						if (completedIntent === 'normal') normalRequestInFlight = Math.max(0, normalRequestInFlight - 1);
+						if (completedIntent === 'normal' && !accepted) deferredSteer = null;
+						form.setAttribute('hx-post', normalPostEndpoint);
+						form.removeAttribute('data-submit-intent');
+						if (accepted && deferredSteer) setTimeout(flushDeferredSteer, 0);
+						if (completedIntent === 'normal' && request._chatSubmittedFallbackFromSteer) {
+							steerFallbackPending = false;
+							setTimeout(finishSteerRequest, 0);
+						}
+						if (replayAsNormal) {
+							setTimeout(function() {
+								submitComposer(normalPostEndpoint, 'normal', {
+									message: submittedMessage,
+									attachmentSessionID: submittedAttachmentSession,
+									fallbackFromSteer: true
+								});
+							}, 0);
+						}
 					});		})();
 	</script>
 }
@@ -4157,7 +4447,6 @@ templ ChatAutoScrollScript() {
 					var codeRanges = [];
 					var transcriptToolRanges = [];
 					var segments = [];
-					var preparationFailed = false;
 					function toolBlockRanges(text) {
 						var ranges = [];
 						var pattern = /^[\t ]*\[Tool\s+\S+\s+(?:done|error)\][\t ]*(?:\r\n|\r|\n)?[\s\S]*?\[\/Tool\][\t ]*(?=\r?$)(?:\r\n|\r|\n)?/gm;
@@ -4233,29 +4522,30 @@ templ ChatAutoScrollScript() {
 						});
 						return filtered;
 					}
-					function prepareInitialCodeRanges() {
-						if (shouldYieldPreparation && window.codeRangesAsync) {
-							return window.codeRangesAsync(textBuffer, container).then(function(result) {
-								if (result !== null) rawCodeRanges = result;
-								else preparationFailed = true;
-								return true;
-							});
+						function prepareInitialCodeRanges() {
+							if (shouldYieldPreparation && window.codeRangesAsync) {
+								return window.codeRangesAsync(textBuffer, container).then(function(result) {
+									// A worker is an optimization only. Falling back to raw Markdown
+									// would expose tool protocol markers instead of rendering cards.
+									rawCodeRanges = result !== null ? result : (window.codeRanges ? window.codeRanges(textBuffer) : []);
+									return true;
+								});
+							}
+							rawCodeRanges = window.codeRanges ? window.codeRanges(textBuffer) : [];
+							return true;
 						}
-						rawCodeRanges = window.codeRanges ? window.codeRanges(textBuffer) : [];
-						return true;
-					}
-					function prepareCodeRanges() {
-						if (shouldYieldPreparation && window.codeRangesAsync) {
-							return window.codeRangesAsync(textBuffer, container).then(function(result) {
-								if (result !== null) codeRanges = excludeToolBlockCodeRanges(result);
-								else preparationFailed = true;
-								return true;
-							});
+						function prepareCodeRanges() {
+							if (shouldYieldPreparation && window.codeRangesAsync) {
+								return window.codeRangesAsync(textBuffer, container).then(function(result) {
+									// Keep structured rendering intact if worker preparation is unavailable.
+									codeRanges = excludeToolBlockCodeRanges(result !== null ? result : (window.codeRanges ? window.codeRanges(textBuffer) : []));
+									return true;
+								});
+							}
+							codeRanges = excludeToolBlockCodeRanges(window.codeRanges ? window.codeRanges(textBuffer) : []);
+							return true;
 						}
-						codeRanges = excludeToolBlockCodeRanges(window.codeRanges ? window.codeRanges(textBuffer) : []);
-						return true;
-					}
-					function preparationBudgetExpired(startedAt, processed) {
+						function preparationBudgetExpired(startedAt, processed) {
 						return processed >= 64 || ((window.performance && performance.now ? performance.now() : Date.now()) - startedAt) >= 8;
 					}
 					function collectThinkingMatches() {
@@ -4944,8 +5234,8 @@ templ ChatAutoScrollScript() {
 			if (shouldYieldPreparation) {
 				return new Promise(function(resolve, reject) {
 					var preparationIndex = 0;
-					function runPreparationPhase() {
-						if (container._streamRenderVersion !== renderVersion) { resolve(false); return; }
+						function runPreparationPhase() {
+							if (container._streamRenderVersion !== renderVersion) { resolve(false); return; }
 							try {
 								if (preparationIndex < preparationPhases.length) {
 									var phaseResult = preparationPhases[preparationIndex]();
@@ -4958,22 +5248,15 @@ templ ChatAutoScrollScript() {
 									}
 									if (phaseResult !== false) preparationIndex++;
 									setTimeout(runPreparationPhase, 0);
-								return;
+									return;
+								}
+								var rendered = renderPreparedSegments();
+								if (rendered && typeof rendered.then === 'function') rendered.then(resolve, reject);
+								else resolve(rendered !== false);
+							} catch (err) {
+								reject(err);
 							}
-							if (preparationFailed) {
-								var fallback = window.renderChatMarkdownLargeFallback ? window.renderChatMarkdownLargeFallback(textBuffer) : null;
-								container.replaceChildren(fallback || document.createTextNode(textBuffer));
-								resolve(true);
-								return;
-							}
-							var rendered = renderPreparedSegments();
-							if (rendered && typeof rendered.then === 'function') rendered.then(resolve, reject);
-							else resolve(rendered !== false);
-						} catch (err) {
-							reject(err);
-						}
-					}
-					setTimeout(runPreparationPhase, 0);
+						}					setTimeout(runPreparationPhase, 0);
 				});
 				}
 				for (var preparationIndex = 0; preparationIndex < preparationPhases.length; preparationIndex++) {

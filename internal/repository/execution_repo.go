@@ -42,8 +42,29 @@ const executionSelectColumns = `id, task_id, COALESCE(agent_config_id, ''), stat
 const executionSelectColumnsLight = `id, task_id, COALESCE(agent_config_id, ''), status, prompt_sent, output, '' AS reasoning_content, error_message,
 		tokens_used, duration_ms, is_followup, starts_new_context, '' AS diff_output, cli_session_id, COALESCE(dispatch_id, ''), started_at, completed_at`
 
+const executionSelectColumnsAlias = `e.id, e.task_id, COALESCE(e.agent_config_id, ''), e.status, e.prompt_sent, e.output, e.reasoning_content, e.error_message,
+			e.tokens_used, e.duration_ms, e.is_followup, e.starts_new_context, e.diff_output, e.cli_session_id, COALESCE(e.dispatch_id, ''), e.started_at, e.completed_at`
+
 const executionSelectColumnsAliasLight = `e.id, e.task_id, COALESCE(e.agent_config_id, ''), e.status, e.prompt_sent, e.output, '' AS reasoning_content, e.error_message,
-		e.tokens_used, e.duration_ms, e.is_followup, e.starts_new_context, '' AS diff_output, e.cli_session_id, COALESCE(e.dispatch_id, ''), e.started_at, e.completed_at`
+			e.tokens_used, e.duration_ms, e.is_followup, e.starts_new_context, '' AS diff_output, e.cli_session_id, COALESCE(e.dispatch_id, ''), e.started_at, e.completed_at`
+
+const taskExecutionHistoryPageSQL = `SELECT ` + executionSelectColumnsLight + ` FROM executions WHERE task_id = ? ORDER BY started_at DESC, rowid DESC LIMIT ?`
+
+const taskExecutionCountSQL = `SELECT COUNT(*) FROM executions WHERE task_id = ?`
+
+// taskThreadExecutionSelectColumns contains only the fields needed to render a
+// runtime task-thread transcript. It deliberately omits execution metadata and
+// detail-only payloads that the formatter never reads.
+const taskThreadExecutionSelectColumns = `id, task_id, status, prompt_sent, output, error_message, is_followup, started_at`
+
+const taskExecutionChronologicalPageSQL = `SELECT ` + taskThreadExecutionSelectColumns + ` FROM executions WHERE task_id = ? ORDER BY started_at ASC, rowid ASC LIMIT ? OFFSET ?`
+
+const taskExecutionMetricsSQL = `SELECT
+	(SELECT started_at FROM executions WHERE task_id = ? ORDER BY started_at DESC, rowid DESC LIMIT 1) AS latest_started_at,
+	COALESCE((SELECT duration_ms FROM executions WHERE task_id = ? AND duration_ms > 0 ORDER BY started_at DESC, rowid DESC LIMIT 1), 0) AS latest_duration_ms`
+
+const apiChatExecutionStatusSQL = `SELECT id, status, COALESCE(output, ''), COALESCE(error_message, ''), tokens_used, duration_ms
+	FROM executions WHERE id = ?`
 
 func scanExecutionRow(scanner interface {
 	Scan(dest ...interface{}) error
@@ -55,6 +76,14 @@ func scanExecutionRow(scanner interface {
 	return e, err
 }
 
+func scanTaskThreadExecutionRow(scanner interface {
+	Scan(dest ...interface{}) error
+}) (models.Execution, error) {
+	var e models.Execution
+	err := scanner.Scan(&e.ID, &e.TaskID, &e.Status, &e.PromptSent, &e.Output, &e.ErrorMessage, &e.IsFollowup, &e.StartedAt)
+	return e, err
+}
+
 func (r *ExecutionRepo) ListByTask(ctx context.Context, taskID string) ([]models.Execution, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT `+executionSelectColumnsLight+` FROM executions WHERE task_id = ? ORDER BY started_at DESC`, taskID)
@@ -63,15 +92,41 @@ func (r *ExecutionRepo) ListByTask(ctx context.Context, taskID string) ([]models
 	}
 	defer rows.Close()
 
-	var execs []models.Execution
-	for rows.Next() {
-		e, err := scanExecutionRow(rows)
-		if err != nil {
-			return nil, fmt.Errorf("scanning execution: %w", err)
-		}
-		execs = append(execs, e)
+	return scanExecutionsNewestFirst(rows)
+}
+
+// ListByTaskHistoryPage returns the latest executions for a task in display order
+// for the execution-history panel. Callers request limit+1 rows to discover
+// whether an older page exists without loading the whole task history.
+func (r *ExecutionRepo) ListByTaskHistoryPage(ctx context.Context, taskID string, limit int) ([]models.Execution, error) {
+	if limit <= 0 {
+		return []models.Execution{}, nil
 	}
-	return execs, rows.Err()
+	rows, err := r.db.QueryContext(ctx, taskExecutionHistoryPageSQL, taskID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("listing execution history page: %w", err)
+	}
+	defer rows.Close()
+
+	return scanExecutionsNewestFirst(rows)
+}
+
+func (r *ExecutionRepo) GetTaskExecutionMetrics(ctx context.Context, taskID string) (models.TaskExecutionMetrics, error) {
+	var metrics models.TaskExecutionMetrics
+	var latestStarted sql.NullTime
+	var latestDuration sql.NullInt64
+	err := r.db.QueryRowContext(ctx, taskExecutionMetricsSQL, taskID, taskID).Scan(&latestStarted, &latestDuration)
+	if err != nil {
+		return metrics, fmt.Errorf("getting task execution metrics: %w", err)
+	}
+	if latestStarted.Valid {
+		started := latestStarted.Time
+		metrics.LatestStartedAt = &started
+	}
+	if latestDuration.Valid {
+		metrics.LatestDurationMs = latestDuration.Int64
+	}
+	return metrics, nil
 }
 
 func (r *ExecutionRepo) ListByTaskIDs(ctx context.Context, taskIDs []string) (map[string][]models.Execution, error) {
@@ -165,6 +220,37 @@ func (r *ExecutionRepo) GetByID(ctx context.Context, id string) (*models.Executi
 	return &e, nil
 }
 
+// GetAPIChatStatusByID returns only the execution fields needed by
+// GET /api/chat/message/:id status polling. It intentionally omits prompt,
+// reasoning, diff, timestamps, and other execution-detail payloads.
+func (r *ExecutionRepo) GetAPIChatStatusByID(ctx context.Context, id string) (*models.Execution, error) {
+	var e models.Execution
+	err := r.db.QueryRowContext(ctx, apiChatExecutionStatusSQL, id).Scan(
+		&e.ID, &e.Status, &e.Output, &e.ErrorMessage, &e.TokensUsed, &e.DurationMs)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("getting api chat execution status: %w", err)
+	}
+	return &e, nil
+}
+
+func (r *ExecutionRepo) GetByIDForProject(ctx context.Context, id, projectID string) (*models.Execution, error) {
+	e, err := scanExecutionRow(r.db.QueryRowContext(ctx,
+		`SELECT `+executionSelectColumnsAlias+`
+		 FROM executions e
+		 JOIN tasks t ON t.id = e.task_id
+		 WHERE e.id = ? AND t.project_id = ?`, id, projectID))
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("getting project execution: %w", err)
+	}
+	return &e, nil
+}
+
 func (r *ExecutionRepo) GetLatestCompletedByTask(ctx context.Context, taskID string) (*models.Execution, error) {
 	e, err := scanExecutionRow(r.db.QueryRowContext(ctx,
 		`SELECT `+executionSelectColumns+` FROM executions WHERE task_id = ? AND status = ? ORDER BY completed_at DESC, started_at DESC LIMIT 1`,
@@ -179,18 +265,46 @@ func (r *ExecutionRepo) GetLatestCompletedByTask(ctx context.Context, taskID str
 }
 
 func (r *ExecutionRepo) Create(ctx context.Context, e *models.Execution) error {
+	return withBoundSQLiteConn(ctx, r.db, func(conn *sql.Conn) error {
+		return r.CreateWithExecutor(ctx, conn, e)
+	})
+}
+
+// CreateWithExecutor persists an execution using the caller's transaction.
+func (r *ExecutionRepo) CreateWithExecutor(ctx context.Context, exec SQLExecutor, e *models.Execution) error {
 	isFollowup := 0
 	if e.IsFollowup {
 		isFollowup = 1
 	}
-	err := r.db.QueryRowContext(ctx,
+	err := exec.QueryRowContext(ctx,
 		`INSERT INTO executions (id, task_id, agent_config_id, status, prompt_sent, is_followup, starts_new_context)
-		 VALUES (lower(hex(randomblob(16))), ?, NULLIF(?, ''), ?, ?, ?, ?)
-		 RETURNING id, started_at`,
-		e.TaskID, e.AgentConfigID, e.Status, e.PromptSent, isFollowup, e.StartsNewContext).
-		Scan(&e.ID, &e.StartedAt)
+			 VALUES (COALESCE(NULLIF(?, ''), lower(hex(randomblob(16)))), ?, NULLIF(?, ''), ?, ?, ?, ?)
+			 RETURNING id, started_at`,
+		e.ID, e.TaskID, e.AgentConfigID, e.Status, e.PromptSent, isFollowup, e.StartsNewContext).Scan(&e.ID, &e.StartedAt)
 	if err != nil {
 		return fmt.Errorf("creating execution: %w", err)
+	}
+	return nil
+}
+
+func (r *ExecutionRepo) MarkRunning(ctx context.Context, id string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	res, err := execBoundSQLite(ctx, r.db,
+		`UPDATE executions
+		 SET status = ?, started_at = datetime('now'), completed_at = NULL
+		 WHERE id = ? AND status IN (?, ?)`,
+		models.ExecRunning, id, models.ExecQueued, models.ExecRunning)
+	if err != nil {
+		return fmt.Errorf("marking execution running: %w", err)
+	}
+	changed, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("marking execution running rows affected: %w", err)
+	}
+	if changed == 0 {
+		return fmt.Errorf("execution is not queued/running: %s", id)
 	}
 	return nil
 }
@@ -205,7 +319,7 @@ func (r *ExecutionRepo) CreateDirectTaskFollowupOrQueue(ctx context.Context, e *
 	}
 	threadRepo := NewThreadInputRepo(r.db)
 	started := false
-	err := threadRepo.WithImmediateTx(ctx, func(dbexec SQLExecutor) error {
+	err := withImmediateTx(ctx, r.db, func(dbexec SQLExecutor) error {
 		var status models.TaskStatus
 		var projectID string
 		if err := dbexec.QueryRowContext(ctx, `SELECT status, project_id FROM tasks WHERE id = ?`, e.TaskID).Scan(&status, &projectID); err != nil {
@@ -236,6 +350,7 @@ func (r *ExecutionRepo) CreateDirectTaskFollowupOrQueue(ctx context.Context, e *
 		if e.IsFollowup {
 			isFollowup = 1
 		}
+		e.Status = models.ExecQueued
 		if err := dbexec.QueryRowContext(ctx, `INSERT INTO executions
 			(id, task_id, agent_config_id, status, prompt_sent, is_followup, starts_new_context)
 			VALUES (lower(hex(randomblob(16))), ?, NULLIF(?, ''), ?, ?, ?, ?)
@@ -267,7 +382,7 @@ func (r *ExecutionRepo) CreateDirectTaskFollowup(ctx context.Context, e *models.
 }
 
 func (r *ExecutionRepo) SetAgentConfigIfEmpty(ctx context.Context, id, agentConfigID string) error {
-	_, err := r.db.ExecContext(ctx, `UPDATE executions SET agent_config_id = NULLIF(?, '')
+	_, err := execBoundSQLite(ctx, r.db, `UPDATE executions SET agent_config_id = NULLIF(?, '')
 		WHERE id = ? AND (agent_config_id IS NULL OR agent_config_id = '')`, agentConfigID, id)
 	if err != nil {
 		return fmt.Errorf("updating execution agent config: %w", err)
@@ -276,8 +391,11 @@ func (r *ExecutionRepo) SetAgentConfigIfEmpty(ctx context.Context, id, agentConf
 }
 
 func (r *ExecutionRepo) UpdateOutput(ctx context.Context, id string, output string) error {
-	_, err := r.db.ExecContext(ctx,
-		`UPDATE executions SET output = ? WHERE id = ?`, output, id)
+	err := withBoundSQLiteConn(ctx, r.db, func(conn *sql.Conn) error {
+		_, err := conn.ExecContext(ctx,
+			`UPDATE executions SET output = ? WHERE id = ? AND status = 'running'`, output, id)
+		return err
+	})
 	if err != nil {
 		return fmt.Errorf("updating execution output: %w", err)
 	}
@@ -285,7 +403,7 @@ func (r *ExecutionRepo) UpdateOutput(ctx context.Context, id string, output stri
 }
 
 func (r *ExecutionRepo) UpdateReasoningContent(ctx context.Context, id, reasoningContent string) error {
-	_, err := r.db.ExecContext(ctx,
+	_, err := execBoundSQLite(ctx, r.db,
 		`UPDATE executions SET reasoning_content = ? WHERE id = ?`, reasoningContent, id)
 	if err != nil {
 		return fmt.Errorf("updating execution reasoning content: %w", err)
@@ -294,11 +412,11 @@ func (r *ExecutionRepo) UpdateReasoningContent(ctx context.Context, id, reasonin
 }
 
 func (r *ExecutionRepo) ReplaceReasoningReplay(ctx context.Context, id, reasoningContent string, messages []models.ExecutionReplayMessage) error {
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, cleanup, err := beginImmediateTx(ctx, r.db)
 	if err != nil {
 		return fmt.Errorf("starting execution replay transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer cleanup()
 
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE executions SET reasoning_content = ? WHERE id = ?`, reasoningContent, id); err != nil {
@@ -313,7 +431,7 @@ func (r *ExecutionRepo) ReplaceReasoningReplay(ctx context.Context, id, reasonin
 	return nil
 }
 
-func replaceExecutionReplayMessages(ctx context.Context, tx *sql.Tx, id string, messages []models.ExecutionReplayMessage) error {
+func replaceExecutionReplayMessages(ctx context.Context, tx SQLExecutor, id string, messages []models.ExecutionReplayMessage) error {
 	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM execution_replay_messages WHERE execution_id = ?`, id); err != nil {
 		return fmt.Errorf("clearing execution replay messages: %w", err)
@@ -415,7 +533,7 @@ func (r *ExecutionRepo) Complete(ctx context.Context, id string, status models.E
 	// streaming writer during LLM execution. Failure completion paths frequently
 	// call Complete with empty output while the streamed transcript already exists
 	// in the row; preserving it keeps thread continuity after failures/retries.
-	_, err := r.db.ExecContext(ctx,
+	_, err := execBoundSQLite(ctx, r.db,
 		`UPDATE executions SET status = ?, output = CASE WHEN ? = '' THEN output ELSE ? END, error_message = ?,
 		 tokens_used = ?, duration_ms = ?, completed_at = datetime('now')
 		 WHERE id = ?`,
@@ -456,46 +574,56 @@ func (r *ExecutionRepo) syncAutomationActivitiesForExecution(ctx context.Context
 	} else if status == models.ExecRunning {
 		activityStatus = models.AutomationActivityRunning
 	}
-	_, err := r.db.ExecContext(ctx, `UPDATE automation_activities SET status = ?,
-		completed_at = CASE WHEN ? IN ('completed','failed','cancelled') THEN CURRENT_TIMESTAMP ELSE NULL END,
-		error_message = ? WHERE activity_type IN ('task_execution','thread_input_execution')
-		AND id IN (SELECT activity_id FROM automation_activity_resources
-		WHERE resource_type = 'execution' AND resource_id = ?)`, activityStatus, activityStatus, strings.TrimSpace(message), executionID)
-	if err != nil {
-		return fmt.Errorf("updating automation execution activities: %w", err)
-	}
-	return nil
+	return withBoundSQLiteConn(ctx, r.db, func(conn *sql.Conn) error {
+		rows, err := conn.QueryContext(ctx, `UPDATE automation_activities SET status = ?,
+			completed_at = CASE WHEN ? IN ('completed','failed','cancelled') THEN CURRENT_TIMESTAMP ELSE NULL END,
+			error_message = ? WHERE activity_type IN ('task_execution','thread_input_execution')
+			AND id IN (SELECT activity_id FROM automation_activity_resources
+			WHERE resource_type = 'execution' AND resource_id = ?) RETURNING id`, activityStatus, activityStatus, strings.TrimSpace(message), executionID)
+		if err != nil {
+			return fmt.Errorf("updating automation execution activities: %w", err)
+		}
+		if err := syncAutomationLiveActivityStateRows(ctx, conn, rows); err != nil {
+			return fmt.Errorf("syncing automation execution activity state: %w", err)
+		}
+		return nil
+	})
 }
-
-func (r *ExecutionRepo) CancelRunningByTask(ctx context.Context, taskID string) (int64, error) {
-	ids, err := r.CancelRunningByTaskReturningIDs(ctx, taskID)
+func (r *ExecutionRepo) CancelActiveByTask(ctx context.Context, taskID string) (int64, error) {
+	ids, err := r.CancelActiveByTaskReturningIDs(ctx, taskID)
 	if err != nil {
 		return 0, err
 	}
 	return int64(len(ids)), nil
 }
 
-func (r *ExecutionRepo) CancelRunningByTaskReturningIDs(ctx context.Context, taskID string) ([]string, error) {
-	rows, err := r.db.QueryContext(ctx,
-		`UPDATE executions
-			 SET status = ?, error_message = 'cancelled', completed_at = datetime('now')
-			 WHERE task_id = ? AND status = ?
-			 RETURNING id`,
-		models.ExecCancelled, taskID, models.ExecRunning)
-	if err != nil {
-		return nil, fmt.Errorf("cancelling running task executions: %w", err)
-	}
-	defer rows.Close()
+func (r *ExecutionRepo) CancelActiveByTaskReturningIDs(ctx context.Context, taskID string) ([]string, error) {
 	var ids []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, fmt.Errorf("scanning cancelled execution id: %w", err)
+	err := withBoundSQLiteConn(ctx, r.db, func(conn *sql.Conn) error {
+		rows, err := conn.QueryContext(ctx,
+			`UPDATE executions
+				 SET status = ?, error_message = 'cancelled', completed_at = datetime('now')
+				 WHERE task_id = ? AND status IN (?, ?)
+				 RETURNING id`,
+			models.ExecCancelled, taskID, models.ExecRunning, models.ExecQueued)
+		if err != nil {
+			return fmt.Errorf("cancelling active task executions: %w", err)
 		}
-		ids = append(ids, id)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("scanning cancelled execution ids: %w", err)
+		defer rows.Close()
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				return fmt.Errorf("scanning cancelled active execution id: %w", err)
+			}
+			ids = append(ids, id)
+		}
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("scanning cancelled active execution ids: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	return ids, nil
 }
@@ -514,7 +642,7 @@ func (r *ExecutionRepo) CompleteSuccessIfNoPendingSteering(ctx context.Context, 
 	// streaming writer during LLM execution. Failure completion paths frequently
 	// call Complete with empty output while the streamed transcript already exists
 	// in the row; preserving it keeps thread continuity after failures/retries.
-	res, err := r.db.ExecContext(ctx,
+	res, err := execBoundSQLite(ctx, r.db,
 		`UPDATE executions SET status = ?, output = CASE WHEN ? = '' THEN output ELSE ? END, error_message = '',
 		 tokens_used = ?, duration_ms = ?, completed_at = datetime('now')
 		 WHERE id = ?
@@ -554,9 +682,8 @@ func (r *ExecutionRepo) CompleteSuccessIfNoPendingSteering(ctx context.Context, 
 }
 
 func (r *ExecutionRepo) RecoverPreRestartRunningTaskExecutions(ctx context.Context) (int64, error) {
-	threadRepo := NewThreadInputRepo(r.db)
 	var recovered int64
-	err := threadRepo.WithImmediateTx(ctx, func(exec SQLExecutor) error {
+	err := withImmediateTx(ctx, r.db, func(exec SQLExecutor) error {
 		// No direct or promoted task-thread runner survives a process restart.
 		// Automation dispatches retain a durable dispatch identity/reservation and
 		// are deliberately left to Automation reconciliation.
@@ -637,7 +764,7 @@ func (r *ExecutionRepo) RecoverStaleRunningTaskExecutions(ctx context.Context) (
 			t.category != 'chat'
 			AND (t.status NOT IN ('queued', 'running')
 			     OR t.category NOT IN ('active', 'scheduled'))`
-	if _, err := r.db.ExecContext(ctx, `
+	if _, err := execBoundSQLite(ctx, r.db, `
 		UPDATE thread_inputs
 		SET input_mode = 'queued', turn_id = NULL, expected_turn_id = NULL, updated_at = datetime('now')
 		WHERE input_status = 'pending'
@@ -652,7 +779,7 @@ func (r *ExecutionRepo) RecoverStaleRunningTaskExecutions(ctx context.Context) (
 		  )`); err != nil {
 		return 0, fmt.Errorf("requeueing stale running task steering inputs: %w", err)
 	}
-	res, err := r.db.ExecContext(ctx, `
+	res, err := execBoundSQLite(ctx, r.db, `
 		UPDATE executions
 		SET status = CASE
 				WHEN (SELECT t.status FROM tasks t WHERE t.id = executions.task_id) = 'cancelled' THEN 'cancelled'
@@ -719,12 +846,7 @@ func (r *ExecutionRepo) HasActiveTaskExecution(ctx context.Context, taskID, excl
 }
 
 func (r *ExecutionRepo) FindLatestActiveChatExecution(ctx context.Context, projectID string) (*models.Execution, error) {
-	e, err := scanExecutionRow(r.db.QueryRowContext(ctx,
-		`SELECT `+executionSelectColumnsAliasLight+`
-		 FROM executions e
-		 JOIN tasks t ON t.id = e.task_id
-		 WHERE t.project_id = ? AND t.category = 'chat' AND e.status = 'running'
-		 ORDER BY e.started_at DESC, e.rowid DESC LIMIT 1`, projectID))
+	e, err := scanExecutionRow(r.db.QueryRowContext(ctx, latestActiveChatExecutionSQL(), projectID))
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -784,18 +906,7 @@ func (r *ExecutionRepo) listChatHistoryPage(ctx context.Context, projectID, befo
 	if limit <= 0 {
 		return []models.Execution{}, nil
 	}
-	query := `SELECT ` + executionSelectColumnsAliasLight + `
-		 FROM executions e
-		 JOIN tasks t ON t.id = e.task_id
-		 WHERE t.project_id = ? AND t.category = 'chat'`
-	args := []interface{}{projectID}
-	if beforeExecID != "" {
-		query += ` AND (e.started_at < (SELECT started_at FROM executions WHERE id = ?)
-			OR (e.started_at = (SELECT started_at FROM executions WHERE id = ?) AND e.rowid < (SELECT rowid FROM executions WHERE id = ?)))`
-		args = append(args, beforeExecID, beforeExecID, beforeExecID)
-	}
-	query += ` ORDER BY e.started_at DESC, e.rowid DESC LIMIT ?`
-	args = append(args, limit)
+	query, args := chatHistoryPageSQL(projectID, beforeExecID, limit)
 
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -804,6 +915,72 @@ func (r *ExecutionRepo) listChatHistoryPage(ctx context.Context, projectID, befo
 	defer rows.Close()
 
 	return scanExecutionsNewestFirstAsChronological(rows)
+}
+
+func latestActiveChatExecutionSQL() string {
+	return `SELECT ` + executionSelectColumnsAliasLight + `
+		 FROM executions e
+		 WHERE e.task_project_id = ? AND e.task_category = 'chat' AND e.status = 'running'
+		 ORDER BY e.started_at DESC, e.history_order DESC LIMIT 1`
+}
+
+func chatHistoryPageSQL(projectID, beforeExecID string, limit int) (string, []interface{}) {
+	query := `SELECT ` + executionSelectColumnsAliasLight + `
+		 FROM executions e
+		 WHERE e.task_project_id = ? AND e.task_category = 'chat'`
+	args := []interface{}{projectID}
+	if beforeExecID != "" {
+		query += ` AND (e.started_at < (SELECT started_at FROM executions WHERE id = ?)
+			OR (e.started_at = (SELECT started_at FROM executions WHERE id = ?) AND e.history_order < (SELECT history_order FROM executions WHERE id = ?)))`
+		args = append(args, beforeExecID, beforeExecID, beforeExecID)
+	}
+	query += ` ORDER BY e.started_at DESC, e.history_order DESC LIMIT ?`
+	args = append(args, limit)
+	return query, args
+}
+
+// CountByTask returns the number of executions belonging to a task without
+// selecting any execution payload columns.
+func (r *ExecutionRepo) CountByTask(ctx context.Context, taskID string) (int, error) {
+	var total int
+	if err := r.db.QueryRowContext(ctx, taskExecutionCountSQL, taskID).Scan(&total); err != nil {
+		return 0, fmt.Errorf("counting task executions: %w", err)
+	}
+	return total, nil
+}
+
+// ListByTaskChronologicalPage returns one chronological execution page. The
+// query applies both bounds in SQL so callers do not materialize executions
+// outside the requested window.
+func (r *ExecutionRepo) ListByTaskChronologicalPage(ctx context.Context, taskID string, offset, limit int) ([]models.Execution, error) {
+	if limit <= 0 {
+		return []models.Execution{}, nil
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	rows, err := r.db.QueryContext(ctx, taskExecutionChronologicalPageSQL, taskID, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("listing executions chronological page: %w", err)
+	}
+	defer rows.Close()
+
+	return scanTaskThreadExecutions(rows, limit)
+}
+
+func scanTaskThreadExecutions(rows *sql.Rows, capacity int) ([]models.Execution, error) {
+	if capacity > 64 {
+		capacity = 64
+	}
+	execs := make([]models.Execution, 0, capacity)
+	for rows.Next() {
+		e, err := scanTaskThreadExecutionRow(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scanning task-thread execution: %w", err)
+		}
+		execs = append(execs, e)
+	}
+	return execs, rows.Err()
 }
 
 // ListByTaskChronological returns all executions for a task ordered chronologically (oldest first).
@@ -871,7 +1048,7 @@ func (r *ExecutionRepo) listTaskExecutionPage(ctx context.Context, taskID, befor
 	return scanExecutionsNewestFirstAsChronological(rows)
 }
 
-func scanExecutionsChronological(rows *sql.Rows) ([]models.Execution, error) {
+func scanExecutionsNewestFirst(rows *sql.Rows) ([]models.Execution, error) {
 	var execs []models.Execution
 	for rows.Next() {
 		e, err := scanExecutionRow(rows)
@@ -881,6 +1058,10 @@ func scanExecutionsChronological(rows *sql.Rows) ([]models.Execution, error) {
 		execs = append(execs, e)
 	}
 	return execs, rows.Err()
+}
+
+func scanExecutionsChronological(rows *sql.Rows) ([]models.Execution, error) {
+	return scanExecutionsNewestFirst(rows)
 }
 
 func scanExecutionsNewestFirstAsChronological(rows *sql.Rows) ([]models.Execution, error) {
@@ -895,7 +1076,7 @@ func scanExecutionsNewestFirstAsChronological(rows *sql.Rows) ([]models.Executio
 }
 
 func (r *ExecutionRepo) UpdateDiffOutput(ctx context.Context, id string, diffOutput string) error {
-	_, err := r.db.ExecContext(ctx,
+	_, err := execBoundSQLite(ctx, r.db,
 		`UPDATE executions SET diff_output = ? WHERE id = ?`, diffOutput, id)
 	if err != nil {
 		return fmt.Errorf("updating execution diff output: %w", err)
@@ -905,7 +1086,7 @@ func (r *ExecutionRepo) UpdateDiffOutput(ctx context.Context, id string, diffOut
 
 func (r *ExecutionRepo) UpsertSwarmParentResult(ctx context.Context, parentTaskID, mergerExecutionID, output, diffOutput string, durationMs int64) error {
 	prompt := "Swarm merger final result from execution " + mergerExecutionID
-	res, err := r.db.ExecContext(ctx,
+	res, err := execBoundSQLite(ctx, r.db,
 		`UPDATE executions
 		 SET output = ?, diff_output = ?, duration_ms = ?, completed_at = datetime('now')
 		 WHERE task_id = ? AND prompt_sent = ? AND status = ?`,
@@ -916,7 +1097,7 @@ func (r *ExecutionRepo) UpsertSwarmParentResult(ctx context.Context, parentTaskI
 	if rows, err := res.RowsAffected(); err == nil && rows > 0 {
 		return nil
 	}
-	_, err = r.db.ExecContext(ctx,
+	_, err = execBoundSQLite(ctx, r.db,
 		`INSERT INTO executions (id, task_id, agent_config_id, status, prompt_sent, output, diff_output, duration_ms, completed_at)
 		 VALUES (lower(hex(randomblob(16))), ?, NULL, ?, ?, ?, ?, ?, datetime('now'))`,
 		parentTaskID, models.ExecCompleted, prompt, output, diffOutput, durationMs)
@@ -944,7 +1125,7 @@ func (r *ExecutionRepo) GetLatestNonEmptyDiffOutput(ctx context.Context, taskID 
 }
 
 func (r *ExecutionRepo) UpdateCliSessionID(ctx context.Context, id string, sessionID string) error {
-	_, err := r.db.ExecContext(ctx,
+	_, err := execBoundSQLite(ctx, r.db,
 		`UPDATE executions SET cli_session_id = ? WHERE id = ?`, sessionID, id)
 	if err != nil {
 		return fmt.Errorf("updating execution cli_session_id: %w", err)
@@ -1235,6 +1416,7 @@ func (r *ExecutionRepo) GetMostFrequentTasks(ctx context.Context, projectID stri
 }
 
 // FailedTaskPattern represents failed task pattern
+// returned by the Analytics API.
 type FailedTaskPattern struct {
 	TaskID       string
 	TaskTitle    string
@@ -1243,33 +1425,76 @@ type FailedTaskPattern struct {
 	LastFailedAt string
 }
 
-// GetFailedTaskPatterns returns tasks with failure patterns
-func (r *ExecutionRepo) GetFailedTaskPatterns(ctx context.Context, projectID string, limit int) ([]FailedTaskPattern, error) {
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT
-			t.id,
-			t.title,
-			COUNT(*) as failure_count,
-			e.error_message as last_error,
-			strftime('%Y-%m-%dT%H:%M:%SZ', MAX(e.started_at)) as last_failed_at
+type failedTaskPatternProjection struct {
+	TaskID       string
+	TaskTitle    string
+	FailureCount int
+	LastError    string
+	LastFailedAt string
+}
+
+const failedTaskPatternsQuery = `
+	WITH failed_executions AS (
+		SELECT
+			t.id AS task_id,
+			t.title AS task_title,
+			e.error_message AS latest_error,
+			e.started_at AS latest_started_at,
+			COUNT(*) OVER (PARTITION BY t.id) AS failure_count,
+			ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY e.started_at DESC, e.rowid DESC) AS rn
 		FROM executions e
 		JOIN tasks t ON t.id = e.task_id
 		WHERE t.project_id = ? AND e.status = 'failed'
-		GROUP BY t.id, t.title, e.error_message
-		ORDER BY failure_count DESC, last_failed_at DESC
-		LIMIT ?`, projectID, limit)
+	)
+	SELECT
+		task_id,
+		task_title,
+		failure_count,
+		COALESCE(latest_error, '') AS last_error,
+		strftime('%Y-%m-%dT%H:%M:%SZ', latest_started_at) AS last_failed_at
+	FROM failed_executions
+	WHERE rn = 1 AND failure_count >= ?
+	ORDER BY failure_count DESC, latest_started_at DESC, task_id ASC
+	LIMIT ?`
+
+func queryFailedTaskPatterns(ctx context.Context, db *sql.DB, projectID string, minFailures, limit int) ([]failedTaskPatternProjection, error) {
+	if minFailures < 1 {
+		minFailures = 1
+	}
+
+	rows, err := db.QueryContext(ctx, failedTaskPatternsQuery, projectID, minFailures, limit)
 	if err != nil {
 		return nil, fmt.Errorf("getting failed task patterns: %w", err)
 	}
 	defer rows.Close()
 
-	patterns := []FailedTaskPattern{}
+	patterns := []failedTaskPatternProjection{}
 	for rows.Next() {
-		var pattern FailedTaskPattern
+		var pattern failedTaskPatternProjection
 		if err := rows.Scan(&pattern.TaskID, &pattern.TaskTitle, &pattern.FailureCount, &pattern.LastError, &pattern.LastFailedAt); err != nil {
 			return nil, fmt.Errorf("scanning failed task pattern: %w", err)
 		}
 		patterns = append(patterns, pattern)
 	}
 	return patterns, rows.Err()
+}
+
+// GetFailedTaskPatterns returns task-level failure patterns for Analytics.
+func (r *ExecutionRepo) GetFailedTaskPatterns(ctx context.Context, projectID string, limit int) ([]FailedTaskPattern, error) {
+	rows, err := queryFailedTaskPatterns(ctx, r.db, projectID, 1, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	patterns := make([]FailedTaskPattern, 0, len(rows))
+	for _, row := range rows {
+		patterns = append(patterns, FailedTaskPattern{
+			TaskID:       row.TaskID,
+			TaskTitle:    row.TaskTitle,
+			FailureCount: row.FailureCount,
+			LastError:    row.LastError,
+			LastFailedAt: row.LastFailedAt,
+		})
+	}
+	return patterns, nil
 }

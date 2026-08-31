@@ -24,7 +24,7 @@ func (r *AttachmentRepo) Create(ctx context.Context, att *models.Attachment) err
 		VALUES (?, ?, ?, ?, ?)
 		RETURNING id, created_at
 	`
-	err := r.db.QueryRowContext(ctx, query,
+	err := queryRowBoundSQLite(ctx, r.db, query,
 		att.TaskID,
 		att.FileName,
 		att.FilePath,
@@ -39,12 +39,26 @@ func (r *AttachmentRepo) Create(ctx context.Context, att *models.Attachment) err
 
 func (r *AttachmentRepo) GetByID(ctx context.Context, id string) (*models.Attachment, error) {
 	query := `
-		SELECT id, task_id, file_name, file_path, media_type, file_size, created_at
-		FROM task_attachments
-		WHERE id = ?
-	`
+			SELECT id, task_id, file_name, file_path, media_type, file_size, created_at
+			FROM task_attachments
+			WHERE id = ?
+		`
+	return r.getByQuery(ctx, query, id)
+}
+
+func (r *AttachmentRepo) GetByIDForProject(ctx context.Context, id, projectID string) (*models.Attachment, error) {
+	query := `
+			SELECT a.id, a.task_id, a.file_name, a.file_path, a.media_type, a.file_size, a.created_at
+			FROM task_attachments a
+			JOIN tasks t ON t.id = a.task_id
+			WHERE a.id = ? AND t.project_id = ?
+		`
+	return r.getByQuery(ctx, query, id, projectID)
+}
+
+func (r *AttachmentRepo) getByQuery(ctx context.Context, query string, args ...any) (*models.Attachment, error) {
 	var att models.Attachment
-	err := r.db.QueryRowContext(ctx, query, id).Scan(
+	err := r.db.QueryRowContext(ctx, query, args...).Scan(
 		&att.ID,
 		&att.TaskID,
 		&att.FileName,
@@ -99,7 +113,20 @@ func (r *AttachmentRepo) ListByTask(ctx context.Context, taskID string) ([]model
 
 func (r *AttachmentRepo) Delete(ctx context.Context, id string) error {
 	query := `DELETE FROM task_attachments WHERE id = ?`
-	result, err := r.db.ExecContext(ctx, query, id)
+	return r.deleteByQuery(ctx, query, id)
+}
+
+func (r *AttachmentRepo) DeleteByIDForProject(ctx context.Context, id, projectID string) error {
+	query := `
+		DELETE FROM task_attachments
+		WHERE id = ?
+			AND task_id IN (SELECT id FROM tasks WHERE project_id = ?)
+	`
+	return r.deleteByQuery(ctx, query, id, projectID)
+}
+
+func (r *AttachmentRepo) deleteByQuery(ctx context.Context, query string, args ...any) error {
+	result, err := execBoundSQLite(ctx, r.db, query, args...)
 	if err != nil {
 		return fmt.Errorf("deleting attachment: %w", err)
 	}
@@ -115,17 +142,18 @@ func (r *AttachmentRepo) Delete(ctx context.Context, id string) error {
 
 func (r *AttachmentRepo) DeleteByTask(ctx context.Context, taskID string) error {
 	query := `DELETE FROM task_attachments WHERE task_id = ?`
-	_, err := r.db.ExecContext(ctx, query, taskID)
+	_, err := execBoundSQLite(ctx, r.db, query, taskID)
 	if err != nil {
 		return fmt.Errorf("deleting task attachments: %w", err)
 	}
 	return nil
 }
 
+const selectAllTaskAttachmentFilePathsSQL = `SELECT file_path FROM task_attachments`
+
 // GetAllFilePaths returns all file paths currently in the database
 func (r *AttachmentRepo) GetAllFilePaths(ctx context.Context) ([]string, error) {
-	query := `SELECT file_path FROM task_attachments ORDER BY file_path`
-	rows, err := r.db.QueryContext(ctx, query)
+	rows, err := r.db.QueryContext(ctx, selectAllTaskAttachmentFilePathsSQL)
 	if err != nil {
 		return nil, fmt.Errorf("querying file paths: %w", err)
 	}
@@ -147,43 +175,68 @@ func (r *AttachmentRepo) GetAllFilePaths(ctx context.Context) ([]string, error) 
 
 // CleanupOrphanedFiles removes attachment files from disk that no longer have database records
 func (r *AttachmentRepo) CleanupOrphanedFiles(ctx context.Context, uploadsDir string) (int, error) {
-	normalizedUploadsDir := normalizeAttachmentPath(uploadsDir)
-
-	// Get all file paths from database
 	dbPaths, err := r.GetAllFilePaths(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("getting file paths: %w", err)
 	}
 
-	// Build a map for O(1) lookup
+	return cleanupOrphanedAttachmentFiles(uploadsDir, dbPaths, orphanedAttachmentCleanupOptions{
+		walkError: "walking uploads directory",
+		scope: func(uploadsDir string) orphanedAttachmentCleanupScope {
+			chatUploadsDir := filepath.Join(uploadsDir, "chat")
+			return orphanedAttachmentCleanupScope{
+				walkDir:  uploadsDir,
+				pruneDir: uploadsDir,
+				skipWalkDir: func(path string) bool {
+					// Chat attachments are cleaned separately by ChatAttachmentRepo.
+					return filepath.Clean(path) == chatUploadsDir
+				},
+				skipPruneDir: func(name string) bool {
+					return name == "chat"
+				},
+			}
+		},
+	})
+}
+
+type orphanedAttachmentCleanupScope struct {
+	walkDir      string
+	pruneDir     string
+	skipWalkDir  func(path string) bool
+	skipPruneDir func(name string) bool
+}
+
+type orphanedAttachmentCleanupOptions struct {
+	walkError string
+	scope     func(uploadsDir string) orphanedAttachmentCleanupScope
+}
+
+func cleanupOrphanedAttachmentFiles(uploadsDir string, dbPaths []string, opts orphanedAttachmentCleanupOptions) (int, error) {
+	normalizedUploadsDir := normalizeAttachmentPath(uploadsDir)
+
 	dbPathSet := make(map[string]bool)
 	for _, path := range dbPaths {
 		dbPathSet[normalizeAttachmentPath(path)] = true
 	}
 
-	// Check if uploads directory exists
-	if _, err := os.Stat(normalizedUploadsDir); os.IsNotExist(err) {
+	scope := opts.scope(normalizedUploadsDir)
+	if _, err := os.Stat(scope.walkDir); os.IsNotExist(err) {
 		return 0, nil // Nothing to clean up
 	}
 
 	deletedCount := 0
-	chatUploadsDir := filepath.Join(normalizedUploadsDir, "chat")
-
-	// Walk the uploads directory
-	err = filepath.Walk(normalizedUploadsDir, func(path string, info os.FileInfo, err error) error {
+	err := filepath.Walk(scope.walkDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
 
 		if info.IsDir() {
-			// Chat attachments are cleaned separately by ChatAttachmentRepo.
-			if filepath.Clean(path) == chatUploadsDir {
+			if scope.skipWalkDir != nil && scope.skipWalkDir(path) {
 				return filepath.SkipDir
 			}
 			return nil
 		}
 
-		// Check if file is in database
 		if !dbPathSet[normalizeAttachmentPath(path)] {
 			if err := os.Remove(path); err != nil {
 				return fmt.Errorf("removing orphaned file %s: %w", path, err)
@@ -193,22 +246,19 @@ func (r *AttachmentRepo) CleanupOrphanedFiles(ctx context.Context, uploadsDir st
 
 		return nil
 	})
-
 	if err != nil {
-		return deletedCount, fmt.Errorf("walking uploads directory: %w", err)
+		return deletedCount, fmt.Errorf("%s: %w", opts.walkError, err)
 	}
 
-	// Clean up empty task directories
-	if err := r.cleanupEmptyDirs(normalizedUploadsDir); err != nil {
+	if err := cleanupEmptyAttachmentDirs(scope.pruneDir, scope.skipPruneDir); err != nil {
 		return deletedCount, fmt.Errorf("cleaning up empty directories: %w", err)
 	}
 
 	return deletedCount, nil
 }
 
-// cleanupEmptyDirs removes empty subdirectories in the uploads directory
-func (r *AttachmentRepo) cleanupEmptyDirs(uploadsDir string) error {
-	entries, err := os.ReadDir(uploadsDir)
+func cleanupEmptyAttachmentDirs(rootDir string, skipDir func(name string) bool) error {
+	entries, err := os.ReadDir(rootDir)
 	if err != nil {
 		return err
 	}
@@ -217,17 +267,16 @@ func (r *AttachmentRepo) cleanupEmptyDirs(uploadsDir string) error {
 		if !entry.IsDir() {
 			continue
 		}
-		if entry.Name() == "chat" {
+		if skipDir != nil && skipDir(entry.Name()) {
 			continue
 		}
 
-		dirPath := filepath.Join(uploadsDir, entry.Name())
+		dirPath := filepath.Join(rootDir, entry.Name())
 		subEntries, err := os.ReadDir(dirPath)
 		if err != nil {
 			continue
 		}
 
-		// Remove directory if empty
 		if len(subEntries) == 0 {
 			if err := os.Remove(dirPath); err != nil {
 				return fmt.Errorf("removing empty directory %s: %w", dirPath, err)

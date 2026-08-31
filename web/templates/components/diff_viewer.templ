@@ -59,6 +59,30 @@ const (
 	autoLoadFileDiffChars     = 20 * 1024
 )
 
+func normalizeDiffViewMode(view string) string {
+	if strings.TrimSpace(view) == "split" {
+		return "split"
+	}
+	return "inline"
+}
+
+func diffViewButtonClass(mode string, activeView string) string {
+	classes := "btn btn-sm join-item"
+	if normalizeDiffViewMode(activeView) == mode {
+		classes += " btn-active"
+	}
+	return classes
+}
+
+func diffViewContentClass(mode string, activeView string) string {
+	classes := "space-y-4"
+	if normalizeDiffViewMode(activeView) != mode {
+		classes += " hidden"
+	}
+	return classes
+}
+
+
 // DiffFileRenderMeta controls how a file should render under diff limits.
 type DiffFileRenderMeta struct {
 	Index           int
@@ -399,6 +423,10 @@ func langClass(path string) string {
 }
 
 templ DiffViewer(diffOutput string) {
+	@DiffViewerWithView(diffOutput, "inline")
+}
+
+templ DiffViewerWithView(diffOutput string, initialView string) {
 	if diffOutput == "" {
 		<div class="flex flex-col items-center justify-center py-16 text-base-content/50">
 			<svg xmlns="http://www.w3.org/2000/svg" class="h-16 w-16 mb-4 opacity-30" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -408,12 +436,16 @@ templ DiffViewer(diffOutput string) {
 			<p class="text-sm mt-1">No files were modified during this execution.</p>
 		</div>
 	} else {
-		@diffViewerContent(buildDiffRenderMetas(ParseDiffOutput(diffOutput)))
+		@diffViewerContent(buildDiffRenderMetas(ParseDiffOutput(diffOutput)), initialView)
 	}
 }
 
 // DiffViewerWithReview renders the diff viewer with inline code review support.
 templ DiffViewerWithReview(diffOutput string, taskID string, reviewComments []models.ReviewComment) {
+	@DiffViewerWithReviewView(diffOutput, taskID, reviewComments, "inline")
+}
+
+templ DiffViewerWithReviewView(diffOutput string, taskID string, reviewComments []models.ReviewComment, initialView string) {
 	if diffOutput == "" {
 		<div class="flex flex-col items-center justify-center py-16 text-base-content/50">
 			<svg xmlns="http://www.w3.org/2000/svg" class="h-16 w-16 mb-4 opacity-30" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -423,7 +455,7 @@ templ DiffViewerWithReview(diffOutput string, taskID string, reviewComments []mo
 			<p class="text-sm mt-1">No files were modified during this execution.</p>
 		</div>
 	} else {
-		@diffViewerWithReviewContent(buildDiffRenderMetas(ParseDiffOutput(diffOutput)), taskID, reviewComments)
+		@diffViewerWithReviewContent(buildDiffRenderMetas(ParseDiffOutput(diffOutput)), taskID, reviewComments, initialView)
 	}
 }
 
@@ -442,61 +474,63 @@ func buildCommentMap(comments []models.ReviewComment) map[string][]models.Review
 	return m
 }
 
+type reviewLineTarget struct {
+	LineNumber int
+	LineType   string
+	CanComment bool
+}
+
+// reviewTargetForDiffLine maps a visible diff line to the persisted review-comment target.
+func reviewTargetForDiffLine(line DiffLine) reviewLineTarget {
+	target := reviewLineTarget{
+		LineNumber: line.NewNum,
+		LineType:   "new",
+	}
+	if line.Type == "del" {
+		target.LineNumber = line.OldNum
+		target.LineType = "old"
+	} else if line.Type == "ctx" {
+		target.LineType = "ctx"
+	}
+	target.CanComment = target.LineNumber != 0
+	return target
+}
+
+func (target reviewLineTarget) commentKey(filePath string) string {
+	return commentKey(filePath, target.LineNumber, target.LineType)
+}
+
 // lineHasComment checks if a specific line has review comments
 func lineHasComment(commentMap map[string][]models.ReviewComment, filePath string, line DiffLine) bool {
-	lineNum := line.NewNum
-	lt := "new"
-	if line.Type == "del" {
-		lineNum = line.OldNum
-		lt = "old"
-	} else if line.Type == "ctx" {
-		lt = "ctx"
-	}
-	if lineNum == 0 {
+	target := reviewTargetForDiffLine(line)
+	if !target.CanComment {
 		return false
 	}
-	_, ok := commentMap[commentKey(filePath, lineNum, lt)]
+	_, ok := commentMap[target.commentKey(filePath)]
 	return ok
 }
 
 // getLineComments returns comments for a specific line
 func getLineComments(commentMap map[string][]models.ReviewComment, filePath string, line DiffLine) []models.ReviewComment {
-	lineNum := line.NewNum
-	lt := "new"
-	if line.Type == "del" {
-		lineNum = line.OldNum
-		lt = "old"
-	} else if line.Type == "ctx" {
-		lt = "ctx"
-	}
-	if lineNum == 0 {
+	target := reviewTargetForDiffLine(line)
+	if !target.CanComment {
 		return nil
 	}
-	return commentMap[commentKey(filePath, lineNum, lt)]
+	return commentMap[target.commentKey(filePath)]
 }
 
 // lineTypeForDiff maps diff line type to review line type
 func lineTypeForDiff(diffType string) string {
-	switch diffType {
-	case "del":
-		return "old"
-	case "ctx":
-		return "ctx"
-	default:
-		return "new"
-	}
+	return reviewTargetForDiffLine(DiffLine{Type: diffType, OldNum: 1, NewNum: 1}).LineType
 }
 
 // lineNumForReview returns the appropriate line number for a review comment
 func lineNumForReview(line DiffLine) int {
-	if line.Type == "del" {
-		return line.OldNum
-	}
-	return line.NewNum
+	return reviewTargetForDiffLine(line).LineNumber
 }
 
-templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, reviewComments []models.ReviewComment) {
-	<div id="diff-viewer" class="flex flex-col h-full" data-file-count={ fmt.Sprintf("%d", len(metas)) } data-task-id={ taskID } data-state-key={ diffViewerStateKey(metas, taskID) }>
+templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, reviewComments []models.ReviewComment, initialView string) {
+	<div id="diff-viewer" class="flex flex-col h-full" data-file-count={ fmt.Sprintf("%d", len(metas)) } data-task-id={ taskID } data-state-key={ diffViewerStateKey(metas, taskID) } data-initial-view={ normalizeDiffViewMode(initialView) }>
 		<!-- Toolbar -->
 		<div class="flex flex-wrap items-center gap-2 mb-4">
 			<div class="flex items-center gap-2 flex-1">
@@ -522,14 +556,14 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 				@ReviewToolbar(taskID, len(reviewComments))
 				<div class="join">
 					<button
-						class="btn btn-sm join-item btn-active"
+						class={ diffViewButtonClass("inline", initialView) }
 						id="diff-btn-inline"
 						onclick="switchDiffView('inline')"
 					>
 						Inline
 					</button>
 					<button
-						class="btn btn-sm join-item"
+						class={ diffViewButtonClass("split", initialView) }
 						id="diff-btn-split"
 						onclick="switchDiffView('split')"
 					>
@@ -556,7 +590,7 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 			</div>
 		}
 		<!-- Diff Content with Review -->
-		<div id="diff-content-inline" class="space-y-4">
+		<div id="diff-content-inline" class={ diffViewContentClass("inline", initialView) }>
 			for _, m := range metas {
 				if m.AutoLoad {
 					@inlineDiffFileWithReview(m.File, m.Index, shouldDefaultExpand(len(metas)), taskID, buildCommentMap(reviewComments))
@@ -565,7 +599,7 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 				}
 			}
 		</div>
-		<div id="diff-content-split" class="space-y-4 hidden">
+		<div id="diff-content-split" class={ diffViewContentClass("split", initialView) }>
 			for _, m := range metas {
 				if m.AutoLoad {
 					@splitDiffFileWithReview(m.File, m.Index, shouldDefaultExpand(len(metas)), taskID, buildCommentMap(reviewComments))
@@ -784,11 +818,23 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 				fallbackCopy();
 			}
 
-			function switchDiffView(mode) {
+			function persistDiffViewPreference(mode) {
+				try {
+					fetch('/ui/preferences', {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({ diff_view: mode }),
+						keepalive: true
+					}).catch(function() {});
+				} catch (_) {}
+			}
+
+			function switchDiffView(mode, persist) {
 				var inlineEl = document.getElementById('diff-content-inline');
 				var splitEl = document.getElementById('diff-content-split');
 				var btnInline = document.getElementById('diff-btn-inline');
 				var btnSplit = document.getElementById('diff-btn-split');
+				if (!inlineEl || !splitEl || !btnInline || !btnSplit) return;
 
 				if (mode === 'split') {
 					inlineEl.classList.add('hidden');
@@ -800,6 +846,9 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 					inlineEl.classList.remove('hidden');
 					btnInline.classList.add('btn-active');
 					btnSplit.classList.remove('btn-active');
+				}
+				if (persist !== false) {
+					persistDiffViewPreference(mode === 'split' ? 'split' : 'inline');
 				}
 			}
 
@@ -1589,6 +1638,35 @@ templ diffFileEmptyBody(f DiffFile) {
 	</div>
 }
 
+templ reviewInlineCommentRow(comment models.ReviewComment, filePath string, target reviewLineTarget, layout string) {
+	<tr
+		class="review-inline-comment"
+		data-comment-id={ comment.ID }
+		data-file-path={ filePath }
+		data-line-num={ fmt.Sprintf("%d", target.LineNumber) }
+		data-line-type={ target.LineType }
+		data-review-layout={ layout }
+	>
+		if layout == "split" {
+			<td class="diff-line-num px-2 py-0 border-r border-base-300 bg-base-200"></td>
+			<td class="diff-line-content px-3 py-0 border-r border-base-300 bg-base-200"></td>
+			<td class="diff-line-num px-2 py-0 border-r border-base-300 bg-base-200"></td>
+		} else {
+			<td class="diff-line-num px-2 py-0 w-12 border-r border-base-300 bg-base-200"></td>
+			<td class="diff-line-num px-2 py-0 w-12 border-r border-base-300 bg-base-200"></td>
+		}
+		<td class="p-0 bg-warning/15">
+			<div class="review-inline-comment-box p-2 pl-3 pr-8 text-xs cursor-text" data-comment-id={ comment.ID } onclick="startEditReviewComment(event)">
+				<span class="review-inline-comment-bar"></span>
+				<button type="button" class="btn btn-circle btn-ghost btn-xs review-delete-btn" onclick="deleteReviewComment(event)" aria-label="Delete review comment">
+					<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+				</button>
+				<p class="review-comment-text whitespace-pre-wrap break-words">{ comment.CommentText }</p>
+			</div>
+		</td>
+	</tr>
+}
+
 templ inlineDiffFileWithReview(f DiffFile, idx int, defaultExpanded bool, taskID string, commentMap map[string][]models.ReviewComment) {
 	<div id={ fmt.Sprintf("diff-file-%d", idx) } class="diff-file-card card bg-base-100 border border-base-300 scroll-mt-2">
 		@diffFileHeader(f, idx, defaultExpanded, false)
@@ -1634,26 +1712,7 @@ templ inlineDiffFileWithReview(f DiffFile, idx int, defaultExpanded bool, taskID
 								</tr>
 								if lineHasComment(commentMap, f.Path, line) {
 									for _, comment := range getLineComments(commentMap, f.Path, line) {
-										<tr
-											class="review-inline-comment"
-											data-comment-id={ comment.ID }
-											data-file-path={ f.Path }
-											data-line-num={ fmt.Sprintf("%d", lineNumForReview(line)) }
-											data-line-type={ lineTypeForDiff(line.Type) }
-											data-review-layout="inline"
-										>
-											<td class="diff-line-num px-2 py-0 w-12 border-r border-base-300 bg-base-200"></td>
-											<td class="diff-line-num px-2 py-0 w-12 border-r border-base-300 bg-base-200"></td>
-											<td class="p-0 bg-warning/15">
-												<div class="review-inline-comment-box p-2 pl-3 pr-8 text-xs cursor-text" data-comment-id={ comment.ID } onclick="startEditReviewComment(event)">
-													<span class="review-inline-comment-bar"></span>
-													<button type="button" class="btn btn-circle btn-ghost btn-xs review-delete-btn" onclick="deleteReviewComment(event)" aria-label="Delete review comment">
-														<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-													</button>
-													<p class="review-comment-text whitespace-pre-wrap break-words">{ comment.CommentText }</p>
-												</div>
-											</td>
-										</tr>
+										@reviewInlineCommentRow(comment, f.Path, reviewTargetForDiffLine(line), "inline")
 									}
 								}
 							}
@@ -1665,8 +1724,8 @@ templ inlineDiffFileWithReview(f DiffFile, idx int, defaultExpanded bool, taskID
 	</div>
 }
 
-templ diffViewerContent(metas []DiffFileRenderMeta) {
-	<div id="diff-viewer" class="flex flex-col h-full" data-file-count={ fmt.Sprintf("%d", len(metas)) } data-state-key={ diffViewerStateKey(metas, "") }>
+templ diffViewerContent(metas []DiffFileRenderMeta, initialView string) {
+	<div id="diff-viewer" class="flex flex-col h-full" data-file-count={ fmt.Sprintf("%d", len(metas)) } data-state-key={ diffViewerStateKey(metas, "") } data-initial-view={ normalizeDiffViewMode(initialView) }>
 		<!-- Toolbar -->
 		<div class="flex flex-wrap items-center gap-2 mb-4">
 			<div class="flex items-center gap-2 flex-1">
@@ -1690,14 +1749,14 @@ templ diffViewerContent(metas []DiffFileRenderMeta) {
 			</div>
 			<div class="join ml-auto">
 				<button
-					class="btn btn-sm join-item btn-active"
+					class={ diffViewButtonClass("inline", initialView) }
 					id="diff-btn-inline"
 					onclick="switchDiffView('inline')"
 				>
 					Inline
 				</button>
 				<button
-					class="btn btn-sm join-item"
+					class={ diffViewButtonClass("split", initialView) }
 					id="diff-btn-split"
 					onclick="switchDiffView('split')"
 				>
@@ -1723,7 +1782,7 @@ templ diffViewerContent(metas []DiffFileRenderMeta) {
 			</div>
 		}
 		<!-- Diff Content -->
-		<div id="diff-content-inline" class="space-y-4">
+		<div id="diff-content-inline" class={ diffViewContentClass("inline", initialView) }>
 			for _, m := range metas {
 				if m.AutoLoad {
 					@inlineDiffFile(m.File, m.Index, shouldDefaultExpand(len(metas)))
@@ -1732,7 +1791,7 @@ templ diffViewerContent(metas []DiffFileRenderMeta) {
 				}
 			}
 		</div>
-		<div id="diff-content-split" class="space-y-4 hidden">
+		<div id="diff-content-split" class={ diffViewContentClass("split", initialView) }>
 			for _, m := range metas {
 				if m.AutoLoad {
 					@splitDiffFile(m.File, m.Index, shouldDefaultExpand(len(metas)))
@@ -2010,11 +2069,23 @@ templ diffViewerContent(metas []DiffFileRenderMeta) {
 				fallbackCopy();
 			}
 
-			function switchDiffView(mode) {
+			function persistDiffViewPreference(mode) {
+				try {
+					fetch('/ui/preferences', {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({ diff_view: mode }),
+						keepalive: true
+					}).catch(function() {});
+				} catch (_) {}
+			}
+
+			function switchDiffView(mode, persist) {
 				var inlineEl = document.getElementById('diff-content-inline');
 				var splitEl = document.getElementById('diff-content-split');
 				var btnInline = document.getElementById('diff-btn-inline');
 				var btnSplit = document.getElementById('diff-btn-split');
+				if (!inlineEl || !splitEl || !btnInline || !btnSplit) return;
 
 				if (mode === 'split') {
 					inlineEl.classList.add('hidden');
@@ -2026,6 +2097,9 @@ templ diffViewerContent(metas []DiffFileRenderMeta) {
 					inlineEl.classList.remove('hidden');
 					btnInline.classList.add('btn-active');
 					btnSplit.classList.remove('btn-active');
+				}
+				if (persist !== false) {
+					persistDiffViewPreference(mode === 'split' ? 'split' : 'inline');
 				}
 			}
 
@@ -2189,27 +2263,7 @@ templ splitDiffFileWithReview(f DiffFile, idx int, defaultExpanded bool, taskID 
 								</tr>
 								if pair.Right.Type != "empty" && lineHasComment(commentMap, f.Path, pair.Right) {
 									for _, comment := range getLineComments(commentMap, f.Path, pair.Right) {
-										<tr
-											class="review-inline-comment"
-											data-comment-id={ comment.ID }
-											data-file-path={ f.Path }
-											data-line-num={ fmt.Sprintf("%d", lineNumForReview(pair.Right)) }
-											data-line-type={ lineTypeForDiff(pair.Right.Type) }
-											data-review-layout="split"
-										>
-											<td class="diff-line-num px-2 py-0 border-r border-base-300 bg-base-200"></td>
-											<td class="diff-line-content px-3 py-0 border-r border-base-300 bg-base-200"></td>
-											<td class="diff-line-num px-2 py-0 border-r border-base-300 bg-base-200"></td>
-											<td class="p-0 bg-warning/15">
-												<div class="review-inline-comment-box p-2 pl-3 pr-8 text-xs cursor-text" data-comment-id={ comment.ID } onclick="startEditReviewComment(event)">
-													<span class="review-inline-comment-bar"></span>
-													<button type="button" class="btn btn-circle btn-ghost btn-xs review-delete-btn" onclick="deleteReviewComment(event)" aria-label="Delete review comment">
-														<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-													</button>
-													<p class="review-comment-text whitespace-pre-wrap break-words">{ comment.CommentText }</p>
-												</div>
-											</td>
-										</tr>
+										@reviewInlineCommentRow(comment, f.Path, reviewTargetForDiffLine(pair.Right), "split")
 									}
 								}
 							}
@@ -2526,40 +2580,185 @@ func buildDiffRenderMetas(files []DiffFile) []DiffFileRenderMeta {
 		}
 
 		lineCount, charCount := diffFileMetrics(f)
-		meta := DiffFileRenderMeta{
-			Index:     i,
-			File:      f,
-			LineCount: lineCount,
-			CharCount: charCount,
-		}
-
-		switch {
-		case lineCount > maxLoadableFileDiffLines || charCount > maxLoadableFileDiffChars:
-			meta.BlockedReason = fmt.Sprintf(
-				"This file exceeds single-file limit (%d lines or %s raw diff).",
-				maxLoadableFileDiffLines,
-				formatByteSize(maxLoadableFileDiffChars),
-			)
-		case cumulativeLines+lineCount > maxLoadableTotalDiffLines || cumulativeChars+charCount > maxLoadableTotalDiffChars:
-			meta.BlockedReason = fmt.Sprintf(
-				"Total diff load limit reached (%d lines or %s raw diff).",
-				maxLoadableTotalDiffLines,
-				formatByteSize(maxLoadableTotalDiffChars),
-			)
-		default:
+		meta := buildDiffRenderMeta(f, i, lineCount, charCount, cumulativeLines, cumulativeChars)
+		if meta.AutoLoad || meta.CanLoadOnDemand {
 			cumulativeLines += lineCount
 			cumulativeChars += charCount
-			if lineCount <= autoLoadFileDiffLines && charCount <= autoLoadFileDiffChars {
-				meta.AutoLoad = true
-			} else {
-				meta.CanLoadOnDemand = true
-			}
 		}
 
 		metas = append(metas, meta)
 	}
 
 	return metas
+}
+
+func buildDiffRenderMeta(f DiffFile, index int, lineCount int, charCount int, cumulativeLines int, cumulativeChars int) DiffFileRenderMeta {
+	meta := DiffFileRenderMeta{
+		Index:     index,
+		File:      f,
+		LineCount: lineCount,
+		CharCount: charCount,
+	}
+
+	switch {
+	case lineCount > maxLoadableFileDiffLines || charCount > maxLoadableFileDiffChars:
+		meta.BlockedReason = fmt.Sprintf(
+			"This file exceeds single-file limit (%d lines or %s raw diff).",
+			maxLoadableFileDiffLines,
+			formatByteSize(maxLoadableFileDiffChars),
+		)
+	case cumulativeLines+lineCount > maxLoadableTotalDiffLines || cumulativeChars+charCount > maxLoadableTotalDiffChars:
+		meta.BlockedReason = fmt.Sprintf(
+			"Total diff load limit reached (%d lines or %s raw diff).",
+			maxLoadableTotalDiffLines,
+			formatByteSize(maxLoadableTotalDiffChars),
+		)
+	default:
+		if lineCount <= autoLoadFileDiffLines && charCount <= autoLoadFileDiffChars {
+			meta.AutoLoad = true
+		} else {
+			meta.CanLoadOnDemand = true
+		}
+	}
+
+	return meta
+}
+
+// DiffRenderMetaByIndex extracts render metadata for one diff file without
+// parsing every later file in the diff output. It preserves the same per-file
+// and cumulative load-limit decisions as buildDiffRenderMetas for the requested
+// index by scanning previous file blocks only for their rendered line metrics.
+func DiffRenderMetaByIndex(diffOutput string, fileIndex int) (DiffFileRenderMeta, bool) {
+	meta, _, ok := diffRenderMetaByIndexWithParsedBytes(diffOutput, fileIndex)
+	return meta, ok
+}
+
+func diffRenderMetaByIndexWithParsedBytes(diffOutput string, fileIndex int) (DiffFileRenderMeta, int, bool) {
+	if diffOutput == "" || fileIndex < 0 || fileIndex >= maxDiffFiles {
+		return DiffFileRenderMeta{}, 0, false
+	}
+
+	cumulativeLines := 0
+	cumulativeChars := 0
+	currentIndex := -1
+	blockStart := -1
+	parsedBytes := 0
+
+	for lineStart := 0; lineStart <= len(diffOutput); {
+		if lineStart == len(diffOutput) {
+			break
+		}
+		lineEnd := strings.IndexByte(diffOutput[lineStart:], '\n')
+		nextLineStart := len(diffOutput)
+		line := diffOutput[lineStart:]
+		if lineEnd >= 0 {
+			nextLineStart = lineStart + lineEnd + 1
+			line = diffOutput[lineStart : lineStart+lineEnd]
+		}
+
+		if strings.HasPrefix(line, "diff --git ") {
+			if currentIndex >= 0 {
+				blockEnd := lineStart
+				if currentIndex == fileIndex {
+					return diffRenderMetaFromBlock(diffOutput[blockStart:blockEnd], fileIndex, cumulativeLines, cumulativeChars), blockEnd, true
+				}
+				lines, chars := diffBlockMetrics(diffOutput[blockStart:blockEnd])
+				if previousDiffFileCountsTowardTotal(lines, chars, cumulativeLines, cumulativeChars) {
+					cumulativeLines += lines
+					cumulativeChars += chars
+				}
+			}
+			currentIndex++
+			if currentIndex >= maxDiffFiles {
+				return DiffFileRenderMeta{}, lineStart, false
+			}
+			blockStart = lineStart
+		}
+
+		if nextLineStart == len(diffOutput) {
+			break
+		}
+		lineStart = nextLineStart
+	}
+
+	if currentIndex == fileIndex && blockStart >= 0 {
+		parsedBytes = len(diffOutput)
+		return diffRenderMetaFromBlock(diffOutput[blockStart:], fileIndex, cumulativeLines, cumulativeChars), parsedBytes, true
+	}
+	if blockStart >= 0 {
+		parsedBytes = len(diffOutput)
+	}
+	return DiffFileRenderMeta{}, parsedBytes, false
+}
+
+func diffRenderMetaFromBlock(block string, fileIndex int, cumulativeLines int, cumulativeChars int) DiffFileRenderMeta {
+	files := ParseDiffOutput(block)
+	if len(files) == 0 {
+		return DiffFileRenderMeta{}
+	}
+	lineCount, charCount := diffFileMetrics(files[0])
+	return buildDiffRenderMeta(files[0], fileIndex, lineCount, charCount, cumulativeLines, cumulativeChars)
+}
+
+func previousDiffFileCountsTowardTotal(lineCount int, charCount int, cumulativeLines int, cumulativeChars int) bool {
+	if lineCount > maxLoadableFileDiffLines || charCount > maxLoadableFileDiffChars {
+		return false
+	}
+	if cumulativeLines+lineCount > maxLoadableTotalDiffLines || cumulativeChars+charCount > maxLoadableTotalDiffChars {
+		return false
+	}
+	return true
+}
+
+func diffBlockMetrics(block string) (int, int) {
+	lineCount := 0
+	charCount := 0
+	inHunk := false
+	for lineStart := 0; lineStart <= len(block); {
+		if lineStart == len(block) {
+			break
+		}
+		lineEnd := strings.IndexByte(block[lineStart:], '\n')
+		nextLineStart := len(block)
+		line := block[lineStart:]
+		if lineEnd >= 0 {
+			nextLineStart = lineStart + lineEnd + 1
+			line = block[lineStart : lineStart+lineEnd]
+		}
+
+		switch {
+		case strings.HasPrefix(line, "@@"):
+			inHunk = true
+			charCount += len(line)
+		case line == `\ No newline at end of file`:
+		case inHunk && (strings.HasPrefix(line, "+") || strings.HasPrefix(line, "-") || strings.HasPrefix(line, " ") || line == ""):
+			lineCount++
+			if line == "" {
+				break
+			}
+			charCount += len(line) - 1
+		case !inHunk && diffLineWouldSynthesizeHunk(line):
+			inHunk = true
+			lineCount++
+			charCount += len(line) - 1
+		}
+
+		if nextLineStart == len(block) {
+			break
+		}
+		lineStart = nextLineStart
+	}
+	return lineCount, charCount
+}
+
+func diffLineWouldSynthesizeHunk(line string) bool {
+	if line == "" || strings.HasPrefix(line, "diff --git ") || strings.HasPrefix(line, "--- ") || strings.HasPrefix(line, "+++ ") {
+		return false
+	}
+	if strings.HasPrefix(line, "index ") || strings.HasPrefix(line, "new file") || strings.HasPrefix(line, "deleted file") || strings.HasPrefix(line, "old mode") || strings.HasPrefix(line, "new mode") || strings.HasPrefix(line, "Binary files") || strings.HasPrefix(line, "# Untracked") || strings.HasPrefix(line, "# + ") {
+		return false
+	}
+	return strings.HasPrefix(line, "+") || strings.HasPrefix(line, "-") || strings.HasPrefix(line, " ")
 }
 
 func diffFileCardID(idx int, view string) string {
@@ -2611,25 +2810,33 @@ templ deferredDiffFileWithReview(meta DiffFileRenderMeta, taskID string, view st
 }
 
 templ LoadDiffFileCard(diffOutput string, fileIndex int, view string, taskID string, reviewComments []models.ReviewComment, reviewMode bool) {
-	if !diffFileMetaExists(diffOutput, fileIndex) {
+	if meta, exists := DiffRenderMetaByIndex(diffOutput, fileIndex); exists {
+		@LoadDiffFileCardMeta(meta, true, view, taskID, reviewComments, reviewMode)
+	} else {
+		@LoadDiffFileCardMeta(DiffFileRenderMeta{}, false, view, taskID, reviewComments, reviewMode)
+	}
+}
+
+templ LoadDiffFileCardMeta(meta DiffFileRenderMeta, exists bool, view string, taskID string, reviewComments []models.ReviewComment, reviewMode bool) {
+	if !exists {
 		<div class="alert alert-warning">
 			<span>Unable to load diff file.</span>
 		</div>
-	} else if !isDiffFileLoadable(diffOutput, fileIndex) {
+	} else if !isDiffRenderMetaLoadable(meta) {
 		<div class="alert alert-warning">
-			<span>{ getDiffFileBlockedReason(diffOutput, fileIndex) }</span>
+			<span>{ meta.BlockedReason }</span>
 		</div>
 	} else if view == "split" {
 		if reviewMode {
-			@splitDiffFileWithReview(getDiffRenderMeta(diffOutput, fileIndex).File, getDiffRenderMeta(diffOutput, fileIndex).Index, true, taskID, buildCommentMap(reviewComments))
+			@splitDiffFileWithReview(meta.File, meta.Index, true, taskID, buildCommentMap(reviewComments))
 		} else {
-			@splitDiffFile(getDiffRenderMeta(diffOutput, fileIndex).File, getDiffRenderMeta(diffOutput, fileIndex).Index, true)
+			@splitDiffFile(meta.File, meta.Index, true)
 		}
 	} else {
 		if reviewMode {
-			@inlineDiffFileWithReview(getDiffRenderMeta(diffOutput, fileIndex).File, getDiffRenderMeta(diffOutput, fileIndex).Index, true, taskID, buildCommentMap(reviewComments))
+			@inlineDiffFileWithReview(meta.File, meta.Index, true, taskID, buildCommentMap(reviewComments))
 		} else {
-			@inlineDiffFile(getDiffRenderMeta(diffOutput, fileIndex).File, getDiffRenderMeta(diffOutput, fileIndex).Index, true)
+			@inlineDiffFile(meta.File, meta.Index, true)
 		}
 	}
 }
@@ -2645,22 +2852,17 @@ func getDiffRenderMetaByIndex(files []DiffFile, fileIndex int) (DiffFileRenderMe
 }
 
 func diffFileMetaExists(diffOutput string, fileIndex int) bool {
-	_, ok := getDiffRenderMetaByIndex(ParseDiffOutput(diffOutput), fileIndex)
+	_, ok := DiffRenderMetaByIndex(diffOutput, fileIndex)
 	return ok
 }
 
-func getDiffRenderMeta(diffOutput string, fileIndex int) DiffFileRenderMeta {
-	meta, _ := getDiffRenderMetaByIndex(ParseDiffOutput(diffOutput), fileIndex)
+func diffRenderMetaByIndexOrZero(diffOutput string, fileIndex int) DiffFileRenderMeta {
+	meta, _ := DiffRenderMetaByIndex(diffOutput, fileIndex)
 	return meta
 }
 
-func isDiffFileLoadable(diffOutput string, fileIndex int) bool {
-	meta := getDiffRenderMeta(diffOutput, fileIndex)
+func isDiffRenderMetaLoadable(meta DiffFileRenderMeta) bool {
 	return meta.AutoLoad || meta.CanLoadOnDemand
-}
-
-func getDiffFileBlockedReason(diffOutput string, fileIndex int) string {
-	return getDiffRenderMeta(diffOutput, fileIndex).BlockedReason
 }
 
 func diffViewerStateKey(metas []DiffFileRenderMeta, taskID string) string {

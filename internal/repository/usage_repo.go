@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -47,7 +48,7 @@ func (r *UsageRepo) RecordUsageEvent(ctx context.Context, event *models.LLMUsage
 	}
 
 	var occurredRaw, createdRaw string
-	err := r.db.QueryRowContext(ctx, `
+	err := queryRowBoundSQLite(ctx, r.db, `
 		INSERT OR IGNORE INTO llm_usage_events (
 			id, provider, account_id, project_id, task_id, execution_id, chat_thread_id, turn_id,
 			agent_config_id, model, operation, status, error_message,
@@ -87,11 +88,11 @@ func (r *UsageRepo) CreateAccountUsageSnapshot(ctx context.Context, snapshot *mo
 		fetchedAt = time.Now().UTC()
 	}
 
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, cleanup, err := beginImmediateTx(ctx, r.db)
 	if err != nil {
 		return fmt.Errorf("starting account usage snapshot transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer cleanup()
 
 	var fetchedRaw, createdRaw string
 	err = tx.QueryRowContext(ctx, `
@@ -203,14 +204,20 @@ func (r *UsageRepo) GetUsageTotals(ctx context.Context, filter UsageFilter) (*mo
 }
 
 func (r *UsageRepo) GetDailyUsage(ctx context.Context, filter UsageFilter) ([]models.DailyUsagePoint, error) {
+	if shouldUseProjectDateBoundedAggregate(filter) {
+		return r.getDailyUsageFromScan(ctx, filter, false)
+	}
 	where, args := usageWhere(filter)
+	periodExpr := usagePeriodExpression("day")
+	source := "llm_usage_events"
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT date(occurred_at, 'localtime') AS period,
+		SELECT `+periodExpr+` AS period,
 		       COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0), COALESCE(SUM(cached_input_tokens), 0),
 		       COALESCE(SUM(total_tokens), 0), SUM(cost_usd), COUNT(cost_usd), COUNT(*)
-		FROM llm_usage_events `+where+`
+		FROM `+source+` `+where+`
 		GROUP BY period
 		ORDER BY period ASC`, args...)
+
 	if err != nil {
 		return nil, fmt.Errorf("getting daily usage: %w", err)
 	}
@@ -233,14 +240,20 @@ func (r *UsageRepo) GetDailyUsage(ctx context.Context, filter UsageFilter) ([]mo
 }
 
 func (r *UsageRepo) GetDailyUsageByModel(ctx context.Context, filter UsageFilter) ([]models.DailyUsagePoint, error) {
+	if shouldUseProjectDateBoundedAggregate(filter) {
+		return r.getDailyUsageFromScan(ctx, filter, true)
+	}
 	where, args := usageWhere(filter)
+	periodExpr := usagePeriodExpression("day")
+	source := "llm_usage_events"
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT date(occurred_at, 'localtime') AS period, provider, model,
+		SELECT `+periodExpr+` AS period, provider, model,
 		       COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0), COALESCE(SUM(cached_input_tokens), 0),
 		       COALESCE(SUM(total_tokens), 0), SUM(cost_usd), COUNT(cost_usd), COUNT(*)
-		FROM llm_usage_events `+where+`
+		FROM `+source+` `+where+`
 		GROUP BY period, provider, model
 		ORDER BY period ASC, provider ASC, model ASC`, args...)
+
 	if err != nil {
 		return nil, fmt.Errorf("getting daily usage by model: %w", err)
 	}
@@ -263,13 +276,18 @@ func (r *UsageRepo) GetDailyUsageByModel(ctx context.Context, filter UsageFilter
 }
 
 func (r *UsageRepo) GetUsageRateBuckets(ctx context.Context, filter UsageFilter) ([]models.UsageRatePoint, error) {
+	if shouldUseProjectDateBoundedAggregate(filter) {
+		return r.getUsageRateBucketsFromScan(ctx, filter, false)
+	}
 	where, args := usageWhere(filter)
 	periodExpr := usagePeriodExpression(filter.GroupBy)
+	source := "llm_usage_events"
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT `+periodExpr+` AS period, COALESCE(SUM(total_tokens), 0), COUNT(*)
-		FROM llm_usage_events `+where+`
+		FROM `+source+` `+where+`
 		GROUP BY period
 		ORDER BY period ASC`, args...)
+
 	if err != nil {
 		return nil, fmt.Errorf("getting usage rate buckets: %w", err)
 	}
@@ -287,13 +305,18 @@ func (r *UsageRepo) GetUsageRateBuckets(ctx context.Context, filter UsageFilter)
 }
 
 func (r *UsageRepo) GetUsageRateBucketsByModel(ctx context.Context, filter UsageFilter) ([]models.UsageRatePoint, error) {
+	if shouldUseProjectDateBoundedAggregate(filter) {
+		return r.getUsageRateBucketsFromScan(ctx, filter, true)
+	}
 	where, args := usageWhere(filter)
 	periodExpr := usagePeriodExpression(filter.GroupBy)
+	source := "llm_usage_events"
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT `+periodExpr+` AS period, provider, model, COALESCE(SUM(total_tokens), 0), COUNT(*)
-		FROM llm_usage_events `+where+`
+		FROM `+source+` `+where+`
 		GROUP BY period, provider, model
 		ORDER BY period ASC, provider ASC, model ASC`, args...)
+
 	if err != nil {
 		return nil, fmt.Errorf("getting usage rate buckets by model: %w", err)
 	}
@@ -310,15 +333,38 @@ func (r *UsageRepo) GetUsageRateBucketsByModel(ctx context.Context, filter Usage
 	return points, rows.Err()
 }
 
-func (r *UsageRepo) GetModelUsageBreakdown(ctx context.Context, filter UsageFilter) ([]models.ModelUsagePoint, error) {
+func (r *UsageRepo) GetLatestUsageEventTime(ctx context.Context, filter UsageFilter) (*time.Time, error) {
 	where, args := usageWhere(filter)
+	var occurredRaw string
+	err := r.db.QueryRowContext(ctx, `
+		SELECT occurred_at
+		FROM llm_usage_events `+where+`
+		ORDER BY occurred_at DESC, rowid DESC
+		LIMIT 1`, args...).Scan(&occurredRaw)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("getting latest usage event time: %w", err)
+	}
+	occurredAt := parseSQLiteTime(occurredRaw)
+	return &occurredAt, nil
+}
+
+func (r *UsageRepo) GetModelUsageBreakdown(ctx context.Context, filter UsageFilter) ([]models.ModelUsagePoint, error) {
+	if shouldUseProjectDateBoundedAggregate(filter) {
+		return r.getModelUsageBreakdownFromScan(ctx, filter)
+	}
+	where, args := usageWhere(filter)
+	source := "llm_usage_events"
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT provider, model, COALESCE(SUM(total_tokens), 0), COALESCE(SUM(input_tokens), 0),
 		       COALESCE(SUM(output_tokens), 0), COALESCE(SUM(cached_input_tokens), 0), COALESCE(SUM(reasoning_output_tokens), 0),
 		       SUM(cost_usd), COUNT(cost_usd), COUNT(*)
-		FROM llm_usage_events `+where+`
+		FROM `+source+` `+where+`
 		GROUP BY provider, model
 		ORDER BY COALESCE(SUM(total_tokens), 0) DESC, provider ASC, model ASC`, args...)
+
 	if err != nil {
 		return nil, fmt.Errorf("getting model usage breakdown: %w", err)
 	}
@@ -348,6 +394,246 @@ func (r *UsageRepo) GetModelUsageBreakdown(ctx context.Context, filter UsageFilt
 		}
 	}
 	return points, nil
+}
+
+type usageAggregateEvent struct {
+	Provider              string
+	Model                 string
+	InputTokens           int
+	OutputTokens          int
+	CacheTokens           int
+	ReasoningOutputTokens int
+	TotalTokens           int
+	CostUSD               float64
+	CostValid             bool
+	OccurredAt            time.Time
+}
+
+type usageModelKey struct {
+	Period   string
+	Provider string
+	Model    string
+}
+
+type usageDailyAggregate struct {
+	point     models.DailyUsagePoint
+	costSum   float64
+	costCount int
+}
+
+type usageRateAggregate struct {
+	point models.UsageRatePoint
+}
+
+type usageModelAggregate struct {
+	point     models.ModelUsagePoint
+	costSum   float64
+	costCount int
+}
+
+func (r *UsageRepo) getDailyUsageFromScan(ctx context.Context, filter UsageFilter, byModel bool) ([]models.DailyUsagePoint, error) {
+	aggregates := make(map[usageModelKey]*usageDailyAggregate)
+	if err := r.forEachUsageAggregateEvent(ctx, filter, func(event usageAggregateEvent) {
+		key := usageModelKey{Period: usageLocalPeriod(event.OccurredAt, "day")}
+		if byModel {
+			key.Provider = event.Provider
+			key.Model = event.Model
+		}
+		agg := aggregates[key]
+		if agg == nil {
+			agg = &usageDailyAggregate{point: models.DailyUsagePoint{Period: key.Period, Provider: key.Provider, Model: key.Model}}
+			aggregates[key] = agg
+		}
+		agg.point.InputTokens += event.InputTokens
+		agg.point.OutputTokens += event.OutputTokens
+		agg.point.CacheTokens += event.CacheTokens
+		agg.point.TotalTokens += event.TotalTokens
+		agg.point.CallCount++
+		if event.CostValid {
+			agg.costSum += event.CostUSD
+			agg.costCount++
+		}
+	}); err != nil {
+		return nil, err
+	}
+	keys := sortedUsageModelKeys(aggregates)
+	points := make([]models.DailyUsagePoint, 0, len(keys))
+	for _, key := range keys {
+		agg := aggregates[key]
+		point := agg.point
+		if agg.costCount > 0 {
+			cost := agg.costSum
+			point.CostUSD = &cost
+		}
+		points = append(points, point)
+	}
+	return points, nil
+}
+
+func (r *UsageRepo) getUsageRateBucketsFromScan(ctx context.Context, filter UsageFilter, byModel bool) ([]models.UsageRatePoint, error) {
+	groupBy := normalizedUsageGroupBy(filter.GroupBy)
+	aggregates := make(map[usageModelKey]*usageRateAggregate)
+	if err := r.forEachUsageAggregateEvent(ctx, filter, func(event usageAggregateEvent) {
+		key := usageModelKey{Period: usageLocalPeriod(event.OccurredAt, groupBy)}
+		if byModel {
+			key.Provider = event.Provider
+			key.Model = event.Model
+		}
+		agg := aggregates[key]
+		if agg == nil {
+			agg = &usageRateAggregate{point: models.UsageRatePoint{Period: key.Period, Provider: key.Provider, Model: key.Model}}
+			aggregates[key] = agg
+		}
+		agg.point.TotalTokens += event.TotalTokens
+		agg.point.CallCount++
+	}); err != nil {
+		return nil, err
+	}
+	keys := sortedUsageModelKeys(aggregates)
+	points := make([]models.UsageRatePoint, 0, len(keys))
+	for _, key := range keys {
+		points = append(points, aggregates[key].point)
+	}
+	return points, nil
+}
+
+func (r *UsageRepo) getModelUsageBreakdownFromScan(ctx context.Context, filter UsageFilter) ([]models.ModelUsagePoint, error) {
+	aggregates := make(map[usageModelKey]*usageModelAggregate)
+	var total int
+	if err := r.forEachUsageAggregateEvent(ctx, filter, func(event usageAggregateEvent) {
+		key := usageModelKey{Provider: event.Provider, Model: event.Model}
+		agg := aggregates[key]
+		if agg == nil {
+			agg = &usageModelAggregate{point: models.ModelUsagePoint{Provider: key.Provider, Model: key.Model}}
+			aggregates[key] = agg
+		}
+		agg.point.TotalTokens += event.TotalTokens
+		agg.point.InputTokens += event.InputTokens
+		agg.point.OutputTokens += event.OutputTokens
+		agg.point.CacheTokens += event.CacheTokens
+		agg.point.ReasoningOutputTokens += event.ReasoningOutputTokens
+		agg.point.CallCount++
+		if event.CostValid {
+			agg.costSum += event.CostUSD
+			agg.costCount++
+		}
+		total += event.TotalTokens
+	}); err != nil {
+		return nil, err
+	}
+	points := make([]models.ModelUsagePoint, 0, len(aggregates))
+	for _, agg := range aggregates {
+		point := agg.point
+		if agg.costCount > 0 {
+			cost := agg.costSum
+			point.CostUSD = &cost
+		}
+		if total > 0 {
+			point.Percent = float64(point.TotalTokens) * 100 / float64(total)
+		}
+		points = append(points, point)
+	}
+	sort.Slice(points, func(i, j int) bool {
+		if points[i].TotalTokens != points[j].TotalTokens {
+			return points[i].TotalTokens > points[j].TotalTokens
+		}
+		if points[i].Provider != points[j].Provider {
+			return points[i].Provider < points[j].Provider
+		}
+		return points[i].Model < points[j].Model
+	})
+	return points, nil
+}
+
+func (r *UsageRepo) forEachUsageAggregateEvent(ctx context.Context, filter UsageFilter, handle func(usageAggregateEvent)) error {
+	source, where, args := usageAggregateScanSource(filter)
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT provider, model, input_tokens, output_tokens, cached_input_tokens, reasoning_output_tokens,
+		       total_tokens, cost_usd, occurred_at
+		FROM `+source+` `+where+`
+		ORDER BY occurred_at ASC`, args...)
+	if err != nil {
+		return fmt.Errorf("scanning usage aggregate events: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var event usageAggregateEvent
+		var cost sql.NullFloat64
+		var occurredRaw string
+		if err := rows.Scan(&event.Provider, &event.Model, &event.InputTokens, &event.OutputTokens, &event.CacheTokens, &event.ReasoningOutputTokens, &event.TotalTokens, &cost, &occurredRaw); err != nil {
+			return fmt.Errorf("scanning usage aggregate event: %w", err)
+		}
+		if cost.Valid {
+			event.CostUSD = cost.Float64
+			event.CostValid = true
+		}
+		event.OccurredAt = parseSQLiteTime(occurredRaw)
+		handle(event)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func usageAggregateScanSource(filter UsageFilter) (string, string, []any) {
+	where, args := usageWhere(filter)
+	return "llm_usage_events", where, args
+}
+
+func shouldUseProjectDateBoundedAggregate(filter UsageFilter) bool {
+	return filter.ProjectID != "" && !filter.DateFrom.IsZero() && !filter.DateTo.IsZero()
+}
+
+func sortedUsageModelKeys[T any](aggregates map[usageModelKey]T) []usageModelKey {
+	keys := make([]usageModelKey, 0, len(aggregates))
+	for key := range aggregates {
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i].Period != keys[j].Period {
+			return keys[i].Period < keys[j].Period
+		}
+		if keys[i].Provider != keys[j].Provider {
+			return keys[i].Provider < keys[j].Provider
+		}
+		return keys[i].Model < keys[j].Model
+	})
+	return keys
+}
+
+func normalizedUsageGroupBy(groupBy string) string {
+	switch groupBy {
+	case "hour", "week", "month":
+		return groupBy
+	default:
+		return "day"
+	}
+}
+
+func usageLocalPeriod(occurredAt time.Time, groupBy string) string {
+	local := occurredAt.In(time.Local)
+	switch normalizedUsageGroupBy(groupBy) {
+	case "hour":
+		return local.Format("2006-01-02 15:00:00")
+	case "week":
+		return fmt.Sprintf("%04d-W%02d", local.Year(), sqliteWeekMonday(local))
+	case "month":
+		return local.Format("2006-01")
+	default:
+		return local.Format("2006-01-02")
+	}
+}
+
+func sqliteWeekMonday(t time.Time) int {
+	jan1 := time.Date(t.Year(), time.January, 1, 0, 0, 0, 0, t.Location())
+	firstMonday := (int(time.Monday) - int(jan1.Weekday()) + 7) % 7
+	yday := t.YearDay() - 1
+	if yday < firstMonday {
+		return 0
+	}
+	return (yday-firstMonday)/7 + 1
 }
 
 func usageWhere(filter UsageFilter) (string, []any) {
@@ -393,7 +679,7 @@ func usagePeriodExpression(groupBy string) string {
 	}
 }
 
-func insertAccountUsageExtraLimits(ctx context.Context, tx *sql.Tx, snapshot *models.AccountUsageSnapshot) error {
+func insertAccountUsageExtraLimits(ctx context.Context, tx SQLExecutor, snapshot *models.AccountUsageSnapshot) error {
 	if snapshot == nil || len(snapshot.ExtraLimits) == 0 {
 		return nil
 	}

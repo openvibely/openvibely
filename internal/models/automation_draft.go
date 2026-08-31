@@ -89,9 +89,8 @@ type AutomationCapabilitySnapshot struct {
 	SupportedNodeTypes []AutomationNodeType                       `json:"supported_node_types"`
 	SupportedRoles     []string                                   `json:"supported_roles"`
 	Agents             []AutomationCapabilityRef                  `json:"agents"`
-	Skills             []AutomationCapabilityRef                  `json:"skills"`
+	Models             []AutomationCapabilityRef                  `json:"models"`
 	Integrations       map[string]AutomationIntegrationCapability `json:"integrations"`
-	SourceFiles        []string                                   `json:"source_files"`
 	ReusableResources  []AutomationCapabilityRef                  `json:"reusable_resources"`
 	SafetyBoundaries   map[string]bool                            `json:"safety_boundaries"`
 }
@@ -125,13 +124,18 @@ type AutomationChatConfirmationReceipt struct {
 }
 
 type AutomationBuilderPage struct {
-	Result       AutomationDraftResult        `json:"result"`
-	AutomationID string                       `json:"automation_id,omitempty"`
-	Source       string                       `json:"source,omitempty"`
-	NodePalette  []AutomationDraftNode        `json:"node_palette,omitempty"`
-	EdgePalette  []AutomationDraftEdge        `json:"edge_palette,omitempty"`
-	Capabilities AutomationCapabilitySnapshot `json:"capabilities"`
-	Error        string                       `json:"error,omitempty"`
+	Result                  AutomationDraftResult        `json:"result"`
+	AutomationID            string                       `json:"automation_id,omitempty"`
+	Source                  string                       `json:"source,omitempty"`
+	NodePalette             []AutomationDraftNode        `json:"node_palette,omitempty"`
+	EdgePalette             []AutomationDraftEdge        `json:"edge_palette,omitempty"`
+	Capabilities            AutomationCapabilitySnapshot `json:"capabilities"`
+	TemplateUpdateAvailable bool                         `json:"template_update_available,omitempty"`
+	LifecycleState          AutomationLifecycleState     `json:"lifecycle_state,omitempty"`
+	YAML                    string                       `json:"-"`
+	YAMLProvided            bool                         `json:"-"`
+	InitialView             string                       `json:"-"`
+	Error                   string                       `json:"error,omitempty"`
 }
 
 func (m AutomationGraphMetadata) Candidate() (AutomationDraftCandidate, error) {

@@ -1,0 +1,733 @@
+package service
+
+import (
+	"context"
+	"fmt"
+	"testing"
+	"time"
+
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/stretchr/testify/require"
+)
+
+func TestScheduleActionServiceCreateRejectsMalformedInputsWithoutPersistence(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	project := &models.Project{Name: "Schedule validation"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	task := &models.Task{ProjectID: project.ID, Title: "Target", Prompt: "prompt", Category: models.CategoryBacklog, Status: models.StatusCompleted, Priority: 2}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	svc := NewScheduleActionService(taskRepo, scheduleRepo)
+
+	tests := []struct {
+		name string
+		req  ScheduleTaskRequest
+	}{
+		{name: "trailing time text", req: ScheduleTaskRequest{TaskID: task.ID, Time: "09:30junk", Repeat: "daily"}},
+		{name: "time with seconds", req: ScheduleTaskRequest{TaskID: task.ID, Time: "09:30:45", Repeat: "daily"}},
+		{name: "unsupported repeat", req: ScheduleTaskRequest{TaskID: task.ID, Time: "09:30", Repeat: "yearly"}},
+		{name: "unknown weekly day", req: ScheduleTaskRequest{TaskID: task.ID, Time: "09:30", Repeat: "weekly", Days: []string{"monday"}}},
+		{name: "mixed valid and unknown weekly days", req: ScheduleTaskRequest{TaskID: task.ID, Time: "09:30", Repeat: "weekly", Days: []string{"mon", "funday"}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := svc.Create(ctx, project.ID, tt.req)
+			require.Error(t, err)
+			schedules, listErr := scheduleRepo.ListByTask(ctx, task.ID)
+			require.NoError(t, listErr)
+			require.Empty(t, schedules)
+			storedTask, getErr := taskRepo.GetByID(ctx, task.ID)
+			require.NoError(t, getErr)
+			require.Equal(t, models.CategoryBacklog, storedTask.Category)
+			require.Equal(t, models.StatusCompleted, storedTask.Status)
+		})
+	}
+}
+
+func TestScheduleActionServiceCreateClearsCancellationRequestForScheduledRun(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	workerSvc := newTestWorkerService(t)
+	project := &models.Project{Name: "Schedule clears cancellation marker"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	task := &models.Task{ProjectID: project.ID, Title: "Stopped target", Prompt: "prompt", Category: models.CategoryBacklog, Status: models.StatusCancelled, Priority: 2}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	workerSvc.MarkCancellationRequested(task.ID)
+	require.True(t, workerSvc.IsCancellationRequested(task.ID))
+	svc := NewScheduleActionService(taskRepo, scheduleRepo, workerSvc)
+
+	_, err := svc.Create(ctx, project.ID, ScheduleTaskRequest{TaskID: task.ID, Time: "09:30", Repeat: "daily"})
+	require.NoError(t, err)
+	require.False(t, workerSvc.IsCancellationRequested(task.ID), "schedule activation should clear stale cancellation marker")
+	updated, err := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.CategoryScheduled, updated.Category)
+	require.Equal(t, models.StatusPending, updated.Status)
+}
+
+func TestScheduleActionServiceCreateOneTimeResetsCompletedAlreadyScheduledTask(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	project := &models.Project{Name: "Runtime one-time completed scheduled task"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	task := &models.Task{ProjectID: project.ID, Title: "Completed scheduled target", Prompt: "prompt", Category: models.CategoryScheduled, Status: models.StatusCompleted, Priority: 2}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	svc := NewScheduleActionService(taskRepo, scheduleRepo)
+
+	result, err := svc.Create(ctx, project.ID, ScheduleTaskRequest{TaskID: task.ID, Time: "09:30", Repeat: "once"})
+	require.NoError(t, err)
+	require.NotNil(t, result.Schedule)
+	require.Equal(t, models.RepeatOnce, result.Schedule.RepeatType)
+	require.NotNil(t, result.Schedule.NextRun)
+	require.Equal(t, models.CategoryScheduled, result.Task.Category)
+	require.Equal(t, models.StatusPending, result.Task.Status)
+
+	updated, err := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.CategoryScheduled, updated.Category)
+	require.Equal(t, models.StatusPending, updated.Status)
+	schedules, err := scheduleRepo.ListByTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, schedules, 1)
+}
+
+func TestScheduleActionServiceCreateDoesNotResetRunningAlreadyScheduledTask(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	project := &models.Project{Name: "Runtime running scheduled task"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	task := &models.Task{ProjectID: project.ID, Title: "Running scheduled target", Prompt: "prompt", Category: models.CategoryScheduled, Status: models.StatusRunning, Priority: 2}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	svc := NewScheduleActionService(taskRepo, scheduleRepo)
+
+	result, err := svc.Create(ctx, project.ID, ScheduleTaskRequest{TaskID: task.ID, Time: "09:30", Repeat: "once"})
+	require.NoError(t, err)
+	require.NotNil(t, result.Schedule)
+	require.Equal(t, models.StatusRunning, result.Task.Status)
+
+	updated, err := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.CategoryScheduled, updated.Category)
+	require.Equal(t, models.StatusRunning, updated.Status)
+}
+
+func TestScheduleActionServiceCreateRecurringPreservesTerminalAlreadyScheduledTask(t *testing.T) {
+	for _, status := range []models.TaskStatus{models.StatusCompleted, models.StatusFailed} {
+		t.Run(string(status), func(t *testing.T) {
+			db := testutil.NewTestDB(t)
+			ctx := context.Background()
+			projectRepo := repository.NewProjectRepo(db)
+			taskRepo := repository.NewTaskRepo(db, nil)
+			scheduleRepo := repository.NewScheduleRepo(db)
+			project := &models.Project{Name: "Runtime recurring scheduled task"}
+			require.NoError(t, projectRepo.Create(ctx, project))
+			task := &models.Task{ProjectID: project.ID, Title: "Terminal scheduled target", Prompt: "prompt", Category: models.CategoryScheduled, Status: status, Priority: 2}
+			require.NoError(t, taskRepo.Create(ctx, task))
+			svc := NewScheduleActionService(taskRepo, scheduleRepo)
+
+			result, err := svc.Create(ctx, project.ID, ScheduleTaskRequest{TaskID: task.ID, Time: "09:30", Repeat: "daily"})
+			require.NoError(t, err)
+			require.NotNil(t, result.Schedule)
+			require.Equal(t, models.RepeatDaily, result.Schedule.RepeatType)
+			require.Equal(t, status, result.Task.Status)
+
+			updated, err := taskRepo.GetByID(ctx, task.ID)
+			require.NoError(t, err)
+			require.Equal(t, models.CategoryScheduled, updated.Category)
+			require.Equal(t, status, updated.Status)
+		})
+	}
+}
+
+func TestScheduleActionServiceModifyRejectsMalformedInputsWithoutMutation(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	project := &models.Project{Name: "Schedule validation"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	task := &models.Task{ProjectID: project.ID, Title: "Target", Prompt: "prompt", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	runAt := time.Date(2030, time.January, 7, 8, 15, 0, 0, time.Local).UTC()
+	schedule := &models.Schedule{TaskID: task.ID, RunAt: runAt, RepeatType: models.RepeatWeekly, RepeatInterval: 2, Enabled: true}
+	require.NoError(t, scheduleRepo.Create(ctx, schedule))
+	svc := NewScheduleActionService(taskRepo, scheduleRepo)
+
+	tests := []struct {
+		name string
+		req  ModifyScheduleRequest
+	}{
+		{name: "trailing time text", req: ModifyScheduleRequest{ScheduleID: schedule.ID, Time: "09:30junk"}},
+		{name: "time with seconds", req: ModifyScheduleRequest{ScheduleID: schedule.ID, Time: "09:30:45"}},
+		{name: "unsupported repeat", req: ModifyScheduleRequest{ScheduleID: schedule.ID, Repeat: "yearly"}},
+		{name: "unknown weekly day", req: ModifyScheduleRequest{ScheduleID: schedule.ID, Days: []string{"monday"}}},
+		{name: "mixed valid and unknown weekly days", req: ModifyScheduleRequest{ScheduleID: schedule.ID, Days: []string{"fri", "funday"}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := svc.Modify(ctx, project.ID, tt.req)
+			require.Error(t, err)
+			stored, getErr := scheduleRepo.GetByID(ctx, schedule.ID)
+			require.NoError(t, getErr)
+			require.Equal(t, runAt, stored.RunAt)
+			require.Equal(t, models.RepeatWeekly, stored.RepeatType)
+			require.Equal(t, 2, stored.RepeatInterval)
+		})
+	}
+}
+
+func TestScheduleActionServiceCreateRejectsMultipleWeeklyDaysWithoutPersistence(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	project := &models.Project{Name: "Schedule multi-day validation"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	task := &models.Task{ProjectID: project.ID, Title: "Target", Prompt: "prompt", Category: models.CategoryBacklog, Status: models.StatusCompleted, Priority: 2}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	svc := NewScheduleActionService(taskRepo, scheduleRepo)
+
+	_, err := svc.Create(ctx, project.ID, ScheduleTaskRequest{TaskID: task.ID, Time: "09:30", Repeat: "weekly", Days: []string{"mon", "wed", "fri"}})
+	require.Error(t, err)
+	var actionErr *ScheduleActionError
+	require.ErrorAs(t, err, &actionErr)
+	require.Equal(t, ScheduleActionDaysError, actionErr.Kind)
+	require.Contains(t, err.Error(), "one weekly day")
+
+	schedules, listErr := scheduleRepo.ListByTask(ctx, task.ID)
+	require.NoError(t, listErr)
+	require.Empty(t, schedules)
+	storedTask, getErr := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, getErr)
+	require.Equal(t, models.CategoryBacklog, storedTask.Category)
+	require.Equal(t, models.StatusCompleted, storedTask.Status)
+}
+
+func TestScheduleActionServiceModifyRejectsMultipleWeeklyDaysWithoutMutation(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	project := &models.Project{Name: "Schedule multi-day validation"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	task := &models.Task{ProjectID: project.ID, Title: "Target", Prompt: "prompt", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	runAt := time.Date(2030, time.January, 7, 8, 15, 0, 0, time.Local).UTC()
+	schedule := &models.Schedule{TaskID: task.ID, RunAt: runAt, RepeatType: models.RepeatWeekly, RepeatInterval: 2, Enabled: true, ClearContextOnStart: false}
+	require.NoError(t, scheduleRepo.Create(ctx, schedule))
+	svc := NewScheduleActionService(taskRepo, scheduleRepo)
+
+	_, err := svc.Modify(ctx, project.ID, ModifyScheduleRequest{ScheduleID: schedule.ID, Days: []string{"mon", "wed", "fri"}})
+	require.Error(t, err)
+	var actionErr *ScheduleActionError
+	require.ErrorAs(t, err, &actionErr)
+	require.Equal(t, ScheduleActionDaysError, actionErr.Kind)
+	require.Contains(t, err.Error(), "one weekly day")
+
+	stored, getErr := scheduleRepo.GetByID(ctx, schedule.ID)
+	require.NoError(t, getErr)
+	require.Equal(t, runAt, stored.RunAt)
+	require.Equal(t, models.RepeatWeekly, stored.RepeatType)
+	require.Equal(t, 2, stored.RepeatInterval)
+	require.False(t, stored.ClearContextOnStart)
+}
+
+func TestScheduleActionServiceAcceptsTimeBoundariesAndSupportedWeekdays(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	project := &models.Project{Name: "Schedule validation"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	svc := NewScheduleActionService(taskRepo, scheduleRepo)
+
+	for i, tt := range []struct {
+		time    string
+		day     string
+		weekday time.Weekday
+	}{
+		{time: "00:00", day: "sun", weekday: time.Sunday},
+		{time: "23:59", day: "mon", weekday: time.Monday},
+		{time: "12:30", day: "tue", weekday: time.Tuesday},
+		{time: "12:30", day: "wed", weekday: time.Wednesday},
+		{time: "12:30", day: "thu", weekday: time.Thursday},
+		{time: "12:30", day: "fri", weekday: time.Friday},
+		{time: "12:30", day: "sat", weekday: time.Saturday},
+	} {
+		task := &models.Task{ProjectID: project.ID, Title: tt.day, Prompt: "prompt", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: i + 1}
+		require.NoError(t, taskRepo.Create(ctx, task))
+		result, err := svc.Create(ctx, project.ID, ScheduleTaskRequest{TaskID: task.ID, Time: tt.time, Repeat: "weekly", Days: []string{tt.day}})
+		require.NoError(t, err)
+		require.Equal(t, tt.weekday, result.Schedule.RunAt.Local().Weekday())
+		require.Equal(t, tt.time, result.Schedule.RunAt.Local().Format("15:04"))
+	}
+}
+
+func TestScheduleActionServiceCreateAbsoluteAppliesBrowserFormDefaultsAndLifecycle(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	workerSvc := newTestWorkerService(t)
+	project := &models.Project{Name: "Absolute create lifecycle"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	task := &models.Task{ProjectID: project.ID, Title: "Completed scheduled target", Prompt: "prompt", Category: models.CategoryScheduled, Status: models.StatusCompleted, Priority: 2}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	workerSvc.MarkCancellationRequested(task.ID)
+	clearContext := false
+	runAt := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+	svc := NewScheduleActionService(taskRepo, scheduleRepo, workerSvc)
+
+	result, err := svc.CreateAbsoluteForTask(ctx, CreateAbsoluteScheduleForTaskRequest{
+		TaskID:              task.ID,
+		RunAt:               runAt,
+		RepeatType:          models.RepeatOnce,
+		RepeatInterval:      0,
+		ClearContextOnStart: &clearContext,
+	})
+	require.NoError(t, err)
+	require.Empty(t, result.Warnings)
+	require.NotNil(t, result.Schedule)
+	require.Equal(t, models.RepeatOnce, result.Schedule.RepeatType)
+	require.Equal(t, 1, result.Schedule.RepeatInterval)
+	require.True(t, result.Schedule.Enabled)
+	require.False(t, result.Schedule.ClearContextOnStart)
+	require.NotNil(t, result.Schedule.NextRun)
+	require.True(t, result.Schedule.NextRun.Equal(runAt), "next_run=%v run_at=%v", result.Schedule.NextRun, runAt)
+	require.False(t, workerSvc.IsCancellationRequested(task.ID))
+
+	updated, err := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.CategoryScheduled, updated.Category)
+	require.Equal(t, models.StatusPending, updated.Status)
+}
+
+func TestScheduleActionServiceModifyAbsoluteAppliesBrowserNextRunAndLifecycle(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	workerSvc := newTestWorkerService(t)
+	project := &models.Project{Name: "Absolute update lifecycle"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	task := &models.Task{ProjectID: project.ID, Title: "Cancelled scheduled target", Prompt: "prompt", Category: models.CategoryScheduled, Status: models.StatusCancelled, Priority: 2}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	oldRunAt := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+	schedule := &models.Schedule{TaskID: task.ID, RunAt: oldRunAt, RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: true, ClearContextOnStart: false}
+	require.NoError(t, scheduleRepo.Create(ctx, schedule))
+	workerSvc.MarkCancellationRequested(task.ID)
+	newRunAt := time.Now().UTC().Add(2 * time.Hour).Truncate(time.Second)
+	clearContext := true
+	svc := NewScheduleActionService(taskRepo, scheduleRepo, workerSvc)
+
+	result, err := svc.ModifyAbsolute(ctx, ModifyAbsoluteScheduleRequest{
+		ScheduleID:          schedule.ID,
+		RunAt:               newRunAt,
+		RepeatType:          models.RepeatHours,
+		RepeatInterval:      2,
+		ClearContextOnStart: &clearContext,
+	})
+	require.NoError(t, err)
+	require.Empty(t, result.Warnings)
+	require.False(t, workerSvc.IsCancellationRequested(task.ID))
+
+	storedSchedule, err := scheduleRepo.GetByID(ctx, schedule.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.RepeatHours, storedSchedule.RepeatType)
+	require.Equal(t, 2, storedSchedule.RepeatInterval)
+	require.True(t, storedSchedule.ClearContextOnStart)
+	require.True(t, storedSchedule.RunAt.Equal(newRunAt), "run_at=%v want=%v", storedSchedule.RunAt, newRunAt)
+	require.NotNil(t, storedSchedule.NextRun)
+	require.True(t, storedSchedule.NextRun.Equal(newRunAt), "next_run=%v want=%v", storedSchedule.NextRun, newRunAt)
+	updatedTask, err := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusPending, updatedTask.Status)
+}
+
+func TestScheduleActionServiceModifyRuntimeTimingAppliesLifecycleButDisableDoesNot(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	workerSvc := newTestWorkerService(t)
+	project := &models.Project{Name: "Runtime modify lifecycle"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	task := &models.Task{ProjectID: project.ID, Title: "Runtime cancelled scheduled target", Prompt: "prompt", Category: models.CategoryScheduled, Status: models.StatusCancelled, Priority: 2}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	schedule := &models.Schedule{TaskID: task.ID, RunAt: time.Now().UTC().Add(time.Hour), RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: true}
+	require.NoError(t, scheduleRepo.Create(ctx, schedule))
+	workerSvc.MarkCancellationRequested(task.ID)
+	svc := NewScheduleActionService(taskRepo, scheduleRepo, workerSvc)
+	disabled := false
+
+	_, err := svc.Modify(ctx, project.ID, ModifyScheduleRequest{ScheduleID: schedule.ID, Enabled: &disabled})
+	require.NoError(t, err)
+	require.True(t, workerSvc.IsCancellationRequested(task.ID), "pure disable should not reactivate a terminal scheduled task")
+	updated, err := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusCancelled, updated.Status)
+
+	_, err = svc.Modify(ctx, project.ID, ModifyScheduleRequest{ScheduleID: schedule.ID, Time: "10:15"})
+	require.NoError(t, err)
+	require.False(t, workerSvc.IsCancellationRequested(task.ID), "timing updates should clear stale cancellation markers")
+	updated, err = taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusPending, updated.Status)
+}
+
+func TestScheduleActionServiceModifyRepeatOnceTimeChangeKeepsScheduleRunnable(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	project := &models.Project{Name: "Repeat once pause regression"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	task := &models.Task{
+		ProjectID: project.ID,
+		Title:     "One-time scheduled task",
+		Prompt:    "run once",
+		Category:  models.CategoryScheduled,
+		Status:    models.StatusPending,
+		Priority:  2,
+	}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	runAt := time.Date(2030, time.January, 10, 9, 0, 0, 0, time.Local).UTC()
+	schedule := &models.Schedule{
+		TaskID:         task.ID,
+		RunAt:          runAt,
+		RepeatType:     models.RepeatOnce,
+		RepeatInterval: 1,
+		Enabled:        true,
+	}
+	require.NoError(t, scheduleRepo.Create(ctx, schedule))
+
+	result, err := NewScheduleActionService(taskRepo, scheduleRepo).Modify(ctx, project.ID, ModifyScheduleRequest{
+		ScheduleID: schedule.ID,
+		Time:       "10:00",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, result.Schedule)
+	require.NotNil(t, result.Schedule.NextRun, "a one-time timing edit must keep the schedule due-able")
+	require.Equal(t, result.Schedule.RunAt, *result.Schedule.NextRun)
+
+	stored, err := scheduleRepo.GetByID(ctx, schedule.ID)
+	require.NoError(t, err)
+	require.NotNil(t, stored.NextRun)
+	require.Equal(t, stored.RunAt, *stored.NextRun)
+}
+
+func TestScheduleActionServiceModifyRepeatOnceEnableRequiresTimeAndCombinedEditRestoresNextRun(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	project := &models.Project{Name: "Repeat once modify resume"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	task := &models.Task{ProjectID: project.ID, Title: "Fired one-time task", Prompt: "retry once", Category: models.CategoryScheduled, Status: models.StatusCompleted, Priority: 2}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	schedule := &models.Schedule{TaskID: task.ID, RunAt: time.Date(2030, time.January, 10, 9, 0, 0, 0, time.UTC), RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: true}
+	require.NoError(t, scheduleRepo.Create(ctx, schedule))
+	require.NoError(t, scheduleRepo.MarkRan(ctx, schedule.ID, time.Now(), nil))
+	require.NoError(t, scheduleRepo.ToggleEnabled(ctx, schedule.ID, false))
+	svc := NewScheduleActionService(taskRepo, scheduleRepo)
+	enabled := true
+
+	_, err := svc.Modify(ctx, project.ID, ModifyScheduleRequest{ScheduleID: schedule.ID, Enabled: &enabled})
+	require.Error(t, err)
+	var actionErr *ScheduleActionError
+	require.ErrorAs(t, err, &actionErr)
+	require.Equal(t, ScheduleActionTimeError, actionErr.Kind)
+	unchanged, err := scheduleRepo.GetByID(ctx, schedule.ID)
+	require.NoError(t, err)
+	require.False(t, unchanged.Enabled)
+	require.Nil(t, unchanged.NextRun)
+	unchangedTask, err := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusCompleted, unchangedTask.Status)
+
+	result, err := svc.Modify(ctx, project.ID, ModifyScheduleRequest{ScheduleID: schedule.ID, Time: "10:00", Enabled: &enabled})
+	require.NoError(t, err)
+	require.NotNil(t, result.Schedule.NextRun)
+	require.True(t, result.Schedule.NextRun.Equal(result.Schedule.RunAt))
+	updated, err := scheduleRepo.GetByID(ctx, schedule.ID)
+	require.NoError(t, err)
+	require.True(t, updated.Enabled)
+	require.NotNil(t, updated.NextRun)
+	require.True(t, updated.NextRun.Equal(updated.RunAt))
+	updatedTask, err := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusPending, updatedTask.Status)
+}
+
+func TestScheduleActionServiceTogglePreservesTimingForRepeatingAndOneTimeSchedules(t *testing.T) {
+	for _, repeatType := range []models.RepeatType{models.RepeatDaily, models.RepeatOnce} {
+		t.Run(string(repeatType), func(t *testing.T) {
+			db := testutil.NewTestDB(t)
+			ctx := context.Background()
+			projectRepo := repository.NewProjectRepo(db)
+			taskRepo := repository.NewTaskRepo(db, nil)
+			scheduleRepo := repository.NewScheduleRepo(db)
+			project := &models.Project{Name: "Toggle timing preservation"}
+			require.NoError(t, projectRepo.Create(ctx, project))
+			task := &models.Task{
+				ProjectID: project.ID,
+				Title:     string(repeatType) + " task",
+				Prompt:    "scheduled prompt",
+				Category:  models.CategoryScheduled,
+				Status:    models.StatusPending,
+				Priority:  2,
+			}
+			require.NoError(t, taskRepo.Create(ctx, task))
+			runAt := time.Now().UTC().Add(2 * time.Hour).Truncate(time.Second)
+			schedule := &models.Schedule{
+				TaskID: task.ID, RunAt: runAt, RepeatType: repeatType,
+				RepeatInterval: 1, Enabled: true, ClearContextOnStart: true,
+			}
+			require.NoError(t, scheduleRepo.Create(ctx, schedule))
+			original, err := scheduleRepo.GetByID(ctx, schedule.ID)
+			require.NoError(t, err)
+			require.NotNil(t, original.NextRun)
+
+			svc := NewScheduleActionService(taskRepo, scheduleRepo)
+			paused, err := svc.Toggle(ctx, project.ID, schedule.ID)
+			require.NoError(t, err)
+			require.False(t, paused.Schedule.Enabled)
+			require.NotNil(t, paused.Schedule.NextRun)
+			require.True(t, paused.Schedule.NextRun.Equal(*original.NextRun))
+			pausedTask, err := taskRepo.GetByID(ctx, task.ID)
+			require.NoError(t, err)
+			require.Equal(t, models.StatusPending, pausedTask.Status)
+
+			resumed, err := svc.Toggle(ctx, project.ID, schedule.ID)
+			require.NoError(t, err)
+			require.True(t, resumed.Schedule.Enabled)
+			require.NotNil(t, resumed.Schedule.NextRun)
+			require.True(t, resumed.Schedule.NextRun.Equal(*original.NextRun))
+			stored, err := scheduleRepo.GetByID(ctx, schedule.ID)
+			require.NoError(t, err)
+			require.True(t, stored.RunAt.Equal(original.RunAt))
+			require.True(t, stored.NextRun.Equal(*original.NextRun))
+		})
+	}
+}
+
+func TestScheduleActionServiceToggleResumesDueOneTimeScheduleWithoutChangingTaskState(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	project := &models.Project{Name: "Due one-time toggle"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	task := &models.Task{ProjectID: project.ID, Title: "Due once", Prompt: "run", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	due := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+	schedule := &models.Schedule{TaskID: task.ID, RunAt: due, RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: false}
+	require.NoError(t, scheduleRepo.Create(ctx, schedule))
+	original, err := scheduleRepo.GetByID(ctx, schedule.ID)
+	require.NoError(t, err)
+
+	result, err := NewScheduleActionService(taskRepo, scheduleRepo).Toggle(ctx, project.ID, schedule.ID)
+	require.NoError(t, err)
+	require.True(t, result.Schedule.Enabled)
+	require.NotNil(t, result.Schedule.NextRun)
+	require.True(t, result.Schedule.NextRun.Equal(*original.NextRun))
+	dueSchedules, err := scheduleRepo.ListDue(ctx, time.Now())
+	require.NoError(t, err)
+	require.Len(t, dueSchedules, 1)
+	require.Equal(t, schedule.ID, dueSchedules[0].ID)
+	updatedTask, err := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusPending, updatedTask.Status)
+}
+
+func TestScheduleActionServiceToggleFiredOneTimeRequiresNewTimeWithoutMutation(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	project := &models.Project{Name: "Fired one-time toggle"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	task := &models.Task{ProjectID: project.ID, Title: "Fired once", Prompt: "already ran", Category: models.CategoryScheduled, Status: models.StatusCompleted, Priority: 2}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	schedule := &models.Schedule{TaskID: task.ID, RunAt: time.Now().UTC().Add(-time.Hour), RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: true}
+	require.NoError(t, scheduleRepo.Create(ctx, schedule))
+	require.NoError(t, scheduleRepo.MarkRan(ctx, schedule.ID, time.Now(), nil))
+	require.NoError(t, scheduleRepo.ToggleEnabled(ctx, schedule.ID, false))
+
+	_, err := NewScheduleActionService(taskRepo, scheduleRepo).Toggle(ctx, project.ID, schedule.ID)
+	require.Error(t, err)
+	var actionErr *ScheduleActionError
+	require.ErrorAs(t, err, &actionErr)
+	require.Equal(t, ScheduleActionTimeError, actionErr.Kind)
+	stored, err := scheduleRepo.GetByID(ctx, schedule.ID)
+	require.NoError(t, err)
+	require.False(t, stored.Enabled)
+	require.Nil(t, stored.NextRun)
+	updatedTask, err := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusCompleted, updatedTask.Status)
+}
+
+func TestScheduleActionServiceToggleClearsCancellationMarkerForAlreadyPendingTask(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	workerSvc := newTestWorkerService(t)
+	project := &models.Project{Name: "Pending resume marker"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	task := &models.Task{
+		ProjectID: project.ID, Title: "Pending scheduled task", Prompt: "run again",
+		Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2,
+	}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	schedule := &models.Schedule{
+		TaskID: task.ID, RunAt: time.Now().UTC().Add(time.Hour),
+		RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: false,
+	}
+	require.NoError(t, scheduleRepo.Create(ctx, schedule))
+	workerSvc.MarkCancellationRequested(task.ID)
+
+	result, err := NewScheduleActionService(taskRepo, scheduleRepo, workerSvc).Toggle(ctx, project.ID, schedule.ID)
+	require.NoError(t, err)
+	require.NotNil(t, result.Schedule)
+	require.True(t, result.Schedule.Enabled)
+	require.False(t, workerSvc.IsCancellationRequested(task.ID), "successful resume must clear stale cancellation marker even when task is already pending")
+
+	updatedTask, err := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusPending, updatedTask.Status)
+}
+
+func TestScheduleActionServiceToggleSkipsLifecycleWhenPauseWinsAfterEnable(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	workerSvc := newTestWorkerService(t)
+	project := &models.Project{Name: "Resume pause interleaving"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	task := &models.Task{
+		ProjectID: project.ID, Title: "Paused cancelled task", Prompt: "retry later",
+		Category: models.CategoryScheduled, Status: models.StatusCancelled, Priority: 2,
+	}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	schedule := &models.Schedule{
+		TaskID: task.ID, RunAt: time.Now().UTC().Add(time.Hour),
+		RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: false,
+	}
+	require.NoError(t, scheduleRepo.Create(ctx, schedule))
+	workerSvc.MarkCancellationRequested(task.ID)
+
+	_, err := db.ExecContext(ctx, fmt.Sprintf(`
+		CREATE TRIGGER pause_schedule_after_enable
+		AFTER UPDATE OF enabled ON schedules
+		WHEN NEW.id = '%s' AND NEW.enabled = 1
+		BEGIN
+			UPDATE schedules SET enabled = 0 WHERE id = NEW.id;
+		END`, schedule.ID))
+	require.NoError(t, err)
+
+	result, err := NewScheduleActionService(taskRepo, scheduleRepo, workerSvc).Toggle(ctx, project.ID, schedule.ID)
+	require.NoError(t, err)
+	require.NotNil(t, result.Schedule)
+	storedSchedule, err := scheduleRepo.GetByID(ctx, schedule.ID)
+	require.NoError(t, err)
+	require.False(t, storedSchedule.Enabled)
+	storedTask, err := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusCancelled, storedTask.Status)
+	require.True(t, workerSvc.IsCancellationRequested(task.ID))
+}
+
+func TestScheduleActionServiceResumeLifecycleSkipsTaskResetAfterPauseWins(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	workerSvc := newTestWorkerService(t)
+	project := &models.Project{Name: "Resume pause ordering"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	task := &models.Task{
+		ProjectID: project.ID, Title: "Paused terminal task", Prompt: "retry later",
+		Category: models.CategoryScheduled, Status: models.StatusCancelled, Priority: 2,
+	}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	schedule := &models.Schedule{
+		TaskID: task.ID, RunAt: time.Now().UTC().Add(time.Hour),
+		RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: false,
+	}
+	require.NoError(t, scheduleRepo.Create(ctx, schedule))
+	workerSvc.MarkCancellationRequested(task.ID)
+
+	result := &ScheduleActionResult{Task: task, Schedule: schedule}
+	svc := NewScheduleActionService(taskRepo, scheduleRepo, workerSvc)
+	svc.applyScheduleTaskLifecycle(ctx, result, scheduleTaskLifecycleOptions{
+		ResetTerminal:          true,
+		RequireEnabledSchedule: true,
+	})
+
+	updatedTask, err := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusCancelled, updatedTask.Status)
+	require.True(t, workerSvc.IsCancellationRequested(task.ID))
+	require.Empty(t, result.Warnings)
+}
+func TestScheduleActionServiceToggleResetsTerminalTaskOnlyWhenResumingRunnableSchedule(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	workerSvc := newTestWorkerService(t)
+	project := &models.Project{Name: "Toggle lifecycle"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	task := &models.Task{ProjectID: project.ID, Title: "Cancelled scheduled task", Prompt: "retry", Category: models.CategoryScheduled, Status: models.StatusCancelled, Priority: 2}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	schedule := &models.Schedule{TaskID: task.ID, RunAt: time.Now().UTC().Add(time.Hour), RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: true}
+	require.NoError(t, scheduleRepo.Create(ctx, schedule))
+	workerSvc.MarkCancellationRequested(task.ID)
+	svc := NewScheduleActionService(taskRepo, scheduleRepo, workerSvc)
+
+	_, err := svc.Toggle(ctx, project.ID, schedule.ID)
+	require.NoError(t, err)
+	pausedTask, err := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusCancelled, pausedTask.Status)
+	require.True(t, workerSvc.IsCancellationRequested(task.ID))
+
+	_, err = svc.Toggle(ctx, project.ID, schedule.ID)
+	require.NoError(t, err)
+	resumedTask, err := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusPending, resumedTask.Status)
+	require.False(t, workerSvc.IsCancellationRequested(task.ID))
+}

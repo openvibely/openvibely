@@ -4,8 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 )
@@ -13,6 +15,11 @@ import (
 type AgentRepo struct {
 	db *sql.DB
 }
+
+var (
+	ErrAgentNameRequired                = errors.New("agent name is required")
+	ErrSelectableAgentNameAlreadyExists = errors.New("enabled selectable primary agent name already exists")
+)
 
 func NewAgentRepo(db *sql.DB) *AgentRepo {
 	return &AgentRepo{db: db}
@@ -26,6 +33,127 @@ const agentColumns = `id, name, description, system_prompt, model, tools, tool_c
 	`COALESCE(generated_status, 'user_edited'), absorbed_into, ` +
 	`COALESCE(source_refs_json, '[]'), archived_at, ` +
 	`created_at, updated_at`
+
+// AgentRuntimeSummary is the compact projection needed by runtime list_agents.
+type AgentRuntimeSummary struct {
+	Name           string
+	Description    string
+	Model          string
+	SkillCount     int
+	MCPServerCount int
+}
+
+// AgentPickerOption is the compact projection needed by settings pickers that
+// render only an agent identifier and display name.
+type AgentPickerOption struct {
+	ID   string
+	Name string
+}
+
+// AgentScheduleOption is the compact projection needed by the Schedule primary
+// Agent selector. Availability is enforced by ListScheduleOptions; this type
+// contains only the display fields rendered by the selector.
+type AgentScheduleOption struct {
+	ID    string
+	Name  string
+	Model string
+}
+
+// AgentSkillCatalogRef is the compact projection needed to discover agent-owned
+// skill catalogs without hydrating prompt/config/plugin/skill JSON fields.
+type AgentSkillCatalogRef struct {
+	ID        string
+	Key       string
+	ProjectID string
+}
+
+// AgentListSummary is the compact projection needed by the lifecycle agent_list
+// inspector. It excludes full prompt, model, tool, plugin, MCP, permission,
+// model-default, source-reference, and timestamp fields. Skill names are
+// extracted in SQL so skill descriptions and content are never decoded here.
+type AgentListSummary struct {
+	Key                 string
+	Name                string
+	Description         string
+	Scope               models.AgentScope
+	SelectableAsPrimary bool
+	Enabled             bool
+	GeneratedStatus     models.AgentGeneratedStatus
+	SystemKind          string
+	ArchivedAt          *time.Time
+	AttachedSkillNames  []string
+}
+
+const agentScheduleOptionColumns = `id, name, model`
+
+func scanAgentScheduleOption(row interface{ Scan(dest ...any) error }) (*AgentScheduleOption, error) {
+	var option AgentScheduleOption
+	if err := row.Scan(&option.ID, &option.Name, &option.Model); err != nil {
+		return nil, err
+	}
+	return &option, nil
+}
+
+func scanChatAssignableAgentDefinition(row interface{ Scan(dest ...any) error }) (*models.ChatAssignableAgentDefinition, error) {
+	var a models.ChatAssignableAgentDefinition
+	var selectableInt, enabledInt int
+	var generatedStatus string
+	var archivedAt sql.NullTime
+	if err := row.Scan(&a.ID, &a.Name, &a.Description, &a.Key, &a.SystemKind, &selectableInt, &enabledInt, &generatedStatus, &archivedAt); err != nil {
+		return nil, err
+	}
+	a.SelectableAsPrimary = selectableInt != 0
+	a.Enabled = enabledInt != 0
+	a.GeneratedStatus = models.AgentGeneratedStatus(generatedStatus)
+	if archivedAt.Valid {
+		t := archivedAt.Time
+		a.ArchivedAt = &t
+	}
+	return &a, nil
+}
+
+const agentListSummaryColumns = `COALESCE(key, ''), name, description, COALESCE(scope, 'global'), ` +
+	`COALESCE(selectable_as_primary, 1), COALESCE(enabled, 1), ` +
+	`COALESCE(generated_status, 'user_edited'), COALESCE(system_kind, ''), archived_at, ` +
+	`COALESCE((` +
+	`SELECT json_group_array(skill_name) FROM (` +
+	`SELECT json_extract(skill.value, '$.name') AS skill_name ` +
+	`FROM json_each(CASE WHEN TRIM(COALESCE(agents.skills, '')) = '' THEN '[]' ELSE agents.skills END) AS skill ` +
+	`ORDER BY CAST(skill.key AS INTEGER)` +
+	`)), '[]')`
+
+func scanAgentListSummary(row interface{ Scan(dest ...any) error }) (*AgentListSummary, error) {
+	var summary AgentListSummary
+	var (
+		scope, generatedStatus, skillNamesJSON string
+		selectableInt, enabledInt              int
+		archivedAt                             sql.NullTime
+	)
+	if err := row.Scan(
+		&summary.Key, &summary.Name, &summary.Description, &scope,
+		&selectableInt, &enabledInt, &generatedStatus, &summary.SystemKind,
+		&archivedAt, &skillNamesJSON,
+	); err != nil {
+		return nil, err
+	}
+	summary.Scope = models.AgentScope(scope)
+	summary.SelectableAsPrimary = selectableInt != 0
+	summary.Enabled = enabledInt != 0
+	summary.GeneratedStatus = models.AgentGeneratedStatus(generatedStatus)
+	if archivedAt.Valid {
+		t := archivedAt.Time
+		summary.ArchivedAt = &t
+	}
+	if s := strings.TrimSpace(skillNamesJSON); s != "" && s != "[]" {
+		if err := json.Unmarshal([]byte(s), &summary.AttachedSkillNames); err != nil {
+			return nil, fmt.Errorf("unmarshaling agent list skill names: %w", err)
+		}
+	}
+	if summary.AttachedSkillNames == nil {
+		summary.AttachedSkillNames = []string{}
+	}
+	return &summary, nil
+}
 
 func scanAgent(row interface{ Scan(dest ...any) error }) (*models.Agent, error) {
 	var a models.Agent
@@ -131,6 +259,40 @@ func marshalJSON(v any) (string, error) {
 	return string(b), nil
 }
 
+func (r *AgentRepo) normalizeAndValidateAgentName(ctx context.Context, a *models.Agent) error {
+	if a == nil {
+		return nil
+	}
+	a.Name = strings.TrimSpace(a.Name)
+	if a.Name == "" {
+		return ErrAgentNameRequired
+	}
+	if !a.Enabled || !a.SelectableAsPrimary {
+		return nil
+	}
+
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id
+		FROM agents
+		WHERE LOWER(TRIM(name)) = LOWER(?)
+		  AND id <> ?
+		  AND COALESCE(enabled, 1) = 1
+		  AND COALESCE(selectable_as_primary, 1) = 1
+		  AND COALESCE(generated_status, 'user_edited') <> 'archived'
+		LIMIT 1`, a.Name, a.ID)
+	if err != nil {
+		return fmt.Errorf("checking agent name uniqueness: %w", err)
+	}
+	defer rows.Close()
+	if rows.Next() {
+		return ErrSelectableAgentNameAlreadyExists
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("checking agent name uniqueness: %w", err)
+	}
+	return nil
+}
+
 func normalizeAgentToolConfig(a *models.Agent) {
 	if a == nil {
 		return
@@ -142,6 +304,242 @@ func normalizeAgentToolConfig(a *models.Agent) {
 
 func (r *AgentRepo) List(ctx context.Context) ([]models.Agent, error) {
 	return r.list(ctx, `SELECT `+agentColumns+` FROM agents WHERE COALESCE(generated_status, 'user_edited') <> 'archived' ORDER BY name ASC`)
+}
+
+// ListScheduleOptions returns active primary-Agent options available to a
+// project without selecting or hydrating the Agent's rich configuration.
+func (r *AgentRepo) ListScheduleOptions(ctx context.Context, projectID string) ([]AgentScheduleOption, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT `+agentScheduleOptionColumns+` FROM agents
+		WHERE COALESCE(generated_status, 'user_edited') <> 'archived'
+		  AND archived_at IS NULL
+		  AND COALESCE(enabled, 1) = 1
+		  AND COALESCE(selectable_as_primary, 1) = 1
+		  AND (
+			COALESCE(scope, 'global') <> 'project'
+			OR (project_id IS NOT NULL AND project_id <> '' AND project_id = ?)
+		  )
+		ORDER BY name ASC`, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("listing schedule agent options: %w", err)
+	}
+	defer rows.Close()
+
+	var options []AgentScheduleOption
+	for rows.Next() {
+		option, err := scanAgentScheduleOption(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scanning schedule agent option: %w", err)
+		}
+		options = append(options, *option)
+	}
+	return options, rows.Err()
+}
+
+// ListAgentListSummaries returns the prompt-safe lifecycle agent_list projection.
+// It keeps filtering metadata needed by the inspector while avoiding full Agent
+// hydration and decoding only the attached skill names.
+func (r *AgentRepo) ListAgentListSummaries(ctx context.Context) ([]AgentListSummary, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT `+agentListSummaryColumns+` FROM agents WHERE COALESCE(generated_status, 'user_edited') <> 'archived' ORDER BY name ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("listing agent list summaries: %w", err)
+	}
+	defer rows.Close()
+
+	var summaries []AgentListSummary
+	for rows.Next() {
+		summary, err := scanAgentListSummary(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scanning agent list summary: %w", err)
+		}
+		summaries = append(summaries, *summary)
+	}
+	return summaries, rows.Err()
+}
+
+// ListPage returns one bounded Models-page-compatible agent projection. The
+// Agents card currently carries its edit metadata, so this method retains the
+// existing row shape while bounding both the result count and response HTML.
+func (r *AgentRepo) ListPage(ctx context.Context, limit, offset int, search string) ([]models.Agent, error) {
+	limit, offset = normalizeCardPageArgs(limit, offset)
+	query := `SELECT ` + agentColumns + ` FROM agents WHERE COALESCE(generated_status, 'user_edited') <> 'archived'`
+	args := make([]any, 0, 3)
+	if search = strings.TrimSpace(search); search != "" {
+		query += ` AND INSTR(LOWER(
+			COALESCE(name, '') || ' ' || COALESCE(description, '') || ' ' ||
+			COALESCE(model, '') || ' ' || COALESCE(system_prompt, '')
+		), ?) > 0`
+		args = append(args, strings.ToLower(search))
+	}
+	query += ` ORDER BY name ASC, id ASC LIMIT ? OFFSET ?`
+	args = append(args, limit, offset)
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("listing agent page: %w", err)
+	}
+	defer rows.Close()
+
+	agents := make([]models.Agent, 0, limit)
+	for rows.Next() {
+		agent, err := scanAgent(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scanning agent page: %w", err)
+		}
+		agents = append(agents, *agent)
+	}
+	return agents, rows.Err()
+}
+
+func (r *AgentRepo) ListChatAssignableDefinitions(ctx context.Context) ([]models.ChatAssignableAgentDefinition, error) {
+	rows, err := r.db.QueryContext(ctx, `
+			SELECT id, name, COALESCE(description, ''), COALESCE(key, ''), COALESCE(system_kind, ''),
+			       COALESCE(selectable_as_primary, 1), COALESCE(enabled, 1),
+			       COALESCE(generated_status, 'user_edited'), archived_at
+			FROM agents
+			WHERE COALESCE(generated_status, 'user_edited') <> 'archived'
+			ORDER BY name ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("listing chat assignable agent definitions: %w", err)
+	}
+	defer rows.Close()
+
+	agents := []models.ChatAssignableAgentDefinition{}
+	for rows.Next() {
+		agent, err := scanChatAssignableAgentDefinition(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scanning chat assignable agent definition: %w", err)
+		}
+		agents = append(agents, *agent)
+	}
+	return agents, rows.Err()
+}
+
+func (r *AgentRepo) ListRuntimeSummaries(ctx context.Context) ([]AgentRuntimeSummary, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT name, description, model,
+		       COALESCE(json_array_length(skills), 0) AS skill_count,
+		       COALESCE(json_array_length(mcp_servers), 0) AS mcp_server_count
+		FROM agents
+		WHERE COALESCE(generated_status, 'user_edited') <> 'archived'
+		ORDER BY name ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("listing runtime agent summaries: %w", err)
+	}
+	defer rows.Close()
+
+	var summaries []AgentRuntimeSummary
+	for rows.Next() {
+		var summary AgentRuntimeSummary
+		if err := rows.Scan(&summary.Name, &summary.Description, &summary.Model, &summary.SkillCount, &summary.MCPServerCount); err != nil {
+			return nil, fmt.Errorf("scanning runtime agent summary: %w", err)
+		}
+		summaries = append(summaries, summary)
+	}
+	return summaries, rows.Err()
+}
+
+// GetTaskDetailAgentLabel returns the identity needed by the recurring Task Detail
+// status fragment. The assigned agent must still be live and available to the
+// task's project, but no full Agent configuration is selected or hydrated.
+func (r *AgentRepo) GetTaskDetailAgentLabel(ctx context.Context, projectID, agentID string) (*AgentPickerOption, error) {
+	if agentID == "" {
+		return nil, nil
+	}
+
+	var option AgentPickerOption
+	err := r.db.QueryRowContext(ctx, `
+		SELECT id, name
+		FROM agents
+		WHERE id = ?
+		  AND COALESCE(generated_status, 'user_edited') <> 'archived'
+		  AND archived_at IS NULL
+		  AND (
+			COALESCE(scope, 'global') <> 'project'
+			OR (project_id IS NOT NULL AND project_id <> '' AND project_id = ?)
+		  )`, agentID, projectID).Scan(&option.ID, &option.Name)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("getting task detail agent label: %w", err)
+	}
+	return &option, nil
+}
+
+func (r *AgentRepo) ListPickerOptions(ctx context.Context) ([]AgentPickerOption, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, name
+		FROM agents
+		WHERE COALESCE(generated_status, 'user_edited') <> 'archived'
+		ORDER BY name ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("listing agent picker options: %w", err)
+	}
+	defer rows.Close()
+
+	var options []AgentPickerOption
+	for rows.Next() {
+		var option AgentPickerOption
+		if err := rows.Scan(&option.ID, &option.Name); err != nil {
+			return nil, fmt.Errorf("scanning agent picker option: %w", err)
+		}
+		options = append(options, option)
+	}
+	return options, rows.Err()
+}
+
+// ListPickerOptionsForProject returns compact options for global agents and
+// project-scoped agents owned by projectID. It intentionally keeps the picker
+// projection small because the settings page only needs IDs and names.
+func (r *AgentRepo) ListPickerOptionsForProject(ctx context.Context, projectID string) ([]AgentPickerOption, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, name
+		FROM agents
+		WHERE COALESCE(generated_status, 'user_edited') <> 'archived'
+		  AND (
+			COALESCE(scope, 'global') <> 'project'
+			OR (project_id IS NOT NULL AND project_id <> '' AND project_id = ?)
+		  )
+		ORDER BY name ASC`, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("listing project agent picker options: %w", err)
+	}
+	defer rows.Close()
+
+	var options []AgentPickerOption
+	for rows.Next() {
+		var option AgentPickerOption
+		if err := rows.Scan(&option.ID, &option.Name); err != nil {
+			return nil, fmt.Errorf("scanning project agent picker option: %w", err)
+		}
+		options = append(options, option)
+	}
+	return options, rows.Err()
+}
+
+func (r *AgentRepo) ListSkillCatalogRefs(ctx context.Context) ([]AgentSkillCatalogRef, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, COALESCE(key, ''), project_id
+		FROM agents
+		WHERE COALESCE(generated_status, 'user_edited') <> 'archived'
+		ORDER BY name ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("listing agent skill catalog refs: %w", err)
+	}
+	defer rows.Close()
+
+	var refs []AgentSkillCatalogRef
+	for rows.Next() {
+		var ref AgentSkillCatalogRef
+		var projectID sql.NullString
+		if err := rows.Scan(&ref.ID, &ref.Key, &projectID); err != nil {
+			return nil, fmt.Errorf("scanning agent skill catalog ref: %w", err)
+		}
+		if projectID.Valid {
+			ref.ProjectID = projectID.String
+		}
+		refs = append(refs, ref)
+	}
+	return refs, rows.Err()
 }
 
 func (r *AgentRepo) ListSelectableForProject(ctx context.Context, projectID string, limit int) ([]models.Agent, error) {
@@ -237,7 +635,7 @@ func (r *AgentRepo) ListSelectableByName(ctx context.Context, name string) ([]mo
 
 func (r *AgentRepo) listByName(ctx context.Context, name, extraWhere string) ([]models.Agent, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT `+agentColumns+` FROM agents WHERE LOWER(name) = LOWER(?) AND COALESCE(generated_status, 'user_edited') <> 'archived'`+extraWhere+` ORDER BY created_at ASC`, name)
+		`SELECT `+agentColumns+` FROM agents WHERE LOWER(TRIM(name)) = LOWER(?) AND COALESCE(generated_status, 'user_edited') <> 'archived'`+extraWhere+` ORDER BY created_at ASC`, strings.TrimSpace(name))
 	if err != nil {
 		return nil, fmt.Errorf("listing agents by name: %w", err)
 	}
@@ -304,7 +702,7 @@ func (r *AgentRepo) MarkArchived(ctx context.Context, id, absorbedInto, reason s
 	if absorbedInto != "" {
 		absorbed = absorbedInto
 	}
-	_, err := r.db.ExecContext(ctx,
+	_, err := execBoundSQLite(ctx, r.db,
 		`UPDATE agents SET generated_status = 'archived', enabled = 0,
 		 absorbed_into = ?, source_refs_json = ?, archived_at = datetime('now'),
 		 updated_at = datetime('now') WHERE id = ?`,
@@ -348,6 +746,9 @@ func (r *AgentRepo) ListBySystemKind(ctx context.Context, systemKind string) ([]
 
 func (r *AgentRepo) Create(ctx context.Context, a *models.Agent) error {
 	applyAgentDefaults(a)
+	if err := r.normalizeAndValidateAgentName(ctx, a); err != nil {
+		return err
+	}
 	normalizeAgentToolConfig(a)
 	toolsJSON, err := marshalJSON(a.Tools)
 	if err != nil {
@@ -388,7 +789,7 @@ func (r *AgentRepo) Create(ctx context.Context, a *models.Agent) error {
 	if a.AbsorbedInto != "" {
 		absorbedInto = a.AbsorbedInto
 	}
-	err = r.db.QueryRowContext(ctx,
+	err = queryRowBoundSQLite(ctx, r.db,
 		`INSERT INTO agents (
 		   id, name, description, system_prompt, model, tools, tool_config,
 		   plugins, mcp_servers, skills, system_kind,
@@ -433,6 +834,9 @@ func applyAgentDefaults(a *models.Agent) {
 
 func (r *AgentRepo) Update(ctx context.Context, a *models.Agent) error {
 	applyAgentDefaults(a)
+	if err := r.normalizeAndValidateAgentName(ctx, a); err != nil {
+		return err
+	}
 	normalizeAgentToolConfig(a)
 	toolsJSON, err := marshalJSON(a.Tools)
 	if err != nil {
@@ -476,7 +880,7 @@ func (r *AgentRepo) Update(ctx context.Context, a *models.Agent) error {
 	if a.ArchivedAt != nil {
 		archivedAt = a.ArchivedAt.UTC()
 	}
-	_, err = r.db.ExecContext(ctx,
+	_, err = execBoundSQLite(ctx, r.db,
 		`UPDATE agents SET name = ?, description = ?, system_prompt = ?,
 		 model = ?, tools = ?, tool_config = ?, plugins = ?, mcp_servers = ?, skills = ?, system_kind = ?,
 		 key = ?, scope = ?, project_id = ?, selectable_as_primary = ?, enabled = ?,
@@ -500,10 +904,10 @@ func (r *AgentRepo) Update(ctx context.Context, a *models.Agent) error {
 
 func (r *AgentRepo) Delete(ctx context.Context, id string) error {
 	// Nullify FK references in tasks before deleting
-	if _, err := r.db.ExecContext(ctx, `UPDATE tasks SET agent_definition_id = NULL WHERE agent_definition_id = ?`, id); err != nil {
+	if _, err := execBoundSQLite(ctx, r.db, `UPDATE tasks SET agent_definition_id = NULL WHERE agent_definition_id = ?`, id); err != nil {
 		return fmt.Errorf("nullifying agent in tasks: %w", err)
 	}
-	_, err := r.db.ExecContext(ctx, `DELETE FROM agents WHERE id = ?`, id)
+	_, err := execBoundSQLite(ctx, r.db, `DELETE FROM agents WHERE id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("deleting agent: %w", err)
 	}

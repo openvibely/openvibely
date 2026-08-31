@@ -12,13 +12,129 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-func TestMigration130IndexesTaskDeletionForeignKeys(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "task-deletion-indexes-130.db")
+func openMigrationTestDB(tb testing.TB, dbPath string) *sql.DB {
+	tb.Helper()
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
+		tb.Fatal(err)
+	}
+	db.SetMaxOpenConns(1)
+	for _, pragma := range []string{
+		"PRAGMA journal_mode=WAL",
+		"PRAGMA foreign_keys=ON",
+		"PRAGMA busy_timeout=5000",
+	} {
+		if _, err := db.Exec(pragma); err != nil {
+			db.Close()
+			tb.Fatalf("failed to apply %s: %v", pragma, err)
+		}
+	}
+	tb.Cleanup(func() { _ = db.Close() })
+	return db
+}
+
+func TestMigration153TelegramUsernameOnlyLookupIndexDownDropsOnlyNewIndex(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "telegram-username-index-153.db")
+	db := openMigrationTestDB(t, dbPath)
+
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	if err := goose.Up(db, "."); err != nil {
+		t.Fatalf("failed to run migrations: %v", err)
+	}
+
+	assertIndexExists := func(indexName string, want bool) {
+		t.Helper()
+		var count int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?`, indexName).Scan(&count); err != nil {
+			t.Fatalf("failed to inspect index %s: %v", indexName, err)
+		}
+		if got := count == 1; got != want {
+			t.Fatalf("index %s exists = %v, want %v", indexName, got, want)
+		}
+	}
+
+	assertIndexExists("idx_telegram_auth_username_lower_unknown_id", true)
+	assertIndexExists("idx_telegram_auth_unique_username", true)
+	assertIndexExists("idx_telegram_auth_user", true)
+
+	if err := goose.DownTo(db, ".", 152); err != nil {
+		t.Fatalf("failed to migrate down to 152: %v", err)
+	}
+	assertIndexExists("idx_telegram_auth_username_lower_unknown_id", false)
+	assertIndexExists("idx_telegram_auth_unique_username", true)
+	assertIndexExists("idx_telegram_auth_user", true)
+}
+
+func TestMigration143DropsPredictiveCollisionTables(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "drop-predictive-collisions-143.db")
+	db := openMigrationTestDB(t, dbPath)
+
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 142); err != nil {
+		t.Fatal(err)
+	}
+
+	tables := []string{
+		"impact_analyses",
+		"conflict_predictions",
+		"conflict_history",
+		"execution_order_recommendations",
+	}
+	for _, table := range tables {
+		var count int
+		if err := db.QueryRow(
+			`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`,
+			table,
+		).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 1 {
+			t.Fatalf("table %s does not exist before migration 143", table)
+		}
+	}
+
+	if err := goose.UpTo(db, ".", 143); err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range tables {
+		var count int
+		if err := db.QueryRow(
+			`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`,
+			table,
+		).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 0 {
+			t.Fatalf("table %s still exists after migration 143", table)
+		}
+	}
+
+	if err := goose.DownTo(db, ".", 142); err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range tables {
+		var count int
+		if err := db.QueryRow(
+			`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`,
+			table,
+		).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 1 {
+			t.Fatalf("table %s was not recreated by migration 143 rollback", table)
+		}
+	}
+}
+
+func TestMigration130IndexesTaskDeletionForeignKeys(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "task-deletion-indexes-130.db")
+	db := openMigrationTestDB(t, dbPath)
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
 		t.Fatal(err)
@@ -96,11 +212,7 @@ func TestMigration130IndexesTaskDeletionForeignKeys(t *testing.T) {
 
 func TestMigration130AllowsLegacyDatabaseWithoutArchitectTables(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "legacy-task-deletion-indexes-130.db")
-	db, err := sql.Open("sqlite", dbPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
+	db := openMigrationTestDB(t, dbPath)
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
 		t.Fatal(err)
@@ -135,11 +247,7 @@ func TestMigration130AllowsLegacyDatabaseWithoutArchitectTables(t *testing.T) {
 
 func TestMigration132IndexesLifecycleExecutionParentForeignKey(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "lifecycle-parent-index-132.db")
-	db, err := sql.Open("sqlite", dbPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
+	db := openMigrationTestDB(t, dbPath)
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
 		t.Fatal(err)
@@ -160,13 +268,318 @@ func TestMigration132IndexesLifecycleExecutionParentForeignKey(t *testing.T) {
 	}
 }
 
-func TestMigration131RetiredAttachmentSessionRejectsNewOwners(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "retired-attachment-sessions-131.db")
-	db, err := sql.Open("sqlite", dbPath)
+const systemUpdateQueuedCountQuery = `SELECT
+	(SELECT COUNT(*) FROM tasks WHERE status IN ('pending','queued')) +
+	(SELECT COUNT(*) FROM thread_inputs WHERE input_status = 'pending' AND input_mode = 'queued')`
+
+func TestMigration170IndexesSystemUpdateQueuedThreadInputCount(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "thread-inputs-global-queued-count-170.db")
+	db := openMigrationTestDB(t, dbPath)
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 169); err != nil {
+		t.Fatal(err)
+	}
+	seedMigration170QueuedCountFixture(t, db, 200000)
+
+	before := explainQueryPlan(t, db, systemUpdateQueuedCountQuery)
+	if !strings.Contains(before, "SCAN thread_inputs") {
+		t.Fatalf("migration 169 update queued-count plan = %q, want historical thread_inputs scan baseline", before)
+	}
+
+	if err := goose.UpTo(db, ".", 170); err != nil {
+		t.Fatal(err)
+	}
+
+	var total int
+	if err := db.QueryRow(systemUpdateQueuedCountQuery).Scan(&total); err != nil {
+		t.Fatal(err)
+	}
+	if total != 7 {
+		t.Fatalf("system update queued total = %d, want exact task + thread input count 7", total)
+	}
+
+	after := explainQueryPlan(t, db, systemUpdateQueuedCountQuery)
+	if !strings.Contains(after, "SEARCH thread_inputs USING COVERING INDEX idx_thread_inputs_pending_queued_count") {
+		t.Fatalf("migration 170 update queued-count plan = %q, want pending queued count index search", after)
+	}
+	if strings.Contains(after, "SCAN thread_inputs") {
+		t.Fatalf("migration 170 update queued-count plan = %q, want no historical thread_inputs scan", after)
+	}
+
+	scopedPlans := map[string]struct {
+		query string
+		args  []any
+		index string
+	}{
+		"task promotion": {
+			query: `SELECT id FROM thread_inputs WHERE scope = 'task_thread' AND input_mode = 'queued' AND input_status = 'pending' AND task_id = ? ORDER BY queue_position ASC, created_at ASC, rowid ASC LIMIT 1`,
+			args:  []any{"target-task-170"},
+			index: "idx_thread_inputs_pending_task",
+		},
+		"chat promotion": {
+			query: `SELECT id FROM thread_inputs WHERE scope = 'chat' AND input_mode = 'queued' AND input_status = 'pending' AND project_id = ? ORDER BY queue_position ASC, created_at ASC, rowid ASC LIMIT 1`,
+			args:  []any{"target-project-170"},
+			index: "idx_thread_inputs_pending_chat",
+		},
+	}
+	for name, tc := range scopedPlans {
+		plan := explainQueryPlan(t, db, tc.query, tc.args...)
+		if !strings.Contains(plan, tc.index) {
+			t.Fatalf("%s plan after migration 170 = %q, want existing scoped index %s", name, plan, tc.index)
+		}
+		if strings.Contains(plan, "USE TEMP B-TREE") {
+			t.Fatalf("%s plan after migration 170 = %q, want scoped index to preserve queue ordering", name, plan)
+		}
+	}
+}
+
+const recoverableQueuedChatProjectIDsAfterQuery = `
+	SELECT ti.project_id
+	FROM thread_inputs ti
+	LEFT JOIN executions guarded ON guarded.id = ti.run_execution_id
+	WHERE ti.scope = 'chat'
+	  AND ti.input_mode = 'queued'
+	  AND ti.input_status = 'pending'
+	  AND COALESCE(ti.project_id, '') != ''
+	  AND ti.project_id > ?
+	  AND (ti.run_execution_id IS NULL OR guarded.status IN ('completed', 'failed', 'cancelled'))
+	  AND NOT EXISTS (
+	    SELECT 1
+	    FROM executions active
+	    JOIN tasks active_task ON active_task.id = active.task_id
+	    WHERE active_task.project_id = ti.project_id
+	      AND active_task.category = 'chat'
+	      AND active.status = 'running'
+	  )
+	GROUP BY ti.project_id
+	ORDER BY ti.project_id
+	LIMIT ?`
+
+func TestMigration171IndexesRecoverableQueuedChatProjectPaging(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "thread-inputs-recover-chat-171.db")
+	db := openMigrationTestDB(t, dbPath)
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 170); err != nil {
+		t.Fatal(err)
+	}
+	seedMigration171RecoverableChatFixture(t, db, 5000, 10)
+
+	before := explainQueryPlan(t, db, recoverableQueuedChatProjectIDsAfterQuery, "", 100)
+	if !strings.Contains(before, "USING INDEX idx_thread_inputs_pending_chat") {
+		t.Fatalf("migration 170 recoverable chat plan = %q, want existing project-ordered chat index baseline", before)
+	}
+	if !strings.Contains(before, "scope=? AND project_id>?") {
+		t.Fatalf("migration 170 recoverable chat plan = %q, want project-keyed baseline before pending filters", before)
+	}
+
+	if err := goose.UpTo(db, ".", 171); err != nil {
+		t.Fatal(err)
+	}
+
+	var ids []string
+	rows, err := db.Query(recoverableQueuedChatProjectIDsAfterQuery, "", 100)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			_ = rows.Close()
+			t.Fatal(err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 10 || ids[0] != "recover-chat-00991" || ids[len(ids)-1] != "recover-chat-01000" {
+		t.Fatalf("recoverable chat ids = %#v, want sparse pending projects 00991..01000", ids)
+	}
+
+	after := explainQueryPlan(t, db, recoverableQueuedChatProjectIDsAfterQuery, "", 100)
+	if !strings.Contains(after, "SEARCH ti USING COVERING INDEX idx_thread_inputs_recover_chat_project") {
+		t.Fatalf("migration 171 recoverable chat plan = %q, want recovery covering index", after)
+	}
+	if !strings.Contains(after, "scope=? AND input_status=? AND input_mode=? AND project_id>?") {
+		t.Fatalf("migration 171 recoverable chat plan = %q, want keyset search by scope/status/mode/project", after)
+	}
+	if strings.Contains(after, "USING INDEX idx_thread_inputs_pending_chat (scope=? AND project_id>?") {
+		t.Fatalf("migration 171 recoverable chat plan = %q, want no historical chat scan by project before pending filters", after)
+	}
+
+	scopedPlans := map[string]struct {
+		query string
+		args  []any
+		index string
+	}{
+		"chat promotion": {
+			query: `SELECT id FROM thread_inputs WHERE scope = 'chat' AND input_mode = 'queued' AND input_status = 'pending' AND project_id = ? ORDER BY queue_position ASC, created_at ASC, rowid ASC LIMIT 1`,
+			args:  []any{"recover-chat-00991"},
+			index: "idx_thread_inputs_pending_chat",
+		},
+		"chat pending list": {
+			query: `SELECT id FROM thread_inputs WHERE scope = 'chat' AND project_id = ? AND input_status = 'pending' AND NOT (input_mode = 'steering' AND COALESCE(expected_turn_id, '') = '') ORDER BY queue_position ASC, created_at ASC, rowid ASC`,
+			args:  []any{"recover-chat-00991"},
+			index: "idx_thread_inputs_pending_chat",
+		},
+	}
+	for name, tc := range scopedPlans {
+		plan := explainQueryPlan(t, db, tc.query, tc.args...)
+		if !strings.Contains(plan, tc.index) {
+			t.Fatalf("%s plan after migration 171 = %q, want %s", name, plan, tc.index)
+		}
+		if name == "chat promotion" && strings.Contains(plan, "USE TEMP B-TREE") {
+			t.Fatalf("%s plan after migration 171 = %q, want existing FIFO ordering index without temp sort", name, plan)
+		}
+	}
+
+	countPlan := explainQueryPlan(t, db, systemUpdateQueuedCountQuery)
+	if !strings.Contains(countPlan, "SEARCH thread_inputs USING COVERING INDEX idx_thread_inputs_pending_queued_count") {
+		t.Fatalf("migration 171 update queued-count plan = %q, want global pending queued count index", countPlan)
+	}
+}
+
+func TestMigration159IndexesTaskLifecycleActivityOrdering(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "lifecycle-task-started-index-159.db")
+	db := openMigrationTestDB(t, dbPath)
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 158); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := db.Exec(`
+		INSERT INTO projects (id, name, description, repo_path) VALUES ('project-159', 'Migration 159', '', '');
+		INSERT INTO tasks (id, project_id, title, category, priority, status, prompt) VALUES
+			('task-159', 'project-159', 'Task 159', 'active', 0, 'completed', 'p'),
+			('other-task-159', 'project-159', 'Other Task 159', 'active', 0, 'completed', 'p');
+		INSERT INTO agents (id, name, system_prompt) VALUES ('agent-159', 'Agent 159', 'x');
+		WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM seq WHERE n < 4000)
+		INSERT INTO lifecycle_executions
+			(id, task_id, agent_id, when_slot, skill_key, output_contract, status, input_json, output_json, started_at)
+		SELECT 'exec-159-' || printf('%05d', n), 'task-159', 'agent-159', 'after_complete', 'summarize_activity', 'activity_summary', 'completed', '{"input":"hidden"}', '{"summary":"shown"}', datetime('2026-01-01 12:00:00', '-' || n || ' seconds')
+		FROM seq;
+		WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM seq WHERE n < 4000)
+		INSERT INTO lifecycle_executions
+			(id, task_id, agent_id, when_slot, skill_key, output_contract, status, input_json, output_json, started_at)
+		SELECT 'other-exec-159-' || printf('%05d', n), 'other-task-159', 'agent-159', 'after_complete', 'summarize_activity', 'activity_summary', 'completed', '{"input":"hidden"}', '{"summary":"shown"}', datetime('2026-01-01 12:00:00', '-' || n || ' seconds')
+		FROM seq;
+	`); err != nil {
+		t.Fatalf("seed lifecycle rows: %v", err)
+	}
+
+	listQuery := `
+		SELECT id, agent_id, when_slot, skill_key, output_contract, status, output_json, error, started_at, completed_at
+		FROM lifecycle_executions
+		WHERE task_id = ?
+		ORDER BY started_at DESC, id DESC`
+	before := explainQueryPlan(t, db, listQuery, "task-159")
+	if !strings.Contains(before, "USE TEMP B-TREE FOR ORDER BY") {
+		t.Fatalf("migration 158 lifecycle list plan = %q, want temporary sort baseline", before)
+	}
+
+	if err := goose.UpTo(db, ".", 159); err != nil {
+		t.Fatal(err)
+	}
+
+	after := explainQueryPlan(t, db, listQuery, "task-159")
+	if !strings.Contains(after, "idx_lifecycle_executions_task_started") {
+		t.Fatalf("migration 159 lifecycle list plan = %q, want task started index", after)
+	}
+	if strings.Contains(after, "USE TEMP B-TREE FOR ORDER BY") {
+		t.Fatalf("migration 159 lifecycle list plan = %q, want no temporary sort", after)
+	}
+}
+
+func TestMigration135IndexesProjectScopedAlertOrdering(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "alerts-project-created-index-135.db")
+	db := openMigrationTestDB(t, dbPath)
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 134); err != nil {
+		t.Fatal(err)
+	}
+
+	// The production Alerts page newest-100 query filters by project and orders by
+	// (created_at DESC, id DESC). Populate enough rows across many projects so the
+	// planner makes a meaningful choice rather than trivially scanning.
+	if _, err := db.Exec(`INSERT INTO projects (id, name, description, repo_path) VALUES ('target-135', 'Target 135', '', '')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+		WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM seq WHERE n < 4000)
+		INSERT INTO alerts (project_id, title, created_at)
+		SELECT 'target-135', 'a' || n, datetime('now', '-' || n || ' seconds') FROM seq`); err != nil {
+		t.Fatal(err)
+	}
+
+	listQuery := `SELECT id FROM alerts WHERE project_id = ? ORDER BY created_at DESC, id DESC LIMIT 100 OFFSET 0`
+
+	before := explainQueryPlan(t, db, listQuery, "target-135")
+	if !strings.Contains(before, "USE TEMP B-TREE FOR ORDER BY") {
+		t.Fatalf("migration 134 alerts list plan = %q, want temporary sort baseline", before)
+	}
+
+	if err := goose.UpTo(db, ".", 135); err != nil {
+		t.Fatal(err)
+	}
+
+	after := explainQueryPlan(t, db, listQuery, "target-135")
+	if !strings.Contains(after, "idx_alerts_project_created") {
+		t.Fatalf("migration 135 alerts list plan = %q, want project-plus-order index", after)
+	}
+	if strings.Contains(after, "USE TEMP B-TREE FOR ORDER BY") {
+		t.Fatalf("migration 135 alerts list plan = %q, want no temporary sort", after)
+	}
+
+	// The composite index leads with project_id, so the narrow project-only index
+	// is redundant and must be dropped by the migration.
+	var projectOnly int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_alerts_project_id'`).Scan(&projectOnly); err != nil {
+		t.Fatal(err)
+	}
+	if projectOnly != 0 {
+		t.Fatalf("idx_alerts_project_id index count = %d, want 0 after migration 135", projectOnly)
+	}
+
+	// A bare project_id equality lookup must remain indexed by the composite index.
+	projectLookup := explainQueryPlan(t, db, `SELECT id FROM alerts WHERE project_id = ?`, "target-135")
+	if strings.Contains(projectLookup, "SCAN alerts") {
+		t.Fatalf("project lookup plan = %q, want indexed search after migration 135", projectLookup)
+	}
+
+	// The Down migration restores the narrow project-only index and drops the composite.
+	if err := goose.DownTo(db, ".", 134); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_alerts_project_id'`).Scan(&projectOnly); err != nil {
+		t.Fatal(err)
+	}
+	if projectOnly != 1 {
+		t.Fatalf("idx_alerts_project_id index count = %d, want 1 after migration 135 down", projectOnly)
+	}
+	var composite int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_alerts_project_created'`).Scan(&composite); err != nil {
+		t.Fatal(err)
+	}
+	if composite != 0 {
+		t.Fatalf("idx_alerts_project_created index count = %d, want 0 after migration 135 down", composite)
+	}
+}
+
+func TestMigration131RetiredAttachmentSessionRejectsNewOwners(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "retired-attachment-sessions-131.db")
+	db := openMigrationTestDB(t, dbPath)
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
 		t.Fatal(err)
@@ -179,7 +592,7 @@ func TestMigration131RetiredAttachmentSessionRejectsNewOwners(t *testing.T) {
 	if _, err := db.Exec(`INSERT INTO retired_attachment_sessions(session_id) VALUES (?)`, sessionID); err != nil {
 		t.Fatalf("retiring attachment session: %v", err)
 	}
-	_, err = db.Exec(`
+	_, err := db.Exec(`
 		INSERT INTO thread_inputs
 			(id, scope, project_id, input_mode, input_status, content, attachment_session_id, queue_position)
 		VALUES ('late-owner', 'chat', 'default', 'queued', 'pending', 'late', ?, 1)`, sessionID)
@@ -193,6 +606,88 @@ func TestMigration131RetiredAttachmentSessionRejectsNewOwners(t *testing.T) {
 		  AND attachment_session_id IS NOT NULL AND attachment_session_id <> ''`, sessionID)
 	if !strings.Contains(plan, "USING COVERING INDEX idx_thread_inputs_attachment_session_id") {
 		t.Fatalf("attachment session ownership plan = %q, want covering ownership index", plan)
+	}
+}
+
+func seedMigration170QueuedCountFixture(tb testing.TB, db *sql.DB, threadInputs int) {
+	tb.Helper()
+	if _, err := db.Exec(`
+		INSERT INTO projects (id, name, description, repo_path) VALUES ('target-project-170', 'Migration 170', '', '');
+		INSERT INTO tasks (id, project_id, title, category, priority, status, prompt) VALUES
+			('target-task-170', 'target-project-170', 'Pending Task 170', 'active', 0, 'pending', 'p'),
+			('queued-task-170', 'target-project-170', 'Queued Task 170', 'active', 0, 'queued', 'p'),
+			('completed-task-170', 'target-project-170', 'Completed Task 170', 'active', 0, 'completed', 'p');
+	`); err != nil {
+		tb.Fatalf("seed migration 170 project/tasks: %v", err)
+	}
+	if _, err := db.Exec(`
+		WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM seq WHERE n < ?)
+		INSERT INTO thread_inputs (id, scope, project_id, task_id, input_mode, input_status, content, queue_position, created_at)
+		SELECT
+			'hist-170-' || printf('%06d', n),
+			CASE WHEN n % 3 = 0 THEN 'task_thread' ELSE 'chat' END,
+			'target-project-170',
+			CASE WHEN n % 3 = 0 THEN 'completed-task-170' ELSE NULL END,
+			CASE WHEN n % 2 = 0 THEN 'queued' ELSE 'steering' END,
+			CASE WHEN n IN (50000, 100000, 150000) THEN 'pending' ELSE 'applied' END,
+			'historical input',
+			n,
+			datetime('2026-01-01 00:00:00', '+' || n || ' seconds')
+		FROM seq`, threadInputs); err != nil {
+		tb.Fatalf("seed migration 170 historical thread inputs: %v", err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO thread_inputs (id, scope, project_id, task_id, input_mode, input_status, content, queue_position, created_at) VALUES
+			('task-pending-170', 'task_thread', 'target-project-170', 'target-task-170', 'queued', 'pending', 'task pending', 1, '2026-01-02 00:00:00'),
+			('chat-pending-170', 'chat', 'target-project-170', NULL, 'queued', 'pending', 'chat pending', 1, '2026-01-02 00:00:01');
+	`); err != nil {
+		tb.Fatalf("seed migration 170 sparse pending thread inputs: %v", err)
+	}
+}
+
+func seedMigration171RecoverableChatFixture(tb testing.TB, db *sql.DB, historicalInputs, pendingProjects int) {
+	tb.Helper()
+	if _, err := db.Exec(`
+		INSERT INTO projects (id, name, description, repo_path) VALUES ('recover-chat-default', 'Migration 171 default', '', '');
+		INSERT INTO tasks (id, project_id, title, category, priority, status, prompt) VALUES ('recover-chat-task-171', 'recover-chat-default', 'Migration 171 Task', 'active', 0, 'completed', 'p')`); err != nil {
+		tb.Fatalf("seed migration 171 default rows: %v", err)
+	}
+	if _, err := db.Exec(`
+		WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM seq WHERE n < 1000)
+		INSERT INTO projects (id, name, description, repo_path)
+		SELECT 'recover-chat-' || printf('%05d', n), 'Recover Chat ' || n, '', ''
+		FROM seq`); err != nil {
+		tb.Fatalf("seed migration 171 projects: %v", err)
+	}
+	if _, err := db.Exec(`
+		WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM seq WHERE n < ?)
+		INSERT INTO thread_inputs (id, scope, project_id, input_mode, input_status, content, queue_position, created_at)
+		SELECT
+			'recover-hist-171-' || printf('%06d', n),
+			'chat',
+			'recover-chat-' || printf('%05d', ((n - 1) % 1000) + 1),
+			'queued',
+			CASE WHEN n % 2 = 0 THEN 'applied' ELSE 'cancelled' END,
+			'historical chat input',
+			n,
+			datetime('2026-01-01 00:00:00', '+' || n || ' seconds')
+		FROM seq`, historicalInputs); err != nil {
+		tb.Fatalf("seed migration 171 historical thread inputs: %v", err)
+	}
+	if _, err := db.Exec(`
+		WITH RECURSIVE seq(n) AS (SELECT 1000 - ? + 1 UNION ALL SELECT n + 1 FROM seq WHERE n < 1000)
+		INSERT INTO thread_inputs (id, scope, project_id, input_mode, input_status, content, queue_position, created_at)
+		SELECT
+			'recover-pending-171-' || printf('%05d', n),
+			'chat',
+			'recover-chat-' || printf('%05d', n),
+			'queued',
+			'pending',
+			'pending chat input',
+			n,
+			'2026-01-02 00:00:00'
+		FROM seq`, pendingProjects); err != nil {
+		tb.Fatalf("seed migration 171 pending thread inputs: %v", err)
 	}
 }
 
@@ -218,13 +713,44 @@ func explainQueryPlan(t *testing.T, db *sql.DB, query string, args ...any) strin
 	return strings.Join(details, "; ")
 }
 
+func BenchmarkMigration170SystemUpdateQueuedCount(b *testing.B) {
+	for _, tc := range []struct {
+		name    string
+		version int64
+	}{
+		{name: "migration_169_scan", version: 169},
+		{name: "migration_170_indexed", version: 170},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			dbPath := filepath.Join(b.TempDir(), tc.name+".db")
+			db := openMigrationTestDB(b, dbPath)
+			goose.SetBaseFS(migrations.FS)
+			if err := goose.SetDialect("sqlite3"); err != nil {
+				b.Fatal(err)
+			}
+			if err := goose.UpTo(db, ".", tc.version); err != nil {
+				b.Fatal(err)
+			}
+			seedMigration170QueuedCountFixture(b, db, 200000)
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				var total int
+				if err := db.QueryRow(systemUpdateQueuedCountQuery).Scan(&total); err != nil {
+					b.Fatal(err)
+				}
+				if total != 7 {
+					b.Fatalf("system update queued total = %d, want 7", total)
+				}
+			}
+		})
+	}
+}
+
 func TestMigration122DeletesFailedPublicationCreatedSchedulesBeforeDroppingJournal(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "automation-publication-schedules-122.db")
-	db, err := sql.Open("sqlite", dbPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
+	db := openMigrationTestDB(t, dbPath)
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
 		t.Fatal(err)
@@ -298,11 +824,7 @@ func TestMigration122DeletesFailedPublicationCreatedSchedulesBeforeDroppingJourn
 
 func TestMigration124_BackfillsOnlyFeatureOwnedAutomationIssueTasks(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "automation-issue-origin-124.db")
-	db, err := sql.Open("sqlite", dbPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
+	db := openMigrationTestDB(t, dbPath)
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
 		t.Fatal(err)
@@ -369,11 +891,7 @@ func TestMigration124_BackfillsOnlyFeatureOwnedAutomationIssueTasks(t *testing.T
 
 func TestMigration127FailsClosedForExistingGitHubIssueClaims(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "automation-github-issue-dedup-127.db")
-	db, err := sql.Open("sqlite", dbPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
+	db := openMigrationTestDB(t, dbPath)
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
 		t.Fatal(err)
@@ -423,11 +941,7 @@ func TestMigration127FailsClosedForExistingGitHubIssueClaims(t *testing.T) {
 
 func TestMigration128LeavesHistoricalGitHubIssueProjectionSourceUnknown(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "automation-github-issue-projection-source-128.db")
-	db, err := sql.Open("sqlite", dbPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
+	db := openMigrationTestDB(t, dbPath)
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
 		t.Fatal(err)
@@ -458,11 +972,7 @@ func TestMigration128LeavesHistoricalGitHubIssueProjectionSourceUnknown(t *testi
 
 func TestMigration125_RemovesLegacyDraftGraphsAndUnsavedAutomationShells(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "automation-current-graph-125.db")
-	db, err := sql.Open("sqlite", dbPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
+	db := openMigrationTestDB(t, dbPath)
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
 		t.Fatal(err)
@@ -581,11 +1091,7 @@ func TestMigration125_RemovesLegacyDraftGraphsAndUnsavedAutomationShells(t *test
 
 func TestMigration112_BackfillsOperationalAlertsWithoutInferringProject(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "alerts-112.db")
-	db, err := sql.Open("sqlite", dbPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
+	db := openMigrationTestDB(t, dbPath)
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
 		t.Fatal(err)
@@ -619,11 +1125,7 @@ func TestMigration112_BackfillsOperationalAlertsWithoutInferringProject(t *testi
 func TestMigration100_RepairsSkippedChannelTargetsWhenOldLocalDiscordUsed099(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "old-discord-099.db")
-	db, err := sql.Open("sqlite", dbPath)
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
-	defer db.Close()
+	db := openMigrationTestDB(t, dbPath)
 
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
@@ -689,19 +1191,117 @@ func TestMigration100_RepairsSkippedChannelTargetsWhenOldLocalDiscordUsed099(t *
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 133 {
-		t.Fatalf("max goose version = %d, want 133", maxVersion)
+	if maxVersion != 172 {
+		t.Fatalf("max goose version = %d, want 172", maxVersion)
+	}
+}
+
+func assertXChannelSchema172(t *testing.T, db *sql.DB) {
+	t.Helper()
+	for _, table := range []string{"x_authorized_users", "x_user_projects", "x_task_context", "x_inbound_receipts"} {
+		var count int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 1 {
+			t.Fatalf("expected table %s", table)
+		}
+	}
+	for table, columns := range map[string][]string{
+		"x_task_context":     {"account_id", "conversation_id", "reply_to_tweet_id", "x_user_id", "username"},
+		"x_inbound_receipts": {"lease_token", "lease_expires_at", "task_id"},
+		"thread_inputs":      {"x_account_id", "x_conversation_id", "x_reply_to_tweet_id", "x_user_id", "x_username"},
+	} {
+		for _, column := range columns {
+			if !tableHasColumn(t, db, table, column) {
+				t.Fatalf("expected %s.%s after consolidated X migration", table, column)
+			}
+		}
+	}
+	for _, index := range []string{"idx_x_authorized_users_project", "idx_x_user_projects_project", "idx_x_task_context_conversation", "idx_x_inbound_receipts_project", "idx_x_inbound_receipts_task"} {
+		var count int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?`, index).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 1 {
+			t.Fatalf("expected index %s", index)
+		}
+	}
+}
+
+func TestMigration172CreatesConsolidatedXSchemaFromPublicBaseline(t *testing.T) {
+	db := openMigrationTestDB(t, filepath.Join(t.TempDir(), "x-consolidated-fresh-172.db"))
+	goose.SetBaseFS(migrations.FS)
+	defer goose.SetBaseFS(nil)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 171); err != nil {
+		t.Fatalf("migrate to public baseline 171: %v", err)
+	}
+	if err := goose.Up(db, "."); err != nil {
+		t.Fatalf("apply consolidated X migration: %v", err)
+	}
+	assertXChannelSchema172(t, db)
+	var maxVersion int
+	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
+		t.Fatal(err)
+	}
+	if maxVersion != 172 {
+		t.Fatalf("max goose version = %d, want 172", maxVersion)
+	}
+}
+
+func TestMigration172RollsBackConsolidatedXSchemaToPublicBaseline(t *testing.T) {
+	db := openMigrationTestDB(t, filepath.Join(t.TempDir(), "x-consolidated-rollback-172.db"))
+	goose.SetBaseFS(migrations.FS)
+	defer goose.SetBaseFS(nil)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 171); err != nil {
+		t.Fatalf("migrate to public baseline 171: %v", err)
+	}
+	if err := goose.Up(db, "."); err != nil {
+		t.Fatalf("apply consolidated X migration: %v", err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO projects(id, name, description, repo_path) VALUES('x-rollback-project', 'X rollback', '', '');
+		INSERT INTO x_authorized_users(project_id, x_user_id, username) VALUES('x-rollback-project', 'author', 'alice');
+	`); err != nil {
+		t.Fatalf("seed X rollback data: %v", err)
+	}
+	if err := goose.DownTo(db, ".", 171); err != nil {
+		t.Fatalf("roll back consolidated X migration: %v", err)
+	}
+
+	for _, table := range []string{"x_authorized_users", "x_user_projects", "x_task_context", "x_inbound_receipts"} {
+		var count int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 0 {
+			t.Fatalf("expected table %s to be removed by rollback", table)
+		}
+	}
+	for _, column := range []string{"x_account_id", "x_conversation_id", "x_reply_to_tweet_id", "x_user_id", "x_username"} {
+		if tableHasColumn(t, db, "thread_inputs", column) {
+			t.Fatalf("expected thread_inputs.%s to be removed by rollback", column)
+		}
+	}
+	var projectName string
+	if err := db.QueryRow(`SELECT name FROM projects WHERE id = 'x-rollback-project'`).Scan(&projectName); err != nil {
+		t.Fatalf("public schema unusable after X rollback: %v", err)
+	}
+	if projectName != "X rollback" {
+		t.Fatalf("project name = %q, want X rollback", projectName)
 	}
 }
 
 func TestMigration108_SystemChannelInboundAuthorizationDedupe(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "system-channel-auth.db")
-	db, err := sql.Open("sqlite", dbPath)
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
-	defer db.Close()
+	db := openMigrationTestDB(t, dbPath)
 
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
@@ -761,11 +1361,7 @@ func TestMigration108_SystemChannelInboundAuthorizationDedupe(t *testing.T) {
 func TestMigration105_AllowsMixtureProviderAndConfig(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "mixture-105.db")
-	db, err := sql.Open("sqlite", dbPath)
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
-	defer db.Close()
+	db := openMigrationTestDB(t, dbPath)
 
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
@@ -792,11 +1388,7 @@ func TestMigration105_AllowsMixtureProviderAndConfig(t *testing.T) {
 func TestMigration107_AllowsLocalDatabaseWithOldSwarmVersion106(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "old-swarm-106.db")
-	db, err := sql.Open("sqlite", dbPath)
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
-	defer db.Close()
+	db := openMigrationTestDB(t, dbPath)
 
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
@@ -841,8 +1433,8 @@ func TestMigration107_AllowsLocalDatabaseWithOldSwarmVersion106(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 133 {
-		t.Fatalf("max goose version = %d, want 133", maxVersion)
+	if maxVersion != 172 {
+		t.Fatalf("max goose version = %d, want 172", maxVersion)
 	}
 }
 
@@ -875,11 +1467,7 @@ func tableHasColumn(t *testing.T, db *sql.DB, table, column string) bool {
 func TestMigration100_ChannelTargetsAllowMultipleUnnamedTargets(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "channel-targets.db")
-	db, err := sql.Open("sqlite", dbPath)
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
-	defer db.Close()
+	db := openMigrationTestDB(t, dbPath)
 
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
@@ -910,11 +1498,7 @@ func TestMigrations_PreserveForeignKeyData(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	db, err := sql.Open("sqlite", dbPath)
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
-	defer db.Close()
+	db := openMigrationTestDB(t, dbPath)
 
 	// Run all migrations
 	goose.SetBaseFS(migrations.FS)
@@ -927,41 +1511,35 @@ func TestMigrations_PreserveForeignKeyData(t *testing.T) {
 
 	// Create test data
 	// Create a project
-	_, err = db.Exec(`INSERT INTO projects (id, name, description, repo_path) VALUES ('test-project', 'Test Project', 'Test', '/tmp')`)
-	if err != nil {
+	if _, err := db.Exec(`INSERT INTO projects (id, name, description, repo_path) VALUES ('test-project', 'Test Project', 'Test', '/tmp')`); err != nil {
 		t.Fatalf("failed to insert project: %v", err)
 	}
 
 	// Create a task
-	_, err = db.Exec(`INSERT INTO tasks (id, project_id, title, category, status) VALUES ('test-task', 'test-project', 'Test Task', 'scheduled', 'pending')`)
-	if err != nil {
+	if _, err := db.Exec(`INSERT INTO tasks (id, project_id, title, category, status) VALUES ('test-task', 'test-project', 'Test Task', 'scheduled', 'pending')`); err != nil {
 		t.Fatalf("failed to insert task: %v", err)
 	}
 
 	// Create a schedule
-	_, err = db.Exec(`INSERT INTO schedules (id, task_id, run_at, repeat_type) VALUES ('test-schedule', 'test-task', datetime('now'), 'daily')`)
-	if err != nil {
+	if _, err := db.Exec(`INSERT INTO schedules (id, task_id, run_at, repeat_type) VALUES ('test-schedule', 'test-task', datetime('now'), 'daily')`); err != nil {
 		t.Fatalf("failed to insert schedule: %v", err)
 	}
 
 	// Create an execution
-	_, err = db.Exec(`INSERT INTO executions (id, task_id, status, started_at) VALUES ('test-exec', 'test-task', 'completed', datetime('now'))`)
-	if err != nil {
+	if _, err := db.Exec(`INSERT INTO executions (id, task_id, status, started_at) VALUES ('test-exec', 'test-task', 'completed', datetime('now'))`); err != nil {
 		t.Fatalf("failed to insert execution: %v", err)
 	}
 
 	// Verify the data exists
 	var count int
-	err = db.QueryRow("SELECT COUNT(*) FROM schedules WHERE task_id = 'test-task'").Scan(&count)
-	if err != nil {
+	if err := db.QueryRow("SELECT COUNT(*) FROM schedules WHERE task_id = 'test-task'").Scan(&count); err != nil {
 		t.Fatalf("failed to count schedules: %v", err)
 	}
 	if count != 1 {
 		t.Fatalf("expected 1 schedule, got %d", count)
 	}
 
-	err = db.QueryRow("SELECT COUNT(*) FROM executions WHERE task_id = 'test-task'").Scan(&count)
-	if err != nil {
+	if err := db.QueryRow("SELECT COUNT(*) FROM executions WHERE task_id = 'test-task'").Scan(&count); err != nil {
 		t.Fatalf("failed to count executions: %v", err)
 	}
 	if count != 1 {
@@ -970,8 +1548,7 @@ func TestMigrations_PreserveForeignKeyData(t *testing.T) {
 
 	// Now verify that the schema has proper constraints
 	var schema string
-	err = db.QueryRow("SELECT sql FROM sqlite_master WHERE type='table' AND name='tasks'").Scan(&schema)
-	if err != nil {
+	if err := db.QueryRow("SELECT sql FROM sqlite_master WHERE type='table' AND name='tasks'").Scan(&schema); err != nil {
 		t.Fatalf("failed to get tasks schema: %v", err)
 	}
 
@@ -982,8 +1559,7 @@ func TestMigrations_PreserveForeignKeyData(t *testing.T) {
 
 	// Verify foreign keys are enabled
 	var fkEnabled int
-	err = db.QueryRow("PRAGMA foreign_keys").Scan(&fkEnabled)
-	if err != nil {
+	if err := db.QueryRow("PRAGMA foreign_keys").Scan(&fkEnabled); err != nil {
 		t.Fatalf("failed to check foreign keys: %v", err)
 	}
 	if fkEnabled != 1 {
@@ -997,11 +1573,7 @@ func TestMigrations_AgentsTableDoesNotContainColorColumn(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	db, err := sql.Open("sqlite", dbPath)
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
-	defer db.Close()
+	db := openMigrationTestDB(t, dbPath)
 
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
@@ -1042,11 +1614,7 @@ func TestMigration012_CheckConstraints(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	db, err := sql.Open("sqlite", dbPath)
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
-	defer db.Close()
+	db := openMigrationTestDB(t, dbPath)
 
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
@@ -1057,13 +1625,12 @@ func TestMigration012_CheckConstraints(t *testing.T) {
 	}
 
 	// Create a project first
-	_, err = db.Exec(`INSERT INTO projects (id, name) VALUES ('test-proj', 'Test')`)
-	if err != nil {
+	if _, err := db.Exec(`INSERT INTO projects (id, name) VALUES ('test-proj', 'Test')`); err != nil {
 		t.Fatalf("failed to insert project: %v", err)
 	}
 
 	// Test category CHECK constraint
-	_, err = db.Exec(`INSERT INTO tasks (id, project_id, title, category) VALUES ('t1', 'test-proj', 'Test 1', 'invalid-category')`)
+	_, err := db.Exec(`INSERT INTO tasks (id, project_id, title, category) VALUES ('t1', 'test-proj', 'Test 1', 'invalid-category')`)
 	if err == nil {
 		t.Fatal("expected error for invalid category, got nil")
 	}
@@ -1081,8 +1648,7 @@ func TestMigration012_CheckConstraints(t *testing.T) {
 	}
 
 	// Valid inserts should succeed
-	_, err = db.Exec(`INSERT INTO tasks (id, project_id, title, category, status, tag) VALUES ('t4', 'test-proj', 'Test 4', 'active', 'pending', 'feature')`)
-	if err != nil {
+	if _, err := db.Exec(`INSERT INTO tasks (id, project_id, title, category, status, tag) VALUES ('t4', 'test-proj', 'Test 4', 'active', 'pending', 'feature')`); err != nil {
 		t.Fatalf("expected valid insert to succeed: %v", err)
 	}
 
@@ -1093,11 +1659,7 @@ func TestMigrations_GitHubRepoURLAndTaskPullRequests(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	db, err := sql.Open("sqlite", dbPath)
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
-	defer db.Close()
+	db := openMigrationTestDB(t, dbPath)
 
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
@@ -1204,11 +1766,7 @@ func TestMigration082_NormalizesUnreleasedSkillCuratorNames(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	db, err := sql.Open("sqlite", dbPath)
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
-	defer db.Close()
+	db := openMigrationTestDB(t, dbPath)
 
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
@@ -1298,11 +1856,7 @@ func TestMigration082_SkipsWhenLocalDevDBAlreadyApplied082(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	db, err := sql.Open("sqlite", dbPath)
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
-	defer db.Close()
+	db := openMigrationTestDB(t, dbPath)
 
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
@@ -1328,8 +1882,8 @@ func TestMigration082_SkipsWhenLocalDevDBAlreadyApplied082(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 133 {
-		t.Fatalf("max goose version = %d, want 133", maxVersion)
+	if maxVersion != 172 {
+		t.Fatalf("max goose version = %d, want 172", maxVersion)
 	}
 }
 
@@ -1337,11 +1891,7 @@ func TestMigration082_AppliesAfterPublic074(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	db, err := sql.Open("sqlite", dbPath)
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
-	defer db.Close()
+	db := openMigrationTestDB(t, dbPath)
 
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
@@ -1504,11 +2054,7 @@ func TestMigration071_RebuildsAgentConfigsWithReferences(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	db, err := sql.Open("sqlite", dbPath)
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
-	defer db.Close()
+	db := openMigrationTestDB(t, dbPath)
 
 	if _, err := db.Exec("PRAGMA foreign_keys=ON"); err != nil {
 		t.Fatalf("failed to enable foreign keys: %v", err)
@@ -1577,11 +2123,7 @@ func TestMigration091_BackfillsHistoricalLLMUsageFromExecutions(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	db, err := sql.Open("sqlite", dbPath)
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
-	defer db.Close()
+	db := openMigrationTestDB(t, dbPath)
 
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
@@ -1624,11 +2166,7 @@ func TestMigration091_LocalDevAlreadyAppliedUsageChainStillMigrates(t *testing.T
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	db, err := sql.Open("sqlite", dbPath)
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
-	defer db.Close()
+	db := openMigrationTestDB(t, dbPath)
 
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
@@ -1680,19 +2218,15 @@ func TestMigration091_LocalDevAlreadyAppliedUsageChainStillMigrates(t *testing.T
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 133 {
-		t.Fatalf("max goose version = %d, want 133", maxVersion)
+	if maxVersion != 172 {
+		t.Fatalf("max goose version = %d, want 172", maxVersion)
 	}
 }
 
 func TestMigration095_AllowsCreatedSkillAnalyticsEvents(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "skill-analytics-created.db")
-	db, err := sql.Open("sqlite", dbPath)
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
-	defer db.Close()
+	db := openMigrationTestDB(t, dbPath)
 
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
@@ -1834,11 +2368,7 @@ func TestMain(m *testing.M) {
 func TestMigration110_GitHubAuthorizationAndProjectInbox(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "github-auth-110.db")
-	db, err := sql.Open("sqlite", dbPath)
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
-	defer db.Close()
+	db := openMigrationTestDB(t, dbPath)
 
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
@@ -1880,11 +2410,7 @@ func TestMigration110_GitHubAuthorizationAndProjectInbox(t *testing.T) {
 
 func TestMigration113AutomationDefinitionsUpAndDown(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "automations-113.db")
-	db, err := sql.Open("sqlite", dbPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
+	db := openMigrationTestDB(t, dbPath)
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
 		t.Fatal(err)
@@ -1917,11 +2443,7 @@ func TestMigration113AutomationDefinitionsUpAndDown(t *testing.T) {
 
 func TestMigration121And122LeaveOnlyAtomicAutomationSaveSchema(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "automations-atomic-save.db")
-	db, err := sql.Open("sqlite", dbPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
+	db := openMigrationTestDB(t, dbPath)
 
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
@@ -1986,11 +2508,7 @@ func TestMigration121And122LeaveOnlyAtomicAutomationSaveSchema(t *testing.T) {
 
 func TestMigration115AutomationPublicationUpAndDown(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "automations-115.db")
-	db, err := sql.Open("sqlite", dbPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
+	db := openMigrationTestDB(t, dbPath)
 	if _, err := db.Exec(`PRAGMA foreign_keys = ON`); err != nil {
 		t.Fatal(err)
 	}
@@ -2057,11 +2575,7 @@ func TestMigration115AutomationPublicationUpAndDown(t *testing.T) {
 
 func TestMigration114AutomationRuntimeUpAndDown(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "automations-114.db")
-	db, err := sql.Open("sqlite", dbPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
+	db := openMigrationTestDB(t, dbPath)
 	if _, err := db.Exec(`PRAGMA foreign_keys = ON`); err != nil {
 		t.Fatal(err)
 	}
@@ -2115,11 +2629,7 @@ func TestMigration114AutomationRuntimeUpAndDown(t *testing.T) {
 }
 
 func TestMigration129PreservesExistingScheduleContextSemantics(t *testing.T) {
-	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "schedule-context-129.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
+	db := openMigrationTestDB(t, filepath.Join(t.TempDir(), "schedule-context-129.db"))
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
 		t.Fatal(err)
@@ -2153,12 +2663,191 @@ func TestMigration129PreservesExistingScheduleContextSemantics(t *testing.T) {
 	}
 }
 
-func TestMigration133UsesAutomationLifecycleForScheduleEnablement(t *testing.T) {
-	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "automation-schedule-lifecycle-133.db"))
-	if err != nil {
+func TestMigration134ArtifactMailboxOwnershipSurvivesGraphReplacementWithoutBackfill(t *testing.T) {
+	db := openMigrationTestDB(t, filepath.Join(t.TempDir(), "automation-artifact-mailbox-134.db"))
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	if err := goose.UpTo(db, ".", 133); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO projects (id, name, description, repo_path) VALUES ('project-134', 'Migration 134', '', '');
+		INSERT INTO automations (id, project_id, stable_key, name, lifecycle_state, published_version_id)
+			VALUES ('automation-134', 'project-134', 'artifact-owner-134', 'Artifact owner', 'active', 'version-134');
+		INSERT INTO automation_versions (id, project_id, automation_id, version, state, source, adapter_key)
+			VALUES ('version-134', 'project-134', 'automation-134', 1, 'published', 'manual', 'custom');
+	`); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 134); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM automation_artifact_mailbox_owners`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("migration 134 must not infer or backfill historical ownership: got %d rows", count)
+	}
+	if _, err := db.Exec(`INSERT INTO automation_artifact_mailbox_owners
+		(project_id, automation_id, artifact_type, artifact_id, producer_node_key, action_node_key, gate_node_key, mailbox_node_key)
+		VALUES ('project-134', 'automation-134', 'alert', 'alert-134', 'producer', 'notification', 'approval', 'inbox')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`DELETE FROM automation_versions WHERE id = 'version-134'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM automation_artifact_mailbox_owners WHERE artifact_id = 'alert-134'`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("logical mailbox ownership must survive graph replacement: got %d rows", count)
+	}
+	if _, err := db.Exec(`DELETE FROM automations WHERE id = 'automation-134'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM automation_artifact_mailbox_owners`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("logical mailbox ownership must cascade when the stable Automation is deleted: got %d rows", count)
+	}
+}
+
+func TestMigration145RetiresGitHubIssueMailboxOwnershipOnly(t *testing.T) {
+	db := openMigrationTestDB(t, filepath.Join(t.TempDir(), "retire-github-mailbox-ownership-145.db"))
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 144); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO projects (id, name, description, repo_path) VALUES ('project-145', 'Migration 145', '', '');
+		INSERT INTO automations (id, project_id, stable_key, name, lifecycle_state, published_version_id)
+			VALUES ('automation-145', 'project-145', 'retire-github-owner-145', 'Retire GitHub owner', 'active', 'version-145');
+		INSERT INTO automation_versions (id, project_id, automation_id, version, state, source, adapter_key)
+			VALUES ('version-145', 'project-145', 'automation-145', 1, 'published', 'manual', 'custom');
+		INSERT INTO automation_artifact_mailbox_owners
+			(project_id, automation_id, artifact_type, artifact_id, producer_node_key, action_node_key, gate_node_key, mailbox_node_key)
+			VALUES
+			('project-145', 'automation-145', 'alert', 'alert-145', 'producer', 'notification', 'approval', 'inbox'),
+			('project-145', 'automation-145', 'github_issue', 'github:example/runtime:issue:145', 'producer', 'issue', 'assignment', 'dev_inbox');
+	`); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 145); err != nil {
+		t.Fatal(err)
+	}
+	var alertOwners, githubOwners int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM automation_artifact_mailbox_owners WHERE artifact_type = 'alert'`).Scan(&alertOwners); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM automation_artifact_mailbox_owners WHERE artifact_type = 'github_issue'`).Scan(&githubOwners); err != nil {
+		t.Fatal(err)
+	}
+	if alertOwners != 1 || githubOwners != 0 {
+		t.Fatalf("migration 145 must preserve alert owners and delete GitHub issue owners: alerts=%d github=%d", alertOwners, githubOwners)
+	}
+}
+
+func TestMigration147SkipsStaleGitHubIssueTaskProvenanceResources(t *testing.T) {
+	db := openMigrationTestDB(t, filepath.Join(t.TempDir(), "github-issue-task-provenance-stale-resource-147.db"))
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 146); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO projects (id, name, description, repo_path) VALUES ('project-147', 'Migration 147', '', '');
+		INSERT INTO automations (id, project_id, stable_key, name, automation_type, lifecycle_state, published_version_id)
+			VALUES ('automation-147', 'project-147', 'automation-147', 'Automation 147', 'custom', 'active', 'version-147');
+		INSERT INTO automation_versions (id, project_id, automation_id, version, state, source, adapter_key)
+			VALUES ('version-147', 'project-147', 'automation-147', 1, 'published', 'manual', 'github_sdlc');
+		INSERT INTO automation_nodes (id, project_id, automation_id, version_id, node_key, name, node_type, role)
+			VALUES ('implementation-node-147', 'project-147', 'automation-147', 'version-147', 'implementation', 'Implementation', 'agent_task', 'implementation');
+		INSERT INTO tasks (id, project_id, title, category, priority, status, prompt)
+			VALUES ('live-task-147', 'project-147', 'Live task', 'active', 2, 'pending', 'live');
+		INSERT INTO automation_work_items (id, project_id, automation_id, origin_version_id, work_item_key)
+			VALUES ('live-work-147', 'project-147', 'automation-147', 'version-147', 'live-work-147'),
+				('stale-work-147', 'project-147', 'automation-147', 'version-147', 'stale-work-147');
+		INSERT INTO automation_activities (id, project_id, automation_id, version_id, node_id, work_item_id, activity_key, activity_type, status)
+			VALUES ('live-activity-147', 'project-147', 'automation-147', 'version-147', 'implementation-node-147', 'live-work-147', 'work-item:live-work-147:implementation-task', 'create_task', 'completed'),
+				('stale-activity-147', 'project-147', 'automation-147', 'version-147', 'implementation-node-147', 'stale-work-147', 'work-item:stale-work-147:implementation-task', 'create_task', 'completed');
+		INSERT INTO automation_activity_resources (activity_id, resource_type, resource_id, relation)
+			VALUES ('live-activity-147', 'task', 'live-task-147', 'child'),
+				('live-activity-147', 'github_issue', 'github:openvibely/openvibely:issue:147', 'subject'),
+				('stale-activity-147', 'task', 'deleted-task-147', 'child'),
+				('stale-activity-147', 'github_issue', 'github:openvibely/openvibely:issue:148', 'subject');
+	`); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 147); err != nil {
+		t.Fatalf("migration 147 should skip stale deleted task resources: %v", err)
+	}
+	var live, stale int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM automation_github_issue_task_provenance WHERE task_id = 'live-task-147'`).Scan(&live); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM automation_github_issue_task_provenance WHERE task_id = 'deleted-task-147'`).Scan(&stale); err != nil {
+		t.Fatal(err)
+	}
+	if live != 1 || stale != 0 {
+		t.Fatalf("migration 147 provenance counts: live=%d stale=%d, want live=1 stale=0", live, stale)
+	}
+}
+
+func TestMigration146SimplifiesNativeAlertMailboxOwnership(t *testing.T) {
+	db := openMigrationTestDB(t, filepath.Join(t.TempDir(), "simplify-native-alert-mailbox-ownership-146.db"))
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 145); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO projects (id, name, description, repo_path) VALUES ('project-146', 'Migration 146', '', '');
+		INSERT INTO automations (id, project_id, stable_key, name, lifecycle_state, published_version_id)
+			VALUES ('automation-146', 'project-146', 'simplify-native-owner-146', 'Simplify Native owner', 'active', 'version-146');
+		INSERT INTO automation_versions (id, project_id, automation_id, version, state, source, adapter_key)
+			VALUES ('version-146', 'project-146', 'automation-146', 1, 'published', 'manual', 'custom');
+		INSERT INTO automation_artifact_mailbox_owners
+			(project_id, automation_id, artifact_type, artifact_id, producer_node_key, action_node_key, gate_node_key, mailbox_node_key)
+			VALUES
+			('project-146', 'automation-146', 'alert', 'alert-146', 'producer', 'notification', 'approval', 'inbox'),
+			('project-146', 'automation-146', 'alert', 'alert-146', 'producer2', 'notification2', 'approval2', 'inbox2'),
+			('project-146', 'automation-146', 'alert', 'other-alert-146', 'producer', 'notification', 'approval', 'inbox');
+	`); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 146); err != nil {
+		t.Fatal(err)
+	}
+	var owners int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM automation_artifact_mailbox_owners WHERE artifact_type = 'alert' AND artifact_id = 'alert-146'`).Scan(&owners); err != nil {
+		t.Fatal(err)
+	}
+	if owners != 1 {
+		t.Fatalf("migration 146 must collapse duplicate alert topology owner rows: got %d", owners)
+	}
+	var keyedRows int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM automation_artifact_mailbox_owners
+		WHERE artifact_type = 'alert' AND (producer_node_key <> '' OR action_node_key <> '' OR gate_node_key <> '' OR mailbox_node_key <> '')`).Scan(&keyedRows); err != nil {
+		t.Fatal(err)
+	}
+	if keyedRows != 0 {
+		t.Fatalf("migration 146 must remove Native alert topology keys: got %d keyed rows", keyedRows)
+	}
+}
+
+func TestMigration133UsesAutomationLifecycleForScheduleEnablement(t *testing.T) {
+	db := openMigrationTestDB(t, filepath.Join(t.TempDir(), "automation-schedule-lifecycle-133.db"))
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
 		t.Fatal(err)
@@ -2201,5 +2890,97 @@ func TestMigration133UsesAutomationLifecycleForScheduleEnablement(t *testing.T) 
 	}
 	if !activeEnabled || pausedEnabled {
 		t.Fatalf("migration 133 must enable only active Automation schedules: active=%t paused=%t", activeEnabled, pausedEnabled)
+	}
+}
+
+func TestMigration164DeletesOrphanedSchedules(t *testing.T) {
+	db := openMigrationTestDB(t, filepath.Join(t.TempDir(), "orphaned-schedules-164.db"))
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 163); err != nil {
+		t.Fatalf("failed to run migrations through 163: %v", err)
+	}
+	if _, err := db.Exec(`PRAGMA foreign_keys = OFF`); err != nil {
+		t.Fatal(err)
+	}
+	_, err := db.Exec(`
+		INSERT INTO projects (id, name, description, repo_path) VALUES ('project-164', 'Migration 164', '', '');
+		INSERT INTO tasks (id, project_id, title, prompt) VALUES ('task-164', 'project-164', 'Kept task', '');
+		INSERT INTO schedules (id, task_id, run_at, repeat_type, repeat_interval, enabled, next_run)
+			VALUES ('schedule-kept-164', 'task-164', CURRENT_TIMESTAMP, 'once', 1, 1, CURRENT_TIMESTAMP);
+		INSERT INTO schedules (id, task_id, run_at, repeat_type, repeat_interval, enabled, next_run)
+			VALUES ('schedule-orphan-164', 'missing-task-164', CURRENT_TIMESTAMP, 'once', 1, 1, CURRENT_TIMESTAMP);
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`PRAGMA foreign_keys = ON`); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 164); err != nil {
+		t.Fatalf("failed to run migration 164: %v", err)
+	}
+	var kept, orphan int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM schedules WHERE id = 'schedule-kept-164'`).Scan(&kept); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM schedules WHERE id = 'schedule-orphan-164'`).Scan(&orphan); err != nil {
+		t.Fatal(err)
+	}
+	if kept != 1 || orphan != 0 {
+		t.Fatalf("migration 164 schedules: kept=%d orphan=%d, want kept=1 orphan=0", kept, orphan)
+	}
+}
+
+func TestMigration165DeletesTerminalizedAutomationPositions(t *testing.T) {
+	db := openMigrationTestDB(t, filepath.Join(t.TempDir(), "terminalized-positions-165.db"))
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 164); err != nil {
+		t.Fatalf("failed to run migrations through 164: %v", err)
+	}
+	_, err := db.Exec(`
+		INSERT INTO projects (id, name, description, repo_path) VALUES ('project-165', 'Migration 165', '', '');
+		INSERT INTO automations (id, project_id, stable_key, name, lifecycle_state)
+			VALUES ('automation-165', 'project-165', 'automation-165', 'Automation 165', 'active');
+		INSERT INTO automation_versions (id, project_id, automation_id, version, state, source, adapter_key)
+			VALUES ('version-165', 'project-165', 'automation-165', 1, 'published', 'manual', 'native_sdlc');
+		INSERT INTO automation_nodes (id, project_id, automation_id, version_id, node_key, name, node_type, role)
+			VALUES ('node-165', 'project-165', 'automation-165', 'version-165', 'implementation', 'Implementation', 'agent_task', 'agent');
+		INSERT INTO automation_work_items (id, project_id, automation_id, origin_version_id, work_item_key, status)
+			VALUES ('item-165-terminal', 'project-165', 'automation-165', 'version-165', 'item-165-terminal', 'completed'),
+				('item-165-failed', 'project-165', 'automation-165', 'version-165', 'item-165-failed', 'failed'),
+				('item-165-newer', 'project-165', 'automation-165', 'version-165', 'item-165-newer', 'active');
+		INSERT INTO automation_work_item_positions (work_item_id, project_id, automation_id, version_id, node_id, state, entered_at, updated_at)
+			VALUES ('item-165-terminal', 'project-165', 'automation-165', 'version-165', 'node-165', 'waiting', '2026-08-15 10:00:00', '2026-08-15 10:00:00'),
+				('item-165-failed', 'project-165', 'automation-165', 'version-165', 'node-165', 'failed', '2026-08-15 10:00:00', '2026-08-15 10:00:00'),
+				('item-165-newer', 'project-165', 'automation-165', 'version-165', 'node-165', 'active', '2026-08-15 12:00:00', '2026-08-15 12:00:00');
+		INSERT INTO automation_transitions (id, project_id, automation_id, version_id, work_item_id, from_node_id, to_node_id, event_key, state, occurred_at)
+			VALUES ('transition-165-completed', 'project-165', 'automation-165', 'version-165', 'item-165-terminal', 'node-165', 'node-165', 'execution:terminal-165:terminal:completed', 'completed', '2026-08-15 11:00:00'),
+				('transition-165-failed', 'project-165', 'automation-165', 'version-165', 'item-165-failed', 'node-165', 'node-165', 'execution:failed-165:terminal:failed', 'failed', '2026-08-15 11:00:00'),
+				('transition-165-older', 'project-165', 'automation-165', 'version-165', 'item-165-newer', 'node-165', 'node-165', 'execution:older-165:terminal:completed', 'completed', '2026-08-15 11:00:00');
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 165); err != nil {
+		t.Fatalf("failed to run migration 165: %v", err)
+	}
+	var remaining int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM automation_work_item_positions WHERE work_item_id = 'item-165-terminal'`).Scan(&remaining); err != nil {
+		t.Fatal(err)
+	}
+	if remaining != 0 {
+		t.Fatalf("terminalized completed position count = %d, want 0", remaining)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM automation_work_item_positions WHERE work_item_id IN ('item-165-failed', 'item-165-newer')`).Scan(&remaining); err != nil {
+		t.Fatal(err)
+	}
+	if remaining != 2 {
+		t.Fatalf("preserved position count = %d, want 2", remaining)
 	}
 }

@@ -1336,6 +1336,192 @@ func TestProcessStreamingResponse_GoalAgentQueuedFollowupDoesNotReactivateAchiev
 	require.NotNil(t, latest.AchievedAt)
 }
 
+func TestProcessStreamingResponse_CancelledTaskFollowupSkipsAfterCompleteHooksAndContinuations(t *testing.T) {
+	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	goalRepo := repository.NewTaskGoalRepo(db)
+	goalSvc := service.NewTaskGoalService(goalRepo, h.taskRepo, nil)
+	h.SetTaskGoalService(goalSvc)
+	h.taskSvc.SetTaskGoalService(goalSvc)
+	h.workerSvc.SetTaskGoalService(goalSvc)
+	agentRepo := repository.NewAgentRepo(db)
+	h.SetAgentRepo(agentRepo)
+	h.workerSvc.SetLifecycleAgentRepo(agentRepo)
+
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Cancelled Followup Lifecycle Project")
+	task := createTask(t, h, project.ID, "Cancelled Followup Lifecycle Task", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusRunning
+		tk.AgentID = &agent.ID
+		tk.Prompt = "Continue task"
+	})
+	_, err := h.taskGoalSvc.SetGoal(ctx, task.ID, "Do not restart after stop", service.GoalOptions{})
+	require.NoError(t, err)
+	exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "followup that gets stopped"
+	})
+	goalAgent := &models.Agent{Key: models.AgentSystemKindGoal, Name: "System: Goal Agent", Model: "inherit", Tools: []string{"get_task_goal", "send_to_task", "mark_task_goal_achieved", "report_task_goal_blocked"}, SystemKind: models.AgentSystemKindGoal, GeneratedStatus: models.AgentStatusProtected, CreatedBy: models.AgentCreatedBySystem, Enabled: true}
+	require.NoError(t, agentRepo.Create(ctx, goalAgent))
+
+	afterInvoked := make(chan struct{}, 1)
+	store := &chatMemoryHookStore{hooks: []models.AgentLifecycleHook{{ID: "goal-hook-cancelled", AgentID: goalAgent.ID, When: models.LifecycleAfterComplete, SkillKey: "evaluate_task_goal", OutputContract: models.OutputContractActivitySummary, Blocking: true, Enabled: true}}}
+	invoker := &chatMemoryHookInvoker{onInvoke: func(ctx context.Context, hook models.AgentLifecycleHook, in lifecycle.HookInput) error {
+		if hook.When == models.LifecycleAfterComplete {
+			afterInvoked <- struct{}{}
+			if rt := llmcontracts.RuntimeToolsFromContext(ctx); rt != nil {
+				_, _, _, _ = rt.Executor(ctx, "send_to_task", json.RawMessage(`{"task_id":"current","message":"stale continuation after cancel"}`))
+			}
+		}
+		return nil
+	}}
+	h.workerSvc.SetLifecycleRunner(lifecycle.NewRunner(store, invoker, nil))
+
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "partial completion after stop"
+	mock.TextOnly = "partial completion after stop"
+	mock.OnCall = func(context.Context, testutil.MockLLMCall) {
+		require.NoError(t, h.taskSvc.CancelTask(context.Background(), task.ID))
+	}
+	h.llmSvc.SetLLMCaller(mock)
+
+	h.processStreamingResponse(streamingResponseParams{
+		ExecID:         exec.ID,
+		TaskID:         task.ID,
+		Message:        "followup that gets stopped",
+		Agent:          *agent,
+		ProjectID:      project.ID,
+		IsTaskFollowup: true,
+		ChatMode:       models.ChatModeOrchestrate,
+		InputOrigin:    models.TaskOriginWeb,
+	})
+
+	select {
+	case <-afterInvoked:
+		t.Fatal("cancelled task-thread follow-up invoked after_complete hook")
+	case <-time.After(150 * time.Millisecond):
+	}
+	pending, err := h.threadInputRepo.ListPendingForTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.Empty(t, pending, "cancelled lifecycle hook must not enqueue follow-up work")
+	latestGoal, err := h.taskGoalSvc.GetGoal(ctx, task.ID)
+	require.NoError(t, err)
+	require.NotNil(t, latestGoal)
+	require.Equal(t, models.TaskGoalStatusPaused, latestGoal.Status, "cancellation should only apply required user-stop goal pause")
+	require.Equal(t, service.TaskGoalStoppedByUserReason, latestGoal.Reason)
+	require.Nil(t, latestGoal.AchievedAt, "after_complete must not mark a cancelled run's goal achieved")
+	updatedExec, err := h.execRepo.GetByID(ctx, exec.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.ExecCancelled, updatedExec.Status)
+}
+
+func TestProcessStreamingResponse_DeadlineFailureRunsAfterCompleteDespiteCancelledFinalStatus(t *testing.T) {
+	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	h.workerSvc.SetTaskRepo(h.taskRepo)
+	ctx := context.Background()
+	goalRepo := repository.NewTaskGoalRepo(db)
+	goalSvc := service.NewTaskGoalService(goalRepo, h.taskRepo, nil)
+	h.SetTaskGoalService(goalSvc)
+	h.taskSvc.SetTaskGoalService(goalSvc)
+	h.workerSvc.SetTaskGoalService(goalSvc)
+	h.workerSvc.SetAfterCompleteRuntimeToolProvider(h.GoalAgentAfterCompleteRuntimeTools)
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Deadline Lifecycle Race Project")
+	task := createTask(t, h, project.ID, "Deadline Lifecycle Race Task", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusRunning
+		tk.AgentID = &agent.ID
+		tk.Prompt = "Continue task"
+	})
+	destination := createTask(t, h, project.ID, "Deadline Lifecycle Destination Task", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusPending
+		tk.AgentID = &agent.ID
+		tk.Prompt = "Destination has not started"
+	})
+	exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "followup that times out"
+	})
+
+	afterInput := make(chan lifecycle.HookInput, 1)
+	type deadlineToolResult struct {
+		output  string
+		handled bool
+		isError bool
+		err     error
+	}
+	toolResult := make(chan deadlineToolResult, 1)
+	store := &chatMemoryHookStore{hooks: []models.AgentLifecycleHook{{ID: "learn-deadline", When: models.LifecycleAfterComplete, SkillKey: "observe_task_for_learning", OutputContract: models.OutputContractLearningSummary, Blocking: true, Enabled: true}}}
+	invoker := &chatMemoryHookInvoker{onInvoke: func(ctx context.Context, hook models.AgentLifecycleHook, in lifecycle.HookInput) error {
+		if hook.When == models.LifecycleAfterComplete {
+			if rt := llmcontracts.RuntimeToolsFromContext(ctx); rt != nil {
+				executionError, _ := in.Extras[lifecycle.ExecutionErrorKey].(string)
+				hookCtx := lifecycle.WithHookAgent(ctx, lifecycle.HookAgent{AgentID: "deadline-hook", Tools: []string{"send_to_task"}, TaskID: in.TaskID, TaskRunID: in.TaskRunID, ExecutionError: executionError})
+				payload := json.RawMessage(`{"task_id":"` + destination.ID + `","message":"continue failure evaluation after timeout"}`)
+				output, handled, isError, err := rt.Executor(hookCtx, "send_to_task", payload)
+				toolResult <- deadlineToolResult{output: output, handled: handled, isError: isError, err: err}
+			}
+			afterInput <- in
+		}
+		return nil
+	}}
+	h.workerSvc.SetLifecycleRunner(lifecycle.NewRunner(store, invoker, nil))
+
+	mock := testutil.NewMockLLMCaller()
+	mock.Err = context.DeadlineExceeded
+	mock.OnCall = func(context.Context, testutil.MockLLMCall) {
+		// Simulate the finalization race: by the time the detached after_complete
+		// goroutine performs its persisted task-state preflight, the task has
+		// already been marked cancelled by timeout handling.
+		require.NoError(t, h.taskRepo.UpdateStatus(context.Background(), task.ID, models.StatusCancelled))
+	}
+	h.llmSvc.SetLLMCaller(mock)
+
+	h.processStreamingResponse(streamingResponseParams{
+		ExecID:         exec.ID,
+		TaskID:         task.ID,
+		Message:        "followup that times out",
+		Agent:          *agent,
+		ProjectID:      project.ID,
+		IsTaskFollowup: true,
+		ChatMode:       models.ChatModeOrchestrate,
+		InputOrigin:    models.TaskOriginWeb,
+	})
+
+	select {
+	case in := <-afterInput:
+		if got, _ := in.Extras[lifecycle.ExecutionErrorKey].(string); got != context.DeadlineExceeded.Error() {
+			t.Fatalf("after_complete deadline metadata = %q, want %q", got, context.DeadlineExceeded.Error())
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for after_complete hook after deadline failure")
+	}
+	var queuedID string
+	select {
+	case result := <-toolResult:
+		require.True(t, result.handled, "deadline lifecycle send_to_task should be available")
+		require.False(t, result.isError, "ordinary timeout lifecycle continuation should not be rejected as cancelled")
+		require.NoError(t, result.err, "ordinary timeout lifecycle continuation should not be rejected as cancelled")
+		var payload struct {
+			QueuedMessageID string `json:"queued_message_id"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(result.output), &payload))
+		queuedID = payload.QueuedMessageID
+		require.NotEmpty(t, queuedID)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for deadline lifecycle send_to_task result")
+	}
+	queued, err := h.threadInputRepo.GetByID(ctx, queuedID)
+	require.NoError(t, err)
+	require.NotNil(t, queued)
+	require.Equal(t, "continue failure evaluation after timeout", queued.Content)
+	updatedExec, err := h.execRepo.GetByID(ctx, exec.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.ExecCancelled, updatedExec.Status)
+}
+
 func TestProcessStreamingResponse_GenericAfterCompleteRunsGoalAgentWithoutAutoEnqueue(t *testing.T) {
 	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
 	ctx := context.Background()
@@ -1817,7 +2003,7 @@ func TestHandler_InitialTaskTurnQueuesFollowupBeforeFirstOutputAndPromotes(t *te
 	promotedTask, err := h.taskRepo.GetByID(ctx, task.ID)
 	require.NoError(t, err)
 	require.Equal(t, models.CategoryActive, promotedTask.Category)
-	require.Equal(t, models.StatusQueued, promotedTask.Status)
+	require.Equal(t, models.StatusRunning, promotedTask.Status)
 
 	stored, err := h.threadInputRepo.GetByID(ctx, queued.ID)
 	require.NoError(t, err)
@@ -2021,6 +2207,33 @@ func TestHandler_WorkerCompletionPromotesQueuedTaskThreadInput(t *testing.T) {
 	if len(inputs) != 0 {
 		t.Fatalf("expected no stranded pending queued inputs, got %#v", inputs)
 	}
+}
+
+func TestHandler_RecoverQueuedInputsPromotesChatAfterDrain(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Recover Chat Queue After Drain")
+	queued := &models.ThreadInput{Scope: models.ThreadInputScopeChat, ProjectID: project.ID, AgentConfigID: agent.ID, InputMode: models.ThreadInputModeQueued, Content: "queued chat after drain", ChatMode: models.ChatModeOrchestrate}
+	require.NoError(t, h.threadInputRepo.CreateQueued(ctx, queued))
+	started := make(chan string, 1)
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "recovered"
+	mock.TextOnly = "recovered"
+	mock.OnCall = func(_ context.Context, call testutil.MockLLMCall) { started <- call.Prompt }
+	h.llmSvc.SetLLMCaller(mock)
+
+	h.RecoverQueuedInputs(ctx)
+	select {
+	case got := <-started:
+		require.Equal(t, queued.Content, got)
+	case <-time.After(2 * time.Second):
+		t.Fatal("queued Chat input was not resumed after drain")
+	}
+	stored, err := h.threadInputRepo.GetByID(ctx, queued.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.ThreadInputApplied, stored.InputStatus)
 }
 
 func TestHandler_RecoverQueuedTaskThreadInputsDrainsMoreThanOneBatch(t *testing.T) {
@@ -2278,8 +2491,8 @@ func TestHandler_PromoteQueuedTaskThreadInput_PromotesAfterWorkerCompletion(t *t
 	}
 	updatedTask, err := h.taskRepo.GetByID(ctx, task.ID)
 	require.NoError(t, err)
-	if updatedTask.Status != models.StatusQueued || updatedTask.Category != models.CategoryActive {
-		t.Fatalf("expected promoted task active/queued, got status=%s category=%s", updatedTask.Status, updatedTask.Category)
+	if updatedTask.Status != models.StatusRunning || updatedTask.Category != models.CategoryActive {
+		t.Fatalf("expected promoted task active/running, got status=%s category=%s", updatedTask.Status, updatedTask.Category)
 	}
 }
 
@@ -2783,6 +2996,157 @@ func TestQueuedTaskFollowupRoutesMemoryFromFollowupMessageAfterInitialMemoryTask
 	}
 }
 
+func TestStartQueuedXTaskThreadInputCarriesAuthorizedRuntimeTools(t *testing.T) {
+	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
+	var providerMu sync.Mutex
+	providerRequests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		providerMu.Lock()
+		providerRequests++
+		requestNumber := providerRequests
+		providerMu.Unlock()
+		w.Header().Set("Content-Type", "text/event-stream")
+		if requestNumber == 1 {
+			_, _ = w.Write([]byte(
+				"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"switch_project\",\"arguments\":\"{\\\"project\\\":\\\"Queued X Runtime Target\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n" +
+					"data: [DONE]\n\n",
+			))
+			return
+		}
+		_, _ = w.Write([]byte(
+			"data: {\"choices\":[{\"delta\":{\"content\":\"switched\"}}]}\n\n" +
+				"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+				"data: [DONE]\n\n",
+		))
+	}))
+	defer server.Close()
+
+	agent := createAgent(t, llmConfigRepo, func(config *models.LLMConfig) {
+		config.Provider = models.ProviderOpenAICompatible
+		config.Model = "provider/model"
+		config.APIKey = "test-key"
+		config.AuthMethod = models.AuthMethodAPIKey
+		config.BaseURL = server.URL + "/v1/"
+		config.Transport = "chat_completions"
+		config.PresetSlug = "vllm"
+	})
+	project := createProject(t, h, "Queued X Runtime Project")
+	targetProject := createProject(t, h, "Queued X Runtime Target")
+	task := createTask(t, h, project.ID, "Queued X Runtime Task", func(tk *models.Task) {
+		tk.Category = models.CategoryCompleted
+		tk.Status = models.StatusCompleted
+		tk.AgentID = &agent.ID
+	})
+	auth := repository.NewXAuthRepo(db)
+	selections := repository.NewXUserProjectRepo(db)
+	h.SetXRepositories(auth, selections, repository.NewXTaskContextRepo(db), repository.NewXInboundReceiptRepo(db))
+	require.NoError(t, auth.Create(ctx, &models.XAuthorizedUser{ProjectID: project.ID, XUserID: "123"}))
+	require.NoError(t, auth.Create(ctx, &models.XAuthorizedUser{ProjectID: targetProject.ID, XUserID: "123"}))
+	input := &models.ThreadInput{
+		Scope:           models.ThreadInputScopeTask,
+		ProjectID:       project.ID,
+		TaskID:          task.ID,
+		AgentConfigID:   agent.ID,
+		InputMode:       models.ThreadInputModeQueued,
+		InputStatus:     models.ThreadInputPending,
+		Content:         "switch if needed",
+		Source:          models.TaskOriginX,
+		XAccountID:      "bot-account",
+		XConversationID: "conversation",
+		XReplyToTweetID: "tweet",
+		XUserID:         "123",
+		XUsername:       "alice",
+	}
+	require.NoError(t, h.threadInputRepo.CreateQueued(ctx, input))
+
+	require.NoError(t, h.startQueuedTaskThreadInput(ctx, *input))
+	require.Eventually(t, func() bool {
+		selected, err := selections.GetUserProject(ctx, "123")
+		return err == nil && selected == targetProject.ID
+	}, 2*time.Second, 25*time.Millisecond)
+	providerMu.Lock()
+	require.Equal(t, 2, providerRequests)
+	providerMu.Unlock()
+	require.Eventually(t, func() bool {
+		updated, err := h.taskRepo.GetByID(ctx, task.ID)
+		return err == nil && updated != nil && updated.Status != models.StatusRunning && updated.Status != models.StatusQueued
+	}, 2*time.Second, 25*time.Millisecond)
+}
+
+func TestStartImmediateXTaskThreadRunCarriesAuthorizedRuntimeTools(t *testing.T) {
+	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
+	var providerMu sync.Mutex
+	providerRequests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		providerMu.Lock()
+		providerRequests++
+		requestNumber := providerRequests
+		providerMu.Unlock()
+		w.Header().Set("Content-Type", "text/event-stream")
+		if requestNumber == 1 {
+			_, _ = w.Write([]byte(
+				"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"switch_project\",\"arguments\":\"{\\\"project\\\":\\\"Immediate X Runtime Target\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n" +
+					"data: [DONE]\n\n",
+			))
+			return
+		}
+		_, _ = w.Write([]byte(
+			"data: {\"choices\":[{\"delta\":{\"content\":\"switched\"}}]}\n\n" +
+				"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+				"data: [DONE]\n\n",
+		))
+	}))
+	defer server.Close()
+
+	agent := createAgent(t, llmConfigRepo, func(config *models.LLMConfig) {
+		config.Provider = models.ProviderOpenAICompatible
+		config.Model = "provider/model"
+		config.APIKey = "test-key"
+		config.AuthMethod = models.AuthMethodAPIKey
+		config.BaseURL = server.URL + "/v1/"
+		config.Transport = "chat_completions"
+		config.PresetSlug = "vllm"
+	})
+	project := createProject(t, h, "Immediate X Runtime Project")
+	targetProject := createProject(t, h, "Immediate X Runtime Target")
+	task := createTask(t, h, project.ID, "Immediate X Runtime Task", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusQueued
+		tk.AgentID = &agent.ID
+	})
+	exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecQueued
+		ex.PromptSent = "switch if needed"
+		ex.IsFollowup = true
+	})
+	auth := repository.NewXAuthRepo(db)
+	selections := repository.NewXUserProjectRepo(db)
+	h.SetXRepositories(auth, selections, repository.NewXTaskContextRepo(db), repository.NewXInboundReceiptRepo(db))
+	require.NoError(t, auth.Create(ctx, &models.XAuthorizedUser{ProjectID: project.ID, XUserID: "123"}))
+	require.NoError(t, auth.Create(ctx, &models.XAuthorizedUser{ProjectID: targetProject.ID, XUserID: "123"}))
+	input := models.ThreadInput{Source: models.TaskOriginX, ProjectID: project.ID, XAccountID: "bot-account", XUserID: "123", XConversationID: "conversation", XReplyToTweetID: "tweet", XUsername: "alice"}
+
+	h.StartChannelTaskRun(ctx, service.ChannelTaskRunRequest{
+		ExecID: exec.ID, TaskID: task.ID, ProjectID: project.ID, Message: "switch if needed", Agent: *agent,
+		Surface: chatcontrol.SurfaceX, ReplyContext: channelReplyFromThreadInput(input), RuntimeTools: h.xRuntimeToolsForThreadInput(task.ID, input),
+	})
+	require.Eventually(t, func() bool {
+		selected, err := selections.GetUserProject(ctx, "123")
+		return err == nil && selected == targetProject.ID
+	}, 2*time.Second, 25*time.Millisecond)
+	providerMu.Lock()
+	require.Equal(t, 2, providerRequests)
+	providerMu.Unlock()
+	require.Eventually(t, func() bool {
+		updated, err := h.taskRepo.GetByID(ctx, task.ID)
+		return err == nil && updated != nil && updated.Status != models.StatusRunning && updated.Status != models.StatusQueued
+	}, 2*time.Second, 25*time.Millisecond)
+}
+
 func TestStartQueuedTaskThreadInputPreparesSelectedMemoryForQueuedFollowup(t *testing.T) {
 	h, _, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()
@@ -2840,6 +3204,166 @@ func TestStartQueuedTaskThreadInputPreparesSelectedMemoryForQueuedFollowup(t *te
 	if err != nil || !handled || isErr || !strings.Contains(out, "Selected chat memory body.") || strings.Contains(out, "available only after") {
 		t.Fatalf("expected final queued followup memory_view to load selected memory, handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
 	}
+}
+
+func TestResolveTaskThreadExecutionAgentUsesOpenAICodexTaskModelAfterStaleAnthropicRun(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+
+	staleOpus := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
+		a.Name = "Claude Opus 4.8"
+		a.Provider = models.ProviderAnthropic
+		a.AuthMethod = models.AuthMethodOAuth
+		a.Model = "claude-opus-4-8"
+		a.IsDefault = false
+	})
+	codex := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
+		a.Name = "Codex 5.5"
+		a.Provider = models.ProviderOpenAI
+		a.AuthMethod = models.AuthMethodOAuth
+		a.Model = "gpt-5.5"
+		a.IsDefault = true
+	})
+	project := createProject(t, h, "OpenAI Codex Resolver Project")
+	task := createTask(t, h, project.ID, "OpenAI Codex Resolver Task", func(tk *models.Task) {
+		tk.Category = models.CategoryBacklog
+		tk.Status = models.StatusFailed
+		tk.AgentID = &codex.ID
+	})
+	createExec(t, h, task.ID, staleOpus.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecFailed
+		ex.PromptSent = "failed with expired Anthropic OAuth"
+		ex.ErrorMessage = `OAuth token refresh failed for model config "Claude Opus 4.8" (provider=anthropic model=claude-opus-4-8): refresh failed with HTTP 400`
+	})
+
+	agent, unstartable, err := h.resolveTaskThreadExecutionAgent(ctx, task)
+	require.NoError(t, err)
+	require.False(t, unstartable)
+	require.NotNil(t, agent)
+	require.Equal(t, codex.ID, agent.ID)
+	require.Equal(t, models.ProviderOpenAI, agent.Provider)
+	require.Equal(t, models.AuthMethodOAuth, agent.AuthMethod)
+	require.Equal(t, "gpt-5.5", agent.Model)
+	require.NotEqual(t, staleOpus.ID, agent.ID)
+}
+
+func TestRetryLatestFailedTaskThreadFollowupUsesCurrentTaskModel(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+
+	staleOpus := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
+		a.Name = "Claude Opus 4.8"
+		a.Provider = models.ProviderAnthropic
+		a.AuthMethod = models.AuthMethodOAuth
+		a.Model = "claude-opus-4-8"
+		a.IsDefault = false
+	})
+	codex := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
+		a.Name = "Codex 5.5"
+		a.Provider = models.ProviderTest
+		a.Model = "gpt-5.5"
+		a.IsDefault = true
+	})
+	project := createProject(t, h, "Failed Followup Model Switch Project")
+	task := createTask(t, h, project.ID, "Failed Followup Model Switch Task", func(tk *models.Task) {
+		tk.Category = models.CategoryBacklog
+		tk.Status = models.StatusFailed
+		tk.AgentID = &codex.ID
+	})
+	createExec(t, h, task.ID, staleOpus.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecFailed
+		ex.PromptSent = "retry the failed follow-up"
+		ex.ErrorMessage = `OAuth token refresh failed for model config "Claude Opus 4.8" (provider=anthropic model=claude-opus-4-8): refresh failed with HTTP 400`
+		ex.IsFollowup = true
+	})
+
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "retried with codex"
+	mock.TextOnly = "retried with codex"
+	h.llmSvc.SetLLMCaller(mock)
+
+	started, err := h.RetryLatestFailedTaskThreadFollowup(ctx, task.ID)
+	require.NoError(t, err)
+	require.True(t, started)
+	require.Eventually(t, func() bool { return mock.CallCount() == 1 }, 2*time.Second, 25*time.Millisecond)
+	require.Equal(t, codex.ID, mock.LastAgentRequest().Agent.ID)
+	require.NotEqual(t, staleOpus.ID, mock.LastAgentRequest().Agent.ID)
+
+	execs, err := h.execRepo.ListByTask(ctx, task.ID)
+	require.NoError(t, err)
+	foundRetry := false
+	for _, exec := range execs {
+		if exec.PromptSent == "retry the failed follow-up" && exec.ID != "" && exec.Status != models.ExecFailed {
+			foundRetry = true
+			require.Equal(t, codex.ID, exec.AgentConfigID)
+		}
+	}
+	require.True(t, foundRetry, "expected rerun execution to be recorded with current task model")
+}
+
+func TestStartQueuedTaskThreadInputUsesCurrentTaskModelAfterModelChange(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+
+	staleOpus := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
+		a.Name = "Claude Opus 4.8"
+		a.Provider = models.ProviderAnthropic
+		a.AuthMethod = models.AuthMethodOAuth
+		a.Model = "claude-opus-4-8"
+		a.IsDefault = false
+	})
+	codex := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
+		a.Name = "Codex 5.5"
+		a.Provider = models.ProviderTest
+		a.Model = "gpt-5.5"
+		a.IsDefault = true
+	})
+	project := createProject(t, h, "Queued Followup Model Switch Project")
+	task := createTask(t, h, project.ID, "Queued Followup Model Switch Task", func(tk *models.Task) {
+		tk.Category = models.CategoryBacklog
+		tk.Status = models.StatusFailed
+		tk.AgentID = &codex.ID
+	})
+	failed := createExec(t, h, task.ID, staleOpus.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecFailed
+		ex.PromptSent = "initial failed run"
+		ex.ErrorMessage = `OAuth token refresh failed for model config "Claude Opus 4.8" (provider=anthropic model=claude-opus-4-8): refresh failed with HTTP 400`
+	})
+	input := &models.ThreadInput{
+		Scope:          models.ThreadInputScopeTask,
+		ProjectID:      project.ID,
+		TaskID:         task.ID,
+		RunExecutionID: failed.ID,
+		AgentConfigID:  staleOpus.ID,
+		InputMode:      models.ThreadInputModeQueued,
+		InputStatus:    models.ThreadInputPending,
+		Content:        "continue after switching to Codex 5.5",
+		Source:         models.TaskOriginWeb,
+	}
+	require.NoError(t, h.threadInputRepo.CreateQueued(ctx, input))
+
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "continued with codex"
+	mock.TextOnly = "continued with codex"
+	h.llmSvc.SetLLMCaller(mock)
+
+	require.NoError(t, h.startQueuedTaskThreadInput(ctx, *input))
+	require.Eventually(t, func() bool { return mock.CallCount() == 1 }, 2*time.Second, 25*time.Millisecond)
+	require.Equal(t, codex.ID, mock.LastAgentRequest().Agent.ID)
+	require.NotEqual(t, staleOpus.ID, mock.LastAgentRequest().Agent.ID)
+
+	execs, err := h.execRepo.ListByTask(ctx, task.ID)
+	require.NoError(t, err)
+	foundPromoted := false
+	for _, exec := range execs {
+		if exec.PromptSent == input.Content {
+			foundPromoted = true
+			require.Equal(t, codex.ID, exec.AgentConfigID)
+		}
+	}
+	require.True(t, foundPromoted, "expected promoted execution to be recorded with current task model")
 }
 
 func TestStartQueuedTaskThreadInputCancelsQueuedInputWhenNoModelAvailable(t *testing.T) {
@@ -4005,6 +4529,186 @@ func TestProcessStreamingResponse_AppliesPreparedSteeringAfterSuccessfulProvider
 	require.Equal(t, models.ThreadInputApplied, applied.InputStatus)
 }
 
+func TestProcessStreamingResponse_RequeuesLateAttachmentSteeringInsteadOfCommittingToCompletedChatTurn(t *testing.T) {
+	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	h.workerSvc = nil
+	t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	originalUploadsDir := uploadsDir
+	uploadsDir = tmpDir
+	t.Cleanup(func() { uploadsDir = originalUploadsDir })
+	project := createProject(t, h, "Late Chat Steering Attachment Project")
+	sessionID := "late-chat-steering-session"
+	pendingDir := filepath.Join(tmpDir, "chat", "pending", sessionID)
+	var exec *models.Execution
+	var steeringID string
+	var createLateSteering sync.Once
+	var providerCalls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		providerCalls++
+		createLateSteering.Do(func() {
+			require.NotNil(t, exec)
+			require.NoError(t, os.MkdirAll(pendingDir, 0755))
+			require.NoError(t, os.WriteFile(filepath.Join(pendingDir, "screen.png"), []byte("fake-png"), 0644))
+			steering := &models.ThreadInput{
+				Scope:               models.ThreadInputScopeChat,
+				ProjectID:           project.ID,
+				RunExecutionID:      exec.ID,
+				InputMode:           models.ThreadInputModeSteering,
+				InputStatus:         models.ThreadInputPending,
+				TurnID:              exec.ID,
+				ExpectedTurnID:      exec.ID,
+				Content:             "what is in the image?",
+				AttachmentSessionID: sessionID,
+			}
+			require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, steering, exec.ID))
+			steeringID = steering.ID
+		})
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(
+			"data: {\"choices\":[{\"delta\":{\"content\":\"cow story complete\"}}]}\n\n" +
+				"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":20,\"completion_tokens\":17,\"total_tokens\":37}}\n\n" +
+				"data: [DONE]\n\n",
+		))
+	}))
+	defer server.Close()
+	agent := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
+		a.Provider = models.ProviderOpenAICompatible
+		a.AuthMethod = models.AuthMethodAPIKey
+		a.APIKey = "test-key"
+		a.BaseURL = server.URL + "/v1/"
+		a.Transport = "chat_completions"
+		a.PresetSlug = "vllm"
+	})
+	activeTask := createTask(t, h, project.ID, "Late Chat Steering Attachment Task", func(tk *models.Task) {
+		tk.Category = models.CategoryChat
+		tk.Status = models.StatusRunning
+		tk.AgentID = &agent.ID
+	})
+	exec = createExec(t, h, activeTask.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "tell me a story about a cow"
+	})
+
+	h.processStreamingResponse(streamingResponseParams{
+		ExecID:                      exec.ID,
+		TaskID:                      activeTask.ID,
+		Message:                     "tell me a story about a cow",
+		Agent:                       *agent,
+		ProjectID:                   project.ID,
+		suppressQueuedTurnPromotion: true,
+	})
+
+	require.Equal(t, 1, providerCalls, "late attachment steering must not trigger a continuation on the completed turn")
+	chatAttachments, err := h.chatAttachmentRepo.ListByExecution(ctx, exec.ID)
+	require.NoError(t, err)
+	require.Empty(t, chatAttachments, "late steering attachments must not be published on the original user turn")
+	requeued, err := h.threadInputRepo.GetByID(ctx, steeringID)
+	require.NoError(t, err)
+	require.NotNil(t, requeued)
+	require.Equal(t, models.ThreadInputPending, requeued.InputStatus)
+	require.Equal(t, models.ThreadInputModeQueued, requeued.InputMode)
+	require.Empty(t, requeued.TurnID)
+	require.Empty(t, requeued.ExpectedTurnID)
+	require.Equal(t, sessionID, requeued.AttachmentSessionID)
+	require.FileExists(t, filepath.Join(pendingDir, "screen.png"))
+
+	var usageCount, totalTokens int
+	var usageStatus, operation string
+	err = db.QueryRowContext(ctx, `
+		SELECT COUNT(*), COALESCE(MAX(total_tokens), 0), COALESCE(MAX(status), ''), COALESCE(MAX(operation), '')
+		FROM llm_usage_events
+		WHERE execution_id = ?`, exec.ID).Scan(&usageCount, &totalTokens, &usageStatus, &operation)
+	require.NoError(t, err)
+	require.Equal(t, 1, usageCount, "late attachment-steering completion must still record provider usage")
+	require.Equal(t, 37, totalTokens)
+	require.Equal(t, string(models.ExecCompleted), usageStatus)
+	require.Equal(t, string(llmcontracts.OperationStreaming), operation)
+}
+
+func TestProcessStreamingResponse_SendsAndCommitsPreparedSteeringAttachmentsAfterSuccessfulProviderCall(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	originalUploadsDir := uploadsDir
+	uploadsDir = tmpDir
+	t.Cleanup(func() { uploadsDir = originalUploadsDir })
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "model used steering attachments"
+	mock.TextOnly = "model used steering attachments"
+	h.llmSvc.SetLLMCaller(mock)
+
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Prepared Successful Steering Attachments Project")
+	task := createTask(t, h, project.ID, "Prepared Successful Steering Attachments Task", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusRunning
+		tk.AgentID = &agent.ID
+	})
+	exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "active prompt"
+		ex.IsFollowup = true
+	})
+	sessionID := "steering-success-session"
+	pendingDir := filepath.Join(tmpDir, "chat", "pending", sessionID)
+	require.NoError(t, os.MkdirAll(pendingDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(pendingDir, "notes.txt"), []byte("steering notes"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(pendingDir, "screen.png"), []byte("fake-png"), 0644))
+	largeContent := strings.Repeat("x", maxTextAttachmentSize+1)
+	require.NoError(t, os.WriteFile(filepath.Join(pendingDir, "large.txt"), []byte(largeContent), 0644))
+	steering := &models.ThreadInput{
+		Scope:               models.ThreadInputScopeTask,
+		ProjectID:           project.ID,
+		TaskID:              task.ID,
+		RunExecutionID:      exec.ID,
+		InputMode:           models.ThreadInputModeSteering,
+		InputStatus:         models.ThreadInputPending,
+		TurnID:              exec.ID,
+		ExpectedTurnID:      exec.ID,
+		Content:             "use attached steering files",
+		AttachmentSessionID: sessionID,
+	}
+	require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, steering, exec.ID))
+
+	h.processStreamingResponse(streamingResponseParams{
+		ExecID:                      exec.ID,
+		TaskID:                      task.ID,
+		Message:                     "active prompt",
+		Agent:                       *agent,
+		ProjectID:                   project.ID,
+		IsTaskFollowup:              true,
+		suppressQueuedTurnPromotion: true,
+	})
+
+	require.Equal(t, 1, mock.CallCount())
+	lastCall := mock.LastCall()
+	require.Contains(t, lastCall.Prompt, "use attached steering files")
+	require.Contains(t, lastCall.Prompt, "steering notes")
+	require.Contains(t, lastCall.Prompt, "large.txt (attached")
+	require.NotContains(t, lastCall.Prompt, largeContent[:50])
+	require.Len(t, lastCall.Attachments, 1)
+	require.Equal(t, filepath.Join(pendingDir, "screen.png"), lastCall.Attachments[0].FilePath)
+	applied, err := h.threadInputRepo.GetByID(ctx, steering.ID)
+	require.NoError(t, err)
+	require.NotNil(t, applied)
+	require.Equal(t, models.ThreadInputApplied, applied.InputStatus)
+	chatAttachments, err := h.chatAttachmentRepo.ListByExecution(ctx, exec.ID)
+	require.NoError(t, err)
+	require.Len(t, chatAttachments, 3)
+	seen := map[string]string{}
+	for _, att := range chatAttachments {
+		seen[att.FileName] = att.FilePath
+		require.FileExists(t, att.FilePath)
+	}
+	require.Contains(t, seen, "notes.txt")
+	require.Contains(t, seen, "screen.png")
+	require.Contains(t, seen, "large.txt")
+	require.NoDirExists(t, pendingDir)
+}
+
 func TestProcessStreamingResponse_DoesNotMovePreparedSteeringAttachmentsWhenProviderCallFails(t *testing.T) {
 	h, _, llmConfigRepo := setupTestHandler(t)
 	h.workerSvc = nil
@@ -5130,6 +5834,207 @@ func TestCompleteWithSuccess_UpdatesTaskStatusBeforeDiffCapture(t *testing.T) {
 	}
 }
 
+func TestCompleteWithSuccess_GitHubSDLCImplementationWithoutPullRequestFailsTask(t *testing.T) {
+	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	prRepo := repository.NewTaskPullRequestRepo(db)
+	automationRepo := repository.NewAutomationRepo(db)
+	h.SetTaskPullRequestRepo(prRepo)
+	h.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
+
+	agent := &models.LLMConfig{Name: "Test Agent", Provider: models.ProviderTest, Model: "claude-sonnet-4-5", MaxTokens: 4096, Temperature: 1.0, IsDefault: true}
+	require.NoError(t, llmConfigRepo.Create(ctx, agent))
+	project := &models.Project{Name: "GitHub SDLC PR required"}
+	require.NoError(t, h.projectSvc.Create(ctx, project))
+	_, err := db.ExecContext(ctx, `INSERT INTO automations (id, project_id, stable_key, name, automation_type, lifecycle_state, created_via)
+		VALUES ('github-sdlc-completion-automation', ?, 'github-sdlc-completion', 'GitHub SDLC', 'custom', 'active', 'test')`, project.ID)
+	require.NoError(t, err)
+
+	task := &models.Task{ProjectID: project.ID, Title: "Implement GitHub issue #42", Category: models.CategoryActive, Priority: 2, Prompt: "Test", Status: models.StatusRunning, CreatedVia: "automation:github-sdlc-completion-automation:implementation"}
+	require.NoError(t, h.taskSvc.Create(ctx, task))
+	_, err = db.ExecContext(ctx, `INSERT INTO automation_github_issue_task_provenance
+		(project_id, automation_id, task_id, issue_resource_id, implementation_node_key)
+		VALUES (?, 'github-sdlc-completion-automation', ?, 'github_issue:openvibely/openvibely:42', 'implementation')`, project.ID, task.ID)
+	require.NoError(t, err)
+
+	exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "Test"}
+	require.NoError(t, h.execRepo.Create(ctx, exec))
+
+	h.completeWithSuccess(ctx, exec.ID, task.ID, "implementation complete", "", 100, 5000)
+
+	completedExec, err := h.execRepo.GetByID(ctx, exec.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.ExecCompleted, completedExec.Status)
+	updatedTask, err := h.taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusFailed, updatedTask.Status)
+	require.Equal(t, models.CategoryBacklog, updatedTask.Category)
+}
+
+func TestCompleteWithSuccess_GitHubSDLCImplementationWithPullRequestCompletesTask(t *testing.T) {
+	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	prRepo := repository.NewTaskPullRequestRepo(db)
+	automationRepo := repository.NewAutomationRepo(db)
+	h.SetTaskPullRequestRepo(prRepo)
+	h.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
+
+	agent := &models.LLMConfig{Name: "Test Agent", Provider: models.ProviderTest, Model: "claude-sonnet-4-5", MaxTokens: 4096, Temperature: 1.0, IsDefault: true}
+	require.NoError(t, llmConfigRepo.Create(ctx, agent))
+	project := &models.Project{Name: "GitHub SDLC PR published", RepoURL: "https://github.com/openvibely/openvibely", RepoPath: t.TempDir()}
+	require.NoError(t, h.projectSvc.Create(ctx, project))
+	h.SetGitHubService(&fakeGitHubService{
+		resolveRepoFn: func(context.Context, string, string) (*service.GitHubRepoRef, error) {
+			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely", HTMLURL: "https://github.com/openvibely/openvibely"}, nil
+		},
+		getPullRequestFn: func(context.Context, *service.GitHubRepoRef, int) (*service.GitHubPullRequest, error) {
+			return &service.GitHubPullRequest{Number: 123, URL: "https://github.com/openvibely/openvibely/pull/123", State: "open", HeadRef: "task/issue-42", HeadRepoFullName: "openvibely/openvibely", HeadSHA: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}, nil
+		},
+	})
+	_, err := db.ExecContext(ctx, `INSERT INTO automations (id, project_id, stable_key, name, automation_type, lifecycle_state, created_via)
+		VALUES ('github-sdlc-completion-automation', ?, 'github-sdlc-completion', 'GitHub SDLC', 'custom', 'active', 'test')`, project.ID)
+	require.NoError(t, err)
+
+	task := &models.Task{ProjectID: project.ID, Title: "Implement GitHub issue #42", Category: models.CategoryActive, Priority: 2, Prompt: "Test", Status: models.StatusRunning, WorktreeBranch: "task/issue-42", CreatedVia: "automation:github-sdlc-completion-automation:implementation"}
+	require.NoError(t, h.taskSvc.Create(ctx, task))
+	_, err = db.ExecContext(ctx, `INSERT INTO automation_github_issue_task_provenance
+		(project_id, automation_id, task_id, issue_resource_id, implementation_node_key)
+		VALUES (?, 'github-sdlc-completion-automation', ?, 'github_issue:openvibely/openvibely:42', 'implementation')`, project.ID, task.ID)
+	require.NoError(t, err)
+	require.NoError(t, prRepo.Upsert(ctx, &models.TaskPullRequest{TaskID: task.ID, PRNumber: 123, PRURL: "https://github.com/openvibely/openvibely/pull/123", PRState: "open", PublishedHeadSHA: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}))
+
+	exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "Test"}
+	require.NoError(t, h.execRepo.Create(ctx, exec))
+
+	h.completeWithSuccess(ctx, exec.ID, task.ID, "implementation complete", "", 100, 5000)
+
+	updatedTask, err := h.taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusCompleted, updatedTask.Status)
+	require.Equal(t, models.CategoryCompleted, updatedTask.Category)
+}
+
+func TestCompleteWithSuccess_GitHubSDLCImplementationWithOldOpenPullRequestHeadFailsTask(t *testing.T) {
+	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	prRepo := repository.NewTaskPullRequestRepo(db)
+	automationRepo := repository.NewAutomationRepo(db)
+	h.SetTaskPullRequestRepo(prRepo)
+	h.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
+
+	agent := &models.LLMConfig{Name: "Test Agent", Provider: models.ProviderTest, Model: "claude-sonnet-4-5", MaxTokens: 4096, Temperature: 1.0, IsDefault: true}
+	require.NoError(t, llmConfigRepo.Create(ctx, agent))
+	project := &models.Project{Name: "GitHub SDLC old PR head", RepoURL: "https://github.com/openvibely/openvibely", RepoPath: t.TempDir()}
+	require.NoError(t, h.projectSvc.Create(ctx, project))
+	h.SetGitHubService(&fakeGitHubService{
+		resolveRepoFn: func(context.Context, string, string) (*service.GitHubRepoRef, error) {
+			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely", HTMLURL: "https://github.com/openvibely/openvibely"}, nil
+		},
+		getPullRequestFn: func(context.Context, *service.GitHubRepoRef, int) (*service.GitHubPullRequest, error) {
+			return &service.GitHubPullRequest{Number: 123, URL: "https://github.com/openvibely/openvibely/pull/123", State: "open", HeadRef: "task/issue-42", HeadRepoFullName: "openvibely/openvibely", HeadSHA: "cccccccccccccccccccccccccccccccccccccccc"}, nil
+		},
+	})
+	_, err := db.ExecContext(ctx, `INSERT INTO automations (id, project_id, stable_key, name, automation_type, lifecycle_state, created_via)
+		VALUES ('github-sdlc-completion-automation', ?, 'github-sdlc-completion', 'GitHub SDLC', 'custom', 'active', 'test')`, project.ID)
+	require.NoError(t, err)
+
+	task := &models.Task{ProjectID: project.ID, Title: "Implement GitHub issue #42", Category: models.CategoryActive, Priority: 2, Prompt: "Test", Status: models.StatusRunning, WorktreeBranch: "task/issue-42", CreatedVia: "automation:github-sdlc-completion-automation:implementation"}
+	require.NoError(t, h.taskSvc.Create(ctx, task))
+	_, err = db.ExecContext(ctx, `INSERT INTO automation_github_issue_task_provenance
+		(project_id, automation_id, task_id, issue_resource_id, implementation_node_key)
+		VALUES (?, 'github-sdlc-completion-automation', ?, 'github_issue:openvibely/openvibely:42', 'implementation')`, project.ID, task.ID)
+	require.NoError(t, err)
+	require.NoError(t, prRepo.Upsert(ctx, &models.TaskPullRequest{TaskID: task.ID, PRNumber: 123, PRURL: "https://github.com/openvibely/openvibely/pull/123", PRState: "open", PublishedHeadSHA: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}))
+
+	exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "Test"}
+	require.NoError(t, h.execRepo.Create(ctx, exec))
+
+	h.completeWithSuccess(ctx, exec.ID, task.ID, "implementation complete", "", 100, 5000)
+
+	updatedTask, err := h.taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusFailed, updatedTask.Status)
+	require.Equal(t, models.CategoryBacklog, updatedTask.Category)
+}
+
+func TestCompleteWithSuccess_GitHubSDLCImplementationWithStaleOpenPullRequestFailsTask(t *testing.T) {
+	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	prRepo := repository.NewTaskPullRequestRepo(db)
+	automationRepo := repository.NewAutomationRepo(db)
+	h.SetTaskPullRequestRepo(prRepo)
+	h.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
+
+	agent := &models.LLMConfig{Name: "Test Agent", Provider: models.ProviderTest, Model: "claude-sonnet-4-5", MaxTokens: 4096, Temperature: 1.0, IsDefault: true}
+	require.NoError(t, llmConfigRepo.Create(ctx, agent))
+	project := &models.Project{Name: "GitHub SDLC stale open PR", RepoURL: "https://github.com/openvibely/openvibely", RepoPath: t.TempDir()}
+	require.NoError(t, h.projectSvc.Create(ctx, project))
+	h.SetGitHubService(&fakeGitHubService{
+		resolveRepoFn: func(context.Context, string, string) (*service.GitHubRepoRef, error) {
+			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely", HTMLURL: "https://github.com/openvibely/openvibely"}, nil
+		},
+		getPullRequestFn: func(context.Context, *service.GitHubRepoRef, int) (*service.GitHubPullRequest, error) {
+			return &service.GitHubPullRequest{Number: 123, URL: "https://github.com/openvibely/openvibely/pull/123", State: "closed", HeadRef: "task/issue-42", HeadRepoFullName: "openvibely/openvibely"}, nil
+		},
+	})
+	_, err := db.ExecContext(ctx, `INSERT INTO automations (id, project_id, stable_key, name, automation_type, lifecycle_state, created_via)
+		VALUES ('github-sdlc-completion-automation', ?, 'github-sdlc-completion', 'GitHub SDLC', 'custom', 'active', 'test')`, project.ID)
+	require.NoError(t, err)
+
+	task := &models.Task{ProjectID: project.ID, Title: "Implement GitHub issue #42", Category: models.CategoryActive, Priority: 2, Prompt: "Test", Status: models.StatusRunning, WorktreeBranch: "task/issue-42", CreatedVia: "automation:github-sdlc-completion-automation:implementation"}
+	require.NoError(t, h.taskSvc.Create(ctx, task))
+	_, err = db.ExecContext(ctx, `INSERT INTO automation_github_issue_task_provenance
+		(project_id, automation_id, task_id, issue_resource_id, implementation_node_key)
+		VALUES (?, 'github-sdlc-completion-automation', ?, 'github_issue:openvibely/openvibely:42', 'implementation')`, project.ID, task.ID)
+	require.NoError(t, err)
+	require.NoError(t, prRepo.Upsert(ctx, &models.TaskPullRequest{TaskID: task.ID, PRNumber: 123, PRURL: "https://github.com/openvibely/openvibely/pull/123", PRState: "open", PublishedHeadSHA: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}))
+
+	exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "Test"}
+	require.NoError(t, h.execRepo.Create(ctx, exec))
+
+	h.completeWithSuccess(ctx, exec.ID, task.ID, "implementation complete", "", 100, 5000)
+
+	updatedTask, err := h.taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusFailed, updatedTask.Status)
+	require.Equal(t, models.CategoryBacklog, updatedTask.Category)
+}
+
+func TestCompleteWithSuccess_GitHubSDLCImplementationWithClosedPullRequestFailsTask(t *testing.T) {
+	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	prRepo := repository.NewTaskPullRequestRepo(db)
+	automationRepo := repository.NewAutomationRepo(db)
+	h.SetTaskPullRequestRepo(prRepo)
+	h.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
+
+	agent := &models.LLMConfig{Name: "Test Agent", Provider: models.ProviderTest, Model: "claude-sonnet-4-5", MaxTokens: 4096, Temperature: 1.0, IsDefault: true}
+	require.NoError(t, llmConfigRepo.Create(ctx, agent))
+	project := &models.Project{Name: "GitHub SDLC closed PR"}
+	require.NoError(t, h.projectSvc.Create(ctx, project))
+	_, err := db.ExecContext(ctx, `INSERT INTO automations (id, project_id, stable_key, name, automation_type, lifecycle_state, created_via)
+		VALUES ('github-sdlc-completion-automation', ?, 'github-sdlc-completion', 'GitHub SDLC', 'custom', 'active', 'test')`, project.ID)
+	require.NoError(t, err)
+
+	task := &models.Task{ProjectID: project.ID, Title: "Implement GitHub issue #42", Category: models.CategoryActive, Priority: 2, Prompt: "Test", Status: models.StatusRunning, CreatedVia: "automation:github-sdlc-completion-automation:implementation"}
+	require.NoError(t, h.taskSvc.Create(ctx, task))
+	_, err = db.ExecContext(ctx, `INSERT INTO automation_github_issue_task_provenance
+		(project_id, automation_id, task_id, issue_resource_id, implementation_node_key)
+		VALUES (?, 'github-sdlc-completion-automation', ?, 'github_issue:openvibely/openvibely:42', 'implementation')`, project.ID, task.ID)
+	require.NoError(t, err)
+	require.NoError(t, prRepo.Upsert(ctx, &models.TaskPullRequest{TaskID: task.ID, PRNumber: 123, PRURL: "https://github.com/openvibely/openvibely/pull/123", PRState: "closed"}))
+
+	exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "Test"}
+	require.NoError(t, h.execRepo.Create(ctx, exec))
+
+	h.completeWithSuccess(ctx, exec.ID, task.ID, "implementation complete", "", 100, 5000)
+
+	updatedTask, err := h.taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusFailed, updatedTask.Status)
+	require.Equal(t, models.CategoryBacklog, updatedTask.Category)
+}
+
 func TestCompleteWithFailure_UpdatesTaskStatus(t *testing.T) {
 	h, _, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()
@@ -5729,6 +6634,40 @@ func TestFollowupNoChangesDoesNotResetMergeStatus(t *testing.T) {
 	if updatedExec.DiffOutput != "" {
 		t.Errorf("expected no diff output for read-only followup, got %d bytes", len(updatedExec.DiffOutput))
 	}
+}
+
+func TestStartPendingTaskThreadFollowup_ClearsCancellationRequestForPromotedRun(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Queued Followup Clears Stop Marker Project")
+	task := createTask(t, h, project.ID, "Queued Followup Clears Stop Marker Task", func(task *models.Task) {
+		task.Category = models.CategoryBacklog
+		task.Status = models.StatusCancelled
+		task.AgentID = &agent.ID
+		task.Prompt = "original prompt"
+	})
+	queued := &models.ThreadInput{
+		Scope:         models.ThreadInputScopeTask,
+		ProjectID:     project.ID,
+		TaskID:        task.ID,
+		AgentConfigID: agent.ID,
+		InputMode:     models.ThreadInputModeQueued,
+		Content:       "legitimate queued follow-up after stop",
+	}
+	require.NoError(t, h.threadInputRepo.CreateQueued(ctx, queued))
+	h.workerSvc.MarkCancellationRequested(task.ID)
+	require.True(t, h.workerSvc.IsCancellationRequested(task.ID))
+	h.llmSvc.SetLLMCaller(testutil.NewMockLLMCaller())
+
+	handled, err := h.StartPendingTaskThreadFollowup(ctx, task.ID)
+	require.NoError(t, err)
+	require.True(t, handled)
+	require.False(t, h.workerSvc.IsCancellationRequested(task.ID), "promoted queued follow-up should clear stale stop intent")
+	updated, err := h.taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.CategoryActive, updated.Category)
+	require.Contains(t, []models.TaskStatus{models.StatusQueued, models.StatusRunning}, updated.Status)
 }
 
 func TestStartPendingTaskThreadFollowup_AlreadyActiveIsHandled(t *testing.T) {
@@ -6439,6 +7378,7 @@ func TestFormatThreadTranscript_LargeMessageTruncation(t *testing.T) {
 }
 
 func TestProcessStreamingResponse_MixtureSupportedAggregatorInjectsCreateTask(t *testing.T) {
+	t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
 	h, _, llmConfigRepo := setupTestHandler(t)
 	h.workerSvc = nil
 	ctx := context.Background()
@@ -6460,7 +7400,7 @@ func TestProcessStreamingResponse_MixtureSupportedAggregatorInjectsCreateTask(t 
 		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"Task created.\"}}]}\n\ndata: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"))
 	}))
 	defer server.Close()
-	aggregator := &models.LLMConfig{Name: "Compatible Aggregator", Provider: models.ProviderOpenAICompatible, Model: "provider/model", AuthMethod: models.AuthMethodAPIKey, APIKey: "test-key", BaseURL: server.URL + "/v1/", Transport: "chat_completions"}
+	aggregator := &models.LLMConfig{Name: "Compatible Aggregator", Provider: models.ProviderOpenAICompatible, Model: "provider/model", AuthMethod: models.AuthMethodAPIKey, APIKey: "test-key", BaseURL: server.URL + "/v1/", PresetSlug: "vllm", Transport: "chat_completions"}
 	require.NoError(t, llmConfigRepo.Create(ctx, aggregator))
 	mixture := &models.LLMConfig{
 		Name:              "Tool-capable Mixture",
@@ -6854,5 +7794,373 @@ func TestCancelThreadInputBroadcastsChatCancellation(t *testing.T) {
 		require.Equal(t, input.ID, event.PendingInputID)
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for chat thread input cancellation event")
+	}
+}
+
+func TestProcessStreamingResponseConstructsRealHardenedGitHubRuntimeOnceFor50ToolCalls(t *testing.T) {
+	t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
+	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+	project := createProject(t, h, "Real hardened runtime construction project")
+
+	providerCalls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		providerCalls++
+		w.Header().Set("Content-Type", "text/event-stream")
+		if providerCalls == 1 {
+			toolCalls := make([]map[string]any, 50)
+			for i := range toolCalls {
+				toolCalls[i] = map[string]any{
+					"index": i,
+					"id":    fmt.Sprintf("call_%d", i),
+					"type":  "function",
+					"function": map[string]any{
+						"name":      "list_capabilities",
+						"arguments": `{}`,
+					},
+				}
+			}
+			payload, err := json.Marshal(map[string]any{"choices": []any{map[string]any{
+				"delta": map[string]any{"tool_calls": toolCalls}, "finish_reason": "tool_calls",
+			}}})
+			require.NoError(t, err)
+			_, _ = fmt.Fprintf(w, "data: %s\n\ndata: [DONE]\n\n", payload)
+			return
+		}
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"complete\"}}]}\n\ndata: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	agent := models.LLMConfig{Name: "Runtime fixture model", Provider: models.ProviderOpenAICompatible, Model: "fixture/model", AuthMethod: models.AuthMethodAPIKey, APIKey: "test-key", BaseURL: server.URL + "/v1/", PresetSlug: "vllm", Transport: "chat_completions"}
+	require.NoError(t, llmConfigRepo.Create(ctx, &agent))
+	task := createTask(t, h, project.ID, "Runtime fixture task", func(task *models.Task) {
+		task.Category = models.CategoryActive
+		task.Status = models.StatusRunning
+		task.AgentID = &agent.ID
+	})
+	execution := createExec(t, h, task.ID, agent.ID, func(execution *models.Execution) {
+		execution.Status = models.ExecRunning
+		execution.PromptSent = "Run fifty tools"
+		execution.IsFollowup = true
+	})
+
+	automationRepo := repository.NewAutomationRepo(db)
+	h.llmSvc.SetAutomationRepo(automationRepo)
+	h.llmSvc.SetGitHubIssueRuntimeProvider(&fakeGitHubService{})
+	constructions := 0
+	h.githubRuntimeHook = func() { constructions++ }
+	automationContext := models.AutomationContext{ProjectID: project.ID, OriginTask: true}
+
+	h.processStreamingResponse(streamingResponseParams{
+		ExecID: execution.ID, TaskID: task.ID, Message: execution.PromptSent, Agent: agent,
+		ProjectID: project.ID, IsTaskFollowup: true, Task: task, AutomationContext: &automationContext,
+	})
+
+	require.Equal(t, 2, providerCalls, "the provider should execute one 50-tool round and one final response round")
+	require.Equal(t, 1, constructions, "processStreamingResponse must construct the real hardened runtime once for all 50 tool calls")
+}
+
+func newProductionHardenedRuntimeDispatchFixture() (*Handler, context.Context, streamingResponseParams, []llmcontracts.RuntimeToolDefinition) {
+	llmSvc := service.NewLLMService(nil, nil, nil, repository.NewProjectRepo(nil), nil, nil)
+	llmSvc.SetAutomationRepo(repository.NewAutomationRepo(nil))
+	llmSvc.SetGitHubIssueRuntimeProvider(&fakeGitHubService{})
+	h := &Handler{llmSvc: llmSvc}
+	task := models.Task{ID: "runtime-fixture-task", ProjectID: "runtime-fixture-project", Category: models.CategoryScheduled}
+	ctx := service.WithAutomationContext(context.Background(), models.AutomationContext{ProjectID: task.ProjectID, OriginTask: true})
+	defs := filterTaskThreadRuntimeToolDefs(chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true), nil, true)
+	params := streamingResponseParams{
+		ProjectID:      task.ProjectID,
+		TaskID:         task.ID,
+		ExecID:         "runtime-fixture-execution",
+		IsTaskFollowup: true,
+		Task:           &task,
+	}
+	return h, ctx, params, defs
+}
+
+func TestTaskFollowupRuntimeReusesRealHardenedGitHubRuntimeFor50Dispatches(t *testing.T) {
+	h, ctx, params, defs := newProductionHardenedRuntimeDispatchFixture()
+	constructions := 0
+	h.githubRuntimeHook = func() { constructions++ }
+	channelCalls := 0
+	params.RuntimeTools = &llmcontracts.RuntimeTools{
+		Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "channel_tool"}},
+		Executor: func(_ context.Context, name string, _ json.RawMessage) (string, bool, bool, error) {
+			if name != "channel_tool" {
+				return "", false, false, nil
+			}
+			channelCalls++
+			return "channel", true, false, nil
+		},
+	}
+	hardened := h.llmSvc.AutomationGitHubRuntimeTools(ctx, *params.Task, defs)
+	require.NotNil(t, hardened, "fixture must construct the real hardened Automation GitHub runtime")
+	runtime := h.buildStreamingResponseActionRuntime(ctx, params, nil, defs, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
+
+	for i := 0; i < 50; i++ {
+		output, handled, isError, err := runtime.Executor(ctx, "memory_view", nil)
+		require.NoError(t, err)
+		require.True(t, handled)
+		require.False(t, isError)
+		require.Contains(t, output, "memory_view")
+	}
+	require.Equal(t, 1, constructions, "processStreamingResponse runtime assembly must construct the real hardened runtime once, not once per dispatch")
+
+	_, handled, isError, err := runtime.Executor(ctx, "github_create_issue", json.RawMessage(`{}`))
+	require.True(t, handled)
+	require.True(t, isError)
+	require.ErrorContains(t, err, "not authorized")
+	require.Equal(t, 1, constructions, "GitHub dispatch must reuse the request-scoped hardened runtime")
+
+	output, handled, isError, err := runtime.Executor(ctx, "channel_tool", nil)
+	require.NoError(t, err)
+	require.True(t, handled)
+	require.False(t, isError)
+	require.Equal(t, "channel", output)
+	require.Equal(t, 1, channelCalls, "channel runtime must retain priority for its non-GitHub tool")
+
+	output, handled, isError, err = runtime.Executor(ctx, "unknown_tool", nil)
+	require.NoError(t, err)
+	require.False(t, handled)
+	require.False(t, isError)
+	require.Empty(t, output)
+	require.Equal(t, 1, constructions)
+}
+
+var taskFollowupDispatchBenchmarkOutput string
+
+func BenchmarkTaskFollowupHardenedGitHubRuntime50Dispatches(b *testing.B) {
+	h, ctx, params, defs := newProductionHardenedRuntimeDispatchFixture()
+	contextRT := &llmcontracts.RuntimeTools{
+		Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "context_tool"}},
+		Executor: func(_ context.Context, _ string, _ json.RawMessage) (string, bool, bool, error) {
+			return "", false, false, nil
+		},
+	}
+	ctx = llmcontracts.WithRuntimeTools(ctx, contextRT)
+	params.RuntimeTools = &llmcontracts.RuntimeTools{
+		Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "channel_tool"}},
+		Executor: func(_ context.Context, _ string, _ json.RawMessage) (string, bool, bool, error) {
+			return "", false, false, nil
+		},
+	}
+	if hardened := h.llmSvc.AutomationGitHubRuntimeTools(ctx, *params.Task, defs); hardened == nil {
+		b.Fatal("fixture must construct the real hardened Automation GitHub runtime")
+	}
+
+	benchmarkDispatches := func(b *testing.B, buildRuntime func() *llmcontracts.RuntimeTools) {
+		b.Helper()
+		for i := 0; i < b.N; i++ {
+			runtime := buildRuntime()
+			for call := 0; call < 50; call++ {
+				output, handled, isError, err := runtime.Executor(ctx, "memory_view", nil)
+				if err != nil || !handled || isError || !strings.Contains(output, "memory_view") {
+					b.Fatalf("real generic dispatch failed: output=%q handled=%v isError=%v err=%v", output, handled, isError, err)
+				}
+				taskFollowupDispatchBenchmarkOutput = output
+			}
+		}
+	}
+
+	b.Run("legacy_reconstruct", func(b *testing.B) {
+		benchmarkDispatches(b, func() *llmcontracts.RuntimeTools {
+			initial := h.llmSvc.AutomationGitHubRuntimeTools(ctx, *params.Task, defs)
+			genericExecutor := h.chatActionExecutor(params, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
+			legacyGeneric := &llmcontracts.RuntimeTools{
+				Definitions: defs,
+				Executor: func(dispatchCtx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
+					hardened := h.llmSvc.AutomationGitHubRuntimeTools(dispatchCtx, *params.Task, defs)
+					if hardened != nil {
+						if output, handled, isError, err := hardened.Executor(dispatchCtx, name, input); handled {
+							return output, true, isError, err
+						}
+					}
+					return genericExecutor(dispatchCtx, name, input)
+				},
+			}
+			return llmcontracts.CompositeRuntimeTools(initial, llmcontracts.RuntimeToolsFromContext(ctx), params.RuntimeTools, legacyGeneric)
+		})
+	})
+	b.Run("reused", func(b *testing.B) {
+		benchmarkDispatches(b, func() *llmcontracts.RuntimeTools {
+			return h.buildStreamingResponseActionRuntime(ctx, params, nil, defs, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
+		})
+	})
+}
+
+func TestExecuteListAgentsUsesRuntimeSummariesAndPreservesOutput(t *testing.T) {
+	h, _, _, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	agentRepo := repository.NewAgentRepo(db)
+	h.SetAgentRepo(agentRepo)
+	if _, err := db.ExecContext(ctx, `DELETE FROM agents WHERE id IS NOT NULL`); err != nil {
+		t.Fatalf("clear agents: %v", err)
+	}
+
+	agents := []*models.Agent{
+		{Name: "Alpha Agent", Description: "alpha description", Model: "inherit", Skills: []models.SkillConfig{{Name: "one"}, {Name: "two"}}, MCPServers: []models.MCPServerConfig{{Name: "browser"}}, Enabled: true, SelectableAsPrimary: true},
+		{Name: "Bravo Agent", Description: "bravo description", Model: "gpt-5", MCPServers: []models.MCPServerConfig{{Name: "one"}, {Name: "two"}}, Enabled: true, SelectableAsPrimary: true},
+		{Name: "Archived Agent", Description: "hidden", Model: "gpt-5", Skills: []models.SkillConfig{{Name: "hidden"}}, GeneratedStatus: models.AgentStatusArchived, Enabled: true, SelectableAsPrimary: true},
+	}
+	for _, agent := range agents {
+		if err := agentRepo.Create(ctx, agent); err != nil {
+			t.Fatalf("create agent %q: %v", agent.Name, err)
+		}
+	}
+
+	out := strings.TrimSpace(h.executeListAgents(ctx))
+	alphaLine := "- **Alpha Agent** — alpha description, 2 skills, 1 MCP servers"
+	bravoLine := "- **Bravo Agent** — bravo description, model: gpt-5, 0 skills, 2 MCP servers"
+	require.Contains(t, out, "Configured Agents:")
+	require.Contains(t, out, alphaLine)
+	require.Contains(t, out, bravoLine)
+	require.NotContains(t, out, "Archived Agent")
+	require.Less(t, strings.Index(out, alphaLine), strings.Index(out, bravoLine), "agents should remain ordered by name ASC")
+
+	h.SetAgentRepo(nil)
+	require.Equal(t, "Configured Agents:\nAgent definitions not available.", strings.TrimSpace(h.executeListAgents(ctx)))
+
+	h.SetAgentRepo(agentRepo)
+	if _, err := db.ExecContext(ctx, `DELETE FROM agents WHERE id IS NOT NULL`); err != nil {
+		t.Fatalf("clear agents for empty result: %v", err)
+	}
+	require.Contains(t, h.executeListAgents(ctx), "No agents configured.")
+}
+
+func TestStartQueuedTaskThreadInputHandlesMissingTaskAndNoModel(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("missing task returns load error", func(t *testing.T) {
+		h, _, _ := setupTestHandler(t)
+		input := models.ThreadInput{ID: "queued-missing-task", TaskID: "missing-task", Content: "continue", Source: models.TaskOriginSlack}
+		err := h.startQueuedTaskThreadInput(ctx, input)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "task not found")
+	})
+
+	t.Run("unstartable queued input is cancelled when no model exists", func(t *testing.T) {
+		h, _, _ := setupTestHandler(t)
+		project := createProject(t, h, "Queued No Model Project")
+		task := createTask(t, h, project.ID, "Queued No Model Task", func(tk *models.Task) {
+			tk.Category = models.CategoryActive
+			tk.Status = models.StatusPending
+		})
+		queued := models.ThreadInput{ID: "queued-missing-model", Scope: models.ThreadInputScopeTask, TaskID: task.ID, ProjectID: project.ID, AgentConfigID: "missing-model", Content: "continue without model", Source: models.TaskOriginDiscord, DiscordChannelID: "C1", DiscordThreadID: "T1", DiscordMessageID: "M1", DiscordUserID: "U1"}
+
+		err := h.startQueuedTaskThreadInput(ctx, queued)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "input is no longer pending")
+	})
+}
+
+func TestChannelReplyAndQueuedAgentResolutionBranches(t *testing.T) {
+	h, _, repo := setupTestHandler(t)
+	ctx := context.Background()
+	project := createProject(t, h, "Queued Agent Resolution Project")
+	agent := createAgent(t, repo)
+	project.DefaultAgentConfigID = &agent.ID
+	require.NoError(t, h.projectRepo.Update(ctx, project))
+
+	task := createTask(t, h, project.ID, "Queued Agent Resolution Task", func(tk *models.Task) {
+		tk.AgentID = nil
+	})
+	resolved, unstartable, err := h.resolveTaskThreadExecutionAgent(ctx, task)
+	require.NoError(t, err)
+	require.False(t, unstartable)
+	require.NotNil(t, resolved)
+	require.Equal(t, agent.ID, resolved.ID)
+
+	input := models.ThreadInput{
+		Source:    models.TaskOriginEmail,
+		EmailFrom: "sender@example.com", EmailMessageID: "msg-1", EmailReferences: "<ref>", EmailSubject: "Subject", EmailSessionKey: "session-1",
+		TelegramChatID: 123, SlackTeamID: "T1", SlackChannelID: "C1", SlackThreadTS: "123.456", SlackUserID: "U1",
+		DiscordChannelID: "D1", DiscordThreadID: "DT1", DiscordMessageID: "DM1", DiscordUserID: "DU1",
+	}
+	reply := channelReplyFromThreadInput(input)
+	require.Equal(t, models.TaskOriginEmail, reply.Source)
+	require.Equal(t, "sender@example.com", reply.EmailFrom)
+	require.Equal(t, "msg-1", reply.EmailMessageID)
+	require.Equal(t, "session-1", reply.EmailSessionKey)
+	require.Equal(t, int64(123), reply.TelegramChatID)
+	require.Equal(t, "T1", reply.SlackTeamID)
+	require.Equal(t, "DU1", reply.DiscordUserID)
+
+	require.Equal(t, chatcontrol.SurfaceTelegram, surfaceForThreadInput(models.ThreadInput{Source: models.TaskOriginTelegram}))
+	require.Equal(t, chatcontrol.SurfaceSlack, surfaceForThreadInput(models.ThreadInput{Source: models.TaskOriginSlack}))
+	require.Equal(t, chatcontrol.SurfaceEmail, surfaceForThreadInput(models.ThreadInput{Source: models.TaskOriginEmail}))
+	require.Equal(t, chatcontrol.SurfaceDiscord, surfaceForThreadInput(models.ThreadInput{Source: models.TaskOriginDiscord}))
+	require.Equal(t, chatcontrol.SurfaceWeb, surfaceForThreadInput(models.ThreadInput{Source: models.TaskOriginWeb}))
+}
+
+func TestExecuteViewTaskThreadUsesBoundedExecutionReads(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	h, _, agentRepo := setupTestHandlerForDB(t, db)
+	project := createProject(t, h, "Bounded Thread Project")
+	agent := createAgent(t, agentRepo)
+	task := createTask(t, h, project.ID, "Bounded Thread Task", func(tk *models.Task) {
+		tk.Category = models.CategoryBacklog
+		tk.Status = models.StatusCompleted
+		tk.Prompt = "original prompt"
+	})
+
+	for i := 0; i < 40; i++ {
+		output := fmt.Sprintf("output-%02d %s", i, strings.Repeat("x", 20*1024))
+		exec := createExec(t, h, task.ID, agent.ID, func(exec *models.Execution) {
+			exec.ID = fmt.Sprintf("thread-exec-%02d", i)
+			exec.Status = models.ExecRunning
+			exec.PromptSent = fmt.Sprintf("prompt-%02d", i)
+			exec.IsFollowup = i > 0
+		})
+		require.NoError(t, h.execRepo.Complete(context.Background(), exec.ID, models.ExecCompleted, output, "", 0, 0))
+	}
+
+	ctx := context.Background()
+	counter.Reset()
+	counter.SetEnabled(true)
+	transcript, err := h.executeViewTaskThreadRequest(ctx, streamingResponseParams{ProjectID: project.ID}, service.ViewThreadRequest{
+		TaskID: task.ID,
+		Offset: 5,
+		Limit:  3,
+	})
+	counter.SetEnabled(false)
+	require.NoError(t, err)
+	require.Contains(t, transcript, "Total executions: 40")
+	require.Contains(t, transcript, "prompt-05")
+	require.Contains(t, transcript, "prompt-07")
+	require.NotContains(t, transcript, "prompt-04")
+	require.NotContains(t, transcript, "prompt-08")
+	require.Contains(t, transcript, "Showing executions 6–8 of 40")
+
+	var executionQueries []string
+	for _, statement := range counter.Statements() {
+		if strings.Contains(strings.ToLower(statement), "from executions") {
+			executionQueries = append(executionQueries, statement)
+		}
+	}
+	require.Len(t, executionQueries, 2)
+	require.Contains(t, executionQueries[0], "COUNT(*)")
+	require.Contains(t, executionQueries[1], "ORDER BY started_at ASC, rowid ASC LIMIT ? OFFSET ?")
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	transcript, err = h.executeViewTaskThreadRequest(ctx, streamingResponseParams{ProjectID: project.ID}, service.ViewThreadRequest{
+		TaskID: task.ID,
+		Limit:  0,
+	})
+	counter.SetEnabled(false)
+	require.NoError(t, err)
+	require.Contains(t, transcript, "Total executions: 40")
+	require.Contains(t, transcript, "Transcript size limit reached")
+
+	executionQueries = nil
+	for _, statement := range counter.Statements() {
+		if strings.Contains(strings.ToLower(statement), "from executions") {
+			executionQueries = append(executionQueries, statement)
+		}
+	}
+	require.GreaterOrEqual(t, len(executionQueries), 2)
+	for _, statement := range executionQueries[1:] {
+		require.Contains(t, statement, "ORDER BY started_at ASC, rowid ASC LIMIT ? OFFSET ?")
 	}
 }

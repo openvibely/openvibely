@@ -3,6 +3,8 @@ package pages
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
+	"sort"
 	"strings"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/web/templates/layout"
@@ -10,26 +12,63 @@ import (
 
 templ Automations(projects []models.Project, currentProjectID string, cards []models.AutomationCard) {
 	@layout.Base("Automations", projects, currentProjectID) {
-		@automationsContent(cards, currentProjectID)
+		@automationsContent(cards, currentProjectID, "", "", false)
+	}
+}
+
+// AutomationsPage renders the initial bounded portfolio with its page boundary.
+templ AutomationsPage(projects []models.Project, currentProjectID string, cards []models.AutomationCard, hasMore bool) {
+	@layout.Base("Automations", projects, currentProjectID) {
+		@automationsContent(cards, currentProjectID, "", "", hasMore)
+	}
+}
+
+templ AutomationsDescribeFailure(projects []models.Project, currentProjectID string, cards []models.AutomationCard, description string, errorMessage string) {
+	@layout.Base("Automations", projects, currentProjectID) {
+		@automationsContent(cards, currentProjectID, description, errorMessage, false)
+	}
+}
+
+// AutomationsDescribeFailurePage keeps the portfolio error document paged.
+templ AutomationsDescribeFailurePage(projects []models.Project, currentProjectID string, cards []models.AutomationCard, description string, errorMessage string, hasMore bool) {
+	@layout.Base("Automations", projects, currentProjectID) {
+		@automationsContent(cards, currentProjectID, description, errorMessage, hasMore)
 	}
 }
 
 templ AutomationsContent(cards []models.AutomationCard, currentProjectID string) {
-	@automationsContent(cards, currentProjectID)
+	@automationsContent(cards, currentProjectID, "", "", false)
 }
 
-templ automationsContent(cards []models.AutomationCard, currentProjectID string) {
-	<div id="automations-container" class="h-full min-w-0 max-w-full overflow-y-auto" data-search-container>
+// AutomationsContentPage renders one bounded portfolio page with its boundary.
+templ AutomationsContentPage(cards []models.AutomationCard, currentProjectID string, hasMore bool) {
+	@automationsContent(cards, currentProjectID, "", "", hasMore)
+}
+
+templ automationsContent(cards []models.AutomationCard, currentProjectID string, description string, errorMessage string, hasMore bool) {
+		<div id="automations-container" class="h-full min-w-0 max-w-full overflow-y-auto" data-search-container data-card-pagination-root data-card-pagination-url={ fmt.Sprintf("/automations?project_id=%s", currentProjectID) } data-card-pagination-list="#automations-card-list" data-card-pagination-card-selector="[data-automation-url]" data-card-pagination-key="data-automation-url" data-card-pagination-page-size="20" data-card-pagination-has-more={ cardPaginationHasMoreAttribute(hasMore) }>
 		@layout.PageTitle("Automations")
 		<div class="mb-6 flex items-center justify-between gap-3">
 			<h2 class="text-2xl font-bold">Automations</h2>
-			<a class="btn btn-primary btn-sm" href={ templ.URL(fmt.Sprintf("/automations/new?project_id=%s", currentProjectID)) } hx-get={ fmt.Sprintf("/automations/new?project_id=%s", currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;">New Automation</a>
+			<div class="dropdown dropdown-end">
+				<label tabindex="0" class="btn btn-primary btn-sm" onclick="handleDropdownToggle(event)">+ New Automation</label>
+				<ul tabindex="0" class="dropdown-content z-[100] menu w-48 rounded-box border border-base-300 bg-base-100 p-2 shadow" data-automation-new-menu>
+					<li><button type="button" data-automation-new-template onclick="openAutomationNewModal(event, 'automation-template-modal')">Template</button></li>
+					<li><button type="button" data-automation-new-describe onclick="openAutomationNewModal(event, 'automation-describe-modal')">Describe</button></li>
+					<li><button type="button" data-automation-new-custom onclick="submitAutomationCustom(event)">Custom</button></li>
+				</ul>
+			</div>
+			<form id="automation-custom-form" class="hidden" method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/builder?project_id=%s", currentProjectID)) } hx-post={ fmt.Sprintf("/automations/builder?project_id=%s", currentProjectID) } hx-target="#main-content">
+				<input type="hidden" name="project_id" value={ currentProjectID }/>
+				<input type="hidden" name="source" value="blank"/>
+			</form>
 		</div>
-		@CardSearchInput("automations", "Search automations...")
-		if len(cards) == 0 {
-			<div class="rounded-box bg-base-200/60 p-8 text-center">
+			@CardSearchInput("automations", "Search automations...")
+			<div id="automations-card-list" data-card-pagination-list>
+			if len(cards) == 0 {
+				<div class="rounded-box bg-base-200/60 p-8 text-center" data-search-empty-state>
 				<h3 class="font-semibold">No saved automations</h3>
-				<p class="mt-2 text-sm text-base-content/65">Create one from Template, Describe It, or Blank. Maintained Native and GitHub setup can also register newly created resources. Existing tasks and schedules are never inferred or backfilled.</p>
+				<p class="mt-2 text-sm text-base-content/65">Create one from Template, Describe, or Custom. Maintained Native and GitHub setup can also register newly created resources. Existing tasks and schedules are never inferred or backfilled.</p>
 			</div>
 		} else {
 			<div class="grid grid-cols-1 gap-4 min-w-0 max-w-full">
@@ -50,16 +89,68 @@ templ automationsContent(cards []models.AutomationCard, currentProjectID string)
 										</svg>
 									</label>
 									<ul tabindex="0" class="dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-48 border border-base-300">
-										<li>
-											<button
-												type="button"
-												class="w-full"
-												data-automation-card-edit={ card.Automation.ID }
-												data-automation-edit-url={ fmt.Sprintf("/automations/%s/builder?project_id=%s", card.Automation.ID, currentProjectID) }
-												data-project-id={ currentProjectID }
-												onclick="event.stopPropagation(); openAutomationCardEdit(this)"
-											>Edit</button>
-										</li>
+											<li>
+												<button
+													type="button"
+													class="w-full"
+													data-automation-card-edit={ card.Automation.ID }
+													data-automation-edit-url={ fmt.Sprintf("/automations/%s/builder?project_id=%s", card.Automation.ID, currentProjectID) }
+													data-project-id={ currentProjectID }
+													onclick="event.stopPropagation(); openAutomationCardEdit(this)"
+												>Edit</button>
+											</li>
+											if card.TemplateUpdateAvailable {
+												<li>
+													<button
+														type="button"
+														class="w-full"
+														data-automation-card-update-template={ card.Automation.ID }
+														data-automation-update-template-url={ fmt.Sprintf("/automations/%s/builder?project_id=%s", card.Automation.ID, currentProjectID) }
+														data-project-id={ currentProjectID }
+														onclick="event.stopPropagation(); openAutomationCardUpdateTemplate(this)"
+													>Update to latest template</button>
+												</li>
+											}										if card.Automation.LifecycleState == models.AutomationActive {
+											<li>
+												<button
+													class="w-full"
+													type="button"
+													hx-post={ fmt.Sprintf("/automations/%s/run-now?project_id=%s", card.Automation.ID, currentProjectID) }
+													hx-include={ fmt.Sprintf("#run-now-automation-card-form-%s", card.Automation.ID) }
+													hx-target="#automations-container"
+													hx-swap="outerHTML"
+													data-automation-card-run-now={ card.Automation.ID }
+													data-automation-lifecycle-form={ fmt.Sprintf("run-now-automation-card-form-%s", card.Automation.ID) }
+													onclick="submitAutomationLifecycleFallback(this)"
+												>Run now</button>
+											</li>
+											<li>
+												<button
+													class="w-full"
+													type="button"
+													hx-post={ fmt.Sprintf("/automations/%s/pause?project_id=%s", card.Automation.ID, currentProjectID) }
+													hx-include={ fmt.Sprintf("#pause-automation-card-form-%s", card.Automation.ID) }
+													hx-target="#automations-container"
+													hx-swap="outerHTML"
+													data-automation-card-pause={ card.Automation.ID }
+													data-automation-lifecycle-form={ fmt.Sprintf("pause-automation-card-form-%s", card.Automation.ID) }
+													onclick="submitAutomationLifecycleFallback(this)"
+													>Disable</button>											</li>
+										}
+										if card.Automation.LifecycleState == models.AutomationPaused {
+											<li>
+												<button
+													class="w-full"
+													type="button"
+													hx-post={ fmt.Sprintf("/automations/%s/resume?project_id=%s", card.Automation.ID, currentProjectID) }
+													hx-include={ fmt.Sprintf("#resume-automation-card-form-%s", card.Automation.ID) }
+													hx-target="#automations-container"
+													hx-swap="outerHTML"
+													data-automation-card-resume={ card.Automation.ID }
+													data-automation-lifecycle-form={ fmt.Sprintf("resume-automation-card-form-%s", card.Automation.ID) }
+													onclick="submitAutomationLifecycleFallback(this)"
+													>Enable</button>											</li>
+										}
 										<li>
 											<button
 												class="text-error"
@@ -71,6 +162,22 @@ templ automationsContent(cards []models.AutomationCard, currentProjectID string)
 											>Delete</button>
 										</li>
 									</ul>
+									if card.Automation.LifecycleState == models.AutomationActive {
+										<form id={ fmt.Sprintf("run-now-automation-card-form-%s", card.Automation.ID) } class="hidden" method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/run-now?project_id=%s", card.Automation.ID, currentProjectID)) }>
+											<input type="hidden" name="project_id" value={ currentProjectID }/>
+											<input type="hidden" name="return_to" value="portfolio"/>
+										</form>
+										<form id={ fmt.Sprintf("pause-automation-card-form-%s", card.Automation.ID) } class="hidden" method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/pause?project_id=%s", card.Automation.ID, currentProjectID)) }>
+											<input type="hidden" name="project_id" value={ currentProjectID }/>
+											<input type="hidden" name="return_to" value="portfolio"/>
+										</form>
+									}
+									if card.Automation.LifecycleState == models.AutomationPaused {
+										<form id={ fmt.Sprintf("resume-automation-card-form-%s", card.Automation.ID) } class="hidden" method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/resume?project_id=%s", card.Automation.ID, currentProjectID)) }>
+											<input type="hidden" name="project_id" value={ currentProjectID }/>
+											<input type="hidden" name="return_to" value="portfolio"/>
+										</form>
+									}
 								</div>
 							</div>
 							<div class="pr-12 min-w-0 max-w-full">
@@ -88,10 +195,42 @@ templ automationsContent(cards []models.AutomationCard, currentProjectID string)
 					</div>
 				}
 			</div>
-		}
+			}
+			</div>
+				@CardPaginationStatusWithBoundary(hasMore)			<dialog id="automation-template-modal" class="modal">
+			<div class="modal-box">
+				@ModalCloseButton("document.getElementById('automation-template-modal')", "Close template selection")
+				<h3 class="pr-10 text-lg font-bold">Create from template</h3>
+				<p class="mt-2 text-sm text-base-content/65">Choose a maintained Automation design to load into the browser-local builder.</p>
+				<form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/builder?project_id=%s", currentProjectID)) } hx-post={ fmt.Sprintf("/automations/builder?project_id=%s", currentProjectID) } hx-target="#main-content" class="mt-4 space-y-4">
+					<input type="hidden" name="project_id" value={ currentProjectID }/>
+					<input type="hidden" name="source" value="template"/>
+					<label class="form-control">
+						<span class="label-text mb-1 font-medium">Template</span>
+						<select name="template_key" class="select select-bordered w-full" aria-label="Automation template" onchange="updateAutomationTemplateDescription(this)">
+							<option value="native_sdlc" data-template-description="Reviews project direction, proposes actionable work, waits for human approval, and hands approved work to an implementation task.">Native SDLC</option>
+							<option value="github_sdlc" data-template-description="Finds repository improvements, creates GitHub issues, waits for human assignment and review, and prepares implementation pull requests.">GitHub SDLC</option>
+						</select>
+					</label>
+					<p class="rounded-box bg-base-200/60 p-3 text-sm text-base-content/70" data-template-description-card>Reviews project direction, proposes actionable work, waits for human approval, and hands approved work to an implementation task.</p>
+					<div class="modal-action">
+						<button class="btn" type="button" onclick="document.getElementById('automation-template-modal').close()">Cancel</button>
+						<button class="btn btn-primary" type="submit">Use template</button>
+					</div>
+				</form>
+			</div>
+			<form method="dialog" class="modal-backdrop"><button>Cancel</button></form>
+		</dialog>
+		<dialog id="automation-describe-modal" class="modal" open?={ errorMessage != "" }>
+			<div id="automation-describe-modal-content" class="modal-box">
+				@ModalCloseButton("document.getElementById('automation-describe-modal')", "Close Automation description")
+				@automationDescribeModalFields(currentProjectID, description, errorMessage)
+			</div>
+			<form method="dialog" class="modal-backdrop"><button>Cancel</button></form>
+		</dialog>
 		<dialog id="delete-automation-card-modal" class="modal">
 			<div class="modal-box">
-				@ModalCloseButton("delete-automation-card-modal", "Close delete automation confirmation")
+				@ModalCloseButton("document.getElementById('delete-automation-card-modal')", "Close delete automation confirmation")
 				<h3 class="pr-10 text-lg font-bold text-error">Delete automation</h3>
 				<p class="py-4">Delete <strong id="delete-automation-card-name"></strong>? This permanently deletes the saved Automation graph and Automation record.</p>
 				<div class="rounded-lg bg-base-200 p-3 text-sm text-base-content/70">Existing tasks remain. Automation-owned trigger schedules will be deleted. This cannot be undone.</div>
@@ -105,7 +244,70 @@ templ automationsContent(cards []models.AutomationCard, currentProjectID string)
 			</div>
 			<form method="dialog" class="modal-backdrop"><button>Cancel</button></form>
 		</dialog>
+		<dialog id="update-automation-card-template-modal" class="modal">
+			<div class="modal-box">
+				@ModalCloseButton("document.getElementById('update-automation-card-template-modal')", "Close template update confirmation")
+				<h3 class="pr-10 text-lg font-bold">Update to latest template</h3>
+				<p class="py-4">This replaces the current nodes, connections, prompts, and schedules with the latest maintained template.</p>
+				<div class="rounded-lg bg-base-200 p-3 text-sm text-base-content/70">The Automation name and lifecycle state are preserved. Template customizations are not merged.</div>
+				<div class="modal-action">
+					<button class="btn" type="button" onclick="document.getElementById('update-automation-card-template-modal').close()">Cancel</button>
+					<form id="update-automation-card-template-form" method="post" action="">
+						<input type="hidden" name="project_id" value={ currentProjectID }/>
+						<input type="hidden" name="update_template" value="true"/>
+						<button class="btn btn-primary" type="submit">Update to latest</button>
+					</form>
+				</div>
+			</div>
+			<form method="dialog" class="modal-backdrop"><button>Cancel</button></form>
+		</dialog>
 		<script>
+			window.openAutomationNewModal = function(event, modalID) {
+				if (event) {
+					event.preventDefault();
+					event.stopPropagation();
+				}
+				var menu = event && event.currentTarget ? event.currentTarget.closest('.dropdown') : null;
+				var toggle = menu ? menu.querySelector('[tabindex="0"]') : null;
+				if (toggle) toggle.blur();
+				var modal = document.getElementById(modalID);
+				if (modal) modal.showModal();
+			};
+
+			window.submitAutomationCustom = function(event) {
+				if (event) {
+					event.preventDefault();
+					event.stopPropagation();
+				}
+				var form = document.getElementById('automation-custom-form');
+				if (!form) return;
+				if (window.htmx) {
+					window.htmx.ajax('POST', form.getAttribute('action'), {
+						source: form,
+						target: '#main-content',
+						swap: 'innerHTML',
+						values: { project_id: form.querySelector('[name="project_id"]').value, source: 'blank' }
+					});
+					return;
+				}
+				form.requestSubmit();
+			};
+
+			window.updateAutomationTemplateDescription = function(select) {
+				if (!select) return;
+				var option = select.options[select.selectedIndex];
+				var form = select.closest('form');
+				var description = form ? form.querySelector('[data-template-description-card]') : null;
+				if (description) {
+					description.textContent = option ? option.dataset.templateDescription || '' : '';
+				}
+			};
+
+			window.submitAutomationLifecycleFallback = function(button) {
+				if (!button || window.htmx) return;
+				var form = document.getElementById(button.dataset.automationLifecycleForm || '');
+				if (form) form.requestSubmit();
+			};
 			window.openAutomationCardEdit = function(button) {
 				if (!button || !window.htmx) return;
 				var url = button.dataset.automationEditUrl || '';
@@ -133,14 +335,75 @@ templ automationsContent(cards []models.AutomationCard, currentProjectID string)
 				form.setAttribute('action', button.dataset.automationDeleteUrl || '');
 				modal.showModal();
 			};
+
+			window.openAutomationCardUpdateTemplate = function(button) {
+				if (!button) return;
+				var modal = document.getElementById('update-automation-card-template-modal');
+				var form = document.getElementById('update-automation-card-template-form');
+				if (!modal || !form) return;
+				var url = button.dataset.automationUpdateTemplateUrl || '';
+				form.setAttribute('action', url);
+				if (window.htmx) {
+					form.onsubmit = function(event) {
+						event.preventDefault();
+						event.stopImmediatePropagation();
+						window.htmx.ajax('POST', url, {
+							source: form,
+							target: '#main-content',
+							swap: 'innerHTML',
+							values: { project_id: button.dataset.projectId || '', update_template: 'true' }
+						});
+						modal.close();
+						return false;
+					};
+				} else {
+					form.onsubmit = null;
+				}
+				modal.showModal();
+			};
 		</script>
 	</div>
+}
+
+templ AutomationDescribeModalContent(currentProjectID string, description string, errorMessage string) {
+	@automationDescribeModalContent(currentProjectID, description, errorMessage)
+}
+
+templ automationDescribeModalContent(currentProjectID string, description string, errorMessage string) {
+	<div id="automation-describe-modal-content" class="modal-box">
+		@ModalCloseButton("document.getElementById('automation-describe-modal')", "Close Automation description")
+		@automationDescribeModalFields(currentProjectID, description, errorMessage)
+	</div>
+}
+
+templ automationDescribeModalFields(currentProjectID string, description string, errorMessage string) {
+	<h3 class="pr-10 text-lg font-bold">Describe an Automation</h3>
+	<p class="mt-2 text-sm text-base-content/65">Describe what should happen. OpenVibely will generate a browser-local design for you to review before saving.</p>
+	if errorMessage != "" {
+		<div class="alert alert-error mt-4" role="alert"><span>{ errorMessage }</span></div>
+	}
+	<form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/builder?project_id=%s", currentProjectID)) } hx-post={ fmt.Sprintf("/automations/builder?project_id=%s", currentProjectID) } hx-target="#main-content" hx-indicator="#automation-describe-loading" hx-disabled-elt="button" class="mt-4 space-y-4">
+		<input type="hidden" name="project_id" value={ currentProjectID }/>
+		<input type="hidden" name="source" value="describe"/>
+		<textarea name="description" class="textarea textarea-bordered h-32 w-full" maxlength="4000" required placeholder="Review project vision daily, request approval, then create implementation work.">{ description }</textarea>
+		<div class="modal-action">
+			<button class="btn" type="button" onclick="document.getElementById('automation-describe-modal').close()">Cancel</button>
+			<button class="btn btn-primary" type="submit">Generate design</button>
+		</div>
+		<div id="automation-describe-loading" class="htmx-indicator text-center text-sm text-base-content/65" role="status" aria-live="polite">Generating and validating design…</div>
+	</form>
 }
 
 templ automationLiveNodeShape(node models.AutomationLiveNode) {
 	<g data-automation-live-node={ node.ID } transform={ fmt.Sprintf("translate(%.0f %.0f)", automationGraphLayoutX(node.PositionX), automationGraphLayoutY(node.PositionY)) }>
 		<rect width={ fmt.Sprintf("%.0f", automationGraphNodeWidth) } height={ fmt.Sprintf("%.0f", automationGraphNodeHeight) } rx="12" class={ automationLiveNodeClass(node.DisplayState) } stroke-width="3"></rect>
-		<foreignObject x="0" y="0" width={ fmt.Sprintf("%.0f", automationGraphNodeWidth) } height={ fmt.Sprintf("%.0f", automationGraphNodeHeight) } class="pointer-events-none"><div xmlns="http://www.w3.org/1999/xhtml" class="automation-node-content"><strong>{ node.Name }</strong><span class={ automationStateTextClass(node.DisplayState) }>{ automationStateLabel(node.DisplayState) }</span><small>{ automationNodeCountLabel(node.Counts) }</small></div></foreignObject>
+		<foreignObject x="0" y="0" width={ fmt.Sprintf("%.0f", automationGraphNodeWidth) } height={ fmt.Sprintf("%.0f", automationGraphNodeHeight) } class="pointer-events-none"><div xmlns="http://www.w3.org/1999/xhtml" class="automation-node-content"><strong>{ node.Name }</strong><span class={ automationStateTextClass(node.DisplayState) }>{ automationStateLabel(node.DisplayState) }</span>
+			if automationLiveNodeModelLabel(node) != "" {
+				<small>{ automationLiveNodeModelLabel(node) }</small>
+			} else {
+				<small>{ automationNodeCountLabel(node.Counts) }</small>
+			}
+		</div></foreignObject>
 	</g>
 }
 
@@ -154,67 +417,129 @@ templ AutomationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 	@automationLiveContent(graph, currentProjectID, deleteAvailable)
 }
 
-templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID string, deleteAvailable bool) {
-		<div id="automation-live" class="flex h-full min-w-0 max-w-full flex-col overflow-y-auto" data-automation-id={ graph.Automation.ID } data-project-id={ currentProjectID }
-			data-refresh-url={ fmt.Sprintf("/automations/%s?project_id=%s", graph.Automation.ID, currentProjectID) }
-			data-external-refresh-url={ fmt.Sprintf("/automations/%s/refresh-external?project_id=%s", graph.Automation.ID, currentProjectID) }>
-			@layout.PageTitle(graph.Automation.Name)
-			@automationBreadcrumb(currentProjectID, graph.Automation.ID, graph.Automation.Name, "")
-			<div class="mb-5 flex flex-wrap items-start justify-between gap-3">
-				<div class="min-w-0">
-					<p class="max-w-3xl text-sm text-base-content/65">{ graph.Automation.Description }</p>
-				</div>
-				<div class="flex flex-wrap items-center gap-2">
-					<span class="badge badge-primary badge-outline">{ string(graph.Automation.LifecycleState) }</span>
-					<span class="badge badge-ghost">{ string(graph.Automation.HealthState) }</span>
-					<form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/builder?project_id=%s", graph.Automation.ID, currentProjectID)) } hx-post={ fmt.Sprintf("/automations/%s/builder?project_id=%s", graph.Automation.ID, currentProjectID) } hx-target="#main-content" onsubmit="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelySubmitNavigate(this); return false;">
-						<input type="hidden" name="project_id" value={ currentProjectID }/>
-						<button class="btn btn-outline btn-sm" type="submit">Edit automation</button>
-					</form>
-					if graph.Automation.LifecycleState == models.AutomationActive {
-						<form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/pause?project_id=%s", graph.Automation.ID, currentProjectID)) }><input type="hidden" name="project_id" value={ currentProjectID }/><button class="btn btn-ghost btn-sm" type="submit">Pause</button></form>
-					}
-					if graph.Automation.LifecycleState == models.AutomationPaused {
-						<form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/resume?project_id=%s", graph.Automation.ID, currentProjectID)) }><input type="hidden" name="project_id" value={ currentProjectID }/><button class="btn btn-ghost btn-sm" type="submit">Resume</button></form>
-					}
-					if deleteAvailable {
-						<button class="btn btn-ghost btn-sm text-error" type="button" onclick="document.getElementById('delete-automation-modal').showModal()">Delete</button>
-					}
-				</div>
-			</div>
-		if graph.ExternalState.TrackedResources > 0 {
-			<div class="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-box border border-base-300 bg-base-100 px-4 py-3" data-automation-external-state>
-				<div>
-					<div class="flex flex-wrap items-center gap-2"><span class="text-sm font-semibold">GitHub state</span>
-						if graph.ExternalState.Stale {
-							<span class="badge badge-warning badge-sm">Stale</span>
-						} else {
-							<span class="badge badge-success badge-sm">Fresh</span>
-						}
-					</div>
-					if graph.ExternalState.LastUpdatedAt != nil {
-						<p class="mt-1 text-xs text-base-content/60">Last persisted update { graph.ExternalState.LastUpdatedAt.Local().Format("Jan 2, 3:04 PM") }</p>
-					}
-				</div>
-				<form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/refresh-external?project_id=%s", graph.Automation.ID, currentProjectID)) } onsubmit="event.preventDefault(); window.openVibelyAutomationLiveRefresh('POST', this.getAttribute('action')); return false;">
-					<input type="hidden" name="project_id" value={ currentProjectID }/>
-					<button class="btn btn-outline btn-sm" type="submit">Refresh GitHub state</button>
-				</form>
-			</div>
-		}
-		<div class="rounded-box border border-base-300 bg-base-100 p-4 min-w-0 flex flex-1 flex-col" data-automation-readonly-canvas>
-			<div class="mb-3 flex flex-wrap items-start justify-between gap-3">
-				<div><h3 class="text-sm font-semibold">Node states</h3><p class="mt-1 text-xs text-base-content/55">A node’s border and label show the highest-priority work state currently present.</p></div>
-				<div class="flex gap-2"><button class="btn btn-ghost btn-xs" type="button" data-automation-zoom-out aria-label="Zoom out">−</button><button class="btn btn-ghost btn-xs" type="button" data-automation-zoom-in aria-label="Zoom in">+</button><button class="btn btn-ghost btn-xs" type="button" data-automation-fit>Fit</button></div>
-			</div>
-			<ul class="mb-3 flex flex-wrap gap-x-4 gap-y-2 text-xs" aria-label="Graph status legend">
-				for _, state := range []string{"failed", "blocked", "waiting_human", "running", "recently_completed", "idle"} {
-					<li class="inline-flex items-center gap-1.5"><span class={ automationStateDotClass(state) } aria-hidden="true"></span><span>{ automationStateLabel(state) }</span></li>
+templ automationViewSwitcher(ariaLabel string) {
+	<div class="join" role="group" aria-label={ ariaLabel } data-automation-view-switcher>
+		<button class="btn btn-sm join-item btn-active" type="button" aria-pressed="true" data-automation-view-graph>Graph</button>
+		<button class="btn btn-sm join-item" type="button" aria-pressed="false" data-automation-view-details>Details</button>
+		<button class="btn btn-sm join-item" type="button" aria-pressed="false" data-automation-view-yaml>YAML</button>
+	</div>
+}
+
+templ automationViewStateScript() {
+	<script>
+		window.setAutomationCanvasView = window.setAutomationCanvasView || function(root, view, options) {
+			if (!root || ['graph', 'details', 'yaml'].indexOf(view) < 0) return false;
+			options = options || {};
+			var graphPanel = root.querySelector(options.graphPanelSelector || '[data-automation-graph-panel]');
+			var detailsPanel = root.querySelector(options.detailsPanelSelector || '[data-automation-live-details-panel], [data-automation-details-panel]');
+			var yamlPanel = root.querySelector(options.yamlPanelSelector || '[data-automation-yaml-panel]');
+			var graphButton = root.querySelector('[data-automation-view-graph]');
+			var detailsButton = root.querySelector('[data-automation-view-details]');
+			var yamlButton = root.querySelector('[data-automation-view-yaml]');
+			if (!graphPanel || !detailsPanel || !yamlPanel || !graphButton || !detailsButton || !yamlButton) return false;
+			var graphSelected = view === 'graph', detailsSelected = view === 'details', yamlSelected = view === 'yaml';
+			graphPanel.hidden = !graphSelected;
+			graphPanel.style.display = graphSelected ? (options.graphDisplay || '') : 'none';
+			detailsPanel.hidden = !detailsSelected;
+			detailsPanel.style.display = detailsSelected ? (options.detailsDisplay || 'block') : 'none';
+			yamlPanel.hidden = !yamlSelected;
+			yamlPanel.style.display = yamlSelected ? (options.yamlDisplay || 'flex') : 'none';
+			graphButton.classList.toggle('btn-active', graphSelected);
+			detailsButton.classList.toggle('btn-active', detailsSelected);
+			yamlButton.classList.toggle('btn-active', yamlSelected);
+			graphButton.setAttribute('aria-pressed', String(graphSelected));
+			detailsButton.setAttribute('aria-pressed', String(detailsSelected));
+			yamlButton.setAttribute('aria-pressed', String(yamlSelected));
+			return true;
+		};
+	</script>
+}
+
+// automationYAMLSharedScript defines the single source of truth for YAML line
+// rendering (syntax highlighting, indentation guides and hanging indent) used
+// by both the editable builder editor and the read-only preview panel, so
+// they can never visually drift apart from one another.
+templ automationYAMLSharedScript() {
+	<script>
+		window.openVibelyYAML = window.openVibelyYAML || (function() {
+			function escapeYAMLHTML(value) { return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
+			function lineIndent(line) { var match = line.match(/^\s*/); return match ? match[0].length : 0; }
+			function indentationGuides(indent) {
+				if (!indent) return '';
+				var dots = [];
+				for (var column = 0; column < indent; column++) {
+					dots.push('<span class="absolute z-10 rounded-full" style="left:calc(' + column + 'ch + 0.65ch);top:50%;width:2px;height:2px;transform:translate(-50%,-50%);background-color:oklch(var(--bc) / 0.3)" data-automation-yaml-indent-dot aria-hidden="true"></span>');
 				}
-			</ul>
-			<div class="automation-canvas-shell min-h-[34rem] w-full flex-1 overflow-hidden rounded-box border border-base-300 bg-base-200/20" role="region" aria-label="Live automation graph">
-				<svg data-automation-canvas viewBox={ automationLiveGraphViewBox(graph.Nodes) } class="h-full w-full touch-none select-none" role="img" aria-label={ graph.Automation.Name + " live automation graph" }>
-					@automationGraphThemeStyles()
+				return '<span class="pointer-events-none absolute inset-y-0 left-0 z-10" style="width:' + indent + 'ch" data-automation-yaml-indent-guides data-automation-yaml-indent-guide aria-hidden="true">' + dots.join('') + '</span>';
+			}
+			function highlightLine(line, lineNumber, diagnosticLine) {
+				var indentation = line.match(/^\s*/)[0], content = line.slice(indentation.length), match = content.match(/^((?:-\s+)?)([^:#][^:]*?)(:)(.*)$/), rendered = escapeYAMLHTML(content);
+				if (/^\s*#/.test(line)) rendered = '<span class="text-base-content/50">' + escapeYAMLHTML(content) + '</span>';
+				else if (match) {
+					var value = match[4], valueClass = 'text-base-content/80';
+					if (/^\s*(?:true|false|null|~|-?\d+(?:\.\d+)?)\s*(?:#.*)?$/i.test(value)) valueClass = 'text-secondary';
+					rendered = escapeYAMLHTML(match[1]) + '<span class="text-primary" data-automation-yaml-key>' + escapeYAMLHTML(match[2]) + '</span>' + escapeYAMLHTML(match[3]) + '<span class="' + valueClass + '">' + escapeYAMLHTML(value) + '</span>';
+				}
+				if (diagnosticLine && lineNumber === diagnosticLine) rendered = '<span class="decoration-error underline decoration-wavy" style="text-decoration-line: underline; text-decoration-style: wavy; text-decoration-color: oklch(var(--er)); text-decoration-thickness: 1px" data-automation-yaml-error-line>' + rendered + '</span>';
+				return rendered;
+			}
+			// renderLineSpan renders one complete, self-contained highlighted line
+			// (indent guide + hanging indent + syntax highlighting + optional fold
+			// summary), identically for every caller so indentation can never
+			// silently diverge between the editable and read-only YAML views.
+			function renderLineSpan(line, lineNumber, options) {
+				options = options || {};
+				var indent = lineIndent(line), hangingIndent = indent ? ' style="padding-left:' + indent + 'ch"' : '', rendered = highlightLine(line, lineNumber, options.diagnosticLine);
+				if (options.folded) rendered += '<span class="ml-2 text-base-content/45" data-automation-yaml-fold-summary>…</span>';
+				return '<span class="relative block min-h-6 break-words" data-automation-yaml-highlight-line data-yaml-line="' + lineNumber + '" data-yaml-indent="' + indent + '"' + hangingIndent + '>' + indentationGuides(indent) + rendered + '</span>';
+			}
+			return {escapeHTML: escapeYAMLHTML, lineIndent: lineIndent, indentationGuides: indentationGuides, highlightLine: highlightLine, renderLineSpan: renderLineSpan};
+		})();
+	</script>
+}
+
+templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID string, deleteAvailable bool) {
+		@automationViewStateScript()
+		@automationYAMLSharedScript()
+		<div id="automation-live" class="flex h-full min-w-0 max-w-full flex-col overflow-y-auto" data-automation-id={ graph.Automation.ID } data-project-id={ currentProjectID }
+			data-refresh-url={ fmt.Sprintf("/automations/%s?project_id=%s", graph.Automation.ID, currentProjectID) }>
+			@layout.PageTitle(graph.Automation.Name)
+			<div class="mb-6 flex flex-wrap items-start justify-between gap-3" data-automation-live-header>
+				<div class="min-w-0 flex-1">
+					@automationBreadcrumb(currentProjectID, graph.Automation.ID, graph.Automation.Name, "", false)
+					if graph.Automation.Description != "" {
+						<p class="mt-1 text-sm opacity-60">{ graph.Automation.Description }</p>
+					}
+				</div>
+				<div class="flex shrink-0 flex-wrap items-center justify-end gap-2" data-automation-live-header-actions>
+						<button class="btn btn-outline btn-sm" type="submit" form="automation-live-edit-form" data-automation-live-edit>Edit</button>
+						if graph.Automation.LifecycleState == models.AutomationActive {
+							<button class="btn btn-primary btn-sm" type="submit" form="automation-live-run-now-form" data-automation-live-run-now={ graph.Automation.ID }>Run</button>					}
+					@automationLiveMoreActions(graph, deleteAvailable)
+				</div>
+			</div>
+						<div class="rounded-box border border-base-300 bg-base-100 p-4 min-w-0 min-h-0 flex flex-1 flex-col" data-automation-readonly-canvas data-automation-view-root>						<div class="mb-3 flex flex-wrap items-center justify-between gap-3" data-automation-live-card-actions>
+							@automationViewSwitcher("Automation canvas view")							<div class="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-2" data-automation-live-badges>
+							<span class="badge badge-primary badge-outline" data-automation-live-status>{ string(graph.Automation.LifecycleState) }</span>
+							<span class="badge badge-ghost" data-automation-live-health>{ string(graph.Automation.HealthState) }</span>
+						</div>
+					</div>				<form id="automation-live-edit-form" class="hidden" method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/builder?project_id=%s", graph.Automation.ID, currentProjectID)) } hx-post={ fmt.Sprintf("/automations/%s/builder?project_id=%s", graph.Automation.ID, currentProjectID) } hx-target="#main-content" onsubmit="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelySubmitNavigate(this); return false;">
+					<input type="hidden" name="project_id" value={ currentProjectID }/>
+				</form>
+				if graph.Automation.LifecycleState == models.AutomationActive {
+					<form id="automation-live-run-now-form" class="hidden" method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/run-now?project_id=%s", graph.Automation.ID, currentProjectID)) } onsubmit="event.preventDefault(); Promise.resolve(window.openVibelyAutomationLiveRefresh('POST', this.getAttribute('action'))).then(function() { window.openVibelyAutomationLiveRefresh('GET'); }); return false;"><input type="hidden" name="project_id" value={ currentProjectID }/></form>
+					<form id="automation-live-pause-form" class="hidden" method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/pause?project_id=%s", graph.Automation.ID, currentProjectID)) }><input type="hidden" name="project_id" value={ currentProjectID }/></form>
+				}
+				if graph.Automation.LifecycleState == models.AutomationPaused {
+					<form id="automation-live-resume-form" class="hidden" method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/resume?project_id=%s", graph.Automation.ID, currentProjectID)) }><input type="hidden" name="project_id" value={ currentProjectID }/></form>
+				}
+					<div class="automation-canvas-shell relative min-h-[20rem] w-full flex-1 overflow-hidden rounded-box border border-base-300 bg-base-200/20" data-automation-graph-panel role="region" aria-label="Live automation graph">					<div class="absolute right-3 top-3 z-10 flex gap-1 rounded-box border border-base-300 bg-base-100/90 p-1 shadow-sm backdrop-blur" data-automation-live-viewport-controls>
+						<button class="btn btn-ghost btn-xs" type="button" data-automation-zoom-out aria-label="Zoom out">−</button>
+						<button class="btn btn-ghost btn-xs" type="button" data-automation-zoom-in aria-label="Zoom in">+</button>
+						<button class="btn btn-ghost btn-xs" type="button" data-automation-fit>Fit</button>
+					</div>
+					<svg data-automation-canvas viewBox={ automationLiveGraphViewBox(graph.Nodes) } class="h-full w-full touch-none select-none" role="img" aria-label={ graph.Automation.Name + " live automation graph" }>
+						@automationGraphThemeStyles()
 					<defs><marker id="automation-live-arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" class="automation-graph-arrow"></path></marker></defs>
 					for _, edge := range graph.Edges {
 						if source, target, ok := automationLiveEdgeNodes(graph.Nodes, edge.AutomationEdge); ok {
@@ -222,21 +547,47 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 						}
 					}
 					for _, node := range graph.Nodes {
-						if taskURL := automationLiveNodeTaskURL(node, graph.Resources, currentProjectID); taskURL != "" {
-							<a class="automation-graph-link" href={ templ.URL(taskURL) } hx-get={ taskURL } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;" aria-label={ automationLiveNodeAria(node) } data-automation-task-link>
+						if taskURL := automationLiveNodeTaskURL(node, graph.Resources, currentProjectID, graph.Automation.ID, graph.Automation.Name); taskURL != "" {
+							<a class="automation-graph-link" href={ templ.URL(taskURL) } hx-get={ taskURL } hx-target="#main-content" hx-push-url="true" draggable="false" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;" aria-label={ automationLiveNodeAria(node) } data-automation-task-link>
 								@automationLiveNodeShape(node)
 							</a>
 						} else {
 							@automationLiveNodeShape(node)
 						}
 					}
-				</svg>
-			</div>
-		</div>
-			if deleteAvailable {
+					</svg>
+					</div>
+					@automationLiveDetailsPanel(graph)
+					<div class="flex min-h-[20rem] flex-1 flex-col overflow-hidden rounded-box border border-base-300 bg-base-200/20 px-0 py-4 font-mono text-sm leading-6" data-automation-yaml-panel hidden style="display: none" aria-label="Saved automation YAML">
+						<div class="flex min-h-0 flex-1 overflow-hidden" data-automation-yaml-editor-shell>
+							<div class="group relative shrink-0 overflow-hidden border-r border-base-300" style="box-sizing: border-box; width: max-content; min-width: 3.25rem; flex: 0 0 auto;" data-automation-yaml-gutter>
+								<pre class="m-0 h-full w-full min-w-0 select-none overflow-hidden whitespace-nowrap pb-0 pl-2 pr-2 pt-0 text-left text-xs text-base-content/45" style="box-sizing: border-box; text-align: left !important;" aria-label="YAML line numbers" data-automation-yaml-line-numbers>{ automationYAMLLineNumbers(graph.YAML) }</pre>
+							</div>
+							<div class="relative min-h-0 min-w-0 flex-1 overflow-hidden" data-automation-yaml-editor-viewport>
+								<pre class="absolute left-0 top-0 m-0 min-h-full w-max min-w-full overflow-hidden whitespace-pre px-3 font-mono text-sm leading-6" aria-hidden="true" data-automation-yaml-highlight></pre>
+								<textarea class="absolute inset-0 block h-full w-full resize-none overflow-auto border-0 bg-transparent whitespace-pre px-3 font-mono text-sm leading-6 text-transparent outline-none caret-transparent cursor-default" readonly tabindex="-1" data-automation-yaml-editor data-automation-yaml-readonly spellcheck="false" wrap="off" aria-label="Automation definition (read-only).">{ graph.YAML }</textarea>
+							</div>
+						</div>
+					</div>
+				</div>			if graph.TemplateUpdateAvailable {
+				<dialog id="update-automation-template-modal" class="modal">
+					<div class="modal-box">
+						@ModalCloseButton("document.getElementById('update-automation-template-modal')", "Close template update confirmation")
+						<h3 class="pr-10 text-lg font-bold">Update to latest template</h3>
+						<p class="py-4">This replaces your current nodes, connections, prompts, and schedules with the latest { automationAdapterLabel(graph.Version.AdapterKey) } template.</p>
+						<div class="rounded-lg bg-base-200 p-3 text-sm text-base-content/70">Your Automation name and lifecycle state are preserved. Template customizations are not merged.</div>
+						<div class="modal-action">
+							<button class="btn" type="button" onclick="document.getElementById('update-automation-template-modal').close()">Cancel</button>
+							<form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/builder?project_id=%s", graph.Automation.ID, currentProjectID)) } hx-post={ fmt.Sprintf("/automations/%s/builder?project_id=%s", graph.Automation.ID, currentProjectID) } hx-target="#main-content"><input type="hidden" name="project_id" value={ currentProjectID }/><input type="hidden" name="update_template" value="true"/><button class="btn btn-primary" type="submit">Update to latest</button></form>
+						</div>
+					</div>
+					<form method="dialog" class="modal-backdrop"><button>Cancel</button></form>
+				</dialog>
+			}
+				if deleteAvailable {
 				<dialog id="delete-automation-modal" class="modal">
 					<div class="modal-box">
-						@ModalCloseButton("delete-automation-modal", "Close delete automation confirmation")
+						@ModalCloseButton("document.getElementById('delete-automation-modal')", "Close delete automation confirmation")
 						<h3 class="pr-10 text-lg font-bold text-error">Delete automation</h3>
 						<p class="py-4">Delete <strong>{ graph.Automation.Name }</strong>? This permanently deletes the saved Automation graph and Automation record.</p>
 						<div class="rounded-lg bg-base-200 p-3 text-sm text-base-content/70">Existing tasks remain. Automation-owned trigger schedules will be deleted. This cannot be undone.</div>
@@ -259,6 +610,7 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 				if (state.automationId !== liveRoot.dataset.automationId) {
 					state.generation = 0;
 					state.automationId = liveRoot.dataset.automationId;
+					window._automationLiveSelectedView = '';
 				}
 				if (state.timer) clearInterval(state.timer);
 				window.openVibelyAutomationLiveRefresh = function(method, url) {
@@ -310,14 +662,13 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 							window.openVibelyAutomationLiveRefresh('GET');
 						}, 250);
 					});
+					window.addEventListener('sse-live-connected', function() {
+						if (!document.getElementById('automation-live')) return;
+						window.openVibelyAutomationLiveRefresh('GET');
+					});
 					document.addEventListener('visibilitychange', function() {
 						if (document.visibilityState !== 'visible') return;
-						var root = document.getElementById('automation-live');
-						if (!root) return;
-						if (root.dataset.externalRefreshUrl && root.querySelector('[data-automation-external-state]')) {
-							window.openVibelyAutomationLiveRefresh('POST', root.dataset.externalRefreshUrl);
-							return;
-						}
+						if (!document.getElementById('automation-live')) return;
 						window.openVibelyAutomationLiveRefresh('GET');
 					});
 				}
@@ -326,20 +677,159 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 						window.openVibelyAutomationLiveRefresh('GET');
 					}
 				}, 20000);
-				var canvasRoot = document.querySelector('[data-automation-readonly-canvas]');
-				var svg = canvasRoot && canvasRoot.querySelector('[data-automation-canvas]');
-				if (canvasRoot && svg) {
+					var canvasRoot = document.querySelector('[data-automation-readonly-canvas]');
+					var yamlPanel = canvasRoot && canvasRoot.querySelector('[data-automation-yaml-panel]');
+					var graphViewButton = canvasRoot && canvasRoot.querySelector('[data-automation-view-graph]');
+					var detailsViewButton = canvasRoot && canvasRoot.querySelector('[data-automation-view-details]');
+					var yamlViewButton = canvasRoot && canvasRoot.querySelector('[data-automation-view-yaml]');
+					function selectAutomationLiveView(view) {
+						return window.setAutomationCanvasView && window.setAutomationCanvasView(canvasRoot, view, {detailsPanelSelector: '[data-automation-live-details-panel]'});
+					}
+					graphViewButton && graphViewButton.addEventListener('click', function() { window._automationLiveSelectedView = 'graph'; selectAutomationLiveView('graph'); });
+					detailsViewButton && detailsViewButton.addEventListener('click', function() { window._automationLiveSelectedView = 'details'; selectAutomationLiveView('details'); });
+					yamlViewButton && yamlViewButton.addEventListener('click', function() { window._automationLiveSelectedView = 'yaml'; selectAutomationLiveView('yaml'); });
+					if (window._automationLiveSelectedView && window._automationLiveSelectedView !== 'graph') {
+						selectAutomationLiveView(window._automationLiveSelectedView);
+					}
+					(function() {
+						var yamlEditor = yamlPanel && yamlPanel.querySelector('[data-automation-yaml-editor]');
+						var yamlLineNumbers = yamlPanel && yamlPanel.querySelector('[data-automation-yaml-line-numbers]');
+						var yamlHighlight = yamlPanel && yamlPanel.querySelector('[data-automation-yaml-highlight]');
+						var yamlGutter = yamlPanel && yamlPanel.querySelector('[data-automation-yaml-gutter]');
+						if (!yamlEditor || !yamlLineNumbers || !yamlHighlight) return;
+						var shared = window.openVibelyYAML;
+						function renderYAMLLineNumbers() {
+							var lines = yamlEditor.value.split('\n'), numbers = [];
+							lines.forEach(function(line, index) {
+								numbers.push('<span class="block min-h-6" data-automation-yaml-line-number data-yaml-line="' + (index + 1) + '">' + (index + 1) + '</span>');
+							});
+							yamlLineNumbers.innerHTML = numbers.join('');
+						}
+						function renderYAMLHighlight() {
+							var lines = yamlEditor.value.split('\n'), highlighted = [];
+							lines.forEach(function(line, index) { highlighted.push(shared.renderLineSpan(line, index + 1)); });
+							yamlHighlight.innerHTML = highlighted.join('');
+						}
+						function syncYAMLHighlightScroll() {
+							yamlHighlight.style.transform = 'translate(' + (-yamlEditor.scrollLeft) + 'px, ' + (-yamlEditor.scrollTop) + 'px)';
+							if (yamlLineNumbers) yamlLineNumbers.scrollTop = yamlEditor.scrollTop;
+						}
+						function scrollYAMLFromWheel(event) {
+							if (!event.deltaY) return;
+							var delta = event.deltaY;
+							if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) delta *= 24;
+							if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) delta *= yamlEditor.clientHeight;
+							var previousTop = yamlEditor.scrollTop;
+							yamlEditor.scrollTop += delta;
+							if (yamlEditor.scrollTop !== previousTop) { syncYAMLHighlightScroll(); event.preventDefault(); }
+						}
+						yamlEditor.addEventListener('scroll', syncYAMLHighlightScroll);
+						if (yamlGutter) yamlGutter.addEventListener('wheel', scrollYAMLFromWheel, {passive: false});
+						renderYAMLLineNumbers();
+						renderYAMLHighlight();
+					})();
+					var svg = canvasRoot && canvasRoot.querySelector('[data-automation-canvas]');				if (canvasRoot && svg) {
 					var original = svg.getAttribute('viewBox').split(/\s+/).map(Number);
 					var box = original.slice();
 					var pan = null;
+					var panFrame = 0;
+					var suppressedNodeLink = null;
+					var suppressNodeClickTimer = 0;
 					function apply() { svg.setAttribute('viewBox', box.join(' ')); }
-					function point(event) { var value = svg.createSVGPoint(); value.x = event.clientX; value.y = event.clientY; return value.matrixTransform(svg.getScreenCTM().inverse()); }
+					function applyPan() {
+						panFrame = 0;
+						if (!pan || !pan.pending) return;
+						box[0] = pan.box[0] - (pan.pending.x - pan.clientX) * pan.unitsX;
+						box[1] = pan.box[1] - (pan.pending.y - pan.clientY) * pan.unitsY;
+						apply();
+					}
+					function queuePan(event) {
+						if (!pan || pan.input !== 'pointer' || event.pointerId !== pan.pointerId) return;
+						pan.pending = {x:event.clientX, y:event.clientY};
+						if (!pan.dragged && Math.hypot(event.clientX-pan.clientX, event.clientY-pan.clientY) > 4) pan.dragged = true;
+						if (!panFrame) panFrame = requestAnimationFrame(applyPan);
+					}
+					function queueMousePan(event) {
+						if (!pan || pan.input !== 'mouse') return;
+						if (!(event.buttons & 1)) { cancelMousePan(); return; }
+						pan.pending = {x:event.clientX, y:event.clientY};
+						if (!pan.dragged && Math.hypot(event.clientX-pan.clientX, event.clientY-pan.clientY) > 4) pan.dragged = true;
+						if (!panFrame) panFrame = requestAnimationFrame(applyPan);
+					}
+					function stopPanTracking() {
+						window.removeEventListener('pointermove', queuePan);
+						window.removeEventListener('pointerup', finishPan);
+						window.removeEventListener('pointercancel', finishPan);
+						window.removeEventListener('mousemove', queueMousePan);
+						window.removeEventListener('mouseup', finishMousePan);
+						window.removeEventListener('blur', cancelMousePan);
+					}
+					function completePan(eventType, clientX, clientY, includePosition) {
+						if (!pan) return;
+						stopPanTracking();
+						if (includePosition) pan.pending = {x:clientX, y:clientY};
+						if (panFrame) { cancelAnimationFrame(panFrame); panFrame = 0; }
+						applyPan();
+						var dragged = pan.dragged;
+						var nodeLink = pan.nodeLink;
+						pan = null;
+						if (dragged && nodeLink && eventType === 'up') {
+							suppressedNodeLink = nodeLink;
+							if (suppressNodeClickTimer) clearTimeout(suppressNodeClickTimer);
+							suppressNodeClickTimer = setTimeout(function() {
+								suppressNodeClickTimer = 0;
+								suppressedNodeLink = null;
+							}, 0);
+						}
+					}
+					function finishPan(event) {
+						if (!pan || pan.input !== 'pointer' || event.pointerId !== pan.pointerId) return;
+						completePan(event.type === 'pointerup' ? 'up' : 'cancel', event.clientX, event.clientY, true);
+					}
+					function finishMousePan(event) {
+						if (!pan || pan.input !== 'mouse' || event.button !== 0) return;
+						completePan('up', event.clientX, event.clientY, true);
+					}
+					function cancelMousePan() {
+						if (!pan || pan.input !== 'mouse') return;
+						completePan('cancel', 0, 0, false);
+					}
 					function zoom(factor) { var cx=box[0]+box[2]/2, cy=box[1]+box[3]/2; box[2]=Math.max(300,Math.min(4000,box[2]*factor)); box[3]=Math.max(200,Math.min(2500,box[3]*factor)); box[0]=cx-box[2]/2; box[1]=cy-box[3]/2; apply(); }
 					svg.addEventListener('wheel', function(event) { if (!event.ctrlKey && !event.metaKey) return; event.preventDefault(); zoom(event.deltaY > 0 ? 1.12 : .88); }, {passive:false});
-					svg.addEventListener('pointerdown', function(event) { if (event.target !== svg || event.button !== 0) return; var p=point(event); pan={x:p.x,y:p.y,box:box.slice()}; svg.setPointerCapture(event.pointerId); });
-					svg.addEventListener('pointermove', function(event) { if (!pan) return; var p=point(event); box[0]=pan.box[0]+pan.x-p.x; box[1]=pan.box[1]+pan.y-p.y; apply(); });
-					svg.addEventListener('pointerup', function(){pan=null;});
-					svg.addEventListener('pointercancel', function(){pan=null;});
+					svg.addEventListener('dragstart', function(event) {
+						if (event.target.closest('[data-automation-task-link]')) event.preventDefault();
+					});
+					svg.addEventListener('pointerdown', function(event) {
+						if (document.documentElement.dataset.runtime === 'desktop') return;
+						if (event.button !== 0) return;
+						var rect = svg.getBoundingClientRect();
+						if (!rect.width || !rect.height) return;
+						if (suppressNodeClickTimer) { clearTimeout(suppressNodeClickTimer); suppressNodeClickTimer = 0; }
+						suppressedNodeLink = null;
+						pan = {input:'pointer', pointerId:event.pointerId, clientX:event.clientX, clientY:event.clientY, box:box.slice(), unitsX:box[2]/rect.width, unitsY:box[3]/rect.height, pending:null, dragged:false, nodeLink:event.target.closest('[data-automation-task-link]')};
+						window.addEventListener('pointermove', queuePan);
+						window.addEventListener('pointerup', finishPan);
+						window.addEventListener('pointercancel', finishPan);
+						if (!pan.nodeLink) { try { svg.setPointerCapture(event.pointerId); } catch (_) {} }
+					});
+					svg.addEventListener('mousedown', function(event) {
+						if (document.documentElement.dataset.runtime !== 'desktop' || event.button !== 0) return;
+						var rect = svg.getBoundingClientRect();
+						if (!rect.width || !rect.height) return;
+						if (suppressNodeClickTimer) { clearTimeout(suppressNodeClickTimer); suppressNodeClickTimer = 0; }
+						suppressedNodeLink = null;
+						pan = {input:'mouse', clientX:event.clientX, clientY:event.clientY, box:box.slice(), unitsX:box[2]/rect.width, unitsY:box[3]/rect.height, pending:null, dragged:false, nodeLink:event.target.closest('[data-automation-task-link]')};
+						window.addEventListener('mousemove', queueMousePan);
+						window.addEventListener('mouseup', finishMousePan);
+						window.addEventListener('blur', cancelMousePan);
+					});
+					svg.addEventListener('click', function(event) {
+						var nodeLink = event.target.closest('[data-automation-task-link]');
+						if (!suppressedNodeLink || nodeLink !== suppressedNodeLink) return;
+						event.preventDefault(); event.stopImmediatePropagation();
+						suppressedNodeLink = null;
+						if (suppressNodeClickTimer) { clearTimeout(suppressNodeClickTimer); suppressNodeClickTimer = 0; }
+					}, true);
 					canvasRoot.querySelector('[data-automation-zoom-in]').addEventListener('click', function(){zoom(.82);});
 					canvasRoot.querySelector('[data-automation-zoom-out]').addEventListener('click', function(){zoom(1.22);});
 					canvasRoot.querySelector('[data-automation-fit]').addEventListener('click', function(){box=original.slice();apply();});
@@ -348,9 +838,23 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 		</script>
 }
 
-func automationGraphLayoutX(value float64) float64 { return value * 1.25 }
-func automationGraphLayoutY(value float64) float64 { return value * 1.15 }
-func automationLiveGraphViewBox(nodes []models.AutomationLiveNode) string { if len(nodes) == 0 { return "-60 -60 900 540" }; minX, minY := automationGraphLayoutX(nodes[0].PositionX), automationGraphLayoutY(nodes[0].PositionY); maxX, maxY := minX+automationGraphNodeWidth, minY+automationGraphNodeHeight; for _, node := range nodes { x, y := automationGraphLayoutX(node.PositionX), automationGraphLayoutY(node.PositionY); if x < minX { minX = x }; if y < minY { minY = y }; if x+automationGraphNodeWidth > maxX { maxX = x+automationGraphNodeWidth }; if y+automationGraphNodeHeight > maxY { maxY = y+automationGraphNodeHeight } }; return fmt.Sprintf("%.0f %.0f %.0f %.0f", minX-automationGraphPadding, minY-automationGraphPadding, maxX-minX+2*automationGraphPadding, maxY-minY+2*automationGraphPadding) }
+func automationGraphLayoutX(value float64) float64 { return value }
+func automationGraphLayoutY(value float64) float64 { return value }
+func automationLiveGraphViewBox(nodes []models.AutomationLiveNode) string {
+	if len(nodes) == 0 {
+		return "-60 -60 900 540"
+	}
+	minX, minY := automationGraphLayoutX(nodes[0].PositionX), automationGraphLayoutY(nodes[0].PositionY)
+	maxX, maxY := minX+automationGraphNodeWidth, minY+automationGraphNodeHeight
+	for _, node := range nodes {
+		x, y := automationGraphLayoutX(node.PositionX), automationGraphLayoutY(node.PositionY)
+		if x < minX { minX = x }
+		if y < minY { minY = y }
+		if x+automationGraphNodeWidth > maxX { maxX = x+automationGraphNodeWidth }
+		if y+automationGraphNodeHeight > maxY { maxY = y+automationGraphNodeHeight }
+	}
+	return fmt.Sprintf("%.0f %.0f %.0f %.0f", minX-automationGraphPadding, minY-automationGraphPadding, maxX-minX+2*automationGraphPadding, maxY-minY+2*automationGraphPadding)
+}
 func automationLiveEdgeNodes(nodes []models.AutomationLiveNode, edge models.AutomationEdge) (models.AutomationLiveNode, models.AutomationLiveNode, bool) { var source, target models.AutomationLiveNode; var foundSource, foundTarget bool; for _, n := range nodes { if n.ID == edge.SourceNodeID { source, foundSource = n, true }; if n.ID == edge.TargetNodeID { target, foundTarget = n, true } }; return source, target, foundSource && foundTarget }
 func automationLiveNodeClass(state string) string { base := "automation-graph-node automation-graph-node--idle"; switch state { case "failed": return "automation-graph-node automation-graph-node--failed"; case "blocked": return "automation-graph-node automation-graph-node--blocked"; case "waiting_human": return "automation-graph-node automation-graph-node--waiting"; case "running": return "automation-graph-node automation-graph-node--running"; case "recently_completed": return "automation-graph-node automation-graph-node--completed" }; return base }
 func automationStateLabel(state string) string { return strings.ReplaceAll(strings.Title(strings.ReplaceAll(state, "_", " ")), "Human", "human") }
@@ -359,39 +863,157 @@ func automationStateTextClass(state string) string { return "automation-node-sta
 func automationNodeCountLabel(c models.AutomationNodeCounts) string { values := []string{}; if c.Running > 0 { values = append(values, fmt.Sprintf("%d running", c.Running)) }; if c.Waiting > 0 { values = append(values, fmt.Sprintf("%d waiting", c.Waiting)) }; if c.Blocked > 0 { values = append(values, fmt.Sprintf("%d blocked", c.Blocked)) }; if c.Failed > 0 { values = append(values, fmt.Sprintf("%d failed", c.Failed)) }; if c.CompletedRecently > 0 { values = append(values, fmt.Sprintf("%d recent", c.CompletedRecently)) }; if len(values) == 0 { return "No active work" }; return strings.Join(values, " · ") }
 func automationLiveNodeAria(node models.AutomationLiveNode) string { return node.Name + ", " + automationStateLabel(node.DisplayState) + ", " + automationNodeCountLabel(node.Counts) }
 
-templ AutomationNew(projects []models.Project, currentProjectID string) {
-	@layout.Base("New Automation", projects, currentProjectID) {
-		@automationNewContent(currentProjectID, "", "")
-	}
-}
+type automationLiveCardField struct { Label string; Value string }
 
-templ AutomationNewFailure(projects []models.Project, currentProjectID string, description string, errorMessage string) {
-	@layout.Base("New Automation", projects, currentProjectID) {
-		@automationNewContent(currentProjectID, description, errorMessage)
-	}
-}
-
-templ AutomationNewContent(currentProjectID string) {
-	@automationNewContent(currentProjectID, "", "")
-}
-
-templ AutomationNewFailureContent(currentProjectID string, description string, errorMessage string) {
-	@automationNewContent(currentProjectID, description, errorMessage)
-}
-
-templ automationNewContent(currentProjectID string, description string, errorMessage string) {
-	<div id="automation-new" class="h-full overflow-y-auto min-w-0 max-w-full">
-		@layout.PageTitle("New Automation")
-		@automationBreadcrumb(currentProjectID, "", "", "New Automation")
-		<div class="mb-6"><p class="text-sm text-base-content/65">Choose one explicit creation path. Existing tasks and schedules are never discovered or registered from this page.</p></div>
-		if errorMessage != "" {
-			<div class="alert alert-error mb-4" role="alert"><span>{ errorMessage }</span></div>
+func automationLiveCardFields(raw string) []automationLiveCardField {
+	var config map[string]any
+	if json.Unmarshal([]byte(raw), &config) != nil || len(config) == 0 { return nil }
+	keys := make([]string, 0, len(config))
+	for key := range config { keys = append(keys, key) }
+	sort.Strings(keys)
+	fields := make([]automationLiveCardField, 0, len(keys))
+	for _, key := range keys {
+		value := ""
+		switch configured := config[key].(type) {
+		case string: value = configured
+		default: encoded, err := json.Marshal(configured); if err == nil { value = string(encoded) }
 		}
-		<div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
-			<section class="rounded-box border border-base-300 bg-base-100 p-5"><h3 class="text-lg font-semibold">Template</h3><p class="mt-1 text-sm text-base-content/60">Load a maintained supported topology into the browser-local builder. Review or customize it, then Save changes to create the Automation.</p><form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/builder?project_id=%s", currentProjectID)) } hx-post={ fmt.Sprintf("/automations/builder?project_id=%s", currentProjectID) } hx-target="#main-content" class="mt-4 space-y-3"><input type="hidden" name="project_id" value={ currentProjectID }/><input type="hidden" name="source" value="template"/><select name="template_key" class="select select-bordered w-full" aria-label="Automation template"><option value="native_sdlc">Native SDLC</option><option value="github_sdlc">GitHub SDLC</option></select><button class="btn btn-primary w-full" type="submit">Use template</button></form></section>
-			<section class="rounded-box border border-base-300 bg-base-100 p-5"><h3 class="text-lg font-semibold">Describe It</h3><p class="mt-1 text-sm text-base-content/60">Generate a browser-local design through the shared safe schema. Review the graph, then Save changes to create the Automation.</p><form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/builder?project_id=%s", currentProjectID)) } hx-post={ fmt.Sprintf("/automations/builder?project_id=%s", currentProjectID) } hx-target="#main-content" hx-indicator="#automation-describe-loading" hx-disabled-elt="button" class="mt-4 space-y-3"><input type="hidden" name="project_id" value={ currentProjectID }/><input type="hidden" name="source" value="describe"/><textarea name="description" class="textarea textarea-bordered h-32 w-full" maxlength="4000" required placeholder="Review project vision daily, request approval, then create implementation work.">{ description }</textarea><button class="btn btn-primary w-full" type="submit">Generate design</button><div id="automation-describe-loading" class="htmx-indicator text-center text-sm text-base-content/65" role="status" aria-live="polite">Generating and validating design…</div></form></section>
-			<section class="rounded-box border border-base-300 bg-base-100 p-5"><h3 class="text-lg font-semibold">Blank</h3><p class="mt-1 text-sm text-base-content/60">Build your own runnable Automation from configurable OpenVibely capabilities. Add schedules, tasks, and outcomes, then connect and configure them yourself.</p><form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/builder?project_id=%s", currentProjectID)) } hx-post={ fmt.Sprintf("/automations/builder?project_id=%s", currentProjectID) } hx-target="#main-content" class="mt-4"><input type="hidden" name="project_id" value={ currentProjectID }/><input type="hidden" name="source" value="blank"/><button class="btn btn-outline w-full" type="submit">Open custom builder</button></form></section>
+		label := strings.Title(strings.ReplaceAll(key, "_", " "))
+		if key == "model_config_id" {
+			label = "Model"
+			if value == "default" || strings.TrimSpace(value) == "" {
+				value = "Project default"
+			}
+		}
+		fields = append(fields, automationLiveCardField{Label: label, Value: value})
+	}
+	return fields
+}
+
+func automationLiveEdgeCondition(raw string) string {
+	var condition map[string]any
+	if json.Unmarshal([]byte(raw), &condition) != nil || len(condition) == 0 { return "" }
+	encoded, err := json.Marshal(condition)
+	if err != nil { return "" }
+	return string(encoded)
+}
+
+templ automationLiveDetailsPanel(graph models.AutomationLiveGraph) {
+	<div data-automation-live-details-panel hidden class="min-h-[20rem] w-full flex-1 overflow-y-auto rounded-box border border-base-300 bg-base-200/20 p-4" aria-label="Saved automation details">
+		<div class="grid grid-cols-1 gap-4 xl:grid-cols-2" data-automation-live-node-details>
+			for _, node := range graph.Nodes {
+				<section class="rounded-box border border-base-300 bg-base-100 p-4" data-automation-live-node-detail={ node.NodeKey }>
+					<div class="mb-3 flex flex-wrap items-start justify-between gap-3"><div><h3 class="font-semibold">{ node.Name }</h3><p class="text-xs text-base-content/55">{ node.NodeKey } · { node.Role }</p></div><span class="badge badge-ghost badge-sm">{ automationNodeTypeLabel(node.NodeType) }</span></div>
+					<dl class="grid grid-cols-1 gap-3 text-sm">
+						for _, field := range automationLiveCardFields(node.ConfigJSON) {
+							<div><dt class="text-xs font-medium text-base-content/55">{ field.Label }</dt><dd class="mt-1 whitespace-pre-wrap break-words">{ field.Value }</dd></div>
+						}
+					</dl>
+				</section>
+			}
 		</div>
+		<div class="mt-4 rounded-box border border-base-300 bg-base-100 p-4"><h3 class="font-semibold">Transitions</h3><div class="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2" data-automation-live-edge-details>
+			for _, edge := range graph.Edges {
+				if source, target, ok := automationLiveEdgeNodes(graph.Nodes, edge.AutomationEdge); ok {
+					<div class="rounded-box bg-base-200/40 p-3" data-automation-live-edge-detail={ edge.EdgeKey }><div class="text-sm font-medium">{ source.Name } → { target.Name }</div>
+						if edge.Label != "" {
+							<p class="mt-2 text-sm">{ edge.Label }</p>
+						}
+						if condition := automationLiveEdgeCondition(edge.ConditionJSON); condition != "" {
+							<p class="mt-2 font-mono text-xs text-base-content/65">{ condition }</p>
+						}
+					</div>
+				}
+			}
+		</div></div>
+	</div>
+}
+
+templ automationTaskModelSelector(node models.AutomationDraftNode, modelOptions []models.AutomationCapabilityRef) {
+	<label class="form-control"><span class="label-text">Model</span><select class="select select-bordered" name={ "node_" + node.Key + "_model_config_id" }><option value="default" selected?={ automationDraftModelConfigIsDefault(node) }>Project default model</option>
+		for _, model := range modelOptions {
+			<option value={ model.ID } selected?={ automationDraftStringConfig(node, "model_config_id") == model.ID }>{ automationModelOptionLabel(model) }</option>
+		}
+	</select><span class="label-text-alt">Choose the configured LLM model for this task node.</span></label>
+}
+
+templ automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentProjectID string) {
+	<div data-automation-details-panel hidden style="display: none" class="min-h-[20rem] flex-1 overflow-y-auto rounded-box border border-base-300 bg-base-200/20 p-4">
+		<form id="automation-details-form" method="post" action={ templ.SafeURL(automationBuilderPostURL(page, currentProjectID)) } hx-post={ automationBuilderPostURL(page, currentProjectID) } hx-target="#main-content" class="space-y-4" data-automation-details-form>
+			<input type="hidden" name="project_id" value={ currentProjectID }/>
+			<input type="hidden" name="builder_source" value={ page.Source }/>
+			<input type="hidden" name="save_changes" value="true"/>
+			<input type="hidden" name="automation_name" value={ page.Result.Candidate.Name } data-automation-details-name/>
+			<input type="hidden" name="candidate_json" value={ automationDraftCandidateJSON(page.Result.Candidate) }/>
+			<div class="grid grid-cols-1 gap-4 xl:grid-cols-2" data-automation-node-details>
+				for _, node := range page.Result.Candidate.Nodes {
+					<section class="rounded-box border border-base-300 bg-base-100 p-4" data-automation-node-detail={ node.Key }>
+						<div class="mb-3 flex flex-wrap items-start justify-between gap-3"><div><h3 class="font-semibold">{ node.Name }</h3><p class="text-xs text-base-content/55">{ node.Key } · { node.Role }</p></div><div class="flex items-center gap-2"><span class="badge badge-ghost badge-sm">{ automationNodeTypeLabel(node.Type) }</span><button class="btn btn-ghost btn-xs text-error" type="submit" name="remove_node" value={ node.Key } aria-label={ "Delete node " + node.Name }><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg></button></div></div>
+						<label class="form-control"><span class="label-text">Display name</span><input class="input input-bordered" name={ "node_" + node.Key + "_name" } value={ node.Name } maxlength="200"/></label>
+						if automationDraftHasConfig(node, "prompt") {
+							<label class="form-control mt-3"><span class="label-text">Task prompt</span><textarea class="textarea textarea-bordered h-28" name={ "node_" + node.Key + "_prompt" } maxlength="20000">{ automationDraftStringConfig(node, "prompt") }</textarea></label>
+							<div class="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-3">
+									<label class="form-control"><span class="label-text">Primary Agent</span><select class="select select-bordered" name={ "node_" + node.Key + "_agent_ref" }><option value="" selected?={ automationDraftStringConfig(node, "agent_ref") == "" }>Default (no primary Agent)</option>
+										for _, agent := range page.Capabilities.Agents {
+											<option value={ agent.ID } selected?={ automationDraftStringConfig(node, "agent_ref") == agent.ID }>{ agent.Name }</option>
+										}
+									</select></label>
+										@automationTaskModelSelector(node, page.Capabilities.Models)
+							</div>
+							<div class="mt-3 grid grid-cols-2 gap-3">
+								if page.Result.Candidate.AdapterKey == "github_sdlc" && node.Role == "implementation" {
+									<label class="form-control"><span class="label-text">Category</span><span class="input input-bordered flex items-center bg-base-200 text-base-content/70">Active</span></label>
+								} else if page.Result.Candidate.AdapterKey == "custom" && node.Type == models.AutomationNodeTrigger {
+									<label class="form-control"><span class="label-text">Category</span><span class="input input-bordered flex items-center bg-base-200 text-base-content/70">Scheduled task</span></label>
+								} else {
+									<label class="form-control"><span class="label-text">Category</span><select class="select select-bordered" name={ "node_" + node.Key + "_category" }><option value="backlog" selected?={ automationDraftStringConfig(node, "category") == "backlog" }>Backlog</option>
+										if page.Result.Candidate.AdapterKey == "custom" {
+											<option value="active" selected?={ automationDraftStringConfig(node, "category") == "active" }>Active follow-up</option>
+										} else {
+											<option value="scheduled" selected?={ automationDraftStringConfig(node, "category") == "scheduled" }>Scheduled</option>
+										}
+									</select></label>
+								}
+								<label class="form-control"><span class="label-text">Priority</span><input type="number" min="1" max="4" class="input input-bordered" name={ "node_" + node.Key + "_priority" } value={ fmt.Sprintf("%d", automationDraftIntConfig(node, "priority")) }/></label>
+							</div>
+							}
+							if automationDraftSupportsModel(node) && !automationDraftHasConfig(node, "prompt") {
+								<div class="mt-3">
+									@automationTaskModelSelector(node, page.Capabilities.Models)
+								</div>
+							}
+							if automationDraftSupportsGoal(node) {
+								<label class="form-control mt-3"><span class="label-text">Task goal (optional)</span><textarea class="textarea textarea-bordered h-20" name={ "node_" + node.Key + "_goal" } maxlength="2000">{ automationDraftStringConfig(node, "goal") }</textarea></label>
+							}
+							if automationDraftHasConfig(node, "run_at") {
+								<div class="mt-3 grid grid-cols-2 gap-3"><label class="form-control"><span class="label-text">Time</span><input type="time" class="input input-bordered" name={ "node_" + node.Key + "_run_at" } value={ automationDraftStringConfig(node, "run_at") }/></label><label class="form-control"><span class="label-text">Repeat</span><select class="select select-bordered" name={ "node_" + node.Key + "_repeat_type" }>								for _, repeat := range []string{"once", "minutes", "hours", "daily", "weekly", "monthly"} {
+									<option value={ repeat } selected?={ automationDraftStringConfig(node, "repeat_type") == repeat }>{ repeat }</option>
+								}
+							</select></label><label class="form-control"><span class="label-text">Interval</span><input type="number" min="1" max="365" class="input input-bordered" name={ "node_" + node.Key + "_repeat_interval" } value={ fmt.Sprintf("%d", automationDraftIntConfig(node, "repeat_interval")) }/></label><label class="label cursor-pointer justify-start gap-3 col-span-2"><input type="checkbox" class="checkbox" name={ "node_" + node.Key + "_clear_context_on_start" } value="true" checked?={ !automationDraftHasConfig(node, "clear_context_on_start") || automationDraftBoolConfig(node, "clear_context_on_start") }/><span class="label-text">Clear context on start</span></label></div>
+						}
+							if automationDraftHasConfig(node, "notification_type") {
+								<div class="mt-3 grid grid-cols-1 gap-3"><label class="form-control"><span class="label-text">Notification type</span><input class="input input-bordered" name={ "node_" + node.Key + "_notification_type" } value={ automationDraftStringConfig(node, "notification_type") } maxlength="100"/></label><label class="form-control"><span class="label-text">What needs review</span><textarea class="textarea textarea-bordered h-24" name={ "node_" + node.Key + "_instructions" } maxlength="2000">{ automationDraftStringConfig(node, "instructions") }</textarea></label></div>
+							}
+							if node.Role == "create_github_issue" {
+								<div class="mt-3 grid grid-cols-1 gap-3"><label class="form-control"><span class="label-text">Issue instructions</span><textarea class="textarea textarea-bordered h-24" name={ "node_" + node.Key + "_instructions" } maxlength="2000">{ automationDraftStringConfig(node, "instructions") }</textarea></label><label class="form-control"><span class="label-text">Labels</span><input class="input input-bordered" name={ "node_" + node.Key + "_labels" } value={ automationDraftStringSliceConfig(node, "labels") } maxlength="1000" placeholder="suggestion, bug"/></label></div>
+							}
+							if node.Role == "open_pull_request" {
+								<div class="mt-3 grid grid-cols-1 gap-3"><label class="form-control"><span class="label-text">Pull request instructions</span><textarea class="textarea textarea-bordered h-24" name={ "node_" + node.Key + "_instructions" } maxlength="2000">{ automationDraftStringConfig(node, "instructions") }</textarea></label><label class="form-control"><span class="label-text">Base branch</span><input class="input input-bordered" name={ "node_" + node.Key + "_base" } value={ automationDraftStringConfig(node, "base") } maxlength="200" placeholder="Repository default"/></label><label class="label cursor-pointer justify-start gap-3"><input type="checkbox" class="checkbox" name={ "node_" + node.Key + "_draft" } value="true" checked?={ automationDraftBoolConfig(node, "draft") }/><span class="label-text">Open as draft PR</span></label></div>
+							}					</section>
+				}
+			</div>
+			<div class="rounded-box border border-base-300 bg-base-100 p-4"><h3 class="font-semibold">Transitions</h3><div class="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2" data-automation-edge-details>
+				for _, edge := range page.Result.Candidate.Edges {
+					<div class="rounded-box bg-base-200/40 p-3" data-automation-edge-detail={ edge.Key }><div class="mb-2 flex items-center justify-between gap-2"><span class="text-xs font-medium">{ automationDraftNodeName(page.Result.Candidate.Nodes, edge.From) } → { automationDraftNodeName(page.Result.Candidate.Nodes, edge.To) }</span><button class="btn btn-ghost btn-xs text-error" type="submit" name="remove_edge" value={ edge.Key } aria-label={ "Delete connection " + automationDraftNodeName(page.Result.Candidate.Nodes, edge.From) + " to " + automationDraftNodeName(page.Result.Candidate.Nodes, edge.To) }><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg></button></div><label class="form-control"><span class="label-text">Label</span><input class="input input-bordered" name={ "edge_" + edge.Key + "_label" } value={ edge.Label } maxlength="100"/></label>
+						if automationDraftNodeRole(page.Result.Candidate.Nodes, edge.From) == "native_approval" {
+							<label class="form-control mt-2"><span class="label-text">Human result</span><select class="select select-bordered" name={ "edge_" + edge.Key + "_state" }><option value="">Choose result</option><option value="approved" selected?={ automationDraftEdgeConditionState(edge) == "approved" }>Approved</option><option value="rejected" selected?={ automationDraftEdgeConditionState(edge) == "rejected" }>Rejected</option></select></label>
+						} else if automationDraftNodeRole(page.Result.Candidate.Nodes, edge.From) == "github_assignment" {
+							<label class="form-control mt-2"><span class="label-text">Human result</span><select class="select select-bordered" name={ "edge_" + edge.Key + "_state" }><option value="">Choose result</option><option value="assigned" selected?={ automationDraftEdgeConditionState(edge) == "assigned" }>Assigned in GitHub</option></select></label>
+						}
+					</div>
+				}
+			</div></div>
+		</form>
 	</div>
 }
 
@@ -402,29 +1024,46 @@ templ AutomationBuilder(projects []models.Project, currentProjectID string, page
 }
 
 templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectID string) {
-	<div id="automation-builder" class="h-full overflow-y-auto min-w-0 max-w-full" data-automation-draft>
+	@automationViewStateScript()
+	@automationYAMLSharedScript()
+	<div id="automation-builder" class="flex h-full min-w-0 max-w-full flex-col overflow-y-auto" data-automation-draft data-automation-yaml-builder>
+		<div class={ templ.KV("flex h-full min-h-0 shrink-0 flex-col", automationBuilderUsesEditShell(page)) } data-automation-builder-edit-pane>
 		@layout.PageTitle(page.Result.Candidate.Name)
-		if page.AutomationID != "" {
-			@automationBreadcrumb(currentProjectID, page.AutomationID, page.Result.Candidate.Name, "Edit automation")
-		} else {
-			@automationBreadcrumb(currentProjectID, "", "", "New Automation")
-		}
-		<div class="mb-4 flex flex-wrap items-end justify-between gap-3">
-			<div class="min-w-0 flex-1">
-				<label class="form-control max-w-xl"><span class="label-text mb-1 font-medium">Automation name</span><input class="input input-bordered w-full text-xl font-bold sm:text-2xl" form="automation-design-form" name="automation_name" value={ page.Result.Candidate.Name } maxlength="200" required data-automation-name aria-label="Automation name"/></label>
-				<p class="mt-2 text-sm text-base-content/65">Saving validates and applies this Automation immediately.</p>
-			</div>
-			<div class="flex flex-wrap gap-2">
-				<button class="btn btn-primary btn-sm" type="submit" form="automation-design-form">Save changes</button>
-				if page.AutomationID != "" {
-					<button class="btn btn-ghost btn-sm text-error" type="button" data-delete-automation-open onclick="document.getElementById('delete-automation-modal').showModal()">Delete</button>
+		if automationBuilderUsesEditShell(page) {
+			<div class="mb-6 min-w-0 shrink-0" data-automation-builder-header>
+				<div class="flex flex-wrap items-start justify-between gap-3">
+					<div class="min-w-0 flex-1">@automationEditableBreadcrumb(currentProjectID, page.Result.Candidate.Name)</div>
+					if page.AutomationID != "" {
+						<div class="flex shrink-0 flex-wrap items-center justify-end gap-2" data-automation-builder-header-actions>
+							<a class="btn btn-ghost btn-sm" href={ templ.URL(fmt.Sprintf("/automations/%s?project_id=%s", page.AutomationID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s?project_id=%s", page.AutomationID, currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;" data-automation-builder-cancel>Cancel</a>
+							<button class="btn btn-primary btn-sm" type="submit" form="automation-design-form" name="save_changes" value="true" data-automation-builder-save>Save</button>
+							@automationBuilderMoreActions(page, currentProjectID)
+						</div>
+					} else {
+						<div class="flex shrink-0 flex-wrap items-center justify-end gap-2" data-automation-builder-header-actions>
+							<button class="btn btn-primary btn-sm" type="submit" form="automation-design-form" name="save_changes" value="true" data-automation-builder-save>Save</button>
+						</div>
+					}
+				</div>
+				if strings.TrimSpace(page.Result.Candidate.Description) != "" {
+					<p class="mt-1 text-sm opacity-60">{ page.Result.Candidate.Description }</p>
 				}
 			</div>
-		</div>
+		} else {
+			@automationBreadcrumb(currentProjectID, "", "", "New Automation", true)
+		}		if !automationBuilderUsesEditShell(page) {
+			<div class="mb-4 flex flex-wrap items-end justify-between gap-3">
+				<div class="min-w-0 flex-1">
+					<label class="form-control max-w-xl"><span class="label-text mb-1 font-medium">Automation name</span><input class="input input-bordered w-full text-xl font-bold sm:text-2xl" form="automation-design-form" name="automation_name" value={ page.Result.Candidate.Name } maxlength="200" required data-automation-name aria-label="Automation name"/></label>
+					<p class="mt-2 text-sm text-base-content/65">Saving validates and applies this Automation immediately.</p>
+				</div>
+				<button class="btn btn-primary btn-sm" type="submit" form="automation-design-form" name="save_changes" value="true">Save changes</button>
+			</div>
+		}
 		if page.AutomationID != "" {
 			<dialog id="delete-automation-modal" class="modal">
 				<div class="modal-box">
-					@ModalCloseButton("delete-automation-modal", "Close delete automation confirmation")
+					@ModalCloseButton("document.getElementById('delete-automation-modal')", "Close delete automation confirmation")
 					<h3 class="pr-10 text-lg font-bold text-error">Delete automation</h3>
 					<p class="py-4">Delete <strong>{ page.Result.Candidate.Name }</strong>? This permanently deletes this Automation graph and its saved design.</p>
 					<div class="rounded-lg bg-base-200 p-3 text-sm text-base-content/70">Existing tasks remain. Any Automation-owned trigger schedules will be deleted. This cannot be undone.</div>
@@ -436,17 +1075,26 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 				<form method="dialog" class="modal-backdrop"><button>Cancel</button></form>
 			</dialog>
 		}
-		if page.AutomationID == "" && page.Source == "template" {
-			<div class="alert alert-info mb-4" role="status"><span>This template design is browser-local. Review or customize the graph, then select <strong>Save changes</strong> to create the Automation.</span></div>
-		}
-		if page.AutomationID == "" && page.Source == "describe" {
-			<div class="alert alert-info mb-4" role="status"><span>This generated design is browser-local. Review the graph, then select <strong>Save changes</strong> to create and start the Automation.</span></div>
+		if page.AutomationID != "" && page.TemplateUpdateAvailable {
+			<dialog id="update-automation-template-modal" class="modal">
+				<div class="modal-box">
+					@ModalCloseButton("document.getElementById('update-automation-template-modal')", "Close template update confirmation")
+					<h3 class="pr-10 text-lg font-bold">Update to latest template</h3>
+					<p class="py-4">This replaces your current nodes, connections, prompts, and schedules with the latest { automationAdapterLabel(page.Result.Candidate.AdapterKey) } template.</p>
+					<div class="rounded-lg bg-base-200 p-3 text-sm text-base-content/70">Your Automation name and lifecycle state are preserved. Template customizations are not merged.</div>
+					<div class="modal-action">
+						<button class="btn" type="button" onclick="document.getElementById('update-automation-template-modal').close()">Cancel</button>
+						<form method="post" action={ templ.SafeURL(automationBuilderPostURL(page, currentProjectID)) } hx-post={ automationBuilderPostURL(page, currentProjectID) } hx-target="#main-content"><input type="hidden" name="project_id" value={ currentProjectID }/><input type="hidden" name="update_template" value="true"/><button class="btn btn-primary" type="submit">Update to latest</button></form>
+					</div>
+				</div>
+				<form method="dialog" class="modal-backdrop"><button>Cancel</button></form>
+			</dialog>
 		}
 		if page.Error != "" {
 			<div class="alert alert-error mb-4" role="alert">{ page.Error }</div>
 		}
-		if len(page.Result.Assumptions) > 0 || len(page.Result.Warnings) > 0 {
-			<div class="mb-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
+		if page.AutomationID == "" && (len(page.Result.Assumptions) > 0 || len(page.Result.Warnings) > 0) {
+			<div class="mb-4 grid grid-cols-1 gap-3 lg:grid-cols-2" data-automation-builder-insights>
 				<div class="rounded-box bg-base-200/60 p-4"><h3 class="font-semibold">Assumptions</h3><ul class="mt-2 list-disc pl-5 text-sm">
 					for _, item := range page.Result.Assumptions {
 						<li>{ item }</li>
@@ -460,7 +1108,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 			</div>
 		}
 			if len(page.Result.ValidationErrors) > 0 {
-				<details class="mb-3 rounded-box border border-base-300 bg-base-200/40 px-4 py-3" data-automation-validation-summary open?={ page.Error != "" }>
+				<details class="mb-3 rounded-box border border-base-300 bg-base-200/40 px-4 py-3" data-automation-validation-summary data-automation-yaml-validation open?={ page.Error != "" }>
 					<summary class="cursor-pointer text-sm font-medium">{ fmt.Sprintf("%d setup items before this design can run", len(automationValidationMessages(page.Result.ValidationErrors, page.NodePalette))) }</summary>
 					<ul class="mt-2 list-disc pl-5 text-sm text-base-content/70">
 						for _, message := range automationValidationMessages(page.Result.ValidationErrors, page.NodePalette) {
@@ -469,46 +1117,60 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 					</ul>
 				</details>
 			}
-			<section class="mb-5 rounded-box border border-base-300 bg-base-100 p-3 sm:p-4" data-automation-draft-canvas data-edge-palette={ automationDraftEdgesJSON(page.EdgePalette) }>
-				<div class="flex flex-wrap items-start justify-between gap-3">
-					<div><div class="flex flex-wrap items-center gap-2"><h3 class="font-semibold">Canvas</h3><span class="badge badge-outline badge-sm">{ automationAdapterLabel(page.Result.Candidate.AdapterKey) }</span></div><p class="mt-1 text-xs text-base-content/60">Drag nodes to arrange them and empty space to pan. Pinch or use the controls to zoom; ordinary scrolling moves the page.</p><p class="mt-2 text-sm font-medium" data-automation-connect-status aria-live="polite"><span class="text-primary">Connect steps:</span> Drag from a node's right handle to another node's left handle. Select a line, then use its × control to delete it or drag an endpoint to reconnect it.</p></div>
-					<div class="flex flex-wrap items-center gap-2" aria-label="Canvas controls">
-						<div data-automation-node-tool>
-							<button class="btn btn-primary btn-sm" type="button" data-automation-add-node-open onclick="document.getElementById('automation-node-dialog').showModal()">Add node</button>
-						</div>
-						<button class="btn btn-ghost btn-sm" type="button" data-automation-zoom-out aria-label="Zoom out">−</button><button class="btn btn-ghost btn-sm" type="button" data-automation-zoom-in aria-label="Zoom in">+</button><button class="btn btn-ghost btn-sm" type="button" data-automation-fit>Fit</button><button class="btn btn-ghost btn-sm" type="button" data-automation-reset>Reset layout</button>
+				<section class={ "rounded-box border border-base-300 bg-base-100", templ.KV("mb-5 p-3 sm:p-4", !automationBuilderUsesEditShell(page)), templ.KV("mb-0 p-4", automationBuilderUsesEditShell(page)), templ.KV("flex flex-1 min-h-[20rem] flex-col", automationBuilderUsesEditShell(page)) } data-automation-draft-canvas data-automation-view-root data-edge-palette={ automationDraftEdgesJSON(page.EdgePalette) }>
+					<div class={ "flex flex-wrap justify-between gap-3", templ.KV("items-start", !automationBuilderUsesEditShell(page)), templ.KV("mb-3 items-center", automationBuilderUsesEditShell(page)) }>
+						@automationViewSwitcher("Automation builder view")					<div class="flex shrink-0 flex-wrap items-center justify-end gap-2" data-automation-node-tool>
+						<button class="btn btn-primary btn-sm" type="button" data-automation-add-node-open onclick="document.getElementById('automation-node-dialog').showModal()">Add node</button>
 					</div>
 				</div>
-				<dialog id="automation-node-dialog" class="modal" data-automation-node-dialog>
-					<div class="modal-box relative max-w-md">
-						<div class="absolute right-4 top-4">@ModalCloseButton("document.getElementById('automation-node-dialog')", "Close add node dialog")</div>
-						<div class="pr-10"><h3 class="text-lg font-semibold">Add node</h3>
-							if page.Result.Candidate.AdapterKey == "custom" {
-								<p class="mt-1 text-sm text-base-content/65">Add an OpenVibely capability, then configure it and connect it to the next step.</p>
-							} else {
-								<p class="mt-1 text-sm text-base-content/65">Add a step from this maintained Automation template.</p>
+				<span class="sr-only" data-automation-connect-status aria-live="polite"></span>
+						if page.AutomationID != "" && page.LifecycleState == models.AutomationActive {
+						<form id="automation-builder-pause-form" class="hidden" method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/pause?project_id=%s", page.AutomationID, currentProjectID)) }>
+							<input type="hidden" name="project_id" value={ currentProjectID }/>
+						</form>
+					}
+					if page.AutomationID != "" && page.LifecycleState == models.AutomationPaused {
+						<form id="automation-builder-resume-form" class="hidden" method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/resume?project_id=%s", page.AutomationID, currentProjectID)) }>
+							<input type="hidden" name="project_id" value={ currentProjectID }/>
+						</form>
+					}
+							<div data-automation-yaml-panel hidden style="display: none" class="flex min-h-[20rem] flex-1 flex-col overflow-hidden rounded-box border border-base-300 bg-base-200/20 px-0 py-4 font-mono text-sm leading-6">							<div class="flex min-h-0 flex-1 overflow-hidden" data-automation-yaml-editor-shell>
+										<div class="group relative shrink-0 overflow-hidden border-r border-base-300" style="box-sizing: border-box; width: max-content; min-width: 3.25rem; flex: 0 0 auto;" data-automation-yaml-gutter>
+											<pre class="m-0 h-full w-full min-w-0 select-none overflow-hidden whitespace-nowrap pb-0 pl-2 pr-2 pt-0 text-left text-xs text-base-content/45" style="box-sizing: border-box; text-align: left !important;" aria-label="YAML line numbers" data-automation-yaml-line-numbers>{ automationYAMLLineNumbers(page.YAML) }</pre>											<div class="pointer-events-none absolute inset-y-0 right-0 z-10 hidden w-8" aria-label="YAML section controls" data-automation-yaml-fold-controls hidden></div>
+											</div>									<div class="relative min-h-0 min-w-0 flex-1 overflow-hidden" data-automation-yaml-editor-viewport>										<pre class="absolute left-0 top-0 m-0 min-h-full w-max min-w-full overflow-hidden whitespace-pre px-3 font-mono text-sm leading-6" aria-hidden="true" data-automation-yaml-highlight></pre>
+										<textarea class="absolute inset-0 block h-full w-full resize-none overflow-auto border-0 bg-transparent whitespace-pre px-3 font-mono text-sm leading-6 text-transparent outline-none caret-base-content" style="caret-color: oklch(var(--bc));" form="automation-design-form" name="automation_yaml" data-automation-yaml-editor data-automation-yaml-parse-url={ fmt.Sprintf("/automations/yaml/parse?project_id=%s", currentProjectID) } spellcheck="false" wrap="off" aria-label="Automation definition.">{ page.YAML }</textarea>
+									</div>							</div>
+							<p class="mt-3 hidden rounded-box border border-error/30 bg-error/10 px-3 py-2 font-sans text-sm text-error" role="alert" data-automation-yaml-diagnostic></p>
+							</div>
+							@automationBuilderDetailsPanel(page, currentProjectID)
+							<dialog id="automation-node-dialog" class="modal" data-automation-node-dialog>							<div class="modal-box relative max-w-md">
+								<div class="absolute right-4 top-4">@ModalCloseButton("document.getElementById('automation-node-dialog')", "Close add node dialog")</div>
+								<div class="pr-10"><h3 class="text-lg font-semibold">Add node</h3>
+									if page.Result.Candidate.AdapterKey == "custom" {
+										<p class="mt-1 text-sm text-base-content/65">Add an OpenVibely capability, then connect it to the next step.</p>
+									} else {
+								<p class="mt-1 text-sm text-base-content/65">Add an OpenVibely capability or restore a removed template step, then connect supported handoffs.</p>
 							}
 						</div>
 					<form class="mt-5 space-y-4" method="post" action={ templ.SafeURL(automationBuilderPostURL(page, currentProjectID)) } hx-post={ automationBuilderPostURL(page, currentProjectID) } hx-target="#main-content">
-						<input type="hidden" name="project_id" value={ currentProjectID }/><input type="hidden" name="builder_source" value={ page.Source }/><input type="hidden" name="candidate_json" value={ automationDraftCandidateJSON(page.Result.Candidate) } data-candidate-json/><input type="hidden" name="builder_action" value="create_node"/>
+						<input type="hidden" name="project_id" value={ currentProjectID }/><input type="hidden" name="builder_source" value={ page.Source }/><input type="hidden" value={ automationDraftCandidateJSON(page.Result.Candidate) } data-candidate-json/><input type="hidden" name="automation_yaml" value={ page.YAML } data-automation-yaml-submission/><input type="hidden" name="builder_action" value="create_node"/>
 						<label class="form-control"><span class="label-text">Node purpose</span><select class="select select-bordered" name="node_kind" required>
-							if page.Result.Candidate.AdapterKey == "custom" {
-									<option value="schedule">Schedule</option>
-									<option value="task">Task</option>
-									<option value="create_notification">Create notification</option>
-									<option value="human_approval">Human approval</option>
-									<option value="native_inbox">Approved inbox</option>
-									<option value="native_implementation">Native implementation</option>
-									<option value="create_github_issue">Create GitHub issue</option>
-									<option value="human_assignment">Human assignment</option>
-									<option value="github_inbox">GitHub inbox</option>
-									<option value="open_pull_request">Open pull request</option>
-									<option value="human_review">Human review</option>
-									<option value="outcome">Outcome</option>
-							} else {
+							<option value="schedule">Schedule</option>
+							<option value="task">Task</option>
+							<option value="create_notification">Create notification</option>
+							<option value="human_approval">Human approval</option>
+							<option value="native_inbox">Approved inbox</option>
+							<option value="native_implementation">Native implementation</option>
+							<option value="create_github_issue">Create GitHub issue</option>
+							<option value="human_assignment">Human assignment</option>
+							<option value="github_inbox">GitHub inbox</option>
+							<option value="open_pull_request">Open pull request</option>
+							<option value="human_review">Human review</option>
+							<option value="outcome">Outcome</option>
+							if page.Result.Candidate.AdapterKey != "custom" {
 								for _, node := range page.NodePalette {
 									if !automationDraftHasNode(page.Result.Candidate.Nodes, node.Key) {
-										<option value={ "runtime:" + node.Key }>{ node.Name } · { automationNodeTypeLabel(node.Type) }</option>
+										<option value={ "runtime:" + node.Key }>{ "Restore: " + node.Name + " · " + automationNodeTypeLabel(node.Type) }</option>
 									}
 								}
 							}
@@ -516,22 +1178,16 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 						<label class="form-control"><span class="label-text">Name</span><input class="input input-bordered" name="node_name" maxlength="200" placeholder="Review result" required autofocus/></label>
 						<div class="modal-action"><button class="btn btn-ghost" type="button" onclick="document.getElementById('automation-node-dialog').close()">Cancel</button><button class="btn btn-primary" type="submit" data-automation-create-node>Add node</button></div>
 					</form>
-					if page.Source == "template" {
-						<details class="mt-5 border-t border-base-300 pt-4"><summary class="cursor-pointer text-sm font-semibold">Suggested nodes</summary><p class="mt-1 text-xs text-base-content/60">Quick-add nodes understood by this Automation’s runtime.</p>
-							<div class="mt-2 space-y-1">
-								for _, node := range page.NodePalette {
-									if !automationDraftHasNode(page.Result.Candidate.Nodes, node.Key) {
-										<form method="post" action={ templ.SafeURL(automationBuilderPostURL(page, currentProjectID)) } hx-post={ automationBuilderPostURL(page, currentProjectID) } hx-target="#main-content"><input type="hidden" name="project_id" value={ currentProjectID }/><input type="hidden" name="builder_source" value={ page.Source }/><input type="hidden" name="candidate_json" value={ automationDraftCandidateJSON(page.Result.Candidate) } data-candidate-json/><input type="hidden" name="builder_action" value="add_node"/><input type="hidden" name="node_key" value={ node.Key }/><button class="btn btn-ghost h-auto min-h-11 w-full justify-start py-2 text-left" type="submit" data-automation-add-node><span><span class="block text-sm font-medium">{ node.Name }</span><span class="block text-xs font-normal text-base-content/55">{ automationNodeTypeLabel(node.Type) }</span></span></button></form>
-									}
-								}
-							</div>
-						</details>
-					}
 					</div>
 					<form method="dialog" class="modal-backdrop"><button aria-label="Close add node dialog">close</button></form>
 				</dialog>
-				<div class="automation-canvas-shell relative mt-3 min-h-[calc(100dvh-15rem)] w-full overflow-hidden rounded-box border border-base-300 bg-base-200/30" role="region" aria-label="Automation graph builder">
-					<svg data-automation-canvas viewBox={ automationDraftGraphViewBox(page.Result.Candidate.Nodes) } class="h-[calc(100dvh-15rem)] min-h-[42rem] w-full touch-none select-none" role="img" aria-label={ page.Result.Candidate.Name + " graph design" }>
+					<div data-automation-graph-panel class={ "automation-canvas-shell relative w-full overflow-hidden rounded-box border border-base-300 bg-base-200/30", templ.KV("mt-3", !automationBuilderUsesEditShell(page)), templ.KV("flex-1 min-h-[20rem]", automationBuilderUsesEditShell(page)), templ.KV("min-h-[calc(100dvh-15rem)]", !automationBuilderUsesEditShell(page)) } role="region" aria-label="Automation graph builder">					<div class="absolute right-3 top-3 z-10 flex flex-wrap items-center gap-1 rounded-box border border-base-300 bg-base-100/90 p-1 shadow-sm backdrop-blur" aria-label="Canvas controls" data-automation-builder-viewport-controls>
+						<button class="btn btn-ghost btn-sm" type="button" data-automation-zoom-out aria-label="Zoom out">−</button>
+						<button class="btn btn-ghost btn-sm" type="button" data-automation-zoom-in aria-label="Zoom in">+</button>
+						<button class="btn btn-ghost btn-sm" type="button" data-automation-fit>Fit</button>
+						<button class="btn btn-ghost btn-sm" type="button" data-automation-reset>Reset layout</button>
+					</div>
+					<svg data-automation-canvas viewBox={ automationDraftGraphViewBox(page.Result.Candidate.Nodes) } class={ "block w-full touch-none select-none", templ.KV("h-full", automationBuilderUsesEditShell(page)), templ.KV("h-[calc(100dvh-15rem)] min-h-[42rem]", !automationBuilderUsesEditShell(page)) } role="img" aria-label={ page.Result.Candidate.Name + " graph design" }>
 						@automationGraphThemeStyles()
 						<defs>
 							<marker id="automation-draft-arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" class="automation-graph-arrow automation-edge-foreground-arrow"></path></marker>
@@ -548,8 +1204,11 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 							if node.Position != nil {
 								<g class="automation-draft-node automation-graph-focus cursor-grab active:cursor-grabbing" data-node-key={ node.Key } data-node-x={ fmt.Sprintf("%.0f", node.Position.X) } data-node-y={ fmt.Sprintf("%.0f", node.Position.Y) } data-default-x={ fmt.Sprintf("%.0f", automationDraftDefaultX(page.NodePalette, node.Key)) } data-default-y={ fmt.Sprintf("%.0f", automationDraftDefaultY(page.NodePalette, node.Key)) } transform={ fmt.Sprintf("translate(%.0f %.0f)", node.Position.X, node.Position.Y) } tabindex="0" role="group" aria-label={ node.Name + ", " + string(node.Type) + ", use arrow keys to move" }>
 									<rect width={ fmt.Sprintf("%.0f", automationGraphNodeWidth) } height={ fmt.Sprintf("%.0f", automationGraphNodeHeight) } rx="12" class="automation-graph-node automation-graph-node--idle" stroke-width="2"></rect>
-									<foreignObject x="0" y="0" width={ fmt.Sprintf("%.0f", automationGraphNodeWidth) } height={ fmt.Sprintf("%.0f", automationGraphNodeHeight) } class="pointer-events-none"><div xmlns="http://www.w3.org/1999/xhtml" class="automation-node-content"><strong>{ node.Name }</strong><span>{ automationNodeTypeLabel(node.Type) }</span></div></foreignObject>
-									<circle cx="0" cy={ fmt.Sprintf("%.0f", automationGraphNodeHeight/2) } r="9" class="automation-connect-handle automation-connect-handle--input" data-connect-port={ node.Key } data-port-side="left" data-port-kind="input" tabindex="0" role="button" aria-label={ "Input for " + node.Name }></circle>
+										<foreignObject x="0" y="0" width={ fmt.Sprintf("%.0f", automationGraphNodeWidth) } height={ fmt.Sprintf("%.0f", automationGraphNodeHeight) } class="pointer-events-none"><div xmlns="http://www.w3.org/1999/xhtml" class="automation-node-content"><strong>{ node.Name }</strong><span>{ automationNodeTypeLabel(node.Type) }</span>
+											if automationDraftNodeModelLabel(node, page.Capabilities.Models) != "" {
+												<small>{ automationDraftNodeModelLabel(node, page.Capabilities.Models) }</small>
+											}
+										</div></foreignObject>									<circle cx="0" cy={ fmt.Sprintf("%.0f", automationGraphNodeHeight/2) } r="9" class="automation-connect-handle automation-connect-handle--input" data-connect-port={ node.Key } data-port-side="left" data-port-kind="input" tabindex="0" role="button" aria-label={ "Input for " + node.Name }></circle>
 									<circle cx={ fmt.Sprintf("%.0f", automationGraphNodeWidth) } cy={ fmt.Sprintf("%.0f", automationGraphNodeHeight/2) } r="9" class="automation-connect-handle automation-connect-handle--output" data-connect-port={ node.Key } data-port-side="right" data-port-kind="output" tabindex="0" role="button" aria-label={ "Output from " + node.Name }></circle>
 									<g data-delete-node transform={ fmt.Sprintf("translate(%.0f 16)", automationGraphNodeWidth-16) } class="automation-node-delete" tabindex="0" role="button" aria-label={ "Delete " + node.Name }><circle r="11"></circle><path d="M-4 -4 L4 4 M4 -4 L-4 4" class="automation-delete-x"></path></g>
 								</g>
@@ -578,96 +1237,26 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 					}
 				</div>
 			</section>
-			<details class="mb-5 rounded-box border border-base-300 bg-base-100 p-4">
-				<summary class="cursor-pointer font-semibold">Node and connection settings</summary>
-				<form id="automation-design-form" method="post" action={ templ.SafeURL(automationBuilderPostURL(page, currentProjectID)) } hx-post={ automationBuilderPostURL(page, currentProjectID) } hx-target="#main-content" class="mt-4 space-y-4" data-automation-draft-form>
-					<input type="hidden" name="project_id" value={ currentProjectID }/>
+		</div>
+			if page.AutomationID != "" && (len(page.Result.Assumptions) > 0 || len(page.Result.Warnings) > 0) {
+				<div class="mb-4 grid grid-cols-1 gap-3 lg:grid-cols-2" data-automation-builder-insights>
+					<div class="rounded-box bg-base-200/60 p-4"><h3 class="font-semibold">Assumptions</h3><ul class="mt-2 list-disc pl-5 text-sm">
+						for _, item := range page.Result.Assumptions {
+							<li>{ item }</li>
+						}
+					</ul></div>
+					<div class="rounded-box bg-base-200/60 p-4"><h3 class="font-semibold">Warnings</h3><ul class="mt-2 list-disc pl-5 text-sm">
+						for _, item := range page.Result.Warnings {
+							<li>{ item }</li>
+						}
+					</ul></div>
+				</div>
+			}
+			<form id="automation-design-form" method="post" action={ templ.SafeURL(automationBuilderPostURL(page, currentProjectID)) } hx-post={ automationBuilderPostURL(page, currentProjectID) } hx-target="#main-content" class="hidden" data-automation-yaml-form>
+				<input type="hidden" name="project_id" value={ currentProjectID }/>
 					<input type="hidden" name="builder_source" value={ page.Source }/>
-					<input type="hidden" name="save_changes" value="true"/>
-					<input type="hidden" name="candidate_json" value={ automationDraftCandidateJSON(page.Result.Candidate) } data-candidate-json/>
-					<div class="grid grid-cols-1 gap-4 xl:grid-cols-2">
-				for _, node := range page.Result.Candidate.Nodes {
-					<section class="rounded-box border border-base-300 bg-base-100 p-4"><div class="mb-3 flex flex-wrap items-start justify-between gap-3"><div><h3 class="font-semibold">{ node.Name }</h3><p class="text-xs text-base-content/55">{ node.Key } · { node.Role }</p></div><div class="flex items-center gap-2"><span class="badge badge-ghost badge-sm">{ automationNodeTypeLabel(node.Type) }</span><button class="btn btn-ghost btn-xs text-error" type="submit" name="remove_node" value={ node.Key }>Delete node</button></div></div><label class="form-control"><span class="label-text">Display name</span><input class="input input-bordered" name={ "node_" + node.Key + "_name" } value={ node.Name } maxlength="200"/></label>
-						if automationDraftHasConfig(node, "prompt") {
-							<label class="form-control mt-3"><span class="label-text">Task prompt</span><textarea class="textarea textarea-bordered h-28" name={ "node_" + node.Key + "_prompt" } maxlength="20000">{ automationDraftStringConfig(node, "prompt") }</textarea>
-								if page.Result.Candidate.AdapterKey == "custom" && node.Type == models.AutomationNodeTrigger {
-									<span class="label-text-alt mt-1">This is the work performed by the scheduled task. A connected Task is a separate downstream handoff that starts after this task completes.</span>
-								}
-							</label>
-								<div class="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-3">
-									<label class="form-control"><span class="label-text">Primary Agent</span><select class="select select-bordered" name={ "node_" + node.Key + "_agent_ref" }><option value="" selected?={ automationDraftStringConfig(node, "agent_ref") == "" }>Default (no primary Agent)</option>
-										for _, agent := range page.Capabilities.Agents {
-											<option value={ agent.ID } selected?={ automationDraftStringConfig(node, "agent_ref") == agent.ID }>{ agent.Name }</option>
-										}
-									</select></label>
-									if page.Result.Candidate.AdapterKey != "custom" {
-										<label class="form-control"><span class="label-text">Skills</span><input type="hidden" name={ "node_" + node.Key + "_skills" } value=""/><select class="select select-bordered min-h-24" name={ "node_" + node.Key + "_skills" } multiple>
-											for _, skill := range page.Capabilities.Skills {
-												<option value={ skill.ID } selected?={ automationDraftStringSliceContains(node, "skills", skill.ID) }>{ skill.Name }</option>
-											}
-										</select></label>
-										<label class="form-control"><span class="label-text">Source files</span><input type="hidden" name={ "node_" + node.Key + "_source_files" } value=""/><select class="select select-bordered min-h-24" name={ "node_" + node.Key + "_source_files" } multiple>
-											for _, sourceFile := range page.Capabilities.SourceFiles {
-												<option value={ sourceFile } selected?={ automationDraftStringSliceContains(node, "source_files", sourceFile) }>{ sourceFile }</option>
-											}
-										</select></label>
-									}
-								</div>
-									<div class="mt-3 grid grid-cols-2 gap-3">
-										if page.Result.Candidate.AdapterKey == "github_sdlc" && node.Role == "implementation" {
-											<label class="form-control"><span class="label-text">Category</span><span class="input input-bordered flex items-center bg-base-200 text-base-content/70">Active</span></label>
-										} else if page.Result.Candidate.AdapterKey == "custom" && node.Type == models.AutomationNodeTrigger {
-											<label class="form-control"><span class="label-text">Category</span><span class="input input-bordered flex items-center bg-base-200 text-base-content/70">Scheduled task</span></label>
-										} else {
-											<label class="form-control"><span class="label-text">Category</span><select class="select select-bordered" name={ "node_" + node.Key + "_category" }><option value="backlog" selected?={ automationDraftStringConfig(node, "category") == "backlog" }>Backlog</option>
-												if page.Result.Candidate.AdapterKey == "custom" {
-													<option value="active" selected?={ automationDraftStringConfig(node, "category") == "active" }>Active follow-up</option>
-												} else {
-													<option value="scheduled" selected?={ automationDraftStringConfig(node, "category") == "scheduled" }>Scheduled</option>
-												}
-											</select></label>
-										}
-										<label class="form-control"><span class="label-text">Priority</span><input type="number" min="1" max="4" class="input input-bordered" name={ "node_" + node.Key + "_priority" } value={ fmt.Sprintf("%d", automationDraftIntConfig(node, "priority")) }/></label>
-									</div>						}						if automationDraftHasConfig(node, "run_at") {
-							<div class="grid grid-cols-2 gap-3"><label class="form-control"><span class="label-text">Time</span><input type="time" class="input input-bordered" name={ "node_" + node.Key + "_run_at" } value={ automationDraftStringConfig(node, "run_at") }/></label><label class="form-control"><span class="label-text">Repeat</span><select class="select select-bordered" name={ "node_" + node.Key + "_repeat_type" }>
-								for _, repeat := range []string{"once","minutes","hours","daily","weekly","monthly"} {
-									<option value={ repeat } selected?={ automationDraftStringConfig(node, "repeat_type") == repeat }>{ repeat }</option>
-								}
-								</select></label><label class="form-control"><span class="label-text">Interval</span><input type="number" min="1" max="365" class="input input-bordered" name={ "node_" + node.Key + "_repeat_interval" } value={ fmt.Sprintf("%d", automationDraftIntConfig(node, "repeat_interval")) }/></label><label class="label cursor-pointer justify-start gap-3 col-span-2"><input type="checkbox" class="checkbox" name={ "node_" + node.Key + "_clear_context_on_start" } value="true" checked?={ !automationDraftHasConfig(node, "clear_context_on_start") || automationDraftBoolConfig(node, "clear_context_on_start") }/><span class="label-text">Clear context on start</span></label></div>
-						}
-						if automationDraftHasConfig(node, "notification_type") {
-							<div class="mt-3 grid grid-cols-1 gap-3"><label class="form-control"><span class="label-text">Notification type</span><input class="input input-bordered" name={ "node_" + node.Key + "_notification_type" } value={ automationDraftStringConfig(node, "notification_type") } maxlength="100"/></label><label class="form-control"><span class="label-text">What needs review</span><textarea class="textarea textarea-bordered h-24" name={ "node_" + node.Key + "_instructions" } maxlength="2000">{ automationDraftStringConfig(node, "instructions") }</textarea><span class="label-text-alt mt-1">The connected Task is configured to create the notification. The Alert is created only when that task runs.</span></label></div>
-						}
-						if node.Role == "create_github_issue" {
-							<div class="mt-3 grid grid-cols-1 gap-3"><label class="form-control"><span class="label-text">Issue instructions</span><textarea class="textarea textarea-bordered h-24" name={ "node_" + node.Key + "_instructions" } maxlength="2000">{ automationDraftStringConfig(node, "instructions") }</textarea></label><label class="form-control"><span class="label-text">Labels</span><input class="input input-bordered" name={ "node_" + node.Key + "_labels" } value={ automationDraftStringSliceConfig(node, "labels") } maxlength="1000" placeholder="suggestion, bug"/><span class="label-text-alt mt-1">Comma-separated plain GitHub labels. Assignment is intentionally unavailable here because the connected Human assignment gate is authoritative.</span></label></div>
-						}
-						if node.Role == "open_pull_request" {
-							<div class="mt-3 grid grid-cols-1 gap-3"><label class="form-control"><span class="label-text">Pull request instructions</span><textarea class="textarea textarea-bordered h-24" name={ "node_" + node.Key + "_instructions" } maxlength="2000">{ automationDraftStringConfig(node, "instructions") }</textarea></label><label class="form-control"><span class="label-text">Base branch</span><input class="input input-bordered" name={ "node_" + node.Key + "_base" } value={ automationDraftStringConfig(node, "base") } maxlength="200" placeholder="Repository default"/></label><label class="label cursor-pointer justify-start gap-3"><input type="checkbox" class="checkbox" name={ "node_" + node.Key + "_draft" } value="true" checked?={ automationDraftBoolConfig(node, "draft") }/><span class="label-text">Open as draft PR</span></label><div class="alert text-sm"><span>This action can open or reuse a PR. Human review and merge remain outside Automation authority.</span></div></div>
-						}
-						if automationDraftHasConfig(node, "approval_method") {
-							if node.Role == "native_approval" {
-								<div class="alert mt-3 text-sm"><span>Native Alert approval. A human approves or rejects the real notification from Alerts; this graph cannot decide for them.</span></div>
-							} else if node.Role == "github_assignment" {
-								<div class="alert mt-3 text-sm"><span>GitHub assignment is the approval signal. A configured human assigns the real issue before the GitHub inbox may create implementation work.</span></div>
-							} else if node.Role == "pull_request_review" {
-								<div class="alert mt-3 text-sm"><span>Human PR review and merge remain in GitHub. Automation only observes the linked PR and cannot approve or merge it.</span></div>
-							}
-						}
-					</section>
-				}
-			</div>
-			<div class="rounded-box border border-base-300 bg-base-100 p-4"><h3 class="font-semibold">Transitions</h3><div class="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
-				for _, edge := range page.Result.Candidate.Edges {
-						<div class="rounded-box bg-base-200/40 p-3"><div class="mb-2 flex items-center justify-between gap-2"><span class="text-xs font-medium">{ automationDraftNodeName(page.Result.Candidate.Nodes, edge.From) } → { automationDraftNodeName(page.Result.Candidate.Nodes, edge.To) }</span><button class="btn btn-ghost btn-xs text-error" type="submit" name="remove_edge" value={ edge.Key }>Delete connection</button></div><label class="form-control"><span class="label-text">Label</span><input class="input input-bordered" name={ "edge_" + edge.Key + "_label" } value={ edge.Label } maxlength="100"/></label>
-							if automationDraftNodeRole(page.Result.Candidate.Nodes, edge.From) == "native_approval" {
-								<label class="form-control mt-2"><span class="label-text">Human result</span><select class="select select-bordered" name={ "edge_" + edge.Key + "_state" }><option value="">Choose result</option><option value="approved" selected?={ automationDraftEdgeConditionState(edge) == "approved" }>Approved</option><option value="rejected" selected?={ automationDraftEdgeConditionState(edge) == "rejected" }>Rejected</option></select></label>
-							} else if automationDraftNodeRole(page.Result.Candidate.Nodes, edge.From) == "github_assignment" {
-								<label class="form-control mt-2"><span class="label-text">Human result</span><select class="select select-bordered" name={ "edge_" + edge.Key + "_state" }><option value="">Choose result</option><option value="assigned" selected?={ automationDraftEdgeConditionState(edge) == "assigned" }>Assigned in GitHub</option></select></label>
-							}
-						</div>				}
-			</div></div>
-					<div class="flex flex-wrap gap-3"><button class="btn btn-primary" type="submit">Save changes</button></div>
-				</form>			</details>
+					<input type="hidden" name="initial_view" value={ page.InitialView } data-automation-initial-view/>
+				</form>			<input type="hidden" value={ automationDraftCandidateJSON(page.Result.Candidate) } data-candidate-json/>
 			<script>
 			(function() {
 				var root = document.querySelector('[data-automation-draft-canvas]');
@@ -692,69 +1281,469 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 						function nodeGroup(key) { return svg.querySelector('[data-node-key="' + CSS.escape(key) + '"]'); }
 						function foregroundEdge(key) { return svg.querySelector('[data-edge-foreground][data-edge-key="' + CSS.escape(key) + '"]'); }
 						function edgeControls(key) { return svg.querySelector('[data-edge-controls][data-edge-key="' + CSS.escape(key) + '"]'); }					function nodePortPoint(key, side) { var group = nodeGroup(key); if (!group) return null; return {x: Number(group.dataset.nodeX) + (side === 'right' ? 170 : 0), y: Number(group.dataset.nodeY) + 52}; }
-					function syncCandidate() {
-						var automationName = builder.querySelector('[data-automation-name]');
-						if (automationName) candidate.name = automationName.value;
+					function yamlString(value) { return JSON.stringify(String(value == null ? '' : value)); }
+					function yamlPlainKeyPattern() { return /^[A-Za-z_][A-Za-z0-9_]*$/; }
+					function yamlKey(key) { return yamlPlainKeyPattern().test(String(key)) ? String(key) : yamlString(key); }
+					function yamlScalar(value) {
+						if (value === null || value === undefined) return 'null';
+						if (typeof value === 'boolean' || typeof value === 'number') return String(value);
+						return yamlString(value);
+					}
+					function yamlIndent(level) { return '  '.repeat(level); }
+					function yamlIsEmptyContainer(value) {
+						if (Array.isArray(value)) return value.length === 0;
+						if (value !== null && typeof value === 'object') return Object.keys(value).length === 0;
+						return false;
+					}
+					function yamlBlockLines(value, level) {
+						if (Array.isArray(value)) {
+							var lines = [];
+							value.forEach(function(item) {
+								if (item !== null && typeof item === 'object' && !yamlIsEmptyContainer(item)) {
+									var subLines = yamlBlockLines(item, level + 1);
+									lines.push(yamlIndent(level) + '- ' + subLines[0].slice(yamlIndent(level + 1).length));
+									subLines.slice(1).forEach(function(line) { lines.push(line); });
+								} else if (item !== null && typeof item === 'object') {
+									lines.push(yamlIndent(level) + '- ' + (Array.isArray(item) ? '[]' : '{}'));
+								} else {
+									lines.push(yamlIndent(level) + '- ' + yamlScalar(item));
+								}
+							});
+							return lines;
+						}
+						if (value !== null && typeof value === 'object') {
+							var lines = [];
+							Object.keys(value).forEach(function(key) {
+								var nested = value[key];
+								if (nested !== null && typeof nested === 'object' && !yamlIsEmptyContainer(nested)) {
+									lines.push(yamlIndent(level) + yamlKey(key) + ':');
+									yamlBlockLines(nested, level + 1).forEach(function(line) { lines.push(line); });
+								} else if (nested !== null && typeof nested === 'object') {
+									lines.push(yamlIndent(level) + yamlKey(key) + ': ' + (Array.isArray(nested) ? '[]' : '{}'));
+								} else {
+									lines.push(yamlIndent(level) + yamlKey(key) + ': ' + yamlScalar(nested));
+								}
+							});
+							return lines;
+						}
+						return [yamlIndent(level) + yamlScalar(value)];
+					}
+					function yamlNestedField(lines, label, value, level) {
+						var normalized = (value && typeof value === 'object') ? value : {};
+						if (yamlIsEmptyContainer(normalized)) {
+							lines.push(yamlIndent(level) + label + ': ' + (Array.isArray(normalized) ? '[]' : '{}'));
+							return;
+						}
+						lines.push(yamlIndent(level) + label + ':');
+						yamlBlockLines(normalized, level + 1).forEach(function(line) { lines.push(line); });
+					}
+					function visualCandidateYAML() {
+						var lines = [
+							'schema_version: ' + Number(candidate.schema_version || 1),
+							'name: ' + yamlString(candidate.name),
+							'description: ' + yamlString(candidate.description),
+							'automation_type: ' + yamlString(candidate.automation_type),
+							'adapter_key: ' + yamlString(candidate.adapter_key),
+							'nodes:'
+						];
 						(candidate.nodes || []).forEach(function(node) {
-						var prefix = 'node_' + node.key + '_';
-						var name = builder.querySelector('[name="' + prefix + 'name"]');
-						if (name) node.name = name.value;
-						if (node.config && Object.prototype.hasOwnProperty.call(node.config, 'prompt')) {
-							var prompt = builder.querySelector('[name="' + prefix + 'prompt"]');
-							var category = builder.querySelector('[name="' + prefix + 'category"]');
-							var priority = builder.querySelector('[name="' + prefix + 'priority"]');
-							var agentRef = builder.querySelector('[name="' + prefix + 'agent_ref"]');
-							var skills = builder.querySelector('select[name="' + prefix + 'skills"]');
-							var sourceFiles = builder.querySelector('select[name="' + prefix + 'source_files"]');
-							if (prompt) node.config.prompt = prompt.value;
-							if (category) node.config.category = category.value;
-							if (priority) node.config.priority = Number(priority.value);
-							if (agentRef) node.config.agent_ref = agentRef.value;
-							if (skills) node.config.skills = Array.from(skills.selectedOptions).map(function(option) { return option.value; });
-							if (sourceFiles) node.config.source_files = Array.from(sourceFiles.selectedOptions).map(function(option) { return option.value; });
+							lines.push('  - key: ' + yamlString(node.key));
+							lines.push('    name: ' + yamlString(node.name));
+							lines.push('    type: ' + yamlString(node.type));
+							lines.push('    role: ' + yamlString(node.role));
+							yamlNestedField(lines, 'config', node.config || {}, 2);
+							if (node.position) yamlNestedField(lines, 'position', node.position, 2);
+						});
+						lines.push('edges:');
+						(candidate.edges || []).forEach(function(edge) {
+							lines.push('  - key: ' + yamlString(edge.key));
+							lines.push('    from: ' + yamlString(edge.from));
+							lines.push('    to: ' + yamlString(edge.to));
+							lines.push('    from_port: ' + yamlString(edge.from_port || 'right'));
+							lines.push('    to_port: ' + yamlString(edge.to_port || 'left'));
+							if (edge.label) lines.push('    label: ' + yamlString(edge.label));
+							if (edge.condition && Object.keys(edge.condition).length) yamlNestedField(lines, 'condition', edge.condition, 2);
+						});
+						if (candidate.assumptions && candidate.assumptions.length) yamlNestedField(lines, 'assumptions', candidate.assumptions, 0);
+						if (candidate.warnings && candidate.warnings.length) yamlNestedField(lines, 'warnings', candidate.warnings, 0);
+						return lines.join('\n') + '\n';
+					}
+					var yamlEditor = builder.querySelector('[data-automation-yaml-editor]');
+					var yamlLineNumbers = builder.querySelector('[data-automation-yaml-line-numbers]');
+					var yamlFoldControls = builder.querySelector('[data-automation-yaml-fold-controls]');
+					var yamlGutter = builder.querySelector('[data-automation-yaml-gutter]');
+					var yamlViewport = builder.querySelector('[data-automation-yaml-editor-viewport]');
+					var yamlHighlight = builder.querySelector('[data-automation-yaml-highlight]');
+					var yamlDiagnostic = builder.querySelector('[data-automation-yaml-diagnostic]');
+					var yamlDiagnosticLine = 0;
+					var yamlShared = window.openVibelyYAML;
+						var yamlFoldingEnabled = false;
+						var yamlFoldedLines = new Set();
+						var yamlSourceValue = yamlEditor ? yamlEditor.value : '';
+						var yamlVisibleLineMap = [];
+						var yamlRenderingValue = false;
+						var yamlPendingSelectionStart = 0;
+						var yamlPendingSelectionEnd = 0;
+						var yamlPendingValue = '';
+						var yamlPendingInputType = '';
+						var yamlParseTimer = 0;					var yamlParseRequest = 0;
+					var yamlLineLayoutFrame = 0;
+						function yamlActiveScrollTop() { return yamlEditor ? yamlEditor.scrollTop : 0; }
+						function restoreYAMLScrollTop(value) {
+							if (!yamlEditor) return;
+							yamlEditor.scrollTop = value;
+							if (yamlViewport) yamlViewport.scrollTop = 0;
+							syncYAMLHighlightScroll();
 						}
-						if (node.config && Object.prototype.hasOwnProperty.call(node.config, 'run_at')) {
-							var runAt = builder.querySelector('[name="' + prefix + 'run_at"]');
-							var repeat = builder.querySelector('[name="' + prefix + 'repeat_type"]');
-							var interval = builder.querySelector('[name="' + prefix + 'repeat_interval"]');
-							var enabled = builder.querySelector('[name="' + prefix + 'enabled"]');
-							var clearContextOnStart = builder.querySelector('[name="' + prefix + 'clear_context_on_start"]');
-							if (runAt) node.config.run_at = runAt.value;
-							if (repeat) node.config.repeat_type = repeat.value;
-							if (interval) node.config.repeat_interval = Number(interval.value);
-							if (enabled) node.config.enabled = enabled.checked;
-							if (clearContextOnStart) node.config.clear_context_on_start = clearContextOnStart.checked;
+						function scrollYAMLFromWheel(event) {
+							if (!yamlEditor || !event.deltaY) return;
+							var scroller = yamlEditor;
+							if (!scroller) return;						var delta = event.deltaY;
+						if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) delta *= 24;
+						if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) delta *= scroller.clientHeight;
+						var previousTop = scroller.scrollTop;
+						scroller.scrollTop += delta;
+						if (scroller.scrollTop !== previousTop) {
+							if (scroller === yamlEditor) syncYAMLHighlightScroll();
+							else {
+								if (yamlLineNumbers) yamlLineNumbers.scrollTop = scroller.scrollTop;
+								if (yamlFoldControls) yamlFoldControls.style.transform = 'translateY(' + (-scroller.scrollTop) + 'px)';
+							}
+							event.preventDefault();
 						}
-						if (node.config && Object.prototype.hasOwnProperty.call(node.config, 'notification_type')) {
-							var notificationType = builder.querySelector('[name="' + prefix + 'notification_type"]');
-							var instructions = builder.querySelector('[name="' + prefix + 'instructions"]');
-							if (notificationType) node.config.notification_type = notificationType.value;
-							if (instructions) node.config.instructions = instructions.value;
+					}
+						function automationYAMLValue() { return yamlFoldedLines.size > 0 ? yamlSourceValue : (yamlEditor ? yamlEditor.value : yamlSourceValue); }
+						function setYAMLEditorDisplay(value) {
+							if (!yamlEditor || yamlEditor.value === value) return;
+							yamlRenderingValue = true;
+							yamlEditor.value = value;
+							yamlRenderingValue = false;
 						}
-						if (node.role === 'create_github_issue') {
-							var issueInstructions = builder.querySelector('[name="' + prefix + 'instructions"]');
-							var labels = builder.querySelector('[name="' + prefix + 'labels"]');
-							if (issueInstructions) node.config.instructions = issueInstructions.value;
-							if (labels) node.config.labels = labels.value.split(',').map(function(label) { return label.trim(); }).filter(Boolean);
+						function escapeYAMLHTML(value) { return yamlShared.escapeHTML(value); }
+						function yamlLineIndent(line) { return yamlShared.lineIndent(line); }
+						function yamlFoldRanges(lines) {
+							var ranges = {};						for (var index = 0; index < lines.length; index++) {
+							var line = lines[index];
+							if (!line.trim() || line.trim().charAt(0) === '#') continue;
+							var indent = yamlLineIndent(line), next = index + 1;
+							while (next < lines.length && (!lines[next].trim() || lines[next].trim().charAt(0) === '#')) next++;
+							if (next >= lines.length || yamlLineIndent(lines[next]) <= indent) continue;
+							var end = next;
+							while (end + 1 < lines.length && (!lines[end + 1].trim() || lines[end + 1].trim().charAt(0) === '#' || yamlLineIndent(lines[end + 1]) > indent)) end++;
+							ranges[index] = end;
 						}
-						if (node.role === 'open_pull_request') {
-							var prInstructions = builder.querySelector('[name="' + prefix + 'instructions"]');
-							var base = builder.querySelector('[name="' + prefix + 'base"]');
-							var draft = builder.querySelector('[name="' + prefix + 'draft"]');
-							if (prInstructions) node.config.instructions = prInstructions.value;
-							if (base) node.config.base = base.value;
-							if (draft) node.config.draft = draft.checked;
+							return ranges;
 						}
+						function reconcileYAMLFolds(ranges) {
+							Array.from(yamlFoldedLines).forEach(function(line) { if (ranges[line] === undefined) yamlFoldedLines.delete(line); });
+						}
+						function yamlActiveRailInfo() {
+							if (!yamlEditor || document.activeElement !== yamlEditor) return null;
+							return {line: yamlOffsetToLineCol(yamlEditor.value, yamlEditor.selectionStart).line + 1};
+						}
+						function yamlRailColor(active) {
+							if (!active) return 'oklch(var(--bc) / 0.3)';
+							var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+							return isDark ? 'rgba(212, 212, 212, 0.8)' : 'rgba(64, 64, 64, 0.6)';
+						}
+						function yamlContinuousIndentationRails(lines, visibleLines, activeInfo) {
+						var rails = [], maxIndent = 0, candidates = [];
+						visibleLines.forEach(function(lineIndex) { maxIndent = Math.max(maxIndent, yamlLineIndent(lines[lineIndex])); });
+							for (var column = 0; column < maxIndent; column += 2) {
+								var startLine = 0, endLine = 0, startRow = 0, endRow = 0;
+								visibleLines.forEach(function(lineIndex, rowIndex) {
+									var line = lines[lineIndex], ignorable = !line.trim() || /^\s*#/.test(line), continues = yamlLineIndent(line) > column || (startLine && ignorable);
+									if (continues) {
+										if (!startLine) startLine = lineIndex + 1;
+										endLine = lineIndex + 1;
+										if (!startRow) startRow = rowIndex + 1;
+										endRow = rowIndex + 1;
+									} else if (startLine) {
+										candidates.push({column: column, start: startLine, end: endLine, rowStart: startRow, rowEnd: endRow});
+										startLine = 0;
+										startRow = 0;
+									}
+								});
+								if (startLine) candidates.push({column: column, start: startLine, end: endLine, rowStart: startRow, rowEnd: endRow});
+							}
+							var activeCandidate = null;
+							if (activeInfo) {
+								candidates.forEach(function(candidate) {
+									var withinGroup = activeInfo.line >= candidate.start && activeInfo.line <= candidate.end;
+									var onGroupHeader = activeInfo.line === candidate.start - 1;
+									if ((withinGroup || onGroupHeader) && (!activeCandidate || candidate.column > activeCandidate.column)) activeCandidate = candidate;
+								});
+							}
+								candidates.forEach(function(candidate) {
+									var color = yamlRailColor(candidate === activeCandidate);
+									rails.push('<span class="pointer-events-none absolute transition-colors" style="left:calc(0.75rem + ' + candidate.column + 'ch);top:calc(' + (candidate.rowStart - 1) + ' * 1.5rem);height:calc(' + (candidate.rowEnd - candidate.rowStart + 1) + ' * 1.5rem);width:1px;z-index:20;background-color:' + color + '" data-automation-yaml-indent-rail data-yaml-rail-start="' + candidate.start + '" data-yaml-rail-end="' + candidate.end + '" data-yaml-rail-column="' + candidate.column + '" aria-hidden="true"></span>');
+								});
+						return rails.join('');
+					}
+						function updateYAMLActiveRail() {
+							if (!yamlHighlight || !yamlEditor) return;
+							var rails = yamlHighlight.querySelectorAll('[data-automation-yaml-indent-rail]');
+							if (!rails.length) return;
+							var activeInfo = yamlActiveRailInfo();
+							var active = null;
+							rails.forEach(function(rail) {
+								var start = Number(rail.dataset.yamlRailStart), end = Number(rail.dataset.yamlRailEnd), column = Number(rail.dataset.yamlRailColumn);
+								var withinGroup = activeInfo && activeInfo.line >= start && activeInfo.line <= end;
+								var onGroupHeader = activeInfo && activeInfo.line === start - 1;
+								if (activeInfo && (withinGroup || onGroupHeader) && (!active || column > Number(active.dataset.yamlRailColumn))) active = rail;
+							});
+							rails.forEach(function(rail) { rail.style.backgroundColor = yamlRailColor(rail === active); });
+						}
+						function layoutYAMLIndentationRails() {
+						if (!yamlHighlight) return;
+						yamlHighlight.querySelectorAll('[data-automation-yaml-indent-rail]').forEach(function(rail) {
+							var start = yamlHighlight.querySelector('[data-automation-yaml-highlight-line][data-yaml-line="' + rail.dataset.yamlRailStart + '"]');
+							var end = yamlHighlight.querySelector('[data-automation-yaml-highlight-line][data-yaml-line="' + rail.dataset.yamlRailEnd + '"]');
+							if (!start || !end) return;
+							rail.style.top = start.offsetTop + 'px';
+							rail.style.height = Math.max(0, end.offsetTop + end.offsetHeight - start.offsetTop) + 'px';
+						});
+					}
+					function layoutYAMLLines() {
+						yamlLineLayoutFrame = 0;
+						if (!yamlLineNumbers || !yamlFoldControls || !yamlHighlight || !yamlViewport || !yamlViewport.clientWidth) return;
+						var lineNumberRows = yamlLineNumbers.querySelectorAll('[data-automation-yaml-line-number]');
+						lineNumberRows.forEach(function(lineNumberRow) {
+							var sourceLine = lineNumberRow.dataset.yamlLine;
+							var highlightLine = yamlHighlight.querySelector('[data-automation-yaml-highlight-line][data-yaml-line="' + sourceLine + '"]');
+							if (!highlightLine) return;
+							lineNumberRow.style.height = Math.ceil(highlightLine.getBoundingClientRect().height) + 'px';
+							var control = yamlFoldControls.querySelector('[data-yaml-line="' + sourceLine + '"]');
+							if (control) control.style.top = highlightLine.offsetTop + 'px';
+						});
+						layoutYAMLIndentationRails();
+					}
+					function queueYAMLLineLayout() {
+						if (yamlLineLayoutFrame) cancelAnimationFrame(yamlLineLayoutFrame);
+						yamlLineLayoutFrame = requestAnimationFrame(layoutYAMLLines);
+					}
+						function updateYAMLLineNumbers() {
+							if (!yamlEditor || !yamlLineNumbers || !yamlFoldControls || !yamlHighlight) return;
+var lines = yamlSourceValue.split('\n'), ranges = yamlFoldRanges(lines), highlighted = [], lineNumbers = [], controls = [], visibleLines = [], displayLines = [], index = 0;
+							reconcileYAMLFolds(ranges);
+							var folded = yamlFoldedLines.size > 0;
+							while (index < lines.length) {							var foldEnd = ranges[index], canFold = foldEnd !== undefined, isFolded = yamlFoldedLines.has(index), indent = yamlLineIndent(lines[index]);
+							visibleLines.push(index);
+							displayLines.push(lines[index]);
+							lineNumbers.push('<span class="block min-h-6" data-automation-yaml-line-number data-yaml-line="' + (index + 1) + '">' + (index + 1) + '</span>');								if (canFold && yamlFoldingEnabled) {
+									var visibilityClass = isFolded ? '' : ' opacity-0 group-hover:opacity-100 focus-visible:opacity-100';
+									controls.push('<button class="pointer-events-auto absolute right-1 inline-flex h-6 w-6 items-center justify-center rounded bg-transparent p-0 text-base-content/60 transition-opacity hover:bg-transparent hover:text-base-content/60 focus-visible:bg-transparent focus-visible:text-base-content/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary' + visibilityClass + '" style="top:0" type="button" data-automation-yaml-fold data-yaml-line="' + (index + 1) + '" data-yaml-indent="' + indent + '" aria-label="' + (isFolded ? 'Expand' : 'Collapse') + ' YAML section starting on line ' + (index + 1) + '"><svg class="h-5 w-5 transition-transform' + (isFolded ? ' -rotate-90' : '') + '" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 7.5 10 12.5 15 7.5"></path></svg></button>');
+								}
+								highlighted.push(yamlShared.renderLineSpan(lines[index], index + 1, {diagnosticLine: yamlDiagnosticLine, folded: isFolded}));								if (isFolded) index = foldEnd + 1; else index++;
+							}
+							yamlHighlight.innerHTML = yamlContinuousIndentationRails(lines, visibleLines, yamlActiveRailInfo()) + highlighted.join('');
+							yamlLineNumbers.innerHTML = lineNumbers.join('');
+							yamlFoldControls.innerHTML = controls.join('');
+							yamlVisibleLineMap = visibleLines.slice();
+							if (folded) {
+								yamlEditor.hidden = false;
+								setYAMLEditorDisplay(displayLines.join('\n'));
+								yamlHighlight.classList.remove('absolute', 'left-0', 'right-0', 'top-0', 'min-h-full');
+								yamlHighlight.classList.add('min-h-full');
+								yamlHighlight.style.transform = '';
+								yamlFoldControls.style.transform = '';
+								if (yamlViewport) {
+yamlViewport.classList.remove('overflow-hidden');
+										yamlViewport.classList.add('overflow-y-auto', 'overflow-x-hidden');
+										yamlViewport.tabIndex = 0;
+										yamlViewport.setAttribute('aria-label', 'Collapsed YAML source');								}
+							} else {
+								yamlEditor.hidden = false;
+								setYAMLEditorDisplay(yamlSourceValue);
+								yamlVisibleLineMap = [];
+								yamlHighlight.classList.add('absolute', 'left-0', 'right-0', 'top-0', 'min-h-full');
+								if (yamlViewport) {
+yamlViewport.scrollTop = 0;
+										yamlViewport.classList.remove('overflow-y-auto', 'overflow-x-hidden');
+										yamlViewport.classList.add('overflow-hidden');
+										yamlViewport.tabIndex = -1;									yamlViewport.removeAttribute('aria-label');
+								}
+								syncYAMLHighlightScroll();
+							}
+							queueYAMLLineLayout();
+							updateYAMLActiveRail();
+						}
+						function yamlOffsetToLineCol(text, offset) {
+							var prefix = text.slice(0, offset).split('\n');
+							return {line: prefix.length - 1, col: prefix[prefix.length - 1].length};
+						}
+						function yamlLineColToSourceOffset(sourceLines, sourceLineIndex, col) {
+							var offset = 0;
+							for (var i = 0; i < sourceLineIndex; i++) offset += sourceLines[i].length + 1;
+							return offset + col;
+						}
+						function syncYAMLHighlightScroll() {
+							if (!yamlEditor) return;
+							if (yamlHighlight) yamlHighlight.style.transform = 'translate(' + (-yamlEditor.scrollLeft) + 'px, ' + (-yamlEditor.scrollTop) + 'px)';
+							if (yamlFoldControls) yamlFoldControls.style.transform = 'translateY(' + (-yamlEditor.scrollTop) + 'px)';
+							if (yamlLineNumbers) yamlLineNumbers.scrollTop = yamlEditor.scrollTop;
+						}
+						function showYAMLDiagnostic(message) {						var match = String(message || '').match(/line\s+(\d+)/i);
+						yamlDiagnosticLine = match ? Number(match[1]) : 0;
+						if (yamlDiagnostic) {
+							yamlDiagnostic.textContent = message || '';
+							yamlDiagnostic.classList.toggle('hidden', !message);
+						}
+						updateYAMLLineNumbers();
+					}
+					function validateYAMLWhileTyping() {
+						if (!yamlEditor || !yamlEditor.dataset.automationYamlParseUrl) return;
+						var request = ++yamlParseRequest;
+						window.clearTimeout(yamlParseTimer);
+						yamlParseTimer = window.setTimeout(function() {
+							fetch(yamlEditor.dataset.automationYamlParseUrl, {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: new URLSearchParams({automation_yaml: automationYAMLValue()})})
+								.then(function(response) { return response.ok ? response.json() : Promise.reject(new Error('YAML validation is unavailable.')); })
+								.then(function(result) { if (request === yamlParseRequest) showYAMLDiagnostic(result.valid ? '' : result.message); })
+								.catch(function(error) { if (request === yamlParseRequest) showYAMLDiagnostic(error.message); });
+						}, 300);
+					}
+					function validateYAMLNow() {
+						if (!yamlEditor || !yamlEditor.dataset.automationYamlParseUrl) return;
+						var request = ++yamlParseRequest;
+						window.clearTimeout(yamlParseTimer);
+						fetch(yamlEditor.dataset.automationYamlParseUrl, {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: new URLSearchParams({automation_yaml: automationYAMLValue()})})
+							.then(function(response) { return response.ok ? response.json() : Promise.reject(new Error('YAML validation is unavailable.')); })
+							.then(function(result) { if (request === yamlParseRequest) showYAMLDiagnostic(result.valid ? '' : result.message); })
+							.catch(function(error) { if (request === yamlParseRequest) showYAMLDiagnostic(error.message); });
+					}
+					if (yamlEditor) {
+						yamlEditor.addEventListener('scroll', syncYAMLHighlightScroll);
+							yamlEditor.addEventListener('keydown', function(event) {
+								if (event.key !== 'Tab' || event.altKey || event.metaKey || event.ctrlKey) return;
+								event.preventDefault();
+								var value = yamlEditor.value;
+								var start = yamlEditor.selectionStart, end = yamlEditor.selectionEnd;
+								yamlPendingValue = value;
+								if (event.shiftKey) {
+									var lineStart = value.lastIndexOf('\n', start - 1) + 1;
+									var removable = 0;
+									while (removable < 2 && value.charAt(lineStart + removable) === ' ') removable++;
+									if (removable === 0) return;
+									yamlPendingSelectionStart = start;
+									yamlPendingSelectionEnd = end;
+									yamlPendingInputType = 'deleteContentBackward';
+									yamlEditor.setRangeText('', lineStart, lineStart + removable, 'preserve');
+									yamlEditor.selectionStart = Math.max(lineStart, start - removable);
+									yamlEditor.selectionEnd = Math.max(lineStart, end - removable);
+								} else {
+									yamlPendingSelectionStart = start;
+									yamlPendingSelectionEnd = end;
+									yamlPendingInputType = 'insertText';
+									yamlEditor.setRangeText('  ', start, end, 'end');
+								}
+								yamlEditor.dispatchEvent(new Event('input', {bubbles: true}));
+							});
+							yamlEditor.addEventListener('beforeinput', function(event) {
+								if (yamlRenderingValue) return;
+								yamlPendingSelectionStart = yamlEditor.selectionStart;
+								yamlPendingSelectionEnd = yamlEditor.selectionEnd;
+								yamlPendingValue = yamlEditor.value;
+								yamlPendingInputType = event && event.inputType ? event.inputType : '';
+							});
+							yamlEditor.addEventListener('input', function() {
+								if (yamlRenderingValue) return;
+								if (yamlFoldedLines.size === 0) {
+									yamlSourceValue = yamlEditor.value;
+								} else {
+									var oldSourceLines = yamlSourceValue.split('\n');
+									var newVisibleValue = yamlEditor.value;
+									var preEditVisibleValue = yamlPendingValue || newVisibleValue;
+									var preEditStart = yamlOffsetToLineCol(preEditVisibleValue, yamlPendingSelectionStart);
+									var preEditEnd = yamlOffsetToLineCol(preEditVisibleValue, yamlPendingSelectionEnd);
+									var postEditOffset = yamlEditor.selectionStart;
+									var startVisibleLine = Math.min(preEditStart.line, yamlVisibleLineMap.length - 1);
+									var endVisibleLine = Math.min(preEditEnd.line, yamlVisibleLineMap.length - 1);
+									if (startVisibleLine < 0 || endVisibleLine < 0 || !yamlVisibleLineMap.length) {
+										yamlSourceValue = newVisibleValue;
+									} else {
+										var sourceStartLine = yamlVisibleLineMap[startVisibleLine];
+										var sourceEndLine = yamlVisibleLineMap[endVisibleLine];
+										var sourceStartOffset = yamlLineColToSourceOffset(oldSourceLines, sourceStartLine, preEditStart.col);
+										var sourceEndOffset = yamlLineColToSourceOffset(oldSourceLines, sourceEndLine, preEditEnd.col);
+										var collapsedDeletion = preEditStart.line === preEditEnd.line && preEditStart.col === preEditEnd.col && newVisibleValue.length < preEditVisibleValue.length;
+										if (collapsedDeletion) {
+											var removedLength = preEditVisibleValue.length - newVisibleValue.length;
+											var sourceLineText = oldSourceLines[sourceStartLine] || '';
+											if (yamlPendingInputType === 'deleteContentForward') {
+												var nextVisibleSourceLine = yamlVisibleLineMap[startVisibleLine + 1];
+												var atFoldBoundaryForward = preEditStart.col === sourceLineText.length && nextVisibleSourceLine !== undefined && nextVisibleSourceLine !== sourceStartLine + 1;
+												if (atFoldBoundaryForward) {
+													var forwardBoundaryOffset = yamlLineColToSourceOffset(oldSourceLines, nextVisibleSourceLine, 0) - 1;
+													sourceStartOffset = forwardBoundaryOffset;
+													sourceEndOffset = forwardBoundaryOffset + removedLength;
+												} else {
+													sourceEndOffset = sourceStartOffset + removedLength;
+												}
+											} else {
+												var prevVisibleSourceLine = startVisibleLine > 0 ? yamlVisibleLineMap[startVisibleLine - 1] : undefined;
+												var atFoldBoundaryBackward = preEditStart.col === 0 && startVisibleLine > 0 && prevVisibleSourceLine !== sourceStartLine - 1;
+												if (atFoldBoundaryBackward) {
+													var backwardBoundaryOffset = yamlLineColToSourceOffset(oldSourceLines, sourceStartLine, 0) - 1;
+													sourceStartOffset = Math.max(0, backwardBoundaryOffset);
+													sourceEndOffset = sourceStartOffset + removedLength;
+												} else {
+													sourceStartOffset = Math.max(0, sourceStartOffset - removedLength);
+												}
+											}
+										yamlSourceValue = yamlSourceValue.slice(0, sourceStartOffset) + yamlSourceValue.slice(sourceEndOffset);
+									} else {											var visibleEditStartOffset = 0;
+											for (var k = 0; k < startVisibleLine; k++) visibleEditStartOffset += (yamlVisibleLineMap[k] !== undefined ? oldSourceLines[yamlVisibleLineMap[k]].length : 0) + 1;
+											visibleEditStartOffset += preEditStart.col;
+											var insertedText = newVisibleValue.slice(visibleEditStartOffset, postEditOffset);
+											yamlSourceValue = yamlSourceValue.slice(0, sourceStartOffset) + insertedText + yamlSourceValue.slice(sourceEndOffset);
+										}
+									}
+								}
+								updateYAMLLineNumbers();
+								validateYAMLWhileTyping();
+								});						updateYAMLLineNumbers();
+						validateYAMLWhileTyping();
+						yamlEditor.addEventListener('mousedown', function() { window.requestAnimationFrame(updateYAMLActiveRail); });
+						yamlEditor.addEventListener('keyup', updateYAMLActiveRail);
+						yamlEditor.addEventListener('input', updateYAMLActiveRail);
+						yamlEditor.addEventListener('focus', updateYAMLActiveRail);
+						yamlEditor.addEventListener('blur', updateYAMLActiveRail);
+					}					if (yamlFoldControls) yamlFoldControls.addEventListener('click', function(event) {
+						var toggle = event.target.closest('[data-automation-yaml-fold]');
+						if (!toggle) return;
+						var line = Number(toggle.dataset.yamlLine) - 1;
+						var scrollTop = yamlActiveScrollTop();
+						if (yamlFoldedLines.has(line)) yamlFoldedLines.delete(line); else yamlFoldedLines.add(line);
+						if (yamlEditor) yamlEditor.blur();
+						updateYAMLLineNumbers();
+						restoreYAMLScrollTop(scrollTop);
 					});
-					(candidate.edges || []).forEach(function(edge) {
-						var label = builder.querySelector('[name="edge_' + edge.key + '_label"]');
-						var state = builder.querySelector('[name="edge_' + edge.key + '_state"]');
-						if (label) edge.label = label.value;
-						if (state) edge.condition = state.value ? {state: state.value} : {};
-					});
-					builder.querySelectorAll('[data-candidate-json]').forEach(function(input) { input.value = JSON.stringify(candidate); });
-				}
-				function applyViewBox() { svg.setAttribute('viewBox', viewBox.join(' ')); }
+						if (yamlViewport) yamlViewport.addEventListener('scroll', function() {
+							if (!yamlEditor || !yamlEditor.hidden) return;
+							if (yamlLineNumbers) yamlLineNumbers.scrollTop = yamlViewport.scrollTop;
+							if (yamlFoldControls) yamlFoldControls.style.transform = 'translateY(' + (-yamlViewport.scrollTop) + 'px)';
+						});
+						if (yamlViewport) yamlViewport.addEventListener('wheel', function(event) {
+							if (!yamlEditor || !yamlEditor.hidden) return;
+							scrollYAMLFromWheel(event);
+						}, {passive: false});
+						if (yamlGutter) yamlGutter.addEventListener('wheel', scrollYAMLFromWheel, {passive: false});
+						window.addEventListener('resize', queueYAMLLineLayout);					function syncCandidate(writeYAML) {
+						var automationName = builder.querySelector('[data-automation-name]');
+						var automationNameValue = automationName ? automationName.value : '';
+						if (automationName) candidate.name = automationNameValue;
+						builder.querySelectorAll('[data-automation-details-name]').forEach(function(input) { input.value = automationNameValue; });
+						builder.querySelectorAll('[data-candidate-json]').forEach(function(input) { input.value = JSON.stringify(candidate); });
+						if (writeYAML !== false) {
+							var serializedYAML = visualCandidateYAML();
+								if (yamlEditor) {
+									yamlSourceValue = serializedYAML;
+									yamlFoldedLines.clear();
+									setYAMLEditorDisplay(serializedYAML);
+									updateYAMLLineNumbers();
+								}							builder.querySelectorAll('[data-automation-yaml-submission]').forEach(function(input) { input.value = serializedYAML; });
+						}
+					}					function applyViewBox() { svg.setAttribute('viewBox', viewBox.join(' ')); }
 				function graphPoint(event) {
 					var point = svg.createSVGPoint();
 					point.x = event.clientX;
@@ -918,13 +1907,19 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 						remove.addEventListener('keydown', function(event) { if (event.key === 'Enter' || event.key === ' ') deleteCurrent(event); });
 						group.addEventListener('pointerdown', function(event) {
 							if (event.button !== 0 || event.target.closest('[data-connect-port], [data-delete-node]')) return;
-							event.preventDefault(); event.stopPropagation(); group.setPointerCapture(event.pointerId);
+							event.preventDefault(); event.stopPropagation(); try { group.setPointerCapture(event.pointerId); } catch (_) {}
 						var start = graphPoint(event), originX = Number(group.dataset.nodeX), originY = Number(group.dataset.nodeY);
+						var dragFrame = 0;
 						function move(moveEvent) {
 							var point = graphPoint(moveEvent);
-							renderNode(group, Math.round(originX + point.x - start.x), Math.round(originY + point.y - start.y)); renderEdges(); syncCandidate();
+							renderNode(group, Math.round(originX + point.x - start.x), Math.round(originY + point.y - start.y)); renderEdges();
+							if (!dragFrame) dragFrame = requestAnimationFrame(function() { dragFrame = 0; syncCandidate(); });
 						}
-						function done() { group.removeEventListener('pointermove', move); group.removeEventListener('pointerup', done); group.removeEventListener('pointercancel', done); }
+						function done() {
+							group.removeEventListener('pointermove', move); group.removeEventListener('pointerup', done); group.removeEventListener('pointercancel', done);
+							if (dragFrame) { cancelAnimationFrame(dragFrame); dragFrame = 0; }
+							syncCandidate();
+						}
 						group.addEventListener('pointermove', move); group.addEventListener('pointerup', done); group.addEventListener('pointercancel', done);
 					});
 						group.addEventListener('keydown', function(event) {
@@ -936,18 +1931,36 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 						event.preventDefault(); renderNode(group, Number(group.dataset.nodeX) + dx, Number(group.dataset.nodeY) + dy); renderEdges(); syncCandidate();
 					});
 				});
-				var pan = null;
-				svg.addEventListener('pointerdown', function(event) {
-					if (event.target !== svg || event.button !== 0) return;
-					var point = graphPoint(event); pan = {x: point.x, y: point.y, view: viewBox.slice()}; svg.setPointerCapture(event.pointerId);
-				});
-				svg.addEventListener('pointermove', function(event) {
-					if (!pan) return;
-					var point = graphPoint(event); viewBox[0] = pan.view[0] + pan.x - point.x; viewBox[1] = pan.view[1] + pan.y - point.y; applyViewBox();
-				});
-				svg.addEventListener('pointerup', function() { pan = null; });
-				svg.addEventListener('pointercancel', function() { pan = null; });
-				function zoom(factor) {
+					var pan = null;
+					var panFrame = 0;
+					function applyBuilderPan() {
+						panFrame = 0;
+						if (!pan || !pan.pending) return;
+						viewBox[0] = pan.view[0] - (pan.pending.x - pan.clientX) * pan.unitsX;
+						viewBox[1] = pan.view[1] - (pan.pending.y - pan.clientY) * pan.unitsY;
+						applyViewBox();
+					}
+					svg.addEventListener('pointerdown', function(event) {
+						if (event.target !== svg || event.button !== 0) return;
+						var rect = svg.getBoundingClientRect();
+						if (!rect.width || !rect.height) return;
+						pan = {pointerId:event.pointerId, clientX:event.clientX, clientY:event.clientY, view:viewBox.slice(), unitsX:viewBox[2]/rect.width, unitsY:viewBox[3]/rect.height, pending:null};
+						try { svg.setPointerCapture(event.pointerId); } catch (_) {}
+					});
+					svg.addEventListener('pointermove', function(event) {
+						if (!pan || event.pointerId !== pan.pointerId) return;
+						pan.pending = {x:event.clientX, y:event.clientY};
+						if (!panFrame) panFrame = requestAnimationFrame(applyBuilderPan);
+					});
+					function finishBuilderPan(event) {
+						if (!pan || event.pointerId !== pan.pointerId) return;
+						pan.pending = {x:event.clientX, y:event.clientY};
+						if (panFrame) { cancelAnimationFrame(panFrame); panFrame = 0; }
+						applyBuilderPan(); pan = null;
+					}
+					svg.addEventListener('pointerup', finishBuilderPan);
+					svg.addEventListener('pointercancel', finishBuilderPan);
+					function zoom(factor) {
 					var cx = viewBox[0] + viewBox[2] / 2, cy = viewBox[1] + viewBox[3] / 2;
 					viewBox[2] = Math.max(240, Math.min(3000, viewBox[2] * factor)); viewBox[3] = Math.max(160, Math.min(2000, viewBox[3] * factor));
 					viewBox[0] = cx - viewBox[2] / 2; viewBox[1] = cy - viewBox[3] / 2; applyViewBox();
@@ -964,8 +1977,8 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 					var xs = groups.map(function(group) { return Number(group.dataset.nodeX); });
 					var ys = groups.map(function(group) { return Number(group.dataset.nodeY); });
 					var minX = Math.min.apply(null, xs) - 60, minY = Math.min.apply(null, ys) - 60;
-					var maxX = Math.max.apply(null, xs) + 250, maxY = Math.max.apply(null, ys) + 164;
-					viewBox = [minX, minY, Math.max(360, maxX - minX), Math.max(240, maxY - minY)]; applyViewBox();
+					var maxX = Math.max.apply(null, xs) + 230, maxY = Math.max.apply(null, ys) + 164;
+					viewBox = [minX, minY, maxX - minX, maxY - minY]; applyViewBox();
 				});
 				root.querySelector('[data-automation-reset]').addEventListener('click', function() {
 					svg.querySelectorAll('.automation-draft-node').forEach(function(group) { renderNode(group, Number(group.dataset.defaultX), Number(group.dataset.defaultY)); });
@@ -974,12 +1987,55 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 					builder.addEventListener('htmx:beforeCleanupElement', function(event) {
 						if (event.target === builder) clearActiveConnection();
 					});
-					var automationName = builder.querySelector('[data-automation-name]');
-					if (automationName) automationName.addEventListener('input', syncCandidate);
-					builder.addEventListener('submit', syncCandidate);
-					renderEdges(); syncCandidate();
-				})();
-		</script>
+						var automationName = builder.querySelector('[data-automation-name]');
+						if (automationName) automationName.addEventListener('input', syncCandidate);					builder.addEventListener('input', function(event) { if (event.target !== yamlEditor && !event.target.closest('[data-automation-node-dialog]')) syncCandidate(); });
+					builder.addEventListener('change', function(event) { if (event.target !== yamlEditor && !event.target.closest('[data-automation-node-dialog]')) syncCandidate(); });
+					builder.addEventListener('submit', function() {
+						if (yamlEditor && automationYAMLValue() !== visualCandidateYAML()) {
+							var submittedYAML = automationYAMLValue();
+							setYAMLEditorDisplay(submittedYAML);
+							builder.querySelectorAll('[data-automation-yaml-submission]').forEach(function(input) { input.value = submittedYAML; });
+							return;
+						}
+						syncCandidate();
+					});
+						var viewRoot = builder.querySelector('[data-automation-view-root]');
+						var yamlPanel = viewRoot && viewRoot.querySelector('[data-automation-yaml-panel]');
+						var detailsPanel = viewRoot && viewRoot.querySelector('[data-automation-details-panel]');
+						var graphButton = viewRoot && viewRoot.querySelector('[data-automation-view-graph]');
+						var yamlButton = viewRoot && viewRoot.querySelector('[data-automation-view-yaml]');
+						var detailsButton = viewRoot && viewRoot.querySelector('[data-automation-view-details]');
+						var detailsForm = builder.querySelector('[data-automation-details-form]');
+						function selectAutomationBuilderView(view) {
+							var applied = window.setAutomationCanvasView && window.setAutomationCanvasView(viewRoot, view, {detailsPanelSelector: '[data-automation-details-panel]'});
+							if (!applied) return;
+							queueYAMLLineLayout();
+							if (view === 'yaml') validateYAMLNow();
+						}
+						function previewYAMLThenSelect(view) {
+							var form = document.getElementById('automation-design-form');
+							if (yamlEditor && form && automationYAMLValue() !== visualCandidateYAML()) {
+								var initialView = form.querySelector('[data-automation-initial-view]');
+								if (initialView) initialView.value = view === 'details' ? 'details' : '';
+								form.requestSubmit();
+								return;
+							}
+							selectAutomationBuilderView(view);
+						}
+						graphButton && graphButton.addEventListener('click', function() { previewYAMLThenSelect('graph'); });
+						yamlButton && yamlButton.addEventListener('click', function() { selectAutomationBuilderView('yaml'); });
+							detailsButton && detailsButton.addEventListener('click', function() { previewYAMLThenSelect('details'); });						builder.querySelectorAll('[data-automation-builder-save]').forEach(function(button) {
+							button.addEventListener('click', function(event) {
+								if (!detailsPanel || detailsPanel.hidden || !detailsForm) return;
+								event.preventDefault();
+								syncCandidate();
+								detailsForm.requestSubmit();
+							});
+						});
+							renderEdges(); syncCandidate(false);
+							var initialView = builder.querySelector('[data-automation-initial-view]');
+							if (initialView && initialView.value === 'details') selectAutomationBuilderView('details');
+					})();		</script>
 	</div>
 }
 
@@ -997,6 +2053,17 @@ func automationBuilderPostURL(page models.AutomationBuilderPage, currentProjectI
 }
 
 func automationDraftCandidateJSON(candidate models.AutomationDraftCandidate) string { value, _ := json.Marshal(candidate); return string(value) }
+func automationBuilderUsesEditShell(page models.AutomationBuilderPage) bool {
+	return page.AutomationID != "" || page.Source == "blank" || page.Source == "template" || page.Source == "describe"
+}
+func automationYAMLLineNumbers(value string) string {
+	count := strings.Count(value, "\n") + 1
+	lines := make([]string, count)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("%d", i+1)
+	}
+	return strings.Join(lines, "\n")
+}
 func automationDraftEdgesJSON(edges []models.AutomationDraftEdge) string {
 	if edges == nil {
 		return "[]"
@@ -1004,29 +2071,34 @@ func automationDraftEdgesJSON(edges []models.AutomationDraftEdge) string {
 	value, _ := json.Marshal(edges)
 	return string(value)
 }
-func automationValidationMessages(issues []models.AutomationValidationIssue, palette []models.AutomationDraftNode) []string {
-	missingNodes := []string{}
-	missingEdges := 0
+func automationValidationMessages(issues []models.AutomationValidationIssue, _ []models.AutomationDraftNode) []string {
 	messages := []string{}
 	seen := map[string]bool{}
 	for _, issue := range issues {
-		switch issue.Code {
-		case "missing_node":
-			missingNodes = append(missingNodes, automationDraftNodeName(palette, issue.NodeKey))
-		case "missing_edge":
-			missingEdges++
-		default:
-			if !seen[issue.Message] { messages = append(messages, issue.Message); seen[issue.Message] = true }
+		if !seen[issue.Message] {
+			messages = append(messages, issue.Message)
+			seen[issue.Message] = true
 		}
 	}
-	if len(missingNodes) > 0 { messages = append([]string{fmt.Sprintf("%d required nodes remain: %s.", len(missingNodes), strings.Join(missingNodes, ", "))}, messages...) }
-	if missingEdges > 0 { messages = append([]string{fmt.Sprintf("%d required connections remain.", missingEdges)}, messages...) }
 	return messages
 }
 func automationDraftHasConfig(node models.AutomationDraftNode, key string) bool { _, ok := node.Config[key]; return ok }
+func automationDraftSupportsGoal(node models.AutomationDraftNode) bool {
+	return node.Type == models.AutomationNodeTrigger || node.Type == models.AutomationNodeAgentTask
+}
+func automationDraftSupportsModel(node models.AutomationDraftNode) bool {
+	if node.Type != models.AutomationNodeTrigger && node.Type != models.AutomationNodeAgentTask {
+		return false
+	}
+	if _, ok := node.Config["model_config_id"]; ok {
+		return true
+	}
+	_, hasPrompt := node.Config["prompt"]
+	return hasPrompt
+}
 func automationDraftStringConfig(node models.AutomationDraftNode, key string) string { value, _ := node.Config[key].(string); return value }
+func automationDraftModelConfigIsDefault(node models.AutomationDraftNode) bool { value := strings.TrimSpace(automationDraftStringConfig(node, "model_config_id")); return value == "" || value == "default" }
 func automationDraftStringSliceConfig(node models.AutomationDraftNode, key string) string { values := []string{}; switch configured := node.Config[key].(type) { case []string: values = append(values, configured...); case []any: for _, value := range configured { if text, ok := value.(string); ok { values = append(values, text) } } }; return strings.Join(values, ", ") }
-func automationDraftStringSliceContains(node models.AutomationDraftNode, key, expected string) bool { switch values := node.Config[key].(type) { case []string: for _, value := range values { if value == expected { return true } }; case []any: for _, value := range values { if text, ok := value.(string); ok && text == expected { return true } } }; return false }
 func automationDraftIntConfig(node models.AutomationDraftNode, key string) int { switch value := node.Config[key].(type) { case int: return value; case float64: return int(value); case json.Number: parsed, _ := value.Int64(); return int(parsed) }; return 0 }
 func automationDraftBoolConfig(node models.AutomationDraftNode, key string) bool { value, _ := node.Config[key].(bool); return value }
 func automationDraftHasNode(nodes []models.AutomationDraftNode, key string) bool { for _, node := range nodes { if node.Key == key { return true } }; return false }
@@ -1037,6 +2109,47 @@ func automationDraftDefaultX(nodes []models.AutomationDraftNode, key string) flo
 func automationDraftDefaultY(nodes []models.AutomationDraftNode, key string) float64 { for _, node := range nodes { if node.Key == key && node.Position != nil { return node.Position.Y } }; return 0 }
 func automationDraftGraphViewBox(nodes []models.AutomationDraftNode) string { var first *models.AutomationDraftPoint; for _, node := range nodes { if node.Position != nil { first = node.Position; break } }; if first == nil { return "-60 -60 900 540" }; minX, minY, maxX, maxY := first.X, first.Y, first.X+automationGraphNodeWidth, first.Y+automationGraphNodeHeight; for _, node := range nodes { if node.Position == nil { continue }; if node.Position.X < minX { minX = node.Position.X }; if node.Position.Y < minY { minY = node.Position.Y }; if node.Position.X+automationGraphNodeWidth > maxX { maxX = node.Position.X+automationGraphNodeWidth }; if node.Position.Y+automationGraphNodeHeight > maxY { maxY = node.Position.Y+automationGraphNodeHeight } }; return fmt.Sprintf("%.0f %.0f %.0f %.0f", minX-automationGraphPadding, minY-automationGraphPadding, maxX-minX+2*automationGraphPadding, maxY-minY+2*automationGraphPadding) }
 func automationDraftEdgeNodes(nodes []models.AutomationDraftNode, edge models.AutomationDraftEdge) (models.AutomationDraftNode, models.AutomationDraftNode, bool) { var source, target models.AutomationDraftNode; var sourceOK, targetOK bool; for _, node := range nodes { if node.Key == edge.From { source, sourceOK = node, node.Position != nil }; if node.Key == edge.To { target, targetOK = node, node.Position != nil } }; return source, target, sourceOK && targetOK }
+func automationModelOptionLabel(ref models.AutomationCapabilityRef) string {
+	if len(ref.Capabilities) > 0 && strings.TrimSpace(ref.Capabilities[0]) != "" {
+		return ref.Name + " · " + strings.TrimSpace(ref.Capabilities[0])
+	}
+	return ref.Name
+}
+func automationDraftNodeModelLabel(node models.AutomationDraftNode, modelOptions []models.AutomationCapabilityRef) string {
+	if !automationDraftSupportsModel(node) {
+		return ""
+	}
+	modelID := strings.TrimSpace(automationDraftStringConfig(node, "model_config_id"))
+	if modelID == "" || modelID == "default" {
+		return "Model: Project default"
+	}
+	for _, model := range modelOptions {
+		if model.ID == modelID {
+			return "Model: " + automationModelOptionLabel(model)
+		}
+	}
+	return "Model: " + modelID
+}
+func automationLiveNodeModelLabel(node models.AutomationLiveNode) string {
+	if node.NodeType != models.AutomationNodeTrigger && node.NodeType != models.AutomationNodeAgentTask {
+		return ""
+	}
+	var config map[string]any
+	if err := json.Unmarshal([]byte(node.ConfigJSON), &config); err != nil {
+		return ""
+	}
+	if _, ok := config["model_config_id"]; !ok {
+		if _, hasPrompt := config["prompt"]; !hasPrompt {
+			return ""
+		}
+	}
+	modelID, _ := config["model_config_id"].(string)
+	modelID = strings.TrimSpace(modelID)
+	if modelID == "" || modelID == "default" {
+		return "Model: Project default"
+	}
+	return "Model: " + modelID
+}
 func automationNodeTypeLabel(nodeType models.AutomationNodeType) string {
 	if nodeType == models.AutomationNodeTrigger {
 		return "Schedule"
@@ -1052,13 +2165,13 @@ func automationCardURL(card models.AutomationCard, currentProjectID string) stri
 	return fmt.Sprintf("/automations/%s?project_id=%s", card.Automation.ID, currentProjectID)
 }
 func automationCardSearchText(card models.AutomationCard) string { return strings.Join([]string{card.Automation.Name, card.Automation.Description, card.Version.AdapterKey, string(card.Automation.LifecycleState), string(card.Automation.HealthState)}, " ") }
-func automationLiveNodeTaskURL(node models.AutomationLiveNode, resources []models.AutomationResourceSummary, projectID string) string {
+func automationLiveNodeTaskURL(node models.AutomationLiveNode, resources []models.AutomationResourceSummary, projectID string, automationID string, automationName string) string {
 	if node.NodeType != models.AutomationNodeTrigger && node.NodeType != models.AutomationNodeAgentTask {
 		return ""
 	}
 	for _, resource := range resources {
 		if resource.NodeID == node.ID && resource.ResourceType == "task" && resource.ResourceID != "" {
-			return fmt.Sprintf("/tasks/%s?project_id=%s", resource.ResourceID, projectID)
+			return fmt.Sprintf("/tasks/%s?project_id=%s&from=automation&automation_id=%s&automation_name=%s", resource.ResourceID, url.QueryEscape(projectID), url.QueryEscape(automationID), url.QueryEscape(automationName))
 		}
 	}
 	return ""
@@ -1098,9 +2211,10 @@ templ automationGraphThemeStyles() {
 		.automation-node-state--running { color: oklch(var(--p)); }
 		.automation-node-state--recently_completed { color: oklch(var(--su)); }
 		.automation-canvas-shell svg { cursor: grab; }
+		.automation-graph-link { -webkit-user-drag: none; }
 		.automation-canvas-shell svg:active { cursor: grabbing; }
 		.automation-canvas-shell .automation-draft-node { cursor: grab; }
-			.automation-canvas-shell .automation-draft-node:active { cursor: grabbing; }
+		.automation-canvas-shell .automation-draft-node:active { cursor: grabbing; }
 			.automation-connect-handle { stroke: oklch(var(--p)); stroke-width: 2; vector-effect: non-scaling-stroke; }
 			.automation-connect-handle--input { fill: oklch(var(--b2)); cursor: default; }
 			.automation-connect-handle--output { fill: oklch(var(--p)); cursor: crosshair; }
@@ -1123,8 +2237,60 @@ templ automationGraphThemeStyles() {
 	</style>
 }
 
-templ automationBreadcrumb(currentProjectID string, automationID string, automationName string, currentLabel string) {
-	<nav class="mb-6 flex min-w-0 flex-shrink-0 items-center gap-2" aria-label="Breadcrumb" data-automation-breadcrumb>
+templ automationLiveMoreActions(graph models.AutomationLiveGraph, deleteAvailable bool) {
+	<div class="dropdown dropdown-end shrink-0" data-automation-live-menu>
+		<label tabindex="0" class="btn btn-ghost btn-sm" title="More actions" aria-label={ "More actions for " + graph.Automation.Name } onclick="handleDropdownToggle(event)">
+			<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
+			</svg>
+		</label>
+			<ul tabindex="0" class="dropdown-content z-[100] menu w-48 rounded-box border border-base-300 bg-base-100 p-2 shadow">
+				if graph.TemplateUpdateAvailable {
+					<li><button type="button" data-automation-live-update-template onclick="document.getElementById('update-automation-template-modal').showModal()">Update to latest template</button></li>
+				}
+			if graph.Automation.LifecycleState == models.AutomationActive {
+				<li><button type="submit" form="automation-live-pause-form" data-automation-live-pause>Disable</button></li>
+			}
+			if graph.Automation.LifecycleState == models.AutomationPaused {
+				<li><button type="submit" form="automation-live-resume-form" data-automation-live-resume>Enable</button></li>
+			}
+			if deleteAvailable {
+				<li><button class="text-error" type="button" data-automation-live-delete onclick="document.getElementById('delete-automation-modal').showModal()">Delete</button></li>
+			}
+		</ul>
+	</div>
+}
+
+templ automationBuilderMoreActions(page models.AutomationBuilderPage, currentProjectID string) {
+	<div class="dropdown dropdown-end shrink-0" data-automation-builder-actions>
+		<label tabindex="0" class="btn btn-ghost btn-sm" title="More actions" aria-label={ "More actions for " + page.Result.Candidate.Name } onclick="handleDropdownToggle(event)">
+			<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
+			</svg>
+		</label>
+			<ul tabindex="0" class="dropdown-content z-[100] menu w-48 rounded-box border border-base-300 bg-base-100 p-2 shadow">
+				if page.LifecycleState == models.AutomationActive {
+					<li><button type="submit" form="automation-builder-pause-form" data-automation-builder-pause>Disable</button></li>
+				}
+			if page.LifecycleState == models.AutomationPaused {
+				<li><button type="submit" form="automation-builder-resume-form" data-automation-builder-resume>Enable</button></li>
+			}
+			if page.TemplateUpdateAvailable {
+				<li><button type="button" data-update-automation-template-open onclick="document.getElementById('update-automation-template-modal').showModal()">Update to latest template</button></li>
+			}
+			<li><button class="text-error" type="button" data-delete-automation-open onclick="document.getElementById('delete-automation-modal').showModal()">Delete</button></li>
+		</ul>
+	</div>
+}
+
+templ automationEditableBreadcrumb(currentProjectID string, automationName string) {
+	<nav class="flex min-w-0 flex-shrink-0 flex-wrap items-start" aria-label="Breadcrumb" data-automation-breadcrumb data-automation-editable-breadcrumb>
+		<a class="flex-shrink-0 text-2xl text-base-content/50 transition-colors hover:text-base-content/80" href={ templ.URL(fmt.Sprintf("/automations?project_id=%s", currentProjectID)) } hx-get={ fmt.Sprintf("/automations?project_id=%s", currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;">Automations</a>
+		<span class="ml-2 flex-shrink-0 text-2xl text-base-content/30">/</span>
+		<input class="input input-bordered ml-1 h-8 min-w-0 flex-1 px-[3px] py-0 text-xl font-bold leading-none sm:max-w-xl sm:text-2xl" form="automation-design-form" name="automation_name" value={ automationName } maxlength="200" required data-automation-name aria-label="Automation name"/>
+	</nav>
+}templ automationBreadcrumb(currentProjectID string, automationID string, automationName string, currentLabel string, withBottomMargin bool) {
+	<nav class={ "flex min-w-0 flex-shrink-0 items-center gap-2", templ.KV("mb-6", withBottomMargin) } aria-label="Breadcrumb" data-automation-breadcrumb>
 		<a class="flex-shrink-0 text-2xl text-base-content/50 transition-colors hover:text-base-content/80" href={ templ.URL(fmt.Sprintf("/automations?project_id=%s", currentProjectID)) } hx-get={ fmt.Sprintf("/automations?project_id=%s", currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;">Automations</a>
 		if automationName != "" {
 			<span class="flex-shrink-0 text-2xl text-base-content/30">/</span>

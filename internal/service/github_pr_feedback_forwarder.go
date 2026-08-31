@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"fmt"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -11,7 +13,7 @@ import (
 )
 
 type GitHubPRFeedbackProvider interface {
-	GetAuthenticatedUser(ctx context.Context) (*GitHubAuthenticatedUser, error)
+	GetAuthenticatedUserForRepo(ctx context.Context, repo *GitHubRepoRef) (*GitHubAuthenticatedUser, error)
 	ListPullRequestFeedback(ctx context.Context, repo *GitHubRepoRef, prNumber int) ([]GitHubPullRequestFeedback, error)
 }
 
@@ -61,7 +63,7 @@ func (f *GitHubPRFeedbackForwarder) ForwardAuthorizedFeedback(ctx context.Contex
 	if projectID == "" {
 		return nil, fmt.Errorf("project id is required")
 	}
-	authenticatedUser, err := f.github.GetAuthenticatedUser(ctx)
+	authenticatedUser, err := f.github.GetAuthenticatedUserForRepo(ctx, repo)
 	if err != nil {
 		return nil, err
 	}
@@ -78,7 +80,11 @@ func (f *GitHubPRFeedbackForwarder) ForwardAuthorizedFeedback(ctx context.Contex
 		if pr.PRNumber <= 0 || strings.TrimSpace(pr.TaskID) == "" || strings.TrimSpace(pr.ID) == "" {
 			continue
 		}
-		items, err := f.github.ListPullRequestFeedback(ctx, repo, pr.PRNumber)
+		prRepo, err := parsePersistedGitHubPullRequestURL(pr.PRURL, pr.PRNumber, repo)
+		if err != nil {
+			continue
+		}
+		items, err := f.github.ListPullRequestFeedback(ctx, prRepo, pr.PRNumber)
 		if err != nil {
 			return nil, err
 		}
@@ -107,7 +113,7 @@ func (f *GitHubPRFeedbackForwarder) ForwardAuthorizedFeedback(ctx context.Contex
 				result.SkippedUnauthorized++
 				continue
 			}
-			already, err := f.feedbackRepo.AlreadyForwarded(ctx, repo.FullName, pr.PRNumber, item.Kind, item.ID)
+			already, err := f.feedbackRepo.AlreadyForwarded(ctx, prRepo.FullName, pr.PRNumber, item.Kind, item.ID)
 			if err != nil {
 				return nil, err
 			}
@@ -130,7 +136,7 @@ func (f *GitHubPRFeedbackForwarder) ForwardAuthorizedFeedback(ctx context.Contex
 			feedbackRecord := &models.GitHubPRFeedbackForwarded{
 				TaskPullRequestID: pr.ID,
 				TaskID:            pr.TaskID,
-				RepoFullName:      repo.FullName,
+				RepoFullName:      prRepo.FullName,
 				PRNumber:          pr.PRNumber,
 				FeedbackKind:      item.Kind,
 				GitHubID:          item.ID,
@@ -160,6 +166,73 @@ func (f *GitHubPRFeedbackForwarder) ForwardAuthorizedFeedback(ctx context.Contex
 		}
 	}
 	return result, nil
+}
+
+func parsePersistedGitHubPullRequestURL(raw string, expectedPRNumber int, selectedRepo *GitHubRepoRef) (*GitHubRepoRef, error) {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return nil, fmt.Errorf("invalid pull request URL")
+	}
+	selectedHost, err := githubRepositoryWebHost(selectedRepo)
+	if err != nil {
+		return nil, err
+	}
+	if !strings.EqualFold(parsed.Scheme, "https") || !strings.EqualFold(parsed.Host, selectedHost) || parsed.User != nil || parsed.RawPath != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return nil, fmt.Errorf("unsupported pull request URL")
+	}
+	parts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
+	if len(parts) != 4 || !strings.EqualFold(parts[2], "pull") {
+		return nil, fmt.Errorf("invalid pull request URL")
+	}
+	prNumber, err := strconv.Atoi(parts[3])
+	if err != nil || prNumber <= 0 || prNumber != expectedPRNumber {
+		return nil, fmt.Errorf("pull request URL number does not match persisted number")
+	}
+	owner := strings.ToLower(strings.TrimSpace(parts[0]))
+	repo := strings.ToLower(strings.TrimSpace(parts[1]))
+	for _, segment := range []string{owner, repo} {
+		if segment == "" || segment == "." || segment == ".." {
+			return nil, fmt.Errorf("invalid pull request repository")
+		}
+		for _, char := range segment {
+			if (char < 'a' || char > 'z') && (char < '0' || char > '9') && char != '-' && char != '_' && char != '.' {
+				return nil, fmt.Errorf("invalid pull request repository")
+			}
+		}
+	}
+	webBaseURL := "https://" + selectedHost
+	return &GitHubRepoRef{
+		Owner:      owner,
+		Name:       repo,
+		FullName:   owner + "/" + repo,
+		CloneURL:   fmt.Sprintf("%s/%s/%s.git", webBaseURL, owner, repo),
+		HTMLURL:    fmt.Sprintf("%s/%s/%s", webBaseURL, owner, repo),
+		APIBaseURL: strings.TrimSpace(selectedRepo.APIBaseURL),
+	}, nil
+}
+
+func githubRepositoryWebHost(repo *GitHubRepoRef) (string, error) {
+	if repo == nil {
+		return "", fmt.Errorf("repository reference is required")
+	}
+	for _, raw := range []string{repo.HTMLURL, repo.CloneURL} {
+		if strings.TrimSpace(raw) == "" {
+			continue
+		}
+		parsed, err := url.Parse(strings.TrimSpace(raw))
+		if err != nil || !strings.EqualFold(parsed.Scheme, "https") || parsed.Host == "" || parsed.User != nil {
+			return "", fmt.Errorf("repository URL has no valid HTTPS host")
+		}
+		return parsed.Host, nil
+	}
+	if strings.TrimSpace(repo.APIBaseURL) != "" {
+		parsed, err := url.Parse(strings.TrimSpace(repo.APIBaseURL))
+		if err != nil || !strings.EqualFold(parsed.Scheme, "https") || parsed.Host == "" || parsed.User != nil {
+			return "", fmt.Errorf("GitHub API endpoint has no valid HTTPS host")
+		}
+		return parsed.Host, nil
+	}
+	return "github.com", nil
 }
 
 func isGitHubPRFeedbackSelfOrBot(authorLogin, authorType, selfLogin string) bool {

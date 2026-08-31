@@ -2,6 +2,10 @@ package repository
 
 import (
 	"context"
+	"database/sql"
+	"os"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -389,4 +393,208 @@ func TestUsageRepo_ModelUsageGlobalVisibility(t *testing.T) {
 	if totals.TotalTokens != 210 {
 		t.Errorf("expected total_tokens=210, got %d", totals.TotalTokens)
 	}
+}
+
+func TestUsageRepo_ProjectDateBoundedAggregatePlansAvoidTempBTree(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	filter := UsageFilter{
+		ProjectID: "project-plan",
+		DateFrom:  time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		DateTo:    time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC),
+		GroupBy:   "day",
+	}
+	source, where, args := usageAggregateScanSource(filter)
+	assertNoTempBTree(t, db, "project/date-bounded usage aggregate scan", `
+		SELECT provider, model, input_tokens, output_tokens, cached_input_tokens, reasoning_output_tokens,
+		       total_tokens, cost_usd, occurred_at
+		FROM `+source+` `+where+`
+		ORDER BY occurred_at ASC`, args...)
+}
+
+func TestUsageRepo_ProjectDateBoundedAggregatesComputeLocaltimeAtReadTime(t *testing.T) {
+	setUsageRepoTestLocalTimezone(t, "UTC")
+	db := testutil.NewTestDB(t)
+	repo := NewUsageRepo(db)
+	ctx := context.Background()
+	projectID := "project-timezone-change"
+	if _, err := db.ExecContext(ctx, `INSERT INTO projects (id, name) VALUES (?, ?)`, projectID, "Timezone Change Usage Project"); err != nil {
+		t.Fatalf("insert project: %v", err)
+	}
+
+	eventTime := time.Date(2026, 1, 1, 2, 30, 0, 0, time.UTC)
+	cost := 0.25
+	if err := repo.RecordUsageEvent(ctx, &models.LLMUsageEvent{
+		Provider:          "openai",
+		ProjectID:         projectID,
+		Model:             "gpt-timezone",
+		Operation:         "task",
+		Status:            "completed",
+		InputTokens:       12,
+		OutputTokens:      7,
+		CachedInputTokens: 3,
+		TotalTokens:       19,
+		CostUSD:           &cost,
+		OccurredAt:        eventTime,
+	}); err != nil {
+		t.Fatalf("RecordUsageEvent: %v", err)
+	}
+
+	setUsageRepoTestLocalTimezone(t, "America/Los_Angeles")
+	filter := UsageFilter{
+		ProjectID: projectID,
+		DateFrom:  time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		DateTo:    time.Date(2026, 1, 1, 23, 59, 59, 0, time.UTC),
+		GroupBy:   "day",
+	}
+
+	daily, err := repo.GetDailyUsage(ctx, filter)
+	if err != nil {
+		t.Fatalf("GetDailyUsage: %v", err)
+	}
+	if len(daily) != 1 || daily[0].Period != "2025-12-31" {
+		t.Fatalf("GetDailyUsage period after timezone change = %+v, want one 2025-12-31 bucket", daily)
+	}
+	byModel, err := repo.GetDailyUsageByModel(ctx, filter)
+	if err != nil {
+		t.Fatalf("GetDailyUsageByModel: %v", err)
+	}
+	if len(byModel) != 1 || byModel[0].Period != "2025-12-31" || byModel[0].Provider != "openai" || byModel[0].Model != "gpt-timezone" {
+		t.Fatalf("GetDailyUsageByModel after timezone change = %+v, want one openai/gpt-timezone 2025-12-31 bucket", byModel)
+	}
+	legacy := legacyUsageRateBuckets(t, db, filter)
+	optimized, err := repo.GetUsageRateBuckets(ctx, filter)
+	if err != nil {
+		t.Fatalf("GetUsageRateBuckets: %v", err)
+	}
+	if !reflect.DeepEqual(optimized, legacy) {
+		t.Fatalf("read-time localtime mismatch after timezone change\noptimized=%+v\nlegacy=%+v", optimized, legacy)
+	}
+}
+
+func TestUsageRepo_ProjectDateBoundedAggregatesPreserveDSTSensitiveLocaltimeSemantics(t *testing.T) {
+	setUsageRepoTestLocalTimezone(t, "America/New_York")
+	db := testutil.NewTestDB(t)
+	repo := NewUsageRepo(db)
+	ctx := context.Background()
+	projectID := "project-dst"
+	if _, err := db.ExecContext(ctx, `INSERT INTO projects (id, name) VALUES (?, ?)`, projectID, "DST Usage Project"); err != nil {
+		t.Fatalf("insert project: %v", err)
+	}
+
+	events := []time.Time{
+		time.Date(2026, 3, 8, 6, 30, 0, 0, time.UTC),
+		time.Date(2026, 3, 8, 7, 30, 0, 0, time.UTC),
+		time.Date(2026, 11, 1, 5, 30, 0, 0, time.UTC),
+		time.Date(2026, 11, 1, 6, 30, 0, 0, time.UTC),
+	}
+	for i, eventTime := range events {
+		if err := repo.RecordUsageEvent(ctx, &models.LLMUsageEvent{
+			Provider:    "openai",
+			ProjectID:   projectID,
+			Model:       "gpt-dst",
+			Operation:   "task",
+			Status:      "completed",
+			InputTokens: 10 + i,
+			TotalTokens: 10 + i,
+			OccurredAt:  eventTime,
+		}); err != nil {
+			t.Fatalf("RecordUsageEvent[%d]: %v", i, err)
+		}
+	}
+
+	filter := UsageFilter{
+		ProjectID: projectID,
+		DateFrom:  time.Date(2026, 3, 8, 0, 0, 0, 0, time.UTC),
+		DateTo:    time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC),
+	}
+	for _, groupBy := range []string{"hour", "day", "week", "month"} {
+		filter.GroupBy = groupBy
+		legacy := legacyUsageRateBuckets(t, db, filter)
+		optimized, err := repo.GetUsageRateBuckets(ctx, filter)
+		if err != nil {
+			t.Fatalf("GetUsageRateBuckets(%s): %v", groupBy, err)
+		}
+		if !reflect.DeepEqual(optimized, legacy) {
+			t.Fatalf("%s localtime bucket mismatch\noptimized=%+v\nlegacy=%+v", groupBy, optimized, legacy)
+		}
+	}
+}
+
+func setUsageRepoTestLocalTimezone(t *testing.T, name string) {
+	t.Helper()
+	oldTZ, hadTZ := os.LookupEnv("TZ")
+	oldLocal := time.Local
+	t.Cleanup(func() {
+		if hadTZ {
+			_ = os.Setenv("TZ", oldTZ)
+		} else {
+			_ = os.Unsetenv("TZ")
+		}
+		time.Local = oldLocal
+	})
+	if err := os.Setenv("TZ", name); err != nil {
+		t.Fatalf("set TZ: %v", err)
+	}
+	loc, err := time.LoadLocation(name)
+	if err != nil {
+		t.Fatalf("load location: %v", err)
+	}
+	time.Local = loc
+}
+
+func legacyUsageRateBuckets(t *testing.T, db *sql.DB, filter UsageFilter) []models.UsageRatePoint {
+	t.Helper()
+	where, args := usageWhere(filter)
+	periodExpr := usagePeriodExpression(filter.GroupBy)
+	rows, err := db.QueryContext(context.Background(), `
+		SELECT `+periodExpr+` AS period, COALESCE(SUM(total_tokens), 0), COUNT(*)
+		FROM llm_usage_events `+where+`
+		GROUP BY period
+		ORDER BY period ASC`, args...)
+	if err != nil {
+		t.Fatalf("legacy usage rate buckets: %v", err)
+	}
+	defer rows.Close()
+	var points []models.UsageRatePoint
+	for rows.Next() {
+		var point models.UsageRatePoint
+		if err := rows.Scan(&point.Period, &point.TotalTokens, &point.CallCount); err != nil {
+			t.Fatalf("scan legacy usage rate: %v", err)
+		}
+		points = append(points, point)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate legacy usage rate: %v", err)
+	}
+	return points
+}
+
+func assertNoTempBTree(t *testing.T, db *sql.DB, name, query string, args ...any) {
+	t.Helper()
+	plan := explainUsageQueryPlan(t, db, query, args...)
+	if strings.Contains(plan, "USE TEMP B-TREE") {
+		t.Fatalf("%s plan still uses a temp B-tree:\n%s", name, plan)
+	}
+}
+
+func explainUsageQueryPlan(t *testing.T, db *sql.DB, query string, args ...any) string {
+	t.Helper()
+	rows, err := db.Query("EXPLAIN QUERY PLAN "+query, args...)
+	if err != nil {
+		t.Fatalf("explain query plan: %v", err)
+	}
+	defer rows.Close()
+	var parts []string
+	for rows.Next() {
+		var id, parent, notused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &notused, &detail); err != nil {
+			t.Fatalf("scan query plan: %v", err)
+		}
+		parts = append(parts, detail)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate query plan: %v", err)
+	}
+	return strings.Join(parts, "\n")
 }

@@ -4,15 +4,20 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"strings"
+	"time"
 
+	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/lifecycle"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
+	"github.com/openvibely/openvibely/internal/update"
 )
 
 func supportsChatActionTools(agent models.LLMConfig) bool {
@@ -26,16 +31,38 @@ func (h *Handler) supportsChatActionTools(ctx context.Context, agent models.LLMC
 	return service.SupportsRuntimeChatActionTools(ctx, h.llmConfigRepo, agent)
 }
 
-type pendingAutomationPlanConfirmation struct {
-	Issue service.AutomationConfirmationIssue
-	Plan  models.AutomationSavePlan
-	Name  string
+type chatActionSummaryCollector struct {
+	createdLines []string
+	editedLines  []string
 }
 
-type chatActionSummaryCollector struct {
-	createdLines          []string
-	editedLines           []string
-	pendingAutomationPlan []pendingAutomationPlanConfirmation
+type systemUpdateStatusToolResponse struct {
+	OK                 bool                         `json:"ok"`
+	Applicable         bool                         `json:"applicable"`
+	Message            string                       `json:"message"`
+	State              string                       `json:"state,omitempty"`
+	CurrentVersion     string                       `json:"current_version,omitempty"`
+	TargetVersion      string                       `json:"target_version,omitempty"`
+	Distribution       string                       `json:"distribution,omitempty"`
+	Channel            string                       `json:"channel,omitempty"`
+	ReleaseNotesURL    string                       `json:"release_notes_url,omitempty"`
+	ApplySupported     bool                         `json:"apply_supported"`
+	UpdateAction       string                       `json:"update_action,omitempty"`
+	Manual             bool                         `json:"manual"`
+	Staged             bool                         `json:"staged"`
+	Drain              systemUpdateDrainToolSummary `json:"drain"`
+	ConfigurationError string                       `json:"configuration_error,omitempty"`
+	Error              string                       `json:"error,omitempty"`
+}
+
+type systemUpdateDrainToolSummary struct {
+	State                string `json:"state,omitempty"`
+	TaskExecutions       int    `json:"task_executions"`
+	ChatExecutions       int    `json:"chat_executions"`
+	AutomationActivities int    `json:"automation_activities"`
+	ActiveTotal          int    `json:"active_total"`
+	QueuedTotal          int    `json:"queued_total"`
+	ExpiresAt            string `json:"expires_at,omitempty"`
 }
 
 func newChatActionSummaryCollector() *chatActionSummaryCollector {
@@ -45,31 +72,93 @@ func newChatActionSummaryCollector() *chatActionSummaryCollector {
 	}
 }
 
-func (c *chatActionSummaryCollector) addAutomationPlan(pending pendingAutomationPlanConfirmation) {
-	if c == nil {
-		return
+func (h *Handler) executeViewSystemUpdate(_ context.Context) (string, error) {
+	if h == nil || h.updateCoordinator == nil || !h.updateCoordinator.Visible() {
+		return marshalSystemUpdateStatus(systemUpdateStatusToolResponse{
+			OK:         true,
+			Applicable: false,
+			Message:    "System update status is not currently visible or applicable for this installation.",
+		})
 	}
-	c.pendingAutomationPlan = append(c.pendingAutomationPlan, pending)
+	snapshot := h.updateCoordinator.Snapshot()
+	return marshalSystemUpdateStatus(systemUpdateStatusFromSnapshot(snapshot))
 }
 
-func (c *chatActionSummaryCollector) appendAutomationPlans(output string) string {
-	if c == nil || len(c.pendingAutomationPlan) == 0 {
-		return output
+func systemUpdateStatusFromSnapshot(snapshot update.CoordinatorSnapshot) systemUpdateStatusToolResponse {
+	response := systemUpdateStatusToolResponse{
+		OK:                 true,
+		Applicable:         true,
+		Message:            systemUpdateStatusMessage(snapshot),
+		State:              snapshot.State,
+		CurrentVersion:     snapshot.CurrentVersion,
+		Distribution:       snapshot.Distribution,
+		Channel:            snapshot.Channel,
+		Manual:             snapshot.Manual,
+		Staged:             snapshot.Staged,
+		ConfigurationError: snapshot.ConfigurationError,
+		Error:              snapshot.Error,
+		Drain: systemUpdateDrainToolSummary{
+			State:                snapshot.Drain.State,
+			TaskExecutions:       snapshot.Drain.Active.TaskExecutions,
+			ChatExecutions:       snapshot.Drain.Active.ChatExecutions,
+			AutomationActivities: snapshot.Drain.Active.AutomationActivities,
+			ActiveTotal:          snapshot.Drain.Active.Total(),
+			QueuedTotal:          snapshot.Drain.QueuedTotal,
+		},
 	}
-	var blocks []string
-	for _, pending := range c.pendingAutomationPlan {
-		var lines []string
-		for _, effect := range pending.Plan.Effects {
-			lines = append(lines, fmt.Sprintf("- %s %s: %s", effect.Operation, effect.ResourceType, effect.Name))
+	if !snapshot.Drain.ExpiresAt.IsZero() {
+		response.Drain.ExpiresAt = snapshot.Drain.ExpiresAt.UTC().Format(time.RFC3339)
+	}
+	if snapshot.Release != nil {
+		response.TargetVersion = snapshot.Release.Metadata.Version
+		response.ReleaseNotesURL = snapshot.Release.Metadata.ReleaseNotesURL
+		response.ApplySupported = snapshot.Release.ApplySupported
+		response.UpdateAction = snapshot.Release.Action
+	}
+	return response
+}
+
+func systemUpdateStatusMessage(snapshot update.CoordinatorSnapshot) string {
+	target := ""
+	if snapshot.Release != nil {
+		target = strings.TrimSpace(snapshot.Release.Metadata.Version)
+	}
+	switch snapshot.State {
+	case update.StateAvailable:
+		if target != "" {
+			return fmt.Sprintf("Update %s is available.", target)
 		}
-		blocks = append(blocks, fmt.Sprintf("Automation save plan for %s:\n%s\nNothing has been created or activated. To save after reviewing this stored plan, reply exactly: save %s",
-			pending.Name, strings.Join(lines, "\n"), pending.Name))
+		return "A system update is available."
+	case update.StateWaitingForIdle:
+		return "OpenVibely is waiting for active work to finish before applying the update."
+	case update.StateReady:
+		return "OpenVibely is ready for the next update step."
+	case update.StateApplying, update.StateRestarting, update.StateValidating, update.StateRollingBack:
+		return fmt.Sprintf("System update is in progress: %s.", snapshot.State)
+	case update.StateFailed:
+		return "System update failed."
+	case update.StateSucceeded:
+		return "System update succeeded."
+	case update.StateRolledBack:
+		return "System update rolled back."
+	case update.StateChecking:
+		return "OpenVibely is checking for system updates."
+	case update.StateIdle:
+		return "No actionable system update is currently visible."
+	default:
+		if strings.TrimSpace(snapshot.State) != "" {
+			return fmt.Sprintf("System update state is %s.", snapshot.State)
+		}
+		return "System update status is available."
 	}
-	summary := "\n\n---\n" + strings.Join(blocks, "\n\n")
-	if strings.Contains(output, summary) {
-		return output
+}
+
+func marshalSystemUpdateStatus(response systemUpdateStatusToolResponse) (string, error) {
+	b, err := json.Marshal(response)
+	if err != nil {
+		return "", err
 	}
-	return output + summary
+	return string(b), nil
 }
 
 func (c *chatActionSummaryCollector) addCreated(summary string) {
@@ -108,19 +197,9 @@ func containsSummaryLine(items []string, target string) bool {
 	return false
 }
 
-type createSwarmTaskToolInput struct {
-	Title            string `json:"title"`
-	Prompt           string `json:"prompt"`
-	ProjectID        string `json:"project_id"`
-	Category         string `json:"category"`
-	MaxWorkers       int    `json:"max_workers"`
-	WorkerIsolation  string `json:"worker_isolation"`
-	StartImmediately *bool  `json:"start_immediately"`
-}
-
 func isChannelActionSurface(surface chatcontrol.Surface) bool {
 	switch surface {
-	case chatcontrol.SurfaceSlack, chatcontrol.SurfaceTelegram, chatcontrol.SurfaceDiscord, chatcontrol.SurfaceEmail:
+	case chatcontrol.SurfaceSlack, chatcontrol.SurfaceTelegram, chatcontrol.SurfaceDiscord, chatcontrol.SurfaceEmail, chatcontrol.SurfaceX:
 		return true
 	default:
 		return false
@@ -128,11 +207,8 @@ func isChannelActionSurface(surface chatcontrol.Surface) bool {
 }
 
 func (h *Handler) executeCreateSwarmTaskTool(ctx context.Context, params streamingResponseParams, input json.RawMessage, collector *chatActionSummaryCollector) (string, error) {
-	if h.swarmSvc == nil {
-		return "", fmt.Errorf("create_swarm_task: swarm service unavailable")
-	}
-	var req createSwarmTaskToolInput
-	if err := json.Unmarshal(input, &req); err != nil {
+	var req service.SwarmTaskRuntimeInput
+	if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 		return "", err
 	}
 	projectID := strings.TrimSpace(params.ProjectID)
@@ -144,16 +220,10 @@ func (h *Handler) executeCreateSwarmTaskTool(ctx context.Context, params streami
 	if projectID == "" {
 		return "", fmt.Errorf("create_swarm_task: no current project")
 	}
-	category := models.CategoryActive
-	if strings.EqualFold(strings.TrimSpace(req.Category), string(models.CategoryBacklog)) {
-		category = models.CategoryBacklog
-	}
-	parent, err := h.swarmSvc.CreateSwarmTask(ctx, service.CreateSwarmTaskRequest{ProjectID: projectID, Title: req.Title, Prompt: req.Prompt, Category: category, Priority: 2, MaxWorkers: req.MaxWorkers, WorkerIsolation: req.WorkerIsolation, ReviewerEnabled: true, MergerEnabled: true, StartImmediately: req.StartImmediately})
+	_, summary, err := service.ExecuteCreateSwarmTaskRuntime(ctx, service.CreateSwarmTaskRuntimeOptions{ProjectID: projectID, Input: req, SwarmSvc: h.swarmSvc, TaskSvc: h.taskSvc})
 	if err != nil {
 		return "", err
 	}
-	plannerMessage := "Planner starts when the swarm parent is Active."
-	summary := fmt.Sprintf("Created swarm task: %s.\n%s\n- \"%s\" (%s) [TASK_ID:%s]", parent.Title, plannerMessage, parent.Title, parent.Category, parent.ID)
 	if collector != nil {
 		collector.addCreated(summary)
 	}
@@ -229,80 +299,127 @@ func (h *Handler) chatActionExecutor(params streamingResponseParams, collector *
 	return chatcontrol.BuildRuntimeToolExecutor(mode, surface, handlers)
 }
 
+func (h *Handler) materializeRuntimeAgentFromChat(ctx context.Context, projectID string, agent *models.Agent) error {
+	if h == nil || agent == nil || h.agentSkillRoot == "" {
+		return nil
+	}
+	pid := strings.TrimSpace(projectID)
+	if strings.TrimSpace(agent.ProjectID) != "" {
+		pid = strings.TrimSpace(agent.ProjectID)
+	}
+	projectRoot := ""
+	if agent.Scope == models.AgentScopeProject && pid != "" && h.projectRepo != nil {
+		projectRoot = service.ProjectSkillRootForResolver(ctx, h.projectRepo, pid)
+	}
+	target := "/agents"
+	if pid != "" {
+		target += "?project_id=" + url.QueryEscape(pid)
+	}
+	req := httptest.NewRequest(http.MethodPost, target, nil).WithContext(ctx)
+	rec := httptest.NewRecorder()
+	c := echo.New().NewContext(req, rec)
+	return h.materializeAgentToDisk(c, agent, projectRoot)
+}
+
 func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *chatActionSummaryCollector, mode models.ChatMode, surface chatcontrol.Surface) map[string]chatcontrol.RuntimeActionHandler {
 	alertHandlers := service.BuildAlertRuntimeActionHandlers(service.AlertRuntimeOptions{
 		ProjectID: params.ProjectID, CallerTaskID: params.TaskID, Source: "agent", AlertSvc: h.alertSvc, TaskRepo: h.taskRepo,
 	})
-	return map[string]chatcontrol.RuntimeActionHandler{
+	goalHandlers := h.taskGoalActionHandlers(params)
+	handlers := map[string]chatcontrol.RuntimeActionHandler{
+		"list_automations": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return h.executeListAutomationsTool(ctx, params, input)
+		},
+		"get_automation": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return h.executeGetAutomationTool(ctx, params, input)
+		},
 		"preview_automation_description": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return h.executeAutomationPreviewAction(ctx, params, input)
 		},
-		"plan_automation_save": func(ctx context.Context, input json.RawMessage) (string, error) {
-			return h.executeAutomationPlanSaveAction(ctx, params, input, collector)
-		},
 		"save_automation": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return h.executeAutomationSaveAction(ctx, params, input)
+		},
+		"update_automation_template": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return h.executeUpdateAutomationTemplateTool(ctx, params, input)
+		},
+		"run_automation_now": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return h.executeRunAutomationNowTool(ctx, params, input)
+		},
+		"pause_automation": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return h.executePauseAutomationTool(ctx, params, input)
+		},
+		"resume_automation": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return h.executeResumeAutomationTool(ctx, params, input)
+		},
+		"delete_automation": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return h.executeDeleteAutomationTool(ctx, params, input)
 		},
 		"create_swarm_task": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return h.executeCreateSwarmTaskTool(ctx, params, input, collector)
 		},
 		"create_task": func(ctx context.Context, input json.RawMessage) (string, error) {
-			var req service.TaskCreationRequest
-			if err := decodeChatActionInput(input, &req); err != nil {
-				return "", err
-			}
 			if strings.TrimSpace(params.ProjectID) == "" {
 				return "", fmt.Errorf("create_task: no current project — cannot create task without a project context")
 			}
-			if strings.TrimSpace(req.Title) == "" || strings.TrimSpace(req.Prompt) == "" {
-				return "", fmt.Errorf("create_task requires title and prompt")
-			}
-			if req.Priority == 0 {
-				req.Priority = 2
-			}
-			agents, err := h.llmConfigRepo.List(ctx)
-			if err != nil {
-				agents = nil
-			}
-			summary, _ := h.executeChatTaskCreationRequests(ctx, params.ExecID, params.ProjectID, []service.TaskCreationRequest{req}, agents, params.ChannelReply)
-			createdIDs := extractTaskIDsFromOutput(summary)
-			if len(createdIDs) == 0 {
-				return summary, fmt.Errorf("create_task: no tasks were persisted (see summary for details)")
-			}
-			if h.taskRepo != nil {
-				var missing []string
-				for _, id := range createdIDs {
-					task, getErr := h.taskRepo.GetByID(ctx, id)
-					if getErr != nil || task == nil || task.ProjectID != params.ProjectID {
-						missing = append(missing, id)
+
+			out, _, err := service.ExecuteCreateTaskRuntimeAction(ctx, input, service.RuntimeTaskCreationOptions{
+				ProjectID:     params.ProjectID,
+				TaskSvc:       h.taskSvc,
+				LLMConfigRepo: h.llmConfigRepo,
+				CreateTask: func(ctx context.Context, req service.TaskCreationRequest, agents []models.LLMConfig) ([]models.Task, string, bool, error) {
+					summary, _ := h.executeChatTaskCreationRequests(ctx, params.ExecID, params.ProjectID, []service.TaskCreationRequest{req}, agents, params.ChannelReply)
+					return nil, summary, true, nil
+				},
+				VerifyCreated: func(ctx context.Context, summary string, _ []models.Task) error {
+					createdIDs := extractTaskIDsFromOutput(summary)
+					if len(createdIDs) == 0 {
+						return fmt.Errorf("create_task: no tasks were persisted (see summary for details)")
+
 					}
-				}
-				if len(missing) > 0 {
-					return summary, fmt.Errorf("create_task: %d task(s) reported as created are not present in project %s: %s", len(missing), params.ProjectID, strings.Join(missing, ", "))
-				}
-			}
-			if collector != nil {
-				collector.addCreated(summary)
-			}
-			return strings.TrimSpace(summary), nil
+					if h.taskRepo == nil {
+						return nil
+					}
+					var missing []string
+					for _, id := range createdIDs {
+						task, getErr := h.taskRepo.GetByID(ctx, id)
+						if getErr != nil || task == nil || task.ProjectID != params.ProjectID {
+							missing = append(missing, id)
+						}
+					}
+					if len(missing) > 0 {
+						return fmt.Errorf("create_task: %d task(s) reported as created are not present in project %s: %s", len(missing), params.ProjectID, strings.Join(missing, ", "))
+					}
+					return nil
+				},
+				AddCreatedSummary: func(summary string) {
+					if collector != nil {
+						collector.addCreated(summary)
+					}
+				},
+			})
+			return out, err
 		},
 		"edit_task": func(ctx context.Context, input json.RawMessage) (string, error) {
 			var req service.TaskEditRequest
-			if err := decodeChatActionInput(input, &req); err != nil {
+			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 				return "", err
 			}
 			if strings.TrimSpace(req.ID) == "" {
 				return "", fmt.Errorf("edit_task requires id")
 			}
 			summary := h.executeChatTaskEditRequests(ctx, params.ExecID, params.ProjectID, []service.TaskEditRequest{req})
+			trimmedSummary := strings.TrimSpace(summary)
+			if strings.Contains(summary, "Failed to edit") && !strings.Contains(summary, "[TASK_EDITED:") {
+				return trimmedSummary, fmt.Errorf("edit_task: no tasks were updated")
+			}
 			if collector != nil {
 				collector.addEdited(summary)
 			}
-			return strings.TrimSpace(summary), nil
+			return trimmedSummary, nil
 		},
 		"execute_tasks": func(ctx context.Context, input json.RawMessage) (string, error) {
 			var req service.TaskExecutionRequest
-			if err := decodeChatActionInput(input, &req); err != nil {
+			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 				return "", err
 			}
 			if strings.TrimSpace(req.TaskID) == "" && strings.TrimSpace(req.Title) == "" && len(req.Tags) == 0 && req.MinPriority == 0 {
@@ -310,15 +427,24 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 			}
 			return strings.TrimSpace(h.executeChatTaskExecutionRequests(ctx, params.ExecID, params.ProjectID, []service.TaskExecutionRequest{req})), nil
 		},
+		"cancel_task": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return h.executeCancelTaskTool(ctx, params, input)
+		},
 		"list_tasks": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return service.ExecuteListTasksTool(ctx, h.taskRepo, params.ProjectID, input)
 		},
+		"view_swarm": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return h.executeViewSwarmTool(ctx, params, input)
+		},
 		"view_task_thread": func(ctx context.Context, input json.RawMessage) (string, error) {
 			var req service.ViewThreadRequest
-			if err := decodeChatActionInput(input, &req); err != nil {
+			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 				return "", err
 			}
-			return h.executeViewTaskThreadRequest(ctx, params.ProjectID, req)
+			if strings.TrimSpace(req.TaskID) == "" && strings.TrimSpace(req.Title) == "" && params.IsTaskFollowup && params.TaskID != "" {
+				req.TaskID = "current"
+			}
+			return h.executeViewTaskThreadRequest(ctx, params, req)
 		},
 		"send_to_task": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return h.executeSendToTaskTool(ctx, params, input)
@@ -344,6 +470,9 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 		"github_list_my_assigned_issues": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return h.executeGitHubListMyAssignedIssuesTool(ctx, params.ProjectID, input)
 		},
+		"github_list_existing_automation_issues": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return h.executeGitHubListExistingAutomationIssuesTool(ctx, params.ProjectID, input)
+		},
 		"github_list_assigned_issues": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return h.executeGitHubListAssignedIssuesTool(ctx, params.ProjectID, input)
 		},
@@ -356,6 +485,9 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 		"github_add_issue_labels": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return h.executeGitHubAddIssueLabelsTool(ctx, params.ProjectID, input)
 		},
+		"github_close_issue": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return h.executeGitHubCloseIssueTool(ctx, params.ProjectID, input)
+		},
 		"github_open_pull_request": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return h.executeGitHubOpenPullRequestTool(ctx, params, input)
 		},
@@ -365,47 +497,41 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 		"github_forward_pr_feedback_to_tasks": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return h.executeGitHubForwardPRFeedbackToTasksTool(ctx, params.ProjectID, input)
 		},
-		"set_task_goal": func(ctx context.Context, input json.RawMessage) (string, error) {
-			return h.executeSetTaskGoalTool(ctx, params, input)
-		},
-		"clear_task_goal": func(ctx context.Context, input json.RawMessage) (string, error) {
-			return h.executeClearTaskGoalTool(ctx, params, input)
-		},
-		"get_task_goal": func(ctx context.Context, input json.RawMessage) (string, error) {
-			return h.executeGetTaskGoalTool(ctx, params, input)
-		},
-		"pause_task_goal": func(ctx context.Context, input json.RawMessage) (string, error) {
-			return h.executePauseTaskGoalTool(ctx, params, input)
-		},
-		"resume_task_goal": func(ctx context.Context, input json.RawMessage) (string, error) {
-			return h.executeResumeTaskGoalTool(ctx, params, input)
-		},
-		"mark_task_goal_achieved": func(ctx context.Context, input json.RawMessage) (string, error) {
-			return h.executeMarkTaskGoalAchievedTool(ctx, params, input)
-		},
-		"report_task_goal_blocked": func(ctx context.Context, input json.RawMessage) (string, error) {
-			return h.executeReportTaskGoalBlockedTool(ctx, params, input)
-		},
 		"schedule_task": func(ctx context.Context, input json.RawMessage) (string, error) {
 			var req service.ScheduleTaskRequest
-			if err := decodeChatActionInput(input, &req); err != nil {
+			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
+				return "", err
+			}
+			if err := h.normalizeScheduleToolTaskReference(ctx, params, &req.TaskID, &req.Title, true); err != nil {
 				return "", err
 			}
 			return strings.TrimSpace(h.executeChatScheduleRequests(ctx, params.ProjectID, []service.ScheduleTaskRequest{req})), nil
 		},
 		"delete_schedule": func(ctx context.Context, input json.RawMessage) (string, error) {
 			var req service.DeleteScheduleRequest
-			if err := decodeChatActionInput(input, &req); err != nil {
+			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
+				return "", err
+			}
+			if err := h.normalizeScheduleToolTaskReference(ctx, params, &req.TaskID, &req.Title, strings.TrimSpace(req.ScheduleID) == ""); err != nil {
 				return "", err
 			}
 			return strings.TrimSpace(h.executeChatDeleteScheduleRequests(ctx, params.ProjectID, []service.DeleteScheduleRequest{req})), nil
 		},
 		"modify_schedule": func(ctx context.Context, input json.RawMessage) (string, error) {
 			var req service.ModifyScheduleRequest
-			if err := decodeChatActionInput(input, &req); err != nil {
+			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
+				return "", err
+			}
+			if err := h.normalizeScheduleToolTaskReference(ctx, params, &req.TaskID, &req.Title, strings.TrimSpace(req.ScheduleID) == ""); err != nil {
 				return "", err
 			}
 			return strings.TrimSpace(h.executeChatModifyScheduleRequests(ctx, params.ProjectID, []service.ModifyScheduleRequest{req})), nil
+		},
+		"list_schedules": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return service.ExecuteListSchedulesTool(ctx, h.scheduleRepo, params.ProjectID, input)
+		},
+		"view_pulse": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return service.ExecuteViewPulseTool(ctx, h.upcomingSvc, params.ProjectID, input)
 		},
 		"list_personalities": func(ctx context.Context, _ json.RawMessage) (string, error) {
 			return strings.TrimSpace(h.executeListPersonalities(ctx)), nil
@@ -415,10 +541,17 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 		},
 		"set_personality": func(ctx context.Context, input json.RawMessage) (string, error) {
 			var req service.SetPersonalityRequest
-			if err := decodeChatActionInput(input, &req); err != nil {
+			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 				return "", err
 			}
 			return strings.TrimSpace(h.executeSetPersonality(ctx, req)), nil
+		},
+		"save_custom_personality": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return service.ExecuteSaveCustomPersonalityRuntime(ctx, service.CustomPersonalitySaveOptions{
+				Input:                 input,
+				CustomPersonalityRepo: h.customPersonalityRepo,
+				SettingsRepo:          h.settingsRepo,
+			})
 		},
 		"list_models": func(ctx context.Context, _ json.RawMessage) (string, error) {
 			return strings.TrimSpace(h.executeListModels(ctx)), nil
@@ -426,11 +559,54 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 		"get_model": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return h.executeGetModel(ctx, input), nil
 		},
+		"view_usage_analytics": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return h.executeViewUsageAnalytics(ctx, params.ProjectID, input)
+		},
 		"list_agents": func(ctx context.Context, _ json.RawMessage) (string, error) {
 			return strings.TrimSpace(h.executeListAgents(ctx)), nil
 		},
+		"create_agent": func(ctx context.Context, input json.RawMessage) (string, error) {
+			req, err := service.DecodeCreateAgentRuntimeInput(input)
+			if err != nil {
+				return "", err
+			}
+			out, _, err := service.ExecuteCreateAgentRuntime(ctx, service.CreateAgentRuntimeOptions{
+				ProjectID:     params.ProjectID,
+				Input:         req,
+				AgentRepo:     h.agentRepo,
+				LLMConfigRepo: h.llmConfigRepo,
+				ProjectRepo:   h.projectRepo,
+				Materialize: func(ctx context.Context, agent *models.Agent) error {
+					return h.materializeRuntimeAgentFromChat(ctx, params.ProjectID, agent)
+				},
+			})
+			return out, err
+		},
+		"update_agent": func(ctx context.Context, input json.RawMessage) (string, error) {
+			req, err := service.DecodeUpdateAgentRuntimeInput(input)
+			if err != nil {
+				return "", err
+			}
+			out, _, err := service.ExecuteUpdateAgentRuntime(ctx, service.UpdateAgentRuntimeOptions{
+				ProjectID:     params.ProjectID,
+				Input:         req,
+				AgentRepo:     h.agentRepo,
+				LLMConfigRepo: h.llmConfigRepo,
+				ProjectRepo:   h.projectRepo,
+				Materialize: func(ctx context.Context, agent *models.Agent) error {
+					return h.materializeRuntimeAgentFromChat(ctx, params.ProjectID, agent)
+				},
+			})
+			return out, err
+		},
 		"view_settings": func(ctx context.Context, _ json.RawMessage) (string, error) {
 			return strings.TrimSpace(h.executeViewSettings(ctx)), nil
+		},
+		"list_channels": func(ctx context.Context, _ json.RawMessage) (string, error) {
+			return strings.TrimSpace(h.executeListChannels(ctx, params.ProjectID)), nil
+		},
+		"view_system_update": func(ctx context.Context, _ json.RawMessage) (string, error) {
+			return h.executeViewSystemUpdate(ctx)
 		},
 		"project_info": func(ctx context.Context, _ json.RawMessage) (string, error) {
 			return strings.TrimSpace(h.executeProjectInfo(ctx, params.ProjectID)), nil
@@ -441,29 +617,53 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 		"list_projects": func(ctx context.Context, _ json.RawMessage) (string, error) {
 			return strings.TrimSpace(h.executeListProjects(ctx, params.ProjectID)), nil
 		},
+		"create_project": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return service.ExecuteCreateGitHubProjectRuntime(ctx, input, service.CreateGitHubProjectRuntimeOptions{
+				ProjectSvc:                 h.projectSvc,
+				GitHubSvc:                  h.githubSvc,
+				MemorySvc:                  h.memorySvc,
+				AgentLibraryMaintenanceSvc: h.agentLibraryMaintenanceSvc,
+			})
+		},
+		"update_project_settings": func(ctx context.Context, input json.RawMessage) (string, error) {
+			var dispatch func()
+			if h.workerSvc != nil {
+				dispatch = h.workerSvc.DispatchNext
+			}
+			return service.ExecuteUpdateProjectSettingsRuntime(ctx, service.UpdateProjectSettingsRuntimeOptions{
+				ProjectID:          params.ProjectID,
+				Input:              input,
+				ProjectSvc:         h.projectSvc,
+				ProjectRepo:        h.projectRepo,
+				LLMConfigRepo:      h.llmConfigRepo,
+				DispatchQueuedWork: dispatch,
+			})
+		},
 		"switch_project": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return h.executeSwitchProject(ctx, params.ProjectID, input), nil
 		},
-		"list_alerts":                      alertHandlers["list_alerts"],
-		"get_alert":                        alertHandlers["get_alert"],
-		"create_alert":                     alertHandlers["create_alert"],
-		"create_notification":              alertHandlers["create_notification"],
-		"claim_alert":                      alertHandlers["claim_alert"],
-		"create_alert_implementation_task": alertHandlers["create_alert_implementation_task"],
-		"link_alert_implementation_task":   alertHandlers["link_alert_implementation_task"],
-		"complete_alert_processing":        alertHandlers["complete_alert_processing"],
-		"fail_alert_processing":            alertHandlers["fail_alert_processing"],
-		"release_alert_claim":              alertHandlers["release_alert_claim"],
+		"list_alerts":                            alertHandlers["list_alerts"],
+		"get_alert":                              alertHandlers["get_alert"],
+		"list_existing_automation_notifications": alertHandlers["list_existing_automation_notifications"],
+		"create_alert":                           alertHandlers["create_alert"],
+		"create_notification":                    alertHandlers["create_notification"],
+		"decide_alert":                           alertHandlers["decide_alert"],
+		"claim_alert":                            alertHandlers["claim_alert"],
+		"create_alert_implementation_task":       alertHandlers["create_alert_implementation_task"],
+		"link_alert_implementation_task":         alertHandlers["link_alert_implementation_task"],
+		"complete_alert_processing":              alertHandlers["complete_alert_processing"],
+		"fail_alert_processing":                  alertHandlers["fail_alert_processing"],
+		"release_alert_claim":                    alertHandlers["release_alert_claim"],
 		"delete_alert": func(ctx context.Context, input json.RawMessage) (string, error) {
 			var req service.DeleteAlertRequest
-			if err := decodeChatActionInput(input, &req); err != nil {
+			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 				return "", err
 			}
 			return strings.TrimSpace(h.executeDeleteAlertRequests(ctx, params.ProjectID, []service.DeleteAlertRequest{req})), nil
 		},
 		"toggle_alert": func(ctx context.Context, input json.RawMessage) (string, error) {
 			var req service.ToggleAlertRequest
-			if err := decodeChatActionInput(input, &req); err != nil {
+			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 				return "", err
 			}
 			return strings.TrimSpace(h.executeToggleAlertRequests(ctx, params.ProjectID, []service.ToggleAlertRequest{req})), nil
@@ -478,8 +678,8 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 			var req struct {
 				Mode string `json:"mode"`
 			}
-			if err := json.Unmarshal(input, &req); err != nil {
-				return "", fmt.Errorf("invalid input: %w", err)
+			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
+				return "", err
 			}
 			newMode := models.NormalizeChatMode(req.Mode)
 			return fmt.Sprintf("Chat mode set to %s. The mode change will take effect on the next message.", newMode), nil
@@ -493,7 +693,12 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 				summaries = filterAssignedAgentCapabilitySummaries(summaries, params.AgentDefinition)
 			}
 			return formatCapabilities(summaries, selectedMemoryHandles), nil
-		}}
+		},
+	}
+	for name, handler := range goalHandlers {
+		handlers[name] = handler
+	}
+	return handlers
 }
 
 // ---- New action executors ----
@@ -506,24 +711,6 @@ type githubCreateIssueToolInput struct {
 	RepoURL   string   `json:"repo_url"`
 }
 
-type githubIssueToolInput struct {
-	IssueNumber           int      `json:"issue_number"`
-	IssueURL              string   `json:"issue_url"`
-	RepoURL               string   `json:"repo_url"`
-	Assignee              string   `json:"assignee"`
-	GitHubLogin           string   `json:"github_login"`
-	Body                  string   `json:"body"`
-	Labels                []string `json:"labels"`
-	TaskID                string   `json:"task_id"`
-	Title                 string   `json:"title"`
-	PRTitle               string   `json:"pr_title"`
-	PRBody                string   `json:"pr_body"`
-	Base                  string   `json:"base"`
-	Draft                 bool     `json:"draft"`
-	ExpectedHeadSHA       string   `json:"expected_head_sha"`
-	ConfirmHistoryRewrite bool     `json:"confirm_history_rewrite"`
-}
-
 func (h *Handler) resolveGitHubRepoForTool(ctx context.Context, projectID string) (*service.GitHubRepoRef, error) {
 	return h.resolveGitHubRepoForToolURL(ctx, projectID, "")
 }
@@ -531,10 +718,6 @@ func (h *Handler) resolveGitHubRepoForTool(ctx context.Context, projectID string
 func (h *Handler) resolveGitHubRepoForToolURL(ctx context.Context, projectID, repoURL string) (*service.GitHubRepoRef, error) {
 	if h.githubSvc == nil {
 		return nil, fmt.Errorf("github service unavailable")
-	}
-	automationContext, automationBound := service.AutomationContextFromContext(ctx)
-	if strings.TrimSpace(repoURL) != "" && (!automationBound || automationContext.ProjectID != projectID) {
-		return h.githubSvc.ResolveRepo(ctx, repoURL, "")
 	}
 	if h.projectRepo == nil {
 		return nil, fmt.Errorf("project repository unavailable")
@@ -546,14 +729,7 @@ func (h *Handler) resolveGitHubRepoForToolURL(ctx context.Context, projectID, re
 	if project == nil {
 		return nil, fmt.Errorf("current project not found")
 	}
-	if automationBound && automationContext.ProjectID == projectID {
-		repoPath := ""
-		if strings.TrimSpace(project.RepoURL) == "" {
-			repoPath = project.RepoPath
-		}
-		return h.githubSvc.ResolveRepo(ctx, project.RepoURL, repoPath)
-	}
-	return h.githubSvc.ResolveRepo(ctx, project.RepoURL, project.RepoPath)
+	return service.ResolveGitHubToolRepository(ctx, h.githubSvc, projectID, repoURL, project)
 }
 
 func requireAutomationGitHubRepo(ctx context.Context, projectID string, project *models.Project) error {
@@ -566,7 +742,7 @@ func requireAutomationGitHubRepo(ctx context.Context, projectID string, project 
 
 func (h *Handler) executeGitHubCreateIssueTool(ctx context.Context, projectID string, input json.RawMessage) (string, error) {
 	var req githubCreateIssueToolInput
-	if err := json.Unmarshal(input, &req); err != nil {
+	if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 		return "", err
 	}
 	repo, err := h.resolveGitHubRepoForToolURL(ctx, projectID, req.RepoURL)
@@ -580,153 +756,60 @@ func (h *Handler) executeGitHubCreateIssueTool(ctx context.Context, projectID st
 	return githubToolJSON(map[string]any{"ok": true, "issue": issue})
 }
 
-func (h *Handler) executeGitHubGetIssueTool(ctx context.Context, projectID string, input json.RawMessage) (string, error) {
-	var req githubIssueToolInput
-	if err := json.Unmarshal(input, &req); err != nil {
-		return "", err
-	}
-	repo, err := h.resolveGitHubRepoForToolURL(ctx, projectID, req.RepoURL)
-	if err != nil {
-		return "", err
-	}
-	issue, err := h.githubSvc.GetIssue(ctx, repo, req.IssueNumber)
-	if err != nil {
-		return "", err
-	}
-	return githubToolJSON(map[string]any{"ok": true, "issue": issue})
+func (h *Handler) githubIssueActionCore(projectID string) *service.GitHubIssueActionCore {
+	return service.NewGitHubIssueActionCore(h.githubSvc, h.githubAuthRepo, projectID,
+		chatcontrol.DecodeRuntimeToolInput,
+		func(ctx context.Context, repoURL string) (*service.GitHubRepoRef, error) {
+			return h.resolveGitHubRepoForToolURL(ctx, projectID, repoURL)
+		})
 }
 
-func (h *Handler) executeGitHubGetProjectInboxTool(ctx context.Context, projectID string, _ json.RawMessage) (string, error) {
-	if h.githubAuthRepo == nil {
-		return "", fmt.Errorf("github auth repository unavailable")
-	}
-	actors, err := h.githubAuthRepo.ListAuthorizedInboxAssignees(ctx)
-	if err != nil {
-		return "", err
-	}
-	assignees := make([]string, 0, len(actors))
-	for _, actor := range actors {
-		if login := repository.NormalizeGitHubLogin(actor.GitHubLogin); login != "" {
-			assignees = append(assignees, login)
-		}
-	}
-	legacyInbox, err := h.githubAuthRepo.GetEnabledProjectInbox(ctx, projectID)
-	if err != nil {
-		return "", err
-	}
-	return githubToolJSON(map[string]any{"ok": true, "configured": len(assignees) > 0, "assignees": assignees, "authorized_users": actors, "legacy_inbox": legacyInbox})
+func (h *Handler) executeGitHubGetIssueTool(ctx context.Context, projectID string, input json.RawMessage) (string, error) {
+	return h.githubIssueActionCore(projectID).ExecuteGetIssue(ctx, input)
+}
+
+func (h *Handler) executeGitHubGetProjectInboxTool(ctx context.Context, projectID string, input json.RawMessage) (string, error) {
+	return h.githubIssueActionCore(projectID).ExecuteGetProjectInbox(ctx, input)
 }
 
 func (h *Handler) executeGitHubIsActorAuthorizedTool(ctx context.Context, input json.RawMessage) (string, error) {
-	if h.githubAuthRepo == nil {
-		return "", fmt.Errorf("github auth repository unavailable")
-	}
-	var req githubIssueToolInput
-	if err := json.Unmarshal(input, &req); err != nil {
-		return "", err
-	}
-	login := strings.TrimSpace(req.GitHubLogin)
-	if login == "" {
-		return "", fmt.Errorf("github_login is required")
-	}
-	authorized, err := h.githubAuthRepo.IsActorAuthorized(ctx, login)
-	if err != nil {
-		return "", err
-	}
-	return githubToolJSON(map[string]any{"ok": true, "github_login": repository.NormalizeGitHubLogin(login), "authorized": authorized})
+	return h.githubIssueActionCore("").ExecuteIsActorAuthorized(ctx, input)
 }
 
 func (h *Handler) executeGitHubListMyAssignedIssuesTool(ctx context.Context, projectID string, input json.RawMessage) (string, error) {
-	var req githubIssueToolInput
-	if err := json.Unmarshal(input, &req); err != nil {
-		return "", err
-	}
-	repo, err := h.resolveGitHubRepoForToolURL(ctx, projectID, req.RepoURL)
-	if err != nil {
-		return "", err
-	}
-	user, issues, err := h.githubSvc.ListAuthenticatedAssignedIssues(ctx, repo)
-	if err != nil {
-		return "", err
-	}
-	return githubToolJSON(map[string]any{"ok": true, "account": user, "issues": issues})
+	return h.githubIssueActionCore(projectID).ExecuteListMyAssignedIssues(ctx, input)
+}
+
+func (h *Handler) executeGitHubListExistingAutomationIssuesTool(ctx context.Context, projectID string, input json.RawMessage) (string, error) {
+	return h.githubIssueActionCore(projectID).ExecuteListExistingAutomationIssues(ctx, input)
 }
 
 func (h *Handler) executeGitHubListAssignedIssuesTool(ctx context.Context, projectID string, input json.RawMessage) (string, error) {
-	var req githubIssueToolInput
-	if err := json.Unmarshal(input, &req); err != nil {
-		return "", err
-	}
-	assignee := strings.TrimSpace(req.Assignee)
-	if assignee == "" {
-		return "", fmt.Errorf("assignee is required")
-	}
-	repo, err := h.resolveGitHubRepoForToolURL(ctx, projectID, req.RepoURL)
-	if err != nil {
-		return "", err
-	}
-	issues, err := h.githubSvc.ListAssignedIssues(ctx, repo, assignee)
-	if err != nil {
-		return "", err
-	}
-	return githubToolJSON(map[string]any{"ok": true, "assignee": repository.NormalizeGitHubLogin(assignee), "issues": issues})
+	return h.githubIssueActionCore(projectID).ExecuteListAssignedIssues(ctx, input)
 }
 
 func (h *Handler) executeGitHubListAssignedIssuesWithPRsTool(ctx context.Context, projectID string, input json.RawMessage) (string, error) {
-	var req githubIssueToolInput
-	if err := json.Unmarshal(input, &req); err != nil {
-		return "", err
-	}
-	if strings.TrimSpace(req.Assignee) == "" {
-		return "", fmt.Errorf("assignee is required")
-	}
-	repo, err := h.resolveGitHubRepoForToolURL(ctx, projectID, req.RepoURL)
-	if err != nil {
-		return "", err
-	}
-	items, err := h.githubSvc.ListAssignedIssuesWithPullRequests(ctx, repo, req.Assignee)
-	if err != nil {
-		return "", err
-	}
-	return githubToolJSON(map[string]any{"ok": true, "items": items, "skipped_without_pr": "Assigned issues without an associated pull request are skipped."})
+	return h.githubIssueActionCore(projectID).ExecuteListAssignedIssuesWithPRs(ctx, input)
 }
 
 func (h *Handler) executeGitHubCommentOnIssueTool(ctx context.Context, projectID string, input json.RawMessage) (string, error) {
-	var req githubIssueToolInput
-	if err := json.Unmarshal(input, &req); err != nil {
-		return "", err
-	}
-	repo, err := h.resolveGitHubRepoForToolURL(ctx, projectID, req.RepoURL)
-	if err != nil {
-		return "", err
-	}
-	if err := h.githubSvc.CommentOnIssue(ctx, repo, req.IssueNumber, req.Body); err != nil {
-		return "", err
-	}
-	return githubToolJSON(map[string]any{"ok": true, "issue_number": req.IssueNumber})
+	return h.githubIssueActionCore(projectID).ExecuteCommentOnIssue(ctx, input)
 }
 
 func (h *Handler) executeGitHubAddIssueLabelsTool(ctx context.Context, projectID string, input json.RawMessage) (string, error) {
-	var req githubIssueToolInput
-	if err := json.Unmarshal(input, &req); err != nil {
-		return "", err
-	}
-	repo, err := h.resolveGitHubRepoForToolURL(ctx, projectID, req.RepoURL)
-	if err != nil {
-		return "", err
-	}
-	if err := h.githubSvc.AddLabelsToIssue(ctx, repo, req.IssueNumber, req.Labels); err != nil {
-		return "", err
-	}
-	return githubToolJSON(map[string]any{"ok": true, "issue_number": req.IssueNumber, "labels": req.Labels})
+	return h.githubIssueActionCore(projectID).ExecuteAddIssueLabels(ctx, input)
+}
+
+func (h *Handler) executeGitHubCloseIssueTool(ctx context.Context, projectID string, input json.RawMessage) (string, error) {
+	return h.githubIssueActionCore(projectID).ExecuteCloseIssue(ctx, input)
 }
 
 func (h *Handler) executeGitHubForwardPRFeedbackToTasksTool(ctx context.Context, projectID string, input json.RawMessage) (string, error) {
 	if h.taskPullRequestRepo == nil || h.githubPRFeedbackRepo == nil || h.githubAuthRepo == nil || h.threadInputRepo == nil {
 		return "", fmt.Errorf("github pr feedback forwarding dependencies unavailable")
 	}
-	var req githubIssueToolInput
-	if err := json.Unmarshal(input, &req); err != nil {
+	var req service.GitHubIssueActionRequest
+	if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 		return "", err
 	}
 	repo, err := h.resolveGitHubRepoForToolURL(ctx, projectID, req.RepoURL)
@@ -748,40 +831,48 @@ func (h *Handler) executeGitHubForwardPRFeedbackToTasksTool(ctx context.Context,
 	return githubToolJSON(map[string]any{"ok": true, "result": result})
 }
 
+func (h *Handler) resolveGitHubPRTaskForTool(ctx context.Context, params streamingResponseParams, taskID, title string) (*models.Task, *models.Project, error) {
+	resolvedTaskID, err := h.resolveTaskIDForTool(ctx, params, taskID, title)
+	if err != nil {
+		return nil, nil, err
+	}
+	task, err := h.taskRepo.GetByID(ctx, resolvedTaskID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if task == nil || task.ProjectID != params.ProjectID {
+		return nil, nil, fmt.Errorf("task not found in current project")
+	}
+	project, err := h.projectRepo.GetByID(ctx, params.ProjectID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if project == nil {
+		return nil, nil, fmt.Errorf("current project not found")
+	}
+	if err := requireAutomationGitHubRepo(ctx, params.ProjectID, project); err != nil {
+		return nil, nil, err
+	}
+	return task, project, nil
+}
+
 func (h *Handler) executeGitHubOpenPullRequestTool(ctx context.Context, params streamingResponseParams, input json.RawMessage) (string, error) {
 	if h.taskPullRequestRepo == nil {
 		return "", fmt.Errorf("task pull request repository unavailable")
 	}
-	var req githubIssueToolInput
-	if err := json.Unmarshal(input, &req); err != nil {
+	var req service.GitHubIssueActionRequest
+	if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 		return "", err
 	}
-	taskID, err := h.resolveTaskIDForTool(ctx, params, req.TaskID, req.Title)
+	task, project, err := h.resolveGitHubPRTaskForTool(ctx, params, req.TaskID, req.Title)
 	if err != nil {
-		return "", err
-	}
-	task, err := h.taskRepo.GetByID(ctx, taskID)
-	if err != nil {
-		return "", err
-	}
-	if task == nil || task.ProjectID != params.ProjectID {
-		return "", fmt.Errorf("task not found in current project")
-	}
-	project, err := h.projectRepo.GetByID(ctx, params.ProjectID)
-	if err != nil {
-		return "", err
-	}
-	if project == nil {
-		return "", fmt.Errorf("current project not found")
-	}
-	if err := requireAutomationGitHubRepo(ctx, params.ProjectID, project); err != nil {
 		return "", err
 	}
 	var issueNumber *int
 	if req.IssueNumber > 0 {
 		issueNumber = &req.IssueNumber
 	}
-	result, err := service.NewTaskPullRequestService(h.githubSvc, h.taskPullRequestRepo).OpenForTask(ctx, project, task, service.OpenTaskPullRequestOptions{
+	result, err := h.newTaskPullRequestService().OpenForTask(ctx, project, task, service.OpenTaskPullRequestOptions{
 		Title:       req.PRTitle,
 		Body:        req.PRBody,
 		Base:        req.Base,
@@ -799,35 +890,18 @@ func (h *Handler) executeGitHubReplacePullRequestBranchTool(ctx context.Context,
 	if h.taskPullRequestRepo == nil {
 		return "", fmt.Errorf("task pull request repository unavailable")
 	}
-	var req githubIssueToolInput
-	if err := json.Unmarshal(input, &req); err != nil {
+	var req service.GitHubIssueActionRequest
+	if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 		return "", err
 	}
 	if !req.ConfirmHistoryRewrite {
 		return "", fmt.Errorf("confirm_history_rewrite must be true to replace pull request branch history")
 	}
-	taskID, err := h.resolveTaskIDForTool(ctx, params, req.TaskID, req.Title)
+	task, project, err := h.resolveGitHubPRTaskForTool(ctx, params, req.TaskID, req.Title)
 	if err != nil {
 		return "", err
 	}
-	task, err := h.taskRepo.GetByID(ctx, taskID)
-	if err != nil {
-		return "", err
-	}
-	if task == nil || task.ProjectID != params.ProjectID {
-		return "", fmt.Errorf("task not found in current project")
-	}
-	project, err := h.projectRepo.GetByID(ctx, params.ProjectID)
-	if err != nil {
-		return "", err
-	}
-	if project == nil {
-		return "", fmt.Errorf("current project not found")
-	}
-	if err := requireAutomationGitHubRepo(ctx, params.ProjectID, project); err != nil {
-		return "", err
-	}
-	record, err := service.NewTaskPullRequestService(h.githubSvc, h.taskPullRequestRepo).ReplaceBranchHeadForTask(ctx, project, task, req.ExpectedHeadSHA)
+	record, err := h.newTaskPullRequestService().ReplaceBranchHeadForTask(ctx, project, task, req.ExpectedHeadSHA)
 	if err != nil {
 		return "", err
 	}
@@ -843,6 +917,10 @@ func (h *Handler) executeGitHubReplacePullRequestBranchTool(ctx context.Context,
 func githubToolJSON(payload map[string]any) (string, error) {
 	b, err := json.Marshal(payload)
 	return string(b), err
+}
+
+func (h *Handler) executeViewUsageAnalytics(ctx context.Context, projectID string, input json.RawMessage) (string, error) {
+	return service.ExecuteViewUsageAnalyticsTool(ctx, h.usageAnalyticsSvc, projectID, input)
 }
 
 func (h *Handler) executeGetPersonality(ctx context.Context) string {
@@ -865,30 +943,30 @@ func (h *Handler) executeGetModel(ctx context.Context, input json.RawMessage) st
 		ModelID string `json:"model_id"`
 		Name    string `json:"name"`
 	}
-	if err := json.Unmarshal(input, &req); err != nil {
+	if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 		return "Invalid input for get_model."
 	}
 
-	configs, err := h.llmConfigRepo.List(ctx)
+	c, err := h.llmConfigRepo.GetRuntimeSummary(ctx, req.ModelID, req.Name)
 	if err != nil {
 		applog.Infof("[handler] executeGetModel error: %v", err)
 		return "Error retrieving model configurations."
 	}
-
-	for _, c := range configs {
-		if (req.ModelID != "" && c.ID == req.ModelID) ||
-			(req.Name != "" && strings.EqualFold(c.Name, req.Name)) {
-			defaultStr := ""
-			if c.IsDefault {
-				defaultStr = " (default)"
-			}
-			workerInfo := ""
-			if c.MaxWorkers > 0 {
-				workerInfo = fmt.Sprintf(", max_workers: %d", c.MaxWorkers)
-			}
-			return fmt.Sprintf("Model: %s%s\n  Provider: %s\n  Model ID: %s\n  Auth: %s%s",
-				c.Name, defaultStr, c.Provider, c.Model, c.AuthMethod, workerInfo)
+	if c != nil {
+		defaultStr := ""
+		if c.IsDefault {
+			defaultStr = " (default)"
 		}
+		workerInfo := ""
+		if c.MaxWorkers > 0 {
+			workerInfo = fmt.Sprintf(", max_workers: %d", c.MaxWorkers)
+		}
+		authStr := string(c.AuthMethod)
+		if authStr == "" {
+			authStr = string(models.AuthMethodAPIKey)
+		}
+		return fmt.Sprintf("Model: %s%s\n  Provider: %s\n  Model ID: %s\n  Auth: %s%s",
+			c.Name, defaultStr, c.Provider, c.Model, authStr, workerInfo)
 	}
 
 	if req.ModelID != "" {
@@ -917,7 +995,7 @@ func (h *Handler) executeSwitchProject(ctx context.Context, currentProjectID str
 	var req struct {
 		Project string `json:"project"`
 	}
-	if err := json.Unmarshal(input, &req); err != nil {
+	if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 		return "Invalid input for switch_project."
 	}
 	target := strings.TrimSpace(req.Project)
@@ -950,7 +1028,7 @@ func (h *Handler) executeGetAlert(ctx context.Context, projectID string, input j
 	var req struct {
 		AlertID string `json:"alert_id"`
 	}
-	if err := json.Unmarshal(input, &req); err != nil {
+	if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 		return "Invalid input for get_alert."
 	}
 	if req.AlertID == "" {
@@ -1010,34 +1088,13 @@ func formatCapabilities(summaries []chatcontrol.ActionSummary, selectedMemoryHan
 	return sb.String()
 }
 
-func decodeChatActionInput(input json.RawMessage, dst any) error {
-	payload := input
-	if len(strings.TrimSpace(string(payload))) == 0 {
-		payload = json.RawMessage(`{}`)
-	}
-	if err := json.Unmarshal(payload, dst); err != nil {
-		return fmt.Errorf("invalid tool input JSON: %w", err)
-	}
-	return nil
-}
-
 // buildChatActionToolRuntimeFromDefs creates a RuntimeTools from pre-computed tool
 // definitions and the shared executor. Used by processStreamingResponse which
 // computes defs from the registry before calling this.
 func (h *Handler) buildChatActionToolRuntimeFromDefs(params streamingResponseParams, collector *chatActionSummaryCollector, defs []llmcontracts.RuntimeToolDefinition, mode models.ChatMode, surface chatcontrol.Surface) *llmcontracts.RuntimeTools {
-	genericExecutor := h.chatActionExecutor(params, collector, mode, surface)
 	return &llmcontracts.RuntimeTools{
 		Definitions: defs,
-		Executor: func(ctx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
-			if params.IsTaskFollowup && params.Task != nil && h.llmSvc != nil {
-				if hardened := h.llmSvc.AutomationGitHubRuntimeTools(ctx, *params.Task, defs); hardened != nil {
-					if output, handled, isError, err := hardened.Executor(ctx, name, input); handled {
-						return output, true, isError, err
-					}
-				}
-			}
-			return genericExecutor(ctx, name, input)
-		},
+		Executor:    h.chatActionExecutor(params, collector, mode, surface),
 	}
 }
 
@@ -1055,16 +1112,89 @@ func chatActionToolDefinitions() []llmcontracts.RuntimeToolDefinition {
 	return chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true)
 }
 
-type taskGoalToolInput struct {
+type sendToTaskToolInput struct {
 	TaskID      string `json:"task_id"`
 	Title       string `json:"title"`
-	Goal        string `json:"goal"`
-	GoalID      string `json:"goal_id"`
-	Reason      string `json:"reason"`
-	BlockerKey  string `json:"blocker_key"`
 	Message     string `json:"message"`
 	Origin      string `json:"origin"`
 	OriginAgent string `json:"origin_agent"`
+}
+
+type cancelTaskToolInput struct {
+	TaskID string `json:"task_id"`
+	Title  string `json:"title"`
+}
+
+func (h *Handler) executeCancelTaskTool(ctx context.Context, params streamingResponseParams, input json.RawMessage) (string, error) {
+	var req cancelTaskToolInput
+	if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
+		return "", err
+	}
+	taskIDInput := strings.TrimSpace(req.TaskID)
+	if taskIDInput == "" && strings.TrimSpace(req.Title) == "" && params.IsTaskFollowup && params.TaskID != "" {
+		taskIDInput = "current"
+	}
+	taskID, err := h.resolveTaskIDForTool(ctx, params, taskIDInput, req.Title)
+	if err != nil {
+		return "", err
+	}
+	task, err := h.resolveTaskReference(ctx, params.ProjectID, taskID, "")
+	if err != nil {
+		return "", err
+	}
+	if taskIDInput == "" && strings.TrimSpace(req.Title) != "" && !strings.EqualFold(strings.TrimSpace(task.Title), strings.TrimSpace(req.Title)) {
+		return "", fmt.Errorf("no task found with exact title %q", strings.TrimSpace(req.Title))
+	}
+	result, err := h.cancelTaskWork(ctx, task, false, "ChatCancelTask")
+	if err != nil {
+		return "", err
+	}
+	b, err := json.Marshal(result)
+	return string(b), err
+}
+
+func (h *Handler) executeViewSwarmTool(ctx context.Context, params streamingResponseParams, input json.RawMessage) (string, error) {
+	var req service.ViewSwarmRequest
+	if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
+		return "", fmt.Errorf("view_swarm: %w", err)
+	}
+	taskID := strings.TrimSpace(req.TaskID)
+	title := strings.TrimSpace(req.Title)
+	if taskID == "current" || (taskID == "" && title == "" && params.IsTaskFollowup && params.TaskID != "") {
+		resolvedTaskID, err := h.resolveTaskIDForTool(ctx, params, "current", "")
+		if err != nil {
+			return "", err
+		}
+		req.TaskID = resolvedTaskID
+		req.Title = ""
+		encoded, err := json.Marshal(req)
+		if err != nil {
+			return "", err
+		}
+		input = encoded
+	}
+	return service.ExecuteViewSwarmTool(ctx, h.taskRepo, params.ProjectID, input)
+}
+
+func (h *Handler) normalizeScheduleToolTaskReference(ctx context.Context, params streamingResponseParams, taskID, title *string, defaultOmittedToCurrent bool) error {
+	if taskID == nil || title == nil {
+		return nil
+	}
+	trimmedTaskID := strings.TrimSpace(*taskID)
+	trimmedTitle := strings.TrimSpace(*title)
+	if trimmedTaskID != "current" {
+		if trimmedTaskID != "" || trimmedTitle != "" || !defaultOmittedToCurrent || !params.IsTaskFollowup || params.TaskID == "" {
+			return nil
+		}
+		trimmedTaskID = "current"
+	}
+	resolvedTaskID, err := h.resolveTaskIDForTool(ctx, params, trimmedTaskID, trimmedTitle)
+	if err != nil {
+		return err
+	}
+	*taskID = resolvedTaskID
+	*title = ""
+	return nil
 }
 
 func (h *Handler) resolveTaskIDForTool(ctx context.Context, params streamingResponseParams, taskID, title string) (string, error) {
@@ -1073,10 +1203,14 @@ func (h *Handler) resolveTaskIDForTool(ctx context.Context, params streamingResp
 		if !params.IsTaskFollowup || params.TaskID == "" {
 			return "", fmt.Errorf("task_id current is only valid in a persisted task thread")
 		}
-		return params.TaskID, nil
+		taskID = params.TaskID
 	}
 	if taskID != "" {
-		return taskID, nil
+		task, err := h.resolveTaskReference(ctx, params.ProjectID, taskID, "")
+		if err != nil {
+			return "", err
+		}
+		return task.ID, nil
 	}
 	if strings.TrimSpace(title) != "" {
 		task, err := h.resolveTaskReference(ctx, params.ProjectID, "", title)
@@ -1088,101 +1222,16 @@ func (h *Handler) resolveTaskIDForTool(ctx context.Context, params streamingResp
 	return "", fmt.Errorf("task_id is required")
 }
 
-func goalToolJSON(goal *models.TaskGoal) (string, error) {
-	payload := map[string]any{"ok": true, "goal": goal}
-	if goal != nil {
-		payload["task_id"] = goal.TaskID
-	}
-	b, err := json.Marshal(payload)
-	return string(b), err
-}
-
-func (h *Handler) executeSetTaskGoalTool(ctx context.Context, params streamingResponseParams, input json.RawMessage) (string, error) {
-	if h.taskGoalSvc == nil {
-		return "", fmt.Errorf("task goal service unavailable")
-	}
-	var req taskGoalToolInput
-	if err := json.Unmarshal(input, &req); err != nil {
-		return "", err
-	}
-	taskID, err := h.resolveTaskIDForTool(ctx, params, req.TaskID, req.Title)
-	if err != nil {
-		return "", err
-	}
-	goal, err := h.taskGoalSvc.SetGoal(ctx, taskID, req.Goal, service.GoalOptions{Actor: "assistant"})
-	if err != nil {
-		return "", err
-	}
-	return goalToolJSON(goal)
-}
-
-func (h *Handler) executeGetTaskGoalTool(ctx context.Context, params streamingResponseParams, input json.RawMessage) (string, error) {
-	if h.taskGoalSvc == nil {
-		return "", fmt.Errorf("task goal service unavailable")
-	}
-	var req taskGoalToolInput
-	if err := json.Unmarshal(input, &req); err != nil {
-		return "", err
-	}
-	taskID, err := h.resolveTaskIDForTool(ctx, params, req.TaskID, req.Title)
-	if err != nil {
-		return "", err
-	}
-	goal, err := h.taskGoalSvc.GetGoal(ctx, taskID)
-	if err != nil {
-		return "", err
-	}
-	return goalToolJSON(goal)
-}
-
-func (h *Handler) executeClearTaskGoalTool(ctx context.Context, params streamingResponseParams, input json.RawMessage) (string, error) {
-	if h.taskGoalSvc == nil {
-		return "", fmt.Errorf("task goal service unavailable")
-	}
-	var req taskGoalToolInput
-	if err := json.Unmarshal(input, &req); err != nil {
-		return "", err
-	}
-	taskID, err := h.resolveTaskIDForTool(ctx, params, req.TaskID, req.Title)
-	if err != nil {
-		return "", err
-	}
-	if err := h.taskGoalSvc.ClearGoal(ctx, taskID, "assistant"); err != nil {
-		return "", err
-	}
-	goal, _ := h.taskGoalSvc.GetGoal(ctx, taskID)
-	return goalToolJSON(goal)
-}
-
-func (h *Handler) executePauseTaskGoalTool(ctx context.Context, params streamingResponseParams, input json.RawMessage) (string, error) {
-	return h.executeGoalStatusTool(ctx, params, input, func(taskID string) error {
-		return h.taskGoalSvc.PauseGoal(ctx, taskID, "assistant")
+func (h *Handler) taskGoalActionHandlers(params streamingResponseParams) map[string]chatcontrol.RuntimeActionHandler {
+	return service.BuildTaskGoalRuntimeActionHandlers(service.TaskGoalRuntimeActionOptions{
+		TaskGoalSvc: h.taskGoalSvc,
+		ResolveTaskID: func(ctx context.Context, req service.TaskGoalRuntimeToolInput) (string, error) {
+			return h.resolveTaskIDForTool(ctx, params, req.TaskID, req.Title)
+		},
+		AuthorizeStatusTool: func(ctx context.Context, toolName string) error {
+			return requireGoalStatusToolGrant(ctx, params, toolName)
+		},
 	})
-}
-
-func (h *Handler) executeResumeTaskGoalTool(ctx context.Context, params streamingResponseParams, input json.RawMessage) (string, error) {
-	return h.executeGoalStatusTool(ctx, params, input, func(taskID string) error {
-		return h.taskGoalSvc.ResumeGoal(ctx, taskID, "assistant")
-	})
-}
-
-func (h *Handler) executeGoalStatusTool(ctx context.Context, params streamingResponseParams, input json.RawMessage, fn func(string) error) (string, error) {
-	if h.taskGoalSvc == nil {
-		return "", fmt.Errorf("task goal service unavailable")
-	}
-	var req taskGoalToolInput
-	if err := json.Unmarshal(input, &req); err != nil {
-		return "", err
-	}
-	taskID, err := h.resolveTaskIDForTool(ctx, params, req.TaskID, req.Title)
-	if err != nil {
-		return "", err
-	}
-	if err := fn(taskID); err != nil {
-		return "", err
-	}
-	goal, _ := h.taskGoalSvc.GetGoal(ctx, taskID)
-	return goalToolJSON(goal)
 }
 
 func requireGoalStatusToolGrant(ctx context.Context, params streamingResponseParams, toolName string) error {
@@ -1201,53 +1250,9 @@ func requireGoalStatusToolGrant(ctx context.Context, params streamingResponsePar
 	return fmt.Errorf("tool %s requires an explicit agent tool grant", toolName)
 }
 
-func (h *Handler) executeMarkTaskGoalAchievedTool(ctx context.Context, params streamingResponseParams, input json.RawMessage) (string, error) {
-	if err := requireGoalStatusToolGrant(ctx, params, "mark_task_goal_achieved"); err != nil {
-		return "", err
-	}
-	if h.taskGoalSvc == nil {
-		return "", fmt.Errorf("task goal service unavailable")
-	}
-	var req taskGoalToolInput
-	if err := json.Unmarshal(input, &req); err != nil {
-		return "", err
-	}
-	taskID, err := h.resolveTaskIDForTool(ctx, params, req.TaskID, req.Title)
-	if err != nil {
-		return "", err
-	}
-	goal, err := h.taskGoalSvc.MarkAchieved(ctx, taskID, req.GoalID, req.Reason)
-	if err != nil {
-		return "", err
-	}
-	return goalToolJSON(goal)
-}
-
-func (h *Handler) executeReportTaskGoalBlockedTool(ctx context.Context, params streamingResponseParams, input json.RawMessage) (string, error) {
-	if err := requireGoalStatusToolGrant(ctx, params, "report_task_goal_blocked"); err != nil {
-		return "", err
-	}
-	if h.taskGoalSvc == nil {
-		return "", fmt.Errorf("task goal service unavailable")
-	}
-	var req taskGoalToolInput
-	if err := json.Unmarshal(input, &req); err != nil {
-		return "", err
-	}
-	taskID, err := h.resolveTaskIDForTool(ctx, params, req.TaskID, req.Title)
-	if err != nil {
-		return "", err
-	}
-	goal, err := h.taskGoalSvc.RecordBlockedReport(ctx, taskID, req.GoalID, req.BlockerKey, req.Reason)
-	if err != nil {
-		return "", err
-	}
-	return goalToolJSON(goal)
-}
-
 func (h *Handler) executeSendToTaskTool(ctx context.Context, params streamingResponseParams, input json.RawMessage) (string, error) {
-	var req taskGoalToolInput
-	if err := json.Unmarshal(input, &req); err != nil {
+	var req sendToTaskToolInput
+	if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 		return "", err
 	}
 	taskIDInput := strings.TrimSpace(req.TaskID)
@@ -1260,6 +1265,9 @@ func (h *Handler) executeSendToTaskTool(ctx context.Context, params streamingRes
 	}
 	origin, originAgent := sanitizeSendToTaskLineage(ctx, req.Origin, req.OriginAgent, params)
 	if err := h.rejectStaleLifecycleSendToTask(ctx); err != nil {
+		return "", err
+	}
+	if err := h.rejectCancelledLifecycleSendToTask(ctx, taskID); err != nil {
 		return "", err
 	}
 	if origin == models.TaskOriginSystemAgent && originAgent == models.AgentSystemKindGoal && h.taskGoalSvc != nil {
@@ -1282,6 +1290,49 @@ func (h *Handler) executeSendToTaskTool(ctx context.Context, params streamingRes
 func isGoalLifecycleHookAgent(ctx context.Context) bool {
 	agent, ok := lifecycle.HookAgentFromContext(ctx)
 	return ok && agent.SystemKind == models.AgentSystemKindGoal
+}
+
+func (h *Handler) rejectCancelledLifecycleSendToTask(ctx context.Context, destinationTaskID string) error {
+	agent, ok := lifecycle.HookAgentFromContext(ctx)
+	if !ok || h.taskRepo == nil {
+		return nil
+	}
+	for _, taskID := range []string{strings.TrimSpace(agent.TaskID), strings.TrimSpace(destinationTaskID)} {
+		if taskID == "" {
+			continue
+		}
+		if h.workerSvc != nil && h.workerSvc.IsCancellationRequested(taskID) {
+			return fmt.Errorf("cancelled lifecycle task %s cannot enqueue continuation", taskID)
+		}
+		task, err := h.taskRepo.GetByID(ctx, taskID)
+		if err != nil {
+			return err
+		}
+		if task != nil && task.Status == models.StatusCancelled && !lifecycleHookMayContinueFromCancelledSource(agent, taskID) {
+			return fmt.Errorf("cancelled lifecycle task %s cannot enqueue continuation", taskID)
+		}
+	}
+	return nil
+}
+
+func lifecycleHookMayContinueFromCancelledSource(agent lifecycle.HookAgent, taskID string) bool {
+	if strings.TrimSpace(agent.TaskID) == "" || strings.TrimSpace(agent.TaskID) != strings.TrimSpace(taskID) {
+		return false
+	}
+	return lifecycleHookHasNonCancellationExecutionError(agent.ExecutionError)
+}
+
+func lifecycleHookHasNonCancellationExecutionError(executionError string) bool {
+	msg := strings.ToLower(strings.TrimSpace(executionError))
+	if msg == "" {
+		return false
+	}
+	switch msg {
+	case "task cancelled", "task canceled", "task cancelled by user", "task canceled by user", "context canceled", "context cancelled":
+		return false
+	default:
+		return true
+	}
 }
 
 func (h *Handler) rejectStaleLifecycleSendToTask(ctx context.Context) error {
@@ -1340,7 +1391,7 @@ func sanitizeSendToTaskLineage(ctx context.Context, requestedOrigin, requestedOr
 		origin = strings.TrimSpace(params.ChannelReply.Source)
 	}
 	switch origin {
-	case models.TaskOriginSlack, models.TaskOriginTelegram, models.TaskOriginEmail, models.TaskOriginDiscord:
+	case models.TaskOriginSlack, models.TaskOriginTelegram, models.TaskOriginEmail, models.TaskOriginDiscord, models.TaskOriginX:
 		return origin, ""
 	default:
 		return models.TaskOriginWeb, ""
@@ -1397,44 +1448,52 @@ func assignedAgentToolDenied(toolName string, agentDef *models.Agent) bool {
 
 func taskThreadAllowedRuntimeToolNames(agentDef *models.Agent) map[string]bool {
 	allowed := map[string]bool{
-		"list_tasks":                           true,
-		"view_task_thread":                     true,
-		"send_to_task":                         true,
-		"send_message":                         true,
-		"create_task":                          true,
-		"execute_tasks":                        true,
-		"create_swarm_task":                    true,
-		"schedule_task":                        true,
-		"delete_schedule":                      true,
-		"modify_schedule":                      true,
-		"create_alert":                         true,
-		"create_notification":                  true,
-		"list_alerts":                          true,
-		"get_alert":                            true,
-		"claim_alert":                          true,
-		"create_alert_implementation_task":     true,
-		"link_alert_implementation_task":       true,
-		"complete_alert_processing":            true,
-		"fail_alert_processing":                true,
-		"release_alert_claim":                  true,
-		"github_create_issue":                  true,
-		"github_get_issue":                     true,
-		"github_get_project_inbox":             true,
-		"github_is_actor_authorized":           true,
-		"github_list_my_assigned_issues":       true,
-		"github_list_assigned_issues":          true,
-		"github_list_assigned_issues_with_prs": true,
-		"github_comment_on_issue":              true,
-		"github_add_issue_labels":              true,
-		"github_open_pull_request":             true,
-		"github_replace_pull_request_branch":   true,
-		"github_forward_pr_feedback_to_tasks":  true,
-		"set_task_goal":                        true,
-		"clear_task_goal":                      true,
-		"get_task_goal":                        true,
-		"pause_task_goal":                      true,
-		"resume_task_goal":                     true,
-		"list_capabilities":                    true,
+		"list_tasks":                             true,
+		"view_swarm":                             true,
+		"view_task_thread":                       true,
+		"send_to_task":                           true,
+		"send_message":                           true,
+		"create_task":                            true,
+		"execute_tasks":                          true,
+		"create_swarm_task":                      true,
+		"list_schedules":                         true,
+		"view_usage_analytics":                   true,
+		"view_pulse":                             true,
+		"view_system_update":                     true,
+		"schedule_task":                          true,
+		"delete_schedule":                        true,
+		"modify_schedule":                        true,
+		"create_alert":                           true,
+		"create_notification":                    true,
+		"list_alerts":                            true,
+		"get_alert":                              true,
+		"list_existing_automation_notifications": true,
+		"decide_alert":                           true,
+		"claim_alert":                            true,
+		"create_alert_implementation_task":       true,
+		"link_alert_implementation_task":         true,
+		"complete_alert_processing":              true,
+		"fail_alert_processing":                  true,
+		"release_alert_claim":                    true,
+		"github_create_issue":                    true,
+		"github_get_issue":                       true,
+		"github_get_project_inbox":               true,
+		"github_is_actor_authorized":             true,
+		"github_list_my_assigned_issues":         true,
+		"github_list_existing_automation_issues": true,
+		"github_list_assigned_issues":            true,
+		"github_list_assigned_issues_with_prs":   true,
+		"github_comment_on_issue":                true,
+		"github_add_issue_labels":                true,
+		"github_close_issue":                     true,
+		"github_open_pull_request":               true, "github_replace_pull_request_branch": true,
+		"github_forward_pr_feedback_to_tasks": true,
+		"set_task_goal":                       true,
+		"clear_task_goal":                     true,
+		"get_task_goal":                       true,
+		"pause_task_goal":                     true,
+		"resume_task_goal":                    true,
+		"list_capabilities":                   true,
 	}
 	for _, tool := range explicitlyGrantedTaskThreadRuntimeTools(agentDef) {
 		allowed[tool] = true

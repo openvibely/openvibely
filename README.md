@@ -1,8 +1,12 @@
 # OpenVibely
 
+[![Test](https://github.com/openvibely/openvibely/actions/workflows/test.yml/badge.svg)](https://github.com/openvibely/openvibely/actions/workflows/test.yml)
+[![codecov](https://codecov.io/github/openvibely/openvibely/graph/badge.svg?token=VL6VTQEKR7)](https://codecov.io/github/openvibely/openvibely)
+[![License: MIT](docs/badges/license-mit.svg)](LICENSE)
+
 The only recursive self-improvement command center for software teams.
 
-OpenVibely turns one Chat into the control plane for your entire AI development workflow. Describe a goal once, then let it fan out into parallel task sessions, live agent execution, reviewable diffs, scheduled follow-ups, and durable project learning.
+OpenVibely turns one Chat into the control plane for your entire AI development workflow. Describe a goal once, then coordinate parallel task sessions, reusable Automation Graphs, scheduled work, live agent execution, and reviewable changes from one place.
 
 Agents do the work. You stay in command. Inspect any thread, review any diff, steer any task, and keep the whole plan moving from the original conversation.
 
@@ -43,15 +47,43 @@ Useful starting points:
 | Operations footprint | Self-host a single Go binary with SQLite by default, plus optional Docker/VPS and desktop modes. |
 | Visibility and control | Use live status, execution logs, thread history, changed files, review comments, alerts, and insights to keep AI work auditable. |
 
-## Quick Start (Recommended)
+## Install OpenVibely (Recommended)
 
-### Prerequisite
+The hosted installers detect your operating system and amd64 or arm64 architecture automatically.
 
-- Go `1.26.5+`
+### macOS And Linux
 
-### Fresh Clone
+Desktop app:
 
-For most users, setup is this fast:
+```bash
+curl -fsSL https://openvibely.ai/install.sh | bash -s -- --variant desktop
+```
+
+Server:
+
+```bash
+curl -fsSL https://openvibely.ai/install.sh | bash -s -- --variant binary
+```
+
+### Windows PowerShell
+
+Desktop app:
+
+```powershell
+& ([scriptblock]::Create((irm https://openvibely.ai/install.ps1))) -Variant desktop
+```
+
+Server:
+
+```powershell
+& ([scriptblock]::Create((irm https://openvibely.ai/install.ps1))) -Variant binary
+```
+
+See the <a href="https://docs.openvibely.ai/installation" target="_blank" rel="noopener noreferrer">Installation guide</a> for install locations, version pinning, replacement behavior, and every supported platform.
+
+## Run From Source
+
+Requires Go `1.27.0+`:
 
 ```bash
 git clone https://github.com/openvibely/openvibely.git
@@ -61,7 +93,7 @@ cd openvibely
 
 Open `http://localhost:3001`.
 
-## Optional Developer Workflow
+### Optional Developer Workflow
 
 Live reload while editing Go, templ, HTML, CSS, or JS files:
 
@@ -180,15 +212,29 @@ Desktop mode defaults:
 | Setting | Desktop default | Env override |
 |---|---|---|
 | Port | `0` (ephemeral) | `PORT` |
-| DB path | `~/.openvibely/openvibely.db` | `DATABASE_PATH` or `OPENVIBELY_APP_DATA_DIR` |
-| Repo root | `~/.openvibely/repos` | `PROJECT_REPO_ROOT` or `OPENVIBELY_APP_DATA_DIR` |
+| DB path | Platform app-data directory (`~/Library/Application Support/OpenVibely` on macOS, `%LOCALAPPDATA%\OpenVibely` on Windows, `$XDG_DATA_HOME/openvibely` on Linux) | `DATABASE_PATH` or `OPENVIBELY_APP_DATA_DIR` |
+| Repo root | `<platform app-data directory>/repos` | `PROJECT_REPO_ROOT` or `OPENVIBELY_APP_DATA_DIR` |
 | Local repo paths | enabled | `OPENVIBELY_ENABLE_LOCAL_REPO_PATH` |
 
-Runtime storage defaults to the same user app directory used by the web/server binary so desktop and web share the same DB by default. The desktop wrapper still reads its optional `config.env` from the OS desktop config directory, and all env vars still work as overrides in desktop mode.
+Desktop user data is stored outside the replaceable application install unit in the OS application-data directory. Updates and rollbacks replace only the signed OpenVibely `.app` bundle on macOS or desktop executable on Windows/Linux; databases, projects, memories, skills, agents, configuration, credentials, plugins, and other user data are never copied, replaced, deleted, or rolled back. All storage environment variables still work as explicit external overrides in desktop mode, but must resolve outside the install and backup boundaries.
 
 ### Docker
 
-VPS/Docker deployment uses the `Dockerfile`. For persistent runtime state, deploy with a durable data volume and configure runtime paths through environment variables. See [`docs/environment.md`](./docs/environment.md) and <a href="https://docs.openvibely.ai/deployment" target="_blank" rel="noopener noreferrer">Deployment</a>.
+The default image is designed for the complete OpenVibely workflow:
+
+| Image definition | Purpose | Contents |
+|---|---|---|
+| `Dockerfile` | Published OpenVibely server and coding-agent image | Fedora-based runtime with Go, Node.js/npm/Corepack/TypeScript, Python/pip/venv, Rust/cargo, Java/JDK, Ruby, Git, ripgrep, and native build tools |
+| `Dockerfile-dev` | Developing OpenVibely itself | Live-reload environment with the repository source, Air, templ, Swagger, Go, Node.js, and rootless Podman |
+
+The server executes coding agents in the same image, so `openvibely/openvibely` includes the language runtimes and build tools those agents need. Build and verify it with:
+
+```bash
+make docker-build
+make docker-check-tools
+```
+
+The image runs as UID/GID `10001:10001`, so mounted `/data` storage must be writable by that user. See <a href="https://docs.openvibely.ai/deployment" target="_blank" rel="noopener noreferrer">Deployment</a> for storage setup and upgrade guidance, and [`docs/environment.md`](./docs/environment.md) for runtime configuration.
 
 ## OAuth by Mode
 

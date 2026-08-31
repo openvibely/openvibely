@@ -31,7 +31,6 @@ Modifier examples the agent will understand:
 | `Release version 0.1.1` | Full pipeline — preflight, build, notes, docs, publish |
 | `Release version 0.1.1 — dry run only` | Runs all steps with `DRY_RUN=1`; no git push, no GitHub release |
 | `Release version 0.1.1 — create as draft` | GitHub release is created as a draft for review before publishing |
-| `Release version 0.1.1 — skip Docker` | Suppresses the Docker reminder (still a manual step regardless) |
 | `Release version 0.1.1 — build step only` | Runs preflight + build; stops before notes, docs, or publish |
 | `Release version 0.1.1 — preflight already passed, start from build` | Skips preflight, runs build → notes → docs → publish |
 
@@ -55,27 +54,31 @@ Before a real non-dry-run release, confirm the exact commit that will receive th
 |------|---------|---------|
 | `go` | Build server/desktop binaries | https://go.dev/dl |
 | `git` | Tag, branch, commit range | pre-installed |
-| `gh` (GitHub CLI) | Create GitHub release, upload assets | `brew install gh` or https://cli.github.com |
+| `gh` (GitHub CLI) | Create GitHub release, upload assets | installed locally under `.tools/gh` by signing setup when missing |
 | `zip` | Package Windows and macOS archives | pre-installed macOS/Linux |
 | `tar` | Package server tarballs | pre-installed |
 | `sha256sum` / `shasum` | Generate SHA256SUMS | pre-installed (Linux/macOS) |
-| `docker` *(optional)* | Build and push Docker image | https://docker.com |
-| `x86_64-w64-mingw32-gcc` *(optional)* | Cross-compile Windows desktop-cli | `brew install mingw-w64` |
+| `java` | Run `jsign` for Azure Artifact Signing | installed locally under `.tools/jre` by signing setup when missing |
+| `python3` | Bootstrap local Azure CLI when system `az` is unavailable | installed locally under `.tools/python` when Python 3.14+ is missing |
+| `az` | Fetch Azure Artifact Signing access token | installed locally under `.tools/azure-cli`, or replaced by `AZURE_ACCESS_TOKEN` |
+| `docker` *(optional)* | Build/push Docker image and host Wails Linux desktop cross-builds | https://docker.com |
+| `wails3` | Run desktop Taskfile builds and Wails Docker build paths | installed locally under `.tools/wails3` by signing setup when missing |
 
-**macOS-only:** macOS desktop `.app` bundles can only be built on a macOS host. Server artifacts for all platforms can be cross-compiled from any OS.
+**Platform builds:** macOS desktop `.app` bundles require a macOS host. Linux desktop binaries for amd64 and arm64 require native Linux build jobs, Wails v3 Docker/Taskfile builds, or `OPENVIBELY_LINUX_DESKTOP_BINARY` plus `OPENVIBELY_LINUX_ARM64_DESKTOP_BINARY`. Windows desktop binaries for amd64 and arm64 build through Wails with Go cross-compilation (`CGO_ENABLED=0`); `OPENVIBELY_WINDOWS_DESKTOP_BINARY` can supply a prebuilt amd64 artifact. Official release builds fail if any required desktop artifact is unavailable.
 
 ### Missing tools — install before proceeding
 
-If preflight or a dry run reports a required release tool as missing, install it during the task before continuing. Do not stop at "tool missing" unless installation fails, requires unavailable privileges, or requires user-owned credentials/auth that cannot be completed non-interactively.
+If preflight or a dry run reports a required release tool as missing, run the release tooling setup during the task before continuing. Do not stop at "tool missing" unless setup fails, requires unavailable privileges, or requires user-owned credentials/auth that cannot be completed non-interactively.
 
-Common macOS installs:
+Release tooling setup:
 
 ```bash
-brew install gh
-brew install mingw-w64
+bash .openvibely/skills/openvibely_release_workflow/scripts/check-release-signing.sh --setup
 ```
 
-After installing `gh`, run `gh auth status`; if unauthenticated, run `gh auth login` or ask the user to complete GitHub authentication. If the user has already requested the real release and later completes `gh` authentication or another credential step, treat the original release request as still active: verify auth and preflight, then continue the release pipeline. Do not stop with a status-only summary asking whether to proceed unless a new hard blocker remains or the user explicitly changed the request to dry-run/status mode. For optional tools, install them when the requested release artifact or Docker step depends on them; otherwise document the skipped capability in the release summary.
+`ensure-release-tooling.sh` installs local release tools under `.tools`, including `gh` and `wails3` when missing. When Docker is running, it also builds or refreshes `wails-cross-amd64` and `wails-cross-arm64` by default. Set `SKIP_WAILS_DOCKER_SETUP=1` to skip that heavier Wails Linux desktop image setup, or `OPENVIBELY_WAILS_CROSS_ARCH=arm64` to prepare only one architecture.
+
+After setup, run `gh auth status`; if unauthenticated, run `gh auth login` or ask the user to complete GitHub authentication. If the user has already requested the real release and later completes `gh` authentication or another credential step, treat the original release request as still active: verify auth and preflight, then continue the release pipeline. Do not stop with a status-only summary asking whether to proceed unless a new hard blocker remains or the user explicitly changed the request to dry-run/status mode. For platform-specific desktop builds, install the required Wails, Docker, or native platform dependencies when practical, or supply the corresponding signed/prebuilt artifact hook. Official releases cannot omit Windows or Linux desktop artifacts; the build stops if either cannot be produced. Windows desktop normally uses Go's built-in cross-compilation; Linux desktop still needs a native Linux/WebKit build path, Wails v3 Docker/Taskfile build, or `OPENVIBELY_LINUX_DESKTOP_BINARY`.
 
 ---
 
@@ -91,7 +94,7 @@ Run `release-preflight.sh <version>` first, or let `release.sh` run it automatic
 6. **Tag collision** — fails if `v<version>` already exists locally or in GitHub releases.
 7. **Previous tag** — finds latest `v*` tag for changelog range.
 8. **Commit count** — lists unreleased commits for review.
-9. **Build capability** — reports whether macOS desktop, Windows desktop-cli, and Docker are available on the current host.
+9. **Build capability** — reports whether macOS, Windows, and Linux desktop artifacts can be built locally or must be supplied by their native release jobs, plus Docker availability.
 
 ---
 
@@ -101,25 +104,28 @@ Run `release-preflight.sh <version>` first, or let `release.sh` run it automatic
 
 ```bash
 cd /path/to/openvibely
+# The release script automatically creates/loads .release-signing.env and runs
+# signing readiness checks before building.
 DRY_RUN=1 .openvibely/skills/openvibely_release_workflow/scripts/release.sh 0.1.1
 # Review dry-run output, then:
 .openvibely/skills/openvibely_release_workflow/scripts/release.sh 0.1.1
 ```
 
-The orchestrator runs steps in sequence, with a mandatory AI synthesis + docs + review pause before publishing.
+The orchestrator runs steps in sequence. It pauses before publishing for release-note and artifact review; the agent must also treat docs review as a hard publishing gate before continuing past that pause.
 
 ```text
-Step 0: agent sanity check    — verify HEAD/tag target is intended main release commit
-Step 1: release-preflight.sh  — validate environment, auth, tags, build caps
-Step 2: release-build.sh      — build all artifacts → dist/0.1.1/ and verify archive contents
-Step 3: release-notes.sh      — collect COMMITS.txt, render RELEASE_NOTES.md shell
-Step 4: (agent)               — read COMMITS.txt, synthesize release-specific highlights and changelog, fill placeholders
-Step 5: (agent)               — update docs for features added or meaningfully changed in this release
-Step 6: (review)              — confirm RELEASE_NOTES.md, docs updates, and artifact sanity checks look correct
-Step 7: release-publish.sh    — create GitHub release, upload artifacts
+Step 0: agent sanity check          — verify HEAD/tag target is intended main release commit
+Step 0b: check-release-signing.sh   — create/load .release-signing.env, install release tooling, verify signing readiness
+Step 1: release-preflight.sh        — validate environment, auth, tags, build caps
+Step 2: release-build.sh            — build all artifacts → dist/0.1.1/ and verify archive contents
+Step 3: release-notes.sh            — collect COMMITS.txt, render RELEASE_NOTES.md shell
+Step 4: (agent)                     — read COMMITS.txt, synthesize release-specific highlights and changelog, fill placeholders
+Step 5: (agent)                     — review docs impact and update docs for features added or meaningfully changed in this release
+Step 6: (review)                    — confirm RELEASE_NOTES.md, docs updates, and artifact sanity checks look correct
+Step 7: release-publish.sh          — create GitHub release, upload artifacts
 ```
 
-Step 4 is not automated — the orchestrating agent reads `COMMITS.txt` and writes both the `Highlights` and `What's Changed` sections using AI judgment (see Release Notes Generation below). Step 5 is also agent-owned — update the user docs before publishing so the release tag and public documentation include the features being announced.
+Step 4 is not automated — the orchestrating agent reads `COMMITS.txt` and writes both the `Highlights` and `What's Changed` sections using AI judgment (see Release Notes Generation below). Step 5 is also agent-owned and mandatory: before publishing, search the relevant docs surfaces, update stale or missing user-facing documentation, and include those docs changes in the intended release commit. If no docs changes are needed, record that decision in the release summary before continuing. If docs updates are needed while using the automated script, make them at the pre-publish review pause and do not press Enter to publish until they are committed or intentionally included in the tag plan.
 
 ### Option B: Step-by-step (for debugging or partial runs)
 
@@ -130,15 +136,46 @@ SCRIPTS=".openvibely/skills/openvibely_release_workflow/scripts"
 git status --short --branch
 git log --oneline -3
 
-# 1. Preflight
+# 1. Signing readiness + preflight
+bash $SCRIPTS/check-release-signing.sh --setup
 bash $SCRIPTS/release-preflight.sh 0.1.1
 
-# 2. Build artifacts
+# 2. Build artifacts. Official artifacts require the embedded Ed25519 trust
+#    root. The signing check creates/loads .release-signing.env and downloads
+#    native signing/verification tools into .tools/ when needed. Credentials are
+#    supplied by the release environment and are never generated.
+OPENVIBELY_RELEASE_KEY_ID=openvibely-release-1
+OPENVIBELY_RELEASE_PUBLIC_KEY='<base64-encoded-32-byte-Ed25519-public-key>'
+OPENVIBELY_MACOS_SIGN_IDENTITY='Developer ID Application: Example (TEAMID)'
+OPENVIBELY_MACOS_NOTARY_PROFILE='openvibely-notary'
+OPENVIBELY_AZURE_SIGNING_ENDPOINT='<azure-region>.codesigning.azure.net'
+OPENVIBELY_AZURE_SIGNING_ACCOUNT='<artifact-signing-account-name>'
+OPENVIBELY_AZURE_SIGNING_PROFILE='<certificate-profile-name>'
+OPENVIBELY_AZURE_SUBSCRIPTION_ID='<optional-azure-subscription-id>'
+OPENVIBELY_WINDOWS_SIGN_COMMAND="$(pwd)/$SCRIPTS/sign-windows.sh"
+OPENVIBELY_WINDOWS_VERIFY_COMMAND="$(pwd)/$SCRIPTS/verify-windows.sh"
+# On a non-Windows/non-Linux release coordinator, provide binaries built by
+# the corresponding native release jobs. The build fails if either desktop
+# artifact cannot be produced.
+export OPENVIBELY_WINDOWS_DESKTOP_BINARY='/secure/path/to/openvibely-desktop.exe'
+export OPENVIBELY_LINUX_DESKTOP_BINARY='/secure/path/to/openvibely-desktop-amd64'
+export OPENVIBELY_LINUX_ARM64_DESKTOP_BINARY='/secure/path/to/openvibely-desktop-arm64'
 bash $SCRIPTS/release-build.sh 0.1.1 ./dist/0.1.1
+
+# If macOS notarization is slow or interrupted, re-run the same command from
+# the same release commit. The build resumes existing Apple submissions from:
+#   ./dist/0.1.1/notarization-state.tsv
+# and keeps the matching local files in:
+#   ./.release-tmp/build-0.1.1/
+# Delete both only when intentionally forcing fresh macOS submissions.
 
 # 2b. Verify archive contents, especially macOS .app zips
 #     The top-level extracted desktop bundle must end exactly in .app.
+#     The zip must not contain AppleDouble/resource-fork metadata such as ._* or __MACOSX entries.
 unzip -Z1 ./dist/0.1.1/OpenVibely_0.1.1_darwin_amd64.app.zip | head
+if unzip -Z1 ./dist/0.1.1/OpenVibely_0.1.1_darwin_amd64.app.zip | grep -E '(^|/)\._|(^|/)__MACOSX(/|$)|(^|/)\.DS_Store$'; then
+  echo "invalid macOS app zip metadata"
+fi
 
 # 3. Collect commits + render notes template
 bash $SCRIPTS/release-notes.sh 0.1.1 v0.1.0 ./dist/0.1.1
@@ -147,7 +184,7 @@ bash $SCRIPTS/release-notes.sh 0.1.1 v0.1.0 ./dist/0.1.1
 #    Read:  ./dist/0.1.1/COMMITS.txt
 #    Edit:  ./dist/0.1.1/RELEASE_NOTES.md  (replace AI_HIGHLIGHTS_PLACEHOLDER and AI_CHANGELOG_PLACEHOLDER blocks)
 
-# 5. (Agent step) Update docs for new and changed user-facing features before publishing
+# 5. (Agent step) Review docs impact and update docs for new and changed user-facing features before publishing
 #    Edit relevant in-repo docs/*.md files and the docs site repo if available.
 
 # 6. Review the final RELEASE_NOTES.md and docs changes, then publish
@@ -165,8 +202,6 @@ DRY_RUN=1 .openvibely/skills/openvibely_release_workflow/scripts/release.sh 0.1.
 When a user asks what the release notes would look like after a dry run, read the generated `COMMITS.txt` and `RELEASE_NOTES.md` from the dry-run/dist directory, synthesize both the `Highlights` and `What's Changed` sections in the response, and present the full filled-in notes preview without publishing or editing release state.
 
 For a dry-run-only release rehearsal, still verify public state read-only: compare local tags, `git ls-remote --tags`, and `gh release view/list` output; confirm the new `v<version>` tag or release does not already exist; identify the previous public boundary before using it as the commit range. It is safe to generate temporary notes under `dist/<version>` for synthesis, but delete that dry-run output before finishing unless the user explicitly asked to keep files. End the report with the exact commands/actions needed for a real release, not just a status summary.
-
-**Known dry-run caveat:** if `release-build.sh` prints `cp` or `chmod` errors while building macOS desktop bundles in `DRY_RUN=1`, treat them as a dry-run script leak unless the real build was requested. The `build_macos_app()` path may print the skipped binary build but still attempt bundle setup against a missing dry-run binary; report this as a script bug to fix before relying on clean dry-run output, but do not treat it as proof that an actual release build is blocked. If a dry-run rehearsal must exercise `release-build.sh` without allowing native macOS bundle filesystem writes, run the build script behind a temporary non-Darwin `uname` shim and record that macOS bundle behavior was intentionally bypassed because of the known leak.
 
 ### Post-release factual questions
 
@@ -194,18 +229,22 @@ Use the preferred style from `references/release-note-style.md` when rewriting r
 
 ---
 
-## Artifact Naming (matches v0.1.0 release pattern)
+## Artifact Naming
 
 | Artifact | Description |
 |----------|-------------|
 | `OpenVibely_<version>_darwin_amd64.app.zip` | macOS desktop app bundle (Intel) |
 | `OpenVibely_<version>_darwin_arm64.app.zip` | macOS desktop app bundle (Apple Silicon) |
-| `openvibely_<version>_darwin_amd64_server.tar.gz` | macOS server binary (Intel) |
-| `openvibely_<version>_darwin_arm64_server.tar.gz` | macOS server binary (Apple Silicon) |
+| `openvibely_<version>_darwin_amd64_server.zip` | macOS server binary (Intel) |
+| `openvibely_<version>_darwin_arm64_server.zip` | macOS server binary (Apple Silicon) |
 | `openvibely_<version>_linux_amd64_server.tar.gz` | Linux server binary (x86_64) |
 | `openvibely_<version>_linux_arm64_server.tar.gz` | Linux server binary (ARM64) |
-| `openvibely_<version>_windows_amd64_server.zip` | Windows server binary zip |
-| `openvibely_<version>_windows_amd64_desktop-cli.zip` | Windows desktop binary zip (requires mingw-w64) |
+| `openvibely_<version>_windows_amd64_server.zip` | Windows server binary zip (x86_64) |
+| `openvibely_<version>_windows_arm64_server.zip` | Windows server binary zip (ARM64) |
+| `openvibely_<version>_windows_amd64_desktop.zip` | Signed Windows desktop binary zip (x86_64) |
+| `openvibely_<version>_windows_arm64_desktop.zip` | Signed Windows desktop binary zip (ARM64) |
+| `openvibely_<version>_linux_amd64_desktop.tar.gz` | Linux desktop binary tarball (x86_64) |
+| `openvibely_<version>_linux_arm64_desktop.tar.gz` | Linux desktop binary tarball (ARM64) |
 | `SHA256SUMS` | SHA-256 checksums for all artifacts |
 
 **Casing rule:** Desktop macOS bundles use `OpenVibely_` (capitalized). All server/binary artifacts use `openvibely_` (lowercase).
@@ -224,7 +263,9 @@ bin/OpenVibely.app/
 
 Treat `bin/openvibely-desktop` as a staging/intermediate Unix executable, not the user-facing desktop app and not a release asset by itself. It exists so the bundle can copy it into `Contents/MacOS/OpenVibely`; the useful macOS artifact is the `.app` bundle, packaged as `.app.zip` for GitHub releases.
 
-The release build creates one `.app.zip` per macOS architecture in `dist/<version>/`: `OpenVibely_<version>_darwin_amd64.app.zip` for Intel and `OpenVibely_<version>_darwin_arm64.app.zip` for Apple Silicon. The desktop binary starts the OpenVibely backend on localhost and opens it in a native macOS WebView window; it is not Electron. Unless signing/notarization has been added and verified in the scripts, treat these as unsigned app bundles and tell users they may need Finder right-click → Open on first launch.
+The release script delegates OS signing to skill-local helpers: `sign-macos.sh`, `notarize-macos-archive.sh`, `sign-windows.sh`, and `verify-windows.sh`. macOS bundles are hardened-runtime signed with a secure timestamp, notarized, stapled, and Gatekeeper-assessed before packaging. Windows executables are Authenticode signed and timestamped with Azure Artifact Signing through `jsign` on macOS, then verified with `osslsigncode`.
+
+macOS notarization is resumable during real release builds. `release-build.sh` writes `dist/<version>/notarization-state.tsv` and keeps the local files Apple reviewed under `.release-tmp/build-<version>/` unless `OPENVIBELY_RELEASE_WORK_DIR` overrides that path. If the terminal wait is interrupted while Apple still says `In Progress`, re-run the exact same `release-build.sh` command from the same Git commit; do not delete the state file or work dir. The script should reuse the saved submission IDs, wait for acceptance, staple desktop `.app` bundles, package the final macOS desktop zips, and then generate `SHA256SUMS`. If the release commit changed, the script must submit fresh macOS notarizations.
 
 ### macOS app archive verification
 
@@ -232,13 +273,19 @@ Do not infer the contents of a desktop release zip from its filename or from the
 
 A valid macOS desktop release zip must extract to a top-level bundle directory whose name ends exactly in `.app` and contains an executable at `Contents/MacOS/OpenVibely`. A top-level directory like `OpenVibely.app_amd64/` or `OpenVibely.app_arm64/` is invalid because Finder will not recognize it as an application bundle; treat that as a release blocker and fix the packaging script before publishing.
 
-This exact top-level directory-name requirement is macOS-specific. Linux and Windows server/CLI archives are flat binary artifacts; verify their binary names and executable bits where applicable, but do not apply `.app` bundle naming rules to non-macOS artifacts.
+A valid macOS desktop release zip must also be free of AppleDouble/resource-fork metadata entries like `._*`, `__MACOSX/*`, and `.DS_Store`. These files can be added by macOS archive tooling and will break the sealed code signature after extraction, causing Gatekeeper to show “OpenVibely is damaged and can’t be opened.” Treat any such entry as a release blocker.
+
+This exact top-level directory-name requirement is macOS-specific. Linux and Windows server/desktop archives are flat binary artifacts; verify their binary names and executable bits where applicable, but do not apply `.app` bundle naming rules to non-macOS artifacts.
 
 Example checks after a real build:
 
 ```bash
 zip_path="dist/<version>/OpenVibely_<version>_darwin_amd64.app.zip"
 unzip -Z1 "$zip_path" | head -20
+if unzip -Z1 "$zip_path" | grep -E '(^|/)\._|(^|/)__MACOSX(/|$)|(^|/)\.DS_Store$'; then
+  echo "invalid macOS app zip metadata"
+  exit 1
+fi
 
 tmpdir="$(mktemp -d)"
 unzip -q "$zip_path" -d "$tmpdir"
@@ -255,7 +302,7 @@ Only state that the raw Unix executable is excluded from release assets after ve
 
 `release-notes.sh` is deterministic: it collects raw commit data and renders the static template, but **does not synthesize release-specific highlights or the changelog**. Those steps require AI judgment and are explicitly delegated to the orchestrating agent.
 
-Never reuse static product marketing bullets as release `Highlights`. The product intro can describe what OpenVibely is; `Highlights` must describe the 2–4 biggest user-facing changes that are new in this exact release compared to the previous tag.
+Never reuse static product marketing bullets as release `Highlights`. The product intro can describe what OpenVibely is; `Highlights` must describe the 2–4 biggest user-facing changes, features, or workflow improvements that are new in this exact release compared to the previous tag. Do not spend Highlights on small bug fixes, narrow UI polish, dependency bumps, release tooling, tests, or internal reliability work unless the combined effect is a major user-visible improvement.
 
 ### What the script does
 
@@ -267,12 +314,14 @@ Never reuse static product marketing bullets as release `Highlights`. The produc
 After `release-notes.sh` runs, the agent must:
 
 1. **Read `dist/<version>/COMMITS.txt`** — full commit log since the previous release.
-2. **Synthesize release-specific highlights** — 2–4 bullets, only for the most notable changes that are new in this release. Do not list evergreen features that existed in the prior release. Describe each highlight by what it **does** for the user — the functional capability or workflow it enables — not by what UI elements or files were added. Avoid using feature-specific examples in this skill; they rot as the product evolves. Prefer generic guidance such as: describe the user outcome, not the implementation detail or surface-level label.
+2. **Synthesize release-specific highlights** — 2–4 bullets, only for the most notable changes that are new in this release. Each bullet should use the style `- **Capability or outcome** — User-facing explanation`. Do not list evergreen features that existed in the prior release. Describe each highlight by what it **does** for the user — the functional capability or workflow it enables — not by what UI elements or files were added. Avoid using feature-specific examples in this skill; they rot as the product evolves. Prefer generic guidance such as: describe the user outcome, not the implementation detail or surface-level label.
 3. **Synthesize a high-level, user-facing changelog** — not a dump of commit subjects. The agent should:
    - Identify what actually changed from a user's perspective.
-   - Group related commits into coherent bullet points (3–8 total, plain English).
+   - Group related commits into coherent bullet points (3–8 total, plain English), with each bullet following the style `- **Area or feature — outcome** — Details`.
+   - Focus the `What's Changed` section on substantial capabilities, workflow changes, and major reliability improvements. It can include more detail than Highlights, but it should still read like an upgrade summary, not a bug-fix ledger.
    - Leave out noise: internal refactors, memory updates, test changes, typo fixes, chore commits, CI/build/release-tooling changes, developer-only logging/observability flags, and anything else with no direct user impact.
    - Omit narrow bug fixes, reliability patches, and UI polish items unless they restore or materially improve a core user workflow that a release reader would choose to upgrade for.
+   - When several bug fixes or polish commits support the same larger feature, fold them into that feature's bullet instead of listing them separately.
    - Omit panel-detail changes, visual tweaks, and one-off light/dark-mode fixes from high-level notes; fold them into a broader feature entry only when they directly support a major release capability.
    - Apply the upgrade-decision test before adding a bullet: would a developer or operator deciding whether to upgrade care about this item at release-note level? If not, leave it out even if the commit is user-visible.
    - Combine multiple small commits about the same feature into one bullet.
@@ -282,6 +331,15 @@ After `release-notes.sh` runs, the agent must:
    - **Omit minor model version additions** (e.g. "Model X added to model selector") unless the model is a primary release feature. Adding a model to a dropdown is a maintenance change, not a release highlight. Omit it entirely or fold it into a generic "model updates" entry only if there are several such additions.
 4. **Replace both placeholder blocks** in `RELEASE_NOTES.md`: `AI_HIGHLIGHTS_PLACEHOLDER` and `AI_CHANGELOG_PLACEHOLDER`.
 5. Confirm the notes look correct before running `release-publish.sh`: no placeholder text, no duplicated commit-derived bullets, no old highlights from a previous release, no leaked secrets, and no claims about Docker/artifacts/features that the scripts did not actually build or verify.
+
+### Release note style
+
+Use this shape for synthesized sections:
+
+- `Highlights`: 2–4 bullets for the release's biggest user-facing themes. These are the headline reasons to care about the release.
+- `What's Changed`: 3–8 grouped bullets. Each bullet should have a bold lead label with an outcome, an em dash, and a concise explanation of the meaningful behavior change.
+
+Good release notes describe major features and meaningful workflows. They should not enumerate small bug fixes, implementation details, one-off visual tweaks, test commits, build script changes, or every individual commit. If the release has many small fixes in one area, summarize the user-visible effect as one broader reliability or workflow bullet only when it matters for upgrade decisions.
 
 ### Why this approach
 
@@ -319,7 +377,7 @@ Full changelog: <link>
 
 ## Docs Update
 
-After synthesizing the release notes, update documentation for features that are new or meaningfully changed in this release before publishing. Use `openvibely_docs_editing_workflow` when selected or available, and keep edits conservative.
+After synthesizing the release notes, review and update documentation for features that are new or meaningfully changed in this release before publishing. This is a required agent gate even though `release.sh` cannot enforce it mechanically. Use `openvibely_docs_editing_workflow` when selected or available, and keep edits conservative.
 
 ### What to update
 
@@ -345,26 +403,26 @@ Before publishing, verify the docs changes are included in the release branch/ta
 
 ## Known Limitations (documented in release notes)
 
-These are preserved from v0.1.0 and should appear in every release's notes unless resolved:
+These release-note bullets should appear unless resolved or superseded:
 
-1. **Linux desktop** — GTK/WebKit dependencies prevent cross-compilation from macOS. Linux server artifacts are included; desktop artifacts are not. Build natively on Linux with `libgtk-4-dev`, `libwebkitgtk-6.0-dev`, etc.
-2. **Windows desktop-cli** — Artifact is an executable zip, not an installer. Requires `mingw-w64` cross-compiler for CGO-enabled Wails build; skipped if unavailable.
+1. **Linux desktop** — Artifacts are built for amd64 and arm64, either natively on Linux with GTK/WebKit dependencies, through Wails v3 Docker/Taskfile builds, or supplied through `OPENVIBELY_LINUX_DESKTOP_BINARY` and `OPENVIBELY_LINUX_ARM64_DESKTOP_BINARY`; an official release fails if either artifact is unavailable.
+2. **Windows desktop** — Artifacts are signed executable zips, not installers, for amd64 and arm64. They build through Wails with Go cross-compilation (`CGO_ENABLED=0`); use `OPENVIBELY_WINDOWS_DESKTOP_BINARY` to supply a prebuilt amd64 artifact. An official release fails if either artifact is unavailable.
 3. **Docker / VPS storage** — Mount `/data` as a persistent volume; do not rely on the container filesystem for database or repos.
 
 ---
 
 ## Docker Image (manual step)
 
-Automated Docker image publishing is not wired to CI yet. After the GitHub release is created, publish the Docker image manually:
+Docker image publishing is intentionally manual and separate from the GitHub release scripts. After the GitHub release is created, the release owner can publish the OpenVibely server and coding-agent image:
 
 ```bash
-docker buildx build --platform linux/amd64,linux/arm64 \
+docker buildx build --platform linux/amd64,linux/arm64 -f Dockerfile \
     -t openvibely/openvibely:<version> \
     -t openvibely/openvibely:latest \
     --push .
 ```
 
-`release-publish.sh` prints this command as a reminder after completing. If Docker Hub access is not set up, note this as a pending step in the GitHub release body.
+`release-publish.sh` prints these commands as a reminder after completing. Do not run Docker publish commands unless the user explicitly asks and confirms Docker Hub access. If Docker Hub access is not set up, note this as a pending owner step in the GitHub release body or final release summary.
 
 ---
 
@@ -373,7 +431,9 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 | Failure point | Recovery action |
 |---------------|----------------|
 | Preflight fails | Fix the reported issue and re-run `release.sh` — no state was changed |
-| Build fails mid-way | Fix the error; re-run `release-build.sh` (dist dir is recreated each run) |
+| Build fails before macOS notarization upload | Fix the error and re-run `release-build.sh` |
+| Build is interrupted while macOS notarization is `In Progress` | Re-run the same `release-build.sh` command from the same Git commit; it resumes from `dist/<version>/notarization-state.tsv` and `.release-tmp/build-<version>/` |
+| Need fresh macOS notarization submissions | Delete `dist/<version>/notarization-state.tsv` and `.release-tmp/build-<version>/`, then re-run `release-build.sh` |
 | Notes generation fails | Re-run `release-notes.sh`; it overwrites `RELEASE_NOTES.md` |
 | GitHub release creation fails | If tag was pushed, delete it: `git tag -d v<ver> && git push <remote> :refs/tags/v<ver>`; delete the remote release if partially created via `gh release delete v<ver>`; then retry |
 | Partial asset upload | Use `gh release upload v<ver> <files>` to add missing assets to an existing release |
@@ -415,12 +475,16 @@ After a successful run:
 dist/<version>/
 ├── OpenVibely_<version>_darwin_amd64.app.zip
 ├── OpenVibely_<version>_darwin_arm64.app.zip
-├── openvibely_<version>_darwin_amd64_server.tar.gz
-├── openvibely_<version>_darwin_arm64_server.tar.gz
+├── openvibely_<version>_darwin_amd64_server.zip
+├── openvibely_<version>_darwin_arm64_server.zip
 ├── openvibely_<version>_linux_amd64_server.tar.gz
 ├── openvibely_<version>_linux_arm64_server.tar.gz
 ├── openvibely_<version>_windows_amd64_server.zip
-├── openvibely_<version>_windows_amd64_desktop-cli.zip  (if mingw-w64 present)
+├── openvibely_<version>_windows_arm64_server.zip
+├── openvibely_<version>_windows_amd64_desktop.zip
+├── openvibely_<version>_windows_arm64_desktop.zip
+├── openvibely_<version>_linux_amd64_desktop.tar.gz
+├── openvibely_<version>_linux_arm64_desktop.tar.gz
 ├── SHA256SUMS
 └── RELEASE_NOTES.md
 ```
@@ -440,7 +504,7 @@ bash .openvibely/skills/openvibely_release_workflow/scripts/release-validate.sh
 Tests cover:
 - Semver normalization (strip `v` prefix)
 - Semver validation (valid and invalid inputs)
-- Artifact naming conventions (all eight artifact patterns)
+- Artifact naming conventions (all required server and desktop artifact patterns)
 - Tag format (`v<version>`)
 - Release title format (`OpenVibely <version>`)
 - Release branch naming (`release/v<version>`)
@@ -451,9 +515,6 @@ Tests cover:
 
 ---
 
-## Reference Release: v0.1.0
+## Release Matrix Source Of Truth
 
-- Tag: `v0.1.0` — commit `d654a06`
-- GitHub release title: `OpenVibely 0.1.0`
-- Assets published: darwin amd64/arm64 desktop `.app.zip`, darwin/linux amd64/arm64 server tarballs, windows amd64 server zip, windows amd64 desktop-cli zip, SHA256SUMS
-- Docker image: `openvibely/openvibely:0.1.0`
+Do not use historical reference releases as the source of truth for the current artifact matrix. Release outputs have changed over time. For current requirements, use this skill's Artifact Naming and Expected Output sections, plus the executable contracts in `release-build.sh`, `release-publish.sh`, and `release-validate.sh`.

@@ -9,12 +9,22 @@ import (
 
 templ Agents(projects []models.Project, currentProjectID string, agents []models.Agent, modelOptions []models.AgentModelOption) {
 	@layout.Base("Agents", projects, currentProjectID) {
-		@agentsContent(agents, modelOptions)
+		@agentsContent(agents, modelOptions, false)
+	}
+}
+
+templ AgentsPage(projects []models.Project, currentProjectID string, agents []models.Agent, modelOptions []models.AgentModelOption, hasMore bool) {
+	@layout.Base("Agents", projects, currentProjectID) {
+		@agentsContent(agents, modelOptions, hasMore)
 	}
 }
 
 templ AgentsContent(agents []models.Agent, modelOptions []models.AgentModelOption) {
-	@agentsContent(agents, modelOptions)
+	@agentsContent(agents, modelOptions, false)
+}
+
+templ AgentsContentPage(agents []models.Agent, modelOptions []models.AgentModelOption, hasMore bool) {
+	@agentsContent(agents, modelOptions, hasMore)
 }
 
 func agentToolsJSON(tools []string) string {
@@ -47,9 +57,8 @@ func agentPermissionDefaultsJSON(perms models.AgentPermissionDefaults) string {
 	return string(b)
 }
 
-templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOption) {
-	<div id="agents-container" class="overflow-x-hidden max-w-full min-w-0" data-search-container>
-		@layout.PageTitle("Agents")
+templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOption, hasMore bool) {
+		<div id="agents-container" class="overflow-x-hidden max-w-full min-w-0" data-search-container data-card-pagination-root data-card-pagination-url="/agents" data-card-pagination-list="#agents-card-list" data-card-pagination-card-selector="[data-agent-id]" data-card-pagination-key="data-agent-id" data-card-pagination-page-size="20" data-card-pagination-has-more={ cardPaginationHasMoreAttribute(hasMore) }>		@layout.PageTitle("Agents")
 		<div class="flex items-center justify-between mb-6">
 			<h2 class="text-2xl font-bold">Agents</h2>
 			<button class="btn btn-primary btn-sm" onclick="openNewAgentModal()">
@@ -58,8 +67,9 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 		</div>
 		@CardSearchInput("agents", "Search agents...")
 
-		if len(agents) == 0 {
-			<div class="text-center py-12">
+			<div id="agents-card-list" data-card-pagination-list>
+			if len(agents) == 0 {
+				<div class="text-center py-12" data-search-empty-state>
 				<p class="opacity-50 mb-4">No agents configured yet. Create one and attach plugins from marketplace resources.</p>
 				<button class="btn btn-primary" onclick="openNewAgentModal()">
 					Create Agent
@@ -155,20 +165,10 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 				}
 			</div>
 		}
-
-			<dialog id="delete_agent_confirm_modal" class="modal">
-				<div class="modal-box">
-					@ModalCloseButton("delete_agent_confirm_modal", "Close delete agent confirmation")
-					<h3 class="font-bold text-lg text-error pr-10">Delete Agent</h3>
-					<p class="py-4">Are you sure you want to delete <strong id="delete_agent_confirm_name"></strong>? This action cannot be undone.</p>
-					<div class="text-sm text-base-content/70 bg-base-200 rounded-lg p-3 mb-4">Tasks using this agent will be unlinked.</div>
-					<div class="modal-action">
-						<button type="button" class="btn" onclick="delete_agent_confirm_modal.close()">Cancel</button>
-						<button type="button" class="btn btn-error" onclick="confirmDeleteAgent()">Delete Permanently</button>
-					</div>
-				</div>
-				<form method="dialog" class="modal-backdrop"><button>close</button></form>
-			</dialog>
+		</div>
+			@CardPaginationStatusWithBoundary(hasMore)		@DestructiveConfirmDialog("delete_agent_confirm_modal", "Close delete agent confirmation", "Delete Agent", "Are you sure you want to delete ", "delete_agent_confirm_name", "", "? This action cannot be undone.", templ.ComponentScript{Call: "delete_agent_confirm_modal.close()"}, templ.ComponentScript{Call: "confirmDeleteAgent()"}) {
+					Tasks using this agent will be unlinked.
+				}
 
 			<dialog id="agent_modal" class="modal" onclose="if (typeof syncToastContainerHost === 'function') syncToastContainerHost()">			<div class="modal-box max-w-4xl p-0 overflow-hidden">
 				@ModalCloseButton("agent_modal", "Close agent dialog")
@@ -489,10 +489,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 					if (!button) return;
 					deleteAgentID = button.dataset.agentId || '';
 					if (!deleteAgentID) return;
-					var nameEl = document.getElementById('delete_agent_confirm_name');
-					if (nameEl) nameEl.textContent = button.dataset.agentName || 'this agent';
-					var modal = document.getElementById('delete_agent_confirm_modal');
-					if (modal) modal.showModal();
+						window.openDestructiveConfirmDialog('delete_agent_confirm_modal', 'delete_agent_confirm_name', button.dataset.agentName || 'this agent');
 				}
 
 				async function confirmDeleteAgent() {
@@ -500,8 +497,11 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 					var id = deleteAgentID;
 					var modal = document.getElementById('delete_agent_confirm_modal');
 					if (modal) modal.close();
+					var container = document.getElementById('agents-container');
+					var deleteURL = withCurrentProject('/agents/' + encodeURIComponent(id));
+					if (window.cardPaginationRefreshURL) deleteURL = window.cardPaginationRefreshURL(container, deleteURL);
 					try {
-						const response = await fetch(withCurrentProject('/agents/' + encodeURIComponent(id)), {
+						const response = await fetch(deleteURL, {
 							method: 'DELETE',
 							headers: { 'HX-Request': 'true' }
 						});
@@ -509,12 +509,15 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 							throw new Error(await response.text() || 'Delete failed');
 						}
 						const html = await response.text();
-						const container = document.getElementById('agents-container');
-						if (container) {
+						if (container && typeof window.replaceSearchableCardContainer === 'function') {
+							window.replaceSearchableCardContainer('#agents-container', html);
+						} else if (container) {
+							if (typeof window.destroyCardPagination === 'function') window.destroyCardPagination(container, true);
 							container.outerHTML = html;
 							const refreshedContainer = document.getElementById('agents-container');
-							htmx.process(refreshedContainer);
+							if (window.htmx) htmx.process(refreshedContainer);
 							if (window.refreshCardSearches) window.refreshCardSearches(refreshedContainer);
+							if (window.refreshCardPagination) window.refreshCardPagination(refreshedContainer);
 						}
 						deleteAgentID = '';
 						if (window.showToast) window.showToast('Agent deleted', 'completed');
@@ -1344,9 +1347,9 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 			activeAgentID = '';
 			document.getElementById('agent_modal_title').textContent = 'New Agent';
 			const form = document.getElementById('agent_form');
-			form.action = '/agents';
+			form.action = withCurrentProject('/agents');
 			form.method = 'post';
-			form.setAttribute('hx-post', '/agents');
+			form.setAttribute('hx-post', withCurrentProject('/agents'));
 			form.setAttribute('hx-target', '#agents-container');
 			form.setAttribute('hx-swap', 'outerHTML');
 			form.removeAttribute('hx-put');

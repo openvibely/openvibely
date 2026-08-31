@@ -10,7 +10,9 @@ import (
 	"testing"
 	"time"
 
+	llmcustomauth "github.com/openvibely/openvibely/internal/llm/customauth"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/testutil"
 )
 
 func TestResolveProviderAndAuth(t *testing.T) {
@@ -33,13 +35,13 @@ func TestResolveProviderAndAuth(t *testing.T) {
 			wantAuthMethod: models.AuthMethodAPIKey,
 		},
 		{
-			name:           "anthropic subscription cli",
+			name:           "anthropic subscription legacy cli normalizes to oauth",
 			provider:       "anthropic",
 			anthropicAuth:  "subscription",
 			openaiAuth:     "",
 			authMethod:     "cli",
 			wantProvider:   models.ProviderAnthropic,
-			wantAuthMethod: models.AuthMethodCLI,
+			wantAuthMethod: models.AuthMethodOAuth,
 		},
 		{
 			name:           "anthropic subscription oauth",
@@ -78,13 +80,13 @@ func TestResolveProviderAndAuth(t *testing.T) {
 			wantAuthMethod: models.AuthMethodAPIKey,
 		},
 		{
-			name:           "openai subscription cli",
+			name:           "openai subscription legacy cli normalizes to oauth",
 			provider:       "openai",
 			anthropicAuth:  "",
 			openaiAuth:     "subscription",
 			authMethod:     "cli",
 			wantProvider:   models.ProviderOpenAI,
-			wantAuthMethod: models.AuthMethodCLI,
+			wantAuthMethod: models.AuthMethodOAuth,
 		},
 		{
 			name:           "openai subscription oauth",
@@ -105,13 +107,13 @@ func TestResolveProviderAndAuth(t *testing.T) {
 			wantAuthMethod: models.AuthMethodOAuth,
 		},
 		{
-			name:           "openai defaults to cli for backwards compat",
+			name:           "openai defaults to api key",
 			provider:       "openai",
 			anthropicAuth:  "",
 			openaiAuth:     "",
 			authMethod:     "",
 			wantProvider:   models.ProviderOpenAI,
-			wantAuthMethod: models.AuthMethodCLI,
+			wantAuthMethod: models.AuthMethodAPIKey,
 		},
 		{
 			name:           "openai compatible api key",
@@ -147,7 +149,7 @@ func TestResolveProviderAndAuth(t *testing.T) {
 			openaiAuth:     "",
 			authMethod:     "",
 			wantProvider:   models.LLMProvider("openai_compatible_xai"),
-			wantAuthMethod: models.AuthMethodCLI,
+			wantAuthMethod: models.AuthMethodAPIKey,
 		}, {
 			name:           "ollama",
 			provider:       "ollama",
@@ -155,7 +157,7 @@ func TestResolveProviderAndAuth(t *testing.T) {
 			openaiAuth:     "",
 			authMethod:     "",
 			wantProvider:   models.ProviderOllama,
-			wantAuthMethod: models.AuthMethodCLI,
+			wantAuthMethod: models.AuthMethodAPIKey,
 		}}
 
 	for _, tt := range tests {
@@ -172,6 +174,7 @@ func TestResolveProviderAndAuth(t *testing.T) {
 }
 
 func TestListOpenAICompatibleAvailableModelsUsesBaseModelsEndpoint(t *testing.T) {
+	t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
 	_, e, _ := setupTestHandler(t)
 	var gotPath string
 	var gotAuth string
@@ -183,7 +186,7 @@ func TestListOpenAICompatibleAvailableModelsUsesBaseModelsEndpoint(t *testing.T)
 	}))
 	defer srv.Close()
 
-	req := httptest.NewRequest(http.MethodGet, "/models/openai-compatible/available?base_url="+url.QueryEscape(srv.URL+"/v1"), nil)
+	req := httptest.NewRequest(http.MethodGet, "/models/openai-compatible/available?allow_private=1&base_url="+url.QueryEscape(srv.URL+"/v1"), nil)
 	req.Header.Set("X-OpenAI-Compatible-API-Key", "sk-test")
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
@@ -206,7 +209,285 @@ func TestListOpenAICompatibleAvailableModelsUsesBaseModelsEndpoint(t *testing.T)
 	}
 }
 
+func TestListOpenAICompatibleAvailableModelsUsesSavedCustomHeaders(t *testing.T) {
+	t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
+	_, e, repo := setupTestHandler(t)
+	var gotAPIKey, gotRequiredHeader string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAPIKey = r.Header.Get("X-API-Key")
+		gotRequiredHeader = r.Header.Get("X-Required-Header")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"models":[{"name":"configured-model"}]}`))
+	}))
+	defer srv.Close()
+
+	agent := &models.LLMConfig{
+		Name:                  "Configured discovery",
+		Provider:              models.ProviderOpenAICompatible,
+		AuthMethod:            models.AuthMethodAPIKey,
+		Model:                 "configured-model",
+		APIKey:                "saved-key",
+		BaseURL:               srv.URL + "/v1",
+		PresetSlug:            "vllm",
+		AuthHeaderName:        "X-API-Key",
+		AuthHeaderValuePrefix: "Token ",
+		ExtraHeadersJSON:      `{"X-Required-Header":"required"}`,
+		CustomAuthConfigJSON: llmcustomauth.MarshalConfig(llmcustomauth.Config{
+			ModelsArrayPath: "models",
+			ModelIDField:    "name",
+		}),
+	}
+	if err := repo.Create(context.Background(), agent); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/models/openai-compatible/available?config_id="+url.QueryEscape(agent.ID), nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if gotAPIKey != "Token saved-key" || gotRequiredHeader != "required" {
+		t.Fatalf("custom discovery headers = X-API-Key %q, X-Required-Header %q", gotAPIKey, gotRequiredHeader)
+	}
+	if !strings.Contains(rec.Body.String(), `"id":"configured-model"`) {
+		t.Fatalf("unexpected discovered models: %s", rec.Body.String())
+	}
+}
+
+func TestListOpenAICompatibleAvailableModelsUsesLiveEditsForSavedAPIKeyConfig(t *testing.T) {
+	t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
+	_, e, repo := setupTestHandler(t)
+	var gotLiveKey, gotStoredKey, gotRequiredHeader string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotLiveKey = r.Header.Get("X-Live-Key")
+		gotStoredKey = r.Header.Get("X-Stored-Key")
+		gotRequiredHeader = r.Header.Get("X-Required-Header")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"inventory":[{"slug":"live-model"}]}`))
+	}))
+	defer srv.Close()
+
+	agent := &models.LLMConfig{
+		Name:                  "Edited discovery",
+		Provider:              models.ProviderOpenAICompatible,
+		AuthMethod:            models.AuthMethodAPIKey,
+		Model:                 "stored-model",
+		APIKey:                "stored-key",
+		BaseURL:               srv.URL,
+		PresetSlug:            "custom",
+		ModelsURL:             srv.URL + "/models",
+		AuthHeaderName:        "X-Stored-Key",
+		AuthHeaderValuePrefix: "Token ",
+		ExtraHeadersJSON:      `{"X-Required-Header":"stored"}`,
+		CustomAuthConfigJSON: llmcustomauth.MarshalConfig(llmcustomauth.Config{
+			ModelsArrayPath:       "data",
+			ModelIDField:          "id",
+			AllowPrivateEndpoints: true,
+		}),
+	}
+	if err := repo.Create(context.Background(), agent); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/models/openai-compatible/available?config_id="+url.QueryEscape(agent.ID), nil)
+	req.Header.Set(openAICompatibleAPIKeyHeader, "live-key")
+	req.Header.Set(openAICompatibleAuthHeaderNameHeader, "X-Live-Key")
+	req.Header.Set(openAICompatibleAuthHeaderPrefixHeader, "")
+	req.Header.Set(openAICompatibleExtraHeadersHeader, `{"X-Required-Header":"live"}`)
+	req.Header.Set(openAICompatibleModelsArrayPathHeader, "inventory")
+	req.Header.Set(openAICompatibleModelIDFieldHeader, "slug")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if gotLiveKey != "live-key" || gotStoredKey != "" || gotRequiredHeader != "live" {
+		t.Fatalf("live discovery headers = X-Live-Key %q, X-Stored-Key %q, X-Required-Header %q", gotLiveKey, gotStoredKey, gotRequiredHeader)
+	}
+	if !strings.Contains(rec.Body.String(), `"id":"live-model"`) {
+		t.Fatalf("unexpected discovered models: %s", rec.Body.String())
+	}
+
+	gotRequiredHeader = "not-requested"
+	req = httptest.NewRequest(http.MethodGet, "/models/openai-compatible/available?config_id="+url.QueryEscape(agent.ID), nil)
+	req.Header.Set(openAICompatibleAuthHeaderNameHeader, "X-Live-Key")
+	req.Header.Set(openAICompatibleExtraHeadersHeader, `{}`)
+	req.Header.Set(openAICompatibleModelsArrayPathHeader, "inventory")
+	req.Header.Set(openAICompatibleModelIDFieldHeader, "slug")
+	rec = httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected clearing live headers to succeed, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if gotRequiredHeader != "" {
+		t.Fatalf("expected live discovery to clear saved required header, got %q", gotRequiredHeader)
+	}
+}
+
+func TestListOpenAICompatibleAvailableModelsUsesUnsavedCustomRequestSettings(t *testing.T) {
+	t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
+	_, e, _ := setupTestHandler(t)
+	var gotAPIKey, gotRequiredHeader string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAPIKey = r.Header.Get("X-API-Key")
+		gotRequiredHeader = r.Header.Get("X-Required-Header")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"models":[{"name":"live-model"}]}`))
+	}))
+	defer srv.Close()
+
+	req := httptest.NewRequest(http.MethodGet, "/models/openai-compatible/available?allow_private=1&base_url="+url.QueryEscape(srv.URL), nil)
+	req.Header.Set(openAICompatibleAPIKeyHeader, "live-key")
+	req.Header.Set(openAICompatibleAuthHeaderNameHeader, "X-API-Key")
+	req.Header.Set(openAICompatibleAuthHeaderPrefixHeader, "")
+	req.Header.Set(openAICompatibleExtraHeadersHeader, `{"X-Required-Header":"required"}`)
+	req.Header.Set(openAICompatibleModelsArrayPathHeader, "models")
+	req.Header.Set(openAICompatibleModelIDFieldHeader, "name")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if gotAPIKey != "live-key" || gotRequiredHeader != "required" {
+		t.Fatalf("live discovery headers = X-API-Key %q, X-Required-Header %q", gotAPIKey, gotRequiredHeader)
+	}
+	if !strings.Contains(rec.Body.String(), `"id":"live-model"`) {
+		t.Fatalf("unexpected discovered models: %s", rec.Body.String())
+	}
+}
+
+func TestCustomOAuthModelDiscoveryUsesSharedExtraHeaders(t *testing.T) {
+	t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
+	var gotRequiredHeader string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotRequiredHeader = r.Header.Get("X-Required-Header")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"id":"oauth-model"}]}`))
+	}))
+	defer server.Close()
+
+	h, _, repo := setupTestHandler(t)
+	agent := &models.LLMConfig{
+		Name:             "OAuth discovery headers",
+		Provider:         models.ProviderOpenAICompatible,
+		AuthMethod:       models.AuthMethodOAuth,
+		Model:            "oauth-model",
+		BaseURL:          server.URL,
+		ModelsURL:        server.URL + "/models",
+		OAuthAccessToken: "access-token",
+		ExtraHeadersJSON: `{"X-Required-Header":"required"}`,
+		CustomAuthConfigJSON: llmcustomauth.MarshalConfig(llmcustomauth.Config{
+			Enabled:               true,
+			AllowPrivateEndpoints: true,
+		}),
+	}
+	if err := repo.Create(context.Background(), agent); err != nil {
+		t.Fatal(err)
+	}
+
+	found, err := h.fetchCustomOpenAICompatibleModels(
+		context.Background(),
+		llmcustomauth.NewHTTPClient(time.Second, true),
+		agent.ModelsURL,
+		*agent,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotRequiredHeader != "required" {
+		t.Fatalf("X-Required-Header = %q", gotRequiredHeader)
+	}
+	if len(found) != 1 || found[0].ID != "oauth-model" {
+		t.Fatalf("unexpected discovered models: %+v", found)
+	}
+}
+
+func TestListOpenAICompatibleAvailableModelsRejectsUnsavedEndpointChanges(t *testing.T) {
+	_, e, repo := setupTestHandler(t)
+	agent := &models.LLMConfig{
+		Name:       "Configured discovery",
+		Provider:   models.ProviderOpenAICompatible,
+		AuthMethod: models.AuthMethodAPIKey,
+		Model:      "configured-model",
+		BaseURL:    "https://saved.example.test/v1",
+		ModelsURL:  "https://saved.example.test/models",
+	}
+	if err := repo.Create(context.Background(), agent); err != nil {
+		t.Fatal(err)
+	}
+
+	query := url.Values{
+		"config_id":  {agent.ID},
+		"base_url":   {"https://edited.example.test/v1"},
+		"models_url": {"https://edited.example.test/models"},
+	}
+	req := httptest.NewRequest(http.MethodGet, "/models/openai-compatible/available?"+query.Encode(), nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "save endpoint changes") {
+		t.Fatalf("unexpected response: %s", rec.Body.String())
+	}
+}
+
+func TestCustomOAuthModelDiscoveryRejectsStaleConfigurationBeforeRequest(t *testing.T) {
+	t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
+	requested := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requested = true
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"id":"model"}]}`))
+	}))
+	defer server.Close()
+
+	h, _, repo := setupTestHandler(t)
+	cfg := llmcustomauth.Config{Enabled: true, AllowPrivateEndpoints: true}
+	agent := &models.LLMConfig{
+		Name:                 "Revision guarded discovery",
+		Provider:             models.ProviderOpenAICompatible,
+		AuthMethod:           models.AuthMethodOAuth,
+		Model:                "model",
+		BaseURL:              server.URL,
+		ModelsURL:            server.URL + "/models",
+		OAuthAccessToken:     "access-token",
+		CustomAuthConfigJSON: llmcustomauth.MarshalConfig(cfg),
+	}
+	if err := repo.Create(context.Background(), agent); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := *agent
+	current, err := repo.GetByID(context.Background(), agent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current.Name = "Edited while discovery was queued"
+	if err := repo.Update(context.Background(), current); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = h.fetchCustomOpenAICompatibleModels(
+		context.Background(),
+		llmcustomauth.NewHTTPClient(time.Second, true),
+		snapshot.ModelsURL,
+		snapshot,
+	)
+	if err == nil || !strings.Contains(err.Error(), "configuration changed") {
+		t.Fatalf("discovery error = %v", err)
+	}
+	if requested {
+		t.Fatal("stale discovery made an outbound request")
+	}
+}
+
 func TestListOpenAICompatibleAvailableModelsFallsBackToV1Models(t *testing.T) {
+	t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
 	_, e, _ := setupTestHandler(t)
 	var paths []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -220,7 +501,7 @@ func TestListOpenAICompatibleAvailableModelsFallsBackToV1Models(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	req := httptest.NewRequest(http.MethodGet, "/models/openai-compatible/available?base_url="+url.QueryEscape(srv.URL), nil)
+	req := httptest.NewRequest(http.MethodGet, "/models/openai-compatible/available?allow_private=1&base_url="+url.QueryEscape(srv.URL), nil)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
@@ -356,6 +637,250 @@ func TestCreateModel_NonMixturePreservesTemperature(t *testing.T) {
 		}
 	}
 	t.Fatal("created non-mixture model not found")
+}
+
+func TestCreateModel_RejectsBlankNameWithoutInsert(t *testing.T) {
+	_, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	before, err := llmConfigRepo.List(ctx)
+	if err != nil {
+		t.Fatalf("list before create: %v", err)
+	}
+
+	form := modelValidationForm(" \t\n ")
+	rec := postForm(e, "/models", form)
+
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "Model name is required") {
+		t.Fatalf("expected controlled blank-name 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+	after, err := llmConfigRepo.List(ctx)
+	if err != nil {
+		t.Fatalf("list after create: %v", err)
+	}
+	if len(after) != len(before) {
+		t.Fatalf("blank create mutated rows: before=%d after=%d", len(before), len(after))
+	}
+}
+
+func TestCreateModel_RejectsBlankRunnableModelSlugWithoutInsert(t *testing.T) {
+	_, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	tests := []struct {
+		name       string
+		provider   string
+		modelValue *string
+		customize  func(url.Values)
+	}{
+		{name: "anthropic missing", provider: "anthropic", modelValue: nil},
+		{name: "anthropic empty", provider: "anthropic", modelValue: ptrString("")},
+		{name: "anthropic whitespace", provider: "anthropic", modelValue: ptrString(" \t\n ")},
+		{name: "openai missing", provider: "openai", modelValue: nil, customize: func(form url.Values) { form.Set("openai_auth_type", "api_key") }},
+		{name: "openai empty", provider: "openai", modelValue: ptrString(""), customize: func(form url.Values) { form.Set("openai_auth_type", "api_key") }},
+		{name: "openai whitespace", provider: "openai", modelValue: ptrString(" \t\n "), customize: func(form url.Values) { form.Set("openai_auth_type", "api_key") }},
+		{name: "openai compatible missing", provider: "openai_compatible", modelValue: nil, customize: configureOpenAICompatibleValidationForm},
+		{name: "openai compatible empty", provider: "openai_compatible", modelValue: ptrString(""), customize: configureOpenAICompatibleValidationForm},
+		{name: "openai compatible whitespace", provider: "openai_compatible", modelValue: ptrString(" \t\n "), customize: configureOpenAICompatibleValidationForm},
+		{name: "ollama missing", provider: "ollama", modelValue: nil},
+		{name: "ollama empty", provider: "ollama", modelValue: ptrString("")},
+		{name: "ollama whitespace", provider: "ollama", modelValue: ptrString(" \t\n ")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			before, err := llmConfigRepo.List(ctx)
+			if err != nil {
+				t.Fatalf("list before create: %v", err)
+			}
+
+			form := modelValidationForm("Blank Slug " + tt.name)
+			form.Set("provider", tt.provider)
+			form.Del("model")
+			if tt.modelValue != nil {
+				form.Set("model", *tt.modelValue)
+			}
+			if tt.customize != nil {
+				tt.customize(form)
+			}
+			rec := postForm(e, "/models", form)
+
+			if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "Model identifier is required") {
+				t.Fatalf("expected controlled blank-model 400, got %d: %s", rec.Code, rec.Body.String())
+			}
+			after, err := llmConfigRepo.List(ctx)
+			if err != nil {
+				t.Fatalf("list after create: %v", err)
+			}
+			if len(after) != len(before) {
+				t.Fatalf("blank model create mutated rows: before=%d after=%d", len(before), len(after))
+			}
+		})
+	}
+}
+
+func TestCreateModel_HTMXRejectsDuplicateNormalizedNameWithoutInsert(t *testing.T) {
+	_, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	existing := &models.LLMConfig{Name: "Production", Provider: models.ProviderAnthropic, AuthMethod: models.AuthMethodAPIKey, Model: "claude-sonnet-4-5-20250929"}
+	if err := llmConfigRepo.Create(ctx, existing); err != nil {
+		t.Fatalf("create existing model: %v", err)
+	}
+	before, err := llmConfigRepo.List(ctx)
+	if err != nil {
+		t.Fatalf("list before duplicate create: %v", err)
+	}
+
+	form := modelValidationForm(" production ")
+	rec := htmxPost(e, "/models", form)
+
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "already exists") {
+		t.Fatalf("expected controlled duplicate-name 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+	after, err := llmConfigRepo.List(ctx)
+	if err != nil {
+		t.Fatalf("list after duplicate create: %v", err)
+	}
+	if len(after) != len(before) {
+		t.Fatalf("duplicate create mutated rows: before=%d after=%d", len(before), len(after))
+	}
+}
+
+func TestUpdateModel_PostRejectsBlankNameWithoutMutation(t *testing.T) {
+	_, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agent, err := llmConfigRepo.GetDefault(ctx)
+	if err != nil || agent == nil {
+		t.Fatalf("expected seeded default model, got %v", err)
+	}
+	original := *agent
+
+	form := modelValidationForm("   ")
+	rec := postForm(e, "/models/"+agent.ID, form)
+
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "Model name is required") {
+		t.Fatalf("expected controlled blank-name 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+	updated, err := llmConfigRepo.GetByID(ctx, agent.ID)
+	if err != nil {
+		t.Fatalf("get updated model: %v", err)
+	}
+	if updated.Name != original.Name || updated.Model != original.Model || updated.Provider != original.Provider {
+		t.Fatalf("blank update mutated model: before=%+v after=%+v", original, updated)
+	}
+}
+
+func TestUpdateModel_RejectsBlankRunnableModelSlugWithoutMutation(t *testing.T) {
+	_, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	tests := []struct {
+		name      string
+		agent     *models.LLMConfig
+		customize func(url.Values)
+	}{
+		{name: "anthropic", agent: &models.LLMConfig{Name: "Runnable Anthropic", Provider: models.ProviderAnthropic, AuthMethod: models.AuthMethodAPIKey, Model: "claude-sonnet-4-5-20250929"}},
+		{name: "openai", agent: &models.LLMConfig{Name: "Runnable OpenAI", Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-5.5"}, customize: func(form url.Values) { form.Set("openai_auth_type", "api_key") }},
+		{name: "openai compatible", agent: &models.LLMConfig{Name: "Runnable Compatible", Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodAPIKey, Model: "vendor/model", BaseURL: "https://api.example.test/v1/", Transport: "chat_completions", PresetSlug: "custom"}, customize: configureOpenAICompatibleValidationForm},
+		{name: "ollama", agent: &models.LLMConfig{Name: "Runnable Ollama", Provider: models.ProviderOllama, AuthMethod: models.AuthMethodAPIKey, Model: "llama3"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			agent := *tt.agent
+			if err := llmConfigRepo.Create(ctx, &agent); err != nil {
+				t.Fatalf("create model: %v", err)
+			}
+			original := agent
+
+			form := modelValidationForm(agent.Name)
+			form.Set("provider", string(agent.Provider))
+			form.Set("model", " \t\n ")
+			if tt.customize != nil {
+				tt.customize(form)
+			}
+			rec := htmxPut(e, "/models/"+agent.ID, form)
+
+			if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "Model identifier is required") {
+				t.Fatalf("expected controlled blank-model 400, got %d: %s", rec.Code, rec.Body.String())
+			}
+			updated, err := llmConfigRepo.GetByID(ctx, agent.ID)
+			if err != nil {
+				t.Fatalf("get updated model: %v", err)
+			}
+			if updated.Model != original.Model || updated.Provider != original.Provider || updated.Name != original.Name {
+				t.Fatalf("blank model update mutated model: before=%+v after=%+v", original, updated)
+			}
+		})
+	}
+}
+
+func TestUpdateModel_HTMXRejectsDuplicateNormalizedNameWithoutMutation(t *testing.T) {
+	_, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	alpha := &models.LLMConfig{Name: "Alpha", Provider: models.ProviderAnthropic, AuthMethod: models.AuthMethodAPIKey, Model: "claude-sonnet-4-5-20250929"}
+	beta := &models.LLMConfig{Name: "Beta", Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-5.5"}
+	for _, cfg := range []*models.LLMConfig{alpha, beta} {
+		if err := llmConfigRepo.Create(ctx, cfg); err != nil {
+			t.Fatalf("create %s model: %v", cfg.Name, err)
+		}
+	}
+	original := *beta
+
+	form := modelValidationForm(" alpha ")
+	form.Set("provider", "openai")
+	form.Set("openai_auth_type", "api_key")
+	form.Set("model", beta.Model)
+	rec := htmxPut(e, "/models/"+beta.ID, form)
+
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "already exists") {
+		t.Fatalf("expected controlled duplicate-name 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+	updated, err := llmConfigRepo.GetByID(ctx, beta.ID)
+	if err != nil {
+		t.Fatalf("get updated model: %v", err)
+	}
+	if updated.Name != original.Name || updated.Model != original.Model || updated.Provider != original.Provider {
+		t.Fatalf("duplicate update mutated model: before=%+v after=%+v", original, updated)
+	}
+}
+
+func TestUpdateModel_AllowsOwnNormalizedNameAndPersistsTrimmedName(t *testing.T) {
+	_, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agent := &models.LLMConfig{Name: "Stable Name", Provider: models.ProviderAnthropic, AuthMethod: models.AuthMethodAPIKey, Model: "claude-sonnet-4-5-20250929"}
+	if err := llmConfigRepo.Create(ctx, agent); err != nil {
+		t.Fatalf("create model: %v", err)
+	}
+
+	form := modelValidationForm("  Stable Name  ")
+	rec := postForm(e, "/models/"+agent.ID, form)
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected own normalized name update to succeed, got %d: %s", rec.Code, rec.Body.String())
+	}
+	updated, err := llmConfigRepo.GetByID(ctx, agent.ID)
+	if err != nil {
+		t.Fatalf("get updated model: %v", err)
+	}
+	if updated.Name != "Stable Name" {
+		t.Fatalf("expected trimmed model name to persist, got %q", updated.Name)
+	}
+}
+
+func modelValidationForm(name string) url.Values {
+	form := url.Values{}
+	form.Set("name", name)
+	form.Set("provider", "anthropic")
+	form.Set("anthropic_auth_type", "api_key")
+	form.Set("model", "claude-sonnet-4-5-20250929")
+	form.Set("temperature", "0")
+	return form
+}
+
+func configureOpenAICompatibleValidationForm(form url.Values) {
+	form.Set("base_url", "https://api.example.test/v1/")
+	form.Set("transport", "chat_completions")
+	form.Set("preset_slug", "custom")
+}
+
+func ptrString(value string) *string {
+	return &value
 }
 
 func TestCreateModel_MixtureDefaultsBlankModel(t *testing.T) {
@@ -710,6 +1235,321 @@ func TestCreateModel_OpenAICompatible(t *testing.T) {
 	}
 }
 
+func TestCreateModel_CustomOpenAICompatibleOAuthPersistsAdvancedAuthentication(t *testing.T) {
+	_, e, llmConfigRepo := setupTestHandler(t)
+
+	form := url.Values{}
+	form.Set("name", "Signed Custom Model")
+	form.Set("provider", "openai_compatible")
+	form.Set("custom_auth_method", "oauth")
+	form.Set("model", "premium")
+	form.Set("base_url", "https://api.example.test/inference/v1")
+	form.Set("models_url", "https://api.example.test/inference/v1/model/info")
+	form.Set("transport", "chat_completions")
+	form.Set("preset_slug", "custom")
+	form.Set("oauth_authorize_url", "https://login.example.test/login")
+	form.Set("oauth_token_url", "https://api.example.test/auth/token")
+	form.Set("oauth_client_id", "client-id")
+	form.Set("oauth_client_secret", "client-secret")
+	form.Set("oauth_scopes", "openid profile")
+	form.Set("custom_refresh_url", "https://api.example.test/auth/refresh")
+	form.Set("custom_profile_url", "https://api.example.test/admin/profile")
+	form.Set("custom_user_agent", "custom-client/1.0")
+	form.Set("custom_signing_secret", "secret")
+	form.Set("custom_authorization_mode", "auto")
+	form.Set("custom_access_token_header", "X-Auth-Token")
+	form.Set("custom_access_token_prefix", "Token ")
+	form.Set("custom_profile_instance_path", "instances.0.instance_id")
+	form.Set("custom_profile_team_path", "instances.0.teams.0.id")
+	form.Set("custom_models_array_path", "data")
+	form.Set("custom_model_id_field", "model_name")
+	form.Set("custom_access_token_field", "token")
+	form.Set("custom_refresh_token_field", "refresh_token")
+	form.Set("custom_token_request_format", "json")
+	form.Set("custom_callback_parameter", "redirect_uri")
+	form.Set("custom_local_callback_host", "127.0.0.1")
+	form.Set("custom_local_callback_path", "/provider-callback")
+	form.Set("custom_standard_token_fields", "on")
+	form.Set("custom_oauth_pkce", "on")
+	form.Set("custom_static_headers_json", `{"X-Required-Header":"required-value"}`)
+	form.Set("custom_authorization_parameters_json", `{"audience":"custom-api"}`)
+
+	req := httptest.NewRequest(http.MethodPost, "/models", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	configs, err := llmConfigRepo.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found *models.LLMConfig
+	for i := range configs {
+		if configs[i].Name == "Signed Custom Model" {
+			found = &configs[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("created model not found")
+	}
+	if found.AuthMethod != models.AuthMethodOAuth || found.ModelsURL != "https://api.example.test/inference/v1/model/info" {
+		t.Fatalf("unexpected saved config: %#v", found)
+	}
+	cfg, err := llmcustomauth.ParseConfig(found.CustomAuthConfigJSON)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Enabled || cfg.UserAgent != "custom-client/1.0" || cfg.SigningSecret != "secret" || cfg.ModelIDField != "model_name" ||
+		cfg.AccessTokenHeader != "X-Auth-Token" || cfg.AccessTokenPrefix != "Token " {
+		t.Fatalf("unexpected custom auth config: %#v", cfg)
+	}
+	if !cfg.PKCE || !cfg.StandardTokenFields || cfg.CallbackParameter != "redirect_uri" ||
+		cfg.LocalCallbackHost != "127.0.0.1" || cfg.LocalCallbackPath != "/provider-callback" ||
+		cfg.StaticHeaders["X-Required-Header"] != "required-value" || cfg.AuthorizationParameters["audience"] != "custom-api" {
+		t.Fatalf("generic OAuth fields not saved: %#v", cfg)
+	}
+	if found.OAuthClientID != "client-id" || found.OAuthClientSecret != "client-secret" || found.OAuthScopes != "openid profile" {
+		t.Fatalf("OAuth client fields not saved: %#v", found)
+	}
+
+	editForm := url.Values{}
+	editForm.Set("base_url", found.BaseURL)
+	editForm.Set("models_url", found.ModelsURL)
+	editForm.Set("transport", found.Transport)
+	editForm.Set("preset_slug", found.PresetSlug)
+	editForm.Set("custom_user_agent", cfg.UserAgent)
+	editReq := httptest.NewRequest(http.MethodPost, "/models/"+found.ID, strings.NewReader(editForm.Encode()))
+	editReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	editCtx := e.NewContext(editReq, httptest.NewRecorder())
+	edited := *found
+	if err := applyOpenAICompatibleForm(editCtx, &edited); err != nil {
+		t.Fatal(err)
+	}
+	editedCfg, err := llmcustomauth.ParseConfig(edited.CustomAuthConfigJSON)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if editedCfg.StaticHeaders["X-Required-Header"] != "required-value" {
+		t.Fatalf("blank edit erased saved static headers: %#v", editedCfg.StaticHeaders)
+	}
+	clearForm := url.Values{}
+	clearForm.Set("base_url", found.BaseURL)
+	clearForm.Set("models_url", found.ModelsURL)
+	clearForm.Set("transport", found.Transport)
+	clearForm.Set("preset_slug", found.PresetSlug)
+	clearForm.Set("custom_clear_signing_secret", "on")
+	clearReq := httptest.NewRequest(http.MethodPost, "/models/"+found.ID, strings.NewReader(clearForm.Encode()))
+	clearReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	clearCtx := e.NewContext(clearReq, httptest.NewRecorder())
+	if err := applyOpenAICompatibleForm(clearCtx, &edited); err != nil {
+		t.Fatal(err)
+	}
+	clearedCfg, err := llmcustomauth.ParseConfig(edited.CustomAuthConfigJSON)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if clearedCfg.SigningSecret != "" {
+		t.Fatal("explicit clear retained the signing secret")
+	}
+}
+
+func TestCreateModel_CustomOAuthRejectsInvalidHeaderConfiguration(t *testing.T) {
+	_, e, _ := setupTestHandler(t)
+	form := url.Values{
+		"name":                       {"Invalid custom header"},
+		"provider":                   {"openai_compatible"},
+		"custom_auth_method":         {"oauth"},
+		"model":                      {"premium"},
+		"base_url":                   {"https://api.example.test/v1"},
+		"preset_slug":                {"custom"},
+		"transport":                  {"chat_completions"},
+		"oauth_authorize_url":        {"https://login.example.test/authorize"},
+		"oauth_token_url":            {"https://login.example.test/token"},
+		"custom_access_token_header": {"Bad Header"},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/models", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "valid HTTP header name") {
+		t.Fatalf("unexpected response: %s", rec.Body.String())
+	}
+}
+
+func TestCreateModel_CustomCompatibleRejectsInvalidRequestExtras(t *testing.T) {
+	tests := []struct {
+		name  string
+		field string
+		value string
+	}{
+		{name: "auth header name", field: "auth_header_name", value: "Bad Header"},
+		{name: "auth header value", field: "auth_header_value_prefix", value: "Bearer\r\nX-Injected: true"},
+		{name: "additional headers JSON", field: "extra_headers_json", value: `{"X-Required-Header":`},
+		{name: "additional header value", field: "extra_headers_json", value: `{"X-Required-Header":"required\u000aX-Injected: true"}`},
+		{name: "additional body JSON", field: "extra_body_json", value: `[{"metadata":"not an object"}]`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, e, _ := setupTestHandler(t)
+			form := url.Values{
+				"name":        {"Invalid compatible request extras"},
+				"provider":    {"openai_compatible"},
+				"model":       {"model"},
+				"api_key":     {"secret"},
+				"base_url":    {"https://api.example.test/v1"},
+				"preset_slug": {"custom"},
+				"transport":   {"chat_completions"},
+				"temperature": {"0"},
+			}
+			form.Set(tt.field, tt.value)
+			req := httptest.NewRequest(http.MethodPost, "/models", strings.NewReader(form.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestApplyOpenAICompatibleFormPreservesAndClearsRequestExtras(t *testing.T) {
+	_, e, _ := setupTestHandler(t)
+	agent := models.LLMConfig{
+		Provider:         models.ProviderOpenAICompatible,
+		AuthMethod:       models.AuthMethodAPIKey,
+		APIKey:           "secret",
+		ExtraHeadersJSON: `{"X-Required-Header":"required"}`,
+		ExtraBodyJSON:    `{"provider_option":true}`,
+	}
+	form := url.Values{
+		"base_url":                 {"https://api.example.test/v1"},
+		"preset_slug":              {"custom"},
+		"transport":                {"chat_completions"},
+		"auth_header_name":         {"X-API-Key"},
+		"auth_header_value_prefix": {""},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/models", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if err := applyOpenAICompatibleForm(e.NewContext(req, httptest.NewRecorder()), &agent); err != nil {
+		t.Fatal(err)
+	}
+	if agent.ExtraHeadersJSON != `{"X-Required-Header":"required"}` || agent.ExtraBodyJSON != `{"provider_option":true}` {
+		t.Fatalf("blank edit erased saved request extras: headers=%q body=%q", agent.ExtraHeadersJSON, agent.ExtraBodyJSON)
+	}
+	if got := agent.GetAuthHeaderValuePrefix(); got != "" {
+		t.Fatalf("raw API-key prefix = %q, want empty", got)
+	}
+
+	form.Set("clear_extra_headers", "on")
+	form.Set("clear_extra_body", "on")
+	req = httptest.NewRequest(http.MethodPost, "/models", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if err := applyOpenAICompatibleForm(e.NewContext(req, httptest.NewRecorder()), &agent); err != nil {
+		t.Fatal(err)
+	}
+	if agent.ExtraHeadersJSON != "" || agent.ExtraBodyJSON != "" {
+		t.Fatalf("explicit clear retained request extras: headers=%q body=%q", agent.ExtraHeadersJSON, agent.ExtraBodyJSON)
+	}
+
+	agent.ExtraHeadersJSON = `{"X-Required-Header":"required"}`
+	agent.ExtraBodyJSON = `{"provider_option":true}`
+	form.Set("preset_slug", "openrouter")
+	form.Set("extra_headers_json", `{"X-Required-Header":"required"}`)
+	form.Set("extra_body_json", `{"provider_option":true}`)
+	req = httptest.NewRequest(http.MethodPost, "/models", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if err := applyOpenAICompatibleForm(e.NewContext(req, httptest.NewRecorder()), &agent); err != nil {
+		t.Fatal(err)
+	}
+	if agent.AuthHeaderName != "" || agent.AuthHeaderValuePrefix != "" ||
+		agent.ExtraHeadersJSON != "" || agent.ExtraBodyJSON != "" {
+		t.Fatalf("preset switch retained custom request settings: %#v", agent)
+	}
+}
+
+func TestUpdateCustomOAuthSecurityEndpointInvalidatesStoredCredentials(t *testing.T) {
+	_, e, repo := setupTestHandler(t)
+	ctx := context.Background()
+	cfg := llmcustomauth.Config{
+		Enabled:              true,
+		RefreshURL:           "https://api.example.test/auth/refresh",
+		ProfileURL:           "https://api.example.test/profile",
+		AccessTokenField:     "token",
+		RefreshTokenField:    "refresh_token",
+		AuthorizationMode:    "auto",
+		ModelsArrayPath:      "data",
+		ModelIDField:         "model_name",
+		CallbackParameter:    "callback_uri",
+		TokenRequestFormat:   "json",
+		RefreshRequestFormat: "json",
+	}
+	agent := &models.LLMConfig{
+		Name:                 "Connected custom model",
+		Provider:             models.ProviderOpenAICompatible,
+		AuthMethod:           models.AuthMethodOAuth,
+		Model:                "premium",
+		BaseURL:              "https://api.example.test/inference/v1",
+		ModelsURL:            "https://api.example.test/inference/v1/model/info",
+		OAuthAuthorizeURL:    "https://login.example.test/login",
+		OAuthTokenURL:        "https://api.example.test/auth/token",
+		OAuthAccessToken:     "connected-access",
+		OAuthRefreshToken:    "connected-refresh",
+		OAuthExpiresAt:       time.Now().Add(time.Hour).UnixMilli(),
+		CustomAuthConfigJSON: llmcustomauth.MarshalConfig(cfg),
+		CustomAuthStateJSON:  `{"instance_id":"instance-1"}`,
+	}
+	if err := repo.Create(ctx, agent); err != nil {
+		t.Fatal(err)
+	}
+	form := url.Values{
+		"name":                          {agent.Name},
+		"provider":                      {"openai_compatible"},
+		"custom_auth_method":            {"oauth"},
+		"model":                         {agent.Model},
+		"base_url":                      {agent.BaseURL},
+		"models_url":                    {"https://new-api.example.test/models"},
+		"preset_slug":                   {"custom"},
+		"transport":                     {"chat_completions"},
+		"oauth_authorize_url":           {agent.OAuthAuthorizeURL},
+		"oauth_token_url":               {agent.OAuthTokenURL},
+		"custom_refresh_url":            {cfg.RefreshURL},
+		"custom_profile_url":            {cfg.ProfileURL},
+		"custom_access_token_field":     {"token"},
+		"custom_refresh_token_field":    {"refresh_token"},
+		"custom_token_request_format":   {"json"},
+		"custom_refresh_request_format": {"json"},
+		"custom_authorization_mode":     {"auto"},
+		"custom_models_array_path":      {"data"},
+		"custom_model_id_field":         {"model_name"},
+		"custom_callback_parameter":     {"callback_uri"},
+	}
+	req := httptest.NewRequest(http.MethodPut, "/models/"+agent.ID, strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303, got %d: %s", rec.Code, rec.Body.String())
+	}
+	updated, err := repo.GetByID(ctx, agent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.ModelsURL != "https://new-api.example.test/models" {
+		t.Fatalf("models URL not updated: %q", updated.ModelsURL)
+	}
+	if updated.OAuthAccessToken != "" || updated.OAuthRefreshToken != "" || updated.CustomAuthStateJSON != "" {
+		t.Fatalf("security endpoint change retained OAuth credentials: %#v", updated)
+	}
+}
+
 func TestCreateModel_OpenAICompatibleNewPresetPersistsExactFields(t *testing.T) {
 	_, e, llmConfigRepo := setupTestHandler(t)
 
@@ -795,7 +1635,31 @@ func TestCreateModel_OpenAICompatibleRejectsPublicHTTPBaseURL(t *testing.T) {
 	}
 }
 
+func TestCreateModel_OpenAICompatibleRequiresOptInForPrivateModelsURL(t *testing.T) {
+	t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
+	_, e, _ := setupTestHandler(t)
+
+	form := url.Values{}
+	form.Set("name", "Private Models API")
+	form.Set("provider", "openai_compatible")
+	form.Set("model", "model")
+	form.Set("base_url", "https://api.example.test/v1")
+	form.Set("models_url", "http://127.0.0.1:8000/models")
+	form.Set("preset_slug", "custom")
+	form.Set("temperature", "0")
+
+	req := httptest.NewRequest(http.MethodPost, "/models", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 without per-model private endpoint opt-in, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestCreateModel_OpenAICompatibleAllowsLocalHTTPBaseURL(t *testing.T) {
+	t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
 	_, e, llmConfigRepo := setupTestHandler(t)
 
 	form := url.Values{}
@@ -827,6 +1691,25 @@ func TestCreateModel_OpenAICompatibleAllowsLocalHTTPBaseURL(t *testing.T) {
 		}
 	}
 	t.Fatal("created model not found")
+}
+
+func TestCreateModel_OpenAICompatibleRejectsLocalURLWithoutServerPolicy(t *testing.T) {
+	t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "")
+	_, e, _ := setupTestHandler(t)
+	form := url.Values{
+		"name":        {"Blocked Local Compatible"},
+		"provider":    {"openai_compatible"},
+		"model":       {"local-model"},
+		"base_url":    {"http://127.0.0.1:8000/v1"},
+		"preset_slug": {"vllm"},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/models", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
 }
 
 func TestCreateModel_AnthropicAPIKey(t *testing.T) {
@@ -923,11 +1806,196 @@ func TestCreateModel_HTMX_ReturnsContentInsteadOfRedirect(t *testing.T) {
 	}
 }
 
-func TestCreateModel_SubscriptionCLI(t *testing.T) {
+func TestModelMutations_HTMXReturnRefreshedList(t *testing.T) {
+	db, statementCounter := testutil.NewStatementCountingTestDB(t)
+	_, e, llmConfigRepo := setupTestHandlerForDB(t, db)
+	ctx := context.Background()
+	largePayload := strings.Repeat("large-edit-only-json", 4096)
+	largeCustom := &models.LLMConfig{
+		Name: "Large Custom Provider", Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodAPIKey,
+		Model: "custom-model", APIKey: "secret-api-key", BaseURL: "https://example.com/v1/",
+		Transport: "chat_completions", PresetSlug: "custom", ExtraHeadersJSON: `{"X-Secret":"value"}`,
+		ExtraBodyJSON: largePayload, CustomAuthConfigJSON: `{"signing_secret":"secret"}`,
+		CustomAuthStateJSON: `{"access":"secret"}`, MixtureConfigJSON: `{"large":"` + largePayload + `"}`,
+	}
+	if err := llmConfigRepo.Create(ctx, largeCustom); err != nil {
+		t.Fatalf("create large custom provider: %v", err)
+	}
+
+	createForm := url.Values{
+		"name":                {"Mutation Created Model"},
+		"provider":            {"anthropic"},
+		"anthropic_auth_type": {"api_key"},
+		"model":               {"claude-sonnet-4-5-20250929"},
+		"temperature":         {"0"},
+		"model_max_workers":   {"2"},
+	}
+	statementCounter.Reset()
+	statementCounter.SetEnabled(true)
+	createReq := httptest.NewRequest(http.MethodPost, "/models", strings.NewReader(createForm.Encode()))
+	createReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	createReq.Header.Set("HX-Request", "true")
+	createRec := httptest.NewRecorder()
+	e.ServeHTTP(createRec, createReq)
+	statementCounter.SetEnabled(false)
+	assertRefreshedModelsResponse(t, createRec, "Mutation Created Model", "Large Custom Provider", "0 / 2 active")
+	assertCompactModelsRefreshQuery(t, statementCounter.Statements())
+	assertNotContains(t, createRec, largePayload)
+	assertNotContains(t, createRec, "secret-api-key")
+
+	configs, err := llmConfigRepo.List(ctx)
+	if err != nil {
+		t.Fatalf("list models after create: %v", err)
+	}
+	var created *models.LLMConfig
+	for i := range configs {
+		if configs[i].Name == "Mutation Created Model" {
+			created = &configs[i]
+			break
+		}
+	}
+	if created == nil {
+		t.Fatal("created model not found")
+	}
+
+	updateForm := url.Values{
+		"name":                {"Mutation Updated Model"},
+		"provider":            {"anthropic"},
+		"anthropic_auth_type": {"api_key"},
+		"model":               {"claude-sonnet-4-5-20250929"},
+		"temperature":         {"0"},
+		"model_max_workers":   {"3"},
+	}
+	statementCounter.Reset()
+	statementCounter.SetEnabled(true)
+	updateRec := htmxPut(e, "/models/"+created.ID, updateForm)
+	statementCounter.SetEnabled(false)
+	assertRefreshedModelsResponse(t, updateRec, "Mutation Updated Model", "Large Custom Provider", "0 / 3 active")
+	assertCompactModelsRefreshQuery(t, statementCounter.Statements())
+	assertNotContains(t, updateRec, largePayload)
+
+	statementCounter.Reset()
+	statementCounter.SetEnabled(true)
+	defaultRec := htmxPost(e, "/models/"+created.ID+"/set-default", nil)
+	statementCounter.SetEnabled(false)
+	assertRefreshedModelsResponse(t, defaultRec, "Mutation Updated Model", "Large Custom Provider", "data-model-is-default=\"true\"")
+	assertCompactModelsRefreshQuery(t, statementCounter.Statements())
+	assertNotContains(t, defaultRec, largePayload)
+
+	statementCounter.Reset()
+	statementCounter.SetEnabled(true)
+	deleteRec := htmxDelete(e, "/models/"+created.ID)
+	statementCounter.SetEnabled(false)
+	if deleteRec.Code != http.StatusOK {
+		t.Fatalf("delete HTMX response code = %d, want %d: %s", deleteRec.Code, http.StatusOK, deleteRec.Body.String())
+	}
+	if body := deleteRec.Body.String(); !strings.Contains(body, "models-container") || strings.Contains(body, "Mutation Updated Model") {
+		t.Errorf("delete HTMX response did not contain the refreshed model list: %s", body)
+	}
+	assertCompactModelsRefreshQuery(t, statementCounter.Statements())
+	assertNotContains(t, deleteRec, largePayload)
+
+	details := htmxGet(e, "/models/"+largeCustom.ID+"/edit-details")
+	assertCode(t, details, http.StatusOK)
+	var payload modelEditDetails
+	if err := json.Unmarshal(details.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.ExtraBodyJSON != largePayload || payload.ExtraHeadersJSON != largeCustom.ExtraHeadersJSON {
+		t.Fatalf("edit details lost full custom provider fields: %#v", payload)
+	}
+}
+
+func assertRefreshedModelsResponse(t *testing.T, rec *httptest.ResponseRecorder, expected ...string) {
+	t.Helper()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("HTMX response code = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "models-container") {
+		t.Fatalf("HTMX response missing models-container: %s", body)
+	}
+	for _, value := range expected {
+		if !strings.Contains(body, value) {
+			t.Errorf("HTMX response missing %q: %s", value, body)
+		}
+	}
+}
+
+func assertCompactModelsRefreshQuery(t *testing.T, statements []string) {
+	t.Helper()
+	var refreshStatements []string
+	for _, statement := range statements {
+		normalized := strings.Join(strings.Fields(statement), " ")
+		if strings.Contains(normalized, "FROM agent_configs ORDER BY is_default DESC, name ASC") {
+			refreshStatements = append(refreshStatements, normalized)
+		}
+	}
+	if len(refreshStatements) != 1 {
+		t.Fatalf("expected exactly one model-card refresh query, got %d in statements: %q", len(refreshStatements), statements)
+	}
+	refresh := refreshStatements[0]
+	for _, forbidden := range []string{"oauth_refresh_token", "oauth_client_secret", "extra_headers_json", "extra_body_json", "custom_auth_config_json", "custom_auth_state_json"} {
+		if strings.Contains(refresh, forbidden) {
+			t.Fatalf("model refresh query selected edit-only column %q: %s", forbidden, refresh)
+		}
+	}
+	for _, required := range []string{"CASE WHEN api_key != '' THEN 1 ELSE 0 END", "json_array_length"} {
+		if !strings.Contains(refresh, required) {
+			t.Fatalf("model refresh query does not look like compact card projection; missing %q in %s", required, refresh)
+		}
+	}
+}
+
+func TestNormalizeBrowserModelFormCommonWorkerAndCheckboxSettings(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+
+	createForm := url.Values{
+		"name":                {"Worker Create"},
+		"provider":            {"anthropic"},
+		"anthropic_auth_type": {"api_key"},
+		"model":               {"claude-sonnet-4-5-20250929"},
+		"temperature":         {"0.2"},
+		"model_max_workers":   {"99"},
+		"worker_timeout":      {"-5"},
+		"is_default":          {"on"},
+		"auto_start_tasks":    {"on"},
+	}
+	createReq := httptest.NewRequest(http.MethodPost, "/models", strings.NewReader(createForm.Encode()))
+	createReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	created := &models.LLMConfig{}
+	if err := h.normalizeBrowserModelForm(context.Background(), e.NewContext(createReq, httptest.NewRecorder()), created, modelFormOptions{mode: modelFormCreate}); err != nil {
+		t.Fatal(err)
+	}
+	if created.MaxWorkers != 10 || created.WorkerTimeout != 0 || !created.IsDefault || !created.AutoStartTasks || created.Temperature != 0.2 {
+		t.Fatalf("create normalization mismatch: %#v", created)
+	}
+
+	updateForm := url.Values{
+		"name":                {"Worker Update"},
+		"provider":            {"anthropic"},
+		"anthropic_auth_type": {"api_key"},
+		"model":               {"claude-sonnet-4-5-20250929"},
+		"temperature":         {"not-a-number"},
+		"model_max_workers":   {"not-a-number"},
+		"worker_timeout":      {"25"},
+	}
+	updateReq := httptest.NewRequest(http.MethodPost, "/models/id", strings.NewReader(updateForm.Encode()))
+	updateReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	updated := &models.LLMConfig{Temperature: 0.7, MaxWorkers: 4, WorkerTimeout: 12, IsDefault: true, AutoStartTasks: true}
+	if err := h.normalizeBrowserModelForm(context.Background(), e.NewContext(updateReq, httptest.NewRecorder()), updated, modelFormOptions{mode: modelFormUpdate}); err != nil {
+		t.Fatal(err)
+	}
+	if updated.Temperature != 0.7 || updated.MaxWorkers != 4 || updated.WorkerTimeout != 25 || updated.IsDefault || updated.AutoStartTasks {
+		t.Fatalf("update normalization mismatch: %#v", updated)
+	}
+}
+
+func TestCreateModel_SubscriptionLegacyCLINormalizesOAuth(t *testing.T) {
 	_, e, llmConfigRepo := setupTestHandler(t)
 
 	form := url.Values{}
-	form.Set("name", "My CLI Model")
+	form.Set("name", "My Legacy CLI Model")
 	form.Set("provider", "anthropic")
 	form.Set("anthropic_auth_type", "subscription")
 	form.Set("auth_method", "cli")
@@ -951,7 +2019,7 @@ func TestCreateModel_SubscriptionCLI(t *testing.T) {
 
 	var found *models.LLMConfig
 	for i := range configs {
-		if configs[i].Name == "My CLI Model" {
+		if configs[i].Name == "My Legacy CLI Model" {
 			found = &configs[i]
 			break
 		}
@@ -962,8 +2030,8 @@ func TestCreateModel_SubscriptionCLI(t *testing.T) {
 	if found.Provider != models.ProviderAnthropic {
 		t.Errorf("provider = %q, want %q", found.Provider, models.ProviderAnthropic)
 	}
-	if found.AuthMethod != models.AuthMethodCLI {
-		t.Errorf("auth_method = %q, want %q", found.AuthMethod, models.AuthMethodCLI)
+	if found.AuthMethod != models.AuthMethodOAuth {
+		t.Errorf("auth_method = %q, want %q", found.AuthMethod, models.AuthMethodOAuth)
 	}
 }
 
@@ -1342,6 +2410,7 @@ func TestUpdateModel_SwitchOpenAIOAuthToAnthropicOAuthClearsStaleOAuthState(t *t
 }
 
 func TestUpdateModel_SwitchToOpenAICompatibleBlankAPIKeyClearsStaleCredential(t *testing.T) {
+	t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
 	_, e, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()
 
@@ -1390,7 +2459,155 @@ func TestUpdateModel_SwitchToOpenAICompatibleBlankAPIKeyClearsStaleCredential(t 
 	}
 }
 
+func TestUpdateModel_SwitchCustomOAuthToAPIKeyClearsOAuthSecrets(t *testing.T) {
+	_, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	cfg := llmcustomauth.Config{
+		Enabled:           true,
+		SigningSecret:     "signing-secret",
+		StaticHeaders:     map[string]string{"X-Required-Header": "required"},
+		TokenHeaders:      map[string]string{"X-Token-Secret": "token-secret"},
+		RefreshHeaders:    map[string]string{"X-Refresh-Secret": "refresh-secret"},
+		RefreshParameters: map[string]string{"refresh_secret": "secret"},
+	}
+	agent := &models.LLMConfig{
+		Name:                 "Custom OAuth",
+		Provider:             models.ProviderOpenAICompatible,
+		AuthMethod:           models.AuthMethodOAuth,
+		Model:                "model",
+		BaseURL:              "https://api.example.test/v1",
+		APIKey:               "",
+		OAuthAccessToken:     "access-token",
+		OAuthRefreshToken:    "refresh-token",
+		OAuthClientID:        "client-id",
+		OAuthClientSecret:    "client-secret",
+		OAuthAuthorizeURL:    "https://login.example.test/authorize",
+		OAuthTokenURL:        "https://login.example.test/token",
+		CustomAuthConfigJSON: llmcustomauth.MarshalConfig(cfg),
+	}
+	if err := llmConfigRepo.Create(ctx, agent); err != nil {
+		t.Fatal(err)
+	}
+
+	form := url.Values{
+		"name":               {"Custom API key"},
+		"provider":           {"openai_compatible"},
+		"custom_auth_method": {"api_key"},
+		"model":              {"model"},
+		"api_key":            {"new-api-key"},
+		"base_url":           {"https://api.example.test/v1"},
+		"preset_slug":        {"custom"},
+		"transport":          {"chat_completions"},
+		"temperature":        {"0"},
+	}
+	req := httptest.NewRequest(http.MethodPut, "/models/"+agent.ID, strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	updated, err := llmConfigRepo.GetByID(ctx, agent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.AuthMethod != models.AuthMethodAPIKey || updated.APIKey != "new-api-key" {
+		t.Fatalf("unexpected updated credentials: auth=%s api_key=%q", updated.AuthMethod, updated.APIKey)
+	}
+	if updated.OAuthAccessToken != "" || updated.OAuthRefreshToken != "" ||
+		updated.OAuthClientID != "" || updated.OAuthClientSecret != "" {
+		t.Fatalf("OAuth credentials survived auth-mode switch: %#v", updated)
+	}
+	updatedCfg, err := llmcustomauth.ParseConfig(updated.CustomAuthConfigJSON)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updatedCfg.SigningSecret != "" || len(updatedCfg.StaticHeaders) != 0 ||
+		len(updatedCfg.TokenHeaders) != 0 || len(updatedCfg.RefreshHeaders) != 0 ||
+		len(updatedCfg.RefreshParameters) != 0 {
+		t.Fatalf("OAuth-only secrets survived auth-mode switch: %#v", updatedCfg)
+	}
+}
+
+func TestUpdateModel_CustomOAuthEmptyDisplayedValuesClearSavedSecrets(t *testing.T) {
+	_, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	cfg := llmcustomauth.Config{
+		Enabled:           true,
+		SigningSecret:     "signing-secret",
+		StaticHeaders:     map[string]string{"X-Required": "static-secret"},
+		TokenHeaders:      map[string]string{"X-Token": "token-secret"},
+		RefreshHeaders:    map[string]string{"X-Refresh": "refresh-secret"},
+		RefreshParameters: map[string]string{"audience": "saved-audience"},
+	}
+	agent := &models.LLMConfig{
+		Name:                 "Custom OAuth",
+		Provider:             models.ProviderOpenAICompatible,
+		AuthMethod:           models.AuthMethodOAuth,
+		Model:                "custom-model",
+		BaseURL:              "https://api.example.test/v1",
+		PresetSlug:           "custom",
+		OAuthClientID:        "client-id",
+		OAuthClientSecret:    "client-secret",
+		OAuthAuthorizeURL:    "https://login.example.test/authorize",
+		OAuthTokenURL:        "https://login.example.test/token",
+		CustomAuthConfigJSON: llmcustomauth.MarshalConfig(cfg),
+	}
+	if err := llmConfigRepo.Create(ctx, agent); err != nil {
+		t.Fatal(err)
+	}
+
+	form := url.Values{
+		"name":                                 {"Custom OAuth"},
+		"provider":                             {"openai_compatible"},
+		"custom_auth_method":                   {"oauth"},
+		"model":                                {"custom-model"},
+		"base_url":                             {"https://api.example.test/v1"},
+		"preset_slug":                          {"custom"},
+		"transport":                            {"chat_completions"},
+		"oauth_authorize_url":                  {"https://login.example.test/authorize"},
+		"oauth_token_url":                      {"https://login.example.test/token"},
+		"oauth_client_id":                      {"client-id"},
+		"oauth_client_secret":                  {""},
+		"custom_signing_secret":                {""},
+		"custom_static_headers_json":           {""},
+		"custom_token_headers_json":            {""},
+		"custom_refresh_headers_json":          {""},
+		"custom_refresh_parameters_json":       {""},
+		"custom_authorization_parameters_json": {""},
+		"temperature":                          {"0"},
+	}
+	req := httptest.NewRequest(http.MethodPut, "/models/"+agent.ID, strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	updated, err := llmConfigRepo.GetByID(ctx, agent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.OAuthClientSecret != "" {
+		t.Fatalf("empty displayed client secret did not clear saved value: %q", updated.OAuthClientSecret)
+	}
+	updatedCfg, err := llmcustomauth.ParseConfig(updated.CustomAuthConfigJSON)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updatedCfg.SigningSecret != "" || len(updatedCfg.StaticHeaders) != 0 ||
+		len(updatedCfg.TokenHeaders) != 0 || len(updatedCfg.RefreshHeaders) != 0 ||
+		len(updatedCfg.RefreshParameters) != 0 {
+		t.Fatalf("empty displayed custom OAuth values did not clear saved values: %#v", updatedCfg)
+	}
+}
+
 func TestUpdateModel_SwitchProviderWithoutAPIKeyFieldClearsStaleCredential(t *testing.T) {
+	t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
 	_, e, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()
 
@@ -1576,11 +2793,11 @@ func TestUpdateModel_SwitchFromAPIKeyToSubscription(t *testing.T) {
 	}
 }
 
-func TestUpdateModel_ChangeAuthMethod_CLIToOAuth(t *testing.T) {
+func TestUpdateModel_ChangeAuthMethod_LegacyCLIToOAuth(t *testing.T) {
 	_, e, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()
 
-	// Create a Claude Max model with CLI auth method
+	// Create a historical subscription model with retired CLI auth method.
 	agent := &models.LLMConfig{
 		Name:       "Sonnet CLI",
 		Provider:   models.ProviderAnthropic,
@@ -1625,7 +2842,7 @@ func TestUpdateModel_ChangeAuthMethod_CLIToOAuth(t *testing.T) {
 	}
 }
 
-func TestUpdateModel_ChangeAuthMethod_OAuthToCLI(t *testing.T) {
+func TestUpdateModel_ChangeAuthMethod_OAuthStaleCLIFormNormalizesOAuth(t *testing.T) {
 	_, e, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()
 
@@ -1642,7 +2859,7 @@ func TestUpdateModel_ChangeAuthMethod_OAuthToCLI(t *testing.T) {
 		t.Fatalf("create error: %v", err)
 	}
 
-	// Update: change auth_method from OAuth to CLI
+	// Update: a stale CLI value from a subscription form normalizes back to OAuth.
 	form := url.Values{}
 	form.Set("name", "Sonnet OAuth")
 	form.Set("provider", "anthropic")
@@ -1669,8 +2886,8 @@ func TestUpdateModel_ChangeAuthMethod_OAuthToCLI(t *testing.T) {
 	if updated.Provider != models.ProviderAnthropic {
 		t.Errorf("provider = %q, want %q", updated.Provider, models.ProviderAnthropic)
 	}
-	if updated.AuthMethod != models.AuthMethodCLI {
-		t.Errorf("auth_method = %q, want %q", updated.AuthMethod, models.AuthMethodCLI)
+	if updated.AuthMethod != models.AuthMethodOAuth {
+		t.Errorf("auth_method = %q, want %q", updated.AuthMethod, models.AuthMethodOAuth)
 	}
 }
 
@@ -1796,10 +3013,9 @@ func TestUpdateModel_DuplicateAuthMethodFormFields(t *testing.T) {
 	}
 
 	// With duplicate form fields, Go's FormValue returns the first value ("cli").
-	// The UI prevents this via toggleProviderFields(), which disables the inactive
-	// provider's select. An explicit "cli" value is still respected by the handler.
-	if updated.AuthMethod != models.AuthMethodCLI {
-		t.Errorf("auth_method = %q, want %q (FormValue returns first duplicate)", updated.AuthMethod, models.AuthMethodCLI)
+	// The handler normalizes stale subscription CLI values back to OAuth.
+	if updated.AuthMethod != models.AuthMethodOAuth {
+		t.Errorf("auth_method = %q, want %q", updated.AuthMethod, models.AuthMethodOAuth)
 	}
 }
 
@@ -1823,12 +3039,12 @@ func TestResolveProviderAndAuth_OAuthFormValue(t *testing.T) {
 			wantAuthMethod: models.AuthMethodOAuth,
 		},
 		{
-			name:           "anthropic oauth with cli connection",
+			name:           "anthropic oauth with legacy cli connection normalizes to oauth",
 			provider:       "anthropic",
 			anthropicAuth:  "oauth",
 			authMethod:     "cli",
 			wantProvider:   models.ProviderAnthropic,
-			wantAuthMethod: models.AuthMethodCLI,
+			wantAuthMethod: models.AuthMethodOAuth,
 		},
 		{
 			name:           "anthropic oauth defaults to oauth when auth_method absent",
@@ -1847,12 +3063,12 @@ func TestResolveProviderAndAuth_OAuthFormValue(t *testing.T) {
 			wantAuthMethod: models.AuthMethodOAuth,
 		},
 		{
-			name:           "openai oauth with cli connection",
+			name:           "openai oauth with legacy cli connection normalizes to oauth",
 			provider:       "openai",
 			openaiAuth:     "oauth",
 			authMethod:     "cli",
 			wantProvider:   models.ProviderOpenAI,
-			wantAuthMethod: models.AuthMethodCLI,
+			wantAuthMethod: models.AuthMethodOAuth,
 		},
 		{
 			name:           "openai oauth defaults to oauth when auth_method absent",
@@ -1877,11 +3093,11 @@ func TestResolveProviderAndAuth_OAuthFormValue(t *testing.T) {
 	}
 }
 
-func TestCreateModel_OAuthCLI(t *testing.T) {
+func TestCreateModel_OAuthLegacyCLINormalizesOAuth(t *testing.T) {
 	_, e, llmConfigRepo := setupTestHandler(t)
 
 	form := url.Values{}
-	form.Set("name", "My OAuth CLI Model")
+	form.Set("name", "My OAuth Legacy CLI Model")
 	form.Set("provider", "anthropic")
 	form.Set("anthropic_auth_type", "oauth")
 	form.Set("auth_method", "cli")
@@ -1905,7 +3121,7 @@ func TestCreateModel_OAuthCLI(t *testing.T) {
 
 	var found *models.LLMConfig
 	for i := range configs {
-		if configs[i].Name == "My OAuth CLI Model" {
+		if configs[i].Name == "My OAuth Legacy CLI Model" {
 			found = &configs[i]
 			break
 		}
@@ -1916,8 +3132,8 @@ func TestCreateModel_OAuthCLI(t *testing.T) {
 	if found.Provider != models.ProviderAnthropic {
 		t.Errorf("provider = %q, want %q", found.Provider, models.ProviderAnthropic)
 	}
-	if found.AuthMethod != models.AuthMethodCLI {
-		t.Errorf("auth_method = %q, want %q", found.AuthMethod, models.AuthMethodCLI)
+	if found.AuthMethod != models.AuthMethodOAuth {
+		t.Errorf("auth_method = %q, want %q", found.AuthMethod, models.AuthMethodOAuth)
 	}
 }
 
@@ -2095,11 +3311,11 @@ func TestCreateModel_OpenAIOAuthAPI(t *testing.T) {
 	}
 }
 
-func TestCreateModel_OpenAIOAuthCLI(t *testing.T) {
+func TestCreateModel_OpenAIOAuthLegacyCLINormalizesOAuth(t *testing.T) {
 	_, e, llmConfigRepo := setupTestHandler(t)
 
 	form := url.Values{}
-	form.Set("name", "OpenAI OAuth CLI Model")
+	form.Set("name", "OpenAI OAuth Legacy CLI Model")
 	form.Set("provider", "openai")
 	form.Set("openai_auth_type", "oauth")
 	form.Set("auth_method", "cli")
@@ -2123,7 +3339,7 @@ func TestCreateModel_OpenAIOAuthCLI(t *testing.T) {
 
 	var found *models.LLMConfig
 	for i := range configs {
-		if configs[i].Name == "OpenAI OAuth CLI Model" {
+		if configs[i].Name == "OpenAI OAuth Legacy CLI Model" {
 			found = &configs[i]
 			break
 		}
@@ -2134,8 +3350,8 @@ func TestCreateModel_OpenAIOAuthCLI(t *testing.T) {
 	if found.Provider != models.ProviderOpenAI {
 		t.Errorf("provider = %q, want %q", found.Provider, models.ProviderOpenAI)
 	}
-	if found.AuthMethod != models.AuthMethodCLI {
-		t.Errorf("auth_method = %q, want %q", found.AuthMethod, models.AuthMethodCLI)
+	if found.AuthMethod != models.AuthMethodOAuth {
+		t.Errorf("auth_method = %q, want %q", found.AuthMethod, models.AuthMethodOAuth)
 	}
 }
 
@@ -2250,7 +3466,7 @@ func TestNormalizeOpenAIModel(t *testing.T) {
 		{"gpt-5.1-codex-mini", "gpt-5.1-codex-mini"},
 		{"gpt-5-codex", "gpt-5-codex"},
 		{"gpt-5-codex-mini", "gpt-5-codex-mini"},
-		{"", "gpt-5.6-sol"},              // empty defaults to latest
+		{"", ""},                         // empty stays empty for form validation
 		{"invalid-model", "gpt-5.6-sol"}, // unknown defaults to latest
 		{"  gpt-5.5  ", "gpt-5.5"},       // whitespace trimmed
 	}
@@ -2381,7 +3597,7 @@ func TestUpdateModel_SwitchFromSubscriptionToAPIKey(t *testing.T) {
 	h, e, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()
 
-	// Create a Claude Max (subscription CLI) model
+	// Create a historical subscription model with retired CLI auth method.
 	agent := &models.LLMConfig{
 		Name:       "Sub to API",
 		Provider:   models.ProviderAnthropic,
@@ -2528,6 +3744,41 @@ func TestUpdateModel_PreservesProjectIDInRedirect(t *testing.T) {
 	location := rec.Header().Get("Location")
 	if location != "/models?project_id=proj-xyz" {
 		t.Errorf("redirect Location = %q, want %q", location, "/models?project_id=proj-xyz")
+	}
+}
+
+func TestModelMutations_DefaultAndDeleteRedirectToPlainModels(t *testing.T) {
+	_, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+
+	defaultCandidate := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
+		a.Name = "Default Redirect Model"
+		a.IsDefault = false
+	})
+	setDefaultRec := postForm(e, "/models/"+defaultCandidate.ID+"/set-default?project_id=preserved-by-create-update-only", nil)
+	if setDefaultRec.Code != http.StatusSeeOther {
+		t.Fatalf("set default response code = %d, want %d: %s", setDefaultRec.Code, http.StatusSeeOther, setDefaultRec.Body.String())
+	}
+	if location := setDefaultRec.Header().Get("Location"); location != "/models" {
+		t.Errorf("set default redirect = %q, want /models", location)
+	}
+
+	deleteCandidate := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
+		a.Name = "Delete Redirect Model"
+		a.IsDefault = false
+	})
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/models/"+deleteCandidate.ID+"?project_id=preserved-by-create-update-only", nil)
+	deleteRec := httptest.NewRecorder()
+	e.ServeHTTP(deleteRec, deleteReq)
+	if deleteRec.Code != http.StatusSeeOther {
+		t.Fatalf("delete response code = %d, want %d: %s", deleteRec.Code, http.StatusSeeOther, deleteRec.Body.String())
+	}
+	if location := deleteRec.Header().Get("Location"); location != "/models" {
+		t.Errorf("delete redirect = %q, want /models", location)
+	}
+
+	if deleted, err := llmConfigRepo.GetByID(ctx, deleteCandidate.ID); err != nil || deleted != nil {
+		t.Fatalf("deleted model = %#v, err = %v; want nil, nil", deleted, err)
 	}
 }
 

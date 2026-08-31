@@ -16,7 +16,7 @@ type fakeGitHubService struct {
 	recloneFn              func(ctx context.Context, projectID, currentRepoPath, repoURL string) (string, string, error)
 	resolveRepoFn          func(ctx context.Context, repoURL, repoPath string) (*service.GitHubRepoRef, error)
 	defaultBranchFn        func(ctx context.Context, repo *service.GitHubRepoRef) (string, error)
-	publishBranchFn        func(ctx context.Context, repo *service.GitHubRepoRef, publishReq service.GitHubPublishBranchRequest) error
+	publishBranchFn        func(ctx context.Context, repo *service.GitHubRepoRef, publishReq service.GitHubPublishBranchRequest) (*service.GitHubPublishBranchResult, error)
 	replaceBranchHeadFn    func(ctx context.Context, repo *service.GitHubRepoRef, req service.GitHubReplaceBranchHeadRequest) error
 	getPullRequestFn       func(ctx context.Context, repo *service.GitHubRepoRef, number int) (*service.GitHubPullRequest, error)
 	findPRFn               func(ctx context.Context, repo *service.GitHubRepoRef, branch string) (*service.GitHubPullRequest, error)
@@ -25,12 +25,15 @@ type fakeGitHubService struct {
 	getIssueFn             func(ctx context.Context, repo *service.GitHubRepoRef, issueNumber int) (*service.GitHubIssue, error)
 	getAuthenticatedUserFn func(ctx context.Context) (*service.GitHubAuthenticatedUser, error)
 	listMyAssignedIssuesFn func(ctx context.Context, repo *service.GitHubRepoRef) (*service.GitHubAuthenticatedUser, []service.GitHubIssue, error)
+	listCreatedIssuesFn    func(ctx context.Context, repo *service.GitHubRepoRef) (*service.GitHubAuthenticatedUser, []service.GitHubIssue, error)
 	listAssignedIssuesFn   func(ctx context.Context, repo *service.GitHubRepoRef, assignee string) ([]service.GitHubIssue, error)
 	listAssignedIssuesPRFn func(ctx context.Context, repo *service.GitHubRepoRef, assignee string) ([]service.GitHubIssueWithPullRequest, error)
 	findIssuePRFn          func(ctx context.Context, repo *service.GitHubRepoRef, issueNumber int) (*service.GitHubPullRequest, error)
 	listPRFeedbackFn       func(ctx context.Context, repo *service.GitHubRepoRef, prNumber int) ([]service.GitHubPullRequestFeedback, error)
 	commentOnIssueFn       func(ctx context.Context, repo *service.GitHubRepoRef, issueNumber int, bodyText string) error
 	addLabelsToIssueFn     func(ctx context.Context, repo *service.GitHubRepoRef, issueNumber int, labels []string) error
+	closeIssueFn           func(ctx context.Context, repo *service.GitHubRepoRef, issueNumber int) error
+	globalAPIEndpoint      string
 }
 
 func (f *fakeGitHubService) GetConnectionStatus(ctx context.Context) (service.GitHubConnectionStatus, error) {
@@ -89,11 +92,11 @@ func (f *fakeGitHubService) DefaultBranch(ctx context.Context, repo *service.Git
 	return "main", nil
 }
 
-func (f *fakeGitHubService) PublishBranch(ctx context.Context, repo *service.GitHubRepoRef, publishReq service.GitHubPublishBranchRequest) error {
+func (f *fakeGitHubService) PublishBranch(ctx context.Context, repo *service.GitHubRepoRef, publishReq service.GitHubPublishBranchRequest) (*service.GitHubPublishBranchResult, error) {
 	if f != nil && f.publishBranchFn != nil {
 		return f.publishBranchFn(ctx, repo, publishReq)
 	}
-	return nil
+	return &service.GitHubPublishBranchResult{HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
 }
 
 func (f *fakeGitHubService) ReplaceBranchHead(ctx context.Context, repo *service.GitHubRepoRef, req service.GitHubReplaceBranchHeadRequest) error {
@@ -124,6 +127,10 @@ func (f *fakeGitHubService) CreatePullRequest(ctx context.Context, repo *service
 	return nil, fmt.Errorf("create PR not configured")
 }
 
+func (f *fakeGitHubService) EnsureIssueLabels(context.Context, *service.GitHubRepoRef, []string) error {
+	return nil
+}
+
 func (f *fakeGitHubService) CreateIssue(ctx context.Context, repo *service.GitHubRepoRef, createReq service.GitHubCreateIssueRequest) (*service.GitHubIssue, error) {
 	if f != nil && f.createIssueFn != nil {
 		return f.createIssueFn(ctx, repo, createReq)
@@ -145,11 +152,22 @@ func (f *fakeGitHubService) GetAuthenticatedUser(ctx context.Context) (*service.
 	return &service.GitHubAuthenticatedUser{Login: "openvibely", Source: service.GitHubAuthModePAT}, nil
 }
 
+func (f *fakeGitHubService) GetAuthenticatedUserForRepo(ctx context.Context, repo *service.GitHubRepoRef) (*service.GitHubAuthenticatedUser, error) {
+	return f.GetAuthenticatedUser(ctx)
+}
+
 func (f *fakeGitHubService) ListAuthenticatedAssignedIssues(ctx context.Context, repo *service.GitHubRepoRef) (*service.GitHubAuthenticatedUser, []service.GitHubIssue, error) {
 	if f != nil && f.listMyAssignedIssuesFn != nil {
 		return f.listMyAssignedIssuesFn(ctx, repo)
 	}
 	return nil, nil, fmt.Errorf("list my assigned issues not configured")
+}
+
+func (f *fakeGitHubService) ListAuthenticatedCreatedIssues(ctx context.Context, repo *service.GitHubRepoRef) (*service.GitHubAuthenticatedUser, []service.GitHubIssue, error) {
+	if f != nil && f.listCreatedIssuesFn != nil {
+		return f.listCreatedIssuesFn(ctx, repo)
+	}
+	return nil, nil, fmt.Errorf("list existing automation issues not configured")
 }
 
 func (f *fakeGitHubService) ListAssignedIssues(ctx context.Context, repo *service.GitHubRepoRef, assignee string) ([]service.GitHubIssue, error) {
@@ -192,4 +210,18 @@ func (f *fakeGitHubService) AddLabelsToIssue(ctx context.Context, repo *service.
 		return f.addLabelsToIssueFn(ctx, repo, issueNumber, labels)
 	}
 	return fmt.Errorf("add labels to issue not configured")
+}
+
+func (f *fakeGitHubService) CloseIssue(ctx context.Context, repo *service.GitHubRepoRef, issueNumber int) error {
+	if f != nil && f.closeIssueFn != nil {
+		return f.closeIssueFn(ctx, repo, issueNumber)
+	}
+	return fmt.Errorf("close issue not configured")
+}
+
+func (f *fakeGitHubService) GlobalAPIEndpoint(_ context.Context) string {
+	if f != nil {
+		return f.globalAPIEndpoint
+	}
+	return ""
 }

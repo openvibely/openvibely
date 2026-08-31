@@ -10,10 +10,28 @@ import templruntime "github.com/a-h/templ/runtime"
 
 import (
 	"fmt"
+	"net/url"
+
 	"github.com/openvibely/openvibely/internal/models"
 )
 
-func ChatAttachmentListOnly(attachments []models.ChatAttachment) templ.Component {
+func ChatAttachmentDownloadURL(attachmentID, projectID string) string {
+	base := fmt.Sprintf("/chat/attachments/%s/download", attachmentID)
+	if projectID == "" {
+		return base
+	}
+	return base + "?project_id=" + url.QueryEscape(projectID)
+}
+
+func ChatAttachmentDeleteURL(attachmentID, projectID string) string {
+	base := fmt.Sprintf("/chat/attachments/%s", attachmentID)
+	if projectID == "" {
+		return base
+	}
+	return base + "?project_id=" + url.QueryEscape(projectID)
+}
+
+func ChatAttachmentListOnly(attachments []models.ChatAttachment, projectID string) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -50,9 +68,9 @@ func ChatAttachmentListOnly(attachments []models.ChatAttachment) templ.Component
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var2 templ.SafeURL
-				templ_7745c5c3_Var2, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/chat/attachments/%s/download", att.ID)))
+				templ_7745c5c3_Var2, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(ChatAttachmentDownloadURL(att.ID, projectID)))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_attachment_list.templ`, Line: 21, Col: 82}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_attachment_list.templ`, Line: 39, Col: 74}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var2))
 				if templ_7745c5c3_Err != nil {
@@ -65,7 +83,7 @@ func ChatAttachmentListOnly(attachments []models.ChatAttachment) templ.Component
 				var templ_7745c5c3_Var3 string
 				templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.JoinStringErrs(att.FileName)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_attachment_list.templ`, Line: 25, Col: 22}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_attachment_list.templ`, Line: 43, Col: 22}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var3))
 				if templ_7745c5c3_Err != nil {
@@ -78,7 +96,7 @@ func ChatAttachmentListOnly(attachments []models.ChatAttachment) templ.Component
 				var templ_7745c5c3_Var4 string
 				templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(FormatFileSize(att.FileSize))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_attachment_list.templ`, Line: 27, Col: 77}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_attachment_list.templ`, Line: 45, Col: 77}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
 				if templ_7745c5c3_Err != nil {
@@ -89,9 +107,9 @@ func ChatAttachmentListOnly(attachments []models.ChatAttachment) templ.Component
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var5 string
-				templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/chat/attachments/%s", att.ID))
+				templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.ResolveAttributeValue(ChatAttachmentDeleteURL(att.ID, projectID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_attachment_list.templ`, Line: 32, Col: 61}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_attachment_list.templ`, Line: 50, Col: 60}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var5)
 				if templ_7745c5c3_Err != nil {

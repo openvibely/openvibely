@@ -15,25 +15,60 @@ type automationGitHubConnectionProvider interface {
 	GetConnectionStatus(context.Context) (GitHubConnectionStatus, error)
 }
 
-type automationGitHubRepositoryResolver interface {
+// GitHubToolRepositoryResolver resolves repository identity and exposes the
+// project-scoped GitHub API endpoint used by runtime GitHub tools.
+type GitHubToolRepositoryResolver interface {
 	ResolveRepo(context.Context, string, string) (*GitHubRepoRef, error)
+	GlobalAPIEndpoint(context.Context) string
+}
+
+// ResolveGitHubToolRepository resolves the repository and API endpoint for GitHub
+// runtime tools. Explicit repo_url inputs are honored outside the selected
+// project's Automation context; Automation-bound calls are pinned to the project
+// repository and only fall back to RepoPath when RepoURL is empty.
+func ResolveGitHubToolRepository(ctx context.Context, provider GitHubToolRepositoryResolver, projectID, repoURL string, project *models.Project) (*GitHubRepoRef, error) {
+	if project == nil {
+		return nil, errors.New("project not found")
+	}
+	automationContext, automationBound := AutomationContextFromContext(ctx)
+	if strings.TrimSpace(repoURL) != "" && (!automationBound || automationContext.ProjectID != projectID) {
+		repo, err := provider.ResolveRepo(ctx, repoURL, "")
+		if err != nil {
+			return nil, err
+		}
+		if err := ConfigureGitHubRepoEndpointForProject(repo, repoURL, project.RepoURL, provider.GlobalAPIEndpoint(ctx)); err != nil {
+			return nil, err
+		}
+		return repo, nil
+	}
+	repoPath := strings.TrimSpace(project.RepoPath)
+	if automationBound && automationContext.ProjectID == projectID && strings.TrimSpace(project.RepoURL) != "" {
+		repoPath = ""
+	}
+	repo, err := provider.ResolveRepo(ctx, project.RepoURL, repoPath)
+	if err != nil {
+		return nil, err
+	}
+	if err := ConfigureGitHubRepoEndpoint(repo, provider.GlobalAPIEndpoint(ctx)); err != nil {
+		return nil, err
+	}
+	return repo, nil
 }
 
 func resolveAutomationProjectGitHubRepository(ctx context.Context, provider any, project *models.Project) (*GitHubRepoRef, error) {
 	if project == nil {
 		return nil, errors.New("project not found")
 	}
+	if resolver, ok := provider.(GitHubToolRepositoryResolver); ok {
+		return ResolveGitHubToolRepository(ctx, resolver, project.ID, "", project)
+	}
 	repoURL := strings.TrimSpace(project.RepoURL)
-	repoPath := ""
-	if repoURL == "" {
-		repoPath = strings.TrimSpace(project.RepoPath)
-	}
-	if resolver, ok := provider.(automationGitHubRepositoryResolver); ok {
-		return resolver.ResolveRepo(ctx, repoURL, repoPath)
-	}
 	if repoURL != "" {
 		repo, err := ParseGitHubRepoURL(repoURL)
 		if err != nil {
+			return nil, err
+		}
+		if err := ConfigureGitHubRepoEndpoint(&repo, ""); err != nil {
 			return nil, err
 		}
 		return &repo, nil
@@ -141,7 +176,7 @@ func (v *AutomationSaveValidator) capabilityIssues(ctx context.Context, projectI
 			return nil, errors.New("project not found")
 		}
 	}
-	if candidate.AdapterKey != AutomationAdapterGitHubSDLC && !customAutomationUsesGitHub(candidate) {
+	if !automationUsesGitHub(candidate) {
 		return nil, nil
 	}
 
@@ -202,14 +237,15 @@ func (v *AutomationSaveValidator) capabilityIssues(ctx context.Context, projectI
 	return issues, nil
 }
 
-func customAutomationUsesGitHub(candidate models.AutomationDraftCandidate) bool {
-	if candidate.AdapterKey != AutomationAdapterCustom {
-		return false
-	}
+func automationUsesGitHub(candidate models.AutomationDraftCandidate) bool {
 	for _, node := range candidate.Nodes {
 		switch node.Role {
 		case "create_github_issue", "github_assignment", "github_inbox", "open_pull_request", "pull_request_review":
 			return true
+		case "implementation":
+			if candidate.AdapterKey == AutomationAdapterGitHubSDLC {
+				return true
+			}
 		}
 	}
 	return false
@@ -287,16 +323,6 @@ func automationNodeTaskConfiguration(candidate models.AutomationDraftCandidate, 
 func automationCompiledTaskPrompt(candidate models.AutomationDraftCandidate, node models.AutomationDraftNode) string {
 	prompt, _ := node.Config["prompt"].(string)
 	prompt = strings.TrimSpace(prompt)
-	skills, _ := draftStringSlice(node.Config["skills"])
-	sourceFiles, _ := draftStringSlice(node.Config["source_files"])
-	skills = normalizeDraftReferences(skills)
-	sourceFiles = normalizeDraftReferences(sourceFiles)
-	if len(skills) > 0 {
-		prompt += "\n\nConfigured Agent skills:\n- " + strings.Join(automationSkillNames(skills), "\n- ")
-	}
-	if len(sourceFiles) > 0 {
-		prompt += "\n\nFocus source files:\n- " + strings.Join(sourceFiles, "\n- ")
-	}
 	if node.Type == models.AutomationNodeTrigger {
 		if _, child := customAutomationTaskNeighbors(candidate, node.Key); child != nil {
 			prompt += "\n\nConnected Task handoff:\nDo not create or schedule the connected downstream Task yourself. OpenVibely activates it automatically after this task completes successfully."
@@ -316,23 +342,85 @@ func automationCompiledTaskPrompt(candidate models.AutomationDraftCandidate, nod
 			"\nWhen the suggestion is ready, call github_create_issue exactly once for the current project's repository. Use the suggestion as the issue title/body and these labels: " + strings.Join(normalizeDraftReferences(labels), ", ") +
 			". Do not assign the issue. A human assignment in GitHub is the approval signal; creating the issue must not approve, implement, merge, release, or deploy anything."
 	}
-	if candidate.AdapterKey == AutomationAdapterCustom && node.Role == "native_inbox" {
-		prompt += "\n\nNative approved-notification handoff:\nCall list_alerts without project_id, using decision_state=approved, implementation_task_linked=false, a bounded limit, and stable pagination. Do not pass the read filter: both read and unread approved notifications are eligible. The runtime automatically uses this scheduled Task's persisted project. Never search for or reuse a project ID from prior messages, examples, memory, tool output, the project snapshot, or the user description. After create_alert_implementation_task links a Backlog Task, call execute_tasks with the exact returned implementation_task_id. Only call complete_alert_processing after task execution starts; otherwise call fail_alert_processing."
+	if node.Role == "native_inbox" {
+		if implementation := automationTargetByRole(candidate, node.Key, "implementation"); implementation != nil {
+			if goal := automationDraftNodeGoal(*implementation); goal != "" {
+				prompt += "\n\nImplementation task goal:\nWhen calling create_alert_implementation_task, set goal to exactly:\n" + goal
+			}
+		}
+	}
+	if automationCandidateNodeUsesCustomTopology(candidate, node.Key) && node.Role == "native_inbox" {
+		producerScope := customAutomationProducerScope(candidate, node.Key, "native_approval", "create_notification")
+		prompt += "\n\nNative approved-notification handoff:\nOnly process approved notifications owned by this same Automation in the current project. Eligible producer stages for this inbox, as source context rather than a graph-branch eligibility limit:\n- " + producerScope + "\nThe runtime returns only notifications with durable project + Automation + notification ownership for this current Native inbox execution; model-supplied metadata, content similarity, graph versions, and stable node-key chains cannot establish ownership. Confirm each returned notification is still actionable for an eligible producer purpose, and skip unrelated content.\nCall list_alerts without project_id, using decision_state=approved, implementation_task_linked=false, a bounded limit, and stable pagination. Do not pass the read filter: both read and unread approved notifications are eligible. The runtime automatically uses this scheduled Task's persisted project. Never search for or reuse a project ID from prior messages, examples, memory, tool output, the project snapshot, or the user description. Before calling claim_alert, collect every eligible result from all pages by following the returned pagination offsets. Do not claim, link, or process any notification while paginating because linkage removes rows from this filtered result set and advancing an offset after mutation can skip notifications. Only after the complete paginated snapshot is collected, call get_alert for each collected notification and inspect the full body and metadata before claiming it.\nCall claim_alert for each notification you can process. Only continue when the claim succeeds. Then call create_alert_implementation_task with a focused Backlog Task title and prompt. The created task is the implementation task. Its prompt must include the notification ID, reviewed context, and acceptance criteria, and directly instruct it to implement the reviewed change, add or update tests, and run required validation; state that it is already the linked implementation task, must not create or look for another implementation task, and must not run notification intake or call get_alert. Human approval authorizes creating and starting that task, but not merge, release, deployment, destructive remediation, or credential changes. Do not say that the created task lacks authorization to implement. The operation atomically links at most one Task and is safe to retry after a crash. After create_alert_implementation_task links the Backlog Task, call execute_tasks with the exact returned implementation_task_id. Do not leave the created Task waiting in Backlog.\nOnly call complete_alert_processing after execute_tasks succeeds. If creation, linkage, or Task execution fails, call fail_alert_processing with a concise error; do not report processing complete. Call release_alert_claim only when no task was linked and immediate retry by another scan is appropriate."
 	}
 	if node.Role == "github_inbox" {
+		issueTask := customAutomationGitHubIssueTaskTarget(candidate, node.Key)
+		if !automationCandidateNodeUsesCustomTopology(candidate, node.Key) {
+			issueTask = automationTargetByRole(candidate, node.Key, "implementation")
+		}
+		if issueTask != nil {
+			if goal := automationDraftNodeGoal(*issueTask); goal != "" {
+				prompt += "\n\nImplementation task goal:\nWhen calling create_task, set goal to exactly:\n" + goal
+			}
+		}
+	}
+	if automationCandidateNodeUsesCustomTopology(candidate, node.Key) && node.Role == "github_inbox" {
 		if issueTask := customAutomationGitHubIssueTaskTarget(candidate, node.Key); issueTask != nil {
 			issueTaskPrompt := automationCompiledGitHubIssueTaskPrompt(candidate, *issueTask)
 			category, _ := issueTask.Config["category"].(string)
 			priority, _ := draftInt(issueTask.Config["priority"])
-			prompt += "\n\nGitHub assignment handoff:\nCall github_get_project_inbox, then github_list_assigned_issues for an authorized configured inbox login. Reconcile existing work with list_tasks before calling create_task. Create at most one visible task per actionable assigned issue. Set source_github_issue_number to the exact issue number returned by this inbox execution so GitHub/Automation provenance is preserved. Do not set source_github_repo_url; the server resolves Automation provenance from this project's configured repository URL, or from a GitHub remote in its local checkout when that URL is blank. Create each new issue task with category " + category + "; Active creation submits it automatically. Do not call execute_tasks for a newly created Active task. Use priority " + fmt.Sprintf("%d", priority) + ". For a reconciled existing task, call execute_tasks only when list_tasks shows category Backlog or status failed/cancelled, and pass that exact existing task ID. Never call execute_tasks for an Active pending, queued, running, or completed task. Do not leave approved implementation work in Backlog or merely reconcile a task without starting it when it still needs execution. The task prompt must include:\n" + issueTaskPrompt +
-				"\nAssignment is a human approval signal only. You must not approve an issue, approve a PR, merge, release, or deploy on the human's behalf."
+			producerScope := customAutomationProducerScope(candidate, node.Key, "github_assignment", "create_github_issue")
+			prompt += "\n\nGitHub assignment handoff:\nProcess open issues assigned to the PAT owner or configured GitHub Authorized Users for this inbox. Assignment is the approval signal, whether the issue was created by this Automation or manually in GitHub. Connected upstream producer stages for this inbox can create assignable issues but do not limit eligibility:\n- " + producerScope + "\nAlways call github_get_project_inbox and call github_list_assigned_issues for every returned Authorized User. When PAT authentication is available, also call github_list_my_assigned_issues. Use the listed assigned issues as compact body-free discovery data containing issue numbers, URLs, titles, labels, assignees, and state; do not call github_get_issue for every listed issue as a default scan step. After repository/issue deduplication and existing-task reconciliation, call github_get_issue only for the specific listed issue that needs body or acceptance-note details for accurate task creation. Use the provided GitHub runtime tools as the only source for inbox discovery; do not use local shell commands, gh, Python scripts, curl, or direct GitHub API calls to list or reconstruct assigned issues. If a runtime GitHub tool response is incomplete or too large to inspect safely, use github_get_issue only for the specific issue numbers already returned by that runtime tool, or report the limitation. Deduplicate issues by repository plus issue number before processing them. Reconcile existing work before calling create_task. For each GitHub issue, perform one existing-task lookup with list_tasks using the issue number or URL as the query. Treat that single lookup result as the reconciliation result for that issue. Do not retry the same issue lookup, do not vary task lifecycle filters to search again, and do not run title or fragment searches for the same issue. Create at most one visible task per actionable assigned issue. Set source_github_issue_number to the exact issue number returned by this inbox execution so GitHub/Automation provenance is preserved. Do not set source_github_repo_url; the server resolves Automation provenance from this project's configured repository URL, or from a GitHub remote in its local checkout when that URL is blank. Create each new issue task with category " + category + "; Active creation submits it automatically. Do not call execute_tasks for a newly created Active task. After create_task succeeds for a newly created Active task, do not call list_tasks again for that issue in the same inbox turn just to verify start, labels, or existence; the successful create_task response is the confirmation to proceed with the goal refresh and summary/labels. Use priority " + fmt.Sprintf("%d", priority) + ". For a reconciled existing task, call execute_tasks only when list_tasks shows category Backlog or status failed/cancelled, and pass that exact existing task ID. Never call execute_tasks for an Active pending, queued, running, or completed task. Do not leave approved implementation work in Backlog or merely reconcile a task without starting it when it still needs execution. The task prompt must include the GitHub issue number, URL, title, body or acceptance notes, relevant labels, assignment context, and:\n" + issueTaskPrompt + "\nAssignment is a human approval signal only. You must not approve an issue, approve a PR, merge, release, or deploy on the human's behalf."
 		}
 	}
 	return prompt
 }
 
+func customAutomationProducerScope(candidate models.AutomationDraftCandidate, inboxKey, gateRole, actionRole string) string {
+	nodes := make(map[string]models.AutomationDraftNode, len(candidate.Nodes))
+	for _, node := range candidate.Nodes {
+		nodes[node.Key] = node
+	}
+	gateKeys := make(map[string]struct{})
+	for _, edge := range candidate.Edges {
+		source, ok := nodes[edge.From]
+		if edge.To == inboxKey && ok && source.Type == models.AutomationNodeHumanGate && source.Role == gateRole {
+			gateKeys[source.Key] = struct{}{}
+		}
+	}
+	actionKeys := make(map[string]struct{})
+	for _, edge := range candidate.Edges {
+		source, sourceOK := nodes[edge.From]
+		if _, targetOK := gateKeys[edge.To]; targetOK && sourceOK && source.Type == models.AutomationNodeAction && source.Role == actionRole {
+			actionKeys[source.Key] = struct{}{}
+		}
+	}
+	producerKeys := make(map[string]struct{})
+	for _, edge := range candidate.Edges {
+		source, sourceOK := nodes[edge.From]
+		if _, targetOK := actionKeys[edge.To]; targetOK && sourceOK &&
+			(source.Type == models.AutomationNodeTrigger || source.Type == models.AutomationNodeAgentTask) {
+			producerKeys[source.Key] = struct{}{}
+		}
+	}
+	var producers []string
+	for _, node := range candidate.Nodes {
+		if _, ok := producerKeys[node.Key]; !ok {
+			continue
+		}
+		name := strings.TrimSpace(node.Name)
+		purpose, _ := node.Config["prompt"].(string)
+		purpose = strings.TrimSpace(purpose)
+		producers = append(producers, fmt.Sprintf("Producer: %q. Purpose: %q.", name, purpose))
+	}
+	if len(producers) == 0 {
+		return "No producer is eligible; do not process any notification or issue."
+	}
+	return strings.Join(producers, "\n- ")
+}
+
 func customAutomationNotificationTarget(candidate models.AutomationDraftCandidate, taskNodeKey string) *models.AutomationDraftNode {
-	if candidate.AdapterKey != AutomationAdapterCustom {
+	if !automationCandidateNodeUsesCustomTopology(candidate, taskNodeKey) {
 		return nil
 	}
 	nodes := make(map[string]models.AutomationDraftNode, len(candidate.Nodes))
@@ -348,10 +436,7 @@ func customAutomationNotificationTarget(candidate models.AutomationDraftCandidat
 	return nil
 }
 
-func customAutomationTargetByRole(candidate models.AutomationDraftCandidate, sourceNodeKey, role string) *models.AutomationDraftNode {
-	if candidate.AdapterKey != AutomationAdapterCustom {
-		return nil
-	}
+func automationTargetByRole(candidate models.AutomationDraftCandidate, sourceNodeKey, role string) *models.AutomationDraftNode {
 	nodes := make(map[string]models.AutomationDraftNode, len(candidate.Nodes))
 	for _, node := range candidate.Nodes {
 		nodes[node.Key] = node
@@ -363,6 +448,18 @@ func customAutomationTargetByRole(candidate models.AutomationDraftCandidate, sou
 		}
 	}
 	return nil
+}
+
+func customAutomationTargetByRole(candidate models.AutomationDraftCandidate, sourceNodeKey, role string) *models.AutomationDraftNode {
+	if !automationCandidateNodeUsesCustomTopology(candidate, sourceNodeKey) {
+		return nil
+	}
+	return automationTargetByRole(candidate, sourceNodeKey, role)
+}
+
+func automationDraftNodeGoal(node models.AutomationDraftNode) string {
+	goal, _ := node.Config["goal"].(string)
+	return strings.TrimSpace(goal)
 }
 
 func automationCompiledGitHubIssueTaskPrompt(candidate models.AutomationDraftCandidate, node models.AutomationDraftNode) string {

@@ -11,11 +11,14 @@ import (
 
 func (w *WorkerService) buildLearningSnapshot(ctx context.Context, task models.Task, taskRunID string, runErr error) lifecycle.LearningInputSnapshot {
 	turn := lifecycleTurnFromContext(ctx)
+	// UserRequestSummary is intentionally left empty: the hook prompt already
+	// carries the request as HookInput.TaskPrompt and again as the user half of
+	// extras.conversation_transcript. A third copy in the same JSON block is
+	// paid for on every after-complete hook and read by none of them.
 	snapshot := lifecycle.LearningInputSnapshot{
 		TaskID:                 task.ID,
 		TaskRunID:              taskRunID,
 		ProjectID:              task.ProjectID,
-		UserRequestSummary:     strings.TrimSpace(task.Prompt),
 		LoadedSkillHandles:     append([]string(nil), turn.SelectedSkillHandles...),
 		SkillWritePolicy:       learningSkillWritePolicy(turn.AssignedAgent != nil),
 		ExecutionStatus:        "completed",
@@ -53,6 +56,21 @@ func (w *WorkerService) buildLearningSnapshot(ctx context.Context, task models.T
 		snapshot.SelectedStandaloneSkills = append(snapshot.SelectedStandaloneSkills, ctx)
 	}
 	return snapshot
+}
+
+// assignedAgentIdentity derives the compact assigned-agent block from the
+// learning snapshot, so a hook that only needs to recognize which agent ran the
+// task can declare `assigned_agent` instead of the whole snapshot.
+func assignedAgentIdentity(snapshot lifecycle.LearningInputSnapshot) lifecycle.AssignedAgentIdentity {
+	identity := lifecycle.AssignedAgentIdentity{Key: snapshot.ActiveAgentKey}
+	if snapshot.AssignedAgent != nil {
+		if identity.Key == "" {
+			identity.Key = snapshot.AssignedAgent.Key
+		}
+		identity.Name = snapshot.AssignedAgent.Name
+		identity.SystemKind = snapshot.AssignedAgent.SystemKind
+	}
+	return identity
 }
 
 func selectedLearningSkillEntries(catalog *agentskills.Catalog, handles []string) []agentskills.Entry {

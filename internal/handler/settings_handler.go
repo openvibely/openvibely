@@ -59,16 +59,25 @@ func triggerChannelsRefresh(c echo.Context) error {
 	return c.NoContent(http.StatusOK)
 }
 
+func returnToChannels(c echo.Context) error {
+	if isHTMX(c) {
+		return triggerChannelsRefresh(c)
+	}
+	return c.Redirect(http.StatusSeeOther, "/channels")
+}
+
 // handleChannels renders the channels (integrations) page
 func (h *Handler) handleChannels(c echo.Context) error {
 	projectID := c.QueryParam("project_id")
 
 	// Get projects for sidebar
-	projects, err := h.projectSvc.List(c.Request().Context())
+	projects, err := h.projectSvc.ListSelectorOptions(c.Request().Context())
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to load projects")
 	}
 
+	ctx := c.Request().Context()
+	page := parseCardPageRequest(c)
 	resolvedProjectID := projectID
 	if id, err := h.getCurrentProjectID(c); err == nil && id != "" {
 		resolvedProjectID = id
@@ -76,47 +85,92 @@ func (h *Handler) handleChannels(c echo.Context) error {
 		resolvedProjectID = projects[0].ID
 	}
 
-	// Get current Telegram bot token and status
-	var token string
+	settingsValues := map[string]string{}
 	if h.settingsRepo != nil {
-		token, _ = h.settingsRepo.Get(c.Request().Context(), service.TelegramSettingBotToken)
+		keys := []string{
+			service.TelegramSettingBotToken,
+			service.TelegramSettingSendResponses,
+			service.TelegramSettingRichMessagesV2,
+			service.GitHubSettingAuthMode,
+			service.GitHubSettingAppID,
+			service.GitHubSettingAppSlug,
+			service.GitHubSettingAppPrivateKey,
+			service.GitHubSettingPAT,
+			service.GitHubSettingAPIEndpoint,
+			service.SlackSettingClientID,
+			service.SlackSettingClientSecret,
+			service.SlackSettingAppToken,
+			service.SlackSettingBotTokenOverride,
+			service.SlackSettingBotTokenSource,
+			service.SlackSettingBotToken,
+			service.SlackSettingSendResponses,
+			service.DiscordSettingBotToken,
+			service.DiscordSettingSendResponses,
+			service.XSettingConsumerKey,
+			service.XSettingConsumerSecret,
+			service.XSettingAccessToken,
+			service.XSettingAccessTokenSecret,
+			service.XSettingPollIntervalSeconds,
+			service.XSettingSendResponses,
+			service.EmailSettingProvider, service.EmailSettingAddress,
+			service.EmailSettingPassword,
+			service.EmailSettingIMAPHost,
+			service.EmailSettingIMAPPort,
+			service.EmailSettingSMTPHost,
+			service.EmailSettingSMTPPort,
+			service.EmailSettingPollIntervalSeconds,
+			service.EmailSettingSendResponses,
+			service.EmailSettingSkipAttachments,
+			service.EmailSettingMarkExistingSeenOnStart,
+		}
+		if resolvedProjectID != "" {
+			keys = append(keys, service.SendMessageAllowExplicitTargetsSetting+":"+resolvedProjectID)
+		}
+		settingsValues, _ = h.settingsRepo.GetMany(ctx, keys)
 	}
+	setting := func(key string) string {
+		return settingsValues[key]
+	}
+
+	// Get current Telegram bot token and status
+	token := setting(service.TelegramSettingBotToken)
 	isBotRunning := h.telegramService != nil && h.telegramService.IsRunning()
 	hasTelegramChannel := strings.TrimSpace(token) != "" || isBotRunning
 
 	// Load system-level inbound channel authorization allowlists.
 	var authorizedUsers []models.TelegramAuthorizedUser
 	if h.telegramAuthRepo != nil {
-		authorizedUsers, _ = h.telegramAuthRepo.ListByProject(c.Request().Context(), resolvedProjectID)
+		authorizedUsers, _ = h.telegramAuthRepo.ListByProject(ctx, resolvedProjectID)
 	}
 
 	var slackAuthorizedUsers []models.SlackAuthorizedUser
 	if h.slackAuthRepo != nil {
-		slackAuthorizedUsers, _ = h.slackAuthRepo.ListByProject(c.Request().Context(), resolvedProjectID)
+		slackAuthorizedUsers, _ = h.slackAuthRepo.ListByProject(ctx, resolvedProjectID)
 	}
 
 	var emailAuthorizedSenders []models.EmailAuthorizedSender
 	if h.emailAuthRepo != nil {
-		emailAuthorizedSenders, _ = h.emailAuthRepo.ListByProject(c.Request().Context(), resolvedProjectID)
+		emailAuthorizedSenders, _ = h.emailAuthRepo.ListByProject(ctx, resolvedProjectID)
 	}
 
 	var discordAuthorizedUsers []models.DiscordAuthorizedUser
 	if h.discordAuthRepo != nil {
-		discordAuthorizedUsers, _ = h.discordAuthRepo.ListByProject(c.Request().Context(), resolvedProjectID)
+		discordAuthorizedUsers, _ = h.discordAuthRepo.ListByProject(ctx, resolvedProjectID)
+	}
+
+	var xAuthorizedUsers []models.XAuthorizedUser
+	if h.xAuthRepo != nil && resolvedProjectID != "" {
+		xAuthorizedUsers, _ = h.xAuthRepo.ListByProject(ctx, resolvedProjectID)
 	}
 
 	// Load Telegram settings (default: enabled)
 	sendResponses := true
 	richMessagesV2 := true
-	if h.settingsRepo != nil {
-		val, _ := h.settingsRepo.Get(c.Request().Context(), service.TelegramSettingSendResponses)
-		if strings.EqualFold(strings.TrimSpace(val), "false") {
-			sendResponses = false
-		}
-		val, _ = h.settingsRepo.Get(c.Request().Context(), service.TelegramSettingRichMessagesV2)
-		if strings.EqualFold(strings.TrimSpace(val), "false") {
-			richMessagesV2 = false
-		}
+	if strings.EqualFold(strings.TrimSpace(setting(service.TelegramSettingSendResponses)), "false") {
+		sendResponses = false
+	}
+	if strings.EqualFold(strings.TrimSpace(setting(service.TelegramSettingRichMessagesV2)), "false") {
+		richMessagesV2 = false
 	}
 
 	var githubStatus service.GitHubConnectionStatus
@@ -125,6 +179,7 @@ func (h *Handler) handleChannels(c echo.Context) error {
 	githubAppSlug := ""
 	githubPrivateKeyValue := ""
 	githubPATValue := ""
+	githubAPIEndpoint := ""
 	githubHasPrivateKey := false
 	githubHasPAT := false
 	githubModeSetting := ""
@@ -143,6 +198,21 @@ func (h *Handler) handleChannels(c echo.Context) error {
 	discordStatus := service.DiscordConnectionStatus{SendResponses: true}
 	discordBotToken := ""
 	discordSendResponses := true
+	xStatus := service.XConnectionStatus{}
+	xPollIntervalSeconds := strings.TrimSpace(setting(service.XSettingPollIntervalSeconds))
+	if xPollIntervalSeconds == "" {
+		xPollIntervalSeconds = "30"
+	}
+	xSendResponses := !strings.EqualFold(strings.TrimSpace(setting(service.XSettingSendResponses)), "false")
+	xHasConsumerKey := strings.TrimSpace(setting(service.XSettingConsumerKey)) != ""
+	xHasConsumerSecret := strings.TrimSpace(setting(service.XSettingConsumerSecret)) != ""
+	xHasAccessToken := strings.TrimSpace(setting(service.XSettingAccessToken)) != ""
+	xHasAccessTokenSecret := strings.TrimSpace(setting(service.XSettingAccessTokenSecret)) != ""
+	if xService := h.getXService(); xService != nil {
+		xStatus = xService.Status()
+	} else {
+		xStatus.Configured = xHasConsumerKey && xHasConsumerSecret && xHasAccessToken && xHasAccessTokenSecret
+	}
 	emailStatus := service.EmailConnectionStatus{Provider: service.EmailProviderCustom, IMAPPort: 993, SMTPPort: 587}
 	emailPasswordValue := ""
 	emailHasPassword := false
@@ -151,91 +221,88 @@ func (h *Handler) handleChannels(c echo.Context) error {
 	emailMarkExistingSeenOnStart := true
 	emailPollIntervalSeconds := "15"
 	if h.githubSvc != nil {
-		githubStatus, _ = h.githubSvc.GetConnectionStatus(c.Request().Context())
+		githubStatus, _ = h.githubSvc.GetConnectionStatus(ctx)
 		if githubStatus.AuthMode != "" {
 			githubAuthMode = service.NormalizeGitHubAuthMode(githubStatus.AuthMode)
 		}
 		githubHasPAT = githubStatus.HasPAT
 	}
-	if h.settingsRepo != nil {
-		githubModeSetting, _ = h.settingsRepo.Get(c.Request().Context(), service.GitHubSettingAuthMode)
-		githubAppID, _ = h.settingsRepo.Get(c.Request().Context(), service.GitHubSettingAppID)
-		githubAppSlug, _ = h.settingsRepo.Get(c.Request().Context(), service.GitHubSettingAppSlug)
-		githubPrivateKeyValue, _ = h.settingsRepo.Get(c.Request().Context(), service.GitHubSettingAppPrivateKey)
-		githubHasPrivateKey = strings.TrimSpace(githubPrivateKeyValue) != ""
-		githubPATValue, _ = h.settingsRepo.Get(c.Request().Context(), service.GitHubSettingPAT)
-		if strings.TrimSpace(githubPATValue) != "" {
-			githubHasPAT = true
-		}
-		if strings.TrimSpace(githubModeSetting) != "" {
-			githubAuthMode = service.NormalizeGitHubAuthMode(githubModeSetting)
-		}
+	githubModeSetting = setting(service.GitHubSettingAuthMode)
+	githubAppID = setting(service.GitHubSettingAppID)
+	githubAppSlug = setting(service.GitHubSettingAppSlug)
+	githubPrivateKeyValue = setting(service.GitHubSettingAppPrivateKey)
+	githubHasPrivateKey = strings.TrimSpace(githubPrivateKeyValue) != ""
+	githubPATValue = setting(service.GitHubSettingPAT)
+	if strings.TrimSpace(githubPATValue) != "" {
+		githubHasPAT = true
+	}
+	githubAPIEndpoint = setting(service.GitHubSettingAPIEndpoint)
+	if strings.TrimSpace(githubModeSetting) != "" {
+		githubAuthMode = service.NormalizeGitHubAuthMode(githubModeSetting)
 	}
 	if h.slackSvc != nil {
-		slackStatus, _ = h.slackSvc.GetConnectionStatus(c.Request().Context())
+		slackStatus, _ = h.slackSvc.GetConnectionStatus(ctx)
 	}
 	if h.discordSvc != nil {
-		discordStatus, _ = h.discordSvc.GetConnectionStatus(c.Request().Context())
+		discordStatus, _ = h.discordSvc.GetConnectionStatus(ctx)
 	}
-	if h.settingsRepo != nil {
-		slackClientID, _ = h.settingsRepo.Get(c.Request().Context(), service.SlackSettingClientID)
-		slackClientSecret, _ = h.settingsRepo.Get(c.Request().Context(), service.SlackSettingClientSecret)
-		slackAppToken, _ = h.settingsRepo.Get(c.Request().Context(), service.SlackSettingAppToken)
-		slackBotToken, _ = h.settingsRepo.Get(c.Request().Context(), service.SlackSettingBotTokenOverride)
-		slackBotTokenMode, _ = h.settingsRepo.Get(c.Request().Context(), service.SlackSettingBotTokenSource)
-		slackBotTokenMode = strings.TrimSpace(strings.ToLower(slackBotTokenMode))
-		if slackBotTokenMode != service.SlackBotTokenSourceManual {
-			slackBotTokenMode = service.SlackBotTokenSourceOAuth
-		}
-		oauthBotToken, _ := h.settingsRepo.Get(c.Request().Context(), service.SlackSettingBotToken)
-		slackHasOAuthBotToken = strings.TrimSpace(oauthBotToken) != ""
-		if val, _ := h.settingsRepo.Get(c.Request().Context(), service.SlackSettingSendResponses); strings.TrimSpace(strings.ToLower(val)) == "false" {
-			slackSendResponses = false
-		}
-		slackHasClientID = strings.TrimSpace(slackClientID) != ""
-		slackHasClientSecret = strings.TrimSpace(slackClientSecret) != ""
-		slackHasAppToken = strings.TrimSpace(slackAppToken) != ""
-		slackHasBotToken = strings.TrimSpace(slackBotToken) != ""
+	slackClientID = setting(service.SlackSettingClientID)
+	slackClientSecret = setting(service.SlackSettingClientSecret)
+	slackAppToken = setting(service.SlackSettingAppToken)
+	slackBotToken = setting(service.SlackSettingBotTokenOverride)
+	slackBotTokenMode = setting(service.SlackSettingBotTokenSource)
+	slackBotTokenMode = strings.TrimSpace(strings.ToLower(slackBotTokenMode))
+	if slackBotTokenMode != service.SlackBotTokenSourceManual {
+		slackBotTokenMode = service.SlackBotTokenSourceOAuth
+	}
+	oauthBotToken := setting(service.SlackSettingBotToken)
+	slackHasOAuthBotToken = strings.TrimSpace(oauthBotToken) != ""
+	if strings.TrimSpace(strings.ToLower(setting(service.SlackSettingSendResponses))) == "false" {
+		slackSendResponses = false
+	}
+	slackHasClientID = strings.TrimSpace(slackClientID) != ""
+	slackHasClientSecret = strings.TrimSpace(slackClientSecret) != ""
+	slackHasAppToken = strings.TrimSpace(slackAppToken) != ""
+	slackHasBotToken = strings.TrimSpace(slackBotToken) != ""
 
-		discordBotToken, _ = h.settingsRepo.Get(c.Request().Context(), service.DiscordSettingBotToken)
-		if val, _ := h.settingsRepo.Get(c.Request().Context(), service.DiscordSettingSendResponses); strings.TrimSpace(strings.ToLower(val)) == "false" {
-			discordSendResponses = false
-		}
+	discordBotToken = setting(service.DiscordSettingBotToken)
+	if strings.TrimSpace(strings.ToLower(setting(service.DiscordSettingSendResponses))) == "false" {
+		discordSendResponses = false
+	}
 
-		emailProvider, _ := h.settingsRepo.Get(c.Request().Context(), service.EmailSettingProvider)
-		emailAddress, _ := h.settingsRepo.Get(c.Request().Context(), service.EmailSettingAddress)
-		emailPasswordValue, _ = h.settingsRepo.Get(c.Request().Context(), service.EmailSettingPassword)
-		emailHasPassword = strings.TrimSpace(emailPasswordValue) != ""
-		emailIMAPHost, _ := h.settingsRepo.Get(c.Request().Context(), service.EmailSettingIMAPHost)
-		emailIMAPPort, _ := h.settingsRepo.Get(c.Request().Context(), service.EmailSettingIMAPPort)
-		emailSMTPHost, _ := h.settingsRepo.Get(c.Request().Context(), service.EmailSettingSMTPHost)
-		emailSMTPPort, _ := h.settingsRepo.Get(c.Request().Context(), service.EmailSettingSMTPPort)
-		emailPollIntervalSeconds, _ = h.settingsRepo.Get(c.Request().Context(), service.EmailSettingPollIntervalSeconds)
-		if strings.TrimSpace(emailPollIntervalSeconds) == "" {
-			emailPollIntervalSeconds = "15"
-		}
-		if val, _ := h.settingsRepo.Get(c.Request().Context(), service.EmailSettingSendResponses); strings.TrimSpace(strings.ToLower(val)) == "false" {
-			emailSendResponses = false
-		}
-		if val, _ := h.settingsRepo.Get(c.Request().Context(), service.EmailSettingSkipAttachments); strings.TrimSpace(strings.ToLower(val)) == "true" {
-			emailSkipAttachments = true
-		}
-		if val, _ := h.settingsRepo.Get(c.Request().Context(), service.EmailSettingMarkExistingSeenOnStart); strings.TrimSpace(strings.ToLower(val)) == "false" {
-			emailMarkExistingSeenOnStart = false
-		}
-		emailStatus.Provider = service.NormalizeEmailProvider(emailProvider)
-		emailStatus.Address = strings.TrimSpace(emailAddress)
-		emailStatus.IMAPHost = strings.TrimSpace(emailIMAPHost)
-		emailStatus.SMTPHost = strings.TrimSpace(emailSMTPHost)
-		if port, err := strconv.Atoi(strings.TrimSpace(emailIMAPPort)); err == nil && port > 0 {
-			emailStatus.IMAPPort = port
-		}
-		if port, err := strconv.Atoi(strings.TrimSpace(emailSMTPPort)); err == nil && port > 0 {
-			emailStatus.SMTPPort = port
-		}
+	emailProvider := setting(service.EmailSettingProvider)
+	emailAddress := setting(service.EmailSettingAddress)
+	emailPasswordValue = setting(service.EmailSettingPassword)
+	emailHasPassword = strings.TrimSpace(emailPasswordValue) != ""
+	emailIMAPHost := setting(service.EmailSettingIMAPHost)
+	emailIMAPPort := setting(service.EmailSettingIMAPPort)
+	emailSMTPHost := setting(service.EmailSettingSMTPHost)
+	emailSMTPPort := setting(service.EmailSettingSMTPPort)
+	emailPollIntervalSeconds = setting(service.EmailSettingPollIntervalSeconds)
+	if strings.TrimSpace(emailPollIntervalSeconds) == "" {
+		emailPollIntervalSeconds = "15"
+	}
+	if strings.TrimSpace(strings.ToLower(setting(service.EmailSettingSendResponses))) == "false" {
+		emailSendResponses = false
+	}
+	if strings.TrimSpace(strings.ToLower(setting(service.EmailSettingSkipAttachments))) == "true" {
+		emailSkipAttachments = true
+	}
+	if strings.TrimSpace(strings.ToLower(setting(service.EmailSettingMarkExistingSeenOnStart))) == "false" {
+		emailMarkExistingSeenOnStart = false
+	}
+	emailStatus.Provider = service.NormalizeEmailProvider(emailProvider)
+	emailStatus.Address = strings.TrimSpace(emailAddress)
+	emailStatus.IMAPHost = strings.TrimSpace(emailIMAPHost)
+	emailStatus.SMTPHost = strings.TrimSpace(emailSMTPHost)
+	if port, err := strconv.Atoi(strings.TrimSpace(emailIMAPPort)); err == nil && port > 0 {
+		emailStatus.IMAPPort = port
+	}
+	if port, err := strconv.Atoi(strings.TrimSpace(emailSMTPPort)); err == nil && port > 0 {
+		emailStatus.SMTPPort = port
 	}
 	if h.emailService != nil {
-		runtimeStatus := h.emailService.GetConnectionStatus(c.Request().Context())
+		runtimeStatus := h.emailService.GetConnectionStatus(ctx)
 		if runtimeStatus.Address != "" || runtimeStatus.Configured || runtimeStatus.Running {
 			emailStatus = runtimeStatus
 		}
@@ -250,53 +317,114 @@ func (h *Handler) handleChannels(c echo.Context) error {
 		slackHasClientID || slackHasClientSecret || slackHasAppToken || slackHasBotToken || slackHasOAuthBotToken
 	hasEmailChannel := emailStatus.Configured || emailStatus.Running || strings.TrimSpace(emailStatus.Address) != "" || strings.TrimSpace(emailStatus.IMAPHost) != "" || strings.TrimSpace(emailStatus.SMTPHost) != "" || emailHasPassword
 	hasDiscordChannel := discordStatus.Configured || discordStatus.Connected || strings.TrimSpace(discordBotToken) != ""
+	hasXChannel := xStatus.Configured || xStatus.Connected || xHasConsumerKey || xHasConsumerSecret || xHasAccessToken || xHasAccessTokenSecret
 
 	var channelTargets []models.ChannelTarget
 	sendMessageExplicitTargets := false
 	if resolvedProjectID != "" && h.channelTargetRepo != nil {
-		channelTargets, _ = h.channelTargetRepo.ListByProject(c.Request().Context(), resolvedProjectID)
+		channelTargets, _ = h.channelTargetRepo.ListByProject(ctx, resolvedProjectID)
 	}
-	if resolvedProjectID != "" && h.settingsRepo != nil {
-		if val, _ := h.settingsRepo.Get(c.Request().Context(), service.SendMessageAllowExplicitTargetsSetting+":"+resolvedProjectID); strings.TrimSpace(val) != "" {
+	if resolvedProjectID != "" {
+		if val := setting(service.SendMessageAllowExplicitTargetsSetting + ":" + resolvedProjectID); strings.TrimSpace(val) != "" {
 			sendMessageExplicitTargets = strings.EqualFold(strings.TrimSpace(val), "true")
 		}
 	}
 
-	// Load webhooks for current project
+	// Load webhooks for current project using the bounded card projection.
 	var webhooks []models.WebhookEndpoint
+	var webhooksHasMore bool
 	if resolvedProjectID != "" && h.webhookRepo != nil {
-		webhooks, _ = h.webhookRepo.ListByProject(c.Request().Context(), resolvedProjectID)
+		pageItems, err := h.webhookRepo.ListCardsByProjectPage(ctx, resolvedProjectID, page.PageSize+1, page.Offset, page.Search)
+		if err != nil {
+			return err
+		}
+		webhooks, webhooksHasMore = cardPageItems(pageItems, page.PageSize)
 	}
+	setCardPageResponse(c, webhooksHasMore)
 
-	// Load agents for webhook agent selection
-	var agents []models.Agent
-	if h.agentRepo != nil {
-		agents, _ = h.agentRepo.List(c.Request().Context())
+	// Load compact agents for webhook agent selection in the current project.
+	var agentPickerOptions []repository.AgentPickerOption
+	if h.agentRepo != nil && resolvedProjectID != "" {
+		agentPickerOptions, _ = h.agentRepo.ListPickerOptionsForProject(ctx, resolvedProjectID)
 	}
 
 	webhookAgents := map[string][]models.WebhookEndpointAgent{}
-	if h.webhookRepo != nil {
-		for _, wh := range webhooks {
-			list, err := h.webhookRepo.GetEndpointAgents(c.Request().Context(), wh.ID)
-			if err != nil {
-				continue
-			}
-			webhookAgents[wh.ID] = list
-		}
-	}
 
-	if isHTMX(c) {
-		return render(c, http.StatusOK, pages.SettingsContent(token, isBotRunning, authorizedUsers, slackAuthorizedUsers, discordAuthorizedUsers, resolvedProjectID, sendResponses, richMessagesV2, githubStatus, githubAuthMode, githubAppID, githubAppSlug, githubPrivateKeyValue, githubPATValue, githubHasPrivateKey, githubHasPAT, slackStatus, slackClientID, slackClientSecret, slackAppToken, slackBotToken, slackBotTokenMode, slackHasClientID, slackHasClientSecret, slackHasAppToken, slackHasBotToken, slackSendResponses, discordStatus, discordBotToken, discordSendResponses, emailStatus, emailAuthorizedSenders, emailPasswordValue, emailSendResponses, emailSkipAttachments, emailMarkExistingSeenOnStart, emailPollIntervalSeconds, hasTelegramChannel, hasGitHubChannel, hasSlackChannel, hasDiscordChannel, hasEmailChannel, webhooks, agents, webhookAgents, channelTargets, sendMessageExplicitTargets))
+	channelView := pages.ChannelsSettingsView{
+		TelegramToken:                token,
+		IsBotRunning:                 isBotRunning,
+		AuthorizedUsers:              authorizedUsers,
+		SlackAuthorizedUsers:         slackAuthorizedUsers,
+		DiscordAuthorizedUsers:       discordAuthorizedUsers,
+		XAuthorizedUsers:             xAuthorizedUsers,
+		XStatus:                      xStatus,
+		XHasConsumerKey:              xHasConsumerKey,
+		XHasConsumerSecret:           xHasConsumerSecret,
+		XHasAccessToken:              xHasAccessToken,
+		XHasAccessTokenSecret:        xHasAccessTokenSecret,
+		XPollIntervalSeconds:         xPollIntervalSeconds,
+		XSendResponses:               xSendResponses,
+		CurrentProjectID:             resolvedProjectID,
+		SendResponses:                sendResponses,
+		RichMessagesV2:               richMessagesV2,
+		GitHubStatus:                 githubStatus,
+		GitHubAuthMode:               githubAuthMode,
+		GitHubAppID:                  githubAppID,
+		GitHubAppSlug:                githubAppSlug,
+		GitHubPrivateKeyValue:        githubPrivateKeyValue,
+		GitHubPATValue:               githubPATValue,
+		GitHubAPIEndpoint:            githubAPIEndpoint,
+		GitHubHasPrivateKey:          githubHasPrivateKey,
+		GitHubHasPAT:                 githubHasPAT,
+		SlackStatus:                  slackStatus,
+		SlackClientID:                slackClientID,
+		SlackClientSecret:            slackClientSecret,
+		SlackAppToken:                slackAppToken,
+		SlackBotToken:                slackBotToken,
+		SlackBotTokenMode:            slackBotTokenMode,
+		SlackHasClientID:             slackHasClientID,
+		SlackHasClientSecret:         slackHasClientSecret,
+		SlackHasAppToken:             slackHasAppToken,
+		SlackHasBotToken:             slackHasBotToken,
+		SlackSendResponses:           slackSendResponses,
+		DiscordStatus:                discordStatus,
+		DiscordBotToken:              discordBotToken,
+		DiscordSendResponses:         discordSendResponses,
+		EmailStatus:                  emailStatus,
+		EmailAuthorizedSenders:       emailAuthorizedSenders,
+		EmailPasswordValue:           emailPasswordValue,
+		EmailSendResponses:           emailSendResponses,
+		EmailSkipAttachments:         emailSkipAttachments,
+		EmailMarkExistingSeenOnStart: emailMarkExistingSeenOnStart,
+		EmailPollIntervalSeconds:     emailPollIntervalSeconds,
+		HasTelegramChannel:           hasTelegramChannel,
+		HasGitHubChannel:             hasGitHubChannel,
+		HasSlackChannel:              hasSlackChannel,
+		HasDiscordChannel:            hasDiscordChannel,
+		HasXChannel:                  hasXChannel,
+		HasEmailChannel:              hasEmailChannel,
+		Webhooks:                     webhooks,
+		WebhooksPageOffset:           page.Offset,
+		WebhooksSearch:               page.Search,
+		WebhooksHasMore:              webhooksHasMore,
+		AgentPickerOptions:           agentPickerOptions,
+		WebhookAgents:                webhookAgents,
+		ChannelTargets:               channelTargets,
+		SendMessageExplicitTargets:   sendMessageExplicitTargets,
 	}
-	return render(c, http.StatusOK, pages.SettingsPage(token, isBotRunning, projects, resolvedProjectID, authorizedUsers, slackAuthorizedUsers, discordAuthorizedUsers, sendResponses, richMessagesV2, githubStatus, githubAuthMode, githubAppID, githubAppSlug, githubPrivateKeyValue, githubPATValue, githubHasPrivateKey, githubHasPAT, slackStatus, slackClientID, slackClientSecret, slackAppToken, slackBotToken, slackBotTokenMode, slackHasClientID, slackHasClientSecret, slackHasAppToken, slackHasBotToken, slackSendResponses, discordStatus, discordBotToken, discordSendResponses, emailStatus, emailAuthorizedSenders, emailPasswordValue, emailSendResponses, emailSkipAttachments, emailMarkExistingSeenOnStart, emailPollIntervalSeconds, hasTelegramChannel, hasGitHubChannel, hasSlackChannel, hasDiscordChannel, hasEmailChannel, webhooks, agents, webhookAgents, channelTargets, sendMessageExplicitTargets))
+	if isHTMX(c) || page.IsFragment {
+		return render(c, http.StatusOK, pages.SettingsContent(channelView))
+	}
+	return render(c, http.StatusOK, pages.SettingsPage(projects, channelView))
 }
 
 // handleAppSettings renders the application settings page (personality, etc.)
 func (h *Handler) handleAppSettings(c echo.Context) error {
 	projectID := c.QueryParam("project_id")
+	page := parseCardPageRequest(c)
 
 	// Get projects for sidebar
-	projects, err := h.projectSvc.List(c.Request().Context())
+	projects, err := h.projectSvc.ListSelectorOptions(c.Request().Context())
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to load projects")
 	}
@@ -307,16 +435,17 @@ func (h *Handler) handleAppSettings(c echo.Context) error {
 		personality, _ = h.settingsRepo.Get(c.Request().Context(), "personality")
 	}
 
-	// Load custom personalities
-	var customPersonalities []models.CustomPersonality
-	if h.customPersonalityRepo != nil {
-		customPersonalities, _ = h.customPersonalityRepo.List(c.Request().Context())
+	// Load custom personalities using the bounded card projection.
+	customPersonalities, customPersonalitiesHasMore, err := h.listPersonalityCardPage(c.Request().Context(), page, personality)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to load custom personalities")
 	}
+	setCardPageResponse(c, customPersonalitiesHasMore)
 
-	if isHTMX(c) {
-		return render(c, http.StatusOK, pages.AppSettingsContent(personality, projectID, customPersonalities))
+	if isHTMX(c) || page.IsFragment {
+		return render(c, http.StatusOK, pages.AppSettingsContentWithPagination(personality, projectID, customPersonalities, customPersonalitiesHasMore))
 	}
-	return render(c, http.StatusOK, pages.AppSettingsPage(personality, projects, projectID, customPersonalities))
+	return render(c, http.StatusOK, pages.AppSettingsPageWithPagination(personality, projects, projectID, customPersonalities, customPersonalitiesHasMore))
 }
 
 // handleTelegramSave saves the Telegram bot token and starts the bot
@@ -358,12 +487,16 @@ func (h *Handler) handleTelegramSave(c echo.Context) error {
 		if h.customPersonalityRepo != nil {
 			svc.SetCustomPersonalityRepo(h.customPersonalityRepo)
 		}
+		if h.automationGraphSvc != nil {
+			svc.SetAutomationGraphService(h.automationGraphSvc)
+		}
 		if h.chatBroadcaster != nil {
 			svc.SetChatBroadcaster(h.chatBroadcaster)
 		}
 		if h.threadInputRepo != nil {
 			svc.SetThreadInputRepo(h.threadInputRepo)
 		}
+		h.wireChannelIntegrationSummaryDeps(svc)
 		svc.SetQueuedTurnPromoter(h.PromoteQueuedChatInput)
 		svc.SetQueuedTaskThreadPromoter(h.PromoteQueuedTaskThreadInput)
 		svc.SetChannelChatRunner(h.StartChannelChatRun)
@@ -376,47 +509,20 @@ func (h *Handler) handleTelegramSave(c echo.Context) error {
 		h.telegramService = svc
 	}
 
-	if isHTMX(c) {
-		return triggerChannelsRefresh(c)
-	}
-	return c.Redirect(http.StatusSeeOther, "/channels")
+	return returnToChannels(c)
 }
 
 // handleTelegramTest tests the Telegram bot connection
 func (h *Handler) handleTelegramTest(c echo.Context) error {
-	if h.telegramService == nil || !h.telegramService.IsRunning() {
-		// Return error HTML with red X icon
-		errorHTML := `
-			<div class="flex items-center gap-2 text-error" id="telegram-test-feedback">
-				<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-				</svg>
-				<span>Connection failed: Bot is not running</span>
-			</div>
-		`
-		return c.HTML(http.StatusOK, errorHTML)
+	options := channelConnectionTestFeedbackOptions{
+		ElementID:          "telegram-test-feedback",
+		MissingServiceText: "Connection failed: Bot is not running",
+		AutoDismissSuccess: true,
 	}
-
-	// Return success HTML with green checkmark and auto-dismiss
-	successHTML := `
-		<div class="flex items-center gap-2 text-success" id="telegram-test-feedback">
-			<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-			</svg>
-			<span>Connection successful!</span>
-		</div>
-		<script>
-			setTimeout(function() {
-				var el = document.getElementById('telegram-test-feedback');
-				if (el) {
-					el.style.transition = 'opacity 0.5s';
-					el.style.opacity = '0';
-					setTimeout(function() { el.remove(); }, 500);
-				}
-			}, 3000);
-		</script>
-	`
-	return c.HTML(http.StatusOK, successHTML)
+	if h.telegramService == nil || !h.telegramService.IsRunning() {
+		return renderStandardChannelConnectionTestFeedback(c, "Telegram", false, nil, options)
+	}
+	return renderStandardChannelConnectionTestFeedback(c, "Telegram", true, nil, options)
 }
 
 // handleTelegramSendResponses toggles the "send task responses to Telegram" setting
@@ -452,10 +558,7 @@ func (h *Handler) handleTelegramRemove(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to remove channel settings").SetInternal(err)
 	}
 
-	if isHTMX(c) {
-		return triggerChannelsRefresh(c)
-	}
-	return c.Redirect(http.StatusSeeOther, "/channels")
+	return returnToChannels(c)
 }
 
 func (h *Handler) handleGitHubConnect(c echo.Context) error {
@@ -479,6 +582,11 @@ func (h *Handler) handleGitHubConfigure(c echo.Context) error {
 	appSlug := strings.TrimSpace(c.FormValue("github_app_slug"))
 	privateKey := strings.TrimSpace(c.FormValue("github_app_private_key"))
 	pat := strings.TrimSpace(c.FormValue("github_pat"))
+	apiEndpoint := strings.TrimSpace(c.FormValue("github_api_endpoint"))
+
+	if err := h.settingsRepo.Set(c.Request().Context(), service.GitHubSettingAPIEndpoint, apiEndpoint); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to save GitHub API endpoint")
+	}
 
 	if strings.TrimSpace(c.FormValue("github_auth_mode")) == "" && (appID != "" || appSlug != "" || privateKey != "") {
 		authMode = service.GitHubAuthModeApp
@@ -530,10 +638,7 @@ func (h *Handler) handleGitHubConfigure(c echo.Context) error {
 		}
 	}
 
-	if isHTMX(c) {
-		return triggerChannelsRefresh(c)
-	}
-	return c.Redirect(http.StatusSeeOther, "/channels")
+	return returnToChannels(c)
 }
 
 func (h *Handler) handleGitHubCallback(c echo.Context) error {
@@ -554,10 +659,7 @@ func (h *Handler) handleGitHubDisconnect(c echo.Context) error {
 	if err := h.githubSvc.Disconnect(c.Request().Context()); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to disconnect GitHub")
 	}
-	if isHTMX(c) {
-		return triggerChannelsRefresh(c)
-	}
-	return c.Redirect(http.StatusSeeOther, "/channels")
+	return returnToChannels(c)
 }
 
 func (h *Handler) handleGitHubRemove(c echo.Context) error {
@@ -574,14 +676,12 @@ func (h *Handler) handleGitHubRemove(c echo.Context) error {
 		{key: service.GitHubSettingPAT, value: ""},
 		{key: service.GitHubSettingPATUserLogin, value: ""},
 		{key: service.GitHubSettingAuthMode, value: ""},
+		{key: service.GitHubSettingAPIEndpoint, value: ""},
 	}); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to remove channel settings").SetInternal(err)
 	}
 
-	if isHTMX(c) {
-		return triggerChannelsRefresh(c)
-	}
-	return c.Redirect(http.StatusSeeOther, "/channels")
+	return returnToChannels(c)
 }
 
 func (h *Handler) handleSlackConfigure(c echo.Context) error {
@@ -656,10 +756,7 @@ func (h *Handler) handleSlackConfigure(c echo.Context) error {
 		_ = h.slackSvc.ReloadFromSettings(c.Request().Context())
 	}
 
-	if isHTMX(c) {
-		return triggerChannelsRefresh(c)
-	}
-	return c.Redirect(http.StatusSeeOther, "/channels")
+	return returnToChannels(c)
 }
 
 func (h *Handler) handleSlackConnect(c echo.Context) error {
@@ -694,10 +791,7 @@ func (h *Handler) handleSlackDisconnect(c echo.Context) error {
 	if err := h.slackSvc.Disconnect(c.Request().Context()); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to disconnect Slack")
 	}
-	if isHTMX(c) {
-		return triggerChannelsRefresh(c)
-	}
-	return c.Redirect(http.StatusSeeOther, "/channels")
+	return returnToChannels(c)
 }
 
 func (h *Handler) handleSlackRemove(c echo.Context) error {
@@ -724,20 +818,14 @@ func (h *Handler) handleSlackRemove(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to remove channel settings").SetInternal(err)
 	}
 
-	if isHTMX(c) {
-		return triggerChannelsRefresh(c)
-	}
-	return c.Redirect(http.StatusSeeOther, "/channels")
+	return returnToChannels(c)
 }
 
 func (h *Handler) handleSlackTest(c echo.Context) error {
 	if h.slackSvc == nil {
-		return c.HTML(http.StatusOK, `<div class="flex items-center gap-2 text-error"><span>Slack service not configured</span></div>`)
+		return renderStandardChannelConnectionTestFeedback(c, "Slack", false, nil)
 	}
-	if err := h.slackSvc.TestConnection(c.Request().Context()); err != nil {
-		return c.HTML(http.StatusOK, `<div class="flex items-center gap-2 text-error"><span>Connection failed: `+templateEscape(err.Error())+`</span></div>`)
-	}
-	return c.HTML(http.StatusOK, `<div class="flex items-center gap-2 text-success"><span>Connection successful!</span></div>`)
+	return renderStandardChannelConnectionTestFeedback(c, "Slack", true, h.slackSvc.TestConnection(c.Request().Context()))
 }
 
 func (h *Handler) handleDiscordConfigure(c echo.Context) error {
@@ -769,10 +857,7 @@ func (h *Handler) handleDiscordConfigure(c echo.Context) error {
 			applog.Infof("warning: failed to reload discord gateway after settings save: %v", err)
 		}
 	}
-	if isHTMX(c) {
-		return triggerChannelsRefresh(c)
-	}
-	return c.Redirect(http.StatusSeeOther, "/channels")
+	return returnToChannels(c)
 }
 
 func (h *Handler) handleDiscordRemove(c echo.Context) error {
@@ -780,36 +865,28 @@ func (h *Handler) handleDiscordRemove(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "settings repository not configured")
 	}
 	projectID, _ := h.getCurrentProjectID(c)
-	var resetErr error
 	if h.discordSvc != nil {
 		_ = h.discordSvc.Disconnect(c.Request().Context())
-	} else {
-		resetErr = applyChannelSettingResets(c.Request().Context(), h.settingsRepo, []channelSettingReset{
-			{key: service.DiscordSettingBotToken, value: ""},
-			{key: service.DiscordSettingBotUserID, value: ""},
-			{key: service.DiscordSettingSendResponses, value: ""},
-		})
 	}
+	resetErr := applyChannelSettingResets(c.Request().Context(), h.settingsRepo, []channelSettingReset{
+		{key: service.DiscordSettingBotToken, value: ""},
+		{key: service.DiscordSettingBotUserID, value: ""},
+		{key: service.DiscordSettingSendResponses, value: ""},
+	})
 	if h.discordAuthRepo != nil && projectID != "" {
 		_ = h.discordAuthRepo.DeleteByProject(c.Request().Context(), projectID)
 	}
 	if resetErr != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to remove channel settings").SetInternal(resetErr)
 	}
-	if isHTMX(c) {
-		return triggerChannelsRefresh(c)
-	}
-	return c.Redirect(http.StatusSeeOther, "/channels")
+	return returnToChannels(c)
 }
 
 func (h *Handler) handleDiscordTest(c echo.Context) error {
 	if h.discordSvc == nil {
-		return c.HTML(http.StatusOK, `<div class="flex items-center gap-2 text-error"><span>Discord service not configured</span></div>`)
+		return renderStandardChannelConnectionTestFeedback(c, "Discord", false, nil)
 	}
-	if err := h.discordSvc.TestConnection(c.Request().Context()); err != nil {
-		return c.HTML(http.StatusOK, `<div class="flex items-center gap-2 text-error"><span>Connection failed: `+templateEscape(err.Error())+`</span></div>`)
-	}
-	return c.HTML(http.StatusOK, `<div class="flex items-center gap-2 text-success"><span>Connection successful!</span></div>`)
+	return renderStandardChannelConnectionTestFeedback(c, "Discord", true, h.discordSvc.TestConnection(c.Request().Context()))
 }
 
 func (h *Handler) handleEmailConfigure(c echo.Context) error {
@@ -856,10 +933,7 @@ func (h *Handler) handleEmailConfigure(c echo.Context) error {
 	if h.emailService != nil {
 		_ = h.emailService.ReloadFromSettings(c.Request().Context())
 	}
-	if isHTMX(c) {
-		return triggerChannelsRefresh(c)
-	}
-	return c.Redirect(http.StatusSeeOther, "/channels")
+	return returnToChannels(c)
 }
 
 func (h *Handler) handleEmailRemove(c echo.Context) error {
@@ -884,20 +958,14 @@ func (h *Handler) handleEmailRemove(c echo.Context) error {
 	}); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to remove channel settings").SetInternal(err)
 	}
-	if isHTMX(c) {
-		return triggerChannelsRefresh(c)
-	}
-	return c.Redirect(http.StatusSeeOther, "/channels")
+	return returnToChannels(c)
 }
 
 func (h *Handler) handleEmailTest(c echo.Context) error {
 	if h.emailService == nil {
-		return c.HTML(http.StatusOK, `<div class="flex items-center gap-2 text-error"><span>Email service not configured</span></div>`)
+		return renderStandardChannelConnectionTestFeedback(c, "Email", false, nil)
 	}
-	if err := h.emailService.TestConnection(c.Request().Context()); err != nil {
-		return c.HTML(http.StatusOK, `<div class="flex items-center gap-2 text-error"><span>Connection failed: `+templateEscape(err.Error())+`</span></div>`)
-	}
-	return c.HTML(http.StatusOK, `<div class="flex items-center gap-2 text-success"><span>Connection successful!</span></div>`)
+	return renderStandardChannelConnectionTestFeedback(c, "Email", true, h.emailService.TestConnection(c.Request().Context()))
 }
 
 func defaultIfBlank(value, fallback string) string {
@@ -920,6 +988,47 @@ func boolFormValue(value string, fallback bool) string {
 		return "true"
 	}
 	return "false"
+}
+
+type channelConnectionTestFeedbackOptions struct {
+	ElementID          string
+	MissingServiceText string
+	AutoDismissSuccess bool
+}
+
+func renderStandardChannelConnectionTestFeedback(c echo.Context, channelName string, serviceConfigured bool, testErr error, opts ...channelConnectionTestFeedbackOptions) error {
+	options := channelConnectionTestFeedbackOptions{}
+	if len(opts) > 0 {
+		options = opts[0]
+	}
+	elementID := ""
+	if options.ElementID != "" {
+		elementID = ` id="` + templateEscape(options.ElementID) + `"`
+	}
+	if !serviceConfigured {
+		message := channelName + " service not configured"
+		if options.MissingServiceText != "" {
+			message = options.MissingServiceText
+		}
+		return c.HTML(http.StatusOK, `<div class="flex items-center gap-2 text-error"`+elementID+`><span>`+templateEscape(message)+`</span></div>`)
+	}
+	if testErr != nil {
+		return c.HTML(http.StatusOK, `<div class="flex items-center gap-2 text-error"`+elementID+`><span>Connection failed: `+templateEscape(testErr.Error())+`</span></div>`)
+	}
+	feedbackHTML := `<div class="flex items-center gap-2 text-success"` + elementID + `><span>Connection successful!</span></div>`
+	if options.AutoDismissSuccess && options.ElementID != "" {
+		feedbackHTML += `<script>
+			setTimeout(function() {
+				var el = document.getElementById(` + strconv.Quote(options.ElementID) + `);
+				if (el) {
+					el.style.transition = 'opacity 0.5s';
+					el.style.opacity = '0';
+					setTimeout(function() { el.remove(); }, 500);
+				}
+			}, 3000);
+		</script>`
+	}
+	return c.HTML(http.StatusOK, feedbackHTML)
 }
 
 func (h *Handler) buildAbsoluteURL(c echo.Context, path string) string {
@@ -961,14 +1070,25 @@ func templateEscape(s string) string {
 
 // handlePersonalitySave saves the global chat personality setting
 func (h *Handler) handlePersonalitySave(c echo.Context) error {
-	// Accept personality from form value OR query param (for kebab menu hx-post with query string)
-	personality := c.FormValue("personality")
-	if personality == "" {
-		personality = c.QueryParam("personality")
+	ctx := c.Request().Context()
+	// Accept personality from form value OR query param (for kebab menu hx-post with query string).
+	// Read PostForm directly so an explicit empty form value still clears to the base/default personality.
+	personality := c.QueryParam("personality")
+	if err := c.Request().ParseForm(); err == nil {
+		if values, ok := c.Request().PostForm["personality"]; ok {
+			personality = ""
+			if len(values) > 0 {
+				personality = values[0]
+			}
+		}
+	}
+
+	if !service.IsAvailablePersonalityKey(ctx, personality, h.customPersonalityRepo) {
+		return c.String(http.StatusBadRequest, fmt.Sprintf("Unknown personality %q. Refresh Personality settings and choose an available option.", personality))
 	}
 
 	if h.settingsRepo != nil {
-		if err := h.settingsRepo.Set(c.Request().Context(), "personality", personality); err != nil {
+		if err := h.settingsRepo.Set(ctx, "personality", personality); err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, "Failed to save personality")
 		}
 	}

@@ -3,7 +3,6 @@ package pages
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"html"
 	"strings"
@@ -11,6 +10,22 @@ import (
 
 	"github.com/openvibely/openvibely/internal/models"
 )
+
+func TestCardPaginationCompletionIsSilent(t *testing.T) {
+	var buf bytes.Buffer
+	if err := ModelsContentPageWithPagination(nil, nil, nil, false, false).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render models pagination status: %v", err)
+	}
+	out := buf.String()
+	if strings.Contains(out, "End of list") || strings.Contains(out, "data-card-pagination-end") {
+		t.Fatalf("pagination completion should be silent, got visible end marker")
+	}
+	for _, required := range []string{"data-card-pagination-loading", "data-card-pagination-error", "data-card-pagination-retry", "data-card-pagination-sentinel"} {
+		if !strings.Contains(out, required) {
+			t.Errorf("expected pagination status to retain %s", required)
+		}
+	}
+}
 
 func TestModelsContent_NewModelVersionsInSelector(t *testing.T) {
 	// Render the models page and verify the new model versions appear in the
@@ -65,6 +80,34 @@ func TestModelsContent_NewModelVersionsInSelector(t *testing.T) {
 	}
 	if strings.Contains(out, "Max Output Tokens / Request") || strings.Contains(out, "model_max_tokens") {
 		t.Error("expected model dialog not to expose internal output-token cap")
+	}
+	if !strings.Contains(out, "Save endpoint changes and reconnect before discovering models.") {
+		t.Error("expected edit-mode discovery to explain that endpoint changes must be saved first")
+	}
+	if !strings.Contains(out, `name="custom_access_token_header"`) ||
+		!strings.Contains(out, `name="custom_access_token_prefix"`) ||
+		!strings.Contains(out, `<option value="raw">Raw token</option>`) {
+		t.Error("expected custom OAuth token header, prefix, and raw-token controls")
+	}
+	for _, control := range []string{
+		`name="auth_header_name"`,
+		`name="auth_header_value_prefix"`,
+		`name="extra_headers_json"`,
+		`name="extra_body_json"`,
+		`name="models_url"`,
+	} {
+		if !strings.Contains(out, control) {
+			t.Errorf("expected custom API-key request control %s", control)
+		}
+	}
+	if !strings.Contains(out, "if (!showCustom) methodInput.value = 'api_key';") {
+		t.Error("expected provider changes to reset the hidden custom OAuth selector")
+	}
+	if !strings.Contains(out, "apiKeyField.classList.toggle('hidden', showCustom && method === 'oauth');") {
+		t.Error("expected switching from OAuth to API key to restore the API-key field")
+	}
+	if !strings.Contains(out, "el.disabled = !showCustom || method !== 'oauth';") {
+		t.Error("expected hidden OAuth controls to be disabled outside custom OAuth mode")
 	}
 	if !strings.Contains(out, "Claude Effort") {
 		t.Error("expected Claude effort label in model dialog")
@@ -226,6 +269,20 @@ func TestModelsContent_ModelFormUsesHTMXSubmit(t *testing.T) {
 	if !strings.Contains(out, `id="model_config_id" name="model_config_id" value=""`) {
 		t.Fatal("expected model form to include hidden model config ID")
 	}
+	if !strings.Contains(out, `id="model_form_error"`) ||
+		!strings.Contains(out, `aria-live="assertive"`) {
+		t.Fatal("expected model form to include an accessible save-error banner")
+	}
+	if !strings.Contains(out, `showModelFormError(modelSaveErrorMessage(event.detail.xhr));`) {
+		t.Fatal("expected model save failures to display in the model form")
+	}
+	if !strings.Contains(out, `payload.message || payload.error || fallback`) {
+		t.Fatal("expected model save error responses to be parsed for a useful message")
+	}
+	if !strings.Contains(out, `addEventListener('invalid'`) ||
+		!strings.Contains(out, `Complete the required field:`) {
+		t.Fatal("expected invalid model fields to display a visible validation error")
+	}
 	// JS dynamically updates HTMX method and action to include project_id for create/edit paths.
 	if !strings.Contains(out, "form.removeAttribute('hx-put');") || !strings.Contains(out, "form.setAttribute('hx-post', _createUrl);") {
 		t.Fatal("expected create flow to use hx-post and clear edit hx-put")
@@ -351,27 +408,17 @@ func TestModelsContent_ModelModalJavaScriptShape(t *testing.T) {
 	}
 }
 
-func TestModelsContent_DefaultCardCarriesCompleteEditData(t *testing.T) {
+func TestModelsContent_CardsCarryOnlyBoundedListData(t *testing.T) {
 	agents := []models.LLMConfig{
 		{
-			ID:             "default-model",
-			Name:           "Default OpenAI",
-			Provider:       models.ProviderOpenAI,
-			Model:          "gpt-5.5",
-			AuthMethod:     models.AuthMethodAPIKey,
-			APIKey:         "sk-default",
-			Temperature:    0.42,
-			IsDefault:      true,
-			AutoStartTasks: true,
+			ID: "default-model", Name: "Default OpenAI", Provider: models.ProviderOpenAI,
+			Model: "gpt-5.5", AuthMethod: models.AuthMethodAPIKey, APIKey: "sk-default",
+			Temperature: 0.42, IsDefault: true, AutoStartTasks: true,
 		},
 		{
-			ID:              "other-model",
-			Name:            "Other Claude",
-			Provider:        models.ProviderAnthropic,
-			Model:           "claude-sonnet-5",
-			AuthMethod:      models.AuthMethodOAuth,
-			Temperature:     0.9,
-			ReasoningEffort: "high",
+			ID: "other-model", Name: "Other Claude", Provider: models.ProviderAnthropic,
+			Model: "claude-sonnet-5", AuthMethod: models.AuthMethodOAuth,
+			Temperature: 0.9, ReasoningEffort: "high",
 		},
 	}
 	var buf bytes.Buffer
@@ -381,37 +428,26 @@ func TestModelsContent_DefaultCardCarriesCompleteEditData(t *testing.T) {
 	out := buf.String()
 
 	defaultCard := renderedModelCard(t, out, "default-model")
-	for _, want := range []string{
-		`onclick="editModelFromData(this)"`,
-		`data-model-name="Default OpenAI"`,
-		`data-model-provider="openai"`,
-		`data-model-model="gpt-5.5"`,
-		`data-model-auth-method="api_key"`,
-		`data-model-api-key="sk-default"`,
-		`data-model-temperature="0.420000"`,
-		`data-model-is-default="true"`,
-		`data-model-auto-start-tasks="true"`,
-	} {
-		if !strings.Contains(defaultCard, want) {
-			t.Fatalf("expected default model card edit data to contain %q in:\n%s", want, defaultCard)
-		}
-	}
-	if !strings.Contains(defaultCard, "Default</span>") {
-		t.Fatal("expected default badge to render without replacing card edit click target")
+	if !strings.Contains(defaultCard, `onclick="editModelFromData(this)"`) || !strings.Contains(defaultCard, "Default</span>") {
+		t.Fatal("expected default card to remain directly editable and display its default badge")
 	}
 	if strings.Contains(defaultCard, `data-model-set-default-url=`) {
-		t.Fatal("default card should not render a set-default action that can conflict with edit opening")
+		t.Fatal("default card should not render a set-default action")
+	}
+	for _, forbidden := range []string{"sk-default", "data-model-api-key", "data-model-auth-method", "data-model-auto-start-tasks", "data-model-reasoning-effort"} {
+		if strings.Contains(defaultCard, forbidden) {
+			t.Fatalf("bounded card leaked edit-only value %q", forbidden)
+		}
 	}
 
 	otherCard := renderedModelCard(t, out, "other-model")
-	if !strings.Contains(otherCard, `onclick="editModelFromData(this)"`) {
-		t.Fatal("expected non-default card to remain directly editable")
+	if !strings.Contains(otherCard, `onclick="editModelFromData(this)"`) || !strings.Contains(otherCard, "Reasoning effort: high") {
+		t.Fatal("expected non-default card display and edit action to remain intact")
 	}
-	if !strings.Contains(otherCard, `data-model-provider="anthropic"`) || !strings.Contains(otherCard, `data-model-auth-method="oauth"`) {
-		t.Fatal("expected non-default card to carry its own provider/auth edit data")
-	}
-	if !strings.Contains(otherCard, `data-model-reasoning-effort="high"`) {
-		t.Fatal("expected non-default card to carry its own reasoning effort edit data")
+	for _, want := range []string{"/edit-details", "details.id !== id", "populateModelEditForm", "modelReasoningEffort: details.reasoning_effort"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected lazy edit script to contain %q", want)
+		}
 	}
 }
 
@@ -519,66 +555,31 @@ func TestModelsContent_MixtureReferenceOrderingControls(t *testing.T) {
 	}
 }
 
-func TestModelsContent_MixtureEditHydratesSavedReferenceOrder(t *testing.T) {
+func TestModelsContent_MixtureEditHydratesSavedReferenceOrderLazily(t *testing.T) {
 	agents := []models.LLMConfig{
 		{ID: "ref-a", Name: "Reference A", Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-a"},
 		{ID: "ref-b", Name: "Reference B", Provider: models.ProviderAnthropic, AuthMethod: models.AuthMethodAPIKey, Model: "claude-b"},
-		{ID: "mix", Name: "Ordered Mix", Provider: models.ProviderMixture, Model: "mixture", MixtureConfigJSON: `{"enabled":true,"reference_models":[{"agent_config_id":"ref-b"},{"agent_config_id":"ref-a"}],"aggregator":{"agent_config_id":"ref-a"}}`},
+		{ID: "mix", Name: "Ordered Mix", Provider: models.ProviderMixture, Model: "mixture", MixtureAggregatorID: "ref-a", MixtureReferenceCount: 2},
 	}
 	var buf bytes.Buffer
 	if err := ModelsContent(agents, nil, false).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render models content: %v", err)
 	}
 	out := buf.String()
-
-	cardStart := strings.Index(out, `data-model-id="mix"`)
-	if cardStart < 0 {
-		t.Fatal("expected rendered mixture model card")
+	cardMarkup := renderedModelCard(t, out, "mix")
+	if strings.Contains(cardMarkup, `data-model-mixture-config-json=`) || strings.Contains(cardMarkup, `reference_models`) {
+		t.Fatal("initial mixture card exposed full edit configuration")
 	}
-	cardMarkup := out[cardStart:]
-	if nextCard := strings.Index(cardMarkup[1:], `data-model-id=`); nextCard > 0 {
-		cardMarkup = cardMarkup[:nextCard+1]
-	}
-	if !strings.Contains(cardMarkup, `data-model-mixture-config-json=`) {
-		t.Fatal("expected mixture edit card to carry saved mixture config JSON")
-	}
-	refB := strings.Index(cardMarkup, `agent_config_id`)
-	refA := strings.LastIndex(cardMarkup, `agent_config_id`)
-	if refB < 0 || refA < 0 || refB == refA {
-		t.Fatalf("expected saved mixture config data to include ordered reference model IDs")
-	}
-	if strings.Index(cardMarkup, `ref-b`) < 0 || strings.Index(cardMarkup, `ref-a`) < 0 || strings.Index(cardMarkup, `ref-b`) > strings.Index(cardMarkup, `ref-a`) {
-		t.Fatalf("expected saved mixture config data to preserve reference order ref-b before ref-a")
-	}
-	if !strings.Contains(out, "renderMixtureReferenceOptions(selectedIDs);") {
-		t.Fatal("expected edit hydration to rebuild reference selector in saved order")
-	}
-	if strings.Contains(cardMarkup, `&quot;{`) || strings.Contains(cardMarkup, `\\u0022`) {
-		t.Fatalf("expected mixture edit config data to be raw attribute-escaped JSON, not double-encoded JSON string: %s", cardMarkup)
-	}
-	attrPrefix := `data-model-mixture-config-json="`
-	attrStart := strings.Index(cardMarkup, attrPrefix)
-	if attrStart < 0 {
-		t.Fatal("expected mixture edit card to include mixture config data attribute")
-	}
-	attrValue := cardMarkup[attrStart+len(attrPrefix):]
-	attrEnd := strings.Index(attrValue, `"`)
-	if attrEnd < 0 {
-		t.Fatalf("expected terminated mixture config data attribute: %s", cardMarkup)
-	}
-	var parsed struct {
-		Aggregator struct {
-			AgentConfigID string `json:"agent_config_id"`
-		} `json:"aggregator"`
-		ReferenceModels []struct {
-			AgentConfigID string `json:"agent_config_id"`
-		} `json:"reference_models"`
-	}
-	if err := json.Unmarshal([]byte(html.UnescapeString(attrValue[:attrEnd])), &parsed); err != nil {
-		t.Fatalf("expected browser-readable mixture config JSON data attribute: %v", err)
-	}
-	if parsed.Aggregator.AgentConfigID != "ref-a" || len(parsed.ReferenceModels) != 2 || parsed.ReferenceModels[0].AgentConfigID != "ref-b" || parsed.ReferenceModels[1].AgentConfigID != "ref-a" {
-		t.Fatalf("expected edit hydration data to preserve aggregator and ordered references, got %+v", parsed)
+	for _, want := range []string{
+		"modelMixtureConfigJson: details.mixture_config_json || ''",
+		"applyMixtureConfig(dbProvider === 'mixture' ? mixtureConfigJSON : '');",
+		"renderMixtureReferenceOptions(selectedIDs);",
+		"generation !== window._modelEditRequestGeneration",
+		"window._modelEditRequestedID !== id",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected lazy ordered mixture hydration script to contain %q", want)
+		}
 	}
 	if strings.Index(out, "toggleProviderFields(model, reasoningEffort);") > strings.Index(out, "applyMixtureConfig(dbProvider === 'mixture' ? mixtureConfigJSON : '')") {
 		t.Fatal("expected edit mixture config hydration to run after provider field toggling")
@@ -733,7 +734,7 @@ func TestModelsContent_OpenAICompatibleDiscoveryUI(t *testing.T) {
 		`<input type="hidden" id="model_provider_value" name="provider" value="anthropic"`,
 		`<select id="model_provider"`,
 		`oninput="syncModelAPIKeySubmitValue(); scheduleAutoDiscoverOpenAICompatibleModels()"`,
-		`onsubmit="return normalizeModelFormBeforeSubmit()"`,
+		`onsubmit="clearModelFormError(); return normalizeModelFormBeforeSubmit()"`,
 		`<input type="hidden" id="model_openai_compatible_preset" name="preset_slug" value="custom"`,
 		"OpenAI-compatible presets auto-load available models when selected; Custom stays manual.",
 		"openai_compatible_openrouter: [",
@@ -759,21 +760,54 @@ func TestModelsContent_OpenAICompatibleDiscoveryUI(t *testing.T) {
 		"/models/openai-compatible/available?",
 		"new URLSearchParams({base_url: baseURL})",
 		"X-OpenAI-Compatible-API-Key",
+		"X-OpenAI-Compatible-Auth-Header-Name",
+		"X-OpenAI-Compatible-Auth-Header-Prefix",
+		"X-OpenAI-Compatible-Extra-Headers",
+		"X-OpenAI-Compatible-Models-Array-Path",
+		"X-OpenAI-Compatible-Model-ID-Field",
+		"(!configID || customAuthMethod === 'api_key')",
+		"clearExtraHeaders.checked",
+		"cfg.model_id_field || 'id'",
 		"data.resolved_id",
 		"setOpenAICompatibleModelValue(models[i].id, models[i].id, false)",
 		"setOpenAICompatibleModelValue(data.resolved_id, data.resolved_id, true)",
 		"if (!isDiscoverableOpenAICompatiblePreset())",
 		"document.getElementById('model_provider').value !== provider",
+		"Discover Models",
+		`onclick="discoverOpenAICompatibleModels()"`,
+		`name="custom_static_headers_json"`,
+		`name="custom_authorization_parameters_json"`,
+		`name="custom_oauth_pkce"`,
+		`name="custom_allow_private_endpoints"`,
+		`name="custom_local_callback_host"`,
+		`name="custom_local_callback_path"`,
+		"The callback port is always selected automatically.",
+		`cfg.local_callback_host || 'localhost'`,
+		`cfg.local_callback_path || '/callback'`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("expected OpenAI-compatible discovery UI to contain %q", want)
 		}
 	}
+	modelsPathIndex := strings.Index(out, `name="custom_models_array_path"`)
+	oauthFieldsIndex := strings.Index(out, `id="custom_provider_oauth_fields"`)
+	if modelsPathIndex < 0 || oauthFieldsIndex < 0 || modelsPathIndex > oauthFieldsIndex {
+		t.Fatal("expected model discovery schema controls to be available outside the OAuth-only fields")
+	}
+	modelIDFieldIndex := strings.Index(out, `id="model_custom_model_id_field"`)
+	if modelIDFieldIndex < 0 {
+		t.Fatal("expected custom model ID field")
+	}
+	modelIDFieldMarkup := out[modelIDFieldIndex:]
+	if end := strings.Index(modelIDFieldMarkup, `>`); end >= 0 {
+		modelIDFieldMarkup = modelIDFieldMarkup[:end]
+	}
+	if !strings.Contains(modelIDFieldMarkup, `value="id"`) {
+		t.Fatalf("expected custom model ID field to default to id: %s", modelIDFieldMarkup)
+	}
 	for _, forbidden := range []string{
 		`<select id="model_openai_compatible_preset"`,
 		`onchange="applyOpenAICompatiblePreset()"`,
-		"Discover Models",
-		`onclick="discoverOpenAICompatibleModels()"`,
 		"api_key: apiKey",
 		"api_key=",
 		"openai_compatible_api_key",
@@ -962,5 +996,103 @@ func TestModelsContent_OAuthLinksUseRuntimeSpecificLaunch(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "data-oauth-external=\"true\"") {
 		t.Fatal("expected desktop OAuth links to request external browser launch")
+	}
+}
+
+func TestModelsContent_CustomOAuthEditLoadsRevealableSecretsAndHeaders(t *testing.T) {
+	agents := []models.LLMConfig{{
+		ID:                "custom-oauth",
+		Name:              "Custom OAuth",
+		Provider:          models.ProviderOpenAICompatible,
+		AuthMethod:        models.AuthMethodOAuth,
+		Model:             "custom-model",
+		PresetSlug:        "custom",
+		OAuthClientSecret: "saved-client-secret",
+		ExtraHeadersJSON:  `{"X-Inference-Secret":"saved-inference-secret"}`,
+		ExtraBodyJSON:     `{"saved_option":true}`,
+		CustomAuthConfigJSON: `{"enabled":true,"signing_secret":"saved-signing-secret",` +
+			`"static_headers":{"X-Required":"saved-static-header"},` +
+			`"token_headers":{"X-Token":"saved-token-header"},` +
+			`"refresh_headers":{"X-Refresh":"saved-refresh-header"},` +
+			`"refresh_parameters":{"refresh_secret":"saved-refresh-parameter"}}`,
+	}, {
+		ID:                   "builtin-oauth",
+		Name:                 "Built-in OAuth",
+		Provider:             models.ProviderOpenAI,
+		AuthMethod:           models.AuthMethodOAuth,
+		Model:                "gpt-5.4",
+		OAuthClientSecret:    "builtin-client-secret-must-not-render",
+		CustomAuthConfigJSON: `{"signing_secret":"builtin-signing-secret-must-not-render"}`,
+	}}
+
+	var buf bytes.Buffer
+	if err := ModelsContent(agents, nil, false).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render models content: %v", err)
+	}
+	out := html.UnescapeString(buf.String())
+
+	if !strings.Contains(out, `id="models-container" data-search-container hx-history="false"`) {
+		t.Fatal("expected the secret-bearing Models fragment to opt out of HTMX history snapshots")
+	}
+	for _, value := range []string{
+		"saved-client-secret",
+		"saved-signing-secret",
+		"saved-inference-secret",
+		"saved-static-header",
+		"saved-token-header",
+		"saved-refresh-header",
+		"saved-refresh-parameter",
+		`{"saved_option":true}`,
+	} {
+		if strings.Contains(out, value) {
+			t.Errorf("initial Models response leaked saved edit value %q", value)
+		}
+	}
+	for _, inputID := range []string{
+		"model_custom_oauth_client_secret",
+		"model_custom_signing_secret",
+		"model_compatible_extra_headers",
+		"model_custom_static_headers_json",
+		"model_custom_token_headers_json",
+		"model_custom_refresh_headers_json",
+		"model_custom_refresh_parameters_json",
+	} {
+		if !strings.Contains(out, `togglePasswordVisibility('`+inputID+`', this)`) {
+			t.Errorf("expected reveal control for %s", inputID)
+		}
+		if !strings.Contains(out, `resetSecretInputVisibility('`+inputID+`')`) {
+			t.Errorf("expected %s to reset to hidden whenever the modal opens", inputID)
+		}
+	}
+	for _, secret := range []string{
+		"builtin-client-secret-must-not-render",
+		"builtin-signing-secret-must-not-render",
+	} {
+		if strings.Contains(out, secret) {
+			t.Errorf("built-in provider secret %q leaked into model page", secret)
+		}
+	}
+	for _, inputID := range []string{
+		"model_compatible_extra_headers",
+		"model_custom_static_headers_json",
+		"model_custom_token_headers_json",
+		"model_custom_refresh_headers_json",
+		"model_custom_refresh_parameters_json",
+	} {
+		if strings.Contains(out, `<textarea id="`+inputID+`"`) {
+			t.Errorf("sensitive JSON field %s rendered as a plaintext textarea", inputID)
+		}
+	}
+	if strings.Contains(out, "Leave blank to keep saved secret") ||
+		strings.Contains(out, `name="clear_oauth_client_secret"`) ||
+		strings.Contains(out, `name="custom_clear_signing_secret"`) {
+		t.Fatal("expected custom OAuth edit controls not to use blank-preserve or separate-clear behavior")
+	}
+	if !strings.Contains(out, "modelOauthClientSecret: details.oauth_client_secret || ''") ||
+		!strings.Contains(out, "modelExtraHeadersJson: details.extra_headers_json || ''") ||
+		!strings.Contains(out, "modelCustomAuthConfig: details.custom_auth_config_json || ''") ||
+		!strings.Contains(out, "cfg.signing_secret || ''") ||
+		!strings.Contains(out, "cfg.static_headers ? JSON.stringify") {
+		t.Fatal("expected edit script to populate all saved custom OAuth secret and header values")
 	}
 }

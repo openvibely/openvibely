@@ -238,6 +238,18 @@ func NewWithCompatibleAPIKey(apiKey, baseURL, authHeaderName, authHeaderValuePre
 	return client
 }
 
+// NewWithCompatibleOAuthToken creates an OAuth client for an OpenAI-compatible
+// Chat Completions endpoint.
+func NewWithCompatibleOAuthToken(token, refreshToken string, expiresAt int64, baseURL string) *Client {
+	client := newClient(&StoredAuth{
+		Token:        token,
+		RefreshToken: refreshToken,
+		ExpiresAt:    expiresAt,
+	})
+	client.apiBaseURL = strings.TrimSpace(baseURL)
+	return client
+}
+
 // NewWithOAuthToken creates a client using an OAuth access token.
 func NewWithOAuthToken(token, refreshToken string, expiresAt int64, accountID string) *Client {
 	return newClient(&StoredAuth{
@@ -290,6 +302,24 @@ func (c *Client) CurrentAuth() StoredAuth {
 func (c *Client) SetOAuthUnauthorizedHandler(handler OAuthUnauthorizedHandler) {
 	c.oauthUnauthorizedHandler = handler
 	c.oauthRefreshExternallyManaged = handler != nil
+}
+
+// SetHTTPClient overrides the transport used for provider requests.
+func (c *Client) SetHTTPClient(client *http.Client) {
+	if client != nil {
+		c.httpClient = client
+	}
+}
+
+// SetAuthHeader controls where the client's primary API key or OAuth token is
+// placed. Request finalizers may still replace the value for provider-specific
+// authorization modes.
+func (c *Client) SetAuthHeader(name, prefix string) {
+	if c.auth == nil {
+		return
+	}
+	c.auth.AuthHeaderName = strings.TrimSpace(name)
+	c.auth.AuthHeaderValuePrefix = prefix
 }
 
 func (c *Client) ensureValidToken() error {
@@ -509,41 +539,55 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *SendOptions) (*R
 	if isResponsesLiteWebsocketModel(opts.Model) {
 		payload["stream"] = true
 		wsPayload := buildResponsesLiteWebsocketPayload(payload, system, c.sessionID)
-		policy := httpretry.DefaultPolicy()
-		policy.AllowReplay = true
-		policy.RetryableError = isRetryableResponsesTransportError
-		result, err := httpretry.DoStream(ctx, policy, func(attemptCtx context.Context) (*Response, bool, error) {
-			openStream := func(useWebsocket bool) (io.ReadCloser, error) {
-				if useWebsocket {
-					return c.openResponsesWebsocketStream(attemptCtx, wsPayload, isChatGPTOAuth)
+		result, err := httpretry.DoStreamTurn(ctx, httpretry.StreamTurnPolicy{
+			RetryableError:                       isRetryableResponsesTransportError,
+			RetryConnectionFailuresWithoutBudget: true,
+			OnRetry: func(event httpretry.RetryEvent) {
+				if httpretry.IsConnectionSetupFailure(event.Err) {
+					applog.Infof("[openai-client] reconnecting responses-lite stream in %v: %v", event.Delay, event.Err)
+					return
 				}
-				return c.openResponsesLiteHTTPStream(attemptCtx, wsPayload, isChatGPTOAuth)
-			}
-			useWebsocket := !c.responsesTransportState.websocketDisabled.Load()
-			body, wsErr := openStream(useWebsocket)
-			if useWebsocket && shouldFallbackResponsesWebsocket(attemptCtx, wsErr) {
-				c.responsesTransportState.disableWebsocket()
-				return nil, false, wsErr
-			}
-			if wsErr != nil {
-				return nil, false, wsErr
-			}
-			sawOutput := false
-			onDelta := func(text string) {
-				sawOutput = true
-				if opts.OnDelta != nil {
-					opts.OnDelta(text)
+				applog.Infof("[openai-client] retrying responses-lite stream, retry attempt %d/%d in %v: %v", event.Attempt, event.MaxRetries, event.Delay, event.Err)
+			},
+		}, func(attemptCtx context.Context) (*Response, error) {
+			policy := httpretry.DefaultPolicy()
+			policy.MaxRetries = 0
+			policy.AllowReplay = true
+			policy.RetryableError = isRetryableResponsesTransportError
+			result, err := httpretry.DoStream(attemptCtx, policy, func(streamCtx context.Context) (*Response, bool, error) {
+				openStream := func(useWebsocket bool) (io.ReadCloser, error) {
+					if useWebsocket {
+						return c.openResponsesWebsocketStream(streamCtx, wsPayload, isChatGPTOAuth)
+					}
+					return c.openResponsesLiteHTTPStream(streamCtx, wsPayload, isChatGPTOAuth)
 				}
-			}
-			result, wsErr := parseStreamingResponse(body, onDelta, opts.SuppressToolMarkers)
-			body.Close()
-			if wsErr != nil && useWebsocket && shouldFallbackResponsesWebsocket(attemptCtx, wsErr) {
-				c.responsesTransportState.disableWebsocket()
-			}
-			if wsErr != nil {
-				return result, sawOutput, httpretry.NewStreamError(wsErr)
-			}
-			return result, sawOutput, nil
+				useWebsocket := !c.responsesTransportState.websocketDisabled.Load()
+				body, wsErr := openStream(useWebsocket)
+				if useWebsocket && shouldFallbackResponsesWebsocket(streamCtx, wsErr) {
+					c.responsesTransportState.disableWebsocket()
+					return nil, false, wsErr
+				}
+				if wsErr != nil {
+					return nil, false, wsErr
+				}
+				sawOutput := false
+				onDelta := func(text string) {
+					sawOutput = true
+					if opts.OnDelta != nil {
+						opts.OnDelta(text)
+					}
+				}
+				result, wsErr := parseStreamingResponse(body, onDelta, opts.SuppressToolMarkers)
+				body.Close()
+				if wsErr != nil && useWebsocket && shouldFallbackResponsesWebsocket(streamCtx, wsErr) {
+					c.responsesTransportState.disableWebsocket()
+				}
+				if wsErr != nil {
+					return result, sawOutput, httpretry.NewStreamError(wsErr)
+				}
+				return result, sawOutput, nil
+			})
+			return result, err
 		})
 		if err != nil {
 			return nil, err
@@ -562,54 +606,67 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *SendOptions) (*R
 		return nil, err
 	}
 
-	policy := httpretry.DefaultPolicy()
-	policy.AllowReplay = true
-	result, err := httpretry.DoStream(ctx, policy, func(attemptCtx context.Context) (*Response, bool, error) {
-		buildReq := func() (*http.Request, error) {
-			req, err := http.NewRequestWithContext(attemptCtx, http.MethodPost, endpoint, bytes.NewReader(body))
+	result, err := httpretry.DoStreamTurn(ctx, httpretry.StreamTurnPolicy{
+		RetryConnectionFailuresWithoutBudget: true,
+		OnRetry: func(event httpretry.RetryEvent) {
+			if httpretry.IsConnectionSetupFailure(event.Err) {
+				applog.Infof("[openai-client] reconnecting responses stream in %v: %v", event.Delay, event.Err)
+				return
+			}
+			applog.Infof("[openai-client] retrying responses stream, retry attempt %d/%d in %v: %v", event.Attempt, event.MaxRetries, event.Delay, event.Err)
+		},
+	}, func(attemptCtx context.Context) (*Response, error) {
+		policy := httpretry.DefaultPolicy()
+		policy.MaxRetries = 0
+		policy.AllowReplay = true
+		result, err := httpretry.DoStream(attemptCtx, policy, func(streamCtx context.Context) (*Response, bool, error) {
+			buildReq := func() (*http.Request, error) {
+				req, err := http.NewRequestWithContext(streamCtx, http.MethodPost, endpoint, bytes.NewReader(body))
+				if err != nil {
+					return nil, err
+				}
+				c.applyAuthHeaders(req, isChatGPTOAuth)
+				req.Header.Set("Content-Type", "application/json")
+				if stream {
+					req.Header.Set("Accept", "text/event-stream")
+				}
+				return req, nil
+			}
+			resp, err := c.doWithOAuthRecovery(attemptCtx, endpoint, isChatGPTOAuth, buildReq)
 			if err != nil {
-				return nil, err
+				return nil, false, err
 			}
-			c.applyAuthHeaders(req, isChatGPTOAuth)
-			req.Header.Set("Content-Type", "application/json")
+			defer resp.Body.Close()
+			for k, v := range resp.Header {
+				kl := strings.ToLower(k)
+				if strings.Contains(kl, "ratelimit") || strings.Contains(kl, "rate-limit") || strings.Contains(kl, "retry") || strings.Contains(kl, "x-openai") || strings.Contains(kl, "x-request") {
+					applog.Debugf("[openai-headers] %s: %v", k, v)
+				}
+			}
+			if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+				errBody, _ := io.ReadAll(resp.Body)
+				apiErr := parseAPIError(resp.StatusCode, errBody)
+				return nil, false, httpretry.NewResponseError(resp, fmt.Errorf("POST %q: %w", endpoint, apiErr))
+			}
+			observed := false
+			onDelta := func(text string) {
+				observed = true
+				if opts.OnDelta != nil {
+					opts.OnDelta(text)
+				}
+			}
+			var result *Response
 			if stream {
-				req.Header.Set("Accept", "text/event-stream")
+				result, err = parseStreamingResponse(resp.Body, onDelta, opts.SuppressToolMarkers)
+			} else {
+				result, err = parseResponse(resp.Body)
 			}
-			return req, nil
-		}
-		resp, err := c.doWithOAuthRecovery(attemptCtx, endpoint, isChatGPTOAuth, buildReq)
-		if err != nil {
-			return nil, false, err
-		}
-		defer resp.Body.Close()
-		for k, v := range resp.Header {
-			kl := strings.ToLower(k)
-			if strings.Contains(kl, "ratelimit") || strings.Contains(kl, "rate-limit") || strings.Contains(kl, "retry") || strings.Contains(kl, "x-openai") || strings.Contains(kl, "x-request") {
-				applog.Debugf("[openai-headers] %s: %v", k, v)
+			if err != nil {
+				return result, observed, httpretry.NewStreamError(err)
 			}
-		}
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			errBody, _ := io.ReadAll(resp.Body)
-			apiErr := parseAPIError(resp.StatusCode, errBody)
-			return nil, false, httpretry.NewResponseError(resp, fmt.Errorf("POST %q: %w", endpoint, apiErr))
-		}
-		observed := false
-		onDelta := func(text string) {
-			observed = true
-			if opts.OnDelta != nil {
-				opts.OnDelta(text)
-			}
-		}
-		var result *Response
-		if stream {
-			result, err = parseStreamingResponse(resp.Body, onDelta, opts.SuppressToolMarkers)
-		} else {
-			result, err = parseResponse(resp.Body)
-		}
-		if err != nil {
-			return result, observed, httpretry.NewStreamError(err)
-		}
-		return result, observed, nil
+			return result, observed, nil
+		})
+		return result, err
 	})
 	if err != nil {
 		return nil, err
@@ -687,7 +744,7 @@ func (c *Client) applyAuthHeaders(req *http.Request, isChatGPTOAuth bool) {
 			headerName = "Authorization"
 		}
 		prefix := c.auth.AuthHeaderValuePrefix
-		if prefix == "" {
+		if prefix == "" && strings.TrimSpace(c.auth.AuthHeaderName) == "" {
 			prefix = "Bearer "
 		}
 		req.Header.Set(headerName, prefix+token)

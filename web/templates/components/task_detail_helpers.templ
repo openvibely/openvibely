@@ -107,6 +107,10 @@ func FormatElapsedTime(startedAt time.Time) string {
 	return formatDuration(ms)
 }
 
+func FormatDuration(ms int64) string {
+	return formatDuration(ms)
+}
+
 func parseChainConfigForDisplay(task *models.Task) models.ChainConfiguration {
 	config, err := task.ParseChainConfig()
 	if err != nil {
@@ -304,7 +308,7 @@ templ TaskThreadEarlierMessages(task *models.Task, executions []models.Execution
 	if hasEarlier && len(executions) > 0 {
 		@ChatEarlierMessagesLoader("task-thread-messages", fmt.Sprintf("/tasks/%s/thread?before=%s&limit=%d", task.ID, executions[0].ID, windowLimit), windowLimit)
 	}
-	@ChatMessages(executions, task, chatAttachments, "task-thread-messages", "task-thread-view", hasEarlier)
+	@ChatMessages(executions, task, chatAttachments, "task-thread-messages", "task-thread-view", hasEarlier, task.ProjectID)
 }
 
 templ TaskThreadView(task *models.Task, executions []models.Execution, agents []models.LLMConfig, agentDef *models.Agent, chatAttachments map[string][]models.ChatAttachment, pendingInputs []models.ThreadInput, hasEarlier bool, windowLimit int) {
@@ -341,7 +345,7 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 		<!-- Chat messages area — matches /chat layout (min/max height, padding, spacing) -->
 			<div
 				id="task-thread-messages"
-				class="flex-1 overflow-y-auto py-4 mb-4 space-y-6 min-h-0"
+				class="flex-1 overflow-y-auto pt-4 pb-4 -mb-3 space-y-6 min-h-0"
 				if preservedExecIDs == nil {
 					style="visibility: hidden;"
 					data-transcript-hydrating="true"
@@ -358,9 +362,9 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 				@ChatEmptyState("No messages yet. Click \"Run Now\" to start, then follow up here.")
 			} else {
 				if preservedExecIDs != nil {
-					@ChatMessagesPoll(executions, task, chatAttachments, "task-thread-messages", "task-thread-view", hasEarlier, preservedExecIDs)
+					@ChatMessagesPoll(executions, task, chatAttachments, "task-thread-messages", "task-thread-view", hasEarlier, task.ProjectID, preservedExecIDs)
 				} else {
-					@ChatMessages(executions, task, chatAttachments, "task-thread-messages", "task-thread-view", hasEarlier)
+					@ChatMessages(executions, task, chatAttachments, "task-thread-messages", "task-thread-view", hasEarlier, task.ProjectID)
 				}
 				@PendingThreadInputRows(pendingInputs, taskQueuedSteerEndpoint)
 				@TaskThreadStatusIndicator(task, executions)
@@ -375,10 +379,11 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 			Agents:                 agents,
 			ShowModelSelector:      true,
 			TaskID:                 task.ID,
-				IsRunning:              TaskThreadHasActiveComposerStopState(task, executions),
-				ActiveTurnID:           taskThreadActiveTurnID(executions),
-				StopEndpoint:           fmt.Sprintf("/tasks/%s/cancel?composer_stop=1", task.ID),
-				SelectedAgentID:        derefString(task.AgentID),
+			IsRunning:              TaskThreadHasActiveComposerStopState(task, executions),
+			ActiveTurnID:           taskThreadActiveTurnID(executions),
+			StopEndpoint:           fmt.Sprintf("/tasks/%s/cancel?composer_stop=1", task.ID),
+			SteerEndpoint:          fmt.Sprintf("/tasks/%s/thread/steer", task.ID),
+			SelectedAgentID:        derefString(task.AgentID),
 			PendingInputs:          pendingInputs,
 			QueuedSteerEndpointFor: taskQueuedSteerEndpoint,
 		})
@@ -932,13 +937,64 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 templ TaskThreadLiveEventsScript(taskID string) {
 	<script type="text/javascript">
 			(function() {
-				var threadView = document.getElementById('task-thread-view');
-				var taskId = threadView ? (threadView.getAttribute('data-task-id') || '') : '';
-				if (!taskId) return;
-				window._taskThreadLiveHandlers = window._taskThreadLiveHandlers || {};
-				if (window._taskThreadLiveHandlers[taskId]) {
-					window.removeEventListener('sse-task-event', window._taskThreadLiveHandlers[taskId]);
-				}
+					var threadView = document.getElementById('task-thread-view');
+					var taskId = threadView ? (threadView.getAttribute('data-task-id') || '') : '';
+					if (!taskId) return;
+						var queuedSteerInFlight = {};
+						var queuedSteerClearTimers = {};
+						var directSteerInFlight = false;
+						var directSteerClearTimer = null;					function taskQueuedSteerInputID(triggerEl) {
+						if (!triggerEl || !triggerEl.getAttribute) return '';
+						var hxPost = triggerEl.getAttribute('hx-post') || '';
+						var match = hxPost.match(/^\/tasks\/[^\/]+\/thread\/queued\/([^\/]+)\/steer$/);
+						return match ? match[1] : '';
+					}
+						var queuedSteerBeforeRequestHandler = function(event) {
+							if (!currentTaskThreadView()) return;
+							var triggerEl = event.detail && event.detail.elt;
+							if (triggerEl && triggerEl.id === 'task-thread-form' && triggerEl.getAttribute('data-submit-intent') === 'steer') {
+								directSteerInFlight = true;
+								if (directSteerClearTimer) clearTimeout(directSteerClearTimer);
+							}
+							var inputID = taskQueuedSteerInputID(triggerEl);
+							if (!inputID) return;
+							queuedSteerInFlight[inputID] = true;
+							if (queuedSteerClearTimers[inputID]) clearTimeout(queuedSteerClearTimers[inputID]);
+						};
+						var queuedSteerAfterRequestHandler = function(event) {
+							var triggerEl = event.detail && event.detail.elt;
+							if (triggerEl && triggerEl.id === 'task-thread-form' && directSteerInFlight) {
+								directSteerClearTimer = setTimeout(function() {
+									directSteerInFlight = false;
+									directSteerClearTimer = null;
+								}, 1000);
+							}
+							var inputID = taskQueuedSteerInputID(triggerEl);
+							if (!inputID) return;
+							queuedSteerClearTimers[inputID] = setTimeout(function() {
+								delete queuedSteerInFlight[inputID];
+								delete queuedSteerClearTimers[inputID];
+							}, 1000);
+						};
+						function clearQueuedSteerRequestGuards() {
+							Object.keys(queuedSteerClearTimers).forEach(function(inputID) {
+								clearTimeout(queuedSteerClearTimers[inputID]);
+							});
+							if (directSteerClearTimer) clearTimeout(directSteerClearTimer);
+							queuedSteerInFlight = {};
+							queuedSteerClearTimers = {};
+							directSteerInFlight = false;
+							directSteerClearTimer = null;
+						}					window._taskThreadLiveHandlers = window._taskThreadLiveHandlers || {};
+					window._taskThreadQueuedSteerRequestHandlers = window._taskThreadQueuedSteerRequestHandlers || {};
+					if (window._taskThreadLiveHandlers[taskId]) {
+						window.removeEventListener('sse-task-event', window._taskThreadLiveHandlers[taskId]);
+					}
+					if (window._taskThreadQueuedSteerRequestHandlers[taskId]) {
+						document.body.removeEventListener('htmx:beforeRequest', window._taskThreadQueuedSteerRequestHandlers[taskId].beforeRequest);
+						document.body.removeEventListener('htmx:afterRequest', window._taskThreadQueuedSteerRequestHandlers[taskId].afterRequest);
+						delete window._taskThreadQueuedSteerRequestHandlers[taskId];
+					}
 						function currentTaskThreadView() {
 							var view = document.getElementById('task-thread-view');
 							return view && view.getAttribute('data-task-id') === taskId ? view : null;
@@ -965,12 +1021,19 @@ templ TaskThreadLiveEventsScript(taskID string) {
 							pendingContainer.id = 'pending-thread-inputs';
 							pendingContainer.className = 'space-y-1.5';
 							pendingContainer.setAttribute('data-task-id', taskId);
-							var textareaWrap = textarea.parentElement;
-							form.insertBefore(pendingContainer, textareaWrap || textarea);
-							return pendingContainer;
-						}
-						function refreshPendingInputsIfVisible() {
-							var pendingContainer = currentPendingContainer();
+								var textareaWrap = textarea.parentElement;
+								form.insertBefore(pendingContainer, textareaWrap || textarea);
+								return pendingContainer;
+							}
+							function createPendingAttachmentBadge(label, title) {
+								var badge = document.createElement('div');
+								badge.className = 'badge badge-ghost badge-sm shrink-0 gap-1 text-xs';
+								badge.title = title;
+								badge.setAttribute('aria-label', title);
+								badge.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.586-6.586a4 4 0 00-5.657-5.657L5.757 10.757a6 6 0 108.486 8.486L21 12.486"></path></svg><span>' + label + '</span>';
+								return badge;
+							}
+							function refreshPendingInputsIfVisible() {							var pendingContainer = currentPendingContainer();
 							if (!pendingContainer || !pendingContainer.querySelector('[data-thread-input-id]') || typeof htmx === 'undefined') return;
 							htmx.ajax('GET', '/tasks/' + encodeURIComponent(taskId) + '/thread/pending-inputs', {target: scopedPendingContainerSelector(), swap: 'outerHTML'});
 						}
@@ -991,7 +1054,7 @@ templ TaskThreadLiveEventsScript(taskID string) {
 							var form = document.getElementById('task-thread-form');
 							if (form) {
 								var textarea = document.getElementById('task-message-input');
-								if (textarea) textarea.setAttribute('placeholder', 'Type your message... (Enter to send, Shift+Enter for new line)');
+								if (textarea && window.refreshChatComposerShortcutHint) window.refreshChatComposerShortcutHint(textarea);
 								refreshThreadComposerAction();
 							}
 							var messages = document.getElementById('task-thread-messages');
@@ -1028,10 +1091,8 @@ templ TaskThreadLiveEventsScript(taskID string) {
 								if (streamContainer && typeof completedOutput === 'string') {
 									if (window.setChatRawContent) window.setChatRawContent(streamContainer, completedOutput);
 									else streamContainer.setAttribute('data-raw-content', completedOutput);
-									if (window._taskThreadStreamingActive) {
-										streamContainer._authoritativeTerminalContent = completedOutput;
-										streamContainer.setAttribute('data-authoritative-terminal-content', 'true');
-									}
+									streamContainer._authoritativeTerminalContent = completedOutput;
+									streamContainer.setAttribute('data-authoritative-terminal-content', 'true');
 								}
 								if (streamContainer && typeof completedOutput === 'string' && completedOutput !== '') {
 									if (window.renderStreamingContent) {
@@ -1099,13 +1160,56 @@ templ TaskThreadLiveEventsScript(taskID string) {
 						cancelBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>';
 						actionWrap.appendChild(steerBtn);
 						actionWrap.appendChild(cancelBtn);
-						queuedRow.appendChild(preview);
-						queuedRow.appendChild(actionWrap);
-						pendingContainer.appendChild(queuedRow);
+							queuedRow.appendChild(preview);
+							if (data.has_attachments) queuedRow.appendChild(createPendingAttachmentBadge('Attachments queued', 'Attachments queued with this follow-up'));
+							queuedRow.appendChild(actionWrap);						pendingContainer.appendChild(queuedRow);
 						if (window.htmx) htmx.process(queuedRow);
-					}
-						var pendingFragmentExecs = {};
-						window._pendingTaskThreadLiveEvents = window._pendingTaskThreadLiveEvents || {};
+						}
+						function renderSteeringRow(data) {
+							if (!data || data.task_id !== taskId || !data.pending_input_id || !currentTaskThreadView()) return;
+							var selector = '[data-thread-input-id="' + data.pending_input_id + '"][data-task-id="' + taskId + '"]';
+								var existing = document.querySelector(selector);
+									if (existing && existing.getAttribute('data-input-mode') === 'steering') return;
+									if (directSteerInFlight && !existing) return;
+									if (queuedSteerInFlight[data.pending_input_id]) return;								var pendingContainer = ensureComposerPendingContainer();							if (!pendingContainer) return;
+							if (existing) existing.remove();
+							var steeringRow = document.createElement('div');
+							steeringRow.id = 'thread-input-' + data.pending_input_id;
+							steeringRow.className = 'steering-input-row flex min-h-8 items-center gap-3 rounded-lg bg-base-300/45 px-3 py-1.5 text-sm text-base-content/80';
+							steeringRow.setAttribute('data-thread-input-id', data.pending_input_id);
+							steeringRow.setAttribute('data-task-id', taskId);
+							steeringRow.setAttribute('data-input-mode', 'steering');
+							steeringRow.title = 'Steering instruction will be applied before the active run\'s next model step';
+							var content = document.createElement('div');
+							content.className = 'min-w-0 flex-1';
+							content.innerHTML = '<div class="text-xs font-semibold opacity-70">Steering pending</div>';
+							var preview = document.createElement('div');
+							preview.className = 'truncate';
+							preview.textContent = data.message || '';
+							content.appendChild(preview);
+							var hint = document.createElement('div');
+							hint.className = 'text-xs opacity-60';
+							hint.textContent = 'Will be applied before the active run\'s next model step.';
+							content.appendChild(hint);
+							var actionWrap = document.createElement('div');
+							actionWrap.className = 'ml-auto flex shrink-0 items-center gap-2';
+							var cancelBtn = document.createElement('button');
+							cancelBtn.type = 'button';
+							cancelBtn.className = 'btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-xs text-error';
+							cancelBtn.setAttribute('hx-post', '/thread-inputs/' + data.pending_input_id + '/cancel');
+							cancelBtn.setAttribute('hx-target', '#thread-input-' + data.pending_input_id);
+							cancelBtn.setAttribute('hx-swap', 'outerHTML');
+							cancelBtn.title = 'Cancel pending steering';
+							cancelBtn.setAttribute('aria-label', 'Cancel pending steering');
+							cancelBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>';
+							actionWrap.appendChild(cancelBtn);
+							steeringRow.appendChild(content);
+							if (data.has_attachments) steeringRow.appendChild(createPendingAttachmentBadge('Attachments included', 'Attachments included with this steering instruction'));
+							steeringRow.appendChild(actionWrap);
+							pendingContainer.appendChild(steeringRow);
+							if (window.htmx) htmx.process(steeringRow);
+						}
+							var pendingFragmentExecs = {};						window._pendingTaskThreadLiveEvents = window._pendingTaskThreadLiveEvents || {};
 						function rememberPendingExecutionEvent(data) {
 							if (!data || data.task_id !== taskId || !data.exec_id) return;
 							window._pendingTaskThreadLiveEvents[taskId] = data;
@@ -1191,18 +1295,27 @@ templ TaskThreadLiveEventsScript(taskID string) {
 								ensureStreamingFragment(data);
 								return;
 							}
-							if (data.type === 'task_thread_input_cancelled') {
-								removePendingRow(data.pending_input_id);
-								return;
-							}						if (data.type === 'task_thread_input_queued') {
-							renderQueuedRow(data);
-						}
-				};
-					window._taskThreadLiveHandlers[taskId] = handler;
-					window.addEventListener('sse-task-event', handler);
-					window.addEventListener('sse-chat-live-event', chatHandler);
-					consumePendingExecutionEvent();
-
+								if (data.type === 'task_thread_input_cancelled') {
+									removePendingRow(data.pending_input_id);
+									return;
+								}
+								if (data.type === 'task_thread_input_steered') {
+									renderSteeringRow(data);
+									return;
+								}
+								if (data.type === 'task_thread_input_queued') {
+									renderQueuedRow(data);
+								}				};
+						window._taskThreadLiveHandlers[taskId] = handler;
+						window.addEventListener('sse-task-event', handler);
+						window.addEventListener('sse-chat-live-event', chatHandler);
+						document.body.addEventListener('htmx:beforeRequest', queuedSteerBeforeRequestHandler);
+						document.body.addEventListener('htmx:afterRequest', queuedSteerAfterRequestHandler);
+						window._taskThreadQueuedSteerRequestHandlers[taskId] = {
+							beforeRequest: queuedSteerBeforeRequestHandler,
+							afterRequest: queuedSteerAfterRequestHandler,
+						};
+						consumePendingExecutionEvent();
 					// On SSE reconnect (e.g. after tab blur/refocus), refresh the pending-inputs
 				// container so any steering rows missed while the tab was hidden are reconciled.
 				// The server query excludes prepared/in-flight steering (expected_turn_id=NULL),
@@ -1228,10 +1341,13 @@ templ TaskThreadLiveEventsScript(taskID string) {
 							window.removeEventListener('sse-task-event', handler);
 							window.removeEventListener('sse-chat-live-event', chatHandler);
 							delete window._taskThreadLiveHandlers[taskId];
-							window.removeEventListener('sse-live-connected', reconnectHandler);
-							delete window._taskThreadReconnectHandlers[taskId];
-							document.body.removeEventListener('htmx:beforeSwap', cleanupTaskThreadLiveHandlers);
-						}
+								window.removeEventListener('sse-live-connected', reconnectHandler);
+								delete window._taskThreadReconnectHandlers[taskId];
+								document.body.removeEventListener('htmx:beforeRequest', queuedSteerBeforeRequestHandler);
+								document.body.removeEventListener('htmx:afterRequest', queuedSteerAfterRequestHandler);
+								delete window._taskThreadQueuedSteerRequestHandlers[taskId];
+								clearQueuedSteerRequestGuards();
+								document.body.removeEventListener('htmx:beforeSwap', cleanupTaskThreadLiveHandlers);						}
 					};
 					document.body.addEventListener('htmx:beforeSwap', cleanupTaskThreadLiveHandlers);
 			})();
@@ -1240,26 +1356,26 @@ templ TaskThreadLiveEventsScript(taskID string) {
 
 // TaskThreadFollowupResponse renders user message + streaming assistant for a task thread follow-up.
 // Delegates to the shared ChatFollowupResponse component with thread settings.
-templ TaskThreadFollowupResponse(message string, execID string, attachments []models.ChatAttachment) {
-	@ChatFollowupResponse(message, execID, "task-thread-messages", "task-thread-view", true, attachments)
+templ TaskThreadFollowupResponse(message string, execID string, attachments []models.ChatAttachment, projectID string) {
+	@ChatFollowupResponse(message, execID, "task-thread-messages", "task-thread-view", true, attachments, projectID)
 }
 
-templ TaskThreadQueuedFollowupResponse(message string, attachments []models.ChatAttachment) {
+templ TaskThreadQueuedFollowupResponse(message string, attachments []models.ChatAttachment, projectID string) {
 	if len(attachments) > 0 {
-		@ChatBubbleWithAttachments("User", message, attachments)
+		@ChatBubbleWithAttachments("User", message, attachments, projectID)
 	} else {
 		@ChatBubble("User", message)
 	}
 	@ChatBubble("Assistant", "Queued. This message will be sent to the model after the active response finishes.")
 }
 
-// TaskExecutionHistory renders just the execution history section for polling updates
-templ TaskExecutionHistory(task *models.Task, executions []models.Execution) {
+// TaskExecutionHistory renders the bounded execution history section for polling updates.
+templ TaskExecutionHistory(task *models.Task, executions []models.Execution, hasOlder bool, windowLimit int) {
 	<div
 		id="task-execution-history"
 		class="mt-6"
 		if task.Status == models.StatusRunning || task.Status == models.StatusPending {
-			hx-get={ fmt.Sprintf("/tasks/%s/executions", task.ID) }
+			hx-get={ fmt.Sprintf("/tasks/%s/executions?limit=%d", task.ID, windowLimit) }
 			hx-trigger="every 3s"
 			hx-target="#task-execution-history"
 			hx-swap="morph:outerHTML"
@@ -1282,72 +1398,112 @@ templ TaskExecutionHistory(task *models.Task, executions []models.Execution) {
 				}
 			</div>
 		</div>
-		if len(executions) == 0 {
-			<p class="opacity-50">No executions yet</p>
-		} else {
-			for i, exec := range executions {
-				<div class="card bg-base-100 shadow-sm border border-base-300 mb-2">
-					<div class="card-body p-4">
-						<div class="flex items-center justify-between mb-2">
-							<div class="flex flex-col text-sm opacity-60">
-								<span>Started: { exec.StartedAt.Local().Format("2006-01-02 3:04:05 PM") }</span>
-								if exec.CompletedAt != nil {
-									<span>Finished: { exec.CompletedAt.Local().Format("2006-01-02 3:04:05 PM") }</span>
-								}
-							</div>
-							if exec.Status == models.ExecRunning && i == 0 && task.Status == models.StatusRunning {
-								<div class="text-sm opacity-60">
-									<span class="badge badge-warning">Elapsed: { FormatElapsedTime(exec.StartedAt) }</span>
-								</div>
-							} else if exec.DurationMs > 0 || exec.TokensUsed > 0 {
-								<div class="text-sm opacity-60">
-									{ fmt.Sprintf("%d tokens, %s", exec.TokensUsed, formatDuration(exec.DurationMs)) }
-								</div>
-							}
-						</div>
-						if exec.Status == models.ExecRunning && exec.Output == "" {
-							<div class="flex items-center gap-2 p-3 bg-base-200 rounded-lg">
-								<span class="loading loading-spinner loading-sm"></span>
-								<span class="text-sm opacity-60">Model is working on this task...</span>
-							</div>
-						}
-						if exec.Output != "" {
-							<div class="mb-2">
-								<div class="flex items-center justify-between mb-1">
-									<span class="text-xs opacity-60">Model Output:</span>
-									<button
-										class="btn btn-xs btn-ghost"
-										onclick={ templ.ComponentScript{Call: fmt.Sprintf("copyToClipboard('exec-output-%s', this)", exec.ID)} }
-										title="Copy to clipboard"
-									>
-										<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
-										</svg>
-									</button>
-								</div>
-								<pre id={ fmt.Sprintf("exec-output-%s", exec.ID) } class="p-3 bg-base-200 rounded-lg text-sm whitespace-pre-wrap max-h-96 overflow-y-auto mt-1">{ exec.Output }</pre>
-							</div>
-						}
-						if exec.ErrorMessage != "" {
-							<div class="mb-2">
-								<div class="flex items-center justify-between mb-1">
-									<span class="text-xs opacity-60 text-error">Error:</span>
-									<button
-										class="btn btn-xs btn-ghost text-error"
-										onclick={ templ.ComponentScript{Call: fmt.Sprintf("copyToClipboard('exec-error-%s', this)", exec.ID)} }
-										title="Copy to clipboard"
-									>
-										<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
-										</svg>
-									</button>
-								</div>
-								<pre id={ fmt.Sprintf("exec-error-%s", exec.ID) } class="p-3 bg-error/10 rounded-lg text-sm text-error whitespace-pre-wrap mt-1">{ exec.ErrorMessage }</pre>
-							</div>
-						}
+		<div id="task-execution-history-latest">
+			if len(executions) == 0 {
+				<p class="opacity-50">No executions yet</p>
+			} else {
+				@taskExecutionHistoryCards(task, executions)
+			}
+		</div>
+		<div id="task-execution-history-loaded-older" hx-preserve></div>
+		<div id="task-execution-history-older-loader">
+			if len(executions) > 0 && hasOlder {
+				@taskExecutionHistoryOlderLoader(task, executions[len(executions)-1].ID, windowLimit)
+			}
+		</div>
+	</div>
+}
+
+templ TaskExecutionHistoryOlderPage(task *models.Task, executions []models.Execution, hasOlder bool, windowLimit int) {
+	<div id="task-execution-history-loaded-older" hx-swap-oob="beforeend">
+		@taskExecutionHistoryCards(task, executions)
+	</div>
+	<div id="task-execution-history-older-loader">
+		if len(executions) > 0 && hasOlder {
+			@taskExecutionHistoryOlderLoader(task, executions[len(executions)-1].ID, windowLimit)
+		}
+	</div>
+}
+
+templ taskExecutionHistoryOlderLoader(task *models.Task, beforeExecID string, windowLimit int) {
+	<div class="mt-3 flex justify-center" data-execution-history-older-loader>
+		<button
+			class="btn btn-sm btn-ghost"
+			hx-get={ fmt.Sprintf("/tasks/%s/executions?before=%s&limit=%d", task.ID, beforeExecID, windowLimit) }
+			hx-target="#task-execution-history-older-loader"
+			hx-swap="outerHTML"
+		>
+			Load older executions
+		</button>
+	</div>
+}
+
+templ taskExecutionHistoryCards(task *models.Task, executions []models.Execution) {
+	for i, exec := range executions {
+		@taskExecutionHistoryCard(task, exec, i)
+	}
+}
+
+templ taskExecutionHistoryCard(task *models.Task, exec models.Execution, index int) {
+	<div class="card bg-base-100 shadow-sm border border-base-300 mb-2" data-execution-history-card={ exec.ID }>
+		<div class="card-body p-4">
+			<div class="flex items-center justify-between mb-2">
+				<div class="flex flex-col text-sm opacity-60">
+					<span>Started: { exec.StartedAt.Local().Format("2006-01-02 3:04:05 PM") }</span>
+					if exec.CompletedAt != nil {
+						<span>Finished: { exec.CompletedAt.Local().Format("2006-01-02 3:04:05 PM") }</span>
+					}
+				</div>
+				if exec.Status == models.ExecRunning && index == 0 && task.Status == models.StatusRunning {
+					<div class="text-sm opacity-60">
+						<span class="badge badge-warning">Elapsed: { FormatElapsedTime(exec.StartedAt) }</span>
 					</div>
+				} else if exec.DurationMs > 0 || exec.TokensUsed > 0 {
+					<div class="text-sm opacity-60">
+						{ fmt.Sprintf("%d tokens, %s", exec.TokensUsed, formatDuration(exec.DurationMs)) }
+					</div>
+				}
+			</div>
+			if exec.Status == models.ExecRunning && exec.Output == "" {
+				<div class="flex items-center gap-2 p-3 bg-base-200 rounded-lg">
+					<span class="loading loading-spinner loading-sm"></span>
+					<span class="text-sm opacity-60">Model is working on this task...</span>
 				</div>
 			}
-		}
+			if exec.Output != "" {
+				<div class="mb-2">
+					<div class="flex items-center justify-between mb-1">
+						<span class="text-xs opacity-60">Model Output:</span>
+						<button
+							class="btn btn-xs btn-ghost"
+							onclick={ templ.ComponentScript{Call: fmt.Sprintf("copyToClipboard('exec-output-%s', this)", exec.ID)} }
+							title="Copy to clipboard"
+						>
+							<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
+							</svg>
+						</button>
+					</div>
+					<pre id={ fmt.Sprintf("exec-output-%s", exec.ID) } class="p-3 bg-base-200 rounded-lg text-sm whitespace-pre-wrap max-h-96 overflow-y-auto mt-1">{ exec.Output }</pre>
+				</div>
+			}
+			if exec.ErrorMessage != "" {
+				<div class="mb-2">
+					<div class="flex items-center justify-between mb-1">
+						<span class="text-xs opacity-60 text-error">Error:</span>
+						<button
+							class="btn btn-xs btn-ghost text-error"
+							onclick={ templ.ComponentScript{Call: fmt.Sprintf("copyToClipboard('exec-error-%s', this)", exec.ID)} }
+							title="Copy to clipboard"
+						>
+							<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
+							</svg>
+						</button>
+					</div>
+					<pre id={ fmt.Sprintf("exec-error-%s", exec.ID) } class="p-3 bg-error/10 rounded-lg text-sm text-error whitespace-pre-wrap mt-1">{ exec.ErrorMessage }</pre>
+				</div>
+			}
+		</div>
 	</div>
 }

@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,6 +23,24 @@ const (
 	maxAutomationDraftNodes      = 50
 	maxAutomationDraftEdges      = 100
 )
+
+var (
+	//go:embed automation_templates/native_sdlc.yaml
+	nativeSDLCTemplateYAML string
+	//go:embed automation_templates/github_sdlc.yaml
+	githubSDLCTemplateYAML string
+)
+
+func maintainedAutomationTemplateYAML(adapterKey string) (string, bool) {
+	switch strings.TrimSpace(adapterKey) {
+	case AutomationAdapterNativeSDLC:
+		return nativeSDLCTemplateYAML, true
+	case AutomationAdapterGitHubSDLC:
+		return githubSDLCTemplateYAML, true
+	default:
+		return "", false
+	}
+}
 
 type AutomationDraftService struct {
 	repo         *repository.AutomationRepo
@@ -85,8 +104,40 @@ func (s *AutomationDraftService) CreationTemplateCandidate(adapterKey string) (m
 	return s.TemplateCandidate(adapterKey)
 }
 
+func ApplyAutomationTemplateDefaultModel(candidate *models.AutomationDraftCandidate) {
+	if candidate == nil {
+		return
+	}
+	for i := range candidate.Nodes {
+		node := &candidate.Nodes[i]
+		if node.Type != models.AutomationNodeTrigger && node.Type != models.AutomationNodeAgentTask {
+			continue
+		}
+		if node.Config == nil {
+			node.Config = map[string]any{}
+		}
+		if existing, ok := node.Config["model_config_id"].(string); ok && strings.TrimSpace(existing) != "" {
+			continue
+		}
+		if _, hasPrompt := node.Config["prompt"]; hasPrompt || node.Role == "implementation" {
+			node.Config["model_config_id"] = automationDefaultModelConfigID
+		}
+	}
+}
+
 func (s *AutomationDraftService) TemplateCandidate(adapterKey string) (models.AutomationDraftCandidate, error) {
-	adapter, ok := s.registry.Get(strings.TrimSpace(adapterKey))
+	adapterKey = strings.TrimSpace(adapterKey)
+	if document, maintained := maintainedAutomationTemplateYAML(adapterKey); maintained {
+		candidate, err := DecodeAutomationDraftYAML([]byte(document))
+		if err != nil {
+			return models.AutomationDraftCandidate{}, fmt.Errorf("decode maintained automation template %q: %w", adapterKey, err)
+		}
+		if candidate.AdapterKey != adapterKey {
+			return models.AutomationDraftCandidate{}, fmt.Errorf("maintained automation template %q has adapter %q", adapterKey, candidate.AdapterKey)
+		}
+		return candidate, nil
+	}
+	adapter, ok := s.registry.Get(adapterKey)
 	if !ok {
 		return models.AutomationDraftCandidate{}, fmt.Errorf("unsupported automation template %q", adapterKey)
 	}
@@ -120,55 +171,92 @@ func (s *AutomationDraftService) TemplateCandidate(adapterKey string) (models.Au
 	return candidate, nil
 }
 
+const automationDefaultModelConfigID = "default"
+
+func automationExplicitModelConfigID(value any) string {
+	modelConfigID, _ := value.(string)
+	modelConfigID = strings.TrimSpace(modelConfigID)
+	if strings.EqualFold(modelConfigID, automationDefaultModelConfigID) {
+		return ""
+	}
+	return modelConfigID
+}
+
+// DefaultAutomationDraftNodeConfig returns the canonical starting Config for a draft node.
+func DefaultAutomationDraftNodeConfig(adapterKey, nodeKey string, nodeType models.AutomationNodeType, role string, allowedResources map[string]bool) (map[string]any, error) {
+	adapterKey = strings.TrimSpace(adapterKey)
+	nodeKey = strings.TrimSpace(nodeKey)
+	role = strings.TrimSpace(role)
+	resources := make(map[string]bool, len(allowedResources))
+	for key, allowed := range allowedResources {
+		resources[key] = allowed
+	}
+	config := map[string]any{}
+	usesTaskConfiguration := resources["task"] || adapterKey == AutomationAdapterGitHubSDLC && role == "implementation"
+	usesModelConfiguration := usesTaskConfiguration || role == "implementation" && (adapterKey == AutomationAdapterNativeSDLC || adapterKey == AutomationAdapterCustom && nodeType == models.AutomationNodeAgentTask)
+	if usesTaskConfiguration {
+		prompt, err := defaultAutomationNodePrompt(adapterKey, role)
+		if err != nil {
+			return nil, err
+		}
+		config["prompt"] = prompt
+		config["goal"] = ""
+		config["category"] = string(models.CategoryBacklog)
+		config["priority"] = 2
+		config["model_config_id"] = automationDefaultModelConfigID
+		if resources["schedule"] {
+			config["category"] = string(models.CategoryScheduled)
+		}
+		if adapterKey == AutomationAdapterGitHubSDLC && role == "implementation" {
+			config["category"] = string(models.CategoryActive)
+		}
+	}
+	if resources["schedule"] {
+		config["run_at"] = "09:00"
+		config["repeat_type"] = string(models.RepeatDaily)
+		config["repeat_interval"] = 1
+		config["enabled"] = true
+		config["clear_context_on_start"] = true
+		if role == "loop_auditor" {
+			config["repeat_type"] = string(models.RepeatWeekly)
+		} else if role == "native_inbox" || role == "github_inbox" || strings.Contains(nodeKey, "inbox") {
+			config["run_at"] = "10:00"
+		}
+	}
+	if usesModelConfiguration && !usesTaskConfiguration {
+		config["goal"] = ""
+		config["model_config_id"] = automationDefaultModelConfigID
+	}
+	switch role {
+	case "create_notification":
+		config["notification_type"] = "approval_request"
+		config["instructions"] = "Summarize the proposal that needs a human decision."
+	case "create_github_issue":
+		config["instructions"] = "Open one focused, reviewable GitHub issue."
+		config["labels"] = []string{}
+	case "open_pull_request":
+		config["instructions"] = "Open a reviewable pull request linked to the source issue."
+		config["base"] = ""
+		config["draft"] = false
+	case "native_approval":
+		config["approval_method"] = "native_alert"
+	case "github_assignment":
+		config["approval_method"] = "github_assignment"
+	case "pull_request_review":
+		config["approval_method"] = "pull_request_review"
+	}
+	return config, nil
+}
+
 func defaultAutomationNodeConfigs(adapter AutomationAdapter) (map[string]map[string]any, error) {
 	configs := make(map[string]map[string]any, len(adapter.Nodes))
 	for _, node := range adapter.Nodes {
-		config := map[string]any{}
-		if automationMaintainedNodeUsesTaskConfiguration(adapter, node) {
-			prompt, err := defaultAutomationNodePrompt(adapter.Key, node.Role)
-			if err != nil {
-				return nil, err
-			}
-			config["prompt"] = prompt
-			config["category"] = string(models.CategoryBacklog)
-			if adapter.Key == AutomationAdapterGitHubSDLC && node.Role == "implementation" {
-				config["category"] = string(models.CategoryActive)
-			}
-			config["priority"] = 2
+		config, err := DefaultAutomationDraftNodeConfig(adapter.Key, node.Key, models.AutomationNodeType(node.Type), node.Role, node.AllowedResources)
+		if err != nil {
+			return nil, err
 		}
 		if node.AllowedResources["schedule"] {
 			config["target_node_key"] = adapterScheduleTarget(adapter, node.Key)
-			config["run_at"] = "09:00"
-			config["repeat_type"] = string(models.RepeatDaily)
-			config["repeat_interval"] = 1
-			config["enabled"] = true
-			config["clear_context_on_start"] = true
-			if node.AllowedResources["task"] {
-				config["category"] = string(models.CategoryScheduled)
-			}
-			if node.Role == "loop_auditor" {
-				config["repeat_type"] = string(models.RepeatWeekly)
-			} else if strings.Contains(node.Key, "inbox") {
-				config["repeat_type"] = string(models.RepeatHours)
-			}
-		}
-		switch node.Role {
-		case "create_notification":
-			config["notification_type"] = "approval_request"
-			config["instructions"] = "Summarize the proposal that needs a human decision."
-		case "create_github_issue":
-			config["instructions"] = "Open one focused, reviewable GitHub issue."
-			config["labels"] = []string{}
-		case "open_pull_request":
-			config["instructions"] = "Open a reviewable pull request linked to the source issue."
-			config["base"] = ""
-			config["draft"] = false
-		case "native_approval":
-			config["approval_method"] = "native_alert"
-		case "github_assignment":
-			config["approval_method"] = "github_assignment"
-		case "pull_request_review":
-			config["approval_method"] = "pull_request_review"
 		}
 		configs[node.Key] = config
 	}
@@ -218,6 +306,9 @@ func (s *AutomationDraftService) NormalizeCandidate(candidate models.AutomationD
 	for _, node := range adapter.Nodes {
 		adapterNodes[node.Key] = node
 	}
+	missingPositions := make([]int, 0, len(candidate.Nodes))
+	hasPosition := false
+	var minY, maxX float64
 	for i := range candidate.Nodes {
 		node := &candidate.Nodes[i]
 		node.Key = strings.TrimSpace(node.Key)
@@ -231,16 +322,35 @@ func (s *AutomationDraftService) NormalizeCandidate(candidate models.AutomationD
 				node.Config["agent_ref"] = strings.TrimSpace(text)
 			}
 		}
-		for _, field := range []string{"skills", "source_files"} {
-			if value, exists := node.Config[field]; exists {
-				if values, valid := draftStringSlice(value); valid {
-					node.Config[field] = normalizeDraftReferences(values)
-				}
-			}
+		delete(node.Config, "skills")
+		delete(node.Config, "source_files")
+		if canonical, exists := adapterNodes[node.Key]; exists && node.Position == nil {
+			node.Position = &models.AutomationDraftPoint{X: canonical.X, Y: canonical.Y}
 		}
-		if canonical, exists := adapterNodes[node.Key]; exists {
-			if node.Position == nil {
-				node.Position = &models.AutomationDraftPoint{X: canonical.X, Y: canonical.Y}
+		if node.Position == nil {
+			missingPositions = append(missingPositions, i)
+			continue
+		}
+		if !hasPosition || node.Position.X > maxX {
+			maxX = node.Position.X
+		}
+		if !hasPosition || node.Position.Y < minY {
+			minY = node.Position.Y
+		}
+		hasPosition = true
+	}
+	if len(missingPositions) > 0 {
+		sort.SliceStable(missingPositions, func(i, j int) bool {
+			return candidate.Nodes[missingPositions[i]].Key < candidate.Nodes[missingPositions[j]].Key
+		})
+		baseX, baseY := 0.0, 0.0
+		if hasPosition {
+			baseX, baseY = maxX+220, minY
+		}
+		for order, index := range missingPositions {
+			candidate.Nodes[index].Position = &models.AutomationDraftPoint{
+				X: baseX + float64(order%3)*220,
+				Y: baseY + float64(order/3)*140,
 			}
 		}
 	}
@@ -397,6 +507,7 @@ func (s *AutomationDraftService) ValidateCandidate(candidate models.AutomationDr
 		automationobs.Event("automation.graph.limit_reached", automationobs.String("adapter_key", candidate.AdapterKey), automationobs.String("limit", "nodes_or_edges"))
 	}
 
+	flexibleTemplate := adapter.Key == AutomationAdapterNativeSDLC || adapter.Key == AutomationAdapterGitHubSDLC
 	canonicalNodes := make(map[string]AutomationAdapterNode, len(adapter.Nodes))
 	for _, node := range adapter.Nodes {
 		canonicalNodes[node.Key] = node
@@ -432,7 +543,9 @@ func (s *AutomationDraftService) ValidateCandidate(candidate models.AutomationDr
 				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "invalid_node", Message: "Node type is not supported by the graph editor."})
 				continue
 			}
-			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "unsupported_topology", Message: "Custom graph nodes can be saved only when they use supported runtime capabilities."})
+			if !flexibleTemplate {
+				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "unsupported_topology", Message: "Custom graph nodes can be saved only when they use supported runtime capabilities."})
+			}
 			issues = append(issues, validateCustomAutomationNodeConfig(node)...)
 			continue
 		}
@@ -441,9 +554,11 @@ func (s *AutomationDraftService) ValidateCandidate(candidate models.AutomationDr
 		}
 		issues = append(issues, validateAutomationNodeConfig(adapter, canonical, node)...)
 	}
-	for key := range canonicalNodes {
-		if !seenNodes[key] {
-			issues = append(issues, models.AutomationValidationIssue{NodeKey: key, Code: "missing_node", Message: "Add this required node before saving."})
+	if !flexibleTemplate {
+		for key := range canonicalNodes {
+			if !seenNodes[key] {
+				issues = append(issues, models.AutomationValidationIssue{NodeKey: key, Code: "missing_node", Message: fmt.Sprintf("Required node %q is missing. Restore it before saving.", key)})
+			}
 		}
 	}
 
@@ -452,6 +567,7 @@ func (s *AutomationDraftService) ValidateCandidate(candidate models.AutomationDr
 		canonicalEdges[edge.Key] = edge
 	}
 	seenEdgeKeys := map[string]bool{}
+	seenEndpointPairs := map[string]bool{}
 	seenCanonicalEdges := map[string]bool{}
 	for _, edge := range candidate.Edges {
 		if edge.Key == "" || seenEdgeKeys[edge.Key] {
@@ -467,7 +583,12 @@ func (s *AutomationDraftService) ValidateCandidate(candidate models.AutomationDr
 			issues = append(issues, models.AutomationValidationIssue{Code: "invalid_edge", Message: "Graph edge references an invalid node."})
 			continue
 		}
-		if adapter.DynamicTopology {
+		endpointPair := edge.From + "\x00" + edge.To
+		if seenEndpointPairs[endpointPair] {
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: edge.From, Code: "ambiguous_handoff", Message: fmt.Sprintf("Nodes %q and %q have more than one connection. Keep exactly one connection between the same source and target.", edge.From, edge.To)})
+		}
+		seenEndpointPairs[endpointPair] = true
+		if adapter.DynamicTopology || flexibleTemplate {
 			conditionState, hasCondition := customAutomationEdgeConditionState(edge.Condition)
 			fromNode := draftNodes[edge.From]
 			switch fromNode.Role {
@@ -513,15 +634,232 @@ func (s *AutomationDraftService) ValidateCandidate(candidate models.AutomationDr
 			issues = append(issues, models.AutomationValidationIssue{Code: "unsupported_condition", Message: "Edge conditions are fixed by the registered adapter."})
 		}
 	}
-	for key := range canonicalEdges {
-		if !seenCanonicalEdges[key] {
-			issues = append(issues, models.AutomationValidationIssue{Code: "missing_edge", Message: "Add every required transition before saving."})
+	if !flexibleTemplate {
+		for key, canonical := range canonicalEdges {
+			if seenCanonicalEdges[key] || !seenNodes[canonical.From] || !seenNodes[canonical.To] {
+				continue
+			}
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: canonical.From, Code: "missing_edge", Message: fmt.Sprintf("Required connection %q from node %q to node %q is missing. Restore that connection before saving.", key, canonical.From, canonical.To)})
 		}
 	}
 	if adapter.DynamicTopology {
 		issues = append(issues, validateCustomAutomationTopology(candidate)...)
+	} else if flexibleTemplate {
+		issues = append(issues, validateMaintainedSDLCTopology(candidate, canonicalNodes)...)
 	}
 	sortAutomationValidationIssues(issues)
+	return issues
+}
+
+func validateMaintainedSDLCTopology(candidate models.AutomationDraftCandidate, canonicalNodes map[string]AutomationAdapterNode) []models.AutomationValidationIssue {
+	if len(candidate.Nodes) == 0 {
+		return []models.AutomationValidationIssue{{Code: "empty_graph", Message: "Keep at least one runnable node before saving."}}
+	}
+	nodes := make(map[string]models.AutomationDraftNode, len(candidate.Nodes))
+	incoming := make(map[string][]models.AutomationDraftEdge, len(candidate.Nodes))
+	outgoing := make(map[string][]models.AutomationDraftEdge, len(candidate.Nodes))
+	for _, node := range candidate.Nodes {
+		nodes[node.Key] = node
+	}
+	for _, edge := range candidate.Edges {
+		if _, ok := nodes[edge.From]; !ok {
+			continue
+		}
+		if _, ok := nodes[edge.To]; !ok || edge.From == edge.To {
+			continue
+		}
+		outgoing[edge.From] = append(outgoing[edge.From], edge)
+		incoming[edge.To] = append(incoming[edge.To], edge)
+	}
+
+	isProducer := func(role string) bool {
+		return role == "offering_manager" || role == "bug_finder" || role == "optimization_finder" || role == "redundancy_finder"
+	}
+	var issues []models.AutomationValidationIssue
+	for _, edge := range candidate.Edges {
+		from, fromOK := nodes[edge.From]
+		to, toOK := nodes[edge.To]
+		if !fromOK || !toOK || edge.From == edge.To {
+			continue
+		}
+		_, fromCanonical := canonicalNodes[from.Key]
+		_, toCanonical := canonicalNodes[to.Key]
+		if !fromCanonical && !toCanonical {
+			continue
+		}
+		supported := false
+		if candidate.AdapterKey == AutomationAdapterNativeSDLC {
+			supported = isProducer(from.Role) && to.Role == "create_notification" ||
+				from.Role == "create_notification" && to.Role == "native_approval" ||
+				from.Role == "native_approval" && (to.Role == "rejected" || to.Role == "native_inbox") ||
+				from.Role == "native_inbox" && to.Role == "implementation" ||
+				from.Role == "implementation" && to.Role == "completed"
+		} else {
+			supported = isProducer(from.Role) && to.Role == "create_github_issue" ||
+				from.Role == "create_github_issue" && to.Role == "github_assignment" ||
+				from.Role == "github_assignment" && to.Role == "github_inbox" ||
+				from.Role == "github_inbox" && to.Role == "implementation" ||
+				from.Role == "implementation" && to.Role == "open_pull_request" ||
+				from.Role == "open_pull_request" && to.Role == "pull_request_review" ||
+				from.Role == "pull_request_review" && to.Role == "completed"
+		}
+		if !supported {
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: from.Key, Code: "unsupported_handoff", Message: fmt.Sprintf("Connection %q from node %q to node %q is not a supported runtime handoff.", edge.Key, from.Key, to.Key)})
+			continue
+		}
+		if from.Role == "native_approval" {
+			state, _ := customAutomationEdgeConditionState(edge.Condition)
+			expected := "approved"
+			if to.Role == "rejected" {
+				expected = "rejected"
+			}
+			if state != expected {
+				issues = append(issues, models.AutomationValidationIssue{NodeKey: from.Key, Code: "unsupported_condition", Message: fmt.Sprintf("Connection %q to node %q must use the %q result.", edge.Key, to.Key, expected)})
+			}
+		}
+	}
+
+	customNodes := make([]models.AutomationDraftNode, 0)
+	for _, node := range candidate.Nodes {
+		if _, canonical := canonicalNodes[node.Key]; !canonical {
+			customNodes = append(customNodes, node)
+		}
+	}
+	if len(customNodes) > 0 {
+		customEdges := make([]models.AutomationDraftEdge, 0)
+		for _, edge := range candidate.Edges {
+			_, fromCanonical := canonicalNodes[edge.From]
+			_, toCanonical := canonicalNodes[edge.To]
+			if !fromCanonical && !toCanonical {
+				customEdges = append(customEdges, edge)
+			}
+		}
+		customCandidate := candidate
+		customCandidate.AdapterKey = AutomationAdapterCustom
+		customCandidate.AutomationType = "custom"
+		customCandidate.Nodes = customNodes
+		customCandidate.Edges = customEdges
+		issues = append(issues, validateCustomAutomationTopology(customCandidate)...)
+	}
+
+	for _, node := range candidate.Nodes {
+		if _, canonical := canonicalNodes[node.Key]; !canonical {
+			continue
+		}
+		in, out := incoming[node.Key], outgoing[node.Key]
+		add := func(code, message string) {
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: code, Message: message})
+		}
+		switch node.Role {
+		case "offering_manager", "bug_finder", "optimization_finder", "redundancy_finder":
+			if len(in) != 0 {
+				add("schedule_parents", fmt.Sprintf("Schedule node %q cannot have an incoming connection.", node.Key))
+			}
+		case "loop_auditor":
+			if len(in) != 0 {
+				add("schedule_parents", fmt.Sprintf("Schedule node %q cannot have an incoming connection.", node.Key))
+			}
+		case "create_notification":
+			if len(in) == 0 || len(out) != 1 || nodes[out[0].To].Role != "native_approval" {
+				add("notification_connections", fmt.Sprintf("Node %q needs at least one producer source and exactly one Human approval target.", node.Key))
+			}
+		case "native_approval":
+			if len(in) == 0 {
+				add("approval_source", fmt.Sprintf("Human approval node %q needs a Create notification source.", node.Key))
+			}
+			states := map[string]int{}
+			for _, edge := range out {
+				state, _ := customAutomationEdgeConditionState(edge.Condition)
+				states[state]++
+			}
+			if states["approved"] > 1 || states["rejected"] > 1 {
+				add("approval_branches", fmt.Sprintf("Human approval node %q may have at most one target for each result.", node.Key))
+			}
+		case "native_inbox":
+			if len(in) != 1 || nodes[in[0].From].Role != "native_approval" {
+				add("native_inbox_source", fmt.Sprintf("Approved inbox node %q needs exactly one approved Human approval source.", node.Key))
+			}
+			if len(out) != 1 || nodes[out[0].To].Role != "implementation" {
+				add("native_inbox_target", fmt.Sprintf("Approved inbox node %q needs exactly one implementation target.", node.Key))
+			}
+		case "create_github_issue":
+			if len(in) == 0 || len(out) != 1 || nodes[out[0].To].Role != "github_assignment" {
+				add("github_issue_connections", fmt.Sprintf("Node %q needs at least one producer source and exactly one Human assignment target.", node.Key))
+			}
+		case "github_assignment":
+			if len(in) == 0 {
+				add("github_assignment_source", fmt.Sprintf("Human assignment node %q needs a Create GitHub issue source.", node.Key))
+			}
+			if len(out) != 1 || nodes[out[0].To].Role != "github_inbox" {
+				add("github_assignment_target", fmt.Sprintf("Human assignment node %q needs exactly one assigned GitHub inbox target.", node.Key))
+			}
+		case "github_inbox":
+			if len(in) != 1 || nodes[in[0].From].Role != "github_assignment" {
+				add("github_inbox_source", fmt.Sprintf("GitHub inbox node %q needs exactly one Human assignment source.", node.Key))
+			}
+			if len(out) != 1 || nodes[out[0].To].Role != "implementation" {
+				add("github_inbox_target", fmt.Sprintf("GitHub inbox node %q needs exactly one implementation target.", node.Key))
+			}
+		case "implementation":
+			if candidate.AdapterKey == AutomationAdapterNativeSDLC {
+				if len(in) != 1 || nodes[in[0].From].Role != "native_inbox" {
+					add("native_implementation_source", fmt.Sprintf("Implementation node %q needs exactly one Approved inbox source.", node.Key))
+				}
+				if len(out) != 1 || nodes[out[0].To].Type != models.AutomationNodeOutcome {
+					add("native_implementation_target", fmt.Sprintf("Implementation node %q needs exactly one terminal Outcome.", node.Key))
+				}
+			} else {
+				if len(in) != 1 || nodes[in[0].From].Role != "github_inbox" {
+					add("github_implementation_source", fmt.Sprintf("Implementation node %q needs exactly one GitHub inbox source.", node.Key))
+				}
+				if len(out) != 1 || nodes[out[0].To].Role != "open_pull_request" {
+					add("github_implementation_target", fmt.Sprintf("Implementation node %q needs exactly one Open pull request target.", node.Key))
+				}
+			}
+		case "open_pull_request":
+			if len(in) != 1 || nodes[in[0].From].Role != "implementation" {
+				add("pull_request_source", fmt.Sprintf("Open pull request node %q needs exactly one implementation source.", node.Key))
+			}
+			if len(out) != 1 || nodes[out[0].To].Role != "pull_request_review" {
+				add("pull_request_target", fmt.Sprintf("Open pull request node %q needs exactly one Human review target.", node.Key))
+			}
+		case "pull_request_review":
+			if len(in) != 1 || nodes[in[0].From].Role != "open_pull_request" {
+				add("pull_request_review_source", fmt.Sprintf("Human review node %q needs exactly one Open pull request source.", node.Key))
+			}
+			if len(out) != 1 || nodes[out[0].To].Type != models.AutomationNodeOutcome {
+				add("pull_request_review_target", fmt.Sprintf("Human review node %q needs exactly one terminal Outcome.", node.Key))
+			}
+		case "completed", "rejected":
+			if len(out) != 0 {
+				add("outcome_terminal", fmt.Sprintf("Outcome node %q must be the end of a path.", node.Key))
+			}
+		}
+	}
+
+	indegree := make(map[string]int, len(nodes))
+	queue := make([]string, 0, len(nodes))
+	for key := range nodes {
+		indegree[key] = len(incoming[key])
+		if indegree[key] == 0 {
+			queue = append(queue, key)
+		}
+	}
+	visited := 0
+	for len(queue) > 0 {
+		key := queue[0]
+		queue = queue[1:]
+		visited++
+		for _, edge := range outgoing[key] {
+			indegree[edge.To]--
+			if indegree[edge.To] == 0 {
+				queue = append(queue, edge.To)
+			}
+		}
+	}
+	if visited != len(nodes) {
+		issues = append(issues, models.AutomationValidationIssue{Code: "unsupported_cycle", Message: "Executable Automation handoffs must not contain a cycle."})
+	}
 	return issues
 }
 
@@ -543,8 +881,13 @@ func customAutomationNativeImplementation(candidate models.AutomationDraftCandid
 		nodes[node.Key] = node
 	}
 	node, ok := nodes[nodeKey]
-	if !ok || node.Type != models.AutomationNodeAgentTask || node.Role != "implementation" || len(node.Config) != 0 {
+	if !ok || node.Type != models.AutomationNodeAgentTask || node.Role != "implementation" {
 		return false
+	}
+	for key := range node.Config {
+		if key != "goal" && key != "model_config_id" {
+			return false
+		}
 	}
 	incoming, outgoing := 0, 0
 	for _, edge := range candidate.Edges {
@@ -902,12 +1245,12 @@ func validateCustomAutomationNodeConfig(node models.AutomationDraftNode) []model
 	switch node.Type {
 	case models.AutomationNodeAgentTask:
 		if node.Role == "implementation" {
-			allowed = map[string]bool{}
+			allowed = map[string]bool{"goal": true, "model_config_id": true}
 		} else {
-			allowed = map[string]bool{"prompt": true, "category": true, "priority": true, "agent_ref": true}
+			allowed = map[string]bool{"prompt": true, "goal": true, "category": true, "priority": true, "agent_ref": true, "model_config_id": true}
 		}
 	case models.AutomationNodeTrigger:
-		allowed = map[string]bool{"prompt": true, "category": true, "priority": true, "agent_ref": true, "run_at": true, "repeat_type": true, "repeat_interval": true, "enabled": true, "clear_context_on_start": true}
+		allowed = map[string]bool{"prompt": true, "goal": true, "category": true, "priority": true, "agent_ref": true, "model_config_id": true, "run_at": true, "repeat_type": true, "repeat_interval": true, "enabled": true, "clear_context_on_start": true}
 	case models.AutomationNodeAction:
 		switch node.Role {
 		case "create_notification":
@@ -963,6 +1306,9 @@ func validateCustomAutomationNodeConfig(node models.AutomationDraftNode) []model
 		}
 		issues = append(issues, validateAutomationTaskReferenceShape(node)...)
 	}
+	if node.Type == models.AutomationNodeAgentTask && node.Role == "implementation" {
+		issues = append(issues, validateAutomationTaskReferenceShape(node)...)
+	}
 	if node.Type == models.AutomationNodeTrigger {
 		prompt, promptOK := node.Config["prompt"].(string)
 		if !promptOK || strings.TrimSpace(prompt) == "" {
@@ -977,27 +1323,11 @@ func validateCustomAutomationNodeConfig(node models.AutomationDraftNode) []model
 			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "priority", Message: "Schedule task priority must be between 1 and 4."})
 		}
 		issues = append(issues, validateAutomationTaskReferenceShape(node)...)
-		runAt, runAtOK := node.Config["run_at"].(string)
-		if !runAtOK {
-			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "run_at", Message: "Trigger time must use HH:MM local time."})
-		} else if _, err := time.Parse("15:04", runAt); err != nil {
-			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "run_at", Message: "Trigger time must use HH:MM local time."})
-		}
-		repeat, repeatOK := node.Config["repeat_type"].(string)
-		if !repeatOK || !map[string]bool{"once": true, "minutes": true, "hours": true, "daily": true, "weekly": true, "monthly": true}[repeat] {
-			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "repeat_type", Message: "Unsupported schedule repeat type."})
-		}
-		interval, intervalOK := draftInt(node.Config["repeat_interval"])
-		if !intervalOK || interval < 1 || interval > 365 {
-			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "repeat_interval", Message: "Schedule interval must be between 1 and 365."})
-		}
-		if enabled, enabledOK := node.Config["enabled"].(bool); !enabledOK || !enabled {
-			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "enabled", Message: "Schedule execution is controlled by the Automation lifecycle and must be enabled."})
-		}
-		if clearContextOnStart, present := node.Config["clear_context_on_start"]; present {
-			if _, valid := clearContextOnStart.(bool); !valid {
-				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "clear_context_on_start", Message: "Clear context on start must be true or false."})
-			}
+		issues = append(issues, validateAutomationScheduleConfig(node)...)
+	}
+	if goal, present := node.Config["goal"]; present {
+		if text, ok := goal.(string); !ok || len(strings.TrimSpace(text)) > MaxTaskGoalLength {
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "goal", Message: "Task goal must be text of at most 2000 characters."})
 		}
 	}
 	if node.Type == models.AutomationNodeAction {
@@ -1005,6 +1335,33 @@ func validateCustomAutomationNodeConfig(node models.AutomationDraftNode) []model
 	}
 	if node.Type == models.AutomationNodeHumanGate {
 		issues = append(issues, validateAutomationHumanGateConfig(node, node.Role)...)
+	}
+	return issues
+}
+
+func validateAutomationScheduleConfig(node models.AutomationDraftNode) []models.AutomationValidationIssue {
+	var issues []models.AutomationValidationIssue
+	runAt, runAtOK := node.Config["run_at"].(string)
+	if !runAtOK {
+		issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "run_at", Message: "Trigger time must use HH:MM local time."})
+	} else if _, err := time.Parse("15:04", runAt); err != nil {
+		issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "run_at", Message: "Trigger time must use HH:MM local time."})
+	}
+	repeat, repeatOK := node.Config["repeat_type"].(string)
+	if !repeatOK || !map[string]bool{"once": true, "minutes": true, "hours": true, "daily": true, "weekly": true, "monthly": true}[repeat] {
+		issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "repeat_type", Message: "Unsupported schedule repeat type."})
+	}
+	interval, intervalOK := draftInt(node.Config["repeat_interval"])
+	if !intervalOK || models.ValidateScheduleRepeatInterval(interval) != nil {
+		issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "repeat_interval", Message: "Schedule interval must be between 1 and 365."})
+	}
+	if enabled, enabledOK := node.Config["enabled"].(bool); !enabledOK || !enabled {
+		issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "enabled", Message: "Schedule execution is controlled by the Automation lifecycle and must be enabled."})
+	}
+	if clearContextOnStart, present := node.Config["clear_context_on_start"]; present {
+		if _, valid := clearContextOnStart.(bool); !valid {
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "clear_context_on_start", Message: "Clear context on start must be true or false."})
+		}
 	}
 	return issues
 }
@@ -1058,10 +1415,18 @@ func validateAutomationHumanGateConfig(node models.AutomationDraftNode, role str
 func validateAutomationNodeConfig(adapter AutomationAdapter, canonical AutomationAdapterNode, node models.AutomationDraftNode) []models.AutomationValidationIssue {
 	allowed := map[string]bool{}
 	usesTaskConfiguration := automationMaintainedNodeUsesTaskConfiguration(adapter, canonical)
+	usesModelConfiguration := usesTaskConfiguration || adapter.Key == AutomationAdapterNativeSDLC && canonical.Role == "implementation"
+	usesGoalConfiguration := usesModelConfiguration
 	if usesTaskConfiguration {
-		for _, key := range []string{"prompt", "category", "priority", "agent_ref", "skills", "source_files"} {
+		for _, key := range []string{"prompt", "category", "priority", "agent_ref"} {
 			allowed[key] = true
 		}
+	}
+	if usesGoalConfiguration {
+		allowed["goal"] = true
+	}
+	if usesModelConfiguration {
+		allowed["model_config_id"] = true
 	}
 	if canonical.AllowedResources["schedule"] {
 		for _, key := range []string{"target_node_key", "run_at", "repeat_type", "repeat_interval", "enabled", "clear_context_on_start"} {
@@ -1111,33 +1476,22 @@ func validateAutomationNodeConfig(adapter AutomationAdapter, canonical Automatio
 		}
 		issues = append(issues, validateAutomationTaskReferenceShape(node)...)
 	}
+	if usesModelConfiguration && !usesTaskConfiguration {
+		issues = append(issues, validateAutomationTaskReferenceShape(node)...)
+	}
+	if usesGoalConfiguration {
+		if goal, present := node.Config["goal"]; present {
+			if text, ok := goal.(string); !ok || len(strings.TrimSpace(text)) > MaxTaskGoalLength {
+				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "goal", Message: "Task goal must be text of at most 2000 characters."})
+			}
+		}
+	}
 	if canonical.AllowedResources["schedule"] {
 		target, targetOK := node.Config["target_node_key"].(string)
 		if !targetOK || target == "" || target != adapterScheduleTarget(adapter, node.Key) {
 			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "schedule_target", Message: "Trigger target is fixed by the registered adapter."})
 		}
-		runAt, runAtOK := node.Config["run_at"].(string)
-		if !runAtOK {
-			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "run_at", Message: "Trigger time must use HH:MM local time."})
-		} else if _, err := time.Parse("15:04", runAt); err != nil {
-			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "run_at", Message: "Trigger time must use HH:MM local time."})
-		}
-		repeat, repeatOK := node.Config["repeat_type"].(string)
-		if !repeatOK || !map[string]bool{"once": true, "minutes": true, "hours": true, "daily": true, "weekly": true, "monthly": true}[repeat] {
-			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "repeat_type", Message: "Unsupported schedule repeat type."})
-		}
-		interval, ok := draftInt(node.Config["repeat_interval"])
-		if !ok || interval < 1 || interval > 365 {
-			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "repeat_interval", Message: "Schedule interval must be between 1 and 365."})
-		}
-		if enabled, ok := node.Config["enabled"].(bool); !ok || !enabled {
-			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "enabled", Message: "Schedule execution is controlled by the Automation lifecycle and must be enabled."})
-		}
-		if clearContextOnStart, present := node.Config["clear_context_on_start"]; present {
-			if _, valid := clearContextOnStart.(bool); !valid {
-				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "clear_context_on_start", Message: "Clear context on start must be true or false."})
-			}
-		}
+		issues = append(issues, validateAutomationScheduleConfig(node)...)
 	}
 	switch canonical.Role {
 	case "create_notification", "create_github_issue", "open_pull_request":
@@ -1156,25 +1510,10 @@ func validateAutomationTaskReferenceShape(node models.AutomationDraftNode) []mod
 			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "agent_ref", Message: "Agent selection must use a supported project Agent reference."})
 		}
 	}
-	for _, field := range []struct {
-		key  string
-		code string
-		name string
-	}{{"skills", "skill_ref", "Skill"}, {"source_files", "source_file", "Source file"}} {
-		value, exists := node.Config[field.key]
-		if !exists {
-			continue
-		}
-		values, ok := draftStringSlice(value)
-		if !ok || len(values) > 20 {
-			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: field.code, Message: field.name + " selection must be a bounded list of supported references."})
-			continue
-		}
-		for _, value := range values {
-			if strings.TrimSpace(value) == "" || len(value) > 240 {
-				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: field.code, Message: field.name + " selection contains an unsupported reference."})
-				break
-			}
+	if value, exists := node.Config["model_config_id"]; exists {
+		ref, ok := value.(string)
+		if !ok || len(strings.TrimSpace(ref)) > 200 {
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "model_config_id", Message: "Model selection must use a supported configured model."})
 		}
 	}
 	return issues
@@ -1182,7 +1521,7 @@ func validateAutomationTaskReferenceShape(node models.AutomationDraftNode) []mod
 
 func (s *AutomationDraftService) ValidateCandidateWithCapabilities(candidate models.AutomationDraftCandidate, snapshot models.AutomationCapabilitySnapshot) []models.AutomationValidationIssue {
 	issues := s.ValidateCandidate(candidate)
-	if candidate.AdapterKey == AutomationAdapterGitHubSDLC || customAutomationUsesGitHub(candidate) {
+	if automationUsesGitHub(candidate) {
 		github, configured := snapshot.Integrations["github"]
 		if !configured || !github.Configured {
 			issues = append(issues, models.AutomationValidationIssue{Code: "github_unavailable", Message: "GitHub is not ready for this project. Configure connected GitHub authentication, at least one GitHub Authorized User, and either a project GitHub repository URL or a GitHub remote in the project's local checkout before saving this Automation."})
@@ -1192,13 +1531,9 @@ func (s *AutomationDraftService) ValidateCandidateWithCapabilities(candidate mod
 	for _, agent := range snapshot.Agents {
 		agents[agent.ID] = true
 	}
-	skills := make(map[string]bool, len(snapshot.Skills))
-	for _, skill := range snapshot.Skills {
-		skills[skill.ID] = true
-	}
-	sourceFiles := make(map[string]bool, len(snapshot.SourceFiles))
-	for _, sourceFile := range snapshot.SourceFiles {
-		sourceFiles[sourceFile] = true
+	modelsByID := make(map[string]bool, len(snapshot.Models))
+	for _, model := range snapshot.Models {
+		modelsByID[model.ID] = true
 	}
 	for _, node := range candidate.Nodes {
 		if node.Type != models.AutomationNodeAgentTask && node.Type != models.AutomationNodeTrigger {
@@ -1206,22 +1541,12 @@ func (s *AutomationDraftService) ValidateCandidateWithCapabilities(candidate mod
 		}
 		agentRef, _ := node.Config["agent_ref"].(string)
 		agentRef = strings.TrimSpace(agentRef)
+		modelConfigID := automationExplicitModelConfigID(node.Config["model_config_id"])
 		if agentRef != "" && !agents[agentRef] {
 			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "agent_ref", Message: "Agent selection is unavailable in this project."})
 		}
-		if selected, ok := draftStringSlice(node.Config["skills"]); ok {
-			for _, skill := range normalizeDraftReferences(selected) {
-				if !skills[skill] || agentRef == "" || !strings.HasPrefix(skill, agentRef+":") {
-					issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "skill_ref", Message: "Skill selection is unavailable for the selected Agent in this project."})
-				}
-			}
-		}
-		if selected, ok := draftStringSlice(node.Config["source_files"]); ok {
-			for _, sourceFile := range normalizeDraftReferences(selected) {
-				if !sourceFiles[sourceFile] {
-					issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "source_file", Message: "Source file selection is unavailable in this project."})
-				}
-			}
+		if modelConfigID != "" && !modelsByID[modelConfigID] {
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "model_config_id", Message: "Model selection is unavailable in this project."})
 		}
 	}
 	sortAutomationValidationIssues(issues)
@@ -1237,12 +1562,6 @@ func (s *AutomationDraftService) validateCandidateForProject(ctx context.Context
 			}
 			if ref, _ := node.Config["agent_ref"].(string); strings.TrimSpace(ref) != "" {
 				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "agent_ref", Message: "Agent selection cannot be resolved because project capabilities are unavailable."})
-			}
-			if values, ok := draftStringSlice(node.Config["skills"]); ok && len(normalizeDraftReferences(values)) > 0 {
-				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "skill_ref", Message: "Skill selection cannot be resolved because project capabilities are unavailable."})
-			}
-			if values, ok := draftStringSlice(node.Config["source_files"]); ok && len(normalizeDraftReferences(values)) > 0 {
-				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "source_file", Message: "Source file selection cannot be resolved because project capabilities are unavailable."})
 			}
 		}
 		sortAutomationValidationIssues(issues)
@@ -1268,6 +1587,10 @@ func sortAutomationValidationIssues(issues []models.AutomationValidationIssue) {
 }
 
 func unsafeAutomationConfigValue(key string, value any) bool {
+	if key == "model_config_id" {
+		text, ok := value.(string)
+		return !ok || len(strings.TrimSpace(text)) > 200
+	}
 	if strings.Contains(strings.ToLower(key), "url") || strings.Contains(strings.ToLower(key), "sql") || strings.Contains(strings.ToLower(key), "code") || strings.Contains(strings.ToLower(key), "tool") || strings.HasSuffix(strings.ToLower(key), "_id") {
 		return true
 	}
@@ -1339,7 +1662,14 @@ func defaultAutomationNodePrompt(adapterKey, role string) (string, error) {
 	case AutomationAdapterGitHubSDLC:
 		return githubSDLCRolePrompt(role)
 	default:
-		return fmt.Sprintf("Run the %s role for this %s automation using the existing project-scoped tools and human review boundaries.", strings.ReplaceAll(role, "_", " "), strings.ReplaceAll(adapterKey, "_", " ")), nil
+		switch strings.TrimSpace(role) {
+		case "fixed_schedule":
+			return "Describe the scheduled work this node should perform.", nil
+		case "task":
+			return "Describe the work this node should perform.", nil
+		default:
+			return fmt.Sprintf("Run the %s role for this %s automation using the existing project-scoped tools and human review boundaries.", strings.ReplaceAll(role, "_", " "), strings.ReplaceAll(adapterKey, "_", " ")), nil
+		}
 	}
 }
 

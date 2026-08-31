@@ -26,7 +26,7 @@ type UpcomingTaskRow struct {
 	Category     string
 	Priority     int
 	Status       string
-	Prompt       string
+	Prompt       string // Bounded to upcomingTaskPromptPreviewLen chars; only used for a truncated UI preview.
 	AgentID      *string
 	Tag          string
 	DisplayOrder int
@@ -35,82 +35,122 @@ type UpcomingTaskRow struct {
 	// Agent name
 	AgentName *string
 	// Schedule fields (nullable)
-	ScheduleID       *string
-	RunAt            *time.Time
-	RepeatType       *string
-	RepeatInterval   *int
-	ScheduleEnabled  *bool
-	NextRun          *time.Time
-	LastRun          *time.Time
+	ScheduleID      *string
+	RunAt           *time.Time
+	RepeatType      *string
+	RepeatInterval  *int
+	ScheduleEnabled *bool
+	NextRun         *time.Time
+	LastRun         *time.Time
 }
+
+// upcomingTaskPromptPreviewLen bounds the prompt text selected by Pulse
+// dashboard list queries. web/templates/pages/upcoming.templ only ever
+// renders a 200-char truncated preview (truncatePrompt(bt.Task.Prompt, 200)),
+// so selecting/scanning the full prompt column for every row wastes time and
+// memory. SUBSTR(t.prompt, 1, N) always returns at most N characters, so
+// truncatePrompt on this preview matches truncating the full prompt.
+const upcomingTaskPromptPreviewLen = 200
+
+// upcomingTaskListColumns is the shared task and agent projection used by all
+// Pulse task-list queries. The prompt is deliberately bounded because these
+// rows only populate the dashboard preview.
+const upcomingTaskListColumns = `t.id, t.project_id, t.title, t.category, t.priority, t.status, SUBSTR(t.prompt, 1, ?),
+	t.agent_id, t.tag, t.display_order, t.created_at, t.updated_at,
+	ac.name AS agent_name`
+
+const upcomingTaskListWithoutScheduleColumns = `NULL, NULL, NULL, NULL, NULL, NULL, NULL`
+
+const upcomingTaskListScheduleColumns = `s.id, s.run_at, s.repeat_type, s.repeat_interval, s.enabled, s.next_run, s.last_run`
+
+const upcomingRunningTasksQuery = `SELECT ` + upcomingTaskListColumns + `,
+	` + upcomingTaskListWithoutScheduleColumns + `
+ FROM tasks t
+ LEFT JOIN agent_configs ac ON ac.id = t.agent_id
+ WHERE t.project_id = ? AND t.status = 'running' AND t.category != 'chat'
+ ORDER BY t.updated_at DESC`
+
+const upcomingPendingActiveTasksQuery = `SELECT ` + upcomingTaskListColumns + `,
+	` + upcomingTaskListWithoutScheduleColumns + `
+ FROM tasks t
+ LEFT JOIN agent_configs ac ON ac.id = t.agent_id
+ WHERE t.project_id = ? AND t.category = 'active' AND t.status = 'pending'
+ ORDER BY t.priority DESC, t.display_order ASC`
+
+const upcomingScheduledTasksQuery = `SELECT ` + upcomingTaskListColumns + `,
+	` + upcomingTaskListScheduleColumns + `
+ FROM tasks t
+ JOIN schedules s ON s.task_id = t.id
+ LEFT JOIN agent_configs ac ON ac.id = t.agent_id
+ WHERE t.project_id = ? AND s.enabled = 1 AND s.next_run IS NOT NULL AND s.next_run <= ?
+ ORDER BY s.next_run ASC`
 
 // ListRunningTasks returns tasks currently being executed for a project
 func (r *UpcomingRepo) ListRunningTasks(ctx context.Context, projectID string) ([]models.UpcomingTask, error) {
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT t.id, t.project_id, t.title, t.category, t.priority, t.status, t.prompt,
-			t.agent_id, t.tag, t.display_order, t.created_at, t.updated_at,
-			ac.name as agent_name,
-			NULL, NULL, NULL, NULL, NULL, NULL, NULL
-		 FROM tasks t
-		 LEFT JOIN agent_configs ac ON ac.id = t.agent_id
-		 WHERE t.project_id = ? AND t.status = 'running' AND t.category != 'chat'
-		 ORDER BY t.updated_at DESC`, projectID)
+	tasks, err := r.listUpcomingTasks(ctx, upcomingRunningTasksQuery, upcomingTaskPromptPreviewLen, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("listing running tasks: %w", err)
 	}
-	defer rows.Close()
-	return r.scanUpcomingTasks(rows)
+	return tasks, nil
 }
 
 // ListPendingActiveTasks returns active tasks with pending status (queued for execution)
 func (r *UpcomingRepo) ListPendingActiveTasks(ctx context.Context, projectID string) ([]models.UpcomingTask, error) {
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT t.id, t.project_id, t.title, t.category, t.priority, t.status, t.prompt,
-			t.agent_id, t.tag, t.display_order, t.created_at, t.updated_at,
-			ac.name as agent_name,
-			NULL, NULL, NULL, NULL, NULL, NULL, NULL
-		 FROM tasks t
-		 LEFT JOIN agent_configs ac ON ac.id = t.agent_id
-		 WHERE t.project_id = ? AND t.category = 'active' AND t.status = 'pending'
-		 ORDER BY t.priority DESC, t.display_order ASC`, projectID)
+	tasks, err := r.listUpcomingTasks(ctx, upcomingPendingActiveTasksQuery, upcomingTaskPromptPreviewLen, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("listing pending active tasks: %w", err)
 	}
-	defer rows.Close()
-	return r.scanUpcomingTasks(rows)
+	return tasks, nil
 }
 
 // ListUpcomingScheduledTasks returns scheduled tasks with a future next_run
 func (r *UpcomingRepo) ListUpcomingScheduledTasks(ctx context.Context, projectID string, until time.Time) ([]models.UpcomingTask, error) {
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT t.id, t.project_id, t.title, t.category, t.priority, t.status, t.prompt,
-			t.agent_id, t.tag, t.display_order, t.created_at, t.updated_at,
-			ac.name as agent_name,
-			s.id, s.run_at, s.repeat_type, s.repeat_interval, s.enabled, s.next_run, s.last_run
-		 FROM tasks t
-		 JOIN schedules s ON s.task_id = t.id
-		 LEFT JOIN agent_configs ac ON ac.id = t.agent_id
-		 WHERE t.project_id = ? AND s.enabled = 1 AND s.next_run IS NOT NULL AND s.next_run <= ?
-		 ORDER BY s.next_run ASC`, projectID, until)
+	tasks, err := r.listUpcomingTasks(ctx, upcomingScheduledTasksQuery, upcomingTaskPromptPreviewLen, projectID, until)
 	if err != nil {
 		return nil, fmt.Errorf("listing upcoming scheduled tasks: %w", err)
+	}
+	return tasks, nil
+}
+
+func (r *UpcomingRepo) listUpcomingTasks(ctx context.Context, query string, args ...any) ([]models.UpcomingTask, error) {
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
 	}
 	defer rows.Close()
 	return r.scanUpcomingTasks(rows)
 }
 
+// historyOutputPreviewLen is the maximum bytes of e.output fetched for the
+// Reflection/History page. The template renders at most 300 chars via
+// truncatePrompt, so selecting the full output column (50–500 KB) wastes
+// bandwidth and memory. SUBSTR always returns at most this many characters.
+const historyOutputPreviewLen = 400
+
+// historyErrorPreviewLen is the maximum bytes of e.error_message fetched.
+// The template renders at most 200 chars, so we cap at 250 to leave a margin.
+const historyErrorPreviewLen = 250
+
+// historyExecutionLimit caps results returned by ListRecentExecutions to avoid
+// multi-MB reads on high-volume projects.
+const historyExecutionLimit = 200
+
 // ListRecentExecutions returns executions completed within the given time range
 func (r *UpcomingRepo) ListRecentExecutions(ctx context.Context, projectID string, since time.Time) ([]models.HistoryExecution, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT e.id, e.task_id, COALESCE(e.agent_config_id, ''), e.status, e.prompt_sent, e.output,
-			e.error_message, e.tokens_used, e.duration_ms, e.started_at, e.completed_at,
+		`SELECT e.id, e.task_id, COALESCE(e.agent_config_id, ''), e.status,
+			SUBSTR(e.output, 1, ?),
+			SUBSTR(e.error_message, 1, ?),
+			e.tokens_used, e.duration_ms, e.started_at, e.completed_at,
 			t.title as task_title,
 			COALESCE(ac.name, '') as agent_name
 		 FROM executions e
 		 JOIN tasks t ON t.id = e.task_id
 		 LEFT JOIN agent_configs ac ON ac.id = e.agent_config_id
 		 WHERE t.project_id = ? AND t.category != 'chat' AND e.started_at >= ?
-		 ORDER BY e.started_at DESC`, projectID, since)
+		 ORDER BY e.started_at DESC
+		 LIMIT ?`,
+		historyOutputPreviewLen, historyErrorPreviewLen, projectID, since, historyExecutionLimit)
 	if err != nil {
 		return nil, fmt.Errorf("listing recent executions: %w", err)
 	}
@@ -121,7 +161,7 @@ func (r *UpcomingRepo) ListRecentExecutions(ctx context.Context, projectID strin
 		var de models.HistoryExecution
 		if err := rows.Scan(
 			&de.Execution.ID, &de.Execution.TaskID, &de.Execution.AgentConfigID,
-			&de.Execution.Status, &de.Execution.PromptSent, &de.Execution.Output,
+			&de.Execution.Status, &de.Execution.Output,
 			&de.Execution.ErrorMessage, &de.Execution.TokensUsed, &de.Execution.DurationMs,
 			&de.Execution.StartedAt, &de.Execution.CompletedAt,
 			&de.TaskTitle, &de.AgentName,

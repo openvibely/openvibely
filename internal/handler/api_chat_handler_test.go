@@ -3,6 +3,7 @@ package handler
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"mime/multipart"
@@ -15,8 +16,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -238,7 +241,68 @@ func TestAPIChatMessage_FileSizeExceeded(t *testing.T) {
 
 	var resp map[string]string
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
-	assert.Contains(t, resp["error"], "size limit")
+	assert.Equal(t, "request body too large", resp["error"])
+}
+
+func TestAPIChatMessage_OversizedMultipartRequestIsRejectedBeforeSideEffects(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	ctx := context.Background()
+	projects, err := h.projectSvc.List(ctx)
+	require.NoError(t, err)
+	require.NotEmpty(t, projects)
+	projectID := projects[0].ID
+	tmpMultipartDir := t.TempDir()
+	t.Setenv("TMPDIR", tmpMultipartDir)
+
+	req, body, _ := newSizedMultipartUploadRequest(t, http.MethodPost, "/api/chat/message", map[string]string{
+		"message":    "Check this large upload",
+		"project_id": projectID,
+	}, "attachments", "too-large.txt", "text/plain", apiAttachmentRequestLimit(apiMaxFileSize, apiMaxFilesPerReq), true)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusRequestEntityTooLarge, rec.Code)
+	assert.Equal(t, int64(0), body.bytesRead)
+	chatHistory, err := h.execRepo.ListChatHistory(ctx, projectID, 50)
+	require.NoError(t, err)
+	assert.Empty(t, chatHistory)
+	pendingRoot := filepath.Join(uploadsDir, "chat", "pending")
+	if _, err := os.Stat(pendingRoot); !os.IsNotExist(err) {
+		t.Fatalf("expected no pending attachment root, stat err=%v", err)
+	}
+	assertDirEmpty(t, tmpMultipartDir)
+}
+
+func TestAPIChatMessage_OversizedMultipartWithSplitFileHeaderIsBounded(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	ctx := context.Background()
+	projects, err := h.projectSvc.List(ctx)
+	require.NoError(t, err)
+	require.NotEmpty(t, projects)
+	projectID := projects[0].ID
+	tmpMultipartDir := t.TempDir()
+	t.Setenv("TMPDIR", tmpMultipartDir)
+
+	req, body, totalSize := newSizedMultipartUploadRequestWithFilePrefix(t, http.MethodPost, "/api/chat/message", map[string]string{
+		"message":    "Check this large upload",
+		"project_id": projectID,
+	}, "attachments", "too-large.txt", "text/plain", 25<<20, invalidMultipartBoundaryPayloadPrefix(), false)
+	body.limitReadChunkSize(1)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusRequestEntityTooLarge, rec.Code)
+	maxRead := browserAttachmentRequestLimit(apiMaxFileSize) + 1
+	assert.LessOrEqual(t, body.bytesRead, maxRead)
+	assert.Less(t, body.bytesRead, totalSize)
+	chatHistory, err := h.execRepo.ListChatHistory(ctx, projectID, 50)
+	require.NoError(t, err)
+	assert.Empty(t, chatHistory)
+	pendingRoot := filepath.Join(uploadsDir, "chat", "pending")
+	if _, err := os.Stat(pendingRoot); !os.IsNotExist(err) {
+		t.Fatalf("expected no pending attachment root, stat err=%v", err)
+	}
+	assertDirEmpty(t, tmpMultipartDir)
 }
 
 func TestAPIChatMessage_WithImageAttachment(t *testing.T) {
@@ -397,6 +461,60 @@ func TestAPIChatMessage_WithMultipleAttachments(t *testing.T) {
 	assert.True(t, fileNames["readme.md"], "expected readme.md attachment")
 }
 
+func TestAPIChatMessage_AllowsPaddedBoundaryDelimiterWhitespace(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+
+	agent := &models.LLMConfig{
+		Name:        "Test Agent",
+		Provider:    models.ProviderTest,
+		Model:       "claude-3-sonnet-20240229",
+		APIKey:      "test-key",
+		MaxTokens:   4096,
+		Temperature: 1.0,
+		IsDefault:   true,
+	}
+	require.NoError(t, llmConfigRepo.Create(ctx, agent))
+
+	projects, err := h.projectSvc.List(ctx)
+	require.NoError(t, err)
+	require.NotEmpty(t, projects)
+	projectID := projects[0].ID
+
+	tmpDir := t.TempDir()
+	oldUploadsDir := uploadsDir
+	uploadsDir = tmpDir
+	defer func() { uploadsDir = oldUploadsDir }()
+
+	files := []taskAttachmentTestFile{
+		{name: "padded-first.txt", contentType: "text/plain", content: bytes.Repeat([]byte("a"), 6<<20)},
+		{name: "padded-second.txt", contentType: "text/plain", content: bytes.Repeat([]byte("b"), 6<<20)},
+	}
+	body, contentType := newPaddedDelimiterMultipartBody(t, map[string]string{
+		"message":    "Check these padded boundary files",
+		"project_id": projectID,
+	}, "attachments", files)
+	require.Greater(t, int64(body.Len()), browserAttachmentRequestLimit(apiMaxFileSize))
+	require.LessOrEqual(t, int64(body.Len()), apiAttachmentRequestLimit(apiMaxFileSize, apiMaxFilesPerReq))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/chat/message", body)
+	req.Header.Set("Content-Type", contentType)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+	chatHistory, err := h.execRepo.ListChatHistory(ctx, projectID, 50)
+	require.NoError(t, err)
+	require.NotEmpty(t, chatHistory)
+	attachments, err := h.chatAttachmentRepo.ListByExecution(ctx, chatHistory[0].ID)
+	require.NoError(t, err)
+	require.Len(t, attachments, 2)
+	for _, attachment := range attachments {
+		assert.Equal(t, int64(6<<20), attachment.FileSize)
+		assert.FileExists(t, attachment.FilePath)
+	}
+}
+
 func TestAPIChatMessage_NoAgents(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	ctx := context.Background()
@@ -427,6 +545,282 @@ func TestAPIChatMessage_NoAgents(t *testing.T) {
 	var resp map[string]string
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 	assert.Contains(t, resp["error"], "no agents available")
+}
+
+func TestAPIChatMessage_UsesCompactSelectionAndHydratesSingleConfiguredModel(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
+	ctx := context.Background()
+	_, err := db.Exec(`DELETE FROM agent_configs`)
+	require.NoError(t, err)
+
+	largeProviderJSON := strings.Repeat("large-provider-json", 4096)
+	agent := &models.LLMConfig{
+		Name: "Hydrated API Chat Model", Provider: models.ProviderTest, AuthMethod: models.AuthMethodAPIKey,
+		Model: "claude-sonnet-api-chat", APIKey: "secret-api-key", OAuthAccessToken: "secret-oauth-token",
+		OAuthRefreshToken: "secret-refresh-token", OAuthClientSecret: "secret-client-secret",
+		BaseURL: "https://example.com/v1/", ExtraHeadersJSON: `{"X-Secret":"value"}`,
+		ExtraBodyJSON: largeProviderJSON, CustomAuthConfigJSON: `{"signing_secret":"secret"}`,
+		CustomAuthStateJSON: `{"access":"secret"}`, MixtureConfigJSON: `{"large":"` + largeProviderJSON + `"}`,
+		IsDefault: true,
+	}
+	require.NoError(t, llmConfigRepo.Create(ctx, agent))
+
+	projects, err := h.projectSvc.List(ctx)
+	require.NoError(t, err)
+	require.NotEmpty(t, projects)
+	projectID := projects[0].ID
+
+	mock := testutil.NewMockLLMCaller()
+	providerCalled := make(chan struct{}, 1)
+	mock.OnCall = func(context.Context, testutil.MockLLMCall) {
+		providerCalled <- struct{}{}
+	}
+	h.llmSvc.SetLLMCaller(mock)
+
+	form := url.Values{}
+	form.Set("message", "Hello from compact API chat")
+	form.Set("project_id", projectID)
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	req := httptest.NewRequest(http.MethodPost, "/api/chat/message", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	counter.SetEnabled(false)
+
+	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+	select {
+	case <-providerCalled:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for mock provider call")
+	}
+
+	assertAPIChatSelectionStatements(t, counter.Statements())
+	call := mock.LastCall()
+	require.Equal(t, agent.ID, call.Agent.ID)
+	require.Equal(t, "secret-api-key", call.Agent.APIKey)
+	require.Equal(t, "secret-oauth-token", call.Agent.OAuthAccessToken)
+	require.Equal(t, "secret-refresh-token", call.Agent.OAuthRefreshToken)
+	require.Equal(t, "secret-client-secret", call.Agent.OAuthClientSecret)
+	require.Equal(t, largeProviderJSON, call.Agent.ExtraBodyJSON)
+	require.NotEmpty(t, call.Agent.CustomAuthConfigJSON)
+	require.NotEmpty(t, call.Agent.CustomAuthStateJSON)
+	require.NotEmpty(t, call.Agent.MixtureConfigJSON)
+
+	request := mock.LastAgentRequest()
+	modelContextLine := fmt.Sprintf("- [ID:%s] %q (model: %s, provider: %s) (default)", agent.ID, agent.Name, agent.Model, agent.Provider)
+	require.Contains(t, request.ChatSystemContext, modelContextLine)
+	require.NotContains(t, request.ChatSystemContext, "secret-api-key")
+	require.NotContains(t, request.ChatSystemContext, largeProviderJSON)
+}
+
+func TestAPIChatMessage_MultipleModelsDefaultFallbackHydratesSelectedModel(t *testing.T) {
+	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	_, err := db.Exec(`DELETE FROM agent_configs`)
+	require.NoError(t, err)
+
+	nonDefault := &models.LLMConfig{
+		Name: "API Chat Non Default Opus", Provider: models.ProviderTest, Model: "claude-opus-non-default",
+		APIKey: "non-default-secret",
+	}
+	require.NoError(t, llmConfigRepo.Create(ctx, nonDefault))
+	defaultModel := &models.LLMConfig{
+		Name: "API Chat Default Opus", Provider: models.ProviderTest, Model: "claude-opus-default",
+		APIKey: "default-secret", ExtraBodyJSON: `{"execution":"config"}`, IsDefault: true,
+	}
+	require.NoError(t, llmConfigRepo.Create(ctx, defaultModel))
+
+	projects, err := h.projectSvc.List(ctx)
+	require.NoError(t, err)
+	require.NotEmpty(t, projects)
+
+	mock := testutil.NewMockLLMCaller()
+	providerCalled := make(chan struct{}, 1)
+	mock.OnCall = func(context.Context, testutil.MockLLMCall) {
+		providerCalled <- struct{}{}
+	}
+	h.llmSvc.SetLLMCaller(mock)
+
+	form := url.Values{}
+	form.Set("message", "rename this")
+	form.Set("project_id", projects[0].ID)
+	req := httptest.NewRequest(http.MethodPost, "/api/chat/message", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+
+	select {
+	case <-providerCalled:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for mock provider call")
+	}
+	call := mock.LastCall()
+	require.Equal(t, defaultModel.ID, call.Agent.ID)
+	require.Equal(t, "default-secret", call.Agent.APIKey)
+	require.Equal(t, `{"execution":"config"}`, call.Agent.ExtraBodyJSON)
+}
+
+func TestAPIChatMessage_QueuedBehindActiveTurnStoresSelectedModelWithoutFullList(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
+	ctx := context.Background()
+	_, err := db.Exec(`DELETE FROM agent_configs`)
+	require.NoError(t, err)
+
+	agent := &models.LLMConfig{
+		Name: "Queued API Chat Model", Provider: models.ProviderTest, Model: "claude-sonnet-queued",
+		APIKey: "queued-secret", ExtraBodyJSON: strings.Repeat("queued-large", 4096), IsDefault: true,
+	}
+	require.NoError(t, llmConfigRepo.Create(ctx, agent))
+	projects, err := h.projectSvc.List(ctx)
+	require.NoError(t, err)
+	require.NotEmpty(t, projects)
+	projectID := projects[0].ID
+
+	chatTask := &models.Task{ProjectID: projectID, Title: "Active Chat", Prompt: "active", Status: models.StatusRunning, Category: models.CategoryChat}
+	require.NoError(t, h.taskRepo.Create(ctx, chatTask))
+	activeExec := &models.Execution{TaskID: chatTask.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "active"}
+	require.NoError(t, h.execRepo.Create(ctx, activeExec))
+
+	form := url.Values{}
+	form.Set("message", "queue me")
+	form.Set("project_id", projectID)
+	counter.Reset()
+	counter.SetEnabled(true)
+	req := httptest.NewRequest(http.MethodPost, "/api/chat/message", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	counter.SetEnabled(false)
+
+	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+	var resp ChatMessageAcceptedResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.True(t, resp.Queued)
+	queued, err := h.threadInputRepo.GetByID(ctx, resp.MessageID)
+	require.NoError(t, err)
+	require.NotNil(t, queued)
+	require.Equal(t, agent.ID, queued.AgentConfigID)
+	assertAPIChatSelectionStatements(t, counter.Statements())
+	assertNoAPIChatFullListStatement(t, counter.Statements())
+}
+
+func TestAPIChatMessage_QueuedPromotionUsesCompactContextAndHydratedSelectedModel(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
+	ctx := context.Background()
+	_, err := db.Exec(`DELETE FROM agent_configs`)
+	require.NoError(t, err)
+
+	largeProviderJSON := strings.Repeat("queued-promotion-large", 4096)
+	agent := &models.LLMConfig{
+		Name: "Queued Promotion API Chat Model", Provider: models.ProviderTest, AuthMethod: models.AuthMethodAPIKey,
+		Model: "claude-sonnet-queued-promotion", APIKey: "queued-promotion-secret",
+		OAuthAccessToken: "queued-promotion-token", OAuthRefreshToken: "queued-promotion-refresh",
+		OAuthClientSecret: "queued-promotion-client-secret", BaseURL: "https://example.com/v1/",
+		ExtraHeadersJSON: `{"X-Secret":"value"}`, ExtraBodyJSON: largeProviderJSON,
+		CustomAuthConfigJSON: `{"signing_secret":"secret"}`, CustomAuthStateJSON: `{"access":"secret"}`,
+		MixtureConfigJSON: `{"large":"` + largeProviderJSON + `"}`, IsDefault: true,
+	}
+	require.NoError(t, llmConfigRepo.Create(ctx, agent))
+	projects, err := h.projectSvc.List(ctx)
+	require.NoError(t, err)
+	require.NotEmpty(t, projects)
+	projectID := projects[0].ID
+
+	chatTask := &models.Task{ProjectID: projectID, Title: "Active Chat", Prompt: "active", Status: models.StatusRunning, Category: models.CategoryChat}
+	require.NoError(t, h.taskRepo.Create(ctx, chatTask))
+	activeExec := &models.Execution{TaskID: chatTask.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "active"}
+	require.NoError(t, h.execRepo.Create(ctx, activeExec))
+
+	form := url.Values{}
+	form.Set("message", "queue promotion")
+	form.Set("project_id", projectID)
+	req := httptest.NewRequest(http.MethodPost, "/api/chat/message", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+	var resp ChatMessageAcceptedResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.True(t, resp.Queued)
+
+	require.NoError(t, h.execRepo.Complete(ctx, activeExec.ID, models.ExecCompleted, "active done", "", 0, 0))
+	mock := testutil.NewMockLLMCaller()
+	providerCalled := make(chan struct{}, 1)
+	mock.OnCall = func(context.Context, testutil.MockLLMCall) {
+		providerCalled <- struct{}{}
+	}
+	h.llmSvc.SetLLMCaller(mock)
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	h.PromoteQueuedChatInput(projectID)
+	select {
+	case <-providerCalled:
+	case <-time.After(5 * time.Second):
+		counter.SetEnabled(false)
+		t.Fatal("timed out waiting for queued promotion provider call")
+	}
+	counter.SetEnabled(false)
+
+	assertAPIChatSelectionStatements(t, counter.Statements())
+	assertNoAPIChatFullListStatement(t, counter.Statements())
+	call := mock.LastCall()
+	require.Equal(t, agent.ID, call.Agent.ID)
+	require.Equal(t, "queued-promotion-secret", call.Agent.APIKey)
+	require.Equal(t, "queued-promotion-token", call.Agent.OAuthAccessToken)
+	require.Equal(t, "queued-promotion-refresh", call.Agent.OAuthRefreshToken)
+	require.Equal(t, "queued-promotion-client-secret", call.Agent.OAuthClientSecret)
+	require.Equal(t, largeProviderJSON, call.Agent.ExtraBodyJSON)
+	require.NotEmpty(t, call.Agent.CustomAuthConfigJSON)
+	require.NotEmpty(t, call.Agent.CustomAuthStateJSON)
+	require.NotEmpty(t, call.Agent.MixtureConfigJSON)
+
+	request := mock.LastAgentRequest()
+	modelContextLine := fmt.Sprintf("- [ID:%s] %q (model: %s, provider: %s) (default)", agent.ID, agent.Name, agent.Model, agent.Provider)
+	require.Contains(t, request.ChatSystemContext, modelContextLine)
+	require.NotContains(t, request.ChatSystemContext, "queued-promotion-secret")
+	require.NotContains(t, request.ChatSystemContext, largeProviderJSON)
+}
+
+func assertAPIChatSelectionStatements(t *testing.T, statements []string) {
+	t.Helper()
+	var selectionStatements []string
+	for _, statement := range statements {
+		normalized := strings.Join(strings.Fields(statement), " ")
+		if strings.Contains(normalized, "FROM agent_configs ORDER BY is_default DESC, name ASC") {
+			selectionStatements = append(selectionStatements, normalized)
+		}
+	}
+	if len(selectionStatements) != 1 {
+		t.Fatalf("expected exactly one API Chat model-selection query, got %d in statements: %q", len(selectionStatements), statements)
+	}
+	selection := selectionStatements[0]
+	projection := strings.Split(strings.ToLower(selection), " from agent_configs ")[0]
+	if !strings.Contains(projection, "select id, name, provider, model, is_default") {
+		t.Fatalf("API Chat selection query does not use id/name/provider/model/is_default projection: %s", selection)
+	}
+	for _, forbidden := range []string{"api_key", "oauth_access_token", "oauth_refresh_token", "oauth_client_secret", "oauth_authorize_url", "oauth_token_url", "ollama_base_url", "base_url", "models_url", "extra_headers_json", "extra_body_json", "custom_auth_config_json", "custom_auth_state_json", "mixture_config_json"} {
+		if strings.Contains(projection, forbidden) {
+			t.Fatalf("API Chat selection query selected forbidden column %q: %s", forbidden, selection)
+		}
+	}
+}
+
+func assertNoAPIChatFullListStatement(t *testing.T, statements []string) {
+	t.Helper()
+	for _, statement := range statements {
+		normalized := strings.ToLower(strings.Join(strings.Fields(statement), " "))
+		if strings.Contains(normalized, " from agent_configs order by is_default desc, name asc") &&
+			strings.Contains(normalized, "api_key") {
+			t.Fatalf("API Chat called full model List before selection: %s", statement)
+		}
+	}
 }
 
 func TestAPIChatMessage_ResponseFormat(t *testing.T) {
@@ -825,12 +1219,11 @@ func TestAPIChatMessage_QueuedAttachmentMetadataFailureRemovesPendingSession(t *
 	e.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusInternalServerError, rec.Code)
-	pendingRoot := filepath.Join(uploadsDir, "chat", "pending")
-	entries, readErr := os.ReadDir(pendingRoot)
-	if !os.IsNotExist(readErr) {
-		require.NoError(t, readErr)
-		require.Empty(t, entries, "failed queued metadata publication must remove its pending session")
-	}
+
+	var retiredSessionID string
+	require.NoError(t, db.QueryRow(`SELECT session_id FROM retired_attachment_sessions`).Scan(&retiredSessionID))
+	require.NotEmpty(t, retiredSessionID)
+	require.NoDirExists(t, filepath.Join(uploadsDir, "chat", "pending", retiredSessionID))
 }
 
 func TestAPIChatMessage_ImmediateAttachmentMetadataFailureRemovesFile(t *testing.T) {
@@ -1031,6 +1424,242 @@ func TestAPIChatMessageStatus_Completed(t *testing.T) {
 	assert.Equal(t, "AI response text", resp.Response)
 	assert.Equal(t, 100, resp.TokensUsed)
 	assert.Equal(t, int64(2500), resp.DurationMs)
+}
+
+func TestAPIChatMessageStatus_CompletedManyTaskMarkersUsesCompactQueries(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	h, e, _ := setupTestHandlerForDB(t, db)
+	execID, expectedTaskIDs := setupAPIChatStatusMarkerFixture(t, h, db, 25, false)
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	rec := serveAPIChatMessageStatusCompact(t, h, e, execID)
+	counter.SetEnabled(false)
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var resp ChatMessageStatusResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Equal(t, "completed", resp.Status)
+	assert.Equal(t, execID, resp.MessageID)
+	assert.Equal(t, expectedTaskIDs, resp.TaskIDs)
+
+	assertAPIChatStatusCompactStatements(t, counter.Statements(), 1)
+}
+
+func TestAPIChatMessageStatus_CompletedWithoutTaskMarkersSkipsTaskLookup(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
+	ctx := context.Background()
+	agent := createAgentTB(t, llmConfigRepo)
+	project := createProjectTB(t, h, "API Chat Status No Markers Project")
+	chatTask := createTaskTB(t, h, project.ID, "No Marker Chat", func(tk *models.Task) {
+		tk.Category = models.CategoryChat
+		tk.Status = models.StatusCompleted
+		tk.AgentID = &agent.ID
+	})
+	exec := &models.Execution{TaskID: chatTask.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: strings.Repeat("prompt ", 1024)}
+	require.NoError(t, h.execRepo.Create(ctx, exec))
+	require.NoError(t, h.execRepo.Complete(ctx, exec.ID, models.ExecCompleted, "AI response text", "", 100, 2500))
+	require.NoError(t, setAPIChatStatusHeavyExecutionFields(ctx, db, exec.ID))
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	rec := serveAPIChatMessageStatusCompact(t, h, e, exec.ID)
+	counter.SetEnabled(false)
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var resp ChatMessageStatusResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Equal(t, "completed", resp.Status)
+	assert.Equal(t, "AI response text", resp.Response)
+	assert.Empty(t, resp.TaskIDs)
+	assertAPIChatStatusCompactStatements(t, counter.Statements(), 0)
+}
+
+func BenchmarkAPIChatMessageStatusCompactProjection(b *testing.B) {
+	db, counter := testutil.NewStatementCountingTestDB(b)
+	h, e, _ := setupTestHandlerForDB(b, db)
+	execID, _ := setupAPIChatStatusMarkerFixture(b, h, db, 25, true)
+
+	b.Run("full_row_n_plus_one", func(b *testing.B) {
+		counter.Reset()
+		counter.SetEnabled(true)
+		serveAPIChatMessageStatusBaselineNPlusOne(b, h, e, execID)
+		counter.SetEnabled(false)
+		statementCount := len(counter.Statements())
+
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			serveAPIChatMessageStatusBaselineNPlusOne(b, h, e, execID)
+		}
+		b.ReportMetric(float64(statementCount), "sqlite-statements/op")
+	})
+
+	b.Run("compact_batched", func(b *testing.B) {
+		counter.Reset()
+		counter.SetEnabled(true)
+		serveAPIChatMessageStatusCompact(b, h, e, execID)
+		counter.SetEnabled(false)
+		statementCount := len(counter.Statements())
+
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			serveAPIChatMessageStatusCompact(b, h, e, execID)
+		}
+		b.ReportMetric(float64(statementCount), "sqlite-statements/op")
+	})
+}
+
+func setupAPIChatStatusMarkerFixture(tb testing.TB, h *Handler, db *sql.DB, markerCount int, large bool) (string, []string) {
+	tb.Helper()
+	ctx := context.Background()
+	agent := createAgentTB(tb, h.llmConfigRepo)
+	project := createProjectTB(tb, h, "API Chat Status Marker Project")
+
+	largeTaskPayload := "task prompt"
+	if large {
+		largeTaskPayload = strings.Repeat("large task payload ", 4096)
+	}
+	taskIDs := make([]string, 0, markerCount)
+	for i := 0; i < markerCount; i++ {
+		task := createTaskTB(tb, h, project.ID, fmt.Sprintf("Referenced Task %02d", i), func(tk *models.Task) {
+			tk.Category = models.CategoryBacklog
+			tk.Status = models.StatusPending
+			tk.Prompt = largeTaskPayload
+			tk.ChainConfig = largeTaskPayload
+			tk.SwarmConfig = largeTaskPayload
+		})
+		taskIDs = append(taskIDs, task.ID)
+	}
+	chatMarkerTask := createTaskTB(tb, h, project.ID, "Referenced Chat Task", func(tk *models.Task) {
+		tk.Category = models.CategoryChat
+		tk.Status = models.StatusCompleted
+		tk.Prompt = largeTaskPayload
+		tk.ChainConfig = largeTaskPayload
+		tk.SwarmConfig = largeTaskPayload
+	})
+	chatTask := createTaskTB(tb, h, project.ID, "Status Chat Execution", func(tk *models.Task) {
+		tk.Category = models.CategoryChat
+		tk.Status = models.StatusCompleted
+		tk.AgentID = &agent.ID
+		tk.Prompt = largeTaskPayload
+	})
+
+	var output strings.Builder
+	expected := make([]string, 0, markerCount+1)
+	for i, taskID := range taskIDs {
+		fmt.Fprintf(&output, "created task %02d [TASK_ID:%s]\n", i, taskID)
+		expected = append(expected, taskID)
+		if i == 5 {
+			fmt.Fprintf(&output, "duplicate marker [TASK_ID:%s]\n", taskIDs[0])
+			expected = append(expected, taskIDs[0])
+		}
+	}
+	fmt.Fprintf(&output, "chat task should be hidden [TASK_ID:%s]\n", chatMarkerTask.ID)
+	fmt.Fprintln(&output, "missing task should be hidden [TASK_ID:missing-task-id]")
+
+	promptSent := "chat prompt"
+	if large {
+		promptSent = strings.Repeat("large prompt sent ", 8192)
+	}
+	exec := &models.Execution{TaskID: chatTask.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: promptSent}
+	require.NoError(tb, h.execRepo.Create(ctx, exec))
+	require.NoError(tb, h.execRepo.Complete(ctx, exec.ID, models.ExecCompleted, output.String(), "", 123, 4567))
+	require.NoError(tb, setAPIChatStatusHeavyExecutionFields(ctx, db, exec.ID))
+	return exec.ID, expected
+}
+
+func setAPIChatStatusHeavyExecutionFields(ctx context.Context, db *sql.DB, execID string) error {
+	largeReasoning := strings.Repeat("large reasoning content ", 8192)
+	largeDiff := strings.Repeat("large diff output ", 8192)
+	_, err := db.ExecContext(ctx, `UPDATE executions SET reasoning_content = ?, diff_output = ? WHERE id = ?`, largeReasoning, largeDiff, execID)
+	return err
+}
+
+func serveAPIChatMessageStatusCompact(tb testing.TB, h *Handler, e *echo.Echo, execID string) *httptest.ResponseRecorder {
+	tb.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/api/chat/message/"+execID, nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("id")
+	c.SetParamValues(execID)
+	require.NoError(tb, h.APIChatMessageStatus(c))
+	return rec
+}
+
+func serveAPIChatMessageStatusBaselineNPlusOne(tb testing.TB, h *Handler, e *echo.Echo, execID string) *httptest.ResponseRecorder {
+	tb.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/api/chat/message/"+execID, nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	exec, err := h.execRepo.GetByID(req.Context(), execID)
+	require.NoError(tb, err)
+	require.NotNil(tb, exec)
+
+	resp := ChatMessageStatusResponse{MessageID: exec.ID}
+	switch exec.Status {
+	case models.ExecCompleted:
+		resp.Status = "completed"
+		resp.Response = exec.Output
+		resp.TokensUsed = exec.TokensUsed
+		resp.DurationMs = exec.DurationMs
+		for _, taskID := range extractTaskIDsFromOutput(exec.Output) {
+			if task, taskErr := h.taskRepo.GetByID(req.Context(), taskID); taskErr == nil && task != nil && task.Category != models.CategoryChat {
+				resp.TaskIDs = append(resp.TaskIDs, taskID)
+			}
+		}
+	case models.ExecFailed:
+		resp.Status = "failed"
+		resp.Error = exec.ErrorMessage
+		resp.DurationMs = exec.DurationMs
+	case models.ExecCancelled:
+		resp.Status = "cancelled"
+		resp.Error = exec.ErrorMessage
+		resp.Response = exec.Output
+		resp.DurationMs = exec.DurationMs
+	default:
+		resp.Status = "processing"
+		if exec.Output != "" {
+			resp.Response = exec.Output
+		}
+	}
+	require.NoError(tb, c.JSON(http.StatusOK, resp))
+	return rec
+}
+
+func assertAPIChatStatusCompactStatements(t *testing.T, statements []string, wantTaskQueries int) {
+	t.Helper()
+	statusQueries := 0
+	taskQueries := 0
+	for _, statement := range statements {
+		normalized := strings.ToLower(strings.Join(strings.Fields(statement), " "))
+		if strings.Contains(normalized, "from executions where id = ?") {
+			statusQueries++
+			projection := strings.Split(normalized, " from executions where id = ?")[0]
+			if !strings.Contains(projection, "select id, status") {
+				t.Fatalf("API Chat status query does not use compact execution projection: %s", statement)
+			}
+			for _, forbidden := range []string{"prompt_sent", "reasoning_content", "diff_output"} {
+				if strings.Contains(projection, forbidden) {
+					t.Fatalf("API Chat status query selected forbidden column %q: %s", forbidden, statement)
+				}
+			}
+		}
+		if strings.Contains(normalized, "select id from tasks where id in") && strings.Contains(normalized, "category != ?") {
+			taskQueries++
+		}
+		if strings.Contains(normalized, "from tasks where id = ?") {
+			t.Fatalf("API Chat status used per-marker full task lookup: %s", statement)
+		}
+	}
+	if statusQueries != 1 {
+		t.Fatalf("API Chat status execution queries = %d, want 1; statements: %#v", statusQueries, statements)
+	}
+	if taskQueries != wantTaskQueries {
+		t.Fatalf("API Chat status task filter queries = %d, want %d; statements: %#v", taskQueries, wantTaskQueries, statements)
+	}
 }
 
 func TestAPIChatMessageStatus_Failed(t *testing.T) {

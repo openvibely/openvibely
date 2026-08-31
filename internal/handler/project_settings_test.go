@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"bytes"
 	"context"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -55,15 +57,7 @@ func TestProjectSettings_EndToEnd(t *testing.T) {
 		nil, // schedulerSvc
 		nil, // alertSvc
 		nil, // upcomingSvc
-		nil, // workflowSvc
-		nil, // collisionSvc
 		nil, // insightsSvc
-		nil, // architectSvc
-		nil, // backlogSvc
-		nil, // autonomousTriggerSvc
-		nil, // trendSvc
-		nil, // templateSvc
-		nil, // patternSvc
 		llmConfigRepo,
 		taskRepo,
 		scheduleRepo,
@@ -298,6 +292,123 @@ func TestProjectSettings_EndToEnd(t *testing.T) {
 }
 
 // TestNewProjectDialog tests the new project creation dialog endpoint
+func TestProjectDialogsUseCompactDefaultModelProjection(t *testing.T) {
+	t.Setenv("OPENVIBELY_ENABLE_LOCAL_REPO_PATH", "true")
+
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
+	ctx := context.Background()
+	if _, err := db.Exec(`DELETE FROM agent_configs`); err != nil {
+		t.Fatalf("clear model configs: %v", err)
+	}
+
+	largeHiddenField := strings.Repeat("hidden-project-dialog-model-field", 4096)
+	globalDefault := &models.LLMConfig{
+		Name: "Project Dialog Global Default", Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodOAuth,
+		Model: "global-default-model", APIKey: "global-secret-key", OAuthAccessToken: "global-secret-token",
+		OAuthRefreshToken: "global-secret-refresh", OAuthClientSecret: "global-secret-client",
+		OAuthAuthorizeURL: "https://auth.example.com/authorize", OAuthTokenURL: "https://auth.example.com/token",
+		OllamaBaseURL: "http://localhost:11434", BaseURL: "https://example.com/v1/", ModelsURL: "https://example.com/models",
+		ExtraHeadersJSON: `{"X-Secret":"value"}`, ExtraBodyJSON: largeHiddenField,
+		CustomAuthConfigJSON: `{"signing_secret":"secret"}`, CustomAuthStateJSON: `{"access":"secret"}`,
+		MixtureConfigJSON: `{"large":"` + largeHiddenField + `"}`, MaxWorkers: 3, WorkerTimeout: 99, IsDefault: true,
+	}
+	if err := llmConfigRepo.Create(ctx, globalDefault); err != nil {
+		t.Fatalf("create global default model: %v", err)
+	}
+	projectDefault := &models.LLMConfig{
+		Name: "Project Dialog Project Default", Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodAPIKey,
+		Model: "project-default-model", APIKey: "project-secret-key", BaseURL: "https://project.example.com/v1/",
+		ExtraHeadersJSON: `{"Authorization":"secret"}`, ExtraBodyJSON: largeHiddenField,
+		CustomAuthConfigJSON: `{"secret":"config"}`, CustomAuthStateJSON: `{"secret":"state"}`,
+		MixtureConfigJSON: `{"large":"` + largeHiddenField + `"}`,
+	}
+	if err := llmConfigRepo.Create(ctx, projectDefault); err != nil {
+		t.Fatalf("create project default model: %v", err)
+	}
+	project := &models.Project{Name: "Compact Dialog Project", RepoPath: t.TempDir(), DefaultAgentConfigID: &projectDefault.ID}
+	if err := h.projectSvc.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	t.Run("new project dialog", func(t *testing.T) {
+		counter.Reset()
+		counter.SetEnabled(true)
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/projects/new", nil)
+		e.ServeHTTP(rec, req)
+		counter.SetEnabled(false)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET /projects/new = %d body=%s", rec.Code, rec.Body.String())
+		}
+		body := rec.Body.String()
+		if !strings.Contains(body, `Project Dialog Global Default (openai_compatible/global-default-model)`) ||
+			!strings.Contains(body, `Project Dialog Project Default (openai_compatible/project-default-model)`) ||
+			!strings.Contains(body, `[global default]`) {
+			t.Fatalf("new dialog did not preserve model labels/default marker: %s", body)
+		}
+		assertProjectDialogModelProjection(t, counter.Statements())
+		assertProjectDialogHiddenModelFieldsAbsent(t, body, largeHiddenField)
+	})
+
+	t.Run("edit project dialog", func(t *testing.T) {
+		counter.Reset()
+		counter.SetEnabled(true)
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/projects/"+project.ID+"/edit", nil)
+		e.ServeHTTP(rec, req)
+		counter.SetEnabled(false)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET /projects/:id/edit = %d body=%s", rec.Code, rec.Body.String())
+		}
+		body := rec.Body.String()
+		if !strings.Contains(body, `value="`+projectDefault.ID+`" selected`) {
+			t.Fatalf("edit dialog did not select project default model %s: %s", projectDefault.ID, body)
+		}
+		if !strings.Contains(body, `Project Dialog Global Default (openai_compatible/global-default-model)`) || !strings.Contains(body, `[global default]`) {
+			t.Fatalf("edit dialog did not preserve global default label/marker: %s", body)
+		}
+		assertProjectDialogModelProjection(t, counter.Statements())
+		assertProjectDialogHiddenModelFieldsAbsent(t, body, largeHiddenField)
+	})
+}
+
+func assertProjectDialogModelProjection(t *testing.T, statements []string) {
+	t.Helper()
+	var modelQueries []string
+	for _, statement := range statements {
+		stmt := strings.ToLower(strings.Join(strings.Fields(statement), " "))
+		if strings.Contains(stmt, " from agent_configs ") {
+			modelQueries = append(modelQueries, statement)
+		}
+	}
+	if len(modelQueries) != 1 {
+		t.Fatalf("agent_configs statements = %#v, want exactly one compact dialog model query", modelQueries)
+	}
+	stmt := strings.ToLower(strings.Join(strings.Fields(modelQueries[0]), " "))
+	projection := strings.Split(stmt, " from agent_configs ")[0]
+	if !strings.Contains(projection, "select id, name, provider, model, is_default") {
+		t.Fatalf("project dialog model projection = %q, want id/name/provider/model/is_default in %s", projection, modelQueries[0])
+	}
+	for _, forbidden := range []string{"reasoning_effort", "api_key", "oauth_access_token", "oauth_refresh_token", "oauth_client_secret", "oauth_authorize_url", "oauth_token_url", "oauth_scopes", "ollama_base_url", "base_url", "models_url", "auth_header_name", "auth_header_value_prefix", "extra_headers_json", "extra_body_json", "custom_auth_config_json", "custom_auth_state_json", "mixture_config_json", "created_at", "updated_at", "max_workers", "worker_timeout", "auto_start_tasks"} {
+		if strings.Contains(projection, forbidden) {
+			t.Fatalf("project dialog query selected forbidden column %q: %s", forbidden, modelQueries[0])
+		}
+	}
+	if !strings.Contains(stmt, "order by is_default desc, name asc") {
+		t.Fatalf("project dialog query must preserve default/name ordering: %s", modelQueries[0])
+	}
+}
+
+func assertProjectDialogHiddenModelFieldsAbsent(t *testing.T, body, largeHiddenField string) {
+	t.Helper()
+	for _, hidden := range []string{largeHiddenField, "global-secret-key", "global-secret-token", "global-secret-refresh", "global-secret-client", "project-secret-key", "hidden-project-dialog-model-field", "auth.example.com", "project.example.com", "X-Secret", "signing_secret"} {
+		if strings.Contains(body, hidden) {
+			t.Fatalf("project dialog rendered hidden model field %q", hidden)
+		}
+	}
+}
+
 func TestNewProjectDialog(t *testing.T) {
 	t.Setenv("OPENVIBELY_ENABLE_LOCAL_REPO_PATH", "true")
 
@@ -317,15 +428,7 @@ func TestNewProjectDialog(t *testing.T) {
 		nil, // schedulerSvc
 		nil, // alertSvc
 		nil, // upcomingSvc
-		nil, // workflowSvc
-		nil, // collisionSvc
 		nil, // insightsSvc
-		nil, // architectSvc
-		nil, // backlogSvc
-		nil, // autonomousTriggerSvc
-		nil, // trendSvc
-		nil, // templateSvc
-		nil, // patternSvc
 		llmConfigRepo,
 		nil, // taskRepo
 		nil, // scheduleRepo
@@ -453,15 +556,7 @@ func TestProjectDialogs_GitHubOnlyModeHidesLocalSourceOption(t *testing.T) {
 		nil, // schedulerSvc
 		nil, // alertSvc
 		nil, // upcomingSvc
-		nil, // workflowSvc
-		nil, // collisionSvc
 		nil, // insightsSvc
-		nil, // architectSvc
-		nil, // backlogSvc
-		nil, // autonomousTriggerSvc
-		nil, // trendSvc
-		nil, // templateSvc
-		nil, // patternSvc
 		llmConfigRepo,
 		nil, // taskRepo
 		nil, // scheduleRepo
@@ -546,7 +641,7 @@ func TestProjectDialogs_GitHubOnlyModeHidesLocalSourceOption(t *testing.T) {
 			Name:        "GitHub Project",
 			Description: "github",
 			RepoPath:    "/repos/github-project",
-			RepoURL:     "https://github.com/owner/repo",
+			RepoURL:     "https://github.example.com/owner/repo",
 		}
 		if err := projectSvc.Create(ctx, project); err != nil {
 			t.Fatalf("failed to create project: %v", err)
@@ -563,7 +658,7 @@ func TestProjectDialogs_GitHubOnlyModeHidesLocalSourceOption(t *testing.T) {
 		}
 		body := rec.Body.String()
 		// Should show GitHub URL input directly (no selector needed)
-		if !strings.Contains(body, `value="https://github.com/owner/repo"`) {
+		if !strings.Contains(body, `value="https://github.example.com/owner/repo"`) {
 			t.Fatal("edit dialog should pre-fill existing GitHub URL")
 		}
 		// Should NOT have a local path option
@@ -594,15 +689,7 @@ func TestUpdateProject_SwitchLocalToGitHub_LocalDisabled(t *testing.T) {
 		nil, // schedulerSvc
 		nil, // alertSvc
 		nil, // upcomingSvc
-		nil, // workflowSvc
-		nil, // collisionSvc
 		nil, // insightsSvc
-		nil, // architectSvc
-		nil, // backlogSvc
-		nil, // autonomousTriggerSvc
-		nil, // trendSvc
-		nil, // templateSvc
-		nil, // patternSvc
 		llmConfigRepo,
 		nil, // taskRepo
 		nil, // scheduleRepo
@@ -720,15 +807,7 @@ func TestProjectCreate_WithDefaultSettings(t *testing.T) {
 		nil, // schedulerSvc
 		nil, // alertSvc
 		nil, // upcomingSvc
-		nil, // workflowSvc
-		nil, // collisionSvc
 		nil, // insightsSvc
-		nil, // architectSvc
-		nil, // backlogSvc
-		nil, // autonomousTriggerSvc
-		nil, // trendSvc
-		nil, // templateSvc
-		nil, // patternSvc
 		llmConfigRepo,
 		nil, // taskRepo
 		nil, // scheduleRepo
@@ -967,15 +1046,7 @@ func TestProjectCreate_WithSettings(t *testing.T) {
 		nil, // schedulerSvc
 		nil, // alertSvc
 		nil, // upcomingSvc
-		nil, // workflowSvc
-		nil, // collisionSvc
 		nil, // insightsSvc
-		nil, // architectSvc
-		nil, // backlogSvc
-		nil, // autonomousTriggerSvc
-		nil, // trendSvc
-		nil, // templateSvc
-		nil, // patternSvc
 		llmConfigRepo,
 		nil, // taskRepo
 		nil, // scheduleRepo
@@ -1053,6 +1124,7 @@ func TestProjectCreate_WithSettings(t *testing.T) {
 
 func TestDeleteProject(t *testing.T) {
 	t.Setenv("OPENVIBELY_ENABLE_LOCAL_REPO_PATH", "true")
+	useTempUploadsDir(t)
 
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
@@ -1073,6 +1145,7 @@ func TestDeleteProject(t *testing.T) {
 	llmSvc.SetLLMCaller(testutil.NewMockLLMCaller())
 	workerSvc := service.NewWorkerService(llmSvc, 0, projectRepo)
 	taskSvc := service.NewTaskService(taskRepo, attachmentRepo, workerSvc)
+	taskSvc.SetDeletionUploadsDir(uploadsDir)
 
 	h := New(
 		projectSvc,
@@ -1082,15 +1155,7 @@ func TestDeleteProject(t *testing.T) {
 		nil, // schedulerSvc
 		nil, // alertSvc
 		nil, // upcomingSvc
-		nil, // workflowSvc
-		nil, // collisionSvc
 		nil, // insightsSvc
-		nil, // architectSvc
-		nil, // backlogSvc
-		nil, // autonomousTriggerSvc
-		nil, // trendSvc
-		nil, // templateSvc
-		nil, // patternSvc
 		llmConfigRepo,
 		taskRepo,
 		scheduleRepo,
@@ -1163,6 +1228,139 @@ func TestDeleteProject(t *testing.T) {
 		}
 		if task != nil {
 			t.Error("expected task to be cascade-deleted but it still exists")
+		}
+	})
+
+	t.Run("DeleteProjectCleansPendingAttachmentSessionAndRejectsLateUpload", func(t *testing.T) {
+		project := &models.Project{
+			Name:        "Attachment Cleanup Project",
+			Description: "Owns a pending task-thread attachment",
+			RepoPath:    "/tmp/delete-attachments",
+		}
+		if err := projectSvc.Create(ctx, project); err != nil {
+			t.Fatalf("failed to create project: %v", err)
+		}
+
+		_, err := db.ExecContext(ctx,
+			`INSERT INTO tasks (id, project_id, title, prompt) VALUES ('task-del-attachment', ?, 'Task With Attachment', 'do something')`,
+			project.ID)
+		if err != nil {
+			t.Fatalf("failed to create task: %v", err)
+		}
+
+		sessionID := uploadChatAttachmentForTest(t, e, h, "note.txt", []byte("pending content"), "text/plain", "0123456789abcdef0123456789abcdef")
+		pendingDir := filepath.Join(uploadsDir, "chat", "pending", sessionID)
+		if _, err := os.Stat(pendingDir); err != nil {
+			t.Fatalf("expected pending upload directory before delete: %v", err)
+		}
+
+		_, err = db.ExecContext(ctx, `
+				INSERT INTO thread_inputs
+					(id, scope, project_id, task_id, input_mode, input_status, content, attachment_session_id, queue_position)
+				VALUES ('project-delete-pending-input', 'task_thread', ?, 'task-del-attachment', 'queued', 'pending', 'queued with file', ?, 1)`, project.ID, sessionID)
+		if err != nil {
+			t.Fatalf("failed to create pending task-thread input: %v", err)
+		}
+
+		req := httptest.NewRequest(http.MethodDelete, "/projects/"+project.ID, nil)
+		req.Header.Set("HX-Request", "true")
+		rec := httptest.NewRecorder()
+		c := e.NewContext(req, rec)
+		c.SetParamNames("id")
+		c.SetParamValues(project.ID)
+
+		if err := h.DeleteProject(c); err != nil {
+			t.Fatalf("DeleteProject failed: %v", err)
+		}
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected status 200, got %d", rec.Code)
+		}
+
+		var retiredCount int
+		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM retired_attachment_sessions WHERE session_id = ?`, sessionID).Scan(&retiredCount); err != nil {
+			t.Fatalf("failed to count retired session: %v", err)
+		}
+		if retiredCount != 1 {
+			t.Fatalf("expected session %s to be retired once, got %d", sessionID, retiredCount)
+		}
+		var inputCount int
+		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM thread_inputs WHERE id = 'project-delete-pending-input'`).Scan(&inputCount); err != nil {
+			t.Fatalf("failed to count thread inputs: %v", err)
+		}
+		if inputCount != 0 {
+			t.Fatalf("expected thread input to be deleted, got %d", inputCount)
+		}
+		if _, err := os.Stat(pendingDir); !os.IsNotExist(err) {
+			t.Fatalf("expected pending upload directory to be removed, stat err=%v", err)
+		}
+
+		lateBody := &bytes.Buffer{}
+		writer := multipart.NewWriter(lateBody)
+		part, err := writer.CreateFormFile("files", "late.txt")
+		if err != nil {
+			t.Fatalf("failed to create late upload part: %v", err)
+		}
+		if _, err := part.Write([]byte("late content")); err != nil {
+			t.Fatalf("failed to write late upload: %v", err)
+		}
+		if err := writer.WriteField("attachment_session_id", sessionID); err != nil {
+			t.Fatalf("failed to write late session field: %v", err)
+		}
+		if err := writer.Close(); err != nil {
+			t.Fatalf("failed to close late upload writer: %v", err)
+		}
+		lateReq := httptest.NewRequest(http.MethodPost, "/chat/attachments", lateBody)
+		lateReq.Header.Set("Content-Type", writer.FormDataContentType())
+		lateRec := httptest.NewRecorder()
+		lateCtx := e.NewContext(lateReq, lateRec)
+		err = h.UploadChatAttachment(lateCtx)
+		if err == nil {
+			t.Fatal("expected late upload to fail")
+		}
+		httpErr, ok := err.(*echo.HTTPError)
+		if !ok {
+			t.Fatalf("expected echo.HTTPError for late upload, got %T", err)
+		}
+		if httpErr.Code != http.StatusConflict {
+			t.Fatalf("expected late upload status 409, got %d", httpErr.Code)
+		}
+		if _, err := os.Stat(pendingDir); !os.IsNotExist(err) {
+			t.Fatalf("late upload recreated pending directory, stat err=%v", err)
+		}
+	})
+
+	t.Run("DeleteProjectCancelsRunningAndQueuedTasks", func(t *testing.T) {
+		project := &models.Project{Name: "Cancel Tasks Project", Description: "Has active tasks", RepoPath: "/tmp/delete-cancel"}
+		if err := projectSvc.Create(ctx, project); err != nil {
+			t.Fatalf("failed to create project: %v", err)
+		}
+		_, err := db.ExecContext(ctx, `
+				INSERT INTO tasks (id, project_id, title, category, status, prompt) VALUES
+				('task-del-running', ?, 'Running Task', 'active', 'running', 'run'),
+				('task-del-queued', ?, 'Queued Task', 'active', 'queued', 'queue')`, project.ID, project.ID)
+		if err != nil {
+			t.Fatalf("failed to create cancellable tasks: %v", err)
+		}
+
+		runningCancelled := false
+		queuedCancelled := false
+		workerSvc.RegisterCancel("task-del-running", func() { runningCancelled = true })
+		workerSvc.RegisterCancel("task-del-queued", func() { queuedCancelled = true })
+
+		req := httptest.NewRequest(http.MethodDelete, "/projects/"+project.ID, nil)
+		rec := httptest.NewRecorder()
+		c := e.NewContext(req, rec)
+		c.SetParamNames("id")
+		c.SetParamValues(project.ID)
+
+		if err := h.DeleteProject(c); err != nil {
+			t.Fatalf("DeleteProject failed: %v", err)
+		}
+		if !runningCancelled {
+			t.Fatal("expected running task cancel hook to be called")
+		}
+		if !queuedCancelled {
+			t.Fatal("expected queued task cancel hook to be called")
 		}
 	})
 
@@ -1276,8 +1474,19 @@ func TestDeleteProject(t *testing.T) {
 		if !strings.Contains(body, "Delete Project") {
 			t.Error("edit dialog for non-default project should contain 'Delete Project' button")
 		}
-		if !strings.Contains(body, "Delete Permanently") {
-			t.Error("edit dialog for non-default project should contain confirmation modal")
+		for _, want := range []string{
+			`id="delete_project_confirm_modal" class="modal"`,
+			`data-destructive-confirm-dialog`,
+			`window.openDestructiveConfirmDialog = function(dialogID, nameID, displayName)`,
+			`onclick="window.openDestructiveConfirmDialog('delete_project_confirm_modal', '', '')"`,
+			`onclick="delete_project_confirm_modal.close()"`,
+			`Delete Permanently`,
+			`var editModal = document.getElementById('edit_project_modal');`,
+			`htmx.ajax('DELETE', '/projects/' + projectID, {target: 'body', swap: 'none'});`,
+		} {
+			if !strings.Contains(body, want) {
+				t.Errorf("edit dialog for non-default project should contain %q", want)
+			}
 		}
 	})
 
@@ -1320,15 +1529,7 @@ func TestGlobalPersonality(t *testing.T) {
 		nil, // schedulerSvc
 		nil, // alertSvc
 		nil, // upcomingSvc
-		nil, // workflowSvc
-		nil, // collisionSvc
 		nil, // insightsSvc
-		nil, // architectSvc
-		nil, // backlogSvc
-		nil, // autonomousTriggerSvc
-		nil, // trendSvc
-		nil, // templateSvc
-		nil, // patternSvc
 		llmConfigRepo,
 		nil, // taskRepo
 		nil, // scheduleRepo

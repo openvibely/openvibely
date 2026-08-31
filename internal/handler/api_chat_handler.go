@@ -17,6 +17,7 @@ import (
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/service"
+	"github.com/openvibely/openvibely/web/templates/components"
 )
 
 const (
@@ -122,15 +123,18 @@ type ChatMessageStatusResponse struct {
 // @Failure 500 {object} ErrorResponse "Internal server error"
 // @Router /api/chat/message [post]
 func (h *Handler) APIChatMessage(c echo.Context) error {
-	// Parse multipart form (limit total request body to prevent abuse)
-	if err := c.Request().ParseMultipartForm(apiMaxFileSize * int64(apiMaxFilesPerReq)); err != nil {
-		// If it's not multipart, try regular form
-		if c.Request().Header.Get("Content-Type") == "" || strings.HasPrefix(c.Request().Header.Get("Content-Type"), "application/x-www-form-urlencoded") {
-			// That's OK, no attachments
-		} else {
+	contentType := c.Request().Header.Get("Content-Type")
+	if isMultipartContentType(contentType) {
+		if _, err := parseBoundedMultipartForm(c, apiMaxFileSize, apiMaxFilesPerReq); err != nil {
 			applog.Infof("[handler] APIChatMessage error parsing form: %v", err)
+			if httpErr, ok := err.(*echo.HTTPError); ok && httpErr.Code == http.StatusRequestEntityTooLarge {
+				return c.JSON(http.StatusRequestEntityTooLarge, map[string]string{"error": "request body too large"})
+			}
 			return c.JSON(http.StatusBadRequest, map[string]string{"error": "failed to parse request form"})
 		}
+	} else if contentType != "" && !strings.HasPrefix(contentType, "application/x-www-form-urlencoded") {
+		applog.Infof("[handler] APIChatMessage unsupported form content type: %s", contentType)
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "failed to parse request form"})
 	}
 
 	message := c.FormValue("message")
@@ -153,19 +157,20 @@ func (h *Handler) APIChatMessage(c echo.Context) error {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "project not found"})
 	}
 
-	// Auto-select an agent
-	agents, err := h.llmConfigRepo.List(c.Request().Context())
-	if err != nil || len(agents) == 0 {
+	// Auto-select an agent from compact selection/context rows. Provider
+	// execution below hydrates the chosen row through GetByID before use.
+	availableModels, err := h.llmConfigRepo.ListChatSelectionOptions(c.Request().Context())
+	if err != nil || len(availableModels) == 0 {
 		applog.Infof("[handler] APIChatMessage no agents available: %v", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "no agents available"})
 	}
 	complexity := service.AnalyzeComplexity(message)
-	result := service.SelectLLM(complexity, agents)
-	var agent *models.LLMConfig
+	result := service.SelectLLM(complexity, availableModels)
+	var selectedModel *models.LLMConfig
 	if result != nil {
-		agent = result.LLMConfig
+		selectedModel = result.LLMConfig
 	} else {
-		agent = &agents[0]
+		selectedModel = &availableModels[0]
 	}
 
 	// Note: Interactive chat intentionally bypasses task worker capacity checks.
@@ -226,7 +231,7 @@ func (h *Handler) APIChatMessage(c echo.Context) error {
 			Scope:               models.ThreadInputScopeChat,
 			ProjectID:           projectID,
 			RunExecutionID:      activeChatExec.ID,
-			AgentConfigID:       agent.ID,
+			AgentConfigID:       selectedModel.ID,
 			InputMode:           models.ThreadInputModeQueued,
 			InputStatus:         models.ThreadInputPending,
 			Content:             message,
@@ -235,23 +240,21 @@ func (h *Handler) APIChatMessage(c echo.Context) error {
 		}
 		if err := h.threadInputRepo.CreateQueued(c.Request().Context(), queued); err != nil {
 			applog.Infof("[handler] APIChatMessage error creating queued input: %v", err)
-			if attachmentSessionID != "" {
-				pendingDir := filepath.Join(uploadsDir, "chat", "pending", attachmentSessionID)
-				if cleanupErr := os.RemoveAll(pendingDir); cleanupErr != nil {
-					applog.Infof("[handler] APIChatMessage error removing unpublished queued attachment session %s: %v", attachmentSessionID, cleanupErr)
-				}
+			if cleanupErr := h.cleanupUnpublishedPendingAttachmentSession(c.Request().Context(), attachmentSessionID); cleanupErr != nil {
+				applog.Infof("[handler] APIChatMessage error cleaning unpublished queued attachment session %s: %v", attachmentSessionID, cleanupErr)
 			}
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to queue chat message"})
 		}
 		if h.chatBroadcaster != nil {
 			h.chatBroadcaster.Publish(events.ChatEvent{
-				Type:      events.ChatNewMessage,
-				ProjectID: projectID,
-				ExecID:    queued.ID,
-				Message:   message,
-				Source:    "api",
-				AgentName: agent.Name,
-				Queued:    true,
+				Type:           events.ChatNewMessage,
+				ProjectID:      projectID,
+				ExecID:         queued.ID,
+				Message:        message,
+				Source:         "api",
+				AgentName:      selectedModel.Name,
+				Queued:         true,
+				HasAttachments: queued.AttachmentSessionID != "",
 			})
 		}
 		return c.JSON(http.StatusCreated, ChatMessageAcceptedResponse{
@@ -260,6 +263,12 @@ func (h *Handler) APIChatMessage(c echo.Context) error {
 			StatusURL: fmt.Sprintf("/api/chat/message/%s", queued.ID),
 			Queued:    true,
 		})
+	}
+
+	agent, err := h.llmConfigRepo.GetByID(c.Request().Context(), selectedModel.ID)
+	if err != nil || agent == nil {
+		applog.Infof("[handler] APIChatMessage selected agent unavailable: id=%s err=%v", selectedModel.ID, err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "selected agent unavailable"})
 	}
 
 	// Create a task record for the chat message
@@ -320,7 +329,7 @@ func (h *Handler) APIChatMessage(c echo.Context) error {
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to create upload directory"})
 		}
 
-		var textContents []string
+		var contextFiles []chatAttachmentModelContextFile
 		for _, sf := range savedFiles {
 			filename := filepath.Base(sf.header.Filename)
 			// Generate unique filename to avoid collisions
@@ -371,33 +380,22 @@ func (h *Handler) APIChatMessage(c echo.Context) error {
 				continue
 			}
 
-			attachmentURLs = append(attachmentURLs, fmt.Sprintf("/chat/attachments/%s/download", chatAtt.ID))
+			attachmentURLs = append(attachmentURLs, components.ChatAttachmentDownloadURL(chatAtt.ID, projectID))
 
-			// Categorize for AI processing
-			if isImageFile(filename) {
-				imageAttachments = append(imageAttachments, models.Attachment{
-					FileName:  filename,
-					FilePath:  destPath,
-					MediaType: mediaType,
-					FileSize:  sf.header.Size,
-				})
-			} else {
-				info, _ := os.Stat(destPath)
-				if info != nil && info.Size() <= maxTextAttachmentSize {
-					content, readErr := os.ReadFile(destPath)
-					if readErr == nil {
-						textContents = append(textContents, fmt.Sprintf("\nFile: %s\n```\n%s\n```\n", filename, string(content)))
-					}
-				} else {
-					textContents = append(textContents, fmt.Sprintf("\nFile: %s (attached, %d bytes - too large to include inline)\n", filename, sf.header.Size))
-				}
-			}
+			contextFiles = append(contextFiles, chatAttachmentModelContextFile{
+				FileName:  filename,
+				FilePath:  destPath,
+				MediaType: mediaType,
+				FileSize:  sf.header.Size,
+			})
 
 			applog.Infof("[handler] APIChatMessage saved attachment file=%s size=%d", filename, sf.header.Size)
 		}
 
-		if len(textContents) > 0 {
-			attachmentContext = "\n\n--- Attached Files ---\n" + strings.Join(textContents, "")
+		var contextErr error
+		attachmentContext, imageAttachments, contextErr = buildChatAttachmentModelContext(contextFiles, chatAttachmentModelContextOptions{IgnoreReadErrors: true})
+		if contextErr != nil {
+			applog.Infof("[handler] APIChatMessage error building attachment context: %v", contextErr)
 		}
 	}
 
@@ -409,7 +407,7 @@ func (h *Handler) APIChatMessage(c echo.Context) error {
 	}
 	priorHistory := filterChatHistory(chatHistory, exec.ID)
 	// Build task context using shared function (same as /chat and Telegram)
-	taskContext := h.buildChatContext(c.Request().Context(), projectID, agents)
+	taskContext := h.buildChatContext(c.Request().Context(), projectID, availableModels)
 
 	// Combine context (including personality if set)
 	fullContext := taskContext
@@ -423,14 +421,14 @@ func (h *Handler) APIChatMessage(c echo.Context) error {
 		fullContext += personalityContext
 	}
 
-	// Get working directory for CLI
+	// Get working directory for the provider call.
 	workDir := project.RepoPath
 
 	// Process the LLM call asynchronously using the shared streaming response processor.
 	// This ensures consistent behavior (runtime action tools, proper completion ordering,
 	// ChatResponseDone broadcast) regardless of whether the message came from web, API, or Telegram.
 	// The client receives 201 immediately and polls GET /api/chat/message/:id for the result.
-	go h.processStreamingResponse(streamingResponseParams{
+	if err := h.startStreamingResponse(streamingResponseParams{
 		ExecID:           exec.ID,
 		TaskID:           task.ID,
 		Message:          message,
@@ -443,7 +441,10 @@ func (h *Handler) APIChatMessage(c echo.Context) error {
 		ImageAttachments: imageAttachments,
 		IsTaskFollowup:   false,
 		Surface:          chatcontrol.SurfaceAPI,
-	})
+	}); err != nil {
+		c.Response().Header().Set("Retry-After", "30")
+		return echo.NewHTTPError(http.StatusServiceUnavailable, err.Error())
+	}
 
 	applog.Infof("[handler] APIChatMessage exec=%s accepted for async processing status=%s", exec.ID, execStatus)
 	// Return 201 immediately with the message ID for polling
@@ -476,7 +477,7 @@ func (h *Handler) APIChatMessageStatus(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "message id is required"})
 	}
 
-	exec, err := h.execRepo.GetByID(c.Request().Context(), execID)
+	exec, err := h.execRepo.GetAPIChatStatusByID(c.Request().Context(), execID)
 	if err != nil {
 		applog.Infof("[handler] APIChatMessageStatus exec=%s error: %v", execID, err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to retrieve message status"})
@@ -490,7 +491,7 @@ func (h *Handler) APIChatMessageStatus(c echo.Context) error {
 			}
 			if input != nil {
 				if input.InputStatus == models.ThreadInputApplied && input.RunExecutionID != "" {
-					exec, err = h.execRepo.GetByID(c.Request().Context(), input.RunExecutionID)
+					exec, err = h.execRepo.GetAPIChatStatusByID(c.Request().Context(), input.RunExecutionID)
 					if err != nil {
 						applog.Infof("[handler] APIChatMessageStatus promoted exec=%s error: %v", input.RunExecutionID, err)
 						return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to retrieve promoted message status"})
@@ -524,8 +525,13 @@ func (h *Handler) apiChatExecutionStatus(c echo.Context, exec *models.Execution)
 		resp.TokensUsed = exec.TokensUsed
 		resp.DurationMs = exec.DurationMs
 
-		for _, taskID := range extractTaskIDsFromOutput(exec.Output) {
-			if task, taskErr := h.taskRepo.GetByID(c.Request().Context(), taskID); taskErr == nil && task != nil && task.Category != models.CategoryChat {
+		taskIDs := extractTaskIDsFromOutput(exec.Output)
+		allowedTaskIDs, taskErr := h.taskRepo.FilterNonChatTaskIDs(c.Request().Context(), taskIDs)
+		if taskErr != nil {
+			applog.Infof("[handler] APIChatMessageStatus task filter error: %v", taskErr)
+		}
+		for _, taskID := range taskIDs {
+			if allowedTaskIDs[taskID] {
 				resp.TaskIDs = append(resp.TaskIDs, taskID)
 			}
 		}

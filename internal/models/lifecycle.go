@@ -44,8 +44,12 @@ type AgentLifecycleHook struct {
 	PermissionsJSON string                  `json:"permissions_json,omitempty"`
 	RunPolicyJSON   string                  `json:"run_policy_json,omitempty"`
 	ScheduleJSON    string                  `json:"schedule_json,omitempty"`
-	CreatedAt       time.Time               `json:"created_at"`
-	UpdatedAt       time.Time               `json:"updated_at"`
+	// PayloadJSON declares which lifecycle context blocks this hook's skill
+	// reads, as {"blocks":["conversation_transcript",...]}. Empty or absent
+	// means the hook receives every block the slot produced.
+	PayloadJSON string    `json:"payload_json,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 // LifecycleExecutionStatus reports the result of a hook execution. These
@@ -132,6 +136,16 @@ type LifecycleExecution struct {
 	IdempotencyKey  string                   `json:"idempotency_key,omitempty"`
 	StartedAt       time.Time                `json:"started_at"`
 	CompletedAt     *time.Time               `json:"completed_at,omitempty"`
+}
+
+// LifecycleExecutionPage is one bounded slice of a task's lifecycle activity.
+// Items are newest-first for the initial and older directions. Newer pages are
+// returned oldest-first so callers can merge them ahead of an existing window
+// without changing the authoritative (started_at DESC, id DESC) display order.
+type LifecycleExecutionPage struct {
+	Items      []LifecycleExecution `json:"items"`
+	HasMore    bool                 `json:"has_more"`
+	NextCursor string               `json:"next_cursor,omitempty"`
 }
 
 // LifecycleExecutionEvent records one prompt-safe trace event emitted while a

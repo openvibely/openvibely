@@ -27,6 +27,9 @@ lifecycle_hooks:
     blocking: true
     output_contract: activity_summary
     run_policy: always
+    payload:
+      - conversation_transcript
+      - task_goal
     permissions:
       read_task_prompt: true
       read_task_execution: true

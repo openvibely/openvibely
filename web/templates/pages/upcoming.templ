@@ -2,7 +2,9 @@ package pages
 
 import (
 	"fmt"
+
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/openvibely/openvibely/web/templates/layout"
 )
 
@@ -222,45 +224,6 @@ templ upcomingContent(upcoming *models.Upcoming, currentProjectID string) {
 			</div>
 		}
 
-		<!-- Backlog Health -->
-		if upcoming.BacklogHealth != nil {
-			<div class="card bg-base-100 shadow-sm border border-base-300 mb-6">
-				<div class="card-body p-4">
-					<h3 class="card-title text-lg">Backlog Health</h3>
-					<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mt-2">
-						<div>
-							<span class="text-xs opacity-60">Total Tasks</span>
-							<div class="font-semibold">{ fmt.Sprintf("%d", upcoming.BacklogHealth.TotalTasks) }</div>
-						</div>
-						<div>
-							<span class="text-xs opacity-60">Avg Age</span>
-							<div class="font-semibold">{ fmt.Sprintf("%.1f days", upcoming.BacklogHealth.AvgAgeDays) }</div>
-						</div>
-						<div>
-							<span class="text-xs opacity-60">Stale (>30 days)</span>
-							<div class="font-semibold text-error">{ fmt.Sprintf("%d", upcoming.BacklogHealth.StaleCount) }</div>
-						</div>
-						<div>
-							<span class="text-xs opacity-60">Completion Velocity</span>
-							<div class="font-semibold">{ fmt.Sprintf("%.1f/day", upcoming.BacklogHealth.CompletionVelocity) }</div>
-						</div>
-					</div>
-					<!-- Health Score Bar -->
-					<div class="mt-3">
-						<div class="flex justify-between text-xs mb-1">
-							<span>Health Score</span>
-							<span>{ fmt.Sprintf("%.0f%%", upcoming.BacklogHealth.HealthScore) }</span>
-						</div>
-						<progress
-							class={ "progress w-full", templ.KV("progress-success", upcoming.BacklogHealth.HealthScore >= 70), templ.KV("progress-warning", upcoming.BacklogHealth.HealthScore >= 40 && upcoming.BacklogHealth.HealthScore < 70), templ.KV("progress-error", upcoming.BacklogHealth.HealthScore < 40) }
-							value={ fmt.Sprintf("%.0f", upcoming.BacklogHealth.HealthScore) }
-							max="100"
-						></progress>
-					</div>
-				</div>
-			</div>
-		}
-
 		<!-- Running Tasks -->
 		if len(upcoming.RunningTasks) > 0 {
 			<div class="mb-6">
@@ -348,8 +311,8 @@ templ upcomingTaskCardWithOrder(bt models.UpcomingTask, status string, currentPr
 					if bt.Task.Priority > 0 {
 						<span class="badge badge-sm badge-ghost">P{ fmt.Sprintf("%d", bt.Task.Priority) }</span>
 					}
-					if bt.Task.Tag != "" {
-						<span class={ "badge badge-sm", tagBadgeClass(bt.Task.Tag) }>{ string(bt.Task.Tag) }</span>
+					if components.TagLabel(bt.Task.Tag) != "" {
+						<span class={ "badge badge-sm", components.TagBadgeClass(bt.Task.Tag) }>{ components.TagLabel(bt.Task.Tag) }</span>
 					}
 					<span class="text-xs opacity-50">{ bt.AgentName }</span>
 				</div>
@@ -399,17 +362,6 @@ templ AISummaryResult(summary string, err error) {
 				<p class="text-sm opacity-80">{ summary }</p>
 			</div>
 		</div>
-	}
-}
-
-func tagBadgeClass(tag models.TaskTag) string {
-	switch tag {
-	case models.TagFeature:
-		return "badge-success"
-	case models.TagBug:
-		return "badge-error"
-	default:
-		return "badge-ghost"
 	}
 }
 

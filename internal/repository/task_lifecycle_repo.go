@@ -11,7 +11,7 @@ func (r *TaskRepo) UpdateAgentDefinition(ctx context.Context, taskID string, age
 	if taskID == "" {
 		return fmt.Errorf("updating task agent definition: missing task id")
 	}
-	_, err := r.db.ExecContext(ctx,
+	_, err := execBoundSQLite(ctx, r.db,
 		`UPDATE tasks SET agent_definition_id = ?, updated_at = datetime('now') WHERE id = ?`,
 		agentDefinitionID, taskID)
 	if err != nil {

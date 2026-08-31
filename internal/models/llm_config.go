@@ -20,7 +20,7 @@ const (
 type AuthMethod string
 
 const (
-	AuthMethodCLI    AuthMethod = "cli"     // Use Claude/Codex CLI (default)
+	AuthMethodCLI    AuthMethod = "cli"     // Legacy value for retired CLI auth.
 	AuthMethodOAuth  AuthMethod = "oauth"   // Use OAuth tokens (Claude Max or OpenAI)
 	AuthMethodAPIKey AuthMethod = "api_key" // Use API key directly (OpenAI)
 )
@@ -71,7 +71,15 @@ type LLMConfig struct {
 	DefaultMaxTokens      int    `json:"default_max_tokens,omitempty"`
 	TokenExchangeFormat   string `json:"token_exchange_format,omitempty"`
 	TokenRefreshFormat    string `json:"token_refresh_format,omitempty"`
+	CustomAuthConfigJSON  string `json:"-"`
+	CustomAuthStateJSON   string `json:"-"`
+	OAuthConfigRevision   int64  `json:"-"`
 	MixtureConfigJSON     string `json:"mixture_config_json,omitempty"`
+
+	// Bounded Models-page summary fields populated by the compact card query.
+	MixtureAggregatorID    string `json:"-"`
+	MixtureAggregatorLabel string `json:"-"`
+	MixtureReferenceCount  int    `json:"-"`
 
 	// Auto-start configuration
 	AutoStartTasks bool `json:"auto_start_tasks"` // When enabled, tasks created with this model start immediately
@@ -79,7 +87,8 @@ type LLMConfig struct {
 
 // IsOAuth returns true if this config uses OAuth authentication.
 func (c *LLMConfig) IsOAuth() bool {
-	return c.AuthMethod == AuthMethodOAuth && (c.Provider == ProviderAnthropic || c.Provider == ProviderOpenAI)
+	return c.AuthMethod == AuthMethodOAuth &&
+		(c.Provider == ProviderAnthropic || c.Provider == ProviderOpenAI || c.Provider == ProviderOpenAICompatible)
 }
 
 // IsAnthropicAPIKey returns true if this is an Anthropic config using API key authentication.
@@ -96,6 +105,9 @@ func (c *LLMConfig) IsAnthropicCLI() bool {
 func (c *LLMConfig) HasValidOAuthToken() bool {
 	if !c.IsOAuth() || c.OAuthAccessToken == "" {
 		return false
+	}
+	if c.OAuthExpiresAt == 0 {
+		return c.Provider == ProviderOpenAICompatible
 	}
 	return c.OAuthExpiresAt > time.Now().UnixMilli()
 }
@@ -133,7 +145,7 @@ func (c *LLMConfig) IsCallableMixtureSlot() bool {
 	case ProviderAnthropic:
 		return c.IsAnthropicAPIKey() || c.IsOAuth()
 	case ProviderOpenAICompatible:
-		return c.IsOpenAICompatibleAPIKey()
+		return c.IsOpenAICompatibleAPIKey() || c.IsOAuth()
 	case ProviderOllama, ProviderTest:
 		return true
 	default:
@@ -162,8 +174,13 @@ func (c *LLMConfig) GetAuthHeaderName() string {
 
 // GetAuthHeaderValuePrefix returns the inference auth header value prefix.
 func (c *LLMConfig) GetAuthHeaderValuePrefix() string {
-	if strings.TrimSpace(c.AuthHeaderValuePrefix) != "" {
+	if c.AuthHeaderValuePrefix != "" {
 		return c.AuthHeaderValuePrefix
+	}
+	// A configured header name with an empty prefix intentionally requests a
+	// raw API-key value. Legacy rows have both fields empty and retain Bearer.
+	if strings.TrimSpace(c.AuthHeaderName) != "" {
+		return ""
 	}
 	return "Bearer "
 }

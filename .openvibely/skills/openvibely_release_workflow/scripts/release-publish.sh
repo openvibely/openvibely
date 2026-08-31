@@ -62,6 +62,11 @@ if ! is_valid_release_version "$VERSION"; then
     fail "Invalid semver: '$RAW_VERSION'."
 fi
 
+REPO_ROOT_FOR_TOOLS="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null || true)"
+if [[ -n "$REPO_ROOT_FOR_TOOLS" ]]; then
+    export PATH="${REPO_ROOT_FOR_TOOLS}/.tools/gh/bin:${PATH}"
+fi
+
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || fail "Not in a git repository.")"
 DIST_DIR="${2:-${DIST_DIR:-${REPO_ROOT}/dist/${VERSION}}}"
 
@@ -84,6 +89,30 @@ if [[ ! -f "$SUMS_FILE" ]]; then
     fi
 fi
 
+require_release_artifact() {
+    local name="$1"
+    if [[ -f "${DIST_DIR}/${name}" ]]; then
+        return
+    fi
+    if [[ "${DRY_RUN:-0}" == "1" ]]; then
+        warn "${name} not present because this is a non-writing dry run; using the planned path."
+        return
+    fi
+    fail "Required release artifact not found: ${DIST_DIR}/${name}. Run the complete release-build workflow first."
+}
+require_release_artifact "openvibely_${VERSION}_darwin_amd64_server.zip"
+require_release_artifact "openvibely_${VERSION}_darwin_arm64_server.zip"
+require_release_artifact "openvibely_${VERSION}_linux_amd64_server.tar.gz"
+require_release_artifact "openvibely_${VERSION}_linux_arm64_server.tar.gz"
+require_release_artifact "openvibely_${VERSION}_windows_amd64_server.zip"
+require_release_artifact "openvibely_${VERSION}_windows_arm64_server.zip"
+require_release_artifact "OpenVibely_${VERSION}_darwin_amd64.app.zip"
+require_release_artifact "OpenVibely_${VERSION}_darwin_arm64.app.zip"
+require_release_artifact "openvibely_${VERSION}_windows_amd64_desktop.zip"
+require_release_artifact "openvibely_${VERSION}_windows_arm64_desktop.zip"
+require_release_artifact "openvibely_${VERSION}_linux_amd64_desktop.tar.gz"
+require_release_artifact "openvibely_${VERSION}_linux_arm64_desktop.tar.gz"
+
 ###############################################################################
 # 2. GitHub CLI authentication
 ###############################################################################
@@ -95,7 +124,7 @@ if [[ "${DRY_RUN:-0}" == "1" ]]; then
         warn "GitHub CLI not found; continuing non-publishing dry run."
     fi
 else
-    command -v gh &>/dev/null || fail "GitHub CLI (gh) not found. Install: https://cli.github.com"
+    command -v gh &>/dev/null || fail "GitHub CLI (gh) not found. Run check-release-signing.sh --setup to install local release tooling."
     gh auth status &>/dev/null || fail "GitHub CLI not authenticated. Run: gh auth login"
     log "GitHub auth: OK"
 fi
@@ -166,20 +195,22 @@ done < <(find "$DIST_DIR" -maxdepth 1 \( -name "*.zip" -o -name "*.tar.gz" \) | 
 
 if [[ ${#ARTIFACTS[@]} -eq 0 && "${DRY_RUN:-0}" == "1" ]]; then
     ARTIFACTS+=(
-        "${DIST_DIR}/openvibely_${VERSION}_darwin_amd64_server.tar.gz"
-        "${DIST_DIR}/openvibely_${VERSION}_darwin_arm64_server.tar.gz"
+        "${DIST_DIR}/openvibely_${VERSION}_darwin_amd64_server.zip"
+        "${DIST_DIR}/openvibely_${VERSION}_darwin_arm64_server.zip"
         "${DIST_DIR}/openvibely_${VERSION}_linux_amd64_server.tar.gz"
         "${DIST_DIR}/openvibely_${VERSION}_linux_arm64_server.tar.gz"
         "${DIST_DIR}/openvibely_${VERSION}_windows_amd64_server.zip"
+        "${DIST_DIR}/openvibely_${VERSION}_windows_arm64_server.zip"
+        "${DIST_DIR}/openvibely_${VERSION}_windows_amd64_desktop.zip"
+        "${DIST_DIR}/openvibely_${VERSION}_windows_arm64_desktop.zip"
+        "${DIST_DIR}/openvibely_${VERSION}_linux_amd64_desktop.tar.gz"
+        "${DIST_DIR}/openvibely_${VERSION}_linux_arm64_desktop.tar.gz"
     )
     if [[ "$(uname -s)" == "Darwin" ]]; then
         ARTIFACTS+=(
             "${DIST_DIR}/OpenVibely_${VERSION}_darwin_amd64.app.zip"
             "${DIST_DIR}/OpenVibely_${VERSION}_darwin_arm64.app.zip"
         )
-    fi
-    if command -v x86_64-w64-mingw32-gcc &>/dev/null; then
-        ARTIFACTS+=("${DIST_DIR}/openvibely_${VERSION}_windows_amd64_desktop-cli.zip")
     fi
 fi
 
@@ -231,9 +262,14 @@ warn "=============================="
 warn "Docker image tagging and publishing requires a Docker Hub account with"
 warn "write access to openvibely/openvibely."
 warn ""
-warn "To publish the Docker image, run on your Docker-authenticated host:"
+warn "To publish the OpenVibely server and coding-agent image, run on your Docker-authenticated host:"
 warn ""
-info "  docker buildx build --platform linux/amd64,linux/arm64 \\"
+info "  docker buildx build --platform linux/amd64,linux/arm64 -f Dockerfile \\"
+info "      --build-arg VERSION=${VERSION} \\"
+info "      --build-arg COMMIT=$(git rev-parse HEAD) \\"
+info "      --build-arg BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ) \\"
+info "      --build-arg RELEASE_TRUST_ID=\${OPENVIBELY_RELEASE_KEY_ID:?set-release-key-id} \\"
+info "      --build-arg RELEASE_TRUST_VALUE=\${OPENVIBELY_RELEASE_PUBLIC_KEY:?set-release-public-key} \\"
 info "      -t openvibely/openvibely:${VERSION} \\"
 info "      -t openvibely/openvibely:latest \\"
 info "      --push ."

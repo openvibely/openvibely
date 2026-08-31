@@ -43,11 +43,11 @@ func TestLLMConfigRepo_CreateDefaultAuthMethod(t *testing.T) {
 	ctx := context.Background()
 
 	a := &models.LLMConfig{
-		Name:      "CLI Model",
+		Name:      "API Key Model",
 		Provider:  models.ProviderAnthropic,
 		Model:     "claude-sonnet-4-5-20250929",
 		MaxTokens: 4096,
-		// AuthMethod not set — should default to "cli"
+		// AuthMethod not set should default to API key.
 	}
 
 	if err := repo.Create(ctx, a); err != nil {
@@ -58,8 +58,8 @@ func TestLLMConfigRepo_CreateDefaultAuthMethod(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetByID: %v", err)
 	}
-	if got.AuthMethod != models.AuthMethodCLI {
-		t.Errorf("expected AuthMethod=cli, got %q", got.AuthMethod)
+	if got.AuthMethod != models.AuthMethodAPIKey {
+		t.Errorf("expected AuthMethod=api_key, got %q", got.AuthMethod)
 	}
 }
 
@@ -101,6 +101,17 @@ func TestLLMConfigRepo_UpdateOAuthTokens(t *testing.T) {
 	}
 }
 
+func TestLLMConfigRepo_UpdateOAuthTokensMissingConfigFails(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewLLMConfigRepo(db)
+	ctx := context.Background()
+
+	err := repo.UpdateOAuthTokens(ctx, "missing-model", "access-token", "refresh-token", 1900000000000)
+	if err == nil {
+		t.Fatal("expected UpdateOAuthTokens to fail when no config row is updated")
+	}
+}
+
 func TestLLMConfigRepo_UpdateClearsOAuthTokens(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewLLMConfigRepo(db)
@@ -121,8 +132,8 @@ func TestLLMConfigRepo_UpdateClearsOAuthTokens(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	// Switch to CLI auth method (should clear tokens when handler processes this)
-	a.AuthMethod = models.AuthMethodCLI
+	// Switch to API-key auth method (should clear tokens when handler processes this)
+	a.AuthMethod = models.AuthMethodAPIKey
 	a.OAuthAccessToken = ""
 	a.OAuthRefreshToken = ""
 	a.OAuthExpiresAt = 0
@@ -134,20 +145,20 @@ func TestLLMConfigRepo_UpdateClearsOAuthTokens(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetByID: %v", err)
 	}
-	if got.AuthMethod != models.AuthMethodCLI {
-		t.Errorf("expected AuthMethod=cli, got %q", got.AuthMethod)
+	if got.AuthMethod != models.AuthMethodAPIKey {
+		t.Errorf("expected AuthMethod=api_key, got %q", got.AuthMethod)
 	}
 	if got.OAuthAccessToken != "" {
 		t.Errorf("expected empty OAuthAccessToken after clearing, got %q", got.OAuthAccessToken)
 	}
 }
 
-func TestLLMConfigRepo_SeededDefaultHasCLIAuthMethod(t *testing.T) {
+func TestLLMConfigRepo_SeededDefaultHasAPIKeyAuthMethod(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewLLMConfigRepo(db)
 	ctx := context.Background()
 
-	// Migration 003 seeds a default Claude Max model config
+	// Test databases seed a default API-key model config.
 	def, err := repo.GetDefault(ctx)
 	if err != nil {
 		t.Fatalf("GetDefault: %v", err)
@@ -155,9 +166,8 @@ func TestLLMConfigRepo_SeededDefaultHasCLIAuthMethod(t *testing.T) {
 	if def == nil {
 		t.Fatal("expected seeded default model config, got nil")
 	}
-	// Seeded config should have cli auth method (default)
-	if def.AuthMethod != models.AuthMethodCLI {
-		t.Errorf("expected seeded default AuthMethod=cli, got %q", def.AuthMethod)
+	if def.AuthMethod != models.AuthMethodAPIKey {
+		t.Errorf("expected seeded default AuthMethod=api_key, got %q", def.AuthMethod)
 	}
 }
 

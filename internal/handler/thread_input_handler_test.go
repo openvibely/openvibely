@@ -139,6 +139,47 @@ func TestChatQueuedInputSteer_NonExistentID(t *testing.T) {
 	tc.Assert(rec).StatusCode(http.StatusConflict)
 }
 
+func TestChatQueuedInputSteer_WithAttachmentsShowsSteeringAttachmentIndicator(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	p := tc.CreateProject().Build()
+	task := tc.CreateTask(p.ID).WithCategory(models.CategoryChat).Build()
+	agent, _ := tc.llmConfigRepo.GetDefault(ctx)
+	if agent == nil {
+		t.Skip("no default agent configured")
+	}
+	exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "active"}
+	if err := tc.execRepo.Create(ctx, exec); err != nil {
+		t.Fatalf("create execution: %v", err)
+	}
+	queued := &models.ThreadInput{
+		Scope:               models.ThreadInputScopeChat,
+		ProjectID:           p.ID,
+		RunExecutionID:      exec.ID,
+		InputMode:           models.ThreadInputModeQueued,
+		InputStatus:         models.ThreadInputPending,
+		Content:             "convert attached queued chat",
+		AttachmentSessionID: "chat-convert-session",
+	}
+	if err := tc.handler.threadInputRepo.CreateQueued(ctx, queued); err != nil {
+		t.Fatalf("create queued input: %v", err)
+	}
+
+	rec := tc.HTMX().Post("/chat/queued/" + queued.ID + "/steer").Execute()
+	tc.Assert(rec).StatusCode(http.StatusOK)
+	body := rec.Body.String()
+	if !strings.Contains(body, "Steering pending") || !strings.Contains(body, "Attachments included") || !strings.Contains(body, `aria-label="Attachments included with this steering instruction"`) {
+		t.Fatalf("converted chat queued row should show steering attachment indicator, got: %q", body)
+	}
+	stored, err := tc.handler.threadInputRepo.GetByID(ctx, queued.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if stored == nil || stored.InputMode != models.ThreadInputModeSteering || stored.AttachmentSessionID != "chat-convert-session" {
+		t.Fatalf("converted row = %#v, want steering with attachment session", stored)
+	}
+}
+
 func TestTaskThreadQueuedInputSteer_NonExistentInput(t *testing.T) {
 	tc := NewTestContext(t)
 	p := tc.CreateProject().Build()

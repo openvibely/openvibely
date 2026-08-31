@@ -112,8 +112,6 @@ func TestAutomationDescriptionPromptExposesOnlyExecutableCustomCapabilities(t *t
 	snapshot.SupportedNodeTypes = []models.AutomationNodeType{models.AutomationNodeCondition, models.AutomationNodeAgentTask}
 	snapshot.SupportedRoles = []string{"implementation", "task", "vision_driver"}
 	snapshot.Agents = []models.AutomationCapabilityRef{{ID: "market-reader", Name: "Market Reader", Capabilities: []string{"WebSearch", "Read"}}}
-	snapshot.Skills = []models.AutomationCapabilityRef{{ID: "market-reader:private", Name: "Private skill"}}
-	snapshot.SourceFiles = []string{"SECRET.md"}
 	snapshot.ReusableResources = []models.AutomationCapabilityRef{{ID: "existing-task-id", Name: "Existing task"}}
 	snapshot.Integrations = map[string]models.AutomationIntegrationCapability{"native": {Configured: true}, "github": {Configured: false}}
 
@@ -179,11 +177,21 @@ func TestAutomationDescriptionPromptMatchesStrictCustomValidationContract(t *tes
 		require.Contains(t, prompt, "Native mailbox family")
 		require.Contains(t, prompt, "Human approval -> Approved inbox -> Implementation -> Outcome")
 		require.Contains(t, prompt, "Approved inbox is itself the scheduled Task")
+		require.Contains(t, prompt, "Process approved notifications owned by this same Automation in the current project")
+		require.Contains(t, prompt, "connected upstream producers are sources and context, not a graph-branch eligibility limit")
+		require.Contains(t, prompt, "durable project + Automation + notification ownership plus this current Native inbox execution")
+		require.NotContains(t, prompt, "Only process approved notifications created by connected upstream producers on that inbox's own approval branch in the same Automation")
+		require.NotContains(t, prompt, "exact trusted Automation/graph/branch provenance rather than content similarity or model-supplied metadata")
 		require.Contains(t, prompt, "Call list_alerts without project_id")
 		require.Contains(t, prompt, "Do not pass the read filter")
 		require.Contains(t, prompt, "runtime automatically uses this scheduled Task's persisted project")
 		require.Contains(t, prompt, "Never search for or reuse a project ID")
 		require.Contains(t, prompt, "GitHub mailbox family")
+		require.Contains(t, prompt, "process open issues assigned to the PAT owner or configured GitHub Authorized Users")
+		require.Contains(t, prompt, "whether the issue was created by this Automation or manually in GitHub")
+		require.Contains(t, prompt, "issue sources only, not as an eligibility limit")
+		require.NotContains(t, prompt, "only process assigned issues created by connected upstream producers on that inbox's own assignment branch in the same Automation")
+		require.NotContains(t, prompt, "exact trusted local Automation/graph/producer-branch creation records rather than labels or issue-content similarity")
 		require.Contains(t, prompt, "Never combine Native mailbox nodes and GitHub mailbox nodes in one custom graph")
 		require.Contains(t, prompt, "If requested work depends on an external capability")
 		require.Contains(t, prompt, "add an explicit warning")
@@ -493,8 +501,15 @@ type automationCapabilityGitHubResolverStub struct {
 func (s *automationCapabilityGitHubResolverStub) ResolveRepo(_ context.Context, repoURL, repoPath string) (*GitHubRepoRef, error) {
 	s.resolvedURL = repoURL
 	s.resolvedPath = repoPath
-	return &GitHubRepoRef{Owner: "openvibely", Name: "local-project", FullName: "openvibely/local-project"}, nil
+	return &GitHubRepoRef{
+		Owner:    "openvibely",
+		Name:     "local-project",
+		FullName: "openvibely/local-project",
+		HTMLURL:  "https://github.com/openvibely/local-project",
+	}, nil
 }
+
+func (s *automationCapabilityGitHubResolverStub) GlobalAPIEndpoint(context.Context) string { return "" }
 
 func TestAutomationCapabilitySnapshotAcceptsAuthorizedUserAndLocalGitHubRemote(t *testing.T) {
 	db := testutil.NewTestDB(t)

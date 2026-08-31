@@ -3,6 +3,7 @@ package components
 import (
 	"bytes"
 	"context"
+	"os"
 	"strings"
 	"testing"
 
@@ -233,6 +234,47 @@ func TestKanbanBoard_DoesNotRenderActiveCancelledTaskAsQueued(t *testing.T) {
 	}
 }
 
+func TestKanbanBoard_RendersCapacityQueuedAutomationInPendingDropzone(t *testing.T) {
+	tasks := []models.Task{
+		{
+			ID:                       "automation-capacity-queued",
+			ProjectID:                "default",
+			Title:                    "Capacity Queued Automation",
+			Category:                 models.CategoryScheduled,
+			Status:                   models.StatusPending,
+			AutomationCapacityQueued: true,
+		},
+		{
+			ID:         "automation-future",
+			ProjectID:  "default",
+			Title:      "Future Automation Schedule",
+			Category:   models.CategoryScheduled,
+			Status:     models.StatusPending,
+			CreatedVia: "automation:automation-1:future",
+		},
+		{
+			ID:        "ordinary-scheduled",
+			ProjectID: "default",
+			Title:     "Ordinary Scheduled Task",
+			Category:  models.CategoryScheduled,
+			Status:    models.StatusPending,
+		},
+	}
+
+	var buf bytes.Buffer
+	if err := KanbanBoard(tasks, "default", "", "", nil, nil).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render kanban board: %v", err)
+	}
+	body := buf.String()
+	pending := activeStatusDropZone(t, body, "pending")
+	if !strings.Contains(pending, "Capacity Queued Automation") {
+		t.Fatalf("capacity-queued Automation task should render in Active pending dropzone, got %s", pending)
+	}
+	if strings.Contains(body, "Ordinary Scheduled Task") {
+		t.Fatalf("ordinary scheduled task should remain managed by the Schedule page, got %s", body)
+	}
+}
+
 func TestKanbanBoard_RendersSwarmParentWithRunningChildInProgress(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -314,6 +356,275 @@ func activeStatusDropZone(t *testing.T, body, status string) string {
 	return body[start : start+len(marker)+next]
 }
 
+func TestTaskCard_LazilyLoadsAuthoritativeMergeOptions(t *testing.T) {
+	task := models.Task{
+		ID:        "merge-card-task",
+		ProjectID: "project-1",
+		Title:     "Merge card task",
+		Category:  models.CategoryCompleted,
+		Status:    models.StatusCompleted,
+	}
+	var buf bytes.Buffer
+	if err := TaskCard(task, "project-1", "completed", nil, nil).Render(context.Background(), &buf); err != nil {
+		t.Fatal(err)
+	}
+	body := buf.String()
+	for _, want := range []string{
+		`data-task-card-menu-trigger`,
+		`data-task-card-merge-options`,
+		`hx-get="/tasks/merge-card-task/card/merge-options?project_id=project-1"`,
+		`hx-trigger="task-card-menu-open"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("expected task card merge menu contract %q, body=%s", want, body)
+		}
+	}
+}
+
+func TestTaskCardMergeOptionsRemainRefreshableAndExposeCreatePR(t *testing.T) {
+	task := models.Task{ID: "merge-card-task", ProjectID: "project-1", Title: "Merge card task", MergeTargetBranch: "main"}
+	var buf bytes.Buffer
+	if err := TaskCardMergeOptions(&task, "project-1", true, false, "", nil, true, "").Render(context.Background(), &buf); err != nil {
+		t.Fatal(err)
+	}
+	body := buf.String()
+	for _, want := range []string{
+		`hx-get="/tasks/merge-card-task/card/merge-options?project_id=project-1"`,
+		`hx-trigger="task-card-menu-open"`,
+		`data-task-card-pr-action`,
+		`data-merge-type="pr"`,
+		`Create PR`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("expected authoritative card action contract %q, body=%s", want, body)
+		}
+	}
+}
+
+func TestTaskCardMergeOptionsExposeSharedLocalActionMetadata(t *testing.T) {
+	task := models.Task{ID: "merge-card-task", ProjectID: "project-1", Title: "Merge card task", MergeTargetBranch: "main"}
+	var buf bytes.Buffer
+	if err := TaskCardMergeOptions(&task, "project-1", true, true, "", nil, true, "").Render(context.Background(), &buf); err != nil {
+		t.Fatal(err)
+	}
+	body := buf.String()
+	for _, want := range []string{
+		`data-merge-type="merge"`,
+		`data-merge-type="ff"`,
+		`data-merge-type="rebase"`,
+		`data-merge-type="squash"`,
+		`data-merge-label="Merge commit"`,
+		`data-merge-label="Fast-forward only"`,
+		`data-merge-label="Rebase"`,
+		`data-merge-label="Squash merge"`,
+		`data-merge-endpoint="merge"`,
+		`data-merge-endpoint="rebase"`,
+		`data-target-branch="main"`,
+		`Rebase onto main`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("expected shared card merge metadata %q, body=%s", want, body)
+		}
+	}
+}
+
+func TestTaskWorktreeMergeActionsDefineCanonicalLocalMapping(t *testing.T) {
+	actions := TaskWorktreeMergeActions()
+	want := []struct {
+		mergeType        string
+		label            string
+		endpoint         string
+		includeTarget    bool
+		requiresRebase   bool
+		includeMergeType bool
+	}{
+		{mergeType: "merge", label: "Merge commit", endpoint: "merge", includeMergeType: true},
+		{mergeType: "ff", label: "Fast-forward only", endpoint: "merge", includeMergeType: true},
+		{mergeType: "rebase", label: "Rebase", endpoint: "rebase", includeTarget: true, requiresRebase: true},
+		{mergeType: "squash", label: "Squash merge", endpoint: "merge", includeMergeType: true},
+	}
+	if len(actions) != len(want) {
+		t.Fatalf("expected %d local merge actions, got %d", len(want), len(actions))
+	}
+	for i, expected := range want {
+		got := actions[i]
+		if got.MergeType != expected.mergeType || got.Label != expected.label || got.Endpoint != expected.endpoint || got.IncludeTarget != expected.includeTarget || got.RequiresRebaseEligibility != expected.requiresRebase || got.IncludeMergeType != expected.includeMergeType {
+			t.Fatalf("action %d mismatch: got %#v, want %#v", i, got, expected)
+		}
+	}
+	if got := actions[2].DisplayLabel("develop"); got != "Rebase onto develop" {
+		t.Fatalf("target-aware Rebase label = %q", got)
+	}
+	if got := TaskWorktreeMergeTarget(&models.Task{MergeTargetBranch: "develop"}); got != "develop" {
+		t.Fatalf("target display = %q", got)
+	}
+	if got := TaskWorktreeMergeTarget(nil); got != "main" {
+		t.Fatalf("empty target display = %q", got)
+	}
+}
+func TestTaskCardMergeOptionsClosedHistoricalPRExposesCreatePR(t *testing.T) {
+	task := models.Task{ID: "merge-card-task", ProjectID: "project-1", Title: "Merge card task", MergeTargetBranch: "main"}
+	closedPR := &models.TaskPullRequest{TaskID: task.ID, PRNumber: 17, PRURL: "https://github.com/example/repo/pull/17", PRState: "closed"}
+	var buf bytes.Buffer
+	if err := TaskCardMergeOptions(&task, "project-1", true, false, "", closedPR, true, "").Render(context.Background(), &buf); err != nil {
+		t.Fatal(err)
+	}
+	body := buf.String()
+	if strings.Contains(body, "View PR #17") {
+		t.Fatalf("closed historical PR must not suppress current Create PR action: %s", body)
+	}
+	for _, want := range []string{`data-task-card-pr-action`, `data-merge-type="pr"`, `Create PR`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("closed historical PR should expose %q: %s", want, body)
+		}
+	}
+}
+
+func TestTaskCard_GoalMetIconMatchesDocumentedStandardGlyph(t *testing.T) {
+	doc, err := os.ReadFile("../../../docs/task-status-icon-options.html")
+	if err != nil {
+		t.Fatalf("read task status icon options: %v", err)
+	}
+	for _, want := range []string{
+		`{ key: 'goal-met', label: 'Goal met' }`,
+		`standardGoal: {`,
+		`'goal-met': '<circle cx="12" cy="8.5" r="7.5"/><path d="m8 14-2 8 6-3.5 6 3.5-2-8"/><path d="m9 8.5 2 2 4-4"/>'`,
+		`goalSource: 'standardGoal'`,
+	} {
+		if !bytes.Contains(doc, []byte(want)) {
+			t.Fatalf("task status icon options must define the standard goal-met glyph %q", want)
+		}
+	}
+
+	task := models.Task{ID: "goal-met", ProjectID: "default", Title: "Met goal", Category: models.CategoryCompleted, Status: models.StatusCompleted, GoalMet: true}
+	var rendered bytes.Buffer
+	if err := TaskCard(task, "default", "completed", nil, nil).Render(context.Background(), &rendered); err != nil {
+		t.Fatalf("render goal-met task card: %v", err)
+	}
+	for _, want := range []string{
+		`<circle cx="12" cy="8.5" r="7.5" stroke-width="2"></circle>`,
+		`d="m8 14-2 8 6-3.5 6 3.5-2-8"`,
+		`d="m9 8.5 2 2 4-4"`,
+	} {
+		if !strings.Contains(rendered.String(), want) {
+			t.Fatalf("rendered goal-met icon must use documented geometry %q, got %s", want, rendered.String())
+		}
+	}
+}
+
+func TestTaskCard_RendersPersistentAccessibleStateIconBeforeTitle(t *testing.T) {
+	tests := []struct {
+		name        string
+		status      models.TaskStatus
+		category    models.TaskCategory
+		mergeStatus models.MergeStatus
+		goalMet     bool
+		wantState   string
+		wantLabel   string
+	}{
+		{name: "backlog pending", status: models.StatusPending, category: models.CategoryBacklog, wantState: "pending", wantLabel: "Pending"},
+		{name: "active pending", status: models.StatusPending, category: models.CategoryActive, wantState: "queued", wantLabel: "Queued"},
+		{name: "queued", status: models.StatusQueued, category: models.CategoryActive, wantState: "queued", wantLabel: "Queued"},
+		{name: "running", status: models.StatusRunning, category: models.CategoryActive, wantState: "running", wantLabel: "In Progress"},
+		{name: "completed", status: models.StatusCompleted, category: models.CategoryCompleted, wantState: "completed", wantLabel: "Completed"},
+		{name: "completed with met goal", status: models.StatusCompleted, category: models.CategoryCompleted, goalMet: true, wantState: "goal-met", wantLabel: "Goal met"},
+		{name: "failed", status: models.StatusFailed, category: models.CategoryBacklog, wantState: "failed", wantLabel: "Failed"},
+		{name: "cancelled", status: models.StatusCancelled, category: models.CategoryBacklog, wantState: "cancelled", wantLabel: "Cancelled"},
+		{name: "blocked", status: models.StatusBlocked, category: models.CategoryActive, wantState: "blocked", wantLabel: "Waiting for Parent"},
+		{name: "merged overrides completion", status: models.StatusCompleted, category: models.CategoryCompleted, mergeStatus: models.MergeStatusMerged, wantState: "merged", wantLabel: "Merged"},
+		{name: "merged overrides met goal", status: models.StatusCompleted, category: models.CategoryCompleted, mergeStatus: models.MergeStatusMerged, goalMet: true, wantState: "merged", wantLabel: "Merged"},
+		{name: "stale met goal does not override running", status: models.StatusRunning, category: models.CategoryActive, goalMet: true, wantState: "running", wantLabel: "In Progress"},
+		{name: "stale merged does not override running", status: models.StatusRunning, category: models.CategoryActive, mergeStatus: models.MergeStatusMerged, wantState: "running", wantLabel: "In Progress"},
+		{name: "stale merged does not override failed", status: models.StatusFailed, category: models.CategoryBacklog, mergeStatus: models.MergeStatusMerged, wantState: "failed", wantLabel: "Failed"},
+		{name: "stale merged does not override cancelled", status: models.StatusCancelled, category: models.CategoryBacklog, mergeStatus: models.MergeStatusMerged, wantState: "cancelled", wantLabel: "Cancelled"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			task := models.Task{
+				ID:          "state-card",
+				ProjectID:   "default",
+				Title:       "State title",
+				Category:    tt.category,
+				Status:      tt.status,
+				MergeStatus: tt.mergeStatus,
+				GoalMet:     tt.goalMet,
+			}
+			var buf bytes.Buffer
+			if err := TaskCard(task, "default", string(tt.category), nil, nil).Render(context.Background(), &buf); err != nil {
+				t.Fatalf("render task card: %v", err)
+			}
+			body := buf.String()
+			icon := `data-task-state-icon data-task-state="` + tt.wantState + `"`
+			if !strings.Contains(body, icon) {
+				t.Fatalf("expected %s state icon, got %s", tt.wantState, body)
+			}
+			for _, want := range []string{
+				`role="img"`,
+				`aria-label="Task state: ` + tt.wantLabel + `"`,
+				`data-tip="` + tt.wantLabel + `"`,
+				`tooltip-right`,
+				`aria-hidden="true"`,
+			} {
+				if !strings.Contains(body, want) {
+					t.Fatalf("expected accessible state icon markup %q, got %s", want, body)
+				}
+			}
+			if strings.Contains(body, `tooltip-bottom`) {
+				t.Fatalf("state tooltip must open inward from the card's left edge, got %s", body)
+			}
+			if !strings.Contains(body, `</span><span data-task-title class="min-w-0 flex-1 break-words sm:truncate">State title</span>`) {
+				t.Fatalf("state icon must render immediately before the shrink-safe title, got %s", body)
+			}
+		})
+	}
+}
+
+func TestKanbanBoard_RendersStateIconsInEveryCardVariant(t *testing.T) {
+	tasks := []models.Task{
+		{ID: "backlog-failed", ProjectID: "default", Title: "Failed card", Category: models.CategoryBacklog, Status: models.StatusFailed},
+		{ID: "active-queued", ProjectID: "default", Title: "Queued card", Category: models.CategoryActive, Status: models.StatusQueued},
+		{ID: "active-running", ProjectID: "default", Title: "Running card", Category: models.CategoryActive, Status: models.StatusRunning},
+		{ID: "completed-merged", ProjectID: "default", Title: "Merged card", Category: models.CategoryCompleted, Status: models.StatusCompleted, MergeStatus: models.MergeStatusMerged},
+	}
+	var buf bytes.Buffer
+	if err := KanbanBoard(tasks, "default", "", "", nil, nil).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render kanban board: %v", err)
+	}
+	body := buf.String()
+	for _, state := range []string{"failed", "queued", "running", "merged"} {
+		if !strings.Contains(body, `data-task-state-icon data-task-state="`+state+`"`) {
+			t.Fatalf("expected %s icon in rendered board variants, got %s", state, body)
+		}
+	}
+}
+
+func TestTaskCard_UsesGrabCursorForDrag(t *testing.T) {
+	task := models.Task{
+		ID:        "task-1",
+		ProjectID: "default",
+		Title:     "Drag me",
+		Category:  models.CategoryBacklog,
+		Status:    models.StatusPending,
+	}
+
+	var buf bytes.Buffer
+	if err := TaskCard(task, "default", "", nil, nil).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render task card: %v", err)
+	}
+	body := buf.String()
+	for _, want := range []string{"cursor-grab", "active:cursor-grabbing", "drag-cursor-surface", `onpointerdown="handleTaskPointerDown(event)"`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("expected pointer-draggable task card to contain %q, got %s", want, body)
+		}
+	}
+	for _, forbidden := range []string{"cursor-move", `draggable="true"`, `ondragstart=`, `ondragend=`, "drag-card-preview", "drag-cursor-indicator"} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("task card should preserve native drag with grab cursor styling, found %q in %s", forbidden, body)
+		}
+	}
+}
+
 func TestTaskCard_HasMobileSafeActionsAndReadableText(t *testing.T) {
 	task := models.Task{
 		ID:        "task-1",
@@ -329,9 +640,25 @@ func TestTaskCard_HasMobileSafeActionsAndReadableText(t *testing.T) {
 		t.Fatalf("render task card: %v", err)
 	}
 	body := buf.String()
+	cardStart := strings.Index(body, `id="task-task-1"`)
+	if cardStart == -1 {
+		t.Fatalf("expected rendered task card root, got %s", body)
+	}
+	cardEnd := strings.Index(body[cardStart:], `>`)
+	if cardEnd == -1 {
+		t.Fatalf("expected rendered task card opening tag, got %s", body)
+	}
+	cardTag := body[cardStart : cardStart+cardEnd]
+	if !strings.Contains(cardTag, "overflow-visible") {
+		t.Fatalf("task card root must allow kebab menus to render outside card bounds, got %s", cardTag)
+	}
+	if strings.Contains(cardTag, "overflow-hidden") {
+		t.Fatalf("task card root must not clip kebab menus with overflow-hidden, got %s", cardTag)
+	}
+
 	for _, want := range []string{
 		"min-w-0",
-		"overflow-hidden",
+		"overflow-visible",
 		"min-h-11",
 		"h-11",
 		"w-11",
@@ -414,5 +741,40 @@ func TestTaskCard_RendersGoalBadge(t *testing.T) {
 	}
 	if !strings.Contains(body, ">Goal<") {
 		t.Fatalf("expected goal badge label in task card, got %s", body)
+	}
+}
+
+func TestTaskCard_RendersPriorityBadgeLabels(t *testing.T) {
+	for _, tt := range []struct {
+		priority int
+		label    string
+	}{
+		{priority: 1, label: "Low"},
+		{priority: 2, label: "Normal"},
+		{priority: 3, label: "High"},
+		{priority: 4, label: "Urgent"},
+	} {
+		t.Run(tt.label, func(t *testing.T) {
+			if got := PriorityLabel(tt.priority); got != tt.label {
+				t.Fatalf("test expectation drifted from PriorityLabel(%d): got %q want %q", tt.priority, got, tt.label)
+			}
+			task := models.Task{
+				ID:        "task-priority-badge",
+				ProjectID: "default",
+				Title:     "Priority badge task",
+				Category:  models.CategoryBacklog,
+				Status:    models.StatusPending,
+				Priority:  tt.priority,
+			}
+
+			var buf bytes.Buffer
+			if err := TaskCard(task, "default", "", nil, nil).Render(context.Background(), &buf); err != nil {
+				t.Fatalf("render task card: %v", err)
+			}
+			want := ">" + tt.label + "</span>"
+			if !strings.Contains(buf.String(), want) {
+				t.Fatalf("expected priority badge label %q in %s", tt.label, buf.String())
+			}
+		})
 	}
 }

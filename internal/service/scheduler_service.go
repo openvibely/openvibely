@@ -8,6 +8,7 @@ import (
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/update"
 )
 
 // staleQueuedTaskTimeout is how long a task can stay in "queued" status before
@@ -37,6 +38,7 @@ type SchedulerService struct {
 	cancel         context.CancelFunc
 	wg             sync.WaitGroup
 	lastCleanupAt  time.Time
+	updateTracker  *update.WorkTracker
 }
 
 func NewSchedulerService(scheduleRepo *repository.ScheduleRepo, taskRepo *repository.TaskRepo, workerSvc *WorkerService) *SchedulerService {
@@ -51,6 +53,10 @@ func NewSchedulerService(scheduleRepo *repository.ScheduleRepo, taskRepo *reposi
 // SetWorktreeService sets the worktree service for automatic cleanup.
 func (s *SchedulerService) SetAutomationRepo(repo *repository.AutomationRepo) {
 	s.automationRepo = repo
+}
+
+func (s *SchedulerService) SetUpdateWorkTracker(tracker *update.WorkTracker) {
+	s.updateTracker = tracker
 }
 
 func (s *SchedulerService) SetWorktreeService(wts *WorktreeService) {
@@ -97,7 +103,7 @@ func (s *SchedulerService) run(ctx context.Context) {
 			applog.Infof("[scheduler] context cancelled, exiting run loop")
 			return
 		case t := <-ticker.C:
-			applog.Infof("[scheduler] tick at %s, checking due tasks and active tasks", t.Format("15:04:05"))
+			applog.Debugf("[scheduler] tick at %s, checking due tasks and active tasks", t.Format("15:04:05"))
 			s.checkDueTasks(ctx)
 			s.checkActiveTasks(ctx)
 
@@ -111,6 +117,13 @@ func (s *SchedulerService) run(ctx context.Context) {
 
 // checkDueTasks finds scheduled tasks whose next_run has passed and submits them.
 func (s *SchedulerService) checkDueTasks(ctx context.Context) {
+	if s.updateTracker != nil {
+		done, err := s.updateTracker.Start(update.WorkAutomation)
+		if err != nil {
+			return
+		}
+		defer done()
+	}
 	now := time.Now().UTC()
 	applog.Infof("[scheduler] checkDueTasks now=%s", now.Format("2006-01-02 15:04:05"))
 
@@ -122,6 +135,10 @@ func (s *SchedulerService) checkDueTasks(ctx context.Context) {
 	applog.Infof("[scheduler] checkDueTasks found %d due schedules", len(schedules))
 
 	for _, sched := range schedules {
+		if err := models.ValidateScheduleRepeatInterval(sched.RepeatInterval); err != nil {
+			applog.Infof("[scheduler] skipping invalid schedule %s: %v", sched.ID, err)
+			continue
+		}
 		if s.automationRepo != nil {
 			owner, ownerErr := s.automationRepo.GetTriggerOwner(ctx, sched.ID)
 			if ownerErr != nil {
@@ -144,8 +161,15 @@ func (s *SchedulerService) checkDueTasks(ctx context.Context) {
 			}
 		}
 		task, err := s.taskRepo.GetByID(ctx, sched.TaskID)
-		if err != nil || task == nil {
+		if err != nil {
 			applog.Infof("[scheduler] checkDueTasks error getting task %s: %v", sched.TaskID, err)
+			continue
+		}
+		if task == nil {
+			applog.Infof("[scheduler] checkDueTasks deleting orphaned schedule=%s missing_task=%s", sched.ID, sched.TaskID)
+			if err := s.scheduleRepo.DeleteOrphan(ctx, sched.ID, sched.TaskID); err != nil {
+				applog.Infof("[scheduler] checkDueTasks error deleting orphaned schedule %s: %v", sched.ID, err)
+			}
 			continue
 		}
 
@@ -210,9 +234,11 @@ func (s *SchedulerService) checkDueTasks(ctx context.Context) {
 				continue
 			}
 		} else {
+			if s.workerSvc != nil {
+				s.workerSvc.ClearCancellationRequested(task.ID)
+			}
 			s.workerSvc.Submit(*task)
 		}
-
 		// Compute next run
 		nextRun := sched.ComputeNextRun(now)
 		if nextRun != nil {
@@ -229,28 +255,39 @@ func (s *SchedulerService) checkDueTasks(ctx context.Context) {
 // checkActiveTasks finds tasks in the Active category that are pending and auto-submits them.
 // Also recovers stale "queued" tasks (orphaned by crashed thread follow-up goroutines).
 func (s *SchedulerService) checkActiveTasks(ctx context.Context) {
-	tasks, err := s.taskRepo.ListActivePending(ctx)
+	admissions, err := s.taskRepo.ListActivePendingAdmissions(ctx)
 	if err != nil {
 		applog.Infof("[scheduler] checkActiveTasks error: %v", err)
 		return
 	}
 
-	if len(tasks) > 0 {
-		applog.Infof("[scheduler] checkActiveTasks found %d pending active tasks", len(tasks))
+	if len(admissions) > 0 {
+		applog.Infof("[scheduler] checkActiveTasks found %d pending active tasks", len(admissions))
 	}
 
-	for _, task := range tasks {
-		if task.SwarmRole == models.SwarmRoleParent && s.swarmStarter != nil {
+	for _, admission := range admissions {
+		if admission.SwarmRole == models.SwarmRoleParent && s.swarmStarter != nil {
 			applog.Infof("[scheduler] checkActiveTasks starting swarm planner task id=%s title=%q project=%s",
-				task.ID, task.Title, task.ProjectID)
-			if err := s.swarmStarter.StartPlanner(ctx, task.ID); err != nil {
-				applog.Infof("[scheduler] checkActiveTasks error starting swarm planner task=%s: %v", task.ID, err)
+				admission.ID, admission.Title, admission.ProjectID)
+			if err := s.swarmStarter.StartPlanner(ctx, admission.ID); err != nil {
+				applog.Infof("[scheduler] checkActiveTasks error starting swarm planner task=%s: %v", admission.ID, err)
 			}
 			continue
 		}
 		applog.Infof("[scheduler] checkActiveTasks auto-submitting task id=%s title=%q project=%s",
-			task.ID, task.Title, task.ProjectID)
-		s.workerSvc.Submit(task)
+			admission.ID, admission.Title, admission.ProjectID)
+		s.workerSvc.Submit(models.Task{
+			ID:                admission.ID,
+			ProjectID:         admission.ProjectID,
+			Title:             admission.Title,
+			Category:          admission.Category,
+			Priority:          admission.Priority,
+			Status:            admission.Status,
+			AgentID:           admission.AgentID,
+			AgentDefinitionID: admission.AgentDefinitionID,
+			ParentTaskID:      admission.ParentTaskID,
+			SwarmRole:         admission.SwarmRole,
+		})
 	}
 
 	// Recover stale queued tasks. The "queued" status is set by TaskThreadSend

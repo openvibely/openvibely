@@ -72,6 +72,7 @@ func shouldFallbackResponsesWebsocket(ctx context.Context, err error) bool {
 const (
 	openAIResponsesWebsocketBeta = "responses_websockets=2026-02-06"
 	responsesLiteMetadataKey     = "ws_request_header_x_openai_internal_codex_responses_lite"
+	responsesWebsocketReadLimit  = 64 << 20
 )
 
 func isResponsesLiteWebsocketModel(model string) bool {
@@ -112,18 +113,21 @@ func responsesLiteTools(tools any) []any {
 	return filtered
 }
 
-func stripResponsesLiteImageDetails(value any) {
+func filterResponsesLiteImageDetails(value any, model string) {
+	supportsAutoDetail := isResponsesLiteWebsocketModel(model)
 	switch current := value.(type) {
 	case map[string]any:
 		if strings.EqualFold(strings.TrimSpace(stringFromAny(current["type"])), "input_image") {
-			delete(current, "detail")
+			if !supportsAutoDetail || stringFromAny(current["detail"]) != "auto" {
+				delete(current, "detail")
+			}
 		}
 		for _, nested := range current {
-			stripResponsesLiteImageDetails(nested)
+			filterResponsesLiteImageDetails(nested, model)
 		}
 	case []any:
 		for _, nested := range current {
-			stripResponsesLiteImageDetails(nested)
+			filterResponsesLiteImageDetails(nested, model)
 		}
 	}
 }
@@ -160,7 +164,7 @@ func buildResponsesLiteWebsocketPayload(payload map[string]any, system, sessionI
 	}
 
 	input, _ := request["input"].([]any)
-	stripResponsesLiteImageDetails(input)
+	filterResponsesLiteImageDetails(input, stringFromAny(request["model"]))
 	prefix := make([]any, 0, 2)
 	prefix = append(prefix, map[string]any{
 		"type":  "additional_tools",
@@ -224,11 +228,18 @@ func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[s
 		headers.Set("OpenAI-Beta", openAIResponsesWebsocketBeta)
 		headers.Set("session-id", c.sessionID)
 		headers.Set("thread-id", c.sessionID)
-		return websocket.Dial(ctx, endpoint, &websocket.DialOptions{
+		conn, resp, err := websocket.Dial(ctx, endpoint, &websocket.DialOptions{
 			HTTPClient:      c.httpClient,
 			HTTPHeader:      headers,
 			CompressionMode: websocket.CompressionContextTakeover,
 		})
+		if err == nil {
+			// Match Codex's maximum complete WebSocket message size. The
+			// coder/websocket default is only 32 KiB, which is too small for
+			// Responses events containing large tool output or completion data.
+			conn.SetReadLimit(responsesWebsocketReadLimit)
+		}
+		return conn, resp, err
 	}
 
 	connect := func() (*websocket.Conn, error) {

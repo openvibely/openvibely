@@ -51,7 +51,7 @@ func TestFilterTaskThreadRuntimeToolDefs_GoalStatusToolsRequireExplicitGrant(t *
 	if !ungranted["create_task"] || !ungranted["execute_tasks"] || !ungranted["schedule_task"] || !ungranted["modify_schedule"] {
 		t.Fatalf("task agents should get visible task creation/execution and schedule bootstrap tools by default: %+v", ungranted)
 	}
-	if !ungranted["github_get_issue"] || !ungranted["github_get_project_inbox"] || !ungranted["github_is_actor_authorized"] || !ungranted["github_list_my_assigned_issues"] || !ungranted["github_list_assigned_issues"] || !ungranted["github_open_pull_request"] || !ungranted["github_replace_pull_request_branch"] || !ungranted["github_forward_pr_feedback_to_tasks"] {
+	if !ungranted["github_get_issue"] || !ungranted["github_get_project_inbox"] || !ungranted["github_is_actor_authorized"] || !ungranted["github_list_my_assigned_issues"] || !ungranted["github_list_assigned_issues"] || !ungranted["github_close_issue"] || !ungranted["github_open_pull_request"] || !ungranted["github_replace_pull_request_branch"] || !ungranted["github_forward_pr_feedback_to_tasks"] {
 		t.Fatalf("task agents should get GitHub issue tools by default: %+v", ungranted)
 	}
 	if ungranted["memory_view"] {
@@ -86,10 +86,12 @@ func TestFilterTaskThreadRuntimeToolDefs_CreateNotificationDispatchUsesPersisted
 	defs := filterTaskThreadRuntimeToolDefs(chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true), nil, false)
 	advertised := toolDefNameSet(defs)
 	require.True(t, advertised["create_notification"], "task-thread runtime must advertise create_notification")
+	require.True(t, advertised["decide_alert"], "task-thread runtime must advertise decide_alert")
 	capabilities := capabilityNameSet(filterTaskThreadCapabilitySummaries(
 		chatcontrol.ListForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb), nil, false,
 	))
 	require.True(t, capabilities["create_notification"], "task-thread capabilities must include create_notification")
+	require.True(t, capabilities["decide_alert"], "task-thread capabilities must include decide_alert")
 
 	runtime := h.buildChatActionToolRuntimeFromDefs(streamingResponseParams{
 		TaskID:         task.ID,
@@ -99,8 +101,7 @@ func TestFilterTaskThreadRuntimeToolDefs_CreateNotificationDispatchUsesPersisted
 	output, handled, isErr, err := runtime.Executor(ctx, "create_notification", json.RawMessage(`{
 		"type":"task_thread_suggestion",
 		"title":"Follow-up suggestion",
-		"body":"Created from an ordinary task follow-up",
-		"idempotency_key":"task-thread-followup"
+		"body":"Created from an ordinary task follow-up"
 	}`))
 	require.NoError(t, err)
 	require.True(t, handled)
@@ -118,6 +119,15 @@ func TestFilterTaskThreadRuntimeToolDefs_CreateNotificationDispatchUsesPersisted
 	require.Equal(t, models.AlertProcessingUnclaimed, stored.ProcessingState)
 	require.NotNil(t, stored.SourceTaskID)
 	require.Equal(t, task.ID, *stored.SourceTaskID)
+
+	decisionOutput, handled, isErr, err := runtime.Executor(ctx, "decide_alert", json.RawMessage(`{"alert_id":"`+result.Notification.ID+`","decision":"approved"}`))
+	require.NoError(t, err)
+	require.True(t, handled)
+	require.False(t, isErr)
+	require.Contains(t, decisionOutput, `"decision_state":"approved"`)
+	decided, err := h.alertSvc.GetByID(ctx, project.ID, result.Notification.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.AlertDecisionApproved, decided.DecisionState)
 }
 
 func TestFilterTaskThreadRuntimeToolDefs_HaveWebHandlers(t *testing.T) {
@@ -129,10 +139,12 @@ func TestFilterTaskThreadRuntimeToolDefs_HaveWebHandlers(t *testing.T) {
 		"create_task",
 		"schedule_task",
 		"modify_schedule",
+		"decide_alert",
 		"github_get_project_inbox",
 		"github_list_my_assigned_issues",
 		"github_list_assigned_issues",
 		"github_list_assigned_issues_with_prs",
+		"github_close_issue",
 		"github_open_pull_request",
 		"github_replace_pull_request_branch",
 		"github_forward_pr_feedback_to_tasks",
@@ -174,7 +186,7 @@ func TestFilterTaskThreadCapabilitySummaries_GoalStatusToolsRequireExplicitGrant
 	if !ungranted["send_message"] {
 		t.Fatalf("task agents should advertise send_message by default: %+v", ungranted)
 	}
-	if !ungranted["github_get_issue"] || !ungranted["github_get_project_inbox"] || !ungranted["github_is_actor_authorized"] || !ungranted["github_list_my_assigned_issues"] || !ungranted["github_list_assigned_issues"] || !ungranted["github_open_pull_request"] || !ungranted["github_replace_pull_request_branch"] || !ungranted["github_forward_pr_feedback_to_tasks"] {
+	if !ungranted["github_get_issue"] || !ungranted["github_get_project_inbox"] || !ungranted["github_is_actor_authorized"] || !ungranted["github_list_my_assigned_issues"] || !ungranted["github_list_assigned_issues"] || !ungranted["github_close_issue"] || !ungranted["github_open_pull_request"] || !ungranted["github_replace_pull_request_branch"] || !ungranted["github_forward_pr_feedback_to_tasks"] {
 		t.Fatalf("task agents should advertise GitHub issue tools by default: %+v", ungranted)
 	}
 

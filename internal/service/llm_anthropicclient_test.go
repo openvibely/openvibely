@@ -1,6 +1,10 @@
 package service
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
@@ -105,5 +109,51 @@ func TestBuildAnthropicClientHistory_AlternatingRoles(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestAnthropicClientToolSecondaryInfoAndAttachmentConversion(t *testing.T) {
+	if got := toolSecondaryInfo("read_file", json.RawMessage(`{"file_path":"/tmp/project/README.md"}`)); got != "README.md" {
+		t.Fatalf("read_file secondary = %q", got)
+	}
+	longCommand := strings.Repeat("x", 80)
+	if got := toolSecondaryInfo("Bash", json.RawMessage(`{"command":"`+longCommand+`"}`)); !strings.HasPrefix(got, "$ "+strings.Repeat("x", 60)) || !strings.HasSuffix(got, "…") {
+		t.Fatalf("bash secondary not truncated as expected: %q", got)
+	}
+	longPattern := strings.Repeat("p", 50)
+	if got := toolSecondaryInfo("Grep", json.RawMessage(`{"pattern":"`+longPattern+`"}`)); !strings.HasPrefix(got, strings.Repeat("p", 40)) || !strings.HasSuffix(got, "…") {
+		t.Fatalf("grep secondary not truncated as expected: %q", got)
+	}
+	if got := toolSecondaryInfo("Glob", json.RawMessage(`{"pattern":"**/*.go"}`)); got != "**/*.go" {
+		t.Fatalf("glob secondary = %q", got)
+	}
+	if got := toolSecondaryInfo("unknown", json.RawMessage(`{"command":"ignored"}`)); got != "" {
+		t.Fatalf("unknown secondary = %q", got)
+	}
+	if got := toolSecondaryInfo("read_file", json.RawMessage(`{`)); got != "" {
+		t.Fatalf("invalid json secondary = %q", got)
+	}
+	parts := splitPath("/tmp/project/file.txt")
+	if len(parts) == 0 || parts[len(parts)-1] != "file.txt" {
+		t.Fatalf("splitPath parts = %#v", parts)
+	}
+
+	root := t.TempDir()
+	textPath := filepath.Join(root, "note.txt")
+	if err := os.WriteFile(textPath, []byte("hello attachment"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	converted, err := convertAttachments([]models.Attachment{{FileName: "note.txt", FilePath: textPath, MediaType: "text/plain"}})
+	if err != nil {
+		t.Fatalf("convertAttachments: %v", err)
+	}
+	if len(converted) != 1 || converted[0] == nil {
+		t.Fatalf("unexpected converted attachments: %#v", converted)
+	}
+	if empty, err := convertAttachments(nil); err != nil || empty != nil {
+		t.Fatalf("empty convertAttachments = %#v, %v", empty, err)
+	}
+	if _, err := convertAttachments([]models.Attachment{{FileName: "missing.txt", FilePath: filepath.Join(root, "missing.txt")}}); err == nil || !strings.Contains(err.Error(), "load attachment missing.txt") {
+		t.Fatalf("expected missing attachment error, got %v", err)
 	}
 }

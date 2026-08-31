@@ -225,6 +225,17 @@ func TestChannelsDiscordRemoveClearsSettings(t *testing.T) {
 
 func TestChannelsDiscordTestConnection(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
+
+	missingReq := httptest.NewRequest(http.MethodPost, "/channels/discord/test", nil)
+	missingRec := httptest.NewRecorder()
+	e.ServeHTTP(missingRec, missingReq)
+	if missingRec.Code != http.StatusOK {
+		t.Fatalf("expected missing-service status 200, got %d", missingRec.Code)
+	}
+	if !strings.Contains(missingRec.Body.String(), "Discord service not configured") {
+		t.Fatalf("expected Discord missing-service body, got %q", missingRec.Body.String())
+	}
+
 	h.SetDiscordService(&fakeDiscordService{testFn: func(ctx context.Context) error { return nil }})
 
 	req := httptest.NewRequest(http.MethodPost, "/channels/discord/test", nil)
@@ -235,24 +246,25 @@ func TestChannelsDiscordTestConnection(t *testing.T) {
 		t.Fatalf("expected success response, got %d %q", rec.Code, rec.Body.String())
 	}
 
-	h.SetDiscordService(&fakeDiscordService{testFn: func(ctx context.Context) error { return errors.New("bad token") }})
+	h.SetDiscordService(&fakeDiscordService{testFn: func(ctx context.Context) error { return errors.New(`discord <bad> & "quoted"`) }})
 	req2 := httptest.NewRequest(http.MethodPost, "/channels/discord/test", nil)
 	rec2 := httptest.NewRecorder()
 	e.ServeHTTP(rec2, req2)
 
-	if rec2.Code != http.StatusOK || !strings.Contains(rec2.Body.String(), "bad token") {
-		t.Fatalf("expected failure response, got %d %q", rec2.Code, rec2.Body.String())
+	wantFailure := `<div class="flex items-center gap-2 text-error"><span>Connection failed: discord &lt;bad&gt; &amp; &quot;quoted&quot;</span></div>`
+	if rec2.Code != http.StatusOK || rec2.Body.String() != wantFailure {
+		t.Fatalf("expected escaped failure response %q, got %d %q", wantFailure, rec2.Code, rec2.Body.String())
 	}
 }
 
 func TestDiscordAuthorizedUsersHandlers(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	project := createProject(t, h, "Discord Auth Handler Project")
+	otherProject := createProject(t, h, "Other Discord Auth Handler Project")
 
 	form := url.Values{}
 	form.Set("project_id", project.ID)
 	form.Set("discord_user_id", "12345")
-	form.Set("display_name", "Alice")
 	req := httptest.NewRequest(http.MethodPost, "/channels/discord/authorized-users", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
@@ -261,8 +273,8 @@ func TestDiscordAuthorizedUsersHandlers(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected add status 200, got %d %q", rec.Code, rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), "Alice") || !strings.Contains(rec.Body.String(), "12345") {
-		t.Fatalf("expected added user in response: %q", rec.Body.String())
+	if !strings.Contains(rec.Body.String(), ">12345<") || !strings.Contains(rec.Body.String(), "ID: 12345") {
+		t.Fatalf("expected numeric ID display-name default in response: %q", rec.Body.String())
 	}
 
 	invalidForm := url.Values{}
@@ -276,19 +288,54 @@ func TestDiscordAuthorizedUsersHandlers(t *testing.T) {
 		t.Fatalf("expected non-numeric Discord ID rejected with numeric guidance, got %d %q", invalidRec.Code, invalidRec.Body.String())
 	}
 
-	users, err := h.discordAuthRepo.ListByProject(context.Background(), project.ID)
-	if err != nil || len(users) != 1 {
-		t.Fatalf("expected one discord user, got %d err=%v", len(users), err)
+	otherUser := &models.DiscordAuthorizedUser{ProjectID: otherProject.ID, DiscordUserID: "67890", DisplayName: "Other Discord User", AddedBy: "test"}
+	if err := h.discordAuthRepo.Create(context.Background(), otherUser); err != nil {
+		t.Fatalf("seed other discord user: %v", err)
 	}
 
-	delReq := httptest.NewRequest(http.MethodDelete, "/channels/discord/authorized-users/"+users[0].ID+"?project_id="+project.ID, nil)
+	users, err := h.discordAuthRepo.ListByProject(context.Background(), project.ID)
+	if err != nil {
+		t.Fatalf("list discord users: %v", err)
+	}
+	var user *models.DiscordAuthorizedUser
+	for i := range users {
+		if users[i].DiscordUserID == "12345" {
+			user = &users[i]
+			break
+		}
+	}
+	if user == nil {
+		t.Fatalf("expected added discord user in %#v", users)
+	}
+
+	delReq := httptest.NewRequest(http.MethodDelete, "/channels/discord/authorized-users/"+user.ID, nil)
 	delRec := httptest.NewRecorder()
 	e.ServeHTTP(delRec, delReq)
 
 	if delRec.Code != http.StatusOK {
 		t.Fatalf("expected delete status 200, got %d %q", delRec.Code, delRec.Body.String())
 	}
-	if !strings.Contains(delRec.Body.String(), "No authorized users configured. Access is denied until authorized users are added.") {
-		t.Fatalf("expected deny-by-default empty state, got %q", delRec.Body.String())
+	if strings.Contains(delRec.Body.String(), "ID: 12345") {
+		t.Fatalf("expected removed user to disappear from response, got %q", delRec.Body.String())
+	}
+	if !strings.Contains(delRec.Body.String(), "Other Discord User") {
+		t.Fatalf("expected other system-level user to remain visible, got %q", delRec.Body.String())
+	}
+	if !strings.Contains(delRec.Body.String(), `name="project_id" value="`+project.ID+`"`) {
+		t.Fatalf("expected omitted project_id delete to reload with record project %q, got %q", project.ID, delRec.Body.String())
+	}
+	deleted, err := h.discordAuthRepo.GetByID(context.Background(), user.ID)
+	if err != nil {
+		t.Fatalf("get deleted discord user: %v", err)
+	}
+	if deleted != nil {
+		t.Fatalf("expected deleted discord user removed, got %#v", deleted)
+	}
+	remaining, err := h.discordAuthRepo.GetByID(context.Background(), otherUser.ID)
+	if err != nil {
+		t.Fatalf("get other discord user: %v", err)
+	}
+	if remaining == nil {
+		t.Fatal("expected other project user to remain")
 	}
 }

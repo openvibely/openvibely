@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,6 +22,7 @@ import (
 	"github.com/openvibely/openvibely/internal/agentskills"
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/auth"
+	"github.com/openvibely/openvibely/internal/buildinfo"
 	"github.com/openvibely/openvibely/internal/builtinskills"
 	"github.com/openvibely/openvibely/internal/config"
 	"github.com/openvibely/openvibely/internal/database"
@@ -31,6 +33,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
+	"github.com/openvibely/openvibely/internal/update"
 
 	_ "github.com/openvibely/openvibely/docs" // Swagger docs
 )
@@ -44,8 +47,16 @@ type Instance struct {
 	BaseURL string
 	// Shutdown gracefully stops all background services, the HTTP server, and the DB.
 	// It is safe to call multiple times.
-	Shutdown func()
+	Shutdown          func()
+	ShutdownRequested <-chan struct{}
+	UpdateCoordinator *update.Coordinator
 }
+
+var (
+	newDatabaseConnections           = database.NewReadWrite
+	registerDedicatedWriter          = repository.RegisterDedicatedWriter
+	loadAutomationConfirmationSecret = service.LoadOrCreateAutomationConfirmationSecret
+)
 
 func migrateLegacyStorage(cfg *config.Config) error {
 	if cfg == nil || os.Getenv("OPENVIBELY_DISABLE_LEGACY_STORAGE_MIGRATION") != "" {
@@ -347,6 +358,44 @@ func configureMethodOverride(e *echo.Echo) {
 	}))
 }
 
+func desktopUpdateProtectedPaths(cfg *config.Config) ([]string, error) {
+	paths := []string{cfg.AppDataDir, cfg.DatabasePath, cfg.ProjectRepoRoot}
+	if cfg.Mode == config.ModeDesktop {
+		paths = append(paths, config.DesktopConfigFilePath())
+		if pluginRoot := strings.TrimSpace(os.Getenv("OPENVIBELY_PLUGIN_ROOT")); pluginRoot != "" {
+			paths = append(paths, pluginRoot)
+		}
+	}
+	if keyFile := strings.TrimSpace(cfg.UpdatePublicKeyFile); keyFile != "" {
+		paths = append(paths, keyFile)
+	}
+	resolved := make([]string, 0, len(paths))
+	seen := make(map[string]struct{}, len(paths))
+	for _, path := range paths {
+		absolute, err := filepath.Abs(path)
+		if err != nil {
+			return nil, err
+		}
+		absolute = filepath.Clean(absolute)
+		if _, exists := seen[absolute]; exists {
+			continue
+		}
+		seen[absolute] = struct{}{}
+		resolved = append(resolved, absolute)
+	}
+	return resolved, nil
+}
+
+type updateCoordinatorStarter interface {
+	StartRecovery(context.Context)
+	StartChecks(context.Context)
+}
+
+func startUpdateCoordinator(ctx context.Context, coordinator updateCoordinatorStarter) {
+	coordinator.StartRecovery(ctx)
+	coordinator.StartChecks(ctx)
+}
+
 // Start wires the full OpenVibely backend and starts serving HTTP on cfg.Port.
 // It blocks until the HTTP listener is bound and background services are started,
 // then returns an Instance with the bound address and a shutdown handle.
@@ -394,11 +443,23 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	handler.SetUploadsDir(uploadsPath)
 
 	// Database
-	db, err := database.New(cfg.DatabasePath)
+	databaseConnections, err := newDatabaseConnections(cfg.DatabasePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize database: %w", err)
 	}
+	db := databaseConnections.Reader
+	writeDB := databaseConnections.Writer
+	unregisterDedicatedWriter := registerDedicatedWriter(db, writeDB)
+	closeDatabase := func() {
+		unregisterDedicatedWriter()
+		_ = databaseConnections.Close()
+	}
 	applog.Infof("database initialized")
+	var databaseSchema int
+	if err := db.QueryRowContext(ctx, `SELECT COALESCE(MAX(version_id), 0) FROM goose_db_version WHERE is_applied = 1`).Scan(&databaseSchema); err != nil {
+		closeDatabase()
+		return nil, fmt.Errorf("reading database schema version: %w", err)
+	}
 
 	// Event broadcasters for real-time UI updates
 	broadcaster := events.NewBroadcaster()
@@ -451,6 +512,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	chatAttachmentRepo := repository.NewChatAttachmentRepo(db)
 	agentRepo := repository.NewAgentRepo(db)
 	alertRepo := repository.NewAlertRepo(db)
+	taskCommitStatRepo := repository.NewTaskCommitStatRepo(db)
 	automationRepo := repository.NewAutomationRepo(db)
 	automationRepo.SetBroadcaster(broadcaster)
 	execRepo.SetAutomationRepo(automationRepo)
@@ -459,6 +521,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 
 	// Services
 	llmSvc := service.NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
+	llmSvc.SetTaskCommitStatRepo(taskCommitStatRepo)
 	llmSvc.SetExecutionStreamHub(executionStreamHub)
 
 	maxWorkers, _ := workerRepo.GetMaxWorkers(context.Background())
@@ -467,19 +530,129 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	workerSvc.SetLLMConfigRepo(llmConfigRepo)
 	workerSvc.SetExecutionRepo(execRepo)
 	workerSvc.SetAutomationRepo(automationRepo)
+	updateTracker := update.NewWorkTracker()
+	updateDrain := update.NewDrainManager(
+		updateTracker.Active,
+		func() int {
+			var total int
+			_ = db.QueryRowContext(context.Background(), `SELECT
+				(SELECT COUNT(*) FROM tasks WHERE status IN ('pending','queued')) +
+				(SELECT COUNT(*) FROM thread_inputs WHERE input_status = 'pending' AND input_mode = 'queued')`).Scan(&total)
+			return total
+		},
+		2*time.Second,
+		time.Now,
+	)
+	updateDrain.SetWorkTracker(updateTracker)
+	if err := updateDrain.SetPersistence(filepath.Join(cfg.AppDataDir, "update-drain.json")); err != nil {
+		closeDatabase()
+		return nil, fmt.Errorf("restoring update drain: %w", err)
+	}
+	workerSvc.SetUpdateWorkTracker(updateTracker)
+	llmSvc.SetUpdateWorkTracker(updateTracker)
+	workerSvc.SetAdmissionGate(updateDrain.Admit)
+	updateKeys, err := update.DecodePublicKeys(buildinfo.ReleaseKeyID, buildinfo.ReleasePublicKey, cfg.UpdatePublicKeyFile)
+	if err != nil {
+		closeDatabase()
+		return nil, fmt.Errorf("loading update trust root: %w", err)
+	}
+	currentBuild := buildinfo.Current(cfg.BuildArtifact)
+	currentBuild.Artifact = cfg.BuildArtifact
+	updateClient := update.NewClient(update.ClientConfig{
+		ServiceURL: cfg.UpdateServiceURL,
+		Channel:    cfg.UpdateChannel,
+		StatePath:  filepath.Join(cfg.AppDataDir, "update-state.json"),
+		PublicKeys: updateKeys,
+	})
+	current := update.CurrentBuild{Build: currentBuild, Distribution: cfg.Distribution}
+	var updateInstaller update.Installer
+	var binaryUpdateInstaller *update.BinaryInstaller
+	shutdownRequested := make(chan struct{}, 1)
+	var hostedUpdateController *update.HostedController
+	switch {
+	case cfg.BuildArtifact == buildinfo.ArtifactBinary && cfg.ManagedUpdateError == "":
+		executable, execErr := os.Executable()
+		if execErr != nil {
+			closeDatabase()
+			return nil, fmt.Errorf("resolving update executable: %w", execErr)
+		}
+		workingDirectory, workdirErr := os.Getwd()
+		if workdirErr != nil {
+			closeDatabase()
+			return nil, fmt.Errorf("resolving update working directory: %w", workdirErr)
+		}
+		binaryUpdateInstaller = &update.BinaryInstaller{Client: updateClient, Current: current, Executable: executable, Arguments: append([]string(nil), os.Args...), WorkingDirectory: workingDirectory, Shutdown: func() {
+			select {
+			case shutdownRequested <- struct{}{}:
+			default:
+			}
+		}}
+		updateInstaller = binaryUpdateInstaller
+	case cfg.UpdateMode == buildinfo.ModeDockerAgent && cfg.ManagedUpdateError == "":
+		agentAPI, apiErr := update.NewAgentHTTPClient(cfg.DockerAgentURL, cfg.DockerAgentToken, nil)
+		if apiErr != nil {
+			closeDatabase()
+			return nil, fmt.Errorf("configuring Docker update agent: %w", apiErr)
+		}
+		dockerInstaller := &update.DockerAgentInstaller{API: agentAPI, Client: updateClient, Current: current, Drain: updateDrain, StatePath: filepath.Join(cfg.AppDataDir, "docker-update-request.json")}
+		if err := dockerInstaller.Load(); err != nil {
+			closeDatabase()
+			return nil, fmt.Errorf("restoring Docker update request: %w", err)
+		}
+		updateInstaller = dockerInstaller
+	case cfg.UpdateMode == buildinfo.ModeHosted:
+		agentAPI, apiErr := update.NewAgentHTTPClient(cfg.HostedSSOControlURL, cfg.HostedAgentToken, nil)
+		if apiErr != nil {
+			closeDatabase()
+			return nil, fmt.Errorf("configuring Hosted update controller: %w", apiErr)
+		}
+		hostedUpdateController = update.NewHostedController(agentAPI, updateDrain, current, filepath.Join(cfg.AppDataDir, "hosted-update.json"))
+		if err := hostedUpdateController.Restore(); err != nil {
+			closeDatabase()
+			return nil, fmt.Errorf("restoring Hosted update controller: %w", err)
+		}
+	}
+	updateCoordinator := update.NewCoordinator(
+		updateClient,
+		current,
+		cfg.UpdateChannel,
+		updateDrain,
+		updateInstaller,
+		cfg.UpdateMode == buildinfo.ModeDockerManual,
+		cfg.ManagedUpdateError,
+		workerSvc.ResumeDispatch,
+	)
+	updateCoordinator.SetUpdateNotificationsEnabled(!cfg.DisableUpdateNotifications)
+	protectedDataPaths, protectedPathsErr := desktopUpdateProtectedPaths(cfg)
+	if protectedPathsErr != nil {
+		closeDatabase()
+		return nil, fmt.Errorf("resolving desktop update data boundaries: %w", protectedPathsErr)
+	}
+	updateCoordinator.SetProtectedDataPaths(protectedDataPaths)
+	if hostedUpdateController != nil {
+		updateCoordinator.SetManagedStateProvider(hostedUpdateController.Lifecycle)
+	}
+	if err := updateCoordinator.SetPersistence(filepath.Join(cfg.AppDataDir, "update-coordinator.json")); err != nil {
+		closeDatabase()
+		return nil, fmt.Errorf("restoring update coordinator: %w", err)
+	}
 
 	projectSvc := service.NewProjectService(projectRepo)
 	taskGoalSvc := service.NewTaskGoalService(taskGoalRepo, taskRepo, broadcaster)
 	taskSvc := service.NewTaskService(taskRepo, attachmentRepo, workerSvc)
+	projectSvc.SetTaskService(taskSvc)
 	taskSvc.SetDeletionUploadsDir(filepath.Join(cfg.AppDataDir, "uploads"))
 	taskSvc.SetAgentRepo(agentRepo)
 	taskSvc.SetTaskGoalService(taskGoalSvc)
 	llmSvc.SetTaskGoalService(taskGoalSvc)
 	workerSvc.SetTaskGoalService(taskGoalSvc)
 	schedulerSvc := service.NewSchedulerService(scheduleRepo, taskRepo, workerSvc)
+	schedulerSvc.SetUpdateWorkTracker(updateTracker)
 	schedulerSvc.SetAutomationRepo(automationRepo)
 	automationDispatcher := service.NewAutomationDispatcher(automationRepo, taskRepo, workerSvc)
+	automationDispatcher.SetUpdateWorkTracker(updateTracker)
 	automationReconciler := service.NewAutomationReconciler(automationRepo, execRepo, workerSvc)
+	automationReconciler.SetUpdateWorkTracker(updateTracker)
 	alertSvc := service.NewAlertService(alertRepo, broadcaster)
 	automationRegistry := service.NewAutomationAdapterRegistry()
 	automationRegistrationSvc := service.NewAutomationRegistrationService(automationRepo, automationRegistry)
@@ -487,44 +660,15 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	llmSvc.SetAutomationRegistrationService(automationRegistrationSvc)
 	llmSvc.SetAutomationRepo(automationRepo)
 	upcomingSvc := service.NewUpcomingService(upcomingRepo)
-	workflowRepo := repository.NewWorkflowRepo(db)
-	workflowSvc := service.NewWorkflowService(workflowRepo, llmConfigRepo, taskRepo, llmSvc)
-	workflowSvc.SetAlertService(alertSvc)
-	collisionRepo := repository.NewCollisionRepo(db)
-	collisionSvc := service.NewCollisionService(collisionRepo, taskRepo, projectRepo, llmConfigRepo)
-	collisionSvc.SetLLMService(llmSvc)
 	insightsRepo := repository.NewInsightsRepo(db)
 	insightsSvc := service.NewInsightsService(insightsRepo, taskRepo, projectRepo, llmConfigRepo, execRepo)
 	insightsSvc.SetLLMService(llmSvc)
-	architectRepo := repository.NewArchitectRepo(db)
-	architectSvc := service.NewArchitectService(architectRepo, taskRepo, projectRepo, llmConfigRepo)
-	architectSvc.SetLLMService(llmSvc)
-	backlogRepo := repository.NewBacklogRepo(db)
-	backlogSvc := service.NewBacklogService(backlogRepo, taskRepo, projectRepo, llmConfigRepo, execRepo)
-	backlogSvc.SetLLMService(llmSvc)
-	upcomingSvc.SetBacklogRepo(backlogRepo)
 	upcomingSvc.SetProjectRepo(projectRepo)
+	upcomingSvc.SetTaskCommitStatRepo(taskCommitStatRepo)
 	upcomingSvc.SetLLMService(llmSvc)
 	upcomingSvc.SetLLMConfigRepo(llmConfigRepo)
 
-	// Autonomous Builds (task-chain based)
-	autonomousRepo := repository.NewAutonomousRepo(db)
-	autonomousTriggerSvc := service.NewAutonomousTriggerService(taskSvc, projectRepo, taskRepo, execRepo, autonomousRepo)
-
-	// Trend Intelligence (enriches autonomous builds with external data)
-	trendRepo := repository.NewTrendRepo(db)
-	trendSvc := service.NewTrendIntelligenceService(trendRepo, projectRepo, llmConfigRepo)
-	trendSvc.SetLLMService(llmSvc)
-	autonomousTriggerSvc.SetTrendIntelligenceService(trendSvc)
-
-	// Task Templates
-	templateRepo := repository.NewTemplateRepo(db)
-	templateSvc := service.NewTemplateService(templateRepo, taskRepo, projectRepo)
-
-	// Pattern Library
-	patternRepo := repository.NewPatternRepo(db)
-	patternSvc := service.NewPatternService(patternRepo, taskRepo)
-
+	llmSvc.SetUpcomingService(upcomingSvc)
 	llmSvc.SetAlertService(alertSvc)
 	llmSvc.SetTaskService(taskSvc)
 	llmSvc.SetThreadInputRepo(repository.NewThreadInputRepo(db))
@@ -547,6 +691,10 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	discordAuthRepo := repository.NewDiscordAuthRepo(db)
 	discordTaskContextRepo := repository.NewDiscordTaskContextRepo(db)
 	discordUserProjectRepo := repository.NewDiscordUserProjectRepo(db)
+	xAuthRepo := repository.NewXAuthRepo(db)
+	xUserProjectRepo := repository.NewXUserProjectRepo(db)
+	xTaskContextRepo := repository.NewXTaskContextRepo(db)
+	xInboundReceiptRepo := repository.NewXInboundReceiptRepo(db)
 	channelTargetRepo := repository.NewChannelTargetRepo(db)
 
 	// Custom personalities
@@ -555,14 +703,16 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	settingsRepo := repository.NewSettingsRepo(db)
 	automationDraftSvc := service.NewAutomationDraftService(automationRepo, automationRegistry)
 	automationCapabilitySvc := service.NewAutomationCapabilitySnapshotBuilder(projectRepo, agentRepo, taskRepo, settingsRepo)
+	automationCapabilitySvc.SetLLMConfigRepository(llmConfigRepo)
 	automationDraftSvc.SetCapabilitySnapshotBuilder(automationCapabilitySvc)
 	automationSaveValidator := service.NewAutomationSaveValidator(automationRegistry, automationDraftSvc)
 	automationSaveValidator.SetAgentRepository(agentRepo)
 	automationCompiler := service.NewAutomationCompiler(automationRepo, taskSvc, taskRepo, scheduleRepo, automationSaveValidator)
 	automationCompiler.SetAgentRepository(agentRepo)
 	automationLifecycleSvc := service.NewAutomationLifecycleService(automationRepo, scheduleRepo, taskSvc)
-	automationConfirmationSecret, confirmationSecretErr := service.LoadOrCreateAutomationConfirmationSecret(context.Background(), settingsRepo)
+	automationConfirmationSecret, confirmationSecretErr := loadAutomationConfirmationSecret(context.Background(), settingsRepo)
 	if confirmationSecretErr != nil {
+		closeDatabase()
 		return nil, fmt.Errorf("initializing automation confirmation secret: %w", confirmationSecretErr)
 	}
 	automationConfirmationSvc := service.NewAutomationConfirmationService(automationRepo, execRepo, automationConfirmationSecret)
@@ -608,6 +758,9 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 		cfg.ProjectRepoRoot,
 	)
 	automationExternalStateSvc := service.NewAutomationExternalStateService(automationRepo, taskPullRequestRepo, projectRepo, githubSvc)
+	automationLiveViewTracker := service.NewAutomationLiveViewTracker()
+	automationReconciler.SetAutomationExternalStateService(automationExternalStateSvc)
+	automationReconciler.SetAutomationLiveViewTracker(automationLiveViewTracker)
 	automationSaveValidator.SetGitHubConnectionProvider(githubSvc)
 	automationCapabilitySvc.SetGitHubConnectionProvider(githubSvc)
 	llmSvc.SetGitHubIssueRuntimeProvider(githubSvc)
@@ -635,10 +788,19 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	slackSvc.SetExecutionStreamHub(executionStreamHub)
 	slackSvc.SetAlertService(alertSvc)
 	slackSvc.SetTaskGoalService(taskGoalSvc)
+	slackSvc.SetUpcomingService(upcomingSvc)
 	slackSvc.SetThreadInputRepo(repository.NewThreadInputRepo(db))
+	slackSvc.SetSlackInboundReceiptRepo(repository.NewSlackInboundReceiptRepo(db))
 	slackSvc.SetAgentRepo(agentRepo)
 	emailSvc := service.NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, scheduleRepo, taskSvc, llmSvc, workerSvc, emailAuthRepo, emailTaskContextRepo)
 	channelMessageRouter := service.NewChannelMessageRouter(channelTargetRepo, settingsRepo)
+	xSettingValues, _ := settingsRepo.GetMany(context.Background(), []string{service.XSettingConsumerKey, service.XSettingConsumerSecret, service.XSettingAccessToken, service.XSettingAccessTokenSecret, service.XSettingPollIntervalSeconds})
+	xCredentials := service.XCredentials{ConsumerKey: xSettingValues[service.XSettingConsumerKey], ConsumerSecret: xSettingValues[service.XSettingConsumerSecret], AccessToken: xSettingValues[service.XSettingAccessToken], AccessTokenSecret: xSettingValues[service.XSettingAccessTokenSecret]}
+	xSvc := service.NewXService(xCredentials, settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, scheduleRepo, taskSvc)
+	xSvc.SetRepositories(xAuthRepo, xUserProjectRepo, xTaskContextRepo, xInboundReceiptRepo, repository.NewThreadInputRepo(db))
+	if seconds, err := strconv.Atoi(strings.TrimSpace(xSettingValues[service.XSettingPollIntervalSeconds])); err == nil {
+		xSvc.SetPollInterval(time.Duration(seconds) * time.Second)
+	}
 	llmSvc.SetChannelMessageRouter(channelMessageRouter)
 	channelMessageRouter.SetSlackService(slackSvc)
 	channelMessageRouter.SetSlackAuthStore(slackAuthRepo)
@@ -653,6 +815,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	emailSvc.SetChatBroadcaster(chatBroadcaster)
 	emailSvc.SetExecutionStreamHub(executionStreamHub)
 	emailSvc.SetThreadInputRepo(repository.NewThreadInputRepo(db))
+	emailSvc.SetEmailInboundReceiptRepo(repository.NewEmailInboundReceiptRepo(db))
 	emailSvc.SetAgentRepo(agentRepo)
 	discordSvc := service.NewDiscordService(
 		settingsRepo,
@@ -674,6 +837,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	discordSvc.SetExecutionStreamHub(executionStreamHub)
 	discordSvc.SetAlertService(alertSvc)
 	discordSvc.SetTaskGoalService(taskGoalSvc)
+	discordSvc.SetUpcomingService(upcomingSvc)
 	discordSvc.SetThreadInputRepo(repository.NewThreadInputRepo(db))
 	discordSvc.SetAgentRepo(agentRepo)
 	discordSvc.SetChannelMessageRouter(channelMessageRouter)
@@ -742,6 +906,18 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 		return service.ProjectSkillRootForResolver(ctx, projectRepo, projectID)
 	})
 	lifecycleRunner := lifecycle.NewRunner(lifecycleRepo, llmHookInvoker, skillResolver)
+	lifecycleRunner.SetExecutionChangedObserver(func(_ context.Context, projectID string, exec models.LifecycleExecution) {
+		if broadcaster == nil {
+			return
+		}
+		broadcaster.Publish(events.TaskEvent{
+			Type:      events.TaskLifecycleExecutionChanged,
+			ProjectID: projectID,
+			TaskID:    exec.TaskID,
+			ExecID:    exec.ID,
+			Status:    string(exec.Status),
+		})
+	})
 	workerSvc.SetLifecycleRunner(lifecycleRunner)
 	workerSvc.SetLifecycleSkillRoot(globalSkillRoot)
 	// Give the LLM service the same root used for global skill catalog and
@@ -763,6 +939,9 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	agentLibraryMaintenanceSvc.SetLifecycleRepo(lifecycleRepo)
 	agentLibraryMaintenanceSvc.SetAgentsRootPath(globalSkillRoot)
 	workerSvc.SetAgentRootSyncService(agentLibraryMaintenanceSvc)
+	slackSvc.SetProjectCreationServices(projectSvc, githubSvc, memorySvc, agentLibraryMaintenanceSvc)
+	emailSvc.SetProjectCreationServices(projectSvc, githubSvc, memorySvc, agentLibraryMaintenanceSvc)
+	discordSvc.SetProjectCreationServices(projectSvc, githubSvc, memorySvc, agentLibraryMaintenanceSvc)
 	if err := agentLibraryMaintenanceSvc.EnsureGlobalAgents(context.Background()); err != nil {
 		applog.Infof("[agent-library] ensure global system agents: %v", err)
 	}
@@ -809,8 +988,10 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 			telegramSvc.SetCustomPersonalityRepo(customPersonalityRepo)
 			telegramSvc.SetAlertService(alertSvc)
 			telegramSvc.SetTaskGoalService(taskGoalSvc)
+			telegramSvc.SetUpcomingService(upcomingSvc)
 			telegramSvc.SetThreadInputRepo(repository.NewThreadInputRepo(db))
 			telegramSvc.SetChannelMessageRouter(channelMessageRouter)
+			telegramSvc.SetProjectCreationServices(projectSvc, githubSvc, memorySvc, agentLibraryMaintenanceSvc)
 			channelMessageRouter.SetTelegramService(telegramSvc)
 			applog.Infof("telegram bot initialized")
 		}
@@ -890,9 +1071,15 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 		hostedPendingStore = auth.NewPendingStore(srvCtx, time.Now)
 	}
 
+	database.StartIncrementalVacuum(srvCtx, writeDB)
+	updateDrain.StartExpirySupervisor(srvCtx)
 	workerSvc.Start(srvCtx)
 	automationReconciler.Start(srvCtx)
 	automationDispatcher.Start(srvCtx)
+	startUpdateCoordinator(srvCtx, updateCoordinator)
+	if hostedUpdateController != nil {
+		hostedUpdateController.Start(srvCtx)
+	}
 
 	// HTTP Server
 	e := echo.New()
@@ -916,7 +1103,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	})
 
 	h := handler.New(
-		projectSvc, taskSvc, llmSvc, workerSvc, schedulerSvc, alertSvc, upcomingSvc, workflowSvc, collisionSvc, insightsSvc, architectSvc, backlogSvc, autonomousTriggerSvc, trendSvc, templateSvc, patternSvc,
+		projectSvc, taskSvc, llmSvc, workerSvc, schedulerSvc, alertSvc, upcomingSvc, insightsSvc,
 		llmConfigRepo, taskRepo, scheduleRepo, execRepo, workerRepo, attachmentRepo, chatAttachmentRepo, projectRepo, settingsRepo, broadcaster, telegramSvc,
 	)
 	h.SetChatBroadcaster(chatBroadcaster)
@@ -924,6 +1111,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	h.SetTaskGoalService(taskGoalSvc)
 	h.SetAutomationServices(automationGraphSvc, automationRegistrationSvc)
 	h.SetAutomationExternalStateService(automationExternalStateSvc)
+	h.SetAutomationLiveViewTracker(automationLiveViewTracker)
 	h.SetAutomationBuilderServices(automationDraftSvc, automationCapabilitySvc, automationSaveValidator, automationCompiler, automationConfirmationSvc, automationLifecycleSvc)
 	workerSvc.SetAfterCompleteRuntimeToolProvider(h.GoalAgentAfterCompleteRuntimeTools)
 	h.SetFileChangeBroadcaster(fileChangeBroadcaster)
@@ -935,6 +1123,8 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	h.SetSlackTaskContextRepo(slackTaskContextRepo)
 	h.SetDiscordAuthRepo(discordAuthRepo)
 	h.SetDiscordTaskContextRepo(discordTaskContextRepo)
+	h.SetXRepositories(xAuthRepo, xUserProjectRepo, xTaskContextRepo, xInboundReceiptRepo)
+	h.SetXService(xSvc)
 	h.SetReviewCommentRepo(reviewCommentRepo)
 	h.SetCustomPersonalityRepo(customPersonalityRepo)
 	h.SetWorktreeService(worktreeSvc)
@@ -961,6 +1151,14 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	discordSvc.SetQueuedTaskThreadPromoter(h.PromoteQueuedTaskThreadInput)
 	discordSvc.SetChannelChatRunner(h.StartChannelChatRun)
 	discordSvc.SetChannelTaskRunner(h.StartChannelTaskRun)
+	xSvc.SetRuntime(agentRepo, customPersonalityRepo, chatBroadcaster, executionStreamHub, h.StartChannelChatRun, h.StartChannelTaskRun, h.PromoteQueuedChatInput, h.PromoteQueuedTaskThreadInput, channelMessageRouter)
+	if xCredentials.Ready() {
+		if err := xSvc.Start(); err != nil {
+			applog.Infof("warning: failed to start X mention polling: %v", err)
+		} else {
+			channelMessageRouter.SetXService(xSvc)
+		}
+	}
 	if telegramSvc != nil {
 		telegramSvc.SetChannelMessageRouter(channelMessageRouter)
 		channelMessageRouter.SetTelegramService(telegramSvc)
@@ -993,6 +1191,10 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	h.SetDesktopMode(cfg.Mode == config.ModeDesktop)
 	h.SetAppBaseURL(cfg.AppBaseURL)
 	h.SetAuthMode(cfg.AuthMode)
+	h.SetSystemHealth(currentBuild, cfg.UpdateMode, cfg.Distribution, cfg.HostedAgentToken, cfg.DockerAgentToken, databaseSchema, updateDrain)
+	h.SetManagedUpdateError(cfg.ManagedUpdateError)
+	h.SetUpdateCoordinator(updateCoordinator)
+	h.SetUpdateWorkTracker(updateTracker)
 	h.SetAuthConfig(authCfg)
 	if cfg.AuthMode == auth.AuthModeHostedSSO {
 		h.SetHostedSSO(hostedSSOClient, hostedPendingStore, cfg.HostedSSOKey, cfg.HostedSSOInstanceID, cfg.AppBaseURL)
@@ -1005,9 +1207,20 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	if telegramSvc != nil {
 		llmSvc.SetTelegramService(telegramSvc)
 	}
-	h.RecoverQueuedTaskThreadInputs(context.Background())
-	// Start scheduler scans only after durable queued task-thread inputs have
-	// been offered for promotion. Repository admission guards remain authoritative
+	go func() {
+		for {
+			select {
+			case <-srvCtx.Done():
+				return
+			case <-updateDrain.Reopened():
+				workerSvc.ResumeDispatch()
+				h.RecoverQueuedInputs(srvCtx)
+			}
+		}
+	}()
+	h.RecoverQueuedInputs(context.Background())
+	// Start scheduler scans only after durable queued Chat and task-thread inputs
+	// have been offered for promotion. Repository admission guards remain authoritative
 	// if recovery and a later scan overlap.
 	schedulerSvc.Start(srvCtx)
 	h.RegisterRoutes(e)
@@ -1017,7 +1230,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	ln, listenErr := net.Listen("tcp", addr)
 	if listenErr != nil {
 		srvCancel()
-		db.Close()
+		closeDatabase()
 		return nil, fmt.Errorf("failed to listen on %s: %w", addr, listenErr)
 	}
 
@@ -1030,6 +1243,10 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 		host = "127.0.0.1"
 	}
 	baseURL := fmt.Sprintf("http://%s:%s", host, port)
+	if binaryUpdateInstaller != nil {
+		binaryUpdateInstaller.HealthURL = baseURL + "/api/system/health"
+		updateCoordinator.StartRecovery(srvCtx)
+	}
 
 	shutdownOnce := make(chan struct{})
 	shutdownDone := make(chan struct{})
@@ -1063,8 +1280,9 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 		if discordSvc != nil {
 			discordSvc.Stop()
 		}
+		h.StopXService()
 		e.Close()
-		db.Close()
+		closeDatabase()
 		close(shutdownDone)
 	}
 
@@ -1077,8 +1295,10 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	}()
 
 	return &Instance{
-		BoundAddr: boundAddr,
-		BaseURL:   baseURL,
-		Shutdown:  shutdownFn,
+		BoundAddr:         boundAddr,
+		BaseURL:           baseURL,
+		Shutdown:          shutdownFn,
+		ShutdownRequested: shutdownRequested,
+		UpdateCoordinator: updateCoordinator,
 	}, nil
 }

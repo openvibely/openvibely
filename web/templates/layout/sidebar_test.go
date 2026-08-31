@@ -88,16 +88,82 @@ func TestSidebar_NavigationHeadingHiddenAndLinksPreserved(t *testing.T) {
 		}
 	}
 
-	hiddenLinks := []string{
-		`data-nav-base="/dashboard-mockup"`,
-		`data-nav-base="/architect"`,
-		`data-nav-base="/autonomous"`,
-		`data-nav-base="/suggestions"`,
+}
+
+func TestSidebar_AlertsKeepsUnreadCountSeparateFromSystemUpdateBadge(t *testing.T) {
+	projects := []models.Project{{ID: "project-1", Name: "Default"}}
+
+	var buf bytes.Buffer
+	if err := Sidebar(projects, "project-1").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("failed to render Sidebar: %v", err)
 	}
-	for _, marker := range hiddenLinks {
-		if strings.Contains(html, marker) {
-			t.Fatalf("sidebar link marker should be hidden: %s", marker)
+
+	html := buf.String()
+	for _, required := range []string{
+		`id="alert-badge"`,
+		`hx-get="/alerts/unread-count?project_id=project-1"`,
+		`sidebar-alert-indicators`,
+		`id="system-update-nav-badge"`,
+		`badge badge-sm badge-primary badge-outline inline-flex items-center sidebar-update-badge hidden`,
+		`sidebar-update-badge`,
+		`System update available`,
+		`>Update</span>`,
+	} {
+		if !strings.Contains(html, required) {
+			t.Fatalf("alerts nav missing separate update marker snippet: %s", required)
 		}
+	}
+}
+
+func TestSidebar_AutomationsUsesRecognizableOutlineLightningBolt(t *testing.T) {
+	projects := []models.Project{{ID: "project-1", Name: "Default"}}
+
+	var buf bytes.Buffer
+	if err := Sidebar(projects, "project-1").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("failed to render Sidebar: %v", err)
+	}
+
+	html := buf.String()
+	start := strings.Index(html, `data-nav-base="/automations"`)
+	if start < 0 {
+		t.Fatal("Automations navigation link is missing")
+	}
+	end := strings.Index(html[start:], `</a>`)
+	if end < 0 {
+		t.Fatal("Automations navigation link is incomplete")
+	}
+	automationsLink := html[start : start+end]
+	for _, marker := range []string{
+		`fill="none"`,
+		`stroke="currentColor"`,
+		`stroke-linecap="round"`,
+		`stroke-linejoin="round"`,
+		`stroke-width="2"`,
+		`d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"`,
+	} {
+		if !strings.Contains(automationsLink, marker) {
+			t.Fatalf("Automations navigation icon is missing outline lightning-bolt marker %s", marker)
+		}
+	}
+	if strings.Contains(automationsLink, `d="M13 10V3L4 14h7v7l9-11h-7z"`) {
+		t.Fatal("Automations navigation must not use the ambiguous old zigzag icon")
+	}
+}
+
+func TestSidebar_RoutesTaskBoardUpdatesThroughSharedTaskEvents(t *testing.T) {
+	projects := []models.Project{{ID: "p1", Name: "Test"}}
+
+	var buf bytes.Buffer
+	if err := Sidebar(projects, "p1").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("failed to render Sidebar: %v", err)
+	}
+
+	html := buf.String()
+	if !strings.Contains(html, `'task_board_updated': handleLiveEvent`) {
+		t.Fatal("shared live SSE listener map must subscribe to task_board_updated")
+	}
+	if !strings.Contains(html, "eventType === 'task_board_updated'") {
+		t.Fatal("shared live SSE dispatch must route task_board_updated through task listeners")
 	}
 }
 
@@ -278,6 +344,59 @@ func TestSidebar_CollapseToggleAccessibilityAndA11ySync(t *testing.T) {
 	}
 }
 
+func TestSidebar_CollapseToggleHandlersSharePersistenceHelper(t *testing.T) {
+	projects := []models.Project{{ID: "p1", Name: "Test"}}
+
+	var buf bytes.Buffer
+	if err := Sidebar(projects, "p1").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("failed to render Sidebar: %v", err)
+	}
+
+	html := buf.String()
+	helperStart := strings.Index(html, "function toggleSidebarCollapsed()")
+	if helperStart == -1 {
+		t.Fatal("sidebar toggle script must define a shared toggleSidebarCollapsed helper")
+	}
+	helperEnd := strings.Index(html[helperStart:], "btn.addEventListener('click'")
+	if helperEnd == -1 {
+		t.Fatal("sidebar toggle helper should appear before the click handler")
+	}
+	helper := html[helperStart : helperStart+helperEnd]
+
+	for _, snippet := range []string{
+		"sidebar.classList.toggle('sidebar-collapsed');",
+		"var isCollapsed = sidebar.classList.contains('sidebar-collapsed');",
+		"localStorage.setItem('sidebar-collapsed', isCollapsed)",
+		"persistSidebarPreference(isCollapsed);",
+		"updateSidebarToggleA11y(isCollapsed);",
+	} {
+		if !strings.Contains(helper, snippet) {
+			t.Fatalf("shared sidebar toggle helper missing snippet: %s", snippet)
+		}
+		if strings.Count(html, snippet) != 1 {
+			t.Fatalf("sidebar toggle post-action snippet should appear only once, got %d for %s", strings.Count(html, snippet), snippet)
+		}
+	}
+
+	if strings.Count(html, "toggleSidebarCollapsed();") != 2 {
+		t.Fatalf("click and keyboard handlers should be the only callers of toggleSidebarCollapsed, got %d", strings.Count(html, "toggleSidebarCollapsed();"))
+	}
+	if !strings.Contains(html, "btn.addEventListener('click', function(e) {") || !strings.Contains(html, "e.preventDefault();\n\t\t\t\t\t\ttoggleSidebarCollapsed();") {
+		t.Fatal("click handler must prevent default and delegate to shared sidebar toggle helper")
+	}
+	for _, snippet := range []string{
+		"document.addEventListener('keydown', function(e) {",
+		"if ((e.ctrlKey || e.metaKey) && e.key === 'b') {",
+		"var tag = document.activeElement && document.activeElement.tagName;",
+		"if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;",
+		"e.preventDefault();\n\t\t\t\t\t\t\ttoggleSidebarCollapsed();",
+	} {
+		if !strings.Contains(html, snippet) {
+			t.Fatalf("keyboard sidebar toggle handler missing snippet: %s", snippet)
+		}
+	}
+}
+
 func TestSidebar_UserAreaAndThemeToggleCoexist(t *testing.T) {
 	projects := []models.Project{{ID: "p1", Name: "Test"}}
 
@@ -405,10 +524,22 @@ func TestSidebar_ForwardsChatTurnSteeredEvents(t *testing.T) {
 	if !strings.Contains(html, "|| eventType === 'task_thread_input_cancelled'") {
 		t.Fatal("sidebar dispatcher must forward task thread input cancellation events to task pages")
 	}
+	if !strings.Contains(html, "|| eventType === 'task_thread_input_steered'") {
+		t.Fatal("sidebar dispatcher must forward task thread steering events to task pages")
+	}
 	if !strings.Contains(html, "'chat_turn_steered': handleLiveEvent") {
 		t.Fatal("shared live SSE must subscribe to chat_turn_steered events")
 	}
 	if !strings.Contains(html, "'chat_thread_input_cancelled': handleLiveEvent") || !strings.Contains(html, "'task_thread_input_cancelled': handleLiveEvent") {
 		t.Fatal("shared live SSE must subscribe to pending input cancellation events")
+	}
+	if !strings.Contains(html, "'task_thread_input_steered': handleLiveEvent") {
+		t.Fatal("shared live SSE must subscribe to task thread steering events")
+	}
+	if !strings.Contains(html, "|| eventType === 'task_lifecycle_execution_changed'") {
+		t.Fatal("sidebar dispatcher must forward lifecycle execution changes to task pages")
+	}
+	if !strings.Contains(html, "'task_lifecycle_execution_changed': handleLiveEvent") {
+		t.Fatal("shared live SSE must subscribe to lifecycle execution changes")
 	}
 }

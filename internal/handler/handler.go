@@ -2,17 +2,21 @@ package handler
 
 import (
 	"context"
+	"reflect"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/auth"
+	"github.com/openvibely/openvibely/internal/buildinfo"
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
+	"github.com/openvibely/openvibely/internal/update"
 	echoSwagger "github.com/swaggo/echo-swagger"
 )
 
@@ -26,15 +30,7 @@ type Handler struct {
 	schedulerSvc               *service.SchedulerService
 	alertSvc                   *service.AlertService
 	upcomingSvc                *service.UpcomingService
-	workflowSvc                *service.WorkflowService
-	collisionSvc               *service.CollisionService
 	insightsSvc                *service.InsightsService
-	architectSvc               *service.ArchitectService
-	backlogSvc                 *service.BacklogService
-	autonomousTriggerSvc       *service.AutonomousTriggerService
-	trendSvc                   *service.TrendIntelligenceService
-	templateSvc                *service.TemplateService
-	patternSvc                 *service.PatternService
 	automationGraphSvc         *service.AutomationGraphService
 	automationRegistrationSvc  *service.AutomationRegistrationService
 	automationDraftSvc         *service.AutomationDraftService
@@ -44,6 +40,7 @@ type Handler struct {
 	automationConfirmationSvc  *service.AutomationConfirmationService
 	automationLifecycleSvc     *service.AutomationLifecycleService
 	automationExternalStateSvc *service.AutomationExternalStateService
+	automationLiveViewTracker  *service.AutomationLiveViewTracker
 	llmConfigRepo              *repository.LLMConfigRepo
 	taskRepo                   *repository.TaskRepo
 	scheduleRepo               *repository.ScheduleRepo
@@ -62,11 +59,18 @@ type Handler struct {
 	fileChangeBroadcaster      *events.FileChangeBroadcaster
 	executionStreamHub         *events.ExecutionStreamHub
 	telegramService            *service.TelegramService
+	xService                   *service.XService
+	xServiceMu                 sync.RWMutex
+	xConfigMu                  sync.Mutex
 	emailService               EmailServiceProvider
 	telegramAuthRepo           *repository.TelegramAuthRepo
 	slackAuthRepo              *repository.SlackAuthRepo
 	emailAuthRepo              *repository.EmailAuthRepo
 	discordAuthRepo            *repository.DiscordAuthRepo
+	xAuthRepo                  *repository.XAuthRepo
+	xUserProjectRepo           *repository.XUserProjectRepo
+	xTaskContextRepo           *repository.XTaskContextRepo
+	xInboundReceiptRepo        *repository.XInboundReceiptRepo
 	emailTaskContextRepo       *repository.EmailTaskContextRepo
 	slackTaskContextRepo       *repository.SlackTaskContextRepo
 	discordTaskContextRepo     *repository.DiscordTaskContextRepo
@@ -76,6 +80,7 @@ type Handler struct {
 	lifecycleRepo              *repository.LifecycleRepo
 	worktreeSvc                *service.WorktreeService
 	taskPullRequestRepo        *repository.TaskPullRequestRepo
+	taskCommitStatRepo         *repository.TaskCommitStatRepo
 	githubPRFeedbackRepo       *repository.GitHubPRFeedbackRepo
 	githubAuthRepo             *repository.GitHubAuthRepo
 	githubSvc                  GitHubServiceProvider
@@ -97,8 +102,20 @@ type Handler struct {
 	hostedSSOInstanceID        string
 	appBaseURL                 string
 	desktopMode                bool
+	buildIdentity              buildinfo.Build
+	updateMode                 string
+	distribution               string
+	hostedAgentToken           string
+	dockerAgentToken           string
+	databaseSchema             int
+	drainManager               *update.DrainManager
+	updateCoordinator          *update.Coordinator
+	updateWorkTracker          *update.WorkTracker
+	systemReady                bool
+	managedUpdateError         string
 	pendingRemovalHook         func(string)
 	pendingPublicationHook     func(string)
+	githubRuntimeHook          func()
 
 	loginFailuresMu   sync.Mutex
 	loginFailureTimes []time.Time
@@ -116,20 +133,24 @@ type GitHubServiceProvider interface {
 	RecloneProjectRepo(ctx context.Context, projectID, currentRepoPath, repoURL string) (string, string, error)
 	ResolveRepo(ctx context.Context, repoURL, repoPath string) (*service.GitHubRepoRef, error)
 	DefaultBranch(ctx context.Context, repo *service.GitHubRepoRef) (string, error)
-	PublishBranch(ctx context.Context, repo *service.GitHubRepoRef, publishReq service.GitHubPublishBranchRequest) error
+	PublishBranch(ctx context.Context, repo *service.GitHubRepoRef, publishReq service.GitHubPublishBranchRequest) (*service.GitHubPublishBranchResult, error)
 	FindPullRequestByBranch(ctx context.Context, repo *service.GitHubRepoRef, branch string) (*service.GitHubPullRequest, error)
 	GetPullRequest(ctx context.Context, repo *service.GitHubRepoRef, number int) (*service.GitHubPullRequest, error)
 	CreatePullRequest(ctx context.Context, repo *service.GitHubRepoRef, createReq service.GitHubCreatePullRequestRequest) (*service.GitHubPullRequest, error)
 	CreateIssue(ctx context.Context, repo *service.GitHubRepoRef, createReq service.GitHubCreateIssueRequest) (*service.GitHubIssue, error)
 	GetIssue(ctx context.Context, repo *service.GitHubRepoRef, issueNumber int) (*service.GitHubIssue, error)
 	GetAuthenticatedUser(ctx context.Context) (*service.GitHubAuthenticatedUser, error)
+	GetAuthenticatedUserForRepo(ctx context.Context, repo *service.GitHubRepoRef) (*service.GitHubAuthenticatedUser, error)
 	ListAuthenticatedAssignedIssues(ctx context.Context, repo *service.GitHubRepoRef) (*service.GitHubAuthenticatedUser, []service.GitHubIssue, error)
+	ListAuthenticatedCreatedIssues(ctx context.Context, repo *service.GitHubRepoRef) (*service.GitHubAuthenticatedUser, []service.GitHubIssue, error)
 	ListAssignedIssues(ctx context.Context, repo *service.GitHubRepoRef, assignee string) ([]service.GitHubIssue, error)
 	ListAssignedIssuesWithPullRequests(ctx context.Context, repo *service.GitHubRepoRef, assignee string) ([]service.GitHubIssueWithPullRequest, error)
 	FindPullRequestForIssue(ctx context.Context, repo *service.GitHubRepoRef, issueNumber int) (*service.GitHubPullRequest, error)
 	ListPullRequestFeedback(ctx context.Context, repo *service.GitHubRepoRef, prNumber int) ([]service.GitHubPullRequestFeedback, error)
 	CommentOnIssue(ctx context.Context, repo *service.GitHubRepoRef, issueNumber int, bodyText string) error
 	AddLabelsToIssue(ctx context.Context, repo *service.GitHubRepoRef, issueNumber int, labels []string) error
+	CloseIssue(ctx context.Context, repo *service.GitHubRepoRef, issueNumber int) error
+	GlobalAPIEndpoint(ctx context.Context) string
 }
 
 type SlackServiceProvider interface {
@@ -153,6 +174,18 @@ type EmailServiceProvider interface {
 	SendTaskCompletionNotification(ctx context.Context, task models.Task, output, errMsg string)
 }
 
+type channelEmailStatusProviderSetter interface {
+	SetEmailStatusProvider(func(context.Context) service.EmailConnectionStatus)
+}
+
+type channelEmailAuthRepoSetter interface {
+	SetEmailAuthRepo(*repository.EmailAuthRepo)
+}
+
+type channelWebhookRepoSetter interface {
+	SetWebhookRepo(*repository.WebhookRepo)
+}
+
 type DiscordServiceProvider interface {
 	GetConnectionStatus(ctx context.Context) (service.DiscordConnectionStatus, error)
 	ReloadFromSettings(ctx context.Context) error
@@ -168,15 +201,7 @@ func New(
 	schedulerSvc *service.SchedulerService,
 	alertSvc *service.AlertService,
 	upcomingSvc *service.UpcomingService,
-	workflowSvc *service.WorkflowService,
-	collisionSvc *service.CollisionService,
 	insightsSvc *service.InsightsService,
-	architectSvc *service.ArchitectService,
-	backlogSvc *service.BacklogService,
-	autonomousTriggerSvc *service.AutonomousTriggerService,
-	trendSvc *service.TrendIntelligenceService,
-	templateSvc *service.TemplateService,
-	patternSvc *service.PatternService,
 	llmConfigRepo *repository.LLMConfigRepo,
 	taskRepo *repository.TaskRepo,
 	scheduleRepo *repository.ScheduleRepo,
@@ -192,12 +217,14 @@ func New(
 	var threadInputRepo *repository.ThreadInputRepo
 	var usageRepo *repository.UsageRepo
 	var skillAnalyticsRepo *repository.SkillAnalyticsRepo
+	var taskCommitStatRepo *repository.TaskCommitStatRepo
 	var usageAnalyticsSvc *service.UsageAnalyticsService
 	if execRepo != nil {
 		if db := execRepo.DB(); db != nil {
 			threadInputRepo = repository.NewThreadInputRepo(db)
 			usageRepo = repository.NewUsageRepo(db)
 			skillAnalyticsRepo = repository.NewSkillAnalyticsRepo(db)
+			taskCommitStatRepo = repository.NewTaskCommitStatRepo(db)
 			usageAnalyticsSvc = service.NewUsageAnalyticsService(usageRepo, llmConfigRepo)
 		}
 	}
@@ -208,6 +235,12 @@ func New(
 	}
 	if llmSvc != nil && skillAnalyticsRepo != nil {
 		llmSvc.SetSkillAnalyticsRepo(skillAnalyticsRepo)
+	}
+	if llmSvc != nil && taskCommitStatRepo != nil {
+		llmSvc.SetTaskCommitStatRepo(taskCommitStatRepo)
+	}
+	if upcomingSvc != nil && taskCommitStatRepo != nil {
+		upcomingSvc.SetTaskCommitStatRepo(taskCommitStatRepo)
 	}
 	if workerSvc != nil && skillAnalyticsRepo != nil {
 		workerSvc.SetSkillAnalyticsRepo(skillAnalyticsRepo)
@@ -241,39 +274,35 @@ func New(
 	}
 
 	h = &Handler{
-		projectSvc:           projectSvc,
-		taskSvc:              taskSvc,
-		swarmSvc:             swarmSvc,
-		llmSvc:               llmSvc,
-		workerSvc:            workerSvc,
-		schedulerSvc:         schedulerSvc,
-		alertSvc:             alertSvc,
-		upcomingSvc:          upcomingSvc,
-		workflowSvc:          workflowSvc,
-		collisionSvc:         collisionSvc,
-		insightsSvc:          insightsSvc,
-		architectSvc:         architectSvc,
-		backlogSvc:           backlogSvc,
-		autonomousTriggerSvc: autonomousTriggerSvc,
-		trendSvc:             trendSvc,
-		templateSvc:          templateSvc,
-		patternSvc:           patternSvc,
-		llmConfigRepo:        llmConfigRepo,
-		taskRepo:             taskRepo,
-		scheduleRepo:         scheduleRepo,
-		execRepo:             execRepo,
-		threadInputRepo:      threadInputRepo,
-		usageRepo:            usageRepo,
-		skillAnalyticsRepo:   skillAnalyticsRepo,
-		usageAnalyticsSvc:    usageAnalyticsSvc,
-		workerRepo:           workerRepo,
-		attachmentRepo:       attachmentRepo,
-		chatAttachmentRepo:   chatAttachmentRepo,
-		projectRepo:          projectRepo,
-		settingsRepo:         settingsRepo,
-		broadcaster:          broadcaster,
-		telegramService:      telegramSvc,
-		projectFolderPicker:  pickProjectFolderNative,
+		projectSvc:          projectSvc,
+		taskSvc:             taskSvc,
+		swarmSvc:            swarmSvc,
+		llmSvc:              llmSvc,
+		workerSvc:           workerSvc,
+		schedulerSvc:        schedulerSvc,
+		alertSvc:            alertSvc,
+		upcomingSvc:         upcomingSvc,
+		insightsSvc:         insightsSvc,
+		llmConfigRepo:       llmConfigRepo,
+		taskRepo:            taskRepo,
+		scheduleRepo:        scheduleRepo,
+		execRepo:            execRepo,
+		threadInputRepo:     threadInputRepo,
+		usageRepo:           usageRepo,
+		skillAnalyticsRepo:  skillAnalyticsRepo,
+		taskCommitStatRepo:  taskCommitStatRepo,
+		usageAnalyticsSvc:   usageAnalyticsSvc,
+		workerRepo:          workerRepo,
+		attachmentRepo:      attachmentRepo,
+		chatAttachmentRepo:  chatAttachmentRepo,
+		projectRepo:         projectRepo,
+		settingsRepo:        settingsRepo,
+		broadcaster:         broadcaster,
+		telegramService:     telegramSvc,
+		projectFolderPicker: pickProjectFolderNative,
+	}
+	if projectSvc != nil && taskSvc != nil {
+		projectSvc.SetTaskService(taskSvc)
 	}
 	if taskSvc != nil {
 		taskSvc.SetQueuedTaskThreadFollowupHook(h.StartPendingTaskThreadFollowup)
@@ -318,25 +347,29 @@ func (h *Handler) SetExecutionStreamHub(hub *events.ExecutionStreamHub) {
 	h.executionStreamHub = hub
 }
 
+func (h *Handler) cancelActiveExecutionsAndPublish(ctx context.Context, taskID, operation string) {
+	if h == nil || h.execRepo == nil {
+		return
+	}
+	cancelledIDs, err := h.execRepo.CancelActiveByTaskReturningIDs(ctx, taskID)
+	if err != nil {
+		applog.Infof("[handler] %s error cancelling active executions task=%s: %v", operation, taskID, err)
+		return
+	}
+	if len(cancelledIDs) == 0 {
+		return
+	}
+	applog.Infof("[handler] %s cancelled %d active executions task=%s", operation, len(cancelledIDs), taskID)
+	for _, id := range cancelledIDs {
+		h.publishExecutionTerminal(id, models.ExecCancelled, "cancelled")
+	}
+}
+
 func (h *Handler) publishExecutionTerminal(execID string, status models.ExecutionStatus, errMsg string) {
-	if h == nil || h.executionStreamHub == nil || execID == "" {
+	if h == nil {
 		return
 	}
-	event := events.ExecutionStreamEvent{ExecID: execID}
-	switch status {
-	case models.ExecCompleted:
-		event.Type = events.ExecutionStreamDone
-		event.Status = "completed"
-	case models.ExecCancelled:
-		event.Type = events.ExecutionStreamDone
-		event.Status = "cancelled"
-	case models.ExecFailed:
-		event.Type = events.ExecutionStreamError
-		event.Error = errMsg
-	default:
-		return
-	}
-	h.executionStreamHub.Close(execID, event)
+	h.executionStreamHub.CloseTerminal(execID, status, errMsg)
 }
 
 // SetTelegramAuthRepo sets the Telegram authorization repo for managing authorized users.
@@ -352,6 +385,9 @@ func (h *Handler) SetSlackAuthRepo(repo *repository.SlackAuthRepo) {
 // SetEmailAuthRepo sets the Email authorization repo for managing authorized senders.
 func (h *Handler) SetEmailAuthRepo(repo *repository.EmailAuthRepo) {
 	h.emailAuthRepo = repo
+	h.wireChannelIntegrationSummaryDeps(h.slackSvc)
+	h.wireChannelIntegrationSummaryDeps(h.discordSvc)
+	h.wireChannelIntegrationSummaryDeps(h.telegramService)
 }
 
 // SetDiscordAuthRepo sets the Discord authorization repo for managing authorized users.
@@ -369,6 +405,9 @@ func (h *Handler) SetDiscordTaskContextRepo(repo *repository.DiscordTaskContextR
 
 func (h *Handler) SetEmailService(svc EmailServiceProvider) {
 	h.emailService = svc
+	h.wireChannelIntegrationSummaryDeps(h.slackSvc)
+	h.wireChannelIntegrationSummaryDeps(h.discordSvc)
+	h.wireChannelIntegrationSummaryDeps(h.telegramService)
 }
 
 func (h *Handler) SetSlackTaskContextRepo(repo *repository.SlackTaskContextRepo) {
@@ -409,6 +448,20 @@ func (h *Handler) SetTaskPullRequestRepo(repo *repository.TaskPullRequestRepo) {
 	h.taskPullRequestRepo = repo
 }
 
+func (h *Handler) SetTaskCommitStatRepo(repo *repository.TaskCommitStatRepo) {
+	h.taskCommitStatRepo = repo
+	if h.llmSvc != nil {
+		h.llmSvc.SetTaskCommitStatRepo(repo)
+	}
+	if h.upcomingSvc != nil {
+		h.upcomingSvc.SetTaskCommitStatRepo(repo)
+	}
+}
+
+func (h *Handler) newTaskPullRequestService() *service.TaskPullRequestService {
+	return service.NewTaskPullRequestService(h.githubSvc, h.taskPullRequestRepo).SetTaskCommitStatRepo(h.taskCommitStatRepo)
+}
+
 func (h *Handler) SetGitHubPRFeedbackRepo(repo *repository.GitHubPRFeedbackRepo) {
 	h.githubPRFeedbackRepo = repo
 }
@@ -424,10 +477,60 @@ func (h *Handler) SetGitHubService(svc GitHubServiceProvider) {
 
 func (h *Handler) SetSlackService(svc SlackServiceProvider) {
 	h.slackSvc = svc
+	if setter, ok := svc.(automationGraphServiceSetter); ok {
+		setter.SetAutomationGraphService(h.automationGraphSvc)
+	}
+	h.wireChannelIntegrationSummaryDeps(svc)
 }
 
 func (h *Handler) SetDiscordService(svc DiscordServiceProvider) {
 	h.discordSvc = svc
+	if setter, ok := svc.(automationGraphServiceSetter); ok {
+		setter.SetAutomationGraphService(h.automationGraphSvc)
+	}
+	h.wireChannelIntegrationSummaryDeps(svc)
+}
+
+func (h *Handler) SetXRepositories(auth *repository.XAuthRepo, selections *repository.XUserProjectRepo, contexts *repository.XTaskContextRepo, receipts *repository.XInboundReceiptRepo) {
+	h.xAuthRepo = auth
+	h.xUserProjectRepo = selections
+	h.xTaskContextRepo = contexts
+	h.xInboundReceiptRepo = receipts
+}
+
+func (h *Handler) SetXService(svc *service.XService) {
+	h.xServiceMu.Lock()
+	h.xService = svc
+	h.xServiceMu.Unlock()
+}
+
+func (h *Handler) getXService() *service.XService {
+	h.xServiceMu.RLock()
+	defer h.xServiceMu.RUnlock()
+	return h.xService
+}
+
+func (h *Handler) swapXService(svc *service.XService) *service.XService {
+	h.xServiceMu.Lock()
+	old := h.xService
+	h.xService = svc
+	h.xServiceMu.Unlock()
+	return old
+}
+
+// StopXService stops whichever dynamically configured X service is currently
+// active. Server shutdown must not retain only the startup instance because the
+// Channels settings flow can replace it at runtime.
+func (h *Handler) StopXService() {
+	h.xConfigMu.Lock()
+	defer h.xConfigMu.Unlock()
+	old := h.swapXService(nil)
+	if h.channelMessageRouter != nil {
+		h.channelMessageRouter.SetXService(nil)
+	}
+	if old != nil {
+		old.Stop()
+	}
 }
 
 func (h *Handler) SetChannelMessageRouter(router *service.ChannelMessageRouter) {
@@ -456,6 +559,28 @@ func (h *Handler) SetProjectFolderPicker(picker ProjectFolderPicker) {
 // SetWebhookRepo sets the webhook endpoint repository for inbound webhook management.
 func (h *Handler) SetWebhookRepo(repo *repository.WebhookRepo) {
 	h.webhookRepo = repo
+	h.wireChannelIntegrationSummaryDeps(h.slackSvc)
+	h.wireChannelIntegrationSummaryDeps(h.discordSvc)
+	h.wireChannelIntegrationSummaryDeps(h.telegramService)
+}
+
+func (h *Handler) wireChannelIntegrationSummaryDeps(svc any) {
+	if svc == nil {
+		return
+	}
+	v := reflect.ValueOf(svc)
+	if v.Kind() == reflect.Pointer && v.IsNil() {
+		return
+	}
+	if setter, ok := svc.(channelEmailStatusProviderSetter); ok && h.emailService != nil {
+		setter.SetEmailStatusProvider(h.emailService.GetConnectionStatus)
+	}
+	if setter, ok := svc.(channelEmailAuthRepoSetter); ok {
+		setter.SetEmailAuthRepo(h.emailAuthRepo)
+	}
+	if setter, ok := svc.(channelWebhookRepoSetter); ok {
+		setter.SetWebhookRepo(h.webhookRepo)
+	}
 }
 
 // SetMemoryService wires the Memory service so project-create handlers
@@ -472,11 +597,12 @@ func (h *Handler) SetAgentLibraryMaintenanceService(svc *service.AgentLibraryMai
 
 // getCurrentProjectID resolves the current project ID from the query param.
 // If project_id is provided and valid, it uses GetByID to verify it exists.
-// Otherwise it falls back to listing all projects and using the first one.
+// Otherwise it falls back to the first compact selector option.
 func (h *Handler) getCurrentProjectID(c echo.Context) (string, error) {
+	ctx := c.Request().Context()
 	projectID := c.QueryParam("project_id")
 	if projectID != "" && projectID != "default" {
-		p, err := h.projectSvc.GetByID(c.Request().Context(), projectID)
+		p, err := h.projectSvc.GetByID(ctx, projectID)
 		if err != nil {
 			return "", err
 		}
@@ -484,7 +610,21 @@ func (h *Handler) getCurrentProjectID(c echo.Context) (string, error) {
 			return projectID, nil
 		}
 	}
-	projects, err := h.projectSvc.List(c.Request().Context())
+	if h.settingsRepo != nil {
+		selectedProjectID, err := h.settingsRepo.Get(ctx, uiPreferenceSelectedProjectIDKey)
+		if err != nil {
+			applog.Debugf("[handler] failed to load selected project preference: %v", err)
+		} else if selectedProjectID = strings.TrimSpace(selectedProjectID); selectedProjectID != "" {
+			p, err := h.projectSvc.GetByID(ctx, selectedProjectID)
+			if err != nil {
+				return "", err
+			}
+			if p != nil {
+				return selectedProjectID, nil
+			}
+		}
+	}
+	projects, err := h.projectSvc.ListSelectorOptions(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -518,6 +658,23 @@ func parseIntClamped(value string, min, max int) int {
 }
 
 func (h *Handler) RegisterRoutes(e *echo.Echo) {
+	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			c.Set("handler", h)
+			return next(c)
+		}
+	})
+
+	// Machine-readable readiness and immutable build identity.
+	e.GET("/api/system/health", h.SystemHealth)
+	e.POST("/ui/preferences", h.SaveUIPreferences)
+
+	// Machine-readable system update state and administrator actions.
+	e.GET("/api/system/update", h.SystemUpdate)
+	e.POST("/api/system/update/apply", h.ApplySystemUpdate)
+	e.POST("/api/system/update/cancel", h.CancelSystemUpdate)
+	e.GET("/api/system/update/events", h.SystemUpdateEvents)
+
 	// Swagger API documentation
 	e.GET("/swagger/*", echoSwagger.WrapHandler)
 
@@ -535,9 +692,6 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 
 	// Dashboard
 	e.GET("/", h.Home)
-	e.GET("/dashboard", h.Dashboard)
-	e.GET("/dashboard-mockup", h.DashboardMockup)
-	e.POST("/dashboard-mockup/actions", h.DashboardMockupAction)
 	e.GET("/analytics", h.Analytics)
 
 	// Analytics API endpoints
@@ -562,9 +716,10 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 
 	// Automations (project-scoped via ?project_id= query param)
 	e.GET("/automations", h.ListAutomations)
-	e.GET("/automations/new", h.NewAutomationBuilder)
 	e.POST("/automations/builder", h.BuildAutomationWeb)
+	e.POST("/automations/yaml/parse", h.ParseAutomationYAML)
 	e.POST("/automations/:automationId/builder", h.EditAutomationBuilder)
+	e.POST("/automations/:automationId/run-now", h.RunAutomationNow)
 	e.POST("/automations/:automationId/pause", h.PauseAutomation)
 	e.POST("/automations/:automationId/resume", h.ResumeAutomation)
 	e.POST("/automations/:automationId/refresh-external", h.RefreshAutomationExternalState)
@@ -596,6 +751,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.GET("/tasks/:taskId/thread/composer-action", h.TaskThreadComposerAction)
 	e.GET("/tasks/:taskId/thread/executions/:execId/fragment", h.GetTaskThreadExecutionFragment)
 	e.POST("/tasks/:taskId/thread", h.TaskThreadSend)
+	e.POST("/tasks/:taskId/thread/model", h.TaskThreadSelectModel)
 	e.POST("/tasks/:taskId/thread/steer", h.TaskThreadSteer)
 	e.GET("/tasks/:taskId/thread/pending-inputs", h.TaskThreadPendingInputs)
 	e.POST("/thread-inputs/:inputId/cancel", h.CancelThreadInput)
@@ -657,6 +813,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.GET("/skills", h.ListSkills)
 	e.POST("/skills", h.CreateSkill)
 	e.POST("/skills/import", h.ImportSkillPackage)
+	e.GET("/skills/:skill/details", h.GetSkillDetail)
 	e.PUT("/skills/:skill", h.UpdateSkill)
 	e.POST("/skills/:skill/enabled", h.SetSkillEnabled)
 	e.POST("/skills/:skill/always_use", h.SetSkillAlwaysUse)
@@ -667,11 +824,13 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.GET("/agents/:id/lifecycle-hooks", h.GetAgentLifecycleHooks)
 	e.PUT("/agents/:id/lifecycle-hooks", h.SaveAgentLifecycleHooks)
 	// Lifecycle execution activity (runbook §Rollout step 17)
+	e.GET("/api/tasks/:id/lifecycle-executions/:executionID", h.GetTaskLifecycleExecution)
 	e.GET("/api/tasks/:id/lifecycle-executions", h.GetTaskLifecycleExecutions)
 	e.GET("/api/lifecycle-executions/:id/events", h.GetLifecycleExecutionEvents)
 
 	e.GET("/models", h.ListModels)
 	e.POST("/models", h.CreateModel)
+	e.GET("/models/:id/edit-details", h.GetModelEditDetails)
 	e.GET("/models/openai-compatible/available", h.ListOpenAICompatibleAvailableModels)
 	e.GET("/models/ollama/available", h.ListOllamaAvailableModels)
 	e.POST("/models/:id", h.UpdateModel)
@@ -726,6 +885,11 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.POST("/channels/discord/configure", h.handleDiscordConfigure)
 	e.POST("/channels/discord/remove", h.handleDiscordRemove)
 	e.POST("/channels/discord/test", h.handleDiscordTest)
+	e.POST("/channels/x/configure", h.handleXConfigure)
+	e.POST("/channels/x/test", h.handleXTest)
+	e.POST("/channels/x/remove", h.handleXRemove)
+	e.POST("/channels/x/authorized-users", h.AddXAuthorizedUser)
+	e.DELETE("/channels/x/authorized-users/:id", h.RemoveXAuthorizedUser)
 	e.POST("/channels/email/configure", h.handleEmailConfigure)
 	e.POST("/channels/email/remove", h.handleEmailRemove)
 	e.POST("/channels/email/test", h.handleEmailTest)
@@ -772,6 +936,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 
 	// Webhooks
 	e.POST("/channels/webhooks", h.HandleWebhookCreate)
+	e.GET("/channels/webhooks/:id", h.HandleWebhookDetail)
 	e.PUT("/channels/webhooks/:id", h.HandleWebhookUpdate)
 	e.DELETE("/channels/webhooks/:id", h.HandleWebhookDelete)
 	e.POST("/channels/webhooks/:id/rotate-secret", h.HandleWebhookRotateSecret)
@@ -781,6 +946,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.POST("/webhooks/inbound/:pathToken", h.HandleWebhookInbound)
 
 	// Git Worktree
+	e.GET("/tasks/:taskId/card/merge-options", h.GetTaskCardMergeOptions)
 	e.GET("/tasks/:taskId/worktree", h.GetTaskWorktreeInfo)
 	e.POST("/tasks/:taskId/worktree/auto-merge", h.UpdateTaskAutoMerge)
 	e.POST("/tasks/:taskId/worktree/merge", h.MergeTaskBranch)
@@ -825,6 +991,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 
 	// Alerts
 	e.GET("/alerts", h.ListAlerts)
+	e.GET("/alerts/:id/details", h.GetAlertDetail)
 	e.POST("/alerts/:id/read", h.MarkAlertRead)
 	e.POST("/alerts/:id/approve", h.ApproveAlert)
 	e.POST("/alerts/:id/reject", h.RejectAlert)
@@ -834,51 +1001,6 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.DELETE("/alerts", h.DeleteAllAlerts)
 	e.GET("/alerts/unread-count", h.GetUnreadAlertCount)
 
-	// Multi-Agent Workflows
-	e.GET("/workflows", h.ListWorkflows)
-	e.POST("/workflows", h.CreateWorkflow)
-	e.GET("/workflows/:id", h.GetWorkflow)
-	e.PUT("/workflows/:id", h.UpdateWorkflow)
-	e.DELETE("/workflows/:id", h.DeleteWorkflow)
-	e.POST("/workflows/:id/steps", h.AddWorkflowStep)
-	e.DELETE("/workflows/:id/steps/:stepId", h.DeleteWorkflowStep)
-	e.POST("/workflows/:id/execute", h.ExecuteWorkflow)
-	e.POST("/workflows/executions/:execId/cancel", h.CancelWorkflowExecution)
-	e.GET("/workflows/executions/:execId", h.GetWorkflowExecution)
-
-	// Workflow Templates
-	e.GET("/workflows/templates", h.ListWorkflowTemplates)
-
-	// Task Complexity Analysis
-	e.GET("/tasks/:taskId/analyze", h.AnalyzeTaskComplexity)
-
-	// Agent Performance Metrics
-	e.GET("/api/workflows/metrics", h.GetAllAgentMetrics)
-	e.GET("/api/workflows/metrics/:agentId", h.GetAgentMetrics)
-	e.GET("/api/workflows/best-agent", h.GetBestAgent)
-	e.GET("/api/workflows/cheapest-agent", h.GetCheapestAgent)
-
-	// Vote Records
-	e.GET("/api/workflows/votes/:stepExecId", h.GetVoteRecords)
-
-	// Semantic Collision Detection
-	e.POST("/api/collisions/analyze/:taskId", h.AnalyzeTaskImpact)
-	e.GET("/api/collisions/impact/:taskId", h.GetTaskImpact)
-	e.POST("/api/collisions/detect", h.DetectConflicts)
-	e.GET("/api/collisions/conflicts/:taskId", h.GetTaskConflicts)
-	e.PATCH("/api/collisions/conflicts/:id/status", h.UpdateConflictStatus)
-	e.GET("/api/collisions/report", h.GetCollisionReport)
-	e.POST("/api/collisions/recommend", h.RecommendExecutionOrder)
-	e.GET("/api/collisions/recommendation", h.GetLatestRecommendation)
-	e.POST("/api/collisions/recommendation/:id/accept", h.AcceptRecommendation)
-	e.POST("/api/collisions/recommendation/:id/reject", h.RejectRecommendation)
-	e.GET("/api/collisions/history", h.GetConflictHistory)
-	e.POST("/api/collisions/history", h.RecordConflict)
-
-	// Unified Suggestions (combined Insights + Backlog)
-	e.GET("/suggestions", h.UnifiedSuggestions)
-	e.POST("/suggestions/analyze", h.RunCombinedAnalysis)
-
 	// Proactive Insights (individual endpoints still work)
 	e.GET("/insights", h.ProactiveInsights)
 	e.POST("/insights/analyze", h.RunInsightsAnalysis)
@@ -886,78 +1008,10 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.PATCH("/insights/:id/status", h.UpdateInsightStatus)
 	e.DELETE("/insights/:id", h.DeleteInsight)
 	e.GET("/insights/by-type", h.ListInsightsByType)
-	e.GET("/insights/knowledge/search", h.SearchInsightsKnowledge)
 	e.DELETE("/insights/knowledge/:id", h.DeleteKnowledgeEntry)
 	e.GET("/insights/reports", h.ListInsightReports)
 	e.POST("/insights/health-check", h.RunHealthCheck)
 	e.POST("/history/grade-ideas", h.GradeIdeas)
-
-	// Architect
-	e.GET("/architect", h.ArchitectMode)
-	e.POST("/architect/sessions", h.CreateArchitectSession)
-	e.GET("/architect/sessions/:id", h.GetArchitectSession)
-	e.DELETE("/architect/sessions/:id", h.DeleteArchitectSession)
-	e.POST("/architect/sessions/:id/messages", h.SendArchitectMessage)
-	e.POST("/architect/sessions/:id/advance", h.AdvanceArchitectPhase)
-	e.POST("/architect/sessions/:id/architecture", h.GenerateArchitectArchitecture)
-	e.POST("/architect/sessions/:id/risks", h.GenerateArchitectRisks)
-	e.POST("/architect/sessions/:id/tasks", h.GenerateArchitectTasks)
-	e.POST("/architect/sessions/:id/activate", h.ActivateArchitectPhase)
-	e.POST("/architect/sessions/:id/abandon", h.AbandonArchitectSession)
-	e.POST("/architect/sessions/:id/template", h.SaveArchitectTemplate)
-	e.DELETE("/architect/templates/:id", h.DeleteArchitectTemplate)
-
-	// Backlog Management
-	e.GET("/backlog", h.BacklogManagement)
-	e.POST("/backlog/analyze", h.RunBacklogAnalysis)
-	e.PATCH("/backlog/suggestions/:id/status", h.UpdateBacklogSuggestionStatus)
-	e.POST("/backlog/suggestions/:id/apply", h.ApplyBacklogSuggestion)
-	e.DELETE("/backlog/suggestions/:id", h.DeleteBacklogSuggestion)
-	e.POST("/backlog/health", h.SnapshotBacklogHealth)
-	e.GET("/backlog/reports", h.ListBacklogReports)
-
-	// Autonomous Builds
-	e.GET("/autonomous", h.AutonomousBuilds)
-	e.POST("/api/autonomous/trigger", h.TriggerAutonomousBuild)
-	e.PUT("/api/autonomous/config", h.UpdateAutonomousConfig)
-	e.GET("/api/autonomous/summary/:taskId", h.GetBuildSummary)
-	e.GET("/api/autonomous/chain/:taskId", h.GetBuildChain)
-
-	// Trend Intelligence (part of Autonomous)
-	e.PUT("/api/autonomous/x-credentials", h.SaveXCredentials)
-	e.POST("/api/autonomous/trends/sources", h.AddTrendSource)
-	e.DELETE("/api/autonomous/trends/sources/:id", h.DeleteTrendSource)
-	e.PATCH("/api/autonomous/trends/sources/:id/toggle", h.ToggleTrendSource)
-	e.POST("/api/autonomous/trends/collect", h.CollectTrends)
-	e.POST("/api/autonomous/trends/analyze", h.AnalyzeTrends)
-	e.POST("/api/autonomous/trends/competitors", h.AnalyzeCompetitors)
-	e.PATCH("/api/autonomous/trends/patterns/:id/status", h.UpdateTrendPatternStatus)
-	e.GET("/api/autonomous/trends/dashboard", h.GetTrendDashboard)
-
-	// Task Templates
-	e.GET("/templates", h.Templates)
-	e.POST("/templates", h.CreateTemplate)
-	e.POST("/templates/:id/create-task", h.CreateTaskFromTemplate)
-	e.POST("/tasks/:id/save-as-template", h.SaveTaskAsTemplate)
-	e.PUT("/templates/:id", h.UpdateTemplate)
-	e.DELETE("/templates/:id", h.DeleteTemplate)
-	e.POST("/templates/:id/favorite", h.ToggleFavoriteTemplate)
-	e.GET("/templates/search", h.SearchTemplates)
-	e.GET("/templates/filter", h.FilterTemplates)
-
-	// Pattern Library
-	e.GET("/patterns", h.PatternsPage)
-	e.POST("/patterns", h.CreatePattern)
-	e.GET("/patterns/:id", h.GetPattern)
-	e.PUT("/patterns/:id", h.UpdatePattern)
-	e.DELETE("/patterns/:id", h.DeletePattern)
-	e.GET("/patterns/:id/apply", h.ApplyPatternForm)
-	e.POST("/patterns/:id/apply", h.ApplyPattern)
-	e.POST("/patterns/:id/duplicate", h.DuplicatePattern)
-	e.GET("/patterns/search", h.SearchPatterns)
-	e.GET("/patterns/export", h.ExportPatterns)
-	e.POST("/patterns/import", h.ImportPatterns)
-	e.GET("/patterns/category/:category", h.ListPatternsByCategory)
 
 	// Server-Sent Events for real-time updates
 	e.GET("/events/live", h.LiveEventsSSE)

@@ -45,9 +45,12 @@ type channelChatIngressQueueOptions struct {
 	ThreadInputRepo *repository.ThreadInputRepo
 	ChatBroadcaster *events.ChatBroadcaster
 
-	NewThreadInput func() *models.ThreadInput
-	OnQueueFailure func(context.Context)
-	OnQueued       func(context.Context)
+	NewThreadInput        func() *models.ThreadInput
+	CreateQueuedInput     func(context.Context, *models.ThreadInput) (bool, error)
+	OnQueueFailure        func(context.Context)
+	OnQueued              func(context.Context)
+	OnDurableHandoff      func()
+	CleanupPendingSession func(context.Context, string)
 }
 
 type channelTaskThreadSendOptions struct {
@@ -66,6 +69,7 @@ type channelTaskThreadSendOptions struct {
 	SettingsRepo               *repository.SettingsRepo
 	CustomPersonalityRepo      *repository.CustomPersonalityRepo
 	ChannelTaskRunner          ChannelTaskRunner
+	RuntimeToolsForTask        func(taskID string) *llmcontracts.RuntimeTools
 	QueuedTaskThreadPromoter   func(taskID string)
 	CompleteExecution          func(context.Context, string, string, string, string, int, int64)
 	NewQueuedInput             func(*models.Task, string, string) *models.ThreadInput
@@ -113,6 +117,11 @@ type channelChatIngressFirstTurnOptions struct {
 	ChannelChatRunner  ChannelChatRunner
 
 	CreateTaskContext          func(context.Context, string) error
+	CreateExecution            func(context.Context, *models.Execution) (bool, error)
+	PrepareDurableAttachments  func(context.Context, string, []models.ChatAttachment) ([]models.ChatAttachment, error)
+	CreateDurableFirstTurn     func(context.Context, *models.Task, *models.Execution, []models.ChatAttachment) (bool, error)
+	CleanupProvisionalTask     func(context.Context, string, string)
+	CleanupAttachmentSources   func(context.Context, []models.ChatAttachment)
 	CompleteExecution          func(context.Context, string, string, string, string, int, int64)
 	LinkAttachments            func(context.Context, string, []models.ChatAttachment) ([]models.ChatAttachment, error)
 	AttachmentContextAndImages func([]models.ChatAttachment) (string, []models.Attachment)
@@ -128,6 +137,7 @@ type channelChatIngressFirstTurnOptions struct {
 	OnTaskCreateFailure        func(context.Context)
 	OnTaskContextFailure       func(context.Context)
 	OnExecutionCreateFailure   func(context.Context)
+	OnDurableHandoff           func()
 	OnAttachmentLinkFailure    func(context.Context, string)
 	PrepareRunner              func(context.Context, string, string) int
 	OnRunnerUnavailable        func(context.Context, string, int)
@@ -165,10 +175,14 @@ type channelChatIngressOptions struct {
 	ContinueWithoutAttachmentsOnDownloadError bool
 	IncomingAttachmentsNeedVision             func() bool
 	SavePendingAttachments                    func([]models.ChatAttachment) (string, error)
+	SavePendingAttachmentsWithContext         func(context.Context, []models.ChatAttachment) (string, error)
+	CleanupAttachmentSources                  func(context.Context, []models.ChatAttachment)
+	CleanupPendingSession                     func(context.Context, string)
 	SelectionMessage                          string
 	FindActiveExecution                       func(context.Context, string) (*models.Execution, error)
 	RecordAttachmentFailure                   func(context.Context, string, string)
 	NewQueuedInput                            func() *models.ThreadInput
+	CreateQueuedInput                         func(context.Context, *models.ThreadInput) (bool, error)
 	AttachmentDownloadFailureMessage          func(error, bool) string
 	OnAttachmentDownloadFailed                func(context.Context, string)
 	OnQueuedAttachmentDownloadFailed          func(context.Context, string)
@@ -177,6 +191,7 @@ type channelChatIngressOptions struct {
 	OnActiveLookupFailed                      func(context.Context)
 	OnQueueFailure                            func(context.Context)
 	OnQueued                                  func(context.Context)
+	OnDurableHandoff                          func()
 	FirstTurn                                 channelChatIngressFirstTurnOptions
 }
 
@@ -251,11 +266,11 @@ func buildChannelChatContext(ctx context.Context, opts channelChatContextOptions
 	return systemContext
 }
 
-func listChannelChatAssignableAgentDefinitions(ctx context.Context, platform string, repo *repository.AgentRepo) []models.Agent {
+func listChannelChatAssignableAgentDefinitions(ctx context.Context, platform string, repo *repository.AgentRepo) []models.ChatAssignableAgentDefinition {
 	if repo == nil {
 		return nil
 	}
-	agents, err := repo.List(ctx)
+	agents, err := repo.ListChatAssignableDefinitions(ctx)
 	if err != nil {
 		applog.Infof("[%s] error listing agent definitions for context: %v", channelChatLogPlatform(platform), err)
 		return nil
@@ -298,7 +313,7 @@ func completeChannelExecution(ctx context.Context, opts channelExecutionCompleti
 		if err := opts.ExecRepo.Complete(ctx, opts.ExecID, models.ExecFailed, "", opts.ErrorMessage, 0, opts.DurationMs); err != nil {
 			applog.Infof("[%s] complete failed execution error: %v", platform, err)
 		} else {
-			publishChannelExecutionTerminal(opts.ExecutionStreamHub, opts.ExecID, models.ExecFailed, opts.ErrorMessage)
+			opts.ExecutionStreamHub.CloseTerminal(opts.ExecID, models.ExecFailed, opts.ErrorMessage)
 		}
 		if err := opts.TaskRepo.UpdateStatus(ctx, opts.TaskID, models.StatusFailed); err != nil {
 			applog.Infof("[%s] update failed task status error: %v", platform, err)
@@ -309,7 +324,7 @@ func completeChannelExecution(ctx context.Context, opts channelExecutionCompleti
 	if err := opts.ExecRepo.Complete(ctx, opts.ExecID, models.ExecCompleted, opts.Output, "", opts.TokensUsed, opts.DurationMs); err != nil {
 		applog.Infof("[%s] complete execution error: %v", platform, err)
 	} else {
-		publishChannelExecutionTerminal(opts.ExecutionStreamHub, opts.ExecID, models.ExecCompleted, "")
+		opts.ExecutionStreamHub.CloseTerminal(opts.ExecID, models.ExecCompleted, "")
 	}
 	if err := opts.TaskRepo.UpdateStatus(ctx, opts.TaskID, models.StatusCompleted); err != nil {
 		applog.Infof("[%s] update task status error: %v", platform, err)
@@ -331,27 +346,6 @@ type channelExecutionCompletionOptions struct {
 	DurationMs         int64
 }
 
-func publishChannelExecutionTerminal(hub *events.ExecutionStreamHub, execID string, status models.ExecutionStatus, errMsg string) {
-	if hub == nil || execID == "" {
-		return
-	}
-	event := events.ExecutionStreamEvent{ExecID: execID}
-	switch status {
-	case models.ExecCompleted:
-		event.Type = events.ExecutionStreamDone
-		event.Status = "completed"
-	case models.ExecCancelled:
-		event.Type = events.ExecutionStreamDone
-		event.Status = "cancelled"
-	case models.ExecFailed:
-		event.Type = events.ExecutionStreamError
-		event.Error = errMsg
-	default:
-		return
-	}
-	hub.Close(execID, event)
-}
-
 func promoteQueuedChannelChatAfterCompletion(ctx context.Context, taskRepo *repository.TaskRepo, queuedTurnPromoter func(projectID string), taskID string) {
 	if queuedTurnPromoter == nil || taskRepo == nil {
 		return
@@ -364,74 +358,7 @@ func promoteQueuedChannelChatAfterCompletion(ctx context.Context, taskRepo *repo
 }
 
 func resolveChannelTaskReference(ctx context.Context, taskRepo *repository.TaskRepo, projectID, taskID, title string) (*models.Task, error) {
-	if taskRepo == nil {
-		return nil, fmt.Errorf("task repository not configured")
-	}
-	if strings.TrimSpace(taskID) != "" {
-		taskID = strings.TrimSpace(taskID)
-		task, err := taskRepo.GetByID(ctx, taskID)
-		if err != nil {
-			return nil, fmt.Errorf("error looking up task %s: %w", taskID, err)
-		}
-		if task == nil {
-			return nil, fmt.Errorf("task %s not found", taskID)
-		}
-		if task.ProjectID != projectID {
-			return nil, fmt.Errorf("task %s belongs to a different project", taskID)
-		}
-		return task, nil
-	}
-	title = strings.TrimSpace(title)
-	if title != "" {
-		tasks, err := taskRepo.SearchByTitle(ctx, projectID, title)
-		if err != nil {
-			return nil, fmt.Errorf("error searching for task %q: %w", title, err)
-		}
-		if len(tasks) == 0 {
-			return nil, fmt.Errorf("no task found matching %q", title)
-		}
-		return &tasks[0], nil
-	}
-	return nil, fmt.Errorf("no task_id or title provided")
-}
-
-func resolveChannelScheduleReference(ctx context.Context, taskRepo *repository.TaskRepo, scheduleRepo *repository.ScheduleRepo, projectID, scheduleID, taskID, title string) (*models.Schedule, *models.Task, error) {
-	if scheduleRepo == nil {
-		return nil, nil, fmt.Errorf("schedule repository not available")
-	}
-	if strings.TrimSpace(scheduleID) != "" {
-		scheduleID = strings.TrimSpace(scheduleID)
-		schedule, err := scheduleRepo.GetByID(ctx, scheduleID)
-		if err != nil {
-			return nil, nil, fmt.Errorf("error looking up schedule %s: %w", scheduleID, err)
-		}
-		if schedule == nil {
-			return nil, nil, fmt.Errorf("schedule %s not found", scheduleID)
-		}
-		if taskRepo == nil {
-			return nil, nil, fmt.Errorf("task repository not configured")
-		}
-		task, err := taskRepo.GetByID(ctx, schedule.TaskID)
-		if err != nil || task == nil {
-			return nil, nil, fmt.Errorf("task for schedule %s not found", scheduleID)
-		}
-		if task.ProjectID != projectID {
-			return nil, nil, fmt.Errorf("schedule %s belongs to a different project", scheduleID)
-		}
-		return schedule, task, nil
-	}
-	task, err := resolveChannelTaskReference(ctx, taskRepo, projectID, taskID, title)
-	if err != nil {
-		return nil, nil, err
-	}
-	schedules, err := scheduleRepo.ListByTask(ctx, task.ID)
-	if err != nil {
-		return nil, nil, fmt.Errorf("error listing schedules for task %s: %w", task.ID, err)
-	}
-	if len(schedules) == 0 {
-		return nil, nil, fmt.Errorf("no schedules found for task %q", task.Title)
-	}
-	return &schedules[0], task, nil
+	return ResolveTaskReference(ctx, taskRepo, projectID, taskID, title, TaskReferenceResolutionOptions{})
 }
 
 func runChannelTaskThreadSend(ctx context.Context, task *models.Task, opts channelTaskThreadSendOptions) string {
@@ -521,7 +448,7 @@ func runChannelTaskThreadSend(ctx context.Context, task *models.Task, opts chann
 		}
 		return formatErr("Error selecting agent for task %q: %v", task.Title, err)
 	}
-	exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: opts.Message, IsFollowup: true}
+	exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecQueued, PromptSent: opts.Message, IsFollowup: true}
 	if opts.ExecRepo == nil {
 		return formatErr("Error creating follow-up execution for %q: execution repository not configured", task.Title)
 	}
@@ -581,7 +508,11 @@ func runChannelTaskThreadSend(ctx context.Context, task *models.Task, opts chann
 	if updatedTask, getErr := opts.TaskRepo.GetByID(ctx, task.ID); getErr == nil && updatedTask != nil {
 		task = updatedTask
 	}
-	opts.ChannelTaskRunner(context.Background(), ChannelTaskRunRequest{ExecID: exec.ID, TaskID: task.ID, ProjectID: task.ProjectID, Message: opts.Message, Agent: *agent, ChatHistory: priorHistory, SystemContext: systemContext, Surface: opts.Surface, ReplyContext: opts.ReplyContext})
+	var runtimeTools *llmcontracts.RuntimeTools
+	if opts.RuntimeToolsForTask != nil {
+		runtimeTools = opts.RuntimeToolsForTask(task.ID)
+	}
+	opts.ChannelTaskRunner(context.Background(), ChannelTaskRunRequest{ExecID: exec.ID, TaskID: task.ID, ProjectID: task.ProjectID, Message: opts.Message, Agent: *agent, ChatHistory: priorHistory, SystemContext: systemContext, Surface: opts.Surface, ReplyContext: opts.ReplyContext, RuntimeTools: runtimeTools})
 	if opts.StartedResult != nil {
 		return opts.StartedResult(task)
 	}
@@ -724,7 +655,7 @@ func runChannelChatIngress(ctx context.Context, opts channelChatIngressOptions) 
 
 	agent, err := selectChannelChatAgent(ctx, opts.LLMConfigRepo, opts.selectionPrompt(), len(imageAttachments) > 0)
 	if err != nil {
-		cleanupChannelChatAttachmentSourceDirs(chatAttachments)
+		cleanupChannelChatAttachmentSources(ctx, opts.CleanupAttachmentSources, chatAttachments)
 		if opts.OnModelSelectionFailed != nil {
 			opts.OnModelSelectionFailed(ctx, err)
 		}
@@ -734,15 +665,19 @@ func runChannelChatIngress(ctx context.Context, opts channelChatIngressOptions) 
 	if activeChatExec != nil {
 		attachmentSessionID := ""
 		if len(chatAttachments) > 0 {
-			if opts.SavePendingAttachments == nil {
-				cleanupChannelChatAttachmentSourceDirs(chatAttachments)
+			if opts.SavePendingAttachments == nil && opts.SavePendingAttachmentsWithContext == nil {
+				cleanupChannelChatAttachmentSources(ctx, opts.CleanupAttachmentSources, chatAttachments)
 				if opts.OnAttachmentStoreFailed != nil {
 					opts.OnAttachmentStoreFailed(ctx, "Failed to process attachment: unable to store attachment. Please try again.")
 				}
 				return true
 			}
 			var stageErr error
-			attachmentSessionID, stageErr = opts.SavePendingAttachments(chatAttachments)
+			if opts.SavePendingAttachmentsWithContext != nil {
+				attachmentSessionID, stageErr = opts.SavePendingAttachmentsWithContext(ctx, chatAttachments)
+			} else {
+				attachmentSessionID, stageErr = opts.SavePendingAttachments(chatAttachments)
+			}
 			if stageErr != nil {
 				applog.Infof("[%s] queue chat attachment staging failed: %v", platform, stageErr)
 				msgText := "Failed to process attachment: unable to store attachment. Please try again."
@@ -768,8 +703,11 @@ func runChannelChatIngress(ctx context.Context, opts channelChatIngressOptions) 
 			ThreadInputRepo:         opts.ThreadInputRepo,
 			ChatBroadcaster:         opts.ChatBroadcaster,
 			NewThreadInput:          opts.NewQueuedInput,
+			CreateQueuedInput:       opts.CreateQueuedInput,
 			OnQueueFailure:          opts.OnQueueFailure,
 			OnQueued:                opts.OnQueued,
+			OnDurableHandoff:        opts.OnDurableHandoff,
+			CleanupPendingSession:   opts.CleanupPendingSession,
 		})
 	}
 
@@ -784,6 +722,8 @@ func runChannelChatIngress(ctx context.Context, opts channelChatIngressOptions) 
 	first.ImageAttachments = imageAttachments
 	first.HasAttachments = opts.HasAttachments || len(chatAttachments) > 0
 	first.Surface = opts.Surface
+	first.OnDurableHandoff = opts.OnDurableHandoff
+	first.CleanupAttachmentSources = opts.CleanupAttachmentSources
 	first.Start = opts.Start
 	if first.Start.IsZero() {
 		first.Start = time.Now()
@@ -823,7 +763,7 @@ func runChannelChatIngress(ctx context.Context, opts channelChatIngressOptions) 
 }
 
 func runChannelChatQueuedInput(ctx context.Context, opts channelChatIngressQueueOptions) bool {
-	if opts.ThreadInputRepo == nil {
+	if opts.ThreadInputRepo == nil && opts.CreateQueuedInput == nil {
 		return false
 	}
 	platform := strings.TrimSpace(opts.Platform)
@@ -858,13 +798,29 @@ func runChannelChatQueuedInput(ctx context.Context, opts channelChatIngressQueue
 			queued.Source = opts.Source
 		}
 	}
-	if err := opts.ThreadInputRepo.CreateQueued(ctx, queued); err != nil {
+	createQueued := opts.CreateQueuedInput
+	if createQueued == nil {
+		createQueued = func(ctx context.Context, input *models.ThreadInput) (bool, error) {
+			return false, opts.ThreadInputRepo.CreateQueued(ctx, input)
+		}
+	}
+	alreadyHandedOff, err := createQueued(ctx, queued)
+	if err != nil {
 		applog.Infof("[%s] queue chat input failed: %v", platform, err)
 		if opts.AttachmentSessionID != "" {
-			_ = os.RemoveAll(filepath.Join(opts.UploadsDir, "chat", "pending", opts.AttachmentSessionID))
+			cleanupChannelChatPendingSession(ctx, opts.CleanupPendingSession, opts.UploadsDir, opts.AttachmentSessionID)
 		}
 		if opts.OnQueueFailure != nil {
 			opts.OnQueueFailure(ctx)
+		}
+		return true
+	}
+	if opts.OnDurableHandoff != nil {
+		opts.OnDurableHandoff()
+	}
+	if alreadyHandedOff {
+		if opts.AttachmentSessionID != "" {
+			cleanupChannelChatPendingSession(ctx, opts.CleanupPendingSession, opts.UploadsDir, opts.AttachmentSessionID)
 		}
 		return true
 	}
@@ -877,14 +833,51 @@ func runChannelChatQueuedInput(ctx context.Context, opts channelChatIngressQueue
 	return true
 }
 
+func cleanupChannelChatAttachmentSources(ctx context.Context, cleanup func(context.Context, []models.ChatAttachment), attachments []models.ChatAttachment) {
+	if cleanup != nil {
+		cleanup(ctx, attachments)
+		return
+	}
+	cleanupChannelChatAttachmentSourceDirs(attachments)
+}
+
+func cleanupChannelChatPendingSession(ctx context.Context, cleanup func(context.Context, string), uploadsDir, sessionID string) {
+	if sessionID == "" {
+		return
+	}
+	if cleanup != nil {
+		cleanup(ctx, sessionID)
+		return
+	}
+	_ = os.RemoveAll(filepath.Join(uploadsDir, "chat", "pending", sessionID))
+}
+
+func cleanupChannelChatProvisionalTaskWithOptions(ctx context.Context, opts channelChatIngressFirstTurnOptions, platform, taskID, reason string) {
+	if opts.CleanupProvisionalTask != nil {
+		opts.CleanupProvisionalTask(ctx, taskID, reason)
+		return
+	}
+	cleanupChannelChatProvisionalTask(ctx, platform, opts.TaskRepo, taskID, reason)
+}
+
+func cleanupChannelChatProvisionalTask(ctx context.Context, platform string, taskRepo *repository.TaskRepo, taskID, reason string) {
+	if taskRepo == nil || strings.TrimSpace(taskID) == "" {
+		return
+	}
+	cleanupCtx := context.WithoutCancel(ctx)
+	if err := taskRepo.Delete(cleanupCtx, taskID); err != nil {
+		applog.Infof("[%s] cleanup %s task failed task=%s: %v", platform, reason, taskID, err)
+	}
+}
+
 func runChannelChatFirstTurn(ctx context.Context, opts channelChatIngressFirstTurnOptions) (bool, []models.ChatAttachment) {
 	platform := strings.TrimSpace(opts.Platform)
 	if platform == "" {
 		platform = "channel"
 	}
-	if opts.TaskRepo == nil || opts.ExecRepo == nil || opts.Agent == nil || opts.Task == nil {
+	if opts.TaskRepo == nil || (opts.ExecRepo == nil && opts.CreateExecution == nil && opts.CreateDurableFirstTurn == nil) || opts.Agent == nil || opts.Task == nil {
 		applog.Infof("[%s] incoming message ignored: shared ingress dependencies are not fully configured", platform)
-		cleanupChannelChatAttachmentSourceDirs(opts.Attachments)
+		cleanupChannelChatAttachmentSources(ctx, opts.CleanupAttachmentSources, opts.Attachments)
 		return false, nil
 	}
 	selectedAgentID := opts.Agent.ID
@@ -896,43 +889,96 @@ func runChannelChatFirstTurn(ctx context.Context, opts channelChatIngressFirstTu
 	if opts.Task.CreatedVia == "" {
 		opts.Task.CreatedVia = opts.Source
 	}
-	if err := opts.TaskRepo.Create(ctx, opts.Task); err != nil {
-		applog.Infof("[%s] create chat task failed: %v", platform, err)
-		cleanupChannelChatAttachmentSourceDirs(opts.Attachments)
-		if opts.OnTaskCreateFailure != nil {
-			opts.OnTaskCreateFailure(ctx)
-		}
-		return true, nil
-	}
-	if opts.CreateTaskContext != nil {
-		if err := opts.CreateTaskContext(ctx, opts.Task.ID); err != nil {
-			applog.Infof("[%s] create chat context failed task=%s: %v", platform, opts.Task.ID, err)
-			cleanupChannelChatAttachmentSourceDirs(opts.Attachments)
-			if delErr := opts.TaskRepo.Delete(ctx, opts.Task.ID); delErr != nil {
-				applog.Infof("[%s] cleanup chat task failed task=%s: %v", platform, opts.Task.ID, delErr)
+	exec := &models.Execution{AgentConfigID: opts.Agent.ID, Status: models.ExecRunning, PromptSent: opts.Message}
+	linkedAttachments := opts.Attachments
+	attachmentsDurablyLinked := false
+	if opts.CreateDurableFirstTurn != nil {
+		if len(opts.Attachments) > 0 {
+			if opts.PrepareDurableAttachments == nil {
+				applog.Infof("[%s] durable first-turn attachment preparation is unavailable", platform)
+				cleanupChannelChatAttachmentSources(ctx, opts.CleanupAttachmentSources, opts.Attachments)
+				if opts.OnAttachmentLinkFailure != nil {
+					opts.OnAttachmentLinkFailure(ctx, "Failed to process attachment: unable to store attachment. Please try again.")
+				}
+				return true, nil
 			}
-			if opts.OnTaskContextFailure != nil {
-				opts.OnTaskContextFailure(ctx)
+			exec.ID = generateChannelChatPendingSessionID()
+			prepared, err := opts.PrepareDurableAttachments(ctx, exec.ID, opts.Attachments)
+			if err != nil {
+				applog.Infof("[%s] prepare durable first-turn attachments failed: %v", platform, err)
+				if opts.OnAttachmentLinkFailure != nil {
+					opts.OnAttachmentLinkFailure(ctx, "Failed to process attachment: unable to store attachment. Please try again.")
+				}
+				return true, nil
+			}
+			linkedAttachments = prepared
+		}
+		alreadyHandedOff, err := opts.CreateDurableFirstTurn(ctx, opts.Task, exec, linkedAttachments)
+		if err != nil {
+			applog.Infof("[%s] create durable first turn failed: %v", platform, err)
+			cleanupChannelChatAttachmentSources(ctx, opts.CleanupAttachmentSources, linkedAttachments)
+			if opts.OnExecutionCreateFailure != nil {
+				opts.OnExecutionCreateFailure(ctx)
 			}
 			return true, nil
 		}
-	}
-	exec := &models.Execution{TaskID: opts.Task.ID, AgentConfigID: opts.Agent.ID, Status: models.ExecRunning, PromptSent: opts.Message}
-	if err := opts.ExecRepo.Create(ctx, exec); err != nil {
-		applog.Infof("[%s] create execution failed: %v", platform, err)
-		cleanupChannelChatAttachmentSourceDirs(opts.Attachments)
-		if delErr := opts.TaskRepo.Delete(ctx, opts.Task.ID); delErr != nil {
-			applog.Infof("[%s] cleanup chat task failed task=%s after execution create failure: %v", platform, opts.Task.ID, delErr)
+		if opts.OnDurableHandoff != nil {
+			opts.OnDurableHandoff()
 		}
-		if opts.OnExecutionCreateFailure != nil {
-			opts.OnExecutionCreateFailure(ctx)
+		if alreadyHandedOff {
+			cleanupChannelChatAttachmentSources(ctx, opts.CleanupAttachmentSources, linkedAttachments)
+			return true, nil
 		}
-		return true, nil
+		attachmentsDurablyLinked = len(linkedAttachments) > 0
+	} else {
+		if err := opts.TaskRepo.Create(ctx, opts.Task); err != nil {
+			applog.Infof("[%s] create chat task failed: %v", platform, err)
+			cleanupChannelChatAttachmentSources(ctx, opts.CleanupAttachmentSources, opts.Attachments)
+			if opts.OnTaskCreateFailure != nil {
+				opts.OnTaskCreateFailure(ctx)
+			}
+			return true, nil
+		}
+		if opts.CreateTaskContext != nil {
+			if err := opts.CreateTaskContext(ctx, opts.Task.ID); err != nil {
+				applog.Infof("[%s] create chat context failed task=%s: %v", platform, opts.Task.ID, err)
+				cleanupChannelChatAttachmentSources(ctx, opts.CleanupAttachmentSources, opts.Attachments)
+				cleanupChannelChatProvisionalTaskWithOptions(ctx, opts, platform, opts.Task.ID, "chat context")
+				if opts.OnTaskContextFailure != nil {
+					opts.OnTaskContextFailure(ctx)
+				}
+				return true, nil
+			}
+		}
+		exec.TaskID = opts.Task.ID
+		createExecution := opts.CreateExecution
+		if createExecution == nil {
+			createExecution = func(ctx context.Context, execution *models.Execution) (bool, error) {
+				return false, opts.ExecRepo.Create(ctx, execution)
+			}
+		}
+		alreadyHandedOff, err := createExecution(ctx, exec)
+		if err != nil {
+			applog.Infof("[%s] create execution failed: %v", platform, err)
+			cleanupChannelChatAttachmentSources(ctx, opts.CleanupAttachmentSources, opts.Attachments)
+			cleanupChannelChatProvisionalTaskWithOptions(ctx, opts, platform, opts.Task.ID, "chat task after execution create failure")
+			if opts.OnExecutionCreateFailure != nil {
+				opts.OnExecutionCreateFailure(ctx)
+			}
+			return true, nil
+		}
+		if opts.OnDurableHandoff != nil {
+			opts.OnDurableHandoff()
+		}
+		if alreadyHandedOff {
+			cleanupChannelChatAttachmentSources(ctx, opts.CleanupAttachmentSources, opts.Attachments)
+			cleanupChannelChatProvisionalTaskWithOptions(ctx, opts, platform, opts.Task.ID, "duplicate chat")
+			return true, nil
+		}
 	}
 
-	linkedAttachments := opts.Attachments
-	hasLinkedAttachments := false
-	if len(linkedAttachments) > 0 {
+	hasLinkedAttachments := attachmentsDurablyLinked
+	if len(linkedAttachments) > 0 && !attachmentsDurablyLinked {
 		linkFn := opts.LinkAttachments
 		if linkFn == nil {
 			linkFn = func(ctx context.Context, execID string, atts []models.ChatAttachment) ([]models.ChatAttachment, error) {
@@ -956,9 +1002,9 @@ func runChannelChatFirstTurn(ctx context.Context, opts channelChatIngressFirstTu
 			return true, nil
 		}
 		hasLinkedAttachments = true
-		if opts.AttachmentContextAndImages != nil {
-			opts.AttachmentContext, opts.ImageAttachments = opts.AttachmentContextAndImages(linkedAttachments)
-		}
+	}
+	if hasLinkedAttachments && opts.AttachmentContextAndImages != nil {
+		opts.AttachmentContext, opts.ImageAttachments = opts.AttachmentContextAndImages(linkedAttachments)
 	}
 
 	if opts.ChatBroadcaster != nil {
@@ -1173,6 +1219,43 @@ func saveChannelChatAttachmentsToPendingSession(uploadsDir, fallbackName string,
 	}
 	cleanupChannelChatAttachmentDirs(cleanupDirs)
 	return sessionID, nil
+}
+
+func publishChannelChatAttachmentFiles(execID string, attachments []models.ChatAttachment, opts channelChatAttachmentLinkOptions) ([]models.ChatAttachment, error) {
+	if len(attachments) == 0 {
+		return nil, nil
+	}
+	platform := strings.TrimSpace(opts.Platform)
+	if platform == "" {
+		platform = "channel"
+	}
+	execDir := filepath.Join(opts.UploadsDir, "chat", execID)
+	if err := os.MkdirAll(execDir, 0755); err != nil {
+		cleanupChannelChatAttachmentSourceDirs(attachments)
+		return nil, fmt.Errorf("storing %s attachment: %w", channelChatAttachmentDisplayPlatform(platform), err)
+	}
+	cleanupDirs := make(map[string]struct{})
+	published := make([]models.ChatAttachment, 0, len(attachments))
+	for i := range attachments {
+		att := attachments[i]
+		cleanupDirs[filepath.Dir(att.FilePath)] = struct{}{}
+		destPath := filepath.Join(execDir, uniqueChannelChatTempFilename(execDir, safeChannelChatAttachmentFileName(att.FileName, opts.FallbackName)))
+		if err := moveOrCopyFile(att.FilePath, destPath); err != nil {
+			_ = os.RemoveAll(execDir)
+			cleanupChannelChatAttachmentDirs(cleanupDirs)
+			cleanupChannelChatAttachmentSourceDirs(attachments[i+1:])
+			return nil, fmt.Errorf("storing %s attachment %s: %w", channelChatAttachmentDisplayPlatform(platform), att.FileName, err)
+		}
+		absPath, err := filepath.Abs(destPath)
+		if err != nil {
+			absPath = destPath
+		}
+		att.FilePath = absPath
+		att.ExecutionID = execID
+		published = append(published, att)
+	}
+	cleanupChannelChatAttachmentDirs(cleanupDirs)
+	return published, nil
 }
 
 func linkChannelChatAttachmentsToExecution(ctx context.Context, execID string, attachments []models.ChatAttachment, opts channelChatAttachmentLinkOptions) ([]models.ChatAttachment, error) {

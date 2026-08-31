@@ -35,6 +35,44 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=release-version.sh
 source "${SCRIPT_DIR}/release-version.sh"
 
+load_release_env_defaults() {
+    local env_file="$1"
+    local had_key=0 had_pub=0 had_mac_id=0 had_notary=0 had_win_sign=0 had_win_verify=0 had_azure_endpoint=0 had_azure_account=0 had_azure_profile=0 had_azure_sub=0 had_win_desktop=0 had_linux_desktop=0 had_linux_arm64_desktop=0
+    local saved_key="" saved_pub="" saved_mac_id="" saved_notary="" saved_win_sign="" saved_win_verify="" saved_azure_endpoint="" saved_azure_account="" saved_azure_profile="" saved_azure_sub="" saved_win_desktop="" saved_linux_desktop="" saved_linux_arm64_desktop=""
+
+    [[ ${OPENVIBELY_RELEASE_KEY_ID+x} ]] && { had_key=1; saved_key="$OPENVIBELY_RELEASE_KEY_ID"; }
+    [[ ${OPENVIBELY_RELEASE_PUBLIC_KEY+x} ]] && { had_pub=1; saved_pub="$OPENVIBELY_RELEASE_PUBLIC_KEY"; }
+    [[ ${OPENVIBELY_MACOS_SIGN_IDENTITY+x} ]] && { had_mac_id=1; saved_mac_id="$OPENVIBELY_MACOS_SIGN_IDENTITY"; }
+    [[ ${OPENVIBELY_MACOS_NOTARY_PROFILE+x} ]] && { had_notary=1; saved_notary="$OPENVIBELY_MACOS_NOTARY_PROFILE"; }
+    [[ ${OPENVIBELY_WINDOWS_SIGN_COMMAND+x} ]] && { had_win_sign=1; saved_win_sign="$OPENVIBELY_WINDOWS_SIGN_COMMAND"; }
+    [[ ${OPENVIBELY_WINDOWS_VERIFY_COMMAND+x} ]] && { had_win_verify=1; saved_win_verify="$OPENVIBELY_WINDOWS_VERIFY_COMMAND"; }
+    [[ ${OPENVIBELY_AZURE_SIGNING_ENDPOINT+x} ]] && { had_azure_endpoint=1; saved_azure_endpoint="$OPENVIBELY_AZURE_SIGNING_ENDPOINT"; }
+    [[ ${OPENVIBELY_AZURE_SIGNING_ACCOUNT+x} ]] && { had_azure_account=1; saved_azure_account="$OPENVIBELY_AZURE_SIGNING_ACCOUNT"; }
+    [[ ${OPENVIBELY_AZURE_SIGNING_PROFILE+x} ]] && { had_azure_profile=1; saved_azure_profile="$OPENVIBELY_AZURE_SIGNING_PROFILE"; }
+    [[ ${OPENVIBELY_AZURE_SUBSCRIPTION_ID+x} ]] && { had_azure_sub=1; saved_azure_sub="$OPENVIBELY_AZURE_SUBSCRIPTION_ID"; }
+    [[ ${OPENVIBELY_WINDOWS_DESKTOP_BINARY+x} ]] && { had_win_desktop=1; saved_win_desktop="$OPENVIBELY_WINDOWS_DESKTOP_BINARY"; }
+    [[ ${OPENVIBELY_LINUX_DESKTOP_BINARY+x} ]] && { had_linux_desktop=1; saved_linux_desktop="$OPENVIBELY_LINUX_DESKTOP_BINARY"; }
+    [[ ${OPENVIBELY_LINUX_ARM64_DESKTOP_BINARY+x} ]] && { had_linux_arm64_desktop=1; saved_linux_arm64_desktop="$OPENVIBELY_LINUX_ARM64_DESKTOP_BINARY"; }
+
+    # shellcheck source=/dev/null
+    source "$env_file"
+
+    [[ "$had_key" == "1" ]] && OPENVIBELY_RELEASE_KEY_ID="$saved_key"
+    [[ "$had_pub" == "1" ]] && OPENVIBELY_RELEASE_PUBLIC_KEY="$saved_pub"
+    [[ "$had_mac_id" == "1" ]] && OPENVIBELY_MACOS_SIGN_IDENTITY="$saved_mac_id"
+    [[ "$had_notary" == "1" ]] && OPENVIBELY_MACOS_NOTARY_PROFILE="$saved_notary"
+    [[ "$had_win_sign" == "1" ]] && OPENVIBELY_WINDOWS_SIGN_COMMAND="$saved_win_sign"
+    [[ "$had_win_verify" == "1" ]] && OPENVIBELY_WINDOWS_VERIFY_COMMAND="$saved_win_verify"
+    [[ "$had_azure_endpoint" == "1" ]] && OPENVIBELY_AZURE_SIGNING_ENDPOINT="$saved_azure_endpoint"
+    [[ "$had_azure_account" == "1" ]] && OPENVIBELY_AZURE_SIGNING_ACCOUNT="$saved_azure_account"
+    [[ "$had_azure_profile" == "1" ]] && OPENVIBELY_AZURE_SIGNING_PROFILE="$saved_azure_profile"
+    [[ "$had_azure_sub" == "1" ]] && OPENVIBELY_AZURE_SUBSCRIPTION_ID="$saved_azure_sub"
+    [[ "$had_win_desktop" == "1" ]] && OPENVIBELY_WINDOWS_DESKTOP_BINARY="$saved_win_desktop"
+    [[ "$had_linux_desktop" == "1" ]] && OPENVIBELY_LINUX_DESKTOP_BINARY="$saved_linux_desktop"
+    [[ "$had_linux_arm64_desktop" == "1" ]] && OPENVIBELY_LINUX_ARM64_DESKTOP_BINARY="$saved_linux_arm64_desktop"
+    return 0
+}
+
 ###############################################################################
 # 0. Arguments
 ###############################################################################
@@ -52,6 +90,7 @@ fi
 
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || fail "Not in a git repository.")"
 DIST_DIR="${DIST_DIR:-${REPO_ROOT}/dist/${VERSION}}"
+SIGNING_CHECK="${SCRIPT_DIR}/check-release-signing.sh"
 
 export DRY_RUN="${DRY_RUN:-0}"
 export DRAFT="${DRAFT:-0}"
@@ -63,6 +102,26 @@ export DIST_DIR
 log "OpenVibely release pipeline starting for v${VERSION}"
 [[ "$DRY_RUN" == "1" ]] && warn "DRY_RUN=1 — no destructive operations will be performed."
 [[ "$DRAFT" == "1" ]]   && warn "DRAFT=1 — GitHub release will be created as a draft."
+
+###############################################################################
+# 0b. Signing setup
+###############################################################################
+
+if [[ "${SKIP_SIGNING_CHECK:-0}" == "1" ]]; then
+    warn "SKIP_SIGNING_CHECK=1 — skipping signing readiness checks."
+elif [[ -x "$SIGNING_CHECK" ]]; then
+    log "=== Step 0/6: Signing setup/readiness ==="
+    if [[ "$DRY_RUN" == "1" ]]; then
+        "$SIGNING_CHECK" --no-interactive
+    else
+        "$SIGNING_CHECK" --setup
+    fi
+    if [[ "${SKIP_RELEASE_SIGNING_ENV:-0}" != "1" && -f "${REPO_ROOT}/.release-signing.env" ]]; then
+        load_release_env_defaults "${REPO_ROOT}/.release-signing.env"
+    fi
+else
+    warn "Signing readiness script not found: $SIGNING_CHECK"
+fi
 
 ###############################################################################
 # 1. Preflight
@@ -160,6 +219,10 @@ info "=============================="
 info "Artifacts: $DIST_DIR"
 info "Tag:       v${VERSION}"
 echo ""
-warn "REMINDER: Publish Docker image manually if applicable:"
-info "  docker buildx build --platform linux/amd64,linux/arm64 \\"
+warn "REMINDER: Publish the OpenVibely Docker image manually if applicable:"
+info "  docker buildx build --platform linux/amd64,linux/arm64 -f Dockerfile \\"
+info "      --build-arg VERSION=${VERSION} --build-arg COMMIT=$(git rev-parse HEAD) \\"
+info "      --build-arg BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ) \\"
+info "      --build-arg RELEASE_TRUST_ID=\${OPENVIBELY_RELEASE_KEY_ID:?set-release-key-id} \\"
+info "      --build-arg RELEASE_TRUST_VALUE=\${OPENVIBELY_RELEASE_PUBLIC_KEY:?set-release-public-key} \\"
 info "      -t openvibely/openvibely:${VERSION} -t openvibely/openvibely:latest --push ."

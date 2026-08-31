@@ -2,6 +2,9 @@ package repository
 
 import (
 	"context"
+	"database/sql"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
@@ -492,6 +495,105 @@ func TestTelegramAuthRepo_MultipleUsernameEntries(t *testing.T) {
 	if len(users) != 2 {
 		t.Errorf("expected 2 users, got %d", len(users))
 	}
+}
+
+func TestTelegramAuthRepo_IsAuthorizedAnywhereLargeUsernameOnlyUsesIndexes(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewTelegramAuthRepo(db)
+	ctx := context.Background()
+	targetUsername := seedLargeTelegramUsernameOnlyFixture(t, db)
+
+	plan := explainTelegramAuthQueryPlan(t, db, telegramIsAuthorizedAnywhereQuery, int64(123456789), targetUsername)
+	if strings.Contains(plan, "SCAN telegram_authorized_users") {
+		t.Fatalf("query plan = %s, want indexed username lookup without full table scan", plan)
+	}
+	require.Contains(t, plan, "idx_telegram_auth_user")
+	require.Contains(t, plan, "idx_telegram_auth_username_lower_unknown_id")
+
+	authorized, err := repo.IsAuthorizedAnywhere(ctx, 123456789, "missing_large_username")
+	require.NoError(t, err)
+	assert.False(t, authorized)
+
+	authorized, err = repo.IsAuthorizedAnywhere(ctx, 123456789, strings.ToUpper(targetUsername))
+	require.NoError(t, err)
+	assert.True(t, authorized)
+}
+
+func BenchmarkTelegramAuthRepo_IsAuthorizedAnywhereLargeUsernameOnly(b *testing.B) {
+	db := testutil.NewTestDB(b)
+	repo := NewTelegramAuthRepo(db)
+	ctx := context.Background()
+	targetUsername := seedLargeTelegramUsernameOnlyFixture(b, db)
+
+	b.Run("absent_username", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			authorized, err := repo.IsAuthorizedAnywhere(ctx, 123456789, "missing_large_username")
+			if err != nil {
+				b.Fatal(err)
+			}
+			if authorized {
+				b.Fatal("missing username should not be authorized")
+			}
+		}
+	})
+
+	b.Run("present_username", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			authorized, err := repo.IsAuthorizedAnywhere(ctx, 123456789, targetUsername)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if !authorized {
+				b.Fatal("target username should be authorized")
+			}
+		}
+	})
+}
+
+func seedLargeTelegramUsernameOnlyFixture(tb testing.TB, db *sql.DB) string {
+	tb.Helper()
+	projectRepo := NewProjectRepo(db)
+	project := &models.Project{Name: "Large Telegram Username Fixture"}
+	require.NoError(tb, projectRepo.Create(context.Background(), project))
+
+	const rowCount = 100000
+	_, err := db.ExecContext(context.Background(), `
+		WITH digits(d) AS (VALUES (0),(1),(2),(3),(4),(5),(6),(7),(8),(9)),
+		seq(n) AS (
+			SELECT ones.d + tens.d*10 + hundreds.d*100 + thousands.d*1000 + ten_thousands.d*10000 + 1
+			FROM digits AS ones
+			CROSS JOIN digits AS tens
+			CROSS JOIN digits AS hundreds
+			CROSS JOIN digits AS thousands
+			CROSS JOIN digits AS ten_thousands
+		)
+		INSERT INTO telegram_authorized_users (id, project_id, telegram_user_id, telegram_username, display_name, added_by)
+		SELECT printf('telegram-large-%06d', n), ?, 0, printf('largeuser%06d', n), printf('@largeuser%06d', n), 'test'
+		FROM seq
+		WHERE n <= ?`, project.ID, rowCount)
+	require.NoError(tb, err)
+	return fmt.Sprintf("largeuser%06d", rowCount/2)
+}
+
+func explainTelegramAuthQueryPlan(tb testing.TB, db *sql.DB, query string, args ...any) string {
+	tb.Helper()
+	rows, err := db.QueryContext(context.Background(), "EXPLAIN QUERY PLAN "+query, args...)
+	require.NoError(tb, err)
+	defer rows.Close()
+
+	var details []string
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		require.NoError(tb, rows.Scan(&id, &parent, &unused, &detail))
+		details = append(details, detail)
+	}
+	require.NoError(tb, rows.Err())
+	return strings.Join(details, "\n")
 }
 
 func TestTelegramAuthRepo_CascadeDelete(t *testing.T) {

@@ -1,0 +1,76 @@
+package pages
+
+templ DestructiveConfirmDialog(dialogID string, closeLabel string, title string, promptPrefix string, itemNameID string, itemName string, promptSuffix string, cancelHandler templ.ComponentScript, confirmHandler templ.ComponentScript) {
+	<dialog id={ dialogID } class="modal" data-destructive-confirm-dialog aria-labelledby={ dialogID + "_title" } aria-describedby={ dialogID + "_description" }>
+		<div class="modal-box">
+			@ModalCloseButton(dialogID, closeLabel)
+			<h3 id={ dialogID + "_title" } class="font-bold text-lg text-error pr-10">{ title }</h3>
+			if itemNameID != "" {
+				<p id={ dialogID + "_description" } class="py-4">{ promptPrefix }<strong id={ itemNameID }></strong>{ promptSuffix }</p>
+			} else {
+				<p id={ dialogID + "_description" } class="py-4">{ promptPrefix }<strong>{ itemName }</strong>{ promptSuffix }</p>
+			}
+			<div class="text-sm text-base-content/70 bg-base-200 rounded-lg p-3 mb-4">
+				{ children... }
+			</div>
+			<div class="modal-action">
+				<button type="button" class="btn" autofocus onclick={ cancelHandler }>Cancel</button>
+				<button type="button" class="btn btn-error" onclick={ confirmHandler }>Delete Permanently</button>
+			</div>
+		</div>
+		<form method="dialog" class="modal-backdrop"><button>close</button></form>
+	</dialog>
+	<script>
+		if (!window.openDestructiveConfirmDialog) {
+			window.openDestructiveConfirmDialog = function(dialogID, nameID, displayName) {
+				var nameEl = nameID ? document.getElementById(nameID) : null;
+				if (nameEl) nameEl.textContent = displayName || '';
+				var modal = document.getElementById(dialogID);
+				if (!modal) return null;
+				if (!modal.__openVibelyDestructiveFocusHandlers) {
+					modal.addEventListener('close', function() {
+						var trigger = modal.__openVibelyDestructiveTrigger;
+						modal.__openVibelyDestructiveTrigger = null;
+						if (!trigger || !document.contains(trigger)) return;
+						if (modal.__openVibelyDestructiveFocusTimer) {
+							window.clearTimeout(modal.__openVibelyDestructiveFocusTimer);
+						}
+						modal.__openVibelyDestructiveFocusTimer = window.setTimeout(function() {
+							modal.__openVibelyDestructiveFocusTimer = null;
+							var focusTarget = trigger;
+							var menu = trigger.closest ? trigger.closest('.dropdown-content') : null;
+							if (menu) {
+								var dropdown = menu.closest ? menu.closest('.dropdown') : null;
+								var candidates = dropdown ? dropdown.querySelectorAll('label[tabindex], button[tabindex], [role="button"][tabindex]') : [];
+								for (var i = 0; i < candidates.length; i++) {
+									if (candidates[i].parentElement === dropdown && candidates[i].getClientRects().length) {
+										focusTarget = candidates[i];
+										break;
+									}
+								}
+							}
+							if (document.contains(focusTarget)) focusTarget.focus({preventScroll: true});
+						}, 0);
+					});
+					modal.addEventListener('keydown', function(event) {
+						if (event.key === 'Escape' && modal.open) {
+							event.preventDefault();
+							modal.close();
+						}
+					});
+					modal.__openVibelyDestructiveFocusHandlers = true;
+				}
+				if (modal.open) return modal;
+				if (modal.__openVibelyDestructiveFocusTimer) {
+					window.clearTimeout(modal.__openVibelyDestructiveFocusTimer);
+					modal.__openVibelyDestructiveFocusTimer = null;
+				}
+				modal.__openVibelyDestructiveTrigger = document.activeElement;
+				modal.showModal();
+				var initialFocus = modal.querySelector('[autofocus]');
+				if (initialFocus) initialFocus.focus({preventScroll: true});
+				return modal;
+			};
+		}
+	</script>
+}

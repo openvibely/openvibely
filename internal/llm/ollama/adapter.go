@@ -63,7 +63,7 @@ func (a *Adapter) Call(ctx context.Context, req llmcontracts.AgentRequest, workD
 
 	switch req.Operation {
 	case llmcontracts.OperationTask:
-		output, textOnly, tokens, err := a.callStreaming(ctx, req.Message, req.Attachments, agent, req.ExecID, req.ProjectInstructions)
+		output, textOnly, tokens, err := a.callStreaming(ctx, req.Message, req.Attachments, agent, req.ExecID, req.ProjectInstructions, workDir)
 		return llmcontracts.AgentResult{
 			Output:         output,
 			TextOnlyOutput: textOnly,
@@ -72,13 +72,13 @@ func (a *Adapter) Call(ctx context.Context, req llmcontracts.AgentRequest, workD
 
 	case llmcontracts.OperationStreaming:
 		if req.Followup || req.ChatHistory != nil || req.ChatMode == models.ChatModeOrchestrate || req.ChatMode == models.ChatModePlan {
-			output, tokens, err := a.callChat(ctx, req.Message, req.Attachments, agent, req.ExecID, req.ChatHistory, req.ChatSystemContext, req.Followup, req.ChatMode)
+			output, tokens, err := a.callChat(ctx, req.Message, req.Attachments, agent, req.ExecID, req.ChatHistory, req.ChatSystemContext, req.Followup, req.ChatMode, workDir)
 			return llmcontracts.AgentResult{
 				Output: output,
 				Usage:  llmusage.FromTotal(tokens),
 			}, err
 		}
-		output, textOnly, tokens, err := a.callStreaming(ctx, req.Message, req.Attachments, agent, req.ExecID, req.ProjectInstructions)
+		output, textOnly, tokens, err := a.callStreaming(ctx, req.Message, req.Attachments, agent, req.ExecID, req.ProjectInstructions, workDir)
 		return llmcontracts.AgentResult{
 			Output:         output,
 			TextOnlyOutput: textOnly,
@@ -86,7 +86,7 @@ func (a *Adapter) Call(ctx context.Context, req llmcontracts.AgentRequest, workD
 		}, err
 
 	case llmcontracts.OperationDirect:
-		output, tokens, err := a.callDirect(ctx, req.Message, req.Attachments, agent)
+		output, tokens, err := a.callDirect(ctx, req.Message, req.Attachments, agent, req.ProjectInstructions)
 		return llmcontracts.AgentResult{
 			Output: output,
 			Usage:  llmusage.FromTotal(tokens),
@@ -98,7 +98,9 @@ func (a *Adapter) Call(ctx context.Context, req llmcontracts.AgentRequest, workD
 }
 
 // callDirect calls the Ollama API for task execution (non-chat).
-func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig) (string, int, error) {
+// projectInstructions carries the calling agent's own system prompt; the
+// provider wrapper folds the agent definition into it.
+func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, projectInstructions string) (string, int, error) {
 	baseURL := agent.GetOllamaBaseURL()
 	applog.Infof("[ollama] callDirect model=%s base_url=%s prompt_len=%d attachments=%d", agent.Model, baseURL, len(prompt), len(attachments))
 
@@ -109,9 +111,15 @@ func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []m
 		userMsg.Images = images
 	}
 
+	messages := make([]chatMessage, 0, 2)
+	if strings.TrimSpace(projectInstructions) != "" {
+		messages = append(messages, chatMessage{Role: "system", Content: projectInstructions})
+	}
+	messages = append(messages, userMsg)
+
 	reqBody := chatRequest{
 		Model:    agent.Model,
-		Messages: []chatMessage{userMsg},
+		Messages: messages,
 		Stream:   false,
 		Options:  opts,
 	}
@@ -148,12 +156,13 @@ func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []m
 }
 
 // callChat calls the Ollama API for Chat and task follow-up requests.
-func (a *Adapter) callChat(ctx context.Context, message string, attachments []models.Attachment, agent models.LLMConfig, execID string, chatHistory []models.Execution, chatSystemContext string, isTaskFollowup bool, chatMode models.ChatMode) (string, int, error) {
+func (a *Adapter) callChat(ctx context.Context, message string, attachments []models.Attachment, agent models.LLMConfig, execID string, chatHistory []models.Execution, chatSystemContext string, isTaskFollowup bool, chatMode models.ChatMode, workDir string) (string, int, error) {
 	baseURL := agent.GetOllamaBaseURL()
 	applog.Infof("[ollama] callChat model=%s base_url=%s history=%d message_len=%d attachments=%d exec=%s isTaskFollowup=%v",
 		agent.Model, baseURL, len(chatHistory), len(message), len(attachments), execID, isTaskFollowup)
 
 	systemPromptStr := llmprompt.BuildChatSystemPrompt(isTaskFollowup, chatMode, chatSystemContext, false)
+	systemPromptStr = llmprompt.AppendWorktreeContextPrompt(systemPromptStr, workDir)
 	if chatMode == models.ChatModeOrchestrate {
 		systemPromptStr = llmprompt.ApplyChatActionToolMode(systemPromptStr, nil)
 	}
@@ -202,7 +211,7 @@ func (a *Adapter) callChat(ctx context.Context, message string, attachments []mo
 }
 
 // callStreaming calls Ollama with streaming for task execution.
-func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, execID string, projectInstructions string) (string, string, int, error) {
+func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, execID string, projectInstructions string, workDir string) (string, string, int, error) {
 	baseURL := agent.GetOllamaBaseURL()
 	applog.Infof("[ollama] callStreaming model=%s base_url=%s prompt_len=%d attachments=%d exec=%s", agent.Model, baseURL, len(prompt), len(attachments), execID)
 
@@ -210,7 +219,7 @@ func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments 
 
 	var messages []chatMessage
 	// Inject system prompt with project instructions for task execution
-	systemPrompt := llmprompt.BuildAgentSystemPrompt(projectInstructions)
+	systemPrompt := llmprompt.BuildAgentSystemPrompt(projectInstructions, workDir)
 	messages = append(messages, chatMessage{Role: "system", Content: systemPrompt})
 
 	userMsg := chatMessage{Role: "user", Content: llmprompt.ApplyTaskCreationToolMode(prompt, nil)}
@@ -277,13 +286,16 @@ type ollamaBufferedResponse struct {
 }
 
 func (a *Adapter) bufferedWithRetry(ctx context.Context, url string, body []byte) (ollamaBufferedResponse, error) {
-	policy := httpretry.DefaultPolicy()
-	policy.AllowReplay = true
-	policy.After = retryAfter
-	policy.OnRetry = func(event httpretry.RetryEvent) {
-		applog.Infof("[ollama] response read error, retry attempt %d/%d in %v: %v", event.Attempt, event.MaxRetries, event.Delay, event.Err)
-	}
-	return httpretry.DoStream(ctx, policy, func(attemptCtx context.Context) (ollamaBufferedResponse, bool, error) {
+	return httpretry.DoStreamTurn(ctx, httpretry.StreamTurnPolicy{
+		After: retryAfter,
+		OnRetry: func(event httpretry.RetryEvent) {
+			if httpretry.IsConnectionSetupFailure(event.Err) {
+				applog.Infof("[ollama] reconnecting response read in %v: %v", event.Delay, event.Err)
+				return
+			}
+			applog.Infof("[ollama] response read error, retry attempt %d/%d in %v: %v", event.Attempt, event.MaxRetries, event.Delay, event.Err)
+		},
+	}, func(attemptCtx context.Context) (ollamaBufferedResponse, error) {
 		result := ollamaBufferedResponse{}
 		resp, err := a.doWithRetry(attemptCtx, func() (*http.Request, error) {
 			httpReq, err := http.NewRequestWithContext(attemptCtx, http.MethodPost, url, bytes.NewReader(body))
@@ -294,68 +306,77 @@ func (a *Adapter) bufferedWithRetry(ctx context.Context, url string, body []byte
 			return httpReq, nil
 		})
 		if err != nil {
-			return result, false, err
+			return result, err
 		}
 		defer resp.Body.Close()
 		result.statusCode = resp.StatusCode
 		result.body, err = io.ReadAll(resp.Body)
 		if err != nil {
-			return result, false, httpretry.NewStreamError(fmt.Errorf("reading ollama response: %w", err))
+			return result, httpretry.NewStreamError(fmt.Errorf("reading ollama response: %w", err))
 		}
 		if httpretry.IsRetryableStatus(resp.StatusCode) {
-			return result, false, httpretry.NewResponseError(resp, ollamaResponseError(resp.StatusCode, result.body))
+			return result, httpretry.NewResponseError(resp, ollamaResponseError(resp.StatusCode, result.body))
 		}
-		return result, false, nil
+		return result, nil
 	})
 }
 
 func (a *Adapter) streamWithRetry(ctx context.Context, url string, body []byte, onChunk func(chatStreamChunk) bool) (ollamaStreamResult, error) {
-	policy := httpretry.DefaultPolicy()
-	policy.AllowReplay = true
-	policy.After = retryAfter
-	policy.OnRetry = func(event httpretry.RetryEvent) {
-		applog.Infof("[ollama] stream error before output, retry attempt %d/%d in %v: %v", event.Attempt, event.MaxRetries, event.Delay, event.Err)
-	}
-	return httpretry.DoStream(ctx, policy, func(attemptCtx context.Context) (ollamaStreamResult, bool, error) {
-		result := ollamaStreamResult{}
-		observed := false
-		resp, err := a.doWithRetry(attemptCtx, func() (*http.Request, error) {
-			httpReq, err := http.NewRequestWithContext(attemptCtx, http.MethodPost, url, bytes.NewReader(body))
+	return httpretry.DoStreamTurn(ctx, httpretry.StreamTurnPolicy{
+		After: retryAfter,
+		OnRetry: func(event httpretry.RetryEvent) {
+			if httpretry.IsConnectionSetupFailure(event.Err) {
+				applog.Infof("[ollama] reconnecting stream in %v: %v", event.Delay, event.Err)
+				return
+			}
+			applog.Infof("[ollama] stream error, retry attempt %d/%d in %v: %v", event.Attempt, event.MaxRetries, event.Delay, event.Err)
+		},
+	}, func(attemptCtx context.Context) (ollamaStreamResult, error) {
+		policy := httpretry.DefaultPolicy()
+		policy.MaxRetries = 0
+		policy.AllowReplay = true
+		policy.After = retryAfter
+		return httpretry.DoStream(attemptCtx, policy, func(streamCtx context.Context) (ollamaStreamResult, bool, error) {
+			result := ollamaStreamResult{}
+			observed := false
+			resp, err := a.doWithRetry(streamCtx, func() (*http.Request, error) {
+				httpReq, err := http.NewRequestWithContext(streamCtx, http.MethodPost, url, bytes.NewReader(body))
+				if err != nil {
+					return nil, err
+				}
+				httpReq.Header.Set("Content-Type", "application/json")
+				return httpReq, nil
+			})
 			if err != nil {
-				return nil, err
+				return result, observed, err
 			}
-			httpReq.Header.Set("Content-Type", "application/json")
-			return httpReq, nil
-		})
-		if err != nil {
-			return result, observed, err
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			respBody, _ := io.ReadAll(resp.Body)
-			err := ollamaResponseError(resp.StatusCode, respBody)
-			return result, observed, httpretry.NewResponseError(resp, err)
-		}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				respBody, _ := io.ReadAll(resp.Body)
+				err := ollamaResponseError(resp.StatusCode, respBody)
+				return result, observed, httpretry.NewResponseError(resp, err)
+			}
 
-		decoder := json.NewDecoder(resp.Body)
-		for {
-			var chunk chatStreamChunk
-			if err := decoder.Decode(&chunk); err != nil {
-				if ctxErr := ctx.Err(); ctxErr != nil {
-					return result, observed, fmt.Errorf("ollama streaming cancelled: %w", ctxErr)
+			decoder := json.NewDecoder(resp.Body)
+			for {
+				var chunk chatStreamChunk
+				if err := decoder.Decode(&chunk); err != nil {
+					if ctxErr := ctx.Err(); ctxErr != nil {
+						return result, observed, fmt.Errorf("ollama streaming cancelled: %w", ctxErr)
+					}
+					if err == io.EOF {
+						err = io.ErrUnexpectedEOF
+					}
+					return result, observed, httpretry.NewStreamError(fmt.Errorf("decoding ollama stream chunk: %w", err))
 				}
-				if err == io.EOF {
-					err = io.ErrUnexpectedEOF
+				observed = onChunk(chunk) || observed
+				if chunk.Done {
+					result.totalTokens = chunk.EvalCount
+					result.promptTokens = chunk.PromptEvalCount
+					return result, observed, nil
 				}
-				return result, observed, httpretry.NewStreamError(fmt.Errorf("decoding ollama stream chunk: %w", err))
 			}
-			observed = onChunk(chunk) || observed
-			if chunk.Done {
-				result.totalTokens = chunk.EvalCount
-				result.promptTokens = chunk.PromptEvalCount
-				return result, observed, nil
-			}
-		}
+		})
 	})
 }
 

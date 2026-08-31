@@ -93,8 +93,108 @@ func (s *AlertService) ListByProject(ctx context.Context, projectID string, limi
 	return s.alertRepo.ListByProject(ctx, projectID, limit)
 }
 
+func (s *AlertService) ListSummariesByProject(ctx context.Context, projectID string, limit int) ([]models.AlertSummary, error) {
+	return s.alertRepo.ListSummariesByProject(ctx, projectID, limit)
+}
+
+// ListSummariesPage returns one bounded, project-scoped notification page.
+func (s *AlertService) ListSummariesPage(ctx context.Context, projectID string, filter models.AlertListFilter) ([]models.AlertSummary, error) {
+	return s.alertRepo.ListFilteredSummaries(ctx, projectID, filter)
+}
+
 func (s *AlertService) ListFiltered(ctx context.Context, projectID string, filter models.AlertListFilter) ([]models.Alert, error) {
 	return s.alertRepo.ListFiltered(ctx, projectID, filter)
+}
+
+func (s *AlertService) ListFilteredSummariesForRuntime(ctx context.Context, projectID string, filter models.AlertListFilter) ([]models.AlertSummary, error) {
+	automationContext, automationBound := AutomationContextFromContext(ctx)
+	if !automationBound {
+		return s.alertRepo.ListFilteredSummaries(ctx, projectID, filter)
+	}
+	if automationContext.ProjectID != projectID {
+		return nil, fmt.Errorf("alert Automation project mismatch")
+	}
+	bindings, err := s.alertRepo.NativeInboxBindings(ctx, automationContext)
+	if err != nil {
+		return nil, err
+	}
+	if len(bindings) == 0 {
+		return s.alertRepo.ListFilteredSummaries(ctx, projectID, filter)
+	}
+	filter.AutomationInboxBindings = bindings
+	return s.alertRepo.ListFilteredSummaries(ctx, projectID, filter)
+}
+
+func (s *AlertService) ListExistingAutomationNotificationSummariesForRuntime(ctx context.Context, projectID string, filter models.AlertListFilter) ([]models.AlertSummary, error) {
+	if s == nil || s.alertRepo == nil {
+		return nil, fmt.Errorf("alert service not available")
+	}
+	automationContext, automationBound := AutomationContextFromContext(ctx)
+	if !automationBound {
+		return nil, fmt.Errorf("Automation context is required to list existing Automation notifications")
+	}
+	if automationContext.ProjectID != projectID {
+		return nil, fmt.Errorf("alert Automation project mismatch")
+	}
+	seen := map[string]bool{}
+	bindings := make([]models.AutomationBinding, 0, len(automationContext.Bindings))
+	for _, binding := range automationContext.Bindings {
+		automationID := strings.TrimSpace(binding.AutomationID)
+		if automationID == "" || seen[automationID] {
+			continue
+		}
+		seen[automationID] = true
+		binding.AutomationID = automationID
+		bindings = append(bindings, binding)
+	}
+	if len(bindings) == 0 {
+		return []models.AlertSummary{}, nil
+	}
+	filter.AutomationInboxBindings = bindings
+	return s.alertRepo.ListFilteredSummaries(ctx, projectID, filter)
+}
+
+func (s *AlertService) RequireAutomationNotificationOwnership(ctx context.Context, projectID, alertID string) error {
+	automationContext, automationBound := AutomationContextFromContext(ctx)
+	if !automationBound {
+		return nil
+	}
+	if automationContext.ProjectID != projectID {
+		return fmt.Errorf("alert Automation project mismatch")
+	}
+	owned, err := s.alertRepo.AlertOwnedByAutomation(ctx, projectID, alertID, automationContext.Bindings)
+	if err != nil {
+		return err
+	}
+	if !owned {
+		return fmt.Errorf("notification is not owned by this Automation")
+	}
+	return nil
+}
+
+func (s *AlertService) RequireAutomationInboxOwnership(ctx context.Context, projectID, alertID string) error {
+	automationContext, automationBound := AutomationContextFromContext(ctx)
+	if !automationBound {
+		return nil
+	}
+	if automationContext.ProjectID != projectID {
+		return fmt.Errorf("alert Automation project mismatch")
+	}
+	bindings, err := s.alertRepo.NativeInboxBindings(ctx, automationContext)
+	if err != nil {
+		return err
+	}
+	owned, err := s.alertRepo.AlertOwnedByAutomation(ctx, projectID, alertID, bindings)
+	if err != nil {
+		return err
+	}
+	if !owned {
+		return fmt.Errorf("notification is not owned by this Automation inbox")
+	}
+	if err := s.alertRepo.RebindAlertToAutomationInbox(ctx, projectID, alertID, bindings); err != nil {
+		return fmt.Errorf("projecting notification onto the current Automation graph: %w", err)
+	}
+	return nil
 }
 
 func (s *AlertService) CountUnread(ctx context.Context, projectID string) (int, error) {

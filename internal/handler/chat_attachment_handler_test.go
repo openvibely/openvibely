@@ -15,7 +15,10 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
+	"github.com/openvibely/openvibely/internal/database"
+	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -28,6 +31,91 @@ func useTempUploadsDir(t *testing.T) {
 	t.Cleanup(func() {
 		uploadsDir = originalUploadsDir
 	})
+}
+
+type chatAttachmentOwnershipFixture struct {
+	e                  *echo.Echo
+	h                  *Handler
+	chatAttachmentRepo *repository.ChatAttachmentRepo
+	owningProject      models.Project
+	foreignProject     models.Project
+	attachment         models.ChatAttachment
+	fileContent        []byte
+}
+
+func setupChatAttachmentOwnershipFixture(t *testing.T) chatAttachmentOwnershipFixture {
+	t.Helper()
+	useTempUploadsDir(t)
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	projectSvc := service.NewProjectService(projectRepo)
+	settingsRepo := repository.NewSettingsRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	execRepo := repository.NewExecutionRepo(db)
+	chatAttachmentRepo := repository.NewChatAttachmentRepo(db)
+	h := &Handler{
+		projectSvc:         projectSvc,
+		settingsRepo:       settingsRepo,
+		chatAttachmentRepo: chatAttachmentRepo,
+	}
+
+	owningProject := &models.Project{Name: "Attachment Owner"}
+	require.NoError(t, projectSvc.Create(ctx, owningProject))
+	foreignProject := &models.Project{Name: "Attachment Foreign"}
+	require.NoError(t, projectSvc.Create(ctx, foreignProject))
+
+	task := &models.Task{
+		ProjectID: owningProject.ID,
+		Title:     "Chat attachment owner task",
+		Category:  models.CategoryChat,
+		Priority:  1,
+		Status:    models.StatusRunning,
+		Prompt:    "chat prompt",
+	}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	exec := &models.Execution{TaskID: task.ID, Status: models.ExecCompleted, PromptSent: "chat prompt"}
+	require.NoError(t, execRepo.Create(ctx, exec))
+
+	fileContent := []byte("project A secret attachment body")
+	filePath := filepath.Join(uploadsDir, "chat", exec.ID, "secret.txt")
+	require.NoError(t, os.MkdirAll(filepath.Dir(filePath), 0755))
+	require.NoError(t, os.WriteFile(filePath, fileContent, 0644))
+	attachment := &models.ChatAttachment{
+		ExecutionID: exec.ID,
+		FileName:    "secret.txt",
+		FilePath:    filePath,
+		MediaType:   "text/plain",
+		FileSize:    int64(len(fileContent)),
+	}
+	require.NoError(t, chatAttachmentRepo.Create(ctx, attachment))
+
+	return chatAttachmentOwnershipFixture{
+		e:                  echo.New(),
+		h:                  h,
+		chatAttachmentRepo: chatAttachmentRepo,
+		owningProject:      *owningProject,
+		foreignProject:     *foreignProject,
+		attachment:         *attachment,
+		fileContent:        fileContent,
+	}
+}
+
+func newChatAttachmentContext(t *testing.T, e *echo.Echo, method, attachmentID, projectID string) (echo.Context, *httptest.ResponseRecorder) {
+	t.Helper()
+	path := "/chat/attachments/" + attachmentID
+	if method == http.MethodGet {
+		path += "/download"
+	}
+	if projectID != "" {
+		path += "?project_id=" + projectID
+	}
+	req := httptest.NewRequest(method, path, nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("id")
+	c.SetParamValues(attachmentID)
+	return c, rec
 }
 
 func uploadChatAttachmentForTest(t *testing.T, e *echo.Echo, h *Handler, filename string, content []byte, contentType string, sessionID string) string {
@@ -66,6 +154,65 @@ func uploadChatAttachmentForTest(t *testing.T, e *echo.Echo, h *Handler, filenam
 	require.Len(t, response.Attachments, 1)
 	assert.Equal(t, contentType, response.Attachments[0].MediaType)
 	return response.SessionID
+}
+
+func TestDownloadChatAttachmentRejectsCrossProjectAttachment(t *testing.T) {
+	fixture := setupChatAttachmentOwnershipFixture(t)
+
+	c, rec := newChatAttachmentContext(t, fixture.e, http.MethodGet, fixture.attachment.ID, fixture.foreignProject.ID)
+	err := fixture.h.DownloadChatAttachment(c)
+
+	require.Error(t, err)
+	httpErr, ok := err.(*echo.HTTPError)
+	require.True(t, ok)
+	assert.Equal(t, http.StatusNotFound, httpErr.Code)
+	assert.NotContains(t, rec.Body.String(), string(fixture.fileContent))
+	assert.FileExists(t, fixture.attachment.FilePath)
+}
+
+func TestDownloadChatAttachmentServesSameProjectAttachment(t *testing.T) {
+	fixture := setupChatAttachmentOwnershipFixture(t)
+
+	c, rec := newChatAttachmentContext(t, fixture.e, http.MethodGet, fixture.attachment.ID, fixture.owningProject.ID)
+	err := fixture.h.DownloadChatAttachment(c)
+
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, string(fixture.fileContent), rec.Body.String())
+}
+
+func TestDeleteChatAttachmentRejectsCrossProjectAttachment(t *testing.T) {
+	fixture := setupChatAttachmentOwnershipFixture(t)
+
+	c, _ := newChatAttachmentContext(t, fixture.e, http.MethodDelete, fixture.attachment.ID, fixture.foreignProject.ID)
+	err := fixture.h.DeleteChatAttachment(c)
+
+	require.Error(t, err)
+	httpErr, ok := err.(*echo.HTTPError)
+	require.True(t, ok)
+	assert.Equal(t, http.StatusNotFound, httpErr.Code)
+	stored, getErr := fixture.chatAttachmentRepo.GetByID(context.Background(), fixture.attachment.ID)
+	require.NoError(t, getErr)
+	require.NotNil(t, stored)
+	assert.FileExists(t, fixture.attachment.FilePath)
+	contents, readErr := os.ReadFile(fixture.attachment.FilePath)
+	require.NoError(t, readErr)
+	assert.Equal(t, fixture.fileContent, contents)
+}
+
+func TestDeleteChatAttachmentRemovesSameProjectAttachment(t *testing.T) {
+	fixture := setupChatAttachmentOwnershipFixture(t)
+
+	c, rec := newChatAttachmentContext(t, fixture.e, http.MethodDelete, fixture.attachment.ID, fixture.owningProject.ID)
+	err := fixture.h.DeleteChatAttachment(c)
+
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	stored, getErr := fixture.chatAttachmentRepo.GetByID(context.Background(), fixture.attachment.ID)
+	require.NoError(t, getErr)
+	assert.Nil(t, stored)
+	assert.NoFileExists(t, fixture.attachment.FilePath)
+	assert.Contains(t, rec.Body.String(), "No attachments")
 }
 
 func TestUploadChatAttachment_AllFileTypes(t *testing.T) {
@@ -237,7 +384,9 @@ func TestUploadChatAttachment_RejectsRetiredSessionWithoutRecreatingDirectory(t 
 func TestUploadChatAttachment_SerializesPublicationWithConcurrentRetirement(t *testing.T) {
 	useTempUploadsDir(t)
 
-	db := testutil.NewTestDB(t)
+	db, err := database.New(filepath.Join(t.TempDir(), "attachment-retirement.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, db.Close()) })
 	h := &Handler{
 		chatAttachmentRepo: repository.NewChatAttachmentRepo(db),
 		threadInputRepo:    repository.NewThreadInputRepo(db),
@@ -348,6 +497,117 @@ func TestUploadChatAttachment_ExistingPendingSessionMaxFilesLimit(t *testing.T) 
 	assert.Equal(t, http.StatusBadRequest, httpErr.Code)
 }
 
+func TestUploadChatAttachment_AllowsValidMultiFileUploadAboveSingleFileRequestCap(t *testing.T) {
+	useTempUploadsDir(t)
+
+	db := testutil.NewTestDB(t)
+	h := &Handler{
+		chatAttachmentRepo: repository.NewChatAttachmentRepo(db),
+		threadInputRepo:    repository.NewThreadInputRepo(db),
+	}
+	e := echo.New()
+
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	for _, filename := range []string{"first.bin", "second.bin"} {
+		part, err := writer.CreateFormFile("files", filename)
+		require.NoError(t, err)
+		_, err = io.Copy(part, bytes.NewReader(bytes.Repeat([]byte("x"), 6<<20)))
+		require.NoError(t, err)
+	}
+	require.NoError(t, writer.Close())
+	require.Greater(t, int64(body.Len()), browserAttachmentRequestLimit(maxChatUploadSize))
+	require.LessOrEqual(t, int64(body.Len()), attachmentRequestLimit(maxChatUploadSize, maxFilesPerUpload))
+
+	req := httptest.NewRequest(http.MethodPost, "/chat/attachments", body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	rec := httptest.NewRecorder()
+	require.NoError(t, h.UploadChatAttachment(e.NewContext(req, rec)))
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var response struct {
+		SessionID   string `json:"session_id"`
+		Attachments []struct {
+			Filename string `json:"filename"`
+			Size     int64  `json:"size"`
+		} `json:"attachments"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))
+	require.NotEmpty(t, response.SessionID)
+	require.Len(t, response.Attachments, 2)
+	for _, attachment := range response.Attachments {
+		assert.Equal(t, int64(6<<20), attachment.Size)
+		assert.FileExists(t, filepath.Join(uploadsDir, "chat", "pending", response.SessionID, attachment.Filename))
+	}
+}
+
+func TestUploadChatAttachment_AllowsPaddedBoundaryDelimiterWhitespace(t *testing.T) {
+	useTempUploadsDir(t)
+
+	db := testutil.NewTestDB(t)
+	h := &Handler{
+		chatAttachmentRepo: repository.NewChatAttachmentRepo(db),
+		threadInputRepo:    repository.NewThreadInputRepo(db),
+	}
+	e := echo.New()
+	files := []taskAttachmentTestFile{
+		{name: "padded-first.bin", contentType: "application/octet-stream", content: bytes.Repeat([]byte("a"), 6<<20)},
+		{name: "padded-second.bin", contentType: "application/octet-stream", content: bytes.Repeat([]byte("b"), 6<<20)},
+	}
+	body, contentType := newPaddedDelimiterMultipartBody(t, nil, "files", files)
+	require.Greater(t, int64(body.Len()), browserAttachmentRequestLimit(maxChatUploadSize))
+	require.LessOrEqual(t, int64(body.Len()), attachmentRequestLimit(maxChatUploadSize, maxFilesPerUpload))
+
+	req := httptest.NewRequest(http.MethodPost, "/chat/attachments", body)
+	req.Header.Set("Content-Type", contentType)
+	rec := httptest.NewRecorder()
+	require.NoError(t, h.UploadChatAttachment(e.NewContext(req, rec)))
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var response struct {
+		SessionID   string `json:"session_id"`
+		Attachments []struct {
+			Filename string `json:"filename"`
+			Size     int64  `json:"size"`
+		} `json:"attachments"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))
+	require.NotEmpty(t, response.SessionID)
+	require.Len(t, response.Attachments, 2)
+	for _, attachment := range response.Attachments {
+		assert.Equal(t, int64(6<<20), attachment.Size)
+		assert.FileExists(t, filepath.Join(uploadsDir, "chat", "pending", response.SessionID, attachment.Filename))
+	}
+}
+
+func TestUploadChatAttachment_OversizedMultipartRequestIsBoundedBeforePendingSession(t *testing.T) {
+	useTempUploadsDir(t)
+	tmpMultipartDir := t.TempDir()
+	t.Setenv("TMPDIR", tmpMultipartDir)
+
+	db := testutil.NewTestDB(t)
+	h := &Handler{
+		chatAttachmentRepo: repository.NewChatAttachmentRepo(db),
+		threadInputRepo:    repository.NewThreadInputRepo(db),
+	}
+	e := echo.New()
+	const sessionID = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	req, body, totalSize := newSizedMultipartUploadRequestWithFilePrefix(t, http.MethodPost, "/chat/attachments", map[string]string{"attachment_session_id": sessionID}, "files", "too-large.bin", "application/octet-stream", 25<<20, invalidMultipartBoundaryPayloadPrefix(), false)
+	body.limitReadChunkSize(1)
+	rec := httptest.NewRecorder()
+	err := h.UploadChatAttachment(e.NewContext(req, rec))
+
+	require.Error(t, err)
+	httpErr, ok := err.(*echo.HTTPError)
+	require.True(t, ok)
+	assert.Equal(t, http.StatusRequestEntityTooLarge, httpErr.Code)
+	maxRead := browserAttachmentRequestLimit(maxChatUploadSize) + 1
+	assert.LessOrEqual(t, body.bytesRead, maxRead)
+	assert.Less(t, body.bytesRead, totalSize)
+	require.NoDirExists(t, filepath.Join(uploadsDir, "chat", "pending", sessionID))
+	assertDirEmpty(t, tmpMultipartDir)
+}
+
 func TestUploadChatAttachment_FileSizeLimit(t *testing.T) {
 	useTempUploadsDir(t)
 
@@ -389,7 +649,7 @@ func TestUploadChatAttachment_FileSizeLimit(t *testing.T) {
 	assert.Error(t, err)
 	httpErr, ok := err.(*echo.HTTPError)
 	assert.True(t, ok)
-	assert.Equal(t, http.StatusBadRequest, httpErr.Code)
+	assert.Equal(t, http.StatusRequestEntityTooLarge, httpErr.Code)
 }
 
 func TestUploadChatAttachment_MaxFilesLimit(t *testing.T) {

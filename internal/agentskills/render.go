@@ -178,6 +178,9 @@ func filteredIndexBody(indexPath, skillsDir, agentKey string) (string, bool) {
 	var sb strings.Builder
 	for _, sec := range sections {
 		absPath := filepath.Join(skillsDir, sec.skill, SkillFile)
+		if _, err := os.Stat(absPath); err != nil {
+			continue
+		}
 		if skillDisabledOnDisk(absPath) {
 			continue
 		}

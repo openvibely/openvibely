@@ -41,16 +41,16 @@ templ WorkerSettingsContent(maxWorkers int, runningWorkers int, totalRunning int
 }
 
 templ workerSettingsContent(maxWorkers int, runningWorkers int, totalRunning int, queueSize int, projectStats []ProjectWorkerStats, modelStats []ModelWorkerStats) {
-	<div id="worker-settings-content">
+	<div id="worker-settings-content" class="w-full min-w-0 max-w-full flex-none pb-6">
 		@layout.PageTitle("Workers")
 		<h2 class="text-2xl font-bold mb-6">Workers</h2>
 
-		<div class="card bg-base-100 shadow-sm border border-base-300 mb-6">
-			<div class="card-body">
+		<div class="card bg-base-100 shadow-sm border border-base-300 mb-6 w-full min-w-0 max-w-full flex-none h-auto">
+			<div class="card-body min-w-0">
 				<h3 class="card-title text-lg">Worker Capacity &amp; Utilization</h3>
 				<p class="text-sm opacity-60 mb-4">Global and per-project worker limits shown together. Click a limit value to edit it.</p>
-				<div class="overflow-x-auto">
-					<table class="table table-sm">
+				<div class="worker-table-scroll w-full min-w-0 max-w-full overflow-x-auto">
+					<table class="table table-sm worker-stats-table w-full min-w-max h-auto">
 						<thead>
 							<tr>
 								<th>Scope</th>
@@ -69,12 +69,12 @@ templ workerSettingsContent(maxWorkers int, runningWorkers int, totalRunning int
 
 		<!-- Per-Model Utilization -->
 		if len(modelStats) > 0 {
-			<div class="card bg-base-100 shadow-sm border border-base-300">
-				<div class="card-body">
+			<div class="card bg-base-100 shadow-sm border border-base-300 w-full min-w-0 max-w-full flex-none h-auto">
+				<div class="card-body min-w-0">
 					<h3 class="card-title text-lg">Per-Model Worker Pools</h3>
 					<p class="text-sm opacity-60 mb-4">Models with dedicated worker pools. Configure limits on the Models page.</p>
-					<div class="overflow-x-auto">
-						<table class="table table-sm">
+					<div class="worker-table-scroll w-full min-w-0 max-w-full overflow-x-auto">
+						<table class="table table-sm worker-stats-table w-full min-w-max h-auto">
 							<thead>
 								<tr>
 									<th>Model</th>
@@ -97,8 +97,26 @@ templ workerSettingsContent(maxWorkers int, runningWorkers int, totalRunning int
 							box-shadow: none;
 						}
 						#worker-settings-content .worker-limit-input:focus-visible {
-							outline: 2px solid hsl(var(--p));
+							outline: 2px solid oklch(var(--p));
 							outline-offset: 1px;
+						}
+						#worker-settings-content .worker-table-scroll {
+							flex: 0 0 auto;
+							max-height: none;
+						}
+						#worker-settings-content .worker-stats-table {
+							table-layout: auto;
+							height: auto;
+						}
+						#worker-settings-content .worker-stats-table :where(th, td) {
+							padding-top: 0.625rem;
+							padding-bottom: 0.625rem;
+							vertical-align: middle;
+							white-space: nowrap;
+						}
+						#worker-settings-content .worker-stats-table tr {
+							height: auto;
+							min-height: 2.75rem;
 						}
 					</style>
 					<script>
@@ -290,7 +308,7 @@ templ projectStatsTableBody(maxWorkers int, runningWorkers int, totalRunning int
 					hx-post="/workers"
 					hx-target="#worker-settings-content"
 					hx-swap="outerHTML"
-					class="flex items-center gap-2 worker-limit-form"
+					class="flex flex-nowrap items-center gap-2 worker-limit-form"
 					data-project-id="global"
 				>
 					<input
@@ -350,7 +368,7 @@ templ projectStatsTableBody(maxWorkers int, runningWorkers int, totalRunning int
 						hx-post={ fmt.Sprintf("/workers/projects/%s/limit", ps.ID) }
 						hx-target="#worker-settings-content"
 						hx-swap="outerHTML"
-						class="flex items-center gap-2 worker-limit-form"
+						class="flex flex-nowrap items-center gap-2 worker-limit-form"
 						data-project-id={ ps.ID }
 					>
 						<input

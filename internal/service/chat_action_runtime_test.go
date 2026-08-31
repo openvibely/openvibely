@@ -2,17 +2,316 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
+	"github.com/openvibely/openvibely/internal/chatcontrol"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/require"
 )
+
+func TestRunChannelViewTaskThreadUsesBoundedExecutionPage(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	execRepo := repository.NewExecutionRepo(db)
+	project := &models.Project{Name: "Bounded Channel Thread Project"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	task := &models.Task{
+		ProjectID: project.ID,
+		Title:     "Bounded Channel Thread Task",
+		Category:  models.CategoryBacklog,
+		Status:    models.StatusCompleted,
+		Prompt:    "original prompt",
+	}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	for i := 0; i < 40; i++ {
+		output := fmt.Sprintf("output-%02d %s", i, strings.Repeat("x", 20*1024))
+		exec := &models.Execution{
+			ID:         fmt.Sprintf("channel-thread-exec-%02d", i),
+			TaskID:     task.ID,
+			Status:     models.ExecRunning,
+			PromptSent: fmt.Sprintf("prompt-%02d", i),
+			IsFollowup: i > 0,
+		}
+		require.NoError(t, execRepo.Create(ctx, exec))
+		require.NoError(t, execRepo.Complete(ctx, exec.ID, models.ExecCompleted, output, "", 0, 0))
+	}
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	transcript, err := runChannelViewTaskThread(ctx, taskRepo, execRepo, project.ID, ViewThreadRequest{
+		TaskID: task.ID,
+		Offset: 5,
+		Limit:  3,
+	})
+	counter.SetEnabled(false)
+	require.NoError(t, err)
+	require.Contains(t, transcript, "Total executions: 40")
+	require.Contains(t, transcript, "prompt-05")
+	require.Contains(t, transcript, "prompt-07")
+	require.NotContains(t, transcript, "prompt-04")
+	require.NotContains(t, transcript, "prompt-08")
+	require.Contains(t, transcript, "Showing executions 6–8 of 40")
+
+	var executionQueries []string
+	for _, statement := range counter.Statements() {
+		if strings.Contains(strings.ToLower(statement), "from executions") {
+			executionQueries = append(executionQueries, statement)
+		}
+	}
+	require.Len(t, executionQueries, 2)
+	require.Contains(t, executionQueries[0], "COUNT(*)")
+	require.Contains(t, executionQueries[1], "ORDER BY started_at ASC, rowid ASC LIMIT ? OFFSET ?")
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	transcript, err = runChannelViewTaskThread(ctx, taskRepo, execRepo, project.ID, ViewThreadRequest{
+		TaskID: task.ID,
+	})
+	counter.SetEnabled(false)
+	require.NoError(t, err)
+	require.Contains(t, transcript, "Total executions: 40")
+	require.Contains(t, transcript, "Transcript size limit reached")
+
+	executionQueries = nil
+	for _, statement := range counter.Statements() {
+		if strings.Contains(strings.ToLower(statement), "from executions") {
+			executionQueries = append(executionQueries, statement)
+		}
+	}
+	require.GreaterOrEqual(t, len(executionQueries), 2)
+	for _, statement := range executionQueries[1:] {
+		require.Contains(t, statement, "ORDER BY started_at ASC, rowid ASC LIMIT ? OFFSET ?")
+	}
+}
+
+func TestChannelContextModeActionHandlers(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	project := &models.Project{Name: "Channel Runtime Project"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+
+	for _, channelName := range []string{"Slack", "Telegram", "Discord", "Email"} {
+		t.Run(channelName, func(t *testing.T) {
+			handlers := buildChannelContextModeActionHandlers(channelContextModeActionHandlerOptions{
+				ChannelDisplayName: channelName,
+				ProjectID:          project.ID,
+				ProjectRepo:        projectRepo,
+			})
+
+			currentProject, err := handlers["get_current_project"](ctx, nil)
+			require.NoError(t, err)
+			require.Equal(t, "Current project: Channel Runtime Project (id: "+project.ID+")", currentProject)
+
+			chatMode, err := handlers["get_chat_mode"](ctx, nil)
+			require.NoError(t, err)
+			require.Equal(t, "Current chat mode: orchestrate", chatMode)
+
+			setMode, err := handlers["set_chat_mode"](ctx, json.RawMessage(`{"mode":"plan"}`))
+			require.NoError(t, err)
+			require.Equal(t, "Chat mode changes are not supported on "+channelName+". "+channelName+" always uses orchestrate mode.", setMode)
+		})
+	}
+}
+
+func TestChannelRuntimeHandlerMapsCoverAdvertisedTools(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	project := &models.Project{Name: "Channel Handler Coverage"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+
+	tests := []struct {
+		name     string
+		surface  chatcontrol.Surface
+		handlers func() map[string]chatcontrol.RuntimeActionHandler
+		runtimes func() []*llmcontracts.RuntimeTools
+	}{
+		{
+			name:    "Slack",
+			surface: chatcontrol.SurfaceSlack,
+			handlers: func() map[string]chatcontrol.RuntimeActionHandler {
+				return (&SlackService{projectRepo: projectRepo}).slackActionHandlers(project.ID, slackActionContext{}, nil)
+			},
+			runtimes: func() []*llmcontracts.RuntimeTools {
+				service := &SlackService{projectRepo: projectRepo}
+				return []*llmcontracts.RuntimeTools{
+					service.buildSlackActionToolRuntime(project.ID, slackActionContext{}, nil),
+					service.buildSlackActionToolRuntime(project.ID, slackActionContext{TeamID: "T1", ChannelID: "C1", ThreadTS: "123.456", UserID: "U1"}, nil),
+				}
+			},
+		},
+		{
+			name:    "Telegram",
+			surface: chatcontrol.SurfaceTelegram,
+			handlers: func() map[string]chatcontrol.RuntimeActionHandler {
+				return (&TelegramService{projectRepo: projectRepo}).telegramActionHandlers(project.ID, 1, 1, nil)
+			},
+			runtimes: func() []*llmcontracts.RuntimeTools {
+				service := &TelegramService{projectRepo: projectRepo}
+				return []*llmcontracts.RuntimeTools{
+					service.buildTelegramActionToolRuntime(project.ID, 0, 0, nil),
+					service.buildTelegramActionToolRuntime(project.ID, 1, 2, nil),
+				}
+			},
+		},
+		{
+			name:    "Discord",
+			surface: chatcontrol.SurfaceDiscord,
+			handlers: func() map[string]chatcontrol.RuntimeActionHandler {
+				return (&DiscordService{projectRepo: projectRepo}).discordActionHandlers(project.ID, discordActionContext{}, nil)
+			},
+			runtimes: func() []*llmcontracts.RuntimeTools {
+				service := &DiscordService{projectRepo: projectRepo}
+				return []*llmcontracts.RuntimeTools{
+					service.buildDiscordActionToolRuntime(project.ID, discordActionContext{}, nil),
+					service.buildDiscordActionToolRuntime(project.ID, discordActionContext{ChannelID: "C1", ThreadID: "T1", MessageID: "M1", UserID: "U1"}, nil),
+				}
+			},
+		},
+		{
+			name:    "Email",
+			surface: chatcontrol.SurfaceEmail,
+			handlers: func() map[string]chatcontrol.RuntimeActionHandler {
+				return (&EmailService{projectRepo: projectRepo}).emailActionHandlers(project.ID, "user@example.com")
+			},
+			runtimes: func() []*llmcontracts.RuntimeTools {
+				return []*llmcontracts.RuntimeTools{(&EmailService{projectRepo: projectRepo}).buildEmailActionToolRuntime(project.ID, "user@example.com")}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handlers := tt.handlers()
+			if tt.surface == chatcontrol.SurfaceEmail {
+				expectedDefs := make([]llmcontracts.RuntimeToolDefinition, 0, len(handlers))
+				for _, def := range actionToolDefinitions(tt.surface, true) {
+					if _, ok := handlers[def.Name]; ok {
+						expectedDefs = append(expectedDefs, def)
+					}
+				}
+				for _, runtime := range tt.runtimes() {
+					require.NotNil(t, runtime)
+					require.Equal(t, expectedDefs, runtime.Definitions)
+					definitionNames := make(map[string]struct{}, len(runtime.Definitions))
+					for _, def := range runtime.Definitions {
+						definitionNames[def.Name] = struct{}{}
+						require.Contains(t, handlers, def.Name, "advertised email runtime tool must have a handler")
+					}
+					require.NotContains(t, definitionNames, "create_task")
+
+					_, handled, blocked, err := runtime.Executor(ctx, "save_automation", nil)
+					require.NoError(t, err)
+					require.False(t, handled)
+					require.False(t, blocked)
+				}
+			} else {
+				expectedDefs := actionToolDefinitions(tt.surface, true)
+				for _, runtime := range tt.runtimes() {
+					require.NotNil(t, runtime)
+					require.Equal(t, expectedDefs, runtime.Definitions)
+					definitionNames := make(map[string]struct{}, len(runtime.Definitions))
+					for _, def := range runtime.Definitions {
+						definitionNames[def.Name] = struct{}{}
+					}
+					require.Contains(t, definitionNames, "view_task_thread")
+					require.Contains(t, definitionNames, "send_to_task")
+					require.Contains(t, definitionNames, "preview_automation_description")
+					require.Contains(t, definitionNames, "save_automation")
+
+					currentProject, handled, blocked, err := runtime.Executor(ctx, "get_current_project", nil)
+					require.NoError(t, err)
+					require.True(t, handled)
+					require.False(t, blocked)
+					require.Equal(t, "Current project: Channel Handler Coverage (id: "+project.ID+")", currentProject)
+
+					_, handled, blocked, err = runtime.Executor(ctx, "save_automation", nil)
+					require.NoError(t, err)
+					require.False(t, handled)
+					require.False(t, blocked)
+				}
+			}
+
+			currentProject, err := handlers["get_current_project"](ctx, nil)
+			require.NoError(t, err)
+			require.Equal(t, "Current project: Channel Handler Coverage (id: "+project.ID+")", currentProject)
+
+			chatMode, err := handlers["get_chat_mode"](ctx, nil)
+			require.NoError(t, err)
+			require.Equal(t, "Current chat mode: orchestrate", chatMode)
+
+			setMode, err := handlers["set_chat_mode"](ctx, json.RawMessage(`{"mode":"plan"}`))
+			require.NoError(t, err)
+			require.Equal(t, "Chat mode changes are not supported on "+tt.name+". "+tt.name+" always uses orchestrate mode.", setMode)
+		})
+	}
+}
+
+func channelRuntimeGenericFallbackTool(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "memory_view", "preview_automation_description", "save_automation", "run_automation_now", "pause_automation", "resume_automation", "delete_automation":
+		return true
+	default:
+		return false
+	}
+}
+
+func TestAutomationNotificationCreationAllowsMissingIdempotencyKey(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	project := &models.Project{Name: "Native existing-work dedupe"}
+	require.NoError(t, repository.NewProjectRepo(db).Create(ctx, project))
+	alertSvc := NewAlertService(repository.NewAlertRepo(db), nil)
+	handlers := BuildAlertRuntimeActionHandlers(AlertRuntimeOptions{ProjectID: project.ID, AlertSvc: alertSvc})
+	automationCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: project.ID, OriginTask: true})
+
+	createdJSON, err := handlers["create_notification"](automationCtx, json.RawMessage(`{
+		"type":"bug_suggestion",
+		"title":"Existing-work checked notification"
+	}`))
+	require.NoError(t, err)
+	require.Contains(t, createdJSON, "Existing-work checked notification")
+}
+
+func TestAlertRuntimeCreateNotificationIgnoresHiddenIdempotencyKey(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	project := &models.Project{Name: "Runtime hidden idempotency"}
+	require.NoError(t, repository.NewProjectRepo(db).Create(ctx, project))
+	alertSvc := NewAlertService(repository.NewAlertRepo(db), nil)
+	handlers := BuildAlertRuntimeActionHandlers(AlertRuntimeOptions{ProjectID: project.ID, AlertSvc: alertSvc})
+	input := json.RawMessage(`{"type":"bug_suggestion","title":"Hidden key notification","idempotency_key":"hidden-runtime-key"}`)
+
+	firstJSON, err := handlers["create_notification"](ctx, input)
+	require.NoError(t, err)
+	secondJSON, err := handlers["create_notification"](ctx, input)
+	require.NoError(t, err)
+	var first, second struct {
+		Notification models.Alert `json:"notification"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(firstJSON), &first))
+	require.NoError(t, json.Unmarshal([]byte(secondJSON), &second))
+	require.NotEmpty(t, first.Notification.ID)
+	require.NotEmpty(t, second.Notification.ID)
+	require.NotEqual(t, first.Notification.ID, second.Notification.ID)
+	require.Empty(t, first.Notification.IdempotencyKey)
+	require.Empty(t, second.Notification.IdempotencyKey)
+	var storedWithHiddenKey int
+	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM alerts WHERE project_id = ? AND idempotency_key = ?`, project.ID, "hidden-runtime-key").Scan(&storedWithHiddenKey))
+	require.Zero(t, storedWithHiddenKey)
+}
 
 func TestAlertRuntimeSuggestionApprovalClaimAndTaskLinkage(t *testing.T) {
 	db := testutil.NewTestDB(t)
@@ -28,7 +327,7 @@ func TestAlertRuntimeSuggestionApprovalClaimAndTaskLinkage(t *testing.T) {
 	alertSvc := NewAlertService(repository.NewAlertRepo(db), nil)
 	handlers := BuildAlertRuntimeActionHandlers(AlertRuntimeOptions{ProjectID: project.ID, CallerTaskID: caller.ID, Source: "scheduled_task", AlertSvc: alertSvc})
 
-	createInput := json.RawMessage(`{"project_id":"` + project.ID + `","type":"product_suggestion","title":"Add approval inbox","message":"Review this","body":"Detailed implementation context","metadata":{"component":"alerts"},"idempotency_key":"suggestion:approval-inbox"}`)
+	createInput := json.RawMessage(`{"project_id":"` + project.ID + `","type":"product_suggestion","title":"Add approval inbox","message":"Review this","body":"Detailed implementation context","metadata":{"component":"alerts"}}`)
 	createdJSON, err := handlers["create_notification"](ctx, createInput)
 	require.NoError(t, err)
 	var created struct {
@@ -40,23 +339,27 @@ func TestAlertRuntimeSuggestionApprovalClaimAndTaskLinkage(t *testing.T) {
 	require.Equal(t, models.AlertDecisionPending, created.Notification.DecisionState)
 	require.Equal(t, caller.ID, *created.Notification.SourceTaskID)
 
-	duplicateJSON, err := handlers["create_notification"](ctx, createInput)
-	require.NoError(t, err)
-	var duplicate struct {
-		Notification models.Alert `json:"notification"`
-	}
-	require.NoError(t, json.Unmarshal([]byte(duplicateJSON), &duplicate))
-	require.Equal(t, created.Notification.ID, duplicate.Notification.ID)
-
 	_, err = handlers["list_alerts"](ctx, json.RawMessage(`{"project_id":"`+foreign.ID+`"}`))
 	require.ErrorContains(t, err, "outside the caller's authorized project")
 	listJSON, err := handlers["list_alerts"](ctx, json.RawMessage(`{"decision_state":"pending","limit":1,"offset":0}`))
 	require.NoError(t, err)
 	require.Contains(t, listJSON, created.Notification.ID)
 	require.Contains(t, listJSON, `"next_offset":1`)
+	require.NotContains(t, listJSON, `"body"`)
+	require.NotContains(t, listJSON, `"metadata"`)
+	var listed struct {
+		Notifications []map[string]any `json:"notifications"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(listJSON), &listed))
+	require.Len(t, listed.Notifications, 1)
+	for _, key := range []string{"id", "project_id", "type", "severity", "title", "message", "is_read", "decision_state", "processing_state", "source", "created_at", "updated_at"} {
+		require.Contains(t, listed.Notifications[0], key)
+	}
 	detailJSON, err := handlers["get_alert"](ctx, json.RawMessage(`{"alert_id":"`+created.Notification.ID+`"}`))
 	require.NoError(t, err)
 	require.Contains(t, detailJSON, "Detailed implementation context")
+	require.Contains(t, detailJSON, `"body"`)
+	require.Contains(t, detailJSON, `"metadata"`)
 
 	require.NoError(t, alertSvc.SetDecision(ctx, project.ID, created.Notification.ID, models.AlertDecisionApproved))
 	approvedJSON, err := handlers["list_alerts"](ctx, json.RawMessage(`{"decision_state":"approved","processing_state":"unclaimed"}`))
@@ -66,7 +369,7 @@ func TestAlertRuntimeSuggestionApprovalClaimAndTaskLinkage(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, claimJSON, `"processing_state":"claimed"`)
 
-	createTaskInput := json.RawMessage(`{"alert_id":"` + created.Notification.ID + `","title":"Implement approval inbox","prompt":"Implement the approved suggestion and leave merge/release to human review.","priority":3,"tag":"feature"}`)
+	createTaskInput := json.RawMessage(`{"alert_id":"` + created.Notification.ID + `","title":"Implement approval inbox","prompt":"Implement the approved suggestion and leave merge/release to human review.","goal":"Complete the approved change with focused regression coverage.","priority":3,"tag":"feature"}`)
 	taskJSON, err := handlers["create_alert_implementation_task"](ctx, createTaskInput)
 	require.NoError(t, err)
 	var linked struct {
@@ -74,6 +377,10 @@ func TestAlertRuntimeSuggestionApprovalClaimAndTaskLinkage(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal([]byte(taskJSON), &linked))
 	require.NotEmpty(t, linked.ImplementationTaskID)
+	implementationGoal, err := repository.NewTaskGoalRepo(db).GetByTaskID(ctx, linked.ImplementationTaskID)
+	require.NoError(t, err)
+	require.NotNil(t, implementationGoal)
+	require.Equal(t, "Complete the approved change with focused regression coverage.", implementationGoal.Objective)
 	secondTaskJSON, err := handlers["create_alert_implementation_task"](ctx, createTaskInput)
 	require.NoError(t, err)
 	var linkedAgain struct {
@@ -89,6 +396,196 @@ func TestAlertRuntimeSuggestionApprovalClaimAndTaskLinkage(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, models.AlertProcessingCompleted, final.ProcessingState)
 	require.Equal(t, linked.ImplementationTaskID, *final.ImplementationTaskID)
+}
+
+func TestAlertRuntimeDecideAlertApprovesRejectsAndValidates(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	project := &models.Project{Name: "Runtime Alert Decisions"}
+	foreign := &models.Project{Name: "Foreign Runtime Alert Decisions"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	require.NoError(t, projectRepo.Create(ctx, foreign))
+	caller := &models.Task{ProjectID: project.ID, Title: "Decision caller", Prompt: "review", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
+	foreignCaller := &models.Task{ProjectID: foreign.ID, Title: "Foreign decision caller", Prompt: "review", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
+	require.NoError(t, taskRepo.Create(ctx, caller))
+	require.NoError(t, taskRepo.Create(ctx, foreignCaller))
+	alertSvc := NewAlertService(repository.NewAlertRepo(db), nil)
+	handlers := BuildAlertRuntimeActionHandlers(AlertRuntimeOptions{ProjectID: project.ID, CallerTaskID: caller.ID, Source: "chat", AlertSvc: alertSvc})
+	foreignHandlers := BuildAlertRuntimeActionHandlers(AlertRuntimeOptions{ProjectID: foreign.ID, CallerTaskID: foreignCaller.ID, Source: "chat", AlertSvc: alertSvc})
+
+	create := func(t *testing.T, runtime map[string]chatcontrol.RuntimeActionHandler, title string) models.Alert {
+		t.Helper()
+		out, err := runtime["create_notification"](ctx, json.RawMessage(`{"type":"product_suggestion","title":"`+title+`"}`))
+		require.NoError(t, err)
+		var payload struct {
+			Notification models.Alert `json:"notification"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(out), &payload))
+		require.Equal(t, models.AlertDecisionPending, payload.Notification.DecisionState)
+		return payload.Notification
+	}
+
+	approved := create(t, handlers, "Approve from Chat")
+	approveJSON, err := handlers["decide_alert"](ctx, json.RawMessage(`{"alert_id":"`+approved.ID+`","decision":"approved"}`))
+	require.NoError(t, err)
+	require.Contains(t, approveJSON, `"decision_state":"approved"`)
+	storedApproved, err := alertSvc.GetByID(ctx, project.ID, approved.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.AlertDecisionApproved, storedApproved.DecisionState)
+	require.NotNil(t, storedApproved.DecidedAt)
+	_, err = handlers["claim_alert"](ctx, json.RawMessage(`{"alert_id":"`+approved.ID+`"}`))
+	require.NoError(t, err, "approved notifications must remain claimable by the inbox flow")
+
+	rejected := create(t, handlers, "Reject from Chat")
+	rejectJSON, err := handlers["decide_alert"](ctx, json.RawMessage(`{"alert_id":"`+rejected.ID+`","decision":"rejected"}`))
+	require.NoError(t, err)
+	require.Contains(t, rejectJSON, `"decision_state":"rejected"`)
+	storedRejected, err := alertSvc.GetByID(ctx, project.ID, rejected.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.AlertDecisionRejected, storedRejected.DecisionState)
+	_, err = handlers["claim_alert"](ctx, json.RawMessage(`{"alert_id":"`+rejected.ID+`"}`))
+	require.ErrorContains(t, err, "alert is not claimable")
+
+	dismissed := create(t, handlers, "Dismiss from Chat")
+	_, err = handlers["decide_alert"](ctx, json.RawMessage(`{"alert_id":"`+dismissed.ID+`","decision":"dismissed"}`))
+	require.NoError(t, err)
+	_, err = handlers["claim_alert"](ctx, json.RawMessage(`{"alert_id":"`+dismissed.ID+`"}`))
+	require.ErrorContains(t, err, "alert is not claimable")
+
+	_, err = handlers["decide_alert"](ctx, json.RawMessage(`{"decision":"approved"}`))
+	require.ErrorContains(t, err, "alert_id is required")
+	_, err = handlers["decide_alert"](ctx, json.RawMessage(`{"alert_id":"`+rejected.ID+`","decision":"pending"}`))
+	require.ErrorContains(t, err, "decision must be one of approved, rejected, or dismissed")
+	_, err = handlers["decide_alert"](ctx, json.RawMessage(`{"alert_id":"missing-alert","decision":"approved"}`))
+	require.ErrorContains(t, err, "alert not found or not pending")
+	_, err = handlers["decide_alert"](ctx, json.RawMessage(`{"alert_id":"`+rejected.ID+`","decision":"approved"}`))
+	require.ErrorContains(t, err, "alert decision is rejected, not pending")
+
+	foreignNotification := create(t, foreignHandlers, "Foreign alert")
+	_, err = handlers["decide_alert"](ctx, json.RawMessage(`{"alert_id":"`+foreignNotification.ID+`","decision":"approved"}`))
+	require.ErrorContains(t, err, "alert not found or not pending")
+	require.NotContains(t, err.Error(), foreign.ID)
+	unchangedForeign, err := alertSvc.GetByID(ctx, foreign.ID, foreignNotification.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.AlertDecisionPending, unchangedForeign.DecisionState)
+}
+
+func TestAlertRuntimeClaimAlertValidatesLeaseSeconds(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	project := &models.Project{Name: "Runtime Claim Lease Validation"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	caller := &models.Task{ProjectID: project.ID, Title: "Scheduled notification inbox", Prompt: "scan", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
+	require.NoError(t, taskRepo.Create(ctx, caller))
+	alertRepo := repository.NewAlertRepo(db)
+	alertSvc := NewAlertService(alertRepo, nil)
+	handlers := BuildAlertRuntimeActionHandlers(AlertRuntimeOptions{ProjectID: project.ID, CallerTaskID: caller.ID, Source: "scheduled_task", AlertSvc: alertSvc})
+
+	createApproved := func(t *testing.T, title string) models.Alert {
+		t.Helper()
+		createdJSON, err := handlers["create_notification"](ctx, json.RawMessage(`{"type":"bug_suggestion","title":"`+title+`"}`))
+		require.NoError(t, err)
+		var created struct {
+			Notification models.Alert `json:"notification"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(createdJSON), &created))
+		require.NoError(t, alertSvc.SetDecision(ctx, project.ID, created.Notification.ID, models.AlertDecisionApproved))
+		return created.Notification
+	}
+
+	for _, leaseSeconds := range []int{-1, 0, 90000} {
+		t.Run(fmt.Sprintf("rejects explicit %d", leaseSeconds), func(t *testing.T) {
+			alert := createApproved(t, fmt.Sprintf("Invalid lease %d", leaseSeconds))
+			_, err := handlers["claim_alert"](ctx, json.RawMessage(fmt.Sprintf(`{"alert_id":"%s","lease_seconds":%d}`, alert.ID, leaseSeconds)))
+			require.ErrorContains(t, err, "lease_seconds must be between 1 and 86400")
+
+			unclaimed, err := alertSvc.GetByID(ctx, project.ID, alert.ID)
+			require.NoError(t, err)
+			require.Equal(t, models.AlertProcessingUnclaimed, unclaimed.ProcessingState)
+			require.Empty(t, unclaimed.Claimant)
+			require.Nil(t, unclaimed.ClaimedAt)
+			require.Nil(t, unclaimed.ClaimExpiresAt)
+		})
+	}
+
+	claimAndAssertDuration := func(t *testing.T, alertID string, input json.RawMessage, expected time.Duration) {
+		t.Helper()
+		_, err := handlers["claim_alert"](ctx, input)
+		require.NoError(t, err)
+		claimed, err := alertSvc.GetByID(ctx, project.ID, alertID)
+		require.NoError(t, err)
+		require.Equal(t, models.AlertProcessingClaimed, claimed.ProcessingState)
+		require.NotNil(t, claimed.ClaimedAt)
+		require.NotNil(t, claimed.ClaimExpiresAt)
+		require.WithinDuration(t, claimed.ClaimedAt.Add(expected), *claimed.ClaimExpiresAt, time.Second)
+	}
+
+	omitted := createApproved(t, "Omitted lease uses default")
+	claimAndAssertDuration(t, omitted.ID, json.RawMessage(`{"alert_id":"`+omitted.ID+`"}`), 30*time.Minute)
+
+	oneSecond := createApproved(t, "One second lease")
+	claimAndAssertDuration(t, oneSecond.ID, json.RawMessage(`{"alert_id":"`+oneSecond.ID+`","lease_seconds":1}`), time.Second)
+
+	oneDay := createApproved(t, "One day lease")
+	claimAndAssertDuration(t, oneDay.ID, json.RawMessage(`{"alert_id":"`+oneDay.ID+`","lease_seconds":86400}`), 24*time.Hour)
+}
+
+func TestNativeInboxCollectsAllPagesBeforeShrinkingEligibleSet(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	project := &models.Project{Name: "Native inbox pagination"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	caller := &models.Task{ProjectID: project.ID, Title: "Approved inbox", Prompt: "scan", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
+	require.NoError(t, taskRepo.Create(ctx, caller))
+	alertSvc := NewAlertService(repository.NewAlertRepo(db), nil)
+	handlers := BuildAlertRuntimeActionHandlers(AlertRuntimeOptions{ProjectID: project.ID, CallerTaskID: caller.ID, Source: "scheduled_task", AlertSvc: alertSvc})
+
+	createdIDs := make(map[string]struct{}, 3)
+	for i := 0; i < 3; i++ {
+		createdJSON, err := handlers["create_notification"](ctx, json.RawMessage(`{"type":"bug_suggestion","title":"Finding `+string(rune('A'+i))+`"}`))
+		require.NoError(t, err)
+		var created struct {
+			Notification models.Alert `json:"notification"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(createdJSON), &created))
+		require.NoError(t, alertSvc.SetDecision(ctx, project.ID, created.Notification.ID, models.AlertDecisionApproved))
+		createdIDs[created.Notification.ID] = struct{}{}
+	}
+
+	listPage := func(offset int) []models.Alert {
+		listedJSON, err := handlers["list_alerts"](ctx, json.RawMessage(`{"decision_state":"approved","implementation_task_linked":false,"limit":2,"offset":`+fmt.Sprintf("%d", offset)+`}`))
+		require.NoError(t, err)
+		var listed struct {
+			Notifications []models.Alert `json:"notifications"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(listedJSON), &listed))
+		return listed.Notifications
+	}
+
+	firstPage := listPage(0)
+	require.Len(t, firstPage, 2)
+	snapshotRemainder := listPage(2)
+	require.Len(t, snapshotRemainder, 1, "the inbox must collect later pages before linking changes the filtered set")
+	for _, alert := range firstPage {
+		_, err := handlers["claim_alert"](ctx, json.RawMessage(`{"alert_id":"`+alert.ID+`"}`))
+		require.NoError(t, err)
+		_, err = handlers["create_alert_implementation_task"](ctx, json.RawMessage(`{"alert_id":"`+alert.ID+`","title":"Implement finding `+alert.ID+`","prompt":"Implement the approved finding."}`))
+		require.NoError(t, err)
+		delete(createdIDs, alert.ID)
+	}
+
+	require.Empty(t, listPage(2), "advancing the offset after mutation skips the remaining row")
+	remaining := listPage(0)
+	require.Len(t, remaining, 1)
+	require.Equal(t, snapshotRemainder[0].ID, remaining[0].ID, "the pre-mutation snapshot must retain the otherwise skipped notification ID")
+	_, ok := createdIDs[snapshotRemainder[0].ID]
+	require.True(t, ok)
 }
 
 func TestAlertRuntimeCreateAlertPreservesOperationalContract(t *testing.T) {
@@ -253,6 +750,88 @@ func TestRunChannelChatFirstTurnBuildsRuntimeAfterPersistingCallerTask(t *testin
 	require.NotNil(t, runReq.RuntimeTools)
 }
 
+func TestTaskControlRuntimeOmitsImplementationTaskToolsForLoopAuditor(t *testing.T) {
+	loopAuditor := models.Task{
+		ProjectID:  "project",
+		Category:   models.CategoryScheduled,
+		CreatedVia: "automation:github-sdlc:auditor",
+	}
+
+	runtime := (&LLMService{}).taskControlRuntimeTools(loopAuditor)
+	require.NotNil(t, runtime)
+	for _, tool := range []string{
+		"create_task",
+		"create_swarm_task",
+		"execute_tasks",
+		"create_alert_implementation_task",
+		"link_alert_implementation_task",
+	} {
+		require.Falsef(t, runtime.HasDefinition(tool), "Loop Auditor must not expose %s", tool)
+	}
+	for _, tool := range []string{
+		"list_tasks",
+		"set_task_goal",
+		"clear_task_goal",
+		"get_task_goal",
+		"pause_task_goal",
+		"resume_task_goal",
+		"list_schedules",
+		"schedule_task",
+		"delete_schedule",
+		"modify_schedule",
+		"create_alert",
+		"create_notification",
+		"list_alerts",
+		"get_alert",
+		"claim_alert",
+		"complete_alert_processing",
+		"fail_alert_processing",
+		"release_alert_claim",
+		"list_capabilities",
+	} {
+		require.Truef(t, runtime.HasDefinition(tool), "Loop Auditor must retain %s", tool)
+	}
+}
+
+func TestTaskControlRuntimeScheduledAutomationTaskRemainsGenericAndExposesExistingNotificationDiscovery(t *testing.T) {
+	finder := models.Task{
+		ProjectID:  "project",
+		Category:   models.CategoryScheduled,
+		CreatedVia: "automation:native:optimization_finder",
+	}
+
+	runtime := (&LLMService{}).taskControlRuntimeTools(finder)
+	require.NotNil(t, runtime)
+	for _, tool := range []string{
+		"create_notification",
+		"list_existing_automation_notifications",
+		"get_alert",
+		"list_alerts",
+		"list_tasks",
+		"list_capabilities",
+		"create_alert",
+		"claim_alert",
+		"create_alert_implementation_task",
+		"execute_tasks",
+	} {
+		require.Truef(t, runtime.HasDefinition(tool), "scheduled Automation task must retain generic tool %s", tool)
+	}
+}
+
+func TestTaskControlRuntimeNativeInboxKeepsApprovalProcessingTools(t *testing.T) {
+	inbox := models.Task{
+		ProjectID:  "project",
+		Category:   models.CategoryScheduled,
+		CreatedVia: "automation:native:inbox",
+	}
+
+	runtime := (&LLMService{}).taskControlRuntimeTools(inbox)
+	require.NotNil(t, runtime)
+	for _, tool := range []string{"list_alerts", "claim_alert", "create_alert_implementation_task", "execute_tasks"} {
+		require.Truef(t, runtime.HasDefinition(tool), "Native inbox must retain %s", tool)
+	}
+}
+
 func TestTaskControlRuntimeExposesExecuteTasksAndStartsExactBacklogTask(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
@@ -289,6 +868,71 @@ func TestTaskControlRuntimeExposesExecuteTasksAndStartsExactBacklogTask(t *testi
 	require.NoError(t, err)
 	require.Equal(t, models.CategoryActive, updated.Category)
 	require.Equal(t, models.StatusPending, updated.Status)
+}
+
+func TestTaskControlRuntimeListAlertsUsesPersistedProjectAcrossReadStates(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	project := &models.Project{Name: "Scheduled Alert Inbox"}
+	foreign := &models.Project{Name: "Foreign Alert Inbox"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	require.NoError(t, projectRepo.Create(ctx, foreign))
+	inboxTask := &models.Task{ProjectID: project.ID, Title: "Approved inbox", Prompt: "process approvals", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
+	require.NoError(t, taskRepo.Create(ctx, inboxTask))
+	alertSvc := NewAlertService(repository.NewAlertRepo(db), nil)
+	createNotification := func(title string, read bool) models.Alert {
+		created, err := alertSvc.CreateActionable(ctx, &models.Alert{ProjectID: project.ID, Scope: models.AlertScopeProject, Type: "product_suggestion", Title: title, Source: "producer"})
+		require.NoError(t, err)
+		require.NoError(t, alertSvc.SetDecision(ctx, project.ID, created.ID, models.AlertDecisionApproved))
+		if read {
+			require.NoError(t, alertSvc.MarkRead(ctx, project.ID, created.ID))
+		}
+		return *created
+	}
+	readNotification := createNotification("Read approval", true)
+	unreadNotification := createNotification("Unread approval", false)
+	svc := &LLMService{taskRepo: taskRepo, alertSvc: alertSvc}
+
+	runtime := svc.taskControlRuntimeTools(*inboxTask)
+	require.NotNil(t, runtime)
+	var listSchema struct {
+		Properties map[string]json.RawMessage `json:"properties"`
+	}
+	for _, definition := range runtime.Definitions {
+		if definition.Name == "list_alerts" {
+			require.NoError(t, json.Unmarshal(definition.Parameters, &listSchema))
+			break
+		}
+	}
+	require.NotEmpty(t, listSchema.Properties)
+	require.NotContains(t, listSchema.Properties, "project_id")
+	require.NotContains(t, listSchema.Properties, "read")
+
+	output, handled, isErr, err := runtime.Executor(ctx, "list_alerts", json.RawMessage(`{"project_id":"`+foreign.ID+`","read":false,"decision_state":"approved","implementation_task_linked":false,"limit":50,"offset":0}`))
+	require.True(t, handled)
+	require.False(t, isErr)
+	require.NoError(t, err)
+	require.Contains(t, output, readNotification.ID)
+	require.Contains(t, output, unreadNotification.ID)
+	require.Contains(t, output, `"project_id":"`+project.ID+`"`)
+
+	ordinaryRuntime := svc.taskControlRuntimeTools(models.Task{ProjectID: project.ID, Category: models.CategoryActive})
+	require.NotNil(t, ordinaryRuntime)
+	for _, definition := range ordinaryRuntime.Definitions {
+		if definition.Name != "list_alerts" {
+			continue
+		}
+		var ordinarySchema struct {
+			Properties map[string]json.RawMessage `json:"properties"`
+		}
+		require.NoError(t, json.Unmarshal(definition.Parameters, &ordinarySchema))
+		require.Contains(t, ordinarySchema.Properties, "project_id")
+		require.Contains(t, ordinarySchema.Properties, "read")
+		return
+	}
+	t.Fatal("ordinary task runtime is missing list_alerts")
 }
 
 func TestTaskControlRuntimeExposesCreateNotificationForScheduledTask(t *testing.T) {
@@ -354,7 +998,7 @@ func TestRunChannelTaskThreadSendStartsDirectFollowupWithReplyContext(t *testing
 	require.Equal(t, models.CategoryActive, updated.Category)
 }
 
-func TestBuildChannelGoalActionHandlersSetGoalUsesSharedTaskResolution(t *testing.T) {
+func TestBuildChannelGoalActionHandlersUseSharedGoalRuntime(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 	projectRepo := repository.NewProjectRepo(db)
@@ -364,13 +1008,26 @@ func TestBuildChannelGoalActionHandlersSetGoalUsesSharedTaskResolution(t *testin
 	task := &models.Task{ProjectID: project.ID, Title: "Goal target", Prompt: "prompt", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2}
 	require.NoError(t, taskRepo.Create(ctx, task))
 	handlers := buildChannelGoalActionHandlers(channelGoalActionHandlerOptions{ProjectID: project.ID, TaskRepo: taskRepo, TaskGoalSvc: NewTaskGoalService(repository.NewTaskGoalRepo(db), taskRepo, nil)})
-	payload, err := json.Marshal(channelGoalToolInput{Title: "Goal target", Goal: "Finish the shared refactor"})
+	payload, err := json.Marshal(TaskGoalRuntimeToolInput{Title: "Goal target", Goal: "Finish the shared refactor"})
 	require.NoError(t, err)
 
-	result, err := handlers["set_task_goal"](ctx, payload)
+	setResult, err := handlers["set_task_goal"](ctx, payload)
 	require.NoError(t, err)
-	require.Contains(t, result, "Finish the shared refactor")
-	require.Contains(t, result, task.ID)
+	require.Contains(t, setResult, "Finish the shared refactor")
+	require.Contains(t, setResult, task.ID)
+
+	getResult, err := handlers["get_task_goal"](ctx, []byte(`{"task_id":"`+task.ID+`"}`))
+	require.NoError(t, err)
+	require.Contains(t, getResult, "Finish the shared refactor")
+	require.Contains(t, getResult, task.ID)
+
+	pauseResult, err := handlers["pause_task_goal"](ctx, []byte(`{"task_id":"`+task.ID+`"}`))
+	require.NoError(t, err)
+	require.Contains(t, pauseResult, string(models.TaskGoalStatusPaused))
+
+	resumeResult, err := handlers["resume_task_goal"](ctx, []byte(`{"task_id":"`+task.ID+`"}`))
+	require.NoError(t, err)
+	require.Contains(t, resumeResult, string(models.TaskGoalStatusActive))
 }
 
 func TestBuildChannelUtilityActionHandlersScheduleTaskAndModifyUseSharedLogic(t *testing.T) {
@@ -385,6 +1042,30 @@ func TestBuildChannelUtilityActionHandlersScheduleTaskAndModifyUseSharedLogic(t 
 	require.NoError(t, taskRepo.Create(ctx, task))
 
 	handlers := buildChannelUtilityActionHandlers(channelUtilityActionHandlerOptions{ProjectID: project.ID, TaskRepo: taskRepo, ScheduleRepo: scheduleRepo})
+	for _, tt := range []struct {
+		payload string
+		want    string
+	}{
+		{payload: `{"title":"Scheduled target","time":"09:30junk","repeat":"daily"}`, want: "Invalid time"},
+		{payload: `{"title":"Scheduled target","time":"09:30:45","repeat":"daily"}`, want: "Invalid time"},
+		{payload: `{"title":"Scheduled target","time":"09:30","repeat":"yearly"}`, want: "Unknown repeat type"},
+		{payload: `{"title":"Scheduled target","time":"09:30","repeat":"weekly","days":["monday"]}`, want: "Invalid weekly days"},
+	} {
+		out, err := handlers["schedule_task"](ctx, json.RawMessage(tt.payload))
+		require.NoError(t, err)
+		require.Contains(t, out, tt.want)
+	}
+	beforeInvalidCreate, err := scheduleRepo.ListByTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.Empty(t, beforeInvalidCreate)
+
+	oversizedCreateOut, err := handlers["schedule_task"](ctx, json.RawMessage(`{"title":"Scheduled target","time":"09:30","repeat":"seconds","interval":366}`))
+	require.NoError(t, err)
+	require.Contains(t, oversizedCreateOut, "between 1 and 365")
+	beforeCreate, err := scheduleRepo.ListByTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.Empty(t, beforeCreate)
+
 	scheduleOut, err := handlers["schedule_task"](ctx, json.RawMessage(`{"title":"Scheduled target","time":"09:30","repeat":"weekly","days":["mon"],"interval":2}`))
 	require.NoError(t, err)
 	require.Contains(t, scheduleOut, "Scheduled task")
@@ -396,7 +1077,38 @@ func TestBuildChannelUtilityActionHandlersScheduleTaskAndModifyUseSharedLogic(t 
 	schedules, err := scheduleRepo.ListByTask(ctx, task.ID)
 	require.NoError(t, err)
 	require.Len(t, schedules, 1)
+	require.Equal(t, 2, schedules[0].RepeatInterval)
+	require.Equal(t, time.Monday, schedules[0].RunAt.Local().Weekday())
 	require.True(t, schedules[0].ClearContextOnStart)
+	require.NotNil(t, schedules[0].NextRun)
+	require.WithinDuration(t, schedules[0].RunAt, *schedules[0].NextRun, time.Second)
+
+	originalRunAt := schedules[0].RunAt
+	for _, tt := range []struct {
+		payload string
+		want    string
+	}{
+		{payload: `{"schedule_id":"` + schedules[0].ID + `","time":"09:30junk"}`, want: "Invalid time"},
+		{payload: `{"schedule_id":"` + schedules[0].ID + `","time":"09:30:45"}`, want: "Invalid time"},
+		{payload: `{"schedule_id":"` + schedules[0].ID + `","repeat":"yearly"}`, want: "Unknown repeat type"},
+		{payload: `{"schedule_id":"` + schedules[0].ID + `","days":["monday"]}`, want: "Invalid weekly days"},
+	} {
+		out, err := handlers["modify_schedule"](ctx, json.RawMessage(tt.payload))
+		require.NoError(t, err)
+		require.Contains(t, out, tt.want)
+		unchanged, getErr := scheduleRepo.GetByID(ctx, schedules[0].ID)
+		require.NoError(t, getErr)
+		require.Equal(t, originalRunAt, unchanged.RunAt)
+		require.Equal(t, models.RepeatWeekly, unchanged.RepeatType)
+		require.Equal(t, 2, unchanged.RepeatInterval)
+	}
+
+	oversizedModifyOut, err := handlers["modify_schedule"](ctx, json.RawMessage(`{"schedule_id":"`+schedules[0].ID+`","interval":366}`))
+	require.NoError(t, err)
+	require.Contains(t, oversizedModifyOut, "between 1 and 365")
+	unchanged, err := scheduleRepo.GetByID(ctx, schedules[0].ID)
+	require.NoError(t, err)
+	require.Equal(t, 2, unchanged.RepeatInterval)
 
 	modifyOut, err := handlers["modify_schedule"](ctx, json.RawMessage(`{"schedule_id":"`+schedules[0].ID+`","time":"10:45","enabled":false,"clear_context_on_start":false}`))
 	require.NoError(t, err)
@@ -406,6 +1118,526 @@ func TestBuildChannelUtilityActionHandlersScheduleTaskAndModifyUseSharedLogic(t 
 	modified, err := scheduleRepo.GetByID(ctx, schedules[0].ID)
 	require.NoError(t, err)
 	require.False(t, modified.ClearContextOnStart)
+	require.False(t, modified.Enabled)
+
+	lowerBoundOut, err := handlers["modify_schedule"](ctx, json.RawMessage(`{"schedule_id":"`+schedules[0].ID+`","interval":0}`))
+	require.NoError(t, err)
+	require.Contains(t, lowerBoundOut, "between 1 and 365")
+	modifyDaysOut, err := handlers["modify_schedule"](ctx, json.RawMessage(`{"schedule_id":"`+schedules[0].ID+`","interval":365,"days":["fri"],"enabled":true,"clear_context_on_start":true}`))
+	require.NoError(t, err)
+	require.Contains(t, modifyDaysOut, "Updated schedule")
+	modified, err = scheduleRepo.GetByID(ctx, schedules[0].ID)
+	require.NoError(t, err)
+	require.Equal(t, 365, modified.RepeatInterval)
+	require.Equal(t, time.Friday, modified.RunAt.Local().Weekday())
+	require.True(t, modified.Enabled)
+	require.True(t, modified.ClearContextOnStart)
+	require.NotNil(t, modified.NextRun)
+	require.WithinDuration(t, modified.RunAt, *modified.NextRun, time.Second)
+
+	foreign := &models.Project{Name: "Foreign Utility Actions"}
+	require.NoError(t, projectRepo.Create(ctx, foreign))
+	foreignTask := &models.Task{ProjectID: foreign.ID, Title: "Foreign scheduled target", Prompt: "prompt", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
+	require.NoError(t, taskRepo.Create(ctx, foreignTask))
+	foreignSchedule := &models.Schedule{TaskID: foreignTask.ID, RunAt: time.Now().UTC().Add(time.Hour), RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: true}
+	require.NoError(t, scheduleRepo.Create(ctx, foreignSchedule))
+	for tool, payload := range map[string]string{
+		"schedule_task":   `{"task_id":"` + foreignTask.ID + `","time":"09:30"}`,
+		"modify_schedule": `{"schedule_id":"` + foreignSchedule.ID + `","enabled":false}`,
+		"delete_schedule": `{"schedule_id":"` + foreignSchedule.ID + `"}`,
+	} {
+		out, err := handlers[tool](ctx, json.RawMessage(payload))
+		require.NoError(t, err)
+		require.Contains(t, out, "different project")
+	}
+
+	deleteOut, err := handlers["delete_schedule"](ctx, json.RawMessage(`{"schedule_id":"`+schedules[0].ID+`"}`))
+	require.NoError(t, err)
+	require.Contains(t, deleteOut, "Deleted schedule")
+	remaining, err := scheduleRepo.ListByTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.Empty(t, remaining)
+	updatedTask, err = taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.CategoryBacklog, updatedTask.Category)
+}
+
+func TestBuildChannelUtilityActionHandlersAutomationReadsRejectForeignProject(t *testing.T) {
+	ctx := context.Background()
+	handlers := buildChannelUtilityActionHandlers(channelUtilityActionHandlerOptions{ProjectID: "project-current"})
+
+	_, err := handlers["list_automations"](ctx, json.RawMessage(`{"project_id":"project-foreign"}`))
+	require.ErrorContains(t, err, `project_id "project-foreign" is outside the caller's authorized project context`)
+
+	_, err = handlers["get_automation"](ctx, json.RawMessage(`{"automation_id":"automation-1","project_id":"project-foreign"}`))
+	require.ErrorContains(t, err, `project_id "project-foreign" is outside the caller's authorized project context`)
+}
+
+func TestBuildChannelUtilityActionHandlersUpdateAutomationTemplate(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	automationRepo := repository.NewAutomationRepo(db)
+	project := &models.Project{Name: "Channel Automation Update"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	foreign := &models.Project{Name: "Foreign Channel Automation Update"}
+	require.NoError(t, projectRepo.Create(ctx, foreign))
+
+	registry := NewAutomationAdapterRegistry()
+	drafts := NewAutomationDraftService(automationRepo, registry)
+	validator := NewAutomationSaveValidator(registry, drafts)
+	compiler := NewAutomationCompiler(automationRepo, NewTaskService(taskRepo, nil, nil), taskRepo, scheduleRepo, validator)
+	graphSvc := NewAutomationGraphService(automationRepo)
+
+	candidate, err := drafts.TemplateCandidate(AutomationAdapterNativeSDLC)
+	require.NoError(t, err)
+	ApplyAutomationTemplateDefaultModel(&candidate)
+	candidate.Name = "Channel Native SDLC"
+	saved, err := compiler.Save(ctx, AutomationSaveRequest{ProjectID: project.ID, Source: "template", CreatedVia: "chat", Candidate: candidate})
+	require.NoError(t, err)
+	automationID := saved.Definition.Automation.ID
+	currentRevision := CurrentAutomationTemplateRevision(AutomationAdapterNativeSDLC)
+	require.Positive(t, currentRevision)
+	_, err = db.Exec(`UPDATE automations SET template_revision = 0 WHERE id = ? AND project_id = ?`, automationID, project.ID)
+	require.NoError(t, err)
+
+	handlers := buildChannelUtilityActionHandlers(channelUtilityActionHandlerOptions{
+		ProjectID:          project.ID,
+		AutomationGraphSvc: graphSvc,
+		AutomationDraftSvc: drafts,
+		AutomationCompiler: compiler,
+	})
+	listOut, err := handlers["list_automations"](ctx, nil)
+	require.NoError(t, err)
+	require.Contains(t, listOut, `"template_update_available":true`)
+	require.Contains(t, listOut, fmt.Sprintf(`"current_template_revision":%d`, currentRevision))
+
+	beforeGraphID := channelAutomationPublishedGraphID(t, db, automationID)
+	updateOut, err := handlers["update_automation_template"](ctx, json.RawMessage(`{"name":"Channel Native SDLC"}`))
+	require.NoError(t, err)
+	require.Contains(t, updateOut, `"applied":true`)
+	require.Contains(t, updateOut, fmt.Sprintf(`"template_revision":%d`, currentRevision))
+	afterGraphID := channelAutomationPublishedGraphID(t, db, automationID)
+	require.NotEqual(t, beforeGraphID, afterGraphID)
+
+	currentOut, err := handlers["update_automation_template"](ctx, json.RawMessage(fmt.Sprintf(`{"automation_id":%q}`, automationID)))
+	require.NoError(t, err)
+	require.Contains(t, currentOut, `"applied":false`)
+	require.Contains(t, currentOut, `"reason":"already_current"`)
+	require.Equal(t, afterGraphID, channelAutomationPublishedGraphID(t, db, automationID))
+
+	foreignCandidate := candidate
+	foreignCandidate.Name = "Foreign Channel Native SDLC"
+	foreignSaved, err := compiler.Save(ctx, AutomationSaveRequest{ProjectID: foreign.ID, Source: "template", CreatedVia: "chat", Candidate: foreignCandidate})
+	require.NoError(t, err)
+	_, err = handlers["update_automation_template"](ctx, json.RawMessage(fmt.Sprintf(`{"automation_id":%q}`, foreignSaved.Definition.Automation.ID)))
+	require.ErrorContains(t, err, "not found in current project")
+}
+
+func channelAutomationPublishedGraphID(t *testing.T, db *sql.DB, automationID string) string {
+	t.Helper()
+	var graphID string
+	require.NoError(t, db.QueryRow(`SELECT published_version_id FROM automations WHERE id = ?`, automationID).Scan(&graphID))
+	return graphID
+}
+
+func TestBuildChannelUtilityActionHandlersListSchedulesDiscovery(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	project := &models.Project{Name: "Schedule Discovery"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	other := &models.Project{Name: "Other Discovery"}
+	require.NoError(t, projectRepo.Create(ctx, other))
+
+	now := time.Now().UTC().Truncate(time.Second)
+	mkTask := func(projectID, title string) *models.Task {
+		task := &models.Task{ProjectID: projectID, Title: title, Prompt: "prompt", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
+		require.NoError(t, taskRepo.Create(ctx, task))
+		return task
+	}
+	mkSched := func(taskID string, repeat models.RepeatType, enabled bool, runAt time.Time) *models.Schedule {
+		s := &models.Schedule{TaskID: taskID, RunAt: runAt, RepeatType: repeat, RepeatInterval: 1, Enabled: enabled, ClearContextOnStart: true}
+		require.NoError(t, scheduleRepo.Create(ctx, s))
+		return s
+	}
+
+	alphaTask := mkTask(project.ID, "Alpha nightly")
+	betaTask := mkTask(project.ID, "Beta weekly")
+	foreignTask := mkTask(other.ID, "Foreign task")
+	alphaEnabled := mkSched(alphaTask.ID, models.RepeatDaily, true, now.Add(2*time.Hour))
+	alphaDisabled := mkSched(alphaTask.ID, models.RepeatHours, false, now.Add(time.Hour))
+	betaEnabled := mkSched(betaTask.ID, models.RepeatWeekly, true, now.Add(3*time.Hour))
+	foreignSched := mkSched(foreignTask.ID, models.RepeatDaily, true, now.Add(time.Hour))
+
+	handlers := buildChannelUtilityActionHandlers(channelUtilityActionHandlerOptions{ProjectID: project.ID, TaskRepo: taskRepo, ScheduleRepo: scheduleRepo})
+
+	// Project isolation: only default-project schedule IDs appear.
+	allOut, err := handlers["list_schedules"](ctx, json.RawMessage(`{}`))
+	require.NoError(t, err)
+	require.Contains(t, allOut, `"ok":true`)
+	require.Contains(t, allOut, `"total":3`)
+	require.Contains(t, allOut, alphaEnabled.ID)
+	require.Contains(t, allOut, betaEnabled.ID)
+	require.Contains(t, allOut, "Alpha nightly")
+	require.NotContains(t, allOut, foreignSched.ID)
+
+	// Enabled filter.
+	enabledOut, err := handlers["list_schedules"](ctx, json.RawMessage(`{"enabled":true}`))
+	require.NoError(t, err)
+	require.Contains(t, enabledOut, `"total":2`)
+	require.NotContains(t, enabledOut, alphaDisabled.ID)
+
+	// Task identity filter.
+	betaOut, err := handlers["list_schedules"](ctx, json.RawMessage(`{"task_id":"`+betaTask.ID+`"}`))
+	require.NoError(t, err)
+	require.Contains(t, betaOut, `"total":1`)
+	require.Contains(t, betaOut, betaEnabled.ID)
+	require.NotContains(t, betaOut, alphaEnabled.ID)
+
+	// Pagination bounds the page and reports has_more.
+	pageOut, err := handlers["list_schedules"](ctx, json.RawMessage(`{"limit":2,"offset":0}`))
+	require.NoError(t, err)
+	require.Contains(t, pageOut, `"count":2`)
+	require.Contains(t, pageOut, `"has_more":true`)
+}
+
+func TestBuildChannelUtilityActionHandlersViewPulseUsesUpcomingService(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	upcomingSvc := NewUpcomingService(repository.NewUpcomingRepo(db))
+	project := &models.Project{Name: "Channel Pulse"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	other := &models.Project{Name: "Other Channel Pulse"}
+	require.NoError(t, projectRepo.Create(ctx, other))
+
+	pending := &models.Task{ProjectID: project.ID, Title: "Channel queued", Prompt: "queued prompt", Category: models.CategoryActive, Status: models.StatusPending, Priority: 3}
+	require.NoError(t, taskRepo.Create(ctx, pending))
+	scheduledTask := &models.Task{ProjectID: project.ID, Title: "Channel scheduled", Prompt: strings.Repeat("p", 250), Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
+	require.NoError(t, taskRepo.Create(ctx, scheduledTask))
+	foreignTask := &models.Task{ProjectID: other.ID, Title: "Foreign channel scheduled", Prompt: "foreign", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 4}
+	require.NoError(t, taskRepo.Create(ctx, foreignTask))
+	now := time.Now().UTC()
+	scheduled := &models.Schedule{TaskID: scheduledTask.ID, RunAt: now.Add(-time.Hour), RepeatType: models.RepeatHours, RepeatInterval: 2, Enabled: true, ClearContextOnStart: true}
+	require.NoError(t, scheduleRepo.Create(ctx, scheduled))
+	foreignSchedule := &models.Schedule{TaskID: foreignTask.ID, RunAt: now.Add(time.Hour), RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: true, ClearContextOnStart: true}
+	require.NoError(t, scheduleRepo.Create(ctx, foreignSchedule))
+
+	handlers := buildChannelUtilityActionHandlers(channelUtilityActionHandlerOptions{ProjectID: project.ID, TaskRepo: taskRepo, ScheduleRepo: scheduleRepo, UpcomingSvc: upcomingSvc})
+	out, err := handlers["view_pulse"](ctx, json.RawMessage(`{}`))
+	require.NoError(t, err)
+	require.NotContains(t, out, foreignTask.ID)
+	require.NotContains(t, out, strings.Repeat("p", 225))
+
+	var got struct {
+		OK           bool   `json:"ok"`
+		ProjectID    string `json:"project_id"`
+		PendingTasks []struct {
+			TaskID string `json:"task_id"`
+		} `json:"pending_tasks"`
+		ScheduledTasks []struct {
+			TaskID      string `json:"task_id"`
+			ScheduleID  string `json:"schedule_id"`
+			RepeatLabel string `json:"repeat_label"`
+		} `json:"scheduled_tasks"`
+		TaskSummary struct {
+			Scheduled struct {
+				Overdue     int `json:"overdue"`
+				DueToday    int `json:"due_today"`
+				DueThisWeek int `json:"due_this_week"`
+			} `json:"scheduled"`
+		} `json:"task_summary"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &got))
+	require.True(t, got.OK)
+	require.Equal(t, project.ID, got.ProjectID)
+	require.Len(t, got.PendingTasks, 1)
+	require.Equal(t, pending.ID, got.PendingTasks[0].TaskID)
+	require.Len(t, got.ScheduledTasks, 1)
+	require.Equal(t, scheduledTask.ID, got.ScheduledTasks[0].TaskID)
+	require.Equal(t, scheduled.ID, got.ScheduledTasks[0].ScheduleID)
+	require.Equal(t, "every 2 hours", got.ScheduledTasks[0].RepeatLabel)
+	require.Equal(t, 1, got.TaskSummary.Scheduled.Overdue)
+	require.Equal(t, 1, got.TaskSummary.Scheduled.DueToday)
+	require.Equal(t, 1, got.TaskSummary.Scheduled.DueThisWeek)
+}
+
+func TestBuildChannelUtilityActionHandlersListSchedulesIncludesEmptyDaysAndNullNextRun(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	project := &models.Project{Name: "Schedule Discovery Contract"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	task := &models.Task{ProjectID: project.ID, Title: "One time", Prompt: "prompt", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	schedule := &models.Schedule{TaskID: task.ID, RunAt: time.Now().UTC().Add(time.Hour), RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: true}
+	require.NoError(t, scheduleRepo.Create(ctx, schedule))
+	_, err := db.ExecContext(ctx, `UPDATE schedules SET next_run = NULL WHERE id = ?`, schedule.ID)
+	require.NoError(t, err)
+
+	handlers := buildChannelUtilityActionHandlers(channelUtilityActionHandlerOptions{ProjectID: project.ID, TaskRepo: taskRepo, ScheduleRepo: scheduleRepo})
+	out, err := handlers["list_schedules"](ctx, json.RawMessage(`{}`))
+	require.NoError(t, err)
+
+	var result struct {
+		Schedules []map[string]any `json:"schedules"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &result))
+	require.Len(t, result.Schedules, 1)
+	days, ok := result.Schedules[0]["days"]
+	require.True(t, ok, "days must always be present")
+	require.Equal(t, "", days)
+	nextRun, ok := result.Schedules[0]["next_run"]
+	require.True(t, ok, "next_run must always be present")
+	require.Nil(t, nextRun)
+}
+
+func TestBuildChannelUtilityActionHandlersListChannelsReportsGitHubAppConnectionSafely(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	settingsRepo := repository.NewSettingsRepo(db)
+	projectRepo := repository.NewProjectRepo(db)
+	project := &models.Project{Name: "Channel GitHub App Status"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	require.NoError(t, settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModeApp))
+	require.NoError(t, settingsRepo.Set(ctx, GitHubSettingAppID, "12345"))
+	require.NoError(t, settingsRepo.Set(ctx, GitHubSettingAppSlug, "openvibely-app"))
+	require.NoError(t, settingsRepo.Set(ctx, GitHubSettingAppPrivateKey, "PRIVATE-KEY-MUST-NOT-LEAK"))
+	require.NoError(t, settingsRepo.Set(ctx, githubSettingInstallationID, "67890"))
+	require.NoError(t, settingsRepo.Set(ctx, githubSettingAccountLogin, "openvibely"))
+	require.NoError(t, settingsRepo.Set(ctx, githubSettingAccountType, "Organization"))
+
+	handlers := buildChannelUtilityActionHandlers(channelUtilityActionHandlerOptions{ProjectID: project.ID, SettingsRepo: settingsRepo})
+	out, err := handlers["list_channels"](ctx, json.RawMessage(`{}`))
+	require.NoError(t, err)
+	require.NotContains(t, out, "PRIVATE-KEY-MUST-NOT-LEAK")
+
+	var result struct {
+		GitHub struct {
+			Configured    bool   `json:"configured"`
+			Connected     bool   `json:"connected"`
+			Status        string `json:"status"`
+			AuthMode      string `json:"auth_mode"`
+			AccountLogin  string `json:"account_login"`
+			AccountType   string `json:"account_type"`
+			AppConfigured bool   `json:"app_configured"`
+			PATConfigured bool   `json:"pat_configured"`
+		} `json:"github"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &result))
+	require.True(t, result.GitHub.Configured)
+	require.True(t, result.GitHub.Connected)
+	require.Equal(t, "connected", result.GitHub.Status)
+	require.Equal(t, GitHubAuthModeApp, result.GitHub.AuthMode)
+	require.Equal(t, "openvibely", result.GitHub.AccountLogin)
+	require.Equal(t, "Organization", result.GitHub.AccountType)
+	require.True(t, result.GitHub.AppConfigured)
+	require.False(t, result.GitHub.PATConfigured)
+
+	require.NoError(t, settingsRepo.Set(ctx, githubSettingInstallationID, ""))
+	require.NoError(t, settingsRepo.Set(ctx, GitHubSettingPAT, "PAT-MUST-NOT-LEAK"))
+	out, err = handlers["list_channels"](ctx, json.RawMessage(`{}`))
+	require.NoError(t, err)
+	require.NotContains(t, out, "PAT-MUST-NOT-LEAK")
+	require.NoError(t, json.Unmarshal([]byte(out), &result))
+	require.True(t, result.GitHub.Configured)
+	require.False(t, result.GitHub.Connected)
+	require.Equal(t, "configured_not_connected", result.GitHub.Status)
+	require.Equal(t, GitHubAuthModeApp, result.GitHub.AuthMode)
+	require.True(t, result.GitHub.PATConfigured)
+}
+
+func TestChannelServiceListChannelsIncludesEmailWebhooksAndTargetsSafely(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	settingsRepo := repository.NewSettingsRepo(db)
+	projectRepo := repository.NewProjectRepo(db)
+	emailAuthRepo := repository.NewEmailAuthRepo(db)
+	webhookRepo := repository.NewWebhookRepo(db)
+	channelTargetRepo := repository.NewChannelTargetRepo(db)
+	project := &models.Project{Name: "Channel Surface Complete Status"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	require.NoError(t, settingsRepo.Set(ctx, EmailSettingProvider, EmailProviderCustom))
+	require.NoError(t, settingsRepo.Set(ctx, EmailSettingAddress, "bot@example.com"))
+	require.NoError(t, settingsRepo.Set(ctx, EmailSettingPassword, "EMAIL-PASSWORD-MUST-NOT-LEAK"))
+	require.NoError(t, settingsRepo.Set(ctx, EmailSettingIMAPHost, "imap.example.com"))
+	require.NoError(t, settingsRepo.Set(ctx, EmailSettingSMTPHost, "smtp.example.com"))
+	require.NoError(t, emailAuthRepo.Create(ctx, &models.EmailAuthorizedSender{ProjectID: project.ID, EmailAddress: "sender@example.com", DisplayName: "Sender", AddedBy: "test"}))
+	require.NoError(t, webhookRepo.Create(ctx, &models.WebhookEndpoint{ProjectID: project.ID, Name: "Deploy", Enabled: true, PathToken: "WEBHOOK-PATH-TOKEN-MUST-NOT-LEAK", Secret: "WEBHOOK-SECRET-MUST-NOT-LEAK", DefaultPriority: 2}))
+	require.NoError(t, channelTargetRepo.Upsert(ctx, models.ChannelTarget{ID: "target-1", ProjectID: project.ID, Platform: "slack", TargetKind: "channel", Name: "ops", TargetID: "RAW-TARGET-ID-MUST-NOT-LEAK", Home: true}))
+	router := NewChannelMessageRouter(channelTargetRepo, settingsRepo)
+	emailStatus := func(context.Context) EmailConnectionStatus {
+		return EmailConnectionStatus{Configured: true, Running: true, Address: "bot@example.com", Provider: EmailProviderCustom, IMAPHost: "imap.example.com", IMAPPort: 993, SMTPHost: "smtp.example.com", SMTPPort: 587}
+	}
+
+	slackSvc := NewSlackService(settingsRepo, projectRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	slackSvc.SetEmailStatusProvider(emailStatus)
+	slackSvc.SetEmailAuthRepo(emailAuthRepo)
+	slackSvc.SetWebhookRepo(webhookRepo)
+	slackSvc.SetChannelMessageRouter(router)
+	discordSvc := NewDiscordService(settingsRepo, projectRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	discordSvc.SetEmailStatusProvider(emailStatus)
+	discordSvc.SetEmailAuthRepo(emailAuthRepo)
+	discordSvc.SetWebhookRepo(webhookRepo)
+	discordSvc.SetChannelMessageRouter(router)
+	telegramSvc := &TelegramService{settingsRepo: settingsRepo, projectRepo: projectRepo}
+	telegramSvc.SetEmailStatusProvider(emailStatus)
+	telegramSvc.SetEmailAuthRepo(emailAuthRepo)
+	telegramSvc.SetWebhookRepo(webhookRepo)
+	telegramSvc.SetChannelMessageRouter(router)
+
+	for _, tc := range []struct {
+		name     string
+		handlers map[string]chatcontrol.RuntimeActionHandler
+	}{
+		{name: "slack", handlers: slackSvc.slackActionHandlers(project.ID, slackActionContext{TeamID: "T1", ChannelID: "C1", UserID: "U1"}, nil)},
+		{name: "discord", handlers: discordSvc.discordActionHandlers(project.ID, discordActionContext{ChannelID: "C1", UserID: "U1"}, nil)},
+		{name: "telegram", handlers: telegramSvc.telegramActionHandlers(project.ID, 1001, 2002, nil)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			out, err := tc.handlers["list_channels"](ctx, json.RawMessage(`{}`))
+			require.NoError(t, err)
+			for _, secret := range []string{"EMAIL-PASSWORD-MUST-NOT-LEAK", "WEBHOOK-PATH-TOKEN-MUST-NOT-LEAK", "WEBHOOK-SECRET-MUST-NOT-LEAK", "RAW-TARGET-ID-MUST-NOT-LEAK"} {
+				require.NotContains(t, out, secret)
+			}
+
+			var result struct {
+				Email struct {
+					Configured            bool   `json:"configured"`
+					Running               bool   `json:"running"`
+					Status                string `json:"status"`
+					AuthorizedSenderCount int    `json:"authorized_sender_count"`
+				} `json:"email"`
+				Webhooks struct {
+					Total      int  `json:"total"`
+					Active     int  `json:"active"`
+					Configured bool `json:"configured"`
+				} `json:"webhooks"`
+				OutboundTargets struct {
+					Total              int  `json:"total"`
+					Configured         bool `json:"configured"`
+					MessagingAvailable bool `json:"messaging_available"`
+					ByPlatform         map[string]struct {
+						Total int `json:"total"`
+						Home  int `json:"home"`
+					} `json:"by_platform"`
+				} `json:"outbound_message_targets"`
+			}
+			require.NoError(t, json.Unmarshal([]byte(out), &result))
+			require.True(t, result.Email.Configured)
+			require.True(t, result.Email.Running)
+			require.Equal(t, "running", result.Email.Status)
+			require.Equal(t, 1, result.Email.AuthorizedSenderCount)
+			require.True(t, result.Webhooks.Configured)
+			require.Equal(t, 1, result.Webhooks.Total)
+			require.Equal(t, 1, result.Webhooks.Active)
+			require.True(t, result.OutboundTargets.Configured)
+			require.True(t, result.OutboundTargets.MessagingAvailable)
+			require.Equal(t, 1, result.OutboundTargets.Total)
+			require.Equal(t, 1, result.OutboundTargets.ByPlatform["slack"].Total)
+			require.Equal(t, 1, result.OutboundTargets.ByPlatform["slack"].Home)
+		})
+	}
+}
+
+func TestChannelServiceListChannelsUsesTargetSummaryStore(t *testing.T) {
+	ctx := context.Background()
+	store := &summaryOnlyChannelTargetStore{summary: repository.ChannelTargetProjectSummary{
+		Total:      4,
+		Configured: true,
+		ByPlatform: map[string]repository.ChannelTargetPlatformSummary{
+			"slack": {Total: 2, Home: 1, Named: 1, ByKind: map[string]int{"channel": 1, "user": 1}},
+			"email": {Total: 2, Home: 0, Named: 1, ByKind: map[string]int{"email": 1, "address": 1}},
+		},
+	}}
+	handlers := buildChannelUtilityActionHandlers(channelUtilityActionHandlerOptions{
+		ProjectID:      "summary-project",
+		ChannelTargets: store,
+	})
+	out, err := handlers["list_channels"](ctx, json.RawMessage(`{}`))
+	require.NoError(t, err)
+	require.False(t, store.listCalled, "list_channels should use SummarizeByProject instead of materializing targets")
+
+	var result struct {
+		OutboundTargets struct {
+			Total      int  `json:"total"`
+			Configured bool `json:"configured"`
+			ByPlatform map[string]struct {
+				Total  int            `json:"total"`
+				Home   int            `json:"home"`
+				Named  int            `json:"named"`
+				ByKind map[string]int `json:"by_kind"`
+			} `json:"by_platform"`
+		} `json:"outbound_message_targets"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &result))
+	require.Equal(t, 4, result.OutboundTargets.Total)
+	require.True(t, result.OutboundTargets.Configured)
+	require.Equal(t, 2, result.OutboundTargets.ByPlatform["slack"].Total)
+	require.Equal(t, 1, result.OutboundTargets.ByPlatform["slack"].Home)
+	require.Equal(t, 1, result.OutboundTargets.ByPlatform["slack"].Named)
+	require.Equal(t, map[string]int{"channel": 1, "user": 1}, result.OutboundTargets.ByPlatform["slack"].ByKind)
+	require.Equal(t, 2, result.OutboundTargets.ByPlatform["email"].Total)
+	require.Equal(t, 1, result.OutboundTargets.ByPlatform["email"].Named)
+	require.Equal(t, map[string]int{"email": 1, "address": 1}, result.OutboundTargets.ByPlatform["email"].ByKind)
+
+	store.summary = repository.ChannelTargetProjectSummary{}
+	out, err = handlers["list_channels"](ctx, json.RawMessage(`{}`))
+	require.NoError(t, err)
+
+	var emptyResult struct {
+		OutboundTargets struct {
+			Configured bool                       `json:"configured"`
+			ByPlatform map[string]json.RawMessage `json:"by_platform"`
+		} `json:"outbound_message_targets"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &emptyResult))
+	require.False(t, emptyResult.OutboundTargets.Configured)
+	require.NotNil(t, emptyResult.OutboundTargets.ByPlatform)
+	require.Empty(t, emptyResult.OutboundTargets.ByPlatform)
+}
+
+type summaryOnlyChannelTargetStore struct {
+	summary    repository.ChannelTargetProjectSummary
+	listCalled bool
+}
+
+func (s *summaryOnlyChannelTargetStore) SummarizeByProject(ctx context.Context, projectID string) (repository.ChannelTargetProjectSummary, error) {
+	return s.summary, nil
+}
+
+func (s *summaryOnlyChannelTargetStore) ListByProject(ctx context.Context, projectID string) ([]models.ChannelTarget, error) {
+	s.listCalled = true
+	return nil, fmt.Errorf("ListByProject should not be called")
+}
+
+func (s *summaryOnlyChannelTargetStore) FindHome(ctx context.Context, projectID, platform string) (*models.ChannelTarget, error) {
+	return nil, nil
+}
+
+func (s *summaryOnlyChannelTargetStore) FindByName(ctx context.Context, projectID, platform, name string) (*models.ChannelTarget, error) {
+	return nil, nil
+}
+
+func (s *summaryOnlyChannelTargetStore) FindByTarget(ctx context.Context, projectID, platform, targetID, threadID string) (*models.ChannelTarget, error) {
+	return nil, nil
+}
+
+func (s *summaryOnlyChannelTargetStore) FindByTargetAndKind(ctx context.Context, projectID, platform, targetID, threadID, targetKind string) (*models.ChannelTarget, error) {
+	return nil, nil
+}
+
+func (s *summaryOnlyChannelTargetStore) RecordSend(ctx context.Context, send models.ChannelMessageSend) error {
+	return nil
 }
 
 func TestBuildChannelUtilityActionHandlersPersonalityModelAndProjectInfo(t *testing.T) {
@@ -414,20 +1646,42 @@ func TestBuildChannelUtilityActionHandlersPersonalityModelAndProjectInfo(t *test
 	projectRepo := repository.NewProjectRepo(db)
 	taskRepo := repository.NewTaskRepo(db, nil)
 	settingsRepo := repository.NewSettingsRepo(db)
+	customPersonalityRepo := repository.NewCustomPersonalityRepo(db)
 	llmConfigRepo := repository.NewLLMConfigRepo(db)
 	project := &models.Project{Name: "Info Project", Description: "Details"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	agent := &models.LLMConfig{Name: "Default Model", Provider: models.ProviderTest, Model: "test", IsDefault: true}
 	require.NoError(t, llmConfigRepo.Create(ctx, agent))
 	require.NoError(t, taskRepo.Create(ctx, &models.Task{ProjectID: project.ID, Title: "Info task", Prompt: "prompt", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2}))
+	require.NoError(t, customPersonalityRepo.Create(ctx, &models.CustomPersonality{
+		Name:         "Channel Custom",
+		Key:          "channel_custom",
+		Description:  "Custom channel personality",
+		SystemPrompt: "You are a channel custom personality with enough detail.",
+	}))
 
-	handlers := buildChannelUtilityActionHandlers(channelUtilityActionHandlerOptions{ProjectID: project.ID, TaskRepo: taskRepo, ProjectRepo: projectRepo, SettingsRepo: settingsRepo, LLMConfigRepo: llmConfigRepo})
+	handlers := buildChannelUtilityActionHandlers(channelUtilityActionHandlerOptions{ProjectID: project.ID, TaskRepo: taskRepo, ProjectRepo: projectRepo, SettingsRepo: settingsRepo, CustomPersonalityRepo: customPersonalityRepo, LLMConfigRepo: llmConfigRepo})
+	saveOut, err := handlers["save_custom_personality"](ctx, json.RawMessage(`{"mode":"create","name":"Channel Runtime Created","description":"Created from channel chat","system_prompt":"You are a channel-created custom personality with enough detail."}`))
+	require.NoError(t, err)
+	require.Contains(t, saveOut, `"ok":true`)
+	created, err := customPersonalityRepo.GetByKey(ctx, "channel_runtime_created")
+	require.NoError(t, err)
+	require.NotNil(t, created)
+	setCreatedOut, err := handlers["set_personality"](ctx, json.RawMessage(`{"personality":"channel_runtime_created"}`))
+	require.NoError(t, err)
+	require.Contains(t, setCreatedOut, "Personality changed")
 	setOut, err := handlers["set_personality"](ctx, json.RawMessage(`{"personality":"no_nonsense_pro"}`))
 	require.NoError(t, err)
 	require.Contains(t, setOut, "Personality changed")
+	customOut, err := handlers["set_personality"](ctx, json.RawMessage(`{"personality":"channel_custom"}`))
+	require.NoError(t, err)
+	require.Contains(t, customOut, "Personality changed")
+	unknownOut, err := handlers["set_personality"](ctx, json.RawMessage(`{"personality":"missing_custom"}`))
+	require.NoError(t, err)
+	require.Contains(t, unknownOut, `Unknown personality "missing_custom"`)
 	getOut, err := handlers["get_personality"](ctx, nil)
 	require.NoError(t, err)
-	require.Contains(t, getOut, "no_nonsense_pro")
+	require.Contains(t, getOut, "channel_custom")
 	modelsOut, err := handlers["list_models"](ctx, nil)
 	require.NoError(t, err)
 	require.Contains(t, modelsOut, "Default Model")
@@ -437,15 +1691,156 @@ func TestBuildChannelUtilityActionHandlersPersonalityModelAndProjectInfo(t *test
 	require.Contains(t, projectOut, "Total tasks: 1")
 }
 
-func TestBuildChannelTaskActionHandlersCreateTaskUsesSharedLogicAndOriginCallback(t *testing.T) {
+func TestBuildChannelUtilityActionHandlersModelStatusToolsUseCompactRuntimeSummaries(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	project := &models.Project{Name: "Channel Compact Project"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	_, err := db.Exec(`DELETE FROM agent_configs`)
+	require.NoError(t, err)
+
+	largeBody := strings.Repeat("large-provider-json", 4096)
+	defaultModel := &models.LLMConfig{
+		Name: "Channel Default Model", Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey,
+		Model: "channel-default-model", IsDefault: true, APIKey: "secret-key",
+		ExtraBodyJSON: largeBody, CustomAuthConfigJSON: `{"signing_secret":"secret"}`,
+		CustomAuthStateJSON: `{"token":"secret"}`, MixtureConfigJSON: `{"large":"` + largeBody + `"}`,
+	}
+	require.NoError(t, llmConfigRepo.Create(ctx, defaultModel))
+	customModel := &models.LLMConfig{
+		Name: "Channel Compact Model", Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodOAuth,
+		Model: "channel-compact-model", APIKey: "secret-key", OAuthAccessToken: "secret-token",
+		OAuthRefreshToken: "secret-refresh", OAuthClientSecret: "secret-client", BaseURL: "https://example.com/v1/",
+		ModelsURL: "https://example.com/models", OAuthAuthorizeURL: "https://example.com/auth", OAuthTokenURL: "https://example.com/token",
+		ExtraHeadersJSON: `{"secret":"header"}`, ExtraBodyJSON: largeBody,
+		CustomAuthConfigJSON: `{"signing_secret":"secret"}`, CustomAuthStateJSON: `{"token":"secret"}`,
+		MixtureConfigJSON: `{"large":"` + largeBody + `"}`, MaxWorkers: 4, WorkerTimeout: 30,
+	}
+	require.NoError(t, llmConfigRepo.Create(ctx, customModel))
+
+	handlers := buildChannelUtilityActionHandlers(channelUtilityActionHandlerOptions{
+		ProjectID: project.ID, ProjectRepo: projectRepo, SettingsRepo: settingsRepo, LLMConfigRepo: llmConfigRepo,
+	})
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	modelsOut, err := handlers["list_models"](ctx, nil)
+	require.NoError(t, err)
+	getOut, err := handlers["get_model"](ctx, json.RawMessage(`{"name":" channel compact model "}`))
+	require.NoError(t, err)
+	settingsOut, err := handlers["view_settings"](ctx, nil)
+	require.NoError(t, err)
+	counter.SetEnabled(false)
+
+	require.Contains(t, modelsOut, "Channel Default Model (default)")
+	require.Contains(t, modelsOut, "Channel Compact Model")
+	require.Contains(t, modelsOut, "max_workers: 4")
+	require.Contains(t, getOut, "Model: Channel Compact Model")
+	require.Contains(t, getOut, "Provider: openai_compatible")
+	require.Contains(t, getOut, "max_workers: 4")
+	require.Contains(t, settingsOut, "- Configured models: 2")
+	for _, out := range []string{modelsOut, getOut, settingsOut} {
+		require.NotContains(t, out, "secret")
+		require.NotContains(t, out, largeBody)
+	}
+	assertChannelModelStatusStatementsCompact(t, counter.Statements())
+}
+
+func assertChannelModelStatusStatementsCompact(t *testing.T, statements []string) {
+	t.Helper()
+	var runtimeListQueries, targetedLookupQueries int
+	for _, raw := range statements {
+		stmt := strings.ToLower(strings.Join(strings.Fields(raw), " "))
+		if !strings.Contains(stmt, " from agent_configs") {
+			continue
+		}
+		projection := strings.Split(stmt, " from agent_configs")[0]
+		for _, forbidden := range []string{"api_key", "oauth_access_token", "oauth_refresh_token", "oauth_client_secret", "oauth_authorize_url", "oauth_token_url", "ollama_base_url", "base_url", "models_url", "extra_headers_json", "extra_body_json", "custom_auth_config_json", "custom_auth_state_json", "mixture_config_json"} {
+			if strings.Contains(projection, forbidden) {
+				t.Fatalf("channel model/status query selected forbidden column %q: %s", forbidden, raw)
+			}
+		}
+		if strings.Contains(projection, "select id, name, provider, model, is_default, auth_method, max_workers, worker_timeout") && strings.Contains(stmt, "where name = ? collate nocase") {
+			targetedLookupQueries++
+			continue
+		}
+		if strings.Contains(projection, "select id, name, provider, model, is_default, auth_method, max_workers, worker_timeout") && strings.Contains(stmt, "order by is_default desc, name asc") && !strings.Contains(stmt, " where ") {
+			runtimeListQueries++
+			continue
+		}
+		if strings.Contains(projection, "select id, name, provider, model, reasoning_effort") {
+			t.Fatalf("channel model/status tool used full model list query: %s", raw)
+		}
+	}
+	if runtimeListQueries != 2 {
+		t.Fatalf("runtime list compact query count = %d, want 2; statements: %#v", runtimeListQueries, statements)
+	}
+	if targetedLookupQueries != 1 {
+		t.Fatalf("targeted lookup compact query count = %d, want 1; statements: %#v", targetedLookupQueries, statements)
+	}
+}
+
+func TestBuildChannelTaskActionHandlersCreateTaskValidatesSharedInput(t *testing.T) {
 	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	project := &models.Project{Name: "Channel Create Validation"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	handlers := buildChannelTaskActionHandlers(channelTaskActionHandlerOptions{
+		ProjectID: project.ID,
+		TaskSvc:   NewTaskService(taskRepo, nil, nil),
+	})
+
+	for _, tt := range []struct {
+		name      string
+		input     json.RawMessage
+		wantError string
+	}{
+		{name: "blank", input: nil, wantError: "create_task requires title and prompt"},
+		{name: "whitespace", input: json.RawMessage(" \n\t "), wantError: "create_task requires title and prompt"},
+		{name: "missing title", input: json.RawMessage(`{"prompt":"Do channel work"}`), wantError: "create_task requires title and prompt"},
+		{name: "missing prompt", input: json.RawMessage(`{"title":"Channel task"}`), wantError: "create_task requires title and prompt"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			out, err := handlers["create_task"](ctx, tt.input)
+			require.ErrorContains(t, err, tt.wantError)
+			require.Empty(t, out)
+			tasks, listErr := taskRepo.ListByProject(ctx, project.ID, "")
+			require.NoError(t, listErr)
+			require.Empty(t, tasks)
+		})
+	}
+
+	out, err := handlers["create_task"](ctx, json.RawMessage(`{"title":" Channel success ","prompt":"Do channel work"}`))
+	require.NoError(t, err)
+	require.Contains(t, out, "Channel success")
+	tasks, err := taskRepo.ListByProject(ctx, project.ID, "")
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
+	require.Equal(t, "Channel success", tasks[0].Title)
+	require.Equal(t, 2, tasks[0].Priority)
+}
+
+func TestBuildChannelTaskActionHandlersCreateTaskUsesSharedLogicAndOriginCallback(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
 	ctx := context.Background()
 	projectRepo := repository.NewProjectRepo(db)
 	llmConfigRepo := repository.NewLLMConfigRepo(db)
 	taskRepo := repository.NewTaskRepo(db, nil)
 	project := &models.Project{Name: "Channel Actions"}
 	require.NoError(t, projectRepo.Create(ctx, project))
-	agent := &models.LLMConfig{Name: "Default", Provider: models.ProviderTest, Model: "test", IsDefault: true}
+	largeProviderJSON := strings.Repeat("large-provider-json", 4096)
+	agent := &models.LLMConfig{
+		Name: "Default", Provider: models.ProviderTest, Model: "test", IsDefault: true,
+		APIKey: "secret-api-key", OAuthAccessToken: "secret-oauth-token", OAuthRefreshToken: "secret-refresh-token",
+		OAuthClientSecret: "secret-client-secret", BaseURL: "https://example.com/v1/", ExtraHeadersJSON: `{"X-Secret":"value"}`,
+		ExtraBodyJSON: largeProviderJSON, CustomAuthConfigJSON: `{"signing_secret":"secret"}`,
+		CustomAuthStateJSON: `{"access":"secret"}`, MixtureConfigJSON: `{"large":"` + largeProviderJSON + `"}`,
+	}
 	require.NoError(t, llmConfigRepo.Create(ctx, agent))
 	collector := newChannelActionSummaryCollector()
 	var callbackTaskIDs []string
@@ -464,7 +1859,10 @@ func TestBuildChannelTaskActionHandlersCreateTaskUsesSharedLogicAndOriginCallbac
 	payload, err := json.Marshal(TaskCreationRequest{Title: "Shared action task", Prompt: "Do shared work"})
 	require.NoError(t, err)
 
+	counter.Reset()
+	counter.SetEnabled(true)
 	summary, err := handlers["create_task"](ctx, payload)
+	counter.SetEnabled(false)
 	require.NoError(t, err)
 	require.Contains(t, summary, "Shared action task")
 	require.Contains(t, summary, "[TASK_ID:")
@@ -474,7 +1872,111 @@ func TestBuildChannelTaskActionHandlersCreateTaskUsesSharedLogicAndOriginCallbac
 	require.NotNil(t, created)
 	require.Equal(t, project.ID, created.ProjectID)
 	require.Equal(t, 2, created.Priority)
+	require.NotNil(t, created.AgentID)
+	require.Equal(t, agent.ID, *created.AgentID)
 	require.Contains(t, strings.Join(collector.createdLines, "\n"), callbackTaskIDs[0])
+	assertChannelCreateTaskUsesCompactModelSelection(t, counter.Statements())
+}
+
+func assertChannelCreateTaskUsesCompactModelSelection(t *testing.T, statements []string) {
+	t.Helper()
+	compactQueries := 0
+	for _, raw := range statements {
+		stmt := strings.ToLower(strings.Join(strings.Fields(raw), " "))
+		if !strings.Contains(stmt, " from agent_configs") {
+			continue
+		}
+		projection := strings.Split(stmt, " from agent_configs")[0]
+		for _, forbidden := range []string{"api_key", "oauth_access_token", "oauth_refresh_token", "oauth_client_id", "oauth_client_secret", "oauth_authorize_url", "oauth_token_url", "oauth_scopes", "ollama_base_url", "base_url", "transport", "preset_slug", "models_url", "auth_header_name", "auth_header_value_prefix", "extra_headers_json", "extra_body_json", "custom_auth_config_json", "custom_auth_state_json", "mixture_config_json", "max_workers", "worker_timeout"} {
+			if strings.Contains(projection, forbidden) {
+				t.Fatalf("channel create_task model query selected forbidden column %q: %s", forbidden, raw)
+			}
+		}
+		if strings.Contains(projection, "select id, name, provider, model, reasoning_effort") {
+			t.Fatalf("channel create_task used full model list query: %s", raw)
+		}
+		if projection == "select id, name, provider, model, is_default, auto_start_tasks" && strings.Contains(stmt, "order by is_default desc, name asc") {
+			compactQueries++
+		}
+	}
+	if compactQueries != 1 {
+		t.Fatalf("compact task creation model query count = %d, want 1; statements: %#v", compactQueries, statements)
+	}
+}
+
+func TestBuildChannelTaskActionHandlersEditTaskUpdatesPrimaryAgentDefinition(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	project := &models.Project{Name: "Channel Edit Primary Agent"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	modelConfig := &models.LLMConfig{Name: "Channel Model", Provider: models.ProviderTest, Model: "test"}
+	require.NoError(t, llmConfigRepo.Create(ctx, modelConfig))
+	agentRepo := repository.NewAgentRepo(db)
+	agentDef := &models.Agent{Name: "Channel Reviewer", Key: "channel_reviewer", Enabled: true, SelectableAsPrimary: true}
+	require.NoError(t, agentRepo.Create(ctx, agentDef))
+	taskSvc := NewTaskService(taskRepo, nil, nil)
+	taskSvc.SetAgentRepo(agentRepo)
+	task := &models.Task{ProjectID: project.ID, Title: "Channel edit target", Prompt: "Prompt", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2, AgentID: &modelConfig.ID}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	collector := newChannelActionSummaryCollector()
+	handlers := buildChannelTaskActionHandlers(channelTaskActionHandlerOptions{ProjectID: project.ID, TaskSvc: taskSvc, Collector: collector})
+
+	payload, err := json.Marshal(TaskEditRequest{ID: task.ID, Agent: agentDef.Name})
+	require.NoError(t, err)
+	summary, err := handlers["edit_task"](ctx, payload)
+	require.NoError(t, err)
+	require.Contains(t, summary, "Edited 1 task(s)")
+	updated, err := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.NotNil(t, updated.AgentDefinitionID)
+	require.Equal(t, agentDef.ID, *updated.AgentDefinitionID)
+	require.NotNil(t, updated.AgentID)
+	require.Equal(t, modelConfig.ID, *updated.AgentID)
+
+	clearPayload, err := json.Marshal(TaskEditRequest{ID: task.ID, ClearAgentDefinition: true})
+	require.NoError(t, err)
+	clearSummary, err := handlers["edit_task"](ctx, clearPayload)
+	require.NoError(t, err)
+	require.Contains(t, clearSummary, "Edited 1 task(s)")
+	updated, err = taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Nil(t, updated.AgentDefinitionID)
+	require.NotNil(t, updated.AgentID)
+	require.Equal(t, modelConfig.ID, *updated.AgentID)
+	require.Contains(t, strings.Join(collector.editedLines, "\n"), task.ID)
+}
+
+func TestBuildChannelTaskActionHandlersEditTaskRejectsInvalidPriority(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	project := &models.Project{Name: "Channel Edit Invalid Priority"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	taskSvc := NewTaskService(taskRepo, nil, nil)
+	task := &models.Task{ProjectID: project.ID, Title: "Channel invalid priority target", Prompt: "Prompt", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 3}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	handlers := buildChannelTaskActionHandlers(channelTaskActionHandlerOptions{ProjectID: project.ID, TaskSvc: taskSvc})
+
+	for _, priority := range []int{0, 5} {
+		t.Run(fmt.Sprintf("priority %d", priority), func(t *testing.T) {
+			payload := json.RawMessage(fmt.Sprintf(`{"id":%q,"title":"Should Not Persist","priority":%d}`, task.ID, priority))
+			summary, err := handlers["edit_task"](ctx, payload)
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "edit_task: no tasks were updated")
+			require.Contains(t, summary, "Failed to edit 1 task(s)")
+			require.Contains(t, summary, ErrInvalidTaskPriority.Error())
+
+			updated, err := taskRepo.GetByID(ctx, task.ID)
+			require.NoError(t, err)
+			require.NotNil(t, updated)
+			require.Equal(t, "Channel invalid priority target", updated.Title)
+			require.Equal(t, 3, updated.Priority)
+		})
+	}
 }
 
 func TestBuildChannelTaskActionHandlersCreateSwarmTaskUsesSharedSwarmService(t *testing.T) {
@@ -502,7 +2004,7 @@ func TestBuildChannelTaskActionHandlersCreateSwarmTaskUsesSharedSwarmService(t *
 			return nil
 		},
 	})
-	payload, err := json.Marshal(channelCreateSwarmTaskInput{Title: "Shared swarm", Prompt: "Split this across workers", ProjectID: foreignProject.ID, Category: string(models.CategoryBacklog)})
+	payload, err := json.Marshal(SwarmTaskRuntimeInput{Title: "Shared swarm", Prompt: "Split this across workers", ProjectID: foreignProject.ID, Category: string(models.CategoryBacklog)})
 	require.NoError(t, err)
 
 	summary, err := handlers["create_swarm_task"](ctx, payload)
@@ -517,6 +2019,12 @@ func TestBuildChannelTaskActionHandlersCreateSwarmTaskUsesSharedSwarmService(t *
 	require.Equal(t, project.ID, created.ProjectID)
 	require.Equal(t, models.SwarmRoleParent, created.SwarmRole)
 	require.Equal(t, models.StatusBlocked, created.Status)
+	require.Equal(t, 2, created.Priority)
+	require.Equal(t, models.TagNone, created.Tag)
+	cfg, err := models.ParseSwarmConfig(created.SwarmConfig)
+	require.NoError(t, err)
+	require.True(t, cfg.ReviewerEnabled)
+	require.True(t, cfg.MergerEnabled)
 	foreignTasks, err := taskRepo.ListByProject(ctx, foreignProject.ID, "")
 	require.NoError(t, err)
 	require.Empty(t, foreignTasks)
@@ -524,4 +2032,1006 @@ func TestBuildChannelTaskActionHandlersCreateSwarmTaskUsesSharedSwarmService(t *
 	planner, err := taskRepo.FindSwarmChildByRole(ctx, created.ID, models.SwarmRolePlanner)
 	require.NoError(t, err)
 	require.Nil(t, planner)
+}
+
+func TestBuildChannelTaskActionHandlersCreateSwarmTaskPersistsMetadata(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	directProject := &models.Project{Name: "Direct Swarm Metadata"}
+	require.NoError(t, projectRepo.Create(ctx, directProject))
+	channelProject := &models.Project{Name: "Channel Swarm Metadata"}
+	require.NoError(t, projectRepo.Create(ctx, channelProject))
+	foreignProject := &models.Project{Name: "Foreign Channel Swarm Metadata"}
+	require.NoError(t, projectRepo.Create(ctx, foreignProject))
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	modelConfig := &models.LLMConfig{Name: "Channel Swarm Model", Provider: models.ProviderTest, Model: "claude-sonnet-4-5", MaxTokens: 4096}
+	require.NoError(t, llmConfigRepo.Create(ctx, modelConfig))
+	agentRepo := repository.NewAgentRepo(db)
+	agentDef := &models.Agent{Name: "Channel Swarm Agent", Key: "channel-swarm-agent", Enabled: true, SelectableAsPrimary: true}
+	require.NoError(t, agentRepo.Create(ctx, agentDef))
+	taskSvc := NewTaskService(taskRepo, nil, nil)
+	taskSvc.SetAgentRepo(agentRepo)
+	swarmSvc := NewSwarmService(taskSvc, taskRepo, nil, nil)
+	taskSvc.SetSwarmService(swarmSvc)
+	reviewerEnabled := false
+	mergerEnabled := false
+	input := SwarmTaskRuntimeInput{
+		Title:             "Runtime metadata swarm",
+		Prompt:            "Split this channel bug",
+		Goal:              "Channel tests pass",
+		ProjectID:         foreignProject.ID,
+		Category:          string(models.CategoryBacklog),
+		Priority:          4,
+		AgentID:           modelConfig.ID,
+		Agent:             agentDef.Name,
+		Tag:               string(models.TagFeature),
+		ReviewerEnabled:   &reviewerEnabled,
+		MergerEnabled:     &mergerEnabled,
+		MergeTargetBranch: "integration/channel",
+	}
+
+	directParent, directSummary, err := ExecuteCreateSwarmTaskRuntime(ctx, CreateSwarmTaskRuntimeOptions{ProjectID: directProject.ID, Input: input, SwarmSvc: swarmSvc, TaskSvc: taskSvc})
+	require.NoError(t, err)
+	require.Contains(t, directSummary, "Created swarm task: Runtime metadata swarm")
+
+	var callbackTaskIDs []string
+	handlers := buildChannelTaskActionHandlers(channelTaskActionHandlerOptions{
+		ProjectID: channelProject.ID,
+		TaskSvc:   taskSvc,
+		SwarmSvc:  swarmSvc,
+		OnTasksCreated: func(_ context.Context, _ []TaskCreationRequest, tasks []models.Task) error {
+			for _, task := range tasks {
+				callbackTaskIDs = append(callbackTaskIDs, task.ID)
+			}
+			return nil
+		},
+	})
+	payload, err := json.Marshal(input)
+	require.NoError(t, err)
+
+	summary, err := handlers["create_swarm_task"](ctx, payload)
+	require.NoError(t, err)
+	require.Contains(t, summary, "Created swarm task: Runtime metadata swarm")
+	require.Len(t, callbackTaskIDs, 1)
+	created, err := taskRepo.GetByID(ctx, callbackTaskIDs[0])
+	require.NoError(t, err)
+	require.NotNil(t, created)
+	require.Equal(t, channelProject.ID, created.ProjectID)
+
+	type persistedSwarmMetadata struct {
+		Category          models.TaskCategory
+		Priority          int
+		Tag               models.TaskTag
+		AgentID           string
+		AgentDefinitionID string
+		MergeTargetBranch string
+		ReviewerEnabled   bool
+		MergerEnabled     bool
+		Goal              string
+	}
+	loadMetadata := func(task *models.Task) persistedSwarmMetadata {
+		t.Helper()
+		require.NotNil(t, task)
+		require.NotNil(t, task.AgentID)
+		require.NotNil(t, task.AgentDefinitionID)
+		cfg, err := models.ParseSwarmConfig(task.SwarmConfig)
+		require.NoError(t, err)
+		goal, err := repository.NewTaskGoalRepo(db).GetByTaskID(ctx, task.ID)
+		require.NoError(t, err)
+		require.NotNil(t, goal)
+		return persistedSwarmMetadata{
+			Category:          task.Category,
+			Priority:          task.Priority,
+			Tag:               task.Tag,
+			AgentID:           *task.AgentID,
+			AgentDefinitionID: *task.AgentDefinitionID,
+			MergeTargetBranch: task.MergeTargetBranch,
+			ReviewerEnabled:   cfg.ReviewerEnabled,
+			MergerEnabled:     cfg.MergerEnabled,
+			Goal:              goal.Objective,
+		}
+	}
+	require.Equal(t, loadMetadata(directParent), loadMetadata(created))
+	foreignTasks, err := taskRepo.ListByProject(ctx, foreignProject.ID, "")
+	require.NoError(t, err)
+	require.Empty(t, foreignTasks)
+}
+
+func TestChannelListAgentsResultUsesRuntimeSummariesAndPreservesOutput(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	repo := repository.NewAgentRepo(db)
+	if _, err := db.ExecContext(ctx, `DELETE FROM agents WHERE id IS NOT NULL`); err != nil {
+		t.Fatalf("clear agents: %v", err)
+	}
+
+	agents := []*models.Agent{
+		{Name: "Alpha Agent", Description: "alpha description", Model: "inherit", Skills: []models.SkillConfig{{Name: "one"}}, Enabled: true, SelectableAsPrimary: true},
+		{Name: "Bravo Agent", Description: "bravo description", Model: "gpt-5", MCPServers: []models.MCPServerConfig{{Name: "one"}, {Name: "two"}}, Enabled: true, SelectableAsPrimary: true},
+		{Name: "Archived Agent", Description: "hidden", Model: "gpt-5", GeneratedStatus: models.AgentStatusArchived, Enabled: true, SelectableAsPrimary: true},
+	}
+	for _, agent := range agents {
+		require.NoError(t, repo.Create(ctx, agent))
+	}
+
+	out := channelListAgentsResult(ctx, repo, "")
+	alphaLine := "- Alpha Agent — alpha description, 1 skills, 0 MCP servers"
+	bravoLine := "- Bravo Agent — bravo description, model: gpt-5, 0 skills, 2 MCP servers"
+	require.Contains(t, out, "Configured Agents:")
+	require.Contains(t, out, alphaLine)
+	require.Contains(t, out, bravoLine)
+	require.NotContains(t, out, "Archived Agent")
+	require.Less(t, strings.Index(out, alphaLine), strings.Index(out, bravoLine), "agents should remain ordered by name ASC")
+
+	require.Equal(t, "Agent definitions not available.", channelListAgentsResult(ctx, nil, ""))
+	require.Equal(t, "Channel unavailable.", channelListAgentsResult(ctx, nil, "Channel unavailable."))
+
+	if _, err := db.ExecContext(ctx, `DELETE FROM agents WHERE id IS NOT NULL`); err != nil {
+		t.Fatalf("clear agents for empty result: %v", err)
+	}
+	require.Equal(t, "No agents configured.", channelListAgentsResult(ctx, repo, ""))
+}
+
+type fakeProjectCloneProvider struct {
+	cloneFn func(ctx context.Context, projectID, repoURL string) (string, string, error)
+}
+
+func (f fakeProjectCloneProvider) CloneProjectRepo(ctx context.Context, projectID, repoURL string) (string, string, error) {
+	if f.cloneFn != nil {
+		return f.cloneFn(ctx, projectID, repoURL)
+	}
+	return "/tmp/openvibely-test/" + projectID, "https://github.com/acme/widgets", nil
+}
+
+func TestExecuteCreateGitHubProjectRuntimeCreatesGitHubBackedProject(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	projectSvc := NewProjectService(projectRepo)
+	modelRepo := repository.NewLLMConfigRepo(db)
+	model := &models.LLMConfig{Name: "Project Default", Provider: models.ProviderTest, Model: "test"}
+	require.NoError(t, modelRepo.Create(ctx, model))
+
+	var cloneProjectID, cloneRepoURL string
+	out, err := ExecuteCreateGitHubProjectRuntime(ctx, json.RawMessage(fmt.Sprintf(`{"name":" Runtime GitHub Project ","description":"from chat","repo_url":"https://github.com/acme/widgets","default_agent_config_id":%q,"max_workers":3}`, model.ID)), CreateGitHubProjectRuntimeOptions{
+		ProjectSvc: projectSvc,
+		GitHubSvc: fakeProjectCloneProvider{cloneFn: func(ctx context.Context, projectID, repoURL string) (string, string, error) {
+			cloneProjectID = projectID
+			cloneRepoURL = repoURL
+			return "/repos/" + projectID, "https://github.com/acme/widgets", nil
+		}},
+	})
+	require.NoError(t, err)
+
+	var resp createGitHubProjectRuntimeResponse
+	require.NoError(t, json.Unmarshal([]byte(out), &resp))
+	require.True(t, resp.OK)
+	require.NotEmpty(t, resp.ProjectID)
+	require.Equal(t, "Runtime GitHub Project", resp.Name)
+	require.Equal(t, "https://github.com/acme/widgets", resp.RepoURL)
+	require.True(t, resp.RepoPathPresent)
+	require.False(t, resp.Switched)
+	require.Equal(t, resp.ProjectID, cloneProjectID)
+	require.Equal(t, "https://github.com/acme/widgets", cloneRepoURL)
+
+	created, err := projectRepo.GetByID(ctx, resp.ProjectID)
+	require.NoError(t, err)
+	require.NotNil(t, created)
+	require.Equal(t, "Runtime GitHub Project", created.Name)
+	require.Equal(t, "from chat", created.Description)
+	require.Equal(t, "/repos/"+resp.ProjectID, created.RepoPath)
+	require.Equal(t, "https://github.com/acme/widgets", created.RepoURL)
+	require.NotNil(t, created.DefaultAgentConfigID)
+	require.Equal(t, model.ID, *created.DefaultAgentConfigID)
+	require.NotNil(t, created.MaxWorkers)
+	require.Equal(t, 3, *created.MaxWorkers)
+}
+
+func TestExecuteCreateGitHubProjectRuntimeRejectsUnsupportedWorkerLimitsBeforeSideEffects(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	projectSvc := NewProjectService(projectRepo)
+	cloneCalls := 0
+	opts := CreateGitHubProjectRuntimeOptions{
+		ProjectSvc: projectSvc,
+		GitHubSvc: fakeProjectCloneProvider{cloneFn: func(ctx context.Context, projectID, repoURL string) (string, string, error) {
+			cloneCalls++
+			return "/repos/" + projectID, repoURL, nil
+		}},
+	}
+
+	for _, tc := range []struct {
+		name       string
+		maxWorkers int
+	}{
+		{name: "negative", maxWorkers: -1},
+		{name: "zero", maxWorkers: 0},
+		{name: "above maximum", maxWorkers: 100},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			projectName := "Invalid Worker Limit " + tc.name
+			out, err := ExecuteCreateGitHubProjectRuntime(ctx, json.RawMessage(fmt.Sprintf(`{"name":%q,"repo_url":"https://github.com/acme/%s","max_workers":%d}`, projectName, tc.name, tc.maxWorkers)), opts)
+			require.NoError(t, err)
+
+			var resp createGitHubProjectRuntimeResponse
+			require.NoError(t, json.Unmarshal([]byte(out), &resp))
+			require.False(t, resp.OK)
+			require.Contains(t, resp.Error, "max_workers")
+
+			projects, err := projectRepo.List(ctx)
+			require.NoError(t, err)
+			for _, project := range projects {
+				require.NotEqual(t, projectName, project.Name)
+			}
+		})
+	}
+
+	require.Zero(t, cloneCalls, "invalid worker limits must be rejected before cloning")
+}
+
+func TestExecuteCreateGitHubProjectRuntimeRollsBackOnCloneFailure(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	projectSvc := NewProjectService(projectRepo)
+
+	out, err := ExecuteCreateGitHubProjectRuntime(ctx, json.RawMessage(`{"name":"Rollback Project","repo_url":"https://github.com/acme/fails"}`), CreateGitHubProjectRuntimeOptions{
+		ProjectSvc: projectSvc,
+		GitHubSvc: fakeProjectCloneProvider{cloneFn: func(ctx context.Context, projectID, repoURL string) (string, string, error) {
+			return "", "", fmt.Errorf("clone failed for safe test")
+		}},
+	})
+	require.NoError(t, err)
+	var resp createGitHubProjectRuntimeResponse
+	require.NoError(t, json.Unmarshal([]byte(out), &resp))
+	require.False(t, resp.OK)
+	require.Contains(t, resp.Error, "failed to clone")
+
+	projects, err := projectRepo.List(ctx)
+	require.NoError(t, err)
+	for _, p := range projects {
+		require.NotEqual(t, "Rollback Project", p.Name)
+	}
+}
+
+func TestExecuteCreateGitHubProjectRuntimeRejectsLocalPathAndCreateDirectoryInput(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectSvc := NewProjectService(repository.NewProjectRepo(db))
+	opts := CreateGitHubProjectRuntimeOptions{ProjectSvc: projectSvc, GitHubSvc: fakeProjectCloneProvider{}}
+
+	for _, tc := range []struct {
+		name    string
+		payload string
+		want    string
+	}{
+		{name: "repo_path field", payload: `{"name":"Local","repo_url":"https://github.com/acme/widgets","repo_path":"/tmp/widgets"}`, want: `repo_path`},
+		{name: "create_directory field", payload: `{"name":"Local","repo_url":"https://github.com/acme/widgets","create_directory":true}`, want: `create_directory`},
+		{name: "absolute local repo_url", payload: `{"name":"Local","repo_url":"/tmp/widgets"}`, want: `local filesystem paths`},
+		{name: "bare path repo_url", payload: `{"name":"Local","repo_url":"tmp/widgets"}`, want: `local filesystem paths`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			out, err := ExecuteCreateGitHubProjectRuntime(ctx, json.RawMessage(tc.payload), opts)
+			require.NoError(t, err)
+			var resp createGitHubProjectRuntimeResponse
+			require.NoError(t, json.Unmarshal([]byte(out), &resp))
+			require.False(t, resp.OK)
+			require.Contains(t, resp.Error, tc.want)
+		})
+	}
+}
+
+func TestExecuteCreateGitHubProjectRuntimeSwitchAfterCreateWhenSupported(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectSvc := NewProjectService(repository.NewProjectRepo(db))
+	var switchedTo string
+
+	out, err := ExecuteCreateGitHubProjectRuntime(ctx, json.RawMessage(`{"name":"Switchable","repo_url":"https://github.com/acme/switchable","switch_after_create":true}`), CreateGitHubProjectRuntimeOptions{
+		ProjectSvc: projectSvc,
+		GitHubSvc:  fakeProjectCloneProvider{},
+		SwitchProject: func(ctx context.Context, project *models.Project) error {
+			switchedTo = project.ID
+			return nil
+		},
+	})
+	require.NoError(t, err)
+	var resp createGitHubProjectRuntimeResponse
+	require.NoError(t, json.Unmarshal([]byte(out), &resp))
+	require.True(t, resp.OK)
+	require.True(t, resp.Switched)
+	require.Equal(t, resp.ProjectID, switchedTo)
+}
+
+func TestSlackTelegramDiscordRuntimesCreateGitHubProject(t *testing.T) {
+	ctx := context.Background()
+
+	tests := []struct {
+		name       string
+		repoSuffix string
+		runtime    func(projectID string, projectRepo *repository.ProjectRepo, projectSvc *ProjectService, githubSvc GitHubProjectCloneProvider) *llmcontracts.RuntimeTools
+	}{
+		{
+			name:       "Slack",
+			repoSuffix: "slack-runtime",
+			runtime: func(projectID string, projectRepo *repository.ProjectRepo, projectSvc *ProjectService, githubSvc GitHubProjectCloneProvider) *llmcontracts.RuntimeTools {
+				svc := &SlackService{projectRepo: projectRepo, userProjects: map[string]string{}}
+				svc.SetProjectCreationServices(projectSvc, githubSvc, nil, nil)
+				return svc.buildSlackActionToolRuntime(projectID, slackActionContext{TeamID: "T1", UserID: "U1"}, nil)
+			},
+		},
+		{
+			name:       "Telegram",
+			repoSuffix: "telegram-runtime",
+			runtime: func(projectID string, projectRepo *repository.ProjectRepo, projectSvc *ProjectService, githubSvc GitHubProjectCloneProvider) *llmcontracts.RuntimeTools {
+				svc := &TelegramService{projectRepo: projectRepo, userProjects: map[int64]string{}, userProjectVersions: map[int64]uint64{}}
+				svc.SetProjectCreationServices(projectSvc, githubSvc, nil, nil)
+				return svc.buildTelegramActionToolRuntime(projectID, 12345, 67890, nil)
+			},
+		},
+		{
+			name:       "Discord",
+			repoSuffix: "discord-runtime",
+			runtime: func(projectID string, projectRepo *repository.ProjectRepo, projectSvc *ProjectService, githubSvc GitHubProjectCloneProvider) *llmcontracts.RuntimeTools {
+				svc := &DiscordService{projectRepo: projectRepo, userProjects: map[string]string{}}
+				svc.SetProjectCreationServices(projectSvc, githubSvc, nil, nil)
+				return svc.buildDiscordActionToolRuntime(projectID, discordActionContext{ChannelID: "C1", UserID: "U1"}, nil)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := testutil.NewTestDB(t)
+			projectRepo := repository.NewProjectRepo(db)
+			projectSvc := NewProjectService(projectRepo)
+			current := &models.Project{Name: tt.name + " Current Project"}
+			require.NoError(t, projectRepo.Create(ctx, current))
+
+			normalizedURL := "https://github.com/acme/" + tt.repoSuffix
+			cloneSvc := fakeProjectCloneProvider{cloneFn: func(ctx context.Context, projectID, repoURL string) (string, string, error) {
+				require.Equal(t, normalizedURL, repoURL)
+				return "/repos/" + projectID, normalizedURL, nil
+			}}
+			rt := tt.runtime(current.ID, projectRepo, projectSvc, cloneSvc)
+			require.NotNil(t, rt)
+
+			payload := json.RawMessage(fmt.Sprintf(`{"name":%q,"repo_url":%q,"switch_after_create":true}`, tt.name+" Created Project", normalizedURL))
+			out, handled, isErr, err := rt.Executor(ctx, "create_project", payload)
+			require.NoError(t, err)
+			require.True(t, handled)
+			require.False(t, isErr, out)
+
+			var resp createGitHubProjectRuntimeResponse
+			require.NoError(t, json.Unmarshal([]byte(out), &resp))
+			require.True(t, resp.OK, resp.Error)
+			require.NotEmpty(t, resp.ProjectID)
+			require.Equal(t, tt.name+" Created Project", resp.Name)
+			require.Equal(t, normalizedURL, resp.RepoURL)
+			require.True(t, resp.RepoPathPresent)
+			require.True(t, resp.Switched)
+
+			created, err := projectRepo.GetByID(ctx, resp.ProjectID)
+			require.NoError(t, err)
+			require.NotNil(t, created)
+			require.Equal(t, "/repos/"+resp.ProjectID, created.RepoPath)
+			require.Equal(t, normalizedURL, created.RepoURL)
+		})
+	}
+}
+
+func TestExecuteUpdateProjectSettingsRuntimeUpdatesAndClearsDefaults(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	projectSvc := NewProjectService(projectRepo)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+
+	projectLimit := 1
+	project := &models.Project{Name: "Runtime Settings Project", Description: "old", MaxWorkers: &projectLimit}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	modelA := &models.LLMConfig{Name: "Runtime Model A", Provider: models.ProviderTest, Model: "test-a"}
+	require.NoError(t, llmConfigRepo.Create(ctx, modelA))
+	modelB := &models.LLMConfig{Name: "Runtime Model B", Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-test"}
+	require.NoError(t, llmConfigRepo.Create(ctx, modelB))
+
+	dispatchCalls := 0
+	out, err := ExecuteUpdateProjectSettingsRuntime(ctx, UpdateProjectSettingsRuntimeOptions{
+		ProjectID:          project.ID,
+		Input:              json.RawMessage(`{"project_id":"` + project.ID + `","project_name":"Runtime Settings Project","new_name":"Renamed Runtime Project","description":"updated","default_model":"runtime model b","max_workers":2}`),
+		ProjectSvc:         projectSvc,
+		ProjectRepo:        projectRepo,
+		LLMConfigRepo:      llmConfigRepo,
+		DispatchQueuedWork: func() { dispatchCalls++ },
+	})
+	require.NoError(t, err)
+	var resp updateProjectSettingsRuntimeResponse
+	require.NoError(t, json.Unmarshal([]byte(out), &resp))
+	require.True(t, resp.OK, resp.Error)
+	require.Equal(t, project.ID, resp.ProjectID)
+	require.Equal(t, "Renamed Runtime Project", resp.Name)
+	require.True(t, resp.DefaultModel.Set)
+	require.Equal(t, modelB.ID, resp.DefaultModel.ModelID)
+	require.True(t, resp.WorkerLimit.Set)
+	require.Equal(t, 2, resp.WorkerLimit.MaxWorkers)
+	require.Equal(t, 1, dispatchCalls, "increasing finite max_workers should dispatch queued work")
+
+	updated, err := projectRepo.GetByID(ctx, project.ID)
+	require.NoError(t, err)
+	require.NotNil(t, updated.DefaultAgentConfigID)
+	require.Equal(t, modelB.ID, *updated.DefaultAgentConfigID)
+	require.NotNil(t, updated.MaxWorkers)
+	require.Equal(t, 2, *updated.MaxWorkers)
+	require.Equal(t, "Renamed Runtime Project", updated.Name)
+	require.Equal(t, "updated", updated.Description)
+
+	out, err = ExecuteUpdateProjectSettingsRuntime(ctx, UpdateProjectSettingsRuntimeOptions{
+		ProjectID:          project.ID,
+		Input:              json.RawMessage(`{"clear_default_model":true,"max_workers":0}`),
+		ProjectSvc:         projectSvc,
+		ProjectRepo:        projectRepo,
+		LLMConfigRepo:      llmConfigRepo,
+		DispatchQueuedWork: func() { dispatchCalls++ },
+	})
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal([]byte(out), &resp))
+	require.True(t, resp.OK, resp.Error)
+	require.False(t, resp.DefaultModel.Set)
+	require.False(t, resp.WorkerLimit.Set)
+	require.Equal(t, 2, dispatchCalls, "clearing finite max_workers should dispatch queued work")
+
+	updated, err = projectRepo.GetByID(ctx, project.ID)
+	require.NoError(t, err)
+	require.Nil(t, updated.DefaultAgentConfigID)
+	require.Nil(t, updated.MaxWorkers)
+}
+
+func TestExecuteUpdateProjectSettingsRuntimeRejectsInvalidInputsWithoutPartialUpdate(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	projectSvc := NewProjectService(projectRepo)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+
+	limit := 2
+	project := &models.Project{Name: "No Partial Project", Description: "keep", MaxWorkers: &limit, RepoPath: t.TempDir()}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	model := &models.LLMConfig{Name: "Safe Model", Provider: models.ProviderTest, Model: "test"}
+	require.NoError(t, llmConfigRepo.Create(ctx, model))
+	project.DefaultAgentConfigID = &model.ID
+	require.NoError(t, projectSvc.Update(ctx, project))
+
+	run := func(input string) updateProjectSettingsRuntimeResponse {
+		out, err := ExecuteUpdateProjectSettingsRuntime(ctx, UpdateProjectSettingsRuntimeOptions{
+			ProjectID:     project.ID,
+			Input:         json.RawMessage(input),
+			ProjectSvc:    projectSvc,
+			ProjectRepo:   projectRepo,
+			LLMConfigRepo: llmConfigRepo,
+		})
+		require.NoError(t, err)
+		var resp updateProjectSettingsRuntimeResponse
+		require.NoError(t, json.Unmarshal([]byte(out), &resp))
+		return resp
+	}
+
+	for _, input := range []string{
+		`{"default_model":"missing","max_workers":3}`,
+		`{"project_id":"different-project","max_workers":3}`,
+		`{"max_workers":-1}`,
+		`{"max_workers":11}`,
+		`{"repo_path":"/tmp/other","max_workers":3}`,
+		`{"clear_default_model":true,"default_model":"Safe Model"}`,
+	} {
+		resp := run(input)
+		require.False(t, resp.OK, input)
+		updated, err := projectRepo.GetByID(ctx, project.ID)
+		require.NoError(t, err)
+		require.Equal(t, "No Partial Project", updated.Name)
+		require.Equal(t, "keep", updated.Description)
+		require.NotNil(t, updated.DefaultAgentConfigID)
+		require.Equal(t, model.ID, *updated.DefaultAgentConfigID)
+		require.NotNil(t, updated.MaxWorkers)
+		require.Equal(t, 2, *updated.MaxWorkers)
+		require.Equal(t, project.RepoPath, updated.RepoPath)
+	}
+}
+
+func TestExecuteUpdateProjectSettingsRuntimeRejectsAmbiguousModelName(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	projectSvc := NewProjectService(projectRepo)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	project := &models.Project{Name: "Ambiguous Model Project"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	_, err := db.ExecContext(ctx, `INSERT INTO agent_configs (id, name, provider, model, is_default, auth_method) VALUES
+		('ambiguous-model-a', 'Ambiguous Runtime Model', 'test', 'test-a', 0, 'api_key'),
+		('ambiguous-model-b', 'ambiguous runtime model', 'test', 'test-b', 0, 'api_key')`)
+	require.NoError(t, err)
+
+	out, err := ExecuteUpdateProjectSettingsRuntime(ctx, UpdateProjectSettingsRuntimeOptions{
+		ProjectID:     project.ID,
+		Input:         json.RawMessage(`{"default_model":"AMBIGUOUS RUNTIME MODEL"}`),
+		ProjectSvc:    projectSvc,
+		ProjectRepo:   projectRepo,
+		LLMConfigRepo: llmConfigRepo,
+	})
+	require.NoError(t, err)
+	var resp updateProjectSettingsRuntimeResponse
+	require.NoError(t, json.Unmarshal([]byte(out), &resp))
+	require.False(t, resp.OK)
+	require.Contains(t, resp.Error, "ambiguous")
+
+	updated, err := projectRepo.GetByID(ctx, project.ID)
+	require.NoError(t, err)
+	require.Nil(t, updated.DefaultAgentConfigID)
+}
+
+func TestBuildChannelProjectActionHandlersUpdateProjectSettings(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	projectSvc := NewProjectService(projectRepo)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	project := &models.Project{Name: "Channel Settings Project"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	model := &models.LLMConfig{Name: "Channel Settings Model", Provider: models.ProviderTest, Model: "test"}
+	require.NoError(t, llmConfigRepo.Create(ctx, model))
+
+	handlers := buildChannelProjectActionHandlers(channelProjectActionHandlerOptions{
+		ProjectID: project.ID, ProjectRepo: projectRepo, ProjectSvc: projectSvc, LLMConfigRepo: llmConfigRepo,
+	})
+	out, err := handlers["update_project_settings"](ctx, json.RawMessage(`{"default_model_id":"`+model.ID+`","max_workers":1}`))
+	require.NoError(t, err)
+	var resp updateProjectSettingsRuntimeResponse
+	require.NoError(t, json.Unmarshal([]byte(out), &resp))
+	require.True(t, resp.OK, resp.Error)
+	require.Equal(t, model.ID, resp.DefaultModel.ModelID)
+	require.True(t, resp.WorkerLimit.Set)
+}
+
+func TestCreateAgentRuntimeCreatesAgentAndRejectsUnsafeInputs(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	agentRepo := repository.NewAgentRepo(db)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	projectRepo := repository.NewProjectRepo(db)
+	project := &models.Project{Name: "Runtime Agent Service Project"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+
+	out, agent, err := ExecuteCreateAgentRuntime(ctx, CreateAgentRuntimeOptions{
+		ProjectID:     project.ID,
+		AgentRepo:     agentRepo,
+		LLMConfigRepo: llmConfigRepo,
+		ProjectRepo:   projectRepo,
+		Input: CreateAgentRuntimeInput{
+			Name:         "Docs Reviewer",
+			Description:  "Reviews docs only.",
+			SystemPrompt: "Review documentation changes only.",
+			Model:        "inherit",
+			Tools:        []string{"Read", "Grep", "read"},
+			ScopedFiles:  []models.ScopedFilesConfig{{Directory: "docs", Permissions: []string{"read", "write", "read"}}},
+			Scope:        "project",
+		},
+	})
+	require.NoError(t, err, out)
+	require.NotNil(t, agent)
+	require.Contains(t, out, `"ok":true`)
+	require.Equal(t, project.ID, agent.ProjectID)
+	require.Equal(t, models.AgentScopeProject, agent.Scope)
+	require.True(t, agent.Enabled)
+	require.True(t, agent.SelectableAsPrimary)
+	require.Equal(t, []string{"Read", "Grep", models.AgentToolScopedFiles}, agent.Tools)
+	require.Equal(t, []models.ScopedFilesConfig{{Directory: "docs", Permissions: []string{"read", "write"}}}, agent.ToolConfig.ScopedFiles)
+
+	stored, err := agentRepo.GetUniqueSelectableByName(ctx, "Docs Reviewer")
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+
+	for _, tc := range []struct {
+		name      string
+		input     CreateAgentRuntimeInput
+		wantError string
+	}{
+		{name: "duplicate selectable name", input: CreateAgentRuntimeInput{Name: " docs reviewer ", SystemPrompt: "duplicate"}, wantError: "enabled selectable primary agent name already exists"},
+		{name: "unknown tool", input: CreateAgentRuntimeInput{Name: "Tool Bad", SystemPrompt: "bad", Tools: []string{"Read", "RootShell"}}, wantError: `unknown tool "RootShell"`},
+		{name: "invalid scoped file directory", input: CreateAgentRuntimeInput{Name: "Scoped Bad", SystemPrompt: "bad", ScopedFiles: []models.ScopedFilesConfig{{Directory: "../secrets", Permissions: []string{"read"}}}}, wantError: "scoped file directory must stay inside the project"},
+		{name: "invalid scoped file permission", input: CreateAgentRuntimeInput{Name: "Perm Bad", SystemPrompt: "bad", ScopedFiles: []models.ScopedFilesConfig{{Directory: "docs", Permissions: []string{"admin"}}}}, wantError: `unknown scoped file permission "admin"`},
+		{name: "foreign project id", input: CreateAgentRuntimeInput{Name: "Foreign", SystemPrompt: "bad", Scope: "project", ProjectID: "other-project"}, wantError: "project_id must match the current project context"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, created, err := ExecuteCreateAgentRuntime(ctx, CreateAgentRuntimeOptions{ProjectID: project.ID, AgentRepo: agentRepo, LLMConfigRepo: llmConfigRepo, ProjectRepo: projectRepo, Input: tc.input})
+			require.Error(t, err)
+			require.Nil(t, created)
+			require.Contains(t, err.Error(), tc.wantError)
+			matches, getErr := agentRepo.ListByName(ctx, tc.input.Name)
+			require.NoError(t, getErr)
+			if tc.name == "duplicate selectable name" {
+				require.Len(t, matches, 1)
+			} else {
+				require.Empty(t, matches)
+			}
+		})
+	}
+
+	_, decodeErr := DecodeCreateAgentRuntimeInput(json.RawMessage(`{"name":"Unsafe","system_prompt":"x","mcp_servers":[{"env":{"API_KEY":"secret"}}]}`))
+	require.Error(t, decodeErr)
+	require.Contains(t, decodeErr.Error(), `create_agent does not support "mcp_servers"`)
+	_, decodeErr = DecodeCreateAgentRuntimeInput(json.RawMessage(`{"name":"Unsafe","system_prompt":"x","plugins":["github@marketplace"]}`))
+	require.Error(t, decodeErr)
+	require.Contains(t, decodeErr.Error(), `create_agent does not support "plugins"`)
+	_, decodeErr = DecodeCreateAgentRuntimeInput(json.RawMessage(`{"id":"protected","name":"Unsafe","system_prompt":"x"}`))
+	require.Error(t, decodeErr)
+	require.Contains(t, decodeErr.Error(), `create_agent does not support "id"`)
+}
+
+func TestUpdateAgentRuntimePatchesSafeFieldsAndPreservesOwnership(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	agentRepo := repository.NewAgentRepo(db)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	project := &models.Project{Name: "Runtime Agent Update Project"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	model := &models.LLMConfig{Name: "Specific Runtime Model", Provider: models.ProviderTest, Model: "specific-model"}
+	require.NoError(t, llmConfigRepo.Create(ctx, model))
+
+	agent := &models.Agent{
+		Name:                "Docs Reviewer",
+		Description:         "Old description",
+		SystemPrompt:        "Old prompt",
+		Model:               "specific-model",
+		Tools:               []string{"Read", "Bash", "Grep", models.AgentToolScopedFiles},
+		ToolConfig:          models.AgentToolConfig{ScopedFiles: []models.ScopedFilesConfig{{Directory: "docs", Permissions: []string{"read", "write"}}}},
+		Plugins:             []string{"github@marketplace"},
+		MCPServers:          []models.MCPServerConfig{{Name: "secret-server", Env: map[string]string{"API_KEY": "secret"}, Headers: map[string]string{"Authorization": "Bearer secret"}}},
+		Skills:              []models.SkillConfig{{Name: "owned", Content: "preserve"}},
+		Key:                 "docs_reviewer",
+		Scope:               models.AgentScopeProject,
+		ProjectID:           project.ID,
+		SelectableAsPrimary: true,
+		Enabled:             true,
+		CreatedBy:           models.AgentCreatedByUser,
+		GeneratedStatus:     models.AgentStatusUserEdited,
+	}
+	require.NoError(t, agentRepo.Create(ctx, agent))
+	task := &models.Task{ProjectID: project.ID, Title: "Historical Task", Prompt: "Use existing agent", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2, AgentDefinitionID: &agent.ID}
+	require.NoError(t, taskRepo.Create(ctx, task))
+
+	out, updated, err := ExecuteUpdateAgentRuntime(ctx, UpdateAgentRuntimeOptions{
+		ProjectID:     project.ID,
+		AgentRepo:     agentRepo,
+		LLMConfigRepo: llmConfigRepo,
+		ProjectRepo:   projectRepo,
+		Input: UpdateAgentRuntimeInput{
+			AgentName:           "Docs Reviewer",
+			Description:         ptrString("New description"),
+			SystemPrompt:        ptrString("New prompt"),
+			Model:               ptrString("inherit"),
+			Tools:               &[]string{"Read", "Grep"},
+			ScopedFiles:         &[]models.ScopedFilesConfig{{Directory: "src/docs", Permissions: []string{"read"}}},
+			Enabled:             ptrBool(false),
+			SelectableAsPrimary: ptrBool(false),
+		},
+	})
+	require.NoError(t, err, out)
+	require.NotNil(t, updated)
+	require.Contains(t, out, `"ok":true`)
+	require.ElementsMatch(t, []string{"description", "system_prompt", "model", "tools", "scoped_files", "enabled", "selectable_as_primary"}, decodeUpdateAgentChangedFields(t, out))
+
+	stored, err := agentRepo.GetByID(ctx, agent.ID)
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	require.Equal(t, "Docs Reviewer", stored.Name)
+	require.Equal(t, "New description", stored.Description)
+	require.Equal(t, "New prompt", stored.SystemPrompt)
+	require.Equal(t, "inherit", stored.Model)
+	require.Equal(t, []string{"Read", "Grep", models.AgentToolScopedFiles}, stored.Tools)
+	require.Equal(t, []models.ScopedFilesConfig{{Directory: "src/docs", Permissions: []string{"read"}}}, stored.ToolConfig.ScopedFiles)
+	require.False(t, stored.Enabled)
+	require.False(t, stored.SelectableAsPrimary)
+	require.Equal(t, models.AgentScopeProject, stored.Scope)
+	require.Equal(t, project.ID, stored.ProjectID)
+	require.Equal(t, []string{"github@marketplace"}, stored.Plugins)
+	require.Equal(t, "secret", stored.MCPServers[0].Env["API_KEY"])
+	require.Equal(t, []models.SkillConfig{{Name: "owned", Content: "preserve"}}, stored.Skills)
+
+	out, updated, err = ExecuteUpdateAgentRuntime(ctx, UpdateAgentRuntimeOptions{
+		ProjectID:     project.ID,
+		AgentRepo:     agentRepo,
+		LLMConfigRepo: llmConfigRepo,
+		ProjectRepo:   projectRepo,
+		Input:         UpdateAgentRuntimeInput{Key: "docs_reviewer", Description: ptrString("Updated by key")},
+	})
+	require.NoError(t, err, out)
+	require.NotNil(t, updated)
+	require.Equal(t, "Updated by key", updated.Description)
+
+	selectable, err := agentRepo.ListSelectableForProject(ctx, project.ID, 10)
+	require.NoError(t, err)
+	require.Empty(t, selectable)
+	storedTask, err := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.NotNil(t, storedTask.AgentDefinitionID)
+	require.Equal(t, agent.ID, *storedTask.AgentDefinitionID)
+}
+
+func TestUpdateAgentRuntimeRejectsUnsafeTargetsAndInputsWithoutPartialSave(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	agentRepo := repository.NewAgentRepo(db)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	projectRepo := repository.NewProjectRepo(db)
+	project := &models.Project{Name: "Runtime Agent Reject Project"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	foreign := &models.Project{Name: "Foreign Runtime Agent Project"}
+	require.NoError(t, projectRepo.Create(ctx, foreign))
+
+	base := &models.Agent{Name: "Safe Agent", Description: "original", SystemPrompt: "original prompt", Model: "inherit", Tools: []string{"Read", "Bash"}, Scope: models.AgentScopeProject, ProjectID: project.ID, Enabled: true, SelectableAsPrimary: true, GeneratedStatus: models.AgentStatusUserEdited}
+	require.NoError(t, agentRepo.Create(ctx, base))
+	duplicate := &models.Agent{Name: "Taken Name", SystemPrompt: "duplicate", Model: "inherit", Tools: []string{"Read"}, Scope: models.AgentScopeProject, ProjectID: project.ID, Enabled: true, SelectableAsPrimary: true, GeneratedStatus: models.AgentStatusUserEdited}
+	require.NoError(t, agentRepo.Create(ctx, duplicate))
+	protected := &models.Agent{Name: "System: Goal Agent", Key: models.AgentSystemKindGoal, SystemKind: models.AgentSystemKindGoal, SystemPrompt: "protected", Model: "inherit", Tools: []string{"Read"}, Scope: models.AgentScopeGlobal, Enabled: true, SelectableAsPrimary: false, GeneratedStatus: models.AgentStatusProtected}
+	require.NoError(t, agentRepo.Create(ctx, protected))
+	archived := &models.Agent{Name: "Archived Agent", SystemPrompt: "archived", Model: "inherit", Tools: []string{"Read"}, Scope: models.AgentScopeGlobal, Enabled: false, SelectableAsPrimary: false, GeneratedStatus: models.AgentStatusArchived}
+	require.NoError(t, agentRepo.Create(ctx, archived))
+	foreignAgent := &models.Agent{Name: "Foreign Agent", SystemPrompt: "foreign", Model: "inherit", Tools: []string{"Read"}, Scope: models.AgentScopeProject, ProjectID: foreign.ID, Enabled: true, SelectableAsPrimary: true, GeneratedStatus: models.AgentStatusUserEdited}
+	require.NoError(t, agentRepo.Create(ctx, foreignAgent))
+	ambiguousOne := &models.Agent{Name: "Ambiguous Agent", SystemPrompt: "one", Model: "inherit", Tools: []string{"Read"}, Scope: models.AgentScopeGlobal, Enabled: false, SelectableAsPrimary: false, GeneratedStatus: models.AgentStatusUserEdited}
+	require.NoError(t, agentRepo.Create(ctx, ambiguousOne))
+	ambiguousTwo := &models.Agent{Name: "Ambiguous Agent", SystemPrompt: "two", Model: "inherit", Tools: []string{"Read"}, Scope: models.AgentScopeGlobal, Enabled: false, SelectableAsPrimary: false, GeneratedStatus: models.AgentStatusUserEdited}
+	require.NoError(t, agentRepo.Create(ctx, ambiguousTwo))
+
+	for _, tc := range []struct {
+		name      string
+		input     UpdateAgentRuntimeInput
+		wantError string
+	}{
+		{name: "missing target", input: UpdateAgentRuntimeInput{Description: ptrString("bad")}, wantError: "requires agent_id, agent_name, or key"},
+		{name: "ambiguous selector fields", input: UpdateAgentRuntimeInput{AgentID: base.ID, Key: "safe"}, wantError: "only one target selector"},
+		{name: "ambiguous name", input: UpdateAgentRuntimeInput{AgentName: "Ambiguous Agent", Description: ptrString("bad")}, wantError: `agent name "Ambiguous Agent" is ambiguous`},
+		{name: "unknown tool", input: UpdateAgentRuntimeInput{AgentID: base.ID, Tools: &[]string{"Read", "RootShell"}}, wantError: `unknown tool "RootShell"`},
+		{name: "invalid scoped directory", input: UpdateAgentRuntimeInput{AgentID: base.ID, ScopedFiles: &[]models.ScopedFilesConfig{{Directory: "../secrets", Permissions: []string{"read"}}}}, wantError: "scoped file directory must stay inside the project"},
+		{name: "duplicate selectable name", input: UpdateAgentRuntimeInput{AgentID: base.ID, Name: ptrString("Taken Name")}, wantError: "enabled selectable primary agent name already exists"},
+		{name: "protected", input: UpdateAgentRuntimeInput{AgentID: protected.ID, Description: ptrString("bad")}, wantError: "protected system agents cannot be updated"},
+		{name: "archived", input: UpdateAgentRuntimeInput{AgentID: archived.ID, Description: ptrString("bad")}, wantError: "archived agents cannot be updated"},
+		{name: "cross project", input: UpdateAgentRuntimeInput{AgentID: foreignAgent.ID, Description: ptrString("bad")}, wantError: "belongs to a different project"},
+		{name: "foreign project assertion", input: UpdateAgentRuntimeInput{AgentID: base.ID, ProjectID: foreign.ID, Description: ptrString("bad")}, wantError: "project_id must match"},
+		{name: "blank system prompt", input: UpdateAgentRuntimeInput{AgentID: base.ID, SystemPrompt: ptrString("  ")}, wantError: "system_prompt cannot be blank"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, updated, err := ExecuteUpdateAgentRuntime(ctx, UpdateAgentRuntimeOptions{ProjectID: project.ID, AgentRepo: agentRepo, LLMConfigRepo: llmConfigRepo, ProjectRepo: projectRepo, Input: tc.input})
+			require.Error(t, err)
+			require.Nil(t, updated)
+			require.Contains(t, err.Error(), tc.wantError)
+			stored, getErr := agentRepo.GetByID(ctx, base.ID)
+			require.NoError(t, getErr)
+			require.Equal(t, "Safe Agent", stored.Name)
+			require.Equal(t, "original", stored.Description)
+			require.Equal(t, "original prompt", stored.SystemPrompt)
+			require.Equal(t, []string{"Read", "Bash"}, stored.Tools)
+		})
+	}
+
+	for _, raw := range []string{
+		`{"agent_id":"` + base.ID + `","mcp_servers":[{"env":{"API_KEY":"secret"}}]}`,
+		`{"agent_id":"` + base.ID + `","plugins":["github@marketplace"]}`,
+		`{"agent_id":"` + base.ID + `","skills":[{"content":"mutate"}]}`,
+		`{"agent_id":"` + base.ID + `","lifecycle_hooks":[{"slot":"after_complete"}]}`,
+		`{"agent_id":"` + base.ID + `","delete":true}`,
+		`{"agent_id":"` + base.ID + `","api_key":"secret"}`,
+		`{"agent_id":"` + base.ID + `","oauth_token":"secret"}`,
+	} {
+		_, err := DecodeUpdateAgentRuntimeInput(json.RawMessage(raw))
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "update_agent does not support")
+	}
+
+	updateHandler := buildChannelUtilityActionHandlers(channelUtilityActionHandlerOptions{ProjectID: project.ID, AgentRepo: agentRepo, LLMConfigRepo: llmConfigRepo, ProjectRepo: projectRepo})["update_agent"]
+	require.NotNil(t, updateHandler)
+	for _, raw := range []string{
+		`{"agent_id":"` + base.ID + `","scoped_files":[{"directory":"docs","permissions":["read"],"api_key":"secret"}]}`,
+		`{"agent_id":"` + base.ID + `","scoped_files":[{"directory":"docs","permissions":["read"],"plugins":["github@marketplace"]}]}`,
+		`{"agent_id":"` + base.ID + `","scoped_files":[{"directory":"docs","permissions":["read"],"skills":[{"content":"mutate"}]}]}`,
+		`{"agent_id":"` + base.ID + `","scoped_files":[{"directory":"docs","permissions":["read"],"lifecycle_hooks":[{"slot":"after_complete"}]}]}`,
+		`{"agent_id":"` + base.ID + `","scoped_files":[{"directory":"docs","permissions":["read"],"delete":true}]}`,
+	} {
+		_, err := updateHandler(ctx, json.RawMessage(raw))
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "update_agent scoped_files[0] does not support")
+		stored, getErr := agentRepo.GetByID(ctx, base.ID)
+		require.NoError(t, getErr)
+		require.Equal(t, []string{"Read", "Bash"}, stored.Tools)
+		require.Empty(t, stored.ToolConfig.ScopedFiles)
+	}
+}
+
+func ptrString(v string) *string { return &v }
+
+func ptrBool(v bool) *bool { return &v }
+
+func decodeUpdateAgentChangedFields(t *testing.T, out string) []string {
+	t.Helper()
+	var resp updateAgentRuntimeResponse
+	require.NoError(t, json.Unmarshal([]byte(out), &resp))
+	return resp.ChangedFields
+}
+
+func TestChannelUtilityCreateAgentRuntimeAndCompactListAgents(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	agentRepo := repository.NewAgentRepo(db)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	projectRepo := repository.NewProjectRepo(db)
+	project := &models.Project{Name: "Channel Runtime Agent Project"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	handlers := buildChannelUtilityActionHandlers(channelUtilityActionHandlerOptions{ProjectID: project.ID, AgentRepo: agentRepo, LLMConfigRepo: llmConfigRepo, ProjectRepo: projectRepo})
+
+	createHandler := handlers["create_agent"]
+	require.NotNil(t, createHandler)
+	out, err := createHandler(ctx, json.RawMessage(`{"name":"Channel Reuser","description":"Reusable from channel.","system_prompt":"Act as a reusable channel-created Agent.","model":"inherit","tools":["Read"]}`))
+	require.NoError(t, err, out)
+	require.Contains(t, out, `"ok":true`)
+
+	stored, err := agentRepo.GetUniqueSelectableByName(ctx, "Channel Reuser")
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	require.Equal(t, project.ID, stored.ProjectID)
+	require.Equal(t, []string{"Read"}, stored.Tools)
+
+	updateHandler := handlers["update_agent"]
+	require.NotNil(t, updateHandler)
+	out, err = updateHandler(ctx, json.RawMessage(fmt.Sprintf(`{"agent_id":%q,"description":"Updated from channel.","tools":["Read","Grep"],"enabled":false}`, stored.ID)))
+	require.NoError(t, err, out)
+	require.Contains(t, out, `"ok":true`)
+	stored, err = agentRepo.GetByID(ctx, stored.ID)
+	require.NoError(t, err)
+	require.Equal(t, "Updated from channel.", stored.Description)
+	require.Equal(t, []string{"Read", "Grep"}, stored.Tools)
+	require.False(t, stored.Enabled)
+
+	listOut, err := handlers["list_agents"](ctx, nil)
+	require.NoError(t, err)
+	require.Contains(t, listOut, "Channel Reuser")
+	require.Contains(t, listOut, "Updated from channel.")
+	require.NotContains(t, listOut, "Act as a reusable channel-created Agent")
+}
+
+func TestChannelAlertResultHelpersPersistAndFormatAlerts(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	alertSvc := NewAlertService(repository.NewAlertRepo(db), nil)
+	project := &models.Project{Name: "Channel Alert Helpers"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+
+	require.Equal(t, "Alert service not available.", channelListAlertsResult(ctx, nil, project.ID))
+	require.Equal(t, "No alerts found. You're all clear!", channelListAlertsResult(ctx, alertSvc, project.ID))
+	require.Equal(t, "Invalid input for get_alert.", channelGetAlertResult(ctx, alertSvc, project.ID, json.RawMessage(`{`)))
+	require.Equal(t, "get_alert requires alert_id.", channelGetAlertResult(ctx, alertSvc, project.ID, json.RawMessage(`{}`)))
+	require.Equal(t, "create_alert requires title.", channelCreateAlertResult(ctx, alertSvc, project.ID, json.RawMessage(`{"message":"missing"}`)))
+	require.Equal(t, "Invalid severity \"critical\".", channelCreateAlertResult(ctx, alertSvc, project.ID, json.RawMessage(`{"title":"Bad severity","severity":"critical"}`)))
+	require.Equal(t, "Invalid alert type \"unknown\".", channelCreateAlertResult(ctx, alertSvc, project.ID, json.RawMessage(`{"title":"Bad type","type":"unknown"}`)))
+
+	created := channelCreateAlertResult(ctx, alertSvc, project.ID, json.RawMessage(`{"title":"Investigate channel","message":"Channel worker stalled","severity":"warning","type":"task_needs_followup"}`))
+	require.Contains(t, created, `Created alert "Investigate channel"`)
+	require.Contains(t, created, "severity: warning")
+
+	alerts, err := alertSvc.ListSummariesByProject(ctx, project.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, alerts, 1)
+	alertID := alerts[0].ID
+
+	listed := channelListAlertsResult(ctx, alertSvc, project.ID)
+	require.Contains(t, listed, "Found 1 alerts (1 unread):")
+	require.Contains(t, listed, "Investigate channel")
+	require.Contains(t, listed, alertID)
+	require.Contains(t, listed, "severity: warning")
+	require.Contains(t, listed, "unread")
+
+	got := channelGetAlertResult(ctx, alertSvc, project.ID, json.RawMessage(fmt.Sprintf(`{"alert_id":%q}`, alertID)))
+	require.Contains(t, got, "Alert: Investigate channel")
+	require.Contains(t, got, "Type: task_needs_followup")
+	require.Contains(t, got, "Severity: warning")
+	require.Contains(t, got, "Status: unread")
+	require.Contains(t, got, "Message: Channel worker stalled")
+
+	require.Equal(t, "toggle_alert requires alert_id.", channelToggleAlertResult(ctx, alertSvc, project.ID, json.RawMessage(`{}`)))
+	toggled := channelToggleAlertResult(ctx, alertSvc, project.ID, json.RawMessage(fmt.Sprintf(`{"alert_id":%q}`, alertID)))
+	require.Equal(t, "Marked alert "+alertID+" as read.", toggled)
+	got = channelGetAlertResult(ctx, alertSvc, project.ID, json.RawMessage(fmt.Sprintf(`{"alert_id":%q}`, alertID)))
+	require.Contains(t, got, "Status: read")
+
+	require.Equal(t, "delete_alert requires alert_id.", channelDeleteAlertResult(ctx, alertSvc, project.ID, json.RawMessage(`{}`)))
+	deleted := channelDeleteAlertResult(ctx, alertSvc, project.ID, json.RawMessage(fmt.Sprintf(`{"alert_id":%q}`, alertID)))
+	require.Equal(t, "Deleted alert "+alertID+".", deleted)
+	require.Equal(t, "No alerts found. You're all clear!", channelListAlertsResult(ctx, alertSvc, project.ID))
+	require.Contains(t, channelGetAlertResult(ctx, alertSvc, project.ID, json.RawMessage(fmt.Sprintf(`{"alert_id":%q}`, alertID))), "not found")
+
+	severity, errText := channelAlertSeverity("")
+	require.Empty(t, errText)
+	require.Equal(t, models.SeverityInfo, severity)
+	severity, errText = channelAlertSeverity(" error ")
+	require.Empty(t, errText)
+	require.Equal(t, models.SeverityError, severity)
+	alertType, errText := channelAlertType("")
+	require.Empty(t, errText)
+	require.Equal(t, models.AlertCustom, alertType)
+	alertType, errText = channelAlertType("task_failed")
+	require.Empty(t, errText)
+	require.Equal(t, models.AlertTaskFailed, alertType)
+}
+
+func TestChannelStatusAndAutomationSummaryHelpers(t *testing.T) {
+	targets := []models.ChannelTarget{
+		{Platform: " Slack ", TargetKind: "channel", Name: "alerts", Home: true},
+		{Platform: "slack", TargetKind: "", Name: "", Home: false},
+		{Platform: "", TargetKind: "custom", Name: "mystery", Home: false},
+	}
+	summary := channelSummarizeTargets(targets)
+	require.Equal(t, 3, summary.Total)
+	require.True(t, summary.Configured)
+	require.Equal(t, 2, summary.ByPlatform["slack"].Total)
+	require.Equal(t, 1, summary.ByPlatform["slack"].Home)
+	require.Equal(t, 1, summary.ByPlatform["slack"].Named)
+	require.Equal(t, 2, summary.ByPlatform["slack"].ByKind["channel"])
+	require.Equal(t, 1, summary.ByPlatform["unknown"].ByKind["custom"])
+
+	repoSummary := channelTargetStatusFromRepoSummary(repository.ChannelTargetProjectSummary{Total: 2, Configured: true, ByPlatform: map[string]repository.ChannelTargetPlatformSummary{"email": {Total: 2, Home: 1, Named: 1, ByKind: map[string]int{"address": 2}}}})
+	require.Equal(t, 2, repoSummary.Total)
+	require.Equal(t, 2, repoSummary.ByPlatform["email"].ByKind["address"])
+	webhookSummary := channelSummarizeWebhooks([]models.WebhookEndpoint{{Enabled: true}, {Enabled: false}, {Enabled: true}})
+	require.Equal(t, 3, webhookSummary.Total)
+	require.Equal(t, 2, webhookSummary.Active)
+	require.Equal(t, 1, webhookSummary.Disabled)
+
+	require.Equal(t, "connected", channelConnectedStatus(true, true))
+	require.Equal(t, "configured_not_connected", channelConnectedStatus(true, false))
+	require.Equal(t, "not_configured", channelConnectedStatus(false, false))
+	require.Equal(t, "running", channelRunningStatus(true, true))
+	require.Equal(t, "configured_not_running", channelRunningStatus(true, false))
+	require.Equal(t, "not_configured", channelRunningStatus(false, false))
+	require.Equal(t, "connected", channelDiscordStatus(DiscordConnectionStatus{Configured: true, Connected: true, Running: true}))
+	require.Equal(t, "gateway_offline", channelDiscordStatus(DiscordConnectionStatus{Configured: true, Connected: false, Running: false}))
+	require.Equal(t, "configured_not_connected", channelDiscordStatus(DiscordConnectionStatus{Configured: true, Connected: false, Running: true}))
+	require.Equal(t, "not_configured", channelDiscordStatus(DiscordConnectionStatus{}))
+	longLine := strings.Repeat("word ", 80)
+	require.LessOrEqual(t, len(channelSafeSingleLine(longLine)), 240)
+	require.Equal(t, "spaced value", channelSafeSingleLine("  spaced\n\tvalue  "))
+
+	nextRun := time.Date(2026, 8, 22, 12, 30, 0, 0, time.FixedZone("offset", -5*3600))
+	lastRun := nextRun.Add(-time.Hour)
+	card := models.AutomationCard{
+		Automation: models.Automation{ID: "auto-1", Name: "Nightly", LifecycleState: models.AutomationPaused},
+		Version:    models.AutomationVersion{AdapterKey: "native"},
+		Counts:     models.AutomationNodeCounts{Running: 2, Waiting: 3, Blocked: 1, Failed: 4, CompletedRecently: 5},
+		NextRun:    &nextRun,
+		LastRun:    &lastRun,
+	}
+	cardSummary := channelAutomationCardSummary(card)
+	require.Equal(t, "auto-1", cardSummary["id"])
+	require.Equal(t, true, cardSummary["paused"])
+	require.Equal(t, "native", cardSummary["adapter_key"])
+	require.Equal(t, 15, cardSummary["node_count"])
+	require.Equal(t, "2026-08-22T17:30:00Z", cardSummary["next_run"])
+	require.Equal(t, "2026-08-22T16:30:00Z", cardSummary["last_run"])
+
+	jsonResult, err := marshalChannelAutomationResult(map[string]any{"automation": cardSummary})
+	require.NoError(t, err)
+	require.Contains(t, jsonResult, "auto-1")
+
+	listResult, err := channelListAutomationsResult(context.Background(), nil, "project-1", json.RawMessage(`{}`))
+	require.NoError(t, err)
+	require.JSONEq(t, `{"automations":[]}`, listResult)
+	_, err = channelListAutomationsResult(context.Background(), nil, "project-1", json.RawMessage(`{"project_id":"other"}`))
+	require.ErrorContains(t, err, "outside the caller's authorized project context")
+	_, err = channelGetAutomationResult(context.Background(), nil, "project-1", json.RawMessage(`{"automation_id":"auto-1"}`))
+	require.ErrorContains(t, err, "automations unavailable")
+	_, err = channelGetAutomationResult(context.Background(), nil, "project-1", json.RawMessage(`{}`))
+	require.ErrorContains(t, err, "automation_id is required")
 }

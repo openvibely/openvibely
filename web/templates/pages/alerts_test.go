@@ -3,14 +3,61 @@ package pages
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 )
 
+func TestAlertsContent_SystemUpdateShowsExactDockerDigestAndLiveProgress(t *testing.T) {
+	var buf bytes.Buffer
+	if err := AlertsContent(nil, "project-1", 0).Render(context.Background(), &buf); err != nil {
+		t.Fatal(err)
+	}
+	html := buf.String()
+	for _, required := range []string{"system-update-digest", "view.imageRef", "window.openVibelyRenderSystemUpdateCard = renderSystemUpdateCard", "window.refreshGlobalSystemUpdateIndicators()", "window.openVibelyNormalizeSystemUpdateSnapshot(data)", "view.hidden", "view.showCancel", "window.openVibelyHandleSystemUpdateSnapshot(data)", "window.openVibelyHandleSystemUpdateSnapshot(null)"} {
+		if !strings.Contains(html, required) {
+			t.Fatalf("system update UI missing %q", required)
+		}
+	}
+	if strings.Contains(html, "setInterval(refreshSystemUpdateCard, 1000)") {
+		t.Fatal("Alerts page should use the shared system update poll instead of polling every second")
+	}
+	for _, duplicatedRule := range []string{"data.current_version === available", "localPackagedReady", "data.release.apply_supported", "data.distribution === 'hosted' ||"} {
+		if strings.Contains(html, duplicatedRule) {
+			t.Fatalf("system update UI still duplicates normalized rule %q", duplicatedRule)
+		}
+	}
+}
+
+func TestAlertsContent_SystemUpdateUsesSingleAcceptanceActionAndExplainsDrain(t *testing.T) {
+	var buf bytes.Buffer
+	if err := AlertsContent(nil, "project-1", 0).Render(context.Background(), &buf); err != nil {
+		t.Fatal(err)
+	}
+	html := buf.String()
+	for _, required := range []string{
+		`id="system-update-accept"`,
+		`Update OpenVibely`,
+		`The replacement is downloaded and verified before approval. After you accept, OpenVibely waits for active work to finish, restarts, validates the new version, and rolls back automatically if needed.`,
+		`view.actionable`,
+		`systemUpdateAction('apply')`,
+	} {
+		if !strings.Contains(html, required) {
+			t.Fatalf("single-action update UI missing %q", required)
+		}
+	}
+	for _, removed := range []string{`id="system-update-stage"`, `id="system-update-apply"`, `Stage update`, `Apply update`} {
+		if strings.Contains(html, removed) {
+			t.Fatalf("two-step update UI still contains %q", removed)
+		}
+	}
+}
+
 func TestAlertsContent_DeleteActionsDoNotDependOnHxConfirm(t *testing.T) {
-	alerts := []models.Alert{{ID: "alert-1", Title: "Disk full", ProjectID: "project-1"}}
+	alerts := []models.AlertSummary{{ID: "alert-1", Title: "Disk full", ProjectID: "project-1"}}
 
 	var buf bytes.Buffer
 	err := AlertsContent(alerts, "project-1", 1).Render(context.Background(), &buf)
@@ -49,11 +96,204 @@ func TestAlertsContent_DeleteActionsDoNotDependOnHxConfirm(t *testing.T) {
 	if !strings.Contains(html, `function deleteAlerts(url, target)`) {
 		t.Fatal("expected direct delete helper in alerts template")
 	}
+	for _, want := range []string{
+		`data-alert-scroll-anchor`,
+		`data-alert-delete`,
+		`aria-label="Delete alert Disk full"`,
+		`htmx:beforeSwap`,
+		`htmx:afterSettle`,
+		`focus({preventScroll: true})`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("expected single-alert delete flow to preserve viewport and focus with %q", want)
+		}
+	}
+}
+
+func TestAlertsContent_ListOmitsBodyAndMetadataAndLazyLoadsDetail(t *testing.T) {
+	createdAt := time.Date(2026, time.August, 4, 9, 8, 7, 0, time.UTC)
+	largeBody := strings.Repeat("Compiler diagnostics line with secret payload ", 200)
+	alerts := []models.AlertSummary{
+		{
+			ID: "operational-1", ProjectID: "proj-1", Type: models.AlertTaskFailed,
+			Severity: models.SeverityError, Title: "Build failed", Message: "Compiler exited",
+			Source: "task-runner", DecisionState: models.AlertDecisionNotRequired,
+			ProcessingState: models.AlertProcessingNotApplicable, CreatedAt: createdAt, UpdatedAt: createdAt,
+		},
+		{
+			ID: "notification-1", ProjectID: "proj-1", Type: models.AlertCustom,
+			Severity: models.SeverityWarning, Title: "Review change", Message: "Approval requested",
+			Source: "review-agent", DecisionState: models.AlertDecisionPending,
+			ProcessingState: models.AlertProcessingUnclaimed, CreatedAt: createdAt, UpdatedAt: createdAt,
+		},
+	}
+
+	var buf bytes.Buffer
+	if err := AlertsContent(alerts, "proj-1", 1).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render alerts content: %v", err)
+	}
+	html := buf.String()
+
+	// The list fragment must lazily reference the per-alert detail endpoint and
+	// must never embed the full body or metadata in the DOM.
+	for _, required := range []string{
+		`<summary class="cursor-pointer text-sm font-medium">Inspect alert</summary>`,
+		`<summary class="cursor-pointer text-sm font-medium">Inspect notification</summary>`,
+		`data-alert-detail-url="/alerts/operational-1/details?project_id=proj-1"`,
+		`data-alert-detail-url="/alerts/notification-1/details?project_id=proj-1"`,
+		`ontoggle="loadAlertDetail(this)"`,
+		`data-alert-detail-container`,
+		`function loadAlertDetail(details)`,
+	} {
+		if !strings.Contains(html, required) {
+			t.Fatalf("lazy list markup missing %q", required)
+		}
+	}
+	for _, forbidden := range []string{
+		largeBody,
+		"secret payload",
+		base64.StdEncoding.EncodeToString([]byte(largeBody)),
+	} {
+		if strings.Contains(html, forbidden) {
+			t.Fatalf("list fragment unexpectedly embedded detail content %q", forbidden)
+		}
+	}
+}
+
+func decodedAlertCopyBody(t *testing.T, detailHTML string) string {
+	t.Helper()
+	const prefix = `data-alert-copy-base64="`
+	start := strings.Index(detailHTML, prefix)
+	if start < 0 {
+		t.Fatal("encoded copy payload missing")
+	}
+	start += len(prefix)
+	end := strings.IndexByte(detailHTML[start:], '"')
+	if end < 0 {
+		t.Fatal("encoded copy payload is unterminated")
+	}
+	decoded, err := base64.StdEncoding.DecodeString(detailHTML[start : start+end])
+	if err != nil {
+		t.Fatalf("decode copy payload: %v", err)
+	}
+	return string(decoded)
+}
+
+func TestAlertDetail_IncludesBodyAndMetadataForSelectedAlert(t *testing.T) {
+	createdAt := time.Date(2026, time.August, 4, 9, 8, 7, 0, time.UTC)
+	alert := models.Alert{
+		ID: "operational-1", ProjectID: "proj-1", IdempotencyKey: "hidden-idempotency-key",
+		Type: models.AlertTaskFailed, Severity: models.SeverityError, Title: "Build failed",
+		Message: "Compiler exited", Body: "Compiler diagnostics\nline 2", Source: "task-runner",
+		Metadata:      map[string]any{"attempt": float64(2)},
+		DecisionState: models.AlertDecisionNotRequired, ProcessingState: models.AlertProcessingNotApplicable,
+		CreatedAt: createdAt, UpdatedAt: createdAt,
+	}
+
+	var buf bytes.Buffer
+	if err := AlertDetail(alert).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render alert detail: %v", err)
+	}
+	html := buf.String()
+
+	for _, required := range []string{
+		`data-alert-detail-loaded`,
+		`Compiler diagnostics`,
+		`attempt`,
+		`data-alert-copy`,
+		`aria-label="Copy inspected alert body"`,
+		`onclick="copyAlertDetails(this)"`,
+		`data-alert-copy-text`,
+	} {
+		if !strings.Contains(html, required) {
+			t.Fatalf("alert detail fragment missing %q", required)
+		}
+	}
+
+	payload := decodedAlertCopyBody(t, html)
+	if payload != alert.Body {
+		t.Fatalf("body-only copy payload changed: got %q, want %q", payload, alert.Body)
+	}
+	for _, forbidden := range []string{"OpenVibely", "ID:", "Title:", "hidden-idempotency-key"} {
+		if strings.Contains(payload, forbidden) {
+			t.Fatalf("body-only copy payload unexpectedly contains %q", forbidden)
+		}
+	}
+}
+
+func TestAlertDetail_UsesSharedMarkdownSurfaceWithoutChangingCopySource(t *testing.T) {
+	body := "# Heading\r\n\r\n**emphasis**\r\n\r\n- first\r\n- second\r\n\r\n[link](https://example.test)\r\n\r\n```go\r\nline 1\r\nline 2\r\n```\r\n\r\n<img src=x onerror=alert(1)>"
+	alert := models.Alert{
+		ID: "markdown-detail-1", ProjectID: "project-1", Title: "Markdown detail", Body: body,
+		Metadata:      map[string]any{"attempt": float64(2)},
+		DecisionState: models.AlertDecisionNotRequired, ProcessingState: models.AlertProcessingNotApplicable,
+	}
+
+	var detail bytes.Buffer
+	if err := AlertDetail(alert).Render(context.Background(), &detail); err != nil {
+		t.Fatalf("render alert detail: %v", err)
+	}
+	detailHTML := detail.String()
+	for _, required := range []string{
+		`data-alert-detail-loaded`,
+		`class="chat-markdown"`,
+		`data-alert-markdown`,
+		`data-raw-content=`,
+		`data-alert-copy-text`,
+		`attempt`,
+	} {
+		if !strings.Contains(detailHTML, required) {
+			t.Fatalf("Markdown detail fragment missing %q", required)
+		}
+	}
+	if strings.Contains(detailHTML, `class="whitespace-pre-wrap break-words text-sm"`) {
+		t.Fatal("detail body must not be emitted as a second plain-text rendering")
+	}
+
+	if got := decodedAlertCopyBody(t, detailHTML); got != body {
+		t.Fatalf("copy source changed the raw body: got %q, want %q", got, body)
+	}
+
+	var content bytes.Buffer
+	if err := AlertsContent(nil, "project-1", 0).Render(context.Background(), &content); err != nil {
+		t.Fatalf("render Alerts content: %v", err)
+	}
+	contentHTML := content.String()
+	for _, required := range []string{
+		`function hydrateAlertMarkdown(container)`,
+		`window.renderChatMarkdown(raw)`,
+		`window.addCodeCopyButtons(markdown)`,
+		`hydrateAlertMarkdown(container)`,
+		`function decodeAlertCopyText(copyText)`,
+		`new TextDecoder('utf-8', {fatal: true}).decode(bytes)`,
+	} {
+		if !strings.Contains(contentHTML, required) {
+			t.Fatalf("Alerts detail hydration missing shared renderer contract %q", required)
+		}
+	}
+	if strings.Contains(contentHTML, `marked.parse(`) || strings.Contains(contentHTML, `sanitizeChatHTML`) {
+		t.Fatal("Alerts detail must delegate Markdown parsing and sanitization to the shared pipeline")
+	}
+}
+
+func TestAlertDetail_EmptyAlertOmitsCopyControl(t *testing.T) {
+	alert := models.Alert{ID: "empty-body-1", Title: "No body", Message: "Summary only"}
+	var buf bytes.Buffer
+	if err := AlertDetail(alert).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render alert detail: %v", err)
+	}
+	html := buf.String()
+	if strings.Contains(html, `data-alert-copy`) {
+		t.Fatal("alert without a body must not render a copy control")
+	}
+	if !strings.Contains(html, "No additional detail.") {
+		t.Fatal("empty detail should render a placeholder")
+	}
 }
 
 func TestAlertsContent_CardsConformToNarrowViewport(t *testing.T) {
 	longText := strings.Repeat("SuperLongUnbrokenAlertToken", 8)
-	alerts := []models.Alert{{ID: "alert-1", Title: longText, Message: longText, ProjectID: "project-1"}}
+	alerts := []models.AlertSummary{{ID: "alert-1", Title: longText, Message: longText, ProjectID: "project-1"}}
 
 	var buf bytes.Buffer
 	err := AlertsContent(alerts, "project-1", 1).Render(context.Background(), &buf)

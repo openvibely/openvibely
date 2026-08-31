@@ -20,6 +20,7 @@ import (
 	"github.com/openvibely/openvibely/internal/events"
 	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -97,6 +98,117 @@ func TestHandler_Chat_HTMX(t *testing.T) {
 	// HTMX response should not contain full page structure
 	if strings.Contains(body, "<!DOCTYPE html>") {
 		t.Error("HTMX response should not contain full page structure")
+	}
+}
+
+func TestHandler_ChatRenderRoutesUseCompactModelPickerProjection(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
+	ctx := context.Background()
+	projects, err := h.projectSvc.List(ctx)
+	if err != nil || len(projects) == 0 {
+		t.Fatalf("list projects: %v", err)
+	}
+	projectID := projects[0].ID
+
+	largePayload := strings.Repeat("large-edit-only-json", 4096)
+	largeCustom := &models.LLMConfig{
+		Name: "Large Custom Provider", Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodOAuth,
+		Model: "custom-model", APIKey: "secret-api-key", OAuthAccessToken: "secret-oauth-token",
+		OAuthRefreshToken: "secret-refresh", OAuthClientSecret: "secret-client", BaseURL: "https://example.com/v1/",
+		Transport: "chat_completions", PresetSlug: "custom", ExtraHeadersJSON: `{"X-Secret":"value"}`,
+		ExtraBodyJSON: largePayload, CustomAuthConfigJSON: `{"signing_secret":"secret"}`,
+		CustomAuthStateJSON: `{"access":"secret"}`, MixtureConfigJSON: `{"large":"` + largePayload + `"}`,
+		IsDefault: true,
+	}
+	if err := llmConfigRepo.Create(ctx, largeCustom); err != nil {
+		t.Fatalf("create large custom provider: %v", err)
+	}
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	chatRec := htmxGet(e, "/chat?project_id="+projectID)
+	counter.SetEnabled(false)
+	assertCode(t, chatRec, http.StatusOK)
+	chatBody := chatRec.Body.String()
+	for _, expected := range []string{"Auto", "Default", "Large Custom Provider", "custom-model"} {
+		if !strings.Contains(chatBody, expected) {
+			t.Fatalf("GET /chat response missing %q: %s", expected, chatBody)
+		}
+	}
+	assertNotContains(t, chatRec, largePayload)
+	assertNotContains(t, chatRec, "secret-api-key")
+	assertChatModelPickerQuery(t, counter.Statements())
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	clearRec := htmxDelete(e, "/chat/history?project_id="+projectID)
+	counter.SetEnabled(false)
+	assertCode(t, clearRec, http.StatusOK)
+	clearBody := clearRec.Body.String()
+	for _, expected := range []string{"Auto", "Default", "Large Custom Provider", "custom-model"} {
+		if !strings.Contains(clearBody, expected) {
+			t.Fatalf("DELETE /chat/history response missing %q: %s", expected, clearBody)
+		}
+	}
+	assertNotContains(t, clearRec, largePayload)
+	assertNotContains(t, clearRec, "secret-api-key")
+	assertChatModelPickerQuery(t, counter.Statements())
+
+	full, err := llmConfigRepo.GetByID(ctx, largeCustom.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if full == nil || full.APIKey != "secret-api-key" || full.OAuthAccessToken != "secret-oauth-token" || full.ExtraBodyJSON != largePayload || full.CustomAuthStateJSON == "" {
+		t.Fatalf("execution/detail model read lost full provider fields: %#v", full)
+	}
+}
+
+func assertChatModelPickerQuery(t *testing.T, statements []string) {
+	t.Helper()
+	var pickerStatements []string
+	for _, statement := range statements {
+		normalized := strings.Join(strings.Fields(statement), " ")
+		if strings.Contains(normalized, "FROM agent_configs ORDER BY is_default DESC, name ASC") {
+			pickerStatements = append(pickerStatements, normalized)
+		}
+	}
+	if len(pickerStatements) != 1 {
+		t.Fatalf("expected exactly one Chat model-picker query, got %d in statements: %q", len(pickerStatements), statements)
+	}
+	picker := pickerStatements[0]
+	projection := strings.Split(strings.ToLower(picker), " from agent_configs ")[0]
+	if !strings.Contains(projection, "select id, name, model") {
+		t.Fatalf("Chat picker query does not use id/name/model projection: %s", picker)
+	}
+	for _, forbidden := range []string{"provider", "api_key", "oauth_access_token", "oauth_refresh_token", "oauth_client_secret", "oauth_authorize_url", "oauth_token_url", "ollama_base_url", "base_url", "models_url", "extra_headers_json", "extra_body_json", "custom_auth_config_json", "custom_auth_state_json", "mixture_config_json"} {
+		if strings.Contains(projection, forbidden) {
+			t.Fatalf("Chat picker query selected forbidden column %q: %s", forbidden, picker)
+		}
+	}
+}
+
+func assertBrowserChatContextModelStatements(t *testing.T, statements []string) {
+	t.Helper()
+	var contextStatements []string
+	for _, statement := range statements {
+		normalized := strings.Join(strings.Fields(statement), " ")
+		if strings.Contains(normalized, "FROM agent_configs ORDER BY is_default DESC, name ASC") {
+			contextStatements = append(contextStatements, normalized)
+		}
+	}
+	if len(contextStatements) != 1 {
+		t.Fatalf("expected exactly one browser Chat context model query, got %d in statements: %q", len(contextStatements), statements)
+	}
+	contextQuery := contextStatements[0]
+	projection := strings.Split(strings.ToLower(contextQuery), " from agent_configs ")[0]
+	if !strings.Contains(projection, "select id, name, provider, model, is_default") {
+		t.Fatalf("browser Chat context query does not use id/name/provider/model/is_default projection: %s", contextQuery)
+	}
+	for _, forbidden := range []string{"api_key", "oauth_access_token", "oauth_refresh_token", "oauth_client_secret", "oauth_authorize_url", "oauth_token_url", "ollama_base_url", "base_url", "models_url", "extra_headers_json", "extra_body_json", "custom_auth_config_json", "custom_auth_state_json", "mixture_config_json"} {
+		if strings.Contains(projection, forbidden) {
+			t.Fatalf("browser Chat context query selected forbidden column %q: %s", forbidden, contextQuery)
+		}
 	}
 }
 
@@ -311,7 +423,7 @@ func TestHandler_ChatSend(t *testing.T) {
 	if !strings.Contains(body, "chat-bubble-user-msg") && !strings.Contains(body, "chat-bubble-assistant-msg") {
 		t.Error("expected chat bubbles in response")
 	}
-	if !strings.Contains(body, `id="chat-form-primary-action" hx-swap-oob="outerHTML"`) {
+	if !strings.Contains(body, `id="chat-form-primary-action" data-composer-running="true" data-active-turn-id="`) || strings.Contains(body, `data-active-turn-id=""`) {
 		t.Error("expected composer primary action OOB replacement in response")
 	}
 	if strings.Contains(body, `id="chat-form-action-cluster" hx-swap-oob="outerHTML"`) {
@@ -322,7 +434,78 @@ func TestHandler_ChatSend(t *testing.T) {
 	}
 }
 
+func TestHandler_ChatSend_UsesCompactContextModelProjectionAndHydratesSelectedModel(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
+	ctx := context.Background()
+	_, err := db.Exec(`DELETE FROM agent_configs`)
+	require.NoError(t, err)
+
+	largeProviderJSON := strings.Repeat("large-browser-chat-provider-json", 4096)
+	agent := &models.LLMConfig{
+		Name: "Hydrated Browser Chat Model", Provider: models.ProviderTest, AuthMethod: models.AuthMethodAPIKey,
+		Model: "claude-sonnet-browser-chat", APIKey: "browser-secret-api-key", OAuthAccessToken: "browser-secret-oauth-token",
+		OAuthRefreshToken: "browser-secret-refresh-token", OAuthClientSecret: "browser-secret-client-secret",
+		BaseURL: "https://example.com/v1/", ExtraHeadersJSON: `{"X-Secret":"value"}`,
+		ExtraBodyJSON: largeProviderJSON, CustomAuthConfigJSON: `{"signing_secret":"secret"}`,
+		CustomAuthStateJSON: `{"access":"secret"}`, MixtureConfigJSON: `{"large":"` + largeProviderJSON + `"}`,
+		IsDefault: true,
+	}
+	require.NoError(t, llmConfigRepo.Create(ctx, agent))
+
+	projects, err := h.projectSvc.List(ctx)
+	require.NoError(t, err)
+	require.NotEmpty(t, projects)
+	projectID := projects[0].ID
+
+	mock := testutil.NewMockLLMCaller()
+	providerCalled := make(chan struct{}, 1)
+	mock.OnCall = func(context.Context, testutil.MockLLMCall) {
+		providerCalled <- struct{}{}
+	}
+	h.llmSvc.SetLLMCaller(mock)
+
+	form := url.Values{}
+	form.Set("message", "Hello from compact browser chat")
+	form.Set("agent_id", agent.ID)
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	req := httptest.NewRequest(http.MethodPost, "/chat/send?project_id="+url.QueryEscape(projectID), strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	counter.SetEnabled(false)
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	select {
+	case <-providerCalled:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for mock provider call")
+	}
+
+	assertBrowserChatContextModelStatements(t, counter.Statements())
+	call := mock.LastCall()
+	require.Equal(t, agent.ID, call.Agent.ID)
+	require.Equal(t, "browser-secret-api-key", call.Agent.APIKey)
+	require.Equal(t, "browser-secret-oauth-token", call.Agent.OAuthAccessToken)
+	require.Equal(t, "browser-secret-refresh-token", call.Agent.OAuthRefreshToken)
+	require.Equal(t, "browser-secret-client-secret", call.Agent.OAuthClientSecret)
+	require.Equal(t, largeProviderJSON, call.Agent.ExtraBodyJSON)
+	require.NotEmpty(t, call.Agent.CustomAuthConfigJSON)
+	require.NotEmpty(t, call.Agent.CustomAuthStateJSON)
+	require.NotEmpty(t, call.Agent.MixtureConfigJSON)
+
+	request := mock.LastAgentRequest()
+	modelContextLine := fmt.Sprintf("- [ID:%s] %q (model: %s, provider: %s) (default)", agent.ID, agent.Name, agent.Model, agent.Provider)
+	require.Contains(t, request.ChatSystemContext, modelContextLine)
+	require.NotContains(t, request.ChatSystemContext, "browser-secret-api-key")
+	require.NotContains(t, request.ChatSystemContext, largeProviderJSON)
+}
+
 func TestHandler_ChatSend_MixtureSupportedAggregatorCreatesTaskThroughRuntimeTool(t *testing.T) {
+	t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
 	h, e, llmConfigRepo := setupTestHandler(t)
 	h.workerSvc = nil
 	ctx := context.Background()
@@ -354,6 +537,7 @@ func TestHandler_ChatSend_MixtureSupportedAggregatorCreatesTaskThroughRuntimeToo
 		Name: "HTTP Compatible Aggregator", Provider: models.ProviderOpenAICompatible,
 		Model: "provider/model", AuthMethod: models.AuthMethodAPIKey, APIKey: "test-key",
 		BaseURL: providerServer.URL + "/v1/", Transport: "chat_completions",
+		PresetSlug: "vllm",
 	}
 	require.NoError(t, llmConfigRepo.Create(ctx, aggregator))
 	mixture := &models.LLMConfig{
@@ -1497,12 +1681,16 @@ func TestHandler_ChatStop_CancelsActiveChatTurn(t *testing.T) {
 		ex.PromptSent = "active chat"
 	})
 	require.NoError(t, h.execRepo.UpdateOutput(ctx, activeExec.ID, "partial output"))
+	hub := events.NewExecutionStreamHub()
+	h.SetExecutionStreamHub(hub)
+	sub, _, err := hub.Subscribe(activeExec.ID)
+	require.NoError(t, err)
 	cancelled := false
 	h.workerSvc.RegisterCancel(activeTask.ID, func() { cancelled = true })
 
 	rec := htmxPost(e, "/chat/stop?project_id="+project.ID, url.Values{})
 	assertCode(t, rec, http.StatusOK)
-	assertContains(t, rec, `id="chat-form-primary-action" hx-swap-oob="outerHTML"`)
+	assertContains(t, rec, `id="chat-form-primary-action" data-composer-running="false" data-active-turn-id="" hx-swap-oob="outerHTML"`)
 	assertNotContains(t, rec, `id="chat-form-action-cluster" hx-swap-oob="outerHTML"`)
 	assertContains(t, rec, `title="Send message"`)
 	assertNotContains(t, rec, `title="Stop response"`)
@@ -1524,6 +1712,19 @@ func TestHandler_ChatStop_CancelsActiveChatTurn(t *testing.T) {
 	assert.Equal(t, models.ExecCancelled, updatedExec.Status)
 	assert.Equal(t, "partial output", updatedExec.Output)
 	assert.Equal(t, "cancelled", updatedExec.ErrorMessage)
+	select {
+	case event, ok := <-sub:
+		require.True(t, ok)
+		assert.Equal(t, events.ExecutionStreamEvent{
+			ExecID: activeExec.ID,
+			Type:   events.ExecutionStreamDone,
+			Status: "cancelled",
+		}, event)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for ChatStop terminal event")
+	}
+	_, ok := <-sub
+	assert.False(t, ok, "ChatStop should close the execution subscriber")
 }
 
 func TestHandler_Chat_HidesComposerSteeringAffordanceWhileActive(t *testing.T) {
@@ -1560,16 +1761,6 @@ func TestHandler_BrowserPendingAttachmentMetadataFailureRemovesSession(t *testin
 				form.Set("agent_id", agent.ID)
 				form.Set("attachment_session_id", sessionID)
 				return htmxPost(e, "/chat/send?project_id="+project.ID, form)
-			},
-		},
-		{
-			name: "steering chat",
-			send: func(t *testing.T, _ *Handler, e *echo.Echo, project *models.Project, _ *models.Task, exec *models.Execution, _ *models.LLMConfig, sessionID string) *httptest.ResponseRecorder {
-				form := url.Values{}
-				form.Set("message", "steer chat with attachment")
-				form.Set("expected_turn_id", exec.ID)
-				form.Set("attachment_session_id", sessionID)
-				return htmxPost(e, "/chat/steer?project_id="+project.ID, form)
 			},
 		},
 		{
@@ -1695,6 +1886,36 @@ func TestCleanupUnpublishedPendingAttachmentSession_RejectsOwnerAcquiredBeforeRe
 	require.NoError(t, h.cleanupUnpublishedPendingAttachmentSession(context.Background(), sessionID))
 	require.ErrorContains(t, ownershipErr, "attachment session retired")
 	require.NoDirExists(t, sessionDir)
+}
+
+func TestCleanupUnpublishedPendingAttachmentSession_PreservesAlreadyOwnedSession(t *testing.T) {
+	h, _, _, db := setupTestHandlerWithDB(t)
+	project := createProject(t, h, "Pending attachment existing owner")
+	ownerTask := createTask(t, h, project.ID, "Existing pending owner", func(task *models.Task) {
+		task.Category = models.CategoryBacklog
+		task.Status = models.StatusPending
+	})
+	const sessionID = "cccccccccccccccccccccccccccccccc"
+	sessionDir := filepath.Join(uploadsDir, "chat", "pending", sessionID)
+	require.NoError(t, os.MkdirAll(sessionDir, 0o755))
+	pendingFile := filepath.Join(sessionDir, "owned.txt")
+	require.NoError(t, os.WriteFile(pendingFile, []byte("content"), 0o600))
+	require.NoError(t, h.threadInputRepo.CreateQueued(context.Background(), &models.ThreadInput{
+		Scope:               models.ThreadInputScopeTask,
+		ProjectID:           project.ID,
+		TaskID:              ownerTask.ID,
+		InputMode:           models.ThreadInputModeQueued,
+		InputStatus:         models.ThreadInputPending,
+		Content:             "durable owner",
+		AttachmentSessionID: sessionID,
+	}))
+
+	require.NoError(t, h.cleanupUnpublishedPendingAttachmentSession(context.Background(), sessionID))
+	require.FileExists(t, pendingFile)
+
+	var retiredCount int
+	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM retired_attachment_sessions WHERE session_id = ?`, sessionID).Scan(&retiredCount))
+	require.Zero(t, retiredCount)
 }
 
 func TestHandler_DirectBrowserAttachmentFailureRemovesUnpublishedSession(t *testing.T) {
@@ -1880,6 +2101,52 @@ func TestHandler_ChatSteer_CreatesPendingSteeringInput(t *testing.T) {
 	require.Len(t, inputs, 1)
 	assert.Equal(t, "Actually answer about queues", inputs[0].Content)
 	assert.Equal(t, models.ThreadInputModeSteering, inputs[0].InputMode)
+}
+
+func TestHandler_ChatSteer_FailurePreservesAttachmentSessionForRetry(t *testing.T) {
+	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Failed Chat steer attachment retry")
+	activeTask := createTask(t, h, project.ID, "Active Chat steer attachment retry", func(task *models.Task) {
+		task.Category = models.CategoryChat
+		task.Status = models.StatusRunning
+		task.AgentID = &agent.ID
+	})
+	activeExec := createExec(t, h, activeTask.ID, agent.ID, func(exec *models.Execution) {
+		exec.Status = models.ExecRunning
+		exec.PromptSent = "active turn"
+	})
+
+	const sessionID = "abababababababababababababababab"
+	sessionDir := filepath.Join(uploadsDir, "chat", "pending", sessionID)
+	attachmentPath := filepath.Join(sessionDir, "retry.txt")
+	require.NoError(t, os.MkdirAll(sessionDir, 0o755))
+	require.NoError(t, os.WriteFile(attachmentPath, []byte("retry content"), 0o600))
+	_, err := db.Exec(`CREATE TRIGGER fail_chat_steer_input BEFORE INSERT ON thread_inputs BEGIN SELECT RAISE(ABORT, 'injected steer failure'); END`)
+	require.NoError(t, err)
+
+	form := url.Values{}
+	form.Set("message", "steer with retained attachment")
+	form.Set("expected_turn_id", activeExec.ID)
+	form.Set("attachment_session_id", sessionID)
+	failed := htmxPost(e, "/chat/steer?project_id="+project.ID, form)
+	require.Equal(t, http.StatusInternalServerError, failed.Code)
+	require.FileExists(t, attachmentPath, "failed steering must retain pending attachments for retry")
+
+	_, err = db.Exec(`DROP TRIGGER fail_chat_steer_input`)
+	require.NoError(t, err)
+	retried := htmxPost(e, "/chat/steer?project_id="+project.ID, form)
+	require.Equal(t, http.StatusOK, retried.Code)
+	assertContains(t, retried, "Attachments included")
+	assertContains(t, retried, `aria-label="Attachments included with this steering instruction"`)
+	require.FileExists(t, attachmentPath, "successful steering keeps pending files until the steering input is consumed")
+
+	inputs, err := h.threadInputRepo.ListPendingSteering(ctx, activeExec.ID, activeExec.ID)
+	require.NoError(t, err)
+	require.Len(t, inputs, 1)
+	assert.Equal(t, sessionID, inputs[0].AttachmentSessionID)
+	assert.Equal(t, "steer with retained attachment", inputs[0].Content)
 }
 
 func TestHandler_ClearChat_CancelsPendingChatInputs(t *testing.T) {
@@ -2382,6 +2649,68 @@ func TestMediaTypeFromExtension(t *testing.T) {
 			assert.Equal(t, tc.expected, result, "mediaTypeFromExtension(%q)", tc.filename)
 		})
 	}
+}
+
+func TestBuildChatAttachmentModelContextMatchesPendingPreviewAndAPISavedFiles(t *testing.T) {
+	h, _, _ := setupTestHandler(t)
+
+	tmpDir := t.TempDir()
+	oldUploadsDir := uploadsDir
+	uploadsDir = tmpDir
+	defer func() { uploadsDir = oldUploadsDir }()
+
+	sessionID := "equivalent-context-session"
+	pendingDir := filepath.Join(tmpDir, "chat", "pending", sessionID)
+	apiDir := filepath.Join(tmpDir, "chat", "api-exec")
+	require.NoError(t, os.MkdirAll(pendingDir, 0755))
+	require.NoError(t, os.MkdirAll(apiDir, 0755))
+
+	notesContent := []byte("remember this note")
+	largeContent := []byte(strings.Repeat("x", maxTextAttachmentSize+1))
+	imageContent := []byte{0x89, 0x50, 0x4e, 0x47}
+	files := []struct {
+		name    string
+		content []byte
+	}{
+		{name: "large.txt", content: largeContent},
+		{name: "notes.txt", content: notesContent},
+		{name: "screen.png", content: imageContent},
+	}
+
+	var apiFiles []chatAttachmentModelContextFile
+	for _, file := range files {
+		pendingPath := filepath.Join(pendingDir, file.name)
+		apiPath := filepath.Join(apiDir, file.name)
+		require.NoError(t, os.WriteFile(pendingPath, file.content, 0644))
+		require.NoError(t, os.WriteFile(apiPath, file.content, 0644))
+		apiFiles = append(apiFiles, chatAttachmentModelContextFile{
+			FileName: file.name,
+			FilePath: apiPath,
+			FileSize: int64(len(file.content)),
+		})
+	}
+
+	pendingText, pendingImages, err := h.previewPendingAttachments(sessionID)
+	require.NoError(t, err)
+	apiText, apiImages, err := buildChatAttachmentModelContext(apiFiles, chatAttachmentModelContextOptions{})
+	require.NoError(t, err)
+
+	assert.Equal(t, pendingText, apiText)
+	assert.Contains(t, pendingText, "--- Attached Files ---")
+	assert.Contains(t, pendingText, "File: notes.txt")
+	assert.Contains(t, pendingText, string(notesContent))
+	assert.Contains(t, pendingText, "File: large.txt (attached")
+	assert.Contains(t, pendingText, "too large to include inline")
+	assert.NotContains(t, pendingText, "screen.png")
+	assert.NotContains(t, pendingText, string(largeContent[:50]))
+
+	require.Len(t, pendingImages, 1)
+	require.Len(t, apiImages, 1)
+	assert.Equal(t, pendingImages[0].FileName, apiImages[0].FileName)
+	assert.Equal(t, pendingImages[0].MediaType, apiImages[0].MediaType)
+	assert.Equal(t, pendingImages[0].FileSize, apiImages[0].FileSize)
+	assert.Equal(t, filepath.Join(pendingDir, "screen.png"), pendingImages[0].FilePath)
+	assert.Equal(t, filepath.Join(apiDir, "screen.png"), apiImages[0].FilePath)
 }
 
 func TestProcessAttachments_ImageFilesReturnedAsSeparateAttachments(t *testing.T) {
@@ -3457,7 +3786,7 @@ func TestHandler_TaskThreadSend_QueuesWhenAtCapacity(t *testing.T) {
 	e.ServeHTTP(rec, req)
 
 	assert.Equal(t, http.StatusOK, rec.Code, "task follow-up should be accepted and queued")
-	assertContains(t, rec, `id="task-thread-form-primary-action" hx-swap-oob="outerHTML"`)
+	assertContains(t, rec, `id="task-thread-form-primary-action" data-composer-running="true" data-active-turn-id="`)
 	assertNotContains(t, rec, `id="task-thread-form-action-cluster" hx-swap-oob="outerHTML"`)
 	assertContains(t, rec, `hx-post="/tasks/`+task.ID+`/cancel?composer_stop=1"`)
 	assertContains(t, rec, `title="Stop response"`)
@@ -3619,7 +3948,7 @@ func TestHandler_TaskThreadSend_CancelQueuedCapacityWait(t *testing.T) {
 	cancelRec := httptest.NewRecorder()
 	e.ServeHTTP(cancelRec, cancelReq)
 	require.Equal(t, http.StatusOK, cancelRec.Code, cancelRec.Body.String())
-	assertContains(t, cancelRec, `id="task-thread-form-primary-action" hx-swap-oob="outerHTML"`)
+	assertContains(t, cancelRec, `id="task-thread-form-primary-action" data-composer-running="false" data-active-turn-id="" hx-swap-oob="outerHTML"`)
 	assertNotContains(t, cancelRec, `id="task-thread-form-action-cluster" hx-swap-oob="outerHTML"`)
 	assertContains(t, cancelRec, `title="Send message"`)
 	assertNotContains(t, cancelRec, `title="Stop response"`)
@@ -3703,7 +4032,7 @@ func TestHandler_Chat_ReconnectPreservesProjectID(t *testing.T) {
 		"chat root must stay width-bounded")
 	assert.NotContains(t, body, `id="chat-page-root" class="h-full flex flex-col min-w-0 max-w-full overflow-x-hidden"`,
 		"chat root must not clip the composer shadow")
-	assert.Contains(t, body, `id="chat-messages" class="flex-1 min-h-0 overflow-y-auto py-4`,
+	assert.Contains(t, body, `id="chat-messages" class="flex-1 min-h-0 overflow-y-auto pt-4 pb-4 -mb-3`,
 		"chat messages pane must be present")
 	assert.NotContains(t, body, `id="chat-messages" class="flex-1 min-h-0 overflow-y-auto overflow-x-hidden`,
 		"chat messages pane must not hard-clip chat bubble shadows")

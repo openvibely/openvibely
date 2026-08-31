@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"testing"
+	"unsafe"
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/repository"
@@ -18,7 +20,7 @@ import (
 // TestHandleTelegramTest_NotRunning tests the error feedback HTML
 func TestHandleTelegramTest_NotRunning(t *testing.T) {
 	e := echo.New()
-	h := New(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	h := New(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	// telegramService is nil by default (not running)
 
 	req := httptest.NewRequest(http.MethodPost, "/channels/telegram/test", nil)
@@ -28,20 +30,37 @@ func TestHandleTelegramTest_NotRunning(t *testing.T) {
 	err := h.handleTelegramTest(c)
 	require.NoError(t, err)
 
-	// Verify handler returns 200 OK with error HTML
+	assert.Equal(t, http.StatusOK, rec.Code)
+	want := `<div class="flex items-center gap-2 text-error" id="telegram-test-feedback"><span>Connection failed: Bot is not running</span></div>`
+	assert.Equal(t, want, rec.Body.String())
+	assert.NotContains(t, rec.Body.String(), "setTimeout") // errors should persist
+}
+
+func TestHandleTelegramTest_Success(t *testing.T) {
+	e := echo.New()
+	h := New(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	h.telegramService = &service.TelegramService{}
+	markTelegramServiceRunningForTest(t, h.telegramService)
+
+	req := httptest.NewRequest(http.MethodPost, "/channels/telegram/test", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	err := h.handleTelegramTest(c)
+	require.NoError(t, err)
+
 	assert.Equal(t, http.StatusOK, rec.Code)
 	body := rec.Body.String()
+	assert.Contains(t, body, `<div class="flex items-center gap-2 text-success" id="telegram-test-feedback"><span>Connection successful!</span></div>`)
+	assert.Contains(t, body, `document.getElementById("telegram-test-feedback")`)
+	assert.Contains(t, body, "setTimeout")
+}
 
-	// Verify error feedback HTML contains:
-	// - Error styling (text-error class)
-	// - Error icon (X SVG path)
-	// - Error message
-	// - No auto-dismiss script (errors should persist)
-	assert.Contains(t, body, "text-error")
-	assert.Contains(t, body, "Connection failed")
-	assert.Contains(t, body, "Bot is not running")
-	assert.Contains(t, body, "M6 18L18 6M6 6l12 12") // X SVG path
-	assert.NotContains(t, body, "setTimeout")        // should NOT auto-dismiss
+func markTelegramServiceRunningForTest(t *testing.T, svc *service.TelegramService) {
+	t.Helper()
+	running := reflect.ValueOf(svc).Elem().FieldByName("running")
+	require.True(t, running.IsValid())
+	reflect.NewAt(running.Type(), unsafe.Pointer(running.UnsafeAddr())).Elem().SetBool(true)
 }
 
 func assertChannelsRefreshTrigger(t *testing.T, rec *httptest.ResponseRecorder) {
@@ -49,6 +68,31 @@ func assertChannelsRefreshTrigger(t *testing.T, rec *httptest.ResponseRecorder) 
 	assert.Equal(t, channelsRefreshTrigger, rec.Header().Get("HX-Trigger"))
 	assert.Empty(t, rec.Header().Get("HX-Refresh"))
 	assert.Empty(t, rec.Header().Get("Location"))
+}
+
+func TestReturnToChannelsHTMXTriggersChannelsRefresh(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/channels/github/configure", nil)
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	require.NoError(t, returnToChannels(c))
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assertChannelsRefreshTrigger(t, rec)
+}
+
+func TestReturnToChannelsNonHTMXRedirectsToChannels(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/channels/github/configure", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	require.NoError(t, returnToChannels(c))
+	assert.Equal(t, http.StatusSeeOther, rec.Code)
+	assert.Equal(t, "/channels", rec.Header().Get("Location"))
+	assert.Empty(t, rec.Header().Get("HX-Trigger"))
+	assert.Empty(t, rec.Header().Get("HX-Refresh"))
 }
 
 func TestHandleTelegramSaveHTMXTriggersChannelsRefresh(t *testing.T) {
@@ -335,7 +379,7 @@ func TestHandleTelegramRemoveNonHTMXRedirectsToChannelsAndClearsSettings(t *test
 
 func TestHandleTelegramRemoveMissingSettingsRepoReturnsError(t *testing.T) {
 	e := echo.New()
-	h := New(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	h := New(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/channels/telegram/remove", nil)
 	rec := httptest.NewRecorder()
@@ -351,9 +395,10 @@ func TestHandleTelegramRemoveMissingSettingsRepoReturnsError(t *testing.T) {
 
 func TestChannelRemovalResetsAllSettings(t *testing.T) {
 	tests := []struct {
-		name   string
-		path   string
-		resets map[string]string
+		name             string
+		path             string
+		resets           map[string]string
+		configureHandler func(*Handler)
 	}{
 		{
 			name: "telegram",
@@ -395,6 +440,18 @@ func TestChannelRemovalResetsAllSettings(t *testing.T) {
 			},
 		},
 		{
+			name: "discord",
+			path: "/channels/discord/remove",
+			resets: map[string]string{
+				service.DiscordSettingBotToken:      "",
+				service.DiscordSettingBotUserID:     "",
+				service.DiscordSettingSendResponses: "",
+			},
+			configureHandler: func(h *Handler) {
+				h.SetDiscordService(&fakeDiscordService{disconnectFn: func(context.Context) error { return nil }})
+			},
+		},
+		{
 			name: "discord service unavailable fallback",
 			path: "/channels/discord/remove",
 			resets: map[string]string{
@@ -425,6 +482,9 @@ func TestChannelRemovalResetsAllSettings(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			h, e, _ := setupTestHandler(t)
+			if tc.configureHandler != nil {
+				tc.configureHandler(h)
+			}
 			for key := range tc.resets {
 				require.NoError(t, h.settingsRepo.Set(context.Background(), key, "configured"))
 			}
@@ -516,14 +576,24 @@ func (s *removalEmailService) Stop() {
 
 func TestChannelRemovalSettingFailureDoesNotReportSuccess(t *testing.T) {
 	tests := []struct {
-		name     string
-		path     string
-		firstKey string
-		failKey  string
+		name             string
+		path             string
+		firstKey         string
+		failKey          string
+		configureHandler func(*Handler)
 	}{
 		{name: "telegram", path: "/channels/telegram/remove", firstKey: service.TelegramSettingBotToken, failKey: service.TelegramSettingSendResponses},
 		{name: "github", path: "/channels/github/remove", firstKey: service.GitHubSettingAppID, failKey: service.GitHubSettingAppSlug},
 		{name: "slack", path: "/channels/slack/remove", firstKey: service.SlackSettingClientID, failKey: service.SlackSettingClientSecret},
+		{
+			name:     "discord",
+			path:     "/channels/discord/remove",
+			firstKey: service.DiscordSettingBotToken,
+			failKey:  service.DiscordSettingBotUserID,
+			configureHandler: func(h *Handler) {
+				h.SetDiscordService(&fakeDiscordService{disconnectFn: func(context.Context) error { return nil }})
+			},
+		},
 		{name: "discord fallback", path: "/channels/discord/remove", firstKey: service.DiscordSettingBotToken, failKey: service.DiscordSettingBotUserID},
 		{name: "email", path: "/channels/email/remove", firstKey: service.EmailSettingProvider, failKey: service.EmailSettingAddress},
 	}
@@ -531,6 +601,9 @@ func TestChannelRemovalSettingFailureDoesNotReportSuccess(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			h, e, _, db := setupTestHandlerWithDB(t)
+			if tc.configureHandler != nil {
+				tc.configureHandler(h)
+			}
 			require.NoError(t, h.settingsRepo.Set(context.Background(), tc.firstKey, "configured"))
 			require.NoError(t, h.settingsRepo.Set(context.Background(), tc.failKey, "configured"))
 			trigger := fmt.Sprintf(`CREATE TRIGGER fail_channel_setting_reset

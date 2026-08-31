@@ -1,0 +1,76 @@
+# Release Signing Setup
+
+OpenVibely public desktop releases require OS signing before auto-update is enabled.
+
+## macOS
+
+You need an Apple Developer Program account.
+
+1. Create a Developer ID Application certificate.
+2. Create a notarytool profile:
+
+```bash
+.openvibely/skills/openvibely_release_workflow/scripts/check-release-signing.sh --setup
+```
+
+This creates `.release-signing.env` if it does not exist. Fill in the placeholders once; future checks load it automatically.
+
+3. Put these in `.release-signing.env`:
+
+```bash
+OPENVIBELY_MACOS_SIGN_IDENTITY='Developer ID Application: Your Name or Company (TEAMID)'
+OPENVIBELY_MACOS_NOTARY_PROFILE='openvibely-notary'
+```
+
+## Windows From macOS
+
+You need an Azure Artifact Signing account with completed identity validation
+and an active Public Trust certificate profile.
+
+Put these in `.release-signing.env`:
+
+```bash
+OPENVIBELY_AZURE_SIGNING_ENDPOINT='<azure-region>.codesigning.azure.net'
+OPENVIBELY_AZURE_SIGNING_ACCOUNT='<artifact-signing-account-name>'
+OPENVIBELY_AZURE_SIGNING_PROFILE='<certificate-profile-name>'
+OPENVIBELY_AZURE_SUBSCRIPTION_ID='<optional-azure-subscription-id>'
+OPENVIBELY_WINDOWS_SIGN_COMMAND='/absolute/path/to/openvibely/.openvibely/skills/openvibely_release_workflow/scripts/sign-windows.sh'
+OPENVIBELY_WINDOWS_VERIFY_COMMAND='/absolute/path/to/openvibely/.openvibely/skills/openvibely_release_workflow/scripts/verify-windows.sh'
+```
+
+The signer uses `jsign` locally on macOS and obtains a short-lived Azure access
+token with `az account get-access-token`. If `AZURE_ACCESS_TOKEN` is already set,
+the script uses that token and does not call `az`.
+
+## Check Readiness
+
+```bash
+.openvibely/skills/openvibely_release_workflow/scripts/check-release-signing.sh
+```
+
+On macOS, the scripts install local release tooling under `.tools/` when needed:
+
+- `.tools/osslsigncode` for Windows signature verification.
+- `.tools/gh` for GitHub release publishing when no runnable system GitHub CLI
+  is present.
+- `.tools/wails3` for desktop release builds when no runnable system Wails CLI
+  is present.
+- `.tools/jsign` for Azure Artifact Signing.
+- `.tools/jre` for the Java runtime used by `jsign` when no runnable system Java
+  is present.
+- `.tools/python` for the Python 3.14 runtime used by local Azure CLI setup
+  when no runnable system Python 3.14+ is present.
+- `.tools/azure-cli` for `az` when the Azure CLI is absent.
+
+You can also provide `AZURE_ACCESS_TOKEN` before signing to skip Azure CLI
+authentication. Homebrew is not required. Building Linux desktop artifacts on
+macOS requires Docker and the Wails cross-build images unless both Linux
+desktop binaries are supplied through the documented prebuilt artifact
+variables. macOS and Windows desktop builds do not require Docker. The check
+must pass before publishing official macOS or Windows auto-update artifacts.
+
+The normal release command runs this setup/check automatically:
+
+```bash
+.openvibely/skills/openvibely_release_workflow/scripts/release.sh <version>
+```

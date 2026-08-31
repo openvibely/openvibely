@@ -27,7 +27,7 @@ func (h *Handler) ViewUpcoming(c echo.Context) error {
 	if isHTMX {
 		return render(c, http.StatusOK, pages.UpcomingContent(upcoming, currentProjectID))
 	}
-	projects, _ := h.projectSvc.List(ctx)
+	projects, _ := h.projectSvc.ListSelectorOptions(ctx)
 	return render(c, http.StatusOK, pages.UpcomingPage(projects, currentProjectID, upcoming))
 }
 
@@ -54,7 +54,7 @@ func (h *Handler) ViewHistory(c echo.Context) error {
 	if isHTMX {
 		return render(c, http.StatusOK, pages.HistoryContent(history, currentProjectID))
 	}
-	projects, _ := h.projectSvc.List(ctx)
+	projects, _ := h.projectSvc.ListSelectorOptions(ctx)
 	return render(c, http.StatusOK, pages.HistoryPage(projects, currentProjectID, history))
 }
 

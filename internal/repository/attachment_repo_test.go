@@ -6,9 +6,51 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/openvibely/openvibely/internal/database"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
+
+func TestAttachmentRepo_CreateUsesDedicatedWriter(t *testing.T) {
+	connections, err := database.NewReadWrite(filepath.Join(t.TempDir(), "attachments.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connections.Close()
+	unregister := RegisterDedicatedWriter(connections.Reader, connections.Writer)
+	defer unregister()
+
+	ctx := context.Background()
+	if _, err := connections.Writer.ExecContext(ctx, `
+		INSERT INTO projects(id, name) VALUES ('attachment-project', 'Attachment project');
+		INSERT INTO tasks(id, project_id, title, category, status)
+		VALUES ('attachment-task', 'attachment-project', 'Attachment task', 'active', 'pending');
+	`); err != nil {
+		t.Fatal(err)
+	}
+
+	attachment := &models.Attachment{
+		TaskID:    "attachment-task",
+		FileName:  "attachment.txt",
+		FilePath:  "/tmp/attachment.txt",
+		MediaType: "text/plain",
+		FileSize:  10,
+	}
+	if err := NewAttachmentRepo(connections.Reader).Create(ctx, attachment); err != nil {
+		t.Fatalf("create through split pool: %v", err)
+	}
+	if attachment.ID == "" || attachment.CreatedAt.IsZero() {
+		t.Fatalf("created attachment = %#v", attachment)
+	}
+
+	loaded, err := NewAttachmentRepo(connections.Reader).GetByID(ctx, attachment.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded == nil || loaded.ID != attachment.ID {
+		t.Fatalf("loaded attachment = %#v", loaded)
+	}
+}
 
 func TestAttachmentRepo_Create(t *testing.T) {
 	db := testutil.NewTestDB(t)
@@ -578,6 +620,11 @@ func TestAttachmentRepo_CleanupOrphanedFiles_RelativeRootSkipsChatAndPreservesTr
 		t.Fatalf("failed to create tracked chat attachment: %v", err)
 	}
 
+	untrackedChatFile := filepath.Join(chatDir, "untracked-chat.png")
+	if err := os.WriteFile(untrackedChatFile, []byte("orphaned chat"), 0644); err != nil {
+		t.Fatalf("failed to create untracked chat file: %v", err)
+	}
+
 	cwd, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("failed to get cwd: %v", err)
@@ -603,5 +650,8 @@ func TestAttachmentRepo_CleanupOrphanedFiles_RelativeRootSkipsChatAndPreservesTr
 	}
 	if _, err := os.Stat(trackedChatFile); os.IsNotExist(err) {
 		t.Fatal("chat attachment should not be touched by task attachment cleanup")
+	}
+	if _, err := os.Stat(untrackedChatFile); os.IsNotExist(err) {
+		t.Fatal("untracked chat file should not be touched by task attachment cleanup")
 	}
 }

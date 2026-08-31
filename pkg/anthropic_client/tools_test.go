@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/openvibely/openvibely/pkg/agenttools"
 )
 
 func TestExecReadFile(t *testing.T) {
@@ -33,7 +35,7 @@ func TestExecReadFile(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if strings.Contains(out, "     1\t") {
+		if strings.Contains(out, "1\tline1\n") {
 			t.Error("should not contain line 1")
 		}
 		if !strings.Contains(out, "line3") {
@@ -74,6 +76,35 @@ func TestExecReadFile(t *testing.T) {
 			t.Error("expected line1 with absolute path")
 		}
 	})
+}
+
+func TestExecReadFileUsesCompactLinePrefixes(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "lines.txt"), []byte("  first\nsecond\nthird\nfourth\nfifth\nsixth\nseventh\neighth\nninth\nlast\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := ExecuteTool(context.Background(), dir, "read_file", json.RawMessage(`{"file_path":"lines.txt","limit":10}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(out, "1\t  first\n") || !strings.Contains(out, "10\tlast\n") {
+		t.Fatalf("compact single/double-digit line prefixes or source indentation lost: %q", out)
+	}
+	if strings.Contains(out, "     1\t") || strings.Contains(out, "    10\t") {
+		t.Fatalf("read output retains fixed-width line-number padding: %q", out)
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "wide.txt"), []byte(strings.Repeat("\n", 99999)+"  wide\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err = ExecuteTool(context.Background(), dir, "read_file", json.RawMessage(`{"file_path":"wide.txt","offset":99999,"limit":1}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(out, "100000\t  wide\n") {
+		t.Fatalf("wide line prefix or source indentation changed: %q", out)
+	}
 }
 
 func TestExecWriteFile(t *testing.T) {
@@ -255,8 +286,8 @@ func TestNormalizeExecBashTimeout(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := normalizeExecBashTimeout(tt.in); got != tt.want {
-				t.Fatalf("normalizeExecBashTimeout(%d) = %d, want %d", tt.in, got, tt.want)
+			if got := agenttools.NormalizeBashTimeout(tt.in, agenttools.BashPolicy{DefaultTimeoutSeconds: defaultExecBashTimeoutSeconds}); got != tt.want {
+				t.Fatalf("NormalizeBashTimeout(%d) = %d, want %d", tt.in, got, tt.want)
 			}
 		})
 	}

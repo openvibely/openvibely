@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -18,19 +19,25 @@ import (
 type GitHubIssueRuntimeProvider interface {
 	ResolveRepo(ctx context.Context, repoURL, repoPath string) (*GitHubRepoRef, error)
 	DefaultBranch(ctx context.Context, repo *GitHubRepoRef) (string, error)
-	PublishBranch(ctx context.Context, repo *GitHubRepoRef, publishReq GitHubPublishBranchRequest) error
+	PublishBranch(ctx context.Context, repo *GitHubRepoRef, publishReq GitHubPublishBranchRequest) (*GitHubPublishBranchResult, error)
+	GetPullRequest(ctx context.Context, repo *GitHubRepoRef, number int) (*GitHubPullRequest, error)
 	FindPullRequestByBranch(ctx context.Context, repo *GitHubRepoRef, branch string) (*GitHubPullRequest, error)
 	CreatePullRequest(ctx context.Context, repo *GitHubRepoRef, createReq GitHubCreatePullRequestRequest) (*GitHubPullRequest, error)
+	EnsureIssueLabels(ctx context.Context, repo *GitHubRepoRef, labels []string) error
 	CreateIssue(ctx context.Context, repo *GitHubRepoRef, createReq GitHubCreateIssueRequest) (*GitHubIssue, error)
 	GetIssue(ctx context.Context, repo *GitHubRepoRef, issueNumber int) (*GitHubIssue, error)
 	GetAuthenticatedUser(ctx context.Context) (*GitHubAuthenticatedUser, error)
+	GetAuthenticatedUserForRepo(ctx context.Context, repo *GitHubRepoRef) (*GitHubAuthenticatedUser, error)
 	ListAuthenticatedAssignedIssues(ctx context.Context, repo *GitHubRepoRef) (*GitHubAuthenticatedUser, []GitHubIssue, error)
+	ListAuthenticatedCreatedIssues(ctx context.Context, repo *GitHubRepoRef) (*GitHubAuthenticatedUser, []GitHubIssue, error)
 	ListAssignedIssues(ctx context.Context, repo *GitHubRepoRef, assignee string) ([]GitHubIssue, error)
 	ListAssignedIssuesWithPullRequests(ctx context.Context, repo *GitHubRepoRef, assignee string) ([]GitHubIssueWithPullRequest, error)
 	FindPullRequestForIssue(ctx context.Context, repo *GitHubRepoRef, issueNumber int) (*GitHubPullRequest, error)
 	ListPullRequestFeedback(ctx context.Context, repo *GitHubRepoRef, prNumber int) ([]GitHubPullRequestFeedback, error)
 	CommentOnIssue(ctx context.Context, repo *GitHubRepoRef, issueNumber int, bodyText string) error
 	AddLabelsToIssue(ctx context.Context, repo *GitHubRepoRef, issueNumber int, labels []string) error
+	CloseIssue(ctx context.Context, repo *GitHubRepoRef, issueNumber int) error
+	GlobalAPIEndpoint(ctx context.Context) string
 }
 
 const (
@@ -43,12 +50,16 @@ type githubIssueRuntimeOptions struct {
 	ProjectRepo              *repository.ProjectRepo
 	TaskRepo                 *repository.TaskRepo
 	TaskPullRequestRepo      *repository.TaskPullRequestRepo
+	TaskCommitStatRepo       *repository.TaskCommitStatRepo
 	GitHubPRFeedbackRepo     *repository.GitHubPRFeedbackRepo
 	GitHubAuthRepo           *repository.GitHubAuthRepo
 	ThreadInputRepo          *repository.ThreadInputRepo
 	AutomationRepo           *repository.AutomationRepo
 	GitHub                   GitHubIssueRuntimeProvider
 	AfterPRFeedbackForwarded func(taskID string)
+	AfterPullRequestOpened   func(taskID string, result *OpenTaskPullRequestResult)
+	TaskCreatedVia           string
+	SuppressIssueComments    bool
 }
 
 type githubCreateIssueRuntimeInput struct {
@@ -59,29 +70,11 @@ type githubCreateIssueRuntimeInput struct {
 	RepoURL   string   `json:"repo_url"`
 }
 
-type githubIssueRuntimeInput struct {
-	IssueNumber           int      `json:"issue_number"`
-	IssueURL              string   `json:"issue_url"`
-	RepoURL               string   `json:"repo_url"`
-	Assignee              string   `json:"assignee"`
-	GitHubLogin           string   `json:"github_login"`
-	Body                  string   `json:"body"`
-	Labels                []string `json:"labels"`
-	TaskID                string   `json:"task_id"`
-	Title                 string   `json:"title"`
-	PRTitle               string   `json:"pr_title"`
-	PRBody                string   `json:"pr_body"`
-	Base                  string   `json:"base"`
-	Draft                 bool     `json:"draft"`
-	ExpectedHeadSHA       string   `json:"expected_head_sha"`
-	ConfirmHistoryRewrite bool     `json:"confirm_history_rewrite"`
-}
-
 func buildGitHubIssueRuntimeTools(opts githubIssueRuntimeOptions) *llmcontracts.RuntimeTools {
 	if opts.GitHub == nil || opts.ProjectRepo == nil || strings.TrimSpace(opts.ProjectID) == "" {
 		return nil
 	}
-	defs := gitHubIssueRuntimeToolDefs()
+	defs := gitHubIssueRuntimeToolDefs(opts.SuppressIssueComments)
 	if len(defs) == 0 {
 		return nil
 	}
@@ -92,11 +85,11 @@ func buildGitHubIssueRuntimeTools(opts githubIssueRuntimeOptions) *llmcontracts.
 	}
 }
 
-func gitHubIssueRuntimeToolDefs() []llmcontracts.RuntimeToolDefinition {
+func gitHubIssueRuntimeToolDefs(suppressIssueComments bool) []llmcontracts.RuntimeToolDefinition {
 	defs := chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, false)
 	filtered := make([]llmcontracts.RuntimeToolDefinition, 0, 6)
 	for _, def := range defs {
-		if strings.HasPrefix(strings.ToLower(def.Name), "github_") {
+		if strings.HasPrefix(strings.ToLower(def.Name), "github_") && (!suppressIssueComments || def.Name != "github_comment_on_issue") {
 			filtered = append(filtered, def)
 		}
 	}
@@ -115,10 +108,24 @@ func runtimeToolDefinitionSet(defs []llmcontracts.RuntimeToolDefinition) map[str
 }
 
 func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]chatcontrol.RuntimeActionHandler {
+	core := NewGitHubIssueActionCore(opts.GitHub, opts.GitHubAuthRepo, opts.ProjectID, chatcontrol.DecodeRuntimeToolInput,
+		func(ctx context.Context, repoURL string) (*GitHubRepoRef, error) {
+			return resolveGitHubRepoForRuntimeToolURL(ctx, opts, repoURL)
+		})
+	filterAndRecordAssigned := func(ctx context.Context, repo *GitHubRepoRef, issues []GitHubIssue) ([]GitHubIssue, error) {
+		filtered, err := filterGitHubAssignedIssuesForAutomationInbox(ctx, opts, repo, issues)
+		if err != nil {
+			return nil, err
+		}
+		if err := recordGitHubAssignedIssues(ctx, opts, repo, filtered); err != nil {
+			return nil, err
+		}
+		return filtered, nil
+	}
 	return map[string]chatcontrol.RuntimeActionHandler{
 		"github_create_issue": func(ctx context.Context, input json.RawMessage) (string, error) {
 			var req githubCreateIssueRuntimeInput
-			if err := decodeRuntimeToolInput(input, &req); err != nil {
+			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 				return "", err
 			}
 			automationBound, err := applyAutomationGitHubIssueConfiguration(ctx, opts, &req)
@@ -129,29 +136,45 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 			if err != nil {
 				return "", err
 			}
+			requiredLabels := []string(nil)
+			if automationBound && len(req.Labels) > 0 {
+				requiredLabels = append(requiredLabels, req.Labels...)
+				if err := opts.GitHub.EnsureIssueLabels(ctx, repo, requiredLabels); err != nil {
+					return "", fmt.Errorf("ensuring GitHub issue labels: %w", err)
+				}
+			}
 			activityKey := githubIssueCreationActivityKey(ctx, repo, req)
 			automationContext, hasAutomationContext := AutomationContextFromContext(ctx)
 			var reservedBindings []models.AutomationBinding
 			var reconciliationBindings []models.AutomationBinding
+			var dedupSourceBindings []models.AutomationBinding
 			reservationNeedsReconciliation := false
 			if opts.AutomationRepo != nil && hasAutomationContext {
 				for _, binding := range automationContext.Bindings {
 					if binding.InvocationID == "" {
 						continue
 					}
-					issueNode, nodeErr := opts.AutomationRepo.GetConnectedNodeByRole(ctx, opts.ProjectID, binding.AutomationID, binding.VersionID, binding.NodeID, "create_github_issue", true)
+					effectiveBinding, bindingErr := effectiveAutomationGitHubIssueBinding(ctx, opts, binding)
+					if bindingErr != nil {
+						return "", bindingErr
+					}
+					if effectiveBinding.InvocationID == "" {
+						continue
+					}
+					issueNode, nodeErr := opts.AutomationRepo.GetConnectedNodeByRole(ctx, opts.ProjectID, effectiveBinding.AutomationID, effectiveBinding.VersionID, effectiveBinding.NodeID, "create_github_issue", true)
 					if nodeErr != nil {
 						return "", nodeErr
 					}
 					if issueNode == nil {
 						continue
 					}
-					binding.NodeID = issueNode.ID
-					resourceID, reserveErr := opts.AutomationRepo.ReserveExternalActivity(ctx, opts.ProjectID, binding,
+					dedupSourceBindings = append(dedupSourceBindings, effectiveBinding)
+					effectiveBinding.NodeID = issueNode.ID
+					resourceID, reserveErr := opts.AutomationRepo.ReserveExternalActivity(ctx, opts.ProjectID, effectiveBinding,
 						activityKey, "create_github_issue", "github_issue")
 					if errors.Is(reserveErr, repository.ErrAutomationExternalReconciliation) {
 						reservationNeedsReconciliation = true
-						reconciliationBindings = append(reconciliationBindings, binding)
+						reconciliationBindings = append(reconciliationBindings, effectiveBinding)
 						continue
 					}
 					if reserveErr != nil {
@@ -159,10 +182,10 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 					}
 					if resourceID != "" {
 						reservationNeedsReconciliation = true
-						reconciliationBindings = append(reconciliationBindings, binding)
+						reconciliationBindings = append(reconciliationBindings, effectiveBinding)
 						continue
 					}
-					reservedBindings = append(reservedBindings, binding)
+					reservedBindings = append(reservedBindings, effectiveBinding)
 				}
 			}
 			var dedupFingerprint, dedupOwner string
@@ -175,10 +198,14 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 				if !hasAutomationContext || !hasExecution {
 					return "", errors.New("complete Automation source is required for GitHub issue creation")
 				}
-				dedupFingerprint = githubIssueTitleFingerprint(req.Title)
+				dedupSourceContext := automationContext
+				if len(dedupSourceBindings) > 0 {
+					dedupSourceContext = models.AutomationContext{ProjectID: automationContext.ProjectID, Bindings: dedupSourceBindings}
+				}
+				dedupFingerprint = githubIssueDedupFingerprint(req.Title)
 				dedupOwner = activityKey
 				dedupClaim, err = opts.AutomationRepo.AcquireGitHubIssueDedupLease(ctx, opts.ProjectID, repo.FullName, dedupFingerprint,
-					dedupOwner, repository.AutomationGitHubIssueDedupSource{Context: automationContext, TaskID: taskID, ExecutionID: executionID},
+					dedupOwner, repository.AutomationGitHubIssueDedupSource{Context: dedupSourceContext, TaskID: taskID, ExecutionID: executionID},
 					time.Now().UTC(), automationGitHubIssueDedupLeaseDuration)
 				if err != nil {
 					if releaseErr := releaseGitHubIssueActivityReservationsDetached(opts, reservedBindings, activityKey); releaseErr != nil {
@@ -187,7 +214,16 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 					return "", err
 				}
 				if dedupClaim.IssueNumber > 0 {
-					issue, projectionErr := repairAutomationGitHubIssueProjection(opts, repo, req.Title, dedupClaim)
+					issue := githubIssueFromCanonicalResource(githubIssueResourceID(repo, dedupClaim.IssueNumber))
+					if len(requiredLabels) > 0 {
+						issue, err = ensureReusedGitHubIssueLabels(ctx, opts.GitHub, repo, dedupClaim.IssueNumber, requiredLabels)
+						if err != nil {
+							_ = releaseGitHubIssueActivityReservationsDetached(opts, reservedBindings, activityKey)
+							return "", fmt.Errorf("%w: verifying reused GitHub issue #%d labels: %v",
+								repository.ErrAutomationExternalReconciliation, dedupClaim.IssueNumber, err)
+						}
+					}
+					_, projectionErr := repairAutomationGitHubIssueProjection(opts, repo, req.Title, dedupClaim)
 					if projectionErr != nil {
 						_ = releaseGitHubIssueActivityReservationsDetached(opts, reservedBindings, activityKey)
 						return "", fmt.Errorf("%w: repairing created GitHub issue #%d projection: %v", repository.ErrAutomationExternalReconciliation, dedupClaim.IssueNumber, projectionErr)
@@ -224,10 +260,17 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 				}
 				return "", err
 			}
-			if dedupFingerprint != "" {
-				if issue == nil {
+			if issue == nil {
+				if dedupFingerprint != "" {
 					return "", fmt.Errorf("%w: GitHub issue creation returned no issue", repository.ErrAutomationExternalReconciliation)
 				}
+				return "", errors.New("GitHub issue creation returned no issue")
+			}
+			if missing := missingGitHubIssueLabels(requiredLabels, issue.Labels); len(missing) > 0 {
+				return "", fmt.Errorf("%w: created GitHub issue #%d is missing required category labels: %s",
+					repository.ErrAutomationExternalReconciliation, issue.Number, strings.Join(missing, ", "))
+			}
+			if dedupFingerprint != "" {
 				persistenceCtx, cancel := context.WithTimeout(context.Background(), automationGitHubIssueDedupPersistenceTimeout)
 				completeErr := opts.AutomationRepo.CompleteGitHubIssueDedupLease(persistenceCtx, opts.ProjectID, repo.FullName, dedupFingerprint, dedupOwner, issue.Number)
 				cancel()
@@ -243,62 +286,16 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 			}
 			return githubIssueRuntimeJSON(map[string]any{"ok": true, "issue": issue})
 		},
-		"github_get_issue": func(ctx context.Context, input json.RawMessage) (string, error) {
-			var req githubIssueRuntimeInput
-			if err := decodeRuntimeToolInput(input, &req); err != nil {
-				return "", err
-			}
-			repo, err := resolveGitHubRepoForRuntimeToolURL(ctx, opts, req.RepoURL)
-			if err != nil {
-				return "", err
-			}
-			issue, err := opts.GitHub.GetIssue(ctx, repo, req.IssueNumber)
-			if err != nil {
-				return "", err
-			}
-			return githubIssueRuntimeJSON(map[string]any{"ok": true, "issue": issue})
-		},
-		"github_get_project_inbox": func(ctx context.Context, _ json.RawMessage) (string, error) {
-			if opts.GitHubAuthRepo == nil {
-				return "", fmt.Errorf("github auth repository unavailable")
-			}
-			actors, err := opts.GitHubAuthRepo.ListAuthorizedInboxAssignees(ctx)
-			if err != nil {
-				return "", err
-			}
-			assignees := make([]string, 0, len(actors))
-			for _, actor := range actors {
-				if login := repository.NormalizeGitHubLogin(actor.GitHubLogin); login != "" {
-					assignees = append(assignees, login)
-				}
-			}
-			legacyInbox, err := opts.GitHubAuthRepo.GetEnabledProjectInbox(ctx, opts.ProjectID)
-			if err != nil {
-				return "", err
-			}
-			return githubIssueRuntimeJSON(map[string]any{"ok": true, "configured": len(assignees) > 0, "assignees": assignees, "authorized_users": actors, "legacy_inbox": legacyInbox})
-		},
-		"github_is_actor_authorized": func(ctx context.Context, input json.RawMessage) (string, error) {
-			if opts.GitHubAuthRepo == nil {
-				return "", fmt.Errorf("github auth repository unavailable")
-			}
-			var req githubIssueRuntimeInput
-			if err := decodeRuntimeToolInput(input, &req); err != nil {
-				return "", err
-			}
-			login := strings.TrimSpace(req.GitHubLogin)
-			if login == "" {
-				return "", fmt.Errorf("github_login is required")
-			}
-			authorized, err := opts.GitHubAuthRepo.IsActorAuthorized(ctx, login)
-			if err != nil {
-				return "", err
-			}
-			return githubIssueRuntimeJSON(map[string]any{"ok": true, "github_login": repository.NormalizeGitHubLogin(login), "authorized": authorized})
-		},
+		"github_get_issue":           core.ExecuteGetIssue,
+		"github_get_project_inbox":   core.ExecuteGetProjectInbox,
+		"github_is_actor_authorized": core.ExecuteIsActorAuthorized,
 		"github_list_my_assigned_issues": func(ctx context.Context, input json.RawMessage) (string, error) {
-			var req githubIssueRuntimeInput
-			if err := decodeRuntimeToolInput(input, &req); err != nil {
+			req, err := core.request(input)
+			if err != nil {
+				return "", err
+			}
+			limit, offset, err := assignedIssueListPageForInput(input, req)
+			if err != nil {
 				return "", err
 			}
 			repo, err := resolveGitHubRepoForRuntimeToolURL(ctx, opts, req.RepoURL)
@@ -309,19 +306,29 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 			if err != nil {
 				return "", err
 			}
-			if err := recordGitHubAssignedIssues(ctx, opts, repo, issues); err != nil {
+			issues, err = filterAndRecordAssigned(ctx, repo, issues)
+			if err != nil {
 				return "", err
 			}
-			return githubIssueRuntimeJSON(map[string]any{"ok": true, "account": user, "issues": issues})
+			summaries, nextOffset := compactAssignedGitHubIssues(issues, limit, offset)
+			return githubIssueRuntimeJSON(map[string]any{"ok": true, "account": user, "issues": summaries, "returned": len(summaries), "total": len(issues), "offset": offset, "next_offset": nextOffset, "truncated": nextOffset > 0})
 		},
+		"github_list_existing_automation_issues": core.ExecuteListExistingAutomationIssues,
 		"github_list_assigned_issues": func(ctx context.Context, input json.RawMessage) (string, error) {
-			var req githubIssueRuntimeInput
-			if err := decodeRuntimeToolInput(input, &req); err != nil {
+			req, err := core.request(input)
+			if err != nil {
+				return "", err
+			}
+			limit, offset, err := assignedIssueListPageForInput(input, req)
+			if err != nil {
 				return "", err
 			}
 			assignee := strings.TrimSpace(req.Assignee)
 			if assignee == "" {
 				return "", fmt.Errorf("assignee is required")
+			}
+			if err := core.requireAuthorizedAssignee(ctx, assignee); err != nil {
+				return "", err
 			}
 			repo, err := resolveGitHubRepoForRuntimeToolURL(ctx, opts, req.RepoURL)
 			if err != nil {
@@ -331,57 +338,17 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 			if err != nil {
 				return "", err
 			}
-			if err := recordGitHubAssignedIssues(ctx, opts, repo, issues); err != nil {
-				return "", err
-			}
-			return githubIssueRuntimeJSON(map[string]any{"ok": true, "assignee": repository.NormalizeGitHubLogin(assignee), "issues": issues})
-		},
-		"github_list_assigned_issues_with_prs": func(ctx context.Context, input json.RawMessage) (string, error) {
-			var req githubIssueRuntimeInput
-			if err := decodeRuntimeToolInput(input, &req); err != nil {
-				return "", err
-			}
-			if strings.TrimSpace(req.Assignee) == "" {
-				return "", fmt.Errorf("assignee is required")
-			}
-			repo, err := resolveGitHubRepoForRuntimeToolURL(ctx, opts, req.RepoURL)
+			issues, err = filterAndRecordAssigned(ctx, repo, issues)
 			if err != nil {
 				return "", err
 			}
-			items, err := opts.GitHub.ListAssignedIssuesWithPullRequests(ctx, repo, req.Assignee)
-			if err != nil {
-				return "", err
-			}
-			return githubIssueRuntimeJSON(map[string]any{"ok": true, "items": items, "skipped_without_pr": "Assigned issues without an associated pull request are skipped."})
+			summaries, nextOffset := compactAssignedGitHubIssues(issues, limit, offset)
+			return githubIssueRuntimeJSON(map[string]any{"ok": true, "assignee": repository.NormalizeGitHubLogin(assignee), "issues": summaries, "returned": len(summaries), "total": len(issues), "offset": offset, "next_offset": nextOffset, "truncated": nextOffset > 0})
 		},
-		"github_comment_on_issue": func(ctx context.Context, input json.RawMessage) (string, error) {
-			var req githubIssueRuntimeInput
-			if err := decodeRuntimeToolInput(input, &req); err != nil {
-				return "", err
-			}
-			repo, err := resolveGitHubRepoForRuntimeToolURL(ctx, opts, req.RepoURL)
-			if err != nil {
-				return "", err
-			}
-			if err := opts.GitHub.CommentOnIssue(ctx, repo, req.IssueNumber, req.Body); err != nil {
-				return "", err
-			}
-			return githubIssueRuntimeJSON(map[string]any{"ok": true, "issue_number": req.IssueNumber})
-		},
-		"github_add_issue_labels": func(ctx context.Context, input json.RawMessage) (string, error) {
-			var req githubIssueRuntimeInput
-			if err := decodeRuntimeToolInput(input, &req); err != nil {
-				return "", err
-			}
-			repo, err := resolveGitHubRepoForRuntimeToolURL(ctx, opts, req.RepoURL)
-			if err != nil {
-				return "", err
-			}
-			if err := opts.GitHub.AddLabelsToIssue(ctx, repo, req.IssueNumber, req.Labels); err != nil {
-				return "", err
-			}
-			return githubIssueRuntimeJSON(map[string]any{"ok": true, "issue_number": req.IssueNumber, "labels": req.Labels})
-		},
+		"github_list_assigned_issues_with_prs": core.ExecuteListAssignedIssuesWithPRs,
+		"github_comment_on_issue":              core.ExecuteCommentOnIssue,
+		"github_add_issue_labels":              core.ExecuteAddIssueLabels,
+		"github_close_issue":                   core.ExecuteCloseIssue,
 		"github_open_pull_request": func(ctx context.Context, input json.RawMessage) (string, error) {
 			if opts.TaskPullRequestRepo == nil {
 				return "", fmt.Errorf("task pull request repository unavailable")
@@ -389,8 +356,8 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 			if opts.TaskRepo == nil {
 				return "", fmt.Errorf("task repository unavailable")
 			}
-			var req githubIssueRuntimeInput
-			if err := decodeRuntimeToolInput(input, &req); err != nil {
+			var req GitHubIssueActionRequest
+			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 				return "", err
 			}
 			project, err := resolveGitHubRuntimeProject(ctx, opts)
@@ -401,15 +368,37 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 			if err != nil {
 				return "", err
 			}
-			automationBound, err := applyAutomationPullRequestConfiguration(ctx, opts, task, &req)
+			automationBound, err := applyAutomationPullRequestConfiguration(ctx, opts, task, &req, true)
 			if err != nil {
 				return "", err
+			}
+			if automationBound {
+				requiresStructuredBody, err := automationPullRequestRequiresStructuredBody(ctx, opts)
+				if err != nil {
+					return "", err
+				}
+				if requiresStructuredBody {
+					trustedIssue, err := automationGitHubSDLCSourceIssue(ctx, opts, project, task)
+					if err != nil {
+						return "", err
+					}
+					if req.IssueNumber != trustedIssue.Number {
+						return "", fmt.Errorf("GitHub SDLC pull request issue_number must match the task's source issue #%d", trustedIssue.Number)
+					}
+					if suppliedIssueURL := strings.TrimSpace(req.IssueURL); suppliedIssueURL != "" && suppliedIssueURL != trustedIssue.URL {
+						return "", fmt.Errorf("GitHub SDLC pull request issue_url must match the task's source issue %s", trustedIssue.URL)
+					}
+					req.IssueURL = trustedIssue.URL
+					if err := validateGitHubSDLCReviewPRBody(req.PRBody, trustedIssue.Number); err != nil {
+						return "", err
+					}
+				}
 			}
 			var issueNumber *int
 			if req.IssueNumber > 0 {
 				issueNumber = &req.IssueNumber
 			}
-			pullRequestService := NewTaskPullRequestService(opts.GitHub, opts.TaskPullRequestRepo)
+			pullRequestService := NewTaskPullRequestService(opts.GitHub, opts.TaskPullRequestRepo).SetTaskCommitStatRepo(opts.TaskCommitStatRepo)
 			var result *OpenTaskPullRequestResult
 			if automationBound {
 				result, err = pullRequestService.OpenForAutomationTask(ctx, project, task, OpenTaskPullRequestOptions{
@@ -432,8 +421,14 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 			if err != nil {
 				return "", err
 			}
+			if err := ConfigureGitHubRepoEndpoint(repoRef, opts.GitHub.GlobalAPIEndpoint(ctx)); err != nil {
+				return "", err
+			}
 			if err := recordGitHubPullRequestOpened(ctx, opts, repoRef, task, req, result); err != nil {
 				return "", err
+			}
+			if opts.AfterPullRequestOpened != nil {
+				opts.AfterPullRequestOpened(task.ID, result)
 			}
 			return githubIssueRuntimeJSON(map[string]any{"ok": true, "task_id": task.ID, "pull_request": result.PullRequest, "reused_existing_record": result.ReusedExistingRecord, "reused_remote": result.ReusedRemote, "created": result.Created})
 		},
@@ -444,8 +439,8 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 			if opts.TaskRepo == nil {
 				return "", fmt.Errorf("task repository unavailable")
 			}
-			var req githubIssueRuntimeInput
-			if err := decodeRuntimeToolInput(input, &req); err != nil {
+			var req GitHubIssueActionRequest
+			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 				return "", err
 			}
 			if !req.ConfirmHistoryRewrite {
@@ -459,11 +454,11 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 			if err != nil {
 				return "", err
 			}
-			automationBound, err := applyAutomationPullRequestConfiguration(ctx, opts, task, &req)
+			automationBound, err := applyAutomationPullRequestConfiguration(ctx, opts, task, &req, false)
 			if err != nil {
 				return "", err
 			}
-			pullRequestService := NewTaskPullRequestService(opts.GitHub, opts.TaskPullRequestRepo)
+			pullRequestService := NewTaskPullRequestService(opts.GitHub, opts.TaskPullRequestRepo).SetTaskCommitStatRepo(opts.TaskCommitStatRepo)
 			var record *models.TaskPullRequest
 			if automationBound {
 				record, err = pullRequestService.ReplaceBranchHeadForAutomationTask(ctx, project, task, req.ExpectedHeadSHA)
@@ -485,8 +480,8 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 			if opts.TaskPullRequestRepo == nil || opts.GitHubPRFeedbackRepo == nil || opts.GitHubAuthRepo == nil || opts.ThreadInputRepo == nil {
 				return "", fmt.Errorf("github pr feedback forwarding dependencies unavailable")
 			}
-			var req githubIssueRuntimeInput
-			if err := decodeRuntimeToolInput(input, &req); err != nil {
+			var req GitHubIssueActionRequest
+			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 				return "", err
 			}
 			repo, err := resolveGitHubRepoForRuntimeToolURL(ctx, opts, req.RepoURL)
@@ -512,6 +507,89 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 	}
 }
 
+func missingGitHubIssueLabels(required, actual []string) []string {
+	present := make(map[string]bool, len(actual))
+	for _, label := range actual {
+		label = strings.ToLower(strings.TrimSpace(label))
+		if label != "" {
+			present[label] = true
+		}
+	}
+	missing := make([]string, 0)
+	for _, label := range required {
+		label = strings.TrimSpace(label)
+		if label != "" && !present[strings.ToLower(label)] {
+			missing = append(missing, label)
+		}
+	}
+	return missing
+}
+
+func ensureReusedGitHubIssueLabels(ctx context.Context, provider GitHubIssueRuntimeProvider, repo *GitHubRepoRef, issueNumber int, requiredLabels []string) (*GitHubIssue, error) {
+	issue, err := provider.GetIssue(ctx, repo, issueNumber)
+	if err != nil {
+		return nil, fmt.Errorf("reading reused GitHub issue: %w", err)
+	}
+	if issue == nil || issue.Number != issueNumber {
+		return nil, errors.New("reused GitHub issue could not be confirmed")
+	}
+	missing := missingGitHubIssueLabels(requiredLabels, issue.Labels)
+	if len(missing) == 0 {
+		return issue, nil
+	}
+	if err := provider.AddLabelsToIssue(ctx, repo, issueNumber, missing); err != nil {
+		return nil, fmt.Errorf("restoring required category labels: %w", err)
+	}
+	issue, err = provider.GetIssue(ctx, repo, issueNumber)
+	if err != nil {
+		return nil, fmt.Errorf("confirming reused GitHub issue labels: %w", err)
+	}
+	if issue == nil || issue.Number != issueNumber {
+		return nil, errors.New("reused GitHub issue could not be confirmed after label repair")
+	}
+	if missing = missingGitHubIssueLabels(requiredLabels, issue.Labels); len(missing) > 0 {
+		return nil, fmt.Errorf("reused GitHub issue is missing required category labels after repair: %s", strings.Join(missing, ", "))
+	}
+	return issue, nil
+}
+
+func effectiveAutomationGitHubIssueBinding(ctx context.Context, opts githubIssueRuntimeOptions, binding models.AutomationBinding) (models.AutomationBinding, error) {
+	current, err := opts.AutomationRepo.IsCurrentActiveBinding(ctx, opts.ProjectID, binding)
+	if err != nil {
+		return models.AutomationBinding{}, err
+	}
+	if current {
+		return binding, nil
+	}
+	if strings.TrimSpace(binding.InvocationID) != "" {
+		launchedBinding, ok, err := opts.AutomationRepo.CurrentActiveBindingForLaunchNode(ctx, opts.ProjectID, binding, "create_github_issue")
+		if err != nil {
+			return models.AutomationBinding{}, err
+		}
+		if ok {
+			return launchedBinding, nil
+		}
+	}
+	if automationID, nodeKey, createdViaOK := automationCreatedViaNode(opts.TaskCreatedVia); createdViaOK && automationID == binding.AutomationID {
+		createdViaBinding, createdViaOK, createdViaErr := opts.AutomationRepo.CurrentActiveBindingForNodeKey(ctx, opts.ProjectID, automationID, nodeKey, "create_github_issue")
+		if createdViaErr != nil {
+			return models.AutomationBinding{}, createdViaErr
+		}
+		if createdViaOK {
+			return createdViaBinding, nil
+		}
+	}
+	return models.AutomationBinding{}, errors.New("github_create_issue is not authorized by the caller's current active Automation graph")
+}
+
+func automationCreatedViaNode(createdVia string) (string, string, bool) {
+	parts := strings.Split(strings.TrimSpace(createdVia), ":")
+	if len(parts) < 3 || parts[0] != "automation" || strings.TrimSpace(parts[1]) == "" || strings.TrimSpace(parts[2]) == "" {
+		return "", "", false
+	}
+	return strings.TrimSpace(parts[1]), strings.TrimSpace(parts[2]), true
+}
+
 func applyAutomationGitHubIssueConfiguration(ctx context.Context, opts githubIssueRuntimeOptions, req *githubCreateIssueRuntimeInput) (bool, error) {
 	automationContext, automationBound := AutomationContextFromContext(ctx)
 	if !automationBound || automationContext.ProjectID != opts.ProjectID {
@@ -522,16 +600,15 @@ func applyAutomationGitHubIssueConfiguration(ctx context.Context, opts githubIss
 	}
 	var configuredLabels []string
 	configured := false
+	var maintainedLabels []string
+	maintainedConfigured := false
 	actionAuthorized := false
 	for _, binding := range automationContext.Bindings {
-		current, err := opts.AutomationRepo.IsCurrentActiveBinding(ctx, opts.ProjectID, binding)
+		effectiveBinding, err := effectiveAutomationGitHubIssueBinding(ctx, opts, binding)
 		if err != nil {
 			return false, err
 		}
-		if !current {
-			return false, errors.New("github_create_issue is not authorized by the caller's current active Automation graph")
-		}
-		issueNode, err := opts.AutomationRepo.GetConnectedNodeByRole(ctx, opts.ProjectID, binding.AutomationID, binding.VersionID, binding.NodeID, "create_github_issue", true)
+		issueNode, err := opts.AutomationRepo.GetConnectedNodeByRole(ctx, opts.ProjectID, effectiveBinding.AutomationID, effectiveBinding.VersionID, effectiveBinding.NodeID, "create_github_issue", true)
 		if err != nil {
 			return false, err
 		}
@@ -539,7 +616,18 @@ func applyAutomationGitHubIssueConfiguration(ctx context.Context, opts githubIss
 			return false, errors.New("github_create_issue is not authorized by the caller's Automation graph: every causal binding must authorize the action")
 		}
 		actionAuthorized = true
-		assignmentNode, err := opts.AutomationRepo.GetConnectedNodeByRole(ctx, opts.ProjectID, binding.AutomationID, binding.VersionID, issueNode.ID, "github_assignment", true)
+		finderLabels, err := maintainedGitHubSDLCFinderLabels(ctx, opts, effectiveBinding)
+		if err != nil {
+			return false, err
+		}
+		if len(finderLabels) > 0 {
+			if maintainedConfigured && strings.Join(maintainedLabels, "\x00") != strings.Join(finderLabels, "\x00") {
+				return false, errors.New("Automation bindings have conflicting GitHub finder categories")
+			}
+			maintainedLabels = finderLabels
+			maintainedConfigured = true
+		}
+		assignmentNode, err := opts.AutomationRepo.GetConnectedNodeByRole(ctx, opts.ProjectID, effectiveBinding.AutomationID, effectiveBinding.VersionID, issueNode.ID, "github_assignment", true)
 		if err != nil {
 			return false, err
 		}
@@ -573,10 +661,136 @@ func applyAutomationGitHubIssueConfiguration(ctx context.Context, opts githubIss
 		req.Labels = configuredLabels
 		req.Assignees = nil
 	}
+	if maintainedConfigured {
+		req.Labels = normalizeDraftReferences(append(append([]string{}, maintainedLabels...), req.Labels...))
+	}
 	return true, nil
 }
 
-func applyAutomationPullRequestConfiguration(ctx context.Context, opts githubIssueRuntimeOptions, task *models.Task, req *githubIssueRuntimeInput) (bool, error) {
+func maintainedGitHubSDLCFinderLabels(ctx context.Context, opts githubIssueRuntimeOptions, binding models.AutomationBinding) ([]string, error) {
+	definition, err := opts.AutomationRepo.GetDefinition(ctx, opts.ProjectID, binding.AutomationID)
+	if err != nil {
+		return nil, err
+	}
+	if definition == nil || definition.Version.ID != binding.VersionID || definition.Version.AdapterKey != AutomationAdapterGitHubSDLC {
+		return nil, nil
+	}
+	for _, node := range definition.Nodes {
+		if node.ID != binding.NodeID {
+			continue
+		}
+		switch node.Role {
+		case "offering_manager":
+			return []string{"suggestion", "feature"}, nil
+		case "bug_finder":
+			return []string{"bug"}, nil
+		case "optimization_finder":
+			return []string{"performance"}, nil
+		case "redundancy_finder":
+			return []string{"duplication"}, nil
+		default:
+			return nil, nil
+		}
+	}
+	return nil, errors.New("Automation GitHub finder binding node was not found")
+}
+
+func automationPullRequestRequiresStructuredBody(ctx context.Context, opts githubIssueRuntimeOptions) (bool, error) {
+	automationContext, automationBound := AutomationContextFromContext(ctx)
+	if !automationBound || automationContext.ProjectID != opts.ProjectID {
+		return false, nil
+	}
+	if opts.AutomationRepo == nil {
+		return false, errors.New("Automation repository unavailable for pull request body validation")
+	}
+	if automationContext.OriginTask {
+		taskID, _, hasExecution := AutomationExecutionFromContext(ctx)
+		if !hasExecution {
+			return false, errors.New("Automation pull request action requires exact causal task provenance")
+		}
+		provenance, err := opts.AutomationRepo.GitHubIssueTaskProvenance(ctx, opts.ProjectID, taskID)
+		if err != nil {
+			return false, err
+		}
+		if provenance == nil {
+			return false, errors.New("Automation GitHub implementation task has no trusted source issue")
+		}
+		definition, err := opts.AutomationRepo.GetDefinition(ctx, opts.ProjectID, provenance.AutomationID)
+		if err != nil {
+			return false, err
+		}
+		if definition == nil || definition.Automation.LifecycleState != models.AutomationActive || definition.Automation.PublishedVersionID == nil {
+			return false, errors.New("current Automation definition is unavailable for pull request body validation")
+		}
+		return definition.Version.AdapterKey == AutomationAdapterGitHubSDLC, nil
+	}
+	for _, binding := range automationContext.Bindings {
+		definition, err := opts.AutomationRepo.GetDefinition(ctx, opts.ProjectID, binding.AutomationID)
+		if err != nil {
+			return false, err
+		}
+		if definition == nil || definition.Version.ID != binding.VersionID {
+			return false, errors.New("current Automation definition is unavailable for pull request body validation")
+		}
+		if definition.Version.AdapterKey == AutomationAdapterGitHubSDLC {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func automationGitHubSDLCSourceIssue(ctx context.Context, opts githubIssueRuntimeOptions, project *models.Project, task *models.Task) (*GitHubIssue, error) {
+	if opts.AutomationRepo == nil || task == nil {
+		return nil, errors.New("Automation GitHub source issue provenance is unavailable")
+	}
+	resourceID, err := opts.AutomationRepo.GitHubIssueResourceForTask(ctx, opts.ProjectID, task.ID)
+	if err != nil {
+		return nil, fmt.Errorf("loading Automation GitHub source issue provenance: %w", err)
+	}
+	parts := strings.Split(resourceID, ":")
+	issue := githubIssueFromCanonicalResource(resourceID)
+	if len(parts) != 4 || strings.TrimSpace(parts[1]) == "" || issue.Number <= 0 {
+		return nil, errors.New("Automation GitHub implementation task has no trusted source issue")
+	}
+	repo, err := resolveAutomationProjectGitHubRepository(ctx, opts.GitHub, project)
+	if err != nil {
+		return nil, fmt.Errorf("resolving Automation GitHub source issue repository: %w", err)
+	}
+	if !strings.EqualFold(strings.TrimSpace(parts[1]), strings.TrimSpace(repo.FullName)) {
+		return nil, errors.New("Automation GitHub source issue repository does not match the selected project repository")
+	}
+	repoURL, err := url.Parse(repo.HTMLURL)
+	if err != nil || repoURL.Scheme != "https" || repoURL.Host == "" {
+		return nil, errors.New("Automation GitHub source issue repository has no valid web URL")
+	}
+	issue.URL = fmt.Sprintf("https://%s/%s/issues/%d", repoURL.Host, parts[1], issue.Number)
+	return issue, nil
+}
+
+func validateGitHubSDLCReviewPRBody(body string, issueNumber int) error {
+	body = strings.TrimSpace(body)
+	if body == "" {
+		return errors.New("GitHub SDLC pull requests require pr_body with a factual summary and validation")
+	}
+	lowerBody := strings.ToLower(body)
+	if !strings.Contains(lowerBody, "## summary") || !strings.Contains(lowerBody, "## validation") {
+		return errors.New("GitHub SDLC pr_body must include ## Summary and ## Validation sections")
+	}
+	if issueNumber <= 0 {
+		return errors.New("GitHub SDLC pull requests require the source issue number")
+	}
+	if !strings.Contains(lowerBody, fmt.Sprintf("closes #%d", issueNumber)) {
+		return fmt.Errorf("GitHub SDLC pr_body must include Closes #%d", issueNumber)
+	}
+	return nil
+}
+
+type automationPullRequestConfig struct {
+	base  string
+	draft bool
+}
+
+func applyAutomationPullRequestConfiguration(ctx context.Context, opts githubIssueRuntimeOptions, task *models.Task, req *GitHubIssueActionRequest, allowDurableProvenance bool) (bool, error) {
 	automationContext, automationBound := AutomationContextFromContext(ctx)
 	if !automationBound || automationContext.ProjectID != opts.ProjectID {
 		return false, nil
@@ -591,11 +805,23 @@ func applyAutomationPullRequestConfiguration(ctx context.Context, opts githubIss
 	if callerTaskID != task.ID {
 		return false, errors.New("Automation pull request action cannot mutate a different task")
 	}
-	type pullRequestConfig struct {
-		base  string
-		draft bool
+	if automationContext.OriginTask && allowDurableProvenance {
+		provenance, err := opts.AutomationRepo.GitHubIssueTaskProvenance(ctx, opts.ProjectID, task.ID)
+		if err != nil {
+			return false, err
+		}
+		if provenance == nil {
+			return false, errors.New("github pull request action is not authorized by trusted Automation task provenance")
+		}
+		configured, err := currentPullRequestConfigForProvenance(ctx, opts, provenance, req)
+		if err != nil {
+			return false, err
+		}
+		req.Base = configured.base
+		req.Draft = configured.draft
+		return true, nil
 	}
-	var configured *pullRequestConfig
+	var configured *automationPullRequestConfig
 	for _, binding := range automationContext.Bindings {
 		currentBinding, currentErr := opts.AutomationRepo.IsCurrentActiveBinding(ctx, opts.ProjectID, binding)
 		if currentErr != nil {
@@ -611,27 +837,10 @@ func applyAutomationPullRequestConfiguration(ctx context.Context, opts githubIss
 		if node == nil {
 			return false, errors.New("github pull request action is not authorized by the caller's Automation graph: every causal binding must authorize the action")
 		}
-		var config map[string]any
-		if err := json.Unmarshal([]byte(node.ConfigJSON), &config); err != nil {
-			return false, fmt.Errorf("decoding pull request node configuration: %w", err)
+		current, err := pullRequestConfigFromNode(node, req)
+		if err != nil {
+			return false, err
 		}
-		base := strings.TrimSpace(req.Base)
-		if rawBase, exists := config["base"]; exists {
-			parsedBase, valid := rawBase.(string)
-			if !valid {
-				return false, errors.New("published pull request base configuration is invalid")
-			}
-			base = strings.TrimSpace(parsedBase)
-		}
-		draft := req.Draft
-		if rawDraft, exists := config["draft"]; exists {
-			parsedDraft, valid := rawDraft.(bool)
-			if !valid {
-				return false, errors.New("published pull request draft configuration is invalid")
-			}
-			draft = parsedDraft
-		}
-		current := pullRequestConfig{base: base, draft: draft}
 		if configured != nil && *configured != current {
 			return false, errors.New("Automation bindings have conflicting pull request configuration")
 		}
@@ -643,6 +852,76 @@ func applyAutomationPullRequestConfiguration(ctx context.Context, opts githubIss
 	req.Base = configured.base
 	req.Draft = configured.draft
 	return true, nil
+}
+
+func currentPullRequestConfigForProvenance(ctx context.Context, opts githubIssueRuntimeOptions, provenance *repository.AutomationGitHubIssueTaskProvenance, req *GitHubIssueActionRequest) (automationPullRequestConfig, error) {
+	if provenance == nil || strings.TrimSpace(provenance.AutomationID) == "" || strings.TrimSpace(provenance.ImplementationNodeKey) == "" {
+		return automationPullRequestConfig{}, errors.New("complete Automation GitHub issue task provenance is required")
+	}
+	definition, err := opts.AutomationRepo.GetDefinition(ctx, opts.ProjectID, provenance.AutomationID)
+	if err != nil {
+		return automationPullRequestConfig{}, err
+	}
+	if definition == nil || definition.Automation.LifecycleState != models.AutomationActive || definition.Automation.PublishedVersionID == nil {
+		return automationPullRequestConfig{}, errors.New("github pull request action is not authorized by the current active Automation graph")
+	}
+	var implementationNode *models.AutomationNode
+	for i := range definition.Nodes {
+		node := &definition.Nodes[i]
+		if node.NodeKey == provenance.ImplementationNodeKey && node.NodeType == models.AutomationNodeAgentTask && (node.Role == "task" || node.Role == "implementation") {
+			implementationNode = node
+			break
+		}
+	}
+	if implementationNode == nil {
+		return automationPullRequestConfig{}, errors.New("github pull request action is not authorized by the current Automation implementation node")
+	}
+	var prNode *models.AutomationNode
+	for _, edge := range definition.Edges {
+		if edge.SourceNodeID != implementationNode.ID {
+			continue
+		}
+		for i := range definition.Nodes {
+			node := &definition.Nodes[i]
+			if node.ID == edge.TargetNodeID && node.Role == "open_pull_request" {
+				if prNode != nil {
+					return automationPullRequestConfig{}, errors.New("Automation implementation has ambiguous pull request targets")
+				}
+				prNode = node
+			}
+		}
+	}
+	if prNode == nil {
+		return automationPullRequestConfig{}, errors.New("github pull request action is not authorized by the current Automation graph")
+	}
+	return pullRequestConfigFromNode(prNode, req)
+}
+
+func pullRequestConfigFromNode(node *models.AutomationNode, req *GitHubIssueActionRequest) (automationPullRequestConfig, error) {
+	if node == nil || req == nil {
+		return automationPullRequestConfig{}, errors.New("pull request node configuration is unavailable")
+	}
+	var config map[string]any
+	if err := json.Unmarshal([]byte(node.ConfigJSON), &config); err != nil {
+		return automationPullRequestConfig{}, fmt.Errorf("decoding pull request node configuration: %w", err)
+	}
+	base := strings.TrimSpace(req.Base)
+	if rawBase, exists := config["base"]; exists {
+		parsedBase, valid := rawBase.(string)
+		if !valid {
+			return automationPullRequestConfig{}, errors.New("published pull request base configuration is invalid")
+		}
+		base = strings.TrimSpace(parsedBase)
+	}
+	draft := req.Draft
+	if rawDraft, exists := config["draft"]; exists {
+		parsedDraft, valid := rawDraft.(bool)
+		if !valid {
+			return automationPullRequestConfig{}, errors.New("published pull request draft configuration is invalid")
+		}
+		draft = parsedDraft
+	}
+	return automationPullRequestConfig{base: base, draft: draft}, nil
 }
 
 func resolveGitHubRuntimeProject(ctx context.Context, opts githubIssueRuntimeOptions) (*models.Project, error) {
@@ -661,26 +940,27 @@ func resolveGitHubRepoForRuntimeTool(ctx context.Context, opts githubIssueRuntim
 }
 
 func resolveGitHubRepoForRuntimeToolURL(ctx context.Context, opts githubIssueRuntimeOptions, repoURL string) (*GitHubRepoRef, error) {
-	automationContext, automationBound := AutomationContextFromContext(ctx)
-	if strings.TrimSpace(repoURL) != "" && (!automationBound || automationContext.ProjectID != opts.ProjectID) {
-		return opts.GitHub.ResolveRepo(ctx, repoURL, "")
-	}
 	project, err := resolveGitHubRuntimeProject(ctx, opts)
 	if err != nil {
 		return nil, err
 	}
-	if automationBound && automationContext.ProjectID == opts.ProjectID {
-		return resolveAutomationProjectGitHubRepository(ctx, opts.GitHub, project)
-	}
-	return opts.GitHub.ResolveRepo(ctx, project.RepoURL, project.RepoPath)
+	return ResolveGitHubToolRepository(ctx, opts.GitHub, opts.ProjectID, repoURL, project)
 }
 
 func resolveGitHubRuntimeTask(ctx context.Context, taskRepo *repository.TaskRepo, projectID, taskID, title string) (*models.Task, error) {
 	if taskRepo == nil {
 		return nil, fmt.Errorf("task repository unavailable")
 	}
-	if strings.TrimSpace(taskID) != "" {
-		task, err := taskRepo.GetByID(ctx, strings.TrimSpace(taskID))
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "current" {
+		callerTaskID, _, hasExecution := AutomationExecutionFromContext(ctx)
+		if !hasExecution || strings.TrimSpace(callerTaskID) == "" {
+			return nil, fmt.Errorf("task_id current requires Automation task execution context")
+		}
+		taskID = callerTaskID
+	}
+	if taskID != "" {
+		task, err := taskRepo.GetByID(ctx, taskID)
 		if err != nil {
 			return nil, err
 		}
@@ -720,25 +1000,78 @@ func releaseGitHubIssueActivityReservationsDetached(opts githubIssueRuntimeOptio
 	return releaseGitHubIssueActivityReservations(ctx, opts, bindings, activityKey)
 }
 
+func currentGitHubIssueProjectionSource(ctx context.Context, opts githubIssueRuntimeOptions, source repository.AutomationGitHubIssueDedupSource) (repository.AutomationGitHubIssueDedupSource, error) {
+	current := source
+	current.Context.Bindings = nil
+	seen := map[string]bool{}
+	for _, stable := range source.StableBindings {
+		automationID := strings.TrimSpace(stable.AutomationID)
+		nodeKey := strings.TrimSpace(stable.NodeKey)
+		if automationID == "" || nodeKey == "" {
+			continue
+		}
+		binding, ok, err := opts.AutomationRepo.CurrentActiveBindingForNodeKey(ctx, opts.ProjectID, automationID, nodeKey, "create_github_issue")
+		if err != nil {
+			return current, err
+		}
+		if !ok {
+			continue
+		}
+		key := binding.AutomationID + "\x00" + binding.VersionID + "\x00" + binding.NodeID
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		current.Context.Bindings = append(current.Context.Bindings, binding)
+	}
+	if len(current.Context.Bindings) > 0 {
+		return current, nil
+	}
+	for _, binding := range source.Context.Bindings {
+		effective, err := effectiveAutomationGitHubIssueBinding(ctx, opts, binding)
+		if err != nil {
+			return current, err
+		}
+		key := effective.AutomationID + "\x00" + effective.VersionID + "\x00" + effective.NodeID
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		current.Context.Bindings = append(current.Context.Bindings, effective)
+	}
+	if len(current.Context.Bindings) == 0 {
+		return current, errors.New("trusted local GitHub issue projection source no longer maps to the current Automation graph")
+	}
+	return current, nil
+}
+
 func repairAutomationGitHubIssueProjection(opts githubIssueRuntimeOptions, repo *GitHubRepoRef, title string, claim repository.AutomationGitHubIssueDedupClaim) (*GitHubIssue, error) {
 	if claim.IssueNumber <= 0 || strings.TrimSpace(claim.OwnerToken) == "" || claim.Source.Context.ProjectID != opts.ProjectID ||
 		len(claim.Source.Context.Bindings) == 0 || strings.TrimSpace(claim.Source.TaskID) == "" || strings.TrimSpace(claim.Source.ExecutionID) == "" {
 		return nil, errors.New("trusted local GitHub issue projection source is unavailable")
 	}
-	ctx := WithAutomationContext(context.Background(), claim.Source.Context)
-	ctx = withAutomationExecution(ctx, claim.Source.TaskID, claim.Source.ExecutionID)
-	ctx, cancel := context.WithTimeout(ctx, automationGitHubIssueDedupPersistenceTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), automationGitHubIssueDedupPersistenceTimeout)
 	defer cancel()
+	projectionSource, err := currentGitHubIssueProjectionSource(ctx, opts, claim.Source)
+	if err != nil {
+		return nil, err
+	}
+	ctx = WithAutomationContext(ctx, projectionSource.Context)
+	ctx = withAutomationExecution(ctx, projectionSource.TaskID, projectionSource.ExecutionID)
 	projectionIssue := githubIssueFromCanonicalResource(githubIssueResourceID(repo, claim.IssueNumber))
 	projectionIssue.Title = strings.TrimSpace(title)
 	recordedBindings, err := recordGitHubIssueCreated(ctx, opts, repo, projectionIssue, claim.OwnerToken)
 	if err != nil {
 		return nil, err
 	}
-	if recordedBindings != len(claim.Source.Context.Bindings) {
-		return nil, fmt.Errorf("expected GitHub issue projection for %d source binding(s), recorded %d", len(claim.Source.Context.Bindings), recordedBindings)
+	if recordedBindings != len(projectionSource.Context.Bindings) {
+		return nil, fmt.Errorf("expected GitHub issue projection for %d source binding(s), recorded %d", len(projectionSource.Context.Bindings), recordedBindings)
 	}
 	return githubIssueFromCanonicalResource(githubIssueResourceID(repo, claim.IssueNumber)), nil
+}
+
+func githubIssueDedupFingerprint(title string) string {
+	return githubIssueTitleFingerprint(title)
 }
 
 func githubIssueTitleFingerprint(title string) string {
@@ -784,21 +1117,29 @@ func recordGitHubIssueCreated(ctx context.Context, opts githubIssueRuntimeOption
 	resourceID := githubIssueResourceID(repo, issue.Number)
 	recordedBindings := 0
 	for _, sourceBinding := range automationContext.Bindings {
-		issueNode, err := opts.AutomationRepo.GetConnectedNodeByRole(ctx, opts.ProjectID, sourceBinding.AutomationID, sourceBinding.VersionID, sourceBinding.NodeID, "create_github_issue", true)
+		effectiveBinding, err := effectiveAutomationGitHubIssueBinding(ctx, opts, sourceBinding)
+		if err != nil {
+			return recordedBindings, err
+		}
+		sourceNodeID := effectiveBinding.NodeID
+		issueNode, err := opts.AutomationRepo.GetConnectedNodeByRole(ctx, opts.ProjectID, effectiveBinding.AutomationID, effectiveBinding.VersionID, effectiveBinding.NodeID, "create_github_issue", true)
 		if err != nil {
 			return recordedBindings, err
 		}
 		if issueNode == nil {
 			continue
 		}
-		assignmentNode, err := opts.AutomationRepo.GetConnectedNodeByRole(ctx, opts.ProjectID, sourceBinding.AutomationID, sourceBinding.VersionID, issueNode.ID, "github_assignment", true)
+		assignmentNode, err := opts.AutomationRepo.GetConnectedNodeByRole(ctx, opts.ProjectID, effectiveBinding.AutomationID, effectiveBinding.VersionID, issueNode.ID, "github_assignment", true)
 		if err != nil {
 			return recordedBindings, err
 		}
 		if assignmentNode == nil {
 			return recordedBindings, errors.New("expected GitHub issue assignment projection node is unavailable")
 		}
-		binding := sourceBinding
+		binding := effectiveBinding
+		if binding.VersionID != sourceBinding.VersionID {
+			binding.InvocationID = ""
+		}
 		binding.NodeID = issueNode.ID
 		resources := []models.AutomationActivityResource{{ResourceType: "github_issue", ResourceID: resourceID}}
 		if taskID != "" {
@@ -811,7 +1152,7 @@ func recordGitHubIssueCreated(ctx context.Context, opts githubIssueRuntimeOption
 			Context: automationContext, Binding: binding, WorkItemKey: resourceID, WorkItemKind: "github_issue",
 			WorkItemTitle: issue.Title, WorkItemStatus: models.AutomationWorkItemWaiting,
 			ActivityKey: activityKey, ActivityType: "create_github_issue", ActivityStatus: models.AutomationActivityCompleted,
-			Resources: resources, EventKey: resourceID + ":created:issue", FromNodeID: sourceBinding.NodeID,
+			Resources: resources, EventKey: resourceID + ":created:issue", FromNodeID: sourceNodeID,
 			ToNodeID: issueNode.ID, Transition: models.AutomationTransitionEntered,
 		})
 		if err != nil {
@@ -829,6 +1170,10 @@ func recordGitHubIssueCreated(ctx context.Context, opts githubIssueRuntimeOption
 		recordedBindings++
 	}
 	return recordedBindings, nil
+}
+
+func filterGitHubAssignedIssuesForAutomationInbox(_ context.Context, _ githubIssueRuntimeOptions, _ *GitHubRepoRef, issues []GitHubIssue) ([]GitHubIssue, error) {
+	return issues, nil
 }
 
 func recordGitHubAssignedIssues(ctx context.Context, opts githubIssueRuntimeOptions, repo *GitHubRepoRef, issues []GitHubIssue) error {
@@ -868,11 +1213,11 @@ func recordGitHubAssignedIssues(ctx context.Context, opts githubIssueRuntimeOpti
 			}
 			if _, _, err := opts.AutomationRepo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
 				Context: automationContext, Binding: binding, WorkItemKey: resourceID, WorkItemKind: "github_issue",
-				WorkItemTitle: issue.Title, WorkItemStatus: models.AutomationWorkItemActive,
+				WorkItemTitle: issue.Title, WorkItemStatus: models.AutomationWorkItemWaiting,
 				ActivityKey:  "invocation:" + sourceBinding.InvocationID + ":discover:" + resourceID,
 				ActivityType: "discover_assigned_issue", ActivityStatus: models.AutomationActivityCompleted,
 				Resources: resources, EventKey: resourceID + ":assigned", FromNodeID: assignmentNode.ID,
-				ToNodeID: devInboxNode.ID, Transition: models.AutomationTransitionEntered,
+				ToNodeID: devInboxNode.ID, Transition: models.AutomationTransitionWaiting,
 			}); err != nil {
 				return err
 			}
@@ -881,7 +1226,7 @@ func recordGitHubAssignedIssues(ctx context.Context, opts githubIssueRuntimeOpti
 	return nil
 }
 
-func recordGitHubPullRequestOpened(ctx context.Context, opts githubIssueRuntimeOptions, repo *GitHubRepoRef, task *models.Task, req githubIssueRuntimeInput, result *OpenTaskPullRequestResult) error {
+func recordGitHubPullRequestOpened(ctx context.Context, opts githubIssueRuntimeOptions, repo *GitHubRepoRef, task *models.Task, req GitHubIssueActionRequest, result *OpenTaskPullRequestResult) error {
 	if opts.AutomationRepo == nil || task == nil || result == nil || result.PullRequest == nil {
 		return nil
 	}

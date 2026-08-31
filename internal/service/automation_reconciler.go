@@ -9,22 +9,46 @@ import (
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/automationobs"
 	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/update"
 )
 
 // AutomationReconciler repairs Automation projections and resubmits durable
 // prepared executions after a process restart. Existing Task and Execution rows
 // remain authoritative; this service never rewrites their state.
 type AutomationReconciler struct {
-	automationRepo *repository.AutomationRepo
-	executionRepo  *repository.ExecutionRepo
-	workerSvc      *WorkerService
-	interval       time.Duration
-	cancel         context.CancelFunc
-	wg             sync.WaitGroup
+	automationRepo      *repository.AutomationRepo
+	executionRepo       *repository.ExecutionRepo
+	workerSvc           *WorkerService
+	externalStateSvc    *AutomationExternalStateService
+	liveViewTracker     *AutomationLiveViewTracker
+	interval            time.Duration
+	externalRefreshEach time.Duration
+	liveViewWindow      time.Duration
+	cancel              context.CancelFunc
+	wg                  sync.WaitGroup
+	updateTracker       *update.WorkTracker
 }
 
 func NewAutomationReconciler(automationRepo *repository.AutomationRepo, executionRepo *repository.ExecutionRepo, workerSvc *WorkerService) *AutomationReconciler {
-	return &AutomationReconciler{automationRepo: automationRepo, executionRepo: executionRepo, workerSvc: workerSvc, interval: 15 * time.Second}
+	return &AutomationReconciler{automationRepo: automationRepo, executionRepo: executionRepo, workerSvc: workerSvc, interval: 15 * time.Second, externalRefreshEach: 5 * time.Minute, liveViewWindow: time.Minute}
+}
+
+func (r *AutomationReconciler) SetUpdateWorkTracker(tracker *update.WorkTracker) {
+	r.updateTracker = tracker
+}
+
+// SetAutomationExternalStateService enables background refresh of Automations'
+// tracked GitHub pull request state while their Live/Preview page is open, so
+// it stays fresh without requiring a manual click.
+func (r *AutomationReconciler) SetAutomationExternalStateService(svc *AutomationExternalStateService) {
+	r.externalStateSvc = svc
+}
+
+// SetAutomationLiveViewTracker scopes background external-state refresh to
+// Automations whose Live page was recently viewed, avoiding unnecessary
+// GitHub API calls for automations nobody is looking at.
+func (r *AutomationReconciler) SetAutomationLiveViewTracker(tracker *AutomationLiveViewTracker) {
+	r.liveViewTracker = tracker
 }
 
 func (r *AutomationReconciler) Start(ctx context.Context) {
@@ -71,6 +95,13 @@ func (r *AutomationReconciler) reconcile(ctx context.Context) {
 }
 
 func (r *AutomationReconciler) ReconcileOnce(ctx context.Context) error {
+	if r.updateTracker != nil {
+		done, err := r.updateTracker.Start(update.WorkAutomation)
+		if err != nil {
+			return nil
+		}
+		defer done()
+	}
 	terminal, err := r.automationRepo.ListTerminalUnfinalizedDispatches(ctx, 100)
 	if err != nil {
 		return err
@@ -105,10 +136,26 @@ func (r *AutomationReconciler) ReconcileOnce(ctx context.Context) error {
 			automationobs.String("status", string(repair.Status)))
 		applog.Infof("[automation-reconciler] repaired execution projection execution=%s", repair.ExecutionID)
 	}
+	if pruned, err := r.automationRepo.PruneTerminalizedAutomationPositions(ctx, 100); err != nil {
+		return err
+	} else if pruned > 0 {
+		applog.Infof("[automation-reconciler] pruned %d terminalized automation position(s)", pruned)
+	}
 	if completed, err := r.automationRepo.ReconcileInvocationCompletions(ctx, 100); err != nil {
 		return err
 	} else if completed > 0 {
 		applog.Infof("[automation-reconciler] completed %d invocation projection(s)", completed)
+	}
+
+	abandoned, err := r.automationRepo.ListAbandonedQueuedDispatches(ctx, 100)
+	if err != nil {
+		return err
+	}
+	for _, dispatch := range abandoned {
+		if err := r.automationRepo.CancelDispatchesForTask(ctx, dispatch.TaskID, "Automation task was cancelled or is no longer runnable"); err != nil {
+			return err
+		}
+		applog.Infof("[automation-reconciler] cancelled abandoned dispatch=%s execution=%s", dispatch.ID, dispatch.ExecutionID)
 	}
 
 	recoverable, err := r.automationRepo.ListRecoverablePreparedDispatches(ctx, 100)
@@ -134,5 +181,44 @@ func (r *AutomationReconciler) ReconcileOnce(ctx context.Context) error {
 			automationobs.String("execution_id", dispatch.ExecutionID))
 		applog.Infof("[automation-reconciler] resubmitted prepared dispatch=%s execution=%s", dispatch.ID, dispatch.ExecutionID)
 	}
-	return r.automationRepo.RecomputeAutomationHealthForAll(ctx, time.Now().UTC(), 100)
+	if err := r.automationRepo.RecomputeAutomationHealthForAll(ctx, time.Now().UTC(), 100); err != nil {
+		return err
+	}
+	return r.refreshStaleExternalState(ctx)
+}
+
+// refreshStaleExternalState proactively refreshes tracked GitHub pull request
+// state for Automations whose state has gone stale, so their health and graph
+// stay current without requiring a manual "Refresh GitHub state" click.
+func (r *AutomationReconciler) refreshStaleExternalState(ctx context.Context) error {
+	if r.externalStateSvc == nil {
+		return nil
+	}
+	return r.refreshStaleExternalStateWith(ctx, func(ctx context.Context, projectID, automationID string, now time.Time) error {
+		_, err := r.externalStateSvc.Refresh(ctx, projectID, automationID, now)
+		return err
+	})
+}
+
+func (r *AutomationReconciler) refreshStaleExternalStateWith(ctx context.Context, refresh func(context.Context, string, string, time.Time) error) error {
+	if refresh == nil {
+		return nil
+	}
+	now := time.Now().UTC()
+	stale, err := r.automationRepo.ListAutomationsWithStaleExternalPullRequests(ctx, now.Add(-r.externalRefreshEach), 100)
+	if err != nil {
+		return err
+	}
+	for _, pair := range stale {
+		projectID, automationID := pair[0], pair[1]
+		if r.liveViewTracker != nil && !r.liveViewTracker.IsRecentlyViewed(projectID, automationID, r.liveViewWindow) {
+			continue
+		}
+		if err := refresh(ctx, projectID, automationID, now); err != nil {
+			applog.Infof("[automation-reconciler] external state refresh failed project=%s automation=%s: %v", projectID, automationID, err)
+			continue
+		}
+		applog.Infof("[automation-reconciler] refreshed external GitHub state project=%s automation=%s", projectID, automationID)
+	}
+	return nil
 }

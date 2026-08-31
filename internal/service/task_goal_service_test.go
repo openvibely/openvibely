@@ -120,6 +120,61 @@ func TestTaskGoalService_ValidationPauseResumeClear(t *testing.T) {
 	}
 }
 
+func TestTaskGoalService_ClearBlockedReportClearsOnlyMatchingBlocker(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	project := createServiceGoalTestProject(t, ctx, db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	task := &models.Task{ProjectID: project.ID, Title: "PR Blocker Goal", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "prompt", Priority: 2}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	svc := NewTaskGoalService(repository.NewTaskGoalRepo(db), taskRepo, nil)
+	goal, err := svc.SetGoal(ctx, task.ID, "Publish the PR", GoalOptions{Actor: "test"})
+	if err != nil {
+		t.Fatalf("set goal: %v", err)
+	}
+	for i := 0; i < 3; i++ {
+		if _, err := svc.RecordBlockedReport(ctx, task.ID, goal.GoalID, GitHubPRPublicationBlockerKey, "PR publication failed"); err != nil {
+			t.Fatalf("record publication blocker: %v", err)
+		}
+	}
+	blocked, err := svc.GetGoal(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("get blocked goal: %v", err)
+	}
+	if blocked.Status != models.TaskGoalStatusBlocked || blocked.BlockerKey != GitHubPRPublicationBlockerKey {
+		t.Fatalf("blocked goal = %+v", blocked)
+	}
+	cleared, err := svc.ClearBlockedReport(ctx, task.ID, GitHubPRPublicationBlockerKey, "GitHub PR publication succeeded with PR #77")
+	if err != nil {
+		t.Fatalf("clear matching blocker: %v", err)
+	}
+	if cleared == nil || cleared.Status != models.TaskGoalStatusActive || cleared.BlockerKey != "" || cleared.BlockerCount != 0 {
+		t.Fatalf("cleared goal = %+v", cleared)
+	}
+	if cleared.Reason != "GitHub PR publication succeeded with PR #77" {
+		t.Fatalf("clear reason = %q", cleared.Reason)
+	}
+	if _, err := svc.RecordBlockedReport(ctx, task.ID, goal.GoalID, "different-blocker", "Different blocker"); err != nil {
+		t.Fatalf("record different blocker: %v", err)
+	}
+	unchanged, err := svc.ClearBlockedReport(ctx, task.ID, GitHubPRPublicationBlockerKey, "should not clear")
+	if err != nil {
+		t.Fatalf("clear nonmatching blocker: %v", err)
+	}
+	if unchanged != nil {
+		t.Fatalf("expected no-op for nonmatching blocker, got %+v", unchanged)
+	}
+	latest, err := svc.GetGoal(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("get latest goal: %v", err)
+	}
+	if latest.BlockerKey != "different-blocker" || latest.BlockerCount != 1 {
+		t.Fatalf("nonmatching blocker was cleared: %+v", latest)
+	}
+}
+
 func TestTaskGoalService_UserStopPausePreservesGoalForResume(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()

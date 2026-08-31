@@ -23,6 +23,7 @@ type AutomationSaveWrite struct {
 	StableKey              string
 	Source                 string
 	CreatedVia             string
+	TemplateRevision       *int
 	Candidate              models.AutomationDraftCandidate
 	ConfirmationTokenID    string
 	ConfirmationPrincipal  string
@@ -37,8 +38,10 @@ type AutomationSaveTask struct {
 	ExistingTaskID    string
 	Title             string
 	Prompt            string
+	Goal              string
 	Category          models.TaskCategory
 	Priority          int
+	AgentID           *string
 	AgentDefinitionID *string
 	ApplyTopology     bool
 	ParentNodeKey     string
@@ -76,21 +79,20 @@ func (r *AutomationRepo) SaveCurrentGraph(ctx context.Context, in AutomationSave
 	if in.CreatedVia == "" {
 		in.CreatedVia = "web"
 	}
+	for _, schedule := range in.Schedules {
+		if schedule.ExistingScheduleID != "" && schedule.PreserveTiming {
+			continue
+		}
+		if err := models.ValidateScheduleRepeatInterval(schedule.RepeatInterval); err != nil {
+			return nil, nil, fmt.Errorf("invalid repeat interval for schedule node %q: %w", schedule.NodeKey, err)
+		}
+	}
 
-	conn, err := r.db.Conn(ctx)
+	conn, finishImmediate, err := beginImmediateConn(ctx, r.db)
 	if err != nil {
 		return nil, nil, err
 	}
-	defer conn.Close()
-	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
-		return nil, nil, err
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
-		}
-	}()
+	defer finishImmediate()
 
 	if in.ConfirmationTokenID != "" {
 		candidateJSON, err := json.Marshal(in.Candidate)
@@ -120,7 +122,7 @@ func (r *AutomationRepo) SaveCurrentGraph(ctx context.Context, in AutomationSave
 
 	var automation models.Automation
 	err = scanAutomation(conn.QueryRowContext(ctx, `SELECT id, project_id, stable_key, name, description, automation_type,
-		lifecycle_state, health_state, health_reason, health_evaluated_at, published_version_id,
+		lifecycle_state, health_state, health_reason, health_evaluated_at, published_version_id, template_revision,
 		created_via, created_at, updated_at, archived_at FROM automations WHERE project_id = ? AND id = ?`, in.ProjectID, in.AutomationID), &automation)
 	newAutomation := errors.Is(err, sql.ErrNoRows)
 	if err != nil && !newAutomation {
@@ -131,14 +133,14 @@ func (r *AutomationRepo) SaveCurrentGraph(ctx context.Context, in AutomationSave
 			return nil, nil, errors.New("automation changed before Save")
 		}
 		if _, err := conn.ExecContext(ctx, `INSERT INTO automations
-			(id, project_id, stable_key, name, description, automation_type, lifecycle_state, created_via)
-			VALUES (?, ?, ?, ?, ?, ?, 'active', ?)`, in.AutomationID, in.ProjectID, in.StableKey,
-			in.Candidate.Name, in.Candidate.Description, in.Candidate.AutomationType, in.CreatedVia); err != nil {
+			(id, project_id, stable_key, name, description, automation_type, lifecycle_state, template_revision, created_via)
+			VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?)`, in.AutomationID, in.ProjectID, in.StableKey,
+			in.Candidate.Name, in.Candidate.Description, in.Candidate.AutomationType, in.TemplateRevision, in.CreatedVia); err != nil {
 			return nil, nil, fmt.Errorf("creating Automation: %w", err)
 		}
 		automation = models.Automation{ID: in.AutomationID, ProjectID: in.ProjectID, StableKey: in.StableKey,
 			Name: in.Candidate.Name, Description: in.Candidate.Description, AutomationType: in.Candidate.AutomationType,
-			LifecycleState: models.AutomationActive, CreatedVia: in.CreatedVia}
+			LifecycleState: models.AutomationActive, TemplateRevision: in.TemplateRevision, CreatedVia: in.CreatedVia}
 	} else {
 		currentGraphID := ""
 		if automation.PublishedVersionID != nil {
@@ -173,31 +175,55 @@ func (r *AutomationRepo) SaveCurrentGraph(ctx context.Context, in AutomationSave
 		graphSequence, in.Source, in.Candidate.AdapterKey, in.Candidate.SchemaVersion); err != nil {
 		return nil, nil, fmt.Errorf("creating current Automation graph: %w", err)
 	}
-	if err := writeAutomationGraph(ctx, conn, AutomationGraphWrite{ProjectID: in.ProjectID, AutomationID: in.AutomationID,
-		GraphID: in.GraphID, Candidate: in.Candidate}); err != nil {
-		return nil, nil, err
-	}
-
-	nodeIDs := make(map[string]string, len(in.Candidate.Nodes))
-	rows, err := conn.QueryContext(ctx, `SELECT node_key, id FROM automation_nodes WHERE version_id = ?`, in.GraphID)
+	nodeIDs, err := writeAutomationGraph(ctx, conn, AutomationGraphWrite{ProjectID: in.ProjectID, AutomationID: in.AutomationID,
+		GraphID: in.GraphID, Candidate: in.Candidate})
 	if err != nil {
-		return nil, nil, err
-	}
-	for rows.Next() {
-		var key, id string
-		if err := rows.Scan(&key, &id); err != nil {
-			rows.Close()
-			return nil, nil, err
-		}
-		nodeIDs[key] = id
-	}
-	if err := rows.Close(); err != nil {
 		return nil, nil, err
 	}
 
 	taskRepo := NewTaskRepo(r.db, nil)
 	taskIDs := make(map[string]string, len(in.Tasks))
 	for _, write := range in.Tasks {
+		restoreMaintainedTask := in.ExpectedCurrentGraphID != "" &&
+			(in.Candidate.AdapterKey == "native_sdlc" || in.Candidate.AdapterKey == "github_sdlc")
+		if write.ExistingTaskID == "" && restoreMaintainedTask {
+			createdVia := AutomationCompilerTaskCreatedVia(in.AutomationID, write.NodeKey)
+			rows, err := conn.QueryContext(ctx, `SELECT id FROM tasks WHERE project_id = ? AND created_via = ? ORDER BY id LIMIT 2`, in.ProjectID, createdVia)
+			if err != nil {
+				return nil, nil, fmt.Errorf("finding preserved task for node %q: %w", write.NodeKey, err)
+			}
+			var preservedTaskIDs []string
+			for rows.Next() {
+				var taskID string
+				if err := rows.Scan(&taskID); err != nil {
+					rows.Close()
+					return nil, nil, fmt.Errorf("scanning preserved task for node %q: %w", write.NodeKey, err)
+				}
+				preservedTaskIDs = append(preservedTaskIDs, taskID)
+			}
+			if err := rows.Err(); err != nil {
+				rows.Close()
+				return nil, nil, fmt.Errorf("reading preserved tasks for node %q: %w", write.NodeKey, err)
+			}
+			if err := rows.Close(); err != nil {
+				return nil, nil, fmt.Errorf("closing preserved task lookup for node %q: %w", write.NodeKey, err)
+			}
+			if len(preservedTaskIDs) > 1 {
+				return nil, nil, fmt.Errorf("more than one preserved task exists for node %q", write.NodeKey)
+			}
+			if len(preservedTaskIDs) == 1 {
+				var bindings, schedules int
+				if err := conn.QueryRowContext(ctx, `SELECT
+					(SELECT COUNT(*) FROM automation_definition_resources WHERE resource_type = 'task' AND resource_id = ?),
+					(SELECT COUNT(*) FROM schedules WHERE task_id = ?)`, preservedTaskIDs[0], preservedTaskIDs[0]).Scan(&bindings, &schedules); err != nil {
+					return nil, nil, fmt.Errorf("checking preserved task ownership for node %q: %w", write.NodeKey, err)
+				}
+				if bindings != 0 || schedules != 0 {
+					return nil, nil, fmt.Errorf("preserved task for node %q is still bound to another resource", write.NodeKey)
+				}
+				write.ExistingTaskID = preservedTaskIDs[0]
+			}
+		}
 		if write.ExistingTaskID != "" {
 			var projectID string
 			if err := conn.QueryRowContext(ctx, `SELECT project_id FROM tasks WHERE id = ?`, write.ExistingTaskID).Scan(&projectID); err != nil {
@@ -210,7 +236,7 @@ func (r *AutomationRepo) SaveCurrentGraph(ctx context.Context, in AutomationSave
 			continue
 		}
 		task := &models.Task{ProjectID: in.ProjectID, Title: write.Title, Prompt: write.Prompt, Category: models.CategoryBacklog,
-			Priority: write.Priority, Status: models.StatusPending, AgentDefinitionID: write.AgentDefinitionID,
+			Priority: write.Priority, Status: models.StatusPending, AgentID: write.AgentID, AgentDefinitionID: write.AgentDefinitionID,
 			CreatedVia: AutomationCompilerTaskCreatedVia(in.AutomationID, write.NodeKey)}
 		if err := taskRepo.createWithExecutor(ctx, conn, task); err != nil {
 			return nil, nil, fmt.Errorf("creating task for node %q: %w", write.NodeKey, err)
@@ -251,8 +277,8 @@ func (r *AutomationRepo) SaveCurrentGraph(ctx context.Context, in AutomationSave
 				chainConfig = string(encoded)
 			}
 		}
-		query := `UPDATE tasks SET title = ?, prompt = ?, category = ?, priority = ?, agent_definition_id = ?, updated_at = CURRENT_TIMESTAMP`
-		args := []any{write.Title, write.Prompt, category, write.Priority, write.AgentDefinitionID}
+		query := `UPDATE tasks SET title = ?, prompt = ?, category = ?, priority = ?, agent_id = ?, agent_definition_id = ?, updated_at = CURRENT_TIMESTAMP`
+		args := []any{write.Title, write.Prompt, category, write.Priority, write.AgentID, write.AgentDefinitionID}
 		if write.ApplyTopology {
 			query += `, parent_task_id = ?, chain_config = ?, status = CASE WHEN status IN ('running','queued') THEN status ELSE ? END`
 			args = append(args, parentID, chainConfig, status)
@@ -268,6 +294,11 @@ func (r *AutomationRepo) SaveCurrentGraph(ctx context.Context, in AutomationSave
 		}
 		if affected, _ := result.RowsAffected(); affected != 1 {
 			return nil, nil, fmt.Errorf("task for node %q is unavailable", write.NodeKey)
+		}
+		if strings.TrimSpace(write.Goal) != "" {
+			if err := setTaskGoalWithExecutor(ctx, conn, taskID, write.Goal, "set by Automation configuration"); err != nil {
+				return nil, nil, fmt.Errorf("saving goal for task node %q: %w", write.NodeKey, err)
+			}
 		}
 		if nodeID := nodeIDs[write.NodeKey]; nodeID != "" {
 			if _, err := conn.ExecContext(ctx, `INSERT INTO automation_definition_resources
@@ -285,7 +316,7 @@ func (r *AutomationRepo) SaveCurrentGraph(ctx context.Context, in AutomationSave
 		}
 		if automation.LifecycleState == models.AutomationActive && storedCategory == models.CategoryActive && storedStatus == models.StatusPending && !storedParentID.Valid {
 			runnable = append(runnable, models.Task{ID: taskID, ProjectID: in.ProjectID, Title: write.Title, Prompt: write.Prompt,
-				Category: storedCategory, Priority: write.Priority, Status: storedStatus, AgentDefinitionID: write.AgentDefinitionID,
+				Category: storedCategory, Priority: write.Priority, Status: storedStatus, AgentID: write.AgentID, AgentDefinitionID: write.AgentDefinitionID,
 				ChainConfig: chainConfig})
 		}
 	}
@@ -354,9 +385,9 @@ func (r *AutomationRepo) SaveCurrentGraph(ctx context.Context, in AutomationSave
 	}
 
 	if _, err := conn.ExecContext(ctx, `UPDATE automations SET name = ?, description = ?, automation_type = ?, lifecycle_state = ?,
-		published_version_id = ?, archived_at = CASE WHEN ? = 'archived' THEN archived_at ELSE NULL END, updated_at = CURRENT_TIMESTAMP
+		template_revision = ?, published_version_id = ?, archived_at = CASE WHEN ? = 'archived' THEN archived_at ELSE NULL END, updated_at = CURRENT_TIMESTAMP
 		WHERE id = ? AND project_id = ?`, in.Candidate.Name, in.Candidate.Description, in.Candidate.AutomationType,
-		automation.LifecycleState, in.GraphID, automation.LifecycleState, in.AutomationID, in.ProjectID); err != nil {
+		automation.LifecycleState, in.TemplateRevision, in.GraphID, automation.LifecycleState, in.AutomationID, in.ProjectID); err != nil {
 		return nil, nil, err
 	}
 	if in.ExpectedCurrentGraphID != "" {
@@ -374,7 +405,7 @@ func (r *AutomationRepo) SaveCurrentGraph(ctx context.Context, in AutomationSave
 	}
 
 	if err := scanAutomation(conn.QueryRowContext(ctx, `SELECT id, project_id, stable_key, name, description, automation_type,
-		lifecycle_state, health_state, health_reason, health_evaluated_at, published_version_id,
+		lifecycle_state, health_state, health_reason, health_evaluated_at, published_version_id, template_revision,
 		created_via, created_at, updated_at, archived_at FROM automations WHERE project_id = ? AND id = ?`, in.ProjectID, in.AutomationID), &automation); err != nil {
 		return nil, nil, err
 	}
@@ -385,13 +416,32 @@ func (r *AutomationRepo) SaveCurrentGraph(ctx context.Context, in AutomationSave
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 		return nil, nil, err
 	}
-	committed = true
 
 	r.PublishInvalidation(events.AutomationDefinitionUpdated, in.ProjectID, models.AutomationBinding{AutomationID: in.AutomationID, VersionID: in.GraphID})
 	return definition, runnable, nil
 }
 
 func backfillLegacyGitHubIssueTaskOrigins(ctx context.Context, exec SQLExecutor, projectID, automationID, versionID string) error {
+	if _, err := exec.ExecContext(ctx, `INSERT INTO automation_github_issue_task_provenance
+		(project_id, automation_id, task_id, issue_resource_id, implementation_node_key, created_from_version_id, created_from_node_id)
+		SELECT activity.project_id, activity.automation_id, task_resource.resource_id, issue_resource.resource_id,
+			node.node_key, activity.version_id, activity.node_id
+		FROM automation_activities activity
+		JOIN automation_nodes node ON node.id = activity.node_id
+			AND node.version_id = activity.version_id AND node.automation_id = activity.automation_id
+			AND node.project_id = activity.project_id
+		JOIN automation_activity_resources task_resource ON task_resource.activity_id = activity.id
+			AND task_resource.resource_type = 'task' AND task_resource.relation = 'child'
+		JOIN tasks task ON task.id = task_resource.resource_id AND task.project_id = activity.project_id
+		JOIN automation_activity_resources issue_resource ON issue_resource.activity_id = activity.id
+			AND issue_resource.resource_type = 'github_issue'
+		WHERE activity.project_id = ? AND activity.automation_id = ? AND activity.version_id = ?
+			AND activity.activity_type = 'create_task' AND activity.work_item_id IS NOT NULL
+			AND activity.activity_key = 'work-item:' || activity.work_item_id || ':implementation-task'
+			AND node.node_type = 'agent_task' AND node.role IN ('task', 'implementation')
+		ON CONFLICT(project_id, task_id) DO NOTHING`, projectID, automationID, versionID); err != nil {
+		return fmt.Errorf("backfilling Automation GitHub issue task provenance: %w", err)
+	}
 	_, err := exec.ExecContext(ctx, `UPDATE tasks
 		SET created_via = (
 			SELECT 'automation:' || activity.automation_id || ':' || node.node_key

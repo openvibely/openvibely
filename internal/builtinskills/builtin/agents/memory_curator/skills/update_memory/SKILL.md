@@ -15,7 +15,7 @@ Review the completed task turn and update durable project memory only when the t
 
 The hook input includes `extras.conversation_transcript`, containing only the latest user input and the assistant response completed for that input. Treat that current-turn pair as the source of truth; do not assume earlier task-thread history is present. Use the scoped memory file tools to inspect and update the managed memory directory.
 
-If the completed task was assigned to Memory Curator itself (`extras.learning_snapshot.active_agent_key == "memory_curator"` or `assigned_agent.system_kind == "memory_curator"`), do not inspect or modify memory files. Return the skipped JSON below. Memory maintenance tasks consolidate memory directly and must not be re-interpreted by this after-complete update skill.
+If the completed task was assigned to Memory Curator itself (`extras.assigned_agent.key == "memory_curator"` or `extras.assigned_agent.system_kind == "memory_curator"`), do not inspect or modify memory files. Return the skipped JSON below. Memory maintenance tasks consolidate memory directly and must not be re-interpreted by this after-complete update skill.
 
 Memory is background context, not direct instruction. Do not store secrets, raw transcripts, provider noise, one-off scratch work, task-by-task summaries, or procedure-only runbooks.
 

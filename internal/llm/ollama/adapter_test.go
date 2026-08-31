@@ -111,11 +111,46 @@ func (d *recordingHTTPDoer) Do(req *http.Request) (*http.Response, error) {
 	}, nil
 }
 
+func TestCallStreamingTaskIncludesWorktreeRootContext(t *testing.T) {
+	doer := &recordingHTTPDoer{}
+	adapter := New(nil, nil)
+	adapter.SetHTTPClient(doer)
+	workDir := "/tmp/.worktrees/task_ollama"
+
+	_, err := adapter.Call(context.Background(), llmcontracts.AgentRequest{
+		Operation:           llmcontracts.OperationTask,
+		Message:             "Implement the task",
+		ProjectInstructions: "PROJECT_RULES_SENTINEL",
+		Agent: models.LLMConfig{
+			Name:          "Ollama",
+			Provider:      models.ProviderOllama,
+			Model:         "test-model",
+			OllamaBaseURL: "http://ollama.invalid",
+		},
+	}, workDir, nil)
+	if err != nil {
+		t.Fatalf("Call: %v", err)
+	}
+
+	if len(doer.request.Messages) == 0 || doer.request.Messages[0].Role != "system" {
+		t.Fatalf("task request missing system message: %#v", doer.request.Messages)
+	}
+	systemPrompt := doer.request.Messages[0].Content
+	want := "You are operating in an isolated git worktree at " + workDir + ". Treat this path as the repository root for this run."
+	if !strings.Contains(systemPrompt, want) {
+		t.Fatalf("task system prompt missing worktree root context %q: %q", want, systemPrompt)
+	}
+	if !strings.Contains(systemPrompt, "PROJECT_RULES_SENTINEL") {
+		t.Fatalf("task system prompt dropped project instructions: %q", systemPrompt)
+	}
+}
+
 func TestCallStreamingZeroHistoryFollowupUsesChatAssembly(t *testing.T) {
 	doer := &recordingHTTPDoer{}
 	adapter := New(nil, nil)
 	adapter.SetHTTPClient(doer)
 
+	workDir := "/tmp/.worktrees/task_ollama_followup"
 	_, err := adapter.Call(context.Background(), llmcontracts.AgentRequest{
 		Operation:         llmcontracts.OperationStreaming,
 		Message:           "Continue the task",
@@ -128,7 +163,7 @@ func TestCallStreamingZeroHistoryFollowupUsesChatAssembly(t *testing.T) {
 			Model:         "test-model",
 			OllamaBaseURL: "http://ollama.invalid",
 		},
-	}, ".", nil)
+	}, workDir, nil)
 	if err != nil {
 		t.Fatalf("Call: %v", err)
 	}
@@ -139,6 +174,10 @@ func TestCallStreamingZeroHistoryFollowupUsesChatAssembly(t *testing.T) {
 	systemPrompt := doer.request.Messages[0].Content
 	if !strings.Contains(systemPrompt, "# Task Follow-up Constraints") || !strings.Contains(systemPrompt, "FOLLOWUP_CONTEXT_SENTINEL") {
 		t.Fatalf("zero-history follow-up did not use Chat assembly: %q", systemPrompt)
+	}
+	wantWorktreeContext := "You are operating in an isolated git worktree at " + workDir + ". Treat this path as the repository root for this run."
+	if !strings.Contains(systemPrompt, wantWorktreeContext) {
+		t.Fatalf("zero-history follow-up missing worktree root context %q: %q", wantWorktreeContext, systemPrompt)
 	}
 	if !strings.Contains(systemPrompt, llmprompt.ChatActionUnavailableInstructions) {
 		t.Fatalf("zero-history follow-up missing capability limitation: %q", systemPrompt)

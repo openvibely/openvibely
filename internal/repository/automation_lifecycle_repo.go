@@ -14,20 +14,11 @@ import (
 var ErrAutomationDispatchInFlight = errors.New("automation has in-flight dispatch work")
 
 func (r *AutomationRepo) ResumeAutomation(ctx context.Context, projectID, automationID string) ([]models.Task, error) {
-	conn, err := r.db.Conn(ctx)
+	conn, finishImmediate, err := beginImmediateConn(ctx, r.db)
 	if err != nil {
 		return nil, err
 	}
-	defer conn.Close()
-	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
-		return nil, err
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
-		}
-	}()
+	defer finishImmediate()
 
 	var current models.AutomationLifecycleState
 	var versionID sql.NullString
@@ -48,7 +39,6 @@ func (r *AutomationRepo) ResumeAutomation(ctx context.Context, projectID, automa
 		if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 			return nil, err
 		}
-		committed = true
 		return nil, nil
 	}
 
@@ -210,10 +200,7 @@ func (r *AutomationRepo) ResumeAutomation(ctx context.Context, projectID, automa
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 		return nil, err
 	}
-	committed = true
-	if err := conn.Close(); err != nil {
-		return nil, err
-	}
+	finishImmediate()
 
 	admittedTasks := make([]models.Task, 0, len(admittedTaskIDs))
 	taskRepo := NewTaskRepo(r.db, nil)
@@ -241,20 +228,11 @@ func (r *AutomationRepo) SetAutomationLifecycle(ctx context.Context, projectID, 
 	if state != models.AutomationPaused && state != models.AutomationArchived {
 		return errors.New("unsupported automation lifecycle state")
 	}
-	conn, err := r.db.Conn(ctx)
+	conn, finishImmediate, err := beginImmediateConn(ctx, r.db)
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
-	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
-		return err
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
-		}
-	}()
+	defer finishImmediate()
 	var current models.AutomationLifecycleState
 	var published sql.NullString
 	if err := conn.QueryRowContext(ctx, `SELECT lifecycle_state, published_version_id FROM automations WHERE project_id = ? AND id = ?`, projectID, automationID).Scan(&current, &published); err != nil {
@@ -272,6 +250,43 @@ func (r *AutomationRepo) SetAutomationLifecycle(ctx context.Context, projectID, 
 	if _, err := conn.ExecContext(ctx, `UPDATE schedules SET enabled = 0, updated_at = CURRENT_TIMESTAMP
 		WHERE id IN (SELECT schedule_id FROM automation_trigger_owners WHERE project_id = ? AND automation_id = ?)`, projectID, automationID); err != nil {
 		return err
+	}
+	if state == models.AutomationPaused || state == models.AutomationArchived {
+		cancellationMessage := "Automation lifecycle changed before dispatch"
+		if state == models.AutomationPaused {
+			cancellationMessage = "Automation was paused before dispatch"
+		} else if state == models.AutomationArchived {
+			cancellationMessage = "Automation was archived before dispatch"
+		}
+		if _, err := conn.ExecContext(ctx, `UPDATE automation_invocations SET status = 'cancelled', error_message = ?,
+			completed_at = COALESCE(completed_at, CURRENT_TIMESTAMP), updated_at = CURRENT_TIMESTAMP
+			WHERE id IN (
+				SELECT d.invocation_id FROM automation_dispatch_outbox d
+				JOIN automation_invocations i ON i.id = d.invocation_id
+				WHERE i.project_id = ? AND i.automation_id = ?
+				AND d.execution_id IS NULL AND d.status IN ('pending', 'processing', 'submitted')
+			)`, cancellationMessage, projectID, automationID); err != nil {
+			return err
+		}
+		if _, err := conn.ExecContext(ctx, `DELETE FROM automation_task_run_reservations
+			WHERE dispatch_id IN (
+				SELECT d.id FROM automation_dispatch_outbox d
+				JOIN automation_invocations i ON i.id = d.invocation_id
+				WHERE i.project_id = ? AND i.automation_id = ?
+				AND d.execution_id IS NULL AND d.status IN ('pending', 'processing', 'submitted')
+			)`, projectID, automationID); err != nil {
+			return err
+		}
+		if _, err := conn.ExecContext(ctx, `UPDATE automation_dispatch_outbox SET status = 'failed', last_error = ?,
+			claimed_by = '', claim_expires_at = NULL, updated_at = CURRENT_TIMESTAMP
+			WHERE id IN (
+				SELECT d.id FROM automation_dispatch_outbox d
+				JOIN automation_invocations i ON i.id = d.invocation_id
+				WHERE i.project_id = ? AND i.automation_id = ?
+				AND d.execution_id IS NULL AND d.status IN ('pending', 'processing', 'submitted')
+			)`, cancellationMessage, projectID, automationID); err != nil {
+			return err
+		}
 	}
 	if state == models.AutomationPaused {
 		if _, err := conn.ExecContext(ctx, `INSERT INTO automation_paused_task_admissions
@@ -292,7 +307,7 @@ func (r *AutomationRepo) SetAutomationLifecycle(ctx context.Context, projectID, 
 		return err
 	}
 	if _, err := conn.ExecContext(ctx, `UPDATE tasks SET category = 'backlog', updated_at = CURRENT_TIMESTAMP
-		WHERE project_id = ? AND category = 'active' AND status = 'pending'
+		WHERE project_id = ? AND category IN ('active', 'scheduled') AND status = 'pending'
 		  AND (id IN (SELECT resource_id FROM automation_definition_resources
 			WHERE project_id = ? AND automation_id = ? AND version_id = ? AND resource_type = 'task')
 		  OR id IN (SELECT resource.resource_id FROM automation_activity_resources resource
@@ -321,7 +336,6 @@ func (r *AutomationRepo) SetAutomationLifecycle(ctx context.Context, projectID, 
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 		return err
 	}
-	committed = true
 	eventName := "automation.lifecycle.paused"
 	if state == models.AutomationArchived {
 		eventName = "automation.lifecycle.archived"
@@ -337,20 +351,11 @@ func (r *AutomationRepo) SetAutomationLifecycle(ctx context.Context, projectID, 
 // its Automation-owned metadata. Existing domain tasks remain authoritative;
 // trigger schedules exclusively owned by the Automation are deleted before metadata cascades.
 func (r *AutomationRepo) DeleteAutomation(ctx context.Context, projectID, automationID string) error {
-	conn, err := r.db.Conn(ctx)
+	conn, finishImmediate, err := beginImmediateConn(ctx, r.db)
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
-	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
-		return err
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
-		}
-	}()
+	defer finishImmediate()
 
 	var versionID sql.NullString
 	if err := conn.QueryRowContext(ctx, `SELECT published_version_id FROM automations WHERE project_id = ? AND id = ?`, projectID, automationID).Scan(&versionID); err != nil {
@@ -396,7 +401,6 @@ func (r *AutomationRepo) DeleteAutomation(ctx context.Context, projectID, automa
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 		return err
 	}
-	committed = true
 	automationobs.Event("automation.lifecycle.deleted",
 		automationobs.String("project_id", projectID), automationobs.String("automation_id", automationID),
 		automationobs.String("version_id", versionID.String), automationobs.String("state", "deleted"))

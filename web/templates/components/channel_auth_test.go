@@ -84,27 +84,25 @@ func TestChannelAuthorizationListWrappersPreserveHTMXContracts(t *testing.T) {
 				tc.emptyState,
 				`name="project_id"`,
 				fmt.Sprintf(`value="%s"`, projectID),
-				fmt.Sprintf(`type="%s"`, tc.inputType),
-				fmt.Sprintf(`name="%s"`, tc.inputName),
+				fmt.Sprintf(`<input type="%s" name="%s"`, tc.inputType, tc.inputName),
 				fmt.Sprintf(`hx-post="%s"`, tc.addEndpoint),
 				fmt.Sprintf(`hx-target="#%s"`, tc.containerID),
 				`hx-swap="outerHTML"`,
 				fmt.Sprintf(`hx-include="#%s-add-controls"`, tc.containerID),
 			)
+			assertChannelAuthorizationMutationScope(t, emptyHTML, tc.containerID, 1)
+			if got := strings.Count(emptyHTML, fmt.Sprintf(`hx-post="%s"`, tc.addEndpoint)); got != 1 {
+				t.Fatalf("expected exactly one Add endpoint %s, got %d", tc.addEndpoint, got)
+			}
 
 			populatedHTML := renderChannelAuthorizationComponent(t, tc.populatedList)
 			assertChannelAuthorizationContains(t, populatedHTML,
 				fmt.Sprintf(`hx-delete="%s"`, tc.deleteRoute),
 				fmt.Sprintf(`hx-confirm="%s"`, tc.confirmation),
 			)
-			if got := strings.Count(populatedHTML, `hx-target=`); got != 2 {
-				t.Fatalf("expected only Add and Remove HTMX targets, got %d target attributes", got)
-			}
-			if got := strings.Count(populatedHTML, fmt.Sprintf(`hx-target="#%s"`, tc.containerID)); got != 2 {
-				t.Fatalf("expected Add and Remove to target only #%s, got %d modal-fragment targets", tc.containerID, got)
-			}
-			if got := strings.Count(populatedHTML, `hx-swap="outerHTML"`); got != 2 {
-				t.Fatalf("expected Add and Remove to use modal-scoped outerHTML swaps, got %d swap attributes", got)
+			assertChannelAuthorizationMutationScope(t, populatedHTML, tc.containerID, 2)
+			if got := strings.Count(populatedHTML, fmt.Sprintf(`hx-delete="%s"`, tc.deleteRoute)); got != 1 {
+				t.Fatalf("expected exactly one Remove endpoint %s, got %d", tc.deleteRoute, got)
 			}
 		})
 	}
@@ -120,6 +118,23 @@ func TestTelegramAuthorizedUsersListPreservesUsernameAndUserIDRendering(t *testi
 	assertChannelAuthorizationContains(t, html, "@both_identity", "ID: 123456789", "@username_only", "ID: 987654321")
 	if strings.Contains(html, "ID: 0") {
 		t.Fatal("Telegram rows without a numeric user ID must not render ID: 0")
+	}
+}
+
+func assertChannelAuthorizationMutationScope(t *testing.T, html, containerID string, mutationCount int) {
+	t.Helper()
+	rootPrefix := fmt.Sprintf(`<div id="%s">`, containerID)
+	if !strings.HasPrefix(html, rootPrefix) || !strings.HasSuffix(html, `</div>`) {
+		t.Fatalf("authorization mutations must render inside the single root %s", rootPrefix)
+	}
+	if got := strings.Count(html, `hx-target=`); got != mutationCount {
+		t.Fatalf("expected %d modal-fragment targets, got %d", mutationCount, got)
+	}
+	if got := strings.Count(html, fmt.Sprintf(`hx-target="#%s"`, containerID)); got != mutationCount {
+		t.Fatalf("expected all %d mutations to target only #%s, got %d", mutationCount, containerID, got)
+	}
+	if got := strings.Count(html, `hx-swap="outerHTML"`); got != mutationCount {
+		t.Fatalf("expected all %d mutations to use modal-scoped outerHTML swaps, got %d", mutationCount, got)
 	}
 }
 

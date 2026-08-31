@@ -2,13 +2,18 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/config"
 	"github.com/openvibely/openvibely/internal/server"
+	"github.com/openvibely/openvibely/internal/update"
 )
 
 // @title OpenVibely API
@@ -40,16 +45,36 @@ import (
 // @tag.name capacity
 // @tag.description Worker capacity and utilization API endpoints
 
-// @tag.name workflows
-// @tag.description Multi-agent workflow and metrics API endpoints
-
-// @tag.name autonomous
-// @tag.description Autonomous build and trend intelligence API endpoints
-
-// @tag.name collisions
-// @tag.description Semantic collision analysis API endpoints
-
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == update.ExecutableUpdateHelperCommand {
+		cfg, err := update.ParseExecutableUpdateHelperArgs(os.Args[2:])
+		if err == nil {
+			if cfg.RelaunchMetadataPath != "" {
+				err = update.LoadExecutableUpdateHelperRelaunchFile(cfg.RelaunchMetadataPath, &cfg)
+			} else {
+				err = update.LoadExecutableUpdateHelperRelaunch(os.Stdin, &cfg)
+			}
+		}
+		applyUpdateIntegrationTimeouts(&cfg)
+		if err == nil {
+			err = update.RunExecutableUpdateHelper(context.Background(), cfg)
+		}
+		if err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
+		port := os.Getenv("PORT")
+		if port == "" {
+			port = "3001"
+		}
+		endpoint := "http://127.0.0.1:" + port + "/api/system/health"
+		if err := runHealthcheck(endpoint, &http.Client{Timeout: 5 * time.Second}); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 	cfg := config.Load()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -60,10 +85,49 @@ func main() {
 		log.Fatalf("failed to start server: %v", err)
 	}
 
-	// Wait for termination signal
+	// Wait for termination signal or an update helper handoff.
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	<-sigCh
+	waitForShutdown(sigCh, inst.ShutdownRequested)
 
 	inst.Shutdown()
+}
+
+func applyUpdateIntegrationTimeouts(cfg *update.ExecutableUpdateHelperConfig) {
+	if cfg == nil {
+		return
+	}
+	if value := os.Getenv("OPENVIBELY_UPDATE_INTEGRATION_WAIT_TIMEOUT_MS"); value != "" {
+		milliseconds, err := strconv.Atoi(value)
+		if err != nil {
+			log.Fatal(err)
+		}
+		cfg.WaitTimeout = time.Duration(milliseconds) * time.Millisecond
+	}
+	if value := os.Getenv("OPENVIBELY_UPDATE_INTEGRATION_VALIDATION_TIMEOUT_MS"); value != "" {
+		milliseconds, err := strconv.Atoi(value)
+		if err != nil {
+			log.Fatal(err)
+		}
+		cfg.ValidationTimeout = time.Duration(milliseconds) * time.Millisecond
+	}
+}
+
+func waitForShutdown(signals <-chan os.Signal, requested <-chan struct{}) {
+	select {
+	case <-signals:
+	case <-requested:
+	}
+}
+
+func runHealthcheck(endpoint string, client *http.Client) error {
+	resp, err := client.Get(endpoint)
+	if err != nil {
+		return fmt.Errorf("healthcheck request: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("healthcheck returned HTTP %d", resp.StatusCode)
+	}
+	return nil
 }

@@ -44,6 +44,7 @@ type ChannelTaskRunRequest struct {
 	Surface         chatcontrol.Surface
 	AgentDefinition *models.Agent
 	ReplyContext    ChannelReplyContext
+	RuntimeTools    *llmcontracts.RuntimeTools
 }
 
 type ChannelReplyContext struct {
@@ -62,6 +63,11 @@ type ChannelReplyContext struct {
 	DiscordThreadID  string
 	DiscordMessageID string
 	DiscordUserID    string
+	XAccountID       string
+	XConversationID  string
+	XReplyToTweetID  string
+	XUserID          string
+	XUsername        string
 }
 
 type ChannelTaskRunner func(context.Context, ChannelTaskRunRequest)

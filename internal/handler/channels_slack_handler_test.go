@@ -266,6 +266,17 @@ func TestChannelsSlackCallbackDisconnectAndRemove(t *testing.T) {
 
 func TestChannelsSlackTestConnection(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
+
+	missingReq := httptest.NewRequest(http.MethodPost, "/channels/slack/test", nil)
+	missingRec := httptest.NewRecorder()
+	e.ServeHTTP(missingRec, missingReq)
+	if missingRec.Code != http.StatusOK {
+		t.Fatalf("expected missing-service status 200, got %d", missingRec.Code)
+	}
+	if !strings.Contains(missingRec.Body.String(), "Slack service not configured") {
+		t.Fatalf("expected Slack missing-service body, got %q", missingRec.Body.String())
+	}
+
 	h.SetSlackService(&fakeSlackService{
 		testFn: func(ctx context.Context) error {
 			return nil
@@ -284,7 +295,7 @@ func TestChannelsSlackTestConnection(t *testing.T) {
 
 	h.SetSlackService(&fakeSlackService{
 		testFn: func(ctx context.Context) error {
-			return errors.New("boom")
+			return errors.New(`slack <bad> & "quoted"`)
 		},
 	})
 	req2 := httptest.NewRequest(http.MethodPost, "/channels/slack/test", nil)
@@ -293,7 +304,8 @@ func TestChannelsSlackTestConnection(t *testing.T) {
 	if rec2.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d", rec2.Code)
 	}
-	if !strings.Contains(rec2.Body.String(), "Connection failed") {
-		t.Fatalf("expected failure body, got %q", rec2.Body.String())
+	wantFailure := `<div class="flex items-center gap-2 text-error"><span>Connection failed: slack &lt;bad&gt; &amp; &quot;quoted&quot;</span></div>`
+	if rec2.Body.String() != wantFailure {
+		t.Fatalf("expected escaped failure feedback %q, got %q", wantFailure, rec2.Body.String())
 	}
 }

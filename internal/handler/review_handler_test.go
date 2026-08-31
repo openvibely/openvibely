@@ -51,7 +51,7 @@ func setupReviewHandler(t *testing.T) (*Handler, *echo.Echo, *repository.ReviewC
 		projectSvc,
 		taskSvc,
 		llmSvc,
-		workerSvc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
+		workerSvc, nil, nil, nil, nil,
 		llmConfigRepo, taskRepo, scheduleRepo, execRepo, nil, attachmentRepo, nil, projectRepo, settingsRepo, broadcaster, nil,
 	)
 	h.SetReviewCommentRepo(reviewCommentRepo)
@@ -369,6 +369,58 @@ func TestSubmitReview_WorktreeFailurePreservesExistingQueuedFIFO(t *testing.T) {
 		execs, listErr := execRepo.ListByTaskChronological(ctx, taskID)
 		return listErr == nil && len(execs) == 2 && execs[0].PromptSent == queued.Content && strings.Contains(execs[1].PromptSent, "Fix this")
 	}, time.Second, 10*time.Millisecond, "expected existing queued input to run before the newer review follow-up")
+}
+
+func TestSubmitReview_RejectsForeignProjectTaskBeforeSideEffects(t *testing.T) {
+	h, e, reviewRepo, execRepo, mockLLM, foreignTaskID := setupReviewHandler(t)
+	ctx := context.Background()
+
+	foreignTask, err := h.taskRepo.GetByID(ctx, foreignTaskID)
+	require.NoError(t, err)
+	require.NotNil(t, foreignTask)
+
+	otherProject := &models.Project{Name: "Other Review Project"}
+	require.NoError(t, h.projectSvc.Create(ctx, otherProject))
+
+	goal, err := h.taskGoalSvc.SetGoal(ctx, foreignTaskID, "foreign task goal", service.GoalOptions{})
+	require.NoError(t, err)
+	require.NoError(t, h.taskGoalSvc.PauseActiveGoalStoppedByUser(ctx, foreignTaskID))
+
+	require.NoError(t, reviewRepo.Create(ctx, &models.ReviewComment{
+		TaskID:      foreignTaskID,
+		FilePath:    "foreign.go",
+		LineNumber:  42,
+		LineType:    "new",
+		CommentText: "Do not submit across projects",
+		ReviewedBy:  "user",
+	}))
+
+	req := httptest.NewRequest(http.MethodPost, "/tasks/"+foreignTaskID+"/reviews/submit?project_id="+url.QueryEscape(otherProject.ID), nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusNotFound, rec.Code)
+
+	commentCount, err := reviewRepo.CountByTask(ctx, foreignTaskID)
+	require.NoError(t, err)
+	require.Equal(t, 1, commentCount, "foreign task comments must not be cleared")
+
+	execs, err := execRepo.ListByTaskChronological(ctx, foreignTaskID)
+	require.NoError(t, err)
+	require.Empty(t, execs, "foreign task execution must not be created")
+
+	pendingInputs, err := h.threadInputRepo.ListPendingForTask(ctx, foreignTaskID)
+	require.NoError(t, err)
+	require.Empty(t, pendingInputs, "foreign task thread inputs must not be queued")
+
+	unchangedGoal, err := h.taskGoalSvc.GetGoal(ctx, foreignTaskID)
+	require.NoError(t, err)
+	require.NotNil(t, unchangedGoal)
+	require.Equal(t, goal.GoalID, unchangedGoal.GoalID)
+	require.Equal(t, models.TaskGoalStatusPaused, unchangedGoal.Status)
+	require.Equal(t, "stopped by user", unchangedGoal.Reason)
+	require.Equal(t, 0, mockLLM.CallCount(), "foreign task must not start background LLM work")
+	require.NotEqual(t, otherProject.ID, foreignTask.ProjectID)
 }
 
 func TestSubmitReview_CreatesFollowupExecutionAndClearsComments(t *testing.T) {

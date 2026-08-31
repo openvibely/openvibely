@@ -2,14 +2,173 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
+
+func TestExecutionRepo_ListByTaskHistoryPageUsesTaskStartedIndex(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	plan := explainExecutionRepoPlan(t, db, taskExecutionHistoryPageSQL, "task-history-plan", 21)
+	if !strings.Contains(plan, "idx_executions_task_started_at") {
+		t.Fatalf("expected execution-history page query to use idx_executions_task_started_at, plan:\n%s", plan)
+	}
+	if strings.Contains(plan, "USE TEMP B-TREE FOR ORDER BY") {
+		t.Fatalf("execution-history page query should not sort with a temp B-tree, plan:\n%s", plan)
+	}
+}
+
+func TestExecutionRepo_ListByTaskChronologicalPageUsesTaskStartedIndex(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	plan := explainExecutionRepoPlan(t, db, taskExecutionChronologicalPageSQL, "thread-page-plan", 20, 0)
+	if !strings.Contains(plan, "idx_executions_task_started_at") {
+		t.Fatalf("expected task-thread page query to use idx_executions_task_started_at, plan:\n%s", plan)
+	}
+	if strings.Contains(plan, "USE TEMP B-TREE FOR ORDER BY") {
+		t.Fatalf("task-thread page query should not sort with a temp B-tree, plan:\n%s", plan)
+	}
+
+	countPlan := explainExecutionRepoPlan(t, db, taskExecutionCountSQL, "thread-page-plan")
+	if !strings.Contains(countPlan, "idx_executions_task_started_at") {
+		t.Fatalf("expected task-thread count query to use idx_executions_task_started_at, plan:\n%s", countPlan)
+	}
+}
+
+func TestExecutionRepo_ListByTaskChronologicalPage(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := NewTaskRepo(db, nil)
+	execRepo := NewExecutionRepo(db)
+	ctx := context.Background()
+	task := &models.Task{ProjectID: "default", Title: "Thread Page Test", Category: models.CategoryBacklog, Status: models.StatusCompleted, Prompt: "original"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	startedAt := "2026-08-18 12:00:00"
+	rows := []struct {
+		id         string
+		prompt     string
+		isFollowup int
+	}{
+		{id: "thread-page-0", prompt: "first"},
+		{id: "thread-page-1", prompt: "second", isFollowup: 1},
+		{id: "thread-page-2", prompt: "third", isFollowup: 1},
+		{id: "thread-page-3", prompt: "fourth", isFollowup: 1},
+	}
+	for _, row := range rows {
+		if _, err := db.ExecContext(ctx, `INSERT INTO executions
+			(id, task_id, status, prompt_sent, output, is_followup, started_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?)`, row.id, task.ID, models.ExecCompleted, row.prompt, "output "+row.prompt, row.isFollowup, startedAt); err != nil {
+			t.Fatalf("insert execution %s: %v", row.id, err)
+		}
+	}
+
+	total, err := execRepo.CountByTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("CountByTask: %v", err)
+	}
+	if total != len(rows) {
+		t.Fatalf("CountByTask = %d, want %d", total, len(rows))
+	}
+
+	page, err := execRepo.ListByTaskChronologicalPage(ctx, task.ID, 1, 2)
+	if err != nil {
+		t.Fatalf("ListByTaskChronologicalPage: %v", err)
+	}
+	if len(page) != 2 {
+		t.Fatalf("page length = %d, want 2", len(page))
+	}
+	if page[0].ID != rows[1].id || page[1].ID != rows[2].id {
+		t.Fatalf("page IDs = [%s, %s], want [%s, %s]", page[0].ID, page[1].ID, rows[1].id, rows[2].id)
+	}
+	if page[0].DiffOutput != "" || page[1].ReasoningContent != "" {
+		t.Fatal("chronological page should use the light execution projection")
+	}
+}
+func TestExecutionRepo_GetTaskExecutionMetrics(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := NewTaskRepo(db, nil)
+	execRepo := NewExecutionRepo(db)
+	ctx := context.Background()
+	task := &models.Task{ProjectID: "default", Title: "Metrics Test", Category: models.CategoryActive, Status: models.StatusCompleted, Prompt: "test"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	base := time.Date(2026, 8, 18, 12, 0, 0, 0, time.UTC)
+	rows := []struct {
+		id         string
+		startedAt  time.Time
+		durationMs int64
+	}{
+		{id: "exec-old", startedAt: base, durationMs: 2500},
+		{id: "exec-latest-duration", startedAt: base.Add(time.Minute), durationMs: 4200},
+		{id: "exec-newest", startedAt: base.Add(2 * time.Minute), durationMs: 0},
+	}
+	for _, row := range rows {
+		_, err := db.ExecContext(ctx, `INSERT INTO executions (id, task_id, status, prompt_sent, output, duration_ms, started_at, completed_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, row.id, task.ID, models.ExecCompleted, "prompt", "output", row.durationMs, row.startedAt.Format("2006-01-02 15:04:05"), row.startedAt.Add(time.Second).Format("2006-01-02 15:04:05"))
+		if err != nil {
+			t.Fatalf("insert execution %s: %v", row.id, err)
+		}
+	}
+
+	metrics, err := execRepo.GetTaskExecutionMetrics(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetTaskExecutionMetrics: %v", err)
+	}
+	if metrics.LatestStartedAt == nil || !metrics.LatestStartedAt.Equal(rows[2].startedAt) {
+		t.Fatalf("LatestStartedAt = %v, want %v", metrics.LatestStartedAt, rows[2].startedAt)
+	}
+	if metrics.LatestDurationMs != rows[1].durationMs {
+		t.Fatalf("LatestDurationMs = %d, want %d", metrics.LatestDurationMs, rows[1].durationMs)
+	}
+}
+
+func TestExecutionRepo_GetTaskExecutionMetricsUsesTaskStartedIndexAndOmitsExecutionText(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	for _, forbidden := range []string{"prompt_sent", "output", "error_message", "reasoning_content", "diff_output"} {
+		if strings.Contains(taskExecutionMetricsSQL, forbidden) {
+			t.Fatalf("task execution metrics query must not select historical %s text: %s", forbidden, taskExecutionMetricsSQL)
+		}
+	}
+	plan := explainExecutionRepoPlan(t, db, taskExecutionMetricsSQL, "task-metrics-plan", "task-metrics-plan")
+	if !strings.Contains(plan, "idx_executions_task_started_at") {
+		t.Fatalf("expected task metrics query to use idx_executions_task_started_at, plan:\n%s", plan)
+	}
+	if strings.Contains(plan, "USE TEMP B-TREE") {
+		t.Fatalf("task metrics query should not materialize a temp B-tree, plan:\n%s", plan)
+	}
+}
+
+func explainExecutionRepoPlan(t testing.TB, db interface {
+	Query(query string, args ...any) (*sql.Rows, error)
+}, query string, args ...any) string {
+	t.Helper()
+	rows, err := db.Query("EXPLAIN QUERY PLAN "+query, args...)
+	if err != nil {
+		t.Fatalf("explain query plan: %v", err)
+	}
+	defer rows.Close()
+	var lines []string
+	for rows.Next() {
+		var id, parent, notused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &notused, &detail); err != nil {
+			t.Fatalf("scan plan: %v", err)
+		}
+		lines = append(lines, detail)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("read plan: %v", err)
+	}
+	return strings.Join(lines, "\n")
+}
 
 func TestExecutionRepo_CreateAndComplete(t *testing.T) {
 	db := testutil.NewTestDB(t)
@@ -929,6 +1088,61 @@ func TestExecutionRepo_CompleteSuccessIfNoPendingSteeringReportsTerminalState(t 
 	}
 }
 
+func TestExecutionRepo_CancelActiveByTaskCancelsRunningAndQueuedOnly(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	taskRepo := NewTaskRepo(db, nil)
+	execRepo := NewExecutionRepo(db)
+
+	task := &models.Task{ProjectID: "default", Title: "Cancel Active Test", Category: models.CategoryActive, Status: models.StatusQueued, Prompt: "test"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	execs := map[string]models.ExecutionStatus{
+		"running-exec":   models.ExecRunning,
+		"queued-exec":    models.ExecQueued,
+		"completed-exec": models.ExecCompleted,
+	}
+	for id, status := range execs {
+		exec := &models.Execution{ID: id, TaskID: task.ID, Status: status, PromptSent: id}
+		if err := execRepo.Create(ctx, exec); err != nil {
+			t.Fatalf("create execution %s: %v", id, err)
+		}
+	}
+
+	cancelledIDs, err := execRepo.CancelActiveByTaskReturningIDs(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("CancelActiveByTaskReturningIDs: %v", err)
+	}
+	cancelled := map[string]bool{}
+	for _, id := range cancelledIDs {
+		cancelled[id] = true
+	}
+	for _, id := range []string{"running-exec", "queued-exec"} {
+		if !cancelled[id] {
+			t.Fatalf("expected %s to be returned as cancelled; got %v", id, cancelledIDs)
+		}
+		stored, err := execRepo.GetByID(ctx, id)
+		if err != nil {
+			t.Fatalf("GetByID %s: %v", id, err)
+		}
+		if stored.Status != models.ExecCancelled || stored.ErrorMessage != "cancelled" || stored.CompletedAt == nil {
+			t.Fatalf("%s not cancelled correctly: status=%s err=%q completed_at=%v", id, stored.Status, stored.ErrorMessage, stored.CompletedAt)
+		}
+	}
+	if cancelled["completed-exec"] {
+		t.Fatalf("completed execution must not be returned as cancelled")
+	}
+	completed, err := execRepo.GetByID(ctx, "completed-exec")
+	if err != nil {
+		t.Fatalf("GetByID completed-exec: %v", err)
+	}
+	if completed.Status != models.ExecCompleted {
+		t.Fatalf("completed execution was changed to %s", completed.Status)
+	}
+}
+
 func TestExecutionRepo_ChatHistoryWindowReturnsLatestChronologicalAndBeforeCursor(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	taskRepo := NewTaskRepo(db, nil)
@@ -1011,4 +1225,44 @@ func promptsOf(execs []models.Execution) []string {
 		out[i] = exec.PromptSent
 	}
 	return out
+}
+
+func TestExecutionRepo_CancelActiveByTaskReturnsCount(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	taskRepo := NewTaskRepo(db, nil)
+	execRepo := NewExecutionRepo(db)
+	projectRepo := NewProjectRepo(db)
+	project := &models.Project{Name: "Cancel Active Count Project"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Cancel active count", Prompt: "prompt", Status: models.StatusRunning, Category: models.CategoryActive}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	for _, status := range []models.ExecutionStatus{models.ExecRunning, models.ExecQueued, models.ExecCompleted} {
+		exec := &models.Execution{TaskID: task.ID, Status: status, PromptSent: string(status)}
+		if err := execRepo.Create(ctx, exec); err != nil {
+			t.Fatal(err)
+		}
+	}
+	count, err := execRepo.CancelActiveByTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("CancelActiveByTask: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("expected 2 active executions cancelled, got %d", count)
+	}
+	history, err := execRepo.ListByTask(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	statuses := map[models.ExecutionStatus]int{}
+	for _, exec := range history {
+		statuses[exec.Status]++
+	}
+	if statuses[models.ExecCancelled] != 2 || statuses[models.ExecCompleted] != 1 {
+		t.Fatalf("unexpected execution statuses after cancel: %#v", statuses)
+	}
 }

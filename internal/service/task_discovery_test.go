@@ -3,11 +3,15 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/stretchr/testify/require"
 )
 
 func decodeListTasksResult(t *testing.T, raw string) taskDiscoveryResult {
@@ -64,6 +68,9 @@ func TestExecuteListTasksTool(t *testing.T) {
 	if result.Total != 2 || result.Count != 2 {
 		t.Fatalf("expected 2 matches (chat + other project excluded), got total=%d count=%d", result.Total, result.Count)
 	}
+	if result.Filter.Query != "issue 25" || result.Filter.Category != "" || result.Filter.Status != "" || result.Note != "" {
+		t.Fatalf("unexpected filter echo/note for matching query: %+v", result)
+	}
 	var found bool
 	for _, task := range result.Tasks {
 		if task.Category == string(models.CategoryChat) {
@@ -92,6 +99,19 @@ func TestExecuteListTasksTool(t *testing.T) {
 	if filtered.Total != 1 || len(filtered.Tasks) != 1 || filtered.Tasks[0].Title != "Unrelated task" {
 		t.Fatalf("expected single running active task, got %+v", filtered)
 	}
+	if filtered.Filter.Category != "active" || filtered.Filter.Status != "running" {
+		t.Fatalf("expected normalized category/status filter echo, got %+v", filtered.Filter)
+	}
+
+	// Exhausted empty pages explicitly identify the exact filter that was exhausted.
+	out, err = ExecuteListTasksTool(ctx, taskRepo, "default", json.RawMessage(`{"query":"missing issue","limit":10}`))
+	if err != nil {
+		t.Fatalf("list_tasks empty query: %v", err)
+	}
+	empty := decodeListTasksResult(t, out)
+	if empty.Total != 0 || empty.Count != 0 || empty.HasMore || empty.Filter.Query != "missing issue" || !strings.Contains(empty.Note, "No tasks matched this exact list_tasks query/filter") || !strings.Contains(empty.Note, "filter object echoes the parameters you sent") || !strings.Contains(empty.Note, "do not immediately repeat the same query just to get an unfiltered echo") {
+		t.Fatalf("unexpected exhausted empty response: %+v", empty)
+	}
 
 	// Invalid category/status are rejected.
 	if _, err := ExecuteListTasksTool(ctx, taskRepo, "default", json.RawMessage(`{"category":"bogus"}`)); err == nil {
@@ -119,4 +139,278 @@ func TestExecuteListTasksTool(t *testing.T) {
 	if page3.Offset != 2 || page3.Count != 1 || page3.HasMore {
 		t.Fatalf("unexpected final page contract: %+v", page3)
 	}
+}
+
+func TestExecuteListTasksTool_PreservesCompactJSONContract(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	ctx := context.Background()
+
+	parent := &models.Task{
+		ProjectID: "default",
+		Title:     "Discovery JSON parent",
+		Category:  models.CategoryChat,
+		Priority:  1,
+		Status:    models.StatusCompleted,
+		Prompt:    "internal parent",
+	}
+	if err := taskRepo.Create(ctx, parent); err != nil {
+		t.Fatalf("create parent: %v", err)
+	}
+	withOptionalFields := &models.Task{
+		ProjectID:    "default",
+		Title:        "Discovery JSON optional",
+		Category:     models.CategoryActive,
+		Priority:     4,
+		Status:       models.StatusRunning,
+		Prompt:       "not returned",
+		ParentTaskID: &parent.ID,
+		SwarmRole:    models.SwarmRoleWorker,
+	}
+	withoutOptionalFields := &models.Task{
+		ProjectID: "default",
+		Title:     "Discovery JSON nullable",
+		Category:  models.CategoryBacklog,
+		Priority:  2,
+		Status:    models.StatusPending,
+		Prompt:    "not returned",
+	}
+	for _, task := range []*models.Task{withOptionalFields, withoutOptionalFields} {
+		if err := taskRepo.Create(ctx, task); err != nil {
+			t.Fatalf("create %q: %v", task.Title, err)
+		}
+	}
+
+	fixedTimestamp := time.Date(2024, time.January, 2, 3, 4, 5, 0, time.UTC)
+	if _, err := db.ExecContext(ctx, `UPDATE tasks SET updated_at = ? WHERE id IN (?, ?)`, fixedTimestamp, withOptionalFields.ID, withoutOptionalFields.ID); err != nil {
+		t.Fatalf("set fixture timestamps: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name     string
+		query    string
+		expected string
+	}{
+		{
+			name:  "optional fields present",
+			query: `{"query":"Discovery JSON optional"}`,
+			expected: fmt.Sprintf(`{"ok":true,"tasks":[{"task_id":"%s","title":"Discovery JSON optional","category":"active","status":"running","priority":4,"updated_at":"2024-01-02T03:04:05Z","parent_task_id":"%s","swarm_role":"worker"}],"count":1,"total":1,"limit":20,"offset":0,"has_more":false,"filter":{"query":"Discovery JSON optional","category":"","status":""}}`,
+				withOptionalFields.ID, parent.ID)},
+		{
+			name:  "nullable optional fields omitted",
+			query: `{"query":"Discovery JSON nullable"}`,
+			expected: fmt.Sprintf(`{"ok":true,"tasks":[{"task_id":"%s","title":"Discovery JSON nullable","category":"backlog","status":"pending","priority":2,"updated_at":"2024-01-02T03:04:05Z"}],"count":1,"total":1,"limit":20,"offset":0,"has_more":false,"filter":{"query":"Discovery JSON nullable","category":"","status":""}}`,
+				withoutOptionalFields.ID)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			out, err := ExecuteListTasksTool(ctx, taskRepo, "default", json.RawMessage(tc.query))
+			if err != nil {
+				t.Fatalf("ExecuteListTasksTool: %v", err)
+			}
+			if out != tc.expected {
+				t.Fatalf("compact JSON changed:\nwant %s\n got %s", tc.expected, out)
+			}
+		})
+	}
+}
+
+func TestDiscoveryToolsUseSharedInputDecoder(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+
+	tools := map[string]func(json.RawMessage) (string, error){
+		"list_tasks": func(input json.RawMessage) (string, error) {
+			return ExecuteListTasksTool(ctx, taskRepo, "default", input)
+		},
+		"list_schedules": func(input json.RawMessage) (string, error) {
+			return ExecuteListSchedulesTool(ctx, scheduleRepo, "default", input)
+		},
+	}
+
+	for name, tool := range tools {
+		t.Run(name, func(t *testing.T) {
+			for _, input := range []json.RawMessage{nil, json.RawMessage(" \n\t ")} {
+				out, err := tool(input)
+				if err != nil {
+					t.Fatalf("blank input: %v", err)
+				}
+				if !strings.Contains(out, `"ok":true`) {
+					t.Fatalf("expected successful empty result, got %q", out)
+				}
+			}
+
+			_, err := tool(json.RawMessage(`{"broken":`))
+			if err == nil || !strings.Contains(err.Error(), name+`: invalid tool input JSON: unexpected end of JSON input`) {
+				t.Fatalf("expected %s shared decoder error, got %v", name, err)
+			}
+		})
+	}
+}
+
+func TestExecuteViewSwarmToolParentTitleReturnsOrderedCompactHierarchy(t *testing.T) {
+	ctx := context.Background()
+	taskRepo, project := setupViewSwarmServiceFixture(t)
+	parent := createViewSwarmTask(t, taskRepo, project.ID, "Release swarm", func(task *models.Task) {
+		task.SwarmRole = models.SwarmRoleParent
+		task.SwarmStatus = "planning"
+		task.Prompt = "parent prompt must not appear"
+		task.SwarmConfig = `{"planner_notes":"large config must not appear"}`
+	})
+	createViewSwarmTask(t, taskRepo, project.ID, "worker later", func(task *models.Task) {
+		task.ParentTaskID = &parent.ID
+		task.SwarmRole = models.SwarmRoleWorker
+		task.SwarmStatus = "blocked"
+		task.SwarmSequence = 20
+		task.Status = models.StatusBlocked
+		task.Prompt = "worker prompt must not appear"
+		task.WorktreeBranch = "task/worker-later"
+	})
+	createViewSwarmTask(t, taskRepo, project.ID, "planner", func(task *models.Task) {
+		task.ParentTaskID = &parent.ID
+		task.SwarmRole = models.SwarmRolePlanner
+		task.SwarmStatus = "running"
+		task.SwarmSequence = 0
+		task.Status = models.StatusRunning
+	})
+	createViewSwarmTask(t, taskRepo, project.ID, "worker first", func(task *models.Task) {
+		task.ParentTaskID = &parent.ID
+		task.SwarmRole = models.SwarmRoleWorker
+		task.SwarmStatus = "done"
+		task.SwarmSequence = 10
+		task.Status = models.StatusCompleted
+	})
+	createViewSwarmTask(t, taskRepo, project.ID, "reviewer", func(task *models.Task) {
+		task.ParentTaskID = &parent.ID
+		task.SwarmRole = models.SwarmRoleReviewer
+		task.SwarmStatus = "pending"
+		task.SwarmSequence = 30
+	})
+	createViewSwarmTask(t, taskRepo, project.ID, "merger", func(task *models.Task) {
+		task.ParentTaskID = &parent.ID
+		task.SwarmRole = models.SwarmRoleMerger
+		task.SwarmStatus = "waiting"
+		task.SwarmSequence = 40
+		task.MergeStatus = models.MergeStatusPending
+	})
+
+	out, err := ExecuteViewSwarmTool(ctx, taskRepo, project.ID, json.RawMessage(`{"title":"Release swarm"}`))
+	require.NoError(t, err)
+
+	var got viewSwarmResult
+	require.NoError(t, json.Unmarshal([]byte(out), &got))
+	require.True(t, got.OK)
+	require.True(t, got.IsSwarm)
+	require.Equal(t, "parent", got.ResolvedFrom)
+	require.Equal(t, parent.ID, got.ParentTaskID)
+	require.Equal(t, parent.ID, got.Parent.TaskID)
+	require.Equal(t, 5, got.ChildCount)
+	require.Equal(t, []string{"planner", "worker first", "worker later", "reviewer", "merger"}, viewSwarmChildTitles(got.Children))
+	require.Equal(t, "blocked", got.Children[2].Status)
+	require.True(t, got.Children[2].HasDiff)
+	require.True(t, got.Children[4].HasDiff)
+
+	for _, forbidden := range []string{"parent prompt must not appear", "worker prompt must not appear", "large config must not appear", "prompt", "swarm_config", "chain_config", "worktree_path", "diff_output"} {
+		require.NotContains(t, out, forbidden)
+	}
+}
+
+func TestExecuteViewSwarmToolChildLookupResolvesParentHierarchy(t *testing.T) {
+	ctx := context.Background()
+	taskRepo, project := setupViewSwarmServiceFixture(t)
+	parent := createViewSwarmTask(t, taskRepo, project.ID, "Parent", func(task *models.Task) {
+		task.SwarmRole = models.SwarmRoleParent
+	})
+	child := createViewSwarmTask(t, taskRepo, project.ID, "Worker", func(task *models.Task) {
+		task.ParentTaskID = &parent.ID
+		task.SwarmRole = models.SwarmRoleWorker
+		task.SwarmSequence = 1
+	})
+
+	out, err := ExecuteViewSwarmTool(ctx, taskRepo, project.ID, json.RawMessage(`{"task_id":"`+child.ID+`"}`))
+	require.NoError(t, err)
+
+	var got viewSwarmResult
+	require.NoError(t, json.Unmarshal([]byte(out), &got))
+	require.True(t, got.IsSwarm)
+	require.Equal(t, child.ID, got.RequestedTaskID)
+	require.Equal(t, "child", got.ResolvedFrom)
+	require.Equal(t, parent.ID, got.ParentTaskID)
+	require.Len(t, got.Children, 1)
+	require.Equal(t, child.ID, got.Children[0].TaskID)
+}
+
+func TestExecuteViewSwarmToolNonSwarmReturnsControlledResponse(t *testing.T) {
+	ctx := context.Background()
+	taskRepo, project := setupViewSwarmServiceFixture(t)
+	task := createViewSwarmTask(t, taskRepo, project.ID, "Ordinary", nil)
+
+	out, err := ExecuteViewSwarmTool(ctx, taskRepo, project.ID, json.RawMessage(`{"task_id":"`+task.ID+`"}`))
+	require.NoError(t, err)
+
+	var got viewSwarmResult
+	require.NoError(t, json.Unmarshal([]byte(out), &got))
+	require.True(t, got.OK)
+	require.False(t, got.IsSwarm)
+	require.Equal(t, "non_swarm", got.ResolvedFrom)
+	require.Contains(t, strings.ToLower(got.Message), "not a swarm")
+	require.Empty(t, got.Children)
+}
+
+func TestExecuteViewSwarmToolDoesNotCrossProjects(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	current := &models.Project{Name: "Current"}
+	foreign := &models.Project{Name: "Foreign"}
+	require.NoError(t, projectRepo.Create(ctx, current))
+	require.NoError(t, projectRepo.Create(ctx, foreign))
+	foreignParent := createViewSwarmTask(t, taskRepo, foreign.ID, "Same swarm title", func(task *models.Task) {
+		task.SwarmRole = models.SwarmRoleParent
+	})
+
+	_, err := ExecuteViewSwarmTool(ctx, taskRepo, current.ID, json.RawMessage(`{"task_id":"`+foreignParent.ID+`"}`))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "current project")
+
+	_, err = ExecuteViewSwarmTool(ctx, taskRepo, current.ID, json.RawMessage(`{"title":"Same swarm title"}`))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "current project")
+}
+
+func setupViewSwarmServiceFixture(t *testing.T) (*repository.TaskRepo, *models.Project) {
+	t.Helper()
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	project := &models.Project{Name: "Swarm Project"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	return repository.NewTaskRepo(db, nil), project
+}
+
+func createViewSwarmTask(t *testing.T, taskRepo *repository.TaskRepo, projectID, title string, mutate func(*models.Task)) *models.Task {
+	t.Helper()
+	task := &models.Task{
+		ProjectID: projectID,
+		Title:     title,
+		Category:  models.CategoryActive,
+		Priority:  2,
+		Status:    models.StatusPending,
+		Prompt:    "test prompt",
+	}
+	if mutate != nil {
+		mutate(task)
+	}
+	require.NoError(t, taskRepo.Create(context.Background(), task))
+	return task
+}
+
+func viewSwarmChildTitles(children []swarmTaskSummary) []string {
+	titles := make([]string, 0, len(children))
+	for _, child := range children {
+		titles = append(titles, child.Title)
+	}
+	return titles
 }

@@ -95,6 +95,21 @@ type AgentModelDefaults struct {
 	MaxTokens   int     `json:"max_tokens,omitempty"`
 }
 
+// ChatAssignableAgentDefinition is the compact Agent shape needed to advertise
+// assignable Agent definitions in Chat prompt context without hydrating full
+// prompts, tools, permissions, skills, MCP servers, plugins, or model defaults.
+type ChatAssignableAgentDefinition struct {
+	ID                  string
+	Name                string
+	Description         string
+	Key                 string
+	SystemKind          string
+	SelectableAsPrimary bool
+	Enabled             bool
+	GeneratedStatus     AgentGeneratedStatus
+	ArchivedAt          *time.Time
+}
+
 // Agent is a named configuration that wraps a system prompt, tool restrictions,
 // skills, MCP servers, and parameterized tool config. Tasks can be assigned to an agent.
 type Agent struct {
@@ -208,6 +223,5 @@ var AllAgentTools = []string{
 	"skill_view", "skills_list", "agent_list", "agent_view", "skill_manage", "skill_import", "agent_skill_manage",
 	"memory_view",
 	"send_message",
-	"create_alert", "create_notification", "list_alerts", "get_alert", "claim_alert", "create_alert_implementation_task", "link_alert_implementation_task", "complete_alert_processing", "fail_alert_processing", "release_alert_claim",
-	"github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs", "github_comment_on_issue", "github_add_issue_labels", "github_open_pull_request", "github_replace_pull_request_branch", "github_forward_pr_feedback_to_tasks",
-	"send_to_task", "set_task_goal", "clear_task_goal", "get_task_goal", "pause_task_goal", "resume_task_goal", "mark_task_goal_achieved", "report_task_goal_blocked"}
+	"create_alert", "create_notification", "list_alerts", "get_alert", "decide_alert", "claim_alert", "create_alert_implementation_task", "link_alert_implementation_task", "complete_alert_processing", "fail_alert_processing", "release_alert_claim",
+	"github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs", "github_comment_on_issue", "github_add_issue_labels", "github_close_issue", "github_open_pull_request", "github_replace_pull_request_branch", "github_forward_pr_feedback_to_tasks", "send_to_task", "set_task_goal", "clear_task_goal", "get_task_goal", "pause_task_goal", "resume_task_goal", "mark_task_goal_achieved", "report_task_goal_blocked"}

@@ -13,6 +13,49 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
+func TestBaseOmitsMultiSelectionCounter(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Base("Selection", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render Base: %v", err)
+	}
+	html := buf.String()
+	for _, forbidden := range []string{`id="selection-counter"`, `id="selection-count"`, `id="selection-label"`, `clearActiveSelection`} {
+		if strings.Contains(html, forbidden) {
+			t.Fatalf("base layout must not render the multi-selection counter contract %q", forbidden)
+		}
+	}
+}
+
+func TestBaseRuntimeModeAndChatLinkPolicyHooks(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Base("Runtime", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render web Base: %v", err)
+	}
+	html := buf.String()
+	for _, want := range []string{
+		`data-openvibely-runtime="web"`,
+		"window.chatLinkOpensOutsideApp = function(href)",
+		"window.sanitizeChatHTMLElement = function(element)",
+		"element.setAttribute('target', '_blank')",
+		"element.setAttribute('rel', 'noopener noreferrer')",
+		"element.removeAttribute('target')",
+		"element.removeAttribute('rel')",
+		"window.sanitizeChatHTMLElement(element)",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("base layout missing chat link/runtime policy hook %q", want)
+		}
+	}
+
+	buf.Reset()
+	if err := Base("Runtime", []models.Project{}, "").Render(WithDesktopMode(context.Background(), true), &buf); err != nil {
+		t.Fatalf("render desktop Base: %v", err)
+	}
+	if !strings.Contains(buf.String(), `data-openvibely-runtime="desktop"`) {
+		t.Fatal("base layout must render authoritative desktop runtime marker")
+	}
+}
+
 func TestBaseProvidesCentralClientSidePageTitleAndHistorySynchronization(t *testing.T) {
 	var buf bytes.Buffer
 	if err := Base("Initial", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
@@ -109,6 +152,77 @@ if (document.title !== 'History Task - OpenVibely') throw new Error('cache-miss 
 	}
 }
 
+func TestBaseGlobalToastBridgeOwnsHTMXToastRendering(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Base("Toast", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render base: %v", err)
+	}
+	html := buf.String()
+	for _, expected := range []string{
+		"document.body.addEventListener('openvibelyToast'",
+		"var status = detail.status || detail.type || 'info'",
+		"if (status === 'success') status = 'completed'",
+		"var taskId = detail.taskId || detail.task_id || ''",
+		"var linkURL = detail.linkURL || detail.link_url || ''",
+		"var linkText = detail.linkText || detail.link_text || ''",
+		"var toastKey = detail.toastKey || detail.toast_key || ''",
+		"var clickURL = detail.clickURL || detail.click_url || ''",
+		"window.showToast(message, status, taskId, { linkURL: linkURL, linkText: linkText, toastKey: toastKey, clickURL: clickURL })",
+	} {
+		if !strings.Contains(html, expected) {
+			t.Fatalf("global toast bridge missing contract %q", expected)
+		}
+	}
+	if strings.Contains(html, "document.body.addEventListener('showToast'") {
+		t.Fatal("base layout must not register a second legacy showToast HTMX bridge")
+	}
+}
+
+func TestBaseGlobalToastRendererPreservesDuplicateSuppressionAndLinks(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Base("Toast", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render base: %v", err)
+	}
+	html := buf.String()
+	for _, expected := range []string{
+		"function shouldSuppressDuplicateToast(message, status, taskId)",
+		"now - lastShownAt < 1000",
+		"now - timestamp > 5000",
+		"if (taskId && findVisibleTaskToast(taskId))",
+		"if (toastKey && findVisibleToastKey(toastKey))",
+		"if (shouldSuppressDuplicateToast(displayTitle, status, taskId))",
+		"link.addEventListener('click', function(event)",
+		"event.stopPropagation()",
+		"window.openVibelyNavigate(linkURL)",
+		"const toasts = container.querySelectorAll('.toast-notification:not(.toast-dismiss)')",
+		"if (toasts.length > 5)",
+	} {
+		if !strings.Contains(html, expected) {
+			t.Fatalf("global toast renderer missing behavior %q", expected)
+		}
+	}
+}
+
+func TestBasePurgesSensitiveHTMXHistoryBeforeHTMXLoads(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Base("Test", nil, "").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render base: %v", err)
+	}
+	html := buf.String()
+	cleanup := strings.Index(html, "window.__ov_purgeSensitiveHTMXHistory = function")
+	invocation := strings.Index(html, "window.__ov_purgeSensitiveHTMXHistory();")
+	htmx := strings.Index(html, `src="https://unpkg.com/htmx.org@2.0.4"`)
+	if cleanup < 0 || invocation < 0 {
+		t.Fatal("base layout must purge stale secret-bearing HTMX history entries")
+	}
+	if htmx < 0 || cleanup > htmx || invocation > htmx {
+		t.Fatal("sensitive HTMX history cleanup must run before HTMX loads")
+	}
+	if !strings.Contains(html, "new URL(entry.url, window.location.href).pathname !== '/models'") {
+		t.Fatal("history cleanup must remove Models URLs including query and fragment variants")
+	}
+}
+
 func TestTabVisibilityManager_DoesNotTreatBlurOrFocusAsTranscriptRefresh(t *testing.T) {
 	var buf bytes.Buffer
 	if err := Base("Test", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
@@ -127,6 +241,127 @@ func TestTabVisibilityManager_DoesNotTreatBlurOrFocusAsTranscriptRefresh(t *test
 	for _, forbidden := range []string{"window.addEventListener('focus'", "window.addEventListener('blur'", "window.addEventListener('pageshow'"} {
 		if strings.Contains(manager, forbidden) {
 			t.Fatalf("plain blur/focus/pageshow must not trigger transcript reconciliation: found %q", forbidden)
+		}
+	}
+}
+
+func TestBaseDropdownToggleRepositionsMenusInsideVisibleScrollBoundary(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Base("Test", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("failed to render Base: %v", err)
+	}
+	html := buf.String()
+	start := strings.Index(html, "let focusedBeforeClick")
+	end := strings.Index(html[start:], "function handleTaskSelect(event)")
+	if start < 0 || end < 0 {
+		t.Fatal("base layout must define shared dropdown positioning before task-card click handling")
+	}
+	dropdownScript := html[start : start+end]
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is required to execute the rendered dropdown positioning script")
+	}
+	script := `
+	const listeners = {};
+	let runtime = 'web';
+	global.window = { innerHeight: 320 };
+	global.document = {
+	  body: { name: 'body' },
+	  documentElement: { getAttribute: function() { return runtime; } },
+	  activeElement: null,
+	  addEventListener: function(name, handler) { listeners[name] = handler; }
+	};
+	global.requestAnimationFrame = function(callback) { callback(); };
+	global.getComputedStyle = function(element) { return element.styles || { overflowY: 'visible' }; };
+	function makeClassList(initial) {
+	  const values = new Set(initial || []);
+	  return {
+	    add: function(value) { values.add(value); },
+	    remove: function(value) { values.delete(value); },
+	    contains: function(value) { return values.has(value); },
+	    toString: function() { return Array.from(values).sort().join(' '); }
+	  };
+	}
+	function makeDropdown(labelTop, labelBottom, menuHeight) {
+	  const boundary = {
+	    parentElement: document.body,
+	    clientHeight: 240,
+	    styles: { overflowY: 'auto' },
+	    getBoundingClientRect: function() { return { top: 40, bottom: 280 }; }
+	  };
+	  const content = {
+	    scrollHeight: menuHeight,
+	    getBoundingClientRect: function() { return { height: menuHeight }; }
+	  };
+	  const dropdown = {
+	    parentElement: boundary,
+	    dataset: {},
+	    getAttribute: function(name) { return this[name] || null; },
+	    classList: makeClassList(['dropdown', 'dropdown-end']),
+	    querySelector: function(selector) { return selector === '.dropdown-content' ? content : null; }
+	  };
+	  const label = {
+	    parentElement: dropdown,
+	    blur: function() { this.blurred = true; },
+	    closest: function(selector) { return selector === '.dropdown' ? dropdown : null; },
+	    getBoundingClientRect: function() { return { top: labelTop, bottom: labelBottom }; }
+	  };
+	  return { dropdown: dropdown, label: label };
+	}
+	` + dropdownScript + `
+	const bottom = makeDropdown(230, 254, 100);
+	handleDropdownToggle({ currentTarget: bottom.label, stopPropagation: function() {} });
+	if (!bottom.dropdown.classList.contains('dropdown-top')) throw new Error('near-bottom dropdown did not open upward: ' + bottom.dropdown.classList.toString());
+	const roomy = makeDropdown(80, 104, 100);
+	handleDropdownToggle({ currentTarget: roomy.label, stopPropagation: function() {} });
+	if (roomy.dropdown.classList.contains('dropdown-top')) throw new Error('roomy dropdown should stay downward: ' + roomy.dropdown.classList.toString());
+	const originalTop = makeDropdown(80, 104, 40);
+	originalTop.dropdown.classList.add('dropdown-top');
+	handleDropdownToggle({ currentTarget: originalTop.label, stopPropagation: function() {} });
+	if (!originalTop.dropdown.classList.contains('dropdown-top')) throw new Error('original dropdown-top class should be preserved');
+
+	runtime = 'desktop';
+	const startupFocusedChat = makeDropdown(80, 104, 100);
+	document.activeElement = startupFocusedChat.label;
+	listeners['mousedown']({});
+	const startupActivation = {
+	  currentTarget: startupFocusedChat.label,
+	  defaultPrevented: false,
+	  stopPropagation: function() {},
+	  preventDefault: function() { this.defaultPrevented = true; }
+	};
+	startupFocusedChat.dropdown.getAttribute = function(name) {
+	  return name === 'data-chat-actions-open' ? null : null;
+	};
+	startupFocusedChat.label.closest = function(selector) { return selector === '[data-chat-actions-dropdown]' || selector === '.dropdown' ? startupFocusedChat.dropdown : null; };
+	handleDropdownToggle(startupActivation);
+	if (startupActivation.defaultPrevented) throw new Error('desktop startup focus was treated as an already-open Chat menu');
+	`
+
+	if output, err := exec.Command(node, "-e", script).CombinedOutput(); err != nil {
+		t.Fatalf("rendered dropdown positioning script failed: %v\n%s", err, output)
+	}
+}
+
+func TestBaseDesktopChatActionsRequireExplicitActivation(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Base("Chat", []models.Project{}, "project-1").Render(WithDesktopMode(context.Background(), true), &buf); err != nil {
+		t.Fatalf("failed to render desktop Base: %v", err)
+	}
+	content := buf.String()
+	for _, required := range []string{
+		`data-openvibely-runtime="desktop"`,
+		`#chat-page-root [data-chat-actions-dropdown]:not([data-chat-actions-open="true"]) > .dropdown-content`,
+		`#chat-page-root [data-chat-actions-dropdown][data-chat-actions-open="true"] > .dropdown-content`,
+		`visibility: hidden !important;`,
+		`opacity: 0 !important;`,
+		`pointer-events: none !important;`,
+		`visibility: visible !important;`,
+		`opacity: 1 !important;`,
+		`pointer-events: auto !important;`,
+	} {
+		if !strings.Contains(content, required) {
+			t.Fatalf("desktop Chat startup must keep the clear-actions menu closed; missing %q", required)
 		}
 	}
 }
@@ -350,6 +585,56 @@ func TestToastCloseButtonIsAccessibleAndTopRightAligned(t *testing.T) {
 	}
 }
 
+func TestBase_SystemUpdateNoticeIsStickyAndActionable(t *testing.T) {
+	var buf bytes.Buffer
+	comp := Base("Test", []models.Project{}, "")
+	if err := comp.Render(context.Background(), &buf); err != nil {
+		t.Fatalf("failed to render Base: %v", err)
+	}
+	html := buf.String()
+
+	for _, required := range []string{
+		`data-system-update-toast`,
+		`openvibely-system-update-dismissed-version`,
+		`/api/system/update/apply`,
+		`window.openVibelyNavigate('/alerts')`,
+		`openVibelyNormalizeSystemUpdateSnapshot`,
+		`readyForLocalApply`,
+		`stateAllowsApply`,
+		`systemUpdateNoticeKey`,
+		`metadata.published_at`,
+		`target.sha256`,
+		`navigateSystemUpdateToAlerts`,
+		`applySystemUpdateFromToast`,
+		`showSystemUpdateSucceededToast`,
+		`handleGlobalSystemUpdateSnapshot`,
+		`window.openVibelyHandleSystemUpdateSnapshot`,
+		`window.refreshGlobalSystemUpdateIndicators`,
+		`openvibely-system-update-success-toast`,
+		`openvibely-system-update-pending-success`,
+		`clearSystemUpdatePendingSuccess`,
+		`view.state === 'failed' || view.state === 'rolled_back' || view.state === 'idle'`,
+		`OpenVibely updated to `,
+		`background-color: #646fe4`,
+		`[data-theme="light"] .system-update-toast`,
+		`background-color: #7480ff`,
+		`system-update-toast`,
+		`options.sticky`,
+		`system-update-nav-badge`,
+	} {
+		if !strings.Contains(html, required) {
+			t.Fatalf("global system update notice missing snippet: %s", required)
+		}
+	}
+
+	if strings.Contains(html, `.toast-notification:hover`) && strings.Contains(html, `scale(1.02)`) {
+		t.Fatalf("toast notifications should not resize on hover")
+	}
+	if strings.Contains(html, `data-system-update-apply`) || strings.Contains(html, `system-update-toast-action`) {
+		t.Fatalf("system update toast should use the whole notification as the update action")
+	}
+}
+
 // TestToastDismissalCleanup verifies the toast notification system properly
 // cleans up DOM elements after dismissal to prevent page unresponsiveness.
 func TestToastDismissalCleanup(t *testing.T) {
@@ -391,9 +676,12 @@ func TestToastDismissalCleanup(t *testing.T) {
 		t.Error("toast system must include duplicate suppression map and helper")
 	}
 
-	// Verify HTMX toast bridge passes optional action-link fields
+	// Verify HTMX toast bridge passes optional action-link and click-target fields
 	if !strings.Contains(html, "detail.linkURL || detail.link_url || ''") || !strings.Contains(html, "detail.linkText || detail.link_text || ''") {
 		t.Error("openvibelyToast bridge must map link_url/link_text fields for clickable toast actions")
+	}
+	if !strings.Contains(html, "detail.clickURL || detail.click_url || ''") || !strings.Contains(html, "var navigateURL = clickURL || (taskId ? '/tasks/' + taskId : '')") {
+		t.Error("openvibelyToast bridge must map click_url and use it for toast body navigation")
 	}
 
 	// Verify Wails runtime is loaded so desktop pages can call window.wails.OpenURL.
@@ -762,6 +1050,49 @@ func TestBase_KanbanColumnCSSDoesNotOverrideResponsiveGridWidth(t *testing.T) {
 	}
 }
 
+func TestBase_DraggableCardsUseClosedHandCursorWhileActive(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Base("Test", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("failed to render Base: %v", err)
+	}
+	html := buf.String()
+
+	for _, want := range []string{
+		".drag-cursor-surface {",
+		"cursor: grab;",
+		".drag-cursor-surface:active",
+		"html.drag-cursor-active *",
+		"body.drag-cursor-active *",
+		"cursor: grabbing !important;",
+		"function handleTaskPointerDown(event)",
+		"function handleTaskPointerMove(event)",
+		"card.setPointerCapture(event.pointerId)",
+		"movePointerCard(state.motion, deltaX, deltaY)",
+		"data-pointer-drag-placeholder",
+		"taskPointerDropZoneAt(event.clientX, event.clientY)",
+		"function refreshTaskPointerDropZone(clientX, clientY)",
+		"handlePointerAutoScroll(event, board, zone, function()",
+		"refreshTaskPointerDropZone(event.clientX, event.clientY)",
+		"function pointerAutoScrollDelta(event, scrollZone)",
+		"if (currentScrollRefresh) currentScrollRefresh()",
+		"styles.overflowY === 'auto' || styles.overflowY === 'scroll'",
+		"taskPointerDropZoneAt(event.clientX, event.clientY) || state.dropZone",
+		"window.handlePointerAutoScroll = handlePointerAutoScroll",
+		"window.stopPointerAutoScroll = stopAutoScroll",
+		"document.body.classList.add('drag-cursor-active')",
+		"document.body.classList.remove('drag-cursor-active')",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("expected pointer-driven card cursor contract %q", want)
+		}
+	}
+	for _, forbidden := range []string{"drag-cursor-indicator", "drag-card-preview", "setDragImage", "handleDragCursorPressStart"} {
+		if strings.Contains(html, forbidden) {
+			t.Fatalf("pointer-driven card cursor contract must not contain %q", forbidden)
+		}
+	}
+}
+
 func TestBase_MobileDrawerLayerStaysAboveStickyPageContent(t *testing.T) {
 	var buf bytes.Buffer
 	if err := Base("Test", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
@@ -806,7 +1137,7 @@ func TestLightTheme_UsesLightModernTokens(t *testing.T) {
 		"background-color: var(--ov-l-surface);",
 		"[data-theme=\"light\"] #main-content {",
 		"background-color: var(--ov-l-surface);",
-		"[data-theme=\"light\"] .btn-primary {",
+		"[data-color-theme=\"openvibely-light\"][data-theme=\"light\"] .btn-primary {",
 		"background-color: var(--ov-l-accent);",
 		"[data-theme=\"light\"] .sidebar-aside {",
 		"background-color: #FAFAFA;",
@@ -856,14 +1187,70 @@ func TestThemeToggle_UsesImmediateSwitch(t *testing.T) {
 	}
 
 	expected := []string{
+		".theme-toggle-pill {",
+		"background: #E8E8E8;",
+		"[data-theme=\"dark\"] .theme-toggle-pill {",
+		"background: #3a4455;",
 		"window.toggleTheme = function() {",
-		"html.setAttribute('data-theme', next);",
-		"localStorage.setItem('theme', next);",
+		"var nativeThemeByMode = { light: 'openvibely-light', dark: 'openvibely-dark' };",
+		"html.setAttribute('data-theme', mode);",
+		"html.setAttribute('data-color-theme', themeID);",
+		"localStorage.setItem('theme', themeID);",
+		"window.applyOpenVibelyTheme(nativeThemeByMode[nextMode], true);",
 	}
 	for _, fragment := range expected {
 		if !strings.Contains(html, fragment) {
 			t.Errorf("expected immediate-toggle fragment %q to be present", fragment)
 		}
+	}
+}
+
+func TestTaskRunningStateMatchesChatSendButtonByTheme(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Base("Test", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("failed to render Base: %v", err)
+	}
+	html := buf.String()
+
+	for _, fragment := range []string{
+		":root {",
+		"--ov-primary-action-color: #7480ff;",
+		"[data-theme=\"light\"] {",
+		"--ov-primary-action-color: #7480ff;",
+		"[data-color-theme]:not([data-color-theme=\"openvibely-dark\"]):not([data-color-theme=\"openvibely-light\"]) {",
+		"--ov-primary-action-color: oklch(var(--p) / 1);",
+		"[data-color-theme] .btn-primary.chat-send-button {",
+		"background-color: var(--ov-primary-action-color);",
+		"border-color: var(--ov-primary-action-color);",
+		".task-state-running {",
+		"color: var(--ov-primary-action-color);",
+	} {
+		if !strings.Contains(html, fragment) {
+			t.Errorf("expected chat send button and task running state to share primary action token via %q", fragment)
+		}
+	}
+	for _, forbidden := range []string{
+		"background-color: var(--ov-primary-action-color) !important;",
+		"border-color: var(--ov-primary-action-color) !important;",
+		"[data-color-theme=\"openvibely-dark\"] .btn-primary.chat-send-button,",
+		"\n\t\t\t\t\t.chat-send-button {",
+	} {
+		if strings.Contains(html, forbidden) {
+			t.Errorf("shared normal send color must remain theme-aware without suppressing hover via %q", forbidden)
+		}
+	}
+	sharedRule := strings.Index(html, `[data-color-theme] .btn-primary.chat-send-button {`)
+	for _, hoverSelector := range []string{
+		`[data-color-theme="openvibely-dark"][data-theme="dark"] .btn-primary:hover {`,
+		`[data-color-theme="openvibely-light"][data-theme="light"] .btn-primary:hover {`,
+	} {
+		hoverRule := strings.Index(html, hoverSelector)
+		if sharedRule < 0 || hoverRule < sharedRule {
+			t.Errorf("shared send normal rule must precede %q so hover remains authoritative", hoverSelector)
+		}
+	}
+	if strings.Contains(html, "--ov-task-running:") {
+		t.Error("task running state must not retain a separate color token")
 	}
 }
 
@@ -901,8 +1288,8 @@ func TestDarkMode_ButtonHoverParity(t *testing.T) {
 	html := buf.String()
 
 	expected := []string{
-		"[data-theme=\"dark\"] .btn:hover {",
-		"[data-theme=\"dark\"] .btn-primary:hover {",
+		"[data-color-theme=\"openvibely-dark\"][data-theme=\"dark\"] .btn:hover {",
+		"[data-color-theme=\"openvibely-dark\"][data-theme=\"dark\"] .btn-primary:hover {",
 		"[data-theme=\"dark\"] .btn-secondary:hover {",
 		"[data-theme=\"dark\"] .btn-accent:hover {",
 		"[data-theme=\"dark\"] .btn-info:hover {",
@@ -938,8 +1325,8 @@ func TestLightMode_ButtonHoverParity(t *testing.T) {
 	html := buf.String()
 
 	expected := []string{
-		"[data-theme=\"light\"] .btn:hover {",
-		"[data-theme=\"light\"] .btn-primary:hover {",
+		"[data-color-theme=\"openvibely-light\"][data-theme=\"light\"] .btn:hover {",
+		"[data-color-theme=\"openvibely-light\"][data-theme=\"light\"] .btn-primary:hover {",
 		"[data-theme=\"light\"] .btn-secondary:hover {",
 		"[data-theme=\"light\"] .btn-accent:hover {",
 		"[data-theme=\"light\"] .btn-info:hover {",

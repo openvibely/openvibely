@@ -2,6 +2,12 @@ package service
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -182,6 +188,96 @@ func TestUpcomingService_GenerateHistory_TimeRanges(t *testing.T) {
 	}
 }
 
+func TestUpcomingService_AISummariesBuildPromptsAndTrimOutput(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, repository.NewScheduleRepo(db), attachmentRepo)
+	mock := testutil.NewMockLLMCaller()
+	llmSvc.SetLLMCaller(mock)
+
+	project := &models.Project{Name: "Summary Project", RepoPath: t.TempDir()}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	agent := &models.LLMConfig{Name: "summary-agent", Provider: models.ProviderTest, Model: "test-model", IsDefault: true}
+	if err := llmConfigRepo.Create(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	svc := NewUpcomingService(repository.NewUpcomingRepo(db))
+	svc.SetProjectRepo(projectRepo)
+	svc.SetLLMConfigRepo(llmConfigRepo)
+	svc.SetLLMService(llmSvc)
+	nextRun := time.Date(2026, 8, 16, 15, 4, 0, 0, time.UTC)
+	upcoming := &models.Upcoming{
+		ProjectID: project.ID,
+		RunningTasks: []models.UpcomingTask{{
+			Task:      models.Task{Title: "Run migration", Priority: 4},
+			AgentName: "Builder",
+		}},
+		PendingTasks: []models.UpcomingTask{{
+			Task: models.Task{Title: "Review rollout", Priority: 3},
+		}},
+		ScheduledTasks: []models.UpcomingTask{{
+			Task:    models.Task{Title: "Nightly smoke"},
+			NextRun: &nextRun,
+		}},
+		TaskSummary: &models.TaskSummary{TotalPending: 5, UrgentCount: 1, HighCount: 2, FailedCount: 1, OverdueCount: 3},
+	}
+
+	mock.Response = "  Pulse summary.  \n"
+	pulse, err := svc.GeneratePulseSummary(ctx, project.ID, upcoming)
+	if err != nil {
+		t.Fatalf("GeneratePulseSummary: %v", err)
+	}
+	if pulse != "Pulse summary." {
+		t.Fatalf("pulse summary = %q", pulse)
+	}
+	pulseCall := mock.LastCall()
+	for _, want := range []string{"Running tasks: 1", "Run migration", "Pending tasks: 1", "Nightly smoke", "Task summary: 5 pending total"} {
+		if !strings.Contains(pulseCall.Prompt, want) {
+			t.Fatalf("pulse prompt missing %q:\n%s", want, pulseCall.Prompt)
+		}
+	}
+	if pulseCall.WorkDir != project.RepoPath {
+		t.Fatalf("pulse workdir = %q, want %q", pulseCall.WorkDir, project.RepoPath)
+	}
+
+	history := &models.History{
+		ProjectID: project.ID,
+		TimeRange: models.TimeRangeWeek,
+		Since:     nextRun.Add(-7 * 24 * time.Hour),
+		Summary:   models.HistorySummary{TotalExecutions: 3, SuccessCount: 1, FailureCount: 1, CancelledCount: 1, AvgDurationMs: 2500},
+		Executions: []models.HistoryExecution{{
+			TaskTitle: "Failing deploy",
+			Execution: models.Execution{Status: models.ExecFailed, ErrorMessage: strings.Repeat("x", 120)},
+		}},
+		ProjectChanges: &models.ProjectChanges{Available: true, TotalCommits: 2, TotalInsertions: 12, TotalDeletions: 4, FilesChanged: 3, Changes: models.ChangeSummary{Features: []string{"Add pulse"}, BugFixes: []string{"Fix retry"}}},
+	}
+	mock.Response = "\nReflection summary.\n"
+	reflection, err := svc.GenerateReflectionSummary(ctx, project.ID, history)
+	if err != nil {
+		t.Fatalf("GenerateReflectionSummary: %v", err)
+	}
+	if reflection != "Reflection summary." {
+		t.Fatalf("reflection summary = %q", reflection)
+	}
+	reflectionCall := mock.LastCall()
+	for _, want := range []string{"Time range: week", "Average duration: 2500ms", "Failing deploy", strings.Repeat("x", 100) + "...", "Code changes: 2 commits", "Features: 1", "Bug fixes: 1"} {
+		if !strings.Contains(reflectionCall.Prompt, want) {
+			t.Fatalf("reflection prompt missing %q:\n%s", want, reflectionCall.Prompt)
+		}
+	}
+	if reflectionCall.WorkDir != project.RepoPath {
+		t.Fatalf("reflection workdir = %q, want %q", reflectionCall.WorkDir, project.RepoPath)
+	}
+}
+
 func TestParseGitLog(t *testing.T) {
 	// Hashes must be exactly 40 hex characters
 	hash1 := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" // 40 chars
@@ -269,6 +365,399 @@ README.md
 	}
 	if ftMap[".md"] != 1 {
 		t.Errorf("expected 1 .md file, got %d", ftMap[".md"])
+	}
+}
+
+func TestGenerateHistoryUsesTaskCommitStatsForProjectChanges(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	statRepo := repository.NewTaskCommitStatRepo(db)
+
+	project := &models.Project{Name: "Reflection Stats"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Reflect task", Category: models.CategoryActive, Status: models.StatusCompleted}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	baseTime := time.Now().UTC().Add(-time.Hour)
+	stats := []*models.TaskCommitStat{
+		{ProjectID: project.ID, TaskID: task.ID, CommitSHA: "1111111111111111111111111111111111111111", ShortSHA: "1111111", Subject: "Add API endpoint", Author: "OpenVibely Bot", ProducedAt: baseTime.Add(time.Minute), Insertions: 10, Deletions: 2, FilesChanged: 2, ChangedFilesJSON: `["api.go","README.md"]`},
+		{ProjectID: project.ID, TaskID: task.ID, CommitSHA: "2222222222222222222222222222222222222222", ShortSHA: "2222222", Subject: "Fix API bug", Author: "OpenVibely Bot", ProducedAt: baseTime, Insertions: 3, Deletions: 4, FilesChanged: 2, ChangedFilesJSON: `["api.go","web.templ"]`},
+	}
+	for _, stat := range stats {
+		if err := statRepo.UpsertProducedCommitStat(ctx, stat); err != nil {
+			t.Fatalf("upsert stat: %v", err)
+		}
+	}
+
+	svc := NewUpcomingService(repository.NewUpcomingRepo(db))
+	svc.SetTaskCommitStatRepo(statRepo)
+	history, err := svc.GenerateHistory(ctx, project.ID, models.TimeRangeDay)
+	if err != nil {
+		t.Fatalf("GenerateHistory: %v", err)
+	}
+	pc := history.ProjectChanges
+	if pc == nil || !pc.Available {
+		t.Fatalf("ProjectChanges unavailable: %#v", pc)
+	}
+	if pc.TotalCommits != 2 || pc.TotalInsertions != 13 || pc.TotalDeletions != 6 || pc.FilesChanged != 3 {
+		t.Fatalf("totals = commits:%d +%d -%d files:%d, want 2 +13 -6 files:3", pc.TotalCommits, pc.TotalInsertions, pc.TotalDeletions, pc.FilesChanged)
+	}
+	if len(pc.Commits) != 2 || pc.Commits[0].Subject != "Add API endpoint" || pc.Commits[1].Subject != "Fix API bug" {
+		t.Fatalf("commits = %#v, want produced_at desc mapping", pc.Commits)
+	}
+	if len(pc.Changes.Features) != 1 || len(pc.Changes.BugFixes) != 1 {
+		t.Fatalf("changes = %#v, want one feature and one bugfix", pc.Changes)
+	}
+	fileTypes := map[string]int{}
+	for _, ft := range pc.FileTypes {
+		fileTypes[ft.Extension] = ft.Count
+	}
+	if fileTypes[".go"] != 1 || fileTypes[".md"] != 1 || fileTypes[".templ"] != 1 {
+		t.Fatalf("file types = %#v, want unique changed-file extensions", fileTypes)
+	}
+}
+
+func TestGenerateHistoryTaskCommitStatsCompactPreviewPreservesTotals(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	statRepo := repository.NewTaskCommitStatRepo(db)
+
+	project := &models.Project{Name: "Reflection Compact Stats"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Reflect compact task", Category: models.CategoryActive, Status: models.StatusCompleted}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	baseTime := time.Now().UTC().Add(-10 * time.Minute).Truncate(time.Second)
+	totalInsertions := 0
+	totalDeletions := 0
+	for i := 0; i < 24; i++ {
+		subject := fmt.Sprintf("Add feature %02d", i)
+		if i%3 == 1 {
+			subject = fmt.Sprintf("Fix bug %02d", i)
+		} else if i%3 == 2 {
+			subject = fmt.Sprintf("Refactor config %02d", i)
+		}
+		changedFilesJSON := `{not-json`
+		if i == 1 {
+			changedFilesJSON = `["partial_valid.go", bad]`
+		} else if i == 2 {
+			changedFilesJSON = `["trailing_valid.go"] garbage`
+		} else if i != 0 {
+			payload, err := json.Marshal([]string{"shared.go", fmt.Sprintf("dir/file_%02d.ext%d", i, i)})
+			if err != nil {
+				t.Fatalf("marshal changed files: %v", err)
+			}
+			changedFilesJSON = string(payload)
+		}
+		insertions := i + 1
+		deletions := i % 4
+		totalInsertions += insertions
+		totalDeletions += deletions
+		stat := &models.TaskCommitStat{
+			ProjectID: project.ID, TaskID: task.ID,
+			CommitSHA: fmt.Sprintf("%040d", i+1), ShortSHA: fmt.Sprintf("%07d", i+1),
+			Subject: subject, Author: "OpenVibely Bot", ProducedAt: baseTime.Add(-time.Duration(i) * time.Minute),
+			Insertions: insertions, Deletions: deletions, FilesChanged: 2, ChangedFilesJSON: changedFilesJSON,
+		}
+		if err := statRepo.UpsertProducedCommitStat(ctx, stat); err != nil {
+			t.Fatalf("upsert stat %d: %v", i, err)
+		}
+	}
+
+	svc := NewUpcomingService(repository.NewUpcomingRepo(db))
+	svc.SetTaskCommitStatRepo(statRepo)
+	for _, tr := range []models.TimeRange{models.TimeRangeHour, models.TimeRangeDay, models.TimeRangeWeek} {
+		history, err := svc.GenerateHistory(ctx, project.ID, tr)
+		if err != nil {
+			t.Fatalf("GenerateHistory(%s): %v", tr, err)
+		}
+		pc := history.ProjectChanges
+		if pc == nil || !pc.Available {
+			t.Fatalf("ProjectChanges unavailable for %s: %#v", tr, pc)
+		}
+		if pc.TotalCommits != 24 || pc.TotalInsertions != totalInsertions || pc.TotalDeletions != totalDeletions {
+			t.Fatalf("%s totals = commits:%d +%d -%d, want 24 +%d -%d", tr, pc.TotalCommits, pc.TotalInsertions, pc.TotalDeletions, totalInsertions, totalDeletions)
+		}
+		if pc.FilesChanged != 22 {
+			t.Fatalf("%s FilesChanged = %d, want 22 unique files despite duplicate shared.go and malformed JSON payloads", tr, pc.FilesChanged)
+		}
+		if len(pc.Commits) != 10 {
+			t.Fatalf("%s rendered commit examples = %d, want capped 10", tr, len(pc.Commits))
+		}
+		for i, commit := range pc.Commits {
+			want := fmt.Sprintf("%07d", i+1)
+			if commit.ShortHash != want {
+				t.Fatalf("%s commit[%d] short hash = %q, want newest-first %q", tr, i, commit.ShortHash, want)
+			}
+		}
+		if got := changeSummaryFeatureCount(pc.Changes); got != 8 {
+			t.Fatalf("%s feature count = %d, want 8", tr, got)
+		}
+		if got := changeSummaryBugFixCount(pc.Changes); got != 8 {
+			t.Fatalf("%s bugfix count = %d, want 8", tr, got)
+		}
+		if got := changeSummaryConfigChangeCount(pc.Changes); got != 8 {
+			t.Fatalf("%s config count = %d, want 8", tr, got)
+		}
+		if len(pc.Changes.Features) != 5 || len(pc.Changes.BugFixes) != 5 || len(pc.Changes.ConfigChanges) != 5 {
+			t.Fatalf("%s category examples = features:%d bugs:%d config:%d, want all capped at 5", tr, len(pc.Changes.Features), len(pc.Changes.BugFixes), len(pc.Changes.ConfigChanges))
+		}
+		if len(pc.FileTypes) <= 12 {
+			t.Fatalf("%s file types = %d, want more than 12 for badge overflow coverage", tr, len(pc.FileTypes))
+		}
+	}
+}
+
+func TestGenerateHistoryCombinesFallbackBeforeFirstTaskCommitStat(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	statRepo := repository.NewTaskCommitStatRepo(db)
+	repoDir := t.TempDir()
+	runGit(t, repoDir, nil, "init", "-b", "main")
+	runGit(t, repoDir, nil, "config", "user.name", "Test User")
+	runGit(t, repoDir, nil, "config", "user.email", "test@example.com")
+
+	oldCommitTime := time.Now().UTC().Add(-2 * time.Hour).Truncate(time.Second)
+	if err := os.WriteFile(filepath.Join(repoDir, "legacy.go"), []byte("package legacy\n"), 0o644); err != nil {
+		t.Fatalf("write legacy file: %v", err)
+	}
+	dateEnv := []string{
+		"GIT_AUTHOR_DATE=" + oldCommitTime.Format(time.RFC3339),
+		"GIT_COMMITTER_DATE=" + oldCommitTime.Format(time.RFC3339),
+	}
+	runGit(t, repoDir, dateEnv, "add", "legacy.go")
+	runGit(t, repoDir, dateEnv, "commit", "-m", "Add legacy fallback file")
+
+	project := &models.Project{Name: "Reflection Mixed", RepoPath: repoDir}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Reflect task", Category: models.CategoryActive, Status: models.StatusCompleted}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	stat := &models.TaskCommitStat{
+		ProjectID: project.ID, TaskID: task.ID,
+		CommitSHA: "1111111111111111111111111111111111111111", ShortSHA: "1111111",
+		Subject: "Add DB stat file", Author: "OpenVibely Bot", ProducedAt: time.Now().UTC().Add(-30 * time.Minute),
+		Insertions: 4, Deletions: 1, FilesChanged: 1, ChangedFilesJSON: `["db_stat.go"]`,
+	}
+	if err := statRepo.UpsertProducedCommitStat(ctx, stat); err != nil {
+		t.Fatalf("upsert stat: %v", err)
+	}
+
+	svc := NewUpcomingService(repository.NewUpcomingRepo(db))
+	svc.SetProjectRepo(projectRepo)
+	svc.SetTaskCommitStatRepo(statRepo)
+	history, err := svc.GenerateHistory(ctx, project.ID, models.TimeRangeDay)
+	if err != nil {
+		t.Fatalf("GenerateHistory: %v", err)
+	}
+	pc := history.ProjectChanges
+	if pc == nil || !pc.Available {
+		t.Fatalf("ProjectChanges unavailable: %#v", pc)
+	}
+	if pc.TotalCommits != 2 {
+		t.Fatalf("TotalCommits = %d, want DB stat plus pre-stat fallback commit", pc.TotalCommits)
+	}
+	subjects := map[string]bool{}
+	for _, commit := range pc.Commits {
+		subjects[commit.Subject] = true
+	}
+	if !subjects["Add DB stat file"] || !subjects["Add legacy fallback file"] {
+		t.Fatalf("subjects = %#v, want DB stat and fallback commit", subjects)
+	}
+}
+
+func TestGenerateHistoryDoesNotFallbackDuringCoveredQuietGap(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	statRepo := repository.NewTaskCommitStatRepo(db)
+	repoDir := t.TempDir()
+	runGit(t, repoDir, nil, "init", "-b", "main")
+	runGit(t, repoDir, nil, "config", "user.name", "Test User")
+	runGit(t, repoDir, nil, "config", "user.email", "test@example.com")
+
+	rawCommitTime := time.Now().UTC().Add(-2 * time.Hour).Truncate(time.Second)
+	if err := os.WriteFile(filepath.Join(repoDir, "raw.go"), []byte("package raw\n"), 0o644); err != nil {
+		t.Fatalf("write raw file: %v", err)
+	}
+	dateEnv := []string{
+		"GIT_AUTHOR_DATE=" + rawCommitTime.Format(time.RFC3339),
+		"GIT_COMMITTER_DATE=" + rawCommitTime.Format(time.RFC3339),
+	}
+	runGit(t, repoDir, dateEnv, "add", "raw.go")
+	runGit(t, repoDir, dateEnv, "commit", "-m", "Raw covered-gap commit")
+
+	project := &models.Project{Name: "Reflection Covered Gap", RepoPath: repoDir}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Reflect covered gap", Category: models.CategoryActive, Status: models.StatusCompleted}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	firstStat := &models.TaskCommitStat{
+		ProjectID: project.ID, TaskID: task.ID,
+		CommitSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ShortSHA: "aaaaaaa",
+		Subject: "Stats coverage started", Author: "OpenVibely Bot", ProducedAt: time.Now().UTC().Add(-48 * time.Hour),
+		Insertions: 1, FilesChanged: 1, ChangedFilesJSON: `["coverage.go"]`,
+	}
+	currentStat := &models.TaskCommitStat{
+		ProjectID: project.ID, TaskID: task.ID,
+		CommitSHA: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", ShortSHA: "bbbbbbb",
+		Subject: "Current DB stat", Author: "OpenVibely Bot", ProducedAt: time.Now().UTC().Add(-30 * time.Minute),
+		Insertions: 2, FilesChanged: 1, ChangedFilesJSON: `["current.go"]`,
+	}
+	for _, stat := range []*models.TaskCommitStat{firstStat, currentStat} {
+		if err := statRepo.UpsertProducedCommitStat(ctx, stat); err != nil {
+			t.Fatalf("upsert stat: %v", err)
+		}
+	}
+
+	svc := NewUpcomingService(repository.NewUpcomingRepo(db))
+	svc.SetProjectRepo(projectRepo)
+	svc.SetTaskCommitStatRepo(statRepo)
+	history, err := svc.GenerateHistory(ctx, project.ID, models.TimeRangeDay)
+	if err != nil {
+		t.Fatalf("GenerateHistory: %v", err)
+	}
+	pc := history.ProjectChanges
+	if pc == nil || !pc.Available {
+		t.Fatalf("ProjectChanges unavailable: %#v", pc)
+	}
+	if pc.TotalCommits != 1 {
+		t.Fatalf("TotalCommits = %d, want only in-range DB stat and no covered-gap git fallback", pc.TotalCommits)
+	}
+	if len(pc.Commits) != 1 || pc.Commits[0].Subject != "Current DB stat" {
+		t.Fatalf("commits = %#v, want only current DB stat", pc.Commits)
+	}
+}
+
+var benchmarkHistoryProjectChanges *models.ProjectChanges
+
+func BenchmarkTaskCommitStatHistoryProjection(b *testing.B) {
+	b.Run("baseline_full_list", func(b *testing.B) {
+		svc, statRepo, projectID, since := setupTaskCommitStatHistoryBenchmarkFixture(b, 1000, 50)
+		_ = svc
+		b.ReportAllocs()
+		b.ReportMetric(1, "sql/op")
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			stats, err := statRepo.ListProducedCommitStats(context.Background(), projectID, since)
+			if err != nil {
+				b.Fatalf("ListProducedCommitStats: %v", err)
+			}
+			pc, _ := buildProjectChangesFromTaskCommitStatsWithFiles(stats)
+			if pc == nil || pc.TotalCommits != 1000 || len(pc.Commits) != 1000 {
+				b.Fatalf("baseline project changes = %#v", pc)
+			}
+			benchmarkHistoryProjectChanges = pc
+		}
+	})
+	b.Run("compact_aggregate_preview", func(b *testing.B) {
+		svc, _, projectID, since := setupTaskCommitStatHistoryBenchmarkFixture(b, 1000, 50)
+		b.ReportAllocs()
+		b.ReportMetric(4, "sql/op")
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			pc, _, err := svc.buildProjectChangesFromTaskCommitStats(context.Background(), projectID, since)
+			if err != nil {
+				b.Fatalf("buildProjectChangesFromTaskCommitStats: %v", err)
+			}
+			if pc == nil || pc.TotalCommits != 1000 || len(pc.Commits) != projectChangeCommitPreviewLimit {
+				b.Fatalf("compact project changes = %#v", pc)
+			}
+			benchmarkHistoryProjectChanges = pc
+		}
+	})
+}
+
+func setupTaskCommitStatHistoryBenchmarkFixture(tb testing.TB, rows, pathsPerCommit int) (*UpcomingService, *repository.TaskCommitStatRepo, string, time.Time) {
+	tb.Helper()
+	ctx := context.Background()
+	db := testutil.NewTestDB(tb)
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	statRepo := repository.NewTaskCommitStatRepo(db)
+
+	project := &models.Project{Name: "Reflection Benchmark"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		tb.Fatalf("create project: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Benchmark task", Category: models.CategoryActive, Status: models.StatusCompleted}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		tb.Fatalf("create task: %v", err)
+	}
+
+	baseTime := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+	for i := 0; i < rows; i++ {
+		files := make([]string, 0, pathsPerCommit)
+		for j := 0; j < pathsPerCommit; j++ {
+			files = append(files, fmt.Sprintf("pkg/shared/file_%02d.ext%d", j, j%25))
+		}
+		payload, err := json.Marshal(files)
+		if err != nil {
+			tb.Fatalf("marshal changed files: %v", err)
+		}
+		subject := fmt.Sprintf("Add benchmark feature %04d", i)
+		if i%3 == 1 {
+			subject = fmt.Sprintf("Fix benchmark bug %04d", i)
+		} else if i%3 == 2 {
+			subject = fmt.Sprintf("Refactor benchmark config %04d", i)
+		}
+		stat := &models.TaskCommitStat{
+			ProjectID: project.ID, TaskID: task.ID,
+			CommitSHA: fmt.Sprintf("%040d", i+1), ShortSHA: fmt.Sprintf("%07d", i+1),
+			Subject: subject, Author: "OpenVibely Bot", ProducedAt: baseTime.Add(-time.Duration(i) * time.Second),
+			Insertions: i%200 + 1, Deletions: i % 50, FilesChanged: pathsPerCommit, ChangedFilesJSON: string(payload),
+		}
+		if err := statRepo.UpsertProducedCommitStat(ctx, stat); err != nil {
+			tb.Fatalf("upsert stat %d: %v", i, err)
+		}
+	}
+
+	svc := NewUpcomingService(repository.NewUpcomingRepo(db))
+	svc.SetTaskCommitStatRepo(statRepo)
+	return svc, statRepo, project.ID, baseTime.Add(-time.Duration(rows+1) * time.Second)
+}
+
+func runGit(t *testing.T, dir string, extraEnv []string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), extraEnv...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+	}
+}
+
+func TestFormatGitSinceUsesTimezoneSafeRFC3339(t *testing.T) {
+	loc := time.FixedZone("EST", -5*60*60)
+	since := time.Date(2026, 8, 17, 7, 30, 15, 0, loc)
+	got := formatGitSince(since)
+	if got != "2026-08-17T12:30:15Z" {
+		t.Fatalf("formatGitSince = %q, want UTC RFC3339 timestamp with timezone", got)
+	}
+	if _, err := time.Parse(time.RFC3339, got); err != nil {
+		t.Fatalf("formatGitSince output is not RFC3339: %v", err)
 	}
 }
 

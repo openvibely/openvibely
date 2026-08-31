@@ -2,11 +2,13 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/lifecycle"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
@@ -749,6 +751,163 @@ func TestLLMConfigRepo_MaxWorkersDefaultZero(t *testing.T) {
 	}
 	if fetched.WorkerTimeout != 0 {
 		t.Errorf("expected WorkerTimeout=0 (default), got %d", fetched.WorkerTimeout)
+	}
+}
+
+func TestWorkerService_CancelledInitialRunSkipsAfterCompleteHooks(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	project := &models.Project{Name: "cancelled-initial-lifecycle"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("Create project: %v", err)
+	}
+	agent := &models.LLMConfig{Name: "Test Model", Provider: models.ProviderTest, Model: "test-model", MaxTokens: 4096, AuthMethod: models.AuthMethodAPIKey}
+	if err := llmConfigRepo.Create(ctx, agent); err != nil {
+		t.Fatalf("Create agent: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Cancelled initial lifecycle", Prompt: "stop during model call", Category: models.CategoryActive, Status: models.StatusPending, AgentID: &agent.ID, Priority: 2}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("Create task: %v", err)
+	}
+
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
+	worker := NewWorkerService(llmSvc, 1, projectRepo)
+	worker.SetTaskRepo(taskRepo)
+	worker.SetLLMConfigRepo(llmConfigRepo)
+	worker.SetExecutionRepo(execRepo)
+	llmSvc.SetQueuedTaskThreadPromoter(func(string) {})
+
+	afterInvoked := make(chan struct{}, 1)
+	store := &routeHookStore{hooks: []models.AgentLifecycleHook{{ID: "after", When: models.LifecycleAfterComplete, SkillKey: "observe_task_for_learning", OutputContract: models.OutputContractLearningSummary, Enabled: true}}}
+	runner := lifecycle.NewRunner(store, routeHookInvokerFunc(func(_ context.Context, hook models.AgentLifecycleHook, _ lifecycle.HookInput) (json.RawMessage, error) {
+		if hook.When == models.LifecycleAfterComplete {
+			afterInvoked <- struct{}{}
+		}
+		return json.RawMessage(`{"summary":"should not run","nothing_to_save":true}`), nil
+	}), nil)
+	worker.SetLifecycleRunner(runner)
+
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "partial output"
+	mock.TextOnly = "partial output"
+	taskSvc := NewTaskService(taskRepo, nil, worker)
+	mock.OnCall = func(context.Context, testutil.MockLLMCall) {
+		if err := taskSvc.CancelTask(context.Background(), task.ID); err != nil {
+			t.Errorf("CancelTask: %v", err)
+		}
+	}
+	llmSvc.SetLLMCaller(mock)
+
+	worker.Start(ctx)
+	defer worker.Stop()
+	worker.Submit(*task)
+
+	deadline := time.After(2 * time.Second)
+	for {
+		updated, err := taskRepo.GetByID(context.Background(), task.ID)
+		if err == nil && updated != nil && updated.Status == models.StatusCancelled {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for cancelled task status")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+
+	select {
+	case <-afterInvoked:
+		t.Fatal("cancelled initial run invoked after_complete hook")
+	case <-time.After(150 * time.Millisecond):
+	}
+	if mock.CallCount() != 1 {
+		t.Fatalf("provider call count = %d, want 1", mock.CallCount())
+	}
+	execs, err := execRepo.ListByTask(context.Background(), task.ID)
+	if err != nil {
+		t.Fatalf("ListByTask: %v", err)
+	}
+	if len(execs) != 1 || execs[0].Status != models.ExecCancelled {
+		t.Fatalf("executions = %+v, want one cancelled execution", execs)
+	}
+}
+
+func TestWorkerService_NewProjectTasksRespectGlobalLimit(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	newProject := &models.Project{Name: "new-project-global-limit"}
+	if err := projectRepo.Create(ctx, newProject); err != nil {
+		t.Fatalf("Create new project: %v", err)
+	}
+
+	worker := NewWorkerService(nil, 2, projectRepo)
+	worker.SetTaskRepo(taskRepo)
+	worker.Start(ctx)
+
+	claimed := make(chan string, 3)
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	defer func() {
+		releaseOnce.Do(func() { close(release) })
+		worker.Stop()
+	}()
+	worker.afterOrdinaryTaskClaim = func(task models.Task) {
+		claimed <- task.ID
+		<-release
+	}
+
+	taskSvc := NewTaskService(taskRepo, nil, worker)
+	tasks := []*models.Task{
+		{ProjectID: "default", Title: "existing-project-running", Prompt: "hold first global slot", Category: models.CategoryActive},
+		{ProjectID: newProject.ID, Title: "new-project-running", Prompt: "hold second global slot", Category: models.CategoryActive},
+		{ProjectID: newProject.ID, Title: "new-project-queued", Prompt: "wait for global capacity", Category: models.CategoryActive},
+	}
+	for _, task := range tasks {
+		if err := taskSvc.Create(ctx, task); err != nil {
+			t.Fatalf("Create task %q: %v", task.Title, err)
+		}
+	}
+
+	for i := 0; i < 2; i++ {
+		select {
+		case <-claimed:
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for two globally admitted tasks")
+		}
+	}
+	select {
+	case id := <-claimed:
+		t.Fatalf("third task %s was admitted past the global worker limit", id)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	if got := worker.TotalRunning(); got != 2 {
+		t.Fatalf("TotalRunning = %d, want 2", got)
+	}
+	if got := worker.ProjectRunning(newProject.ID); got != 1 {
+		t.Fatalf("new project running count = %d, want 1", got)
+	}
+	queued, err := taskRepo.GetByID(ctx, tasks[2].ID)
+	if err != nil {
+		t.Fatalf("Get queued task: %v", err)
+	}
+	if queued.Status != models.StatusPending || queued.Category != models.CategoryActive {
+		t.Fatalf("excess active task state = %s/%s, want active/pending", queued.Category, queued.Status)
+	}
+	if got := worker.QueueSize(); got != 1 {
+		t.Fatalf("QueueSize = %d, want 1", got)
 	}
 }
 

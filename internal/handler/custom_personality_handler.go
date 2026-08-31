@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"net/http"
 	"strings"
 
@@ -10,18 +11,46 @@ import (
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
 
-// generatePersonalityKey creates a URL-safe key from a name.
-func generatePersonalityKey(name string) string {
-	key := strings.ToLower(strings.TrimSpace(name))
-	key = strings.ReplaceAll(key, " ", "_")
-	key = strings.ReplaceAll(key, "-", "_")
-	var sb strings.Builder
-	for _, r := range key {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' {
-			sb.WriteRune(r)
+// listPersonalityCardPage returns the bounded custom-card page plus the small
+// fixed set needed to render preset overrides and the selected custom card.
+func (h *Handler) listPersonalityCardPage(ctx context.Context, page cardPageRequest, selected string) ([]models.CustomPersonality, bool, error) {
+	if h.customPersonalityRepo == nil {
+		return nil, false, nil
+	}
+	keys := make([]string, 0, len(service.AllPersonalities())+1)
+	excludedKeys := make([]string, 0, len(service.AllPersonalities())+1)
+	if selected = strings.TrimSpace(selected); selected != "" {
+		keys = append(keys, selected)
+		excludedKeys = append(excludedKeys, selected)
+	}
+	for _, preset := range service.AllPersonalities() {
+		if key := strings.TrimSpace(preset.Key); key != "" {
+			keys = append(keys, key)
+			if key != selected {
+				excludedKeys = append(excludedKeys, key)
+			}
 		}
 	}
-	return sb.String()
+
+	pageItems, err := h.customPersonalityRepo.ListPageExcludingKeys(ctx, page.PageSize+1, page.Offset, page.Search, excludedKeys)
+	if err != nil {
+		return nil, false, err
+	}
+	pageItems, hasMore := cardPageItems(pageItems, page.PageSize)
+	fixed, err := h.customPersonalityRepo.ListCardsByKeys(ctx, keys)
+	if err != nil {
+		return nil, false, err
+	}
+	merged := make([]models.CustomPersonality, 0, len(pageItems)+len(fixed))
+	seen := make(map[string]struct{}, len(pageItems)+len(fixed))
+	for _, personality := range append(pageItems, fixed...) {
+		if _, ok := seen[personality.Key]; ok {
+			continue
+		}
+		seen[personality.Key] = struct{}{}
+		merged = append(merged, personality)
+	}
+	return merged, hasMore, nil
 }
 
 // renderPersonalitySection re-renders the personality section with current data.
@@ -33,21 +62,23 @@ func (h *Handler) renderPersonalitySection(c echo.Context) error {
 		personality, _ = h.settingsRepo.Get(ctx, "personality")
 	}
 
-	var customs []models.CustomPersonality
-	if h.customPersonalityRepo != nil {
-		customs, _ = h.customPersonalityRepo.List(ctx)
+	page := parseCardPageRequest(c)
+	customs, hasMore, err := h.listPersonalityCardPage(ctx, page, personality)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to load custom personalities")
 	}
+	setCardPageResponse(c, hasMore)
 
-	return render(c, http.StatusOK, pages.PersonalitySection(personality, customs))
+	return render(c, http.StatusOK, pages.PersonalitySectionPageWithPagination(personality, customs, hasMore))
 }
 
-// CreateCustomPersonality handles POST /personality/custom
-func (h *Handler) CreateCustomPersonality(c echo.Context) error {
-	if h.customPersonalityRepo == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "Custom personalities not configured")
-	}
+type customPersonalitySavePayload struct {
+	Personality *models.CustomPersonality
+	IsJSON      bool
+}
 
-	var name, description, systemPrompt, key string
+func parseCustomPersonalitySavePayload(c echo.Context, key string) (*customPersonalitySavePayload, error) {
+	var name, description, systemPrompt string
 	isJSON := strings.Contains(c.Request().Header.Get(echo.HeaderContentType), echo.MIMEApplicationJSON)
 
 	if isJSON {
@@ -58,37 +89,54 @@ func (h *Handler) CreateCustomPersonality(c echo.Context) error {
 			SystemPrompt string `json:"system_prompt"`
 		}
 		if err := c.Bind(&req); err != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, "Invalid JSON")
+			return nil, echo.NewHTTPError(http.StatusBadRequest, "Invalid JSON")
 		}
 		name = strings.TrimSpace(req.Name)
-		key = strings.TrimSpace(req.Key)
+		if key == "" {
+			key = strings.TrimSpace(req.Key)
+		}
 		description = strings.TrimSpace(req.Description)
 		systemPrompt = strings.TrimSpace(req.SystemPrompt)
 	} else {
 		name = strings.TrimSpace(c.FormValue("name"))
-		key = strings.TrimSpace(c.FormValue("key"))
+		if key == "" {
+			key = strings.TrimSpace(c.FormValue("key"))
+		}
 		description = strings.TrimSpace(c.FormValue("description"))
 		systemPrompt = strings.TrimSpace(c.FormValue("system_prompt"))
 	}
 
-	if name == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "Name is required")
+	p, err := service.NewCustomPersonalityFromFields(name, key, description, systemPrompt)
+	if err != nil {
+		return nil, echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	if !isJSON || key == "" {
-		key = generatePersonalityKey(name)
+
+	return &customPersonalitySavePayload{
+		Personality: p,
+		IsJSON:      isJSON,
+	}, nil
+}
+
+// CreateCustomPersonality handles POST /personality/custom
+func (h *Handler) CreateCustomPersonality(c echo.Context) error {
+	if h.customPersonalityRepo == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "Custom personalities not configured")
 	}
-	if key == "" {
+
+	payload, err := parseCustomPersonalitySavePayload(c, "")
+	if err != nil {
+		return err
+	}
+	p := payload.Personality
+	if !payload.IsJSON || p.Key == "" {
+		p.Key = service.NormalizeCustomPersonalityKey(p.Name)
+	}
+	if p.Key == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "Key is required")
-	}
-	if systemPrompt == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "System prompt is required")
-	}
-	if len(systemPrompt) < 20 {
-		return echo.NewHTTPError(http.StatusBadRequest, "System prompt must be at least 20 characters")
 	}
 
 	// Allow custom personalities to override presets by using the same key
-	existing, err := h.customPersonalityRepo.GetByKey(c.Request().Context(), key)
+	existing, err := h.customPersonalityRepo.GetByKey(c.Request().Context(), p.Key)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to check key uniqueness")
 	}
@@ -96,17 +144,11 @@ func (h *Handler) CreateCustomPersonality(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusConflict, "A custom personality with this key already exists")
 	}
 
-	p := &models.CustomPersonality{
-		Name:         name,
-		Key:          key,
-		Description:  description,
-		SystemPrompt: systemPrompt,
-	}
 	if err := h.customPersonalityRepo.Create(c.Request().Context(), p); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to create custom personality")
 	}
 
-	if isJSON {
+	if payload.IsJSON {
 		return c.JSON(http.StatusCreated, p)
 	}
 	return h.renderPersonalitySection(c)
@@ -124,6 +166,16 @@ func (h *Handler) GetCustomPersonality(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to load personality")
 	}
 	if p == nil {
+		for _, preset := range service.AllPersonalities() {
+			if preset.Key == key && key != "" {
+				return c.JSON(http.StatusOK, &models.CustomPersonality{
+					Name:         preset.Name,
+					Key:          preset.Key,
+					Description:  preset.Description,
+					SystemPrompt: service.GetPersonalityPrompt(key),
+				})
+			}
+		}
 		return echo.NewHTTPError(http.StatusNotFound, "Custom personality not found")
 	}
 
@@ -138,50 +190,25 @@ func (h *Handler) UpdateCustomPersonality(c echo.Context) error {
 
 	key := c.Param("key")
 
-	var name, description, systemPrompt string
-	isJSON := strings.Contains(c.Request().Header.Get(echo.HeaderContentType), echo.MIMEApplicationJSON)
-
-	if isJSON {
-		var req struct {
-			Name         string `json:"name"`
-			Description  string `json:"description"`
-			SystemPrompt string `json:"system_prompt"`
-		}
-		if err := c.Bind(&req); err != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, "Invalid JSON")
-		}
-		name = strings.TrimSpace(req.Name)
-		description = strings.TrimSpace(req.Description)
-		systemPrompt = strings.TrimSpace(req.SystemPrompt)
-	} else {
-		name = strings.TrimSpace(c.FormValue("name"))
-		description = strings.TrimSpace(c.FormValue("description"))
-		systemPrompt = strings.TrimSpace(c.FormValue("system_prompt"))
+	payload, err := parseCustomPersonalitySavePayload(c, key)
+	if err != nil {
+		return err
 	}
-
-	if name == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "Name is required")
-	}
-	if len(systemPrompt) < 20 {
-		return echo.NewHTTPError(http.StatusBadRequest, "System prompt must be at least 20 characters")
-	}
+	p := payload.Personality
 
 	existing, err := h.customPersonalityRepo.GetByKey(c.Request().Context(), key)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to load personality")
 	}
 
-	p := &models.CustomPersonality{
-		Name:         name,
-		Key:          key,
-		Description:  description,
-		SystemPrompt: systemPrompt,
-	}
 	if existing != nil {
 		if err := h.customPersonalityRepo.Update(c.Request().Context(), key, p); err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, "Failed to update custom personality")
 		}
 	} else {
+		if key == "" || !service.IsPresetPersonality(key) {
+			return echo.NewHTTPError(http.StatusNotFound, "Custom personality not found")
+		}
 		if err := h.customPersonalityRepo.Create(c.Request().Context(), p); err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, "Failed to save personality")
 		}
@@ -193,7 +220,7 @@ func (h *Handler) UpdateCustomPersonality(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to retrieve updated personality")
 	}
 
-	if isJSON {
+	if payload.IsJSON {
 		return c.JSON(http.StatusOK, updated)
 	}
 	return h.renderPersonalitySection(c)

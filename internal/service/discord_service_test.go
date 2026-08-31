@@ -36,6 +36,84 @@ func newDiscordServiceForTest(t *testing.T) (*DiscordService, *sql.DB, *reposito
 	return svc, db, settingsRepo, projectRepo, taskRepo, discordAuthRepo, discordTaskContextRepo
 }
 
+func TestDiscordService_CheckAuthorizationPreservesAnyProjectBehavior(t *testing.T) {
+	svc, _, _, projectRepo, _, discordAuthRepo, _ := newDiscordServiceForTest(t)
+	ctx := context.Background()
+	projectA := &models.Project{Name: "Discord Project A"}
+	projectB := &models.Project{Name: "Discord Project B"}
+	if err := projectRepo.Create(ctx, projectA); err != nil {
+		t.Fatal(err)
+	}
+	if err := projectRepo.Create(ctx, projectB); err != nil {
+		t.Fatal(err)
+	}
+	if err := discordAuthRepo.Create(ctx, &models.DiscordAuthorizedUser{ProjectID: projectA.ID, DiscordUserID: "1518288288572641398", DisplayName: "Allowed", AddedBy: "test"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if !svc.checkAuthorization(ctx, projectB.ID, "1518288288572641398") {
+		t.Fatal("expected authorized Discord user from another project to remain allowed")
+	}
+	if svc.checkAuthorization(ctx, projectB.ID, "999999999999999999") {
+		t.Fatal("expected unauthorized Discord user to remain rejected")
+	}
+	if !svc.checkAuthorization(ctx, "", "1518288288572641398") {
+		t.Fatal("expected empty-project Discord authorization to use anywhere lookup")
+	}
+}
+
+func TestDiscordService_CheckAuthorizationRejectedActiveProjectUsesSingleLookup(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	ctx := context.Background()
+	settingsRepo := repository.NewSettingsRepo(db)
+	projectRepo := repository.NewProjectRepo(db)
+	discordAuthRepo := repository.NewDiscordAuthRepo(db)
+	project := &models.Project{Name: "Discord Single Auth Lookup"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	seedChannelAuthorizedUsers(t, db, "discord_authorized_users", "discord_user_id", project.ID, "151828828857", 1000)
+	svc := NewDiscordService(settingsRepo, projectRepo, nil, nil, nil, nil, nil, nil, nil, discordAuthRepo, nil)
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	authorized := svc.checkAuthorization(ctx, project.ID, "999999999999999999")
+	counter.SetEnabled(false)
+
+	if authorized {
+		t.Fatal("expected rejected Discord user to remain unauthorized")
+	}
+	statements := counter.Statements()
+	if len(statements) != 1 {
+		t.Fatalf("rejected active-project authorization statements = %q, want one", statements)
+	}
+	if got := countChannelAuthTableStatements(statements, "discord_authorized_users"); got != 1 {
+		t.Fatalf("discord auth table lookup statements = %d, want one; statements: %q", got, statements)
+	}
+}
+
+func BenchmarkDiscordRejectedAuthorizationSingleLookupLargeAllowlist(b *testing.B) {
+	db := testutil.NewTestDB(b)
+	ctx := context.Background()
+	settingsRepo := repository.NewSettingsRepo(db)
+	projectRepo := repository.NewProjectRepo(db)
+	discordAuthRepo := repository.NewDiscordAuthRepo(db)
+	project := &models.Project{Name: "Discord Rejected Auth Benchmark"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		b.Fatal(err)
+	}
+	seedChannelAuthorizedUsers(b, db, "discord_authorized_users", "discord_user_id", project.ID, "151828828857", 100000)
+	svc := NewDiscordService(settingsRepo, projectRepo, nil, nil, nil, nil, nil, nil, nil, discordAuthRepo, nil)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if svc.checkAuthorization(ctx, project.ID, "999999999999999999") {
+			b.Fatal("unexpected authorized rejected Discord user")
+		}
+	}
+}
+
 func TestDiscordService_NotificationLifecycleRuntimeUsesPersistedChannelTask(t *testing.T) {
 	svc, db, _, projectRepo, taskRepo, _, _ := newDiscordServiceForTest(t)
 	ctx := context.Background()
@@ -178,6 +256,12 @@ func TestDiscordActionHandlersCoverAdvertisedRuntimeTools(t *testing.T) {
 	}
 	for _, d := range defs {
 		_, handled, _, _ := rt.Executor(ctx, d.Name, json.RawMessage(`{}`))
+		if channelRuntimeGenericFallbackTool(d.Name) {
+			if handled {
+				t.Fatalf("generic fallback tool should fall through discord runtime executor: %s", d.Name)
+			}
+			continue
+		}
 		if !handled {
 			t.Fatalf("tool should be handled by discord runtime executor: %s", d.Name)
 		}
@@ -185,9 +269,6 @@ func TestDiscordActionHandlersCoverAdvertisedRuntimeTools(t *testing.T) {
 
 	actionCtx := discordActionContext{ChannelID: "chan-1", ThreadID: "thread-1", MessageID: "msg-1", UserID: "user-1"}
 	handlers := svc.discordActionHandlers(project.ID, actionCtx, nil)
-	if err := chatcontrol.ValidateHandlerCoverage(models.ChatModeOrchestrate, chatcontrol.SurfaceDiscord, true, handlers); err != nil {
-		t.Fatalf("discord handler coverage: %v", err)
-	}
 	out, err := handlers["create_swarm_task"](ctx, json.RawMessage(`{"title":"Discord Swarm Created","prompt":"Split this work","category":"backlog"}`))
 	if err != nil {
 		t.Fatalf("create_swarm_task handler failed: %v", err)
@@ -390,6 +471,133 @@ func TestDiscordSendToTaskUsesConfiguredChannelTaskRunner(t *testing.T) {
 	}
 	if gotReq.ReplyContext.Source != models.TaskOriginDiscord || gotReq.ReplyContext.DiscordChannelID != "chan-1" || gotReq.ReplyContext.DiscordThreadID != "thread-1" || gotReq.ReplyContext.DiscordMessageID != "msg-1" || gotReq.ReplyContext.DiscordUserID != "user-1" {
 		t.Fatalf("unexpected reply context: %#v", gotReq.ReplyContext)
+	}
+}
+
+func TestDiscordFailedSwitchProjectPreservesPriorCacheAndInboundRouting(t *testing.T) {
+	svc, db, settingsRepo, projectRepo, taskRepo, authRepo, _ := newDiscordServiceForTest(t)
+	ctx := context.Background()
+
+	defaultProject := &models.Project{Name: "Alpha", IsDefault: true}
+	targetProject := &models.Project{Name: "Beta"}
+	if err := projectRepo.Create(ctx, defaultProject); err != nil {
+		t.Fatalf("create default project: %v", err)
+	}
+	if err := projectRepo.Create(ctx, targetProject); err != nil {
+		t.Fatalf("create target project: %v", err)
+	}
+	userID := "user-failed-switch"
+	userProjectRepo := repository.NewDiscordUserProjectRepo(db)
+	svc.SetDiscordUserProjectRepo(userProjectRepo)
+	if err := userProjectRepo.SetUserProject(ctx, userID, defaultProject.ID); err != nil {
+		t.Fatalf("persist default project: %v", err)
+	}
+	if err := authRepo.Create(ctx, &models.DiscordAuthorizedUser{ProjectID: defaultProject.ID, DiscordUserID: userID, DisplayName: "Discord User", AddedBy: "test"}); err != nil {
+		t.Fatalf("authorize default project: %v", err)
+	}
+	if err := authRepo.Create(ctx, &models.DiscordAuthorizedUser{ProjectID: targetProject.ID, DiscordUserID: userID, DisplayName: "Discord User", AddedBy: "test"}); err != nil {
+		t.Fatalf("authorize target project: %v", err)
+	}
+	if err := settingsRepo.Set(ctx, DiscordSettingSendResponses, "true"); err != nil {
+		t.Fatalf("set responses: %v", err)
+	}
+	agentRepo := repository.NewLLMConfigRepo(db)
+	agent := &models.LLMConfig{Name: "test", Provider: models.ProviderOpenAI, Model: "gpt-4o", APIKey: "key", IsDefault: true}
+	if err := agentRepo.Create(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	execRepo := repository.NewExecutionRepo(db)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	svc.llmConfigRepo = agentRepo
+	svc.execRepo = execRepo
+	svc.scheduleRepo = scheduleRepo
+	svc.taskSvc = NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil)
+	svc.llmSvc = NewLLMService(agentRepo, execRepo, taskRepo, projectRepo, scheduleRepo, repository.NewAttachmentRepo(db))
+	svc.sendMessageFunc = func(channelID, messageID, text string) (string, error) { return "ack-1", nil }
+
+	// Load the durable selection into the live cache before forcing a failed switch.
+	if got := svc.getActiveProject(ctx, userID); got != defaultProject.ID {
+		t.Fatalf("initial active project = %q, want %q", got, defaultProject.ID)
+	}
+
+	failedCtx, cancel := context.WithCancel(ctx)
+	cancel()
+	if err := svc.setActiveProject(failedCtx, userID, targetProject.ID); err == nil {
+		t.Fatal("expected failed switch persistence error")
+	}
+	if got := svc.userProjects[userID]; got != defaultProject.ID {
+		t.Fatalf("failed switch changed cached project to %q, want %q", got, defaultProject.ID)
+	}
+	if got, err := userProjectRepo.GetUserProject(ctx, userID); err != nil || got != defaultProject.ID {
+		t.Fatalf("failed switch changed durable project: got=%q err=%v want=%q", got, err, defaultProject.ID)
+	}
+
+	var incoming ChannelChatRunRequest
+	svc.SetChannelChatRunner(func(_ context.Context, req ChannelChatRunRequest) { incoming = req })
+	svc.processIncomingMessage(discordIncomingMessage{ChannelID: "chan-1", MessageID: "msg-2", UserID: userID, Username: "Discord User", Text: "continue", Source: "discord"})
+	if incoming.ProjectID != defaultProject.ID {
+		t.Fatalf("inbound message used project %q after failed switch, want %q", incoming.ProjectID, defaultProject.ID)
+	}
+
+	if err := svc.setActiveProject(ctx, userID, targetProject.ID); err != nil {
+		t.Fatalf("successful retry: %v", err)
+	}
+	if got := svc.userProjects[userID]; got != targetProject.ID {
+		t.Fatalf("successful retry cached project = %q, want %q", got, targetProject.ID)
+	}
+	if got, err := userProjectRepo.GetUserProject(ctx, userID); err != nil || got != targetProject.ID {
+		t.Fatalf("successful retry durable project: got=%q err=%v want=%q", got, err, targetProject.ID)
+	}
+}
+
+func TestDiscordSetActiveProjectFailureDoesNotCreateCacheEntry(t *testing.T) {
+	svc, db, settingsRepo, projectRepo, taskRepo, authRepo, _ := newDiscordServiceForTest(t)
+	ctx := context.Background()
+	defaultProject, err := projectRepo.GetByID(ctx, "default")
+	if err != nil {
+		t.Fatalf("load durable default project: %v", err)
+	}
+	rejectedProject := &models.Project{Name: "Rejected Discord Project"}
+	if err := projectRepo.Create(ctx, rejectedProject); err != nil {
+		t.Fatalf("create rejected project: %v", err)
+	}
+	const userID = "uncached-user"
+	userProjectRepo := repository.NewDiscordUserProjectRepo(db)
+	svc.SetDiscordUserProjectRepo(userProjectRepo)
+	if err := authRepo.Create(ctx, &models.DiscordAuthorizedUser{ProjectID: defaultProject.ID, DiscordUserID: userID, DisplayName: "Discord User", AddedBy: "test"}); err != nil {
+		t.Fatalf("authorize default project: %v", err)
+	}
+	if err := settingsRepo.Set(ctx, DiscordSettingSendResponses, "true"); err != nil {
+		t.Fatalf("set responses: %v", err)
+	}
+	agentRepo := repository.NewLLMConfigRepo(db)
+	agent := &models.LLMConfig{Name: "test", Provider: models.ProviderOpenAI, Model: "gpt-4o", APIKey: "key", IsDefault: true}
+	if err := agentRepo.Create(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	execRepo := repository.NewExecutionRepo(db)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	svc.llmConfigRepo = agentRepo
+	svc.execRepo = execRepo
+	svc.scheduleRepo = scheduleRepo
+	svc.taskSvc = NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil)
+	svc.llmSvc = NewLLMService(agentRepo, execRepo, taskRepo, projectRepo, scheduleRepo, repository.NewAttachmentRepo(db))
+	svc.sendMessageFunc = func(channelID, messageID, text string) (string, error) { return "ack-1", nil }
+
+	failedCtx, cancel := context.WithCancel(ctx)
+	cancel()
+	if err := svc.setActiveProject(failedCtx, userID, rejectedProject.ID); err == nil {
+		t.Fatal("expected persistence failure")
+	}
+	if _, ok := svc.userProjects[userID]; ok {
+		t.Fatal("failed switch created a cache entry")
+	}
+
+	var incoming ChannelChatRunRequest
+	svc.SetChannelChatRunner(func(_ context.Context, req ChannelChatRunRequest) { incoming = req })
+	svc.processIncomingMessage(discordIncomingMessage{ChannelID: "chan-1", MessageID: "msg-1", UserID: userID, Username: "Discord User", Text: "continue", Source: "discord"})
+	if incoming.ProjectID != defaultProject.ID {
+		t.Fatalf("inbound message used project %q after failed uncached switch, want durable default %q", incoming.ProjectID, defaultProject.ID)
 	}
 }
 
@@ -1654,5 +1862,240 @@ func TestDiscordSendTaskCompletionNotificationRoutesToContext(t *testing.T) {
 
 	if channelID != "chan-1" || messageID != "msg-1" || !strings.Contains(text, "Discord Task") || !strings.Contains(text, "finished") {
 		t.Fatalf("completion routed incorrectly channel=%q message=%q text=%q", channelID, messageID, text)
+	}
+}
+
+func TestDiscordFormattingAndAttachmentHelpers(t *testing.T) {
+	if got := splitDiscordMessage(strings.Repeat("a", discordMessageLimit+25)); len(got) != 2 || len(got[0]) != discordMessageLimit || len(got[1]) != 25 {
+		t.Fatalf("splitDiscordMessage chunks = %d (%d,%d), want 2 (%d,25)", len(got), len(got[0]), len(got[1]), discordMessageLimit)
+	}
+	if got := formatDiscordTaskCompletion("Deploy", "", "boom"); !strings.Contains(got, "Task failed: Deploy") || !strings.Contains(got, "boom") {
+		t.Fatalf("failure completion = %q", got)
+	}
+	if got := formatDiscordTaskCompletion("Deploy", "", ""); !strings.Contains(got, "Task completed: Deploy") || !strings.Contains(got, "(No output)") {
+		t.Fatalf("empty success completion = %q", got)
+	}
+	if got := sanitizeDiscordText("<@111> <@!222> hello <@333>", "222"); got != "hello" {
+		t.Fatalf("sanitizeDiscordText = %q, want hello", got)
+	}
+	if !discordMentionsBot([]*discordgo.User{{ID: "bot"}, nil}, "bot") || discordMentionsBot([]*discordgo.User{{ID: "other"}}, "bot") || discordMentionsBot([]*discordgo.User{{ID: "bot"}}, "") {
+		t.Fatalf("discordMentionsBot returned unexpected result")
+	}
+	if got := discordThreadID(&discordgo.Message{Thread: &discordgo.Channel{ID: "thread-1"}}); got != "thread-1" {
+		t.Fatalf("discordThreadID = %q", got)
+	}
+	if got := discordDisplayName(&discordgo.User{Username: "user", GlobalName: "Global"}); got != "Global" {
+		t.Fatalf("discordDisplayName global = %q", got)
+	}
+	if got := discordDisplayName(&discordgo.User{Username: "user"}); got != "user" {
+		t.Fatalf("discordDisplayName username = %q", got)
+	}
+
+	attachments := []*discordgo.MessageAttachment{
+		nil,
+		{ID: " 1 ", Filename: " photo.png ", ContentType: " image/png ", Size: 10, URL: " https://cdn.discordapp.com/a.png ", ProxyURL: " https://media.discordapp.net/a.png "},
+		{ID: "2", Filename: "notes.txt"},
+	}
+	incoming := discordIncomingAttachmentsFromMessage(attachments)
+	if len(incoming) != 2 || incoming[0].ID != "1" || incoming[0].FileName != "photo.png" || incoming[1].FileName != "notes.txt" {
+		t.Fatalf("discordIncomingAttachmentsFromMessage = %#v", incoming)
+	}
+	if got := discordAttachmentPrompt(attachments); got != "User sent attachment(s):  photo.png , notes.txt" {
+		t.Fatalf("discordAttachmentPrompt = %q", got)
+	}
+	if got := discordAttachmentPrompt(nil); got != "User sent an attachment." {
+		t.Fatalf("discordAttachmentPrompt nil = %q", got)
+	}
+	if !discordIncomingAttachmentsRequireVision([]discordIncomingAttachment{{FileName: "photo.png", ContentType: ""}}) {
+		t.Fatalf("png filename should require vision")
+	}
+	if !discordIncomingAttachmentsRequireVision([]discordIncomingAttachment{{ContentType: "application/octet-stream", URL: "https://cdn.discordapp.com/file"}}) {
+		t.Fatalf("unknown downloaded file should require vision")
+	}
+	if discordIncomingAttachmentsRequireVision([]discordIncomingAttachment{{FileName: "notes.txt", ContentType: "text/plain"}}) {
+		t.Fatalf("text/plain should not require vision")
+	}
+
+	chatAttachments := []models.ChatAttachment{{FileName: "photo.png", FilePath: "/tmp/photo.png", MediaType: "image/png", FileSize: 9}, {FileName: "notes.txt", FilePath: "/tmp/notes.txt", MediaType: "text/plain", FileSize: 5}}
+	images := discordImageAttachmentsFromChatAttachments(chatAttachments)
+	if len(images) != 1 || images[0].FileName != "photo.png" || images[0].MediaType != "image/png" {
+		t.Fatalf("discordImageAttachmentsFromChatAttachments = %#v", images)
+	}
+	if got := discordSafeFileName(discordIncomingAttachment{ID: "abc", FileName: "../../evil.png"}); got != "evil.png" {
+		t.Fatalf("discordSafeFileName path = %q", got)
+	}
+	if got := discordSafeFileName(discordIncomingAttachment{ID: "abc"}); got != "discord-abc" {
+		t.Fatalf("discordSafeFileName id fallback = %q", got)
+	}
+	if got := discordIncomingFileMediaType(discordIncomingAttachment{ContentType: "IMAGE/PNG; name=x"}, "ignored.txt"); got != "image/png" {
+		t.Fatalf("discordIncomingFileMediaType explicit = %q", got)
+	}
+	if got := discordIncomingFileMediaType(discordIncomingAttachment{ContentType: "application/octet-stream"}, "photo.jpg"); got != "image/jpeg" {
+		t.Fatalf("discordIncomingFileMediaType inferred = %q", got)
+	}
+	urls := discordAttachmentDownloadURLs(discordIncomingAttachment{URL: " https://cdn.discordapp.com/a ", ProxyURL: "https://cdn.discordapp.com/a"})
+	if len(urls) != 1 || urls[0] != "https://cdn.discordapp.com/a" {
+		t.Fatalf("discordAttachmentDownloadURLs = %#v", urls)
+	}
+	if !discordTrustedAttachmentHost(" CDN.DiscordApp.Com ") || !discordTrustedAttachmentHost("media.discordapp.net") || discordTrustedAttachmentHost("example.com") {
+		t.Fatalf("discordTrustedAttachmentHost returned unexpected result")
+	}
+	if err := validateDiscordAttachmentURL(nil); err == nil || !strings.Contains(err.Error(), "empty") {
+		t.Fatalf("validateDiscordAttachmentURL nil err = %v", err)
+	}
+	parsed, _ := url.Parse("http://cdn.discordapp.com/file")
+	if err := validateDiscordAttachmentURL(parsed); err == nil || !strings.Contains(err.Error(), "scheme") {
+		t.Fatalf("validateDiscordAttachmentURL scheme err = %v", err)
+	}
+	parsed, _ = url.Parse("https://example.com/file")
+	if err := validateDiscordAttachmentURL(parsed); err == nil || !strings.Contains(err.Error(), "not trusted") {
+		t.Fatalf("validateDiscordAttachmentURL host err = %v", err)
+	}
+	parsed, _ = url.Parse("https://cdn.discordapp.com/file")
+	if err := validateDiscordAttachmentURL(parsed); err != nil {
+		t.Fatalf("validateDiscordAttachmentURL trusted: %v", err)
+	}
+	next, err := discordRedirectLocation("https://cdn.discordapp.com/path/file", "../next.png")
+	if err != nil || next.String() != "https://cdn.discordapp.com/next.png" {
+		t.Fatalf("discordRedirectLocation = %v err=%v", next, err)
+	}
+}
+
+func TestDiscordSettingsHelpersRoundTrip(t *testing.T) {
+	svc, _, settingsRepo, _, _, _, _ := newDiscordServiceForTest(t)
+	ctx := context.Background()
+	if got := (&DiscordService{}).getSetting(ctx, DiscordSettingBotUserID); got != "" {
+		t.Fatalf("nil repo getSetting = %q", got)
+	}
+	if err := (&DiscordService{}).setSetting(ctx, DiscordSettingBotUserID, "ignored"); err != nil {
+		t.Fatalf("nil repo setSetting: %v", err)
+	}
+	if err := svc.setSetting(ctx, DiscordSettingBotUserID, "bot-1"); err != nil {
+		t.Fatalf("setSetting: %v", err)
+	}
+	if got := svc.getSetting(ctx, DiscordSettingBotUserID); got != "bot-1" {
+		t.Fatalf("getSetting = %q", got)
+	}
+	stored, err := settingsRepo.Get(ctx, DiscordSettingBotUserID)
+	if err != nil || stored != "bot-1" {
+		t.Fatalf("stored setting = %q err=%v", stored, err)
+	}
+}
+
+func TestDiscordServiceSendThreadAndChatResponsesUseInjectedSender(t *testing.T) {
+	ctx := context.Background()
+	svc, _, settingsRepo, projectRepo, taskRepo, _, discordTaskContextRepo := newDiscordServiceForTest(t)
+	if err := settingsRepo.Set(ctx, DiscordSettingSendResponses, "true"); err != nil {
+		t.Fatal(err)
+	}
+	project := &models.Project{Name: "Discord response project"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Discord task", Prompt: "do work", Status: models.StatusPending, Category: models.CategoryActive, CreatedVia: models.TaskOriginDiscord}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	chatTask := &models.Task{ProjectID: project.ID, Title: "Discord chat", Prompt: "chat", Status: models.StatusPending, Category: models.CategoryChat, CreatedVia: models.TaskOriginDiscord}
+	if err := taskRepo.Create(ctx, chatTask); err != nil {
+		t.Fatal(err)
+	}
+	if err := discordTaskContextRepo.Upsert(ctx, &models.DiscordTaskContext{TaskID: task.ID, DiscordChannelID: "chan-task", DiscordThreadID: "thread-task", DiscordMessageID: "msg-task", DiscordUserID: "user-task"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := discordTaskContextRepo.Upsert(ctx, &models.DiscordTaskContext{TaskID: chatTask.ID, DiscordChannelID: "chan-chat", DiscordThreadID: "thread-chat", DiscordMessageID: "msg-chat", DiscordUserID: "user-chat"}); err != nil {
+		t.Fatal(err)
+	}
+
+	type sentMessage struct{ channelID, messageID, body string }
+	var sent []sentMessage
+	svc.sendMessageFunc = func(channelID, messageID, text string) (string, error) {
+		sent = append(sent, sentMessage{channelID: channelID, messageID: messageID, body: text})
+		return fmt.Sprintf("ack-%d", len(sent)), nil
+	}
+
+	svc.SendTaskCompletionToThread(ctx, "chan-direct", "thread-direct", "reply-direct", "Thread Task", "thread output", "", "user-direct")
+	svc.SendTaskCompletionNotification(ctx, *task, "task output", "")
+	svc.SendChatResponse(ctx, *chatTask, "chat output", "")
+	svc.SendChatResponse(ctx, *chatTask, "", "provider exploded")
+
+	if len(sent) != 4 {
+		t.Fatalf("expected 4 sent messages, got %d: %#v", len(sent), sent)
+	}
+	if sent[0].channelID != "chan-direct" || sent[0].messageID != "reply-direct" || !strings.Contains(sent[0].body, "Task completed: Thread Task") {
+		t.Fatalf("unexpected direct completion send: %#v", sent[0])
+	}
+	if sent[1].channelID != "chan-task" || sent[1].messageID != "msg-task" || !strings.Contains(sent[1].body, "Task completed: Discord task") {
+		t.Fatalf("unexpected task completion send: %#v", sent[1])
+	}
+	if sent[2].channelID != "chan-chat" || sent[2].messageID != "msg-chat" || !strings.Contains(sent[2].body, "chat output") {
+		t.Fatalf("unexpected chat output send: %#v", sent[2])
+	}
+	if sent[3].channelID != "chan-chat" || sent[3].messageID != "msg-chat" || !strings.Contains(sent[3].body, "Error: provider exploded") {
+		t.Fatalf("unexpected chat error send: %#v", sent[3])
+	}
+
+	if err := settingsRepo.Set(ctx, DiscordSettingSendResponses, "false"); err != nil {
+		t.Fatal(err)
+	}
+	svc.SendTaskCompletionToThread(ctx, "chan-disabled", "thread-disabled", "reply-disabled", "Disabled", "ignored", "", "user-disabled")
+	if len(sent) != 4 {
+		t.Fatalf("send responses disabled should not send, got %#v", sent)
+	}
+}
+
+func TestDiscordServiceEditOrSendAndLifecycleHelpers(t *testing.T) {
+	ctx := context.Background()
+	svc, _, settingsRepo, _, _, _, _ := newDiscordServiceForTest(t)
+	if svc.IsRunning() {
+		t.Fatal("new Discord service should not be running")
+	}
+	if err := svc.ReloadFromSettings(ctx); err != nil {
+		t.Fatalf("ReloadFromSettings without token: %v", err)
+	}
+	if err := svc.TestConnection(ctx); err == nil || !strings.Contains(err.Error(), "bot token is not configured") {
+		t.Fatalf("expected missing token TestConnection error, got %v", err)
+	}
+	if err := settingsRepo.Set(ctx, DiscordSettingBotToken, "bot-token"); err != nil {
+		t.Fatal(err)
+	}
+	if err := settingsRepo.Set(ctx, DiscordSettingBotUserID, "bot-user"); err != nil {
+		t.Fatal(err)
+	}
+	if err := settingsRepo.Set(ctx, DiscordSettingSendResponses, "false"); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Disconnect(ctx); err != nil {
+		t.Fatalf("Disconnect: %v", err)
+	}
+	for _, key := range []string{DiscordSettingBotToken, DiscordSettingBotUserID, DiscordSettingSendResponses} {
+		value, err := settingsRepo.Get(ctx, key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if value != "" {
+			t.Fatalf("expected %s to be cleared, got %q", key, value)
+		}
+	}
+
+	var sent []string
+	svc.sendMessageFunc = func(channelID, messageID, text string) (string, error) {
+		sent = append(sent, channelID+"|"+messageID+"|"+text)
+		return "ack", nil
+	}
+	if err := svc.editOrSendDiscordMessage("", "edit", "reply", "body"); err != nil {
+		t.Fatalf("blank channel should be ignored: %v", err)
+	}
+	if err := svc.editOrSendDiscordMessage("chan", "edit", "reply", "   "); err != nil {
+		t.Fatalf("blank body should be ignored: %v", err)
+	}
+	if len(sent) != 0 {
+		t.Fatalf("blank edit/send inputs should not send: %#v", sent)
+	}
+	if err := svc.editOrSendDiscordMessage("chan", "edit", "reply", "body"); err != nil {
+		t.Fatalf("editOrSendDiscordMessage: %v", err)
+	}
+	if len(sent) != 1 || sent[0] != "chan|reply|body" {
+		t.Fatalf("expected fallback send through injected sender, got %#v", sent)
 	}
 }

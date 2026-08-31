@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -76,66 +77,9 @@ func (h *Handler) HandleWebhookInbound(c echo.Context) error {
 	eventType := extractStringField(payload, "event_type", "type", "action", "event")
 	summary := extractStringField(payload, "summary", "description", "message", "text", "title")
 
-	// Build task title
-	title := buildWebhookTaskTitle(endpoint, eventType, summary)
-
-	// Build task prompt with embedded payload
-	prompt := buildWebhookTaskPrompt(endpoint, eventType, summary, string(body))
-
-	// Get assigned agents
-	agentIDs := []string{}
-	agents, err := h.webhookRepo.GetEndpointAgents(c.Request().Context(), endpoint.ID)
-	if err == nil {
-		for _, a := range agents {
-			agentIDs = append(agentIDs, a.AgentDefinitionID)
-		}
-	}
-
-	// Create exactly one task
-	task := &models.Task{
-		ProjectID:  endpoint.ProjectID,
-		Title:      title,
-		Category:   models.CategoryActive,
-		Priority:   endpoint.DefaultPriority,
-		Status:     models.StatusPending,
-		Prompt:     prompt,
-		CreatedVia: models.TaskOriginWebhook,
-	}
-
-	// Set primary agent (first selected agent)
-	if len(agentIDs) > 0 {
-		task.AgentDefinitionID = &agentIDs[0]
-	}
-
-	if err := h.taskRepo.Create(c.Request().Context(), task); err != nil {
-		if errors.Is(err, repository.ErrDuplicateTask) {
-			baseTitle := task.Title
-			for i := 2; i <= 100; i++ {
-				task.Title = fmt.Sprintf("%s (%d)", baseTitle, i)
-				if retryErr := h.taskRepo.Create(c.Request().Context(), task); retryErr == nil {
-					err = nil
-					break
-				} else if !errors.Is(retryErr, repository.ErrDuplicateTask) {
-					err = retryErr
-					break
-				}
-			}
-			if err != nil {
-				return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to create task"})
-			}
-		} else {
-			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to create task"})
-		}
-	}
-
-	// Persist full agent assignment list for future multi-agent support
-	if len(agentIDs) > 0 {
-		_ = h.webhookRepo.SetTaskAgentAssignments(c.Request().Context(), task.ID, agentIDs)
-	}
-
-	// Submit task to worker for execution
-	if h.workerSvc != nil {
-		h.workerSvc.Submit(*task)
+	task, err := h.createWebhookTaskFromEndpoint(c.Request().Context(), endpoint, eventType, summary, string(body))
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to create task"})
 	}
 
 	return c.JSON(http.StatusAccepted, map[string]interface{}{
@@ -150,6 +94,101 @@ func (h *Handler) HandleWebhookInbound(c echo.Context) error {
 
 // verifyWebhookAuth checks the webhook secret using constant-time comparison.
 // Supports X-Webhook-Secret header (direct comparison) and X-Hub-Signature-256 (HMAC).
+// webhookTaskPriority maps a stored webhook default priority onto the canonical
+// task priority scale (1=Low, 2=Normal, 3=High, 4=Urgent). Legacy endpoints
+// persisted before the priority scale was corrected may still store 0, which
+// on the canonical scale is treated as no badge and sorts last; remap that
+// legacy value to Normal (2) instead of silently producing a badge-less,
+// bottom-sorted task.
+func webhookTaskPriority(defaultPriority int) int {
+	if defaultPriority < 1 || defaultPriority > 4 {
+		return 2
+	}
+	return defaultPriority
+}
+
+func (h *Handler) validateWebhookAgentIDs(ctx context.Context, projectID string, agentIDs []string) error {
+	if len(agentIDs) == 0 {
+		return nil
+	}
+	for _, agentID := range agentIDs {
+		agentID = strings.TrimSpace(agentID)
+		if agentID == "" {
+			return fmt.Errorf("webhook agent ID is empty")
+		}
+		if _, err := h.resolvePrimaryAgentDefinition(ctx, projectID, agentID); err != nil {
+			return fmt.Errorf("webhook agent %q is unavailable: %w", agentID, err)
+		}
+	}
+	return nil
+}
+
+func (h *Handler) createWebhookTaskFromEndpoint(ctx context.Context, endpoint *models.WebhookEndpoint, eventType, summary, rawJSON string) (*models.Task, error) {
+	if h.taskRepo == nil {
+		return nil, fmt.Errorf("task repository not configured")
+	}
+	if h.webhookRepo == nil {
+		return nil, fmt.Errorf("webhook repository not configured")
+	}
+
+	task := &models.Task{
+		ProjectID:  endpoint.ProjectID,
+		Title:      buildWebhookTaskTitle(endpoint, eventType, summary),
+		Category:   models.CategoryActive,
+		Priority:   webhookTaskPriority(endpoint.DefaultPriority),
+		Status:     models.StatusPending,
+		Prompt:     buildWebhookTaskPrompt(endpoint, eventType, summary, rawJSON),
+		CreatedVia: models.TaskOriginWebhook,
+	}
+
+	assignments, err := h.webhookRepo.GetEndpointAgents(ctx, endpoint.ID)
+	if err != nil {
+		return nil, fmt.Errorf("getting webhook agent assignments: %w", err)
+	}
+	agentIDs := make([]string, 0, len(assignments))
+	for _, assignment := range assignments {
+		agentIDs = append(agentIDs, assignment.AgentDefinitionID)
+	}
+	if err := h.validateWebhookAgentIDs(ctx, endpoint.ProjectID, agentIDs); err != nil {
+		return nil, fmt.Errorf("validating webhook agent assignments: %w", err)
+	}
+	if len(agentIDs) > 0 {
+		task.AgentDefinitionID = &agentIDs[0]
+	}
+
+	if err := h.createWebhookTaskWithUniqueTitle(ctx, task); err != nil {
+		return nil, err
+	}
+	if len(agentIDs) > 0 {
+		if err := h.webhookRepo.SetTaskAgentAssignments(ctx, task.ID, agentIDs); err != nil {
+			return nil, fmt.Errorf("saving task agent assignments: %w", err)
+		}
+	}
+	if h.workerSvc != nil {
+		h.workerSvc.Submit(*task)
+	}
+	return task, nil
+}
+
+func (h *Handler) createWebhookTaskWithUniqueTitle(ctx context.Context, task *models.Task) error {
+	if err := h.taskRepo.Create(ctx, task); err != nil {
+		if !errors.Is(err, repository.ErrDuplicateTask) {
+			return err
+		}
+		baseTitle := task.Title
+		for i := 2; i <= 100; i++ {
+			task.Title = fmt.Sprintf("%s (%d)", baseTitle, i)
+			if retryErr := h.taskRepo.Create(ctx, task); retryErr == nil {
+				return nil
+			} else if !errors.Is(retryErr, repository.ErrDuplicateTask) {
+				return retryErr
+			}
+		}
+		return err
+	}
+	return nil
+}
+
 func verifyWebhookAuth(req *http.Request, secret string, body []byte) bool {
 	// Check direct secret header first
 	headerSecret := req.Header.Get("X-Webhook-Secret")
@@ -259,6 +298,66 @@ func buildWebhookTaskPrompt(endpoint *models.WebhookEndpoint, eventType, summary
 
 // --- CRUD handlers ---
 
+type webhookDetailResponse struct {
+	ID                 string   `json:"id"`
+	ProjectID          string   `json:"project_id"`
+	Name               string   `json:"name"`
+	Enabled            bool     `json:"enabled"`
+	PathToken          string   `json:"path_token"`
+	Secret             string   `json:"secret"`
+	SystemInstructions string   `json:"system_instructions"`
+	TitleTemplate      string   `json:"title_template"`
+	PromptTemplate     string   `json:"prompt_template"`
+	DefaultPriority    int      `json:"default_priority"`
+	AgentIDs           []string `json:"agent_ids"`
+}
+
+func (h *Handler) HandleWebhookDetail(c echo.Context) error {
+	if h.webhookRepo == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "webhook repository not configured")
+	}
+
+	projectID := strings.TrimSpace(c.QueryParam("project_id"))
+	if projectID == "" {
+		var err error
+		projectID, err = h.getCurrentProjectID(c)
+		if err != nil || projectID == "" {
+			return echo.NewHTTPError(http.StatusBadRequest, "project not found")
+		}
+	}
+
+	w, err := h.webhookRepo.GetByIDForProject(c.Request().Context(), c.Param("id"), projectID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to load webhook")
+	}
+	if w == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "webhook not found")
+	}
+
+	agentAssignments, err := h.webhookRepo.GetEndpointAgents(c.Request().Context(), w.ID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to load webhook agents")
+	}
+	agentIDs := make([]string, 0, len(agentAssignments))
+	for _, assignment := range agentAssignments {
+		agentIDs = append(agentIDs, assignment.AgentDefinitionID)
+	}
+
+	return c.JSON(http.StatusOK, webhookDetailResponse{
+		ID:                 w.ID,
+		ProjectID:          w.ProjectID,
+		Name:               w.Name,
+		Enabled:            w.Enabled,
+		PathToken:          w.PathToken,
+		Secret:             w.Secret,
+		SystemInstructions: w.SystemInstructions,
+		TitleTemplate:      w.TitleTemplate,
+		PromptTemplate:     w.PromptTemplate,
+		DefaultPriority:    w.DefaultPriority,
+		AgentIDs:           agentIDs,
+	})
+}
+
 func (h *Handler) HandleWebhookCreate(c echo.Context) error {
 	if h.webhookRepo == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "webhook repository not configured")
@@ -285,19 +384,14 @@ func (h *Handler) HandleWebhookCreate(c echo.Context) error {
 		}
 	}
 
-	name := strings.TrimSpace(c.FormValue("name"))
-	if name == "" {
-		name = "New Webhook"
+	form := parseWebhookEndpointForm(c)
+	if err := h.validateWebhookAgentIDs(c.Request().Context(), projectID, form.AgentIDs); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid webhook agent assignment")
 	}
-
-	w := &models.WebhookEndpoint{
-		ProjectID:          projectID,
-		Name:               name,
-		Enabled:            true,
-		SystemInstructions: strings.TrimSpace(c.FormValue("system_instructions")),
-		TitleTemplate:      strings.TrimSpace(c.FormValue("title_template")),
-		PromptTemplate:     strings.TrimSpace(c.FormValue("prompt_template")),
-		DefaultPriority:    parseIntClamped(c.FormValue("default_priority"), 0, 4),
+	w := &models.WebhookEndpoint{ProjectID: projectID}
+	applyWebhookEndpointForm(w, form)
+	if w.Name == "" {
+		w.Name = "New Webhook"
 	}
 
 	if err := h.webhookRepo.Create(c.Request().Context(), w); err != nil {
@@ -305,9 +399,10 @@ func (h *Handler) HandleWebhookCreate(c echo.Context) error {
 	}
 
 	// Save agent assignments
-	agentIDs := parseWebhookAgentIDs(c)
-	if len(agentIDs) > 0 {
-		_ = h.webhookRepo.SetEndpointAgents(c.Request().Context(), w.ID, agentIDs)
+	if len(form.AgentIDs) > 0 {
+		if err := h.webhookRepo.SetEndpointAgents(c.Request().Context(), w.ID, form.AgentIDs); err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, "failed to save webhook agents: "+err.Error())
+		}
 	}
 
 	if isHTMX(c) {
@@ -330,23 +425,20 @@ func (h *Handler) HandleWebhookUpdate(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, "webhook not found")
 	}
 
-	name := strings.TrimSpace(c.FormValue("name"))
-	if name != "" {
-		w.Name = name
+	form := parseWebhookEndpointForm(c)
+	if err := h.validateWebhookAgentIDs(c.Request().Context(), w.ProjectID, form.AgentIDs); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid webhook agent assignment")
 	}
-	w.Enabled = c.FormValue("enabled") == "true" || c.FormValue("enabled") == "1" || c.FormValue("enabled") == "on"
-	w.SystemInstructions = strings.TrimSpace(c.FormValue("system_instructions"))
-	w.TitleTemplate = strings.TrimSpace(c.FormValue("title_template"))
-	w.PromptTemplate = strings.TrimSpace(c.FormValue("prompt_template"))
-	w.DefaultPriority = parseIntClamped(c.FormValue("default_priority"), 0, 4)
+	applyWebhookEndpointForm(w, form)
 
 	if err := h.webhookRepo.Update(c.Request().Context(), w); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to update webhook")
 	}
 
 	// Update agent assignments
-	agentIDs := parseWebhookAgentIDs(c)
-	_ = h.webhookRepo.SetEndpointAgents(c.Request().Context(), w.ID, agentIDs)
+	if err := h.webhookRepo.SetEndpointAgents(c.Request().Context(), w.ID, form.AgentIDs); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to save webhook agents: "+err.Error())
+	}
 
 	if isHTMX(c) {
 		return triggerChannelsRefresh(c)
@@ -361,6 +453,9 @@ func (h *Handler) HandleWebhookDelete(c echo.Context) error {
 
 	id := c.Param("id")
 	if err := h.webhookRepo.Delete(c.Request().Context(), id); err != nil {
+		if errors.Is(err, repository.ErrWebhookNotFound) {
+			return echo.NewHTTPError(http.StatusNotFound, "webhook not found")
+		}
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to delete webhook")
 	}
 
@@ -378,6 +473,9 @@ func (h *Handler) HandleWebhookRotateSecret(c echo.Context) error {
 	id := c.Param("id")
 	newSecret, err := h.webhookRepo.RotateSecret(c.Request().Context(), id)
 	if err != nil {
+		if errors.Is(err, repository.ErrWebhookNotFound) {
+			return echo.NewHTTPError(http.StatusNotFound, "webhook not found")
+		}
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to rotate secret")
 	}
 
@@ -400,47 +498,48 @@ func (h *Handler) HandleWebhookTest(c echo.Context) error {
 
 	// Create a synthetic test task
 	testPayload := `{"event_type":"test","summary":"Test webhook event","source":"openvibely_test"}`
-	var payload map[string]interface{}
-	_ = json.Unmarshal([]byte(testPayload), &payload)
-
-	title := buildWebhookTaskTitle(endpoint, "test", "Test webhook event")
-	prompt := buildWebhookTaskPrompt(endpoint, "test", "Test webhook event", testPayload)
-
-	agentIDs := []string{}
-	agents, _ := h.webhookRepo.GetEndpointAgents(c.Request().Context(), endpoint.ID)
-	for _, a := range agents {
-		agentIDs = append(agentIDs, a.AgentDefinitionID)
-	}
-
-	task := &models.Task{
-		ProjectID:  endpoint.ProjectID,
-		Title:      title,
-		Category:   models.CategoryActive,
-		Priority:   endpoint.DefaultPriority,
-		Status:     models.StatusPending,
-		Prompt:     prompt,
-		CreatedVia: models.TaskOriginWebhook,
-	}
-	if len(agentIDs) > 0 {
-		task.AgentDefinitionID = &agentIDs[0]
-	}
-
-	if err := h.taskRepo.Create(c.Request().Context(), task); err != nil {
+	task, err := h.createWebhookTaskFromEndpoint(c.Request().Context(), endpoint, "test", "Test webhook event", testPayload)
+	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create test task: "+err.Error())
-	}
-
-	if len(agentIDs) > 0 {
-		_ = h.webhookRepo.SetTaskAgentAssignments(c.Request().Context(), task.ID, agentIDs)
-	}
-
-	if h.workerSvc != nil {
-		h.workerSvc.Submit(*task)
 	}
 
 	if isHTMX(c) {
 		return c.HTML(http.StatusOK, `<div class="flex items-center gap-2 text-success"><span>Test task created!</span></div>`)
 	}
 	return c.JSON(http.StatusAccepted, map[string]string{"task_id": task.ID})
+}
+
+type webhookEndpointForm struct {
+	Name               string
+	Enabled            bool
+	SystemInstructions string
+	TitleTemplate      string
+	PromptTemplate     string
+	DefaultPriority    int
+	AgentIDs           []string
+}
+
+func parseWebhookEndpointForm(c echo.Context) webhookEndpointForm {
+	return webhookEndpointForm{
+		Name:               strings.TrimSpace(c.FormValue("name")),
+		Enabled:            c.FormValue("enabled") == "true" || c.FormValue("enabled") == "1" || c.FormValue("enabled") == "on",
+		SystemInstructions: strings.TrimSpace(c.FormValue("system_instructions")),
+		TitleTemplate:      strings.TrimSpace(c.FormValue("title_template")),
+		PromptTemplate:     strings.TrimSpace(c.FormValue("prompt_template")),
+		DefaultPriority:    parseIntClamped(c.FormValue("default_priority"), 1, 4),
+		AgentIDs:           parseWebhookAgentIDs(c),
+	}
+}
+
+func applyWebhookEndpointForm(w *models.WebhookEndpoint, form webhookEndpointForm) {
+	if form.Name != "" {
+		w.Name = form.Name
+	}
+	w.Enabled = form.Enabled
+	w.SystemInstructions = form.SystemInstructions
+	w.TitleTemplate = form.TitleTemplate
+	w.PromptTemplate = form.PromptTemplate
+	w.DefaultPriority = form.DefaultPriority
 }
 
 func parseWebhookAgentIDs(c echo.Context) []string {

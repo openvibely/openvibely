@@ -51,12 +51,11 @@ type TaskSummary struct {
 type Upcoming struct {
 	ProjectID      string
 	GeneratedAt    time.Time
-	RunningTasks   []UpcomingTask          // Currently executing
-	PendingTasks   []UpcomingTask          // Active category, pending status
-	ScheduledTasks []UpcomingTask          // Scheduled with upcoming next_run
-	BacklogHealth  *BacklogHealthSnapshot  // Latest backlog health metrics
-	TaskSummary    *TaskSummary            // High-level task metrics
-	AISummary      string                  // AI-generated 10,000 foot view
+	RunningTasks   []UpcomingTask // Currently executing
+	PendingTasks   []UpcomingTask // Active category, pending status
+	ScheduledTasks []UpcomingTask // Scheduled with upcoming next_run
+	TaskSummary    *TaskSummary   // High-level task metrics
+	AISummary      string         // AI-generated 10,000 foot view
 }
 
 // HistoryExecution represents a completed execution with its task info
@@ -78,11 +77,11 @@ type HistorySummary struct {
 
 // GitCommit represents a single git commit
 type GitCommit struct {
-	Hash        string
-	ShortHash   string
-	Author      string
-	Date        time.Time
-	Subject     string
+	Hash         string
+	ShortHash    string
+	Author       string
+	Date         time.Time
+	Subject      string
 	FilesChanged int
 	Insertions   int
 	Deletions    int
@@ -96,21 +95,24 @@ type FileTypeCount struct {
 
 // ChangeSummary categorizes a commit as feature, bugfix, config, etc.
 type ChangeSummary struct {
-	Features      []string // Commits identified as new features
-	BugFixes      []string // Commits identified as bug fixes
-	ConfigChanges []string // Architecture or configuration changes
+	Features          []string // Example commits identified as new features
+	BugFixes          []string // Example commits identified as bug fixes
+	ConfigChanges     []string // Example architecture or configuration changes
+	FeatureCount      int      // Total feature commits represented by this summary
+	BugFixCount       int      // Total bug-fix commits represented by this summary
+	ConfigChangeCount int      // Total config/refactor commits represented by this summary
 }
 
 // ProjectChanges holds a summary of recent git activity for a project
 type ProjectChanges struct {
-	Available     bool            // Whether git data is available
-	TotalCommits  int
+	Available       bool // Whether git data is available
+	TotalCommits    int
 	TotalInsertions int
 	TotalDeletions  int
 	FilesChanged    int
-	Commits       []GitCommit
-	FileTypes     []FileTypeCount
-	Changes       ChangeSummary
+	Commits         []GitCommit
+	FileTypes       []FileTypeCount
+	Changes         ChangeSummary
 }
 
 // History represents a summary of recently completed work
@@ -121,6 +123,6 @@ type History struct {
 	Since          time.Time
 	Summary        HistorySummary
 	Executions     []HistoryExecution
-	ProjectChanges   *ProjectChanges
-	AISummary        string           // AI-generated reflection summary
+	ProjectChanges *ProjectChanges
+	AISummary      string // AI-generated reflection summary
 }

@@ -3,8 +3,11 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/openvibely/openvibely/internal/models"
@@ -23,7 +26,7 @@ func NewLifecycleRepo(db *sql.DB) *LifecycleRepo {
 
 const hookCols = `id, agent_id, when_slot, skill_key, prompt_override, output_contract,
                   blocking, enabled, permissions_json, run_policy_json, schedule_json,
-                  created_at, updated_at`
+                  payload_json, created_at, updated_at`
 
 // prefixedHookCols returns hookCols with each column prefixed by the supplied
 // table alias. Used by HooksForWhen so the JOIN against agents does not need
@@ -32,7 +35,7 @@ func prefixedHookCols(alias string) string {
 	cols := []string{
 		"id", "agent_id", "when_slot", "skill_key", "prompt_override", "output_contract",
 		"blocking", "enabled", "permissions_json", "run_policy_json", "schedule_json",
-		"created_at", "updated_at",
+		"payload_json", "created_at", "updated_at",
 	}
 	out := ""
 	for i, c := range cols {
@@ -46,13 +49,16 @@ func prefixedHookCols(alias string) string {
 
 func scanHook(row interface{ Scan(...any) error }) (*models.AgentLifecycleHook, error) {
 	var h models.AgentLifecycleHook
-	var scheduleJSON sql.NullString
+	var scheduleJSON, payloadJSON sql.NullString
 	var blocking, enabled int
 	var when, contract string
 	if err := row.Scan(&h.ID, &h.AgentID, &when, &h.SkillKey, &h.PromptOverride, &contract,
 		&blocking, &enabled, &h.PermissionsJSON, &h.RunPolicyJSON, &scheduleJSON,
-		&h.CreatedAt, &h.UpdatedAt); err != nil {
+		&payloadJSON, &h.CreatedAt, &h.UpdatedAt); err != nil {
 		return nil, err
+	}
+	if payloadJSON.Valid {
+		h.PayloadJSON = payloadJSON.String
 	}
 	h.When = models.LifecycleWhen(when)
 	h.OutputContract = models.LifecycleOutputContract(contract)
@@ -82,18 +88,22 @@ func (r *LifecycleRepo) CreateHook(ctx context.Context, h *models.AgentLifecycle
 	if runPolicy == "" {
 		runPolicy = "{}"
 	}
+	payload := h.PayloadJSON
+	if payload == "" {
+		payload = "{}"
+	}
 	var schedule any
 	if h.ScheduleJSON != "" {
 		schedule = h.ScheduleJSON
 	}
-	err := r.db.QueryRowContext(ctx, `
+	err := queryRowBoundSQLite(ctx, r.db, `
         INSERT INTO agent_lifecycle_hooks
             (id, agent_id, when_slot, skill_key, prompt_override, output_contract,
-             blocking, enabled, permissions_json, run_policy_json, schedule_json)
-        VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             blocking, enabled, permissions_json, run_policy_json, schedule_json, payload_json)
+        VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         RETURNING id, created_at, updated_at`,
 		h.AgentID, string(h.When), h.SkillKey, h.PromptOverride, string(h.OutputContract),
-		blocking, enabled, permissions, runPolicy, schedule,
+		blocking, enabled, permissions, runPolicy, schedule, payload,
 	).Scan(&h.ID, &h.CreatedAt, &h.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("creating lifecycle hook: %w", err)
@@ -119,18 +129,22 @@ func (r *LifecycleRepo) UpdateHook(ctx context.Context, h *models.AgentLifecycle
 	if runPolicy == "" {
 		runPolicy = "{}"
 	}
+	payload := h.PayloadJSON
+	if payload == "" {
+		payload = "{}"
+	}
 	var schedule any
 	if h.ScheduleJSON != "" {
 		schedule = h.ScheduleJSON
 	}
-	_, err := r.db.ExecContext(ctx, `
+	_, err := execBoundSQLite(ctx, r.db, `
         UPDATE agent_lifecycle_hooks
         SET when_slot = ?, skill_key = ?, prompt_override = ?, output_contract = ?,
             blocking = ?, enabled = ?, permissions_json = ?, run_policy_json = ?,
-            schedule_json = ?, updated_at = datetime('now')
+            schedule_json = ?, payload_json = ?, updated_at = datetime('now')
         WHERE id = ?`,
 		string(h.When), h.SkillKey, h.PromptOverride, string(h.OutputContract),
-		blocking, enabled, permissions, runPolicy, schedule, h.ID,
+		blocking, enabled, permissions, runPolicy, schedule, payload, h.ID,
 	)
 	if err != nil {
 		return fmt.Errorf("updating lifecycle hook: %w", err)
@@ -140,7 +154,7 @@ func (r *LifecycleRepo) UpdateHook(ctx context.Context, h *models.AgentLifecycle
 
 // DeleteHook removes a lifecycle hook configuration.
 func (r *LifecycleRepo) DeleteHook(ctx context.Context, id string) error {
-	if _, err := r.db.ExecContext(ctx, `DELETE FROM agent_lifecycle_hooks WHERE id = ?`, id); err != nil {
+	if _, err := execBoundSQLite(ctx, r.db, `DELETE FROM agent_lifecycle_hooks WHERE id = ?`, id); err != nil {
 		return fmt.Errorf("deleting lifecycle hook: %w", err)
 	}
 	return nil
@@ -210,6 +224,124 @@ const execCols = `id, task_id, task_run_id, agent_id, when_slot, lifecycle_hook_
                   next_retry_at, idempotency_key,
                   started_at, completed_at`
 
+const lifecycleExecutionListCols = `id, agent_id, when_slot, skill_key, output_contract, status,
+					 output_json, error, started_at, completed_at`
+
+const listExecutionsForTaskSQL = `
+		        SELECT ` + lifecycleExecutionListCols + `
+		        FROM lifecycle_executions
+		        WHERE task_id = ?
+		        ORDER BY started_at DESC, id DESC`
+
+const (
+	// LifecycleExecutionPageDefaultLimit is the number of rows fetched when the
+	// lifecycle tab does not provide a page size.
+	LifecycleExecutionPageDefaultLimit = 20
+	// LifecycleExecutionPageMaxLimit prevents a caller from turning the compact
+	// lifecycle endpoint back into an unbounded detail payload.
+	LifecycleExecutionPageMaxLimit = 50
+
+	LifecycleExecutionPageOlder = "older"
+	LifecycleExecutionPageNewer = "newer"
+)
+
+// ErrLifecycleExecutionCursor reports a malformed or direction/task-mismatched
+// lifecycle page cursor.
+var ErrLifecycleExecutionCursor = errors.New("invalid lifecycle execution cursor")
+
+type lifecycleExecutionCursor struct {
+	Kind      string `json:"kind"`
+	Direction string `json:"direction"`
+	ID        string `json:"id"`
+}
+
+const listExecutionsForTaskPageSQL = `
+		SELECT ` + lifecycleExecutionListCols + `
+		FROM lifecycle_executions
+		WHERE task_id = ?
+		ORDER BY started_at DESC, id DESC
+		LIMIT ?`
+
+// The tuple comparison uses the stored timestamp from the cursor row rather
+// than formatting a time.Time back to text. This preserves sub-second values
+// and lets the existing task/start index satisfy both the keyset boundary and
+// authoritative display ordering.
+const listExecutionsForTaskOlderPageSQL = `
+		SELECT ` + lifecycleExecutionListCols + `
+		FROM lifecycle_executions
+		WHERE task_id = ?
+		  AND (started_at, id) < (
+				SELECT started_at, id
+				FROM lifecycle_executions
+				WHERE task_id = ? AND id = ?
+		  )
+		ORDER BY started_at DESC, id DESC
+		LIMIT ?`
+
+const listExecutionsForTaskNewerPageSQL = `
+		SELECT ` + lifecycleExecutionListCols + `
+		FROM lifecycle_executions
+		WHERE task_id = ?
+		  AND (started_at, id) > (
+				SELECT started_at, id
+				FROM lifecycle_executions
+				WHERE task_id = ? AND id = ?
+			)
+		ORDER BY started_at ASC, id ASC
+		LIMIT ?`
+
+const getLifecycleExecutionForTaskProjectSQL = `
+		SELECT le.id, le.agent_id, le.when_slot, le.skill_key, le.output_contract, le.status,
+		       le.output_json, le.error, le.started_at, le.completed_at
+		FROM lifecycle_executions le
+		JOIN tasks t ON t.id = le.task_id
+		WHERE le.id = ? AND le.task_id = ? AND t.project_id = ?`
+
+func lifecycleExecutionPageLimit(limit int) int {
+	if limit <= 0 {
+		return LifecycleExecutionPageDefaultLimit
+	}
+	if limit > LifecycleExecutionPageMaxLimit {
+		return LifecycleExecutionPageMaxLimit
+	}
+	return limit
+}
+
+func lifecycleExecutionCursorKind(taskID, direction string) string {
+	return "lifecycle-executions:" + direction + ":" + taskID
+}
+
+func encodeLifecycleExecutionCursor(taskID, direction, id string) string {
+	value, _ := json.Marshal(lifecycleExecutionCursor{
+		Kind:      lifecycleExecutionCursorKind(taskID, direction),
+		Direction: direction,
+		ID:        id,
+	})
+	return base64.RawURLEncoding.EncodeToString(value)
+}
+
+func decodeLifecycleExecutionCursor(taskID, direction, value string, allowRawID bool) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", ErrLifecycleExecutionCursor
+	}
+	decoded, err := base64.RawURLEncoding.DecodeString(value)
+	if err == nil {
+		var cursor lifecycleExecutionCursor
+		if json.Unmarshal(decoded, &cursor) == nil {
+			if cursor.Kind == lifecycleExecutionCursorKind(taskID, direction) &&
+				cursor.Direction == direction && strings.TrimSpace(cursor.ID) != "" {
+				return cursor.ID, nil
+			}
+			return "", ErrLifecycleExecutionCursor
+		}
+	}
+	if allowRawID {
+		return value, nil
+	}
+	return "", ErrLifecycleExecutionCursor
+}
+
 func scanExecution(row interface{ Scan(...any) error }) (*models.LifecycleExecution, error) {
 	var e models.LifecycleExecution
 	var agentID, hookID, parent sql.NullString
@@ -243,6 +375,23 @@ func scanExecution(row interface{ Scan(...any) error }) (*models.LifecycleExecut
 	return &e, nil
 }
 
+func scanExecutionList(row interface{ Scan(...any) error }) (*models.LifecycleExecution, error) {
+	var e models.LifecycleExecution
+	var agentID sql.NullString
+	var when, contract, status string
+	if err := row.Scan(&e.ID, &agentID, &when, &e.SkillKey, &contract, &status,
+		&e.OutputJSON, &e.Error, &e.StartedAt, &e.CompletedAt); err != nil {
+		return nil, err
+	}
+	if agentID.Valid {
+		e.AgentID = agentID.String
+	}
+	e.When = models.LifecycleWhen(when)
+	e.OutputContract = models.LifecycleOutputContract(contract)
+	e.Status = models.LifecycleExecutionStatus(status)
+	return &e, nil
+}
+
 // CreateExecution records the start of a lifecycle hook invocation.
 func (r *LifecycleRepo) CreateExecution(ctx context.Context, e *models.LifecycleExecution) error {
 	var hookID, parent any
@@ -263,7 +412,7 @@ func (r *LifecycleRepo) CreateExecution(ctx context.Context, e *models.Lifecycle
 	if output == "" {
 		output = "{}"
 	}
-	err := r.db.QueryRowContext(ctx, `
+	err := queryRowBoundSQLite(ctx, r.db, `
         INSERT INTO lifecycle_executions
             (id, task_id, task_run_id, agent_id, when_slot, lifecycle_hook_id,
              parent_execution_id, skill_key, output_contract, status,
@@ -364,7 +513,7 @@ func (r *LifecycleRepo) UpdateExecution(ctx context.Context, e *models.Lifecycle
 	if output == "" {
 		output = "{}"
 	}
-	_, err := r.db.ExecContext(ctx, `
+	_, err := execBoundSQLite(ctx, r.db, `
         UPDATE lifecycle_executions
         SET status = ?, output_json = ?, error = ?, attempt_count = ?,
             next_retry_at = ?, completed_at = ?
@@ -378,28 +527,100 @@ func (r *LifecycleRepo) UpdateExecution(ctx context.Context, e *models.Lifecycle
 	return nil
 }
 
-// ListExecutionsForTask returns lifecycle executions attached to a task,
-// ordered newest-first (DESC) so the UI shows the most recent activity without
-// requiring the user to scroll to the bottom.
+// ListExecutionsForTask returns compact lifecycle executions attached to a task,
+// ordered newest-first with a deterministic ID tie-breaker so the UI shows the
+// most recent activity without scrolling. It intentionally omits raw input and
+// retry/hook metadata that are not part of the prompt-safe list response.
 func (r *LifecycleRepo) ListExecutionsForTask(ctx context.Context, taskID string) ([]models.LifecycleExecution, error) {
-	rows, err := r.db.QueryContext(ctx, `
-        SELECT `+execCols+`
-        FROM lifecycle_executions
-        WHERE task_id = ?
-        ORDER BY started_at DESC`, taskID)
+	rows, err := r.db.QueryContext(ctx, listExecutionsForTaskSQL, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("listing executions for task %s: %w", taskID, err)
 	}
 	defer rows.Close()
 	var out []models.LifecycleExecution
 	for rows.Next() {
-		e, err := scanExecution(rows)
+		e, err := scanExecutionList(rows)
 		if err != nil {
 			return nil, err
 		}
 		out = append(out, *e)
 	}
 	return out, rows.Err()
+}
+
+// GetExecutionForTaskProject returns one compact lifecycle execution only when
+// the execution belongs to taskID and that task belongs to projectID. The
+// boolean distinguishes an unknown or foreign row from a database failure.
+func (r *LifecycleRepo) GetExecutionForTaskProject(ctx context.Context, taskID, executionID, projectID string) (*models.LifecycleExecution, bool, error) {
+	e, err := scanExecutionList(r.db.QueryRowContext(ctx, getLifecycleExecutionForTaskProjectSQL, executionID, taskID, projectID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("getting lifecycle execution %s for task %s: %w", executionID, taskID, err)
+	}
+	return e, true, nil
+}
+
+// ListExecutionsForTaskPage returns the first or next older compact page for a
+// task. Items retain the lifecycle tab's newest-first order. The cursor is
+// opaque and can only be used for this task's older direction.
+func (r *LifecycleRepo) ListExecutionsForTaskPage(ctx context.Context, taskID string, limit int, cursorValue string) (models.LifecycleExecutionPage, error) {
+	return r.listExecutionsForTaskPage(ctx, taskID, limit, cursorValue, LifecycleExecutionPageOlder)
+}
+
+// ListExecutionsForTaskNewerPage returns executions newer than afterValue. The
+// after value may be the ID of the newest visible row (which the browser already
+// has) or a newer-direction continuation cursor. Results are oldest-first so a
+// caller can merge inserts before reapplying the authoritative newest-first
+// lifecycle display order.
+func (r *LifecycleRepo) ListExecutionsForTaskNewerPage(ctx context.Context, taskID string, limit int, afterValue string) (models.LifecycleExecutionPage, error) {
+	return r.listExecutionsForTaskPage(ctx, taskID, limit, afterValue, LifecycleExecutionPageNewer)
+}
+
+func (r *LifecycleRepo) listExecutionsForTaskPage(ctx context.Context, taskID string, limit int, cursorValue, direction string) (models.LifecycleExecutionPage, error) {
+	limit = lifecycleExecutionPageLimit(limit)
+	allowRawID := direction == LifecycleExecutionPageNewer
+	cursorID, err := decodeLifecycleExecutionCursor(taskID, direction, cursorValue, allowRawID)
+	if cursorValue != "" && err != nil {
+		return models.LifecycleExecutionPage{}, err
+	}
+
+	query := listExecutionsForTaskPageSQL
+	args := []any{taskID}
+	if cursorID != "" {
+		if direction == LifecycleExecutionPageNewer {
+			query = listExecutionsForTaskNewerPageSQL
+		} else {
+			query = listExecutionsForTaskOlderPageSQL
+		}
+		args = append(args, taskID, cursorID)
+	}
+	args = append(args, limit+1)
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return models.LifecycleExecutionPage{}, fmt.Errorf("listing %s lifecycle executions for task %s: %w", direction, taskID, err)
+	}
+	defer rows.Close()
+
+	page := models.LifecycleExecutionPage{Items: make([]models.LifecycleExecution, 0, limit)}
+	for rows.Next() {
+		e, err := scanExecutionList(rows)
+		if err != nil {
+			return models.LifecycleExecutionPage{}, err
+		}
+		page.Items = append(page.Items, *e)
+	}
+	if err := rows.Err(); err != nil {
+		return models.LifecycleExecutionPage{}, err
+	}
+	if len(page.Items) > limit {
+		page.HasMore = true
+		page.Items = page.Items[:limit]
+		page.NextCursor = encodeLifecycleExecutionCursor(taskID, direction, page.Items[len(page.Items)-1].ID)
+	}
+	return page, nil
 }
 
 // AppendExecutionEvent persists one trace event for a lifecycle execution.
@@ -423,7 +644,7 @@ func (r *LifecycleRepo) AppendExecutionEvent(ctx context.Context, event *models.
 	r.eventSeqMu.Lock()
 	defer r.eventSeqMu.Unlock()
 
-	err := r.db.QueryRowContext(ctx, `
+	err := queryRowBoundSQLite(ctx, r.db, `
 		INSERT INTO lifecycle_execution_events
 		    (lifecycle_execution_id, seq, event_type, payload_json)
 		VALUES (?, COALESCE((SELECT MAX(seq) + 1 FROM lifecycle_execution_events WHERE lifecycle_execution_id = ?), 1), ?, ?)
@@ -440,14 +661,54 @@ func (r *LifecycleRepo) AppendExecutionEvent(ctx context.Context, event *models.
 // ListExecutionEvents returns trace events for a lifecycle execution in emitted order.
 func (r *LifecycleRepo) ListExecutionEvents(ctx context.Context, lifecycleExecutionID string) ([]models.LifecycleExecutionEvent, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, lifecycle_execution_id, seq, event_type, payload_json, created_at
-		FROM lifecycle_execution_events
-		WHERE lifecycle_execution_id = ?
-		ORDER BY seq ASC`, lifecycleExecutionID)
+			SELECT id, lifecycle_execution_id, seq, event_type, payload_json, created_at
+			FROM lifecycle_execution_events
+			WHERE lifecycle_execution_id = ?
+			ORDER BY seq ASC`, lifecycleExecutionID)
 	if err != nil {
 		return nil, fmt.Errorf("listing lifecycle execution events: %w", err)
 	}
 	defer rows.Close()
+	return scanLifecycleExecutionEvents(rows)
+}
+
+// ListExecutionEventsForProject returns trace events only when the lifecycle
+// execution belongs to a task in projectID. The boolean reports whether the
+// execution exists within that project, so callers can distinguish an empty
+// trace from an unknown or foreign execution ID without leaking which case it is.
+func (r *LifecycleRepo) ListExecutionEventsForProject(ctx context.Context, lifecycleExecutionID, projectID string) ([]models.LifecycleExecutionEvent, bool, error) {
+	var exists int
+	if err := r.db.QueryRowContext(ctx, `
+			SELECT EXISTS(
+				SELECT 1
+				FROM lifecycle_executions le
+				JOIN tasks t ON t.id = le.task_id
+				WHERE le.id = ? AND t.project_id = ?
+			)`, lifecycleExecutionID, projectID).Scan(&exists); err != nil {
+		return nil, false, fmt.Errorf("checking lifecycle execution project ownership: %w", err)
+	}
+	if exists == 0 {
+		return nil, false, nil
+	}
+	rows, err := r.db.QueryContext(ctx, `
+			SELECT ev.id, ev.lifecycle_execution_id, ev.seq, ev.event_type, ev.payload_json, ev.created_at
+			FROM lifecycle_execution_events ev
+			JOIN lifecycle_executions le ON le.id = ev.lifecycle_execution_id
+			JOIN tasks t ON t.id = le.task_id
+			WHERE ev.lifecycle_execution_id = ? AND t.project_id = ?
+			ORDER BY ev.seq ASC`, lifecycleExecutionID, projectID)
+	if err != nil {
+		return nil, false, fmt.Errorf("listing lifecycle execution events for project: %w", err)
+	}
+	defer rows.Close()
+	events, err := scanLifecycleExecutionEvents(rows)
+	if err != nil {
+		return nil, false, err
+	}
+	return events, true, nil
+}
+
+func scanLifecycleExecutionEvents(rows *sql.Rows) ([]models.LifecycleExecutionEvent, error) {
 	var out []models.LifecycleExecutionEvent
 	for rows.Next() {
 		var e models.LifecycleExecutionEvent
@@ -489,7 +750,7 @@ func (r *LifecycleRepo) PatchExecutionOutputSkills(ctx context.Context, execID s
 	if err != nil {
 		return fmt.Errorf("patching execution output_json: %w", err)
 	}
-	_, err = r.db.ExecContext(ctx,
+	_, err = execBoundSQLite(ctx, r.db,
 		`UPDATE lifecycle_executions SET output_json = ? WHERE id = ?`,
 		string(patched), execID,
 	)

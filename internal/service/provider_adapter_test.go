@@ -95,7 +95,35 @@ func TestLLMService_CallAgentDirectNoTools_PropagatesDisableToolsFlag(t *testing
 	}
 }
 
-func TestAnthropicProviderAdapter_DirectDisableToolsRejectsCLITransport(t *testing.T) {
+func TestLLMService_CallAgentRawDirectNoToolsIsolatesUtilityRequest(t *testing.T) {
+	svc := &LLMService{}
+	capture := &captureProviderAdapter{}
+	svc.providerAdapters = map[models.LLMProvider]ProviderAdapter{
+		models.ProviderTest: capture,
+	}
+	svc.routing = newAgentRoutingStrategy(svc)
+
+	runtimeTools := &llmcontracts.RuntimeTools{
+		Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "write_file"}},
+	}
+	ctx := llmcontracts.WithRuntimeTools(context.Background(), runtimeTools)
+	agent := models.LLMConfig{Provider: models.ProviderTest, Model: "test-model"}
+	if _, _, err := svc.CallAgentRawDirectNoTools(ctx, "commit summary", nil, agent, ""); err != nil {
+		t.Fatalf("CallAgentRawDirectNoTools error: %v", err)
+	}
+
+	if !capture.lastReq.DisableTools || !capture.lastReq.RawDirectPrompt {
+		t.Fatalf("expected raw no-tools request, got disable=%v raw=%v", capture.lastReq.DisableTools, capture.lastReq.RawDirectPrompt)
+	}
+	if tools := llmcontracts.RuntimeToolsFromContext(capture.lastReq.Ctx); tools != nil {
+		t.Fatalf("expected inherited runtime tools to be removed, got %#v", tools)
+	}
+	if capture.lastReq.AgentDefinition != nil || capture.lastReq.ProjectInstructions != "" || capture.lastReq.ChatSystemContext != "" {
+		t.Fatalf("expected no interactive agent framing, got %#v", capture.lastReq)
+	}
+}
+
+func TestAnthropicProviderAdapter_RejectsRetiredCLITransport(t *testing.T) {
 	adapter := &anthropicProviderAdapter{svc: &LLMService{}}
 	_, err := adapter.Call(llmcontracts.AgentRequest{
 		Ctx:          context.Background(),
@@ -109,14 +137,14 @@ func TestAnthropicProviderAdapter_DirectDisableToolsRejectsCLITransport(t *testi
 		},
 	})
 	if err == nil {
-		t.Fatal("expected error when DisableTools=true with Anthropic CLI transport")
+		t.Fatal("expected error for retired Anthropic CLI transport")
 	}
-	if !strings.Contains(err.Error(), "not supported for Anthropic CLI transport") {
+	if !strings.Contains(err.Error(), "no longer supported") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
-func TestOpenAIProviderAdapter_DirectDisableToolsRejectsCLITransport(t *testing.T) {
+func TestOpenAIProviderAdapter_RejectsRetiredCLITransport(t *testing.T) {
 	adapter := &openAIProviderAdapter{svc: &LLMService{}}
 	_, err := adapter.Call(llmcontracts.AgentRequest{
 		Ctx:          context.Background(),
@@ -130,9 +158,9 @@ func TestOpenAIProviderAdapter_DirectDisableToolsRejectsCLITransport(t *testing.
 		},
 	})
 	if err == nil {
-		t.Fatal("expected error when DisableTools=true with OpenAI CLI transport")
+		t.Fatal("expected error for retired OpenAI CLI transport")
 	}
-	if !strings.Contains(err.Error(), "not supported for OpenAI CLI transport") {
+	if !strings.Contains(err.Error(), "no longer supported") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -165,16 +193,14 @@ func TestResolveAgentRuntime_PerAgentPluginIsolation(t *testing.T) {
 	resolvePluginRuntimeBundleFn = func(ctx context.Context, pluginIDs []string) (*agentplugins.RuntimeBundle, error) {
 		if len(pluginIDs) == 1 && pluginIDs[0] == "plugin-a@alpha-market" {
 			return &agentplugins.RuntimeBundle{
-				PluginIDs:  []string{"plugin-a@alpha-market"},
-				PluginDirs: []string{"/plugins/a"},
-				Skills:     []models.SkillConfig{{Name: "skill-a", Content: "a"}},
+				PluginIDs: []string{"plugin-a@alpha-market"},
+				Skills:    []models.SkillConfig{{Name: "skill-a", Content: "a"}},
 			}, nil
 		}
 		if len(pluginIDs) == 1 && pluginIDs[0] == "plugin-b@beta-market" {
 			return &agentplugins.RuntimeBundle{
-				PluginIDs:  []string{"plugin-b@beta-market"},
-				PluginDirs: []string{"/plugins/b"},
-				Skills:     []models.SkillConfig{{Name: "skill-b", Content: "b"}},
+				PluginIDs: []string{"plugin-b@beta-market"},
+				Skills:    []models.SkillConfig{{Name: "skill-b", Content: "b"}},
 			}, nil
 		}
 		return &agentplugins.RuntimeBundle{}, nil
@@ -183,20 +209,14 @@ func TestResolveAgentRuntime_PerAgentPluginIsolation(t *testing.T) {
 	agentA := &models.Agent{Name: "agent-a", Plugins: []string{"plugin-a@alpha-market"}}
 	agentB := &models.Agent{Name: "agent-b", Plugins: []string{"plugin-b@beta-market"}}
 
-	_, mergedA, dirsA := resolveAgentRuntime(context.Background(), agentA)
-	_, mergedB, dirsB := resolveAgentRuntime(context.Background(), agentB)
+	_, mergedA := resolveAgentRuntime(context.Background(), agentA)
+	_, mergedB := resolveAgentRuntime(context.Background(), agentB)
 
 	if len(mergedA.Skills) == 0 || !strings.EqualFold(strings.TrimSpace(mergedA.Skills[0].Name), "skill-a") {
 		t.Fatalf("expected agent A to include only plugin A skill, got %+v", mergedA.Skills)
 	}
 	if len(mergedB.Skills) == 0 || !strings.EqualFold(strings.TrimSpace(mergedB.Skills[0].Name), "skill-b") {
 		t.Fatalf("expected agent B to include only plugin B skill, got %+v", mergedB.Skills)
-	}
-	if len(dirsA) != 1 || dirsA[0] != "/plugins/a" {
-		t.Fatalf("expected agent A runtime dirs to include plugin A only, got %v", dirsA)
-	}
-	if len(dirsB) != 1 || dirsB[0] != "/plugins/b" {
-		t.Fatalf("expected agent B runtime dirs to include plugin B only, got %v", dirsB)
 	}
 }
 
@@ -210,20 +230,16 @@ func TestResolveAgentRuntime_NilAgentDefinition(t *testing.T) {
 	resolvePluginRuntimeBundleFn = func(ctx context.Context, pluginIDs []string) (*agentplugins.RuntimeBundle, error) {
 		called = true
 		return &agentplugins.RuntimeBundle{
-			PluginDirs: []string{"/should/not/appear"},
-			Skills:     []models.SkillConfig{{Name: "leaked-skill", Content: "leaked"}},
+			Skills: []models.SkillConfig{{Name: "leaked-skill", Content: "leaked"}},
 		}, nil
 	}
 
-	raw, merged, dirs := resolveAgentRuntime(context.Background(), nil)
+	raw, merged := resolveAgentRuntime(context.Background(), nil)
 	if raw != nil {
 		t.Fatalf("expected nil raw agent, got %+v", raw)
 	}
 	if merged != nil {
 		t.Fatalf("expected nil merged agent, got %+v", merged)
-	}
-	if len(dirs) != 0 {
-		t.Fatalf("expected zero plugin dirs, got %v", dirs)
 	}
 	if called {
 		t.Fatal("plugin resolver should not be called for nil agent definition")
@@ -240,8 +256,7 @@ func TestResolveAgentRuntime_AgentWithNoPlugins(t *testing.T) {
 	resolvePluginRuntimeBundleFn = func(ctx context.Context, pluginIDs []string) (*agentplugins.RuntimeBundle, error) {
 		called = true
 		return &agentplugins.RuntimeBundle{
-			PluginDirs: []string{"/should/not/appear"},
-			Skills:     []models.SkillConfig{{Name: "leaked-skill", Content: "leaked"}},
+			Skills: []models.SkillConfig{{Name: "leaked-skill", Content: "leaked"}},
 		}, nil
 	}
 
@@ -251,12 +266,9 @@ func TestResolveAgentRuntime_AgentWithNoPlugins(t *testing.T) {
 		Plugins:      nil,
 	}
 
-	raw, merged, dirs := resolveAgentRuntime(context.Background(), agentDef)
+	raw, merged := resolveAgentRuntime(context.Background(), agentDef)
 	if raw == nil || merged == nil {
 		t.Fatal("expected non-nil raw/merged agent")
-	}
-	if len(dirs) != 0 {
-		t.Fatalf("expected zero plugin dirs, got %v", dirs)
 	}
 	if len(merged.Skills) != 0 {
 		t.Fatalf("expected zero skills, got %+v", merged.Skills)
@@ -271,10 +283,7 @@ func TestResolveAgentRuntime_AgentWithNoPlugins(t *testing.T) {
 	// Also test with explicit empty slice (not nil)
 	agentDef.Plugins = []string{}
 	called = false
-	_, merged2, dirs2 := resolveAgentRuntime(context.Background(), agentDef)
-	if len(dirs2) != 0 {
-		t.Fatalf("expected zero plugin dirs for empty slice, got %v", dirs2)
-	}
+	_, merged2 := resolveAgentRuntime(context.Background(), agentDef)
 	if len(merged2.Skills) != 0 {
 		t.Fatalf("expected zero skills for empty slice, got %+v", merged2.Skills)
 	}
@@ -294,7 +303,6 @@ func TestResolveAgentRuntime_NoCrossAgentLeakage(t *testing.T) {
 		if len(pluginIDs) == 1 && pluginIDs[0] == "plugin-x@market" {
 			return &agentplugins.RuntimeBundle{
 				PluginIDs:  []string{"plugin-x@market"},
-				PluginDirs: []string{"/plugins/x"},
 				Skills:     []models.SkillConfig{{Name: "skill-x", Content: "x-content"}},
 				MCPServers: []models.MCPServerConfig{{Name: "mcp-x", Type: "stdio", Command: []string{"echo"}}},
 			}, nil
@@ -306,9 +314,9 @@ func TestResolveAgentRuntime_NoCrossAgentLeakage(t *testing.T) {
 	agentNoPlugins := &models.Agent{Name: "agent-no-plugins", Plugins: nil}
 
 	// Resolve agent with plugins first
-	_, mergedWith, dirsWith := resolveAgentRuntime(context.Background(), agentWithPlugins)
+	_, mergedWith := resolveAgentRuntime(context.Background(), agentWithPlugins)
 	// Then resolve agent without plugins
-	_, mergedWithout, dirsWithout := resolveAgentRuntime(context.Background(), agentNoPlugins)
+	_, mergedWithout := resolveAgentRuntime(context.Background(), agentNoPlugins)
 
 	// Verify agent WITH plugins has them
 	if len(mergedWith.Skills) != 1 || mergedWith.Skills[0].Name != "skill-x" {
@@ -317,19 +325,12 @@ func TestResolveAgentRuntime_NoCrossAgentLeakage(t *testing.T) {
 	if len(mergedWith.MCPServers) != 1 || mergedWith.MCPServers[0].Name != "mcp-x" {
 		t.Fatalf("agent with plugins should have mcp-x, got %+v", mergedWith.MCPServers)
 	}
-	if len(dirsWith) != 1 || dirsWith[0] != "/plugins/x" {
-		t.Fatalf("agent with plugins should have /plugins/x dir, got %v", dirsWith)
-	}
-
 	// Verify agent WITHOUT plugins has none
 	if len(mergedWithout.Skills) != 0 {
 		t.Fatalf("agent without plugins should have zero skills, got %+v", mergedWithout.Skills)
 	}
 	if len(mergedWithout.MCPServers) != 0 {
 		t.Fatalf("agent without plugins should have zero MCP servers, got %+v", mergedWithout.MCPServers)
-	}
-	if len(dirsWithout) != 0 {
-		t.Fatalf("agent without plugins should have zero dirs, got %v", dirsWithout)
 	}
 }
 
@@ -343,8 +344,7 @@ func TestAdapterCall_NoAgentDefinition_NoPluginContext(t *testing.T) {
 	resolvePluginRuntimeBundleFn = func(ctx context.Context, pluginIDs []string) (*agentplugins.RuntimeBundle, error) {
 		called = true
 		return &agentplugins.RuntimeBundle{
-			PluginDirs: []string{"/leaked"},
-			Skills:     []models.SkillConfig{{Name: "leaked", Content: "should not appear"}},
+			Skills: []models.SkillConfig{{Name: "leaked", Content: "should not appear"}},
 		}, nil
 	}
 
@@ -380,10 +380,9 @@ type pluginResolvingAdapter struct {
 }
 
 func (a *pluginResolvingAdapter) Call(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
-	_, runtimeAgentDef, pluginDirs := resolveAgentRuntime(req.Ctx, req.AgentDefinition)
+	_, runtimeAgentDef := resolveAgentRuntime(req.Ctx, req.AgentDefinition)
 	if runtimeAgentDef != nil {
 		req.AgentDefinition = runtimeAgentDef
-		req.PluginDirs = pluginDirs
 	}
 	return a.inner.Call(req)
 }
@@ -400,7 +399,6 @@ func TestAdapterCall_AgentWithPlugins_OnlyThosePlugins(t *testing.T) {
 		resolvedIDs = pluginIDs
 		return &agentplugins.RuntimeBundle{
 			PluginIDs:  pluginIDs,
-			PluginDirs: []string{"/plugins/target"},
 			Skills:     []models.SkillConfig{{Name: "target-skill", Content: "target content"}},
 			MCPServers: []models.MCPServerConfig{{Name: "target-mcp", Type: "stdio", Command: []string{"echo"}}},
 		}, nil
@@ -442,9 +440,6 @@ func TestAdapterCall_AgentWithPlugins_OnlyThosePlugins(t *testing.T) {
 	if len(capture.lastReq.AgentDefinition.MCPServers) != 1 || capture.lastReq.AgentDefinition.MCPServers[0].Name != "target-mcp" {
 		t.Fatalf("expected merged MCP servers to contain target-mcp, got %+v", capture.lastReq.AgentDefinition.MCPServers)
 	}
-	if len(capture.lastReq.PluginDirs) != 1 || capture.lastReq.PluginDirs[0] != "/plugins/target" {
-		t.Fatalf("expected PluginDirs to contain /plugins/target, got %v", capture.lastReq.PluginDirs)
-	}
 }
 
 // TestAdapterCall_MultipleAgents_NoPluginCrossLeak exercises the full adapter
@@ -458,7 +453,6 @@ func TestAdapterCall_MultipleAgents_NoPluginCrossLeak(t *testing.T) {
 		if len(pluginIDs) == 1 && pluginIDs[0] == "alpha-plugin@market-a" {
 			return &agentplugins.RuntimeBundle{
 				PluginIDs:  []string{"alpha-plugin@market-a"},
-				PluginDirs: []string{"/plugins/alpha"},
 				Skills:     []models.SkillConfig{{Name: "alpha-skill", Content: "alpha"}},
 				MCPServers: []models.MCPServerConfig{{Name: "alpha-mcp", Type: "stdio", Command: []string{"alpha-cmd"}}},
 			}, nil
@@ -466,7 +460,6 @@ func TestAdapterCall_MultipleAgents_NoPluginCrossLeak(t *testing.T) {
 		if len(pluginIDs) == 1 && pluginIDs[0] == "beta-plugin@market-b" {
 			return &agentplugins.RuntimeBundle{
 				PluginIDs:  []string{"beta-plugin@market-b"},
-				PluginDirs: []string{"/plugins/beta"},
 				Skills:     []models.SkillConfig{{Name: "beta-skill", Content: "beta"}},
 				MCPServers: []models.MCPServerConfig{{Name: "beta-mcp", Type: "stdio", Command: []string{"beta-cmd"}}},
 			}, nil
@@ -506,10 +499,6 @@ func TestAdapterCall_MultipleAgents_NoPluginCrossLeak(t *testing.T) {
 	if len(reqA.AgentDefinition.MCPServers) != 1 || reqA.AgentDefinition.MCPServers[0].Name != "alpha-mcp" {
 		t.Fatalf("agent A should have alpha-mcp only, got %+v", reqA.AgentDefinition.MCPServers)
 	}
-	if len(reqA.PluginDirs) != 1 || reqA.PluginDirs[0] != "/plugins/alpha" {
-		t.Fatalf("agent A should have /plugins/alpha dir, got %v", reqA.PluginDirs)
-	}
-
 	// Call for agent B
 	adapter.Call(llmcontracts.AgentRequest{
 		Ctx:             context.Background(),
@@ -528,10 +517,6 @@ func TestAdapterCall_MultipleAgents_NoPluginCrossLeak(t *testing.T) {
 	if len(reqB.AgentDefinition.MCPServers) != 1 || reqB.AgentDefinition.MCPServers[0].Name != "beta-mcp" {
 		t.Fatalf("agent B should have beta-mcp only, got %+v", reqB.AgentDefinition.MCPServers)
 	}
-	if len(reqB.PluginDirs) != 1 || reqB.PluginDirs[0] != "/plugins/beta" {
-		t.Fatalf("agent B should have /plugins/beta dir, got %v", reqB.PluginDirs)
-	}
-
 	// Verify no cross-contamination: A's resources don't appear in B
 	for _, s := range reqB.AgentDefinition.Skills {
 		if s.Name == "alpha-skill" {
@@ -555,9 +540,6 @@ func TestAdapterCall_MultipleAgents_NoPluginCrossLeak(t *testing.T) {
 	reqNone := capture.lastReq
 	if reqNone.AgentDefinition != nil {
 		t.Fatalf("task with no agent definition should have nil AgentDefinition, got %+v", reqNone.AgentDefinition)
-	}
-	if len(reqNone.PluginDirs) != 0 {
-		t.Fatalf("task with no agent definition should have zero PluginDirs, got %v", reqNone.PluginDirs)
 	}
 }
 

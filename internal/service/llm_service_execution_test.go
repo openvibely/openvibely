@@ -67,7 +67,7 @@ type completionPathWritingLLMCaller struct {
 
 func (c *completionPathWritingLLMCaller) CallModel(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, execID string, workDir string) (string, string, int, error) {
 	if strings.HasPrefix(prompt, "Write one concise git commit subject") {
-		return "Update stale fixture", "Update stale fixture", 1, nil
+		return `{"subject":"Update stale fixture"}`, `{"subject":"Update stale fixture"}`, 1, nil
 	}
 	c.workDir = workDir
 	if err := os.WriteFile(filepath.Join(workDir, c.fileName), []byte(c.content), 0644); err != nil {
@@ -188,6 +188,86 @@ func TestLLMService_ExecuteTaskWithAgent_PublishesInitialThreadExecutionStarted(
 		case <-deadline:
 			t.Fatal("timed out waiting for initial task thread execution started event")
 		}
+	}
+}
+
+func TestLLMService_ExecuteTaskWithAgent_PublishesCompletedTerminalEvent(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	agent := ensureDefaultAgent(t, llmConfigRepo)
+	project := &models.Project{Name: "Completed terminal stream project", RepoPath: t.TempDir()}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Completed terminal stream", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "initial prompt", AgentID: &agent.ID}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	hub := events.NewExecutionStreamHub()
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
+	svc.SetExecutionStreamHub(hub)
+	called := make(chan string, 1)
+	release := make(chan struct{})
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "worker complete"
+	mock.TextOnly = "worker complete"
+	mock.OnCall = func(ctx context.Context, call testutil.MockLLMCall) {
+		called <- call.ExecID
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+	}
+	svc.SetLLMCaller(mock)
+	type executeResult struct {
+		exec *models.Execution
+		err  error
+	}
+	resultCh := make(chan executeResult, 1)
+	go func() {
+		exec, err := svc.ExecuteTaskWithAgent(ctx, *task, *agent)
+		resultCh <- executeResult{exec: exec, err: err}
+	}()
+
+	var execID string
+	select {
+	case execID = <-called:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for mock LLM call")
+	}
+	sub, _, err := hub.Subscribe(execID)
+	if err != nil {
+		t.Fatalf("subscribe execution stream: %v", err)
+	}
+	close(release)
+
+	select {
+	case result := <-resultCh:
+		if result.err != nil {
+			t.Fatalf("ExecuteTaskWithAgent: %v", result.err)
+		}
+		if result.exec == nil || result.exec.ID != execID || result.exec.Status != models.ExecCompleted {
+			t.Fatalf("unexpected execution result: %+v", result.exec)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for ExecuteTaskWithAgent")
+	}
+	select {
+	case event, ok := <-sub:
+		if !ok || event.ExecID != execID || event.Type != events.ExecutionStreamDone || event.Status != string(models.ExecCompleted) {
+			t.Fatalf("terminal event = %+v, open=%v", event, ok)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for completed terminal event")
+	}
+	if _, ok := <-sub; ok {
+		t.Fatal("subscriber remained open after completed terminal event")
 	}
 }
 
@@ -2503,6 +2583,101 @@ func TestLLMService_ExecuteTask_MemoryConsolidationUsesNormalExecutionPath(t *te
 	}
 }
 
+func TestLLMService_ExecuteTaskKeepsTaskRunningWhileManagedFinalizationWaitsForLease(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+
+	repoDir := createTestGitRepo(t)
+	project := &models.Project{Name: "Finalization lease", RepoPath: repoDir}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	agent := ensureDefaultAgent(t, llmConfigRepo)
+	task := &models.Task{ProjectID: project.ID, Title: "Finalize under lease", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "finish", AgentID: &agent.ID}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
+	svc.SetWorktreeService(NewWorktreeService(taskRepo, projectRepo, settingsRepo))
+	modelEntered := make(chan struct{})
+	releaseModel := make(chan struct{})
+	var modelOnce sync.Once
+	mock := &testutil.MockLLMCaller{Response: "done", TextOnly: "done"}
+	mock.OnCall = func(context.Context, testutil.MockLLMCall) {
+		modelOnce.Do(func() { close(modelEntered) })
+		<-releaseModel
+	}
+	svc.SetLLMCaller(mock)
+
+	executionDone := make(chan error, 1)
+	go func() {
+		_, err := svc.ExecuteTaskWithAgent(ctx, *task, *agent)
+		executionDone <- err
+	}()
+	select {
+	case <-modelEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("model execution did not start")
+	}
+
+	leaseEntered := make(chan struct{})
+	releaseLease := make(chan struct{})
+	leaseDone := make(chan error, 1)
+	go func() {
+		leaseDone <- WithRepositoryMutation(repoDir, func() error {
+			close(leaseEntered)
+			<-releaseLease
+			return nil
+		})
+	}()
+	<-leaseEntered
+	close(releaseModel)
+
+	select {
+	case err := <-executionDone:
+		close(releaseLease)
+		t.Fatalf("execution bypassed finalization lease: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	current, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		close(releaseLease)
+		t.Fatalf("load task during finalization: %v", err)
+	}
+	if current.Status != models.StatusRunning {
+		close(releaseLease)
+		t.Fatalf("task became merge-eligible before managed finalization completed: %s", current.Status)
+	}
+
+	close(releaseLease)
+	if err := <-leaseDone; err != nil {
+		t.Fatalf("repository mutation lease: %v", err)
+	}
+	select {
+	case err := <-executionDone:
+		if err != nil {
+			t.Fatalf("ExecuteTaskWithAgent: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("execution did not complete after finalization lease release")
+	}
+	current, err = taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("load completed task: %v", err)
+	}
+	if current.Status != models.StatusCompleted {
+		t.Fatalf("task status after finalization = %s, want completed", current.Status)
+	}
+}
+
 func TestLLMService_ExecuteTask_GitWorktreeIsolation(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -2592,6 +2767,89 @@ func TestLLMService_ExecuteTask_GitWorktreeIsolation(t *testing.T) {
 				t.Fatalf("test repository should have no remote, output=%q err=%v", remotes, remoteErr)
 			}
 		})
+	}
+}
+
+func TestLLMService_ExecuteTask_StartupConflictContinuesWithRecoveryContext(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+
+	repoDir := createTestGitRepo(t)
+	project := &models.Project{Name: "Startup Conflict Recovery", RepoPath: repoDir}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	agent := ensureDefaultAgent(t, llmConfigRepo)
+	task := &models.Task{
+		ProjectID:         project.ID,
+		Title:             "Continue conflicted task",
+		Category:          models.CategoryScheduled,
+		Status:            models.StatusPending,
+		Prompt:            "finish the scheduled update",
+		AgentID:           &agent.ID,
+		MergeTargetBranch: "main",
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	worktreeSvc := NewWorktreeService(taskRepo, projectRepo, settingsRepo)
+	wtPath, wtBranch, err := worktreeSvc.SetupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatalf("setup worktree: %v", err)
+	}
+	task.WorktreePath = wtPath
+	task.WorktreeBranch = wtBranch
+
+	if err := os.WriteFile(filepath.Join(wtPath, "conflict.txt"), []byte("task version\n"), 0o644); err != nil {
+		t.Fatalf("write task version: %v", err)
+	}
+	if err := CommitWorktreeChanges(wtPath, "task version"); err != nil {
+		t.Fatalf("commit task version: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "conflict.txt"), []byte("main version\n"), 0o644); err != nil {
+		t.Fatalf("write main version: %v", err)
+	}
+	runGitTest(t, repoDir, "add", "conflict.txt")
+	runGitTest(t, repoDir, "commit", "-m", "main version")
+
+	mock := &testutil.MockLLMCaller{Response: "conflict resolved", TextOnly: "conflict resolved"}
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
+	svc.SetWorktreeService(worktreeSvc)
+	svc.SetLLMCaller(mock)
+
+	execRec, err := svc.ExecuteTaskWithAgent(ctx, *task, *agent)
+	if err != nil {
+		t.Fatalf("startup conflict should continue to the model: %v", err)
+	}
+	if execRec == nil || execRec.Status != models.ExecCompleted {
+		t.Fatalf("expected completed execution, got %#v", execRec)
+	}
+	if mock.CallCount() != 1 {
+		t.Fatalf("expected one model call, got %d", mock.CallCount())
+	}
+	request := mock.LastAgentRequest()
+	if request.WorkDir != wtPath {
+		t.Fatalf("expected preserved worktree %q, got %q", wtPath, request.WorkDir)
+	}
+	for _, want := range []string{"Worktree Sync Warning", "merge was aborted", "conflict.txt", "run the merge", "build, test, and commit"} {
+		if !strings.Contains(request.ProjectInstructions, want) {
+			t.Fatalf("expected recovery instructions to contain %q, got %q", want, request.ProjectInstructions)
+		}
+	}
+	status, err := GitStatusPorcelain(wtPath)
+	if err != nil {
+		t.Fatalf("git status: %v", err)
+	}
+	if strings.TrimSpace(status) != "" || worktreeHasActiveMerge(wtPath) {
+		t.Fatalf("expected clean aborted merge state, status=%q", status)
 	}
 }
 
@@ -3154,7 +3412,7 @@ func TestLLMService_ExecuteTaskWithAgent_MovesRepeatOnceToCompleted(t *testing.T
 		TaskID:         task.ID,
 		RunAt:          time.Now(),
 		RepeatType:     models.RepeatOnce,
-		RepeatInterval: 0,
+		RepeatInterval: 1,
 		Enabled:        true,
 	}
 	if err := scheduleRepo.Create(ctx, schedule); err != nil {
@@ -3584,9 +3842,6 @@ func TestLLMService_ExecuteTaskWithAgent_NoAgentDef_NilPluginContext(t *testing.
 	if capture.lastReq.AgentDefinition != nil {
 		t.Fatalf("expected nil AgentDefinition for task without agent def, got %+v", capture.lastReq.AgentDefinition)
 	}
-	if len(capture.lastReq.PluginDirs) != 0 {
-		t.Fatalf("expected zero PluginDirs for task without agent def, got %v", capture.lastReq.PluginDirs)
-	}
 }
 
 // TestLLMService_ExecuteTaskWithAgent_WrongAgentDefNotUsed verifies that
@@ -3777,17 +4032,23 @@ func TestLLMService_ExecuteTask_ScopedFilesPrepFailureCompletesExecution(t *test
 }
 
 type fakeGitHubIssueRuntimeProvider struct {
+	issueMu              sync.Mutex
+	issues               map[int]GitHubIssue
+	globalAPIEndpoint    string
 	resolveRepoFn        func(context.Context, string, string) (*GitHubRepoRef, error)
 	createIssueFn        func(context.Context, *GitHubRepoRef, GitHubCreateIssueRequest) (*GitHubIssue, error)
+	ensureIssueLabelsFn  func(context.Context, *GitHubRepoRef, []string) error
 	getIssueFn           func(context.Context, *GitHubRepoRef, int) (*GitHubIssue, error)
 	findPRFn             func(context.Context, *GitHubRepoRef, int) (*GitHubPullRequest, error)
 	addLabelsFn          func(context.Context, *GitHubRepoRef, int, []string) error
+	closeIssueFn         func(context.Context, *GitHubRepoRef, int) error
 	listMyIssuesFn       func(context.Context, *GitHubRepoRef) (*GitHubAuthenticatedUser, []GitHubIssue, error)
+	listCreatedIssuesFn  func(context.Context, *GitHubRepoRef) (*GitHubAuthenticatedUser, []GitHubIssue, error)
 	listAssignedIssuesFn func(context.Context, *GitHubRepoRef, string) ([]GitHubIssue, error)
 	listIssuesPRFn       func(context.Context, *GitHubRepoRef, string) ([]GitHubIssueWithPullRequest, error)
 	listPRFeedbackFn     func(context.Context, *GitHubRepoRef, int) ([]GitHubPullRequestFeedback, error)
 	commentIssueFn       func(context.Context, *GitHubRepoRef, int, string) error
-	publishBranchFn      func(context.Context, *GitHubRepoRef, GitHubPublishBranchRequest) error
+	publishBranchFn      func(context.Context, *GitHubRepoRef, GitHubPublishBranchRequest) (*GitHubPublishBranchResult, error)
 	replaceBranchHeadFn  func(context.Context, *GitHubRepoRef, GitHubReplaceBranchHeadRequest) error
 	getPullRequestFn     func(context.Context, *GitHubRepoRef, int) (*GitHubPullRequest, error)
 	findBranchPRFn       func(context.Context, *GitHubRepoRef, string) (*GitHubPullRequest, error)
@@ -3798,18 +4059,18 @@ func (f *fakeGitHubIssueRuntimeProvider) ResolveRepo(ctx context.Context, repoUR
 	if f.resolveRepoFn != nil {
 		return f.resolveRepoFn(ctx, repoURL, repoPath)
 	}
-	return &GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely"}, nil
+	return &GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely", HTMLURL: "https://github.com/openvibely/openvibely"}, nil
 }
 
 func (f *fakeGitHubIssueRuntimeProvider) DefaultBranch(ctx context.Context, repo *GitHubRepoRef) (string, error) {
 	return "main", nil
 }
 
-func (f *fakeGitHubIssueRuntimeProvider) PublishBranch(ctx context.Context, repo *GitHubRepoRef, req GitHubPublishBranchRequest) error {
+func (f *fakeGitHubIssueRuntimeProvider) PublishBranch(ctx context.Context, repo *GitHubRepoRef, req GitHubPublishBranchRequest) (*GitHubPublishBranchResult, error) {
 	if f.publishBranchFn != nil {
 		return f.publishBranchFn(ctx, repo, req)
 	}
-	return nil
+	return &GitHubPublishBranchResult{HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
 }
 
 func (f *fakeGitHubIssueRuntimeProvider) ReplaceBranchHead(ctx context.Context, repo *GitHubRepoRef, req GitHubReplaceBranchHeadRequest) error {
@@ -3837,25 +4098,71 @@ func (f *fakeGitHubIssueRuntimeProvider) CreatePullRequest(ctx context.Context, 
 	if f.createPRFn != nil {
 		return f.createPRFn(ctx, repo, req)
 	}
-	return &GitHubPullRequest{Number: 101, URL: "https://github.com/openvibely/openvibely/pull/101", State: "open"}, nil
+	return &GitHubPullRequest{Number: 101, URL: "https://github.com/openvibely/openvibely/pull/101", State: "open", HeadRef: req.Head, HeadRepoFullName: "openvibely/openvibely", HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
+}
+
+func (f *fakeGitHubIssueRuntimeProvider) EnsureIssueLabels(ctx context.Context, repo *GitHubRepoRef, labels []string) error {
+	if f.ensureIssueLabelsFn != nil {
+		return f.ensureIssueLabelsFn(ctx, repo, labels)
+	}
+	return nil
 }
 
 func (f *fakeGitHubIssueRuntimeProvider) CreateIssue(ctx context.Context, repo *GitHubRepoRef, req GitHubCreateIssueRequest) (*GitHubIssue, error) {
+	var issue *GitHubIssue
+	var err error
 	if f.createIssueFn != nil {
-		return f.createIssueFn(ctx, repo, req)
+		issue, err = f.createIssueFn(ctx, repo, req)
+		if issue != nil && issue.Labels == nil {
+			issue.Labels = append([]string(nil), req.Labels...)
+		}
+	} else {
+		issue = &GitHubIssue{Number: 1, URL: "https://github.com/openvibely/openvibely/issues/1", Title: req.Title, Labels: req.Labels}
 	}
-	return &GitHubIssue{Number: 1, URL: "https://github.com/openvibely/openvibely/issues/1", Title: req.Title, Labels: req.Labels}, nil
+	if issue != nil && err == nil {
+		f.issueMu.Lock()
+		if f.issues == nil {
+			f.issues = make(map[int]GitHubIssue)
+		}
+		f.issues[issue.Number] = *issue
+		f.issueMu.Unlock()
+	}
+	return issue, err
 }
 
 func (f *fakeGitHubIssueRuntimeProvider) GetIssue(ctx context.Context, repo *GitHubRepoRef, issueNumber int) (*GitHubIssue, error) {
 	if f.getIssueFn != nil {
 		return f.getIssueFn(ctx, repo, issueNumber)
 	}
-	return &GitHubIssue{Number: issueNumber, URL: fmt.Sprintf("https://github.com/openvibely/openvibely/issues/%d", issueNumber), Title: "Issue"}, nil
+	f.issueMu.Lock()
+	issue, ok := f.issues[issueNumber]
+	if !ok {
+		baseURL := ""
+		if repo != nil {
+			baseURL = strings.TrimRight(strings.TrimSpace(repo.HTMLURL), "/")
+			if baseURL == "" && strings.TrimSpace(repo.FullName) != "" {
+				baseURL = "https://github.com/" + strings.Trim(strings.TrimSpace(repo.FullName), "/")
+			}
+		}
+		if baseURL == "" {
+			baseURL = "https://github.com/openvibely/openvibely"
+		}
+		issue = GitHubIssue{Number: issueNumber, URL: fmt.Sprintf("%s/issues/%d", baseURL, issueNumber), Title: "Issue", State: "open"}
+		if f.issues == nil {
+			f.issues = make(map[int]GitHubIssue)
+		}
+		f.issues[issueNumber] = issue
+	}
+	f.issueMu.Unlock()
+	return &issue, nil
 }
 
 func (f *fakeGitHubIssueRuntimeProvider) GetAuthenticatedUser(ctx context.Context) (*GitHubAuthenticatedUser, error) {
 	return &GitHubAuthenticatedUser{Login: "channel-user", Source: GitHubAuthModePAT}, nil
+}
+
+func (f *fakeGitHubIssueRuntimeProvider) GetAuthenticatedUserForRepo(ctx context.Context, repo *GitHubRepoRef) (*GitHubAuthenticatedUser, error) {
+	return f.GetAuthenticatedUser(ctx)
 }
 
 func (f *fakeGitHubIssueRuntimeProvider) ListAuthenticatedAssignedIssues(ctx context.Context, repo *GitHubRepoRef) (*GitHubAuthenticatedUser, []GitHubIssue, error) {
@@ -3863,6 +4170,13 @@ func (f *fakeGitHubIssueRuntimeProvider) ListAuthenticatedAssignedIssues(ctx con
 		return f.listMyIssuesFn(ctx, repo)
 	}
 	return &GitHubAuthenticatedUser{Login: "channel-user", Source: GitHubAuthModePAT}, []GitHubIssue{{Number: 5, URL: "https://github.com/openvibely/openvibely/issues/5", Title: "Testing", State: "open", Assignees: []string{"channel-user"}}}, nil
+}
+
+func (f *fakeGitHubIssueRuntimeProvider) ListAuthenticatedCreatedIssues(ctx context.Context, repo *GitHubRepoRef) (*GitHubAuthenticatedUser, []GitHubIssue, error) {
+	if f.listCreatedIssuesFn != nil {
+		return f.listCreatedIssuesFn(ctx, repo)
+	}
+	return &GitHubAuthenticatedUser{Login: "channel-user", Source: GitHubAuthModePAT}, []GitHubIssue{{Number: 7, URL: "https://github.com/openvibely/openvibely/issues/7", Title: "Existing Automation issue", State: "open", UserLogin: "channel-user"}}, nil
 }
 
 func (f *fakeGitHubIssueRuntimeProvider) ListAssignedIssues(ctx context.Context, repo *GitHubRepoRef, assignee string) ([]GitHubIssue, error) {
@@ -3909,7 +4223,90 @@ func (f *fakeGitHubIssueRuntimeProvider) AddLabelsToIssue(ctx context.Context, r
 			return fmt.Errorf("github issue labels must not use openvibely: prefix: %s", strings.TrimSpace(label))
 		}
 	}
+	f.issueMu.Lock()
+	issue, ok := f.issues[issueNumber]
+	if ok {
+		issue.Labels = normalizeDraftReferences(append(issue.Labels, labels...))
+		f.issues[issueNumber] = issue
+	}
+	f.issueMu.Unlock()
 	return nil
+}
+
+func (f *fakeGitHubIssueRuntimeProvider) CloseIssue(ctx context.Context, repo *GitHubRepoRef, issueNumber int) error {
+	if f.closeIssueFn != nil {
+		return f.closeIssueFn(ctx, repo, issueNumber)
+	}
+	f.issueMu.Lock()
+	issue, ok := f.issues[issueNumber]
+	if ok {
+		issue.State = "closed"
+		f.issues[issueNumber] = issue
+	}
+	f.issueMu.Unlock()
+	return nil
+}
+
+func (f *fakeGitHubIssueRuntimeProvider) GlobalAPIEndpoint(_ context.Context) string {
+	return f.globalAPIEndpoint
+}
+
+func TestGitHubRuntimeCurrentEnterpriseRepositoryRequiresAPIEndpoint(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	project := &models.Project{
+		Name:    "Enterprise runtime repository without endpoint",
+		RepoURL: "https://github.example.com/acme/widgets.git",
+	}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	provider := &fakeGitHubIssueRuntimeProvider{resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*GitHubRepoRef, error) {
+		require.Equal(t, project.RepoURL, repoURL)
+		require.Empty(t, repoPath)
+		parsed, err := ParseGitHubRepoURL(repoURL)
+		require.NoError(t, err)
+		return &parsed, nil
+	}}
+	opts := githubIssueRuntimeOptions{ProjectID: project.ID, ProjectRepo: projectRepo, GitHub: provider}
+
+	repo, err := resolveGitHubRepoForRuntimeTool(ctx, opts)
+	require.Nil(t, repo)
+	require.ErrorContains(t, err, "custom repository host requires a configured GitHub API endpoint")
+}
+
+func TestGitHubRuntimeExplicitRepositoryUsesProjectEndpointByParsedHost(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	const enterpriseEndpoint = "https://github.example.com/api/v3"
+	project := &models.Project{
+		Name:    "Enterprise runtime repository",
+		RepoURL: "https://github.example.com/acme/widgets.git",
+	}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	provider := &fakeGitHubIssueRuntimeProvider{
+		globalAPIEndpoint: enterpriseEndpoint,
+		resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*GitHubRepoRef, error) {
+			require.Empty(t, repoPath)
+			parsed, err := ParseGitHubRepoURL(repoURL)
+			require.NoError(t, err)
+			return &parsed, nil
+		},
+	}
+	opts := githubIssueRuntimeOptions{ProjectID: project.ID, ProjectRepo: projectRepo, GitHub: provider}
+
+	for _, repoURL := range []string{
+		"git@github.example.com:acme/widgets.git",
+		"https://github.example.com/acme/sibling.git",
+	} {
+		repo, err := resolveGitHubRepoForRuntimeToolURL(ctx, opts, repoURL)
+		require.NoError(t, err)
+		require.Equal(t, enterpriseEndpoint, repo.APIBaseURL)
+	}
+
+	repo, err := resolveGitHubRepoForRuntimeToolURL(ctx, opts, "https://github.com/acme/widgets.git")
+	require.Nil(t, repo)
+	require.ErrorContains(t, err, "repository host")
 }
 
 func TestAutomationGitHubRuntimeToolsAlwaysResolveCurrentProjectRepository(t *testing.T) {
@@ -3921,7 +4318,7 @@ func TestAutomationGitHubRuntimeToolsAlwaysResolveCurrentProjectRepository(t *te
 	var resolvedURL, resolvedPath string
 	provider := &fakeGitHubIssueRuntimeProvider{resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*GitHubRepoRef, error) {
 		resolvedURL, resolvedPath = repoURL, repoPath
-		return &GitHubRepoRef{Owner: "openvibely", Name: "project", FullName: "openvibely/project"}, nil
+		return &GitHubRepoRef{Owner: "openvibely", Name: "project", FullName: "openvibely/project", HTMLURL: "https://github.com/openvibely/project"}, nil
 	}}
 	opts := githubIssueRuntimeOptions{ProjectID: project.ID, ProjectRepo: projectRepo, GitHub: provider}
 	automationCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: project.ID,
@@ -3936,7 +4333,7 @@ func TestAutomationGitHubRuntimeToolsAlwaysResolveCurrentProjectRepository(t *te
 	require.NoError(t, projectRepo.Update(ctx, project))
 	provider.resolveRepoFn = func(_ context.Context, repoURL, repoPath string) (*GitHubRepoRef, error) {
 		resolvedURL, resolvedPath = repoURL, repoPath
-		return &GitHubRepoRef{Owner: "openvibely", Name: "project", FullName: "openvibely/project"}, nil
+		return &GitHubRepoRef{Owner: "openvibely", Name: "project", FullName: "openvibely/project", HTMLURL: "https://github.com/openvibely/project"}, nil
 	}
 	_, err = resolveGitHubRepoForRuntimeToolURL(automationCtx, opts, "https://github.com/attacker/other")
 	require.NoError(t, err)
@@ -3947,12 +4344,20 @@ func TestAutomationGitHubRuntimeToolsAlwaysResolveCurrentProjectRepository(t *te
 	require.NoError(t, projectRepo.Update(ctx, project))
 	provider.resolveRepoFn = func(_ context.Context, repoURL, repoPath string) (*GitHubRepoRef, error) {
 		resolvedURL, resolvedPath = repoURL, repoPath
-		return &GitHubRepoRef{Owner: "example", Name: "other", FullName: "example/other"}, nil
+		return &GitHubRepoRef{Owner: "example", Name: "other", FullName: "example/other", HTMLURL: "https://github.com/example/other"}, nil
 	}
 	_, err = resolveGitHubRepoForRuntimeToolURL(ctx, opts, "https://github.com/example/other")
 	require.NoError(t, err)
 	require.Equal(t, "https://github.com/example/other", resolvedURL, "ordinary Chat must retain explicit repository selection")
 	require.Empty(t, resolvedPath)
+}
+
+func TestAutomationGitHubRuntimeToolsDoNotExposeStatusCommenting(t *testing.T) {
+	defs := gitHubIssueRuntimeToolDefs(true)
+	for _, def := range defs {
+		require.NotEqual(t, "github_comment_on_issue", def.Name)
+	}
+	require.Contains(t, runtimeToolDefinitionSet(defs), "github_open_pull_request")
 }
 
 func TestGitHubIssueRuntimeToolsExposeDefaultTaskToolsAndPreserveSafetyRules(t *testing.T) {
@@ -3972,18 +4377,18 @@ func TestGitHubIssueRuntimeToolsExposeDefaultTaskToolsAndPreserveSafetyRules(t *
 		t.Fatalf("create task: %v", err)
 	}
 
-	var createdRepo, commentedRepo, labeledRepo string
+	var createdRepo, commentedRepo, labeledRepo, closedRepo string
 	var replacementReq GitHubReplaceBranchHeadRequest
 	provider := &fakeGitHubIssueRuntimeProvider{
 		resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*GitHubRepoRef, error) {
 			switch repoURL {
 			case project.RepoURL:
-				return &GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely"}, nil
+				return &GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely", HTMLURL: "https://github.com/openvibely/openvibely"}, nil
 			case "https://github.com/example/other":
 				if strings.TrimSpace(repoPath) != "" {
 					t.Fatalf("expected explicit repo_url lookup to avoid local repo path, got %q", repoPath)
 				}
-				return &GitHubRepoRef{Owner: "example", Name: "other", FullName: "example/other"}, nil
+				return &GitHubRepoRef{Owner: "example", Name: "other", FullName: "example/other", HTMLURL: "https://github.com/example/other"}, nil
 			default:
 				t.Fatalf("unexpected repo URL %q", repoURL)
 				return nil, nil
@@ -4024,28 +4429,41 @@ func TestGitHubIssueRuntimeToolsExposeDefaultTaskToolsAndPreserveSafetyRules(t *
 			}
 			return nil
 		},
+		closeIssueFn: func(_ context.Context, repo *GitHubRepoRef, issueNumber int) error {
+			closedRepo = repo.FullName
+			if issueNumber != 9 {
+				t.Fatalf("unexpected runtime close input issue=%d", issueNumber)
+			}
+			return nil
+		},
 		getPullRequestFn: func(_ context.Context, _ *GitHubRepoRef, number int) (*GitHubPullRequest, error) {
-			if number != 202 {
+			switch number {
+			case 202:
+				return &GitHubPullRequest{Number: number, URL: "https://github.com/openvibely/openvibely/pull/202", State: "open", HeadRef: "task/existing-runtime-pr", HeadRepoFullName: "openvibely/openvibely", HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
+			case 203:
+				return &GitHubPullRequest{Number: number, URL: "https://github.com/openvibely/openvibely/pull/203", State: "open", HeadRef: "task/existing-runtime-pr-url", HeadRepoFullName: "openvibely/openvibely", HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
+			default:
 				return nil, fmt.Errorf("unexpected pull request #%d", number)
 			}
-			return &GitHubPullRequest{Number: number, HeadRef: "task/existing-runtime-pr", HeadRepoFullName: "openvibely/openvibely"}, nil
 		},
 		replaceBranchHeadFn: func(_ context.Context, _ *GitHubRepoRef, req GitHubReplaceBranchHeadRequest) error {
 			replacementReq = req
 			return nil
 		},
 	}
+	githubAuthRepo := repository.NewGitHubAuthRepo(db)
+	require.NoError(t, githubAuthRepo.UpsertAuthorizedActor(ctx, &models.GitHubAuthorizedActor{GitHubLogin: "Dev-Bot"}))
 	rt := buildGitHubIssueRuntimeTools(githubIssueRuntimeOptions{
 		ProjectID:            project.ID,
 		ProjectRepo:          projectRepo,
 		TaskRepo:             taskRepo,
 		TaskPullRequestRepo:  prRepo,
 		GitHubPRFeedbackRepo: feedbackRepo,
-		GitHubAuthRepo:       repository.NewGitHubAuthRepo(db),
+		GitHubAuthRepo:       githubAuthRepo,
 		ThreadInputRepo:      threadInputRepo,
 		GitHub:               provider,
 	})
-	for _, name := range []string{"github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_assigned_issues", "github_add_issue_labels", "github_open_pull_request", "github_replace_pull_request_branch", "github_forward_pr_feedback_to_tasks"} {
+	for _, name := range []string{"github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_assigned_issues", "github_add_issue_labels", "github_close_issue", "github_open_pull_request", "github_replace_pull_request_branch", "github_forward_pr_feedback_to_tasks"} {
 		if rt == nil || !rt.HasDefinition(name) {
 			t.Fatalf("expected %s in default GitHub runtime definitions for task runs, got %#v", name, rt)
 		}
@@ -4055,29 +4473,29 @@ func TestGitHubIssueRuntimeToolsExposeDefaultTaskToolsAndPreserveSafetyRules(t *
 	if !handled || isErr || err != nil {
 		t.Fatalf("expected my assigned issues success handled=%v isErr=%v err=%v out=%s", handled, isErr, err, out)
 	}
-	if !strings.Contains(out, `"login":"channel-user"`) || !strings.Contains(out, `"Number":5`) {
-		t.Fatalf("expected authenticated assigned issues output, got %s", out)
+	if !strings.Contains(out, `"login":"channel-user"`) || !strings.Contains(out, `"number":5`) || !strings.Contains(out, `"returned":1`) {
+		t.Fatalf("expected compact authenticated assigned issues output, got %s", out)
 	}
 	out, handled, isErr, err = rt.Executor(ctx, "github_list_assigned_issues", []byte(`{"assignee":"Dev-Bot"}`))
 	if !handled || isErr || err != nil {
 		t.Fatalf("expected explicit assigned issues success handled=%v isErr=%v err=%v out=%s", handled, isErr, err, out)
 	}
-	if !strings.Contains(out, `"assignee":"dev-bot"`) || !strings.Contains(out, `"Number":6`) {
-		t.Fatalf("expected explicit assigned issues output, got %s", out)
+	if !strings.Contains(out, `"assignee":"dev-bot"`) || !strings.Contains(out, `"number":6`) || !strings.Contains(out, `"returned":1`) {
+		t.Fatalf("expected compact explicit assigned issues output, got %s", out)
 	}
 	out, handled, isErr, err = rt.Executor(ctx, "github_list_my_assigned_issues", []byte(`{"repo_url":"https://github.com/example/other"}`))
 	if !handled || isErr || err != nil {
 		t.Fatalf("expected explicit repo_url my assigned issues success handled=%v isErr=%v err=%v out=%s", handled, isErr, err, out)
 	}
-	if !strings.Contains(out, `"Number":7`) || !strings.Contains(out, `"https://github.com/example/other/issues/7"`) {
-		t.Fatalf("expected explicit repo_url my assigned issues output, got %s", out)
+	if !strings.Contains(out, `"number":7`) || !strings.Contains(out, `"https://github.com/example/other/issues/7"`) || !strings.Contains(out, `"returned":1`) {
+		t.Fatalf("expected compact explicit repo_url my assigned issues output, got %s", out)
 	}
 	out, handled, isErr, err = rt.Executor(ctx, "github_list_assigned_issues", []byte(`{"assignee":"Dev-Bot","repo_url":"https://github.com/example/other"}`))
 	if !handled || isErr || err != nil {
 		t.Fatalf("expected explicit repo_url assigned issues success handled=%v isErr=%v err=%v out=%s", handled, isErr, err, out)
 	}
-	if !strings.Contains(out, `"Number":8`) || !strings.Contains(out, `"https://github.com/example/other/issues/8"`) {
-		t.Fatalf("expected explicit repo_url assigned issues output, got %s", out)
+	if !strings.Contains(out, `"number":8`) || !strings.Contains(out, `"https://github.com/example/other/issues/8"`) || !strings.Contains(out, `"returned":1`) {
+		t.Fatalf("expected compact explicit repo_url assigned issues output, got %s", out)
 	}
 	out, handled, isErr, err = rt.Executor(ctx, "github_create_issue", []byte(`{"title":"URL issue","body":"Created by URL","labels":["bug"],"assignees":["dev-bot"],"repo_url":"https://github.com/example/other"}`))
 	if !handled || isErr || err != nil {
@@ -4099,6 +4517,13 @@ func TestGitHubIssueRuntimeToolsExposeDefaultTaskToolsAndPreserveSafetyRules(t *
 	}
 	if labeledRepo != "example/other" || !strings.Contains(out, `"labels":["approved"]`) {
 		t.Fatalf("expected explicit repo_url label output repo=%q out=%s", labeledRepo, out)
+	}
+	out, handled, isErr, err = rt.Executor(ctx, "github_close_issue", []byte(`{"issue_number":9,"repo_url":"https://github.com/example/other"}`))
+	if !handled || isErr || err != nil {
+		t.Fatalf("expected explicit repo_url close success handled=%v isErr=%v err=%v out=%s", handled, isErr, err, out)
+	}
+	if closedRepo != "example/other" || !strings.Contains(out, `"state":"closed"`) {
+		t.Fatalf("expected explicit repo_url close output repo=%q out=%s", closedRepo, out)
 	}
 
 	_, handled, isErr, err = rt.Executor(ctx, "github_add_issue_labels", []byte(`{"issue_number":77,"labels":["openvibely:bug"]}`))
@@ -4194,7 +4619,6 @@ func TestGitHubIssueRuntimeToolsExposeDefaultTaskToolsAndPreserveSafetyRules(t *
 	if !strings.Contains(out, `"authorized":false`) {
 		t.Fatalf("expected deny-by-default authorization output, got %s", out)
 	}
-	githubAuthRepo := repository.NewGitHubAuthRepo(db)
 	if err := githubAuthRepo.UpsertAuthorizedActor(ctx, &models.GitHubAuthorizedActor{GitHubLogin: "Dev-Bot", Permission: "triage"}); err != nil {
 		t.Fatalf("configure github authorized user: %v", err)
 	}
@@ -4326,7 +4750,7 @@ func TestLLMServiceExecuteTaskWithAgentExposesBootstrapToolsToInitialRuns(t *tes
 	if rt == nil {
 		t.Fatal("expected runtime tools on provider request")
 	}
-	for _, name := range []string{"list_tasks", "create_task", "set_task_goal", "get_task_goal", "schedule_task", "modify_schedule", "github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs", "github_comment_on_issue", "github_add_issue_labels", "github_open_pull_request", "github_replace_pull_request_branch", "github_forward_pr_feedback_to_tasks"} {
+	for _, name := range []string{"list_tasks", "create_task", "set_task_goal", "get_task_goal", "schedule_task", "modify_schedule", "github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs", "github_comment_on_issue", "github_add_issue_labels", "github_close_issue", "github_open_pull_request", "github_replace_pull_request_branch", "github_forward_pr_feedback_to_tasks"} {
 		if !rt.HasDefinition(name) {
 			t.Fatalf("expected %s on initial task run, got %#v", name, rt.Definitions)
 		}

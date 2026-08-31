@@ -9,8 +9,12 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/config"
+	"github.com/openvibely/openvibely/internal/update"
+	"github.com/wailsapp/wails/v3/pkg/application"
+	"github.com/wailsapp/wails/v3/pkg/events"
 )
 
 // TestEnsureDesktopPATHMakesGoLocatable reproduces the "bash: go: command not
@@ -68,6 +72,145 @@ func TestEnsureDesktopPATHMakesGoLocatable(t *testing.T) {
 	}
 }
 
+func TestEnsureDesktopPluginRootUsesExternalApplicationData(t *testing.T) {
+	t.Setenv("OPENVIBELY_PLUGIN_ROOT", "")
+	appData := filepath.Join(t.TempDir(), "OpenVibely Data")
+	if err := ensureDesktopPluginRoot(&config.Config{AppDataDir: appData}); err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(appData, ".openvibely", "plugins")
+	if got := os.Getenv("OPENVIBELY_PLUGIN_ROOT"); got != want {
+		t.Fatalf("desktop plugin root = %q, want %q", got, want)
+	}
+}
+
+func TestDesktopCommandRoutesPackagedUpdateHelpers(t *testing.T) {
+	tests := []struct {
+		name          string
+		command       string
+		handled       bool
+		errorContains string
+	}{
+		{name: "app-bundle update helper", command: update.AppBundleUpdateHelperCommand, handled: true, errorContains: "invalid app-bundle-update-helper arguments"},
+		{name: "executable update helper", command: update.ExecutableUpdateHelperCommand, handled: true, errorContains: "unsupported executable-update-helper argument"},
+		{name: "normal desktop launch", command: "serve", handled: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			handled, err := runPackagedUpdateHelperCommand(context.Background(), []string{"openvibely-desktop", test.command, "--unsupported", "value"}, strings.NewReader(""))
+			if handled != test.handled {
+				t.Fatalf("handled = %t, want %t", handled, test.handled)
+			}
+			if test.handled && err == nil {
+				t.Fatal("helper command unexpectedly accepted invalid arguments")
+			}
+			if test.errorContains != "" && !strings.Contains(err.Error(), test.errorContains) {
+				t.Fatalf("helper command error = %q, want it to contain %q", err, test.errorContains)
+			}
+			if !test.handled && err != nil {
+				t.Fatalf("normal desktop command returned error: %v", err)
+			}
+		})
+	}
+}
+
+func TestDesktopPackagedUpdateHelperIntegrationTimeouts(t *testing.T) {
+	t.Setenv("OPENVIBELY_UPDATE_INTEGRATION_WAIT_TIMEOUT_MS", "2500")
+	t.Setenv("OPENVIBELY_UPDATE_INTEGRATION_VALIDATION_TIMEOUT_MS", "7500")
+	var executableCfg update.ExecutableUpdateHelperConfig
+	if err := applyUpdateIntegrationTimeouts(&executableCfg); err != nil {
+		t.Fatal(err)
+	}
+	if executableCfg.WaitTimeout != 2500*time.Millisecond {
+		t.Fatalf("executable wait timeout = %s", executableCfg.WaitTimeout)
+	}
+	if executableCfg.ValidationTimeout != 7500*time.Millisecond {
+		t.Fatalf("executable validation timeout = %s", executableCfg.ValidationTimeout)
+	}
+	var appBundleCfg update.AppBundleUpdateHelperConfig
+	if err := applyAppBundleUpdateIntegrationTimeouts(&appBundleCfg); err != nil {
+		t.Fatal(err)
+	}
+	if appBundleCfg.WaitTimeout != 2500*time.Millisecond {
+		t.Fatalf("app-bundle wait timeout = %s", appBundleCfg.WaitTimeout)
+	}
+	if appBundleCfg.ValidationTimeout != 7500*time.Millisecond {
+		t.Fatalf("app-bundle validation timeout = %s", appBundleCfg.ValidationTimeout)
+	}
+}
+
+func TestDesktopWindowUsesEphemeralPortWebViewWithPersistentStorage(t *testing.T) {
+	content, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatalf("read desktop main.go: %v", err)
+	}
+	source := string(content)
+	if !strings.Contains(source, `application.WebviewWindowOptions{`) || !strings.Contains(source, `URL:       baseURL,`) {
+		t.Fatal("desktop launcher must keep loading the server UI through a Wails WebView window")
+	}
+	for _, disallowed := range []string{`DataPath:`, `PrivateMode`, `Incognito`, `Ephemeral`, `ClearBrowsingData`} {
+		if strings.Contains(source, disallowed) {
+			t.Fatalf("desktop launcher appears to override persistent WebView storage with %s", disallowed)
+		}
+	}
+}
+
+func TestRegisterDesktopUpdaterBinding(t *testing.T) {
+	tests := []struct {
+		name            string
+		goos            string
+		wantApplication events.ApplicationEventType
+		wantWindow      events.WindowEventType
+	}{
+		{name: "Windows waits for native WebView navigation", goos: "windows", wantWindow: events.Windows.WebViewNavigationCompleted},
+		{name: "Linux binds during application startup", goos: "linux", wantApplication: events.Common.ApplicationStarted},
+		{name: "macOS binds during application startup", goos: "darwin", wantApplication: events.Common.ApplicationStarted},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var gotApplication events.ApplicationEventType
+			var gotWindow events.WindowEventType
+			var applicationCallback func(*application.ApplicationEvent)
+			var windowCallback func(*application.WindowEvent)
+			var deferredBind func()
+			binds := 0
+			registerDesktopUpdaterBinding(
+				test.goos,
+				func(event events.ApplicationEventType, callback func(*application.ApplicationEvent)) func() {
+					gotApplication, applicationCallback = event, callback
+					return func() {}
+				},
+				func(event events.WindowEventType, callback func(*application.WindowEvent)) func() {
+					gotWindow, windowCallback = event, callback
+					return func() {}
+				},
+				func(callback func()) { deferredBind = callback },
+				func() { binds++ },
+			)
+			if gotApplication != test.wantApplication || gotWindow != test.wantWindow {
+				t.Fatalf("registered application event %d and window event %d, want %d and %d", gotApplication, gotWindow, test.wantApplication, test.wantWindow)
+			}
+			if applicationCallback != nil {
+				applicationCallback(nil)
+			}
+			if windowCallback != nil {
+				windowCallback(nil)
+			}
+			if test.goos == "windows" {
+				if binds != 0 || deferredBind == nil {
+					t.Fatalf("Windows bind ran before native callback deferral: binds=%d deferred=%v", binds, deferredBind != nil)
+				}
+				deferredBind()
+			} else if deferredBind != nil {
+				t.Fatal("non-Windows updater binding unexpectedly used native callback deferral")
+			}
+			if binds != 1 {
+				t.Fatalf("updater bind callback count = %d, want 1", binds)
+			}
+		})
+	}
+}
+
 func TestRunDesktopLaunchesNativeWindow(t *testing.T) {
 	cfg := &config.Config{Mode: config.ModeDesktop}
 
@@ -87,7 +230,7 @@ func TestRunDesktopLaunchesNativeWindow(t *testing.T) {
 				},
 			}, nil
 		},
-		func(url string, onShutdown func()) error {
+		func(url string, onShutdown func(), _ *update.Coordinator) error {
 			launched = true
 			launchedURL = url
 			onShutdown()
@@ -122,7 +265,7 @@ func TestRunDesktopStartFailure(t *testing.T) {
 		func(context.Context, *config.Config) (*desktopBackend, error) {
 			return nil, startErr
 		},
-		func(string, func()) error {
+		func(string, func(), *update.Coordinator) error {
 			launched = true
 			return nil
 		},
@@ -132,6 +275,52 @@ func TestRunDesktopStartFailure(t *testing.T) {
 	}
 	if launched {
 		t.Fatalf("expected launcher not to run when backend fails")
+	}
+}
+
+func TestRunDesktopIgnoresNativeWindowErrorAfterUpdaterShutdown(t *testing.T) {
+	cfg := &config.Config{Mode: config.ModeDesktop}
+	launchErr := errors.New("webview stopped during initialization")
+	shutdownCalled := false
+
+	err := runDesktop(
+		cfg,
+		func(context.Context, *config.Config) (*desktopBackend, error) {
+			return &desktopBackend{
+				BaseURL: "http://127.0.0.1:43210",
+				Shutdown: func() {
+					shutdownCalled = true
+				},
+			}, nil
+		},
+		func(_ string, onShutdown func(), _ *update.Coordinator) error {
+			onShutdown()
+			return launchErr
+		},
+	)
+	if err != nil {
+		t.Fatalf("runDesktop returned an error after updater shutdown: %v", err)
+	}
+	if !shutdownCalled {
+		t.Fatal("expected backend shutdown to be called")
+	}
+}
+
+func TestRunDesktopReturnsNativeWindowErrorWithoutShutdown(t *testing.T) {
+	cfg := &config.Config{Mode: config.ModeDesktop}
+	launchErr := errors.New("webview failed")
+
+	err := runDesktop(
+		cfg,
+		func(context.Context, *config.Config) (*desktopBackend, error) {
+			return &desktopBackend{BaseURL: "http://127.0.0.1:43210"}, nil
+		},
+		func(string, func(), *update.Coordinator) error {
+			return launchErr
+		},
+	)
+	if !errors.Is(err, launchErr) {
+		t.Fatalf("runDesktop error = %v, want native window error", err)
 	}
 }
 
@@ -154,21 +343,29 @@ func TestLoadDesktopConfigFile(t *testing.T) {
 func TestSetDesktopOAuthDefaults(t *testing.T) {
 	t.Run("defaults oauth redirect mode to auto when unset", func(t *testing.T) {
 		unsetEnv(t, "OAUTH_REDIRECT_MODE")
+		unsetEnv(t, "OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS")
 
 		setDesktopOAuthDefaults()
 
 		if got := os.Getenv("OAUTH_REDIRECT_MODE"); got != "auto" {
 			t.Fatalf("expected OAUTH_REDIRECT_MODE=auto, got %q", got)
 		}
+		if got := os.Getenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS"); got != "true" {
+			t.Fatalf("expected desktop private model endpoints to be enabled, got %q", got)
+		}
 	})
 
 	t.Run("does not override explicitly configured oauth redirect mode", func(t *testing.T) {
 		t.Setenv("OAUTH_REDIRECT_MODE", "hosted")
+		t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "false")
 
 		setDesktopOAuthDefaults()
 
 		if got := os.Getenv("OAUTH_REDIRECT_MODE"); got != "hosted" {
 			t.Fatalf("expected OAUTH_REDIRECT_MODE to stay hosted, got %q", got)
+		}
+		if got := os.Getenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS"); got != "false" {
+			t.Fatalf("expected explicit private endpoint policy to remain false, got %q", got)
 		}
 	})
 }

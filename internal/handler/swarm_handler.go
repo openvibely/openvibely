@@ -95,76 +95,43 @@ func (h *Handler) acceptSwarmChildFollowup(c echo.Context, task *models.Task, me
 			return echo.NewHTTPError(http.StatusBadRequest, "no agent available")
 		}
 	}
-	activeExec, err := h.execRepo.FindActiveTaskExecution(ctx, task.ID, "")
+	admission, err := h.admitTaskFollowup(ctx, taskFollowupAdmissionRequest{
+		Task:                task,
+		Agent:               agent,
+		Message:             message,
+		Source:              models.TaskOriginWeb,
+		LogPrefix:           "acceptSwarmChildFollowup",
+		FatalQueueCareError: true,
+	})
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to check active task turn")
-	}
-	queueBehindFirstTurn, err := h.taskHasStartingFirstTurn(ctx, task)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to check task queue")
-	}
-	if activeExec == nil && !queueBehindFirstTurn {
-		activeExec, err = h.execRepo.FindActiveTaskExecution(ctx, task.ID, "")
-		if err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to check active task turn")
+		if admissionErr, ok := err.(*taskFollowupAdmissionError); ok {
+			switch admissionErr.Op {
+			case taskFollowupAdmissionOpActiveCheck:
+				return echo.NewHTTPError(http.StatusInternalServerError, "failed to check active task turn")
+			case taskFollowupAdmissionOpFirstTurnCheck:
+				return echo.NewHTTPError(http.StatusInternalServerError, "failed to check task queue")
+			case taskFollowupAdmissionOpQueueUnavailable:
+				return echo.NewHTTPError(http.StatusInternalServerError, "thread input queue is unavailable")
+			case taskFollowupAdmissionOpQueueCreate:
+				return echo.NewHTTPError(http.StatusInternalServerError, "failed to queue follow-up")
+			case taskFollowupAdmissionOpBind:
+				return echo.NewHTTPError(http.StatusInternalServerError, "failed to bind queued follow-up")
+			case taskFollowupAdmissionOpPromotionCheck:
+				return echo.NewHTTPError(http.StatusInternalServerError, "failed to check queued follow-up promotion")
+			case taskFollowupAdmissionOpDirectAdmission:
+				return echo.NewHTTPError(http.StatusInternalServerError, "failed to admit execution")
+			case taskFollowupAdmissionOpSwarmChildRouting:
+				return admissionErr.Err
+			}
 		}
-	}
-	if activeExec != nil || queueBehindFirstTurn {
-		if h.threadInputRepo == nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "thread input queue is unavailable")
-		}
-		runExecutionID := ""
-		if activeExec != nil {
-			runExecutionID = activeExec.ID
-		}
-		queued := &models.ThreadInput{
-			Scope:          models.ThreadInputScopeTask,
-			ProjectID:      task.ProjectID,
-			TaskID:         task.ID,
-			RunExecutionID: runExecutionID,
-			AgentConfigID:  agent.ID,
-			InputMode:      models.ThreadInputModeQueued,
-			InputStatus:    models.ThreadInputPending,
-			Content:        message,
-			Source:         models.TaskOriginWeb,
-		}
-		if err := h.threadInputRepo.CreateQueued(ctx, queued); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to queue follow-up")
-		}
-		if err := h.bindQueuedTaskInputToActiveExecutionIfAvailable(ctx, queued); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to bind queued follow-up")
-		}
-		if shouldPromote, promoteErr := h.shouldPromotePreExecutionQueuedInput(ctx, task, queued); promoteErr != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to check queued follow-up promotion")
-		} else if shouldPromote {
-			go h.PromoteQueuedTaskThreadInput(task.ID)
-		}
-		return c.JSON(http.StatusOK, map[string]string{"status": "queued", "queued_input_id": queued.ID})
-	}
-	exec := &models.Execution{
-		TaskID:        task.ID,
-		AgentConfigID: agent.ID,
-		Status:        models.ExecRunning,
-		PromptSent:    message,
-		IsFollowup:    true,
-	}
-	queued := &models.ThreadInput{AgentConfigID: agent.ID, Content: message, Source: models.TaskOriginWeb}
-	started, err := h.execRepo.CreateDirectTaskFollowupOrQueue(ctx, exec, queued)
-	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to admit execution")
 	}
-	if !started {
-		go h.PromoteQueuedTaskThreadInput(task.ID)
-		return c.JSON(http.StatusOK, map[string]string{"status": "queued", "queued_input_id": queued.ID})
+	if admission.Queued != nil {
+		return c.JSON(http.StatusOK, map[string]string{"status": "queued", "queued_input_id": admission.Queued.ID})
 	}
-	if err := h.applySwarmChildFollowupStart(ctx, task, message); err != nil {
-		h.completeWithFailure(ctx, exec.ID, task.ID, err.Error(), 0)
-		return err
-	}
-	if updatedTask, getErr := h.taskRepo.GetByID(ctx, task.ID); getErr == nil && updatedTask != nil {
-		task = updatedTask
-	}
-	go h.processStreamingResponse(streamingResponseParams{
+	exec := admission.Execution
+	task = admission.Task
+	if err := h.startStreamingResponse(streamingResponseParams{
 		ExecID:           exec.ID,
 		TaskID:           task.ID,
 		Message:          message,
@@ -174,7 +141,10 @@ func (h *Handler) acceptSwarmChildFollowup(c echo.Context, task *models.Task, me
 		InputOrigin:      models.TaskOriginWeb,
 		DeferHistoryLoad: true,
 		Task:             task,
-	})
+	}); err != nil {
+		c.Response().Header().Set("Retry-After", "30")
+		return echo.NewHTTPError(http.StatusServiceUnavailable, err.Error())
+	}
 	return c.JSON(http.StatusOK, map[string]string{"status": "started", "execution_id": exec.ID})
 }
 

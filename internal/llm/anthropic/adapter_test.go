@@ -131,7 +131,7 @@ func TestCallDirectReturnsErrorOnRefusalStopReason(t *testing.T) {
 		ReasoningEffort: "low",
 		AuthMethod:      models.AuthMethodAPIKey,
 		APIKey:          "test-key",
-	}, ".", "", nil, nil, nil, true, true, false)
+	}, ".", "", nil, nil, nil, true, true, false, false)
 	if err == nil {
 		t.Fatal("expected refusal stop_reason to return an error")
 	}
@@ -146,6 +146,67 @@ func TestCallDirectReturnsErrorOnRefusalStopReason(t *testing.T) {
 	}
 	if _, ok := gotBody["output_config"]; ok {
 		t.Fatalf("unsupported Sonnet 4.5 effort must be omitted, got %#v", gotBody["output_config"])
+	}
+}
+
+func TestCallDirectOperationUsesRuntimeToolsAndDefaultFraming(t *testing.T) {
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if err := json.Unmarshal(body, &gotBody); err != nil {
+			t.Fatalf("unmarshal request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		for _, evt := range []string{
+			`{"type":"message_start","message":{"id":"msg_1","model":"claude-test","usage":{"input_tokens":8,"cache_creation_input_tokens":1,"cache_read_input_tokens":2}}}`,
+			`{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
+			`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"direct result"}}`,
+			`{"type":"content_block_stop","index":0}`,
+			`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":3}}`,
+			`{"type":"message_stop"}`,
+		} {
+			fmt.Fprintf(w, "data: %s\n\n", evt)
+		}
+	}))
+	defer server.Close()
+
+	origHost := anthropicclient.AnthropicAPIHost
+	anthropicclient.AnthropicAPIHost = server.URL
+	defer func() { anthropicclient.AnthropicAPIHost = origHost }()
+
+	ctx := llmcontracts.WithRuntimeTools(context.Background(), &llmcontracts.RuntimeTools{
+		Definitions:      []llmcontracts.RuntimeToolDefinition{{Name: "create_task", Description: "Create a task", Parameters: json.RawMessage(`{"type":"object"}`)}},
+		SkipDefaultTools: true,
+	})
+	adapter := New(nil, nil, nil)
+	result, err := adapter.Call(ctx, llmcontracts.AgentRequest{
+		Operation:           llmcontracts.OperationDirect,
+		Message:             "solve it",
+		ProjectInstructions: "project rules",
+		Agent: models.LLMConfig{
+			Name:            "Claude API",
+			Provider:        models.ProviderAnthropic,
+			Model:           "claude-opus-5",
+			ReasoningEffort: "low",
+			AuthMethod:      models.AuthMethodAPIKey,
+			APIKey:          "test-key",
+		},
+	}, "/repo/worktree", nil)
+	if err != nil {
+		t.Fatalf("Call direct: %v", err)
+	}
+	if result.Output != "direct result" || result.Usage.InputTokens != 8 || result.Usage.OutputTokens != 3 {
+		t.Fatalf("result = %#v", result)
+	}
+	if system := fmt.Sprint(gotBody["system"]); !strings.Contains(system, "project rules") || !strings.Contains(system, "expert software engineer") {
+		t.Fatalf("direct call omitted default system framing: %#v", gotBody["system"])
+	}
+	if !strings.Contains(fmt.Sprint(gotBody["messages"]), "solve it") {
+		t.Fatalf("direct call omitted task prompt: %#v", gotBody["messages"])
+	}
+	if tools := fmt.Sprint(gotBody["tools"]); !strings.Contains(tools, "create_task") || strings.Contains(tools, "Bash") {
+		t.Fatalf("runtime/default tool set = %s", tools)
 	}
 }
 
@@ -184,7 +245,7 @@ func TestCallDirectRawPromptOmitsOpenVibelySystemTaskPromptAndTools(t *testing.T
 		ReasoningEffort: "max",
 		AuthMethod:      models.AuthMethodAPIKey,
 		APIKey:          "test-key",
-	}, "/secret/workdir", "project instructions", nil, nil, nil, true, true, true)
+	}, "/secret/workdir", "project instructions", nil, nil, nil, true, true, true, false)
 	if err != nil {
 		t.Fatalf("callDirect: %v", err)
 	}
@@ -244,55 +305,6 @@ func TestToolSecondaryInfo_LongGrepPreservesLaterPatternContext(t *testing.T) {
 	got := toolSecondaryInfo("Grep", raw)
 	if !strings.Contains(got, "chat_shared") {
 		t.Fatalf("expected later grep context to survive truncation, got %q", got)
-	}
-}
-
-func TestWrapToolFilterForPlanMode_ReadOnlyAllowlist(t *testing.T) {
-	base := func(name string) bool { return true }
-	filter := wrapToolFilterForPlanMode(base, false, models.ChatModePlan)
-
-	if !filter("read_file") || !filter("list_files") || !filter("grep_search") {
-		t.Fatalf("expected read-only tool allowlist to pass")
-	}
-	if filter("write_file") || filter("edit_file") || filter("bash") {
-		t.Fatalf("expected mutating tools to be blocked in plan mode")
-	}
-}
-
-func TestComposeRuntimeToolFilter_OrchestrateAllowsOnlyActionTools(t *testing.T) {
-	rt := &llmcontracts.RuntimeTools{
-		Definitions: []llmcontracts.RuntimeToolDefinition{
-			{Name: "create_task"},
-		},
-	}
-	base := func(name string) bool { return true }
-
-	filter := composeRuntimeToolFilter(base, rt, false, models.ChatModeOrchestrate)
-	if !filter("create_task") {
-		t.Fatalf("expected action tool to be allowed in orchestrate mode")
-	}
-	if filter("read_file") {
-		t.Fatalf("expected filesystem tool to be blocked in orchestrate mode")
-	}
-}
-
-func TestComposeRuntimeToolFilter_PlanBlocksActionToolsAndMutations(t *testing.T) {
-	rt := &llmcontracts.RuntimeTools{
-		Definitions: []llmcontracts.RuntimeToolDefinition{
-			{Name: "create_task"},
-		},
-	}
-	base := func(name string) bool { return true }
-
-	filter := composeRuntimeToolFilter(base, rt, false, models.ChatModePlan)
-	if filter("create_task") {
-		t.Fatalf("expected action tool to be blocked in plan mode")
-	}
-	if !filter("read_file") || !filter("list_files") || !filter("grep_search") {
-		t.Fatalf("expected read-only tools to remain allowed in plan mode")
-	}
-	if filter("write_file") || filter("bash") {
-		t.Fatalf("expected mutating tools to be blocked in plan mode")
 	}
 }
 
@@ -469,5 +481,200 @@ func TestResolveChatToolPolicy(t *testing.T) {
 					tc.follow, tc.mode, tc.rt == nil, gotDisable, gotSkip, tc.wantD, tc.wantS)
 			}
 		})
+	}
+}
+
+// Lifecycle hooks return structured JSON. They must keep their own agent
+// prompt but drop the shared coding-agent system prompt, the take-direct-action
+// header, and provider web tools, all of which are wasted context for them.
+func TestCallDirectLifecycleHookDropsCodingAgentFraming(t *testing.T) {
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if err := json.Unmarshal(body, &gotBody); err != nil {
+			t.Fatalf("unmarshal request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		events := []string{
+			`{"type":"message_start","message":{"id":"msg_1","model":"claude-test","usage":{"input_tokens":4}}}`,
+			`{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
+			`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"{}"}}`,
+			`{"type":"content_block_stop","index":0}`,
+			`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":2}}`,
+			`{"type":"message_stop"}`,
+		}
+		for _, evt := range events {
+			fmt.Fprintf(w, "data: %s\n\n", evt)
+		}
+	}))
+	defer server.Close()
+
+	origHost := anthropicclient.AnthropicAPIHost
+	anthropicclient.AnthropicAPIHost = server.URL
+	defer func() { anthropicclient.AnthropicAPIHost = origHost }()
+
+	adapter := New(nil, nil, nil)
+	_, _, err := adapter.callDirect(context.Background(), "HOOK PROMPT", nil, models.LLMConfig{
+		Name:       "Claude API",
+		Provider:   models.ProviderAnthropic,
+		Model:      "claude-opus-5",
+		AuthMethod: models.AuthMethodAPIKey,
+		APIKey:     "test-key",
+	}, "/repo", "AGENT OWN PROMPT", nil, nil, nil, true, true, false, true)
+	if err != nil {
+		t.Fatalf("callDirect: %v", err)
+	}
+
+	systemBlocks, _ := json.Marshal(gotBody["system"])
+	system := string(systemBlocks)
+	if !strings.Contains(system, "AGENT OWN PROMPT") {
+		t.Fatalf("lifecycle hook must keep its own agent prompt, got %s", system)
+	}
+	if strings.Contains(system, "expert software engineer") {
+		t.Fatalf("lifecycle hook must not receive the coding-agent system prompt, got %s", system)
+	}
+
+	messages, _ := json.Marshal(gotBody["messages"])
+	if strings.Contains(string(messages), "Do not use plan mode") {
+		t.Fatalf("lifecycle hook must not receive the task prompt header, got %s", messages)
+	}
+
+	tools, _ := json.Marshal(gotBody["tools"])
+	if strings.Contains(string(tools), "web_search") || strings.Contains(string(tools), "web_fetch") {
+		t.Fatalf("lifecycle hook must not receive provider web tools, got %s", tools)
+	}
+}
+
+func TestCallStreamingUsesAgenticStreamCallbacksAndRuntimeTools(t *testing.T) {
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if err := json.Unmarshal(body, &gotBody); err != nil {
+			t.Fatalf("unmarshal request body: %v", err)
+		}
+		if got := r.Header.Get("x-api-key"); got != "test-key" {
+			t.Fatalf("x-api-key = %q, want test-key", got)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		for _, evt := range []string{
+			`{"type":"message_start","message":{"id":"msg_stream","model":"claude-opus-5","usage":{"input_tokens":11,"cache_creation_input_tokens":2,"cache_read_input_tokens":3}}}`,
+			`{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}`,
+			`{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"consider options"}}`,
+			`{"type":"content_block_stop","index":0}`,
+			`{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_1","name":"create_task","input":{"title":"ship it"}}}`,
+			`{"type":"content_block_stop","index":1}`,
+			`{"type":"content_block_start","index":2,"content_block":{"type":"text","text":""}}`,
+			`{"type":"content_block_delta","index":2,"delta":{"type":"text_delta","text":"streamed answer"}}`,
+			`{"type":"content_block_stop","index":2}`,
+			`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5}}`,
+			`{"type":"message_stop"}`,
+		} {
+			fmt.Fprintf(w, "data: %s\n\n", evt)
+		}
+	}))
+	defer server.Close()
+
+	origHost := anthropicclient.AnthropicAPIHost
+	anthropicclient.AnthropicAPIHost = server.URL
+	defer func() { anthropicclient.AnthropicAPIHost = origHost }()
+
+	ctx := llmcontracts.WithRuntimeTools(context.Background(), &llmcontracts.RuntimeTools{
+		Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "create_task", Description: "Create task", Parameters: json.RawMessage(`{"type":"object"}`)}},
+		Executor: func(ctx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
+			if name != "create_task" || !strings.Contains(string(input), "ship it") {
+				t.Fatalf("runtime tool call = %s %s", name, string(input))
+			}
+			return `{"created":true}`, true, false, nil
+		},
+		SkipDefaultTools: true,
+	})
+
+	adapter := New(nil, nil, nil)
+	output, textOnly, usage, err := adapter.callStreaming(ctx, "Finish task", nil, models.LLMConfig{
+		Name:            "Claude API",
+		Provider:        models.ProviderAnthropic,
+		Model:           "claude-opus-5",
+		ReasoningEffort: "low",
+		AuthMethod:      models.AuthMethodAPIKey,
+		APIKey:          "test-key",
+	}, "exec-stream", "/repo/worktree", "project rules", nil, nil, nil, false)
+	if err != nil {
+		t.Fatalf("callStreaming: %v", err)
+	}
+	if !strings.Contains(output, "streamed answer") || !strings.Contains(output, "consider options") {
+		t.Fatalf("stream output missing thinking/text events: %q", output)
+	}
+	if textOnly != "streamed answer" {
+		t.Fatalf("textOnly = %q, want streamed answer", textOnly)
+	}
+	if usage.InputTokens != 11 || usage.OutputTokens != 5 || usage.TotalTokens != 16 {
+		t.Fatalf("usage = %#v", usage)
+	}
+	payload := fmt.Sprint(gotBody)
+	if !strings.Contains(payload, "Finish task") || !strings.Contains(payload, "project rules") || !strings.Contains(payload, "create_task") {
+		t.Fatalf("request body missing prompt/system/runtime tools: %#v", gotBody)
+	}
+	if strings.Contains(payload, "Bash") {
+		t.Fatalf("SkipDefaultTools should omit default tools, got %#v", gotBody["tools"])
+	}
+}
+
+func TestCallChatStreamingUsesRuntimePolicyHistoryAndSystemContext(t *testing.T) {
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if err := json.Unmarshal(body, &gotBody); err != nil {
+			t.Fatalf("unmarshal request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		for _, evt := range []string{
+			`{"type":"message_start","message":{"id":"msg_chat","model":"claude-opus-5","usage":{"input_tokens":7}}}`,
+			`{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
+			`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"chat answer"}}`,
+			`{"type":"content_block_stop","index":0}`,
+			`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":4}}`,
+			`{"type":"message_stop"}`,
+		} {
+			fmt.Fprintf(w, "data: %s\n\n", evt)
+		}
+	}))
+	defer server.Close()
+
+	origHost := anthropicclient.AnthropicAPIHost
+	anthropicclient.AnthropicAPIHost = server.URL
+	defer func() { anthropicclient.AnthropicAPIHost = origHost }()
+
+	ctx := llmcontracts.WithRuntimeTools(context.Background(), &llmcontracts.RuntimeTools{
+		Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "list_tasks", Description: "List tasks", Parameters: json.RawMessage(`{"type":"object"}`)}},
+	})
+	adapter := New(nil, nil, nil)
+	output, usage, err := adapter.callChatStreaming(ctx, "What next?", nil, models.LLMConfig{
+		Name:            "Claude API",
+		Provider:        models.ProviderAnthropic,
+		Model:           "claude-opus-5",
+		ReasoningEffort: "low",
+		AuthMethod:      models.AuthMethodAPIKey,
+		APIKey:          "test-key",
+	}, "exec-chat", []models.Execution{{PromptSent: "Earlier question", Output: "Earlier answer", Status: models.ExecCompleted}}, "CHAT_SYSTEM_SENTINEL", true, models.ChatModeOrchestrate, "/repo/worktree", nil, nil, nil, false)
+	if err != nil {
+		t.Fatalf("callChatStreaming: %v", err)
+	}
+	if !strings.Contains(output, "chat answer") {
+		t.Fatalf("output = %q", output)
+	}
+	if usage.InputTokens != 7 || usage.OutputTokens != 4 {
+		t.Fatalf("usage = %#v", usage)
+	}
+	payload := fmt.Sprint(gotBody)
+	for _, want := range []string{"What next?", "Earlier question", "Earlier answer", "CHAT_SYSTEM_SENTINEL", "list_tasks"} {
+		if !strings.Contains(payload, want) {
+			t.Fatalf("request body missing %q: %#v", want, gotBody)
+		}
+	}
+	if !strings.Contains(payload, llmprompt.ChatActionToolModeInstructions) {
+		t.Fatalf("chat runtime tools should enable action guidance: %#v", gotBody["system"])
 	}
 }

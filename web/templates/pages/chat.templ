@@ -47,7 +47,7 @@ templ ChatEarlierMessages(chatHistory []models.Execution, chatAttachments map[st
 	for _, exec := range chatHistory {
 		<div id={ "chat-execution-" + exec.ID } class="chat-execution-pair space-y-6" data-execution-pair="true" data-exec-id={ exec.ID } data-exec-status={ string(exec.Status) } data-execution-revision={ components.ChatExecutionRevision(exec) } data-started-at={ exec.StartedAt.Format(time.RFC3339Nano) }>
 			if attachments, hasAttachments := chatAttachments[exec.ID]; hasAttachments {
-				@components.ChatBubbleWithAttachments("User", exec.PromptSent, attachments)
+				@components.ChatBubbleWithAttachments("User", exec.PromptSent, attachments, currentProjectID)
 			} else {
 				@components.ChatBubble("User", exec.PromptSent)
 			}
@@ -73,19 +73,22 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 				<h2 class="text-2xl font-bold">Chat</h2>
 				<p class="text-sm opacity-60 mt-1">Coordinate and orchestrate AI tasks across your project</p>
 			</div>
-			<div class="dropdown dropdown-end">
-				<label tabindex="0" class="btn btn-xs btn-ghost" title="More actions" onclick="handleDropdownToggle(event)">
+			<div class="dropdown dropdown-end" data-chat-actions-dropdown>
+				<button type="button" class="btn btn-xs btn-ghost" title="More actions" aria-label="More actions" aria-haspopup="menu" aria-expanded="false" aria-controls="chat-actions-menu" onclick="toggleChatActionsDropdown(event)">
 					<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
 					</svg>
-				</label>
-				<ul tabindex="0" class="dropdown-content menu p-2 shadow bg-base-100 rounded-box w-56 z-[100]">
+				</button>
+				<ul id="chat-actions-menu" tabindex="0" role="menu" class="dropdown-content menu p-2 shadow bg-base-100 rounded-box w-56 z-[100]">
 					<li>
 						<button
+							type="button"
 							hx-delete={ "/chat/history?project_id=" + currentProjectID }
 							hx-target="closest #chat-page-root"
 							hx-swap="outerHTML"
+							hx-confirm="Clear all chat history? This cannot be undone."
 							class="text-error"
+							role="menuitem"
 						>
 							<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
@@ -97,16 +100,28 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 			</div>
 		</div>
 		<!-- Chat Messages Container -->
-				<div id="chat-messages" class="flex-1 min-h-0 overflow-y-auto py-4 mb-4 space-y-6" style="visibility: hidden;" data-transcript-hydrating="true" data-window-limit={ fmt.Sprintf("%d", windowLimit) } data-earlier-url-base={ "/chat?project_id=" + currentProjectID + "&limit=" + fmt.Sprintf("%d", windowLimit) } data-scroll-intent-scope={ currentProjectID }>			if hasEarlier && len(chatHistory) > 0 {
+		<div id="chat-messages" class="flex-1 min-h-0 overflow-y-auto pt-4 pb-4 -mb-3 space-y-6" style="visibility: hidden;" data-transcript-hydrating="true" data-window-limit={ fmt.Sprintf("%d", windowLimit) } data-earlier-url-base={ "/chat?project_id=" + currentProjectID + "&limit=" + fmt.Sprintf("%d", windowLimit) } data-scroll-intent-scope={ currentProjectID }>
+			if hasEarlier && len(chatHistory) > 0 {
 				@components.ChatEarlierMessagesLoader("chat-messages", "/chat?project_id="+currentProjectID+"&before="+chatHistory[0].ID+"&limit="+fmt.Sprintf("%d", windowLimit), windowLimit)
 			}
 			if len(chatHistory) == 0 && len(pendingInputs) == 0 {
 				@components.ChatEmptyState("Start a conversation by typing a message below")
 			} else {
 				for _, exec := range chatHistory {
-					<div id={ "chat-execution-" + exec.ID } class="chat-execution-pair space-y-6" data-execution-pair="true" data-exec-id={ exec.ID } data-exec-status={ string(exec.Status) } data-execution-revision={ components.ChatExecutionRevision(exec) } data-started-at={ exec.StartedAt.Format(time.RFC3339Nano) } if exec.Status == models.ExecCompleted || exec.Status == models.ExecFailed || exec.Status == models.ExecCancelled { hx-preserve="true" }>
+					<div
+						id={ "chat-execution-" + exec.ID }
+						class="chat-execution-pair space-y-6"
+						data-execution-pair="true"
+						data-exec-id={ exec.ID }
+						data-exec-status={ string(exec.Status) }
+						data-execution-revision={ components.ChatExecutionRevision(exec) }
+						data-started-at={ exec.StartedAt.Format(time.RFC3339Nano) }
+						if exec.Status == models.ExecCompleted || exec.Status == models.ExecFailed || exec.Status == models.ExecCancelled {
+							hx-preserve="true"
+						}
+					>
 						if attachments, hasAttachments := chatAttachments[exec.ID]; hasAttachments {
-							@components.ChatBubbleWithAttachments("User", exec.PromptSent, attachments)
+							@components.ChatBubbleWithAttachments("User", exec.PromptSent, attachments, currentProjectID)
 						} else {
 							@components.ChatBubble("User", exec.PromptSent)
 						}
@@ -148,16 +163,99 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 			ChatMode:               models.ChatModeOrchestrate,
 			ProjectID:              currentProjectID,
 			IsRunning:              chatHasActiveTurn(chatHistory),
-				ActiveTurnID:           chatActiveTurnID(chatHistory),
-				StopEndpoint:           "/chat/stop?project_id=" + currentProjectID,
-				PendingInputs:          pendingInputs,
+			ActiveTurnID:           chatActiveTurnID(chatHistory),
+			StopEndpoint:           "/chat/stop?project_id=" + currentProjectID,
+			SteerEndpoint:          "/chat/steer?project_id=" + currentProjectID,
+			PendingInputs:          pendingInputs,
 			QueuedSteerEndpointFor: chatQueuedSteerEndpoint,
 		})
-			<!-- Shared auto-scroll and transcript rendering/cleaning utilities -->
-			@components.ChatAutoScrollScript()
-			@components.ChatStreamingResumeInitScript()
-			<!-- Chat-specific: draft persistence, plan handling, and HTMX swap behavior -->
-				<script>
+		<!-- Shared auto-scroll and transcript rendering/cleaning utilities -->
+		@components.ChatAutoScrollScript()
+		@components.ChatStreamingResumeInitScript()
+		<!-- Chat-specific: draft persistence, plan handling, and HTMX swap behavior -->
+		<script>
+			(function() {
+				var setChatActionsOpen = function(dropdown, open) {
+					if (!dropdown) return;
+					if (open) dropdown.setAttribute('data-chat-actions-open', 'true');
+					else dropdown.removeAttribute('data-chat-actions-open');
+					var trigger = dropdown.querySelector('[aria-controls="chat-actions-menu"]');
+					if (trigger) trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+				};
+				var chatActionsTrigger = function(dropdown) {
+					return dropdown ? dropdown.querySelector('[aria-controls="chat-actions-menu"]') : null;
+				};
+				var restoreChatActionsFocus = function(dropdown) {
+					var trigger = chatActionsTrigger(dropdown);
+					if (!trigger || typeof trigger.focus !== 'function') return;
+					try {
+						trigger.focus({preventScroll: true});
+					} catch (_) {
+						trigger.focus();
+					}
+				};
+				var closeChatActions = function(dropdown, restoreFocus) {
+					setChatActionsOpen(dropdown, false);
+					if (restoreFocus) restoreChatActionsFocus(dropdown);
+				};
+				var resetChatActionsDropdown = function() {
+					closeChatActions(document.querySelector('[data-chat-actions-dropdown]'), false);
+				};
+				window.toggleChatActionsDropdown = function(event) {
+					if (!event) return;
+					event.stopPropagation();
+					var trigger = event.currentTarget;
+					var dropdown = trigger && trigger.closest ? trigger.closest('[data-chat-actions-dropdown]') : null;
+					if (!dropdown) return;
+					var isOpen = dropdown.getAttribute('data-chat-actions-open') === 'true';
+					if (isOpen) {
+						event.preventDefault();
+						closeChatActions(dropdown, true);
+						return;
+					}
+					setChatActionsOpen(dropdown, true);
+					requestAnimationFrame(function() {
+						if (typeof positionDropdownForViewport === 'function') positionDropdownForViewport(trigger);
+					});
+				};
+
+				var dropdown = document.querySelector('[data-chat-actions-dropdown]');
+				if (dropdown) {
+					// A Wails WebView may focus the first focusable control during startup.
+					// Explicit state keeps that focus accessible without opening the menu.
+					setChatActionsOpen(dropdown, false);
+					var trigger = chatActionsTrigger(dropdown);
+					if (trigger) trigger.addEventListener('keydown', function(event) {
+						if (event.key !== 'Enter' && event.key !== ' ' && event.key !== 'Spacebar') return;
+						event.preventDefault();
+						window.toggleChatActionsDropdown(event);
+					});
+					dropdown.addEventListener('focusout', function(event) {
+						if (!event.relatedTarget || !dropdown.contains(event.relatedTarget)) closeChatActions(dropdown, false);
+					});
+					dropdown.addEventListener('keydown', function(event) {
+						if (event.key !== 'Escape') return;
+						event.preventDefault();
+						event.stopPropagation();
+						closeChatActions(dropdown, true);
+					});
+				}
+
+				if (!window._chatActionsPointerCloseBound) {
+					window._chatActionsPointerCloseBound = true;
+					document.addEventListener('pointerdown', function(event) {
+						var currentDropdown = document.querySelector('[data-chat-actions-dropdown]');
+						if (currentDropdown && !currentDropdown.contains(event.target)) closeChatActions(currentDropdown, false);
+					}, true);
+				}
+				if (!window._chatActionsHistoryRestoreBound) {
+					window._chatActionsHistoryRestoreBound = true;
+					document.body.addEventListener('htmx:historyRestore', function() {
+						setTimeout(resetChatActionsDropdown, 0);
+					});
+				}
+			})();
+
 					window.initializeChatTranscriptScroll = function() {
 						var chatRoot = document.getElementById('chat-page-root');
 						var chatMessages = document.getElementById('chat-messages');
@@ -575,8 +673,18 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 			if (!window._chatSwapHandlerAttached) {
 				window._chatSwapHandlerAttached = true;
 
-				// Track request-local Chat streaming state without changing scroll intent
-				// until the shared composer confirms that the send was accepted.
+					// Track request-local Chat streaming state without changing scroll intent
+					// until the shared composer confirms that the send was accepted.
+					window._chatQueuedSteerInFlight = window._chatQueuedSteerInFlight || {};
+					window._chatQueuedSteerClearTimers = window._chatQueuedSteerClearTimers || {};
+					window._chatDirectSteerInFlight = false;
+					window._chatDirectSteerClearTimer = null;
+					function chatQueuedSteerInputID(triggerEl) {
+						if (!triggerEl || !triggerEl.getAttribute) return '';
+						var hxPost = triggerEl.getAttribute('hx-post') || '';
+						var match = hxPost.match(/^\/chat\/queued\/([^\/]+)\/steer$/);
+						return match ? match[1] : '';
+					}
 					document.body.addEventListener('htmx:beforeRequest', function(event) {
 						var triggerEl = event.detail.elt;
 						if (triggerEl && triggerEl.id === 'chat-form') {
@@ -586,6 +694,15 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							if (window.hidePlanCompletionPrompt) window.hidePlanCompletionPrompt();
 							// Flag that a web send is in progress (prevents live SSE duplication)
 							window._chatWebSendInProgress = true;
+							if (triggerEl.getAttribute('data-submit-intent') === 'steer') {
+								window._chatDirectSteerInFlight = true;
+								if (window._chatDirectSteerClearTimer) clearTimeout(window._chatDirectSteerClearTimer);
+							}
+						}
+						var queuedSteerID = chatQueuedSteerInputID(triggerEl);
+						if (queuedSteerID) {
+							window._chatQueuedSteerInFlight[queuedSteerID] = true;
+							if (window._chatQueuedSteerClearTimers[queuedSteerID]) clearTimeout(window._chatQueuedSteerClearTimers[queuedSteerID]);
 						}
 					});
 
@@ -595,9 +712,21 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							// Queued sends can return only out-of-band composer updates, so do
 							// not rely on a chat-messages swap to clear web-send suppression.
 							window._chatWebSendInProgress = false;
+							if (window._chatDirectSteerInFlight) {
+								window._chatDirectSteerClearTimer = setTimeout(function() {
+									window._chatDirectSteerInFlight = false;
+									window._chatDirectSteerClearTimer = null;
+								}, 1000);
+							}
 						}
-					});
-				document.body.addEventListener('htmx:afterSwap', function(event) {
+						var queuedSteerID = chatQueuedSteerInputID(triggerEl);
+						if (queuedSteerID) {
+							window._chatQueuedSteerClearTimers[queuedSteerID] = setTimeout(function() {
+								delete window._chatQueuedSteerInFlight[queuedSteerID];
+								delete window._chatQueuedSteerClearTimers[queuedSteerID];
+							}, 1000);
+						}
+					});				document.body.addEventListener('htmx:afterSwap', function(event) {
 					var swapTarget = event.detail.target;
 					var isChatMessagesSwap = !!(swapTarget && swapTarget.id === 'chat-messages');
 					var isChatRootSwap = !!(swapTarget && swapTarget.id === 'chat-page-root');
@@ -701,10 +830,8 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 						if (typeof completedOutput === 'string') {
 							if (window.setChatRawContent) window.setChatRawContent(streamContainer, completedOutput);
 							else streamContainer.setAttribute('data-raw-content', completedOutput);
-							if (window._chatStreamInProgress) {
-								streamContainer._authoritativeTerminalContent = completedOutput;
-								streamContainer.setAttribute('data-authoritative-terminal-content', 'true');
-							}
+							streamContainer._authoritativeTerminalContent = completedOutput;
+							streamContainer.setAttribute('data-authoritative-terminal-content', 'true');
 						}
 						if (typeof completedOutput === 'string' && completedOutput !== '') {
 							if (window.renderStreamingContent) {
@@ -1021,6 +1148,15 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 						return pendingContainer;
 					};
 
+					var createPendingAttachmentBadge = function(label, title) {
+						var badge = document.createElement('div');
+						badge.className = 'badge badge-ghost badge-sm shrink-0 gap-1 text-xs';
+						badge.title = title;
+						badge.setAttribute('aria-label', title);
+						badge.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.586-6.586a4 4 0 00-5.657-5.657L5.757 10.757a6 6 0 108.486 8.486L21 12.486"></path></svg><span>' + label + '</span>';
+						return badge;
+					};
+
 					window.syncChatTranscriptRevision = function(expectedExecID) {
 						var root = document.getElementById('chat-page-root');
 						if (!root || typeof fetch === 'undefined') return Promise.resolve(false);
@@ -1125,15 +1261,17 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 									return;
 								}
 
-								if (eventType === 'chat_turn_steered') {
-							if (document.querySelector('[data-thread-input-id="' + data.exec_id + '"]')) return;
-							if (data.source === 'web' && window._chatWebSendInProgress) return;
-							if (window.hidePlanCompletionPrompt) window.hidePlanCompletionPrompt();
-
-							var pendingContainer = ensureComposerPendingContainer();
-							if (!pendingContainer) return;
-							var steeringRow = document.createElement('div');
-							steeringRow.id = 'thread-input-' + data.exec_id;
+									if (eventType === 'chat_turn_steered') {
+								var existingSteeringRow = document.querySelector('[data-thread-input-id="' + data.exec_id + '"]');
+								if (existingSteeringRow && existingSteeringRow.getAttribute('data-input-mode') === 'steering') return;
+								if (window._chatQueuedSteerInFlight && window._chatQueuedSteerInFlight[data.exec_id]) return;
+									if (data.source === 'web' && window._chatDirectSteerInFlight) return;
+									if (!existingSteeringRow && data.source === 'web' && window._chatWebSendInProgress) return;
+									if (window.hidePlanCompletionPrompt) window.hidePlanCompletionPrompt();
+								var pendingContainer = ensureComposerPendingContainer();
+								if (!pendingContainer) return;
+								if (existingSteeringRow) existingSteeringRow.remove();
+								var steeringRow = document.createElement('div');							steeringRow.id = 'thread-input-' + data.exec_id;
 							steeringRow.className = 'steering-input-row flex min-h-8 items-center gap-3 rounded-lg bg-base-300/45 px-3 py-1.5 text-sm text-base-content/80';
 							steeringRow.setAttribute('data-thread-input-id', data.exec_id);
 							steeringRow.setAttribute('data-input-mode', 'steering');
@@ -1161,9 +1299,9 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							cancelSteeringBtn.setAttribute('aria-label', 'Cancel pending steering');
 							cancelSteeringBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>';
 							actionWrap.appendChild(cancelSteeringBtn);
-							steeringRow.appendChild(content);
-							steeringRow.appendChild(actionWrap);
-							pendingContainer.appendChild(steeringRow);
+								steeringRow.appendChild(content);
+								if (data.has_attachments) steeringRow.appendChild(createPendingAttachmentBadge('Attachments included', 'Attachments included with this steering instruction'));
+								steeringRow.appendChild(actionWrap);							pendingContainer.appendChild(steeringRow);
 							// CSS handles bottom padding while pending rows exist.
 							if (window.htmx) htmx.process(steeringRow);
 							return;
@@ -1180,7 +1318,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 									return;
 								}
 									if (eventType === 'chat_new_message') {
-									if (data.has_attachments) {
+									if (data.has_attachments && !data.queued) {
 										var chatContainer = document.getElementById('chat-page-root');
 										var pid = chatContainer ? chatContainer.getAttribute('data-project-id') : projectId;
 										if (chatContainer && pid && typeof htmx !== 'undefined') {
@@ -1262,6 +1400,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 											cancelBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>';										actionWrap.appendChild(steerBtn);
 										actionWrap.appendChild(cancelBtn);
 										queuedRow.appendChild(queuedPreview);
+										if (data.has_attachments) queuedRow.appendChild(createPendingAttachmentBadge('Attachments queued', 'Attachments queued with this follow-up'));
 										queuedRow.appendChild(actionWrap);
 										pendingContainer.appendChild(queuedRow);
 										// CSS handles bottom padding while pending rows exist.

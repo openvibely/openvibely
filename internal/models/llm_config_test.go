@@ -62,6 +62,16 @@ func TestLLMConfig_HasValidOAuthToken(t *testing.T) {
 			expected: true,
 		},
 		{
+			name: "Opaque token with unknown expiry",
+			config: LLMConfig{
+				Provider:         ProviderOpenAICompatible,
+				AuthMethod:       AuthMethodOAuth,
+				OAuthAccessToken: "opaque-token",
+				OAuthExpiresAt:   0,
+			},
+			expected: true,
+		},
+		{
 			name: "Expired token",
 			config: LLMConfig{
 				Provider:         ProviderAnthropic,
@@ -123,6 +133,7 @@ func TestLLMConfigIsCallableMixtureSlot(t *testing.T) {
 		{name: "anthropic oauth", cfg: LLMConfig{Provider: ProviderAnthropic, AuthMethod: AuthMethodOAuth}, want: true},
 		{name: "anthropic cli", cfg: LLMConfig{Provider: ProviderAnthropic, AuthMethod: AuthMethodCLI}, want: false},
 		{name: "openai compatible api key", cfg: LLMConfig{Provider: ProviderOpenAICompatible, AuthMethod: AuthMethodAPIKey}, want: true},
+		{name: "openai compatible oauth", cfg: LLMConfig{Provider: ProviderOpenAICompatible, AuthMethod: AuthMethodOAuth}, want: true},
 		{name: "openai compatible cli", cfg: LLMConfig{Provider: ProviderOpenAICompatible, AuthMethod: AuthMethodCLI}, want: false},
 		{name: "ollama", cfg: LLMConfig{Provider: ProviderOllama}, want: true},
 		{name: "test", cfg: LLMConfig{Provider: ProviderTest}, want: true},
@@ -135,5 +146,20 @@ func TestLLMConfigIsCallableMixtureSlot(t *testing.T) {
 				t.Fatalf("IsCallableMixtureSlot() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestLLMConfigAuthHeaderValuePrefixSupportsRawAPIKeys(t *testing.T) {
+	legacy := LLMConfig{}
+	if got := legacy.GetAuthHeaderValuePrefix(); got != "Bearer " {
+		t.Fatalf("legacy prefix = %q, want Bearer", got)
+	}
+	raw := LLMConfig{AuthHeaderName: "X-API-Key"}
+	if got := raw.GetAuthHeaderValuePrefix(); got != "" {
+		t.Fatalf("raw prefix = %q, want empty", got)
+	}
+	explicit := LLMConfig{AuthHeaderName: "X-API-Key", AuthHeaderValuePrefix: "Token "}
+	if got := explicit.GetAuthHeaderValuePrefix(); got != "Token " {
+		t.Fatalf("explicit prefix = %q, want Token", got)
 	}
 }

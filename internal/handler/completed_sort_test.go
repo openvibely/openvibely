@@ -221,8 +221,8 @@ func TestCompletedSort_UpdatesWhenTasksCompletedAndUncompleted(t *testing.T) {
 		t.Fatalf("Create alpha: %v", err)
 	}
 
-	moveTaskToCategory(t, h, e, zulu.ID, "completed", "title_asc")
-	bodyAfterSecondComplete := moveTaskToCategory(t, h, e, alpha.ID, "completed", "title_asc")
+	moveTaskToCategory(t, h, e, zulu.ID, "completed", "")
+	bodyAfterSecondComplete := moveTaskToCategory(t, h, e, alpha.ID, "completed", "")
 
 	completedAfterComplete := completedDropZone(bodyAfterSecondComplete)
 	alphaIdx := strings.Index(completedAfterComplete, "Alpha Move")
@@ -234,7 +234,7 @@ func TestCompletedSort_UpdatesWhenTasksCompletedAndUncompleted(t *testing.T) {
 		t.Fatalf("completed zone order incorrect after completion: alpha=%d zulu=%d", alphaIdx, zuluIdx)
 	}
 
-	bodyAfterUncomplete := moveTaskToCategory(t, h, e, alpha.ID, "backlog", "title_asc")
+	bodyAfterUncomplete := moveTaskToCategory(t, h, e, alpha.ID, "backlog", "")
 	completedAfterUncomplete := completedDropZone(bodyAfterUncomplete)
 	if strings.Contains(completedAfterUncomplete, "Alpha Move") {
 		t.Fatalf("Alpha Move should not remain in completed zone after uncomplete: %s", completedAfterUncomplete)
@@ -301,7 +301,9 @@ func moveTaskToCategory(t *testing.T, h *Handler, e *echo.Echo, taskID string, c
 	req := httptest.NewRequest(http.MethodPatch, "/tasks/"+taskID+"/category", strings.NewReader(form.Encode()))
 	req.Header.Set("HX-Request", "true")
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.AddCookie(&http.Cookie{Name: completedSortCookieName, Value: completedSort})
+	if completedSort != "" {
+		req.AddCookie(&http.Cookie{Name: completedSortCookieName, Value: completedSort})
+	}
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 	c.SetPath("/tasks/:taskId/category")

@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/base64"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -22,9 +23,80 @@ import (
 	"github.com/openvibely/openvibely/internal/auth"
 	"github.com/openvibely/openvibely/internal/config"
 	"github.com/openvibely/openvibely/internal/database"
+	"github.com/openvibely/openvibely/internal/repository"
 )
 
+type updateStarterProbe struct {
+	recovery, checks int
+}
+
+func (p *updateStarterProbe) StartRecovery(context.Context) { p.recovery++ }
+func (p *updateStarterProbe) StartChecks(context.Context)   { p.checks++ }
+
+func mockUpdateServiceURL(t *testing.T) string {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/updates/check" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"schema_version":1,"update_available":false}`))
+	}))
+	t.Cleanup(srv.Close)
+	return srv.URL
+}
+
+func TestStartUpdateCoordinatorAlwaysRunsRecoveryAndChecks(t *testing.T) {
+	probe := &updateStarterProbe{}
+	startUpdateCoordinator(context.Background(), probe)
+	if probe.recovery != 1 || probe.checks != 1 {
+		t.Fatalf("recovery=%d checks=%d", probe.recovery, probe.checks)
+	}
+}
+
+func TestDesktopUpdateProtectedPathsIncludeIndependentStorageOverrides(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("OPENVIBELY_DESKTOP_CONFIG_FILE", filepath.Join(root, "config", "config.env"))
+	t.Setenv("OPENVIBELY_PLUGIN_ROOT", filepath.Join(root, "plugins"))
+	cfg := &config.Config{
+		Mode:                config.ModeDesktop,
+		AppDataDir:          filepath.Join(root, "app-data"),
+		DatabasePath:        filepath.Join(root, "database", "openvibely.db"),
+		ProjectRepoRoot:     filepath.Join(root, "projects"),
+		UpdatePublicKeyFile: filepath.Join(root, "trust", "keys.json"),
+	}
+	paths, err := desktopUpdateProtectedPaths(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{
+		cfg.AppDataDir,
+		cfg.DatabasePath,
+		cfg.ProjectRepoRoot,
+		config.DesktopConfigFilePath(),
+		os.Getenv("OPENVIBELY_PLUGIN_ROOT"),
+		cfg.UpdatePublicKeyFile,
+	} {
+		expected, err = filepath.Abs(expected)
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, path := range paths {
+			if path == expected {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("protected paths %#v omit %q", paths, expected)
+		}
+	}
+}
+
 func TestRequestLoggerOmitsSensitiveRequestData(t *testing.T) {
+
 	var output bytes.Buffer
 	e := echo.New()
 	e.Use(middleware.LoggerWithConfig(requestLoggerConfig(&output)))
@@ -58,6 +130,60 @@ func TestRequestLoggerOmitsSensitiveRequestData(t *testing.T) {
 		if strings.Contains(logged, secret) {
 			t.Fatalf("logger exposed %q: %s", secret, logged)
 		}
+	}
+}
+
+func TestMoveCopyHelpersPreserveFilesAndDirectories(t *testing.T) {
+	root := t.TempDir()
+	srcFile := filepath.Join(root, "source.txt")
+	dstFile := filepath.Join(root, "dest.txt")
+	if err := os.WriteFile(srcFile, []byte("source-data"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := copyFile(srcFile, dstFile, 0o640); err != nil {
+		t.Fatalf("copyFile: %v", err)
+	}
+	if got, err := os.ReadFile(dstFile); err != nil || string(got) != "source-data" {
+		t.Fatalf("copied file content=%q err=%v", got, err)
+	}
+	if err := copyFile(srcFile, dstFile, 0o640); err == nil {
+		t.Fatal("copyFile should not overwrite an existing destination")
+	}
+
+	srcDir := filepath.Join(root, "tree")
+	if err := os.MkdirAll(filepath.Join(srcDir, "nested"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "nested", "file.txt"), []byte("nested-data"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dstDir := filepath.Join(root, "tree-copy")
+	if err := copyDir(srcDir, dstDir); err != nil {
+		t.Fatalf("copyDir: %v", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(dstDir, "nested", "file.txt")); err != nil || string(got) != "nested-data" {
+		t.Fatalf("copied directory content=%q err=%v", got, err)
+	}
+
+	moveSrc := filepath.Join(root, "move-me")
+	moveDst := filepath.Join(root, "moved")
+	if err := os.WriteFile(moveSrc, []byte("move-data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := moveOrCopyPath(moveSrc, moveDst); err != nil {
+		t.Fatalf("moveOrCopyPath: %v", err)
+	}
+	if _, err := os.Stat(moveSrc); !os.IsNotExist(err) {
+		t.Fatalf("source should be removed after move, err=%v", err)
+	}
+	if got, err := os.ReadFile(moveDst); err != nil || string(got) != "move-data" {
+		t.Fatalf("moved content=%q err=%v", got, err)
+	}
+	if isCrossDeviceRename(errors.New("permission denied")) {
+		t.Fatal("ordinary errors should not be classified as cross-device renames")
+	}
+	if !isCrossDeviceRename(errors.New("invalid cross-device link")) || !isCrossDeviceRename(errors.New("cross-device rename")) {
+		t.Fatal("expected cross-device rename errors to be detected")
 	}
 }
 
@@ -103,6 +229,7 @@ func TestStart_RejectsDirectHostedSSOAuthModeInDesktop(t *testing.T) {
 		AppDataDir:               filepath.Join(tmpDir, "appdata"),
 		Environment:              "production",
 		EnvironmentExplicitlySet: true,
+		UpdateServiceURL:         mockUpdateServiceURL(t),
 		AuthMode:                 auth.AuthModeHostedSSO,
 		HostedSSOControlURL:      "https://openvibely.ai",
 		HostedSSOInstanceID:      "instance-1",
@@ -141,6 +268,7 @@ func TestStart_HostedSSOWiringRedirectsDirectNavigation(t *testing.T) {
 		AppDataDir:               filepath.Join(tmpDir, "appdata"),
 		Environment:              "production",
 		EnvironmentExplicitlySet: true,
+		UpdateServiceURL:         mockUpdateServiceURL(t),
 		AuthMode:                 auth.AuthModeHostedSSO,
 		HostedSSOEnabled:         true,
 		HostedSSOControlURL:      provider.URL,
@@ -247,18 +375,75 @@ func TestStart_HostedSSOWiringRedirectsDirectNavigation(t *testing.T) {
 	}
 }
 
+func TestStart_ClosesSplitDatabaseAfterConfirmationSecretFailure(t *testing.T) {
+	originalNewDatabaseConnections := newDatabaseConnections
+	originalRegisterDedicatedWriter := registerDedicatedWriter
+	originalLoadAutomationConfirmationSecret := loadAutomationConfirmationSecret
+	defer func() {
+		newDatabaseConnections = originalNewDatabaseConnections
+		registerDedicatedWriter = originalRegisterDedicatedWriter
+		loadAutomationConfirmationSecret = originalLoadAutomationConfirmationSecret
+	}()
+
+	var connections *database.Connections
+	newDatabaseConnections = func(dsn string) (*database.Connections, error) {
+		opened, err := database.NewReadWrite(dsn)
+		connections = opened
+		return opened, err
+	}
+	unregistered := false
+	registerDedicatedWriter = func(reader, writer *sql.DB) func() {
+		unregister := repository.RegisterDedicatedWriter(reader, writer)
+		return func() {
+			unregistered = true
+			unregister()
+		}
+	}
+	loadAutomationConfirmationSecret = func(context.Context, *repository.SettingsRepo) ([]byte, error) {
+		return nil, errors.New("forced confirmation secret failure")
+	}
+
+	root := t.TempDir()
+	cfg := &config.Config{
+		Mode:             config.ModeDesktop,
+		Port:             "0",
+		DatabasePath:     filepath.Join(root, "database.db"),
+		ProjectRepoRoot:  filepath.Join(root, "repos"),
+		AppDataDir:       filepath.Join(root, "appdata"),
+		Environment:      "test",
+		UpdateServiceURL: mockUpdateServiceURL(t),
+	}
+	instance, err := Start(context.Background(), cfg)
+	if instance != nil || err == nil || !strings.Contains(err.Error(), "initializing automation confirmation secret") {
+		t.Fatalf("Start() = (%#v, %v), want confirmation secret failure", instance, err)
+	}
+	if connections == nil {
+		t.Fatal("database connections were not opened")
+	}
+	if !unregistered {
+		t.Fatal("dedicated writer registration was not removed")
+	}
+	if err := connections.Reader.Ping(); err == nil {
+		t.Fatal("reader database remains open")
+	}
+	if err := connections.Writer.Ping(); err == nil {
+		t.Fatal("writer database remains open")
+	}
+}
+
 func TestStart_BootstrapAndShutdown(t *testing.T) {
 	// Smoke-test: start the full server with an in-memory-style temp DB and
 	// an ephemeral port, hit a core route, then shut down gracefully.
 	tmpDir := t.TempDir()
 	appDataDir := filepath.Join(tmpDir, "appdata")
 	cfg := &config.Config{
-		Mode:            config.ModeDesktop,
-		Port:            "0", // ephemeral port
-		DatabasePath:    tmpDir + "/test.db",
-		ProjectRepoRoot: tmpDir + "/repos",
-		AppDataDir:      appDataDir,
-		Environment:     "test",
+		Mode:             config.ModeDesktop,
+		Port:             "0", // ephemeral port
+		DatabasePath:     tmpDir + "/test.db",
+		ProjectRepoRoot:  tmpDir + "/repos",
+		AppDataDir:       appDataDir,
+		Environment:      "test",
+		UpdateServiceURL: mockUpdateServiceURL(t),
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -317,10 +502,11 @@ func TestStart_BootstrapAndShutdown(t *testing.T) {
 func TestStart_SeedsBuiltInSystemAgentsAndMaintenanceSchedulesOnFreshDB(t *testing.T) {
 	appDataDir := filepath.Join(t.TempDir(), "fresh-appdata")
 	cfg := &config.Config{
-		Mode:        config.ModeServer,
-		Port:        "0",
-		AppDataDir:  appDataDir,
-		Environment: "test",
+		Mode:             config.ModeServer,
+		Port:             "0",
+		AppDataDir:       appDataDir,
+		Environment:      "test",
+		UpdateServiceURL: mockUpdateServiceURL(t),
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -404,6 +590,7 @@ func assertSingleScheduledSystemTask(t *testing.T, db *sql.DB, title, systemKind
 		  AND s.repeat_type = 'daily'
 		  AND s.repeat_interval = 1
 		  AND s.enabled = 1
+		  AND s.clear_context_on_start = 1
 	`, title, systemKind).Scan(&count); err != nil {
 		t.Fatalf("count scheduled system task %s: %v", title, err)
 	}
@@ -417,10 +604,11 @@ func TestStart_NormalizesAppStorageDefaults(t *testing.T) {
 		t.Run(string(mode), func(t *testing.T) {
 			appDataDir := filepath.Join(t.TempDir(), "appdata")
 			cfg := &config.Config{
-				Mode:        mode,
-				Port:        "0",
-				AppDataDir:  appDataDir,
-				Environment: "test",
+				Mode:             mode,
+				Port:             "0",
+				AppDataDir:       appDataDir,
+				Environment:      "test",
+				UpdateServiceURL: mockUpdateServiceURL(t),
 			}
 
 			ctx, cancel := context.WithCancel(context.Background())
@@ -794,11 +982,12 @@ func TestStart_ServerModeDefaults(t *testing.T) {
 	// Verify existing server mode still works with explicit port.
 	tmpDir := t.TempDir()
 	cfg := &config.Config{
-		Mode:            config.ModeServer,
-		Port:            "0",
-		DatabasePath:    tmpDir + "/test.db",
-		ProjectRepoRoot: tmpDir + "/repos",
-		Environment:     "test",
+		Mode:             config.ModeServer,
+		Port:             "0",
+		DatabasePath:     tmpDir + "/test.db",
+		ProjectRepoRoot:  tmpDir + "/repos",
+		Environment:      "test",
+		UpdateServiceURL: mockUpdateServiceURL(t),
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())

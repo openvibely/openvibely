@@ -141,13 +141,51 @@ func TestRunSlot_RecordsLifecycleTraceEvents(t *testing.T) {
 	}
 }
 
+func TestRunSlot_NotifiesExecutionChangesAfterCreateAndFinish(t *testing.T) {
+	store := &memStore{hooks: []models.AgentLifecycleHook{{
+		ID: "hook", AgentID: "agent", When: models.LifecycleAfterComplete,
+		SkillKey: "observe", OutputContract: models.OutputContractLearningSummary, Enabled: true,
+	}}}
+	inv := &fakeInvoker{outputs: map[string]json.RawMessage{
+		"hook": json.RawMessage(`{"summary":"No durable learning to save.","nothing_to_save":true}`),
+	}}
+	runner := NewRunner(store, inv, nil)
+	changes := make(chan struct {
+		projectID string
+		exec      models.LifecycleExecution
+	}, 2)
+	runner.SetExecutionChangedObserver(func(_ context.Context, projectID string, exec models.LifecycleExecution) {
+		changes <- struct {
+			projectID string
+			exec      models.LifecycleExecution
+		}{projectID: projectID, exec: exec}
+	})
+
+	if _, err := runner.RunSlot(context.Background(), models.LifecycleAfterComplete, HookInput{
+		TaskID: "task", TaskRunID: "run", ProjectID: "project",
+	}); err != nil {
+		t.Fatalf("RunSlot: %v", err)
+	}
+
+	started := <-changes
+	finished := <-changes
+	if started.projectID != "project" || started.exec.Status != models.LifecycleExecRunning {
+		t.Fatalf("start notification = %+v, want project-scoped running execution", started)
+	}
+	if finished.projectID != "project" || finished.exec.Status != models.LifecycleExecCompleted {
+		t.Fatalf("finish notification = %+v, want project-scoped completed execution", finished)
+	}
+	if started.exec.ID == "" || started.exec.ID != finished.exec.ID {
+		t.Fatalf("notifications refer to different execution IDs: %q and %q", started.exec.ID, finished.exec.ID)
+	}
+}
+
 func TestRunSlot_BlockingFirstThenParallel(t *testing.T) {
-	store := &memStore{
-		hooks: []models.AgentLifecycleHook{
-			{ID: "blk", AgentID: "a", When: models.LifecycleBeforeRun, SkillKey: "agent/recall", OutputContract: models.OutputContractContextBlock, Blocking: true, Enabled: true},
-			{ID: "np-a", AgentID: "b", When: models.LifecycleBeforeRun, SkillKey: "agent/policy", OutputContract: models.OutputContractContextBlock, Blocking: false, Enabled: true},
-			{ID: "np-b", AgentID: "c", When: models.LifecycleBeforeRun, SkillKey: "agent/extra", OutputContract: models.OutputContractContextBlock, Blocking: false, Enabled: true},
-		},
+	store := &memStore{hooks: []models.AgentLifecycleHook{
+		{ID: "blk", AgentID: "a", When: models.LifecycleBeforeRun, SkillKey: "agent/recall", OutputContract: models.OutputContractContextBlock, Blocking: true, Enabled: true},
+		{ID: "np-a", AgentID: "b", When: models.LifecycleBeforeRun, SkillKey: "agent/policy", OutputContract: models.OutputContractContextBlock, Blocking: false, Enabled: true},
+		{ID: "np-b", AgentID: "c", When: models.LifecycleBeforeRun, SkillKey: "agent/extra", OutputContract: models.OutputContractContextBlock, Blocking: false, Enabled: true},
+	},
 	}
 	inv := &fakeInvoker{
 		outputs: map[string]json.RawMessage{
@@ -465,6 +503,37 @@ func TestRunTaskMode_RecordsExecutionRow(t *testing.T) {
 	e := store.executions[0]
 	if e.When != models.LifecycleTaskMode || e.Status != models.LifecycleExecCompleted || e.AgentID != "a-1" {
 		t.Fatalf("unexpected execution row: %+v", e)
+	}
+}
+
+func TestRunTaskMode_NotifiesExecutionChangesAfterCreateAndFinish(t *testing.T) {
+	store := &memStore{}
+	runner := NewRunner(store, nil, nil)
+	changes := make(chan models.LifecycleExecution, 2)
+	runner.SetExecutionChangedObserver(func(_ context.Context, projectID string, exec models.LifecycleExecution) {
+		if projectID != "project" {
+			t.Errorf("notification project_id = %q, want project", projectID)
+		}
+		changes <- exec
+	})
+
+	_, err := runner.RunTaskMode(context.Background(), &fakeTaskMode{res: TaskModeResult{Summary: "done"}}, TaskModeInput{
+		TaskID: "task", TaskRunID: "run", ProjectID: "project",
+		EffectiveMode: EffectiveMode{AgentID: "agent"},
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	started := <-changes
+	finished := <-changes
+	if started.When != models.LifecycleTaskMode || started.Status != models.LifecycleExecRunning {
+		t.Fatalf("start notification = %+v, want running task_mode execution", started)
+	}
+	if finished.When != models.LifecycleTaskMode || finished.Status != models.LifecycleExecCompleted {
+		t.Fatalf("finish notification = %+v, want completed task_mode execution", finished)
+	}
+	if started.ID == "" || started.ID != finished.ID {
+		t.Fatalf("notifications refer to different execution IDs: %q and %q", started.ID, finished.ID)
 	}
 }
 

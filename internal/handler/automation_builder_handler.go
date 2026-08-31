@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"context"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -11,16 +13,25 @@ import (
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
 
-func (h *Handler) NewAutomationBuilder(c echo.Context) error {
-	projectID, err := h.getCurrentProjectID(c)
-	if err != nil {
+type automationYAMLParseResult struct {
+	Valid   bool   `json:"valid"`
+	Message string `json:"message,omitempty"`
+}
+
+// ParseAutomationYAML verifies YAML syntax for the browser editor without
+// normalizing, previewing, or persisting an Automation.
+func (h *Handler) ParseAutomationYAML(c echo.Context) error {
+	if _, err := h.getCurrentProjectID(c); err != nil {
 		return err
 	}
-	if isHTMX(c) {
-		return render(c, http.StatusOK, pages.AutomationNewContent(projectID))
+	rawYAML, submitted := automationDraftFormValue(c, "automation_yaml")
+	if !submitted {
+		return c.JSON(http.StatusOK, automationYAMLParseResult{Message: "YAML is required."})
 	}
-	projects, _ := h.projectSvc.List(c.Request().Context())
-	return render(c, http.StatusOK, pages.AutomationNew(projects, projectID))
+	if _, err := service.DecodeAutomationDraftYAML([]byte(rawYAML)); err != nil {
+		return c.JSON(http.StatusOK, automationYAMLParseResult{Message: "Malformed YAML: " + err.Error()})
+	}
+	return c.JSON(http.StatusOK, automationYAMLParseResult{Valid: true})
 }
 
 func (h *Handler) BuildAutomationWeb(c echo.Context) error {
@@ -37,13 +48,17 @@ func (h *Handler) BuildAutomationWeb(c echo.Context) error {
 		source = strings.TrimSpace(c.FormValue("source"))
 	}
 	var candidate models.AutomationDraftCandidate
-	hasPostedCandidate := strings.TrimSpace(c.FormValue("candidate_json")) != ""
+	rawYAML, yamlSubmitted := automationDraftFormValue(c, "automation_yaml")
+	hasPostedCandidate := yamlSubmitted || strings.TrimSpace(c.FormValue("candidate_json")) != ""
 	if hasPostedCandidate {
-		candidate, err = service.DecodeAutomationDraftCandidate([]byte(strings.TrimSpace(c.FormValue("candidate_json"))))
+		candidate, err = decodeAutomationBuilderCandidate(c)
 	} else {
 		switch source {
 		case "template":
 			candidate, err = h.automationDraftSvc.CreationTemplateCandidate(strings.TrimSpace(c.FormValue("template_key")))
+			if err == nil {
+				h.applyAutomationTemplateDefaultModel(ctx, projectID, &candidate)
+			}
 		case "blank":
 			candidate, err = h.automationDraftSvc.BlankCandidate("")
 		case "describe":
@@ -57,6 +72,16 @@ func (h *Handler) BuildAutomationWeb(c echo.Context) error {
 		}
 	}
 	if err != nil {
+		if yamlSubmitted {
+			fallback, fallbackErr := h.automationDraftSvc.BlankCandidate("")
+			if fallbackErr != nil {
+				return fallbackErr
+			}
+			return h.renderAutomationBuilder(c, models.AutomationBuilderPage{
+				Result: models.AutomationDraftResult{Candidate: fallback}, Source: source, YAML: rawYAML, YAMLProvided: true,
+				Error: "YAML did not parse: " + err.Error(),
+			})
+		}
 		if source == "template" {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
@@ -64,30 +89,42 @@ func (h *Handler) BuildAutomationWeb(c echo.Context) error {
 			message := "Could not generate a supported Automation: " + err.Error()
 			description := c.FormValue("description")
 			if isHTMX(c) {
-				// HTMX does not swap 4xx responses by default, so render the validation
-				// result as a successful fragment while preserving the submitted input.
-				return render(c, http.StatusOK, pages.AutomationNewFailureContent(projectID, description, message))
+				c.Response().Header().Set("HX-Retarget", "#automation-describe-modal-content")
+				c.Response().Header().Set("HX-Reswap", "outerHTML")
+				return render(c, http.StatusOK, pages.AutomationDescribeModalContent(projectID, description, message))
 			}
-			projects, _ := h.projectSvc.List(ctx)
-			return render(c, http.StatusUnprocessableEntity, pages.AutomationNewFailure(projects, projectID, description, message))
+			if h.automationGraphSvc == nil {
+				return echo.NewHTTPError(http.StatusServiceUnavailable, "automations unavailable")
+			}
+			page := parseCardPageRequest(c)
+			cards, listErr := h.automationGraphSvc.ListPage(ctx, projectID, page.PageSize+1, page.Offset, page.Search)
+			if listErr != nil {
+				return listErr
+			}
+			cards, hasMore := cardPageItems(cards, page.PageSize)
+			projects, _ := h.projectSvc.ListSelectorOptions(ctx)
+			return render(c, http.StatusUnprocessableEntity, pages.AutomationsDescribeFailurePage(projects, projectID, cards, description, message, hasMore))
 		}
 		return err
 	}
 	if hasPostedCandidate {
-		applyAutomationDraftFormValues(c, &candidate)
-		if err := h.applyAutomationBuilderAction(c, &candidate); err != nil {
+		if err := h.applySubmittedAutomationBuilderCandidate(c, &candidate, yamlSubmitted); err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
 	}
-	result, err := h.automationDraftSvc.PreviewCandidate(ctx, projectID, candidate, nil)
+	result, err := h.previewAutomationBuilderCandidate(ctx, projectID, candidate, nil)
 	if err != nil {
 		return err
 	}
-	page := models.AutomationBuilderPage{Result: *result, Source: source}
+	page := models.AutomationBuilderPage{Result: *result, Source: source, InitialView: automationBuilderInitialView(c)}
 	if !automationBuilderSaveRequested(c) {
 		return h.renderAutomationBuilder(c, page)
 	}
-	return h.saveAutomationBuilderCandidate(c, projectID, page)
+	return h.saveAutomationBuilderCandidate(c, projectID, page, false)
+}
+
+func (h *Handler) applyAutomationTemplateDefaultModel(_ context.Context, _ string, candidate *models.AutomationDraftCandidate) {
+	service.ApplyAutomationTemplateDefaultModel(candidate)
 }
 
 func (h *Handler) EditAutomationBuilder(c echo.Context) error {
@@ -108,28 +145,94 @@ func (h *Handler) EditAutomationBuilder(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	candidate := opened.Candidate
-	if raw := strings.TrimSpace(c.FormValue("candidate_json")); raw != "" {
-		candidate, err = service.DecodeAutomationDraftCandidate([]byte(raw))
+	currentTemplateRevision := service.CurrentAutomationTemplateRevision(candidate.AdapterKey)
+	templateUpdateAvailable := currentTemplateRevision > 0 &&
+		(opened.Definition.Automation.TemplateRevision == nil || *opened.Definition.Automation.TemplateRevision < currentTemplateRevision)
+	updateTemplate := c.FormValue("update_template") == "true"
+	if updateTemplate {
+		if !templateUpdateAvailable {
+			return echo.NewHTTPError(http.StatusBadRequest, "this Automation already uses the latest template")
+		}
+		candidate, err = h.automationDraftSvc.TemplateCandidate(candidate.AdapterKey)
 		if err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
-		applyAutomationDraftFormValues(c, &candidate)
-		if err := h.applyAutomationBuilderAction(c, &candidate); err != nil {
+		h.applyAutomationTemplateDefaultModel(ctx, projectID, &candidate)
+		candidate.Name = opened.Candidate.Name
+	} else if rawYAML, yamlSubmitted := automationDraftFormValue(c, "automation_yaml"); yamlSubmitted || strings.TrimSpace(c.FormValue("candidate_json")) != "" {
+		candidate, err = decodeAutomationBuilderCandidate(c)
+		if err != nil {
+			return h.renderAutomationBuilder(c, models.AutomationBuilderPage{
+				Result: *opened, AutomationID: automationID, Source: opened.Definition.Version.Source,
+				TemplateUpdateAvailable: templateUpdateAvailable, LifecycleState: opened.Definition.Automation.LifecycleState,
+				YAML: rawYAML, YAMLProvided: true, Error: "YAML did not parse: " + err.Error(),
+			})
+		}
+		if err := h.applySubmittedAutomationBuilderCandidate(c, &candidate, yamlSubmitted); err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
 	}
-	result, err := h.automationDraftSvc.PreviewCandidate(ctx, projectID, candidate, opened.Definition)
+	result, err := h.previewAutomationBuilderCandidate(ctx, projectID, candidate, opened.Definition)
 	if err != nil {
 		return err
 	}
-	page := models.AutomationBuilderPage{Result: *result, AutomationID: automationID, Source: opened.Definition.Version.Source}
+	page := models.AutomationBuilderPage{Result: *result, AutomationID: automationID, Source: opened.Definition.Version.Source,
+		TemplateUpdateAvailable: templateUpdateAvailable, LifecycleState: opened.Definition.Automation.LifecycleState, InitialView: automationBuilderInitialView(c)}
 	if isHTMX(c) {
 		c.Response().Header().Set("HX-Push-Url", "/automations/"+automationID+"?project_id="+projectID)
 	}
-	if !automationBuilderSaveRequested(c) {
+	if !updateTemplate && !automationBuilderSaveRequested(c) {
 		return h.renderAutomationBuilder(c, page)
 	}
-	return h.saveAutomationBuilderCandidate(c, projectID, page)
+	return h.saveAutomationBuilderCandidate(c, projectID, page, updateTemplate)
+}
+
+func (h *Handler) applySubmittedAutomationBuilderCandidate(c echo.Context, candidate *models.AutomationDraftCandidate, yamlSubmitted bool) error {
+	if !yamlSubmitted {
+		h.discardStaleTemplateOnlyNodeConfig(candidate)
+		applyAutomationDraftFormValues(c, candidate)
+	}
+	if !yamlSubmitted || automationBuilderVisualActionRequested(c) {
+		return h.applyAutomationBuilderAction(c, candidate)
+	}
+	return nil
+}
+
+func (h *Handler) previewAutomationBuilderCandidate(ctx context.Context, projectID string, candidate models.AutomationDraftCandidate, definition *models.AutomationDefinition) (*models.AutomationDraftResult, error) {
+	if h.automationCompiler == nil {
+		return nil, echo.NewHTTPError(http.StatusServiceUnavailable, "automation preview unavailable")
+	}
+	plan, normalized, err := h.automationCompiler.PreviewSave(ctx, projectID, candidate)
+	if err != nil {
+		return nil, err
+	}
+	result, err := h.automationDraftSvc.PreviewCandidate(ctx, projectID, normalized, definition)
+	if err != nil {
+		return nil, err
+	}
+	result.Candidate = normalized
+	result.ValidationErrors = plan.Validation
+	return result, nil
+}
+
+func decodeAutomationBuilderCandidate(c echo.Context) (models.AutomationDraftCandidate, error) {
+	if raw, yamlSubmitted := automationDraftFormValue(c, "automation_yaml"); yamlSubmitted {
+		return service.DecodeAutomationDraftYAML([]byte(raw))
+	}
+	return service.DecodeAutomationDraftCandidate([]byte(strings.TrimSpace(c.FormValue("candidate_json"))))
+}
+
+func automationBuilderInitialView(c echo.Context) string {
+	if strings.TrimSpace(c.FormValue("initial_view")) == "details" {
+		return "details"
+	}
+	return ""
+}
+
+func automationBuilderVisualActionRequested(c echo.Context) bool {
+	return strings.TrimSpace(c.FormValue("builder_action")) != "" ||
+		strings.TrimSpace(c.FormValue("remove_node")) != "" ||
+		strings.TrimSpace(c.FormValue("remove_edge")) != ""
 }
 
 func automationBuilderSaveRequested(c echo.Context) bool {
@@ -137,7 +240,7 @@ func automationBuilderSaveRequested(c echo.Context) bool {
 		strings.TrimSpace(c.FormValue("remove_node")) == "" && strings.TrimSpace(c.FormValue("remove_edge")) == ""
 }
 
-func (h *Handler) saveAutomationBuilderCandidate(c echo.Context, projectID string, page models.AutomationBuilderPage) error {
+func (h *Handler) saveAutomationBuilderCandidate(c echo.Context, projectID string, page models.AutomationBuilderPage, updateToLatestTemplate bool) error {
 	if h.automationCompiler == nil {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "automation save unavailable")
 	}
@@ -151,6 +254,7 @@ func (h *Handler) saveAutomationBuilderCandidate(c echo.Context, projectID strin
 	}
 	saved, err := h.automationCompiler.Save(c.Request().Context(), service.AutomationSaveRequest{
 		ProjectID: projectID, AutomationID: page.AutomationID, Source: source, CreatedVia: "web", Candidate: page.Result.Candidate,
+		UpdateToLatestTemplate: updateToLatestTemplate,
 	})
 	if err != nil {
 		page.Error = "Save did not apply: " + err.Error()
@@ -171,6 +275,28 @@ func (h *Handler) redirectToAutomation(c echo.Context, projectID, automationID s
 	return c.Redirect(http.StatusSeeOther, url)
 }
 
+func (h *Handler) discardStaleTemplateOnlyNodeConfig(candidate *models.AutomationDraftCandidate) {
+	if candidate == nil || (candidate.AdapterKey != service.AutomationAdapterNativeSDLC && candidate.AdapterKey != service.AutomationAdapterGitHubSDLC) {
+		return
+	}
+	template, err := h.automationDraftSvc.TemplateCandidate(candidate.AdapterKey)
+	if err != nil {
+		return
+	}
+	canonicalNodes := make(map[string]struct{}, len(template.Nodes))
+	for _, node := range template.Nodes {
+		canonicalNodes[node.Key] = struct{}{}
+	}
+	for i := range candidate.Nodes {
+		node := &candidate.Nodes[i]
+		if _, canonical := canonicalNodes[node.Key]; canonical {
+			continue
+		}
+		delete(node.Config, "skills")
+		delete(node.Config, "source_files")
+	}
+}
+
 func applyAutomationDraftFormValues(c echo.Context, candidate *models.AutomationDraftCandidate) {
 	if candidate == nil {
 		return
@@ -185,6 +311,9 @@ func applyAutomationDraftFormValues(c echo.Context, candidate *models.Automation
 			node.Name = strings.TrimSpace(value)
 		}
 		if _, ok := node.Config["prompt"]; ok {
+			if value, exists := automationDraftFormValue(c, prefix+"model_config_id"); exists {
+				node.Config["model_config_id"] = strings.TrimSpace(value)
+			}
 			if value, exists := automationDraftFormValue(c, prefix+"prompt"); exists {
 				node.Config["prompt"] = value
 			}
@@ -201,14 +330,14 @@ func applyAutomationDraftFormValues(c echo.Context, candidate *models.Automation
 			if value, exists := automationDraftFormValue(c, prefix+"agent_ref"); exists {
 				node.Config["agent_ref"] = strings.TrimSpace(value)
 			}
-			if candidate.AdapterKey != service.AutomationAdapterCustom {
-				if values, exists := automationDraftFormValues(c, prefix+"skills"); exists {
-					node.Config["skills"] = values
-				}
-				if values, exists := automationDraftFormValues(c, prefix+"source_files"); exists {
-					node.Config["source_files"] = values
-				}
+		}
+		if _, ok := node.Config["model_config_id"]; ok {
+			if value, exists := automationDraftFormValue(c, prefix+"model_config_id"); exists {
+				node.Config["model_config_id"] = strings.TrimSpace(value)
 			}
+		}
+		if value, exists := automationDraftFormValue(c, prefix+"goal"); exists {
+			node.Config["goal"] = value
 		}
 		if _, ok := node.Config["run_at"]; ok {
 			node.Config["enabled"] = true
@@ -289,24 +418,6 @@ func automationDraftFormValue(c echo.Context, key string) (string, bool) {
 	return values[0], true
 }
 
-func automationDraftFormValues(c echo.Context, key string) ([]string, bool) {
-	if err := c.Request().ParseForm(); err != nil {
-		return nil, false
-	}
-	values, ok := c.Request().Form[key]
-	if !ok {
-		return nil, false
-	}
-	out := make([]string, 0, len(values))
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value != "" {
-			out = append(out, value)
-		}
-	}
-	return out, true
-}
-
 func (h *Handler) applyAutomationBuilderAction(c echo.Context, candidate *models.AutomationDraftCandidate) error {
 	action := strings.TrimSpace(c.FormValue("builder_action"))
 	if action == "" && strings.TrimSpace(c.FormValue("remove_node")) != "" {
@@ -350,46 +461,48 @@ func (h *Handler) applyAutomationBuilderAction(c echo.Context, candidate *models
 		}
 		var nodeType models.AutomationNodeType
 		var role string
-		config := map[string]any{}
+		defaultAdapterKey := service.AutomationAdapterCustom
+		allowedResources := map[string]bool{}
 		switch nodeKind {
 		case "schedule":
 			nodeType, role = models.AutomationNodeTrigger, "fixed_schedule"
-			config = map[string]any{"prompt": "Describe the scheduled work this node should perform.", "category": string(models.CategoryScheduled), "priority": 2, "run_at": "09:00", "repeat_type": string(models.RepeatDaily), "repeat_interval": 1, "enabled": true}
+			allowedResources = map[string]bool{"task": true, "schedule": true}
 		case "task", "agent_task":
 			nodeType, role = models.AutomationNodeAgentTask, "task"
-			config = map[string]any{"prompt": "Describe the work this node should perform.", "category": string(models.CategoryBacklog), "priority": 2}
+			allowedResources = map[string]bool{"task": true}
 		case "create_notification":
 			nodeType, role = models.AutomationNodeAction, "create_notification"
-			config = map[string]any{"notification_type": "approval_request", "instructions": "Summarize the proposal that needs a human decision."}
 		case "human_approval":
 			nodeType, role = models.AutomationNodeHumanGate, "native_approval"
-			config = map[string]any{"approval_method": "native_alert"}
 		case "native_inbox":
 			nodeType, role = models.AutomationNodeTrigger, "native_inbox"
-			config = map[string]any{"prompt": service.NativeSDLCNotificationInboxPrompt, "category": string(models.CategoryScheduled), "priority": 2, "run_at": "09:00", "repeat_type": string(models.RepeatHours), "repeat_interval": 1, "enabled": true, "clear_context_on_start": true}
+			defaultAdapterKey = service.AutomationAdapterNativeSDLC
+			allowedResources = map[string]bool{"task": true, "schedule": true}
 		case "native_implementation":
 			nodeType, role = models.AutomationNodeAgentTask, "implementation"
+			defaultAdapterKey = service.AutomationAdapterNativeSDLC
 		case "create_github_issue":
 			nodeType, role = models.AutomationNodeAction, "create_github_issue"
-			config = map[string]any{"instructions": "Open one focused, reviewable GitHub issue.", "labels": []string{}}
 		case "human_assignment":
 			nodeType, role = models.AutomationNodeHumanGate, "github_assignment"
-			config = map[string]any{"approval_method": "github_assignment"}
 		case "github_inbox":
 			nodeType, role = models.AutomationNodeTrigger, "github_inbox"
-			config = map[string]any{"prompt": "Process newly assigned GitHub issues and create or continue one issue-linked implementation task per approved issue.", "category": string(models.CategoryScheduled), "priority": 2, "run_at": "09:00", "repeat_type": string(models.RepeatHours), "repeat_interval": 1, "enabled": true, "clear_context_on_start": true}
+			defaultAdapterKey = service.AutomationAdapterGitHubSDLC
+			allowedResources = map[string]bool{"task": true, "schedule": true}
 		case "open_pull_request":
 			nodeType, role = models.AutomationNodeAction, "open_pull_request"
-			config = map[string]any{"instructions": "Open a reviewable pull request linked to the source issue.", "base": "", "draft": false}
 		case "human_review":
 			nodeType, role = models.AutomationNodeHumanGate, "pull_request_review"
-			config = map[string]any{"approval_method": "pull_request_review"}
 		case "outcome":
 			nodeType, role = models.AutomationNodeOutcome, "completed"
 		default:
 			return echo.NewHTTPError(http.StatusBadRequest, "unsupported automation node purpose")
 		}
 		key := automationDraftUniqueKey(candidate, automationDraftKey(name, "node"), false)
+		config, err := service.DefaultAutomationDraftNodeConfig(defaultAdapterKey, key, nodeType, role, allowedResources)
+		if err != nil {
+			return err
+		}
 		index := len(candidate.Nodes)
 		candidate.Nodes = append(candidate.Nodes, models.AutomationDraftNode{
 			Key: key, Name: name, Type: nodeType, Role: role, Config: config,
@@ -551,6 +664,50 @@ func automationDraftContainsNode(nodes []models.AutomationDraftNode, key string)
 	return false
 }
 
+func (h *Handler) RunAutomationNow(c echo.Context) error {
+	if h.automationLifecycleSvc == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "automation lifecycle unavailable")
+	}
+	projectID, err := h.getCurrentProjectID(c)
+	if err != nil {
+		return err
+	}
+	invocations, _, err := h.automationLifecycleSvc.RunNow(c.Request().Context(), projectID, c.Param("automationId"))
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "not found") {
+			return echo.NewHTTPError(http.StatusNotFound, "automation not found")
+		}
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	if startedInvocationID := firstStartedAutomationInvocationID(invocations); isHTMX(c) && h.automationGraphSvc != nil && startedInvocationID != "" {
+		definition, _, defErr := h.automationGraphSvc.GetDefinition(c.Request().Context(), projectID, c.Param("automationId"))
+		if defErr == nil && definition != nil && strings.TrimSpace(definition.Automation.Name) != "" {
+			clickURL := "/automations/" + c.Param("automationId") + "?project_id=" + url.QueryEscape(projectID)
+			setHTMXToastWithOptions(c, strings.TrimSpace(definition.Automation.Name)+" is now running.", "info", "", "", "", "automation:"+startedInvocationID, clickURL)
+		}
+	}
+	if c.FormValue("return_to") == "portfolio" {
+		if isHTMX(c) {
+			return h.ListAutomations(c)
+		}
+		return c.Redirect(http.StatusSeeOther, "/automations?project_id="+projectID)
+	}
+	if isHTMX(c) {
+		return h.GetAutomationLive(c)
+	}
+	return c.Redirect(http.StatusSeeOther, "/automations/"+c.Param("automationId")+"?project_id="+projectID)
+}
+
+func firstStartedAutomationInvocationID(invocations []models.AutomationInvocation) string {
+	for _, invocation := range invocations {
+		switch invocation.Status {
+		case models.AutomationInvocationClaimed, models.AutomationInvocationDispatched, models.AutomationInvocationRunning:
+			return invocation.ID
+		}
+	}
+	return ""
+}
+
 func (h *Handler) PauseAutomation(c echo.Context) error {
 	return h.changeAutomationLifecycle(c, "pause")
 }
@@ -598,11 +755,24 @@ func (h *Handler) changeAutomationLifecycle(c echo.Context, action string) error
 		}
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
+	if c.FormValue("return_to") == "portfolio" {
+		if isHTMX(c) {
+			return h.ListAutomations(c)
+		}
+		return c.Redirect(http.StatusSeeOther, "/automations?project_id="+projectID)
+	}
 	return c.Redirect(http.StatusSeeOther, "/automations/"+c.Param("automationId")+"?project_id="+projectID)
 }
 
 func (h *Handler) renderAutomationBuilder(c echo.Context, page models.AutomationBuilderPage) error {
 	projectID, _ := h.getCurrentProjectID(c)
+	if !page.YAMLProvided && page.YAML == "" {
+		encodedYAML, err := service.EncodeAutomationDraftYAML(page.Result.Candidate)
+		if err != nil {
+			return err
+		}
+		page.YAML = encodedYAML
+	}
 	if h.automationDraftSvc != nil {
 		if palette, err := h.automationDraftSvc.TemplateCandidate(page.Result.Candidate.AdapterKey); err == nil {
 			page.NodePalette = palette.Nodes
@@ -619,6 +789,6 @@ func (h *Handler) renderAutomationBuilder(c echo.Context, page models.Automation
 	if isHTMX(c) {
 		return render(c, http.StatusOK, pages.AutomationBuilderContent(page, projectID))
 	}
-	projects, _ := h.projectSvc.List(c.Request().Context())
+	projects, _ := h.projectSvc.ListSelectorOptions(c.Request().Context())
 	return render(c, http.StatusOK, pages.AutomationBuilder(projects, projectID, page))
 }

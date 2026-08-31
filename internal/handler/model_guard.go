@@ -18,18 +18,22 @@ func (h *Handler) hasConfiguredModels(c echo.Context) (bool, error) {
 	if h.llmConfigRepo == nil {
 		return false, fmt.Errorf("model repository is not configured")
 	}
-	agents, err := h.llmConfigRepo.List(c.Request().Context())
-	if err != nil {
-		return false, err
-	}
-	return len(agents) > 0, nil
+	return h.llmConfigRepo.HasAny(c.Request().Context())
 }
 
 func setHTMXToast(c echo.Context, message, status string) {
-	setHTMXToastWithLink(c, message, status, "", "")
+	setHTMXToastWithOptions(c, message, status, "", "", "", "", "")
 }
 
 func setHTMXToastWithLink(c echo.Context, message, status, linkURL, linkText string) {
+	setHTMXToastWithOptions(c, message, status, linkURL, linkText, "", "", "")
+}
+
+func setHTMXToastWithOptions(c echo.Context, message, status, linkURL, linkText, taskID, toastKey, clickURL string) {
+	setHTMXToastWithOptionsAndTriggers(c, message, status, linkURL, linkText, taskID, toastKey, clickURL, nil)
+}
+
+func setHTMXToastWithOptionsAndTriggers(c echo.Context, message, status, linkURL, linkText, taskID, toastKey, clickURL string, extraTriggers map[string]any) {
 	toast := map[string]any{
 		"message": message,
 		"status":  status,
@@ -40,10 +44,21 @@ func setHTMXToastWithLink(c echo.Context, message, status, linkURL, linkText str
 	if linkText != "" {
 		toast["link_text"] = linkText
 	}
-
-	payload := map[string]any{
-		"openvibelyToast": toast,
+	if taskID != "" {
+		toast["task_id"] = taskID
 	}
+	if toastKey != "" {
+		toast["toast_key"] = toastKey
+	}
+	if clickURL != "" {
+		toast["click_url"] = clickURL
+	}
+
+	payload := make(map[string]any, len(extraTriggers)+1)
+	for key, value := range extraTriggers {
+		payload[key] = value
+	}
+	payload["openvibelyToast"] = toast
 	encoded, err := json.Marshal(payload)
 	if err != nil {
 		return

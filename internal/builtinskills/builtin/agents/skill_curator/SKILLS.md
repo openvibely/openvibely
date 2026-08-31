@@ -44,6 +44,9 @@ lifecycle_hooks:
     blocking: false
     output_contract: learning_summary
     run_policy: always
+    payload:
+      - conversation_transcript
+      - learning_snapshot
     permissions:
       read_task_prompt: true
       read_task_execution: true

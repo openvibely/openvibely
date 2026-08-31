@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -18,6 +20,128 @@ import (
 	"github.com/openvibely/openvibely/internal/testutil"
 	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 )
+
+func TestRuntimeToolHelperMappingFilteringAndExecution(t *testing.T) {
+	if got := applyOpenAIOAuthSystemPrompt("base", models.LLMConfig{Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey}); got != "base" {
+		t.Fatalf("non-OAuth prompt changed: %q", got)
+	}
+	if got := applyOpenAIOAuthSystemPrompt("base", models.LLMConfig{Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodOAuth}); !strings.Contains(got, "base") || got == "base" {
+		t.Fatalf("OAuth prompt missing wrapper guidance: %q", got)
+	}
+
+	mapped := map[string]string{"read_file": "Read", "write_file": "Write", "edit_file": "Edit", "bash": "Bash", "list_files": "Glob", "grep_search": "Grep", "web_search_preview": "WebSearch", "unknown": ""}
+	for name, want := range mapped {
+		if got := mapBuiltInToolName(" " + name + " "); got != want {
+			t.Fatalf("mapBuiltInToolName(%q)=%q want %q", name, got, want)
+		}
+	}
+
+	if !agentAllowsBuiltInTool(nil, "bash") {
+		t.Fatal("nil agent should allow built-in tools")
+	}
+	if agentAllowsBuiltInTool(&models.Agent{ToolConfig: models.AgentToolConfig{SkipDefaultTools: true}}, "bash") {
+		t.Fatal("SkipDefaultTools should deny built-in tools")
+	}
+	if !agentAllowsBuiltInTool(&models.Agent{Tools: []string{" read "}}, "read_file") {
+		t.Fatal("explicit Read grant should allow read_file")
+	}
+	if agentAllowsBuiltInTool(&models.Agent{Tools: []string{" read "}}, "bash") {
+		t.Fatal("missing Bash grant should deny bash")
+	}
+	if !agentAllowsBuiltInTool(&models.Agent{Tools: []string{" read "}}, "custom_runtime_tool") {
+		t.Fatal("unmapped non-built-in tools should pass through")
+	}
+
+	rt := &llmcontracts.RuntimeTools{Definitions: []llmcontracts.RuntimeToolDefinition{
+		{Name: " write_task ", Description: " write ", Access: llmcontracts.RuntimeToolAccessWrite, Parameters: json.RawMessage(`{"type":"object"}`)},
+		{Name: "read_task", Description: "read", Access: llmcontracts.RuntimeToolAccessRead},
+		{Name: "   ", Description: "ignored"},
+	}}
+	openAITools := runtimeOpenAITools(rt)
+	if len(openAITools) != 2 || openAITools[0].Name != "write_task" || openAITools[0].Description != "write" {
+		t.Fatalf("unexpected OpenAI tools: %#v", openAITools)
+	}
+	if runtimeOpenAITools(nil) != nil {
+		t.Fatal("nil runtime tools should produce no OpenAI tools")
+	}
+
+	baseExec := func(_ context.Context, name string, _ json.RawMessage) (string, bool, error) {
+		return "base:" + name, false, nil
+	}
+	runtimeExec := composeRuntimeToolExecutor(baseExec, &llmcontracts.RuntimeTools{Executor: func(_ context.Context, name string, _ json.RawMessage) (string, bool, bool, error) {
+		if name == "handled" {
+			return "runtime handled", true, false, nil
+		}
+		return "", false, false, nil
+	}})
+	out, isErr, err := runtimeExec(context.Background(), "handled", nil)
+	if out != "runtime handled" || isErr || err != nil {
+		t.Fatalf("runtime handled output=%q isErr=%v err=%v", out, isErr, err)
+	}
+	out, isErr, err = runtimeExec(context.Background(), "fallback", nil)
+	if out != "base:fallback" || isErr || err != nil {
+		t.Fatalf("fallback output=%q isErr=%v err=%v", out, isErr, err)
+	}
+	missingExec := composeRuntimeToolExecutor(nil, &llmcontracts.RuntimeTools{Executor: func(context.Context, string, json.RawMessage) (string, bool, bool, error) {
+		return "", false, false, nil
+	}})
+	_, isErr, err = missingExec(context.Background(), "missing", nil)
+	if !isErr || err == nil || !strings.Contains(err.Error(), "not available") {
+		t.Fatalf("missing executor isErr=%v err=%v", isErr, err)
+	}
+	plainExec := composeRuntimeToolExecutor(baseExec, nil)
+	out, _, err = plainExec(context.Background(), "plain", nil)
+	if out != "base:plain" || err != nil {
+		t.Fatalf("plain executor output=%q err=%v", out, err)
+	}
+
+}
+
+func TestCallDirectUsesResponsesAPIWithAttachmentsAndUsage(t *testing.T) {
+	attachmentPath := filepath.Join(t.TempDir(), "notes.txt")
+	if err := os.WriteFile(attachmentPath, []byte("coverage notes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/responses" {
+			t.Fatalf("path=%q want /v1/responses", r.URL.Path)
+		}
+		if r.Header.Get("Authorization") != "Bearer test-key" {
+			t.Fatalf("unexpected authorization header %q", r.Header.Get("Authorization"))
+		}
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"model":"gpt-test","output":[{"content":[{"type":"output_text","text":"direct result"}]}],"usage":{"input_tokens":12,"output_tokens":5,"input_tokens_details":{"cached_tokens":3},"output_tokens_details":{"reasoning_tokens":2}}}`))
+	}))
+	defer srv.Close()
+
+	original := openaiclient.OpenAIAPIBaseURL
+	openaiclient.OpenAIAPIBaseURL = srv.URL + "/v1/"
+	defer func() { openaiclient.OpenAIAPIBaseURL = original }()
+
+	adapter := New(nil, nil, nil)
+	text, usage, err := adapter.CallDirect(context.Background(), "Summarize", []models.Attachment{{FileName: "notes.txt", FilePath: attachmentPath, MediaType: "text/plain"}}, models.LLMConfig{Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-test", APIKey: "test-key", ReasoningEffort: "high"}, "", "project instructions", false, false, false)
+	if err != nil {
+		t.Fatalf("CallDirect: %v", err)
+	}
+	if text != "direct result" || usage.InputTokens != 12 || usage.OutputTokens != 5 || usage.CachedInputTokens != 3 || usage.ReasoningTokens != 2 {
+		t.Fatalf("unexpected response text=%q usage=%+v", text, usage)
+	}
+	if gotBody["model"] != "gpt-test" || gotBody["max_output_tokens"] == nil || gotBody["instructions"] == nil {
+		t.Fatalf("request missing expected fields: %#v", gotBody)
+	}
+	input, ok := gotBody["input"].([]any)
+	if !ok || len(input) == 0 {
+		t.Fatalf("request missing input items: %#v", gotBody["input"])
+	}
+	encodedInput, _ := json.Marshal(input)
+	if !strings.Contains(string(encodedInput), "Attached files") || !strings.Contains(string(encodedInput), "notes.txt") {
+		t.Fatalf("input missing attachment prompt context: %s", encodedInput)
+	}
+}
 
 func TestCallCompletionsStreamingTaskWithRuntimeActionsUsesToolModePrompt(t *testing.T) {
 	var gotBody map[string]any
@@ -465,103 +589,6 @@ func TestInitialTaskAndFollowupShareTransportScope(t *testing.T) {
 	}
 }
 
-func TestRuntimeToolFilter_AllowsFilteredReadOnlyRuntimeToolInPlanMode(t *testing.T) {
-	rt := &llmcontracts.RuntimeTools{
-		Definitions: []llmcontracts.RuntimeToolDefinition{
-			{Name: "memory_view", Description: "read selected memory", Parameters: json.RawMessage(`{"type":"object"}`), Access: llmcontracts.RuntimeToolAccessRead},
-			{Name: "write_file", Description: "write selected file", Parameters: json.RawMessage(`{"type":"object"}`)},
-		},
-		Filter: func(name string) (bool, bool) {
-			switch name {
-			case "memory_view", "write_file":
-				return true, true
-			default:
-				return false, false
-			}
-		},
-	}
-	filter := composeRuntimeToolFilter(nil, rt, false, models.ChatModePlan)
-	if !filter("memory_view") {
-		t.Fatal("expected filtered selected-memory runtime tools to be allowed in plan mode")
-	}
-	if filter("write_file") {
-		t.Fatal("did not expect unrelated runtime action tool in plan mode")
-	}
-}
-
-func TestRuntimeToolFilter_OrchestrateAllowsMemoryViewWithoutFilesystemRead(t *testing.T) {
-	rt := &llmcontracts.RuntimeTools{
-		Definitions: []llmcontracts.RuntimeToolDefinition{
-			{Name: "memory_view", Description: "read selected memory", Parameters: json.RawMessage(`{"type":"object"}`), Access: llmcontracts.RuntimeToolAccessRead},
-			{Name: "create_task", Description: "create task", Parameters: json.RawMessage(`{"type":"object"}`)},
-		},
-		Filter: func(name string) (bool, bool) {
-			switch name {
-			case "memory_view", "create_task":
-				return true, true
-			default:
-				return false, false
-			}
-		},
-	}
-	filter := composeRuntimeToolFilter(func(name string) bool { return true }, rt, false, models.ChatModeOrchestrate)
-	if !filter("memory_view") {
-		t.Fatal("expected selected-memory runtime tools to be allowed in orchestrate mode")
-	}
-	if !filter("create_task") {
-		t.Fatal("expected action runtime tool to be allowed in orchestrate mode")
-	}
-	if filter("read_file") || filter("Read") || filter("list_files") {
-		t.Fatal("did not expect filesystem/default read tools to be allowed in orchestrate mode")
-	}
-}
-
-func TestRuntimeToolFilter_SkipDefaultToolsAllowsOnlyRuntimeTools(t *testing.T) {
-	rt := &llmcontracts.RuntimeTools{
-		SkipDefaultTools: true,
-		Definitions: []llmcontracts.RuntimeToolDefinition{
-			{Name: "read_file"},
-		},
-		Filter: func(name string) (bool, bool) {
-			if name == "read_file" {
-				return true, true
-			}
-			return false, true
-		},
-	}
-	filter := composeRuntimeToolFilter(nil, rt, true, models.ChatModeOrchestrate)
-	if !filter("read_file") {
-		t.Fatalf("expected runtime scoped file tool to be allowed")
-	}
-	if filter("bash") {
-		t.Fatalf("expected default tool to be blocked by runtime filter")
-	}
-}
-
-func TestAgentSkipDefaultToolsBlocksDefaultsButKeepsRuntimeMemoryTool(t *testing.T) {
-	agent := &models.Agent{ToolConfig: models.AgentToolConfig{SkipDefaultTools: true}}
-	if agentAllowsBuiltInTool(agent, "list_files") || agentAllowsBuiltInTool(agent, "bash") || agentAllowsBuiltInTool(agent, "read_file") {
-		t.Fatalf("expected agent SkipDefaultTools to block default built-in tools")
-	}
-
-	rt := &llmcontracts.RuntimeTools{
-		Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "memory_view", Access: llmcontracts.RuntimeToolAccessRead}},
-		Filter: func(name string) (bool, bool) {
-			if name == "memory_view" {
-				return true, true
-			}
-			return false, true
-		},
-	}
-	filter := composeRuntimeToolFilter(func(name string) bool { return agentAllowsBuiltInTool(agent, name) }, rt, true, models.ChatModeOrchestrate)
-	if !filter("memory_view") {
-		t.Fatalf("expected selected memory runtime tool to remain available")
-	}
-	if filter("list_files") || filter("bash") || filter("read_file") {
-		t.Fatalf("expected default tools to stay blocked")
-	}
-}
-
 func TestTaskStreamingRuntimeToolComposition_AllowsScopedFilesRuntimeTools(t *testing.T) {
 	rt := &llmcontracts.RuntimeTools{
 		SkipDefaultTools: true,
@@ -581,13 +608,6 @@ func TestTaskStreamingRuntimeToolComposition_AllowsScopedFilesRuntimeTools(t *te
 		t.Fatalf("expected runtime tool definition to be exposed, got %#v", extraTools)
 	}
 
-	filter := composeRuntimeToolFilter(nil, rt, true, models.ChatModeOrchestrate)
-	if !filter("list_files") {
-		t.Fatalf("expected task streaming runtime filter to allow managed memory tool")
-	}
-	if filter("bash") {
-		t.Fatalf("expected task streaming runtime filter to block default tools when runtime filter handles them")
-	}
 }
 
 func TestApplyOpenAIOAuthSystemPrompt_OAuthAppendsWorkingSection(t *testing.T) {
@@ -628,51 +648,246 @@ func TestApplyOpenAIOAuthSystemPrompt_OAuthNoDuplicateAppend(t *testing.T) {
 	}
 }
 
-func TestWrapToolFilterForPlanMode_ReadOnlyAllowlist(t *testing.T) {
-	base := func(name string) bool { return true }
-	filter := wrapToolFilterForPlanMode(base, false, models.ChatModePlan)
+// A lifecycle hook on the OpenAI direct path must receive its own agent prompt
+// (the provider wrapper folds the agent definition into ProjectInstructions)
+// while skipping the shared coding-agent framing. Before this, CallDirect built
+// its system prompt from "" and system agents ran with no identity at all.
+func TestCallDirectLifecycleHookSendsAgentPromptWithoutCodingFraming(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Errorf("decode request: %v", err)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp-1","status":"completed","model":"gpt-test","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"{}"}]}]}`))
+	}))
+	defer srv.Close()
 
-	if !filter("read_file") || !filter("list_files") || !filter("grep_search") {
-		t.Fatalf("expected read-only tool allowlist to pass")
+	original := openaiclient.OpenAIAPIBaseURL
+	openaiclient.OpenAIAPIBaseURL = srv.URL + "/v1/"
+	defer func() { openaiclient.OpenAIAPIBaseURL = original }()
+
+	adapter := New(nil, nil, nil)
+	_, _, err := adapter.CallDirect(context.Background(), "HOOK PROMPT", nil, models.LLMConfig{
+		Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-test", APIKey: "test-key",
+	}, ".", "SENTINEL_AGENT_PROMPT", true, false, true)
+	if err != nil {
+		t.Fatalf("CallDirect: %v", err)
 	}
-	if filter("write_file") || filter("edit_file") || filter("bash") {
-		t.Fatalf("expected mutating tools to be blocked in plan mode")
+
+	payload, _ := json.Marshal(gotBody)
+	body := string(payload)
+	if !strings.Contains(body, "SENTINEL_AGENT_PROMPT") {
+		t.Fatalf("lifecycle hook lost its agent prompt: %s", body)
+	}
+	if strings.Contains(body, "expert software engineer") {
+		t.Fatalf("lifecycle hook must not receive the coding-agent system prompt: %s", body)
 	}
 }
 
-func TestComposeRuntimeToolFilter_OrchestrateAllowsOnlyActionTools(t *testing.T) {
-	rt := &llmcontracts.RuntimeTools{
-		Definitions: []llmcontracts.RuntimeToolDefinition{
-			{Name: "create_task"},
-		},
-	}
-	base := func(name string) bool { return true }
+// Ordinary direct calls keep both the agent prompt and the coding-agent framing.
+func TestCallDirectNonLifecycleKeepsCodingFraming(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Errorf("decode request: %v", err)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp-1","status":"completed","model":"gpt-test","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}`))
+	}))
+	defer srv.Close()
 
-	filter := composeRuntimeToolFilter(base, rt, false, models.ChatModeOrchestrate)
-	if !filter("create_task") {
-		t.Fatalf("expected action tool to be allowed in orchestrate mode")
+	original := openaiclient.OpenAIAPIBaseURL
+	openaiclient.OpenAIAPIBaseURL = srv.URL + "/v1/"
+	defer func() { openaiclient.OpenAIAPIBaseURL = original }()
+
+	adapter := New(nil, nil, nil)
+	_, _, err := adapter.CallDirect(context.Background(), "DO WORK", nil, models.LLMConfig{
+		Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-test", APIKey: "test-key",
+	}, ".", "SENTINEL_AGENT_PROMPT", true, false, false)
+	if err != nil {
+		t.Fatalf("CallDirect: %v", err)
 	}
-	if filter("read_file") {
-		t.Fatalf("expected filesystem tool to be blocked in orchestrate mode")
+
+	payload, _ := json.Marshal(gotBody)
+	body := string(payload)
+	for _, want := range []string{"SENTINEL_AGENT_PROMPT", "expert software engineer"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("ordinary direct call missing %q: %s", want, body)
+		}
 	}
 }
 
-func TestComposeRuntimeToolFilter_PlanBlocksActionToolsAndMutations(t *testing.T) {
-	rt := &llmcontracts.RuntimeTools{
-		Definitions: []llmcontracts.RuntimeToolDefinition{
-			{Name: "create_task"},
-		},
-	}
-	base := func(name string) bool { return true }
+func TestCallDirectRawPromptOmitsInteractiveAgentFraming(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Errorf("decode request: %v", err)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp-1","status":"completed","model":"gpt-test","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Centralize channel mutation responses"}]}]}`))
+	}))
+	defer srv.Close()
 
-	filter := composeRuntimeToolFilter(base, rt, false, models.ChatModePlan)
-	if filter("create_task") {
-		t.Fatalf("expected action tool to be blocked in plan mode")
+	original := openaiclient.OpenAIAPIBaseURL
+	openaiclient.OpenAIAPIBaseURL = srv.URL + "/v1/"
+	defer func() { openaiclient.OpenAIAPIBaseURL = original }()
+
+	adapter := New(nil, nil, nil)
+	_, _, err := adapter.CallDirect(context.Background(), "COMMIT SUMMARY PROMPT", nil, models.LLMConfig{
+		Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-test", APIKey: "test-key",
+	}, ".", "SENTINEL_PROJECT_INSTRUCTIONS", true, true, false)
+	if err != nil {
+		t.Fatalf("CallDirect: %v", err)
 	}
-	if !filter("read_file") || !filter("list_files") || !filter("grep_search") {
-		t.Fatalf("expected read-only tools to remain allowed in plan mode")
+
+	payload, _ := json.Marshal(gotBody)
+	body := string(payload)
+	for _, unwanted := range []string{"expert software engineer", "SENTINEL_PROJECT_INSTRUCTIONS", "Working with the user", "Intermediary updates"} {
+		if strings.Contains(body, unwanted) {
+			t.Fatalf("raw direct request contains interactive framing %q: %s", unwanted, body)
+		}
 	}
-	if filter("write_file") || filter("bash") {
-		t.Fatalf("expected mutating tools to be blocked in plan mode")
+	if !strings.Contains(body, "COMMIT SUMMARY PROMPT") {
+		t.Fatalf("raw direct request lost caller prompt: %s", body)
+	}
+}
+
+func TestCallStreamingUsesAgenticResponsesCallbacksAndUsage(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/responses" {
+			t.Fatalf("path=%q want /v1/responses", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(
+			`data: {"type":"response.reasoning_summary_text.delta","delta":"thinking"}` + "\n\n" +
+				`data: {"type":"response.output_text.delta","delta":"Task done."}` + "\n\n" +
+				`data: {"type":"response.completed","response":{"id":"resp_stream","status":"completed","model":"gpt-test","output":[{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"output_text","text":"Task done."}]}],"usage":{"input_tokens":21,"output_tokens":9,"input_tokens_details":{"cached_tokens":4},"output_tokens_details":{"reasoning_tokens":3}}}}` + "\n\n",
+		))
+	}))
+	defer srv.Close()
+
+	oldBaseURL := openaiclient.OpenAIAPIBaseURL
+	openaiclient.OpenAIAPIBaseURL = srv.URL + "/v1/"
+	defer func() { openaiclient.OpenAIAPIBaseURL = oldBaseURL }()
+
+	adapter := New(nil, nil, nil)
+	out, textOnly, usage, err := adapter.CallStreaming(context.Background(), "Finish this", nil, models.LLMConfig{
+		Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-test", APIKey: "test-key", ReasoningEffort: "medium",
+	}, "exec-agentic-stream", "", "project instructions", nil)
+	if err != nil {
+		t.Fatalf("CallStreaming: %v", err)
+	}
+	if !strings.Contains(out, "Task done.") || textOnly != "Task done." {
+		t.Fatalf("unexpected streaming output=%q textOnly=%q", out, textOnly)
+	}
+	if usage.InputTokens != 21 || usage.OutputTokens != 9 || usage.CachedInputTokens != 4 || usage.ReasoningTokens != 3 {
+		t.Fatalf("unexpected usage: %+v", usage)
+	}
+	if gotBody["model"] != "gpt-test" || gotBody["instructions"] == nil || gotBody["tools"] == nil {
+		t.Fatalf("request missing expected agentic fields: %#v", gotBody)
+	}
+	encodedInput, _ := json.Marshal(gotBody["input"])
+	if !strings.Contains(string(encodedInput), "Finish this") || !strings.Contains(string(encodedInput), "STATUS: SUCCESS") {
+		t.Fatalf("input missing task/status prompt: %s", encodedInput)
+	}
+}
+
+func TestCallChatStreamingUsesHistoryRuntimeAndDisableToolsPolicy(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(
+			`data: {"type":"response.reasoning_summary_text.delta","delta":"reviewing"}` + "\n\n" +
+				`data: {"type":"response.output_text.delta","delta":"Chat answer"}` + "\n\n" +
+				`data: {"type":"response.completed","response":{"id":"resp_chat","status":"completed","model":"gpt-test","output":[{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"output_text","text":"Chat answer"}]}],"usage":{"input_tokens":13,"output_tokens":7}}}` + "\n\n",
+		))
+	}))
+	defer srv.Close()
+
+	oldBaseURL := openaiclient.OpenAIAPIBaseURL
+	openaiclient.OpenAIAPIBaseURL = srv.URL + "/v1/"
+	defer func() { openaiclient.OpenAIAPIBaseURL = oldBaseURL }()
+
+	ctx := llmcontracts.WithRuntimeTools(context.Background(), &llmcontracts.RuntimeTools{Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "list_tasks", Description: "list", Access: llmcontracts.RuntimeToolAccessRead}}})
+	adapter := New(nil, nil, nil)
+	out, usage, err := adapter.CallChatStreaming(ctx, "What changed?", nil, models.LLMConfig{
+		Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-test", APIKey: "test-key",
+	}, "exec-chat-stream", "transport-scope", []models.Execution{{PromptSent: "previous prompt", Output: "previous output", Status: models.ExecCompleted}}, "project chat context", false, models.ChatModePlan, "", nil)
+	if err != nil {
+		t.Fatalf("CallChatStreaming: %v", err)
+	}
+	if !strings.Contains(out, "Chat answer") || usage.InputTokens != 13 || usage.OutputTokens != 7 {
+		t.Fatalf("unexpected chat output=%q usage=%+v", out, usage)
+	}
+	if gotBody["model"] != "gpt-test" || gotBody["instructions"] == nil || gotBody["tools"] == nil {
+		t.Fatalf("chat request missing model/instructions/tools: %#v", gotBody)
+	}
+	if gotBody["tool_choice"] != nil {
+		t.Fatalf("plan-mode runtime tools should not disable tools: %#v", gotBody)
+	}
+	encoded, _ := json.Marshal(gotBody["input"])
+	if !strings.Contains(string(encoded), "What changed?") || !strings.Contains(string(encoded), "previous prompt") {
+		t.Fatalf("chat input missing message/history: %s", encoded)
+	}
+}
+
+func TestCallCompletionsChatStreamingUsesHistoryRuntimeAndUsage(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Fatalf("path = %s, want /v1/chat/completions", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Errorf("decode request: %v", err)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(
+			"data: {\"choices\":[{\"delta\":{\"content\":\"chat chunk\"}}]}\n\n" +
+				"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":13,\"completion_tokens\":6,\"prompt_tokens_details\":{\"cached_tokens\":4},\"completion_tokens_details\":{\"reasoning_tokens\":2}}}\n\n" +
+				"data: [DONE]\n\n",
+		))
+	}))
+	defer srv.Close()
+
+	original := openaiclient.OpenAIAPIBaseURL
+	openaiclient.OpenAIAPIBaseURL = srv.URL + "/v1/"
+	defer func() { openaiclient.OpenAIAPIBaseURL = original }()
+
+	ctx := llmcontracts.WithRuntimeTools(context.Background(), &llmcontracts.RuntimeTools{
+		Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "list_tasks", Description: "List tasks", Parameters: json.RawMessage(`{"type":"object"}`)}},
+	})
+	adapter := New(nil, nil, nil)
+	output, usage, err := adapter.CallCompletionsChatStreaming(ctx, "What changed?", nil, models.LLMConfig{
+		Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-test", APIKey: "test-key",
+	}, "exec-completions-chat", []models.Execution{{PromptSent: "Earlier prompt", Output: "Earlier answer", Status: models.ExecCompleted}}, "CHAT_CONTEXT_SENTINEL", true, models.ChatModeOrchestrate, "/repo/worktree", nil)
+	if err != nil {
+		t.Fatalf("CallCompletionsChatStreaming: %v", err)
+	}
+	if !strings.Contains(output, "chat chunk") {
+		t.Fatalf("output = %q", output)
+	}
+	if usage.InputTokens != 13 || usage.OutputTokens != 6 || usage.CachedInputTokens != 4 || usage.ReasoningTokens != 2 {
+		t.Fatalf("usage = %#v", usage)
+	}
+	payload := fmt.Sprint(gotBody)
+	for _, want := range []string{"Earlier prompt", "Earlier answer", "What changed?", "CHAT_CONTEXT_SENTINEL", "list_tasks"} {
+		if !strings.Contains(payload, want) {
+			t.Fatalf("request body missing %q: %#v", want, gotBody)
+		}
+	}
+	if !strings.Contains(payload, llmprompt.ChatActionToolModeInstructions) {
+		t.Fatalf("chat completions prompt missing runtime action guidance: %#v", gotBody)
 	}
 }

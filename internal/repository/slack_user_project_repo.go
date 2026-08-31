@@ -7,6 +7,11 @@ import (
 )
 
 // SlackUserProjectRepo persists active project selection per Slack team/user.
+//
+// Unlike the single-key Discord/Telegram/Email user-project repos, Slack
+// selection is keyed by a composite (slack_team_id, slack_user_id), so it
+// keeps its own upsert/get/delete SQL rather than delegating to the shared
+// single-key helpers in auth_repo_common.go.
 type SlackUserProjectRepo struct {
 	db *sql.DB
 }
@@ -16,7 +21,7 @@ func NewSlackUserProjectRepo(db *sql.DB) *SlackUserProjectRepo {
 }
 
 func (r *SlackUserProjectRepo) SetUserProject(ctx context.Context, teamID, userID, projectID string) error {
-	_, err := r.db.ExecContext(ctx,
+	_, err := execBoundSQLite(ctx, r.db,
 		`INSERT INTO slack_user_projects (slack_team_id, slack_user_id, project_id, updated_at)
 		 VALUES (?, ?, ?, datetime('now'))
 		 ON CONFLICT(slack_team_id, slack_user_id) DO UPDATE
@@ -43,7 +48,7 @@ func (r *SlackUserProjectRepo) GetUserProject(ctx context.Context, teamID, userI
 }
 
 func (r *SlackUserProjectRepo) DeleteUserProject(ctx context.Context, teamID, userID string) error {
-	_, err := r.db.ExecContext(ctx,
+	_, err := execBoundSQLite(ctx, r.db,
 		`DELETE FROM slack_user_projects WHERE slack_team_id = ? AND slack_user_id = ?`,
 		teamID, userID)
 	if err != nil {

@@ -1,14 +1,11 @@
 package service
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -21,22 +18,13 @@ import (
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	llmnormalize "github.com/openvibely/openvibely/internal/llm/normalize"
 	llmoutput "github.com/openvibely/openvibely/internal/llm/output"
-	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
-	llmstream "github.com/openvibely/openvibely/internal/llm/stream"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
-	anthropicclient "github.com/openvibely/openvibely/pkg/anthropic_client"
+	"github.com/openvibely/openvibely/internal/update"
 )
 
-// buildAttachmentInstructionsForCLI is a helper that builds CLI-specific attachment
-// instructions, separating text files (which can be read) from image files (which cannot).
-// Exposed for testing.
-func buildAttachmentInstructionsForCLI(attachments []models.Attachment) string {
-	return llmprompt.BuildAttachmentInstructions(attachments)
-}
-
 // LLMCaller abstracts model provider calls so tests can inject a mock
-// instead of hitting real APIs or spawning CLI subprocesses.
+// instead of hitting real APIs.
 type LLMCaller interface {
 	CallModel(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, execID string, workDir string) (output, textOnly string, tokens int, err error)
 }
@@ -64,6 +52,7 @@ type LLMService struct {
 	fileChangeBroadcaster     *events.FileChangeBroadcaster
 	threadInputRepo           *repository.ThreadInputRepo
 	usageRepo                 *repository.UsageRepo
+	upcomingSvc               *UpcomingService
 	skillAnalyticsRepo        *repository.SkillAnalyticsRepo
 	broadcaster               *events.Broadcaster
 	executionStreamHub        *events.ExecutionStreamHub
@@ -73,8 +62,10 @@ type LLMService struct {
 	githubAuthRepo            *repository.GitHubAuthRepo
 	taskPullRequestRepo       *repository.TaskPullRequestRepo
 	githubPRFeedbackRepo      *repository.GitHubPRFeedbackRepo
+	taskCommitStatRepo        *repository.TaskCommitStatRepo
 	automationRegistrationSvc *AutomationRegistrationService
 	automationRepo            *repository.AutomationRepo
+	updateTracker             *update.WorkTracker
 
 	// automationHandoffBeforeFinalAdmission is a deterministic test barrier for
 	// the commit-to-submission lifecycle race. Production leaves it nil.
@@ -97,17 +88,6 @@ func NewLLMService(llmConfigRepo *repository.LLMConfigRepo, execRepo *repository
 	s.initProviderAdapters()
 	s.routing = newAgentRoutingStrategy(s)
 	return s
-}
-
-// isTestMode detects whether the code is running inside a Go test binary.
-// Checks both GO_TESTING env var (set by testutil.init()) and the binary name
-// suffix (.test), which Go always uses for compiled test binaries.
-func isTestMode() bool {
-	if os.Getenv("GO_TESTING") != "" {
-		return true
-	}
-	return strings.HasSuffix(os.Args[0], ".test") ||
-		strings.Contains(os.Args[0], "/_test/")
 }
 
 // SetAlertService sets the alert service for creating alerts on task failures.
@@ -160,9 +140,15 @@ func (s *LLMService) SetUsageRepo(repo *repository.UsageRepo) {
 	s.usageRepo = repo
 }
 
+func (s *LLMService) SetUpcomingService(upcomingSvc *UpcomingService) {
+	s.upcomingSvc = upcomingSvc
+}
+
 func (s *LLMService) SetBroadcaster(b *events.Broadcaster) {
 	s.broadcaster = b
 }
+
+func (s *LLMService) SetUpdateWorkTracker(tracker *update.WorkTracker) { s.updateTracker = tracker }
 
 func (s *LLMService) SetExecutionStreamHub(hub *events.ExecutionStreamHub) {
 	s.executionStreamHub = hub
@@ -170,24 +156,10 @@ func (s *LLMService) SetExecutionStreamHub(hub *events.ExecutionStreamHub) {
 }
 
 func (s *LLMService) publishExecutionTerminal(execID string, status models.ExecutionStatus, errMsg string) {
-	if s == nil || s.executionStreamHub == nil || execID == "" {
+	if s == nil {
 		return
 	}
-	event := events.ExecutionStreamEvent{ExecID: execID}
-	switch status {
-	case models.ExecCompleted:
-		event.Type = events.ExecutionStreamDone
-		event.Status = "completed"
-	case models.ExecCancelled:
-		event.Type = events.ExecutionStreamDone
-		event.Status = "cancelled"
-	case models.ExecFailed:
-		event.Type = events.ExecutionStreamError
-		event.Error = errMsg
-	default:
-		return
-	}
-	s.executionStreamHub.Close(execID, event)
+	s.executionStreamHub.CloseTerminal(execID, status, errMsg)
 }
 
 func (s *LLMService) SetQueuedTaskThreadPromoter(promoter func(taskID string)) {
@@ -251,17 +223,20 @@ func (s *LLMService) taskActionRuntimeTools(ctx context.Context, task models.Tas
 	if s == nil {
 		return nil
 	}
+	_, automationBound := AutomationContextFromContext(ctx)
 	githubTools := buildGitHubIssueRuntimeTools(githubIssueRuntimeOptions{
 		ProjectID:                task.ProjectID,
 		ProjectRepo:              s.projectRepo,
 		TaskRepo:                 s.taskRepo,
 		TaskPullRequestRepo:      s.taskPullRequestRepo,
+		TaskCommitStatRepo:       s.taskCommitStatRepo,
 		GitHubPRFeedbackRepo:     s.githubPRFeedbackRepo,
 		GitHubAuthRepo:           s.githubAuthRepo,
 		ThreadInputRepo:          s.threadInputRepo,
 		AutomationRepo:           s.automationRepo,
 		GitHub:                   s.githubIssueRuntime,
 		AfterPRFeedbackForwarded: s.promoteQueuedTaskThreadAfterCompletion,
+		SuppressIssueComments:    automationBound,
 	})
 	return llmcontracts.CompositeRuntimeTools(s.taskSendMessageRuntimeTools(task), s.taskControlRuntimeTools(task), githubTools, s.automationBootstrapRuntimeTools(ctx, task))
 }
@@ -283,12 +258,16 @@ func (s *LLMService) AutomationGitHubRuntimeTools(ctx context.Context, task mode
 		ProjectRepo:              s.projectRepo,
 		TaskRepo:                 s.taskRepo,
 		TaskPullRequestRepo:      s.taskPullRequestRepo,
+		TaskCommitStatRepo:       s.taskCommitStatRepo,
 		GitHubPRFeedbackRepo:     s.githubPRFeedbackRepo,
 		GitHubAuthRepo:           s.githubAuthRepo,
 		ThreadInputRepo:          s.threadInputRepo,
 		AutomationRepo:           s.automationRepo,
 		GitHub:                   s.githubIssueRuntime,
 		AfterPRFeedbackForwarded: s.promoteQueuedTaskThreadAfterCompletion,
+		AfterPullRequestOpened:   s.clearGitHubPublicationGoalBlocker,
+		TaskCreatedVia:           task.CreatedVia,
+		SuppressIssueComments:    true,
 	})
 	if runtime == nil {
 		return nil
@@ -312,7 +291,14 @@ func (s *LLMService) AutomationGitHubRuntimeTools(ctx context.Context, task mode
 	if len(writeTools) > 0 {
 		baseExecutor := runtime.Executor
 		runtime.Executor = func(toolCtx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
-			if writeTools[strings.ToLower(strings.TrimSpace(name))] {
+			toolName := strings.ToLower(strings.TrimSpace(name))
+			if writeTools[toolName] {
+				if automationContext.OriginTask && toolName == "github_open_pull_request" {
+					return baseExecutor(toolCtx, name, input)
+				}
+				if toolName == "github_create_issue" {
+					return baseExecutor(toolCtx, name, input)
+				}
 				if automationContext.OriginTask && len(automationContext.Bindings) == 0 {
 					return "", true, true, errors.New("GitHub mutation is not authorized by the caller's Automation graph because its originating graph is no longer current")
 				}
@@ -396,44 +382,75 @@ func (s *LLMService) taskControlRuntimeTools(task models.Task) *llmcontracts.Run
 	defs := chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true)
 	filtered := make([]llmcontracts.RuntimeToolDefinition, 0, 5)
 	allowed := map[string]bool{
-		"list_tasks":                       true,
-		"create_task":                      true,
-		"create_swarm_task":                true,
-		"execute_tasks":                    true,
-		"set_task_goal":                    true,
-		"clear_task_goal":                  true,
-		"get_task_goal":                    true,
-		"pause_task_goal":                  true,
-		"resume_task_goal":                 true,
-		"schedule_task":                    true,
-		"delete_schedule":                  true,
-		"modify_schedule":                  true,
-		"create_alert":                     true,
-		"create_notification":              true,
-		"list_alerts":                      true,
-		"get_alert":                        true,
-		"claim_alert":                      true,
-		"create_alert_implementation_task": true,
-		"link_alert_implementation_task":   true,
-		"complete_alert_processing":        true,
-		"fail_alert_processing":            true,
-		"release_alert_claim":              true,
-		"list_capabilities":                true,
+		"list_tasks":                             true,
+		"create_task":                            true,
+		"create_swarm_task":                      true,
+		"execute_tasks":                          true,
+		"set_task_goal":                          true,
+		"clear_task_goal":                        true,
+		"get_task_goal":                          true,
+		"pause_task_goal":                        true,
+		"resume_task_goal":                       true,
+		"list_schedules":                         true,
+		"view_usage_analytics":                   true,
+		"view_pulse":                             true,
+		"schedule_task":                          true,
+		"delete_schedule":                        true,
+		"modify_schedule":                        true,
+		"create_alert":                           true,
+		"create_notification":                    true,
+		"list_existing_automation_notifications": true,
+		"list_alerts":                            true,
+		"get_alert":                              true,
+		"claim_alert":                            true,
+		"create_alert_implementation_task":       true,
+		"link_alert_implementation_task":         true,
+		"complete_alert_processing":              true,
+		"fail_alert_processing":                  true,
+		"release_alert_claim":                    true,
+		"list_capabilities":                      true,
+	}
+	if strings.HasPrefix(task.CreatedVia, "automation:") && strings.HasSuffix(task.CreatedVia, ":auditor") {
+		delete(allowed, "create_task")
+		delete(allowed, "create_swarm_task")
+		delete(allowed, "execute_tasks")
+		delete(allowed, "create_alert_implementation_task")
+		delete(allowed, "link_alert_implementation_task")
 	}
 	for _, def := range defs {
-		if allowed[strings.ToLower(strings.TrimSpace(def.Name))] {
-			filtered = append(filtered, def)
+		name := strings.ToLower(strings.TrimSpace(def.Name))
+		if !allowed[name] {
+			continue
 		}
+		if name == "list_alerts" && task.Category == models.CategoryScheduled {
+			var schema map[string]json.RawMessage
+			var properties map[string]json.RawMessage
+			if json.Unmarshal(def.Parameters, &schema) == nil && json.Unmarshal(schema["properties"], &properties) == nil {
+				delete(properties, "project_id")
+				delete(properties, "read")
+				if encodedProperties, err := json.Marshal(properties); err == nil {
+					schema["properties"] = encodedProperties
+					if encodedSchema, err := json.Marshal(schema); err == nil {
+						def.Parameters = encodedSchema
+					}
+				}
+			}
+			def.Description += " Uses the persisted caller task's project and includes both read and unread alerts."
+		}
+		filtered = append(filtered, def)
 	}
 	if len(filtered) == 0 {
 		return nil
 	}
 	handlers := buildChannelTaskActionHandlers(channelTaskActionHandlerOptions{
-		ProjectID:     task.ProjectID,
-		TaskSvc:       s.taskSvc,
-		SwarmSvc:      nil,
-		LLMConfigRepo: s.llmConfigRepo,
-		PrepareTaskCreation: func(ctx context.Context, request *TaskCreationRequest) error {
+		ProjectID:          task.ProjectID,
+		TaskSvc:            s.taskSvc,
+		SwarmSvc:           nil,
+		TaskRepo:           s.taskRepo,
+		ExecRepo:           s.execRepo,
+		ThreadInputRepo:    s.threadInputRepo,
+		ExecutionStreamHub: s.executionStreamHub,
+		LLMConfigRepo:      s.llmConfigRepo, PrepareTaskCreation: func(ctx context.Context, request *TaskCreationRequest) error {
 			return s.prepareAutomationTaskCreation(ctx, task.ProjectID, request)
 		},
 		CreatePreparedTask: func(ctx context.Context, request TaskCreationRequest, agents []models.LLMConfig) ([]models.Task, string, bool, error) {
@@ -448,18 +465,43 @@ func (s *LLMService) taskControlRuntimeTools(task models.Task) *llmcontracts.Run
 		TaskRepo:    s.taskRepo,
 		TaskGoalSvc: s.taskGoalSvc,
 	}))
+	var usageAnalyticsSvc *UsageAnalyticsService
+	if s.usageRepo != nil {
+		usageAnalyticsSvc = NewUsageAnalyticsService(s.usageRepo, s.llmConfigRepo)
+	}
 	mergeChannelRuntimeActionHandlers(handlers, buildChannelUtilityActionHandlers(channelUtilityActionHandlerOptions{
 		ProjectID:             task.ProjectID,
 		CallerTaskID:          task.ID,
 		TaskRepo:              s.taskRepo,
 		ScheduleRepo:          s.scheduleRepo,
+		WorkerSvc:             workerFromTaskService(s.taskSvc),
 		LLMConfigRepo:         s.llmConfigRepo,
 		AgentRepo:             s.agentRepo,
 		SettingsRepo:          nil,
 		CustomPersonalityRepo: nil,
 		ProjectRepo:           s.projectRepo,
 		AlertSvc:              s.alertSvc,
+		UsageAnalyticsSvc:     usageAnalyticsSvc,
+		UpcomingSvc:           s.upcomingSvc,
+		PrepareImplementationTask: func(ctx context.Context, input *models.AlertImplementationTaskInput) error {
+			return s.prepareAutomationAlertImplementationTask(ctx, task.ProjectID, input)
+		},
 	}))
+	if task.Category == models.CategoryScheduled {
+		if listAlerts := handlers["list_alerts"]; listAlerts != nil {
+			handlers["list_alerts"] = func(ctx context.Context, input json.RawMessage) (string, error) {
+				var request map[string]json.RawMessage
+				if json.Unmarshal(input, &request) == nil {
+					delete(request, "project_id")
+					delete(request, "read")
+					if normalized, err := json.Marshal(request); err == nil {
+						input = normalized
+					}
+				}
+				return listAlerts(ctx, input)
+			}
+		}
+	}
 	handlers["list_capabilities"] = func(_ context.Context, _ json.RawMessage) (string, error) {
 		return formatChannelCapabilities(chatcontrol.ListForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)), nil
 	}
@@ -537,14 +579,6 @@ func (s *LLMService) prepareAutomationTaskCreation(ctx context.Context, projectI
 	if modelContext := strings.TrimSpace(request.Prompt); modelContext != "" && modelContext != prompt {
 		prompt += "\n\nIssue-specific context:\n" + modelContext
 	}
-	skills, _ := draftStringSlice(config["skills"])
-	if len(skills) > 0 {
-		prompt += "\n\nConfigured Agent skills:\n- " + strings.Join(automationSkillNames(normalizeDraftReferences(skills)), "\n- ")
-	}
-	sourceFiles, _ := draftStringSlice(config["source_files"])
-	if len(sourceFiles) > 0 {
-		prompt += "\n\nFocus source files:\n- " + strings.Join(normalizeDraftReferences(sourceFiles), "\n- ")
-	}
 	for _, binding := range automationContext.Bindings {
 		if binding.VersionID != selectedNode.VersionID || binding.AutomationID != selectedNode.AutomationID {
 			continue
@@ -566,10 +600,20 @@ func (s *LLMService) prepareAutomationTaskCreation(ctx context.Context, projectI
 		break
 	}
 	request.Prompt = prompt
+	if goal := automationConfigGoal(config); goal != "" {
+		request.Goal = goal
+	}
 	category, _ := config["category"].(string)
 	request.Category = category
 	priority, _ := draftInt(config["priority"])
 	request.Priority = priority
+	modelConfigID, modelConfigConfigured := config["model_config_id"].(string)
+	modelConfigID = strings.TrimSpace(modelConfigID)
+	if strings.EqualFold(modelConfigID, automationDefaultModelConfigID) || !modelConfigConfigured || modelConfigID == "" {
+		request.AgentID = automationDefaultModelConfigID
+	} else {
+		request.AgentID = modelConfigID
+	}
 	if ref, _ := config["agent_ref"].(string); strings.TrimSpace(ref) != "" {
 		agent, err := resolveAutomationAgent(ctx, s.agentRepo, projectID, ref)
 		if err != nil {
@@ -582,6 +626,64 @@ func (s *LLMService) prepareAutomationTaskCreation(ctx context.Context, projectI
 		request.Agent = ""
 	}
 	return nil
+}
+
+func (s *LLMService) prepareAutomationAlertImplementationTask(ctx context.Context, projectID string, input *models.AlertImplementationTaskInput) error {
+	if s == nil || s.automationRepo == nil || input == nil {
+		return nil
+	}
+	automationContext, ok := AutomationContextFromContext(ctx)
+	if !ok || automationContext.ProjectID != projectID {
+		return nil
+	}
+	configuredGoal := ""
+	configuredModelConfigID := ""
+	for _, binding := range automationContext.Bindings {
+		implementation, err := s.automationRepo.GetConnectedNodeByRole(ctx, projectID, binding.AutomationID, binding.VersionID, binding.NodeID, "implementation", true)
+		if err != nil {
+			return err
+		}
+		if implementation == nil {
+			continue
+		}
+		inbox, err := s.automationRepo.GetConnectedNodeByRole(ctx, projectID, binding.AutomationID, binding.VersionID, implementation.ID, "native_inbox", false)
+		if err != nil {
+			return err
+		}
+		if inbox == nil || inbox.ID != binding.NodeID {
+			continue
+		}
+		var config map[string]any
+		if err := json.Unmarshal([]byte(implementation.ConfigJSON), &config); err != nil {
+			return fmt.Errorf("decoding Native implementation task configuration: %w", err)
+		}
+		goal := automationConfigGoal(config)
+		if goal != "" {
+			if configuredGoal != "" && configuredGoal != goal {
+				return errors.New("Automation bindings have conflicting Native implementation task goals")
+			}
+			configuredGoal = goal
+		}
+		modelConfigID := automationExplicitModelConfigID(config["model_config_id"])
+		if modelConfigID != "" {
+			if configuredModelConfigID != "" && configuredModelConfigID != modelConfigID {
+				return errors.New("Automation bindings have conflicting Native implementation task models")
+			}
+			configuredModelConfigID = modelConfigID
+		}
+	}
+	if configuredGoal != "" {
+		input.Goal = configuredGoal
+	}
+	if configuredModelConfigID != "" {
+		input.AgentID = configuredModelConfigID
+	}
+	return nil
+}
+
+func automationConfigGoal(config map[string]any) string {
+	goal, _ := config["goal"].(string)
+	return strings.TrimSpace(goal)
 }
 
 type automationGitHubTaskCreationPlan struct {
@@ -741,7 +843,7 @@ func (s *LLMService) createPreparedAutomationTask(ctx context.Context, projectID
 	}
 	summary := fmt.Sprintf("\n\n---\n%s 1 task(s):\n- \"%s\" (%s) [TASK_ID:%s]", action,
 		canonical.Title, canonical.Category, canonical.ID)
-	if strings.TrimSpace(request.Goal) != "" && created {
+	if objective != "" && created {
 		summary += " [goal:set]"
 	}
 	return []models.Task{*canonical}, summary, true, nil
@@ -774,6 +876,19 @@ func (s *LLMService) recordAutomationTasksCreated(ctx context.Context, projectID
 		}
 	}
 	return nil
+}
+
+func (s *LLMService) clearGitHubPublicationGoalBlocker(taskID string, result *OpenTaskPullRequestResult) {
+	if s == nil || s.taskGoalSvc == nil || strings.TrimSpace(taskID) == "" {
+		return
+	}
+	reason := "GitHub PR publication succeeded"
+	if result != nil && result.PullRequest != nil && result.PullRequest.Number > 0 {
+		reason = fmt.Sprintf("GitHub PR publication succeeded with PR #%d", result.PullRequest.Number)
+	}
+	if _, err := s.taskGoalSvc.ClearBlockedReport(context.Background(), taskID, GitHubPRPublicationBlockerKey, reason); err != nil {
+		applog.Infof("[agent-svc] clearing GitHub publication goal blocker failed task=%s: %v", taskID, err)
+	}
 }
 
 func (s *LLMService) promoteQueuedTaskThreadAfterCompletion(taskID string) {
@@ -817,7 +932,7 @@ func (s *LLMService) SetGlobalSkillRoot(root string) {
 }
 
 // SetLLMCaller overrides the default model calling behavior.
-// In tests, pass a mock to prevent real API/CLI calls.
+// In tests, pass a mock to prevent real provider calls.
 func (s *LLMService) SetLLMCaller(c LLMCaller) {
 	s.llmCaller = c
 }
@@ -1071,20 +1186,20 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	applog.Infof("[agent-svc] ExecuteTaskWithAgent loaded %d attachments for task=%s", len(attachments), task.ID)
 
 	// Vision-aware agent override: if the task has image attachments and the
-	// current agent doesn't support vision (e.g., Anthropic CLI which can't
-	// send images as multimodal content), try to find a vision-capable agent.
-	// API key and OAuth agents support vision natively via multimodal content blocks.
+	// current agent doesn't support vision, try to find a vision-capable agent.
+	// API key and OAuth agents can support vision via multimodal content blocks.
 	visionDecision := s.ensureRoutingStrategy().resolveVisionRoutingDecision(ctx, task.Prompt, attachments, agent, "ExecuteTaskWithAgent", task.ID)
 	agent = visionDecision.Agent
 	applog.Infof("[agent-svc] ExecuteTaskWithAgent vision routing changed=%v reason=%s detail=%q selected_agent=%s selected_provider=%s",
 		visionDecision.Changed, visionDecision.Reason, visionDecision.Detail, agent.Name, agent.Provider)
 
-	// Look up the project's repo path to use as the working directory
-	// for the CLI subprocess. Without this, the agent runs in the OpenVibely
-	// server directory instead of the project's configured directory.
+	// Look up the project's repo path to use as the working directory for model
+	// calls. Without this, provider tooling runs in the OpenVibely server
+	// directory instead of the project's configured directory.
 	workDir := ""
 	repoDir := "" // original repo dir (for worktree setup and post-execution)
 	managedWorktree := false
+	startupWorktreeContext := ""
 	if task.ProjectID != "" && s.projectRepo != nil {
 		project, projErr := s.projectRepo.GetByID(ctx, task.ProjectID)
 		if projErr != nil {
@@ -1156,40 +1271,46 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 			applog.Infof("[agent-svc] ExecuteTaskWithAgent using worktree workDir=%s branch=%s", workDir, wtBranch)
 
 			if syncErr := s.worktreeSvc.SyncWorktreeFromMainAtStart(ctx, &task, repoDir); syncErr != nil {
-				applog.Infof("[agent-svc] ExecuteTaskWithAgent startup worktree auto-merge failed task=%s: %v", task.ID, syncErr)
-				if completeErr := s.execRepo.Complete(finalizeCtx, exec.ID, models.ExecFailed, "", syncErr.Error(), 0, 0); completeErr != nil {
-					applog.Infof("[agent-svc] ExecuteTaskWithAgent error completing execution after startup auto-merge failure: %v", completeErr)
+				var conflictErr *StartupSyncConflictError
+				if errors.As(syncErr, &conflictErr) {
+					startupWorktreeContext = StartupSyncConflictContext(conflictErr)
+					applog.Infof("[agent-svc] ExecuteTaskWithAgent startup worktree sync conflict task=%s, continuing in preserved worktree: %v", task.ID, syncErr)
 				} else {
-					s.publishExecutionTerminal(exec.ID, models.ExecFailed, syncErr.Error())
-				}
-				if statusErr := s.taskRepo.UpdateStatus(finalizeCtx, task.ID, models.StatusFailed); statusErr != nil {
-					applog.Infof("[agent-svc] ExecuteTaskWithAgent error updating task status after startup auto-merge failure: %v", statusErr)
-				}
-				if task.Category == models.CategoryActive {
-					if categoryErr := s.taskRepo.UpdateCategory(finalizeCtx, task.ID, models.CategoryCompleted); categoryErr != nil {
-						applog.Infof("[agent-svc] ExecuteTaskWithAgent error moving startup-auto-merge-failed task to completed category: %v", categoryErr)
+					applog.Infof("[agent-svc] ExecuteTaskWithAgent startup worktree auto-merge failed task=%s: %v", task.ID, syncErr)
+					if completeErr := s.execRepo.Complete(finalizeCtx, exec.ID, models.ExecFailed, "", syncErr.Error(), 0, 0); completeErr != nil {
+						applog.Infof("[agent-svc] ExecuteTaskWithAgent error completing execution after startup auto-merge failure: %v", completeErr)
 					} else {
-						applog.Infof("[agent-svc] ExecuteTaskWithAgent moved startup-auto-merge-failed task=%s to completed category", task.ID)
+						s.publishExecutionTerminal(exec.ID, models.ExecFailed, syncErr.Error())
 					}
-				}
-				if s.alertSvc != nil {
-					if alertErr := s.alertSvc.CreateTaskFailedAlert(finalizeCtx, task.ProjectID, task.ID, exec.ID, task.Title, syncErr.Error()); alertErr != nil {
-						applog.Infof("[agent-svc] ExecuteTaskWithAgent error creating startup auto-merge failure alert: %v", alertErr)
+					if statusErr := s.taskRepo.UpdateStatus(finalizeCtx, task.ID, models.StatusFailed); statusErr != nil {
+						applog.Infof("[agent-svc] ExecuteTaskWithAgent error updating task status after startup auto-merge failure: %v", statusErr)
 					}
+					if task.Category == models.CategoryActive {
+						if categoryErr := s.taskRepo.UpdateCategory(finalizeCtx, task.ID, models.CategoryCompleted); categoryErr != nil {
+							applog.Infof("[agent-svc] ExecuteTaskWithAgent error moving startup-auto-merge-failed task to completed category: %v", categoryErr)
+						} else {
+							applog.Infof("[agent-svc] ExecuteTaskWithAgent moved startup-auto-merge-failed task=%s to completed category", task.ID)
+						}
+					}
+					if s.alertSvc != nil {
+						if alertErr := s.alertSvc.CreateTaskFailedAlert(finalizeCtx, task.ProjectID, task.ID, exec.ID, task.Title, syncErr.Error()); alertErr != nil {
+							applog.Infof("[agent-svc] ExecuteTaskWithAgent error creating startup auto-merge failure alert: %v", alertErr)
+						}
+					}
+					exec.Status = models.ExecFailed
+					exec.ErrorMessage = syncErr.Error()
+					if s.telegramSvc != nil {
+						s.telegramSvc.SendTaskCompletionNotification(finalizeCtx, task, "", syncErr.Error())
+					}
+					if s.slackSvc != nil {
+						s.slackSvc.SendTaskCompletionNotification(finalizeCtx, task, "", syncErr.Error())
+					}
+					if s.discordSvc != nil {
+						s.discordSvc.SendTaskCompletionNotification(finalizeCtx, task, "", syncErr.Error())
+					}
+					s.promoteQueuedTaskThreadAfterCompletion(task.ID)
+					return exec, llmcontracts.ChatContext{}, fmt.Errorf("startup worktree auto-merge failed: %w", syncErr)
 				}
-				exec.Status = models.ExecFailed
-				exec.ErrorMessage = syncErr.Error()
-				if s.telegramSvc != nil {
-					s.telegramSvc.SendTaskCompletionNotification(finalizeCtx, task, "", syncErr.Error())
-				}
-				if s.slackSvc != nil {
-					s.slackSvc.SendTaskCompletionNotification(finalizeCtx, task, "", syncErr.Error())
-				}
-				if s.discordSvc != nil {
-					s.discordSvc.SendTaskCompletionNotification(finalizeCtx, task, "", syncErr.Error())
-				}
-				s.promoteQueuedTaskThreadAfterCompletion(task.ID)
-				return exec, llmcontracts.ChatContext{}, fmt.Errorf("startup worktree auto-merge failed: %w", syncErr)
 			}
 		}
 	}
@@ -1231,7 +1352,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	if agentSkillTools := s.agentDeclaredSkillRuntimeTools(ctx, task, agentDef, workDir); agentSkillTools != nil {
 		runtimeTools = llmcontracts.CompositeRuntimeTools(runtimeTools, agentSkillTools)
 	}
-	projectInstructions := combineProjectInstructions(additionalProjectInstructionsFromContext(ctx), loadRootProjectInstructions(repoDir))
+	projectInstructions := combineProjectInstructions(additionalProjectInstructionsFromContext(ctx), startupWorktreeContext, loadRootProjectInstructions(repoDir))
 	if projectInstructions != "" {
 		applog.Infof("[agent-svc] ExecuteTaskWithAgent prepared project instructions (%d bytes)", len(projectInstructions))
 	}
@@ -1289,6 +1410,40 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	textOnlyOutput := result.TextOnlyOutput
 	tokensUsed := result.Usage.TotalTokens
 	durationMs := time.Since(start).Milliseconds()
+	taskCancelled := func() bool {
+		current, getErr := s.taskRepo.GetByID(context.Background(), task.ID)
+		if getErr != nil {
+			applog.Infof("[agent-svc] ExecuteTaskWithAgent error checking cancelled task state: %v", getErr)
+			return false
+		}
+		return current != nil && current.Status == models.StatusCancelled
+	}
+	completeCancelled := func() (*models.Execution, llmcontracts.ChatContext, error) {
+		bgCtx := context.Background()
+		reason := "task cancelled by user"
+		s.requeuePendingTaskSteeringForExecution(bgCtx, exec.ID)
+		applog.Infof("[agent-svc] ExecuteTaskWithAgent CANCELLED task=%s duration=%dms", task.ID, durationMs)
+		if completeErr := s.execRepo.Complete(bgCtx, exec.ID, models.ExecCancelled, output, reason, tokensUsed, durationMs); completeErr != nil {
+			applog.Infof("[agent-svc] ExecuteTaskWithAgent error completing cancelled execution: %v", completeErr)
+		} else {
+			s.publishExecutionTerminal(exec.ID, models.ExecCancelled, reason)
+		}
+		RecordUsageFromResult(bgCtx, s.usageRepo, UsageCapture{ProjectID: task.ProjectID, TaskID: task.ID, ExecutionID: exec.ID, TurnID: exec.ID, Operation: string(llmcontracts.OperationTask), Status: string(models.ExecCancelled), ErrorMessage: reason, LatencyMs: durationMs, OccurredAt: time.Now().UTC()}, agent, result)
+		if statusErr := s.taskRepo.UpdateStatus(bgCtx, task.ID, models.StatusCancelled); statusErr != nil {
+			applog.Infof("[agent-svc] ExecuteTaskWithAgent error updating task status to cancelled: %v", statusErr)
+		}
+		if task.Category == models.CategoryActive {
+			if categoryErr := s.taskRepo.UpdateCategory(bgCtx, task.ID, models.CategoryBacklog); categoryErr != nil {
+				applog.Infof("[agent-svc] ExecuteTaskWithAgent error moving cancelled task to backlog: %v", categoryErr)
+			} else {
+				applog.Infof("[agent-svc] ExecuteTaskWithAgent moved cancelled task=%s to backlog", task.ID)
+			}
+		}
+		exec.Status = models.ExecCancelled
+		exec.ErrorMessage = reason
+		s.promoteQueuedTaskThreadAfterCompletion(task.ID)
+		return exec, result.ChatContext, fmt.Errorf("task cancelled")
+	}
 
 	// Stop diff snapshot broadcaster
 	if stopDiffBroadcast != nil {
@@ -1297,29 +1452,11 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 
 	if err != nil {
 		// Distinguish between user cancellation and actual failures.
-		// When a task is cancelled, the context is cancelled which kills the CLI process.
+		// When a task is cancelled, the context is cancelled which stops the provider call.
 		// Use background context for DB updates since the task context may be cancelled.
 		bgCtx := context.Background()
 		if ctx.Err() == context.Canceled {
-			s.requeuePendingTaskSteeringForExecution(bgCtx, exec.ID)
-			applog.Infof("[agent-svc] ExecuteTaskWithAgent CANCELLED task=%s duration=%dms",
-				task.ID, durationMs)
-			// Pass output (may contain partial streamed content) so Complete preserves it
-			if completeErr := s.execRepo.Complete(bgCtx, exec.ID, models.ExecCancelled, output, "task cancelled by user", tokensUsed, durationMs); completeErr != nil {
-				applog.Infof("[agent-svc] ExecuteTaskWithAgent error completing cancelled execution: %v", completeErr)
-			} else {
-				s.publishExecutionTerminal(exec.ID, models.ExecCancelled, "task cancelled by user")
-			}
-			RecordUsageFromResult(bgCtx, s.usageRepo, UsageCapture{ProjectID: task.ProjectID, TaskID: task.ID, ExecutionID: exec.ID, TurnID: exec.ID, Operation: string(llmcontracts.OperationTask), Status: string(models.ExecCancelled), ErrorMessage: "task cancelled by user", LatencyMs: durationMs, OccurredAt: time.Now().UTC()}, agent, result)
-			// Task status is already set to cancelled by CancelTask, but set it again
-			// in case the cancellation came from a different path (e.g., server shutdown).
-			if statusErr := s.taskRepo.UpdateStatus(bgCtx, task.ID, models.StatusCancelled); statusErr != nil {
-				applog.Infof("[agent-svc] ExecuteTaskWithAgent error updating task status to cancelled: %v", statusErr)
-			}
-			exec.Status = models.ExecCancelled
-			exec.ErrorMessage = "task cancelled by user"
-			s.promoteQueuedTaskThreadAfterCompletion(task.ID)
-			return exec, result.ChatContext, fmt.Errorf("task cancelled")
+			return completeCancelled()
 		}
 
 		s.requeuePendingTaskSteeringForExecution(bgCtx, exec.ID)
@@ -1370,6 +1507,9 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 		}
 		s.promoteQueuedTaskThreadAfterCompletion(task.ID)
 		return exec, result.ChatContext, fmt.Errorf("calling LLM: %w", err)
+	}
+	if ctx.Err() == context.Canceled && taskCancelled() {
+		return completeCancelled()
 	}
 
 	if err := s.commitPreparedTaskSteering(ctx, exec.ID, preparedSteering); err != nil {
@@ -1473,8 +1613,8 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	}
 
 	// NOTE: detectToolFailures was previously used here to scan for non-zero exit
-	// codes and fail the task. This was removed because both the CLI path (Claude Code)
-	// and OAuth agentic path handle tool errors internally — the model sees the error,
+	// codes and fail the task. Provider agentic paths handle tool errors internally:
+	// the model sees the error,
 	// can retry or fix the issue, and continues working. Intermediate command failures
 	// should not kill the task. The model uses [STATUS: FAILED | reason] to explicitly
 	// report task failure when it determines the task cannot be completed.
@@ -1487,12 +1627,6 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 		completedExecution = true
 	}
 	RecordUsageFromResult(finalizeCtx, s.usageRepo, UsageCapture{ProjectID: task.ProjectID, TaskID: task.ID, ExecutionID: exec.ID, TurnID: exec.ID, Operation: string(llmcontracts.OperationTask), Status: string(models.ExecCompleted), LatencyMs: durationMs, OccurredAt: time.Now().UTC()}, agent, result)
-	if statusErr := s.taskRepo.UpdateStatus(finalizeCtx, task.ID, models.StatusCompleted); statusErr != nil {
-		applog.Infof("[agent-svc] ExecuteTaskWithAgent error updating task status to completed: %v", statusErr)
-	}
-	if completedExecution {
-		s.publishExecutionTerminal(exec.ID, models.ExecCompleted, "")
-	}
 
 	// Capture git diff of changes made during execution. Only a worktree
 	// successfully established for this execution may use target-relative review
@@ -1517,7 +1651,16 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	// Commit, merge, and update worktree status only for the managed worktree
 	// established for this execution, never from retained task metadata alone.
 	if managedWorktree && s.worktreeSvc != nil && repoDir != "" {
-		s.worktreeSvc.HandlePostExecution(finalizeCtx, &task, repoDir)
+		s.worktreeSvc.HandlePostExecution(finalizeCtx, &task, exec, repoDir)
+	}
+	// Keep the task non-terminal until all managed-worktree commit, diff, merge,
+	// and cleanup writers have left the shared repository mutation boundary.
+	// Card/manual actions gate on this status and cannot enter finalization early.
+	if statusErr := s.taskRepo.UpdateStatus(finalizeCtx, task.ID, models.StatusCompleted); statusErr != nil {
+		applog.Infof("[agent-svc] ExecuteTaskWithAgent error updating task status to completed: %v", statusErr)
+	}
+	if completedExecution {
+		s.publishExecutionTerminal(exec.ID, models.ExecCompleted, "")
 	}
 
 	// Check for follow-up marker (task still completed, but alert created)
@@ -1593,6 +1736,7 @@ func (s *LLMService) publishTaskThreadInputAppliedEvents(execID string, inputs [
 			ExecID:         execID,
 			Message:        input.Content,
 			PendingInputID: input.ID,
+			HasAttachments: input.AttachmentSessionID != "",
 		})
 	}
 }
@@ -1612,6 +1756,7 @@ func (s *LLMService) publishTaskThreadInputQueuedEvents(inputs []models.ThreadIn
 			ExecID:         input.RunExecutionID,
 			Message:        input.Content,
 			PendingInputID: input.ID,
+			HasAttachments: input.AttachmentSessionID != "",
 		})
 	}
 }
@@ -1684,17 +1829,55 @@ func (s *LLMService) SummarizeWorktreeCommitDiff(ctx context.Context, worktreePa
 	prompt := buildWorktreeCommitSummaryPrompt(diffContext, commitCtx)
 	summaryCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	output, _, err := s.CallAgentDirectNoTools(summaryCtx, prompt, nil, agent, worktreePath)
+	output, _, err := s.CallAgentRawDirectNoTools(summaryCtx, prompt, nil, agent, worktreePath)
 	if err != nil {
 		applog.Infof("[agent-svc] commit diff summary failed worktree=%s: %v", worktreePath, err)
 		return ""
 	}
-	for _, summary := range summarizeCommitIntentLines(output) {
-		if summary != "" {
-			return summary
+	return parseWorktreeCommitSummaryOutput(output)
+}
+
+func parseWorktreeCommitSummaryOutput(output string) string {
+	match := ""
+	for offset, char := range output {
+		if char != '{' {
+			continue
 		}
+		candidate := parseWorktreeCommitSummaryObject(output[offset:])
+		if candidate == "" {
+			continue
+		}
+		if match != "" {
+			return ""
+		}
+		match = candidate
 	}
-	return ""
+	return match
+}
+
+func parseWorktreeCommitSummaryObject(output string) string {
+	var fields map[string]json.RawMessage
+	decoder := json.NewDecoder(strings.NewReader(output))
+	if err := decoder.Decode(&fields); err != nil || len(fields) != 1 {
+		return ""
+	}
+	rawSubject, ok := fields["subject"]
+	if !ok {
+		return ""
+	}
+	var subject string
+	if err := json.Unmarshal(rawSubject, &subject); err != nil {
+		return ""
+	}
+	subject = strings.TrimSpace(subject)
+	if subject == "" || strings.ContainsAny(subject, "\r\n") {
+		return ""
+	}
+	subject = cleanCommitSubject(subject)
+	if subject == "" || len(subject) > 72 {
+		return ""
+	}
+	return subject
 }
 
 func buildWorktreeCommitSummaryPrompt(diffContext string, commitCtx WorktreeCommitMessageContext) string {
@@ -1705,8 +1888,11 @@ func buildWorktreeCommitSummaryPrompt(diffContext string, commitCtx WorktreeComm
 	b.WriteString("- Use an imperative, capitalized subject, for example: Add analytics chart.\n")
 	b.WriteString("- Use plain language with no conventional prefix such as feat:, fix:, chore:, docs:, or test:.\n")
 	b.WriteString("- Do not mention tasks, task turns, follow-ups, lifecycle phases, worktrees, or file lists unless that is literally the product code being changed.\n")
-	b.WriteString("- Return only the subject line, max 72 characters.\n")
+	b.WriteString("- The subject must be at most 72 characters.\n")
 	b.WriteString("- If supporting context conflicts with the diff, ignore the supporting context.\n\n")
+	b.WriteString("Return exactly one JSON object with no markdown or other text:\n")
+	b.WriteString(`{"subject":"Add concise description"}`)
+	b.WriteString("\n\n")
 	if context := buildWorktreeCommitSupportingContext(commitCtx); context != "" {
 		b.WriteString("Supporting context, only if it agrees with the diff:\n")
 		b.WriteString(context)
@@ -1790,6 +1976,17 @@ func (s *LLMService) captureWorktreeDiffAfterExecution(ctx context.Context, exec
 	if exec == nil || task == nil || task.WorktreePath == "" || repoDir == "" {
 		return ""
 	}
+	var diffOutput string
+	if err := WithRepositoryMutation(repoDir, func() error {
+		diffOutput = s.captureWorktreeDiffAfterExecutionUnlocked(ctx, exec, task, repoDir, outputSummary, agent)
+		return nil
+	}); err != nil {
+		applog.Infof("[agent-svc] ExecuteTaskWithAgent error acquiring finalization lease task=%s worktree=%s: %v", task.ID, task.WorktreePath, err)
+	}
+	return diffOutput
+}
+
+func (s *LLMService) captureWorktreeDiffAfterExecutionUnlocked(ctx context.Context, exec *models.Execution, task *models.Task, repoDir string, outputSummary string, agent models.LLMConfig) string {
 	worktreeBranch := GetCurrentBranch(task.WorktreePath)
 	if worktreeBranch == "" {
 		worktreeBranch = task.WorktreeBranch
@@ -1806,7 +2003,7 @@ func (s *LLMService) captureWorktreeDiffAfterExecution(ctx context.Context, exec
 	}
 	commitCtx.DiffSummary = s.SummarizeWorktreeCommitDiff(ctx, task.WorktreePath, agent, commitCtx)
 	commitMessage := BuildWorktreeCommitMessage(task.WorktreePath, commitCtx)
-	if err := CommitWorktreeChanges(task.WorktreePath, commitMessage); err != nil {
+	if err := s.CommitTaskWorktreeChanges(ctx, task, exec, task.WorktreePath, commitMessage); err != nil {
 		applog.Infof("[agent-svc] ExecuteTaskWithAgent error committing worktree changes task=%s worktree=%s branch=%s: %v", task.ID, task.WorktreePath, worktreeBranch, err)
 	}
 
@@ -1897,6 +2094,13 @@ func (s *LLMService) CallAgentDirectWithDefinitionNoTools(ctx context.Context, m
 	return s.callAgentDirectWithDefinition(ctx, message, attachments, agent, workDir, agentDef, true)
 }
 
+// CallAgentRawDirectNoTools calls the agent with an already-composed utility
+// prompt, without coding-agent framing or tools.
+func (s *LLMService) CallAgentRawDirectNoTools(ctx context.Context, message string, attachments []models.Attachment, agent models.LLMConfig, workDir string) (string, int, error) {
+	ctx = llmcontracts.WithoutRuntimeTools(ctx)
+	return s.callAgentDirectWithDefinitionMode(ctx, message, attachments, agent, workDir, nil, true, true)
+}
+
 type directUsageProjectContextKey struct{}
 
 func WithDirectUsageProject(ctx context.Context, projectID string) context.Context {
@@ -1922,6 +2126,17 @@ func (s *LLMService) callAgentDirect(ctx context.Context, message string, attach
 }
 
 func (s *LLMService) callAgentDirectWithDefinition(ctx context.Context, message string, attachments []models.Attachment, agent models.LLMConfig, workDir string, agentDef *models.Agent, disableTools bool) (string, int, error) {
+	return s.callAgentDirectWithDefinitionMode(ctx, message, attachments, agent, workDir, agentDef, disableTools, false)
+}
+
+func (s *LLMService) callAgentDirectWithDefinitionMode(ctx context.Context, message string, attachments []models.Attachment, agent models.LLMConfig, workDir string, agentDef *models.Agent, disableTools bool, rawDirectPrompt bool) (string, int, error) {
+	if s.updateTracker != nil {
+		done, err := s.updateTracker.Start(update.WorkChat)
+		if err != nil {
+			return "", 0, err
+		}
+		defer done()
+	}
 	applog.Infof("[agent-svc] CallAgentDirect agent=%s model=%s message_len=%d workDir=%s disable_tools=%v agent_def=%t", agent.Name, agent.Model, len(message), workDir, disableTools, agentDef != nil)
 
 	adapter, err := s.ensureRoutingStrategy().resolveAdapter(agent.Provider)
@@ -1943,14 +2158,16 @@ func (s *LLMService) callAgentDirectWithDefinition(ctx context.Context, message 
 		}
 	}
 	req, err := llmnormalize.NormalizeRequest(llmcontracts.AgentRequest{
-		Ctx:             callCtx,
-		Operation:       llmcontracts.OperationDirect,
-		Message:         message,
-		Attachments:     attachments,
-		Agent:           agent,
-		WorkDir:         workDir,
-		DisableTools:    disableTools,
-		AgentDefinition: agentDef,
+		Ctx:               callCtx,
+		Operation:         llmcontracts.OperationDirect,
+		Message:           message,
+		Attachments:       attachments,
+		Agent:             agent,
+		WorkDir:           workDir,
+		DisableTools:      disableTools,
+		RawDirectPrompt:   rawDirectPrompt,
+		AgentDefinition:   agentDef,
+		LifecycleHookCall: llmcontracts.LifecycleHookCallFromContext(ctx),
 	})
 	if err != nil {
 		return "", 0, err
@@ -2044,7 +2261,7 @@ func (s *LLMService) directScopedFilesRuntime(ctx context.Context, agentDef *mod
 // CallAgentDirectStreaming calls the agent with streaming support, writing output to DB in real-time.
 // chatHistory provides prior conversation turns for context (nil for non-chat calls).
 // chatSystemContext is optional additional context appended to the chat system prompt (e.g., task list).
-// workDir is the project's repo path used as the working directory for CLI subprocesses.
+// workDir is the project's repo path used as the working directory for model calls.
 // isTaskFollowup when true uses the coding agent system prompt instead of task management prompt.
 func (s *LLMService) CallAgentDirectStreamingDetailed(ctx context.Context, message string, attachments []models.Attachment, agent models.LLMConfig, execID string, chatHistory []models.Execution, chatSystemContext string, workDir string, agentDef *models.Agent, isTaskFollowup ...bool) (llmcontracts.AgentResult, error) {
 	followup := len(isTaskFollowup) > 0 && isTaskFollowup[0]
@@ -2224,946 +2441,6 @@ func trackLifecycleCompletionUserMessage(ctx context.Context, fallback string) (
 		return message, err
 	}
 	return llmcontracts.WithSteeringCallback(ctx, tracked), current
-}
-
-func (s *LLMService) callAnthropic(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig) (string, int, error) {
-	applog.Infof("[agent-svc] callAnthropic model=%s temp=%.1f attachments=%d",
-		agent.Model, agent.Temperature, len(attachments))
-
-	client := anthropicclient.NewWithAPIKey(agent.APIKey)
-
-	// Convert attachments to anthropicclient format
-	mcAttachments, err := convertAttachments(attachments)
-	if err != nil {
-		return "", 0, fmt.Errorf("convert attachments: %w", err)
-	}
-
-	// If there are non-image attachments, mention them in the prompt
-	fullPrompt := prompt
-	if len(attachments) > 0 {
-		attachmentInfo := "\n\nYou have been provided with the following attached files:\n"
-		for _, att := range attachments {
-			attachmentInfo += fmt.Sprintf("- %s\n", att.FileName)
-		}
-		attachmentInfo += "\nPlease examine these files as part of your task.\n"
-		fullPrompt += attachmentInfo
-	}
-
-	resp, err := client.Send(ctx, fullPrompt, &anthropicclient.SendOptions{
-		Model:       agent.Model,
-		MaxTokens:   anthropicDirectOutputBudget,
-		Attachments: mcAttachments,
-	})
-	if err != nil {
-		applog.Infof("[agent-svc] callAnthropic API error: %v", err)
-		return "", 0, fmt.Errorf("anthropic API call: %w", err)
-	}
-
-	tokensUsed := resp.InputTokens + resp.OutputTokens
-	applog.Infof("[agent-svc] callAnthropic success input_tokens=%d output_tokens=%d stop_reason=%s",
-		resp.InputTokens, resp.OutputTokens, resp.StopReason)
-
-	return resp.Text, tokensUsed, nil
-}
-
-// callAnthropicChat is the chat-specific variant of callAnthropic.
-// It includes a system prompt with task context and conversation history.
-// Image attachments are sent as proper multimodal content blocks instead of text.
-// Uses anthropicclient for retries, connection pooling, and streaming.
-func (s *LLMService) callAnthropicChat(ctx context.Context, message string, attachments []models.Attachment, agent models.LLMConfig, execID string, chatHistory []models.Execution, chatSystemContext string, isTaskFollowup bool, chatMode models.ChatMode) (string, int, error) {
-	applog.Infof("[agent-svc] callAnthropicChat model=%s history=%d message_len=%d context_len=%d attachments=%d exec=%s isTaskFollowup=%v chat_mode=%s", agent.Model, len(chatHistory), len(message), len(chatSystemContext), len(attachments), execID, isTaskFollowup, chatMode)
-
-	client := anthropicclient.NewWithAPIKey(agent.APIKey)
-
-	// Build the system prompt based on whether this is a task followup or orchestration chat
-	// Anthropic API agents don't need tool restrictions (restrictTools=false)
-	systemPromptStr := llmprompt.BuildChatSystemPrompt(isTaskFollowup, chatMode, chatSystemContext, false)
-	if chatMode == models.ChatModeOrchestrate {
-		systemPromptStr = llmprompt.ApplyChatActionToolMode(systemPromptStr, nil)
-	}
-	client.History = append(client.History, buildAnthropicClientHistory(chatHistory)...)
-
-	// Convert attachments to anthropicclient format
-	mcAttachments, err := convertAttachments(attachments)
-	if err != nil {
-		return "", 0, fmt.Errorf("convert attachments: %w", err)
-	}
-
-	sw := llmstream.NewWriterWithPublisher(execID, "", s.execRepo, ctx, 500*time.Millisecond, s.executionStreamHub)
-	defer sw.Stop()
-
-	chatInThinking := false
-	disableTools := !isTaskFollowup && chatMode != models.ChatModePlan
-	opts := &anthropicclient.AgenticOptions{
-		Model:          agent.Model,
-		MaxTokens:      anthropicAgenticOutputBudget,
-		EnableThinking: true,
-		DisableTools:   disableTools,
-		System:         systemPromptStr,
-		Attachments:    mcAttachments,
-		AutoCompaction: true,
-		OnThinking: func(text string) {
-			if !chatInThinking {
-				chatInThinking = true
-				llmstream.WriteEvent(sw, llmstream.Event{Type: llmstream.EventThinkingOpen}, false)
-			}
-			llmstream.WriteEvent(sw, llmstream.Event{Type: llmstream.EventThinkingText, Text: text}, false)
-		},
-		OnText: func(text string) {
-			if chatInThinking {
-				chatInThinking = false
-				llmstream.WriteEvent(sw, llmstream.Event{Type: llmstream.EventThinkingEnd}, false)
-			}
-			llmstream.WriteEvent(sw, llmstream.Event{Type: llmstream.EventTextDelta, Text: text}, false)
-		},
-		OnToolUse: func(name string, input json.RawMessage) {
-			if chatInThinking {
-				chatInThinking = false
-				llmstream.WriteEvent(sw, llmstream.Event{Type: llmstream.EventThinkingEnd}, false)
-			}
-			secondary := toolSecondaryInfo(name, input)
-			llmstream.WriteEvent(sw, llmstream.Event{Type: llmstream.EventToolUse, ToolName: name, Secondary: secondary}, false)
-		},
-		OnToolResult: func(name string, output string, isError bool) {
-			llmstream.WriteEvent(sw, llmstream.Event{Type: llmstream.EventToolResult, ToolName: name, Output: output, IsError: isError}, false)
-		},
-		OnCompaction: func(summary string) {
-			applog.Infof("[agent-svc] callAnthropicChat context compacted, summary_len=%d", len(summary))
-		},
-	}
-
-	resp, err := client.SendAgentic(ctx, message, opts)
-	if err != nil {
-		sw.Flush()
-		applog.Infof("[agent-svc] callAnthropicChat error: %v", err)
-		return "", 0, fmt.Errorf("anthropic API streaming call: %w", err)
-	}
-
-	sw.Flush()
-
-	output := sw.String()
-	tokensUsed := resp.InputTokens + resp.OutputTokens
-	applog.Infof("[agent-svc] callAnthropicChat success input_tokens=%d output_tokens=%d output_len=%d tools=%d stop=%s", resp.InputTokens, resp.OutputTokens, len(output), len(resp.ToolCalls), resp.StopReason)
-	if resp.StopReason == "max_tokens" {
-		return output, tokensUsed, errMaxTokens
-	}
-	return output, tokensUsed, nil
-}
-
-func (s *LLMService) callClaudeCLI(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, execID string, workDir string, projectInstructions string, pluginDirs []string, agentDef ...*models.Agent) (string, string, int, error) {
-	applog.Infof("[agent-svc] callClaudeCLI model=%s attachments=%d workDir=%s", agent.Model, len(attachments), workDir)
-
-	// SAFETY: Prevent accidental real CLI calls during tests
-	if isTestMode() {
-		return "", "", 0, fmt.Errorf("callClaudeCLI blocked in test mode - use ProviderTest with SetLLMCaller() instead")
-	}
-
-	// Find the claude binary
-	claudePath, err := exec.LookPath("claude")
-	if err != nil {
-		applog.Infof("[agent-svc] callClaudeCLI 'claude' not found in PATH: %v", err)
-		return "", "", 0, fmt.Errorf("claude CLI not found in PATH - install it from https://docs.anthropic.com/en/docs/claude-code")
-	}
-	applog.Infof("[agent-svc] callClaudeCLI using binary: %s", claudePath)
-
-	var fullPrompt strings.Builder
-	fullPrompt.WriteString(llmprompt.BuildTaskPromptHeader())
-	if worktreeContext := llmprompt.BuildWorktreeContextSentence(workDir); worktreeContext != "" {
-		fullPrompt.WriteString(worktreeContext)
-		fullPrompt.WriteString("\n\n")
-	}
-	if strings.TrimSpace(projectInstructions) != "" {
-		fullPrompt.WriteString(strings.TrimSpace(projectInstructions))
-		fullPrompt.WriteString("\n\n")
-	}
-	fullPrompt.WriteString(llmprompt.BuildAttachmentInstructions(attachments))
-	fullPrompt.WriteString(llmprompt.ApplyTaskCreationToolMode(prompt, nil))
-
-	// Append status reporting instructions AFTER the task prompt so the agent
-	// sees them last and is more likely to follow them.
-	fullPrompt.WriteString("\n\n---\nRESPONSE FORMAT REQUIREMENT: You MUST end your final response with exactly one of these status lines:\n" +
-		"- If the task completed successfully: [STATUS: SUCCESS]\n" +
-		"- If a command failed, a script returned non-zero, or the task could not be completed: [STATUS: FAILED | <describe what went wrong>]\n" +
-		"- If the task completed but something needs human attention: [STATUS: NEEDS_FOLLOWUP | <describe what needs attention>]\n" +
-		"Example: [STATUS: FAILED | fail.sh returned exit code 1]\n" +
-		"Example: [STATUS: NEEDS_FOLLOWUP | tests pass but 3 warnings need review]\n" +
-		"Replace <describe what went wrong> or <describe what needs attention> with your actual description.\n" +
-		"This status line is MANDATORY. Always include it as the very last line of your response.")
-
-	// Build command: -p reads prompt from stdin, stream-json gives us JSON events,
-	// --include-partial-messages gives us token-level streaming for real-time output
-	args := []string{
-		"-p",
-		"--output-format=stream-json",
-		"--verbose",
-		"--include-partial-messages",
-		"--dangerously-skip-permissions",
-	}
-	if agent.Model != "" {
-		args = append(args, "--model", agent.Model)
-	}
-	if effort := claudeEffort(agent.ReasoningEffort); effort != "" {
-		args = append(args, "--effort", effort)
-	}
-	for _, dir := range pluginDirs {
-		dir = strings.TrimSpace(dir)
-		if dir == "" {
-			continue
-		}
-		args = append(args, "--plugin-dir", dir)
-	}
-
-	applog.Infof("[agent-svc] callClaudeCLI executing: claude %s (prompt via stdin)", strings.Join(args, " "))
-
-	cmd := exec.CommandContext(ctx, claudePath, args...)
-
-	// Set working directory to the project's repo path so the agent
-	// operates in the correct project directory (not the OpenVibely server dir).
-	if workDir != "" {
-		cmd.Dir = workDir
-		applog.Infof("[agent-svc] callClaudeCLI using workDir=%s", workDir)
-	}
-
-	// Write agent definition files (agent.md, skills, .mcp.json) if present
-	var ad *models.Agent
-	if len(agentDef) > 0 {
-		ad = agentDef[0]
-	}
-	if ad != nil && workDir != "" {
-		cleanup, writeErr := WriteAgentFiles(workDir, ad)
-		if writeErr != nil {
-			applog.Infof("[agent-svc] callClaudeCLI error writing agent files: %v", writeErr)
-		} else {
-			defer cleanup()
-			applog.Infof("[agent-svc] callClaudeCLI wrote agent definition files for %q", ad.Name)
-		}
-	}
-
-	cmd.Env = llmprompt.FilteredEnvWithoutClaudeCode()
-
-	// Pass prompt via stdin for streaming output
-	cmd.Stdin = strings.NewReader(fullPrompt.String())
-
-	// Get stdout pipe for reading JSON stream
-	stdoutPipe, err := cmd.StdoutPipe()
-	if err != nil {
-		applog.Infof("[agent-svc] callClaudeCLI error creating stdout pipe: %v", err)
-		return "", "", 0, fmt.Errorf("creating stdout pipe: %w", err)
-	}
-
-	// Use streaming writer for real-time DB updates.
-	// The background periodic flush ensures output is visible even during
-	// long pauses (e.g., while a tool is running).
-	sw := llmstream.NewWriterWithPublisher(execID, "", s.execRepo, ctx, 500*time.Millisecond, s.executionStreamHub)
-	defer sw.Stop()
-
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-
-	// Start the command
-	if err := cmd.Start(); err != nil {
-		applog.Infof("[agent-svc] callClaudeCLI error starting command: %v", err)
-		return "", "", 0, fmt.Errorf("starting claude CLI: %w", err)
-	}
-
-	// Parse JSON stream in a goroutine and extract text content
-	parseErr := make(chan error, 1)
-	go func() {
-		parseErr <- llmstream.ParseJSONStream(stdoutPipe, sw, false)
-	}()
-
-	// Wait for command to finish
-	err = cmd.Wait()
-
-	// Wait for parsing to complete
-	if pErr := <-parseErr; pErr != nil {
-		applog.Infof("[agent-svc] callClaudeCLI JSON parsing error: %v", pErr)
-	}
-
-	// Flush any remaining output to the DB
-	sw.Flush()
-
-	if err != nil {
-		errOutput := stderr.String()
-		applog.Infof("[agent-svc] callClaudeCLI error: %v stderr: %s", err, errOutput)
-		if errOutput != "" {
-			return "", "", 0, fmt.Errorf("claude CLI error: %s", errOutput)
-		}
-		return "", "", 0, fmt.Errorf("claude CLI error: %w", err)
-	}
-
-	// Check if the CLI result event reported an error (e.g., max turns exceeded).
-	// The CLI may exit 0 even when it reports is_error=true in the result event.
-	if sw.IsError() {
-		output := sw.String()
-		subtype := sw.ResultSubtype()
-		applog.Infof("[agent-svc] callClaudeCLI result is_error=true subtype=%s output_len=%d", subtype, len(output))
-		return output, "", 0, fmt.Errorf("claude CLI reported error (subtype=%s)", subtype)
-	}
-
-	output := sw.String()
-	textOnly := sw.TextString()
-	applog.Infof("[agent-svc] callClaudeCLI success output_len=%d text_only_len=%d", len(output), len(textOnly))
-
-	// CLI doesn't report token counts, so we return 0
-	return output, textOnly, 0, nil
-}
-
-// callClaudeCLIChat is the chat-specific variant of callClaudeCLI.
-// It builds a lightweight prompt with conversation history and no task-execution
-// directives (no AGENTS.md, no STATUS markers).
-func (s *LLMService) callClaudeCLIChat(ctx context.Context, message string, attachments []models.Attachment, agent models.LLMConfig, execID string, chatHistory []models.Execution, chatSystemContext string, workDir string, isTaskFollowup bool, chatMode models.ChatMode, pluginDirs []string) (string, int, error) {
-	applog.Infof("[agent-svc] callClaudeCLIChat model=%s history=%d message_len=%d context_len=%d attachments=%d workDir=%s isTaskFollowup=%v chat_mode=%s", agent.Model, len(chatHistory), len(message), len(chatSystemContext), len(attachments), workDir, isTaskFollowup, chatMode)
-
-	// SAFETY: Prevent accidental real CLI calls during tests
-	if isTestMode() {
-		return "", 0, fmt.Errorf("callClaudeCLIChat blocked in test mode - use ProviderTest with SetLLMCaller() instead")
-	}
-
-	claudePath, err := exec.LookPath("claude")
-	if err != nil {
-		applog.Infof("[agent-svc] callClaudeCLIChat 'claude' not found in PATH: %v", err)
-		return "", 0, fmt.Errorf("claude CLI not found in PATH - install it from https://docs.anthropic.com/en/docs/claude-code")
-	}
-
-	// Check if we have a CLI session ID from a prior chat turn to resume
-	var lastSessionID string
-	for i := len(chatHistory) - 1; i >= 0; i-- {
-		if chatHistory[i].CliSessionID != "" {
-			lastSessionID = chatHistory[i].CliSessionID
-			break
-		}
-	}
-
-	// Build prompt — just the system prompt + current message (no manual history).
-	// If resuming a session, the CLI manages its own conversation state.
-	var fullPrompt strings.Builder
-	systemPromptStr := llmprompt.BuildChatSystemPrompt(isTaskFollowup, chatMode, chatSystemContext, true)
-	if chatMode == models.ChatModeOrchestrate {
-		systemPromptStr = llmprompt.ApplyChatActionToolMode(systemPromptStr, nil)
-	}
-	systemPromptStr = llmprompt.AppendWorktreeContextPrompt(systemPromptStr, workDir)
-	fullPrompt.WriteString(systemPromptStr)
-	fullPrompt.WriteString("\n")
-
-	if lastSessionID == "" {
-		// First message — no session to resume, include history text as context
-		fullPrompt.WriteString(llmprompt.BuildChatHistoryText(chatHistory))
-	}
-
-	fullPrompt.WriteString(message)
-
-	// Pass attachments - separate handling for text vs images
-	if len(attachments) > 0 {
-		var textFiles []models.Attachment
-		var imageFiles []models.Attachment
-
-		for _, att := range attachments {
-			if strings.HasPrefix(strings.ToLower(att.MediaType), "image/") {
-				imageFiles = append(imageFiles, att)
-			} else {
-				textFiles = append(textFiles, att)
-			}
-		}
-
-		// Text files can be read normally
-		if len(textFiles) > 0 {
-			fullPrompt.WriteString("\n\n[The user attached the following files:\n")
-			for _, att := range textFiles {
-				absPath := llmprompt.AttachmentAbsPath(att)
-				fullPrompt.WriteString(fmt.Sprintf("- %s (path: %s)\n", att.FileName, absPath))
-			}
-			fullPrompt.WriteString("You can read these files using your Read tool.]")
-		}
-
-		// Image files cannot be viewed in CLI mode
-		if len(imageFiles) > 0 {
-			fullPrompt.WriteString("\n\n[NOTE: The user attached the following image files, but you cannot view them because you are running in CLI mode without vision support:\n")
-			for _, att := range imageFiles {
-				absPath := llmprompt.AttachmentAbsPath(att)
-				fullPrompt.WriteString(fmt.Sprintf("- %s (path: %s)\n", att.FileName, absPath))
-			}
-			fullPrompt.WriteString("\nPlease inform the user that you cannot analyze images in CLI mode and suggest they reconfigure to use a vision-capable model (Anthropic API or OpenAI API with an API key or OAuth).]")
-		}
-	}
-
-	args := []string{
-		"-p",
-		"--output-format=stream-json",
-		"--verbose",
-		"--include-partial-messages",
-	}
-	if !isTaskFollowup && chatMode == models.ChatModePlan {
-		args = append(args, "--permission-mode", "plan")
-	} else {
-		args = append(args, "--dangerously-skip-permissions")
-	}
-	if agent.Model != "" {
-		args = append(args, "--model", agent.Model)
-	}
-	if effort := claudeEffort(agent.ReasoningEffort); effort != "" {
-		args = append(args, "--effort", effort)
-	}
-	if !(chatMode == models.ChatModePlan && !isTaskFollowup) {
-		for _, dir := range pluginDirs {
-			dir = strings.TrimSpace(dir)
-			if dir == "" {
-				continue
-			}
-			args = append(args, "--plugin-dir", dir)
-		}
-	}
-	// Resume the CLI session if we have one from a prior chat turn
-	if lastSessionID != "" {
-		args = append(args, "--resume", lastSessionID)
-		applog.Infof("[agent-svc] callClaudeCLIChat resuming session=%s", lastSessionID)
-	}
-
-	applog.Infof("[agent-svc] callClaudeCLIChat executing: claude %s (prompt via stdin, len=%d)", strings.Join(args, " "), fullPrompt.Len())
-
-	cmd := exec.CommandContext(ctx, claudePath, args...)
-
-	// Set working directory to the project's repo path so the agent
-	// operates in the correct project directory (not the OpenVibely server dir).
-	if workDir != "" {
-		cmd.Dir = workDir
-		applog.Infof("[agent-svc] callClaudeCLIChat using workDir=%s", workDir)
-	}
-
-	cmd.Env = llmprompt.FilteredEnvWithoutClaudeCode()
-
-	cmd.Stdin = strings.NewReader(fullPrompt.String())
-
-	stdoutPipe, err := cmd.StdoutPipe()
-	if err != nil {
-		applog.Infof("[agent-svc] callClaudeCLIChat error creating stdout pipe: %v", err)
-		return "", 0, fmt.Errorf("creating stdout pipe: %w", err)
-	}
-
-	sw := llmstream.NewWriterWithPublisher(execID, "", s.execRepo, ctx, 500*time.Millisecond, s.executionStreamHub)
-	defer sw.Stop()
-
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-
-	if err := cmd.Start(); err != nil {
-		applog.Infof("[agent-svc] callClaudeCLIChat error starting command: %v", err)
-		return "", 0, fmt.Errorf("starting claude CLI: %w", err)
-	}
-
-	parseErr := make(chan error, 1)
-	go func() {
-		parseErr <- llmstream.ParseJSONStream(stdoutPipe, sw, true)
-	}()
-
-	err = cmd.Wait()
-
-	if pErr := <-parseErr; pErr != nil {
-		applog.Infof("[agent-svc] callClaudeCLIChat JSON parsing error: %v", pErr)
-	}
-
-	sw.Flush()
-
-	if err != nil {
-		errOutput := stderr.String()
-		applog.Infof("[agent-svc] callClaudeCLIChat error: %v stderr: %s", err, errOutput)
-		if errOutput != "" {
-			return "", 0, fmt.Errorf("claude CLI error: %s", errOutput)
-		}
-		return "", 0, fmt.Errorf("claude CLI error: %w", err)
-	}
-
-	if sw.IsError() {
-		output := sw.String()
-		subtype := sw.ResultSubtype()
-		applog.Infof("[agent-svc] callClaudeCLIChat result is_error=true subtype=%s output_len=%d", subtype, len(output))
-		return output, 0, fmt.Errorf("claude CLI reported error (subtype=%s)", subtype)
-	}
-
-	output := sw.String()
-
-	// Persist the CLI session ID so subsequent chat calls can --resume
-	sid := sw.SessionID()
-	if sid != "" && s.execRepo != nil {
-		if err := s.execRepo.UpdateCliSessionID(ctx, execID, sid); err != nil {
-			applog.Infof("[agent-svc] callClaudeCLIChat error persisting session_id: %v", err)
-		} else {
-			applog.Infof("[agent-svc] callClaudeCLIChat persisted session_id=%s for exec=%s", sid, execID)
-		}
-	}
-
-	applog.Infof("[agent-svc] callClaudeCLIChat success output_len=%d session_id=%s", len(output), sid)
-	return output, 0, nil
-}
-
-func claudeEffort(value string) string {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "low", "medium", "high", "max":
-		return strings.ToLower(strings.TrimSpace(value))
-	default:
-		return ""
-	}
-}
-
-func prependDirectNoToolsInstruction(prompt string) string {
-	prompt = strings.TrimSpace(prompt)
-	prefix := "IMPORTANT: Do not execute any tools, plugins, MCP actions, or shell commands for this request. Reply directly with plain text only."
-	if prompt == "" {
-		return prefix
-	}
-	return prefix + "\n\n" + prompt
-}
-
-func (s *LLMService) callClaudeCLISimple(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, workDir string, disableTools bool) (string, int, error) {
-	applog.Infof("[agent-svc] callClaudeCLISimple model=%s attachments=%d workDir=%s", agent.Model, len(attachments), workDir)
-
-	// SAFETY: Prevent accidental real CLI calls during tests
-	if isTestMode() {
-		return "", 0, fmt.Errorf("callClaudeCLISimple blocked in test mode - use ProviderTest with SetLLMCaller() instead")
-	}
-
-	// Find the claude binary
-	claudePath, err := exec.LookPath("claude")
-	if err != nil {
-		applog.Infof("[agent-svc] callClaudeCLISimple 'claude' not found in PATH: %v", err)
-		return "", 0, fmt.Errorf("claude CLI not found in PATH - install it from https://docs.anthropic.com/en/docs/claude-code")
-	}
-	applog.Infof("[agent-svc] callClaudeCLISimple using binary: %s", claudePath)
-
-	// Build command with streaming JSON output
-	args := []string{
-		"-p",
-		"--output-format=stream-json",
-		"--verbose",
-		"--include-partial-messages",
-		"--dangerously-skip-permissions",
-	}
-	if agent.Model != "" {
-		args = append(args, "--model", agent.Model)
-	}
-	if effort := claudeEffort(agent.ReasoningEffort); effort != "" {
-		args = append(args, "--effort", effort)
-	}
-
-	applog.Infof("[agent-svc] callClaudeCLISimple executing: claude %s (prompt via stdin)", strings.Join(args, " "))
-	cmd := exec.CommandContext(ctx, claudePath, args...)
-
-	// Set working directory to the project's repo path so the agent
-	// operates in the correct project directory (not the OpenVibely server dir).
-	if workDir != "" {
-		cmd.Dir = workDir
-		applog.Infof("[agent-svc] callClaudeCLISimple using workDir=%s", workDir)
-	}
-
-	cmd.Env = llmprompt.FilteredEnvWithoutClaudeCode()
-
-	fullPrompt := prompt
-	if disableTools {
-		fullPrompt = prependDirectNoToolsInstruction(prompt)
-	}
-
-	// Pass prompt via stdin
-	cmd.Stdin = strings.NewReader(fullPrompt)
-
-	// Get stdout pipe for reading JSON stream
-	stdoutPipe, err := cmd.StdoutPipe()
-	if err != nil {
-		applog.Infof("[agent-svc] callClaudeCLISimple error creating stdout pipe: %v", err)
-		return "", 0, fmt.Errorf("creating stdout pipe: %w", err)
-	}
-
-	// Use a simple buffer writer for collecting output
-	var outputBuf bytes.Buffer
-
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-
-	// Start the command
-	if err := cmd.Start(); err != nil {
-		applog.Infof("[agent-svc] callClaudeCLISimple error starting command: %v", err)
-		return "", 0, fmt.Errorf("starting claude CLI: %w", err)
-	}
-
-	// Parse JSON stream and collect text
-	scanner := bufio.NewScanner(stdoutPipe)
-	const maxCapacity = 1024 * 1024 // 1MB
-	buf := make([]byte, maxCapacity)
-	scanner.Buffer(buf, maxCapacity)
-
-	for scanner.Scan() {
-		line := scanner.Text()
-		if line == "" {
-			continue
-		}
-
-		var event map[string]interface{}
-		if err := json.Unmarshal([]byte(line), &event); err != nil {
-			continue
-		}
-
-		eventType, hasType := event["type"].(string)
-		if hasType {
-			switch eventType {
-			case "content_block_delta":
-				if delta, ok := event["delta"].(map[string]interface{}); ok {
-					if dt, _ := delta["type"].(string); dt == "text_delta" {
-						if text, ok := delta["text"].(string); ok && text != "" {
-							outputBuf.WriteString(text)
-						}
-					}
-				}
-			case "content_block_start":
-				if cb, ok := event["content_block"].(map[string]interface{}); ok {
-					if bt, _ := cb["type"].(string); bt == "tool_use" {
-						if name, ok := cb["name"].(string); ok && name != "" {
-							outputBuf.WriteString(fmt.Sprintf("\n[Using tool: %s]\n", name))
-						}
-					}
-				}
-			case "result":
-				if result, ok := event["result"].(string); ok && result != "" {
-					if outputBuf.Len() == 0 {
-						outputBuf.WriteString(result)
-					}
-				}
-			}
-		}
-	}
-
-	// Wait for command to finish
-	err = cmd.Wait()
-
-	if err != nil {
-		errOutput := stderr.String()
-		applog.Infof("[agent-svc] callClaudeCLISimple error: %v stderr: %s", err, errOutput)
-		if errOutput != "" {
-			return "", 0, fmt.Errorf("claude CLI error: %s", errOutput)
-		}
-		return "", 0, fmt.Errorf("claude CLI error: %w", err)
-	}
-
-	output := outputBuf.String()
-	applog.Infof("[agent-svc] callClaudeCLISimple success output_len=%d", len(output))
-
-	return output, 0, nil
-}
-
-func (s *LLMService) callCodexCLI(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, execID string, workDir string) (string, string, int, error) {
-	applog.Infof("[agent-svc] callCodexCLI model=%s attachments=%d workDir=%s", agent.Model, len(attachments), workDir)
-
-	// SAFETY: Prevent accidental real CLI calls during tests
-	if isTestMode() {
-		return "", "", 0, fmt.Errorf("callCodexCLI blocked in test mode - use ProviderTest with SetLLMCaller() instead")
-	}
-
-	codexPath, err := exec.LookPath("codex")
-	if err != nil {
-		applog.Infof("[agent-svc] callCodexCLI 'codex' not found in PATH: %v", err)
-		return "", "", 0, fmt.Errorf("codex CLI not found in PATH - install it from https://github.com/openai/codex")
-	}
-	applog.Infof("[agent-svc] callCodexCLI using binary: %s", codexPath)
-
-	var fullPrompt strings.Builder
-	fullPrompt.WriteString(llmprompt.BuildTaskPromptHeader())
-	if worktreeContext := llmprompt.BuildWorktreeContextSentence(workDir); worktreeContext != "" {
-		fullPrompt.WriteString(worktreeContext)
-		fullPrompt.WriteString("\n\n")
-	}
-	fullPrompt.WriteString(llmprompt.BuildAttachmentInstructions(attachments))
-	fullPrompt.WriteString(llmprompt.ApplyTaskCreationToolMode(prompt, nil))
-
-	imagePaths := make([]string, 0, len(attachments))
-	for _, att := range attachments {
-		if llmoutput.IsImageMediaType(att.MediaType) {
-			imagePaths = append(imagePaths, llmprompt.AttachmentAbsPath(att))
-		}
-	}
-	fullPrompt.WriteString("\n\n---\nRESPONSE FORMAT REQUIREMENT: You MUST end your final response with exactly one of these status lines:\n" +
-		"- If the task completed successfully: [STATUS: SUCCESS]\n" +
-		"- If a command failed, a script returned non-zero, or the task could not be completed: [STATUS: FAILED | <describe what went wrong>]\n" +
-		"- If the task completed but something needs human attention: [STATUS: NEEDS_FOLLOWUP | <describe what needs attention>]\n" +
-		"Example: [STATUS: FAILED | fail.sh returned exit code 1]\n" +
-		"Example: [STATUS: NEEDS_FOLLOWUP | tests pass but 3 warnings need review]\n" +
-		"Replace <describe what went wrong> or <describe what needs attention> with your actual description.\n" +
-		"This status line is MANDATORY. Always include it as the very last line of your response.")
-
-	args := llmprompt.CodexExecArgs(agent.Model, agent.ReasoningEffort, imagePaths)
-	applog.Infof("[agent-svc] callCodexCLI executing: codex %s (prompt via stdin)", strings.Join(args, " "))
-
-	cmd := exec.CommandContext(ctx, codexPath, args...)
-	if workDir != "" {
-		cmd.Dir = workDir
-		applog.Infof("[agent-svc] callCodexCLI using workDir=%s", workDir)
-	}
-	cmd.Stdin = strings.NewReader(fullPrompt.String())
-
-	stdoutPipe, err := cmd.StdoutPipe()
-	if err != nil {
-		applog.Infof("[agent-svc] callCodexCLI error creating stdout pipe: %v", err)
-		return "", "", 0, fmt.Errorf("creating stdout pipe: %w", err)
-	}
-
-	sw := llmstream.NewWriterWithPublisher(execID, "", s.execRepo, ctx, 500*time.Millisecond, s.executionStreamHub)
-	defer sw.Stop()
-
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-
-	if err := cmd.Start(); err != nil {
-		applog.Infof("[agent-svc] callCodexCLI error starting command: %v", err)
-		return "", "", 0, fmt.Errorf("starting codex CLI: %w", err)
-	}
-
-	parseErr := make(chan error, 1)
-	go func() {
-		parseErr <- llmstream.ParseCodexJSONStream(stdoutPipe, sw, false)
-	}()
-
-	err = cmd.Wait()
-	if pErr := <-parseErr; pErr != nil {
-		applog.Infof("[agent-svc] callCodexCLI JSON parsing error: %v", pErr)
-	}
-
-	sw.Flush()
-
-	if err != nil {
-		errOutput := strings.TrimSpace(stderr.String())
-		applog.Infof("[agent-svc] callCodexCLI error: %v stderr: %s", err, errOutput)
-		if errOutput != "" {
-			return "", "", 0, fmt.Errorf("codex CLI error: %s", errOutput)
-		}
-		return "", "", 0, fmt.Errorf("codex CLI error: %w", err)
-	}
-
-	if sw.IsError() {
-		output := sw.String()
-		subtype := sw.ResultSubtype()
-		applog.Infof("[agent-svc] callCodexCLI result is_error=true subtype=%s output_len=%d", subtype, len(output))
-		return output, "", 0, fmt.Errorf("codex CLI reported error (subtype=%s)", subtype)
-	}
-
-	output := sw.String()
-	textOnly := sw.TextString()
-	applog.Infof("[agent-svc] callCodexCLI success output_len=%d text_only_len=%d", len(output), len(textOnly))
-	return output, textOnly, 0, nil
-}
-
-func (s *LLMService) callCodexCLIChat(ctx context.Context, message string, attachments []models.Attachment, agent models.LLMConfig, execID string, chatHistory []models.Execution, chatSystemContext string, workDir string, isTaskFollowup bool, chatMode models.ChatMode) (string, int, error) {
-	applog.Infof("[agent-svc] callCodexCLIChat model=%s history=%d message_len=%d context_len=%d attachments=%d workDir=%s isTaskFollowup=%v chat_mode=%s", agent.Model, len(chatHistory), len(message), len(chatSystemContext), len(attachments), workDir, isTaskFollowup, chatMode)
-
-	// SAFETY: Prevent accidental real CLI calls during tests
-	if isTestMode() {
-		return "", 0, fmt.Errorf("callCodexCLIChat blocked in test mode - use ProviderTest with SetLLMCaller() instead")
-	}
-
-	codexPath, err := exec.LookPath("codex")
-	if err != nil {
-		applog.Infof("[agent-svc] callCodexCLIChat 'codex' not found in PATH: %v", err)
-		return "", 0, fmt.Errorf("codex CLI not found in PATH - install it from https://github.com/openai/codex")
-	}
-
-	// Check for a prior Codex thread ID to resume
-	var lastThreadID string
-	for i := len(chatHistory) - 1; i >= 0; i-- {
-		if chatHistory[i].CliSessionID != "" {
-			lastThreadID = chatHistory[i].CliSessionID
-			break
-		}
-	}
-
-	var fullPrompt strings.Builder
-	systemPromptStr := llmprompt.BuildChatSystemPrompt(isTaskFollowup, chatMode, chatSystemContext, true)
-	if chatMode == models.ChatModeOrchestrate {
-		systemPromptStr = llmprompt.ApplyChatActionToolMode(systemPromptStr, nil)
-	}
-	systemPromptStr = llmprompt.AppendWorktreeContextPrompt(systemPromptStr, workDir)
-	fullPrompt.WriteString(systemPromptStr)
-	fullPrompt.WriteString("\n")
-
-	if lastThreadID == "" {
-		// First message — no thread to resume, include history text as context
-		fullPrompt.WriteString(llmprompt.BuildChatHistoryText(chatHistory))
-	}
-
-	fullPrompt.WriteString(message)
-
-	imagePaths := make([]string, 0, len(attachments))
-	if len(attachments) > 0 {
-		fullPrompt.WriteString("\n\n[The user attached files. Use the absolute paths below when needed:\n")
-		for _, att := range attachments {
-			absPath := llmprompt.AttachmentAbsPath(att)
-			fullPrompt.WriteString(fmt.Sprintf("- %s (path: %s)\n", att.FileName, absPath))
-			if llmoutput.IsImageMediaType(att.MediaType) {
-				imagePaths = append(imagePaths, absPath)
-			}
-		}
-		fullPrompt.WriteString("]")
-	}
-
-	var args []string
-	if lastThreadID != "" {
-		// Resume existing thread — codex manages its own history
-		args = llmprompt.CodexResumeArgs(agent.Model, agent.ReasoningEffort, lastThreadID, imagePaths, chatMode)
-		applog.Infof("[agent-svc] callCodexCLIChat resuming thread=%s", lastThreadID)
-	} else {
-		args = llmprompt.CodexChatArgs(agent.Model, agent.ReasoningEffort, imagePaths, chatMode)
-	}
-	applog.Infof("[agent-svc] callCodexCLIChat executing: codex %s (prompt via stdin, len=%d)", strings.Join(args, " "), fullPrompt.Len())
-
-	cmd := exec.CommandContext(ctx, codexPath, args...)
-	if workDir != "" {
-		cmd.Dir = workDir
-		applog.Infof("[agent-svc] callCodexCLIChat using workDir=%s", workDir)
-	}
-	cmd.Stdin = strings.NewReader(fullPrompt.String())
-
-	stdoutPipe, err := cmd.StdoutPipe()
-	if err != nil {
-		applog.Infof("[agent-svc] callCodexCLIChat error creating stdout pipe: %v", err)
-		return "", 0, fmt.Errorf("creating stdout pipe: %w", err)
-	}
-
-	sw := llmstream.NewWriterWithPublisher(execID, "", s.execRepo, ctx, 500*time.Millisecond, s.executionStreamHub)
-	defer sw.Stop()
-
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-
-	if err := cmd.Start(); err != nil {
-		applog.Infof("[agent-svc] callCodexCLIChat error starting command: %v", err)
-		return "", 0, fmt.Errorf("starting codex CLI: %w", err)
-	}
-
-	parseErr := make(chan error, 1)
-	go func() {
-		parseErr <- llmstream.ParseCodexJSONStream(stdoutPipe, sw, true)
-	}()
-
-	err = cmd.Wait()
-	if pErr := <-parseErr; pErr != nil {
-		applog.Infof("[agent-svc] callCodexCLIChat JSON parsing error: %v", pErr)
-	}
-
-	sw.Flush()
-
-	if err != nil {
-		errOutput := strings.TrimSpace(stderr.String())
-		applog.Infof("[agent-svc] callCodexCLIChat error: %v stderr: %s", err, errOutput)
-		if errOutput != "" {
-			return "", 0, fmt.Errorf("codex CLI error: %s", errOutput)
-		}
-		return "", 0, fmt.Errorf("codex CLI error: %w", err)
-	}
-
-	if sw.IsError() {
-		output := sw.String()
-		subtype := sw.ResultSubtype()
-		applog.Infof("[agent-svc] callCodexCLIChat result is_error=true subtype=%s output_len=%d", subtype, len(output))
-		return output, 0, fmt.Errorf("codex CLI reported error (subtype=%s)", subtype)
-	}
-
-	output := sw.String()
-
-	// Persist the Codex thread ID so subsequent chat calls can resume
-	tid := sw.SessionID()
-	if tid != "" && s.execRepo != nil {
-		if err := s.execRepo.UpdateCliSessionID(ctx, execID, tid); err != nil {
-			applog.Infof("[agent-svc] callCodexCLIChat error persisting thread_id: %v", err)
-		} else {
-			applog.Infof("[agent-svc] callCodexCLIChat persisted thread_id=%s for exec=%s", tid, execID)
-		}
-	}
-
-	applog.Infof("[agent-svc] callCodexCLIChat success output_len=%d thread_id=%s", len(output), tid)
-	return output, 0, nil
-}
-
-func (s *LLMService) callCodexCLISimple(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, workDir string, disableTools bool) (string, int, error) {
-	applog.Infof("[agent-svc] callCodexCLISimple model=%s attachments=%d workDir=%s", agent.Model, len(attachments), workDir)
-
-	// SAFETY: Prevent accidental real CLI calls during tests
-	if isTestMode() {
-		return "", 0, fmt.Errorf("callCodexCLISimple blocked in test mode - use ProviderTest with SetLLMCaller() instead")
-	}
-
-	codexPath, err := exec.LookPath("codex")
-	if err != nil {
-		applog.Infof("[agent-svc] callCodexCLISimple 'codex' not found in PATH: %v", err)
-		return "", 0, fmt.Errorf("codex CLI not found in PATH - install it from https://github.com/openai/codex")
-	}
-
-	fullPrompt := strings.TrimSpace(prompt)
-	if disableTools {
-		fullPrompt = prependDirectNoToolsInstruction(fullPrompt)
-	}
-	imagePaths := make([]string, 0, len(attachments))
-	if len(attachments) > 0 {
-		fullPrompt += "\n\nAttached files:\n"
-		for _, att := range attachments {
-			absPath := llmprompt.AttachmentAbsPath(att)
-			fullPrompt += fmt.Sprintf("- %s (absolute path: %s)\n", att.FileName, absPath)
-			if llmoutput.IsImageMediaType(att.MediaType) {
-				imagePaths = append(imagePaths, absPath)
-			}
-		}
-	}
-
-	args := llmprompt.CodexExecArgs(agent.Model, agent.ReasoningEffort, imagePaths)
-	applog.Infof("[agent-svc] callCodexCLISimple executing: codex %s (prompt via stdin)", strings.Join(args, " "))
-
-	cmd := exec.CommandContext(ctx, codexPath, args...)
-	if workDir != "" {
-		cmd.Dir = workDir
-		applog.Infof("[agent-svc] callCodexCLISimple using workDir=%s", workDir)
-	}
-	cmd.Stdin = strings.NewReader(fullPrompt)
-
-	stdoutPipe, err := cmd.StdoutPipe()
-	if err != nil {
-		applog.Infof("[agent-svc] callCodexCLISimple error creating stdout pipe: %v", err)
-		return "", 0, fmt.Errorf("creating stdout pipe: %w", err)
-	}
-
-	sw := llmstream.NewWriter("", "", nil, ctx, time.Hour)
-	defer sw.Stop()
-
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-
-	if err := cmd.Start(); err != nil {
-		applog.Infof("[agent-svc] callCodexCLISimple error starting command: %v", err)
-		return "", 0, fmt.Errorf("starting codex CLI: %w", err)
-	}
-
-	parseErr := make(chan error, 1)
-	go func() {
-		parseErr <- llmstream.ParseCodexJSONStream(stdoutPipe, sw, true)
-	}()
-
-	err = cmd.Wait()
-	if pErr := <-parseErr; pErr != nil {
-		applog.Infof("[agent-svc] callCodexCLISimple JSON parsing error: %v", pErr)
-	}
-
-	if err != nil {
-		errOutput := strings.TrimSpace(stderr.String())
-		applog.Infof("[agent-svc] callCodexCLISimple error: %v stderr: %s", err, errOutput)
-		if errOutput != "" {
-			return "", 0, fmt.Errorf("codex CLI error: %s", errOutput)
-		}
-		return "", 0, fmt.Errorf("codex CLI error: %w", err)
-	}
-
-	if sw.IsError() {
-		output := sw.String()
-		subtype := sw.ResultSubtype()
-		applog.Infof("[agent-svc] callCodexCLISimple result is_error=true subtype=%s output_len=%d", subtype, len(output))
-		return output, 0, fmt.Errorf("codex CLI reported error (subtype=%s)", subtype)
-	}
-
-	output := sw.String()
-	applog.Infof("[agent-svc] callCodexCLISimple success output_len=%d", len(output))
-	return output, 0, nil
 }
 
 // statusOrNil returns a stringified status for logging, or "<nil>" when the

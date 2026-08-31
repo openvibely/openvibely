@@ -11,57 +11,6 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
-func TestComposeRuntimeToolFilter_AllowsFilteredReadOnlyRuntimeToolInPlanMode(t *testing.T) {
-	rt := &llmcontracts.RuntimeTools{
-		Definitions: []llmcontracts.RuntimeToolDefinition{
-			{Name: "memory_view", Description: "read selected memory", Parameters: json.RawMessage(`{"type":"object"}`), Access: llmcontracts.RuntimeToolAccessRead},
-			{Name: "write_file", Description: "write selected file", Parameters: json.RawMessage(`{"type":"object"}`)},
-		},
-		Filter: func(name string) (bool, bool) {
-			switch name {
-			case "memory_view", "write_file":
-				return true, true
-			default:
-				return false, false
-			}
-		},
-	}
-	filter := composeRuntimeToolFilter(nil, rt, false, models.ChatModePlan)
-	if !filter("memory_view") {
-		t.Fatal("expected filtered selected-memory runtime tools to be allowed in plan mode")
-	}
-	if filter("write_file") {
-		t.Fatal("did not expect unrelated runtime action tool in plan mode")
-	}
-}
-
-func TestComposeRuntimeToolFilter_OrchestrateAllowsMemoryViewWithoutFilesystemRead(t *testing.T) {
-	rt := &llmcontracts.RuntimeTools{
-		Definitions: []llmcontracts.RuntimeToolDefinition{
-			{Name: "memory_view", Description: "read selected memory", Parameters: json.RawMessage(`{"type":"object"}`), Access: llmcontracts.RuntimeToolAccessRead},
-			{Name: "create_task", Description: "create task", Parameters: json.RawMessage(`{"type":"object"}`)},
-		},
-		Filter: func(name string) (bool, bool) {
-			switch name {
-			case "memory_view", "create_task":
-				return true, true
-			default:
-				return false, false
-			}
-		},
-	}
-	filter := composeRuntimeToolFilter(func(name string) bool { return true }, rt, false, models.ChatModeOrchestrate)
-	if !filter("memory_view") {
-		t.Fatal("expected selected-memory runtime tools to be allowed in orchestrate mode")
-	}
-	if !filter("create_task") {
-		t.Fatal("expected action runtime tool to be allowed in orchestrate mode")
-	}
-	if filter("read_file") || filter("Read") || filter("list_files") {
-		t.Fatal("did not expect filesystem/default read tools to be allowed in orchestrate mode")
-	}
-}
-
 func TestRuntimeAnthropicToolsAliasesSkillsListWireName(t *testing.T) {
 	rt := &llmcontracts.RuntimeTools{
 		Definitions: []llmcontracts.RuntimeToolDefinition{
@@ -112,10 +61,71 @@ func TestComposeRuntimeToolFilterCanonicalizesAnthropicSkillListAlias(t *testing
 		},
 	}
 
-	filter := composeRuntimeToolFilter(nil, rt, false, models.ChatModeOrchestrate)
+	filter := llmcontracts.ComposeRuntimeToolFilter(nil, rt, runtimeToolPolicyOptions(false, models.ChatModeOrchestrate))
 	if !filter("skill_list") {
 		t.Fatalf("expected aliased skills_list tool to be allowed through canonical runtime filter")
 	}
+}
+
+func TestAnthropicRuntimeToolHelperMappingFilteringAndExecution(t *testing.T) {
+	if got := applyAgentToSystemPrompt("base", nil); got != "base" {
+		t.Fatalf("nil agent prompt = %q", got)
+	}
+	combined := applyAgentToSystemPrompt("base", &models.Agent{SystemPrompt: "system", Skills: []models.SkillConfig{{Name: "Audit", Content: "check carefully"}, {Name: "Empty"}}})
+	if !strings.Contains(combined, "system") || !strings.Contains(combined, "## Skill: Audit") || !strings.Contains(combined, "base") {
+		t.Fatalf("combined agent prompt missing parts: %q", combined)
+	}
+
+	mapped := map[string]string{"read_file": "Read", "write_file": "Write", "edit_file": "Edit", "bash": "Bash", "list_files": "Glob", "grep_search": "Grep", "web_search_20260209": "WebSearch", "web_fetch_20260309": "WebFetch", "unknown": ""}
+	for name, want := range mapped {
+		if got := mapBuiltInToolName(" " + name + " "); got != want {
+			t.Fatalf("mapBuiltInToolName(%q)=%q want %q", name, got, want)
+		}
+	}
+	if !agentAllowsBuiltInTool(nil, "bash") || agentAllowsBuiltInTool(&models.Agent{ToolConfig: models.AgentToolConfig{SkipDefaultTools: true}}, "bash") {
+		t.Fatal("agent built-in skip/default behavior changed")
+	}
+	if !agentAllowsBuiltInTool(&models.Agent{Tools: []string{" WebFetch "}}, "web_fetch") || agentAllowsBuiltInTool(&models.Agent{Tools: []string{"Read"}}, "bash") {
+		t.Fatal("agent explicit built-in grant behavior changed")
+	}
+	if !planModeAllowsReadOnlyTool("web_fetch_20250910") || planModeAllowsReadOnlyTool("write_file") {
+		t.Fatal("plan-mode Anthropic tool classification changed")
+	}
+
+	rt := &llmcontracts.RuntimeTools{Definitions: []llmcontracts.RuntimeToolDefinition{{Name: " skills_list ", Description: " list skills ", Access: llmcontracts.RuntimeToolAccessRead, Parameters: json.RawMessage(`{"type":"object"}`)}, {Name: "write_task"}, {Name: " "}}}
+	tools := runtimeAnthropicTools(rt)
+	if len(tools) != 2 || tools[0].Name != "skill_list" || tools[0].Description != "list skills" {
+		t.Fatalf("runtimeAnthropicTools = %#v", tools)
+	}
+	if runtimeAnthropicTools(nil) != nil {
+		t.Fatal("nil runtime tools should not produce Anthropic tools")
+	}
+
+	baseExec := func(_ context.Context, name string, _ json.RawMessage) (string, bool, error) {
+		return "base:" + name, false, nil
+	}
+	exec := composeRuntimeToolExecutor(baseExec, &llmcontracts.RuntimeTools{Executor: func(_ context.Context, name string, _ json.RawMessage) (string, bool, bool, error) {
+		if name == "skills_list" {
+			return "listed", true, false, nil
+		}
+		return "", false, false, nil
+	}})
+	out, isErr, err := exec(context.Background(), "skill_list", nil)
+	if out != "listed" || isErr || err != nil {
+		t.Fatalf("runtime executor out=%q isErr=%v err=%v", out, isErr, err)
+	}
+	out, isErr, err = exec(context.Background(), "bash", nil)
+	if out != "base:bash" || isErr || err != nil {
+		t.Fatalf("base executor out=%q isErr=%v err=%v", out, isErr, err)
+	}
+	missingExec := composeRuntimeToolExecutor(nil, &llmcontracts.RuntimeTools{Executor: func(context.Context, string, json.RawMessage) (string, bool, bool, error) {
+		return "", false, false, nil
+	}})
+	_, isErr, err = missingExec(context.Background(), "missing", nil)
+	if !isErr || err == nil || !strings.Contains(err.Error(), "not available") {
+		t.Fatalf("missing executor isErr=%v err=%v", isErr, err)
+	}
+
 }
 
 func TestClaudeCodeMaxOutputTokens(t *testing.T) {

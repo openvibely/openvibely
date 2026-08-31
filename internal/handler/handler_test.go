@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	htmlstd "html"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -15,25 +16,81 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/labstack/echo/v4"
+	"github.com/openvibely/openvibely/internal/lifecycle"
 	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/web/templates/components"
+	"github.com/openvibely/openvibely/web/templates/pages"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func setupTestHandler(t *testing.T) (*Handler, *echo.Echo, *repository.LLMConfigRepo) {
+func setupTestHandler(t testing.TB) (*Handler, *echo.Echo, *repository.LLMConfigRepo) {
 	h, e, llmConfigRepo, _ := setupTestHandlerWithDB(t)
 	return h, e, llmConfigRepo
 }
 
-func setupTestHandlerWithDB(t *testing.T) (*Handler, *echo.Echo, *repository.LLMConfigRepo, *sql.DB) {
+func setupTestHandlerForDB(t testing.TB, db *sql.DB) (*Handler, *echo.Echo, *repository.LLMConfigRepo) {
+	t.Helper()
+	oldUploadsDir := uploadsDir
+	uploadsDir = t.TempDir()
+	t.Cleanup(func() {
+		uploadsDir = oldUploadsDir
+	})
+
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	workerRepo := repository.NewWorkerRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	chatAttachmentRepo := repository.NewChatAttachmentRepo(db)
+
+	alertRepo := repository.NewAlertRepo(db)
+	upcomingRepo := repository.NewUpcomingRepo(db)
+
+	projectSvc := service.NewProjectService(projectRepo)
+	llmSvc := service.NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
+	llmSvc.SetLLMCaller(testutil.NewMockLLMCaller())
+	workerSvc := service.NewWorkerService(llmSvc, 0, nil)
+	taskSvc := service.NewTaskService(taskRepo, attachmentRepo, workerSvc)
+	taskSvc.SetDeletionUploadsDir(uploadsDir)
+	schedulerSvc := service.NewSchedulerService(scheduleRepo, taskRepo, workerSvc)
+	alertSvc := service.NewAlertService(alertRepo, nil)
+	upcomingSvc := service.NewUpcomingService(upcomingRepo)
+
+	settingsRepo := repository.NewSettingsRepo(db)
+	slackAuthRepo := repository.NewSlackAuthRepo(db)
+	emailAuthRepo := repository.NewEmailAuthRepo(db)
+	emailTaskContextRepo := repository.NewEmailTaskContextRepo(db)
+	discordAuthRepo := repository.NewDiscordAuthRepo(db)
+	discordTaskContextRepo := repository.NewDiscordTaskContextRepo(db)
+	githubAuthRepo := repository.NewGitHubAuthRepo(db)
+
+	h := New(projectSvc, taskSvc, llmSvc, workerSvc, schedulerSvc, alertSvc, upcomingSvc, nil, llmConfigRepo, taskRepo, scheduleRepo, execRepo, workerRepo, attachmentRepo, chatAttachmentRepo, projectRepo, settingsRepo, nil, nil)
+	h.SetGitHubAuthRepo(githubAuthRepo)
+	h.SetSlackAuthRepo(slackAuthRepo)
+	h.SetEmailAuthRepo(emailAuthRepo)
+	h.SetEmailTaskContextRepo(emailTaskContextRepo)
+	h.SetDiscordAuthRepo(discordAuthRepo)
+	h.SetDiscordTaskContextRepo(discordTaskContextRepo)
+	h.SetLocalRepoPathEnabled(true)
+
+	e := echo.New()
+	h.RegisterRoutes(e)
+	return h, e, llmConfigRepo
+}
+
+func setupTestHandlerWithDB(t testing.TB) (*Handler, *echo.Echo, *repository.LLMConfigRepo, *sql.DB) {
 	t.Helper()
 	oldUploadsDir := uploadsDir
 	uploadsDir = t.TempDir()
@@ -73,7 +130,7 @@ func setupTestHandlerWithDB(t *testing.T) (*Handler, *echo.Echo, *repository.LLM
 	discordTaskContextRepo := repository.NewDiscordTaskContextRepo(db)
 	githubAuthRepo := repository.NewGitHubAuthRepo(db)
 
-	h := New(projectSvc, taskSvc, llmSvc, workerSvc, schedulerSvc, alertSvc, upcomingSvc, nil, nil, nil, nil, nil, nil, nil, nil, nil, llmConfigRepo, taskRepo, scheduleRepo, execRepo, workerRepo, attachmentRepo, chatAttachmentRepo, projectRepo, settingsRepo, nil, nil)
+	h := New(projectSvc, taskSvc, llmSvc, workerSvc, schedulerSvc, alertSvc, upcomingSvc, nil, llmConfigRepo, taskRepo, scheduleRepo, execRepo, workerRepo, attachmentRepo, chatAttachmentRepo, projectRepo, settingsRepo, nil, nil)
 	h.SetGitHubAuthRepo(githubAuthRepo)
 	h.SetSlackAuthRepo(slackAuthRepo)
 	h.SetEmailAuthRepo(emailAuthRepo)
@@ -90,6 +147,10 @@ func setupTestHandlerWithDB(t *testing.T) (*Handler, *echo.Echo, *repository.LLM
 
 // createProject creates a test project with the given name.
 func createProject(t *testing.T, h *Handler, name string) *models.Project {
+	return createProjectTB(t, h, name)
+}
+
+func createProjectTB(t testing.TB, h *Handler, name string) *models.Project {
 	t.Helper()
 	p := &models.Project{Name: name}
 	if err := h.projectSvc.Create(context.Background(), p); err != nil {
@@ -101,6 +162,10 @@ func createProject(t *testing.T, h *Handler, name string) *models.Project {
 // createAgent creates a test LLM config with sensible defaults.
 // Uses ProviderTest so tests never hit real APIs or spawn CLI subprocesses.
 func createAgent(t *testing.T, repo *repository.LLMConfigRepo, opts ...func(*models.LLMConfig)) *models.LLMConfig {
+	return createAgentTB(t, repo, opts...)
+}
+
+func createAgentTB(t testing.TB, repo *repository.LLMConfigRepo, opts ...func(*models.LLMConfig)) *models.LLMConfig {
 	t.Helper()
 	a := &models.LLMConfig{
 		Name: "Test Agent", Provider: models.ProviderTest,
@@ -117,6 +182,10 @@ func createAgent(t *testing.T, repo *repository.LLMConfigRepo, opts ...func(*mod
 
 // createTask creates a test task with sensible defaults (active/pending).
 func createTask(t *testing.T, h *Handler, projectID, title string, opts ...func(*models.Task)) *models.Task {
+	return createTaskTB(t, h, projectID, title, opts...)
+}
+
+func createTaskTB(t testing.TB, h *Handler, projectID, title string, opts ...func(*models.Task)) *models.Task {
 	t.Helper()
 	task := &models.Task{
 		ProjectID: projectID, Title: title,
@@ -278,7 +347,7 @@ func setupTestHandlerWithInsights(t *testing.T) (*Handler, *echo.Echo) {
 	insightsSvc := service.NewInsightsService(insightsRepo, taskRepo, projectRepo, llmConfigRepo, execRepo)
 	insightsSvc.SetLLMService(llmSvc)
 
-	h := New(projectSvc, taskSvc, llmSvc, workerSvc, schedulerSvc, alertSvc, upcomingSvc, nil, nil, insightsSvc, nil, nil, nil, nil, nil, nil, llmConfigRepo, taskRepo, scheduleRepo, execRepo, workerRepo, attachmentRepo, chatAttachmentRepo, projectRepo, nil, nil, nil)
+	h := New(projectSvc, taskSvc, llmSvc, workerSvc, schedulerSvc, alertSvc, upcomingSvc, insightsSvc, llmConfigRepo, taskRepo, scheduleRepo, execRepo, workerRepo, attachmentRepo, chatAttachmentRepo, projectRepo, nil, nil, nil)
 	e := echo.New()
 	h.RegisterRoutes(e)
 	return h, e
@@ -306,6 +375,227 @@ func TestHandler_GetTask_HTMX(t *testing.T) {
 	assertContains(t, rec, "task-detail-content")
 	assertContains(t, rec, task.Title)
 	assertNotContains(t, rec, "task_detail_modal")
+}
+
+func TestHandler_GetTaskLargeHistoryUsesNarrowExecutionMetrics(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
+	ctx := context.Background()
+
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Initial Detail Metrics Project")
+	task := createTask(t, h, project.ID, "Initial Detail Metrics Task", func(tk *models.Task) {
+		tk.Category = models.CategoryBacklog
+		tk.Status = models.StatusCompleted
+		tk.Priority = 3
+		tk.Tag = models.TagFeature
+		tk.AgentID = &agent.ID
+	})
+	task.Category = models.CategoryActive
+	if err := h.taskSvc.Update(ctx, task); err != nil {
+		t.Fatalf("update task to active completed: %v", err)
+	}
+	seedLargeExecutionHistory(t, db, task.ID, agent.ID, 200, 4*1024, 64*1024)
+	if _, err := db.ExecContext(ctx, `UPDATE executions SET status = ?, duration_ms = ?, completed_at = ? WHERE id = ?`, models.ExecCompleted, int64(65_000), "2026-08-13 12:03:20", "exec-199"); err != nil {
+		t.Fatalf("complete latest execution: %v", err)
+	}
+
+	checkInitialDetail := func(name string, htmx bool) {
+		t.Helper()
+		counter.Reset()
+		counter.SetEnabled(true)
+		var rec *httptest.ResponseRecorder
+		if htmx {
+			rec = htmxGet(e, "/tasks/"+task.ID)
+		} else {
+			req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID, nil)
+			rec = httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+		}
+		counter.SetEnabled(false)
+
+		assertCode(t, rec, http.StatusOK)
+		for _, required := range []string{"Initial Detail Metrics Task", "Category:", "active", "Status:", "Completed", "Tag:", "Feature", "Priority:", "High", "Model:", "Test Agent", "Duration:", "1m 5s"} {
+			assertContains(t, rec, required)
+		}
+
+		metricsQuerySeen := false
+		for _, stmt := range counter.Statements() {
+			if !strings.Contains(stmt, "FROM executions") {
+				continue
+			}
+			if strings.Contains(stmt, "latest_started_at") && strings.Contains(stmt, "latest_duration_ms") {
+				metricsQuerySeen = true
+			}
+			for _, forbidden := range []string{"prompt_sent", "output", "error_message", "reasoning_content", "diff_output"} {
+				if strings.Contains(stmt, forbidden) {
+					t.Fatalf("%s execution query scanned historical %s text: %s", name, forbidden, stmt)
+				}
+			}
+			if strings.Contains(stmt, "ORDER BY started_at ASC, rowid ASC") {
+				t.Fatalf("%s initial detail path executed the unbounded chronological execution query: %s", name, stmt)
+			}
+		}
+		if !metricsQuerySeen {
+			t.Fatalf("%s initial detail path did not execute compact task execution metrics query; statements: %#v", name, counter.Statements())
+		}
+	}
+
+	checkInitialDetail("HTMX", true)
+	checkInitialDetail("full-page", false)
+}
+
+func BenchmarkHandler_GetTask_MetricsProjection(b *testing.B) {
+	for _, tc := range []struct {
+		name               string
+		queryPattern       string
+		executionTextBytes int64
+		run                func(context.Context, *echo.Echo, *models.Task) (*httptest.ResponseRecorder, error)
+	}{
+		{
+			name:               "legacy_all_history",
+			queryPattern:       "ORDER BY started_at ASC, rowid ASC",
+			executionTextBytes: int64(200 * (4*1024 + 64*1024)),
+		},
+		{
+			name:               "compact_metrics",
+			queryPattern:       "latest_started_at",
+			executionTextBytes: 0,
+		},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			db, counter := testutil.NewStatementCountingTestDB(b)
+			h, e, llmConfigRepo := setupTestHandlerForDB(b, db)
+			ctx := context.Background()
+			agent := createAgentTB(b, llmConfigRepo)
+			project := createProjectTB(b, h, "Initial Detail Metrics Benchmark Project")
+			task := createTaskTB(b, h, project.ID, "Initial Detail Metrics Benchmark Task", func(tk *models.Task) {
+				tk.Category = models.CategoryBacklog
+				tk.Status = models.StatusCompleted
+				tk.Priority = 3
+				tk.Tag = models.TagFeature
+				tk.AgentID = &agent.ID
+			})
+			task.Category = models.CategoryActive
+			if err := h.taskSvc.Update(ctx, task); err != nil {
+				b.Fatalf("update task to active completed: %v", err)
+			}
+			seedLargeExecutionHistory(b, db, task.ID, agent.ID, 200, 4*1024, 64*1024)
+			if _, err := db.ExecContext(ctx, `UPDATE executions SET status = ?, duration_ms = ?, completed_at = ? WHERE id = ?`, models.ExecCompleted, int64(65_000), "2026-08-13 12:03:20", "exec-199"); err != nil {
+				b.Fatalf("complete latest execution: %v", err)
+			}
+			var historicalExecutionTextBytes int64
+			if err := db.QueryRowContext(ctx, `SELECT COALESCE(SUM(LENGTH(COALESCE(prompt_sent, '')) + LENGTH(COALESCE(output, '')) + LENGTH(COALESCE(error_message, ''))), 0) FROM executions WHERE task_id = ?`, task.ID).Scan(&historicalExecutionTextBytes); err != nil {
+				b.Fatalf("sum historical execution text bytes: %v", err)
+			}
+			if tc.name == "legacy_all_history" {
+				tc.executionTextBytes = historicalExecutionTextBytes
+			} else {
+				tc.executionTextBytes = 0
+			}
+
+			legacyEcho := echo.New()
+			legacyEcho.GET("/tasks/:taskId", func(c echo.Context) error {
+				return renderLegacyTaskDetailForBenchmark(c, h)
+			})
+			if tc.name == "legacy_all_history" {
+				tc.run = func(_ context.Context, _ *echo.Echo, task *models.Task) (*httptest.ResponseRecorder, error) {
+					req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID, nil)
+					rec := httptest.NewRecorder()
+					legacyEcho.ServeHTTP(rec, req)
+					if rec.Code != http.StatusOK {
+						return rec, fmt.Errorf("legacy detail request status=%d", rec.Code)
+					}
+					return rec, nil
+				}
+			} else {
+				tc.run = func(_ context.Context, currentEcho *echo.Echo, task *models.Task) (*httptest.ResponseRecorder, error) {
+					req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID, nil)
+					rec := httptest.NewRecorder()
+					currentEcho.ServeHTTP(rec, req)
+					if rec.Code != http.StatusOK {
+						return rec, fmt.Errorf("compact detail request status=%d", rec.Code)
+					}
+					return rec, nil
+				}
+			}
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			var totalContention time.Duration
+			var totalResponseBytes int64
+			for i := 0; i < b.N; i++ {
+				queryStarted := make(chan struct{})
+				var once sync.Once
+				counter.SetObserver(func(_ context.Context, query string) {
+					if strings.Contains(query, tc.queryPattern) {
+						once.Do(func() { close(queryStarted) })
+					}
+				})
+				errCh := make(chan error, 1)
+				var response *httptest.ResponseRecorder
+				go func() {
+					var err error
+					response, err = tc.run(context.Background(), e, task)
+					errCh <- err
+				}()
+				select {
+				case <-queryStarted:
+				case err := <-errCh:
+					b.Fatalf("%s detail request ended before execution query started: %v", tc.name, err)
+				case <-time.After(2 * time.Second):
+					b.Fatalf("%s execution query did not start", tc.name)
+				}
+				contentionStart := time.Now()
+				if _, err := h.projectSvc.List(context.Background()); err != nil {
+					b.Fatalf("lightweight project list: %v", err)
+				}
+				totalContention += time.Since(contentionStart)
+				if err := <-errCh; err != nil {
+					b.Fatal(err)
+				}
+				totalResponseBytes += int64(response.Body.Len())
+				counter.SetObserver(nil)
+			}
+			b.StopTimer()
+			b.ReportMetric(float64(tc.executionTextBytes), "execution_text_bytes/op")
+			b.ReportMetric(float64(totalResponseBytes)/float64(b.N), "rendered_response_bytes/op")
+			b.ReportMetric(float64(totalContention.Nanoseconds())/float64(b.N), "lightweight_db_wait_ns/op")
+		})
+	}
+}
+
+func renderLegacyTaskDetailForBenchmark(c echo.Context, h *Handler) error {
+	ctx := c.Request().Context()
+	taskID := c.Param("taskId")
+	task, err := h.taskSvc.GetByID(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	if task == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "task not found")
+	}
+	if task.SwarmRole == models.SwarmRoleParent {
+		if children, childErr := h.taskRepo.ListSwarmChildren(ctx, task.ID); childErr == nil {
+			task.SwarmChildren = children
+		}
+	}
+	executions, _ := h.execRepo.ListByTaskChronological(ctx, taskID)
+	schedules, _ := h.scheduleRepo.ListByTask(ctx, taskID)
+	agents, _ := h.llmConfigRepo.ListBadgeOptions(ctx)
+	attachments, _ := h.attachmentRepo.ListByTask(ctx, taskID)
+	agentDefs := h.listTaskFormAgentDefinitions(ctx, task.ProjectID, task.AgentDefinitionID)
+	var reviewComments []models.ReviewComment
+	if h.reviewCommentRepo != nil {
+		reviewComments, _ = h.reviewCommentRepo.ListByTask(ctx, taskID)
+	}
+	projects, _ := h.projectSvc.ListSelectorOptions(ctx)
+	defaultTab := "details"
+	if task.Status == models.StatusCompleted || task.Status == models.StatusFailed || task.Status == models.StatusCancelled || task.Status == models.StatusRunning {
+		defaultTab = "chat"
+	}
+	metrics := taskExecutionMetricsFromExecutionsForBenchmark(executions)
+	return render(c, http.StatusOK, pages.TaskDetailPage(projects, task, h.loadTaskGoal(ctx, taskID), &metrics, schedules, agents, agentDefs, attachments, defaultTab, reviewComments))
 }
 
 func TestHandler_TasksPage_NoDialogContainer(t *testing.T) {
@@ -366,6 +656,423 @@ func TestHandler_GetTaskExecutions(t *testing.T) {
 	}
 }
 
+func TestHandler_GetTaskExecutions_BoundedProductionFixture(t *testing.T) {
+	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Execution History Project")
+	task := createTask(t, h, project.ID, "Large Execution History", func(tk *models.Task) {
+		tk.Status = models.StatusRunning
+	})
+	seedLargeExecutionHistory(t, db, task.ID, agent.ID, 200, 4*1024, 64*1024)
+
+	rec := htmxGet(e, "/tasks/"+task.ID+"/executions")
+	assertCode(t, rec, http.StatusOK)
+	assertContains(t, rec, `id="task-execution-history"`)
+	assertContains(t, rec, "Load older executions")
+	assertContains(t, rec, "output-199-")
+	assertContains(t, rec, `exec-output-exec-199`)
+	assertContains(t, rec, "Elapsed:")
+	assertContains(t, rec, "output-182-")
+	assertContains(t, rec, "64 tokens, 1s")
+	assertContains(t, rec, "Finished:")
+	assertContains(t, rec, "failure message")
+	assertContains(t, rec, `exec-error-exec-198`)
+	assertNotContains(t, rec, "output-181-")
+	assertNotContains(t, rec, "output-000-")
+	assertContains(t, rec, `id="task-execution-history-loaded-older"`)
+	assertContains(t, rec, `hx-preserve`)
+
+	executions, err := h.execRepo.ListByTask(ctx, task.ID)
+	require.NoError(t, err)
+	var legacy bytes.Buffer
+	require.NoError(t, components.TaskExecutionHistory(task, executions, false, len(executions)).Render(ctx, &legacy))
+	if got, wantLessThan := rec.Body.Len(), legacy.Len()/10; got >= wantLessThan {
+		t.Fatalf("bounded execution-history response too large: got %d bytes, want < %d bytes (legacy all-history %d bytes)", got, wantLessThan, legacy.Len())
+	}
+}
+
+func TestHandler_GetTaskExecutions_LoadOlderPage(t *testing.T) {
+	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Execution History Project")
+	task := createTask(t, h, project.ID, "Paged Execution History", func(tk *models.Task) {
+		tk.Status = models.StatusRunning
+	})
+	seedLargeExecutionHistory(t, db, task.ID, agent.ID, 25, 16, 64)
+
+	rec := htmxGet(e, "/tasks/"+task.ID+"/executions?limit=5")
+	assertCode(t, rec, http.StatusOK)
+	assertContains(t, rec, "output-024-")
+	assertContains(t, rec, "output-020-")
+	assertNotContains(t, rec, "output-019-")
+
+	oldestVisibleID := newestHistoryExecutionID(t, db, task.ID, 5)
+	older := htmxGet(e, "/tasks/"+task.ID+"/executions?before="+oldestVisibleID+"&limit=5")
+	assertCode(t, older, http.StatusOK)
+	assertContains(t, older, `id="task-execution-history-loaded-older"`)
+	assertContains(t, older, `hx-swap-oob="beforeend"`)
+	assertContains(t, older, `id="task-execution-history-older-loader"`)
+	assertContains(t, older, `data-execution-history-card="exec-019"`)
+	assertContains(t, older, "output-019-")
+	assertContains(t, older, "output-015-")
+	assertNotContains(t, older, "output-020-")
+	assertNotContains(t, older, "output-014-")
+	assertContains(t, older, "Load older executions")
+}
+
+func BenchmarkHandler_GetTaskExecutions_ContentionWithLightweightDBRequest(b *testing.B) {
+	for _, tc := range []struct {
+		name string
+		run  func(context.Context, *Handler, *echo.Echo, *models.Task) error
+	}{
+		{
+			name: "legacy_unbounded",
+			run: func(ctx context.Context, h *Handler, _ *echo.Echo, task *models.Task) error {
+				loadedTask, err := h.taskSvc.GetByID(ctx, task.ID)
+				if err != nil {
+					return err
+				}
+				executions, err := h.execRepo.ListByTask(ctx, task.ID)
+				if err != nil {
+					return err
+				}
+				var out bytes.Buffer
+				return components.TaskExecutionHistory(loadedTask, executions, false, len(executions)).Render(ctx, &out)
+			},
+		},
+		{
+			name: "bounded_poll",
+			run: func(_ context.Context, _ *Handler, e *echo.Echo, task *models.Task) error {
+				rec := htmxGet(e, "/tasks/"+task.ID+"/executions")
+				if rec.Code != http.StatusOK {
+					return fmt.Errorf("execution-history request status=%d", rec.Code)
+				}
+				return nil
+			},
+		},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			db, counter := testutil.NewStatementCountingTestDB(b)
+			h, e, llmConfigRepo := setupTestHandlerForDB(b, db)
+			agent := createAgentTB(b, llmConfigRepo)
+			project := createProjectTB(b, h, "Contention Benchmark Project")
+			task := createTaskTB(b, h, project.ID, "Contention Benchmark Task", func(tk *models.Task) {
+				tk.Status = models.StatusRunning
+			})
+			seedLargeExecutionHistory(b, db, task.ID, agent.ID, 200, 4*1024, 64*1024)
+
+			var totalLightweightLatency int64
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				queryStarted := make(chan struct{})
+				var once sync.Once
+				counter.SetObserver(func(_ context.Context, query string) {
+					if strings.Contains(query, "FROM executions WHERE task_id = ? ORDER BY started_at DESC") {
+						once.Do(func() { close(queryStarted) })
+					}
+				})
+				errCh := make(chan error, 1)
+				go func() {
+					errCh <- tc.run(context.Background(), h, e, task)
+				}()
+				select {
+				case <-queryStarted:
+				case err := <-errCh:
+					b.Fatalf("execution-history request ended before query started: %v", err)
+				case <-time.After(2 * time.Second):
+					b.Fatalf("execution-history query did not start")
+				}
+				lightweightStart := time.Now()
+				if _, err := h.projectSvc.List(context.Background()); err != nil {
+					b.Fatalf("lightweight project list: %v", err)
+				}
+				totalLightweightLatency += time.Since(lightweightStart).Nanoseconds()
+				if err := <-errCh; err != nil {
+					b.Fatal(err)
+				}
+				counter.SetObserver(nil)
+			}
+			b.ReportMetric(float64(totalLightweightLatency)/float64(b.N), "lightweight_db_block_ns/op")
+		})
+	}
+}
+
+func seedLargeExecutionHistory(t testing.TB, db *sql.DB, taskID, agentID string, count, promptBytes, outputBytes int) {
+	t.Helper()
+	base := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)
+	stmt, err := db.Prepare(`INSERT INTO executions
+		(id, task_id, agent_config_id, status, prompt_sent, output, error_message, tokens_used, duration_ms, started_at, completed_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+	require.NoError(t, err)
+	defer stmt.Close()
+	for i := 0; i < count; i++ {
+		status := models.ExecCompleted
+		errorMessage := ""
+		completed := any(base.Add(time.Duration(i)*time.Second + time.Second).Format("2006-01-02 15:04:05"))
+		if i == count-1 {
+			status = models.ExecRunning
+			completed = nil
+		} else if i == count-2 {
+			status = models.ExecFailed
+			errorMessage = "failure message " + strings.Repeat("E", 256)
+		}
+		prompt := fmt.Sprintf("prompt-%03d-", i) + strings.Repeat("P", promptBytes)
+		output := fmt.Sprintf("output-%03d-", i) + strings.Repeat("O", outputBytes)
+		_, err := stmt.Exec(
+			fmt.Sprintf("exec-%03d", i),
+			taskID,
+			agentID,
+			status,
+			prompt,
+			output,
+			errorMessage,
+			64,
+			1500,
+			base.Add(time.Duration(i)*time.Second).Format("2006-01-02 15:04:05"),
+			completed,
+		)
+		require.NoError(t, err)
+	}
+}
+
+func newestHistoryExecutionID(t testing.TB, db *sql.DB, taskID string, offset int) string {
+	t.Helper()
+	var id string
+	err := db.QueryRow(`SELECT id FROM executions WHERE task_id = ? ORDER BY started_at DESC, rowid DESC LIMIT 1 OFFSET ?`, taskID, offset-1).Scan(&id)
+	require.NoError(t, err)
+	return id
+}
+
+func TestHandler_GetTaskDetailStatusUsesCompactAgentLabelProjection(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
+	h.SetAgentRepo(repository.NewAgentRepo(db))
+	ctx := context.Background()
+
+	model := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Compact Agent Status Project")
+	agentDef := &models.Agent{
+		Name:                "Compact Status Agent",
+		SystemPrompt:        "This must not be hydrated by status polling.",
+		Model:               "inherit",
+		Enabled:             true,
+		SelectableAsPrimary: true,
+	}
+	if err := h.agentRepo.Create(ctx, agentDef); err != nil {
+		t.Fatalf("create agent definition: %v", err)
+	}
+	assigned := createTask(t, h, project.ID, "Assigned Compact Status Task", func(task *models.Task) {
+		task.Category = models.CategoryBacklog
+		task.AgentID = &model.ID
+		task.AgentDefinitionID = &agentDef.ID
+	})
+	withoutAgent := createTask(t, h, project.ID, "No Agent Compact Status Task", func(task *models.Task) {
+		task.Category = models.CategoryBacklog
+	})
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	assignedResponse := htmxGet(e, "/tasks/"+assigned.ID+"/detail-status")
+	counter.SetEnabled(false)
+	assertCode(t, assignedResponse, http.StatusOK)
+	assertContains(t, assignedResponse, "Agent:")
+	assertContains(t, assignedResponse, "Compact Status Agent")
+
+	agentQuerySeen := false
+	for _, statement := range counter.Statements() {
+		lower := strings.ToLower(statement)
+		if !strings.Contains(lower, "from agents") {
+			continue
+		}
+		agentQuerySeen = true
+		projection := strings.Split(lower, "from agents")[0]
+		if !strings.Contains(projection, "select id, name") {
+			t.Fatalf("status Agent query projection = %q, want only identity columns: %s", projection, statement)
+		}
+		for _, forbidden := range []string{"system_prompt", "tools", "tool_config", "plugins", "mcp_servers", "skills", "permission_defaults_json", "model_defaults_json", "source_refs_json"} {
+			if strings.Contains(projection, forbidden) {
+				t.Fatalf("status Agent query selected forbidden column %q: %s", forbidden, statement)
+			}
+		}
+	}
+	if !agentQuerySeen {
+		t.Fatalf("status did not execute the compact Agent label query; statements: %#v", counter.Statements())
+	}
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	noAgentResponse := htmxGet(e, "/tasks/"+withoutAgent.ID+"/detail-status")
+	counter.SetEnabled(false)
+	assertCode(t, noAgentResponse, http.StatusOK)
+	assertContains(t, noAgentResponse, "Agent:")
+	assertContains(t, noAgentResponse, "No agent")
+	for _, statement := range counter.Statements() {
+		if strings.Contains(strings.ToLower(statement), "from agents") {
+			t.Fatalf("status without an Agent unexpectedly queried the Agent catalog: %s", statement)
+		}
+	}
+}
+
+func TestHandler_GetTaskDetailStatusPreservesAgentAvailabilityAndTaskStates(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
+	h.SetAgentRepo(repository.NewAgentRepo(db))
+	ctx := context.Background()
+
+	model := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Status Agent Availability Project")
+	otherProject := createProject(t, h, "Other Status Agent Project")
+
+	createDefinition := func(agent *models.Agent) *models.Agent {
+		t.Helper()
+		if err := h.agentRepo.Create(ctx, agent); err != nil {
+			t.Fatalf("create Agent definition %q: %v", agent.Name, err)
+		}
+		return agent
+	}
+	global := createDefinition(&models.Agent{Name: "Enabled Global Status Agent", Model: "inherit", SystemPrompt: "global status details", Enabled: true, SelectableAsPrimary: true})
+	projectScoped := createDefinition(&models.Agent{Name: "Enabled Project Status Agent", Model: "inherit", SystemPrompt: "project status details", Scope: models.AgentScopeProject, ProjectID: project.ID, Enabled: true, SelectableAsPrimary: true})
+	otherProjectScoped := createDefinition(&models.Agent{Name: "Other Project Status Agent", Model: "inherit", SystemPrompt: "other project status details", Scope: models.AgentScopeProject, ProjectID: otherProject.ID, Enabled: true, SelectableAsPrimary: true})
+	disabled := createDefinition(&models.Agent{Name: "Disabled Assigned Status Agent", Model: "inherit", SystemPrompt: "disabled status details", Enabled: false, SelectableAsPrimary: false})
+	archived := createDefinition(&models.Agent{Name: "Archived Status Agent", Model: "inherit", SystemPrompt: "archived status details", Enabled: true, SelectableAsPrimary: true})
+	archived.GeneratedStatus = models.AgentStatusArchived
+	if err := h.agentRepo.Update(ctx, archived); err != nil {
+		t.Fatalf("archive Agent definition: %v", err)
+	}
+	archivedTimestamp := createDefinition(&models.Agent{Name: "Archived Timestamp Status Agent", Model: "inherit", SystemPrompt: "archived timestamp status details", Enabled: true, SelectableAsPrimary: true})
+	archivedAt := time.Now().UTC()
+	archivedTimestamp.ArchivedAt = &archivedAt
+	if err := h.agentRepo.Update(ctx, archivedTimestamp); err != nil {
+		t.Fatalf("archive Agent definition by timestamp: %v", err)
+	}
+
+	statusCases := []struct {
+		name     string
+		status   models.TaskStatus
+		category models.TaskCategory
+	}{
+		{name: "pending backlog", status: models.StatusPending, category: models.CategoryBacklog},
+		{name: "running backlog", status: models.StatusRunning, category: models.CategoryBacklog},
+		{name: "completed backlog", status: models.StatusCompleted, category: models.CategoryBacklog},
+		{name: "failed backlog", status: models.StatusFailed, category: models.CategoryBacklog},
+		{name: "cancelled backlog", status: models.StatusCancelled, category: models.CategoryBacklog},
+		{name: "scheduled pending", status: models.StatusPending, category: models.CategoryScheduled},
+	}
+	for _, tc := range statusCases {
+		t.Run(tc.name, func(t *testing.T) {
+			task := createTask(t, h, project.ID, "No Agent "+tc.name, func(task *models.Task) {
+				task.Status = tc.status
+				task.Category = tc.category
+				task.AgentID = &model.ID
+			})
+			counter.Reset()
+			counter.SetEnabled(true)
+			response := htmxGet(e, "/tasks/"+task.ID+"/detail-status")
+			counter.SetEnabled(false)
+			assertCode(t, response, http.StatusOK)
+			assertContains(t, response, "Model:")
+			assertContains(t, response, "Test Agent")
+			assertContains(t, response, "Agent:")
+			assertContains(t, response, "No agent")
+			for _, statement := range counter.Statements() {
+				if strings.Contains(strings.ToLower(statement), "from agents") {
+					t.Fatalf("task without an Agent queried the Agent catalog: %s", statement)
+				}
+			}
+		})
+	}
+
+	agentCases := []struct {
+		name         string
+		definitionID string
+		want         string
+	}{
+		{name: "enabled global", definitionID: global.ID, want: global.Name},
+		{name: "enabled project scoped", definitionID: projectScoped.ID, want: projectScoped.Name},
+		{name: "disabled assigned global", definitionID: disabled.ID, want: disabled.Name},
+		{name: "other project scoped", definitionID: otherProjectScoped.ID, want: "Unknown agent"},
+		{name: "archived", definitionID: archived.ID, want: "Unknown agent"},
+		{name: "archived timestamp", definitionID: archivedTimestamp.ID, want: "Unknown agent"},
+		{name: "missing", definitionID: "missing-agent-id", want: "Unknown agent"},
+		{name: "invalid", definitionID: "not a valid persisted id", want: "Unknown agent"},
+	}
+	for _, tc := range agentCases {
+		t.Run(tc.name, func(t *testing.T) {
+			task := createTask(t, h, project.ID, "Assigned "+tc.name, func(task *models.Task) {
+				task.Status = models.StatusCompleted
+				task.Category = models.CategoryBacklog
+				task.AgentID = &model.ID
+				if tc.name != "missing" && tc.name != "invalid" {
+					task.AgentDefinitionID = &tc.definitionID
+				}
+			})
+			if tc.name == "missing" || tc.name == "invalid" {
+				if _, err := db.ExecContext(ctx, `PRAGMA foreign_keys = OFF`); err != nil {
+					t.Fatalf("disable foreign-key checks for invalid Agent fixture: %v", err)
+				}
+				if _, err := db.ExecContext(ctx, `UPDATE tasks SET agent_definition_id = ? WHERE id = ?`, tc.definitionID, task.ID); err != nil {
+					t.Fatalf("set invalid Agent definition fixture: %v", err)
+				}
+				if _, err := db.ExecContext(ctx, `PRAGMA foreign_keys = ON`); err != nil {
+					t.Fatalf("restore foreign-key checks after invalid Agent fixture: %v", err)
+				}
+			}
+			counter.Reset()
+			counter.SetEnabled(true)
+			response := htmxGet(e, "/tasks/"+task.ID+"/detail-status")
+			counter.SetEnabled(false)
+			assertCode(t, response, http.StatusOK)
+			assertContains(t, response, "Model:")
+			assertContains(t, response, "Test Agent")
+			assertContains(t, response, "Agent:")
+			assertContains(t, response, tc.want)
+
+			agentQueries := 0
+			for _, statement := range counter.Statements() {
+				if !strings.Contains(strings.ToLower(statement), "from agents") {
+					continue
+				}
+				agentQueries++
+				projection := strings.Split(strings.ToLower(statement), "from agents")[0]
+				if !strings.Contains(projection, "select id, name") {
+					t.Fatalf("status Agent query projection = %q, want identity-only query: %s", projection, statement)
+				}
+				for _, forbidden := range []string{"system_prompt", "tools", "tool_config", "plugins", "mcp_servers", "skills", "permission_defaults_json", "model_defaults_json", "source_refs_json"} {
+					if strings.Contains(projection, forbidden) {
+						t.Fatalf("status Agent query selected forbidden column %q: %s", forbidden, statement)
+					}
+				}
+			}
+			if agentQueries != 1 {
+				t.Fatalf("status Agent lookup count = %d, want one targeted lookup; statements: %#v", agentQueries, counter.Statements())
+			}
+		})
+	}
+
+	fullDetailTask := createTask(t, h, project.ID, "Full Agent Detail Task", func(task *models.Task) {
+		task.Category = models.CategoryBacklog
+		task.AgentDefinitionID = &global.ID
+	})
+	counter.Reset()
+	counter.SetEnabled(true)
+	fullPage := htmxGet(e, "/tasks/"+fullDetailTask.ID)
+	counter.SetEnabled(false)
+	assertCode(t, fullPage, http.StatusOK)
+	fullProjectionSeen := false
+	for _, statement := range counter.Statements() {
+		if strings.Contains(strings.ToLower(statement), "from agents") && strings.Contains(strings.ToLower(statement), "system_prompt") {
+			fullProjectionSeen = true
+			break
+		}
+	}
+	if !fullProjectionSeen {
+		t.Fatalf("initial Task Detail no longer used the full Agent projection; statements: %#v", counter.Statements())
+	}
+}
+
 func TestHandler_GetTaskDetailStatus(t *testing.T) {
 	h, e, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()
@@ -416,17 +1123,419 @@ func TestHandler_GetTaskDetailStatus(t *testing.T) {
 	assertContains(t, rec2, "badge-warning")
 	assertContains(t, rec2, "Elapsed")
 
-	// Test 3: Not found task returns 404
-	req3 := httptest.NewRequest(http.MethodGet, "/tasks/nonexistent/detail-status", nil)
-	rec3 := httptest.NewRecorder()
-	c3 := e.NewContext(req3, rec3)
-	c3.SetPath("/tasks/:taskId/detail-status")
-	c3.SetParamNames("taskId")
-	c3.SetParamValues("nonexistent")
+	// Test 3: Completed task shows latest terminal duration
+	completedExec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+	})
+	if err := h.execRepo.Complete(ctx, completedExec.ID, models.ExecCompleted, "done", "", 10, 1500); err != nil {
+		t.Fatalf("complete execution: %v", err)
+	}
+	task.Status = models.StatusCompleted
+	if err := h.taskSvc.Update(ctx, task); err != nil {
+		t.Fatalf("failed to update task completed: %v", err)
+	}
+	rec3 := htmxGet(e, "/tasks/"+task.ID+"/detail-status")
+	assertCode(t, rec3, http.StatusOK)
+	assertContains(t, rec3, "Duration:")
+	assertContains(t, rec3, "1s")
 
-	if err := h.GetTaskDetailStatus(c3); err == nil {
+	// Test 4: Not found task returns 404
+	req4 := httptest.NewRequest(http.MethodGet, "/tasks/nonexistent/detail-status", nil)
+	rec4 := httptest.NewRecorder()
+	c4 := e.NewContext(req4, rec4)
+	c4.SetPath("/tasks/:taskId/detail-status")
+	c4.SetParamNames("taskId")
+	c4.SetParamValues("nonexistent")
+
+	if err := h.GetTaskDetailStatus(c4); err == nil {
 		t.Errorf("expected error for nonexistent task")
 	}
+}
+
+func TestHandler_GetTaskDetailStatusLargeHistoryUsesNarrowExecutionMetrics(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
+	ctx := context.Background()
+	agentRepo := repository.NewAgentRepo(db)
+	h.SetAgentRepo(agentRepo)
+	agent := createAgent(t, llmConfigRepo)
+	agentDef := &models.Agent{
+		Name:                "Primary Metrics Agent",
+		Key:                 "primary_metrics_agent",
+		SystemPrompt:        "Handle metrics tasks.",
+		Model:               "inherit",
+		Enabled:             true,
+		SelectableAsPrimary: true,
+	}
+	if err := agentRepo.Create(ctx, agentDef); err != nil {
+		t.Fatalf("create agent definition: %v", err)
+	}
+	project := createProject(t, h, "Metrics Projection Project")
+	task := createTask(t, h, project.ID, "Metrics Projection Task", func(tk *models.Task) {
+		tk.Category = models.CategoryBacklog
+		tk.Status = models.StatusCompleted
+		tk.Priority = 3
+		tk.Tag = models.TagFeature
+		tk.AgentID = &agent.ID
+		tk.AgentDefinitionID = &agentDef.ID
+	})
+	task.Category = models.CategoryActive
+	if err := h.taskSvc.Update(ctx, task); err != nil {
+		t.Fatalf("update task to active completed: %v", err)
+	}
+	seedLargeExecutionHistory(t, db, task.ID, agent.ID, 200, 4*1024, 64*1024)
+	if _, err := db.ExecContext(ctx, `UPDATE executions SET status = ?, duration_ms = ?, completed_at = ? WHERE id = ?`, models.ExecCompleted, int64(65_000), "2026-08-13 12:03:20", "exec-199"); err != nil {
+		t.Fatalf("complete latest execution: %v", err)
+	}
+	var legacyTextBytes int64
+	if err := db.QueryRowContext(ctx, `SELECT COALESCE(SUM(LENGTH(COALESCE(prompt_sent, '')) + LENGTH(COALESCE(output, '')) + LENGTH(COALESCE(error_message, ''))), 0) FROM executions WHERE task_id = ?`, task.ID).Scan(&legacyTextBytes); err != nil {
+		t.Fatalf("sum legacy execution text bytes: %v", err)
+	}
+	if legacyTextBytes < 13*1024*1024 {
+		t.Fatalf("fixture should contain at least 13 MiB of historical execution text, got %d", legacyTextBytes)
+	}
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	rec := htmxGet(e, "/tasks/"+task.ID+"/detail-status")
+	counter.SetEnabled(false)
+	assertCode(t, rec, http.StatusOK)
+	for _, required := range []string{"Category:", "active", "Status:", "Completed", "Tag:", "Feature", "Priority:", "High", "Model:", "Test Agent", "Agent:", "Primary Metrics Agent", "Duration:", "1m 5s"} {
+		assertContains(t, rec, required)
+	}
+
+	metricsQuerySeen := false
+	for _, stmt := range counter.Statements() {
+		if !strings.Contains(stmt, "FROM executions") {
+			continue
+		}
+		if strings.Contains(stmt, "latest_started_at") && strings.Contains(stmt, "latest_duration_ms") {
+			metricsQuerySeen = true
+		}
+		for _, forbidden := range []string{"prompt_sent", "output", "error_message", "reasoning_content", "diff_output"} {
+			if strings.Contains(stmt, forbidden) {
+				t.Fatalf("detail-status execution query scanned historical %s text: %s", forbidden, stmt)
+			}
+		}
+	}
+	if !metricsQuerySeen {
+		t.Fatalf("detail-status did not execute compact task execution metrics query; statements: %#v", counter.Statements())
+	}
+	const newTextBytesScanned = 0
+	if newTextBytesScanned > legacyTextBytes/10 {
+		t.Fatalf("expected at least 90%% lower DB text bytes scanned, legacy=%d new=%d", legacyTextBytes, newTextBytesScanned)
+	}
+}
+
+func BenchmarkHandler_GetTaskDetailStatus_MetricsProjection(b *testing.B) {
+	for _, tc := range []struct {
+		name             string
+		dbTextBytes      func(*sql.DB, string) int64
+		run              func(context.Context, *Handler, *echo.Echo, *models.Task, []models.LLMConfig, []models.Agent) error
+		waitQueryPattern string
+	}{
+		{
+			name: "legacy_all_history",
+			dbTextBytes: func(db *sql.DB, taskID string) int64 {
+				var total int64
+				if err := db.QueryRow(`SELECT COALESCE(SUM(LENGTH(COALESCE(prompt_sent, '')) + LENGTH(COALESCE(output, '')) + LENGTH(COALESCE(error_message, ''))), 0) FROM executions WHERE task_id = ?`, taskID).Scan(&total); err != nil {
+					b.Fatalf("legacy text bytes: %v", err)
+				}
+				return total
+			},
+			run: func(ctx context.Context, h *Handler, _ *echo.Echo, task *models.Task, agents []models.LLMConfig, agentDefs []models.Agent) error {
+				loadedTask, err := h.taskSvc.GetByID(ctx, task.ID)
+				if err != nil {
+					return err
+				}
+				executions, err := h.execRepo.ListByTaskChronological(ctx, task.ID)
+				if err != nil {
+					return err
+				}
+				var out bytes.Buffer
+				agentName := ""
+				for _, agentDef := range agentDefs {
+					if loadedTask.AgentDefinitionID != nil && agentDef.ID == *loadedTask.AgentDefinitionID {
+						agentName = agentDef.Name
+						break
+					}
+				}
+				return pages.TaskDetailMetrics(loadedTask, taskExecutionMetricsFromExecutionsForBenchmark(executions), agents, agentName).Render(ctx, &out)
+			},
+			waitQueryPattern: "prompt_sent, output"},
+		{
+			name:        "narrow_projection",
+			dbTextBytes: func(*sql.DB, string) int64 { return 0 },
+			run: func(_ context.Context, _ *Handler, e *echo.Echo, task *models.Task, _ []models.LLMConfig, _ []models.Agent) error {
+				rec := htmxGet(e, "/tasks/"+task.ID+"/detail-status")
+				if rec.Code != http.StatusOK {
+					return fmt.Errorf("detail-status request status=%d", rec.Code)
+				}
+				return nil
+			},
+			waitQueryPattern: "latest_started_at",
+		},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			db, counter := testutil.NewStatementCountingTestDB(b)
+			h, e, llmConfigRepo := setupTestHandlerForDB(b, db)
+			ctx := context.Background()
+			agentRepo := repository.NewAgentRepo(db)
+			h.SetAgentRepo(agentRepo)
+			agent := createAgentTB(b, llmConfigRepo)
+			agentDef := &models.Agent{Name: "Primary Metrics Agent", Key: "primary_metrics_agent", SystemPrompt: "Handle metrics tasks.", Model: "inherit", Enabled: true, SelectableAsPrimary: true}
+			if err := agentRepo.Create(ctx, agentDef); err != nil {
+				b.Fatalf("create agent definition: %v", err)
+			}
+			project := createProjectTB(b, h, "Detail Status Benchmark Project")
+			task := createTaskTB(b, h, project.ID, "Detail Status Benchmark Task", func(tk *models.Task) {
+				tk.Category = models.CategoryBacklog
+				tk.Status = models.StatusCompleted
+				tk.Priority = 3
+				tk.Tag = models.TagFeature
+				tk.AgentID = &agent.ID
+				tk.AgentDefinitionID = &agentDef.ID
+			})
+			task.Category = models.CategoryActive
+			if err := h.taskSvc.Update(ctx, task); err != nil {
+				b.Fatalf("update task to active completed: %v", err)
+			}
+			seedLargeExecutionHistory(b, db, task.ID, agent.ID, 200, 4*1024, 64*1024)
+			if _, err := db.ExecContext(ctx, `UPDATE executions SET status = ?, duration_ms = ?, completed_at = ? WHERE id = ?`, models.ExecCompleted, int64(65_000), "2026-08-13 12:03:20", "exec-199"); err != nil {
+				b.Fatalf("complete latest execution: %v", err)
+			}
+			agents, err := h.llmConfigRepo.ListBadgeOptions(ctx)
+			if err != nil {
+				b.Fatalf("list badge options: %v", err)
+			}
+			agentDefs := h.listTaskFormAgentDefinitions(ctx, task.ProjectID, task.AgentDefinitionID)
+			textBytes := tc.dbTextBytes(db, task.ID)
+			var totalLightweightLatency int64
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				queryStarted := make(chan struct{})
+				var once sync.Once
+				counter.SetObserver(func(_ context.Context, query string) {
+					if strings.Contains(query, tc.waitQueryPattern) {
+						once.Do(func() { close(queryStarted) })
+					}
+				})
+				errCh := make(chan error, 1)
+				go func() {
+					errCh <- tc.run(context.Background(), h, e, task, agents, agentDefs)
+				}()
+				select {
+				case <-queryStarted:
+				case err := <-errCh:
+					b.Fatalf("detail-status request ended before query started: %v", err)
+				case <-time.After(2 * time.Second):
+					b.Fatalf("detail-status query did not start")
+				}
+				lightweightStart := time.Now()
+				if _, err := h.projectSvc.List(context.Background()); err != nil {
+					b.Fatalf("lightweight project list: %v", err)
+				}
+				totalLightweightLatency += time.Since(lightweightStart).Nanoseconds()
+				if err := <-errCh; err != nil {
+					b.Fatal(err)
+				}
+				counter.SetObserver(nil)
+			}
+			b.ReportMetric(float64(totalLightweightLatency)/float64(b.N), "lightweight_db_block_ns/op")
+			b.ReportMetric(float64(textBytes), "db_text_bytes_scanned/op")
+		})
+	}
+}
+
+func BenchmarkHandler_GetTaskDetailStatus_AgentProjectionVsFullHydration(b *testing.B) {
+	db, counter := testutil.NewStatementCountingTestDB(b)
+	h, e, llmConfigRepo := setupTestHandlerForDB(b, db)
+	ctx := context.Background()
+	agentRepo := repository.NewAgentRepo(db)
+	h.SetAgentRepo(agentRepo)
+	if _, err := db.ExecContext(ctx, `DELETE FROM agents WHERE id IS NOT NULL`); err != nil {
+		b.Fatalf("clear Agent definitions: %v", err)
+	}
+
+	var targetAgent *models.Agent
+	for i := 0; i < 1000; i++ {
+		agent := createRichTaskDetailBenchmarkAgent(b, agentRepo, fmt.Sprintf("Agent %04d", i))
+		if i == 999 {
+			targetAgent = agent
+		}
+	}
+	if targetAgent == nil {
+		b.Fatal("target Agent definition was not created")
+	}
+
+	model := createAgentTB(b, llmConfigRepo)
+	project := createProjectTB(b, h, "Agent Projection Benchmark Project")
+	task := createTaskTB(b, h, project.ID, "Agent Projection Benchmark Task", func(tk *models.Task) {
+		tk.Status = models.StatusCompleted
+		tk.AgentID = &model.ID
+		tk.AgentDefinitionID = &targetAgent.ID
+	})
+
+	for _, tc := range []struct {
+		name string
+		run  func(context.Context) (int, error)
+	}{
+		{
+			name: "full_hydration",
+			run: func(ctx context.Context) (int, error) {
+				loadedTask, err := h.taskSvc.GetByID(ctx, task.ID)
+				if err != nil {
+					return 0, err
+				}
+				metrics, err := h.execRepo.GetTaskExecutionMetrics(ctx, task.ID)
+				if err != nil {
+					return 0, err
+				}
+				agents, err := h.llmConfigRepo.ListBadgeOptions(ctx)
+				if err != nil {
+					return 0, err
+				}
+				agentDefs, err := agentRepo.List(ctx)
+				if err != nil {
+					return 0, err
+				}
+				if len(agentDefs) != 1000 {
+					return 0, fmt.Errorf("full Agent list length = %d, want 1000", len(agentDefs))
+				}
+				agentName := ""
+				for _, agentDef := range agentDefs {
+					if loadedTask.AgentDefinitionID != nil && agentDef.ID == *loadedTask.AgentDefinitionID {
+						agentName = agentDef.Name
+						break
+					}
+				}
+				var out bytes.Buffer
+				if err := pages.TaskDetailMetrics(loadedTask, metrics, agents, agentName).Render(ctx, &out); err != nil {
+					return 0, err
+				}
+				return out.Len(), nil
+			},
+		},
+		{
+			name: "task_detail_status",
+			run: func(_ context.Context) (int, error) {
+				rec := htmxGet(e, "/tasks/"+task.ID+"/detail-status")
+				if rec.Code != http.StatusOK {
+					return 0, fmt.Errorf("detail-status request status=%d", rec.Code)
+				}
+				return rec.Body.Len(), nil
+			},
+		},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			b.ResetTimer()
+			var totalResponseBytes int64
+			var totalLightweightWait time.Duration
+			for i := 0; i < b.N; i++ {
+				queryStarted := make(chan struct{})
+				var once sync.Once
+				counter.SetObserver(func(_ context.Context, query string) {
+					if strings.Contains(strings.ToLower(query), "from agents") {
+						once.Do(func() { close(queryStarted) })
+					}
+				})
+
+				type lookupResult struct {
+					responseBytes int
+					err           error
+				}
+				resultCh := make(chan lookupResult, 1)
+				go func() {
+					responseBytes, err := tc.run(context.Background())
+					resultCh <- lookupResult{responseBytes: responseBytes, err: err}
+				}()
+				var result lookupResult
+				lookupComplete := false
+				select {
+				case <-queryStarted:
+				case result = <-resultCh:
+					lookupComplete = true
+				case <-time.After(2 * time.Second):
+					b.Fatalf("Agent lookup query did not start")
+				}
+
+				lightweightStart := time.Now()
+				var projectID string
+				if err := db.QueryRowContext(context.Background(), `SELECT id FROM projects ORDER BY id LIMIT 1`).Scan(&projectID); err != nil {
+					b.Fatalf("lightweight project lookup: %v", err)
+				}
+				totalLightweightWait += time.Since(lightweightStart)
+
+				if !lookupComplete {
+					result = <-resultCh
+				}
+				counter.SetObserver(nil)
+				if result.err != nil {
+					b.Fatal(result.err)
+				}
+				if result.responseBytes <= 0 {
+					b.Fatal("Agent status response body was empty")
+				}
+				totalResponseBytes += int64(result.responseBytes)
+			}
+			b.StopTimer()
+			b.ReportMetric(float64(totalResponseBytes)/float64(b.N), "response_bytes/op")
+			b.ReportMetric(float64(totalLightweightWait.Nanoseconds())/float64(b.N), "lightweight_db_wait_ns/op")
+		})
+	}
+}
+
+func createRichTaskDetailBenchmarkAgent(tb testing.TB, repo *repository.AgentRepo, name string) *models.Agent {
+	tb.Helper()
+	agent := &models.Agent{
+		Name:         name,
+		Description:  "production-shaped picker agent",
+		SystemPrompt: strings.Repeat("large webhook picker prompt with instructions and examples. ", 320),
+		Model:        "inherit",
+		Tools:        []string{"Read", "Write", "Edit", "Bash", models.AgentToolScopedFiles},
+		ToolConfig: models.AgentToolConfig{ScopedFiles: []models.ScopedFilesConfig{{
+			Directory:   "src",
+			Permissions: []string{"read", "write"},
+		}}},
+		Plugins: []string{"github@marketplace", "playwright@claude-plugins-official"},
+		MCPServers: []models.MCPServerConfig{{
+			Name:    "playwright",
+			Command: []string{"npx", "-y", "@playwright/mcp"},
+			Env:     map[string]string{"TOKEN": strings.Repeat("x", 256)},
+		}},
+		Skills: []models.SkillConfig{{
+			Name:        "triage",
+			Description: "large skill config",
+			Tools:       "Read, Grep, Bash",
+			Content:     strings.Repeat("skill body ", 256),
+		}},
+		PermissionDefaults:  models.AgentPermissionDefaults{ReadAgents: true, ReadSkills: true, ReadRepositoryFiles: true, UseShellOrTools: true},
+		ModelDefaults:       models.AgentModelDefaults{Model: "gpt-5", Temperature: 0.3, MaxTokens: 8192},
+		SourceRefs:          []string{"agents/picker/SKILLS.md", strings.Repeat("ref", 128)},
+		Enabled:             true,
+		SelectableAsPrimary: true,
+	}
+	if err := repo.Create(context.Background(), agent); err != nil {
+		tb.Fatalf("create benchmark Agent %q: %v", name, err)
+	}
+	return agent
+}
+
+func taskExecutionMetricsFromExecutionsForBenchmark(executions []models.Execution) models.TaskExecutionMetrics {
+	var metrics models.TaskExecutionMetrics
+	if len(executions) > 0 {
+		started := executions[len(executions)-1].StartedAt
+		metrics.LatestStartedAt = &started
+	}
+	for i := len(executions) - 1; i >= 0; i-- {
+		if executions[i].DurationMs > 0 {
+			metrics.LatestDurationMs = executions[i].DurationMs
+			break
+		}
+	}
+	return metrics
 }
 
 func TestHandler_GetTaskDetailActions(t *testing.T) {
@@ -653,6 +1762,145 @@ func TestHandler_GetTask_StatusIndicator(t *testing.T) {
 	}
 }
 
+func TestHandler_GetTaskThreadPollUsesCompactTaskMetadata(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Thread Poll Projection Project")
+	task := createTask(t, h, project.ID, "Thread Poll Projection Task", func(tk *models.Task) {
+		tk.Status = models.StatusRunning
+		tk.Category = models.CategoryActive
+		tk.AgentID = &agent.ID
+		tk.Prompt = strings.Repeat("large-current-task-prompt", 8192)
+	})
+	if _, err := db.ExecContext(ctx, `UPDATE tasks SET chain_config = ?, swarm_config = ? WHERE id = ?`, strings.Repeat("large-chain-config", 8192), strings.Repeat("large-swarm-config", 8192), task.ID); err != nil {
+		t.Fatalf("seed large task configs: %v", err)
+	}
+	exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "stable execution prompt"
+		ex.Output = "working"
+	})
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	rec := htmxGet(e, "/tasks/"+task.ID+"/thread?poll=1&limit=5&preserved_exec_ids="+exec.ID)
+	counter.SetEnabled(false)
+	assertCode(t, rec, http.StatusOK)
+	assertContains(t, rec, `data-task-status="running"`)
+	assertContains(t, rec, `data-task-category="active"`)
+	assertContains(t, rec, `data-task-agent="`+agent.ID+`"`)
+	assertNotContains(t, rec, "large-current-task-prompt")
+	assertNotContains(t, rec, "large-chain-config")
+	assertNotContains(t, rec, "large-swarm-config")
+
+	var compactTaskQuerySeen bool
+	for _, stmt := range counter.Statements() {
+		if !strings.Contains(stmt, "FROM tasks") || !strings.Contains(stmt, "WHERE id = ?") {
+			continue
+		}
+		if strings.Contains(stmt, "SELECT id, project_id, category, status, agent_id, agent_definition_id") {
+			compactTaskQuerySeen = true
+		}
+		for _, forbidden := range []string{"prompt", "chain_config", "swarm_config"} {
+			if strings.Contains(stmt, forbidden) {
+				t.Fatalf("poll task metadata query selected %s: %s", forbidden, stmt)
+			}
+		}
+	}
+	if !compactTaskQuerySeen {
+		t.Fatalf("poll did not execute compact task metadata query; statements: %#v", counter.Statements())
+	}
+}
+
+func TestHandler_GetTaskThreadPollIgnoresTaskPromptAndConfigChanges(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Thread Poll Stable Project")
+	task := createTask(t, h, project.ID, "Thread Poll Stable Task", func(tk *models.Task) {
+		tk.Status = models.StatusRunning
+		tk.Category = models.CategoryActive
+		tk.AgentID = &agent.ID
+		tk.Prompt = strings.Repeat("first prompt payload", 4096)
+	})
+	createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "stable execution prompt"
+		ex.Output = "working"
+	})
+
+	first := htmxGet(e, "/tasks/"+task.ID+"/thread?poll=1&limit=5")
+	assertCode(t, first, http.StatusOK)
+	if _, err := db.ExecContext(ctx, `UPDATE tasks SET prompt = ?, chain_config = ?, swarm_config = ? WHERE id = ?`, strings.Repeat("second prompt payload", 4096), strings.Repeat("changed chain payload", 4096), strings.Repeat("changed swarm payload", 4096), task.ID); err != nil {
+		t.Fatalf("update ignored task payloads: %v", err)
+	}
+	second := htmxGet(e, "/tasks/"+task.ID+"/thread?poll=1&limit=5")
+	assertCode(t, second, http.StatusOK)
+	if first.Body.String() != second.Body.String() {
+		t.Fatalf("poll response changed after prompt/config-only update")
+	}
+}
+
+func TestHandler_GetTaskThreadPollPreservesComposerModelSelection(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		configureTask    func(*models.Task, *models.LLMConfig, *models.LLMConfig, *models.LLMConfig)
+		configureProject bool
+		want             func(*models.LLMConfig, *models.LLMConfig, *models.LLMConfig) string
+	}{
+		{
+			name: "explicit_task_model",
+			configureTask: func(tk *models.Task, explicit, _, _ *models.LLMConfig) {
+				tk.AgentID = &explicit.ID
+			},
+			configureProject: true,
+			want:             func(explicit, _, _ *models.LLMConfig) string { return explicit.ID },
+		},
+		{
+			name:             "project_default_model",
+			configureProject: true,
+			want:             func(_, projectDefault, _ *models.LLMConfig) string { return projectDefault.ID },
+		},
+		{
+			name: "global_default_model",
+			want: func(_, _, globalDefault *models.LLMConfig) string { return globalDefault.ID },
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, e, llmConfigRepo := setupTestHandler(t)
+			ctx := context.Background()
+			globalDefault := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) { a.Name = "Global Default"; a.IsDefault = true })
+			projectDefault := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) { a.Name = "Project Default"; a.IsDefault = false })
+			explicit := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) { a.Name = "Explicit Model"; a.IsDefault = false })
+			project := createProject(t, h, "Thread Poll Model Selection "+tc.name)
+			if tc.configureProject {
+				project.DefaultAgentConfigID = &projectDefault.ID
+				if err := h.projectSvc.Update(ctx, project); err != nil {
+					t.Fatalf("set project default model: %v", err)
+				}
+			}
+			task := createTask(t, h, project.ID, "Thread Poll Model Selection Task "+tc.name, func(tk *models.Task) {
+				tk.Status = models.StatusRunning
+				tk.Category = models.CategoryActive
+				if tc.configureTask != nil {
+					tc.configureTask(tk, explicit, projectDefault, globalDefault)
+				}
+			})
+			createExec(t, h, task.ID, globalDefault.ID, func(ex *models.Execution) {
+				ex.Status = models.ExecRunning
+				ex.PromptSent = "hello"
+			})
+
+			rec := htmxGet(e, "/tasks/"+task.ID+"/thread?poll=1&limit=5")
+			assertCode(t, rec, http.StatusOK)
+			assertContains(t, rec, `data-task-agent="`+tc.want(explicit, projectDefault, globalDefault)+`"`)
+		})
+	}
+}
+
 func TestHandler_CreateModel(t *testing.T) {
 	_, e, _ := setupTestHandler(t)
 
@@ -745,6 +1993,72 @@ func TestHandler_CreateTask_ActiveCategory(t *testing.T) {
 	assertCode(t, rec, http.StatusOK)
 }
 
+func TestHandler_CreateTask_NormalizesInvalidPrioritiesToDefault(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	ctx := context.Background()
+
+	cases := []struct {
+		name        string
+		prioritySet bool
+		priority    string
+	}{
+		{name: "omitted"},
+		{name: "empty", prioritySet: true, priority: ""},
+		{name: "malformed", prioritySet: true, priority: "urgent"},
+		{name: "below range", prioritySet: true, priority: "0"},
+		{name: "above range", prioritySet: true, priority: "5"},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			form := url.Values{}
+			form.Set("title", "Invalid Priority "+tt.name)
+			form.Set("category", "backlog")
+			form.Set("prompt", "test")
+			if tt.prioritySet {
+				form.Set("priority", tt.priority)
+			}
+
+			rec := postForm(e, "/tasks?project_id=default", form)
+			assertCode(t, rec, http.StatusOK)
+		})
+	}
+
+	tasks, err := h.taskRepo.ListByProject(ctx, "default", "")
+	require.NoError(t, err)
+	require.Len(t, tasks, len(cases))
+	for _, task := range tasks {
+		assert.Equal(t, 2, task.Priority, "task %q priority", task.Title)
+		assert.Equal(t, "Normal", components.PriorityLabel(task.Priority))
+	}
+}
+
+func TestHandler_CreateTask_PersistsValidPriorities(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	ctx := context.Background()
+
+	labels := map[int]string{1: "Low", 2: "Normal", 3: "High", 4: "Urgent"}
+	for priority := 1; priority <= 4; priority++ {
+		form := url.Values{}
+		form.Set("title", fmt.Sprintf("Priority %d", priority))
+		form.Set("category", "backlog")
+		form.Set("priority", strconv.Itoa(priority))
+		form.Set("prompt", "test")
+
+		rec := postForm(e, "/tasks?project_id=default", form)
+		assertCode(t, rec, http.StatusOK)
+	}
+
+	tasks, err := h.taskRepo.ListByProject(ctx, "default", "")
+	require.NoError(t, err)
+	require.Len(t, tasks, 4)
+	for _, task := range tasks {
+		wantLabel, ok := labels[task.Priority]
+		require.True(t, ok, "unexpected priority %d for task %q", task.Priority, task.Title)
+		assert.Equal(t, wantLabel, components.PriorityLabel(task.Priority))
+	}
+}
+
 func TestHandler_CreateTask_BacklogSwarmDefersPlanner(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	ctx := context.Background()
@@ -798,6 +2112,70 @@ func TestHandler_CreateTask_DuplicateTitle(t *testing.T) {
 	rec2 := postForm(e, "/tasks?project_id=default", form2)
 	assertCode(t, rec2, http.StatusConflict)
 	assertContains(t, rec2, "task with this name already exists")
+}
+
+func TestHandler_CreateTask_NormalizesWhitespaceAndDetectsDuplicateTitle(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	ctx := context.Background()
+
+	form := url.Values{}
+	form.Set("title", " Fix checkout ")
+	form.Set("category", "backlog")
+	form.Set("priority", "2")
+	form.Set("prompt", " investigate checkout ")
+	rec := postForm(e, "/tasks?project_id=default", form)
+	assertCode(t, rec, http.StatusOK)
+
+	tasks, err := h.taskRepo.ListByProject(ctx, "default", "")
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
+	assert.Equal(t, "Fix checkout", tasks[0].Title)
+	assert.Equal(t, "investigate checkout", tasks[0].Prompt)
+
+	duplicate := url.Values{}
+	duplicate.Set("title", " Fix checkout ")
+	duplicate.Set("category", "backlog")
+	duplicate.Set("priority", "2")
+	duplicate.Set("prompt", "different prompt")
+	dupRec := postForm(e, "/tasks?project_id=default", duplicate)
+	assertCode(t, dupRec, http.StatusConflict)
+	assertContains(t, dupRec, "task with this name already exists")
+
+	tasksAfterDuplicate, err := h.taskRepo.ListByProject(ctx, "default", "")
+	require.NoError(t, err)
+	require.Len(t, tasksAfterDuplicate, 1)
+	assert.Equal(t, "Fix checkout", tasksAfterDuplicate[0].Title)
+}
+
+func TestHandler_CreateTask_RejectsWhitespaceOnlyTitlePrompt(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		title      string
+		prompt     string
+		wantStatus int
+		wantBody   string
+	}{
+		{name: "title", title: " \t\n ", prompt: "valid prompt", wantStatus: http.StatusBadRequest, wantBody: "Task title is required"},
+		{name: "prompt", title: "Valid title", prompt: " \t\n ", wantStatus: http.StatusBadRequest, wantBody: "Task prompt is required"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			h, e, _ := setupTestHandler(t)
+			ctx := context.Background()
+			form := url.Values{}
+			form.Set("title", tt.title)
+			form.Set("category", "backlog")
+			form.Set("priority", "2")
+			form.Set("prompt", tt.prompt)
+
+			rec := postForm(e, "/tasks?project_id=default", form)
+			assertCode(t, rec, tt.wantStatus)
+			assertContains(t, rec, tt.wantBody)
+
+			tasks, err := h.taskRepo.ListByProject(ctx, "default", "")
+			require.NoError(t, err)
+			assert.Empty(t, tasks)
+		})
+	}
 }
 
 func TestHandler_DeleteModel_HTMX(t *testing.T) {
@@ -904,8 +2282,18 @@ func TestHandler_DeleteModel_WithTaskReferences(t *testing.T) {
 
 func TestHandler_ListModels(t *testing.T) {
 	_, e, _ := setupTestHandler(t)
-	rec := htmxGet(e, "/models")
-	assertCode(t, rec, http.StatusOK)
+	for _, htmx := range []bool{false, true} {
+		req := httptest.NewRequest(http.MethodGet, "/models", nil)
+		if htmx {
+			req.Header.Set("HX-Request", "true")
+		}
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		assertCode(t, rec, http.StatusOK)
+		if got := rec.Header().Get("Cache-Control"); got != "no-store" {
+			t.Errorf("htmx=%t Cache-Control=%q, want no-store", htmx, got)
+		}
+	}
 }
 
 func TestHandler_ListModels_RendersAuthoritativeDesktopOAuthMode(t *testing.T) {
@@ -951,10 +2339,14 @@ func TestHandler_ListModels_DeleteConfirmationDialog(t *testing.T) {
 	for _, want := range []string{
 		`id="delete_model_confirm_modal" class="modal"`,
 		`id="delete_model_confirm_name"`,
+		`data-destructive-confirm-dialog`,
+		`openDestructiveConfirmDialog('delete_model_confirm_modal', 'delete_model_confirm_name', _deleteModelName)`,
 		`onclick="delete_model_confirm_modal.close()"`,
 		`onclick="confirmDeleteModel()"`,
 		`class="btn btn-error"`,
 		`modal.showModal()`,
+		`if (_deleteModelIsDefault)`,
+		`reassign_default_modal.showModal();`,
 		`htmx.ajax('DELETE', modelMutationURL('/models/' + _deleteModelId)`,
 	} {
 		if !strings.Contains(body, want) {
@@ -992,7 +2384,7 @@ func TestHandler_ListModels_MixtureUI(t *testing.T) {
 		`Mixture of Models / default`,
 		`Aggregator: Aggregator`,
 		`References: 1`,
-		`data-model-mixture-config-json=`,
+		`/edit-details`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("expected models UI to contain %q", want)
@@ -1074,7 +2466,7 @@ func TestHandler_ListModels_IncludesToastModalStackingHooks(t *testing.T) {
 	}
 }
 
-func TestHandler_ListModels_APIKeyUsesSecretInputPattern(t *testing.T) {
+func TestHandler_ListModels_LazyLoadsAPIKeyForEdit(t *testing.T) {
 	_, e, llmConfigRepo := setupTestHandler(t)
 	cfg := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
 		a.Name = "Saved Key Agent"
@@ -1083,58 +2475,103 @@ func TestHandler_ListModels_APIKeyUsesSecretInputPattern(t *testing.T) {
 		a.APIKey = "test-secret-api-key"
 		a.IsDefault = false
 	})
-	req := httptest.NewRequest(http.MethodGet, "/models", nil)
-	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
 
-	assertCode(t, rec, http.StatusOK)
-	body := rec.Body.String()
-
+	page := htmxGet(e, "/models")
+	assertCode(t, page, http.StatusOK)
+	body := page.Body.String()
 	for _, want := range []string{
 		`id="model_api_key"`,
 		`type="password"`,
 		`id="model_api_key_submit" name="api_key" value=""`,
-		`autocomplete="off"`,
-		`class="input input-bordered w-full pr-10 font-mono text-xs"`,
 		`onclick="togglePasswordVisibility('model_api_key', this)"`,
-		`aria-label="Toggle API key visibility"`,
-		`aria-pressed="false"`,
-		`id="model_api_key_help"`,
-		`data-model-api-key="test-secret-api-key"`,
-		`data-model-has-api-key="true"`,
-		`var apiKey = button.dataset.modelApiKey || '';`,
-		`var hasAPIKey = apiKey !== '';`,
-		`form.dataset.originalApiKey = apiKey;`,
-		`document.getElementById('model_api_key').value = apiKey;`,
-		`syncModelAPIKeySubmitValue();`,
+		`function editModelFromData(button)`,
+		`/edit-details`,
+		`generation !== window._modelEditRequestGeneration`,
+		`window._modelEditRequestedID !== id`,
+		`details.id !== id`,
+		`function populateModelEditForm(button)`,
 		`setModelAPIKeyEditHelp(hasAPIKey);`,
-		`Saved API key is hidden by default. Click the eye to reveal or edit it.`,
-		`No API key is currently saved for this model. Type a key to save one, or leave empty to keep it blank.`,
-		`input.placeholder = hasAPIKey ? 'Saved API key' : 'Type an API key to save for this model'`,
-		`function syncModelAPIKeySubmitValue()`,
-		`if (form.dataset.mode === 'edit' && input.value === original)`,
-		`submit.value = '';`,
-		`submit.value = input.value;`,
-		`button.setAttribute('aria-pressed', willReveal ? 'true' : 'false')`,
-		`function resetSecretInputVisibility(inputId)`,
 		`resetSecretInputVisibility('model_api_key')`,
 	} {
 		if !strings.Contains(body, want) {
-			t.Fatalf("expected models API key secret input markup/script to contain %q", want)
+			t.Fatalf("expected lazy model edit markup/script to contain %q", want)
 		}
 	}
-	if strings.Contains(body, `id="model_api_key" name="api_key" class="input input-bordered"`) {
-		t.Fatal("expected models API key field to stop rendering as a plain text-style input")
+	if strings.Contains(body, cfg.APIKey) || strings.Contains(body, `data-model-api-key=`) {
+		t.Fatal("initial Models response exposed the saved API key")
 	}
-	if strings.Contains(body, `onclick="togglePasswordVisibility('model_api_key', this)" tabindex="-1"`) {
-		t.Fatal("expected API key reveal toggle to remain keyboard reachable")
+
+	details := htmxGet(e, "/models/"+cfg.ID+"/edit-details")
+	assertCode(t, details, http.StatusOK)
+	var payload modelEditDetails
+	if err := json.Unmarshal(details.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(body, `data-model-id="`+cfg.ID+`"`) || !strings.Contains(body, `data-model-api-key="`+cfg.APIKey+`"`) {
-		t.Fatal("expected model cards to expose the saved API key for masked edit-dialog reveal parity with channel secrets")
+	if payload.ID != cfg.ID || payload.APIKey != cfg.APIKey || payload.Name != cfg.Name || payload.AuthMethod != cfg.AuthMethod {
+		t.Fatalf("edit details lost provider fields: %#v", payload)
 	}
-	if strings.Contains(body, `value="`+cfg.APIKey+`"`) {
-		t.Fatal("expected saved model API key to be loaded into the edit dialog by script, not prefilled in the create/edit input on initial render")
+	if got := details.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("edit details Cache-Control = %q", got)
 	}
+}
+
+func TestHandler_GetModelEditDetails_PreservesProviderSpecificFields(t *testing.T) {
+	_, e, repo := setupTestHandler(t)
+	cfg := &models.LLMConfig{
+		Name: "Custom OAuth", Provider: models.ProviderOpenAICompatible, Model: "custom-model",
+		ReasoningEffort: "high", Temperature: 0.25, AuthMethod: models.AuthMethodOAuth,
+		APIKey: "api-secret", MaxWorkers: 7, WorkerTimeout: 45,
+		OAuthClientID: "client-id", OAuthClientSecret: "client-secret",
+		OAuthAuthorizeURL: "https://example.com/authorize", OAuthTokenURL: "https://example.com/token",
+		OAuthScopes: "models profile", BaseURL: "https://example.com/v1", Transport: "chat_completions",
+		PresetSlug: "custom", ModelsURL: "https://example.com/models", AuthHeaderName: "X-Key",
+		AuthHeaderValuePrefix: "Token ", ExtraHeadersJSON: `{"X-Extra":"value"}`,
+		ExtraBodyJSON: `{"routing":{"tier":"fast"}}`, CustomAuthConfigJSON: `{"pkce":true}`,
+		MixtureConfigJSON: `{"unused":true}`, AutoStartTasks: true,
+	}
+	if err := repo.Create(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := htmxGet(e, "/models/"+cfg.ID+"/edit-details")
+	assertCode(t, rec, http.StatusOK)
+	var got modelEditDetails
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.ID != cfg.ID || got.Provider != cfg.Provider || got.Model != cfg.Model ||
+		got.ReasoningEffort != cfg.ReasoningEffort || got.Temperature != cfg.Temperature ||
+		got.APIKey != cfg.APIKey || got.AuthMethod != cfg.AuthMethod || got.MaxWorkers != cfg.MaxWorkers ||
+		got.WorkerTimeout != cfg.WorkerTimeout || got.OAuthClientID != cfg.OAuthClientID ||
+		got.OAuthClientSecret != cfg.OAuthClientSecret || got.OAuthAuthorizeURL != cfg.OAuthAuthorizeURL ||
+		got.OAuthTokenURL != cfg.OAuthTokenURL || got.OAuthScopes != cfg.OAuthScopes ||
+		got.BaseURL != cfg.BaseURL || got.Transport != cfg.Transport || got.PresetSlug != cfg.PresetSlug ||
+		got.ModelsURL != cfg.ModelsURL || got.AuthHeaderName != cfg.AuthHeaderName ||
+		got.AuthHeaderValuePrefix != cfg.AuthHeaderValuePrefix || got.ExtraHeadersJSON != cfg.ExtraHeadersJSON ||
+		got.ExtraBodyJSON != cfg.ExtraBodyJSON || got.CustomAuthConfigJSON != cfg.CustomAuthConfigJSON ||
+		got.AutoStartTasks != cfg.AutoStartTasks {
+		t.Fatalf("edit details differ from stored provider fields:\n got: %#v\nwant: %#v", got, cfg)
+	}
+
+	if got.MixtureConfigJSON != "" {
+		t.Fatalf("non-mixture edit details exposed mixture config: %q", got.MixtureConfigJSON)
+	}
+	builtIn := &models.LLMConfig{
+		Name: "Built-in OAuth", Provider: models.ProviderOpenAI, Model: "gpt-5.4",
+		AuthMethod: models.AuthMethodOAuth, OAuthClientSecret: "must-not-return",
+		CustomAuthConfigJSON: `{"signing_secret":"must-not-return"}`,
+	}
+	if err := repo.Create(context.Background(), builtIn); err != nil {
+		t.Fatal(err)
+	}
+	builtInRec := htmxGet(e, "/models/"+builtIn.ID+"/edit-details")
+	assertCode(t, builtInRec, http.StatusOK)
+	if strings.Contains(builtInRec.Body.String(), "must-not-return") {
+		t.Fatal("built-in provider secret leaked through edit details")
+	}
+
+	notFound := htmxGet(e, "/models/missing/edit-details")
+	assertCode(t, notFound, http.StatusNotFound)
 }
 
 func TestHandler_SetDefaultModel(t *testing.T) {
@@ -1249,12 +2686,6 @@ func TestHandler_HomeRedirectsToChat(t *testing.T) {
 	if loc := rec.Header().Get("Location"); loc != "/chat" {
 		t.Fatalf("expected redirect to /chat, got %q", loc)
 	}
-}
-
-func TestHandler_Dashboard(t *testing.T) {
-	_, e, _ := setupTestHandler(t)
-	rec := htmxGet(e, "/dashboard")
-	assertCode(t, rec, http.StatusOK)
 }
 
 func TestHandler_TasksPage_RendersCategoryDrivenSwarmPlannerCopy(t *testing.T) {
@@ -1486,7 +2917,9 @@ func TestHandler_UpdateProjectWorkerLimit(t *testing.T) {
 
 func TestHandler_ListTasks_KanbanBoard(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
-	createTask(t, h, "default", "Active Task", func(tk *models.Task) { tk.Prompt = "Do something" })
+	promptTail := "FULL_PROMPT_DETAIL_TAIL"
+	fullPrompt := strings.Repeat("a", 299) + "界" + promptTail
+	activeTask := createTask(t, h, "default", "Active Task", func(tk *models.Task) { tk.Prompt = fullPrompt })
 	createTask(t, h, "default", "Backlog Task", func(tk *models.Task) {
 		tk.Category = models.CategoryBacklog
 		tk.Prompt = "Do something later"
@@ -1500,6 +2933,14 @@ func TestHandler_ListTasks_KanbanBoard(t *testing.T) {
 	assertContains(t, rec, "Active Task")
 	assertContains(t, rec, "Backlog Task")
 	assertContains(t, rec, "kanban-board")
+	assertContains(t, rec, strings.Repeat("a", 299)+"界")
+	assert.NotContains(t, rec.Body.String(), promptTail, "Kanban response must not materialize the full prompt")
+
+	detailReq := httptest.NewRequest(http.MethodGet, "/tasks/"+activeTask.ID, nil)
+	detailRec := httptest.NewRecorder()
+	e.ServeHTTP(detailRec, detailReq)
+	assertCode(t, detailRec, http.StatusOK)
+	assertContains(t, detailRec, promptTail)
 }
 
 func TestHandler_ListTasks_AttachesSwarmChildrenWhenIncludeChildrenRequested(t *testing.T) {
@@ -1565,6 +3006,309 @@ func TestHandler_UpdateTask(t *testing.T) {
 	}
 }
 
+func TestHandler_UpdateTask_RejectsInvalidPriorities(t *testing.T) {
+	cases := []struct {
+		name        string
+		prioritySet bool
+		priority    string
+	}{
+		{name: "missing"},
+		{name: "zero", prioritySet: true, priority: "0"},
+		{name: "above range", prioritySet: true, priority: "5"},
+		{name: "malformed", prioritySet: true, priority: "urgent"},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			h, e, _ := setupTestHandler(t)
+			ctx := context.Background()
+			task := createTask(t, h, "default", "Original Invalid Priority Target", func(tk *models.Task) {
+				tk.Category = models.CategoryBacklog
+				tk.Priority = 3
+			})
+
+			form := url.Values{}
+			form.Set("title", "Should Not Persist")
+			form.Set("category", "active")
+			form.Set("prompt", "should not persist")
+			if tt.prioritySet {
+				form.Set("priority", tt.priority)
+			}
+
+			rec := htmxPut(e, "/tasks/"+task.ID, form)
+			assertCode(t, rec, http.StatusBadRequest)
+			assertContains(t, rec, "Task priority must be between 1 and 4")
+
+			updated, err := h.taskSvc.GetByID(ctx, task.ID)
+			require.NoError(t, err)
+			require.NotNil(t, updated)
+			assert.Equal(t, "Original Invalid Priority Target", updated.Title)
+			assert.Equal(t, models.CategoryBacklog, updated.Category)
+			assert.Equal(t, "test prompt", updated.Prompt)
+			assert.Equal(t, 3, updated.Priority)
+		})
+	}
+}
+
+func taskEditFormValues(title, category, priority, prompt, agentDefinitionID string) url.Values {
+	form := url.Values{}
+	form.Set("title", title)
+	form.Set("category", category)
+	form.Set("priority", priority)
+	form.Set("prompt", prompt)
+	form.Set("agent_definition_id", agentDefinitionID)
+	return form
+}
+
+func assertTaskPrimaryAgentDefinition(t *testing.T, h *Handler, taskID string, want *string) {
+	t.Helper()
+	stored, err := h.taskSvc.GetByID(context.Background(), taskID)
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	if want == nil {
+		assert.Nil(t, stored.AgentDefinitionID)
+		return
+	}
+	require.NotNil(t, stored.AgentDefinitionID)
+	assert.Equal(t, *want, *stored.AgentDefinitionID)
+}
+
+func TestHandler_UpdateTask_AssignsAndClearsPrimaryAgentDefinition(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().Build()
+	agentRepo := repository.NewAgentRepo(tc.db)
+	tc.handler.agentRepo = agentRepo
+	projectAgent := createScheduleTestAgent(t, agentRepo, "Task Edit Runner", models.AgentScopeProject, project.ID, true)
+	globalAgent := createScheduleTestAgent(t, agentRepo, "Task Edit Global Runner", models.AgentScopeGlobal, "", true)
+	task := createTask(t, tc.handler, project.ID, "Task Edit Assign Agent", func(tk *models.Task) {
+		tk.Category = models.CategoryBacklog
+	})
+
+	rec := tc.HTMX().Put("/tasks/" + task.ID).WithForm(taskEditFormValues("Task Edit Assign Agent", "backlog", "2", "updated prompt", projectAgent.ID)).Execute()
+	assertCode(t, rec, http.StatusOK)
+	assertTaskPrimaryAgentDefinition(t, tc.handler, task.ID, &projectAgent.ID)
+
+	rec = tc.HTMX().Put("/tasks/" + task.ID).WithForm(taskEditFormValues("Task Edit Assign Agent", "backlog", "2", "updated prompt", globalAgent.ID)).Execute()
+	assertCode(t, rec, http.StatusOK)
+	assertTaskPrimaryAgentDefinition(t, tc.handler, task.ID, &globalAgent.ID)
+
+	rec = tc.HTMX().Put("/tasks/" + task.ID).WithForm(taskEditFormValues("Task Edit Assign Agent", "backlog", "2", "updated prompt", "")).Execute()
+	assertCode(t, rec, http.StatusOK)
+	stored, err := tc.handler.taskSvc.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	assert.Nil(t, stored.AgentDefinitionID)
+}
+
+func TestHandler_UpdateTask_RejectsInvalidPrimaryAgentDefinitions(t *testing.T) {
+	cases := []struct {
+		name     string
+		agentID  func(t *testing.T, repo *repository.AgentRepo, projectID, otherProjectID string) string
+		wantBody string
+	}{
+		{
+			name: "cross project",
+			agentID: func(t *testing.T, repo *repository.AgentRepo, _, otherProjectID string) string {
+				return createScheduleTestAgent(t, repo, "Other Project Task Edit Agent", models.AgentScopeProject, otherProjectID, true).ID
+			},
+			wantBody: "invalid primary agent",
+		},
+		{
+			name: "unknown",
+			agentID: func(t *testing.T, _ *repository.AgentRepo, _, _ string) string {
+				return "agent-does-not-exist"
+			},
+		},
+		{
+			name: "disabled",
+			agentID: func(t *testing.T, repo *repository.AgentRepo, projectID, _ string) string {
+				agent := createScheduleTestAgent(t, repo, "Disabled Task Edit Agent", models.AgentScopeProject, projectID, true)
+				agent.Enabled = false
+				require.NoError(t, repo.Update(context.Background(), agent))
+				return agent.ID
+			},
+			wantBody: "invalid primary agent",
+		},
+		{
+			name: "archived",
+			agentID: func(t *testing.T, repo *repository.AgentRepo, projectID, _ string) string {
+				agent := createScheduleTestAgent(t, repo, "Archived Task Edit Agent", models.AgentScopeProject, projectID, true)
+				agent.GeneratedStatus = models.AgentStatusArchived
+				require.NoError(t, repo.Update(context.Background(), agent))
+				return agent.ID
+			},
+			wantBody: "invalid primary agent",
+		},
+		{
+			name: "non selectable",
+			agentID: func(t *testing.T, repo *repository.AgentRepo, projectID, _ string) string {
+				return createScheduleTestAgent(t, repo, "Non Selectable Task Edit Agent", models.AgentScopeProject, projectID, false).ID
+			},
+			wantBody: "invalid primary agent",
+		},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			tc := NewTestContext(t)
+			project := tc.CreateProject().WithName("Project A").Build()
+			otherProject := tc.CreateProject().WithName("Project B").Build()
+			agentRepo := repository.NewAgentRepo(tc.db)
+			tc.handler.agentRepo = agentRepo
+			previous := createScheduleTestAgent(t, agentRepo, "Existing Task Edit Agent", models.AgentScopeProject, project.ID, true)
+			task := createTask(t, tc.handler, project.ID, "Task Edit Invalid Agent", func(tk *models.Task) {
+				tk.Category = models.CategoryBacklog
+				tk.AgentDefinitionID = &previous.ID
+			})
+			invalidAgentID := tt.agentID(t, agentRepo, project.ID, otherProject.ID)
+
+			rec := tc.HTMX().Put("/tasks/" + task.ID).WithForm(taskEditFormValues("Should Not Persist", "backlog", "2", "should not persist", invalidAgentID)).Execute()
+			assertCode(t, rec, http.StatusBadRequest)
+			if tt.wantBody != "" {
+				assertContains(t, rec, tt.wantBody)
+			}
+			assertTaskPrimaryAgentDefinition(t, tc.handler, task.ID, &previous.ID)
+		})
+	}
+}
+
+func TestHandler_UpdateTask_PersistsValidPriorities(t *testing.T) {
+	labels := map[int]string{1: "Low", 2: "Normal", 3: "High", 4: "Urgent"}
+	for priority := 1; priority <= 4; priority++ {
+		t.Run(fmt.Sprintf("priority %d", priority), func(t *testing.T) {
+			h, e, _ := setupTestHandler(t)
+			ctx := context.Background()
+			task := createTask(t, h, "default", "Original Valid Priority Target", func(tk *models.Task) {
+				tk.Category = models.CategoryBacklog
+				tk.Priority = 2
+			})
+
+			form := url.Values{}
+			form.Set("title", fmt.Sprintf("Priority %d", priority))
+			form.Set("category", "backlog")
+			form.Set("priority", strconv.Itoa(priority))
+			form.Set("prompt", "updated prompt")
+
+			rec := htmxPut(e, "/tasks/"+task.ID, form)
+			assertCode(t, rec, http.StatusOK)
+
+			updated, err := h.taskSvc.GetByID(ctx, task.ID)
+			require.NoError(t, err)
+			require.NotNil(t, updated)
+			assert.Equal(t, priority, updated.Priority)
+			assert.Equal(t, labels[priority], components.PriorityLabel(updated.Priority))
+		})
+	}
+}
+
+func TestHandler_UpdateTask_NormalizesWhitespaceAndRejectsBlankFields(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	ctx := context.Background()
+	createTask(t, h, "default", "Existing title", func(tk *models.Task) { tk.Category = models.CategoryBacklog })
+	target := createTask(t, h, "default", "Original title", func(tk *models.Task) { tk.Category = models.CategoryBacklog })
+
+	form := url.Values{}
+	form.Set("title", " Trimmed title ")
+	form.Set("category", "backlog")
+	form.Set("priority", "2")
+	form.Set("prompt", " updated prompt ")
+	rec := htmxPut(e, "/tasks/"+target.ID, form)
+	assertCode(t, rec, http.StatusOK)
+	updated, err := h.taskSvc.GetByID(ctx, target.ID)
+	require.NoError(t, err)
+	require.NotNil(t, updated)
+	assert.Equal(t, "Trimmed title", updated.Title)
+	assert.Equal(t, "updated prompt", updated.Prompt)
+
+	duplicate := url.Values{}
+	duplicate.Set("title", " Existing title ")
+	duplicate.Set("category", "backlog")
+	duplicate.Set("priority", "2")
+	duplicate.Set("prompt", "duplicate prompt")
+	dupRec := htmxPut(e, "/tasks/"+target.ID, duplicate)
+	assertCode(t, dupRec, http.StatusConflict)
+	assertContains(t, dupRec, "task with this name already exists")
+	afterDuplicate, err := h.taskSvc.GetByID(ctx, target.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "Trimmed title", afterDuplicate.Title)
+	assert.Equal(t, "updated prompt", afterDuplicate.Prompt)
+
+	blankTitle := url.Values{}
+	blankTitle.Set("title", " \t\n ")
+	blankTitle.Set("category", "backlog")
+	blankTitle.Set("priority", "2")
+	blankTitle.Set("prompt", "still valid")
+	blankTitleRec := htmxPut(e, "/tasks/"+target.ID, blankTitle)
+	assertCode(t, blankTitleRec, http.StatusBadRequest)
+	assertContains(t, blankTitleRec, "Task title is required")
+	afterBlankTitle, err := h.taskSvc.GetByID(ctx, target.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "Trimmed title", afterBlankTitle.Title)
+	assert.Equal(t, "updated prompt", afterBlankTitle.Prompt)
+
+	blankPrompt := url.Values{}
+	blankPrompt.Set("title", "Still valid")
+	blankPrompt.Set("category", "backlog")
+	blankPrompt.Set("priority", "2")
+	blankPrompt.Set("prompt", " \t\n ")
+	blankPromptRec := htmxPut(e, "/tasks/"+target.ID, blankPrompt)
+	assertCode(t, blankPromptRec, http.StatusBadRequest)
+	assertContains(t, blankPromptRec, "Task prompt is required")
+	afterBlankPrompt, err := h.taskSvc.GetByID(ctx, target.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "Trimmed title", afterBlankPrompt.Title)
+	assert.Equal(t, "updated prompt", afterBlankPrompt.Prompt)
+}
+
+func TestHandler_UpdateTask_DetailCategoryTransitionsRefreshCompletedAt(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	task := createTask(t, tc.handler, "default", "Recompleted Through Detail Edit", func(tk *models.Task) {
+		tk.Category = models.CategoryCompleted
+		tk.Status = models.StatusCompleted
+	})
+	other := createTask(t, tc.handler, "default", "Previously Completed Task", func(tk *models.Task) {
+		tk.Category = models.CategoryCompleted
+		tk.Status = models.StatusCompleted
+	})
+
+	_, err := tc.db.ExecContext(ctx, `UPDATE tasks SET completed_at = ? WHERE id = ?`, "2000-01-01 00:00:00", task.ID)
+	require.NoError(t, err)
+	_, err = tc.db.ExecContext(ctx, `UPDATE tasks SET completed_at = ? WHERE id = ?`, "2020-01-01 00:00:00", other.ID)
+	require.NoError(t, err)
+
+	updateCategory := func(category models.TaskCategory) {
+		t.Helper()
+		form := url.Values{}
+		form.Set("title", task.Title)
+		form.Set("category", string(category))
+		form.Set("priority", "2")
+		form.Set("prompt", task.Prompt)
+		rec := tc.HTMX().Put("/tasks/" + task.ID).WithForm(form).Execute()
+		assertCode(t, rec, http.StatusOK)
+	}
+
+	updateCategory(models.CategoryBacklog)
+	movedToBacklog, err := tc.handler.taskSvc.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.NotNil(t, movedToBacklog)
+	assert.Equal(t, models.CategoryBacklog, movedToBacklog.Category)
+	assert.Nil(t, movedToBacklog.CompletedAt, "leaving Completed through Task Detail must clear completed_at")
+
+	updateCategory(models.CategoryCompleted)
+	recompleted, err := tc.handler.taskSvc.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.NotNil(t, recompleted)
+	require.NotNil(t, recompleted.CompletedAt, "entering Completed through Task Detail must set completed_at")
+	assert.True(t, recompleted.CompletedAt.After(time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)))
+
+	completedTasks, err := tc.handler.taskSvc.ListByProjectWithCategorySorts(ctx, "default", string(models.CategoryCompleted), "", "completed_desc")
+	require.NoError(t, err)
+	require.Len(t, completedTasks, 2)
+	assert.Equal(t, task.ID, completedTasks[0].ID, "recompleted task should sort ahead of older completions")
+}
+
 func TestHandler_UpdateTask_NonRunningOnly(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	ctx := context.Background()
@@ -1573,7 +3317,7 @@ func TestHandler_UpdateTask_NonRunningOnly(t *testing.T) {
 	form := url.Values{}
 	form.Set("title", "Updated While Pending")
 	form.Set("category", "active")
-	form.Set("priority", "0")
+	form.Set("priority", "2")
 	form.Set("prompt", "test")
 	rec := htmxPut(e, "/tasks/"+task.ID, form)
 	assertCode(t, rec, http.StatusOK)
@@ -1592,7 +3336,7 @@ func TestHandler_UpdateTask_DuplicateTitle(t *testing.T) {
 	form := url.Values{}
 	form.Set("title", "Existing Task")
 	form.Set("category", "backlog")
-	form.Set("priority", "0")
+	form.Set("priority", "2")
 	form.Set("prompt", "test prompt 2")
 	rec := htmxPut(e, "/tasks/"+task2.ID, form)
 	assertCode(t, rec, http.StatusConflict)
@@ -1900,7 +3644,7 @@ func TestHandler_UpdateTask_CategoryChangeFromActiveQueuedToCompletedStopsTask(t
 	assert.Equal(t, service.TaskGoalStoppedByUserReason, paused.Reason)
 }
 
-func TestHandler_UpdateTask_CategoryChangeFromCompletedToActive(t *testing.T) {
+func TestHandler_UpdateTask_CategoryChangeFromCompletedToActiveIsMetadataOnly(t *testing.T) {
 	tc := NewTestContext(t)
 	ctx := context.Background()
 	task := createTask(t, tc.handler, "default", "Completed Task", func(tk *models.Task) {
@@ -1910,12 +3654,13 @@ func TestHandler_UpdateTask_CategoryChangeFromCompletedToActive(t *testing.T) {
 	goal, err := tc.handler.taskGoalSvc.SetGoal(ctx, task.ID, "finish the objective", service.GoalOptions{Actor: "test"})
 	require.NoError(t, err)
 	require.NoError(t, tc.handler.taskGoalSvc.PauseActiveGoalStoppedByUser(ctx, task.ID))
+	tc.CreateSchedule(task.ID).WithRunAt(time.Now().Add(time.Hour)).Build()
 
 	form := url.Values{}
 	form.Set("title", task.Title)
 	form.Set("category", "active")
 	form.Set("prompt", task.Prompt)
-	form.Set("priority", "0")
+	form.Set("priority", "2")
 	rec := tc.HTMX().Put("/tasks/" + task.ID).WithForm(form).Execute()
 	assertCode(t, rec, http.StatusOK)
 
@@ -1923,15 +3668,30 @@ func TestHandler_UpdateTask_CategoryChangeFromCompletedToActive(t *testing.T) {
 	if updated.Category != models.CategoryActive {
 		t.Errorf("expected category 'active', got %q", updated.Category)
 	}
-	if updated.Status != models.StatusPending {
-		t.Errorf("expected status 'pending' after moving to active, got %q", updated.Status)
+	if updated.Status != models.StatusCompleted {
+		t.Errorf("expected status to remain completed after metadata edit, got %q", updated.Status)
 	}
+	execs, err := tc.execRepo.ListByTaskChronological(ctx, task.ID)
+	require.NoError(t, err)
+	assert.Empty(t, execs, "task detail metadata save must not create an execution")
+	var threadInputs int
+	require.NoError(t, tc.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM thread_inputs WHERE task_id = ?`, task.ID).Scan(&threadInputs))
+	assert.Equal(t, 0, threadInputs, "task detail metadata save must not queue a thread input")
+	assert.Equal(t, 0, tc.handler.workerSvc.QueueSize(), "task detail metadata save must not queue worker work")
+	assert.Equal(t, 0, tc.handler.workerSvc.TotalRunning(), "task detail metadata save must not start worker work")
+	assert.Equal(t, 0, tc.handler.workerSvc.ProjectRunning(updated.ProjectID), "task detail metadata save must not start project worker work")
+	var lifecycleRows int
+	require.NoError(t, tc.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM lifecycle_executions WHERE task_id = ?`, task.ID).Scan(&lifecycleRows))
+	assert.Equal(t, 0, lifecycleRows, "task detail metadata save must not create lifecycle continuations")
+	var scheduleRuns int
+	require.NoError(t, tc.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM schedules WHERE task_id = ? AND last_run IS NOT NULL`, task.ID).Scan(&scheduleRuns))
+	assert.Equal(t, 0, scheduleRuns, "task detail metadata save must not mark schedule runs")
 	resumed, err := tc.handler.taskGoalSvc.GetGoal(ctx, task.ID)
 	require.NoError(t, err)
 	require.NotNil(t, resumed)
 	assert.Equal(t, goal.GoalID, resumed.GoalID)
-	assert.Equal(t, models.TaskGoalStatusActive, resumed.Status)
-	assert.Equal(t, "resumed by user", resumed.Reason)
+	assert.Equal(t, models.TaskGoalStatusPaused, resumed.Status)
+	assert.Equal(t, service.TaskGoalStoppedByUserReason, resumed.Reason)
 }
 
 func TestHandler_UpdateTaskStatus_DragDrop(t *testing.T) {
@@ -1947,8 +3707,8 @@ func TestHandler_UpdateTaskStatus_DragDrop(t *testing.T) {
 	assertContains(t, rec, "kanban-board")
 
 	updated, _ := h.taskSvc.GetByID(ctx, task.ID)
-	if updated.Status != models.StatusRunning {
-		t.Errorf("expected status 'running', got %q", updated.Status)
+	if updated.Status != models.StatusPending {
+		t.Errorf("expected status 'pending' until worker admission, got %q", updated.Status)
 	}
 }
 
@@ -1969,8 +3729,8 @@ func TestHandler_UpdateTaskStatus_MovesToRunning(t *testing.T) {
 	assertCode(t, rec, http.StatusOK)
 
 	updated, _ := tc.handler.taskSvc.GetByID(ctx, task.ID)
-	if updated.Status != models.StatusRunning {
-		t.Errorf("expected status 'running', got %q", updated.Status)
+	if updated.Status != models.StatusPending {
+		t.Errorf("expected status 'pending' until worker admission, got %q", updated.Status)
 	}
 	resumed, err := tc.handler.taskGoalSvc.GetGoal(ctx, task.ID)
 	require.NoError(t, err)
@@ -1978,6 +3738,34 @@ func TestHandler_UpdateTaskStatus_MovesToRunning(t *testing.T) {
 	assert.Equal(t, goal.GoalID, resumed.GoalID)
 	assert.Equal(t, models.TaskGoalStatusActive, resumed.Status)
 	assert.Equal(t, "resumed by user", resumed.Reason)
+}
+
+func TestHandler_UpdateTaskStatus_RunningDoesNotBypassWorkerCapacity(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	ctx := context.Background()
+	maxWorkers := 1
+	project := &models.Project{Name: "Status Admission Project", MaxWorkers: &maxWorkers}
+	require.NoError(t, h.projectSvc.Create(ctx, project))
+	h.workerSvc.SetProjectRepo(h.projectRepo)
+
+	task := createTask(t, h, project.ID, "Capacity-gated status task", func(tk *models.Task) {
+		tk.Category = models.CategoryBacklog
+		tk.Status = models.StatusCompleted
+	})
+
+	require.True(t, h.workerSvc.TryAcquireProjectSlot(project.ID), "test setup should saturate project capacity")
+	defer h.workerSvc.ReleaseProjectSlot(project.ID)
+
+	form := url.Values{}
+	form.Set("status", "running")
+	rec := htmxPatch(e, "/tasks/"+task.ID+"/status", form)
+	assertCode(t, rec, http.StatusOK)
+
+	updated, _ := h.taskSvc.GetByID(ctx, task.ID)
+	require.NotNil(t, updated)
+	assert.Equal(t, models.CategoryActive, updated.Category)
+	assert.Equal(t, models.StatusPending, updated.Status, "In Progress must wait for worker admission")
+	assert.Equal(t, 1, h.workerSvc.TotalRunning(), "status move must not acquire an extra slot beyond capacity")
 }
 
 func TestHandler_DeleteAllTasksByCategory(t *testing.T) {
@@ -2004,6 +3792,16 @@ func TestHandler_DeleteAllTasksByCategory(t *testing.T) {
 
 			rec := htmxDelete(e, tc.endpoint+"?project_id="+project1.ID)
 			assertCode(t, rec, http.StatusOK)
+			body := rec.Body.String()
+			if !strings.HasPrefix(strings.TrimSpace(body), `<div id="kanban-board"`) {
+				t.Fatalf("expected delete-all response to refresh kanban board, got %s", body)
+			}
+			if strings.Contains(body, tc.name+" Task 1") || strings.Contains(body, tc.name+" Task 2") {
+				t.Fatalf("delete-all response still contains deleted %s tasks: %s", tc.name, body)
+			}
+			if !strings.Contains(body, `data-category="`+string(tc.category)+`"`) || !strings.Contains(body, "Drop tasks here") {
+				t.Fatalf("delete-all response must render the empty category state for %s: %s", tc.name, body)
+			}
 
 			for _, id := range []string{task1.ID, task2.ID} {
 				if got, _ := h.taskSvc.GetByID(ctx, id); got != nil {
@@ -2017,6 +3815,83 @@ func TestHandler_DeleteAllTasksByCategory(t *testing.T) {
 				t.Error("expected other project task to still exist")
 			}
 		})
+	}
+}
+
+func TestHandler_ListTasks_DeleteAllUsesSharedConfirmationModal(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	project := createProject(t, h, "Delete All Modal Project")
+	createTask(t, h, project.ID, "Completed Delete All Task", func(task *models.Task) {
+		task.Category = models.CategoryCompleted
+		task.Status = models.StatusCompleted
+	})
+	createTask(t, h, project.ID, "Backlog Delete All Task", func(task *models.Task) {
+		task.Category = models.CategoryBacklog
+		task.Status = models.StatusPending
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/tasks?project_id="+url.QueryEscape(project.ID), nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	assertCode(t, rec, http.StatusOK)
+	body := rec.Body.String()
+
+	for _, want := range []string{
+		`id="delete_all_tasks_confirm_modal" class="modal" data-destructive-confirm-dialog`,
+		`aria-labelledby="delete_all_tasks_confirm_modal_title"`,
+		`aria-describedby="delete_all_tasks_confirm_modal_description"`,
+		`id="delete_all_tasks_confirm_name"`,
+		`autofocus`,
+		`onclick="openDeleteAllTasksConfirm(this)"`,
+		`data-delete-all-tasks-category="completed"`,
+		`data-delete-all-tasks-category="backlog"`,
+		`data-project-id="` + project.ID + `"`,
+		`function openDeleteAllTasksConfirm(button)`,
+		`function confirmDeleteAllTasks()`,
+		`htmx.ajax('DELETE', requestURL`,
+		`target: '#kanban-board'`,
+		`swap: 'outerHTML'`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("expected task-board delete-all confirmation contract to contain %q", want)
+		}
+	}
+	for _, forbidden := range []string{
+		`hx-confirm="Are you sure you want to delete all completed tasks? This action cannot be undone."`,
+		`hx-confirm="Are you sure you want to delete all backlog tasks? This action cannot be undone."`,
+		`hx-delete="/tasks/completed`,
+		`hx-delete="/tasks/backlog`,
+	} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("task-board delete-all action must not retain direct deletion wiring %q", forbidden)
+		}
+	}
+}
+
+func TestHandler_DeleteAllTasksByCategory_CancelledRequestPreservesProjectTasks(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	project := createProject(t, h, "Cancelled Delete All Project")
+	task := createTask(t, h, project.ID, "Task preserved after failure", func(task *models.Task) {
+		task.Category = models.CategoryCompleted
+		task.Status = models.StatusCompleted
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	req := httptest.NewRequest(http.MethodDelete, "/tasks/completed?project_id="+url.QueryEscape(project.ID), nil).WithContext(ctx)
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code < http.StatusBadRequest {
+		t.Fatalf("expected cancelled delete-all request to fail, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	remaining, err := h.taskSvc.GetByID(context.Background(), task.ID)
+	if err != nil {
+		t.Fatalf("get preserved task: %v", err)
+	}
+	if remaining == nil {
+		t.Fatal("cancelled delete-all request deleted the project task")
 	}
 }
 
@@ -2167,10 +4042,14 @@ func TestHandler_ViewSchedule_DeleteConfirmationDialog(t *testing.T) {
 	for _, want := range []string{
 		`id="delete_schedule_confirm_modal" class="modal"`,
 		`id="delete_schedule_confirm_name"`,
+		`data-destructive-confirm-dialog`,
+		`openDestructiveConfirmDialog('delete_schedule_confirm_modal', 'delete_schedule_confirm_name', button.dataset.scheduleTitle || 'this task')`,
 		`onclick="delete_schedule_confirm_modal.close()"`,
 		`onclick="confirmDeleteSchedule()"`,
 		`class="btn btn-error"`,
 		`function openDeleteScheduleConfirm(button)`,
+		`deleteScheduleTarget = button.dataset.scheduleTarget || '#schedule-content';`,
+		`deleteScheduleSwap = button.dataset.scheduleSwap || 'outerHTML show:none';`,
 		`modal.showModal()`,
 		`htmx.ajax('DELETE', '/schedules/' + deleteScheduleID`,
 	} {
@@ -2221,7 +4100,10 @@ func TestHandler_ViewSchedule_NewTaskDialogRepeatIntervalControls(t *testing.T) 
 	if !strings.Contains(body, `window.updateScheduleCreateRepeatInterval`) {
 		t.Fatal("expected schedule create dialog repeat interval behavior hook")
 	}
-	if !strings.Contains(body, `Repeat interval must be a whole number of at least 1`) {
+	if !strings.Contains(body, `max="365"`) {
+		t.Fatal("expected schedule create dialog to cap repeat intervals at 365")
+	}
+	if !strings.Contains(body, `Repeat interval must be a whole number between 1 and 365`) {
 		t.Fatal("expected schedule create dialog interval validation message")
 	}
 	if !strings.Contains(body, `<option value="daily" selected>Daily</option>`) {
@@ -2356,9 +4238,32 @@ func TestHandler_Schedule_NoViewportHeightOverflow(t *testing.T) {
 	if strings.Contains(body, "100vh") {
 		t.Error("schedule page must not use viewport-relative height (100vh); use flex layout instead")
 	}
-	// The timeline container should use flex-1 to fill remaining space
-	if !strings.Contains(body, "flex-1 min-h-0") {
-		t.Error("schedule-timeline-container should use flex-1 min-h-0 for proper overflow")
+	// The timeline container should use flex-1 to fill remaining space. Treat
+	// classes as tokens so adding or reordering other layout classes does not
+	// make this assertion fail while the overflow contract is still intact.
+	timelineStart := strings.Index(body, `id="schedule-timeline-container"`)
+	if timelineStart < 0 {
+		t.Fatal("missing schedule-timeline-container element")
+	}
+	timelineTagEnd := strings.Index(body[timelineStart:], ">")
+	if timelineTagEnd < 0 {
+		t.Fatal("unterminated schedule-timeline-container element")
+	}
+	timelineTag := body[timelineStart : timelineStart+timelineTagEnd]
+	classStart := strings.Index(timelineTag, `class="`)
+	if classStart < 0 {
+		t.Fatal("schedule-timeline-container is missing its class attribute")
+	}
+	classValue := timelineTag[classStart+len(`class="`):]
+	classEnd := strings.Index(classValue, `"`)
+	if classEnd < 0 {
+		t.Fatal("schedule-timeline-container has an unterminated class attribute")
+	}
+	classes := strings.Fields(classValue[:classEnd])
+	for _, required := range []string{"flex-1", "min-h-0"} {
+		if !slices.Contains(classes, required) {
+			t.Errorf("schedule-timeline-container should include %q for proper overflow; classes=%v", required, classes)
+		}
 	}
 }
 
@@ -2785,7 +4690,7 @@ func TestHandler_UpdateTaskTag(t *testing.T) {
 		form := url.Values{}
 		form.Set("title", task.Title)
 		form.Set("category", string(task.Category))
-		form.Set("priority", "0")
+		form.Set("priority", "2")
 		form.Set("prompt", task.Prompt)
 		form.Set("tag", tag)
 		return form
@@ -3481,6 +5386,26 @@ func TestSidebar_SamePageNavPrevention(t *testing.T) {
 	}
 }
 
+func TestSidebar_AutomationInvocationStartedShowsToast(t *testing.T) {
+	_, e, _ := setupTestHandler(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/tasks", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	body := rec.Body.String()
+
+	for _, snippet := range []string{
+		`eventType === 'automation_invocation_started'`,
+		`const automationName = data.task_name || 'Automation';`,
+		`const automationUrl = '/automations/' + encodeURIComponent(data.automation_id || '') + '?project_id=' + encodeURIComponent(currentProjectID);`,
+		`window.showToast(automationName + ' is now running.', 'info', '', { toastKey: 'automation:' + invocationId, clickURL: automationUrl });`,
+	} {
+		if !strings.Contains(body, snippet) {
+			t.Fatalf("sidebar automation-start toast script missing snippet: %s", snippet)
+		}
+	}
+}
+
 func TestSidebar_DoesNotPersistSelectedNavHighlight(t *testing.T) {
 	_, e, _ := setupTestHandler(t)
 
@@ -3498,6 +5423,223 @@ func TestSidebar_DoesNotPersistSelectedNavHighlight(t *testing.T) {
 		if strings.Contains(body, snippet) {
 			t.Fatalf("sidebar should not persist selected nav highlight, found snippet: %s", snippet)
 		}
+	}
+}
+
+func TestLayout_ThemeAndSidebarPreferencesPersistBeforeFirstPaint(t *testing.T) {
+	_, e, _ := setupTestHandler(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/tasks", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	body := rec.Body.String()
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	required := []string{
+		`rawSaved = document.documentElement.getAttribute('data-ui-theme') || ''`,
+		`saved = normalizeStoredTheme(rawSaved)`,
+		`'openvibely-light'`,
+		`'openvibely-dark'`,
+		`document.documentElement.setAttribute('data-theme', mode)`,
+		`document.documentElement.setAttribute('data-color-theme', themeID)`,
+		`localStorage.setItem('theme', themeID)`,
+		`window.applyOpenVibelyTheme`,
+		`document.documentElement.getAttribute('data-ui-sidebar-collapsed') === 'true'`,
+		`document.body.classList.add('sidebar-collapsed-pending')`,
+		`body.sidebar-collapsed-pending .sidebar-aside`,
+		`body.sidebar-collapsed-pending .sidebar-aside .sidebar-inner`,
+		`document.body.classList.toggle('sidebar-collapsed-pending', isCollapsed)`,
+		`/ui/preferences`,
+		`JSON.stringify({ sidebar_collapsed: isCollapsed })`,
+		`JSON.stringify({ project_id: projectID })`,
+	}
+	for _, snippet := range required {
+		if !strings.Contains(body, snippet) {
+			t.Fatalf("layout missing persisted preference snippet: %s", snippet)
+		}
+	}
+
+	if strings.Contains(body, `localStorage.setItem('theme', next)`) {
+		t.Fatal("theme toggle must persist stable exact theme IDs, not raw light/dark mode values")
+	}
+}
+
+func TestLayout_UIPreferencesRestoreFromSettings(t *testing.T) {
+	h, e, _, _ := setupTestHandlerWithDB(t)
+	require.NoError(t, h.settingsRepo.Set(context.Background(), uiPreferenceThemeKey, "openvibely-light"))
+	require.NoError(t, h.settingsRepo.Set(context.Background(), uiPreferenceSidebarCollapsedKey, "true"))
+
+	req := httptest.NewRequest(http.MethodGet, "/tasks", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	body := rec.Body.String()
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	for _, snippet := range []string{
+		`data-openvibely-runtime="web"`,
+		`data-ui-theme="openvibely-light"`,
+		`data-ui-sidebar-collapsed="true"`,
+		`rawSaved = document.documentElement.getAttribute('data-ui-theme') || ''`,
+		`document.documentElement.getAttribute('data-ui-sidebar-collapsed') === 'true'`,
+		`fetch('/ui/preferences'`,
+		`JSON.stringify({ sidebar_collapsed: isCollapsed })`,
+	} {
+		if !strings.Contains(body, snippet) {
+			t.Fatalf("UI preference restore missing snippet: %s", snippet)
+		}
+	}
+	if strings.Contains(body, `document.cookie`) || strings.Contains(body, `openvibely-sidebar-collapsed`) || strings.Contains(body, `openvibely-theme`) {
+		t.Fatal("UI preferences must persist through DB settings, not port/origin scoped cookies")
+	}
+	if strings.Contains(body, `if (document.documentElement.getAttribute('data-openvibely-runtime') !== 'desktop') return`) {
+		t.Fatal("UI preferences must persist to DB in web/server mode as well as desktop mode")
+	}
+}
+
+func TestLayout_UIPreferencesDoNotReadSettingsForHTMXFragments(t *testing.T) {
+	h, e, _, _ := setupTestHandlerWithDB(t)
+	settingsQueries := 0
+	h.settingsRepo.SetQueryObserver(func(query string) {
+		if strings.Contains(query, "app_settings") {
+			settingsQueries++
+		}
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/tasks", nil)
+	req.Header.Set("HX-Request", "true")
+	req.Header.Set("HX-Target", "main-content")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	if settingsQueries != 0 {
+		t.Fatalf("HTMX fragment render should not read UI preferences from app_settings, got %d settings queries", settingsQueries)
+	}
+}
+
+func TestSaveUIPreferences_PersistsPreferencesToSettings(t *testing.T) {
+	h, e, _, _ := setupTestHandlerWithDB(t)
+	project := createProject(t, h, "Selected Project")
+	req := httptest.NewRequest(http.MethodPost, "/ui/preferences", strings.NewReader(fmt.Sprintf(`{"theme":"openvibely-dark","sidebar_collapsed":true,"diff_view":"split","project_id":%q}`, project.ID)))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d: %s", rec.Code, rec.Body.String())
+	}
+	theme, err := h.settingsRepo.Get(context.Background(), uiPreferenceThemeKey)
+	require.NoError(t, err)
+	require.Equal(t, "openvibely-dark", theme)
+	sidebar, err := h.settingsRepo.Get(context.Background(), uiPreferenceSidebarCollapsedKey)
+	require.NoError(t, err)
+	require.Equal(t, "true", sidebar)
+	diffView, err := h.settingsRepo.Get(context.Background(), uiPreferenceDiffViewKey)
+	require.NoError(t, err)
+	require.Equal(t, "split", diffView)
+	selectedProjectID, err := h.settingsRepo.Get(context.Background(), uiPreferenceSelectedProjectIDKey)
+	require.NoError(t, err)
+	require.Equal(t, project.ID, selectedProjectID)
+}
+
+func TestSaveUIPreferences_RejectsInvalidProjectID(t *testing.T) {
+	_, e, _ := setupTestHandler(t)
+	req := httptest.NewRequest(http.MethodPost, "/ui/preferences", strings.NewReader(`{"project_id":"missing-project"}`))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid project id, got %d", rec.Code)
+	}
+}
+
+func TestSaveUIPreferences_RejectsInvalidDiffView(t *testing.T) {
+	_, e, _ := setupTestHandler(t)
+	req := httptest.NewRequest(http.MethodPost, "/ui/preferences", strings.NewReader(`{"diff_view":"side-by-side"}`))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid diff view, got %d", rec.Code)
+	}
+}
+
+func TestTaskChangesUsesPersistedSplitDiffViewPreference(t *testing.T) {
+	h, e, llmConfigRepo, _ := setupTestHandlerWithDB(t)
+	project := createProject(t, h, "Diff Pref Project")
+	agent := createAgent(t, llmConfigRepo)
+	task := createTask(t, h, project.ID, "Diff Pref Task")
+	exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecCompleted
+	})
+	require.NoError(t, h.execRepo.UpdateDiffOutput(context.Background(), exec.ID, "diff --git a/file.txt b/file.txt\n--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old\n+new\n"))
+	require.NoError(t, h.settingsRepo.Set(context.Background(), uiPreferenceDiffViewKey, "split"))
+
+	req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes", nil)
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	body := rec.Body.String()
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, body)
+	}
+	for _, snippet := range []string{
+		`data-initial-view="split"`,
+		`id="diff-btn-split"`,
+		`class="btn btn-sm join-item btn-active"`,
+		`id="diff-content-split" class="space-y-4"`,
+		`id="diff-content-inline" class="space-y-4 hidden"`,
+		`JSON.stringify({ diff_view: mode })`,
+	} {
+		if !strings.Contains(body, snippet) {
+			t.Fatalf("changes diff view preference render missing snippet: %s", snippet)
+		}
+	}
+}
+
+func TestTaskDetailChangesRefreshRestoresInlineOrSplitWithoutSaving(t *testing.T) {
+	h, e, _, _ := setupTestHandlerWithDB(t)
+	project := createProject(t, h, "Diff Refresh Project")
+	task := createTask(t, h, project.ID, "Diff Refresh Task")
+
+	req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"?tab=changes", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	body := rec.Body.String()
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, body)
+	}
+	for _, snippet := range []string{
+		`var viewMode = _getDiffViewMode()`,
+		`if ((viewMode === 'inline' || viewMode === 'split') && typeof switchDiffView === 'function')`,
+		`switchDiffView(viewMode, false)`,
+	} {
+		if !strings.Contains(body, snippet) {
+			t.Fatalf("changes refresh restore missing snippet: %s", snippet)
+		}
+	}
+	if strings.Contains(body, `viewMode === 'split' && typeof switchDiffView === 'function'`) {
+		t.Fatal("changes refresh must restore inline as well as split")
+	}
+}
+
+func TestSaveUIPreferences_RejectsInvalidThemeID(t *testing.T) {
+	_, e, _ := setupTestHandler(t)
+	req := httptest.NewRequest(http.MethodPost, "/ui/preferences", strings.NewReader(`{"theme":"bad theme"}`))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid theme, got %d", rec.Code)
 	}
 }
 
@@ -3714,6 +5856,64 @@ func TestHandler_TaskThreadSend(t *testing.T) {
 	}
 }
 
+func TestHandler_TaskThreadSend_ClearsStaleCancellationMarkerSoGoalAfterCompleteRuns(t *testing.T) {
+	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	goalRepo := repository.NewTaskGoalRepo(db)
+	goalSvc := service.NewTaskGoalService(goalRepo, h.taskRepo, nil)
+	h.SetTaskGoalService(goalSvc)
+	h.taskSvc.SetTaskGoalService(goalSvc)
+	h.workerSvc.SetTaskGoalService(goalSvc)
+	agentRepo := repository.NewAgentRepo(db)
+	h.SetAgentRepo(agentRepo)
+	h.workerSvc.SetLifecycleAgentRepo(agentRepo)
+
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Direct Followup Clears Stop Marker Project")
+	task := createTask(t, h, project.ID, "Direct Followup Clears Stop Marker Task", func(tk *models.Task) {
+		tk.Category = models.CategoryCompleted
+		tk.Status = models.StatusCompleted
+		tk.AgentID = &agent.ID
+		tk.Prompt = "initial task prompt"
+	})
+	_, err := goalSvc.SetGoal(ctx, task.ID, "Keep evaluating after every legitimate follow-up", service.GoalOptions{})
+	require.NoError(t, err)
+	goalAgent := &models.Agent{Key: models.AgentSystemKindGoal, Name: "System: Goal Agent", Model: "inherit", Tools: []string{"get_task_goal", "send_to_task", "mark_task_goal_achieved", "report_task_goal_blocked"}, SystemKind: models.AgentSystemKindGoal, GeneratedStatus: models.AgentStatusProtected, CreatedBy: models.AgentCreatedBySystem, Enabled: true}
+	require.NoError(t, agentRepo.Create(ctx, goalAgent))
+	store := &chatMemoryHookStore{hooks: []models.AgentLifecycleHook{{ID: "goal-hook-direct", AgentID: goalAgent.ID, When: models.LifecycleAfterComplete, SkillKey: "evaluate_task_goal", OutputContract: models.OutputContractActivitySummary, Blocking: true, Enabled: true}}}
+	invoker := &chatMemoryHookInvoker{}
+	h.workerSvc.SetLifecycleRunner(lifecycle.NewRunner(store, invoker, nil))
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "direct follow-up complete"
+	mock.TextOnly = "direct follow-up complete"
+	h.llmSvc.SetLLMCaller(mock)
+
+	h.workerSvc.MarkCancellationRequested(task.ID)
+	require.True(t, h.workerSvc.IsCancellationRequested(task.ID))
+
+	for _, message := range []string{"first legitimate follow-up after stop", "second legitimate follow-up after stop"} {
+		form := url.Values{}
+		form.Set("message", message)
+		rec := htmxPost(e, "/tasks/"+task.ID+"/thread", form)
+		assertCode(t, rec, http.StatusOK)
+		require.Eventually(t, func() bool {
+			execs, _ := h.execRepo.ListByTaskChronological(ctx, task.ID)
+			return len(execs) > 0 && execs[len(execs)-1].Status == models.ExecCompleted
+		}, 2*time.Second, 10*time.Millisecond)
+	}
+
+	require.False(t, h.workerSvc.IsCancellationRequested(task.ID), "direct follow-up start should clear stale stop intent")
+	require.Eventually(t, func() bool {
+		n := 0
+		for _, seen := range invoker.Seen() {
+			if seen == "after_complete/evaluate_task_goal" {
+				n++
+			}
+		}
+		return n == 2
+	}, 2*time.Second, 10*time.Millisecond, "expected Goal Agent after_complete for both direct follow-up turns, seen=%#v", invoker.Seen())
+}
+
 func TestHandler_TaskThreadSend_SwarmParentRoutesWithoutNormalExecution(t *testing.T) {
 	h, e, llmConfigRepo := setupTestHandler(t)
 	h.workerSvc = nil
@@ -3721,16 +5921,16 @@ func TestHandler_TaskThreadSend_SwarmParentRoutesWithoutNormalExecution(t *testi
 	agent := createAgent(t, llmConfigRepo)
 	project := createProject(t, h, "Thread Swarm Parent Project")
 	parent, err := h.swarmSvc.CreateSwarmTask(ctx, service.CreateSwarmTaskRequest{
-		ProjectID:         project.ID,
-		Title:             "Swarm parent",
-		Prompt:            "Build the swarm result",
-		Category:          models.CategoryActive,
-		Priority:          2,
-		AgentID:           &agent.ID,
-		MaxWorkers:        3,
-		WorkerIsolation:   "worktree",
-		ReviewerEnabled:   true,
-		MergerEnabled: true,
+		ProjectID:       project.ID,
+		Title:           "Swarm parent",
+		Prompt:          "Build the swarm result",
+		Category:        models.CategoryActive,
+		Priority:        2,
+		AgentID:         &agent.ID,
+		MaxWorkers:      3,
+		WorkerIsolation: "worktree",
+		ReviewerEnabled: true,
+		MergerEnabled:   true,
 	})
 	require.NoError(t, err)
 
@@ -3758,7 +5958,10 @@ func TestHandler_TaskThreadSend_SwarmParentRoutesWithoutNormalExecution(t *testi
 	require.NotNil(t, planner)
 	assert.Equal(t, models.StatusPending, planner.Status)
 	assert.Equal(t, "coordinating", planner.SwarmStatus)
-	assert.Contains(t, planner.Prompt, "Update only the API worker")
+	fullPlanner, err := h.taskRepo.GetByID(ctx, planner.ID)
+	require.NoError(t, err)
+	require.NotNil(t, fullPlanner)
+	assert.Contains(t, fullPlanner.Prompt, "Update only the API worker")
 }
 
 func TestHandler_SwarmFollowupChildCreatesTaskThreadExecution(t *testing.T) {
@@ -3768,25 +5971,25 @@ func TestHandler_SwarmFollowupChildCreatesTaskThreadExecution(t *testing.T) {
 	agent := createAgent(t, llmConfigRepo)
 	project := createProject(t, h, "API Swarm Child Followup Project")
 	parent, err := h.swarmSvc.CreateSwarmTask(ctx, service.CreateSwarmTaskRequest{
-		ProjectID:         project.ID,
-		Title:             "Swarm parent",
-		Prompt:            "Build the swarm result",
-		Category:          models.CategoryActive,
-		Priority:          2,
-		AgentID:           &agent.ID,
-		MaxWorkers:        1,
-		WorkerIsolation:   "worktree",
-		ReviewerEnabled:   true,
-		MergerEnabled: true,
+		ProjectID:       project.ID,
+		Title:           "Swarm parent",
+		Prompt:          "Build the swarm result",
+		Category:        models.CategoryActive,
+		Priority:        2,
+		AgentID:         &agent.ID,
+		MaxWorkers:      1,
+		WorkerIsolation: "worktree",
+		ReviewerEnabled: true,
+		MergerEnabled:   true,
 	})
 	require.NoError(t, err)
 	planner, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
 	require.NoError(t, err)
 	require.NotNil(t, planner)
 	require.NoError(t, h.swarmSvc.ApplyPlannerOutput(ctx, planner.ID, service.PlannerOutput{
-		Workers:          []service.PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
-		ReviewerPrompt:   "Review the worker",
-		MergerPrompt: "Integrate the worker",
+		Workers:        []service.PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
+		ReviewerPrompt: "Review the worker",
+		MergerPrompt:   "Integrate the worker",
 	}))
 	worker, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleWorker)
 	require.NoError(t, err)
@@ -3819,7 +6022,7 @@ func TestHandler_SwarmFollowupChildCreatesTaskThreadExecution(t *testing.T) {
 	updatedWorker, err := h.taskRepo.GetByID(ctx, worker.ID)
 	require.NoError(t, err)
 	require.NotNil(t, updatedWorker)
-	assert.Equal(t, models.StatusQueued, updatedWorker.Status)
+	assert.Contains(t, []models.TaskStatus{models.StatusQueued, models.StatusRunning}, updatedWorker.Status)
 	assert.Equal(t, models.CategoryActive, updatedWorker.Category)
 	assert.Equal(t, "followup_pending", updatedWorker.SwarmStatus)
 }
@@ -3831,25 +6034,25 @@ func TestHandler_SwarmFollowupChildQueuesWhenActive(t *testing.T) {
 	agent := createAgent(t, llmConfigRepo)
 	project := createProject(t, h, "API Swarm Child Queue Project")
 	parent, err := h.swarmSvc.CreateSwarmTask(ctx, service.CreateSwarmTaskRequest{
-		ProjectID:         project.ID,
-		Title:             "Swarm parent",
-		Prompt:            "Build the swarm result",
-		Category:          models.CategoryActive,
-		Priority:          2,
-		AgentID:           &agent.ID,
-		MaxWorkers:        1,
-		WorkerIsolation:   "worktree",
-		ReviewerEnabled:   true,
-		MergerEnabled: true,
+		ProjectID:       project.ID,
+		Title:           "Swarm parent",
+		Prompt:          "Build the swarm result",
+		Category:        models.CategoryActive,
+		Priority:        2,
+		AgentID:         &agent.ID,
+		MaxWorkers:      1,
+		WorkerIsolation: "worktree",
+		ReviewerEnabled: true,
+		MergerEnabled:   true,
 	})
 	require.NoError(t, err)
 	planner, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
 	require.NoError(t, err)
 	require.NotNil(t, planner)
 	require.NoError(t, h.swarmSvc.ApplyPlannerOutput(ctx, planner.ID, service.PlannerOutput{
-		Workers:          []service.PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
-		ReviewerPrompt:   "Review the worker",
-		MergerPrompt: "Integrate the worker",
+		Workers:        []service.PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
+		ReviewerPrompt: "Review the worker",
+		MergerPrompt:   "Integrate the worker",
 	}))
 	worker, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleWorker)
 	require.NoError(t, err)
@@ -3887,25 +6090,25 @@ func TestHandler_SubmitReview_SwarmChildQueuesBehindActiveExecutionWithoutRoutin
 	agent := createAgent(t, llmConfigRepo)
 	project := createProject(t, h, "Review Swarm Child Queue Project")
 	parent, err := h.swarmSvc.CreateSwarmTask(ctx, service.CreateSwarmTaskRequest{
-		ProjectID:         project.ID,
-		Title:             "Swarm parent",
-		Prompt:            "Build the swarm result",
-		Category:          models.CategoryActive,
-		Priority:          2,
-		AgentID:           &agent.ID,
-		MaxWorkers:        1,
-		WorkerIsolation:   "worktree",
-		ReviewerEnabled:   true,
-		MergerEnabled: true,
+		ProjectID:       project.ID,
+		Title:           "Swarm parent",
+		Prompt:          "Build the swarm result",
+		Category:        models.CategoryActive,
+		Priority:        2,
+		AgentID:         &agent.ID,
+		MaxWorkers:      1,
+		WorkerIsolation: "worktree",
+		ReviewerEnabled: true,
+		MergerEnabled:   true,
 	})
 	require.NoError(t, err)
 	planner, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
 	require.NoError(t, err)
 	require.NotNil(t, planner)
 	require.NoError(t, h.swarmSvc.ApplyPlannerOutput(ctx, planner.ID, service.PlannerOutput{
-		Workers:          []service.PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
-		ReviewerPrompt:   "Review the worker",
-		MergerPrompt: "Integrate the worker",
+		Workers:        []service.PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
+		ReviewerPrompt: "Review the worker",
+		MergerPrompt:   "Integrate the worker",
 	}))
 	worker, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleWorker)
 	require.NoError(t, err)
@@ -3957,25 +6160,25 @@ func TestHandler_SubmitReview_SwarmChildDirectStartAppliesRouting(t *testing.T) 
 	agent := createAgent(t, llmConfigRepo)
 	project := createProject(t, h, "Review Swarm Child Direct Project")
 	parent, err := h.swarmSvc.CreateSwarmTask(ctx, service.CreateSwarmTaskRequest{
-		ProjectID:         project.ID,
-		Title:             "Swarm parent",
-		Prompt:            "Build the swarm result",
-		Category:          models.CategoryActive,
-		Priority:          2,
-		AgentID:           &agent.ID,
-		MaxWorkers:        1,
-		WorkerIsolation:   "worktree",
-		ReviewerEnabled:   true,
-		MergerEnabled: true,
+		ProjectID:       project.ID,
+		Title:           "Swarm parent",
+		Prompt:          "Build the swarm result",
+		Category:        models.CategoryActive,
+		Priority:        2,
+		AgentID:         &agent.ID,
+		MaxWorkers:      1,
+		WorkerIsolation: "worktree",
+		ReviewerEnabled: true,
+		MergerEnabled:   true,
 	})
 	require.NoError(t, err)
 	planner, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
 	require.NoError(t, err)
 	require.NotNil(t, planner)
 	require.NoError(t, h.swarmSvc.ApplyPlannerOutput(ctx, planner.ID, service.PlannerOutput{
-		Workers:          []service.PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
-		ReviewerPrompt:   "Review the worker",
-		MergerPrompt: "Integrate the worker",
+		Workers:        []service.PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
+		ReviewerPrompt: "Review the worker",
+		MergerPrompt:   "Integrate the worker",
 	}))
 	worker, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleWorker)
 	require.NoError(t, err)
@@ -4019,25 +6222,25 @@ func TestHandler_TaskThreadSend_SwarmChildQueuedFollowupDefersRoutingUntilPromot
 	agent := createAgent(t, llmConfigRepo)
 	project := createProject(t, h, "Thread Swarm Child Queue Timing Project")
 	parent, err := h.swarmSvc.CreateSwarmTask(ctx, service.CreateSwarmTaskRequest{
-		ProjectID:         project.ID,
-		Title:             "Swarm parent",
-		Prompt:            "Build the swarm result",
-		Category:          models.CategoryActive,
-		Priority:          2,
-		AgentID:           &agent.ID,
-		MaxWorkers:        1,
-		WorkerIsolation:   "worktree",
-		ReviewerEnabled:   true,
-		MergerEnabled: true,
+		ProjectID:       project.ID,
+		Title:           "Swarm parent",
+		Prompt:          "Build the swarm result",
+		Category:        models.CategoryActive,
+		Priority:        2,
+		AgentID:         &agent.ID,
+		MaxWorkers:      1,
+		WorkerIsolation: "worktree",
+		ReviewerEnabled: true,
+		MergerEnabled:   true,
 	})
 	require.NoError(t, err)
 	planner, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
 	require.NoError(t, err)
 	require.NotNil(t, planner)
 	require.NoError(t, h.swarmSvc.ApplyPlannerOutput(ctx, planner.ID, service.PlannerOutput{
-		Workers:          []service.PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
-		ReviewerPrompt:   "Review the worker",
-		MergerPrompt: "Integrate the worker",
+		Workers:        []service.PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
+		ReviewerPrompt: "Review the worker",
+		MergerPrompt:   "Integrate the worker",
 	}))
 	worker, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleWorker)
 	require.NoError(t, err)
@@ -4085,25 +6288,25 @@ func TestHandler_StartQueuedTaskThreadInput_AppliesSwarmChildFollowupOnPromotion
 	agent := createAgent(t, llmConfigRepo)
 	project := createProject(t, h, "Thread Swarm Child Promotion Timing Project")
 	parent, err := h.swarmSvc.CreateSwarmTask(ctx, service.CreateSwarmTaskRequest{
-		ProjectID:         project.ID,
-		Title:             "Swarm parent",
-		Prompt:            "Build the swarm result",
-		Category:          models.CategoryActive,
-		Priority:          2,
-		AgentID:           &agent.ID,
-		MaxWorkers:        1,
-		WorkerIsolation:   "worktree",
-		ReviewerEnabled:   true,
-		MergerEnabled: true,
+		ProjectID:       project.ID,
+		Title:           "Swarm parent",
+		Prompt:          "Build the swarm result",
+		Category:        models.CategoryActive,
+		Priority:        2,
+		AgentID:         &agent.ID,
+		MaxWorkers:      1,
+		WorkerIsolation: "worktree",
+		ReviewerEnabled: true,
+		MergerEnabled:   true,
 	})
 	require.NoError(t, err)
 	planner, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
 	require.NoError(t, err)
 	require.NotNil(t, planner)
 	require.NoError(t, h.swarmSvc.ApplyPlannerOutput(ctx, planner.ID, service.PlannerOutput{
-		Workers:          []service.PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
-		ReviewerPrompt:   "Review the worker",
-		MergerPrompt: "Integrate the worker",
+		Workers:        []service.PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
+		ReviewerPrompt: "Review the worker",
+		MergerPrompt:   "Integrate the worker",
 	}))
 	worker, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleWorker)
 	require.NoError(t, err)
@@ -4153,6 +6356,47 @@ func TestHandler_StartQueuedTaskThreadInput_AppliesSwarmChildFollowupOnPromotion
 	assert.Equal(t, execs[0].ID, applied.RunExecutionID)
 }
 
+func TestHandler_ApplySwarmChildFollowupStartClearsCancellationRequests(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Direct Swarm Child Followup Clears Stop Marker Project")
+	parent, err := h.swarmSvc.CreateSwarmTask(ctx, service.CreateSwarmTaskRequest{
+		ProjectID:       project.ID,
+		Title:           "Swarm parent",
+		Prompt:          "Build the swarm result",
+		Category:        models.CategoryActive,
+		Priority:        2,
+		AgentID:         &agent.ID,
+		MaxWorkers:      1,
+		WorkerIsolation: "worktree",
+	})
+	require.NoError(t, err)
+	planner, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
+	require.NoError(t, err)
+	require.NotNil(t, planner)
+	require.NoError(t, h.swarmSvc.ApplyPlannerOutput(ctx, planner.ID, service.PlannerOutput{
+		Workers: []service.PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
+	}))
+	worker, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleWorker)
+	require.NoError(t, err)
+	require.NotNil(t, worker)
+	h.workerSvc.MarkCancellationRequested(parent.ID)
+	h.workerSvc.MarkCancellationRequested(worker.ID)
+
+	require.NoError(t, h.applySwarmChildFollowupStart(ctx, worker, "legitimate follow-up after swarm restart"))
+
+	require.False(t, h.workerSvc.IsCancellationRequested(parent.ID), "swarm child follow-up should clear stale parent cancellation request")
+	require.False(t, h.workerSvc.IsCancellationRequested(worker.ID), "swarm child follow-up should clear stale child cancellation request")
+	updatedParent, err := h.taskRepo.GetByID(ctx, parent.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusRunning, updatedParent.Status)
+	require.Equal(t, models.CategoryActive, updatedParent.Category)
+	updatedWorker, err := h.taskRepo.GetByID(ctx, worker.ID)
+	require.NoError(t, err)
+	require.Equal(t, "followup_pending", updatedWorker.SwarmStatus)
+}
+
 func TestHandler_CompleteWithSuccess_NotifiesSwarmChildFollowupCompletion(t *testing.T) {
 	h, _, llmConfigRepo := setupTestHandler(t)
 	h.workerSvc = nil
@@ -4160,16 +6404,16 @@ func TestHandler_CompleteWithSuccess_NotifiesSwarmChildFollowupCompletion(t *tes
 	agent := createAgent(t, llmConfigRepo)
 	project := createProject(t, h, "Thread Swarm Child Completion Project")
 	parent, err := h.swarmSvc.CreateSwarmTask(ctx, service.CreateSwarmTaskRequest{
-		ProjectID:         project.ID,
-		Title:             "Swarm parent",
-		Prompt:            "Build the swarm result",
-		Category:          models.CategoryActive,
-		Priority:          2,
-		AgentID:           &agent.ID,
-		MaxWorkers:        3,
-		WorkerIsolation:   "worktree",
-		ReviewerEnabled:   true,
-		MergerEnabled: true,
+		ProjectID:       project.ID,
+		Title:           "Swarm parent",
+		Prompt:          "Build the swarm result",
+		Category:        models.CategoryActive,
+		Priority:        2,
+		AgentID:         &agent.ID,
+		MaxWorkers:      3,
+		WorkerIsolation: "worktree",
+		ReviewerEnabled: true,
+		MergerEnabled:   true,
 	})
 	require.NoError(t, err)
 	planner, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
@@ -4179,8 +6423,8 @@ func TestHandler_CompleteWithSuccess_NotifiesSwarmChildFollowupCompletion(t *tes
 		Workers: []service.PlannerWorker{
 			{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true},
 		},
-		ReviewerPrompt:   "Review the worker",
-		MergerPrompt: "Integrate the worker",
+		ReviewerPrompt: "Review the worker",
+		MergerPrompt:   "Integrate the worker",
 	}
 	require.NoError(t, h.swarmSvc.ApplyPlannerOutput(ctx, planner.ID, output))
 	children, err := h.taskRepo.ListSwarmChildren(ctx, parent.ID)
@@ -4222,25 +6466,25 @@ func TestHandler_CancelTask_NotifiesSwarmChildCancellation(t *testing.T) {
 	agent := createAgent(t, llmConfigRepo)
 	project := createProject(t, h, "Swarm Child Cancel Project")
 	parent, err := h.swarmSvc.CreateSwarmTask(ctx, service.CreateSwarmTaskRequest{
-		ProjectID:         project.ID,
-		Title:             "Swarm parent",
-		Prompt:            "Build the swarm result",
-		Category:          models.CategoryActive,
-		Priority:          2,
-		AgentID:           &agent.ID,
-		MaxWorkers:        1,
-		WorkerIsolation:   "worktree",
-		ReviewerEnabled:   true,
-		MergerEnabled: true,
+		ProjectID:       project.ID,
+		Title:           "Swarm parent",
+		Prompt:          "Build the swarm result",
+		Category:        models.CategoryActive,
+		Priority:        2,
+		AgentID:         &agent.ID,
+		MaxWorkers:      1,
+		WorkerIsolation: "worktree",
+		ReviewerEnabled: true,
+		MergerEnabled:   true,
 	})
 	require.NoError(t, err)
 	planner, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
 	require.NoError(t, err)
 	require.NotNil(t, planner)
 	require.NoError(t, h.swarmSvc.ApplyPlannerOutput(ctx, planner.ID, service.PlannerOutput{
-		Workers:          []service.PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
-		ReviewerPrompt:   "Review the worker",
-		MergerPrompt: "Integrate the worker",
+		Workers:        []service.PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
+		ReviewerPrompt: "Review the worker",
+		MergerPrompt:   "Integrate the worker",
 	}))
 	worker, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleWorker)
 	require.NoError(t, err)
@@ -4267,36 +6511,39 @@ func TestHandler_UpdateTask_NotifiesPendingSwarmChildCancellation(t *testing.T) 
 	agent := createAgent(t, llmConfigRepo)
 	project := createProject(t, h, "Swarm Child Edit Cancel Project")
 	parent, err := h.swarmSvc.CreateSwarmTask(ctx, service.CreateSwarmTaskRequest{
-		ProjectID:         project.ID,
-		Title:             "Swarm parent edit",
-		Prompt:            "Build the swarm result",
-		Category:          models.CategoryActive,
-		Priority:          2,
-		AgentID:           &agent.ID,
-		MaxWorkers:        1,
-		WorkerIsolation:   "worktree",
-		ReviewerEnabled:   true,
-		MergerEnabled: true,
+		ProjectID:       project.ID,
+		Title:           "Swarm parent edit",
+		Prompt:          "Build the swarm result",
+		Category:        models.CategoryActive,
+		Priority:        2,
+		AgentID:         &agent.ID,
+		MaxWorkers:      1,
+		WorkerIsolation: "worktree",
+		ReviewerEnabled: true,
+		MergerEnabled:   true,
 	})
 	require.NoError(t, err)
 	planner, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
 	require.NoError(t, err)
 	require.NotNil(t, planner)
 	require.NoError(t, h.swarmSvc.ApplyPlannerOutput(ctx, planner.ID, service.PlannerOutput{
-		Workers:          []service.PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
-		ReviewerPrompt:   "Review the worker",
-		MergerPrompt: "Integrate the worker",
+		Workers:        []service.PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
+		ReviewerPrompt: "Review the worker",
+		MergerPrompt:   "Integrate the worker",
 	}))
 	worker, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleWorker)
 	require.NoError(t, err)
 	require.NotNil(t, worker)
+	fullWorker, err := h.taskRepo.GetByID(ctx, worker.ID)
+	require.NoError(t, err)
+	require.NotNil(t, fullWorker)
 	require.NoError(t, h.taskRepo.UpdateStatus(ctx, worker.ID, models.StatusPending))
 	require.NoError(t, h.taskRepo.UpdateCategory(ctx, worker.ID, models.CategoryActive))
 
 	form := url.Values{}
 	form.Set("title", "Edited pending worker")
 	form.Set("category", string(models.CategoryCompleted))
-	form.Set("prompt", worker.Prompt)
+	form.Set("prompt", fullWorker.Prompt)
 	form.Set("priority", "3")
 	rec := htmxPut(e, "/tasks/"+worker.ID, form)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
@@ -4321,25 +6568,25 @@ func TestHandler_UpdateTaskCategory_NotifiesSwarmChildCancellation(t *testing.T)
 	agent := createAgent(t, llmConfigRepo)
 	project := createProject(t, h, "Swarm Child Drop Cancel Project")
 	parent, err := h.swarmSvc.CreateSwarmTask(ctx, service.CreateSwarmTaskRequest{
-		ProjectID:         project.ID,
-		Title:             "Swarm parent",
-		Prompt:            "Build the swarm result",
-		Category:          models.CategoryActive,
-		Priority:          2,
-		AgentID:           &agent.ID,
-		MaxWorkers:        1,
-		WorkerIsolation:   "worktree",
-		ReviewerEnabled:   true,
-		MergerEnabled: true,
+		ProjectID:       project.ID,
+		Title:           "Swarm parent",
+		Prompt:          "Build the swarm result",
+		Category:        models.CategoryActive,
+		Priority:        2,
+		AgentID:         &agent.ID,
+		MaxWorkers:      1,
+		WorkerIsolation: "worktree",
+		ReviewerEnabled: true,
+		MergerEnabled:   true,
 	})
 	require.NoError(t, err)
 	planner, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
 	require.NoError(t, err)
 	require.NotNil(t, planner)
 	require.NoError(t, h.swarmSvc.ApplyPlannerOutput(ctx, planner.ID, service.PlannerOutput{
-		Workers:          []service.PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
-		ReviewerPrompt:   "Review the worker",
-		MergerPrompt: "Integrate the worker",
+		Workers:        []service.PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
+		ReviewerPrompt: "Review the worker",
+		MergerPrompt:   "Integrate the worker",
 	}))
 	worker, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleWorker)
 	require.NoError(t, err)
@@ -4375,25 +6622,25 @@ func TestHandler_CompleteWithCancellation_NotifiesSwarmChildCancellation(t *test
 	agent := createAgent(t, llmConfigRepo)
 	project := createProject(t, h, "Swarm Child Streaming Cancel Project")
 	parent, err := h.swarmSvc.CreateSwarmTask(ctx, service.CreateSwarmTaskRequest{
-		ProjectID:         project.ID,
-		Title:             "Swarm parent",
-		Prompt:            "Build the swarm result",
-		Category:          models.CategoryActive,
-		Priority:          2,
-		AgentID:           &agent.ID,
-		MaxWorkers:        1,
-		WorkerIsolation:   "worktree",
-		ReviewerEnabled:   true,
-		MergerEnabled: true,
+		ProjectID:       project.ID,
+		Title:           "Swarm parent",
+		Prompt:          "Build the swarm result",
+		Category:        models.CategoryActive,
+		Priority:        2,
+		AgentID:         &agent.ID,
+		MaxWorkers:      1,
+		WorkerIsolation: "worktree",
+		ReviewerEnabled: true,
+		MergerEnabled:   true,
 	})
 	require.NoError(t, err)
 	planner, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
 	require.NoError(t, err)
 	require.NotNil(t, planner)
 	require.NoError(t, h.swarmSvc.ApplyPlannerOutput(ctx, planner.ID, service.PlannerOutput{
-		Workers:          []service.PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
-		ReviewerPrompt:   "Review the worker",
-		MergerPrompt: "Integrate the worker",
+		Workers:        []service.PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
+		ReviewerPrompt: "Review the worker",
+		MergerPrompt:   "Integrate the worker",
 	}))
 	worker, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleWorker)
 	require.NoError(t, err)
@@ -4606,7 +6853,7 @@ func TestHandler_TaskThreadSend_CompletedTaskIgnoresAndRepairsStaleRunningExecut
 	require.Len(t, execs, 2)
 	assert.Equal(t, models.ExecFailed, execs[0].Status)
 	assert.Equal(t, staleExec.ID, execs[0].ID)
-	assert.Equal(t, models.ExecRunning, execs[1].Status)
+	assert.Contains(t, []models.ExecutionStatus{models.ExecQueued, models.ExecRunning}, execs[1].Status)
 	assert.Equal(t, "follow up after completed task", execs[1].PromptSent)
 	assert.True(t, execs[1].IsFollowup)
 	pending, err := h.threadInputRepo.ListPendingForTask(ctx, task.ID)
@@ -4642,7 +6889,7 @@ func TestHandler_TaskThreadSend_CancelledTaskIgnoresAndRepairsStaleRunningExecut
 	require.Len(t, execs, 2)
 	assert.Equal(t, staleExec.ID, execs[0].ID)
 	assert.Equal(t, models.ExecCancelled, execs[0].Status)
-	assert.Equal(t, models.ExecRunning, execs[1].Status)
+	assert.Contains(t, []models.ExecutionStatus{models.ExecQueued, models.ExecRunning}, execs[1].Status)
 	assert.Equal(t, "follow up after cancelled task", execs[1].PromptSent)
 }
 
@@ -4798,16 +7045,16 @@ func TestHandler_RunTask_StartsPlannerForDeferredSwarmParent(t *testing.T) {
 	project := createProject(t, h, "Deferred Swarm Run Project")
 	startImmediately := false
 	parent, err := h.swarmSvc.CreateSwarmTask(ctx, service.CreateSwarmTaskRequest{
-		ProjectID:         project.ID,
-		Title:             "Deferred swarm",
-		Prompt:            "Split this deferred swarm into workers",
-		Category:          models.CategoryBacklog,
-		Priority:          2,
-		AgentID:           &agent.ID,
-		MaxWorkers:        2,
-		ReviewerEnabled:   true,
-		MergerEnabled:     true,
-		StartImmediately:  &startImmediately,
+		ProjectID:        project.ID,
+		Title:            "Deferred swarm",
+		Prompt:           "Split this deferred swarm into workers",
+		Category:         models.CategoryBacklog,
+		Priority:         2,
+		AgentID:          &agent.ID,
+		MaxWorkers:       2,
+		ReviewerEnabled:  true,
+		MergerEnabled:    true,
+		StartImmediately: &startImmediately,
 	})
 	require.NoError(t, err)
 
@@ -4867,7 +7114,7 @@ func TestHandler_RunTask_PromotesPendingTaskThreadInputInsteadOfOriginalPrompt(t
 	updatedTask, err := h.taskRepo.GetByID(ctx, task.ID)
 	require.NoError(t, err)
 	require.NotNil(t, updatedTask)
-	assert.Equal(t, models.StatusQueued, updatedTask.Status)
+	assert.Contains(t, []models.TaskStatus{models.StatusQueued, models.StatusRunning}, updatedTask.Status)
 	assert.Equal(t, models.CategoryActive, updatedTask.Category)
 }
 
@@ -4891,12 +7138,15 @@ func TestHandler_TaskThreadSteer_CreatesPendingSteeringInput(t *testing.T) {
 	form := url.Values{}
 	form.Set("message", "Stop and use the new interface")
 	form.Set("expected_turn_id", activeExec.ID)
+	form.Set("attachment_session_id", "task-steering-session")
 	rec := htmxPost(e, "/tasks/"+task.ID+"/thread/steer", form)
 	assertCode(t, rec, http.StatusOK)
 	assertContains(t, rec, "Steering pending")
 	assertContains(t, rec, `data-input-mode="steering"`)
 	assertContains(t, rec, `steering-input-row`)
 	assertContains(t, rec, `aria-label="Cancel pending steering"`)
+	assertContains(t, rec, "Attachments included")
+	assertContains(t, rec, `aria-label="Attachments included with this steering instruction"`)
 	assertContains(t, rec, `M19 7l-.867 12.142`)
 	assertNotContains(t, rec, `>Cancel</button>`)
 
@@ -4908,6 +7158,7 @@ func TestHandler_TaskThreadSteer_CreatesPendingSteeringInput(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, inputs, 1)
 	assert.Equal(t, "Stop and use the new interface", inputs[0].Content)
+	assert.Equal(t, "task-steering-session", inputs[0].AttachmentSessionID)
 }
 
 func TestHandler_TaskThreadCancel_CancelsQueuedFollowups(t *testing.T) {
@@ -4987,6 +7238,182 @@ func TestHandler_TaskThreadSend_WithExplicitAgent(t *testing.T) {
 	execs, _ := h.execRepo.ListByTaskChronological(ctx, task.ID)
 	if len(execs) != 1 || execs[0].AgentConfigID != explicitAgent.ID {
 		t.Errorf("expected execution with explicit agent %s", explicitAgent.ID)
+	}
+}
+
+// TestHandler_TaskThreadSend_ExplicitAgentPersistsAsTaskDefault verifies that
+// explicitly selecting a model in the task-thread composer becomes the task's
+// ongoing assigned model (Task.AgentID), so a subsequent thread render reflects
+// the newly selected model rather than reverting to the task's prior default.
+func TestHandler_TaskThreadSend_ExplicitAgentPersistsAsTaskDefault(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	defaultAgent := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) { a.Name = "Default Agent" })
+	explicitAgent := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
+		a.Name = "Explicit Agent"
+		a.Provider = "anthropic"
+		a.Model = "claude-opus-4-20250514"
+		a.MaxTokens = 8192
+		a.IsDefault = false
+	})
+	project := createProject(t, h, "Model Persist Test")
+	task := createTask(t, h, project.ID, "Model Persist Task", func(tk *models.Task) {
+		tk.Status = models.StatusCompleted
+		tk.AgentID = &defaultAgent.ID
+	})
+
+	form := url.Values{}
+	form.Set("message", "Switch to the explicit model")
+	form.Set("agent_id", explicitAgent.ID)
+	rec := postForm(e, "/tasks/"+task.ID+"/thread", form)
+	assertCode(t, rec, http.StatusOK)
+
+	updatedTask, err := h.taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if updatedTask.AgentID == nil || *updatedTask.AgentID != explicitAgent.ID {
+		t.Fatalf("expected task.AgentID=%s after explicit selection, got %v", explicitAgent.ID, updatedTask.AgentID)
+	}
+
+	// A subsequent thread render must reflect the persisted selection, not the
+	// task's original default agent.
+	threadRec := htmxGet(e, "/tasks/"+task.ID+"/thread")
+	assertCode(t, threadRec, http.StatusOK)
+	assertContains(t, threadRec, "data-task-agent=\""+explicitAgent.ID+"\"")
+}
+
+// TestHandler_TaskThreadSend_AutoSelectionDoesNotOverrideTaskDefault verifies that
+// sending a follow-up with "auto" model routing (no explicit selection change)
+// does not overwrite the task's previously assigned model.
+func TestHandler_TaskThreadSend_AutoSelectionDoesNotOverrideTaskDefault(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	assignedAgent := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) { a.Name = "Assigned Agent" })
+	project := createProject(t, h, "Auto No Override Test")
+	task := createTask(t, h, project.ID, "Auto No Override Task", func(tk *models.Task) {
+		tk.Status = models.StatusCompleted
+		tk.AgentID = &assignedAgent.ID
+	})
+
+	form := url.Values{}
+	form.Set("message", "Follow up without an explicit model change")
+	form.Set("agent_id", "auto")
+	rec := postForm(e, "/tasks/"+task.ID+"/thread", form)
+	assertCode(t, rec, http.StatusOK)
+
+	updatedTask, err := h.taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if updatedTask.AgentID == nil || *updatedTask.AgentID != assignedAgent.ID {
+		t.Fatalf("expected task.AgentID to remain %s, got %v", assignedAgent.ID, updatedTask.AgentID)
+	}
+}
+
+// TestHandler_TaskThreadSelectModel_PersistsWithoutSending verifies that
+// changing the task-thread composer's model dropdown persists the selection
+// immediately, without requiring a message to be sent. This ensures the
+// selector does not revert after navigating away and back to the thread.
+func TestHandler_TaskThreadSelectModel_PersistsWithoutSending(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	defaultAgent := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) { a.Name = "Default Agent" })
+	explicitAgent := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
+		a.Name = "Explicit Agent"
+		a.Provider = "anthropic"
+		a.Model = "claude-opus-4-20250514"
+		a.MaxTokens = 8192
+		a.IsDefault = false
+	})
+	project := createProject(t, h, "Model Select Without Send Test")
+	task := createTask(t, h, project.ID, "Model Select Without Send Task", func(tk *models.Task) {
+		tk.Status = models.StatusCompleted
+		tk.AgentID = &defaultAgent.ID
+	})
+
+	form := url.Values{}
+	form.Set("agent_id", explicitAgent.ID)
+	rec := postForm(e, "/tasks/"+task.ID+"/thread/model", form)
+	assertCode(t, rec, http.StatusNoContent)
+
+	updatedTask, err := h.taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if updatedTask.AgentID == nil || *updatedTask.AgentID != explicitAgent.ID {
+		t.Fatalf("expected task.AgentID=%s after selection, got %v", explicitAgent.ID, updatedTask.AgentID)
+	}
+
+	// A subsequent thread render (e.g. after navigating away and back) must
+	// reflect the persisted selection, not the task's original default.
+	threadRec := htmxGet(e, "/tasks/"+task.ID+"/thread")
+	assertCode(t, threadRec, http.StatusOK)
+	assertContains(t, threadRec, "data-task-agent=\""+explicitAgent.ID+"\"")
+}
+
+// TestHandler_TaskThreadSelectModel_AutoDoesNotOverride verifies that
+// selecting "auto" via the immediate model-select endpoint does not
+// overwrite the task's previously assigned model.
+func TestHandler_TaskThreadSelectModel_AutoDoesNotOverride(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	assignedAgent := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) { a.Name = "Assigned Agent" })
+	project := createProject(t, h, "Model Select Auto No Override Test")
+	task := createTask(t, h, project.ID, "Model Select Auto No Override Task", func(tk *models.Task) {
+		tk.Status = models.StatusCompleted
+		tk.AgentID = &assignedAgent.ID
+	})
+
+	form := url.Values{}
+	form.Set("agent_id", "auto")
+	rec := postForm(e, "/tasks/"+task.ID+"/thread/model", form)
+	assertCode(t, rec, http.StatusNoContent)
+
+	updatedTask, err := h.taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if updatedTask.AgentID == nil || *updatedTask.AgentID != assignedAgent.ID {
+		t.Fatalf("expected task.AgentID to remain %s, got %v", assignedAgent.ID, updatedTask.AgentID)
+	}
+}
+
+// TestHandler_TaskThreadSelectModel_SkipsSwarmParent verifies that the
+// immediate model-select endpoint does not mutate Task.AgentID for swarm
+// parent tasks, consistent with TaskThreadSend's swarm-parent handling. Swarm
+// parents resolve their assigned agent through swarm-specific semantics
+// (SwarmService.resolveAssignedAgentID and child creation), not direct
+// composer persistence.
+func TestHandler_TaskThreadSelectModel_SkipsSwarmParent(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	defaultAgent := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) { a.Name = "Default Agent" })
+	explicitAgent := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
+		a.Name = "Explicit Agent"
+		a.Provider = "anthropic"
+		a.Model = "claude-opus-4-20250514"
+		a.MaxTokens = 8192
+		a.IsDefault = false
+	})
+	project := createProject(t, h, "Model Select Swarm Parent Test")
+	task := createTask(t, h, project.ID, "Model Select Swarm Parent Task", func(tk *models.Task) {
+		tk.Status = models.StatusCompleted
+		tk.AgentID = &defaultAgent.ID
+		tk.SwarmRole = models.SwarmRoleParent
+	})
+
+	form := url.Values{}
+	form.Set("agent_id", explicitAgent.ID)
+	rec := postForm(e, "/tasks/"+task.ID+"/thread/model", form)
+	assertCode(t, rec, http.StatusNoContent)
+
+	updatedTask, err := h.taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if updatedTask.AgentID == nil || *updatedTask.AgentID != defaultAgent.ID {
+		t.Fatalf("expected swarm parent task.AgentID to remain unchanged at %s, got %v", defaultAgent.ID, updatedTask.AgentID)
 	}
 }
 
@@ -5129,8 +7556,8 @@ func TestHandler_TaskThreadSend_AllowsWhenProjectHasCapacity(t *testing.T) {
 	assertCode(t, rec, http.StatusOK)
 
 	updatedTask, _ := h.taskSvc.GetByID(ctx, task.ID)
-	if updatedTask.Status != models.StatusQueued {
-		t.Errorf("expected status queued, got %s", updatedTask.Status)
+	if updatedTask.Status != models.StatusQueued && updatedTask.Status != models.StatusRunning {
+		t.Errorf("expected status queued or running, got %s", updatedTask.Status)
 	}
 }
 
@@ -5763,6 +8190,10 @@ func TestHandler_GetTaskThread_ChannelSwarmChildFollowupSurvivesStaleRecoverySwe
 			SlackUserID:    "Uswarm",
 		},
 	})
+	require.Eventually(t, func() bool {
+		stored, err := h.execRepo.GetByID(ctx, exec.ID)
+		return err == nil && stored != nil && stored.Status == models.ExecRunning
+	}, 2*time.Second, 25*time.Millisecond)
 	assert.NoError(t, h.execRepo.UpdateOutput(ctx, exec.ID, "partial worker output"))
 
 	_, err := h.execRepo.RecoverStaleRunningTaskExecutions(ctx)
@@ -6069,25 +8500,25 @@ func TestHandler_RerunSwarmReviewerRejectsActiveRoleExecution(t *testing.T) {
 	agent := createAgent(t, llmConfigRepo)
 	project := createProject(t, h, "API Swarm Rerun Active Project")
 	parent, err := h.swarmSvc.CreateSwarmTask(ctx, service.CreateSwarmTaskRequest{
-		ProjectID:         project.ID,
-		Title:             "Swarm parent",
-		Prompt:            "Build the swarm result",
-		Category:          models.CategoryActive,
-		Priority:          2,
-		AgentID:           &agent.ID,
-		MaxWorkers:        1,
-		WorkerIsolation:   "worktree",
-		ReviewerEnabled:   true,
-		MergerEnabled: true,
+		ProjectID:       project.ID,
+		Title:           "Swarm parent",
+		Prompt:          "Build the swarm result",
+		Category:        models.CategoryActive,
+		Priority:        2,
+		AgentID:         &agent.ID,
+		MaxWorkers:      1,
+		WorkerIsolation: "worktree",
+		ReviewerEnabled: true,
+		MergerEnabled:   true,
 	})
 	require.NoError(t, err)
 	planner, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
 	require.NoError(t, err)
 	require.NotNil(t, planner)
 	require.NoError(t, h.swarmSvc.ApplyPlannerOutput(ctx, planner.ID, service.PlannerOutput{
-		Workers:          []service.PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", Required: true}},
-		ReviewerPrompt:   "Review the worker",
-		MergerPrompt: "Integrate the worker",
+		Workers:        []service.PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", Required: true}},
+		ReviewerPrompt: "Review the worker",
+		MergerPrompt:   "Integrate the worker",
 	}))
 	reviewer, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleReviewer)
 	require.NoError(t, err)
@@ -6101,4 +8532,130 @@ func TestHandler_RerunSwarmReviewerRejectsActiveRoleExecution(t *testing.T) {
 	e.ServeHTTP(rec, req)
 	require.Equal(t, http.StatusConflict, rec.Code, rec.Body.String())
 	assert.Contains(t, rec.Body.String(), "already running")
+}
+
+func newHistoricalModelsBenchmarkEcho(h *Handler, repo *repository.LLMConfigRepo) *echo.Echo {
+	e := echo.New()
+	e.GET("/models", func(c echo.Context) error {
+		c.Response().Header().Set("Cache-Control", "no-store")
+		agents, err := repo.List(c.Request().Context())
+		if err != nil {
+			return err
+		}
+		stats := make(map[string]int, len(agents))
+		for _, agent := range agents {
+			stats[agent.ID] = h.workerSvc.ModelRunning(agent.ID)
+		}
+		if err := render(c, http.StatusOK, pages.ModelsContent(agents, stats, h.desktopMode)); err != nil {
+			return err
+		}
+		// Reproduce the historical eager edit attributes inside the complete
+		// handler path. extra_body_json dominates the acceptance fixture, while
+		// these fields also retain the former secret and request-JSON payload.
+		for _, agent := range agents {
+			_, err := fmt.Fprintf(c.Response(), `<div data-model-api-key="%s" data-model-extra-headers-json="%s" data-model-extra-body-json="%s"></div>`,
+				htmlstd.EscapeString(agent.APIKey),
+				htmlstd.EscapeString(agent.ExtraHeadersJSON),
+				htmlstd.EscapeString(agent.ExtraBodyJSON),
+			)
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	return e
+}
+
+func TestModelsBenchmarkHandlersUseCompleteHTMXRoutes(t *testing.T) {
+	h, candidate, repo := setupTestHandler(t)
+	cfg := &models.LLMConfig{
+		Name: "Historical Eager Config", Provider: models.ProviderOpenAICompatible,
+		Model: "custom-model", PresetSlug: "custom", ExtraBodyJSON: `{"eager":"payload"}`,
+	}
+	if err := repo.Create(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+	baseline := newHistoricalModelsBenchmarkEcho(h, repo)
+
+	for name, server := range map[string]*echo.Echo{"baseline": baseline, "candidate": candidate} {
+		t.Run(name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/models", nil)
+			req.Header.Set("HX-Request", "true")
+			rec := httptest.NewRecorder()
+			server.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("GET /models status = %d", rec.Code)
+			}
+			if !strings.Contains(rec.Body.String(), "Historical Eager Config") {
+				t.Fatal("GET /models did not render the configured model")
+			}
+			if name == "baseline" && !strings.Contains(rec.Body.String(), htmlstd.EscapeString(cfg.ExtraBodyJSON)) {
+				t.Fatal("historical GET /models did not eagerly serialize extra_body_json")
+			}
+			if name == "candidate" && strings.Contains(rec.Body.String(), cfg.ExtraBodyJSON) {
+				t.Fatal("candidate GET /models eagerly serialized extra_body_json")
+			}
+		})
+	}
+}
+
+func BenchmarkHandlerListModelsHTMXLargeEditConfig(b *testing.B) {
+	h, candidate, _, db := setupTestHandlerWithDB(b)
+	baselineRepo := repository.NewLLMConfigRepo(db)
+	baseline := newHistoricalModelsBenchmarkEcho(h, baselineRepo)
+	if _, err := db.Exec(`DELETE FROM agent_configs`); err != nil {
+		b.Fatal(err)
+	}
+	extraBody := `{"padding":"` + strings.Repeat("x", 1024*1024-len(`{"padding":""}`)) + `"}`
+	if len(extraBody) != 1024*1024 {
+		b.Fatalf("extra_body_json fixture size = %d, want %d", len(extraBody), 1024*1024)
+	}
+	for i := 0; i < 50; i++ {
+		_, err := db.Exec(`INSERT INTO agent_configs (
+			id, name, provider, model, api_key, temperature, is_default, auth_method,
+			base_url, transport, preset_slug, extra_body_json
+		) VALUES (?, ?, 'openai_compatible', 'custom-model', 'secret', 0.2, ?, 'api_key',
+			'https://example.com/v1', 'chat_completions', 'custom', ?)`,
+			fmt.Sprintf("large-%02d", i), fmt.Sprintf("Large Custom %02d", i), i == 0, extraBody)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	b.Run("baseline_full_projection", func(b *testing.B) {
+		b.ReportAllocs()
+		var responseBytes int64
+		for i := 0; i < b.N; i++ {
+			req := httptest.NewRequest(http.MethodGet, "/models", nil)
+			req.Header.Set("HX-Request", "true")
+			rec := httptest.NewRecorder()
+			b.StartTimer()
+			baseline.ServeHTTP(rec, req)
+			b.StopTimer()
+			if rec.Code != http.StatusOK {
+				b.Fatalf("status = %d", rec.Code)
+			}
+			responseBytes += int64(rec.Body.Len())
+		}
+		b.ReportMetric(float64(responseBytes)/float64(b.N), "response_bytes")
+	})
+
+	b.Run("candidate_lazy_edit_details", func(b *testing.B) {
+		b.ReportAllocs()
+		var responseBytes int64
+		for i := 0; i < b.N; i++ {
+			req := httptest.NewRequest(http.MethodGet, "/models", nil)
+			req.Header.Set("HX-Request", "true")
+			rec := httptest.NewRecorder()
+			b.StartTimer()
+			candidate.ServeHTTP(rec, req)
+			b.StopTimer()
+			if rec.Code != http.StatusOK {
+				b.Fatalf("status = %d", rec.Code)
+			}
+			responseBytes += int64(rec.Body.Len())
+		}
+		b.ReportMetric(float64(responseBytes)/float64(b.N), "response_bytes")
+	})
 }

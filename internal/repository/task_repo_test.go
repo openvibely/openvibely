@@ -2,8 +2,12 @@ package repository
 
 import (
 	"context"
+	"database/sql"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/testutil"
@@ -15,6 +19,127 @@ func getDefaultProjectID(t *testing.T, db interface {
 	t.Helper()
 	// The migration seeds a default project
 	return "default"
+}
+
+func TestTaskRepo_GetThreadRenderMetadataUsesCompactProjection(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewTaskRepo(db, nil)
+	ctx := context.Background()
+
+	task := &models.Task{
+		ProjectID: "default",
+		Title:     "Large Thread Metadata Task",
+		Category:  models.CategoryActive,
+		Priority:  3,
+		Prompt:    strings.Repeat("prompt-payload", 4096),
+		Status:    models.StatusRunning,
+	}
+	if err := repo.Create(ctx, task); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	largeChainConfig := strings.Repeat("chain-payload", 4096)
+	largeSwarmConfig := strings.Repeat("swarm-payload", 4096)
+	if _, err := db.ExecContext(ctx, `UPDATE tasks SET chain_config = ?, swarm_config = ? WHERE id = ?`, largeChainConfig, largeSwarmConfig, task.ID); err != nil {
+		t.Fatalf("seed large task configs: %v", err)
+	}
+
+	got, err := repo.GetThreadRenderMetadata(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetThreadRenderMetadata: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected task metadata, got nil")
+	}
+	if got.ID != task.ID || got.ProjectID != task.ProjectID || got.Category != task.Category || got.Status != task.Status {
+		t.Fatalf("unexpected compact metadata: %+v", got)
+	}
+	if got.Title != "" || got.Priority != 0 || got.Prompt != "" || got.ChainConfig != "" || got.SwarmConfig != "" {
+		t.Fatalf("compact metadata carried omitted full-detail fields: title=%q priority=%d prompt=%d chain=%d swarm=%d",
+			got.Title, got.Priority, len(got.Prompt), len(got.ChainConfig), len(got.SwarmConfig))
+	}
+
+	full, err := repo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if len(full.Prompt) != len(task.Prompt) || full.ChainConfig != largeChainConfig || full.SwarmConfig != largeSwarmConfig {
+		t.Fatalf("full task hydration did not preserve payloads: prompt=%d chain=%d swarm=%d", len(full.Prompt), len(full.ChainConfig), len(full.SwarmConfig))
+	}
+}
+
+func TestTaskRepo_GetThreadRenderMetadataQueryPlanUsesTaskID(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	rows, err := db.Query(`EXPLAIN QUERY PLAN SELECT `+taskThreadRenderMetadataColumns+` FROM tasks WHERE id = ?`, "task-id")
+	if err != nil {
+		t.Fatalf("EXPLAIN QUERY PLAN: %v", err)
+	}
+	defer rows.Close()
+	var details []string
+	for rows.Next() {
+		var id, parent, notUsed int
+		var detail string
+		if err := rows.Scan(&id, &parent, &notUsed, &detail); err != nil {
+			t.Fatalf("scan query plan: %v", err)
+		}
+		details = append(details, detail)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate query plan: %v", err)
+	}
+	plan := strings.Join(details, "\n")
+	if !strings.Contains(plan, "SEARCH tasks") || !strings.Contains(plan, "id=?") {
+		t.Fatalf("thread metadata query plan = %s, want indexed tasks.id lookup", plan)
+	}
+}
+
+func BenchmarkTaskRepo_GetThreadRenderMetadataProjection(b *testing.B) {
+	for _, tc := range []struct {
+		name        string
+		run         func(context.Context, *TaskRepo, string) (*models.Task, error)
+		textBytesFn func(*models.Task) int64
+	}{
+		{
+			name: "legacy_full_task",
+			run: func(ctx context.Context, repo *TaskRepo, taskID string) (*models.Task, error) {
+				return repo.GetByID(ctx, taskID)
+			},
+			textBytesFn: func(task *models.Task) int64 {
+				return int64(len(task.Prompt) + len(task.ChainConfig) + len(task.SwarmConfig))
+			},
+		},
+		{
+			name: "compact_thread_metadata",
+			run: func(ctx context.Context, repo *TaskRepo, taskID string) (*models.Task, error) {
+				return repo.GetThreadRenderMetadata(ctx, taskID)
+			},
+			textBytesFn: func(*models.Task) int64 { return 0 },
+		},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			db := testutil.NewTestDB(b)
+			repo := NewTaskRepo(db, nil)
+			ctx := context.Background()
+			task := &models.Task{ProjectID: "default", Title: "Thread Metadata Benchmark", Category: models.CategoryActive, Priority: 2, Prompt: strings.Repeat("prompt", 128*1024), Status: models.StatusRunning}
+			if err := repo.Create(ctx, task); err != nil {
+				b.Fatalf("Create: %v", err)
+			}
+			if _, err := db.ExecContext(ctx, `UPDATE tasks SET chain_config = ?, swarm_config = ? WHERE id = ?`, strings.Repeat("chain", 128*1024), strings.Repeat("swarm", 128*1024), task.ID); err != nil {
+				b.Fatalf("seed large configs: %v", err)
+			}
+			warm, err := tc.run(ctx, repo, task.ID)
+			if err != nil {
+				b.Fatalf("warm projection: %v", err)
+			}
+			b.ReportMetric(float64(tc.textBytesFn(warm)), "task_payload_bytes_scanned/op")
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				if _, err := tc.run(ctx, repo, task.ID); err != nil {
+					b.Fatalf("projection: %v", err)
+				}
+			}
+		})
+	}
 }
 
 func TestTaskRepo_CreateAndGetByID(t *testing.T) {
@@ -143,6 +268,46 @@ func TestTaskRepo_ListByProject_SetsHasGoalForActiveGoal(t *testing.T) {
 	}
 }
 
+func TestTaskRepo_ListBoardByProject_ProjectsGoalMetState(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewTaskRepo(db, nil)
+	goalRepo := NewTaskGoalRepo(db)
+	ctx := context.Background()
+
+	activeGoal := &models.Task{ProjectID: "default", Title: "Active Goal", Category: models.CategoryCompleted, Status: models.StatusCompleted, Prompt: "p"}
+	metGoal := &models.Task{ProjectID: "default", Title: "Met Goal", Category: models.CategoryCompleted, Status: models.StatusCompleted, Prompt: "p"}
+	withoutGoal := &models.Task{ProjectID: "default", Title: "Without Goal", Category: models.CategoryCompleted, Status: models.StatusCompleted, Prompt: "p"}
+	for _, task := range []*models.Task{activeGoal, metGoal, withoutGoal} {
+		if err := repo.Create(ctx, task); err != nil {
+			t.Fatalf("create task %q: %v", task.Title, err)
+		}
+	}
+	if err := goalRepo.CreateOrReplace(ctx, &models.TaskGoal{TaskID: activeGoal.ID, GoalID: "goal-active", Objective: "finish", Status: models.TaskGoalStatusActive}); err != nil {
+		t.Fatalf("create active goal: %v", err)
+	}
+	if err := goalRepo.CreateOrReplace(ctx, &models.TaskGoal{TaskID: metGoal.ID, GoalID: "goal-met", Objective: "finish", Status: models.TaskGoalStatusAchieved}); err != nil {
+		t.Fatalf("create met goal: %v", err)
+	}
+
+	tasks, err := repo.ListBoardByProjectWithCategorySorts(ctx, "default", "completed", "", "")
+	if err != nil {
+		t.Fatalf("ListBoardByProjectWithCategorySorts: %v", err)
+	}
+	byID := make(map[string]models.Task, len(tasks))
+	for _, task := range tasks {
+		byID[task.ID] = task
+	}
+	if got := byID[activeGoal.ID]; !got.HasGoal || got.GoalMet {
+		t.Fatalf("active goal projection = HasGoal %t GoalMet %t, want true/false", got.HasGoal, got.GoalMet)
+	}
+	if got := byID[metGoal.ID]; !got.HasGoal || !got.GoalMet {
+		t.Fatalf("met goal projection = HasGoal %t GoalMet %t, want true/true", got.HasGoal, got.GoalMet)
+	}
+	if got := byID[withoutGoal.ID]; got.HasGoal || got.GoalMet {
+		t.Fatalf("missing goal projection = HasGoal %t GoalMet %t, want false/false", got.HasGoal, got.GoalMet)
+	}
+}
+
 func TestTaskRepo_ListByProject_OrderingFIFO(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewTaskRepo(db, nil)
@@ -205,6 +370,169 @@ func TestTaskRepo_ListActivePending(t *testing.T) {
 	}
 	if len(pending) > 0 && pending[0].Title != "Active Pending" {
 		t.Errorf("expected Active Pending, got %q", pending[0].Title)
+	}
+}
+
+func TestTaskRepo_ListActivePendingAdmissionsUsesCompactProjection(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	repo := NewTaskRepo(db, nil)
+	ctx := context.Background()
+	largePrompt := strings.Repeat("prompt payload ", 4096)
+	largeChainConfig := strings.Repeat("chain payload ", 2048)
+	largeSwarmConfig := strings.Repeat("swarm payload ", 2048)
+	task := &models.Task{
+		ProjectID:         "default",
+		Title:             "Compact active admission",
+		Category:          models.CategoryActive,
+		Priority:          4,
+		Status:            models.StatusPending,
+		Prompt:            largePrompt,
+		ChainConfig:       largeChainConfig,
+		SwarmRole:         models.SwarmRoleParent,
+		SwarmConfig:       largeSwarmConfig,
+		WorktreePath:      "/tmp/compact-admission-worktree",
+		WorktreeBranch:    "task/compact-admission",
+		MergeTargetBranch: "main",
+	}
+	if err := repo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	admissions, err := repo.ListActivePendingAdmissions(ctx)
+	counter.SetEnabled(false)
+	if err != nil {
+		t.Fatalf("ListActivePendingAdmissions: %v", err)
+	}
+	if len(admissions) != 1 {
+		t.Fatalf("expected one admission, got %d", len(admissions))
+	}
+	admission := admissions[0]
+	if admission.ID != task.ID || admission.ProjectID != task.ProjectID || admission.Title != task.Title || admission.Category != task.Category || admission.Priority != task.Priority || admission.Status != task.Status || admission.SwarmRole != task.SwarmRole {
+		t.Fatalf("unexpected admission fields: %#v", admission)
+	}
+
+	statements := counter.Statements()
+	if len(statements) != 1 {
+		t.Fatalf("expected one admission query, got %d: %#v", len(statements), statements)
+	}
+	query := strings.ToLower(statements[0])
+	const expectedProjection = "select id, project_id, title, category, priority, status, agent_id, agent_definition_id, parent_task_id, swarm_role"
+	if !strings.Contains(query, expectedProjection) {
+		t.Fatalf("admission query did not use the compact projection: %s", statements[0])
+	}
+	projection := strings.SplitN(query, " from ", 2)[0]
+	for _, forbidden := range []string{"prompt", "chain_config", "swarm_config", "worktree_path", "worktree_branch", "merge_target_branch", "created_at", "updated_at", "completed_at"} {
+		if strings.Contains(projection, forbidden) {
+			t.Fatalf("admission query selected execution/detail column %q: %s", forbidden, statements[0])
+		}
+	}
+
+	full, err := repo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if full == nil || full.Prompt != largePrompt || full.ChainConfig != largeChainConfig || full.SwarmConfig != largeSwarmConfig || full.WorktreePath != task.WorktreePath {
+		t.Fatalf("authoritative task read did not preserve full payload: %#v", full)
+	}
+}
+
+func TestTaskRepo_ListActivePendingAdmissionsEmptyResult(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	repo := NewTaskRepo(db, nil)
+	ctx := context.Background()
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	admissions, err := repo.ListActivePendingAdmissions(ctx)
+	counter.SetEnabled(false)
+	if err != nil {
+		t.Fatalf("ListActivePendingAdmissions: %v", err)
+	}
+	if len(admissions) != 0 {
+		t.Fatalf("expected no active pending admissions, got %#v", admissions)
+	}
+	if statements := counter.Statements(); len(statements) != 1 {
+		t.Fatalf("expected one bounded empty-result query, got %d: %#v", len(statements), statements)
+	}
+}
+
+func TestTaskRepo_ListActivePendingAdmissionsPreservesEligibilityAndOrder(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewTaskRepo(db, nil)
+	inputRepo := NewThreadInputRepo(db)
+	execRepo := NewExecutionRepo(db)
+	ctx := context.Background()
+
+	first := &models.Task{ProjectID: "default", Title: "highest priority", Category: models.CategoryActive, Priority: 4, Status: models.StatusPending, Prompt: "first"}
+	second := &models.Task{ProjectID: "default", Title: "same priority earlier display", Category: models.CategoryActive, Priority: 3, Status: models.StatusPending, Prompt: "second"}
+	third := &models.Task{ProjectID: "default", Title: "same priority later display", Category: models.CategoryActive, Priority: 3, Status: models.StatusPending, Prompt: "third"}
+	for _, task := range []*models.Task{first, second, third} {
+		if err := repo.Create(ctx, task); err != nil {
+			t.Fatalf("create eligible task %q: %v", task.Title, err)
+		}
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE tasks SET display_order = CASE title WHEN ? THEN 2 WHEN ? THEN 1 ELSE display_order END WHERE id IN (?, ?)`, second.Title, third.Title, second.ID, third.ID); err != nil {
+		t.Fatalf("set display order: %v", err)
+	}
+
+	backlog := &models.Task{ProjectID: "default", Title: "backlog", Category: models.CategoryBacklog, Priority: 4, Status: models.StatusPending, Prompt: "excluded"}
+	running := &models.Task{ProjectID: "default", Title: "running", Category: models.CategoryActive, Priority: 4, Status: models.StatusRunning, Prompt: "excluded"}
+	queuedExecution := &models.Task{ProjectID: "default", Title: "queued execution", Category: models.CategoryActive, Priority: 4, Status: models.StatusPending, Prompt: "excluded"}
+	pendingInput := &models.Task{ProjectID: "default", Title: "pending input", Category: models.CategoryActive, Priority: 4, Status: models.StatusPending, Prompt: "excluded"}
+	for _, task := range []*models.Task{backlog, running, queuedExecution, pendingInput} {
+		if err := repo.Create(ctx, task); err != nil {
+			t.Fatalf("create excluded task %q: %v", task.Title, err)
+		}
+	}
+	queuedExec := &models.Execution{TaskID: queuedExecution.ID, Status: models.ExecQueued, PromptSent: "queued"}
+	if err := execRepo.Create(ctx, queuedExec); err != nil {
+		t.Fatalf("create queued execution: %v", err)
+	}
+	prior := &models.Execution{TaskID: pendingInput.ID, Status: models.ExecCompleted, PromptSent: "prior"}
+	if err := execRepo.Create(ctx, prior); err != nil {
+		t.Fatalf("create prior execution: %v", err)
+	}
+	queuedInput := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: "default", TaskID: pendingInput.ID, InputMode: models.ThreadInputModeQueued, InputStatus: models.ThreadInputPending, Content: "follow-up"}
+	if err := inputRepo.CreateQueued(ctx, queuedInput); err != nil {
+		t.Fatalf("create pending input: %v", err)
+	}
+
+	reserved := &models.Task{ProjectID: "default", Title: "reserved", Category: models.CategoryActive, Priority: 4, Status: models.StatusPending, Prompt: "excluded"}
+	if err := repo.Create(ctx, reserved); err != nil {
+		t.Fatalf("create reserved task: %v", err)
+	}
+	reservationStatements := []struct {
+		query string
+		args  []any
+	}{
+		{`INSERT INTO automations (id, project_id, stable_key, name) VALUES ('admission-projection-auto', 'default', 'admission-projection-auto', 'Admission projection')`, nil},
+		{`INSERT INTO automation_versions (id, project_id, automation_id, version, adapter_key) VALUES ('admission-projection-version', 'default', 'admission-projection-auto', 1, 'test')`, nil},
+		{`INSERT INTO automation_nodes (id, project_id, automation_id, version_id, node_key, name, node_type, role) VALUES ('admission-projection-node', 'default', 'admission-projection-auto', 'admission-projection-version', 'trigger', 'Trigger', 'trigger', 'trigger')`, nil},
+		{`INSERT INTO automation_invocations (id, project_id, automation_id, version_id, trigger_node_id, trigger_resource_type, trigger_resource_id, occurrence_key) VALUES ('admission-projection-invocation', 'default', 'admission-projection-auto', 'admission-projection-version', 'admission-projection-node', 'schedule', 'fixture', 'fixture')`, nil},
+		{`INSERT INTO automation_dispatch_outbox (id, invocation_id, task_id) VALUES ('admission-projection-dispatch', 'admission-projection-invocation', ?)`, []any{reserved.ID}},
+		{`INSERT INTO automation_task_run_reservations (task_id, dispatch_id, project_id) VALUES (?, 'admission-projection-dispatch', 'default')`, []any{reserved.ID}},
+	}
+	for _, statement := range reservationStatements {
+		if _, err := db.ExecContext(ctx, statement.query, statement.args...); err != nil {
+			t.Fatalf("create reservation fixture: %v", err)
+		}
+	}
+
+	admissions, err := repo.ListActivePendingAdmissions(ctx)
+	if err != nil {
+		t.Fatalf("ListActivePendingAdmissions: %v", err)
+	}
+	if len(admissions) != 3 {
+		t.Fatalf("expected three eligible admissions, got %d: %#v", len(admissions), admissions)
+	}
+	gotTitles := []string{admissions[0].Title, admissions[1].Title, admissions[2].Title}
+	wantTitles := []string{first.Title, third.Title, second.Title}
+	for i := range wantTitles {
+		if gotTitles[i] != wantTitles[i] {
+			t.Errorf("admission %d: got %q, want %q (all=%#v)", i, gotTitles[i], wantTitles[i], gotTitles)
+		}
 	}
 }
 
@@ -372,9 +700,10 @@ func TestTaskRepo_CountPendingByProject(t *testing.T) {
 		t.Fatalf("Create project2: %v", err)
 	}
 
-	// Create active+pending tasks for default project (should be counted as queue)
+	// Create active pending/queued tasks for default project (should be counted as queue)
 	repo.Create(ctx, &models.Task{ProjectID: "default", Title: "P1", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "p"})
 	repo.Create(ctx, &models.Task{ProjectID: "default", Title: "P1b", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "p"})
+	repo.Create(ctx, &models.Task{ProjectID: "default", Title: "Q1", Category: models.CategoryActive, Status: models.StatusQueued, Prompt: "p"})
 
 	// Create backlog+pending task (should NOT be counted - not in active queue)
 	repo.Create(ctx, &models.Task{ProjectID: "default", Title: "P2", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "p"})
@@ -396,9 +725,9 @@ func TestTaskRepo_CountPendingByProject(t *testing.T) {
 		t.Fatalf("CountPendingByProject: %v", err)
 	}
 
-	// Should count only active+pending tasks for default project (2, not 3)
-	if counts["default"] != 2 {
-		t.Errorf("expected default=2, got %d", counts["default"])
+	// Should count only active pending/queued tasks for default project (3, not backlog/running)
+	if counts["default"] != 3 {
+		t.Errorf("expected default=3, got %d", counts["default"])
 	}
 
 	// Should count 1 active+pending task for project2 (not scheduled or completed)
@@ -427,6 +756,54 @@ func TestTaskRepo_Delete(t *testing.T) {
 	got, _ := repo.GetByID(ctx, task.ID)
 	if got != nil {
 		t.Error("expected nil after delete")
+	}
+}
+
+func TestTaskRepo_DeleteWithCleanupManifest_TerminalizesRetainedSwarmChildren(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewTaskRepo(db, nil)
+	ctx := context.Background()
+
+	parent := &models.Task{ProjectID: "default", Title: "Swarm", Category: models.CategoryCompleted, Status: models.StatusCompleted, Prompt: "p", SwarmRole: models.SwarmRoleParent, SwarmStatus: "current"}
+	if err := repo.Create(ctx, parent); err != nil {
+		t.Fatalf("Create parent: %v", err)
+	}
+	planner := &models.Task{ProjectID: "default", Title: "Swarm · Planner", Category: models.CategoryCompleted, Status: models.StatusCompleted, Prompt: "p", ParentTaskID: &parent.ID, SwarmRole: models.SwarmRolePlanner, SwarmStatus: "planned"}
+	worker := &models.Task{ProjectID: "default", Title: "Swarm · Worker", Category: models.CategoryActive, Status: models.StatusRunning, Prompt: "p", ParentTaskID: &parent.ID, SwarmRole: models.SwarmRoleWorker, SwarmStatus: "running"}
+	reviewer := &models.Task{ProjectID: "default", Title: "Swarm · Reviewer", Category: models.CategoryActive, Status: models.StatusBlocked, Prompt: "p", ParentTaskID: &parent.ID, SwarmRole: models.SwarmRoleReviewer, SwarmStatus: "pending"}
+	merger := &models.Task{ProjectID: "default", Title: "Swarm · Merger", Category: models.CategoryActive, Status: models.StatusBlocked, Prompt: "p", ParentTaskID: &parent.ID, SwarmRole: models.SwarmRoleMerger, SwarmStatus: "pending"}
+	integrator := &models.Task{ProjectID: "default", Title: "Swarm · Integrator", Category: models.CategoryActive, Status: models.StatusBlocked, Prompt: "p", ParentTaskID: &parent.ID, SwarmRole: models.SwarmRoleLegacyIntegrator, SwarmStatus: "pending"}
+	for _, child := range []*models.Task{planner, worker, reviewer, merger, integrator} {
+		if err := repo.Create(ctx, child); err != nil {
+			t.Fatalf("Create child %s: %v", child.SwarmRole, err)
+		}
+	}
+
+	_, deleted, err := repo.DeleteWithCleanupManifest(ctx, parent.ID, nil)
+	if err != nil {
+		t.Fatalf("DeleteWithCleanupManifest: %v", err)
+	}
+	if !deleted {
+		t.Fatal("expected swarm parent deletion")
+	}
+
+	for _, child := range []*models.Task{planner, worker, reviewer, merger, integrator} {
+		got, err := repo.GetByID(ctx, child.ID)
+		if err != nil || got == nil {
+			t.Fatalf("retained child %s: task=%v err=%v", child.SwarmRole, got, err)
+		}
+		if got.ParentTaskID != nil {
+			t.Errorf("child %s parent = %v, want nil after parent deletion", child.SwarmRole, *got.ParentTaskID)
+		}
+		if child == planner {
+			if got.Status != models.StatusCompleted || got.SwarmStatus != "planned" || got.Category != models.CategoryCompleted {
+				t.Errorf("completed planner changed during parent deletion: category=%s status=%s swarm_status=%s", got.Category, got.Status, got.SwarmStatus)
+			}
+			continue
+		}
+		if got.Status != models.StatusCancelled || got.SwarmStatus != "cancelled" || got.Category != models.CategoryCompleted {
+			t.Errorf("unfinished child %s not terminalized: category=%s status=%s swarm_status=%s", child.SwarmRole, got.Category, got.Status, got.SwarmStatus)
+		}
 	}
 }
 
@@ -2039,6 +2416,159 @@ func TestTaskRepo_ListByProjectWithSort_BacklogCategoryFilter(t *testing.T) {
 	}
 }
 
+func TestTaskRepo_ListBoardByProjectWithCategorySorts_ProjectsUnicodePromptPreview(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewTaskRepo(db, nil)
+	ctx := context.Background()
+
+	fullPrompt := strings.Repeat("a", 299) + "界" + "🙂full prompt tail"
+	task := &models.Task{
+		ProjectID: "default",
+		Title:     "Unicode preview",
+		Category:  models.CategoryBacklog,
+		Status:    models.StatusPending,
+		Prompt:    fullPrompt,
+		Priority:  2,
+	}
+	if err := repo.Create(ctx, task); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	boardTasks, err := repo.ListBoardByProjectWithCategorySorts(ctx, "default", "", "", "")
+	if err != nil {
+		t.Fatalf("ListBoardByProjectWithCategorySorts: %v", err)
+	}
+	if len(boardTasks) != 1 {
+		t.Fatalf("expected 1 board task, got %d", len(boardTasks))
+	}
+	wantPreview := strings.Repeat("a", 299) + "界"
+	if boardTasks[0].Prompt != wantPreview {
+		t.Fatalf("board prompt = %q, want 300-code-point preview %q", boardTasks[0].Prompt, wantPreview)
+	}
+	if got := utf8.RuneCountInString(boardTasks[0].Prompt); got != BoardPromptPreviewCodePoints {
+		t.Fatalf("board prompt has %d code points, want %d", got, BoardPromptPreviewCodePoints)
+	}
+
+	fullTasks, err := repo.ListByProjectWithCategorySorts(ctx, "default", "", "", "")
+	if err != nil {
+		t.Fatalf("ListByProjectWithCategorySorts: %v", err)
+	}
+	if len(fullTasks) != 1 || fullTasks[0].Prompt != fullPrompt {
+		t.Fatalf("ordinary list did not retain full prompt")
+	}
+	got, err := repo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if got.Prompt != fullPrompt {
+		t.Fatalf("GetByID prompt was truncated")
+	}
+}
+
+func TestTaskRepo_ListBoardByProjectWithCategorySorts_ProjectsFailedAndMergedState(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewTaskRepo(db, nil)
+	ctx := context.Background()
+
+	failed := &models.Task{ProjectID: "default", Title: "Failed board task", Category: models.CategoryBacklog, Status: models.StatusFailed, Prompt: strings.Repeat("f", BoardPromptPreviewCodePoints+25), Priority: 2}
+	merged := &models.Task{ProjectID: "default", Title: "Merged board task", Category: models.CategoryCompleted, Status: models.StatusCompleted, MergeStatus: models.MergeStatusMerged, Prompt: strings.Repeat("m", BoardPromptPreviewCodePoints+25), Priority: 2}
+	for _, task := range []*models.Task{failed, merged} {
+		if err := repo.Create(ctx, task); err != nil {
+			t.Fatalf("Create %q: %v", task.Title, err)
+		}
+	}
+
+	boardTasks, err := repo.ListBoardByProjectWithCategorySorts(ctx, "default", "", "", "")
+	if err != nil {
+		t.Fatalf("ListBoardByProjectWithCategorySorts: %v", err)
+	}
+	byID := make(map[string]models.Task, len(boardTasks))
+	for _, task := range boardTasks {
+		byID[task.ID] = task
+	}
+	if got := byID[failed.ID]; got.Status != models.StatusFailed {
+		t.Fatalf("failed board status = %q, want %q", got.Status, models.StatusFailed)
+	}
+	if got := byID[merged.ID]; got.Status != models.StatusCompleted || got.MergeStatus != models.MergeStatusMerged {
+		t.Fatalf("merged board state = status %q merge %q, want completed/merged", got.Status, got.MergeStatus)
+	}
+	for _, task := range boardTasks {
+		if len([]rune(task.Prompt)) > BoardPromptPreviewCodePoints {
+			t.Fatalf("board state projection hydrated an unbounded prompt for %q", task.Title)
+		}
+	}
+}
+
+func TestTaskRepo_ListBoardByProjectWithCategorySorts_PreservesOrderingAndMetadata(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewTaskRepo(db, nil)
+	ctx := context.Background()
+
+	tasks := []*models.Task{
+		{
+			ProjectID:         "default",
+			Title:             "Zulu backlog",
+			Category:          models.CategoryBacklog,
+			Status:            models.StatusPending,
+			Prompt:            strings.Repeat("z", BoardPromptPreviewCodePoints+50),
+			Priority:          4,
+			Tag:               models.TagBug,
+			ChainConfig:       `{"enabled":true,"trigger":"on_completion"}`,
+			SwarmRole:         models.SwarmRoleParent,
+			SwarmStatus:       "planning",
+			SwarmConfig:       `{"mode":"autonomous","max_workers":2}`,
+			SwarmSequence:     3,
+			WorktreePath:      "/tmp/worktree",
+			WorktreeBranch:    "task/branch",
+			AutoMerge:         true,
+			MergeTargetBranch: "main",
+			MergeStatus:       models.MergeStatusPending,
+			BaseBranch:        "main",
+			BaseCommitSHA:     strings.Repeat("a", 40),
+			LineageDepth:      2,
+			CreatedVia:        models.TaskOriginSlack,
+			TelegramChatID:    42,
+		},
+		{ProjectID: "default", Title: "Alpha backlog", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "short backlog", Priority: 1},
+		{ProjectID: "default", Title: "Zulu completed", Category: models.CategoryCompleted, Status: models.StatusCompleted, Prompt: "short completed", Priority: 2},
+		{ProjectID: "default", Title: "Alpha completed", Category: models.CategoryCompleted, Status: models.StatusCompleted, Prompt: "another completed", Priority: 3},
+	}
+	for i, task := range tasks {
+		if i == 0 {
+			goal := &models.TaskGoal{Objective: "preserve goal badge"}
+			if err := repo.CreateWithGoal(ctx, task, goal); err != nil {
+				t.Fatalf("CreateWithGoal: %v", err)
+			}
+			continue
+		}
+		if err := repo.Create(ctx, task); err != nil {
+			t.Fatalf("Create task %d: %v", i, err)
+		}
+	}
+
+	fullTasks, err := repo.ListByProjectWithCategorySorts(ctx, "default", "", "title_desc", "title_asc")
+	if err != nil {
+		t.Fatalf("ListByProjectWithCategorySorts: %v", err)
+	}
+	boardTasks, err := repo.ListBoardByProjectWithCategorySorts(ctx, "default", "", "title_desc", "title_asc")
+	if err != nil {
+		t.Fatalf("ListBoardByProjectWithCategorySorts: %v", err)
+	}
+	if len(boardTasks) != len(fullTasks) {
+		t.Fatalf("board task count = %d, want %d", len(boardTasks), len(fullTasks))
+	}
+	for i := range fullTasks {
+		if boardTasks[i].ID != fullTasks[i].ID {
+			t.Fatalf("board task %d ID = %q, want ordered ID %q", i, boardTasks[i].ID, fullTasks[i].ID)
+		}
+		projected := boardTasks[i]
+		projected.Prompt = fullTasks[i].Prompt
+		if !reflect.DeepEqual(projected, fullTasks[i]) {
+			t.Fatalf("board task %q metadata differs from full list\nboard: %#v\nfull: %#v", boardTasks[i].ID, projected, fullTasks[i])
+		}
+	}
+}
+
 func TestTaskRepo_ListByProjectWithCategorySorts_CompletedTitleAsc(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewTaskRepo(db, nil)
@@ -2490,6 +3020,61 @@ func TestTaskRepo_ReclaimStaleQueuedTaskRejectsOwnerAddedAfterListing(t *testing
 	}
 }
 
+func TestTaskRepo_ListTasksForDiscovery_UsesCompactProjection(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewTaskRepo(db, nil)
+	ctx := context.Background()
+
+	parent := &models.Task{
+		ProjectID: "default",
+		Title:     "Discovery parent",
+		Category:  models.CategoryActive,
+		Priority:  2,
+		Status:    models.StatusRunning,
+		Prompt:    "parent prompt",
+	}
+	if err := repo.Create(ctx, parent); err != nil {
+		t.Fatalf("create parent: %v", err)
+	}
+
+	largePrompt := strings.Repeat("p", 64*1024)
+	largeChainConfig := `{"payload":"` + strings.Repeat("c", 16*1024) + `"}`
+	largeSwarmConfig := `{"payload":"` + strings.Repeat("s", 16*1024) + `"}`
+	child := &models.Task{
+		ProjectID:    "default",
+		Title:        "Discovery compact worker",
+		Category:     models.CategoryActive,
+		Priority:     4,
+		Status:       models.StatusRunning,
+		Prompt:       largePrompt,
+		ParentTaskID: &parent.ID,
+		ChainConfig:  largeChainConfig,
+		SwarmRole:    models.SwarmRoleWorker,
+		SwarmConfig:  largeSwarmConfig,
+	}
+	if err := repo.Create(ctx, child); err != nil {
+		t.Fatalf("create child: %v", err)
+	}
+
+	tasks, total, err := repo.ListTasksForDiscovery(ctx, "default", TaskDiscoveryFilter{Query: child.Title})
+	if err != nil {
+		t.Fatalf("ListTasksForDiscovery: %v", err)
+	}
+	if total != 1 || len(tasks) != 1 {
+		t.Fatalf("expected one compact discovery result, got total=%d len=%d", total, len(tasks))
+	}
+	got := tasks[0]
+	if got.ID != child.ID || got.Title != child.Title || got.Category != child.Category || got.Status != child.Status || got.Priority != child.Priority || got.UpdatedAt.IsZero() {
+		t.Fatalf("discovery fields changed: %+v", got)
+	}
+	if got.ParentTaskID == nil || *got.ParentTaskID != parent.ID || got.SwarmRole != models.SwarmRoleWorker {
+		t.Fatalf("optional discovery fields changed: %+v", got)
+	}
+	if got.Prompt != "" || got.ChainConfig != "" || got.SwarmConfig != "" {
+		t.Fatalf("discovery materialized unreturned payloads: prompt=%d chain_config=%d swarm_config=%d", len(got.Prompt), len(got.ChainConfig), len(got.SwarmConfig))
+	}
+}
+
 func TestTaskRepo_ListTasksForDiscovery(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewTaskRepo(db, nil)
@@ -2535,8 +3120,8 @@ func TestTaskRepo_ListTasksForDiscovery(t *testing.T) {
 		if task.Category == models.CategoryChat {
 			t.Fatalf("chat row leaked into discovery: %q", task.Title)
 		}
-		if task.ProjectID != "default" {
-			t.Fatalf("cross-project row leaked: %q", task.ProjectID)
+		if task.Title == "Deploy pipeline elsewhere" {
+			t.Fatalf("cross-project row leaked: %q", task.Title)
 		}
 	}
 
@@ -2614,5 +3199,308 @@ func TestTaskRepo_ListTasksForDiscovery(t *testing.T) {
 			t.Fatalf("pagination returned duplicate task %q", task.ID)
 		}
 		seen[task.ID] = true
+	}
+}
+
+func TestTaskRepo_ListWithSchedulesByProject_UsesCalendarProjection(t *testing.T) {
+	if got, want := scheduleCalendarTaskSelectColumns, "t.id, t.project_id, t.title, t.category, t.status"; got != want {
+		t.Fatalf("calendar projection changed: got %q, want %q", got, want)
+	}
+	for _, forbidden := range []string{"prompt", "chain_config", "swarm_config"} {
+		if projectionContainsColumn(scheduleCalendarTaskSelectColumns, forbidden) {
+			t.Fatalf("calendar projection must not select unused task column %q: %s", forbidden, scheduleCalendarTaskSelectColumns)
+		}
+	}
+
+	db := testutil.NewTestDB(t)
+	repo := NewTaskRepo(db, nil)
+	scheduleRepo := NewScheduleRepo(db)
+	ctx := context.Background()
+
+	largePrompt := strings.Repeat("p", 64*1024)
+	largeChainConfig := `{"payload":"` + strings.Repeat("c", 16*1024) + `"}`
+	largeSwarmConfig := `{"payload":"` + strings.Repeat("s", 16*1024) + `"}`
+	scheduledWithSchedule := &models.Task{
+		ProjectID:     "default",
+		Title:         "Calendar bounded scheduled task",
+		Category:      models.CategoryActive,
+		Priority:      4,
+		Status:        models.StatusPending,
+		Prompt:        largePrompt,
+		ChainConfig:   largeChainConfig,
+		SwarmConfig:   largeSwarmConfig,
+		SwarmRole:     models.SwarmRoleWorker,
+		SwarmSequence: 7,
+	}
+	if err := repo.Create(ctx, scheduledWithSchedule); err != nil {
+		t.Fatalf("create scheduled task: %v", err)
+	}
+
+	runAt := time.Date(2026, 8, 9, 14, 30, 0, 0, time.UTC)
+	nextRun := runAt.Add(48 * time.Hour)
+	lastRun := runAt.Add(-48 * time.Hour)
+	schedule := &models.Schedule{
+		TaskID:              scheduledWithSchedule.ID,
+		RunAt:               runAt,
+		RepeatType:          models.RepeatDaily,
+		RepeatInterval:      2,
+		Enabled:             false,
+		ClearContextOnStart: true,
+		NextRun:             &nextRun,
+	}
+	if err := scheduleRepo.Create(ctx, schedule); err != nil {
+		t.Fatalf("create schedule: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE schedules SET last_run = ? WHERE id = ?`, lastRun, schedule.ID); err != nil {
+		t.Fatalf("set schedule last_run: %v", err)
+	}
+	insertAutomationScheduleOwner(t, ctx, db, "default", schedule.ID, "Automation Node Override")
+
+	scheduledWithoutSchedule := &models.Task{
+		ProjectID:   "default",
+		Title:       "Calendar scheduled category without schedule",
+		Category:    models.CategoryScheduled,
+		Priority:    1,
+		Status:      models.StatusPending,
+		Prompt:      largePrompt,
+		ChainConfig: largeChainConfig,
+		SwarmConfig: largeSwarmConfig,
+	}
+	if err := repo.Create(ctx, scheduledWithoutSchedule); err != nil {
+		t.Fatalf("create scheduled category task: %v", err)
+	}
+
+	results, err := repo.ListWithSchedulesByProject(ctx, "default")
+	if err != nil {
+		t.Fatalf("ListWithSchedulesByProject: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected two calendar rows, got %d: %#v", len(results), results)
+	}
+
+	byID := make(map[string]TaskWithSchedule, len(results))
+	for _, result := range results {
+		byID[result.Task.ID] = result
+		if result.Task.Prompt != "" || result.Task.ChainConfig != "" || result.Task.SwarmConfig != "" {
+			t.Fatalf("calendar projection materialized unused payloads for task %s: prompt=%d chain_config=%d swarm_config=%d", result.Task.ID, len(result.Task.Prompt), len(result.Task.ChainConfig), len(result.Task.SwarmConfig))
+		}
+	}
+
+	withSchedule := byID[scheduledWithSchedule.ID]
+	if withSchedule.Task.ProjectID != "default" || withSchedule.Task.Title != scheduledWithSchedule.Title || withSchedule.Task.Category != models.CategoryActive || withSchedule.Task.Status != models.StatusPending {
+		t.Fatalf("calendar task fields changed: %+v", withSchedule.Task)
+	}
+	if withSchedule.AutomationScheduleName != "Automation Node Override" {
+		t.Fatalf("expected automation schedule name override, got %q", withSchedule.AutomationScheduleName)
+	}
+	if withSchedule.Schedule == nil {
+		t.Fatal("expected schedule metadata")
+	}
+	if withSchedule.Schedule.ID != schedule.ID || withSchedule.Schedule.TaskID != scheduledWithSchedule.ID || !withSchedule.Schedule.RunAt.Equal(runAt) {
+		t.Fatalf("schedule identity/time fields changed: %+v", withSchedule.Schedule)
+	}
+	if withSchedule.Schedule.RepeatType != models.RepeatDaily || withSchedule.Schedule.RepeatInterval != 2 || withSchedule.Schedule.Enabled || !withSchedule.Schedule.ClearContextOnStart {
+		t.Fatalf("schedule repeat/enabled fields changed: %+v", withSchedule.Schedule)
+	}
+	if withSchedule.Schedule.NextRun == nil || !withSchedule.Schedule.NextRun.Equal(nextRun) {
+		t.Fatalf("schedule next_run changed: %+v", withSchedule.Schedule.NextRun)
+	}
+	if withSchedule.Schedule.LastRun == nil || !withSchedule.Schedule.LastRun.Equal(lastRun) {
+		t.Fatalf("schedule last_run changed: %+v", withSchedule.Schedule.LastRun)
+	}
+
+	withoutSchedule := byID[scheduledWithoutSchedule.ID]
+	if withoutSchedule.Task.Title != scheduledWithoutSchedule.Title || withoutSchedule.Schedule != nil || withoutSchedule.AutomationScheduleName != "" {
+		t.Fatalf("scheduled category row without schedule changed: %+v", withoutSchedule)
+	}
+}
+
+func TestTaskRepoCoveragePriorityTagsWorktreeOriginsAndDescendants(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewTaskRepo(db, nil)
+	ctx := context.Background()
+
+	parent := &models.Task{ProjectID: "default", Title: "Coverage parent", Category: models.CategoryBacklog, Status: models.StatusBlocked, Prompt: "parent", Priority: 5, SwarmRole: models.SwarmRoleParent, Tag: models.TagFeature}
+	high := &models.Task{ProjectID: "default", Title: "Coverage high", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "high", Priority: 5, Tag: models.TagBug}
+	low := &models.Task{ProjectID: "default", Title: "Coverage low", Category: models.CategoryBacklog, Status: models.StatusFailed, Prompt: "low", Priority: 1, Tag: models.TagFeature}
+	active := &models.Task{ProjectID: "default", Title: "Coverage active", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "active", Priority: 3, Tag: models.TagFeature}
+	chatRunning := &models.Task{ProjectID: "default", Title: "Coverage chat running", Category: models.CategoryChat, Status: models.StatusRunning, Prompt: "chat"}
+	chatDone := &models.Task{ProjectID: "default", Title: "Coverage chat done", Category: models.CategoryChat, Status: models.StatusCompleted, Prompt: "chat done"}
+	for _, task := range []*models.Task{parent, high, low, active, chatRunning, chatDone} {
+		if err := repo.Create(ctx, task); err != nil {
+			t.Fatalf("create %s: %v", task.Title, err)
+		}
+	}
+	child := &models.Task{ProjectID: "default", Title: "Coverage child", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "child", ParentTaskID: &parent.ID}
+	grandchild := &models.Task{ProjectID: "default", Title: "Coverage grandchild", Category: models.CategoryActive, Status: models.StatusCompleted, Prompt: "grandchild", ParentTaskID: &child.ID}
+	for _, task := range []*models.Task{child, grandchild} {
+		if err := repo.Create(ctx, task); err != nil {
+			t.Fatalf("create descendant %s: %v", task.Title, err)
+		}
+	}
+
+	backlog, err := repo.ListBacklogByPriority(ctx, "default", 0)
+	if err != nil {
+		t.Fatalf("ListBacklogByPriority all: %v", err)
+	}
+	if len(backlog) != 3 || backlog[0].Priority < backlog[1].Priority {
+		t.Fatalf("unexpected backlog priority list: %#v", backlog)
+	}
+	priorityFive, err := repo.ListBacklogByPriority(ctx, "default", 5)
+	if err != nil {
+		t.Fatalf("ListBacklogByPriority priority: %v", err)
+	}
+	if len(priorityFive) != 2 {
+		t.Fatalf("expected two priority-five backlog tasks, got %#v", priorityFive)
+	}
+	counts, err := repo.CountBacklogByPriority(ctx, "default")
+	if err != nil {
+		t.Fatalf("CountBacklogByPriority: %v", err)
+	}
+	if counts[5] != 2 || counts[1] != 1 {
+		t.Fatalf("priority counts = %#v", counts)
+	}
+
+	tagged, err := repo.ListByTags(ctx, []models.TaskTag{models.TagFeature}, "default", models.CategoryBacklog, 2, "")
+	if err != nil {
+		t.Fatalf("ListByTags: %v", err)
+	}
+	if len(tagged) != 1 || tagged[0].ID != parent.ID {
+		t.Fatalf("expected only feature backlog task with priority >=2, got %#v", tagged)
+	}
+	activeTagged, err := repo.ListByTags(ctx, nil, "default", models.CategoryActive, 0, models.StatusPending)
+	if err != nil {
+		t.Fatalf("ListByTags status/category: %v", err)
+	}
+	if len(activeTagged) != 2 {
+		t.Fatalf("expected active pending tasks, got %#v", activeTagged)
+	}
+
+	runningChatIDs, err := repo.ListRunningChatTaskIDs(ctx, "default")
+	if err != nil {
+		t.Fatalf("ListRunningChatTaskIDs: %v", err)
+	}
+	if !reflect.DeepEqual(runningChatIDs, []string{chatRunning.ID}) {
+		t.Fatalf("running chat IDs = %#v", runningChatIDs)
+	}
+
+	if err := repo.UpdateSwarmFields(ctx, child.ID, models.SwarmRoleWorker, "blocked", `{"role":"worker"}`, 7); err != nil {
+		t.Fatalf("UpdateSwarmFields: %v", err)
+	}
+	defaultAgentID := defaultAgentConfigID(t, ctx, db)
+	if err := repo.UpdateAgentID(ctx, child.ID, defaultAgentID); err != nil {
+		t.Fatalf("UpdateAgentID set: %v", err)
+	}
+	if err := repo.UpdateAgentID(ctx, child.ID, ""); err != nil {
+		t.Fatalf("UpdateAgentID clear: %v", err)
+	}
+	if err := repo.UpdateWorktreeInfo(ctx, child.ID, "/tmp/worktree", "task/branch"); err != nil {
+		t.Fatalf("UpdateWorktreeInfo: %v", err)
+	}
+	if err := repo.UpdateMergeStatus(ctx, child.ID, models.MergeStatusMerged); err != nil {
+		t.Fatalf("UpdateMergeStatus: %v", err)
+	}
+	if err := repo.UpdateAutoMerge(ctx, child.ID, true, "main"); err != nil {
+		t.Fatalf("UpdateAutoMerge: %v", err)
+	}
+	if err := repo.UpdateLineage(ctx, child.ID, "main", strings.Repeat("a", 40), 2); err != nil {
+		t.Fatalf("UpdateLineage: %v", err)
+	}
+	if err := repo.UpdateTelegramOrigin(ctx, child.ID, 123); err != nil {
+		t.Fatalf("UpdateTelegramOrigin: %v", err)
+	}
+	if err := repo.UpdateSlackOrigin(ctx, child.ID); err != nil {
+		t.Fatalf("UpdateSlackOrigin: %v", err)
+	}
+	if err := repo.UpdateEmailOrigin(ctx, child.ID); err != nil {
+		t.Fatalf("UpdateEmailOrigin: %v", err)
+	}
+	if err := repo.UpdateDiscordOrigin(ctx, child.ID); err != nil {
+		t.Fatalf("UpdateDiscordOrigin: %v", err)
+	}
+
+	updated, err := repo.GetByID(ctx, child.ID)
+	if err != nil {
+		t.Fatalf("GetByID updated child: %v", err)
+	}
+	if updated.AgentID != nil || updated.WorktreePath != "/tmp/worktree" || updated.WorktreeBranch != "task/branch" ||
+		updated.MergeStatus != models.MergeStatusMerged || !updated.AutoMerge || updated.MergeTargetBranch != "main" ||
+		updated.BaseBranch != "main" || updated.LineageDepth != 2 || updated.CreatedVia != models.TaskOriginDiscord {
+		t.Fatalf("updated child = %#v", updated)
+	}
+	if err := repo.ClearWorktreeInfo(ctx, child.ID); err != nil {
+		t.Fatalf("ClearWorktreeInfo: %v", err)
+	}
+	cleared, err := repo.GetByID(ctx, child.ID)
+	if err != nil {
+		t.Fatalf("GetByID cleared child: %v", err)
+	}
+	if cleared.WorktreePath != "" || cleared.WorktreeBranch != "" {
+		t.Fatalf("worktree info not cleared: %#v", cleared)
+	}
+
+	hasActiveDescendant, err := repo.HasNonTerminalDescendants(ctx, parent.ID)
+	if err != nil {
+		t.Fatalf("HasNonTerminalDescendants active: %v", err)
+	}
+	if !hasActiveDescendant {
+		t.Fatal("expected active descendant")
+	}
+	if err := repo.UpdateStatus(ctx, child.ID, models.StatusCompleted); err != nil {
+		t.Fatalf("complete child: %v", err)
+	}
+	hasActiveDescendant, err = repo.HasNonTerminalDescendants(ctx, parent.ID)
+	if err != nil {
+		t.Fatalf("HasNonTerminalDescendants terminal: %v", err)
+	}
+	if hasActiveDescendant {
+		t.Fatal("expected only terminal descendants")
+	}
+
+	foundChild, err := repo.FindBlockedChildByParent(ctx, parent.ID)
+	if err != nil {
+		t.Fatalf("FindBlockedChildByParent before blocked: %v", err)
+	}
+	if foundChild != nil {
+		t.Fatalf("completed child should not be returned as blocked: %#v", foundChild)
+	}
+	if err := repo.UpdateStatus(ctx, child.ID, models.StatusBlocked); err != nil {
+		t.Fatalf("block child: %v", err)
+	}
+	foundChild, err = repo.FindBlockedChildByParent(ctx, parent.ID)
+	if err != nil {
+		t.Fatalf("FindBlockedChildByParent: %v", err)
+	}
+	if foundChild == nil || foundChild.ID != child.ID {
+		t.Fatalf("blocked child = %#v", foundChild)
+	}
+	if err := repo.DeleteBlockedChildrenByParent(ctx, parent.ID); err != nil {
+		t.Fatalf("DeleteBlockedChildrenByParent: %v", err)
+	}
+	foundChild, err = repo.FindBlockedChildByParent(ctx, parent.ID)
+	if err != nil {
+		t.Fatalf("FindBlockedChildByParent after delete: %v", err)
+	}
+	if foundChild != nil {
+		t.Fatalf("blocked child still present: %#v", foundChild)
+	}
+}
+
+func insertAutomationScheduleOwner(t *testing.T, ctx context.Context, db *sql.DB, projectID, scheduleID, nodeName string) {
+	t.Helper()
+	automationID := "calendar-automation-" + scheduleID
+	versionID := "calendar-version-" + scheduleID
+	nodeID := "calendar-node-" + scheduleID
+	if _, err := db.ExecContext(ctx, `INSERT INTO automations (id, project_id, stable_key, name, lifecycle_state) VALUES (?, ?, ?, ?, 'active')`, automationID, projectID, automationID, "Calendar Automation"); err != nil {
+		t.Fatalf("insert automation: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO automation_versions (id, project_id, automation_id, version, state, source, adapter_key) VALUES (?, ?, ?, 1, 'published', 'manual', 'calendar-test')`, versionID, projectID, automationID); err != nil {
+		t.Fatalf("insert automation version: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO automation_nodes (id, project_id, automation_id, version_id, node_key, name, node_type, role, config_json) VALUES (?, ?, ?, ?, 'schedule-trigger', ?, 'trigger', 'schedule', '{}')`, nodeID, projectID, automationID, versionID, nodeName); err != nil {
+		t.Fatalf("insert automation node: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO automation_trigger_owners (schedule_id, project_id, automation_id, version_id, node_id, ownership_state) VALUES (?, ?, ?, ?, ?, 'active')`, scheduleID, projectID, automationID, versionID, nodeID); err != nil {
+		t.Fatalf("insert automation schedule owner: %v", err)
 	}
 }

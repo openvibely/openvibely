@@ -12,10 +12,38 @@ import (
 func (h *Handler) SetAutomationServices(graph *service.AutomationGraphService, registration *service.AutomationRegistrationService) {
 	h.automationGraphSvc = graph
 	h.automationRegistrationSvc = registration
+	h.setChannelAutomationGraphService(graph)
 }
 
 func (h *Handler) SetAutomationExternalStateService(external *service.AutomationExternalStateService) {
 	h.automationExternalStateSvc = external
+}
+
+func (h *Handler) SetAutomationLiveViewTracker(tracker *service.AutomationLiveViewTracker) {
+	h.automationLiveViewTracker = tracker
+}
+
+type automationGraphServiceSetter interface {
+	SetAutomationGraphService(*service.AutomationGraphService)
+}
+
+type automationTemplateUpdateServiceSetter interface {
+	SetAutomationTemplateUpdateServices(*service.AutomationDraftService, *service.AutomationCompiler)
+}
+
+func (h *Handler) setChannelAutomationGraphService(graph *service.AutomationGraphService) {
+	if h == nil {
+		return
+	}
+	if h.telegramService != nil {
+		h.telegramService.SetAutomationGraphService(graph)
+	}
+	if setter, ok := h.slackSvc.(automationGraphServiceSetter); ok {
+		setter.SetAutomationGraphService(graph)
+	}
+	if setter, ok := h.discordSvc.(automationGraphServiceSetter); ok {
+		setter.SetAutomationGraphService(graph)
+	}
 }
 
 func (h *Handler) SetAutomationBuilderServices(drafts *service.AutomationDraftService, capabilities *service.AutomationCapabilitySnapshotBuilder, validator *service.AutomationSaveValidator, compiler *service.AutomationCompiler, confirmation *service.AutomationConfirmationService, lifecycle *service.AutomationLifecycleService) {
@@ -36,6 +64,15 @@ func (h *Handler) SetAutomationBuilderServices(drafts *service.AutomationDraftSe
 			compiler.SetAgentRepository(h.agentRepo)
 		}
 	}
+	if h.telegramService != nil {
+		h.telegramService.SetAutomationTemplateUpdateServices(drafts, compiler)
+	}
+	if setter, ok := h.slackSvc.(automationTemplateUpdateServiceSetter); ok {
+		setter.SetAutomationTemplateUpdateServices(drafts, compiler)
+	}
+	if setter, ok := h.discordSvc.(automationTemplateUpdateServiceSetter); ok {
+		setter.SetAutomationTemplateUpdateServices(drafts, compiler)
+	}
 }
 
 func (h *Handler) ListAutomations(c echo.Context) error {
@@ -47,15 +84,18 @@ func (h *Handler) ListAutomations(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	cards, err := h.automationGraphSvc.List(ctx, projectID)
+	page := parseCardPageRequest(c)
+	cards, err := h.automationGraphSvc.ListPage(ctx, projectID, page.PageSize+1, page.Offset, page.Search)
 	if err != nil {
 		return err
 	}
-	if isHTMX(c) {
-		return render(c, http.StatusOK, pages.AutomationsContent(cards, projectID))
+	cards, hasMore := cardPageItems(cards, page.PageSize)
+	if page.IsFragment || isHTMX(c) {
+		setCardPageResponse(c, hasMore)
+		return render(c, http.StatusOK, pages.AutomationsContentPage(cards, projectID, hasMore))
 	}
-	projects, _ := h.projectSvc.List(ctx)
-	return render(c, http.StatusOK, pages.Automations(projects, projectID, cards))
+	projects, _ := h.projectSvc.ListSelectorOptions(ctx)
+	return render(c, http.StatusOK, pages.AutomationsPage(projects, projectID, cards, hasMore))
 }
 
 func (h *Handler) GetAutomationLive(c echo.Context) error {
@@ -74,11 +114,25 @@ func (h *Handler) GetAutomationLive(c echo.Context) error {
 	if graph == nil {
 		return echo.NewHTTPError(http.StatusNotFound, "automation not found")
 	}
+	h.automationLiveViewTracker.MarkViewed(projectID, graph.Automation.ID)
 	deleteAvailable := true
+	currentTemplateRevision := service.CurrentAutomationTemplateRevision(graph.Version.AdapterKey)
+	graph.TemplateUpdateAvailable = currentTemplateRevision > 0 &&
+		(graph.Automation.TemplateRevision == nil || *graph.Automation.TemplateRevision < currentTemplateRevision)
+	if h.automationDraftSvc != nil {
+		current, currentErr := h.automationDraftSvc.CurrentCandidate(ctx, projectID, graph.Automation.ID)
+		if currentErr != nil {
+			return currentErr
+		}
+		graph.YAML, currentErr = service.EncodeAutomationDraftYAML(current.Candidate)
+		if currentErr != nil {
+			return currentErr
+		}
+	}
 	if isHTMX(c) {
 		return render(c, http.StatusOK, pages.AutomationLiveContent(*graph, projectID, deleteAvailable))
 	}
-	projects, _ := h.projectSvc.List(ctx)
+	projects, _ := h.projectSvc.ListSelectorOptions(ctx)
 	return render(c, http.StatusOK, pages.AutomationLive(projects, projectID, *graph, deleteAvailable))
 }
 

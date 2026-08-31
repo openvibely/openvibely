@@ -95,6 +95,15 @@ func TestExtractMarkedPATHRejectsUnmarkedOutput(t *testing.T) {
 	}
 }
 
+func TestDefaultDesktopShellAndReadShellPATHFailures(t *testing.T) {
+	if runtime.GOOS != "windows" && defaultDesktopShell() == "" {
+		t.Fatal("expected a default shell on non-Windows systems")
+	}
+	if _, err := readShellPATH(t.Context(), filepath.Join(t.TempDir(), "missing-shell")); err == nil {
+		t.Fatal("expected readShellPATH to fail for missing shell")
+	}
+}
+
 func TestReadShellPATHReadsUserShellEnvironment(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell PATH bootstrap is not used on windows")

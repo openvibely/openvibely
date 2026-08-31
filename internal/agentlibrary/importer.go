@@ -572,33 +572,8 @@ func (i *Importer) WriteAgentOwnedSupportFile(ctx context.Context, scope, agentK
 	if err != nil {
 		return nil, err
 	}
-	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
-		return nil, fmt.Errorf("importer: mkdir %s: %w", filepath.Dir(abs), err)
-	}
-	created := false
-	if _, err := os.Stat(abs); errors.Is(err, os.ErrNotExist) {
-		created = true
-	}
-	perm := os.FileMode(0o644)
-	if kind == SupportScripts {
-		perm = 0o755
-	}
-	if err := os.WriteFile(abs, content, perm); err != nil {
-		return nil, fmt.Errorf("importer: write %s: %w", abs, err)
-	}
-	if kind == SupportScripts {
-		if err := os.Chmod(abs, perm); err != nil {
-			return nil, fmt.Errorf("importer: chmod %s: %w", abs, err)
-		}
-	}
 	item := agentKey + "/" + key + "/" + string(kind) + "/" + rel
-	result := &ImportResult{Applied: true, ChangedPaths: []string{abs}}
-	if created {
-		result.Created = []string{item}
-	} else {
-		result.Updated = []string{item}
-	}
-	return result, nil
+	return writeResolvedSupportFile(abs, kind, content, item)
 }
 
 // RemoveAgentOwnedSupportFile removes one support file under a server-scoped
@@ -611,13 +586,8 @@ func (i *Importer) RemoveAgentOwnedSupportFile(ctx context.Context, scope, agent
 	if err != nil {
 		return nil, err
 	}
-	if err := os.Remove(abs); err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, fmt.Errorf("importer: support file %q not found", relPath)
-		}
-		return nil, fmt.Errorf("importer: remove %s: %w", abs, err)
-	}
-	return &ImportResult{Applied: true, Archived: []string{agentKey + "/" + key + "/" + string(kind) + "/" + rel}, ChangedPaths: []string{abs}}, nil
+	item := agentKey + "/" + key + "/" + string(kind) + "/" + rel
+	return removeResolvedSupportFile(abs, relPath, item)
 }
 
 // WriteAgentRootDeclaration writes the agent-level declaration and Markdown index
@@ -701,6 +671,25 @@ func (i *Importer) WriteSupportFile(ctx context.Context, scope, handle string, k
 	if err != nil {
 		return nil, err
 	}
+	item := handle + "/" + string(kind) + "/" + rel
+	return writeResolvedSupportFile(abs, kind, content, item)
+}
+
+// RemoveSupportFile removes one support file under an existing standalone skill
+// package. It never removes SKILL.md or directories outside the support kind.
+func (i *Importer) RemoveSupportFile(ctx context.Context, scope, handle string, kind SupportFileKind, relPath string) (*ImportResult, error) {
+	if i == nil {
+		return nil, errors.New("importer: nil")
+	}
+	abs, rel, err := i.resolveSupportFilePath(ctx, scope, handle, kind, relPath)
+	if err != nil {
+		return nil, err
+	}
+	item := handle + "/" + string(kind) + "/" + rel
+	return removeResolvedSupportFile(abs, relPath, item)
+}
+
+func writeResolvedSupportFile(abs string, kind SupportFileKind, content []byte, item string) (*ImportResult, error) {
 	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
 		return nil, fmt.Errorf("importer: mkdir %s: %w", filepath.Dir(abs), err)
 	}
@@ -720,39 +709,23 @@ func (i *Importer) WriteSupportFile(ctx context.Context, scope, handle string, k
 			return nil, fmt.Errorf("importer: chmod %s: %w", abs, err)
 		}
 	}
-	result := &ImportResult{
-		Applied:      true,
-		ChangedPaths: []string{abs},
-	}
+	result := &ImportResult{Applied: true, ChangedPaths: []string{abs}}
 	if created {
-		result.Created = []string{handle + "/" + string(kind) + "/" + rel}
+		result.Created = []string{item}
 	} else {
-		result.Updated = []string{handle + "/" + string(kind) + "/" + rel}
+		result.Updated = []string{item}
 	}
 	return result, nil
 }
 
-// RemoveSupportFile removes one support file under an existing standalone skill
-// package. It never removes SKILL.md or directories outside the support kind.
-func (i *Importer) RemoveSupportFile(ctx context.Context, scope, handle string, kind SupportFileKind, relPath string) (*ImportResult, error) {
-	if i == nil {
-		return nil, errors.New("importer: nil")
-	}
-	abs, rel, err := i.resolveSupportFilePath(ctx, scope, handle, kind, relPath)
-	if err != nil {
-		return nil, err
-	}
+func removeResolvedSupportFile(abs, relPath, item string) (*ImportResult, error) {
 	if err := os.Remove(abs); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, fmt.Errorf("importer: support file %q not found", relPath)
 		}
 		return nil, fmt.Errorf("importer: remove %s: %w", abs, err)
 	}
-	return &ImportResult{
-		Applied:      true,
-		Archived:     []string{handle + "/" + string(kind) + "/" + rel},
-		ChangedPaths: []string{abs},
-	}, nil
+	return &ImportResult{Applied: true, Archived: []string{item}, ChangedPaths: []string{abs}}, nil
 }
 
 func (i *Importer) resolveAgentOwnedSupportFilePath(ctx context.Context, scope, agentKey, handle string, kind SupportFileKind, relPath string) (string, string, string, error) {

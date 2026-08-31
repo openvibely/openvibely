@@ -2,10 +2,13 @@ package agentskills
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func writeSkill(t *testing.T, root, skill, body string) string {
@@ -265,7 +268,10 @@ func TestBuiltInGitHubAutonomousSDLCBootstrapSkillContent(t *testing.T) {
 		"attach their recurring schedules without setting persisted task goals",
 		"Use `set_task_goal` only for implementation tasks that Dev Inbox creates from assigned GitHub issues",
 		"do not add persisted goals to recurring loop tasks",
-		"implementation-task goals for per-issue work records",
+		"prompt memory alone",
+		"github_list_existing_automation_issues",
+		"github_get_issue",
+		"skip covered candidates",
 		"Do not start Dev Inbox or scanner/finder tasks as extra one-off setup work unless the user explicitly asks for an immediate poll/scan pass",
 		"GitHub Bug Finder`",
 		"GitHub Optimization Finder`",
@@ -283,7 +289,9 @@ func TestBuiltInGitHubAutonomousSDLCBootstrapSkillContent(t *testing.T) {
 		"Do not call `execute_tasks` for a newly created Active task",
 		"For a reconciled existing task, call `execute_tasks` only when `list_tasks` shows category Backlog or status failed/cancelled",
 		"Never call `execute_tasks` for an Active pending, queued, running, or completed task",
-		"For PAT setups, use `github_list_my_assigned_issues` to find open issues assigned to the authenticated PAT user",
+		"Always read assignee candidates with `github_get_project_inbox` and call `github_list_assigned_issues` for every returned Authorized User",
+		"also use `github_list_my_assigned_issues` to include issues assigned only to the authenticated PAT user",
+		"Deduplicate issues by repository plus issue number",
 		"For GitHub App setups, do not treat the installation owner or organization as an issue assignee",
 	} {
 		if !strings.Contains(text, want) {
@@ -314,23 +322,30 @@ func TestNativeAutonomousSDLCDocsAlignWithBootstrapSkill(t *testing.T) {
 	guideText := string(guideBody)
 
 	for _, want := range []string{
-		"Vision Suggestions, Bug Finder, Optimization Finder, Redundancy Finder, Notification Inbox, and Loop Auditor",
+		"Vision Suggestions, Bug Finder, Optimization Finder, Redundancy Finder, and Notification Inbox",
 		"Do not create separate runner tasks",
 		"usually daily",
 		"commonly hourly",
-		"usually weekly",
 		"must not create implementation tasks or modify code",
-		"Do not list, search, or inspect GitHub issues for duplicate detection",
-		"Native notification idempotency",
+		"list_existing_automation_notifications",
+		"next_offset",
+		"get_alert",
+		"skip covered candidates",
+		"at most one new notification",
 		"Call `list_alerts` without `project_id`",
 		"pass the `read` filter",
 		"both read and unread approved notifications",
+		"complete paginated snapshot",
 		"call `execute_tasks` with that exact task ID",
 		"Only after `execute_tasks` succeeds",
 		"Never reuse a project ID from prior messages, examples, memory, or tool output",
 		"create_alert_implementation_task",
+		"The created task is the implementation task",
+		"must not create or look for another implementation task",
+		"run notification intake",
+		"destructive remediation",
 		"register_automation_resources",
-		"`vision_suggestions`, `bug_finder`, `optimization_finder`, `redundancy_finder`, `inbox`, and `auditor`",
+		"`vision_suggestions`, `bug_finder`, `optimization_finder`, `redundancy_finder`, and `inbox`",
 	} {
 		if !strings.Contains(skillText, want) {
 			t.Fatalf("Native bootstrap skill missing %q", want)
@@ -356,6 +371,7 @@ func TestNativeAutonomousSDLCDocsAlignWithBootstrapSkill(t *testing.T) {
 	}
 
 	for _, forbidden := range []string{
+		"Native notification idempotency is the duplicate-prevention boundary",
 		"Create a scheduled suggestion producer and a project-scoped approved-notification inbox",
 		"A typical setup schedules the suggestion producer daily and the approved-notification inbox hourly",
 	} {
@@ -408,7 +424,10 @@ func TestGitHubAutonomousSDLCDocsAlignWithBootstrapSkill(t *testing.T) {
 		"attach their recurring schedules without setting persisted task goals",
 		"Use `set_task_goal` only for implementation tasks that Dev Inbox creates from assigned GitHub issues",
 		"do not add persisted goals to recurring loop tasks",
-		"implementation-task goals for per-issue work records",
+		"prompt memory alone",
+		"github_list_existing_automation_issues",
+		"github_get_issue",
+		"skip covered candidates",
 		"Do not start Dev Inbox or scanner/finder tasks as extra one-off setup work unless the user explicitly asks for an immediate poll/scan pass",
 		"GitHub Bug Finder`",
 		"GitHub Optimization Finder`",
@@ -461,15 +480,16 @@ func TestGitHubAutonomousSDLCDocsAlignWithBootstrapSkill(t *testing.T) {
 		"`GitHub Bug Finder` | Daily",
 		"`GitHub Optimization Finder` | Daily",
 		"`GitHub Redundancy Finder` | Daily",
-		"`GitHub Loop Auditor` | Weekly",
 		"These finder tasks open GitHub issues only; Dev Inbox remains the path that turns assigned issues into implementation tasks",
 		"Offering, Bug Finder, Optimization Finder, and Redundancy Finder tasks should open issues only",
 		"register_automation_resources",
 		"`github_sdlc`",
 		"`github-sdlc/default`",
-		"`vision_suggestions`, `bug_finder`, `optimization_finder`, `redundancy_finder`, `dev_inbox`, and `auditor`",
-		"Do not list, search, or inspect existing GitHub issues for duplicate detection",
-		"the server prevents duplicate Automation-created issues using trusted local state",
+		"`vision_suggestions`, `bug_finder`, `optimization_finder`, `redundancy_finder`, and `dev_inbox`",
+		"github_list_existing_automation_issues",
+		"github_get_issue",
+		"skip that candidate and keep searching",
+		"at most one new GitHub issue",
 		"First call `github_forward_pr_feedback_to_tasks` to fetch new pull request comments, review summaries, and review comments from GitHub Authorized Users",
 		"forwards each new authorized feedback item to the linked implementation task thread and deduplicates previously forwarded feedback",
 		"For each actionable issue, create or continue a distinct visible OpenVibely implementation task for that GitHub issue",
@@ -510,21 +530,27 @@ func TestGitHubAutonomousSDLCDocsAlignWithBootstrapSkill(t *testing.T) {
 		body string
 	}{{name: "GitHub bootstrap skill", body: skillText}, {name: "GitHub autonomous SDLC guide", body: guideText}} {
 		for _, want := range []string{
-			"Do not require a repository-wide issue or pull-request listing/search before publication",
-			"Do not block publication because such a listing/search is unavailable, unauthenticated, incomplete, or unpaginated",
-			"Call `github_create_issue` for each actionable finding; the server performs trusted local duplicate prevention",
+			"Before creating any issue, call `github_list_existing_automation_issues`",
+			"call `github_get_issue` for that issue and read the body",
+			"skip that candidate and keep searching",
+			"Try to create at most one new GitHub issue this run",
 		} {
-			if strings.Count(text.body, want) < 2 {
-				t.Fatalf("%s must include Offering Manager and finder duplicate-boundary guidance %q", text.name, want)
+			if !strings.Contains(text.body, want) {
+				t.Fatalf("%s must include existing-issue discovery guidance %q", text.name, want)
 			}
 		}
 	}
 
 	for _, forbidden := range []string{
+		"idempotency_key",
+		"Do not list, search, or inspect existing GitHub issues for duplicate detection",
+		"Do not require a repository-wide issue or pull-request listing/search before publication",
+		"Do not block publication because such a listing/search is unavailable, unauthenticated, incomplete, or unpaginated",
 		"Avoid duplicates by searching or inspecting existing visible work",
 		"Avoid duplicates by searching/inspecting existing visible work",
 		"Start with two scheduled tasks before adding more scanner/finder loops",
 		"You can later add Bug Finder, Optimization Finder, Redundancy Finder, and Loop Auditor tasks",
+		"Loop Auditor",
 		"optional Loop Auditor",
 		"When a prompt names a specific GitHub repository URL, pass `repo_url` to issue create/read/list/comment/label tools",
 		"prompts may pass `repo_url` when they name a specific GitHub repository URL",
@@ -660,6 +686,72 @@ func TestBuildCatalog_ExcludesDisabledSkills(t *testing.T) {
 	}
 	if _, ok := cat.Lookup("disabled_skill"); ok {
 		t.Fatalf("disabled skill must NOT be in runtime catalog")
+	}
+}
+
+func TestBuildCatalog_FrontmatterFallbacksDefaultToEnabled(t *testing.T) {
+	root := t.TempDir()
+	writeSkill(t, root, "no_frontmatter", "# No frontmatter\nbody")
+	writeSkill(t, root, "missing_enabled", "---\nskill:\n  key: missing_enabled\n---\nbody")
+	writeSkill(t, root, "malformed_frontmatter", "---\nskill:\n  enabled: [\n---\nbody")
+
+	cat, err := BuildCatalog("t", root, "")
+	if err != nil {
+		t.Fatalf("build catalog: %v", err)
+	}
+	for _, handle := range []string{"no_frontmatter", "missing_enabled", "malformed_frontmatter"} {
+		if _, ok := cat.Lookup(handle); !ok {
+			t.Fatalf("%s should default to enabled", handle)
+		}
+	}
+}
+
+func TestBuildCatalog_StandaloneProjectOverridePreservesDisabledFiltering(t *testing.T) {
+	globalRoot := t.TempDir()
+	projectRoot := t.TempDir()
+	writeDisabledSkill(t, globalRoot, "override_skill")
+	projectPath := writeSkill(t, projectRoot, "override_skill", "---\nskill:\n  enabled: true\n---\nproject")
+
+	cat, err := BuildCatalog("t", globalRoot, projectRoot)
+	if err != nil {
+		t.Fatalf("build catalog: %v", err)
+	}
+	entry, ok := cat.Lookup("override_skill")
+	if !ok {
+		t.Fatal("project override should remain enabled")
+	}
+	if entry.Source != SourceProject || entry.AbsolutePath != projectPath {
+		t.Fatalf("expected project override entry, got %+v", entry)
+	}
+}
+
+func TestRenderAndSkillsList_SkipMissingSkillBody(t *testing.T) {
+	root := t.TempDir()
+	writeSkill(t, root, "real_skill", "body")
+	appendHeader(t, SkillsIndexPath(root), "missing_skill")
+
+	available := RenderAvailableSkillsMarkdown(root, "")
+	if !strings.Contains(available, "## real_skill") {
+		t.Fatalf("available skills missing real skill:\n%s", available)
+	}
+	if strings.Contains(available, "missing_skill") {
+		t.Fatalf("available skills must skip missing body:\n%s", available)
+	}
+
+	cat, err := BuildCatalog("turn", root, "")
+	if err != nil {
+		t.Fatalf("build catalog: %v", err)
+	}
+	rt := SkillRuntimeTools(cat, root, "", nil)
+	out, handled, isErr, execErr := rt.Executor(t.Context(), "skills_list", nil)
+	if !handled || isErr || execErr != nil {
+		t.Fatalf("skills_list failed handled=%v isErr=%v err=%v out=%q", handled, isErr, execErr, out)
+	}
+	if strings.Contains(out, "missing_skill") {
+		t.Fatalf("skills_list must skip missing body:\n%s", out)
+	}
+	if !strings.Contains(out, "standalone:real_skill") {
+		t.Fatalf("skills_list missing real skill view handle:\n%s", out)
 	}
 }
 
@@ -852,4 +944,213 @@ func TestRenderAvailableSkillsMarkdown_DoesNotLeakAlwaysUseFrontmatter(t *testin
 	if strings.Contains(out, "---") {
 		t.Errorf("frontmatter delimiters must NOT be present in model-visible available_skills:\n%s", out)
 	}
+}
+
+const (
+	benchmarkSkillCount    = 200
+	benchmarkSkillBodySize = 128 * 1024
+)
+
+func BenchmarkBuildCatalogProductionShape(b *testing.B) {
+	root := writeBenchmarkSkillRoot(b)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		cat, err := BuildCatalog("bench", root, "")
+		if err != nil {
+			b.Fatalf("BuildCatalog: %v", err)
+		}
+		if got := len(cat.Entries()); got != benchmarkSkillCount {
+			b.Fatalf("entries = %d, want %d", got, benchmarkSkillCount)
+		}
+	}
+}
+
+func BenchmarkBuildCatalogLegacyFullBodyDisabledCheckProductionShape(b *testing.B) {
+	root := writeBenchmarkSkillRoot(b)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		cat, err := legacyBuildCatalogFullBodyDisabledCheck("bench", root)
+		if err != nil {
+			b.Fatalf("legacy build catalog: %v", err)
+		}
+		if got := len(cat.Entries()); got != benchmarkSkillCount {
+			b.Fatalf("entries = %d, want %d", got, benchmarkSkillCount)
+		}
+	}
+}
+
+func BenchmarkLifecycleCatalogAndAvailableIndexProductionShape(b *testing.B) {
+	root := writeBenchmarkSkillRoot(b)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		cat, err := BuildCatalog("bench", root, "")
+		if err != nil {
+			b.Fatalf("BuildCatalog: %v", err)
+		}
+		if got := len(cat.Entries()); got != benchmarkSkillCount {
+			b.Fatalf("entries = %d, want %d", got, benchmarkSkillCount)
+		}
+		out := RenderAvailableSkillsMarkdown(root, "")
+		if !strings.Contains(out, "## skill_000") || !strings.Contains(out, "## skill_199") {
+			b.Fatalf("rendered index missing expected handles")
+		}
+	}
+}
+
+func BenchmarkLifecycleCatalogAndAvailableIndexLegacyFullBodyDisabledCheckProductionShape(b *testing.B) {
+	root := writeBenchmarkSkillRoot(b)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		cat, err := legacyBuildCatalogFullBodyDisabledCheck("bench", root)
+		if err != nil {
+			b.Fatalf("legacy build catalog: %v", err)
+		}
+		if got := len(cat.Entries()); got != benchmarkSkillCount {
+			b.Fatalf("entries = %d, want %d", got, benchmarkSkillCount)
+		}
+		out := legacyRenderAvailableSkillsMarkdownFullBodyDisabledCheck(root)
+		if !strings.Contains(out, "## skill_000") || !strings.Contains(out, "## skill_199") {
+			b.Fatalf("rendered index missing expected handles")
+		}
+	}
+}
+
+func writeBenchmarkSkillRoot(b *testing.B) string {
+	b.Helper()
+	root := b.TempDir()
+	bodyPadding := strings.Repeat("x", benchmarkSkillBodySize)
+	for i := 0; i < benchmarkSkillCount; i++ {
+		handle := fmt.Sprintf("skill_%03d", i)
+		dir := filepath.Join(root, SkillsDir, handle)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			b.Fatalf("mkdir %s: %v", dir, err)
+		}
+		body := fmt.Sprintf("---\nskill:\n  key: %s\n  enabled: true\n---\n%s", handle, bodyPadding)
+		if err := os.WriteFile(filepath.Join(dir, SkillFile), []byte(body), 0o644); err != nil {
+			b.Fatalf("write skill %s: %v", handle, err)
+		}
+		appendBenchmarkHeader(b, SkillsIndexPath(root), handle)
+	}
+	return root
+}
+
+func appendBenchmarkHeader(b *testing.B, path, header string) {
+	b.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		b.Fatal(err)
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer f.Close()
+	if _, err := f.WriteString("## " + header + "\n\n"); err != nil {
+		b.Fatal(err)
+	}
+}
+
+func legacyBuildCatalogFullBodyDisabledCheck(turnID, root string) (*Catalog, error) {
+	entries, err := legacyLoadSkillIndexEntriesFullBodyDisabledCheck(SkillsIndexPath(root), filepath.Join(root, SkillsDir))
+	if err != nil {
+		return nil, err
+	}
+	return NewCatalog(turnID, entries), nil
+}
+
+func legacyLoadSkillIndexEntriesFullBodyDisabledCheck(indexPath, skillsDir string) ([]Entry, error) {
+	data, err := os.ReadFile(indexPath)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Entry, 0, benchmarkSkillCount)
+	for _, skill := range extractH2Headers(string(data)) {
+		if strings.Contains(skill, "/") || !isValidSlug(skill) {
+			continue
+		}
+		absPath := filepath.Join(skillsDir, skill, SkillFile)
+		if _, err := os.Stat(absPath); err != nil {
+			continue
+		}
+		if legacySkillDisabledOnDiskFullBody(absPath) {
+			continue
+		}
+		out = append(out, Entry{Handle: skill, Skill: skill, Source: SourceGlobal, AbsolutePath: absPath})
+	}
+	return out, nil
+}
+
+func legacyRenderAvailableSkillsMarkdownFullBodyDisabledCheck(root string) string {
+	body, ok := legacyFilteredIndexBodyFullBodyDisabledCheck(SkillsIndexPath(root), filepath.Join(root, SkillsDir))
+	if !ok {
+		return ""
+	}
+	return body
+}
+
+func legacyFilteredIndexBodyFullBodyDisabledCheck(indexPath, skillsDir string) (string, bool) {
+	data, err := os.ReadFile(indexPath)
+	if err != nil {
+		return "", false
+	}
+	content := string(data)
+	type section struct {
+		body  string
+		skill string
+	}
+	headerLocs := h2HeaderRegexp.FindAllStringIndex(content, -1)
+	headerMatches := h2HeaderRegexp.FindAllStringSubmatch(content, -1)
+	sections := make([]section, 0, len(headerLocs))
+	for i, loc := range headerLocs {
+		skill := strings.TrimSpace(headerMatches[i][1])
+		if strings.Contains(skill, "/") || !isValidSlug(skill) {
+			continue
+		}
+		end := len(content)
+		if i+1 < len(headerLocs) {
+			end = headerLocs[i+1][0]
+		}
+		sections = append(sections, section{body: content[loc[0]:end], skill: skill})
+	}
+	var sb strings.Builder
+	for _, sec := range sections {
+		absPath := filepath.Join(skillsDir, sec.skill, SkillFile)
+		if legacySkillDisabledOnDiskFullBody(absPath) {
+			continue
+		}
+		sb.WriteString(sec.body)
+	}
+	out := sb.String()
+	return out, out != ""
+}
+
+func legacySkillDisabledOnDiskFullBody(path string) bool {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	content := string(data)
+	if !strings.HasPrefix(content, "---") {
+		return false
+	}
+	rest := strings.TrimPrefix(content, "---")
+	rest = strings.TrimPrefix(rest, "\r")
+	rest = strings.TrimPrefix(rest, "\n")
+	end := strings.Index(rest, "\n---")
+	if end < 0 {
+		return false
+	}
+	front := rest[:end]
+	var parsed struct {
+		Skill struct {
+			Enabled *bool `yaml:"enabled"`
+		} `yaml:"skill"`
+	}
+	if err := yaml.Unmarshal([]byte(front), &parsed); err != nil {
+		return false
+	}
+	return parsed.Skill.Enabled != nil && !*parsed.Skill.Enabled
 }

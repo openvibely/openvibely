@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	htmltemplate "html/template"
 	"io"
 	"net"
 	"net/http"
@@ -21,6 +22,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/applog"
+	llmcustomauth "github.com/openvibely/openvibely/internal/llm/customauth"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/pkg/browser"
 )
@@ -45,20 +47,38 @@ const (
 	oauthRedirectModeHosted          = "hosted"
 	oauthRedirectModeLocalhostManual = "localhost_manual"
 	anthropicManualOAuthPort         = 53692
+	oauthFlowLifetime                = 10 * time.Minute
 )
 
 // oauthPendingFlow stores the PKCE verifier and model config ID for an in-progress OAuth flow.
 type oauthPendingFlow struct {
-	ConfigID     string
-	Verifier     string
-	State        string
-	RedirectURI  string
-	CreatedAt    time.Time
-	Provider     models.LLMProvider
-	ClientID     string // From model config (OpenAI) or hardcoded (Claude Max)
-	ClientSecret string // Only used for OpenAI OAuth
-	TokenURL     string // From model config (OpenAI) or hardcoded (Claude Max)
-	ProjectID    string
+	ConfigID       string
+	Verifier       string
+	State          string
+	RedirectURI    string
+	CreatedAt      time.Time
+	Provider       models.LLMProvider
+	ClientID       string // From model config (OpenAI) or hardcoded (Claude Max)
+	ClientSecret   string // Only used for OpenAI OAuth
+	TokenURL       string // From model config (OpenAI) or hardcoded (Claude Max)
+	ProjectID      string
+	CustomConfig   string
+	ConfigRevision int64
+}
+
+type oauthCompletionOutcome int
+
+const (
+	oauthCompletionSucceeded oauthCompletionOutcome = iota
+	oauthCompletionInvalidState
+	oauthCompletionExchangeFailed
+)
+
+type oauthCompletionResult struct {
+	Outcome   oauthCompletionOutcome
+	Flow      *oauthPendingFlow
+	ExpiresAt int64
+	Err       error
 }
 
 // oauthFlows tracks pending OAuth authorization flows (keyed by state).
@@ -141,7 +161,34 @@ func (h *Handler) OAuthInitiate(c echo.Context) error {
 
 	// Resolve OAuth endpoints and credentials based on provider + callback mode.
 	var authURL, clientID, clientSecret, tokenEndpoint, scope string
-	if agent.Provider == models.ProviderOpenAI {
+	var customOAuthConfig llmcustomauth.Config
+	if agent.Provider == models.ProviderOpenAICompatible {
+		cfg, cfgErr := llmcustomauth.ParseConfig(agent.CustomAuthConfigJSON)
+		if cfgErr != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, cfgErr.Error())
+		}
+		if validateErr := llmcustomauth.ValidateAuthorizationParameters(cfg); validateErr != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, validateErr.Error())
+		}
+		if validateErr := llmcustomauth.ValidateHeaders(cfg); validateErr != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, validateErr.Error())
+		}
+		authURL = strings.TrimSpace(agent.OAuthAuthorizeURL)
+		tokenEndpoint = strings.TrimSpace(agent.OAuthTokenURL)
+		clientID = strings.TrimSpace(agent.OAuthClientID)
+		clientSecret = strings.TrimSpace(agent.OAuthClientSecret)
+		scope = strings.TrimSpace(agent.OAuthScopes)
+		customOAuthConfig = cfg
+		if authURL == "" || tokenEndpoint == "" {
+			return echo.NewHTTPError(http.StatusBadRequest, "custom OAuth authorize and token URLs are required")
+		}
+		if _, validateErr := llmcustomauth.ValidateEndpoint(authURL, cfg.AllowPrivateEndpoints); validateErr != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid custom OAuth authorize URL: "+validateErr.Error())
+		}
+		if _, validateErr := llmcustomauth.ValidateEndpoint(tokenEndpoint, cfg.AllowPrivateEndpoints); validateErr != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid custom OAuth token URL: "+validateErr.Error())
+		}
+	} else if agent.Provider == models.ProviderOpenAI {
 		if usePublicCallback {
 			// Hosted mode prefers explicit hosted OAuth settings, but falls back to
 			// built-in Codex CLI defaults to avoid hard-failing configured deployments.
@@ -191,6 +238,17 @@ func (h *Handler) OAuthInitiate(c echo.Context) error {
 	}
 	state := base64.RawURLEncoding.EncodeToString(stateBytes)
 
+	if agent.Provider == models.ProviderOpenAICompatible {
+		revision, advanced, revisionErr := h.llmConfigRepo.AdvanceCustomOAuthRevision(c.Request().Context(), agent.ID)
+		if revisionErr != nil {
+			return revisionErr
+		}
+		if !advanced {
+			return echo.NewHTTPError(http.StatusConflict, "custom OAuth configuration changed; reload and try again")
+		}
+		agent.OAuthConfigRevision = revision
+	}
+
 	// Cancel any previous callback server for this config before starting a new one.
 	shutdownPreviousOAuthServer(id)
 
@@ -203,12 +261,21 @@ func (h *Handler) OAuthInitiate(c echo.Context) error {
 	if agent.Provider == models.ProviderOpenAI {
 		redirectPath = "/auth/callback"
 	}
+	localCallbackHost := "localhost"
+	localCallbackPath := redirectPath
+	if agent.Provider == models.ProviderOpenAICompatible {
+		var callbackErr error
+		localCallbackHost, localCallbackPath, callbackErr = normalizeCustomOAuthLocalCallback(customOAuthConfig)
+		if callbackErr != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, callbackErr.Error())
+		}
+	}
 
 	redirectURI := ""
 	if usePublicCallback {
 		redirectURI = strings.TrimRight(publicBaseURL, "/") + redirectPath
 	} else {
-		localPath := "/callback"
+		localPath := localCallbackPath
 		if agent.Provider == models.ProviderOpenAI {
 			localPath = "/auth/callback"
 		}
@@ -218,7 +285,7 @@ func (h *Handler) OAuthInitiate(c echo.Context) error {
 			if agent.Provider == models.ProviderOpenAI {
 				port = openAIOAuthPort
 			}
-			redirectURI = fmt.Sprintf("http://localhost:%d%s", port, localPath)
+			redirectURI = fmt.Sprintf("http://%s:%d%s", localCallbackHost, port, localPath)
 		} else {
 			// Start local callback listener.
 			// Anthropic supports dynamic localhost ports; OpenAI/Codex uses fixed localhost:1455.
@@ -231,7 +298,7 @@ func (h *Handler) OAuthInitiate(c echo.Context) error {
 				return echo.NewHTTPError(http.StatusInternalServerError, "failed to start callback listener")
 			}
 			port := listener.Addr().(*net.TCPAddr).Port
-			redirectURI = fmt.Sprintf("http://localhost:%d%s", port, localPath)
+			redirectURI = fmt.Sprintf("http://%s:%d%s", localCallbackHost, port, localPath)
 
 			// Start temporary callback server in background with timeout context.
 			// The server auto-shuts down after handling one request, on timeout, or
@@ -242,7 +309,7 @@ func (h *Handler) OAuthInitiate(c echo.Context) error {
 			oauthServers[id] = &oauthRunningServer{ConfigID: id, ServerID: serverID, Cancel: serverCancel}
 			oauthServersMu.Unlock()
 			go func() {
-				h.startOAuthCallbackServer(serverCtx, serverCancel, listener, modelsURL, id)
+				h.startOAuthCallbackServer(serverCtx, serverCancel, listener, modelsURL, id, localPath)
 				// Clean up tracking after the server exits.
 				untrackOAuthServer(id, serverID)
 			}()
@@ -251,23 +318,25 @@ func (h *Handler) OAuthInitiate(c echo.Context) error {
 
 	// Store flow details
 	oauthFlowsMu.Lock()
-	// Clean up old flows (> 10 minutes)
+	// Clean up expired flows and invalidate any prior attempt for this config.
 	for k, v := range oauthFlows {
-		if time.Since(v.CreatedAt) > 10*time.Minute {
+		if oauthFlowExpired(v, time.Now()) || v.ConfigID == id {
 			delete(oauthFlows, k)
 		}
 	}
 	oauthFlows[state] = &oauthPendingFlow{
-		ConfigID:     id,
-		Verifier:     verifier,
-		State:        state,
-		RedirectURI:  redirectURI,
-		CreatedAt:    time.Now(),
-		Provider:     agent.Provider,
-		ClientID:     clientID,
-		ClientSecret: clientSecret,
-		TokenURL:     tokenEndpoint,
-		ProjectID:    c.QueryParam("project_id"),
+		ConfigID:       id,
+		Verifier:       verifier,
+		State:          state,
+		RedirectURI:    redirectURI,
+		CreatedAt:      time.Now(),
+		Provider:       agent.Provider,
+		ClientID:       clientID,
+		ClientSecret:   clientSecret,
+		TokenURL:       tokenEndpoint,
+		ProjectID:      c.QueryParam("project_id"),
+		CustomConfig:   agent.CustomAuthConfigJSON,
+		ConfigRevision: agent.OAuthConfigRevision,
 	}
 	oauthFlowsMu.Unlock()
 
@@ -277,15 +346,47 @@ func (h *Handler) OAuthInitiate(c echo.Context) error {
 	}
 
 	// Build the authorization URL
-	authURLFull := authURL +
-		"?response_type=code" +
-		"&client_id=" + url.QueryEscape(clientID) +
-		"&redirect_uri=" + url.QueryEscape(redirectURI) +
-		"&code_challenge=" + url.QueryEscape(challenge) +
-		"&code_challenge_method=S256" +
-		"&state=" + url.QueryEscape(state)
-	if scope != "" {
-		authURLFull += "&scope=" + url.QueryEscape(scope)
+	var authURLFull string
+	if agent.Provider == models.ProviderOpenAICompatible {
+		cfg, _ := llmcustomauth.ParseConfig(agent.CustomAuthConfigJSON)
+		u, parseErr := url.Parse(authURL)
+		if parseErr != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid custom OAuth authorize URL")
+		}
+		q := u.Query()
+		q.Set(cfg.CallbackParameter, redirectURI)
+		q.Set("state", state)
+		if clientID != "" {
+			q.Set("client_id", clientID)
+		}
+		if scope != "" {
+			q.Set("scope", scope)
+		}
+		if cfg.StandardTokenFields || cfg.PKCE {
+			q.Set("response_type", "code")
+		}
+		if cfg.PKCE {
+			q.Set("code_challenge", challenge)
+			q.Set("code_challenge_method", "S256")
+		}
+		for key, value := range cfg.AuthorizationParameters {
+			if strings.TrimSpace(key) != "" {
+				q.Set(key, value)
+			}
+		}
+		u.RawQuery = q.Encode()
+		authURLFull = u.String()
+	} else {
+		authURLFull = authURL +
+			"?response_type=code" +
+			"&client_id=" + url.QueryEscape(clientID) +
+			"&redirect_uri=" + url.QueryEscape(redirectURI) +
+			"&code_challenge=" + url.QueryEscape(challenge) +
+			"&code_challenge_method=S256" +
+			"&state=" + url.QueryEscape(state)
+		if scope != "" {
+			authURLFull += "&scope=" + url.QueryEscape(scope)
+		}
 	}
 	// Anthropic-specific parameter (for Anthropic OAuth, not OpenAI)
 	if agent.Provider == models.ProviderAnthropic {
@@ -308,7 +409,7 @@ func (h *Handler) OAuthInitiate(c echo.Context) error {
 			<p>Your system browser has been opened for OAuth authorization.</p>
 			<p>After authorizing, return to this app.</p>
 			<p><a href="%s">Return to Models</a></p>
-		</body></html>`, modelsURL))
+		</body></html>`, htmltemplate.HTMLEscapeString(modelsURL)))
 	}
 
 	return c.Redirect(http.StatusTemporaryRedirect, authURLFull)
@@ -317,7 +418,7 @@ func (h *Handler) OAuthInitiate(c echo.Context) error {
 // startOAuthCallbackServer runs a temporary HTTP server that handles the OAuth callback
 // on a localhost port. It shuts down after handling one request, when the context expires
 // (timeout or cancellation from a new flow for the same config), or on /cancel.
-func (h *Handler) startOAuthCallbackServer(ctx context.Context, cancel context.CancelFunc, listener net.Listener, modelsURL string, configID string) {
+func (h *Handler) startOAuthCallbackServer(ctx context.Context, cancel context.CancelFunc, listener net.Listener, modelsURL string, configID string, callbackPaths ...string) {
 	mux := http.NewServeMux()
 	srv := &http.Server{Handler: mux}
 
@@ -341,6 +442,11 @@ func (h *Handler) startOAuthCallbackServer(ctx context.Context, cancel context.C
 	mux.HandleFunc("/callback", handleCallback)
 	// OpenAI/Codex flow uses this callback path.
 	mux.HandleFunc("/auth/callback", handleCallback)
+	for _, callbackPath := range callbackPaths {
+		if callbackPath != "" && callbackPath != "/callback" && callbackPath != "/auth/callback" {
+			mux.HandleFunc(callbackPath, handleCallback)
+		}
+	}
 	// Allow replacing an existing pending flow on localhost:1455 (Codex-style reauth).
 	mux.HandleFunc("/cancel", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -403,22 +509,15 @@ func (h *Handler) OAuthManualComplete(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": errDesc})
 	}
 
-	oauthFlowsMu.Lock()
-	flow, ok := oauthFlows[state]
-	if ok {
-		delete(oauthFlows, state)
-	}
-	oauthFlowsMu.Unlock()
-	if !ok {
+	result := h.completeOAuthFlow(state, code)
+	if result.Outcome == oauthCompletionInvalidState {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "oauth session expired or invalid state"})
 	}
-
-	expiresAt, err := h.exchangeOAuthCodeAndSaveTokens(flow, code, state)
-	if err != nil {
-		applog.Infof("[handler] OAuthManualComplete exchange/save error: %v", err)
-		return c.JSON(http.StatusBadGateway, map[string]string{"error": "token exchange failed"})
+	if result.Outcome == oauthCompletionExchangeFailed {
+		applog.Infof("[handler] OAuthManualComplete exchange/save error: %v", result.Err)
+		return c.JSON(http.StatusBadGateway, map[string]string{"error": publicOAuthExchangeError(result.Err)})
 	}
-	applog.Infof("[handler] OAuthManualComplete success config=%s provider=%s expires=%s", flow.ConfigID, flow.Provider, time.UnixMilli(expiresAt).Format(time.RFC3339))
+	applog.Infof("[handler] OAuthManualComplete success config=%s provider=%s expires=%s", result.Flow.ConfigID, result.Flow.Provider, time.UnixMilli(result.ExpiresAt).Format(time.RFC3339))
 	return c.JSON(http.StatusOK, map[string]string{"status": "connected"})
 }
 
@@ -434,29 +533,34 @@ func (h *Handler) handleOAuthCallbackResponse(w http.ResponseWriter, r *http.Req
 
 	var flow *oauthPendingFlow
 	ok := false
-	if state != "" {
-		oauthFlowsMu.Lock()
-		flow, ok = oauthFlows[state]
-		if ok {
-			delete(oauthFlows, state)
-		}
-		oauthFlowsMu.Unlock()
+	if state != "" && (r.URL.Query().Get("error") != "" || code == "") {
+		flow, ok = takeOAuthFlow(state)
 		if ok {
 			modelsURL = modelsReturnURLFromRequest(r, flow.ProjectID, modelsURL)
 		}
 	}
 
 	if oauthErr := r.URL.Query().Get("error"); oauthErr != "" {
+		if !ok {
+			applog.Infof("[handler] OAuthCallback rejected provider error without a valid state")
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			fmt.Fprint(w, `<html><body>
+				<h2>Session Expired</h2>
+				<p>The OAuth session has expired. Please try again.</p>
+			</body></html>`)
+			return
+		}
 		errDesc := r.URL.Query().Get("error_description")
 		if errDesc == "" {
 			errDesc = oauthErr
 		}
 		applog.Infof("[handler] OAuthCallback error: %s - %s", oauthErr, errDesc)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		fmt.Fprintf(w, `<html><body>
-			<h2>OAuth Failed</h2>
-			<p>%s</p>
-			<p><a href="%s">Return to Models</a></p>
-		</body></html>`, errDesc, modelsURL)
+				<h2>OAuth Failed</h2>
+				<p>%s</p>
+				<p><a href="%s">Return to Models</a></p>
+			</body></html>`, htmltemplate.HTMLEscapeString(errDesc), htmltemplate.HTMLEscapeString(modelsURL))
 		return
 	}
 
@@ -465,36 +569,63 @@ func (h *Handler) handleOAuthCallbackResponse(w http.ResponseWriter, r *http.Req
 			<h2>Invalid Callback</h2>
 			<p>Missing state or code parameter.</p>
 			<p><a href="%s">Return to Models</a></p>
-		</body></html>`, modelsURL)
+		</body></html>`, htmltemplate.HTMLEscapeString(modelsURL))
 		return
 	}
 
-	if !ok {
+	result := h.completeOAuthFlow(state, code)
+	if result.Flow != nil {
+		modelsURL = modelsReturnURLFromRequest(r, result.Flow.ProjectID, modelsURL)
+	}
+	if result.Outcome == oauthCompletionInvalidState {
 		applog.Infof("[handler] OAuthCallback state not found or expired")
 		fmt.Fprintf(w, `<html><body>
 			<h2>Session Expired</h2>
 			<p>The OAuth session has expired. Please try again.</p>
 			<p><a href="%s">Return to Models</a></p>
-		</body></html>`, modelsURL)
+		</body></html>`, htmltemplate.HTMLEscapeString(modelsURL))
 		return
+	}
+	if result.Outcome == oauthCompletionExchangeFailed {
+		applog.Infof("[handler] OAuthCallback exchange/save error: %v", result.Err)
+		fmt.Fprintf(w, `<html><body>
+			<h2>Token Exchange Failed</h2>
+			<p>%s</p>
+			<p><a href="%s">Return to Models</a></p>
+		</body></html>`, htmltemplate.HTMLEscapeString(publicOAuthExchangeError(result.Err)), htmltemplate.HTMLEscapeString(modelsURL))
+		return
+	}
+
+	applog.Infof("[handler] OAuthCallback success config=%s provider=%s expires=%s", result.Flow.ConfigID, result.Flow.Provider, time.UnixMilli(result.ExpiresAt).Format(time.RFC3339))
+	http.Redirect(w, r, modelsURL, http.StatusTemporaryRedirect)
+}
+
+func (h *Handler) completeOAuthFlow(state, code string) oauthCompletionResult {
+	flow, ok := takeOAuthFlow(state)
+	if !ok {
+		return oauthCompletionResult{Outcome: oauthCompletionInvalidState}
 	}
 
 	expiresAt, err := h.exchangeOAuthCodeAndSaveTokens(flow, code, state)
 	if err != nil {
-		applog.Infof("[handler] OAuthCallback exchange/save error: %v", err)
-		fmt.Fprintf(w, `<html><body>
-			<h2>Token Exchange Failed</h2>
-			<p>Could not complete OAuth exchange.</p>
-			<p><a href="%s">Return to Models</a></p>
-		</body></html>`, modelsURL)
-		return
+		return oauthCompletionResult{
+			Outcome: oauthCompletionExchangeFailed,
+			Flow:    flow,
+			Err:     err,
+		}
 	}
 
-	applog.Infof("[handler] OAuthCallback success config=%s provider=%s expires=%s", flow.ConfigID, flow.Provider, time.UnixMilli(expiresAt).Format(time.RFC3339))
-	http.Redirect(w, r, modelsURL, http.StatusTemporaryRedirect)
+	return oauthCompletionResult{
+		Outcome:   oauthCompletionSucceeded,
+		Flow:      flow,
+		ExpiresAt: expiresAt,
+	}
 }
 
 func (h *Handler) exchangeOAuthCodeAndSaveTokens(flow *oauthPendingFlow, code, state string) (int64, error) {
+	if flow.Provider == models.ProviderOpenAICompatible {
+		return h.exchangeCustomOAuthCodeAndSaveTokens(flow, code)
+	}
 	tokenBody, contentType := buildTokenExchangeBody(flow, code, state)
 	tokenReq, err := http.NewRequest("POST", flow.TokenURL, bytes.NewReader(tokenBody))
 	if err != nil {
@@ -525,6 +656,9 @@ func (h *Handler) exchangeOAuthCodeAndSaveTokens(flow *oauthPendingFlow, code, s
 	if err := json.NewDecoder(tokenResp.Body).Decode(&tokenResult); err != nil {
 		return 0, err
 	}
+	if strings.TrimSpace(tokenResult.AccessToken) == "" {
+		return 0, fmt.Errorf("OAuth token response did not include a usable access token")
+	}
 
 	expiresAt := resolveOAuthExpiryAt(tokenResult.ExpiresIn)
 	openAIAccountID := ""
@@ -533,17 +667,258 @@ func (h *Handler) exchangeOAuthCodeAndSaveTokens(flow *oauthPendingFlow, code, s
 	}
 
 	bgCtx := context.Background()
+	updated := false
 	if openAIAccountID != "" {
-		if err := h.llmConfigRepo.UpdateOAuthTokens(bgCtx, flow.ConfigID, tokenResult.AccessToken, tokenResult.RefreshToken, expiresAt, openAIAccountID); err != nil {
-			return 0, err
-		}
+		updated, err = h.llmConfigRepo.UpdateStandardOAuthTokensIfRevision(bgCtx, flow.ConfigID, flow.ConfigRevision, flow.Provider, tokenResult.AccessToken, tokenResult.RefreshToken, expiresAt, openAIAccountID)
 	} else {
-		if err := h.llmConfigRepo.UpdateOAuthTokens(bgCtx, flow.ConfigID, tokenResult.AccessToken, tokenResult.RefreshToken, expiresAt); err != nil {
-			return 0, err
-		}
+		updated, err = h.llmConfigRepo.UpdateStandardOAuthTokensIfRevision(bgCtx, flow.ConfigID, flow.ConfigRevision, flow.Provider, tokenResult.AccessToken, tokenResult.RefreshToken, expiresAt)
+	}
+	if err != nil {
+		return 0, err
+	}
+	if !updated {
+		return 0, fmt.Errorf("OAuth configuration changed while authorization was in progress; reconnect using the current configuration")
 	}
 
 	return expiresAt, nil
+}
+
+func (h *Handler) exchangeCustomOAuthCodeAndSaveTokens(flow *oauthPendingFlow, code string) (int64, error) {
+	if err := h.ensureCustomOAuthFlowCurrent(context.Background(), flow); err != nil {
+		return 0, err
+	}
+	cfg, err := llmcustomauth.ParseConfig(flow.CustomConfig)
+	if err != nil {
+		return 0, err
+	}
+	if err := llmcustomauth.ValidateHeaders(cfg); err != nil {
+		return 0, err
+	}
+	fields := map[string]string{"code": code}
+	if cfg.StandardTokenFields || cfg.PKCE {
+		fields["grant_type"] = "authorization_code"
+		fields["redirect_uri"] = flow.RedirectURI
+	}
+	if flow.ClientID != "" {
+		fields["client_id"] = flow.ClientID
+	}
+	if flow.ClientSecret != "" {
+		fields["client_secret"] = flow.ClientSecret
+	}
+	if cfg.PKCE {
+		fields["code_verifier"] = flow.Verifier
+	}
+	tokenBody, contentType, err := llmcustomauth.EncodeTokenExchange(cfg, fields)
+	if err != nil {
+		return 0, err
+	}
+	req, err := http.NewRequest(http.MethodPost, flow.TokenURL, bytes.NewReader(tokenBody))
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Content-Type", contentType)
+	if cfg.UserAgent != "" {
+		req.Header.Set("User-Agent", cfg.UserAgent)
+	}
+	for name, value := range cfg.TokenHeaders {
+		if strings.TrimSpace(name) != "" {
+			req.Header.Set(name, value)
+		}
+	}
+	if _, err := llmcustomauth.ValidateEndpoint(flow.TokenURL, cfg.AllowPrivateEndpoints); err != nil {
+		return 0, fmt.Errorf("invalid custom OAuth token URL: %w", err)
+	}
+	customHTTPClient := llmcustomauth.NewHTTPClient(30*time.Second, cfg.AllowPrivateEndpoints)
+	resp, err := customHTTPClient.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		detail := customOAuthErrorDetail(resp.Body)
+		fieldNames := customOAuthFieldNames(fields)
+		if detail != "" {
+			return 0, fmt.Errorf("custom OAuth token exchange returned %d %s: %s (request fields: %s)", resp.StatusCode, http.StatusText(resp.StatusCode), detail, fieldNames)
+		}
+		return 0, fmt.Errorf("custom OAuth token exchange returned %d %s (request fields: %s)", resp.StatusCode, http.StatusText(resp.StatusCode), fieldNames)
+	}
+	tokens, err := llmcustomauth.DecodeTokenResponse(resp.Body, cfg, "")
+	if err != nil {
+		return 0, err
+	}
+	customState := llmcustomauth.State{}
+	if cfg.ProfileURL != "" {
+		if err := h.ensureCustomOAuthFlowCurrent(context.Background(), flow); err != nil {
+			return 0, err
+		}
+		if _, err := llmcustomauth.ValidateEndpoint(cfg.ProfileURL, cfg.AllowPrivateEndpoints); err != nil {
+			return 0, fmt.Errorf("invalid custom OAuth profile URL: %w", err)
+		}
+		profileReq, reqErr := http.NewRequest(http.MethodGet, cfg.ProfileURL, nil)
+		if reqErr != nil {
+			return 0, reqErr
+		}
+		if err := llmcustomauth.PrepareRequest(profileReq, nil, cfg, customState, tokens.AccessToken); err != nil {
+			return 0, err
+		}
+		profileResp, reqErr := customHTTPClient.Do(profileReq)
+		if reqErr != nil {
+			return 0, reqErr
+		}
+		defer profileResp.Body.Close()
+		if profileResp.StatusCode < 200 || profileResp.StatusCode >= 300 {
+			_, _ = io.Copy(io.Discard, io.LimitReader(profileResp.Body, 1<<20))
+			return 0, fmt.Errorf("custom OAuth profile request returned %d %s", profileResp.StatusCode, http.StatusText(profileResp.StatusCode))
+		}
+		var payload any
+		if err := llmcustomauth.DecodeMetadataJSON(profileResp.Body, &payload, "custom OAuth profile"); err != nil {
+			return 0, err
+		}
+		customState = llmcustomauth.ExtractState(payload, cfg)
+		if strings.TrimSpace(cfg.ProfileInstancePath) != "" && strings.TrimSpace(customState.InstanceID) == "" {
+			return 0, fmt.Errorf("custom OAuth profile did not include required instance metadata at %q", cfg.ProfileInstancePath)
+		}
+		if strings.TrimSpace(cfg.ProfileTeamPath) != "" && strings.TrimSpace(customState.TeamID) == "" {
+			return 0, fmt.Errorf("custom OAuth profile did not include required team metadata at %q", cfg.ProfileTeamPath)
+		}
+	}
+	if err := llmcustomauth.ValidateRequestHeaderValues(cfg, customState, tokens.AccessToken); err != nil {
+		return 0, err
+	}
+	updated, err := h.llmConfigRepo.UpdateCustomOAuthConnectionIfRevision(
+		context.Background(), flow.ConfigID, flow.ConfigRevision,
+		tokens.AccessToken, tokens.RefreshToken, tokens.ExpiresAt, llmcustomauth.MarshalState(customState),
+	)
+	if err != nil {
+		return 0, err
+	}
+	if !updated {
+		return 0, fmt.Errorf("custom OAuth configuration changed while authorization was in progress; reconnect using the current configuration")
+	}
+	return tokens.ExpiresAt, nil
+}
+
+func customOAuthErrorDetail(body io.Reader) string {
+	data, err := io.ReadAll(io.LimitReader(body, 64<<10))
+	if err != nil || len(data) == 0 {
+		return ""
+	}
+	var payload map[string]any
+	if json.Unmarshal(data, &payload) != nil {
+		return ""
+	}
+	for _, key := range []string{"error_description", "message", "error"} {
+		if value, ok := payload[key].(string); ok {
+			return sanitizeCustomOAuthErrorDetail(value)
+		}
+	}
+	if detail := customOAuthValidationErrors(payload["errors"]); detail != "" {
+		return detail
+	}
+	switch detail := payload["detail"].(type) {
+	case string:
+		return sanitizeCustomOAuthErrorDetail(detail)
+	case []any:
+		messages := make([]string, 0, len(detail))
+		for _, item := range detail {
+			entry, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			if message, ok := entry["msg"].(string); ok {
+				messages = append(messages, message)
+			}
+		}
+		return sanitizeCustomOAuthErrorDetail(strings.Join(messages, "; "))
+	}
+	return ""
+}
+
+func customOAuthValidationErrors(raw any) string {
+	entries, ok := raw.([]any)
+	if !ok {
+		return ""
+	}
+	messages := make([]string, 0, len(entries))
+	for _, item := range entries {
+		entry, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		message, _ := entry["message"].(string)
+		location, _ := entry["location"].(string)
+		if message == "" {
+			continue
+		}
+		if location != "" {
+			message = location + ": " + message
+		}
+		messages = append(messages, message)
+	}
+	return sanitizeCustomOAuthErrorDetail(strings.Join(messages, "; "))
+}
+
+func customOAuthFieldNames(fields map[string]string) string {
+	names := make([]string, 0, 6)
+	for _, name := range []string{"code", "grant_type", "redirect_uri", "client_id", "client_secret", "code_verifier"} {
+		if _, ok := fields[name]; ok {
+			names = append(names, name)
+		}
+	}
+	return strings.Join(names, ", ")
+}
+
+func sanitizeCustomOAuthErrorDetail(value string) string {
+	value = strings.Join(strings.Fields(value), " ")
+	const maxLength = 512
+	if len(value) > maxLength {
+		value = value[:maxLength] + "…"
+	}
+	return value
+}
+
+func publicOAuthExchangeError(err error) string {
+	if err == nil {
+		return "Could not complete OAuth exchange."
+	}
+	message := err.Error()
+	if strings.HasPrefix(message, "custom OAuth token exchange returned ") {
+		return message
+	}
+	return "Could not complete OAuth exchange."
+}
+
+func (h *Handler) ensureCustomOAuthFlowCurrent(ctx context.Context, flow *oauthPendingFlow) error {
+	if flow == nil {
+		return fmt.Errorf("custom OAuth authorization flow is missing")
+	}
+	current, err := h.llmConfigRepo.GetByID(ctx, flow.ConfigID)
+	if err != nil {
+		return err
+	}
+	if current == nil || current.Provider != models.ProviderOpenAICompatible ||
+		current.AuthMethod != models.AuthMethodOAuth ||
+		current.OAuthConfigRevision != flow.ConfigRevision {
+		return fmt.Errorf("custom OAuth configuration changed while authorization was in progress; reconnect using the current configuration")
+	}
+	return nil
+}
+
+func takeOAuthFlow(state string) (*oauthPendingFlow, bool) {
+	oauthFlowsMu.Lock()
+	defer oauthFlowsMu.Unlock()
+	flow, ok := oauthFlows[state]
+	if ok {
+		delete(oauthFlows, state)
+	}
+	if !ok || oauthFlowExpired(flow, time.Now()) {
+		return nil, false
+	}
+	return flow, true
+}
+
+func oauthFlowExpired(flow *oauthPendingFlow, now time.Time) bool {
+	return flow == nil || flow.CreatedAt.IsZero() || now.Sub(flow.CreatedAt) > oauthFlowLifetime
 }
 
 // OAuthStatus returns the OAuth status for a model config.
@@ -651,6 +1026,37 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func normalizeCustomOAuthLocalCallback(cfg llmcustomauth.Config) (string, string, error) {
+	host := strings.ToLower(strings.TrimSpace(cfg.LocalCallbackHost))
+	if host == "" {
+		host = "localhost"
+	}
+	if host != "localhost" && host != "127.0.0.1" {
+		return "", "", fmt.Errorf("local callback host must be localhost or 127.0.0.1")
+	}
+
+	path := strings.TrimSpace(cfg.LocalCallbackPath)
+	if path == "" {
+		path = "/callback"
+	}
+	parsed, err := url.Parse(path)
+	if err != nil || !strings.HasPrefix(path, "/") || strings.HasPrefix(path, "//") ||
+		parsed.IsAbs() || parsed.Host != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", "", fmt.Errorf("local callback path must be an absolute path without a query or fragment")
+	}
+	if path == "/" {
+		return "", "", fmt.Errorf("local callback path must not be the server root")
+	}
+	for _, char := range path {
+		if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') ||
+			(char >= '0' && char <= '9') || strings.ContainsRune("/-._~", char) {
+			continue
+		}
+		return "", "", fmt.Errorf("local callback path contains unsupported characters")
+	}
+	return host, path, nil
 }
 
 func resolveOAuthRedirectMode() string {

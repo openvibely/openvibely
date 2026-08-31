@@ -87,14 +87,14 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
 					</div>
 					<div id="edit-project-github-fields" class="form-control mb-3">
 						<label class="label"><span class="label-text">GitHub URL</span></label>
-						<input type="url" id="edit-project-repo-url" name="repo_url" class="input input-bordered" value={ project.RepoURL } placeholder="https://github.com/owner/repo"/>
-						<label class="label"><span class="label-text-alt opacity-60">Changing this URL re-clones the repository into managed storage.</span></label>
+							<input type="url" id="edit-project-repo-url" name="repo_url" class="input input-bordered" value={ project.RepoURL } placeholder="https://github.com/owner/repo"/>
+							<label class="label"><span class="label-text-alt opacity-60">Changing this URL re-clones the repository into managed storage.</span></label>
 					</div>
 				} else if projectRepoSource(project) == "github" {
 					<div class="form-control mb-3">
 						<label class="label"><span class="label-text">GitHub URL</span></label>
-						<input type="url" id="edit-project-repo-url" name="repo_url" class="input input-bordered" value={ project.RepoURL } placeholder="https://github.com/owner/repo" required/>
-						<label class="label"><span class="label-text-alt opacity-60">Changing this URL re-clones the repository into managed storage.</span></label>
+							<input type="url" id="edit-project-repo-url" name="repo_url" class="input input-bordered" value={ project.RepoURL } placeholder="https://github.com/owner/repo" required/>
+							<label class="label"><span class="label-text-alt opacity-60">Changing this URL re-clones the repository into managed storage.</span></label>
 					</div>
 				} else {
 					<input type="hidden" name="repo_path" value={ project.RepoPath }/>
@@ -105,8 +105,8 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
 					</div>
 					<div id="edit-project-github-fields" class="form-control mb-3 hidden">
 						<label class="label"><span class="label-text">GitHub URL</span></label>
-						<input type="url" id="edit-project-repo-url" name="repo_url" class="input input-bordered" placeholder="https://github.com/owner/repo"/>
-						<label class="label"><span class="label-text-alt opacity-60">The repository is cloned into managed storage.</span></label>
+							<input type="url" id="edit-project-repo-url" name="repo_url" class="input input-bordered" placeholder="https://github.com/owner/repo"/>
+							<label class="label"><span class="label-text-alt opacity-60">The repository is cloned into managed storage.</span></label>
 					</div>
 				}
 				<div class="form-control mb-3">
@@ -160,7 +160,7 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
 						<button
 							type="button"
 							class="btn btn-error btn-outline mr-auto"
-							onclick="document.getElementById('delete_project_confirm_modal').showModal()"
+							onclick="window.openDestructiveConfirmDialog('delete_project_confirm_modal', '', '')"
 						>Delete Project</button>
 					}
 					<button type="button" class="btn" onclick="edit_project_modal.close()">Cancel</button>
@@ -173,36 +173,15 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
 		</form>
 	</dialog>
 	if !project.IsDefault {
-		<dialog id="delete_project_confirm_modal" class="modal">
-			<div class="modal-box">
-				@ModalCloseButton("delete_project_confirm_modal", "Close delete project confirmation")
-				<h3 class="font-bold text-lg text-error pr-10">Delete Project</h3>
-				<p class="py-4">
-					Are you sure you want to delete <strong>{ project.Name }</strong>? This action cannot be undone.
-				</p>
-				<div class="text-sm text-base-content/70 bg-base-200 rounded-lg p-3 mb-4">
-					<p class="font-medium mb-1">The following data will be permanently deleted:</p>
-					<ul class="list-disc list-inside space-y-1">
-						<li>All tasks and their execution history</li>
-						<li>All scheduled runs</li>
-						<li>Chat history for this project</li>
-						<li>Workflows and workflow executions</li>
-						<li>Project-specific settings and configurations</li>
-					</ul>
-				</div>
-				<div class="modal-action">
-					<button type="button" class="btn" onclick="delete_project_confirm_modal.close()">Cancel</button>
-					<button
-						type="button"
-						class="btn btn-error"
-						onclick={ deleteProjectAction(project.ID) }
-					>Delete Permanently</button>
-				</div>
-			</div>
-			<form method="dialog" class="modal-backdrop">
-				<button>close</button>
-			</form>
-		</dialog>
+			@DestructiveConfirmDialog("delete_project_confirm_modal", "Close delete project confirmation", "Delete Project", "Are you sure you want to delete ", "", project.Name, "? This action cannot be undone.", templ.ComponentScript{Call: "delete_project_confirm_modal.close()"}, deleteProjectAction(project.ID)) {
+				<p class="font-medium mb-1">The following data will be permanently deleted:</p>
+				<ul class="list-disc list-inside space-y-1">
+					<li>All tasks and their execution history</li>
+					<li>All scheduled runs</li>
+					<li>Chat history for this project</li>
+					<li>Project-specific settings and configurations</li>
+				</ul>
+			}
 	}
 	<script>
 		(function() {
@@ -363,11 +342,9 @@ templ NewProjectDialog(agents []models.LLMConfig, localRepoPathEnabled bool) {
 					</div>
 					<div id="new-project-github-fields" class="form-control mb-3 hidden">
 						<label class="label"><span class="label-text">GitHub URL</span></label>
-						<input type="url" id="new-project-repo-url" name="repo_url" class="input input-bordered" placeholder="https://github.com/owner/repo"/>
-							<label class="label">
-								<span class="label-text-alt opacity-60">The repository is cloned into managed storage using configured GitHub auth or your local git credentials.</span>
-							</label>					</div>
-					<div id="new-project-create-dir-wrapper" class="form-control mb-2">
+							<input type="url" id="new-project-repo-url" name="repo_url" class="input input-bordered" placeholder="https://github.com/owner/repo"/>
+							<label class="label"><span class="label-text-alt opacity-60">The repository is cloned into managed storage using configured GitHub auth or your local git credentials.</span></label>
+						</div>					<div id="new-project-create-dir-wrapper" class="form-control mb-2">
 						<label class="label cursor-pointer justify-start gap-3">
 							<input type="checkbox" id="new-project-create-dir" name="create_directory" value="true" class="checkbox checkbox-sm checkbox-primary"/>
 							<span class="label-text">Create directory if it doesn't exist</span>
@@ -382,11 +359,9 @@ templ NewProjectDialog(agents []models.LLMConfig, localRepoPathEnabled bool) {
 				} else {
 					<div class="form-control mb-3">
 						<label class="label"><span class="label-text">GitHub URL</span></label>
-						<input type="url" id="new-project-repo-url" name="repo_url" class="input input-bordered" placeholder="https://github.com/owner/repo" required/>
-							<label class="label">
-								<span class="label-text-alt opacity-60">The repository is cloned into managed storage using configured GitHub auth or your local git credentials.</span>
-							</label>					</div>
-				}
+							<input type="url" id="new-project-repo-url" name="repo_url" class="input input-bordered" placeholder="https://github.com/owner/repo" required/>
+							<label class="label"><span class="label-text-alt opacity-60">The repository is cloned into managed storage using configured GitHub auth or your local git credentials.</span></label>
+						</div>				}
 				<div class="form-control mb-3">
 					<label class="label">
 						<span class="label-text">Default Model</span>

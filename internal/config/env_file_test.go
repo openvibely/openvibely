@@ -41,6 +41,34 @@ func TestLoadEnvFileRejectsMalformedLine(t *testing.T) {
 	}
 }
 
+func TestLoadEnvFileRejectsEmptyKeyAndMissingFile(t *testing.T) {
+	dir := t.TempDir()
+	emptyKey := filepath.Join(dir, "empty.env")
+	if err := os.WriteFile(emptyKey, []byte(" =value\n"), 0o644); err != nil {
+		t.Fatalf("write env file: %v", err)
+	}
+	if err := LoadEnvFile(emptyKey); err == nil {
+		t.Fatal("expected empty key error")
+	}
+	if err := LoadEnvFile(filepath.Join(dir, "missing.env")); err == nil {
+		t.Fatal("expected missing file error")
+	}
+}
+
+func TestDesktopConfigFilePathUsesOverrideOrDesktopDataDir(t *testing.T) {
+	t.Setenv("OPENVIBELY_DESKTOP_CONFIG_FILE", "/tmp/openvibely/custom.env")
+	if got := DesktopConfigFilePath(); got != "/tmp/openvibely/custom.env" {
+		t.Fatalf("DesktopConfigFilePath override = %q", got)
+	}
+
+	t.Setenv("OPENVIBELY_DESKTOP_CONFIG_FILE", " ")
+	t.Setenv("XDG_CONFIG_HOME", "/tmp/openvibely-config")
+	got := DesktopConfigFilePath()
+	if filepath.Base(got) != "config.env" {
+		t.Fatalf("DesktopConfigFilePath should end in config.env, got %q", got)
+	}
+}
+
 func unsetEnvForTest(t *testing.T, key string) {
 	t.Helper()
 	old, had := os.LookupEnv(key)

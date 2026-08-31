@@ -13,6 +13,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/agentlibrary"
 	"github.com/openvibely/openvibely/internal/agentskills"
+	"github.com/openvibely/openvibely/internal/lifecycle"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/service"
 )
@@ -65,7 +66,10 @@ func (h *Handler) GetAgentSkills(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	projectRoot := h.currentProjectSkillRoot(c)
+	projectRoot, err := h.agentOwnedSkillProjectRoot(c, agent)
+	if err != nil {
+		return err
+	}
 	if err := h.migrateLegacyAgentSkills(c, agent, projectRoot); err != nil {
 		return err
 	}
@@ -87,7 +91,7 @@ func (h *Handler) GetAgentSkills(c echo.Context) error {
 		view := agentSkillView{
 			Handle: entry.Handle,
 			Name:   entry.Skill,
-			Scope:  h.scopeForAgentSkillPath(c, entry.AbsolutePath),
+			Scope:  h.scopeForAgentSkillPathWithProjectRoot(entry.AbsolutePath, projectRoot),
 			Source: string(entry.Source),
 			Path:   entry.AbsolutePath,
 		}
@@ -170,7 +174,11 @@ func (h *Handler) ArchiveAgentOwnedSkill(c echo.Context) error {
 	var req agentSkillArchiveRequest
 	_ = json.NewDecoder(c.Request().Body).Decode(&req)
 	scope := h.dialogSkillScope(c, agent, c.QueryParam("scope"))
-	root, err := h.rootForDialogScope(c, scope)
+	projectRoot, err := h.agentOwnedSkillProjectRoot(c, agent)
+	if err != nil {
+		return err
+	}
+	root, err := h.rootForDialogScopeWithProjectRoot(scope, projectRoot)
 	if err != nil {
 		return err
 	}
@@ -210,7 +218,11 @@ func (h *Handler) writeAgentOwnedSkillFromDialog(c echo.Context, agent *models.A
 		return nil, echo.NewHTTPError(http.StatusBadRequest, "skill handle must be a slug and must not include an agent prefix")
 	}
 	scope := h.dialogSkillScope(c, agent, req.Scope)
-	root, err := h.rootForDialogScope(c, scope)
+	projectRoot, err := h.agentOwnedSkillProjectRoot(c, agent)
+	if err != nil {
+		return nil, err
+	}
+	root, err := h.rootForDialogScopeWithProjectRoot(scope, projectRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -222,46 +234,79 @@ func (h *Handler) writeAgentOwnedSkillFromDialog(c echo.Context, agent *models.A
 			return nil, echo.NewHTTPError(http.StatusInternalServerError, statErr.Error())
 		}
 	}
-	body := strings.TrimSpace(req.Body)
-	var decl *agentlibrary.SkillDeclaration
-	if strings.HasPrefix(body, "---") {
-		parsed, parsedBody, parseErr := agentlibrary.ParseDeclaration(body)
-		if parseErr != nil {
-			return nil, echo.NewHTTPError(http.StatusBadRequest, parseErr.Error())
-		}
-		if parsed.Skill.Key != handle {
-			return nil, echo.NewHTTPError(http.StatusBadRequest, "body frontmatter skill.key must match handle")
-		}
-		decl = parsed
-		body = parsedBody
-	} else {
-		enabled := true
-		decl = &agentlibrary.SkillDeclaration{
-			Kind:    "openvibely.agent_skill",
-			Version: 1,
-			Skill: agentlibrary.SkillBlock{
-				Key:         handle,
-				Name:        firstDialogNonEmpty(strings.TrimSpace(req.Name), handle),
-				Description: strings.TrimSpace(req.Description),
-				Enabled:     &enabled,
-			},
-		}
+	decl, body, err := normalizeSkillDialogDeclaration(skillDialogNormalizationRequest{
+		Handle:      handle,
+		Scope:       scope,
+		Name:        req.Name,
+		Description: req.Description,
+		Body:        req.Body,
+	})
+	if err != nil {
+		return nil, err
 	}
-	decl.Agent.Key = ""
-	decl.Skill.Key = handle
-	decl.Skill.Scope = scope
-	if strings.TrimSpace(req.Name) != "" {
-		decl.Skill.Name = strings.TrimSpace(req.Name)
-	}
-	if strings.TrimSpace(req.Description) != "" {
-		decl.Skill.Description = strings.TrimSpace(req.Description)
-	}
-	importer := agentlibrary.NewImporter(agentlibrary.SkillRoots{Global: h.agentSkillRoot, Project: h.currentProjectSkillRoot(c)}, agentlibrary.NewRepoApplier(h.agentRepo, h.lifecycleRepo))
+	importer := agentlibrary.NewImporter(agentlibrary.SkillRoots{Global: h.agentSkillRoot, Project: projectRoot}, agentlibrary.NewRepoApplier(h.agentRepo, h.lifecycleRepo))
 	res, err := importer.WriteAgentOwnedSkill(c.Request().Context(), scope, agentStableKey(agent), decl, body)
 	if err != nil {
 		return res, echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	return res, nil
+}
+
+type skillDialogNormalizationRequest struct {
+	Handle               string
+	Scope                string
+	Name                 string
+	Description          string
+	Body                 string
+	Enabled              *bool
+	RejectAgentOwnership bool
+}
+
+func normalizeSkillDialogDeclaration(req skillDialogNormalizationRequest) (*agentlibrary.SkillDeclaration, string, error) {
+	body := strings.TrimSpace(req.Body)
+	parsedFrontmatter := strings.HasPrefix(body, "---")
+	var decl *agentlibrary.SkillDeclaration
+	if parsedFrontmatter {
+		parsed, parsedBody, parseErr := agentlibrary.ParseDeclaration(body)
+		if parseErr != nil {
+			return nil, "", echo.NewHTTPError(http.StatusBadRequest, parseErr.Error())
+		}
+		if req.RejectAgentOwnership && (parsed.IsAgentRootDeclaration() || strings.TrimSpace(parsed.Agent.Key) != "") {
+			return nil, "", echo.NewHTTPError(http.StatusBadRequest, "standalone skills must not set agent.key")
+		}
+		if parsed.Skill.Key != req.Handle {
+			return nil, "", echo.NewHTTPError(http.StatusBadRequest, "body frontmatter skill.key must match handle")
+		}
+		decl = parsed
+		body = parsedBody
+	} else {
+		decl = &agentlibrary.SkillDeclaration{
+			Kind:    "openvibely.agent_skill",
+			Version: 1,
+			Skill: agentlibrary.SkillBlock{
+				Key: req.Handle,
+				// Enabled left nil: absence = enabled, keeps frontmatter clean.
+			},
+		}
+	}
+	if req.RejectAgentOwnership {
+		decl.Agent.Key = ""
+	}
+	decl.Skill.Key = req.Handle
+	decl.Skill.Scope = req.Scope
+	decl.Skill.Name = strings.TrimSpace(req.Name)
+	if decl.Skill.Name == "" && !parsedFrontmatter {
+		decl.Skill.Name = req.Handle
+	}
+	decl.Skill.Description = strings.TrimSpace(req.Description)
+	if req.Enabled != nil {
+		if !*req.Enabled {
+			decl.Skill.Enabled = req.Enabled
+		} else {
+			decl.Skill.Enabled = nil
+		}
+	}
+	return decl, body, nil
 }
 
 func (h *Handler) agentFromParam(c echo.Context) (*models.Agent, error) {
@@ -315,13 +360,33 @@ func (h *Handler) currentProjectSkillRoot(c echo.Context) string {
 // directory (covers non-browser callers and older UI requests). Falls back to
 // the request-derived current project when the agent has no ProjectID set.
 func (h *Handler) projectSkillRootForAgent(c echo.Context, agent *models.Agent) string {
-	if agent != nil && strings.TrimSpace(agent.ProjectID) != "" && h.projectRepo != nil {
+	if agent != nil && strings.TrimSpace(agent.ProjectID) != "" {
+		if h.projectRepo == nil {
+			return ""
+		}
 		return service.ProjectSkillRootForResolver(c.Request().Context(), h.projectRepo, strings.TrimSpace(agent.ProjectID))
 	}
 	return h.currentProjectSkillRoot(c)
 }
 
+func (h *Handler) agentOwnedSkillProjectRoot(c echo.Context, agent *models.Agent) (string, error) {
+	if agent != nil && agent.Scope == models.AgentScopeProject {
+		agentProjectID := strings.TrimSpace(agent.ProjectID)
+		if agentProjectID != "" {
+			if requestedProjectID := strings.TrimSpace(c.QueryParam("project_id")); requestedProjectID != "" && requestedProjectID != agentProjectID {
+				return "", echo.NewHTTPError(http.StatusNotFound, "agent not found")
+			}
+			return h.projectSkillRootForAgent(c, agent), nil
+		}
+	}
+	return h.currentProjectSkillRoot(c), nil
+}
+
 func (h *Handler) rootForDialogScope(c echo.Context, scope string) (string, error) {
+	return h.rootForDialogScopeWithProjectRoot(scope, h.currentProjectSkillRoot(c))
+}
+
+func (h *Handler) rootForDialogScopeWithProjectRoot(scope, projectRoot string) (string, error) {
 	switch scope {
 	case "global":
 		if h.agentSkillRoot == "" {
@@ -329,13 +394,11 @@ func (h *Handler) rootForDialogScope(c echo.Context, scope string) (string, erro
 		}
 		return h.agentSkillRoot, nil
 	case "project":
-		projectRoot := h.currentProjectSkillRoot(c)
 		if projectRoot == "" {
 			return "", echo.NewHTTPError(http.StatusServiceUnavailable, "project skill root not configured")
 		}
 		return projectRoot, nil
 	case "":
-		projectRoot := h.currentProjectSkillRoot(c)
 		if projectRoot != "" {
 			return projectRoot, nil
 		}
@@ -359,22 +422,37 @@ func (h *Handler) dialogSkillScope(c echo.Context, agent *models.Agent, requeste
 	return "project"
 }
 
-func (h *Handler) materializeDBAgentsToDisk(c echo.Context, agents []models.Agent) error {
+func (h *Handler) materializeDBAgentsToDisk(c echo.Context, agents []models.Agent) (bool, error) {
 	if h == nil || h.agentRepo == nil || h.agentSkillRoot == "" {
-		return nil
+		return false, nil
 	}
 	projectRoot := h.currentProjectSkillRoot(c)
 	usedKeys := h.usedAgentKeys(agents, projectRoot)
+	persistenceChanged := false
 	for i := range agents {
 		agent := agents[i]
-		if err := h.materializeAgentToDiskWithUsedKeys(c, &agent, projectRoot, usedKeys, false); err != nil {
-			return err
+		agentProjectRoot := h.projectRootForAgentMaterialization(c, &agent)
+		originalKey := agent.Key
+		originalSkillCount := len(agent.Skills)
+		originalSelectable := agent.SelectableAsPrimary
+		if err := h.materializeAgentToDiskWithUsedKeys(c, &agent, agentProjectRoot, usedKeys, false); err != nil {
+			return persistenceChanged, err
 		}
-		if err := h.migrateLegacyAgentSkills(c, &agent, projectRoot); err != nil {
-			return err
+		if err := h.migrateLegacyAgentSkills(c, &agent, agentProjectRoot); err != nil {
+			return persistenceChanged, err
+		}
+		if agent.Key != originalKey || len(agent.Skills) != originalSkillCount || agent.SelectableAsPrimary != originalSelectable {
+			persistenceChanged = true
 		}
 	}
-	return nil
+	return persistenceChanged, nil
+}
+
+func (h *Handler) projectRootForAgentMaterialization(c echo.Context, agent *models.Agent) string {
+	if agent != nil && agent.Scope == models.AgentScopeProject && strings.TrimSpace(agent.ProjectID) != "" {
+		return h.projectSkillRootForAgent(c, agent)
+	}
+	return h.currentProjectSkillRoot(c)
 }
 
 func (h *Handler) materializeAgentToDisk(c echo.Context, agent *models.Agent, projectRoot string) error {
@@ -393,9 +471,15 @@ func (h *Handler) materializeAgentToDiskWithUsedKeys(c echo.Context, agent *mode
 		scope = "global"
 	}
 	if scope == "project" && projectRoot == "" {
+		// A project-owned agent must never fall back to the global root when its
+		// recorded project has no writable repository root. Legacy project rows
+		// without ProjectID retain the historical current-project/global fallback.
+		if strings.TrimSpace(agent.ProjectID) != "" {
+			return nil
+		}
 		scope = "global"
 	}
-	root, err := h.rootForDialogScope(c, scope)
+	root, err := h.rootForDialogScopeWithProjectRoot(scope, projectRoot)
 	if err != nil {
 		return err
 	}
@@ -517,6 +601,9 @@ func (h *Handler) lifecycleHookDeclsForAgent(ctx context.Context, agentID string
 				decl.ScheduleCron = strings.TrimSpace(schedule["cron"])
 			}
 		}
+		if payload := lifecycle.ParseHookPayload(hook.PayloadJSON); !payload.SelectsAllBlocks() {
+			decl.Payload = payload.Blocks
+		}
 		out[when] = decl
 	}
 	return out
@@ -559,9 +646,15 @@ func (h *Handler) migrateLegacyAgentSkills(c echo.Context, agent *models.Agent, 
 		scope = "global"
 	}
 	if scope == "project" && projectRoot == "" {
+		// A project-owned agent must never fall back to the global root when its
+		// recorded project has no writable repository root. Legacy project rows
+		// without ProjectID retain the historical current-project/global fallback.
+		if strings.TrimSpace(agent.ProjectID) != "" {
+			return nil
+		}
 		scope = "global"
 	}
-	root, err := h.rootForDialogScope(c, scope)
+	root, err := h.rootForDialogScopeWithProjectRoot(scope, projectRoot)
 	if err != nil {
 		return err
 	}
@@ -678,8 +771,12 @@ func agentStableKey(agent *models.Agent) string {
 }
 
 func (h *Handler) scopeForAgentSkillPath(c echo.Context, path string) string {
+	return h.scopeForAgentSkillPathWithProjectRoot(path, h.currentProjectSkillRoot(c))
+}
+
+func (h *Handler) scopeForAgentSkillPathWithProjectRoot(path, projectRoot string) string {
 	clean := filepath.Clean(path)
-	if projectRoot := h.currentProjectSkillRoot(c); projectRoot != "" {
+	if projectRoot != "" {
 		if rel, err := filepath.Rel(filepath.Clean(projectRoot), clean); err == nil && rel != "." && !strings.HasPrefix(rel, "..") && !filepath.IsAbs(rel) {
 			return "project"
 		}

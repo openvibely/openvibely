@@ -4,9 +4,14 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
 	"io"
 	"math"
 	"net/http"
@@ -28,9 +33,14 @@ Preserve completed one-time setup actions (for example required project-guidance
 Do not restart the task from scratch.
 Keep the summary actionable and specific. Omit chit-chat and duplication.
 Return only the summary text.`
-	openAICompactionTranscriptLimit = 200000
-	openAICompactionTranscriptGap   = "\n\n[Middle conversation content omitted before compaction]\n\n"
-	openAIEffectiveContextPercent   = 95
+	openAICompactionTranscriptLimit                    = 200000
+	openAICompactionTranscriptGap                      = "\n\n[Middle conversation content omitted before compaction]\n\n"
+	openAIEffectiveContextPercent                      = 95
+	openAIRemoteCompactionV2RetainedMessageTokenBudget = 64000
+	openAIApproxBytesPerToken                          = 4
+	openAIResizedImageBytesEstimate                    = 7373
+	openAIOriginalImagePatchSize                       = 32
+	openAIOriginalImageMaxPatches                      = 10000
 	// Mirrors Codex truncation policy defaults in models_cache.json.
 	openAIToolOutputTokenLimitDefault = 10000
 	// OpenAI native web search tool type for the Responses API.
@@ -42,7 +52,8 @@ type AgenticOptions struct {
 	Model           string
 	MaxOutputTokens int
 	System          string
-	// CompactionPrompt overrides the instruction text used for /responses/compact.
+	// CompactionPrompt overrides the instruction text used for API-key /responses/compact.
+	// ChatGPT OAuth compaction mirrors Codex v2 and uses the base system instructions.
 	// When empty, openAICompactionInstructions is used.
 	CompactionPrompt string
 	WorkDir          string // working directory for tool execution
@@ -235,21 +246,33 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 	for turn := 0; turn < opts.MaxTurns; turn++ {
 		var turnResult *agenticTurnResult
 		overflowRecovered := false
-		for {
-			var err error
-			turnResult, err = c.sendAgenticTurn(ctx, inputItems, tools, opts, isChatGPTOAuth)
-			if err == nil {
-				break
-			}
-			if opts.AutoCompaction && !overflowRecovered && isContextLengthExceededError(err) {
+		turnResult, err := httpretry.DoStreamTurn(ctx, httpretry.StreamTurnPolicy{
+			RetryableError:                       isRetryableResponsesTransportError,
+			RetryConnectionFailuresWithoutBudget: true,
+			Recover: func(err error) (bool, error) {
+				if !opts.AutoCompaction || overflowRecovered || !isContextLengthExceededError(err) {
+					return false, nil
+				}
 				compactedItems, compactErr := compactIfNeeded(inputItems, compactionThreshold, true)
 				if compactErr != nil {
-					return nil, fmt.Errorf("turn %d overflow recovery compaction: %w", turn+1, compactErr)
+					return false, fmt.Errorf("turn %d overflow recovery compaction: %w", turn+1, compactErr)
 				}
 				inputItems = compactedItems
 				overflowRecovered = true
-				continue
-			}
+				return true, nil
+			},
+			OnRetry: func(event httpretry.RetryEvent) {
+				if httpretry.IsConnectionSetupFailure(event.Err) {
+					applog.Infof("[openai-client] reconnecting agentic turn %d after connection error in %v: %v", turn+1, event.Delay, event.Err)
+					return
+				}
+				applog.Infof("[openai-client] retrying agentic turn %d after stream/transport error, retry attempt %d/%d in %v: %v",
+					turn+1, event.Attempt, event.MaxRetries, event.Delay, event.Err)
+			},
+		}, func(attemptCtx context.Context) (*agenticTurnResult, error) {
+			return c.sendAgenticTurn(attemptCtx, inputItems, tools, opts, isChatGPTOAuth)
+		})
+		if err != nil {
 			return nil, fmt.Errorf("turn %d: %w", turn+1, err)
 		}
 
@@ -483,11 +506,224 @@ func isContextLengthExceededError(err error) bool {
 }
 
 func estimateInputItemsTokens(inputItems []any) int {
-	text := openAIInputItemsTranscript(inputItems)
+	if len(inputItems) == 0 {
+		return 0
+	}
+	total := 0
+	for _, item := range inputItems {
+		total += estimateAgenticInputItemTokens(item)
+	}
+	return total
+}
+
+func estimateAgenticInputItemTokens(item any) int {
+	bytes := estimateAgenticResponseItemModelVisibleBytes(item)
+	if bytes > 0 {
+		return approxOpenAITokensFromByteCount(bytes)
+	}
+	text := openAIInputItemsTranscript([]any{item})
 	if text == "" {
 		return 0
 	}
-	return (len(text) + 3) / 4
+	return approxOpenAITokenCount(text)
+}
+
+func estimateAgenticResponseItemModelVisibleBytes(item any) int {
+	if itemMap, ok := item.(map[string]any); ok {
+		switch strings.TrimSpace(stringFromAny(itemMap["type"])) {
+		case "reasoning", "context_compaction":
+			if encryptedContent := stringFromAny(itemMap["encrypted_content"]); encryptedContent != "" {
+				return estimateOpenAIReasoningLength(len(encryptedContent))
+			}
+		case "compaction":
+			encryptedContent := stringFromAny(itemMap["encrypted_content"])
+			return estimateOpenAIReasoningLength(len(encryptedContent))
+		}
+	}
+
+	serialized, err := json.Marshal(item)
+	if err != nil || len(serialized) == 0 {
+		return 0
+	}
+	raw := len(serialized)
+	imagePayloadBytes, imageReplacementBytes := agenticImageDataURLEstimateAdjustment(item)
+	audioPayloadBytes, audioReplacementBytes := agenticAudioDataURLEstimateAdjustment(item)
+	encryptedPayloadBytes, encryptedReplacementBytes := agenticEncryptedFunctionOutputEstimateAdjustment(item)
+	raw = raw - imagePayloadBytes + imageReplacementBytes - audioPayloadBytes + audioReplacementBytes
+	raw = raw - encryptedPayloadBytes + encryptedReplacementBytes
+	if raw < 0 {
+		return 0
+	}
+	return raw
+}
+
+func estimateOpenAIReasoningLength(encodedLen int) int {
+	if encodedLen <= 0 {
+		return 0
+	}
+	estimated := encodedLen*3/4 - 650
+	if estimated < 0 {
+		return 0
+	}
+	return estimated
+}
+
+func estimateOpenAIEncryptedFunctionOutputLength(encodedLen int) int {
+	if encodedLen <= 0 {
+		return 0
+	}
+	return (encodedLen*9 + 15) / 16
+}
+
+func agenticImageDataURLEstimateAdjustment(item any) (int, int) {
+	payloadBytes := 0
+	replacementBytes := 0
+	forEachAgenticContentBlock(item, func(block map[string]any) {
+		if strings.TrimSpace(stringFromAny(block["type"])) != "input_image" {
+			return
+		}
+		imageURL := firstNonEmpty(stringFromAny(block["image_url"]), stringFromAny(block["url"]))
+		payload, ok := parseAgenticBase64DataURL(imageURL, "image/")
+		if !ok {
+			return
+		}
+		payloadBytes += len(payload)
+		if strings.EqualFold(strings.TrimSpace(stringFromAny(block["detail"])), "original") {
+			replacementBytes += estimateAgenticOriginalImageBytes(imageURL)
+			return
+		}
+		replacementBytes += openAIResizedImageBytesEstimate
+	})
+	return payloadBytes, replacementBytes
+}
+
+func agenticAudioDataURLEstimateAdjustment(item any) (int, int) {
+	payloadBytes := 0
+	replacementBytes := 0
+	forEachAgenticContentBlock(item, func(block map[string]any) {
+		if strings.TrimSpace(stringFromAny(block["type"])) != "input_audio" {
+			return
+		}
+		audioURL := firstNonEmpty(stringFromAny(block["audio_url"]), stringFromAny(block["url"]))
+		payload, ok := parseAgenticBase64DataURL(audioURL, "audio/")
+		if !ok {
+			return
+		}
+		payloadBytes += len(payload)
+		replacementBytes += approxOpenAIBytesForTokens(approxOpenAITokenCount(audioURL))
+	})
+	return payloadBytes, replacementBytes
+}
+
+func agenticEncryptedFunctionOutputEstimateAdjustment(item any) (int, int) {
+	payloadBytes := 0
+	replacementBytes := 0
+	itemMap, ok := item.(map[string]any)
+	if !ok {
+		return 0, 0
+	}
+	itemType := strings.ToLower(strings.TrimSpace(stringFromAny(itemMap["type"])))
+	switch itemType {
+	case "function_call_output", "custom_tool_call_output", "agent_message":
+	default:
+		return 0, 0
+	}
+	forEachAgenticContentBlock(itemMap, func(block map[string]any) {
+		if strings.TrimSpace(stringFromAny(block["type"])) != "encrypted_content" {
+			return
+		}
+		encryptedContent := stringFromAny(block["encrypted_content"])
+		if encryptedContent == "" {
+			return
+		}
+		payloadBytes += len(encryptedContent)
+		replacementBytes += estimateOpenAIEncryptedFunctionOutputLength(len(encryptedContent))
+	})
+	return payloadBytes, replacementBytes
+}
+
+func forEachAgenticContentBlock(value any, visit func(map[string]any)) {
+	switch typed := value.(type) {
+	case []any:
+		for _, item := range typed {
+			forEachAgenticContentBlock(item, visit)
+		}
+	case map[string]any:
+		visit(typed)
+		for _, nested := range typed {
+			switch nested.(type) {
+			case []any, map[string]any:
+				forEachAgenticContentBlock(nested, visit)
+			}
+		}
+	}
+}
+
+func parseAgenticBase64DataURL(url string, mediaTypePrefix string) (string, bool) {
+	if len(url) < len("data:") || !strings.EqualFold(url[:len("data:")], "data:") {
+		return "", false
+	}
+	commaIndex := strings.IndexByte(url, ',')
+	if commaIndex < 0 {
+		return "", false
+	}
+	metadata := url[len("data:"):commaIndex]
+	payload := url[commaIndex+1:]
+	parts := strings.Split(metadata, ";")
+	if len(parts) == 0 || len(parts[0]) < len(mediaTypePrefix) || !strings.EqualFold(parts[0][:len(mediaTypePrefix)], mediaTypePrefix) {
+		return "", false
+	}
+	hasBase64Marker := false
+	for _, part := range parts[1:] {
+		if strings.EqualFold(part, "base64") {
+			hasBase64Marker = true
+			break
+		}
+	}
+	if !hasBase64Marker {
+		return "", false
+	}
+	return payload, true
+}
+
+func estimateAgenticOriginalImageBytes(imageURL string) int {
+	payload, ok := parseAgenticBase64DataURL(imageURL, "image/")
+	if !ok {
+		return openAIResizedImageBytesEstimate
+	}
+	decoded, err := base64.StdEncoding.DecodeString(payload)
+	if err != nil {
+		return openAIResizedImageBytesEstimate
+	}
+	config, _, err := image.DecodeConfig(bytes.NewReader(decoded))
+	if err != nil || config.Width <= 0 || config.Height <= 0 {
+		return openAIResizedImageBytesEstimate
+	}
+	patchesWide := (config.Width + openAIOriginalImagePatchSize - 1) / openAIOriginalImagePatchSize
+	patchesHigh := (config.Height + openAIOriginalImagePatchSize - 1) / openAIOriginalImagePatchSize
+	patchCount := patchesWide * patchesHigh
+	if patchCount > openAIOriginalImageMaxPatches {
+		patchCount = openAIOriginalImageMaxPatches
+	}
+	return approxOpenAIBytesForTokens(patchCount)
+}
+
+func approxOpenAITokenCount(text string) int {
+	return approxOpenAITokensFromByteCount(len(text))
+}
+
+func approxOpenAITokensFromByteCount(bytes int) int {
+	if bytes <= 0 {
+		return 0
+	}
+	return (bytes + openAIApproxBytesPerToken - 1) / openAIApproxBytesPerToken
+}
+
+func approxOpenAIBytesForTokens(tokens int) int {
+	if tokens <= 0 {
+		return 0
+	}
+	return tokens * openAIApproxBytesPerToken
 }
 
 func normalizedCompactionThreshold(threshold int) int {
@@ -589,10 +825,17 @@ func (c *Client) compactAgenticInputItems(ctx context.Context, inputItems []any,
 	}
 
 	instructions := compactionInstructions(opts)
+	if isChatGPTOAuth {
+		instructions = openAICompactionV2Instructions(opts, isChatGPTOAuth)
+	}
 
 	trimmedInput := trimCompactionInputItemsToFitContextWindow(inputItems, tools, instructions, opts.Model)
 	if len(trimmedInput) == 0 {
 		return nil, "", fmt.Errorf("compaction input is empty after trimming")
+	}
+
+	if isChatGPTOAuth {
+		return c.compactAgenticInputItemsViaResponsesV2(ctx, trimmedInput, tools, opts)
 	}
 
 	payload := map[string]any{
@@ -671,6 +914,341 @@ func (c *Client) compactAgenticInputItems(ctx context.Context, inputItems []any,
 
 	summary := extractCompactionSummaryFromOutputItems(compacted.Output)
 	return append([]any(nil), compacted.Output...), summary, nil
+}
+
+func (c *Client) compactAgenticInputItemsViaResponsesV2(ctx context.Context, inputItems []any, tools []ToolDefinition, opts *AgenticOptions) ([]any, string, error) {
+	compactionInput := append([]any(nil), inputItems...)
+	compactionInput = append(compactionInput, agenticInputItem{"type": "compaction_trigger"})
+
+	payload := map[string]any{
+		"model":   opts.Model,
+		"input":   compactionInput,
+		"stream":  true,
+		"store":   false,
+		"include": []string{"reasoning.encrypted_content"},
+	}
+	system := openAICompactionV2Instructions(opts, true)
+	if system != "" {
+		payload["instructions"] = system
+	}
+	if len(tools) > 0 {
+		payload["tools"] = tools
+		payload["parallel_tool_calls"] = openAIModelSupportsParallelToolCalls(opts.Model)
+	}
+
+	reasoningPayload := map[string]any{}
+	if effort := normalizeReasoningEffort(opts.ReasoningEffort); effort != "" {
+		reasoningPayload["effort"] = effort
+	}
+	if summary := normalizeReasoningSummary(opts.ReasoningSummary); summary != "" {
+		reasoningPayload["summary"] = summary
+	}
+	if isResponsesLiteWebsocketModel(opts.Model) {
+		if len(reasoningPayload) == 0 {
+			reasoningPayload["effort"] = responsesLiteDefaultReasoningEffort(opts.Model)
+		}
+		reasoningPayload["context"] = "all_turns"
+	}
+	if len(reasoningPayload) > 0 {
+		payload["reasoning"] = reasoningPayload
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, "", fmt.Errorf("marshal compaction response request: %w", err)
+	}
+
+	endpoint, err := c.responsesEndpoint(true)
+	if err != nil {
+		return nil, "", err
+	}
+
+	buildReq := func() (*http.Request, error) {
+		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+		if err != nil {
+			return nil, err
+		}
+		c.applyAuthHeaders(httpReq, true)
+		httpReq.Header.Set("Content-Type", "application/json")
+		httpReq.Header.Set("Accept", "text/event-stream")
+		if isResponsesLiteWebsocketModel(opts.Model) {
+			httpReq.Header.Set("x-openai-internal-codex-responses-lite", "true")
+		}
+		return httpReq, nil
+	}
+
+	resp, err := c.doWithOAuthRecovery(ctx, endpoint, true, buildReq)
+	if err != nil {
+		return nil, "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		errBody, _ := io.ReadAll(resp.Body)
+		apiErr := parseAPIError(resp.StatusCode, errBody)
+		return nil, "", fmt.Errorf("POST %q (compaction response): %w", endpoint, apiErr)
+	}
+
+	result, err := c.parseAgenticStream(resp.Body, nil, nil)
+	if err != nil {
+		return nil, "", fmt.Errorf("parse compaction response: %w", err)
+	}
+	compactionItems := make([]any, 0, 1)
+	for _, raw := range result.outputItems {
+		item, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(stringFromAny(item["type"])), "compaction") {
+			compactionItems = append(compactionItems, item)
+		}
+	}
+	if len(compactionItems) != 1 {
+		return nil, "", fmt.Errorf("compaction response returned %d compaction items, want 1", len(compactionItems))
+	}
+
+	summary := extractCompactionSummaryFromOutputItems(compactionItems)
+	return buildAgenticRemoteCompactionV2History(inputItems, compactionItems[0]), summary, nil
+}
+
+func buildAgenticRemoteCompactionV2History(inputItems []any, compactionItem any) []any {
+	retained := make([]any, 0, len(inputItems)+1)
+	remaining := openAIRemoteCompactionV2RetainedMessageTokenBudget
+
+	for i := len(inputItems) - 1; i >= 0 && remaining > 0; i-- {
+		item, ok := inputItems[i].(map[string]any)
+		if !ok || !isRetainedForOpenAIRemoteCompactionV2(item) {
+			continue
+		}
+		tokens := retainedMessageTokenCountForOpenAIRemoteCompactionV2(item)
+		if tokens <= 0 {
+			tokens = 1
+		}
+		if tokens > remaining {
+			truncated, ok := truncateRetainedMessageForOpenAIRemoteCompactionV2(item, remaining)
+			if !ok {
+				continue
+			}
+			retained = append(retained, truncated)
+			break
+		}
+		retained = append(retained, cloneAgenticMap(item))
+		remaining -= tokens
+	}
+
+	for i, j := 0, len(retained)-1; i < j; i, j = i+1, j-1 {
+		retained[i], retained[j] = retained[j], retained[i]
+	}
+	retained = append(retained, compactionItem)
+	return retained
+}
+
+func isRetainedForOpenAIRemoteCompactionV2(item map[string]any) bool {
+	itemType := strings.ToLower(strings.TrimSpace(stringFromAny(item["type"])))
+	switch strings.ToLower(strings.TrimSpace(stringFromAny(item["role"]))) {
+	case "user", "developer", "system":
+		return itemType == "message"
+	case "assistant":
+		if itemType != "message" {
+			return false
+		}
+		text := openAIInputItemContentText(item["content"])
+		return !strings.HasPrefix(text, "Message Type: FINAL_ANSWER\n")
+	default:
+		if itemType != "agent_message" {
+			return false
+		}
+		text := openAIInputItemContentText(item["content"])
+		return !strings.HasPrefix(text, "Message Type: FINAL_ANSWER\n") &&
+			estimateAgenticInputItemTokens(item) <= openAIToolOutputTokenLimitDefault
+	}
+}
+
+func retainedMessageTokenCountForOpenAIRemoteCompactionV2(item map[string]any) int {
+	if strings.EqualFold(strings.TrimSpace(stringFromAny(item["type"])), "message") {
+		if textTokens := messageTextTokenCountForOpenAIRemoteCompactionV2(item); textTokens > 0 {
+			return textTokens
+		}
+	}
+	return estimateAgenticInputItemTokens(item)
+}
+
+func messageTextTokenCountForOpenAIRemoteCompactionV2(item map[string]any) int {
+	switch content := item["content"].(type) {
+	case string:
+		return approxOpenAITokenCount(content)
+	case []any:
+		total := 0
+		for _, raw := range content {
+			block, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			switch strings.TrimSpace(stringFromAny(block["type"])) {
+			case "input_text", "output_text":
+				total += approxOpenAITokenCount(firstNonEmpty(stringFromAny(block["text"]), stringFromAny(block["content"])))
+			}
+		}
+		return total
+	default:
+		return 0
+	}
+}
+
+func truncateRetainedMessageForOpenAIRemoteCompactionV2(item map[string]any, tokenBudget int) (map[string]any, bool) {
+	if tokenBudget <= 0 {
+		return nil, false
+	}
+	cloned := cloneAgenticMap(item)
+	switch content := cloned["content"].(type) {
+	case string:
+		truncated := truncateTextToOpenAITokenBudget(strings.TrimSpace(content), tokenBudget)
+		if truncated == "" {
+			return nil, false
+		}
+		cloned["content"] = truncated
+		return cloned, true
+	case []any:
+		remaining := tokenBudget
+		out := make([]any, 0, len(content))
+		for _, raw := range content {
+			block, ok := raw.(map[string]any)
+			if !ok {
+				out = append(out, raw)
+				continue
+			}
+			block = cloneAgenticMap(block)
+			switch strings.TrimSpace(stringFromAny(block["type"])) {
+			case "input_text", "output_text":
+				text := strings.TrimSpace(firstNonEmpty(stringFromAny(block["text"]), stringFromAny(block["content"])))
+				if text == "" || remaining <= 0 {
+					continue
+				}
+				truncated := truncateTextToOpenAITokenBudget(text, remaining)
+				if truncated == "" {
+					continue
+				}
+				if _, ok := block["text"]; ok {
+					block["text"] = truncated
+				} else {
+					block["content"] = truncated
+				}
+				remaining -= approxOpenAITokenCount(truncated)
+			}
+			out = append(out, block)
+		}
+		if len(out) == 0 {
+			return nil, false
+		}
+		cloned["content"] = out
+		return cloned, true
+	default:
+		return nil, false
+	}
+}
+
+func cloneAgenticMap(item map[string]any) map[string]any {
+	cloned := make(map[string]any, len(item))
+	for key, value := range item {
+		cloned[key] = value
+	}
+	return cloned
+}
+
+func truncateTextToOpenAITokenBudget(text string, maxTokens int) string {
+	text = strings.TrimSpace(text)
+	if maxTokens <= 0 || text == "" {
+		return ""
+	}
+	maxBytes := approxOpenAIBytesForTokens(maxTokens)
+	if len(text) <= maxBytes {
+		return text
+	}
+	return strings.TrimSpace(truncateMiddleByByteEstimate(text, maxBytes, true))
+}
+
+func truncateMiddleByByteEstimate(text string, maxBytes int, useTokens bool) string {
+	if text == "" {
+		return ""
+	}
+	totalChars := len([]rune(text))
+	if maxBytes <= 0 {
+		return openAITruncationMarker(useTokens, openAIRemovedUnits(useTokens, len(text), totalChars))
+	}
+	if len(text) <= maxBytes {
+		return text
+	}
+
+	leftBudget := maxBytes / 2
+	rightBudget := maxBytes - leftBudget
+	removedChars, left, right := splitOpenAITruncationString(text, leftBudget, rightBudget)
+	marker := openAITruncationMarker(useTokens, openAIRemovedUnits(useTokens, len(text)-maxBytes, removedChars))
+	return left + marker + right
+}
+
+func splitOpenAITruncationString(text string, beginningBytes, endBytes int) (int, string, string) {
+	if text == "" {
+		return 0, "", ""
+	}
+	textLen := len(text)
+	tailStartTarget := textLen - endBytes
+	if tailStartTarget < 0 {
+		tailStartTarget = 0
+	}
+
+	prefixEnd := 0
+	suffixStart := textLen
+	removedChars := 0
+	suffixStarted := false
+	for idx, ch := range text {
+		charEnd := idx + len(string(ch))
+		if charEnd <= beginningBytes {
+			prefixEnd = charEnd
+			continue
+		}
+		if idx >= tailStartTarget {
+			if !suffixStarted {
+				suffixStart = idx
+				suffixStarted = true
+			}
+			continue
+		}
+		removedChars++
+	}
+	if suffixStart < prefixEnd {
+		suffixStart = prefixEnd
+	}
+	return removedChars, text[:prefixEnd], text[suffixStart:]
+}
+
+func openAITruncationMarker(useTokens bool, removedCount int) string {
+	if useTokens {
+		return fmt.Sprintf("…%d tokens truncated…", removedCount)
+	}
+	return fmt.Sprintf("…%d chars truncated…", removedCount)
+}
+
+func openAIRemovedUnits(useTokens bool, removedBytes, removedChars int) int {
+	if useTokens {
+		return approxOpenAITokensFromByteCount(removedBytes)
+	}
+	return removedChars
+}
+
+func openAICompactionV2Instructions(opts *AgenticOptions, isChatGPTOAuth bool) string {
+	if opts != nil {
+		if system := strings.TrimSpace(opts.System); system != "" {
+			return system
+		}
+	}
+	if isChatGPTOAuth {
+		return "You are a helpful assistant."
+	}
+	return ""
+}
+
+func openAIModelSupportsParallelToolCalls(model string) bool {
+	return !isResponsesLiteWebsocketModel(model)
 }
 
 func compactionInstructions(opts *AgenticOptions) string {
@@ -785,11 +1363,11 @@ func nextCompactionTrimIndex(items []any, protectedIndexes ...int) int {
 func estimateCompactionRequestTokens(inputItems []any, tools []ToolDefinition, instructions string) int {
 	total := estimateInputItemsTokens(inputItems)
 	if instructions != "" {
-		total += (len(instructions) + 3) / 4
+		total += approxOpenAITokenCount(instructions)
 	}
 	if len(tools) > 0 {
 		if encoded, err := json.Marshal(tools); err == nil {
-			total += (len(encoded) + 3) / 4
+			total += approxOpenAITokensFromByteCount(len(encoded))
 		}
 	}
 	return total
@@ -1021,12 +1599,13 @@ func statelessOAuthOutputItems(items []any) []any {
 // sendAgenticTurn sends a single request and returns parsed results.
 func (c *Client) sendAgenticTurn(ctx context.Context, inputItems []any, tools []ToolDefinition, opts *AgenticOptions, isChatGPTOAuth bool) (*agenticTurnResult, error) {
 	policy := httpretry.DefaultPolicy()
+	policy.MaxRetries = 0
 	policy.AllowReplay = true
 	policy.RetryableError = isRetryableResponsesTransportError
 	policy.OnRetry = func(event httpretry.RetryEvent) {
 		applog.Infof("[openai-client] stream error before output, retry attempt %d/%d in %v: %v", event.Attempt, event.MaxRetries, event.Delay, event.Err)
 	}
-	return httpretry.DoStream(ctx, policy, func(attemptCtx context.Context) (*agenticTurnResult, bool, error) {
+	result, err := httpretry.DoStream(ctx, policy, func(attemptCtx context.Context) (*agenticTurnResult, bool, error) {
 		attemptOpts := *opts
 		observed := false
 		attemptOpts.OnText = func(text string) {
@@ -1056,6 +1635,7 @@ func (c *Client) sendAgenticTurn(ctx context.Context, inputItems []any, tools []
 		result, err := c.sendAgenticTurnOnce(attemptCtx, inputItems, tools, &attemptOpts, isChatGPTOAuth)
 		return result, observed, err
 	})
+	return result, err
 }
 
 func (c *Client) sendAgenticTurnOnce(ctx context.Context, inputItems []any, tools []ToolDefinition, opts *AgenticOptions, isChatGPTOAuth bool) (*agenticTurnResult, error) {
@@ -1388,6 +1968,8 @@ func (c *Client) parseAgenticStreamWithToolCallbacks(body io.Reader, onText func
 							sawThinking = true
 						}
 					}
+				case "compaction":
+					result.outputItems = append(result.outputItems, item)
 				default:
 					// Provider-native output items (web_search_call, etc.) are
 					// round-tripped but not locally executed.

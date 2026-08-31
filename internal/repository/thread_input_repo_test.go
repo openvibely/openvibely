@@ -179,6 +179,120 @@ func TestThreadInputRepo_ListRecoverableQueuedTaskIDsFindsPendingInputsBehindTer
 	}
 }
 
+func TestThreadInputRepo_ListRecoverableQueuedChatProjectIDs(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	repo := NewThreadInputRepo(db)
+	project := createThreadInputProject(t, ctx, db)
+	agent := createThreadInputLLMConfig(t, ctx, db)
+	queued := &models.ThreadInput{Scope: models.ThreadInputScopeChat, ProjectID: project.ID, AgentConfigID: agent.ID, InputMode: models.ThreadInputModeQueued, Content: "queued while draining", ChatMode: models.ChatModeOrchestrate}
+	if err := repo.CreateQueued(ctx, queued); err != nil {
+		t.Fatalf("CreateQueued: %v", err)
+	}
+
+	ids, err := repo.ListRecoverableQueuedChatProjectIDsAfter(ctx, "", 10)
+	if err != nil {
+		t.Fatalf("ListRecoverableQueuedChatProjectIDsAfter: %v", err)
+	}
+	if len(ids) != 1 || ids[0] != project.ID {
+		t.Fatalf("recoverable chat project ids = %#v, want [%s]", ids, project.ID)
+	}
+
+	chatTask := &models.Task{ProjectID: project.ID, Title: "Active Chat", Category: models.CategoryChat, Status: models.StatusRunning, Prompt: "active"}
+	if err := NewTaskRepo(db, nil).Create(ctx, chatTask); err != nil {
+		t.Fatalf("create active chat task: %v", err)
+	}
+	active := &models.Execution{TaskID: chatTask.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "active"}
+	if err := NewExecutionRepo(db).Create(ctx, active); err != nil {
+		t.Fatalf("create active chat execution: %v", err)
+	}
+	ids, err = repo.ListRecoverableQueuedChatProjectIDsAfter(ctx, "", 10)
+	if err != nil {
+		t.Fatalf("ListRecoverableQueuedChatProjectIDsAfter active: %v", err)
+	}
+	if len(ids) != 0 {
+		t.Fatalf("recoverable chat projects with active execution = %#v, want none", ids)
+	}
+}
+
+func TestThreadInputRepo_ListRecoverableQueuedChatProjectIDs_KeysetPagesAndGuards(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	repo := NewThreadInputRepo(db)
+	agent := createThreadInputLLMConfig(t, ctx, db)
+
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO projects (id, name, description, repo_path) VALUES
+			('chat-recover-001', 'Chat Recover 001', '', ''),
+			('chat-recover-002', 'Chat Recover 002', '', ''),
+			('chat-recover-003', 'Chat Recover 003', '', ''),
+			('chat-recover-004', 'Chat Recover 004', '', ''),
+			('chat-recover-005', 'Chat Recover 005', '', ''),
+			('chat-recover-006', 'Chat Recover 006', '', ''),
+			('chat-recover-007', 'Chat Recover 007', '', '');
+		INSERT INTO tasks (id, project_id, title, category, priority, status, prompt) VALUES
+			('chat-recover-terminal-task', 'chat-recover-003', 'Terminal guard', 'active', 2, 'completed', 'p'),
+			('chat-recover-active-chat-task', 'chat-recover-004', 'Active Chat', 'chat', 2, 'running', 'p'),
+			('chat-recover-running-guard-task', 'chat-recover-005', 'Running guard', 'active', 2, 'running', 'p'),
+			('chat-recover-cancelled-task', 'chat-recover-006', 'Cancelled guard', 'active', 2, 'cancelled', 'p');
+		INSERT INTO executions (id, task_id, agent_config_id, status, prompt_sent) VALUES
+			('chat-recover-completed-exec', 'chat-recover-terminal-task', ?, 'completed', 'done'),
+			('chat-recover-active-chat-exec', 'chat-recover-active-chat-task', ?, 'running', 'active'),
+			('chat-recover-running-guard-exec', 'chat-recover-running-guard-task', ?, 'running', 'active'),
+			('chat-recover-cancelled-exec', 'chat-recover-cancelled-task', ?, 'cancelled', 'cancelled');
+		INSERT INTO thread_inputs (id, scope, project_id, run_execution_id, agent_config_id, input_mode, input_status, content, queue_position, chat_mode) VALUES
+			('chat-recover-history', 'chat', 'chat-recover-001', NULL, ?, 'queued', 'applied', 'old applied', 1, 'orchestrate'),
+			('chat-recover-eligible-002-a', 'chat', 'chat-recover-002', NULL, ?, 'queued', 'pending', 'first pending', 1, 'orchestrate'),
+			('chat-recover-eligible-002-b', 'chat', 'chat-recover-002', NULL, ?, 'queued', 'pending', 'second pending same project', 2, 'orchestrate'),
+			('chat-recover-eligible-003', 'chat', 'chat-recover-003', 'chat-recover-completed-exec', ?, 'queued', 'pending', 'completed guard', 1, 'orchestrate'),
+			('chat-recover-active-004', 'chat', 'chat-recover-004', NULL, ?, 'queued', 'pending', 'active chat should skip', 1, 'orchestrate'),
+			('chat-recover-running-guard-005', 'chat', 'chat-recover-005', 'chat-recover-running-guard-exec', ?, 'queued', 'pending', 'running guard should skip', 1, 'orchestrate'),
+			('chat-recover-cancelled-006', 'chat', 'chat-recover-006', 'chat-recover-cancelled-exec', ?, 'queued', 'pending', 'cancelled guard', 1, 'orchestrate'),
+			('chat-recover-eligible-007', 'chat', 'chat-recover-007', NULL, ?, 'queued', 'pending', 'later pending', 1, 'orchestrate')`, agent.ID, agent.ID, agent.ID, agent.ID, agent.ID, agent.ID, agent.ID, agent.ID, agent.ID, agent.ID, agent.ID, agent.ID); err != nil {
+		t.Fatalf("seed recoverable chat fixture: %v", err)
+	}
+
+	firstPage, err := repo.ListRecoverableQueuedChatProjectIDsAfter(ctx, "", 2)
+	if err != nil {
+		t.Fatalf("ListRecoverableQueuedChatProjectIDsAfter first page: %v", err)
+	}
+	wantFirst := []string{"chat-recover-002", "chat-recover-003"}
+	if strings.Join(firstPage, ",") != strings.Join(wantFirst, ",") {
+		t.Fatalf("first recovery page = %#v, want %#v", firstPage, wantFirst)
+	}
+
+	secondPage, err := repo.ListRecoverableQueuedChatProjectIDsAfter(ctx, firstPage[len(firstPage)-1], 2)
+	if err != nil {
+		t.Fatalf("ListRecoverableQueuedChatProjectIDsAfter second page: %v", err)
+	}
+	wantSecond := []string{"chat-recover-006", "chat-recover-007"}
+	if strings.Join(secondPage, ",") != strings.Join(wantSecond, ",") {
+		t.Fatalf("second recovery page = %#v, want %#v", secondPage, wantSecond)
+	}
+
+	thirdPage, err := repo.ListRecoverableQueuedChatProjectIDsAfter(ctx, secondPage[len(secondPage)-1], 2)
+	if err != nil {
+		t.Fatalf("ListRecoverableQueuedChatProjectIDsAfter third page: %v", err)
+	}
+	if len(thirdPage) != 0 {
+		t.Fatalf("third recovery page = %#v, want none", thirdPage)
+	}
+}
+
+func TestThreadInputRepo_ListRecoverableQueuedChatProjectIDsAfterQueryPlan(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	plan := explainThreadInputQueryPlan(t, db, listRecoverableQueuedChatProjectIDsAfterSQL, "", 100)
+	if !strings.Contains(plan, "SEARCH ti USING COVERING INDEX idx_thread_inputs_recover_chat_project") {
+		t.Fatalf("recoverable chat project plan = %q, want recovery covering index", plan)
+	}
+	if !strings.Contains(plan, "scope=? AND input_status=? AND input_mode=? AND project_id>?") {
+		t.Fatalf("recoverable chat project plan = %q, want keyset search by scope/status/mode/project", plan)
+	}
+	if strings.Contains(plan, "USING INDEX idx_thread_inputs_pending_chat (scope=? AND project_id>?") {
+		t.Fatalf("recoverable chat project plan = %q, want no historical chat scan by project before pending filters", plan)
+	}
+}
+
 func TestThreadInputRepo_ClaimQueuedForTaskExecutionRequiresNoActiveExecution(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
@@ -247,6 +361,12 @@ func TestThreadInputRepo_ClaimQueuedForTaskExecutionRetargetsRemainingQueuedGuar
 	}
 	if storedSecond == nil || storedSecond.RunExecutionID != promoted.ID {
 		t.Fatalf("remaining queued task input guard = %#v, want promoted exec %s", storedSecond, promoted.ID)
+	}
+	if _, err := repo.ConvertQueuedToSteering(ctx, second.ID, promoted.ID, promoted.ID); err == nil {
+		t.Fatalf("remaining queued task input should not steer before promoted execution is running")
+	}
+	if err := execRepo.MarkRunning(ctx, promoted.ID); err != nil {
+		t.Fatalf("mark promoted execution running: %v", err)
 	}
 	if _, err := repo.ConvertQueuedToSteering(ctx, second.ID, promoted.ID, promoted.ID); err != nil {
 		t.Fatalf("remaining queued task input should steer against promoted turn: %v", err)
@@ -336,6 +456,59 @@ func TestThreadInputRepo_ClaimQueuedChatPersistsSlackContextWithClaim(t *testing
 	}
 	if stc == nil || stc.SlackChannelID != "C1" || stc.SlackThreadTS != "1710000000.100000" {
 		t.Fatalf("slack context not persisted with queued claim: %#v", stc)
+	}
+	stored, err := repo.GetByID(ctx, input.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if stored == nil || stored.InputStatus != models.ThreadInputApplied || stored.RunExecutionID != exec.ID {
+		t.Fatalf("queued input should be applied to created execution, got %#v", stored)
+	}
+}
+
+func TestThreadInputRepo_ClaimQueuedChatPersistsEmailContextWithClaim(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	repo := NewThreadInputRepo(db)
+	project := createThreadInputProject(t, ctx, db)
+	agent := createThreadInputLLMConfig(t, ctx, db)
+
+	input := &models.ThreadInput{
+		Scope:           models.ThreadInputScopeChat,
+		ProjectID:       project.ID,
+		AgentConfigID:   agent.ID,
+		InputMode:       models.ThreadInputModeQueued,
+		Content:         "queued email",
+		ChatMode:        models.ChatModeOrchestrate,
+		Source:          models.TaskOriginEmail,
+		EmailFrom:       "sender@example.com",
+		EmailMessageID:  "<message-1@example.com>",
+		EmailReferences: "<root@example.com>",
+		EmailSubject:    "Original subject",
+		EmailSessionKey: "sender@example.com|thread-root",
+	}
+	if err := repo.CreateQueued(ctx, input); err != nil {
+		t.Fatalf("CreateQueued: %v", err)
+	}
+
+	task := &models.Task{ProjectID: project.ID, Title: "Queued Email", Category: models.CategoryChat, Status: models.StatusRunning, Prompt: input.Content, CreatedVia: models.TaskOriginEmail}
+	exec := &models.Execution{AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: input.Content}
+	if err := repo.ClaimQueuedForChatExecution(ctx, input.ID, task, exec, nil, &models.EmailTaskContext{
+		EmailFrom:       "sender@example.com",
+		EmailMessageID:  "<message-1@example.com>",
+		EmailReferences: "<root@example.com>",
+		EmailSubject:    "Original subject",
+		EmailSessionKey: "sender@example.com|thread-root",
+	}, nil); err != nil {
+		t.Fatalf("ClaimQueuedForChatExecution: %v", err)
+	}
+
+	etc, err := NewEmailTaskContextRepo(db).GetByTaskID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetByTaskID: %v", err)
+	}
+	if etc == nil || etc.EmailFrom != "sender@example.com" || etc.EmailMessageID != "<message-1@example.com>" || etc.EmailReferences != "<root@example.com>" || etc.EmailSubject != "Original subject" || etc.EmailSessionKey != "sender@example.com|thread-root" {
+		t.Fatalf("email context not persisted with queued claim: %#v", etc)
 	}
 	stored, err := repo.GetByID(ctx, input.ID)
 	if err != nil {
@@ -1003,8 +1176,8 @@ func TestExecutionRepo_CreateDirectTaskFollowupReactivatesSwarmChildBeforeRecove
 	if err != nil {
 		t.Fatalf("GetByID: %v", err)
 	}
-	if stored.Status != models.ExecRunning {
-		t.Fatalf("expected active swarm child follow-up execution to remain running, got %s (error=%q)", stored.Status, stored.ErrorMessage)
+	if stored.Status != models.ExecQueued {
+		t.Fatalf("expected active swarm child follow-up execution to wait queued, got %s (error=%q)", stored.Status, stored.ErrorMessage)
 	}
 	updatedChild, err := taskRepo.GetByID(ctx, child.ID)
 	if err != nil {
@@ -1342,8 +1515,18 @@ func TestExecutionRepo_TaskFollowupAdmissionConcurrentDirectStartsExactlyOnce(t 
 		t.Fatalf("expected exactly one direct admission winner, got %d", startedCount)
 	}
 	execs, err := execRepo.ListByTaskChronological(ctx, task.ID)
-	if err != nil || len(execs) != 1 || execs[0].Status != models.ExecRunning {
-		t.Fatalf("expected one running direct execution, got %#v err=%v", execs, err)
+	if err != nil || len(execs) != 1 || execs[0].Status != models.ExecQueued {
+		t.Fatalf("expected one queued direct execution, got %#v err=%v", execs, err)
+	}
+	if err := execRepo.MarkRunning(ctx, execs[0].ID); err != nil {
+		t.Fatalf("mark direct execution running: %v", err)
+	}
+	promoted, err := execRepo.GetByID(ctx, execs[0].ID)
+	if err != nil {
+		t.Fatalf("get promoted execution: %v", err)
+	}
+	if promoted.Status != models.ExecRunning {
+		t.Fatalf("expected promoted direct execution to be running, got %s", promoted.Status)
 	}
 	pending, err := NewThreadInputRepo(db).ListPendingForTask(ctx, task.ID)
 	if err != nil || len(pending) != submissions-1 {
@@ -1500,6 +1683,28 @@ func TestThreadInputRepo_QueuedPromotionBlockedByOrdinaryTaskClaim(t *testing.T)
 	if exec.ID != "" {
 		t.Fatalf("blocked promotion created execution %s", exec.ID)
 	}
+}
+
+func explainThreadInputQueryPlan(t testing.TB, db *sql.DB, query string, args ...any) string {
+	t.Helper()
+	rows, err := db.Query("EXPLAIN QUERY PLAN "+query, args...)
+	if err != nil {
+		t.Fatalf("explain query plan: %v", err)
+	}
+	defer rows.Close()
+	var details []string
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatalf("scan query plan: %v", err)
+		}
+		details = append(details, detail)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate query plan: %v", err)
+	}
+	return strings.Join(details, "; ")
 }
 
 func createThreadInputProject(t *testing.T, ctx context.Context, db *sql.DB) *models.Project {

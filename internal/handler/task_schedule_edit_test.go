@@ -40,11 +40,16 @@ func TestHandler_GetTask_ScheduleDeleteConfirmationDialog(t *testing.T) {
 	for _, want := range []string{
 		`id="delete_schedule_confirm_modal" class="modal"`,
 		`id="delete_schedule_confirm_name"`,
+		`data-destructive-confirm-dialog`,
+		`openDestructiveConfirmDialog('delete_schedule_confirm_modal', 'delete_schedule_confirm_name', button.dataset.scheduleTitle || 'this task')`,
 		`onclick="delete_schedule_confirm_modal.close()"`,
 		`onclick="confirmDeleteSchedule()"`,
 		`class="btn btn-error"`,
 		`onclick="openDeleteScheduleConfirm(this)"`,
 		`data-schedule-title="Scheduled Delete Dialog Task"`,
+		`deleteScheduleTarget = button.dataset.scheduleTarget || '#task-detail-content';`,
+		`deleteScheduleTargetElement = deleteScheduleTarget.indexOf('closest ') === 0 ? button.closest(deleteScheduleTarget.replace(/^closest\s+/, '')) : null;`,
+		`deleteScheduleSwap = button.dataset.scheduleSwap || 'outerHTML';`,
 		`modal.showModal()`,
 		`htmx.ajax('DELETE', '/schedules/' + deleteScheduleID`,
 	} {
@@ -204,7 +209,7 @@ func TestHandler_UpdateTask_FromSchedulePage(t *testing.T) {
 	form.Add("title", "Updated Title")
 	form.Add("prompt", "Updated prompt")
 	form.Add("category", string(models.CategoryScheduled))
-	form.Add("priority", "0")
+	form.Add("priority", "2")
 	form.Add("tag", "")
 
 	req := httptest.NewRequest(http.MethodPut, "/tasks/"+task.ID, strings.NewReader(form.Encode()))
@@ -355,6 +360,80 @@ func TestHandler_CreateTask_FromSchedulePage_WithRepeatInterval(t *testing.T) {
 	}
 }
 
+func TestHandler_CreateTask_FromSchedulePage_RejectsOversizedInterval(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	ctx := context.Background()
+	form := url.Values{
+		"title":           {"Oversized interval task"},
+		"prompt":          {"must not persist"},
+		"category":        {"scheduled"},
+		"priority":        {"2"},
+		"run_at":          {"2026-03-15T10:00"},
+		"repeat_type":     {"seconds"},
+		"repeat_interval": {"366"},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/tasks?project_id=default&from=schedule", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+	tasks, err := h.taskSvc.ListByProject(ctx, "default", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, task := range tasks {
+		if task.Title == "Oversized interval task" {
+			t.Fatal("oversized scheduled task was persisted")
+		}
+	}
+}
+
+func TestHandler_CreateTask_FromSchedulePage_InvalidDateCreatesTaskWithoutSchedule(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	ctx := context.Background()
+	form := url.Values{
+		"title":           {"Invalid date scheduled task"},
+		"prompt":          {"Create the task without a schedule"},
+		"category":        {"scheduled"},
+		"priority":        {"2"},
+		"run_at":          {"not-a-date"},
+		"repeat_type":     {"daily"},
+		"repeat_interval": {"1"},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/tasks?project_id=default&from=schedule", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303, got %d: %s", rec.Code, rec.Body.String())
+	}
+	tasks, err := h.taskSvc.ListByProject(ctx, "default", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found *models.Task
+	for i := range tasks {
+		if tasks[i].Title == "Invalid date scheduled task" {
+			found = &tasks[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("expected scheduled task to be created")
+	}
+	schedules, err := h.scheduleRepo.ListByTask(ctx, found.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(schedules) != 0 {
+		t.Fatalf("expected no schedule for invalid date, got %d", len(schedules))
+	}
+}
+
 func TestHandler_CreateTask_FromSchedulePage_DefaultsRepeatTypeToDailyWhenMissing(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	ctx := context.Background()
@@ -485,7 +564,7 @@ func TestHandler_UpdateTask_FromTasksPage(t *testing.T) {
 	form.Add("description", "Updated description")
 	form.Add("prompt", "Updated prompt")
 	form.Add("category", string(models.CategoryActive))
-	form.Add("priority", "0")
+	form.Add("priority", "2")
 	form.Add("tag", "")
 
 	req := httptest.NewRequest(http.MethodPut, "/tasks/"+task.ID, strings.NewReader(form.Encode()))

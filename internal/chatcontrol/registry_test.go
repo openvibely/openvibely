@@ -22,6 +22,28 @@ func TestRegistry_AllActionsHaveValidJSON(t *testing.T) {
 	}
 }
 
+func TestRegistry_ListTasksDescriptionDiscouragesLifecycleEnumeration(t *testing.T) {
+	def := Get("list_tasks")
+	if def == nil {
+		t.Fatal("list_tasks action missing")
+	}
+	if !strings.Contains(def.Description, "Omit category/status for a broad search across all visible task categories and statuses") {
+		t.Fatalf("list_tasks description should explain broad category/status search, got %q", def.Description)
+	}
+	if !strings.Contains(def.Description, "Supplying category or status restricts results to only that lifecycle state") {
+		t.Fatalf("list_tasks description should explain category/status filters are restrictive, got %q", def.Description)
+	}
+	if !strings.Contains(def.Description, "Returned filter values echo the parameters you sent") {
+		t.Fatalf("list_tasks description should explain returned filters are echoes, got %q", def.Description)
+	}
+	if !strings.Contains(def.Description, "do not immediately repeat the same query just to get an unfiltered echo") {
+		t.Fatalf("list_tasks description should discourage retrying for an unfiltered echo, got %q", def.Description)
+	}
+	if !strings.Contains(def.Description, "Do not enumerate lifecycle filters after an empty total=0, has_more=false result") {
+		t.Fatalf("list_tasks description should discourage empty lifecycle enumeration, got %q", def.Description)
+	}
+}
+
 func TestRegistry_SendMessageTargetDescriptionMentionsAuthorizedRecipients(t *testing.T) {
 	def := Get("send_message")
 	if def == nil {
@@ -60,6 +82,19 @@ func TestRegistry_NoDuplicateNames(t *testing.T) {
 	}
 }
 
+func TestRegistry_AllActionNamesMatchesRegistryOrder(t *testing.T) {
+	names := AllActionNames()
+	actions := Registry()
+	if len(names) != len(actions) {
+		t.Fatalf("AllActionNames length = %d, want %d", len(names), len(actions))
+	}
+	for i, action := range actions {
+		if names[i] != action.Name {
+			t.Fatalf("AllActionNames[%d] = %q, want %q", i, names[i], action.Name)
+		}
+	}
+}
+
 func TestRegistry_AllNamesLowercase(t *testing.T) {
 	for _, a := range Registry() {
 		if a.Name != strings.ToLower(a.Name) {
@@ -77,35 +112,41 @@ func TestRegistry_AllActionsHaveDescription(t *testing.T) {
 }
 
 func TestRegistry_AutomationActionsEnforceModeAndSurfacePolicies(t *testing.T) {
-	readActions := []string{"preview_automation_description"}
-	writeActions := []string{"plan_automation_save", "save_automation"}
+	readActions := []string{"list_automations", "get_automation", "preview_automation_description"}
+	writeActions := []string{"save_automation", "update_automation_template", "run_automation_now", "pause_automation", "resume_automation", "delete_automation"}
 	for _, name := range append(readActions, writeActions...) {
 		def := Get(name)
 		if def == nil || def.Domain != DomainAutomations {
 			t.Fatalf("expected %s in automations domain", name)
 		}
-		if err := IsAllowed(name, models.ChatModeOrchestrate, SurfaceWeb); err != nil {
-			t.Fatalf("expected %s in web orchestrate mode: %v", name, err)
-		}
-		if err := IsAllowed(name, models.ChatModeOrchestrate, SurfaceAPI); err != nil {
-			t.Fatalf("expected %s on project-aware API surface: %v", name, err)
-		}
-		if err := IsAllowed(name, models.ChatModeOrchestrate, SurfaceSlack); err == nil {
-			t.Fatalf("expected %s unavailable on channel surfaces", name)
+		for _, surface := range AllSurfaces {
+			if err := IsAllowed(name, models.ChatModeOrchestrate, surface); err != nil {
+				t.Fatalf("expected %s in orchestrate mode on %s surface: %v", name, surface, err)
+			}
+			orchestrateDefs := toolDefNames(ToolDefsForContext(models.ChatModeOrchestrate, surface, true))
+			mustContain(t, orchestrateDefs, name)
 		}
 	}
 	for _, name := range readActions {
-		if err := IsAllowed(name, models.ChatModePlan, SurfaceWeb); err != nil {
-			t.Fatalf("expected read action %s in plan mode: %v", name, err)
+		for _, surface := range AllSurfaces {
+			if err := IsAllowed(name, models.ChatModePlan, surface); err != nil {
+				t.Fatalf("expected read action %s in plan mode on %s surface: %v", name, surface, err)
+			}
+			planDefs := toolDefNames(ToolDefsForContext(models.ChatModePlan, surface, true))
+			mustContain(t, planDefs, name)
 		}
 	}
 	for _, name := range writeActions {
-		if err := IsAllowed(name, models.ChatModePlan, SurfaceWeb); err == nil {
-			t.Fatalf("expected write action %s denied in plan mode", name)
+		for _, surface := range AllSurfaces {
+			if err := IsAllowed(name, models.ChatModePlan, surface); err == nil {
+				t.Fatalf("expected write action %s denied in plan mode on %s surface", name, surface)
+			}
+			planDefs := toolDefNames(ToolDefsForContext(models.ChatModePlan, surface, true))
+			mustNotContain(t, planDefs, name)
 		}
 	}
 
-	plan := Get("plan_automation_save")
+	save := Get("save_automation")
 	var schema struct {
 		Properties struct {
 			Source struct {
@@ -113,24 +154,52 @@ func TestRegistry_AutomationActionsEnforceModeAndSurfacePolicies(t *testing.T) {
 			} `json:"source"`
 		} `json:"properties"`
 	}
-	if err := json.Unmarshal(plan.Parameters, &schema); err != nil {
-		t.Fatalf("decode Automation save-plan schema: %v", err)
+	if err := json.Unmarshal(save.Parameters, &schema); err != nil {
+		t.Fatalf("decode Automation save schema: %v", err)
 	}
-	want := []string{"template", "describe", "blank"}
+	want := []string{"template", "describe", "blank", "yaml"}
 	if !reflect.DeepEqual(want, schema.Properties.Source.Enum) {
-		t.Fatalf("Automation save-plan source enum = %v, want %v", schema.Properties.Source.Enum, want)
+		t.Fatalf("Automation save source enum = %v, want %v", schema.Properties.Source.Enum, want)
 	}
-	if strings.Contains(string(plan.Parameters), `"candidate"`) || strings.Contains(plan.Description, "structured candidate") {
-		t.Fatal("public Automation save-plan action must not expose a candidate creation identity")
+	if !strings.Contains(string(save.Parameters), `"automation_yaml"`) || !strings.Contains(strings.ToLower(save.Description), "yaml") {
+		t.Fatal("public Automation save action must advertise the canonical YAML input path")
 	}
-	for _, removed := range []string{"create_automation_draft", "plan_automation_publication", "publish_automation_draft"} {
+	if strings.Contains(string(save.Parameters), `"candidate"`) || strings.Contains(save.Description, "structured candidate") {
+		t.Fatal("public Automation save action must not expose a candidate creation identity")
+	}
+	for _, name := range []string{"update_automation_template", "run_automation_now", "pause_automation", "resume_automation"} {
+		def := Get(name)
+		if def == nil {
+			t.Fatalf("%s is not registered", name)
+		}
+		if !strings.Contains(string(def.Parameters), `"automation_id"`) || !strings.Contains(string(def.Parameters), `"name"`) {
+			t.Fatalf("%s must accept automation_id and name selectors", name)
+		}
+		if strings.Contains(strings.ToLower(def.Name), "delete") || strings.Contains(strings.ToLower(def.Description), "delete") {
+			t.Fatalf("%s must not expose Automation deletion", name)
+		}
+	}
+	deleteAutomation := Get("delete_automation")
+	if deleteAutomation == nil {
+		t.Fatal("delete_automation is not registered")
+	}
+	if deleteAutomation.Access != AccessWrite || deleteAutomation.Sensitivity != SensitivityDestructive || !deleteAutomation.NeedsConfirmation {
+		t.Fatalf("delete_automation policy = access=%q sensitivity=%q confirmation=%v, want write/destructive/true", deleteAutomation.Access, deleteAutomation.Sensitivity, deleteAutomation.NeedsConfirmation)
+	}
+	if !strings.Contains(string(deleteAutomation.Parameters), `"automation_id"`) || !strings.Contains(string(deleteAutomation.Parameters), `"name"`) {
+		t.Fatal("delete_automation must accept automation_id and name selectors")
+	}
+	if !strings.Contains(strings.ToLower(deleteAutomation.Description), "explicit confirmation") {
+		t.Fatalf("delete_automation description should require explicit confirmation, got %q", deleteAutomation.Description)
+	}
+	for _, removed := range []string{"create_automation_draft", "plan_automation_publication", "publish_automation_draft", "plan_automation_save"} {
 		if Get(removed) != nil {
 			t.Fatalf("removed draft action %s remains registered", removed)
 		}
 	}
 	preview := Get("preview_automation_description")
 	if preview == nil || !strings.Contains(preview.Description, "custom") || !strings.Contains(preview.Description, "visual builder") ||
-		!strings.Contains(plan.Description, "custom") || !strings.Contains(plan.Description, "visual builder") {
+		!strings.Contains(save.Description, "custom") || !strings.Contains(save.Description, "visual builder") {
 		t.Fatal("Describe It and Chat action descriptions must advertise the shared custom builder contract")
 	}
 }
@@ -139,7 +208,7 @@ func TestRegistry_AllActionsHaveDomain(t *testing.T) {
 	validDomains := map[Domain]bool{
 		DomainTasks: true, DomainSchedules: true, DomainAlerts: true,
 		DomainPersonality: true, DomainModels: true, DomainAgents: true,
-		DomainProjects: true, DomainSettings: true, DomainMessaging: true, DomainGitHub: true, DomainAutomations: true, DomainMemory: true, DomainChat: true,
+		DomainProjects: true, DomainSettings: true, DomainMessaging: true, DomainGitHub: true, DomainAnalytics: true, DomainPulse: true, DomainAutomations: true, DomainMemory: true, DomainChat: true,
 	}
 	for _, a := range Registry() {
 		if !validDomains[a.Domain] {
@@ -198,6 +267,161 @@ func TestRegistry_DestructiveActionsNeedConfirmation(t *testing.T) {
 	}
 }
 
+func TestSaveCustomPersonalityRegisteredOrchestrateOnly(t *testing.T) {
+	def := Get("save_custom_personality")
+	if def == nil {
+		t.Fatal("save_custom_personality missing from registry")
+	}
+	if def.Domain != DomainPersonality || def.Access != AccessWrite {
+		t.Fatalf("save_custom_personality domain/access = %s/%s, want personality/write", def.Domain, def.Access)
+	}
+	for _, surface := range AllSurfaces {
+		if err := IsAllowed("save_custom_personality", models.ChatModeOrchestrate, surface); err != nil {
+			t.Fatalf("save_custom_personality should be allowed in orchestrate on %s: %v", surface, err)
+		}
+		mustContain(t, toolDefNames(ToolDefsForContext(models.ChatModeOrchestrate, surface, true)), "save_custom_personality")
+		if err := IsAllowed("save_custom_personality", models.ChatModePlan, surface); err == nil {
+			t.Fatalf("save_custom_personality should be denied in plan on %s", surface)
+		}
+		mustNotContain(t, toolDefNames(ToolDefsForContext(models.ChatModePlan, surface, true)), "save_custom_personality")
+	}
+	var schema struct {
+		Required   []string                   `json:"required"`
+		Properties map[string]json.RawMessage `json:"properties"`
+	}
+	if err := json.Unmarshal(def.Parameters, &schema); err != nil {
+		t.Fatalf("decode schema: %v", err)
+	}
+	for _, name := range []string{"mode", "name", "system_prompt", "key", "description", "activate"} {
+		if _, ok := schema.Properties[name]; !ok {
+			t.Fatalf("save_custom_personality schema missing %s", name)
+		}
+	}
+	required := map[string]bool{}
+	for _, name := range schema.Required {
+		required[name] = true
+	}
+	mustContain(t, required, "mode", "name", "system_prompt")
+}
+
+func TestDecideAlertRegisteredOrchestrateOnly(t *testing.T) {
+	def := Get("decide_alert")
+	if def == nil {
+		t.Fatal("decide_alert missing from registry")
+	}
+	if def.Domain != DomainAlerts || def.Access != AccessWrite {
+		t.Fatalf("decide_alert domain/access = %s/%s, want alerts/write", def.Domain, def.Access)
+	}
+	if def.NeedsConfirmation {
+		t.Fatal("decide_alert should rely on explicit user-directed Orchestrate calls, not destructive confirmation")
+	}
+	for _, surface := range AllSurfaces {
+		if err := IsAllowed("decide_alert", models.ChatModeOrchestrate, surface); err != nil {
+			t.Fatalf("decide_alert should be allowed in orchestrate on %s: %v", surface, err)
+		}
+		mustContain(t, toolDefNames(ToolDefsForContext(models.ChatModeOrchestrate, surface, true)), "decide_alert")
+		if err := IsAllowed("decide_alert", models.ChatModePlan, surface); err == nil {
+			t.Fatalf("decide_alert should be denied in plan on %s", surface)
+		}
+		mustNotContain(t, toolDefNames(ToolDefsForContext(models.ChatModePlan, surface, true)), "decide_alert")
+	}
+	var schema struct {
+		Required   []string `json:"required"`
+		Properties map[string]struct {
+			Enum []string `json:"enum"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(def.Parameters, &schema); err != nil {
+		t.Fatalf("decode schema: %v", err)
+	}
+	required := map[string]bool{}
+	for _, name := range schema.Required {
+		required[name] = true
+	}
+	mustContain(t, required, "alert_id", "decision")
+	if !reflect.DeepEqual(schema.Properties["decision"].Enum, []string{"approved", "rejected", "dismissed"}) {
+		t.Fatalf("decide_alert decision enum = %v", schema.Properties["decision"].Enum)
+	}
+}
+
+func TestCreateProjectRegisteredOrchestrateOnly(t *testing.T) {
+	def := Get("create_project")
+	if def == nil {
+		t.Fatal("create_project missing from registry")
+	}
+	if def.Domain != DomainProjects || def.Access != AccessWrite {
+		t.Fatalf("create_project domain/access = %s/%s, want projects/write", def.Domain, def.Access)
+	}
+	for _, surface := range AllSurfaces {
+		if err := IsAllowed("create_project", models.ChatModeOrchestrate, surface); err != nil {
+			t.Fatalf("create_project should be allowed in orchestrate on %s: %v", surface, err)
+		}
+		mustContain(t, toolDefNames(ToolDefsForContext(models.ChatModeOrchestrate, surface, true)), "create_project")
+		if err := IsAllowed("create_project", models.ChatModePlan, surface); err == nil {
+			t.Fatalf("create_project should be denied in plan on %s", surface)
+		}
+		mustNotContain(t, toolDefNames(ToolDefsForContext(models.ChatModePlan, surface, true)), "create_project")
+	}
+	var schema struct {
+		Properties map[string]json.RawMessage `json:"properties"`
+	}
+	if err := json.Unmarshal(def.Parameters, &schema); err != nil {
+		t.Fatalf("decode schema: %v", err)
+	}
+	if _, ok := schema.Properties["repo_path"]; ok {
+		t.Fatal("create_project schema must not expose repo_path")
+	}
+	if _, ok := schema.Properties["create_directory"]; ok {
+		t.Fatal("create_project schema must not expose create_directory")
+	}
+	var maxWorkersSchema struct {
+		Minimum int `json:"minimum"`
+		Maximum int `json:"maximum"`
+	}
+	if err := json.Unmarshal(schema.Properties["max_workers"], &maxWorkersSchema); err != nil {
+		t.Fatalf("decode create_project max_workers schema: %v", err)
+	}
+	if maxWorkersSchema.Minimum != 1 || maxWorkersSchema.Maximum != 10 {
+		t.Fatalf("create_project max_workers bounds = %d..%d, want 1..10", maxWorkersSchema.Minimum, maxWorkersSchema.Maximum)
+	}
+}
+
+func TestUpdateProjectSettingsRegisteredOrchestrateOnly(t *testing.T) {
+	def := Get("update_project_settings")
+	if def == nil {
+		t.Fatal("update_project_settings missing from registry")
+	}
+	if def.Domain != DomainProjects || def.Access != AccessWrite {
+		t.Fatalf("update_project_settings domain/access = %s/%s, want projects/write", def.Domain, def.Access)
+	}
+	for _, surface := range AllSurfaces {
+		if err := IsAllowed("update_project_settings", models.ChatModeOrchestrate, surface); err != nil {
+			t.Fatalf("update_project_settings should be allowed in orchestrate on %s: %v", surface, err)
+		}
+		mustContain(t, toolDefNames(ToolDefsForContext(models.ChatModeOrchestrate, surface, true)), "update_project_settings")
+		if err := IsAllowed("update_project_settings", models.ChatModePlan, surface); err == nil {
+			t.Fatalf("update_project_settings should be denied in plan on %s", surface)
+		}
+		mustNotContain(t, toolDefNames(ToolDefsForContext(models.ChatModePlan, surface, true)), "update_project_settings")
+	}
+	var schema struct {
+		Properties map[string]json.RawMessage `json:"properties"`
+	}
+	if err := json.Unmarshal(def.Parameters, &schema); err != nil {
+		t.Fatalf("decode schema: %v", err)
+	}
+	for _, name := range []string{"project_id", "project_name", "default_model", "default_model_id", "clear_default_model", "max_workers", "clear_max_workers"} {
+		if _, ok := schema.Properties[name]; !ok {
+			t.Fatalf("update_project_settings schema missing %s", name)
+		}
+	}
+	for _, forbidden := range []string{"repo_path", "repo_url", "github_url", "delete_project", "credentials"} {
+		if _, ok := schema.Properties[forbidden]; ok {
+			t.Fatalf("update_project_settings schema must not expose %s", forbidden)
+		}
+	}
+}
+
 // ---- Surface-specific capability tests ----
 
 func TestToolDefsForContext_OrchestrateWeb(t *testing.T) {
@@ -205,13 +429,15 @@ func TestToolDefsForContext_OrchestrateWeb(t *testing.T) {
 	names := toolDefNames(defs)
 
 	// Must have core write actions
-	mustContain(t, names, "create_task", "edit_task", "execute_tasks", "send_to_task", "send_message")
+	mustContain(t, names, "create_task", "edit_task", "execute_tasks", "send_to_task", "send_message", "create_project", "update_project_settings")
 	// Must have new actions
 	mustContain(t, names, "switch_project", "get_chat_mode", "set_chat_mode", "list_capabilities")
 	// Must have new read actions
-	mustContain(t, names, "get_alert", "get_model", "get_personality", "get_current_project", "memory_view")
+	mustContain(t, names, "get_alert", "get_model", "get_personality", "get_current_project", "memory_view", "view_system_update", "view_swarm")
+	// Must have alert decision actions in Orchestrate mode.
+	mustContain(t, names, "decide_alert")
 	// Must have GitHub mailbox actions on web/API surfaces.
-	mustContain(t, names, "github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs", "github_comment_on_issue", "github_add_issue_labels", "github_open_pull_request", "github_replace_pull_request_branch", "github_forward_pr_feedback_to_tasks")
+	mustContain(t, names, "github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_existing_automation_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs", "github_comment_on_issue", "github_add_issue_labels", "github_close_issue", "github_open_pull_request", "github_replace_pull_request_branch", "github_forward_pr_feedback_to_tasks")
 	// Must have thread tools when requested
 	mustContain(t, names, "view_task_thread", "send_to_task")
 }
@@ -232,16 +458,205 @@ func TestToolDefsForContext_PlanWeb(t *testing.T) {
 
 	// Must NOT have write actions
 	mustNotContain(t, names, "create_task", "edit_task", "execute_tasks",
-		"set_personality", "schedule_task", "delete_schedule", "modify_schedule",
-		"create_alert", "create_notification", "delete_alert", "toggle_alert", "switch_project",
-		"set_chat_mode", "send_to_task", "send_message", "github_create_issue", "github_comment_on_issue", "github_add_issue_labels", "github_open_pull_request", "github_replace_pull_request_branch", "github_forward_pr_feedback_to_tasks")
+		"set_personality", "save_custom_personality", "schedule_task", "delete_schedule", "modify_schedule",
+		"create_alert", "create_notification", "decide_alert", "delete_alert", "toggle_alert", "create_project", "update_project_settings", "switch_project",
+		"set_chat_mode", "send_to_task", "send_message", "github_create_issue", "github_comment_on_issue", "github_add_issue_labels", "github_close_issue", "github_open_pull_request", "github_replace_pull_request_branch", "github_forward_pr_feedback_to_tasks",
+		"save_automation", "run_automation_now", "pause_automation", "resume_automation", "delete_automation")
 
 	// Must have read actions
 	mustContain(t, names, "list_projects", "list_models", "list_alerts",
-		"list_personalities", "view_settings", "project_info",
+		"list_personalities", "view_settings", "list_channels", "view_system_update", "project_info",
 		"get_chat_mode", "list_capabilities", "get_alert", "get_model",
-		"get_personality", "get_current_project", "memory_view", "view_task_thread", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs")
+		"get_personality", "get_current_project", "memory_view", "view_task_thread", "view_swarm", "list_schedules", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_existing_automation_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs")
 }
+
+func TestViewSwarmRegisteredReadOnlyAllSurfacesBothModes(t *testing.T) {
+	for _, mode := range []models.ChatMode{models.ChatModePlan, models.ChatModeOrchestrate} {
+		for _, surface := range AllSurfaces {
+			defs := ToolDefsForContext(mode, surface, false)
+			mustContain(t, toolDefNames(defs), "view_swarm")
+			if err := IsAllowed("view_swarm", mode, surface); err != nil {
+				t.Fatalf("expected view_swarm allowed in %s on %s: %v", mode, surface, err)
+			}
+		}
+	}
+
+	def := Get("view_swarm")
+	if def == nil {
+		t.Fatal("expected view_swarm to be registered")
+	}
+	if def.Access != AccessRead {
+		t.Fatalf("expected view_swarm to be read-only, got %q", def.Access)
+	}
+	if def.Domain != DomainTasks {
+		t.Fatalf("expected view_swarm in tasks domain, got %q", def.Domain)
+	}
+	if !strings.Contains(def.Description, "without prompts, execution outputs, diff hunks, or config blobs") {
+		t.Fatalf("view_swarm description should state compact response boundary, got %q", def.Description)
+	}
+}
+
+func TestListSchedulesRegisteredReadOnlyAllSurfacesBothModes(t *testing.T) {
+	// list_schedules is a read-only discovery action available in Plan and
+	// Orchestrate modes across every supported chat surface.
+	for _, mode := range []models.ChatMode{models.ChatModePlan, models.ChatModeOrchestrate} {
+		for _, surface := range AllSurfaces {
+			defs := ToolDefsForContext(mode, surface, false)
+			names := toolDefNames(defs)
+			mustContain(t, names, "list_schedules")
+		}
+	}
+
+	def := Get("list_schedules")
+	if def == nil {
+		t.Fatal("expected list_schedules to be registered")
+	}
+	if def.Access != AccessRead {
+		t.Fatalf("expected list_schedules to be read-only, got %q", def.Access)
+	}
+	if def.Domain != DomainSchedules {
+		t.Fatalf("expected list_schedules in schedules domain, got %q", def.Domain)
+	}
+	// Read-only actions must remain allowed in Plan mode on web.
+	if err := IsAllowed("list_schedules", models.ChatModePlan, SurfaceWeb); err != nil {
+		t.Fatalf("expected list_schedules allowed in plan mode: %v", err)
+	}
+}
+
+func TestListChannelsRegisteredReadOnlyAllSurfacesBothModes(t *testing.T) {
+	for _, mode := range []models.ChatMode{models.ChatModePlan, models.ChatModeOrchestrate} {
+		for _, surface := range AllSurfaces {
+			defs := ToolDefsForContext(mode, surface, false)
+			mustContain(t, toolDefNames(defs), "list_channels")
+			if err := IsAllowed("list_channels", mode, surface); err != nil {
+				t.Fatalf("expected list_channels allowed in %s mode on %s: %v", mode, surface, err)
+			}
+		}
+	}
+
+	def := Get("list_channels")
+	if def == nil {
+		t.Fatal("expected list_channels to be registered")
+	}
+	if def.Access != AccessRead {
+		t.Fatalf("expected list_channels to be read-only, got %q", def.Access)
+	}
+	if def.Domain != DomainSettings {
+		t.Fatalf("expected list_channels in settings domain, got %q", def.Domain)
+	}
+	if strings.Contains(strings.ToLower(def.Description), "token") && !strings.Contains(strings.ToLower(def.Description), "does not expose") {
+		t.Fatalf("list_channels description must make secret boundary explicit: %q", def.Description)
+	}
+}
+
+func TestViewSystemUpdateRegisteredReadOnlyWebAPIBothModes(t *testing.T) {
+	for _, mode := range []models.ChatMode{models.ChatModePlan, models.ChatModeOrchestrate} {
+		for _, surface := range []Surface{SurfaceWeb, SurfaceAPI} {
+			defs := ToolDefsForContext(mode, surface, false)
+			mustContain(t, toolDefNames(defs), "view_system_update")
+			if err := IsAllowed("view_system_update", mode, surface); err != nil {
+				t.Fatalf("expected view_system_update allowed in %s mode on %s: %v", mode, surface, err)
+			}
+		}
+		for _, surface := range []Surface{SurfaceSlack, SurfaceTelegram, SurfaceDiscord, SurfaceEmail} {
+			defs := ToolDefsForContext(mode, surface, false)
+			mustNotContain(t, toolDefNames(defs), "view_system_update")
+			if err := IsAllowed("view_system_update", mode, surface); err == nil || err.Code != "surface_blocked" {
+				t.Fatalf("expected view_system_update blocked on %s in %s mode, got %v", surface, mode, err)
+			}
+		}
+	}
+
+	def := Get("view_system_update")
+	if def == nil {
+		t.Fatal("expected view_system_update to be registered")
+	}
+	if def.Access != AccessRead {
+		t.Fatalf("expected view_system_update to be read-only, got %q", def.Access)
+	}
+	if def.Domain != DomainSettings {
+		t.Fatalf("expected view_system_update in settings domain, got %q", def.Domain)
+	}
+	if !strings.Contains(strings.ToLower(def.Description), "read-only") {
+		t.Fatalf("view_system_update description must document read-only behavior: %q", def.Description)
+	}
+}
+
+func TestViewPulseRegisteredReadOnlySupportedSurfacesBothModes(t *testing.T) {
+	for _, mode := range []models.ChatMode{models.ChatModePlan, models.ChatModeOrchestrate} {
+		for _, surface := range []Surface{SurfaceWeb, SurfaceAPI, SurfaceSlack, SurfaceTelegram, SurfaceDiscord} {
+			defs := ToolDefsForContext(mode, surface, false)
+			mustContain(t, toolDefNames(defs), "view_pulse")
+			if err := IsAllowed("view_pulse", mode, surface); err != nil {
+				t.Fatalf("expected view_pulse allowed in %s mode on %s: %v", mode, surface, err)
+			}
+		}
+		defs := ToolDefsForContext(mode, SurfaceEmail, false)
+		mustNotContain(t, toolDefNames(defs), "view_pulse")
+		if err := IsAllowed("view_pulse", mode, SurfaceEmail); err == nil || err.Code != "surface_blocked" {
+			t.Fatalf("expected view_pulse blocked on email in %s mode, got %v", mode, err)
+		}
+	}
+
+	def := Get("view_pulse")
+	if def == nil {
+		t.Fatal("expected view_pulse to be registered")
+	}
+	if def.Access != AccessRead {
+		t.Fatalf("expected view_pulse to be read-only, got %q", def.Access)
+	}
+	if def.Domain != DomainPulse {
+		t.Fatalf("expected view_pulse in pulse domain, got %q", def.Domain)
+	}
+	description := strings.ToLower(def.Description)
+	for _, want := range []string{"read-only", "bounded", "does not expose", "does not", "mutate"} {
+		if !strings.Contains(description, want) {
+			t.Fatalf("view_pulse description must document safe bounded behavior; missing %q in %q", want, def.Description)
+		}
+	}
+}
+
+func TestScheduleMutationSchemasDocumentAcceptedInputGrammar(t *testing.T) {
+	for _, name := range []string{"schedule_task", "modify_schedule"} {
+		def := Get(name)
+		if def == nil {
+			t.Fatalf("%s action missing", name)
+		}
+		var schema struct {
+			Properties map[string]struct {
+				Pattern     string   `json:"pattern"`
+				Enum        []string `json:"enum"`
+				Description string   `json:"description"`
+				MaxItems    int      `json:"maxItems"`
+				Items       *struct {
+					Enum []string `json:"enum"`
+				} `json:"items"`
+			} `json:"properties"`
+		}
+		if err := json.Unmarshal(def.Parameters, &schema); err != nil {
+			t.Fatalf("decode %s schema: %v", name, err)
+		}
+		if got := schema.Properties["time"].Pattern; got != `^(?:[01][0-9]|2[0-3]):[0-5][0-9]$` {
+			t.Fatalf("%s time pattern = %q", name, got)
+		}
+		wantRepeats := []string{"once", "daily", "weekly", "monthly", "hours", "hourly", "minutes", "seconds"}
+		if got := schema.Properties["repeat"].Enum; !reflect.DeepEqual(got, wantRepeats) {
+			t.Fatalf("%s repeat enum = %v, want %v", name, got, wantRepeats)
+		}
+		wantDays := []string{"sun", "mon", "tue", "wed", "thu", "fri", "sat"}
+		days := schema.Properties["days"]
+		if days.MaxItems != 1 {
+			t.Fatalf("%s days maxItems = %d, want 1", name, days.MaxItems)
+		}
+		if !strings.Contains(days.Description, "at most one weekday") {
+			t.Fatalf("%s days description = %q, want single-day limit documented", name, days.Description)
+		}
+		if days.Items == nil || !reflect.DeepEqual(days.Items.Enum, wantDays) {
+			t.Fatalf("%s weekday enum = %v, want %v", name, days.Items, wantDays)
+		}
+	}
+}
+
 func TestToolDefsForContext_Telegram(t *testing.T) {
 	defs := ToolDefsForContext(models.ChatModeOrchestrate, SurfaceTelegram, true)
 	names := toolDefNames(defs)
@@ -268,12 +683,12 @@ func TestGitHubToolDefsOnlyExposeOnWebAndAPI(t *testing.T) {
 	for _, surface := range []Surface{SurfaceWeb, SurfaceAPI} {
 		defs := ToolDefsForContext(models.ChatModeOrchestrate, surface, true)
 		names := toolDefNames(defs)
-		mustContain(t, names, "github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs", "github_comment_on_issue", "github_add_issue_labels", "github_open_pull_request", "github_replace_pull_request_branch", "github_forward_pr_feedback_to_tasks")
+		mustContain(t, names, "github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_existing_automation_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs", "github_comment_on_issue", "github_add_issue_labels", "github_close_issue", "github_open_pull_request", "github_replace_pull_request_branch", "github_forward_pr_feedback_to_tasks")
 	}
 	for _, surface := range []Surface{SurfaceSlack, SurfaceTelegram, SurfaceDiscord, SurfaceEmail} {
 		defs := ToolDefsForContext(models.ChatModeOrchestrate, surface, true)
 		names := toolDefNames(defs)
-		mustNotContain(t, names, "github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs", "github_comment_on_issue", "github_add_issue_labels", "github_open_pull_request", "github_replace_pull_request_branch", "github_forward_pr_feedback_to_tasks")
+		mustNotContain(t, names, "github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_existing_automation_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs", "github_comment_on_issue", "github_add_issue_labels", "github_close_issue", "github_open_pull_request", "github_replace_pull_request_branch", "github_forward_pr_feedback_to_tasks")
 	}
 }
 
@@ -370,15 +785,15 @@ func TestRegistry_CoversCoreActions(t *testing.T) {
 		"view_task_thread", "send_to_task",
 		"schedule_task", "delete_schedule", "modify_schedule",
 		"list_personalities", "set_personality",
-		"list_models", "list_agents",
-		"view_settings", "project_info",
-		"list_projects", "switch_project",
-		"list_alerts", "create_alert", "create_notification", "delete_alert", "toggle_alert",
+		"list_models", "list_agents", "create_agent", "update_agent",
+		"view_settings", "list_channels", "view_system_update", "project_info",
+		"list_projects", "create_project", "update_project_settings", "switch_project",
+		"list_alerts", "list_existing_automation_notifications", "create_alert", "create_notification", "decide_alert", "delete_alert", "toggle_alert",
 		// new actions
 		"get_chat_mode", "set_chat_mode", "list_capabilities",
 		"get_alert", "get_model", "get_personality", "get_current_project",
 		"memory_view", "send_message",
-		"github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs", "github_comment_on_issue", "github_add_issue_labels", "github_open_pull_request", "github_replace_pull_request_branch", "github_forward_pr_feedback_to_tasks",
+		"github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_existing_automation_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs", "github_comment_on_issue", "github_add_issue_labels", "github_close_issue", "github_open_pull_request", "github_replace_pull_request_branch", "github_forward_pr_feedback_to_tasks",
 	}
 	names := map[string]bool{}
 	for _, a := range Registry() {
@@ -416,7 +831,7 @@ func TestActionError_StructuredFields(t *testing.T) {
 
 func TestRegistry_AlertFlowActions(t *testing.T) {
 	// list alerts, get specific alert
-	for _, name := range []string{"list_alerts", "get_alert"} {
+	for _, name := range []string{"list_alerts", "get_alert", "list_existing_automation_notifications"} {
 		def := Get(name)
 		if def == nil {
 			t.Fatalf("missing action %q", name)
@@ -639,6 +1054,51 @@ func TestRegistry_EditTaskChainSchemaHasProperties(t *testing.T) {
 	}
 }
 
+func TestRegistry_EditTaskSchemaDistinguishesAgentDefinitionFromModelConfig(t *testing.T) {
+	def := Get("edit_task")
+	if def == nil {
+		t.Fatal("missing edit_task")
+	}
+
+	var schema map[string]interface{}
+	if err := json.Unmarshal(def.Parameters, &schema); err != nil {
+		t.Fatalf("invalid Parameters JSON: %v", err)
+	}
+	props, ok := schema["properties"].(map[string]interface{})
+	if !ok {
+		t.Fatal("missing properties in edit_task schema")
+	}
+	for _, name := range []string{"agent_definition_id", "agent", "clear_agent_definition"} {
+		if _, exists := props[name]; !exists {
+			t.Fatalf("edit_task schema missing %q", name)
+		}
+	}
+	agent, ok := props["agent"].(map[string]interface{})
+	if !ok {
+		t.Fatal("missing agent property")
+	}
+	agentDesc, _ := agent["description"].(string)
+	if !strings.Contains(agentDesc, "Exact name") || !strings.Contains(agentDesc, "Agent definition") || !strings.Contains(agentDesc, "Agent name") {
+		t.Fatalf("agent description should explain exact Agent-definition name assignment, got %q", agentDesc)
+	}
+	clearAgent, ok := props["clear_agent_definition"].(map[string]interface{})
+	if !ok {
+		t.Fatal("missing clear_agent_definition property")
+	}
+	clearDesc, _ := clearAgent["description"].(string)
+	if !strings.Contains(clearDesc, "Clear") || !strings.Contains(clearDesc, "model config") {
+		t.Fatalf("clear_agent_definition description should explain model config preservation, got %q", clearDesc)
+	}
+	agentID, ok := props["agent_id"].(map[string]interface{})
+	if !ok {
+		t.Fatal("missing agent_id property")
+	}
+	agentIDDesc, _ := agentID["description"].(string)
+	if !strings.Contains(agentIDDesc, "Internal model config ID") || !strings.Contains(agentIDDesc, "Do not use for Agent definitions") {
+		t.Fatalf("agent_id description should explain model config separation, got %q", agentIDDesc)
+	}
+}
+
 func TestRegistry_CreateTaskSchemaDistinguishesAgentDefinitionFromModelConfig(t *testing.T) {
 	def := Get("create_task")
 	if def == nil {
@@ -662,6 +1122,47 @@ func TestRegistry_CreateTaskSchemaDistinguishesAgentDefinitionFromModelConfig(t 
 		t.Fatalf("agent description should explain exact Agent-definition name assignment, got %q", agentDesc)
 	}
 	agentID, ok := props["agent_id"].(map[string]interface{})
+	if !ok {
+		t.Fatal("missing agent_id property")
+	}
+	agentIDDesc, _ := agentID["description"].(string)
+	if !strings.Contains(agentIDDesc, "Internal model config ID") || !strings.Contains(agentIDDesc, "Do not use for Agent definitions") {
+		t.Fatalf("agent_id description should explain model config separation, got %q", agentIDDesc)
+	}
+}
+
+func TestRegistry_CreateSwarmTaskSchemaIncludesMetadataOptions(t *testing.T) {
+	def := Get("create_swarm_task")
+	if def == nil {
+		t.Fatal("missing create_swarm_task")
+	}
+
+	var schema map[string]any
+	if err := json.Unmarshal(def.Parameters, &schema); err != nil {
+		t.Fatalf("invalid Parameters JSON: %v", err)
+	}
+	props, ok := schema["properties"].(map[string]any)
+	if !ok {
+		t.Fatal("missing properties in create_swarm_task schema")
+	}
+	for _, name := range []string{"goal", "priority", "agent_id", "agent_definition_id", "agent", "tag", "reviewer_enabled", "merger_enabled", "merge_target_branch"} {
+		if _, exists := props[name]; !exists {
+			t.Fatalf("create_swarm_task schema missing %q", name)
+		}
+	}
+	priority, ok := props["priority"].(map[string]any)
+	if !ok || priority["minimum"] != float64(1) || priority["maximum"] != float64(4) {
+		t.Fatalf("priority schema should be bounded 1..4, got %#v", props["priority"])
+	}
+	tag, ok := props["tag"].(map[string]any)
+	if !ok {
+		t.Fatal("missing tag schema")
+	}
+	enum, ok := tag["enum"].([]any)
+	if !ok || len(enum) != 2 || enum[0] != "bug" || enum[1] != "feature" {
+		t.Fatalf("tag schema should advertise bug/feature, got %#v", tag["enum"])
+	}
+	agentID, ok := props["agent_id"].(map[string]any)
 	if !ok {
 		t.Fatal("missing agent_id property")
 	}
@@ -738,5 +1239,36 @@ func TestRegistry_TaskGoalToolsAndCreateTaskGoalSchema(t *testing.T) {
 	props := schema["properties"].(map[string]any)
 	if _, ok := props["goal"]; !ok {
 		t.Fatalf("create_task schema missing goal: %+v", props)
+	}
+}
+
+func TestCreateAgentRegistryModesAndSurfaces(t *testing.T) {
+	for _, def := range ToolDefsForContext(models.ChatModePlan, SurfaceWeb, true) {
+		if def.Name == "create_agent" || def.Name == "update_agent" {
+			t.Fatalf("%s must not be exposed in plan mode", def.Name)
+		}
+	}
+	for _, surface := range []Surface{SurfaceWeb, SurfaceAPI, SurfaceSlack, SurfaceTelegram, SurfaceDiscord, SurfaceEmail} {
+		foundCreate := false
+		foundUpdate := false
+		for _, def := range ToolDefsForContext(models.ChatModeOrchestrate, surface, false) {
+			if def.Name == "create_agent" || def.Name == "update_agent" {
+				if strings.Contains(string(def.Parameters), "mcp_servers") || strings.Contains(string(def.Parameters), "api_key") || strings.Contains(string(def.Parameters), "oauth") || strings.Contains(string(def.Parameters), "plugins") || strings.Contains(string(def.Parameters), "skills") || strings.Contains(string(def.Parameters), "lifecycle") {
+					t.Fatalf("%s schema for surface %s exposes unsupported fields: %s", def.Name, surface, string(def.Parameters))
+				}
+			}
+			if def.Name == "create_agent" {
+				foundCreate = true
+			}
+			if def.Name == "update_agent" {
+				foundUpdate = true
+			}
+		}
+		if !foundCreate {
+			t.Fatalf("create_agent not exposed in orchestrate mode for surface %s", surface)
+		}
+		if !foundUpdate {
+			t.Fatalf("update_agent not exposed in orchestrate mode for surface %s", surface)
+		}
 	}
 }

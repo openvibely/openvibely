@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"mime/multipart"
 	"net/http"
 	"os"
 	"os/exec"
@@ -13,11 +12,11 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/a-h/templ"
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/applog"
+	"github.com/openvibely/openvibely/internal/events"
 	llmworkflow "github.com/openvibely/openvibely/internal/llm/workflow"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
@@ -27,15 +26,30 @@ import (
 )
 
 const (
-	backlogSortCookieName        = "backlog_sort"
-	completedSortCookieName      = "completed_sort"
-	taskThreadWindowLimitDefault = 5
-	taskThreadWindowLimitMax     = 100
+	backlogSortCookieName             = "backlog_sort"
+	completedSortCookieName           = "completed_sort"
+	defaultBacklogSort                = "created_desc"
+	defaultCompletedSort              = "completed_desc"
+	taskThreadWindowLimitDefault      = 5
+	taskThreadWindowLimitMax          = 100
+	taskExecutionHistoryWindowDefault = 18
+	taskExecutionHistoryWindowMax     = 100
 )
 
 type taskSortPreferences struct {
 	Backlog   string
 	Completed string
+}
+
+type taskDetailContentData struct {
+	task             *models.Task
+	taskGoal         *models.TaskGoal
+	executionMetrics models.TaskExecutionMetrics
+	schedules        []models.Schedule
+	agents           []models.LLMConfig
+	agentDefs        []models.Agent
+	attachments      []models.Attachment
+	reviewComments   []models.ReviewComment
 }
 
 func getSortPreference(c echo.Context, cookieName string) string {
@@ -46,10 +60,17 @@ func getSortPreference(c echo.Context, cookieName string) string {
 }
 
 func getSortPreferences(c echo.Context) taskSortPreferences {
-	return taskSortPreferences{
+	preferences := taskSortPreferences{
 		Backlog:   getSortPreference(c, backlogSortCookieName),
 		Completed: getCompletedSortPreference(c),
 	}
+	if preferences.Backlog == "" {
+		preferences.Backlog = defaultBacklogSort
+	}
+	if preferences.Completed == "" {
+		preferences.Completed = defaultCompletedSort
+	}
+	return preferences
 }
 
 // getCompletedSortPreference reads the completed-sort cookie and migrates
@@ -162,6 +183,33 @@ func (h *Handler) listTaskFormAgentDefinitions(ctx context.Context, projectID st
 	return out
 }
 
+func (h *Handler) listScheduleAgentOptions(ctx context.Context, projectID string) []repository.AgentScheduleOption {
+	if h.agentRepo == nil {
+		return nil
+	}
+	options, err := h.agentRepo.ListScheduleOptions(ctx, projectID)
+	if err != nil {
+		applog.Infof("[handler] listScheduleAgentOptions error: %v", err)
+		return nil
+	}
+	return options
+}
+
+func (h *Handler) taskDetailAgentLabel(ctx context.Context, projectID string, agentDefinitionID *string) string {
+	if h.agentRepo == nil || agentDefinitionID == nil || *agentDefinitionID == "" {
+		return ""
+	}
+	option, err := h.agentRepo.GetTaskDetailAgentLabel(ctx, projectID, *agentDefinitionID)
+	if err != nil {
+		applog.Infof("[handler] taskDetailAgentLabel error: %v", err)
+		return ""
+	}
+	if option == nil {
+		return ""
+	}
+	return option.Name
+}
+
 func agentDefinitionAvailableToProject(agent models.Agent, projectID string) bool {
 	if agent.Scope == models.AgentScopeProject {
 		return agent.ProjectID != "" && agent.ProjectID == projectID
@@ -218,6 +266,25 @@ func (h *Handler) renderKanbanBoard(c echo.Context, tasks []models.Task, project
 	return render(c, http.StatusOK, components.KanbanBoard(tasks, projectID, sortPrefs.Backlog, sortPrefs.Completed, llmModels, agentDefs))
 }
 
+func (h *Handler) renderTaskBoardRefresh(c echo.Context, projectID string, adjustSort func(*taskSortPreferences)) error {
+	sortPrefs := getSortPreferences(c)
+	if adjustSort != nil {
+		adjustSort(&sortPrefs)
+	}
+
+	tasks, err := h.taskSvc.ListBoardByProjectWithCategorySorts(c.Request().Context(), projectID, "", sortPrefs.Backlog, sortPrefs.Completed)
+	if err != nil {
+		applog.Infof("[handler] renderTaskBoardRefresh error listing tasks project=%s: %v", projectID, err)
+		return err
+	}
+	agents, err := h.llmConfigRepo.ListBadgeOptions(c.Request().Context())
+	if err != nil {
+		applog.Infof("[handler] renderTaskBoardRefresh error listing LLM configs project=%s: %v", projectID, err)
+		return err
+	}
+	return h.renderKanbanBoard(c, tasks, projectID, sortPrefs, agents)
+}
+
 func (h *Handler) ListTasks(c echo.Context) error {
 	projectID := c.QueryParam("project_id")
 	isHTMX := isHTMX(c)
@@ -235,24 +302,27 @@ func (h *Handler) ListTasks(c echo.Context) error {
 		if projectID == "" {
 			return echo.NewHTTPError(http.StatusBadRequest, "project_id required")
 		}
-		tasks, err := h.taskSvc.ListByProjectWithCategorySorts(c.Request().Context(), projectID, "", sortPrefs.Backlog, sortPrefs.Completed)
+		tasks, err := h.taskSvc.ListBoardByProjectWithCategorySorts(c.Request().Context(), projectID, "", sortPrefs.Backlog, sortPrefs.Completed)
 		if err != nil {
 			applog.Infof("[handler] ListTasks error: %v", err)
 			return err
 		}
 		tasks = service.AttachSwarmChildren(tasks)
 		applog.Infof("[handler] ListTasks found %d tasks", len(tasks))
-		agents, _ := h.llmConfigRepo.List(c.Request().Context())
+		agents, _ := h.llmConfigRepo.ListBadgeOptions(c.Request().Context())
 		return h.renderKanbanBoard(c, tasks, projectID, sortPrefs, agents)
 	}
 
-	// For full page and main-content swaps, default to first project
-	projects, _ := h.projectSvc.List(c.Request().Context())
+	// For full page and main-content swaps, default to first project.
+	// The Tasks shell renders only the sidebar selector and the current project's
+	// id, so the compact selector projection is sufficient; the full current
+	// project is loaded via GetByID below.
+	projects, _ := h.projectSvc.ListSelectorOptions(c.Request().Context())
 	if projectID == "" && len(projects) > 0 {
 		projectID = projects[0].ID
 	}
 
-	tasks, err := h.taskSvc.ListByProjectWithCategorySorts(c.Request().Context(), projectID, "", sortPrefs.Backlog, sortPrefs.Completed)
+	tasks, err := h.taskSvc.ListBoardByProjectWithCategorySorts(c.Request().Context(), projectID, "", sortPrefs.Backlog, sortPrefs.Completed)
 	if err != nil {
 		applog.Infof("[handler] ListTasks error: %v", err)
 		return err
@@ -261,7 +331,7 @@ func (h *Handler) ListTasks(c echo.Context) error {
 	applog.Infof("[handler] ListTasks found %d tasks", len(tasks))
 
 	project, _ := h.projectSvc.GetByID(c.Request().Context(), projectID)
-	agents, _ := h.llmConfigRepo.List(c.Request().Context())
+	agents, _ := h.llmConfigRepo.ListBadgeOptions(c.Request().Context())
 	agentDefs := h.listTaskFormAgentDefinitions(c.Request().Context(), projectID, nil)
 
 	if isHTMX {
@@ -276,12 +346,40 @@ func isSwarmTaskForm(c echo.Context) bool {
 	return v == "on" || v == "true" || v == "1"
 }
 
+func taskRequiredFieldHTTPError(err error) *echo.HTTPError {
+	switch {
+	case errors.Is(err, service.ErrTaskTitleRequired):
+		return echo.NewHTTPError(http.StatusBadRequest, "Task title is required")
+	case errors.Is(err, service.ErrTaskPromptRequired):
+		return echo.NewHTTPError(http.StatusBadRequest, "Task prompt is required")
+	case errors.Is(err, service.ErrInvalidTaskPriority):
+		return echo.NewHTTPError(http.StatusBadRequest, "Task priority must be between 1 and 4")
+	default:
+		return nil
+	}
+}
+
 func (h *Handler) CreateTask(c echo.Context) error {
 	projectID := c.QueryParam("project_id")
+	if _, err := parseBoundedMultipartForm(c, maxUploadSize, maxTaskAttachmentFilesPerRequest); err != nil {
+		applog.Infof("[handler] CreateTask error parsing form: %v", err)
+		if httpErr, ok := err.(*echo.HTTPError); ok {
+			return httpErr
+		}
+		return echo.NewHTTPError(http.StatusBadRequest, "failed to parse form")
+	}
 	priority, _ := strconv.Atoi(c.FormValue("priority"))
 	category := models.TaskCategory(c.FormValue("category"))
 	if category == "" {
 		category = models.CategoryActive
+	}
+	var scheduledFormValues scheduleFormValues
+	var scheduledFormErr error
+	if category == models.CategoryScheduled && c.FormValue("run_at") != "" {
+		scheduledFormValues, scheduledFormErr = parseScheduleForm(c, models.RepeatDaily)
+		if _, ok := scheduledFormErr.(*echo.HTTPError); ok {
+			return scheduledFormErr
+		}
 	}
 
 	// Creating an active task immediately submits it to the worker pool.
@@ -334,6 +432,9 @@ func (h *Handler) CreateTask(c echo.Context) error {
 			if errors.Is(err, service.ErrDuplicateTask) {
 				return echo.NewHTTPError(http.StatusConflict, "A task with this name already exists in this project")
 			}
+			if httpErr := taskRequiredFieldHTTPError(err); httpErr != nil {
+				return httpErr
+			}
 			return err
 		}
 		*t = *parent
@@ -342,49 +443,31 @@ func (h *Handler) CreateTask(c echo.Context) error {
 			applog.Infof("[handler] CreateTask duplicate title=%q", t.Title)
 			return echo.NewHTTPError(http.StatusConflict, "A task with this name already exists in this project")
 		}
+		if httpErr := taskRequiredFieldHTTPError(err); httpErr != nil {
+			return httpErr
+		}
 		applog.Infof("[handler] CreateTask error: %v", err)
 		return err
 	}
 	applog.Infof("[handler] CreateTask success id=%s", t.ID)
 
 	// If category is scheduled and run_at is provided, create a schedule
-	if t.Category == models.CategoryScheduled {
-		runAtStr := c.FormValue("run_at")
-		if runAtStr != "" {
-			// Parse the time in local timezone since the browser sends datetime-local values,
-			// then convert to UTC for consistent storage
-			runAt, err := time.ParseInLocation("2006-01-02T15:04", runAtStr, time.Local)
+	if t.Category == models.CategoryScheduled && c.FormValue("run_at") != "" {
+		if scheduledFormErr != nil {
+			applog.Infof("[handler] CreateTask schedule parse error: %v", scheduledFormErr)
+		} else {
+			clearContextOnStart := formBoolEnabled(c, "clear_context_on_start", true)
+			sched, err := service.NewScheduleActionService(h.taskRepo, h.scheduleRepo).CreateForTask(c.Request().Context(), service.CreateScheduleForTaskRequest{
+				TaskID:              t.ID,
+				RunAt:               scheduledFormValues.runAt,
+				RepeatType:          scheduledFormValues.repeatType,
+				RepeatInterval:      scheduledFormValues.repeatInterval,
+				ClearContextOnStart: &clearContextOnStart,
+			})
 			if err != nil {
-				applog.Infof("[handler] CreateTask schedule parse error: %v", err)
+				applog.Infof("[handler] CreateTask schedule create error: %v", err)
 			} else {
-				runAt = runAt.UTC()
-				repeatInterval, _ := strconv.Atoi(c.FormValue("repeat_interval"))
-				if repeatInterval < 1 {
-					repeatInterval = 1
-				}
-				sched := &models.Schedule{
-					TaskID:              t.ID,
-					RunAt:               runAt,
-					RepeatType:          models.RepeatType(c.FormValue("repeat_type")),
-					RepeatInterval:      repeatInterval,
-					Enabled:             true,
-					ClearContextOnStart: formBoolEnabled(c, "clear_context_on_start", true),
-				}
-				if sched.RepeatType == "" {
-					sched.RepeatType = models.RepeatDaily
-				}
-				// For recurring schedules with a past RunAt, compute the next future occurrence immediately
-				if sched.RepeatType != models.RepeatOnce && !runAt.After(time.Now().UTC()) {
-					nextRun := sched.ComputeNextRun(time.Now().UTC())
-					if nextRun != nil {
-						sched.NextRun = nextRun
-					}
-				}
-				if err := h.scheduleRepo.Create(c.Request().Context(), sched); err != nil {
-					applog.Infof("[handler] CreateTask schedule create error: %v", err)
-				} else {
-					applog.Infof("[handler] CreateTask schedule created id=%s next_run=%v", sched.ID, sched.NextRun)
-				}
+				applog.Infof("[handler] CreateTask schedule created id=%s next_run=%v", sched.ID, sched.NextRun)
 			}
 		}
 	}
@@ -392,78 +475,8 @@ func (h *Handler) CreateTask(c echo.Context) error {
 	// Handle optional file attachments (multiple files supported)
 	form, err := c.MultipartForm()
 	if err == nil && form != nil {
-		files := form.File["files"]
-		if len(files) > 0 {
-			// Create task-specific directory
-			taskDir := filepath.Join(uploadsDir, t.ID)
-			if err := os.MkdirAll(taskDir, 0755); err != nil {
-				applog.Infof("[handler] CreateTask error creating directory: %v", err)
-			} else {
-				// Process each file
-				uploadedCount := 0
-				for _, file := range files {
-					// Check file size
-					if file.Size > maxUploadSize {
-						applog.Infof("[handler] CreateTask file %s too large (%d bytes)", file.Filename, file.Size)
-						continue // Skip this file but continue with others
-					}
-
-					// Open the uploaded file
-					src, err := file.Open()
-					if err != nil {
-						applog.Infof("[handler] CreateTask error opening file %s: %v", file.Filename, err)
-						continue
-					}
-
-					// Save file
-					filename := filepath.Base(file.Filename)
-					destPath := filepath.Join(taskDir, filename)
-					dest, err := os.Create(destPath)
-					if err != nil {
-						applog.Infof("[handler] CreateTask error creating file %s: %v", filename, err)
-						src.Close()
-						continue
-					}
-
-					if _, err := io.Copy(dest, src); err != nil {
-						applog.Infof("[handler] CreateTask error copying file %s: %v", filename, err)
-						src.Close()
-						dest.Close()
-						os.Remove(destPath)
-						continue
-					}
-					src.Close()
-					dest.Close()
-
-					// Detect media type from file header
-					mediaType := file.Header.Get("Content-Type")
-					if mediaType == "" {
-						mediaType = "application/octet-stream"
-					}
-
-					// Create attachment record
-					attachment := &models.Attachment{
-						TaskID:    t.ID,
-						FileName:  filename,
-						FilePath:  destPath,
-						MediaType: mediaType,
-						FileSize:  file.Size,
-					}
-
-					if err := h.attachmentRepo.Create(c.Request().Context(), attachment); err != nil {
-						applog.Infof("[handler] CreateTask error creating attachment for %s: %v", filename, err)
-						os.Remove(destPath)
-						continue
-					}
-
-					applog.Infof("[handler] CreateTask attachment created id=%s file=%s size=%d", attachment.ID, filename, file.Size)
-					uploadedCount++
-				}
-
-				if uploadedCount > 0 {
-					applog.Infof("[handler] CreateTask completed: %d/%d attachments uploaded", uploadedCount, len(files))
-				}
-			}
+		if files := form.File["files"]; len(files) > 0 {
+			h.persistTaskAttachmentFiles(c.Request().Context(), t.ID, files, "CreateTask")
 		}
 	}
 
@@ -475,8 +488,8 @@ func (h *Handler) CreateTask(c echo.Context) error {
 		}
 		project, _ := h.projectSvc.GetByID(c.Request().Context(), projectID)
 		scheduledTasks, _ := h.taskSvc.GetTasksWithSchedulesByProject(c.Request().Context(), projectID)
-		agents, _ := h.llmConfigRepo.List(c.Request().Context())
-		agentDefs := h.listTaskFormAgentDefinitions(c.Request().Context(), projectID, t.AgentDefinitionID)
+		agents, _ := h.llmConfigRepo.ListBadgeOptions(c.Request().Context())
+		agentDefs := h.listScheduleAgentOptions(c.Request().Context(), projectID)
 		weekOffset := 0
 		if weekParam := c.QueryParam("week"); weekParam != "" {
 			if w, err := strconv.Atoi(weekParam); err == nil {
@@ -487,10 +500,55 @@ func (h *Handler) CreateTask(c echo.Context) error {
 	}
 
 	// Return the full kanban board
-	sortPrefs := getSortPreferences(c)
-	tasks, _ := h.taskSvc.ListByProjectWithCategorySorts(c.Request().Context(), projectID, "", sortPrefs.Backlog, sortPrefs.Completed)
-	agents, _ := h.llmConfigRepo.List(c.Request().Context())
-	return h.renderKanbanBoard(c, tasks, projectID, sortPrefs, agents)
+	return h.renderTaskBoardRefresh(c, projectID, nil)
+}
+
+func (h *Handler) loadTaskDetailContentData(ctx context.Context, taskID string) (*taskDetailContentData, error) {
+	task, err := h.taskSvc.GetByID(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	if task == nil {
+		return nil, echo.NewHTTPError(http.StatusNotFound, "task not found")
+	}
+	if task.SwarmRole == models.SwarmRoleParent {
+		if children, childErr := h.taskRepo.ListSwarmChildren(ctx, task.ID); childErr == nil {
+			task.SwarmChildren = children
+		}
+	}
+
+	executionMetrics, _ := h.execRepo.GetTaskExecutionMetrics(ctx, taskID)
+	schedules, _ := h.scheduleRepo.ListByTask(ctx, taskID)
+	agents, _ := h.llmConfigRepo.ListBadgeOptions(ctx)
+	attachments, _ := h.attachmentRepo.ListByTask(ctx, taskID)
+	agentDefs := h.listTaskFormAgentDefinitions(ctx, task.ProjectID, task.AgentDefinitionID)
+	var reviewComments []models.ReviewComment
+	if h.reviewCommentRepo != nil {
+		reviewComments, _ = h.reviewCommentRepo.ListByTask(ctx, taskID)
+	}
+
+	return &taskDetailContentData{
+		task:             task,
+		taskGoal:         h.loadTaskGoal(ctx, taskID),
+		executionMetrics: executionMetrics,
+		schedules:        schedules,
+		agents:           agents,
+		agentDefs:        agentDefs,
+		attachments:      attachments,
+		reviewComments:   reviewComments,
+	}, nil
+}
+
+func (h *Handler) renderTaskDetailContent(c echo.Context, taskID, selectedTab string) error {
+	data, err := h.loadTaskDetailContentData(c.Request().Context(), taskID)
+	if err != nil {
+		return err
+	}
+	return h.renderTaskDetailContentData(c, data, selectedTab)
+}
+
+func (h *Handler) renderTaskDetailContentData(c echo.Context, data *taskDetailContentData, selectedTab string) error {
+	return render(c, http.StatusOK, pages.TaskDetailContent(data.task, data.taskGoal, &data.executionMetrics, data.schedules, data.agents, data.agentDefs, data.attachments, selectedTab, data.reviewComments))
 }
 
 func (h *Handler) GetTask(c echo.Context) error {
@@ -498,31 +556,17 @@ func (h *Handler) GetTask(c echo.Context) error {
 	isHTMX := isHTMX(c)
 	applog.Infof("[handler] GetTask id=%s htmx=%v", taskID, isHTMX)
 
-	task, err := h.taskSvc.GetByID(c.Request().Context(), taskID)
+	data, err := h.loadTaskDetailContentData(c.Request().Context(), taskID)
 	if err != nil {
-		applog.Infof("[handler] GetTask error: %v", err)
+		if httpErr, ok := err.(*echo.HTTPError); ok && httpErr.Code == http.StatusNotFound {
+			applog.Infof("[handler] GetTask not found id=%s", taskID)
+		} else {
+			applog.Infof("[handler] GetTask error: %v", err)
+		}
 		return err
 	}
-	if task == nil {
-		applog.Infof("[handler] GetTask not found id=%s", taskID)
-		return echo.NewHTTPError(http.StatusNotFound, "task not found")
-	}
-	if task.SwarmRole == models.SwarmRoleParent {
-		if children, childErr := h.taskRepo.ListSwarmChildren(c.Request().Context(), task.ID); childErr == nil {
-			task.SwarmChildren = children
-		}
-	}
-
-	executions, _ := h.execRepo.ListByTaskChronological(c.Request().Context(), taskID)
-	schedules, _ := h.scheduleRepo.ListByTask(c.Request().Context(), taskID)
-	agents, _ := h.llmConfigRepo.List(c.Request().Context())
-	attachments, _ := h.attachmentRepo.ListByTask(c.Request().Context(), taskID)
-	agentDefs := h.listTaskFormAgentDefinitions(c.Request().Context(), task.ProjectID, task.AgentDefinitionID)
-	var reviewComments []models.ReviewComment
-	if h.reviewCommentRepo != nil {
-		reviewComments, _ = h.reviewCommentRepo.ListByTask(c.Request().Context(), taskID)
-	}
-	applog.Infof("[handler] GetTask id=%s executions=%d schedules=%d attachments=%d", taskID, len(executions), len(schedules), len(attachments))
+	task := data.task
+	applog.Infof("[handler] GetTask id=%s schedules=%d attachments=%d", taskID, len(data.schedules), len(data.attachments))
 
 	// Determine default tab
 	defaultTab := c.QueryParam("tab")
@@ -544,15 +588,18 @@ func (h *Handler) GetTask(c echo.Context) error {
 
 	// HTMX request: return just the task detail content partial
 	if isHTMX {
-		return render(c, http.StatusOK, pages.TaskDetailContent(task, h.loadTaskGoal(c.Request().Context(), taskID), executions, schedules, agents, agentDefs, attachments, defaultTab, reviewComments))
+		return h.renderTaskDetailContentData(c, data, defaultTab)
 	}
 
 	// Full page load: wrap in layout
-	projects, _ := h.projectSvc.List(c.Request().Context())
-	return render(c, http.StatusOK, pages.TaskDetailPage(projects, task, h.loadTaskGoal(c.Request().Context(), taskID), executions, schedules, agents, agentDefs, attachments, defaultTab, reviewComments))
+	projects, _ := h.projectSvc.ListSelectorOptions(c.Request().Context())
+	return render(c, http.StatusOK, pages.TaskDetailPage(projects, data.task, data.taskGoal, &data.executionMetrics, data.schedules, data.agents, data.agentDefs, data.attachments, defaultTab, data.reviewComments))
 }
 
-// GetTaskExecutions returns just the execution history for a task (used for polling updates)
+// GetTaskExecutions returns the bounded execution-history fragment for a task.
+// The default polling path renders only the latest window; older pages are loaded
+// deliberately through ?before=<exec_id> so recurring polls do not reload all
+// historical output bytes.
 func (h *Handler) GetTaskExecutions(c echo.Context) error {
 	taskID := c.Param("taskId")
 
@@ -564,9 +611,16 @@ func (h *Handler) GetTaskExecutions(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, "task not found")
 	}
 
-	executions, _ := h.execRepo.ListByTask(c.Request().Context(), taskID)
+	limit := parseThreadWindowLimit(c.QueryParam("limit"), taskExecutionHistoryWindowDefault, taskExecutionHistoryWindowMax)
+	executions, hasOlder, err := h.loadTaskExecutionHistoryWindow(c.Request().Context(), taskID, c.QueryParam("before"), limit)
+	if err != nil {
+		return err
+	}
+	if c.QueryParam("before") != "" {
+		return render(c, http.StatusOK, components.TaskExecutionHistoryOlderPage(task, executions, hasOlder, limit))
+	}
 
-	return render(c, http.StatusOK, components.TaskExecutionHistory(task, executions))
+	return render(c, http.StatusOK, components.TaskExecutionHistory(task, executions, hasOlder, limit))
 }
 
 // GetTaskDetailStatus returns just the task detail metrics (status badges) for polling updates
@@ -581,12 +635,15 @@ func (h *Handler) GetTaskDetailStatus(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, "task not found")
 	}
 
-	executions, _ := h.execRepo.ListByTaskChronological(c.Request().Context(), taskID)
+	metrics, err := h.execRepo.GetTaskExecutionMetrics(c.Request().Context(), taskID)
+	if err != nil {
+		applog.Infof("[handler] GetTaskDetailStatus error loading execution metrics task=%s: %v", taskID, err)
+	}
 
-	agents, _ := h.llmConfigRepo.List(c.Request().Context())
-	agentDefs := h.listTaskFormAgentDefinitions(c.Request().Context(), task.ProjectID, task.AgentDefinitionID)
+	agents, _ := h.llmConfigRepo.ListBadgeOptions(c.Request().Context())
+	agentLabel := h.taskDetailAgentLabel(c.Request().Context(), task.ProjectID, task.AgentDefinitionID)
 
-	return render(c, http.StatusOK, pages.TaskDetailMetrics(task, executions, agents, agentDefs))
+	return render(c, http.StatusOK, pages.TaskDetailMetrics(task, metrics, agents, agentLabel))
 }
 
 // GetTaskDetailActions returns just the action buttons fragment (Run Now / Edit / Delete).
@@ -780,7 +837,10 @@ func (h *Handler) taskRebaseAvailable(task *models.Task, project *models.Project
 	if branchAlreadyMerged || task.MergeStatus == models.MergeStatusMerged || task.MergeStatus == models.MergeStatusConflict {
 		return false
 	}
-	if len(service.ActiveConflictFiles(project.RepoPath)) > 0 {
+	if len(service.ActiveConflictFiles(project.RepoPath)) > 0 || service.IsGitWorktreeLocked(project.RepoPath, task.WorktreePath) {
+		return false
+	}
+	if status, err := service.GitStatusPorcelain(task.WorktreePath); err != nil || strings.TrimSpace(status) != "" {
 		return false
 	}
 	targetBranch := task.MergeTargetBranch
@@ -790,7 +850,7 @@ func (h *Handler) taskRebaseAvailable(task *models.Task, project *models.Project
 	if targetBranch == "" {
 		return false
 	}
-	return service.IsBranchBehindTarget(project.RepoPath, task.WorktreeBranch, targetBranch)
+	return service.IsBranchDivergedFromTarget(project.RepoPath, task.WorktreeBranch, targetBranch)
 }
 
 func (h *Handler) reconcileAlreadyMergedBranch(ctx context.Context, task *models.Task) bool {
@@ -823,20 +883,122 @@ func (h *Handler) reconcileAlreadyMergedBranch(ctx context.Context, task *models
 	return service.IsBranchTipMergedInto(project.RepoPath, task.WorktreeBranch, targetBranch)
 }
 
-// resolveTaskChangesDiffOutput resolves the diff payload used by the Changes UI.
-// It mirrors GetTaskChanges behavior so per-file lazy loads match full-page output.
-func (h *Handler) resolveTaskChangesDiffOutput(ctx context.Context, task *models.Task) string {
-	if task == nil {
-		return ""
-	}
+type taskMergeActionState struct {
+	UseWorktreeContent  bool
+	BranchAlreadyMerged bool
+	RebaseAvailable     bool
+}
 
-	// Lazy file requests can arrive directly, without the full Changes endpoint
-	// first repairing conventional worktree metadata. Recover here so every
-	// Changes surface resolves the same current task lineage and comparison base.
+func (h *Handler) resolveTaskMergeActionState(ctx context.Context, task *models.Task) taskMergeActionState {
+	var state taskMergeActionState
+	if task == nil {
+		return state
+	}
 	project, _ := h.projectRepo.GetByID(ctx, task.ProjectID)
 	h.recoverTaskWorktreeState(ctx, task, project)
+	if task.WorktreeBranch == "" {
+		return state
+	}
+	state.UseWorktreeContent = true
+	state.BranchAlreadyMerged = h.reconcileAlreadyMergedBranch(ctx, task)
+	state.RebaseAvailable = h.taskRebaseAvailable(task, project, state.BranchAlreadyMerged)
+	return state
+}
 
-	// preservedDiff fetches the most recent non-empty execution diff on first call.
+type taskChangesWorktreeState struct {
+	UseWorktreeContent    bool
+	DiffOutput            string
+	FileStats             []service.WorktreeFileStat
+	BranchAlreadyMerged   bool
+	LocalMergeUnavailable bool
+	ConflictRecovery      bool
+	RebaseAvailable       bool
+}
+
+type taskMergeEligibility struct {
+	MergeAvailable   bool
+	ConflictRecovery bool
+	Reason           string
+	TargetBranch     string
+}
+
+func (h *Handler) resolveTaskMergeEligibility(ctx context.Context, task *models.Task, project *models.Project, branchAlreadyMerged bool) taskMergeEligibility {
+	if task == nil || project == nil || project.RepoPath == "" || !service.IsGitRepo(project.RepoPath) {
+		return taskMergeEligibility{Reason: "project repository is unavailable"}
+	}
+
+	targetBranch := task.MergeTargetBranch
+	if targetBranch == "" {
+		targetBranch = service.GetDefaultBranch(project.RepoPath)
+	}
+	result := taskMergeEligibility{TargetBranch: targetBranch}
+
+	hasActiveMerge := service.HasActiveMerge(project.RepoPath)
+	activeConflictFiles := service.ActiveConflictFiles(project.RepoPath)
+	ownsLiveConflict := (hasActiveMerge && service.ActiveMergeMatchesBranch(project.RepoPath, task.WorktreeBranch)) ||
+		(!hasActiveMerge && task.MergeStatus == models.MergeStatusConflict && len(activeConflictFiles) > 0)
+	if ownsLiveConflict {
+		if task.MergeStatus != models.MergeStatusConflict {
+			if err := h.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusConflict); err == nil {
+				task.MergeStatus = models.MergeStatusConflict
+			}
+		}
+		result.ConflictRecovery = true
+		return result
+	}
+	if hasActiveMerge || len(activeConflictFiles) > 0 {
+		result.Reason = "another merge or conflict is active in the project repository"
+		return result
+	}
+
+	if task.MergeStatus == models.MergeStatusConflict {
+		switch task.Status {
+		case models.StatusCompleted, models.StatusFailed, models.StatusCancelled:
+			if err := h.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusPending); err != nil {
+				result.Reason = "merge conflict status could not be refreshed"
+				return result
+			}
+			task.MergeStatus = models.MergeStatusPending
+		default:
+			result.Reason = "task conflict recovery is not ready"
+			return result
+		}
+	}
+
+	if branchAlreadyMerged || task.MergeStatus == models.MergeStatusMerged {
+		result.Reason = "task branch is already merged"
+		return result
+	}
+	switch task.Status {
+	case models.StatusCompleted, models.StatusFailed, models.StatusCancelled:
+	default:
+		result.Reason = fmt.Sprintf("task status %s is not mergeable", task.Status)
+		return result
+	}
+	if task.WorktreeBranch == "" || !gitRefExists(project.RepoPath, task.WorktreeBranch) {
+		result.Reason = "task branch does not exist"
+		return result
+	}
+	if targetBranch == "" || !gitRefExists(project.RepoPath, targetBranch) {
+		result.Reason = "target branch does not exist"
+		return result
+	}
+
+	result.MergeAvailable = true
+	return result
+}
+
+// resolveTaskChangesWorktreeState is the canonical handler-level resolver for
+// Changes surfaces that need to choose live worktree state versus preserved
+// execution diffs. Endpoint handlers remain responsible only for request
+// parsing, review/PR loading, and rendering their specific fragments.
+func (h *Handler) resolveTaskChangesWorktreeState(ctx context.Context, task *models.Task) taskChangesWorktreeState {
+	var state taskChangesWorktreeState
+	if task == nil {
+		return state
+	}
+
+	project, _ := h.projectRepo.GetByID(ctx, task.ProjectID)
 	var preservedDiffOnce struct {
 		val  string
 		done bool
@@ -849,48 +1011,122 @@ func (h *Handler) resolveTaskChangesDiffOutput(ctx context.Context, task *models
 		return preservedDiffOnce.val
 	}
 
-	// Worktree tasks can use live git diff or preserved execution diff.
-	if task.WorktreeBranch != "" {
-		// Active tasks with an existing worktree should prefer live diff even if
-		// merge_status is stale from a previous run/follow-up.
-		isActive := task.Status == models.StatusRunning || task.Status == models.StatusQueued
-
-		// For non-active merged tasks, only preserved execution diff is available.
-		if !isActive && task.MergeStatus == models.MergeStatusMerged {
-			return preservedDiff()
-		}
-
-		// For active/unmerged tasks with an existing worktree, prefer live diff.
-		if task.WorktreePath != "" {
-			if _, err := os.Stat(task.WorktreePath); err == nil {
-				if project != nil && project.RepoPath != "" {
-					targetBranch := task.MergeTargetBranch
-					if targetBranch == "" {
-						targetBranch = service.GetDefaultBranch(project.RepoPath)
-					}
-					var diffOutput string
-					if task.Status == models.StatusRunning || task.Status == models.StatusQueued || task.MergeStatus != models.MergeStatusMerged {
-						diffOutput = service.GetWorktreeDiffWithUncommitted(project.RepoPath, task.WorktreeBranch, targetBranch, task.WorktreePath)
-					} else {
-						diffOutput = service.GetWorktreeDiff(project.RepoPath, task.WorktreeBranch, targetBranch)
-					}
-					if strings.TrimSpace(diffOutput) == "" &&
-						task.Status != models.StatusRunning &&
-						task.Status != models.StatusQueued &&
-						service.IsBranchMerged(project.RepoPath, task.WorktreeBranch, targetBranch) {
-						return preservedDiff()
-					}
-					return diffOutput
-				}
-			}
-		}
-
-		// Worktree is gone/unavailable, fall back to preserved diff.
-		return preservedDiff()
+	mergeState := h.resolveTaskMergeActionState(ctx, task)
+	if !mergeState.UseWorktreeContent {
+		state.DiffOutput = preservedDiff()
+		return state
 	}
 
-	// Non-worktree tasks use execution-based diff.
-	return preservedDiff()
+	state.UseWorktreeContent = true
+	state.BranchAlreadyMerged = mergeState.BranchAlreadyMerged
+	mergeEligibility := h.resolveTaskMergeEligibility(ctx, task, project, state.BranchAlreadyMerged)
+	state.LocalMergeUnavailable = !mergeEligibility.MergeAvailable && !mergeEligibility.ConflictRecovery
+	state.ConflictRecovery = mergeEligibility.ConflictRecovery
+	state.RebaseAvailable = mergeEligibility.MergeAvailable && mergeState.RebaseAvailable
+	isActive := task.Status == models.StatusRunning || task.Status == models.StatusQueued
+
+	// For non-active merged tasks, live git diff is empty after integration;
+	// preserve the execution diff for review while hiding local merge actions.
+	if !isActive && task.MergeStatus == models.MergeStatusMerged {
+		state.DiffOutput = preservedDiff()
+		return state
+	}
+
+	if task.WorktreePath != "" && project != nil && project.RepoPath != "" {
+		if _, err := os.Stat(task.WorktreePath); err == nil {
+			targetBranch := task.MergeTargetBranch
+			if targetBranch == "" {
+				targetBranch = service.GetDefaultBranch(project.RepoPath)
+			}
+			useLiveUncommitted := isActive || task.MergeStatus != models.MergeStatusMerged
+			if useLiveUncommitted {
+				state.DiffOutput = service.GetWorktreeDiffWithUncommitted(project.RepoPath, task.WorktreeBranch, targetBranch, task.WorktreePath)
+				state.FileStats = service.GetWorktreeFileStatsWithUncommitted(project.RepoPath, task.WorktreeBranch, targetBranch, task.WorktreePath)
+			} else {
+				state.DiffOutput = service.GetWorktreeDiff(project.RepoPath, task.WorktreeBranch, targetBranch)
+				state.FileStats = service.GetWorktreeFileStats(project.RepoPath, task.WorktreeBranch, targetBranch)
+			}
+			if strings.TrimSpace(state.DiffOutput) == "" && !isActive && (state.BranchAlreadyMerged || service.IsBranchMerged(project.RepoPath, task.WorktreeBranch, targetBranch)) {
+				if diff := preservedDiff(); diff != "" {
+					state.DiffOutput = diff
+					state.FileStats = nil
+				}
+			}
+			return state
+		}
+	}
+
+	// Missing/unavailable worktrees fall back to the preserved execution diff.
+	state.DiffOutput = preservedDiff()
+	state.FileStats = nil
+	return state
+}
+
+// resolveTaskChangesDiffOutput resolves only the diff payload used by diff-only
+// Changes fragments. The state decision is shared with full worktree renders.
+func (h *Handler) resolveTaskChangesDiffOutput(ctx context.Context, task *models.Task) string {
+	return h.resolveTaskChangesWorktreeState(ctx, task).DiffOutput
+}
+
+// resolveTaskChangesFileMeta resolves one lazy diff-card target without forcing
+// worktree-backed requests through whole-task diff and stats generation.
+func (h *Handler) resolveTaskChangesFileMeta(ctx context.Context, task *models.Task, fileIndex int) (components.DiffFileRenderMeta, bool) {
+	if task == nil || fileIndex < 0 {
+		return components.DiffFileRenderMeta{}, false
+	}
+
+	project, _ := h.projectRepo.GetByID(ctx, task.ProjectID)
+	h.recoverTaskWorktreeState(ctx, task, project)
+
+	preservedMeta := func() (components.DiffFileRenderMeta, bool) {
+		diffOutput, _ := h.execRepo.GetLatestNonEmptyDiffOutput(ctx, task.ID)
+		return components.DiffRenderMetaByIndex(diffOutput, fileIndex)
+	}
+
+	if task.WorktreeBranch == "" {
+		return preservedMeta()
+	}
+
+	isActive := task.Status == models.StatusRunning || task.Status == models.StatusQueued
+	if !isActive && task.MergeStatus == models.MergeStatusMerged {
+		return preservedMeta()
+	}
+
+	if task.WorktreePath == "" || project == nil || project.RepoPath == "" {
+		return preservedMeta()
+	}
+	if _, err := os.Stat(task.WorktreePath); err != nil {
+		return preservedMeta()
+	}
+
+	targetBranch := task.MergeTargetBranch
+	if targetBranch == "" {
+		targetBranch = service.GetDefaultBranch(project.RepoPath)
+	}
+	if targetBranch == "" {
+		return components.DiffFileRenderMeta{}, false
+	}
+
+	useLiveUncommitted := isActive || task.MergeStatus != models.MergeStatusMerged
+	var diffOutput string
+	var ok bool
+	if useLiveUncommitted {
+		diffOutput, ok = service.GetWorktreeDiffFileWithUncommitted(project.RepoPath, task.WorktreeBranch, targetBranch, task.WorktreePath, fileIndex)
+	} else {
+		diffOutput, ok = service.GetWorktreeDiffFileWithUncommitted(project.RepoPath, task.WorktreeBranch, targetBranch, "", fileIndex)
+	}
+	if !ok {
+		if !isActive && (h.reconcileAlreadyMergedBranch(ctx, task) || service.IsBranchMerged(project.RepoPath, task.WorktreeBranch, targetBranch)) {
+			return preservedMeta()
+		}
+		return components.DiffFileRenderMeta{}, false
+	}
+	meta, ok := components.DiffRenderMetaByIndex(diffOutput, 0)
+	if !ok {
+		return components.DiffFileRenderMeta{}, false
+	}
+	meta.Index = fileIndex
+	return meta, true
 }
 
 // GetTaskChanges returns just the changes tab content for fresh updates when switching tabs.
@@ -907,104 +1143,26 @@ func (h *Handler) GetTaskChanges(c echo.Context) error {
 	}
 
 	ctx := c.Request().Context()
-	project, _ := h.projectRepo.GetByID(ctx, task.ProjectID)
-	h.recoverTaskWorktreeState(ctx, task, project)
+	state := h.resolveTaskChangesWorktreeState(ctx, task)
 
-	// If task has a worktree branch, show worktree-specific diff
-	// For merged tasks, show the preserved diff from execution (live diff would be empty)
-	// For pending/conflict tasks, show live diff if worktree still exists
-	if task.WorktreeBranch != "" {
-		// Detect branches that are already reachable from the target and back-fill
-		// stale merge_status so the merge actions in the changes-tab dropdown stay
-		// in sync with reality.
-		branchAlreadyMerged := h.reconcileAlreadyMergedBranch(ctx, task)
+	var reviewComments []models.ReviewComment
+	if h.reviewCommentRepo != nil {
+		reviewComments, _ = h.reviewCommentRepo.ListByTask(ctx, taskID)
+	}
 
-		var reviewComments []models.ReviewComment
-		if h.reviewCommentRepo != nil {
-			reviewComments, _ = h.reviewCommentRepo.ListByTask(ctx, taskID)
-		}
+	diffView := h.uiDiffViewPreference(ctx)
+
+	if state.UseWorktreeContent {
 		var taskPR *models.TaskPullRequest
 		if h.taskPullRequestRepo != nil {
 			taskPR, _ = h.taskPullRequestRepo.GetByTaskID(ctx, taskID)
 		}
-
-		rebaseAvailable := h.taskRebaseAvailable(task, project, branchAlreadyMerged)
-
-		// preservedDiff fetches the most recent non-empty execution diff on first call,
-		// avoiding loading all execution rows when only the diff blob is needed.
-		var preservedDiffOnce struct {
-			val  string
-			done bool
-		}
-		preservedDiff := func() string {
-			if !preservedDiffOnce.done {
-				preservedDiffOnce.val, _ = h.execRepo.GetLatestNonEmptyDiffOutput(ctx, taskID)
-				preservedDiffOnce.done = true
-			}
-			return preservedDiffOnce.val
-		}
-
-		// Active tasks with an existing worktree should prefer live diff even if
-		// merge_status is stale from a previous run/follow-up.
-		isActive := task.Status == models.StatusRunning || task.Status == models.StatusQueued
-
-		// For non-active merged tasks, show the preserved execution diff.
-		if !isActive && task.MergeStatus == models.MergeStatusMerged {
-			return render(c, http.StatusOK, pages.TaskChangesWorktreeContent(
-				preservedDiff(), task, nil, reviewComments, taskPR, branchAlreadyMerged, rebaseAvailable,
-			))
-		}
-
-		// For active/unmerged tasks, show live diff if worktree still exists
-		if task.WorktreePath != "" {
-			if _, err := os.Stat(task.WorktreePath); err == nil {
-				if project != nil && project.RepoPath != "" {
-					targetBranch := task.MergeTargetBranch
-					if targetBranch == "" {
-						targetBranch = service.GetDefaultBranch(project.RepoPath)
-					}
-					// For running/queued tasks, include uncommitted changes for real-time visibility
-					var diffOutput string
-					if task.Status == models.StatusRunning || task.Status == models.StatusQueued || task.MergeStatus != models.MergeStatusMerged {
-						diffOutput = service.GetWorktreeDiffWithUncommitted(project.RepoPath, task.WorktreeBranch, targetBranch, task.WorktreePath)
-					} else {
-						diffOutput = service.GetWorktreeDiff(project.RepoPath, task.WorktreeBranch, targetBranch)
-					}
-					fileStats := service.GetWorktreeFileStats(project.RepoPath, task.WorktreeBranch, targetBranch)
-					if task.Status == models.StatusRunning || task.Status == models.StatusQueued || task.MergeStatus != models.MergeStatusMerged {
-						fileStats = service.GetWorktreeFileStatsWithUncommitted(project.RepoPath, task.WorktreeBranch, targetBranch, task.WorktreePath)
-					}
-					if strings.TrimSpace(diffOutput) == "" &&
-						task.Status != models.StatusRunning &&
-						task.Status != models.StatusQueued &&
-						(branchAlreadyMerged || service.IsBranchMerged(project.RepoPath, task.WorktreeBranch, targetBranch)) {
-						if pd := preservedDiff(); pd != "" {
-							diffOutput = pd
-							fileStats = nil
-						}
-					}
-
-					return render(c, http.StatusOK, pages.TaskChangesWorktreeContent(
-						diffOutput, task, fileStats, reviewComments, taskPR, branchAlreadyMerged, rebaseAvailable,
-					))
-				}
-			}
-		}
-
-		// Fallback: worktree existed but is gone, show preserved diff
-		return render(c, http.StatusOK, pages.TaskChangesWorktreeContent(
-			preservedDiff(), task, nil, reviewComments, taskPR, branchAlreadyMerged, rebaseAvailable,
+		return render(c, http.StatusOK, pages.TaskChangesWorktreeContentWithView(
+			state.DiffOutput, task, state.FileStats, reviewComments, taskPR, state.LocalMergeUnavailable, state.ConflictRecovery, state.RebaseAvailable, diffView,
 		))
 	}
 
-	// Fallback to execution-based diff (non-worktree tasks)
-	diffOutput, _ := h.execRepo.GetLatestNonEmptyDiffOutput(c.Request().Context(), taskID)
-	var reviewComments []models.ReviewComment
-	if h.reviewCommentRepo != nil {
-		reviewComments, _ = h.reviewCommentRepo.ListByTask(c.Request().Context(), taskID)
-	}
-
-	return render(c, http.StatusOK, pages.TaskChangesContent(diffOutput, task.ID, reviewComments))
+	return render(c, http.StatusOK, pages.TaskChangesContentWithView(state.DiffOutput, task.ID, reviewComments, diffView))
 }
 
 // GetTaskChangesFile returns a single diff file card for per-file lazy loading.
@@ -1035,8 +1193,8 @@ func (h *Handler) GetTaskChangesFile(c echo.Context) error {
 		reviewComments, _ = h.reviewCommentRepo.ListByTask(c.Request().Context(), taskID)
 	}
 
-	diffOutput := h.resolveTaskChangesDiffOutput(c.Request().Context(), task)
-	return render(c, http.StatusOK, components.LoadDiffFileCard(diffOutput, fileIndex, view, taskID, reviewComments, reviewMode))
+	meta, exists := h.resolveTaskChangesFileMeta(c.Request().Context(), task, fileIndex)
+	return render(c, http.StatusOK, components.LoadDiffFileCardMeta(meta, exists, view, taskID, reviewComments, reviewMode))
 }
 
 // GetTaskChangesLive returns only the diff viewer fragment for realtime updates.
@@ -1074,7 +1232,8 @@ func (h *Handler) GetTaskChangesLive(c echo.Context) error {
 		if _, err := io.WriteString(w, `<div id="diff-viewer-container">`); err != nil {
 			return err
 		}
-		if err := components.DiffViewerWithReview(diffOutput, task.ID, reviewComments).Render(ctx, w); err != nil {
+		diffView := h.uiDiffViewPreference(c.Request().Context())
+		if err := components.DiffViewerWithReviewView(diffOutput, task.ID, reviewComments, diffView).Render(ctx, w); err != nil {
 			return err
 		}
 		_, err := io.WriteString(w, `</div>`)
@@ -1127,6 +1286,13 @@ func (h *Handler) updateTaskGoalFromEditForm(c echo.Context, taskID string) erro
 func (h *Handler) UpdateTask(c echo.Context) error {
 	taskID := c.Param("taskId")
 	applog.Infof("[handler] UpdateTask id=%s", taskID)
+	if _, err := parseBoundedMultipartForm(c, maxUploadSize, maxTaskAttachmentFilesPerRequest); err != nil {
+		applog.Infof("[handler] UpdateTask error parsing form: %v", err)
+		if httpErr, ok := err.(*echo.HTTPError); ok {
+			return httpErr
+		}
+		return echo.NewHTTPError(http.StatusBadRequest, "failed to parse form")
+	}
 
 	task, err := h.taskSvc.GetByID(c.Request().Context(), taskID)
 	if err != nil {
@@ -1156,16 +1322,18 @@ func (h *Handler) UpdateTask(c echo.Context) error {
 	}
 
 	task.Title = c.FormValue("title")
-	if stopActiveViaCategoryUpdate {
-		task.Category = oldCategory
-	} else {
-		task.Category = newCategory
-	}
+	// Category transitions must go through UpdateCategory after the generic field
+	// update so completed_at, display order, events, and execution lifecycle stay
+	// consistent with drag/drop transitions.
+	task.Category = oldCategory
 	task.Prompt = c.FormValue("prompt")
 	task.Tag = models.TaskTag(c.FormValue("tag"))
-	if p, err := strconv.Atoi(c.FormValue("priority")); err == nil {
-		task.Priority = p
+	priorityValue := strings.TrimSpace(c.FormValue("priority"))
+	priority, err := strconv.Atoi(priorityValue)
+	if priorityValue == "" || err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "Task priority must be between 1 and 4")
 	}
+	task.Priority = priority
 
 	// Handle optional agent (LLM config) selection
 	if agentID := c.FormValue("agent_id"); agentID != "" {
@@ -1173,12 +1341,12 @@ func (h *Handler) UpdateTask(c echo.Context) error {
 	} else {
 		task.AgentID = nil
 	}
-	// Handle optional agent definition selection
-	if agentDefID := c.FormValue("agent_definition_id"); agentDefID != "" {
-		task.AgentDefinitionID = &agentDefID
-	} else {
-		task.AgentDefinitionID = nil
+	// Handle optional primary Agent definition selection separately from the model config.
+	agentDefID, err := h.resolvePrimaryAgentDefinition(c.Request().Context(), task.ProjectID, c.FormValue("agent_definition_id"))
+	if err != nil {
+		return err
 	}
+	task.AgentDefinitionID = agentDefID
 
 	// Handle auto-merge settings — if the hidden sentinel is present, the edit form
 	// was submitted and we always update (unchecked checkbox sends no value).
@@ -1195,6 +1363,9 @@ func (h *Handler) UpdateTask(c echo.Context) error {
 			applog.Infof("[handler] UpdateTask duplicate title=%q", task.Title)
 			return echo.NewHTTPError(http.StatusConflict, "A task with this name already exists in this project")
 		}
+		if httpErr := taskRequiredFieldHTTPError(err); httpErr != nil {
+			return httpErr
+		}
 		applog.Infof("[handler] UpdateTask error: %v", err)
 		return err
 	}
@@ -1205,7 +1376,7 @@ func (h *Handler) UpdateTask(c echo.Context) error {
 	// Handle file uploads if present (multipart form)
 	if form, err := c.MultipartForm(); err == nil && form != nil {
 		if files := form.File["files"]; len(files) > 0 {
-			h.processTaskFileUploads(c.Request().Context(), taskID, files)
+			h.persistTaskAttachmentFiles(c.Request().Context(), taskID, files, "UpdateTask")
 		}
 	}
 
@@ -1229,17 +1400,20 @@ func (h *Handler) UpdateTask(c echo.Context) error {
 		}
 	}
 
-	// Category transitions that start or stop execution use the same lifecycle path as drag & drop.
-	if oldCategory != newCategory && newCategory == models.CategoryActive {
-		applog.Infof("[handler] UpdateTask category changed to Active, resetting status and auto-submitting id=%s", taskID)
-		if err := h.taskSvc.UpdateCategory(c.Request().Context(), taskID, models.CategoryActive); err != nil {
-			applog.Infof("[handler] UpdateTask error starting active task: %v", err)
-			return err
-		}
-	} else if stopActiveViaCategoryUpdate {
+	// Task detail edits are metadata saves. They may update the stored category for
+	// display/sorting, but must not activate or enqueue work; explicit Run Now,
+	// drag/drop category changes, schedules, and task-thread follow-ups own those
+	// execution side effects.
+	if stopActiveViaCategoryUpdate {
 		applog.Infof("[handler] UpdateTask category changed from Active while %s, cancelling id=%s", oldStatus, taskID)
 		if err := h.taskSvc.UpdateCategory(c.Request().Context(), taskID, newCategory); err != nil {
 			applog.Infof("[handler] UpdateTask error stopping active task: %v", err)
+			return err
+		}
+	} else if oldCategory != newCategory {
+		applog.Infof("[handler] UpdateTask metadata category changed %s->%s id=%s", oldCategory, newCategory, taskID)
+		if err := h.taskRepo.UpdateCategory(c.Request().Context(), taskID, newCategory); err != nil {
+			applog.Infof("[handler] UpdateTask error changing metadata category: %v", err)
 			return err
 		}
 	}
@@ -1248,82 +1422,10 @@ func (h *Handler) UpdateTask(c echo.Context) error {
 
 	// Re-fetch updated task data for rendering
 	if isHTMX(c) {
-		task, _ = h.taskSvc.GetByID(c.Request().Context(), taskID)
-		executions, _ := h.execRepo.ListByTaskChronological(c.Request().Context(), taskID)
-		schedules, _ := h.scheduleRepo.ListByTask(c.Request().Context(), taskID)
-		agents, _ := h.llmConfigRepo.List(c.Request().Context())
-		attachments, _ := h.attachmentRepo.ListByTask(c.Request().Context(), taskID)
-		adefs := h.listTaskFormAgentDefinitions(c.Request().Context(), task.ProjectID, task.AgentDefinitionID)
-		var rc []models.ReviewComment
-		if h.reviewCommentRepo != nil {
-			rc, _ = h.reviewCommentRepo.ListByTask(c.Request().Context(), taskID)
-		}
-		return render(c, http.StatusOK, pages.TaskDetailContent(task, h.loadTaskGoal(c.Request().Context(), taskID), executions, schedules, agents, adefs, attachments, "details", rc))
+		return h.renderTaskDetailContent(c, taskID, "details")
 	}
 
 	return c.Redirect(http.StatusSeeOther, "/tasks/"+task.ID)
-}
-
-// processTaskFileUploads handles file uploads during task update.
-// Saves files to uploads/{taskID}/ and creates attachment records.
-func (h *Handler) processTaskFileUploads(ctx context.Context, taskID string, files []*multipart.FileHeader) {
-	taskDir := filepath.Join(uploadsDir, taskID)
-	if err := os.MkdirAll(taskDir, 0755); err != nil {
-		applog.Infof("[handler] processTaskFileUploads error creating directory: %v", err)
-		return
-	}
-
-	for _, file := range files {
-		if file.Size > maxUploadSize {
-			applog.Infof("[handler] processTaskFileUploads file %s too large (%d bytes)", file.Filename, file.Size)
-			continue
-		}
-
-		src, err := file.Open()
-		if err != nil {
-			applog.Infof("[handler] processTaskFileUploads error opening %s: %v", file.Filename, err)
-			continue
-		}
-
-		filename := filepath.Base(file.Filename)
-		destPath := filepath.Join(taskDir, filename)
-		dest, err := os.Create(destPath)
-		if err != nil {
-			applog.Infof("[handler] processTaskFileUploads error creating %s: %v", filename, err)
-			src.Close()
-			continue
-		}
-
-		if _, err := io.Copy(dest, src); err != nil {
-			applog.Infof("[handler] processTaskFileUploads error copying %s: %v", filename, err)
-			src.Close()
-			dest.Close()
-			os.Remove(destPath)
-			continue
-		}
-		src.Close()
-		dest.Close()
-
-		mediaType := file.Header.Get("Content-Type")
-		if mediaType == "" {
-			mediaType = "application/octet-stream"
-		}
-
-		att := &models.Attachment{
-			TaskID:    taskID,
-			FileName:  filename,
-			FilePath:  destPath,
-			MediaType: mediaType,
-			FileSize:  file.Size,
-		}
-		if err := h.attachmentRepo.Create(ctx, att); err != nil {
-			applog.Infof("[handler] processTaskFileUploads error creating record for %s: %v", filename, err)
-			os.Remove(destPath)
-			continue
-		}
-
-		applog.Infof("[handler] processTaskFileUploads uploaded %s to task %s", filename, taskID)
-	}
 }
 
 func (h *Handler) DeleteTask(c echo.Context) error {
@@ -1360,14 +1462,7 @@ func (h *Handler) DeleteTask(c echo.Context) error {
 
 	// Return the full kanban board for HTMX requests (consistent with other task operations)
 	if isHTMX(c) {
-		sortPrefs := getSortPreferences(c)
-		tasks, err := h.taskSvc.ListByProjectWithCategorySorts(c.Request().Context(), projectID, "", sortPrefs.Backlog, sortPrefs.Completed)
-		if err != nil {
-			applog.Infof("[handler] DeleteTask error listing tasks: %v", err)
-			return err
-		}
-		agents, _ := h.llmConfigRepo.List(c.Request().Context())
-		return h.renderKanbanBoard(c, tasks, projectID, sortPrefs, agents)
+		return h.renderTaskBoardRefresh(c, projectID, nil)
 	}
 	return c.Redirect(http.StatusSeeOther, "/tasks?project_id="+projectID)
 }
@@ -1417,6 +1512,77 @@ func (h *Handler) RunTask(c echo.Context) error {
 	return c.Redirect(http.StatusSeeOther, "/tasks/"+taskID)
 }
 
+type taskCancellationResult struct {
+	OK               bool                `json:"ok"`
+	Accepted         bool                `json:"accepted"`
+	TaskID           string              `json:"task_id"`
+	Title            string              `json:"title"`
+	PreviousStatus   models.TaskStatus   `json:"previous_status"`
+	PreviousCategory models.TaskCategory `json:"previous_category"`
+	FinalStatus      models.TaskStatus   `json:"final_status"`
+	FinalCategory    models.TaskCategory `json:"final_category"`
+	Message          string              `json:"message"`
+}
+
+func taskIsCancellableByUser(task *models.Task) bool {
+	if task == nil {
+		return false
+	}
+	return task.Status == models.StatusRunning || task.Status == models.StatusQueued || (task.Status == models.StatusPending && task.Category == models.CategoryActive) || (task.SwarmRole == models.SwarmRoleParent && task.Status == models.StatusBlocked && task.Category == models.CategoryActive)
+}
+
+func (h *Handler) cancelTaskWork(ctx context.Context, task *models.Task, composerStop bool, operation string) (*taskCancellationResult, error) {
+	if task == nil {
+		return nil, fmt.Errorf("task not found")
+	}
+	result := &taskCancellationResult{
+		OK:               true,
+		TaskID:           task.ID,
+		Title:            task.Title,
+		PreviousStatus:   task.Status,
+		PreviousCategory: task.Category,
+		FinalStatus:      task.Status,
+		FinalCategory:    task.Category,
+	}
+	if !taskIsCancellableByUser(task) {
+		result.Accepted = false
+		result.Message = fmt.Sprintf("Task is not currently cancellable (status=%s, category=%s).", task.Status, task.Category)
+		return result, nil
+	}
+
+	if h.workerSvc != nil {
+		h.workerSvc.MarkCancellationRequested(task.ID)
+	}
+	if !composerStop && h.threadInputRepo != nil {
+		if err := h.threadInputRepo.CancelPendingForTask(ctx, task.ID); err != nil {
+			applog.Infof("[handler] %s error cancelling pending thread inputs task=%s: %v", operation, task.ID, err)
+		}
+	}
+	if task.SwarmRole == models.SwarmRoleParent && h.swarmSvc != nil {
+		if err := h.swarmSvc.CancelSwarm(ctx, task.ID); err != nil {
+			applog.Infof("[handler] %s swarm cascade error: %v", operation, err)
+			return nil, err
+		}
+	} else if err := h.taskSvc.CancelTask(ctx, task.ID); err != nil {
+		applog.Infof("[handler] %s error: %v", operation, err)
+		return nil, err
+	} else if models.IsSwarmChildRole(task.SwarmRole) {
+		h.notifySwarmChildTerminal(ctx, task.ID)
+	}
+	h.cancelActiveExecutionsAndPublish(ctx, task.ID, operation)
+	updated, err := h.taskSvc.GetByID(ctx, task.ID)
+	if err != nil {
+		return nil, err
+	}
+	if updated != nil {
+		result.FinalStatus = updated.Status
+		result.FinalCategory = updated.Category
+	}
+	result.Accepted = true
+	result.Message = "Cancellation requested."
+	return result, nil
+}
+
 func (h *Handler) CancelTask(c echo.Context) error {
 	taskID := c.Param("taskId")
 	applog.Infof("[handler] CancelTask task=%s", taskID)
@@ -1434,47 +1600,22 @@ func (h *Handler) CancelTask(c echo.Context) error {
 	projectID := task.ProjectID
 
 	composerStop := c.QueryParam("composer_stop") == "1"
-	if !composerStop && h.threadInputRepo != nil {
-		if err := h.threadInputRepo.CancelPendingForTask(c.Request().Context(), taskID); err != nil {
-			applog.Infof("[handler] CancelTask error cancelling pending thread inputs task=%s: %v", taskID, err)
-		}
-	}
-	if task.SwarmRole == models.SwarmRoleParent && h.swarmSvc != nil {
-		if err := h.swarmSvc.CancelSwarm(c.Request().Context(), taskID); err != nil {
-			applog.Infof("[handler] CancelTask swarm cascade error: %v", err)
-			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-		}
-	} else if err := h.taskSvc.CancelTask(c.Request().Context(), taskID); err != nil {
-		applog.Infof("[handler] CancelTask error: %v", err)
+	result, err := h.cancelTaskWork(c.Request().Context(), task, composerStop, "CancelTask")
+	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	} else if models.IsSwarmChildRole(task.SwarmRole) {
-		h.notifySwarmChildTerminal(c.Request().Context(), taskID)
 	}
-	if h.execRepo != nil {
-		if cancelledIDs, err := h.execRepo.CancelRunningByTaskReturningIDs(c.Request().Context(), taskID); err != nil {
-			applog.Infof("[handler] CancelTask error cancelling running executions task=%s: %v", taskID, err)
-		} else if len(cancelledIDs) > 0 {
-			applog.Infof("[handler] CancelTask cancelled %d running executions task=%s", len(cancelledIDs), taskID)
-			for _, id := range cancelledIDs {
-				h.publishExecutionTerminal(id, models.ExecCancelled, "cancelled")
-			}
-		}
+	if result != nil && !result.Accepted {
+		applog.Infof("[handler] CancelTask not cancellable task=%s status=%s category=%s", taskID, task.Status, task.Category)
+		return echo.NewHTTPError(http.StatusBadRequest, result.Message)
 	}
 	applog.Infof("[handler] CancelTask cancelled task=%s", taskID)
 
 	// Return the full kanban board for HTMX requests
 	if isHTMX(c) {
-		sortPrefs := getSortPreferences(c)
-		tasks, err := h.taskSvc.ListByProjectWithCategorySorts(c.Request().Context(), projectID, "", sortPrefs.Backlog, sortPrefs.Completed)
-		if err != nil {
-			applog.Infof("[handler] CancelTask error listing tasks: %v", err)
-			return err
-		}
 		if composerStop {
-			return render(c, http.StatusOK, components.ChatComposerActionButtonOOB("task-thread-form-primary-action", fmt.Sprintf("/tasks/%s/cancel?composer_stop=1", taskID), false))
+			return render(c, http.StatusOK, components.ChatComposerActionButtonOOB("task-thread-form-primary-action", fmt.Sprintf("/tasks/%s/cancel?composer_stop=1", taskID), false, ""))
 		}
-		agents, _ := h.llmConfigRepo.List(c.Request().Context())
-		return h.renderKanbanBoard(c, tasks, projectID, sortPrefs, agents)
+		return h.renderTaskBoardRefresh(c, projectID, nil)
 	}
 	return c.Redirect(http.StatusSeeOther, "/tasks/"+taskID)
 }
@@ -1522,10 +1663,7 @@ func (h *Handler) UpdateTaskCategory(c echo.Context) error {
 
 	// Return the full kanban board
 	if isHTMX(c) {
-		sortPrefs := getSortPreferences(c)
-		tasks, _ := h.taskSvc.ListByProjectWithCategorySorts(c.Request().Context(), task.ProjectID, "", sortPrefs.Backlog, sortPrefs.Completed)
-		agents, _ := h.llmConfigRepo.List(c.Request().Context())
-		return h.renderKanbanBoard(c, tasks, task.ProjectID, sortPrefs, agents)
+		return h.renderTaskBoardRefresh(c, task.ProjectID, nil)
 	}
 	return c.NoContent(http.StatusOK)
 }
@@ -1543,10 +1681,7 @@ func (h *Handler) MoveCompletedActiveToCompleted(c echo.Context) error {
 
 	// Return the full kanban board
 	if isHTMX(c) {
-		sortPrefs := getSortPreferences(c)
-		tasks, _ := h.taskSvc.ListByProjectWithCategorySorts(c.Request().Context(), projectID, "", sortPrefs.Backlog, sortPrefs.Completed)
-		agents, _ := h.llmConfigRepo.List(c.Request().Context())
-		return h.renderKanbanBoard(c, tasks, projectID, sortPrefs, agents)
+		return h.renderTaskBoardRefresh(c, projectID, nil)
 	}
 
 	return c.Redirect(http.StatusSeeOther, "/tasks?project_id="+projectID)
@@ -1571,10 +1706,7 @@ func (h *Handler) UpdateTaskStatus(c echo.Context) error {
 
 	// Return the full kanban board
 	if isHTMX(c) {
-		sortPrefs := getSortPreferences(c)
-		tasks, _ := h.taskSvc.ListByProjectWithCategorySorts(c.Request().Context(), task.ProjectID, "", sortPrefs.Backlog, sortPrefs.Completed)
-		agents, _ := h.llmConfigRepo.List(c.Request().Context())
-		return h.renderKanbanBoard(c, tasks, task.ProjectID, sortPrefs, agents)
+		return h.renderTaskBoardRefresh(c, task.ProjectID, nil)
 	}
 	return c.NoContent(http.StatusOK)
 }
@@ -1628,10 +1760,7 @@ func (h *Handler) BatchUpdateTaskCategory(c echo.Context) error {
 	applog.Infof("[handler] BatchUpdateTaskCategory success")
 
 	if isHTMX(c) {
-		sortPrefs := getSortPreferences(c)
-		tasks, _ := h.taskSvc.ListByProjectWithCategorySorts(c.Request().Context(), projectID, "", sortPrefs.Backlog, sortPrefs.Completed)
-		agents, _ := h.llmConfigRepo.List(c.Request().Context())
-		return h.renderKanbanBoard(c, tasks, projectID, sortPrefs, agents)
+		return h.renderTaskBoardRefresh(c, projectID, nil)
 	}
 	return c.NoContent(http.StatusOK)
 }
@@ -1649,10 +1778,7 @@ func (h *Handler) DeleteAllCompletedTasks(c echo.Context) error {
 
 	// Return the full kanban board
 	if isHTMX(c) {
-		sortPrefs := getSortPreferences(c)
-		tasks, _ := h.taskSvc.ListByProjectWithCategorySorts(c.Request().Context(), projectID, "", sortPrefs.Backlog, sortPrefs.Completed)
-		agents, _ := h.llmConfigRepo.List(c.Request().Context())
-		return h.renderKanbanBoard(c, tasks, projectID, sortPrefs, agents)
+		return h.renderTaskBoardRefresh(c, projectID, nil)
 	}
 
 	return c.Redirect(http.StatusSeeOther, "/tasks?project_id="+projectID)
@@ -1671,10 +1797,7 @@ func (h *Handler) DeleteAllBacklogTasks(c echo.Context) error {
 
 	// Return the full kanban board
 	if isHTMX(c) {
-		sortPrefs := getSortPreferences(c)
-		tasks, _ := h.taskSvc.ListByProjectWithCategorySorts(c.Request().Context(), projectID, "", sortPrefs.Backlog, sortPrefs.Completed)
-		agents, _ := h.llmConfigRepo.List(c.Request().Context())
-		return h.renderKanbanBoard(c, tasks, projectID, sortPrefs, agents)
+		return h.renderTaskBoardRefresh(c, projectID, nil)
 	}
 
 	return c.Redirect(http.StatusSeeOther, "/tasks?project_id="+projectID)
@@ -1693,10 +1816,7 @@ func (h *Handler) ActivateAllBacklogTasks(c echo.Context) error {
 
 	// Return the full kanban board
 	if isHTMX(c) {
-		sortPrefs := getSortPreferences(c)
-		tasks, _ := h.taskSvc.ListByProjectWithCategorySorts(c.Request().Context(), projectID, "", sortPrefs.Backlog, sortPrefs.Completed)
-		agents, _ := h.llmConfigRepo.List(c.Request().Context())
-		return h.renderKanbanBoard(c, tasks, projectID, sortPrefs, agents)
+		return h.renderTaskBoardRefresh(c, projectID, nil)
 	}
 
 	return c.Redirect(http.StatusSeeOther, "/tasks?project_id="+projectID)
@@ -1725,10 +1845,7 @@ func (h *Handler) ReorderTask(c echo.Context) error {
 
 	// Return the full kanban board
 	if isHTMX(c) {
-		sortPrefs := getSortPreferences(c)
-		tasks, _ := h.taskSvc.ListByProjectWithCategorySorts(c.Request().Context(), task.ProjectID, "", sortPrefs.Backlog, sortPrefs.Completed)
-		agents, _ := h.llmConfigRepo.List(c.Request().Context())
-		return h.renderKanbanBoard(c, tasks, task.ProjectID, sortPrefs, agents)
+		return h.renderTaskBoardRefresh(c, task.ProjectID, nil)
 	}
 	return c.NoContent(http.StatusOK)
 }
@@ -1755,10 +1872,7 @@ func (h *Handler) ExecuteBacklogTasks(c echo.Context) error {
 
 	// Return the full kanban board
 	if isHTMX(c) {
-		sortPrefs := getSortPreferences(c)
-		allTasks, _ := h.taskSvc.ListByProjectWithCategorySorts(c.Request().Context(), projectID, "", sortPrefs.Backlog, sortPrefs.Completed)
-		agents, _ := h.llmConfigRepo.List(c.Request().Context())
-		return h.renderKanbanBoard(c, allTasks, projectID, sortPrefs, agents)
+		return h.renderTaskBoardRefresh(c, projectID, nil)
 	}
 
 	return c.Redirect(http.StatusSeeOther, "/tasks?project_id="+projectID)
@@ -1792,15 +1906,9 @@ func (h *Handler) SetBacklogSort(c echo.Context) error {
 
 	// Return the full kanban board with the new sort order
 	if isHTMX(c) {
-		sortPrefs := getSortPreferences(c)
-		sortPrefs.Backlog = sortBy
-		tasks, err := h.taskSvc.ListByProjectWithCategorySorts(c.Request().Context(), projectID, "", sortPrefs.Backlog, sortPrefs.Completed)
-		if err != nil {
-			applog.Infof("[handler] SetBacklogSort error: %v", err)
-			return err
-		}
-		agents, _ := h.llmConfigRepo.List(c.Request().Context())
-		return h.renderKanbanBoard(c, tasks, projectID, sortPrefs, agents)
+		return h.renderTaskBoardRefresh(c, projectID, func(sortPrefs *taskSortPreferences) {
+			sortPrefs.Backlog = sortBy
+		})
 	}
 
 	return c.Redirect(http.StatusSeeOther, "/tasks?project_id="+projectID)
@@ -1820,15 +1928,9 @@ func (h *Handler) SetCompletedSort(c echo.Context) error {
 	applog.Infof("[handler] SetCompletedSort cookie set: %s", sortBy)
 
 	if isHTMX(c) {
-		sortPrefs := getSortPreferences(c)
-		sortPrefs.Completed = sortBy
-		tasks, err := h.taskSvc.ListByProjectWithCategorySorts(c.Request().Context(), projectID, "", sortPrefs.Backlog, sortPrefs.Completed)
-		if err != nil {
-			applog.Infof("[handler] SetCompletedSort error: %v", err)
-			return err
-		}
-		agents, _ := h.llmConfigRepo.List(c.Request().Context())
-		return h.renderKanbanBoard(c, tasks, projectID, sortPrefs, agents)
+		return h.renderTaskBoardRefresh(c, projectID, func(sortPrefs *taskSortPreferences) {
+			sortPrefs.Completed = sortBy
+		})
 	}
 
 	return c.Redirect(http.StatusSeeOther, "/tasks?project_id="+projectID)
@@ -1904,16 +2006,7 @@ func (h *Handler) UpdateTaskChainConfig(c echo.Context) error {
 
 	// Return updated task detail content
 	if isHTMX(c) {
-		executions, _ := h.execRepo.ListByTaskChronological(c.Request().Context(), taskID)
-		schedules, _ := h.scheduleRepo.ListByTask(c.Request().Context(), taskID)
-		agents, _ := h.llmConfigRepo.List(c.Request().Context())
-		attachments, _ := h.attachmentRepo.ListByTask(c.Request().Context(), taskID)
-		adefs := h.listTaskFormAgentDefinitions(c.Request().Context(), task.ProjectID, task.AgentDefinitionID)
-		var rc []models.ReviewComment
-		if h.reviewCommentRepo != nil {
-			rc, _ = h.reviewCommentRepo.ListByTask(c.Request().Context(), taskID)
-		}
-		return render(c, http.StatusOK, pages.TaskDetailContent(task, h.loadTaskGoal(c.Request().Context(), taskID), executions, schedules, agents, adefs, attachments, "chaining", rc))
+		return h.renderTaskDetailContent(c, taskID, "chaining")
 	}
 
 	return c.NoContent(http.StatusOK)
@@ -1932,7 +2025,59 @@ func (h *Handler) TaskThreadComposerAction(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	return render(c, http.StatusOK, components.ChatComposerActionButtonOOB("task-thread-form-primary-action", fmt.Sprintf("/tasks/%s/cancel?composer_stop=1", taskID), components.TaskThreadHasActiveComposerStopState(task, executions)))
+	activeTurnID := ""
+	for _, exec := range executions {
+		if exec.Status == models.ExecRunning {
+			activeTurnID = exec.ID
+		}
+	}
+	return render(c, http.StatusOK, components.ChatComposerActionButtonOOB("task-thread-form-primary-action", fmt.Sprintf("/tasks/%s/cancel?composer_stop=1", taskID), components.TaskThreadHasActiveComposerStopState(task, executions), activeTurnID))
+}
+
+// TaskThreadSelectModel persists a task-thread composer model selection
+// immediately, independent of sending a message. Without this, changing the
+// model dropdown only mutates client-side DOM/hidden-input state; since task
+// threads intentionally do not use the Chat page's localStorage persistence
+// (which is keyed by ProjectID), navigating away and back would otherwise
+// re-render the composer from the task's unchanged Task.AgentID and silently
+// revert the visible selection. "auto" and "" are one-off routing choices and
+// are not persisted here (matches TaskThreadSend's persistence semantics).
+func (h *Handler) TaskThreadSelectModel(c echo.Context) error {
+	taskID := c.Param("taskId")
+	agentID := c.FormValue("agent_id")
+
+	task, err := h.taskSvc.GetByID(c.Request().Context(), taskID)
+	if err != nil {
+		return err
+	}
+	if task == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "task not found")
+	}
+
+	// Swarm parent tasks resolve their assigned agent through swarm-specific
+	// semantics (see SwarmService.resolveAssignedAgentID and child creation),
+	// not through direct Task.AgentID composer persistence. TaskThreadSend
+	// skips AgentID persistence for swarm parents by routing through
+	// HandleParentFollowup first; mirror that here so this endpoint cannot
+	// mutate parent.AgentID and unintentionally affect swarm child creation.
+	if task.SwarmRole == models.SwarmRoleParent {
+		return c.NoContent(http.StatusNoContent)
+	}
+
+	if agentID != "" && agentID != "auto" && h.taskRepo != nil {
+		agent, selErr := h.selectAgent(c.Request().Context(), agentID, "", false)
+		if selErr != nil || agent == nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid model selection")
+		}
+		if task.AgentID == nil || *task.AgentID != agent.ID {
+			if updErr := h.taskRepo.UpdateAgentID(c.Request().Context(), taskID, agent.ID); updErr != nil {
+				applog.Infof("[handler] TaskThreadSelectModel error persisting selected model task=%s agent=%s: %v", taskID, agent.ID, updErr)
+				return echo.NewHTTPError(http.StatusInternalServerError, "failed to persist model selection")
+			}
+		}
+	}
+
+	return c.NoContent(http.StatusNoContent)
 }
 
 // TaskThreadSend handles sending a follow-up message in the task thread.
@@ -1965,8 +2110,8 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 			return echo.NewHTTPError(http.StatusInternalServerError, "failed to route swarm follow-up")
 		}
 		return render(c, http.StatusOK, templ.Join(
-			components.TaskThreadQueuedFollowupResponse(message, nil),
-			components.ChatComposerActionButtonOOB("task-thread-form-primary-action", fmt.Sprintf("/tasks/%s/cancel?composer_stop=1", taskID), false),
+			components.TaskThreadQueuedFollowupResponse(message, nil, task.ProjectID),
+			components.ChatComposerActionButtonOOB("task-thread-form-primary-action", fmt.Sprintf("/tasks/%s/cancel?composer_stop=1", taskID), false, ""),
 		))
 	}
 
@@ -1986,98 +2131,71 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 		}
 	}
 
-	activeExec, activeErr := h.execRepo.FindActiveTaskExecution(c.Request().Context(), taskID, "")
-	if activeErr != nil {
-		applog.Infof("[handler] TaskThreadSend active execution check failed task=%s: %v", taskID, activeErr)
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to check active task turn")
-	}
-	queueBehindFirstTurn, queueStateErr := h.taskHasStartingFirstTurn(c.Request().Context(), task)
-	if queueStateErr != nil {
-		applog.Infof("[handler] TaskThreadSend first-turn state check failed task=%s: %v", taskID, queueStateErr)
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to check task queue")
-	}
-	if activeExec == nil && !queueBehindFirstTurn {
-		activeExec, activeErr = h.execRepo.FindActiveTaskExecution(c.Request().Context(), taskID, "")
-		if activeErr != nil {
-			applog.Infof("[handler] TaskThreadSend active execution recheck failed task=%s: %v", taskID, activeErr)
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to check active task turn")
-		}
-	}
-	if activeExec != nil || queueBehindFirstTurn {
-		if h.threadInputRepo == nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "thread input queue is unavailable")
-		}
-		runExecutionID := ""
-		if activeExec != nil {
-			runExecutionID = activeExec.ID
-		}
-		queued := &models.ThreadInput{
-			Scope:               models.ThreadInputScopeTask,
-			ProjectID:           task.ProjectID,
-			TaskID:              taskID,
-			RunExecutionID:      runExecutionID,
-			AgentConfigID:       agent.ID,
-			InputMode:           models.ThreadInputModeQueued,
-			InputStatus:         models.ThreadInputPending,
-			Content:             message,
-			Source:              models.TaskOriginWeb,
-			AttachmentSessionID: sessionID,
-		}
-		if err := h.threadInputRepo.CreateQueued(c.Request().Context(), queued); err != nil {
-			applog.Infof("[handler] TaskThreadSend error creating queued input: %v", err)
-			if cleanupErr := h.cleanupUnpublishedPendingAttachmentSession(c.Request().Context(), sessionID); cleanupErr != nil {
-				applog.Infof("[handler] TaskThreadSend error cleaning unpublished attachment session %s: %v", sessionID, cleanupErr)
+	// An explicit composer model selection (a concrete model ID, or an explicit
+	// "default" choice) becomes the task's ongoing assigned model, so the composer
+	// selector continues to reflect it after this send and on future follow-ups
+	// instead of silently reverting to the task's previous default. This matches
+	// task assignment semantics where explicit Task.AgentID drives task model
+	// selection. "auto" and unset selections are one-off routing for this send
+	// only and do not change the task's assignment. Persisting here (rather than
+	// only after execution admission) also protects against races with concurrent
+	// or queued follow-ups: each queued/direct execution still carries its own
+	// explicitly resolved agent.ID independent of this assignment update.
+	if agentID != "" && agentID != "auto" && h.taskRepo != nil {
+		newAgentID := agent.ID
+		if task.AgentID == nil || *task.AgentID != newAgentID {
+			if updErr := h.taskRepo.UpdateAgentID(c.Request().Context(), taskID, newAgentID); updErr != nil {
+				applog.Infof("[handler] TaskThreadSend error persisting selected model task=%s agent=%s: %v", taskID, newAgentID, updErr)
+			} else {
+				task.AgentID = &newAgentID
 			}
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to queue follow-up")
 		}
-		if err := h.bindQueuedTaskInputToActiveExecutionIfAvailable(c.Request().Context(), queued); err != nil {
-			applog.Infof("[handler] TaskThreadSend task=%s input=%s active execution bind skipped: %v", taskID, queued.ID, err)
-		}
-		if shouldPromote, promoteErr := h.shouldPromotePreExecutionQueuedInput(c.Request().Context(), task, queued); promoteErr != nil {
-			applog.Infof("[handler] TaskThreadSend task=%s input=%s promotion recheck skipped: %v", taskID, queued.ID, promoteErr)
-		} else if shouldPromote {
-			go h.PromoteQueuedTaskThreadInput(taskID)
-		}
-		return render(c, http.StatusOK, components.ChatQueuedInputRowOOBForTask(queued.ID, message, fmt.Sprintf("/tasks/%s/thread/queued/%s/steer", taskID, queued.ID), queued.AttachmentSessionID != "", taskID))
 	}
-	exec := &models.Execution{
-		TaskID:        taskID,
-		AgentConfigID: agent.ID,
-		Status:        models.ExecRunning,
-		PromptSent:    message,
-		IsFollowup:    true,
-	}
-	queued := &models.ThreadInput{
-		Scope:               models.ThreadInputScopeTask,
-		ProjectID:           task.ProjectID,
-		TaskID:              taskID,
-		AgentConfigID:       agent.ID,
-		InputMode:           models.ThreadInputModeQueued,
-		InputStatus:         models.ThreadInputPending,
-		Content:             message,
+
+	admission, err := h.admitTaskFollowup(c.Request().Context(), taskFollowupAdmissionRequest{
+		Task:                task,
+		Agent:               agent,
+		Message:             message,
 		Source:              models.TaskOriginWeb,
 		AttachmentSessionID: sessionID,
-	}
-	started, err := h.execRepo.CreateDirectTaskFollowupOrQueue(c.Request().Context(), exec, queued)
+		LogPrefix:           "TaskThreadSend",
+	})
 	if err != nil {
-		applog.Infof("[handler] TaskThreadSend error admitting execution: %v", err)
-		if cleanupErr := h.cleanupUnpublishedPendingAttachmentSession(c.Request().Context(), sessionID); cleanupErr != nil {
-			applog.Infof("[handler] TaskThreadSend error cleaning unpublished attachment session %s after admission failure: %v", sessionID, cleanupErr)
+		if admissionErr, ok := err.(*taskFollowupAdmissionError); ok {
+			switch admissionErr.Op {
+			case taskFollowupAdmissionOpActiveCheck:
+				applog.Infof("[handler] TaskThreadSend active execution check failed task=%s: %v", taskID, admissionErr.Err)
+				return echo.NewHTTPError(http.StatusInternalServerError, "failed to check active task turn")
+			case taskFollowupAdmissionOpFirstTurnCheck:
+				applog.Infof("[handler] TaskThreadSend first-turn state check failed task=%s: %v", taskID, admissionErr.Err)
+				return echo.NewHTTPError(http.StatusInternalServerError, "failed to check task queue")
+			case taskFollowupAdmissionOpQueueUnavailable:
+				return echo.NewHTTPError(http.StatusInternalServerError, "thread input queue is unavailable")
+			case taskFollowupAdmissionOpQueueCreate:
+				applog.Infof("[handler] TaskThreadSend error creating queued input: %v", admissionErr.Err)
+				if cleanupErr := h.cleanupUnpublishedPendingAttachmentSession(c.Request().Context(), sessionID); cleanupErr != nil {
+					applog.Infof("[handler] TaskThreadSend error cleaning unpublished attachment session %s: %v", sessionID, cleanupErr)
+				}
+				return echo.NewHTTPError(http.StatusInternalServerError, "failed to queue follow-up")
+			case taskFollowupAdmissionOpDirectAdmission:
+				applog.Infof("[handler] TaskThreadSend error admitting execution: %v", admissionErr.Err)
+				if cleanupErr := h.cleanupUnpublishedPendingAttachmentSession(c.Request().Context(), sessionID); cleanupErr != nil {
+					applog.Infof("[handler] TaskThreadSend error cleaning unpublished attachment session %s after admission failure: %v", sessionID, cleanupErr)
+				}
+				return echo.NewHTTPError(http.StatusInternalServerError, "failed to admit execution")
+			case taskFollowupAdmissionOpSwarmChildRouting:
+				applog.Infof("[handler] TaskThreadSend swarm child follow-up routing failed task=%s: %v", taskID, admissionErr.Err)
+				return echo.NewHTTPError(http.StatusInternalServerError, "failed to route swarm follow-up")
+			}
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to admit execution")
 	}
-	if !started {
-		if err := h.bindQueuedTaskInputToActiveExecutionIfAvailable(c.Request().Context(), queued); err != nil {
-			applog.Infof("[handler] TaskThreadSend task=%s input=%s active execution bind skipped: %v", taskID, queued.ID, err)
-		}
-		go h.PromoteQueuedTaskThreadInput(taskID)
+	if admission.Queued != nil {
+		queued := admission.Queued
 		return render(c, http.StatusOK, components.ChatQueuedInputRowOOBForTask(queued.ID, message, fmt.Sprintf("/tasks/%s/thread/queued/%s/steer", taskID, queued.ID), queued.AttachmentSessionID != "", taskID))
 	}
-	if err := h.applySwarmChildFollowupStart(c.Request().Context(), task, message); err != nil {
-		applog.Infof("[handler] TaskThreadSend swarm child follow-up routing failed task=%s: %v", taskID, err)
-		h.completeWithFailure(c.Request().Context(), exec.ID, taskID, err.Error(), 0)
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to route swarm follow-up")
-	}
+	exec := admission.Execution
+	task = admission.Task
 
 	applog.Infof("[handler] TaskThreadSend created followup exec=%s for task=%s agent=%s status=%s", exec.ID, taskID, agent.Name, exec.Status)
 	// Handle file attachments if present (same as ChatSend)
@@ -2097,19 +2215,12 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 	h.resumeUserStoppedGoalForManualStart(c.Request().Context(), taskID, models.TaskOriginWeb, "")
 	h.reactivateAchievedGoalForManualFollowup(c.Request().Context(), taskID, models.TaskOriginWeb, "")
 
-	// CreateDirectTaskFollowup reactivated the task atomically before exposing the
-	// running execution, so no stale-recovery sweep can observe a terminal task
-	// owning a live follow-up. Refresh the local task copy used by the goroutine.
-	if updatedTask, getErr := h.taskRepo.GetByID(c.Request().Context(), taskID); getErr == nil && updatedTask != nil {
-		task = updatedTask
-	}
-
 	// Spawn LLM processing goroutine (acquires per-model worker slot in processStreamingResponse).
 	// DeferHistoryLoad=true moves the full ListByTaskChronological scan, agent-definition
 	// loading, system/goal/personality context building, and worktree resolution out of the
 	// HTTP handler and into the background goroutine, eliminating the per-execution O(N) block
 	// that caused visible UI hangs on tasks with many prior executions.
-	go h.processStreamingResponse(streamingResponseParams{
+	if err := h.startStreamingResponse(streamingResponseParams{
 		ExecID:            exec.ID,
 		TaskID:            taskID,
 		Message:           message,
@@ -2121,11 +2232,14 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 		DeferHistoryLoad:  true,
 		AttachmentContext: attachmentContext,
 		Task:              task,
-	})
+	}); err != nil {
+		c.Response().Header().Set("Retry-After", "30")
+		return echo.NewHTTPError(http.StatusServiceUnavailable, err.Error())
+	}
 
 	return render(c, http.StatusOK, templ.Join(
-		components.TaskThreadFollowupResponse(message, exec.ID, chatAttachments),
-		components.ChatComposerActionButtonOOB("task-thread-form-primary-action", fmt.Sprintf("/tasks/%s/cancel?composer_stop=1", taskID), true),
+		components.TaskThreadFollowupResponse(message, exec.ID, chatAttachments, task.ProjectID),
+		components.ChatComposerActionButtonOOB("task-thread-form-primary-action", fmt.Sprintf("/tasks/%s/cancel?composer_stop=1", taskID), true, exec.ID),
 	))
 }
 
@@ -2182,14 +2296,37 @@ func (h *Handler) TaskThreadSteer(c echo.Context) error {
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to save steering input")
 	}
-	return render(c, http.StatusOK, components.ChatSteeringInputRowForTask(input.ID, message, taskID))
+	if h.broadcaster != nil {
+		h.broadcaster.Publish(events.TaskEvent{
+			Type:           events.TaskThreadInputSteered,
+			ProjectID:      input.ProjectID,
+			TaskID:         input.TaskID,
+			ExecID:         input.RunExecutionID,
+			Message:        input.Content,
+			PendingInputID: input.ID,
+			HasAttachments: input.AttachmentSessionID != "",
+		})
+	}
+	return render(c, http.StatusOK, components.ChatSteeringInputRowForTask(input.ID, message, input.AttachmentSessionID != "", taskID))
 }
 
 // GetTaskThread returns the task thread view (for polling updates)
 func (h *Handler) GetTaskThread(c echo.Context) error {
 	taskID := c.Param("taskId")
+	ctx := c.Request().Context()
+	limit := parseThreadWindowLimit(c.QueryParam("limit"), taskThreadWindowLimitDefault, taskThreadWindowLimitMax)
+	beforeExecID := strings.TrimSpace(c.QueryParam("before"))
+	isPoll := c.QueryParam("poll") == "1"
 
-	task, err := h.taskSvc.GetByID(c.Request().Context(), taskID)
+	var (
+		task *models.Task
+		err  error
+	)
+	if isPoll && beforeExecID == "" {
+		task, err = h.taskSvc.GetThreadRenderMetadata(ctx, taskID)
+	} else {
+		task, err = h.taskSvc.GetByID(ctx, taskID)
+	}
 	if err != nil {
 		return err
 	}
@@ -2197,21 +2334,19 @@ func (h *Handler) GetTaskThread(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, "task not found")
 	}
 
-	limit := parseThreadWindowLimit(c.QueryParam("limit"), taskThreadWindowLimitDefault, taskThreadWindowLimitMax)
-	beforeExecID := strings.TrimSpace(c.QueryParam("before"))
-	executions, hasEarlier, err := h.loadTaskThreadExecutionWindow(c.Request().Context(), taskID, beforeExecID, limit)
+	executions, hasEarlier, err := h.loadTaskThreadExecutionWindow(ctx, taskID, beforeExecID, limit)
 	if err != nil {
 		applog.Infof("[handler] GetTaskThread error loading executions: %v", err)
 		executions = []models.Execution{}
 		hasEarlier = false
 	}
-	agents, _ := h.llmConfigRepo.List(c.Request().Context())
+	agents, _ := h.llmConfigRepo.ListBadgeOptions(ctx)
 
-	chatAttachmentsByExec := h.loadChatAttachmentsForExecutions(c.Request().Context(), executions, "GetTaskThread")
+	chatAttachmentsByExec := h.loadChatAttachmentsForExecutions(ctx, executions, "GetTaskThread")
 
 	pendingInputs := []models.ThreadInput{}
 	if h.threadInputRepo != nil {
-		if inputs, inputErr := h.threadInputRepo.ListPendingForTask(c.Request().Context(), taskID); inputErr == nil {
+		if inputs, inputErr := h.threadInputRepo.ListPendingForTask(ctx, taskID); inputErr == nil {
 			pendingInputs = inputs
 		} else {
 			applog.Infof("[handler] GetTaskThread error loading pending inputs: %v", inputErr)
@@ -2220,7 +2355,7 @@ func (h *Handler) GetTaskThread(c echo.Context) error {
 
 	var agentDef *models.Agent
 	if task.AgentDefinitionID != nil && h.agentRepo != nil {
-		if ad, adErr := h.agentRepo.GetByID(c.Request().Context(), *task.AgentDefinitionID); adErr == nil && ad != nil {
+		if ad, adErr := h.agentRepo.GetByID(ctx, *task.AgentDefinitionID); adErr == nil && ad != nil {
 			agentDef = ad
 		}
 	}
@@ -2229,8 +2364,9 @@ func (h *Handler) GetTaskThread(c echo.Context) error {
 		return render(c, http.StatusOK, components.TaskThreadEarlierMessages(task, executions, chatAttachmentsByExec, hasEarlier, limit))
 	}
 
-	renderTask := h.taskThreadRenderTaskWithEffectiveAgent(c.Request().Context(), task)
-	if c.QueryParam("poll") == "1" {
+	renderTask := h.taskThreadRenderTaskWithEffectiveAgent(ctx, task, agents)
+	if isPoll {
+		renderTask = taskThreadPollRenderTaskWithExecutionPrompt(renderTask, executions, hasEarlier)
 		preservedExecIDs := make(map[string]bool)
 		for index, id := range strings.Split(c.QueryParam("preserved_exec_ids"), ",") {
 			if index >= taskThreadWindowLimitMax {
@@ -2246,23 +2382,26 @@ func (h *Handler) GetTaskThread(c echo.Context) error {
 	return render(c, http.StatusOK, components.TaskThreadView(renderTask, executions, agents, agentDef, chatAttachmentsByExec, pendingInputs, hasEarlier, limit))
 }
 
-func (h *Handler) taskThreadRenderTaskWithEffectiveAgent(ctx context.Context, task *models.Task) *models.Task {
-	if task == nil || task.AgentID != nil || h.llmConfigRepo == nil {
+func (h *Handler) taskThreadRenderTaskWithEffectiveAgent(ctx context.Context, task *models.Task, agents []models.LLMConfig) *models.Task {
+	if task == nil || task.AgentID != nil {
 		return task
 	}
 	resolvedID := ""
 	if h.projectRepo != nil && strings.TrimSpace(task.ProjectID) != "" {
-		project, err := h.projectRepo.GetByID(ctx, task.ProjectID)
-		if err == nil && project != nil && project.DefaultAgentConfigID != nil && strings.TrimSpace(*project.DefaultAgentConfigID) != "" {
-			candidateID := strings.TrimSpace(*project.DefaultAgentConfigID)
-			if agent, agentErr := h.llmConfigRepo.GetByID(ctx, candidateID); agentErr == nil && agent != nil {
+		defaultAgentConfigID, err := h.projectRepo.GetDefaultAgentConfigID(ctx, task.ProjectID)
+		if err == nil && defaultAgentConfigID != nil {
+			candidateID := strings.TrimSpace(*defaultAgentConfigID)
+			if taskThreadAgentIDInBadgeOptions(agents, candidateID) {
 				resolvedID = candidateID
 			}
 		}
 	}
 	if resolvedID == "" {
-		if agent, err := h.llmConfigRepo.GetDefault(ctx); err == nil && agent != nil {
-			resolvedID = agent.ID
+		for _, agent := range agents {
+			if agent.IsDefault && strings.TrimSpace(agent.ID) != "" {
+				resolvedID = agent.ID
+				break
+			}
 		}
 	}
 	if resolvedID == "" {
@@ -2271,6 +2410,33 @@ func (h *Handler) taskThreadRenderTaskWithEffectiveAgent(ctx context.Context, ta
 	renderTask := *task
 	renderTask.AgentID = &resolvedID
 	return &renderTask
+}
+
+func taskThreadAgentIDInBadgeOptions(agents []models.LLMConfig, id string) bool {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return false
+	}
+	for _, agent := range agents {
+		if agent.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func taskThreadPollRenderTaskWithExecutionPrompt(task *models.Task, executions []models.Execution, hasEarlier bool) *models.Task {
+	if task == nil || task.Prompt != "" || hasEarlier {
+		return task
+	}
+	for _, exec := range executions {
+		if !exec.IsFollowup && exec.PromptSent != "" {
+			renderTask := *task
+			renderTask.Prompt = exec.PromptSent
+			return &renderTask
+		}
+	}
+	return task
 }
 
 // TaskThreadPendingInputs returns the current pending-inputs composer fragment for a task.
@@ -2291,6 +2457,27 @@ func (h *Handler) TaskThreadPendingInputs(c echo.Context) error {
 	return render(c, http.StatusOK, components.ChatComposerQueuedInputRowsForTask(pendingInputs, func(input models.ThreadInput) string {
 		return fmt.Sprintf("/tasks/%s/thread/queued/%s/steer", taskID, input.ID)
 	}, taskID))
+}
+
+func (h *Handler) loadTaskExecutionHistoryWindow(ctx context.Context, taskID, beforeExecID string, limit int) ([]models.Execution, bool, error) {
+	queryLimit := limit + 1
+	var rows []models.Execution
+	var err error
+	if beforeExecID != "" {
+		rows, err = h.execRepo.ListByTaskChronologicalBefore(ctx, taskID, beforeExecID, queryLimit)
+		for i, j := 0, len(rows)-1; i < j; i, j = i+1, j-1 {
+			rows[i], rows[j] = rows[j], rows[i]
+		}
+	} else {
+		rows, err = h.execRepo.ListByTaskHistoryPage(ctx, taskID, queryLimit)
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	if len(rows) <= limit {
+		return rows, false, nil
+	}
+	return rows[:limit], true, nil
 }
 
 func (h *Handler) loadTaskThreadExecutionWindow(ctx context.Context, taskID, beforeExecID string, limit int) ([]models.Execution, bool, error) {
@@ -2316,6 +2503,14 @@ func (h *Handler) GetTaskThreadExecutionFragment(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "task and execution are required")
 	}
 
+	task, err := h.taskSvc.GetByID(c.Request().Context(), taskID)
+	if err != nil {
+		return err
+	}
+	if task == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "task not found")
+	}
+
 	exec, err := h.execRepo.GetByID(c.Request().Context(), execID)
 	if err != nil {
 		return err
@@ -2333,5 +2528,5 @@ func (h *Handler) GetTaskThreadExecutionFragment(c echo.Context) error {
 			attachments = byExec[execID]
 		}
 	}
-	return render(c, http.StatusOK, components.TaskThreadFollowupResponse(exec.PromptSent, exec.ID, attachments))
+	return render(c, http.StatusOK, components.TaskThreadFollowupResponse(exec.PromptSent, exec.ID, attachments, task.ProjectID))
 }

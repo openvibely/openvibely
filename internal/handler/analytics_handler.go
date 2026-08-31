@@ -22,8 +22,10 @@ func (h *Handler) Analytics(c echo.Context) error {
 
 	projectID := c.QueryParam("project_id")
 
-	// For HTMX requests, we still need to get projects for the current project lookup
-	projects, err := h.projectSvc.List(c.Request().Context())
+	// For HTMX requests, we still need to get projects for the current project lookup.
+	// The analytics shell only renders the sidebar selector and the current project's
+	// id/name, so the compact selector projection is sufficient here.
+	projects, err := h.projectSvc.ListSelectorOptions(c.Request().Context())
 	if err != nil {
 		applog.Infof("[handler] Analytics error listing projects: %v", err)
 		return err
@@ -120,7 +122,7 @@ func parseSkillAnalyticsFilter(c echo.Context) repository.SkillAnalyticsFilter {
 		filter.GroupBy = "day"
 	}
 	now := time.Now()
-	if days, ok := analyticsRangeDays(c.QueryParam("range")); ok {
+	if days, ok := service.ParseUsageAnalyticsRangeDays(c.QueryParam("range")); ok {
 		filter.DateFrom = now.AddDate(0, 0, -days)
 		filter.DateTo = now
 	} else if c.QueryParam("range") == "all" {
@@ -150,7 +152,7 @@ func (h *Handler) enabledSkillsForAnalytics(c echo.Context) []repository.Enabled
 		}
 	}
 	if h.agentRepo != nil {
-		agents, err := h.agentRepo.List(c.Request().Context())
+		agents, err := h.agentRepo.ListSkillCatalogRefs(c.Request().Context())
 		if err == nil {
 			seen := map[string]bool{}
 			for _, agent := range agents {
@@ -187,67 +189,20 @@ func serviceProjectSkillRoot(c echo.Context, h *Handler, projectID string) strin
 }
 
 func parseUsageFilter(c echo.Context) repository.UsageFilter {
-	filter := repository.UsageFilter{
+	filter, _ := service.NormalizeUsageFilter(service.UsageFilterInput{
 		ProjectID: c.QueryParam("project_id"),
 		Provider:  c.QueryParam("provider"),
 		GroupBy:   c.QueryParam("group_by"),
+		Range:     c.QueryParam("range"),
+		DateFrom:  c.QueryParam("date_from"),
+		DateTo:    c.QueryParam("date_to"),
 		Refresh:   c.QueryParam("refresh") == "true" || c.QueryParam("refresh") == "1",
-	}
-	if filter.GroupBy == "" {
-		filter.GroupBy = "day"
-	}
-	if from := parseAnalyticsTime(c.QueryParam("date_from")); !from.IsZero() {
-		filter.DateFrom = from
-	}
-	if to := parseAnalyticsTime(c.QueryParam("date_to")); !to.IsZero() {
-		filter.DateTo = to
-	}
-	if filter.DateFrom.IsZero() && filter.DateTo.IsZero() {
-		// Use local time so the range boundaries match the user's calendar day,
-		// consistent with how the Schedules page uses time.Local / time.Now().
-		now := time.Now()
-		if days, ok := analyticsRangeDays(c.QueryParam("range")); ok {
-			filter.DateFrom = now.AddDate(0, 0, -days)
-			filter.DateTo = now
-		} else {
-			switch c.QueryParam("range") {
-			case "month":
-				// Start of the current local month at midnight local time.
-				filter.DateFrom = time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.Local)
-				filter.DateTo = now
-			case "all":
-				// no date bounds
-			default:
-				filter.DateFrom = now.AddDate(0, 0, -30)
-				filter.DateTo = now
-			}
-		}
-	}
+	})
 	return filter
 }
 
-func analyticsRangeDays(value string) (int, bool) {
-	if !strings.HasSuffix(value, "d") {
-		return 0, false
-	}
-	days, err := strconv.Atoi(strings.TrimSuffix(value, "d"))
-	if err != nil || days <= 0 {
-		return 0, false
-	}
-	return days, true
-}
-
 func parseAnalyticsTime(value string) time.Time {
-	if value == "" {
-		return time.Time{}
-	}
-	if t, err := time.Parse(time.RFC3339, value); err == nil {
-		return t.UTC()
-	}
-	if t, err := time.Parse("2006-01-02", value); err == nil {
-		return t.UTC()
-	}
-	return time.Time{}
+	return service.ParseUsageAnalyticsTime(value)
 }
 
 // GetSuccessFailureRates returns success/failure rates data
@@ -407,7 +362,7 @@ func (h *Handler) GetMostFrequentTasks(c echo.Context) error {
 
 // GetFailedTaskPatterns returns tasks with failure patterns
 // @Summary Get failed task patterns
-// @Description Returns tasks with repeated failures, grouped by last observed error.
+// @Description Returns task-level failure patterns with the latest observed error.
 // @Tags analytics
 // @Produce json
 // @Param project_id query string false "Project ID filter"

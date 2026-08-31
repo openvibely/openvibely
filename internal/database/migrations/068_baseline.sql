@@ -8,7 +8,7 @@ CREATE TABLE executions (
     task_id         TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
     agent_config_id TEXT REFERENCES agent_configs(id),
     status          TEXT NOT NULL DEFAULT 'running'
-                    CHECK (status IN ('running', 'completed', 'failed', 'cancelled')),
+                    CHECK (status IN ('queued', 'running', 'completed', 'failed', 'cancelled')),
     prompt_sent     TEXT NOT NULL DEFAULT '',
     output          TEXT NOT NULL DEFAULT '',
     error_message   TEXT NOT NULL DEFAULT '',

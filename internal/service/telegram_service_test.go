@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -407,6 +408,180 @@ func TestTelegramServiceGetUpdatesConflictDoesNotUseLibraryRetryLoop(t *testing.
 	}, time.Second, 10*time.Millisecond)
 	assert.Equal(t, int32(1), atomic.LoadInt32(&client.maxActiveUpdates), "conflict retries must not create overlapping long-poll requests")
 	assert.True(t, svc.IsRunning())
+}
+
+func TestTelegramPollingBatchStopsAtFirstFailedHandoff(t *testing.T) {
+	offset := 0
+	updates := []tgbotapi.Update{{UpdateID: 100}, {UpdateID: 101}, {UpdateID: 102}}
+	attempts := make([]int, 0, len(updates))
+
+	completed := processTelegramUpdateBatch(context.Background(), &offset, updates, func(_ context.Context, update tgbotapi.Update) bool {
+		attempts = append(attempts, update.UpdateID)
+		return update.UpdateID != 101
+	})
+
+	assert.False(t, completed)
+	assert.Equal(t, 101, offset, "offset must acknowledge only the contiguous successful prefix")
+	assert.Equal(t, []int{100, 101}, attempts, "later updates must not be handled past an earlier failure")
+}
+
+func TestTelegramPollingBatchRetryDoesNotDuplicateSuccessfulPrefix(t *testing.T) {
+	offset := 0
+	updates := []tgbotapi.Update{{UpdateID: 100}, {UpdateID: 101}, {UpdateID: 102}}
+	attempts := map[int]int{}
+	handler := func(_ context.Context, update tgbotapi.Update) bool {
+		attempts[update.UpdateID]++
+		return update.UpdateID != 101 || attempts[update.UpdateID] > 1
+	}
+
+	assert.False(t, processTelegramUpdateBatch(context.Background(), &offset, updates, handler))
+	assert.Equal(t, 101, offset)
+	assert.True(t, processTelegramUpdateBatch(context.Background(), &offset, updates, handler))
+	assert.Equal(t, 103, offset)
+	assert.Equal(t, map[int]int{100: 1, 101: 2, 102: 1}, attempts)
+}
+
+func TestTelegramServiceSenderChatUpdateIsTerminallyIgnored(t *testing.T) {
+	authorizationChecked := false
+	svc := &TelegramService{
+		telegramAuthRepo: telegramAuthorizationStoreStub{
+			isAuthorized: func(context.Context, string, int64, string) (bool, error) {
+				authorizationChecked = true
+				return true, nil
+			},
+			isAuthorizedAnywhere: func(context.Context, int64, string) (bool, error) {
+				authorizationChecked = true
+				return true, nil
+			},
+		},
+		userProjects: make(map[int64]string),
+	}
+	update := tgbotapi.Update{Message: &tgbotapi.Message{
+		From:       nil,
+		SenderChat: &tgbotapi.Chat{ID: -100123, Type: "channel", Title: "Announcements"},
+		Chat:       &tgbotapi.Chat{ID: -100123, Type: "channel", Title: "Announcements"},
+		Text:       "posted as the channel",
+	}}
+
+	var acknowledged bool
+	require.NotPanics(t, func() {
+		acknowledged = svc.handleTelegramUpdate(context.Background(), update)
+	})
+	assert.True(t, acknowledged, "unsupported sender-chat updates should be terminally acknowledged")
+	assert.False(t, authorizationChecked, "sender-chat identity must not be treated as an authorized user")
+}
+
+func TestTelegramPollerContinuesAfterSenderChatUpdate(t *testing.T) {
+	svc, projectRepo, _ := newTestTelegramService(t)
+	project := &models.Project{Name: "Telegram sender-chat poller", IsDefault: true}
+	require.NoError(t, projectRepo.Create(context.Background(), project))
+
+	client := &telegramStubClient{
+		blockUpdates:   make(chan struct{}),
+		releaseUpdates: make(chan struct{}),
+		getUpdatesResponse: `{"ok":true,"result":[` +
+			`{"update_id":100,"message":{"message_id":1,"sender_chat":{"id":-100123,"type":"channel","title":"Announcements"},"chat":{"id":-100123,"type":"channel","title":"Announcements"},"date":1,"text":"posted as the channel"}},` +
+			`{"update_id":101,"message":{"message_id":2,"from":{"id":7,"is_bot":false,"first_name":"User","username":"allowed"},"chat":{"id":7,"type":"private"},"date":1,"text":"/start","entities":[{"type":"bot_command","offset":0,"length":6}]}}]}`,
+	}
+	bot, err := tgbotapi.NewBotAPIWithClient("test-token", tgbotapi.APIEndpoint, client)
+	require.NoError(t, err)
+	svc.bot = bot
+	sent := make(chan string, 1)
+	svc.sendMessageFunc = func(_ int64, text string) { sent <- text }
+	t.Cleanup(func() {
+		client.unblock()
+		svc.lifecycleOpMu.Lock()
+		require.True(t, svc.stopLocked(true))
+		svc.lifecycleOpMu.Unlock()
+	})
+
+	svc.Start()
+	require.Eventually(t, func() bool {
+		return atomic.LoadInt32(&client.activeUpdates) == 1
+	}, time.Second, 10*time.Millisecond)
+	client.releaseOne()
+
+	select {
+	case response := <-sent:
+		assert.Contains(t, response, "Welcome to *OpenVibely*!", "the ordinary user update after the sender-chat update must be processed")
+	case <-time.After(time.Second):
+		t.Fatal("ordinary user update was not processed after sender-chat update")
+	}
+	require.Eventually(t, func() bool {
+		return svc.IsRunning() && atomic.LoadInt32(&client.activeUpdates) == 1
+	}, time.Second, 10*time.Millisecond, "poller should continue into the next getUpdates call")
+}
+
+func TestTelegramChatHandoffDoesNotWaitForModelCompletion(t *testing.T) {
+	svc, projectRepo, _ := newTestTelegramService(t)
+	project := &models.Project{Name: "Telegram durable handoff", IsDefault: true}
+	require.NoError(t, projectRepo.Create(context.Background(), project))
+	svc.userProjects[7] = project.ID
+	svc.sendMessageFunc = func(int64, string) {}
+	runnerStarted := make(chan struct{})
+	releaseRunner := make(chan struct{})
+	svc.channelChatRunner = func(context.Context, ChannelChatRunRequest) {
+		close(runnerStarted)
+		<-releaseRunner
+	}
+	t.Cleanup(func() { close(releaseRunner) })
+	message := &tgbotapi.Message{From: &tgbotapi.User{ID: 7}, Chat: &tgbotapi.Chat{ID: 8}, Text: "persist me"}
+
+	result := make(chan bool, 1)
+	go func() { result <- svc.handleChatMessageUntilDurable(context.Background(), message) }()
+	select {
+	case success := <-result:
+		assert.True(t, success)
+	case <-time.After(time.Second):
+		t.Fatal("durable handoff waited for model completion")
+	}
+	select {
+	case <-runnerStarted:
+	case <-time.After(time.Second):
+		t.Fatal("model runner did not start after durable handoff")
+	}
+}
+
+func TestTelegramChatHandoffReportsTaskPersistenceFailure(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	project := &models.Project{Name: "Telegram task failure", IsDefault: true}
+	require.NoError(t, projectRepo.Create(context.Background(), project))
+
+	svc := &TelegramService{
+		projectRepo:     projectRepo,
+		llmConfigRepo:   repository.NewLLMConfigRepo(db),
+		taskRepo:        repository.NewTaskRepo(closedTestDB(t), nil),
+		execRepo:        repository.NewExecutionRepo(db),
+		threadInputRepo: repository.NewThreadInputRepo(db),
+		userProjects:    map[int64]string{7: project.ID},
+		sendMessageFunc: func(int64, string) {},
+	}
+	message := &tgbotapi.Message{From: &tgbotapi.User{ID: 7}, Chat: &tgbotapi.Chat{ID: 8}, Text: "persist me"}
+
+	assert.False(t, svc.handleChatMessageUntilDurable(context.Background(), message))
+}
+
+func TestTelegramChatHandoffReportsExecutionPersistenceFailure(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	project := &models.Project{Name: "Telegram execution failure", IsDefault: true}
+	require.NoError(t, projectRepo.Create(context.Background(), project))
+	_, err := db.Exec(`CREATE TRIGGER fail_telegram_execution BEFORE INSERT ON executions BEGIN SELECT RAISE(FAIL, 'injected execution failure'); END`)
+	require.NoError(t, err)
+
+	svc := &TelegramService{
+		projectRepo:     projectRepo,
+		llmConfigRepo:   repository.NewLLMConfigRepo(db),
+		taskRepo:        repository.NewTaskRepo(db, nil),
+		execRepo:        repository.NewExecutionRepo(db),
+		threadInputRepo: repository.NewThreadInputRepo(db),
+		userProjects:    map[int64]string{7: project.ID},
+		sendMessageFunc: func(int64, string) {},
+	}
+	message := &tgbotapi.Message{From: &tgbotapi.User{ID: 7}, Chat: &tgbotapi.Chat{ID: 8}, Text: "persist me"}
+
+	assert.False(t, svc.handleChatMessageUntilDurable(context.Background(), message))
 }
 
 func TestTelegramServiceConcurrentUpdateTokenIsSerialized(t *testing.T) {
@@ -853,11 +1028,12 @@ func TestTelegramService_RuntimeExecutorHandlesAllDefinedTools(t *testing.T) {
 
 	for _, d := range defs {
 		_, handled, _, _ := rt.Executor(ctx, d.Name, json.RawMessage(`{}`))
+		if channelRuntimeGenericFallbackTool(d.Name) {
+			require.Falsef(t, handled, "generic fallback tool should fall through telegram runtime executor: %s", d.Name)
+			continue
+		}
 		require.Truef(t, handled, "tool should be handled by telegram runtime executor: %s", d.Name)
 	}
-
-	handlers := svc.telegramActionHandlers(project.ID, 12345, 12345, nil)
-	require.NoError(t, chatcontrol.ValidateHandlerCoverage(models.ChatModeOrchestrate, chatcontrol.SurfaceTelegram, true, handlers))
 }
 
 func TestTelegramService_CompleteExecution_Success(t *testing.T) {
@@ -1129,6 +1305,27 @@ func TestTelegramService_HandleProject_CaseInsensitiveSwitch(t *testing.T) {
 
 	assert.Contains(t, response, "Switched to project: *MyProject*")
 	assert.Equal(t, project.ID, svc.userProjects[userID])
+}
+
+func TestTelegramService_HandleProject_SwitchByExactID(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+
+	ctx := context.Background()
+	project1 := &models.Project{Name: "Project A", RepoPath: "/tmp/a", IsDefault: true}
+	require.NoError(t, projectRepo.Create(ctx, project1))
+	project2 := &models.Project{Name: "Project B", RepoPath: "/tmp/b"}
+	require.NoError(t, projectRepo.Create(ctx, project2))
+
+	svc := &TelegramService{
+		projectRepo:  projectRepo,
+		userProjects: map[int64]string{321: project1.ID},
+	}
+
+	response := svc.handleProject(321, project2.ID)
+
+	assert.Contains(t, response, "Switched to project: *Project B*")
+	assert.Equal(t, project2.ID, svc.userProjects[321])
 }
 
 func TestTelegramService_ExtractTelegramAttachment_Photo(t *testing.T) {
@@ -1883,6 +2080,95 @@ func TestTelegramService_BuildTelegramTaskChatContext(t *testing.T) {
 	assert.Contains(t, ctx, "starting work")
 }
 
+type telegramAuthorizationStoreStub struct {
+	isAuthorized         func(context.Context, string, int64, string) (bool, error)
+	isAuthorizedAnywhere func(context.Context, int64, string) (bool, error)
+}
+
+func (s telegramAuthorizationStoreStub) IsAuthorized(ctx context.Context, projectID string, userID int64, username string) (bool, error) {
+	if s.isAuthorized == nil {
+		return false, fmt.Errorf("unexpected project authorization lookup")
+	}
+	return s.isAuthorized(ctx, projectID, userID, username)
+}
+
+func (s telegramAuthorizationStoreStub) IsAuthorizedAnywhere(ctx context.Context, userID int64, username string) (bool, error) {
+	if s.isAuthorizedAnywhere == nil {
+		return false, fmt.Errorf("unexpected global authorization lookup")
+	}
+	return s.isAuthorizedAnywhere(ctx, userID, username)
+}
+
+func (telegramAuthorizationStoreStub) BackfillUserID(context.Context, string, string, int64) error {
+	return nil
+}
+
+func TestTelegramService_CheckAuthorizationRepositoryErrorsDeny(t *testing.T) {
+	lookupErr := fmt.Errorf("authorization storage unavailable")
+
+	tests := []struct {
+		name      string
+		projectID string
+		store     telegramAuthorizationStoreStub
+	}{
+		{
+			name:      "active-project global lookup",
+			projectID: "project-1",
+			store: telegramAuthorizationStoreStub{
+				isAuthorizedAnywhere: func(context.Context, int64, string) (bool, error) {
+					return false, lookupErr
+				},
+			},
+		},
+		{
+			name:      "no-project global lookup",
+			projectID: "",
+			store: telegramAuthorizationStoreStub{
+				isAuthorizedAnywhere: func(context.Context, int64, string) (bool, error) {
+					return false, lookupErr
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := &TelegramService{telegramAuthRepo: tt.store}
+			assert.False(t, svc.checkAuthorization(999, "unknown", tt.projectID))
+		})
+	}
+}
+
+func TestTelegramService_HandleUpdateAuthorizationStorageFailureStopsCommandProcessing(t *testing.T) {
+	const (
+		userID    = int64(999)
+		chatID    = int64(1234)
+		projectID = "project-1"
+	)
+	var sent []string
+	svc := &TelegramService{
+		telegramAuthRepo: telegramAuthorizationStoreStub{
+			isAuthorizedAnywhere: func(context.Context, int64, string) (bool, error) {
+				return false, fmt.Errorf("database closed")
+			},
+		},
+		userProjects: map[int64]string{userID: projectID},
+		sendMessageFunc: func(_ int64, text string) {
+			sent = append(sent, text)
+		},
+	}
+	update := tgbotapi.Update{Message: &tgbotapi.Message{
+		Text:     "/start",
+		From:     &tgbotapi.User{ID: userID, UserName: "unknown"},
+		Chat:     &tgbotapi.Chat{ID: chatID},
+		Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 6}},
+	}}
+
+	svc.handleTelegramUpdate(context.Background(), update)
+
+	require.Equal(t, []string{"You are not authorized to use this bot. Contact the project owner to get access."}, sent)
+}
+
 func TestTelegramService_CheckAuthorization(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	projectRepo := repository.NewProjectRepo(db)
@@ -2000,7 +2286,188 @@ func TestTelegramService_CheckAuthorization(t *testing.T) {
 	})
 }
 
+func TestTelegramService_CheckAuthorizationRejectedActiveProjectUsesSingleLookup(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	telegramAuthRepo := repository.NewTelegramAuthRepo(db)
+
+	project := &models.Project{Name: "Telegram Single Auth Lookup"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	seedTelegramAuthorizedUsers(t, db, project.ID, 1000, 1000)
+
+	svc := &TelegramService{
+		projectRepo:      projectRepo,
+		telegramAuthRepo: telegramAuthRepo,
+		userProjects:     make(map[int64]string),
+	}
+	counter.Reset()
+	counter.SetEnabled(true)
+	authorized := svc.checkAuthorization(999999, "unknown", project.ID)
+	counter.SetEnabled(false)
+
+	require.False(t, authorized)
+	statements := counter.Statements()
+	require.Len(t, statements, 1, "rejected active-project authorization should issue one statement: %q", statements)
+	require.Equal(t, 1, countChannelAuthTableStatements(statements, "telegram_authorized_users"), "statements: %q", statements)
+}
+
+func BenchmarkTelegramRejectedAuthorizationSingleLookupLargeAllowlist(b *testing.B) {
+	db := testutil.NewTestDB(b)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	telegramAuthRepo := repository.NewTelegramAuthRepo(db)
+	project := &models.Project{Name: "Telegram Rejected Auth Benchmark"}
+	require.NoError(b, projectRepo.Create(ctx, project))
+	seedTelegramAuthorizedUsers(b, db, project.ID, 1000, 100000)
+	svc := &TelegramService{
+		projectRepo:      projectRepo,
+		telegramAuthRepo: telegramAuthRepo,
+		userProjects:     make(map[int64]string),
+	}
+	originalLogOutput := log.Writer()
+	log.SetOutput(io.Discard)
+	b.Cleanup(func() { log.SetOutput(originalLogOutput) })
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if svc.checkAuthorization(999999999, "unknown", project.ID) {
+			b.Fatal("unexpected authorized rejected Telegram user")
+		}
+	}
+}
+
+func seedTelegramAuthorizedUsers(tb testing.TB, db *sql.DB, projectID string, firstUserID int64, count int) {
+	tb.Helper()
+	tx, err := db.Begin()
+	require.NoError(tb, err)
+	stmt, err := tx.Prepare(`INSERT INTO telegram_authorized_users (project_id, telegram_user_id, display_name, added_by) VALUES (?, ?, ?, ?)`)
+	require.NoError(tb, err)
+	for i := 0; i < count; i++ {
+		_, err = stmt.Exec(projectID, firstUserID+int64(i), "Benchmark User", "test")
+		require.NoError(tb, err)
+	}
+	require.NoError(tb, stmt.Close())
+	require.NoError(tb, tx.Commit())
+}
+
 // --- App Settings Tests ---
+
+func installFailingTelegramUserProjectWrites(t *testing.T, db *sql.DB) {
+	t.Helper()
+	_, err := db.Exec(`
+		CREATE TRIGGER fail_telegram_user_project_insert
+		BEFORE INSERT ON telegram_user_projects
+		BEGIN
+			SELECT RAISE(ABORT, 'forced telegram user project write failure');
+		END;
+		CREATE TRIGGER fail_telegram_user_project_update
+		BEFORE UPDATE ON telegram_user_projects
+		BEGIN
+			SELECT RAISE(ABORT, 'forced telegram user project write failure');
+		END;
+	`)
+	require.NoError(t, err)
+}
+
+func newTelegramProjectSwitchFailureFixture(t *testing.T) (*TelegramService, *repository.TelegramUserProjectRepo, *models.Project, *models.Project, int64) {
+	t.Helper()
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	userProjectRepo := repository.NewTelegramUserProjectRepo(db)
+	ctx := context.Background()
+	projectA := &models.Project{Name: "Project A", RepoPath: "/tmp/a", IsDefault: true}
+	require.NoError(t, projectRepo.Create(ctx, projectA))
+	projectB := &models.Project{Name: "Project B", RepoPath: "/tmp/b"}
+	require.NoError(t, projectRepo.Create(ctx, projectB))
+
+	const userID = int64(197)
+	require.NoError(t, userProjectRepo.SetUserProject(ctx, strconv.FormatInt(userID, 10), projectA.ID))
+	svc := &TelegramService{
+		projectRepo:             projectRepo,
+		telegramUserProjectRepo: userProjectRepo,
+		userProjects:            map[int64]string{userID: projectA.ID},
+		userProjectVersions:     make(map[int64]uint64),
+	}
+	installFailingTelegramUserProjectWrites(t, db)
+	return svc, userProjectRepo, projectA, projectB, userID
+}
+
+func TestTelegramService_HandleStart_PersistenceFailureLeavesActiveProjectUnchanged(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	userProjectRepo := repository.NewTelegramUserProjectRepo(db)
+	ctx := context.Background()
+	previousProject := &models.Project{Name: "Previous Project", RepoPath: "/tmp/previous"}
+	require.NoError(t, projectRepo.Create(ctx, previousProject))
+
+	const userID = int64(198)
+	userKey := strconv.FormatInt(userID, 10)
+	require.NoError(t, userProjectRepo.SetUserProject(ctx, userKey, previousProject.ID))
+	svc := &TelegramService{
+		projectRepo:             projectRepo,
+		telegramUserProjectRepo: userProjectRepo,
+		userProjects:            map[int64]string{userID: previousProject.ID},
+		userProjectVersions:     make(map[int64]uint64),
+	}
+	installFailingTelegramUserProjectWrites(t, db)
+
+	response := svc.handleStart(userID)
+
+	require.Contains(t, response, "Error setting default project")
+	require.NotContains(t, response, "Welcome to *OpenVibely*")
+	require.Equal(t, previousProject.ID, svc.getActiveProject(userID))
+	savedProjectID, err := userProjectRepo.GetUserProject(ctx, userKey)
+	require.NoError(t, err)
+	require.Equal(t, previousProject.ID, savedProjectID)
+}
+
+func TestTelegramService_HandleProject_PersistenceFailureLeavesActiveProjectUnchanged(t *testing.T) {
+	svc, userProjectRepo, projectA, _, userID := newTelegramProjectSwitchFailureFixture(t)
+
+	response := svc.handleProject(userID, "Project B")
+
+	require.Contains(t, response, "Error switching project")
+	require.NotContains(t, response, "Switched to project")
+	require.Equal(t, projectA.ID, svc.getActiveProject(userID))
+	savedProjectID, err := userProjectRepo.GetUserProject(context.Background(), strconv.FormatInt(userID, 10))
+	require.NoError(t, err)
+	require.Equal(t, projectA.ID, savedProjectID)
+}
+
+func TestTelegramService_NaturalLanguageProjectSwitch_PersistenceFailureLeavesActiveProjectUnchanged(t *testing.T) {
+	svc, userProjectRepo, projectA, _, userID := newTelegramProjectSwitchFailureFixture(t)
+
+	response, handled := svc.handleNaturalLanguageProjectCommand(userID, "switch to project Project B")
+
+	require.True(t, handled)
+	require.Contains(t, response, "Error switching project")
+	require.NotContains(t, response, "Switched to project")
+	require.Equal(t, projectA.ID, svc.getActiveProject(userID))
+	savedProjectID, err := userProjectRepo.GetUserProject(context.Background(), strconv.FormatInt(userID, 10))
+	require.NoError(t, err)
+	require.Equal(t, projectA.ID, savedProjectID)
+}
+
+func TestTelegramService_RuntimeProjectSwitch_PersistenceFailureLeavesActiveProjectUnchanged(t *testing.T) {
+	svc, userProjectRepo, projectA, projectB, userID := newTelegramProjectSwitchFailureFixture(t)
+	ctx := context.Background()
+	runtime := svc.buildTelegramActionToolRuntime(projectA.ID, userID, userID, nil)
+	require.NotNil(t, runtime)
+
+	result, handled, isErr, err := runtime.Executor(ctx, "switch_project", json.RawMessage(`{"project":"Project B"}`))
+
+	require.ErrorContains(t, err, "persist failed")
+	require.True(t, handled)
+	require.True(t, isErr)
+	require.Empty(t, result)
+	require.Equal(t, projectA.ID, svc.getActiveProject(userID))
+	savedProjectID, getErr := userProjectRepo.GetUserProject(ctx, strconv.FormatInt(userID, 10))
+	require.NoError(t, getErr)
+	require.Equal(t, projectA.ID, savedProjectID)
+	require.NotEqual(t, projectB.ID, savedProjectID)
+}
 
 func TestTelegramService_HandleProject_PersistsSelection(t *testing.T) {
 	db := testutil.NewTestDB(t)
@@ -2660,6 +3127,12 @@ func TestBuildChannelProjectActionHandlersSwitchProjectCallback(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, result, "Switched to project: Beta")
 	assert.Equal(t, project2.ID, switchedProjectID)
+
+	switchedProjectID = ""
+	result, err = handlers["switch_project"](ctx, json.RawMessage(fmt.Sprintf(`{"project":%q}`, project2.ID)))
+	require.NoError(t, err)
+	assert.Contains(t, result, "Switched to project: Beta")
+	assert.Equal(t, project2.ID, switchedProjectID)
 }
 
 func TestBuildChannelProjectActionHandlersSwitchProjectInvalidProject(t *testing.T) {
@@ -3099,9 +3572,10 @@ func TestTelegramService_HandleChatMessageSniffsOctetStreamImageForVisionModel(t
 	defaultAgent, err := llmConfigRepo.GetDefault(ctx)
 	require.NoError(t, err)
 	require.NotNil(t, defaultAgent)
-	defaultAgent.Provider = models.ProviderAnthropic
-	defaultAgent.AuthMethod = models.AuthMethodCLI
-	defaultAgent.Model = "claude-sonnet-4-5"
+	defaultAgent.Provider = models.ProviderOpenAICompatible
+	defaultAgent.AuthMethod = models.AuthMethodAPIKey
+	defaultAgent.APIKey = "test-key"
+	defaultAgent.Model = "text-only-compatible"
 	defaultAgent.IsDefault = true
 	require.NoError(t, llmConfigRepo.Update(ctx, defaultAgent))
 	visionAgent := &models.LLMConfig{
@@ -3403,11 +3877,10 @@ func TestTelegramService_StreamRichDraftFallbackUsesEditLoop(t *testing.T) {
 	require.NoError(t, taskRepo.Create(ctx, task))
 	exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "hi"}
 	require.NoError(t, execRepo.Create(ctx, exec))
-	require.NoError(t, execRepo.UpdateOutput(ctx, exec.ID, "partial output"))
+	require.NoError(t, execRepo.Complete(ctx, exec.ID, models.ExecCompleted, "partial output", "", 0, 0))
 
 	var richDraftCalled bool
 	var edited []string
-	editObserved := make(chan struct{})
 	svc := &TelegramService{
 		execRepo: execRepo,
 		makeRequestFunc: func(endpoint string, params tgbotapi.Params) (*tgbotapi.APIResponse, error) {
@@ -3417,23 +3890,14 @@ func TestTelegramService_StreamRichDraftFallbackUsesEditLoop(t *testing.T) {
 		},
 		editMessageFunc: func(chatID int64, messageID int, text string) {
 			edited = append(edited, text)
-			select {
-			case editObserved <- struct{}{}:
-			default:
-			}
 		},
 	}
 	done := svc.beginTelegramPreview(42, 99)
 	oldInterval := telegramStreamInterval
 	telegramStreamInterval = time.Millisecond
 	t.Cleanup(func() { telegramStreamInterval = oldInterval })
-	go svc.streamUpdatesToTelegram(ctx, 42, 99, exec.ID, done)
-	select {
-	case <-editObserved:
-		svc.finishTelegramPreview(42, 99)
-	case <-time.After(time.Second):
-		t.Fatal("expected rich draft fallback edit")
-	}
+	svc.streamUpdatesToTelegram(ctx, 42, 99, exec.ID, done)
+	svc.finishTelegramPreview(42, 99)
 
 	require.True(t, richDraftCalled)
 	require.NotEmpty(t, edited)
@@ -3784,6 +4248,129 @@ func TestTelegramService_SendChatResponse_RichDraftFinalSendRejectionSendsLegacy
 	require.Equal(t, "✅ Response sent.", clearedPlaceholder)
 }
 
+func TestTelegramService_SendChatResponse_RichDraftFinalSendRejectionCompleteMultiChunkLegacyFallbackClearsPlaceholder(t *testing.T) {
+	var endpoints []string
+	var markdownChunks []string
+	var plainChunks []string
+	var clearedPlaceholder string
+	svc := &TelegramService{
+		makeRequestFunc: func(endpoint string, params tgbotapi.Params) (*tgbotapi.APIResponse, error) {
+			endpoints = append(endpoints, endpoint)
+			require.Equal(t, "sendRichMessage", endpoint)
+			require.Equal(t, "42", params["chat_id"])
+			return nil, fmt.Errorf("Bad Request: rich_message unsupported")
+		},
+		sendConfigFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
+			switch msg := c.(type) {
+			case tgbotapi.MessageConfig:
+				require.Equal(t, int64(42), msg.ChatID)
+				if msg.ParseMode == "MarkdownV2" {
+					markdownChunks = append(markdownChunks, msg.Text)
+					if len(markdownChunks) == 1 {
+						return tgbotapi.Message{}, fmt.Errorf("Bad Request: can't parse entities")
+					}
+					return tgbotapi.Message{}, nil
+				}
+				plainChunks = append(plainChunks, msg.Text)
+				return tgbotapi.Message{}, nil
+			case tgbotapi.EditMessageTextConfig:
+				require.Equal(t, int64(42), msg.ChatID)
+				require.Equal(t, 99, msg.MessageID)
+				clearedPlaceholder = msg.Text
+			default:
+				t.Fatalf("unexpected Telegram config type %T", c)
+			}
+			return tgbotapi.Message{}, nil
+		},
+	}
+	done := svc.beginTelegramPreview(42, 99)
+	require.True(t, svc.withActiveTelegramPreview(42, 99, done, func(state *telegramPreviewState) bool {
+		state.richDraftID = 123
+		state.richDraftVisible = true
+		return true
+	}))
+	t.Cleanup(func() {
+		select {
+		case <-done:
+		default:
+			svc.finishTelegramPreview(42, 99)
+		}
+	})
+	task := models.Task{ID: "task-1", Category: models.CategoryChat, CreatedVia: models.TaskOriginTelegram, TelegramChatID: 42}
+	output := strings.Repeat("a", maxMessageLength+1)
+
+	svc.SendChatResponse(context.Background(), task, output, "", 99)
+
+	require.Equal(t, []string{"sendRichMessage"}, endpoints)
+	require.Len(t, markdownChunks, 2)
+	require.Len(t, plainChunks, 1)
+	require.Len(t, markdownChunks[0], maxMessageLength)
+	require.Len(t, plainChunks[0], maxMessageLength)
+	require.Equal(t, "a", markdownChunks[1])
+	require.Equal(t, "✅ Response sent.", clearedPlaceholder)
+}
+
+func TestTelegramService_SendChatResponse_RichDraftFinalSendRejectionPartialLegacyFallbackKeepsPlaceholder(t *testing.T) {
+	var endpoints []string
+	var markdownChunks []string
+	var plainChunks []string
+	placeholderCleared := false
+	svc := &TelegramService{
+		makeRequestFunc: func(endpoint string, params tgbotapi.Params) (*tgbotapi.APIResponse, error) {
+			endpoints = append(endpoints, endpoint)
+			require.Equal(t, "sendRichMessage", endpoint)
+			require.Equal(t, "42", params["chat_id"])
+			return nil, fmt.Errorf("Bad Request: rich_message unsupported")
+		},
+		sendConfigFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
+			switch msg := c.(type) {
+			case tgbotapi.MessageConfig:
+				require.Equal(t, int64(42), msg.ChatID)
+				if msg.ParseMode == "MarkdownV2" {
+					markdownChunks = append(markdownChunks, msg.Text)
+					if len(markdownChunks) == 1 {
+						return tgbotapi.Message{}, fmt.Errorf("Bad Request: can't parse entities")
+					}
+					return tgbotapi.Message{}, nil
+				}
+				plainChunks = append(plainChunks, msg.Text)
+				return tgbotapi.Message{}, fmt.Errorf("Bad Request: message rejected")
+			case tgbotapi.EditMessageTextConfig:
+				placeholderCleared = true
+				t.Fatalf("partial legacy fallback must not clear the Thinking placeholder")
+			default:
+				t.Fatalf("unexpected Telegram config type %T", c)
+			}
+			return tgbotapi.Message{}, nil
+		},
+	}
+	done := svc.beginTelegramPreview(42, 99)
+	require.True(t, svc.withActiveTelegramPreview(42, 99, done, func(state *telegramPreviewState) bool {
+		state.richDraftID = 123
+		state.richDraftVisible = true
+		return true
+	}))
+	t.Cleanup(func() {
+		select {
+		case <-done:
+		default:
+			svc.finishTelegramPreview(42, 99)
+		}
+	})
+	task := models.Task{ID: "task-1", Category: models.CategoryChat, CreatedVia: models.TaskOriginTelegram, TelegramChatID: 42}
+	output := strings.Repeat("a", maxMessageLength+1)
+
+	svc.SendChatResponse(context.Background(), task, output, "", 99)
+
+	require.Equal(t, []string{"sendRichMessage"}, endpoints)
+	require.Len(t, markdownChunks, 2)
+	require.Len(t, plainChunks, 1)
+	require.Len(t, markdownChunks[0], maxMessageLength)
+	require.Len(t, plainChunks[0], maxMessageLength)
+	require.Equal(t, "a", markdownChunks[1])
+	require.False(t, placeholderCleared)
+}
+
 func TestTelegramService_SendChatResponse_AmbiguousFinalRichEditErrorDoesNotSendOrEditFallback(t *testing.T) {
 	var endpoints []string
 	legacyEditCalled := false
@@ -4057,4 +4644,123 @@ func TestTelegramService_RuntimeSwitchProject_PersistsToRepo(t *testing.T) {
 	}
 	require.Equal(t, project2.ID, svc2.getActiveProject(userID),
 		"getActiveProject must return the newly-persisted project on next session")
+}
+
+func TestTelegramActiveProjectCacheConcurrentResolutionAndRuntimeSwitch(t *testing.T) {
+	svc, projectRepo, _ := newTestTelegramService(t)
+	ctx := context.Background()
+	alpha := &models.Project{Name: "Concurrent Alpha", IsDefault: true}
+	require.NoError(t, projectRepo.Create(ctx, alpha))
+	beta := &models.Project{Name: "Concurrent Beta"}
+	require.NoError(t, projectRepo.Create(ctx, beta))
+
+	const userID = int64(174)
+	svc.userProjectsMu.Lock()
+	started := make(chan struct{}, 2)
+	resolved := make(chan string, 1)
+	switched := make(chan error, 1)
+	go func() {
+		started <- struct{}{}
+		resolved <- svc.getActiveProject(userID)
+	}()
+	go func() {
+		started <- struct{}{}
+		switched <- svc.setTelegramActiveProject(ctx, userID, beta.ID)
+	}()
+	<-started
+	<-started
+	svc.userProjectsMu.Unlock()
+
+	require.NoError(t, <-switched)
+	resolvedProject := <-resolved
+	require.Contains(t, []string{alpha.ID, beta.ID}, resolvedProject)
+	projectID, ok, _ := svc.cachedTelegramActiveProject(userID)
+	require.True(t, ok)
+	require.Equal(t, beta.ID, projectID, "stale cache population must not overwrite switch_project")
+}
+
+func TestTelegramInboundUpdateResolvesProjectWhilePriorTurnSwitchesProject(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	execRepo := repository.NewExecutionRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	alpha := &models.Project{Name: "Workflow Alpha", IsDefault: true}
+	require.NoError(t, projectRepo.Create(ctx, alpha))
+	beta := &models.Project{Name: "Workflow Beta"}
+	require.NoError(t, projectRepo.Create(ctx, beta))
+	workerSvc := NewWorkerService(nil, 0, projectRepo)
+	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
+	userProjectRepo := repository.NewTelegramUserProjectRepo(db)
+
+	const userID = int64(174174)
+	svc := &TelegramService{
+		taskSvc:                 taskSvc,
+		projectRepo:             projectRepo,
+		llmConfigRepo:           llmConfigRepo,
+		taskRepo:                taskRepo,
+		execRepo:                execRepo,
+		chatAttachmentRepo:      repository.NewChatAttachmentRepo(db),
+		threadInputRepo:         repository.NewThreadInputRepo(db),
+		telegramUserProjectRepo: userProjectRepo,
+		settingsRepo:            repository.NewSettingsRepo(db),
+		scheduleRepo:            repository.NewScheduleRepo(db),
+		userProjects:            map[int64]string{userID: alpha.ID},
+		ctx:                     ctx,
+		sendMessageFunc:         func(int64, string) {},
+	}
+
+	runnerReady := make(chan ChannelChatRunRequest, 1)
+	invokeSwitch := make(chan struct{})
+	switchDone := make(chan error, 1)
+	secondResolvingProject := make(chan struct{})
+	allowSecondResolution := make(chan struct{})
+	svc.SetChannelChatRunner(func(runCtx context.Context, req ChannelChatRunRequest) {
+		runnerReady <- req
+		<-invokeSwitch
+		_, handled, isErr, err := req.RuntimeTools.Executor(runCtx, "switch_project", json.RawMessage(`{"project":"Workflow Beta"}`))
+		if err == nil && (!handled || isErr) {
+			err = fmt.Errorf("switch_project handled=%v isErr=%v", handled, isErr)
+		}
+		switchDone <- err
+	})
+
+	first := &tgbotapi.Message{From: &tgbotapi.User{ID: userID}, Chat: &tgbotapi.Chat{ID: userID}, Text: "first turn"}
+	require.True(t, svc.handleChatMessageUntilDurable(ctx, first))
+	req := <-runnerReady
+	require.Equal(t, alpha.ID, req.ProjectID)
+
+	var resolutionBarrier sync.Once
+	svc.activeProjectReadHook = func(resolvingUserID int64) {
+		if resolvingUserID != userID {
+			return
+		}
+		resolutionBarrier.Do(func() {
+			close(secondResolvingProject)
+			<-allowSecondResolution
+		})
+	}
+	secondDone := make(chan bool, 1)
+	go func() {
+		secondDone <- svc.handleTelegramUpdate(ctx, tgbotapi.Update{UpdateID: 2, Message: &tgbotapi.Message{
+			From: &tgbotapi.User{ID: userID}, Chat: &tgbotapi.Chat{ID: userID}, Text: "/project",
+		}})
+	}()
+	<-secondResolvingProject
+	close(invokeSwitch)
+	require.NoError(t, <-switchDone)
+	close(allowSecondResolution)
+	resolvingProjectID, ok, _ := svc.cachedTelegramActiveProject(userID)
+	require.True(t, ok)
+	require.Equal(t, beta.ID, resolvingProjectID)
+	require.True(t, <-secondDone)
+
+	persistedProjectID, err := userProjectRepo.GetUserProject(ctx, fmt.Sprintf("%d", userID))
+	require.NoError(t, err)
+	require.Equal(t, beta.ID, persistedProjectID)
+	cachedProjectID, ok, _ := svc.cachedTelegramActiveProject(userID)
+	require.True(t, ok)
+	require.Equal(t, persistedProjectID, cachedProjectID)
 }

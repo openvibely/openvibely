@@ -58,7 +58,7 @@ func TestChatContent_RestoresSmartScrollAcrossNavigationAndHistory(t *testing.T)
 		t.Fatalf("global Chat transcript and composer must share project-scoped send intent, got %d markers", count)
 	}
 
-	if !strings.Contains(content, `id="chat-messages" class="flex-1 min-h-0 overflow-y-auto py-4 mb-4 space-y-6" style="visibility: hidden;" data-transcript-hydrating="true"`) {
+	if !strings.Contains(content, `id="chat-messages" class="flex-1 min-h-0 overflow-y-auto pt-4 pb-4 -mb-3 space-y-6" style="visibility: hidden;" data-transcript-hydrating="true"`) {
 		t.Fatal("global Chat must hide its initial transcript until hydration and scroll restoration settle")
 	}
 	for _, required := range []string{
@@ -110,8 +110,8 @@ func TestChatContent_MobileComposerStaysWithinViewport(t *testing.T) {
 	content := buf.String()
 	required := []string{
 		`id="chat-page-root" class="h-full flex flex-col min-w-0 max-w-full"`,
-		`id="chat-messages" class="flex-1 min-h-0 overflow-y-auto py-4 mb-4 space-y-6"`,
-		`class="chat-input-shadow-gutter w-full min-w-0 max-w-full pt-2 pb-4"`,
+		`id="chat-messages" class="flex-1 min-h-0 overflow-y-auto pt-4 pb-4 -mb-3 space-y-6"`,
+		`class="chat-input-shadow-gutter w-full min-w-0 max-w-full mt-6"`,
 		`class="chat-input-container rounded-xl p-4 relative min-w-0 max-w-full"`,
 		`class="flex items-center justify-between gap-2 pt-2 min-w-0 max-w-full overflow-hidden"`,
 		`class="flex items-center gap-2 flex-shrink-0"`,
@@ -124,8 +124,8 @@ func TestChatContent_MobileComposerStaysWithinViewport(t *testing.T) {
 	if strings.Contains(content, `id="chat-page-root" class="h-full flex flex-col min-w-0 max-w-full overflow-x-hidden"`) {
 		t.Fatal("chat page root must not clip the composer shadow; horizontal containment belongs on the messages pane and inner controls")
 	}
-	if strings.Contains(content, `sm:max-w-3xl`) || strings.Contains(content, `sm:mx-auto`) || strings.Contains(content, `px-3 pt-2 pb-4`) {
-		t.Fatal("chat page composer must not add desktop side gaps or mobile right-side empty space")
+	if strings.Contains(content, `sm:max-w-3xl`) || strings.Contains(content, `sm:mx-auto`) || strings.Contains(content, `px-3 pt-2 pb-4`) || strings.Contains(content, `pt-2 pb-4`) {
+		t.Fatal("chat page composer must not add desktop side gaps, mobile right-side empty space, or extra vertical gutters")
 	}
 	if strings.Contains(content, `-mr-[29px]`) || strings.Contains(content, `-mr-[18px]`) {
 		t.Fatal("chat message panes must not use fixed right-margin scrollbar compensation because it still leaves bubbles visually shorter than the input in real browsers")
@@ -379,7 +379,7 @@ func TestChatContent_LiveBubbleErrorClearsStreamingFlag(t *testing.T) {
 	}
 }
 
-func TestChatContent_KebabTriggerUsesLabelForDesktopWebviewCompatibility(t *testing.T) {
+func TestChatContent_ClearActionsUseExplicitAccessibleTrigger(t *testing.T) {
 	agents := []models.LLMConfig{{ID: "agent-1", Name: "Agent One", Provider: models.ProviderAnthropic}}
 
 	var buf bytes.Buffer
@@ -389,15 +389,33 @@ func TestChatContent_KebabTriggerUsesLabelForDesktopWebviewCompatibility(t *test
 	}
 	content := buf.String()
 
-	if !strings.Contains(content, `<label tabindex="0" class="btn btn-xs btn-ghost" title="More actions" onclick="handleDropdownToggle(event)">`) {
-		t.Fatal("expected chat kebab trigger to use <label> for stable dropdown focus behavior")
+	for _, required := range []string{
+		`data-chat-actions-dropdown`,
+		`<button type="button" class="btn btn-xs btn-ghost" title="More actions" aria-label="More actions" aria-haspopup="menu" aria-expanded="false" aria-controls="chat-actions-menu" onclick="toggleChatActionsDropdown(event)">`,
+		`<ul id="chat-actions-menu" tabindex="0" role="menu"`,
+		`type="button"`,
+		`role="menuitem"`,
+		`hx-delete="/chat/history?project_id=project-1"`,
+		`hx-confirm="Clear all chat history? This cannot be undone."`,
+		`window.toggleChatActionsDropdown = function(event)`,
+		`restoreChatActionsFocus = function(dropdown)`,
+		`trigger.focus({preventScroll: true})`,
+		`closeChatActions(dropdown, true)`,
+		`event.key !== 'Escape'`,
+	} {
+		if !strings.Contains(content, required) {
+			t.Fatalf("Chat clear-actions startup/accessibility contract is missing %q", required)
+		}
 	}
-	if strings.Contains(content, `<button tabindex="0" class="btn btn-xs btn-ghost" title="More actions" onclick="handleDropdownToggle(event)">`) {
-		t.Fatal("unexpected <button> dropdown trigger in chat header")
+	if strings.Contains(content, `<label tabindex="0" class="btn btn-xs btn-ghost" title="More actions"`) {
+		t.Fatal("Chat clear-actions trigger must not use a focus-opening label")
+	}
+	if strings.Contains(content, `autofocus`) {
+		t.Fatal("Chat startup must not introduce autofocus that changes the initial focus target")
 	}
 }
 
-func TestChatContent_ClearChatDoesNotRequireConfirmation(t *testing.T) {
+func TestChatContent_ClearChatPreservesConfirmationFlow(t *testing.T) {
 	agents := []models.LLMConfig{{ID: "agent-1", Name: "Agent One", Provider: models.ProviderAnthropic}}
 
 	var buf bytes.Buffer
@@ -410,8 +428,8 @@ func TestChatContent_ClearChatDoesNotRequireConfirmation(t *testing.T) {
 	if !strings.Contains(content, `hx-delete="/chat/history?project_id=project-1"`) {
 		t.Fatal("expected clear chat action to issue hx-delete request")
 	}
-	if strings.Contains(content, `hx-confirm="Clear all chat history? This cannot be undone."`) {
-		t.Fatal("clear chat action should not require confirmation in desktop app")
+	if !strings.Contains(content, `hx-confirm="Clear all chat history? This cannot be undone."`) {
+		t.Fatal("clear chat action must preserve its confirmation flow")
 	}
 }
 
@@ -499,11 +517,56 @@ func TestChatContent_LiveSteeringRowsAreCancelable(t *testing.T) {
 	if strings.Contains(branch, "_chatKnownExecIds[data.exec_id]") {
 		t.Fatal("live steering pending-input ids must not pollute the chat execution duplicate guard")
 	}
+	if !strings.Contains(branch, "existingSteeringRow.remove()") || !strings.Contains(branch, "data-input-mode') === 'steering'") {
+		t.Fatal("live steering events must replace stale queued rows without duplicating existing steering rows")
+	}
+	if !strings.Contains(branch, "window._chatQueuedSteerInFlight[data.exec_id]") {
+		t.Fatal("same-tab queued-to-steer live events must not remove the local HTMX swap target")
+	}
+	if !strings.Contains(content, "window._chatDirectSteerInFlight = true") || !strings.Contains(branch, "window._chatDirectSteerInFlight") {
+		t.Fatal("same-tab direct steering live events must not duplicate the local HTMX steering row")
+	}
 	if !strings.Contains(branch, "'/thread-inputs/' + data.exec_id + '/cancel'") {
 		t.Fatal("live steering row must expose cancel action")
 	}
 	if !strings.Contains(branch, "htmx.process(steeringRow)") {
 		t.Fatal("live steering row must process dynamic HTMX controls")
+	}
+	if !strings.Contains(branch, "data.has_attachments") || !strings.Contains(branch, "Attachments included") {
+		t.Fatal("live steering row must render the attachment indicator when the event has attachments")
+	}
+}
+
+func TestChatContent_LiveQueuedAttachmentEventsReachQueuedRowBranch(t *testing.T) {
+	agents := []models.LLMConfig{{ID: "agent-1", Name: "Agent One", Provider: models.ProviderAnthropic}}
+
+	var buf bytes.Buffer
+	err := renderChatContentForTest(agents, nil, "project-1", map[string][]models.ChatAttachment{}, nil, false).Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("render chat content: %v", err)
+	}
+	content := buf.String()
+
+	chatNewStart := strings.Index(content, "if (eventType === 'chat_new_message')")
+	if chatNewStart == -1 {
+		t.Fatal("expected live chat_new_message branch")
+	}
+	branchEnd := strings.Index(content[chatNewStart:], "// Scroll to bottom")
+	if branchEnd == -1 {
+		t.Fatal("expected live chat_new_message branch terminator")
+	}
+	branch := content[chatNewStart : chatNewStart+branchEnd]
+	attachmentRefresh := strings.Index(branch, "if (data.has_attachments && !data.queued)")
+	queuedBranch := strings.Index(branch, "if (data.queued)")
+	queuedBadge := strings.Index(branch, "queuedRow.appendChild(createPendingAttachmentBadge('Attachments queued'")
+	if attachmentRefresh == -1 {
+		t.Fatal("attachment transcript refresh must be gated to non-queued events so queued attachment rows render")
+	}
+	if queuedBranch == -1 || queuedBadge == -1 || !(queuedBranch < queuedBadge) {
+		t.Fatal("live queued row branch must render the queued attachment indicator")
+	}
+	if strings.Contains(branch, "if (data.has_attachments) {") {
+		t.Fatal("queued attachment events must not be consumed by the non-queued attachment refresh branch")
 	}
 }
 

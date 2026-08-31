@@ -17,54 +17,47 @@ func NewDiscordTaskContextRepo(db *sql.DB) *DiscordTaskContextRepo {
 	return &DiscordTaskContextRepo{db: db}
 }
 
+var discordTaskContextLifecycle = taskContextLifecycle[models.DiscordTaskContext]{
+	table:           "discord_task_context",
+	errLabel:        "discord task context",
+	metadataColumns: []string{"discord_channel_id", "discord_thread_id", "discord_message_id", "discord_user_id"},
+	selectColumns:   "task_id, discord_channel_id, discord_thread_id, discord_message_id, discord_user_id, created_at, updated_at",
+	values: func(dtc models.DiscordTaskContext) (string, []any) {
+		return dtc.TaskID, []any{dtc.DiscordChannelID, dtc.DiscordThreadID, dtc.DiscordMessageID, dtc.DiscordUserID}
+	},
+	scan: func(row taskContextScanner) (models.DiscordTaskContext, error) {
+		var dtc models.DiscordTaskContext
+		err := row.Scan(
+			&dtc.TaskID,
+			&dtc.DiscordChannelID,
+			&dtc.DiscordThreadID,
+			&dtc.DiscordMessageID,
+			&dtc.DiscordUserID,
+			&dtc.CreatedAt,
+			&dtc.UpdatedAt,
+		)
+		return dtc, err
+	},
+}
+
 func (r *DiscordTaskContextRepo) Upsert(ctx context.Context, dtc *models.DiscordTaskContext) error {
+	return withBoundSQLiteConn(ctx, r.db, func(conn *sql.Conn) error {
+		return r.UpsertWithExecutor(ctx, conn, dtc)
+	})
+}
+
+// UpsertWithExecutor persists Discord task context using the caller's transaction.
+func (r *DiscordTaskContextRepo) UpsertWithExecutor(ctx context.Context, exec SQLExecutor, dtc *models.DiscordTaskContext) error {
 	if dtc == nil {
 		return fmt.Errorf("discord task context is nil")
 	}
-	_, err := r.db.ExecContext(ctx,
-		`INSERT INTO discord_task_context (task_id, discord_channel_id, discord_thread_id, discord_message_id, discord_user_id, updated_at)
-		 VALUES (?, ?, ?, ?, ?, datetime('now'))
-		 ON CONFLICT(task_id) DO UPDATE SET
-		 discord_channel_id = excluded.discord_channel_id,
-		 discord_thread_id = excluded.discord_thread_id,
-		 discord_message_id = excluded.discord_message_id,
-		 discord_user_id = excluded.discord_user_id,
-		 updated_at = datetime('now')`,
-		dtc.TaskID, dtc.DiscordChannelID, dtc.DiscordThreadID, dtc.DiscordMessageID, dtc.DiscordUserID)
-	if err != nil {
-		return fmt.Errorf("upsert discord task context: %w", err)
-	}
-	return nil
+	return discordTaskContextLifecycle.Upsert(ctx, exec, *dtc)
 }
 
 func (r *DiscordTaskContextRepo) GetByTaskID(ctx context.Context, taskID string) (*models.DiscordTaskContext, error) {
-	var dtc models.DiscordTaskContext
-	err := r.db.QueryRowContext(ctx,
-		`SELECT task_id, discord_channel_id, discord_thread_id, discord_message_id, discord_user_id, created_at, updated_at
-		 FROM discord_task_context WHERE task_id = ?`,
-		taskID,
-	).Scan(
-		&dtc.TaskID,
-		&dtc.DiscordChannelID,
-		&dtc.DiscordThreadID,
-		&dtc.DiscordMessageID,
-		&dtc.DiscordUserID,
-		&dtc.CreatedAt,
-		&dtc.UpdatedAt,
-	)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("get discord task context: %w", err)
-	}
-	return &dtc, nil
+	return discordTaskContextLifecycle.GetByTaskID(ctx, r.db, taskID)
 }
 
 func (r *DiscordTaskContextRepo) DeleteByTaskID(ctx context.Context, taskID string) error {
-	_, err := r.db.ExecContext(ctx, `DELETE FROM discord_task_context WHERE task_id = ?`, taskID)
-	if err != nil {
-		return fmt.Errorf("delete discord task context: %w", err)
-	}
-	return nil
+	return deleteByTaskID(ctx, r.db, "discord_task_context", taskID, "discord task context")
 }

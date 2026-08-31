@@ -21,6 +21,10 @@ type automationTaskSubmissionService interface {
 	SubmitSavedAutomationTask(models.Task)
 }
 
+type automationQueuedWorkPruner interface {
+	PruneQueuedWork()
+}
+
 type AutomationCompiler struct {
 	automationRepo *repository.AutomationRepo
 	taskSvc        automationTaskMutationService
@@ -32,16 +36,17 @@ type AutomationCompiler struct {
 }
 
 type AutomationSaveRequest struct {
-	ProjectID             string
-	AutomationID          string
-	StableKey             string
-	Source                string
-	CreatedVia            string
-	Candidate             models.AutomationDraftCandidate
-	ConfirmationTokenID   string
-	ConfirmationPrincipal string
-	ConfirmationThreadID  string
-	ConfirmingUserInputID string
+	ProjectID              string
+	AutomationID           string
+	StableKey              string
+	Source                 string
+	CreatedVia             string
+	Candidate              models.AutomationDraftCandidate
+	ConfirmationTokenID    string
+	ConfirmationPrincipal  string
+	ConfirmationThreadID   string
+	ConfirmingUserInputID  string
+	UpdateToLatestTemplate bool
 }
 
 type AutomationSaveResult struct {
@@ -56,48 +61,43 @@ func (c *AutomationCompiler) SetAgentRepository(agentRepo *repository.AgentRepo)
 	c.agentRepo = agentRepo
 }
 
-func (c *AutomationCompiler) PreviewSave(ctx context.Context, projectID string, candidate models.AutomationDraftCandidate) (*models.AutomationSavePlan, models.AutomationDraftCandidate, error) {
+func (c *AutomationCompiler) validateSaveCandidate(ctx context.Context, projectID string, candidate models.AutomationDraftCandidate) (models.AutomationDraftCandidate, []models.AutomationValidationIssue, error) {
 	if c == nil || c.validator == nil || c.validator.drafts == nil || c.validator.registry == nil {
-		return nil, candidate, errors.New("automation save is unavailable")
+		return candidate, nil, errors.New("automation save is unavailable")
 	}
 	normalized, err := c.validator.drafts.NormalizeCandidate(candidate)
 	if err != nil {
-		return nil, candidate, err
+		return candidate, nil, err
 	}
 	issues, err := c.validator.drafts.validateCandidateForProject(ctx, projectID, normalized)
 	if err != nil {
-		return nil, normalized, err
+		return normalized, nil, err
 	}
 	capabilityIssues, err := c.validator.capabilityIssues(ctx, projectID, normalized)
 	if err != nil {
-		return nil, normalized, err
+		return normalized, nil, err
 	}
 	agentIssues, err := c.validator.agentIssues(ctx, projectID, normalized)
 	if err != nil {
-		return nil, normalized, err
+		return normalized, nil, err
 	}
 	issues = append(issues, capabilityIssues...)
 	issues = append(issues, agentIssues...)
+	return normalized, issues, nil
+}
+
+func (c *AutomationCompiler) PreviewSave(ctx context.Context, projectID string, candidate models.AutomationDraftCandidate) (*models.AutomationSavePlan, models.AutomationDraftCandidate, error) {
+	normalized, issues, err := c.validateSaveCandidate(ctx, projectID, candidate)
+	if err != nil {
+		return nil, normalized, err
+	}
 	plan := &models.AutomationSavePlan{Validation: issues, WillNot: []string{"merge pull requests", "release software", "deploy software"}}
 	if len(issues) > 0 {
 		automationobs.Event("automation.save.validation_failure", automationobs.String("project_id", projectID), automationobs.String("adapter_key", normalized.AdapterKey))
 		return plan, normalized, nil
 	}
 	adapter, _ := c.validator.registry.Get(normalized.AdapterKey)
-	resourceNodes := adapter.Nodes
-	if adapter.DynamicTopology {
-		resourceNodes = nil
-		for _, node := range normalized.Nodes {
-			allowed := map[string]bool{}
-			if customAutomationNodeMaterializesTask(normalized, node) {
-				allowed["task"] = true
-			}
-			if node.Type == models.AutomationNodeTrigger {
-				allowed["schedule"] = true
-			}
-			resourceNodes = append(resourceNodes, AutomationAdapterNode{Key: node.Key, Name: node.Name, AllowedResources: allowed})
-		}
-	}
+	resourceNodes := automationResourceNodes(adapter, normalized)
 	for _, node := range resourceNodes {
 		if node.AllowedResources["task"] {
 			plan.Effects = append(plan.Effects, models.AutomationSaveEffect{Operation: "create", ResourceType: "task", Name: node.Name})
@@ -107,6 +107,49 @@ func (c *AutomationCompiler) PreviewSave(ctx context.Context, projectID string, 
 		}
 	}
 	return plan, normalized, nil
+}
+
+func automationResourceNodes(adapter AutomationAdapter, candidate models.AutomationDraftCandidate) []AutomationAdapterNode {
+	canonical := make(map[string]AutomationAdapterNode, len(adapter.Nodes))
+	for _, node := range adapter.Nodes {
+		canonical[node.Key] = node
+	}
+	resources := make([]AutomationAdapterNode, 0, len(candidate.Nodes))
+	for _, node := range candidate.Nodes {
+		if resource, exists := canonical[node.Key]; exists {
+			resources = append(resources, resource)
+			continue
+		}
+		if !adapter.DynamicTopology && adapter.Key != AutomationAdapterNativeSDLC && adapter.Key != AutomationAdapterGitHubSDLC {
+			continue
+		}
+		resource := AutomationAdapterNode{Key: node.Key, Name: node.Name, Type: string(node.Type), Role: node.Role, AllowedResources: map[string]bool{}}
+		if customAutomationNodeMaterializesTask(candidate, node) {
+			resource.AllowedResources["task"] = true
+		}
+		if node.Type == models.AutomationNodeTrigger {
+			resource.AllowedResources["schedule"] = true
+		}
+		resources = append(resources, resource)
+	}
+	return resources
+}
+
+func automationNodeUsesCustomTopology(adapter AutomationAdapter, nodeKey string) bool {
+	if adapter.DynamicTopology {
+		return true
+	}
+	for _, node := range adapter.Nodes {
+		if node.Key == nodeKey {
+			return false
+		}
+	}
+	return adapter.Key == AutomationAdapterNativeSDLC || adapter.Key == AutomationAdapterGitHubSDLC
+}
+
+func automationCandidateNodeUsesCustomTopology(candidate models.AutomationDraftCandidate, nodeKey string) bool {
+	adapter, ok := NewAutomationAdapterRegistry().Get(candidate.AdapterKey)
+	return ok && automationNodeUsesCustomTopology(adapter, nodeKey)
 }
 
 func customAutomationNodeMaterializesTask(candidate models.AutomationDraftCandidate, node models.AutomationDraftNode) bool {
@@ -127,24 +170,10 @@ func (c *AutomationCompiler) Save(ctx context.Context, request AutomationSaveReq
 	if strings.TrimSpace(request.ProjectID) == "" {
 		return nil, errors.New("project is required")
 	}
-	candidate, err := c.validator.drafts.NormalizeCandidate(request.Candidate)
+	candidate, issues, err := c.validateSaveCandidate(ctx, request.ProjectID, request.Candidate)
 	if err != nil {
 		return nil, err
 	}
-	issues, err := c.validator.drafts.validateCandidateForProject(ctx, request.ProjectID, candidate)
-	if err != nil {
-		return nil, err
-	}
-	capabilityIssues, err := c.validator.capabilityIssues(ctx, request.ProjectID, candidate)
-	if err != nil {
-		return nil, err
-	}
-	agentIssues, err := c.validator.agentIssues(ctx, request.ProjectID, candidate)
-	if err != nil {
-		return nil, err
-	}
-	issues = append(issues, capabilityIssues...)
-	issues = append(issues, agentIssues...)
 	if len(issues) > 0 {
 		return nil, fmt.Errorf("automation graph validation failed: %s", issues[0].Message)
 	}
@@ -177,28 +206,24 @@ func (c *AutomationCompiler) Save(ctx context.Context, request AutomationSaveReq
 	if !ok {
 		return nil, fmt.Errorf("unsupported automation adapter %q", candidate.AdapterKey)
 	}
+	templateRevision := automation.TemplateRevision
+	if request.UpdateToLatestTemplate {
+		if current == nil || adapter.TemplateRevision == 0 {
+			return nil, errors.New("only an existing maintained template Automation can update to the latest template")
+		}
+		templateRevision = &adapter.TemplateRevision
+	} else if current == nil && request.Source == "template" && adapter.TemplateRevision > 0 {
+		templateRevision = &adapter.TemplateRevision
+	}
 	candidateNodes := make(map[string]models.AutomationDraftNode, len(candidate.Nodes))
 	for _, node := range candidate.Nodes {
 		candidateNodes[node.Key] = node
 	}
-	resourceNodes := adapter.Nodes
-	if adapter.DynamicTopology {
-		resourceNodes = make([]AutomationAdapterNode, 0, len(candidate.Nodes))
-		for _, node := range candidate.Nodes {
-			resource := AutomationAdapterNode{Key: node.Key, Name: node.Name, Type: string(node.Type), Role: node.Role, AllowedResources: map[string]bool{}}
-			if customAutomationNodeMaterializesTask(candidate, node) {
-				resource.AllowedResources["task"] = true
-			}
-			if node.Type == models.AutomationNodeTrigger {
-				resource.AllowedResources["schedule"] = true
-			}
-			resourceNodes = append(resourceNodes, resource)
-		}
-	}
+	resourceNodes := automationResourceNodes(adapter, candidate)
 
 	write := repository.AutomationSaveWrite{ProjectID: request.ProjectID, AutomationID: automationID, GraphID: repository.NewID(),
 		ExpectedCurrentGraphID: expectedGraphID, StableKey: request.StableKey, Source: request.Source,
-		CreatedVia: request.CreatedVia, Candidate: candidate, ConfirmationTokenID: request.ConfirmationTokenID,
+		CreatedVia: request.CreatedVia, TemplateRevision: templateRevision, Candidate: candidate, ConfirmationTokenID: request.ConfirmationTokenID,
 		ConfirmationPrincipal: request.ConfirmationPrincipal, ConfirmationThreadID: request.ConfirmationThreadID,
 		ConfirmingUserInputID: request.ConfirmingUserInputID}
 	for _, resourceNode := range resourceNodes {
@@ -211,16 +236,30 @@ func (c *AutomationCompiler) Save(ctx context.Context, request AutomationSaveReq
 		if err != nil {
 			return nil, err
 		}
-		var agentID *string
+		var agentDefinitionID *string
 		if agent != nil {
-			agentID = &agent.ID
+			agentDefinitionID = &agent.ID
 		}
-		taskWrite := repository.AutomationSaveTask{NodeKey: node.Key, Title: automationTaskTitle(automation, node), Prompt: prompt,
-			Category: category, Priority: priority, AgentDefinitionID: agentID}
+		modelConfigID := automationExplicitModelConfigID(node.Config["model_config_id"])
+		var agentID *string
+		if modelConfigID != "" {
+			agentID = &modelConfigID
+		}
+		goal, _ := node.Config["goal"].(string)
+		taskWrite := repository.AutomationSaveTask{
+			NodeKey:           node.Key,
+			Title:             automationTaskTitle(automation, node),
+			Prompt:            prompt,
+			Goal:              strings.TrimSpace(goal),
+			Category:          category,
+			Priority:          priority,
+			AgentID:           agentID,
+			AgentDefinitionID: agentDefinitionID,
+		}
 		if existing := existingResources[node.Key+"\x00task"]; existing.ResourceID != "" {
 			taskWrite.ExistingTaskID = existing.ResourceID
 		}
-		if candidate.AdapterKey == AutomationAdapterCustom {
+		if automationNodeUsesCustomTopology(adapter, node.Key) {
 			taskWrite.ApplyTopology = true
 			taskWrite.ParentNodeKey, _ = customAutomationTaskNeighbors(candidate, node.Key)
 			if _, child := customAutomationTaskNeighbors(candidate, node.Key); child != nil {
@@ -252,7 +291,7 @@ func (c *AutomationCompiler) Save(ctx context.Context, request AutomationSaveReq
 			}
 		}
 		taskNodeKey := node.Key
-		if candidate.AdapterKey != AutomationAdapterCustom {
+		if !automationNodeUsesCustomTopology(adapter, node.Key) {
 			taskNodeKey, _ = node.Config["target_node_key"].(string)
 		}
 		schedule, err := c.scheduleFromNode("", node)
@@ -327,6 +366,9 @@ func (c *AutomationCompiler) scheduleFromNode(taskID string, node models.Automat
 	}
 	repeat, _ := node.Config["repeat_type"].(string)
 	interval, _ := draftInt(node.Config["repeat_interval"])
+	if err := models.ValidateScheduleRepeatInterval(interval); err != nil {
+		return models.Schedule{}, fmt.Errorf("invalid repeat interval for %q: %w", node.Key, err)
+	}
 	clearContextOnStart, present := node.Config["clear_context_on_start"].(bool)
 	if !present {
 		clearContextOnStart = true
@@ -348,11 +390,24 @@ func NewAutomationLifecycleService(repo *repository.AutomationRepo, scheduleRepo
 	return service
 }
 
+func (s *AutomationLifecycleService) RunNow(ctx context.Context, projectID, automationID string) ([]models.AutomationInvocation, []models.AutomationDispatch, error) {
+	if s == nil || s.repo == nil {
+		return nil, nil, errors.New("automation lifecycle service is unavailable")
+	}
+	return s.repo.ClaimManualAutomationRun(ctx, projectID, automationID, time.Now().UTC())
+}
+
 func (s *AutomationLifecycleService) Pause(ctx context.Context, projectID, automationID string) error {
 	if s == nil || s.repo == nil {
 		return errors.New("automation lifecycle service is unavailable")
 	}
-	return s.repo.SetAutomationLifecycle(ctx, projectID, automationID, models.AutomationPaused)
+	if err := s.repo.SetAutomationLifecycle(ctx, projectID, automationID, models.AutomationPaused); err != nil {
+		return err
+	}
+	if pruner, ok := s.taskSvc.(automationQueuedWorkPruner); ok {
+		pruner.PruneQueuedWork()
+	}
+	return nil
 }
 
 func (s *AutomationLifecycleService) Resume(ctx context.Context, projectID, automationID string) error {
@@ -376,7 +431,13 @@ func (s *AutomationLifecycleService) Archive(ctx context.Context, projectID, aut
 	if s == nil || s.repo == nil {
 		return errors.New("automation lifecycle service is unavailable")
 	}
-	return s.repo.SetAutomationLifecycle(ctx, projectID, automationID, models.AutomationArchived)
+	if err := s.repo.SetAutomationLifecycle(ctx, projectID, automationID, models.AutomationArchived); err != nil {
+		return err
+	}
+	if pruner, ok := s.taskSvc.(automationQueuedWorkPruner); ok {
+		pruner.PruneQueuedWork()
+	}
+	return nil
 }
 
 func (s *AutomationLifecycleService) Delete(ctx context.Context, projectID, automationID string) error {

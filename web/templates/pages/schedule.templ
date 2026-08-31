@@ -31,8 +31,7 @@ type TimeSlot struct {
 }
 
 // schedNextOccurrence returns the next occurrence after t, preserving local time-of-day across DST.
-// Uses AddDate (calendar-day arithmetic) instead of Add(24h) to avoid DST-related time shifts.
-func schedNextOccurrence(t time.Time, repeatType models.RepeatType, interval int) time.Time {
+func schedNextOccurrence(t, anchor time.Time, repeatType models.RepeatType, interval int) time.Time {
 	switch repeatType {
 	case models.RepeatSeconds:
 		return t.Add(time.Duration(interval) * time.Second)
@@ -45,14 +44,14 @@ func schedNextOccurrence(t time.Time, repeatType models.RepeatType, interval int
 	case models.RepeatWeekly:
 		return t.AddDate(0, 0, 7*interval)
 	case models.RepeatMonthly:
-		return t.AddDate(0, interval, 0)
+		return schedMonthlyOccurrence(anchor, t, interval)
 	default:
 		return t.AddDate(0, 0, 1)
 	}
 }
 
 // schedPrevOccurrence returns the previous occurrence before t, preserving local time-of-day across DST.
-func schedPrevOccurrence(t time.Time, repeatType models.RepeatType, interval int) time.Time {
+func schedPrevOccurrence(t, anchor time.Time, repeatType models.RepeatType, interval int) time.Time {
 	switch repeatType {
 	case models.RepeatSeconds:
 		return t.Add(-time.Duration(interval) * time.Second)
@@ -65,10 +64,15 @@ func schedPrevOccurrence(t time.Time, repeatType models.RepeatType, interval int
 	case models.RepeatWeekly:
 		return t.AddDate(0, 0, -7*interval)
 	case models.RepeatMonthly:
-		return t.AddDate(0, -interval, 0)
+		return schedMonthlyOccurrence(anchor, t, -interval)
 	default:
 		return t.AddDate(0, 0, -1)
 	}
+}
+
+func schedMonthlyOccurrence(anchor, current time.Time, monthDelta int) time.Time {
+	monthsFromAnchor := (current.Year()-anchor.Year())*12 + int(current.Month()-anchor.Month())
+	return models.AddMonthsClamped(anchor, monthsFromAnchor+monthDelta)
 }
 
 // formatRepeatLabel returns a human-readable label for a sub-daily repeat schedule.
@@ -141,7 +145,8 @@ func buildTaskOccurrenceMap(tasks []repository.TaskWithSchedule, startOfWeek tim
 				// DB stores UTC; calendar grid uses local dates/hours.
 				// Use NextRun if set (indicates task has executed or been rescheduled),
 				// otherwise use RunAt (new schedule that hasn't run yet).
-				var currentRun time.Time
+					anchor := task.Schedule.RunAt.Local()
+					var currentRun time.Time
 				if task.Schedule.NextRun != nil {
 					currentRun = (*task.Schedule.NextRun).Local()
 				} else {
@@ -151,7 +156,7 @@ func buildTaskOccurrenceMap(tasks []repository.TaskWithSchedule, startOfWeek tim
 				// Rewind to find the first occurrence at or after startOfWeek.
 				// Uses AddDate for DST-aware calendar day arithmetic (not fixed 24h durations).
 				for !currentRun.Before(startOfWeek) {
-					prevRun := schedPrevOccurrence(currentRun, task.Schedule.RepeatType, task.Schedule.RepeatInterval)
+						prevRun := schedPrevOccurrence(currentRun, anchor, task.Schedule.RepeatType, task.Schedule.RepeatInterval)
 					if prevRun.Before(startOfWeek) {
 						break
 					}
@@ -160,12 +165,11 @@ func buildTaskOccurrenceMap(tasks []repository.TaskWithSchedule, startOfWeek tim
 
 				// Fast-forward to the first occurrence in the week if still before it
 				for currentRun.Before(startOfWeek) {
-					currentRun = schedNextOccurrence(currentRun, task.Schedule.RepeatType, task.Schedule.RepeatInterval)
+						currentRun = schedNextOccurrence(currentRun, anchor, task.Schedule.RepeatType, task.Schedule.RepeatInterval)
 				}
 
-				// Generate occurrences up to the end of the week.
-				// Uses AddDate-based advancement (not ComputeNextRun which is anchored to RunAt
-				// and would skip days when viewing weeks before RunAt).
+					// Generate occurrences up to the end of the week. Monthly advancement
+					// remains anchored to RunAt so clamped dates do not drift.
 				for !currentRun.After(endOfWeek) {
 					if !currentRun.Before(startOfWeek) {
 						dateTimeKey := fmt.Sprintf("%s-%02d", currentRun.Format("2006-01-02"), currentRun.Hour())
@@ -174,7 +178,7 @@ func buildTaskOccurrenceMap(tasks []repository.TaskWithSchedule, startOfWeek tim
 							OccurrenceTime: currentRun,
 						})
 					}
-					currentRun = schedNextOccurrence(currentRun, task.Schedule.RepeatType, task.Schedule.RepeatInterval)
+						currentRun = schedNextOccurrence(currentRun, anchor, task.Schedule.RepeatType, task.Schedule.RepeatInterval)
 				}
 			} else {
 				// For one-time tasks, use NextRun if set (rescheduled), otherwise use RunAt
@@ -432,18 +436,18 @@ templ SchedulePrimaryAgentSelector(selected *string, agentDefs []models.Agent, s
 	</select>
 }
 
-templ Schedule(projects []models.Project, currentProject *models.Project, tasks []repository.TaskWithSchedule, weekOffset int, agents []models.LLMConfig, agentDefs []models.Agent) {
+templ Schedule(projects []models.Project, currentProject *models.Project, tasks []repository.TaskWithSchedule, weekOffset int, agents []models.LLMConfig, agentDefs []repository.AgentScheduleOption) {
 	@layout.Base("Schedule", projects, projectID(currentProject)) {
 		@scheduleContent(currentProject, buildWeekData(tasks, weekOffset), weekOffset, agents, agentDefs)
 	}
 }
 
 // ScheduleContent renders just the schedule content for HTMX requests
-templ ScheduleContent(currentProject *models.Project, tasks []repository.TaskWithSchedule, weekOffset int, agents []models.LLMConfig, agentDefs []models.Agent) {
+templ ScheduleContent(currentProject *models.Project, tasks []repository.TaskWithSchedule, weekOffset int, agents []models.LLMConfig, agentDefs []repository.AgentScheduleOption) {
 	@scheduleContent(currentProject, buildWeekData(tasks, weekOffset), weekOffset, agents, agentDefs)
 }
 
-templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOffset int, agents []models.LLMConfig, agentDefs []models.Agent) {
+templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOffset int, agents []models.LLMConfig, agentDefs []repository.AgentScheduleOption) {
 	<div id="schedule-content" class="flex flex-col h-full" data-project-id={ projectID(currentProject) }>
 		@layout.PageTitle("Schedule")
 		<!-- Header: Row 1 – Title + New Task button -->
@@ -501,8 +505,8 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 		</div>
 
 						<!-- Week Timeline View -->
-						<div id="schedule-timeline-container" class="bg-base-100 rounded-lg shadow-lg overflow-x-auto flex-1 min-h-0 overflow-y-auto opacity-0" style="border: 1px solid var(--ov-schedule-grid-border);">
-							<div class="min-w-[800px]">
+						<div id="schedule-timeline-container" class="bg-base-100 rounded-lg shadow-lg overflow-x-auto flex flex-1 flex-col min-h-0 overflow-y-auto opacity-0" style="border: 1px solid var(--ov-schedule-grid-border);">
+							<div class="min-w-[800px] flex flex-1 flex-col">
 								<!-- Day Headers -->
 								<div class="grid bg-base-200 sticky top-0 z-20" style="grid-template-columns: 60px repeat(7, 1fr); border-bottom: 1px solid var(--ov-schedule-grid-border);">
 									<div class="p-2 text-center font-semibold text-xs" style="border-right: 1px solid var(--ov-schedule-grid-border);"></div>
@@ -525,10 +529,10 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 								</div>
 
 								<!-- Timeline Grid -->
-								<div class="relative">
-									for _, slot := range getTimeSlots() {
-										<div class="grid schedule-grid-row last:border-b-0" style="grid-template-columns: 60px repeat(7, 1fr); border-bottom: 1px solid var(--ov-schedule-grid-border);">
-											<!-- Time Label -->
+									<div class="relative flex flex-1 flex-col">
+										for _, slot := range getTimeSlots() {
+											<div class="grid flex-1 schedule-grid-row last:border-b-0" style="grid-template-columns: 60px repeat(7, 1fr); border-bottom: 1px solid var(--ov-schedule-grid-border);">
+												<!-- Time Label -->
 											<div class="py-1 px-2 text-[10px] font-medium text-right bg-base-200 schedule-time-label" style="border-right: 1px solid var(--ov-schedule-grid-border);">
 												{ slot.Label }
 											</div>
@@ -542,9 +546,6 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 													data-date={ day.Date.Format("2006-01-02") }
 													data-hour={ fmt.Sprintf("%d", slot.Hour) }
 													style="border-right: 1px solid var(--ov-schedule-grid-border);"
-													ondragover="handleScheduleDragOver(event)"
-													ondrop="handleScheduleDrop(event)"
-													ondragleave="handleScheduleDragLeave(event)"
 												>
 													for _, occurrence := range getTasksForHour(weekData.TasksByDateTime, day.Date, slot.Hour) {
 														if occurrence.Task.Schedule != nil && !occurrence.Task.Schedule.Enabled {
@@ -562,14 +563,13 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 															</div>
 														} else {
 															<div
-																class="text-[10px] px-1.5 py-1 mb-0.5 rounded bg-indigo-600 bg-opacity-30 hover:bg-opacity-40 cursor-move transition-colors border-l-2 border-indigo-500 overflow-hidden"
+																class="text-[10px] px-1.5 py-1 mb-0.5 rounded bg-indigo-600 bg-opacity-30 hover:bg-opacity-40 cursor-grab active:cursor-grabbing drag-cursor-surface transition-colors border-l-2 border-indigo-500 overflow-hidden"
 																title={ scheduleDisplayTitle(occurrence.Task) }
-																draggable="true"
 																data-schedule-id={ getScheduleID(occurrence.Task) }
 																data-task-id={ occurrence.Task.Task.ID }
 																data-has-schedule={ fmt.Sprintf("%t", occurrence.Task.Schedule != nil && getScheduleID(occurrence.Task) != "") }
-																onclick="openTaskDialog(this.dataset.taskId)"
-																ondragstart="handleScheduleDragStart(event)"
+																onclick="handleScheduleSelect(event)"
+																onpointerdown="handleSchedulePointerDown(event)"
 															>
 																<div class="font-semibold truncate leading-tight">{ scheduleDisplayTitle(occurrence.Task) }</div>
 																if occurrence.Task.Schedule != nil && occurrence.Task.Schedule.RepeatType.IsSubDaily() {
@@ -619,20 +619,9 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 				<span>Today</span>
 			</div>
 		</div>
-
-			<dialog id="delete_schedule_confirm_modal" class="modal">
-				<div class="modal-box">
-					@ModalCloseButton("delete_schedule_confirm_modal", "Close delete schedule confirmation")
-					<h3 class="font-bold text-lg text-error pr-10">Delete Schedule</h3>
-					<p class="py-4">Are you sure you want to delete the schedule for <strong id="delete_schedule_confirm_name"></strong>? This action cannot be undone.</p>
-					<div class="text-sm text-base-content/70 bg-base-200 rounded-lg p-3 mb-4">The task will remain, but it will no longer run on this schedule.</div>
-					<div class="modal-action">
-						<button type="button" class="btn" onclick="delete_schedule_confirm_modal.close()">Cancel</button>
-						<button type="button" class="btn btn-error" onclick="confirmDeleteSchedule()">Delete Permanently</button>
-					</div>
-				</div>
-				<form method="dialog" class="modal-backdrop"><button>close</button></form>
-			</dialog>
+				@DestructiveConfirmDialog("delete_schedule_confirm_modal", "Close delete schedule confirmation", "Delete Schedule", "Are you sure you want to delete the schedule for ", "delete_schedule_confirm_name", "", "? This action cannot be undone.", templ.ComponentScript{Call: "delete_schedule_confirm_modal.close()"}, templ.ComponentScript{Call: "confirmDeleteSchedule()"}) {
+					The task will remain, but it will no longer run on this schedule.
+				}
 
 			<!-- New Scheduled Task Dialog -->		<dialog id="new_scheduled_task_modal" class="modal">
 			<div class="modal-box">
@@ -678,7 +667,7 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 						</div>
 						<div class="form-control min-w-0">
 							<label class="label"><span class="label-text">Primary Agent</span></label>
-							@SchedulePrimaryAgentSelector(nil, agentDefs, "select select-bordered w-full max-w-full")
+							@SchedulePrimaryAgentOptionSelector(nil, agentDefs, "select select-bordered w-full max-w-full")
 							<label class="label"><span class="label-text-alt opacity-60">Agent definition used for scheduled runs</span></label>
 						</div>
 					</div>
@@ -725,7 +714,7 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 						<div class="form-control md:col-span-2" id="sched-repeat-interval-container">
 							<label class="label"><span class="label-text">Repeat Every</span></label>
 							<div class="flex items-center gap-2">
-								<input type="number" id="sched-repeat-interval-input" name="repeat_interval" class="input input-bordered w-20" value="1" min="1" step="1"/>
+								<input type="number" id="sched-repeat-interval-input" name="repeat_interval" class="input input-bordered w-20" value="1" min="1" max="365" step="1"/>
 								<span class="text-sm opacity-60" id="sched-repeat-interval-label">day(s)</span>
 							</div>
 						</div>
@@ -760,10 +749,7 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 							if (!deleteScheduleID) return;
 							deleteScheduleTarget = button.dataset.scheduleTarget || '#schedule-content';
 							deleteScheduleSwap = button.dataset.scheduleSwap || 'outerHTML show:none';
-							var nameEl = document.getElementById('delete_schedule_confirm_name');
-							if (nameEl) nameEl.textContent = button.dataset.scheduleTitle || 'this task';
-							var modal = document.getElementById('delete_schedule_confirm_modal');
-							if (modal) modal.showModal();
+								window.openDestructiveConfirmDialog('delete_schedule_confirm_modal', 'delete_schedule_confirm_name', button.dataset.scheduleTitle || 'this task');
 						}
 
 						function confirmDeleteSchedule() {
@@ -838,8 +824,8 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 						repeatIntervalInput.disabled = false;
 						repeatIntervalInput.required = true;
 						const raw = (repeatIntervalInput.value || '').trim();
-						if (raw === '' || !/^\d+$/.test(raw) || Number(raw) < 1) {
-							repeatIntervalInput.setCustomValidity('Repeat interval must be a whole number of at least 1');
+						if (raw === '' || !/^\d+$/.test(raw) || Number(raw) < 1 || Number(raw) > 365) {
+							repeatIntervalInput.setCustomValidity('Repeat interval must be a whole number between 1 and 365');
 						} else {
 							repeatIntervalInput.setCustomValidity('');
 						}
@@ -908,6 +894,7 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 				// Close modal on successful task creation (schedule-content swap)
 				document.body.addEventListener('htmx:afterSwap', function(event) {
 					if (event.detail.target && event.detail.target.id === 'schedule-content') {
+						if (typeof clearScheduleSelection === 'function') clearScheduleSelection();
 						const modal = document.getElementById('new_scheduled_task_modal');
 						if (modal && modal.open) {
 							modal.close();
@@ -916,16 +903,46 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 				});
 			}
 
-			let draggedScheduleId = null;
-			let draggedTaskId = null;
-			let draggedHasSchedule = false;
+			var draggedScheduleId = null;
+			var draggedScheduleIds = [];
+			var selectedScheduleCards = new Set();
+			var draggedTaskId = null;
+			var draggedHasSchedule = false;
 			// Flag to suppress scroll-to-now after drag-drop reschedule
-			let _schedDragDropJustCompleted = false;
+			var _schedDragDropJustCompleted = false;
 			// Flag to suppress click events that fire after short drags.
 			// Browsers may fire click after a very short drag (e.g. adjacent slot),
 			// even though the drag completed successfully. Without this guard,
 			// openTaskDialog navigates away and the user never sees the reschedule.
-			let _schedDragActive = false;
+			var _schedDragActive = false;
+
+			function clearScheduleSelection() {
+				selectedScheduleCards.forEach(function(card) { card.classList.remove('schedule-selected'); });
+				selectedScheduleCards.clear();
+				draggedScheduleIds = [];
+			}
+
+			function handleScheduleSelect(event) {
+				var card = event.currentTarget;
+				if (!card || _schedDragActive) {
+					event.preventDefault();
+					return;
+				}
+				if (event.metaKey || event.ctrlKey) {
+					event.preventDefault();
+					event.stopPropagation();
+					if (selectedScheduleCards.has(card)) {
+						selectedScheduleCards.delete(card);
+						card.classList.remove('schedule-selected');
+					} else {
+						selectedScheduleCards.add(card);
+						card.classList.add('schedule-selected');
+					}
+					return;
+				}
+				openTaskDialog(card.dataset.taskId);
+			}
+			window.handleScheduleSelect = handleScheduleSelect;
 
 			function openTaskDialog(taskId) {
 				// Only navigate if not dragging and not just finished dragging
@@ -938,78 +955,165 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 				}
 			}
 
-			let _dragSourceHour = null;
-			let _dragSourceDate = null;
+			var _dragSourceHour = null;
+			var _dragSourceDate = null;
 
-			function handleScheduleDragStart(event) {
-				draggedScheduleId = event.target.dataset.scheduleId;
-				draggedTaskId = event.target.dataset.taskId;
-				draggedHasSchedule = event.target.dataset.hasSchedule === 'true';
-				_schedDragActive = true;
-				// Track source slot so we can detect same-slot drops
-				var sourceZone = event.target.closest('.drop-zone');
-				_dragSourceHour = sourceZone ? sourceZone.dataset.hour : null;
-				_dragSourceDate = sourceZone ? sourceZone.dataset.date : null;
-				event.target.style.opacity = '0.5';
-				event.dataTransfer.effectAllowed = 'move';
-				event.dataTransfer.setData('text/html', event.target.innerHTML);
-				// Set a custom drag type so drop zones can identify schedule drags
-				// even without relying solely on the global variable
-				event.dataTransfer.setData('application/x-schedule-drag', draggedScheduleId || '');
-			}
+				var _schedulePointerDrag = null;
 
-			// Clear inline drag feedback styles from a drop zone
-			function clearDropZoneFeedback(zone) {
-				zone.style.backgroundColor = '';
-				zone.style.outline = '';
-				zone.style.cursor = '';
-			}
-
-			function handleScheduleDragOver(event) {
-				var dropZone = event.currentTarget;
-
-				// Check if this is a schedule drag by looking at drag data types.
-				// dataTransfer.types is available during dragover (unlike getData).
-				var hasScheduleType = event.dataTransfer.types &&
-					event.dataTransfer.types.indexOf('application/x-schedule-drag') !== -1;
-
-				// Valid drop: must be a schedule drag with a valid schedule ID and
-				// the task must actually have schedule configuration
-				var isValidDrop = hasScheduleType && draggedScheduleId && draggedHasSchedule;
-
-				if (isValidDrop) {
-					// Valid scheduled task — accept the drop
-					event.preventDefault();
-					event.dataTransfer.dropEffect = 'move';
-					// Use inline styles to avoid conflicts with Tailwind bg-opacity classes
-					dropZone.style.backgroundColor = 'rgba(99, 102, 241, 0.2)';
-					dropZone.style.outline = '2px solid rgba(99, 102, 241, 0.5)';
-					dropZone.style.cursor = '';
-				} else if (hasScheduleType) {
-					// Schedule drag but task has no schedule config — show error feedback.
-					// Still preventDefault so drop event fires and we can show a toast.
-					event.preventDefault();
-					event.dataTransfer.dropEffect = 'none';
-					dropZone.style.backgroundColor = 'rgba(239, 68, 68, 0.15)';
-					dropZone.style.outline = '2px dashed rgba(239, 68, 68, 0.6)';
-					dropZone.style.cursor = 'not-allowed';
-				} else {
-					// Not a schedule drag at all (external content, text, kanban card, etc.)
-					// Do NOT preventDefault — browser will reject the drop automatically.
-					event.dataTransfer.dropEffect = 'none';
-					dropZone.style.backgroundColor = 'rgba(239, 68, 68, 0.15)';
-					dropZone.style.outline = '2px dashed rgba(239, 68, 68, 0.6)';
-					dropZone.style.cursor = 'not-allowed';
+				function schedulePointerDropZoneAt(clientX, clientY) {
+					var hit = document.elementFromPoint(clientX, clientY);
+					return hit ? hit.closest('.drop-zone') : null;
 				}
-			}
 
-			function handleScheduleDragLeave(event) {
-				clearDropZoneFeedback(event.currentTarget);
-			}
+				function clearDropZoneFeedback(zone) {
+					if (!zone) return;
+					zone.style.backgroundColor = '';
+					zone.style.outline = '';
+					zone.style.cursor = '';
+				}
 
-			function handleScheduleDrop(event) {
-				event.stopPropagation();
-				event.preventDefault();
+				function resetSchedulePointerDrag() {
+					var state = _schedulePointerDrag;
+					var wasStarted = !!(state && state.started);
+					if (window.stopPointerAutoScroll) window.stopPointerAutoScroll();
+					if (state && state.dropZone) clearDropZoneFeedback(state.dropZone);
+					if (state && state.motions) {
+						state.motions.forEach(function(motion) {
+							window.endPointerCardMotion(motion);
+							motion.card.classList.remove('dragging');
+						});
+					} else if (state && state.card) {
+						window.endPointerCardMotion(state.motion);
+						state.card.classList.remove('dragging');
+					}
+					document.documentElement.classList.remove('drag-cursor-active');
+					document.body.classList.remove('drag-cursor-active');
+					window.removeEventListener('pointermove', handleSchedulePointerMove, true);
+					window.removeEventListener('pointerup', handleSchedulePointerUp, true);
+					window.removeEventListener('pointercancel', handleSchedulePointerCancel, true);
+					_schedulePointerDrag = null;
+					draggedScheduleId = null;
+					draggedScheduleIds = [];
+					draggedTaskId = null;
+					draggedHasSchedule = false;
+					_dragSourceHour = null;
+					_dragSourceDate = null;
+					if (wasStarted) clearScheduleSelection();
+					setTimeout(function() { _schedDragActive = false; }, 0);
+				}
+				function beginSchedulePointerDrag() {
+					var state = _schedulePointerDrag;
+					if (!state || state.started) return;
+					state.started = true;
+					var card = state.card;
+					draggedScheduleId = card.dataset.scheduleId;
+					draggedTaskId = card.dataset.taskId;
+					draggedHasSchedule = card.dataset.hasSchedule === 'true';
+					if (selectedScheduleCards.has(card) && selectedScheduleCards.size > 1) {
+						state.dragCards = Array.from(selectedScheduleCards);
+					} else {
+						clearScheduleSelection();
+						state.dragCards = [card];
+					}
+					draggedScheduleIds = Array.from(new Set(state.dragCards.map(function(selected) {
+						return selected.dataset.scheduleId;
+					}).filter(Boolean)));
+					_schedDragActive = true;
+					document.documentElement.classList.add('drag-cursor-active');
+					document.body.classList.add('drag-cursor-active');
+					state.motions = state.dragCards.map(function(selected) {
+						selected.classList.add('dragging');
+						return window.beginPointerCardMotion(selected);
+					});
+					state.motion = state.motions[state.dragCards.indexOf(card)];
+					var sourceZone = state.motion.placeholder.closest('.drop-zone');
+					_dragSourceHour = sourceZone ? sourceZone.dataset.hour : null;
+					_dragSourceDate = sourceZone ? sourceZone.dataset.date : null;
+				}
+				function refreshSchedulePointerDropZone(clientX, clientY) {
+					var state = _schedulePointerDrag;
+					if (!state || !state.started) return null;
+					var zone = schedulePointerDropZoneAt(clientX, clientY);
+					if (state.dropZone !== zone) {
+						clearDropZoneFeedback(state.dropZone);
+						state.dropZone = zone;
+					}
+					if (!zone) return null;
+					if (draggedScheduleId && draggedHasSchedule) {
+						zone.style.backgroundColor = 'rgba(99, 102, 241, 0.2)';
+						zone.style.outline = '2px solid rgba(99, 102, 241, 0.5)';
+						zone.style.cursor = '';
+					} else {
+						zone.style.backgroundColor = 'rgba(239, 68, 68, 0.15)';
+						zone.style.outline = '2px dashed rgba(239, 68, 68, 0.6)';
+						zone.style.cursor = 'not-allowed';
+					}
+					return zone;
+				}
+
+				function updateSchedulePointerDropZone(event) {
+					var zone = refreshSchedulePointerDropZone(event.clientX, event.clientY);
+					var timeline = document.getElementById('schedule-timeline-container');
+					window.handlePointerAutoScroll(event, timeline, null, function() {
+						refreshSchedulePointerDropZone(event.clientX, event.clientY);
+					});
+				}
+
+				function handleSchedulePointerMove(event) {
+					var state = _schedulePointerDrag;
+					if (!state || event.pointerId !== state.pointerId) return;
+					var deltaX = event.clientX - state.startX;
+					var deltaY = event.clientY - state.startY;
+					if (!state.started && Math.hypot(deltaX, deltaY) < 4) return;
+					beginSchedulePointerDrag();
+					event.preventDefault();
+					state.motions.forEach(function(motion) { window.movePointerCard(motion, deltaX, deltaY); });
+					updateSchedulePointerDropZone(event);
+				}
+
+				function handleSchedulePointerUp(event) {
+					var state = _schedulePointerDrag;
+					if (!state || event.pointerId !== state.pointerId) return;
+					var dropZone = schedulePointerDropZoneAt(event.clientX, event.clientY) || state.dropZone;
+					if (state.started && dropZone) {
+						handleScheduleDrop({
+							currentTarget: dropZone,
+							target: dropZone,
+							clientY: event.clientY,
+							stopPropagation: function() {},
+							preventDefault: function() {}
+						});
+					} else {
+						resetSchedulePointerDrag();
+					}
+				}
+
+				function handleSchedulePointerCancel(event) {
+					if (!_schedulePointerDrag || event.pointerId !== _schedulePointerDrag.pointerId) return;
+					resetSchedulePointerDrag();
+				}
+
+				function handleSchedulePointerDown(event) {
+					if (event.button !== 0 || _schedulePointerDrag) return;
+					var card = event.currentTarget;
+					_schedulePointerDrag = {
+						card: card,
+						pointerId: event.pointerId,
+						startX: event.clientX,
+						startY: event.clientY,
+						started: false,
+						dropZone: null
+					};
+					try { card.setPointerCapture(event.pointerId); } catch (_) {}
+					window.addEventListener('pointermove', handleSchedulePointerMove, true);
+					window.addEventListener('pointerup', handleSchedulePointerUp, true);
+					window.addEventListener('pointercancel', handleSchedulePointerCancel, true);
+				}
+				window.handleSchedulePointerDown = handleSchedulePointerDown;
+
+				function handleScheduleDrop(event) {
+					event.stopPropagation();
+					event.preventDefault();
 
 				var dropZone = event.currentTarget;
 				clearDropZoneFeedback(dropZone);
@@ -1060,25 +1164,23 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 							: 'Only tasks with active schedule configuration can be moved between time slots.';
 						window.showToast(reason, 'failed');
 					}
-					// Reset dragged elements
-					document.querySelectorAll('[draggable="true"]').forEach(function(el) {
-						el.style.opacity = '1';
-					});
-					draggedScheduleId = null;
-					draggedTaskId = null;
-					draggedHasSchedule = false;
-					_dragSourceHour = null;
-					_dragSourceDate = null;
+					resetSchedulePointerDrag();
 					return;
 				}
-
 				if (newDate && newHour) {
 					// Send reschedule request
 					var formData = new FormData();
 					formData.append('new_date', newDate);
 					formData.append('hour', newHour);
+					formData.append('source_date', _dragSourceDate || '');
+					formData.append('source_hour', _dragSourceHour || '');
+					formData.append('schedule_ids', draggedScheduleIds.join(','));
+					var scheduleRoot = document.getElementById('schedule-content');
+					var mutationProjectId = scheduleRoot ? (scheduleRoot.dataset.projectId || '') : '';
+					var mutationURL = '/schedules/' + encodeURIComponent(draggedScheduleId) + '/reschedule';
+					if (mutationProjectId) mutationURL += '?project_id=' + encodeURIComponent(mutationProjectId);
 
-					fetch('/schedules/' + draggedScheduleId + '/reschedule', {
+					fetch(mutationURL, {
 						method: 'PATCH',
 						headers: {
 							'HX-Request': 'true'
@@ -1111,41 +1213,8 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 					});
 				}
 
-				// Reset dragged elements
-				document.querySelectorAll('[draggable="true"]').forEach(function(el) {
-					el.style.opacity = '1';
-				});
-				draggedScheduleId = null;
-				draggedTaskId = null;
-				draggedHasSchedule = false;
-				_dragSourceHour = null;
-				_dragSourceDate = null;
+				resetSchedulePointerDrag();
 			}
-
-			// Reset opacity and clean up drop zone highlights on drag end
-			// Guard against duplicate registrations on HTMX content swaps
-			if (!window._schedDragendRegistered) {
-				window._schedDragendRegistered = true;
-				document.addEventListener('dragend', function(event) {
-					if (event.target.hasAttribute('draggable')) {
-						event.target.style.opacity = '1';
-					}
-					// Clean up any lingering drop zone highlights (use inline style cleanup)
-					document.querySelectorAll('.drop-zone').forEach(function(zone) {
-						clearDropZoneFeedback(zone);
-					});
-					draggedScheduleId = null;
-					draggedTaskId = null;
-					draggedHasSchedule = false;
-					_dragSourceHour = null;
-					_dragSourceDate = null;
-					// Clear _schedDragActive after a short delay so that any
-					// click event synthesized by the browser after a short drag
-					// is still suppressed by the openTaskDialog guard.
-					setTimeout(function() { _schedDragActive = false; }, 150);
-				});
-			}
-
 			// Current time timeline indicator
 			function updateNowIndicator() {
 				const timelineBefore = document.getElementById('timeline-before');
@@ -1346,7 +1415,7 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 			}
 
 			// Track if we've already scrolled for this page visit
-			let hasScrolledToNow = false;
+			var hasScrolledToNow = false;
 
 			// Update on load — run synchronously (no setTimeout) so scroll
 			// position is set before the browser's first paint. The script
@@ -1394,5 +1463,30 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 			}
 		</script>
 	</div>
+}
+
+templ SchedulePrimaryAgentOptionSelector(selected *string, agentDefs []repository.AgentScheduleOption, selectClass string) {
+	<input type="hidden" name="schedule_agent_definition_present" value="1"/>
+	<select name="agent_definition_id" class={ selectClass }>
+		<option
+			value=""
+			if selected == nil || *selected == "" {
+				selected
+			}
+		>No Agent</option>
+		for _, ad := range agentDefs {
+			<option
+				value={ ad.ID }
+				if selected != nil && *selected == ad.ID {
+					selected
+				}
+			>
+				{ ad.Name }
+				if ad.Model != "inherit" {
+					({ ad.Model })
+				}
+			</option>
+		}
+	</select>
 }
 

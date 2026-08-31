@@ -19,6 +19,15 @@ type LifecycleExecutionView struct {
 	CompletedAt      *time.Time           `json:"completed_at,omitempty"`
 }
 
+// LifecycleExecutionPageView is the bounded prompt-safe lifecycle activity
+// response. The handler maps each item through the same evidence-safe view
+// projection used by the original unpaged response.
+type LifecycleExecutionPageView struct {
+	Items      []LifecycleExecutionView `json:"items"`
+	HasMore    bool                     `json:"has_more"`
+	NextCursor string                   `json:"next_cursor,omitempty"`
+}
+
 // SelectedMemoryView is the compact prompt-safe memory recall detail shown in
 // task lifecycle activity. It contains identifiers plus brief summaries/snippets,
 // never raw memory files.

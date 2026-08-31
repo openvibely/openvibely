@@ -2,8 +2,13 @@ package service
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -17,6 +22,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/chatcontrol"
+	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
@@ -70,6 +77,7 @@ func TestParseGitHubRepoURL(t *testing.T) {
 		raw       string
 		wantOwner string
 		wantRepo  string
+		wantHTML  string
 		wantErr   bool
 	}{
 		{name: "https", raw: "https://github.com/openvibely/openvibely", wantOwner: "openvibely", wantRepo: "openvibely"},
@@ -77,7 +85,10 @@ func TestParseGitHubRepoURL(t *testing.T) {
 		{name: "ssh short", raw: "git@github.com:openvibely/openvibely.git", wantOwner: "openvibely", wantRepo: "openvibely"},
 		{name: "ssh url", raw: "ssh://git@github.com/openvibely/openvibely.git", wantOwner: "openvibely", wantRepo: "openvibely"},
 		{name: "owner repo", raw: "openvibely/openvibely", wantOwner: "openvibely", wantRepo: "openvibely"},
-		{name: "invalid host", raw: "https://gitlab.com/openvibely/openvibely", wantErr: true},
+		{name: "enterprise https", raw: "https://github.example.com/openvibely/openvibely.git", wantOwner: "openvibely", wantRepo: "openvibely", wantHTML: "https://github.example.com/openvibely/openvibely"},
+		{name: "enterprise https default port", raw: "https://github.example.com:443/openvibely/openvibely.git", wantOwner: "openvibely", wantRepo: "openvibely", wantHTML: "https://github.example.com/openvibely/openvibely"},
+		{name: "enterprise https non-default port", raw: "https://github.example.com:8443/openvibely/openvibely.git", wantOwner: "openvibely", wantRepo: "openvibely", wantHTML: "https://github.example.com:8443/openvibely/openvibely"},
+		{name: "http custom port canonicalizes to https default authority", raw: "http://github.example.com:8080/openvibely/openvibely.git", wantOwner: "openvibely", wantRepo: "openvibely", wantHTML: "https://github.example.com/openvibely/openvibely"},
 		{name: "invalid shape", raw: "https://github.com/openvibely", wantErr: true},
 	}
 
@@ -96,13 +107,120 @@ func TestParseGitHubRepoURL(t *testing.T) {
 			if got.Owner != tt.wantOwner || got.Name != tt.wantRepo {
 				t.Fatalf("unexpected parse result: owner=%q repo=%q", got.Owner, got.Name)
 			}
-			if got.HTMLURL != "https://github.com/"+tt.wantOwner+"/"+tt.wantRepo {
+			wantHTML := tt.wantHTML
+			if wantHTML == "" {
+				wantHTML = "https://github.com/" + tt.wantOwner + "/" + tt.wantRepo
+			}
+			if got.HTMLURL != wantHTML {
 				t.Fatalf("unexpected HTML URL: %s", got.HTMLURL)
 			}
 			if got.CloneURL != got.HTMLURL+".git" {
 				t.Fatalf("unexpected clone URL: %s", got.CloneURL)
 			}
 		})
+	}
+}
+
+func TestConfigureGitHubRepoEndpoint_DefaultAndExplicitOverride(t *testing.T) {
+	publicRepo, err := ParseGitHubRepoURL("https://github.com/openvibely/openvibely")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ConfigureGitHubRepoEndpoint(&publicRepo, ""); err != nil {
+		t.Fatalf("blank endpoint: %v", err)
+	}
+	if got := githubAPIBaseURLForRepo(&publicRepo, defaultGitHubAPIBaseURL); got != defaultGitHubAPIBaseURL {
+		t.Fatalf("blank endpoint resolved to %q", got)
+	}
+
+	if err := ConfigureGitHubRepoEndpoint(&publicRepo, "https://api.github.com/"); err != nil {
+		t.Fatalf("explicit public endpoint: %v", err)
+	}
+	if publicRepo.APIBaseURL != "" {
+		t.Fatalf("public endpoint should normalize to implicit default, got %q", publicRepo.APIBaseURL)
+	}
+
+	publicHostDefaultPort, err := ParseGitHubRepoURL("https://github.com:443/openvibely/openvibely")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ConfigureGitHubRepoEndpoint(&publicHostDefaultPort, ""); err != nil {
+		t.Fatalf("github.com on the default HTTPS port: %v", err)
+	}
+
+	publicHostCustomPort, err := ParseGitHubRepoURL("https://github.com:8443/openvibely/openvibely")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ConfigureGitHubRepoEndpoint(&publicHostCustomPort, ""); err == nil {
+		t.Fatal("github.com on a non-default port must not use the implicit public API endpoint")
+	}
+
+	enterpriseRepo, err := ParseGitHubRepoURL("https://github.example.com/acme/widgets")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ConfigureGitHubRepoEndpoint(&enterpriseRepo, "https://github.example.com/api/v3/"); err != nil {
+		t.Fatalf("enterprise endpoint: %v", err)
+	}
+	if enterpriseRepo.APIBaseURL != "https://github.example.com/api/v3" {
+		t.Fatalf("normalized endpoint = %q", enterpriseRepo.APIBaseURL)
+	}
+	for _, endpoint := range []string{
+		"http://github.example.com/api/v3",
+		"https://token@github.example.com/api/v3",
+		"https://other.example.com/api/v3",
+		"https://github.example.com/api/v3?token=secret",
+	} {
+		if err := ConfigureGitHubRepoEndpoint(&enterpriseRepo, endpoint); err == nil {
+			t.Fatalf("expected endpoint %q to be rejected", endpoint)
+		}
+	}
+}
+
+func TestConfigureGitHubRepoEndpointForProject_PreservesRepositoryPortScope(t *testing.T) {
+	target, err := ParseGitHubRepoURL("https://github.example.com:8443/acme/sibling")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ConfigureGitHubRepoEndpointForProject(&target, target.HTMLURL, "https://github.example.com:8443/acme/widgets", "https://github.example.com:8443/api/v3"); err != nil {
+		t.Fatalf("same authority endpoint: %v", err)
+	}
+	if target.APIBaseURL != "https://github.example.com:8443/api/v3" {
+		t.Fatalf("API endpoint = %q", target.APIBaseURL)
+	}
+
+	foreignPort, err := ParseGitHubRepoURL("https://github.example.com:9443/acme/sibling")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ConfigureGitHubRepoEndpointForProject(&foreignPort, foreignPort.HTMLURL, "https://github.example.com:8443/acme/widgets", "https://github.example.com:8443/api/v3"); err == nil {
+		t.Fatal("expected a different repository port to be rejected")
+	}
+}
+
+func TestGitHubDefaultBranch_UsesRepositoryEndpointOverride(t *testing.T) {
+	var gotPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		if r.Header.Get("Authorization") != "Bearer enterprise-pat" {
+			t.Fatalf("unexpected authorization header %q", r.Header.Get("Authorization"))
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{"default_branch": "main"})
+	}))
+	defer server.Close()
+
+	svc := newPATGitHubService(t, "https://api.github.com")
+	if err := svc.settingsRepo.Set(context.Background(), GitHubSettingPAT, "enterprise-pat"); err != nil {
+		t.Fatal(err)
+	}
+	repo := &GitHubRepoRef{Owner: "acme", Name: "widgets", APIBaseURL: server.URL + "/api/v3"}
+	branch, err := svc.DefaultBranch(context.Background(), repo)
+	if err != nil {
+		t.Fatalf("DefaultBranch: %v", err)
+	}
+	if branch != "main" || gotPath != "/api/v3/repos/acme/widgets" {
+		t.Fatalf("branch=%q path=%q", branch, gotPath)
 	}
 }
 
@@ -123,6 +241,17 @@ func TestNormalizeGitHubAuthMode(t *testing.T) {
 		if got := NormalizeGitHubAuthMode(tt.in); got != tt.want {
 			t.Fatalf("NormalizeGitHubAuthMode(%q) = %q, want %q", tt.in, got, tt.want)
 		}
+	}
+}
+
+func TestGitHubTokenEnvForURL_ScopesCredentialToExplicitHost(t *testing.T) {
+	env := gitHubTokenEnvForURL("enterprise-token", "https://github.example.com/acme/widgets.git")
+	joined := strings.Join(env, "\n")
+	if !strings.Contains(joined, "GIT_CONFIG_KEY_0=http.https://github.example.com/.extraheader") {
+		t.Fatalf("credential scope missing Enterprise host: %s", joined)
+	}
+	if strings.Contains(joined, "http.https://github.com/.extraheader") {
+		t.Fatalf("Enterprise token must not be scoped to public GitHub: %s", joined)
 	}
 }
 
@@ -264,6 +393,143 @@ func TestFormatGitHubAPIError(t *testing.T) {
 			t.Fatalf("expected raw body fallback, got %q", got)
 		}
 	})
+
+	t.Run("formats structured error without message", func(t *testing.T) {
+		body := []byte(`{"errors":[{"resource":"Reference","field":"ref","code":"already_exists"}]}`)
+		if got := formatGitHubAPIError(body); got != "Reference ref already_exists" {
+			t.Fatalf("expected synthesized error detail, got %q", got)
+		}
+	})
+
+	t.Run("falls back to docs url", func(t *testing.T) {
+		body := []byte(`{"documentation_url":"https://docs.github.com/rest"}`)
+		if got := formatGitHubAPIError(body); got != "https://docs.github.com/rest" {
+			t.Fatalf("expected documentation url fallback, got %q", got)
+		}
+	})
+
+	t.Run("truncates long raw body", func(t *testing.T) {
+		body := []byte(strings.Repeat("x", 350))
+		got := formatGitHubAPIError(body)
+		if len(got) != 303 || !strings.HasSuffix(got, "...") {
+			t.Fatalf("expected truncated raw body, got len=%d value=%q", len(got), got)
+		}
+	})
+}
+
+func TestGitHubServiceLowLevelHelpers(t *testing.T) {
+	base := t.TempDir()
+	inside := filepath.Join(base, "child", "repo")
+	outside := filepath.Join(t.TempDir(), "repo")
+
+	if ok, err := isPathWithin(base, inside); err != nil || !ok {
+		t.Fatalf("isPathWithin inside = %v, %v", ok, err)
+	}
+	if ok, err := isPathWithin(base, base); err != nil || !ok {
+		t.Fatalf("isPathWithin same path = %v, %v", ok, err)
+	}
+	if ok, err := isPathWithin(base, outside); err != nil || ok {
+		t.Fatalf("isPathWithin outside = %v, %v", ok, err)
+	}
+	if ok, err := isPathWithin("", inside); err != nil || ok {
+		t.Fatalf("isPathWithin blank = %v, %v", ok, err)
+	}
+
+	key, err := rsa.GenerateKey(rand.Reader, 1024)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	pemValue := string(pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)}))
+	escaped := strings.ReplaceAll(pemValue, "\n", `\\n`)
+	if parsed, err := parseGitHubAppPrivateKey(escaped); err != nil || parsed.N.Cmp(key.N) != 0 {
+		t.Fatalf("parse escaped rsa key = %#v, %v", parsed, err)
+	}
+	if _, err := parseGitHubAppPrivateKey(""); err == nil {
+		t.Fatal("expected empty private key to fail")
+	}
+	if _, err := parseGitHubAppPrivateKey("not pem"); err == nil {
+		t.Fatal("expected invalid PEM to fail")
+	}
+
+	svc := NewGitHubService(nil, "1", "slug", pemValue, "")
+	if !svc.isConfigured() {
+		t.Fatal("expected service app config to be configured")
+	}
+	partial := NewGitHubService(nil, "1", "", pemValue, "")
+	if partial.isConfigured() {
+		t.Fatal("expected partial service app config to be incomplete")
+	}
+}
+
+func TestGitHubServiceConnectionStatusConnectCallbackAndDisconnect(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	settingsRepo := repository.NewSettingsRepo(db)
+
+	requireNoError(t, settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT))
+	requireNoError(t, settingsRepo.Set(ctx, GitHubSettingPAT, " ghp_token "))
+	requireNoError(t, settingsRepo.Set(ctx, GitHubSettingPATUserLogin, "octocat"))
+	patSvc := NewGitHubService(settingsRepo, "", "", "", "")
+	status, err := patSvc.GetConnectionStatus(ctx)
+	requireNoError(t, err)
+	if !status.Configured || !status.Connected || !status.HasPAT || status.AuthMode != GitHubAuthModePAT || status.AccountLogin != "octocat" || status.AccountType != "User" {
+		t.Fatalf("unexpected PAT status: %+v", status)
+	}
+	if _, err := patSvc.ConnectURL(ctx); err == nil || !strings.Contains(err.Error(), "Advanced mode") {
+		t.Fatalf("expected PAT connect URL to reject app flow, got %v", err)
+	}
+	requireNoError(t, patSvc.Disconnect(ctx))
+	status, err = patSvc.GetConnectionStatus(ctx)
+	requireNoError(t, err)
+	if status.Connected || status.HasPAT || status.AccountLogin != "" {
+		t.Fatalf("expected PAT disconnect to clear token/login, got %+v", status)
+	}
+
+	privateKey, err := rsa.GenerateKey(rand.Reader, 1024)
+	requireNoError(t, err)
+	privateKeyPEM := string(pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(privateKey)}))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/app/installations/12345" {
+			t.Fatalf("unexpected GitHub API path %s", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); !strings.HasPrefix(got, "Bearer ") {
+			t.Fatalf("missing app JWT auth header %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"account":{"login":"openvibely","type":"Organization"}}`))
+	}))
+	defer server.Close()
+
+	requireNoError(t, settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModeApp))
+	appSvc := NewGitHubService(settingsRepo, "42", "openvibely-app", privateKeyPEM, "")
+	appSvc.apiBaseURL = server.URL
+	connectURL, err := appSvc.ConnectURL(ctx)
+	requireNoError(t, err)
+	if connectURL != "https://github.com/apps/openvibely-app/installations/new" {
+		t.Fatalf("unexpected connect URL %q", connectURL)
+	}
+	if err := appSvc.HandleInstallCallback(ctx, "not-a-number"); err == nil || !strings.Contains(err.Error(), "invalid installation id") {
+		t.Fatalf("expected invalid installation id error, got %v", err)
+	}
+	requireNoError(t, appSvc.HandleInstallCallback(ctx, "12345"))
+	status, err = appSvc.GetConnectionStatus(ctx)
+	requireNoError(t, err)
+	if !status.Configured || !status.Connected || status.InstallationID != "12345" || status.AccountLogin != "openvibely" || status.AccountType != "Organization" {
+		t.Fatalf("unexpected app status after install: %+v", status)
+	}
+	requireNoError(t, appSvc.Disconnect(ctx))
+	status, err = appSvc.GetConnectionStatus(ctx)
+	requireNoError(t, err)
+	if status.Connected || status.InstallationID != "" || status.AccountLogin != "" || status.AccountType != "" {
+		t.Fatalf("expected app disconnect to clear installation metadata, got %+v", status)
+	}
+}
+
+func requireNoError(t *testing.T, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestCloneProjectRepo_NoPATFallsBackToLocalGitCLI(t *testing.T) {
@@ -368,6 +634,83 @@ func TestCloneProjectRepo_PATConfiguredUsesTokenClone(t *testing.T) {
 	}
 	if !envContainsPrefix(gotEnv, "GIT_CONFIG_VALUE_0=AUTHORIZATION: Basic ") {
 		t.Fatalf("expected token auth header env, got %v", gotEnv)
+	}
+}
+
+func TestCloneProjectRepoWithEndpoint_ScopesPATToEnterpriseHost(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
+		t.Fatal(err)
+	}
+	if err := settingsRepo.Set(ctx, GitHubSettingPAT, "enterprise-pat"); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewGitHubService(settingsRepo, "", "", "", t.TempDir())
+	var gotEnv []string
+	var gotArgs []string
+	svc.runGit = func(_ context.Context, _ string, env []string, args ...string) ([]byte, error) {
+		gotEnv = append([]string(nil), env...)
+		gotArgs = append([]string(nil), args...)
+		return nil, nil
+	}
+	_, normalizedURL, err := svc.CloneProjectRepoWithEndpoint(ctx, "enterprise-project", "https://github.example.com:8443/acme/widgets", "https://github.example.com:8443/api/v3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if normalizedURL != "https://github.example.com:8443/acme/widgets" || len(gotArgs) < 2 || gotArgs[1] != "https://github.example.com:8443/acme/widgets.git" {
+		t.Fatalf("url=%q args=%v", normalizedURL, gotArgs)
+	}
+	joined := strings.Join(gotEnv, "\n")
+	if !strings.Contains(joined, "GIT_CONFIG_KEY_0=http.https://github.example.com:8443/.extraheader") || strings.Contains(joined, "http.https://github.example.com/.extraheader") || strings.Contains(joined, "http.https://github.com/.extraheader") {
+		t.Fatalf("unexpected credential scope: %s", joined)
+	}
+}
+
+func TestRecloneProjectRepoWithEndpointReplacesManagedCheckout(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+	requireNoError(t, settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT))
+	requireNoError(t, settingsRepo.Set(ctx, GitHubSettingPAT, "pat"))
+	root := t.TempDir()
+	current := filepath.Join(root, "old-managed")
+	requireNoError(t, os.MkdirAll(current, 0o755))
+	requireNoError(t, os.WriteFile(filepath.Join(current, "old.txt"), []byte("old"), 0o644))
+	dest := filepath.Join(root, "project-reclone")
+	requireNoError(t, os.MkdirAll(dest, 0o755))
+	requireNoError(t, os.WriteFile(filepath.Join(dest, "stale.txt"), []byte("stale"), 0o644))
+
+	svc := NewGitHubService(settingsRepo, "", "", "", root)
+	svc.nowFn = func() time.Time { return time.Unix(123, 456) }
+	var cloneDest string
+	svc.runGit = func(_ context.Context, _ string, _ []string, args ...string) ([]byte, error) {
+		if len(args) != 3 || args[0] != "clone" {
+			t.Fatalf("expected git clone, got %v", args)
+		}
+		cloneDest = args[2]
+		requireNoError(t, os.MkdirAll(cloneDest, 0o755))
+		requireNoError(t, os.WriteFile(filepath.Join(cloneDest, "fresh.txt"), []byte("fresh"), 0o644))
+		return nil, nil
+	}
+
+	newPath, normalizedURL, err := svc.RecloneProjectRepoWithEndpoint(ctx, "project-reclone", current, "https://github.example.com/acme/widgets", "https://github.example.com/api/v3")
+	requireNoError(t, err)
+	if newPath != dest || normalizedURL != "https://github.example.com/acme/widgets" {
+		t.Fatalf("newPath=%q normalizedURL=%q", newPath, normalizedURL)
+	}
+	if cloneDest == "" || !strings.Contains(cloneDest, filepath.Join(root, ".tmp")) {
+		t.Fatalf("expected clone into temporary root, got %q", cloneDest)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "fresh.txt")); err != nil {
+		t.Fatalf("expected fresh checkout at destination: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "stale.txt")); !os.IsNotExist(err) {
+		t.Fatalf("expected stale checkout to be replaced, err=%v", err)
+	}
+	if _, err := os.Stat(current); !os.IsNotExist(err) {
+		t.Fatalf("expected old managed checkout to be removed, err=%v", err)
 	}
 }
 
@@ -737,6 +1080,154 @@ func TestListPullRequestFeedbackTraversesAllPagesAndSortsMergedSources(t *testin
 	}
 }
 
+func TestDevInboxAssignedIssueScanSkipsDetailFetchesForCompleteListEntries(t *testing.T) {
+	ctx := context.Background()
+	var listRequests, detailRequests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/repos/openvibely/openvibely/issues":
+			listRequests.Add(1)
+			if got := r.URL.Query().Get("assignee"); got != "dev-bot" {
+				t.Fatalf("expected assignee dev-bot, got %q", got)
+			}
+			issues := make([]string, 0, 100)
+			for i := 1; i <= 100; i++ {
+				issues = append(issues, fmt.Sprintf(`{"number":%d,"html_url":"https://github.com/openvibely/openvibely/issues/%d","title":"Issue %d","body":"Acceptance notes for issue %d","state":"open","user":{"login":"reporter"},"assignees":[{"login":"dev-bot"}],"labels":[{"name":"performance"}]}`, i, i, i, i))
+			}
+			_, _ = w.Write([]byte("[" + strings.Join(issues, ",") + "]"))
+		case strings.HasPrefix(r.URL.Path, "/repos/openvibely/openvibely/issues/"):
+			detailRequests.Add(1)
+			_, _ = w.Write([]byte(`{"number":42,"html_url":"https://github.com/openvibely/openvibely/issues/42","title":"Explicit read","body":"Explicit body","state":"open"}`))
+		default:
+			t.Fatalf("unexpected GitHub API path: %s", r.URL.String())
+		}
+	}))
+	defer server.Close()
+
+	handlers := newDevInboxGitHubRuntimeHandlers(t, server.URL)
+	out, err := handlers["github_list_assigned_issues"](ctx, json.RawMessage(`{"assignee":"dev-bot","repo_url":"https://github.com/openvibely/openvibely"}`))
+	if err != nil {
+		t.Fatalf("github_list_assigned_issues: %v", err)
+	}
+	if got := listRequests.Load(); got != 1 {
+		t.Fatalf("assigned issue list requests = %d, want 1", got)
+	}
+	if got := detailRequests.Load(); got != 0 {
+		t.Fatalf("issue detail requests during default list scan = %d, want 0", got)
+	}
+	if !strings.Contains(out, `"number":100`) || !strings.Contains(out, `"labels":["performance"]`) || !strings.Contains(out, `"assignees":["dev-bot"]`) || !strings.Contains(out, `"detail_required":true`) || !strings.Contains(out, `"complete_for_task_creation":false`) || strings.Contains(out, "Acceptance notes for issue 100") || strings.Contains(out, "body_excerpt") {
+		t.Fatalf("compact assigned issue output should be body-free while retaining candidate fields: %s", out)
+	}
+
+	_, err = handlers["github_get_issue"](ctx, json.RawMessage(`{"issue_number":42,"repo_url":"https://github.com/openvibely/openvibely"}`))
+	if err != nil {
+		t.Fatalf("explicit github_get_issue: %v", err)
+	}
+	if got := detailRequests.Load(); got != 1 {
+		t.Fatalf("explicit github_get_issue detail requests = %d, want 1", got)
+	}
+}
+
+func TestDevInboxAssignedIssueScanDoesNotHydrateListEntries(t *testing.T) {
+	ctx := context.Background()
+	var listRequests, detailRequests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/user":
+			_, _ = w.Write([]byte(`{"login":"pat-owner"}`))
+		case "/repos/openvibely/openvibely/issues":
+			listRequests.Add(1)
+			switch r.URL.Query().Get("assignee") {
+			case "dev-bot":
+				_, _ = w.Write([]byte(`[
+					{"number":1,"html_url":"https://github.com/openvibely/openvibely/issues/1","title":"Complete one","body":"Body one","state":"open","assignees":[{"login":"dev-bot"}],"labels":[{"name":"bug"}]},
+					{"number":2,"html_url":"https://github.com/openvibely/openvibely/issues/2","title":"Partial two","state":"open","assignees":[{"login":"dev-bot"}],"labels":[{"name":"performance"}]},
+					{"number":3,"html_url":"https://github.com/openvibely/openvibely/issues/3","title":"Complete three","body":"Body three","state":"open","assignees":[{"login":"dev-bot"}],"labels":[{"name":"feature"}]}
+				]`))
+			case "other-bot":
+				_, _ = w.Write([]byte(`[
+					{"number":2,"html_url":"https://github.com/openvibely/openvibely/issues/2","title":"Partial two again","state":"open","assignees":[{"login":"other-bot"}],"labels":[{"name":"performance"}]},
+					{"number":4,"html_url":"https://github.com/openvibely/openvibely/issues/4","title":"Complete four","body":"Body four","state":"open","assignees":[{"login":"other-bot"}],"labels":[{"name":"bug"}]}
+				]`))
+			case "pat-owner":
+				_, _ = w.Write([]byte(`[
+					{"number":2,"html_url":"https://github.com/openvibely/openvibely/issues/2","title":"Partial two from PAT scan","state":"open","assignees":[{"login":"pat-owner"}],"labels":[{"name":"performance"}]},
+					{"number":5,"html_url":"https://github.com/openvibely/openvibely/issues/5","title":"Complete five","body":"Body five","state":"open","assignees":[{"login":"pat-owner"}],"labels":[{"name":"feature"}]}
+				]`))
+			default:
+				t.Fatalf("unexpected assignee query: %q", r.URL.Query().Get("assignee"))
+			}
+		case "/repos/openvibely/openvibely/issues/2":
+			detailRequests.Add(1)
+			_, _ = w.Write([]byte(`{"number":2,"html_url":"https://github.com/openvibely/openvibely/issues/2","title":"Hydrated two","body":"Hydrated acceptance notes","state":"open","assignees":[{"login":"dev-bot"}],"labels":[{"name":"performance"}]}`))
+		default:
+			t.Fatalf("unexpected GitHub API path: %s", r.URL.String())
+		}
+	}))
+	defer server.Close()
+
+	handlers := newDevInboxGitHubRuntimeHandlers(t, server.URL)
+	out, err := handlers["github_list_assigned_issues"](ctx, json.RawMessage(`{"assignee":"dev-bot","repo_url":"https://github.com/openvibely/openvibely"}`))
+	if err != nil {
+		t.Fatalf("github_list_assigned_issues: %v", err)
+	}
+	if got := listRequests.Load(); got != 1 {
+		t.Fatalf("assigned issue list requests = %d, want 1", got)
+	}
+	if got := detailRequests.Load(); got != 0 {
+		t.Fatalf("issue detail requests during assigned list scan = %d, want 0", got)
+	}
+	if !strings.Contains(out, `"title":"Partial two"`) || !strings.Contains(out, `"title":"Complete three"`) || strings.Contains(out, "Hydrated acceptance notes") || strings.Contains(out, "Body three") || strings.Contains(out, "body_excerpt") {
+		t.Fatalf("compact assigned issue output should retain listed candidate metadata without body text or hydration: %s", out)
+	}
+
+	out, err = handlers["github_list_assigned_issues"](ctx, json.RawMessage(`{"assignee":"other-bot","repo_url":"https://github.com/openvibely/openvibely"}`))
+	if err != nil {
+		t.Fatalf("github_list_assigned_issues for second assignee: %v", err)
+	}
+	if !strings.Contains(out, `"title":"Partial two again"`) || !strings.Contains(out, `"title":"Complete four"`) || strings.Contains(out, "Body four") {
+		t.Fatalf("second assignee output should use listed metadata without body text: %s", out)
+	}
+	out, err = handlers["github_list_my_assigned_issues"](ctx, json.RawMessage(`{"repo_url":"https://github.com/openvibely/openvibely"}`))
+	if err != nil {
+		t.Fatalf("github_list_my_assigned_issues: %v", err)
+	}
+	if !strings.Contains(out, `"title":"Partial two from PAT scan"`) || !strings.Contains(out, `"title":"Complete five"`) || !strings.Contains(out, `"login":"pat-owner"`) || strings.Contains(out, "Body five") {
+		t.Fatalf("PAT-owner output should use listed metadata without body text: %s", out)
+	}
+	if got := listRequests.Load(); got != 3 {
+		t.Fatalf("assigned issue list requests after multiple scans = %d, want 3", got)
+	}
+	if got := detailRequests.Load(); got != 0 {
+		t.Fatalf("issue detail requests after assigned list scans = %d, want 0", got)
+	}
+}
+
+func newDevInboxGitHubRuntimeHandlers(t *testing.T, apiBaseURL string) map[string]chatcontrol.RuntimeActionHandler {
+	t.Helper()
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	project := &models.Project{Name: "Dev Inbox GitHub Runtime", RepoURL: "https://github.com/openvibely/openvibely"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	githubAuthRepo := repository.NewGitHubAuthRepo(db)
+	for _, login := range []string{"dev-bot", "other-bot"} {
+		if err := githubAuthRepo.UpsertAuthorizedActor(ctx, &models.GitHubAuthorizedActor{GitHubLogin: login}); err != nil {
+			t.Fatalf("authorize github actor %s: %v", login, err)
+		}
+	}
+	return buildGitHubIssueRuntimeHandlers(githubIssueRuntimeOptions{
+		ProjectID:      project.ID,
+		ProjectRepo:    projectRepo,
+		GitHubAuthRepo: githubAuthRepo,
+		GitHub:         newPATGitHubService(t, apiBaseURL),
+	})
+}
+
 func TestListAssignedIssuesTraversesAllPagesAndFiltersPullRequests(t *testing.T) {
 	ctx := context.Background()
 	var server *httptest.Server
@@ -804,6 +1295,151 @@ func TestPaginatedGitHubGetReturnsSecondPageAPIErrorWithoutPartialResults(t *tes
 	}
 	if issues != nil {
 		t.Fatalf("expected no partial results after page-two error, got %#v", issues)
+	}
+}
+
+func TestGitHubServicePullRequestAndIssueHTTPActions(t *testing.T) {
+	ctx := context.Background()
+	var seenMu sync.Mutex
+	var seen []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenMu.Lock()
+		seen = append(seen, r.Method+" "+r.URL.RequestURI())
+		seenMu.Unlock()
+		if strings.TrimSpace(r.Header.Get("Authorization")) == "" {
+			t.Fatalf("missing authorization header for %s", r.URL.RequestURI())
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/acme/widgets/pulls/7":
+			_, _ = w.Write([]byte(`{"number":7,"html_url":"https://github.com/acme/widgets/pull/7","state":"open","merged":true,"head":{"ref":"feature","sha":"abc123","repo":{"full_name":"acme/widgets"}}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/acme/widgets/pulls":
+			if r.URL.Query().Get("state") != "all" || r.URL.Query().Get("head") != "acme:feature" {
+				t.Fatalf("unexpected pull list query %s", r.URL.RawQuery)
+			}
+			_, _ = w.Write([]byte(`[{"number":6,"html_url":"https://github.com/acme/widgets/pull/6","state":"closed","head":{"ref":"feature","sha":"old","repo":{"full_name":"acme/widgets"}}},{"number":8,"html_url":"https://github.com/acme/widgets/pull/8","state":"open","head":{"ref":"feature","sha":"new","repo":{"full_name":"acme/widgets"}}}]`))
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/acme/widgets/pulls":
+			var payload map[string]any
+			requireNoError(t, json.NewDecoder(r.Body).Decode(&payload))
+			if payload["title"] != "Open coverage PR" || payload["head"] != "feature" || payload["base"] != "main" || payload["draft"] != true {
+				t.Fatalf("unexpected create pull payload %#v", payload)
+			}
+			_, _ = w.Write([]byte(`{"number":9,"html_url":"https://github.com/acme/widgets/pull/9","state":"open","head":{"ref":"feature","sha":"created","repo":{"full_name":"acme/widgets"}}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/acme/widgets/issues":
+			var payload map[string]any
+			requireNoError(t, json.NewDecoder(r.Body).Decode(&payload))
+			if payload["title"] != "Write coverage notes" || payload["body"] != "body" {
+				t.Fatalf("unexpected create issue payload %#v", payload)
+			}
+			labels, _ := payload["labels"].([]any)
+			assignees, _ := payload["assignees"].([]any)
+			if len(labels) != 2 || len(assignees) != 1 {
+				t.Fatalf("expected cleaned labels and assignees, got %#v", payload)
+			}
+			_, _ = w.Write([]byte(`{"number":10,"html_url":"https://github.com/acme/widgets/issues/10","title":"Write coverage notes","body":"body","state":"open","user":{"login":"octo"},"assignees":[{"login":"dev-bot"}],"labels":[{"name":"bug"},{"name":"approved"}]}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/acme/widgets/issues/10":
+			_, _ = w.Write([]byte(`{"number":10,"html_url":"https://github.com/acme/widgets/issues/10","title":"Write coverage notes","body":"body","state":"open","user":{"login":"octo"},"assignees":[{"login":"dev-bot"}],"labels":[{"name":"bug"}]}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/acme/widgets/issues/10/comments":
+			var payload map[string]string
+			requireNoError(t, json.NewDecoder(r.Body).Decode(&payload))
+			if payload["body"] != "coverage comment" {
+				t.Fatalf("unexpected comment payload %#v", payload)
+			}
+			_, _ = w.Write([]byte(`{}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/acme/widgets/issues/10/labels":
+			var payload map[string][]string
+			requireNoError(t, json.NewDecoder(r.Body).Decode(&payload))
+			if len(payload["labels"]) != 2 || payload["labels"][0] != "bug" || payload["labels"][1] != "approved" {
+				t.Fatalf("unexpected labels payload %#v", payload)
+			}
+			_, _ = w.Write([]byte(`{}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/acme/widgets/issues/9/comments":
+			_, _ = w.Write([]byte(`[{"id":101,"node_id":"IC_kw","html_url":"https://github.com/acme/widgets/pull/9#issuecomment-101","body":"issue feedback","created_at":"2026-08-16T00:00:01Z","user":{"login":"reviewer","type":"User"}}]`))
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/acme/widgets/pulls/9/reviews":
+			_, _ = w.Write([]byte(`[{"id":202,"node_id":"PRR_kw","html_url":"https://github.com/acme/widgets/pull/9#pullrequestreview-202","body":"approved with comment","state":"APPROVED","submitted_at":"2026-08-16T00:00:02Z","user":{"login":"maintainer","type":"User"}},{"id":203,"node_id":"empty","html_url":"https://github.com/acme/widgets/pull/9#pullrequestreview-203","body":"","state":"","submitted_at":"2026-08-16T00:00:03Z","user":{"login":"bot","type":"Bot"}}]`))
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/acme/widgets/pulls/9/comments":
+			_, _ = w.Write([]byte(`[{"id":303,"node_id":"PRRC_kw","html_url":"https://github.com/acme/widgets/pull/9#discussion_r303","body":"line feedback","path":"internal/service/github_service.go","line":42,"created_at":"2026-08-16T00:00:03Z","user":{"login":"reviewer","type":"User"}}]`))
+		case r.Method == http.MethodPatch && r.URL.Path == "/repos/acme/widgets/issues/11":
+			var payload map[string]string
+			requireNoError(t, json.NewDecoder(r.Body).Decode(&payload))
+			if payload["state"] != "closed" {
+				t.Fatalf("unexpected close issue payload %#v", payload)
+			}
+			_, _ = w.Write([]byte(`{}`))
+		default:
+			t.Fatalf("unexpected GitHub API request %s %s", r.Method, r.URL.RequestURI())
+		}
+	}))
+	defer server.Close()
+
+	svc := newPATGitHubService(t, server.URL)
+	repo := &GitHubRepoRef{Owner: "acme", Name: "widgets"}
+	pr, err := svc.GetPullRequest(ctx, repo, 7)
+	requireNoError(t, err)
+	if pr.Number != 7 || !pr.Merged || pr.HeadRef != "feature" || pr.HeadSHA != "abc123" {
+		t.Fatalf("unexpected pull request: %+v", pr)
+	}
+	found, err := svc.FindPullRequestByBranch(ctx, repo, " feature ")
+	requireNoError(t, err)
+	if found == nil || found.Number != 8 || found.HeadSHA != "new" {
+		t.Fatalf("expected open PR to be selected, got %+v", found)
+	}
+	created, err := svc.CreatePullRequest(ctx, repo, GitHubCreatePullRequestRequest{Title: "Open coverage PR", Head: "feature", Base: "main", Body: "body", Draft: true})
+	requireNoError(t, err)
+	if created.Number != 9 || created.HeadSHA != "created" {
+		t.Fatalf("unexpected created PR: %+v", created)
+	}
+	issue, err := svc.CreateIssue(ctx, repo, GitHubCreateIssueRequest{Title: " Write coverage notes ", Body: "body", Labels: []string{"bug", "", "approved", "bug"}, Assignees: []string{"dev-bot", "dev-bot", ""}})
+	requireNoError(t, err)
+	if issue.Number != 10 || issue.Title != "Write coverage notes" || len(issue.Labels) != 2 || len(issue.Assignees) != 1 {
+		t.Fatalf("unexpected created issue: %+v", issue)
+	}
+	gotIssue, err := svc.GetIssue(ctx, repo, 10)
+	requireNoError(t, err)
+	if gotIssue.Number != 10 || gotIssue.UserLogin != "octo" || len(gotIssue.Labels) != 1 {
+		t.Fatalf("unexpected fetched issue: %+v", gotIssue)
+	}
+	requireNoError(t, svc.CommentOnIssue(ctx, repo, 10, " coverage comment "))
+	requireNoError(t, svc.AddLabelsToIssue(ctx, repo, 10, []string{"bug", "approved", "bug"}))
+	feedback, err := svc.ListPullRequestFeedback(ctx, repo, 9)
+	requireNoError(t, err)
+	if len(feedback) != 3 || feedback[0].Kind != "issue_comment" || feedback[1].Kind != "review" || feedback[2].Path != "internal/service/github_service.go" {
+		t.Fatalf("unexpected feedback ordering/content: %+v", feedback)
+	}
+	requireNoError(t, svc.CloseIssue(ctx, repo, 11))
+	seenMu.Lock()
+	seenSnapshot := append([]string(nil), seen...)
+	seenMu.Unlock()
+	if len(seenSnapshot) != 11 {
+		t.Fatalf("expected eleven API requests, got %d: %v", len(seenSnapshot), seenSnapshot)
+	}
+
+	if _, err := svc.GetPullRequest(ctx, nil, 7); err == nil {
+		t.Fatal("expected nil repo GetPullRequest error")
+	}
+	if _, err := svc.GetIssue(ctx, repo, 0); err == nil {
+		t.Fatal("expected invalid GetIssue error")
+	}
+	if _, err := svc.CreateIssue(ctx, repo, GitHubCreateIssueRequest{}); err == nil {
+		t.Fatal("expected missing title CreateIssue error")
+	}
+	if err := svc.CommentOnIssue(ctx, repo, 10, " "); err == nil {
+		t.Fatal("expected empty CommentOnIssue error")
+	}
+	if err := svc.AddLabelsToIssue(ctx, repo, 10, []string{"openvibely:internal"}); err == nil {
+		t.Fatal("expected reserved label prefix error")
+	}
+	if _, err := svc.ListPullRequestFeedback(ctx, repo, 0); err == nil {
+		t.Fatal("expected invalid ListPullRequestFeedback error")
+	}
+	if _, err := svc.FindPullRequestByBranch(ctx, repo, " "); err == nil {
+		t.Fatal("expected empty branch FindPullRequestByBranch error")
+	}
+	if _, err := svc.CreatePullRequest(ctx, repo, GitHubCreatePullRequestRequest{}); err == nil {
+		t.Fatal("expected incomplete CreatePullRequest error")
+	}
+	if err := svc.CloseIssue(ctx, repo, 0); err == nil {
+		t.Fatal("expected invalid CloseIssue error")
 	}
 }
 
@@ -955,6 +1591,227 @@ func TestListAuthenticatedAssignedIssuesUsesConfiguredTokenUser(t *testing.T) {
 	}
 }
 
+func TestListAuthenticatedCreatedIssuesUsesConfiguredTokenCreator(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
+		t.Fatalf("set auth mode: %v", err)
+	}
+	if err := settingsRepo.Set(ctx, GitHubSettingPAT, "ghp_test"); err != nil {
+		t.Fatalf("set pat: %v", err)
+	}
+
+	var sawUser bool
+	var issueListQuery string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/user":
+			sawUser = true
+			_, _ = w.Write([]byte(`{"login":"automation-bot"}`))
+		case "/repos/openvibely/openvibely/issues":
+			issueListQuery = r.URL.RawQuery
+			if got := r.URL.Query().Get("creator"); got != "automation-bot" {
+				t.Fatalf("expected authenticated creator filter, got %q", got)
+			}
+			if got := r.URL.Query().Get("state"); got != "all" {
+				t.Fatalf("expected all issue query, got state=%q", got)
+			}
+			if got := r.URL.Query().Get("sort"); got != "created" {
+				t.Fatalf("expected created sort, got %q", got)
+			}
+			_, _ = w.Write([]byte(`[
+				{"number":9,"html_url":"https://github.com/openvibely/openvibely/issues/9","title":"Prior automation issue","body":"body","state":"closed","user":{"login":"automation-bot"},"assignees":[],"labels":[{"name":"bug"}]},
+				{"number":10,"html_url":"https://github.com/openvibely/openvibely/pull/10","title":"PR object","state":"open","pull_request":{}}
+			]`))
+		default:
+			t.Fatalf("unexpected GitHub API path: %s", r.URL.String())
+		}
+	}))
+	defer server.Close()
+
+	svc := NewGitHubService(settingsRepo, "", "", "", "")
+	svc.apiBaseURL = server.URL
+	repo := &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}
+
+	user, issues, err := svc.ListAuthenticatedCreatedIssues(ctx, repo)
+	if err != nil {
+		t.Fatalf("ListAuthenticatedCreatedIssues returned error: %v", err)
+	}
+	if !sawUser || issueListQuery == "" {
+		t.Fatalf("expected /user and creator issues endpoints, sawUser=%v query=%q", sawUser, issueListQuery)
+	}
+	if user == nil || user.Login != "automation-bot" || user.Source != GitHubAuthModePAT {
+		t.Fatalf("unexpected authenticated user: %#v", user)
+	}
+	if len(issues) != 1 || issues[0].Number != 9 || issues[0].Title != "Prior automation issue" || issues[0].Body != "body" {
+		t.Fatalf("expected only real issue created by token user, got %#v", issues)
+	}
+}
+
+func TestGetAuthenticatedUserForEnterpriseRepoBypassesGlobalPATLoginCache(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
+		t.Fatal(err)
+	}
+	if err := settingsRepo.Set(ctx, GitHubSettingPAT, "enterprise-pat"); err != nil {
+		t.Fatal(err)
+	}
+	if err := settingsRepo.Set(ctx, GitHubSettingPATUserLogin, "public-user"); err != nil {
+		t.Fatal(err)
+	}
+
+	var userRequests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		userRequests++
+		if r.URL.Path != "/api/v3/user" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer enterprise-pat" {
+			t.Fatalf("unexpected auth header %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"login":"enterprise-user"}`))
+	}))
+	defer server.Close()
+
+	svc := NewGitHubService(settingsRepo, "", "", "", "")
+	repo := &GitHubRepoRef{Owner: "acme", Name: "widgets", APIBaseURL: server.URL + "/api/v3"}
+	user, err := svc.GetAuthenticatedUserForRepo(ctx, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if user.Login != "enterprise-user" || user.Source != GitHubAuthModePAT {
+		t.Fatalf("unexpected authenticated user: %#v", user)
+	}
+	if userRequests != 1 {
+		t.Fatalf("expected one Enterprise /user request, got %d", userRequests)
+	}
+	cachedLogin, err := settingsRepo.Get(ctx, GitHubSettingPATUserLogin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cachedLogin != "public-user" {
+		t.Fatalf("global PAT login cache changed to %q", cachedLogin)
+	}
+	publicUser, err := svc.GetAuthenticatedUser(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if publicUser.Login != "public-user" || publicUser.Source != GitHubAuthModePAT {
+		t.Fatalf("unexpected cached public user: %#v", publicUser)
+	}
+	if userRequests != 1 {
+		t.Fatalf("public cached lookup contacted Enterprise; request count = %d", userRequests)
+	}
+}
+
+func TestGetAuthenticatedUserForEnterpriseRepoBypassesGlobalGitHubAppLoginCache(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	privateKeyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(privateKey)})
+	for key, value := range map[string]string{
+		GitHubSettingAuthMode:       GitHubAuthModeApp,
+		githubSettingInstallationID: "123",
+		githubSettingAccountLogin:   "public-installation",
+		githubSettingAccountType:    "Organization",
+	} {
+		if err := settingsRepo.Set(ctx, key, value); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var metadataRequests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		metadataRequests++
+		if r.URL.Path != "/api/v3/app/installations/123" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); !strings.HasPrefix(got, "Bearer ") || len(strings.TrimPrefix(got, "Bearer ")) < 20 {
+			t.Fatalf("expected app JWT bearer auth, got %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"account":{"login":"enterprise-installation","type":"Organization"}}`))
+	}))
+	defer server.Close()
+
+	svc := NewGitHubService(settingsRepo, "1", "test-app", string(privateKeyPEM), "")
+	repo := &GitHubRepoRef{Owner: "acme", Name: "widgets", APIBaseURL: server.URL + "/api/v3"}
+	user, err := svc.GetAuthenticatedUserForRepo(ctx, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if user.Login != "enterprise-installation" || user.Source != GitHubAuthModeApp {
+		t.Fatalf("unexpected authenticated user: %#v", user)
+	}
+	if metadataRequests != 1 {
+		t.Fatalf("expected one Enterprise installation metadata request, got %d", metadataRequests)
+	}
+	cachedLogin, err := settingsRepo.Get(ctx, githubSettingAccountLogin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cachedLogin != "public-installation" {
+		t.Fatalf("global app login cache changed to %q", cachedLogin)
+	}
+	publicUser, err := svc.GetAuthenticatedUser(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if publicUser.Login != "public-installation" || publicUser.Source != GitHubAuthModeApp {
+		t.Fatalf("unexpected cached public app user: %#v", publicUser)
+	}
+	if metadataRequests != 1 {
+		t.Fatalf("public cached lookup contacted Enterprise; request count = %d", metadataRequests)
+	}
+}
+
+func TestListAuthenticatedAssignedIssuesUsesEnterpriseRepoEndpoint(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
+		t.Fatal(err)
+	}
+	if err := settingsRepo.Set(ctx, GitHubSettingPAT, "enterprise-pat"); err != nil {
+		t.Fatal(err)
+	}
+	var paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		if r.Header.Get("Authorization") != "Bearer enterprise-pat" {
+			t.Fatalf("unexpected auth header %q", r.Header.Get("Authorization"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v3/user":
+			_, _ = w.Write([]byte(`{"login":"enterprise-user"}`))
+		case "/api/v3/repos/acme/widgets/issues":
+			_, _ = w.Write([]byte(`[]`))
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	svc := NewGitHubService(settingsRepo, "", "", "", "")
+	repo := &GitHubRepoRef{Owner: "acme", Name: "widgets", APIBaseURL: server.URL + "/api/v3"}
+	user, _, err := svc.ListAuthenticatedAssignedIssues(ctx, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if user.Login != "enterprise-user" || len(paths) != 2 {
+		t.Fatalf("user=%#v paths=%v", user, paths)
+	}
+}
+
 func TestListAuthenticatedAssignedIssuesRejectsGitHubAppInstallationAccount(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	settingsRepo := repository.NewSettingsRepo(db)
@@ -984,11 +1841,52 @@ func TestListAuthenticatedAssignedIssuesRejectsGitHubAppInstallationAccount(t *t
 	repo := &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}
 
 	_, _, err := svc.ListAuthenticatedAssignedIssues(ctx, repo)
-	if err == nil || !strings.Contains(err.Error(), "requires a PAT user token") || !strings.Contains(err.Error(), "github_list_assigned_issues") {
+	if err == nil || !strings.Contains(err.Error(), "requires a PAT user token") || !strings.Contains(err.Error(), "github_list_my_assigned_issues") {
 		t.Fatalf("expected GitHub App guidance error, got %v", err)
 	}
 	if sawIssueList {
 		t.Fatalf("expected no GitHub issue-list request for GitHub App installation account")
+	}
+}
+
+func TestGitHubClientRejectsRedirectWithoutReplayingAuthorization(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
+		t.Fatalf("set auth mode: %v", err)
+	}
+	if err := settingsRepo.Set(ctx, GitHubSettingPAT, "ghp_redirect_secret"); err != nil {
+		t.Fatalf("set pat: %v", err)
+	}
+
+	var targetCalls int
+	var targetAuthorization string
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		targetCalls++
+		targetAuthorization = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"number":7,"title":"redirected"}`)
+	}))
+	defer target.Close()
+
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer ghp_redirect_secret" {
+			t.Fatalf("expected source request authorization, got %q", got)
+		}
+		http.Redirect(w, r, target.URL+r.URL.Path, http.StatusFound)
+	}))
+	defer source.Close()
+
+	svc := NewGitHubService(settingsRepo, "", "", "", "")
+	svc.apiBaseURL = source.URL
+	repo := &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}
+
+	if _, err := svc.GetIssue(ctx, repo, 7); err == nil || !strings.Contains(err.Error(), "redirect") {
+		t.Fatalf("expected redirect rejection, got %v", err)
+	}
+	if targetCalls != 0 {
+		t.Fatalf("redirect target received %d request(s), authorization %q", targetCalls, targetAuthorization)
 	}
 }
 
@@ -1119,7 +2017,7 @@ func TestPublishBranchUsesGitHubAPIWithoutGitPush(t *testing.T) {
 		}
 		return defaultRunGit(ctx, dir, extraEnv, args...)
 	}
-	err = svc.PublishBranch(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubPublishBranchRequest{
+	_, err = svc.PublishBranch(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubPublishBranchRequest{
 		RepoPath:       repoDir,
 		Branch:         "task/api-publish",
 		BaseBranch:     "main",
@@ -1240,7 +2138,7 @@ func TestPublishBranchPublishesCleanCommittedLocalBranchChanges(t *testing.T) {
 		}
 		return defaultRunGit(ctx, dir, extraEnv, args...)
 	}
-	if err := svc.PublishBranch(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubPublishBranchRequest{
+	if _, err := svc.PublishBranch(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubPublishBranchRequest{
 		RepoPath:      repoDir,
 		Branch:        "task/api-publish",
 		BaseBranch:    "main",
@@ -1324,7 +2222,7 @@ func TestPublishBranchParentsExistingRemoteTaskBranch(t *testing.T) {
 		}
 		return defaultRunGit(ctx, dir, extraEnv, args...)
 	}
-	if err := svc.PublishBranch(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubPublishBranchRequest{
+	if _, err := svc.PublishBranch(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubPublishBranchRequest{
 		RepoPath:      repoDir,
 		Branch:        "task/api-publish",
 		BaseBranch:    "main",
@@ -1382,7 +2280,7 @@ func TestPublishBranchNoOpsWhenDesiredTreeMatchesRemoteTaskBranch(t *testing.T) 
 
 	svc := NewGitHubService(settingsRepo, "", "", "", "")
 	svc.apiBaseURL = server.URL
-	if err := svc.PublishBranch(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubPublishBranchRequest{
+	if _, err := svc.PublishBranch(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubPublishBranchRequest{
 		RepoPath:      repoDir,
 		Branch:        "task/api-publish",
 		BaseBranch:    "main",
@@ -1430,7 +2328,7 @@ func TestPublishBranchNoOpsWhenNoChangesAndRemoteTaskBranchExists(t *testing.T) 
 		}
 		return defaultRunGit(ctx, dir, extraEnv, args...)
 	}
-	if err := svc.PublishBranch(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubPublishBranchRequest{
+	if _, err := svc.PublishBranch(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubPublishBranchRequest{
 		RepoPath:      repoDir,
 		Branch:        "task/api-publish",
 		BaseBranch:    "main",
@@ -1495,7 +2393,7 @@ func TestPublishBranchCreatesRemoteBranchAtBaseWhenNoChangesAndBranchAbsent(t *t
 		}
 		return defaultRunGit(ctx, dir, extraEnv, args...)
 	}
-	if err := svc.PublishBranch(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubPublishBranchRequest{
+	if _, err := svc.PublishBranch(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubPublishBranchRequest{
 		RepoPath:      repoDir,
 		Branch:        "task/api-publish",
 		BaseBranch:    "main",
@@ -1562,7 +2460,7 @@ func TestPublishBranchNoChangesConcurrentBranchCreationSucceeds(t *testing.T) {
 
 	svc := NewGitHubService(settingsRepo, "", "", "", "")
 	svc.apiBaseURL = server.URL
-	if err := svc.PublishBranch(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubPublishBranchRequest{
+	if _, err := svc.PublishBranch(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubPublishBranchRequest{
 		RepoPath:      repoDir,
 		Branch:        "task/api-publish",
 		BaseBranch:    "main",
@@ -1663,7 +2561,7 @@ func TestPublishBranchRetriesWithLatestRemoteBranchParentOnNonFastForward(t *tes
 		}
 		return defaultRunGit(ctx, dir, extraEnv, args...)
 	}
-	if err := svc.PublishBranch(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubPublishBranchRequest{
+	if _, err := svc.PublishBranch(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubPublishBranchRequest{
 		RepoPath:      repoDir,
 		Branch:        "task/api-publish",
 		BaseBranch:    "main",
@@ -1758,7 +2656,7 @@ func TestPublishBranchRetriesAfterConcurrentBranchCreation(t *testing.T) {
 
 	svc := NewGitHubService(settingsRepo, "", "", "", "")
 	svc.apiBaseURL = server.URL
-	if err := svc.PublishBranch(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubPublishBranchRequest{
+	if _, err := svc.PublishBranch(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubPublishBranchRequest{
 		RepoPath:      repoDir,
 		Branch:        "task/api-publish",
 		BaseBranch:    "main",
@@ -1836,7 +2734,7 @@ func TestPublishBranchConcurrentBranchCreationNoOpsWhenDesiredTreeMatches(t *tes
 
 	svc := NewGitHubService(settingsRepo, "", "", "", "")
 	svc.apiBaseURL = server.URL
-	if err := svc.PublishBranch(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubPublishBranchRequest{
+	if _, err := svc.PublishBranch(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubPublishBranchRequest{
 		RepoPath:      repoDir,
 		Branch:        "task/api-publish",
 		BaseBranch:    "main",
@@ -1911,7 +2809,7 @@ func TestPublishBranchRaceNoOpsWhenLatestRemoteTreeMatchesDesiredTree(t *testing
 
 	svc := NewGitHubService(settingsRepo, "", "", "", "")
 	svc.apiBaseURL = server.URL
-	if err := svc.PublishBranch(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubPublishBranchRequest{
+	if _, err := svc.PublishBranch(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubPublishBranchRequest{
 		RepoPath:      repoDir,
 		Branch:        "task/api-publish",
 		BaseBranch:    "main",
@@ -1922,6 +2820,228 @@ func TestPublishBranchRaceNoOpsWhenLatestRemoteTreeMatchesDesiredTree(t *testing
 	if refGets != 2 || commitPosts != 1 || patches != 1 {
 		t.Fatalf("expected race to reuse latest desired tree, got refGets=%d commitPosts=%d patches=%d", refGets, commitPosts, patches)
 	}
+}
+
+func TestCollectGitHubBranchChangesPreservesModesDeletesRenamesAndOrdering(t *testing.T) {
+	ctx := context.Background()
+	repoDir := createGitHubBranchCollectionFixture(t, 0, 0)
+	writeGitHubBranchFixtureFile(t, repoDir, "normal.txt", []byte("normal\n"), 0o644)
+	writeGitHubBranchFixtureFile(t, repoDir, "exec.sh", []byte("#!/bin/sh\necho old\n"), 0o755)
+	writeGitHubBranchFixtureFile(t, repoDir, "chmod.sh", []byte("#!/bin/sh\necho chmod\n"), 0o644)
+	writeGitHubBranchFixtureFile(t, repoDir, "deleted.txt", []byte("delete me\n"), 0o644)
+	writeGitHubBranchFixtureFile(t, repoDir, "rename-old.txt", []byte("rename me\n"), 0o644)
+	if err := os.Symlink("old-target", filepath.Join(repoDir, "tracked-link")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	runGitHubBranchFixtureGit(t, repoDir, "add", ".")
+	runGitHubBranchFixtureGit(t, repoDir, "commit", "-m", "add mode fixture")
+
+	writeGitHubBranchFixtureFile(t, repoDir, "normal.txt", []byte("normal updated\n"), 0o644)
+	writeGitHubBranchFixtureFile(t, repoDir, "exec.sh", []byte("#!/bin/sh\necho new\n"), 0o755)
+	writeGitHubBranchFixtureFile(t, repoDir, "chmod.sh", []byte("#!/bin/sh\necho chmod now exec\n"), 0o755)
+	if err := os.Remove(filepath.Join(repoDir, "deleted.txt")); err != nil {
+		t.Fatalf("remove deleted fixture: %v", err)
+	}
+	runGitHubBranchFixtureGit(t, repoDir, "mv", "rename-old.txt", "rename-new.txt")
+	if err := os.Remove(filepath.Join(repoDir, "tracked-link")); err != nil {
+		t.Fatalf("remove tracked symlink: %v", err)
+	}
+	if err := os.Symlink("new-target", filepath.Join(repoDir, "tracked-link")); err != nil {
+		t.Fatalf("replace tracked symlink: %v", err)
+	}
+	writeGitHubBranchFixtureFile(t, repoDir, "untracked-exec.sh", []byte("#!/bin/sh\necho untracked\n"), 0o755)
+	if err := os.Symlink("outside", filepath.Join(repoDir, "untracked-link")); err != nil {
+		t.Fatalf("create untracked symlink: %v", err)
+	}
+
+	changes, err := collectGitHubBranchChanges(ctx, repoDir, "main")
+	if err != nil {
+		t.Fatalf("collectGitHubBranchChanges returned error: %v", err)
+	}
+	gotPaths := make([]string, 0, len(changes))
+	byPath := make(map[string]githubBranchChange, len(changes))
+	for _, change := range changes {
+		gotPaths = append(gotPaths, change.Path)
+		byPath[change.Path] = change
+	}
+	wantPaths := []string{"chmod.sh", "deleted.txt", "exec.sh", "normal.txt", "rename-new.txt", "rename-old.txt", "tracked-link", "untracked-exec.sh"}
+	if strings.Join(gotPaths, "\x00") != strings.Join(wantPaths, "\x00") {
+		t.Fatalf("unexpected deterministic paths:\n got %v\nwant %v", gotPaths, wantPaths)
+	}
+	assertGitHubBranchChange := func(path, mode, content string, deleted bool) {
+		t.Helper()
+		change, ok := byPath[path]
+		if !ok {
+			t.Fatalf("missing change for %s", path)
+		}
+		if change.Mode != mode || change.Delete != deleted || string(change.Content) != content {
+			t.Fatalf("unexpected change for %s: mode=%q delete=%v content=%q", path, change.Mode, change.Delete, string(change.Content))
+		}
+	}
+	assertGitHubBranchChange("chmod.sh", "100755", "#!/bin/sh\necho chmod now exec\n", false)
+	assertGitHubBranchChange("deleted.txt", "100644", "", true)
+	assertGitHubBranchChange("exec.sh", "100755", "#!/bin/sh\necho new\n", false)
+	assertGitHubBranchChange("normal.txt", "100644", "normal updated\n", false)
+	assertGitHubBranchChange("rename-new.txt", "100644", "rename me\n", false)
+	assertGitHubBranchChange("rename-old.txt", "100644", "", true)
+	assertGitHubBranchChange("tracked-link", "120000", "new-target", false)
+	assertGitHubBranchChange("untracked-exec.sh", "100755", "#!/bin/sh\necho untracked\n", false)
+	if _, ok := byPath["untracked-link"]; ok {
+		t.Fatal("untracked symlink must be skipped")
+	}
+}
+
+func TestCollectGitHubBranchChangesLargeFixtureUsesBatchedModeLookup(t *testing.T) {
+	ctx := context.Background()
+	repoDir := createGitHubBranchCollectionFixture(t, 1000, 1000)
+	var gitCalls int
+	var modeLookupCalls int
+	var modeLookupPathCount int
+	var untrackedModeLookups int
+	runGit := func(ctx context.Context, dir string, extraEnv []string, args ...string) ([]byte, error) {
+		gitCalls++
+		if len(args) >= 4 && args[0] == "ls-files" && args[1] == "-s" {
+			modeLookupCalls++
+			for i, arg := range args {
+				if arg != "--" {
+					continue
+				}
+				for _, path := range args[i+1:] {
+					modeLookupPathCount++
+					if strings.HasPrefix(path, "untracked/") {
+						untrackedModeLookups++
+					}
+				}
+				break
+			}
+		}
+		return defaultRunGit(ctx, dir, extraEnv, args...)
+	}
+
+	started := time.Now()
+	changes, err := collectGitHubBranchChangesWithGit(ctx, repoDir, "main", runGit)
+	if err != nil {
+		t.Fatalf("collectGitHubBranchChangesWithGit returned error: %v", err)
+	}
+	t.Logf("collected %d changes with %d git subprocesses and %d mode lookup subprocesses in %s", len(changes), gitCalls, modeLookupCalls, time.Since(started))
+	if len(changes) != 2000 {
+		t.Fatalf("expected 2000 modified/untracked file changes, got %d", len(changes))
+	}
+	if gitCalls > 4 {
+		t.Fatalf("expected bounded git subprocesses for 2000 files, got %d", gitCalls)
+	}
+	if modeLookupCalls != 1 {
+		t.Fatalf("expected one batched tracked mode lookup for this fixture, got %d", modeLookupCalls)
+	}
+	if modeLookupPathCount != 1000 {
+		t.Fatalf("expected mode lookup for 1000 tracked paths only, got %d", modeLookupPathCount)
+	}
+	if untrackedModeLookups != 0 {
+		t.Fatalf("untracked files must not be passed to git ls-files -s, got %d", untrackedModeLookups)
+	}
+}
+
+func TestGitHubTreeModesChunksLargePathLists(t *testing.T) {
+	ctx := context.Background()
+	paths := make([]string, 0, 300)
+	for i := 0; i < 300; i++ {
+		paths = append(paths, fmt.Sprintf("tracked/%03d-%s.txt", i, strings.Repeat("x", 300)))
+	}
+	calls := 0
+	runGit := func(ctx context.Context, dir string, extraEnv []string, args ...string) ([]byte, error) {
+		calls++
+		var b strings.Builder
+		for i, arg := range args {
+			if arg != "--" {
+				continue
+			}
+			for _, path := range args[i+1:] {
+				b.WriteString("100644 abcdef1234567890 0\t")
+				b.WriteString(path)
+				b.WriteByte(0)
+			}
+			break
+		}
+		return []byte(b.String()), nil
+	}
+	modes, err := gitHubTreeModes(ctx, t.TempDir(), paths, runGit)
+	if err != nil {
+		t.Fatalf("gitHubTreeModes returned error: %v", err)
+	}
+	if calls <= 1 || calls >= len(paths) {
+		t.Fatalf("expected chunked bounded mode lookup calls, got %d for %d paths", calls, len(paths))
+	}
+	if len(modes) != len(paths) {
+		t.Fatalf("expected %d parsed modes, got %d", len(paths), len(modes))
+	}
+}
+
+func BenchmarkCollectGitHubBranchChangesLargeFixture(b *testing.B) {
+	ctx := context.Background()
+	repoDir := createGitHubBranchCollectionFixture(b, 1000, 1000)
+	var gitCalls int64
+	runGit := func(ctx context.Context, dir string, extraEnv []string, args ...string) ([]byte, error) {
+		atomic.AddInt64(&gitCalls, 1)
+		return defaultRunGit(ctx, dir, extraEnv, args...)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		changes, err := collectGitHubBranchChangesWithGit(ctx, repoDir, "main", runGit)
+		if err != nil {
+			b.Fatalf("collectGitHubBranchChangesWithGit returned error: %v", err)
+		}
+		if len(changes) != 2000 {
+			b.Fatalf("expected 2000 changes, got %d", len(changes))
+		}
+	}
+	b.ReportMetric(float64(atomic.LoadInt64(&gitCalls))/float64(b.N), "gitcmds/op")
+}
+
+func createGitHubBranchCollectionFixture(tb testing.TB, trackedFiles, untrackedFiles int) string {
+	tb.Helper()
+	dir := tb.TempDir()
+	runGitHubBranchFixtureGit(tb, dir, "init", "-b", "main")
+	runGitHubBranchFixtureGit(tb, dir, "config", "user.email", "test@test.com")
+	runGitHubBranchFixtureGit(tb, dir, "config", "user.name", "Test")
+	writeGitHubBranchFixtureFile(tb, dir, "README.md", []byte("# Test\n"), 0o644)
+	for i := 0; i < trackedFiles; i++ {
+		writeGitHubBranchFixtureFile(tb, dir, fmt.Sprintf("tracked/%04d.txt", i), []byte("old\n"), 0o644)
+	}
+	runGitHubBranchFixtureGit(tb, dir, "add", ".")
+	runGitHubBranchFixtureGit(tb, dir, "commit", "-m", "initial commit")
+	for i := 0; i < trackedFiles; i++ {
+		writeGitHubBranchFixtureFile(tb, dir, fmt.Sprintf("tracked/%04d.txt", i), []byte(fmt.Sprintf("new %04d\n", i)), 0o644)
+	}
+	for i := 0; i < untrackedFiles; i++ {
+		writeGitHubBranchFixtureFile(tb, dir, fmt.Sprintf("untracked/%04d.txt", i), []byte(fmt.Sprintf("untracked %04d\n", i)), 0o644)
+	}
+	return dir
+}
+
+func writeGitHubBranchFixtureFile(tb testing.TB, repoDir, relPath string, content []byte, perm os.FileMode) {
+	tb.Helper()
+	absPath := filepath.Join(repoDir, filepath.FromSlash(relPath))
+	if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
+		tb.Fatalf("mkdir fixture file parent: %v", err)
+	}
+	if err := os.WriteFile(absPath, content, perm); err != nil {
+		tb.Fatalf("write fixture file %s: %v", relPath, err)
+	}
+	if err := os.Chmod(absPath, perm); err != nil {
+		tb.Fatalf("chmod fixture file %s: %v", relPath, err)
+	}
+}
+
+func runGitHubBranchFixtureGit(tb testing.TB, dir string, args ...string) string {
+	tb.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		tb.Fatalf("git %v failed: %v\n%s", args, err, out)
+	}
+	return strings.TrimSpace(string(out))
 }
 
 func TestGitHubIssueAPIMethods(t *testing.T) {
@@ -1938,16 +3058,28 @@ func TestGitHubIssueAPIMethods(t *testing.T) {
 	var sawCreate, sawGet, sawComment, sawLabels bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		if got := r.Header.Get("Authorization"); got != "Bearer ghp_test" {
+			t.Fatalf("unexpected authorization header for %s %s: %q", r.Method, r.URL.Path, got)
+		}
+		if got := r.Header.Get("Accept"); got != githubAPIAcceptHeaderValue {
+			t.Fatalf("unexpected accept header for %s %s: %q", r.Method, r.URL.Path, got)
+		}
+		if got := r.Header.Get("X-GitHub-Api-Version"); got != githubAPIVersionHeaderValue {
+			t.Fatalf("unexpected API version header for %s %s: %q", r.Method, r.URL.Path, got)
+		}
+		if r.Method == http.MethodGet {
+			if got := r.Header.Get("Content-Type"); got != "" {
+				t.Fatalf("GET request must not have a content type, got %q", got)
+			}
+		} else if got := r.Header.Get("Content-Type"); got != "application/json" {
+			t.Fatalf("unexpected content type for %s %s: %q", r.Method, r.URL.Path, got)
+		}
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/repos/openvibely/openvibely/issues":
 			sawCreate = true
 			body, _ := io.ReadAll(r.Body)
-			text := string(body)
-			if strings.Contains(text, "openvibely:") {
-				t.Fatalf("issue creation must not send prefixed labels: %s", text)
-			}
-			if !strings.Contains(text, `"labels":["bug","approved"]`) || !strings.Contains(text, `"assignees":["dev-bot"]`) {
-				t.Fatalf("unexpected create issue payload: %s", text)
+			if got, want := string(body), `{"assignees":["dev-bot"],"body":"Fix it","labels":["bug","approved"],"title":"Bug"}`; got != want {
+				t.Fatalf("unexpected create issue payload: %s", got)
 			}
 			_, _ = w.Write([]byte(`{"number":7,"html_url":"https://github.com/openvibely/openvibely/issues/7","title":"Bug","body":"Fix it","state":"open","user":{"login":"alice"},"assignees":[{"login":"dev-bot"}],"labels":[{"name":"bug"},{"name":"approved"}]}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/issues/7":
@@ -1956,8 +3088,8 @@ func TestGitHubIssueAPIMethods(t *testing.T) {
 		case r.Method == http.MethodPost && r.URL.Path == "/repos/openvibely/openvibely/issues/7/comments":
 			sawComment = true
 			body, _ := io.ReadAll(r.Body)
-			if !strings.Contains(string(body), `"body":"working on it"`) {
-				t.Fatalf("unexpected comment payload: %s", string(body))
+			if got := string(body); got != `{"body":"working on it"}` {
+				t.Fatalf("unexpected comment payload: %s", got)
 			}
 			w.WriteHeader(http.StatusCreated)
 			_, _ = w.Write([]byte(`{"id":1}`))
@@ -2000,6 +3132,77 @@ func TestGitHubIssueAPIMethods(t *testing.T) {
 	}
 	if !sawCreate || !sawGet || !sawComment || !sawLabels {
 		t.Fatalf("expected all issue API endpoints to be called create=%v get=%v comment=%v labels=%v", sawCreate, sawGet, sawComment, sawLabels)
+	}
+}
+
+func TestGitHubServiceEnsureIssueLabelsReusesAndCreatesLabels(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
+		t.Fatalf("set auth mode: %v", err)
+	}
+	if err := settingsRepo.Set(ctx, GitHubSettingPAT, "ghp_test"); err != nil {
+		t.Fatalf("set pat: %v", err)
+	}
+	var created int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/labels/bug":
+			_, _ = w.Write([]byte(`{"name":"bug","color":"d73a4a"}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/labels/performance":
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"message":"Not Found"}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/openvibely/openvibely/labels":
+			created++
+			body, _ := io.ReadAll(r.Body)
+			if got, want := string(body), `{"color":"ededed","name":"performance"}`; got != want {
+				t.Fatalf("unexpected create label payload: %s", got)
+			}
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"name":"performance","color":"ededed"}`))
+		default:
+			t.Fatalf("unexpected label request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	svc := NewGitHubService(settingsRepo, "", "", "", "")
+	svc.apiBaseURL = server.URL
+	if err := svc.EnsureIssueLabels(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, []string{"bug", "performance", "bug"}); err != nil {
+		t.Fatalf("EnsureIssueLabels returned error: %v", err)
+	}
+	if created != 1 {
+		t.Fatalf("expected one missing label to be created, got %d", created)
+	}
+}
+
+func TestGitHubServiceEnsureIssueLabelsFailsOnProvisioningDenial(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
+		t.Fatalf("set auth mode: %v", err)
+	}
+	if err := settingsRepo.Set(ctx, GitHubSettingPAT, "ghp_test"); err != nil {
+		t.Fatalf("set pat: %v", err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"message":"Not Found"}`))
+			return
+		}
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"message":"Resource not accessible by integration"}`))
+	}))
+	defer server.Close()
+	svc := NewGitHubService(settingsRepo, "", "", "", "")
+	svc.apiBaseURL = server.URL
+	err := svc.EnsureIssueLabels(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, []string{"performance"})
+	if err == nil || !strings.Contains(err.Error(), "creating GitHub label") {
+		t.Fatalf("expected provisioning denial, got %v", err)
 	}
 }
 
@@ -2494,3 +3697,113 @@ func benchmarkCreateGitHubTree(b *testing.B, fileCount int) {
 func BenchmarkCreateGitHubTree10Files(b *testing.B)  { benchmarkCreateGitHubTree(b, 10) }
 func BenchmarkCreateGitHubTree50Files(b *testing.B)  { benchmarkCreateGitHubTree(b, 50) }
 func BenchmarkCreateGitHubTree200Files(b *testing.B) { benchmarkCreateGitHubTree(b, 200) }
+
+func TestGitHubLocalCommitSHAAndErrorHelpers(t *testing.T) {
+	ctx := context.Background()
+	repoDir := t.TempDir()
+	runGit := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repoDir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, strings.TrimSpace(string(out)))
+		}
+	}
+	runGit("init", "-b", "main")
+	runGit("config", "user.email", "test@example.com")
+	runGit("config", "user.name", "Test User")
+	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("hello"), 0o644); err != nil {
+		t.Fatalf("write readme: %v", err)
+	}
+	runGit("add", "README.md")
+	runGit("commit", "-m", "initial")
+	sha, err := localCommitSHA(ctx, repoDir, "main")
+	if err != nil {
+		t.Fatalf("localCommitSHA main: %v", err)
+	}
+	if len(sha) != 40 {
+		t.Fatalf("sha = %q, want 40 hex chars", sha)
+	}
+	if _, err := localCommitSHA(ctx, repoDir, " "); err == nil || !strings.Contains(err.Error(), "ref is required") {
+		t.Fatalf("blank ref error = %v", err)
+	}
+	if _, err := localCommitSHA(ctx, repoDir, "missing"); err == nil || !strings.Contains(err.Error(), "git rev-parse missing") {
+		t.Fatalf("missing ref error = %v", err)
+	}
+
+	if got := pathEscapeGitRef("refs/heads/feature/test branch"); got != "refs/heads/feature/test%20branch" {
+		t.Fatalf("pathEscapeGitRef = %q", got)
+	}
+	cases := []struct {
+		name string
+		err  error
+		fn   func(error) bool
+		want bool
+	}{
+		{"not found", errors.New("github API request failed (404): nope"), isGitHubNotFoundError, true},
+		{"already exists", errors.New("GitHub API request failed (422): already_exists"), isGitHubAlreadyExistsError, true},
+		{"missing ref message", errors.New("reference does not exist"), isGitHubRefMissingError, true},
+		{"ref exists", errors.New("github API request failed (422): reference already exists"), isGitHubRefAlreadyExistsError, true},
+		{"non fast forward", errors.New("github API request failed (422): update is not a fast forward"), isGitHubNonFastForwardError, true},
+		{"nil", nil, isGitHubNonFastForwardError, false},
+	}
+	for _, tc := range cases {
+		if got := tc.fn(tc.err); got != tc.want {
+			t.Fatalf("%s = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestPublishExistingLocalCommitWithTokenUpdatesOrCreatesRefs(t *testing.T) {
+	ctx := context.Background()
+	type requestRecord struct {
+		method string
+		path   string
+		body   string
+		auth   string
+	}
+	var requests []requestRecord
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		requests = append(requests, requestRecord{method: r.Method, path: r.URL.Path, body: string(body), auth: r.Header.Get("Authorization")})
+		switch {
+		case r.Method == http.MethodPatch && r.URL.Path == "/repos/openvibely/openvibely/git/refs/heads/existing":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"ref":"refs/heads/existing"}`))
+		case r.Method == http.MethodPatch && r.URL.Path == "/repos/openvibely/openvibely/git/refs/heads/feature/topic":
+			http.Error(w, `{"message":"Reference does not exist"}`, http.StatusNotFound)
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/openvibely/openvibely/git/refs":
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"ref":"refs/heads/feature/topic"}`))
+		default:
+			t.Fatalf("unexpected GitHub request %s %s body=%s", r.Method, r.URL.Path, body)
+		}
+	}))
+	defer server.Close()
+
+	svc := NewGitHubService(nil, "", "", "", "")
+	svc.apiBaseURL = server.URL
+	repo := &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}
+	if err := svc.publishExistingLocalCommitWithToken(ctx, "token-1", repo, " existing ", " abc123 ", true); err != nil {
+		t.Fatalf("publish existing ref: %v", err)
+	}
+	if err := svc.publishExistingLocalCommitWithToken(ctx, "token-2", repo, "feature/topic", "def456", false); err != nil {
+		t.Fatalf("publish missing ref: %v", err)
+	}
+	if len(requests) != 3 {
+		t.Fatalf("expected 3 GitHub requests, got %#v", requests)
+	}
+	if requests[0].method != http.MethodPatch || requests[0].auth != "Bearer token-1" || !strings.Contains(requests[0].body, `"force":true`) || !strings.Contains(requests[0].body, `"sha":"abc123"`) {
+		t.Fatalf("unexpected existing-ref patch: %#v", requests[0])
+	}
+	if requests[1].method != http.MethodPatch || requests[1].path != "/repos/openvibely/openvibely/git/refs/heads/feature/topic" {
+		t.Fatalf("unexpected missing-ref patch: %#v", requests[1])
+	}
+	if requests[2].method != http.MethodPost || !strings.Contains(requests[2].body, `"ref":"refs/heads/feature/topic"`) || !strings.Contains(requests[2].body, `"sha":"def456"`) {
+		t.Fatalf("unexpected ref create: %#v", requests[2])
+	}
+	if err := svc.publishExistingLocalCommitWithToken(ctx, "token", repo, " ", "sha", false); err == nil || !strings.Contains(err.Error(), "branch and sha are required") {
+		t.Fatalf("expected blank branch validation error, got %v", err)
+	}
+}

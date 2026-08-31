@@ -2,9 +2,13 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
@@ -12,9 +16,10 @@ import (
 )
 
 type fakeTaskPullRequestGitHubProvider struct {
+	globalAPIEndpoint   string
 	resolveRepoFn       func(context.Context, string, string) (*GitHubRepoRef, error)
 	defaultBranchFn     func(context.Context, *GitHubRepoRef) (string, error)
-	publishBranchFn     func(context.Context, *GitHubRepoRef, GitHubPublishBranchRequest) error
+	publishBranchFn     func(context.Context, *GitHubRepoRef, GitHubPublishBranchRequest) (*GitHubPublishBranchResult, error)
 	replaceBranchHeadFn func(context.Context, *GitHubRepoRef, GitHubReplaceBranchHeadRequest) error
 	getPullRequestFn    func(context.Context, *GitHubRepoRef, int) (*GitHubPullRequest, error)
 	findPRFn            func(context.Context, *GitHubRepoRef, string) (*GitHubPullRequest, error)
@@ -25,7 +30,7 @@ func (f *fakeTaskPullRequestGitHubProvider) ResolveRepo(ctx context.Context, rep
 	if f.resolveRepoFn != nil {
 		return f.resolveRepoFn(ctx, repoURL, repoPath)
 	}
-	return &GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely"}, nil
+	return &GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely", HTMLURL: "https://github.com/openvibely/openvibely"}, nil
 }
 
 func (f *fakeTaskPullRequestGitHubProvider) DefaultBranch(ctx context.Context, repo *GitHubRepoRef) (string, error) {
@@ -35,11 +40,11 @@ func (f *fakeTaskPullRequestGitHubProvider) DefaultBranch(ctx context.Context, r
 	return "main", nil
 }
 
-func (f *fakeTaskPullRequestGitHubProvider) PublishBranch(ctx context.Context, repo *GitHubRepoRef, req GitHubPublishBranchRequest) error {
+func (f *fakeTaskPullRequestGitHubProvider) PublishBranch(ctx context.Context, repo *GitHubRepoRef, req GitHubPublishBranchRequest) (*GitHubPublishBranchResult, error) {
 	if f.publishBranchFn != nil {
 		return f.publishBranchFn(ctx, repo, req)
 	}
-	return nil
+	return &GitHubPublishBranchResult{HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
 }
 
 func (f *fakeTaskPullRequestGitHubProvider) ReplaceBranchHead(ctx context.Context, repo *GitHubRepoRef, req GitHubReplaceBranchHeadRequest) error {
@@ -53,7 +58,7 @@ func (f *fakeTaskPullRequestGitHubProvider) GetPullRequest(ctx context.Context, 
 	if f.getPullRequestFn != nil {
 		return f.getPullRequestFn(ctx, repo, number)
 	}
-	return &GitHubPullRequest{Number: number, URL: fmt.Sprintf("https://github.com/openvibely/openvibely/pull/%d", number), State: "open", HeadRef: "task/clean-history", HeadRepoFullName: "openvibely/openvibely"}, nil
+	return &GitHubPullRequest{Number: number, URL: fmt.Sprintf("https://github.com/openvibely/openvibely/pull/%d", number), State: "open", HeadRef: "task/clean-history", HeadRepoFullName: "openvibely/openvibely", HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
 }
 
 func (f *fakeTaskPullRequestGitHubProvider) FindPullRequestByBranch(ctx context.Context, repo *GitHubRepoRef, branch string) (*GitHubPullRequest, error) {
@@ -67,7 +72,86 @@ func (f *fakeTaskPullRequestGitHubProvider) CreatePullRequest(ctx context.Contex
 	if f.createPRFn != nil {
 		return f.createPRFn(ctx, repo, req)
 	}
-	return &GitHubPullRequest{Number: 42, URL: "https://github.com/openvibely/openvibely/pull/42", State: "open"}, nil
+	return &GitHubPullRequest{Number: 42, URL: "https://github.com/openvibely/openvibely/pull/42", State: "open", HeadRef: req.Head, HeadRepoFullName: "openvibely/openvibely", HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
+}
+
+func (f *fakeTaskPullRequestGitHubProvider) GlobalAPIEndpoint(_ context.Context) string {
+	return f.globalAPIEndpoint
+}
+
+func TestTaskPullRequestServiceOpenForTaskUsesCanonicalRepositoryMutationBoundary(t *testing.T) {
+	ctx := context.Background()
+	repoDir := t.TempDir()
+	aliasRoot := t.TempDir()
+	alias := filepath.Join(aliasRoot, "repo-alias")
+	if err := os.Symlink(repoDir, alias); err != nil {
+		t.Skipf("symlink repository alias: %v", err)
+	}
+	db := testutil.NewTestDB(t)
+	prRepo := repository.NewTaskPullRequestRepo(db)
+	publishEntered := make(chan struct{}, 1)
+	github := &fakeTaskPullRequestGitHubProvider{
+		publishBranchFn: func(context.Context, *GitHubRepoRef, GitHubPublishBranchRequest) (*GitHubPublishBranchResult, error) {
+			publishEntered <- struct{}{}
+			return nil, errors.New("stop after publication entry")
+		},
+	}
+	service := NewTaskPullRequestService(github, prRepo)
+	project := &models.Project{ID: "project", RepoPath: alias, RepoURL: "https://github.com/openvibely/openvibely"}
+	task := &models.Task{ID: "task", ProjectID: project.ID, Title: "Publish", WorktreeBranch: "task/publish", MergeTargetBranch: "main"}
+
+	leaseEntered := make(chan struct{})
+	releaseLease := make(chan struct{})
+	leaseDone := make(chan error, 1)
+	go func() {
+		leaseDone <- WithRepositoryMutation(repoDir, func() error {
+			close(leaseEntered)
+			<-releaseLease
+			return nil
+		})
+	}()
+	select {
+	case <-leaseEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("repository mutation lease was not acquired")
+	}
+
+	openDone := make(chan error, 1)
+	go func() {
+		_, err := service.OpenForTask(ctx, project, task, OpenTaskPullRequestOptions{})
+		openDone <- err
+	}()
+	select {
+	case <-publishEntered:
+		t.Fatal("direct pull-request publication bypassed canonical repository mutation boundary")
+	case err := <-openDone:
+		t.Fatalf("direct pull-request publication returned before lease release: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(releaseLease)
+	select {
+	case err := <-leaseDone:
+		if err != nil {
+			t.Fatalf("repository mutation lease: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("repository mutation lease did not finish")
+	}
+	select {
+	case <-publishEntered:
+	case err := <-openDone:
+		t.Fatalf("publication did not enter after lease release: %v", err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("publication did not resume after lease release")
+	}
+	select {
+	case err := <-openDone:
+		if err == nil || !strings.Contains(err.Error(), "stop after publication entry") {
+			t.Fatalf("unexpected publication result: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("publication did not return")
+	}
 }
 
 func TestTaskPullRequestServiceReplaceBranchHeadForTaskUsesLinkedPRAndTaskBranch(t *testing.T) {
@@ -126,7 +210,7 @@ func TestTaskPullRequestServiceReplaceBranchHeadForTaskRejectsLinkedPRHeadMismat
 	replaceCalled := false
 	svc := NewTaskPullRequestService(&fakeTaskPullRequestGitHubProvider{
 		getPullRequestFn: func(_ context.Context, _ *GitHubRepoRef, number int) (*GitHubPullRequest, error) {
-			return &GitHubPullRequest{Number: number, HeadRef: "task/different-branch", HeadRepoFullName: "openvibely/openvibely"}, nil
+			return &GitHubPullRequest{Number: number, HeadRef: "task/different-branch", HeadRepoFullName: "openvibely/openvibely", HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
 		},
 		replaceBranchHeadFn: func(_ context.Context, _ *GitHubRepoRef, _ GitHubReplaceBranchHeadRequest) error {
 			replaceCalled = true
@@ -163,7 +247,7 @@ func TestTaskPullRequestServiceReplaceBranchHeadForTaskRejectsLinkedPRHeadReposi
 	replaceCalled := false
 	svc := NewTaskPullRequestService(&fakeTaskPullRequestGitHubProvider{
 		getPullRequestFn: func(_ context.Context, _ *GitHubRepoRef, number int) (*GitHubPullRequest, error) {
-			return &GitHubPullRequest{Number: number, HeadRef: task.WorktreeBranch, HeadRepoFullName: "contributor/openvibely"}, nil
+			return &GitHubPullRequest{Number: number, HeadRef: task.WorktreeBranch, HeadRepoFullName: "contributor/openvibely", HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
 		},
 		replaceBranchHeadFn: func(_ context.Context, _ *GitHubRepoRef, _ GitHubReplaceBranchHeadRequest) error {
 			replaceCalled = true
@@ -227,6 +311,28 @@ func TestTaskPullRequestServiceReplaceBranchHeadForTaskRequiresLinkedPR(t *testi
 	}
 }
 
+func TestTaskPullRequestServiceBuildCreatePullRequestRequestUsesGenericFallbackWithoutInternalMetadata(t *testing.T) {
+	svc := NewTaskPullRequestService(&fakeTaskPullRequestGitHubProvider{}, nil)
+	issueNumber := 262
+
+	request := svc.buildCreatePullRequestRequest(context.Background(), &models.Project{RepoPath: t.TempDir()}, &models.Task{
+		ID:                "4465e3079fae6b5c4a3ce4ba81d623ee",
+		Title:             "Narrow template dashboard/list SQL projection (#262)",
+		WorktreeBranch:    "task/narrow-template-sql",
+		MergeTargetBranch: "main",
+	}, OpenTaskPullRequestOptions{IssueNumber: &issueNumber}, &GitHubRepoRef{})
+
+	want := "## Summary\n- Narrow template dashboard/list SQL projection\n\nCloses #262"
+	if request.Body != want {
+		t.Fatalf("default PR body = %q, want %q", request.Body, want)
+	}
+	for _, forbidden := range []string{"Task ID:", "Task title:", "OpenVibely", "Automated pull request"} {
+		if strings.Contains(request.Body, forbidden) {
+			t.Fatalf("default PR body contains %q: %q", forbidden, request.Body)
+		}
+	}
+}
+
 func TestTaskPullRequestServiceOpenForTaskCreatesAndPersistsPR(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
@@ -236,13 +342,13 @@ func TestTaskPullRequestServiceOpenForTaskCreatesAndPersistsPR(t *testing.T) {
 	var publishedReq GitHubPublishBranchRequest
 	var createdReq GitHubCreatePullRequestRequest
 	svc := NewTaskPullRequestService(&fakeTaskPullRequestGitHubProvider{
-		publishBranchFn: func(_ context.Context, _ *GitHubRepoRef, req GitHubPublishBranchRequest) error {
+		publishBranchFn: func(_ context.Context, _ *GitHubRepoRef, req GitHubPublishBranchRequest) (*GitHubPublishBranchResult, error) {
 			publishedReq = req
-			return nil
+			return &GitHubPublishBranchResult{HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
 		},
 		createPRFn: func(_ context.Context, _ *GitHubRepoRef, req GitHubCreatePullRequestRequest) (*GitHubPullRequest, error) {
 			createdReq = req
-			return &GitHubPullRequest{Number: 77, URL: "https://github.com/openvibely/openvibely/pull/77", State: "open"}, nil
+			return &GitHubPullRequest{Number: 77, URL: "https://github.com/openvibely/openvibely/pull/77", State: "open", HeadRef: req.Head, HeadRepoFullName: "openvibely/openvibely", HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
 		},
 	}, prRepo)
 	project := &models.Project{Name: "PR Service Project", RepoPath: t.TempDir(), RepoURL: "https://github.com/openvibely/openvibely"}
@@ -275,8 +381,139 @@ func TestTaskPullRequestServiceOpenForTaskCreatesAndPersistsPR(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetByTaskID: %v", err)
 	}
-	if record == nil || record.PRNumber != 77 || record.IssueNumber == nil || *record.IssueNumber != 99 || record.IssueURL == "" {
+	if record == nil || record.PRNumber != 77 || record.PublishedHeadSHA != "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" || record.IssueNumber == nil || *record.IssueNumber != 99 || record.IssueURL == "" {
 		t.Fatalf("unexpected persisted PR record: %#v", record)
+	}
+}
+
+func TestTaskPullRequestServiceOpenForTaskRecordsPublishedCommitStat(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	prRepo := repository.NewTaskPullRequestRepo(db)
+	statRepo := repository.NewTaskCommitStatRepo(db)
+
+	repoDir := createTestGitRepo(t)
+	if out, err := gitOutput(repoDir, "checkout", "-b", "task/publish-stat"); err != nil {
+		t.Fatalf("checkout task branch: %v\n%s", err, out)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("# Test\n\nPublished update\n"), 0644); err != nil {
+		t.Fatalf("write README: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "published.go"), []byte("package published\n\nfunc Added() {}\n"), 0644); err != nil {
+		t.Fatalf("write published.go: %v", err)
+	}
+	project := &models.Project{Name: "Published Commit Stats", RepoPath: repoDir, RepoURL: "https://github.com/openvibely/openvibely"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Publish stat task", Category: models.CategoryActive, Status: models.StatusCompleted, WorktreePath: repoDir, WorktreeBranch: "task/publish-stat", MergeTargetBranch: "main"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	publishedSHA := strings.Repeat("c", 40)
+	svc := NewTaskPullRequestService(&fakeTaskPullRequestGitHubProvider{
+		publishBranchFn: func(_ context.Context, _ *GitHubRepoRef, req GitHubPublishBranchRequest) (*GitHubPublishBranchResult, error) {
+			if req.BaseBranch != "main" || req.Branch != task.WorktreeBranch || req.WorktreePath != repoDir {
+				t.Fatalf("unexpected publish request: %#v", req)
+			}
+			return &GitHubPublishBranchResult{HeadSHA: publishedSHA, CreatedCommit: true}, nil
+		},
+		createPRFn: func(_ context.Context, _ *GitHubRepoRef, req GitHubCreatePullRequestRequest) (*GitHubPullRequest, error) {
+			return &GitHubPullRequest{Number: 87, URL: "https://github.com/openvibely/openvibely/pull/87", State: "open", HeadRef: req.Head, HeadRepoFullName: "openvibely/openvibely", HeadSHA: publishedSHA}, nil
+		},
+	}, prRepo).SetTaskCommitStatRepo(statRepo)
+
+	_, err := svc.OpenForTask(ctx, project, task, OpenTaskPullRequestOptions{CommitMessage: "Publish task stats"})
+	if err != nil {
+		t.Fatalf("OpenForTask: %v", err)
+	}
+	stats, err := statRepo.ListProducedCommitStats(ctx, project.ID, time.Now().UTC().Add(-time.Minute))
+	if err != nil {
+		t.Fatalf("list stats: %v", err)
+	}
+	if len(stats) != 1 {
+		t.Fatalf("stats count = %d, want 1", len(stats))
+	}
+	stat := stats[0]
+	if stat.CommitSHA != publishedSHA || stat.ShortSHA != publishedSHA[:7] || stat.Subject != "Publish task stats" {
+		t.Fatalf("unexpected published stat metadata: %#v", stat)
+	}
+	if stat.Insertions != 5 || stat.FilesChanged != 2 || stat.ChangedFilesJSON != `["README.md","published.go"]` {
+		t.Fatalf("unexpected published stat totals: insertions=%d files=%d changed=%s", stat.Insertions, stat.FilesChanged, stat.ChangedFilesJSON)
+	}
+}
+
+func TestTaskPullRequestServiceOpenForTaskRecordsPublishedUpdateCommitStat(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	prRepo := repository.NewTaskPullRequestRepo(db)
+	statRepo := repository.NewTaskCommitStatRepo(db)
+
+	repoDir := createTestGitRepo(t)
+	if out, err := gitOutput(repoDir, "checkout", "-b", "task/publish-update-stat"); err != nil {
+		t.Fatalf("checkout task branch: %v\n%s", err, out)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("# Test\n\nPreviously published branch change\n"), 0644); err != nil {
+		t.Fatalf("write README: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "update.go"), []byte("package update\n\nfunc Later() {}\n"), 0644); err != nil {
+		t.Fatalf("write update.go: %v", err)
+	}
+	project := &models.Project{Name: "Published Update Stats", RepoPath: repoDir, RepoURL: "https://github.com/openvibely/openvibely"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Publish update stat task", Category: models.CategoryActive, Status: models.StatusCompleted, WorktreePath: repoDir, WorktreeBranch: "task/publish-update-stat", MergeTargetBranch: "main"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	previousSHA := strings.Repeat("b", 40)
+	publishedSHA := strings.Repeat("d", 40)
+	if err := prRepo.Upsert(ctx, &models.TaskPullRequest{TaskID: task.ID, PRNumber: 88, PRURL: "https://github.com/openvibely/openvibely/pull/88", PRState: "open", PublishedHeadSHA: previousSHA}); err != nil {
+		t.Fatalf("seed PR record: %v", err)
+	}
+	svc := NewTaskPullRequestService(&fakeTaskPullRequestGitHubProvider{
+		publishBranchFn: func(_ context.Context, _ *GitHubRepoRef, req GitHubPublishBranchRequest) (*GitHubPublishBranchResult, error) {
+			if req.BaseBranch != "main" || req.Branch != task.WorktreeBranch || req.WorktreePath != repoDir {
+				t.Fatalf("unexpected publish request: %#v", req)
+			}
+			return &GitHubPublishBranchResult{
+				HeadSHA:       publishedSHA,
+				CreatedCommit: true,
+				ParentSHA:     previousSHA,
+				CommitStats:   &GitHubPublishedCommitStats{Insertions: 3, FilesChanged: 1, ChangedFiles: []string{"update.go"}},
+			}, nil
+		},
+		getPullRequestFn: func(_ context.Context, _ *GitHubRepoRef, number int) (*GitHubPullRequest, error) {
+			return &GitHubPullRequest{Number: number, URL: "https://github.com/openvibely/openvibely/pull/88", State: "open", HeadRef: task.WorktreeBranch, HeadRepoFullName: "openvibely/openvibely", HeadSHA: publishedSHA}, nil
+		},
+		createPRFn: func(context.Context, *GitHubRepoRef, GitHubCreatePullRequestRequest) (*GitHubPullRequest, error) {
+			t.Fatal("existing open PR should be reused")
+			return nil, nil
+		},
+	}, prRepo).SetTaskCommitStatRepo(statRepo)
+
+	_, err := svc.OpenForTask(ctx, project, task, OpenTaskPullRequestOptions{CommitMessage: "Publish update stats"})
+	if err != nil {
+		t.Fatalf("OpenForTask: %v", err)
+	}
+	stats, err := statRepo.ListProducedCommitStats(ctx, project.ID, time.Now().UTC().Add(-time.Minute))
+	if err != nil {
+		t.Fatalf("list stats: %v", err)
+	}
+	if len(stats) != 1 {
+		t.Fatalf("stats count = %d, want 1", len(stats))
+	}
+	stat := stats[0]
+	if stat.CommitSHA != publishedSHA || stat.ShortSHA != publishedSHA[:7] || stat.Subject != "Publish update stats" {
+		t.Fatalf("unexpected published update stat metadata: %#v", stat)
+	}
+	if stat.Insertions != 3 || stat.Deletions != 0 || stat.FilesChanged != 1 || stat.ChangedFilesJSON != `["update.go"]` {
+		t.Fatalf("unexpected published update stat totals: insertions=%d deletions=%d files=%d changed=%s", stat.Insertions, stat.Deletions, stat.FilesChanged, stat.ChangedFilesJSON)
 	}
 }
 
@@ -298,13 +535,18 @@ func TestTaskPullRequestServiceOpenForTaskReusesExistingRecord(t *testing.T) {
 		t.Fatalf("seed PR record: %v", err)
 	}
 	createCalls := 0
+	getCalls := 0
 	publishCalls := 0
 	var publishedReq GitHubPublishBranchRequest
 	svc := NewTaskPullRequestService(&fakeTaskPullRequestGitHubProvider{
-		publishBranchFn: func(_ context.Context, _ *GitHubRepoRef, req GitHubPublishBranchRequest) error {
+		publishBranchFn: func(_ context.Context, _ *GitHubRepoRef, req GitHubPublishBranchRequest) (*GitHubPublishBranchResult, error) {
 			publishCalls++
 			publishedReq = req
-			return nil
+			return &GitHubPublishBranchResult{HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
+		},
+		getPullRequestFn: func(context.Context, *GitHubRepoRef, int) (*GitHubPullRequest, error) {
+			getCalls++
+			return &GitHubPullRequest{Number: 22, URL: "https://github.com/openvibely/openvibely/pull/22", State: "open", HeadRef: task.WorktreeBranch, HeadRepoFullName: "openvibely/openvibely", HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
 		},
 		createPRFn: func(context.Context, *GitHubRepoRef, GitHubCreatePullRequestRequest) (*GitHubPullRequest, error) {
 			createCalls++
@@ -316,8 +558,182 @@ func TestTaskPullRequestServiceOpenForTaskReusesExistingRecord(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenForTask: %v", err)
 	}
-	if !result.ReusedExistingRecord || result.PullRequest.Number != 22 || createCalls != 0 || publishCalls != 1 || publishedReq.Branch != task.WorktreeBranch {
-		t.Fatalf("expected existing PR reuse with branch publish, result=%#v createCalls=%d publishCalls=%d publishedReq=%#v", result, createCalls, publishCalls, publishedReq)
+	if !result.ReusedExistingRecord || result.PullRequest.Number != 22 || createCalls != 0 || getCalls != 1 || publishCalls != 1 || publishedReq.Branch != task.WorktreeBranch {
+		t.Fatalf("expected existing PR reuse with branch publish and live verification, result=%#v createCalls=%d getCalls=%d publishCalls=%d publishedReq=%#v", result, createCalls, getCalls, publishCalls, publishedReq)
+	}
+	record, err := prRepo.GetByTaskID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetByTaskID: %v", err)
+	}
+	if record == nil || record.PublishedHeadSHA != "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
+		t.Fatalf("expected existing PR record to store current publication head, got %#v", record)
+	}
+}
+
+func TestTaskPullRequestServiceOpenForTaskRejectsOldOpenPullRequestHead(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	prRepo := repository.NewTaskPullRequestRepo(db)
+	project := &models.Project{Name: "Old Head PR Project", RepoPath: t.TempDir(), RepoURL: "https://github.com/openvibely/openvibely"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Old Head PR", Category: models.CategoryActive, Status: models.StatusCompleted, WorktreeBranch: "task/old-head"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := prRepo.Upsert(ctx, &models.TaskPullRequest{TaskID: task.ID, PRNumber: 22, PRURL: "https://github.com/openvibely/openvibely/pull/22", PRState: "open", PublishedHeadSHA: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}); err != nil {
+		t.Fatalf("seed PR record: %v", err)
+	}
+	createCalls := 0
+	svc := NewTaskPullRequestService(&fakeTaskPullRequestGitHubProvider{
+		publishBranchFn: func(_ context.Context, _ *GitHubRepoRef, req GitHubPublishBranchRequest) (*GitHubPublishBranchResult, error) {
+			if req.Branch != task.WorktreeBranch {
+				t.Fatalf("unexpected publish request: %#v", req)
+			}
+			return &GitHubPublishBranchResult{HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
+		},
+		getPullRequestFn: func(context.Context, *GitHubRepoRef, int) (*GitHubPullRequest, error) {
+			return &GitHubPullRequest{Number: 22, URL: "https://github.com/openvibely/openvibely/pull/22", State: "open", HeadRef: task.WorktreeBranch, HeadRepoFullName: "openvibely/openvibely", HeadSHA: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}, nil
+		},
+		findPRFn: func(_ context.Context, _ *GitHubRepoRef, branch string) (*GitHubPullRequest, error) {
+			if branch != task.WorktreeBranch {
+				t.Fatalf("unexpected branch lookup: %s", branch)
+			}
+			return &GitHubPullRequest{Number: 22, URL: "https://github.com/openvibely/openvibely/pull/22", State: "open", HeadRef: task.WorktreeBranch, HeadRepoFullName: "openvibely/openvibely", HeadSHA: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}, nil
+		},
+		createPRFn: func(context.Context, *GitHubRepoRef, GitHubCreatePullRequestRequest) (*GitHubPullRequest, error) {
+			createCalls++
+			return nil, fmt.Errorf("should not create while GitHub reports an open branch PR")
+		},
+	}, prRepo)
+
+	_, err := svc.OpenForTask(ctx, project, task, OpenTaskPullRequestOptions{})
+	if err == nil || !strings.Contains(err.Error(), "does not match published branch head") {
+		t.Fatalf("expected stale head publication error, got %v", err)
+	}
+	if createCalls != 0 {
+		t.Fatalf("did not expect create call, got %d", createCalls)
+	}
+	record, getErr := prRepo.GetByTaskID(ctx, task.ID)
+	if getErr != nil {
+		t.Fatalf("GetByTaskID: %v", getErr)
+	}
+	if record == nil || record.PublishedHeadSHA != "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" {
+		t.Fatalf("stale publication row should not be updated on failed verification: %#v", record)
+	}
+}
+
+func TestTaskPullRequestServiceOpenForTaskReplacesStaleOpenRecordWithOpenPR(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	prRepo := repository.NewTaskPullRequestRepo(db)
+	project := &models.Project{Name: "Stale Open PR Project", RepoPath: t.TempDir(), RepoURL: "https://github.com/openvibely/openvibely"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Stale Open PR", Category: models.CategoryActive, Status: models.StatusCompleted, WorktreeBranch: "task/stale-open"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := prRepo.Upsert(ctx, &models.TaskPullRequest{TaskID: task.ID, PRNumber: 22, PRURL: "https://github.com/openvibely/openvibely/pull/22", PRState: "open"}); err != nil {
+		t.Fatalf("seed PR record: %v", err)
+	}
+	getCalls := 0
+	findCalls := 0
+	createCalls := 0
+	svc := NewTaskPullRequestService(&fakeTaskPullRequestGitHubProvider{
+		getPullRequestFn: func(context.Context, *GitHubRepoRef, int) (*GitHubPullRequest, error) {
+			getCalls++
+			return &GitHubPullRequest{Number: 22, URL: "https://github.com/openvibely/openvibely/pull/22", State: "closed", HeadRef: task.WorktreeBranch, HeadRepoFullName: "openvibely/openvibely", HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
+		},
+		findPRFn: func(_ context.Context, _ *GitHubRepoRef, branch string) (*GitHubPullRequest, error) {
+			findCalls++
+			if branch != task.WorktreeBranch {
+				t.Fatalf("unexpected branch lookup: %s", branch)
+			}
+			return nil, nil
+		},
+		createPRFn: func(context.Context, *GitHubRepoRef, GitHubCreatePullRequestRequest) (*GitHubPullRequest, error) {
+			createCalls++
+			return &GitHubPullRequest{Number: 33, URL: "https://github.com/openvibely/openvibely/pull/33", State: "open", HeadRef: task.WorktreeBranch, HeadRepoFullName: "openvibely/openvibely", HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
+		},
+	}, prRepo)
+
+	result, err := svc.OpenForTask(ctx, project, task, OpenTaskPullRequestOptions{})
+	if err != nil {
+		t.Fatalf("OpenForTask: %v", err)
+	}
+	if result.ReusedExistingRecord || !result.Created || result.PullRequest.Number != 33 || getCalls != 1 || findCalls != 1 || createCalls != 1 {
+		t.Fatalf("expected stale open record replacement, result=%#v getCalls=%d findCalls=%d createCalls=%d", result, getCalls, findCalls, createCalls)
+	}
+	record, err := prRepo.GetByTaskID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetByTaskID: %v", err)
+	}
+	if record == nil || record.PRNumber != 33 || record.PRState != "open" {
+		t.Fatalf("expected open replacement PR record, got %#v", record)
+	}
+}
+
+func TestTaskPullRequestServiceOpenForTaskReplacesClosedRecordWithOpenPR(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	prRepo := repository.NewTaskPullRequestRepo(db)
+	project := &models.Project{Name: "Closed PR Project", RepoPath: t.TempDir(), RepoURL: "https://github.com/openvibely/openvibely"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Closed PR", Category: models.CategoryActive, Status: models.StatusCompleted, WorktreeBranch: "task/closed"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := prRepo.Upsert(ctx, &models.TaskPullRequest{TaskID: task.ID, PRNumber: 22, PRURL: "https://github.com/openvibely/openvibely/pull/22", PRState: "closed"}); err != nil {
+		t.Fatalf("seed PR record: %v", err)
+	}
+	publishCalls := 0
+	findCalls := 0
+	createCalls := 0
+	svc := NewTaskPullRequestService(&fakeTaskPullRequestGitHubProvider{
+		publishBranchFn: func(_ context.Context, _ *GitHubRepoRef, req GitHubPublishBranchRequest) (*GitHubPublishBranchResult, error) {
+			publishCalls++
+			if req.Branch != task.WorktreeBranch {
+				t.Fatalf("unexpected publish request: %#v", req)
+			}
+			return &GitHubPublishBranchResult{HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
+		},
+		findPRFn: func(_ context.Context, _ *GitHubRepoRef, branch string) (*GitHubPullRequest, error) {
+			findCalls++
+			if branch != task.WorktreeBranch {
+				t.Fatalf("unexpected branch lookup: %s", branch)
+			}
+			return &GitHubPullRequest{Number: 22, URL: "https://github.com/openvibely/openvibely/pull/22", State: "closed"}, nil
+		},
+		createPRFn: func(context.Context, *GitHubRepoRef, GitHubCreatePullRequestRequest) (*GitHubPullRequest, error) {
+			createCalls++
+			return &GitHubPullRequest{Number: 33, URL: "https://github.com/openvibely/openvibely/pull/33", State: "open", HeadRef: task.WorktreeBranch, HeadRepoFullName: "openvibely/openvibely", HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
+		},
+	}, prRepo)
+
+	result, err := svc.OpenForTask(ctx, project, task, OpenTaskPullRequestOptions{})
+	if err != nil {
+		t.Fatalf("OpenForTask: %v", err)
+	}
+	if result.ReusedExistingRecord || !result.Created || result.PullRequest.Number != 33 || publishCalls != 1 || findCalls != 1 || createCalls != 1 {
+		t.Fatalf("expected closed record replacement, result=%#v publishCalls=%d findCalls=%d createCalls=%d", result, publishCalls, findCalls, createCalls)
+	}
+	record, err := prRepo.GetByTaskID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetByTaskID: %v", err)
+	}
+	if record == nil || record.PRNumber != 33 || record.PRState != "open" {
+		t.Fatalf("expected open replacement PR record, got %#v", record)
 	}
 }
 
@@ -340,6 +756,9 @@ func TestTaskPullRequestServiceOpenForTaskReusesExistingRecordAndPersistsIssueMe
 	}
 	createCalls := 0
 	svc := NewTaskPullRequestService(&fakeTaskPullRequestGitHubProvider{
+		getPullRequestFn: func(context.Context, *GitHubRepoRef, int) (*GitHubPullRequest, error) {
+			return &GitHubPullRequest{Number: 23, URL: "https://github.com/openvibely/openvibely/pull/23", State: "open", HeadRef: task.WorktreeBranch, HeadRepoFullName: "openvibely/openvibely", HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
+		},
 		createPRFn: func(context.Context, *GitHubRepoRef, GitHubCreatePullRequestRequest) (*GitHubPullRequest, error) {
 			createCalls++
 			return nil, fmt.Errorf("should not create")
@@ -388,6 +807,9 @@ func TestTaskPullRequestServiceOpenForTaskClearsStaleIssueURLWhenIssueNumberChan
 		t.Fatalf("seed PR record: %v", err)
 	}
 	svc := NewTaskPullRequestService(&fakeTaskPullRequestGitHubProvider{
+		getPullRequestFn: func(context.Context, *GitHubRepoRef, int) (*GitHubPullRequest, error) {
+			return &GitHubPullRequest{Number: 24, URL: "https://github.com/openvibely/openvibely/pull/24", State: "open", HeadRef: task.WorktreeBranch, HeadRepoFullName: "openvibely/openvibely", HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
+		},
 		createPRFn: func(context.Context, *GitHubRepoRef, GitHubCreatePullRequestRequest) (*GitHubPullRequest, error) {
 			return nil, fmt.Errorf("should not create")
 		},
@@ -432,6 +854,9 @@ func TestTaskPullRequestServiceOpenForTaskClearsStaleIssueNumberWhenIssueURLChan
 		t.Fatalf("seed PR record: %v", err)
 	}
 	svc := NewTaskPullRequestService(&fakeTaskPullRequestGitHubProvider{
+		getPullRequestFn: func(context.Context, *GitHubRepoRef, int) (*GitHubPullRequest, error) {
+			return &GitHubPullRequest{Number: 25, URL: "https://github.com/openvibely/openvibely/pull/25", State: "open", HeadRef: task.WorktreeBranch, HeadRepoFullName: "openvibely/openvibely", HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
+		},
 		createPRFn: func(context.Context, *GitHubRepoRef, GitHubCreatePullRequestRequest) (*GitHubPullRequest, error) {
 			return nil, fmt.Errorf("should not create")
 		},
@@ -477,7 +902,7 @@ func TestTaskPullRequestServiceOpenForTaskRecoversAlreadyExistsByFindingPR(t *te
 			if findCalls == 1 {
 				return nil, nil
 			}
-			return &GitHubPullRequest{Number: 88, URL: "https://github.com/openvibely/openvibely/pull/88", State: "open"}, nil
+			return &GitHubPullRequest{Number: 88, URL: "https://github.com/openvibely/openvibely/pull/88", State: "open", HeadRef: task.WorktreeBranch, HeadRepoFullName: "openvibely/openvibely", HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
 		},
 		createPRFn: func(context.Context, *GitHubRepoRef, GitHubCreatePullRequestRequest) (*GitHubPullRequest, error) {
 			return nil, fmt.Errorf("Validation Failed: pull request already exists for openvibely:task/reused")
@@ -521,7 +946,7 @@ func TestTaskPullRequestServiceAutomationOperationsUseProjectURLOrLocalGitRemote
 			resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*GitHubRepoRef, error) {
 				resolveCalls++
 				resolvedURL, resolvedPath = repoURL, repoPath
-				return &GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely"}, nil
+				return &GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely", HTMLURL: "https://github.com/openvibely/openvibely"}, nil
 			},
 		}, prRepo)
 
@@ -578,10 +1003,10 @@ func TestTaskPullRequestServiceAutomationOperationsUseProjectURLOrLocalGitRemote
 			resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*GitHubRepoRef, error) {
 				resolveCalls++
 				resolvedURL, resolvedPath = repoURL, repoPath
-				return &GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely"}, nil
+				return &GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely", HTMLURL: "https://github.com/openvibely/openvibely"}, nil
 			},
 			getPullRequestFn: func(_ context.Context, _ *GitHubRepoRef, number int) (*GitHubPullRequest, error) {
-				return &GitHubPullRequest{Number: number, HeadRef: task.WorktreeBranch, HeadRepoFullName: "openvibely/openvibely"}, nil
+				return &GitHubPullRequest{Number: number, HeadRef: task.WorktreeBranch, HeadRepoFullName: "openvibely/openvibely", HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
 			},
 		}, prRepo)
 

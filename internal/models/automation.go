@@ -42,6 +42,7 @@ type Automation struct {
 	HealthReason       string                   `json:"health_reason"`
 	HealthEvaluatedAt  *time.Time               `json:"health_evaluated_at,omitempty"`
 	PublishedVersionID *string                  `json:"published_version_id,omitempty"`
+	TemplateRevision   *int                     `json:"template_revision,omitempty"`
 	CreatedVia         string                   `json:"created_via"`
 	CreatedAt          time.Time                `json:"created_at"`
 	UpdatedAt          time.Time                `json:"updated_at"`
@@ -174,12 +175,13 @@ type AutomationResourceSummary struct {
 }
 
 type AutomationCard struct {
-	Automation Automation                  `json:"automation"`
-	Version    AutomationVersion           `json:"version"`
-	Resources  []AutomationResourceSummary `json:"resources"`
-	Counts     AutomationNodeCounts        `json:"counts"`
-	NextRun    *time.Time                  `json:"next_run,omitempty"`
-	LastRun    *time.Time                  `json:"last_run,omitempty"`
+	Automation              Automation                  `json:"automation"`
+	Version                 AutomationVersion           `json:"version"`
+	Resources               []AutomationResourceSummary `json:"resources"`
+	Counts                  AutomationNodeCounts        `json:"counts"`
+	NextRun                 *time.Time                  `json:"next_run,omitempty"`
+	LastRun                 *time.Time                  `json:"last_run,omitempty"`
+	TemplateUpdateAvailable bool                        `json:"template_update_available,omitempty"`
 }
 
 type AutomationInvocationStatus string
@@ -225,11 +227,12 @@ const (
 )
 
 type AutomationBinding struct {
-	AutomationID string `json:"automation_id"`
-	VersionID    string `json:"version_id"`
-	InvocationID string `json:"invocation_id,omitempty"`
-	NodeID       string `json:"node_id"`
-	WorkItemID   string `json:"work_item_id,omitempty"`
+	AutomationID   string `json:"automation_id"`
+	AutomationName string `json:"automation_name,omitempty"`
+	VersionID      string `json:"version_id"`
+	InvocationID   string `json:"invocation_id,omitempty"`
+	NodeID         string `json:"node_id"`
+	WorkItemID     string `json:"work_item_id,omitempty"`
 }
 
 type AutomationContext struct {
@@ -392,15 +395,17 @@ type AutomationExternalState struct {
 }
 
 type AutomationLiveGraph struct {
-	Automation        Automation                  `json:"automation"`
-	Version           AutomationVersion           `json:"version"`
-	Nodes             []AutomationLiveNode        `json:"nodes"`
-	Edges             []AutomationLiveEdge        `json:"edges"`
-	Resources         []AutomationResourceSummary `json:"resources"`
-	ActiveInvocations int                         `json:"active_invocations"`
-	ActiveWorkItems   int                         `json:"active_work_items"`
-	RecentCutoff      time.Time                   `json:"recent_cutoff"`
-	ExternalState     AutomationExternalState     `json:"external_state"`
+	Automation              Automation                  `json:"automation"`
+	Version                 AutomationVersion           `json:"version"`
+	Nodes                   []AutomationLiveNode        `json:"nodes"`
+	Edges                   []AutomationLiveEdge        `json:"edges"`
+	Resources               []AutomationResourceSummary `json:"resources"`
+	ActiveInvocations       int                         `json:"active_invocations"`
+	ActiveWorkItems         int                         `json:"active_work_items"`
+	RecentCutoff            time.Time                   `json:"recent_cutoff"`
+	ExternalState           AutomationExternalState     `json:"external_state"`
+	TemplateUpdateAvailable bool                        `json:"template_update_available,omitempty"`
+	YAML                    string                      `json:"-"`
 }
 
 type AutomationInvocationPage struct {

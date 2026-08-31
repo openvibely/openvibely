@@ -544,7 +544,7 @@ func TestLLMHookInvoker_AttachesHookAgentToolsToRuntimeContext(t *testing.T) {
 	agentDef := &models.Agent{ID: "custom-agent", Name: "Custom Hook", Tools: []string{"mark_task_goal_achieved", "send_to_task"}}
 	inv := NewLLMHookInvoker(caller, &fakeAgentLookup{byID: map[string]*models.Agent{"custom-agent": agentDef}}, nil)
 	ctx := llmcontracts.WithRuntimeTools(context.Background(), &llmcontracts.RuntimeTools{Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "mark_task_goal_achieved"}, {Name: "send_to_task"}}})
-	_, err := inv.Invoke(ctx, models.AgentLifecycleHook{AgentID: "custom-agent", OutputContract: models.OutputContractActivitySummary}, HookInput{})
+	_, err := inv.Invoke(ctx, models.AgentLifecycleHook{AgentID: "custom-agent", OutputContract: models.OutputContractActivitySummary}, HookInput{TaskID: "task-1", TaskRunID: "run-1", Extras: map[string]any{ExecutionErrorKey: "context deadline exceeded"}})
 	if err != nil {
 		t.Fatalf("Invoke: %v", err)
 	}
@@ -557,6 +557,12 @@ func TestLLMHookInvoker_AttachesHookAgentToolsToRuntimeContext(t *testing.T) {
 	}
 	if strings.Join(hookAgent.Tools, ",") != "mark_task_goal_achieved,send_to_task" {
 		t.Fatalf("hook agent tools = %#v", hookAgent.Tools)
+	}
+	if hookAgent.TaskID != "task-1" || hookAgent.TaskRunID != "run-1" {
+		t.Fatalf("hook agent task/run = %q/%q", hookAgent.TaskID, hookAgent.TaskRunID)
+	}
+	if hookAgent.ExecutionError != "context deadline exceeded" {
+		t.Fatalf("hook agent execution error = %q", hookAgent.ExecutionError)
 	}
 }
 
@@ -590,5 +596,114 @@ func TestLLMHookInvoker_GoalAgentRequiredRuntimeToolsAvailable(t *testing.T) {
 	}
 	if !caller.calledWithDef {
 		t.Fatal("expected model call when required tools are available")
+	}
+}
+
+func TestLLMHookInvoker_SkillCuratorRouteHookGetsNoTools(t *testing.T) {
+	caller := &fakeCaller{reply: `{"skills":[],"confidence":0.5,"reason":"none","needs_clarification":false}`}
+	agentDef := &models.Agent{
+		Key: models.AgentSystemKindSkillCurator, Name: "Skill Curator", Model: "sonnet",
+		SystemKind: models.AgentSystemKindSkillCurator,
+		Tools:      []string{"skill_view", "skills_list", "agent_list", "agent_view"},
+	}
+	inv := NewLLMHookInvoker(caller, &fakeAgentLookup{byID: map[string]*models.Agent{"skill-curator": agentDef}}, nil)
+	baseTools := &llmcontracts.RuntimeTools{
+		Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "skill_view"}, {Name: "skills_list"}, {Name: "agent_list"}, {Name: "agent_view"}},
+	}
+	ctx := llmcontracts.WithRuntimeTools(context.Background(), baseTools)
+	hook := models.AgentLifecycleHook{
+		AgentID: "skill-curator", When: models.LifecycleRouteTask,
+		SkillKey: "route_task", OutputContract: models.OutputContractSelectedSkills,
+	}
+	if _, err := inv.Invoke(ctx, hook, HookInput{}); err != nil {
+		t.Fatalf("Invoke: %v", err)
+	}
+	if !caller.calledWithDefNoTools || caller.calledWithDef {
+		t.Fatalf("expected skill route hook to use the no-tools caller, noTools=%v withDef=%v", caller.calledWithDefNoTools, caller.calledWithDef)
+	}
+	if !caller.lastRuntime.SkipDefaultTools {
+		t.Fatal("expected skill route hook to suppress provider default tools")
+	}
+	for _, denied := range []string{"skill_view", "skills_list", "agent_list", "agent_view"} {
+		if caller.lastRuntime.HasDefinition(denied) {
+			t.Fatalf("skill route hook must not carry %s: %#v", denied, caller.lastRuntime.Definitions)
+		}
+	}
+	if caller.lastAgentDef == nil || caller.lastAgentDef.SystemKind != models.AgentSystemKindSkillCurator {
+		t.Fatalf("expected sanitized definition to preserve identity, got %#v", caller.lastAgentDef)
+	}
+}
+
+func TestLLMHookInvoker_AfterCompleteLearningHookKeepsTools(t *testing.T) {
+	caller := &fakeCaller{reply: `{"summary":"noted","nothing_to_save":true}`}
+	agentDef := &models.Agent{
+		Key: models.AgentSystemKindSkillCurator, Name: "Skill Curator", Model: "sonnet",
+		SystemKind: models.AgentSystemKindSkillCurator,
+		Tools:      []string{"skill_view", "skill_manage"},
+	}
+	inv := NewLLMHookInvoker(caller, &fakeAgentLookup{byID: map[string]*models.Agent{"skill-curator": agentDef}}, nil)
+	baseTools := &llmcontracts.RuntimeTools{
+		Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "skill_view"}, {Name: "skill_manage"}},
+	}
+	ctx := llmcontracts.WithRuntimeTools(context.Background(), baseTools)
+	hook := models.AgentLifecycleHook{
+		AgentID: "skill-curator", When: models.LifecycleAfterComplete,
+		SkillKey: "observe_task_for_learning", OutputContract: models.OutputContractLearningSummary,
+	}
+	if _, err := inv.Invoke(ctx, hook, HookInput{}); err != nil {
+		t.Fatalf("Invoke: %v", err)
+	}
+	if caller.calledWithDefNoTools {
+		t.Fatal("after-complete learning hook must keep its mutation tools")
+	}
+	for _, want := range []string{"skill_view", "skill_manage"} {
+		if !caller.lastRuntime.HasDefinition(want) {
+			t.Fatalf("expected %s to remain available", want)
+		}
+	}
+}
+
+func TestLLMHookInvoker_CustomRouteHookKeepsTools(t *testing.T) {
+	caller := &fakeCaller{reply: `{"skills":[],"confidence":0.5,"reason":"none","needs_clarification":false}`}
+	agentDef := &models.Agent{Key: "custom_router", Name: "Custom Router", Model: "sonnet", Tools: []string{"skill_view"}}
+	inv := NewLLMHookInvoker(caller, &fakeAgentLookup{byID: map[string]*models.Agent{"custom": agentDef}}, nil)
+	baseTools := &llmcontracts.RuntimeTools{Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "skill_view"}}}
+	ctx := llmcontracts.WithRuntimeTools(context.Background(), baseTools)
+	hook := models.AgentLifecycleHook{
+		AgentID: "custom", When: models.LifecycleRouteTask,
+		SkillKey: "route_task", OutputContract: models.OutputContractSelectedSkills,
+	}
+	if _, err := inv.Invoke(ctx, hook, HookInput{}); err != nil {
+		t.Fatalf("Invoke: %v", err)
+	}
+	if caller.calledWithDefNoTools {
+		t.Fatal("custom route hooks must keep their tool access")
+	}
+	if !caller.lastRuntime.HasDefinition("skill_view") {
+		t.Fatal("expected custom route hook to keep skill_view")
+	}
+}
+
+func TestLLMHookInvoker_MarksLifecycleHookCall(t *testing.T) {
+	caller := &fakeCaller{reply: `{"summary":"ok","nothing_to_save":true}`}
+	agentDef := &models.Agent{Name: "Skill Curator", Model: "sonnet"}
+	inv := NewLLMHookInvoker(caller, &fakeAgentLookup{byID: map[string]*models.Agent{"a": agentDef}}, nil)
+	hook := models.AgentLifecycleHook{AgentID: "a", OutputContract: models.OutputContractLearningSummary}
+	if _, err := inv.Invoke(context.Background(), hook, HookInput{}); err != nil {
+		t.Fatalf("Invoke: %v", err)
+	}
+	if !llmcontracts.LifecycleHookCallFromContext(caller.lastContext) {
+		t.Fatal("expected hook calls to be marked so the direct path drops coding-agent framing")
+	}
+}
+
+func TestRenderHookPromptDoesNotRepeatPromptOverride(t *testing.T) {
+	hook := models.AgentLifecycleHook{PromptOverride: "SENTINEL_OVERRIDE_TEXT"}
+	prompt, err := renderHookPrompt(hook, HookInput{TaskID: "t1", PromptOverride: "SENTINEL_OVERRIDE_TEXT"})
+	if err != nil {
+		t.Fatalf("renderHookPrompt: %v", err)
+	}
+	if got := strings.Count(prompt, "SENTINEL_OVERRIDE_TEXT"); got != 1 {
+		t.Fatalf("prompt override appears %d times, want 1:\n%s", got, prompt)
 	}
 }

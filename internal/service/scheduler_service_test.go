@@ -2,12 +2,15 @@ package service
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/stretchr/testify/require"
 )
 
 func TestSchedulerService_CheckDueTasks(t *testing.T) {
@@ -70,6 +73,165 @@ func TestSchedulerService_CheckDueTasks(t *testing.T) {
 	updated, _ := scheduleRepo.GetByID(ctx, sched.ID)
 	if updated.LastRun == nil {
 		t.Error("expected LastRun to be set after checkDueTasks")
+	}
+}
+
+func TestSchedulerService_CheckDueTasksClearsCancellationRequestBeforeSubmit(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	workerSvc := newTestWorkerService(t)
+	ctx := context.Background()
+	svc := NewSchedulerService(scheduleRepo, taskRepo, workerSvc)
+
+	task := &models.Task{
+		ProjectID: "default",
+		Title:     "Due task after stop",
+		Category:  models.CategoryScheduled,
+		Status:    models.StatusPending,
+		Prompt:    "test",
+	}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	workerSvc.MarkCancellationRequested(task.ID)
+	require.True(t, workerSvc.IsCancellationRequested(task.ID))
+
+	now := time.Now().UTC()
+	sched := &models.Schedule{TaskID: task.ID, RunAt: now.Add(-time.Minute), RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: true}
+	require.NoError(t, scheduleRepo.Create(ctx, sched))
+
+	svc.checkDueTasks(ctx)
+
+	select {
+	case submitted := <-workerSvc.Submitted():
+		require.Equal(t, task.ID, submitted.ID)
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("expected due task to be submitted")
+	}
+	require.False(t, workerSvc.IsCancellationRequested(task.ID), "due scheduled submission should clear stale cancellation marker")
+}
+
+func TestSchedulerService_CheckDueTasksDeletesOrphanedDueSchedule(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	workerSvc := newTestWorkerService(t)
+	ctx := context.Background()
+	svc := NewSchedulerService(scheduleRepo, taskRepo, workerSvc)
+
+	_, err := db.Exec(`PRAGMA foreign_keys = OFF`)
+	require.NoError(t, err)
+	dueAt := time.Now().UTC().Add(-time.Minute)
+	_, err = db.Exec(`INSERT INTO schedules (id, task_id, run_at, repeat_type, repeat_interval, enabled, next_run)
+		VALUES ('orphan-schedule', 'missing-task', ?, 'once', 1, 1, ?)`, dueAt, dueAt)
+	require.NoError(t, err)
+	_, err = db.Exec(`PRAGMA foreign_keys = ON`)
+	require.NoError(t, err)
+
+	svc.checkDueTasks(ctx)
+
+	select {
+	case submitted := <-workerSvc.Submitted():
+		t.Fatalf("orphan schedule submitted unexpected task: %s", submitted.ID)
+	default:
+	}
+	updated, err := scheduleRepo.GetByID(ctx, "orphan-schedule")
+	require.NoError(t, err)
+	require.Nil(t, updated)
+}
+
+func TestSchedulerService_CheckDueTasksSubmitsOneTimeScheduleCreatedForCompletedScheduledTask(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	workerSvc := newTestWorkerService(t)
+	ctx := context.Background()
+	svc := NewSchedulerService(scheduleRepo, taskRepo, workerSvc)
+
+	task := &models.Task{
+		ProjectID: "default",
+		Title:     "Completed scheduled task",
+		Category:  models.CategoryScheduled,
+		Status:    models.StatusCompleted,
+		Prompt:    "test",
+	}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	actionSvc := NewScheduleActionService(taskRepo, scheduleRepo)
+	result, err := actionSvc.Create(ctx, "default", ScheduleTaskRequest{TaskID: task.ID, Time: "09:30", Repeat: "once"})
+	require.NoError(t, err)
+	require.Equal(t, models.StatusPending, result.Task.Status)
+
+	dueAt := time.Now().UTC().Add(-time.Minute)
+	result.Schedule.RunAt = dueAt
+	result.Schedule.NextRun = &dueAt
+	require.NoError(t, scheduleRepo.Update(ctx, result.Schedule))
+
+	svc.checkDueTasks(ctx)
+
+	select {
+	case submitted := <-workerSvc.Submitted():
+		require.Equal(t, task.ID, submitted.ID)
+		require.Equal(t, models.StatusPending, submitted.Status)
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("expected due one-time schedule to be submitted")
+	}
+	updatedSchedule, err := scheduleRepo.GetByID(ctx, result.Schedule.ID)
+	require.NoError(t, err)
+	require.NotNil(t, updatedSchedule.LastRun)
+	require.Nil(t, updatedSchedule.NextRun)
+}
+
+func TestSchedulerService_MalformedScheduleDoesNotBlockLaterValidSchedule(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	workerSvc := newTestWorkerService(t)
+	ctx := context.Background()
+	svc := NewSchedulerService(scheduleRepo, taskRepo, workerSvc)
+	now := time.Now().UTC()
+
+	malformedTask := &models.Task{ProjectID: "default", Title: "Malformed schedule", Category: models.CategoryScheduled, Status: models.StatusPending, Prompt: "bad"}
+	validTask := &models.Task{ProjectID: "default", Title: "Valid schedule", Category: models.CategoryScheduled, Status: models.StatusPending, Prompt: "good"}
+	if err := taskRepo.Create(ctx, malformedTask); err != nil {
+		t.Fatal(err)
+	}
+	if err := taskRepo.Create(ctx, validTask); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO schedules
+		(id, task_id, run_at, repeat_type, repeat_interval, enabled, next_run)
+		VALUES (?, ?, ?, ?, ?, 1, ?)`,
+		"corrupt-interval", malformedTask.ID, now.Add(-2*time.Minute), models.RepeatSeconds, 9223372036854775807, now.Add(-2*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	valid := &models.Schedule{TaskID: validTask.ID, RunAt: now.Add(-time.Minute), RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: true}
+	if err := scheduleRepo.Create(ctx, valid); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		svc.checkDueTasks(ctx)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("malformed schedule blocked processing of later valid schedules")
+	}
+
+	persisted, err := scheduleRepo.GetByID(ctx, valid.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.LastRun == nil {
+		t.Fatal("expected later valid schedule to be processed")
+	}
+	corrupt, err := scheduleRepo.GetByID(ctx, "corrupt-interval")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if corrupt.LastRun != nil {
+		t.Fatal("corrupt schedule should not be dispatched or marked as run")
 	}
 }
 
@@ -434,6 +596,230 @@ func TestSchedulerService_CheckActiveTasks_DoesNotRecoverStaleQueuedFollowup(t *
 	if stored.Status != models.StatusQueued {
 		t.Fatalf("active follow-up ownership must preserve queued task status, got %s", stored.Status)
 	}
+}
+
+func TestSchedulerService_CheckActiveTasksSubmitsAdmissionWithoutPayload(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	taskRepo := repository.NewTaskRepo(db, nil)
+	workerSvc := newTestWorkerService(t)
+
+	task := &models.Task{
+		ProjectID:      "default",
+		Title:          "Large admission payload",
+		Category:       models.CategoryActive,
+		Priority:       3,
+		Status:         models.StatusPending,
+		Prompt:         strings.Repeat("prompt payload ", 4096),
+		ChainConfig:    strings.Repeat("chain payload ", 1024),
+		SwarmConfig:    strings.Repeat("swarm payload ", 1024),
+		WorktreePath:   "/tmp/task-worktree",
+		WorktreeBranch: "task/large-admission-payload",
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	NewSchedulerService(repository.NewScheduleRepo(db), taskRepo, workerSvc).checkActiveTasks(ctx)
+
+	select {
+	case submitted := <-workerSvc.Submitted():
+		if submitted.ID != task.ID || submitted.Title != task.Title || submitted.ProjectID != task.ProjectID {
+			t.Fatalf("unexpected submitted task identity: %#v", submitted)
+		}
+		if submitted.Prompt != "" || submitted.ChainConfig != "" || submitted.SwarmConfig != "" || submitted.WorktreePath != "" || submitted.WorktreeBranch != "" {
+			t.Fatalf("scheduler submission carried execution-only payload: prompt=%d chain=%d swarm=%d worktree=%q branch=%q",
+				len(submitted.Prompt), len(submitted.ChainConfig), len(submitted.SwarmConfig), submitted.WorktreePath, submitted.WorktreeBranch)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("expected active pending task to be submitted")
+	}
+}
+
+func TestSchedulerService_CheckActiveTasksUsesBoundedAdmissionQuery(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	ctx := context.Background()
+	taskRepo := repository.NewTaskRepo(db, nil)
+	workerSvc := newTestWorkerService(t)
+	task := &models.Task{
+		ProjectID:   "default",
+		Title:       "Counted active admission",
+		Category:    models.CategoryActive,
+		Status:      models.StatusPending,
+		Prompt:      strings.Repeat("large prompt ", 4096),
+		ChainConfig: strings.Repeat("large chain ", 1024),
+		SwarmConfig: strings.Repeat("large swarm ", 1024),
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	NewSchedulerService(repository.NewScheduleRepo(db), taskRepo, workerSvc).checkActiveTasks(ctx)
+	counter.SetEnabled(false)
+
+	statements := counter.Statements()
+	admissionQueries := 0
+	for _, statement := range statements {
+		query := strings.ToLower(statement)
+		if strings.Contains(query, "from tasks where category = 'active' and status = 'pending'") {
+			admissionQueries++
+			projection := strings.SplitN(query, " from ", 2)[0]
+			if strings.Contains(projection, "prompt") || strings.Contains(projection, "chain_config") || strings.Contains(projection, "swarm_config") {
+				t.Fatalf("scheduler admission query selected full payload: %s", statement)
+			}
+		}
+		if strings.Contains(query, "where id = ?") {
+			t.Fatalf("scheduler admission introduced a per-task read: %s", statement)
+		}
+	}
+	if admissionQueries != 1 {
+		t.Fatalf("expected one scheduler admission query, got %d: %#v", admissionQueries, statements)
+	}
+	if len(statements) != 2 {
+		t.Fatalf("expected one admission query plus one stale-queue query, got %d: %#v", len(statements), statements)
+	}
+}
+
+func BenchmarkWorkerSchedulerActivePendingProjection(b *testing.B) {
+	fixtures := []struct {
+		name         string
+		taskCount    int
+		promptSize   int
+		workflowSize int
+	}{
+		{name: "20_SmallPayloads", taskCount: 20, promptSize: 4 * 1024, workflowSize: 2 * 1024},
+		{name: "20_LargePayloads", taskCount: 20, promptSize: 64 * 1024, workflowSize: 16 * 1024},
+		{name: "200_SmallPayloads", taskCount: 200, promptSize: 4 * 1024, workflowSize: 2 * 1024},
+		{name: "200_LargePayloads", taskCount: 200, promptSize: 64 * 1024, workflowSize: 16 * 1024},
+		{name: "1000_SmallPayloads", taskCount: 1000, promptSize: 4 * 1024, workflowSize: 2 * 1024},
+		{name: "1000_LargePayloads", taskCount: 1000, promptSize: 64 * 1024, workflowSize: 16 * 1024},
+	}
+
+	for _, fixture := range fixtures {
+		fixture := fixture
+		b.Run(fixture.name, func(b *testing.B) {
+			db, counter := testutil.NewStatementCountingTestDB(b)
+			repo := repository.NewTaskRepo(db, nil)
+			seedActivePendingProjectionBenchmark(b, repo, fixture.taskCount, fixture.promptSize, fixture.workflowSize)
+
+			fullRows, fullPayload, fullStatements := measureFullActivePendingProjection(b, repo, counter)
+			admissionRows, admissionPayload, admissionStatements := measureActivePendingAdmissionProjection(b, repo, counter)
+			if fullRows != fixture.taskCount || admissionRows != fixture.taskCount {
+				b.Fatalf("projection row counts differ: full=%d admission=%d want=%d", fullRows, admissionRows, fixture.taskCount)
+			}
+			if fullStatements != 1 || admissionStatements != 1 {
+				b.Fatalf("projection query counts must remain bounded: full=%d admission=%d", fullStatements, admissionStatements)
+			}
+
+			b.Run("CurrentFullProjection", func(b *testing.B) {
+				benchmarkFullActivePendingProjection(b, repo, fullPayload, fullRows, fullStatements)
+			})
+			b.Run("AdmissionProjection", func(b *testing.B) {
+				benchmarkActivePendingAdmissionProjection(b, repo, admissionPayload, admissionRows, admissionStatements)
+			})
+		})
+	}
+}
+
+func seedActivePendingProjectionBenchmark(b *testing.B, repo *repository.TaskRepo, taskCount, promptSize, workflowSize int) {
+	b.Helper()
+	ctx := context.Background()
+	prompt := strings.Repeat("p", promptSize)
+	chainConfig := strings.Repeat("c", workflowSize)
+	swarmConfig := strings.Repeat("s", workflowSize)
+	for i := 0; i < taskCount; i++ {
+		task := &models.Task{
+			ProjectID:   "default",
+			Title:       fmt.Sprintf("Scheduler projection benchmark task %04d", i),
+			Category:    models.CategoryActive,
+			Priority:    (i % 4) + 1,
+			Status:      models.StatusPending,
+			Prompt:      prompt,
+			ChainConfig: chainConfig,
+			SwarmConfig: swarmConfig,
+		}
+		if err := repo.Create(ctx, task); err != nil {
+			b.Fatalf("create benchmark task %d: %v", i, err)
+		}
+	}
+}
+
+func measureFullActivePendingProjection(b *testing.B, repo *repository.TaskRepo, counter *testutil.SQLStatementCounter) (int, int64, int) {
+	b.Helper()
+	counter.Reset()
+	counter.SetEnabled(true)
+	tasks, err := repo.ListActivePending(context.Background())
+	counter.SetEnabled(false)
+	if err != nil {
+		b.Fatalf("measure full active pending projection: %v", err)
+	}
+	return len(tasks), activePendingExecutionPayloadBytes(tasks), len(counter.Statements())
+}
+
+func measureActivePendingAdmissionProjection(b *testing.B, repo *repository.TaskRepo, counter *testutil.SQLStatementCounter) (int, int64, int) {
+	b.Helper()
+	counter.Reset()
+	counter.SetEnabled(true)
+	admissions, err := repo.ListActivePendingAdmissions(context.Background())
+	counter.SetEnabled(false)
+	if err != nil {
+		b.Fatalf("measure active pending admission projection: %v", err)
+	}
+	return len(admissions), 0, len(counter.Statements())
+}
+
+func benchmarkFullActivePendingProjection(b *testing.B, repo *repository.TaskRepo, selectedPayloadBytes int64, expectedRows, statementCount int) {
+	b.Helper()
+	ctx := context.Background()
+	var rows int
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		tasks, err := repo.ListActivePending(ctx)
+		if err != nil {
+			b.Fatalf("list full active pending tasks: %v", err)
+		}
+		rows = len(tasks)
+	}
+	b.StopTimer()
+	if rows != expectedRows {
+		b.Fatalf("full projection returned %d rows, want %d", rows, expectedRows)
+	}
+	b.ReportMetric(float64(rows), "rows/op")
+	b.ReportMetric(float64(selectedPayloadBytes), "selected_payload_bytes/op")
+	b.ReportMetric(float64(statementCount), "sql_statements/op")
+}
+
+func benchmarkActivePendingAdmissionProjection(b *testing.B, repo *repository.TaskRepo, selectedPayloadBytes int64, expectedRows, statementCount int) {
+	b.Helper()
+	ctx := context.Background()
+	var rows int
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		admissions, err := repo.ListActivePendingAdmissions(ctx)
+		if err != nil {
+			b.Fatalf("list active pending admissions: %v", err)
+		}
+		rows = len(admissions)
+	}
+	b.StopTimer()
+	if rows != expectedRows {
+		b.Fatalf("admission projection returned %d rows, want %d", rows, expectedRows)
+	}
+	b.ReportMetric(float64(rows), "rows/op")
+	b.ReportMetric(float64(selectedPayloadBytes), "selected_payload_bytes/op")
+	b.ReportMetric(float64(statementCount), "sql_statements/op")
+}
+
+func activePendingExecutionPayloadBytes(tasks []models.Task) int64 {
+	var total int64
+	for _, task := range tasks {
+		total += int64(len(task.Prompt) + len(task.ChainConfig) + len(task.SwarmConfig))
+	}
+	return total
 }
 
 func TestSchedulerService_CheckActiveTasks(t *testing.T) {
@@ -1156,6 +1542,59 @@ func TestSchedulerService_CheckDueTasks_ReenabledScheduleRuns(t *testing.T) {
 	case <-time.After(100 * time.Millisecond):
 		t.Error("expected re-enabled task to be submitted")
 	}
+}
+
+func TestSchedulerService_CheckDueTasks_PausedDueScheduleResumesWithoutLosingOccurrence(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	workerSvc := newTestWorkerService(t)
+	ctx := context.Background()
+	task := &models.Task{
+		ProjectID: "default", Title: "Paused due task", Category: models.CategoryScheduled,
+		Status: models.StatusPending, Prompt: "run after resume",
+	}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	dueAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Second)
+	schedule := &models.Schedule{TaskID: task.ID, RunAt: dueAt, RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: true}
+	require.NoError(t, scheduleRepo.Create(ctx, schedule))
+	original, err := scheduleRepo.GetByID(ctx, schedule.ID)
+	require.NoError(t, err)
+	actionSvc := NewScheduleActionService(taskRepo, scheduleRepo)
+
+	_, err = actionSvc.Toggle(ctx, "default", schedule.ID)
+	require.NoError(t, err)
+	paused, err := scheduleRepo.GetByID(ctx, schedule.ID)
+	require.NoError(t, err)
+	require.False(t, paused.Enabled)
+	require.NotNil(t, paused.NextRun)
+	require.True(t, paused.NextRun.Equal(*original.NextRun))
+
+	scheduler := NewSchedulerService(scheduleRepo, taskRepo, workerSvc)
+	scheduler.checkDueTasks(ctx)
+	select {
+	case submitted := <-workerSvc.Submitted():
+		t.Fatalf("paused due schedule submitted task %s", submitted.ID)
+	default:
+	}
+	stillPaused, err := scheduleRepo.GetByID(ctx, schedule.ID)
+	require.NoError(t, err)
+	require.Nil(t, stillPaused.LastRun)
+	require.True(t, stillPaused.NextRun.Equal(*original.NextRun))
+
+	_, err = actionSvc.Toggle(ctx, "default", schedule.ID)
+	require.NoError(t, err)
+	scheduler.checkDueTasks(ctx)
+	select {
+	case submitted := <-workerSvc.Submitted():
+		require.Equal(t, task.ID, submitted.ID)
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("resumed due schedule was not submitted")
+	}
+	resumed, err := scheduleRepo.GetByID(ctx, schedule.ID)
+	require.NoError(t, err)
+	require.NotNil(t, resumed.LastRun)
+	require.Nil(t, resumed.NextRun)
 }
 
 func TestSchedulerService_CheckActiveTasksStartsSwarmPlanner(t *testing.T) {

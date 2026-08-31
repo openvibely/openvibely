@@ -193,7 +193,7 @@ const docTemplate = `{
         },
         "/api/analytics/failed-task-patterns": {
             "get": {
-                "description": "Returns tasks with repeated failures, grouped by last observed error.",
+                "description": "Returns task-level failure patterns with the latest observed error.",
                 "produces": [
                     "application/json"
                 ],
@@ -468,641 +468,6 @@ const docTemplate = `{
                         "description": "Internal server error",
                         "schema": {
                             "$ref": "#/definitions/handler.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/autonomous/chain/{taskId}": {
-            "get": {
-                "description": "Returns build-chain status HTML for an autonomous build root task.",
-                "produces": [
-                    "text/html"
-                ],
-                "tags": [
-                    "autonomous"
-                ],
-                "summary": "Get autonomous build chain status",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Root task ID",
-                        "name": "taskId",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Build chain HTML fragment",
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    "400": {
-                        "description": "Missing task_id",
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal server error",
-                        "schema": {
-                            "type": "string"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/autonomous/config": {
-            "put": {
-                "description": "Updates autonomous build settings for a project and returns an updated HTML dashboard fragment.",
-                "consumes": [
-                    "application/x-www-form-urlencoded"
-                ],
-                "produces": [
-                    "text/html"
-                ],
-                "tags": [
-                    "autonomous"
-                ],
-                "summary": "Update autonomous build configuration",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Project ID",
-                        "name": "project_id",
-                        "in": "query",
-                        "required": true
-                    },
-                    {
-                        "type": "boolean",
-                        "description": "Enable autonomous builds",
-                        "name": "enabled",
-                        "in": "formData"
-                    },
-                    {
-                        "type": "integer",
-                        "default": 4,
-                        "description": "Maximum execution hours",
-                        "name": "max_execution_hours",
-                        "in": "formData"
-                    },
-                    {
-                        "type": "integer",
-                        "default": 23,
-                        "description": "Daily schedule hour (0-23)",
-                        "name": "schedule_hour",
-                        "in": "formData"
-                    },
-                    {
-                        "type": "string",
-                        "description": "JSON array of protected file paths",
-                        "name": "protected_files",
-                        "in": "formData"
-                    },
-                    {
-                        "type": "string",
-                        "description": "JSON array of excluded areas",
-                        "name": "excluded_areas",
-                        "in": "formData"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Autonomous dashboard HTML fragment",
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    "400": {
-                        "description": "Missing project_id",
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal server error",
-                        "schema": {
-                            "type": "string"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/autonomous/summary/{taskId}": {
-            "get": {
-                "description": "Returns the build summary panel HTML for an autonomous build root task.",
-                "produces": [
-                    "text/html"
-                ],
-                "tags": [
-                    "autonomous"
-                ],
-                "summary": "Get autonomous build summary",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Root task ID",
-                        "name": "taskId",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Build summary HTML fragment",
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    "400": {
-                        "description": "Missing task_id",
-                        "schema": {
-                            "type": "string"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/autonomous/trends/analyze": {
-            "post": {
-                "description": "Runs trend pattern analysis and returns analysis result HTML.",
-                "produces": [
-                    "text/html"
-                ],
-                "tags": [
-                    "autonomous"
-                ],
-                "summary": "Analyze trends",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Project ID",
-                        "name": "project_id",
-                        "in": "query",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Trend analysis HTML fragment",
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    "400": {
-                        "description": "Missing project_id",
-                        "schema": {
-                            "type": "string"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/autonomous/trends/collect": {
-            "post": {
-                "description": "Collects trend data from configured sources and returns collection result HTML.",
-                "produces": [
-                    "text/html"
-                ],
-                "tags": [
-                    "autonomous"
-                ],
-                "summary": "Collect trends",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Project ID",
-                        "name": "project_id",
-                        "in": "query",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Collection result HTML fragment",
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    "400": {
-                        "description": "Missing project_id",
-                        "schema": {
-                            "type": "string"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/autonomous/trends/competitors": {
-            "post": {
-                "description": "Runs competitor update analysis and returns result HTML.",
-                "produces": [
-                    "text/html"
-                ],
-                "tags": [
-                    "autonomous"
-                ],
-                "summary": "Analyze competitors",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Project ID",
-                        "name": "project_id",
-                        "in": "query",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Competitor analysis HTML fragment",
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    "400": {
-                        "description": "Missing project_id",
-                        "schema": {
-                            "type": "string"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/autonomous/trends/dashboard": {
-            "get": {
-                "description": "Returns the trend dashboard HTML section for a project.",
-                "produces": [
-                    "text/html"
-                ],
-                "tags": [
-                    "autonomous"
-                ],
-                "summary": "Get trend dashboard section",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Project ID",
-                        "name": "project_id",
-                        "in": "query",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Trend dashboard HTML fragment",
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    "400": {
-                        "description": "Missing project_id",
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal server error",
-                        "schema": {
-                            "type": "string"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/autonomous/trends/patterns/{id}/status": {
-            "patch": {
-                "description": "Updates a trend pattern status and returns updated patterns HTML.",
-                "consumes": [
-                    "application/x-www-form-urlencoded"
-                ],
-                "produces": [
-                    "text/html"
-                ],
-                "tags": [
-                    "autonomous"
-                ],
-                "summary": "Update trend pattern status",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Trend pattern ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Project ID",
-                        "name": "project_id",
-                        "in": "query",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Pattern status (implemented or dismissed)",
-                        "name": "status",
-                        "in": "formData",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Feature name when status is implemented",
-                        "name": "feature_name",
-                        "in": "formData"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Updated trend patterns HTML fragment",
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    "400": {
-                        "description": "Missing or invalid parameters",
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal server error",
-                        "schema": {
-                            "type": "string"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/autonomous/trends/sources": {
-            "post": {
-                "description": "Adds a monitored trend source and returns updated source-list HTML.",
-                "consumes": [
-                    "application/x-www-form-urlencoded"
-                ],
-                "produces": [
-                    "text/html"
-                ],
-                "tags": [
-                    "autonomous"
-                ],
-                "summary": "Add trend source",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Project ID",
-                        "name": "project_id",
-                        "in": "query",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Source type (hashtag, account, keyword, competitor)",
-                        "name": "source_type",
-                        "in": "formData",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Source value",
-                        "name": "value",
-                        "in": "formData",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Updated source list HTML fragment",
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    "400": {
-                        "description": "Missing or invalid parameters",
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal server error",
-                        "schema": {
-                            "type": "string"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/autonomous/trends/sources/{id}": {
-            "delete": {
-                "description": "Deletes a trend source and returns updated source-list HTML.",
-                "produces": [
-                    "text/html"
-                ],
-                "tags": [
-                    "autonomous"
-                ],
-                "summary": "Delete trend source",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Trend source ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Project ID",
-                        "name": "project_id",
-                        "in": "query",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Updated source list HTML fragment",
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    "400": {
-                        "description": "Missing parameters",
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal server error",
-                        "schema": {
-                            "type": "string"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/autonomous/trends/sources/{id}/toggle": {
-            "patch": {
-                "description": "Enables or disables a trend source and returns updated source-list HTML.",
-                "consumes": [
-                    "application/x-www-form-urlencoded"
-                ],
-                "produces": [
-                    "text/html"
-                ],
-                "tags": [
-                    "autonomous"
-                ],
-                "summary": "Toggle trend source",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Trend source ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Project ID",
-                        "name": "project_id",
-                        "in": "query",
-                        "required": true
-                    },
-                    {
-                        "type": "boolean",
-                        "description": "Whether source is enabled",
-                        "name": "enabled",
-                        "in": "formData",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Updated source list HTML fragment",
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    "400": {
-                        "description": "Missing parameters",
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal server error",
-                        "schema": {
-                            "type": "string"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/autonomous/trigger": {
-            "post": {
-                "description": "Starts a new autonomous build chain for a project and returns an HTML fragment with result status.",
-                "produces": [
-                    "text/html"
-                ],
-                "tags": [
-                    "autonomous"
-                ],
-                "summary": "Trigger autonomous build",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Project ID",
-                        "name": "project_id",
-                        "in": "query",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Autonomous trigger result HTML",
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    "400": {
-                        "description": "Missing project_id",
-                        "schema": {
-                            "type": "string"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/autonomous/x-credentials": {
-            "put": {
-                "description": "Saves X API credentials for trend intelligence and returns an HTML confirmation fragment.",
-                "consumes": [
-                    "application/x-www-form-urlencoded"
-                ],
-                "produces": [
-                    "text/html"
-                ],
-                "tags": [
-                    "autonomous"
-                ],
-                "summary": "Save X credentials",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Project ID",
-                        "name": "project_id",
-                        "in": "query",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "X API key",
-                        "name": "api_key",
-                        "in": "formData"
-                    },
-                    {
-                        "type": "string",
-                        "description": "X API secret",
-                        "name": "api_secret",
-                        "in": "formData"
-                    },
-                    {
-                        "type": "string",
-                        "description": "X access token",
-                        "name": "access_token",
-                        "in": "formData"
-                    },
-                    {
-                        "type": "string",
-                        "description": "X access token secret",
-                        "name": "access_token_secret",
-                        "in": "formData"
-                    },
-                    {
-                        "type": "string",
-                        "description": "X bearer token",
-                        "name": "bearer_token",
-                        "in": "formData"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Credentials saved HTML fragment",
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    "400": {
-                        "description": "Missing project_id",
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal server error",
-                        "schema": {
-                            "type": "string"
                         }
                     }
                 }
@@ -1384,460 +749,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/collisions/analyze/{taskId}": {
-            "post": {
-                "description": "Performs AI-powered semantic analysis of what files, APIs, schemas, and components a task will likely modify",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "collisions"
-                ],
-                "summary": "Analyze task impact",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Task ID",
-                        "name": "taskId",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/models.ImpactAnalysis"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/collisions/conflicts/{id}/status": {
-            "patch": {
-                "description": "Updates the status of a conflict prediction (acknowledge, resolve, mark as false positive)",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "collisions"
-                ],
-                "summary": "Update conflict status",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Conflict Prediction ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Status update",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "type": "object"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/collisions/conflicts/{taskId}": {
-            "get": {
-                "description": "Returns all active conflicts involving a specific task",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "collisions"
-                ],
-                "summary": "Get conflicts for a task",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Task ID",
-                        "name": "taskId",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/models.ConflictPrediction"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/collisions/detect": {
-            "post": {
-                "description": "Compares impact analyses across pending/running tasks to predict conflicts",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "collisions"
-                ],
-                "summary": "Detect conflicts between tasks",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Project ID",
-                        "name": "project_id",
-                        "in": "query",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/models.ConflictPrediction"
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/collisions/history": {
-            "get": {
-                "description": "Returns historical conflict data for a project (for learning)",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "collisions"
-                ],
-                "summary": "Get conflict history",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Project ID",
-                        "name": "project_id",
-                        "in": "query",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    }
-                }
-            },
-            "post": {
-                "description": "Records a conflict that actually occurred for learning and prediction improvement",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "collisions"
-                ],
-                "summary": "Record an actual conflict",
-                "parameters": [
-                    {
-                        "description": "Conflict history record",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/models.ConflictHistory"
-                        }
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "Created",
-                        "schema": {
-                            "$ref": "#/definitions/models.ConflictHistory"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/collisions/impact/{taskId}": {
-            "get": {
-                "description": "Returns the latest impact analysis for a task",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "collisions"
-                ],
-                "summary": "Get task impact analysis",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Task ID",
-                        "name": "taskId",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/models.ImpactAnalysis"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/collisions/recommend": {
-            "post": {
-                "description": "Generates an optimal task execution order recommendation based on detected conflicts",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "collisions"
-                ],
-                "summary": "Recommend task execution order",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Project ID",
-                        "name": "project_id",
-                        "in": "query",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/models.ExecutionOrderRecommendation"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/collisions/recommendation": {
-            "get": {
-                "description": "Returns the latest pending recommendation for a project",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "collisions"
-                ],
-                "summary": "Get latest execution order recommendation",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Project ID",
-                        "name": "project_id",
-                        "in": "query",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/models.ExecutionOrderRecommendation"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/collisions/recommendation/{id}/accept": {
-            "post": {
-                "description": "Marks a recommendation as accepted",
-                "tags": [
-                    "collisions"
-                ],
-                "summary": "Accept execution order recommendation",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Recommendation ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/collisions/recommendation/{id}/reject": {
-            "post": {
-                "description": "Marks a recommendation as rejected",
-                "tags": [
-                    "collisions"
-                ],
-                "summary": "Reject execution order recommendation",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Recommendation ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/collisions/report": {
-            "get": {
-                "description": "Returns a full collision report for a project including analyses, conflicts, and recommendations",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "collisions"
-                ],
-                "summary": "Get collision report",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Project ID",
-                        "name": "project_id",
-                        "in": "query",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/models.CollisionReport"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
         "/api/lifecycle-executions/{id}/events": {
             "get": {
                 "description": "Returns prompt-safe trace events for one lifecycle hook invocation.",
@@ -1869,6 +780,12 @@ const docTemplate = `{
                     },
                     "400": {
                         "description": "Invalid execution ID",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Lifecycle execution not found",
                         "schema": {
                             "$ref": "#/definitions/handler.ErrorResponse"
                         }
@@ -1943,9 +860,137 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/system/health": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "system"
+                ],
+                "summary": "System health and build identity",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handler.SystemHealthResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/handler.SystemHealthResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/system/update": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "system"
+                ],
+                "summary": "Get system update state",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/update.CoordinatorSnapshot"
+                        }
+                    },
+                    "204": {
+                        "description": "No Content"
+                    }
+                }
+            }
+        },
+        "/api/system/update/apply": {
+            "post": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "system"
+                ],
+                "summary": "Accept a system update",
+                "responses": {
+                    "202": {
+                        "description": "Accepted",
+                        "schema": {
+                            "$ref": "#/definitions/update.CoordinatorSnapshot"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/system/update/cancel": {
+            "post": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "system"
+                ],
+                "summary": "Cancel a system update",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/update.CoordinatorSnapshot"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/system/update/events": {
+            "get": {
+                "produces": [
+                    "text/event-stream"
+                ],
+                "tags": [
+                    "system"
+                ],
+                "summary": "Stream system update events",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "204": {
+                        "description": "No Content"
+                    }
+                }
+            }
+        },
         "/api/tasks/{id}/lifecycle-executions": {
             "get": {
-                "description": "Returns lifecycle hook invocations (routing, before-run preparation, after-complete learning) recorded for the given task.",
+                "description": "Returns one bounded page of lifecycle hook invocations (routing, before-run preparation, after-complete learning) recorded for the given task. Results are newest-first; use next_cursor with before for older activity and the newest execution ID with after for live inserts.",
                 "produces": [
                     "application/json"
                 ],
@@ -1960,20 +1005,107 @@ const docTemplate = `{
                         "name": "id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Project ID",
+                        "name": "project_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page size (default 20, maximum 50)",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Opaque cursor for the next older page",
+                        "name": "before",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Newest execution ID or newer-page cursor",
+                        "name": "after",
+                        "in": "query"
                     }
                 ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/viewmodels.LifecycleExecutionView"
-                            }
+                            "$ref": "#/definitions/viewmodels.LifecycleExecutionPageView"
                         }
                     },
                     "400": {
-                        "description": "Invalid task ID",
+                        "description": "Invalid task ID or page cursor",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Task not found",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/tasks/{id}/lifecycle-executions/{executionID}": {
+            "get": {
+                "description": "Returns the prompt-safe current state of one lifecycle hook invocation when it belongs to the requested task and project.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Lifecycle"
+                ],
+                "summary": "Get one lifecycle execution for a task",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Task ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Lifecycle execution ID",
+                        "name": "executionID",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Project ID",
+                        "name": "project_id",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/viewmodels.LifecycleExecutionView"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid task or execution ID",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Task or lifecycle execution not found",
                         "schema": {
                             "$ref": "#/definitions/handler.ErrorResponse"
                         }
@@ -2206,190 +1338,6 @@ const docTemplate = `{
                     }
                 }
             }
-        },
-        "/api/workflows/best-agent": {
-            "get": {
-                "description": "Returns the best-performing model for the requested task type based on workflow metrics.",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "workflows"
-                ],
-                "summary": "Get best model for task type",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "default": "general",
-                        "description": "Task type",
-                        "name": "task_type",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Best model and metric payload, or message when unavailable",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "500": {
-                        "description": "Agent not found",
-                        "schema": {
-                            "type": "string"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/workflows/cheapest-agent": {
-            "get": {
-                "description": "Returns the cheapest model that meets the requested minimum quality threshold.",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "workflows"
-                ],
-                "summary": "Get cheapest model for task type",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "default": "general",
-                        "description": "Task type",
-                        "name": "task_type",
-                        "in": "query"
-                    },
-                    {
-                        "type": "number",
-                        "default": 0.6,
-                        "description": "Minimum quality threshold (0..1)",
-                        "name": "min_quality",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Cheapest model and metric payload, or message when unavailable",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "500": {
-                        "description": "Agent not found",
-                        "schema": {
-                            "type": "string"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/workflows/metrics": {
-            "get": {
-                "description": "Returns workflow performance metrics for all configured model configurations.",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "workflows"
-                ],
-                "summary": "Get metrics for all models",
-                "responses": {
-                    "200": {
-                        "description": "All model performance metrics",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/models.AgentPerformanceMetric"
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Failed to get metrics",
-                        "schema": {
-                            "type": "string"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/workflows/metrics/{agentId}": {
-            "get": {
-                "description": "Returns workflow performance metrics for a specific model configuration.",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "workflows"
-                ],
-                "summary": "Get metrics for a model",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Model configuration ID",
-                        "name": "agentId",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Model performance metrics",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/models.AgentPerformanceMetric"
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Failed to get metrics",
-                        "schema": {
-                            "type": "string"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/workflows/votes/{stepExecId}": {
-            "get": {
-                "description": "Returns all agent vote records for a workflow voting step execution.",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "workflows"
-                ],
-                "summary": "Get vote records for workflow step execution",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Step execution ID",
-                        "name": "stepExecId",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Vote records",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/models.VoteRecord"
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Failed to get votes",
-                        "schema": {
-                            "type": "string"
-                        }
-                    }
-                }
-            }
         }
     },
     "definitions": {
@@ -2574,6 +1522,44 @@ const docTemplate = `{
                 }
             }
         },
+        "handler.SystemHealthResponse": {
+            "type": "object",
+            "properties": {
+                "artifact": {
+                    "type": "string"
+                },
+                "build_time": {
+                    "type": "string"
+                },
+                "commit": {
+                    "type": "string"
+                },
+                "database_schema": {
+                    "type": "integer"
+                },
+                "distribution": {
+                    "type": "string"
+                },
+                "drain_state": {
+                    "type": "string"
+                },
+                "ready": {
+                    "type": "boolean"
+                },
+                "schema_version": {
+                    "type": "integer"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "update_mode": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "string"
+                }
+            }
+        },
         "models.AccountLimitView": {
             "type": "object",
             "properties": {
@@ -2650,40 +1636,6 @@ const docTemplate = `{
                 }
             }
         },
-        "models.AgentPerformanceMetric": {
-            "type": "object",
-            "properties": {
-                "agent_config_id": {
-                    "type": "string"
-                },
-                "avg_cost_cents": {
-                    "type": "integer"
-                },
-                "avg_duration_ms": {
-                    "type": "integer"
-                },
-                "avg_quality_score": {
-                    "description": "0-1",
-                    "type": "number"
-                },
-                "failure_count": {
-                    "type": "integer"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "last_updated": {
-                    "type": "string"
-                },
-                "success_count": {
-                    "type": "integer"
-                },
-                "task_type": {
-                    "description": "\"frontend\", \"backend\", \"testing\", \"refactor\", \"bugfix\", \"architecture\"",
-                    "type": "string"
-                }
-            }
-        },
         "models.AnalyticsUsageViewModel": {
             "type": "object",
             "properties": {
@@ -2737,163 +1689,6 @@ const docTemplate = `{
                 }
             }
         },
-        "models.CollisionReport": {
-            "type": "object",
-            "properties": {
-                "analyses": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/models.ImpactAnalysis"
-                    }
-                },
-                "conflicts": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/models.ConflictPrediction"
-                    }
-                },
-                "generated_at": {
-                    "type": "string"
-                },
-                "project_id": {
-                    "type": "string"
-                },
-                "recommendation": {
-                    "$ref": "#/definitions/models.ExecutionOrderRecommendation"
-                }
-            }
-        },
-        "models.ConflictHistory": {
-            "type": "object",
-            "properties": {
-                "actual_files": {
-                    "description": "JSON array",
-                    "type": "string"
-                },
-                "conflict_type": {
-                    "type": "string"
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "impact_score": {
-                    "type": "number"
-                },
-                "prediction_id": {
-                    "type": "string"
-                },
-                "project_id": {
-                    "type": "string"
-                },
-                "resolution": {
-                    "type": "string"
-                },
-                "task_a_id": {
-                    "type": "string"
-                },
-                "task_b_id": {
-                    "type": "string"
-                },
-                "was_predicted": {
-                    "type": "boolean"
-                }
-            }
-        },
-        "models.ConflictPrediction": {
-            "type": "object",
-            "properties": {
-                "conflict_type": {
-                    "$ref": "#/definitions/models.ConflictType"
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "description": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "overlapping_resources": {
-                    "description": "JSON array",
-                    "type": "string"
-                },
-                "project_id": {
-                    "type": "string"
-                },
-                "resolution_strategy": {
-                    "type": "string"
-                },
-                "resolved_at": {
-                    "type": "string"
-                },
-                "severity": {
-                    "$ref": "#/definitions/models.ConflictSeverity"
-                },
-                "status": {
-                    "$ref": "#/definitions/models.ConflictStatus"
-                },
-                "task_a_id": {
-                    "type": "string"
-                },
-                "task_b_id": {
-                    "type": "string"
-                },
-                "updated_at": {
-                    "type": "string"
-                }
-            }
-        },
-        "models.ConflictSeverity": {
-            "type": "string",
-            "enum": [
-                "low",
-                "medium",
-                "high",
-                "critical"
-            ],
-            "x-enum-varnames": [
-                "SeverityLow",
-                "SeverityMedium",
-                "SeverityHigh",
-                "SeverityCritical"
-            ]
-        },
-        "models.ConflictStatus": {
-            "type": "string",
-            "enum": [
-                "detected",
-                "acknowledged",
-                "resolved",
-                "false_positive"
-            ],
-            "x-enum-varnames": [
-                "ConflictDetected",
-                "ConflictAcknowledged",
-                "ConflictResolved",
-                "ConflictFalsePositive"
-            ]
-        },
-        "models.ConflictType": {
-            "type": "string",
-            "enum": [
-                "file",
-                "api",
-                "schema",
-                "component",
-                "semantic"
-            ],
-            "x-enum-varnames": [
-                "ConflictTypeFile",
-                "ConflictTypeAPI",
-                "ConflictTypeSchema",
-                "ConflictTypeComponent",
-                "ConflictTypeSemantic"
-            ]
-        },
         "models.DailyUsagePoint": {
             "type": "object",
             "properties": {
@@ -2923,85 +1718,6 @@ const docTemplate = `{
                 },
                 "total_tokens": {
                     "type": "integer"
-                }
-            }
-        },
-        "models.ExecutionOrderRecommendation": {
-            "type": "object",
-            "properties": {
-                "batch_groups": {
-                    "description": "JSON array of arrays",
-                    "type": "string"
-                },
-                "conflict_count": {
-                    "type": "integer"
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "expires_at": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "project_id": {
-                    "type": "string"
-                },
-                "reasoning": {
-                    "type": "string"
-                },
-                "status": {
-                    "$ref": "#/definitions/models.RecommendationStatus"
-                },
-                "task_ids": {
-                    "description": "JSON array of task IDs in order",
-                    "type": "string"
-                }
-            }
-        },
-        "models.ImpactAnalysis": {
-            "type": "object",
-            "properties": {
-                "analysis_model": {
-                    "type": "string"
-                },
-                "apis_impacted": {
-                    "description": "JSON array",
-                    "type": "string"
-                },
-                "components_impacted": {
-                    "description": "JSON array",
-                    "type": "string"
-                },
-                "confidence": {
-                    "type": "number"
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "files_impacted": {
-                    "description": "JSON array",
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "impact_summary": {
-                    "type": "string"
-                },
-                "project_id": {
-                    "type": "string"
-                },
-                "schemas_impacted": {
-                    "description": "JSON array",
-                    "type": "string"
-                },
-                "task_id": {
-                    "type": "string"
-                },
-                "updated_at": {
-                    "type": "string"
                 }
             }
         },
@@ -3056,21 +1772,6 @@ const docTemplate = `{
                     "type": "integer"
                 }
             }
-        },
-        "models.RecommendationStatus": {
-            "type": "string",
-            "enum": [
-                "pending",
-                "accepted",
-                "rejected",
-                "expired"
-            ],
-            "x-enum-varnames": [
-                "RecommendationPending",
-                "RecommendationAccepted",
-                "RecommendationRejected",
-                "RecommendationExpired"
-            ]
         },
         "models.RepeatType": {
             "type": "string",
@@ -3375,6 +2076,10 @@ const docTemplate = `{
                 "display_order": {
                     "type": "integer"
                 },
+                "goal_met": {
+                    "description": "Derived: task's persisted goal is achieved",
+                    "type": "boolean"
+                },
                 "has_goal": {
                     "description": "Derived: task has a non-cleared persisted goal",
                     "type": "boolean"
@@ -3613,35 +2318,6 @@ const docTemplate = `{
                 }
             }
         },
-        "models.VoteRecord": {
-            "type": "object",
-            "properties": {
-                "agent_config_id": {
-                    "type": "string"
-                },
-                "choice": {
-                    "description": "The option voted for",
-                    "type": "string"
-                },
-                "confidence": {
-                    "description": "0-1 confidence in the vote",
-                    "type": "number"
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "reasoning": {
-                    "description": "Agent's reasoning",
-                    "type": "string"
-                },
-                "step_execution_id": {
-                    "type": "string"
-                }
-            }
-        },
         "repository.AgentUsage": {
             "type": "object",
             "properties": {
@@ -3763,6 +2439,177 @@ const docTemplate = `{
                 }
             }
         },
+        "update.ActiveWork": {
+            "type": "object",
+            "properties": {
+                "automation_activities": {
+                    "type": "integer"
+                },
+                "chat_executions": {
+                    "type": "integer"
+                },
+                "task_executions": {
+                    "type": "integer"
+                }
+            }
+        },
+        "update.CoordinatorSnapshot": {
+            "type": "object",
+            "properties": {
+                "channel": {
+                    "type": "string"
+                },
+                "configuration_error": {
+                    "type": "string"
+                },
+                "current_version": {
+                    "type": "string"
+                },
+                "distribution": {
+                    "type": "string"
+                },
+                "drain": {
+                    "$ref": "#/definitions/update.DrainStatus"
+                },
+                "error": {
+                    "type": "string"
+                },
+                "manual": {
+                    "type": "boolean"
+                },
+                "release": {
+                    "$ref": "#/definitions/update.VerifiedRelease"
+                },
+                "staged": {
+                    "type": "boolean"
+                },
+                "state": {
+                    "type": "string"
+                }
+            }
+        },
+        "update.DrainStatus": {
+            "type": "object",
+            "properties": {
+                "active": {
+                    "$ref": "#/definitions/update.ActiveWork"
+                },
+                "expires_at": {
+                    "type": "string"
+                },
+                "generation": {
+                    "type": "string"
+                },
+                "queued_total": {
+                    "type": "integer"
+                },
+                "state": {
+                    "type": "string"
+                }
+            }
+        },
+        "update.ReleaseMetadata": {
+            "type": "object",
+            "properties": {
+                "channel": {
+                    "type": "string"
+                },
+                "commit": {
+                    "type": "string"
+                },
+                "database_compatibility": {
+                    "type": "string"
+                },
+                "expires_at": {
+                    "type": "string"
+                },
+                "minimum_hosted_version": {
+                    "type": "string"
+                },
+                "minimum_updater_version": {
+                    "type": "string"
+                },
+                "published_at": {
+                    "type": "string"
+                },
+                "release_notes_url": {
+                    "type": "string"
+                },
+                "schema_version": {
+                    "type": "integer"
+                },
+                "targets": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/update.Target"
+                    }
+                },
+                "version": {
+                    "type": "string"
+                }
+            }
+        },
+        "update.Target": {
+            "type": "object",
+            "properties": {
+                "arch": {
+                    "type": "string"
+                },
+                "filename": {
+                    "type": "string"
+                },
+                "filetype": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "image_ref": {
+                    "type": "string"
+                },
+                "install_layout": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string"
+                },
+                "os": {
+                    "type": "string"
+                },
+                "purpose": {
+                    "type": "string"
+                },
+                "sha256": {
+                    "type": "string"
+                },
+                "size": {
+                    "type": "integer"
+                },
+                "url": {
+                    "type": "string"
+                },
+                "variant": {
+                    "type": "string"
+                }
+            }
+        },
+        "update.VerifiedRelease": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string"
+                },
+                "apply_supported": {
+                    "type": "boolean"
+                },
+                "metadata": {
+                    "$ref": "#/definitions/update.ReleaseMetadata"
+                },
+                "target": {
+                    "$ref": "#/definitions/update.Target"
+                }
+            }
+        },
         "viewmodels.LifecycleExecutionEventView": {
             "type": "object",
             "properties": {
@@ -3781,6 +2628,23 @@ const docTemplate = `{
                 },
                 "seq": {
                     "type": "integer"
+                }
+            }
+        },
+        "viewmodels.LifecycleExecutionPageView": {
+            "type": "object",
+            "properties": {
+                "has_more": {
+                    "type": "boolean"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/viewmodels.LifecycleExecutionView"
+                    }
+                },
+                "next_cursor": {
+                    "type": "string"
                 }
             }
         },
@@ -3865,18 +2729,6 @@ const docTemplate = `{
         {
             "description": "Worker capacity and utilization API endpoints",
             "name": "capacity"
-        },
-        {
-            "description": "Multi-agent workflow and metrics API endpoints",
-            "name": "workflows"
-        },
-        {
-            "description": "Autonomous build and trend intelligence API endpoints",
-            "name": "autonomous"
-        },
-        {
-            "description": "Semantic collision analysis API endpoints",
-            "name": "collisions"
         }
     ]
 }`

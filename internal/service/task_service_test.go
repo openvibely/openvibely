@@ -141,6 +141,224 @@ func TestTaskService_Create_DefaultsStatus(t *testing.T) {
 	}
 }
 
+func TestTaskService_Create_NormalizesPriority(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	svc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil)
+	ctx := context.Background()
+
+	cases := []struct {
+		name     string
+		priority int
+		want     int
+	}{
+		{name: "missing zero", priority: 0, want: 2},
+		{name: "below range", priority: -1, want: 2},
+		{name: "above range", priority: 5, want: 2},
+		{name: "low", priority: 1, want: 1},
+		{name: "normal", priority: 2, want: 2},
+		{name: "high", priority: 3, want: 3},
+		{name: "urgent", priority: 4, want: 4},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			task := &models.Task{
+				ProjectID: "default",
+				Title:     "Priority " + tt.name,
+				Prompt:    "test priority normalization",
+				Category:  models.CategoryBacklog,
+				Status:    models.StatusPending,
+				Priority:  tt.priority,
+			}
+			require.NoError(t, svc.CreateWithGoal(ctx, task, ""))
+			assert.Equal(t, tt.want, task.Priority)
+
+			stored, err := taskRepo.GetByID(ctx, task.ID)
+			require.NoError(t, err)
+			require.NotNil(t, stored)
+			assert.Equal(t, tt.want, stored.Priority)
+		})
+	}
+}
+
+func TestTaskService_Update_RejectsInvalidPriority(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	svc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil)
+	ctx := context.Background()
+
+	for _, priority := range []int{0, -1, 5} {
+		t.Run(fmt.Sprintf("priority %d", priority), func(t *testing.T) {
+			task := &models.Task{
+				ProjectID: "default",
+				Title:     fmt.Sprintf("Invalid Priority %d", priority),
+				Prompt:    "original prompt",
+				Category:  models.CategoryBacklog,
+				Status:    models.StatusPending,
+				Priority:  3,
+			}
+			require.NoError(t, svc.Create(ctx, task))
+
+			task.Title = "Should Not Persist"
+			task.Priority = priority
+			err := svc.Update(ctx, task)
+			require.ErrorIs(t, err, ErrInvalidTaskPriority)
+
+			stored, err := taskRepo.GetByID(ctx, task.ID)
+			require.NoError(t, err)
+			require.NotNil(t, stored)
+			assert.Equal(t, fmt.Sprintf("Invalid Priority %d", priority), stored.Title)
+			assert.Equal(t, 3, stored.Priority)
+		})
+	}
+}
+
+func TestTaskService_Update_PersistsValidPriorities(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	svc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil)
+	ctx := context.Background()
+
+	for priority := 1; priority <= 4; priority++ {
+		t.Run(fmt.Sprintf("priority %d", priority), func(t *testing.T) {
+			initialPriority := 2
+			if priority == initialPriority {
+				initialPriority = 3
+			}
+			task := &models.Task{
+				ProjectID: "default",
+				Title:     fmt.Sprintf("Valid Priority %d", priority),
+				Prompt:    "original prompt",
+				Category:  models.CategoryBacklog,
+				Status:    models.StatusPending,
+				Priority:  initialPriority,
+			}
+			require.NoError(t, svc.Create(ctx, task))
+
+			task.Priority = priority
+			require.NoError(t, svc.Update(ctx, task))
+
+			stored, err := taskRepo.GetByID(ctx, task.ID)
+			require.NoError(t, err)
+			require.NotNil(t, stored)
+			assert.Equal(t, priority, stored.Priority)
+		})
+	}
+}
+
+func TestTaskService_Create_NormalizesTitlePromptAndDuplicateCheck(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	svc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil)
+	ctx := context.Background()
+
+	first := &models.Task{
+		ProjectID: "default",
+		Title:     " Fix checkout ",
+		Prompt:    " investigate checkout ",
+		Category:  models.CategoryBacklog,
+		Status:    models.StatusPending,
+	}
+	require.NoError(t, svc.Create(ctx, first))
+	stored, err := taskRepo.GetByID(ctx, first.ID)
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	assert.Equal(t, "Fix checkout", stored.Title)
+	assert.Equal(t, "investigate checkout", stored.Prompt)
+
+	duplicate := &models.Task{
+		ProjectID: "default",
+		Title:     " Fix checkout ",
+		Prompt:    "different prompt",
+		Category:  models.CategoryBacklog,
+		Status:    models.StatusPending,
+	}
+	require.ErrorIs(t, svc.Create(ctx, duplicate), ErrDuplicateTask)
+
+	tasks, err := taskRepo.ListByProject(ctx, "default", "")
+	require.NoError(t, err)
+	matches := 0
+	for _, task := range tasks {
+		if task.Title == "Fix checkout" {
+			matches++
+		}
+	}
+	assert.Equal(t, 1, matches)
+}
+
+func TestTaskService_CreateAndUpdateRejectNormalizedBlankTitlePrompt(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	svc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil)
+	ctx := context.Background()
+
+	for _, tt := range []struct {
+		name string
+		task models.Task
+		want error
+	}{
+		{name: "blank title", task: models.Task{ProjectID: "default", Title: " \t\n ", Prompt: "prompt"}, want: ErrTaskTitleRequired},
+		{name: "blank prompt", task: models.Task{ProjectID: "default", Title: "Title", Prompt: " \t\n "}, want: ErrTaskPromptRequired},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			task := tt.task
+			require.ErrorIs(t, svc.Create(ctx, &task), tt.want)
+		})
+	}
+
+	storedAfterCreateFailures, err := taskRepo.ListByProject(ctx, "default", "")
+	require.NoError(t, err)
+	assert.Empty(t, storedAfterCreateFailures)
+
+	task := &models.Task{ProjectID: "default", Title: "Valid task", Prompt: "valid prompt", Category: models.CategoryBacklog, Status: models.StatusPending}
+	require.NoError(t, svc.Create(ctx, task))
+
+	task.Title = "   "
+	task.Prompt = "still valid"
+	require.ErrorIs(t, svc.Update(ctx, task), ErrTaskTitleRequired)
+	afterBlankTitle, err := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "Valid task", afterBlankTitle.Title)
+	assert.Equal(t, "valid prompt", afterBlankTitle.Prompt)
+
+	task.Title = "Valid task"
+	task.Prompt = "   "
+	require.ErrorIs(t, svc.Update(ctx, task), ErrTaskPromptRequired)
+	afterBlankPrompt, err := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "Valid task", afterBlankPrompt.Title)
+	assert.Equal(t, "valid prompt", afterBlankPrompt.Prompt)
+}
+
+func TestTaskService_Update_NormalizesTitlePromptAndDuplicateCheck(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	svc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil)
+	ctx := context.Background()
+
+	existing := &models.Task{ProjectID: "default", Title: "Existing title", Prompt: "existing prompt", Category: models.CategoryBacklog, Status: models.StatusPending}
+	require.NoError(t, svc.Create(ctx, existing))
+	target := &models.Task{ProjectID: "default", Title: "Original title", Prompt: "original prompt", Category: models.CategoryBacklog, Status: models.StatusPending}
+	require.NoError(t, svc.Create(ctx, target))
+
+	target.Title = " Trimmed update "
+	target.Prompt = " updated prompt "
+	require.NoError(t, svc.Update(ctx, target))
+	updated, err := taskRepo.GetByID(ctx, target.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "Trimmed update", updated.Title)
+	assert.Equal(t, "updated prompt", updated.Prompt)
+
+	updated.Title = " Existing title "
+	updated.Prompt = " conflict prompt "
+	require.ErrorIs(t, svc.Update(ctx, updated), ErrDuplicateTask)
+	afterConflict, err := taskRepo.GetByID(ctx, target.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "Trimmed update", afterConflict.Title)
+	assert.Equal(t, "updated prompt", afterConflict.Prompt)
+}
+
 func TestTaskService_Create_ActiveAutoSubmits(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	taskRepo := repository.NewTaskRepo(db, nil)
@@ -262,6 +480,11 @@ func TestTaskService_UpdateStatus_RunningActiveResumesGoalPausedByUserStop(t *te
 	require.NoError(t, goalSvc.PauseActiveGoalStoppedByUser(ctx, task.ID))
 
 	require.NoError(t, svc.UpdateStatus(ctx, task.ID, models.StatusRunning))
+
+	updated, err := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.NotNil(t, updated)
+	assert.Equal(t, models.StatusPending, updated.Status, "running requests must wait for worker admission")
 
 	resumed, err := goalSvc.GetGoal(ctx, task.ID)
 	require.NoError(t, err)
@@ -667,15 +890,15 @@ func TestTaskService_UpdateCategory_FailedFollowupRetryCreatesOneExecutionAfterA
 	execs, err = execRepo.ListByTaskChronological(ctx, task.ID)
 	require.NoError(t, err)
 	require.Len(t, execs, 2)
-	running := 0
+	queued := 0
 	for _, exec := range execs {
-		if exec.Status == models.ExecRunning {
-			running++
+		if exec.Status == models.ExecQueued {
+			queued++
 			assert.Equal(t, failed.PromptSent, exec.PromptSent)
 			assert.True(t, exec.IsFollowup)
 		}
 	}
-	assert.Equal(t, 1, running, "retry must create exactly one running follow-up execution")
+	assert.Equal(t, 1, queued, "retry must create exactly one queued follow-up execution")
 	select {
 	case submitted := <-workerSvc.Submitted():
 		t.Fatalf("original task was submitted during failed follow-up retry: %s", submitted.ID)
@@ -1132,6 +1355,47 @@ func TestTaskService_Update_DuplicateTitle(t *testing.T) {
 	err := svc.Update(ctx, task2)
 	if err != ErrDuplicateTask {
 		t.Errorf("expected ErrDuplicateTask, got %v", err)
+	}
+}
+
+func TestTaskService_Delete_TerminalizesRetainedSwarmChildren(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	workerSvc := newTestWorkerService(t)
+	svc := NewTaskService(taskRepo, nil, workerSvc)
+	ctx := context.Background()
+
+	parent := &models.Task{ProjectID: "default", Title: "Deleted swarm", Category: models.CategoryCompleted, Status: models.StatusCompleted, Prompt: "p", SwarmRole: models.SwarmRoleParent, SwarmStatus: "current"}
+	require.NoError(t, taskRepo.Create(ctx, parent))
+	worker := &models.Task{ProjectID: "default", Title: "Deleted swarm · Worker", Category: models.CategoryActive, Status: models.StatusRunning, Prompt: "p", ParentTaskID: &parent.ID, SwarmRole: models.SwarmRoleWorker, SwarmStatus: "running"}
+	reviewer := &models.Task{ProjectID: "default", Title: "Deleted swarm · Reviewer", Category: models.CategoryActive, Status: models.StatusBlocked, Prompt: "p", ParentTaskID: &parent.ID, SwarmRole: models.SwarmRoleReviewer, SwarmStatus: "pending"}
+	integrator := &models.Task{ProjectID: "default", Title: "Deleted swarm · Integrator", Category: models.CategoryActive, Status: models.StatusBlocked, Prompt: "p", ParentTaskID: &parent.ID, SwarmRole: models.SwarmRoleLegacyIntegrator, SwarmStatus: "pending"}
+	require.NoError(t, taskRepo.Create(ctx, worker))
+	require.NoError(t, taskRepo.Create(ctx, reviewer))
+	require.NoError(t, taskRepo.Create(ctx, integrator))
+
+	cancelled := make(map[string]bool)
+	for _, child := range []*models.Task{worker, reviewer, integrator} {
+		childID := child.ID
+		workerSvc.cancelMu.Lock()
+		workerSvc.cancelFuncs[childID] = func() { cancelled[childID] = true }
+		workerSvc.cancelMu.Unlock()
+	}
+
+	require.NoError(t, svc.Delete(ctx, parent.ID))
+
+	deletedParent, err := taskRepo.GetByID(ctx, parent.ID)
+	require.NoError(t, err)
+	require.Nil(t, deletedParent)
+	for _, child := range []*models.Task{worker, reviewer, integrator} {
+		got, err := taskRepo.GetByID(ctx, child.ID)
+		require.NoError(t, err)
+		require.NotNil(t, got)
+		assert.Nil(t, got.ParentTaskID)
+		assert.Equal(t, models.CategoryCompleted, got.Category)
+		assert.Equal(t, models.StatusCancelled, got.Status)
+		assert.Equal(t, "cancelled", got.SwarmStatus)
+		assert.True(t, cancelled[child.ID], "expected CancelRunningTask invoked for child %s", child.SwarmRole)
 	}
 }
 
@@ -1659,6 +1923,64 @@ func TestTaskService_UpdateCategory_FromCompletedToActiveResetsStatus(t *testing
 	}
 }
 
+func TestTaskService_UpdateCategory_NonActiveRunningOrQueuedDoesNotCancel(t *testing.T) {
+	cases := []struct {
+		name     string
+		category models.TaskCategory
+		status   models.TaskStatus
+	}{
+		{name: "running scheduled task", category: models.CategoryScheduled, status: models.StatusRunning},
+		{name: "queued backlog task", category: models.CategoryBacklog, status: models.StatusQueued},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			db := testutil.NewTestDB(t)
+			taskRepo := repository.NewTaskRepo(db, nil)
+			workerSvc := newTestWorkerService(t)
+			goalSvc := NewTaskGoalService(repository.NewTaskGoalRepo(db), taskRepo, nil)
+			svc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), workerSvc)
+			svc.SetTaskGoalService(goalSvc)
+			ctx := context.Background()
+
+			task := &models.Task{
+				ProjectID: "default",
+				Title:     tc.name,
+				Prompt:    "test",
+				Status:    tc.status,
+				Category:  tc.category,
+			}
+			require.NoError(t, taskRepo.Create(ctx, task))
+			goal, err := goalSvc.SetGoal(ctx, task.ID, "Keep going until done", GoalOptions{Actor: "test"})
+			require.NoError(t, err)
+
+			cancelled := make(chan struct{}, 1)
+			workerSvc.RegisterCancel(task.ID, func() { cancelled <- struct{}{} })
+
+			require.NoError(t, svc.UpdateCategory(ctx, task.ID, models.CategoryCompleted))
+
+			select {
+			case <-cancelled:
+				t.Fatal("non-Active task category change must not cancel worker work")
+			default:
+			}
+			assert.False(t, workerSvc.IsCancellationRequested(task.ID))
+
+			updated, err := taskRepo.GetByID(ctx, task.ID)
+			require.NoError(t, err)
+			require.NotNil(t, updated)
+			assert.Equal(t, tc.status, updated.Status)
+			assert.Equal(t, models.CategoryCompleted, updated.Category)
+
+			updatedGoal, err := goalSvc.GetGoal(ctx, task.ID)
+			require.NoError(t, err)
+			require.NotNil(t, updatedGoal)
+			assert.Equal(t, goal.GoalID, updatedGoal.GoalID)
+			assert.Equal(t, models.TaskGoalStatusActive, updatedGoal.Status)
+		})
+	}
+}
+
 func TestTaskService_CancelTask_AllowsActivePendingTask(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	taskRepo := repository.NewTaskRepo(db, nil)
@@ -1683,6 +2005,99 @@ func TestTaskService_CancelTask_AllowsActivePendingTask(t *testing.T) {
 	require.NotNil(t, updated)
 	assert.Equal(t, models.StatusCancelled, updated.Status)
 	assert.Equal(t, models.CategoryBacklog, updated.Category)
+}
+
+func TestTaskService_CancelTask_DoesNotAllowOrdinaryScheduledPendingTask(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	workerSvc := newTestWorkerService(t)
+	svc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), workerSvc)
+	ctx := context.Background()
+
+	task := &models.Task{
+		ProjectID: "default",
+		Title:     "Ordinary Scheduled Pending Task",
+		Prompt:    "test",
+		Status:    models.StatusPending,
+		Category:  models.CategoryScheduled,
+	}
+	require.NoError(t, taskRepo.Create(ctx, task))
+
+	err := svc.CancelTask(ctx, task.ID)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "not running, queued, or active pending")
+	updated, err := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.NotNil(t, updated)
+	require.Equal(t, models.StatusPending, updated.Status)
+	require.Equal(t, models.CategoryScheduled, updated.Category)
+}
+
+func TestTaskService_CancelTask_RunningTaskPreservesCancellationOrdering(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	workerSvc := newTestWorkerService(t)
+	goalSvc := NewTaskGoalService(repository.NewTaskGoalRepo(db), taskRepo, nil)
+	svc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), workerSvc)
+	svc.SetTaskGoalService(goalSvc)
+	ctx := context.Background()
+
+	task := &models.Task{
+		ProjectID: "default",
+		Title:     "Running Explicit Cancel",
+		Prompt:    "test",
+		Status:    models.StatusRunning,
+		Category:  models.CategoryActive,
+	}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	goal, err := goalSvc.SetGoal(ctx, task.ID, "Keep going until done", GoalOptions{Actor: "test"})
+	require.NoError(t, err)
+
+	type cancellationObservation struct {
+		markerSet bool
+		status    models.TaskStatus
+		category  models.TaskCategory
+		err       error
+	}
+	observed := make(chan cancellationObservation, 1)
+	workerSvc.RegisterCancel(task.ID, func() {
+		beforeStatus, getErr := taskRepo.GetByID(context.Background(), task.ID)
+		if beforeStatus == nil {
+			observed <- cancellationObservation{markerSet: workerSvc.IsCancellationRequested(task.ID), err: getErr}
+			return
+		}
+		observed <- cancellationObservation{
+			markerSet: workerSvc.IsCancellationRequested(task.ID),
+			status:    beforeStatus.Status,
+			category:  beforeStatus.Category,
+			err:       getErr,
+		}
+	})
+
+	require.NoError(t, svc.CancelTask(ctx, task.ID))
+
+	select {
+	case got := <-observed:
+		require.NoError(t, got.err)
+		assert.True(t, got.markerSet, "cancellation intent must be marked before the worker callback")
+		assert.Equal(t, models.StatusRunning, got.status, "durable task cancellation must follow worker cancellation")
+		assert.Equal(t, models.CategoryActive, got.category)
+	case <-time.After(time.Second):
+		t.Fatal("expected running task cancel callback")
+	}
+
+	updated, err := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.NotNil(t, updated)
+	assert.Equal(t, models.StatusCancelled, updated.Status)
+	assert.Equal(t, models.CategoryBacklog, updated.Category)
+
+	paused, err := goalSvc.GetGoal(ctx, task.ID)
+	require.NoError(t, err)
+	require.NotNil(t, paused)
+	assert.Equal(t, goal.GoalID, paused.GoalID)
+	assert.Equal(t, models.TaskGoalStatusPaused, paused.Status)
+	assert.Equal(t, "stopped by user", paused.Reason)
 }
 
 func TestTaskService_CancelTask_AllowsQueuedTask(t *testing.T) {

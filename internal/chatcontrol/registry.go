@@ -7,21 +7,26 @@
 // # API-domain mapping policy
 //
 // Chat RW (orchestrate mode):
-//   - tasks: create_task, create_swarm_task, edit_task, execute_tasks, send_to_task
+//   - tasks: create_task, create_swarm_task, edit_task, execute_tasks, cancel_task, send_to_task
 //   - schedules: schedule_task, delete_schedule, modify_schedule
-//   - alerts: create_alert, delete_alert, toggle_alert
-//   - personality: set_personality
-//   - projects: switch_project
+//   - alerts: create_alert, create_notification, decide_alert, delete_alert, toggle_alert
+//   - personality: set_personality, save_custom_personality
+//   - projects: create_project, update_project_settings, switch_project
+//   - agents: create_agent, update_agent
+//   - automations: save_automation, update_automation_template, run_automation_now, pause_automation, resume_automation, delete_automation
 //   - chat: set_chat_mode
 //
 // Chat read-only (plan + orchestrate):
-//   - tasks: list_tasks, view_task_thread
+//   - tasks: list_tasks, view_swarm, view_task_thread
+//   - schedules: list_schedules
+//   - pulse: view_pulse
 //   - projects: list_projects, project_info, get_current_project
 //   - models: list_models, get_model
+//   - analytics: view_usage_analytics
 //   - agents: list_agents
 //   - alerts: list_alerts, get_alert
 //   - personality: list_personalities, get_personality
-//   - settings: view_settings
+//   - settings: view_settings, list_channels, view_system_update
 //   - memory: memory_view (only when selected-memory runtime tools authorize a handle)
 //   - chat: get_chat_mode, list_capabilities
 //   - messaging: send_message
@@ -54,10 +59,11 @@ const (
 	SurfaceSlack    Surface = "slack"
 	SurfaceEmail    Surface = "email"
 	SurfaceDiscord  Surface = "discord"
+	SurfaceX        Surface = "x"
 )
 
 // AllSurfaces is the full set of supported surfaces.
-var AllSurfaces = []Surface{SurfaceWeb, SurfaceAPI, SurfaceTelegram, SurfaceSlack, SurfaceEmail, SurfaceDiscord}
+var AllSurfaces = []Surface{SurfaceWeb, SurfaceAPI, SurfaceTelegram, SurfaceSlack, SurfaceEmail, SurfaceDiscord, SurfaceX, SurfaceX}
 
 // AccessLevel classifies read vs write.
 type AccessLevel string
@@ -90,6 +96,8 @@ const (
 	DomainSettings    Domain = "settings"
 	DomainMessaging   Domain = "messaging"
 	DomainGitHub      Domain = "github"
+	DomainAnalytics   Domain = "analytics"
+	DomainPulse       Domain = "pulse"
 	DomainAutomations Domain = "automations"
 	DomainMemory      Domain = "memory"
 	DomainChat        Domain = "chat"
@@ -133,24 +141,34 @@ const chainSchemaProperties = `{"type":"object","properties":{"enabled":{"type":
 // createTaskParams is the full JSON Schema for the create_task tool.
 const createTaskParams = `{"type":"object","properties":{"title":{"type":"string"},"prompt":{"type":"string"},"goal":{"type":"string","description":"Optional completion condition for the task. If set, the Goal Agent may continue the task across turns until this condition is satisfied."},"category":{"type":"string","enum":["active","backlog"]},"priority":{"type":"integer","minimum":1,"maximum":4},"agent_id":{"type":"string","description":"Internal model config ID. Do not use for Agent definitions from the Agents page."},"agent_definition_id":{"type":"string","description":"Agent definition ID when already known."},"agent":{"type":"string","description":"Exact name of an enabled selectable Agent definition from the Agents page, e.g. natural requests like 'Have <agent name>...' use agent: '<agent name>'."},"chain":` + chainSchemaProperties + `,"source_github_issue_number":{"type":"integer","minimum":1,"description":"For a GitHub Dev Inbox implementation task, the exact assigned issue number returned by this execution."},"source_github_repo_url":{"type":"string","description":"Optional repository URL for source_github_issue_number. Defaults to the current project repository."}},"required":["title","prompt"],"additionalProperties":false}`
 
-const createSwarmTaskParams = `{"type":"object","properties":{"title":{"type":"string"},"prompt":{"type":"string"},"project_id":{"type":"string","description":"Optional project id; defaults to current project."},"category":{"type":"string","enum":["active","backlog"],"description":"Active starts the planner now; backlog defers planning until the swarm parent is run or moved to Active."},"max_workers":{"type":"integer","minimum":1,"maximum":8},"worker_isolation":{"type":"string","enum":["worktree","read_only","shared"]}},"required":["title","prompt"],"additionalProperties":false}`
+const createAgentParams = `{"type":"object","properties":{"name":{"type":"string","description":"Display name for the reusable Agent profile."},"description":{"type":"string","description":"Short summary shown on the Agents page and selection surfaces."},"system_prompt":{"type":"string","description":"System prompt/persona for this user-managed Agent."},"model":{"type":"string","description":"Optional model override by configured model id/name, or inherit. Defaults to inherit."},"tools":{"type":"array","items":{"type":"string"},"description":"Optional allowed tool names from the safe Agent tool catalog. Unknown tools are rejected."},"scoped_files":{"type":"array","items":{"type":"object","properties":{"directory":{"type":"string","description":"Project-relative directory."},"permissions":{"type":"array","items":{"type":"string","enum":["read","write","delete"]}}},"required":["directory"],"additionalProperties":false},"description":"Optional safe scoped-file grants. Secret-bearing MCP env/header values are not supported."},"scope":{"type":"string","enum":["project","global"],"description":"Agent scope. Defaults to project."},"project_id":{"type":"string","description":"Optional assertion matching the current project for project-scoped Agents."},"enabled":{"type":"boolean","description":"Whether the Agent is enabled. Defaults to true."},"selectable_as_primary":{"type":"boolean","description":"Whether the Agent can be assigned as a primary Agent for tasks. Defaults to true."}},"required":["name","system_prompt"],"additionalProperties":false}`
+const updateAgentParams = `{"type":"object","properties":{"agent_id":{"type":"string","description":"Existing Agent ID to update."},"agent_name":{"type":"string","description":"Exact existing Agent name to update when agent_id/key are not known."},"key":{"type":"string","description":"Existing Agent key to update."},"project_id":{"type":"string","description":"Optional assertion matching the current project for project-scoped Agents."},"name":{"type":"string","description":"Replacement display name. Duplicate enabled selectable names are rejected."},"description":{"type":"string","description":"Replacement description. Use an empty string to clear it."},"system_prompt":{"type":"string","description":"Replacement system prompt/persona for this user-managed Agent."},"model":{"type":"string","description":"Replacement model override by configured model id/name, or inherit to clear the override."},"tools":{"type":"array","items":{"type":"string"},"description":"Replacement allowed tool names from the safe Agent tool catalog. Unknown tools are rejected."},"scoped_files":{"type":"array","items":{"type":"object","properties":{"directory":{"type":"string","description":"Project-relative directory."},"permissions":{"type":"array","items":{"type":"string","enum":["read","write","delete"]}}},"required":["directory"],"additionalProperties":false},"description":"Replacement safe scoped-file grants. Secret-bearing MCP env/header values are not supported."},"enabled":{"type":"boolean","description":"Whether the Agent is enabled."},"selectable_as_primary":{"type":"boolean","description":"Whether the Agent can be assigned as a primary Agent for tasks."}},"additionalProperties":false}`
+const saveCustomPersonalityParams = `{"type":"object","properties":{"mode":{"type":"string","enum":["create","update"],"description":"Use create for a new custom personality and update for an existing custom personality."},"name":{"type":"string","description":"Display name for the custom personality."},"key":{"type":"string","description":"Optional key for create; required exact existing custom key for update."},"description":{"type":"string","description":"Short description shown in Personality settings and list_personalities."},"system_prompt":{"type":"string","description":"Custom personality system prompt. Must satisfy the same length validation as Settings."},"activate":{"type":"boolean","description":"Set this custom personality as active after the save succeeds."}},"required":["mode","name","system_prompt"],"additionalProperties":false}`
+const createProjectParams = `{"type":"object","properties":{"name":{"type":"string","description":"Project name."},"repo_url":{"type":"string","description":"GitHub repository URL to clone for the new project. Local filesystem paths and create-directory behavior are not supported."},"description":{"type":"string","description":"Optional project description."},"default_agent_config_id":{"type":"string","description":"Optional default model config ID for the project."},"max_workers":{"type":"integer","minimum":1,"maximum":10,"description":"Optional per-project worker limit from 1 through 10."},"switch_after_create":{"type":"boolean","description":"Request switching the current Chat/channel context to the new project when the surface supports it."}},"required":["name","repo_url"],"additionalProperties":false}`
+const updateProjectSettingsParams = `{"type":"object","properties":{"project_id":{"type":"string","description":"Optional assertion matching the current project ID. The action updates only the current project."},"project_name":{"type":"string","description":"Optional assertion matching the current project name exactly, case-insensitive. The action updates only the current project."},"new_name":{"type":"string","description":"Optional new project display name. Must be nonblank after trimming."},"description":{"type":"string","description":"Optional replacement project description. Use an empty string to clear it."},"default_model":{"type":"string","description":"Optional project default model to set, by exact model config ID first or unambiguous exact model name."},"default_model_id":{"type":"string","description":"Optional project default model config ID to set. Use either default_model or default_model_id, not both."},"clear_default_model":{"type":"boolean","description":"Clear the project-specific default model so future tasks inherit the global default."},"max_workers":{"type":"integer","minimum":0,"maximum":10,"description":"Optional per-project worker limit. Use 0 to clear the project-specific limit."},"clear_max_workers":{"type":"boolean","description":"Clear the project-specific worker limit, equivalent to max_workers=0."}},"additionalProperties":false}`
+const createSwarmTaskParams = `{"type":"object","properties":{"title":{"type":"string"},"prompt":{"type":"string"},"goal":{"type":"string","description":"Optional completion condition for the swarm parent. If set, the Goal Agent may continue the parent task until this condition is satisfied."},"project_id":{"type":"string","description":"Optional project id; defaults to current project."},"category":{"type":"string","enum":["active","backlog"],"description":"Active starts the planner now; backlog defers planning until the swarm parent is run or moved to Active."},"priority":{"type":"integer","minimum":1,"maximum":4},"agent_id":{"type":"string","description":"Internal model config ID for the swarm parent/children. Do not use for Agent definitions from the Agents page."},"agent_definition_id":{"type":"string","description":"Agent definition ID when already known."},"agent":{"type":"string","description":"Exact name of an enabled selectable Agent definition from the Agents page, e.g. natural requests like 'Have <agent name>...' use agent: '<agent name>'."},"tag":{"type":"string","enum":["bug","feature"]},"max_workers":{"type":"integer","minimum":1,"maximum":8},"worker_isolation":{"type":"string","enum":["worktree","read_only","shared"]},"reviewer_enabled":{"type":"boolean","description":"Whether the swarm should create and run a reviewer stage. Defaults to true."},"merger_enabled":{"type":"boolean","description":"Whether the swarm should create and run a merger stage. Defaults to true."},"merge_target_branch":{"type":"string","description":"Optional merge target branch for swarm output."}},"required":["title","prompt"],"additionalProperties":false}`
+const viewSwarmParams = `{"type":"object","properties":{"task_id":{"type":"string","description":"Swarm parent or child task ID, or 'current' in a persisted task-thread follow-up."},"title":{"type":"string","description":"Exact swarm parent or child task title in the current project when task_id is not known."}},"additionalProperties":false}`
+const cancelTaskParams = `{"type":"object","properties":{"task_id":{"type":"string","description":"Task ID to cancel, or 'current' in a persisted task-thread follow-up."},"title":{"type":"string","description":"Exact current-project task title when task_id is not known."}},"additionalProperties":false}`
 
 // editTaskParams is the full JSON Schema for the edit_task tool.
-const editTaskParams = `{"type":"object","properties":{"id":{"type":"string"},"title":{"type":"string"},"prompt":{"type":"string"},"category":{"type":"string","enum":["active","backlog","scheduled"]},"priority":{"type":"integer","minimum":1,"maximum":4},"tag":{"type":"string"},"agent_id":{"type":"string"},"agent_config_id":{"type":"string"},"chain":` + chainSchemaProperties + `,"attachments":{"type":"array","items":{"type":"string"}}},"required":["id"],"additionalProperties":false}`
+const editTaskParams = `{"type":"object","properties":{"id":{"type":"string"},"title":{"type":"string"},"prompt":{"type":"string"},"category":{"type":"string","enum":["active","backlog","scheduled"]},"priority":{"type":"integer","minimum":1,"maximum":4},"tag":{"type":"string"},"agent_id":{"type":"string","description":"Internal model config ID. Do not use for Agent definitions from the Agents page."},"agent_config_id":{"type":"string","description":"Alias for agent_id; selects the LLM model config only."},"agent_definition_id":{"type":"string","description":"Primary Agent definition ID when already known."},"agent":{"type":"string","description":"Exact name of an enabled selectable Agent definition from the Agents page. Use this when only the Agent name is known."},"clear_agent_definition":{"type":"boolean","description":"Clear the primary Agent assignment without clearing or changing the model config."},"chain":` + chainSchemaProperties + `,"attachments":{"type":"array","items":{"type":"string"}}},"required":["id"],"additionalProperties":false}`
 
 const sendMessageParams = `{"type":"object","properties":{"action":{"type":"string","enum":["send","list"],"description":"send delivers a message. list returns configured outbound targets including their target_kind."},"target":{"type":"string","description":"Delivery target. Format: platform, platform:#target-name, platform:target_id, or platform:target_id:thread_id. Saved outbound targets and home targets are preferred first. Authorized channel users/senders can be used as direct recipients, including email:person@example.com for an authorized Email sender, telegram:123456789 for an authorized Telegram numeric user ID, and slack:user:U123... or discord:user:1518288288572641398 for direct messages. Arbitrary unsaved explicit targets require the project policy. For Discord channel sends use discord:channel:<channel_id> or discord:channel:<channel_id>:<thread_id>. Prefer saved/named targets; call action=list to see configured targets."},"message":{"type":"string","description":"Text to send."},"subject":{"type":"string","description":"Optional subject for email targets. Ignored by chat platforms."}},"additionalProperties":false}`
 
 const githubRepoURLProperty = `"repo_url":{"type":"string","description":"Optional GitHub repository URL. Defaults to the current project repository."}`
 const githubCreateIssueParams = `{"type":"object","properties":{"title":{"type":"string"},"body":{"type":"string"},"labels":{"type":"array","items":{"type":"string"},"description":"Plain GitHub labels such as suggestion, bug, approved, in-progress. Do not use an openvibely: prefix."},"assignees":{"type":"array","items":{"type":"string"}},` + githubRepoURLProperty + `},"required":["title"],"additionalProperties":false}`
 const githubIssueNumberParams = `{"type":"object","properties":{"issue_number":{"type":"integer","minimum":1},` + githubRepoURLProperty + `},"required":["issue_number"],"additionalProperties":false}`
-const githubListAssignedIssuesParams = `{"type":"object","properties":{"assignee":{"type":"string","description":"GitHub login whose assigned open issues should be listed."},` + githubRepoURLProperty + `},"required":["assignee"],"additionalProperties":false}`
-const githubListMyAssignedIssuesParams = `{"type":"object","properties":{` + githubRepoURLProperty + `},"additionalProperties":false}`
+const githubAssignedIssuePaginationProperties = `,"limit":{"type":"integer","minimum":1,"maximum":100,"description":"Maximum number of assigned issues to return for this page; defaults to 100."},"offset":{"type":"integer","minimum":0,"description":"Number of assigned issues to skip for pagination; use next_offset from the previous response."}`
+const githubListAssignedIssuesParams = `{"type":"object","properties":{"assignee":{"type":"string","description":"GitHub login whose assigned open issues should be listed."},` + githubRepoURLProperty + githubAssignedIssuePaginationProperties + `},"required":["assignee"],"additionalProperties":false}`
+const githubListMyAssignedIssuesParams = `{"type":"object","properties":{` + githubRepoURLProperty + githubAssignedIssuePaginationProperties + `},"additionalProperties":false}`
+const githubListExistingAutomationIssuesParams = `{"type":"object","properties":{` + githubRepoURLProperty + `,"limit":{"type":"integer","minimum":1,"maximum":100,"description":"Maximum number of newest issues to return for this page; defaults to 50."},"offset":{"type":"integer","minimum":0,"description":"Number of newest matching issues to skip for pagination; use next_offset from the previous response."}},"additionalProperties":false}`
 const githubCommentIssueParams = `{"type":"object","properties":{"issue_number":{"type":"integer","minimum":1},"body":{"type":"string"},` + githubRepoURLProperty + `},"required":["issue_number","body"],"additionalProperties":false}`
 const githubAddLabelsParams = `{"type":"object","properties":{"issue_number":{"type":"integer","minimum":1},"labels":{"type":"array","items":{"type":"string"},"description":"Plain GitHub labels such as approved, in-progress, pr-opened. Do not use an openvibely: prefix."},` + githubRepoURLProperty + `},"required":["issue_number","labels"],"additionalProperties":false}`
-const githubOpenPullRequestParams = `{"type":"object","properties":{"task_id":{"type":"string"},"title":{"type":"string","description":"Task title to resolve when task_id is omitted."},"pr_title":{"type":"string","description":"Optional pull request title. Defaults to the task title."},"pr_body":{"type":"string","description":"Optional pull request body. Defaults to an OpenVibely task summary."},"base":{"type":"string","description":"Optional target branch. Defaults to the task merge target or repository default branch."},"draft":{"type":"boolean"},"issue_number":{"type":"integer","minimum":1,"description":"Optional GitHub issue number to persist on the task PR record."},"issue_url":{"type":"string","description":"Optional GitHub issue URL to persist on the task PR record."}},"additionalProperties":false}`
+const githubOpenPullRequestParams = `{"type":"object","properties":{"task_id":{"type":"string"},"title":{"type":"string","description":"Task title to resolve when task_id is omitted."},"pr_title":{"type":"string","description":"Optional pull request title. Defaults to the task title."},"pr_body":{"type":"string","description":"Optional pull request body. For GitHub SDLC work, provide a concise factual Markdown summary of the changes and validation plus a closing reference to the source issue. Defaults to a concise summary and closes the supplied issue."},"base":{"type":"string","description":"Optional target branch. Defaults to the task merge target or repository default branch."},"draft":{"type":"boolean"},"issue_number":{"type":"integer","minimum":1,"description":"Optional GitHub issue number to persist on the task PR record."},"issue_url":{"type":"string","description":"Optional GitHub issue URL to persist on the task PR record."}},"additionalProperties":false}`
 const githubReplacePullRequestBranchParams = `{"type":"object","properties":{"task_id":{"type":"string"},"title":{"type":"string","description":"Task title to resolve when task_id is omitted."},"expected_head_sha":{"type":"string","pattern":"^[0-9a-fA-F]{40}$","description":"Exact current remote PR branch commit SHA used as the atomic lease guard."},"confirm_history_rewrite":{"type":"boolean","const":true,"description":"Must be true to explicitly confirm replacing shared pull request branch history."}},"required":["expected_head_sha","confirm_history_rewrite"],"additionalProperties":false}`
 const githubForwardPRFeedbackParams = `{"type":"object","properties":{"repo_url":{"type":"string","description":"Optional GitHub repository URL. Defaults to the current project repository."}},"additionalProperties":false}`
 const githubActorAuthorizedParams = `{"type":"object","properties":{"github_login":{"type":"string","description":"GitHub login to check against the configured authorized actor list."}},"required":["github_login"],"additionalProperties":false}`
+const automationLifecycleParams = `{"type":"object","properties":{"automation_id":{"type":"string","description":"Saved Automation ID. Use this when known."},"name":{"type":"string","description":"Exact saved Automation name to resolve within the current project when automation_id is not known."}},"additionalProperties":false}`
 
 // registry is the canonical list of all chat-controllable actions.
 // Order matters for prompt/documentation consistency.
@@ -201,8 +219,20 @@ var registry = []ActionDef{
 		Parameters:         json.RawMessage(`{"type":"object","properties":{"task_id":{"type":"string"},"title":{"type":"string"},"tags":{"type":"array","items":{"type":"string"}},"min_priority":{"type":"integer","minimum":1,"maximum":4},"include_completed":{"type":"boolean"}},"additionalProperties":false}`),
 	},
 	{
+		Name:               "cancel_task",
+		Description:        "Cancel one running, queued, or active-pending current-project task. Accepts a task ID, exact title, or task_id='current' in a persisted task-thread follow-up. This stops active work, cancels pending follow-ups, pauses an active goal as stopped by the user, and delegates swarm-parent cancellation to the swarm cascade. It does not support bulk cancellation.",
+		Domain:             DomainTasks,
+		Access:             AccessWrite,
+		Sensitivity:        SensitivityDestructive,
+		NeedsConfirmation:  true,
+		AllowedModes:       []models.ChatMode{models.ChatModeOrchestrate},
+		Surfaces:           allSurfaces(),
+		IncludeThreadTools: true,
+		Parameters:         json.RawMessage(cancelTaskParams),
+	},
+	{
 		Name:               "list_tasks",
-		Description:        "Discover tasks in the current project by partial title and/or optional category/status filters. Returns compact summaries (task ID, title, category, status, priority, updated time, parent/swarm role) with deterministic ordering and explicit limit/offset pagination. Read-only; excludes internal chat rows and never crosses projects. Use it to find an existing task's ID before create_task/edit_task/execute_tasks or to reconcile a GitHub issue by number/URL.",
+		Description:        "Discover tasks in the current project by partial title and/or optional category/status filters. Omit category/status for a broad search across all visible task categories and statuses. Supplying category or status restricts results to only that lifecycle state and can exclude otherwise matching tasks; do not add them when checking whether any matching task exists. Returned filter values echo the parameters you sent; they are not runtime defaults and are not a reason to retry the same query. If you accidentally supplied category/status, do not immediately repeat the same query just to get an unfiltered echo. Do not enumerate lifecycle filters after an empty total=0, has_more=false result for the same query. Returns compact summaries (task ID, title, category, status, priority, updated time, parent/swarm role) with deterministic ordering and explicit limit/offset pagination. Read-only; excludes internal chat rows and never crosses projects. Use it to find an existing task's ID before create_task/edit_task/execute_tasks or to reconcile a GitHub issue by number/URL.",
 		Domain:             DomainTasks,
 		Access:             AccessRead,
 		Sensitivity:        SensitivityNormal,
@@ -210,6 +240,17 @@ var registry = []ActionDef{
 		Surfaces:           allSurfaces(),
 		IncludeThreadTools: false,
 		Parameters:         json.RawMessage(`{"type":"object","properties":{"query":{"type":"string","description":"Optional partial (case-insensitive substring) title match."},"category":{"type":"string","enum":["active","backlog","scheduled","completed"],"description":"Optional category filter. Internal chat rows are always excluded."},"status":{"type":"string","enum":["pending","queued","running","completed","failed","cancelled","blocked"],"description":"Optional task status filter."},"limit":{"type":"integer","minimum":1,"maximum":50,"description":"Max results to return (default 20, capped at 50)."},"offset":{"type":"integer","minimum":0,"description":"Number of results to skip for pagination."}},"additionalProperties":false}`),
+	},
+	{
+		Name:               "view_swarm",
+		Description:        "Inspect one current-project swarm as a compact parent/child hierarchy. Accepts a swarm parent ID, exact parent title, child ID/title (resolved to its parent), or task_id='current' in a persisted task-thread follow-up. Returns ordered planner, worker, reviewer, and merger/integrator child summaries without prompts, execution outputs, diff hunks, or config blobs. Non-swarm tasks return a controlled not-a-swarm response.",
+		Domain:             DomainTasks,
+		Access:             AccessRead,
+		Sensitivity:        SensitivityNormal,
+		AllowedModes:       bothModes(),
+		Surfaces:           allSurfaces(),
+		IncludeThreadTools: false,
+		Parameters:         json.RawMessage(viewSwarmParams),
 	},
 	{
 		Name:               "view_task_thread",
@@ -365,7 +406,7 @@ var registry = []ActionDef{
 	},
 	{
 		Name:         "github_list_my_assigned_issues",
-		Description:  "List open GitHub issues assigned to the authenticated PAT user configured for the GitHub channel, defaulting to the current project repository. Pass repo_url for a specific GitHub repository URL. For GitHub App installations or custom inboxes, use github_list_assigned_issues with an explicit assignee.",
+		Description:  "List open GitHub issues assigned to the authenticated PAT user configured for the GitHub channel, defaulting to the current project repository. Returns compact body-free issue summaries with pagination metadata; use github_get_issue for a specific issue when body/details are needed for task creation. Pass repo_url for a specific GitHub repository URL. For GitHub App installations or custom inboxes, use github_list_assigned_issues with an explicit assignee.",
 		Domain:       DomainGitHub,
 		Access:       AccessRead,
 		Sensitivity:  SensitivityNormal,
@@ -374,8 +415,18 @@ var registry = []ActionDef{
 		Parameters:   json.RawMessage(githubListMyAssignedIssuesParams),
 	},
 	{
+		Name:         "github_list_existing_automation_issues",
+		Description:  "List recent GitHub issues in the current project repository created by the authenticated PAT account so GitHub SDLC finders can avoid duplicate reports. Pass repo_url for a specific GitHub repository URL.",
+		Domain:       DomainGitHub,
+		Access:       AccessRead,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: bothModes(),
+		Surfaces:     webAPISurfaces(),
+		Parameters:   json.RawMessage(githubListExistingAutomationIssuesParams),
+	},
+	{
 		Name:         "github_list_assigned_issues",
-		Description:  "List open GitHub issues assigned to the provided GitHub login, defaulting to the current project repository. Pull request objects are omitted. Pass repo_url for a specific GitHub repository URL. For GitHub App/custom setups, pass a login from github_get_project_inbox.",
+		Description:  "List open GitHub issues assigned to a configured GitHub Authorized User, defaulting to the current project repository. Pull request objects are omitted. Returns compact body-free issue summaries with pagination metadata; use github_get_issue for a specific issue when body/details are needed for task creation. Pass repo_url for a specific GitHub repository URL. For GitHub App/custom setups, pass a login from github_get_project_inbox.",
 		Domain:       DomainGitHub,
 		Access:       AccessRead,
 		Sensitivity:  SensitivityNormal,
@@ -413,8 +464,17 @@ var registry = []ActionDef{
 		Parameters:   json.RawMessage(githubAddLabelsParams),
 	},
 	{
-		Name:         "github_open_pull_request",
-		Description:  "Open or reuse a GitHub pull request for an existing OpenVibely task worktree branch by publishing the branch through the configured GitHub channel token/API, then persist the task PR record.",
+		Name:         "github_close_issue",
+		Description:  "Close a GitHub issue by number, defaulting to the current project repository. Pass repo_url for a specific GitHub repository URL.",
+		Domain:       DomainGitHub,
+		Access:       AccessWrite,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
+		Surfaces:     webAPISurfaces(),
+		Parameters:   json.RawMessage(githubIssueNumberParams),
+	},
+	{
+		Name: "github_open_pull_request", Description: "Open or reuse a GitHub pull request for an existing OpenVibely task worktree branch by publishing the branch through the configured GitHub channel token/API, then persist the task PR record.",
 		Domain:       DomainGitHub,
 		Access:       AccessWrite,
 		Sensitivity:  SensitivityNormal,
@@ -444,6 +504,26 @@ var registry = []ActionDef{
 		Parameters:   json.RawMessage(githubForwardPRFeedbackParams),
 	}, // --- Schedules domain (RW in orchestrate) ---
 	{
+		Name:         "list_schedules",
+		Description:  "Discover schedules in the current project. Returns compact summaries (schedule ID, bound task ID/title, enabled state, recurrence type/interval, next run, clear-context-on-start) with deterministic ordering and explicit limit/offset pagination. Read-only; never crosses projects. Optional filters: task_id, title (partial task title), enabled. Use the returned schedule IDs with modify_schedule or delete_schedule.",
+		Domain:       DomainSchedules,
+		Access:       AccessRead,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: bothModes(),
+		Surfaces:     allSurfaces(),
+		Parameters:   json.RawMessage(`{"type":"object","properties":{"task_id":{"type":"string","description":"Optional: restrict to schedules bound to this task ID."},"title":{"type":"string","description":"Optional partial (case-insensitive substring) task title match."},"enabled":{"type":"boolean","description":"Optional: filter by enabled (true) or disabled (false) schedules."},"limit":{"type":"integer","minimum":1,"maximum":50,"description":"Max results to return (default 20, capped at 50)."},"offset":{"type":"integer","minimum":0,"description":"Number of results to skip for pagination."}},"additionalProperties":false}`),
+	},
+	{
+		Name:         "view_pulse",
+		Description:  "Return the current project's read-only Pulse upcoming-work agenda: running tasks, pending active tasks, scheduled tasks due within seven days, and compact priority/status/category/schedule counts. Uses bounded task previews and does not expose full prompts, execution outputs, schedule history, or mutate work.",
+		Domain:       DomainPulse,
+		Access:       AccessRead,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: bothModes(),
+		Surfaces:     chatSurfacesExceptEmail(),
+		Parameters:   json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
+	},
+	{
 		Name:         "schedule_task",
 		Description:  "Create a schedule for a task.",
 		Domain:       DomainSchedules,
@@ -451,7 +531,7 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{"task_id":{"type":"string"},"title":{"type":"string"},"time":{"type":"string"},"repeat":{"type":"string"},"interval":{"type":"integer","minimum":1},"days":{"type":"array","items":{"type":"string"}},"clear_context_on_start":{"type":"boolean","description":"Clear prior model conversation context when each scheduled run starts; defaults to true."}},"required":["time"],"additionalProperties":false}`),
+		Parameters:   json.RawMessage(`{"type":"object","properties":{"task_id":{"type":"string"},"title":{"type":"string"},"time":{"type":"string","pattern":"^(?:[01][0-9]|2[0-3]):[0-5][0-9]$","description":"Time in exact 24-hour HH:MM format (00:00-23:59)."},"repeat":{"type":"string","enum":["once","daily","weekly","monthly","hours","hourly","minutes","seconds"]},"interval":{"type":"integer","minimum":1},"days":{"type":"array","maxItems":1,"description":"For weekly schedules, provide at most one weekday. Accepted spellings are sun, mon, tue, wed, thu, fri, and sat.","items":{"type":"string","enum":["sun","mon","tue","wed","thu","fri","sat"]}},"clear_context_on_start":{"type":"boolean","description":"Clear prior model conversation context when each scheduled run starts; defaults to true."}},"required":["time"],"additionalProperties":false}`),
 	},
 	{
 		Name:              "delete_schedule",
@@ -472,7 +552,7 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{"schedule_id":{"type":"string"},"task_id":{"type":"string"},"title":{"type":"string"},"time":{"type":"string"},"repeat":{"type":"string"},"interval":{"type":"integer","minimum":1},"days":{"type":"array","items":{"type":"string"}},"enabled":{"type":"boolean"},"clear_context_on_start":{"type":"boolean","description":"Whether each scheduled start clears prior model conversation context."}},"additionalProperties":false}`),
+		Parameters:   json.RawMessage(`{"type":"object","properties":{"schedule_id":{"type":"string"},"task_id":{"type":"string"},"title":{"type":"string"},"time":{"type":"string","pattern":"^(?:[01][0-9]|2[0-3]):[0-5][0-9]$","description":"Time in exact 24-hour HH:MM format (00:00-23:59)."},"repeat":{"type":"string","enum":["once","daily","weekly","monthly","hours","hourly","minutes","seconds"]},"interval":{"type":"integer","minimum":1},"days":{"type":"array","maxItems":1,"description":"For weekly schedules, provide at most one weekday. Accepted spellings are sun, mon, tue, wed, thu, fri, and sat.","items":{"type":"string","enum":["sun","mon","tue","wed","thu","fri","sat"]}},"enabled":{"type":"boolean"},"clear_context_on_start":{"type":"boolean","description":"Whether each scheduled start clears prior model conversation context."}},"additionalProperties":false}`),
 	},
 
 	// --- Alerts and actionable notifications domain ---
@@ -497,6 +577,16 @@ var registry = []ActionDef{
 		Parameters:   json.RawMessage(`{"type":"object","properties":{"project_id":{"type":"string"},"alert_id":{"type":"string"}},"required":["alert_id"],"additionalProperties":false}`),
 	},
 	{
+		Name:         "list_existing_automation_notifications",
+		Description:  "List existing actionable notifications owned by the current Native SDLC Automation so finders can avoid duplicate reports before creating a new notification.",
+		Domain:       DomainAlerts,
+		Access:       AccessRead,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: bothModes(),
+		Surfaces:     allSurfaces(),
+		Parameters:   json.RawMessage(`{"type":"object","properties":{"limit":{"type":"integer","minimum":1,"maximum":100,"description":"Max notifications to return; defaults to 50."},"offset":{"type":"integer","minimum":0}},"additionalProperties":false}`),
+	},
+	{
 		Name:         "create_alert",
 		Description:  "Create a project-scoped operational alert.",
 		Domain:       DomainAlerts,
@@ -514,7 +604,17 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{"project_id":{"type":"string"},"type":{"type":"string","maxLength":100},"title":{"type":"string","maxLength":200},"message":{"type":"string","maxLength":2000},"body":{"type":"string","maxLength":20000},"severity":{"type":"string","enum":["info","warning","error"]},"source":{"type":"string","maxLength":100},"metadata":{"type":"object"},"idempotency_key":{"type":"string","maxLength":200}},"required":["type","title"],"additionalProperties":false}`),
+		Parameters:   json.RawMessage(`{"type":"object","properties":{"project_id":{"type":"string"},"type":{"type":"string","maxLength":100},"title":{"type":"string","maxLength":200},"message":{"type":"string","maxLength":2000},"body":{"type":"string","maxLength":20000},"severity":{"type":"string","enum":["info","warning","error"]},"source":{"type":"string","maxLength":100},"metadata":{"type":"object"}},"required":["type","title"],"additionalProperties":false}`),
+	},
+	{
+		Name:         "decide_alert",
+		Description:  "Approve, reject, or dismiss a pending actionable notification in the current project after explicit user review.",
+		Domain:       DomainAlerts,
+		Access:       AccessWrite,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
+		Surfaces:     allSurfaces(),
+		Parameters:   json.RawMessage(`{"type":"object","properties":{"project_id":{"type":"string","description":"Optional same-project assertion. The action always uses the caller's current project."},"alert_id":{"type":"string"},"decision":{"type":"string","enum":["approved","rejected","dismissed"]}},"required":["alert_id","decision"],"additionalProperties":false}`),
 	},
 	{
 		Name:         "claim_alert",
@@ -534,7 +634,7 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{"project_id":{"type":"string"},"alert_id":{"type":"string"},"title":{"type":"string"},"prompt":{"type":"string"},"priority":{"type":"integer","minimum":1,"maximum":4},"tag":{"type":"string","enum":["","feature","bug"]}},"required":["alert_id","title","prompt"],"additionalProperties":false}`),
+		Parameters:   json.RawMessage(`{"type":"object","properties":{"project_id":{"type":"string"},"alert_id":{"type":"string"},"title":{"type":"string"},"prompt":{"type":"string"},"goal":{"type":"string","maxLength":2000},"priority":{"type":"integer","minimum":1,"maximum":4},"tag":{"type":"string","enum":["","feature","bug"]}},"required":["alert_id","title","prompt"],"additionalProperties":false}`),
 	},
 	{
 		Name:         "link_alert_implementation_task",
@@ -629,6 +729,16 @@ var registry = []ActionDef{
 		Surfaces:     allSurfaces(),
 		Parameters:   json.RawMessage(`{"type":"object","properties":{"personality":{"type":"string"}},"required":["personality"],"additionalProperties":false}`),
 	},
+	{
+		Name:         "save_custom_personality",
+		Description:  "Create or update a custom personality using name, optional key for create, description, and system_prompt. Deletion is not supported. Use activate=true only when the user asks to select it after saving.",
+		Domain:       DomainPersonality,
+		Access:       AccessWrite,
+		Sensitivity:  SensitivitySystemWide,
+		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
+		Surfaces:     allSurfaces(),
+		Parameters:   json.RawMessage(saveCustomPersonalityParams),
+	},
 
 	// --- Models domain (read-only from chat) ---
 	{
@@ -652,6 +762,18 @@ var registry = []ActionDef{
 		Parameters:   json.RawMessage(`{"type":"object","properties":{"model_id":{"type":"string"},"name":{"type":"string"}},"additionalProperties":false}`),
 	},
 
+	// --- Analytics domain (read-only from chat) ---
+	{
+		Name:         "view_usage_analytics",
+		Description:  "Return compact prompt-safe current-project model usage, token totals, cost availability, top model/provider breakdowns, recent buckets, and stored account-limit summaries. Uses locally stored Analytics data only and does not refresh provider account usage.",
+		Domain:       DomainAnalytics,
+		Access:       AccessRead,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: bothModes(),
+		Surfaces:     allSurfaces(),
+		Parameters:   json.RawMessage(`{"type":"object","properties":{"range":{"type":"string","enum":["7d","30d","90d","365d","month","all"],"description":"Convenience range matching Analytics API; defaults to 30d."},"provider":{"type":"string","description":"Optional provider filter, e.g. openai, anthropic, openai_compatible."},"group_by":{"type":"string","enum":["hour","day","week","month"],"description":"Recent usage bucket grouping; defaults to day."},"date_from":{"type":"string","description":"Optional RFC3339 or YYYY-MM-DD start time."},"date_to":{"type":"string","description":"Optional RFC3339 or YYYY-MM-DD end time."},"top_limit":{"type":"integer","minimum":1,"maximum":10,"description":"Maximum top model/provider rows to return; defaults to 5."},"recent_bucket_limit":{"type":"integer","minimum":0,"maximum":24,"description":"Maximum recent usage buckets to return; defaults to 8. Use 0 to omit buckets."}},"additionalProperties":false}`),
+	},
+
 	// --- Agents domain (read-only from chat) ---
 	{
 		Name:         "list_agents",
@@ -663,7 +785,26 @@ var registry = []ActionDef{
 		Surfaces:     allSurfaces(),
 		Parameters:   json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
 	},
-
+	{
+		Name:         "create_agent",
+		Description:  "Save a bounded user-managed reusable Agent profile from Chat. Orchestrate-only; does not edit protected Agents, delete Agents, mutate plugins/lifecycle hooks, or accept MCP credentials, OAuth tokens, or API keys.",
+		Domain:       DomainAgents,
+		Access:       AccessWrite,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
+		Surfaces:     allSurfaces(),
+		Parameters:   json.RawMessage(createAgentParams),
+	},
+	{
+		Name:         "update_agent",
+		Description:  "Update a bounded safe subset of an existing user-managed Agent by ID, exact name, or key. Orchestrate-only; rejects protected or archived Agents, cross-project project-scoped Agents, deletion, plugin/skill/lifecycle mutation, and MCP/OAuth/API-key secrets.",
+		Domain:       DomainAgents,
+		Access:       AccessWrite,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
+		Surfaces:     allSurfaces(),
+		Parameters:   json.RawMessage(updateAgentParams),
+	},
 	// --- Projects domain ---
 	{
 		Name:         "list_projects",
@@ -696,8 +837,27 @@ var registry = []ActionDef{
 		Parameters:   json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
 	},
 	{
-		Name:         "switch_project",
-		Description:  "Switch active project by id or name.",
+		Name:         "create_project",
+		Description:  "Create a GitHub-backed project from a project name and GitHub repository URL. Orchestrate-only; does not support local repository paths, create-directory behavior, deletion, or credential details.",
+		Domain:       DomainProjects,
+		Access:       AccessWrite,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
+		Surfaces:     allSurfaces(),
+		Parameters:   json.RawMessage(createProjectParams),
+	},
+	{
+		Name:         "update_project_settings",
+		Description:  "Update safe settings for the current project: name, description, project default model, and per-project worker limit. Orchestrate-only; optional project_id/project_name are current-project assertions. Does not expose repository path changes, GitHub URL recloning, project deletion, credential edits, or repository rebinding.",
+		Domain:       DomainProjects,
+		Access:       AccessWrite,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
+		Surfaces:     allSurfaces(),
+		Parameters:   json.RawMessage(updateProjectSettingsParams),
+	},
+	{
+		Name: "switch_project", Description: "Switch active project by id or name.",
 		Domain:       DomainProjects,
 		Access:       AccessWrite,
 		Sensitivity:  SensitivityNormal,
@@ -717,6 +877,26 @@ var registry = []ActionDef{
 		Surfaces:     allSurfaces(),
 		Parameters:   json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
 	},
+	{
+		Name:         "list_channels",
+		Description:  "Summarize prompt-safe channel and integration readiness for the current project, including GitHub, Slack, Telegram, Discord, Email, inbound webhooks, and outbound message target counts. Does not expose tokens, passwords, webhook secrets, private keys, or raw target credentials.",
+		Domain:       DomainSettings,
+		Access:       AccessRead,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: bothModes(),
+		Surfaces:     allSurfaces(),
+		Parameters:   json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
+	},
+	{
+		Name:         "view_system_update",
+		Description:  "Return a compact prompt-safe summary of OpenVibely system update status from the update coordinator. Read-only; available on web/API Chat and does not accept, cancel, apply, stage, restart, or roll back updates.",
+		Domain:       DomainSettings,
+		Access:       AccessRead,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: bothModes(),
+		Surfaces:     webAPISurfaces(),
+		Parameters:   json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
+	},
 
 	// --- Memory domain (read-only, scoped by selected-memory runtime tools) ---
 	{
@@ -732,36 +912,96 @@ var registry = []ActionDef{
 
 	// --- Automations domain (project-scoped definition control) ---
 	{
+		Name:         "list_automations",
+		Description:  "List compact summaries of all project Automations (ID, name, status, paused, adapter key, node count, next run, last run). Does not expose YAML graph definitions.",
+		Domain:       DomainAutomations,
+		Access:       AccessRead,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: bothModes(),
+		Surfaces:     allSurfaces(),
+		Parameters:   json.RawMessage(`{"type":"object","properties":{"project_id":{"type":"string","description":"Optional project ID override."}},"additionalProperties":false}`),
+	},
+	{
+		Name:         "get_automation",
+		Description:  "Return a compact summary for a single Automation by ID (same shape as list_automations). Returns a clear not-found response for unknown IDs. Does not expose YAML graph definitions.",
+		Domain:       DomainAutomations,
+		Access:       AccessRead,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: bothModes(),
+		Surfaces:     allSurfaces(),
+		Parameters:   json.RawMessage(`{"type":"object","properties":{"automation_id":{"type":"string","description":"ID of the Automation to retrieve."},"project_id":{"type":"string","description":"Optional project ID override."}},"required":["automation_id"],"additionalProperties":false}`),
+	},
+	{
 		Name:         "preview_automation_description",
 		Description:  "Generate and validate an ephemeral custom or maintained-template Automation graph from a description using the same surfaced capabilities as the visual builder. This does not persist a draft or create runtime resources.",
 		Domain:       DomainAutomations,
 		Access:       AccessRead,
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: bothModes(),
-		Surfaces:     webAPISurfaces(),
+		Surfaces:     allSurfaces(),
 		Parameters:   json.RawMessage(`{"type":"object","properties":{"description":{"type":"string","minLength":1,"maxLength":4000}},"required":["description"],"additionalProperties":false}`),
 	},
 	{
-		Name:         "plan_automation_save",
-		Description:  "Generate, validate, and display the exact save plan for a custom or maintained-template Automation using the same surfaced capabilities as the visual builder. This creates no runtime resources and requires a later user confirmation before Save.",
+		Name:         "save_automation",
+		Description:  "Generate, validate, and atomically save a custom or maintained-template Automation from the user's request or an exact canonical Automation YAML document using the same capabilities and Save pipeline as the visual builder. Use source=\"yaml\" with automation_yaml when the user provides reviewed Automation YAML. Use this when the user asks to create or save an Automation; the successful tool result includes its Live URL. Do not ask for a separate save confirmation.",
 		Domain:       DomainAutomations,
 		Access:       AccessWrite,
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
-		Surfaces:     webAPISurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{"source":{"type":"string","enum":["template","describe","blank"]},"template_key":{"type":"string","enum":["native_sdlc","github_sdlc"]},"description":{"type":"string","maxLength":4000}},"required":["source"],"additionalProperties":false}`),
+		Surfaces:     allSurfaces(),
+		Parameters:   json.RawMessage(`{"type":"object","properties":{"source":{"type":"string","enum":["template","describe","blank","yaml"]},"template_key":{"type":"string","enum":["native_sdlc","github_sdlc"]},"description":{"type":"string","maxLength":4000},"automation_yaml":{"type":"string","description":"Canonical Automation YAML document to save when source is yaml.","minLength":1,"maxLength":65536}},"required":["source"],"additionalProperties":false}`),
 	},
 	{
-		Name:         "save_automation",
-		Description:  "Save a previously displayed Automation plan only after a later exact user confirmation in the same thread.",
+		Name:         "update_automation_template",
+		Description:  "Update an outdated maintained Native SDLC or GitHub SDLC Automation to the latest shipped template by ID or exact unambiguous name in the current project. Replaces the graph using the same explicit maintained-template update path as the browser and preserves lifecycle state. Returns a clear no-op response when already current or unsupported.",
 		Domain:       DomainAutomations,
 		Access:       AccessWrite,
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
-		Surfaces:     webAPISurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{"confirmation_token":{"type":"string"},"confirming_user_input_id":{"type":"string"}},"required":["confirmation_token","confirming_user_input_id"],"additionalProperties":false}`),
+		Surfaces:     allSurfaces(),
+		Parameters:   json.RawMessage(automationLifecycleParams),
 	},
-
+	{
+		Name:         "run_automation_now",
+		Description:  "Run a saved Automation immediately by ID or exact unambiguous name in the current project using the same lifecycle path as the browser Run now action. Returns Automation identity, lifecycle state, started invocation IDs, and Live URL.",
+		Domain:       DomainAutomations,
+		Access:       AccessWrite,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
+		Surfaces:     allSurfaces(),
+		Parameters:   json.RawMessage(automationLifecycleParams),
+	},
+	{
+		Name:         "pause_automation",
+		Description:  "Pause a saved Automation by ID or exact unambiguous name in the current project using the same lifecycle path as the browser Disable action. Returns Automation identity, lifecycle state, and Live URL.",
+		Domain:       DomainAutomations,
+		Access:       AccessWrite,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
+		Surfaces:     allSurfaces(),
+		Parameters:   json.RawMessage(automationLifecycleParams),
+	},
+	{
+		Name:         "resume_automation",
+		Description:  "Resume a saved Automation by ID or exact unambiguous name in the current project using the same lifecycle path as the browser Enable action. Returns Automation identity, lifecycle state, and Live URL.",
+		Domain:       DomainAutomations,
+		Access:       AccessWrite,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
+		Surfaces:     allSurfaces(),
+		Parameters:   json.RawMessage(automationLifecycleParams),
+	},
+	{
+		Name:              "delete_automation",
+		Description:       "Permanently delete a saved Automation by ID or exact unambiguous name in the current project. This destructive action requires explicit confirmation and uses the same guarded lifecycle path as browser deletion; it preserves existing domain tasks and removes only Automation-owned trigger schedules. Do not infer deletion from a read or cleanup request.",
+		Domain:            DomainAutomations,
+		Access:            AccessWrite,
+		Sensitivity:       SensitivityDestructive,
+		NeedsConfirmation: true,
+		AllowedModes:      []models.ChatMode{models.ChatModeOrchestrate},
+		Surfaces:          allSurfaces(),
+		Parameters:        json.RawMessage(automationLifecycleParams),
+	},
 	// --- Chat domain ---
 	{
 		Name:         "get_chat_mode",
@@ -798,7 +1038,7 @@ var registry = []ActionDef{
 // helpers
 
 func allSurfaces() []Surface {
-	return []Surface{SurfaceWeb, SurfaceAPI, SurfaceTelegram, SurfaceSlack, SurfaceEmail, SurfaceDiscord}
+	return []Surface{SurfaceWeb, SurfaceAPI, SurfaceTelegram, SurfaceSlack, SurfaceEmail, SurfaceDiscord, SurfaceX}
 }
 
 func bothModes() []models.ChatMode {
@@ -807,6 +1047,10 @@ func bothModes() []models.ChatMode {
 
 func webAPISurfaces() []Surface {
 	return []Surface{SurfaceWeb, SurfaceAPI}
+}
+
+func chatSurfacesExceptEmail() []Surface {
+	return []Surface{SurfaceWeb, SurfaceAPI, SurfaceTelegram, SurfaceSlack, SurfaceDiscord, SurfaceX}
 }
 
 // ---- Public query API ----

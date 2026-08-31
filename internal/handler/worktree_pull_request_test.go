@@ -46,6 +46,109 @@ func TestCreateTaskPullRequest_RequiresWorktreeBranch(t *testing.T) {
 	}
 }
 
+func TestCreateTaskPullRequest_TaskCardOwnershipFailuresAreIndistinguishable(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	h.SetTaskPullRequestRepo(repository.NewTaskPullRequestRepo(db))
+
+	project := &models.Project{Name: "PR Project", RepoPath: "/tmp/repo", RepoURL: "https://github.com/openvibely/openvibely"}
+	if err := h.projectSvc.Create(context.Background(), project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Scoped PR", Category: models.CategoryCompleted, Status: models.StatusCompleted, WorktreeBranch: "task/scoped-pr"}
+	if err := h.taskRepo.Create(context.Background(), task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	request := func(taskID string) *httptest.ResponseRecorder {
+		t.Helper()
+		form := url.Values{"merge_source": {"task_card"}, "project_id": {"foreign"}}
+		req := httptest.NewRequest(http.MethodPost, "/tasks/"+taskID+"/worktree/pull-request", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("HX-Request", "true")
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		return rec
+	}
+
+	missing := request("missing-task")
+	foreign := request(task.ID)
+	for name, rec := range map[string]*httptest.ResponseRecorder{"missing": missing, "foreign": foreign} {
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("%s task-card PR should return 404, got %d: %s", name, rec.Code, rec.Body.String())
+		}
+		trigger := rec.Header().Get("HX-Trigger")
+		if !strings.Contains(trigger, "openvibelyToast") || !strings.Contains(strings.ToLower(trigger), "task not found") {
+			t.Fatalf("%s task-card PR should emit the same failure toast, got %s", name, trigger)
+		}
+		if strings.Contains(rec.Body.String(), "kanban-board") || strings.Contains(rec.Body.String(), "changes-actions-dropdown") {
+			t.Fatalf("%s task-card PR should not return a replacement fragment: %s", name, rec.Body.String())
+		}
+	}
+	if missing.Body.String() != foreign.Body.String() || missing.Header().Get("HX-Trigger") != foreign.Header().Get("HX-Trigger") {
+		t.Fatalf("missing and foreign task-card ownership responses must be indistinguishable: missing=%d %q %q foreign=%d %q %q",
+			missing.Code, missing.Body.String(), missing.Header().Get("HX-Trigger"), foreign.Code, foreign.Body.String(), foreign.Header().Get("HX-Trigger"))
+	}
+}
+
+func TestCreateTaskPullRequest_UsesGlobalEnterpriseEndpointAndIgnoresRequestOverride(t *testing.T) {
+	const enterpriseEndpoint = "https://github.example.com/api/v3"
+	h, e, _, db := setupTestHandlerWithDB(t)
+	h.SetTaskPullRequestRepo(repository.NewTaskPullRequestRepo(db))
+
+	// Seed the global GitHub API endpoint setting.
+	settingsRepo := repository.NewSettingsRepo(db)
+	if err := settingsRepo.Set(context.Background(), service.GitHubSettingAPIEndpoint, enterpriseEndpoint); err != nil {
+		t.Fatal(err)
+	}
+
+	var publishedEndpoint string
+	h.SetGitHubService(&fakeGitHubService{
+		globalAPIEndpoint: enterpriseEndpoint,
+		resolveRepoFn: func(_ context.Context, _, _ string) (*service.GitHubRepoRef, error) {
+			return &service.GitHubRepoRef{Owner: "acme", Name: "widgets", FullName: "acme/widgets", CloneURL: "https://github.example.com/acme/widgets.git", HTMLURL: "https://github.example.com/acme/widgets"}, nil
+		},
+		publishBranchFn: func(_ context.Context, repo *service.GitHubRepoRef, _ service.GitHubPublishBranchRequest) (*service.GitHubPublishBranchResult, error) {
+			publishedEndpoint = repo.APIBaseURL
+			return &service.GitHubPublishBranchResult{HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
+		},
+		findPRFn: func(context.Context, *service.GitHubRepoRef, string) (*service.GitHubPullRequest, error) {
+			return nil, nil
+		},
+		createPRFn: func(_ context.Context, _ *service.GitHubRepoRef, createReq service.GitHubCreatePullRequestRequest) (*service.GitHubPullRequest, error) {
+			return &service.GitHubPullRequest{Number: 81, URL: "https://github.example.com/acme/widgets/pull/81", State: "open", HeadRef: createReq.Head, HeadRepoFullName: "acme/widgets", HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
+		}})
+	project := &models.Project{Name: "Enterprise PR", RepoPath: "/tmp/repo"}
+	if err := h.projectSvc.Create(context.Background(), project); err != nil {
+		t.Fatal(err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Enterprise PR", Category: models.CategoryActive, Status: models.StatusCompleted, WorktreeBranch: "task/enterprise", MergeTargetBranch: "main"}
+	if err := h.taskRepo.Create(context.Background(), task); err != nil {
+		t.Fatal(err)
+	}
+
+	// A request-time override must be ignored; the global setting must win.
+	form := url.Values{"github_api_endpoint": {"https://evil.example/api/v3"}}
+	req := httptest.NewRequest(http.MethodPost, "/tasks/"+task.ID+"/worktree/pull-request", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s trigger=%s", rec.Code, rec.Body.String(), rec.Header().Get("HX-Trigger"))
+	}
+	if publishedEndpoint != enterpriseEndpoint {
+		t.Fatalf("published endpoint = %q, want global endpoint %q", publishedEndpoint, enterpriseEndpoint)
+	}
+	// Global setting must remain unchanged after PR creation.
+	storedEndpoint, err := settingsRepo.Get(context.Background(), service.GitHubSettingAPIEndpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if storedEndpoint != enterpriseEndpoint {
+		t.Fatalf("global endpoint after PR creation = %q, want %q", storedEndpoint, enterpriseEndpoint)
+	}
+}
+
 func TestCreateTaskPullRequest_CreatesAndPersistsPR(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
 	h.SetTaskPullRequestRepo(repository.NewTaskPullRequestRepo(db))
@@ -54,14 +157,14 @@ func TestCreateTaskPullRequest_CreatesAndPersistsPR(t *testing.T) {
 		resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*service.GitHubRepoRef, error) {
 			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely", CloneURL: "https://github.com/openvibely/openvibely.git", HTMLURL: "https://github.com/openvibely/openvibely"}, nil
 		},
-		publishBranchFn: func(_ context.Context, repo *service.GitHubRepoRef, publishReq service.GitHubPublishBranchRequest) error {
-			return nil
+		publishBranchFn: func(_ context.Context, repo *service.GitHubRepoRef, publishReq service.GitHubPublishBranchRequest) (*service.GitHubPublishBranchResult, error) {
+			return &service.GitHubPublishBranchResult{HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
 		},
 		findPRFn: func(_ context.Context, repo *service.GitHubRepoRef, branch string) (*service.GitHubPullRequest, error) {
 			return nil, nil
 		},
 		createPRFn: func(_ context.Context, repo *service.GitHubRepoRef, createReq service.GitHubCreatePullRequestRequest) (*service.GitHubPullRequest, error) {
-			return &service.GitHubPullRequest{Number: 77, URL: "https://github.com/openvibely/openvibely/pull/77", State: "open"}, nil
+			return &service.GitHubPullRequest{Number: 77, URL: "https://github.com/openvibely/openvibely/pull/77", State: "open", HeadRef: createReq.Head, HeadRepoFullName: "openvibely/openvibely", HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
 		},
 	})
 
@@ -74,14 +177,15 @@ func TestCreateTaskPullRequest_CreatesAndPersistsPR(t *testing.T) {
 		t.Fatalf("create task: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/tasks/"+task.ID+"/worktree/pull-request", strings.NewReader(url.Values{}.Encode()))
+	form := url.Values{"merge_source": {"task_card"}, "project_id": {project.ID}}
+	req := httptest.NewRequest(http.MethodPost, "/tasks/"+task.ID+"/worktree/pull-request", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("HX-Request", "true")
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d (%s)", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `id="kanban-board"`) {
+		t.Fatalf("expected authoritative board status 200, got %d (%s)", rec.Code, rec.Body.String())
 	}
 	trigger := rec.Header().Get("HX-Trigger")
 	if !strings.Contains(trigger, "openvibelyToast") {
@@ -111,15 +215,15 @@ func TestCreateTaskPullRequest_PublishesDirtyWorktreeWithDiffSummaryMessage(t *t
 		resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*service.GitHubRepoRef, error) {
 			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely", CloneURL: "https://github.com/openvibely/openvibely.git", HTMLURL: "https://github.com/openvibely/openvibely"}, nil
 		},
-		publishBranchFn: func(_ context.Context, repo *service.GitHubRepoRef, publishReq service.GitHubPublishBranchRequest) error {
+		publishBranchFn: func(_ context.Context, repo *service.GitHubRepoRef, publishReq service.GitHubPublishBranchRequest) (*service.GitHubPublishBranchResult, error) {
 			publishedReq = publishReq
-			return nil
+			return &service.GitHubPublishBranchResult{HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
 		},
 		findPRFn: func(_ context.Context, repo *service.GitHubRepoRef, branch string) (*service.GitHubPullRequest, error) {
 			return nil, nil
 		},
 		createPRFn: func(_ context.Context, repo *service.GitHubRepoRef, createReq service.GitHubCreatePullRequestRequest) (*service.GitHubPullRequest, error) {
-			return &service.GitHubPullRequest{Number: 78, URL: "https://github.com/openvibely/openvibely/pull/78", State: "open"}, nil
+			return &service.GitHubPullRequest{Number: 78, URL: "https://github.com/openvibely/openvibely/pull/78", State: "open", HeadRef: createReq.Head, HeadRepoFullName: "openvibely/openvibely", HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
 		},
 	})
 
@@ -179,16 +283,19 @@ func TestCreateTaskPullRequest_ReusesExistingTaskPR(t *testing.T) {
 	var publishedReq service.GitHubPublishBranchRequest
 	h.SetGitHubService(&fakeGitHubService{
 		resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*service.GitHubRepoRef, error) {
-			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely"}, nil
+			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely", HTMLURL: "https://github.com/openvibely/openvibely"}, nil
 		},
-		publishBranchFn: func(_ context.Context, _ *service.GitHubRepoRef, publishReq service.GitHubPublishBranchRequest) error {
+		publishBranchFn: func(_ context.Context, _ *service.GitHubRepoRef, publishReq service.GitHubPublishBranchRequest) (*service.GitHubPublishBranchResult, error) {
 			publishCalls++
 			publishedReq = publishReq
-			return nil
+			return &service.GitHubPublishBranchResult{HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
+		},
+		getPullRequestFn: func(context.Context, *service.GitHubRepoRef, int) (*service.GitHubPullRequest, error) {
+			return &service.GitHubPullRequest{Number: 22, URL: "https://github.com/openvibely/openvibely/pull/22", State: "open", HeadRef: "task/existing", HeadRepoFullName: "openvibely/openvibely", HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
 		},
 		createPRFn: func(_ context.Context, repo *service.GitHubRepoRef, createReq service.GitHubCreatePullRequestRequest) (*service.GitHubPullRequest, error) {
 			createCalls++
-			return &service.GitHubPullRequest{Number: 1, URL: "https://github.com/x/y/pull/1", State: "open"}, nil
+			return &service.GitHubPullRequest{Number: 1, URL: "https://github.com/x/y/pull/1", State: "open", HeadRef: createReq.Head, HeadRepoFullName: "openvibely/openvibely", HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
 		},
 	})
 
@@ -264,10 +371,10 @@ func TestCreateTaskPullRequest_PublishBranchFailureShowsToast(t *testing.T) {
 
 	h.SetGitHubService(&fakeGitHubService{
 		resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*service.GitHubRepoRef, error) {
-			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, nil
+			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely", HTMLURL: "https://github.com/openvibely/openvibely"}, nil
 		},
-		publishBranchFn: func(_ context.Context, repo *service.GitHubRepoRef, publishReq service.GitHubPublishBranchRequest) error {
-			return fmt.Errorf("authentication failed: bad credentials")
+		publishBranchFn: func(_ context.Context, repo *service.GitHubRepoRef, publishReq service.GitHubPublishBranchRequest) (*service.GitHubPublishBranchResult, error) {
+			return nil, fmt.Errorf("authentication failed: bad credentials")
 		},
 	})
 
@@ -304,17 +411,17 @@ func TestCreateTaskPullRequest_CreatePRAlreadyExistsRecoversByFindingPR(t *testi
 	findCalls := 0
 	h.SetGitHubService(&fakeGitHubService{
 		resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*service.GitHubRepoRef, error) {
-			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, nil
+			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely", HTMLURL: "https://github.com/openvibely/openvibely"}, nil
 		},
-		publishBranchFn: func(_ context.Context, repo *service.GitHubRepoRef, publishReq service.GitHubPublishBranchRequest) error {
-			return nil
+		publishBranchFn: func(_ context.Context, repo *service.GitHubRepoRef, publishReq service.GitHubPublishBranchRequest) (*service.GitHubPublishBranchResult, error) {
+			return &service.GitHubPublishBranchResult{HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
 		},
 		findPRFn: func(_ context.Context, repo *service.GitHubRepoRef, branch string) (*service.GitHubPullRequest, error) {
 			findCalls++
 			if findCalls == 1 {
 				return nil, nil
 			}
-			return &service.GitHubPullRequest{Number: 88, URL: "https://github.com/openvibely/openvibely/pull/88", State: "open"}, nil
+			return &service.GitHubPullRequest{Number: 88, URL: "https://github.com/openvibely/openvibely/pull/88", State: "open", HeadRef: branch, HeadRepoFullName: "openvibely/openvibely", HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
 		},
 		createPRFn: func(_ context.Context, repo *service.GitHubRepoRef, createReq service.GitHubCreatePullRequestRequest) (*service.GitHubPullRequest, error) {
 			return nil, fmt.Errorf("github API request failed (422): Validation Failed; A pull request already exists for openvibely:task/create-fail")
@@ -361,10 +468,10 @@ func TestCreateTaskPullRequest_CreatePRFailureShowsToast(t *testing.T) {
 
 	h.SetGitHubService(&fakeGitHubService{
 		resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*service.GitHubRepoRef, error) {
-			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, nil
+			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely", HTMLURL: "https://github.com/openvibely/openvibely"}, nil
 		},
-		publishBranchFn: func(_ context.Context, repo *service.GitHubRepoRef, publishReq service.GitHubPublishBranchRequest) error {
-			return nil
+		publishBranchFn: func(_ context.Context, repo *service.GitHubRepoRef, publishReq service.GitHubPublishBranchRequest) (*service.GitHubPublishBranchResult, error) {
+			return &service.GitHubPublishBranchResult{HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
 		},
 		findPRFn: func(_ context.Context, repo *service.GitHubRepoRef, branch string) (*service.GitHubPullRequest, error) {
 			return nil, nil
@@ -404,24 +511,36 @@ func TestHandler_GetTaskChanges_ShowsMergeOptions(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	ctx := context.Background()
 
-	repoPath := t.TempDir()
-	worktreePath := t.TempDir()
+	repoPath := createHandlerTestGitRepo(t)
+	targetBranch := service.GetCurrentBranch(repoPath)
 	project := &models.Project{Name: "Merge Options Project", RepoPath: repoPath, IsDefault: true}
 	if err := h.projectSvc.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
+	h.SetWorktreeService(service.NewWorktreeService(h.taskRepo, h.projectRepo, h.settingsRepo))
 	task := &models.Task{
 		ProjectID:         project.ID,
 		Title:             "Merge Options Task",
-		Category:          models.CategoryActive,
+		Category:          models.CategoryCompleted,
 		Status:            models.StatusCompleted,
-		WorktreePath:      worktreePath,
-		WorktreeBranch:    "task/merge-options",
-		MergeTargetBranch: "main",
+		MergeTargetBranch: targetBranch,
 		MergeStatus:       models.MergeStatusPending,
 	}
 	if err := h.taskRepo.Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
+	}
+	worktreePath, branchName, err := h.worktreeSvc.SetupWorktree(ctx, task, repoPath)
+	if err != nil {
+		t.Fatalf("setup worktree: %v", err)
+	}
+	if err := h.taskRepo.UpdateWorktreeInfo(ctx, task.ID, worktreePath, branchName); err != nil {
+		t.Fatalf("update worktree info: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(worktreePath, "merge-options.txt"), []byte("merge options\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.CommitWorktreeChanges(worktreePath, "merge options"); err != nil {
+		t.Fatal(err)
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes", nil)

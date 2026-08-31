@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -329,10 +331,19 @@ func TestHandler_GetModelCapacities(t *testing.T) {
 
 	h.workerSvc.SetLLMConfigRepo(llmConfigRepo)
 
-	// Acquire worker slot for agent1
+	// Acquire worker slots for agent1 and bring agent2 to capacity.
 	ok := h.workerSvc.TryAcquireModelSlot(agent1.ID)
 	require.True(t, ok)
-	defer h.workerSvc.ReleaseModelSlot(agent1.ID)
+	for i := 0; i < agent2.MaxWorkers; i++ {
+		ok = h.workerSvc.TryAcquireModelSlot(agent2.ID)
+		require.True(t, ok)
+	}
+	defer func() {
+		h.workerSvc.ReleaseModelSlot(agent1.ID)
+		for i := 0; i < agent2.MaxWorkers; i++ {
+			h.workerSvc.ReleaseModelSlot(agent2.ID)
+		}
+	}()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/capacity/models", nil)
 	rec := httptest.NewRecorder()
@@ -364,6 +375,14 @@ func TestHandler_GetModelCapacities(t *testing.T) {
 	assert.True(t, a1Resp.HasCapacity)
 	assert.Equal(t, 2, a1Resp.AvailableSlots)
 
+	detailReq := httptest.NewRequest(http.MethodGet, "/api/capacity/models/"+agent1.ID, nil)
+	detailRec := httptest.NewRecorder()
+	e.ServeHTTP(detailRec, detailReq)
+	require.Equal(t, http.StatusOK, detailRec.Code)
+	var detailResp ModelCapacityResponse
+	require.NoError(t, json.Unmarshal(detailRec.Body.Bytes(), &detailResp))
+	assert.Equal(t, *a1Resp, detailResp)
+
 	// Find agent2 in response
 	var a2Resp *ModelCapacityResponse
 	for i := range resp {
@@ -376,10 +395,97 @@ func TestHandler_GetModelCapacities(t *testing.T) {
 
 	assert.Equal(t, "Claude", a2Resp.Name)
 	assert.Equal(t, "claude-3-opus", a2Resp.Model)
-	assert.Equal(t, 0, a2Resp.Running)
+	assert.Equal(t, 2, a2Resp.Running)
 	assert.Equal(t, 2, a2Resp.MaxWorkers)
-	assert.True(t, a2Resp.HasCapacity)
-	assert.Equal(t, 2, a2Resp.AvailableSlots)
+	assert.False(t, a2Resp.HasCapacity)
+	assert.Equal(t, 0, a2Resp.AvailableSlots)
+
+	detailReq = httptest.NewRequest(http.MethodGet, "/api/capacity/models/"+agent2.ID, nil)
+	detailRec = httptest.NewRecorder()
+	e.ServeHTTP(detailRec, detailReq)
+	require.Equal(t, http.StatusOK, detailRec.Code)
+	require.NoError(t, json.Unmarshal(detailRec.Body.Bytes(), &detailResp))
+	assert.Equal(t, *a2Resp, detailResp)
+}
+
+func TestHandler_GetModelCapacitiesUsesCompactWorkerProjection(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, `DELETE FROM agent_configs`); err != nil {
+		t.Fatalf("clear model configs: %v", err)
+	}
+
+	alpha := &models.LLMConfig{
+		Name: "Worker Alpha", Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodOAuth,
+		Model: "worker-alpha-model", MaxWorkers: 1, APIKey: "secret-key", OAuthAccessToken: "secret-token",
+		OAuthRefreshToken: "secret-refresh", OAuthClientSecret: "secret-client", BaseURL: "https://example.com/v1/",
+		ModelsURL: "https://example.com/v1/models", ExtraHeadersJSON: `{"secret":"header"}`,
+		ExtraBodyJSON: strings.Repeat("x", 64*1024), CustomAuthConfigJSON: `{"signing_secret":"secret"}`,
+		CustomAuthStateJSON: `{"token":"secret"}`, MixtureConfigJSON: `{"large":true}`,
+	}
+	require.NoError(t, llmConfigRepo.Create(ctx, alpha))
+	unlimited := &models.LLMConfig{
+		Name: "Worker Unlimited", Provider: models.ProviderAnthropic, Model: "worker-unlimited-model", MaxWorkers: 0,
+	}
+	require.NoError(t, llmConfigRepo.Create(ctx, unlimited))
+	zuluDefault := &models.LLMConfig{
+		Name: "Worker Zulu Default", Provider: models.ProviderOpenAI, Model: "worker-zulu-model", IsDefault: true, MaxWorkers: 2,
+		APIKey: "secret-key", ExtraBodyJSON: strings.Repeat("y", 64*1024),
+	}
+	require.NoError(t, llmConfigRepo.Create(ctx, zuluDefault))
+
+	h.workerSvc.SetLLMConfigRepo(llmConfigRepo)
+	require.True(t, h.workerSvc.TryAcquireModelSlot(zuluDefault.ID))
+	defer h.workerSvc.ReleaseModelSlot(zuluDefault.ID)
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	req := httptest.NewRequest(http.MethodGet, "/api/capacity/models", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	counter.SetEnabled(false)
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var resp []ModelCapacityResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Len(t, resp, 2)
+	assert.Equal(t, zuluDefault.ID, resp[0].ID)
+	assert.Equal(t, "Worker Zulu Default", resp[0].Name)
+	assert.Equal(t, "worker-zulu-model", resp[0].Model)
+	assert.Equal(t, 1, resp[0].Running)
+	assert.Equal(t, 2, resp[0].MaxWorkers)
+	assert.True(t, resp[0].HasCapacity)
+	assert.Equal(t, 1, resp[0].AvailableSlots)
+	assert.Equal(t, alpha.ID, resp[1].ID)
+	assert.Equal(t, "Worker Alpha", resp[1].Name)
+	assert.Equal(t, "worker-alpha-model", resp[1].Model)
+	assert.Equal(t, 0, resp[1].Running)
+	assert.Equal(t, 1, resp[1].MaxWorkers)
+	assert.True(t, resp[1].HasCapacity)
+	assert.Equal(t, 1, resp[1].AvailableSlots)
+
+	statements := counter.Statements()
+	if len(statements) != 1 {
+		t.Fatalf("statements = %#v, want exactly one compact worker capacity query", statements)
+	}
+	stmt := strings.ToLower(strings.Join(strings.Fields(statements[0]), " "))
+	projection := strings.Split(stmt, " from agent_configs ")[0]
+	if projection != "select id, name, model, max_workers" {
+		t.Fatalf("model capacity projection = %q, want compact worker fields in %s", projection, statements[0])
+	}
+	if !strings.Contains(stmt, "where max_workers > 0") || !strings.Contains(stmt, "order by is_default desc, name asc") {
+		t.Fatalf("model capacity query must filter and preserve ordering: %s", statements[0])
+	}
+	for _, forbidden := range []string{
+		"api_key", "oauth_access_token", "oauth_refresh_token", "oauth_client_secret", "oauth_authorize_url",
+		"oauth_token_url", "ollama_base_url", "base_url", "models_url", "extra_headers_json", "extra_body_json",
+		"custom_auth_config_json", "custom_auth_state_json", "mixture_config_json", "worker_timeout",
+	} {
+		if strings.Contains(projection, forbidden) {
+			t.Fatalf("model capacity query selected forbidden column %q: %s", forbidden, statements[0])
+		}
+	}
 }
 
 func TestHandler_GetModelCapacity(t *testing.T) {
@@ -505,4 +611,73 @@ func TestHandler_GetModelCapacity_NoLimit(t *testing.T) {
 	assert.Equal(t, 0, resp.MaxWorkers)
 	assert.True(t, resp.HasCapacity) // No limit = always has capacity
 	assert.Equal(t, 0, resp.AvailableSlots)
+}
+
+func TestHandler_GetModelCapacity_OverCapacityClampsAvailableSlots(t *testing.T) {
+	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+
+	agent := &models.LLMConfig{
+		Name:       "Over-capacity Model",
+		Model:      "test-model",
+		Provider:   "anthropic",
+		MaxWorkers: 3,
+	}
+	require.NoError(t, llmConfigRepo.Create(ctx, agent))
+	h.workerSvc.SetLLMConfigRepo(llmConfigRepo)
+
+	for i := 0; i < agent.MaxWorkers; i++ {
+		require.True(t, h.workerSvc.TryAcquireModelSlot(agent.ID))
+	}
+	defer func() {
+		for i := 0; i < agent.MaxWorkers; i++ {
+			h.workerSvc.ReleaseModelSlot(agent.ID)
+		}
+	}()
+
+	_, err := db.ExecContext(ctx, `UPDATE agent_configs SET max_workers = ? WHERE id = ?`, 2, agent.ID)
+	require.NoError(t, err)
+
+	listReq := httptest.NewRequest(http.MethodGet, "/api/capacity/models", nil)
+	listRec := httptest.NewRecorder()
+	e.ServeHTTP(listRec, listReq)
+	require.Equal(t, http.StatusOK, listRec.Code)
+	var listResp []ModelCapacityResponse
+	require.NoError(t, json.Unmarshal(listRec.Body.Bytes(), &listResp))
+	require.Len(t, listResp, 1)
+
+	detailReq := httptest.NewRequest(http.MethodGet, "/api/capacity/models/"+agent.ID, nil)
+	detailRec := httptest.NewRecorder()
+	e.ServeHTTP(detailRec, detailReq)
+	require.Equal(t, http.StatusOK, detailRec.Code)
+	var detailResp ModelCapacityResponse
+	require.NoError(t, json.Unmarshal(detailRec.Body.Bytes(), &detailResp))
+
+	assert.Equal(t, listResp[0], detailResp)
+	assert.Equal(t, 3, detailResp.Running)
+	assert.Equal(t, 2, detailResp.MaxWorkers)
+	assert.False(t, detailResp.HasCapacity)
+	assert.Equal(t, 0, detailResp.AvailableSlots)
+}
+
+func TestHandler_GetModelCapacities_RepositoryError(t *testing.T) {
+	_, e, _, db := setupTestHandlerWithDB(t)
+	require.NoError(t, db.Close())
+
+	req := httptest.NewRequest(http.MethodGet, "/api/capacity/models", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+}
+
+func TestHandler_GetModelCapacity_RepositoryError(t *testing.T) {
+	_, e, _, db := setupTestHandlerWithDB(t)
+	require.NoError(t, db.Close())
+
+	req := httptest.NewRequest(http.MethodGet, "/api/capacity/models/model-id", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }

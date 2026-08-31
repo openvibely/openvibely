@@ -8,6 +8,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -19,6 +20,11 @@ import (
 	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 	"github.com/stretchr/testify/require"
 )
+
+func TestMain(m *testing.M) {
+	_ = os.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
+	os.Exit(m.Run())
+}
 
 func TestAdapterCallDirectUsesConfiguredChatCompletionsEndpoint(t *testing.T) {
 	var gotPath string
@@ -52,6 +58,7 @@ func TestAdapterCallDirectUsesConfiguredChatCompletionsEndpoint(t *testing.T) {
 			Model:            "provider/model",
 			APIKey:           "sk-compatible",
 			BaseURL:          srv.URL + "/v1/",
+			PresetSlug:       "vllm",
 			Transport:        "chat_completions",
 			ExtraHeadersJSON: `{"X-Title":"OpenVibely"}`,
 			ExtraBodyJSON:    `{"provider":{"order":["nvidia"]},"model":"evil","stream":false}`,
@@ -154,6 +161,7 @@ func TestAdapterKimiExtraBodyCannotRestoreTemperature(t *testing.T) {
 			Model:         "kimi-k2.6",
 			APIKey:        "test-key",
 			BaseURL:       srv.URL + "/v1/",
+			PresetSlug:    "vllm",
 			Transport:     "chat_completions",
 			ExtraBodyJSON: `{"temperature":0,"custom":true}`,
 		},
@@ -256,6 +264,7 @@ func TestAdapterCallDirectRawPromptOmitsOpenVibelySystemPrompt(t *testing.T) {
 			Model:      "provider/model",
 			APIKey:     "sk-compatible",
 			BaseURL:    srv.URL + "/v1/",
+			PresetSlug: "vllm",
 			Transport:  "chat_completions",
 		},
 	}, "/secret/workdir")
@@ -304,7 +313,7 @@ func TestAdapterChatWithRuntimeActionsUsesToolModeSystemPrompt(t *testing.T) {
 		Ctx: ctx, Operation: llmcontracts.OperationStreaming, Message: "Create a task", ChatMode: models.ChatModeOrchestrate,
 		Agent: models.LLMConfig{
 			Name: "Compatible", Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodAPIKey,
-			Model: "provider/model", APIKey: "sk-compatible", BaseURL: srv.URL + "/v1/", Transport: "chat_completions",
+			Model: "provider/model", APIKey: "sk-compatible", BaseURL: srv.URL + "/v1/", PresetSlug: "vllm", Transport: "chat_completions",
 		},
 	}, ".")
 	require.NoError(t, err)
@@ -338,7 +347,7 @@ func TestAdapterChatWithoutRuntimeActionsReportsCapabilityLimitation(t *testing.
 		Operation: llmcontracts.OperationStreaming, Message: "Create a task", ChatMode: models.ChatModeOrchestrate,
 		Agent: models.LLMConfig{
 			Name: "Compatible", Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodAPIKey,
-			Model: "provider/model", APIKey: "sk-compatible", BaseURL: srv.URL + "/v1/", Transport: "chat_completions",
+			Model: "provider/model", APIKey: "sk-compatible", BaseURL: srv.URL + "/v1/", PresetSlug: "vllm", Transport: "chat_completions",
 		},
 	}, ".")
 	require.NoError(t, err)
@@ -371,7 +380,7 @@ func TestAdapterTaskFollowupWithoutRuntimeActionsReportsCapabilityLimitation(t *
 		Operation: llmcontracts.OperationStreaming, Message: "Create a follow-up task", Followup: true, ChatMode: models.ChatModeOrchestrate,
 		Agent: models.LLMConfig{
 			Name: "Compatible", Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodAPIKey,
-			Model: "provider/model", APIKey: "sk-compatible", BaseURL: srv.URL + "/v1/", Transport: "chat_completions",
+			Model: "provider/model", APIKey: "sk-compatible", BaseURL: srv.URL + "/v1/", PresetSlug: "vllm", Transport: "chat_completions",
 		},
 	}, ".")
 	require.NoError(t, err)
@@ -404,7 +413,7 @@ func TestAdapterPlanWithoutRuntimeActionsRemainsReadOnlyWithoutActionMode(t *tes
 		Operation: llmcontracts.OperationStreaming, Message: "Plan a task", ChatMode: models.ChatModePlan,
 		Agent: models.LLMConfig{
 			Name: "Compatible", Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodAPIKey,
-			Model: "provider/model", APIKey: "sk-compatible", BaseURL: srv.URL + "/v1/", Transport: "chat_completions",
+			Model: "provider/model", APIKey: "sk-compatible", BaseURL: srv.URL + "/v1/", PresetSlug: "vllm", Transport: "chat_completions",
 		},
 	}, ".")
 	require.NoError(t, err)
@@ -443,7 +452,7 @@ func TestAdapterTaskWithRuntimeActionsUsesToolModePrompt(t *testing.T) {
 		Ctx: ctx, Operation: llmcontracts.OperationTask, Message: "Investigate the issue",
 		Agent: models.LLMConfig{
 			Name: "Compatible", Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodAPIKey,
-			Model: "provider/model", APIKey: "sk-compatible", BaseURL: srv.URL + "/v1/", Transport: "chat_completions",
+			Model: "provider/model", APIKey: "sk-compatible", BaseURL: srv.URL + "/v1/", PresetSlug: "vllm", Transport: "chat_completions",
 		},
 	}, ".")
 	require.NoError(t, err)
@@ -478,7 +487,7 @@ func TestAdapterTaskWithoutRuntimeActionsDoesNotAdvertiseLegacyMutationMarkers(t
 		Operation: llmcontracts.OperationTask, Message: "Investigate the issue",
 		Agent: models.LLMConfig{
 			Name: "Compatible", Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodAPIKey,
-			Model: "provider/model", APIKey: "sk-compatible", BaseURL: srv.URL + "/v1/", Transport: "chat_completions",
+			Model: "provider/model", APIKey: "sk-compatible", BaseURL: srv.URL + "/v1/", PresetSlug: "vllm", Transport: "chat_completions",
 		},
 	}, ".")
 	require.NoError(t, err)
@@ -544,6 +553,7 @@ func TestAdapterToolCallReplaysToolResult(t *testing.T) {
 			Model:      "provider/model",
 			APIKey:     "sk-compatible",
 			BaseURL:    srv.URL + "/v1/",
+			PresetSlug: "vllm",
 			Transport:  "chat_completions",
 		},
 	}, ".")
@@ -605,6 +615,108 @@ func TestSupportsReasoningContentReplayForKimiOnly(t *testing.T) {
 	require.False(t, supportsReasoningContentReplay(models.LLMConfig{Model: "kimi-k2.5"}))
 	require.False(t, supportsReasoningContentReplay(models.LLMConfig{Model: "glm-5"}))
 	require.False(t, supportsReasoningContentReplay(models.LLMConfig{Model: "gpt-5.6"}))
+}
+
+func TestEnsureFreshOAuthKeepsOpaqueTokenWithUnknownExpiry(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	configRepo := repository.NewLLMConfigRepo(db)
+	agent := &models.LLMConfig{
+		Name:             "Opaque custom OAuth",
+		Provider:         models.ProviderOpenAICompatible,
+		AuthMethod:       models.AuthMethodOAuth,
+		Model:            "premium",
+		BaseURL:          "https://api.example.test/v1",
+		OAuthAccessToken: "opaque-token",
+		OAuthExpiresAt:   0,
+	}
+	require.NoError(t, configRepo.Create(ctx, agent))
+
+	adapter := NewWithConfigRepo(configRepo, nil, nil)
+	fresh, err := adapter.ensureFreshOAuth(ctx, *agent, false, "")
+	require.NoError(t, err)
+	require.Equal(t, "opaque-token", fresh.OAuthAccessToken)
+	require.Zero(t, fresh.OAuthExpiresAt)
+}
+
+func TestOAuthRequestRejectsConfigurationChangedAfterClientCreation(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	configRepo := repository.NewLLMConfigRepo(db)
+	agent := &models.LLMConfig{
+		Name:             "Revision guarded OAuth",
+		Provider:         models.ProviderOpenAICompatible,
+		AuthMethod:       models.AuthMethodOAuth,
+		Model:            "premium",
+		BaseURL:          "https://api.example.test/v1",
+		OAuthAccessToken: "opaque-token",
+		CustomAuthConfigJSON: `{
+			"enabled": true,
+			"access_token_header": "X-Auth-Token",
+			"authorization_mode": "raw"
+		}`,
+	}
+	require.NoError(t, configRepo.Create(ctx, agent))
+
+	adapter := NewWithConfigRepo(configRepo, nil, nil)
+	_, finalize, err := adapter.client(ctx, *agent)
+	require.NoError(t, err)
+
+	current, err := configRepo.GetByID(ctx, agent.ID)
+	require.NoError(t, err)
+	current.Name = "Edited while request was queued"
+	require.NoError(t, configRepo.Update(ctx, current))
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, agent.BaseURL+"/chat/completions", strings.NewReader(`{}`))
+	require.NoError(t, err)
+	err = finalize(req, []byte(`{}`))
+	require.ErrorContains(t, err, "configuration changed")
+	require.Empty(t, req.Header.Get("X-Auth-Token"), "stale request received OAuth credentials")
+}
+
+func TestOAuthInferenceUsesOnlyConfiguredAccessTokenHeader(t *testing.T) {
+	var authorization, customToken string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authorization = r.Header.Get("Authorization")
+		customToken = r.Header.Get("X-Auth-Token")
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(
+			"data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\n" +
+				"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+				"data: [DONE]\n\n",
+		))
+	}))
+	defer server.Close()
+
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	configRepo := repository.NewLLMConfigRepo(db)
+	agent := &models.LLMConfig{
+		Name:             "Custom token header",
+		Provider:         models.ProviderOpenAICompatible,
+		AuthMethod:       models.AuthMethodOAuth,
+		Model:            "premium",
+		BaseURL:          server.URL + "/v1",
+		PresetSlug:       "vllm",
+		Transport:        "chat_completions",
+		OAuthAccessToken: "opaque-token",
+		CustomAuthConfigJSON: `{
+			"enabled": true,
+			"access_token_header": "X-Auth-Token",
+			"access_token_prefix": "Token "
+		}`,
+	}
+	require.NoError(t, configRepo.Create(ctx, agent))
+
+	adapter := NewWithConfigRepo(configRepo, nil, nil)
+	_, err := adapter.Call(ctx, llmcontracts.AgentRequest{
+		Operation: llmcontracts.OperationDirect,
+		Message:   "hello",
+		Agent:     *agent,
+	}, ".")
+	require.NoError(t, err)
+	require.Empty(t, authorization)
+	require.Equal(t, "Token opaque-token", customToken)
 }
 
 func TestPrepareClientHistoryLoadsReasoningOnlyForKimi(t *testing.T) {
@@ -813,6 +925,7 @@ func TestPersistReasoningContentClearsStaleReasoning(t *testing.T) {
 			Model:      "kimi-k3",
 			APIKey:     "test-key",
 			BaseURL:    srv.URL + "/v1/",
+			PresetSlug: "vllm",
 			Transport:  "chat_completions",
 		},
 	}, ".")
@@ -824,4 +937,86 @@ func TestPersistReasoningContentClearsStaleReasoning(t *testing.T) {
 	replay, err := execRepo.ReplayMessagesByExecutionIDs(ctx, []string{execution.ID})
 	require.NoError(t, err)
 	require.Len(t, replay[execution.ID], 1)
+}
+
+// A lifecycle hook must receive its own agent prompt (folded into
+// ProjectInstructions by the provider wrapper) while skipping the shared
+// coding-agent framing. Previously the lifecycle branch sent an empty System.
+func TestCallDirectLifecycleHookKeepsAgentPromptDropsCodingFraming(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &gotBody)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(
+			"data: {\"choices\":[{\"delta\":{\"content\":\"{}\"}}]}\n\n" +
+				"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+				"data: [DONE]\n\n",
+		))
+	}))
+	defer srv.Close()
+
+	adapter := New(nil, nil)
+	if _, err := adapter.Call(context.Background(), llmcontracts.AgentRequest{
+		Operation:           llmcontracts.OperationDirect,
+		Message:             "HOOK PROMPT",
+		ProjectInstructions: "SENTINEL_AGENT_PROMPT",
+		LifecycleHookCall:   true,
+		Agent: models.LLMConfig{
+			Name: "Compatible", Provider: models.ProviderOpenAICompatible,
+			AuthMethod: models.AuthMethodAPIKey, Model: "provider/model",
+			APIKey: "sk-compatible", BaseURL: srv.URL + "/v1/",
+			PresetSlug: "vllm", Transport: "chat_completions",
+		},
+	}, "."); err != nil {
+		t.Fatalf("Call: %v", err)
+	}
+
+	payload, _ := json.Marshal(gotBody)
+	body := string(payload)
+	if !strings.Contains(body, "SENTINEL_AGENT_PROMPT") {
+		t.Fatalf("lifecycle hook lost its agent prompt: %s", body)
+	}
+	if strings.Contains(body, "expert software engineer") {
+		t.Fatalf("lifecycle hook must not receive the coding-agent system prompt: %s", body)
+	}
+}
+
+// Ordinary direct calls keep both the agent prompt and the coding framing.
+func TestCallDirectNonLifecycleKeepsBothPrompts(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &gotBody)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(
+			"data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\n" +
+				"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+				"data: [DONE]\n\n",
+		))
+	}))
+	defer srv.Close()
+
+	adapter := New(nil, nil)
+	if _, err := adapter.Call(context.Background(), llmcontracts.AgentRequest{
+		Operation:           llmcontracts.OperationDirect,
+		Message:             "DO WORK",
+		ProjectInstructions: "SENTINEL_AGENT_PROMPT",
+		Agent: models.LLMConfig{
+			Name: "Compatible", Provider: models.ProviderOpenAICompatible,
+			AuthMethod: models.AuthMethodAPIKey, Model: "provider/model",
+			APIKey: "sk-compatible", BaseURL: srv.URL + "/v1/",
+			PresetSlug: "vllm", Transport: "chat_completions",
+		},
+	}, "."); err != nil {
+		t.Fatalf("Call: %v", err)
+	}
+
+	payload, _ := json.Marshal(gotBody)
+	body := string(payload)
+	for _, want := range []string{"SENTINEL_AGENT_PROMPT", "expert software engineer"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("ordinary direct call missing %q: %s", want, body)
+		}
+	}
 }

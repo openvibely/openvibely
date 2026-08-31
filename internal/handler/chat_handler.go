@@ -35,9 +35,9 @@ func (h *Handler) Chat(c echo.Context) error {
 	isHTMX := isHTMX(c)
 	applog.Debugf("[handler] Chat requested htmx=%v", isHTMX)
 
-	agents, err := h.llmConfigRepo.List(c.Request().Context())
+	agents, err := h.llmConfigRepo.ListPickerOptions(c.Request().Context())
 	if err != nil {
-		applog.Infof("[handler] Chat error listing agents: %v", err)
+		applog.Infof("[handler] Chat error listing model picker options: %v", err)
 		return err
 	}
 
@@ -75,7 +75,7 @@ func (h *Handler) Chat(c echo.Context) error {
 		return render(c, http.StatusOK, pages.ChatContent(agents, chatHistory, currentProjectID, chatAttachmentsByExec, pendingInputs, latestPlanComplete, hasEarlier, limit))
 	}
 
-	projects, _ := h.projectSvc.List(c.Request().Context())
+	projects, _ := h.projectSvc.ListSelectorOptions(c.Request().Context())
 	return render(c, http.StatusOK, pages.Chat(projects, currentProjectID, agents, chatHistory, chatAttachmentsByExec, pendingInputs, latestPlanComplete, hasEarlier, limit))
 }
 
@@ -206,13 +206,14 @@ func (h *Handler) ChatSend(c echo.Context) error {
 		}
 		if h.chatBroadcaster != nil {
 			h.chatBroadcaster.Publish(events.ChatEvent{
-				Type:      events.ChatNewMessage,
-				ProjectID: projectID,
-				ExecID:    queued.ID,
-				Message:   message,
-				Source:    "web",
-				AgentName: agent.Name,
-				Queued:    true,
+				Type:           events.ChatNewMessage,
+				ProjectID:      projectID,
+				ExecID:         queued.ID,
+				Message:        message,
+				Source:         "web",
+				AgentName:      agent.Name,
+				Queued:         true,
+				HasAttachments: queued.AttachmentSessionID != "",
 			})
 		}
 		return render(c, http.StatusOK, components.ChatQueuedInputRowOOB(queued.ID, message, "/chat/queued/"+queued.ID+"/steer", queued.AttachmentSessionID != ""))
@@ -308,18 +309,18 @@ func (h *Handler) ChatSend(c echo.Context) error {
 	// Render user message and streaming/queued placeholder
 	var userMsg templ.Component
 	if len(chatAttachments) > 0 {
-		userMsg = components.ChatBubbleWithAttachments("User", message, chatAttachments)
+		userMsg = components.ChatBubbleWithAttachments("User", message, chatAttachments, projectID)
 	} else {
 		userMsg = components.ChatBubble("User", message)
 	}
 	agentMsg := components.ChatBubbleStreaming("Assistant", exec.ID, "chat-messages", "", false)
 	// Build context and spawn LLM processing goroutine
-	availableModels, _ := h.llmConfigRepo.List(c.Request().Context())
+	availableModels, _ := h.llmConfigRepo.ListChatSelectionOptions(c.Request().Context())
 	taskContext := h.buildChatContext(c.Request().Context(), projectID, availableModels)
 	personalityContext := h.getPersonalityContext(c.Request().Context(), projectID)
 	workDir := h.resolveWorkDir(c.Request().Context(), projectID)
 
-	go h.processStreamingResponse(streamingResponseParams{
+	if err := h.startStreamingResponse(streamingResponseParams{
 		ExecID:           exec.ID,
 		TaskID:           task.ID,
 		Message:          message,
@@ -333,11 +334,14 @@ func (h *Handler) ChatSend(c echo.Context) error {
 		IsTaskFollowup:   false,
 		ChatMode:         chatMode,
 		Surface:          chatcontrol.SurfaceWeb,
-	})
+	}); err != nil {
+		c.Response().Header().Set("Retry-After", "30")
+		return echo.NewHTTPError(http.StatusServiceUnavailable, err.Error())
+	}
 	return render(c, http.StatusOK, templ.Join(
 		userMsg,
 		agentMsg,
-		components.ChatComposerActionButtonOOB("chat-form-primary-action", "/chat/stop?project_id="+projectID, true),
+		components.ChatComposerActionButtonOOB("chat-form-primary-action", "/chat/stop?project_id="+projectID, true, exec.ID),
 	))
 }
 
@@ -354,7 +358,7 @@ func (h *Handler) ChatStop(c echo.Context) error {
 	}
 	if activeChatExec == nil {
 		if isHTMX(c) {
-			return render(c, http.StatusOK, components.ChatComposerActionButtonOOB("chat-form-primary-action", "/chat/stop?project_id="+projectID, false))
+			return render(c, http.StatusOK, components.ChatComposerActionButtonOOB("chat-form-primary-action", "/chat/stop?project_id="+projectID, false, ""))
 		}
 		return c.NoContent(http.StatusNoContent)
 	}
@@ -370,18 +374,9 @@ func (h *Handler) ChatStop(c echo.Context) error {
 		applog.Infof("[handler] ChatStop error preserving chat category task=%s: %v", activeChatExec.TaskID, err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to preserve chat history")
 	}
-	if h.execRepo != nil {
-		if cancelledIDs, err := h.execRepo.CancelRunningByTaskReturningIDs(c.Request().Context(), activeChatExec.TaskID); err != nil {
-			applog.Infof("[handler] ChatStop error cancelling running executions task=%s: %v", activeChatExec.TaskID, err)
-		} else if len(cancelledIDs) > 0 {
-			applog.Infof("[handler] ChatStop cancelled %d running executions task=%s", len(cancelledIDs), activeChatExec.TaskID)
-			for _, id := range cancelledIDs {
-				h.publishExecutionTerminal(id, models.ExecCancelled, "cancelled")
-			}
-		}
-	}
+	h.cancelActiveExecutionsAndPublish(c.Request().Context(), activeChatExec.TaskID, "ChatStop")
 	if isHTMX(c) {
-		return render(c, http.StatusOK, components.ChatComposerActionButtonOOB("chat-form-primary-action", "/chat/stop?project_id="+projectID, false))
+		return render(c, http.StatusOK, components.ChatComposerActionButtonOOB("chat-form-primary-action", "/chat/stop?project_id="+projectID, false, ""))
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -397,7 +392,11 @@ func (h *Handler) ChatComposerAction(c echo.Context) error {
 		applog.Infof("[handler] ChatComposerAction error checking active chat turn: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to check active response")
 	}
-	return render(c, http.StatusOK, components.ChatComposerActionButtonOOB("chat-form-primary-action", "/chat/stop?project_id="+projectID, activeChatExec != nil))
+	activeTurnID := ""
+	if activeChatExec != nil {
+		activeTurnID = activeChatExec.ID
+	}
+	return render(c, http.StatusOK, components.ChatComposerActionButtonOOB("chat-form-primary-action", "/chat/stop?project_id="+projectID, activeChatExec != nil, activeTurnID))
 }
 
 func (h *Handler) ChatSteer(c echo.Context) error {
@@ -443,9 +442,6 @@ func (h *Handler) ChatSteer(c echo.Context) error {
 	}
 	if err := h.threadInputRepo.CreateSteeringForActiveExecution(c.Request().Context(), input, active.ID); err != nil {
 		applog.Infof("[handler] ChatSteer error creating steering input: %v", err)
-		if cleanupErr := h.cleanupUnpublishedPendingAttachmentSession(c.Request().Context(), input.AttachmentSessionID); cleanupErr != nil {
-			applog.Infof("[handler] ChatSteer error cleaning unpublished attachment session %s: %v", input.AttachmentSessionID, cleanupErr)
-		}
 		if errors.Is(err, repository.ErrExpectedTurnEmpty) {
 			return echo.NewHTTPError(http.StatusBadRequest, "expected turn id is required")
 		}
@@ -456,15 +452,16 @@ func (h *Handler) ChatSteer(c echo.Context) error {
 	}
 	if h.chatBroadcaster != nil {
 		h.chatBroadcaster.Publish(events.ChatEvent{
-			Type:      events.ChatTurnSteered,
-			ProjectID: projectID,
-			ExecID:    input.ID,
-			Message:   message,
-			Source:    "web",
-			Steering:  true,
+			Type:           events.ChatTurnSteered,
+			ProjectID:      projectID,
+			ExecID:         input.ID,
+			Message:        message,
+			Source:         "web",
+			Steering:       true,
+			HasAttachments: input.AttachmentSessionID != "",
 		})
 	}
-	return render(c, http.StatusOK, components.ChatSteeringInputRow(input.ID, message))
+	return render(c, http.StatusOK, components.ChatSteeringInputRow(input.ID, message, input.AttachmentSessionID != ""))
 }
 
 // ChatPendingInputs returns the current pending-inputs composer fragment for the project.
@@ -505,6 +502,58 @@ func mediaTypeFromExtension(filename string) string {
 		return mt
 	}
 	return "text/plain"
+}
+
+type chatAttachmentModelContextFile struct {
+	FileName  string
+	FilePath  string
+	MediaType string
+	FileSize  int64
+}
+
+type chatAttachmentModelContextOptions struct {
+	IgnoreReadErrors bool
+}
+
+func buildChatAttachmentModelContext(files []chatAttachmentModelContextFile, opts chatAttachmentModelContextOptions) (string, []models.Attachment, error) {
+	var attachmentContents []string
+	var imageAttachments []models.Attachment
+
+	for _, file := range files {
+		mediaType := file.MediaType
+		if mediaType == "" {
+			mediaType = mediaTypeFromExtension(file.FileName)
+		}
+
+		if isImageFile(file.FileName) {
+			imageAttachments = append(imageAttachments, models.Attachment{
+				FileName:  file.FileName,
+				FilePath:  file.FilePath,
+				MediaType: mediaType,
+				FileSize:  file.FileSize,
+			})
+			continue
+		}
+
+		if file.FileSize <= maxTextAttachmentSize {
+			content, err := os.ReadFile(file.FilePath)
+			if err != nil {
+				if opts.IgnoreReadErrors {
+					continue
+				}
+				return "", nil, fmt.Errorf("reading file %s: %w", file.FilePath, err)
+			}
+			attachmentContents = append(attachmentContents, fmt.Sprintf("\nFile: %s\n```\n%s\n```\n", file.FileName, string(content)))
+		} else {
+			attachmentContents = append(attachmentContents, fmt.Sprintf("\nFile: %s (attached, %d bytes - too large to include inline)\n", file.FileName, file.FileSize))
+		}
+	}
+
+	textContext := ""
+	if len(attachmentContents) > 0 {
+		textContext = "\n\n--- Attached Files ---\n" + strings.Join(attachmentContents, "")
+	}
+	return textContext, imageAttachments, nil
 }
 
 // processAttachments moves uploaded files from pending directory to execution directory,
@@ -549,8 +598,7 @@ func (h *Handler) processAttachmentsWithReturn(ctx context.Context, sessionID, e
 		return "", nil, nil, fmt.Errorf("creating execution directory: %w", err)
 	}
 
-	var attachmentContents []string
-	var imageAttachments []models.Attachment
+	var contextFiles []chatAttachmentModelContextFile
 	var chatAttachments []models.ChatAttachment
 	var staged []attachmentPublication
 	rollback := func() {
@@ -591,31 +639,24 @@ func (h *Handler) processAttachmentsWithReturn(ctx context.Context, sessionID, e
 		staged = append(staged, attachmentPublication{id: attachment.ID, path: destPath})
 		chatAttachments = append(chatAttachments, *attachment)
 
-		if isImageFile(file.Name()) {
-			imageAttachments = append(imageAttachments, models.Attachment{
-				FileName: file.Name(), FilePath: destPath, MediaType: mediaType, FileSize: info.Size(),
-			})
-		} else if info.Size() <= maxTextAttachmentSize {
-			content, readErr := os.ReadFile(destPath)
-			if readErr != nil {
-				rollback()
-				return "", nil, nil, fmt.Errorf("attachment lifecycle stage=session-read session=%s source=%s execution=%s destination=%s: %w", sessionID, srcPath, execID, destPath, readErr)
-			}
-			attachmentContents = append(attachmentContents, fmt.Sprintf("\nFile: %s\n```\n%s\n```\n", file.Name(), string(content)))
-		} else {
-			attachmentContents = append(attachmentContents, fmt.Sprintf("\nFile: %s (attached, %d bytes - too large to include inline)\n", file.Name(), info.Size()))
-		}
+		contextFiles = append(contextFiles, chatAttachmentModelContextFile{
+			FileName:  file.Name(),
+			FilePath:  destPath,
+			MediaType: mediaType,
+			FileSize:  info.Size(),
+		})
+	}
+
+	textContext, imageAttachments, err := buildChatAttachmentModelContext(contextFiles, chatAttachmentModelContextOptions{})
+	if err != nil {
+		rollback()
+		return "", nil, nil, fmt.Errorf("attachment lifecycle stage=session-read session=%s execution=%s: %w", sessionID, execID, err)
 	}
 
 	if err := os.RemoveAll(pendingDir); err != nil {
 		applog.Infof("[handler] attachment lifecycle stage=session-cleanup session=%s execution=%s source=%s error=%v", sessionID, execID, pendingDir, err)
 	}
 	applog.Infof("[handler] attachment lifecycle stage=session-committed session=%s execution=%s attachments=%d", sessionID, execID, len(chatAttachments))
-
-	var textContext string
-	if len(attachmentContents) > 0 {
-		textContext = "\n\n--- Attached Files ---\n" + strings.Join(attachmentContents, "")
-	}
 
 	return textContext, imageAttachments, chatAttachments, nil
 }
@@ -629,8 +670,7 @@ func (h *Handler) previewPendingAttachments(sessionID string) (string, []models.
 	if err != nil {
 		return "", nil, fmt.Errorf("reading pending directory: %w", err)
 	}
-	var attachmentContents []string
-	var imageAttachments []models.Attachment
+	var contextFiles []chatAttachmentModelContextFile
 	for _, file := range files {
 		if file.IsDir() {
 			continue
@@ -640,29 +680,14 @@ func (h *Handler) previewPendingAttachments(sessionID string) (string, []models.
 		if err != nil {
 			return "", nil, fmt.Errorf("getting file info %s: %w", file.Name(), err)
 		}
-		mediaType := mediaTypeFromExtension(file.Name())
-		if isImageFile(file.Name()) {
-			imageAttachments = append(imageAttachments, models.Attachment{
-				FileName:  file.Name(),
-				FilePath:  path,
-				MediaType: mediaType,
-				FileSize:  info.Size(),
-			})
-		} else if info.Size() <= maxTextAttachmentSize {
-			content, err := os.ReadFile(path)
-			if err != nil {
-				return "", nil, fmt.Errorf("reading file %s: %w", file.Name(), err)
-			}
-			attachmentContents = append(attachmentContents, fmt.Sprintf("\nFile: %s\n```\n%s\n```\n", file.Name(), string(content)))
-		} else {
-			attachmentContents = append(attachmentContents, fmt.Sprintf("\nFile: %s (attached, %d bytes - too large to include inline)\n", file.Name(), info.Size()))
-		}
+		contextFiles = append(contextFiles, chatAttachmentModelContextFile{
+			FileName:  file.Name(),
+			FilePath:  path,
+			MediaType: mediaTypeFromExtension(file.Name()),
+			FileSize:  info.Size(),
+		})
 	}
-	var textContext string
-	if len(attachmentContents) > 0 {
-		textContext = "\n\n--- Attached Files ---\n" + strings.Join(attachmentContents, "")
-	}
-	return textContext, imageAttachments, nil
+	return buildChatAttachmentModelContext(contextFiles, chatAttachmentModelContextOptions{})
 }
 
 func (h *Handler) ClearChat(c echo.Context) error {
@@ -694,9 +719,9 @@ func (h *Handler) ClearChat(c echo.Context) error {
 	applog.Infof("[handler] ClearChat deleted %d chat tasks", count)
 
 	// Return updated chat content
-	agents, err := h.llmConfigRepo.List(c.Request().Context())
+	agents, err := h.llmConfigRepo.ListPickerOptions(c.Request().Context())
 	if err != nil {
-		applog.Infof("[handler] ClearChat error listing agents: %v", err)
+		applog.Infof("[handler] ClearChat error listing model picker options: %v", err)
 		return err
 	}
 

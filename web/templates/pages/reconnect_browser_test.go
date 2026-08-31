@@ -362,7 +362,7 @@ func TestChatReconnectDiscoversMissedActiveExecutionAndAttachesStream(t *testing
 	running := models.Execution{ID: "chat-missed-active", Status: models.ExecRunning, PromptSent: "missed start", Output: "partial"}
 	initialHTML := renderReconnectComponent(t, ChatContent(nil, nil, "project-missed-active", nil, nil, false, false, 30))
 	runningHTML := renderReconnectComponent(t, ChatContent(nil, []models.Execution{running}, "project-missed-active", nil, nil, false, false, 30))
-	stopAction := renderReconnectComponent(t, components.ChatComposerActionButtonOOB("chat-form-primary-action", "/chat/stop?project_id=project-missed-active", true))
+	stopAction := renderReconnectComponent(t, components.ChatComposerActionButtonOOB("chat-form-primary-action", "/chat/stop?project_id=project-missed-active", true, "missed-active-turn"))
 	stopActionJSON, err := json.Marshal(stopAction)
 	if err != nil {
 		t.Fatalf("marshal missed-active Chat composer action: %v", err)
@@ -430,8 +430,8 @@ func runChatExecutionStreamOnlyTerminalComposerCase(t *testing.T, terminalStatus
 	initialHTML := renderReconnectComponent(t, ChatContent(nil, nil, "project-stream-only", nil, nil, false, false, 30))
 	runningHTML := renderReconnectComponent(t, ChatContent(nil, []models.Execution{running}, "project-stream-only", nil, nil, false, false, 30))
 	terminalHTML := renderReconnectComponent(t, ChatContent(nil, []models.Execution{terminal}, "project-stream-only", nil, nil, false, false, 30))
-	stopAction := renderReconnectComponent(t, components.ChatComposerActionButtonOOB("chat-form-primary-action", "/chat/stop?project_id=project-stream-only", true))
-	sendAction := renderReconnectComponent(t, components.ChatComposerActionButtonOOB("chat-form-primary-action", "/chat/stop?project_id=project-stream-only", false))
+	stopAction := renderReconnectComponent(t, components.ChatComposerActionButtonOOB("chat-form-primary-action", "/chat/stop?project_id=project-stream-only", true, "stream-only-turn"))
+	sendAction := renderReconnectComponent(t, components.ChatComposerActionButtonOOB("chat-form-primary-action", "/chat/stop?project_id=project-stream-only", false, ""))
 	stopActionJSON, err := json.Marshal(stopAction)
 	if err != nil {
 		t.Fatalf("marshal stream-only Stop action: %v", err)
@@ -458,7 +458,7 @@ window.addEventListener('DOMContentLoaded', async function() {
     window.renderLiveChatContent = window.renderStreamingContent;
     var draft = document.getElementById('message-input');
     var session = document.getElementById('chat-form-session-id');
-    draft.value = 'preserved stream-only draft';
+    draft.value = '';
     session.value = 'preserved-stream-only-session';
     window.__phase = 'running';
     window.__composerActionHTML = ` + string(stopActionJSON) + `;
@@ -469,7 +469,7 @@ window.addEventListener('DOMContentLoaded', async function() {
     var stopButton = document.querySelector('#chat-form-primary-action button');
     if (!pair || !stream) fail('stream-only terminal fixture did not attach its execution stream');
     if (!stopButton || stopButton.getAttribute('aria-label') !== 'Stop response') fail('normal live Chat start did not change Send to Stop');
-    if (document.getElementById('message-input') !== draft || draft.value !== 'preserved stream-only draft') fail('live start replaced or cleared Chat draft');
+    if (document.getElementById('message-input') !== draft || draft.value !== '') fail('live start replaced or changed empty Chat draft');
     if (document.getElementById('chat-form-session-id') !== session || session.value !== 'preserved-stream-only-session') fail('live start replaced or cleared Chat attachment session');
 
     window.__phase = 'terminal';
@@ -481,6 +481,7 @@ window.addEventListener('DOMContentLoaded', async function() {
     if (!sendButton || sendButton.getAttribute('aria-label') !== 'Send message') fail('per-execution-only ` + string(terminalStatus) + ` terminal did not change Stop to Send');
     if (document.getElementById('chat-execution-` + execID + `') !== pair) fail('stream-only terminal replaced the Chat execution node');
     if (pair.getAttribute('data-exec-status') !== '` + string(terminalStatus) + `') fail('stream-only terminal status was not authoritative: ' + pair.getAttribute('data-exec-status'));
+    draft.value = 'preserved stream-only draft';
     var expectedHolder = document.createElement('template');
     expectedHolder.innerHTML = window.__snapshots.terminal;
     var expectedRevision = expectedHolder.content.querySelector('#chat-page-root').getAttribute('data-chat-revision');
@@ -515,8 +516,8 @@ func TestTaskThreadQueuedPromotionRefreshesComposerActionToStop(t *testing.T) {
 	completed := models.Execution{ID: "thread-before-promotion", TaskID: task.ID, Status: models.ExecCompleted, PromptSent: "old", Output: "done"}
 	promoted := models.Execution{ID: "thread-promoted", TaskID: task.ID, Status: models.ExecRunning, PromptSent: "queued next", IsFollowup: true}
 	initialHTML := renderReconnectComponent(t, components.TaskThreadView(task, []models.Execution{completed}, nil, nil, nil, nil, false, 30))
-	promotedFragment := renderReconnectComponent(t, components.TaskThreadFollowupResponse(promoted.PromptSent, promoted.ID, nil))
-	stopAction := renderReconnectComponent(t, components.ChatComposerActionButtonOOB("task-thread-form-primary-action", "/tasks/thread-promotion/cancel?composer_stop=1", true))
+	promotedFragment := renderReconnectComponent(t, components.TaskThreadFollowupResponse(promoted.PromptSent, promoted.ID, nil, task.ProjectID))
+	stopAction := renderReconnectComponent(t, components.ChatComposerActionButtonOOB("task-thread-form-primary-action", "/tasks/thread-promotion/cancel?composer_stop=1", true, "thread-promotion-turn"))
 	prelude := reconnectFixturePrelude(t, map[string]string{"initial": initialHTML})
 	promotedJSON, err := json.Marshal(promotedFragment)
 	if err != nil {

@@ -10,9 +10,12 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/labstack/echo/v4"
+	"github.com/openvibely/openvibely/internal/agentlibrary"
 	"github.com/openvibely/openvibely/internal/agentplugins"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
@@ -56,13 +59,18 @@ func TestHandler_ListAgents_DeleteConfirmationDialog(t *testing.T) {
 	for _, want := range []string{
 		`id="delete_agent_confirm_modal" class="modal"`,
 		`id="delete_agent_confirm_name"`,
+		`data-destructive-confirm-dialog`,
+		`window.openDestructiveConfirmDialog = function(dialogID, nameID, displayName)`,
+		`openDestructiveConfirmDialog('delete_agent_confirm_modal', 'delete_agent_confirm_name', button.dataset.agentName || 'this agent')`,
 		`onclick="delete_agent_confirm_modal.close()"`,
 		`onclick="confirmDeleteAgent()"`,
 		`class="btn btn-error"`,
 		`onclick="openDeleteAgentConfirm(this)"`,
 		`modal.showModal()`,
 		`async function confirmDeleteAgent()`,
-		`fetch(withCurrentProject('/agents/' + encodeURIComponent(id))`,
+		`var deleteURL = withCurrentProject('/agents/' + encodeURIComponent(id));`,
+		`window.cardPaginationRefreshURL(container, deleteURL)`,
+		`fetch(deleteURL`,
 		`method: 'DELETE'`,
 		`function withCurrentProject(url)`,
 		`function currentProjectQueryString()`,
@@ -73,6 +81,47 @@ func TestHandler_ListAgents_DeleteConfirmationDialog(t *testing.T) {
 	}
 	if strings.Contains(body, `hx-confirm="Delete this agent`) || strings.Contains(body, `hx-delete="/agents/`) {
 		t.Fatal("expected agent delete button to open modal instead of deleting immediately")
+	}
+}
+
+func TestHandler_ListAgents_NewAgentModalPreservesCurrentProject(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	h.SetAgentRepo(repository.NewAgentRepo(db))
+
+	projectA := &models.Project{Name: "Stored Project A", RepoPath: t.TempDir()}
+	if err := h.projectSvc.Create(t.Context(), projectA); err != nil {
+		t.Fatalf("create project A: %v", err)
+	}
+	projectB := &models.Project{Name: "Viewed Project B", RepoPath: t.TempDir()}
+	if err := h.projectSvc.Create(t.Context(), projectB); err != nil {
+		t.Fatalf("create project B: %v", err)
+	}
+	if err := h.settingsRepo.Set(t.Context(), uiPreferenceSelectedProjectIDKey, projectA.ID); err != nil {
+		t.Fatalf("set selected project preference: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/agents?project_id="+url.QueryEscape(projectB.ID), nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+
+	body := rec.Body.String()
+	for _, want := range []string{
+		`function withCurrentProject(url)`,
+		`form.action = withCurrentProject('/agents');`,
+		`form.setAttribute('hx-post', withCurrentProject('/agents'));`,
+		`form.action = withCurrentProject('/agents/' + id);`,
+		`var deleteURL = withCurrentProject('/agents/' + encodeURIComponent(id));`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("expected New/Edit/Delete agent paths to preserve current project with %q", want)
+		}
+	}
+	if strings.Contains(body, `form.action = '/agents';`) || strings.Contains(body, `form.setAttribute('hx-post', '/agents');`) {
+		t.Fatal("expected New Agent form to avoid posting to /agents without current project context")
 	}
 }
 
@@ -1503,6 +1552,293 @@ func TestHandler_ListAgents_IncludesDefaultOffPluginText(t *testing.T) {
 	}
 }
 
+func TestHandler_AgentModelPickerRoutesUseCompactProjection(t *testing.T) {
+	_, e, _, agentRepo, counter := setupAgentModelPickerProjectionTest(t)
+
+	agent := &models.Agent{Name: "Projection Existing", Key: "projection_existing", Model: "inherit", Tools: []string{"Read"}, Enabled: true}
+	if err := agentRepo.Create(t.Context(), agent); err != nil {
+		t.Fatalf("create existing agent: %v", err)
+	}
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/agents?project_id=default", nil)
+	e.ServeHTTP(rec, req)
+	counter.SetEnabled(false)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected list status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	assertCompactAgentPickerQueries(t, counter.Statements(), 1)
+	body := rec.Body.String()
+	inheritIndex := strings.Index(body, `<option value="inherit">Inherit (from task)</option>`)
+	defaultIndex := strings.Index(body, `<option value="agent-picker-default">Agent Picker Default</option>`)
+	firstCustomIndex := strings.Index(body, `<option value="agent-picker-model-00">Agent Picker 00</option>`)
+	if inheritIndex < 0 || defaultIndex < 0 || firstCustomIndex < 0 || !(inheritIndex < defaultIndex && defaultIndex < firstCustomIndex) {
+		t.Fatalf("agent model dropdown order/labels not preserved: inherit=%d default=%d firstCustom=%d", inheritIndex, defaultIndex, firstCustomIndex)
+	}
+
+	createForm := agentDialogModelForm("Projection Create", "agent-picker-model-17")
+	counter.Reset()
+	counter.SetEnabled(true)
+	rec = performAgentDialogRequest(t, e, http.MethodPost, "/agents", createForm)
+	counter.SetEnabled(false)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected create status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	assertCompactAgentPickerQueries(t, counter.Statements(), 2)
+	created := requireUserAgentByName(t, agentRepo, "Projection Create")
+	if created.Model != "agent-picker-model-17" {
+		t.Fatalf("known create model normalized to %q", created.Model)
+	}
+
+	updateForm := agentDialogModelForm("Projection Existing Updated", "agent-picker-model-23")
+	counter.Reset()
+	counter.SetEnabled(true)
+	rec = performAgentDialogRequest(t, e, http.MethodPut, "/agents/"+agent.ID, updateForm)
+	counter.SetEnabled(false)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected update status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	assertCompactAgentPickerQueries(t, counter.Statements(), 2)
+	updated, err := agentRepo.GetByID(t.Context(), agent.ID)
+	if err != nil {
+		t.Fatalf("reload updated agent: %v", err)
+	}
+	if updated.Model != "agent-picker-model-23" {
+		t.Fatalf("known update model normalized to %q", updated.Model)
+	}
+}
+
+func TestHandler_AgentModelNormalizationPreservesBlankInheritUnknownAndKnown(t *testing.T) {
+	_, e, _, agentRepo, counter := setupAgentModelPickerProjectionTest(t)
+
+	createCases := []struct {
+		name      string
+		input     string
+		wantModel string
+	}{
+		{name: "Create Blank Model", input: "", wantModel: "inherit"},
+		{name: "Create Inherit Model", input: " inherit ", wantModel: "inherit"},
+		{name: "Create Unknown Model", input: "missing-model", wantModel: "inherit"},
+		{name: "Create Known Model", input: "agent-picker-model-31", wantModel: "agent-picker-model-31"},
+	}
+	for _, tc := range createCases {
+		counter.Reset()
+		counter.SetEnabled(true)
+		rec := performAgentDialogRequest(t, e, http.MethodPost, "/agents", agentDialogModelForm(tc.name, tc.input))
+		counter.SetEnabled(false)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s: expected status 200, got %d: %s", tc.name, rec.Code, rec.Body.String())
+		}
+		assertCompactAgentPickerQueries(t, counter.Statements(), 2)
+		created := requireUserAgentByName(t, agentRepo, tc.name)
+		if created.Model != tc.wantModel {
+			t.Fatalf("%s: model = %q, want %q", tc.name, created.Model, tc.wantModel)
+		}
+	}
+
+	updateCases := []struct {
+		name      string
+		input     string
+		wantModel string
+	}{
+		{name: "Update Blank Model", input: "", wantModel: "inherit"},
+		{name: "Update Inherit Model", input: "inherit", wantModel: "inherit"},
+		{name: "Update Unknown Model", input: "missing-model", wantModel: "inherit"},
+		{name: "Update Known Model", input: "agent-picker-model-32", wantModel: "agent-picker-model-32"},
+	}
+	for _, tc := range updateCases {
+		agent := &models.Agent{Name: tc.name, Key: strings.ReplaceAll(strings.ToLower(tc.name), " ", "_"), Model: "agent-picker-model-01", Tools: []string{"Read"}, Enabled: true}
+		if err := agentRepo.Create(t.Context(), agent); err != nil {
+			t.Fatalf("create %s: %v", tc.name, err)
+		}
+		counter.Reset()
+		counter.SetEnabled(true)
+		rec := performAgentDialogRequest(t, e, http.MethodPut, "/agents/"+agent.ID, agentDialogModelForm(tc.name, tc.input))
+		counter.SetEnabled(false)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s: expected status 200, got %d: %s", tc.name, rec.Code, rec.Body.String())
+		}
+		assertCompactAgentPickerQueries(t, counter.Statements(), 2)
+		updated, err := agentRepo.GetByID(t.Context(), agent.ID)
+		if err != nil {
+			t.Fatalf("reload %s: %v", tc.name, err)
+		}
+		if updated.Model != tc.wantModel {
+			t.Fatalf("%s: model = %q, want %q", tc.name, updated.Model, tc.wantModel)
+		}
+	}
+}
+
+func TestHandler_GenerateAgentNormalizesModelsWithCompactPickerProjection(t *testing.T) {
+	h, e, _, _, counter := setupAgentModelPickerProjectionTest(t)
+
+	for _, tc := range []struct {
+		name      string
+		model     string
+		wantModel string
+	}{
+		{name: "known", model: "agent-picker-model-17", wantModel: "agent-picker-model-17"},
+		{name: "unknown", model: "missing-generated-model", wantModel: "inherit"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h.llmSvc.SetLLMCaller(llmCallerFunc(func(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, execID string, workDir string) (string, string, int, error) {
+				if agent.APIKey == "" || agent.ExtraBodyJSON == "" {
+					return "", "", 0, fmt.Errorf("default model was not hydrated with full execution fields: %#v", agent)
+				}
+				response := fmt.Sprintf(`{"name":"Generated %s","description":"desc","system_prompt":"Do work","model":%q,"tools":["Read"],"skills":[{"name":"Plan","description":"d","tools":"Read","content":"c"}],"mcp_servers":[]}`, tc.name, tc.model)
+				return response, response, 0, nil
+			}))
+
+			form := url.Values{}
+			form.Set("description", "Generate a coding agent")
+			counter.Reset()
+			counter.SetEnabled(true)
+			req := httptest.NewRequest(http.MethodPost, "/agents/generate", strings.NewReader(form.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+			counter.SetEnabled(false)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+			}
+			assertCompactAgentPickerQueries(t, counter.Statements(), 1)
+			assertGenerateAgentLoadedFullDefaultModel(t, counter.Statements())
+
+			var generated struct {
+				Model          string `json:"model"`
+				GenerationMode string `json:"generation_mode"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &generated); err != nil {
+				t.Fatalf("decode generated response: %v", err)
+			}
+			if generated.GenerationMode != "llm" {
+				t.Fatalf("generation mode = %q, want llm", generated.GenerationMode)
+			}
+			if generated.Model != tc.wantModel {
+				t.Fatalf("generated model = %q, want %q", generated.Model, tc.wantModel)
+			}
+		})
+	}
+}
+
+func setupAgentModelPickerProjectionTest(t *testing.T) (*Handler, *echo.Echo, *repository.LLMConfigRepo, *repository.AgentRepo, *testutil.SQLStatementCounter) {
+	t.Helper()
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
+	agentRepo := repository.NewAgentRepo(db)
+	h.SetAgentRepo(agentRepo)
+
+	largeBody := strings.Repeat("x", 64*1024)
+	extraBodyJSON := `{"large":"` + largeBody + `"}`
+	defaultCfg := &models.LLMConfig{
+		Name:          "Agent Picker Default",
+		Provider:      models.ProviderTest,
+		Model:         "agent-picker-default",
+		APIKey:        "secret-default-key",
+		ExtraBodyJSON: extraBodyJSON,
+		IsDefault:     true,
+	}
+	if err := llmConfigRepo.Create(t.Context(), defaultCfg); err != nil {
+		t.Fatalf("create default model config: %v", err)
+	}
+	for i := 0; i < 50; i++ {
+		cfg := &models.LLMConfig{
+			Name:                 fmt.Sprintf("Agent Picker %02d", i),
+			Provider:             models.ProviderOpenAICompatible,
+			AuthMethod:           models.AuthMethodOAuth,
+			Model:                fmt.Sprintf("agent-picker-model-%02d", i),
+			APIKey:               fmt.Sprintf("secret-key-%02d", i),
+			OAuthAccessToken:     "secret-token",
+			OAuthRefreshToken:    "secret-refresh",
+			OAuthClientSecret:    "secret-client",
+			BaseURL:              "https://example.com/v1/",
+			Transport:            "chat_completions",
+			PresetSlug:           "custom",
+			ExtraHeadersJSON:     `{"secret":"header"}`,
+			ExtraBodyJSON:        extraBodyJSON,
+			CustomAuthConfigJSON: `{"signing_secret":"secret"}`,
+			CustomAuthStateJSON:  `{"token":"secret"}`,
+			MixtureConfigJSON:    `{"large":"` + largeBody + `"}`,
+		}
+		if err := llmConfigRepo.Create(t.Context(), cfg); err != nil {
+			t.Fatalf("create large model config %d: %v", i, err)
+		}
+	}
+	return h, e, llmConfigRepo, agentRepo, counter
+}
+
+func agentDialogModelForm(name, model string) url.Values {
+	form := url.Values{}
+	form.Set("name", name)
+	form.Set("description", "model normalization")
+	form.Set("system_prompt", "do work")
+	form.Set("model", model)
+	form.Set("tools_json", `[]`)
+	form.Set("plugins_json", `[]`)
+	form.Set("skills_json", `[]`)
+	form.Set("mcp_servers_json", `[]`)
+	form.Set("enabled", "true")
+	form.Set("selectable_as_primary", "true")
+	return form
+}
+
+func requireUserAgentByName(t *testing.T, repo *repository.AgentRepo, name string) models.Agent {
+	t.Helper()
+	agents, err := repo.List(t.Context())
+	if err != nil {
+		t.Fatalf("list agents: %v", err)
+	}
+	for _, agent := range agents {
+		if agent.SystemKind == "" && agent.Name == name {
+			return agent
+		}
+	}
+	t.Fatalf("user agent %q not found in %+v", name, agents)
+	return models.Agent{}
+}
+
+func assertCompactAgentPickerQueries(t *testing.T, statements []string, minQueries int) {
+	t.Helper()
+	queries := 0
+	for _, statement := range statements {
+		stmt := strings.ToLower(strings.Join(strings.Fields(statement), " "))
+		if !strings.Contains(stmt, " from agent_configs order by is_default desc, name asc") {
+			continue
+		}
+		queries++
+		projection := strings.Split(stmt, " from agent_configs ")[0]
+		if !strings.Contains(projection, "select id, name, model") {
+			t.Fatalf("agent picker projection = %q, want id/name/model in %s", projection, statement)
+		}
+		for _, forbidden := range []string{"provider", "api_key", "oauth_access_token", "oauth_refresh_token", "oauth_client_secret", "oauth_authorize_url", "oauth_token_url", "ollama_base_url", "base_url", "models_url", "auth_header_name", "auth_header_value_prefix", "extra_headers_json", "extra_body_json", "custom_auth_config_json", "custom_auth_state_json", "oauth_config_revision", "mixture_config_json", "created_at", "updated_at", "max_workers", "worker_timeout", "auto_start_tasks"} {
+			if strings.Contains(projection, forbidden) {
+				t.Fatalf("agent picker query selected forbidden column %q: %s", forbidden, statement)
+			}
+		}
+	}
+	if queries < minQueries {
+		t.Fatalf("found %d compact agent picker queries, want at least %d; statements: %#v", queries, minQueries, statements)
+	}
+}
+
+func assertGenerateAgentLoadedFullDefaultModel(t *testing.T, statements []string) {
+	t.Helper()
+	for _, statement := range statements {
+		stmt := strings.ToLower(strings.Join(strings.Fields(statement), " "))
+		if strings.Contains(stmt, " from agent_configs where is_default = 1 limit 1") {
+			projection := strings.Split(stmt, " from agent_configs ")[0]
+			if strings.Contains(projection, "api_key") && strings.Contains(projection, "extra_body_json") {
+				return
+			}
+			t.Fatalf("GenerateAgent default-model query did not use full execution projection: %s", statement)
+		}
+	}
+	t.Fatalf("GenerateAgent did not load the full default model; statements: %#v", statements)
+}
+
 func TestHandler_GenerateAgent_RejectsUninstalledPluginSelection(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
 	h.SetAgentRepo(repository.NewAgentRepo(db))
@@ -2003,6 +2339,473 @@ func TestHandler_CreateAgent_RejectsInvalidScopedFilesDirectory(t *testing.T) {
 	}
 }
 
+func TestHandler_AgentDialogFormParsing_CreateAndUpdatePersistSharedFields(t *testing.T) {
+	cases := []struct {
+		name   string
+		method string
+		path   func(agentID, projectID string) string
+	}{
+		{
+			name:   "create",
+			method: http.MethodPost,
+			path: func(agentID, projectID string) string {
+				return "/agents?project_id=" + projectID
+			},
+		},
+		{
+			name:   "update",
+			method: http.MethodPut,
+			path: func(agentID, projectID string) string {
+				return "/agents/" + agentID + "?project_id=" + projectID
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
+			agentRepo := repository.NewAgentRepo(db)
+			h.SetAgentRepo(agentRepo)
+
+			model := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
+				a.Name = "Configured Dialog Model"
+				a.Model = "dialog-configured-model"
+				a.IsDefault = false
+			})
+			project := &models.Project{Name: "Dialog Project", RepoPath: t.TempDir()}
+			if err := h.projectSvc.Create(t.Context(), project); err != nil {
+				t.Fatalf("create project: %v", err)
+			}
+
+			origDiscover := discoverPluginStateFn
+			defer func() { discoverPluginStateFn = origDiscover }()
+			discoverPluginStateFn = func(ctx context.Context) (models.PluginState, error) {
+				return models.PluginState{Installed: []models.InstalledPlugin{{ID: "playwright@claude-plugins-official", Enabled: true}}}, nil
+			}
+
+			var existingID string
+			if tc.method == http.MethodPut {
+				existing := &models.Agent{
+					Name:                "Before Dialog Agent",
+					Key:                 "before_dialog_agent",
+					Description:         "before",
+					SystemPrompt:        "before prompt",
+					Model:               "inherit",
+					Tools:               []string{"Read"},
+					SelectableAsPrimary: true,
+					Enabled:             true,
+				}
+				if err := agentRepo.Create(t.Context(), existing); err != nil {
+					t.Fatalf("create existing agent: %v", err)
+				}
+				existingID = existing.ID
+			}
+
+			form := url.Values{}
+			form.Set("name", "Dialog Agent "+tc.name)
+			form.Set("description", "shared dialog payload")
+			form.Set("system_prompt", "Use the shared parser")
+			form.Set("model", model.Model)
+			form.Set("tools_json", `["read","ScopedFiles","send_message","unknown-tool"]`)
+			form.Set("tool_config_json", `{"scoped_files":[{"directory":"configs/secrets","permissions":["read","write"]}],"skip_default_tools":true,"disable_runtime_worktree":true}`)
+			form.Set("plugins_json", `["playwright@claude-plugins-official"]`)
+			form.Set("skills_json", `[{"name":"Generated Skill","description":"from dialog","tools":"Read,Grep","content":"Follow the dialog workflow."}]`)
+			form.Set("mcp_servers_json", `[{"name":"local-docs","command":["npx","docs-mcp"],"env":{"TOKEN":"test"}}]`)
+			form.Set("key", "dialog_agent_"+tc.name)
+			form.Set("scope", "project")
+			form.Set("selectable_as_primary", "false")
+			form.Set("enabled", "false")
+			form.Set("permission_defaults_json", `{"read_agents":true,"write_skills":true,"use_shell_or_tools":true}`)
+			form.Set("source_refs_json", `["https://example.test/source"]`)
+
+			rec := performAgentDialogRequest(t, e, tc.method, tc.path(existingID, project.ID), form)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+			}
+
+			stored, err := agentRepo.GetByKey(t.Context(), "dialog_agent_"+tc.name)
+			if err != nil {
+				t.Fatalf("load saved agent: %v", err)
+			}
+			if stored == nil {
+				t.Fatal("saved agent not found")
+			}
+			if stored.Model != model.Model {
+				t.Fatalf("configured model not persisted: got %q want %q", stored.Model, model.Model)
+			}
+			if !agentToolsInclude(stored.Tools, "Read") || !agentToolsInclude(stored.Tools, models.AgentToolScopedFiles) || !agentToolsInclude(stored.Tools, "send_message") || agentToolsInclude(stored.Tools, "unknown-tool") {
+				t.Fatalf("tools not normalized as expected: %+v", stored.Tools)
+			}
+			wantToolConfig := models.AgentToolConfig{
+				ScopedFiles:            []models.ScopedFilesConfig{{Directory: "configs/secrets", Permissions: []string{"read", "write"}}},
+				SkipDefaultTools:       true,
+				DisableRuntimeWorktree: true,
+			}
+			if !reflect.DeepEqual(stored.ToolConfig, wantToolConfig) {
+				t.Fatalf("tool config mismatch: got %+v want %+v", stored.ToolConfig, wantToolConfig)
+			}
+			if !reflect.DeepEqual(stored.Plugins, []string{"playwright@claude-plugins-official"}) {
+				t.Fatalf("plugins not normalized/persisted: %+v", stored.Plugins)
+			}
+			if len(stored.Skills) != 1 || stored.Skills[0].Name != "Generated Skill" || stored.Skills[0].Content != "Follow the dialog workflow." {
+				t.Fatalf("skills not persisted: %+v", stored.Skills)
+			}
+			if len(stored.MCPServers) != 1 || stored.MCPServers[0].Name != "local-docs" || !reflect.DeepEqual(stored.MCPServers[0].Command, []string{"npx", "docs-mcp"}) || stored.MCPServers[0].Env["TOKEN"] != "test" {
+				t.Fatalf("MCP servers not persisted: %+v", stored.MCPServers)
+			}
+			if stored.Scope != models.AgentScopeProject || stored.ProjectID != project.ID || stored.Enabled || stored.SelectableAsPrimary {
+				t.Fatalf("scope/enabled/project fallback fields mismatch: %+v", stored)
+			}
+			if !stored.PermissionDefaults.ReadAgents || !stored.PermissionDefaults.WriteSkills || !stored.PermissionDefaults.UseShellOrTools {
+				t.Fatalf("permission defaults not persisted: %+v", stored.PermissionDefaults)
+			}
+			if !reflect.DeepEqual(stored.SourceRefs, []string{"https://example.test/source"}) {
+				t.Fatalf("source refs not persisted: %+v", stored.SourceRefs)
+			}
+		})
+	}
+}
+
+func TestHandler_UpdateAgent_OmittedOptionalJSONFieldsPreserveExistingValues(t *testing.T) {
+	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	agentRepo := repository.NewAgentRepo(db)
+	h.SetAgentRepo(agentRepo)
+	model := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
+		a.Model = "omitted-json-model"
+		a.IsDefault = false
+	})
+
+	origDiscover := discoverPluginStateFn
+	defer func() { discoverPluginStateFn = origDiscover }()
+	discoverPluginStateFn = func(ctx context.Context) (models.PluginState, error) {
+		return models.PluginState{Installed: []models.InstalledPlugin{{ID: "playwright@claude-plugins-official", Enabled: true}}}, nil
+	}
+
+	agent := &models.Agent{
+		Name:         "Omitted JSON Agent",
+		Key:          "omitted_json_agent",
+		Description:  "before",
+		SystemPrompt: "before prompt",
+		Model:        "inherit",
+		Tools:        []string{models.AgentToolScopedFiles, "Read"},
+		ToolConfig: models.AgentToolConfig{
+			ScopedFiles:            []models.ScopedFilesConfig{{Directory: "configs/secrets", Permissions: []string{"read"}}},
+			SkipDefaultTools:       true,
+			DisableRuntimeWorktree: true,
+		},
+		Plugins: []string{"playwright@claude-plugins-official"},
+		Skills:  []models.SkillConfig{{Name: "Keep Skill", Description: "existing", Content: "Do not replace."}},
+		MCPServers: []models.MCPServerConfig{{
+			Name:    "keep-mcp",
+			Command: []string{"node", "server.js"},
+			Env:     map[string]string{"KEEP": "1"},
+		}},
+		Enabled:             true,
+		SelectableAsPrimary: true,
+	}
+	if err := agentRepo.Create(t.Context(), agent); err != nil {
+		t.Fatalf("create existing agent: %v", err)
+	}
+
+	form := url.Values{}
+	form.Set("name", "Omitted JSON Agent Updated")
+	form.Set("description", "after")
+	form.Set("system_prompt", "after prompt")
+	form.Set("model", model.Model)
+	form.Set("key", "omitted_json_agent")
+	form.Set("scope", "global")
+	form.Set("enabled", "true")
+	form.Set("selectable_as_primary", "true")
+
+	rec := performAgentDialogRequest(t, e, http.MethodPut, "/agents/"+agent.ID, form)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	stored, err := agentRepo.GetByID(t.Context(), agent.ID)
+	if err != nil {
+		t.Fatalf("reload agent: %v", err)
+	}
+	if stored.Model != model.Model || stored.Name != "Omitted JSON Agent Updated" {
+		t.Fatalf("basic fields not updated: %+v", stored)
+	}
+	if !reflect.DeepEqual(stored.Tools, []string{models.AgentToolScopedFiles, "Read"}) {
+		t.Fatalf("tools changed when tools_json omitted: %+v", stored.Tools)
+	}
+	if !reflect.DeepEqual(stored.ToolConfig, agent.ToolConfig) {
+		t.Fatalf("tool config changed when tool_config_json omitted: %+v", stored.ToolConfig)
+	}
+	if !reflect.DeepEqual(stored.Plugins, agent.Plugins) {
+		t.Fatalf("plugins changed when plugins_json omitted: %+v", stored.Plugins)
+	}
+	if !reflect.DeepEqual(stored.Skills, agent.Skills) {
+		t.Fatalf("skills changed when skills_json omitted: %+v", stored.Skills)
+	}
+	if !reflect.DeepEqual(stored.MCPServers, agent.MCPServers) {
+		t.Fatalf("MCP servers changed when mcp_servers_json omitted: %+v", stored.MCPServers)
+	}
+}
+
+func TestHandler_AgentDialogFormParsing_RejectsInvalidToolConfigForCreateAndUpdate(t *testing.T) {
+	cases := []struct {
+		name   string
+		method string
+		path   func(agentID string) string
+	}{
+		{name: "create", method: http.MethodPost, path: func(agentID string) string { return "/agents" }},
+		{name: "update", method: http.MethodPut, path: func(agentID string) string { return "/agents/" + agentID }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h, e, _, db := setupTestHandlerWithDB(t)
+			agentRepo := repository.NewAgentRepo(db)
+			h.SetAgentRepo(agentRepo)
+			var agentID string
+			if tc.method == http.MethodPut {
+				agent := &models.Agent{Name: "Invalid Tool Config", Key: "invalid_tool_config", Model: "inherit", Tools: []string{"Read"}, Enabled: true}
+				if err := agentRepo.Create(t.Context(), agent); err != nil {
+					t.Fatalf("create agent: %v", err)
+				}
+				agentID = agent.ID
+			}
+
+			form := url.Values{}
+			form.Set("name", "Invalid Tool Config")
+			form.Set("description", "bad config")
+			form.Set("system_prompt", "work")
+			form.Set("model", "inherit")
+			form.Set("tools_json", `["ScopedFiles"]`)
+			form.Set("tool_config_json", `{"scoped_files":`)
+			form.Set("plugins_json", `[]`)
+			form.Set("skills_json", `[]`)
+			form.Set("mcp_servers_json", `[]`)
+
+			rec := performAgentDialogRequest(t, e, tc.method, tc.path(agentID), form)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("expected status 400, got %d: %s", rec.Code, rec.Body.String())
+			}
+			if !strings.Contains(strings.ToLower(rec.Body.String()), "invalid tool configuration") {
+				t.Fatalf("expected invalid tool configuration error, got %s", rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestHandler_AgentDialogFormParsing_RejectsInvalidPluginIDsForCreateAndUpdate(t *testing.T) {
+	cases := []struct {
+		name   string
+		method string
+		path   func(agentID string) string
+	}{
+		{name: "create", method: http.MethodPost, path: func(agentID string) string { return "/agents" }},
+		{name: "update", method: http.MethodPut, path: func(agentID string) string { return "/agents/" + agentID }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h, e, _, db := setupTestHandlerWithDB(t)
+			agentRepo := repository.NewAgentRepo(db)
+			h.SetAgentRepo(agentRepo)
+			origDiscover := discoverPluginStateFn
+			defer func() { discoverPluginStateFn = origDiscover }()
+			discoverPluginStateFn = func(ctx context.Context) (models.PluginState, error) {
+				return models.PluginState{Installed: []models.InstalledPlugin{}}, nil
+			}
+
+			var agentID string
+			if tc.method == http.MethodPut {
+				agent := &models.Agent{Name: "Invalid Plugin", Key: "invalid_plugin", Model: "inherit", Tools: []string{"Read"}, Enabled: true}
+				if err := agentRepo.Create(t.Context(), agent); err != nil {
+					t.Fatalf("create agent: %v", err)
+				}
+				agentID = agent.ID
+			}
+
+			form := url.Values{}
+			form.Set("name", "Invalid Plugin")
+			form.Set("description", "bad plugin")
+			form.Set("system_prompt", "work")
+			form.Set("model", "inherit")
+			form.Set("tools_json", `[]`)
+			form.Set("plugins_json", `["playwright@claude-plugins-official"]`)
+			form.Set("skills_json", `[]`)
+			form.Set("mcp_servers_json", `[]`)
+
+			rec := performAgentDialogRequest(t, e, tc.method, tc.path(agentID), form)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("expected status 400, got %d: %s", rec.Code, rec.Body.String())
+			}
+			if !strings.Contains(strings.ToLower(rec.Body.String()), "not installed") {
+				t.Fatalf("expected plugin validation error, got %s", rec.Body.String())
+			}
+		})
+	}
+}
+
+func performAgentDialogRequest(t *testing.T, e *echo.Echo, method, target string, form url.Values) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(method, target, strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	return rec
+}
+
+func agentNameValidationForm(name string) url.Values {
+	form := url.Values{}
+	form.Set("name", name)
+	form.Set("description", "agent name validation")
+	form.Set("system_prompt", "work")
+	form.Set("model", "inherit")
+	form.Set("tools_json", `[]`)
+	form.Set("plugins_json", `[]`)
+	form.Set("skills_json", `[]`)
+	form.Set("mcp_servers_json", `[]`)
+	form.Set("enabled", "true")
+	form.Set("selectable_as_primary", "true")
+	return form
+}
+
+func TestHandler_CreateAgent_RejectsBlankAndDuplicateSelectableNames(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	agentRepo := repository.NewAgentRepo(db)
+	h.SetAgentRepo(agentRepo)
+
+	blank := agentNameValidationForm("   \t  ")
+	rec := performAgentDialogRequest(t, e, http.MethodPost, "/agents", blank)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected blank name status 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(strings.ToLower(rec.Body.String()), "agent name is required") {
+		t.Fatalf("expected controlled blank-name validation error, got %s", rec.Body.String())
+	}
+
+	agents, err := agentRepo.List(t.Context())
+	if err != nil {
+		t.Fatalf("list agents: %v", err)
+	}
+	for _, agent := range agents {
+		if agent.SystemKind == "" {
+			t.Fatalf("blank-name create persisted user agent: %+v", agent)
+		}
+	}
+
+	create := agentNameValidationForm(" Reviewer ")
+	rec = performAgentDialogRequest(t, e, http.MethodPost, "/agents", create)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected trimmed create status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	stored, err := agentRepo.GetUniqueSelectableByName(t.Context(), "Reviewer")
+	if err != nil {
+		t.Fatalf("resolve created reviewer: %v", err)
+	}
+	if stored == nil || stored.Name != "Reviewer" {
+		t.Fatalf("expected trimmed stored Reviewer, got %+v", stored)
+	}
+
+	dup := agentNameValidationForm(" reviewer ")
+	rec = performAgentDialogRequest(t, e, http.MethodPost, "/agents", dup)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected duplicate name status 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(strings.ToLower(rec.Body.String()), "already exists") {
+		t.Fatalf("expected duplicate-name validation error, got %s", rec.Body.String())
+	}
+	matches, err := agentRepo.ListSelectableByName(t.Context(), "Reviewer")
+	if err != nil {
+		t.Fatalf("list reviewer matches: %v", err)
+	}
+	if len(matches) != 1 || matches[0].ID != stored.ID {
+		t.Fatalf("duplicate create changed selectable reviewer rows: %+v", matches)
+	}
+}
+
+func TestHandler_UpdateAgent_RejectsBlankAndDuplicateSelectableNamesWithoutMutating(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	agentRepo := repository.NewAgentRepo(db)
+	h.SetAgentRepo(agentRepo)
+
+	reviewer := &models.Agent{Name: "Reviewer", Key: "reviewer", Model: "inherit", Enabled: true, SelectableAsPrimary: true}
+	other := &models.Agent{Name: "Other", Key: "other", Model: "inherit", Enabled: true, SelectableAsPrimary: true}
+	if err := agentRepo.Create(t.Context(), reviewer); err != nil {
+		t.Fatalf("create reviewer: %v", err)
+	}
+	if err := agentRepo.Create(t.Context(), other); err != nil {
+		t.Fatalf("create other: %v", err)
+	}
+
+	blank := agentNameValidationForm("   ")
+	rec := performAgentDialogRequest(t, e, http.MethodPut, "/agents/"+other.ID, blank)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected blank update status 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+	reloaded, err := agentRepo.GetByID(t.Context(), other.ID)
+	if err != nil {
+		t.Fatalf("reload after blank update: %v", err)
+	}
+	if reloaded.Name != "Other" {
+		t.Fatalf("blank update mutated name to %q", reloaded.Name)
+	}
+
+	dup := agentNameValidationForm(" REVIEWER ")
+	rec = performAgentDialogRequest(t, e, http.MethodPut, "/agents/"+other.ID, dup)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected duplicate update status 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+	reloaded, err = agentRepo.GetByID(t.Context(), other.ID)
+	if err != nil {
+		t.Fatalf("reload after duplicate update: %v", err)
+	}
+	if reloaded.Name != "Other" {
+		t.Fatalf("duplicate update mutated name to %q", reloaded.Name)
+	}
+
+	trimmed := agentNameValidationForm(" Other Updated ")
+	rec = performAgentDialogRequest(t, e, http.MethodPut, "/agents/"+other.ID, trimmed)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected trimmed update status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	reloaded, err = agentRepo.GetByID(t.Context(), other.ID)
+	if err != nil {
+		t.Fatalf("reload after trimmed update: %v", err)
+	}
+	if reloaded.Name != "Other Updated" {
+		t.Fatalf("expected trimmed update name, got %q", reloaded.Name)
+	}
+}
+
+func TestHandler_AgentNameValidation_AllowsDisabledAndNonPrimaryDuplicates(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	agentRepo := repository.NewAgentRepo(db)
+	h.SetAgentRepo(agentRepo)
+
+	primary := &models.Agent{Name: "Reviewer", Key: "reviewer", Model: "inherit", Enabled: true, SelectableAsPrimary: true}
+	if err := agentRepo.Create(t.Context(), primary); err != nil {
+		t.Fatalf("create primary reviewer: %v", err)
+	}
+
+	disabled := agentNameValidationForm(" reviewer ")
+	disabled.Set("enabled", "false")
+	rec := performAgentDialogRequest(t, e, http.MethodPost, "/agents", disabled)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected disabled duplicate create status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	nonPrimary := agentNameValidationForm(" REVIEWER ")
+	nonPrimary.Set("selectable_as_primary", "false")
+	rec = performAgentDialogRequest(t, e, http.MethodPost, "/agents", nonPrimary)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected non-primary duplicate create status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	matches, err := agentRepo.ListSelectableByName(t.Context(), "Reviewer")
+	if err != nil {
+		t.Fatalf("list selectable reviewer matches: %v", err)
+	}
+	if len(matches) != 1 || matches[0].ID != primary.ID {
+		t.Fatalf("disabled/non-primary duplicates should not affect selectable name resolution: %+v", matches)
+	}
+}
+
 func TestHandler_AgentsPage_AdvancedTabsAreReachableAndSubmitted(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
 	h.SetAgentRepo(repository.NewAgentRepo(db))
@@ -2224,6 +3027,187 @@ func TestHandler_ListAgents_MaterializesLegacyDBAgentsToDisk(t *testing.T) {
 	}
 }
 
+func TestHandler_ListAgents_ProjectScopedAgentMaterializesInOwningProject(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	agentRepo := repository.NewAgentRepo(db)
+	lifecycleRepo := repository.NewLifecycleRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	globalRoot := t.TempDir()
+	maintenanceSvc := service.NewAgentLibraryMaintenanceService(taskRepo, scheduleRepo, agentRepo)
+	maintenanceSvc.SetLifecycleRepo(lifecycleRepo)
+	maintenanceSvc.SetAgentsRootPath(globalRoot)
+	h.SetAgentRepo(agentRepo)
+	h.SetLifecycleRepo(lifecycleRepo)
+	h.SetAgentSkillRoot(globalRoot)
+	h.SetAgentLibraryMaintenanceService(maintenanceSvc)
+
+	projectA := &models.Project{Name: "Project A", RepoPath: t.TempDir()}
+	if err := h.projectSvc.Create(t.Context(), projectA); err != nil {
+		t.Fatalf("create project A: %v", err)
+	}
+	projectB := &models.Project{Name: "Project B", RepoPath: t.TempDir()}
+	if err := h.projectSvc.Create(t.Context(), projectB); err != nil {
+		t.Fatalf("create project B: %v", err)
+	}
+
+	agent := &models.Agent{
+		Name:                "Project B Reviewer",
+		Key:                 "project_b_reviewer",
+		Scope:               models.AgentScopeProject,
+		ProjectID:           projectB.ID,
+		Model:               "inherit",
+		Tools:               []string{},
+		SelectableAsPrimary: true,
+		Enabled:             true,
+		Skills: []models.SkillConfig{{
+			Name:        "Review migrations",
+			Description: "Legacy migration checks",
+			Content:     "Check migration downgrade safety.",
+		}},
+	}
+	if err := agentRepo.Create(t.Context(), agent); err != nil {
+		t.Fatalf("create project B agent: %v", err)
+	}
+
+	listAgents := func(projectID string) {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/agents?project_id="+url.QueryEscape(projectID), nil)
+		req.Header.Set("HX-Request", "true")
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET /agents project=%s status=%d body=%s", projectID, rec.Code, rec.Body.String())
+		}
+	}
+
+	projectARoot := filepath.Join(projectA.RepoPath, ".openvibely")
+	projectBRoot := filepath.Join(projectB.RepoPath, ".openvibely")
+	projectBAgentRoot := filepath.Join(projectBRoot, "agents", agent.Key)
+	listAgents(projectA.ID)
+
+	assertNoFileForTest(t, filepath.Join(projectARoot, "agents", agent.Key, "SKILLS.md"))
+	assertNoFileForTest(t, filepath.Join(projectARoot, "agents", agent.Key, "skills", "review_migrations", "SKILL.md"))
+	assertNoFileForTest(t, filepath.Join(projectARoot, "agents", "AGENTS.md"))
+
+	projectBDeclaration := mustReadFileForTest(t, filepath.Join(projectBAgentRoot, "SKILLS.md"))
+	if !containsAll(projectBDeclaration, "key: "+agent.Key, "scope: project", "project_id: "+projectB.ID) {
+		t.Fatalf("project B declaration was not materialized in the owning root:\n%s", projectBDeclaration)
+	}
+	projectBLegacySkill := mustReadFileForTest(t, filepath.Join(projectBAgentRoot, "skills", "review_migrations", "SKILL.md"))
+	if !containsAll(projectBLegacySkill, "Review migrations", "Check migration downgrade safety.") {
+		t.Fatalf("legacy skill was not migrated in the owning root:\n%s", projectBLegacySkill)
+	}
+
+	listAgents(projectB.ID)
+	listAgents(projectA.ID)
+	assertFileContentForTest(t, filepath.Join(projectBAgentRoot, "SKILLS.md"), projectBDeclaration)
+	assertFileContentForTest(t, filepath.Join(projectBAgentRoot, "skills", "review_migrations", "SKILL.md"), projectBLegacySkill)
+	assertNoFileForTest(t, filepath.Join(projectARoot, "agents", agent.Key, "SKILLS.md"))
+	assertNoFileForTest(t, filepath.Join(projectARoot, "agents", agent.Key, "skills", "review_migrations", "SKILL.md"))
+	assertNoFileForTest(t, filepath.Join(projectARoot, "agents", "AGENTS.md"))
+}
+
+func TestHandler_ListAgents_IgnoresProjectDeclarationFromWrongRoot(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	agentRepo := repository.NewAgentRepo(db)
+	lifecycleRepo := repository.NewLifecycleRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	globalRoot := t.TempDir()
+	maintenanceSvc := service.NewAgentLibraryMaintenanceService(taskRepo, scheduleRepo, agentRepo)
+	maintenanceSvc.SetLifecycleRepo(lifecycleRepo)
+	maintenanceSvc.SetAgentsRootPath(globalRoot)
+	h.SetAgentRepo(agentRepo)
+	h.SetLifecycleRepo(lifecycleRepo)
+	h.SetAgentSkillRoot(globalRoot)
+	h.SetAgentLibraryMaintenanceService(maintenanceSvc)
+
+	projectA := &models.Project{Name: "Project A", RepoPath: t.TempDir()}
+	if err := h.projectSvc.Create(t.Context(), projectA); err != nil {
+		t.Fatalf("create project A: %v", err)
+	}
+	projectB := &models.Project{Name: "Project B", RepoPath: t.TempDir()}
+	if err := h.projectSvc.Create(t.Context(), projectB); err != nil {
+		t.Fatalf("create project B: %v", err)
+	}
+
+	writeDeclaration := func(root, name string) {
+		t.Helper()
+		enabled := true
+		imp := agentlibrary.NewImporter(agentlibrary.SkillRoots{Project: root}, nil)
+		decl := &agentlibrary.SkillDeclaration{
+			Kind:    "openvibely.agent_skill",
+			Version: 1,
+			Agent: agentlibrary.AgentDeclaration{
+				Key:                 "wrong_root_reviewer",
+				Name:                name,
+				Scope:               "project",
+				ProjectID:           projectB.ID,
+				Enabled:             &enabled,
+				SelectableAsPrimary: true,
+			},
+		}
+		if _, err := imp.WriteAgentRootDeclaration(t.Context(), decl, "# "+name+"\n"); err != nil {
+			t.Fatalf("write declaration %s: %v", root, err)
+		}
+	}
+
+	agent := &models.Agent{
+		Name:                "Database Project B Reviewer",
+		Key:                 "wrong_root_reviewer",
+		Scope:               models.AgentScopeProject,
+		ProjectID:           projectB.ID,
+		Model:               "inherit",
+		Tools:               []string{},
+		SelectableAsPrimary: true,
+		Enabled:             true,
+	}
+	if err := agentRepo.Create(t.Context(), agent); err != nil {
+		t.Fatalf("create project B agent: %v", err)
+	}
+
+	projectARoot := filepath.Join(projectA.RepoPath, ".openvibely")
+	projectBRoot := filepath.Join(projectB.RepoPath, ".openvibely")
+	writeDeclaration(projectBRoot, "Project B Declaration")
+	projectBDeclaration := mustReadFileForTest(t, filepath.Join(projectBRoot, "agents", agent.Key, "SKILLS.md"))
+	writeDeclaration(projectARoot, "Wrong Project A Copy")
+	wrongRootDeclaration := mustReadFileForTest(t, filepath.Join(projectARoot, "agents", agent.Key, "SKILLS.md"))
+
+	req := httptest.NewRequest(http.MethodGet, "/agents?project_id="+url.QueryEscape(projectA.ID), nil)
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /agents status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	stored, err := agentRepo.GetByID(t.Context(), agent.ID)
+	if err != nil {
+		t.Fatalf("reload project B agent: %v", err)
+	}
+	if stored == nil || stored.Name != agent.Name || stored.ProjectID != projectB.ID {
+		t.Fatalf("wrong-root declaration changed the owning agent: got=%#v want name=%q project_id=%q", stored, agent.Name, projectB.ID)
+	}
+	assertFileContentForTest(t, filepath.Join(projectBRoot, "agents", agent.Key, "SKILLS.md"), projectBDeclaration)
+	assertFileContentForTest(t, filepath.Join(projectARoot, "agents", agent.Key, "SKILLS.md"), wrongRootDeclaration)
+
+	req = httptest.NewRequest(http.MethodGet, "/agents?project_id="+url.QueryEscape(projectA.ID), nil)
+	req.Header.Set("HX-Request", "true")
+	rec = httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("repeated GET /agents status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	storedAgain, err := agentRepo.GetByID(t.Context(), agent.ID)
+	if err != nil {
+		t.Fatalf("reload project B agent after repeated refresh: %v", err)
+	}
+	if storedAgain == nil || storedAgain.Name != agent.Name || storedAgain.ProjectID != projectB.ID {
+		t.Fatalf("cached wrong-root declaration changed the owning agent: got=%#v want name=%q project_id=%q", storedAgain, agent.Name, projectB.ID)
+	}
+}
+
 func TestHandler_UpdateAgent_RefreshesMaterializedAgentRootFile(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
 	agentRepo := repository.NewAgentRepo(db)
@@ -2419,6 +3403,83 @@ func TestHandler_UpdateAgent_PersistsDisabledAdvancedFields(t *testing.T) {
 	}
 	if len(stored.SourceRefs) != 1 || stored.SourceRefs[0] != "https://after.example.test" {
 		t.Fatalf("source refs not updated: %+v", stored.SourceRefs)
+	}
+}
+
+func TestHandler_CreateAgent_ProjectScopedUsesExplicitURLProjectOverStoredSelection(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	agentRepo := repository.NewAgentRepo(db)
+	lifecycleRepo := repository.NewLifecycleRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+
+	globalRoot := t.TempDir()
+	maintenanceSvc := service.NewAgentLibraryMaintenanceService(taskRepo, scheduleRepo, agentRepo)
+	maintenanceSvc.SetLifecycleRepo(lifecycleRepo)
+	maintenanceSvc.SetAgentsRootPath(globalRoot)
+
+	h.SetAgentRepo(agentRepo)
+	h.SetLifecycleRepo(lifecycleRepo)
+	h.SetAgentSkillRoot(globalRoot)
+	h.SetAgentLibraryMaintenanceService(maintenanceSvc)
+
+	proj1RepoDir := t.TempDir()
+	proj1 := &models.Project{Name: "Stored Project A", RepoPath: proj1RepoDir}
+	if err := h.projectSvc.Create(t.Context(), proj1); err != nil {
+		t.Fatalf("create project A: %v", err)
+	}
+	proj2RepoDir := t.TempDir()
+	proj2 := &models.Project{Name: "Viewed Project B", RepoPath: proj2RepoDir}
+	if err := h.projectSvc.Create(t.Context(), proj2); err != nil {
+		t.Fatalf("create project B: %v", err)
+	}
+	if err := h.settingsRepo.Set(t.Context(), uiPreferenceSelectedProjectIDKey, proj1.ID); err != nil {
+		t.Fatalf("set selected project preference: %v", err)
+	}
+
+	form := url.Values{}
+	form.Set("name", "Project B Browser Agent")
+	form.Set("description", "created from the Project B agents page")
+	form.Set("system_prompt", "work in project B")
+	form.Set("model", "inherit")
+	form.Set("tools_json", `[]`)
+	form.Set("plugins_json", `[]`)
+	form.Set("skills_json", `[]`)
+	form.Set("mcp_servers_json", `[]`)
+	form.Set("key", "project_b_browser_agent")
+	form.Set("scope", "project")
+	form.Set("selectable_as_primary", "true")
+	form.Set("enabled", "true")
+	form.Set("permission_defaults_json", `{}`)
+	form.Set("source_refs_json", `[]`)
+
+	rec := performAgentDialogRequest(t, e, http.MethodPost, "/agents?project_id="+url.QueryEscape(proj2.ID), form)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	stored, err := agentRepo.GetByKey(t.Context(), "project_b_browser_agent")
+	if err != nil {
+		t.Fatalf("load saved agent: %v", err)
+	}
+	if stored == nil {
+		t.Fatal("expected saved project-scoped agent")
+	}
+	if stored.Scope != models.AgentScopeProject || stored.ProjectID != proj2.ID {
+		t.Fatalf("expected Project B scoped agent, got scope=%q project_id=%q want %q", stored.Scope, stored.ProjectID, proj2.ID)
+	}
+
+	proj2AgentPath := filepath.Join(proj2RepoDir, ".openvibely", "agents", "project_b_browser_agent", "SKILLS.md")
+	data, err := os.ReadFile(proj2AgentPath)
+	if err != nil {
+		t.Fatalf("read Project B agent declaration: %v", err)
+	}
+	if !strings.Contains(string(data), `project_id: `+proj2.ID) {
+		t.Fatalf("expected Project B project_id in declaration, got:\n%s", data)
+	}
+	proj1AgentDir := filepath.Join(proj1RepoDir, ".openvibely", "agents", "project_b_browser_agent")
+	if _, err := os.Stat(proj1AgentDir); !os.IsNotExist(err) {
+		t.Fatalf("expected Project A to stay untouched, stat err=%v", err)
 	}
 }
 
@@ -2622,12 +3683,50 @@ func TestHandler_ListAgents_DeleteUsesDurableDeleteRequest(t *testing.T) {
 	for _, want := range []string{
 		`onclick="openDeleteAgentConfirm(this)"`,
 		`async function confirmDeleteAgent()`,
-		`fetch(withCurrentProject('/agents/' + encodeURIComponent(id))`,
+		`var deleteURL = withCurrentProject('/agents/' + encodeURIComponent(id));`,
+		`window.cardPaginationRefreshURL(container, deleteURL)`,
+		`fetch(deleteURL`,
 		`method: 'DELETE'`,
 		`function withCurrentProject(url)`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("expected durable delete flow markup to contain %q; body:\n%s", want, body)
 		}
+	}
+}
+
+func TestParseMCPServersFromSettingsFilePreservesNestedRuntimeFields(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "settings.json")
+	data := `{
+  "mcpServers": {
+    "runtime-http": {
+      "type": "http",
+      "command": "node",
+      "args": ["server.js"],
+      "url": "https://example.test/mcp",
+      "env": {"TOKEN": "secret"},
+      "headers": {"Authorization": "Bearer secret"}
+    }
+  }
+}`
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatalf("write settings: %v", err)
+	}
+
+	servers, err := parseMCPServersFromSettingsFile(path)
+	if err != nil {
+		t.Fatalf("parseMCPServersFromSettingsFile: %v", err)
+	}
+	want := []models.MCPServerConfig{{
+		Name:    "runtime-http",
+		Type:    "http",
+		Command: []string{"node", "server.js"},
+		URL:     "https://example.test/mcp",
+		Env:     map[string]string{"TOKEN": "secret"},
+		Headers: map[string]string{"Authorization": "Bearer secret"},
+	}}
+	if !reflect.DeepEqual(servers, want) {
+		t.Fatalf("servers = %#v, want %#v", servers, want)
 	}
 }

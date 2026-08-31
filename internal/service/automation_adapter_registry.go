@@ -31,20 +31,35 @@ type AutomationAdapterEdge struct {
 }
 
 type AutomationAdapter struct {
-	Key             string
-	AutomationType  string
-	DefaultName     string
-	Description     string
-	DynamicTopology bool
-	Nodes           []AutomationAdapterNode
-	Edges           []AutomationAdapterEdge
+	Key              string
+	AutomationType   string
+	DefaultName      string
+	Description      string
+	TemplateRevision int
+	DynamicTopology  bool
+	Nodes            []AutomationAdapterNode
+	Edges            []AutomationAdapterEdge
 }
 
 type AutomationAdapterRegistry struct{ adapters map[string]AutomationAdapter }
 
+// CurrentAutomationTemplateRevision is bumped when a maintained template changes
+// and existing Automations should offer destructive replacement with that template.
+func CurrentAutomationTemplateRevision(adapterKey string) int {
+	switch adapterKey {
+	case AutomationAdapterNativeSDLC:
+		return 9
+	case AutomationAdapterGitHubSDLC:
+		return 15
+	default:
+		return 0
+	}
+}
+
 func NewAutomationAdapterRegistry() *AutomationAdapterRegistry {
 	registry := &AutomationAdapterRegistry{adapters: make(map[string]AutomationAdapter)}
 	for _, adapter := range []AutomationAdapter{customAutomationAdapter(), nativeSDLCAdapter(), githubSDLCAdapter(), visionDriverAdapter()} {
+		adapter.TemplateRevision = CurrentAutomationTemplateRevision(adapter.Key)
 		registry.adapters[adapter.Key] = adapter
 	}
 	return registry
@@ -107,7 +122,6 @@ func nativeSDLCAdapter() AutomationAdapter {
 			{Key: "implementation", Name: "Implementation", Type: "agent_task", Role: "implementation", AllowedResources: resourceTypes(), X: 880, Y: 270},
 			{Key: "rejected", Name: "Rejected", Type: "outcome", Role: "rejected", AllowedResources: resourceTypes(), X: 660, Y: 90},
 			{Key: "completed", Name: "Completed", Type: "outcome", Role: "completed", AllowedResources: resourceTypes(), X: 1100, Y: 270},
-			{Key: "auditor", Name: "Loop Auditor", Type: "trigger", Role: "loop_auditor", AllowedResources: resourceTypes("task", "schedule"), X: 880, Y: 450},
 		},
 		Edges: []AutomationAdapterEdge{
 			{Key: "vision_to_notification", From: "vision_suggestions", To: "notification"},
@@ -159,7 +173,6 @@ func githubSDLCAdapter() AutomationAdapter {
 			{Key: "open_pr", Name: "Open Pull Request", Type: "action", Role: "open_pull_request", AllowedResources: resourceTypes(), X: 1100, Y: 270},
 			{Key: "review", Name: "Human Review", Type: "human_gate", Role: "pull_request_review", AllowedResources: resourceTypes(), X: 1320, Y: 270},
 			{Key: "completed", Name: "Completed", Type: "outcome", Role: "completed", AllowedResources: resourceTypes(), X: 1540, Y: 270},
-			{Key: "auditor", Name: "Loop Auditor", Type: "trigger", Role: "loop_auditor", AllowedResources: resourceTypes("task", "schedule"), X: 880, Y: 450},
 		},
 		Edges: []AutomationAdapterEdge{
 			{Key: "vision_to_issue", From: "vision_suggestions", To: "issue"},

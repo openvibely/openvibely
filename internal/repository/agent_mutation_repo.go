@@ -77,7 +77,7 @@ func (r *AgentMutationRepo) Create(ctx context.Context, m *models.AgentConfigMut
 	if evidence == "" {
 		evidence = "[]"
 	}
-	err := r.db.QueryRowContext(ctx, `
+	err := queryRowBoundSQLite(ctx, r.db, `
         INSERT INTO agent_config_mutations
             (id, lifecycle_execution_id, task_id, task_run_id, project_id,
              actor_agent_id, target_type, target_key, action,

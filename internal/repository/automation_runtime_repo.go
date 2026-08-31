@@ -19,6 +19,8 @@ import (
 
 var (
 	ErrAutomationScheduleChanged        = errors.New("automation schedule occurrence changed")
+	ErrAutomationNotActive              = errors.New("automation must be active to run now")
+	ErrAutomationNoScheduleEntries      = errors.New("automation has no runnable schedule entries")
 	ErrAutomationDispatchLease          = errors.New("automation dispatch lease is not owned")
 	ErrAutomationTaskBusy               = errors.New("automation task is not available")
 	ErrAutomationExternalReconciliation = errors.New("automation external mutation requires reconciliation")
@@ -28,10 +30,113 @@ var (
 
 const AutomationExternalStaleAfter = 15 * time.Minute
 
+const listAutomationsWithStaleExternalPullRequestsSQL = `SELECT DISTINCT a.project_id, a.automation_id
+				FROM task_pull_requests pr INDEXED BY idx_task_pull_requests_updated_at_task_id
+				CROSS JOIN automation_activity_resources task_resource INDEXED BY idx_automation_activity_resources_type_resource_activity
+				CROSS JOIN automation_activities a
+				WHERE pr.updated_at < ?
+					AND task_resource.resource_type = 'task'
+					AND task_resource.resource_id = pr.task_id
+					AND a.id = task_resource.activity_id
+					AND EXISTS (
+						SELECT 1 FROM automation_activity_resources pull_resource INDEXED BY idx_automation_activity_resources_activity_type
+						WHERE pull_resource.activity_id = a.id AND pull_resource.resource_type = 'pull_request'
+					)
+				ORDER BY a.project_id, a.automation_id
+				LIMIT ?`
+
+const liveNodeCountsSQL = `WITH operational_state AS (
+				SELECT state.node_id, CASE state.activity_status
+					WHEN 'pending' THEN 'running' WHEN 'running' THEN 'running' WHEN 'waiting' THEN 'waiting'
+					WHEN 'failed' THEN 'failed' END AS state,
+					state.state_key
+				FROM automation_live_activity_states state
+				LEFT JOIN automation_work_items work_item ON work_item.id = state.work_item_id
+					AND work_item.project_id = state.project_id AND work_item.automation_id = state.automation_id
+				WHERE state.project_id = ? AND state.automation_id = ? AND state.version_id = ?
+					AND state.activity_status IN ('pending','running','waiting','failed')
+					AND NOT (state.work_item_id IS NOT NULL AND work_item.status = 'completed')
+					AND NOT EXISTS (
+						SELECT 1 FROM automation_invocations active_invocation
+						JOIN schedules trigger_schedule ON trigger_schedule.id = active_invocation.trigger_resource_id
+						WHERE active_invocation.project_id = state.project_id
+							AND active_invocation.automation_id = state.automation_id
+							AND active_invocation.version_id = state.version_id
+							AND active_invocation.trigger_node_id = state.node_id
+							AND active_invocation.status IN ('claimed','dispatched','running')
+							AND state.state_key = 'task:' || trigger_schedule.task_id
+							AND COALESCE(state.invocation_id, '') <> active_invocation.id)
+			UNION ALL
+			SELECT node_id, 'recent', state_key
+			FROM automation_live_activity_states
+			WHERE project_id = ? AND automation_id = ? AND version_id = ?
+				AND activity_status = 'completed' AND completed_at >= ?
+			UNION ALL
+			SELECT i.trigger_node_id, 'running', 'invocation:' || i.id
+			FROM automation_invocations i
+			WHERE i.project_id = ? AND i.automation_id = ? AND i.version_id = ?
+				AND i.status IN ('claimed','dispatched','running')
+				AND NOT EXISTS (SELECT 1 FROM automation_activities a INDEXED BY idx_automation_activities_invocation WHERE a.invocation_id = i.id)
+			UNION ALL
+			SELECT binding.node_id, 'running', CASE WHEN binding.work_item_id IS NOT NULL
+				THEN 'work:' || binding.work_item_id ELSE 'input:' || binding.thread_input_id END
+			FROM automation_thread_input_bindings binding
+			JOIN thread_inputs input ON input.id = binding.thread_input_id
+			WHERE binding.project_id = ? AND binding.automation_id = ? AND binding.version_id = ?
+				AND input.input_status = 'pending'
+			UNION ALL
+			SELECT resource.node_id, 'running', 'execution:' || execution.id
+				FROM automation_definition_resources resource
+				JOIN executions execution INDEXED BY idx_executions_task_status ON execution.task_id = resource.resource_id
+					AND execution.status IN ('queued','running')
+				WHERE resource.project_id = ? AND resource.automation_id = ? AND resource.version_id = ?
+					AND resource.resource_type = 'task' AND resource.relation = 'owned'
+					AND NOT EXISTS (
+						SELECT 1 FROM automation_activity_resources activity_resource
+						JOIN automation_activities activity ON activity.id = activity_resource.activity_id
+						WHERE activity_resource.resource_type = 'execution' AND activity_resource.resource_id = execution.id
+							AND activity.project_id = resource.project_id AND activity.automation_id = resource.automation_id
+							AND activity.version_id = resource.version_id)
+			UNION ALL
+			SELECT position.node_id,
+				CASE WHEN position.state = 'active' THEN 'running' WHEN position.state = 'waiting' THEN 'waiting'
+					WHEN position.state = 'blocked' THEN 'blocked' WHEN position.state = 'failed' THEN 'failed' END,
+				'work:' || position.work_item_id
+			FROM automation_work_item_positions position
+			JOIN automation_nodes node ON node.id = position.node_id AND node.version_id = position.version_id
+				AND node.automation_id = position.automation_id AND node.project_id = position.project_id
+			WHERE position.project_id = ? AND position.automation_id = ? AND position.version_id = ?
+				AND position.state IN ('active','waiting','blocked','failed')
+				AND NOT (position.state = 'active' AND node.role IN ('github_inbox','native_inbox'))
+			UNION ALL
+			SELECT to_node_id, 'recent', 'work:' || work_item_id
+			FROM automation_transitions
+			WHERE project_id = ? AND automation_id = ? AND version_id = ? AND state = 'completed' AND occurred_at >= ?
+			), identity_state AS (
+				SELECT node_id, state_key, MAX(CASE state
+					WHEN 'failed' THEN 5 WHEN 'blocked' THEN 4 WHEN 'waiting' THEN 3
+					WHEN 'running' THEN 2 WHEN 'recent' THEN 1 ELSE 0 END) AS state_priority
+				FROM operational_state GROUP BY node_id, state_key
+			)
+			SELECT node_id,
+				SUM(CASE WHEN state_priority = 2 THEN 1 ELSE 0 END),
+				SUM(CASE WHEN state_priority = 3 THEN 1 ELSE 0 END),
+				SUM(CASE WHEN state_priority = 4 THEN 1 ELSE 0 END),
+				SUM(CASE WHEN state_priority = 5 THEN 1 ELSE 0 END),
+				SUM(CASE WHEN state_priority = 1 THEN 1 ELSE 0 END)
+			FROM identity_state GROUP BY node_id`
+
 type AutomationGitHubIssueDedupSource struct {
-	Context     models.AutomationContext `json:"context"`
-	TaskID      string                   `json:"task_id"`
-	ExecutionID string                   `json:"execution_id"`
+	Context        models.AutomationContext               `json:"context"`
+	TaskID         string                                 `json:"task_id"`
+	ExecutionID    string                                 `json:"execution_id"`
+	StableBindings []AutomationGitHubIssueDedupNodeSource `json:"stable_bindings,omitempty"`
+}
+
+type AutomationGitHubIssueDedupNodeSource struct {
+	AutomationID string `json:"automation_id"`
+	NodeKey      string `json:"node_key"`
+	Role         string `json:"role"`
 }
 
 type AutomationGitHubIssueDedupClaim struct {
@@ -40,25 +145,26 @@ type AutomationGitHubIssueDedupClaim struct {
 	Source      AutomationGitHubIssueDedupSource
 }
 
-func sameAutomationGitHubIssueDedupSource(left, right AutomationGitHubIssueDedupSource) bool {
-	if strings.TrimSpace(left.Context.ProjectID) != strings.TrimSpace(right.Context.ProjectID) ||
-		strings.TrimSpace(left.TaskID) != strings.TrimSpace(right.TaskID) ||
-		len(left.Context.Bindings) != len(right.Context.Bindings) {
-		return false
-	}
-	bindingCounts := make(map[string]int, len(left.Context.Bindings))
-	for _, binding := range left.Context.Bindings {
-		key := strings.TrimSpace(binding.AutomationID) + "\x00" + strings.TrimSpace(binding.VersionID) + "\x00" + strings.TrimSpace(binding.NodeID)
-		bindingCounts[key]++
-	}
-	for _, binding := range right.Context.Bindings {
-		key := strings.TrimSpace(binding.AutomationID) + "\x00" + strings.TrimSpace(binding.VersionID) + "\x00" + strings.TrimSpace(binding.NodeID)
-		if bindingCounts[key] == 0 {
-			return false
+func dedupSourceAutomationCounts(source AutomationGitHubIssueDedupSource) map[string]int {
+	counts := make(map[string]int)
+	seen := make(map[string]bool)
+	for _, binding := range source.Context.Bindings {
+		automationID := strings.TrimSpace(binding.AutomationID)
+		if automationID == "" || seen[automationID] {
+			continue
 		}
-		bindingCounts[key]--
+		seen[automationID] = true
+		counts[automationID]++
 	}
-	return true
+	for _, binding := range source.StableBindings {
+		automationID := strings.TrimSpace(binding.AutomationID)
+		if automationID == "" || seen[automationID] {
+			continue
+		}
+		seen[automationID] = true
+		counts[automationID]++
+	}
+	return counts
 }
 
 type AutomationProjectionEvent struct {
@@ -86,7 +192,7 @@ func (r *AutomationRepo) PublishInvalidation(eventType events.TaskEventType, pro
 	}
 	r.broadcaster.Publish(events.TaskEvent{
 		Type: eventType, ProjectID: projectID, AutomationID: binding.AutomationID,
-		VersionID: binding.VersionID, InvocationID: binding.InvocationID,
+		TaskName: binding.AutomationName, VersionID: binding.VersionID, InvocationID: binding.InvocationID,
 		WorkItemID: binding.WorkItemID, NodeID: binding.NodeID,
 	})
 }
@@ -136,47 +242,215 @@ func automationOccurrenceKey(scheduleID string, due time.Time) string {
 	return "schedule:" + scheduleID + ":" + due.UTC().Format(time.RFC3339Nano)
 }
 
+func (r *AutomationRepo) ClaimManualAutomationRun(ctx context.Context, projectID, automationID string, now time.Time) ([]models.AutomationInvocation, []models.AutomationDispatch, error) {
+	conn, finishImmediate, err := beginImmediateConn(ctx, r.db)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer finishImmediate()
+
+	var versionID, adapterKey, automationName string
+	var lifecycle models.AutomationLifecycleState
+	if err := conn.QueryRowContext(ctx, `SELECT a.published_version_id, a.lifecycle_state, a.name, v.adapter_key
+		FROM automations a JOIN automation_versions v ON v.id = a.published_version_id
+			AND v.automation_id = a.id AND v.project_id = a.project_id
+		WHERE a.project_id = ? AND a.id = ?`, projectID, automationID).Scan(&versionID, &lifecycle, &automationName, &adapterKey); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil, errors.New("automation not found")
+		}
+		return nil, nil, fmt.Errorf("loading Automation for manual run: %w", err)
+	}
+	if lifecycle != models.AutomationActive {
+		return nil, nil, ErrAutomationNotActive
+	}
+
+	type manualEntry struct {
+		scheduleID string
+		nodeID     string
+		taskID     string
+		taskTitle  string
+		status     models.TaskStatus
+		category   models.TaskCategory
+	}
+	rows, err := conn.QueryContext(ctx, `SELECT o.schedule_id, o.node_id, s.task_id, t.title, t.status, t.category
+		FROM automation_trigger_owners o
+		JOIN schedules s ON s.id = o.schedule_id AND s.enabled = 1
+		JOIN tasks t ON t.id = s.task_id AND t.project_id = o.project_id
+		JOIN automation_definition_resources sr ON sr.project_id = o.project_id
+			AND sr.automation_id = o.automation_id AND sr.version_id = o.version_id
+			AND sr.node_id = o.node_id AND sr.resource_type = 'schedule' AND sr.resource_id = o.schedule_id
+		JOIN automation_definition_resources tr ON tr.project_id = o.project_id
+			AND tr.automation_id = o.automation_id AND tr.version_id = o.version_id
+			AND tr.node_id = o.node_id AND tr.resource_type = 'task' AND tr.resource_id = s.task_id
+		WHERE o.project_id = ? AND o.automation_id = ? AND o.version_id = ? AND o.ownership_state = 'active'
+		ORDER BY o.schedule_id`, projectID, automationID, versionID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("loading Automation manual run entries: %w", err)
+	}
+	var entries []manualEntry
+	for rows.Next() {
+		var entry manualEntry
+		if err := rows.Scan(&entry.scheduleID, &entry.nodeID, &entry.taskID, &entry.taskTitle, &entry.status, &entry.category); err != nil {
+			rows.Close()
+			return nil, nil, err
+		}
+		entries = append(entries, entry)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, nil, err
+	}
+	if len(entries) == 0 {
+		return nil, nil, ErrAutomationNoScheduleEntries
+	}
+
+	invocations := make([]models.AutomationInvocation, 0, len(entries))
+	dispatches := make([]models.AutomationDispatch, 0, len(entries))
+	boardEvents := make([]events.TaskEvent, 0, len(entries))
+	for _, entry := range entries {
+		occurrenceKey := "manual:" + NewID()
+		if occurrenceKey == "manual:" {
+			return nil, nil, errors.New("generating Automation manual run identity")
+		}
+		skippedReason := ""
+		if entry.status == models.StatusRunning || entry.status == models.StatusQueued {
+			skippedReason = "task_running"
+		} else {
+			var reservationCount int
+			if err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_task_run_reservations WHERE task_id = ?`, entry.taskID).Scan(&reservationCount); err != nil {
+				return nil, nil, err
+			}
+			if reservationCount > 0 {
+				skippedReason = "task_reserved"
+			}
+		}
+
+		invocation := models.AutomationInvocation{
+			ProjectID: projectID, AutomationID: automationID, VersionID: versionID,
+			TriggerNodeID: entry.nodeID, TriggerResourceType: "manual", TriggerResourceID: entry.scheduleID,
+			OccurrenceKey: occurrenceKey,
+		}
+		if skippedReason != "" {
+			invocation.Status = models.AutomationInvocationSkipped
+			invocation.SkippedReason = skippedReason
+			started := now.UTC()
+			invocation.StartedAt, invocation.CompletedAt = &started, &started
+			if err := conn.QueryRowContext(ctx, `INSERT INTO automation_invocations
+				(project_id, automation_id, version_id, trigger_node_id, trigger_resource_type, trigger_resource_id,
+				 occurrence_key, status, skipped_reason, started_at, completed_at)
+				VALUES (?, ?, ?, ?, 'manual', ?, ?, 'skipped', ?, ?, ?)
+				RETURNING id, created_at, updated_at`, projectID, automationID, versionID, entry.nodeID,
+				entry.scheduleID, occurrenceKey, skippedReason, started, started).
+				Scan(&invocation.ID, &invocation.CreatedAt, &invocation.UpdatedAt); err != nil {
+				return nil, nil, fmt.Errorf("creating skipped Automation manual invocation: %w", err)
+			}
+			invocations = append(invocations, invocation)
+			continue
+		}
+
+		preparedCategory := entry.category
+		if adapterKey == "custom" {
+			if preparedCategory != models.CategoryScheduled {
+				if entry.status == models.StatusFailed && entry.category == models.CategoryCompleted {
+					preparedCategory = models.CategoryScheduled
+				} else {
+					return nil, nil, ErrAutomationScheduleChanged
+				}
+			}
+		} else if preparedCategory != models.CategoryActive && preparedCategory != models.CategoryScheduled {
+			preparedCategory = models.CategoryScheduled
+		}
+		invocation.Status = models.AutomationInvocationClaimed
+		if err := conn.QueryRowContext(ctx, `INSERT INTO automation_invocations
+			(project_id, automation_id, version_id, trigger_node_id, trigger_resource_type, trigger_resource_id,
+			 occurrence_key, status) VALUES (?, ?, ?, ?, 'manual', ?, ?, 'claimed')
+			RETURNING id, created_at, updated_at`, projectID, automationID, versionID, entry.nodeID,
+			entry.scheduleID, occurrenceKey).Scan(&invocation.ID, &invocation.CreatedAt, &invocation.UpdatedAt); err != nil {
+			return nil, nil, fmt.Errorf("creating Automation manual invocation: %w", err)
+		}
+		dispatch := models.AutomationDispatch{InvocationID: invocation.ID, TaskID: entry.taskID, Status: "pending"}
+		if err := conn.QueryRowContext(ctx, `INSERT INTO automation_dispatch_outbox (invocation_id, task_id)
+			VALUES (?, ?) RETURNING id, next_attempt_at, created_at, updated_at`, invocation.ID, entry.taskID).
+			Scan(&dispatch.ID, &dispatch.NextAttemptAt, &dispatch.CreatedAt, &dispatch.UpdatedAt); err != nil {
+			return nil, nil, fmt.Errorf("creating Automation manual dispatch: %w", err)
+		}
+		if _, err := conn.ExecContext(ctx, `INSERT INTO automation_task_run_reservations (task_id, dispatch_id, project_id)
+			VALUES (?, ?, ?)`, entry.taskID, dispatch.ID, projectID); err != nil {
+			return nil, nil, fmt.Errorf("reserving Automation manual task: %w", err)
+		}
+		if _, err := conn.ExecContext(ctx, `UPDATE tasks SET status = 'pending', category = ?, completed_at = NULL, updated_at = CURRENT_TIMESTAMP
+			WHERE id = ? AND project_id = ?`, preparedCategory, entry.taskID, projectID); err != nil {
+			return nil, nil, fmt.Errorf("preparing Automation manual task: %w", err)
+		}
+		invocations = append(invocations, invocation)
+		dispatches = append(dispatches, dispatch)
+		boardEvents = append(boardEvents, events.TaskEvent{
+			Type: events.TaskBoardUpdated, TaskID: entry.taskID, TaskName: entry.taskTitle,
+			ProjectID: projectID, Status: string(models.StatusPending), Category: string(preparedCategory),
+		})
+	}
+
+	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+		return nil, nil, err
+	}
+	for _, invocation := range invocations {
+		automationobs.Event("automation.invocation.created",
+			automationobs.String("project_id", projectID), automationobs.String("automation_id", automationID),
+			automationobs.String("version_id", versionID), automationobs.String("invocation_id", invocation.ID),
+			automationobs.String("node_id", invocation.TriggerNodeID), automationobs.String("status", string(invocation.Status)),
+			automationobs.String("trigger", "manual"))
+		eventType := events.AutomationDefinitionUpdated
+		if invocation.Status == models.AutomationInvocationClaimed {
+			eventType = events.AutomationInvocationStarted
+		}
+		r.PublishInvalidation(eventType, projectID, models.AutomationBinding{
+			AutomationID: automationID, AutomationName: automationName, VersionID: versionID, InvocationID: invocation.ID, NodeID: invocation.TriggerNodeID,
+		})
+	}
+	if r.broadcaster != nil {
+		for _, event := range boardEvents {
+			r.broadcaster.Publish(event)
+		}
+	}
+	return invocations, dispatches, nil
+}
+
 func (r *AutomationRepo) ClaimScheduledOccurrence(ctx context.Context, schedule models.Schedule, now time.Time, nextRun *time.Time) (*models.AutomationInvocation, *models.AutomationDispatch, error) {
 	if schedule.NextRun == nil {
 		return nil, nil, ErrAutomationScheduleChanged
 	}
 	due := schedule.NextRun.UTC()
 	occurrenceKey := automationOccurrenceKey(schedule.ID, due)
-	conn, err := r.db.Conn(ctx)
+	conn, finishImmediate, err := beginImmediateConn(ctx, r.db)
 	if err != nil {
 		return nil, nil, err
 	}
-	defer conn.Close()
-	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
-		return nil, nil, err
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
-		}
-	}()
+	defer finishImmediate()
 
 	if existing, dispatch, err := loadInvocationForOccurrence(ctx, conn, schedule.ID, occurrenceKey); err != nil {
 		return nil, nil, err
 	} else if existing != nil {
+		if automationInvocationTerminal(existing.Status) {
+			if _, err := conn.ExecContext(ctx, `UPDATE schedules SET next_run = ?, updated_at = CURRENT_TIMESTAMP
+				WHERE id = ? AND enabled = 1 AND next_run = ? AND next_run <= ?`, nextRun, schedule.ID, due, now.UTC()); err != nil {
+				return nil, nil, fmt.Errorf("advancing completed automation occurrence: %w", err)
+			}
+		}
 		if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 			return nil, nil, err
 		}
-		committed = true
 		return existing, dispatch, nil
 	}
 
 	var owner models.AutomationTriggerOwner
 	var lifecycle models.AutomationLifecycleState
-	var adapterKey string
+	var adapterKey, automationName string
 	err = conn.QueryRowContext(ctx, `SELECT o.schedule_id, o.project_id, o.automation_id, o.version_id, o.node_id,
-		o.ownership_state, o.created_at, o.updated_at, a.lifecycle_state, v.adapter_key
+		o.ownership_state, o.created_at, o.updated_at, a.lifecycle_state, a.name, v.adapter_key
 		FROM automation_trigger_owners o JOIN automations a ON a.id = o.automation_id AND a.project_id = o.project_id
 		JOIN automation_versions v ON v.id = o.version_id AND v.automation_id = o.automation_id AND v.project_id = o.project_id
 		WHERE o.schedule_id = ? AND o.ownership_state = 'active' AND a.lifecycle_state = 'active'`, schedule.ID).
 		Scan(&owner.ScheduleID, &owner.ProjectID, &owner.AutomationID, &owner.VersionID, &owner.NodeID,
-			&owner.OwnershipState, &owner.CreatedAt, &owner.UpdatedAt, &lifecycle, &adapterKey)
+			&owner.OwnershipState, &owner.CreatedAt, &owner.UpdatedAt, &lifecycle, &automationName, &adapterKey)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil, ErrAutomationScheduleChanged
 	}
@@ -222,7 +496,11 @@ func (r *AutomationRepo) ClaimScheduledOccurrence(ctx context.Context, schedule 
 	preparedCategory := taskCategory
 	if adapterKey == "custom" {
 		if preparedCategory != models.CategoryScheduled {
-			return nil, nil, ErrAutomationScheduleChanged
+			if taskStatus == models.StatusFailed && taskCategory == models.CategoryCompleted {
+				preparedCategory = models.CategoryScheduled
+			} else {
+				return nil, nil, ErrAutomationScheduleChanged
+			}
 		}
 	} else if preparedCategory != models.CategoryActive && preparedCategory != models.CategoryScheduled {
 		preparedCategory = models.CategoryScheduled
@@ -285,7 +563,7 @@ func (r *AutomationRepo) ClaimScheduledOccurrence(ctx context.Context, schedule 
 			VALUES (?, ?, ?)`, taskID, dispatch.ID, owner.ProjectID); err != nil {
 			return nil, nil, fmt.Errorf("reserving automation task: %w", err)
 		}
-		if _, err := conn.ExecContext(ctx, `UPDATE tasks SET status = 'pending', category = ?,
+		if _, err := conn.ExecContext(ctx, `UPDATE tasks SET status = 'pending', category = ?, completed_at = NULL,
 			updated_at = CURRENT_TIMESTAMP WHERE id = ? AND project_id = ?`, preparedCategory, taskID, owner.ProjectID); err != nil {
 			return nil, nil, fmt.Errorf("preparing automation task: %w", err)
 		}
@@ -303,7 +581,6 @@ func (r *AutomationRepo) ClaimScheduledOccurrence(ctx context.Context, schedule 
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 		return nil, nil, err
 	}
-	committed = true
 	automationobs.Event("automation.invocation.created",
 		automationobs.String("project_id", owner.ProjectID), automationobs.String("automation_id", owner.AutomationID),
 		automationobs.String("version_id", owner.VersionID), automationobs.String("invocation_id", invocation.ID),
@@ -330,10 +607,27 @@ func (r *AutomationRepo) ClaimScheduledOccurrence(ctx context.Context, schedule 
 				ProjectID: owner.ProjectID, Status: string(models.StatusPending), Category: string(preparedCategory), OldCategory: string(taskCategory)})
 		}
 	}
-	r.PublishInvalidation(events.AutomationInvocationStarted, owner.ProjectID, models.AutomationBinding{
-		AutomationID: owner.AutomationID, VersionID: owner.VersionID, InvocationID: invocation.ID, NodeID: owner.NodeID,
+	eventType := events.AutomationDefinitionUpdated
+	if dispatch != nil {
+		eventType = events.AutomationInvocationStarted
+	}
+	r.PublishInvalidation(eventType, owner.ProjectID, models.AutomationBinding{
+		AutomationID: owner.AutomationID, AutomationName: automationName, VersionID: owner.VersionID, InvocationID: invocation.ID, NodeID: owner.NodeID,
 	})
+	if dispatch != nil && r.broadcaster != nil {
+		r.broadcaster.Publish(events.TaskEvent{Type: events.TaskBoardUpdated, TaskID: taskID, TaskName: taskTitle,
+			ProjectID: owner.ProjectID, Status: string(models.StatusPending), Category: string(preparedCategory)})
+	}
 	return invocation, dispatch, nil
+}
+
+func automationInvocationTerminal(status models.AutomationInvocationStatus) bool {
+	switch status {
+	case models.AutomationInvocationCompleted, models.AutomationInvocationFailed, models.AutomationInvocationCancelled, models.AutomationInvocationSkipped:
+		return true
+	default:
+		return false
+	}
 }
 
 func loadInvocationForOccurrence(ctx context.Context, exec SQLExecutor, scheduleID, occurrenceKey string) (*models.AutomationInvocation, *models.AutomationDispatch, error) {
@@ -367,13 +661,18 @@ func (r *AutomationRepo) LeaseNextDispatch(ctx context.Context, claimant string,
 	if lease <= 0 || lease > 10*time.Minute {
 		lease = time.Minute
 	}
-	dispatch, err := scanAutomationDispatch(r.db.QueryRowContext(ctx, `UPDATE automation_dispatch_outbox
-		SET status = 'processing', claimed_by = ?, claim_expires_at = ?, attempts = attempts + 1, updated_at = CURRENT_TIMESTAMP
-		WHERE id = (SELECT id FROM automation_dispatch_outbox
-			WHERE next_attempt_at <= ? AND (status = 'pending' OR (status = 'processing' AND claim_expires_at <= ?))
-			ORDER BY next_attempt_at, created_at, id LIMIT 1)
-		RETURNING id, invocation_id, task_id, COALESCE(execution_id, ''), status, attempts, claimed_by,
-		claim_expires_at, next_attempt_at, last_error, created_at, updated_at`, claimant, now.UTC().Add(lease), now.UTC(), now.UTC()))
+	var dispatch *models.AutomationDispatch
+	err := withBoundSQLiteConn(ctx, r.db, func(conn *sql.Conn) error {
+		var err error
+		dispatch, err = scanAutomationDispatch(conn.QueryRowContext(ctx, `UPDATE automation_dispatch_outbox
+			SET status = 'processing', claimed_by = ?, claim_expires_at = ?, attempts = attempts + 1, updated_at = CURRENT_TIMESTAMP
+			WHERE id = (SELECT id FROM automation_dispatch_outbox
+				WHERE next_attempt_at <= ? AND (status = 'pending' OR (status = 'processing' AND claim_expires_at <= ?))
+				ORDER BY next_attempt_at, created_at, id LIMIT 1)
+			RETURNING id, invocation_id, task_id, COALESCE(execution_id, ''), status, attempts, claimed_by,
+			claim_expires_at, next_attempt_at, last_error, created_at, updated_at`, claimant, now.UTC().Add(lease), now.UTC(), now.UTC()))
+		return err
+	})
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -391,20 +690,11 @@ func (r *AutomationRepo) LeaseNextDispatch(ctx context.Context, claimant string,
 }
 
 func (r *AutomationRepo) RenewDispatchLease(ctx context.Context, dispatchID, claimant string, expires time.Time) error {
-	conn, err := r.db.Conn(ctx)
+	conn, finishImmediate, err := beginImmediateConn(ctx, r.db)
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
-	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
-		return err
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
-		}
-	}()
+	defer finishImmediate()
 	result, err := conn.ExecContext(ctx, `UPDATE automation_dispatch_outbox SET claim_expires_at = ?, updated_at = CURRENT_TIMESTAMP
 		WHERE id = ? AND status = 'processing' AND claimed_by = ?`, expires.UTC(), dispatchID, claimant)
 	if err != nil {
@@ -424,58 +714,343 @@ func (r *AutomationRepo) RenewDispatchLease(ctx context.Context, dispatchID, cla
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 		return err
 	}
-	committed = true
 	return nil
 }
 
-func (r *AutomationRepo) MarkDispatchSubmitted(ctx context.Context, dispatchID, claimant, executionID string) error {
-	result, err := r.db.ExecContext(ctx, `UPDATE automation_dispatch_outbox SET status = 'submitted', execution_id = ?,
-		claimed_by = '', claim_expires_at = NULL, updated_at = CURRENT_TIMESTAMP
-		WHERE id = ? AND status = 'processing' AND claimed_by = ?`, executionID, dispatchID, claimant)
+func (r *AutomationRepo) MarkDispatchQueued(ctx context.Context, dispatchID, claimant string) error {
+	return withBoundSQLiteConn(ctx, r.db, func(conn *sql.Conn) error {
+		result, err := conn.ExecContext(ctx, `UPDATE automation_dispatch_outbox SET status = 'submitted', execution_id = NULL,
+			claimed_by = '', claim_expires_at = NULL, updated_at = CURRENT_TIMESTAMP
+			WHERE id = ? AND status = 'processing' AND claimed_by = ?`, dispatchID, claimant)
+		if err != nil {
+			return err
+		}
+		if changed, _ := result.RowsAffected(); changed != 1 {
+			return ErrAutomationDispatchLease
+		}
+		return nil
+	})
+}
+
+func (r *AutomationRepo) AbandonQueuedDispatch(ctx context.Context, dispatchID, message string) error {
+	conn, finishImmediate, err := beginImmediateConn(ctx, r.db)
 	if err != nil {
 		return err
 	}
-	if changed, _ := result.RowsAffected(); changed != 1 {
-		return ErrAutomationDispatchLease
+	defer finishImmediate()
+	var invocationID string
+	if err := conn.QueryRowContext(ctx, `SELECT invocation_id FROM automation_dispatch_outbox
+		WHERE id = ? AND status = 'submitted' AND execution_id IS NULL`, dispatchID).Scan(&invocationID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		return err
+	}
+	message = strings.TrimSpace(message)
+	if _, err := conn.ExecContext(ctx, `UPDATE automation_dispatch_outbox SET status = 'failed', last_error = ?, updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?`, message, dispatchID); err != nil {
+		return err
+	}
+	if _, err := conn.ExecContext(ctx, `UPDATE automation_invocations SET status = 'cancelled', error_message = ?,
+		completed_at = COALESCE(completed_at, CURRENT_TIMESTAMP), updated_at = CURRENT_TIMESTAMP WHERE id = ?`, message, invocationID); err != nil {
+		return err
+	}
+	if _, err := conn.ExecContext(ctx, `DELETE FROM automation_task_run_reservations WHERE dispatch_id = ?`, dispatchID); err != nil {
+		return err
+	}
+	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+		return err
 	}
 	return nil
+}
+
+// CancelDispatchesForTask atomically cancels all not-yet-finished Automation
+// dispatches for a task. It covers both capacity-queued dispatches without an
+// execution and restart-recovered prepared executions waiting for worker
+// capacity. The task lifecycle caller remains responsible for its requested
+// category; this method only releases Automation runtime state and any running
+// prepared execution.
+func (r *AutomationRepo) CancelDispatchesForTask(ctx context.Context, taskID, message string) error {
+	if r == nil || strings.TrimSpace(taskID) == "" {
+		return errors.New("task is required")
+	}
+	message = strings.TrimSpace(message)
+	conn, finishImmediate, err := beginImmediateConn(ctx, r.db)
+	if err != nil {
+		return err
+	}
+	defer finishImmediate()
+
+	type cancellation struct {
+		dispatchID, invocationID, executionID      string
+		projectID, automationID, versionID, nodeID string
+		taskTitle                                  string
+		taskCategory                               models.TaskCategory
+		oldTaskCategory                            models.TaskCategory
+		taskChanged                                bool
+		categoryChanged                            bool
+	}
+	rows, err := conn.QueryContext(ctx, `SELECT d.id, d.invocation_id, COALESCE(d.execution_id, ''),
+		i.project_id, i.automation_id, i.version_id, i.trigger_node_id, t.title, t.category
+		FROM automation_dispatch_outbox d
+		JOIN automation_invocations i ON i.id = d.invocation_id
+		JOIN tasks t ON t.id = d.task_id
+		LEFT JOIN executions e ON e.id = d.execution_id
+		WHERE d.task_id = ? AND (
+			(d.execution_id IS NULL AND d.status IN ('pending', 'processing', 'submitted'))
+			OR (d.execution_id IS NOT NULL AND d.status IN ('processing', 'submitted') AND e.status = 'running')
+		)
+		ORDER BY d.created_at, d.id`, taskID)
+	if err != nil {
+		return err
+	}
+	var cancellations []cancellation
+	for rows.Next() {
+		var item cancellation
+		if err := rows.Scan(&item.dispatchID, &item.invocationID, &item.executionID, &item.projectID,
+			&item.automationID, &item.versionID, &item.nodeID, &item.taskTitle, &item.taskCategory); err != nil {
+			rows.Close()
+			return err
+		}
+		item.oldTaskCategory = item.taskCategory
+		cancellations = append(cancellations, item)
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+
+	for i := range cancellations {
+		item := &cancellations[i]
+		if item.executionID != "" {
+			if _, err := conn.ExecContext(ctx, `UPDATE executions SET status = 'cancelled',
+				error_message = ?, completed_at = COALESCE(completed_at, CURRENT_TIMESTAMP)
+				WHERE id = ? AND status = 'running'`, message, item.executionID); err != nil {
+				return err
+			}
+			result, err := conn.ExecContext(ctx, `UPDATE tasks SET status = 'cancelled',
+				category = CASE WHEN category IN ('active', 'scheduled') THEN 'backlog' ELSE category END,
+				updated_at = CURRENT_TIMESTAMP
+				WHERE id = ? AND status = 'running'`, taskID)
+			if err != nil {
+				return err
+			}
+			changed, _ := result.RowsAffected()
+			item.taskChanged = changed == 1
+			if item.taskChanged && (item.oldTaskCategory == models.CategoryActive || item.oldTaskCategory == models.CategoryScheduled) {
+				item.taskCategory = models.CategoryBacklog
+				item.categoryChanged = true
+			}
+			var activityID string
+			activityErr := conn.QueryRowContext(ctx, `SELECT id FROM automation_activities
+				WHERE invocation_id = ? AND activity_key = ?`, item.invocationID, "dispatch:"+item.dispatchID+":execute").Scan(&activityID)
+			if activityErr != nil && !errors.Is(activityErr, sql.ErrNoRows) {
+				return activityErr
+			}
+			if activityID != "" {
+				if _, err := conn.ExecContext(ctx, `UPDATE automation_activities SET status = 'cancelled',
+					completed_at = COALESCE(completed_at, CURRENT_TIMESTAMP), error_message = ? WHERE id = ?`, message, activityID); err != nil {
+					return err
+				}
+				if err := syncAutomationLiveActivityState(ctx, conn, activityID); err != nil {
+					return err
+				}
+			}
+		}
+		if !item.categoryChanged && (item.taskCategory == models.CategoryActive || item.taskCategory == models.CategoryScheduled) {
+			result, err := conn.ExecContext(ctx, `UPDATE tasks SET category = 'backlog', updated_at = CURRENT_TIMESTAMP
+				WHERE id = ? AND status IN ('cancelled', 'failed') AND category IN ('active', 'scheduled')`, taskID)
+			if err != nil {
+				return err
+			}
+			changed, _ := result.RowsAffected()
+			if changed == 1 {
+				item.taskCategory = models.CategoryBacklog
+				item.categoryChanged = true
+			}
+		}
+		if _, err := conn.ExecContext(ctx, `UPDATE automation_dispatch_outbox SET status = 'failed', last_error = ?,
+			claimed_by = '', claim_expires_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, message, item.dispatchID); err != nil {
+			return err
+		}
+		if _, err := conn.ExecContext(ctx, `UPDATE automation_invocations SET status = 'cancelled', error_message = ?,
+			completed_at = COALESCE(completed_at, CURRENT_TIMESTAMP), updated_at = CURRENT_TIMESTAMP WHERE id = ?`, message, item.invocationID); err != nil {
+			return err
+		}
+		if _, err := conn.ExecContext(ctx, `DELETE FROM automation_task_run_reservations WHERE dispatch_id = ?`, item.dispatchID); err != nil {
+			return err
+		}
+	}
+	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+		return err
+	}
+
+	for _, item := range cancellations {
+		if r.broadcaster != nil {
+			if item.taskChanged {
+				r.broadcaster.Publish(events.TaskEvent{Type: events.TaskStatusChanged, TaskID: taskID,
+					TaskName: item.taskTitle, ProjectID: item.projectID, Status: string(models.StatusCancelled),
+					OldStatus: string(models.StatusRunning), Category: string(item.taskCategory)})
+			}
+			if item.categoryChanged {
+				r.broadcaster.Publish(events.TaskEvent{Type: events.TaskCategoryChanged, TaskID: taskID,
+					TaskName: item.taskTitle, ProjectID: item.projectID, Status: string(models.StatusCancelled),
+					Category: string(item.taskCategory), OldCategory: string(item.oldTaskCategory)})
+			}
+		}
+		r.PublishInvalidation(events.AutomationInvocationUpdated, item.projectID, models.AutomationBinding{
+			AutomationID: item.automationID, VersionID: item.versionID, InvocationID: item.invocationID, NodeID: item.nodeID,
+		})
+		automationobs.Event("automation.dispatch.cancelled",
+			automationobs.String("project_id", item.projectID), automationobs.String("automation_id", item.automationID),
+			automationobs.String("dispatch_id", item.dispatchID), automationobs.String("task_id", taskID),
+			automationobs.String("execution_id", item.executionID))
+	}
+	return nil
+}
+
+func (r *AutomationRepo) ListAbandonedQueuedDispatches(ctx context.Context, limit int) ([]models.AutomationDispatch, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 100
+	}
+	rows, err := r.db.QueryContext(ctx, `SELECT d.id, d.invocation_id, d.task_id, COALESCE(d.execution_id, ''),
+		d.status, d.attempts, d.claimed_by, d.claim_expires_at, d.next_attempt_at, d.last_error, d.created_at, d.updated_at
+		FROM automation_dispatch_outbox d
+		LEFT JOIN executions e ON e.id = d.execution_id AND e.dispatch_id = d.id
+		JOIN tasks t ON t.id = d.task_id
+		WHERE d.status IN ('processing', 'submitted') AND (
+			(d.execution_id IS NULL AND (t.status != 'pending' OR t.category NOT IN ('active','scheduled')))
+			OR (d.execution_id IS NOT NULL AND e.status = 'running' AND
+				(t.status != 'running' OR t.category NOT IN ('active','scheduled')))
+		)
+		ORDER BY d.updated_at, d.id LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []models.AutomationDispatch
+	for rows.Next() {
+		var value models.AutomationDispatch
+		if err := rows.Scan(&value.ID, &value.InvocationID, &value.TaskID, &value.ExecutionID, &value.Status,
+			&value.Attempts, &value.ClaimedBy, &value.ClaimExpiresAt, &value.NextAttemptAt, &value.LastError,
+			&value.CreatedAt, &value.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, value)
+	}
+	return out, rows.Err()
+}
+
+func (r *AutomationRepo) MarkDispatchSubmitted(ctx context.Context, dispatchID, claimant, executionID string) error {
+	return withBoundSQLiteConn(ctx, r.db, func(conn *sql.Conn) error {
+		result, err := conn.ExecContext(ctx, `UPDATE automation_dispatch_outbox SET status = 'submitted', execution_id = ?,
+			claimed_by = '', claim_expires_at = NULL, updated_at = CURRENT_TIMESTAMP
+			WHERE id = ? AND status = 'processing' AND claimed_by = ?`, executionID, dispatchID, claimant)
+		if err != nil {
+			return err
+		}
+		if changed, _ := result.RowsAffected(); changed != 1 {
+			return ErrAutomationDispatchLease
+		}
+		return nil
+	})
 }
 
 func (r *AutomationRepo) FailDispatch(ctx context.Context, dispatchID, claimant, message string, maxAttempts int, now time.Time) error {
 	if maxAttempts <= 0 {
 		maxAttempts = 5
 	}
-	conn, err := r.db.Conn(ctx)
+	conn, finishImmediate, err := beginImmediateConn(ctx, r.db)
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
-	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
-		return err
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
-		}
-	}()
+	defer finishImmediate()
 	var attempts int
-	var invocationID string
-	if err := conn.QueryRowContext(ctx, `SELECT attempts, invocation_id FROM automation_dispatch_outbox
-		WHERE id = ? AND status = 'processing' AND claimed_by = ?`, dispatchID, claimant).Scan(&attempts, &invocationID); err != nil {
+	var invocationID, taskID, projectID, automationID, versionID, nodeID, taskTitle, executionID string
+	var executionStatus models.ExecutionStatus
+	var taskStatus models.TaskStatus
+	var taskCategory models.TaskCategory
+	if err := conn.QueryRowContext(ctx, `SELECT d.attempts, d.invocation_id, d.task_id,
+		i.project_id, i.automation_id, i.version_id, i.trigger_node_id, t.title, t.status, t.category,
+		COALESCE(d.execution_id, ''), COALESCE(e.status, '')
+		FROM automation_dispatch_outbox d
+		JOIN automation_invocations i ON i.id = d.invocation_id
+		JOIN tasks t ON t.id = d.task_id AND t.project_id = i.project_id
+		LEFT JOIN executions e ON e.id = d.execution_id AND e.task_id = d.task_id
+		WHERE d.id = ? AND d.status = 'processing' AND d.claimed_by = ?`, dispatchID, claimant).
+		Scan(&attempts, &invocationID, &taskID, &projectID, &automationID, &versionID, &nodeID,
+			&taskTitle, &taskStatus, &taskCategory, &executionID, &executionStatus); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrAutomationDispatchLease
 		}
 		return err
 	}
-	if attempts >= maxAttempts {
+	terminal := attempts >= maxAttempts
+	taskChanged := false
+	oldTaskStatus := taskStatus
+	oldTaskCategory := taskCategory
+	if terminal {
+		failureMessage := strings.TrimSpace(message)
+		cancelled := taskStatus == models.StatusCancelled || executionStatus == models.ExecCancelled
+		invocationStatus := models.AutomationInvocationFailed
+		executionTerminalStatus := models.ExecFailed
+		activityStatus := models.AutomationActivityFailed
+		terminalTaskStatus := models.StatusFailed
+		if cancelled {
+			invocationStatus = models.AutomationInvocationCancelled
+			executionTerminalStatus = models.ExecCancelled
+			activityStatus = models.AutomationActivityCancelled
+			terminalTaskStatus = models.StatusCancelled
+		}
 		if _, err := conn.ExecContext(ctx, `UPDATE automation_dispatch_outbox SET status = 'failed', last_error = ?,
-			claimed_by = '', claim_expires_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, strings.TrimSpace(message), dispatchID); err != nil {
+			claimed_by = '', claim_expires_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, failureMessage, dispatchID); err != nil {
 			return err
 		}
-		if _, err := conn.ExecContext(ctx, `UPDATE automation_invocations SET status = 'failed', error_message = ?,
-			completed_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, strings.TrimSpace(message), now.UTC(), invocationID); err != nil {
+		if executionID != "" {
+			if _, err := conn.ExecContext(ctx, `UPDATE executions SET status = ?, error_message = ?, completed_at = COALESCE(completed_at, ?)
+				WHERE id = ? AND task_id = ? AND status = 'running'`, executionTerminalStatus, failureMessage, now.UTC(), executionID, taskID); err != nil {
+				return err
+			}
+			var activityID string
+			err := conn.QueryRowContext(ctx, `UPDATE automation_activities SET status = ?, error_message = ?,
+				completed_at = COALESCE(completed_at, ?) WHERE invocation_id = ? AND activity_key = ?
+				AND status IN ('pending','running','waiting') RETURNING id`, activityStatus, failureMessage, now.UTC(),
+				invocationID, "dispatch:"+dispatchID+":execute").Scan(&activityID)
+			if err != nil && !errors.Is(err, sql.ErrNoRows) {
+				return err
+			}
+			if activityID != "" {
+				if err := syncAutomationLiveActivityState(ctx, conn, activityID); err != nil {
+					return err
+				}
+			}
+		}
+		if _, err := conn.ExecContext(ctx, `UPDATE automation_invocations SET status = ?, error_message = ?,
+			completed_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, invocationStatus, failureMessage, now.UTC(), invocationID); err != nil {
 			return err
+		}
+		if taskStatus == models.StatusPending || taskStatus == models.StatusRunning {
+			terminalCategory := models.CategoryBacklog
+			var completedAt any
+			if !cancelled && taskCategory == models.CategoryScheduled {
+				terminalCategory = models.CategoryCompleted
+				completedAt = now.UTC()
+			}
+			result, err := conn.ExecContext(ctx, `UPDATE tasks SET status = ?, category = ?, completed_at = ?,
+				updated_at = CURRENT_TIMESTAMP WHERE id = ? AND project_id = ? AND status = ?
+				AND EXISTS (SELECT 1 FROM automation_task_run_reservations r WHERE r.dispatch_id = ? AND r.task_id = tasks.id)`,
+				terminalTaskStatus, terminalCategory, completedAt, taskID, projectID, oldTaskStatus, dispatchID)
+			if err != nil {
+				return err
+			}
+			changed, err := result.RowsAffected()
+			if err != nil {
+				return err
+			}
+			taskChanged = changed == 1
+			if taskChanged {
+				taskStatus = terminalTaskStatus
+				taskCategory = terminalCategory
+			}
 		}
 		if _, err := conn.ExecContext(ctx, `DELETE FROM automation_task_run_reservations WHERE dispatch_id = ?`, dispatchID); err != nil {
 			return err
@@ -491,8 +1066,22 @@ func (r *AutomationRepo) FailDispatch(ctx context.Context, dispatchID, claimant,
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 		return err
 	}
-	committed = true
-	if attempts >= maxAttempts {
+	if terminal {
+		if r.broadcaster != nil {
+			r.broadcaster.Publish(events.TaskEvent{Type: events.TaskBoardUpdated, TaskID: taskID, TaskName: taskTitle,
+				ProjectID: projectID, Status: string(taskStatus), Category: string(taskCategory)})
+			if taskChanged {
+				r.broadcaster.Publish(events.TaskEvent{Type: events.TaskStatusChanged, TaskID: taskID, TaskName: taskTitle,
+					ProjectID: projectID, Status: string(taskStatus), OldStatus: string(oldTaskStatus), Category: string(taskCategory)})
+				if taskCategory != oldTaskCategory {
+					r.broadcaster.Publish(events.TaskEvent{Type: events.TaskCategoryChanged, TaskID: taskID, TaskName: taskTitle,
+						ProjectID: projectID, Status: string(taskStatus), Category: string(taskCategory), OldCategory: string(oldTaskCategory)})
+				}
+			}
+		}
+		r.PublishInvalidation(events.AutomationInvocationUpdated, projectID, models.AutomationBinding{
+			AutomationID: automationID, VersionID: versionID, InvocationID: invocationID, NodeID: nodeID,
+		})
 		automationobs.Event("automation.dispatch.failed",
 			automationobs.String("dispatch_id", dispatchID), automationobs.String("invocation_id", invocationID),
 			automationobs.String("attempts", strconv.Itoa(attempts)))
@@ -528,31 +1117,77 @@ func (r *AutomationRepo) GetDispatchEnvelope(ctx context.Context, dispatchID str
 		return nil, errors.New("automation dispatch task project mismatch")
 	}
 	envelope.Task = *task
-	envelope.Context = models.AutomationContext{ProjectID: projectID, Bindings: []models.AutomationBinding{binding}}
+	envelope.Context = models.AutomationContext{ProjectID: projectID, Bindings: []models.AutomationBinding{binding}, OriginTask: IsAutomationTaskCreatedVia(task.CreatedVia)}
 	return &envelope, nil
 }
 
 func (r *AutomationRepo) CompleteDispatch(ctx context.Context, dispatchID, executionID string, status models.ExecutionStatus, message string) error {
-	conn, err := r.db.Conn(ctx)
+	var taskStatus models.TaskStatus
+	switch status {
+	case models.ExecCompleted:
+		taskStatus = models.StatusCompleted
+	case models.ExecFailed:
+		taskStatus = models.StatusFailed
+	case models.ExecCancelled:
+		taskStatus = models.StatusCancelled
+	default:
+		return fmt.Errorf("automation dispatch requires terminal execution status, got %q", status)
+	}
+
+	conn, finishImmediate, err := beginImmediateConn(ctx, r.db)
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
-	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
+	defer finishImmediate()
+	var invocationID, projectID, automationID, versionID, nodeID, taskID, taskTitle string
+	var taskCategory models.TaskCategory
+	if err := conn.QueryRowContext(ctx, `SELECT i.id, i.project_id, i.automation_id, i.version_id, i.trigger_node_id,
+		d.task_id, t.title, t.category
+		FROM automation_dispatch_outbox d
+		JOIN automation_invocations i ON i.id = d.invocation_id
+		JOIN tasks t ON t.id = d.task_id
+		WHERE d.id = ? AND d.execution_id = ?`, dispatchID, executionID).
+		Scan(&invocationID, &projectID, &automationID, &versionID, &nodeID, &taskID, &taskTitle, &taskCategory); err != nil {
 		return err
 	}
-	committed := false
-	defer func() {
-		if !committed {
-			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
-		}
-	}()
-	var invocationID, projectID, automationID, versionID, nodeID string
-	if err := conn.QueryRowContext(ctx, `SELECT i.id, i.project_id, i.automation_id, i.version_id, i.trigger_node_id
-		FROM automation_dispatch_outbox d JOIN automation_invocations i ON i.id = d.invocation_id
-		WHERE d.id = ? AND d.execution_id = ?`, dispatchID, executionID).
-		Scan(&invocationID, &projectID, &automationID, &versionID, &nodeID); err != nil {
+	if _, err := conn.ExecContext(ctx, `UPDATE executions SET status = ?, error_message = ?, completed_at = CURRENT_TIMESTAMP
+		WHERE id = ? AND status = 'running'`, status, strings.TrimSpace(message), executionID); err != nil {
 		return err
+	}
+	taskResult, err := conn.ExecContext(ctx, `UPDATE tasks SET status = ?, updated_at = CURRENT_TIMESTAMP
+		WHERE id = ? AND status = 'running'`, taskStatus, taskID)
+	if err != nil {
+		return err
+	}
+	taskChanged, err := taskResult.RowsAffected()
+	if err != nil {
+		return err
+	}
+	oldTaskCategory := taskCategory
+	terminalCategory := taskCategory
+	switch {
+	case taskCategory == models.CategoryScheduled && status == models.ExecFailed:
+		terminalCategory = models.CategoryCompleted
+	case taskCategory == models.CategoryScheduled && status == models.ExecCancelled:
+		terminalCategory = models.CategoryBacklog
+	}
+	categoryChanged := false
+	if terminalCategory != taskCategory {
+		result, err := conn.ExecContext(ctx, `UPDATE tasks SET category = ?,
+			completed_at = CASE WHEN ? = 'completed' THEN CURRENT_TIMESTAMP ELSE NULL END,
+			updated_at = CURRENT_TIMESTAMP WHERE id = ? AND category = ? AND status = ?`,
+			terminalCategory, terminalCategory, taskID, taskCategory, taskStatus)
+		if err != nil {
+			return err
+		}
+		changed, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		categoryChanged = changed == 1
+		if categoryChanged {
+			taskCategory = terminalCategory
+		}
 	}
 	invocationStatus := models.AutomationInvocationCompleted
 	activityStatus := models.AutomationActivityCompleted
@@ -569,6 +1204,9 @@ func (r *AutomationRepo) CompleteDispatch(ctx context.Context, dispatchID, execu
 	var activityID string
 	if err := conn.QueryRowContext(ctx, `UPDATE automation_activities SET status = ?, completed_at = CURRENT_TIMESTAMP,
 		error_message = ? WHERE invocation_id = ? AND activity_key = ? RETURNING id`, activityStatus, strings.TrimSpace(message), invocationID, "dispatch:"+dispatchID+":execute").Scan(&activityID); err != nil {
+		return err
+	}
+	if err := syncAutomationLiveActivityState(ctx, conn, activityID); err != nil {
 		return err
 	}
 	if status == models.ExecCompleted {
@@ -598,7 +1236,20 @@ func (r *AutomationRepo) CompleteDispatch(ctx context.Context, dispatchID, execu
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 		return err
 	}
-	committed = true
+	if r.broadcaster != nil {
+		if taskChanged == 1 {
+			r.broadcaster.Publish(events.TaskEvent{
+				Type: events.TaskStatusChanged, TaskID: taskID, TaskName: taskTitle, ProjectID: projectID,
+				Status: string(taskStatus), OldStatus: string(models.StatusRunning), Category: string(taskCategory),
+			})
+		}
+		if categoryChanged {
+			r.broadcaster.Publish(events.TaskEvent{
+				Type: events.TaskCategoryChanged, TaskID: taskID, TaskName: taskTitle, ProjectID: projectID,
+				Status: string(taskStatus), Category: string(taskCategory), OldCategory: string(oldTaskCategory),
+			})
+		}
+	}
 	automationobs.Event("automation.activity.completed",
 		automationobs.String("project_id", projectID), automationobs.String("automation_id", automationID),
 		automationobs.String("version_id", versionID), automationobs.String("invocation_id", invocationID),
@@ -620,7 +1271,7 @@ func (r *AutomationRepo) ReconcileInvocationCompletions(ctx context.Context, lim
 	if limit <= 0 || limit > 100 {
 		limit = 100
 	}
-	result, err := r.db.ExecContext(ctx, `UPDATE automation_invocations SET
+	result, err := execBoundSQLite(ctx, r.db, `UPDATE automation_invocations SET
 		status = CASE WHEN EXISTS (SELECT 1 FROM automation_activities a
 			WHERE a.invocation_id = automation_invocations.id AND a.status IN ('failed','cancelled'))
 			THEN 'failed' ELSE 'completed' END,
@@ -642,24 +1293,45 @@ func (r *AutomationRepo) ReconcileInvocationCompletions(ctx context.Context, lim
 	return result.RowsAffected()
 }
 
+func (r *AutomationRepo) PruneTerminalizedAutomationPositions(ctx context.Context, limit int) (int64, error) {
+	if r == nil {
+		return 0, nil
+	}
+	if limit <= 0 || limit > 100 {
+		limit = 100
+	}
+	result, err := execBoundSQLite(ctx, r.db, `DELETE FROM automation_work_item_positions
+		WHERE rowid IN (
+			SELECT p.rowid
+			FROM automation_work_item_positions p
+			WHERE EXISTS (
+				SELECT 1
+				FROM automation_transitions tr
+				WHERE tr.project_id = p.project_id
+				AND tr.automation_id = p.automation_id
+				AND tr.version_id = p.version_id
+				AND tr.work_item_id = p.work_item_id
+				AND tr.from_node_id = p.node_id
+				AND tr.state IN ('completed','cancelled')
+				AND tr.occurred_at >= p.entered_at)
+			ORDER BY p.updated_at, p.work_item_id, p.node_id
+			LIMIT ?
+		)`, limit)
+	if err != nil {
+		return 0, fmt.Errorf("pruning terminalized automation positions: %w", err)
+	}
+	return result.RowsAffected()
+}
+
 func (r *AutomationRepo) FinalizeExecutionProjection(ctx context.Context, projectID, executionID string, status models.ExecutionStatus) error {
 	if r == nil || projectID == "" || executionID == "" || status == models.ExecRunning {
 		return nil
 	}
-	conn, err := r.db.Conn(ctx)
+	conn, finishImmediate, err := beginImmediateConn(ctx, r.db)
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
-	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
-		return err
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
-		}
-	}()
+	defer finishImmediate()
 	type target struct {
 		binding    models.AutomationBinding
 		adapterKey string
@@ -774,7 +1446,6 @@ func (r *AutomationRepo) FinalizeExecutionProjection(ctx context.Context, projec
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 		return err
 	}
-	committed = true
 	for _, binding := range changed {
 		r.PublishInvalidation(events.AutomationTransitionCreated, projectID, binding)
 	}
@@ -791,6 +1462,14 @@ type AutomationGitHubIssueTaskCreation struct {
 	Goal            *models.TaskGoal
 }
 
+type AutomationGitHubIssueTaskProvenance struct {
+	ProjectID             string
+	AutomationID          string
+	TaskID                string
+	IssueResourceID       string
+	ImplementationNodeKey string
+}
+
 // CreateOrGetGitHubIssueTask validates the exact current inbox discovery and
 // atomically creates its canonical implementation task plus Automation
 // provenance. The stable work-item activity is the durable one-task claim.
@@ -802,20 +1481,11 @@ func (r *AutomationRepo) CreateOrGetGitHubIssueTask(ctx context.Context, taskRep
 		strings.TrimSpace(in.SourceBinding.WorkItemID) == "" || strings.TrimSpace(in.TargetNodeID) == "" {
 		return nil, false, errors.New("complete Automation GitHub issue task provenance is required")
 	}
-	conn, err := r.db.Conn(ctx)
+	conn, finishImmediate, err := beginImmediateConn(ctx, r.db)
 	if err != nil {
 		return nil, false, err
 	}
-	defer conn.Close()
-	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
-		return nil, false, err
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
-		}
-	}()
+	defer finishImmediate()
 
 	binding := in.SourceBinding
 	var valid int
@@ -833,7 +1503,7 @@ func (r *AutomationRepo) CreateOrGetGitHubIssueTask(ctx context.Context, taskRep
 		JOIN automation_nodes pull_request ON pull_request.project_id = delivery.project_id AND pull_request.automation_id = delivery.automation_id
 			AND pull_request.version_id = delivery.version_id AND pull_request.id = delivery.target_node_id AND pull_request.role = 'open_pull_request'
 		JOIN automation_work_items work_item ON work_item.project_id = automation.project_id AND work_item.automation_id = automation.id
-			AND work_item.origin_version_id = source.version_id AND work_item.id = ? AND work_item.origin_invocation_id = ?
+			AND work_item.origin_version_id = source.version_id AND work_item.id = ?
 		JOIN automation_activities discovery ON discovery.project_id = automation.project_id AND discovery.automation_id = automation.id
 			AND discovery.version_id = source.version_id AND discovery.node_id = source.id
 			AND discovery.invocation_id = ? AND discovery.work_item_id = work_item.id AND discovery.activity_type = 'discover_assigned_issue'
@@ -843,7 +1513,7 @@ func (r *AutomationRepo) CreateOrGetGitHubIssueTask(ctx context.Context, taskRep
 			AND issue_resource.resource_type = 'github_issue' AND issue_resource.resource_id = ?
 		WHERE automation.project_id = ? AND automation.id = ? AND automation.published_version_id = ?
 			AND automation.lifecycle_state = 'active'`, binding.NodeID, in.TargetNodeID, binding.WorkItemID,
-		binding.InvocationID, binding.InvocationID, in.ExecutionID, in.IssueResourceID, in.ProjectID,
+		binding.InvocationID, in.ExecutionID, in.IssueResourceID, in.ProjectID,
 		binding.AutomationID, binding.VersionID).Scan(&valid)
 	if err != nil {
 		return nil, false, fmt.Errorf("validating Automation GitHub issue task provenance: %w", err)
@@ -866,10 +1536,12 @@ func (r *AutomationRepo) CreateOrGetGitHubIssueTask(ctx context.Context, taskRep
 		return nil, false, err
 	}
 	if existing != nil {
+		if err := recordGitHubIssueTaskProvenanceWithExecutor(ctx, conn, in.ProjectID, binding.AutomationID, existing.ID, in.IssueResourceID, binding.VersionID, in.TargetNodeID); err != nil {
+			return nil, false, err
+		}
 		if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 			return nil, false, err
 		}
-		committed = true
 		return existing, false, nil
 	}
 
@@ -899,10 +1571,12 @@ func (r *AutomationRepo) CreateOrGetGitHubIssueTask(ctx context.Context, taskRep
 	if err != nil {
 		return nil, false, err
 	}
+	if err := recordGitHubIssueTaskProvenanceWithExecutor(ctx, conn, in.ProjectID, binding.AutomationID, in.Task.ID, in.IssueResourceID, binding.VersionID, in.TargetNodeID); err != nil {
+		return nil, false, err
+	}
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 		return nil, false, err
 	}
-	committed = true
 	r.PublishInvalidation(events.AutomationTransitionCreated, in.ProjectID, targetBinding)
 	return in.Task, true, nil
 }
@@ -911,20 +1585,11 @@ func (r *AutomationRepo) RecordProjectionEvent(ctx context.Context, in Automatio
 	if in.Context.ProjectID == "" || in.Binding.AutomationID == "" || in.Binding.VersionID == "" || in.Binding.NodeID == "" {
 		return nil, nil, errors.New("complete automation binding is required")
 	}
-	conn, err := r.db.Conn(ctx)
+	conn, finishImmediate, err := beginImmediateConn(ctx, r.db)
 	if err != nil {
 		return nil, nil, err
 	}
-	defer conn.Close()
-	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
-		return nil, nil, err
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
-		}
-	}()
+	defer finishImmediate()
 	workItem, activity, err := recordProjectionEventWithExecutor(ctx, conn, in)
 	if err != nil {
 		if strings.TrimSpace(in.EventKey) != "" {
@@ -941,7 +1606,6 @@ func (r *AutomationRepo) RecordProjectionEvent(ctx context.Context, in Automatio
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 		return nil, nil, err
 	}
-	committed = true
 	binding := in.Binding
 	if workItem != nil {
 		binding.WorkItemID = workItem.ID
@@ -1044,12 +1708,16 @@ func upsertAutomationWorkItem(ctx context.Context, exec SQLExecutor, in Automati
 	if kind == "" {
 		kind = "work"
 	}
+	workItemKey := strings.TrimSpace(in.WorkItemKey)
+	if err := discardStaleAutomationWorkItemProjection(ctx, exec, in.Context.ProjectID, binding.AutomationID, workItemKey); err != nil {
+		return nil, binding, err
+	}
 	_, err := exec.ExecContext(ctx, `INSERT INTO automation_work_items
 		(project_id, automation_id, origin_version_id, origin_invocation_id, work_item_key, kind, title, status)
 		VALUES (?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?)
 		ON CONFLICT(automation_id, work_item_key) DO UPDATE SET title = CASE WHEN excluded.title = '' THEN title ELSE excluded.title END,
 		updated_at = CURRENT_TIMESTAMP`, in.Context.ProjectID, binding.AutomationID, binding.VersionID, binding.InvocationID,
-		strings.TrimSpace(in.WorkItemKey), kind, strings.TrimSpace(in.WorkItemTitle), status)
+		workItemKey, kind, strings.TrimSpace(in.WorkItemTitle), status)
 	if err != nil {
 		return nil, binding, fmt.Errorf("upserting automation work item: %w", err)
 	}
@@ -1077,6 +1745,97 @@ func upsertAutomationWorkItem(ctx context.Context, exec SQLExecutor, in Automati
 	}
 	binding.WorkItemID = item.ID
 	return item, binding, nil
+}
+
+func discardStaleAutomationWorkItemProjection(ctx context.Context, exec SQLExecutor, projectID, automationID, workItemKey string) error {
+	if strings.TrimSpace(workItemKey) == "" {
+		return nil
+	}
+	item, err := scanAutomationWorkItem(exec.QueryRowContext(ctx, `SELECT id, project_id, automation_id, origin_version_id,
+		COALESCE(origin_invocation_id, ''), COALESCE(parent_work_item_id, ''), work_item_key, kind, title, status,
+		created_at, updated_at, completed_at FROM automation_work_items WHERE automation_id = ? AND work_item_key = ?`,
+		automationID, workItemKey))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if item.ProjectID != projectID {
+		return errors.New("automation work item project mismatch")
+	}
+	var versionExists int
+	if err := exec.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_versions WHERE id = ? AND automation_id = ? AND project_id = ?`,
+		item.OriginVersionID, automationID, projectID).Scan(&versionExists); err != nil {
+		return err
+	}
+	if versionExists > 0 {
+		return nil
+	}
+	workItemIDs, err := staleAutomationWorkItemDescendantIDs(ctx, exec, projectID, automationID, item.ID)
+	if err != nil {
+		return err
+	}
+	if len(workItemIDs) == 0 {
+		return nil
+	}
+	placeholders, args := automationWorkItemIDArgs(workItemIDs)
+	if _, err := exec.ExecContext(ctx, `DELETE FROM automation_thread_input_bindings WHERE work_item_id IN (`+placeholders+`)`, args...); err != nil {
+		return fmt.Errorf("discarding stale automation thread input bindings: %w", err)
+	}
+	if _, err := exec.ExecContext(ctx, `DELETE FROM automation_transitions WHERE work_item_id IN (`+placeholders+`)`, args...); err != nil {
+		return fmt.Errorf("discarding stale automation transitions: %w", err)
+	}
+	if _, err := exec.ExecContext(ctx, `DELETE FROM automation_work_item_positions WHERE work_item_id IN (`+placeholders+`)`, args...); err != nil {
+		return fmt.Errorf("discarding stale automation work item positions: %w", err)
+	}
+	if _, err := exec.ExecContext(ctx, `DELETE FROM automation_activity_resources
+		WHERE activity_id IN (SELECT id FROM automation_activities WHERE work_item_id IN (`+placeholders+`))`, args...); err != nil {
+		return fmt.Errorf("discarding stale automation activity resources: %w", err)
+	}
+	if _, err := exec.ExecContext(ctx, `DELETE FROM automation_activities WHERE work_item_id IN (`+placeholders+`)`, args...); err != nil {
+		return fmt.Errorf("discarding stale automation activities: %w", err)
+	}
+	for _, workItemID := range workItemIDs {
+		if _, err := exec.ExecContext(ctx, `DELETE FROM automation_work_items WHERE id = ? AND automation_id = ? AND project_id = ?`, workItemID, automationID, projectID); err != nil {
+			return fmt.Errorf("discarding stale automation work item: %w", err)
+		}
+	}
+	return nil
+}
+
+func staleAutomationWorkItemDescendantIDs(ctx context.Context, exec SQLExecutor, projectID, automationID, rootWorkItemID string) ([]string, error) {
+	rows, err := exec.QueryContext(ctx, `WITH RECURSIVE descendants(id, depth) AS (
+		SELECT id, 0 FROM automation_work_items WHERE id = ? AND automation_id = ? AND project_id = ?
+		UNION ALL
+		SELECT child.id, descendants.depth + 1 FROM automation_work_items child
+		JOIN descendants ON child.parent_work_item_id = descendants.id
+		WHERE child.automation_id = ? AND child.project_id = ?
+	)
+	SELECT id FROM descendants ORDER BY depth DESC`, rootWorkItemID, automationID, projectID, automationID, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("loading stale automation work item descendants: %w", err)
+	}
+	defer rows.Close()
+
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+func automationWorkItemIDArgs(ids []string) (string, []any) {
+	placeholders := strings.TrimRight(strings.Repeat("?,", len(ids)), ",")
+	args := make([]any, 0, len(ids))
+	for _, id := range ids {
+		args = append(args, id)
+	}
+	return placeholders, args
 }
 
 func upsertAutomationActivity(ctx context.Context, exec SQLExecutor, in AutomationProjectionEvent, binding models.AutomationBinding, item *models.AutomationWorkItem) (*models.AutomationActivity, error) {
@@ -1126,7 +1885,110 @@ func upsertAutomationActivity(ctx context.Context, exec SQLExecutor, in Automati
 			return nil, fmt.Errorf("linking automation activity resource: %w", err)
 		}
 	}
+	if err := syncAutomationLiveActivityState(ctx, exec, activity.ID); err != nil {
+		return nil, err
+	}
+	if err := recordAutomationArtifactMailboxOwners(ctx, exec, in, binding); err != nil {
+		return nil, err
+	}
 	return activity, nil
+}
+
+func syncAutomationLiveActivityState(ctx context.Context, exec SQLExecutor, activityID string) error {
+	if strings.TrimSpace(activityID) == "" {
+		return nil
+	}
+	if _, err := exec.ExecContext(ctx, `DELETE FROM automation_live_activity_states WHERE activity_id = ?`, activityID); err != nil {
+		return fmt.Errorf("clearing automation live activity state: %w", err)
+	}
+	rows, err := exec.QueryContext(ctx, `SELECT a.rowid, a.id, a.project_id, a.automation_id, a.version_id, a.node_id,
+		COALESCE(a.invocation_id, ''), COALESCE(a.work_item_id, ''), a.status, a.completed_at,
+		CASE WHEN a.work_item_id IS NOT NULL THEN 'work:' || a.work_item_id
+			WHEN task_resource.resource_id IS NOT NULL THEN 'task:' || task_resource.resource_id
+			ELSE 'activity:' || a.id END AS state_key
+		FROM automation_activities a
+		LEFT JOIN automation_activity_resources task_resource ON task_resource.activity_id = a.id
+			AND task_resource.resource_type = 'task' AND task_resource.relation = 'subject'
+		WHERE a.id = ?`, activityID)
+	if err != nil {
+		return fmt.Errorf("loading automation live activity state: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var rowID int64
+		var id, projectID, automationID, versionID, nodeID, invocationID, workItemID, status, stateKey string
+		var completedAt sql.NullTime
+		if err := rows.Scan(&rowID, &id, &projectID, &automationID, &versionID, &nodeID, &invocationID, &workItemID, &status, &completedAt, &stateKey); err != nil {
+			return err
+		}
+		var completed any
+		if completedAt.Valid {
+			completed = completedAt.Time
+		}
+		if _, err := exec.ExecContext(ctx, `INSERT INTO automation_live_activity_states
+			(project_id, automation_id, version_id, node_id, state_key, activity_id, invocation_id, work_item_id, activity_status, completed_at, activity_rowid)
+			VALUES (?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?)
+			ON CONFLICT(project_id, automation_id, version_id, node_id, state_key) DO UPDATE SET
+				activity_id = excluded.activity_id,
+				invocation_id = excluded.invocation_id,
+				work_item_id = excluded.work_item_id,
+				activity_status = excluded.activity_status,
+				completed_at = excluded.completed_at,
+				activity_rowid = excluded.activity_rowid,
+				updated_at = CURRENT_TIMESTAMP
+			WHERE excluded.activity_rowid >= automation_live_activity_states.activity_rowid`,
+			projectID, automationID, versionID, nodeID, stateKey, id, invocationID, workItemID, status, completed, rowID); err != nil {
+			return fmt.Errorf("upserting automation live activity state: %w", err)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func syncAutomationLiveActivityStateRows(ctx context.Context, exec SQLExecutor, rows *sql.Rows) error {
+	var activityIDs []string
+	for rows.Next() {
+		var activityID string
+		if err := rows.Scan(&activityID); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		activityIDs = append(activityIDs, activityID)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, activityID := range activityIDs {
+		if err := syncAutomationLiveActivityState(ctx, exec, activityID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func recordAutomationArtifactMailboxOwners(ctx context.Context, exec SQLExecutor, in AutomationProjectionEvent, binding models.AutomationBinding) error {
+	if strings.TrimSpace(in.ActivityType) != "create_notification" {
+		return nil
+	}
+	for _, resource := range in.Resources {
+		if strings.TrimSpace(resource.ResourceType) != "alert" || strings.TrimSpace(resource.ResourceID) == "" {
+			continue
+		}
+		if _, err := exec.ExecContext(ctx, `INSERT INTO automation_artifact_mailbox_owners
+			(project_id, automation_id, artifact_type, artifact_id, producer_node_key, action_node_key, gate_node_key, mailbox_node_key)
+			VALUES (?, ?, 'alert', ?, '', '', '', '')
+			ON CONFLICT(project_id, automation_id, artifact_type, artifact_id, producer_node_key, action_node_key, gate_node_key, mailbox_node_key) DO NOTHING`,
+			in.Context.ProjectID, binding.AutomationID, strings.TrimSpace(resource.ResourceID)); err != nil {
+			return fmt.Errorf("recording Automation artifact mailbox ownership: %w", err)
+		}
+	}
+	return nil
 }
 
 func validateAutomationActivityResource(ctx context.Context, exec SQLExecutor, projectID, resourceType, resourceID string) error {
@@ -1142,8 +2004,6 @@ func validateAutomationActivityResource(ctx context.Context, exec SQLExecutor, p
 		query = `SELECT 1 FROM alerts WHERE id = ? AND project_id = ?`
 	case "goal":
 		query = `SELECT 1 FROM task_goals g JOIN tasks t ON t.id = g.task_id WHERE g.task_id = ? AND t.project_id = ?`
-	case "workflow_execution":
-		query = `SELECT 1 FROM workflow_executions we JOIN workflows w ON w.id = we.workflow_id WHERE we.id = ? AND w.project_id = ?`
 	case "pull_request", "github_issue", "review":
 		if err := validateCanonicalGitHubResourceID(resourceType, resourceID); err != nil {
 			return err
@@ -1322,52 +2182,11 @@ func appendAutomationTransition(ctx context.Context, exec SQLExecutor, in Automa
 }
 
 func (r *AutomationRepo) LiveNodeCounts(ctx context.Context, projectID, automationID, versionID string, recentCutoff time.Time) (map[string]models.AutomationNodeCounts, int, int, error) {
-	rows, err := r.db.QueryContext(ctx, `WITH operational_state AS (
-		SELECT node_id, 'running' AS state,
-			CASE WHEN work_item_id IS NULL THEN 'activity:' || id ELSE 'work:' || work_item_id END AS state_key
-		FROM automation_activities
-		WHERE project_id = ? AND automation_id = ? AND version_id = ? AND status IN ('pending','running')
-		UNION
-		SELECT node_id, 'waiting',
-			CASE WHEN work_item_id IS NULL THEN 'activity:' || id ELSE 'work:' || work_item_id END
-		FROM automation_activities
-		WHERE project_id = ? AND automation_id = ? AND version_id = ? AND status = 'waiting'
-		UNION
-		SELECT node_id, 'failed',
-			CASE WHEN work_item_id IS NULL THEN 'activity:' || id ELSE 'work:' || work_item_id END
-		FROM automation_activities
-		WHERE project_id = ? AND automation_id = ? AND version_id = ? AND status = 'failed'
-		UNION
-		SELECT node_id, 'recent',
-			CASE WHEN work_item_id IS NULL THEN 'activity:' || id ELSE 'work:' || work_item_id END
-		FROM automation_activities
-		WHERE project_id = ? AND automation_id = ? AND version_id = ? AND status = 'completed' AND completed_at >= ?
-		UNION
-		SELECT node_id,
-			CASE state WHEN 'active' THEN 'running' WHEN 'waiting' THEN 'waiting' WHEN 'blocked' THEN 'blocked' WHEN 'failed' THEN 'failed' END,
-			'work:' || work_item_id
-		FROM automation_work_item_positions
-		WHERE project_id = ? AND automation_id = ? AND version_id = ? AND state IN ('active','waiting','blocked','failed')
-		UNION
-		SELECT to_node_id, 'recent', 'work:' || work_item_id
-		FROM automation_transitions
-		WHERE project_id = ? AND automation_id = ? AND version_id = ? AND state = 'completed' AND occurred_at >= ?
-		), identity_state AS (
-			SELECT node_id, state_key, MAX(CASE state
-				WHEN 'failed' THEN 5 WHEN 'blocked' THEN 4 WHEN 'waiting' THEN 3
-				WHEN 'running' THEN 2 WHEN 'recent' THEN 1 ELSE 0 END) AS state_priority
-			FROM operational_state GROUP BY node_id, state_key
-		)
-		SELECT node_id,
-			SUM(CASE WHEN state_priority = 2 THEN 1 ELSE 0 END),
-			SUM(CASE WHEN state_priority = 3 THEN 1 ELSE 0 END),
-			SUM(CASE WHEN state_priority = 4 THEN 1 ELSE 0 END),
-			SUM(CASE WHEN state_priority = 5 THEN 1 ELSE 0 END),
-			SUM(CASE WHEN state_priority = 1 THEN 1 ELSE 0 END)
-		FROM identity_state GROUP BY node_id`, projectID, automationID, versionID,
-		projectID, automationID, versionID,
-		projectID, automationID, versionID,
+	rows, err := r.db.QueryContext(ctx, liveNodeCountsSQL, projectID, automationID, versionID,
 		projectID, automationID, versionID, recentCutoff.UTC(),
+		projectID, automationID, versionID,
+		projectID, automationID, versionID,
+		projectID, automationID, versionID,
 		projectID, automationID, versionID,
 		projectID, automationID, versionID, recentCutoff.UTC())
 	if err != nil {
@@ -1399,32 +2218,45 @@ func (r *AutomationRepo) LiveNodeCounts(ctx context.Context, projectID, automati
 }
 
 func (r *AutomationRepo) PortfolioOperationalCounts(ctx context.Context, projectID string, recentCutoff time.Time) (map[string]models.AutomationNodeCounts, error) {
-	rows, err := r.db.QueryContext(ctx, `WITH operational_state AS (
-		SELECT automation_id, 'running' AS state,
-			CASE WHEN work_item_id IS NULL THEN 'activity:' || id ELSE 'work:' || work_item_id END AS state_key
-		FROM automation_activities
-		WHERE project_id = ? AND status IN ('pending','running')
+	rows, err := r.db.QueryContext(ctx, `WITH ranked_activities AS (
+			SELECT a.automation_id, a.work_item_id, a.id, a.status, a.completed_at, task_resource.resource_id AS task_id,
+				ROW_NUMBER() OVER (PARTITION BY a.automation_id, CASE
+					WHEN a.work_item_id IS NOT NULL THEN 'work:' || a.work_item_id
+					WHEN task_resource.resource_id IS NOT NULL THEN 'task:' || task_resource.resource_id
+					ELSE 'activity:' || a.id END
+					ORDER BY a.rowid DESC) AS activity_rank
+			FROM automation_activities a
+			LEFT JOIN automation_activity_resources task_resource ON task_resource.activity_id = a.id
+				AND task_resource.resource_type = 'task' AND task_resource.relation = 'subject'
+			WHERE a.project_id = ?
+		), operational_state AS (
+			SELECT ranked.automation_id, CASE ranked.status
+				WHEN 'pending' THEN 'running' WHEN 'running' THEN 'running' WHEN 'waiting' THEN 'waiting'
+				WHEN 'failed' THEN 'failed' WHEN 'completed' THEN 'recent' END AS state,
+				CASE WHEN ranked.work_item_id IS NOT NULL THEN 'work:' || ranked.work_item_id
+					WHEN ranked.task_id IS NOT NULL THEN 'task:' || ranked.task_id ELSE 'activity:' || ranked.id END AS state_key
+			FROM ranked_activities ranked
+			LEFT JOIN automation_work_items work_item ON work_item.id = ranked.work_item_id
+				AND work_item.project_id = ? AND work_item.automation_id = ranked.automation_id
+			WHERE activity_rank = 1
+				AND (ranked.status IN ('pending','running','waiting','failed') OR (ranked.status = 'completed' AND ranked.completed_at >= ?))
+				AND NOT (ranked.work_item_id IS NOT NULL AND work_item.status = 'completed' AND ranked.status IN ('pending','running','waiting','failed'))
 		UNION
-		SELECT automation_id, 'waiting',
-			CASE WHEN work_item_id IS NULL THEN 'activity:' || id ELSE 'work:' || work_item_id END
-		FROM automation_activities
-		WHERE project_id = ? AND status = 'waiting'
+		SELECT binding.automation_id, 'running', CASE WHEN binding.work_item_id IS NOT NULL
+			THEN 'work:' || binding.work_item_id ELSE 'input:' || binding.thread_input_id END
+		FROM automation_thread_input_bindings binding
+		JOIN thread_inputs input ON input.id = binding.thread_input_id
+		WHERE binding.project_id = ? AND input.input_status = 'pending'
 		UNION
-		SELECT automation_id, 'failed',
-			CASE WHEN work_item_id IS NULL THEN 'activity:' || id ELSE 'work:' || work_item_id END
-		FROM automation_activities
-		WHERE project_id = ? AND status = 'failed'
-		UNION
-		SELECT automation_id, 'recent',
-			CASE WHEN work_item_id IS NULL THEN 'activity:' || id ELSE 'work:' || work_item_id END
-		FROM automation_activities
-		WHERE project_id = ? AND status = 'completed' AND completed_at >= ?
-		UNION
-		SELECT automation_id,
-			CASE state WHEN 'active' THEN 'running' WHEN 'waiting' THEN 'waiting' WHEN 'blocked' THEN 'blocked' WHEN 'failed' THEN 'failed' END,
-			'work:' || work_item_id
-		FROM automation_work_item_positions
-		WHERE project_id = ? AND state IN ('active','waiting','blocked','failed')
+		SELECT position.automation_id,
+			CASE WHEN position.state = 'active' THEN 'running' WHEN position.state = 'waiting' THEN 'waiting'
+				WHEN position.state = 'blocked' THEN 'blocked' WHEN position.state = 'failed' THEN 'failed' END,
+			'work:' || position.work_item_id
+		FROM automation_work_item_positions position
+		JOIN automation_nodes node ON node.id = position.node_id AND node.version_id = position.version_id
+			AND node.automation_id = position.automation_id AND node.project_id = position.project_id
+		WHERE position.project_id = ? AND position.state IN ('active','waiting','blocked','failed')
+			AND NOT (position.state = 'active' AND node.role IN ('github_inbox','native_inbox'))
 		UNION
 		SELECT automation_id, 'recent', 'work:' || work_item_id
 		FROM automation_transitions
@@ -1441,7 +2273,7 @@ func (r *AutomationRepo) PortfolioOperationalCounts(ctx context.Context, project
 			SUM(CASE WHEN state_priority = 4 THEN 1 ELSE 0 END),
 			SUM(CASE WHEN state_priority = 5 THEN 1 ELSE 0 END),
 			SUM(CASE WHEN state_priority = 1 THEN 1 ELSE 0 END)
-		FROM identity_state GROUP BY automation_id`, projectID, projectID, projectID, projectID, recentCutoff.UTC(), projectID, projectID, recentCutoff.UTC())
+			FROM identity_state GROUP BY automation_id`, projectID, projectID, recentCutoff.UTC(), projectID, projectID, projectID, recentCutoff.UTC())
 	if err != nil {
 		return nil, err
 	}
@@ -1505,6 +2337,70 @@ func (r *AutomationRepo) IsCurrentActiveBinding(ctx context.Context, projectID s
 		WHERE a.project_id = ? AND a.id = ? AND a.published_version_id = ? AND a.lifecycle_state = 'active'`,
 		binding.NodeID, projectID, binding.AutomationID, binding.VersionID).Scan(&current)
 	return current == 1, err
+}
+
+func (r *AutomationRepo) CurrentActiveBindingForLaunchNode(ctx context.Context, projectID string, binding models.AutomationBinding, targetRole string) (models.AutomationBinding, bool, error) {
+	if r == nil || strings.TrimSpace(projectID) == "" || strings.TrimSpace(binding.AutomationID) == "" ||
+		strings.TrimSpace(binding.VersionID) == "" || strings.TrimSpace(binding.NodeID) == "" || strings.TrimSpace(binding.InvocationID) == "" || strings.TrimSpace(targetRole) == "" {
+		return models.AutomationBinding{}, false, errors.New("complete launched automation binding is required")
+	}
+	var launched int
+	if err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_invocations
+		WHERE project_id = ? AND automation_id = ? AND version_id = ? AND id = ?`,
+		projectID, binding.AutomationID, binding.VersionID, binding.InvocationID).Scan(&launched); err != nil {
+		return models.AutomationBinding{}, false, err
+	}
+	if launched != 1 {
+		return models.AutomationBinding{}, false, nil
+	}
+	var sourceKey, sourceRole string
+	if err := r.db.QueryRowContext(ctx, `SELECT node_key, role FROM automation_nodes
+		WHERE project_id = ? AND automation_id = ? AND version_id = ? AND id = ?`,
+		projectID, binding.AutomationID, binding.VersionID, binding.NodeID).Scan(&sourceKey, &sourceRole); errors.Is(err, sql.ErrNoRows) {
+		return models.AutomationBinding{}, false, nil
+	} else if err != nil {
+		return models.AutomationBinding{}, false, err
+	}
+	var currentVersionID, currentNodeID string
+	err := r.db.QueryRowContext(ctx, `SELECT a.published_version_id, n.id
+		FROM automations a JOIN automation_nodes n ON n.project_id = a.project_id AND n.automation_id = a.id
+			AND n.version_id = a.published_version_id AND n.node_key = ? AND n.role = ?
+		WHERE a.project_id = ? AND a.id = ? AND a.lifecycle_state = 'active'`,
+		sourceKey, sourceRole, projectID, binding.AutomationID).Scan(&currentVersionID, &currentNodeID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return models.AutomationBinding{}, false, nil
+	}
+	if err != nil {
+		return models.AutomationBinding{}, false, err
+	}
+	connected, err := r.GetConnectedNodeByRole(ctx, projectID, binding.AutomationID, currentVersionID, currentNodeID, strings.TrimSpace(targetRole), true)
+	if err != nil || connected == nil {
+		return models.AutomationBinding{}, false, err
+	}
+	return models.AutomationBinding{AutomationID: binding.AutomationID, VersionID: currentVersionID, InvocationID: binding.InvocationID, NodeID: currentNodeID, WorkItemID: binding.WorkItemID}, true, nil
+}
+
+func (r *AutomationRepo) CurrentActiveBindingForNodeKey(ctx context.Context, projectID, automationID, nodeKey, targetRole string) (models.AutomationBinding, bool, error) {
+	if r == nil || strings.TrimSpace(projectID) == "" || strings.TrimSpace(automationID) == "" || strings.TrimSpace(nodeKey) == "" || strings.TrimSpace(targetRole) == "" {
+		return models.AutomationBinding{}, false, errors.New("complete automation node key binding is required")
+	}
+	var currentVersionID, currentNodeID string
+	err := r.db.QueryRowContext(ctx, `SELECT a.published_version_id, n.id
+		FROM automations a JOIN automation_nodes n ON n.project_id = a.project_id AND n.automation_id = a.id
+			AND n.version_id = a.published_version_id AND n.node_key = ?
+		WHERE a.project_id = ? AND a.id = ? AND a.lifecycle_state = 'active'`,
+		strings.TrimSpace(nodeKey), projectID, automationID).Scan(&currentVersionID, &currentNodeID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return models.AutomationBinding{}, false, nil
+	}
+	if err != nil {
+		return models.AutomationBinding{}, false, err
+	}
+	connected, err := r.GetConnectedNodeByRole(ctx, projectID, automationID, currentVersionID, currentNodeID, strings.TrimSpace(targetRole), true)
+	if err != nil || connected == nil {
+		return models.AutomationBinding{}, false, err
+	}
+	return models.AutomationBinding{AutomationID: automationID, VersionID: currentVersionID, NodeID: currentNodeID}, true, nil
 }
 
 func (r *AutomationRepo) GetConnectedNodeByRole(ctx context.Context, projectID, automationID, versionID, nodeID, role string, outgoing bool) (*models.AutomationNode, error) {
@@ -1616,6 +2512,26 @@ func (r *AutomationRepo) GetCustomNotificationHandoff(ctx context.Context, proje
 	return &node, err
 }
 
+func enrichGitHubIssueDedupSource(ctx context.Context, exec SQLExecutor, projectID string, source AutomationGitHubIssueDedupSource) (AutomationGitHubIssueDedupSource, error) {
+	if len(source.StableBindings) > 0 {
+		return source, nil
+	}
+	for _, binding := range source.Context.Bindings {
+		var stable AutomationGitHubIssueDedupNodeSource
+		err := exec.QueryRowContext(ctx, `SELECT automation_id, node_key, role FROM automation_nodes
+			WHERE project_id = ? AND automation_id = ? AND version_id = ? AND id = ?`,
+			projectID, binding.AutomationID, binding.VersionID, binding.NodeID).Scan(&stable.AutomationID, &stable.NodeKey, &stable.Role)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return source, fmt.Errorf("loading GitHub issue duplicate source node: %w", err)
+		}
+		source.StableBindings = append(source.StableBindings, stable)
+	}
+	return source, nil
+}
+
 func (r *AutomationRepo) AcquireGitHubIssueDedupLease(ctx context.Context, projectID, repositoryFullName, titleFingerprint, ownerToken string, source AutomationGitHubIssueDedupSource, now time.Time, leaseDuration time.Duration) (AutomationGitHubIssueDedupClaim, error) {
 	projectID = strings.TrimSpace(projectID)
 	repositoryFullName = strings.ToLower(strings.TrimSpace(repositoryFullName))
@@ -1632,24 +2548,19 @@ func (r *AutomationRepo) AcquireGitHubIssueDedupLease(ctx context.Context, proje
 			return AutomationGitHubIssueDedupClaim{}, errors.New("complete GitHub issue projection binding is required")
 		}
 	}
+	conn, finishImmediate, err := beginImmediateConn(ctx, r.db)
+	if err != nil {
+		return AutomationGitHubIssueDedupClaim{}, err
+	}
+	defer finishImmediate()
+	source, err = enrichGitHubIssueDedupSource(ctx, conn, projectID, source)
+	if err != nil {
+		return AutomationGitHubIssueDedupClaim{}, err
+	}
 	projectionSourceJSON, err := json.Marshal(source)
 	if err != nil {
 		return AutomationGitHubIssueDedupClaim{}, fmt.Errorf("encoding GitHub issue projection source: %w", err)
 	}
-	conn, err := r.db.Conn(ctx)
-	if err != nil {
-		return AutomationGitHubIssueDedupClaim{}, err
-	}
-	defer conn.Close()
-	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
-		return AutomationGitHubIssueDedupClaim{}, err
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
-		}
-	}()
 	expiresAt := now.UTC().Add(leaseDuration)
 	result, err := conn.ExecContext(ctx, `INSERT INTO automation_github_issue_dedup_leases
 		(project_id, repository_full_name, title_fingerprint, owner_token, lease_expires_at, mutation_state, projection_source_json)
@@ -1681,13 +2592,12 @@ func (r *AutomationRepo) AcquireGitHubIssueDedupLease(ctx context.Context, proje
 			claim.Source = AutomationGitHubIssueDedupSource{}
 		}
 		if createdIssueNumber.Valid && createdIssueNumber.Int64 > 0 {
-			if !sameAutomationGitHubIssueDedupSource(claim.Source, source) {
-				return AutomationGitHubIssueDedupClaim{}, fmt.Errorf("%w: completed GitHub issue belongs to a different Automation source", ErrAutomationExternalReconciliation)
+			if len(dedupSourceAutomationCounts(claim.Source)) == 0 {
+				return AutomationGitHubIssueDedupClaim{}, fmt.Errorf("%w: completed GitHub issue has no trusted Automation source", ErrAutomationExternalReconciliation)
 			}
 			if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 				return AutomationGitHubIssueDedupClaim{}, err
 			}
-			committed = true
 			claim.IssueNumber = int(createdIssueNumber.Int64)
 			return claim, nil
 		}
@@ -1719,12 +2629,11 @@ func (r *AutomationRepo) AcquireGitHubIssueDedupLease(ctx context.Context, proje
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 		return AutomationGitHubIssueDedupClaim{}, err
 	}
-	committed = true
 	return claim, nil
 }
 
 func (r *AutomationRepo) MarkGitHubIssueDedupDispatched(ctx context.Context, projectID, repositoryFullName, titleFingerprint, ownerToken string) error {
-	result, err := r.db.ExecContext(ctx, `UPDATE automation_github_issue_dedup_leases
+	result, err := execBoundSQLite(ctx, r.db, `UPDATE automation_github_issue_dedup_leases
 		SET mutation_state = 'dispatched', updated_at = CURRENT_TIMESTAMP
 		WHERE project_id = ? AND repository_full_name = ? AND title_fingerprint = ? AND owner_token = ?
 			AND mutation_state = 'reserved' AND created_issue_number IS NULL`,
@@ -1744,7 +2653,7 @@ func (r *AutomationRepo) CompleteGitHubIssueDedupLease(ctx context.Context, proj
 	if issueNumber <= 0 {
 		return errors.New("created GitHub issue number is required")
 	}
-	result, err := r.db.ExecContext(ctx, `UPDATE automation_github_issue_dedup_leases
+	result, err := execBoundSQLite(ctx, r.db, `UPDATE automation_github_issue_dedup_leases
 		SET created_issue_number = ?, mutation_state = 'completed', updated_at = CURRENT_TIMESTAMP
 		WHERE project_id = ? AND repository_full_name = ? AND title_fingerprint = ? AND owner_token = ?
 			AND (mutation_state = 'dispatched' OR (mutation_state = 'completed' AND created_issue_number = ?))`,
@@ -1762,7 +2671,7 @@ func (r *AutomationRepo) CompleteGitHubIssueDedupLease(ctx context.Context, proj
 }
 
 func (r *AutomationRepo) ReleaseGitHubIssueDedupLease(ctx context.Context, projectID, repositoryFullName, titleFingerprint, ownerToken string) error {
-	result, err := r.db.ExecContext(ctx, `DELETE FROM automation_github_issue_dedup_leases
+	result, err := execBoundSQLite(ctx, r.db, `DELETE FROM automation_github_issue_dedup_leases
 		WHERE project_id = ? AND repository_full_name = ? AND title_fingerprint = ? AND owner_token = ?
 			AND mutation_state = 'reserved' AND created_issue_number IS NULL`,
 		strings.TrimSpace(projectID), strings.ToLower(strings.TrimSpace(repositoryFullName)), strings.TrimSpace(titleFingerprint), strings.TrimSpace(ownerToken))
@@ -1781,20 +2690,11 @@ func (r *AutomationRepo) ReserveExternalActivity(ctx context.Context, projectID 
 	if projectID == "" || binding.AutomationID == "" || binding.VersionID == "" || binding.NodeID == "" || binding.InvocationID == "" || strings.TrimSpace(activityKey) == "" {
 		return "", errors.New("complete invocation binding is required for an external mutation")
 	}
-	conn, err := r.db.Conn(ctx)
+	conn, finishImmediate, err := beginImmediateConn(ctx, r.db)
 	if err != nil {
 		return "", err
 	}
-	defer conn.Close()
-	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
-		return "", err
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
-		}
-	}()
+	defer finishImmediate()
 	var activityID string
 	err = conn.QueryRowContext(ctx, `INSERT INTO automation_activities
 		(project_id, automation_id, version_id, node_id, invocation_id, activity_key, activity_type, status)
@@ -1812,6 +2712,9 @@ func (r *AutomationRepo) ReserveExternalActivity(ctx context.Context, projectID 
 			return "", err
 		}
 	}
+	if err := syncAutomationLiveActivityState(ctx, conn, activityID); err != nil {
+		return "", err
+	}
 	var resourceID string
 	err = conn.QueryRowContext(ctx, `SELECT resource_id FROM automation_activity_resources
 		WHERE activity_id = ? AND resource_type = ? ORDER BY id LIMIT 1`, activityID, resourceType).Scan(&resourceID)
@@ -1821,7 +2724,6 @@ func (r *AutomationRepo) ReserveExternalActivity(ctx context.Context, projectID 
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 		return "", err
 	}
-	committed = true
 	if resourceID != "" {
 		return resourceID, nil
 	}
@@ -1840,7 +2742,7 @@ func (r *AutomationRepo) ReleaseExternalActivityReservation(ctx context.Context,
 	if projectID == "" || binding.AutomationID == "" || binding.VersionID == "" || binding.NodeID == "" || binding.InvocationID == "" || strings.TrimSpace(activityKey) == "" {
 		return errors.New("complete invocation binding is required to release an external mutation reservation")
 	}
-	_, err := r.db.ExecContext(ctx, `DELETE FROM automation_activities
+	_, err := execBoundSQLite(ctx, r.db, `DELETE FROM automation_activities
 		WHERE project_id = ? AND automation_id = ? AND version_id = ? AND node_id = ? AND invocation_id = ?
 		  AND activity_key = ? AND status = 'pending'
 		  AND NOT EXISTS (SELECT 1 FROM automation_activity_resources WHERE activity_id = automation_activities.id)`,
@@ -1855,7 +2757,7 @@ func (r *AutomationRepo) ListAutomationPullRequests(ctx context.Context, project
 	if limit <= 0 || limit > 20 {
 		limit = 20
 	}
-	rows, err := r.db.QueryContext(ctx, `SELECT DISTINCT pr.id, pr.task_id, pr.pr_number, pr.pr_url, pr.pr_state,
+	rows, err := r.db.QueryContext(ctx, `SELECT DISTINCT pr.id, pr.task_id, pr.pr_number, pr.pr_url, pr.pr_state, pr.published_head_sha,
 		pr.issue_number, pr.issue_url, pr.created_at, pr.updated_at
 		FROM task_pull_requests pr
 		JOIN tasks t ON t.id = pr.task_id
@@ -1875,7 +2777,7 @@ func (r *AutomationRepo) ListAutomationPullRequests(ctx context.Context, project
 	var result []models.TaskPullRequest
 	for rows.Next() {
 		var pull models.TaskPullRequest
-		if err := rows.Scan(&pull.ID, &pull.TaskID, &pull.PRNumber, &pull.PRURL, &pull.PRState,
+		if err := rows.Scan(&pull.ID, &pull.TaskID, &pull.PRNumber, &pull.PRURL, &pull.PRState, &pull.PublishedHeadSHA,
 			&pull.IssueNumber, &pull.IssueURL, &pull.CreatedAt, &pull.UpdatedAt); err != nil {
 			return nil, err
 		}
@@ -1911,6 +2813,30 @@ func (r *AutomationRepo) AutomationExternalState(ctx context.Context, projectID,
 		state.Stale = updated.Before(staleBefore.UTC())
 	}
 	return state, nil
+}
+
+// ListAutomationsWithStaleExternalPullRequests returns (project_id, automation_id) pairs
+// that track at least one GitHub pull request resource whose stored state has not been
+// refreshed since staleBefore, so a background job can proactively refresh their state
+// without requiring a manual "Refresh GitHub state" click.
+func (r *AutomationRepo) ListAutomationsWithStaleExternalPullRequests(ctx context.Context, staleBefore time.Time, limit int) ([][2]string, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 200
+	}
+	rows, err := r.db.QueryContext(ctx, listAutomationsWithStaleExternalPullRequestsSQL, staleBefore.UTC().Format("2006-01-02 15:04:05"), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result [][2]string
+	for rows.Next() {
+		var value [2]string
+		if err := rows.Scan(&value[0], &value[1]); err != nil {
+			return nil, err
+		}
+		result = append(result, value)
+	}
+	return result, rows.Err()
 }
 
 func (r *AutomationRepo) BindingsForActivityResource(ctx context.Context, projectID, automationID, resourceType, resourceID string) (models.AutomationContext, error) {
@@ -2009,14 +2935,23 @@ func (r *AutomationRepo) ListExecutionProjectionRepairs(ctx context.Context, lim
 		limit = 100
 	}
 	rows, err := r.db.QueryContext(ctx, `SELECT DISTINCT t.project_id, e.id, e.status, e.error_message
-		FROM executions e JOIN tasks t ON t.id = e.task_id
-		JOIN automation_activity_resources ar ON ar.resource_type = 'execution' AND ar.resource_id = e.id
-		JOIN automation_activities a ON a.id = ar.activity_id
-		WHERE a.activity_type IN ('task_execution','thread_input_execution')
-		AND (a.status <> e.status OR (e.status IN ('completed','failed','cancelled') AND a.completed_at IS NULL)
-			OR (e.status IN ('completed','failed','cancelled') AND a.work_item_id IS NOT NULL AND EXISTS (
-				SELECT 1 FROM automation_work_item_positions p WHERE p.work_item_id = a.work_item_id AND p.node_id = a.node_id)))
-		ORDER BY e.started_at, e.id LIMIT ?`, limit)
+			FROM executions e JOIN tasks t ON t.id = e.task_id
+			JOIN automation_activity_resources ar ON ar.resource_type = 'execution' AND ar.resource_id = e.id
+			JOIN automation_activities a ON a.id = ar.activity_id
+			JOIN automation_versions v ON v.id = a.version_id AND v.automation_id = a.automation_id AND v.project_id = a.project_id
+			JOIN automation_nodes n ON n.id = a.node_id AND n.version_id = a.version_id AND n.automation_id = a.automation_id AND n.project_id = a.project_id
+			WHERE a.activity_type IN ('task_execution','thread_input_execution')
+				AND (a.status <> e.status OR (e.status IN ('completed','failed','cancelled') AND a.completed_at IS NULL)
+					OR (e.status IN ('completed','failed','cancelled') AND a.work_item_id IS NOT NULL AND EXISTS (
+						SELECT 1 FROM automation_work_item_positions p WHERE p.work_item_id = a.work_item_id AND p.node_id = a.node_id)
+					AND NOT EXISTS (
+						SELECT 1 FROM automation_transitions tr
+						WHERE tr.automation_id = a.automation_id AND tr.version_id = a.version_id
+						AND tr.event_key = 'execution:' || e.id || ':terminal:' || e.status)
+					AND (e.status IN ('failed','cancelled')
+						OR (e.status = 'completed' AND v.adapter_key = 'custom')
+						OR (e.status = 'completed' AND v.adapter_key = 'native_sdlc' AND n.node_key = 'implementation'))))
+			ORDER BY e.started_at, e.id LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -2042,12 +2977,18 @@ func (r *AutomationRepo) RepairExecutionProjection(ctx context.Context, repair A
 	case models.ExecCancelled:
 		activityStatus = models.AutomationActivityCancelled
 	}
-	if _, err := r.db.ExecContext(ctx, `UPDATE automation_activities SET status = ?,
-		completed_at = CASE WHEN ? IN ('completed','failed','cancelled') THEN COALESCE(completed_at, CURRENT_TIMESTAMP) ELSE NULL END,
-		error_message = ? WHERE activity_type IN ('task_execution','thread_input_execution')
-		AND id IN (SELECT activity_id FROM automation_activity_resources
-		WHERE resource_type = 'execution' AND resource_id = ?)`, activityStatus, activityStatus,
-		strings.TrimSpace(repair.Error), repair.ExecutionID); err != nil {
+	if err := withBoundSQLiteConn(ctx, r.db, func(conn *sql.Conn) error {
+		rows, err := conn.QueryContext(ctx, `UPDATE automation_activities SET status = ?,
+			completed_at = CASE WHEN ? IN ('completed','failed','cancelled') THEN COALESCE(completed_at, CURRENT_TIMESTAMP) ELSE NULL END,
+			error_message = ? WHERE activity_type IN ('task_execution','thread_input_execution')
+			AND id IN (SELECT activity_id FROM automation_activity_resources
+			WHERE resource_type = 'execution' AND resource_id = ?) RETURNING id`, activityStatus, activityStatus,
+			strings.TrimSpace(repair.Error), repair.ExecutionID)
+		if err != nil {
+			return err
+		}
+		return syncAutomationLiveActivityStateRows(ctx, conn, rows)
+	}); err != nil {
 		return err
 	}
 	return r.FinalizeExecutionProjection(ctx, repair.ProjectID, repair.ExecutionID, repair.Status)
@@ -2060,10 +3001,12 @@ func (r *AutomationRepo) ListRecoverablePreparedDispatches(ctx context.Context, 
 	rows, err := r.db.QueryContext(ctx, `SELECT d.id, d.invocation_id, d.task_id, COALESCE(d.execution_id, ''),
 		d.status, d.attempts, d.claimed_by, d.claim_expires_at, d.next_attempt_at, d.last_error, d.created_at, d.updated_at
 		FROM automation_dispatch_outbox d
-		JOIN executions e ON e.id = d.execution_id AND e.dispatch_id = d.id
+		LEFT JOIN executions e ON e.id = d.execution_id AND e.dispatch_id = d.id
 		JOIN tasks t ON t.id = d.task_id
 		JOIN automation_task_run_reservations r ON r.dispatch_id = d.id AND r.task_id = d.task_id
-		WHERE d.status = 'submitted' AND e.status = 'running' AND t.status = 'running'
+		WHERE d.status = 'submitted' AND (
+			(d.execution_id IS NULL AND t.status = 'pending') OR
+			(d.execution_id IS NOT NULL AND e.status = 'running' AND t.status = 'running'))
 		ORDER BY d.updated_at, d.id LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
@@ -2174,8 +3117,6 @@ func automationRuntimeResourceURL(projectID, resourceType, resourceID string) st
 		return "/alerts?project_id=" + url.QueryEscape(projectID) + "&alert_id=" + url.QueryEscape(resourceID)
 	case "goal":
 		return "/tasks/" + url.PathEscape(resourceID) + "?project_id=" + url.QueryEscape(projectID) + "#task-goal-panel"
-	case "workflow_execution":
-		return "/workflows/executions/" + url.PathEscape(resourceID)
 	case "github_issue", "pull_request", "review":
 		parts := strings.Split(resourceID, ":")
 		repositoryParts := []string(nil)
@@ -2203,13 +3144,124 @@ func (r *AutomationRepo) BindThreadInput(ctx context.Context, inputID string, au
 	if inputID == "" || automationContext.ProjectID == "" || strings.TrimSpace(bindingKey) == "" || len(automationContext.Bindings) == 0 {
 		return errors.New("thread input and automation bindings are required")
 	}
-	return NewThreadInputRepo(r.db).WithImmediateTx(ctx, func(exec SQLExecutor) error {
+	return withImmediateTx(ctx, r.db, func(exec SQLExecutor) error {
 		return bindAutomationThreadInputWithExecutor(ctx, exec, inputID, automationContext, strings.TrimSpace(bindingKey))
 	})
 }
 
 func (r *AutomationRepo) ContextForTask(ctx context.Context, projectID, taskID string) (models.AutomationContext, error) {
 	return contextForTaskWithExecutor(ctx, r.db, projectID, taskID)
+}
+
+func recordGitHubIssueTaskProvenanceWithExecutor(ctx context.Context, exec SQLExecutor, projectID, automationID, taskID, issueResourceID, versionID, nodeID string) error {
+	if strings.TrimSpace(projectID) == "" || strings.TrimSpace(automationID) == "" || strings.TrimSpace(taskID) == "" || strings.TrimSpace(issueResourceID) == "" || strings.TrimSpace(versionID) == "" || strings.TrimSpace(nodeID) == "" {
+		return errors.New("complete Automation GitHub issue task provenance is required")
+	}
+	var nodeKey string
+	if err := exec.QueryRowContext(ctx, `SELECT node_key FROM automation_nodes
+		WHERE project_id = ? AND automation_id = ? AND version_id = ? AND id = ? AND node_type = 'agent_task' AND role IN ('task','implementation')`,
+		projectID, automationID, versionID, nodeID).Scan(&nodeKey); err != nil {
+		return fmt.Errorf("loading Automation GitHub implementation node provenance: %w", err)
+	}
+	if strings.TrimSpace(nodeKey) == "" {
+		return errors.New("Automation GitHub implementation node provenance is unavailable")
+	}
+	if _, err := exec.ExecContext(ctx, `INSERT INTO automation_github_issue_task_provenance
+		(project_id, automation_id, task_id, issue_resource_id, implementation_node_key, created_from_version_id, created_from_node_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(project_id, task_id) DO NOTHING`, projectID, automationID, taskID, issueResourceID, nodeKey, versionID, nodeID); err != nil {
+		return fmt.Errorf("recording Automation GitHub issue task provenance: %w", err)
+	}
+	var existingAutomationID, existingIssueResourceID, existingNodeKey string
+	if err := exec.QueryRowContext(ctx, `SELECT automation_id, issue_resource_id, implementation_node_key
+		FROM automation_github_issue_task_provenance WHERE project_id = ? AND task_id = ?`, projectID, taskID).
+		Scan(&existingAutomationID, &existingIssueResourceID, &existingNodeKey); err != nil {
+		return fmt.Errorf("loading recorded Automation GitHub issue task provenance: %w", err)
+	}
+	if existingAutomationID != automationID || existingIssueResourceID != issueResourceID || existingNodeKey != nodeKey {
+		return errors.New("source GitHub issue has conflicting Automation task provenance")
+	}
+	return nil
+}
+
+// GitHubIssueTaskProvenance returns the graph-independent source issue record
+// written when a GitHub inbox created the implementation task. It intentionally
+// does not depend on replaceable graph-version rows, so legitimate tasks can
+// publish PRs after compatible Automation edits while spoofed created_via values
+// still fail closed.
+func (r *AutomationRepo) GitHubIssueTaskProvenance(ctx context.Context, projectID, taskID string) (*AutomationGitHubIssueTaskProvenance, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT project_id, automation_id, task_id, issue_resource_id, implementation_node_key
+		FROM automation_github_issue_task_provenance WHERE project_id = ? AND task_id = ?
+		UNION
+		SELECT activity.project_id, activity.automation_id, task_resource.resource_id, issue_resource.resource_id, node.node_key
+		FROM automation_activities activity
+		JOIN automation_nodes node ON node.id = activity.node_id AND node.version_id = activity.version_id
+			AND node.automation_id = activity.automation_id AND node.project_id = activity.project_id
+		JOIN automation_activity_resources task_resource ON task_resource.activity_id = activity.id
+			AND task_resource.resource_type = 'task' AND task_resource.resource_id = ? AND task_resource.relation = 'child'
+		JOIN automation_activity_resources issue_resource ON issue_resource.activity_id = activity.id
+			AND issue_resource.resource_type = 'github_issue'
+		WHERE activity.project_id = ? AND activity.activity_type = 'create_task' AND activity.work_item_id IS NOT NULL
+			AND activity.activity_key = 'work-item:' || activity.work_item_id || ':implementation-task'
+			AND node.node_type = 'agent_task' AND node.role IN ('task','implementation')
+		ORDER BY automation_id, issue_resource_id, implementation_node_key`, projectID, taskID, taskID, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out *AutomationGitHubIssueTaskProvenance
+	for rows.Next() {
+		var candidate AutomationGitHubIssueTaskProvenance
+		if err := rows.Scan(&candidate.ProjectID, &candidate.AutomationID, &candidate.TaskID, &candidate.IssueResourceID, &candidate.ImplementationNodeKey); err != nil {
+			return nil, err
+		}
+		if out != nil && (out.AutomationID != candidate.AutomationID || out.IssueResourceID != candidate.IssueResourceID || out.ImplementationNodeKey != candidate.ImplementationNodeKey) {
+			return nil, errors.New("Automation task has conflicting GitHub source issue provenance")
+		}
+		out = &candidate
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// GitHubIssueResourceForTask returns the canonical GitHub issue resource recorded
+// when an Automation GitHub inbox created the implementation task. More than one
+// source issue is ambiguous and therefore rejected.
+func (r *AutomationRepo) GitHubIssueResourceForTask(ctx context.Context, projectID, taskID string) (string, error) {
+	provenance, err := r.GitHubIssueTaskProvenance(ctx, projectID, taskID)
+	if err != nil {
+		return "", err
+	}
+	if provenance != nil {
+		return provenance.IssueResourceID, nil
+	}
+	rows, err := r.db.QueryContext(ctx, `SELECT DISTINCT issue_resource.resource_id
+		FROM automation_activities activity
+		JOIN automation_activity_resources task_resource ON task_resource.activity_id = activity.id
+			AND task_resource.resource_type = 'task' AND task_resource.resource_id = ?
+		JOIN automation_activity_resources issue_resource ON issue_resource.activity_id = activity.id
+			AND issue_resource.resource_type = 'github_issue'
+		WHERE activity.project_id = ? AND activity.activity_type = 'create_task'
+		ORDER BY issue_resource.resource_id`, taskID, projectID)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+
+	var resourceID string
+	for rows.Next() {
+		var candidate string
+		if err := rows.Scan(&candidate); err != nil {
+			return "", err
+		}
+		if resourceID != "" && resourceID != candidate {
+			return "", errors.New("Automation task has conflicting GitHub source issues")
+		}
+		resourceID = candidate
+	}
+	return resourceID, rows.Err()
 }
 
 func contextForTaskWithExecutor(ctx context.Context, exec SQLExecutor, projectID, taskID string) (models.AutomationContext, error) {

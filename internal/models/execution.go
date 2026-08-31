@@ -5,6 +5,7 @@ import "time"
 type ExecutionStatus string
 
 const (
+	ExecQueued    ExecutionStatus = "queued"
 	ExecRunning   ExecutionStatus = "running"
 	ExecCompleted ExecutionStatus = "completed"
 	ExecFailed    ExecutionStatus = "failed"
@@ -30,6 +31,14 @@ type Execution struct {
 	ReplayMessages   []ExecutionReplayMessage `json:"-"`
 	StartedAt        time.Time                `json:"started_at"`
 	CompletedAt      *time.Time               `json:"completed_at"`
+}
+
+// TaskExecutionMetrics is the compact execution projection needed by task
+// detail status/metrics badges. It intentionally excludes prompt, output,
+// reasoning, error, and diff text.
+type TaskExecutionMetrics struct {
+	LatestStartedAt  *time.Time
+	LatestDurationMs int64
 }
 
 // ExecutionReplayMessage preserves one exact user/assistant exchange made

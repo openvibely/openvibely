@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -56,49 +55,71 @@ type telegramPreviewState struct {
 	richDraftVisible bool
 }
 
+type telegramAuthorizationStore interface {
+	IsAuthorized(ctx context.Context, projectID string, userID int64, username string) (bool, error)
+	IsAuthorizedAnywhere(ctx context.Context, userID int64, username string) (bool, error)
+	BackfillUserID(ctx context.Context, projectID, username string, userID int64) error
+}
+
 // TelegramService manages Telegram bot integration.
 // It acts as a proxy to the /chat page orchestrator — every message sent to the bot
 // is forwarded to the same chat assistant that powers the /chat web UI.
 type TelegramService struct {
-	bot                      *tgbotapi.BotAPI
-	taskSvc                  *TaskService
-	projectRepo              *repository.ProjectRepo
-	llmConfigRepo            *repository.LLMConfigRepo
-	taskRepo                 *repository.TaskRepo
-	execRepo                 *repository.ExecutionRepo
-	scheduleRepo             *repository.ScheduleRepo
-	chatAttachmentRepo       *repository.ChatAttachmentRepo
-	threadInputRepo          *repository.ThreadInputRepo
-	telegramAuthRepo         *repository.TelegramAuthRepo
-	telegramUserProjectRepo  *repository.TelegramUserProjectRepo
-	settingsRepo             *repository.SettingsRepo
-	customPersonalityRepo    *repository.CustomPersonalityRepo
-	agentRepo                *repository.AgentRepo
-	alertSvc                 *AlertService
-	channelMessageRouter     *ChannelMessageRouter
-	taskGoalSvc              *TaskGoalService
-	llmSvc                   *LLMService
-	workerSvc                *WorkerService
-	chatBroadcaster          *events.ChatBroadcaster
-	executionStreamHub       *events.ExecutionStreamHub
-	queuedTurnPromoter       func(projectID string)
-	queuedTaskThreadPromoter func(taskID string)
-	channelChatRunner        ChannelChatRunner
-	channelTaskRunner        ChannelTaskRunner
-	sendMessageFunc          func(chatID int64, text string)
-	editMessageFunc          func(chatID int64, messageID int, text string)
-	sendConfigFunc           func(c tgbotapi.Chattable) (tgbotapi.Message, error)
-	makeRequestFunc          func(endpoint string, params tgbotapi.Params) (*tgbotapi.APIResponse, error)
-	newBotAPI                func(token string) (*tgbotapi.BotAPI, error)
-	previewMu                sync.Mutex
-	activePreviews           map[telegramPreviewKey]*telegramPreviewState
-	userProjects             map[int64]string // Maps Telegram user ID to active project ID
-	lifecycleOpMu            sync.Mutex
-	lifecycleMu              sync.Mutex
-	ctx                      context.Context
-	cancel                   context.CancelFunc
-	runDone                  chan struct{}
-	running                  bool
+	bot                        *tgbotapi.BotAPI
+	taskSvc                    *TaskService
+	projectSvc                 *ProjectService
+	githubProjectSvc           GitHubProjectCloneProvider
+	memorySvc                  *MemoryService
+	agentLibraryMaintenanceSvc *AgentLibraryMaintenanceService
+	projectRepo                *repository.ProjectRepo
+	llmConfigRepo              *repository.LLMConfigRepo
+	taskRepo                   *repository.TaskRepo
+	execRepo                   *repository.ExecutionRepo
+	scheduleRepo               *repository.ScheduleRepo
+	chatAttachmentRepo         *repository.ChatAttachmentRepo
+	threadInputRepo            *repository.ThreadInputRepo
+	telegramAuthRepo           telegramAuthorizationStore
+	telegramUserProjectRepo    *repository.TelegramUserProjectRepo
+	settingsRepo               *repository.SettingsRepo
+	customPersonalityRepo      *repository.CustomPersonalityRepo
+	agentRepo                  *repository.AgentRepo
+	alertSvc                   *AlertService
+	usageAnalyticsSvc          *UsageAnalyticsService
+	upcomingSvc                *UpcomingService
+	channelMessageRouter       *ChannelMessageRouter
+	emailStatus                func(context.Context) EmailConnectionStatus
+	emailAuthRepo              *repository.EmailAuthRepo
+	webhookRepo                *repository.WebhookRepo
+	taskGoalSvc                *TaskGoalService
+	llmSvc                     *LLMService
+	workerSvc                  *WorkerService
+	automationGraphSvc         *AutomationGraphService
+	automationDraftSvc         *AutomationDraftService
+	automationCompiler         *AutomationCompiler
+	chatBroadcaster            *events.ChatBroadcaster
+	executionStreamHub         *events.ExecutionStreamHub
+	queuedTurnPromoter         func(projectID string)
+	queuedTaskThreadPromoter   func(taskID string)
+	channelChatRunner          ChannelChatRunner
+	channelTaskRunner          ChannelTaskRunner
+	sendMessageFunc            func(chatID int64, text string)
+	editMessageFunc            func(chatID int64, messageID int, text string)
+	sendConfigFunc             func(c tgbotapi.Chattable) (tgbotapi.Message, error)
+	makeRequestFunc            func(endpoint string, params tgbotapi.Params) (*tgbotapi.APIResponse, error)
+	newBotAPI                  func(token string) (*tgbotapi.BotAPI, error)
+	previewMu                  sync.Mutex
+	activePreviews             map[telegramPreviewKey]*telegramPreviewState
+	userProjectsMu             sync.RWMutex
+	userProjects               map[int64]string // Maps Telegram user ID to active project ID
+	userProjectVersions        map[int64]uint64
+	userProjectSwitchMu        sync.Mutex
+	activeProjectReadHook      func(int64) // deterministic project-resolution test barrier
+	lifecycleOpMu              sync.Mutex
+	lifecycleMu                sync.Mutex
+	ctx                        context.Context
+	cancel                     context.CancelFunc
+	runDone                    chan struct{}
+	running                    bool
 }
 
 // NewTelegramService creates a new Telegram bot service
@@ -126,23 +147,31 @@ func NewTelegramService(
 	bot.Debug = false
 	applog.Infof("[telegram] authorized on account %s", bot.Self.UserName)
 
+	var usageAnalyticsSvc *UsageAnalyticsService
+	if execRepo != nil {
+		if db := execRepo.DB(); db != nil {
+			usageAnalyticsSvc = NewUsageAnalyticsService(repository.NewUsageRepo(db), llmConfigRepo)
+		}
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &TelegramService{
-		bot:                bot,
-		taskSvc:            taskSvc,
-		projectRepo:        projectRepo,
-		llmConfigRepo:      llmConfigRepo,
-		taskRepo:           taskRepo,
-		execRepo:           execRepo,
-		scheduleRepo:       scheduleRepo,
-		chatAttachmentRepo: chatAttachmentRepo,
-		llmSvc:             llmSvc,
-		workerSvc:          workerSvc,
-		newBotAPI:          tgbotapi.NewBotAPI,
-		userProjects:       make(map[int64]string),
-		ctx:                ctx,
-		cancel:             cancel,
+		bot:                 bot,
+		taskSvc:             taskSvc,
+		projectRepo:         projectRepo,
+		llmConfigRepo:       llmConfigRepo,
+		taskRepo:            taskRepo,
+		execRepo:            execRepo,
+		scheduleRepo:        scheduleRepo,
+		chatAttachmentRepo:  chatAttachmentRepo,
+		llmSvc:              llmSvc,
+		workerSvc:           workerSvc,
+		usageAnalyticsSvc:   usageAnalyticsSvc,
+		newBotAPI:           tgbotapi.NewBotAPI,
+		userProjects:        make(map[int64]string),
+		userProjectVersions: make(map[int64]uint64),
+		ctx:                 ctx,
+		cancel:              cancel,
 	}, nil
 }
 
@@ -210,6 +239,13 @@ func (s *TelegramService) SetCustomPersonalityRepo(repo *repository.CustomPerson
 	s.customPersonalityRepo = repo
 }
 
+func (s *TelegramService) SetProjectCreationServices(projectSvc *ProjectService, githubSvc GitHubProjectCloneProvider, memorySvc *MemoryService, agentLibraryMaintenanceSvc *AgentLibraryMaintenanceService) {
+	s.projectSvc = projectSvc
+	s.githubProjectSvc = githubSvc
+	s.memorySvc = memorySvc
+	s.agentLibraryMaintenanceSvc = agentLibraryMaintenanceSvc
+}
+
 // SetAgentRepo sets the agent repo for listing agent definitions from Telegram chat.
 func (s *TelegramService) SetAgentRepo(repo *repository.AgentRepo) {
 	s.agentRepo = repo
@@ -220,8 +256,33 @@ func (s *TelegramService) SetAlertService(svc *AlertService) {
 	s.alertSvc = svc
 }
 
+func (s *TelegramService) SetUpcomingService(svc *UpcomingService) {
+	s.upcomingSvc = svc
+}
+
+func (s *TelegramService) SetAutomationGraphService(svc *AutomationGraphService) {
+	s.automationGraphSvc = svc
+}
+
+func (s *TelegramService) SetAutomationTemplateUpdateServices(drafts *AutomationDraftService, compiler *AutomationCompiler) {
+	s.automationDraftSvc = drafts
+	s.automationCompiler = compiler
+}
+
 func (s *TelegramService) SetChannelMessageRouter(router *ChannelMessageRouter) {
 	s.channelMessageRouter = router
+}
+
+func (s *TelegramService) SetEmailStatusProvider(provider func(context.Context) EmailConnectionStatus) {
+	s.emailStatus = provider
+}
+
+func (s *TelegramService) SetEmailAuthRepo(repo *repository.EmailAuthRepo) {
+	s.emailAuthRepo = repo
+}
+
+func (s *TelegramService) SetWebhookRepo(repo *repository.WebhookRepo) {
+	s.webhookRepo = repo
 }
 
 // SetTaskGoalService injects the task goal service so Telegram can execute
@@ -242,32 +303,19 @@ func (s *TelegramService) checkAuthorization(userID int64, username string, proj
 
 	ctx := context.Background()
 
-	if projectID == "" {
-		// No project selected yet — check if user is authorized in ANY project
-		authorized, err := s.telegramAuthRepo.IsAuthorizedAnywhere(ctx, userID, username)
-		if err != nil {
-			applog.Infof("[telegram] error checking global authorization for user %d: %v", userID, err)
-			return true // Fail open on error
+	authorized, err := s.telegramAuthRepo.IsAuthorizedAnywhere(ctx, userID, username)
+	if err != nil {
+		if projectID == "" {
+			applog.Infof("[telegram] global authorization lookup failed for user_id=%d: %v", userID, err)
+		} else {
+			applog.Infof("[telegram] project authorization lookup failed for user_id=%d project_id=%s: %v", userID, projectID, err)
 		}
+		return false
+	}
+
+	if projectID == "" {
 		applog.Infof("[telegram] auth check: user %d (%s) global authorized=%v", userID, username, authorized)
 		return authorized
-	}
-
-	// Check if this specific user is authorized for the project
-	authorized, err := s.telegramAuthRepo.IsAuthorized(ctx, projectID, userID, username)
-	if err != nil {
-		applog.Infof("[telegram] error checking authorization for user %d: %v", userID, err)
-		return true // Fail open on error
-	}
-
-	// If not authorized for the specific project, fall back to checking any project.
-	// Users may have been added to a different project than their current active one.
-	if !authorized {
-		authorized, err = s.telegramAuthRepo.IsAuthorizedAnywhere(ctx, userID, username)
-		if err != nil {
-			applog.Infof("[telegram] error checking global authorization for user %d: %v", userID, err)
-			return true // Fail open on error
-		}
 	}
 
 	applog.Infof("[telegram] auth check: user %d (%s) project=%s authorized=%v", userID, username, projectID, authorized)
@@ -411,23 +459,46 @@ func (s *TelegramService) run(ctx context.Context, bot *tgbotapi.BotAPI, done ch
 			continue
 		}
 
-		for _, update := range updates {
-			if update.UpdateID >= u.Offset {
-				u.Offset = update.UpdateID + 1
+		if !processTelegramUpdateBatch(ctx, &u.Offset, updates, s.handleTelegramUpdate) {
+			select {
+			case <-ctx.Done():
+				applog.Infof("[telegram] bot stopped")
+				return
+			case <-time.After(3 * time.Second):
 			}
-			s.handleTelegramUpdate(ctx, update)
 		}
 	}
 }
 
-func (s *TelegramService) handleTelegramUpdate(ctx context.Context, update tgbotapi.Update) {
+func processTelegramUpdateBatch(ctx context.Context, offset *int, updates []tgbotapi.Update, handle func(context.Context, tgbotapi.Update) bool) bool {
+	for _, update := range updates {
+		if update.UpdateID < *offset {
+			continue
+		}
+		if !handle(ctx, update) {
+			return false
+		}
+		*offset = update.UpdateID + 1
+	}
+	return true
+}
+
+func (s *TelegramService) handleTelegramUpdate(ctx context.Context, update tgbotapi.Update) bool {
 	select {
 	case <-ctx.Done():
-		return
+		return false
 	default:
 	}
 	if update.Message == nil {
-		return
+		return true
+	}
+	if update.Message.From == nil {
+		if update.Message.SenderChat != nil {
+			applog.Debugf("[telegram] ignoring sender-chat update update_id=%d sender_chat_id=%d", update.UpdateID, update.Message.SenderChat.ID)
+		} else {
+			applog.Debugf("[telegram] ignoring senderless update update_id=%d", update.UpdateID)
+		}
+		return true
 	}
 
 	// Check authorization before processing any message (including commands)
@@ -441,7 +512,7 @@ func (s *TelegramService) handleTelegramUpdate(ctx context.Context, update tgbot
 		applog.Infof("[telegram] unauthorized access attempt from user %d (username: %s) for project %s",
 			userID, username, projectID)
 		s.sendMessage(s.ctx, chatID, "You are not authorized to use this bot. Contact the project owner to get access.")
-		return
+		return true
 	}
 
 	// Handle special commands: /start and /project
@@ -451,22 +522,23 @@ func (s *TelegramService) handleTelegramUpdate(ctx context.Context, update tgbot
 		case "start":
 			response := s.handleStart(update.Message.From.ID)
 			s.sendMessage(s.ctx, update.Message.Chat.ID, response)
-			return
+			return true
 		case "project":
 			response := s.handleProject(update.Message.From.ID, update.Message.CommandArguments())
 			s.sendMessage(s.ctx, update.Message.Chat.ID, response)
-			return
+			return true
 		}
 	}
 
 	// Check for natural language project commands before forwarding to LLM
 	if response, handled := s.handleNaturalLanguageProjectCommand(userID, update.Message.Text); handled {
 		s.sendMessage(s.ctx, chatID, response)
-		return
+		return true
 	}
 
-	// Forward all other messages (including unrecognized commands) to the chat orchestrator
-	go s.handleChatMessage(update.Message)
+	// Forward all other messages (including unrecognized commands) to the chat orchestrator.
+	// Polling waits only for durable persistence, while model response work continues asynchronously.
+	return s.handleChatMessageUntilDurable(ctx, update.Message)
 }
 
 func isTelegramConflictError(err error) bool {
@@ -500,11 +572,9 @@ func (s *TelegramService) handleStart(userID int64) string {
 		defaultProject = &projects[0]
 	}
 
-	s.userProjects[userID] = defaultProject.ID
-	if s.telegramUserProjectRepo != nil {
-		if err := s.telegramUserProjectRepo.SetUserProject(context.Background(), fmt.Sprintf("%d", userID), defaultProject.ID); err != nil {
-			applog.Infof("[telegram] failed to persist default project for user %d: %v", userID, err)
-		}
+	if err := s.setTelegramActiveProject(context.Background(), userID, defaultProject.ID); err != nil {
+		applog.Infof("[telegram] failed to set default project for user %d: %v", userID, err)
+		return fmt.Sprintf("Error setting default project: %v", err)
 	}
 
 	return fmt.Sprintf("Welcome to *OpenVibely*! 🚀\n\nYour active project is: *%s*\n\nJust send me any message and I'll help you manage tasks, answer questions about your project, or anything else — the same way the /chat page works in the web UI.\n\nExamples:\n- \"Create a task to fix the login bug\"\n- \"List my backlog tasks\"\n- \"What tasks are currently running?\"\n\nUse /project to view or change your active project.",
@@ -514,29 +584,38 @@ func (s *TelegramService) handleStart(userID int64) string {
 // handleProject shows the current project or switches to a new one
 func (s *TelegramService) handleProject(userID int64, args string) string {
 	ctx := context.Background()
-	projects, err := s.projectRepo.List(ctx)
+	targetName := strings.TrimSpace(args)
+	currentProjectID := ""
+	if targetName == "" {
+		currentProjectID = s.getActiveProject(userID)
+	}
+	selection, err := selectChannelProject(ctx, s.projectRepo, currentProjectID, targetName, func(ctx context.Context, project *models.Project) error {
+		// Persist before publishing the switch to the active-project cache. A failed
+		// write must leave both the durable selection and live routing unchanged.
+		return s.setTelegramActiveProject(ctx, userID, project.ID)
+	})
 	if err != nil {
+		if selection.Target != nil {
+			applog.Infof("[telegram] failed to switch project for user %d: %v", userID, err)
+			return fmt.Sprintf("❌ Error switching project: %v", err)
+		}
 		return fmt.Sprintf("❌ Error loading projects: %v", err)
 	}
-	if len(projects) == 0 {
+	if len(selection.Projects) == 0 {
 		return "No projects found. Please create a project first using the web interface."
 	}
 
 	// If no args, show current project and list available projects
-	if strings.TrimSpace(args) == "" {
-		currentProjectID := s.getActiveProject(userID)
+	if selection.TargetName == "" {
 		var currentProjectName string
-		for _, p := range projects {
-			if p.ID == currentProjectID {
-				currentProjectName = p.Name
-				break
-			}
+		if selection.Current != nil {
+			currentProjectName = selection.Current.Name
 		}
 
 		var projectList strings.Builder
 		projectList.WriteString(fmt.Sprintf("📂 *Current project:* %s\n\n", currentProjectName))
 		projectList.WriteString("*Available projects:*\n")
-		for _, p := range projects {
+		for _, p := range selection.Projects {
 			marker := ""
 			if p.ID == currentProjectID {
 				marker = " ← _current_"
@@ -547,37 +626,37 @@ func (s *TelegramService) handleProject(userID int64, args string) string {
 		return projectList.String()
 	}
 
-	// Switch to the specified project (by name or ID)
-	targetName := strings.TrimSpace(args)
-	var targetProject *models.Project
-	for i := range projects {
-		if strings.EqualFold(projects[i].Name, targetName) || projects[i].ID == targetName {
-			targetProject = &projects[i]
-			break
-		}
-	}
-
-	if targetProject == nil {
-		var availableNames []string
-		for _, p := range projects {
-			availableNames = append(availableNames, p.Name)
-		}
+	if selection.Target == nil {
 		return fmt.Sprintf("❌ Project not found: %q\n\nAvailable projects: %s",
-			targetName, strings.Join(availableNames, ", "))
+			selection.TargetName, strings.Join(selection.AvailableNames, ", "))
 	}
 
-	// Update user's active project (in-memory + persistent)
-	s.userProjects[userID] = targetProject.ID
-	if s.telegramUserProjectRepo != nil {
-		if err := s.telegramUserProjectRepo.SetUserProject(ctx, fmt.Sprintf("%d", userID), targetProject.ID); err != nil {
-			applog.Infof("[telegram] failed to persist project selection for user %d: %v", userID, err)
-		}
-	}
-	return fmt.Sprintf("✅ Switched to project: *%s*", targetProject.Name)
+	return fmt.Sprintf("✅ Switched to project: *%s*", selection.Target.Name)
 }
 
-// handleChatMessage forwards a Telegram message to the chat orchestrator
+// handleChatMessage forwards a Telegram message to the chat orchestrator.
 func (s *TelegramService) handleChatMessage(message *tgbotapi.Message) {
+	s.handleChatMessageWithDurableHandoff(context.Background(), message, nil)
+}
+
+func (s *TelegramService) handleChatMessageUntilDurable(ctx context.Context, message *tgbotapi.Message) bool {
+	result := make(chan bool, 1)
+	var reportOnce sync.Once
+	report := func(success bool) {
+		reportOnce.Do(func() { result <- success })
+	}
+	go func() {
+		report(s.handleChatMessageWithDurableHandoff(ctx, message, func() { report(true) }))
+	}()
+	select {
+	case success := <-result:
+		return success
+	case <-ctx.Done():
+		return false
+	}
+}
+
+func (s *TelegramService) handleChatMessageWithDurableHandoff(parentCtx context.Context, message *tgbotapi.Message, onDurableHandoff func()) bool {
 	userID := message.From.ID
 	chatID := message.Chat.ID
 
@@ -593,7 +672,7 @@ func (s *TelegramService) handleChatMessage(message *tgbotapi.Message) {
 	// Require either text or an attachment
 	if text == "" && fileID == "" {
 		s.sendMessage(context.Background(), chatID, "Please send a text message or an attachment.")
-		return
+		return true
 	}
 
 	// If attachment with no caption, generate a default prompt
@@ -606,14 +685,15 @@ func (s *TelegramService) handleChatMessage(message *tgbotapi.Message) {
 	projectID := s.getActiveProject(userID)
 	if projectID == "" {
 		s.sendMessage(context.Background(), chatID, "No active project. Send /start to set up first.")
-		return
+		return true
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), telegramProcessTimeout)
+	ctx, cancel := context.WithTimeout(parentCtx, telegramProcessTimeout)
 	defer cancel()
 
 	start := time.Now()
 	var telegramImageAttachments []models.Attachment
+	durablyHandedOff := false
 	runChannelChatIngress(ctx, channelChatIngressOptions{
 		Platform:              "telegram",
 		ProjectID:             projectID,
@@ -634,6 +714,12 @@ func (s *TelegramService) handleChatMessage(message *tgbotapi.Message) {
 		SettingsRepo:          s.settingsRepo,
 		CustomPersonalityRepo: s.customPersonalityRepo,
 		ProjectRepo:           s.projectRepo,
+		OnDurableHandoff: func() {
+			durablyHandedOff = true
+			if onDurableHandoff != nil {
+				onDurableHandoff()
+			}
+		},
 		DownloadAttachments: func(ctx context.Context) (channelChatIngressDownloadResult, error) {
 			if fileID == "" {
 				return channelChatIngressDownloadResult{}, nil
@@ -722,7 +808,7 @@ func (s *TelegramService) handleChatMessage(message *tgbotapi.Message) {
 			},
 		},
 	})
-	return
+	return durablyHandedOff
 }
 
 // extractTelegramAttachment extracts file information from a Telegram message.
@@ -1210,10 +1296,7 @@ func (s *TelegramService) buildTelegramActionToolRuntime(projectID string, chatI
 
 func (s *TelegramService) buildTelegramActionToolRuntimeForTask(projectID, callerTaskID string, chatID int64, userID int64, collector *channelActionSummaryCollector) *llmcontracts.RuntimeTools {
 	handlers := s.telegramActionHandlersForTask(projectID, callerTaskID, chatID, userID, collector)
-	return &llmcontracts.RuntimeTools{
-		Definitions: actionToolDefinitions(chatcontrol.SurfaceTelegram, true),
-		Executor:    chatcontrol.BuildRuntimeToolExecutor(models.ChatModeOrchestrate, chatcontrol.SurfaceTelegram, handlers),
-	}
+	return buildFullChannelActionToolRuntime(chatcontrol.SurfaceTelegram, handlers)
 }
 
 func (s *TelegramService) telegramActionHandlers(projectID string, chatID int64, userID int64, collector *channelActionSummaryCollector) map[string]chatcontrol.RuntimeActionHandler {
@@ -1221,23 +1304,21 @@ func (s *TelegramService) telegramActionHandlers(projectID string, chatID int64,
 }
 
 func (s *TelegramService) telegramActionHandlersForTask(projectID, callerTaskID string, chatID int64, userID int64, collector *channelActionSummaryCollector) map[string]chatcontrol.RuntimeActionHandler {
+	var llmSvcForAutomation llmServiceForAutomation
+	if s.llmSvc != nil {
+		llmSvcForAutomation = s.llmSvc
+	}
+	prepareTaskCreation, createPreparedTask := buildAutomationTaskCreationCallbacks(callerTaskID, projectID, llmSvcForAutomation)
 	handlers := buildChannelTaskActionHandlers(channelTaskActionHandlerOptions{
-		ProjectID:     projectID,
-		TaskSvc:       s.taskSvc,
-		LLMConfigRepo: s.llmConfigRepo,
-		Collector:     collector,
-		PrepareTaskCreation: func(ctx context.Context, request *TaskCreationRequest) error {
-			if callerTaskID == "" || s.llmSvc == nil {
-				return nil
-			}
-			return s.llmSvc.prepareAutomationTaskCreation(ctx, projectID, request)
-		},
-		CreatePreparedTask: func(ctx context.Context, request TaskCreationRequest, agents []models.LLMConfig) ([]models.Task, string, bool, error) {
-			if callerTaskID == "" || s.llmSvc == nil {
-				return nil, "", false, nil
-			}
-			return s.llmSvc.createPreparedAutomationTask(ctx, projectID, request, agents)
-		},
+		ProjectID:          projectID,
+		TaskSvc:            s.taskSvc,
+		TaskRepo:           s.taskRepo,
+		ExecRepo:           s.execRepo,
+		ThreadInputRepo:    s.threadInputRepo,
+		ExecutionStreamHub: s.executionStreamHub,
+		LLMConfigRepo:      s.llmConfigRepo,
+		Collector:          collector, PrepareTaskCreation: prepareTaskCreation,
+		CreatePreparedTask: createPreparedTask,
 		OnTasksCreated: func(ctx context.Context, _ []TaskCreationRequest, createdTasks []models.Task) error {
 			for _, t := range createdTasks {
 				if s.taskRepo != nil {
@@ -1297,20 +1378,40 @@ func (s *TelegramService) telegramActionHandlersForTask(projectID, callerTaskID 
 		ResultAdapter: telegramSendToTaskActionResult,
 	}))
 	mergeChannelRuntimeActionHandlers(handlers, buildChannelUtilityActionHandlers(channelUtilityActionHandlerOptions{
-		ProjectID:             projectID,
-		CallerTaskID:          callerTaskID,
-		TaskRepo:              s.taskRepo,
-		ScheduleRepo:          s.scheduleRepo,
-		LLMConfigRepo:         s.llmConfigRepo,
-		AgentRepo:             s.agentRepo,
+		ProjectID:          projectID,
+		CallerTaskID:       callerTaskID,
+		TaskRepo:           s.taskRepo,
+		ScheduleRepo:       s.scheduleRepo,
+		AutomationGraphSvc: s.automationGraphSvc,
+		AutomationDraftSvc: s.automationDraftSvc,
+		AutomationCompiler: s.automationCompiler,
+		WorkerSvc:          s.workerSvc,
+		LLMConfigRepo:      s.llmConfigRepo, AgentRepo: s.agentRepo,
 		SettingsRepo:          s.settingsRepo,
 		CustomPersonalityRepo: s.customPersonalityRepo,
 		ProjectRepo:           s.projectRepo,
 		AlertSvc:              s.alertSvc,
+		UsageAnalyticsSvc:     usageAnalyticsServiceFromRepos(s.usageAnalyticsSvc, s.execRepo, s.llmConfigRepo),
+		UpcomingSvc:           s.upcomingSvc,
+		TelegramRunning:       s.IsRunning,
+		TelegramAuthRepo:      telegramAuthCountStore(s.telegramAuthRepo),
+		EmailStatus:           s.emailStatus,
+		EmailAuthRepo:         s.emailAuthRepo,
+		WebhookRepo:           s.webhookRepo,
+		ChannelTargets:        channelTargetsFromRouter(s.channelMessageRouter),
 	}))
 	mergeChannelRuntimeActionHandlers(handlers, buildChannelProjectActionHandlers(channelProjectActionHandlerOptions{
-		ProjectID:   projectID,
-		ProjectRepo: s.projectRepo,
+		ProjectID:     projectID,
+		ProjectRepo:   s.projectRepo,
+		ProjectSvc:    s.projectSvc,
+		LLMConfigRepo: s.llmConfigRepo,
+		WorkerSvc:     s.workerSvc,
+		CreateProject: CreateGitHubProjectRuntimeOptions{
+			ProjectSvc:                 s.projectSvc,
+			GitHubSvc:                  s.githubProjectSvc,
+			MemorySvc:                  s.memorySvc,
+			AgentLibraryMaintenanceSvc: s.agentLibraryMaintenanceSvc,
+		},
 		SwitchProject: func(ctx context.Context, project *models.Project) error {
 			if !s.checkAuthorization(userID, "", project.ID) {
 				return fmt.Errorf("Telegram user %d is not authorized to use project %q", userID, project.Name)
@@ -1318,15 +1419,11 @@ func (s *TelegramService) telegramActionHandlersForTask(projectID, callerTaskID 
 			return s.setTelegramActiveProject(ctx, userID, project.ID)
 		},
 	}))
-	handlers["get_current_project"] = func(ctx context.Context, _ json.RawMessage) (string, error) {
-		return channelCurrentProjectResult(ctx, s.projectRepo, projectID), nil
-	}
-	handlers["get_chat_mode"] = func(_ context.Context, _ json.RawMessage) (string, error) {
-		return "Current chat mode: orchestrate", nil
-	}
-	handlers["set_chat_mode"] = func(_ context.Context, _ json.RawMessage) (string, error) {
-		return "Chat mode changes are not supported on Telegram. Telegram always uses orchestrate mode.", nil
-	}
+	mergeChannelRuntimeActionHandlers(handlers, buildChannelContextModeActionHandlers(channelContextModeActionHandlerOptions{
+		ChannelDisplayName: "Telegram",
+		ProjectID:          projectID,
+		ProjectRepo:        s.projectRepo,
+	}))
 	return handlers
 }
 
@@ -1338,13 +1435,18 @@ func telegramSendToTaskActionResult(result string) (string, error) {
 }
 
 func (s *TelegramService) setTelegramActiveProject(ctx context.Context, userID int64, projectID string) error {
-	s.userProjects[userID] = projectID
+	// Serialize explicit switches so an older persistence operation cannot finish
+	// after and overwrite a newer successful switch. Cache locks remain short-held.
+	s.userProjectSwitchMu.Lock()
+	defer s.userProjectSwitchMu.Unlock()
+
 	if s.telegramUserProjectRepo != nil {
 		if err := s.telegramUserProjectRepo.SetUserProject(ctx, fmt.Sprintf("%d", userID), projectID); err != nil {
-			applog.Infof("[telegram] runtime switch_project error persisting selection: %v", err)
+			applog.Infof("[telegram] error persisting active project selection: %v", err)
 			return fmt.Errorf("persist failed: %w", err)
 		}
 	}
+	s.cacheTelegramActiveProject(userID, projectID)
 	return nil
 }
 
@@ -1442,6 +1544,31 @@ const telegramMaxPerMessageBytes = 50 * 1024
 // limit is the max number of executions to include (0 = all that fit).
 func formatThreadTranscript(task *models.Task, executions []models.Execution, offset, limit int) string {
 	total := len(executions)
+	if offset > 0 {
+		if offset >= total {
+			return formatThreadTranscriptPage(task, nil, total, offset).transcript
+		}
+		executions = executions[offset:]
+	}
+	if limit > 0 && limit < len(executions) {
+		executions = executions[:limit]
+	}
+	return formatThreadTranscriptWithTotal(task, executions, total, offset)
+}
+
+// formatThreadTranscriptWithTotal formats a page that has already been bounded
+// by the repository. total is the full execution count used for pagination
+// metadata and executions starts at offset.
+func formatThreadTranscriptWithTotal(task *models.Task, executions []models.Execution, total, offset int) string {
+	return formatThreadTranscriptPage(task, executions, total, offset).transcript
+}
+
+type threadTranscriptFormatResult struct {
+	transcript     string
+	budgetExceeded bool
+}
+
+func formatThreadTranscriptPage(task *models.Task, executions []models.Execution, total, offset int) threadTranscriptFormatResult {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("\n\n---\n**Thread history for task: \"%s\"** [TASK_ID:%s]\n", task.Title, task.ID))
 	sb.WriteString(fmt.Sprintf("Status: %s | Category: %s | Priority: %d\n", task.Status, task.Category, task.Priority))
@@ -1449,21 +1576,11 @@ func formatThreadTranscript(task *models.Task, executions []models.Execution, of
 
 	if total == 0 {
 		sb.WriteString("No execution history found for this task.\n")
-		return sb.String()
+		return threadTranscriptFormatResult{transcript: sb.String()}
 	}
-
-	// Apply offset
-	if offset > 0 {
-		if offset >= total {
-			sb.WriteString(fmt.Sprintf("Offset %d exceeds total executions (%d). Use a lower offset.\n", offset, total))
-			return sb.String()
-		}
-		executions = executions[offset:]
-	}
-
-	// Apply limit
-	if limit > 0 && limit < len(executions) {
-		executions = executions[:limit]
+	if offset > 0 && offset >= total {
+		sb.WriteString(fmt.Sprintf("Offset %d exceeds total executions (%d). Use a lower offset.\n", offset, total))
+		return threadTranscriptFormatResult{transcript: sb.String()}
 	}
 
 	// Format each execution, tracking total size
@@ -1514,7 +1631,7 @@ func formatThreadTranscript(task *models.Task, executions []models.Execution, of
 		sb.WriteString(fmt.Sprintf("\n---\nShowing executions %d–%d of %d.\n", offset+1, offset+included, total))
 	}
 
-	return sb.String()
+	return threadTranscriptFormatResult{transcript: sb.String(), budgetExceeded: budgetExceeded}
 }
 
 // buildTelegramTaskChatContext builds the system context for task chat follow-ups.
@@ -1541,39 +1658,68 @@ func filterTelegramChatHistory(executions []models.Execution, currentExecID stri
 	return result
 }
 
-// getActiveProject returns the active project ID for a user
+// getActiveProject returns the active project ID for a user.
 func (s *TelegramService) getActiveProject(userID int64) string {
-	if projectID, ok := s.userProjects[userID]; ok {
+	projectID, ok, cacheVersion := s.cachedTelegramActiveProject(userID)
+	if s.activeProjectReadHook != nil {
+		s.activeProjectReadHook(userID)
+	}
+	if ok {
 		return projectID
 	}
 
-	// Check persisted project selection from DB
+	// Keep database and project-list reads outside the cache lock. The cache
+	// version prevents a concurrent explicit switch from being overwritten by
+	// the stale result of either lookup.
 	if s.telegramUserProjectRepo != nil {
 		savedProjectID, err := s.telegramUserProjectRepo.GetUserProject(context.Background(), fmt.Sprintf("%d", userID))
 		if err != nil {
 			applog.Infof("[telegram] error loading persisted project for user %d: %v", userID, err)
 		} else if savedProjectID != "" {
-			s.userProjects[userID] = savedProjectID
-			return savedProjectID
+			return s.populateTelegramActiveProject(userID, savedProjectID, cacheVersion)
 		}
 	}
 
-	// Try to get default project
 	projects, err := s.projectRepo.List(context.Background())
 	if err != nil || len(projects) == 0 {
 		return ""
 	}
 
-	for _, project := range projects {
-		if project.IsDefault {
-			s.userProjects[userID] = project.ID
-			return project.ID
-		}
-	}
+	projectID = fallbackProjectID(projects)
+	return s.populateTelegramActiveProject(userID, projectID, cacheVersion)
+}
 
-	// Use first project as fallback
-	s.userProjects[userID] = projects[0].ID
-	return projects[0].ID
+func (s *TelegramService) cachedTelegramActiveProject(userID int64) (string, bool, uint64) {
+	s.userProjectsMu.RLock()
+	defer s.userProjectsMu.RUnlock()
+	projectID, ok := s.userProjects[userID]
+	return projectID, ok, s.userProjectVersions[userID]
+}
+
+func (s *TelegramService) cacheTelegramActiveProject(userID int64, projectID string) {
+	s.userProjectsMu.Lock()
+	defer s.userProjectsMu.Unlock()
+	if s.userProjects == nil {
+		s.userProjects = make(map[int64]string)
+	}
+	if s.userProjectVersions == nil {
+		s.userProjectVersions = make(map[int64]uint64)
+	}
+	s.userProjects[userID] = projectID
+	s.userProjectVersions[userID]++
+}
+
+func (s *TelegramService) populateTelegramActiveProject(userID int64, projectID string, expectedVersion uint64) string {
+	s.userProjectsMu.Lock()
+	defer s.userProjectsMu.Unlock()
+	if currentProjectID, ok := s.userProjects[userID]; ok || s.userProjectVersions[userID] != expectedVersion {
+		return currentProjectID
+	}
+	if s.userProjects == nil {
+		s.userProjects = make(map[int64]string)
+	}
+	s.userProjects[userID] = projectID
+	return projectID
 }
 
 type telegramInputRichMessage struct {
@@ -1717,7 +1863,7 @@ func (s *TelegramService) sendMessage(ctx context.Context, chatID int64, text st
 }
 
 func (s *TelegramService) sendLegacyMessage(ctx context.Context, chatID int64, text string) bool {
-	delivered := false
+	delivered := true
 	for _, msg := range splitMessage(text, maxMessageLength) {
 		msgConfig := tgbotapi.NewMessage(chatID, escapeTelegramMarkdownV2(msg))
 		msgConfig.ParseMode = "MarkdownV2"
@@ -1726,10 +1872,9 @@ func (s *TelegramService) sendLegacyMessage(ctx context.Context, chatID int64, t
 			plainConfig := tgbotapi.NewMessage(chatID, msg)
 			if _, err := s.sendConfig(plainConfig); err != nil {
 				applog.Infof("[telegram] error sending message: %v", err)
-				continue
+				delivered = false
 			}
 		}
-		delivered = true
 	}
 	return delivered
 }

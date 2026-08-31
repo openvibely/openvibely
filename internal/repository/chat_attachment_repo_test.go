@@ -87,6 +87,20 @@ func TestChatAttachmentRepo_ListByExecutionIDs_Empty(t *testing.T) {
 	}
 }
 
+func TestChatAttachmentRepo_CleanupOrphanedFiles_NoUploadsDir(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewChatAttachmentRepo(db)
+
+	uploadsDir := filepath.Join(t.TempDir(), "missing-uploads")
+	count, err := repo.CleanupOrphanedFiles(context.Background(), uploadsDir)
+	if err != nil {
+		t.Fatalf("CleanupOrphanedFiles() should not error on nonexistent dir: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected 0 files deleted, got %d", count)
+	}
+}
+
 func TestChatAttachmentRepo_CleanupOrphanedFiles_RelativeRootPreservesTrackedFiles(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	chatAttachmentRepo := NewChatAttachmentRepo(db)
@@ -166,6 +180,11 @@ func TestChatAttachmentRepo_CleanupOrphanedFiles_RelativeRootPreservesTrackedFil
 		t.Fatalf("Create tracked task attachment: %v", err)
 	}
 
+	untrackedTaskFile := filepath.Join(taskDir, "untracked-task.txt")
+	if err := os.WriteFile(untrackedTaskFile, []byte("orphaned task"), 0644); err != nil {
+		t.Fatalf("write untracked task file: %v", err)
+	}
+
 	cwd, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("Getwd: %v", err)
@@ -191,5 +210,8 @@ func TestChatAttachmentRepo_CleanupOrphanedFiles_RelativeRootPreservesTrackedFil
 	}
 	if _, err := os.Stat(trackedTaskFile); os.IsNotExist(err) {
 		t.Fatal("task attachment should not be touched by chat cleanup")
+	}
+	if _, err := os.Stat(untrackedTaskFile); os.IsNotExist(err) {
+		t.Fatal("untracked task file should not be touched by chat cleanup")
 	}
 }

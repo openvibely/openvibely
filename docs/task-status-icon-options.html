@@ -1,0 +1,651 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Task status icon options</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0f1117;
+      --surface: #171a22;
+      --surface-2: #1d212b;
+      --surface-3: #242936;
+      --border: #2b3140;
+      --border-strong: #3a4254;
+      --text: #eef1f7;
+      --muted: #98a0b3;
+      --subtle: #697185;
+      --accent: #a9b6ff;
+      --accent-bg: #293055;
+      --pending: #929bad;
+      --queued: #69a8ff;
+      --running: #a78bfa;
+      --completed: #55ca89;
+      --failed: #ff6f76;
+      --cancelled: #929bad;
+      --blocked: #d895ee;
+      --merged: #55ca89;
+      --goal-met: #55ca89;
+      --shadow: 0 16px 48px rgba(0, 0, 0, .26);
+    }
+
+    [data-theme="light"] {
+      color-scheme: light;
+      --bg: #f4f5f8;
+      --surface: #ffffff;
+      --surface-2: #f8f9fb;
+      --surface-3: #eef0f5;
+      --border: #e1e4eb;
+      --border-strong: #cbd0dc;
+      --text: #1c2130;
+      --muted: #60697a;
+      --subtle: #8b93a2;
+      --accent: #4d5eac;
+      --accent-bg: #e8ebff;
+      --pending: #697386;
+      --queued: #2779d8;
+      --running: #7c3aed;
+      --completed: #16814a;
+      --failed: #d43542;
+      --cancelled: #697386;
+      --blocked: #8e43a7;
+      --merged: #16814a;
+      --goal-met: #16814a;
+      --shadow: 0 16px 48px rgba(32, 39, 57, .1);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background:
+        radial-gradient(circle at 18% -10%, color-mix(in srgb, var(--accent) 14%, transparent), transparent 35rem),
+        var(--bg);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    button { font: inherit; }
+    svg { display: block; }
+
+    .page {
+      width: min(1240px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 52px 0 80px;
+    }
+
+    .eyebrow {
+      color: var(--accent);
+      font-size: 11px;
+      font-weight: 760;
+      letter-spacing: .14em;
+      text-transform: uppercase;
+    }
+
+    .hero {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 28px;
+      margin-bottom: 36px;
+    }
+
+    h1 {
+      margin: 7px 0 10px;
+      max-width: 700px;
+      font-size: clamp(32px, 5vw, 52px);
+      line-height: 1.04;
+      letter-spacing: -.035em;
+    }
+
+    .intro {
+      max-width: 670px;
+      margin: 0;
+      color: var(--muted);
+      font-size: 16px;
+    }
+
+    .theme-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 40px;
+      padding: 0 13px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--surface);
+      color: var(--text);
+      cursor: pointer;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, .06);
+    }
+
+    .theme-toggle:hover { border-color: var(--border-strong); }
+
+    .section-head {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 20px;
+      margin: 36px 0 14px;
+    }
+
+    h2 {
+      margin: 0;
+      font-size: 18px;
+      letter-spacing: -.015em;
+    }
+
+    .hint { color: var(--muted); font-size: 12px; }
+
+    .options {
+      display: grid;
+      gap: 12px;
+    }
+
+    .option {
+      position: relative;
+      width: 100%;
+      min-width: 0;
+      max-width: 100%;
+      padding: 0;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: 15px;
+      background: var(--surface);
+      color: var(--text);
+      text-align: left;
+      cursor: pointer;
+      transition: border-color .16s ease, transform .16s ease, box-shadow .16s ease;
+    }
+
+    .option:hover {
+      border-color: var(--border-strong);
+      transform: translateY(-1px);
+    }
+
+    .option.selected {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent), var(--shadow);
+    }
+
+    .option-main {
+      display: grid;
+      min-width: 0;
+      grid-template-columns: 220px 1fr;
+      min-height: 112px;
+    }
+
+    .option-copy {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      padding: 20px 22px;
+      border-right: 1px solid var(--border);
+      background: var(--surface-2);
+    }
+
+    .option-title-row { display: flex; align-items: center; gap: 9px; }
+    .option-letter { color: var(--subtle); font-size: 12px; font-weight: 760; }
+    .option-name { font-size: 16px; font-weight: 720; }
+
+    .recommend {
+      padding: 2px 7px;
+      border-radius: 999px;
+      background: var(--accent-bg);
+      color: var(--accent);
+      font-size: 9px;
+      font-weight: 800;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    .option-description { margin-top: 7px; color: var(--muted); font-size: 12px; }
+
+    .icon-grid {
+      display: grid;
+      width: 100%;
+      min-width: 0;
+      grid-template-columns: repeat(9, minmax(70px, 1fr));
+      align-items: stretch;
+    }
+
+    .icon-cell {
+      display: flex;
+      min-width: 0;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      padding: 17px 7px 14px;
+      border-right: 1px solid var(--border);
+    }
+
+    .icon-cell:last-child { border-right: 0; }
+    .icon-label { max-width: 100%; overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+
+    .state-icon {
+      display: inline-flex;
+      width: 24px;
+      height: 24px;
+      flex: 0 0 24px;
+      align-items: center;
+      justify-content: center;
+      color: var(--state-color);
+    }
+
+    .state-icon svg { width: 19px; height: 19px; }
+    .state-pending { --state-color: var(--pending); }
+    .state-queued { --state-color: var(--queued); }
+    .state-running { --state-color: var(--running); }
+    .state-completed { --state-color: var(--completed); }
+    .state-failed { --state-color: var(--failed); }
+    .state-cancelled { --state-color: var(--cancelled); }
+    .state-blocked { --state-color: var(--blocked); }
+    .state-merged { --state-color: var(--merged); }
+    .state-goal-met { --state-color: var(--goal-met); }
+
+    .family-token {
+      border-radius: 7px;
+      background: color-mix(in srgb, var(--state-color) 16%, transparent);
+    }
+
+    .family-token svg { width: 15px; height: 15px; }
+
+    .family-solid {
+      border-radius: 50%;
+      background: var(--state-color);
+      color: var(--surface);
+    }
+
+    .family-solid svg { width: 14px; height: 14px; }
+
+    .family-symbol svg { width: 18px; height: 18px; }
+
+    .family-mini {
+      width: 20px;
+      height: 20px;
+      flex-basis: 20px;
+      border: 1px solid color-mix(in srgb, var(--state-color) 58%, transparent);
+      border-radius: 5px;
+      background: color-mix(in srgb, var(--state-color) 8%, transparent);
+    }
+
+    .family-mini svg { width: 13px; height: 13px; }
+
+    .family-ring {
+      border: 1.5px solid color-mix(in srgb, var(--state-color) 72%, transparent);
+      border-radius: 50%;
+      background: color-mix(in srgb, var(--state-color) 7%, transparent);
+    }
+
+    .family-ring svg { width: 14px; height: 14px; }
+
+    .family-shield {
+      width: 25px;
+      height: 25px;
+      flex-basis: 25px;
+      border-radius: 8px 8px 10px 10px;
+      background: color-mix(in srgb, var(--state-color) 18%, transparent);
+      box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--state-color) 24%, transparent);
+    }
+
+    .family-shield svg { width: 15px; height: 15px; stroke-width: 2.15; }
+
+    .family-heavy svg { width: 20px; height: 20px; stroke-width: 2.45; }
+
+    .family-disc {
+      width: 25px;
+      height: 25px;
+      flex-basis: 25px;
+      border-radius: 50%;
+      background: color-mix(in srgb, var(--state-color) 13%, transparent);
+      box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--state-color) 32%, transparent);
+    }
+
+    .family-disc svg { width: 15px; height: 15px; stroke-width: 2.2; }
+
+    .preview-shell {
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+
+    .preview-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface-2);
+    }
+
+    .preview-choice { display: flex; align-items: center; gap: 9px; font-weight: 700; }
+    .preview-letter { color: var(--accent); }
+
+    .board {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      padding: 14px;
+      background: color-mix(in srgb, var(--bg) 66%, var(--surface));
+    }
+
+    .column {
+      min-width: 0;
+      padding: 12px;
+      border: 1px solid var(--border);
+      border-radius: 13px;
+      background: var(--surface-2);
+    }
+
+    .column-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin: 1px 2px 11px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 760;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+    }
+
+    .count { color: var(--subtle); font-variant-numeric: tabular-nums; }
+
+    .task-card {
+      margin-top: 8px;
+      padding: 14px;
+      border: 1px solid var(--border);
+      border-radius: 11px;
+      background: var(--surface);
+      box-shadow: 0 2px 6px rgba(0, 0, 0, .08);
+    }
+
+    .task-card:first-of-type { margin-top: 0; }
+    .task-title-row { display: flex; min-width: 0; align-items: flex-start; gap: 8px; }
+    .task-title { min-width: 0; flex: 1; overflow: hidden; font-size: 13px; font-weight: 670; line-height: 1.45; text-overflow: ellipsis; white-space: nowrap; }
+    .menu { color: var(--subtle); font-weight: 800; letter-spacing: 2px; line-height: 16px; }
+    .task-copy { margin: 5px 0 9px 32px; overflow: hidden; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+    .tags { display: flex; gap: 5px; margin-left: 32px; }
+    .tag { padding: 2px 7px; border: 1px solid var(--border); border-radius: 999px; color: var(--muted); font-size: 9px; }
+
+    .notes {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin-top: 12px;
+    }
+
+    .note {
+      padding: 16px;
+      border: 1px solid var(--border);
+      border-radius: 13px;
+      background: var(--surface-2);
+    }
+
+    .note strong { display: block; margin-bottom: 4px; font-size: 12px; }
+    .note span { color: var(--muted); font-size: 11px; }
+
+    @media (max-width: 980px) {
+      .option-main { grid-template-columns: minmax(0, 1fr); }
+      .option-copy { border-right: 0; border-bottom: 1px solid var(--border); }
+      .icon-grid { overflow-x: auto; grid-template-columns: repeat(9, 84px); }
+      .board { grid-template-columns: 1fr 1fr; }
+      .column:last-child { grid-column: 1 / -1; }
+    }
+
+    @media (max-width: 650px) {
+      .page { width: min(100% - 20px, 1240px); padding-top: 28px; }
+      .hero { flex-direction: column; }
+      .theme-toggle { position: absolute; top: 22px; right: 10px; width: 40px; padding: 0; justify-content: center; }
+      .theme-label { display: none; }
+      h1 { padding-right: 44px; }
+      .section-head { align-items: flex-start; flex-direction: column; gap: 4px; }
+      .board, .notes { grid-template-columns: 1fr; }
+      .column:last-child { grid-column: auto; }
+      .preview-toolbar { align-items: flex-start; flex-direction: column; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; }
+    }
+  </style>
+</head>
+<body data-theme="dark">
+  <main class="page">
+    <header class="hero">
+      <div>
+        <div class="eyebrow">OpenVibely · Tasks</div>
+        <h1>Task status icon directions</h1>
+        <p class="intro">Nine alternative icon systems, tested across every task state and at the same compact size used beside card titles. Select a row to update the board preview.</p>
+      </div>
+      <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Switch to light theme">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+          <path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8Z"/>
+        </svg>
+        <span class="theme-label">Light mode</span>
+      </button>
+    </header>
+
+    <div class="section-head">
+      <h2>Icon families</h2>
+      <div class="hint">Click any family to compare it in context</div>
+    </div>
+    <section class="options" id="options" aria-label="Task status icon options"></section>
+
+    <div class="section-head">
+      <h2>On task cards</h2>
+      <div class="hint">Rendered at 20–24 px, with color as a secondary cue</div>
+    </div>
+    <section class="preview-shell" aria-live="polite">
+      <div class="preview-toolbar">
+        <div class="preview-choice"><span class="preview-letter" id="preview-letter">A</span><span id="preview-name">Signal marks</span></div>
+        <div class="hint">The icon remains visible when a title truncates</div>
+      </div>
+      <div class="board" id="board"></div>
+    </section>
+
+    <section class="notes" aria-label="Design criteria">
+      <div class="note"><strong>Shape before color</strong><span>Each state has a distinct silhouette, so meaning survives low contrast and color-vision differences.</span></div>
+      <div class="note"><strong>Pending ≠ queued</strong><span>An empty mark means not admitted; stacked marks mean admitted and waiting for capacity.</span></div>
+      <div class="note"><strong>Motion is optional</strong><span>The running icon reads as active while static. A subtle rotation can be added without carrying the meaning.</span></div>
+    </section>
+  </main>
+
+  <script>
+    const states = [
+      { key: 'pending', label: 'Pending' },
+      { key: 'queued', label: 'Queued' },
+      { key: 'running', label: 'In progress' },
+      { key: 'completed', label: 'Completed' },
+      { key: 'goal-met', label: 'Goal met' },
+      { key: 'failed', label: 'Failed' },
+      { key: 'cancelled', label: 'Cancelled' },
+      { key: 'blocked', label: 'Waiting' },
+      { key: 'merged', label: 'Merged' }
+    ];
+
+    // GitHub-style merge silhouette: two nodes on a straight trunk with a
+    // compact branch that bends right into the third node.
+    const mergeGlyph = '<circle cx="6.5" cy="4.5" r="2.5"/><circle cx="6.5" cy="19.5" r="2.5"/><circle cx="18" cy="12" r="2.5"/><path d="M6.5 7v10M6.5 7c0 3.2 3.4 5 9 5"/>';
+
+    // Goal completion uses restrained achievement symbols rather than another
+    // generic checkmark: finish flag, trophy, or medal depending on the family.
+    const goalMetFlagGlyph = '<path d="M6 21V4m0 1h11l-2 3.5 2 3.5H6"/>';
+    const goalMetTrophyGlyph = '<path d="M8 4h8v5a4 4 0 0 1-8 0V4Z"/><path d="M8 6H5v1a4 4 0 0 0 4 4m7-5h3v1a4 4 0 0 1-4 4M12 13v5m-4 3h8m-6-3h4"/>';
+    const goalMetMedalGlyph = '<circle cx="12" cy="9" r="5"/><path d="m9 14-1 7 4-2 4 2-1-7"/><path d="m10 9 1.3 1.3L14 7.5"/>';
+
+    const paths = {
+      standardPending: {
+        pending: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="1.75" fill="currentColor" stroke="none"/>'
+      },
+      standardGoal: {
+        'goal-met': '<circle cx="12" cy="8.5" r="7.5"/><path d="m8 14-2 8 6-3.5 6 3.5-2-8"/><path d="m9 8.5 2 2 4-4"/>'
+      },
+      signal: {
+        pending: '<circle cx="12" cy="12" r="7.5"/><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/>',
+        queued: '<path d="M7 7h10M7 12h10M7 17h7"/>',
+        running: '<path d="M12 3a9 9 0 1 1-6.36 2.64"/><path d="m5.64 2.8v2.84H2.8"/>',
+        completed: '<path d="m5 12 4.2 4.2L19 6.5"/>',
+        'goal-met': goalMetFlagGlyph,
+        failed: '<path d="m6.5 6.5 11 11m0-11-11 11"/>',
+        cancelled: '<circle cx="12" cy="12" r="8.5"/><path d="M6 18 18 6"/>',
+        blocked: '<path d="M8 9v6m8-6v6"/><rect x="3.5" y="3.5" width="17" height="17" rx="5"/>',
+        merged: mergeGlyph
+      },
+      workflow: {
+        pending: '<path d="M5 8.5h14v10H5z"/><path d="M8 5.5h8"/>',
+        queued: '<rect x="4" y="5" width="16" height="4" rx="1"/><rect x="4" y="11" width="16" height="4" rx="1"/><path d="M4 19h10"/>',
+        running: '<path d="m13.5 2.5-8 11h6l-1 8 8-11h-6z"/>',
+        completed: '<circle cx="12" cy="12" r="9"/><path d="m7.5 12 3 3 6-6"/>',
+        'goal-met': goalMetTrophyGlyph,
+        failed: '<path d="M12 3 2.8 20h18.4z"/><path d="M12 9v4m0 3h.01"/>',
+        cancelled: '<path d="M6 6h12v12H6z"/><path d="m8.5 8.5 7 7m0-7-7 7"/>',
+        blocked: '<rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>',
+        merged: mergeGlyph
+      },
+      geometric: {
+        pending: '<circle cx="12" cy="12" r="4"/>',
+        queued: '<circle cx="8" cy="12" r="3"/><circle cx="16" cy="12" r="3"/>',
+        running: '<path d="m9 6 8 6-8 6z" fill="currentColor" stroke="none"/>',
+        completed: '<path d="m12 3 9 9-9 9-9-9z"/><path d="m8 12 2.5 2.5L16 9"/>',
+        'goal-met': goalMetMedalGlyph,
+        failed: '<path d="m12 3 9 17H3z"/><path d="M12 9v4m0 3h.01"/>',
+        cancelled: '<path d="M5 5h14v14H5z"/><path d="m8 8 8 8m0-8-8 8"/>',
+        blocked: '<path d="M3.5 7h17v10h-17z"/><path d="M9 7v10m6-10v10"/>',
+        merged: mergeGlyph
+      },
+      minimal: {
+        pending: '<circle cx="12" cy="12" r="7" stroke-dasharray="2.2 3"/>',
+        queued: '<path d="M5 8h14M5 12h14M5 16h9"/>',
+        running: '<path d="M5 12h11m-4-4 4 4-4 4"/>',
+        completed: '<path d="m5 12 4.5 4.5L19 7"/>',
+        'goal-met': goalMetFlagGlyph,
+        failed: '<path d="M12 5v9m0 4h.01"/>',
+        cancelled: '<path d="M5 19 19 5"/>',
+        blocked: '<path d="M8 6v12m8-12v12"/>',
+        merged: mergeGlyph
+      },
+      conventional: {
+        pending: '<path d="M7 3h10M7 21h10M8 3c0 4 1 6 4 9-3 3-4 5-4 9m8-18c0 4-1 6-4 9 3 3 4 5 4 9"/>',
+        queued: '<circle cx="5" cy="7" r="1" fill="currentColor" stroke="none"/><circle cx="5" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="5" cy="17" r="1" fill="currentColor" stroke="none"/><path d="M9 7h10M9 12h10M9 17h7"/>',
+        running: '<circle cx="12" cy="12" r="9"/><path d="m10 8 6 4-6 4z" fill="currentColor" stroke="none"/>',
+        completed: '<circle cx="12" cy="12" r="9"/><path d="m7.5 12 3 3 6-6"/>',
+        'goal-met': goalMetTrophyGlyph,
+        failed: '<path d="m8 3-5 5v8l5 5h8l5-5V8l-5-5z"/><path d="M12 7.5v6m0 3h.01"/>',
+        cancelled: '<rect x="4" y="4" width="16" height="16" rx="4"/><path d="M9 9h6v6H9z" fill="currentColor" stroke="none"/>',
+        blocked: '<rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>',
+        merged: mergeGlyph
+      },
+      controls: {
+        pending: '<circle cx="12" cy="12" r="9" stroke-dasharray="2.5 2.5"/><path d="M12 7v5l3 2"/>',
+        queued: '<path d="M4 6h12M4 12h12M4 18h8"/><path d="m17 15 3 3-3 3"/>',
+        running: '<path d="m8 5 11 7-11 7z" fill="currentColor" stroke="none"/>',
+        completed: '<path d="m4.5 12.5 4.5 4.5L19.5 6.5"/>',
+        'goal-met': goalMetMedalGlyph,
+        failed: '<path d="M6 6l12 12M18 6 6 18"/>',
+        cancelled: '<rect x="5" y="5" width="14" height="14" rx="2" fill="currentColor" stroke="none"/>',
+        blocked: '<path d="M8 5v14M16 5v14"/>',
+        merged: mergeGlyph
+      }
+    };
+
+    const families = [
+      { id: 'signal', letter: 'A', name: 'Signal marks', description: 'Open, direct shapes with the clearest small-size distinction.', recommended: true, className: 'family-signal', source: 'signal' },
+      { id: 'token', letter: 'B', name: 'Tinted tokens', description: 'Soft containers give every state a consistent visual footprint.', className: 'family-token', source: 'workflow' },
+      { id: 'solid', letter: 'C', name: 'Solid signals', description: 'Highest contrast and fastest to scan on a dense board.', className: 'family-solid', source: 'minimal' },
+      { id: 'workflow', letter: 'D', name: 'Workflow objects', description: 'Literal metaphors favor recognition over minimalism.', className: 'family-symbol', source: 'workflow' },
+      { id: 'mini', letter: 'E', name: 'Compact tiles', description: 'A restrained square system suited to technical interfaces.', className: 'family-mini', source: 'geometric' },
+      { id: 'standard', letter: 'F', name: 'Standard status', description: 'Canonical product icons: not-started dot, list, play, check, award ribbon, warning, stop, lock, and merge.', className: 'family-heavy', source: 'conventional', pendingSource: 'standardPending', goalSource: 'standardGoal' },
+      { id: 'ring', letter: 'G', name: 'Outlined buttons', description: 'Familiar status symbols inside a quiet circular control shape.', className: 'family-ring', source: 'controls' },
+      { id: 'shield', letter: 'H', name: 'Status shields', description: 'Compact, substantial markers designed for fast scanning without visual noise.', className: 'family-shield', source: 'conventional' },
+      { id: 'disc', letter: 'I', name: 'Soft discs', description: 'Conventional workflow symbols with a gentle background for dependable contrast.', className: 'family-disc', source: 'controls' }
+    ];
+
+    const tasks = [
+      { column: 'Backlog', state: 'pending', title: 'Document the local setup flow', copy: 'Capture prerequisites and first-run steps', tags: ['Docs', 'Normal'] },
+      { column: 'Backlog', state: 'failed', title: 'Repair flaky browser test', copy: 'Timed out waiting for page transition', tags: ['Bug', 'High'] },
+      { column: 'Active', state: 'running', title: 'Add task status indicators', copy: 'Implementing card header treatment', tags: ['Feature', 'High'] },
+      { column: 'Active', state: 'queued', title: 'Audit responsive task cards', copy: 'Waiting for an available worker', tags: ['Frontend', 'Normal'] },
+      { column: 'Active', state: 'blocked', title: 'Publish signed desktop build', copy: 'Waiting for parent task', tags: ['Release', 'Urgent'] },
+      { column: 'Completed', state: 'merged', title: 'Improve task search filters', copy: 'Merged into main', tags: ['Feature', 'Normal'] },
+      { column: 'Completed', state: 'goal-met', title: 'Reach release quality target', copy: 'All goal criteria satisfied', tags: ['Goal', 'High'] },
+      { column: 'Completed', state: 'completed', title: 'Update agent model picker', copy: 'Completed 18 minutes ago', tags: ['Frontend', 'Normal'] },
+      { column: 'Completed', state: 'cancelled', title: 'Prototype legacy migration', copy: 'Cancelled by user', tags: ['Chore', 'Low'] }
+    ];
+
+    let selected = 'signal';
+
+    function iconMarkup(family, state) {
+      let source = family.source;
+      if (state === 'pending' && family.pendingSource) source = family.pendingSource;
+      if (state === 'goal-met' && family.goalSource) source = family.goalSource;
+      const body = paths[source][state];
+      return `<span class="state-icon state-${state} ${family.className}" title="${states.find(s => s.key === state).label}" role="img" aria-label="Task state: ${states.find(s => s.key === state).label}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg></span>`;
+    }
+
+    function renderOptions() {
+      const root = document.getElementById('options');
+      root.innerHTML = families.map(family => `
+        <button class="option ${family.id === selected ? 'selected' : ''}" type="button" data-family="${family.id}" aria-pressed="${family.id === selected}">
+          <div class="option-main">
+            <div class="option-copy">
+              <div class="option-title-row">
+                <span class="option-letter">${family.letter}</span>
+                <span class="option-name">${family.name}</span>
+                ${family.recommended ? '<span class="recommend">Recommended</span>' : ''}
+              </div>
+              <div class="option-description">${family.description}</div>
+            </div>
+            <div class="icon-grid">
+              ${states.map(state => `<div class="icon-cell">${iconMarkup(family, state.key)}<span class="icon-label">${state.label}</span></div>`).join('')}
+            </div>
+          </div>
+        </button>`).join('');
+
+      root.querySelectorAll('.option').forEach(option => {
+        option.addEventListener('click', () => {
+          selected = option.dataset.family;
+          renderOptions();
+          renderBoard();
+          document.querySelector('.preview-shell').scrollIntoView({ behavior: 'smooth', block: 'center' });
+        });
+      });
+    }
+
+    function renderBoard() {
+      const family = families.find(item => item.id === selected);
+      document.getElementById('preview-letter').textContent = family.letter;
+      document.getElementById('preview-name').textContent = family.name;
+      document.getElementById('board').innerHTML = ['Backlog', 'Active', 'Completed'].map(column => {
+        const columnTasks = tasks.filter(task => task.column === column);
+        return `<div class="column">
+          <div class="column-head"><span>${column}</span><span class="count">${columnTasks.length}</span></div>
+          ${columnTasks.map(task => `<article class="task-card">
+            <div class="task-title-row">${iconMarkup(family, task.state)}<div class="task-title" title="${task.title}">${task.title}</div><span class="menu">···</span></div>
+            <div class="task-copy">${task.copy}</div>
+            <div class="tags">${task.tags.map(tag => `<span class="tag">${tag}</span>`).join('')}</div>
+          </article>`).join('')}
+        </div>`;
+      }).join('');
+    }
+
+    document.getElementById('theme-toggle').addEventListener('click', event => {
+      const body = document.body;
+      const light = body.dataset.theme !== 'light';
+      body.dataset.theme = light ? 'light' : 'dark';
+      event.currentTarget.setAttribute('aria-label', light ? 'Switch to dark theme' : 'Switch to light theme');
+      event.currentTarget.querySelector('.theme-label').textContent = light ? 'Dark mode' : 'Light mode';
+    });
+
+    renderOptions();
+    renderBoard();
+  </script>
+</body>
+</html>

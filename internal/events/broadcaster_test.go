@@ -9,14 +9,14 @@ import (
 
 func TestTaskEvent_ToSSE_IncludesTaskName(t *testing.T) {
 	event := TaskEvent{
-		Type:      TaskStatusChanged,
-		TaskID:    "abc123",
-		TaskName:  "My Test Task",
-		ProjectID: "proj1",
-		Status:    "completed",
-		OldStatus: "running",
+		Type:           TaskStatusChanged,
+		TaskID:         "abc123",
+		TaskName:       "My Test Task",
+		ProjectID:      "proj1",
+		Status:         "completed",
+		OldStatus:      "running",
+		HasAttachments: true,
 	}
-
 	sse := event.ToSSE()
 
 	// Verify SSE format
@@ -44,6 +44,9 @@ func TestTaskEvent_ToSSE_IncludesTaskName(t *testing.T) {
 	}
 	if parsed["status"] != "completed" {
 		t.Errorf("expected status 'completed', got %v", parsed["status"])
+	}
+	if parsed["has_attachments"] != true {
+		t.Errorf("expected has_attachments true, got %v", parsed["has_attachments"])
 	}
 }
 
@@ -147,6 +150,22 @@ func TestBroadcaster_UnsubscribeFreeSlot(t *testing.T) {
 
 	// Double unsubscribe should be safe (no panic)
 	b.Unsubscribe(sub1)
+}
+
+func TestBroadcaster_NonBlockingPublish(t *testing.T) {
+	b := NewBroadcaster()
+	sub, err := b.Subscribe()
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	defer b.Unsubscribe(sub)
+
+	for i := 0; i < 15; i++ {
+		b.Publish(TaskEvent{TaskID: "task1", Status: "running"})
+	}
+	if got := len(sub); got != 10 {
+		t.Fatalf("buffered events = %d, want 10 after dropping full-buffer events", got)
+	}
 }
 
 func TestBroadcaster_ConcurrentSubscribeUnsubscribePublish(t *testing.T) {

@@ -41,20 +41,37 @@ func TestSendCompletionsRetriesStreamTimeoutBeforeOutput(t *testing.T) {
 		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: body}, nil
 	})}
 
-	resp, err := client.SendCompletions(context.Background(), "test", &CompletionsOptions{DisableTools: true})
+	var streamed strings.Builder
+	resp, err := client.SendCompletions(context.Background(), "test", &CompletionsOptions{
+		DisableTools: true,
+		OnText: func(text string) {
+			streamed.WriteString(text)
+		},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if attempts != 2 || resp.Text != "retry succeeded" {
 		t.Fatalf("attempts/text = %d/%q, want 2/retry succeeded", attempts, resp.Text)
 	}
+	if streamed.String() != "retry succeeded" {
+		t.Fatalf("streamed text = %q, want retry succeeded", streamed.String())
+	}
 }
 
-func TestSendCompletionsDoesNotReplayStreamAfterOutput(t *testing.T) {
+func TestSendCompletionsRetriesStreamAfterOutputFromTurnState(t *testing.T) {
 	attempts := 0
 	client := NewWithCompatibleAPIKey("test-key", "https://compatible.test/v1", "", "")
 	client.httpClient = &http.Client{Transport: completionsRoundTripFunc(func(*http.Request) (*http.Response, error) {
 		attempts++
+		if attempts == 2 {
+			body := io.NopCloser(strings.NewReader(
+				"data: {\"choices\":[{\"delta\":{\"content\":\"retry succeeded\"}}]}\n\n" +
+					"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+					"data: [DONE]\n\n",
+			))
+			return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: body}, nil
+		}
 		body := io.NopCloser(io.MultiReader(
 			strings.NewReader("data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n"),
 			failingCompletionsBody{},
@@ -62,12 +79,23 @@ func TestSendCompletionsDoesNotReplayStreamAfterOutput(t *testing.T) {
 		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: body}, nil
 	})}
 
-	_, err := client.SendCompletions(context.Background(), "test", &CompletionsOptions{DisableTools: true})
-	if err == nil {
-		t.Fatal("expected stream read error")
+	var streamed strings.Builder
+	resp, err := client.SendCompletions(context.Background(), "test", &CompletionsOptions{
+		DisableTools: true,
+		OnText: func(text string) {
+			streamed.WriteString(text)
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if attempts != 1 {
-		t.Fatalf("attempts = %d, want 1 after output was observed", attempts)
+	if attempts != 2 || resp.Text != "retry succeeded" {
+		t.Fatalf("attempts/text = %d/%q, want 2/retry succeeded", attempts, resp.Text)
+	}
+	// The provider response is rebuilt from retry state, while the live stream
+	// intentionally preserves text already emitted by the failed attempt.
+	if streamed.String() != "partialretry succeeded" {
+		t.Fatalf("streamed text = %q, want partialretry succeeded", streamed.String())
 	}
 }
 

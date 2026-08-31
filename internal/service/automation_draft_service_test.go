@@ -4,7 +4,6 @@ import (
 	"context"
 	"math"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -14,6 +13,177 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestGitHubSDLCCapabilityValidationFollowsRetainedGraph(t *testing.T) {
+	drafts := NewAutomationDraftService(nil, NewAutomationAdapterRegistry())
+	candidate, err := drafts.TemplateCandidate(AutomationAdapterGitHubSDLC)
+	require.NoError(t, err)
+
+	for _, node := range candidate.Nodes {
+		require.NotContains(t, node.Config, "required_capabilities", node.Key)
+	}
+
+	for _, retainedKey := range []string{"vision_suggestions"} {
+		reduced := candidate
+		for _, node := range append([]models.AutomationDraftNode(nil), candidate.Nodes...) {
+			if node.Key != retainedKey {
+				reduced = automationCandidateWithoutNode(reduced, node.Key)
+			}
+		}
+		require.Empty(t, drafts.ValidateCandidate(reduced), retainedKey)
+		require.NotContains(t, issueCodes(drafts.ValidateCandidateWithCapabilities(reduced, models.AutomationCapabilitySnapshot{})), "github_unavailable", retainedKey)
+	}
+
+	require.Contains(t, issueCodes(drafts.ValidateCandidateWithCapabilities(candidate, models.AutomationCapabilitySnapshot{})), "github_unavailable")
+}
+
+func TestMaintainedSDLCTemplatesTreatEveryTemplateNodeAsOptional(t *testing.T) {
+	drafts := NewAutomationDraftService(nil, NewAutomationAdapterRegistry())
+	for _, adapterKey := range []string{AutomationAdapterNativeSDLC, AutomationAdapterGitHubSDLC} {
+		t.Run(adapterKey, func(t *testing.T) {
+			candidate, err := drafts.TemplateCandidate(adapterKey)
+			require.NoError(t, err)
+
+			customizedProducer, err := drafts.TemplateCandidate(adapterKey)
+			require.NoError(t, err)
+			for _, node := range append([]models.AutomationDraftNode(nil), customizedProducer.Nodes...) {
+				if node.Key != "vision_suggestions" {
+					customizedProducer = automationCandidateWithoutNode(customizedProducer, node.Key)
+				}
+			}
+			customizedProducer.Nodes[0].Config["prompt"] = "Review the local project notes and summarize one improvement."
+			require.Empty(t, drafts.ValidateCandidate(customizedProducer), "a customized producer may run as a standalone schedule")
+			if adapterKey == AutomationAdapterGitHubSDLC {
+				require.NotContains(t, issueCodes(drafts.ValidateCandidateWithCapabilities(customizedProducer, models.AutomationCapabilitySnapshot{})), "github_unavailable")
+			}
+
+			for _, key := range []string{"vision_suggestions", "bug_finder", "optimization_finder", "redundancy_finder"} {
+				withoutOneTemplateNode := automationCandidateWithoutNode(candidate, key)
+				require.Empty(t, drafts.ValidateCandidate(withoutOneTemplateNode), key)
+			}
+
+			for _, producerKey := range []string{"vision_suggestions", "bug_finder", "optimization_finder", "redundancy_finder"} {
+				producerOnly := candidate
+				for _, node := range append([]models.AutomationDraftNode(nil), candidate.Nodes...) {
+					if node.Key != producerKey {
+						producerOnly = automationCandidateWithoutNode(producerOnly, node.Key)
+					}
+				}
+				producerIssues := drafts.ValidateCandidate(producerOnly)
+				require.Empty(t, producerIssues, producerKey)
+
+				withoutProducer := automationCandidateWithoutNode(candidate, producerKey)
+				require.Empty(t, drafts.ValidateCandidate(withoutProducer), producerKey)
+			}
+
+			reconnected := candidate
+			reconnected.Edges = append([]models.AutomationDraftEdge(nil), candidate.Edges...)
+			reconnected.Edges[0].Key = "user_reconnected_edge"
+			require.Empty(t, drafts.ValidateCandidate(reconnected))
+
+			duplicateHandoff := candidate
+			duplicateHandoff.Edges = append([]models.AutomationDraftEdge(nil), candidate.Edges...)
+			duplicate := duplicateHandoff.Edges[0]
+			duplicate.Key = "forged_duplicate_handoff"
+			duplicateHandoff.Edges = append(duplicateHandoff.Edges, duplicate)
+			require.Contains(t, issueCodes(drafts.ValidateCandidate(duplicateHandoff)), "ambiguous_handoff")
+
+			stranded := automationCandidateWithoutNode(candidate, "completed")
+			issues := drafts.ValidateCandidate(stranded)
+			require.NotContains(t, issueCodes(issues), "missing_node")
+			require.NotContains(t, issueCodes(issues), "missing_edge")
+			if adapterKey == AutomationAdapterGitHubSDLC {
+				require.Contains(t, issueCodes(issues), "pull_request_review_target")
+			} else {
+				require.Contains(t, issueCodes(issues), "native_implementation_target")
+			}
+
+			missingTerminalEdge := candidate
+			if adapterKey == AutomationAdapterGitHubSDLC {
+				missingTerminalEdge = automationCandidateWithoutEdge(missingTerminalEdge, "review_to_completed")
+			} else {
+				missingTerminalEdge = automationCandidateWithoutEdge(missingTerminalEdge, "implementation_to_completed")
+			}
+			edgeIssues := drafts.ValidateCandidate(missingTerminalEdge)
+			require.NotContains(t, issueCodes(edgeIssues), "missing_edge")
+			if adapterKey == AutomationAdapterGitHubSDLC {
+				require.Contains(t, issueCodes(edgeIssues), "pull_request_review_target")
+			} else {
+				require.Contains(t, issueCodes(edgeIssues), "native_implementation_target")
+			}
+		})
+	}
+}
+
+func TestDefaultAutomationDraftNodeConfigProvidesCanonicalStructuralDefaults(t *testing.T) {
+	taskConfig, err := DefaultAutomationDraftNodeConfig(AutomationAdapterCustom, "review", models.AutomationNodeAgentTask, "task", map[string]bool{"task": true})
+	require.NoError(t, err)
+	require.Equal(t, map[string]any{
+		"prompt":          "Describe the work this node should perform.",
+		"goal":            "",
+		"category":        string(models.CategoryBacklog),
+		"priority":        2,
+		"model_config_id": automationDefaultModelConfigID,
+	}, taskConfig)
+
+	scheduleConfig, err := DefaultAutomationDraftNodeConfig(AutomationAdapterCustom, "daily_review", models.AutomationNodeTrigger, "fixed_schedule", map[string]bool{"task": true, "schedule": true})
+	require.NoError(t, err)
+	require.Equal(t, "Describe the scheduled work this node should perform.", scheduleConfig["prompt"])
+	require.Equal(t, string(models.CategoryScheduled), scheduleConfig["category"])
+	require.Equal(t, automationDefaultModelConfigID, scheduleConfig["model_config_id"])
+	require.Equal(t, "09:00", scheduleConfig["run_at"])
+	require.Equal(t, string(models.RepeatDaily), scheduleConfig["repeat_type"])
+	require.Equal(t, 1, scheduleConfig["repeat_interval"])
+	require.Equal(t, true, scheduleConfig["enabled"])
+	require.Equal(t, true, scheduleConfig["clear_context_on_start"])
+	require.NotContains(t, scheduleConfig, "target_node_key")
+
+	githubInboxConfig, err := DefaultAutomationDraftNodeConfig(AutomationAdapterGitHubSDLC, "manual_dev_inbox", models.AutomationNodeTrigger, "github_inbox", map[string]bool{"task": true, "schedule": true})
+	require.NoError(t, err)
+	require.Equal(t, "10:00", githubInboxConfig["run_at"])
+	require.Equal(t, automationDefaultModelConfigID, githubInboxConfig["model_config_id"])
+
+	nativeImplementationConfig, err := DefaultAutomationDraftNodeConfig(AutomationAdapterNativeSDLC, "manual_implementation", models.AutomationNodeAgentTask, "implementation", nil)
+	require.NoError(t, err)
+	require.Equal(t, map[string]any{"goal": "", "model_config_id": automationDefaultModelConfigID}, nativeImplementationConfig)
+
+	issueConfig, err := DefaultAutomationDraftNodeConfig(AutomationAdapterCustom, "issue", models.AutomationNodeAction, "create_github_issue", nil)
+	require.NoError(t, err)
+	require.Equal(t, "Open one focused, reviewable GitHub issue.", issueConfig["instructions"])
+	require.Equal(t, []string{}, issueConfig["labels"])
+
+	prConfig, err := DefaultAutomationDraftNodeConfig(AutomationAdapterCustom, "open_pr", models.AutomationNodeAction, "open_pull_request", nil)
+	require.NoError(t, err)
+	require.Equal(t, "Open a reviewable pull request linked to the source issue.", prConfig["instructions"])
+	require.Equal(t, "", prConfig["base"])
+	require.Equal(t, false, prConfig["draft"])
+
+	approvalConfig, err := DefaultAutomationDraftNodeConfig(AutomationAdapterCustom, "review", models.AutomationNodeHumanGate, "pull_request_review", nil)
+	require.NoError(t, err)
+	require.Equal(t, map[string]any{"approval_method": "pull_request_review"}, approvalConfig)
+}
+
+func TestMaintainedSDLCTemplatesDoNotIncludeLoopAuditor(t *testing.T) {
+	registry := NewAutomationAdapterRegistry()
+	drafts := NewAutomationDraftService(nil, registry)
+
+	for _, adapterKey := range []string{AutomationAdapterNativeSDLC, AutomationAdapterGitHubSDLC} {
+		t.Run(adapterKey, func(t *testing.T) {
+			adapter, ok := registry.Get(adapterKey)
+			require.True(t, ok)
+			for _, node := range adapter.Nodes {
+				require.NotEqual(t, "auditor", node.Key)
+				require.NotEqual(t, "loop_auditor", node.Role)
+				require.NotEqual(t, "Loop Auditor", node.Name)
+			}
+
+			candidate, err := drafts.TemplateCandidate(adapterKey)
+			require.NoError(t, err)
+			requireNoLoopAuditorNode(t, candidate)
+			require.Empty(t, drafts.ValidateCandidate(candidate))
+		})
+	}
+}
+
 func TestMaintainedSDLCTemplatesKeepDiscoveryParityAndSchedulesOwnTheirTasks(t *testing.T) {
 	registry := NewAutomationAdapterRegistry()
 	drafts := NewAutomationDraftService(nil, registry)
@@ -22,7 +192,7 @@ func TestMaintainedSDLCTemplatesKeepDiscoveryParityAndSchedulesOwnTheirTasks(t *
 	for _, adapterKey := range []string{AutomationAdapterNativeSDLC, AutomationAdapterGitHubSDLC} {
 		adapter, ok := registry.Get(adapterKey)
 		require.True(t, ok)
-		for _, role := range append(discoveryRoles, "loop_auditor") {
+		for _, role := range discoveryRoles {
 			node := automationAdapterNodeByRole(t, adapter, role)
 			require.Equal(t, "trigger", node.Type, "%s/%s must be represented as one Schedule node", adapterKey, role)
 			require.True(t, node.AllowedResources["task"], "%s/%s Schedule must own its Task", adapterKey, role)
@@ -58,7 +228,75 @@ func TestMaintainedSDLCTemplatesKeepDiscoveryParityAndSchedulesOwnTheirTasks(t *
 			invalid.Nodes[i].Config = config
 		}
 		require.Contains(t, issueCodes(drafts.ValidateCandidate(invalid)), "enabled", "%s must reject per-schedule disable intent", adapterKey)
+
+		oversized := candidate
+		oversized.Nodes = append([]models.AutomationDraftNode(nil), candidate.Nodes...)
+		for i := range oversized.Nodes {
+			if _, scheduled := oversized.Nodes[i].Config["run_at"]; !scheduled {
+				continue
+			}
+			config := make(map[string]any, len(oversized.Nodes[i].Config))
+			for key, value := range oversized.Nodes[i].Config {
+				config[key] = value
+			}
+			config["repeat_interval"] = models.MaxScheduleRepeatInterval + 1
+			oversized.Nodes[i].Config = config
+			break
+		}
+		require.Contains(t, issueCodes(drafts.ValidateCandidate(oversized)), "repeat_interval", "%s must reject oversized schedule intervals", adapterKey)
 	}
+}
+
+func TestAutomationDraftScheduleConfigValidationMatchesForCustomAndMaintainedSchedules(t *testing.T) {
+	drafts := NewAutomationDraftService(nil, NewAutomationAdapterRegistry())
+	cases := []struct {
+		name    string
+		field   string
+		value   any
+		code    string
+		message string
+	}{
+		{name: "malformed run_at", field: "run_at", value: "25:99", code: "run_at", message: "Trigger time must use HH:MM local time."},
+		{name: "unsupported repeat_type", field: "repeat_type", value: "yearly", code: "repeat_type", message: "Unsupported schedule repeat type."},
+		{name: "oversized repeat_interval", field: "repeat_interval", value: models.MaxScheduleRepeatInterval + 1, code: "repeat_interval", message: "Schedule interval must be between 1 and 365."},
+		{name: "disabled schedule", field: "enabled", value: false, code: "enabled", message: "Schedule execution is controlled by the Automation lifecycle and must be enabled."},
+		{name: "non-bool clear_context_on_start", field: "clear_context_on_start", value: "yes", code: "clear_context_on_start", message: "Clear context on start must be true or false."},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			custom := customFixedScheduleCandidate(t, drafts)
+			custom.Nodes[0].Config[tc.field] = tc.value
+			customIssue := validationIssueByNodeAndCode(t, drafts.ValidateCandidate(custom), "schedule", tc.code)
+			require.Equal(t, tc.message, customIssue.Message)
+
+			maintained, err := drafts.TemplateCandidate(AutomationAdapterNativeSDLC)
+			require.NoError(t, err)
+			maintained = cloneAutomationDraftCandidate(maintained)
+			idx := automationDraftNodeIndexByKey(t, maintained, "vision_suggestions")
+			maintained.Nodes[idx].Config[tc.field] = tc.value
+			maintainedIssue := validationIssueByNodeAndCode(t, drafts.ValidateCandidate(maintained), "vision_suggestions", tc.code)
+			require.Equal(t, customIssue.Message, maintainedIssue.Message)
+		})
+	}
+}
+
+func TestAutomationDraftScheduleTargetValidationRemainsMaintainedAdapterSpecific(t *testing.T) {
+	drafts := NewAutomationDraftService(nil, NewAutomationAdapterRegistry())
+
+	custom := customFixedScheduleCandidate(t, drafts)
+	custom.Nodes[0].Config["target_node_key"] = "other"
+	customCodes := issueCodes(drafts.ValidateCandidate(custom))
+	require.NotContains(t, customCodes, "schedule_target")
+	require.Contains(t, customCodes, "unknown_config")
+
+	maintained, err := drafts.TemplateCandidate(AutomationAdapterNativeSDLC)
+	require.NoError(t, err)
+	maintained = cloneAutomationDraftCandidate(maintained)
+	idx := automationDraftNodeIndexByKey(t, maintained, "vision_suggestions")
+	maintained.Nodes[idx].Config["target_node_key"] = "implementation"
+	issue := validationIssueByNodeAndCode(t, drafts.ValidateCandidate(maintained), "vision_suggestions", "schedule_target")
+	require.Equal(t, "Trigger target is fixed by the registered adapter.", issue.Message)
 }
 
 func TestNativeSDLCTemplateUsesAutomationOwnedPromptsMatchingBootstrapContract(t *testing.T) {
@@ -68,13 +306,19 @@ func TestNativeSDLCTemplateUsesAutomationOwnedPromptsMatchingBootstrapContract(t
 	visionPrompt, _ := automationDraftNodeByKey(t, candidate, "vision_suggestions").Config["prompt"].(string)
 	require.Contains(t, visionPrompt, "Choose one focused project component or workflow")
 	require.Contains(t, visionPrompt, "Vary the component over time")
-	require.Contains(t, visionPrompt, "project vision or source-of-truth files")
+	require.Contains(t, visionPrompt, "VISION.md")
+	require.Contains(t, visionPrompt, "read it before choosing the finding")
+	require.Contains(t, visionPrompt, "project vision, or other source-of-truth files")
 	require.Contains(t, visionPrompt, "create_notification")
-	require.Contains(t, visionPrompt, "stable idempotency key")
-	require.Contains(t, visionPrompt, "Do not list, search, or inspect GitHub issues for duplicate detection")
-	require.Contains(t, visionPrompt, "Native notification idempotency")
+	require.NotContains(t, visionPrompt, "idempotency_key")
+	require.Contains(t, visionPrompt, "list_existing_automation_notifications")
+	require.Contains(t, visionPrompt, "next_offset")
+	require.Contains(t, visionPrompt, "skip that candidate and keep searching")
 	require.Contains(t, visionPrompt, "Do not modify code")
 	require.Contains(t, visionPrompt, "do not create implementation tasks")
+	require.Contains(t, visionPrompt, "## Summary")
+	require.Contains(t, visionPrompt, "Technical detail is useful and must not be omitted")
+	require.Contains(t, visionPrompt, "Make the title and message understandable to a product user")
 
 	roles := map[string]struct {
 		nodeKey       string
@@ -96,38 +340,47 @@ func TestNativeSDLCTemplateUsesAutomationOwnedPromptsMatchingBootstrapContract(t
 		}
 		require.False(t, seenPrompts[prompt], "%s must not share a prompt body with another finder", role)
 		seenPrompts[prompt] = true
+		require.Contains(t, prompt, "## Summary", "%s Native notification must open with a readable summary", role)
+		require.Contains(t, prompt, "Technical detail is useful and must not be omitted")
+		require.Contains(t, prompt, "Make the title and message understandable to a product user")
 		require.Contains(t, prompt, "Choose one focused project component or workflow")
 		require.Contains(t, prompt, "create_notification")
-		require.Contains(t, prompt, "stable idempotency key")
-		require.Contains(t, prompt, "Do not list, search, or inspect GitHub issues for duplicate detection")
-		require.Contains(t, prompt, "Native notification idempotency")
-		require.Contains(t, prompt, "evidence, scope, risk, and acceptance criteria")
+		require.NotContains(t, prompt, "idempotency_key")
+		require.Contains(t, prompt, "list_existing_automation_notifications")
+		require.Contains(t, prompt, "next_offset")
+		require.Contains(t, prompt, "skip that candidate and keep searching")
+		require.Contains(t, prompt, "acceptance criteria")
 		require.Contains(t, prompt, "Approval authorizes task creation only")
 	}
 
-	inboxPrompt, _ := automationDraftNodeByKey(t, candidate, "inbox").Config["prompt"].(string)
+	inboxNode := automationDraftNodeByKey(t, candidate, "inbox")
+	inboxPrompt, _ := inboxNode.Config["prompt"].(string)
 	for _, required := range []string{
 		"decision_state=approved", "implementation_task_linked=false", "get_alert", "claim_alert",
 		"create_alert_implementation_task", "complete_alert_processing", "fail_alert_processing", "release_alert_claim",
 	} {
 		require.Contains(t, inboxPrompt, required)
 	}
+	require.Equal(t, string(models.RepeatDaily), inboxNode.Config["repeat_type"], "inbox checker must run once daily, not hourly")
+	require.EqualValues(t, 1, inboxNode.Config["repeat_interval"])
+	require.Equal(t, "10:00", inboxNode.Config["run_at"], "inbox checker must run an hour after the daily drivers")
 	require.Contains(t, inboxPrompt, "atomically links at most one task")
-	require.Contains(t, inboxPrompt, "human approval authorized task creation only")
+	require.Contains(t, inboxPrompt, "The created task is the implementation task")
+	require.Contains(t, inboxPrompt, "directly instruct it to implement the reviewed change")
+	require.Contains(t, inboxPrompt, "must not create or look for another implementation task")
+	require.Contains(t, inboxPrompt, "must not run notification intake or call get_alert")
+	require.NotContains(t, inboxPrompt, "implementation approval")
 	require.Contains(t, inboxPrompt, "Call list_alerts without project_id")
+	require.Contains(t, inboxPrompt, "Before calling claim_alert, collect every eligible result from all pages")
+	require.Contains(t, inboxPrompt, "Do not claim, link, or process any notification while paginating")
+	require.Contains(t, inboxPrompt, "Only after the complete paginated snapshot is collected")
 	require.Contains(t, inboxPrompt, "Do not pass the read filter")
 	require.Contains(t, inboxPrompt, "both read and unread approved notifications")
 	require.Contains(t, inboxPrompt, "call execute_tasks with that exact implementation task ID")
 	require.Contains(t, inboxPrompt, "Only after execute_tasks succeeds")
 	require.Contains(t, inboxPrompt, "Never reuse a project ID from prior messages, examples, memory, or tool output")
 
-	auditorPrompt, _ := automationDraftNodeByKey(t, candidate, "auditor").Config["prompt"].(string)
-	for _, required := range []string{"stale notifications", "expired or failed claims", "missing notification/task links", "duplicate implementation work", "blocked tasks", "create_notification"} {
-		require.Contains(t, auditorPrompt, required)
-	}
-	require.Contains(t, auditorPrompt, "does not bypass approval")
-	require.Contains(t, auditorPrompt, "Do not list, search, or inspect GitHub issues for duplicate detection")
-	require.Contains(t, auditorPrompt, "Native notification and task state")
+	requireNoLoopAuditorNode(t, candidate)
 }
 
 func TestNativeSDLCTemplateOwnsItsPrompts(t *testing.T) {
@@ -213,25 +466,57 @@ func TestGitHubSDLCTemplateAcceptsBrowserSubmittedActionSettings(t *testing.T) {
 }
 
 func TestGitHubSDLCPromptsUseRepositoryFallbackAndTrustedLocalDeduplication(t *testing.T) {
+	require.Contains(t, githubSDLCOfferingManagerPrompt, "VISION.md")
+	require.Contains(t, githubSDLCOfferingManagerPrompt, "read it before choosing the finding")
 	require.Contains(t, githubSDLCDevInboxPrompt, "or from a GitHub remote in its local checkout when that URL is blank")
 	require.NotContains(t, githubSDLCDevInboxPrompt, "restricted to the selected project's explicit repository URL")
 	require.Contains(t, githubSDLCDevInboxPrompt, "category=active")
+	require.Contains(t, githubSDLCDevInboxPrompt, "Use `github_list_assigned_issues` and `github_list_my_assigned_issues` as compact body-free discovery lists")
+	require.Contains(t, githubSDLCDevInboxPrompt, "Do not call `github_get_issue` for every listed issue as a default scan step")
+	require.Contains(t, githubSDLCDevInboxPrompt, "call it only for the specific listed issue that needs body or acceptance-note details")
+	require.Contains(t, githubSDLCDevInboxPrompt, "Use the provided GitHub runtime tools as the only source for inbox discovery")
+	require.Contains(t, githubSDLCDevInboxPrompt, "do not use local shell commands, `gh`, Python scripts, `curl`, or direct GitHub API calls")
+	require.NotContains(t, githubSDLCDevInboxPrompt, "For each returned issue, inspect it with `github_get_issue`")
+	require.Contains(t, githubSDLCDevInboxPrompt, "Include the GitHub issue number, URL, title, body or acceptance notes, relevant labels, and assignment context")
+	require.Contains(t, githubSDLCDevInboxPrompt, "perform one existing-task lookup with `list_tasks` using the issue number or URL as the `query`")
+	require.Contains(t, githubSDLCDevInboxPrompt, "Treat that single lookup result as the reconciliation result for that issue")
+	require.Contains(t, githubSDLCDevInboxPrompt, "Do not retry the same issue lookup")
+	require.Contains(t, githubSDLCDevInboxPrompt, "do not vary task lifecycle filters to search again")
+	require.Contains(t, githubSDLCDevInboxPrompt, "do not run title or fragment searches for the same issue")
+	require.NotContains(t, githubSDLCDevInboxPrompt, "Use a different query such as the exact proposed task title")
+	require.NotContains(t, githubSDLCDevInboxPrompt, "issue-number/URL matching is inconclusive")
+	require.NotContains(t, githubSDLCDevInboxPrompt, "A returned `filter` object only echoes")
+	require.NotContains(t, githubSDLCDevInboxPrompt, "runtime defaults")
+	require.NotContains(t, githubSDLCDevInboxPrompt, "lifecycle state combinations")
 	require.Contains(t, githubSDLCDevInboxPrompt, "Do not call `execute_tasks` for a newly created Active task")
+	require.Contains(t, githubSDLCDevInboxPrompt, "After `create_task` succeeds for a newly created Active task, do not call `list_tasks` again for that issue")
+	require.Contains(t, githubSDLCDevInboxPrompt, "the successful `create_task` response is the confirmation")
 	require.Contains(t, githubSDLCDevInboxPrompt, "For a reconciled existing task, call `execute_tasks` only when `list_tasks` shows category Backlog or status failed/cancelled")
 	require.Contains(t, githubSDLCDevInboxPrompt, "Never call `execute_tasks` for an Active pending, queued, running, or completed task")
 	require.NotContains(t, githubSDLCDevInboxPrompt, "Finally, call execute_tasks with that exact task ID")
 	require.Contains(t, githubSDLCDevInboxPrompt, "Do not leave approved implementation work in Backlog")
+	require.Contains(t, githubSDLCDevInboxPrompt, "Do not post status comments on GitHub issues")
+	require.NotContains(t, githubSDLCDevInboxPrompt, "github_comment_on_issue")
+	require.Contains(t, githubSDLCDevInboxPrompt, "github_open_pull_request")
+	require.Contains(t, githubSDLCImplementationPrompt, "Supply pr_body with a concise factual Markdown summary of the changes and validation")
+	require.Contains(t, githubSDLCImplementationPrompt, "Closes #<source issue number>")
+	require.Contains(t, githubSDLCImplementationPrompt, "Do not include task IDs, product or automation boilerplate, or process narration")
 	for name, prompt := range map[string]string{
-		"offering manager":    githubSDLCOfferingManagerPrompt,
+		"vision suggestions":  githubSDLCOfferingManagerPrompt,
 		"bug finder":          githubSDLCBugFinderPrompt,
 		"optimization finder": githubSDLCOptimizationFinderPrompt,
 		"redundancy finder":   githubSDLCRedundancyFinderPrompt,
 	} {
-		require.Contains(t, prompt, "Do not list, search, or inspect existing GitHub issues for duplicate detection", name)
-		require.Contains(t, prompt, "Do not require a repository-wide issue or pull-request listing/search before publication", name)
-		require.Contains(t, prompt, "Do not block publication because such a listing/search is unavailable, unauthenticated, incomplete, or unpaginated", name)
-		require.Contains(t, prompt, "Call github_create_issue for each actionable finding; the server performs trusted local duplicate prevention", name)
-		require.NotContains(t, prompt, "searching/inspecting existing visible work", name)
+		require.Contains(t, prompt, "## Summary", "%s output must open with a readable summary", name)
+		require.Contains(t, prompt, "Technical detail is useful and must not be omitted", name)
+		require.Contains(t, prompt, "Write this for a product user", name)
+		require.Contains(t, prompt, "Pass the required category label", name)
+		require.Contains(t, prompt, "github_list_existing_automation_issues", name)
+		require.Contains(t, prompt, "skip that candidate and keep searching", name)
+		require.Contains(t, prompt, "Try to create at most one new GitHub issue this run", name)
+		require.Contains(t, prompt, "Only call `github_create_issue` after you believe the finding is not already represented", name)
+		require.NotContains(t, prompt, "idempotency_key", name)
+		require.NotContains(t, prompt, "Do not list, search, or inspect existing GitHub issues for duplicate detection", name)
 	}
 
 	candidate := models.AutomationDraftCandidate{
@@ -247,9 +532,15 @@ func TestGitHubSDLCPromptsUseRepositoryFallbackAndTrustedLocalDeduplication(t *t
 		},
 	}
 	prompt := automationCompiledTaskPrompt(candidate, candidate.Nodes[0])
+	require.Contains(t, prompt, "Always call github_get_project_inbox and call github_list_assigned_issues for every returned Authorized User")
+	require.Contains(t, prompt, "also call github_list_my_assigned_issues")
+	require.Contains(t, prompt, "Use the listed assigned issues as compact body-free discovery data")
+	require.Contains(t, prompt, "call github_get_issue only for the specific listed issue that needs body or acceptance-note details")
+	require.Contains(t, prompt, "Deduplicate issues by repository plus issue number")
 	require.Contains(t, prompt, "or from a GitHub remote in its local checkout when that URL is blank")
 	require.NotContains(t, prompt, "restricted to this project's explicit repository URL")
 	require.Contains(t, prompt, "Set source_github_issue_number to the exact issue number returned by this inbox execution")
+	require.Contains(t, prompt, "The task prompt must include the GitHub issue number, URL, title, body or acceptance notes, relevant labels, assignment context")
 	require.Contains(t, prompt, "Create each new issue task with category active; Active creation submits it automatically")
 	require.Contains(t, prompt, "Do not call execute_tasks for a newly created Active task")
 	require.Contains(t, prompt, "For a reconciled existing task, call execute_tasks only when list_tasks shows category Backlog or status failed/cancelled")
@@ -266,7 +557,6 @@ func TestGitHubSDLCTemplateOwnsItsPrompts(t *testing.T) {
 	require.Contains(t, sourceText, "const githubSDLCBugFinderPrompt")
 	require.Contains(t, sourceText, "const githubSDLCOptimizationFinderPrompt")
 	require.Contains(t, sourceText, "const githubSDLCRedundancyFinderPrompt")
-	require.Contains(t, sourceText, "const githubSDLCLoopAuditorPrompt")
 	require.NotContains(t, sourceText, "builtinskills")
 	require.NotContains(t, sourceText, "SKILL.md")
 	require.NotContains(t, sourceText, "dev-inbox-execution-invariants.md")
@@ -282,7 +572,6 @@ func TestGitHubSDLCTemplateUsesAutomationOwnedPrompts(t *testing.T) {
 		"optimization_finder": mustGitHubSDLCRolePrompt(t, "optimization_finder"),
 		"redundancy_finder":   mustGitHubSDLCRolePrompt(t, "redundancy_finder"),
 		"dev_inbox":           githubSDLCDevInboxPrompt,
-		"auditor":             githubSDLCLoopAuditorPrompt,
 	}
 	finderExpectations := map[string]struct {
 		identity  string
@@ -307,13 +596,13 @@ func TestGitHubSDLCTemplateUsesAutomationOwnedPrompts(t *testing.T) {
 	expectedCadence := map[string]struct {
 		repeatType string
 		interval   int
+		runAt      string
 	}{
-		"vision_suggestions":  {repeatType: string(models.RepeatDaily), interval: 1},
-		"bug_finder":          {repeatType: string(models.RepeatDaily), interval: 1},
-		"optimization_finder": {repeatType: string(models.RepeatDaily), interval: 1},
-		"redundancy_finder":   {repeatType: string(models.RepeatDaily), interval: 1},
-		"dev_inbox":           {repeatType: string(models.RepeatHours), interval: 1},
-		"auditor":             {repeatType: string(models.RepeatWeekly), interval: 1},
+		"vision_suggestions":  {repeatType: string(models.RepeatDaily), interval: 1, runAt: "09:00"},
+		"bug_finder":          {repeatType: string(models.RepeatDaily), interval: 1, runAt: "09:00"},
+		"optimization_finder": {repeatType: string(models.RepeatDaily), interval: 1, runAt: "09:00"},
+		"redundancy_finder":   {repeatType: string(models.RepeatDaily), interval: 1, runAt: "09:00"},
+		"dev_inbox":           {repeatType: string(models.RepeatDaily), interval: 1, runAt: "10:00"},
 	}
 	for nodeKey, prompt := range promptsByNode {
 		node := automationDraftNodeByKey(t, candidate, nodeKey)
@@ -321,8 +610,13 @@ func TestGitHubSDLCTemplateUsesAutomationOwnedPrompts(t *testing.T) {
 		require.Equal(t, prompt, automationCompiledTaskPrompt(candidate, node), "%s must persist the exact Automation template prompt without custom-graph additions", nodeKey)
 		require.NotContains(t, node.Config["prompt"], "references/dev-inbox-execution-invariants.md")
 		require.NotContains(t, node.Config["prompt"], "repository-wide current issue listing or search")
+		if nodeKey != "dev_inbox" {
+			require.Contains(t, node.Config["prompt"], "github_list_existing_automation_issues")
+			require.Contains(t, node.Config["prompt"], "keep searching")
+		}
 		require.Equal(t, expectedCadence[nodeKey].repeatType, node.Config["repeat_type"], "%s cadence must match the maintained template", nodeKey)
 		require.EqualValues(t, expectedCadence[nodeKey].interval, node.Config["repeat_interval"])
+		require.Equal(t, expectedCadence[nodeKey].runAt, node.Config["run_at"], "%s run_at must match the maintained template", nodeKey)
 	}
 }
 
@@ -459,7 +753,7 @@ func TestCustomAutomationValidatesComposableTaskHandoffsAndRejectsUnsupportedJoi
 			augmentedAgent.Nodes[i].Config = map[string]any{"prompt": "Research the request.", "category": "backlog", "priority": 2, "skills": []any{"researcher:review"}, "source_files": []any{"README.md"}}
 		}
 	}
-	require.Contains(t, issueCodes(svc.ValidateCandidate(augmentedAgent)), "unknown_config", "ordinary Agent Task nodes must reject Agent-only Skills and Source files")
+	require.Contains(t, issueCodes(svc.ValidateCandidate(augmentedAgent)), "unknown_config", "ordinary Agent Task nodes must reject deprecated skill and source-file config")
 
 	branch := candidate
 	branch.Nodes = append(append([]models.AutomationDraftNode(nil), candidate.Nodes...), models.AutomationDraftNode{
@@ -608,6 +902,29 @@ func TestCustomAutomationValidatesGitHubHandoffsAndRejectsHumanBoundaryBypasses(
 
 	require.Empty(t, svc.ValidateCandidate(candidate), "the GitHub graph must map to the existing assignment, inbox, task, PR, and review machinery")
 
+	var inboxNode models.AutomationDraftNode
+	for _, node := range candidate.Nodes {
+		if node.Key == "inbox" {
+			inboxNode = node
+			break
+		}
+	}
+	prompt := automationCompiledTaskPrompt(candidate, inboxNode)
+	require.Contains(t, prompt, "Use the listed assigned issues as compact body-free discovery data")
+	require.Contains(t, prompt, "call github_get_issue only for the specific listed issue that needs body or acceptance-note details")
+	require.Contains(t, prompt, "Use the provided GitHub runtime tools as the only source for inbox discovery")
+	require.Contains(t, prompt, "do not use local shell commands, gh, Python scripts, curl, or direct GitHub API calls")
+	require.Contains(t, prompt, "perform one existing-task lookup with list_tasks using the issue number or URL as the query")
+	require.Contains(t, prompt, "Treat that single lookup result as the reconciliation result for that issue")
+	require.Contains(t, prompt, "Do not retry the same issue lookup")
+	require.Contains(t, prompt, "do not vary task lifecycle filters to search again")
+	require.Contains(t, prompt, "do not run title or fragment searches for the same issue")
+	require.NotContains(t, prompt, "Use a different query such as the exact proposed task title")
+	require.NotContains(t, prompt, "issue-number/URL matching is inconclusive")
+	require.NotContains(t, prompt, "A returned filter object only echoes")
+	require.NotContains(t, prompt, "runtime defaults")
+	require.Contains(t, prompt, "After create_task succeeds for a newly created Active task, do not call list_tasks again for that issue")
+
 	backlogImplementation := candidate
 	backlogImplementation.Nodes = append([]models.AutomationDraftNode(nil), candidate.Nodes...)
 	for i := range backlogImplementation.Nodes {
@@ -736,9 +1053,6 @@ func TestAutomationTaskReferencesResolveInsideSelectedProject(t *testing.T) {
 	ctx := context.Background()
 	projectRepo := repository.NewProjectRepo(db)
 	project := automationTestProject(t, projectRepo, "Reference project")
-	project.RepoPath = t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(project.RepoPath, "VISION.md"), []byte("vision"), 0o600))
-	require.NoError(t, projectRepo.Update(ctx, &project))
 	other := automationTestProject(t, projectRepo, "Other reference project")
 	agentRepo := repository.NewAgentRepo(db)
 	taskRepo := repository.NewTaskRepo(db, nil)
@@ -754,7 +1068,6 @@ func TestAutomationTaskReferencesResolveInsideSelectedProject(t *testing.T) {
 	snapshot, err := capabilities.Build(ctx, project.ID)
 	require.NoError(t, err)
 	require.Contains(t, snapshot.Agents, models.AutomationCapabilityRef{ID: "project_architect", Name: "Project Architect"})
-	require.Contains(t, snapshot.Skills, models.AutomationCapabilityRef{ID: "project_architect:project-guidance", Name: "project-guidance"})
 
 	svc := NewAutomationDraftService(repository.NewAutomationRepo(db), NewAutomationAdapterRegistry())
 	svc.SetCapabilitySnapshotBuilder(capabilities)
@@ -762,23 +1075,25 @@ func TestAutomationTaskReferencesResolveInsideSelectedProject(t *testing.T) {
 	require.NoError(t, err)
 	driverIndex := automationDraftNodeIndexByKey(t, candidate, "vision_driver")
 	candidate.Nodes[driverIndex].Config["agent_ref"] = "project_architect"
-	candidate.Nodes[driverIndex].Config["skills"] = []any{"project_architect:project-guidance"}
-	candidate.Nodes[driverIndex].Config["source_files"] = []any{"VISION.md"}
 	require.Empty(t, svc.ValidateCandidateWithCapabilities(candidate, snapshot))
 
+	candidate.Nodes[driverIndex].Config["skills"] = []any{"project_architect:project-guidance"}
+	candidate.Nodes[driverIndex].Config["source_files"] = []any{"VISION.md"}
+	normalized, err := svc.NormalizeCandidate(candidate)
+	require.NoError(t, err)
+	normalizedDriver := automationDraftNodeByKey(t, normalized, "vision_driver")
+	require.NotContains(t, normalizedDriver.Config, "skills")
+	require.NotContains(t, normalizedDriver.Config, "source_files")
+	require.Empty(t, svc.ValidateCandidateWithCapabilities(normalized, snapshot))
+
 	candidate.Nodes[driverIndex].Config["agent_ref"] = "foreign_architect"
+	delete(candidate.Nodes[driverIndex].Config, "skills")
+	delete(candidate.Nodes[driverIndex].Config, "source_files")
 	issues := svc.ValidateCandidateWithCapabilities(candidate, snapshot)
 	require.Contains(t, issueCodes(issues), "agent_ref")
 	preview, err := svc.PreviewCandidate(ctx, project.ID, candidate, nil)
 	require.NoError(t, err)
 	require.Contains(t, issueCodes(preview.ValidationErrors), "agent_ref", "unresolved references must remain visible without being guessed")
-
-	candidate.Nodes[driverIndex].Config["agent_ref"] = "project_architect"
-	candidate.Nodes[driverIndex].Config["skills"] = []any{"project_architect:missing"}
-	require.Contains(t, issueCodes(svc.ValidateCandidateWithCapabilities(candidate, snapshot)), "skill_ref")
-	candidate.Nodes[driverIndex].Config["skills"] = []any{"project_architect:project-guidance"}
-	candidate.Nodes[driverIndex].Config["source_files"] = []any{"missing.md"}
-	require.Contains(t, issueCodes(svc.ValidateCandidateWithCapabilities(candidate, snapshot)), "source_file")
 }
 
 func TestAutomationDraftServiceRejectsArbitraryTopologyAndUnsafeConfiguration(t *testing.T) {
@@ -830,6 +1145,120 @@ func TestAutomationDraftServiceRejectsArbitraryTopologyAndUnsafeConfiguration(t 
 	require.Contains(t, issueCodes(svc.ValidateCandidate(candidate)), "invalid_json")
 }
 
+func TestAutomationCandidateWithoutNodeDeepCopiesMutableData(t *testing.T) {
+	position := &models.AutomationDraftPoint{X: 10, Y: 20}
+	source := models.AutomationDraftCandidate{
+		Nodes: []models.AutomationDraftNode{
+			{
+				Key:      "kept",
+				Config:   map[string]any{"list": []string{"original"}, "nested": map[string]any{"values": []any{"original"}}},
+				Position: position,
+			},
+			{Key: "removed", Config: map[string]any{}},
+		},
+		Edges: []models.AutomationDraftEdge{
+			{Key: "kept_edge", From: "kept", To: "kept", Condition: map[string]any{"nested": map[string]any{"value": "original"}}},
+			{Key: "removed_edge", From: "removed", To: "kept"},
+		},
+		Assumptions: []string{"original assumption"},
+		Warnings:    []string{"original warning"},
+	}
+
+	reduced := automationCandidateWithoutNode(source, "removed")
+	reduced.Nodes[0].Config["list"].([]string)[0] = "changed"
+	reduced.Nodes[0].Config["nested"].(map[string]any)["values"].([]any)[0] = "changed"
+	reduced.Nodes[0].Position.X = 99
+	reduced.Edges[0].Condition["nested"].(map[string]any)["value"] = "changed"
+	reduced.Assumptions[0] = "changed assumption"
+	reduced.Warnings[0] = "changed warning"
+
+	require.Equal(t, []string{"original"}, source.Nodes[0].Config["list"])
+	require.Equal(t, "original", source.Nodes[0].Config["nested"].(map[string]any)["values"].([]any)[0])
+	require.Equal(t, float64(10), source.Nodes[0].Position.X)
+	require.Equal(t, "original", source.Edges[0].Condition["nested"].(map[string]any)["value"])
+	require.Equal(t, []string{"original assumption"}, source.Assumptions)
+	require.Equal(t, []string{"original warning"}, source.Warnings)
+}
+
+func automationCandidateWithoutNode(candidate models.AutomationDraftCandidate, key string) models.AutomationDraftCandidate {
+	candidate = cloneAutomationDraftCandidate(candidate)
+	nodes := make([]models.AutomationDraftNode, 0, len(candidate.Nodes))
+	for _, node := range candidate.Nodes {
+		if node.Key != key {
+			nodes = append(nodes, node)
+		}
+	}
+	edges := make([]models.AutomationDraftEdge, 0, len(candidate.Edges))
+	for _, edge := range candidate.Edges {
+		if edge.From != key && edge.To != key {
+			edges = append(edges, edge)
+		}
+	}
+	candidate.Nodes = nodes
+	candidate.Edges = edges
+	return candidate
+}
+
+func cloneAutomationDraftCandidate(candidate models.AutomationDraftCandidate) models.AutomationDraftCandidate {
+	cloned := candidate
+	cloned.Nodes = make([]models.AutomationDraftNode, len(candidate.Nodes))
+	for i, node := range candidate.Nodes {
+		cloned.Nodes[i] = node
+		cloned.Nodes[i].Config = cloneAutomationDraftMap(node.Config)
+		if node.Position != nil {
+			position := *node.Position
+			cloned.Nodes[i].Position = &position
+		}
+	}
+	cloned.Edges = make([]models.AutomationDraftEdge, len(candidate.Edges))
+	for i, edge := range candidate.Edges {
+		cloned.Edges[i] = edge
+		cloned.Edges[i].Condition = cloneAutomationDraftMap(edge.Condition)
+	}
+	cloned.Assumptions = append([]string(nil), candidate.Assumptions...)
+	cloned.Warnings = append([]string(nil), candidate.Warnings...)
+	return cloned
+}
+
+func cloneAutomationDraftMap(values map[string]any) map[string]any {
+	if values == nil {
+		return nil
+	}
+	cloned := make(map[string]any, len(values))
+	for key, value := range values {
+		cloned[key] = cloneAutomationDraftValue(value)
+	}
+	return cloned
+}
+
+func cloneAutomationDraftValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		return cloneAutomationDraftMap(typed)
+	case []any:
+		cloned := make([]any, len(typed))
+		for i, item := range typed {
+			cloned[i] = cloneAutomationDraftValue(item)
+		}
+		return cloned
+	case []string:
+		return append([]string(nil), typed...)
+	default:
+		return value
+	}
+}
+
+func automationCandidateWithoutEdge(candidate models.AutomationDraftCandidate, key string) models.AutomationDraftCandidate {
+	edges := make([]models.AutomationDraftEdge, 0, len(candidate.Edges))
+	for _, edge := range candidate.Edges {
+		if edge.Key != key {
+			edges = append(edges, edge)
+		}
+	}
+	candidate.Edges = edges
+	return candidate
+}
+
 func automationDraftNodeIndexByKey(t *testing.T, candidate models.AutomationDraftCandidate, key string) int {
 	t.Helper()
 	for i := range candidate.Nodes {
@@ -841,10 +1270,138 @@ func automationDraftNodeIndexByKey(t *testing.T, candidate models.AutomationDraf
 	return -1
 }
 
+func customFixedScheduleCandidate(t *testing.T, drafts *AutomationDraftService) models.AutomationDraftCandidate {
+	t.Helper()
+	candidate, err := drafts.BlankCandidate(AutomationAdapterCustom)
+	require.NoError(t, err)
+	candidate.Nodes = []models.AutomationDraftNode{
+		{Key: "schedule", Name: "Schedule", Type: models.AutomationNodeTrigger, Role: "fixed_schedule", Config: map[string]any{"prompt": "Run the scheduled work.", "category": "scheduled", "priority": 2, "run_at": "09:00", "repeat_type": "daily", "repeat_interval": 1, "enabled": true, "clear_context_on_start": true}},
+	}
+	candidate.Edges = nil
+	return candidate
+}
+
+func validationIssueByNodeAndCode(t *testing.T, issues []models.AutomationValidationIssue, nodeKey, code string) models.AutomationValidationIssue {
+	t.Helper()
+	for _, issue := range issues {
+		if issue.NodeKey == nodeKey && issue.Code == code {
+			return issue
+		}
+	}
+	t.Fatalf("no %s issue for %s in %#v", code, nodeKey, issues)
+	return models.AutomationValidationIssue{}
+}
+
 func issueCodes(issues []models.AutomationValidationIssue) []string {
 	codes := make([]string, len(issues))
 	for i := range issues {
 		codes[i] = issues[i].Code
 	}
 	return codes
+}
+
+func TestMaintainedSDLCTemplatesDecodeCanonicalYAML(t *testing.T) {
+	drafts := NewAutomationDraftService(nil, NewAutomationAdapterRegistry())
+	for _, adapterKey := range []string{AutomationAdapterNativeSDLC, AutomationAdapterGitHubSDLC} {
+		t.Run(adapterKey, func(t *testing.T) {
+			document, ok := maintainedAutomationTemplateYAML(adapterKey)
+			require.True(t, ok)
+			expected, err := DecodeAutomationDraftYAML([]byte(document))
+			require.NoError(t, err)
+			actual, err := drafts.TemplateCandidate(adapterKey)
+			require.NoError(t, err)
+			require.Equal(t, expected, actual)
+			require.Empty(t, drafts.ValidateCandidate(actual))
+		})
+	}
+}
+
+func TestAutomationDraftYAMLPositionlessCustomNodesReceiveDeterministicLayout(t *testing.T) {
+	raw := `schema_version: 1
+name: Positionless custom graph
+description: ''
+automation_type: custom
+adapter_key: custom
+nodes:
+  - key: task
+    name: Follow up
+    type: agent_task
+    role: task
+    config:
+      prompt: Follow up on the request.
+      category: backlog
+      priority: 2
+  - key: complete
+    name: Complete
+    type: outcome
+    role: completed
+    config: {}
+edges:
+  - key: task_complete
+    from: task
+    to: complete
+    from_port: right
+    to_port: left
+`
+	candidate, err := DecodeAutomationDraftYAML([]byte(raw))
+	require.NoError(t, err)
+
+	drafts := NewAutomationDraftService(nil, NewAutomationAdapterRegistry())
+	preview, err := drafts.PreviewCandidate(context.Background(), "", candidate, nil)
+	require.NoError(t, err)
+	require.Empty(t, preview.ValidationErrors)
+	for _, node := range preview.Candidate.Nodes {
+		require.NotNil(t, node.Position, node.Key)
+	}
+	for _, edge := range preview.Candidate.Edges {
+		require.NotNil(t, automationDraftNodeByKey(t, preview.Candidate, edge.From).Position, edge.Key)
+		require.NotNil(t, automationDraftNodeByKey(t, preview.Candidate, edge.To).Position, edge.Key)
+	}
+
+	repeated, err := drafts.PreviewCandidate(context.Background(), "", candidate, nil)
+	require.NoError(t, err)
+	require.Equal(t, preview.Candidate, repeated.Candidate)
+}
+
+func TestAutomationDraftYAMLRoundTripAndStrictDecoding(t *testing.T) {
+	repo := repository.NewAutomationRepo(testutil.NewTestDB(t))
+	drafts := NewAutomationDraftService(repo, NewAutomationAdapterRegistry())
+	for _, adapter := range []string{AutomationAdapterNativeSDLC, AutomationAdapterGitHubSDLC} {
+		candidate, err := drafts.TemplateCandidate(adapter)
+		require.NoError(t, err)
+		first, err := EncodeAutomationDraftYAML(candidate)
+		require.NoError(t, err)
+		second, err := EncodeAutomationDraftYAML(candidate)
+		require.NoError(t, err)
+		require.Equal(t, first, second)
+
+		decoded, err := DecodeAutomationDraftYAML([]byte(first))
+		require.NoError(t, err)
+		require.Equal(t, candidate.Name, decoded.Name)
+		require.Equal(t, candidate.AdapterKey, decoded.AdapterKey)
+		require.Len(t, decoded.Nodes, len(candidate.Nodes))
+		require.Len(t, decoded.Edges, len(candidate.Edges))
+		require.IsType(t, int(0), automationDraftNodeByKey(t, decoded, "vision_suggestions").Config["priority"])
+	}
+
+	for _, document := range []string{
+		"name: duplicate\nname: duplicate\n",
+		"schema_version: 1\nunknown: value\n",
+		"schema_version: 1\nname: x\ndescription: ''\nautomation_type: custom\nadapter_key: custom\nnodes: &nodes []\nedges: *nodes\n",
+	} {
+		_, err := DecodeAutomationDraftYAML([]byte(document))
+		require.Error(t, err)
+	}
+	invalidTopology, err := DecodeAutomationDraftYAML([]byte("schema_version: 1\nname: x\ndescription: ''\nautomation_type: custom\nadapter_key: custom\nnodes: []\nedges:\n  - key: dangling\n    from: missing\n    to: missing\n"))
+	require.NoError(t, err)
+	require.NotEmpty(t, drafts.ValidateCandidate(invalidTopology))
+}
+
+func requireNoLoopAuditorNode(t *testing.T, candidate models.AutomationDraftCandidate) {
+	t.Helper()
+	for _, node := range candidate.Nodes {
+		require.NotEqual(t, "auditor", node.Key)
+		require.NotEqual(t, "loop_auditor", node.Role)
+		require.NotEqual(t, "Loop Auditor", node.Name)
+	}
 }

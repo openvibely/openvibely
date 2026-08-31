@@ -403,6 +403,338 @@ html, body, #main-content { height: 100%; margin: 0; }
 	}
 }
 
+func TestChatActionsDropdownRuntimeInChrome(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))
+	if err != nil {
+		t.Fatalf("read pinned HTMX fixture: %v", err)
+	}
+
+	for _, runtime := range []string{"web", "desktop"} {
+		runtime := runtime
+		t.Run(runtime, func(t *testing.T) {
+			runChatActionsDropdownInChrome(t, chrome, htmxJS, runtime)
+		})
+	}
+}
+
+func runChatActionsDropdownInChrome(t *testing.T, chrome string, htmxJS []byte, runtime string) {
+	t.Helper()
+
+	baseContext := context.Background()
+	if runtime == "desktop" {
+		baseContext = layout.WithDesktopMode(baseContext, true)
+	}
+	var base bytes.Buffer
+	if err := layout.Base("Chat actions fixture", nil, "project-actions").Render(baseContext, &base); err != nil {
+		t.Fatalf("render production layout: %v", err)
+	}
+	baseHTML := base.String()
+	styleStart := strings.Index(baseHTML, "<style>")
+	if styleStart < 0 {
+		t.Fatal("could not isolate production layout CSS")
+	}
+	styleEndOffset := strings.Index(baseHTML[styleStart:], "</style>")
+	if styleEndOffset < 0 {
+		t.Fatal("could not find end of production layout CSS")
+	}
+	productionStyle := baseHTML[styleStart : styleStart+styleEndOffset+len("</style>")]
+	navStart := strings.Index(baseHTML, "window.openVibelyNavigate = function")
+	if navStart < 0 {
+		t.Fatal("could not isolate production HTMX navigation helper")
+	}
+	navEndOffset := strings.Index(baseHTML[navStart:], "// Scroll position restoration for drop zones")
+	if navEndOffset < 0 {
+		t.Fatal("could not find end of production HTMX navigation helper")
+	}
+	navigationScript := baseHTML[navStart : navStart+navEndOffset]
+
+	var renderedChat bytes.Buffer
+	if err := ChatContent(nil, nil, "project-actions", nil, nil, false, false, 30).Render(context.Background(), &renderedChat); err != nil {
+		t.Fatalf("render production ChatContent: %v", err)
+	}
+	chatFragment := renderedChat.String()
+
+	runner := `<script>
+window.requestAnimationFrame = function(callback) { return setTimeout(callback, 0); };
+window.cancelAnimationFrame = function(handle) { clearTimeout(handle); };
+window.renderChatMarkdown = function(text) {
+  var div = document.createElement('div');
+  div.textContent = String(text || '');
+  return div.innerHTML;
+};
+window.renderChatMarkdownAsync = null;
+window.addCodeCopyButtons = function() {};
+window.addEventListener('DOMContentLoaded', function() {
+  function fail(message) { throw new Error(message); }
+  function wait(ms) { return new Promise(function(resolve) { setTimeout(resolve, ms); }); }
+  function waitFor(check, label, timeout) {
+    var started = performance.now();
+    return new Promise(function(resolve, reject) {
+      function poll() {
+        try {
+          if (check()) { resolve(); return; }
+        } catch (error) {
+          reject(error);
+          return;
+        }
+        if (performance.now() - started > (timeout || 5000)) {
+          reject(new Error('timed out waiting for ' + label));
+          return;
+        }
+        setTimeout(poll, 10);
+      }
+      poll();
+    });
+  }
+  function root() { return document.getElementById('chat-page-root'); }
+  function dropdown() { return document.querySelector('[data-chat-actions-dropdown]'); }
+  function trigger() { return document.querySelector('[data-chat-actions-dropdown] [aria-controls="chat-actions-menu"]'); }
+  function menu() { return document.getElementById('chat-actions-menu'); }
+  function clearItem() { return document.querySelector('[data-chat-actions-dropdown] [role="menuitem"]'); }
+  function isVisible() {
+    var currentMenu = menu();
+    if (!currentMenu) return false;
+    var styles = getComputedStyle(currentMenu);
+    return styles.visibility !== 'hidden' && styles.opacity !== '0' && styles.pointerEvents !== 'none';
+  }
+  function assertClosed(stage) {
+    var currentRoot = root();
+    var currentDropdown = dropdown();
+    var currentTrigger = trigger();
+    var currentMenu = menu();
+    if (!currentRoot || !currentDropdown || !currentTrigger || !currentMenu) fail(stage + ' lost Chat actions controls');
+    if (currentDropdown.hasAttribute('data-chat-actions-open')) fail(stage + ' left the explicit open state set');
+    if (currentTrigger.getAttribute('aria-expanded') !== 'false') fail(stage + ' left aria-expanded open');
+    if (isVisible()) fail(stage + ' left the menu visible');
+    if (document.activeElement && currentMenu.contains(document.activeElement)) fail(stage + ' left focus inside the hidden menu');
+  }
+  function assertOpen(stage) {
+    var currentRoot = root();
+    var currentDropdown = dropdown();
+    var currentTrigger = trigger();
+    if (!currentRoot || !currentDropdown || !currentTrigger || !isVisible()) fail(stage + ' did not open the menu');
+    if (currentDropdown.getAttribute('data-chat-actions-open') !== 'true') fail(stage + ' did not set explicit open state');
+    if (currentTrigger.getAttribute('aria-expanded') !== 'true') fail(stage + ' did not update aria-expanded');
+  }
+  function key(target, value) {
+    target.dispatchEvent(new KeyboardEvent('keydown', {key: value, bubbles: true, cancelable: true}));
+  }
+  function mouseClick(target) {
+    if (!target) fail('mouse click target is missing');
+    target.focus();
+    var pointerInit = {bubbles: true, cancelable: true, view: window, button: 0, buttons: 1};
+    if (typeof PointerEvent === 'function') target.dispatchEvent(new PointerEvent('pointerdown', pointerInit));
+    target.dispatchEvent(new MouseEvent('mousedown', pointerInit));
+    target.dispatchEvent(new MouseEvent('mouseup', pointerInit));
+    if (typeof PointerEvent === 'function') target.dispatchEvent(new PointerEvent('pointerup', pointerInit));
+    target.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true, view: window, button: 0, buttons: 0}));
+  }
+  function reportResult(status, message) {
+    return fetch('/browser-result?status=' + encodeURIComponent(status) + '&message=' + encodeURIComponent(message || ''), {method: 'POST'}).catch(function() {});
+  }
+  function markFailure(error) {
+    var message = String(error && error.stack || error);
+    var currentRoot = root() || document.body;
+    currentRoot.setAttribute('data-test-result', 'fail');
+    currentRoot.setAttribute('data-test-error', message);
+    reportResult('fail', message);
+  }
+
+  (async function() {
+    var reloadStage = sessionStorage.getItem('chat-actions-reload-stage');
+    await waitFor(function() { return root() && trigger() && menu(); }, reloadStage ? 'reloaded Chat actions controls' : 'initial Chat actions controls');
+    trigger().focus();
+    await wait(30);
+    assertClosed(reloadStage ? 'reload startup focus' : 'startup focus');
+
+    if (!reloadStage) {
+      mouseClick(trigger());
+      await wait(30);
+      assertOpen('mouse activation');
+      mouseClick(trigger());
+      await wait(30);
+      assertClosed('mouse close');
+      if (document.activeElement !== trigger()) fail('mouse close did not restore focus to the trigger');
+
+      key(trigger(), 'Enter');
+      await wait(30);
+      assertOpen('Enter activation');
+      menu().querySelector('[role="menuitem"]').focus();
+      key(menu().querySelector('[role="menuitem"]'), 'Escape');
+      await wait(30);
+      assertClosed('Escape from menu item');
+      if (document.activeElement !== trigger()) fail('Escape from menu item did not restore focus to the trigger');
+
+      key(trigger(), ' ');
+      await wait(30);
+      assertOpen('Space activation');
+      key(trigger(), 'Escape');
+      await wait(30);
+      assertClosed('Escape from trigger');
+      if (document.activeElement !== trigger()) fail('Escape from trigger did not retain focus on the trigger');
+
+      var confirmationMessage = '';
+      window.confirm = function(message) {
+        confirmationMessage = String(message);
+        return false;
+      };
+      mouseClick(trigger());
+      await wait(30);
+      assertOpen('confirmation setup');
+      clearItem().click();
+      await wait(100);
+      if (confirmationMessage !== 'Clear all chat history? This cannot be undone.') fail('clear action used unexpected confirmation text: ' + confirmationMessage);
+      var historyCount = await fetch('/chat-history-count').then(function(response) { return response.text(); });
+      if (historyCount !== '0') fail('cancelled clear action issued ' + historyCount + ' history request(s)');
+      document.body.dispatchEvent(new Event('pointerdown', {bubbles: true}));
+      await wait(30);
+      assertClosed('outside close after cancelled confirmation');
+
+      mouseClick(trigger());
+      await wait(30);
+      assertOpen('navigation setup');
+      await window.openVibelyNavigate('/other');
+      await waitFor(function() { return document.getElementById('other-page'); }, 'other page');
+      history.back();
+      await waitFor(function() { return root() && trigger() && menu(); }, 'history-back Chat');
+      await wait(100);
+      assertClosed('history-back restoration');
+      sessionStorage.setItem('chat-actions-reload-stage', 'pending');
+      location.reload();
+      return;
+    }
+
+    sessionStorage.removeItem('chat-actions-reload-stage');
+    key(trigger(), 'Enter');
+    await wait(30);
+    assertOpen('post-reload Enter activation');
+    key(trigger(), 'Escape');
+    await wait(30);
+    assertClosed('post-reload Escape');
+    if (document.activeElement !== trigger()) fail('post-reload Escape did not retain focus on the trigger');
+    root().setAttribute('data-test-result', 'pass');
+    await reportResult('pass', 'runtime=' + document.documentElement.getAttribute('data-openvibely-runtime'));
+  })().catch(markFailure);
+});
+</script>`
+
+	fixtureStyle := `<style>
+html, body, #main-content { height: 100%; margin: 0; }
+.dropdown-content { display: none; visibility: hidden; opacity: 0; pointer-events: none; }
+.dropdown:focus-within > .dropdown-content { display: block; }
+.hidden { display: none !important; }
+</style>`
+
+	var stateMu sync.Mutex
+	historyRequests := 0
+	browserResult := make(chan string, 8)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/htmx-2.0.4.min.js":
+			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+			_, _ = w.Write(htmxJS)
+		case "/chat":
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			if r.Header.Get("HX-Request") == "true" {
+				_, _ = w.Write([]byte(chatFragment))
+				return
+			}
+			doc := `<!doctype html><html lang="en" data-theme="dark" data-openvibely-runtime="` + runtime + `"><head><meta charset="utf-8"><script src="/htmx-2.0.4.min.js"></script><script>` + navigationScript + `</script>` + productionStyle + fixtureStyle + runner + `</head><body><main id="main-content">` + chatFragment + `</main></body></html>`
+			_, _ = w.Write([]byte(doc))
+		case "/other":
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(`<div id="other-page"><span hidden data-openvibely-page-title="Other - OpenVibely"></span><h1>Other</h1></div>`))
+		case "/chat/history":
+			stateMu.Lock()
+			historyRequests++
+			stateMu.Unlock()
+			w.WriteHeader(http.StatusNoContent)
+		case "/chat-history-count":
+			stateMu.Lock()
+			count := historyRequests
+			stateMu.Unlock()
+			_, _ = fmt.Fprintf(w, "%d", count)
+		case "/chat/composer-action":
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(`<button id="chat-form-primary-action" type="submit">Send</button>`))
+		case "/browser-result":
+			result := r.URL.Query().Get("status") + ":" + r.URL.Query().Get("message")
+			select {
+			case browserResult <- result:
+			default:
+			}
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	stdoutPath := filepath.Join(t.TempDir(), "chat-actions.html")
+	stderrPath := filepath.Join(t.TempDir(), "chat-actions.stderr")
+	stdoutFile, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatalf("create Chrome stdout: %v", err)
+	}
+	defer stdoutFile.Close()
+	stderrFile, err := os.Create(stderrPath)
+	if err != nil {
+		t.Fatalf("create Chrome stderr: %v", err)
+	}
+	defer stderrFile.Close()
+
+	cmd := exec.Command(chrome,
+		"--headless=new",
+		"--no-sandbox",
+		"--disable-gpu",
+		"--disable-software-rasterizer",
+		"--disable-dev-shm-usage",
+		"--disable-background-networking",
+		"--disable-background-timer-throttling",
+		"--no-first-run",
+		"--no-default-browser-check",
+		"--user-data-dir="+filepath.Join(t.TempDir(), "chat-actions-profile"),
+		server.URL+"/chat?project_id=project-actions",
+	)
+	cmd.Stdout = stdoutFile
+	cmd.Stderr = stderrFile
+	if err := startBrowserProcess(cmd); err != nil {
+		t.Fatalf("start Chrome Chat actions fixture: %v", err)
+	}
+
+	var outcome string
+	lastProgress := "none"
+	deadline := time.After(45 * time.Second)
+	for outcome == "" {
+		select {
+		case result := <-browserResult:
+			if strings.HasPrefix(result, "progress:") {
+				lastProgress = strings.TrimPrefix(result, "progress:")
+				continue
+			}
+			outcome = result
+		case <-deadline:
+			outcome = "fail:timed out waiting for browser result callback; last progress=" + lastProgress
+		}
+	}
+	stopBrowserProcess(cmd)
+
+	if !strings.HasPrefix(outcome, "pass:") {
+		stderr, _ := os.ReadFile(stderrPath)
+		if len(stderr) > 8000 {
+			stderr = stderr[len(stderr)-8000:]
+		}
+		t.Fatalf("real Chat actions runtime fixture failed for %s: %s\nLast browser progress: %s\nChrome stderr tail:\n%s", runtime, outcome, lastProgress, stderr)
+	}
+
+	stateMu.Lock()
+	defer stateMu.Unlock()
+	if historyRequests != 0 {
+		t.Fatalf("cancelled Chat clear action issued %d history request(s) in %s runtime", historyRequests, runtime)
+	}
+}
+
 func chatNavigationChromePath(t *testing.T) string {
 	t.Helper()
 	chrome := "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"

@@ -2,37 +2,59 @@
 name: alerts_and_actionable_notifications
 type: project
 created: 2026-07-15
-updated: 2026-07-27
+updated: 2026-08-28
 source: consolidation
-source_id: memory_consolidation_2026_07_20
+source_id: memory_consolidation_2026_08_28
 confidence: high
 title: Alerts and Actionable Notifications
 ---
 
 OpenVibely supports backward-compatible operational alerts and generic approval-based actionable notifications.
 
-Durable model and migration facts:
+Durable model and authorization facts:
 - Alerts are project-owned. List/count, ID-based reads, read-state, delete, decision, claim, linkage, and processing operations enforce project ownership server-side.
-- Existing operational alerts retain their persisted project IDs. Migration does not infer ownership from the active UI project or introduce implicit global visibility; legacy rows are backfilled as `scope=project`, `decision=not_required`, and `processing=not_applicable`.
-- Actionable notification decision state is separate from read/unread and automation processing state. Notifications carry project/scope, type, title/message/body, source and source-task identity, timestamps, structured metadata, optional project-scoped idempotency key, lease claimant/time, processing/failure state, and linked implementation task.
-- Deleting a task intentionally retains associated alerts as historical records while nulling their `task_id`, `source_task_id`, and `execution_id` references. Those alerts must be deleted separately if no longer wanted.
-- Human approval authorizes downstream task creation only. It does not authorize merge, release, deployment, or other higher-risk actions.
+- Existing operational alerts retain persisted project IDs. Migration does not infer ownership from active UI project or create implicit global visibility; legacy rows are backfilled as `scope=project`, `decision=not_required`, and `processing=not_applicable`.
+- Actionable notification decision state is separate from read/unread and automation processing state. Notifications carry project/scope, type, content, source/task identity, timestamps, structured metadata, optional backend idempotency key, lease claimant/time, processing/failure state, and linked implementation task.
+- Deleting a task intentionally retains associated alerts as historical records while nulling task/execution references; those alerts must be deleted separately if no longer wanted.
+- Migration 135 indexes project-scoped stable list order as `alerts(project_id, created_at DESC, id DESC)` and removes the redundant single-column project index.
+- Human approval authorizes creating and starting the configured downstream implementation task only. It does not authorize merge, release, deployment, destructive remediation, credential changes, or other higher-risk actions.
+- Scheduled execution context uses persisted `task.ProjectID`. Scheduled Task runtimes specialize `list_alerts` so `project_id` and `read` are not model-visible and strip injected defaults; these scans cannot be redirected and always include read/unread states.
+- Ordinary Chat and non-scheduled Task runtimes retain optional `project_id` equality assertions and `read` filtering.
 
-Authorization, concurrency, and runtime facts:
-- Scheduled execution context uses persisted `task.ProjectID`, not process-global or current UI project state. A supplied `project_id` is only an equality assertion and is rejected when it differs from the caller's authorized project.
-- `create_alert` preserves the legacy operational-alert contract: title is required, type defaults to `custom`, and message, severity, operational type, and same-project `task_id` remain optional. Operational alerts use `decision=not_required` and `processing=not_applicable` rather than entering approval workflow.
-- `create_notification` creates a pending project-scoped actionable notification, binds source-task identity from the persisted caller task, accepts structured metadata, and supports project-scoped idempotency keys.
-- Initial tasks, scheduled tasks, ordinary task-thread follow-ups, ordinary web/API Chat, Slack, Telegram, Discord, and Email expose `create_notification` when the selected provider/auth path supports runtime tools. Dispatch derives project and trusted source-task identity from the persisted execution context.
-- Ordinary Chat exposes the full notification lifecycle in Orchestrate mode and only read operations such as `list_alerts` and `get_alert` in Plan mode. Runtime-tool-incapable provider/auth paths receive no notification tools and have no bracket-marker fallback.
-- The structured runtime surface covers stable filtered/paginated listing, detail, atomic claim, atomic implementation-task creation/linkage, explicit linkage, processing completion/failure, and claim release/retry.
-- Claims are lease-based and atomic. Stale leases and failed attempts can be recovered. `create_alert_implementation_task` requires a non-empty title and prompt and a notification currently claimed by the persisted caller task; out-of-range priority defaults to 2. In one SQLite `BEGIN IMMEDIATE` transaction it returns the already-linked task or creates a same-project `backlog`/`pending` task with `created_via=system_agent`, links it, marks processing `implementation_task_linked`, and clears claim expiry. It does not start the task, mark processing complete, merge, release, or deploy.
-- Slack, Telegram, and Discord first-turn channel runtimes are constructed only after the channel Chat task is persisted, so channel lifecycle handlers receive trusted caller identity. Email uses the generic executor with its persisted Chat task.
-- All alert lifecycle mutations publish the existing project-scoped alert invalidation event, including claim, release, explicit linkage, atomic task creation, completion, failure, read, and delete operations.
-- Custom Automation graphs support Native Alert approval handoffs through the existing Alert runtime: a connected Agent task receives deterministic `create_notification` instructions from its immutable published Automation version, the Alert is created only when the task runs, and pending/approved/rejected state is projected onto the exact configured notification, human-gate, and outcome nodes. Publication creates no Alert and approval still grants no merge, release, or deploy authority.
-- Automation-bound idempotent notification retries may reuse an Alert only when the same persisted Automation source already owns the creation transition; a same-project, same-key Alert created outside that Automation is rejected rather than adopted.
+Runtime tool contracts:
+- `create_alert` preserves the legacy operational-alert contract: title required; type defaults to `custom`; message/severity/operational type/same-project `task_id` optional; operational alerts use `decision=not_required` and `processing=not_applicable`.
+- `create_notification` creates a pending project-scoped actionable notification, binds trusted source-task identity from persisted caller task, accepts structured metadata, and keeps optional backend/direct-caller idempotency support. The model-facing schema ignores hidden `idempotency_key` input.
+- Native SDLC duplicate prevention is existing-work-first rather than idempotency-key based; finders inspect existing notifications, hydrate likely matches, and create at most one new finding per run.
+- Initial, scheduled, task-thread, web/API Chat, Slack, Telegram, Discord, and Email runtimes expose `create_notification` when the selected provider/auth path supports runtime tools; dispatch derives project/source identity from persisted execution context. Ordinary Chat exposes notification reads and mutations in Orchestrate mode, read-only operations in Plan mode, and no bracket-marker fallback for tool-incapable providers.
+- The runtime surface covers filtered/paginated listing, detail, atomic lease claims, implementation-task creation/linkage, completion/failure, claim release/retry, and explicit pending-notification decisions. Explicit `lease_seconds` is bounded to `1..86400`; omitted uses the repository default.
+- `create_alert_implementation_task` requires a non-empty title/prompt and a notification claimed by the persisted caller task. It transactionally returns an existing linked task or creates and links a same-project Backlog/Pending system-agent task, marks processing `implementation_task_linked`, and clears claim expiry; it does not start, complete, merge, release, or deploy. Open duplication issue `#835` tracks repeated task-row creation that belongs in the shared transaction-capable `TaskRepo` path.
+- If Native creation, linkage, or execution fails, processing is recorded as failed; claim release remains valid only before a task is linked.
+- Maintained Native inboxes collect all stable pages across read states before mutation, derive project scope from the persisted caller task, and use project-scoped `execute_tasks` for the exact linked ID; they atomically create/link one Backlog implementation task and mark processing complete only after execution starts. Native Automation ownership and topology are canonical in `automation_graphs.md`.
+- Open gap `#352`: `complete_alert_processing` can mark an approved notification completed from a merely claimed state without requiring a linked implementation task.
+- Open gap `#612`: Automation-bound non-Native-Inbox tasks can list project-wide notification summaries because zero Native Inbox bindings are treated as an unscoped project list; fix should fail closed or return no rows.
+- Chat/runtime `decide_alert` records explicit user-directed approved/rejected/dismissed decisions for pending actionable notifications in Orchestrate mode without changing the browser Alerts approve/reject path. Missing, unknown, foreign-project, invalid-decision, and already-decided inputs fail without leaking cross-project details; approved notifications remain claimable by Native inbox flow while rejected/dismissed notifications are not claimable.
+- Slack, Telegram, Discord, and Email first-turn channel runtimes are constructed only after the channel Chat task is persisted, so channel lifecycle handlers receive trusted caller identity.
+- Alert lifecycle mutations publish project-scoped alert invalidation events.
+- Alert approval/claim/release/linkage/task creation/processing/idempotent creation/Automation rebind mutations use shared immediate-transaction scaffolding while mutation-specific SQL/validation/projections stay local.
+- `AlertService.SetDecision` publishes invalidation from known project/alert IDs after successful decision update without post-update hydration, preserving delivery even if the alert is deleted immediately after mutation.
+- Custom Automation graphs reuse the canonical Alert approval lifecycle; Automation-specific topology and authorization contracts live in `automation_graphs.md`.
 
-Product surfaces:
-- The Alerts page supports inspection, approve/reject controls for pending notifications, decision and processing badges, claimant/failure details, linked-task navigation, project context, and project-filtered live refresh. Deleting one alert or all alerts for the selected project physically removes those rows and refreshes the list and unread badge; marking read only changes `is_read`, and dismissing only changes decision state.
-- The Alerts page currently fetches only the newest 100 project alerts, while search is client-side and decision-state filters and pagination are absent. Older pending approvals can therefore become unreachable behind newer operational alerts; the durable product direction is server-side filtering/pagination so pending human decisions remain reachable.
-- The bundled `openvibely_native_autonomous_sdlc_bootstrap` skill provides an OpenVibely-native alternative to the GitHub-backed workflow. Suggestion producers use `create_notification`; scheduled inbox tasks inspect approved notifications, claim them, and create one atomically linked implementation task.
-- The model, migration, authorization boundaries, tool contracts, lease recovery, and schedule configuration are documented in `docs/openvibely-native-autonomous-sdlc-user-guide.md`.
+Alerts UI contracts:
+- The Alerts page supports inspection, approve/reject controls, decision/processing badges, claimant/failure details, linked-task navigation, project context, and project-filtered live refresh.
+- The shared inspect surface includes an accessible copy-to-clipboard action when `Body` is non-empty. It copies exact body text only, without title/message/IDs/states/metadata/project/diagnostics.
+- Inspect body/metadata and copy control share one relative content block with compact overlaid icon, reserved right padding, and no separate copy row. Copy feedback remains local with no redundant toasts.
+- Deleting one alert or all alerts for the selected project physically removes rows and refreshes list/unread badge. Marking read only changes `is_read`; dismissing only changes decision.
+- Alerts page mutations and live additions preserve reading position by keeping `#alerts-container` mounted and replacing only inner `#alerts-content` via HTMX `hx-select`.
+- Scroll restoration uses a viewport-intersecting surviving alert row, scopes settle state to the swapped fragment, reapplies card search before geometry restoration, and suppresses HTMX show-to-top.
+- Newly inserted alerts/notifications are never auto-focused. Only deletion transfers focus, using `preventScroll`, to the next/previous visible delete control.
+- `#system-update-card` is independently API-authoritative and uses `hx-preserve` so Alerts swaps retain update-card state. Its poll forwards snapshots to the shared update snapshot handler.
+- Browser Alerts mutation response tails should share one private refresh helper for approve/reject/dismiss, mark-read, mark-all-read, delete-one/delete-last, and delete-all while preserving mutation-specific behavior.
+- Open suggestion `#825`: Alerts page currently fetches only the newest 100 project alerts while search is client-side and decision-state filters/pagination are absent. Older pending approvals can become unreachable behind newer operational alerts; product direction is server-side filtering/pagination.
+- Open suggestion `#847`: Alerts rows currently do not expose decision and claim timing even though `AlertSummary` carries `DecidedAt`, `ClaimedAt`, and `ClaimExpiresAt`; approved or expired claims therefore lack visible audit timing and lease-status context. The issue proposes bounded timing/lease visibility in the Alerts queue.
+- Open suggestion `#870`: actionable Alerts created by finder tasks can preserve `Alert.SourceTaskID` while leaving `TaskID` empty, but `alertRow` navigation checks only `TaskID`; users cannot open the producing task or its history from the Alerts queue before approving the suggestion. The proposed fix adds project-safe source-task navigation while preserving direct task links and source-only notification behavior.
+- Notification bodies should start with a short nontechnical `## Summary` section followed by technical evidence and implementation detail.
+- Alerts UI should make pending approval summaries scanable without requiring expansion; detail expansion remains useful for full evidence/metadata/copy.
+- Runtime alert listing should use compact alert summaries excluding `body` and `metadata_json`, preserving filters/project isolation/Automation inbox scoping/ordering/pagination and `get_alert` detail hydration.
+- Browser Alerts list/detail hydration should keep initial `/alerts` and mutation refreshes on compact summaries; `GET /alerts/:id/details` loads one project-scoped full detail with exact-body copy.
+- Maintained Automation prompts are point-in-time snapshots. Existing saved Native/GitHub inbox Automations must be explicitly edited/saved or recreated after corrected defaults; already-created Backlog tasks are not retroactively started.
+- Notification model, migration, authorization boundaries, tool contracts, lease recovery, and schedule configuration are documented in `docs/openvibely-native-autonomous-sdlc-user-guide.md`.

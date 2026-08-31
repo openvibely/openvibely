@@ -20,7 +20,7 @@ func TestAnalyticsContent_LineChartHoverMarkerPaintsAfterTooltip(t *testing.T) {
 	content := buf.String()
 	for _, expected := range []string{
 		`id: 'analyticsActivePointOnTop'`,
-		`afterEvent: function(chart, args)`,
+		`beforeEvent: function(chart, args)`,
 		`chart.getElementsAtEventForMode(event, 'nearest', { intersect: false }, false)`,
 		`afterDraw: function(chart)`,
 		`data-analytics-hover-marker`,
@@ -28,6 +28,8 @@ func TestAnalyticsContent_LineChartHoverMarkerPaintsAfterTooltip(t *testing.T) {
 		`zIndex = '2'`,
 		`marker.style.clipPath = 'inset('`,
 		`beforeDestroy: function(chart)`,
+		`analyticsLineTooltipOptions()`,
+		`itemSort: function(a, b)`,
 		`position: 'nearest'`, `caretPadding: 6`,
 	} {
 		if !strings.Contains(content, expected) {
@@ -95,10 +97,19 @@ func TestAnalyticsContent_LineChartHoverMarkerBehaviorInChrome(t *testing.T) {
       }
     };
     var hoverArgs = {event: {type: 'mousemove', x: 40, y: 2}, inChartArea: true, changed: false};
-    if (typeof plugin.afterEvent !== 'function') fail('plugin does not track the pointer-nearest point');
-    plugin.afterEvent(chart, hoverArgs);
+    if (typeof plugin.beforeEvent !== 'function') fail('plugin does not track the pointer-nearest point before tooltip layout');
+    plugin.beforeEvent(chart, hoverArgs);
     if (chart.$analyticsHoveredPoint !== points[1]) fail('plugin selected the wrong series point under index interaction');
     if (!hoverArgs.changed) fail('plugin did not schedule a redraw when the nearest series point changed');
+    var tooltipOptions = config.options.plugins.tooltip;
+    if (typeof tooltipOptions.itemSort !== 'function') fail('line tooltip does not promote the pointer-nearest series');
+    var tooltipRows = [
+      {datasetIndex: 0, chart: chart},
+      {datasetIndex: 1, chart: chart},
+      {datasetIndex: 2, chart: chart}
+    ];
+    tooltipRows.sort(tooltipOptions.itemSort);
+    if (tooltipRows.map(function(item) { return item.datasetIndex; }).join(',') !== '1,0,2') fail('hovered series is not first while remaining tooltip rows preserve dataset order');
     plugin.afterDraw(chart);
     var marker = chart.canvas.parentElement.querySelector('[data-analytics-hover-marker]');
     if (!marker) fail('plugin did not create a DOM marker above the canvas tooltip');
@@ -108,7 +119,7 @@ func TestAnalyticsContent_LineChartHoverMarkerBehaviorInChrome(t *testing.T) {
     if (markerClipPath === 'none' || markerClipPath.indexOf('2px') < 0) fail('DOM marker does not preserve chart-area clipping at an edge point: ' + markerClipPath);
     if (marker.style.backgroundColor !== 'rgb(59, 130, 246)' || marker.style.borderColor !== 'rgba(255, 255, 255, 0.96)') fail('DOM marker lacks an opaque dataset-colored center and contrasting halo');
     var outArgs = {event: {type: 'mouseout'}, inChartArea: false, changed: false};
-    plugin.afterEvent(chart, outArgs);
+    plugin.beforeEvent(chart, outArgs);
     plugin.afterDraw(chart);
     if (chart.$analyticsHoveredPoint !== null || !outArgs.changed || marker.style.display !== 'none') fail('plugin did not clear and hide the marker on mouseout');
     plugin.beforeDestroy(chart);

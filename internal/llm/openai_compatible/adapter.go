@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
 	"github.com/openvibely/openvibely/internal/applog"
 	llmattachment "github.com/openvibely/openvibely/internal/llm/attachment"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
+	llmcustomauth "github.com/openvibely/openvibely/internal/llm/customauth"
 	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
 	llmstream "github.com/openvibely/openvibely/internal/llm/stream"
 	llmusage "github.com/openvibely/openvibely/internal/llm/usage"
@@ -23,12 +25,17 @@ const defaultOutputBudget = 16384
 var errMaxTokens = fmt.Errorf("response truncated: max output tokens limit reached (output budget exhausted before task completed)")
 
 type Adapter struct {
-	execRepo  *repository.ExecutionRepo
-	streamHub llmstream.ExecutionStreamPublisher
+	configRepo *repository.LLMConfigRepo
+	execRepo   *repository.ExecutionRepo
+	streamHub  llmstream.ExecutionStreamPublisher
 }
 
 func New(execRepo *repository.ExecutionRepo, streamHub llmstream.ExecutionStreamPublisher) *Adapter {
-	return &Adapter{execRepo: execRepo, streamHub: streamHub}
+	return NewWithConfigRepo(nil, execRepo, streamHub)
+}
+
+func NewWithConfigRepo(configRepo *repository.LLMConfigRepo, execRepo *repository.ExecutionRepo, streamHub llmstream.ExecutionStreamPublisher) *Adapter {
+	return &Adapter{configRepo: configRepo, execRepo: execRepo, streamHub: streamHub}
 }
 
 func (a *Adapter) Call(ctx context.Context, req llmcontracts.AgentRequest, workDir string) (llmcontracts.AgentResult, error) {
@@ -58,15 +65,200 @@ func (a *Adapter) Call(ctx context.Context, req llmcontracts.AgentRequest, workD
 	}
 }
 
-func (a *Adapter) client(agent models.LLMConfig) (*openaiclient.Client, error) {
-	if agent.AuthMethod != models.AuthMethodAPIKey {
-		return nil, fmt.Errorf("OpenAI-compatible model %q is configured with auth_method=%q; expected api_key", agent.Name, agent.AuthMethod)
+func (a *Adapter) client(ctx context.Context, agent models.LLMConfig) (*openaiclient.Client, func(*http.Request, []byte) error, error) {
+	if agent.AuthMethod == models.AuthMethodOAuth {
+		current, err := a.currentOAuthAgent(ctx, agent)
+		if err != nil {
+			return nil, nil, err
+		}
+		agent = current
 	}
-	return openaiclient.NewWithCompatibleAPIKey(strings.TrimSpace(agent.APIKey), agent.BaseURL, agent.GetAuthHeaderName(), agent.GetAuthHeaderValuePrefix()), nil
+	cfg, err := llmcustomauth.ParseConfig(agent.CustomAuthConfigJSON)
+	if err != nil {
+		return nil, nil, err
+	}
+	state, err := llmcustomauth.ParseState(agent.CustomAuthStateJSON)
+	if err != nil {
+		return nil, nil, err
+	}
+	var client *openaiclient.Client
+	switch agent.AuthMethod {
+	case models.AuthMethodAPIKey:
+		client = openaiclient.NewWithCompatibleAPIKey(strings.TrimSpace(agent.APIKey), agent.BaseURL, agent.GetAuthHeaderName(), agent.GetAuthHeaderValuePrefix())
+	case models.AuthMethodOAuth:
+		agent, err = a.ensureFreshOAuth(ctx, agent, false, "")
+		if err != nil {
+			return nil, nil, err
+		}
+		client = openaiclient.NewWithCompatibleOAuthToken(agent.OAuthAccessToken, agent.OAuthRefreshToken, agent.OAuthExpiresAt, agent.BaseURL)
+		client.SetAuthHeader(cfg.AccessTokenHeader, "Bearer ")
+		client.SetOAuthUnauthorizedHandler(func(refreshCtx context.Context, tokenUsed string) (openaiclient.OAuthTokens, bool, error) {
+			refreshed, refreshErr := a.ensureFreshOAuth(refreshCtx, agent, true, tokenUsed)
+			if refreshErr != nil {
+				return openaiclient.OAuthTokens{}, false, refreshErr
+			}
+			return openaiclient.OAuthTokens{
+				AccessToken: refreshed.OAuthAccessToken, RefreshToken: refreshed.OAuthRefreshToken, ExpiresAt: refreshed.OAuthExpiresAt,
+			}, true, nil
+		})
+	default:
+		return nil, nil, fmt.Errorf("OpenAI-compatible model %q uses unsupported auth_method=%q", agent.Name, agent.AuthMethod)
+	}
+	requestPrivate := cfg.AllowPrivateEndpoints || presetUsesPrivateEndpoints(agent.PresetSlug)
+	if _, err := llmcustomauth.ValidateEndpoint(agent.BaseURL, requestPrivate); err != nil {
+		return nil, nil, fmt.Errorf("invalid custom provider base URL: %w", err)
+	}
+	client.SetHTTPClient(llmcustomauth.NewHTTPClient(10*time.Minute, requestPrivate))
+	finalize := func(req *http.Request, body []byte) error {
+		if agent.AuthMethod == models.AuthMethodOAuth {
+			if err := a.verifyOAuthRevision(req.Context(), agent); err != nil {
+				return err
+			}
+		}
+		if !cfg.Enabled {
+			return nil
+		}
+		auth := client.CurrentAuth()
+		token := auth.Token
+		if token == "" {
+			token = auth.APIKey
+		}
+		return llmcustomauth.PrepareRequest(req, body, cfg, state, token)
+	}
+	return client, finalize, nil
+}
+
+func (a *Adapter) currentOAuthAgent(ctx context.Context, snapshot models.LLMConfig) (models.LLMConfig, error) {
+	if a.configRepo == nil {
+		return snapshot, fmt.Errorf("custom OAuth persistence is not configured")
+	}
+	current, err := a.configRepo.GetByID(ctx, snapshot.ID)
+	if err != nil {
+		return snapshot, err
+	}
+	if current == nil || current.Provider != models.ProviderOpenAICompatible || current.AuthMethod != models.AuthMethodOAuth {
+		return snapshot, fmt.Errorf("custom OAuth model %q is no longer available", snapshot.Name)
+	}
+	if current.OAuthConfigRevision != snapshot.OAuthConfigRevision {
+		return snapshot, fmt.Errorf("custom OAuth configuration changed; reload the model before sending requests")
+	}
+	return *current, nil
+}
+
+func (a *Adapter) verifyOAuthRevision(ctx context.Context, expected models.LLMConfig) error {
+	current, err := a.currentOAuthAgent(ctx, expected)
+	if err != nil {
+		return err
+	}
+	if current.BaseURL != expected.BaseURL || current.CustomAuthConfigJSON != expected.CustomAuthConfigJSON ||
+		current.CustomAuthStateJSON != expected.CustomAuthStateJSON {
+		return fmt.Errorf("custom OAuth configuration changed; reload the model before sending requests")
+	}
+	return nil
+}
+
+func presetUsesPrivateEndpoints(preset string) bool {
+	switch strings.ToLower(strings.TrimSpace(preset)) {
+	case "vllm", "lm_studio", "sglang", "litellm", "inferrs", "ds4":
+		return true
+	default:
+		return false
+	}
+}
+
+func (a *Adapter) ensureFreshOAuth(ctx context.Context, agent models.LLMConfig, force bool, tokenUsed string) (models.LLMConfig, error) {
+	if a.configRepo == nil {
+		return agent, fmt.Errorf("custom OAuth persistence is not configured")
+	}
+	if !force && agent.OAuthAccessToken != "" &&
+		(agent.OAuthExpiresAt == 0 || agent.OAuthExpiresAt > time.Now().Add(5*time.Minute).UnixMilli()) {
+		return agent, nil
+	}
+	tokens, err := llmcustomauth.CoordinatedRefreshDistributed(
+		ctx,
+		string(agent.Provider)+":"+agent.ID,
+		a.configRepo,
+		agent.ID,
+		func() (llmcustomauth.TokenSet, bool, error) {
+			current, loadErr := a.configRepo.GetByID(ctx, agent.ID)
+			if loadErr != nil {
+				return llmcustomauth.TokenSet{}, false, loadErr
+			}
+			if current == nil {
+				return llmcustomauth.TokenSet{}, false, fmt.Errorf("custom OAuth model %q no longer exists", agent.Name)
+			}
+			if tokenUsed != "" && current.OAuthAccessToken != "" && current.OAuthAccessToken != tokenUsed {
+				return customTokenSet(*current), true, nil
+			}
+			if !force && current.OAuthAccessToken != "" &&
+				(current.OAuthExpiresAt == 0 || current.OAuthExpiresAt > time.Now().Add(5*time.Minute).UnixMilli()) {
+				return customTokenSet(*current), true, nil
+			}
+			return llmcustomauth.TokenSet{}, false, nil
+		},
+		func() (llmcustomauth.TokenSet, error) {
+			current, loadErr := a.configRepo.GetByID(ctx, agent.ID)
+			if loadErr != nil {
+				return llmcustomauth.TokenSet{}, loadErr
+			}
+			if current == nil {
+				return llmcustomauth.TokenSet{}, fmt.Errorf("custom OAuth model %q no longer exists", agent.Name)
+			}
+			agent = *current
+			if tokenUsed != "" && agent.OAuthAccessToken != "" && agent.OAuthAccessToken != tokenUsed {
+				return customTokenSet(agent), nil
+			}
+			if !force && agent.OAuthAccessToken != "" &&
+				(agent.OAuthExpiresAt == 0 || agent.OAuthExpiresAt > time.Now().Add(5*time.Minute).UnixMilli()) {
+				return customTokenSet(agent), nil
+			}
+			if agent.OAuthRefreshToken == "" {
+				if agent.OAuthAccessToken == "" {
+					return llmcustomauth.TokenSet{}, fmt.Errorf("custom OAuth model %q is not connected", agent.Name)
+				}
+				return llmcustomauth.TokenSet{}, fmt.Errorf("custom OAuth token for model %q cannot be refreshed; reconnect the model", agent.Name)
+			}
+			cfg, parseErr := llmcustomauth.ParseConfig(agent.CustomAuthConfigJSON)
+			if parseErr != nil {
+				return llmcustomauth.TokenSet{}, parseErr
+			}
+			refreshClient := llmcustomauth.NewHTTPClient(30*time.Second, cfg.AllowPrivateEndpoints)
+			refreshed, refreshErr := llmcustomauth.Refresh(ctx, refreshClient, cfg, agent.OAuthRefreshToken, llmcustomauth.RefreshOptions{
+				ClientID: agent.OAuthClientID, ClientSecret: agent.OAuthClientSecret,
+			})
+			if refreshErr != nil {
+				return llmcustomauth.TokenSet{}, refreshErr
+			}
+			updated, persistErr := a.configRepo.UpdateCustomOAuthTokensIfRevision(
+				ctx, agent.ID, agent.OAuthConfigRevision,
+				refreshed.AccessToken, refreshed.RefreshToken, refreshed.ExpiresAt,
+			)
+			if persistErr != nil {
+				return llmcustomauth.TokenSet{}, persistErr
+			}
+			if !updated {
+				return llmcustomauth.TokenSet{}, fmt.Errorf("custom OAuth configuration changed during token refresh")
+			}
+			return refreshed, nil
+		},
+	)
+	if err != nil {
+		return agent, err
+	}
+	agent.OAuthAccessToken = tokens.AccessToken
+	agent.OAuthRefreshToken = tokens.RefreshToken
+	agent.OAuthExpiresAt = tokens.ExpiresAt
+	return agent, nil
+}
+
+func customTokenSet(agent models.LLMConfig) llmcustomauth.TokenSet {
+	return llmcustomauth.TokenSet{
+		AccessToken: agent.OAuthAccessToken, RefreshToken: agent.OAuthRefreshToken, ExpiresAt: agent.OAuthExpiresAt,
+	}
 }
 
 func (a *Adapter) callDirect(ctx context.Context, req llmcontracts.AgentRequest, workDir string) (string, llmcontracts.Usage, error) {
-	client, err := a.client(req.Agent)
+	client, finalizeRequest, err := a.client(ctx, req.Agent)
 	if err != nil {
 		return "", llmusage.FromTotal(0), err
 	}
@@ -80,8 +272,17 @@ func (a *Adapter) callDirect(ctx context.Context, req llmcontracts.AgentRequest,
 		return "", llmusage.FromTotal(0), err
 	}
 	systemPrompt := ""
-	if !req.RawDirectPrompt {
-		systemPrompt = llmprompt.BuildAgentSystemPrompt("", effectiveWorkDir(workDir))
+	switch {
+	case req.RawDirectPrompt:
+		// Message is already fully composed; send it untouched.
+	case req.LifecycleHookCall:
+		// Lifecycle hooks are structured JSON steps, not coding turns. Keep the
+		// hook agent's own prompt — the provider wrapper folded the agent
+		// definition into ProjectInstructions — and drop the shared
+		// coding-agent framing it has no use for.
+		systemPrompt = req.ProjectInstructions
+	default:
+		systemPrompt = llmprompt.BuildAgentSystemPrompt(req.ProjectInstructions, effectiveWorkDir(workDir))
 	}
 	resp, err := client.SendCompletions(ctx, prompt, &openaiclient.CompletionsOptions{
 		Model:            strings.TrimSpace(req.Agent.Model),
@@ -90,10 +291,11 @@ func (a *Adapter) callDirect(ctx context.Context, req llmcontracts.AgentRequest,
 		System:           systemPrompt,
 		WorkDir:          effectiveWorkDir(workDir),
 		DisableTools:     req.DisableTools,
-		SkipDefaultTools: runtimeSkipDefaultTools(ctx),
+		SkipDefaultTools: llmcontracts.RuntimeSkipDefaultTools(llmcontracts.RuntimeToolsFromContext(ctx)),
 		Attachments:      attachments,
 		ExtraTools:       runtimeTools(ctx),
 		ExtraHeaders:     extraHeaders,
+		FinalizeRequest:  finalizeRequest,
 		ExtraBody:        extraBody,
 		ToolExecutor:     toolExecutor(ctx, workDir),
 		ToolFilter:       toolFilter(ctx, true, models.ChatModeOrchestrate),
@@ -106,7 +308,7 @@ func (a *Adapter) callDirect(ctx context.Context, req llmcontracts.AgentRequest,
 }
 
 func (a *Adapter) callTaskStreaming(ctx context.Context, req llmcontracts.AgentRequest, workDir string) (string, string, llmcontracts.Usage, error) {
-	client, err := a.client(req.Agent)
+	client, finalizeRequest, err := a.client(ctx, req.Agent)
 	if err != nil {
 		return "", "", llmusage.FromTotal(0), err
 	}
@@ -118,7 +320,7 @@ func (a *Adapter) callTaskStreaming(ctx context.Context, req llmcontracts.AgentR
 	fullPrompt := llmprompt.BuildTaskPromptHeader() +
 		llmprompt.BuildAttachmentInstructions(req.Attachments) +
 		req.Message
-	fullPrompt = llmprompt.ApplyTaskCreationToolMode(fullPrompt, runtimeToolNames(rt))
+	fullPrompt = llmprompt.ApplyTaskCreationToolMode(fullPrompt, rt.DefinitionNames())
 	fullPrompt += "\n\n---\nRESPONSE FORMAT REQUIREMENT: You MUST end your final response with exactly one of these status lines:\n" +
 		"- If the task completed successfully: [STATUS: SUCCESS]\n" +
 		"- If a command failed, a script returned non-zero, or the task could not be completed: [STATUS: FAILED | <describe what went wrong>]\n" +
@@ -143,10 +345,11 @@ func (a *Adapter) callTaskStreaming(ctx context.Context, req llmcontracts.AgentR
 		System:           llmprompt.BuildAgentSystemPrompt(req.ProjectInstructions, effectiveWorkDir(workDir)),
 		WorkDir:          effectiveWorkDir(workDir),
 		DisableTools:     req.DisableTools,
-		SkipDefaultTools: runtimeSkipDefaultTools(ctx),
+		SkipDefaultTools: llmcontracts.RuntimeSkipDefaultTools(llmcontracts.RuntimeToolsFromContext(ctx)),
 		Attachments:      attachments,
 		ExtraTools:       runtimeTools(ctx),
 		ExtraHeaders:     extraHeaders,
+		FinalizeRequest:  finalizeRequest,
 		ExtraBody:        extraBody,
 		ToolExecutor:     toolExecutor(ctx, workDir),
 		ToolFilter:       toolFilter(ctx, true, models.ChatModeOrchestrate),
@@ -164,7 +367,7 @@ func (a *Adapter) callTaskStreaming(ctx context.Context, req llmcontracts.AgentR
 }
 
 func (a *Adapter) callChatStreaming(ctx context.Context, req llmcontracts.AgentRequest, workDir string) (string, llmcontracts.Usage, error) {
-	client, err := a.client(req.Agent)
+	client, finalizeRequest, err := a.client(ctx, req.Agent)
 	if err != nil {
 		return "", llmusage.FromTotal(0), err
 	}
@@ -180,7 +383,7 @@ func (a *Adapter) callChatStreaming(ctx context.Context, req llmcontracts.AgentR
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)
 	systemPrompt := llmprompt.BuildChatSystemPrompt(req.Followup, req.ChatMode, req.ChatSystemContext, false)
 	if req.ChatMode == models.ChatModeOrchestrate {
-		systemPrompt = llmprompt.ApplyChatActionToolMode(systemPrompt, runtimeToolNames(rt))
+		systemPrompt = llmprompt.ApplyChatActionToolMode(systemPrompt, rt.DefinitionNames())
 	}
 	systemPrompt = llmprompt.AppendWorktreeContextPrompt(systemPrompt, workDir)
 
@@ -204,6 +407,7 @@ func (a *Adapter) callChatStreaming(ctx context.Context, req llmcontracts.AgentR
 		Attachments:      attachments,
 		ExtraTools:       runtimeTools(ctx),
 		ExtraHeaders:     extraHeaders,
+		FinalizeRequest:  finalizeRequest,
 		ExtraBody:        extraBody,
 		ToolExecutor:     toolExecutor(ctx, workDir),
 		ToolFilter:       toolFilter(ctx, req.Followup, req.ChatMode),
@@ -383,19 +587,6 @@ func parseObjectJSON(raw string) (map[string]interface{}, error) {
 	return m, nil
 }
 
-func runtimeToolNames(rt *llmcontracts.RuntimeTools) []string {
-	if rt == nil {
-		return nil
-	}
-	var names []string
-	for _, def := range rt.Definitions {
-		if name := strings.TrimSpace(def.Name); name != "" {
-			names = append(names, name)
-		}
-	}
-	return names
-}
-
 func runtimeTools(ctx context.Context) []openaiclient.ToolDefinition {
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)
 	if rt == nil || len(rt.Definitions) == 0 {
@@ -425,77 +616,19 @@ func toolExecutor(ctx context.Context, workDir string) func(context.Context, str
 	}
 }
 
-func runtimeSkipDefaultTools(ctx context.Context) bool {
-	rt := llmcontracts.RuntimeToolsFromContext(ctx)
-	return rt != nil && rt.SkipDefaultTools
-}
-
 func chatSkipDefaultTools(ctx context.Context, isTaskFollowup bool, chatMode models.ChatMode) bool {
 	if isTaskFollowup || chatMode == models.ChatModePlan {
-		return runtimeSkipDefaultTools(ctx)
+		return llmcontracts.RuntimeSkipDefaultTools(llmcontracts.RuntimeToolsFromContext(ctx))
 	}
 	return true
 }
 
 func toolFilter(ctx context.Context, isTaskFollowup bool, chatMode models.ChatMode) func(string) bool {
-	rt := llmcontracts.RuntimeToolsFromContext(ctx)
-	return func(name string) bool {
-		isRuntimeTool, access := runtimeToolAccess(rt, name)
-		if !isTaskFollowup {
-			switch chatMode {
-			case models.ChatModePlan:
-				if isRuntimeTool {
-					if access != llmcontracts.RuntimeToolAccessRead {
-						return false
-					}
-				} else if !planModeAllowsReadOnlyTool(name) {
-					return false
-				}
-			default:
-				if !isRuntimeTool {
-					return false
-				}
-			}
-		}
-		if isRuntimeTool {
-			if rt != nil && rt.Filter != nil {
-				allow, handled := rt.Filter(name)
-				if handled {
-					return allow
-				}
-			}
-			return true
-		}
-		if rt != nil && rt.SkipDefaultTools {
-			return false
-		}
-		return true
-	}
-}
-
-func runtimeToolAccess(rt *llmcontracts.RuntimeTools, name string) (bool, llmcontracts.RuntimeToolAccess) {
-	if rt == nil {
-		return false, ""
-	}
-	for _, def := range rt.Definitions {
-		if strings.EqualFold(def.Name, name) {
-			access := def.Access
-			if access == "" {
-				access = llmcontracts.RuntimeToolAccessWrite
-			}
-			return true, access
-		}
-	}
-	return false, ""
-}
-
-func planModeAllowsReadOnlyTool(name string) bool {
-	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "read_file", "list_files", "grep_search", "web_search", "web_search_preview":
-		return true
-	default:
-		return false
-	}
+	return llmcontracts.ComposeRuntimeToolFilter(nil, llmcontracts.RuntimeToolsFromContext(ctx), llmcontracts.RuntimeToolPolicyOptions{
+		IsTaskFollowup:     isTaskFollowup,
+		ChatMode:           chatMode,
+		AllowsReadOnlyTool: llmcontracts.DefaultPlanModeAllowsReadOnlyTool,
+	})
 }
 
 func buildClientHistory(chatHistory []models.Execution, preserveReasoningContent bool) []openaiclient.CompletionsHistoryMessage {

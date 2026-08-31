@@ -2,12 +2,76 @@ package repository
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
+
+// BenchmarkListRecentExecutions measures per-op allocations with 100 executions
+// each carrying a ~50 KB output payload. The truncated SELECT introduced in
+// issue #627 should reduce B/op by at least 5× compared to fetching full text.
+func BenchmarkListRecentExecutions(b *testing.B) {
+	db := testutil.NewTestDB(b)
+	upcomingRepo := NewUpcomingRepo(db)
+	projectRepo := NewProjectRepo(db)
+	taskRepo := NewTaskRepo(db, nil)
+	agentRepo := NewLLMConfigRepo(db)
+	execRepo := NewExecutionRepo(db)
+
+	project := &models.Project{Name: "bench-project", RepoPath: "/tmp/bench"}
+	if err := projectRepo.Create(context.Background(), project); err != nil {
+		b.Fatalf("creating project: %v", err)
+	}
+	agent := &models.LLMConfig{Name: "BenchAgent", Provider: models.ProviderAnthropic, Model: "claude-sonnet-4-20250514"}
+	if err := agentRepo.Create(context.Background(), agent); err != nil {
+		b.Fatalf("creating agent: %v", err)
+	}
+
+	// 50 KB output payload — representative of real execution output sizes.
+	largeOutput := strings.Repeat("x", 50*1024)
+
+	task := &models.Task{
+		ProjectID: project.ID,
+		Title:     "Bench Task",
+		Category:  models.CategoryCompleted,
+		Status:    models.StatusCompleted,
+	}
+	if err := taskRepo.Create(context.Background(), task); err != nil {
+		b.Fatalf("creating task: %v", err)
+	}
+
+	for i := 0; i < 100; i++ {
+		exec := &models.Execution{
+			TaskID:        task.ID,
+			AgentConfigID: agent.ID,
+			Status:        models.ExecRunning,
+			PromptSent:    strings.Repeat("p", 10*1024),
+		}
+		if err := execRepo.Create(context.Background(), exec); err != nil {
+			b.Fatalf("creating execution: %v", err)
+		}
+		if err := execRepo.Complete(context.Background(), exec.ID, models.ExecCompleted, largeOutput, "", 100, 5000); err != nil {
+			b.Fatalf("completing execution: %v", err)
+		}
+	}
+
+	since := time.Now().UTC().Add(-1 * time.Hour)
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		results, err := upcomingRepo.ListRecentExecutions(context.Background(), project.ID, since)
+		if err != nil {
+			b.Fatalf("ListRecentExecutions: %v", err)
+		}
+		if len(results) != 100 {
+			b.Fatalf("expected 100 executions, got %d", len(results))
+		}
+		_ = results
+	}
+}
 
 func createTestAgent(t *testing.T, llmConfigRepo *LLMConfigRepo) models.LLMConfig {
 	t.Helper()
@@ -114,6 +178,181 @@ func TestUpcomingRepo_ListPendingActiveTasks(t *testing.T) {
 	}
 	if results[0].AgentName != "Test Agent" {
 		t.Fatalf("expected agent name 'Test Agent', got %q", results[0].AgentName)
+	}
+}
+
+func TestUpcomingRepo_ListRunningTasks_PromptPreviewBounded(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	upcomingRepo := NewUpcomingRepo(db)
+	projectRepo := NewProjectRepo(db)
+	taskRepo := NewTaskRepo(db, nil)
+
+	project := createTestProject(t, projectRepo)
+
+	shortPrompt := "short prompt"
+	longPrompt := strings.Repeat("x", 500)
+
+	shortTask := &models.Task{
+		ProjectID: project.ID,
+		Title:     "Short Prompt Task",
+		Category:  models.CategoryActive,
+		Status:    models.StatusRunning,
+		Prompt:    shortPrompt,
+	}
+	if err := taskRepo.Create(context.Background(), shortTask); err != nil {
+		t.Fatalf("creating short prompt task: %v", err)
+	}
+
+	longTask := &models.Task{
+		ProjectID: project.ID,
+		Title:     "Long Prompt Task",
+		Category:  models.CategoryActive,
+		Status:    models.StatusRunning,
+		Prompt:    longPrompt,
+	}
+	if err := taskRepo.Create(context.Background(), longTask); err != nil {
+		t.Fatalf("creating long prompt task: %v", err)
+	}
+
+	emptyTask := &models.Task{
+		ProjectID: project.ID,
+		Title:     "Empty Prompt Task",
+		Category:  models.CategoryActive,
+		Status:    models.StatusRunning,
+		Prompt:    "",
+	}
+	if err := taskRepo.Create(context.Background(), emptyTask); err != nil {
+		t.Fatalf("creating empty prompt task: %v", err)
+	}
+
+	results, err := upcomingRepo.ListRunningTasks(context.Background(), project.ID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 3 {
+		t.Fatalf("expected 3 running tasks, got %d", len(results))
+	}
+
+	byTitle := make(map[string]string)
+	for _, r := range results {
+		byTitle[r.Task.Title] = r.Task.Prompt
+	}
+
+	// Task with prompt shorter than the 200-char preview bound displays in full.
+	if got := byTitle["Short Prompt Task"]; got != shortPrompt {
+		t.Fatalf("expected full short prompt %q, got %q", shortPrompt, got)
+	}
+
+	// Task with prompt longer than the bound displays the same truncated text
+	// that truncatePrompt(prompt, 200) would have produced against the full
+	// original prompt.
+	wantLong := longPrompt[:200]
+	if got := byTitle["Long Prompt Task"]; got != wantLong {
+		t.Fatalf("expected bounded prompt preview of length %d, got %q (len %d)", len(wantLong), got, len(got))
+	}
+
+	// Task with empty prompt renders the "no prompt" UI branch (empty string).
+	if got := byTitle["Empty Prompt Task"]; got != "" {
+		t.Fatalf("expected empty prompt to remain empty, got %q", got)
+	}
+}
+
+func TestUpcomingRepo_ListPendingActiveTasks_PromptPreviewBounded(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	upcomingRepo := NewUpcomingRepo(db)
+	projectRepo := NewProjectRepo(db)
+	taskRepo := NewTaskRepo(db, nil)
+
+	project := createTestProject(t, projectRepo)
+	longPrompt := strings.Repeat("y", 300)
+
+	task := &models.Task{
+		ProjectID: project.ID,
+		Title:     "Pending Long Prompt",
+		Category:  models.CategoryActive,
+		Status:    models.StatusPending,
+		Prompt:    longPrompt,
+	}
+	if err := taskRepo.Create(context.Background(), task); err != nil {
+		t.Fatalf("creating task: %v", err)
+	}
+
+	results, err := upcomingRepo.ListPendingActiveTasks(context.Background(), project.ID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 pending active task, got %d", len(results))
+	}
+	if got, want := results[0].Task.Prompt, longPrompt[:200]; got != want {
+		t.Fatalf("expected bounded prompt preview %q, got %q", want, got)
+	}
+}
+
+func TestUpcomingRepo_ListUpcomingScheduledTasks_PromptPreviewAndScheduleFields(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	upcomingRepo := NewUpcomingRepo(db)
+	projectRepo := NewProjectRepo(db)
+	taskRepo := NewTaskRepo(db, nil)
+	scheduleRepo := NewScheduleRepo(db)
+
+	project := createTestProject(t, projectRepo)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	longPrompt := strings.Repeat("z", 400)
+
+	task := &models.Task{
+		ProjectID: project.ID,
+		Title:     "Scheduled Long Prompt",
+		Category:  models.CategoryScheduled,
+		Status:    models.StatusPending,
+		Prompt:    longPrompt,
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("creating task: %v", err)
+	}
+
+	nextRun := now.Add(1 * time.Hour)
+	sched := &models.Schedule{
+		TaskID:         task.ID,
+		RunAt:          now,
+		RepeatType:     models.RepeatDaily,
+		RepeatInterval: 1,
+		Enabled:        true,
+		NextRun:        &nextRun,
+	}
+	if err := scheduleRepo.Create(ctx, sched); err != nil {
+		t.Fatalf("creating schedule: %v", err)
+	}
+
+	results, err := upcomingRepo.ListUpcomingScheduledTasks(ctx, project.ID, now.Add(24*time.Hour))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 scheduled task, got %d", len(results))
+	}
+
+	// Bounded prompt projection.
+	if got, want := results[0].Task.Prompt, longPrompt[:200]; got != want {
+		t.Fatalf("expected bounded prompt preview %q, got %q", want, got)
+	}
+
+	// Schedule fields still join correctly alongside the bounded prompt projection.
+	if results[0].Schedule == nil {
+		t.Fatalf("expected schedule to be populated")
+	}
+	if results[0].Schedule.RepeatType != models.RepeatDaily {
+		t.Fatalf("expected repeat type daily, got %q", results[0].Schedule.RepeatType)
+	}
+	if results[0].Schedule.RepeatInterval != 1 {
+		t.Fatalf("expected repeat interval 1, got %d", results[0].Schedule.RepeatInterval)
+	}
+	if !results[0].Schedule.Enabled {
+		t.Fatalf("expected schedule enabled")
+	}
+	if results[0].NextRun == nil || !results[0].NextRun.Equal(nextRun) {
+		t.Fatalf("expected next run %v, got %v", nextRun, results[0].NextRun)
 	}
 }
 

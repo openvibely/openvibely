@@ -28,6 +28,31 @@ func TestTaskDetailContentIncludesAuthoritativeDynamicPageTitle(t *testing.T) {
 	}
 }
 
+func TestTaskDetailBreadcrumbSupportsAutomationOrigin(t *testing.T) {
+	task := &models.Task{ID: "task-automation-origin", ProjectID: "project-origin", Title: "Automation task"}
+	var buf bytes.Buffer
+	if err := TaskDetailContent(task, nil, nil, nil, nil, nil, nil, "details", nil).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render task detail: %v", err)
+	}
+	body := buf.String()
+	for _, want := range []string{
+		`id="task-automations-back-btn"`,
+		`data-automations-url="/automations?project_id=project-origin"`,
+		`id="task-automations-separator"`,
+		`data-automation-url-base="/automations/"`,
+		`from === 'automation'`,
+		`params.get('automation_id')`,
+		`params.get('automation_name')`,
+		`encodeURIComponent(automationID)`,
+		`automationsBtn.hidden = false`,
+		`automationsSeparator.hidden = false`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("expected Automation-origin breadcrumb support to contain %q", want)
+		}
+	}
+}
+
 func TestTaskDetailMetrics_StatusBadgeVisibility(t *testing.T) {
 	tests := []struct {
 		name               string
@@ -93,10 +118,10 @@ func TestTaskDetailMetrics_StatusBadgeVisibility(t *testing.T) {
 				Status:   tt.status,
 				Category: tt.category,
 			}
-			executions := []models.Execution{}
+			metrics := models.TaskExecutionMetrics{}
 
 			var buf bytes.Buffer
-			err := TaskDetailMetrics(task, executions, nil, nil).Render(context.Background(), &buf)
+			err := TaskDetailMetrics(task, metrics, nil, "").Render(context.Background(), &buf)
 			if err != nil {
 				t.Fatalf("render failed: %v", err)
 			}
@@ -165,7 +190,7 @@ func TestTaskDetailContent_TabsRemainScrollableOnMobile(t *testing.T) {
 	}
 
 	output := buf.String()
-	if !strings.Contains(output, `role="tablist" class="tabs tabs-bordered mb-6 flex-shrink-0 w-full overflow-x-auto flex-nowrap"`) {
+	if !strings.Contains(output, `role="tablist" class="tabs tabs-bordered tabs-sm mb-6 flex-shrink-0 w-full overflow-x-auto flex-nowrap"`) {
 		t.Fatal("expected task detail tabs to scroll horizontally instead of clipping on mobile")
 	}
 	for _, label := range []string{"Details", "Thread", "Changes", "Schedules", "Chaining", "Attachments", "Lifecycle"} {
@@ -259,6 +284,38 @@ func TestTaskDetailContent_FileChangesListenersRebindAndCleanup(t *testing.T) {
 	}
 }
 
+func TestTaskDetailContent_LifecycleTabFillsRemainingHeight(t *testing.T) {
+	task := &models.Task{
+		ID:        "task-lifecycle-layout",
+		Title:     "Lifecycle layout",
+		ProjectID: "project-1",
+		Status:    models.StatusCompleted,
+		Category:  models.CategoryCompleted,
+	}
+
+	var buf bytes.Buffer
+	if err := TaskDetailContent(task, nil, nil, nil, nil, nil, nil, "lifecycle", nil).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render failed: %v", err)
+	}
+
+	output := buf.String()
+	for _, required := range []string{
+		`id="tab-lifecycle" class="task-tab-panel flex-1 flex flex-col min-h-0"`,
+		`class="card bg-base-100 shadow-sm border border-base-300 flex-1 min-h-0"`,
+		`class="card-body flex flex-col min-h-0"`,
+		`data-lifecycle-description class="text-sm opacity-70 mb-3 flex-shrink-0"`,
+		`id="lifecycle-activity-scroll"`,
+		`class="flex-1 min-h-0 overflow-y-auto pr-1"`,
+	} {
+		if !strings.Contains(output, required) {
+			t.Fatalf("expected viewport-filling lifecycle layout to contain %q", required)
+		}
+	}
+	if strings.Contains(output, `max-height: 32rem`) || strings.Contains(output, `max-h-128`) {
+		t.Fatal("lifecycle scrollport must not retain the fixed 32rem height cap")
+	}
+}
+
 func TestTaskDetailContent_DetailsTabRendersScrollableMatchedSectionCards(t *testing.T) {
 	task := &models.Task{
 		ID:                "task-layout-1",
@@ -349,7 +406,7 @@ func TestTaskDetailMetrics_ShowsMissingTagModelAndAgentClearly(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := TaskDetailMetrics(task, nil, nil, nil).Render(context.Background(), &buf); err != nil {
+	if err := TaskDetailMetrics(task, models.TaskExecutionMetrics{}, nil, "").Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render failed: %v", err)
 	}
 	output := buf.String()
@@ -477,8 +534,9 @@ func TestTaskDetailContent_DiffUpdateUsesPreSwapFingerprint(t *testing.T) {
 		strings.Contains(output, "// Restore diff view mode (inline/split).							if (viewMode") {
 		t.Fatal("expected diff view restoration if-statement to stay off the line comment")
 	}
-	if !strings.Contains(output, "// Restore diff view mode (inline/split).\n") ||
-		!strings.Contains(output, "if (viewMode === 'split' && typeof switchDiffView === 'function') {") {
+	if !strings.Contains(output, "// Restore diff view mode (inline/split) without saving during refresh restore.\n") ||
+		!strings.Contains(output, "if ((viewMode === 'inline' || viewMode === 'split') && typeof switchDiffView === 'function') {") ||
+		!strings.Contains(output, "switchDiffView(viewMode, false)") {
 		t.Fatal("expected syntactically valid diff view restoration block")
 	}
 }

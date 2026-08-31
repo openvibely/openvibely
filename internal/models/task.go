@@ -183,43 +183,46 @@ const (
 	TaskOriginSlack       = "slack"
 	TaskOriginEmail       = "email"
 	TaskOriginDiscord     = "discord"
+	TaskOriginX           = "x"
 	TaskOriginSystemAgent = "system_agent"
 )
 
 type Task struct {
-	ID                string       `json:"id"`
-	ProjectID         string       `json:"project_id"`
-	Title             string       `json:"title"`
-	Category          TaskCategory `json:"category"`
-	Priority          int          `json:"priority"`
-	Status            TaskStatus   `json:"status"`
-	Prompt            string       `json:"prompt"`
-	AgentID           *string      `json:"agent_id,omitempty"`            // Optional: LLM config (model) to use; uses default if nil
-	AgentDefinitionID *string      `json:"agent_definition_id,omitempty"` // Optional: agent definition (system prompt, skills, MCP)
-	Tag               TaskTag      `json:"tag"`
-	DisplayOrder      int          `json:"display_order"`
-	ParentTaskID      *string      `json:"parent_task_id,omitempty"` // Optional: references parent task for chaining or swarm grouping
-	ChainConfig       string       `json:"chain_config"`             // JSON configuration for task chaining
-	SwarmRole         SwarmRole    `json:"swarm_role"`
-	SwarmStatus       string       `json:"swarm_status"`
-	SwarmConfig       string       `json:"swarm_config"`
-	SwarmSequence     int          `json:"swarm_sequence"`
-	SwarmChildren     []Task       `json:"swarm_children,omitempty"`
-	WorktreePath      string       `json:"worktree_path"`
-	WorktreeBranch    string       `json:"worktree_branch"`
-	AutoMerge         bool         `json:"auto_merge"`
-	MergeTargetBranch string       `json:"merge_target_branch"`
-	MergeStatus       MergeStatus  `json:"merge_status"`
-	BaseBranch        string       `json:"base_branch"`        // Git branch this task should base its worktree on (from parent lineage)
-	BaseCommitSHA     string       `json:"base_commit_sha"`    // Git commit SHA to base worktree on (from parent lineage)
-	LineageDepth      int          `json:"lineage_depth"`      // Depth in chain: 0 = root, 1 = child, 2 = grandchild, etc.
-	CreatedVia        string       `json:"created_via"`        // Origin: "web", "telegram", etc.
-	TelegramChatID    int64        `json:"telegram_chat_id"`   // Telegram chat ID for sending completion notifications
-	HasGoal           bool         `json:"has_goal,omitempty"` // Derived: task has a non-cleared persisted goal
-	StartsNewContext  bool         `json:"-"`                  // Runtime-only: this dispatch starts a new model replay context
-	CreatedAt         time.Time    `json:"created_at"`
-	UpdatedAt         time.Time    `json:"updated_at"`
-	CompletedAt       *time.Time   `json:"completed_at,omitempty"`
+	ID                       string       `json:"id"`
+	ProjectID                string       `json:"project_id"`
+	Title                    string       `json:"title"`
+	Category                 TaskCategory `json:"category"`
+	Priority                 int          `json:"priority"`
+	Status                   TaskStatus   `json:"status"`
+	Prompt                   string       `json:"prompt"`
+	AgentID                  *string      `json:"agent_id,omitempty"`            // Optional: LLM config (model) to use; uses default if nil
+	AgentDefinitionID        *string      `json:"agent_definition_id,omitempty"` // Optional: agent definition (system prompt, skills, MCP)
+	Tag                      TaskTag      `json:"tag"`
+	DisplayOrder             int          `json:"display_order"`
+	ParentTaskID             *string      `json:"parent_task_id,omitempty"` // Optional: references parent task for chaining or swarm grouping
+	ChainConfig              string       `json:"chain_config"`             // JSON configuration for task chaining
+	SwarmRole                SwarmRole    `json:"swarm_role"`
+	SwarmStatus              string       `json:"swarm_status"`
+	SwarmConfig              string       `json:"swarm_config"`
+	SwarmSequence            int          `json:"swarm_sequence"`
+	SwarmChildren            []Task       `json:"swarm_children,omitempty"`
+	WorktreePath             string       `json:"worktree_path"`
+	WorktreeBranch           string       `json:"worktree_branch"`
+	AutoMerge                bool         `json:"auto_merge"`
+	MergeTargetBranch        string       `json:"merge_target_branch"`
+	MergeStatus              MergeStatus  `json:"merge_status"`
+	BaseBranch               string       `json:"base_branch"`        // Git branch this task should base its worktree on (from parent lineage)
+	BaseCommitSHA            string       `json:"base_commit_sha"`    // Git commit SHA to base worktree on (from parent lineage)
+	LineageDepth             int          `json:"lineage_depth"`      // Depth in chain: 0 = root, 1 = child, 2 = grandchild, etc.
+	CreatedVia               string       `json:"created_via"`        // Origin: "web", "telegram", etc.
+	TelegramChatID           int64        `json:"telegram_chat_id"`   // Telegram chat ID for sending completion notifications
+	HasGoal                  bool         `json:"has_goal,omitempty"` // Derived: task has a non-cleared persisted goal
+	GoalMet                  bool         `json:"goal_met,omitempty"` // Derived: task's persisted goal is achieved
+	AutomationCapacityQueued bool         `json:"-"`                  // Runtime-only board projection: an unfinished Automation dispatch is waiting for worker admission
+	StartsNewContext         bool         `json:"-"`                  // Runtime-only: this dispatch starts a new model replay context
+	CreatedAt                time.Time    `json:"created_at"`
+	UpdatedAt                time.Time    `json:"updated_at"`
+	CompletedAt              *time.Time   `json:"completed_at,omitempty"`
 }
 
 // IsTerminalStatus returns true if the task status is terminal (completed/failed/cancelled).

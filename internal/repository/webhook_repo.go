@@ -5,10 +5,15 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/openvibely/openvibely/internal/models"
 )
+
+// ErrWebhookNotFound indicates that a webhook mutation matched no endpoint.
+var ErrWebhookNotFound = errors.New("webhook not found")
 
 // WebhookRepo manages webhook endpoint CRUD and agent assignments.
 type WebhookRepo struct {
@@ -47,6 +52,7 @@ func scanWebhookEndpoint(row interface{ Scan(dest ...any) error }) (*models.Webh
 }
 
 const webhookColumns = `id, project_id, name, enabled, path_token, secret, system_instructions, title_template, prompt_template, default_priority, created_at, updated_at`
+const webhookCardColumns = `id, project_id, name, enabled, path_token, default_priority, created_at, updated_at`
 
 func (r *WebhookRepo) Create(ctx context.Context, w *models.WebhookEndpoint) error {
 	if w.PathToken == "" {
@@ -67,7 +73,7 @@ func (r *WebhookRepo) Create(ctx context.Context, w *models.WebhookEndpoint) err
 	if w.Enabled {
 		enabled = 1
 	}
-	err := r.db.QueryRowContext(ctx,
+	err := queryRowBoundSQLite(ctx, r.db,
 		`INSERT INTO webhook_endpoints (project_id, name, enabled, path_token, secret, system_instructions, title_template, prompt_template, default_priority)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 RETURNING id, created_at, updated_at`,
@@ -88,6 +94,18 @@ func (r *WebhookRepo) GetByID(ctx context.Context, id string) (*models.WebhookEn
 	}
 	if err != nil {
 		return nil, fmt.Errorf("getting webhook endpoint: %w", err)
+	}
+	return w, nil
+}
+
+func (r *WebhookRepo) GetByIDForProject(ctx context.Context, id, projectID string) (*models.WebhookEndpoint, error) {
+	w, err := scanWebhookEndpoint(r.db.QueryRowContext(ctx,
+		`SELECT `+webhookColumns+` FROM webhook_endpoints WHERE id = ? AND project_id = ?`, id, projectID))
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("getting webhook endpoint for project: %w", err)
 	}
 	return w, nil
 }
@@ -123,12 +141,63 @@ func (r *WebhookRepo) ListByProject(ctx context.Context, projectID string) ([]mo
 	return endpoints, rows.Err()
 }
 
+func (r *WebhookRepo) ListCardsByProject(ctx context.Context, projectID string) ([]models.WebhookEndpoint, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT `+webhookCardColumns+` FROM webhook_endpoints WHERE project_id = ? ORDER BY name ASC, id ASC`, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("listing webhook endpoint cards: %w", err)
+	}
+	defer rows.Close()
+
+	var endpoints []models.WebhookEndpoint
+	for rows.Next() {
+		var w models.WebhookEndpoint
+		var enabled int
+		if err := rows.Scan(&w.ID, &w.ProjectID, &w.Name, &enabled, &w.PathToken, &w.DefaultPriority, &w.CreatedAt, &w.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scanning webhook endpoint card: %w", err)
+		}
+		w.Enabled = enabled != 0
+		endpoints = append(endpoints, w)
+	}
+	return endpoints, rows.Err()
+}
+
+// ListCardsByProjectPage returns one bounded, project-scoped webhook card page.
+func (r *WebhookRepo) ListCardsByProjectPage(ctx context.Context, projectID string, limit, offset int, search string) ([]models.WebhookEndpoint, error) {
+	limit, offset = normalizeCardPageArgs(limit, offset)
+	query := `SELECT ` + webhookCardColumns + ` FROM webhook_endpoints WHERE project_id = ?`
+	args := []any{projectID}
+	if search = strings.TrimSpace(search); search != "" {
+		query += ` AND INSTR(LOWER('webhook ' || COALESCE(name, '')), ?) > 0`
+		args = append(args, strings.ToLower(search))
+	}
+	query += ` ORDER BY name ASC, id ASC LIMIT ? OFFSET ?`
+	args = append(args, limit, offset)
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("listing webhook endpoint card page: %w", err)
+	}
+	defer rows.Close()
+
+	endpoints := make([]models.WebhookEndpoint, 0, limit)
+	for rows.Next() {
+		var w models.WebhookEndpoint
+		var enabled int
+		if err := rows.Scan(&w.ID, &w.ProjectID, &w.Name, &enabled, &w.PathToken, &w.DefaultPriority, &w.CreatedAt, &w.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scanning webhook endpoint card page: %w", err)
+		}
+		w.Enabled = enabled != 0
+		endpoints = append(endpoints, w)
+	}
+	return endpoints, rows.Err()
+}
+
 func (r *WebhookRepo) Update(ctx context.Context, w *models.WebhookEndpoint) error {
 	enabled := 0
 	if w.Enabled {
 		enabled = 1
 	}
-	_, err := r.db.ExecContext(ctx,
+	_, err := execBoundSQLite(ctx, r.db,
 		`UPDATE webhook_endpoints SET name = ?, enabled = ?, system_instructions = ?,
 		 title_template = ?, prompt_template = ?, default_priority = ?,
 		 updated_at = datetime('now')
@@ -142,9 +211,16 @@ func (r *WebhookRepo) Update(ctx context.Context, w *models.WebhookEndpoint) err
 }
 
 func (r *WebhookRepo) Delete(ctx context.Context, id string) error {
-	_, err := r.db.ExecContext(ctx, `DELETE FROM webhook_endpoints WHERE id = ?`, id)
+	result, err := execBoundSQLite(ctx, r.db, `DELETE FROM webhook_endpoints WHERE id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("deleting webhook endpoint: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("checking deleted webhook endpoint: %w", err)
+	}
+	if affected == 0 {
+		return ErrWebhookNotFound
 	}
 	return nil
 }
@@ -155,11 +231,18 @@ func (r *WebhookRepo) RotateSecret(ctx context.Context, id string) (string, erro
 	if err != nil {
 		return "", fmt.Errorf("generating new secret: %w", err)
 	}
-	_, err = r.db.ExecContext(ctx,
+	result, err := execBoundSQLite(ctx, r.db,
 		`UPDATE webhook_endpoints SET secret = ?, updated_at = datetime('now') WHERE id = ?`,
 		newSecret, id)
 	if err != nil {
 		return "", fmt.Errorf("rotating webhook secret: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return "", fmt.Errorf("checking rotated webhook endpoint: %w", err)
+	}
+	if affected == 0 {
+		return "", ErrWebhookNotFound
 	}
 	return newSecret, nil
 }
@@ -167,11 +250,11 @@ func (r *WebhookRepo) RotateSecret(ctx context.Context, id string) (string, erro
 // --- Webhook endpoint agent assignments ---
 
 func (r *WebhookRepo) SetEndpointAgents(ctx context.Context, endpointID string, agentIDs []string) error {
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, cleanup, err := beginImmediateTx(ctx, r.db)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
-	defer tx.Rollback()
+	defer cleanup()
 
 	if _, err := tx.ExecContext(ctx, `DELETE FROM webhook_endpoint_agents WHERE webhook_endpoint_id = ?`, endpointID); err != nil {
 		return fmt.Errorf("clearing endpoint agents: %w", err)
@@ -209,11 +292,11 @@ func (r *WebhookRepo) GetEndpointAgents(ctx context.Context, endpointID string) 
 // --- Task agent assignments (future multi-agent) ---
 
 func (r *WebhookRepo) SetTaskAgentAssignments(ctx context.Context, taskID string, agentIDs []string) error {
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, cleanup, err := beginImmediateTx(ctx, r.db)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
-	defer tx.Rollback()
+	defer cleanup()
 
 	if _, err := tx.ExecContext(ctx, `DELETE FROM task_agent_assignments WHERE task_id = ?`, taskID); err != nil {
 		return fmt.Errorf("clearing task agent assignments: %w", err)

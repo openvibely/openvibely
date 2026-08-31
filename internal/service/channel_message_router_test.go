@@ -88,6 +88,36 @@ func setupChannelMessageRouterTest(t *testing.T) (context.Context, *repository.C
 	return ctx, targetRepo, settingsRepo, slackAuthRepo, telegramAuthRepo, emailAuthRepo, discordAuthRepo, project, router, slack, telegram, email, discord
 }
 
+func TestExecuteSendMessageToolNormalizesAndDecodesInput(t *testing.T) {
+	tests := []struct {
+		name       string
+		input      json.RawMessage
+		wantError  string
+		wantOutput string
+	}{
+		{name: "empty", input: nil, wantOutput: "send_message requires target"},
+		{name: "whitespace", input: json.RawMessage(" \n\t "), wantOutput: "send_message requires target"},
+		{name: "valid", input: json.RawMessage(`{"action":"list"}`), wantOutput: `"ok":true`},
+		{name: "malformed", input: json.RawMessage(`{"action":`), wantError: "invalid tool input JSON:"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, _, _, _, _, _, _, project, router, _, _, _, _ := setupChannelMessageRouterTest(t)
+			out, err := ExecuteSendMessageTool(ctx, router, project.ID, tt.input)
+			if tt.wantError != "" {
+				require.ErrorContains(t, err, tt.wantError)
+				if tt.name == "malformed" {
+					require.ErrorContains(t, err, "unexpected end of JSON input")
+				}
+				return
+			}
+			require.NoError(t, err)
+			require.Contains(t, out, tt.wantOutput)
+		})
+	}
+}
+
 func TestChannelMessageRouter_ListTargets(t *testing.T) {
 	ctx, targetRepo, _, _, _, _, _, project, router, _, _, _, _ := setupChannelMessageRouterTest(t)
 	require.NoError(t, targetRepo.Upsert(ctx, models.ChannelTarget{ID: "t1", ProjectID: project.ID, Platform: "slack", Name: "ops", TargetID: "C123", Home: true}))
@@ -161,8 +191,52 @@ func TestChannelMessageRouter_SendDirectTargetDoesNotRequireSavedOrExplicitPolic
 	sends, err := targetRepo.ListSendsByProject(ctx, project.ID)
 	require.NoError(t, err)
 	require.Len(t, sends, 2)
-	require.True(t, sends[0].Success)
-	require.True(t, sends[1].Success)
+	var sawEmail, sawDiscord bool
+	for _, send := range sends {
+		require.True(t, send.Success)
+		switch send.TargetID {
+		case "draft@example.com":
+			sawEmail = true
+			require.Equal(t, "email", send.TargetKind)
+		case "CDRAFT":
+			sawDiscord = true
+			require.Equal(t, "channel", send.TargetKind)
+		}
+	}
+	require.True(t, sawEmail)
+	require.True(t, sawDiscord)
+}
+
+func TestNormalizeOutboundChannelTargetDefaultsAndSharedValidation(t *testing.T) {
+	tests := []struct {
+		name       string
+		target     models.ChannelTarget
+		wantKind   string
+		wantID     string
+		wantThread string
+		wantErr    string
+	}{
+		{name: "slack channel default", target: models.ChannelTarget{Platform: " Slack ", TargetID: "C123"}, wantKind: "channel", wantID: "C123"},
+		{name: "telegram chat default", target: models.ChannelTarget{Platform: "telegram", TargetID: "-100123", ThreadID: "42"}, wantKind: "chat", wantID: "-100123", wantThread: "42"},
+		{name: "email default normalizes address", target: models.ChannelTarget{Platform: "email", TargetID: "Recipient <MAILBOX@Example.com>"}, wantKind: "email", wantID: "mailbox@example.com"},
+		{name: "discord channel default", target: models.ChannelTarget{Platform: "discord", TargetID: "123456789"}, wantKind: "channel", wantID: "123456789"},
+		{name: "invalid telegram thread", target: models.ChannelTarget{Platform: "telegram", TargetID: "-100123", ThreadID: "topic"}, wantErr: "telegram thread id must be an integer"},
+		{name: "invalid slack user", target: models.ChannelTarget{Platform: "slack", TargetKind: "user", TargetID: "C123"}, wantErr: "Invalid Slack user ID"},
+		{name: "invalid discord user", target: models.ChannelTarget{Platform: "discord", TargetKind: "user", TargetID: "not-a-snowflake"}, wantErr: "Invalid Discord user ID"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := NormalizeOutboundChannelTarget(tt.target)
+			if tt.wantErr != "" {
+				require.ErrorContains(t, err, tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tt.wantKind, got.TargetKind)
+			require.Equal(t, tt.wantID, got.TargetID)
+			require.Equal(t, tt.wantThread, got.ThreadID)
+		})
+	}
 }
 
 func TestChannelMessageRouter_ExplicitTargetsRequireSetting(t *testing.T) {
@@ -471,6 +545,44 @@ func TestChannelMessageRouter_DiscordChannelSyntaxSendsToChannel(t *testing.T) {
 	require.Empty(t, discord.userID, "discord:channel:<id> must not dispatch as a DM")
 }
 
+func TestChannelMessageRouter_DiscordChannelSyntaxDoesNotResolveSavedUserTarget(t *testing.T) {
+	ctx, targetRepo, _, _, _, _, _, project, router, _, _, _, discord := setupChannelMessageRouterTest(t)
+	require.NoError(t, targetRepo.Upsert(ctx, models.ChannelTarget{ID: "discord-user-only", ProjectID: project.ID, Platform: "discord", TargetKind: "user", TargetID: "1518288288572641398"}))
+
+	res := router.Send(ctx, project.ID, SendMessageRequest{Target: "discord:channel:1518288288572641398", Message: "channel message"})
+	require.False(t, res.OK)
+	require.Contains(t, res.Error, "Explicit discord channel target is not saved")
+	require.Empty(t, discord.channelID, "user-only saved target must not satisfy discord:channel:<id>")
+	require.Empty(t, discord.userID, "discord:channel:<id> must not dispatch through a saved user-DM target")
+}
+
+func TestChannelMessageRouter_DiscordTypedTargetsRespectSavedTargetKind(t *testing.T) {
+	ctx, targetRepo, _, _, _, _, _, project, router, _, _, _, discord := setupChannelMessageRouterTest(t)
+	require.NoError(t, targetRepo.Upsert(ctx, models.ChannelTarget{ID: "discord-colliding-user", ProjectID: project.ID, Platform: "discord", TargetKind: "user", TargetID: "1518288288572641398"}))
+	require.NoError(t, targetRepo.Upsert(ctx, models.ChannelTarget{ID: "discord-colliding-channel", ProjectID: project.ID, Platform: "discord", TargetKind: "channel", TargetID: "1518288288572641398"}))
+	require.NoError(t, targetRepo.Upsert(ctx, models.ChannelTarget{ID: "discord-threaded-channel", ProjectID: project.ID, Platform: "discord", TargetKind: "channel", TargetID: "2518288288572641398", ThreadID: "987654321012345678"}))
+
+	res := router.Send(ctx, project.ID, SendMessageRequest{Target: "discord:channel:1518288288572641398", Message: "channel message"})
+	require.True(t, res.OK, "discord:channel:<id> must resolve the saved channel target when user and channel IDs collide: %#v", res)
+	require.Equal(t, "1518288288572641398", discord.channelID)
+	require.Empty(t, discord.threadID)
+	require.Empty(t, discord.userID)
+
+	discord.channelID = ""
+	res = router.Send(ctx, project.ID, SendMessageRequest{Target: "discord:channel:2518288288572641398:987654321012345678", Message: "threaded channel message"})
+	require.True(t, res.OK, "discord:channel:<id>:<thread_id> must preserve saved thread handling: %#v", res)
+	require.Equal(t, "2518288288572641398", discord.channelID)
+	require.Equal(t, "987654321012345678", discord.threadID)
+	require.Empty(t, discord.userID)
+
+	discord.channelID = ""
+	discord.threadID = ""
+	res = router.Send(ctx, project.ID, SendMessageRequest{Target: "discord:user:1518288288572641398", Message: "dm message"})
+	require.True(t, res.OK, "discord:user:<id> must still resolve the saved user-DM target: %#v", res)
+	require.Equal(t, "1518288288572641398", discord.userID)
+	require.Empty(t, discord.channelID)
+}
+
 // TestChannelMessageRouter_UserDMSyntaxInvalidIDRejected verifies that malformed user IDs
 // with the platform:user:<id> syntax are rejected cleanly.
 func TestChannelMessageRouter_UserDMSyntaxInvalidIDRejected(t *testing.T) {
@@ -519,4 +631,32 @@ func TestChannelMessageRouter_AuditRowIncludesTargetKind(t *testing.T) {
 	}
 	require.True(t, sawChannel, "expected channel send audit row")
 	require.True(t, sawUser, "expected user DM send audit row")
+}
+
+type fakeXOutbound struct{ target, thread, text string }
+
+func (f *fakeXOutbound) SendOutboundMessage(_ context.Context, target, thread, text string) SendMessageResult {
+	f.target, f.thread, f.text = target, thread, text
+	return SendMessageResult{OK: true, Platform: "x", Target: "x:" + target, MessageID: "tweet-1"}
+}
+
+func TestChannelMessageRouterXUsesSavedAccountTargetAndAudit(t *testing.T) {
+	ctx, targetRepo, _, _, _, _, _, project, router, _, _, _, _ := setupChannelMessageRouterTest(t)
+	sender := &fakeXOutbound{}
+	router.SetXService(sender)
+	target, err := NormalizeOutboundChannelTarget(models.ChannelTarget{ID: "x-home", ProjectID: project.ID, Platform: "x", TargetID: "me", Home: true})
+	require.NoError(t, err)
+	require.Equal(t, "account", target.TargetKind)
+	require.NoError(t, targetRepo.Upsert(ctx, target))
+	result := router.Send(ctx, project.ID, SendMessageRequest{Target: "x", Message: "release update"})
+	require.True(t, result.OK)
+	require.Equal(t, "me", sender.target)
+	require.Equal(t, "release update", sender.text)
+	sends, err := targetRepo.ListSendsByProject(ctx, project.ID)
+	require.NoError(t, err)
+	require.Len(t, sends, 1)
+	require.Equal(t, "x", sends[0].Platform)
+	require.Equal(t, "account", sends[0].TargetKind)
+	bad := router.Send(ctx, project.ID, SendMessageRequest{Target: "x:not-me", Message: "blocked"})
+	require.False(t, bad.OK)
 }

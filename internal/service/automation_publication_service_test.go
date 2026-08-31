@@ -51,6 +51,63 @@ func newAutomationSaveHarness(t *testing.T, name string) automationSaveHarness {
 		lifecycle: NewAutomationLifecycleService(automationRepo, scheduleRepo, taskSvc)}
 }
 
+func TestAutomationSaveDefaultModelSentinelUsesRuntimeDefaultLookup(t *testing.T) {
+	h := newAutomationSaveHarness(t, "Default model execution")
+	ctx := context.Background()
+
+	candidate := customTaskOnlyCandidate("Default model execution", "Run with the runtime default model.", models.CategoryActive)
+	candidate.Nodes[0].Config["model_config_id"] = automationDefaultModelConfigID
+	recorder := &recordingAutomationTaskService{TaskService: NewTaskService(h.taskRepo, repository.NewAttachmentRepo(h.db), nil)}
+	compiler := NewAutomationCompiler(h.automationRepo, recorder, h.taskRepo, h.scheduleRepo, NewAutomationSaveValidator(NewAutomationAdapterRegistry(), h.drafts))
+
+	saved, err := compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
+	require.NoError(t, err)
+	taskID := automationResourceID(t, saved.Definition, "root", "task")
+	stored, err := h.taskRepo.GetByID(ctx, taskID)
+	require.NoError(t, err)
+	require.Nil(t, stored.AgentID)
+	require.Len(t, recorder.submitted, 1)
+	require.Nil(t, recorder.submitted[0].AgentID)
+
+	claim, claimed, err := h.taskRepo.ClaimTaskForDispatch(ctx, taskID)
+	require.NoError(t, err)
+	require.True(t, claimed)
+	require.Nil(t, claim.Task.AgentID)
+}
+
+func TestAutomationSaveStoresSelectedModelForTaskExecution(t *testing.T) {
+	h := newAutomationSaveHarness(t, "Selected model execution")
+	ctx := context.Background()
+	llmConfigRepo := repository.NewLLMConfigRepo(h.db)
+	selectedModel := models.LLMConfig{Name: "Selected automation model", Provider: models.ProviderTest, Model: "selected-model"}
+	require.NoError(t, llmConfigRepo.Create(ctx, &selectedModel))
+	capabilities := NewAutomationCapabilitySnapshotBuilder(repository.NewProjectRepo(h.db), nil, nil, nil)
+	capabilities.SetLLMConfigRepository(llmConfigRepo)
+	h.drafts.SetCapabilitySnapshotBuilder(capabilities)
+
+	candidate := customTaskOnlyCandidate("Selected model execution", "Run with the selected model.", models.CategoryActive)
+	candidate.Nodes[0].Config["model_config_id"] = selectedModel.ID
+	recorder := &recordingAutomationTaskService{TaskService: NewTaskService(h.taskRepo, repository.NewAttachmentRepo(h.db), nil)}
+	compiler := NewAutomationCompiler(h.automationRepo, recorder, h.taskRepo, h.scheduleRepo, NewAutomationSaveValidator(NewAutomationAdapterRegistry(), h.drafts))
+
+	saved, err := compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
+	require.NoError(t, err)
+	taskID := automationResourceID(t, saved.Definition, "root", "task")
+	stored, err := h.taskRepo.GetByID(ctx, taskID)
+	require.NoError(t, err)
+	require.NotNil(t, stored.AgentID)
+	require.Equal(t, selectedModel.ID, *stored.AgentID)
+	require.Len(t, recorder.submitted, 1)
+	require.NotNil(t, recorder.submitted[0].AgentID)
+	require.Equal(t, selectedModel.ID, *recorder.submitted[0].AgentID)
+
+	claim, claimed, err := h.taskRepo.ClaimTaskForDispatch(ctx, taskID)
+	require.NoError(t, err)
+	require.True(t, claimed)
+	require.NotNil(t, claim.Task.AgentID)
+	require.Equal(t, selectedModel.ID, *claim.Task.AgentID)
+}
+
 func seedExistingVisionDriverAutomation(t *testing.T, h automationSaveHarness) (*models.AutomationDefinition, models.AutomationDraftCandidate) {
 	t.Helper()
 	ctx := context.Background()
@@ -94,6 +151,132 @@ func seedExistingVisionDriverAutomation(t *testing.T, h automationSaveHarness) (
 	require.NoError(t, err)
 	require.False(t, reused)
 	return definition, candidate
+}
+
+func TestGitHubSDLCReducedGraphRequiresSetupOnlyForRetainedGitHubRuntimeNodes(t *testing.T) {
+	h := newAutomationSaveHarness(t, "Reduced GitHub graph capability requirements")
+	candidate, err := h.drafts.TemplateCandidate(AutomationAdapterGitHubSDLC)
+	require.NoError(t, err)
+
+	for _, test := range []struct {
+		key    string
+		prompt string
+	}{
+		{key: "vision_suggestions", prompt: "Open an issue for each actionable finding."},
+	} {
+		customized, err := h.drafts.TemplateCandidate(AutomationAdapterGitHubSDLC)
+		require.NoError(t, err)
+		for _, node := range append([]models.AutomationDraftNode(nil), customized.Nodes...) {
+			if node.Key != test.key {
+				customized = automationCandidateWithoutNode(customized, node.Key)
+			}
+		}
+		customized.Nodes[0].Config["prompt"] = test.prompt
+		customizedResult, err := h.compiler.Save(context.Background(), AutomationSaveRequest{
+			ProjectID: h.project.ID, Source: "template", CreatedVia: "web", Candidate: customized,
+		})
+		require.NoError(t, err, test.key)
+		require.Len(t, customizedResult.Definition.Nodes, 1)
+		require.Equal(t, test.key, customizedResult.Definition.Nodes[0].NodeKey)
+	}
+
+	_, err = h.compiler.Save(context.Background(), AutomationSaveRequest{
+		ProjectID: h.project.ID, Source: "template", CreatedVia: "web", Candidate: candidate,
+	})
+	require.ErrorContains(t, err, "Configure the selected GitHub authentication mode")
+
+	terminalOnly := candidate
+	for _, node := range append([]models.AutomationDraftNode(nil), candidate.Nodes...) {
+		if node.Key != "completed" {
+			terminalOnly = automationCandidateWithoutNode(terminalOnly, node.Key)
+		}
+	}
+	result, err := h.compiler.Save(context.Background(), AutomationSaveRequest{
+		ProjectID: h.project.ID, Source: "template", CreatedVia: "web", Candidate: terminalOnly,
+	})
+	require.NoError(t, err)
+	require.Len(t, result.Definition.Nodes, 1)
+	require.Equal(t, "completed", result.Definition.Nodes[0].NodeKey)
+}
+
+func TestMaintainedSDLCSaveRemovesOptionalVisionProducerAndOwnedResources(t *testing.T) {
+	for _, adapterKey := range []string{AutomationAdapterNativeSDLC, AutomationAdapterGitHubSDLC} {
+		t.Run(adapterKey, func(t *testing.T) {
+			h := newAutomationSaveHarness(t, "Optional producer "+adapterKey)
+			ctx := context.Background()
+			if adapterKey == AutomationAdapterGitHubSDLC {
+				projectRepo := repository.NewProjectRepo(h.db)
+				h.project.RepoURL = "https://github.com/example/automation.git"
+				require.NoError(t, projectRepo.Update(ctx, &h.project))
+				settingsRepo := repository.NewSettingsRepo(h.db)
+				require.NoError(t, settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT))
+				require.NoError(t, settingsRepo.Set(ctx, GitHubSettingPAT, "test-token"))
+				githubAuthRepo := repository.NewGitHubAuthRepo(h.db)
+				require.NoError(t, githubAuthRepo.UpsertAuthorizedActor(ctx, &models.GitHubAuthorizedActor{GitHubLogin: "automation-bot"}))
+				h.compiler.validator.SetCapabilityDependencies(projectRepo, settingsRepo, githubAuthRepo)
+			}
+			candidate, err := h.drafts.TemplateCandidate(adapterKey)
+			require.NoError(t, err)
+			fullCandidate := candidate
+
+			initial, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "template", CreatedVia: "web", Candidate: candidate})
+			require.NoError(t, err, "the unmodified maintained template must still save")
+			visionTaskID := automationResourceID(t, initial.Definition, "vision_suggestions", "task")
+			visionScheduleID := automationResourceID(t, initial.Definition, "vision_suggestions", "schedule")
+
+			candidate = automationCandidateWithoutNode(candidate, "vision_suggestions")
+			replacement, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, AutomationID: initial.Definition.Automation.ID,
+				Source: "manual", CreatedVia: "web", Candidate: candidate})
+			require.NoError(t, err)
+			for _, node := range replacement.Definition.Nodes {
+				require.NotEqual(t, "vision_suggestions", node.NodeKey)
+			}
+			for _, resource := range replacement.Definition.Resources {
+				require.NotEqual(t, "vision_suggestions", resource.NodeKey)
+			}
+			require.Equal(t, 1, countRows(t, h.db, `SELECT COUNT(*) FROM tasks WHERE id = ?`, visionTaskID), "replacement preserves the backing domain Task while removing its graph binding")
+			require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM schedules WHERE id = ?`, visionScheduleID))
+			bugNode := automationNodeByKey(t, replacement.Definition, "bug_finder")
+			actionKey := "notification"
+			if adapterKey == AutomationAdapterGitHubSDLC {
+				actionKey = "issue"
+			}
+			actionNode := automationNodeByKey(t, replacement.Definition, actionKey)
+			require.Equal(t, 1, countRows(t, h.db, `SELECT COUNT(*) FROM automation_edges WHERE version_id = ? AND source_node_id = ? AND target_node_id = ?`, replacement.Definition.Version.ID, bugNode.ID, actionNode.ID), "deleting Vision Suggestions must preserve Bug Finder's shared action connection")
+
+			restored, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, AutomationID: initial.Definition.Automation.ID,
+				Source: "manual", CreatedVia: "web", Candidate: fullCandidate})
+			require.NoError(t, err, "restoring a maintained node must reuse its preserved backing Task")
+			require.Equal(t, visionTaskID, automationResourceID(t, restored.Definition, "vision_suggestions", "task"))
+			require.NotEqual(t, visionScheduleID, automationResourceID(t, restored.Definition, "vision_suggestions", "schedule"))
+			require.Equal(t, 1, countRows(t, h.db, `SELECT COUNT(*) FROM tasks WHERE created_via = ?`, repository.AutomationCompilerTaskCreatedVia(initial.Definition.Automation.ID, "vision_suggestions")))
+
+			bugOnly := fullCandidate
+			for _, node := range append([]models.AutomationDraftNode(nil), bugOnly.Nodes...) {
+				if node.Key != "bug_finder" {
+					bugOnly = automationCandidateWithoutNode(bugOnly, node.Key)
+				}
+			}
+			reduced, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, AutomationID: initial.Definition.Automation.ID,
+				Source: "manual", CreatedVia: "web", Candidate: bugOnly})
+			require.NoError(t, err, "a template may be reduced to any valid remaining graph")
+			require.Len(t, reduced.Definition.Nodes, 1)
+			require.Equal(t, "bug_finder", reduced.Definition.Nodes[0].NodeKey)
+			for _, resource := range reduced.Definition.Resources {
+				require.Equal(t, "bug_finder", resource.NodeKey)
+			}
+
+			_, err = h.db.ExecContext(ctx, `UPDATE tasks SET created_via = ? WHERE id = ?`, repository.AutomationCompilerTaskCreatedVia(repository.NewID(), "vision_suggestions"), visionTaskID)
+			require.NoError(t, err)
+			_, err = h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, AutomationID: initial.Definition.Automation.ID,
+				Source: "manual", CreatedVia: "web", Candidate: fullCandidate})
+			require.ErrorContains(t, err, "task with this name already exists", "restore must not adopt a task whose durable origin belongs to another Automation")
+			current, err := h.automationRepo.GetDefinition(ctx, h.project.ID, initial.Definition.Automation.ID)
+			require.NoError(t, err)
+			require.Len(t, current.Nodes, 1, "failed restore must leave the reduced graph current")
+			require.Equal(t, "bug_finder", current.Nodes[0].NodeKey)
+		})
+	}
 }
 
 func TestAutomationSaveRejectsNewVisionDriverAndAllowsExistingEdit(t *testing.T) {
@@ -380,6 +563,27 @@ func TestAutomationSavePreviewExcludesCustomNativeImplementationPlaceholderTask(
 	}
 }
 
+func TestAutomationCompiledCustomNativeInboxScopeIsLimitedToItsApprovalBranch(t *testing.T) {
+	candidate := customNativeMailboxCandidate("Two Native mailbox branches")
+	candidate.Nodes = append(candidate.Nodes,
+		models.AutomationDraftNode{Key: "other_producer", Name: "Weekly security review", Type: models.AutomationNodeTrigger, Role: "fixed_schedule", Config: map[string]any{"prompt": "Find security hardening proposals only."}},
+		models.AutomationDraftNode{Key: "other_notification", Name: "Create security notification", Type: models.AutomationNodeAction, Role: "create_notification", Config: map[string]any{}},
+		models.AutomationDraftNode{Key: "other_approval", Name: "Security approval", Type: models.AutomationNodeHumanGate, Role: "native_approval", Config: map[string]any{}},
+		models.AutomationDraftNode{Key: "other_inbox", Name: "Security approved inbox", Type: models.AutomationNodeTrigger, Role: "native_inbox", Config: map[string]any{"prompt": "Process approved security proposals."}},
+	)
+	candidate.Edges = append(candidate.Edges,
+		models.AutomationDraftEdge{Key: "other_producer_notification", From: "other_producer", To: "other_notification"},
+		models.AutomationDraftEdge{Key: "other_notification_approval", From: "other_notification", To: "other_approval"},
+		models.AutomationDraftEdge{Key: "other_approval_inbox", From: "other_approval", To: "other_inbox"},
+	)
+
+	prompt := automationCompiledTaskPrompt(candidate, candidate.Nodes[3])
+	require.Contains(t, prompt, `Producer: "Daily review"`)
+	require.Contains(t, prompt, `Purpose: "Review one focused area and prepare an actionable notification."`)
+	require.NotContains(t, prompt, "Weekly security review")
+	require.NotContains(t, prompt, "Find security hardening proposals only.")
+}
+
 func TestAutomationSaveHardensCustomNativeInboxPersistedProjectPrompt(t *testing.T) {
 	h := newAutomationSaveHarness(t, "Custom Native inbox prompt")
 	candidate := customNativeMailboxCandidate("Custom Native inbox prompt")
@@ -389,10 +593,33 @@ func TestAutomationSaveHardensCustomNativeInboxPersistedProjectPrompt(t *testing
 	require.NoError(t, err)
 	inboxTask, err := h.taskRepo.GetByID(context.Background(), automationResourceID(t, saved.Definition, "custom_approved_inbox", "task"))
 	require.NoError(t, err)
+	require.Contains(t, inboxTask.Prompt, "Only process approved notifications owned by this same Automation in the current project")
+	require.Contains(t, inboxTask.Prompt, `Producer: "Daily review"`)
+	require.Contains(t, inboxTask.Prompt, `Purpose: "Review one focused area and prepare an actionable notification."`)
+	require.Contains(t, inboxTask.Prompt, "source context rather than a graph-branch eligibility limit")
+	require.Contains(t, inboxTask.Prompt, "durable project + Automation + notification ownership for this current Native inbox execution")
+	require.NotContains(t, inboxTask.Prompt, "exact trusted Automation, graph-version, and inbox-branch provenance")
 	require.Contains(t, inboxTask.Prompt, "Call list_alerts without project_id")
+	require.Contains(t, inboxTask.Prompt, "Before calling claim_alert, collect every eligible result from all pages")
+	require.Contains(t, inboxTask.Prompt, "Do not claim, link, or process any notification while paginating")
+	require.Contains(t, inboxTask.Prompt, "Only after the complete paginated snapshot is collected")
 	require.Contains(t, inboxTask.Prompt, "Do not pass the read filter")
 	require.Contains(t, inboxTask.Prompt, "runtime automatically uses this scheduled Task's persisted project")
 	require.Contains(t, inboxTask.Prompt, "Never search for or reuse a project ID")
+	require.Contains(t, inboxTask.Prompt, "call get_alert for each collected notification and inspect the full body and metadata before claiming it")
+	require.Contains(t, inboxTask.Prompt, "Call claim_alert for each notification you can process")
+	require.Contains(t, inboxTask.Prompt, "Only continue when the claim succeeds")
+	require.Contains(t, inboxTask.Prompt, "call create_alert_implementation_task with a focused Backlog Task title and prompt")
+	require.Contains(t, inboxTask.Prompt, "prompt must include the notification ID, reviewed context, and acceptance criteria")
+	require.Contains(t, inboxTask.Prompt, "The created task is the implementation task")
+	require.Contains(t, inboxTask.Prompt, "directly instruct it to implement the reviewed change")
+	require.Contains(t, inboxTask.Prompt, "must not create or look for another implementation task")
+	require.Contains(t, inboxTask.Prompt, "must not run notification intake or call get_alert")
+	require.Contains(t, inboxTask.Prompt, "call execute_tasks with the exact returned implementation_task_id")
+	require.Contains(t, inboxTask.Prompt, "Only call complete_alert_processing after execute_tasks succeeds")
+	require.Contains(t, inboxTask.Prompt, "If creation, linkage, or Task execution fails, call fail_alert_processing")
+	require.Contains(t, inboxTask.Prompt, "Call release_alert_claim only when no task was linked")
+	require.NotContains(t, inboxTask.Prompt, "implementation approval")
 }
 
 func TestAutomationSaveCreatesCustomNativeMailboxWithoutImplementationPlaceholderTask(t *testing.T) {
@@ -822,6 +1049,36 @@ func TestAutomationSaveSubmitsExistingRootsThatBecomePendingActive(t *testing.T)
 	}
 }
 
+func TestAutomationCompiledCustomGitHubInboxScopeIsLimitedToItsAssignmentBranch(t *testing.T) {
+	candidate := models.AutomationDraftCandidate{AdapterKey: AutomationAdapterCustom, Nodes: []models.AutomationDraftNode{
+		{Key: "model_producer", Name: "Daily model release review", Type: models.AutomationNodeTrigger, Role: "fixed_schedule", Config: map[string]any{"prompt": "Find newly released AI models requiring support."}},
+		{Key: "model_issue", Type: models.AutomationNodeAction, Role: "create_github_issue", Config: map[string]any{}},
+		{Key: "model_assignment", Type: models.AutomationNodeHumanGate, Role: "github_assignment", Config: map[string]any{}},
+		{Key: "model_inbox", Type: models.AutomationNodeTrigger, Role: "github_inbox", Config: map[string]any{"prompt": "Process assigned model support issues."}},
+		{Key: "model_implementation", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "Implement model support.", "category": "active", "priority": 2}},
+		{Key: "model_pr", Type: models.AutomationNodeAction, Role: "open_pull_request", Config: map[string]any{"instructions": "Open the model support pull request."}},
+		{Key: "security_producer", Name: "Weekly security review", Type: models.AutomationNodeTrigger, Role: "fixed_schedule", Config: map[string]any{"prompt": "Find security hardening work only."}},
+		{Key: "security_issue", Type: models.AutomationNodeAction, Role: "create_github_issue", Config: map[string]any{}},
+		{Key: "security_assignment", Type: models.AutomationNodeHumanGate, Role: "github_assignment", Config: map[string]any{}},
+		{Key: "security_inbox", Type: models.AutomationNodeTrigger, Role: "github_inbox", Config: map[string]any{"prompt": "Process assigned security issues."}},
+	}, Edges: []models.AutomationDraftEdge{
+		{Key: "model_producer_issue", From: "model_producer", To: "model_issue"},
+		{Key: "model_issue_assignment", From: "model_issue", To: "model_assignment"},
+		{Key: "model_assignment_inbox", From: "model_assignment", To: "model_inbox"},
+		{Key: "model_inbox_implementation", From: "model_inbox", To: "model_implementation"},
+		{Key: "model_implementation_pr", From: "model_implementation", To: "model_pr"},
+		{Key: "security_producer_issue", From: "security_producer", To: "security_issue"},
+		{Key: "security_issue_assignment", From: "security_issue", To: "security_assignment"},
+		{Key: "security_assignment_inbox", From: "security_assignment", To: "security_inbox"},
+	}}
+
+	prompt := automationCompiledTaskPrompt(candidate, candidate.Nodes[3])
+	require.Contains(t, prompt, `Producer: "Daily model release review"`)
+	require.Contains(t, prompt, `Purpose: "Find newly released AI models requiring support."`)
+	require.NotContains(t, prompt, "Weekly security review")
+	require.NotContains(t, prompt, "Find security hardening work only.")
+}
+
 func TestAutomationCustomScheduledGitHubInboxCreatesRuntimeIssueTasksWithoutRelay(t *testing.T) {
 	h := newAutomationSaveHarness(t, "Scheduled GitHub inbox")
 	ctx := context.Background()
@@ -865,6 +1122,10 @@ func TestAutomationCustomScheduledGitHubInboxCreatesRuntimeIssueTasksWithoutRela
 	}
 	inboxTask, err := h.taskRepo.GetByID(ctx, automationResourceID(t, saved.Definition, "inbox", "task"))
 	require.NoError(t, err)
+	require.Contains(t, inboxTask.Prompt, "Process open issues assigned to the PAT owner or configured GitHub Authorized Users for this inbox")
+	require.Contains(t, inboxTask.Prompt, "whether the issue was created by this Automation or manually in GitHub")
+	require.Contains(t, inboxTask.Prompt, `Producer: "Find model releases"`)
+	require.Contains(t, inboxTask.Prompt, `Purpose: "Find relevant model releases."`)
 	require.Contains(t, inboxTask.Prompt, "Create at most one visible task per actionable assigned issue")
 	require.NotContains(t, inboxTask.Prompt, "Connected Task handoff")
 }
@@ -950,6 +1211,115 @@ func TestAutomationResumeAdmitsDeferredScheduleGitHubInboxHandoff(t *testing.T) 
 
 	require.NoError(t, resume.Resume(ctx, h.project.ID, saved.Definition.Automation.ID))
 	require.Len(t, recorder.submitted, 1, "the deferred Schedule handoff must be admitted exactly once")
+}
+
+func TestAutomationPublishedCustomTaskActivationPreservesDownstreamHandoffPrompts(t *testing.T) {
+	activate := func(t *testing.T, h automationSaveHarness, candidate models.AutomationDraftCandidate, parentKey, childKey string) models.Task {
+		t.Helper()
+		ctx := context.Background()
+		saved, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
+		require.NoError(t, err)
+		parent, err := h.taskRepo.GetByID(ctx, automationResourceID(t, saved.Definition, parentKey, "task"))
+		require.NoError(t, err)
+		childID := automationResourceID(t, saved.Definition, childKey, "task")
+		tasksBefore := countRows(t, h.db, `SELECT COUNT(*) FROM tasks WHERE project_id = ?`, h.project.ID)
+		require.NoError(t, h.taskRepo.UpdateStatus(ctx, parent.ID, models.StatusRunning))
+		execution := models.Execution{TaskID: parent.ID, Status: models.ExecRunning, PromptSent: parent.Prompt}
+		require.NoError(t, repository.NewExecutionRepo(h.db).Create(ctx, &execution))
+		sourceNode := automationNodeByKey(t, saved.Definition, parentKey)
+		binding := models.AutomationBinding{AutomationID: saved.Definition.Automation.ID, VersionID: saved.Definition.Version.ID, NodeID: sourceNode.ID}
+		causalCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: h.project.ID, Bindings: []models.AutomationBinding{binding}})
+		causalCtx = withAutomationExecution(causalCtx, parent.ID, execution.ID)
+		worker := NewWorkerService(nil, 1, repository.NewProjectRepo(h.db))
+		worker.SetTaskRepo(h.taskRepo)
+		taskSvc := NewTaskService(h.taskRepo, repository.NewAttachmentRepo(h.db), worker)
+		llmSvc := &LLMService{taskRepo: h.taskRepo, automationRepo: h.automationRepo, taskSvc: taskSvc}
+		handled, err := llmSvc.activatePublishedCustomAutomationChild(causalCtx, *parent, "upstream result\n[STATUS: SUCCESS]")
+		require.NoError(t, err)
+		require.True(t, handled)
+		activated, err := h.taskRepo.GetByID(ctx, childID)
+		require.NoError(t, err)
+		require.Equal(t, tasksBefore, countRows(t, h.db, `SELECT COUNT(*) FROM tasks WHERE project_id = ?`, h.project.ID))
+		require.Contains(t, activated.Prompt, "upstream result")
+		select {
+		case submitted := <-worker.Submitted():
+			require.Equal(t, childID, submitted.ID)
+		default:
+			t.Fatal("activated child was not submitted")
+		}
+		return *activated
+	}
+
+	t.Run("pull request handoff", func(t *testing.T) {
+		h := newAutomationSaveHarness(t, "Custom PR activation")
+		ctx := context.Background()
+		projectRepo := repository.NewProjectRepo(h.db)
+		h.project.RepoURL = "https://github.com/example/automation.git"
+		require.NoError(t, projectRepo.Update(ctx, &h.project))
+		settingsRepo := repository.NewSettingsRepo(h.db)
+		require.NoError(t, settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT))
+		require.NoError(t, settingsRepo.Set(ctx, GitHubSettingPAT, "test-token"))
+		githubAuthRepo := repository.NewGitHubAuthRepo(h.db)
+		require.NoError(t, githubAuthRepo.UpsertAuthorizedActor(ctx, &models.GitHubAuthorizedActor{GitHubLogin: "automation-bot"}))
+		h.compiler.validator.SetCapabilityDependencies(projectRepo, settingsRepo, githubAuthRepo)
+		candidate := models.AutomationDraftCandidate{SchemaVersion: 1, Name: "Custom PR activation", AutomationType: "custom", AdapterKey: AutomationAdapterCustom,
+			Nodes: []models.AutomationDraftNode{
+				{Key: "producer", Name: "Find issues", Type: models.AutomationNodeTrigger, Role: "fixed_schedule", Config: map[string]any{"prompt": "Find relevant issues.", "category": "scheduled", "priority": 2, "run_at": "04:00", "repeat_type": "daily", "repeat_interval": 1, "enabled": true}},
+				{Key: "issue", Name: "Create issue", Type: models.AutomationNodeAction, Role: "create_github_issue", Config: map[string]any{"instructions": "Open one focused issue.", "labels": []any{"bug"}}},
+				{Key: "assignment", Name: "Human assignment", Type: models.AutomationNodeHumanGate, Role: "github_assignment", Config: map[string]any{"approval_method": "github_assignment"}},
+				{Key: "schedule", Name: "GitHub inbox schedule", Type: models.AutomationNodeTrigger, Role: "fixed_schedule", Config: map[string]any{"prompt": "Poll assigned issues.", "category": "scheduled", "priority": 2, "run_at": "04:15", "repeat_type": "daily", "repeat_interval": 1, "enabled": true}},
+				{Key: "inbox", Name: "GitHub inbox", Type: models.AutomationNodeAgentTask, Role: "github_inbox", Config: map[string]any{"prompt": "Process assigned issues.", "category": "backlog", "priority": 2}},
+				{Key: "implementation", Name: "Implementation", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "Implement the accepted issue.", "category": "active", "priority": 2}},
+				{Key: "open_pr", Name: "Open pull request", Type: models.AutomationNodeAction, Role: "open_pull_request", Config: map[string]any{"instructions": "Open a reviewable pull request linked to the source issue.", "base": "release/v2", "draft": true}},
+				{Key: "review", Name: "Human review", Type: models.AutomationNodeHumanGate, Role: "pull_request_review", Config: map[string]any{"approval_method": "pull_request_review"}},
+				{Key: "complete", Name: "Completed", Type: models.AutomationNodeOutcome, Role: "completed", Config: map[string]any{}},
+			},
+			Edges: []models.AutomationDraftEdge{
+				{Key: "producer_issue", From: "producer", To: "issue", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+				{Key: "issue_assignment", From: "issue", To: "assignment", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+				{Key: "schedule_inbox", From: "schedule", To: "inbox", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+				{Key: "assignment_inbox", From: "assignment", To: "inbox", FromPort: "right", ToPort: "left", Label: "assigned", Condition: map[string]any{"state": "assigned"}},
+				{Key: "inbox_implementation", From: "inbox", To: "implementation", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+				{Key: "implementation_pr", From: "implementation", To: "open_pr", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+				{Key: "pr_review", From: "open_pr", To: "review", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+				{Key: "review_complete", From: "review", To: "complete", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+			}}
+		activated := activate(t, h, candidate, "schedule", "inbox")
+		require.Contains(t, activated.Prompt, "Pull request handoff")
+		require.Contains(t, activated.Prompt, "github_open_pull_request")
+		require.Contains(t, activated.Prompt, `base "release/v2"`)
+		require.Contains(t, activated.Prompt, "draft=true")
+	})
+
+	t.Run("notification handoff", func(t *testing.T) {
+		h := newAutomationSaveHarness(t, "Custom notification activation")
+		candidate := customScheduledTaskCandidate("Custom notification activation", "Start the notification flow.")
+		candidate.Nodes = append(candidate.Nodes,
+			models.AutomationDraftNode{Key: "notify", Name: "Create notification", Type: models.AutomationNodeAction, Role: "create_notification", Config: map[string]any{"notification_type": "change_proposal", "instructions": "Ask a human to review the prepared proposal."}},
+			models.AutomationDraftNode{Key: "approval", Name: "Human approval", Type: models.AutomationNodeHumanGate, Role: "native_approval", Config: map[string]any{"approval_method": "native_alert"}},
+			models.AutomationDraftNode{Key: "complete", Name: "Completed", Type: models.AutomationNodeOutcome, Role: "completed", Config: map[string]any{}},
+		)
+		candidate.Edges = append(candidate.Edges,
+			models.AutomationDraftEdge{Key: "followup_notify", From: "followup", To: "notify", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+			models.AutomationDraftEdge{Key: "notify_approval", From: "notify", To: "approval", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+			models.AutomationDraftEdge{Key: "approval_complete", From: "approval", To: "complete", FromPort: "right", ToPort: "left", Condition: map[string]any{"state": "approved"}},
+		)
+		activated := activate(t, h, candidate, "schedule", "followup")
+		require.Contains(t, activated.Prompt, "Human approval handoff")
+		require.Contains(t, activated.Prompt, "create_notification exactly once")
+		require.NotContains(t, activated.Prompt, "Pull request handoff")
+		require.NotContains(t, activated.Prompt, "github_open_pull_request")
+	})
+
+	t.Run("task only", func(t *testing.T) {
+		h := newAutomationSaveHarness(t, "Custom task-only activation")
+		candidate := customScheduledTaskCandidate("Custom task-only activation", "Start the task-only flow.")
+		activated := activate(t, h, candidate, "schedule", "followup")
+		require.NotContains(t, activated.Prompt, "Human approval handoff")
+		require.NotContains(t, activated.Prompt, "create_notification exactly once")
+		require.NotContains(t, activated.Prompt, "Pull request handoff")
+		require.NotContains(t, activated.Prompt, "github_open_pull_request")
+	})
 }
 
 func TestAutomationCustomTaskFanoutContinuesAfterBusyBranch(t *testing.T) {
@@ -1244,6 +1614,26 @@ func TestAutomationSavePreviewRejectsUnavailableGitHubIntegrationWithoutPersiste
 	require.NoError(t, err)
 	require.NotEmpty(t, plan.Validation)
 	require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM automations`))
+	require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM tasks`))
+	require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM schedules`))
+}
+
+func TestAutomationSaveValidationIssueAppearsInPreviewAndBlocksPersistence(t *testing.T) {
+	h := newAutomationSaveHarness(t, "Shared save validation")
+	candidate := customScheduledTaskCandidate("Shared save validation", "Review one request.")
+	candidate.Nodes[0].Config["agent_ref"] = " missing-agent "
+
+	plan, normalized, err := h.compiler.PreviewSave(context.Background(), h.project.ID, candidate)
+	require.NoError(t, err)
+	require.Equal(t, "missing-agent", normalized.Nodes[0].Config["agent_ref"], "preview must still return the normalized candidate")
+	require.Contains(t, issueCodes(plan.Validation), "agent_ref")
+
+	_, err = h.compiler.Save(context.Background(), AutomationSaveRequest{
+		ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate,
+	})
+	require.ErrorContains(t, err, "automation graph validation failed: Agent selection cannot be resolved because project capabilities are unavailable.")
+	require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM automations`))
+	require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM automation_definition_resources`))
 	require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM tasks`))
 	require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM schedules`))
 }

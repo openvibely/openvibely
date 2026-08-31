@@ -2,16 +2,64 @@ package handler
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
+	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
+	"github.com/openvibely/openvibely/internal/testutil"
 )
+
+func TestChannelsPageRendersConfiguredXWithoutOAuthSecrets(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	ctx := context.Background()
+	secrets := map[string]string{
+		service.XSettingConsumerKey:       "browser-x-consumer-key",
+		service.XSettingConsumerSecret:    "browser-x-consumer-secret",
+		service.XSettingAccessToken:       "browser-x-access-token",
+		service.XSettingAccessTokenSecret: "browser-x-access-token-secret",
+	}
+	for key, value := range secrets {
+		if err := h.settingsRepo.Set(ctx, key, value); err != nil {
+			t.Fatalf("save X setting %s: %v", key, err)
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/channels?project_id=default", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, expected := range []string{
+		`data-channel-type="x"`,
+		`id="x_config_modal"`,
+		`hx-post="/channels/x/configure"`,
+		`name="x_consumer_key"`,
+		`name="x_consumer_secret"`,
+		`name="x_access_token"`,
+		`name="x_access_token_secret"`,
+		`type="password"`,
+	} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("expected configured X page to contain %q", expected)
+		}
+	}
+	for _, secret := range secrets {
+		if strings.Contains(body, secret) {
+			t.Fatalf("configured X page exposed OAuth secret %q", secret)
+		}
+	}
+}
 
 func cardSectionByType(body, channelType string) string {
 	start := strings.Index(body, `data-channel-type="`+channelType+`"`)
@@ -38,20 +86,57 @@ func titleSection(cardBody string) string {
 }
 
 func inputTagByID(body, id string) string {
-	marker := `id="` + id + `"`
-	idIdx := strings.Index(body, marker)
-	if idIdx == -1 {
+	return inputTagByAttribute(body, "id", id)
+}
+
+func inputTagByName(body, name string) string {
+	return inputTagByAttribute(body, "name", name)
+}
+
+func inputTagByAttribute(body, attr, value string) string {
+	marker := attr + `="` + value + `"`
+	attrIdx := strings.Index(body, marker)
+	if attrIdx == -1 {
 		return ""
 	}
-	start := strings.LastIndex(body[:idIdx], "<input")
+	return inputTagEndingAt(body, attrIdx)
+}
+
+func inputTagBeforeText(body, text string) string {
+	textIdx := strings.Index(body, text)
+	if textIdx == -1 {
+		return ""
+	}
+	return inputTagEndingAt(body, textIdx)
+}
+
+func inputTagEndingAt(body string, endBefore int) string {
+	start := strings.LastIndex(body[:endBefore], "<input")
 	if start == -1 {
 		return ""
 	}
-	endRel := strings.Index(body[idIdx:], ">")
+	endRel := strings.Index(body[start:], ">")
 	if endRel == -1 {
 		return ""
 	}
-	return body[start : idIdx+endRel+1]
+	return body[start : start+endRel+1]
+}
+
+func optionTagByValue(body, value string) string {
+	marker := `value="` + value + `"`
+	valueIdx := strings.Index(body, marker)
+	if valueIdx == -1 {
+		return ""
+	}
+	start := strings.LastIndex(body[:valueIdx], "<option")
+	if start == -1 {
+		return ""
+	}
+	endRel := strings.Index(body[start:], "</option>")
+	if endRel == -1 {
+		return ""
+	}
+	return body[start : start+endRel+len("</option>")]
 }
 
 func assertIndexOrder(t *testing.T, body, first, second, message string) {
@@ -230,12 +315,13 @@ func TestChannelsPageOutboundTargetsRenderAsPermanentTopEditCard(t *testing.T) {
 	targetRepo := repository.NewChannelTargetRepo(db)
 	h.SetChannelTargetRepo(targetRepo)
 	seedTarget := models.ChannelTarget{
-		ID:        repository.NewID(),
-		ProjectID: "default",
-		Platform:  "email",
-		Name:      "client",
-		TargetID:  "client@example.com",
-		Home:      true,
+		ID:             repository.NewID(),
+		ProjectID:      "default",
+		Platform:       "email",
+		Name:           "client",
+		TargetID:       "client@example.com",
+		Home:           true,
+		DefaultSubject: "Original subject",
 	}
 	if err := targetRepo.Upsert(context.Background(), seedTarget); err != nil {
 		t.Fatalf("failed to seed outbound target: %v", err)
@@ -290,6 +376,30 @@ func TestChannelsPageOutboundTargetsRenderAsPermanentTopEditCard(t *testing.T) {
 	}
 	if !strings.Contains(body, `onsubmit="return addOutboundTargetDraft(event)"`) || !strings.Contains(body, `client@example.com`) {
 		t.Fatal("expected staged outbound target controls inside modal")
+	}
+	savedRowStart := strings.Index(body, `<tr data-outbound-target-draft-key="`)
+	if savedRowStart == -1 {
+		t.Fatalf("expected saved outbound target row markup, body=%q", body)
+	}
+	savedRowEnd := strings.Index(body[savedRowStart:], `</tr>`)
+	if savedRowEnd == -1 {
+		t.Fatalf("expected saved outbound target row to close, body=%q", body)
+	}
+	savedRow := body[savedRowStart : savedRowStart+savedRowEnd+len(`</tr>`)]
+	if strings.Count(savedRow, `onclick="editOutboundTargetDraft(this)"`) != 1 {
+		t.Fatalf("expected one discoverable Edit action for the saved outbound target, row=%q", savedRow)
+	}
+	for _, want := range []string{
+		"function editOutboundTargetDraft",
+		"outboundTargetsFindDraftGroup",
+		"form.dataset.editingRowKey",
+		"Update Target",
+		"const fieldsID = 'outbound-target-draft-fields-'",
+		"const id = outboundTargetsDraftValue(editingGroup, 'target_row_id');", `name="target_default_subject" value="Original subject"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("expected saved target edit flow to contain %q, body=%q", want, body)
+		}
 	}
 	if strings.Count(body, `data-channel-type="outbound-targets"`) != 1 {
 		t.Fatalf("expected exactly one outbound targets card on page, got %d", strings.Count(body, `data-channel-type="outbound-targets"`))
@@ -410,6 +520,372 @@ func TestChannelsPageOutboundTargetsRenderAsPermanentTopEditCard(t *testing.T) {
 	if !strings.Contains(cardBody, "email: 2") || !strings.Contains(cardBody, "Explicit targets allowed") {
 		t.Fatalf("expected refreshed card fragment to show saved draft and policy badge, got %q", cardBody)
 	}
+}
+
+func TestChannelsPageUsesCompactAgentPickerProjection(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	workerRepo := repository.NewWorkerRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	chatAttachmentRepo := repository.NewChatAttachmentRepo(db)
+	alertRepo := repository.NewAlertRepo(db)
+	upcomingRepo := repository.NewUpcomingRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+
+	projectSvc := service.NewProjectService(projectRepo)
+	llmSvc := service.NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
+	llmSvc.SetLLMCaller(testutil.NewMockLLMCaller())
+	workerSvc := service.NewWorkerService(llmSvc, 0, nil)
+	taskSvc := service.NewTaskService(taskRepo, attachmentRepo, workerSvc)
+	schedulerSvc := service.NewSchedulerService(scheduleRepo, taskRepo, workerSvc)
+	alertSvc := service.NewAlertService(alertRepo, nil)
+	upcomingSvc := service.NewUpcomingService(upcomingRepo)
+	h := New(projectSvc, taskSvc, llmSvc, workerSvc, schedulerSvc, alertSvc, upcomingSvc, nil, llmConfigRepo, taskRepo, scheduleRepo, execRepo, workerRepo, attachmentRepo, chatAttachmentRepo, projectRepo, settingsRepo, nil, nil)
+	h.SetLocalRepoPathEnabled(true)
+	agentRepo := repository.NewAgentRepo(db)
+	h.SetAgentRepo(agentRepo)
+	e := echo.New()
+	h.RegisterRoutes(e)
+
+	alpha := &models.Agent{Name: "Alpha Picker", SystemPrompt: strings.Repeat("large hidden prompt ", 1024), ToolConfig: models.AgentToolConfig{ScopedFiles: []models.ScopedFilesConfig{{Directory: "src", Permissions: []string{"read"}}}}}
+	if err := agentRepo.Create(context.Background(), alpha); err != nil {
+		t.Fatalf("create alpha agent: %v", err)
+	}
+	zulu := &models.Agent{Name: "Zulu Picker", SystemPrompt: strings.Repeat("large hidden prompt ", 1024)}
+	if err := agentRepo.Create(context.Background(), zulu); err != nil {
+		t.Fatalf("create zulu agent: %v", err)
+	}
+	archived := &models.Agent{Name: "Archived Picker", GeneratedStatus: models.AgentStatusArchived}
+	if err := agentRepo.Create(context.Background(), archived); err != nil {
+		t.Fatalf("create archived agent: %v", err)
+	}
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/channels?project_id=default", nil)
+	req.Header.Set("HX-Request", "true")
+	e.ServeHTTP(rec, req)
+	counter.SetEnabled(false)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d; body=%s", rec.Code, rec.Body.String())
+	}
+
+	body := rec.Body.String()
+	alphaIdx := strings.Index(body, alpha.ID)
+	zuluIdx := strings.Index(body, zulu.ID)
+	if alphaIdx == -1 || zuluIdx == -1 {
+		t.Fatalf("expected compact picker IDs in Channels response; alpha=%d zulu=%d body=%s", alphaIdx, zuluIdx, body)
+	}
+	if alphaIdx > zuluIdx {
+		t.Fatalf("expected picker JSON to keep name ASC order, alpha index %d after zulu index %d", alphaIdx, zuluIdx)
+	}
+	forbiddenBody := []string{archived.ID, "large hidden prompt", "scoped_files", "tool_config"}
+	for _, forbidden := range forbiddenBody {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("Channels response contained hidden picker payload %q", forbidden)
+		}
+	}
+
+	var pickerQueries []string
+	for _, statement := range counter.Statements() {
+		stmt := strings.ToLower(statement)
+		if strings.Contains(stmt, "from agents") && strings.Contains(stmt, "order by name asc") {
+			pickerQueries = append(pickerQueries, statement)
+		}
+	}
+	if len(pickerQueries) != 1 {
+		t.Fatalf("expected one Channels agent picker query, got %#v from statements %#v", pickerQueries, counter.Statements())
+	}
+	projection := strings.Split(strings.ToLower(pickerQueries[0]), "from agents")[0]
+	if !strings.Contains(projection, "select id, name") {
+		t.Fatalf("Channels picker query used unexpected projection: %s", pickerQueries[0])
+	}
+	for _, forbidden := range []string{"system_prompt", "tools", "tool_config", "plugins", "mcp_servers", "skills", "permission_defaults_json", "model_defaults_json", "source_refs_json"} {
+		if strings.Contains(projection, forbidden) {
+			t.Fatalf("Channels picker query selected full agent column %q: %s", forbidden, pickerQueries[0])
+		}
+	}
+}
+
+func TestChannelsPageBatchesSettingsReadsAndPreservesRenderedValues(t *testing.T) {
+	tc := NewTestContext(t)
+	selectedProject := tc.CreateProject().WithName("Channels Batch Settings Project").Build()
+	otherProject := tc.CreateProject().WithName("Other Channels Project").Build()
+	seedRepresentativeChannelsSettings(t, tc.settingsRepo, selectedProject.ID, otherProject.ID)
+
+	var settingsQueries []string
+	tc.settingsRepo.SetQueryObserver(func(query string) {
+		if strings.Contains(strings.ToLower(query), "from app_settings") {
+			settingsQueries = append(settingsQueries, query)
+		}
+	})
+	rec := tc.HTMX().Get("/channels?project_id=" + url.QueryEscape(selectedProject.ID)).Execute()
+	tc.settingsRepo.SetQueryObserver(nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected Channels status 200, got %d; body=%s", rec.Code, rec.Body.String())
+	}
+
+	var batchQueries, singleQueries int
+	for _, query := range settingsQueries {
+		lower := strings.ToLower(query)
+		if strings.Contains(lower, "select key, value") && strings.Contains(lower, "where key in") {
+			batchQueries++
+		}
+		if strings.Contains(lower, "select value from app_settings where key = ?") {
+			singleQueries++
+		}
+	}
+	if batchQueries != 1 || singleQueries != 0 {
+		t.Fatalf("expected one batched app_settings query and no individual settings queries, got batch=%d single=%d all=%#v", batchQueries, singleQueries, settingsQueries)
+	}
+
+	body := rec.Body.String()
+	for _, snippet := range []string{
+		`name="github_app_id" class="input input-bordered" value="98765"`,
+		`name="github_app_slug" class="input input-bordered" value="batch-app"`,
+		`batch-private-key`,
+		`value="batch-pat"`,
+		`name="github_api_endpoint"`,
+		`value="https://ghe.example/api/v3"`,
+		`name="slack_client_id" class="input input-bordered" value="slack-client-id"`,
+		`value="slack-client-secret"`,
+		`value="slack-app-token"`,
+		`value="slack-bot-override"`,
+		`value="discord-bot-token"`,
+		`name="email_address" class="input input-bordered" value="bot@example.com"`,
+		`value="email-secret"`,
+		`name="email_imap_host" class="input input-bordered" value="imap.example.com"`,
+		`name="email_smtp_host" class="input input-bordered" value="smtp.example.com"`,
+		`name="email_poll_interval_seconds" class="input input-bordered" value="45"`,
+		"Explicit targets allowed",
+	} {
+		if !strings.Contains(body, snippet) {
+			t.Fatalf("Channels response missing seeded setting snippet %q", snippet)
+		}
+	}
+	if tag := inputTagByID(body, "channel_telegram_rich_messages_v2"); !strings.Contains(tag, "checked") {
+		t.Fatalf("expected channel_telegram_rich_messages_v2 to render checked, got %s", tag)
+	}
+	for _, label := range []string{
+		"Send task responses to Telegram",
+		"Send task completion/failure notifications for Slack-created tasks",
+		"Send task completion/failure notifications for Discord-created tasks",
+		"Send task completion/failure replies by email",
+		"Mark existing unread messages seen on start",
+	} {
+		if tag := inputTagBeforeText(body, label); strings.Contains(tag, "checked") {
+			t.Fatalf("expected checkbox before %q to render unchecked from saved false setting, got %s", label, tag)
+		}
+	}
+	if tag := inputTagByName(body, "email_skip_attachments"); !strings.Contains(tag, "checked") {
+		t.Fatalf("expected email_skip_attachments to render checked, got %s", tag)
+	}
+	for _, option := range []struct {
+		value string
+		label string
+	}{
+		{service.GitHubAuthModeApp, "GitHub App"},
+		{service.SlackBotTokenSourceManual, "Manual Override Token"},
+		{service.EmailProviderFastmail, "Fastmail"},
+	} {
+		tag := optionTagByValue(body, option.value)
+		if !strings.Contains(tag, "selected") || !strings.Contains(tag, option.label) {
+			t.Fatalf("expected option %q to render selected with label %q, got %s", option.value, option.label, tag)
+		}
+	}
+	for _, snippet := range []string{
+		`name="email_imap_port" class="input input-bordered" value="1993"`,
+		`name="email_smtp_port" class="input input-bordered" value="2587"`,
+	} {
+		if !strings.Contains(body, snippet) {
+			t.Fatalf("Channels response missing normalized setting snippet %q", snippet)
+		}
+	}
+}
+
+func TestChannelsPageDefaultsStillRenderWhenSettingsAreMissing(t *testing.T) {
+	tc := NewTestContext(t)
+	rec := tc.HTMX().Get("/channels?project_id=default").Execute()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected Channels status 200, got %d; body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if tag := inputTagByID(body, "channel_telegram_rich_messages_v2"); !strings.Contains(tag, "checked") {
+		t.Fatalf("expected Telegram rich messages default checked, got %s", tag)
+	}
+	if tag := inputTagBeforeText(body, "Mark existing unread messages seen on start"); !strings.Contains(tag, "checked") {
+		t.Fatalf("expected mark-existing-seen default checked, got %s", tag)
+	}
+	for _, option := range []struct {
+		value string
+		label string
+	}{
+		{service.SlackBotTokenSourceOAuth, "OAuth Callback Token"},
+		{service.EmailProviderCustom, "Custom"},
+	} {
+		tag := optionTagByValue(body, option.value)
+		if !strings.Contains(tag, "selected") || !strings.Contains(tag, option.label) {
+			t.Fatalf("expected default option %q to render selected with label %q, got %s", option.value, option.label, tag)
+		}
+	}
+	for _, snippet := range []string{
+		`name="email_imap_port" class="input input-bordered" value="993"`,
+		`name="email_smtp_port" class="input input-bordered" value="587"`,
+		`name="email_poll_interval_seconds" class="input input-bordered" value="15"`,
+	} {
+		if !strings.Contains(body, snippet) {
+			t.Fatalf("Channels response missing default setting snippet %q", snippet)
+		}
+	}
+	if strings.Contains(body, "Explicit targets allowed") {
+		t.Fatal("explicit send targets should default disabled when project setting is missing")
+	}
+}
+
+func BenchmarkHandlerChannelsSettingsBatchedContention(b *testing.B) {
+	db := testutil.NewTestDB(b)
+	h, e, _ := setupTestHandlerForDB(b, db)
+	project := createProjectTB(b, h, "Channels Settings Benchmark Project")
+	settingsRepo := repository.NewSettingsRepo(db)
+	seedRepresentativeChannelsSettings(b, settingsRepo, project.ID, "other-project")
+	h.settingsRepo = settingsRepo
+	h.SetChannelTargetRepo(repository.NewChannelTargetRepo(db))
+
+	var totalLightweightLatency int64
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		queryAcquired := make(chan struct{})
+		var once sync.Once
+		settingsRepo.SetQueryAcquiredObserver(func(query string) {
+			if strings.Contains(strings.ToLower(query), "from app_settings") {
+				once.Do(func() { close(queryAcquired) })
+			}
+		})
+		errCh := make(chan error, 1)
+		go func() {
+			rec := htmxGet(e, "/channels?project_id="+url.QueryEscape(project.ID))
+			if rec.Code != http.StatusOK {
+				errCh <- fmt.Errorf("Channels request status=%d", rec.Code)
+				return
+			}
+			errCh <- nil
+		}()
+		select {
+		case <-queryAcquired:
+		case err := <-errCh:
+			b.Fatalf("Channels request ended before app_settings query started: %v", err)
+		case <-time.After(2 * time.Second):
+			b.Fatal("Channels app_settings query did not start")
+		}
+		lightweightStart := time.Now()
+		if _, err := h.projectSvc.List(context.Background()); err != nil {
+			b.Fatalf("lightweight project list: %v", err)
+		}
+		totalLightweightLatency += time.Since(lightweightStart).Nanoseconds()
+		if err := <-errCh; err != nil {
+			b.Fatal(err)
+		}
+		settingsRepo.SetQueryAcquiredObserver(nil)
+	}
+	b.ReportMetric(float64(totalLightweightLatency)/float64(b.N), "lightweight_db_block_ns/op")
+}
+
+func seedRepresentativeChannelsSettings(t testing.TB, settingsRepo *repository.SettingsRepo, projectID, otherProjectID string) {
+	t.Helper()
+	ctx := context.Background()
+	settings := map[string]string{
+		service.TelegramSettingBotToken:                                       "telegram-batch-token",
+		service.TelegramSettingSendResponses:                                  "false",
+		service.TelegramSettingRichMessagesV2:                                 "true",
+		service.GitHubSettingAuthMode:                                         service.GitHubAuthModeApp,
+		service.GitHubSettingAppID:                                            "98765",
+		service.GitHubSettingAppSlug:                                          "batch-app",
+		service.GitHubSettingAppPrivateKey:                                    "batch-private-key",
+		service.GitHubSettingPAT:                                              "batch-pat",
+		service.GitHubSettingAPIEndpoint:                                      "https://ghe.example/api/v3",
+		service.SlackSettingClientID:                                          "slack-client-id",
+		service.SlackSettingClientSecret:                                      "slack-client-secret",
+		service.SlackSettingAppToken:                                          "slack-app-token",
+		service.SlackSettingBotTokenOverride:                                  "slack-bot-override",
+		service.SlackSettingBotTokenSource:                                    service.SlackBotTokenSourceManual,
+		service.SlackSettingBotToken:                                          "slack-oauth-bot-token",
+		service.SlackSettingSendResponses:                                     "false",
+		service.DiscordSettingBotToken:                                        "discord-bot-token",
+		service.DiscordSettingSendResponses:                                   "false",
+		service.EmailSettingProvider:                                          service.EmailProviderFastmail,
+		service.EmailSettingAddress:                                           "bot@example.com",
+		service.EmailSettingPassword:                                          "email-secret",
+		service.EmailSettingIMAPHost:                                          "imap.example.com",
+		service.EmailSettingIMAPPort:                                          "1993",
+		service.EmailSettingSMTPHost:                                          "smtp.example.com",
+		service.EmailSettingSMTPPort:                                          "2587",
+		service.EmailSettingPollIntervalSeconds:                               "45",
+		service.EmailSettingSendResponses:                                     "false",
+		service.EmailSettingSkipAttachments:                                   "true",
+		service.EmailSettingMarkExistingSeenOnStart:                           "false",
+		service.SendMessageAllowExplicitTargetsSetting + ":" + projectID:      "true",
+		service.SendMessageAllowExplicitTargetsSetting + ":" + otherProjectID: "false",
+	}
+	for key, value := range settings {
+		if err := settingsRepo.Set(ctx, key, value); err != nil {
+			t.Fatalf("seed setting %s: %v", key, err)
+		}
+	}
+}
+
+func TestChannelsPageExplicitTargetsSettingMatchesFullPageAndHTMX(t *testing.T) {
+	tc := NewTestContext(t)
+	if err := tc.settingsRepo.Set(context.Background(), service.SendMessageAllowExplicitTargetsSetting+":default", "true"); err != nil {
+		t.Fatalf("failed to seed explicit target policy: %v", err)
+	}
+
+	full := tc.HTTP().Get("/channels?project_id=default").Execute()
+	if full.Code != http.StatusOK {
+		t.Fatalf("expected full-page status 200, got %d", full.Code)
+	}
+	htmx := tc.HTMX().Get("/channels?project_id=default").Execute()
+	if htmx.Code != http.StatusOK {
+		t.Fatalf("expected HTMX status 200, got %d", htmx.Code)
+	}
+
+	fullBody := full.Body.String()
+	htmxBody := htmx.Body.String()
+	if !strings.Contains(fullBody, "Explicit targets allowed") || !strings.Contains(htmxBody, "Explicit targets allowed") {
+		t.Fatalf("expected full-page and HTMX responses to render explicit-targets badge; full=%t htmx=%t", strings.Contains(fullBody, "Explicit targets allowed"), strings.Contains(htmxBody, "Explicit targets allowed"))
+	}
+
+	fullPolicy := outboundTargetsPolicyControlMarkup(t, fullBody)
+	htmxPolicy := outboundTargetsPolicyControlMarkup(t, htmxBody)
+	if fullPolicy != htmxPolicy {
+		t.Fatalf("explicit-targets policy control differed between full-page and HTMX responses\nfull: %s\nhtmx: %s", fullPolicy, htmxPolicy)
+	}
+	if !strings.Contains(fullPolicy, "checked") {
+		t.Fatalf("expected explicit-targets policy control to render checked, got %s", fullPolicy)
+	}
+}
+
+func outboundTargetsPolicyControlMarkup(t *testing.T, body string) string {
+	t.Helper()
+	marker := "Allow explicit unsaved targets"
+	markerIdx := strings.Index(body, marker)
+	if markerIdx == -1 {
+		t.Fatalf("missing explicit-targets policy marker %q", marker)
+	}
+	labelStart := strings.LastIndex(body[:markerIdx], "<label")
+	if labelStart == -1 {
+		t.Fatalf("missing explicit-targets policy label before %q", marker)
+	}
+	labelEnd := strings.Index(body[markerIdx:], "</label>")
+	if labelEnd == -1 {
+		t.Fatalf("missing explicit-targets policy closing label after %q", marker)
+	}
+	return body[labelStart : markerIdx+labelEnd+len("</label>")]
 }
 
 func TestChannelsPageOutboundTargetTestButtonIncludesSelectedProjectID(t *testing.T) {
@@ -643,24 +1119,24 @@ func TestChannelsPageStatusBadgesRenderAtBottomOfDetailsSection(t *testing.T) {
 	)
 
 	telegramCard := cardSectionByType(body, "telegram")
-	if !strings.Contains(telegramCard, `<span class="badge badge-warning badge-sm">Not Connected</span>`) && !strings.Contains(telegramCard, `<span class="badge badge-success badge-sm">Connected</span>`) {
+	if !strings.Contains(telegramCard, `<span class="badge badge-sm badge-warning">Not Connected</span>`) && !strings.Contains(telegramCard, `<span class="badge badge-sm badge-success">Connected</span>`) {
 		t.Fatal("expected telegram status badge in details section")
 	}
-	if strings.Contains(telegramCard, `<span class="badge badge-warning badge-sm">Not Connected</span>`) {
+	if strings.Contains(telegramCard, `<span class="badge badge-sm badge-warning">Not Connected</span>`) {
 		assertIndexOrder(
 			t,
 			telegramCard,
 			`Authorized users:</span>`,
-			`<span class="badge badge-warning badge-sm">Not Connected</span>`,
+			`<span class="badge badge-sm badge-warning">Not Connected</span>`,
 			"expected telegram status badge below authorized users",
 		)
 	}
-	if strings.Contains(telegramCard, `<span class="badge badge-success badge-sm">Connected</span>`) {
+	if strings.Contains(telegramCard, `<span class="badge badge-sm badge-success">Connected</span>`) {
 		assertIndexOrder(
 			t,
 			telegramCard,
 			`Authorized users:</span>`,
-			`<span class="badge badge-success badge-sm">Connected</span>`,
+			`<span class="badge badge-sm badge-success">Connected</span>`,
 			"expected telegram status badge below authorized users",
 		)
 	}

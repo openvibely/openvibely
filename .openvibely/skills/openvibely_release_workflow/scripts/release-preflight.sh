@@ -49,6 +49,12 @@ fi
 TAG="v${VERSION}"
 log "Normalized version: ${VERSION}  Tag: ${TAG}"
 
+REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null || true)"
+if [[ -n "$REPO_ROOT" ]]; then
+    export PATH="${REPO_ROOT}/.tools/gh/bin:${PATH}"
+    export PATH="${REPO_ROOT}/.tools/wails3/bin:${PATH}"
+fi
+
 ###############################################################################
 # 2. Required tools
 ###############################################################################
@@ -71,7 +77,7 @@ log "Required tools present: go, git, zip, tar, sha(sum)"
 
 # GitHub CLI (needed for release creation — warn, not fail, for preflight)
 if ! command -v gh &>/dev/null; then
-    warn "GitHub CLI (gh) not found — release publishing will fail. Install: https://cli.github.com"
+    warn "GitHub CLI (gh) not found — release publishing will fail. Run check-release-signing.sh --setup to install local release tooling."
 else
     log "GitHub CLI present: $(gh --version | head -1)"
 fi
@@ -152,14 +158,14 @@ else
     COMMIT_RANGE="HEAD"
 fi
 
-COMMIT_COUNT="$(git log "$COMMIT_RANGE" --oneline | wc -l | tr -d ' ')"
+COMMIT_COUNT="$(git --no-pager log "$COMMIT_RANGE" --oneline | wc -l | tr -d ' ')"
 log "Commits since ${PREV_TAG:-beginning}: ${COMMIT_COUNT}"
 
 if [[ "$COMMIT_COUNT" -eq 0 ]]; then
     warn "No commits found since $PREV_TAG. This may be a re-release or tag already points to HEAD."
 else
     info "--- Unreleased commits ---"
-    git log "$COMMIT_RANGE" --oneline --no-decorate
+    git --no-pager log "$COMMIT_RANGE" --oneline --no-decorate
     info "--- End of commits ---"
 fi
 
@@ -173,15 +179,39 @@ HOST_ARCH="$(uname -m)"
 if [[ "$HOST_OS" == "Darwin" ]]; then
     log "Build host: macOS ($HOST_ARCH) — macOS desktop app bundles supported."
 else
-    warn "Build host: $HOST_OS — macOS desktop .app bundles CANNOT be built. Linux/Windows server artifacts only."
+    warn "Build host: $HOST_OS — macOS desktop .app bundles require artifacts from a macOS release job."
 fi
 
-# Windows CGO cross-compiler check
-if command -v x86_64-w64-mingw32-gcc &>/dev/null; then
-    log "mingw-w64 cross-compiler present — Windows desktop-cli build supported."
+if command -v wails3 &>/dev/null || [[ -n "${OPENVIBELY_WAILS3:-}" ]]; then
+    log "wails3 CLI configured — desktop builds use the Wails Taskfile path."
 else
-    warn "mingw-w64 not found (x86_64-w64-mingw32-gcc). Windows desktop-cli build will be skipped."
-    warn "Install on macOS with: brew install mingw-w64"
+    warn "wails3 CLI is missing. Official desktop builds will fail."
+    warn "Install with: go install github.com/wailsapp/wails/v3/cmd/wails3@$(go list -m -f '{{.Version}}' github.com/wailsapp/wails/v3 2>/dev/null || echo latest)"
+fi
+
+# Windows desktop build check
+if [[ -n "${OPENVIBELY_WINDOWS_DESKTOP_BINARY:-}" ]]; then
+    log "Windows amd64 desktop prebuilt artifact configured; Windows arm64 desktop will be built with Go cross-compilation."
+elif go env GOOS GOARCH >/dev/null 2>&1; then
+    log "Windows desktop artifacts will be built for amd64 and arm64 with Go cross-compilation (CGO disabled)."
+else
+    warn "Unable to verify Go cross-compilation support. Official release-build may fail."
+fi
+
+if [[ "$HOST_OS" == "Linux" ]]; then
+    log "Native Linux host — Linux desktop build supported for the host architecture when GTK/WebKit development dependencies are installed."
+fi
+if [[ -n "${OPENVIBELY_LINUX_DESKTOP_BINARY:-}" && -n "${OPENVIBELY_LINUX_ARM64_DESKTOP_BINARY:-}" ]]; then
+    log "Linux desktop prebuilt artifacts configured for amd64 and arm64."
+elif [[ -n "${OPENVIBELY_LINUX_DESKTOP_BINARY:-}" ]]; then
+    log "Linux amd64 desktop prebuilt artifact configured; Linux arm64 still needs native Linux, Wails Docker, or OPENVIBELY_LINUX_ARM64_DESKTOP_BINARY."
+elif [[ -n "${OPENVIBELY_LINUX_ARM64_DESKTOP_BINARY:-}" ]]; then
+    log "Linux arm64 desktop prebuilt artifact configured; Linux amd64 still needs native Linux, Wails Docker, or OPENVIBELY_LINUX_DESKTOP_BINARY."
+elif { command -v wails3 &>/dev/null || [[ -n "${OPENVIBELY_WAILS3:-}" ]]; } && command -v docker &>/dev/null; then
+    log "wails3 and Docker present — Linux desktop can use Wails Docker images for amd64 and arm64."
+else
+    warn "Linux desktop prebuilt artifacts are unset and Wails Docker is unavailable. Official release-build will fail unless native Linux covers the target architecture."
+    warn "Produce Linux desktop binaries in Linux build jobs or Wails v3 Docker/Taskfile builds, then export OPENVIBELY_LINUX_DESKTOP_BINARY and OPENVIBELY_LINUX_ARM64_DESKTOP_BINARY."
 fi
 
 # Docker check

@@ -14,7 +14,7 @@ func (h *Handler) StartChannelChatRun(ctx context.Context, req service.ChannelCh
 	if req.ExecID == "" || req.TaskID == "" || req.ProjectID == "" {
 		return
 	}
-	go h.processStreamingResponse(streamingResponseParams{
+	h.startStreamingResponse(streamingResponseParams{
 		ExecID:                      req.ExecID,
 		TaskID:                      req.TaskID,
 		Message:                     req.Message,
@@ -47,6 +47,9 @@ func (h *Handler) StartChannelTaskRun(ctx context.Context, req service.ChannelTa
 		h.completeWithFailure(context.Background(), req.ExecID, req.TaskID, msg, 0, req.ReplyContext)
 		return
 	}
+	if h.workerSvc != nil {
+		h.workerSvc.ClearCancellationRequested(req.TaskID)
+	}
 	if err := h.applySwarmChildFollowupStart(ctx, task, req.Message); err != nil {
 		h.completeWithFailure(context.Background(), req.ExecID, req.TaskID, err.Error(), 0, req.ReplyContext)
 		return
@@ -61,7 +64,7 @@ func (h *Handler) StartChannelTaskRun(ctx context.Context, req service.ChannelTa
 	h.reactivateAchievedGoalForManualFollowup(ctx, req.TaskID, req.ReplyContext.Source, "")
 	agentDef := h.resolveTaskAgentDefinitionForTask(ctx, req.TaskID, req.AgentDefinition)
 	systemContext := combineContexts(combineContexts(req.SystemContext, h.taskGoalContext(ctx, req.TaskID, agentDef)), worktreeContext)
-	go h.processStreamingResponse(streamingResponseParams{
+	h.startStreamingResponse(streamingResponseParams{
 		ExecID:          req.ExecID,
 		TaskID:          req.TaskID,
 		Message:         req.Message,
@@ -76,5 +79,6 @@ func (h *Handler) StartChannelTaskRun(ctx context.Context, req service.ChannelTa
 		Surface:         req.Surface,
 		ChannelReply:    req.ReplyContext,
 		InputOrigin:     req.ReplyContext.Source,
+		RuntimeTools:    req.RuntimeTools,
 	})
 }

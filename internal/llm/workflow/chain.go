@@ -13,19 +13,9 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
-// AgentCaller is the minimal dependency needed to run a direct agent call.
-type AgentCaller interface {
-	CallAgentDirect(ctx context.Context, message string, agent models.LLMConfig, workDir string) (string, error)
-}
-
 // TaskCreator is the minimal dependency needed to create follow-up tasks.
 type TaskCreator interface {
 	Create(ctx context.Context, task *models.Task) error
-}
-
-// ProjectResolver resolves repo working directory for a project id.
-type ProjectResolver interface {
-	ResolveWorkDir(ctx context.Context, projectID string) string
 }
 
 // LineageResolver resolves Git lineage (branch + commit SHA) for a parent task.
@@ -35,29 +25,17 @@ type LineageResolver interface {
 
 // Service contains workflow chain behavior with narrow dependencies.
 type Service struct {
-	projectResolver ProjectResolver
 	taskCreator     TaskCreator
-	agentCaller     AgentCaller
 	lineageResolver LineageResolver
 }
 
-func NewService(projectResolver ProjectResolver, taskCreator TaskCreator, agentCaller AgentCaller) *Service {
-	return &Service{projectResolver: projectResolver, taskCreator: taskCreator, agentCaller: agentCaller}
+func NewService(taskCreator TaskCreator) *Service {
+	return &Service{taskCreator: taskCreator}
 }
 
 // SetLineageResolver sets the lineage resolver for capturing parent Git state.
 func (s *Service) SetLineageResolver(lr LineageResolver) {
 	s.lineageResolver = lr
-}
-
-// CallAgentForWorkflow calls an LLM agent for workflow step execution.
-// It resolves the project working directory and delegates to CallAgentDirect.
-func (s *Service) CallAgentForWorkflow(ctx context.Context, prompt string, agent *models.LLMConfig, projectID string) (string, error) {
-	workDir := ""
-	if s.projectResolver != nil {
-		workDir = s.projectResolver.ResolveWorkDir(ctx, projectID)
-	}
-	return s.agentCaller.CallAgentDirect(ctx, prompt, *agent, workDir)
 }
 
 // CleanOutputForChain strips internal markers from task output so the child task

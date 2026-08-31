@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"mime"
@@ -39,8 +40,12 @@ func EffectiveTaskCreationCategory(req TaskCreationRequest, availableAgents []mo
 }
 
 func selectTaskCreationAgent(req TaskCreationRequest, availableAgents []models.LLMConfig) (string, string) {
-	if req.AgentID != "" {
-		return req.AgentID, ""
+	requestedAgentID := strings.TrimSpace(req.AgentID)
+	if strings.EqualFold(requestedAgentID, automationDefaultModelConfigID) {
+		return "", ""
+	}
+	if requestedAgentID != "" {
+		return requestedAgentID, ""
 	}
 	if len(availableAgents) > 1 {
 		complexity := AnalyzeComplexity(req.Prompt)
@@ -116,6 +121,8 @@ func ExecuteTaskCreationsWithIndexedReturn(ctx context.Context, requests []TaskC
 	var failed []string
 
 	for requestIndex, req := range requests {
+		req.Title = strings.TrimSpace(req.Title)
+		req.Prompt = strings.TrimSpace(req.Prompt)
 		selectedAgentID, selectionInfo := selectTaskCreationAgent(req, availableAgents)
 		if req.AgentID == "" && len(availableAgents) == 1 {
 			applog.Infof("[task-creation] only one agent available, using %s", selectedAgentID)
@@ -212,6 +219,10 @@ func ExecuteTaskCreationsWithIndexedReturn(ctx context.Context, requests []TaskC
 	return createdResults, summary.String()
 }
 
+func ResolveTaskCreationAgentDefinition(ctx context.Context, req TaskCreationRequest, projectID string, taskSvc *TaskService) (string, error) {
+	return resolveTaskCreationAgentDefinition(ctx, req, projectID, taskSvc)
+}
+
 func resolveTaskCreationAgentDefinition(ctx context.Context, req TaskCreationRequest, projectID string, taskSvc *TaskService) (string, error) {
 	requestedName := strings.TrimSpace(req.Agent)
 	requestedID := strings.TrimSpace(req.AgentDefinitionID)
@@ -256,20 +267,39 @@ func resolveTaskCreationAgentDefinition(ctx context.Context, req TaskCreationReq
 
 // TaskEditRequest represents a typed task edit action request.
 type TaskEditRequest struct {
-	ID            string                     `json:"id"`                        // Required: task ID to edit
-	Title         string                     `json:"title,omitempty"`           // Optional: new title
-	Prompt        string                     `json:"prompt,omitempty"`          // Optional: new prompt
-	Category      string                     `json:"category,omitempty"`        // Optional: new category
-	Priority      int                        `json:"priority,omitempty"`        // Optional: new priority (1-5)
-	Tag           string                     `json:"tag,omitempty"`             // Optional: new tag ("feature", "bug", "")
-	AgentID       string                     `json:"agent_id,omitempty"`        // Optional: new agent ID (empty = use default)
-	AgentConfigID string                     `json:"agent_config_id,omitempty"` // Optional: alias for agent_id (for compatibility)
-	Chain         *models.ChainConfiguration `json:"chain,omitempty"`           // Optional: chain config for sequential task execution
-	Attachments   []string                   `json:"attachments,omitempty"`     // Optional: file paths to attach to the task
+	ID                   string                     `json:"id"`                               // Required: task ID to edit
+	Title                string                     `json:"title,omitempty"`                  // Optional: new title
+	Prompt               string                     `json:"prompt,omitempty"`                 // Optional: new prompt
+	Category             string                     `json:"category,omitempty"`               // Optional: new category
+	Priority             int                        `json:"priority,omitempty"`               // Optional: new priority (1-4)
+	PrioritySet          bool                       `json:"-"`                                // Internal: true when JSON explicitly supplied priority
+	Tag                  string                     `json:"tag,omitempty"`                    // Optional: new tag ("feature", "bug", "")
+	AgentID              string                     `json:"agent_id,omitempty"`               // Optional: new model config ID (empty = leave unchanged)
+	AgentConfigID        string                     `json:"agent_config_id,omitempty"`        // Optional: alias for agent_id (for compatibility)
+	AgentDefinitionID    string                     `json:"agent_definition_id,omitempty"`    // Optional: known primary Agent definition ID
+	Agent                string                     `json:"agent,omitempty"`                  // Optional: exact primary Agent definition name
+	ClearAgentDefinition bool                       `json:"clear_agent_definition,omitempty"` // Optional: explicitly clear the primary Agent definition
+	Chain                *models.ChainConfiguration `json:"chain,omitempty"`                  // Optional: chain config for sequential task execution
+	Attachments          []string                   `json:"attachments,omitempty"`            // Optional: file paths to attach to the task
+}
+
+func (r *TaskEditRequest) UnmarshalJSON(data []byte) error {
+	type alias TaskEditRequest
+	var decoded alias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	decoded.PrioritySet = raw["priority"] != nil
+	*r = TaskEditRequest(decoded)
+	return nil
 }
 
 // ExecuteTaskEdits applies edits to existing tasks and returns a summary.
-// Only fields that are set (non-zero) in the request are updated.
+// Only fields that are set in the request are updated.
 // If attachmentRepo and uploadsDir are provided, file attachments in requests are processed.
 func ExecuteTaskEdits(ctx context.Context, requests []TaskEditRequest, projectID string, taskSvc *TaskService, attachmentRepo *repository.AttachmentRepo, uploadsDir string) string {
 	if len(requests) == 0 {
@@ -294,6 +324,32 @@ func ExecuteTaskEdits(ctx context.Context, requests []TaskEditRequest, projectID
 			continue
 		}
 
+		primaryAgentDefinitionRequested := strings.TrimSpace(req.AgentDefinitionID) != "" || strings.TrimSpace(req.Agent) != "" || req.ClearAgentDefinition
+		resolvedAgentDefinitionID := ""
+		if primaryAgentDefinitionRequested {
+			if req.ClearAgentDefinition && (strings.TrimSpace(req.AgentDefinitionID) != "" || strings.TrimSpace(req.Agent) != "") {
+				failed = append(failed, fmt.Sprintf("- \"%s\": clear_agent_definition cannot be combined with agent_definition_id or agent", task.Title))
+				continue
+			}
+			if !req.ClearAgentDefinition {
+				var resolveErr error
+				resolvedAgentDefinitionID, resolveErr = resolveTaskCreationAgentDefinition(ctx, TaskCreationRequest{AgentDefinitionID: req.AgentDefinitionID, Agent: req.Agent}, projectID, taskSvc)
+				if resolveErr != nil {
+					applog.Infof("[task-edit] refusing invalid primary Agent assignment for task %s: %v", req.ID, resolveErr)
+					failed = append(failed, fmt.Sprintf("- \"%s\": %v", task.Title, resolveErr))
+					continue
+				}
+			}
+		}
+
+		priorityRequested := req.PrioritySet || req.Priority != 0
+		if priorityRequested {
+			if err := validateTaskPriority(req.Priority); err != nil {
+				failed = append(failed, fmt.Sprintf("- \"%s\": %v", task.Title, err))
+				continue
+			}
+		}
+
 		// Apply only the fields that were specified
 		var changes []string
 		if req.Title != "" && req.Title != task.Title {
@@ -304,7 +360,7 @@ func ExecuteTaskEdits(ctx context.Context, requests []TaskEditRequest, projectID
 			task.Prompt = req.Prompt
 			changes = append(changes, "prompt")
 		}
-		if req.Priority > 0 && req.Priority != task.Priority {
+		if priorityRequested && req.Priority != task.Priority {
 			task.Priority = req.Priority
 			changes = append(changes, "priority")
 		}
@@ -329,6 +385,21 @@ func ExecuteTaskEdits(ctx context.Context, requests []TaskEditRequest, projectID
 			if agentID != currentAgentID {
 				task.AgentID = &agentID
 				changes = append(changes, "agent")
+			}
+		}
+		if primaryAgentDefinitionRequested {
+			currentAgentDefinitionID := ""
+			if task.AgentDefinitionID != nil {
+				currentAgentDefinitionID = *task.AgentDefinitionID
+			}
+			if req.ClearAgentDefinition {
+				if currentAgentDefinitionID != "" {
+					task.AgentDefinitionID = nil
+					changes = append(changes, "primary_agent")
+				}
+			} else if resolvedAgentDefinitionID != currentAgentDefinitionID {
+				task.AgentDefinitionID = &resolvedAgentDefinitionID
+				changes = append(changes, "primary_agent")
 			}
 		}
 
@@ -362,20 +433,23 @@ func ExecuteTaskEdits(ctx context.Context, requests []TaskEditRequest, projectID
 			}
 		}
 
-		// Handle category change separately since it has side effects (auto-submit)
+		// Handle category change separately since it has lifecycle side effects.
+		categoryChanged := false
+		newCategory := task.Category
 		if req.Category != "" {
-			newCategory := models.TaskCategory(req.Category)
-			if newCategory != task.Category {
+			requestedCategory := models.TaskCategory(req.Category)
+			if requestedCategory != task.Category {
 				// Validate category
 				validCategory := false
 				for _, c := range models.SelectableCategories {
-					if newCategory == c {
+					if requestedCategory == c {
 						validCategory = true
 						break
 					}
 				}
 				if validCategory {
-					task.Category = newCategory
+					newCategory = requestedCategory
+					categoryChanged = true
 					changes = append(changes, "category")
 				} else {
 					applog.Infof("[task-edit] invalid category %q for task %s", req.Category, req.ID)
@@ -404,13 +478,28 @@ func ExecuteTaskEdits(ctx context.Context, requests []TaskEditRequest, projectID
 			continue
 		}
 
-		if err := taskSvc.Update(ctx, task); err != nil {
-			applog.Infof("[task-edit] error updating task %s: %v", req.ID, err)
-			failed = append(failed, fmt.Sprintf("- \"%s\": %v", task.Title, err))
-		} else {
-			applog.Infof("[task-edit] updated task %s fields=%v", req.ID, changes)
-			edited = append(edited, fmt.Sprintf("- \"%s\" (%s, updated: %s) [TASK_EDITED:%s]", task.Title, task.Category, strings.Join(changes, ", "), task.ID))
+		nonCategoryChanges := len(changes)
+		if categoryChanged {
+			nonCategoryChanges--
 		}
+		if nonCategoryChanges > 0 {
+			if err := taskSvc.Update(ctx, task); err != nil {
+				applog.Infof("[task-edit] error updating task %s: %v", req.ID, err)
+				failed = append(failed, fmt.Sprintf("- \"%s\": %v", task.Title, err))
+				continue
+			}
+		}
+		if categoryChanged {
+			if err := taskSvc.UpdateCategory(ctx, task.ID, newCategory); err != nil {
+				applog.Infof("[task-edit] error updating task category %s: %v", req.ID, err)
+				failed = append(failed, fmt.Sprintf("- \"%s\": %v", task.Title, err))
+				continue
+			}
+			task.Category = newCategory
+		}
+
+		applog.Infof("[task-edit] updated task %s fields=%v", req.ID, changes)
+		edited = append(edited, fmt.Sprintf("- \"%s\" (%s, updated: %s) [TASK_EDITED:%s]", task.Title, task.Category, strings.Join(changes, ", "), task.ID))
 	}
 
 	var summary strings.Builder
@@ -566,7 +655,7 @@ func BuildModelContextString(configs []models.LLMConfig) string {
 
 // BuildAgentDefinitionContextString creates a prompt-safe summary of Agent definitions
 // that can be assigned as a task's primary Agent from chat orchestration.
-func BuildAgentDefinitionContextString(agents []models.Agent) string {
+func BuildAgentDefinitionContextString(agents []models.ChatAssignableAgentDefinition) string {
 	assignable := UniqueChatAssignableAgentDefinitions(agents)
 	if len(assignable) == 0 {
 		return ""
@@ -589,22 +678,26 @@ func BuildAgentDefinitionContextString(agents []models.Agent) string {
 	return sb.String()
 }
 
-func UniqueChatAssignableAgentDefinitions(agents []models.Agent) []models.Agent {
+func UniqueChatAssignableAgentDefinitions(agents []models.ChatAssignableAgentDefinition) []models.ChatAssignableAgentDefinition {
 	counts := make(map[string]int, len(agents))
 	for _, a := range agents {
-		if isChatAssignableAgentDefinition(a) {
+		if isChatAssignableAgentDefinitionSummary(a) {
 			counts[strings.ToLower(strings.TrimSpace(a.Name))]++
 		}
 	}
 
-	out := make([]models.Agent, 0, len(agents))
+	out := make([]models.ChatAssignableAgentDefinition, 0, len(agents))
 	for _, a := range agents {
 		key := strings.ToLower(strings.TrimSpace(a.Name))
-		if isChatAssignableAgentDefinition(a) && counts[key] == 1 {
+		if isChatAssignableAgentDefinitionSummary(a) && counts[key] == 1 {
 			out = append(out, a)
 		}
 	}
 	return out
+}
+
+func isChatAssignableAgentDefinitionSummary(a models.ChatAssignableAgentDefinition) bool {
+	return strings.TrimSpace(a.Name) != "" && strings.TrimSpace(a.SystemKind) == "" && a.Enabled && a.SelectableAsPrimary && a.GeneratedStatus != models.AgentStatusArchived && a.ArchivedAt == nil
 }
 
 func isChatAssignableAgentDefinition(a models.Agent) bool {
@@ -960,7 +1053,7 @@ type ScheduleTaskRequest struct {
 	Time                string   `json:"time"`                   // Required: HH:MM format (24-hour)
 	Repeat              string   `json:"repeat"`                 // once, daily, weekly, monthly, hours, minutes, seconds (default: daily)
 	Interval            int      `json:"interval"`               // Optional: repeat interval (e.g., 2 = every 2 days/hours/etc., default: 1)
-	Days                []string `json:"days"`                   // Optional: day abbreviations for weekly (mon,tue,wed,thu,fri,sat,sun)
+	Days                []string `json:"days"`                   // Optional: at most one day abbreviation for weekly (mon,tue,wed,thu,fri,sat,sun)
 	ClearContextOnStart *bool    `json:"clear_context_on_start"` // Optional; defaults to true for new schedules
 }
 
@@ -979,7 +1072,7 @@ type ModifyScheduleRequest struct {
 	Time                string   `json:"time"`                   // New time in HH:MM format (optional)
 	Repeat              string   `json:"repeat"`                 // New repeat type (optional)
 	Interval            *int     `json:"interval"`               // New interval (optional, pointer to distinguish 0 from unset)
-	Days                []string `json:"days"`                   // New days for weekly (optional)
+	Days                []string `json:"days"`                   // New weekly day (optional; at most one)
 	Enabled             *bool    `json:"enabled"`                // Enable/disable (optional, pointer to distinguish false from unset)
 	ClearContextOnStart *bool    `json:"clear_context_on_start"` // Clear model replay context at each scheduled start (optional)
 }
@@ -1030,7 +1123,7 @@ func BuildChatContext(tasks []models.Task, availableModels []models.LLMConfig, s
 
 // BuildChatContextWithAgentDefinitions builds the chat context with an optional
 // list of Agent definitions that can be assigned via create_task.agent.
-func BuildChatContextWithAgentDefinitions(tasks []models.Task, availableModels []models.LLMConfig, agentDefinitions []models.Agent, schedules []models.Schedule, now time.Time) string {
+func BuildChatContextWithAgentDefinitions(tasks []models.Task, availableModels []models.LLMConfig, agentDefinitions []models.ChatAssignableAgentDefinition, schedules []models.Schedule, now time.Time) string {
 	// Filter out chat tasks
 	var nonChatTasks []models.Task
 	for _, t := range tasks {

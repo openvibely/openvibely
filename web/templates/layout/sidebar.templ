@@ -77,6 +77,17 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 					const sel = document.getElementById('project-selector');
 					if (!sel) return;
 
+					function persistSelectedProject(projectID) {
+						try {
+							fetch('/ui/preferences', {
+								method: 'POST',
+								headers: { 'Content-Type': 'application/json' },
+								body: JSON.stringify({ project_id: projectID }),
+								keepalive: true
+							}).catch(function() {});
+						} catch (_) {}
+					}
+
 					sel.addEventListener('change', function() {
 						const newProjectId = sel.value;
 
@@ -113,9 +124,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 						// Determine which page to load based on current URL
 						const currentPath = window.location.pathname;
 						let newUrl;
-						if (currentPath.includes('/dashboard-mockup')) {
-							newUrl = '/dashboard-mockup?project_id=' + newProjectId;
-						} else if (currentPath.includes('/automations')) {
+						if (currentPath.includes('/automations')) {
 							newUrl = '/automations?project_id=' + newProjectId;
 						} else if (currentPath.includes('/schedule')) {
 							newUrl = '/schedule?project_id=' + newProjectId;
@@ -137,16 +146,8 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 							newUrl = '/alerts?project_id=' + newProjectId;
 						} else if (currentPath.includes('/workers')) {
 							newUrl = '/workers?project_id=' + newProjectId;
-						} else if (currentPath.includes('/suggestions')) {
-							newUrl = '/suggestions?project_id=' + newProjectId;
 						} else if (currentPath.includes('/insights')) {
 							newUrl = '/insights?project_id=' + newProjectId;
-						} else if (currentPath.includes('/architect')) {
-							newUrl = '/architect?project_id=' + newProjectId;
-						} else if (currentPath.includes('/backlog')) {
-							newUrl = '/backlog?project_id=' + newProjectId;
-						} else if (currentPath.includes('/autonomous')) {
-							newUrl = '/autonomous?project_id=' + newProjectId;
 						} else if (currentPath.includes('/channels')) {
 							newUrl = '/channels?project_id=' + newProjectId;
 						} else if (currentPath.includes('/personality')) {
@@ -154,6 +155,8 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 						} else {
 							newUrl = '/tasks?project_id=' + newProjectId;
 						}
+
+						persistSelectedProject(newProjectId);
 
 						// HTMX owns the content swap, URL update, and history cache.
 						window.openVibelyNavigate(newUrl);
@@ -172,7 +175,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 							const eventType = data.type || event.type;
 							if (!eventType) return;
 
-							if (eventType === 'task_status_changed' || eventType === 'task_category_changed' || eventType === 'task_thread_execution_started' || eventType === 'task_thread_input_applied' || eventType === 'task_thread_input_queued' || eventType === 'task_thread_input_cancelled' || eventType === 'alert_created' || eventType.indexOf('automation_') === 0) {
+							if (eventType === 'task_board_updated' || eventType === 'task_status_changed' || eventType === 'task_category_changed' || eventType === 'task_thread_execution_started' || eventType === 'task_lifecycle_execution_changed' || eventType === 'task_thread_input_applied' || eventType === 'task_thread_input_queued' || eventType === 'task_thread_input_steered' || eventType === 'task_thread_input_cancelled' || eventType === 'alert_created' || eventType.indexOf('automation_') === 0) {
 								window._tabVisibility.dispatchSSEEvent('sse-task-event', data);
 								if (eventType.indexOf('automation_') === 0) {
 									window._tabVisibility.dispatchSSEEvent('sse-automation-event', data);
@@ -187,20 +190,30 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 									}
 								}
 
-								// Show toast notifications for task completion events (current project only).
-								// Skip chat tasks — chat responses appear inline in the chat UI.
-								if (eventType === 'task_status_changed' && projectSelector && data.category !== 'chat') {
-									const currentProjectID = projectSelector.value;
-									if (data.project_id === currentProjectID) {
-										const terminalStatuses = ['completed', 'failed', 'cancelled'];
-										if (terminalStatuses.includes(data.status) && typeof window.showToast === 'function') {
-											const taskName = data.task_name || 'Task';
-											window.showToast(taskName, data.status, data.task_id);
+									// Show toast notifications for task completion events (current project only).
+									// Skip chat tasks — chat responses appear inline in the chat UI.
+									if (eventType === 'task_status_changed' && projectSelector && data.category !== 'chat') {
+										const currentProjectID = projectSelector.value;
+										if (data.project_id === currentProjectID) {
+											const terminalStatuses = ['completed', 'failed', 'cancelled'];
+											if (terminalStatuses.includes(data.status) && typeof window.showToast === 'function') {
+												const taskName = data.task_name || 'Task';
+												window.showToast(taskName, data.status, data.task_id);
+											}
 										}
 									}
+
+									if (eventType === 'automation_invocation_started' && projectSelector && typeof window.showToast === 'function') {
+										const currentProjectID = projectSelector.value;
+										if (data.project_id === currentProjectID) {
+											const automationName = data.task_name || 'Automation';
+											const invocationId = data.invocation_id || data.automation_id || '';
+											const automationUrl = '/automations/' + encodeURIComponent(data.automation_id || '') + '?project_id=' + encodeURIComponent(currentProjectID);
+											window.showToast(automationName + ' is now running.', 'info', '', { toastKey: 'automation:' + invocationId, clickURL: automationUrl });
+										}
+									}
+									return;
 								}
-								return;
-							}
 
 							if (eventType === 'chat_new_message' || eventType === 'chat_response_done' || eventType === 'chat_turn_steered' || eventType === 'chat_thread_input_applied' || eventType === 'chat_thread_input_cancelled' || eventType === 'mixture_progress') {
 								window._tabVisibility.dispatchSSEEvent('sse-chat-live-event', data);
@@ -230,11 +243,14 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 							console.error('[SSE-Live] Connection error:', err);
 						},
 						listeners: {
+							'task_board_updated': handleLiveEvent,
 							'task_status_changed': handleLiveEvent,
 							'task_category_changed': handleLiveEvent,
 							'task_thread_execution_started': handleLiveEvent,
+							'task_lifecycle_execution_changed': handleLiveEvent,
 							'task_thread_input_applied': handleLiveEvent,
 							'task_thread_input_queued': handleLiveEvent,
+							'task_thread_input_steered': handleLiveEvent,
 							'task_thread_input_cancelled': handleLiveEvent,
 							'alert_created': handleLiveEvent,
 							'automation_definition_updated': handleLiveEvent,
@@ -353,11 +369,22 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 					});
 				})();
 
-				// Sidebar collapse/expand toggle with localStorage persistence
-				(function() {
-					var sidebar = document.getElementById('sidebar');
-					var btn = document.getElementById('sidebar-collapse-btn');
-					if (!sidebar || !btn) return;
+					// Sidebar collapse/expand toggle with localStorage persistence
+					(function() {
+						var sidebar = document.getElementById('sidebar');
+						var btn = document.getElementById('sidebar-collapse-btn');
+						if (!sidebar || !btn) return;
+
+					function persistSidebarPreference(isCollapsed) {
+						try {
+							fetch('/ui/preferences', {
+								method: 'POST',
+								headers: { 'Content-Type': 'application/json' },
+								body: JSON.stringify({ sidebar_collapsed: isCollapsed }),
+								keepalive: true
+							}).catch(function() {});
+						} catch (_) {}
+					}
 
 					// Update accessibility attributes based on collapsed state
 					function updateSidebarToggleA11y(isCollapsed) {
@@ -365,21 +392,27 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 						btn.setAttribute('aria-label', isCollapsed ? 'Expand sidebar (Ctrl+B)' : 'Collapse sidebar (Ctrl+B)');
 						btn.setAttribute('title', isCollapsed ? 'Expand sidebar (Ctrl+B)' : 'Collapse sidebar (Ctrl+B)');
 						btn.setAttribute('data-tip', isCollapsed ? 'Expand sidebar' : 'Collapse sidebar');
+						if (document.body) document.body.classList.toggle('sidebar-collapsed-pending', isCollapsed);
 					}
 
-					// Restore saved state
-					var collapsed = localStorage.getItem('sidebar-collapsed') === 'true';
-					if (collapsed) {
-						sidebar.classList.add('sidebar-collapsed');
+						// Restore saved state
+							var collapsed = document.documentElement.getAttribute('data-ui-sidebar-collapsed') === 'true';
+						if (collapsed) {
+							sidebar.classList.add('sidebar-collapsed');
+						}
+						updateSidebarToggleA11y(collapsed);
+
+					function toggleSidebarCollapsed() {
+						sidebar.classList.toggle('sidebar-collapsed');
+						var isCollapsed = sidebar.classList.contains('sidebar-collapsed');
+						try { localStorage.setItem('sidebar-collapsed', isCollapsed); } catch (_) {}
+						persistSidebarPreference(isCollapsed);
+						updateSidebarToggleA11y(isCollapsed);
 					}
-					updateSidebarToggleA11y(collapsed);
 
 					btn.addEventListener('click', function(e) {
 						e.preventDefault();
-						sidebar.classList.toggle('sidebar-collapsed');
-						var isCollapsed = sidebar.classList.contains('sidebar-collapsed');
-						localStorage.setItem('sidebar-collapsed', isCollapsed);
-						updateSidebarToggleA11y(isCollapsed);
+						toggleSidebarCollapsed();
 					});
 
 					// Keyboard shortcut: Ctrl+B or Cmd+B to toggle sidebar
@@ -389,10 +422,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 							var tag = document.activeElement && document.activeElement.tagName;
 							if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
 							e.preventDefault();
-							sidebar.classList.toggle('sidebar-collapsed');
-							var isCollapsed = sidebar.classList.contains('sidebar-collapsed');
-							localStorage.setItem('sidebar-collapsed', isCollapsed);
-							updateSidebarToggleA11y(isCollapsed);
+							toggleSidebarCollapsed();
 						}
 					});
 				})();
@@ -443,13 +473,11 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 							hx-target="#main-content"
 							hx-push-url="true"
 						>
-							<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h4m8 0h4M8 6a2 2 0 104 0 2 2 0 10-4 0zm4 12h4m-8 0H4m8 0a2 2 0 104 0 2 2 0 10-4 0zM12 8v8"></path>
-							</svg>
-							<span class="sidebar-text">Automations</span>
+<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"></path>
+								</svg>							<span class="sidebar-text">Automations</span>
 						</a>
-					</li>
-					<li>
+					</li>					<li>
 						<a
 							data-nav-base="/schedule"						data-tip="Schedule"
 						href={ templ.SafeURL(fmt.Sprintf("/schedule?project_id=%s", currentProjectID)) }
@@ -511,7 +539,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 						hx-push-url="true"
 					>
 						<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5M12 7v5l3 2"></path>
 						</svg>
 						<span class="sidebar-text">Reflection</span>
 					</a>
@@ -552,15 +580,21 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"></path>
 						</svg>
 						<span class="sidebar-text">Alerts</span>
-						<span
-							id="alert-badge"
-							class="sidebar-text"
-							hx-get={ fmt.Sprintf("/alerts/unread-count?project_id=%s", currentProjectID) }
-							hx-trigger="load, every 30s, alertUpdate from:body"
-							hx-swap="innerHTML"
-							hx-target="this"
-							hx-push-url="false"
-						></span>
+						<span class="sidebar-alert-indicators sidebar-text">
+							<span
+								id="alert-badge"
+								hx-get={ fmt.Sprintf("/alerts/unread-count?project_id=%s", currentProjectID) }
+								hx-trigger="load, every 30s, alertUpdate from:body"
+								hx-swap="innerHTML"
+								hx-target="this"
+								hx-push-url="false"
+							></span>
+							<span
+								id="system-update-nav-badge"
+								class="badge badge-sm badge-primary badge-outline inline-flex items-center sidebar-update-badge hidden"
+								aria-label="System update available"
+							>Update</span>
+						</span>
 					</a>
 				</li>
 				<li>

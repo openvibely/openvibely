@@ -8,8 +8,7 @@ import (
 )
 
 // ApplyAgentToSystemPrompt prepends the agent's system prompt and skill
-// contents to the existing system context string. Used by API paths
-// (OAuth, Anthropic, OpenAI) where we can't write files for the CLI to read.
+// contents to the existing system context string for provider adapters.
 func ApplyAgentToSystemPrompt(base string, agent *models.Agent) string {
 	if agent == nil {
 		return base
