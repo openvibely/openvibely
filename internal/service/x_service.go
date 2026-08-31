@@ -374,6 +374,56 @@ func xTweetIDLess(a, b string) bool {
 	return a < b
 }
 
+func stripXSelfMentions(text, username string) string {
+	username = strings.TrimSpace(username)
+	if username == "" {
+		return text
+	}
+	for i := 0; i < len(username); i++ {
+		if !isXHandleCharacter(username[i]) {
+			return text
+		}
+	}
+
+	var stripped strings.Builder
+	last := 0
+	search := 0
+	removed := false
+	for search < len(text) {
+		relative := strings.IndexByte(text[search:], '@')
+		if relative < 0 {
+			break
+		}
+		start := search + relative
+		end := start + 1 + len(username)
+		if (start > 0 && isXHandleCharacter(text[start-1])) || end > len(text) {
+			search = start + 1
+			continue
+		}
+		if !strings.EqualFold(text[start+1:end], username) ||
+			(end < len(text) && isXHandleCharacter(text[end])) {
+			search = start + 1
+			continue
+		}
+		if !removed {
+			stripped.Grow(len(text))
+			removed = true
+		}
+		stripped.WriteString(text[last:start])
+		last = end
+		search = end
+	}
+	if !removed {
+		return text
+	}
+	stripped.WriteString(text[last:])
+	return stripped.String()
+}
+
+func isXHandleCharacter(b byte) bool {
+	return b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z' || b >= '0' && b <= '9' || b == '_'
+}
+
 func (s *XService) processMention(ctx context.Context, tweet XTweet, user XUser) (bool, error) {
 	projectID, err := s.projectForUser(ctx, user.ID)
 	if err != nil {
@@ -403,7 +453,7 @@ func (s *XService) processMention(ctx context.Context, tweet XTweet, user XUser)
 	default:
 		return false, fmt.Errorf("unexpected X receipt claim state %q", claim.Result)
 	}
-	text := strings.TrimSpace(strings.ReplaceAll(tweet.Text, "@"+s.me.Username, ""))
+	text := strings.TrimSpace(stripXSelfMentions(tweet.Text, s.me.Username))
 	if text == "" {
 		_, err := s.receiptRepo.CompleteWithHandoff(ctx, tweet.ID, claim.Token, nil, func(exec repository.SQLExecutor) error {
 			return s.requireConfigurationWithExecutor(ctx, exec)
