@@ -2,9 +2,9 @@
 name: coding_agent_product_discipline
 type: feedback
 created: 2026-05-11
-updated: 2026-08-28
-source: consolidation
-source_id: memory_consolidation_2026_08_28
+updated: 2026-08-29
+source: after_complete
+source_id: b33987fc9bad30fe543abdb07057f162:1b619e9cce9d807b
 confidence: high
 title: Coding Agent Product Discipline
 ---
@@ -40,7 +40,7 @@ Audit and review discipline:
 - Raw-key presence checks for JSON numeric fields must account for `encoding/json` case-insensitive struct-field matching; explicit `{"Limit":0}` must not bypass invalid-zero validation through an omitted/default path.
 - Stateful mutations must preserve and verify pre-mutation eligibility before stop/cancel side effects. Reloading after a category write can lose the origin state and cancel work that was not originally Active.
 - Validation claims must match the exact reviewed head/base. If a broad suite fails on a baseline or unrelated regression, report the narrower passing scope and the broad failure rather than claiming the broad suite passed.
-- PR handoffs have repeatedly exposed stale publication metadata. Re-read the authoritative live PR body, head, file list, target, checks, and issue linkage; if a supported reuse path ignores `pr_body` and no body-only operation exists, report the handoff blocker instead of unsafe branch publication or unauthorized API mutation.
+- PR handoffs have repeatedly exposed stale or contaminated publication metadata. Re-read the authoritative live PR body, head, file list, target, checks, and issue linkage; compare the live tree/blob content and changed-file set with the exact validated local head/base, not only filenames. A green check run on a different or contaminated commit does not validate the audited patch; a live-head mismatch, unrelated hunks, deleted coverage, stale validation claims, or missing dependency files is a material publication/scope blocker. If a supported reuse path ignores `pr_body` and no body-only operation exists, report the handoff blocker instead of unsafe branch publication or unauthorized API mutation.
 
 Prompt and model-facing preferences:
 - Use direct role/capability wording over low-value internal labels unless a label affects authorization, routing, or correctness.

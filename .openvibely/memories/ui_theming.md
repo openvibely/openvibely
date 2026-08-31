@@ -2,9 +2,9 @@
 name: ui_theming
 type: project
 created: 2026-08-11
-updated: 2026-08-28
-source: after_complete_update
-source_id: d87ef6d051970bf69bec289136a3a796:3f707b55470e59b3
+updated: 2026-08-30
+source: after_complete
+source_id: d8ce0caca4111ec20dfc1f3906d85000:54a19951cbe52c56
 confidence: high
 title: UI Theming
 ---
@@ -27,6 +27,8 @@ Core theming contracts:
 - Footer sun/moon control toggles between most recently selected light-side and dark-side themes. Light mode toggle track must be light; dark mode keeps dark track. Footer controls must sync after DOM insertion.
 - Apply theme CSS variables early before paint. Base layout embeds only compact runtime catalog needed for early application; full catalog remains server-side for Themes page.
 - Highlight.js must not load a fixed GitHub Dark stylesheet. Rendered Markdown/code syntax colors derive from selected theme and work for initial/HTMX content.
+- Native light-mode Alert inspection inline code uses `--ov-l-surface-active` with `--ov-l-text-strong` through `[data-theme="light"] [data-alert-markdown] :not(pre) > code`; this avoids interpreting DaisyUI's OKLCH `--b2` value through the generic `hsl(var(--b2))` rule. Fenced `<pre><code>` blocks and shared Chat/task-thread bubble styling remain unchanged, and the hydrated notification regression requires at least 4.5:1 computed contrast.
+- Running task status uses the shared `.task-state-running` selector and must exactly match the chat send button's normal primary-action color, with one light value and one dark value. Both controls consume one shared primary-action token rather than duplicated literals. On 2026-08-30, the implementation introduced `--ov-primary-action-color` and `chat-send-button`, corrected the native dark normal state to `#7480ff` (the prior `#646fe4` is the native dark hover value), and kept normal declarations non-important so native hover rules remain authoritative. The follow-up now drives Chrome's actual pointer through CDP and verifies computed normal and `:hover` colors for native dark, native light, and imported themes; it confirms the Send color changes on hover while the running icon retains the normal shared token. That interaction exposed a cascade issue in which native generic/primary rules matched imported themes; native generic/primary hover rules and the native light primary base rule are now scoped to their native `data-color-theme` IDs, preserving imported primary/hover behavior without `!important` on shared Send rules. Deterministic templ generation, the server build, all internal tests, all template tests, and `git diff --check` passed. A fresh strict read-only audit of exact head `279f16dc40a1468d0904a0e2d6026013b59a5471` found no material bugs, regressions, or missing requirements, confirmed the worktree clean and the branch `0 behind / 5 ahead` of `main` with no task-side merge commits, and made no workspace changes or validation runs.
 
 Exact imported-theme styling:
 - Imported VS Code application/content backgrounds must follow selected exact palette, not DaisyUI fallbacks. `contentBg` should prefer editor/window backgrounds, applied to root/page canvas, `.drawer-content`, and `#main-content`.
