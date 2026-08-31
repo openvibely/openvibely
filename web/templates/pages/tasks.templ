@@ -128,29 +128,33 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 				if (!button || taskCardMergeInFlight) return;
 				var modal = document.getElementById('task_card_merge_confirm_modal');
 				if (!modal || modal.open) return;
-					var mode = button.dataset.mergeType || '';
-					if (['merge', 'ff', 'squash', 'rebase', 'pr'].indexOf(mode) < 0) return;
+				if (!button.hasAttribute('data-task-card-merge-action') && !button.hasAttribute('data-task-card-pr-action')) return;
+				var mode = button.dataset.mergeType || '';
+				var label = button.dataset.mergeLabel || '';
+				var endpoint = button.dataset.mergeEndpoint || '';
+				if (!mode || !label || !endpoint) return;
 				taskCardMergeRequest = {
 					taskID: button.dataset.taskId || '',
 					projectID: button.dataset.projectId || '',
 					title: button.dataset.taskTitle || 'this task',
 					target: button.dataset.targetBranch || 'the target branch',
 					mode: mode,
+					label: label,
+					endpoint: endpoint,
 					invokerTaskID: button.dataset.taskId || ''
 				};
 				if (!taskCardMergeRequest.taskID || !taskCardMergeRequest.projectID) return;
-					var names = {merge: 'Merge commit', ff: 'Fast-forward only', squash: 'Squash merge', rebase: 'Rebase', pr: 'Create PR'};
-					var prompt = mode === 'pr'
-						? 'Create a pull request for “' + taskCardMergeRequest.title + '”? Current Git, task, project, and authorization state will be checked again before publication.'
-						: names[mode] + ' “' + taskCardMergeRequest.title + '” into ' + taskCardMergeRequest.target + '? Current Git and task state will be checked again before any change.';
-					document.getElementById('task_card_merge_confirm_message').textContent = prompt;
+				var prompt = mode === 'pr'
+					? 'Create a pull request for “' + taskCardMergeRequest.title + '”? Current Git, task, project, and authorization state will be checked again before publication.'
+					: taskCardMergeRequest.label + ' “' + taskCardMergeRequest.title + '” into ' + taskCardMergeRequest.target + '? Current Git and task state will be checked again before any change.';
+				document.getElementById('task_card_merge_confirm_message').textContent = prompt;
 				var error = document.getElementById('task_card_merge_error');
 				error.textContent = '';
 				error.classList.add('hidden');
-				var label = modal.querySelector('[data-task-card-merge-label]');
-					if (label) label.textContent = names[mode];
-					taskCardMergeInvoker = button;
-					button.blur();
+				var confirmLabel = modal.querySelector('[data-task-card-merge-label]');
+				if (confirmLabel) confirmLabel.textContent = taskCardMergeRequest.label;
+				taskCardMergeInvoker = button;
+				button.blur();
 				modal.showModal();
 			}
 
@@ -170,9 +174,8 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 			function confirmTaskCardMerge() {
 				if (taskCardMergeInFlight || !taskCardMergeRequest || !window.htmx) return;
 				setTaskCardMergeBusy(true);
-					var request = taskCardMergeRequest;
-					var endpoint = request.mode === 'pr' ? 'pull-request' : (request.mode === 'rebase' ? 'rebase' : 'merge');
-					var path = '/tasks/' + encodeURIComponent(request.taskID) + '/worktree/' + endpoint;
+				var request = taskCardMergeRequest;
+				var path = '/tasks/' + encodeURIComponent(request.taskID) + '/worktree/' + request.endpoint;
 				htmx.ajax('POST', path, {
 					target: '#kanban-board',
 					swap: 'outerHTML',

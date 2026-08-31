@@ -804,6 +804,35 @@ func TestTasksRendersSharedTaskCardMergeConfirmation(t *testing.T) {
 	}
 }
 
+func TestTaskCardMergeConfirmationUsesRenderedActionMetadata(t *testing.T) {
+	source, err := os.ReadFile("tasks.templ")
+	if err != nil {
+		t.Fatalf("read tasks template: %v", err)
+	}
+	body := string(source)
+	for _, forbidden := range []string{
+		"var names =",
+		"['merge', 'ff', 'squash', 'rebase', 'pr']",
+		"request.mode === 'pr' ? 'pull-request'",
+	} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("task-card confirmation must not duplicate local action metadata %q", forbidden)
+		}
+	}
+	for _, required := range []string{
+		"button.dataset.mergeLabel",
+		"button.dataset.mergeEndpoint",
+		"endpoint: endpoint",
+		"'/worktree/' + request.endpoint",
+		"merge_source: 'task_card'",
+		"project_id: request.projectID",
+	} {
+		if !strings.Contains(body, required) {
+			t.Fatalf("task-card confirmation must consume rendered action metadata %q", required)
+		}
+	}
+}
+
 func TestTaskCardMergeMenuConfirmationFailureRetryAndBoardRefreshInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))
