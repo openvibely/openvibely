@@ -1388,7 +1388,7 @@ func TestScheduleContent_FullHeightTimelineUsesInnerFlexChain(t *testing.T) {
 		t.Fatal("expected schedule timeline wrapper opening tag")
 	}
 	wrapperTag := output[wrapperStart : wrapperStart+wrapperEnd]
-	for _, required := range []string{"flex-1", "flex", "flex-col"} {
+	for _, required := range []string{"flex-1", "flex", "flex-col", "min-h-0"} {
 		if !strings.Contains(wrapperTag, required) {
 			t.Fatalf("schedule timeline wrapper must contain %q, got %s", required, wrapperTag)
 		}
@@ -1404,7 +1404,7 @@ func TestScheduleContent_FullHeightTimelineUsesInnerFlexChain(t *testing.T) {
 		t.Fatal("expected schedule timeline grid body opening tag")
 	}
 	relativeTag := output[relativeStart : relativeStart+relativeEnd]
-	for _, required := range []string{"flex-1", "flex", "flex-col"} {
+	for _, required := range []string{"flex-1", "flex", "flex-col", "min-h-0"} {
 		if !strings.Contains(relativeTag, required) {
 			t.Fatalf("schedule timeline grid body must contain %q, got %s", required, relativeTag)
 		}

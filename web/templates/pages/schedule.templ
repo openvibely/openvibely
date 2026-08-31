@@ -506,7 +506,7 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 
 						<!-- Week Timeline View -->
 						<div id="schedule-timeline-container" class="bg-base-100 rounded-lg shadow-lg overflow-x-auto flex flex-1 flex-col min-h-0 overflow-y-auto opacity-0" style="border: 1px solid var(--ov-schedule-grid-border);">
-							<div class="min-w-[800px] flex flex-1 flex-col">
+							<div class="min-w-[800px] flex flex-1 flex-col min-h-0">
 								<!-- Day Headers -->
 								<div class="grid bg-base-200 sticky top-0 z-20" style="grid-template-columns: 60px repeat(7, 1fr); border-bottom: 1px solid var(--ov-schedule-grid-border);">
 									<div class="p-2 text-center font-semibold text-xs" style="border-right: 1px solid var(--ov-schedule-grid-border);"></div>
@@ -529,7 +529,7 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 								</div>
 
 								<!-- Timeline Grid -->
-									<div class="relative flex flex-1 flex-col">
+									<div class="relative flex flex-1 flex-col min-h-0">
 										for _, slot := range getTimeSlots() {
 											<div class="grid flex-1 schedule-grid-row last:border-b-0" style="grid-template-columns: 60px repeat(7, 1fr); border-bottom: 1px solid var(--ov-schedule-grid-border);">
 												<!-- Time Label -->
@@ -1489,4 +1489,3 @@ templ SchedulePrimaryAgentOptionSelector(selected *string, agentDefs []repositor
 		}
 	</select>
 }
-
