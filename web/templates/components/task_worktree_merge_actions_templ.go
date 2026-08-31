@@ -72,9 +72,9 @@ func taskWorktreeMergeIndicatorID(action TaskWorktreeMergeActionDescriptor, surf
 	return prefix + "-indicator" + action.IndicatorSuffix
 }
 
-// TaskCardWorktreeMergeAction renders one card action from the shared local
-// action descriptor. Card confirmation and board request behavior remain
-// owned by the Tasks page script.
+// TaskCardWorktreeMergeAction renders one direct card action from the shared
+// local action descriptor. The server revalidates task and Git state before
+// mutation; HTMX swaps the authoritative board only after a successful action.
 func TaskCardWorktreeMergeAction(task *models.Task, projectID string, action TaskWorktreeMergeActionDescriptor) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
@@ -187,7 +187,7 @@ func TaskCardWorktreeMergeAction(task *models.Task, projectID string, action Tas
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "\" onclick=\"openTaskCardMergeConfirm(this)\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "\" onclick=\"runTaskCardAction(this)\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

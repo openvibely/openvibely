@@ -64,9 +64,9 @@ func taskWorktreeMergeIndicatorID(action TaskWorktreeMergeActionDescriptor, surf
 	return prefix + "-indicator" + action.IndicatorSuffix
 }
 
-// TaskCardWorktreeMergeAction renders one card action from the shared local
-// action descriptor. Card confirmation and board request behavior remain
-// owned by the Tasks page script.
+// TaskCardWorktreeMergeAction renders one direct card action from the shared
+// local action descriptor. The server revalidates task and Git state before
+// mutation; HTMX swaps the authoritative board only after a successful action.
 templ TaskCardWorktreeMergeAction(task *models.Task, projectID string, action TaskWorktreeMergeActionDescriptor) {
 	<li>
 		<button
@@ -80,7 +80,7 @@ templ TaskCardWorktreeMergeAction(task *models.Task, projectID string, action Ta
 			data-merge-type={ action.MergeType }
 			data-merge-label={ action.Label }
 			data-merge-endpoint={ action.Endpoint }
-			onclick="openTaskCardMergeConfirm(this)"
+			onclick="runTaskCardAction(this)"
 		>
 			{ action.DisplayLabel(TaskWorktreeMergeTarget(task)) }
 		</button>

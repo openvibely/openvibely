@@ -100,153 +100,40 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 		</script>
 	}
 
-	<!-- Task Card Merge Confirmation Dialog -->
+	<!-- Task card merge, rebase, and pull request actions execute directly. -->
 	if project != nil {
-		<dialog id="task_card_merge_confirm_modal" class="modal">
-			<div class="modal-box max-w-md">
-				@ModalCloseButton("task_card_merge_confirm_modal", "Close merge confirmation")
-					<h3 class="font-bold text-lg pr-10">Confirm task action</h3>
-				<p id="task_card_merge_confirm_message" class="py-4 break-words"></p>
-				<p id="task_card_merge_error" class="hidden text-sm text-error mb-3" role="alert"></p>
-				<div class="modal-action">
-					<button type="button" class="btn" onclick="task_card_merge_confirm_modal.close()">Cancel</button>
-					<button id="task_card_merge_confirm_button" type="button" class="btn btn-primary" onclick="confirmTaskCardMerge()">
-						<span class="loading loading-spinner loading-sm hidden" data-task-card-merge-spinner></span>
-						<span data-task-card-merge-label>Merge</span>
-					</button>
-				</div>
-			</div>
-			<form method="dialog" class="modal-backdrop"><button>close</button></form>
-		</dialog>
 		<script>
-				var taskCardMergeRequest = null;
-				var taskCardMergeInFlight = false;
-				var taskCardMergePendingFocusTaskID = '';
-				var taskCardMergeInvoker = null;
-
-			function openTaskCardMergeConfirm(button) {
-				if (!button || taskCardMergeInFlight) return;
-				var modal = document.getElementById('task_card_merge_confirm_modal');
-				if (!modal || modal.open) return;
+			function runTaskCardAction(button) {
+				if (!button || !window.htmx || window._taskCardActionRequest) return;
 				if (!button.hasAttribute('data-task-card-merge-action') && !button.hasAttribute('data-task-card-pr-action')) return;
+				var taskID = button.dataset.taskId || '';
+				var projectID = button.dataset.projectId || '';
 				var mode = button.dataset.mergeType || '';
-				var label = button.dataset.mergeLabel || '';
 				var endpoint = button.dataset.mergeEndpoint || '';
-				if (!mode || !label || !endpoint) return;
-				taskCardMergeRequest = {
-					taskID: button.dataset.taskId || '',
-					projectID: button.dataset.projectId || '',
-					title: button.dataset.taskTitle || 'this task',
-					target: button.dataset.targetBranch || 'the target branch',
-					mode: mode,
-					label: label,
-					endpoint: endpoint,
-					invokerTaskID: button.dataset.taskId || ''
-				};
-				if (!taskCardMergeRequest.taskID || !taskCardMergeRequest.projectID) return;
-				var prompt = mode === 'pr'
-					? 'Create a pull request for “' + taskCardMergeRequest.title + '”? Current Git, task, project, and authorization state will be checked again before publication.'
-					: taskCardMergeRequest.label + ' “' + taskCardMergeRequest.title + '” into ' + taskCardMergeRequest.target + '? Current Git and task state will be checked again before any change.';
-				document.getElementById('task_card_merge_confirm_message').textContent = prompt;
-				var error = document.getElementById('task_card_merge_error');
-				error.textContent = '';
-				error.classList.add('hidden');
-				var confirmLabel = modal.querySelector('[data-task-card-merge-label]');
-				if (confirmLabel) confirmLabel.textContent = taskCardMergeRequest.label;
-				taskCardMergeInvoker = button;
-				button.blur();
-				modal.showModal();
-			}
-
-			function setTaskCardMergeBusy(busy) {
-				taskCardMergeInFlight = busy;
-				var modal = document.getElementById('task_card_merge_confirm_modal');
-				var button = document.getElementById('task_card_merge_confirm_button');
-				if (button) button.disabled = busy;
-				if (modal) {
-					modal.querySelectorAll('.ov-modal-close, .modal-action .btn:not(#task_card_merge_confirm_button), .modal-backdrop button').forEach(function(control) {
-						control.disabled = busy;
-					});
-				}
-				var spinner = button && button.querySelector('[data-task-card-merge-spinner]');
-				if (spinner) spinner.classList.toggle('hidden', !busy);
-			}
-			function confirmTaskCardMerge() {
-				if (taskCardMergeInFlight || !taskCardMergeRequest || !window.htmx) return;
-				setTaskCardMergeBusy(true);
-				var request = taskCardMergeRequest;
-				var path = '/tasks/' + encodeURIComponent(request.taskID) + '/worktree/' + request.endpoint;
+				if (!taskID || !projectID || !mode || !endpoint) return;
+				var path = '/tasks/' + encodeURIComponent(taskID) + '/worktree/' + endpoint;
+				window._taskCardActionRequest = {path: path, taskID: taskID, button: button};
+				button.disabled = true;
 				htmx.ajax('POST', path, {
 					target: '#kanban-board',
 					swap: 'outerHTML',
-					values: {merge_type: request.mode, merge_source: 'task_card', project_id: request.projectID}
+					values: {merge_type: mode, merge_source: 'task_card', project_id: projectID}
 				});
 			}
 
-			function restoreTaskCardMergeFocus() {
-				if (!taskCardMergePendingFocusTaskID) return;
-				var card = document.getElementById('task-' + taskCardMergePendingFocusTaskID);
-				var trigger = card && card.querySelector('[data-task-card-menu-trigger]');
-				if (!trigger) return;
-				taskCardMergePendingFocusTaskID = '';
-				trigger.focus({preventScroll: true});
-				if (window.closeKanbanMenu) window.closeKanbanMenu(trigger.closest('[data-kanban-menu-key]'), true);
-			}
-
-				if (!window._taskCardMergeHandlersAttached) {
-					window._taskCardMergeHandlersAttached = true;
-					var mergeModal = document.getElementById('task_card_merge_confirm_modal');
-					if (mergeModal) {
-						mergeModal.addEventListener('cancel', function(event) {
-							if (taskCardMergeInFlight) event.preventDefault();
-						});
-						mergeModal.addEventListener('close', function() {
-							if (taskCardMergeInFlight) {
-								requestAnimationFrame(function() {
-									if (taskCardMergeInFlight && !mergeModal.open) mergeModal.showModal();
-								});
-								return;
-							}
-							if (!taskCardMergeRequest) return;
-							var taskID = taskCardMergeRequest.invokerTaskID;
-							var invoker = taskCardMergeInvoker;
-							taskCardMergeRequest = null;
-							taskCardMergeInvoker = null;
-							requestAnimationFrame(function() {
-								var card = document.getElementById('task-' + taskID);
-								var trigger = card && card.querySelector('[data-task-card-menu-trigger]');
-								if (trigger) trigger.focus({preventScroll: true});
-								if (invoker && invoker.isConnected && !invoker.disabled) {
-									requestAnimationFrame(function() { invoker.focus({preventScroll: true}); });
-								}
-							});
-						});
-					}
-				document.body.addEventListener('htmx:afterSettle', function(event) {
-					var target = event.detail && event.detail.target;
-					if (!target || (target.id !== 'kanban-board' && !target.querySelector?.('#kanban-board'))) return;
-					restoreTaskCardMergeFocus();
-				});
+			if (!window._taskCardActionHandlerAttached) {
+				window._taskCardActionHandlerAttached = true;
 				document.body.addEventListener('htmx:afterRequest', function(event) {
-					var detail = event.detail || {};
-					var config = detail.requestConfig || {};
-					if (!taskCardMergeInFlight || !taskCardMergeRequest || config.path.indexOf('/tasks/' + taskCardMergeRequest.taskID + '/worktree/') !== 0) return;
-					setTaskCardMergeBusy(false);
-					var status = detail.xhr && detail.xhr.status || 0;
-					var modal = document.getElementById('task_card_merge_confirm_modal');
-					if (status >= 200 && status < 300) {
-						taskCardMergePendingFocusTaskID = taskCardMergeRequest.invokerTaskID;
-						taskCardMergeRequest = null;
-						taskCardMergeInvoker = null;
-						if (window.closeKanbanMenu) window.closeKanbanMenu(null, false);
-						if (modal && modal.open) modal.close();
-						requestAnimationFrame(restoreTaskCardMergeFocus);
-						return;
-					}
-					var error = document.getElementById('task_card_merge_error');
-					if (error) {
-						error.textContent = detail.xhr && detail.xhr.responseText || 'The merge could not be completed. Refresh the options and try again.';
-						error.classList.remove('hidden');
+					var request = window._taskCardActionRequest;
+					var config = event.detail && event.detail.requestConfig;
+					if (!request || !config || config.path !== request.path) return;
+					var status = event.detail.xhr && event.detail.xhr.status || 0;
+					if (request.button && request.button.isConnected) request.button.disabled = false;
+					window._taskCardActionRequest = null;
+					if (status >= 200 && status < 300 && window.closeKanbanMenu) {
+						var card = document.getElementById('task-' + request.taskID);
+						var trigger = card && card.querySelector('[data-task-card-menu-trigger]');
+						window.closeKanbanMenu(trigger && trigger.closest('[data-kanban-menu-key]'), !!trigger);
 					}
 				});
 			}
@@ -260,6 +147,7 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 					@ModalCloseButton("new_task_modal", "Close new task dialog")
 					<h3 class="font-bold text-lg mb-4 pr-10">New Task</h3>
 					<form
+						data-new-task-form
 						method="post"
 						hx-post={ fmt.Sprintf("/tasks?project_id=%s", project.ID) }
 						hx-target="#kanban-board"
@@ -686,10 +574,10 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 				}
 
 
-				// Handle HTMX response errors for duplicate task titles
-				document.body.addEventListener('htmx:responseError', function(event) {
-					// Check if this is the new task form
-					if (event.detail.target && event.detail.target.id === 'kanban-board') {
+					// Handle HTMX response errors for duplicate task titles.
+					document.body.addEventListener('htmx:responseError', function(event) {
+						var source = event.detail && event.detail.elt;
+						if (!source || !source.closest('form[data-new-task-form]')) return;
 						const xhr = event.detail.xhr;
 
 						// Check for 409 Conflict (duplicate task)
@@ -715,8 +603,7 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 								}
 							}
 						}
-					}
-				});
+					});
 
 				// Clear error when user starts typing in the title field
 				document.getElementById('task-title-input')?.addEventListener('input', function() {
