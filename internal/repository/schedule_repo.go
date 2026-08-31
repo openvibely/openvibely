@@ -277,10 +277,10 @@ func (r *ScheduleRepo) Update(ctx context.Context, s *models.Schedule) error {
 	return nil
 }
 
-// UpdateBatchForProject atomically reloads and updates enabled schedules owned by
-// one project. Reloading after the immediate transaction acquires the writer lock
+// UpdateBatchForProject atomically reloads and updates schedules owned by one
+// project. Reloading after the immediate transaction acquires the writer lock
 // prevents stale caller snapshots from overwriting scheduler or policy changes.
-// Only movement-owned fields are written.
+// Only movement-owned fields are written, preserving each schedule's enabled state.
 func (r *ScheduleRepo) UpdateBatchForProject(ctx context.Context, projectID string, scheduleIDs []string, move func(*models.Schedule) error) error {
 	if len(scheduleIDs) == 0 {
 		return nil
@@ -302,9 +302,6 @@ func (r *ScheduleRepo) UpdateBatchForProject(ctx context.Context, projectID stri
 			if err != nil {
 				return fmt.Errorf("loading schedule %s in batch: %w", scheduleID, err)
 			}
-			if !schedule.Enabled {
-				return fmt.Errorf("updating schedule %s in batch: schedule is disabled", scheduleID)
-			}
 			if err := move(&schedule); err != nil {
 				return fmt.Errorf("moving schedule %s in batch: %w", scheduleID, err)
 			}
@@ -312,7 +309,7 @@ func (r *ScheduleRepo) UpdateBatchForProject(ctx context.Context, projectID stri
 			schedule.NextRun = normalizeScheduleNextRun(schedule.NextRun)
 			result, err := exec.ExecContext(ctx,
 				`UPDATE schedules SET run_at = ?, next_run = ?, updated_at = datetime('now')
-				 WHERE id = ? AND enabled = 1 AND EXISTS (
+				 WHERE id = ? AND EXISTS (
 				  SELECT 1 FROM tasks WHERE tasks.id = schedules.task_id AND tasks.project_id = ?
 				 )`, schedule.RunAt, schedule.NextRun, schedule.ID, projectID)
 			if err != nil {

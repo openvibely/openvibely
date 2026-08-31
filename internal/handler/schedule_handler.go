@@ -679,12 +679,8 @@ func (h *Handler) RescheduleTask(c echo.Context) error {
 			return moved.UTC()
 		}
 		for _, id := range ids {
-			schedule, _, err := h.requireScheduleInRequestProject(c.Request().Context(), id, projectID)
-			if err != nil {
+			if _, _, err := h.requireScheduleInRequestProject(c.Request().Context(), id, projectID); err != nil {
 				return err
-			}
-			if !schedule.Enabled {
-				return echo.NewHTTPError(http.StatusBadRequest, "disabled schedules cannot be moved as part of a selection")
 			}
 		}
 		now := time.Now()

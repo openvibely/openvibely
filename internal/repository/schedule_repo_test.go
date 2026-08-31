@@ -1249,6 +1249,41 @@ func TestScheduleRepo_UpdateBatchForProjectUsesCurrentRowsWithoutOverwritingConc
 	}
 }
 
+func TestScheduleRepo_UpdateBatchForProjectMovesDisabledScheduleWithoutEnabling(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := NewTaskRepo(db, nil)
+	repo := NewScheduleRepo(db)
+	ctx := context.Background()
+	task := createTestTask(t, taskRepo)
+	runAt := time.Date(2031, 2, 3, 9, 30, 0, 0, time.UTC)
+	schedule := &models.Schedule{TaskID: task.ID, RunAt: runAt, RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: false}
+	if err := repo.Create(ctx, schedule); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := repo.UpdateBatchForProject(ctx, "default", []string{schedule.ID}, func(current *models.Schedule) error {
+		current.RunAt = current.RunAt.Add(2 * time.Hour)
+		if current.NextRun != nil {
+			next := current.NextRun.Add(2 * time.Hour)
+			current.NextRun = &next
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("moving disabled schedule: %v", err)
+	}
+
+	stored, err := repo.GetByID(ctx, schedule.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Enabled {
+		t.Fatal("batch movement must preserve disabled state")
+	}
+	if !stored.RunAt.Equal(runAt.Add(2 * time.Hour)) {
+		t.Fatalf("disabled schedule run_at = %v, want %v", stored.RunAt, runAt.Add(2*time.Hour))
+	}
+}
+
 func TestScheduleRepo_UpdateBatchForProjectRollsBackOnFailure(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	taskRepo := NewTaskRepo(db, nil)

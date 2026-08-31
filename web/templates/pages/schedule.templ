@@ -549,16 +549,15 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 												>
 													for _, occurrence := range getTasksForHour(weekData.TasksByDateTime, day.Date, slot.Hour) {
 														if occurrence.Task.Schedule != nil && !occurrence.Task.Schedule.Enabled {
-															<div
-																class="text-[10px] px-1.5 py-1 mb-0.5 rounded bg-base-300 opacity-50 cursor-not-allowed border-l-2 border-base-content border-opacity-20 overflow-hidden"
-																title={ scheduleDisplayTitle(occurrence.Task) + " (disabled)" }
-																draggable="false"
-																data-schedule-id={ getScheduleID(occurrence.Task) }
-																data-task-id={ occurrence.Task.Task.ID }
-																data-has-schedule={ fmt.Sprintf("%t", occurrence.Task.Schedule != nil && getScheduleID(occurrence.Task) != "") }
-																onclick="openTaskDialog(this.dataset.taskId)"
-															>
-																<div class="font-semibold truncate leading-tight line-through">{ scheduleDisplayTitle(occurrence.Task) }</div>
+																	<div
+																		class="text-[10px] px-1.5 py-1 mb-0.5 rounded bg-base-300 opacity-50 cursor-grab active:cursor-grabbing drag-cursor-surface transition-colors border-l-2 border-base-content border-opacity-20 overflow-hidden"
+																		title={ scheduleDisplayTitle(occurrence.Task) + " (disabled)" }
+																		data-schedule-id={ getScheduleID(occurrence.Task) }
+																		data-task-id={ occurrence.Task.Task.ID }
+																		data-has-schedule={ fmt.Sprintf("%t", occurrence.Task.Schedule != nil && getScheduleID(occurrence.Task) != "") }
+																		onclick="handleScheduleSelect(event)"
+																		onpointerdown="handleSchedulePointerDown(event)"
+																	>																<div class="font-semibold truncate leading-tight line-through">{ scheduleDisplayTitle(occurrence.Task) }</div>
 																<div class="opacity-60 leading-tight">paused</div>
 															</div>
 														} else {

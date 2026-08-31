@@ -585,7 +585,7 @@ func TestHandler_RescheduleTask_MultiSelectPreservesLocalHourAcrossDST(t *testin
 	}
 }
 
-func TestHandler_RescheduleTask_MultiSelectRejectsForeignOrDisabledWithoutMutation(t *testing.T) {
+func TestHandler_RescheduleTask_MultiSelectMovesDisabledAndRejectsForeignWithoutMutation(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	ctx := context.Background()
 	ownedProject := &models.Project{Name: "Owned schedules"}
@@ -615,19 +615,39 @@ func TestHandler_RescheduleTask_MultiSelectRejectsForeignOrDisabledWithoutMutati
 	foreign := makeSchedule(foreignProject.ID, "Foreign", true)
 	original := owned.RunAt
 
-	for _, ids := range []string{owned.ID + "," + disabled.ID, owned.ID + "," + foreign.ID} {
-		form := url.Values{"new_date": {"2031-05-11"}, "hour": {"10"}, "source_date": {"2031-05-10"}, "source_hour": {"8"}, "schedule_ids": {ids}, "project_id": {ownedProject.ID}}
-		req := httptest.NewRequest(http.MethodPatch, "/schedules/"+owned.ID+"/reschedule?project_id="+url.QueryEscape(ownedProject.ID), strings.NewReader(form.Encode()))
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		req.Header.Set("HX-Request", "true")
-		rec := httptest.NewRecorder()
-		e.ServeHTTP(rec, req)
-		if rec.Code == http.StatusNoContent {
-			t.Fatalf("expected grouped request %q to fail", ids)
-		}
-		stored, _ := h.scheduleRepo.GetByID(ctx, owned.ID)
-		if !stored.RunAt.Equal(original) {
-			t.Fatalf("failed grouped request partially moved owned schedule to %v", stored.RunAt)
-		}
+	form := url.Values{"new_date": {"2031-05-11"}, "hour": {"10"}, "source_date": {"2031-05-10"}, "source_hour": {"8"}, "schedule_ids": {owned.ID + "," + disabled.ID}, "project_id": {ownedProject.ID}}
+	req := httptest.NewRequest(http.MethodPatch, "/schedules/"+owned.ID+"/reschedule?project_id="+url.QueryEscape(ownedProject.ID), strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected mixed enabled/disabled grouped request to succeed, got %d: %s", rec.Code, rec.Body.String())
+	}
+	movedDisabled, _ := h.scheduleRepo.GetByID(ctx, disabled.ID)
+	if movedDisabled.Enabled {
+		t.Fatal("dragging a disabled schedule must not enable it")
+	}
+	if got := movedDisabled.RunAt.Local(); got.Day() != 11 || got.Hour() != 10 || got.Minute() != 30 {
+		t.Fatalf("disabled schedule moved to %v, want May 11 10:30", got)
+	}
+
+	movedOwned, _ := h.scheduleRepo.GetByID(ctx, owned.ID)
+	beforeForeignFailure := movedOwned.RunAt
+	form.Set("schedule_ids", owned.ID+","+foreign.ID)
+	req = httptest.NewRequest(http.MethodPatch, "/schedules/"+owned.ID+"/reschedule?project_id="+url.QueryEscape(ownedProject.ID), strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	rec = httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code == http.StatusNoContent {
+		t.Fatal("expected foreign grouped request to fail")
+	}
+	stored, _ := h.scheduleRepo.GetByID(ctx, owned.ID)
+	if !stored.RunAt.Equal(beforeForeignFailure) {
+		t.Fatalf("foreign grouped request partially moved owned schedule to %v", stored.RunAt)
+	}
+	if stored.RunAt.Equal(original) {
+		t.Fatal("fixture did not first move the owned schedule")
 	}
 }

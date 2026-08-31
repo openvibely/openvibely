@@ -471,11 +471,11 @@ func TestScheduleCardsSupportModifierMultiSelectGroupedPointerDragAndRollback(t 
 	}
 	project := models.Project{ID: "project-schedule-multi-drag", Name: "Schedule multi drag"}
 	start := getStartOfWeek(0).AddDate(0, 0, 1)
-	makeScheduled := func(id string, hour int) repository.TaskWithSchedule {
+	makeScheduled := func(id string, hour int, enabled bool) repository.TaskWithSchedule {
 		runAt := time.Date(start.Year(), start.Month(), start.Day(), hour, 0, 0, 0, time.Local)
-		return repository.TaskWithSchedule{Task: models.Task{ID: "task-" + id, ProjectID: project.ID, Title: id, Category: models.CategoryScheduled, Status: models.StatusPending, CreatedAt: start, UpdatedAt: start}, Schedule: &models.Schedule{ID: id, TaskID: "task-" + id, RunAt: runAt, NextRun: &runAt, RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: true}}
+		return repository.TaskWithSchedule{Task: models.Task{ID: "task-" + id, ProjectID: project.ID, Title: id, Category: models.CategoryScheduled, Status: models.StatusPending, CreatedAt: start, UpdatedAt: start}, Schedule: &models.Schedule{ID: id, TaskID: "task-" + id, RunAt: runAt, NextRun: &runAt, RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: enabled}}
 	}
-	scheduled := []repository.TaskWithSchedule{makeScheduled("schedule-multi-a", 8), makeScheduled("schedule-multi-b", 8), makeScheduled("schedule-single-c", 12)}
+	scheduled := []repository.TaskWithSchedule{makeScheduled("schedule-multi-a", 8, true), makeScheduled("schedule-multi-b", 8, false), makeScheduled("schedule-single-c", 12, true)}
 
 	runner := `<script>
 window.addEventListener('DOMContentLoaded', function() {
@@ -496,6 +496,8 @@ window.addEventListener('DOMContentLoaded', function() {
     var second = document.querySelector('[data-schedule-id="schedule-multi-b"]');
     var single = document.querySelector('[data-schedule-id="schedule-single-c"]');
     if (!first || !second || !single) fail('expected all schedule cards');
+    if (!second.textContent.includes('paused')) fail('second schedule must render as paused');
+    if (getComputedStyle(second).cursor === 'not-allowed') fail('paused schedule must expose draggable cursor');
     if (document.getElementById('selection-counter')) fail('selection counter must not render');
     var singleHeight = single.getBoundingClientRect().height;
     click(single, true);
@@ -519,20 +521,20 @@ window.addEventListener('DOMContentLoaded', function() {
     var source = first.closest('.drop-zone');
     var targetHour = Number(source.dataset.hour) + 4;
     var target = document.querySelector('.drop-zone[data-date="' + source.dataset.date + '"][data-hour="' + targetHour + '"]');
-    var drop = await drag(first, target, 31);
+    var drop = await drag(second, target, 31);
     if (!first.classList.contains('dragging') || !second.classList.contains('dragging')) fail('every selected schedule must enter dragging state');
     if (getComputedStyle(first).position !== 'fixed' || getComputedStyle(second).position !== 'fixed') fail('every selected schedule card must visibly move');
     if (first.style.transform === '' || first.style.transform !== second.style.transform) fail('selected schedules must move by the same pointer delta');
     if (document.querySelectorAll('[data-pointer-drag-placeholder]').length !== 2) fail('each moved card needs a source placeholder');
-    first.dispatchEvent(new PointerEvent('pointerup', {bubbles:true,cancelable:true,pointerId:31,pointerType:'mouse',button:0,buttons:0,clientX:drop.x,clientY:drop.y}));
+    second.dispatchEvent(new PointerEvent('pointerup', {bubbles:true,cancelable:true,pointerId:31,pointerType:'mouse',button:0,buttons:0,clientX:drop.x,clientY:drop.y}));
     await waitFor(function() { return !first.classList.contains('dragging') && !second.classList.contains('dragging'); }, 'failed grouped drag rollback');
     if (first.style.transform || second.style.transform || document.querySelector('[data-pointer-drag-placeholder]')) fail('failed grouped drag must restore every card');
     if (first.classList.contains('schedule-selected') || second.classList.contains('schedule-selected')) fail('drag completion must clear schedule selection');
     await new Promise(function(resolve) { setTimeout(resolve, 20); });
 
     click(first, true); click(second, true);
-    drop = await drag(first, target, 32);
-    first.dispatchEvent(new PointerEvent('pointerup', {bubbles:true,cancelable:true,pointerId:32,pointerType:'mouse',button:0,buttons:0,clientX:drop.x,clientY:drop.y}));
+    drop = await drag(second, target, 32);
+    second.dispatchEvent(new PointerEvent('pointerup', {bubbles:true,cancelable:true,pointerId:32,pointerType:'mouse',button:0,buttons:0,clientX:drop.x,clientY:drop.y}));
     await waitFor(function() { return document.querySelectorAll('[data-schedule-id]').length === 3; }, 'successful grouped refresh');
     await new Promise(function(resolve) { setTimeout(resolve, 20); });
     var refreshed = document.querySelector('[data-schedule-id="schedule-single-c"]');
@@ -569,7 +571,7 @@ window.addEventListener('DOMContentLoaded', function() {
 			page := strings.Replace(out.String(), "https://unpkg.com/htmx.org@2.0.4", "/htmx-2.0.4.min.js", 1)
 			page = strings.Replace(page, "</head>", runner+"</head>", 1)
 			_, _ = w.Write([]byte(page))
-		case "/schedules/schedule-multi-a/reschedule":
+		case "/schedules/schedule-multi-b/reschedule":
 			if r.Method != http.MethodPatch {
 				t.Errorf("expected PATCH, got %s", r.Method)
 			}
