@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -252,6 +253,58 @@ func TestXAuthorizedMentionUsesSharedIngressAndAdvancesCursorAfterDurableHandoff
 	tasks, err = svc.taskRepo.ListByProject(ctx, project.ID, string(models.CategoryChat))
 	require.NoError(t, err)
 	require.Len(t, tasks, 1)
+}
+
+func TestXAuthorizedMentionTextPreservesHandlesAndPunctuation(t *testing.T) {
+	tests := []struct {
+		name     string
+		username string
+		text     string
+		want     string
+	}{
+		{name: "exact case", username: "openvibely", text: "@openvibely ship it", want: "ship it"},
+		{name: "mixed case", username: "openvibely", text: "@OpenVibely ship it", want: "ship it"},
+		{name: "prefixed handle", username: "openvibely", text: "@openvibely please check @openvibelybot", want: "please check @openvibelybot"},
+		{name: "repeated mentions", username: "openvibely", text: "@OpenVibely, please ask @OPENVIBELY!", want: ", please ask !"},
+		{name: "punctuation adjacent", username: "openvibely", text: "Please check (@OpenVibely), now.", want: "Please check (), now."},
+		{name: "ordinary at sign", username: "openvibely", text: "Keep email@example.com and @someone unchanged", want: "Keep email@example.com and @someone unchanged"},
+		{name: "empty username", username: "", text: "Keep email@example.com and @someone and @openvibely unchanged", want: "Keep email@example.com and @someone and @openvibely unchanged"},
+	}
+
+	for i, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, svc, settings, auth, _, project, _ := setupXServiceTest(t)
+			require.NoError(t, auth.Create(ctx, &models.XAuthorizedUser{ProjectID: project.ID, XUserID: "author"}))
+			require.NoError(t, svc.llmConfigRepo.Create(ctx, &models.LLMConfig{Name: "X Agent", Provider: models.ProviderTest, Model: "test", IsDefault: true}))
+			var run ChannelChatRunRequest
+			svc.SetRuntime(nil, nil, nil, nil, func(_ context.Context, req ChannelChatRunRequest) { run = req }, nil, nil, nil, nil)
+			api := &fakeXAPI{me: XUser{ID: "bot", Username: tt.username}}
+			api.mentions.Meta.NewestID = fmt.Sprintf("%d", 100+i)
+			api.mentions.Data = []XTweet{{ID: api.mentions.Meta.NewestID, Text: tt.text, AuthorID: "author", ConversationID: "conversation"}}
+			svc.setAPI(api)
+			svc.me = api.me
+
+			require.NoError(t, svc.pollOnce(ctx))
+			require.Equal(t, tt.want, run.Message)
+			cursor, err := settings.Get(ctx, XSettingSinceID)
+			require.NoError(t, err)
+			require.Equal(t, api.mentions.Meta.NewestID, cursor)
+			tasks, err := svc.taskRepo.ListByProject(ctx, project.ID, string(models.CategoryChat))
+			require.NoError(t, err)
+			require.Len(t, tasks, 1)
+			require.Equal(t, models.TaskOriginX, tasks[0].CreatedVia)
+			receipt, err := svc.receiptRepo.Claim(ctx, api.mentions.Meta.NewestID, project.ID, svc.now(), xReceiptLease)
+			require.NoError(t, err)
+			require.Equal(t, repository.XReceiptCompleted, receipt.Result)
+
+			// A provider redelivery observes the completed durable receipt and does
+			// not create a second task.
+			require.NoError(t, svc.pollOnce(ctx))
+			tasks, err = svc.taskRepo.ListByProject(ctx, project.ID, string(models.CategoryChat))
+			require.NoError(t, err)
+			require.Len(t, tasks, 1)
+		})
+	}
 }
 
 func TestXAuthorizedMentionUsesAuthorIDWhenExpansionIsMissing(t *testing.T) {
