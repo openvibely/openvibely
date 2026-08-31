@@ -83,7 +83,7 @@ See the <a href="https://docs.openvibely.ai/installation" target="_blank" rel="n
 
 ## Run From Source
 
-Requires Go `1.27.0+`:
+Requires Go `1.26.6+`:
 
 ```bash
 git clone https://github.com/openvibely/openvibely.git
