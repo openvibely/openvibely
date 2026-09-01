@@ -503,6 +503,18 @@ func TestTaskRunningIconSharesThemeAwareSendColorWithoutSuppressingHoverInChrome
 	[data-color-theme="vscode-test"][data-theme="dark"] .btn-primary:hover { background-color: rgb(4, 5, 6); border-color: rgb(4, 5, 6); }
 	</style>`
 	html = strings.Replace(html, "</head>", importedCSS+"</head>", 1)
+	bodyStart := strings.Index(html, "<body")
+	bodyEnd := strings.LastIndex(html, "</body>")
+	if bodyStart < 0 || bodyEnd < bodyStart {
+		t.Fatal("rendered base layout is missing its body")
+	}
+	bodyContentStart := strings.Index(html[bodyStart:bodyEnd], ">")
+	if bodyContentStart < 0 {
+		t.Fatal("rendered base layout has an invalid body start tag")
+	}
+	bodyContentStart += bodyStart + 1
+	fixture := `<button class="btn btn-primary chat-send-button" style="position:fixed;left:20px;top:20px;width:100px;transform:none;transition:none;z-index:2147483647" data-test-send>Send</button><span class="task-state-running" style="position:fixed;left:20px;top:80px;z-index:2147483647" data-test-running>Running</span>`
+	html = html[:bodyContentStart] + fixture + html[bodyEnd:]
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -574,20 +586,20 @@ func TestTaskRunningIconSharesThemeAwareSendColorWithoutSuppressingHoverInChrome
 	defer conn.CloseNow()
 
 	nextID := 0
-	call := func(method string, params any, result any) {
-		t.Helper()
+	call := func(tb testing.TB, method string, params any, result any) {
+		tb.Helper()
 		nextID++
 		request, marshalErr := json.Marshal(map[string]any{"id": nextID, "method": method, "params": params})
 		if marshalErr != nil {
-			t.Fatalf("marshal CDP %s request: %v", method, marshalErr)
+			tb.Fatalf("marshal CDP %s request: %v", method, marshalErr)
 		}
 		if writeErr := conn.Write(ctx, websocket.MessageText, request); writeErr != nil {
-			t.Fatalf("write CDP %s request: %v", method, writeErr)
+			tb.Fatalf("write CDP %s request: %v", method, writeErr)
 		}
 		for {
 			_, message, readErr := conn.Read(ctx)
 			if readErr != nil {
-				t.Fatalf("read CDP %s response: %v", method, readErr)
+				tb.Fatalf("read CDP %s response: %v", method, readErr)
 			}
 			var response struct {
 				ID     int             `json:"id"`
@@ -598,19 +610,19 @@ func TestTaskRunningIconSharesThemeAwareSendColorWithoutSuppressingHoverInChrome
 				continue
 			}
 			if len(response.Error) > 0 {
-				t.Fatalf("CDP %s error: %s", method, response.Error)
+				tb.Fatalf("CDP %s error: %s", method, response.Error)
 			}
 			if result != nil && len(response.Result) > 0 {
 				if unmarshalErr := json.Unmarshal(response.Result, result); unmarshalErr != nil {
-					t.Fatalf("decode CDP %s result: %v", method, unmarshalErr)
+					tb.Fatalf("decode CDP %s result: %v", method, unmarshalErr)
 				}
 			}
 			return
 		}
 	}
 
-	evaluate := func(expression string) string {
-		t.Helper()
+	evaluate := func(tb testing.TB, expression string) string {
+		tb.Helper()
 		var response struct {
 			Result struct {
 				Type        string          `json:"type"`
@@ -619,30 +631,29 @@ func TestTaskRunningIconSharesThemeAwareSendColorWithoutSuppressingHoverInChrome
 			} `json:"result"`
 			ExceptionDetails json.RawMessage `json:"exceptionDetails"`
 		}
-		call("Runtime.evaluate", map[string]any{"expression": expression, "returnByValue": true}, &response)
+		call(tb, "Runtime.evaluate", map[string]any{"expression": expression, "returnByValue": true}, &response)
 		if len(response.ExceptionDetails) > 0 {
-			t.Fatalf("evaluate JavaScript %q: %s", expression, response.ExceptionDetails)
+			tb.Fatalf("evaluate JavaScript %q: %s", expression, response.ExceptionDetails)
 		}
 		if response.Result.Type != "string" || len(response.Result.Value) == 0 {
-			t.Fatalf("evaluate JavaScript %q returned type %q without a string value: %s", expression, response.Result.Type, response.Result.Description)
+			tb.Fatalf("evaluate JavaScript %q returned type %q without a string value: %s", expression, response.Result.Type, response.Result.Description)
 		}
 		var value string
 		if err := json.Unmarshal(response.Result.Value, &value); err != nil {
-			t.Fatalf("decode JavaScript result for %q: %v", expression, err)
+			tb.Fatalf("decode JavaScript result for %q: %v", expression, err)
 		}
 		return value
 	}
-	movePointer := func(x, y float64) {
-		t.Helper()
-		call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": x, "y": y}, nil)
+	movePointer := func(tb testing.TB, x, y float64) {
+		tb.Helper()
+		call(tb, "Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": x, "y": y}, nil)
 	}
 
 	pageReadyDeadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(pageReadyDeadline) && evaluate(`document.readyState`) != "complete" {
+	for time.Now().Before(pageReadyDeadline) && evaluate(t, `document.readyState`) != "complete" {
 		time.Sleep(25 * time.Millisecond)
 	}
-	evaluate(`(function(){var b=document.createElement('button'),r=document.createElement('span');b.className='btn btn-primary chat-send-button';b.dataset.testSend='';b.textContent='Send';b.style.cssText='position:fixed;left:20px;top:20px;width:100px;transform:none;transition:none;z-index:2147483647';r.className='task-state-running';r.dataset.testRunning='';r.textContent='Running';r.style.cssText='position:fixed;left:20px;top:80px;z-index:2147483647';document.body.replaceChildren(b,r);return 'fixture-ready';})()`)
-	if evaluate(`document.readyState + ':' + Boolean(document.querySelector('[data-test-send]')) + ':' + Boolean(document.querySelector('[data-test-running]'))`) != "complete:true:true" {
+	if evaluate(t, `document.readyState + ':' + Boolean(document.querySelector('[data-test-send]')) + ':' + Boolean(document.querySelector('[data-test-running]'))`) != "complete:true:true" {
 		t.Fatal("Chrome page did not finish loading the primary-action fixture")
 	}
 	type themeCase struct {
@@ -657,22 +668,22 @@ func TestTaskRunningIconSharesThemeAwareSendColorWithoutSuppressingHoverInChrome
 		{name: "imported", mode: "dark", id: "vscode-test", wantHover: "rgb(4, 5, 6)"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			movePointer(1000, 1000)
-			evaluate(fmt.Sprintf(`document.documentElement.setAttribute('data-theme', %q); document.documentElement.setAttribute('data-color-theme', %q); ''`, tc.mode, tc.id))
+			movePointer(t, 1000, 1000)
+			evaluate(t, fmt.Sprintf(`document.documentElement.setAttribute('data-theme', %q); document.documentElement.setAttribute('data-color-theme', %q); ''`, tc.mode, tc.id))
 			time.Sleep(400 * time.Millisecond)
 			var normal struct {
 				Send    string     `json:"send"`
 				Running string     `json:"running"`
 				Center  [2]float64 `json:"center"`
 			}
-			if err := json.Unmarshal([]byte(evaluate(`JSON.stringify((function(){var b=document.querySelector('[data-test-send]'),r=b.getBoundingClientRect();return {send:getComputedStyle(b).backgroundColor,running:getComputedStyle(document.querySelector('[data-test-running]')).color,center:[r.left+r.width/2,r.top+r.height/2]};})())`)), &normal); err != nil {
+			if err := json.Unmarshal([]byte(evaluate(t, `JSON.stringify((function(){var b=document.querySelector('[data-test-send]'),r=b.getBoundingClientRect();return {send:getComputedStyle(b).backgroundColor,running:getComputedStyle(document.querySelector('[data-test-running]')).color,center:[r.left+r.width/2,r.top+r.height/2]};})())`)), &normal); err != nil {
 				t.Fatalf("decode normal colors: %v", err)
 			}
 			if normal.Send != normal.Running {
 				t.Fatalf("normal Send/running colors differ: %s vs %s", normal.Send, normal.Running)
 			}
 
-			movePointer(normal.Center[0], normal.Center[1])
+			movePointer(t, normal.Center[0], normal.Center[1])
 			time.Sleep(400 * time.Millisecond)
 			var hovered struct {
 				Send    string `json:"send"`
@@ -680,7 +691,7 @@ func TestTaskRunningIconSharesThemeAwareSendColorWithoutSuppressingHoverInChrome
 				Hovered bool   `json:"hovered"`
 				Hit     string `json:"hit"`
 			}
-			if err := json.Unmarshal([]byte(evaluate(fmt.Sprintf(`JSON.stringify({send:getComputedStyle(document.querySelector('[data-test-send]')).backgroundColor,running:getComputedStyle(document.querySelector('[data-test-running]')).color,hovered:document.querySelector('[data-test-send]').matches(':hover'),hit:(document.elementFromPoint(%f,%f)||{}).outerHTML||''})`, normal.Center[0], normal.Center[1]))), &hovered); err != nil {
+			if err := json.Unmarshal([]byte(evaluate(t, fmt.Sprintf(`JSON.stringify({send:getComputedStyle(document.querySelector('[data-test-send]')).backgroundColor,running:getComputedStyle(document.querySelector('[data-test-running]')).color,hovered:document.querySelector('[data-test-send]').matches(':hover'),hit:(document.elementFromPoint(%f,%f)||{}).outerHTML||''})`, normal.Center[0], normal.Center[1]))), &hovered); err != nil {
 				t.Fatalf("decode hovered colors: %v", err)
 			}
 			if !hovered.Hovered {
