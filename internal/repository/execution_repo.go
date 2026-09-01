@@ -809,16 +809,32 @@ func (r *ExecutionRepo) RecoverStaleRunningTaskExecutions(ctx context.Context) (
 }
 
 func (r *ExecutionRepo) FindActiveTaskExecution(ctx context.Context, taskID, excludeExecID string) (*models.Execution, error) {
+	return r.findActiveTaskExecution(ctx, taskID, excludeExecID, false)
+}
+
+// FindActiveTaskThreadExecution returns the running execution that owns a task
+// thread. Scheduled tasks remain on the task-thread surface while they run, so
+// this lookup includes both active and scheduled task categories without
+// changing the generic active-task lookup used by other surfaces.
+func (r *ExecutionRepo) FindActiveTaskThreadExecution(ctx context.Context, taskID, excludeExecID string) (*models.Execution, error) {
+	return r.findActiveTaskExecution(ctx, taskID, excludeExecID, true)
+}
+
+func (r *ExecutionRepo) findActiveTaskExecution(ctx context.Context, taskID, excludeExecID string, includeScheduled bool) (*models.Execution, error) {
 	if _, err := r.RecoverStaleRunningTaskExecutions(ctx); err != nil {
 		return nil, err
 	}
+	categoryPredicate := "t.category = 'active'"
+	if includeScheduled {
+		categoryPredicate = "t.category IN ('active', 'scheduled')"
+	}
 	e, err := scanExecutionRow(r.db.QueryRowContext(ctx,
 		`SELECT `+executionSelectColumnsAliasLight+`
-		 FROM executions e
-		 JOIN tasks t ON t.id = e.task_id
-		 WHERE e.task_id = ? AND e.id != ? AND e.status = 'running'
-		   AND t.category = 'active' AND t.status IN ('queued', 'running')
-		 ORDER BY e.started_at DESC, e.rowid DESC LIMIT 1`, taskID, excludeExecID))
+			 FROM executions e
+			 JOIN tasks t ON t.id = e.task_id
+			 WHERE e.task_id = ? AND e.id != ? AND e.status = 'running'
+			   AND `+categoryPredicate+` AND t.status IN ('queued', 'running')
+			 ORDER BY e.started_at DESC, e.rowid DESC LIMIT 1`, taskID, excludeExecID))
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -829,16 +845,30 @@ func (r *ExecutionRepo) FindActiveTaskExecution(ctx context.Context, taskID, exc
 }
 
 func (r *ExecutionRepo) HasActiveTaskExecution(ctx context.Context, taskID, excludeExecID string) (bool, error) {
+	return r.hasActiveTaskExecution(ctx, taskID, excludeExecID, false)
+}
+
+// HasActiveTaskThreadExecution reports whether a task-thread task has a live
+// execution. It mirrors FindActiveTaskThreadExecution's scheduled-task scope.
+func (r *ExecutionRepo) HasActiveTaskThreadExecution(ctx context.Context, taskID, excludeExecID string) (bool, error) {
+	return r.hasActiveTaskExecution(ctx, taskID, excludeExecID, true)
+}
+
+func (r *ExecutionRepo) hasActiveTaskExecution(ctx context.Context, taskID, excludeExecID string, includeScheduled bool) (bool, error) {
 	if _, err := r.RecoverStaleRunningTaskExecutions(ctx); err != nil {
 		return false, err
+	}
+	categoryPredicate := "t.category = 'active'"
+	if includeScheduled {
+		categoryPredicate = "t.category IN ('active', 'scheduled')"
 	}
 	var count int
 	err := r.db.QueryRowContext(ctx,
 		`SELECT COUNT(*)
-		 FROM executions e
-		 JOIN tasks t ON t.id = e.task_id
-		 WHERE e.task_id = ? AND e.id != ? AND e.status = 'running'
-		   AND t.category = 'active' AND t.status IN ('queued', 'running')`, taskID, excludeExecID).Scan(&count)
+			 FROM executions e
+			 JOIN tasks t ON t.id = e.task_id
+			 WHERE e.task_id = ? AND e.id != ? AND e.status = 'running'
+			   AND `+categoryPredicate+` AND t.status IN ('queued', 'running')`, taskID, excludeExecID).Scan(&count)
 	if err != nil {
 		return false, fmt.Errorf("checking active task execution: %w", err)
 	}

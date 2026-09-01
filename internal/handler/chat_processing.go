@@ -1269,7 +1269,7 @@ func (h *Handler) startNextQueuedTurnAfter(ctx context.Context, completed stream
 		if completed.TaskID == "" {
 			return
 		}
-		active, activeErr := h.execRepo.HasActiveTaskExecution(ctx, completed.TaskID, excludeExecID)
+		active, activeErr := h.execRepo.HasActiveTaskThreadExecution(ctx, completed.TaskID, excludeExecID)
 		if activeErr != nil {
 			applog.Infof("[handler] startNextQueuedTurn error checking active task turn task=%s: %v", completed.TaskID, activeErr)
 			return
@@ -1587,7 +1587,7 @@ func (h *Handler) StartPendingTaskThreadFollowup(ctx context.Context, taskID str
 	if h.threadInputRepo == nil || h.execRepo == nil || taskID == "" {
 		return false, nil
 	}
-	active, err := h.execRepo.HasActiveTaskExecution(ctx, taskID, "")
+	active, err := h.execRepo.HasActiveTaskThreadExecution(ctx, taskID, "")
 	if err != nil {
 		applog.Infof("[handler] startPendingTaskThreadFollowup task=%s active check error: %v", taskID, err)
 		return false, err
@@ -1616,7 +1616,7 @@ func (h *Handler) RetryLatestFailedTaskThreadFollowup(ctx context.Context, taskI
 	if h.execRepo == nil || h.taskRepo == nil || taskID == "" {
 		return false, nil
 	}
-	active, err := h.execRepo.HasActiveTaskExecution(ctx, taskID, "")
+	active, err := h.execRepo.HasActiveTaskThreadExecution(ctx, taskID, "")
 	if err != nil {
 		return false, err
 	}
@@ -3798,7 +3798,7 @@ func (h *Handler) bindQueuedTaskInputToActiveExecutionIfAvailable(ctx context.Co
 	if input == nil || input.RunExecutionID != "" || h.execRepo == nil || h.threadInputRepo == nil {
 		return nil
 	}
-	active, err := h.execRepo.FindActiveTaskExecution(ctx, input.TaskID, "")
+	active, err := h.execRepo.FindActiveTaskThreadExecution(ctx, input.TaskID, "")
 	if err != nil || active == nil {
 		return err
 	}
@@ -3883,7 +3883,7 @@ func (h *Handler) admitTaskFollowup(ctx context.Context, req taskFollowupAdmissi
 		logPrefix = "admitTaskFollowup"
 	}
 	task := req.Task
-	activeExec, err := h.execRepo.FindActiveTaskExecution(ctx, task.ID, "")
+	activeExec, err := h.execRepo.FindActiveTaskThreadExecution(ctx, task.ID, "")
 	if err != nil {
 		return nil, &taskFollowupAdmissionError{Op: taskFollowupAdmissionOpActiveCheck, Err: err}
 	}
@@ -3892,7 +3892,7 @@ func (h *Handler) admitTaskFollowup(ctx context.Context, req taskFollowupAdmissi
 		return nil, &taskFollowupAdmissionError{Op: taskFollowupAdmissionOpFirstTurnCheck, Err: err}
 	}
 	if activeExec == nil && !queueBehindFirstTurn {
-		activeExec, err = h.execRepo.FindActiveTaskExecution(ctx, task.ID, "")
+		activeExec, err = h.execRepo.FindActiveTaskThreadExecution(ctx, task.ID, "")
 		if err != nil {
 			return nil, &taskFollowupAdmissionError{Op: taskFollowupAdmissionOpActiveCheck, Err: err}
 		}
@@ -4006,7 +4006,7 @@ func (h *Handler) enqueueTaskThreadInput(ctx context.Context, taskID, message, o
 	}
 	activeExecutionID := ""
 	if h.execRepo != nil {
-		if active, activeErr := h.execRepo.FindActiveTaskExecution(ctx, task.ID, ""); activeErr != nil {
+		if active, activeErr := h.execRepo.FindActiveTaskThreadExecution(ctx, task.ID, ""); activeErr != nil {
 			return nil, activeErr
 		} else if active != nil {
 			activeExecutionID = active.ID
