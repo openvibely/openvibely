@@ -20,8 +20,8 @@ func BenchmarkTaskRepo_ListWithSchedulesByProject(b *testing.B) {
 	}{    
 		{name: "Small20x512B", taskCount: 20, promptSize: 512},
 		{name: "Large300x32KiB", taskCount: 300, promptSize: 32 * 1024},
-		// {name: "Scale20k", taskCount: 20000, promptSize: 512},
-		// {name: "Scale250k", taskCount: 250000, promptSize: 512},
+		{name: "Scale20k", taskCount: 20000, promptSize: 512},
+		{name: "Scale250k", taskCount: 250000, promptSize: 512},
 	}
 
 	for _, fixture := range fixtures {
