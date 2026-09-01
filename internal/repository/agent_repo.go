@@ -59,6 +59,14 @@ type AgentScheduleOption struct {
 	Model string
 }
 
+// AgentSelectableReference is the compact identity and project-scope projection
+// used when validating Automation Agent references.
+type AgentSelectableReference struct {
+	ID        string
+	Key       string
+	ProjectID string
+}
+
 // AgentSkillCatalogRef is the compact projection needed to discover agent-owned
 // skill catalogs without hydrating prompt/config/plugin/skill JSON fields.
 type AgentSkillCatalogRef struct {
@@ -85,6 +93,7 @@ type AgentListSummary struct {
 }
 
 const agentScheduleOptionColumns = `id, name, model`
+const agentSelectableReferenceColumns = `id, COALESCE(key, ''), COALESCE(project_id, '')`
 
 func scanAgentScheduleOption(row interface{ Scan(dest ...any) error }) (*AgentScheduleOption, error) {
 	var option AgentScheduleOption
@@ -540,6 +549,34 @@ func (r *AgentRepo) ListSkillCatalogRefs(ctx context.Context) ([]AgentSkillCatal
 		refs = append(refs, ref)
 	}
 	return refs, rows.Err()
+}
+
+// ListSelectableReferencesForProject returns the bounded identity set used by
+// Automation validation. It intentionally omits every full Agent configuration
+// field because validation only matches key/ID and project scope.
+func (r *AgentRepo) ListSelectableReferencesForProject(ctx context.Context, projectID string, limit int) ([]AgentSelectableReference, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	rows, err := r.db.QueryContext(ctx, `SELECT `+agentSelectableReferenceColumns+` FROM agents
+		WHERE COALESCE(generated_status, 'user_edited') <> 'archived'
+		  AND COALESCE(enabled, 1) = 1 AND COALESCE(selectable_as_primary, 1) = 1
+		  AND (project_id IS NULL OR project_id = '' OR project_id = ?)
+		ORDER BY name ASC, id ASC LIMIT ?`, projectID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("listing selectable project agent references: %w", err)
+	}
+	defer rows.Close()
+
+	var references []AgentSelectableReference
+	for rows.Next() {
+		var reference AgentSelectableReference
+		if err := rows.Scan(&reference.ID, &reference.Key, &reference.ProjectID); err != nil {
+			return nil, fmt.Errorf("scanning selectable project agent reference: %w", err)
+		}
+		references = append(references, reference)
+	}
+	return references, rows.Err()
 }
 
 func (r *AgentRepo) ListSelectableForProject(ctx context.Context, projectID string, limit int) ([]models.Agent, error) {
