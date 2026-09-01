@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -35,8 +36,11 @@ func (f *fakeXAPI) Post(_ context.Context, text, reply string) (string, error) {
 	return "posted", f.postErr
 }
 
-func setupXServiceTest(t *testing.T) (context.Context, *XService, *repository.SettingsRepo, *repository.XAuthRepo, *repository.XUserProjectRepo, *models.Project, *models.Project) {
-	db := testutil.NewTestDB(t)
+func setupXServiceTest(t testing.TB) (context.Context, *XService, *repository.SettingsRepo, *repository.XAuthRepo, *repository.XUserProjectRepo, *models.Project, *models.Project) {
+	return setupXServiceTestWithDB(t, testutil.NewTestDB(t))
+}
+
+func setupXServiceTestWithDB(t testing.TB, db *sql.DB) (context.Context, *XService, *repository.SettingsRepo, *repository.XAuthRepo, *repository.XUserProjectRepo, *models.Project, *models.Project) {
 	ctx := context.Background()
 	projects := repository.NewProjectRepo(db)
 	p1 := &models.Project{Name: "One"}
@@ -61,6 +65,119 @@ func setupXServiceTest(t *testing.T) (context.Context, *XService, *repository.Se
 	return ctx, svc, settings, auth, selections, p1, p2
 }
 
+func setupXBatchService(t testing.TB, db *sql.DB, counter *testutil.SQLStatementCounter, mentionsPerPage, pages int) (context.Context, *XService, *repository.SettingsRepo) {
+	ctx, svc, settings, auth, selections, project, _ := setupXServiceTestWithDB(t, db)
+	require.NoError(t, auth.Create(ctx, &models.XAuthorizedUser{ProjectID: project.ID, XUserID: "author"}))
+	require.NoError(t, selections.SetUserProject(ctx, "author", project.ID))
+	require.NoError(t, settings.Set(ctx, XSettingConfigurationID, "generation"))
+	svc.SetConfigurationID("generation")
+	api := &fakeXAPI{me: XUser{ID: "bot", Username: "openvibely"}}
+	api.mentionsFunc = xMentionBatchFunc(mentionsPerPage, pages)
+	svc.setAPI(api)
+	svc.me = api.me
+	counter.Reset()
+	return ctx, svc, settings
+}
+
+func xMentionBatchFunc(mentionsPerPage, pages int) func(context.Context, string, string, string) (xMentionsResponse, error) {
+	return func(_ context.Context, _, _, pagination string) (xMentionsResponse, error) {
+		pageIndex := 0
+		if pagination != "" {
+			if _, err := fmt.Sscanf(pagination, "page-%d", &pageIndex); err != nil {
+				return xMentionsResponse{}, fmt.Errorf("parse X test pagination token %q: %w", pagination, err)
+			}
+		}
+		if pageIndex < 0 || pageIndex >= pages {
+			return xMentionsResponse{}, fmt.Errorf("unexpected X test page index %d", pageIndex)
+		}
+		response := xMentionsResponse{}
+		response.Meta.NewestID = fmt.Sprintf("%d", mentionsPerPage*pages)
+		if pageIndex+1 < pages {
+			response.Meta.NextToken = fmt.Sprintf("page-%d", pageIndex+1)
+		}
+		start := pageIndex*mentionsPerPage + 1
+		response.Data = make([]XTweet, 0, mentionsPerPage)
+		for i := 0; i < mentionsPerPage; i++ {
+			id := fmt.Sprintf("%d", start+i)
+			response.Data = append(response.Data, XTweet{ID: id, Text: "@openvibely", AuthorID: "author", ConversationID: "conversation-" + id})
+		}
+		return response, nil
+	}
+}
+
+func countXSettingsSnapshots(statements []string) int {
+	count := 0
+	for _, statement := range statements {
+		normalized := strings.ReplaceAll(strings.ToUpper(strings.TrimSpace(statement)), " ", "")
+		if normalized == "SELECTKEY,VALUEFROMAPP_SETTINGSWHEREKEYIN(?,?,?)" {
+			count++
+		}
+	}
+	return count
+}
+
+func TestXPollUsesOneConfigurationSnapshotPerBatch(t *testing.T) {
+	for _, tt := range []struct {
+		name            string
+		mentionsPerPage int
+		pages           int
+	}{
+		{name: "one", mentionsPerPage: 1, pages: 1},
+		{name: "ten", mentionsPerPage: 10, pages: 1},
+		{name: "one hundred", mentionsPerPage: 100, pages: 1},
+		{name: "ten pages", mentionsPerPage: 100, pages: 10},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			db, counter := testutil.NewStatementCountingTestDB(t)
+			ctx, svc, settings := setupXBatchService(t, db, counter, tt.mentionsPerPage, tt.pages)
+			counter.SetEnabled(true)
+			err := svc.pollOnce(ctx)
+			counter.SetEnabled(false)
+			require.NoError(t, err)
+
+			statements := counter.Statements()
+			require.Equal(t, 1, countXSettingsSnapshots(statements), "X polling should load one settings snapshot per batch")
+			cursor, err := settings.Get(ctx, XSettingSinceID)
+			require.NoError(t, err)
+			require.Equal(t, fmt.Sprintf("%d", tt.mentionsPerPage*tt.pages), cursor)
+		})
+	}
+}
+
+func BenchmarkXPollBatch(b *testing.B) {
+	for _, tt := range []struct {
+		name            string
+		mentionsPerPage int
+		pages           int
+	}{
+		{name: "1", mentionsPerPage: 1, pages: 1},
+		{name: "10", mentionsPerPage: 10, pages: 1},
+		{name: "100", mentionsPerPage: 100, pages: 1},
+		{name: "paginated-1000", mentionsPerPage: 100, pages: 10},
+	} {
+		b.Run(tt.name, func(b *testing.B) {
+			db, counter := testutil.NewStatementCountingTestDB(b)
+			ctx, svc, _ := setupXBatchService(b, db, counter, tt.mentionsPerPage, tt.pages)
+			require.NoError(b, svc.pollOnce(ctx))
+
+			counter.SetEnabled(true)
+			require.NoError(b, svc.pollOnce(ctx))
+			counter.SetEnabled(false)
+			statements := counter.Statements()
+			require.Equal(b, 1, countXSettingsSnapshots(statements), "X polling should load one settings snapshot per batch")
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			b.ReportMetric(float64(len(statements)), "sqlite-statements/op")
+			b.ReportMetric(float64(countXSettingsSnapshots(statements)), "settings-snapshots/op")
+			for i := 0; i < b.N; i++ {
+				if err := svc.pollOnce(ctx); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
 func TestXRuntimeProjectSwitchRequiresTargetAuthorizationAndPersists(t *testing.T) {
 	ctx, svc, _, auth, selections, p1, p2 := setupXServiceTest(t)
 	require.NoError(t, auth.Create(ctx, &models.XAuthorizedUser{ProjectID: p1.ID, XUserID: "123"}))
