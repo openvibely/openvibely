@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
-	"github.com/openvibely/openvibely/internal/auth"
 	"github.com/openvibely/openvibely/internal/buildinfo"
 	"github.com/openvibely/openvibely/internal/update"
 )
@@ -83,13 +82,9 @@ func (h *Handler) authorizeSystemHealth(c echo.Context) bool {
 	if c.Get("auth_user") != nil {
 		return true
 	}
-	if h.authMode == auth.AuthModeHostedSSO && h.validHostedSession(c.Request()) {
+	session := h.recognizeSession(c.Request(), time.Now())
+	if session.localUser != nil || session.hostedClaims != nil {
 		return true
-	}
-	if h.authMode == auth.AuthModeLocal && h.authCfg != nil {
-		if _, err := auth.UserFromRequest(c.Request(), *h.authCfg, time.Now()); err == nil {
-			return true
-		}
 	}
 	token := ""
 	switch h.updateMode {
