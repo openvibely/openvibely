@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -1364,6 +1365,16 @@ func TestAutomationSaveValidatorAgentIssuesMeetsRichFixturePerformanceBudget(t *
 					t.Fatalf("batched validation issues = %#v", issues)
 				}
 			})
+			baselineBytes := allocatedAutomationValidationBytes(t, 3, func() error {
+				return automationValidationBaseline(ctx, agentRepo, "budget-project", candidate)
+			})
+			batchedBytes := allocatedAutomationValidationBytes(t, 3, func() error {
+				issues, err := validator.agentIssues(ctx, "budget-project", candidate)
+				if err == nil && len(issues) != 0 {
+					return fmt.Errorf("batched validation issues = %#v", issues)
+				}
+				return err
+			})
 			baselineWall := medianAutomationValidationDuration(t, 3, func() error {
 				return automationValidationBaseline(ctx, agentRepo, "budget-project", candidate)
 			})
@@ -1378,6 +1389,9 @@ func TestAutomationSaveValidatorAgentIssuesMeetsRichFixturePerformanceBudget(t *
 			if batchedAllocs > baselineAllocs {
 				t.Fatalf("batched allocations = %.0f, baseline = %.0f; one-reference validation regressed", batchedAllocs, baselineAllocs)
 			}
+			if batchedBytes > baselineBytes {
+				t.Fatalf("batched allocated bytes = %d, baseline = %d; one-reference validation regressed", batchedBytes, baselineBytes)
+			}
 			if batchedWall > baselineWall {
 				t.Fatalf("batched wall time = %s, baseline = %s; one-reference validation regressed", batchedWall, baselineWall)
 			}
@@ -1385,13 +1399,30 @@ func TestAutomationSaveValidatorAgentIssuesMeetsRichFixturePerformanceBudget(t *
 				if batchedAllocs*10 > baselineAllocs {
 					t.Fatalf("batched allocations = %.0f, baseline = %.0f; want at least 90%% reduction", batchedAllocs, baselineAllocs)
 				}
+				if batchedBytes*10 > baselineBytes {
+					t.Fatalf("batched allocated bytes = %d, baseline = %d; want at least 90%% reduction", batchedBytes, baselineBytes)
+				}
 				if batchedWall*10 > baselineWall {
 					t.Fatalf("batched wall time = %s, baseline = %s; want at least 90%% reduction", batchedWall, baselineWall)
 				}
 			}
-			t.Logf("references=%d baseline=%s/%.0f allocs, batched=%s/%.0f allocs", referenceCount, baselineWall, baselineAllocs, batchedWall, batchedAllocs)
+			t.Logf("references=%d baseline=%s/%d B/%.0f allocs, batched=%s/%d B/%.0f allocs", referenceCount, baselineWall, baselineBytes, baselineAllocs, batchedWall, batchedBytes, batchedAllocs)
 		})
 	}
+}
+
+func allocatedAutomationValidationBytes(t *testing.T, runs int, validate func() error) uint64 {
+	t.Helper()
+	runtime.GC()
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	for i := 0; i < runs; i++ {
+		if err := validate(); err != nil {
+			t.Fatalf("validation sample %d: %v", i, err)
+		}
+	}
+	runtime.ReadMemStats(&after)
+	return (after.TotalAlloc - before.TotalAlloc) / uint64(runs)
 }
 
 func medianAutomationValidationDuration(t *testing.T, samples int, validate func() error) time.Duration {
