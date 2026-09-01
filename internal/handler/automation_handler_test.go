@@ -864,6 +864,71 @@ func TestAutomationBuilderPreviewUsesCompilerValidation(t *testing.T) {
 	})
 }
 
+func TestAutomationBuilderPreviewUsesSingleCompactAgentValidationPass(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	h, _, _ := setupTestHandlerForDB(t, db)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	project := &models.Project{Name: "Single Agent validation preview"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	agentRepo := repository.NewAgentRepo(db)
+	agent := &models.Agent{Name: "Preview Agent", Key: "preview-agent", SystemPrompt: "private preview prompt", Model: "inherit", Tools: []string{"Read"}, Enabled: true, SelectableAsPrimary: true}
+	require.NoError(t, agentRepo.Create(ctx, agent))
+	h.SetAgentRepo(agentRepo)
+
+	registry := service.NewAutomationAdapterRegistry()
+	automationRepo := repository.NewAutomationRepo(db)
+	drafts := service.NewAutomationDraftService(automationRepo, registry)
+	capabilities := service.NewAutomationCapabilitySnapshotBuilder(projectRepo, agentRepo, nil, nil)
+	validator := service.NewAutomationSaveValidator(registry, drafts)
+	compiler := service.NewAutomationCompiler(automationRepo, h.taskSvc, h.taskRepo, h.scheduleRepo, validator)
+	h.SetAutomationBuilderServices(drafts, capabilities, validator, compiler, nil, nil)
+
+	candidate, err := drafts.BlankCandidate("")
+	require.NoError(t, err)
+	candidate.Name = "Single Agent validation preview"
+	candidate.Nodes = []models.AutomationDraftNode{{
+		Key: "review", Name: "Review", Type: models.AutomationNodeAgentTask, Role: "task",
+		Config: map[string]any{"prompt": "Review the request.", "category": "backlog", "priority": 2, "agent_ref": agent.Key},
+	}}
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	result, err := h.previewAutomationBuilderCandidate(ctx, project.ID, candidate, nil)
+	counter.SetEnabled(false)
+	require.NoError(t, err)
+	require.Empty(t, result.ValidationErrors)
+	agentStatements := make([]string, 0)
+	for _, statement := range counter.Statements() {
+		if strings.Contains(strings.ToLower(statement), "from agents") {
+			agentStatements = append(agentStatements, statement)
+		}
+	}
+	require.Len(t, agentStatements, 1)
+	projection := strings.ToLower(strings.SplitN(strings.Join(strings.Fields(agentStatements[0]), " "), " from agents", 2)[0])
+	require.Contains(t, projection, "select id")
+	require.Contains(t, projection, "coalesce(key, '')")
+	require.Contains(t, projection, "project_id")
+	for _, forbidden := range []string{"system_prompt", "tools", "tool_config", "plugins", "mcp_servers", "skills", "permission_defaults_json", "model_defaults_json", "source_refs_json", "created_at", "updated_at"} {
+		require.NotContains(t, projection, forbidden)
+	}
+
+	delete(candidate.Nodes[0].Config, "agent_ref")
+	counter.Reset()
+	counter.SetEnabled(true)
+	result, err = h.previewAutomationBuilderCandidate(ctx, project.ID, candidate, nil)
+	counter.SetEnabled(false)
+	require.NoError(t, err)
+	require.Empty(t, result.ValidationErrors)
+	agentStatements = agentStatements[:0]
+	for _, statement := range counter.Statements() {
+		if strings.Contains(strings.ToLower(statement), "from agents") {
+			agentStatements = append(agentStatements, statement)
+		}
+	}
+	require.Empty(t, agentStatements)
+}
+
 func TestAutomationBuilderRejectsUnsafeAndUnsupportedYAMLWithoutSideEffects(t *testing.T) {
 	newBuilder := func(t *testing.T) (*TestContext, *models.Project, *repository.AutomationRepo, *service.AutomationDraftService) {
 		t.Helper()

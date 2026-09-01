@@ -39,6 +39,18 @@ func (b *AutomationCapabilitySnapshotBuilder) SetLLMConfigRepository(llmConfigRe
 }
 
 func (b *AutomationCapabilitySnapshotBuilder) Build(ctx context.Context, projectID string) (models.AutomationCapabilitySnapshot, error) {
+	return b.build(ctx, projectID, true, false)
+}
+
+// BuildForValidation builds the project capability data needed by Automation
+// validation. It loads the compact selectable-Agent identity projection only
+// when includeAgentReferences is true; full Agent configuration remains part of
+// Build for description generation and other capability consumers.
+func (b *AutomationCapabilitySnapshotBuilder) BuildForValidation(ctx context.Context, projectID string, includeAgentReferences bool) (models.AutomationCapabilitySnapshot, error) {
+	return b.build(ctx, projectID, false, includeAgentReferences)
+}
+
+func (b *AutomationCapabilitySnapshotBuilder) build(ctx context.Context, projectID string, includeAgentCapabilities, includeAgentReferences bool) (models.AutomationCapabilitySnapshot, error) {
 	var snapshot models.AutomationCapabilitySnapshot
 	if b == nil || b.projectRepo == nil {
 		return snapshot, errors.New("project repository is unavailable")
@@ -63,24 +75,38 @@ func (b *AutomationCapabilitySnapshotBuilder) Build(ctx context.Context, project
 		"release_requires_separate_authorization": true, "deployment_requires_separate_authorization": true,
 	}
 	if b.agentRepo != nil {
-		agents, listErr := b.agentRepo.ListSelectableForProject(ctx, projectID, automationCapabilityLimit)
-		if listErr != nil {
-			return snapshot, listErr
-		}
-		for _, agent := range agents {
-			if len(snapshot.Agents) >= automationCapabilityLimit {
-				break
+		if includeAgentCapabilities {
+			agents, listErr := b.agentRepo.ListSelectableForProject(ctx, projectID, automationCapabilityLimit)
+			if listErr != nil {
+				return snapshot, listErr
 			}
-			if !agent.Enabled || agent.ArchivedAt != nil || !agent.SelectableAsPrimary || (agent.ProjectID != "" && agent.ProjectID != projectID) {
-				continue
+			for _, agent := range agents {
+				if len(snapshot.Agents) >= automationCapabilityLimit {
+					break
+				}
+				if !agent.Enabled || agent.ArchivedAt != nil || !agent.SelectableAsPrimary || (agent.ProjectID != "" && agent.ProjectID != projectID) {
+					continue
+				}
+				key := strings.TrimSpace(agent.Key)
+				if key == "" {
+					key = agent.ID
+				}
+				capabilities := append([]string(nil), agent.Tools...)
+				sort.Strings(capabilities)
+				snapshot.Agents = append(snapshot.Agents, models.AutomationCapabilityRef{ID: key, Name: agent.Name, Capabilities: capabilities})
 			}
-			key := strings.TrimSpace(agent.Key)
-			if key == "" {
-				key = agent.ID
+		} else if includeAgentReferences {
+			references, listErr := b.agentRepo.ListSelectableReferencesForProject(ctx, projectID, automationCapabilityLimit)
+			if listErr != nil {
+				return snapshot, listErr
 			}
-			capabilities := append([]string(nil), agent.Tools...)
-			sort.Strings(capabilities)
-			snapshot.Agents = append(snapshot.Agents, models.AutomationCapabilityRef{ID: key, Name: agent.Name, Capabilities: capabilities})
+			for _, reference := range references {
+				key := strings.TrimSpace(reference.Key)
+				if key == "" {
+					key = reference.ID
+				}
+				snapshot.Agents = append(snapshot.Agents, models.AutomationCapabilityRef{ID: key})
+			}
 		}
 	}
 	if b.llmConfigRepo != nil {
