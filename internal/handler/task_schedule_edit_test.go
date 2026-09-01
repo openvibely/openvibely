@@ -12,6 +12,17 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
+func assertNoProjectSchedules(t *testing.T, h *Handler, ctx context.Context, projectID string) {
+	t.Helper()
+	schedules, err := h.scheduleRepo.ListByProject(ctx, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(schedules) != 0 {
+		t.Fatalf("expected no schedules for project %s, got %d", projectID, len(schedules))
+	}
+}
+
 func TestHandler_GetTask_ScheduleDeleteConfirmationDialog(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	ctx := context.Background()
@@ -391,12 +402,12 @@ func TestHandler_CreateTask_FromSchedulePage_RejectsOversizedInterval(t *testing
 	}
 }
 
-func TestHandler_CreateTask_FromSchedulePage_InvalidDateCreatesTaskWithoutSchedule(t *testing.T) {
+func TestHandler_CreateTask_FromSchedulePage_RejectsInvalidDateWithoutPersistence(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	ctx := context.Background()
 	form := url.Values{
 		"title":           {"Invalid date scheduled task"},
-		"prompt":          {"Create the task without a schedule"},
+		"prompt":          {"The task must not be created"},
 		"category":        {"scheduled"},
 		"priority":        {"2"},
 		"run_at":          {"not-a-date"},
@@ -408,30 +419,127 @@ func TestHandler_CreateTask_FromSchedulePage_InvalidDateCreatesTaskWithoutSchedu
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusSeeOther {
-		t.Fatalf("expected 303, got %d: %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
 	}
 	tasks, err := h.taskSvc.ListByProject(ctx, "default", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	var found *models.Task
-	for i := range tasks {
-		if tasks[i].Title == "Invalid date scheduled task" {
-			found = &tasks[i]
-			break
+	for _, task := range tasks {
+		if task.Title == "Invalid date scheduled task" {
+			t.Fatal("invalid-date scheduled task was persisted")
 		}
 	}
-	if found == nil {
-		t.Fatal("expected scheduled task to be created")
+	assertNoProjectSchedules(t, h, ctx, "default")
+}
+
+func TestHandler_CreateTask_FromSchedulePage_RejectsMissingDateWithoutPersistence(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	ctx := context.Background()
+	form := url.Values{
+		"title":           {"Missing date scheduled task"},
+		"prompt":          {"The task must not be created"},
+		"category":        {"scheduled"},
+		"priority":        {"2"},
+		"repeat_type":     {"daily"},
+		"repeat_interval": {"1"},
 	}
-	schedules, err := h.scheduleRepo.ListByTask(ctx, found.ID)
+	req := httptest.NewRequest(http.MethodPost, "/tasks?project_id=default&from=schedule", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+	tasks, err := h.taskSvc.ListByProject(ctx, "default", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(schedules) != 0 {
-		t.Fatalf("expected no schedule for invalid date, got %d", len(schedules))
+	for _, task := range tasks {
+		if task.Title == "Missing date scheduled task" {
+			t.Fatal("missing-date scheduled task was persisted")
+		}
 	}
+	assertNoProjectSchedules(t, h, ctx, "default")
+}
+
+func TestHandler_CreateTask_FromSchedulePage_RejectsInvalidRepeatTypeWithoutPersistence(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	ctx := context.Background()
+	form := url.Values{
+		"title":           {"Invalid repeat scheduled task"},
+		"prompt":          {"The task must not be created"},
+		"category":        {"scheduled"},
+		"priority":        {"2"},
+		"run_at":          {"2026-03-15T10:00"},
+		"repeat_type":     {"not-a-repeat"},
+		"repeat_interval": {"1"},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/tasks?project_id=default&from=schedule", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+	tasks, err := h.taskSvc.ListByProject(ctx, "default", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, task := range tasks {
+		if task.Title == "Invalid repeat scheduled task" {
+			t.Fatal("invalid-repeat scheduled task was persisted")
+		}
+	}
+	assertNoProjectSchedules(t, h, ctx, "default")
+}
+
+func TestHandler_CreateTask_FromSchedulePage_RollsBackTaskWhenScheduleCreationFails(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, `CREATE TRIGGER fail_task_schedule_insert
+		BEFORE INSERT ON schedules
+		BEGIN
+			SELECT RAISE(ABORT, 'injected schedule failure');
+		END`); err != nil {
+		t.Fatalf("create schedule failure trigger: %v", err)
+	}
+	defer func() {
+		if _, err := db.ExecContext(ctx, `DROP TRIGGER fail_task_schedule_insert`); err != nil {
+			t.Errorf("drop schedule failure trigger: %v", err)
+		}
+	}()
+
+	form := url.Values{
+		"title":           {"Schedule persistence failure task"},
+		"prompt":          {"The task must be rolled back"},
+		"category":        {"scheduled"},
+		"priority":        {"2"},
+		"run_at":          {"2026-03-15T10:00"},
+		"repeat_type":     {"daily"},
+		"repeat_interval": {"1"},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/tasks?project_id=default&from=schedule", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d: %s", rec.Code, rec.Body.String())
+	}
+	tasks, err := h.taskSvc.ListByProject(ctx, "default", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, task := range tasks {
+		if task.Title == "Schedule persistence failure task" {
+			t.Fatal("task remained after schedule persistence failure")
+		}
+	}
+	assertNoProjectSchedules(t, h, ctx, "default")
 }
 
 func TestHandler_CreateTask_FromSchedulePage_DefaultsRepeatTypeToDailyWhenMissing(t *testing.T) {
@@ -445,6 +553,7 @@ func TestHandler_CreateTask_FromSchedulePage_DefaultsRepeatTypeToDailyWhenMissin
 	form.Add("priority", "2")
 	form.Add("run_at", "2026-03-15T10:00")
 	form.Add("repeat_interval", "1")
+	form.Add("clear_context_on_start", "false")
 
 	req := httptest.NewRequest(http.MethodPost, "/tasks?project_id=default&from=schedule", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -480,6 +589,9 @@ func TestHandler_CreateTask_FromSchedulePage_DefaultsRepeatTypeToDailyWhenMissin
 	}
 	if schedules[0].RepeatType != models.RepeatDaily {
 		t.Errorf("expected repeat type daily default, got %s", schedules[0].RepeatType)
+	}
+	if schedules[0].ClearContextOnStart {
+		t.Error("expected clear context on start to remain disabled")
 	}
 }
 

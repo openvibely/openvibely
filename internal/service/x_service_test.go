@@ -2,11 +2,14 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
@@ -35,8 +38,11 @@ func (f *fakeXAPI) Post(_ context.Context, text, reply string) (string, error) {
 	return "posted", f.postErr
 }
 
-func setupXServiceTest(t *testing.T) (context.Context, *XService, *repository.SettingsRepo, *repository.XAuthRepo, *repository.XUserProjectRepo, *models.Project, *models.Project) {
-	db := testutil.NewTestDB(t)
+func setupXServiceTest(t testing.TB) (context.Context, *XService, *repository.SettingsRepo, *repository.XAuthRepo, *repository.XUserProjectRepo, *models.Project, *models.Project) {
+	return setupXServiceTestWithDB(t, testutil.NewTestDB(t))
+}
+
+func setupXServiceTestWithDB(t testing.TB, db *sql.DB) (context.Context, *XService, *repository.SettingsRepo, *repository.XAuthRepo, *repository.XUserProjectRepo, *models.Project, *models.Project) {
 	ctx := context.Background()
 	projects := repository.NewProjectRepo(db)
 	p1 := &models.Project{Name: "One"}
@@ -59,6 +65,553 @@ func setupXServiceTest(t *testing.T) (context.Context, *XService, *repository.Se
 	)
 	svc.SetRepositories(auth, selections, repository.NewXTaskContextRepo(db), repository.NewXInboundReceiptRepo(db), repository.NewThreadInputRepo(db))
 	return ctx, svc, settings, auth, selections, p1, p2
+}
+
+func setupXBatchService(t testing.TB, db *sql.DB, counter *testutil.SQLStatementCounter, mentionsPerPage, pages int) (context.Context, *XService, *repository.SettingsRepo) {
+	ctx, svc, settings, auth, selections, project, _ := setupXServiceTestWithDB(t, db)
+	require.NoError(t, auth.Create(ctx, &models.XAuthorizedUser{ProjectID: project.ID, XUserID: "author"}))
+	require.NoError(t, selections.SetUserProject(ctx, "author", project.ID))
+	require.NoError(t, settings.Set(ctx, XSettingConfigurationID, "generation"))
+	svc.SetConfigurationID("generation")
+	api := &fakeXAPI{me: XUser{ID: "bot", Username: "openvibely"}}
+	api.mentionsFunc = xMentionBatchFunc(mentionsPerPage, pages)
+	svc.setAPI(api)
+	svc.me = api.me
+	counter.Reset()
+	return ctx, svc, settings
+}
+
+func xMentionBatchFunc(mentionsPerPage, pages int) func(context.Context, string, string, string) (xMentionsResponse, error) {
+	return func(_ context.Context, _, _, pagination string) (xMentionsResponse, error) {
+		pageIndex := 0
+		if pagination != "" {
+			if _, err := fmt.Sscanf(pagination, "page-%d", &pageIndex); err != nil {
+				return xMentionsResponse{}, fmt.Errorf("parse X test pagination token %q: %w", pagination, err)
+			}
+		}
+		if pageIndex < 0 || pageIndex >= pages {
+			return xMentionsResponse{}, fmt.Errorf("unexpected X test page index %d", pageIndex)
+		}
+		response := xMentionsResponse{}
+		response.Meta.NewestID = fmt.Sprintf("%d", mentionsPerPage*pages)
+		if pageIndex+1 < pages {
+			response.Meta.NextToken = fmt.Sprintf("page-%d", pageIndex+1)
+		}
+		start := pageIndex*mentionsPerPage + 1
+		response.Data = make([]XTweet, 0, mentionsPerPage)
+		for i := 0; i < mentionsPerPage; i++ {
+			id := fmt.Sprintf("%d", start+i)
+			response.Data = append(response.Data, XTweet{ID: id, Text: "@openvibely", AuthorID: "author", ConversationID: "conversation-" + id})
+		}
+		return response, nil
+	}
+}
+
+func xPollBatchProfileList() []xPollBatchProfile {
+	return []xPollBatchProfile{
+		{name: "1", mentionsPerPage: 1, pages: 1},
+		{name: "10", mentionsPerPage: 10, pages: 1},
+		{name: "100", mentionsPerPage: 100, pages: 1},
+		{name: "paginated-1000", mentionsPerPage: 100, pages: 10},
+	}
+}
+
+type xPollBatchProfile struct {
+	name            string
+	mentionsPerPage int
+	pages           int
+}
+
+func pollXBatchMode(svc *XService, ctx context.Context, checkEachMention bool) error {
+	if checkEachMention {
+		return svc.pollOnceWithMentionConfigurationCheck(ctx, true)
+	}
+	return svc.pollOnce(ctx)
+}
+
+func countXSettingsSnapshots(statements []string) int {
+	count := 0
+	for _, statement := range statements {
+		normalized := strings.ReplaceAll(strings.ToUpper(strings.TrimSpace(statement)), " ", "")
+		if normalized == "SELECTKEY,VALUEFROMAPP_SETTINGSWHEREKEYIN(?,?,?)" {
+			count++
+		}
+	}
+	return count
+}
+
+func xPollBatchStatements(t testing.TB, profile xPollBatchProfile, checkEachMention bool) ([]string, string) {
+	t.Helper()
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	ctx, svc, settings := setupXBatchService(t, db, counter, profile.mentionsPerPage, profile.pages)
+	counter.SetEnabled(true)
+	err := pollXBatchMode(svc, ctx, checkEachMention)
+	counter.SetEnabled(false)
+	require.NoError(t, err)
+	cursor, err := settings.Get(ctx, XSettingSinceID)
+	require.NoError(t, err)
+	return counter.Statements(), cursor
+}
+
+func TestXPollUsesOneConfigurationSnapshotPerBatch(t *testing.T) {
+	for _, profile := range xPollBatchProfileList() {
+		t.Run(profile.name, func(t *testing.T) {
+			baselineStatements, baselineCursor := xPollBatchStatements(t, profile, true)
+			candidateStatements, candidateCursor := xPollBatchStatements(t, profile, false)
+			mentions := profile.mentionsPerPage * profile.pages
+			wantCursor := fmt.Sprintf("%d", mentions)
+
+			require.Equal(t, mentions+1, countXSettingsSnapshots(baselineStatements), "historical X polling should load one initial and one per-mention settings snapshot")
+			require.Equal(t, 1, countXSettingsSnapshots(candidateStatements), "X polling should load one settings snapshot per batch")
+			require.GreaterOrEqual(t, len(baselineStatements)-len(candidateStatements), mentions, "removing redundant snapshots should reduce total SQLite operations")
+			if mentions == 100 {
+				require.Equal(t, 1208, len(baselineStatements), "the 100-mention historical fixture should match the issue baseline")
+				require.Equal(t, 1108, len(candidateStatements), "the 100-mention candidate should remove exactly 100 snapshot operations")
+			}
+			require.Equal(t, wantCursor, baselineCursor)
+			require.Equal(t, wantCursor, candidateCursor)
+		})
+	}
+}
+
+type xPollBatchFixture struct {
+	ctx      context.Context
+	svc      *XService
+	settings *repository.SettingsRepo
+	counter  *testutil.SQLStatementCounter
+}
+
+func newXPollBatchFixture(t testing.TB, profile xPollBatchProfile) *xPollBatchFixture {
+	t.Helper()
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	ctx, svc, settings := setupXBatchService(t, db, counter, profile.mentionsPerPage, profile.pages)
+	return &xPollBatchFixture{ctx: ctx, svc: svc, settings: settings, counter: counter}
+}
+
+func resetXPollBatchFixture(t testing.TB, fixture *xPollBatchFixture) {
+	t.Helper()
+	fixture.counter.SetEnabled(false)
+	require.NoError(t, fixture.settings.Set(fixture.ctx, XSettingSinceID, ""))
+	fixture.counter.Reset()
+}
+
+func warmXPollBatchFixture(t testing.TB, fixture *xPollBatchFixture) {
+	t.Helper()
+	require.NoError(t, pollXBatchMode(fixture.svc, fixture.ctx, false))
+	resetXPollBatchFixture(t, fixture)
+}
+
+type xPollBatchMetrics struct {
+	wallNs          float64
+	bytesPerOp      float64
+	allocsPerOp     float64
+	statementsPerOp float64
+	snapshotsPerOp  float64
+}
+
+const xPollBatchBenchmarkSamples = 3
+
+func medianXPollBatch(values []float64) float64 {
+	ordered := append([]float64(nil), values...)
+	sort.Float64s(ordered)
+	return ordered[len(ordered)/2]
+}
+
+func measureXPollBatchMode(t *testing.T, fixture *xPollBatchFixture, checkEachMention bool) xPollBatchMetrics {
+	t.Helper()
+	wallSamples := make([]float64, 0, xPollBatchBenchmarkSamples)
+	bytesSamples := make([]float64, 0, xPollBatchBenchmarkSamples)
+	allocSamples := make([]float64, 0, xPollBatchBenchmarkSamples)
+	statementSamples := make([]float64, 0, xPollBatchBenchmarkSamples)
+	snapshotSamples := make([]float64, 0, xPollBatchBenchmarkSamples)
+	for i := 0; i < xPollBatchBenchmarkSamples; i++ {
+		resetXPollBatchFixture(t, fixture)
+		fixture.counter.SetEnabled(true)
+		err := pollXBatchMode(fixture.svc, fixture.ctx, checkEachMention)
+		fixture.counter.SetEnabled(false)
+		require.NoError(t, err)
+		statements := fixture.counter.Statements()
+		statementSamples = append(statementSamples, float64(len(statements)))
+		snapshotSamples = append(snapshotSamples, float64(countXSettingsSnapshots(statements)))
+
+		resetXPollBatchFixture(t, fixture)
+		var pollErr error
+		result := testing.Benchmark(func(b *testing.B) {
+			b.ReportAllocs()
+			b.ResetTimer()
+			for j := 0; j < b.N; j++ {
+				if pollErr = pollXBatchMode(fixture.svc, fixture.ctx, checkEachMention); pollErr != nil {
+					return
+				}
+			}
+		})
+		require.NoError(t, pollErr)
+		wallSamples = append(wallSamples, float64(result.NsPerOp()))
+		bytesSamples = append(bytesSamples, float64(result.AllocedBytesPerOp()))
+		allocSamples = append(allocSamples, float64(result.AllocsPerOp()))
+	}
+
+	return xPollBatchMetrics{
+		wallNs:          medianXPollBatch(wallSamples),
+		bytesPerOp:      medianXPollBatch(bytesSamples),
+		allocsPerOp:     medianXPollBatch(allocSamples),
+		statementsPerOp: medianXPollBatch(statementSamples),
+		snapshotsPerOp:  medianXPollBatch(snapshotSamples),
+	}
+}
+
+func measureXPollBatchPair(t *testing.T, profile xPollBatchProfile) (xPollBatchMetrics, xPollBatchMetrics) {
+	t.Helper()
+	fixture := newXPollBatchFixture(t, profile)
+	warmXPollBatchFixture(t, fixture)
+	baseline := measureXPollBatchMode(t, fixture, true)
+	candidate := measureXPollBatchMode(t, fixture, false)
+	return baseline, candidate
+}
+
+func TestXPollBatchBenchmarkThresholds(t *testing.T) {
+	for _, profile := range xPollBatchProfileList() {
+		t.Run(profile.name, func(t *testing.T) {
+			baseline, candidate := measureXPollBatchPair(t, profile)
+			mentions := profile.mentionsPerPage * profile.pages
+			t.Logf("median baseline: wall=%.0f ns/op bytes=%.0f B/op allocs=%.0f statements=%.0f snapshots=%.0f; candidate: wall=%.0f ns/op bytes=%.0f B/op allocs=%.0f statements=%.0f snapshots=%.0f", baseline.wallNs, baseline.bytesPerOp, baseline.allocsPerOp, baseline.statementsPerOp, baseline.snapshotsPerOp, candidate.wallNs, candidate.bytesPerOp, candidate.allocsPerOp, candidate.statementsPerOp, candidate.snapshotsPerOp)
+
+			require.Equal(t, float64(mentions+1), baseline.snapshotsPerOp)
+			require.Equal(t, float64(1), candidate.snapshotsPerOp)
+			require.GreaterOrEqual(t, baseline.statementsPerOp-candidate.statementsPerOp, float64(mentions), "the candidate must remove one total SQL operation per non-self mention")
+
+			switch mentions {
+			case 1:
+				require.LessOrEqual(t, candidate.wallNs, baseline.wallNs*1.05, "one-mention wall time must not regress by more than 5%%")
+				require.LessOrEqual(t, candidate.allocsPerOp, baseline.allocsPerOp*1.05, "one-mention allocations must not regress by more than 5%%")
+			case 100:
+				require.LessOrEqual(t, candidate.wallNs, baseline.wallNs*0.95, "100-mention wall time must improve by at least 5%%")
+				require.LessOrEqual(t, candidate.allocsPerOp, baseline.allocsPerOp*0.95, "100-mention allocations must improve by at least 5%%")
+			}
+		})
+	}
+}
+
+func BenchmarkXPollBatch(b *testing.B) {
+	for _, profile := range xPollBatchProfileList() {
+		b.Run(profile.name, func(b *testing.B) {
+			fixture := newXPollBatchFixture(b, profile)
+			warmXPollBatchFixture(b, fixture)
+			for _, mode := range []struct {
+				name             string
+				checkEachMention bool
+			}{
+				{name: "baseline", checkEachMention: true},
+				{name: "candidate", checkEachMention: false},
+			} {
+				b.Run(mode.name, func(b *testing.B) {
+					resetXPollBatchFixture(b, fixture)
+					fixture.counter.SetEnabled(true)
+					err := pollXBatchMode(fixture.svc, fixture.ctx, mode.checkEachMention)
+					fixture.counter.SetEnabled(false)
+					require.NoError(b, err)
+					statements := fixture.counter.Statements()
+					mentions := profile.mentionsPerPage * profile.pages
+					expectedSnapshots := 1
+					if mode.checkEachMention {
+						expectedSnapshots = mentions + 1
+					}
+					require.Equal(b, expectedSnapshots, countXSettingsSnapshots(statements))
+
+					b.ReportAllocs()
+					b.ResetTimer()
+					b.ReportMetric(float64(len(statements)), "sqlite-statements/op")
+					b.ReportMetric(float64(countXSettingsSnapshots(statements)), "settings-snapshots/op")
+					for i := 0; i < b.N; i++ {
+						if err := pollXBatchMode(fixture.svc, fixture.ctx, mode.checkEachMention); err != nil {
+							b.Fatal(err)
+						}
+					}
+				})
+			}
+		})
+	}
+}
+
+type xProjectResolutionFixture struct {
+	ctx           context.Context
+	counter       *testutil.SQLStatementCounter
+	projectRepo   *repository.ProjectRepo
+	authRepo      *repository.XAuthRepo
+	selectionRepo *repository.XUserProjectRepo
+	svc           *XService
+	projectID     string
+}
+
+const (
+	xProjectResolutionMedianSamples  = 7
+	xProjectResolutionTimingRuns     = 3
+	xProjectResolutionAllocationRuns = 3
+)
+
+func newXProjectResolutionFixture(tb testing.TB, projectCount int) xProjectResolutionFixture {
+	tb.Helper()
+	db, counter := testutil.NewStatementCountingTestDB(tb)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	var existingProjectCount int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM projects`).Scan(&existingProjectCount); err != nil {
+		tb.Fatalf("count seeded projects: %v", err)
+	}
+	if existingProjectCount >= projectCount {
+		tb.Fatalf("fixture already has %d projects, cannot create exact %d-project fixture", existingProjectCount, projectCount)
+	}
+	var lastProject *models.Project
+	for i := existingProjectCount; i < projectCount; i++ {
+		project := &models.Project{Name: fmt.Sprintf("X benchmark project %04d", i)}
+		if err := projectRepo.Create(ctx, project); err != nil {
+			tb.Fatalf("create benchmark project %d: %v", i, err)
+		}
+		lastProject = project
+	}
+	authRepo := repository.NewXAuthRepo(db)
+	if err := authRepo.Create(ctx, &models.XAuthorizedUser{ProjectID: lastProject.ID, XUserID: "benchmark-author"}); err != nil {
+		tb.Fatalf("authorize benchmark user: %v", err)
+	}
+	selectionRepo := repository.NewXUserProjectRepo(db)
+	svc := NewXService(XCredentials{}, repository.NewSettingsRepo(db), projectRepo, nil, nil, nil, nil, nil)
+	svc.SetRepositories(authRepo, selectionRepo, nil, nil, nil)
+	return xProjectResolutionFixture{
+		ctx:           ctx,
+		counter:       counter,
+		projectRepo:   projectRepo,
+		authRepo:      authRepo,
+		selectionRepo: selectionRepo,
+		svc:           svc,
+		projectID:     lastProject.ID,
+	}
+}
+
+func TestXProjectForUserUsesBoundedUserKeyedAuthorizationLookup(t *testing.T) {
+	fixture := newXProjectResolutionFixture(t, 100)
+	counter := fixture.counter
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	for i := 0; i < 2; i++ {
+		projectID, err := fixture.svc.projectForUser(fixture.ctx, "benchmark-author")
+		require.NoError(t, err)
+		require.Equal(t, fixture.projectID, projectID)
+	}
+	counter.SetEnabled(false)
+
+	statements := counter.Statements()
+	require.Len(t, statements, 4)
+	for _, statement := range statements {
+		require.NotContains(t, statement, "FROM projects ORDER BY")
+	}
+}
+
+func TestXProjectForUserPreservesExplicitSelectionAndOrderedFallback(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projects := repository.NewProjectRepo(db)
+	defaultProject := &models.Project{Name: "Zulu"}
+	nameOrderedProject := &models.Project{Name: "Alpha"}
+	otherProject := &models.Project{Name: "Bravo"}
+	for _, project := range []*models.Project{defaultProject, nameOrderedProject, otherProject} {
+		require.NoError(t, projects.Create(ctx, project))
+	}
+	_, err := db.ExecContext(ctx, `UPDATE projects SET is_default = 1 WHERE id = ?`, defaultProject.ID)
+	require.NoError(t, err)
+
+	auth := repository.NewXAuthRepo(db)
+	selections := repository.NewXUserProjectRepo(db)
+	svc := NewXService(XCredentials{}, repository.NewSettingsRepo(db), projects, nil, nil, nil, nil, nil)
+	svc.SetRepositories(auth, selections, nil, nil, nil)
+
+	nameOrderedAuth := &models.XAuthorizedUser{ProjectID: nameOrderedProject.ID, XUserID: "author"}
+	otherAuth := &models.XAuthorizedUser{ProjectID: otherProject.ID, XUserID: "author"}
+	for _, user := range []*models.XAuthorizedUser{nameOrderedAuth, otherAuth} {
+		require.NoError(t, auth.Create(ctx, user))
+	}
+	projectID, err := svc.projectForUser(ctx, "author")
+	require.NoError(t, err)
+	require.Equal(t, nameOrderedProject.ID, projectID)
+
+	require.NoError(t, auth.Create(ctx, &models.XAuthorizedUser{ProjectID: defaultProject.ID, XUserID: "author"}))
+	projectID, err = svc.projectForUser(ctx, "author")
+	require.NoError(t, err)
+	require.Equal(t, defaultProject.ID, projectID)
+
+	require.NoError(t, selections.SetUserProject(ctx, "author", otherProject.ID))
+	projectID, err = svc.projectForUser(ctx, "author")
+	require.NoError(t, err)
+	require.Equal(t, otherProject.ID, projectID)
+
+	require.NoError(t, auth.Delete(ctx, otherProject.ID, otherAuth.ID))
+	projectID, err = svc.projectForUser(ctx, "author")
+	require.NoError(t, err)
+	require.Equal(t, defaultProject.ID, projectID)
+
+	projectID, err = svc.projectForUser(ctx, "unauthorized")
+	require.NoError(t, err)
+	require.Empty(t, projectID)
+}
+
+func TestXProjectForUserMeetsMedianResolutionThresholdAt1000Projects(t *testing.T) {
+	fixture := newXProjectResolutionFixture(t, 1000)
+	current := measureXProjectResolution(t, fixture.projectID, func() (string, error) {
+		return xProjectForUserFanoutBaseline(fixture.ctx, fixture.projectRepo, fixture.authRepo, fixture.selectionRepo, "benchmark-author")
+	})
+	candidate := measureXProjectResolution(t, fixture.projectID, func() (string, error) {
+		return fixture.svc.projectForUser(fixture.ctx, "benchmark-author")
+	})
+
+	require.LessOrEqual(t, float64(candidate.medianDuration), 0.25*float64(current.medianDuration),
+		"candidate median resolution time must be at least 75%% lower: current=%s candidate=%s", current.medianDuration, candidate.medianDuration)
+	require.LessOrEqual(t, candidate.medianAllocs, 0.25*current.medianAllocs,
+		"candidate median allocations must be at least 75%% lower: current=%.1f candidate=%.1f", current.medianAllocs, candidate.medianAllocs)
+}
+
+func BenchmarkXProjectForUserResolution(b *testing.B) {
+	var candidateMedians = make(map[int]time.Duration, 2)
+	for _, projectCount := range []int{100, 1000} {
+		projectCount := projectCount
+		b.Run(fmt.Sprintf("%d_projects", projectCount), func(b *testing.B) {
+			fixture := newXProjectResolutionFixture(b, projectCount)
+			currentMeasurement := measureXProjectResolution(b, fixture.projectID, func() (string, error) {
+				return xProjectForUserFanoutBaseline(fixture.ctx, fixture.projectRepo, fixture.authRepo, fixture.selectionRepo, "benchmark-author")
+			})
+			candidateMeasurement := measureXProjectResolution(b, fixture.projectID, func() (string, error) {
+				return fixture.svc.projectForUser(fixture.ctx, "benchmark-author")
+			})
+			candidateMedians[projectCount] = candidateMeasurement.medianDuration
+			if projectCount == 1000 {
+				requireXProjectResolutionThreshold(b, currentMeasurement, candidateMeasurement)
+			}
+
+			b.Run("CurrentFanOut", func(b *testing.B) {
+				benchmarkXProjectResolution(b, fixture.counter, fixture.projectID, currentMeasurement, func() (string, error) {
+					return xProjectForUserFanoutBaseline(fixture.ctx, fixture.projectRepo, fixture.authRepo, fixture.selectionRepo, "benchmark-author")
+				})
+			})
+			b.Run("UserKeyedLookup", func(b *testing.B) {
+				benchmarkXProjectResolution(b, fixture.counter, fixture.projectID, candidateMeasurement, func() (string, error) {
+					return fixture.svc.projectForUser(fixture.ctx, "benchmark-author")
+				})
+			})
+		})
+	}
+	if candidateMedians[100] > 0 && candidateMedians[1000] > 4*candidateMedians[100] {
+		b.Fatalf("candidate median resolution is not effectively flat: 100 projects=%s, 1000 projects=%s", candidateMedians[100], candidateMedians[1000])
+	}
+}
+
+func xProjectForUserFanoutBaseline(ctx context.Context, projects *repository.ProjectRepo, auth *repository.XAuthRepo, selections *repository.XUserProjectRepo, userID string) (string, error) {
+	if id, err := selections.GetUserProject(ctx, userID); err != nil {
+		return "", err
+	} else if id != "" {
+		ok, err := auth.IsAuthorized(ctx, id, userID)
+		if err != nil {
+			return "", err
+		}
+		if ok {
+			return id, nil
+		}
+	}
+	allProjects, err := projects.List(ctx)
+	if err != nil {
+		return "", err
+	}
+	for _, project := range allProjects {
+		ok, err := auth.IsAuthorized(ctx, project.ID, userID)
+		if err != nil {
+			return "", err
+		}
+		if ok {
+			return project.ID, nil
+		}
+	}
+	return "", nil
+}
+
+type xProjectResolutionMeasurement struct {
+	medianDuration time.Duration
+	medianAllocs   float64
+}
+
+func measureXProjectResolution(tb testing.TB, want string, resolve func() (string, error)) xProjectResolutionMeasurement {
+	tb.Helper()
+	durations := make([]time.Duration, xProjectResolutionMedianSamples)
+	allocations := make([]float64, xProjectResolutionMedianSamples)
+	for sample := 0; sample < xProjectResolutionMedianSamples; sample++ {
+		started := time.Now()
+		for run := 0; run < xProjectResolutionTimingRuns; run++ {
+			got, err := resolve()
+			if err != nil {
+				tb.Fatalf("timed resolution: %v", err)
+			}
+			if got != want {
+				tb.Fatalf("timed resolution project = %q, want %q", got, want)
+			}
+		}
+		durations[sample] = time.Since(started) / time.Duration(xProjectResolutionTimingRuns)
+
+		var got string
+		var err error
+		allocations[sample] = testing.AllocsPerRun(xProjectResolutionAllocationRuns, func() {
+			got, err = resolve()
+		})
+		if err != nil {
+			tb.Fatalf("allocation resolution: %v", err)
+		}
+		if got != want {
+			tb.Fatalf("allocation resolution project = %q, want %q", got, want)
+		}
+	}
+	sort.Slice(durations, func(i, j int) bool { return durations[i] < durations[j] })
+	sort.Float64s(allocations)
+	return xProjectResolutionMeasurement{
+		medianDuration: durations[len(durations)/2],
+		medianAllocs:   allocations[len(allocations)/2],
+	}
+}
+
+func requireXProjectResolutionThreshold(tb testing.TB, current, candidate xProjectResolutionMeasurement) {
+	tb.Helper()
+	if float64(candidate.medianDuration) > 0.25*float64(current.medianDuration) {
+		tb.Fatalf("candidate median resolution time must be at least 75%% lower: current=%s candidate=%s", current.medianDuration, candidate.medianDuration)
+	}
+	if candidate.medianAllocs > 0.25*current.medianAllocs {
+		tb.Fatalf("candidate median allocations must be at least 75%% lower: current=%.1f candidate=%.1f", current.medianAllocs, candidate.medianAllocs)
+	}
+}
+
+func benchmarkXProjectResolution(b *testing.B, counter *testutil.SQLStatementCounter, want string, median xProjectResolutionMeasurement, resolve func() (string, error)) {
+	b.Helper()
+	counter.Reset()
+	counter.SetEnabled(true)
+	got, err := resolve()
+	counter.SetEnabled(false)
+	if err != nil {
+		b.Fatalf("warm resolution: %v", err)
+	}
+	if got != want {
+		b.Fatalf("warm resolution project = %q, want %q", got, want)
+	}
+	statementCount := len(counter.Statements())
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		got, err := resolve()
+		if err != nil {
+			b.Fatalf("resolve project: %v", err)
+		}
+		if got != want {
+			b.Fatalf("resolved project = %q, want %q", got, want)
+		}
+	}
+	b.StopTimer()
+	b.ReportMetric(float64(median.medianDuration.Nanoseconds()), "median_ns/op")
+	b.ReportMetric(median.medianAllocs, "median_allocs/op")
+	b.ReportMetric(float64(statementCount), "sql_statements/op")
 }
 
 func TestXRuntimeProjectSwitchRequiresTargetAuthorizationAndPersists(t *testing.T) {
@@ -217,6 +770,71 @@ func TestXPollSameAccountReplacementGenerationCreatesNoWork(t *testing.T) {
 	tasks, err := svc.taskRepo.ListByProject(ctx, project.ID, string(models.CategoryChat))
 	require.NoError(t, err)
 	require.Empty(t, tasks)
+}
+
+func TestXPollReplacementBetweenMentionHandoffsCreatesNoStaleWork(t *testing.T) {
+	for _, tt := range []struct {
+		name              string
+		initialGeneration string
+		replaceSettings   func(context.Context, *repository.SettingsRepo) error
+	}{
+		{
+			name: "account",
+			replaceSettings: func(ctx context.Context, settings *repository.SettingsRepo) error {
+				return settings.Set(ctx, XSettingAccountID, "replacement-account")
+			},
+		},
+		{
+			name:              "generation",
+			initialGeneration: "old-generation",
+			replaceSettings: func(ctx context.Context, settings *repository.SettingsRepo) error {
+				return settings.Set(ctx, XSettingConfigurationID, "replacement-generation")
+			},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, svc, settings, auth, _, project, _ := setupXServiceTest(t)
+			if tt.initialGeneration != "" {
+				require.NoError(t, settings.Set(ctx, XSettingConfigurationID, tt.initialGeneration))
+				svc.SetConfigurationID(tt.initialGeneration)
+			}
+			require.NoError(t, auth.Create(ctx, &models.XAuthorizedUser{ProjectID: project.ID, XUserID: "author"}))
+			require.NoError(t, svc.llmConfigRepo.Create(ctx, &models.LLMConfig{Name: "X Agent", Provider: models.ProviderTest, Model: "test", IsDefault: true}))
+
+			handoffs := 0
+			var replacementErr error
+			svc.SetRuntime(nil, nil, nil, nil, func(_ context.Context, _ ChannelChatRunRequest) {
+				handoffs++
+				if handoffs == 1 {
+					replacementErr = tt.replaceSettings(ctx, settings)
+				}
+			}, nil, nil, nil, nil)
+			api := &fakeXAPI{me: XUser{ID: "bot", Username: "openvibely"}}
+			api.mentions.Meta.NewestID = "2"
+			api.mentions.Data = []XTweet{
+				{ID: "2", Text: "@openvibely second", AuthorID: "author", ConversationID: "conversation-2"},
+				{ID: "1", Text: "@openvibely first", AuthorID: "author", ConversationID: "conversation-1"},
+			}
+			svc.setAPI(api)
+			svc.me = api.me
+
+			err := svc.pollOnce(ctx)
+			require.NoError(t, replacementErr)
+			require.ErrorContains(t, err, "configuration changed")
+			require.Equal(t, 1, handoffs)
+
+			tasks, err := svc.taskRepo.ListByProject(ctx, project.ID, string(models.CategoryChat))
+			require.NoError(t, err)
+			require.Len(t, tasks, 1)
+			require.Equal(t, "first", tasks[0].Prompt)
+			pending, err := svc.threadInputRepo.ListPendingForChat(ctx, project.ID)
+			require.NoError(t, err)
+			require.Empty(t, pending)
+			cursor, err := settings.Get(ctx, XSettingSinceID)
+			require.NoError(t, err)
+			require.Empty(t, cursor)
+		})
+	}
 }
 
 func TestXAuthorizedMentionUsesSharedIngressAndAdvancesCursorAfterDurableHandoff(t *testing.T) {
@@ -381,6 +999,8 @@ func TestXReplyRequiresOriginatingAccount(t *testing.T) {
 
 func TestXPollActiveReceiptLeaseDoesNotAdvanceCursorOrDegradeReplacementHealth(t *testing.T) {
 	ctx, old, settings, auth, selections, project, _ := setupXServiceTest(t)
+	require.NoError(t, settings.Set(ctx, XSettingConfigurationID, "generation"))
+	old.SetConfigurationID("generation")
 	require.NoError(t, auth.Create(ctx, &models.XAuthorizedUser{ProjectID: project.ID, XUserID: "author"}))
 	api := &fakeXAPI{me: XUser{ID: "bot", Username: "openvibely"}}
 	api.mentions.Meta.NewestID = "10"
@@ -394,16 +1014,25 @@ func TestXPollActiveReceiptLeaseDoesNotAdvanceCursorOrDegradeReplacementHealth(t
 	replacement.SetRepositories(auth, selections, old.taskContextRepo, old.receiptRepo, old.threadInputRepo)
 	replacement.setAPI(api)
 	replacement.me = api.me
+	replacement.SetConfigurationID("generation")
 	replacement.running = true
 	replacement.connected = true
 	err = replacement.pollOnce(ctx)
-	require.Error(t, err)
+	require.ErrorIs(t, err, errXReceiptActive)
 	replacement.recordPollResult(err)
 	cursor, err := settings.Get(ctx, XSettingSinceID)
 	require.NoError(t, err)
 	require.Empty(t, cursor)
 	require.True(t, replacement.Status().Connected)
 	require.Empty(t, replacement.Status().LastError)
+
+	// An active receipt is retryable only for the same configuration generation.
+	require.NoError(t, settings.Set(ctx, XSettingConfigurationID, "replacement-generation"))
+	err = replacement.pollOnce(ctx)
+	require.ErrorContains(t, err, "configuration changed")
+	cursor, err = settings.Get(ctx, XSettingSinceID)
+	require.NoError(t, err)
+	require.Empty(t, cursor)
 }
 
 func TestXRuntimeOwnsOnlyIdentitySensitiveOverrides(t *testing.T) {
@@ -516,9 +1145,20 @@ func TestXOutboundUsesWeightedPostLimit(t *testing.T) {
 	}{
 		{name: "ascii at limit", text: strings.Repeat("x", 280), shouldPost: true},
 		{name: "emoji at weighted limit", text: strings.Repeat("😀", 140), shouldPost: true},
+		{name: "family emoji entities at weighted limit", text: strings.Repeat("👨‍⚕️", 140), shouldPost: true},
+		{name: "flag emoji entities at weighted limit", text: strings.Repeat("🇺🇸", 140), shouldPost: true},
+		{name: "keycap emoji entities at weighted limit", text: strings.Repeat("1️⃣", 140), shouldPost: true},
 		{name: "emoji over limit", text: strings.Repeat("😀", 141), shouldPost: false},
 		{name: "CJK over limit", text: strings.Repeat("界", 141), shouldPost: false},
 		{name: "URL over limit despite rune count", text: strings.Repeat("x", 258) + " https://example.com", shouldPost: false},
+		{name: "URL followed by CJK path text", text: strings.Repeat("x", 255) + " https://example.com/界", shouldPost: false},
+		{name: "URL followed immediately by CJK text", text: strings.Repeat("x", 255) + " https://example.com界", shouldPost: false},
+		{name: "URL query is a fixed-length entity", text: strings.Repeat("x", 257) + " https://x.co?x=y", shouldPost: false},
+		{name: "URL fragment is ordinary text", text: strings.Repeat("x", 256) + " https://x.co#fragment", shouldPost: false},
+		{name: "trailing URL punctuation is ordinary text", text: strings.Repeat("x", 256) + " https://x.co.", shouldPost: false},
+		{name: "malformed URL-shaped text remains ordinary text", text: strings.Repeat("x", 258) + " https://not-a-url", shouldPost: true},
+		{name: "pseudo-TLD is not a URL entity", text: strings.Repeat("x", 258) + " example.invalid", shouldPost: true},
+		{name: "embedded email is not a URL entity", text: strings.Repeat("x", 258) + " hello@example.com", shouldPost: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -544,8 +1184,98 @@ func TestXReplyTruncatesToWeightedPostLimit(t *testing.T) {
 	require.Equal(t, []string{"tweet|" + strings.Repeat("😀", 139) + "…"}, api.posted)
 
 	api.posted = nil
+	svc.SendReply(ctx, "tweet", strings.Repeat("界", 141), "")
+	require.Equal(t, []string{"tweet|" + strings.Repeat("界", 139) + "…"}, api.posted)
+
+	api.posted = nil
 	svc.SendReply(ctx, "tweet", strings.Repeat("x", 281), "")
 	require.Equal(t, []string{"tweet|" + strings.Repeat("x", 278) + "…"}, api.posted)
+}
+
+func TestXWeightedLengthConformanceRegressions(t *testing.T) {
+	ctx, svc, _, _, _, _, _ := setupXServiceTest(t)
+	api := &fakeXAPI{}
+	svc.setAPI(api)
+
+	directCases := []struct {
+		name       string
+		text       string
+		shouldPost bool
+	}{
+		{name: "text presentation variation selector", text: strings.Repeat("✈︎", 94), shouldPost: false},
+		{name: "unsupported arbitrary ZWJ sequence", text: strings.Repeat("😀\u200d😀", 57), shouldPost: false},
+		{name: "NFC equivalent decomposed text", text: strings.Repeat("e\u0301", 141), shouldPost: true},
+		{name: "valid bare IDN URL", text: strings.Repeat("x", 258) + " example.рф", shouldPost: false},
+	}
+	for _, tt := range directCases {
+		t.Run(tt.name, func(t *testing.T) {
+			api.posted = nil
+			result := svc.SendOutboundMessage(ctx, "me", "", tt.text)
+			if tt.shouldPost {
+				require.True(t, result.OK)
+				require.Equal(t, []string{"|" + tt.text}, api.posted)
+				return
+			}
+			require.False(t, result.OK)
+			require.Empty(t, api.posted)
+		})
+	}
+}
+
+func TestXURLRangesFollowTwitterTextEntityBoundaries(t *testing.T) {
+	tests := []struct {
+		name     string
+		text     string
+		expected []string
+	}{
+		{name: "internationalized domain", text: "example.рф", expected: []string{"example.рф"}},
+		{name: "uppercase path and query", text: "HTTPS://EXAMPLE.COM/Path?X=Y", expected: []string{"HTTPS://EXAMPLE.COM/Path?X=Y"}},
+		{name: "balanced path punctuation", text: "https://example.com/(foo).", expected: []string{"https://example.com/(foo)"}},
+		{name: "slash before unsupported Unicode path", text: "https://example.com/界", expected: []string{"https://example.com/"}},
+		{name: "fragment after authority", text: "https://example.com#fragment", expected: []string{"https://example.com"}},
+		{name: "trailing punctuation", text: "https://example.com/path).", expected: []string{"https://example.com/path"}},
+		{name: "email address", text: "hello@example.com", expected: []string{}},
+		{name: "pseudo-TLD", text: "example.invalid", expected: []string{}},
+		{name: "URL after slash", text: "foo/example.com", expected: []string{}},
+		{name: "URL after hyphen", text: "-example.com", expected: []string{}},
+		{name: "malformed protocol URL", text: "https://not-a-url", expected: []string{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := make([]string, 0, len(tt.expected))
+			for _, url := range xURLRanges(tt.text) {
+				got = append(got, tt.text[url.start:url.end])
+			}
+			require.Equal(t, tt.expected, got)
+		})
+	}
+}
+
+func TestXReplyConformanceTruncatesEntitiesWithoutProviderRejection(t *testing.T) {
+	ctx, svc, _, _, _, _, _ := setupXServiceTest(t)
+	api := &fakeXAPI{}
+	svc.setAPI(api)
+
+	tests := []struct {
+		name     string
+		text     string
+		expected string
+	}{
+		{name: "text presentation variation selector", text: strings.Repeat("✈︎", 94), expected: strings.Repeat("✈︎", 69) + "…"},
+		{name: "unsupported arbitrary ZWJ sequence", text: strings.Repeat("😀\u200d😀", 57), expected: strings.Repeat("😀\u200d😀", 55) + "…"},
+		{name: "CJK text", text: strings.Repeat("界", 141), expected: strings.Repeat("界", 139) + "…"},
+		{name: "URL entity", text: strings.Repeat("x", 258) + " example.рф", expected: strings.Repeat("x", 258) + " …"},
+		{name: "URL followed by CJK text", text: strings.Repeat("x", 255) + " https://example.com/界", expected: strings.Repeat("x", 255) + " …"},
+		{name: "decomposed text preserves original prefix boundary", text: strings.Repeat("e\u0301", 281), expected: strings.Repeat("e\u0301", 278) + "…"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			api.posted = nil
+			svc.SendReply(ctx, "tweet", tt.text, "")
+			require.Equal(t, []string{"tweet|" + tt.expected}, api.posted)
+			require.LessOrEqual(t, xWeightedPostLength(tt.expected), xMaxWeightedPostLength)
+		})
+	}
 }
 
 func TestXReplyDisabledOrEmptyDoesNotPost(t *testing.T) {

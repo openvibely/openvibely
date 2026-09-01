@@ -5,12 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"regexp"
 	"sort"
 	"strings"
 	"sync"
 	"time"
-	"unicode"
 	"unicode/utf8"
 
 	"github.com/openvibely/openvibely/internal/applog"
@@ -20,6 +18,8 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/util"
+	"github.com/rivo/uniseg"
+	"golang.org/x/text/unicode/norm"
 )
 
 const (
@@ -297,6 +297,12 @@ func (s *XService) requireConfigurationWithExecutor(ctx context.Context, exec re
 }
 
 func (s *XService) pollOnce(ctx context.Context) error {
+	return s.pollOnceWithMentionConfigurationCheck(ctx, false)
+}
+
+// pollOnceWithMentionConfigurationCheck shares the complete polling path between
+// normal polling and the historical per-mention-check benchmark comparison.
+func (s *XService) pollOnceWithMentionConfigurationCheck(ctx context.Context, checkEachMention bool) error {
 	if s.receiptRepo == nil || s.authRepo == nil || s.projectRepo == nil {
 		return fmt.Errorf("X channel persistence is not configured")
 	}
@@ -304,6 +310,8 @@ func (s *XService) pollOnce(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// Keep one coherent settings snapshot for the provider batch. Durable handoffs
+	// and the final cursor compare-and-set revalidate configuration in transactions.
 	sinceID := pollingSettings[XSettingSinceID]
 	pagination := ""
 	newest := ""
@@ -337,8 +345,10 @@ func (s *XService) pollOnce(ctx context.Context) error {
 		if tweet.AuthorID == s.me.ID {
 			continue
 		}
-		if _, err := s.pollingSettings(ctx); err != nil {
-			return err
+		if checkEachMention {
+			if _, err := s.pollingSettings(ctx); err != nil {
+				return err
+			}
 		}
 		user := users[tweet.AuthorID]
 		// The immutable tweet author_id is the authorization identity. Expanded
@@ -468,7 +478,11 @@ func (s *XService) processMention(ctx context.Context, tweet XTweet, user XUser)
 		}
 		return err == nil, err
 	}
-	handed, _ := s.ingestMention(ctx, projectID, tweet, user, text, claim.Token)
+	handed, _, ingestErr := s.ingestMention(ctx, projectID, tweet, user, text, claim.Token)
+	if ingestErr != nil {
+		_ = s.receiptRepo.Release(context.Background(), tweet.ID, claim.Token)
+		return false, ingestErr
+	}
 	if !handed {
 		_ = s.receiptRepo.Release(context.Background(), tweet.ID, claim.Token)
 		return false, nil
@@ -489,32 +503,20 @@ func (s *XService) projectForUser(ctx context.Context, userID string) (string, e
 			}
 		}
 	}
-	projects, err := s.projectRepo.List(ctx)
-	if err != nil {
-		return "", err
-	}
-	for _, p := range projects {
-		ok, err := s.authRepo.IsAuthorized(ctx, p.ID, userID)
-		if err != nil {
-			return "", err
-		}
-		if ok {
-			return p.ID, nil
-		}
-	}
-	return "", nil
+	return s.authRepo.FirstAuthorizedProject(ctx, userID)
 }
-func (s *XService) ingestMention(ctx context.Context, projectID string, tweet XTweet, user XUser, text, receiptToken string) (bool, string) {
+func (s *XService) ingestMention(ctx context.Context, projectID string, tweet XTweet, user XUser, text, receiptToken string) (bool, string, error) {
 	ctx, cancel := context.WithTimeout(ctx, xProcessTimeout)
 	defer cancel()
 	handed := false
 	taskID := ""
+	var handoffErr error
 	conversationID := tweet.ConversationID
 	if conversationID == "" {
 		conversationID = tweet.ID
 	}
 	completeWithHandoff := func(ctx context.Context, taskID *string, persist func(repository.SQLExecutor) error) (bool, error) {
-		return s.receiptRepo.CompleteWithHandoff(ctx, tweet.ID, receiptToken, taskID, func(exec repository.SQLExecutor) error {
+		alreadyHandedOff, err := s.receiptRepo.CompleteWithHandoff(ctx, tweet.ID, receiptToken, taskID, func(exec repository.SQLExecutor) error {
 			if err := s.requireConfigurationWithExecutor(ctx, exec); err != nil {
 				return err
 			}
@@ -523,6 +525,10 @@ func (s *XService) ingestMention(ctx context.Context, projectID string, tweet XT
 			}
 			return nil
 		})
+		if err != nil {
+			handoffErr = err
+		}
+		return alreadyHandedOff, err
 	}
 	runChannelChatIngress(ctx, channelChatIngressOptions{
 		Platform: "x", ProjectID: projectID, Message: text, Source: models.TaskOriginX, Surface: chatcontrol.SurfaceX, Start: s.now(),
@@ -570,7 +576,10 @@ func (s *XService) ingestMention(ctx context.Context, projectID string, tweet XT
 			FilterChatHistory: filterXChatHistory,
 		},
 	})
-	return handed, taskID
+	if handoffErr != nil {
+		return handed, taskID, handoffErr
+	}
+	return handed, taskID, nil
 }
 func filterXChatHistory(execs []models.Execution, current string) []models.Execution {
 	out := make([]models.Execution, 0, len(execs))
@@ -730,82 +739,133 @@ func (s *XService) SendChatResponse(ctx context.Context, task models.Task, outpu
 	s.SendReplyForAccount(ctx, meta.AccountID, meta.ReplyToTweetID, output, errMsg)
 }
 
-var xURLPattern = regexp.MustCompile(`(?i)(https?://|www\.)[^\s<>"']+|([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}(:[0-9]+)?([/?#][^\s<>"']*)?`)
-
-// xWeightedPostLength follows the current twitter-text v3 configuration:
-// https://github.com/twitter/twitter-text/blob/master/config/v3.json
-func xWeightedPostLength(text string) int {
-	urls := xURLPattern.FindAllStringIndex(text, -1)
-	weighted := 0
-	offset := 0
-	for _, match := range urls {
-		start, end := match[0], trimXURL(text, match[0], match[1])
-		if start < offset || end <= start || !isXURLStart(text, start) {
-			continue
-		}
-		weighted += xWeightedCharacters(text[offset:start])
-		weighted += xTransformedURLLength
-		offset = end
-	}
-	return weighted + xWeightedCharacters(text[offset:])
+type xTextRange struct {
+	start int
+	end   int
 }
 
-func isXURLStart(text string, start int) bool {
+func xURLRanges(text string) []xTextRange {
+	matches := xURLPattern.FindAllStringSubmatchIndex(text, -1)
+	ranges := make([]xTextRange, 0, len(matches))
+	for _, match := range matches {
+		if len(match) < 4 {
+			continue
+		}
+		start, end := match[2], match[3]
+		if start < 0 || end <= start {
+			continue
+		}
+		candidate := text[start:end]
+		if !xURLHasProtocol(candidate) && !isXURLWithoutProtocolStart(text, start) {
+			continue
+		}
+		if end < len(text) && xURLDomainEndBlocked(text[end:]) {
+			continue
+		}
+		end = xURLSuffixEnd(text, end)
+		ranges = append(ranges, xTextRange{start: start, end: end})
+	}
+	return ranges
+}
+
+func xURLHasProtocol(candidate string) bool {
+	lower := strings.ToLower(candidate)
+	return strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://")
+}
+
+func isXURLWithoutProtocolStart(text string, start int) bool {
 	if start == 0 {
 		return true
 	}
 	previous, _ := utf8.DecodeLastRuneInString(text[:start])
-	if unicode.IsLetter(previous) || unicode.IsDigit(previous) {
-		return false
-	}
-	switch previous {
-	case '_', '@', '＠', '$', '#', '＃':
-		return false
-	default:
+	return !strings.ContainsRune("-_./", previous)
+}
+
+func xURLDomainEndBlocked(text string) bool {
+	r, _ := utf8.DecodeRuneInString(text)
+	switch {
+	case r >= 'A' && r <= 'Z', r >= 'a' && r <= 'z', r >= '0' && r <= '9':
 		return true
+	case r == '@' || r == '+' || r == '-':
+		return true
+	default:
+		return false
 	}
 }
 
-func trimXURL(text string, start, end int) int {
-	for end > start {
-		r, size := utf8.DecodeLastRuneInString(text[start:end])
-		switch r {
-		case '.', ',', '!', '?', ':', ';':
-			end -= size
-			continue
-		case ')':
-			if strings.Count(text[start:end], ")") > strings.Count(text[start:end], "(") {
-				end -= size
-				continue
-			}
-		case ']':
-			if strings.Count(text[start:end], "]") > strings.Count(text[start:end], "[") {
-				end -= size
-				continue
-			}
-		case '}':
-			if strings.Count(text[start:end], "}") > strings.Count(text[start:end], "{") {
-				end -= size
-				continue
-			}
+func xURLSuffixEnd(text string, baseEnd int) int {
+	end := baseEnd
+	if end < len(text) && text[end] == ':' {
+		offset := end + 1
+		for offset < len(text) && text[offset] >= '0' && text[offset] <= '9' {
+			offset++
 		}
-		break
+		if offset > end+1 {
+			end = offset
+		}
+	}
+	if end < len(text) && text[end] == '/' {
+		end++
+		if path := xURLPathPattern.FindStringIndex(text[end:]); path != nil {
+			end += path[1]
+		}
+	}
+	if end < len(text) && text[end] == '?' {
+		if query := xURLQueryPattern.FindStringIndex(text[end:]); query != nil {
+			end += query[1]
+		}
 	}
 	return end
 }
 
-func xWeightedCharacters(text string) int {
+// xWeightedPostLength follows the current twitter-text v3 configuration:
+// https://github.com/twitter/twitter-text/blob/master/config/v3.json
+func xWeightedPostLength(text string) int {
+	text = norm.NFC.String(text)
+	urls := xURLRanges(text)
 	weighted := 0
-	for offset := 0; offset < len(text); {
-		if end := xEmojiSequenceEnd(text, offset); end > offset {
-			weighted += xDefaultCharacterWeight
-			offset = end
+	offset := 0
+	for _, url := range urls {
+		if url.start < offset {
 			continue
 		}
-		r, size := utf8.DecodeRuneInString(text[offset:])
-		if size == 0 {
-			break
+		weighted += xWeightedCharacters(text[offset:url.start])
+		weighted += xTransformedURLLength
+		offset = url.end
+	}
+	return weighted + xWeightedCharacters(text[offset:])
+}
+
+func xEmojiRanges(text string) []xTextRange {
+	matches := xEmojiPattern.FindAllStringIndex(text, -1)
+	ranges := make([]xTextRange, 0, len(matches))
+	for _, match := range matches {
+		if len(match) == 2 && match[1] > match[0] {
+			ranges = append(ranges, xTextRange{start: match[0], end: match[1]})
 		}
+	}
+	return ranges
+}
+
+func xWeightedCharacters(text string) int {
+	emojis := xEmojiRanges(text)
+	weighted := 0
+	offset := 0
+	for _, emoji := range emojis {
+		if emoji.start < offset {
+			continue
+		}
+		weighted += xWeightedCharactersPlain(text[offset:emoji.start])
+		weighted += xDefaultCharacterWeight
+		offset = emoji.end
+	}
+	return weighted + xWeightedCharactersPlain(text[offset:])
+}
+
+func xWeightedCharactersPlain(text string) int {
+	weighted := 0
+	for offset := 0; offset < len(text); {
+		r, size := utf8.DecodeRuneInString(text[offset:])
 		weighted += xCharacterWeight(r)
 		offset += size
 	}
@@ -824,119 +884,49 @@ func xCharacterWeight(r rune) int {
 	return xDefaultCharacterWeight
 }
 
-func xEmojiSequenceEnd(text string, start int) int {
-	r, size := utf8.DecodeRuneInString(text[start:])
-	if size == 0 {
-		return 0
-	}
-	if isXRegionalIndicator(r) {
-		end := start + size
-		next, nextSize := utf8.DecodeRuneInString(text[end:])
-		if isXRegionalIndicator(next) {
-			end += nextSize
-		}
-		return end
-	}
-	if isXKeycapBase(r) {
-		end := consumeXEmojiModifiers(text, start+size)
-		next, nextSize := utf8.DecodeRuneInString(text[end:])
-		if next == '\u20e3' {
-			return end + nextSize
-		}
-		return 0
-	}
-	end := xEmojiBaseEnd(text, start)
-	if end == 0 {
-		return 0
-	}
-	for end < len(text) {
-		joiner, joinerSize := utf8.DecodeRuneInString(text[end:])
-		if joiner != '\u200d' {
-			break
-		}
-		nextEnd := xEmojiBaseEnd(text, end+joinerSize)
-		if nextEnd == 0 {
-			break
-		}
-		end = nextEnd
-	}
-	return end
-}
-
-func xEmojiBaseEnd(text string, start int) int {
-	r, size := utf8.DecodeRuneInString(text[start:])
-	if !isXEmojiBase(r) {
-		return 0
-	}
-	return consumeXEmojiModifiers(text, start+size)
-}
-
-func consumeXEmojiModifiers(text string, start int) int {
-	for start < len(text) {
-		r, size := utf8.DecodeRuneInString(text[start:])
-		if r != '\ufe0e' && r != '\ufe0f' && !isXEmojiModifier(r) && !(r >= 0xe0020 && r <= 0xe007f) {
-			break
-		}
-		start += size
-	}
-	return start
-}
-
-func isXEmojiBase(r rune) bool {
-	switch {
-	case r >= 0x1f000 && r <= 0x1faff:
-	case r >= 0x2600 && r <= 0x27bf:
-	case r == 0x00a9 || r == 0x00ae || r == 0x203c || r == 0x2049:
-	case r == 0x2122 || r == 0x2139:
-	case r >= 0x2194 && r <= 0x2199:
-	case r == 0x21a9 || r == 0x21aa:
-	case r >= 0x231a && r <= 0x231b:
-	case r == 0x2328 || r == 0x23cf:
-	case r >= 0x23e9 && r <= 0x23f3:
-	case r >= 0x23f8 && r <= 0x23fa:
-	case r == 0x24c2:
-	case r >= 0x25aa && r <= 0x25ab:
-	case r == 0x25b6 || r == 0x25c0:
-	case r >= 0x25fb && r <= 0x25fe:
-	case r >= 0x2934 && r <= 0x2935:
-	case r >= 0x2b05 && r <= 0x2b07:
-	case r == 0x2b1b || r == 0x2b1c || r == 0x2b50 || r == 0x2b55:
-	case r == 0x3030 || r == 0x303d || r == 0x3297 || r == 0x3299:
-	default:
-		return false
-	}
-	return true
-}
-
-func isXEmojiModifier(r rune) bool {
-	return r >= 0x1f3fb && r <= 0x1f3ff
-}
-
-func isXRegionalIndicator(r rune) bool {
-	return r >= 0x1f1e6 && r <= 0x1f1ff
-}
-
-func isXKeycapBase(r rune) bool {
-	return r == '#' || r == '*' || r >= '0' && r <= '9'
+func xTextEntityRanges(text string) []xTextRange {
+	ranges := append(xURLRanges(text), xEmojiRanges(text)...)
+	sort.Slice(ranges, func(i, j int) bool {
+		return ranges[i].start < ranges[j].start
+	})
+	return ranges
 }
 
 func truncateXPost(v string) string {
 	text := strings.TrimSpace(v)
-	if xWeightedPostLength(text) <= xMaxWeightedPostLength {
+	normalized := norm.NFC.String(text)
+	if xWeightedPostLength(normalized) <= xMaxWeightedPostLength {
 		return text
 	}
 
-	end := 0
-	for end < len(text) {
-		_, size := utf8.DecodeRuneInString(text[end:])
-		next := end + size
-		if emojiEnd := xEmojiSequenceEnd(text, end); emojiEnd > end {
-			next = emojiEnd
+	entities := xTextEntityRanges(normalized)
+	entityIndex := 0
+	originalEnd := 0
+	normalizedEnd := 0
+	graphemes := uniseg.NewGraphemes(text)
+	for graphemes.Next() {
+		_, nextOriginalEnd := graphemes.Positions()
+		nextNormalizedEnd := len(norm.NFC.String(text[:nextOriginalEnd]))
+		for entityIndex < len(entities) && entities[entityIndex].end <= normalizedEnd {
+			entityIndex++
 		}
-		if xWeightedPostLength(text[:next]+"…") > xMaxWeightedPostLength {
+
+		candidateOriginalEnd := nextOriginalEnd
+		candidateNormalizedEnd := nextNormalizedEnd
+		if entityIndex < len(entities) && entities[entityIndex].start >= normalizedEnd && entities[entityIndex].start < nextNormalizedEnd {
+			entityEnd := entities[entityIndex].end
+			for candidateNormalizedEnd < entityEnd && graphemes.Next() {
+				_, candidateOriginalEnd = graphemes.Positions()
+				candidateNormalizedEnd = len(norm.NFC.String(text[:candidateOriginalEnd]))
+			}
+			entityIndex++
+		}
+
+		if xWeightedPostLength(text[:candidateOriginalEnd]+"…") > xMaxWeightedPostLength {
 			break
 		}
-		end = next
+		originalEnd = candidateOriginalEnd
+		normalizedEnd = candidateNormalizedEnd
 	}
-	return text[:end] + "…"
+	return text[:originalEnd] + "…"
 }
