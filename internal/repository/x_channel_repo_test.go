@@ -2,7 +2,9 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -108,4 +110,49 @@ func TestThreadInputRepoPreservesXReplyMetadataAndPromotesContextAtomically(t *t
 	require.Equal(t, "tweet", meta.ReplyToTweetID)
 	require.Equal(t, "bot-account", meta.AccountID)
 	require.Equal(t, p.ID, meta.ProjectID)
+}
+
+func TestXAuthRepoFirstAuthorizedProjectUsesUserKeyedIndexAndOrdering(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projects := NewProjectRepo(db)
+
+	defaultProject := &models.Project{Name: "Zulu"}
+	nameOrderedProject := &models.Project{Name: "Alpha"}
+	otherProject := &models.Project{Name: "Bravo"}
+	for _, project := range []*models.Project{defaultProject, nameOrderedProject, otherProject} {
+		require.NoError(t, projects.Create(ctx, project))
+	}
+	_, err := db.ExecContext(ctx, `UPDATE projects SET is_default = 1 WHERE id = ?`, defaultProject.ID)
+	require.NoError(t, err)
+
+	auth := NewXAuthRepo(db)
+	for _, project := range []*models.Project{defaultProject, nameOrderedProject, otherProject} {
+		require.NoError(t, auth.Create(ctx, &models.XAuthorizedUser{ProjectID: project.ID, XUserID: "author"}))
+	}
+
+	plan := explainXAuthorizedProjectQueryPlan(t, db, xAuthorizedProjectQuery, "author")
+	require.Contains(t, plan, "idx_x_authorized_users_user_project")
+	require.NotContains(t, plan, "SCAN projects")
+
+	projectID, err := auth.FirstAuthorizedProject(ctx, "author")
+	require.NoError(t, err)
+	require.Equal(t, defaultProject.ID, projectID)
+}
+
+func explainXAuthorizedProjectQueryPlan(t *testing.T, db *sql.DB, query string, args ...any) string {
+	t.Helper()
+	rows, err := db.QueryContext(context.Background(), "EXPLAIN QUERY PLAN "+query, args...)
+	require.NoError(t, err)
+	defer rows.Close()
+
+	var details []string
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		require.NoError(t, rows.Scan(&id, &parent, &unused, &detail))
+		details = append(details, detail)
+	}
+	require.NoError(t, rows.Err())
+	return strings.Join(details, "\n")
 }
