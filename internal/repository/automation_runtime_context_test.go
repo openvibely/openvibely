@@ -294,6 +294,176 @@ func TestAutomationRuntimeSmallHelpers(t *testing.T) {
 	}
 }
 
+func TestAutomationTaskAdmissionPersistsClaimedAndReservedResults(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	fixture := seedAutomationLiveCountsDefinition(t, db, map[string]string{"trigger": "trigger"})
+	taskRepo := NewTaskRepo(db, nil)
+	task := createRuntimeScheduledTask(t, ctx, taskRepo, fixture.ProjectID, "Shared admission task")
+	if _, err := db.ExecContext(ctx, `UPDATE tasks SET category = 'active' WHERE id = ?`, task.ID); err != nil {
+		t.Fatalf("make task active: %v", err)
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	claim := func(input automationTaskAdmissionInput) automationTaskAdmissionResult {
+		conn, finish, err := beginImmediateConn(ctx, db)
+		if err != nil {
+			t.Fatalf("begin admission transaction: %v", err)
+		}
+		defer finish()
+		result, err := claimAutomationTaskAdmission(ctx, conn, input)
+		if err != nil {
+			t.Fatalf("claim admission: %v", err)
+		}
+		if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+			t.Fatalf("commit admission: %v", err)
+		}
+		return result
+	}
+
+	claimed := claim(automationTaskAdmissionInput{
+		projectID: fixture.ProjectID, automationID: fixture.AutomationID, versionID: fixture.VersionID,
+		triggerNodeID: fixture.Nodes["trigger"], triggerResourceType: "manual", triggerResourceID: "schedule-1",
+		occurrenceKey: "manual:shared-admission", adapterKey: "native_sdlc", taskID: task.ID,
+		taskStatus: models.StatusPending, taskCategory: models.CategoryActive, now: now,
+	})
+	if claimed.invocation.Status != models.AutomationInvocationClaimed || claimed.invocation.TriggerResourceType != "manual" || claimed.invocation.ScheduledFor != nil {
+		t.Fatalf("claimed invocation = %#v", claimed.invocation)
+	}
+	if claimed.dispatch == nil || claimed.dispatch.TaskID != task.ID || claimed.effectiveCategory != models.CategoryActive || claimed.skippedReason != "" {
+		t.Fatalf("claimed admission = %#v", claimed)
+	}
+
+	var taskStatus, taskCategory string
+	var completedAt sql.NullTime
+	if err := db.QueryRowContext(ctx, `SELECT status, category, completed_at FROM tasks WHERE id = ?`, task.ID).
+		Scan(&taskStatus, &taskCategory, &completedAt); err != nil {
+		t.Fatalf("load claimed task: %v", err)
+	}
+	if taskStatus != string(models.StatusPending) || taskCategory != string(models.CategoryActive) || completedAt.Valid {
+		t.Fatalf("claimed task status=%q category=%q completed_at=%v", taskStatus, taskCategory, completedAt)
+	}
+	var invocations, dispatches, reservations int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_invocations`).Scan(&invocations); err != nil {
+		t.Fatalf("count claimed invocations: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_dispatch_outbox`).Scan(&dispatches); err != nil {
+		t.Fatalf("count claimed dispatches: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_task_run_reservations`).Scan(&reservations); err != nil {
+		t.Fatalf("count claimed reservations: %v", err)
+	}
+	if invocations != 1 || dispatches != 1 || reservations != 1 {
+		t.Fatalf("claimed rows invocations=%d dispatches=%d reservations=%d", invocations, dispatches, reservations)
+	}
+
+	due := now.Add(-time.Minute)
+	skipped := claim(automationTaskAdmissionInput{
+		projectID: fixture.ProjectID, automationID: fixture.AutomationID, versionID: fixture.VersionID,
+		triggerNodeID: fixture.Nodes["trigger"], triggerResourceType: "schedule", triggerResourceID: "schedule-1",
+		occurrenceKey: "schedule:schedule-1:" + due.Format(time.RFC3339Nano), scheduledFor: &due,
+		adapterKey: "native_sdlc", taskID: task.ID, taskStatus: models.StatusPending, taskCategory: models.CategoryActive, now: now,
+	})
+	if skipped.invocation.Status != models.AutomationInvocationSkipped || skipped.invocation.SkippedReason != "task_reserved" || skipped.dispatch != nil {
+		t.Fatalf("reserved admission = %#v", skipped)
+	}
+	if skipped.invocation.ScheduledFor == nil || !skipped.invocation.ScheduledFor.Equal(due) || skipped.invocation.StartedAt == nil || skipped.invocation.CompletedAt == nil {
+		t.Fatalf("reserved invocation timestamps = %#v", skipped.invocation)
+	}
+	if skipped.effectiveCategory != models.CategoryActive {
+		t.Fatalf("reserved effective category = %q, want %q", skipped.effectiveCategory, models.CategoryActive)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_invocations`).Scan(&invocations); err != nil {
+		t.Fatalf("count skipped invocations: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_dispatch_outbox`).Scan(&dispatches); err != nil {
+		t.Fatalf("count skipped dispatches: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_task_run_reservations`).Scan(&reservations); err != nil {
+		t.Fatalf("count skipped reservations: %v", err)
+	}
+	if invocations != 2 || dispatches != 1 || reservations != 1 {
+		t.Fatalf("skipped rows invocations=%d dispatches=%d reservations=%d", invocations, dispatches, reservations)
+	}
+}
+
+func TestAutomationScheduledCustomCategoryValidationPrecedesAdmissionSkip(t *testing.T) {
+	for _, testCase := range []struct {
+		name     string
+		status   models.TaskStatus
+		reserved bool
+	}{
+		{name: "pending", status: models.StatusPending},
+		{name: "queued", status: models.StatusQueued},
+		{name: "running", status: models.StatusRunning},
+		{name: "reserved", status: models.StatusPending, reserved: true},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			db := testutil.NewTestDB(t)
+			ctx := context.Background()
+			fixture := seedAutomationLiveCountsDefinition(t, db, map[string]string{"trigger": "trigger"})
+			repo := NewAutomationRepo(db)
+			task := createRuntimeScheduledTask(t, ctx, NewTaskRepo(db, nil), fixture.ProjectID, "Invalid custom category")
+			if _, err := db.ExecContext(ctx, `UPDATE tasks SET status = ?, category = 'active' WHERE id = ?`, testCase.status, task.ID); err != nil {
+				t.Fatalf("set invalid custom task state: %v", err)
+			}
+			due := time.Now().UTC().Add(-time.Minute).Truncate(time.Second)
+			schedule := createRuntimeAutomationSchedule(t, ctx, db, fixture, task.ID, fixture.Nodes["trigger"], due)
+			if testCase.reserved {
+				if _, err := db.ExecContext(ctx, `INSERT INTO automation_invocations
+					(id, project_id, automation_id, version_id, trigger_node_id, trigger_resource_type, trigger_resource_id,
+					 occurrence_key, scheduled_for, status)
+					VALUES ('custom-category-existing-invocation', ?, ?, ?, ?, 'schedule', ?, 'custom-category-existing', ?, 'claimed')`,
+					fixture.ProjectID, fixture.AutomationID, fixture.VersionID, fixture.Nodes["trigger"], schedule.ID, due); err != nil {
+					t.Fatalf("insert existing invocation: %v", err)
+				}
+				if _, err := db.ExecContext(ctx, `INSERT INTO automation_dispatch_outbox (id, invocation_id, task_id)
+					VALUES ('custom-category-existing-dispatch', 'custom-category-existing-invocation', ?)`, task.ID); err != nil {
+					t.Fatalf("insert existing dispatch: %v", err)
+				}
+				if _, err := db.ExecContext(ctx, `INSERT INTO automation_task_run_reservations (task_id, dispatch_id, project_id)
+					VALUES (?, 'custom-category-existing-dispatch', ?)`, task.ID, fixture.ProjectID); err != nil {
+					t.Fatalf("insert existing reservation: %v", err)
+				}
+			}
+
+			now := due.Add(time.Minute)
+			nextRun := now.Add(time.Hour)
+			invocation, dispatch, err := repo.ClaimScheduledOccurrence(ctx, schedule, now, &nextRun)
+			if !errors.Is(err, ErrAutomationScheduleChanged) {
+				t.Fatalf("ClaimScheduledOccurrence error = %v, want %v", err, ErrAutomationScheduleChanged)
+			}
+			if invocation != nil || dispatch != nil {
+				t.Fatalf("ClaimScheduledOccurrence result invocation=%#v dispatch=%#v, want nil results", invocation, dispatch)
+			}
+
+			stored, err := NewScheduleRepo(db).GetByID(ctx, schedule.ID)
+			if err != nil {
+				t.Fatalf("reload schedule: %v", err)
+			}
+			if stored.NextRun == nil || !stored.NextRun.Equal(due) {
+				t.Fatalf("schedule next_run = %v, want unchanged due %v", stored.NextRun, due)
+			}
+			var invocationCount, dispatchCount, reservationCount int
+			if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_invocations`).Scan(&invocationCount); err != nil {
+				t.Fatalf("count invocations: %v", err)
+			}
+			if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_dispatch_outbox`).Scan(&dispatchCount); err != nil {
+				t.Fatalf("count dispatches: %v", err)
+			}
+			if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_task_run_reservations`).Scan(&reservationCount); err != nil {
+				t.Fatalf("count reservations: %v", err)
+			}
+			wantExisting := 0
+			if testCase.reserved {
+				wantExisting = 1
+			}
+			if invocationCount != wantExisting || dispatchCount != wantExisting || reservationCount != wantExisting {
+				t.Fatalf("persisted rows invocations=%d dispatches=%d reservations=%d, want each %d", invocationCount, dispatchCount, reservationCount, wantExisting)
+			}
+		})
+	}
+}
+
 func TestAutomationRepoScheduledDispatchLifecycle(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
