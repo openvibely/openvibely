@@ -47,15 +47,29 @@ func parseScheduleForm(c echo.Context, defaultRepeatType models.RepeatType) (sch
 	if err != nil {
 		return scheduleFormValues{}, err
 	}
-	repeatType := models.RepeatType(c.FormValue("repeat_type"))
+	repeatType := models.RepeatType(strings.ToLower(strings.TrimSpace(c.FormValue("repeat_type"))))
 	if repeatType == "" {
 		repeatType = defaultRepeatType
+	}
+	switch repeatType {
+	case models.RepeatOnce, models.RepeatSeconds, models.RepeatMinutes, models.RepeatHours,
+		models.RepeatDaily, models.RepeatWeekly, models.RepeatMonthly:
+	default:
+		return scheduleFormValues{}, echo.NewHTTPError(http.StatusBadRequest, "invalid repeat type")
 	}
 	return scheduleFormValues{
 		runAt:          runAt.UTC(),
 		repeatType:     repeatType,
 		repeatInterval: repeatInterval,
 	}, nil
+}
+
+func scheduleFormHTTPError(err error) error {
+	var parseErr *time.ParseError
+	if errors.As(err, &parseErr) {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid date/time format")
+	}
+	return err
 }
 
 func (h *Handler) mutationProjectID(c echo.Context) string {
@@ -169,9 +183,8 @@ func (h *Handler) CreateSchedule(c echo.Context) error {
 	if err != nil {
 		if _, ok := err.(*time.ParseError); ok {
 			applog.Infof("[handler] CreateSchedule invalid date: %v", err)
-			return echo.NewHTTPError(http.StatusBadRequest, "invalid date/time format")
 		}
-		return err
+		return scheduleFormHTTPError(err)
 	}
 
 	clearContextOnStart := formBoolEnabled(c, "clear_context_on_start", true)
@@ -236,9 +249,8 @@ func (h *Handler) UpdateSchedule(c echo.Context) error {
 	if err != nil {
 		if _, ok := err.(*time.ParseError); ok {
 			applog.Infof("[handler] UpdateSchedule invalid date: %v", err)
-			return echo.NewHTTPError(http.StatusBadRequest, "invalid date/time format")
 		}
-		return err
+		return scheduleFormHTTPError(err)
 	}
 
 	var clearContextOnStart *bool
