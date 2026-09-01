@@ -134,6 +134,50 @@ func TestSaveCurrentGraphReconcilesDeletedOwnedResourcesAndRejectsForeignReferen
 	require.Equal(t, 1, automationGraphCountRows(t, db, `SELECT COUNT(*) FROM tasks WHERE project_id = ? AND created_via = ?`, project.ID, AutomationCompilerTaskCreatedVia(automationID, "trigger")))
 }
 
+func TestSaveCurrentGraphRejectsOwnedScheduleRetargeting(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	project := automationGraphTestProject(t, db, "Owned schedule retargeting")
+	repo := NewAutomationRepo(db)
+	taskRepo := NewTaskRepo(db, nil)
+	ctx := context.Background()
+	automationID := NewID()
+	candidate := models.AutomationDraftCandidate{
+		SchemaVersion: 1, Name: "Owned schedule retargeting", Description: "reject a repointed schedule", AutomationType: "custom", AdapterKey: "custom",
+		Nodes: []models.AutomationDraftNode{{Key: "trigger", Name: "Trigger", Type: models.AutomationNodeTrigger, Role: "fixed_schedule",
+			Config:   map[string]any{"prompt": "Run the retained trigger.", "category": "active", "priority": 2, "run_at": "09:00", "repeat_type": "daily", "repeat_interval": 1, "enabled": true},
+			Position: &models.AutomationDraftPoint{X: 12, Y: 24}}},
+	}
+	first, _, err := repo.SaveCurrentGraph(ctx, AutomationSaveWrite{
+		ProjectID: project.ID, AutomationID: automationID, GraphID: NewID(), Candidate: candidate,
+		Tasks: []AutomationSaveTask{{NodeKey: "trigger", Title: "Trigger", Prompt: "Run the retained trigger.", Category: models.CategoryActive, Priority: 2}},
+		Schedules: []AutomationSaveSchedule{{NodeKey: "trigger", TaskNodeKey: "trigger", RunAt: time.Date(2026, 8, 31, 9, 0, 0, 0, time.UTC), RepeatType: models.RepeatDaily,
+			RepeatInterval: 1, Enabled: true, ClearContextOnStart: true}},
+	})
+	require.NoError(t, err)
+	ownedTaskID := automationGraphResourceID(t, first, "trigger", "task")
+	scheduleID := automationGraphResourceID(t, first, "trigger", "schedule")
+
+	otherTask := &models.Task{ProjectID: project.ID, Title: "Unrelated same-project task", Prompt: "must remain unrelated", Category: models.CategoryActive, Priority: 2, Status: models.StatusPending}
+	require.NoError(t, taskRepo.Create(ctx, otherTask))
+	_, err = db.ExecContext(ctx, `UPDATE schedules SET task_id = ? WHERE id = ?`, otherTask.ID, scheduleID)
+	require.NoError(t, err)
+
+	_, _, err = repo.SaveCurrentGraph(ctx, AutomationSaveWrite{
+		ProjectID: project.ID, AutomationID: automationID, GraphID: NewID(), ExpectedCurrentGraphID: first.Version.ID, Candidate: candidate,
+		Tasks: []AutomationSaveTask{{NodeKey: "trigger", ExistingTaskID: ownedTaskID, Title: "Trigger", Prompt: "Run the retained trigger.", Category: models.CategoryActive, Priority: 2}},
+		Schedules: []AutomationSaveSchedule{{NodeKey: "trigger", ExistingScheduleID: scheduleID, TaskNodeKey: "trigger", RunAt: time.Date(2026, 8, 31, 9, 0, 0, 0, time.UTC), RepeatType: models.RepeatDaily,
+			RepeatInterval: 1, Enabled: true, ClearContextOnStart: true}},
+	})
+	require.ErrorContains(t, err, "must target the task bound to that same node")
+
+	current, err := repo.GetDefinition(ctx, project.ID, automationID)
+	require.NoError(t, err)
+	require.Equal(t, first.Version.ID, current.Version.ID, "a repointed schedule must not replace the current graph")
+	var linkedTaskID string
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT task_id FROM schedules WHERE id = ?`, scheduleID).Scan(&linkedTaskID))
+	require.Equal(t, otherTask.ID, linkedTaskID, "a rejected save must not retarget the schedule")
+}
+
 func TestSaveCurrentGraphSkipsStaleGitHubIssueTaskBackfillResources(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	project := automationGraphTestProject(t, db, "Stale GitHub task backfill")

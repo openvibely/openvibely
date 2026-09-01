@@ -63,6 +63,25 @@ type AutomationSaveSchedule struct {
 	PreserveTiming      bool
 }
 
+func currentAutomationResourceRelation(ctx context.Context, q queryer, projectID, automationID, versionID, nodeKey, resourceType, resourceID string) (string, error) {
+	var relation string
+	if err := q.QueryRowContext(ctx, `SELECT resource.relation
+		FROM automation_definition_resources resource
+		JOIN automation_nodes node ON node.id = resource.node_id
+			AND node.version_id = resource.version_id
+			AND node.automation_id = resource.automation_id
+			AND node.project_id = resource.project_id
+		WHERE resource.project_id = ? AND resource.automation_id = ? AND resource.version_id = ?
+		  AND node.node_key = ? AND resource.resource_type = ? AND resource.resource_id = ?`,
+		projectID, automationID, versionID, nodeKey, resourceType, resourceID).Scan(&relation); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", nil
+		}
+		return "", fmt.Errorf("checking current Automation relation for %s node %q: %w", resourceType, nodeKey, err)
+	}
+	return relation, nil
+}
+
 func currentAutomationOwnsResource(ctx context.Context, q queryer, projectID, automationID, versionID, nodeKey, resourceType, resourceID string) (bool, error) {
 	var owned int
 	if err := q.QueryRowContext(ctx, `SELECT EXISTS (
@@ -80,29 +99,32 @@ func currentAutomationOwnsResource(ctx context.Context, q queryer, projectID, au
 	return owned == 1, nil
 }
 
-func reconcileExistingAutomationTask(ctx context.Context, q queryer, in AutomationSaveWrite, write AutomationSaveTask) (string, error) {
-	owned, err := currentAutomationOwnsResource(ctx, q, in.ProjectID, in.AutomationID, in.ExpectedCurrentGraphID,
+func reconcileExistingAutomationTask(ctx context.Context, q queryer, in AutomationSaveWrite, write AutomationSaveTask) (string, string, error) {
+	relation, err := currentAutomationResourceRelation(ctx, q, in.ProjectID, in.AutomationID, in.ExpectedCurrentGraphID,
 		write.NodeKey, "task", write.ExistingTaskID)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	if !owned {
-		return "", fmt.Errorf("task for node %q is not owned by this Automation", write.NodeKey)
+	if relation == "" {
+		return "", "", fmt.Errorf("task for node %q is not owned by this Automation", write.NodeKey)
+	}
+	if relation != "owned" && relation != "shared" {
+		return "", "", fmt.Errorf("task for node %q has unsupported Automation relation %q", write.NodeKey, relation)
 	}
 	var projectID string
 	if err := q.QueryRowContext(ctx, `SELECT project_id FROM tasks WHERE id = ?`, write.ExistingTaskID).Scan(&projectID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return "", nil
+			return "", relation, nil
 		}
-		return "", fmt.Errorf("loading bound task for node %q: %w", write.NodeKey, err)
+		return "", "", fmt.Errorf("loading bound task for node %q: %w", write.NodeKey, err)
 	}
 	if projectID != in.ProjectID {
-		return "", fmt.Errorf("task for node %q belongs to another project", write.NodeKey)
+		return "", "", fmt.Errorf("task for node %q belongs to another project", write.NodeKey)
 	}
-	return write.ExistingTaskID, nil
+	return write.ExistingTaskID, relation, nil
 }
 
-func reconcileExistingAutomationSchedule(ctx context.Context, q queryer, in AutomationSaveWrite, write AutomationSaveSchedule) (string, error) {
+func reconcileExistingAutomationSchedule(ctx context.Context, q queryer, in AutomationSaveWrite, write AutomationSaveSchedule, taskID string) (string, error) {
 	owned, err := currentAutomationOwnsResource(ctx, q, in.ProjectID, in.AutomationID, in.ExpectedCurrentGraphID,
 		write.NodeKey, "schedule", write.ExistingScheduleID)
 	if err != nil {
@@ -122,9 +144,9 @@ func reconcileExistingAutomationSchedule(ctx context.Context, q queryer, in Auto
 		return "", fmt.Errorf("schedule for node %q is not owned by this Automation", write.NodeKey)
 	}
 
-	var scheduleProjectID string
-	scheduleErr := q.QueryRowContext(ctx, `SELECT t.project_id FROM schedules s JOIN tasks t ON t.id = s.task_id WHERE s.id = ?`, write.ExistingScheduleID).
-		Scan(&scheduleProjectID)
+	var scheduleTaskID, scheduleProjectID string
+	scheduleErr := q.QueryRowContext(ctx, `SELECT s.task_id, t.project_id FROM schedules s JOIN tasks t ON t.id = s.task_id WHERE s.id = ?`, write.ExistingScheduleID).
+		Scan(&scheduleTaskID, &scheduleProjectID)
 	if scheduleErr != nil {
 		if !errors.Is(scheduleErr, sql.ErrNoRows) {
 			return "", fmt.Errorf("loading schedule for node %q: %w", write.NodeKey, scheduleErr)
@@ -140,6 +162,9 @@ func reconcileExistingAutomationSchedule(ctx context.Context, q queryer, in Auto
 	}
 	if scheduleProjectID != in.ProjectID {
 		return "", fmt.Errorf("schedule for node %q belongs to another project", write.NodeKey)
+	}
+	if scheduleTaskID != taskID {
+		return "", fmt.Errorf("schedule for node %q must target the task bound to that same node", write.NodeKey)
 	}
 	if ownerErr != nil {
 		return "", fmt.Errorf("schedule for node %q is not owned by this Automation", write.NodeKey)
@@ -267,14 +292,23 @@ func (r *AutomationRepo) SaveCurrentGraph(ctx context.Context, in AutomationSave
 
 	taskRepo := NewTaskRepo(r.db, nil)
 	taskIDs := make(map[string]string, len(in.Tasks))
+	taskRelations := make(map[string]string, len(in.Tasks))
 	for _, write := range in.Tasks {
+		taskRelation := "owned"
 		if write.ExistingTaskID != "" {
-			reconciledTaskID, err := reconcileExistingAutomationTask(ctx, conn, in, write)
+			reconciledTaskID, reconciledRelation, err := reconcileExistingAutomationTask(ctx, conn, in, write)
 			if err != nil {
 				return nil, nil, err
 			}
 			write.ExistingTaskID = reconciledTaskID
+			if reconciledRelation != "" {
+				taskRelation = reconciledRelation
+			}
+			if write.ExistingTaskID == "" && taskRelation == "shared" {
+				return nil, nil, fmt.Errorf("shared task for node %q is unavailable", write.NodeKey)
+			}
 		}
+		taskRelations[write.NodeKey] = taskRelation
 		restoreMaintainedTask := in.ExpectedCurrentGraphID != "" &&
 			(in.Candidate.AdapterKey == "native_sdlc" || in.Candidate.AdapterKey == "github_sdlc")
 		if write.ExistingTaskID == "" && restoreMaintainedTask {
@@ -368,35 +402,47 @@ func (r *AutomationRepo) SaveCurrentGraph(ctx context.Context, in AutomationSave
 				chainConfig = string(encoded)
 			}
 		}
-		query := `UPDATE tasks SET title = ?, prompt = ?, category = ?, priority = ?, agent_id = ?, agent_definition_id = ?, updated_at = CURRENT_TIMESTAMP`
-		args := []any{write.Title, write.Prompt, category, write.Priority, write.AgentID, write.AgentDefinitionID}
-		if write.ApplyTopology {
-			query += `, parent_task_id = ?, chain_config = ?, status = CASE WHEN status IN ('running','queued') THEN status ELSE ? END`
-			args = append(args, parentID, chainConfig, status)
+		taskRelation := taskRelations[write.NodeKey]
+		if taskRelation == "" {
+			taskRelation = "owned"
 		}
-		query += ` WHERE id = ? AND project_id = ?`
-		args = append(args, taskID, in.ProjectID)
-		result, err := conn.ExecContext(ctx, query, args...)
-		if err != nil {
-			if strings.Contains(err.Error(), "UNIQUE constraint failed: tasks.project_id, tasks.title") {
-				return nil, nil, ErrDuplicateTask
+		if taskRelation == "shared" && write.ApplyTopology {
+			return nil, nil, fmt.Errorf("shared task for node %q cannot use custom topology", write.NodeKey)
+		}
+		if taskRelation != "shared" {
+			query := `UPDATE tasks SET title = ?, prompt = ?, category = ?, priority = ?, agent_id = ?, agent_definition_id = ?, updated_at = CURRENT_TIMESTAMP`
+			args := []any{write.Title, write.Prompt, category, write.Priority, write.AgentID, write.AgentDefinitionID}
+			if write.ApplyTopology {
+				query += `, parent_task_id = ?, chain_config = ?, status = CASE WHEN status IN ('running','queued') THEN status ELSE ? END`
+				args = append(args, parentID, chainConfig, status)
 			}
-			return nil, nil, fmt.Errorf("saving task for node %q: %w", write.NodeKey, err)
-		}
-		if affected, _ := result.RowsAffected(); affected != 1 {
-			return nil, nil, fmt.Errorf("task for node %q is unavailable", write.NodeKey)
-		}
-		if strings.TrimSpace(write.Goal) != "" {
-			if err := setTaskGoalWithExecutor(ctx, conn, taskID, write.Goal, "set by Automation configuration"); err != nil {
-				return nil, nil, fmt.Errorf("saving goal for task node %q: %w", write.NodeKey, err)
+			query += ` WHERE id = ? AND project_id = ?`
+			args = append(args, taskID, in.ProjectID)
+			result, err := conn.ExecContext(ctx, query, args...)
+			if err != nil {
+				if strings.Contains(err.Error(), "UNIQUE constraint failed: tasks.project_id, tasks.title") {
+					return nil, nil, ErrDuplicateTask
+				}
+				return nil, nil, fmt.Errorf("saving task for node %q: %w", write.NodeKey, err)
+			}
+			if affected, _ := result.RowsAffected(); affected != 1 {
+				return nil, nil, fmt.Errorf("task for node %q is unavailable", write.NodeKey)
+			}
+			if strings.TrimSpace(write.Goal) != "" {
+				if err := setTaskGoalWithExecutor(ctx, conn, taskID, write.Goal, "set by Automation configuration"); err != nil {
+					return nil, nil, fmt.Errorf("saving goal for task node %q: %w", write.NodeKey, err)
+				}
 			}
 		}
 		if nodeID := nodeIDs[write.NodeKey]; nodeID != "" {
 			if _, err := conn.ExecContext(ctx, `INSERT INTO automation_definition_resources
 				(project_id, automation_id, version_id, node_id, resource_type, resource_id, relation)
-				VALUES (?, ?, ?, ?, 'task', ?, 'owned')`, in.ProjectID, in.AutomationID, in.GraphID, nodeID, taskID); err != nil {
+				VALUES (?, ?, ?, ?, 'task', ?, ?)`, in.ProjectID, in.AutomationID, in.GraphID, nodeID, taskID, taskRelation); err != nil {
 				return nil, nil, err
 			}
+		}
+		if taskRelation == "shared" {
+			continue
 		}
 		var storedCategory models.TaskCategory
 		var storedStatus models.TaskStatus
@@ -420,7 +466,7 @@ func (r *AutomationRepo) SaveCurrentGraph(ctx context.Context, in AutomationSave
 		enabled := automation.LifecycleState == models.AutomationActive && write.Enabled
 		scheduleID := write.ExistingScheduleID
 		if scheduleID != "" {
-			scheduleID, err = reconcileExistingAutomationSchedule(ctx, conn, in, write)
+			scheduleID, err = reconcileExistingAutomationSchedule(ctx, conn, in, write, taskID)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -435,14 +481,24 @@ func (r *AutomationRepo) SaveCurrentGraph(ctx context.Context, in AutomationSave
 			}
 		} else {
 			if write.PreserveTiming {
-				if _, err := conn.ExecContext(ctx, `UPDATE schedules SET task_id = ?, enabled = ?, clear_context_on_start = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-					taskID, enabled, write.ClearContextOnStart, scheduleID); err != nil {
+				result, err := conn.ExecContext(ctx, `UPDATE schedules SET task_id = ?, enabled = ?, clear_context_on_start = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND task_id = ?`,
+					taskID, enabled, write.ClearContextOnStart, scheduleID, taskID)
+				if err != nil {
 					return nil, nil, fmt.Errorf("updating schedule for node %q: %w", write.NodeKey, err)
 				}
-			} else if _, err := conn.ExecContext(ctx, `UPDATE schedules SET task_id = ?, run_at = ?, repeat_type = ?, repeat_interval = ?, enabled = ?,
-				clear_context_on_start = ?, next_run = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, taskID, write.RunAt, write.RepeatType,
-				write.RepeatInterval, enabled, write.ClearContextOnStart, write.RunAt, scheduleID); err != nil {
-				return nil, nil, fmt.Errorf("updating schedule for node %q: %w", write.NodeKey, err)
+				if affected, _ := result.RowsAffected(); affected != 1 {
+					return nil, nil, fmt.Errorf("schedule for node %q no longer targets the task bound to that same node", write.NodeKey)
+				}
+			} else {
+				result, err := conn.ExecContext(ctx, `UPDATE schedules SET task_id = ?, run_at = ?, repeat_type = ?, repeat_interval = ?, enabled = ?,
+					clear_context_on_start = ?, next_run = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND task_id = ?`, taskID, write.RunAt, write.RepeatType,
+					write.RepeatInterval, enabled, write.ClearContextOnStart, write.RunAt, scheduleID, taskID)
+				if err != nil {
+					return nil, nil, fmt.Errorf("updating schedule for node %q: %w", write.NodeKey, err)
+				}
+				if affected, _ := result.RowsAffected(); affected != 1 {
+					return nil, nil, fmt.Errorf("schedule for node %q no longer targets the task bound to that same node", write.NodeKey)
+				}
 			}
 		}
 		nodeID := nodeIDs[write.NodeKey]
