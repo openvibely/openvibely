@@ -292,6 +292,12 @@ func (s *XService) requireConfigurationWithExecutor(ctx context.Context, exec re
 }
 
 func (s *XService) pollOnce(ctx context.Context) error {
+	return s.pollOnceWithMentionConfigurationCheck(ctx, false)
+}
+
+// pollOnceWithMentionConfigurationCheck shares the complete polling path between
+// normal polling and the historical per-mention-check benchmark comparison.
+func (s *XService) pollOnceWithMentionConfigurationCheck(ctx context.Context, checkEachMention bool) error {
 	if s.receiptRepo == nil || s.authRepo == nil || s.projectRepo == nil {
 		return fmt.Errorf("X channel persistence is not configured")
 	}
@@ -299,6 +305,8 @@ func (s *XService) pollOnce(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// Keep one coherent settings snapshot for the provider batch. Durable handoffs
+	// and the final cursor compare-and-set revalidate configuration in transactions.
 	sinceID := pollingSettings[XSettingSinceID]
 	pagination := ""
 	newest := ""
@@ -332,8 +340,10 @@ func (s *XService) pollOnce(ctx context.Context) error {
 		if tweet.AuthorID == s.me.ID {
 			continue
 		}
-		if _, err := s.pollingSettings(ctx); err != nil {
-			return err
+		if checkEachMention {
+			if _, err := s.pollingSettings(ctx); err != nil {
+				return err
+			}
 		}
 		user := users[tweet.AuthorID]
 		// The immutable tweet author_id is the authorization identity. Expanded
@@ -463,7 +473,11 @@ func (s *XService) processMention(ctx context.Context, tweet XTweet, user XUser)
 		}
 		return err == nil, err
 	}
-	handed, _ := s.ingestMention(ctx, projectID, tweet, user, text, claim.Token)
+	handed, _, ingestErr := s.ingestMention(ctx, projectID, tweet, user, text, claim.Token)
+	if ingestErr != nil {
+		_ = s.receiptRepo.Release(context.Background(), tweet.ID, claim.Token)
+		return false, ingestErr
+	}
 	if !handed {
 		_ = s.receiptRepo.Release(context.Background(), tweet.ID, claim.Token)
 		return false, nil
@@ -499,17 +513,18 @@ func (s *XService) projectForUser(ctx context.Context, userID string) (string, e
 	}
 	return "", nil
 }
-func (s *XService) ingestMention(ctx context.Context, projectID string, tweet XTweet, user XUser, text, receiptToken string) (bool, string) {
+func (s *XService) ingestMention(ctx context.Context, projectID string, tweet XTweet, user XUser, text, receiptToken string) (bool, string, error) {
 	ctx, cancel := context.WithTimeout(ctx, xProcessTimeout)
 	defer cancel()
 	handed := false
 	taskID := ""
+	var handoffErr error
 	conversationID := tweet.ConversationID
 	if conversationID == "" {
 		conversationID = tweet.ID
 	}
 	completeWithHandoff := func(ctx context.Context, taskID *string, persist func(repository.SQLExecutor) error) (bool, error) {
-		return s.receiptRepo.CompleteWithHandoff(ctx, tweet.ID, receiptToken, taskID, func(exec repository.SQLExecutor) error {
+		alreadyHandedOff, err := s.receiptRepo.CompleteWithHandoff(ctx, tweet.ID, receiptToken, taskID, func(exec repository.SQLExecutor) error {
 			if err := s.requireConfigurationWithExecutor(ctx, exec); err != nil {
 				return err
 			}
@@ -518,6 +533,10 @@ func (s *XService) ingestMention(ctx context.Context, projectID string, tweet XT
 			}
 			return nil
 		})
+		if err != nil {
+			handoffErr = err
+		}
+		return alreadyHandedOff, err
 	}
 	runChannelChatIngress(ctx, channelChatIngressOptions{
 		Platform: "x", ProjectID: projectID, Message: text, Source: models.TaskOriginX, Surface: chatcontrol.SurfaceX, Start: s.now(),
@@ -565,7 +584,10 @@ func (s *XService) ingestMention(ctx context.Context, projectID string, tweet XT
 			FilterChatHistory: filterXChatHistory,
 		},
 	})
-	return handed, taskID
+	if handoffErr != nil {
+		return handed, taskID, handoffErr
+	}
+	return handed, taskID, nil
 }
 func filterXChatHistory(execs []models.Execution, current string) []models.Execution {
 	out := make([]models.Execution, 0, len(execs))

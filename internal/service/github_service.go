@@ -1430,6 +1430,30 @@ func (s *GitHubService) GetPullRequest(ctx context.Context, repo *GitHubRepoRef,
 	return &GitHubPullRequest{Number: pr.Number, URL: pr.URL, State: pr.State, Merged: pr.Merged, HeadRef: pr.Head.Ref, HeadRepoFullName: pr.Head.Repo.FullName, HeadSHA: pr.Head.SHA}, nil
 }
 
+func (s *GitHubService) UpdatePullRequestBody(ctx context.Context, repo *GitHubRepoRef, number int, body string) error {
+	if repo == nil {
+		return fmt.Errorf("repository reference is required")
+	}
+	if number <= 0 {
+		return fmt.Errorf("pull request number must be positive")
+	}
+	body = strings.TrimSpace(body)
+	if body == "" {
+		return fmt.Errorf("pull request body is required")
+	}
+
+	token, err := s.createOperationAccessToken(ctx, githubAPIBaseURLForRepo(repo, s.apiBaseURL))
+	if err != nil {
+		return err
+	}
+	endpoint := fmt.Sprintf("%s/repos/%s/%s/pulls/%d", githubAPIBaseURLForRepo(repo, s.apiBaseURL), url.PathEscape(repo.Owner), url.PathEscape(repo.Name), number)
+	req, err := s.newGitHubJSONRequest(ctx, http.MethodPatch, endpoint, token, map[string]string{"body": body})
+	if err != nil {
+		return err
+	}
+	return s.doGitHubJSON(req, nil)
+}
+
 func (s *GitHubService) FindPullRequestByBranch(ctx context.Context, repo *GitHubRepoRef, branch string) (*GitHubPullRequest, error) {
 	if repo == nil {
 		return nil, fmt.Errorf("repository reference is required")

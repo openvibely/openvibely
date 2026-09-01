@@ -2,9 +2,11 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"testing"
 
@@ -35,8 +37,11 @@ func (f *fakeXAPI) Post(_ context.Context, text, reply string) (string, error) {
 	return "posted", f.postErr
 }
 
-func setupXServiceTest(t *testing.T) (context.Context, *XService, *repository.SettingsRepo, *repository.XAuthRepo, *repository.XUserProjectRepo, *models.Project, *models.Project) {
-	db := testutil.NewTestDB(t)
+func setupXServiceTest(t testing.TB) (context.Context, *XService, *repository.SettingsRepo, *repository.XAuthRepo, *repository.XUserProjectRepo, *models.Project, *models.Project) {
+	return setupXServiceTestWithDB(t, testutil.NewTestDB(t))
+}
+
+func setupXServiceTestWithDB(t testing.TB, db *sql.DB) (context.Context, *XService, *repository.SettingsRepo, *repository.XAuthRepo, *repository.XUserProjectRepo, *models.Project, *models.Project) {
 	ctx := context.Background()
 	projects := repository.NewProjectRepo(db)
 	p1 := &models.Project{Name: "One"}
@@ -61,6 +66,271 @@ func setupXServiceTest(t *testing.T) (context.Context, *XService, *repository.Se
 	return ctx, svc, settings, auth, selections, p1, p2
 }
 
+func setupXBatchService(t testing.TB, db *sql.DB, counter *testutil.SQLStatementCounter, mentionsPerPage, pages int) (context.Context, *XService, *repository.SettingsRepo) {
+	ctx, svc, settings, auth, selections, project, _ := setupXServiceTestWithDB(t, db)
+	require.NoError(t, auth.Create(ctx, &models.XAuthorizedUser{ProjectID: project.ID, XUserID: "author"}))
+	require.NoError(t, selections.SetUserProject(ctx, "author", project.ID))
+	require.NoError(t, settings.Set(ctx, XSettingConfigurationID, "generation"))
+	svc.SetConfigurationID("generation")
+	api := &fakeXAPI{me: XUser{ID: "bot", Username: "openvibely"}}
+	api.mentionsFunc = xMentionBatchFunc(mentionsPerPage, pages)
+	svc.setAPI(api)
+	svc.me = api.me
+	counter.Reset()
+	return ctx, svc, settings
+}
+
+func xMentionBatchFunc(mentionsPerPage, pages int) func(context.Context, string, string, string) (xMentionsResponse, error) {
+	return func(_ context.Context, _, _, pagination string) (xMentionsResponse, error) {
+		pageIndex := 0
+		if pagination != "" {
+			if _, err := fmt.Sscanf(pagination, "page-%d", &pageIndex); err != nil {
+				return xMentionsResponse{}, fmt.Errorf("parse X test pagination token %q: %w", pagination, err)
+			}
+		}
+		if pageIndex < 0 || pageIndex >= pages {
+			return xMentionsResponse{}, fmt.Errorf("unexpected X test page index %d", pageIndex)
+		}
+		response := xMentionsResponse{}
+		response.Meta.NewestID = fmt.Sprintf("%d", mentionsPerPage*pages)
+		if pageIndex+1 < pages {
+			response.Meta.NextToken = fmt.Sprintf("page-%d", pageIndex+1)
+		}
+		start := pageIndex*mentionsPerPage + 1
+		response.Data = make([]XTweet, 0, mentionsPerPage)
+		for i := 0; i < mentionsPerPage; i++ {
+			id := fmt.Sprintf("%d", start+i)
+			response.Data = append(response.Data, XTweet{ID: id, Text: "@openvibely", AuthorID: "author", ConversationID: "conversation-" + id})
+		}
+		return response, nil
+	}
+}
+
+func xPollBatchProfileList() []xPollBatchProfile {
+	return []xPollBatchProfile{
+		{name: "1", mentionsPerPage: 1, pages: 1},
+		{name: "10", mentionsPerPage: 10, pages: 1},
+		{name: "100", mentionsPerPage: 100, pages: 1},
+		{name: "paginated-1000", mentionsPerPage: 100, pages: 10},
+	}
+}
+
+type xPollBatchProfile struct {
+	name            string
+	mentionsPerPage int
+	pages           int
+}
+
+func pollXBatchMode(svc *XService, ctx context.Context, checkEachMention bool) error {
+	if checkEachMention {
+		return svc.pollOnceWithMentionConfigurationCheck(ctx, true)
+	}
+	return svc.pollOnce(ctx)
+}
+
+func countXSettingsSnapshots(statements []string) int {
+	count := 0
+	for _, statement := range statements {
+		normalized := strings.ReplaceAll(strings.ToUpper(strings.TrimSpace(statement)), " ", "")
+		if normalized == "SELECTKEY,VALUEFROMAPP_SETTINGSWHEREKEYIN(?,?,?)" {
+			count++
+		}
+	}
+	return count
+}
+
+func xPollBatchStatements(t testing.TB, profile xPollBatchProfile, checkEachMention bool) ([]string, string) {
+	t.Helper()
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	ctx, svc, settings := setupXBatchService(t, db, counter, profile.mentionsPerPage, profile.pages)
+	counter.SetEnabled(true)
+	err := pollXBatchMode(svc, ctx, checkEachMention)
+	counter.SetEnabled(false)
+	require.NoError(t, err)
+	cursor, err := settings.Get(ctx, XSettingSinceID)
+	require.NoError(t, err)
+	return counter.Statements(), cursor
+}
+
+func TestXPollUsesOneConfigurationSnapshotPerBatch(t *testing.T) {
+	for _, profile := range xPollBatchProfileList() {
+		t.Run(profile.name, func(t *testing.T) {
+			baselineStatements, baselineCursor := xPollBatchStatements(t, profile, true)
+			candidateStatements, candidateCursor := xPollBatchStatements(t, profile, false)
+			mentions := profile.mentionsPerPage * profile.pages
+			wantCursor := fmt.Sprintf("%d", mentions)
+
+			require.Equal(t, mentions+1, countXSettingsSnapshots(baselineStatements), "historical X polling should load one initial and one per-mention settings snapshot")
+			require.Equal(t, 1, countXSettingsSnapshots(candidateStatements), "X polling should load one settings snapshot per batch")
+			require.GreaterOrEqual(t, len(baselineStatements)-len(candidateStatements), mentions, "removing redundant snapshots should reduce total SQLite operations")
+			if mentions == 100 {
+				require.Equal(t, 1208, len(baselineStatements), "the 100-mention historical fixture should match the issue baseline")
+				require.Equal(t, 1108, len(candidateStatements), "the 100-mention candidate should remove exactly 100 snapshot operations")
+			}
+			require.Equal(t, wantCursor, baselineCursor)
+			require.Equal(t, wantCursor, candidateCursor)
+		})
+	}
+}
+
+type xPollBatchFixture struct {
+	ctx      context.Context
+	svc      *XService
+	settings *repository.SettingsRepo
+	counter  *testutil.SQLStatementCounter
+}
+
+func newXPollBatchFixture(t testing.TB, profile xPollBatchProfile) *xPollBatchFixture {
+	t.Helper()
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	ctx, svc, settings := setupXBatchService(t, db, counter, profile.mentionsPerPage, profile.pages)
+	return &xPollBatchFixture{ctx: ctx, svc: svc, settings: settings, counter: counter}
+}
+
+func resetXPollBatchFixture(t testing.TB, fixture *xPollBatchFixture) {
+	t.Helper()
+	fixture.counter.SetEnabled(false)
+	require.NoError(t, fixture.settings.Set(fixture.ctx, XSettingSinceID, ""))
+	fixture.counter.Reset()
+}
+
+func warmXPollBatchFixture(t testing.TB, fixture *xPollBatchFixture) {
+	t.Helper()
+	require.NoError(t, pollXBatchMode(fixture.svc, fixture.ctx, false))
+	resetXPollBatchFixture(t, fixture)
+}
+
+type xPollBatchMetrics struct {
+	wallNs          float64
+	bytesPerOp      float64
+	allocsPerOp     float64
+	statementsPerOp float64
+	snapshotsPerOp  float64
+}
+
+const xPollBatchBenchmarkSamples = 3
+
+func medianXPollBatch(values []float64) float64 {
+	ordered := append([]float64(nil), values...)
+	sort.Float64s(ordered)
+	return ordered[len(ordered)/2]
+}
+
+func measureXPollBatchMode(t *testing.T, fixture *xPollBatchFixture, checkEachMention bool) xPollBatchMetrics {
+	t.Helper()
+	wallSamples := make([]float64, 0, xPollBatchBenchmarkSamples)
+	bytesSamples := make([]float64, 0, xPollBatchBenchmarkSamples)
+	allocSamples := make([]float64, 0, xPollBatchBenchmarkSamples)
+	statementSamples := make([]float64, 0, xPollBatchBenchmarkSamples)
+	snapshotSamples := make([]float64, 0, xPollBatchBenchmarkSamples)
+	for i := 0; i < xPollBatchBenchmarkSamples; i++ {
+		resetXPollBatchFixture(t, fixture)
+		fixture.counter.SetEnabled(true)
+		err := pollXBatchMode(fixture.svc, fixture.ctx, checkEachMention)
+		fixture.counter.SetEnabled(false)
+		require.NoError(t, err)
+		statements := fixture.counter.Statements()
+		statementSamples = append(statementSamples, float64(len(statements)))
+		snapshotSamples = append(snapshotSamples, float64(countXSettingsSnapshots(statements)))
+
+		resetXPollBatchFixture(t, fixture)
+		var pollErr error
+		result := testing.Benchmark(func(b *testing.B) {
+			b.ReportAllocs()
+			b.ResetTimer()
+			for j := 0; j < b.N; j++ {
+				if pollErr = pollXBatchMode(fixture.svc, fixture.ctx, checkEachMention); pollErr != nil {
+					return
+				}
+			}
+		})
+		require.NoError(t, pollErr)
+		wallSamples = append(wallSamples, float64(result.NsPerOp()))
+		bytesSamples = append(bytesSamples, float64(result.AllocedBytesPerOp()))
+		allocSamples = append(allocSamples, float64(result.AllocsPerOp()))
+	}
+
+	return xPollBatchMetrics{
+		wallNs:          medianXPollBatch(wallSamples),
+		bytesPerOp:      medianXPollBatch(bytesSamples),
+		allocsPerOp:     medianXPollBatch(allocSamples),
+		statementsPerOp: medianXPollBatch(statementSamples),
+		snapshotsPerOp:  medianXPollBatch(snapshotSamples),
+	}
+}
+
+func measureXPollBatchPair(t *testing.T, profile xPollBatchProfile) (xPollBatchMetrics, xPollBatchMetrics) {
+	t.Helper()
+	fixture := newXPollBatchFixture(t, profile)
+	warmXPollBatchFixture(t, fixture)
+	baseline := measureXPollBatchMode(t, fixture, true)
+	candidate := measureXPollBatchMode(t, fixture, false)
+	return baseline, candidate
+}
+
+func TestXPollBatchBenchmarkThresholds(t *testing.T) {
+	for _, profile := range xPollBatchProfileList() {
+		t.Run(profile.name, func(t *testing.T) {
+			baseline, candidate := measureXPollBatchPair(t, profile)
+			mentions := profile.mentionsPerPage * profile.pages
+			t.Logf("median baseline: wall=%.0f ns/op bytes=%.0f B/op allocs=%.0f statements=%.0f snapshots=%.0f; candidate: wall=%.0f ns/op bytes=%.0f B/op allocs=%.0f statements=%.0f snapshots=%.0f", baseline.wallNs, baseline.bytesPerOp, baseline.allocsPerOp, baseline.statementsPerOp, baseline.snapshotsPerOp, candidate.wallNs, candidate.bytesPerOp, candidate.allocsPerOp, candidate.statementsPerOp, candidate.snapshotsPerOp)
+
+			require.Equal(t, float64(mentions+1), baseline.snapshotsPerOp)
+			require.Equal(t, float64(1), candidate.snapshotsPerOp)
+			require.GreaterOrEqual(t, baseline.statementsPerOp-candidate.statementsPerOp, float64(mentions), "the candidate must remove one total SQL operation per non-self mention")
+
+			switch mentions {
+			case 1:
+				require.LessOrEqual(t, candidate.wallNs, baseline.wallNs*1.05, "one-mention wall time must not regress by more than 5%%")
+				require.LessOrEqual(t, candidate.allocsPerOp, baseline.allocsPerOp*1.05, "one-mention allocations must not regress by more than 5%%")
+			case 100:
+				require.LessOrEqual(t, candidate.wallNs, baseline.wallNs*0.95, "100-mention wall time must improve by at least 5%%")
+				require.LessOrEqual(t, candidate.allocsPerOp, baseline.allocsPerOp*0.95, "100-mention allocations must improve by at least 5%%")
+			}
+		})
+	}
+}
+
+func BenchmarkXPollBatch(b *testing.B) {
+	for _, profile := range xPollBatchProfileList() {
+		b.Run(profile.name, func(b *testing.B) {
+			fixture := newXPollBatchFixture(b, profile)
+			warmXPollBatchFixture(b, fixture)
+			for _, mode := range []struct {
+				name             string
+				checkEachMention bool
+			}{
+				{name: "baseline", checkEachMention: true},
+				{name: "candidate", checkEachMention: false},
+			} {
+				b.Run(mode.name, func(b *testing.B) {
+					resetXPollBatchFixture(b, fixture)
+					fixture.counter.SetEnabled(true)
+					err := pollXBatchMode(fixture.svc, fixture.ctx, mode.checkEachMention)
+					fixture.counter.SetEnabled(false)
+					require.NoError(b, err)
+					statements := fixture.counter.Statements()
+					mentions := profile.mentionsPerPage * profile.pages
+					expectedSnapshots := 1
+					if mode.checkEachMention {
+						expectedSnapshots = mentions + 1
+					}
+					require.Equal(b, expectedSnapshots, countXSettingsSnapshots(statements))
+
+					b.ReportAllocs()
+					b.ResetTimer()
+					b.ReportMetric(float64(len(statements)), "sqlite-statements/op")
+					b.ReportMetric(float64(countXSettingsSnapshots(statements)), "settings-snapshots/op")
+					for i := 0; i < b.N; i++ {
+						if err := pollXBatchMode(fixture.svc, fixture.ctx, mode.checkEachMention); err != nil {
+							b.Fatal(err)
+						}
+					}
+				})
+			}
+		})
+	}
+}
 func TestXRuntimeProjectSwitchRequiresTargetAuthorizationAndPersists(t *testing.T) {
 	ctx, svc, _, auth, selections, p1, p2 := setupXServiceTest(t)
 	require.NoError(t, auth.Create(ctx, &models.XAuthorizedUser{ProjectID: p1.ID, XUserID: "123"}))
@@ -217,6 +487,71 @@ func TestXPollSameAccountReplacementGenerationCreatesNoWork(t *testing.T) {
 	tasks, err := svc.taskRepo.ListByProject(ctx, project.ID, string(models.CategoryChat))
 	require.NoError(t, err)
 	require.Empty(t, tasks)
+}
+
+func TestXPollReplacementBetweenMentionHandoffsCreatesNoStaleWork(t *testing.T) {
+	for _, tt := range []struct {
+		name              string
+		initialGeneration string
+		replaceSettings   func(context.Context, *repository.SettingsRepo) error
+	}{
+		{
+			name: "account",
+			replaceSettings: func(ctx context.Context, settings *repository.SettingsRepo) error {
+				return settings.Set(ctx, XSettingAccountID, "replacement-account")
+			},
+		},
+		{
+			name:              "generation",
+			initialGeneration: "old-generation",
+			replaceSettings: func(ctx context.Context, settings *repository.SettingsRepo) error {
+				return settings.Set(ctx, XSettingConfigurationID, "replacement-generation")
+			},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, svc, settings, auth, _, project, _ := setupXServiceTest(t)
+			if tt.initialGeneration != "" {
+				require.NoError(t, settings.Set(ctx, XSettingConfigurationID, tt.initialGeneration))
+				svc.SetConfigurationID(tt.initialGeneration)
+			}
+			require.NoError(t, auth.Create(ctx, &models.XAuthorizedUser{ProjectID: project.ID, XUserID: "author"}))
+			require.NoError(t, svc.llmConfigRepo.Create(ctx, &models.LLMConfig{Name: "X Agent", Provider: models.ProviderTest, Model: "test", IsDefault: true}))
+
+			handoffs := 0
+			var replacementErr error
+			svc.SetRuntime(nil, nil, nil, nil, func(_ context.Context, _ ChannelChatRunRequest) {
+				handoffs++
+				if handoffs == 1 {
+					replacementErr = tt.replaceSettings(ctx, settings)
+				}
+			}, nil, nil, nil, nil)
+			api := &fakeXAPI{me: XUser{ID: "bot", Username: "openvibely"}}
+			api.mentions.Meta.NewestID = "2"
+			api.mentions.Data = []XTweet{
+				{ID: "2", Text: "@openvibely second", AuthorID: "author", ConversationID: "conversation-2"},
+				{ID: "1", Text: "@openvibely first", AuthorID: "author", ConversationID: "conversation-1"},
+			}
+			svc.setAPI(api)
+			svc.me = api.me
+
+			err := svc.pollOnce(ctx)
+			require.NoError(t, replacementErr)
+			require.ErrorContains(t, err, "configuration changed")
+			require.Equal(t, 1, handoffs)
+
+			tasks, err := svc.taskRepo.ListByProject(ctx, project.ID, string(models.CategoryChat))
+			require.NoError(t, err)
+			require.Len(t, tasks, 1)
+			require.Equal(t, "first", tasks[0].Prompt)
+			pending, err := svc.threadInputRepo.ListPendingForChat(ctx, project.ID)
+			require.NoError(t, err)
+			require.Empty(t, pending)
+			cursor, err := settings.Get(ctx, XSettingSinceID)
+			require.NoError(t, err)
+			require.Empty(t, cursor)
+		})
+	}
 }
 
 func TestXAuthorizedMentionUsesSharedIngressAndAdvancesCursorAfterDurableHandoff(t *testing.T) {
@@ -381,6 +716,8 @@ func TestXReplyRequiresOriginatingAccount(t *testing.T) {
 
 func TestXPollActiveReceiptLeaseDoesNotAdvanceCursorOrDegradeReplacementHealth(t *testing.T) {
 	ctx, old, settings, auth, selections, project, _ := setupXServiceTest(t)
+	require.NoError(t, settings.Set(ctx, XSettingConfigurationID, "generation"))
+	old.SetConfigurationID("generation")
 	require.NoError(t, auth.Create(ctx, &models.XAuthorizedUser{ProjectID: project.ID, XUserID: "author"}))
 	api := &fakeXAPI{me: XUser{ID: "bot", Username: "openvibely"}}
 	api.mentions.Meta.NewestID = "10"
@@ -394,16 +731,25 @@ func TestXPollActiveReceiptLeaseDoesNotAdvanceCursorOrDegradeReplacementHealth(t
 	replacement.SetRepositories(auth, selections, old.taskContextRepo, old.receiptRepo, old.threadInputRepo)
 	replacement.setAPI(api)
 	replacement.me = api.me
+	replacement.SetConfigurationID("generation")
 	replacement.running = true
 	replacement.connected = true
 	err = replacement.pollOnce(ctx)
-	require.Error(t, err)
+	require.ErrorIs(t, err, errXReceiptActive)
 	replacement.recordPollResult(err)
 	cursor, err := settings.Get(ctx, XSettingSinceID)
 	require.NoError(t, err)
 	require.Empty(t, cursor)
 	require.True(t, replacement.Status().Connected)
 	require.Empty(t, replacement.Status().LastError)
+
+	// An active receipt is retryable only for the same configuration generation.
+	require.NoError(t, settings.Set(ctx, XSettingConfigurationID, "replacement-generation"))
+	err = replacement.pollOnce(ctx)
+	require.ErrorContains(t, err, "configuration changed")
+	cursor, err = settings.Get(ctx, XSettingSinceID)
+	require.NoError(t, err)
+	require.Empty(t, cursor)
 }
 
 func TestXRuntimeOwnsOnlyIdentitySensitiveOverrides(t *testing.T) {
