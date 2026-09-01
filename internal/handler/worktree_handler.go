@@ -800,10 +800,7 @@ func (h *Handler) GetTaskChangesWorktree(c echo.Context) error {
 	ctx := c.Request().Context()
 	state := h.resolveTaskChangesWorktreeState(ctx, task)
 
-	var reviewComments []models.ReviewComment
-	if h.reviewCommentRepo != nil {
-		reviewComments, _ = h.reviewCommentRepo.ListByTask(ctx, taskID)
-	}
+	reviewComments := h.loadTaskReviewComments(ctx, taskID)
 
 	diffView := h.uiDiffViewPreference(ctx)
 

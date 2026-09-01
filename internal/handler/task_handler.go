@@ -52,6 +52,14 @@ type taskDetailContentData struct {
 	reviewComments   []models.ReviewComment
 }
 
+func (h *Handler) loadTaskReviewComments(ctx context.Context, taskID string) []models.ReviewComment {
+	if h.reviewCommentRepo == nil {
+		return nil
+	}
+	comments, _ := h.reviewCommentRepo.ListByTask(ctx, taskID)
+	return comments
+}
+
 func getSortPreference(c echo.Context, cookieName string) string {
 	if cookie, err := c.Cookie(cookieName); err == nil {
 		return cookie.Value
@@ -522,10 +530,6 @@ func (h *Handler) loadTaskDetailContentData(ctx context.Context, taskID string) 
 	agents, _ := h.llmConfigRepo.ListBadgeOptions(ctx)
 	attachments, _ := h.attachmentRepo.ListByTask(ctx, taskID)
 	agentDefs := h.listTaskFormAgentDefinitions(ctx, task.ProjectID, task.AgentDefinitionID)
-	var reviewComments []models.ReviewComment
-	if h.reviewCommentRepo != nil {
-		reviewComments, _ = h.reviewCommentRepo.ListByTask(ctx, taskID)
-	}
 
 	return &taskDetailContentData{
 		task:             task,
@@ -535,7 +539,7 @@ func (h *Handler) loadTaskDetailContentData(ctx context.Context, taskID string) 
 		agents:           agents,
 		agentDefs:        agentDefs,
 		attachments:      attachments,
-		reviewComments:   reviewComments,
+		reviewComments:   h.loadTaskReviewComments(ctx, taskID),
 	}, nil
 }
 
@@ -1145,10 +1149,7 @@ func (h *Handler) GetTaskChanges(c echo.Context) error {
 	ctx := c.Request().Context()
 	state := h.resolveTaskChangesWorktreeState(ctx, task)
 
-	var reviewComments []models.ReviewComment
-	if h.reviewCommentRepo != nil {
-		reviewComments, _ = h.reviewCommentRepo.ListByTask(ctx, taskID)
-	}
+	reviewComments := h.loadTaskReviewComments(ctx, taskID)
 
 	diffView := h.uiDiffViewPreference(ctx)
 
@@ -1189,8 +1190,8 @@ func (h *Handler) GetTaskChangesFile(c echo.Context) error {
 
 	reviewMode := strings.EqualFold(c.QueryParam("review"), "true")
 	var reviewComments []models.ReviewComment
-	if reviewMode && h.reviewCommentRepo != nil {
-		reviewComments, _ = h.reviewCommentRepo.ListByTask(c.Request().Context(), taskID)
+	if reviewMode {
+		reviewComments = h.loadTaskReviewComments(c.Request().Context(), taskID)
 	}
 
 	meta, exists := h.resolveTaskChangesFileMeta(c.Request().Context(), task, fileIndex)
@@ -1223,10 +1224,7 @@ func (h *Handler) GetTaskChangesLive(c echo.Context) error {
 		diffOutput = resolvedDiff
 	}
 
-	var reviewComments []models.ReviewComment
-	if h.reviewCommentRepo != nil {
-		reviewComments, _ = h.reviewCommentRepo.ListByTask(c.Request().Context(), taskID)
-	}
+	reviewComments := h.loadTaskReviewComments(c.Request().Context(), taskID)
 
 	component := templ.ComponentFunc(func(ctx context.Context, w io.Writer) error {
 		if _, err := io.WriteString(w, `<div id="diff-viewer-container">`); err != nil {
