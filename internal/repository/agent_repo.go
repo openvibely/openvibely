@@ -560,6 +560,7 @@ func (r *AgentRepo) ListSelectableReferencesForProject(ctx context.Context, proj
 	}
 	rows, err := r.db.QueryContext(ctx, `SELECT `+agentSelectableReferenceColumns+` FROM agents
 		WHERE COALESCE(generated_status, 'user_edited') <> 'archived'
+		  AND archived_at IS NULL
 		  AND COALESCE(enabled, 1) = 1 AND COALESCE(selectable_as_primary, 1) = 1
 		  AND (project_id IS NULL OR project_id = '' OR project_id = ?)
 		ORDER BY name ASC, id ASC LIMIT ?`, projectID, limit)
@@ -585,6 +586,7 @@ func (r *AgentRepo) ListSelectableForProject(ctx context.Context, projectID stri
 	}
 	rows, err := r.db.QueryContext(ctx, `SELECT `+agentColumns+` FROM agents
 		WHERE COALESCE(generated_status, 'user_edited') <> 'archived'
+		  AND archived_at IS NULL
 		  AND COALESCE(enabled, 1) = 1 AND COALESCE(selectable_as_primary, 1) = 1
 		  AND (project_id IS NULL OR project_id = '' OR project_id = ?)
 		ORDER BY name ASC, id ASC LIMIT ?`, projectID, limit)

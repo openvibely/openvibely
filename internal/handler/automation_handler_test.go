@@ -976,24 +976,53 @@ func TestAutomationBuilderEditUsesSingleCompactAgentValidationPass(t *testing.T)
 	counter.SetEnabled(false)
 	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
 
-	compactAgentQueries := 0
-	richAgentQueries := 0
-	for _, statement := range counter.Statements() {
-		query := strings.ToLower(strings.Join(strings.Fields(statement), " "))
-		if !strings.Contains(query, "from agents") {
-			continue
+	countAgentQueries := func() (compact, rich int) {
+		for _, statement := range counter.Statements() {
+			query := strings.ToLower(strings.Join(strings.Fields(statement), " "))
+			if !strings.Contains(query, "from agents") {
+				continue
+			}
+			projection := strings.SplitN(query, " from agents", 2)[0]
+			if strings.Contains(projection, "system_prompt") {
+				rich++
+				continue
+			}
+			if strings.Contains(projection, "coalesce(key, '')") && strings.Contains(projection, "coalesce(project_id, '')") {
+				compact++
+			}
 		}
-		projection := strings.SplitN(query, " from agents", 2)[0]
-		if strings.Contains(projection, "system_prompt") {
-			richAgentQueries++
-			continue
-		}
-		if strings.Contains(projection, "coalesce(key, '')") && strings.Contains(projection, "coalesce(project_id, '')") {
-			compactAgentQueries++
-		}
+		return compact, rich
 	}
-	require.Equal(t, 1, compactAgentQueries, "edit validation must read selectable Agent identities once")
+	compactAgentQueries, richAgentQueries := countAgentQueries()
+	require.Equal(t, 1, compactAgentQueries, "edit preview must read selectable Agent identities once")
 	require.Equal(t, 1, richAgentQueries, "edit rendering must retain its separate rich Agent picker read")
+
+	form.Set("save_changes", "true")
+	req = httptest.NewRequest(http.MethodPost, "/automations/"+saved.Definition.Automation.ID+"/builder?project_id="+project.ID, strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	response = httptest.NewRecorder()
+	counter.Reset()
+	counter.SetEnabled(true)
+	e.ServeHTTP(response, req)
+	counter.SetEnabled(false)
+	require.Equal(t, http.StatusNoContent, response.Code, response.Body.String())
+	compactAgentQueries, richAgentQueries = countAgentQueries()
+	require.Equal(t, 1, compactAgentQueries, "edit save must reuse preview validation")
+	require.Equal(t, 1, richAgentQueries, "edit save must retain its separate rich Agent materialization read")
+
+	_, err = db.ExecContext(ctx, `UPDATE agents SET enabled = 0 WHERE id = ?`, agent.ID)
+	require.NoError(t, err)
+	malformedForm := url.Values{"project_id": {project.ID}, "automation_yaml": {""}, "save_changes": {"true"}}
+	malformedRequest := httptest.NewRequest(http.MethodPost, "/automations/"+saved.Definition.Automation.ID+"/builder?project_id="+project.ID, strings.NewReader(malformedForm.Encode()))
+	malformedRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	malformedRequest.Header.Set("HX-Request", "true")
+	malformedResponse := httptest.NewRecorder()
+	e.ServeHTTP(malformedResponse, malformedRequest)
+	require.Equal(t, http.StatusOK, malformedResponse.Code, malformedResponse.Body.String())
+	require.Empty(t, malformedResponse.Header().Get("HX-Redirect"))
+	require.Contains(t, malformedResponse.Body.String(), "YAML did not parse")
+	require.Contains(t, malformedResponse.Body.String(), "Agent selection is unavailable in this project.")
 }
 
 func TestAutomationBuilderRejectsUnsafeAndUnsupportedYAMLWithoutSideEffects(t *testing.T) {
