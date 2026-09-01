@@ -243,19 +243,20 @@ func automationOccurrenceKey(scheduleID string, due time.Time) string {
 }
 
 type automationTaskAdmissionInput struct {
-	projectID           string
-	automationID        string
-	versionID           string
-	triggerNodeID       string
-	triggerResourceType string
-	triggerResourceID   string
-	occurrenceKey       string
-	scheduledFor        *time.Time
-	adapterKey          string
-	taskID              string
-	taskStatus          models.TaskStatus
-	taskCategory        models.TaskCategory
-	now                 time.Time
+	projectID                  string
+	automationID               string
+	versionID                  string
+	triggerNodeID              string
+	triggerResourceType        string
+	triggerResourceID          string
+	occurrenceKey              string
+	scheduledFor               *time.Time
+	adapterKey                 string
+	taskID                     string
+	taskStatus                 models.TaskStatus
+	taskCategory               models.TaskCategory
+	validateCategoryBeforeSkip bool
+	now                        time.Time
 }
 
 type automationTaskAdmissionResult struct {
@@ -267,6 +268,27 @@ type automationTaskAdmissionResult struct {
 
 func claimAutomationTaskAdmission(ctx context.Context, conn SQLExecutor, input automationTaskAdmissionInput) (automationTaskAdmissionResult, error) {
 	result := automationTaskAdmissionResult{effectiveCategory: input.taskCategory}
+	normalizeCategory := func() error {
+		result.effectiveCategory = input.taskCategory
+		if input.adapterKey == "custom" {
+			if result.effectiveCategory != models.CategoryScheduled {
+				if input.taskStatus == models.StatusFailed && input.taskCategory == models.CategoryCompleted {
+					result.effectiveCategory = models.CategoryScheduled
+				} else {
+					return ErrAutomationScheduleChanged
+				}
+			}
+		} else if result.effectiveCategory != models.CategoryActive && result.effectiveCategory != models.CategoryScheduled {
+			result.effectiveCategory = models.CategoryScheduled
+		}
+		return nil
+	}
+	if input.validateCategoryBeforeSkip {
+		if err := normalizeCategory(); err != nil {
+			return automationTaskAdmissionResult{}, err
+		}
+	}
+
 	if input.taskStatus == models.StatusRunning || input.taskStatus == models.StatusQueued {
 		result.skippedReason = "task_running"
 	} else {
@@ -279,18 +301,9 @@ func claimAutomationTaskAdmission(ctx context.Context, conn SQLExecutor, input a
 		}
 	}
 
-	if result.skippedReason == "" {
-		result.effectiveCategory = input.taskCategory
-		if input.adapterKey == "custom" {
-			if result.effectiveCategory != models.CategoryScheduled {
-				if input.taskStatus == models.StatusFailed && input.taskCategory == models.CategoryCompleted {
-					result.effectiveCategory = models.CategoryScheduled
-				} else {
-					return automationTaskAdmissionResult{}, ErrAutomationScheduleChanged
-				}
-			}
-		} else if result.effectiveCategory != models.CategoryActive && result.effectiveCategory != models.CategoryScheduled {
-			result.effectiveCategory = models.CategoryScheduled
+	if result.skippedReason == "" && !input.validateCategoryBeforeSkip {
+		if err := normalizeCategory(); err != nil {
+			return automationTaskAdmissionResult{}, err
 		}
 	}
 
@@ -534,7 +547,7 @@ func (r *AutomationRepo) ClaimScheduledOccurrence(ctx context.Context, schedule 
 		projectID: owner.ProjectID, automationID: owner.AutomationID, versionID: owner.VersionID,
 		triggerNodeID: owner.NodeID, triggerResourceType: "schedule", triggerResourceID: schedule.ID,
 		occurrenceKey: occurrenceKey, scheduledFor: &due, adapterKey: adapterKey, taskID: taskID,
-		taskStatus: taskStatus, taskCategory: taskCategory, now: now,
+		taskStatus: taskStatus, taskCategory: taskCategory, validateCategoryBeforeSkip: true, now: now,
 	})
 	if err != nil {
 		return nil, nil, err
