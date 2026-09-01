@@ -194,3 +194,107 @@ func TestAlertRepoListFilteredSummariesPageSearchesWithinProject(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, foreign)
 }
+
+func TestAlertRepoListFilteredSummariesSupportsWorkflowFiltersAndPagination(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	projectRepo := NewProjectRepo(db)
+	repo := NewAlertRepo(db)
+	ctx := context.Background()
+	project := &models.Project{Name: "Alert workflow filter project"}
+	other := &models.Project{Name: "Other alert workflow project"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	require.NoError(t, projectRepo.Create(ctx, other))
+
+	implementationTask := &models.Task{
+		ProjectID: project.ID, Title: "Alert implementation", Prompt: "Implement the alert.",
+		Category: models.CategoryBacklog, Priority: 2, Status: models.StatusPending,
+	}
+	require.NoError(t, NewTaskRepo(db, nil).Create(ctx, implementationTask))
+	implementationTaskID := implementationTask.ID
+	alerts := []struct {
+		title      string
+		decision   models.AlertDecisionState
+		processing models.AlertProcessingState
+		message    string
+	}{
+		{"Pending unclaimed", models.AlertDecisionPending, models.AlertProcessingUnclaimed, "pending work"},
+		{"Approved failed", models.AlertDecisionApproved, models.AlertProcessingFailed, "search intersection"},
+		{"Approved claimed", models.AlertDecisionApproved, models.AlertProcessingClaimed, "claimed work"},
+		{"Rejected completed", models.AlertDecisionRejected, models.AlertProcessingCompleted, "completed work"},
+		{"Dismissed linked", models.AlertDecisionDismissed, models.AlertProcessingImplementationTaskLinked, "linked work"},
+		{"Operational not applicable", models.AlertDecisionNotRequired, models.AlertProcessingNotApplicable, "operational work"},
+	}
+	for _, tc := range alerts {
+		alert := &models.Alert{
+			ProjectID:       project.ID,
+			Type:            models.AlertCustom,
+			Severity:        models.SeverityInfo,
+			Title:           tc.title,
+			Message:         tc.message,
+			DecisionState:   tc.decision,
+			ProcessingState: tc.processing,
+		}
+		if tc.processing == models.AlertProcessingImplementationTaskLinked {
+			alert.ImplementationTaskID = &implementationTaskID
+		}
+		require.NoError(t, repo.Create(ctx, alert))
+	}
+	foreign := &models.Alert{
+		ProjectID:       other.ID,
+		Type:            models.AlertCustom,
+		Severity:        models.SeverityInfo,
+		Title:           "Approved failed foreign",
+		Message:         "search intersection",
+		DecisionState:   models.AlertDecisionApproved,
+		ProcessingState: models.AlertProcessingFailed,
+	}
+	require.NoError(t, repo.Create(ctx, foreign))
+
+	pending, err := repo.ListFilteredSummaries(ctx, project.ID, models.AlertListFilter{
+		DecisionState: models.AlertDecisionPending, Limit: 20,
+	})
+	require.NoError(t, err)
+	require.Len(t, pending, 1)
+	require.Equal(t, "Pending unclaimed", pending[0].Title)
+
+	failed, err := repo.ListFilteredSummaries(ctx, project.ID, models.AlertListFilter{
+		ProcessingState: models.AlertProcessingFailed, Limit: 20,
+	})
+	require.NoError(t, err)
+	require.Len(t, failed, 1)
+	require.Equal(t, "Approved failed", failed[0].Title)
+
+	intersection, err := repo.ListFilteredSummaries(ctx, project.ID, models.AlertListFilter{
+		DecisionState: models.AlertDecisionApproved, ProcessingState: models.AlertProcessingFailed,
+		Search: "SEARCH INTERSECTION", Limit: 20,
+	})
+	require.NoError(t, err)
+	require.Len(t, intersection, 1)
+	require.Equal(t, "Approved failed", intersection[0].Title)
+
+	operational, err := repo.ListFilteredSummaries(ctx, project.ID, models.AlertListFilter{
+		DecisionState: models.AlertDecisionNotRequired, ProcessingState: models.AlertProcessingNotApplicable, Limit: 20,
+	})
+	require.NoError(t, err)
+	require.Len(t, operational, 1)
+	require.Equal(t, "Operational not applicable", operational[0].Title)
+
+	allApproved, err := repo.ListFilteredSummaries(ctx, project.ID, models.AlertListFilter{
+		DecisionState: models.AlertDecisionApproved, Limit: 1, Offset: 0,
+	})
+	require.NoError(t, err)
+	require.Len(t, allApproved, 1)
+	secondApproved, err := repo.ListFilteredSummaries(ctx, project.ID, models.AlertListFilter{
+		DecisionState: models.AlertDecisionApproved, Limit: 1, Offset: 1,
+	})
+	require.NoError(t, err)
+	require.Len(t, secondApproved, 1)
+	require.NotEqual(t, allApproved[0].ID, secondApproved[0].ID)
+
+	foreignSearch, err := repo.ListFilteredSummaries(ctx, project.ID, models.AlertListFilter{
+		DecisionState: models.AlertDecisionApproved, ProcessingState: models.AlertProcessingFailed,
+		Search: "foreign", Limit: 20,
+	})
+	require.NoError(t, err)
+	require.Empty(t, foreignSearch)
+}

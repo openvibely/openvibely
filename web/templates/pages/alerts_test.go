@@ -291,10 +291,50 @@ func TestAlertDetail_EmptyAlertOmitsCopyControl(t *testing.T) {
 	}
 }
 
+func TestAlertsContent_WorkflowFiltersRenderSelectedStateAndFilteredEmptyMessage(t *testing.T) {
+	var filtered bytes.Buffer
+	if err := AlertsContentPageWithFilters(nil, "project-1", 4, false, models.AlertDecisionPending, models.AlertProcessingFailed).Render(context.Background(), &filtered); err != nil {
+		t.Fatalf("render filtered alerts content: %v", err)
+	}
+	filteredHTML := filtered.String()
+	for _, required := range []string{
+		`id="alerts-filter-form"`,
+		`method="get"`,
+		`name="search"`,
+		`name="decision_state"`,
+		`name="processing_state"`,
+		`aria-label="Filter by decision state"`,
+		`aria-label="Filter by processing state"`,
+		`All decision states`,
+		`All processing states`,
+		`Implementation task linked`,
+		`data-card-pagination-preserve-params="decision_state,processing_state"`,
+		`data-card-pagination-url="/alerts?decision_state=pending&amp;processing_state=failed&amp;project_id=project-1"`,
+		`hx-get="/alerts?decision_state=pending&amp;processing_state=failed&amp;project_id=project-1"`,
+		`value="pending" selected`,
+		`value="failed" selected`,
+		`No alerts match the selected filters.`,
+	} {
+		if !strings.Contains(filteredHTML, required) {
+			t.Fatalf("filtered Alerts markup missing %q", required)
+		}
+	}
+	if strings.Contains(filteredHTML, "No alerts. You're all clear!") {
+		t.Fatal("filtered empty Alerts result should not claim the project has no alerts")
+	}
+
+	var unfiltered bytes.Buffer
+	if err := AlertsContentPageWithFilters(nil, "project-1", 0, false, "", "").Render(context.Background(), &unfiltered); err != nil {
+		t.Fatalf("render unfiltered alerts content: %v", err)
+	}
+	if !strings.Contains(unfiltered.String(), "No alerts. You're all clear!") {
+		t.Fatal("unfiltered empty Alerts result should retain the existing empty message")
+	}
+}
+
 func TestAlertsContent_CardsConformToNarrowViewport(t *testing.T) {
 	longText := strings.Repeat("SuperLongUnbrokenAlertToken", 8)
 	alerts := []models.AlertSummary{{ID: "alert-1", Title: longText, Message: longText, ProjectID: "project-1"}}
-
 	var buf bytes.Buffer
 	err := AlertsContent(alerts, "project-1", 1).Render(context.Background(), &buf)
 	if err != nil {
