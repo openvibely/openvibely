@@ -242,6 +242,100 @@ func automationOccurrenceKey(scheduleID string, due time.Time) string {
 	return "schedule:" + scheduleID + ":" + due.UTC().Format(time.RFC3339Nano)
 }
 
+type automationTaskAdmissionInput struct {
+	projectID           string
+	automationID        string
+	versionID           string
+	triggerNodeID       string
+	triggerResourceType string
+	triggerResourceID   string
+	occurrenceKey       string
+	scheduledFor        *time.Time
+	adapterKey          string
+	taskID              string
+	taskStatus          models.TaskStatus
+	taskCategory        models.TaskCategory
+	now                 time.Time
+}
+
+type automationTaskAdmissionResult struct {
+	invocation        models.AutomationInvocation
+	dispatch          *models.AutomationDispatch
+	effectiveCategory models.TaskCategory
+	skippedReason     string
+}
+
+func claimAutomationTaskAdmission(ctx context.Context, conn SQLExecutor, input automationTaskAdmissionInput) (automationTaskAdmissionResult, error) {
+	result := automationTaskAdmissionResult{effectiveCategory: input.taskCategory}
+	if input.taskStatus == models.StatusRunning || input.taskStatus == models.StatusQueued {
+		result.skippedReason = "task_running"
+	} else {
+		var reservationCount int
+		if err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_task_run_reservations WHERE task_id = ?`, input.taskID).Scan(&reservationCount); err != nil {
+			return automationTaskAdmissionResult{}, err
+		}
+		if reservationCount > 0 {
+			result.skippedReason = "task_reserved"
+		}
+	}
+
+	if result.skippedReason == "" {
+		result.effectiveCategory = input.taskCategory
+		if input.adapterKey == "custom" {
+			if result.effectiveCategory != models.CategoryScheduled {
+				if input.taskStatus == models.StatusFailed && input.taskCategory == models.CategoryCompleted {
+					result.effectiveCategory = models.CategoryScheduled
+				} else {
+					return automationTaskAdmissionResult{}, ErrAutomationScheduleChanged
+				}
+			}
+		} else if result.effectiveCategory != models.CategoryActive && result.effectiveCategory != models.CategoryScheduled {
+			result.effectiveCategory = models.CategoryScheduled
+		}
+	}
+
+	result.invocation = models.AutomationInvocation{
+		ProjectID: input.projectID, AutomationID: input.automationID, VersionID: input.versionID,
+		TriggerNodeID: input.triggerNodeID, TriggerResourceType: input.triggerResourceType, TriggerResourceID: input.triggerResourceID,
+		OccurrenceKey: input.occurrenceKey, ScheduledFor: input.scheduledFor,
+		Status: models.AutomationInvocationClaimed, SkippedReason: result.skippedReason,
+	}
+	if result.skippedReason != "" {
+		result.invocation.Status = models.AutomationInvocationSkipped
+		started := input.now.UTC()
+		result.invocation.StartedAt, result.invocation.CompletedAt = &started, &started
+	}
+	if err := conn.QueryRowContext(ctx, `INSERT INTO automation_invocations
+		(project_id, automation_id, version_id, trigger_node_id, trigger_resource_type, trigger_resource_id,
+		 occurrence_key, scheduled_for, status, skipped_reason, started_at, completed_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		RETURNING id, created_at, updated_at`, input.projectID, input.automationID, input.versionID, input.triggerNodeID,
+		input.triggerResourceType, input.triggerResourceID, input.occurrenceKey, input.scheduledFor,
+		string(result.invocation.Status), result.skippedReason, result.invocation.StartedAt, result.invocation.CompletedAt).
+		Scan(&result.invocation.ID, &result.invocation.CreatedAt, &result.invocation.UpdatedAt); err != nil {
+		return automationTaskAdmissionResult{}, fmt.Errorf("creating automation invocation: %w", err)
+	}
+	if result.skippedReason != "" {
+		return result, nil
+	}
+
+	result.dispatch = &models.AutomationDispatch{InvocationID: result.invocation.ID, TaskID: input.taskID, Status: "pending"}
+	if err := conn.QueryRowContext(ctx, `INSERT INTO automation_dispatch_outbox (invocation_id, task_id)
+		VALUES (?, ?) RETURNING id, next_attempt_at, created_at, updated_at`, result.invocation.ID, input.taskID).
+		Scan(&result.dispatch.ID, &result.dispatch.NextAttemptAt, &result.dispatch.CreatedAt, &result.dispatch.UpdatedAt); err != nil {
+		return automationTaskAdmissionResult{}, fmt.Errorf("creating automation dispatch: %w", err)
+	}
+	if _, err := conn.ExecContext(ctx, `INSERT INTO automation_task_run_reservations (task_id, dispatch_id, project_id)
+		VALUES (?, ?, ?)`, input.taskID, result.dispatch.ID, input.projectID); err != nil {
+		return automationTaskAdmissionResult{}, fmt.Errorf("reserving automation task: %w", err)
+	}
+	if _, err := conn.ExecContext(ctx, `UPDATE tasks SET status = 'pending', category = ?, completed_at = NULL, updated_at = CURRENT_TIMESTAMP
+		WHERE id = ? AND project_id = ?`, result.effectiveCategory, input.taskID, input.projectID); err != nil {
+		return automationTaskAdmissionResult{}, fmt.Errorf("preparing automation task: %w", err)
+	}
+	return result, nil
+}
+
 func (r *AutomationRepo) ClaimManualAutomationRun(ctx context.Context, projectID, automationID string, now time.Time) ([]models.AutomationInvocation, []models.AutomationDispatch, error) {
 	conn, finishImmediate, err := beginImmediateConn(ctx, r.db)
 	if err != nil {
@@ -311,81 +405,24 @@ func (r *AutomationRepo) ClaimManualAutomationRun(ctx context.Context, projectID
 		if occurrenceKey == "manual:" {
 			return nil, nil, errors.New("generating Automation manual run identity")
 		}
-		skippedReason := ""
-		if entry.status == models.StatusRunning || entry.status == models.StatusQueued {
-			skippedReason = "task_running"
-		} else {
-			var reservationCount int
-			if err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_task_run_reservations WHERE task_id = ?`, entry.taskID).Scan(&reservationCount); err != nil {
-				return nil, nil, err
-			}
-			if reservationCount > 0 {
-				skippedReason = "task_reserved"
-			}
-		}
 
-		invocation := models.AutomationInvocation{
-			ProjectID: projectID, AutomationID: automationID, VersionID: versionID,
-			TriggerNodeID: entry.nodeID, TriggerResourceType: "manual", TriggerResourceID: entry.scheduleID,
-			OccurrenceKey: occurrenceKey,
+		admission, err := claimAutomationTaskAdmission(ctx, conn, automationTaskAdmissionInput{
+			projectID: projectID, automationID: automationID, versionID: versionID,
+			triggerNodeID: entry.nodeID, triggerResourceType: "manual", triggerResourceID: entry.scheduleID,
+			occurrenceKey: occurrenceKey, adapterKey: adapterKey, taskID: entry.taskID,
+			taskStatus: entry.status, taskCategory: entry.category, now: now,
+		})
+		if err != nil {
+			return nil, nil, err
 		}
-		if skippedReason != "" {
-			invocation.Status = models.AutomationInvocationSkipped
-			invocation.SkippedReason = skippedReason
-			started := now.UTC()
-			invocation.StartedAt, invocation.CompletedAt = &started, &started
-			if err := conn.QueryRowContext(ctx, `INSERT INTO automation_invocations
-				(project_id, automation_id, version_id, trigger_node_id, trigger_resource_type, trigger_resource_id,
-				 occurrence_key, status, skipped_reason, started_at, completed_at)
-				VALUES (?, ?, ?, ?, 'manual', ?, ?, 'skipped', ?, ?, ?)
-				RETURNING id, created_at, updated_at`, projectID, automationID, versionID, entry.nodeID,
-				entry.scheduleID, occurrenceKey, skippedReason, started, started).
-				Scan(&invocation.ID, &invocation.CreatedAt, &invocation.UpdatedAt); err != nil {
-				return nil, nil, fmt.Errorf("creating skipped Automation manual invocation: %w", err)
-			}
-			invocations = append(invocations, invocation)
+		invocations = append(invocations, admission.invocation)
+		if admission.dispatch == nil {
 			continue
 		}
-
-		preparedCategory := entry.category
-		if adapterKey == "custom" {
-			if preparedCategory != models.CategoryScheduled {
-				if entry.status == models.StatusFailed && entry.category == models.CategoryCompleted {
-					preparedCategory = models.CategoryScheduled
-				} else {
-					return nil, nil, ErrAutomationScheduleChanged
-				}
-			}
-		} else if preparedCategory != models.CategoryActive && preparedCategory != models.CategoryScheduled {
-			preparedCategory = models.CategoryScheduled
-		}
-		invocation.Status = models.AutomationInvocationClaimed
-		if err := conn.QueryRowContext(ctx, `INSERT INTO automation_invocations
-			(project_id, automation_id, version_id, trigger_node_id, trigger_resource_type, trigger_resource_id,
-			 occurrence_key, status) VALUES (?, ?, ?, ?, 'manual', ?, ?, 'claimed')
-			RETURNING id, created_at, updated_at`, projectID, automationID, versionID, entry.nodeID,
-			entry.scheduleID, occurrenceKey).Scan(&invocation.ID, &invocation.CreatedAt, &invocation.UpdatedAt); err != nil {
-			return nil, nil, fmt.Errorf("creating Automation manual invocation: %w", err)
-		}
-		dispatch := models.AutomationDispatch{InvocationID: invocation.ID, TaskID: entry.taskID, Status: "pending"}
-		if err := conn.QueryRowContext(ctx, `INSERT INTO automation_dispatch_outbox (invocation_id, task_id)
-			VALUES (?, ?) RETURNING id, next_attempt_at, created_at, updated_at`, invocation.ID, entry.taskID).
-			Scan(&dispatch.ID, &dispatch.NextAttemptAt, &dispatch.CreatedAt, &dispatch.UpdatedAt); err != nil {
-			return nil, nil, fmt.Errorf("creating Automation manual dispatch: %w", err)
-		}
-		if _, err := conn.ExecContext(ctx, `INSERT INTO automation_task_run_reservations (task_id, dispatch_id, project_id)
-			VALUES (?, ?, ?)`, entry.taskID, dispatch.ID, projectID); err != nil {
-			return nil, nil, fmt.Errorf("reserving Automation manual task: %w", err)
-		}
-		if _, err := conn.ExecContext(ctx, `UPDATE tasks SET status = 'pending', category = ?, completed_at = NULL, updated_at = CURRENT_TIMESTAMP
-			WHERE id = ? AND project_id = ?`, preparedCategory, entry.taskID, projectID); err != nil {
-			return nil, nil, fmt.Errorf("preparing Automation manual task: %w", err)
-		}
-		invocations = append(invocations, invocation)
-		dispatches = append(dispatches, dispatch)
+		dispatches = append(dispatches, *admission.dispatch)
 		boardEvents = append(boardEvents, events.TaskEvent{
 			Type: events.TaskBoardUpdated, TaskID: entry.taskID, TaskName: entry.taskTitle,
-			ProjectID: projectID, Status: string(models.StatusPending), Category: string(preparedCategory),
+			ProjectID: projectID, Status: string(models.StatusPending), Category: string(admission.effectiveCategory),
 		})
 	}
 
@@ -493,81 +530,17 @@ func (r *AutomationRepo) ClaimScheduledOccurrence(ctx context.Context, schedule 
 	if taskProject != owner.ProjectID {
 		return nil, nil, ErrAutomationScheduleChanged
 	}
-	preparedCategory := taskCategory
-	if adapterKey == "custom" {
-		if preparedCategory != models.CategoryScheduled {
-			if taskStatus == models.StatusFailed && taskCategory == models.CategoryCompleted {
-				preparedCategory = models.CategoryScheduled
-			} else {
-				return nil, nil, ErrAutomationScheduleChanged
-			}
-		}
-	} else if preparedCategory != models.CategoryActive && preparedCategory != models.CategoryScheduled {
-		preparedCategory = models.CategoryScheduled
+	admission, err := claimAutomationTaskAdmission(ctx, conn, automationTaskAdmissionInput{
+		projectID: owner.ProjectID, automationID: owner.AutomationID, versionID: owner.VersionID,
+		triggerNodeID: owner.NodeID, triggerResourceType: "schedule", triggerResourceID: schedule.ID,
+		occurrenceKey: occurrenceKey, scheduledFor: &due, adapterKey: adapterKey, taskID: taskID,
+		taskStatus: taskStatus, taskCategory: taskCategory, now: now,
+	})
+	if err != nil {
+		return nil, nil, err
 	}
-
-	skippedReason := ""
-	if taskStatus == models.StatusRunning || taskStatus == models.StatusQueued {
-		skippedReason = "task_running"
-	} else {
-		var reservationCount int
-		if err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_task_run_reservations
-				WHERE task_id = ?`, taskID).Scan(&reservationCount); err != nil {
-			return nil, nil, err
-		}
-		if reservationCount > 0 {
-			skippedReason = "task_reserved"
-		}
-	}
-
-	invocation := &models.AutomationInvocation{
-		ProjectID: owner.ProjectID, AutomationID: owner.AutomationID, VersionID: owner.VersionID,
-		TriggerNodeID: owner.NodeID, TriggerResourceType: "schedule", TriggerResourceID: schedule.ID,
-		OccurrenceKey: occurrenceKey, ScheduledFor: &due,
-	}
-	if skippedReason != "" {
-		invocation.Status = models.AutomationInvocationSkipped
-		invocation.SkippedReason = skippedReason
-		if err := conn.QueryRowContext(ctx, `INSERT INTO automation_invocations
-			(project_id, automation_id, version_id, trigger_node_id, trigger_resource_type, trigger_resource_id,
-			 occurrence_key, scheduled_for, status, skipped_reason, started_at, completed_at)
-			VALUES (?, ?, ?, ?, 'schedule', ?, ?, ?, 'skipped', ?, ?, ?)
-			RETURNING id, created_at, updated_at`, owner.ProjectID, owner.AutomationID, owner.VersionID, owner.NodeID,
-			schedule.ID, occurrenceKey, due, skippedReason, now.UTC(), now.UTC()).
-			Scan(&invocation.ID, &invocation.CreatedAt, &invocation.UpdatedAt); err != nil {
-			return nil, nil, fmt.Errorf("creating skipped automation invocation: %w", err)
-		}
-		started := now.UTC()
-		invocation.StartedAt, invocation.CompletedAt = &started, &started
-	} else {
-		invocation.Status = models.AutomationInvocationClaimed
-		if err := conn.QueryRowContext(ctx, `INSERT INTO automation_invocations
-			(project_id, automation_id, version_id, trigger_node_id, trigger_resource_type, trigger_resource_id,
-			 occurrence_key, scheduled_for, status)
-			VALUES (?, ?, ?, ?, 'schedule', ?, ?, ?, 'claimed') RETURNING id, created_at, updated_at`,
-			owner.ProjectID, owner.AutomationID, owner.VersionID, owner.NodeID, schedule.ID, occurrenceKey, due).
-			Scan(&invocation.ID, &invocation.CreatedAt, &invocation.UpdatedAt); err != nil {
-			return nil, nil, fmt.Errorf("creating automation invocation: %w", err)
-		}
-	}
-
-	var dispatch *models.AutomationDispatch
-	if skippedReason == "" {
-		dispatch = &models.AutomationDispatch{InvocationID: invocation.ID, TaskID: taskID, Status: "pending"}
-		if err := conn.QueryRowContext(ctx, `INSERT INTO automation_dispatch_outbox (invocation_id, task_id)
-			VALUES (?, ?) RETURNING id, next_attempt_at, created_at, updated_at`, invocation.ID, taskID).
-			Scan(&dispatch.ID, &dispatch.NextAttemptAt, &dispatch.CreatedAt, &dispatch.UpdatedAt); err != nil {
-			return nil, nil, fmt.Errorf("creating automation dispatch: %w", err)
-		}
-		if _, err := conn.ExecContext(ctx, `INSERT INTO automation_task_run_reservations (task_id, dispatch_id, project_id)
-			VALUES (?, ?, ?)`, taskID, dispatch.ID, owner.ProjectID); err != nil {
-			return nil, nil, fmt.Errorf("reserving automation task: %w", err)
-		}
-		if _, err := conn.ExecContext(ctx, `UPDATE tasks SET status = 'pending', category = ?, completed_at = NULL,
-			updated_at = CURRENT_TIMESTAMP WHERE id = ? AND project_id = ?`, preparedCategory, taskID, owner.ProjectID); err != nil {
-			return nil, nil, fmt.Errorf("preparing automation task: %w", err)
-		}
-	}
+	invocation := &admission.invocation
+	dispatch := admission.dispatch
 
 	result, err := conn.ExecContext(ctx, `UPDATE schedules SET last_run = ?, next_run = ?, updated_at = CURRENT_TIMESTAMP
 		WHERE id = ? AND enabled = 1 AND next_run = ?`, now.UTC(), nextRun, schedule.ID, due)
@@ -585,11 +558,11 @@ func (r *AutomationRepo) ClaimScheduledOccurrence(ctx context.Context, schedule 
 		automationobs.String("project_id", owner.ProjectID), automationobs.String("automation_id", owner.AutomationID),
 		automationobs.String("version_id", owner.VersionID), automationobs.String("invocation_id", invocation.ID),
 		automationobs.String("node_id", owner.NodeID), automationobs.String("status", string(invocation.Status)))
-	if skippedReason != "" {
+	if admission.skippedReason != "" {
 		automationobs.Event("automation.invocation.skipped",
 			automationobs.String("automation_id", owner.AutomationID), automationobs.String("version_id", owner.VersionID),
 			automationobs.String("invocation_id", invocation.ID), automationobs.String("node_id", owner.NodeID),
-			automationobs.String("reason", skippedReason))
+			automationobs.String("reason", admission.skippedReason))
 	}
 	if dispatch != nil {
 		automationobs.Event("automation.dispatch.created",
@@ -600,11 +573,11 @@ func (r *AutomationRepo) ClaimScheduledOccurrence(ctx context.Context, schedule 
 	if dispatch != nil && r.broadcaster != nil {
 		if taskStatus != models.StatusPending {
 			r.broadcaster.Publish(events.TaskEvent{Type: events.TaskStatusChanged, TaskID: taskID, TaskName: taskTitle,
-				ProjectID: owner.ProjectID, Status: string(models.StatusPending), OldStatus: string(taskStatus), Category: string(preparedCategory)})
+				ProjectID: owner.ProjectID, Status: string(models.StatusPending), OldStatus: string(taskStatus), Category: string(admission.effectiveCategory)})
 		}
-		if taskCategory != preparedCategory {
+		if taskCategory != admission.effectiveCategory {
 			r.broadcaster.Publish(events.TaskEvent{Type: events.TaskCategoryChanged, TaskID: taskID, TaskName: taskTitle,
-				ProjectID: owner.ProjectID, Status: string(models.StatusPending), Category: string(preparedCategory), OldCategory: string(taskCategory)})
+				ProjectID: owner.ProjectID, Status: string(models.StatusPending), Category: string(admission.effectiveCategory), OldCategory: string(taskCategory)})
 		}
 	}
 	eventType := events.AutomationDefinitionUpdated
@@ -616,7 +589,7 @@ func (r *AutomationRepo) ClaimScheduledOccurrence(ctx context.Context, schedule 
 	})
 	if dispatch != nil && r.broadcaster != nil {
 		r.broadcaster.Publish(events.TaskEvent{Type: events.TaskBoardUpdated, TaskID: taskID, TaskName: taskTitle,
-			ProjectID: owner.ProjectID, Status: string(models.StatusPending), Category: string(preparedCategory)})
+			ProjectID: owner.ProjectID, Status: string(models.StatusPending), Category: string(admission.effectiveCategory)})
 	}
 	return invocation, dispatch, nil
 }
