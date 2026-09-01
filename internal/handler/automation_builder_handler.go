@@ -137,7 +137,7 @@ func (h *Handler) EditAutomationBuilder(c echo.Context) error {
 		return err
 	}
 	automationID := c.Param("automationId")
-	opened, err := h.automationDraftSvc.CurrentCandidate(ctx, projectID, automationID)
+	opened, err := h.automationDraftSvc.LoadCurrentCandidate(ctx, projectID, automationID)
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "not found") {
 			return echo.NewHTTPError(http.StatusNotFound, "automation not found")
