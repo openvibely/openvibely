@@ -619,8 +619,6 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 								streamTerminalHandled = true;
 								if (Object.prototype.hasOwnProperty.call(container, '_authoritativeTerminalContent')) {
 									textBuffer = String(container._authoritativeTerminalContent || '');
-									delete container._authoritativeTerminalContent;
-									container.removeAttribute('data-authoritative-terminal-content');
 								}
 								var terminalStatus = event && event.data ? event.data : 'completed';
 								if (window.hideMixtureProgress) window.hideMixtureProgress(execId);
@@ -694,8 +692,6 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 							streamTerminalHandled = true;
 							if (Object.prototype.hasOwnProperty.call(container, '_authoritativeTerminalContent')) {
 								textBuffer = String(container._authoritativeTerminalContent || '');
-								delete container._authoritativeTerminalContent;
-								container.removeAttribute('data-authoritative-terminal-content');
 							}
 							flushBufferedOutput();
 							// Hide thinking indicator and streaming dots, ensure content shows
@@ -1106,8 +1102,6 @@ templ ChatStreamingResumeInitScript() {
 								streamTerminalHandled = true;
 								if (Object.prototype.hasOwnProperty.call(container, '_authoritativeTerminalContent')) {
 									cumulativeContent = String(container._authoritativeTerminalContent || '');
-									delete container._authoritativeTerminalContent;
-									container.removeAttribute('data-authoritative-terminal-content');
 								}
 								persistResumeStreamState(false);
 								var terminalStatus = event && event.data ? event.data : 'completed';
@@ -1161,8 +1155,6 @@ templ ChatStreamingResumeInitScript() {
 						streamTerminalHandled = true;
 							if (Object.prototype.hasOwnProperty.call(container, '_authoritativeTerminalContent')) {
 								cumulativeContent = String(container._authoritativeTerminalContent || '');
-								delete container._authoritativeTerminalContent;
-								container.removeAttribute('data-authoritative-terminal-content');
 							}
 							persistResumeStreamState(false);
 							flushCumulativeContent();
