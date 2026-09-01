@@ -149,7 +149,7 @@ func (h *Handler) TaskThreadQueuedInputSteer(c echo.Context) error {
 	}
 	ctx := c.Request().Context()
 	steering, err := h.convertQueuedInputToSteering(ctx, input, func() (*models.Execution, error) {
-		return h.execRepo.FindActiveTaskExecution(ctx, taskID, "")
+		return h.execRepo.FindActiveTaskThreadExecution(ctx, taskID, "")
 	})
 	if err != nil {
 		return err

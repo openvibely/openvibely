@@ -175,6 +175,64 @@ func TestHostedValidSessionBypassesNewTransactions(t *testing.T) {
 	}
 }
 
+func TestSessionRecognition_HostedCookieStates(t *testing.T) {
+	h, _, _ := hostedAuthTestHandler(t, nil)
+	now := time.Now()
+	base := auth.SessionClaims{
+		Version: 1, Subject: "subject", Email: "user@example.com", Display: "user@example.com",
+		InstanceID: "instance-1", AuthSource: auth.HostedAuthSource,
+		IssuedAt: now.Unix(), ExpiresAt: now.Unix() + int64(time.Hour/time.Second),
+	}
+	sign := func(claims auth.SessionClaims) string {
+		token, err := auth.SignHostedSession(claims, hostedHandlerKey)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return token
+	}
+	valid := sign(base)
+	tampered := valid[:len(valid)-1] + "A"
+	if tampered == valid {
+		tampered = valid[:len(valid)-1] + "B"
+	}
+	expired := base
+	expired.IssuedAt = now.Add(-2 * time.Hour).Unix()
+	expired.ExpiresAt = expired.IssuedAt + int64(time.Hour/time.Second)
+	wrongInstance := base
+	wrongInstance.InstanceID = "instance-2"
+
+	for _, tt := range []struct {
+		name       string
+		cookie     string
+		wantState  hostedCookieState
+		wantClaims bool
+	}{
+		{name: "missing", wantState: hostedCookieMissing},
+		{name: "valid", cookie: valid, wantState: hostedCookieValid, wantClaims: true},
+		{name: "expired", cookie: sign(expired), wantState: hostedCookieInvalid},
+		{name: "malformed", cookie: "malformed", wantState: hostedCookieInvalid},
+		{name: "tampered", cookie: tampered, wantState: hostedCookieInvalid},
+		{name: "wrong instance", cookie: sign(wrongInstance), wantState: hostedCookieInvalid},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/auth/me", nil)
+			if tt.cookie != "" {
+				req.AddCookie(&http.Cookie{Name: auth.DefaultCookieName, Value: tt.cookie})
+			}
+			session := h.recognizeSession(req, now)
+			if session.hostedCookieState != tt.wantState {
+				t.Fatalf("state=%d want=%d", session.hostedCookieState, tt.wantState)
+			}
+			if (session.hostedClaims != nil) != tt.wantClaims {
+				t.Fatalf("claims=%#v want claims=%v", session.hostedClaims, tt.wantClaims)
+			}
+			if tt.wantClaims && (session.hostedClaims.Subject != base.Subject || session.hostedClaims.InstanceID != base.InstanceID) {
+				t.Fatalf("claims=%#v", session.hostedClaims)
+			}
+		})
+	}
+}
+
 func TestHostedErrorCallbackConsumesOnlyMatchingTransaction(t *testing.T) {
 	var providerCalls int
 	provider := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

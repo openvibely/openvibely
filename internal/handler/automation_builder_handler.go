@@ -137,7 +137,7 @@ func (h *Handler) EditAutomationBuilder(c echo.Context) error {
 		return err
 	}
 	automationID := c.Param("automationId")
-	opened, err := h.automationDraftSvc.CurrentCandidate(ctx, projectID, automationID)
+	opened, err := h.automationDraftSvc.LoadCurrentCandidate(ctx, projectID, automationID)
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "not found") {
 			return echo.NewHTTPError(http.StatusNotFound, "automation not found")
@@ -162,8 +162,12 @@ func (h *Handler) EditAutomationBuilder(c echo.Context) error {
 	} else if rawYAML, yamlSubmitted := automationDraftFormValue(c, "automation_yaml"); yamlSubmitted || strings.TrimSpace(c.FormValue("candidate_json")) != "" {
 		candidate, err = decodeAutomationBuilderCandidate(c)
 		if err != nil {
+			validated, validationErr := h.automationDraftSvc.PreviewCandidate(ctx, projectID, opened.Candidate, opened.Definition)
+			if validationErr != nil {
+				return echo.NewHTTPError(http.StatusBadRequest, validationErr.Error())
+			}
 			return h.renderAutomationBuilder(c, models.AutomationBuilderPage{
-				Result: *opened, AutomationID: automationID, Source: opened.Definition.Version.Source,
+				Result: *validated, AutomationID: automationID, Source: opened.Definition.Version.Source,
 				TemplateUpdateAvailable: templateUpdateAvailable, LifecycleState: opened.Definition.Automation.LifecycleState,
 				YAML: rawYAML, YAMLProvided: true, Error: "YAML did not parse: " + err.Error(),
 			})
@@ -206,10 +210,7 @@ func (h *Handler) previewAutomationBuilderCandidate(ctx context.Context, project
 	if err != nil {
 		return nil, err
 	}
-	result, err := h.automationDraftSvc.PreviewCandidate(ctx, projectID, normalized, definition)
-	if err != nil {
-		return nil, err
-	}
+	result := h.automationDraftSvc.PreviewValidatedCandidate(normalized, definition)
 	result.Candidate = normalized
 	result.ValidationErrors = plan.Validation
 	return result, nil
@@ -252,7 +253,7 @@ func (h *Handler) saveAutomationBuilderCandidate(c echo.Context, projectID strin
 	if page.Source == "template" {
 		source = "template"
 	}
-	saved, err := h.automationCompiler.Save(c.Request().Context(), service.AutomationSaveRequest{
+	saved, err := h.automationCompiler.SaveValidatedCandidate(c.Request().Context(), service.AutomationSaveRequest{
 		ProjectID: projectID, AutomationID: page.AutomationID, Source: source, CreatedVia: "web", Candidate: page.Result.Candidate,
 		UpdateToLatestTemplate: updateToLatestTemplate,
 	})

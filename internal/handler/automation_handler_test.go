@@ -864,6 +864,167 @@ func TestAutomationBuilderPreviewUsesCompilerValidation(t *testing.T) {
 	})
 }
 
+func TestAutomationBuilderPreviewUsesSingleCompactAgentValidationPass(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	h, _, _ := setupTestHandlerForDB(t, db)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	project := &models.Project{Name: "Single Agent validation preview"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	agentRepo := repository.NewAgentRepo(db)
+	agent := &models.Agent{Name: "Preview Agent", Key: "preview-agent", SystemPrompt: "private preview prompt", Model: "inherit", Tools: []string{"Read"}, Enabled: true, SelectableAsPrimary: true}
+	require.NoError(t, agentRepo.Create(ctx, agent))
+	h.SetAgentRepo(agentRepo)
+
+	registry := service.NewAutomationAdapterRegistry()
+	automationRepo := repository.NewAutomationRepo(db)
+	drafts := service.NewAutomationDraftService(automationRepo, registry)
+	capabilities := service.NewAutomationCapabilitySnapshotBuilder(projectRepo, agentRepo, nil, nil)
+	validator := service.NewAutomationSaveValidator(registry, drafts)
+	compiler := service.NewAutomationCompiler(automationRepo, h.taskSvc, h.taskRepo, h.scheduleRepo, validator)
+	h.SetAutomationBuilderServices(drafts, capabilities, validator, compiler, nil, nil)
+
+	candidate, err := drafts.BlankCandidate("")
+	require.NoError(t, err)
+	candidate.Name = "Single Agent validation preview"
+	candidate.Nodes = []models.AutomationDraftNode{{
+		Key: "review", Name: "Review", Type: models.AutomationNodeAgentTask, Role: "task",
+		Config: map[string]any{"prompt": "Review the request.", "category": "backlog", "priority": 2, "agent_ref": agent.Key},
+	}}
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	result, err := h.previewAutomationBuilderCandidate(ctx, project.ID, candidate, nil)
+	counter.SetEnabled(false)
+	require.NoError(t, err)
+	require.Empty(t, result.ValidationErrors)
+	agentStatements := make([]string, 0)
+	for _, statement := range counter.Statements() {
+		if strings.Contains(strings.ToLower(statement), "from agents") {
+			agentStatements = append(agentStatements, statement)
+		}
+	}
+	require.Len(t, agentStatements, 1)
+	projection := strings.ToLower(strings.SplitN(strings.Join(strings.Fields(agentStatements[0]), " "), " from agents", 2)[0])
+	require.Contains(t, projection, "select id")
+	require.Contains(t, projection, "coalesce(key, '')")
+	require.Contains(t, projection, "project_id")
+	for _, forbidden := range []string{"system_prompt", "tools", "tool_config", "plugins", "mcp_servers", "skills", "permission_defaults_json", "model_defaults_json", "source_refs_json", "created_at", "updated_at"} {
+		require.NotContains(t, projection, forbidden)
+	}
+
+	delete(candidate.Nodes[0].Config, "agent_ref")
+	counter.Reset()
+	counter.SetEnabled(true)
+	result, err = h.previewAutomationBuilderCandidate(ctx, project.ID, candidate, nil)
+	counter.SetEnabled(false)
+	require.NoError(t, err)
+	require.Empty(t, result.ValidationErrors)
+	agentStatements = agentStatements[:0]
+	for _, statement := range counter.Statements() {
+		if strings.Contains(strings.ToLower(statement), "from agents") {
+			agentStatements = append(agentStatements, statement)
+		}
+	}
+	require.Empty(t, agentStatements)
+}
+
+func TestAutomationBuilderEditUsesSingleCompactAgentValidationPass(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	h, e, _ := setupTestHandlerForDB(t, db)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	project := &models.Project{Name: "Single Agent validation edit"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	agentRepo := repository.NewAgentRepo(db)
+	agent := &models.Agent{Name: "Edit Agent", Key: "edit-agent", SystemPrompt: "private edit prompt", Model: "inherit", Tools: []string{"Read"}, Enabled: true, SelectableAsPrimary: true}
+	require.NoError(t, agentRepo.Create(ctx, agent))
+	h.SetAgentRepo(agentRepo)
+
+	registry := service.NewAutomationAdapterRegistry()
+	automationRepo := repository.NewAutomationRepo(db)
+	drafts := service.NewAutomationDraftService(automationRepo, registry)
+	capabilities := service.NewAutomationCapabilitySnapshotBuilder(projectRepo, agentRepo, nil, nil)
+	validator := service.NewAutomationSaveValidator(registry, drafts)
+	compiler := service.NewAutomationCompiler(automationRepo, h.taskSvc, h.taskRepo, h.scheduleRepo, validator)
+	h.SetAutomationBuilderServices(drafts, capabilities, validator, compiler, nil, nil)
+
+	candidate, err := drafts.BlankCandidate("")
+	require.NoError(t, err)
+	candidate.Name = "Single Agent validation edit"
+	candidate.Nodes = []models.AutomationDraftNode{{
+		Key: "review", Name: "Review", Type: models.AutomationNodeAgentTask, Role: "task",
+		Config: map[string]any{"prompt": "Review the request.", "category": "backlog", "priority": 2, "agent_ref": agent.Key},
+	}}
+	saved, err := compiler.Save(ctx, service.AutomationSaveRequest{
+		ProjectID: project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, saved)
+	require.NotNil(t, saved.Definition)
+
+	yaml, err := service.EncodeAutomationDraftYAML(candidate)
+	require.NoError(t, err)
+	form := url.Values{"project_id": {project.ID}, "automation_yaml": {yaml}}
+	req := httptest.NewRequest(http.MethodPost, "/automations/"+saved.Definition.Automation.ID+"/builder?project_id="+project.ID, strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	response := httptest.NewRecorder()
+	counter.Reset()
+	counter.SetEnabled(true)
+	e.ServeHTTP(response, req)
+	counter.SetEnabled(false)
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+
+	countAgentQueries := func() (compact, rich int) {
+		for _, statement := range counter.Statements() {
+			query := strings.ToLower(strings.Join(strings.Fields(statement), " "))
+			if !strings.Contains(query, "from agents") {
+				continue
+			}
+			projection := strings.SplitN(query, " from agents", 2)[0]
+			if strings.Contains(projection, "system_prompt") {
+				rich++
+				continue
+			}
+			if strings.Contains(projection, "coalesce(key, '')") && strings.Contains(projection, "coalesce(project_id, '')") {
+				compact++
+			}
+		}
+		return compact, rich
+	}
+	compactAgentQueries, richAgentQueries := countAgentQueries()
+	require.Equal(t, 1, compactAgentQueries, "edit preview must read selectable Agent identities once")
+	require.Equal(t, 1, richAgentQueries, "edit rendering must retain its separate rich Agent picker read")
+
+	form.Set("save_changes", "true")
+	req = httptest.NewRequest(http.MethodPost, "/automations/"+saved.Definition.Automation.ID+"/builder?project_id="+project.ID, strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	response = httptest.NewRecorder()
+	counter.Reset()
+	counter.SetEnabled(true)
+	e.ServeHTTP(response, req)
+	counter.SetEnabled(false)
+	require.Equal(t, http.StatusNoContent, response.Code, response.Body.String())
+	compactAgentQueries, richAgentQueries = countAgentQueries()
+	require.Equal(t, 1, compactAgentQueries, "edit save must reuse preview validation")
+	require.Equal(t, 1, richAgentQueries, "edit save must retain its separate rich Agent materialization read")
+
+	_, err = db.ExecContext(ctx, `UPDATE agents SET enabled = 0 WHERE id = ?`, agent.ID)
+	require.NoError(t, err)
+	malformedForm := url.Values{"project_id": {project.ID}, "automation_yaml": {""}, "save_changes": {"true"}}
+	malformedRequest := httptest.NewRequest(http.MethodPost, "/automations/"+saved.Definition.Automation.ID+"/builder?project_id="+project.ID, strings.NewReader(malformedForm.Encode()))
+	malformedRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	malformedRequest.Header.Set("HX-Request", "true")
+	malformedResponse := httptest.NewRecorder()
+	e.ServeHTTP(malformedResponse, malformedRequest)
+	require.Equal(t, http.StatusOK, malformedResponse.Code, malformedResponse.Body.String())
+	require.Empty(t, malformedResponse.Header().Get("HX-Redirect"))
+	require.Contains(t, malformedResponse.Body.String(), "YAML did not parse")
+	require.Contains(t, malformedResponse.Body.String(), "Agent selection is unavailable in this project.")
+}
+
 func TestAutomationBuilderRejectsUnsafeAndUnsupportedYAMLWithoutSideEffects(t *testing.T) {
 	newBuilder := func(t *testing.T) (*TestContext, *models.Project, *repository.AutomationRepo, *service.AutomationDraftService) {
 		t.Helper()

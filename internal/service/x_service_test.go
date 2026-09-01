@@ -1143,6 +1143,9 @@ func TestXOutboundUsesWeightedPostLimit(t *testing.T) {
 	tcoAtLimit := strings.Repeat("x", 240) + " https://t.co/" + strings.Repeat("a", xMaxTCOURLSlugLength)
 	tcoOverLimit := strings.Repeat("x", 240) + " https://t.co/" + strings.Repeat("a", xMaxTCOURLSlugLength+1)
 	overlongIDNALabel := strings.Repeat("x", 120) + " " + strings.Repeat("界", 80) + ".com"
+	multiSuffixURL := strings.Repeat("x", 241) + " example.com.例.foo.org"
+	unicodeURLWithinRawLimit := "https://" + strings.Repeat("界.", 500) + "com"
+	unicodeURLWithinRawLimit += "/" + strings.Repeat("a", xMaxURLLength-len(unicodeURLWithinRawLimit)-1)
 
 	tests := []struct {
 		name       string
@@ -1170,6 +1173,8 @@ func TestXOutboundUsesWeightedPostLimit(t *testing.T) {
 		{name: "t.co slug at provider maximum", text: tcoAtLimit, shouldPost: true},
 		{name: "t.co slug over provider maximum", text: tcoOverLimit, shouldPost: false},
 		{name: "IDNA label over provider maximum", text: overlongIDNALabel, shouldPost: false},
+		{name: "multiple URL entities separated by Unicode label", text: multiSuffixURL, shouldPost: false},
+		{name: "Unicode URL uses original length for provider maximum", text: unicodeURLWithinRawLimit, shouldPost: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1218,6 +1223,7 @@ func TestXWeightedLengthConformanceRegressions(t *testing.T) {
 		{name: "NFC equivalent decomposed text", text: strings.Repeat("e\u0301", 141), shouldPost: true},
 		{name: "valid bare IDN URL", text: strings.Repeat("x", 258) + " example.рф", shouldPost: false},
 		{name: "valid bare URL after Unicode prefix", text: strings.Repeat("x", 258) + " 例.example.com", shouldPost: false},
+		{name: "mixed ACE-prefixed Unicode domain remains ordinary text", text: strings.Repeat("x", 257) + " https://xn--abc.界.com", shouldPost: true},
 	}
 	for _, tt := range directCases {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1248,6 +1254,7 @@ func TestXURLRangesFollowTwitterTextEntityBoundaries(t *testing.T) {
 		{name: "internationalized domain", text: "example.рф", expected: []string{"example.рф"}},
 		{name: "internationalized subdomain is not protocolless URL", text: "пример.рф", expected: []string{}},
 		{name: "Unicode prefix before ASCII protocolless URL", text: "例.example.com", expected: []string{"example.com"}},
+		{name: "multiple ASCII URLs separated by Unicode label", text: "example.com.例.foo.org", expected: []string{"example.com", "foo.org"}},
 		{name: "uppercase path and query", text: "HTTPS://EXAMPLE.COM/Path?X=Y", expected: []string{"HTTPS://EXAMPLE.COM/Path?X=Y"}},
 		{name: "balanced path punctuation", text: "https://example.com/(foo).", expected: []string{"https://example.com/(foo)"}},
 		{name: "slash before unsupported Unicode path", text: "https://example.com/界", expected: []string{"https://example.com/"}},
@@ -1258,6 +1265,7 @@ func TestXURLRangesFollowTwitterTextEntityBoundaries(t *testing.T) {
 		{name: "URL after slash", text: "foo/example.com", expected: []string{}},
 		{name: "URL after hyphen", text: "-example.com", expected: []string{}},
 		{name: "malformed protocol URL", text: "https://not-a-url", expected: []string{}},
+		{name: "mixed ACE-prefixed Unicode domain", text: "https://xn--abc.界.com", expected: []string{}},
 		{name: "URL exactly at provider maximum", text: maxURL, expected: []string{maxURL}},
 		{name: "URL over provider maximum", text: overlongURL, expected: []string{}},
 		{name: "t.co slug exactly at maximum", text: tcoAtLimit, expected: []string{tcoAtLimit}},
@@ -1279,6 +1287,7 @@ func TestXReplyConformanceTruncatesEntitiesWithoutProviderRejection(t *testing.T
 	ctx, svc, _, _, _, _, _ := setupXServiceTest(t)
 	api := &fakeXAPI{}
 	svc.setAPI(api)
+	multiSuffixURL := strings.Repeat("x", 241) + " example.com.例.foo.org"
 
 	tests := []struct {
 		name     string
@@ -1290,6 +1299,7 @@ func TestXReplyConformanceTruncatesEntitiesWithoutProviderRejection(t *testing.T
 		{name: "CJK text", text: strings.Repeat("界", 141), expected: strings.Repeat("界", 139) + "…"},
 		{name: "URL entity", text: strings.Repeat("x", 258) + " example.рф", expected: strings.Repeat("x", 258) + " …"},
 		{name: "URL after Unicode prefix", text: strings.Repeat("x", 258) + " 例.example.com", expected: strings.Repeat("x", 258) + " 例.…"},
+		{name: "multiple URL entities separated by Unicode label", text: multiSuffixURL, expected: strings.Repeat("x", 241) + " example.com.例.…"},
 		{name: "URL followed by CJK text", text: strings.Repeat("x", 255) + " https://example.com/界", expected: strings.Repeat("x", 255) + " …"},
 		{name: "decomposed text preserves original prefix boundary", text: strings.Repeat("e\u0301", 281), expected: strings.Repeat("e\u0301", 278) + "…"},
 	}

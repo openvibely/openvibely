@@ -7038,6 +7038,41 @@ func TestHandler_TaskThreadSend_QueuesBehindActiveTurn(t *testing.T) {
 	assert.Equal(t, "queued follow up", inputs[0].Content)
 }
 
+func TestHandler_TaskThreadSend_QueuesBehindRunningScheduledExecution(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Scheduled Thread FIFO Project")
+	task := createTask(t, h, project.ID, "Scheduled Thread FIFO Task", func(tk *models.Task) {
+		tk.Status = models.StatusRunning
+		tk.Category = models.CategoryScheduled
+		tk.AgentID = &agent.ID
+	})
+	activeExec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "scheduled active turn"
+	})
+
+	form := url.Values{}
+	form.Set("message", "queue this scheduled follow-up")
+	rec := htmxPost(e, "/tasks/"+task.ID+"/thread", form)
+	assertCode(t, rec, http.StatusOK)
+	assertContains(t, rec, `data-input-mode="queued"`)
+	assertContains(t, rec, `hx-swap-oob="beforeend:#pending-thread-inputs[data-task-id=&#34;`+task.ID+`&#34;]"`)
+
+	inputs, err := h.threadInputRepo.ListPendingForTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, inputs, 1)
+	assert.Equal(t, models.ThreadInputModeQueued, inputs[0].InputMode)
+	assert.Equal(t, activeExec.ID, inputs[0].RunExecutionID)
+	assert.Equal(t, "queue this scheduled follow-up", inputs[0].Content)
+
+	execs, err := h.execRepo.ListByTaskChronological(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, execs, 1)
+	assert.Equal(t, activeExec.ID, execs[0].ID)
+	assert.Equal(t, models.ExecRunning, execs[0].Status)
+}
 func TestHandler_RunTask_StartsPlannerForDeferredSwarmParent(t *testing.T) {
 	h, e, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()
@@ -7159,6 +7194,47 @@ func TestHandler_TaskThreadSteer_CreatesPendingSteeringInput(t *testing.T) {
 	require.Len(t, inputs, 1)
 	assert.Equal(t, "Stop and use the new interface", inputs[0].Content)
 	assert.Equal(t, "task-steering-session", inputs[0].AttachmentSessionID)
+}
+
+func TestHandler_TaskThreadSteer_CreatesPendingSteeringInputForScheduledTask(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Scheduled Thread Steering Project")
+	task := createTask(t, h, project.ID, "Scheduled Thread Steering Task", func(tk *models.Task) {
+		tk.Status = models.StatusRunning
+		tk.Category = models.CategoryScheduled
+		tk.AgentID = &agent.ID
+	})
+	activeExec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "scheduled active turn"
+		ex.Output = "partial scheduled output"
+	})
+
+	form := url.Values{}
+	form.Set("message", "Correct the scheduled run now")
+	form.Set("expected_turn_id", activeExec.ID)
+	rec := htmxPost(e, "/tasks/"+task.ID+"/thread/steer", form)
+	assertCode(t, rec, http.StatusOK)
+	assertContains(t, rec, "Steering pending")
+	assertContains(t, rec, `data-input-mode="steering"`)
+
+	inputs, err := h.threadInputRepo.ListPendingForTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, inputs, 1)
+	assert.Equal(t, models.ThreadInputModeSteering, inputs[0].InputMode)
+	assert.Equal(t, models.ThreadInputPending, inputs[0].InputStatus)
+	assert.Equal(t, activeExec.ID, inputs[0].RunExecutionID)
+	assert.Equal(t, activeExec.ID, inputs[0].TurnID)
+	assert.Equal(t, activeExec.ID, inputs[0].ExpectedTurnID)
+	assert.Equal(t, "Correct the scheduled run now", inputs[0].Content)
+
+	execs, err := h.execRepo.ListByTaskChronological(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, execs, 1)
+	assert.Equal(t, activeExec.ID, execs[0].ID)
+	assert.Equal(t, models.ExecRunning, execs[0].Status)
 }
 
 func TestHandler_TaskThreadCancel_CancelsQueuedFollowups(t *testing.T) {

@@ -47,6 +47,7 @@ type AutomationSaveRequest struct {
 	ConfirmationThreadID   string
 	ConfirmingUserInputID  string
 	UpdateToLatestTemplate bool
+	validatedCandidate     bool
 }
 
 type AutomationSaveResult struct {
@@ -77,12 +78,14 @@ func (c *AutomationCompiler) validateSaveCandidate(ctx context.Context, projectI
 	if err != nil {
 		return normalized, nil, err
 	}
-	agentIssues, err := c.validator.agentIssues(ctx, projectID, normalized)
-	if err != nil {
-		return normalized, nil, err
-	}
 	issues = append(issues, capabilityIssues...)
-	issues = append(issues, agentIssues...)
+	if c.validator.drafts.capabilities == nil {
+		agentIssues, err := c.validator.agentIssues(ctx, projectID, normalized)
+		if err != nil {
+			return normalized, nil, err
+		}
+		issues = append(issues, agentIssues...)
+	}
 	return normalized, issues, nil
 }
 
@@ -107,6 +110,13 @@ func (c *AutomationCompiler) PreviewSave(ctx context.Context, projectID string, 
 		}
 	}
 	return plan, normalized, nil
+}
+
+// SaveValidatedCandidate applies a candidate that has already passed PreviewSave.
+// It preserves Save's atomic materialization and skips only the duplicate validation pass.
+func (c *AutomationCompiler) SaveValidatedCandidate(ctx context.Context, request AutomationSaveRequest) (*AutomationSaveResult, error) {
+	request.validatedCandidate = true
+	return c.Save(ctx, request)
 }
 
 func automationResourceNodes(adapter AutomationAdapter, candidate models.AutomationDraftCandidate) []AutomationAdapterNode {
@@ -170,12 +180,18 @@ func (c *AutomationCompiler) Save(ctx context.Context, request AutomationSaveReq
 	if strings.TrimSpace(request.ProjectID) == "" {
 		return nil, errors.New("project is required")
 	}
-	candidate, issues, err := c.validateSaveCandidate(ctx, request.ProjectID, request.Candidate)
-	if err != nil {
-		return nil, err
-	}
-	if len(issues) > 0 {
-		return nil, fmt.Errorf("automation graph validation failed: %s", issues[0].Message)
+	candidate := request.Candidate
+	if !request.validatedCandidate {
+		var issues []models.AutomationValidationIssue
+		var err error
+		candidate, issues, err = c.validateSaveCandidate(ctx, request.ProjectID, request.Candidate)
+		if err != nil {
+			return nil, err
+		}
+		if len(issues) > 0 {
+			return nil, fmt.Errorf("automation graph validation failed: %s", issues[0].Message)
+		}
+		request.Candidate = candidate
 	}
 
 	automationID := strings.TrimSpace(request.AutomationID)

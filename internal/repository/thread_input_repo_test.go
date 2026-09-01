@@ -975,6 +975,48 @@ func TestExecutionRepo_FindActiveTaskExecutionTreatsQueuedTaskAsActive(t *testin
 	}
 }
 
+func TestExecutionRepo_FindActiveTaskThreadExecutionIncludesScheduledTask(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	project := createThreadInputProject(t, ctx, db)
+	taskRepo := NewTaskRepo(db, nil)
+	agent := createThreadInputLLMConfig(t, ctx, db)
+	execRepo := NewExecutionRepo(db)
+
+	for _, status := range []models.TaskStatus{models.StatusQueued, models.StatusRunning} {
+		t.Run(string(status), func(t *testing.T) {
+			task := &models.Task{
+				ProjectID: project.ID,
+				Title:     "Scheduled task-thread " + string(status),
+				Category:  models.CategoryScheduled,
+				Status:    status,
+				Prompt:    "scheduled prompt",
+			}
+			require.NoError(t, taskRepo.Create(ctx, task))
+			liveExec := &models.Execution{
+				TaskID:        task.ID,
+				AgentConfigID: agent.ID,
+				Status:        models.ExecRunning,
+				PromptSent:    "scheduled live turn",
+			}
+			require.NoError(t, execRepo.Create(ctx, liveExec))
+
+			active, err := execRepo.FindActiveTaskThreadExecution(ctx, task.ID, "")
+			require.NoError(t, err)
+			require.NotNil(t, active)
+			require.Equal(t, liveExec.ID, active.ID)
+
+			hasActive, err := execRepo.HasActiveTaskThreadExecution(ctx, task.ID, "")
+			require.NoError(t, err)
+			require.True(t, hasActive)
+
+			generic, err := execRepo.FindActiveTaskExecution(ctx, task.ID, "")
+			require.NoError(t, err)
+			require.Nil(t, generic, "generic active-task lookup must remain active-category scoped")
+		})
+	}
+}
+
 func TestExecutionRepo_RecoverPreRestartRunningTaskExecutionsTerminalizesDirectFollowupWithoutSuccessor(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
