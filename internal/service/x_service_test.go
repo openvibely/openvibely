@@ -1136,6 +1136,229 @@ func TestXReadinessTracksPollingFailureAndRecovery(t *testing.T) {
 	require.Empty(t, status.LastError)
 }
 
+func TestXOutboundUsesWeightedPostLimit(t *testing.T) {
+	ctx, svc, _, _, _, _, _ := setupXServiceTest(t)
+	api := &fakeXAPI{}
+	svc.setAPI(api)
+
+	maxURL := "https://example.com/" + strings.Repeat("a", xMaxURLLength-len("https://example.com/"))
+	overlongURL := maxURL + "a"
+	tcoAtLimit := strings.Repeat("x", 240) + " https://t.co/" + strings.Repeat("a", xMaxTCOURLSlugLength)
+	tcoOverLimit := strings.Repeat("x", 240) + " https://t.co/" + strings.Repeat("a", xMaxTCOURLSlugLength+1)
+	overlongIDNALabel := strings.Repeat("x", 120) + " " + strings.Repeat("界", 80) + ".com"
+	multiSuffixURL := strings.Repeat("x", 241) + " example.com.例.foo.org"
+	unicodeURLWithinRawLimit := "https://" + strings.Repeat("界.", 500) + "com"
+	unicodeURLWithinRawLimit += "/" + strings.Repeat("a", xMaxURLLength-xUTF16Length(unicodeURLWithinRawLimit)-1)
+	require.Equal(t, xMaxURLLength, xUTF16Length(unicodeURLWithinRawLimit))
+	overlongUnicodePrefixURL := strings.Repeat("界.", 2040) + "example.com"
+	require.Greater(t, xUTF16Length(overlongUnicodePrefixURL)+xUTF16Length("https://"), xMaxURLLength)
+
+	tests := []struct {
+		name       string
+		text       string
+		shouldPost bool
+	}{
+		{name: "ascii at limit", text: strings.Repeat("x", 280), shouldPost: true},
+		{name: "emoji at weighted limit", text: strings.Repeat("😀", 140), shouldPost: true},
+		{name: "family emoji entities at weighted limit", text: strings.Repeat("👨‍⚕️", 140), shouldPost: true},
+		{name: "flag emoji entities at weighted limit", text: strings.Repeat("🇺🇸", 140), shouldPost: true},
+		{name: "keycap emoji entities at weighted limit", text: strings.Repeat("1️⃣", 140), shouldPost: true},
+		{name: "emoji over limit", text: strings.Repeat("😀", 141), shouldPost: false},
+		{name: "CJK over limit", text: strings.Repeat("界", 141), shouldPost: false},
+		{name: "URL over limit despite rune count", text: strings.Repeat("x", 258) + " https://example.com", shouldPost: false},
+		{name: "URL followed by CJK path text", text: strings.Repeat("x", 255) + " https://example.com/界", shouldPost: false},
+		{name: "URL followed immediately by CJK text", text: strings.Repeat("x", 255) + " https://example.com界", shouldPost: false},
+		{name: "URL query is a fixed-length entity", text: strings.Repeat("x", 257) + " https://x.co?x=y", shouldPost: false},
+		{name: "URL fragment is ordinary text", text: strings.Repeat("x", 256) + " https://x.co#fragment", shouldPost: false},
+		{name: "trailing URL punctuation is ordinary text", text: strings.Repeat("x", 256) + " https://x.co.", shouldPost: false},
+		{name: "malformed URL-shaped text remains ordinary text", text: strings.Repeat("x", 258) + " https://not-a-url", shouldPost: true},
+		{name: "pseudo-TLD is not a URL entity", text: strings.Repeat("x", 258) + " example.invalid", shouldPost: true},
+		{name: "embedded email is not a URL entity", text: strings.Repeat("x", 258) + " hello@example.com", shouldPost: true},
+		{name: "URL exactly at provider maximum", text: maxURL, shouldPost: true},
+		{name: "URL over provider maximum", text: overlongURL, shouldPost: false},
+		{name: "t.co slug at provider maximum", text: tcoAtLimit, shouldPost: true},
+		{name: "t.co slug over provider maximum", text: tcoOverLimit, shouldPost: false},
+		{name: "IDNA label over provider maximum", text: overlongIDNALabel, shouldPost: false},
+		{name: "multiple URL entities separated by Unicode label", text: multiSuffixURL, shouldPost: false},
+		{name: "Unicode URL uses original length for provider maximum", text: unicodeURLWithinRawLimit, shouldPost: true},
+		{name: "overlong full protocol-less Unicode-prefixed URL", text: overlongUnicodePrefixURL, shouldPost: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			api.posted = nil
+			result := svc.SendOutboundMessage(ctx, "me", "", tt.text)
+			if tt.shouldPost {
+				require.True(t, result.OK)
+				require.Len(t, api.posted, 1)
+			} else {
+				require.False(t, result.OK)
+				require.Empty(t, api.posted)
+			}
+		})
+	}
+}
+
+func TestXReplyTruncatesToWeightedPostLimit(t *testing.T) {
+	ctx, svc, _, _, _, _, _ := setupXServiceTest(t)
+	api := &fakeXAPI{}
+	svc.setAPI(api)
+
+	svc.SendReply(ctx, "tweet", strings.Repeat("😀", 141), "")
+	require.Equal(t, []string{"tweet|" + strings.Repeat("😀", 139) + "…"}, api.posted)
+
+	api.posted = nil
+	svc.SendReply(ctx, "tweet", strings.Repeat("界", 141), "")
+	require.Equal(t, []string{"tweet|" + strings.Repeat("界", 139) + "…"}, api.posted)
+
+	api.posted = nil
+	svc.SendReply(ctx, "tweet", strings.Repeat("x", 281), "")
+	require.Equal(t, []string{"tweet|" + strings.Repeat("x", 278) + "…"}, api.posted)
+}
+
+func TestXWeightedLengthConformanceRegressions(t *testing.T) {
+	ctx, svc, _, _, _, _, _ := setupXServiceTest(t)
+	api := &fakeXAPI{}
+	svc.setAPI(api)
+
+	directCases := []struct {
+		name       string
+		text       string
+		shouldPost bool
+	}{
+		{name: "text presentation variation selector", text: strings.Repeat("✈︎", 94), shouldPost: false},
+		{name: "unsupported arbitrary ZWJ sequence", text: strings.Repeat("😀\u200d😀", 57), shouldPost: false},
+		{name: "NFC equivalent decomposed text", text: strings.Repeat("e\u0301", 141), shouldPost: true},
+		{name: "valid bare IDN URL", text: strings.Repeat("x", 258) + " example.рф", shouldPost: false},
+		{name: "valid bare URL after Unicode prefix", text: strings.Repeat("x", 258) + " 例.example.com", shouldPost: false},
+		{name: "mixed ACE-prefixed Unicode domain remains ordinary text", text: strings.Repeat("x", 257) + " https://xn--abc.界.com", shouldPost: true},
+	}
+	for _, tt := range directCases {
+		t.Run(tt.name, func(t *testing.T) {
+			api.posted = nil
+			result := svc.SendOutboundMessage(ctx, "me", "", tt.text)
+			if tt.shouldPost {
+				require.True(t, result.OK)
+				require.Equal(t, []string{"|" + tt.text}, api.posted)
+				return
+			}
+			require.False(t, result.OK)
+			require.Empty(t, api.posted)
+		})
+	}
+}
+
+func TestXURLRangesFollowTwitterTextEntityBoundaries(t *testing.T) {
+	maxURL := "https://example.com/" + strings.Repeat("a", xMaxURLLength-len("https://example.com/"))
+	overlongURL := maxURL + "a"
+	tcoAtLimit := "https://t.co/" + strings.Repeat("a", xMaxTCOURLSlugLength)
+	tcoOverLimit := "https://t.co/" + strings.Repeat("a", xMaxTCOURLSlugLength+1)
+	tcoWithExtraPath := tcoAtLimit + "/extra"
+	overlongUnicodePrefixURL := strings.Repeat("界.", 2040) + "example.com"
+	tests := []struct {
+		name     string
+		text     string
+		expected []string
+	}{
+		{name: "internationalized domain", text: "example.рф", expected: []string{"example.рф"}},
+		{name: "internationalized subdomain is not protocolless URL", text: "пример.рф", expected: []string{}},
+		{name: "Unicode prefix before ASCII protocolless URL", text: "例.example.com", expected: []string{"example.com"}},
+		{name: "multiple ASCII URLs separated by Unicode label", text: "example.com.例.foo.org", expected: []string{"example.com", "foo.org"}},
+		{name: "uppercase path and query", text: "HTTPS://EXAMPLE.COM/Path?X=Y", expected: []string{"HTTPS://EXAMPLE.COM/Path?X=Y"}},
+		{name: "balanced path punctuation", text: "https://example.com/(foo).", expected: []string{"https://example.com/(foo)"}},
+		{name: "slash before unsupported Unicode path", text: "https://example.com/界", expected: []string{"https://example.com/"}},
+		{name: "fragment after authority", text: "https://example.com#fragment", expected: []string{"https://example.com"}},
+		{name: "trailing punctuation", text: "https://example.com/path).", expected: []string{"https://example.com/path"}},
+		{name: "email address", text: "hello@example.com", expected: []string{}},
+		{name: "pseudo-TLD", text: "example.invalid", expected: []string{}},
+		{name: "URL after slash", text: "foo/example.com", expected: []string{}},
+		{name: "URL after hyphen", text: "-example.com", expected: []string{}},
+		{name: "malformed protocol URL", text: "https://not-a-url", expected: []string{}},
+		{name: "mixed ACE-prefixed Unicode domain", text: "https://xn--abc.界.com", expected: []string{}},
+		{name: "URL exactly at provider maximum", text: maxURL, expected: []string{maxURL}},
+		{name: "URL over provider maximum", text: overlongURL, expected: []string{}},
+		{name: "t.co slug exactly at maximum", text: tcoAtLimit, expected: []string{tcoAtLimit}},
+		{name: "t.co slug over maximum", text: tcoOverLimit, expected: []string{}},
+		{name: "t.co path after slug is ordinary text", text: tcoWithExtraPath, expected: []string{tcoAtLimit}},
+		{name: "overlong full protocol-less Unicode-prefixed URL", text: overlongUnicodePrefixURL, expected: []string{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := make([]string, 0, len(tt.expected))
+			for _, url := range xURLRanges(tt.text) {
+				got = append(got, tt.text[url.start:url.end])
+			}
+			require.Equal(t, tt.expected, got)
+		})
+	}
+}
+
+func TestXReplyConformanceTruncatesEntitiesWithoutProviderRejection(t *testing.T) {
+	ctx, svc, _, _, _, _, _ := setupXServiceTest(t)
+	api := &fakeXAPI{}
+	svc.setAPI(api)
+	multiSuffixURL := strings.Repeat("x", 241) + " example.com.例.foo.org"
+
+	tests := []struct {
+		name     string
+		text     string
+		expected string
+	}{
+		{name: "text presentation variation selector", text: strings.Repeat("✈︎", 94), expected: strings.Repeat("✈︎", 69) + "…"},
+		{name: "unsupported arbitrary ZWJ sequence", text: strings.Repeat("😀\u200d😀", 57), expected: strings.Repeat("😀\u200d😀", 55) + "…"},
+		{name: "CJK text", text: strings.Repeat("界", 141), expected: strings.Repeat("界", 139) + "…"},
+		{name: "URL entity", text: strings.Repeat("x", 258) + " example.рф", expected: strings.Repeat("x", 258) + " …"},
+		{name: "URL after Unicode prefix", text: strings.Repeat("x", 258) + " 例.example.com", expected: strings.Repeat("x", 258) + " 例.…"},
+		{name: "multiple URL entities separated by Unicode label", text: multiSuffixURL, expected: strings.Repeat("x", 241) + " example.com.例.…"},
+		{name: "URL followed by CJK text", text: strings.Repeat("x", 255) + " https://example.com/界", expected: strings.Repeat("x", 255) + " …"},
+		{name: "decomposed text preserves original prefix boundary", text: strings.Repeat("e\u0301", 281), expected: strings.Repeat("e\u0301", 278) + "…"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			api.posted = nil
+			svc.SendReply(ctx, "tweet", tt.text, "")
+			require.Equal(t, []string{"tweet|" + tt.expected}, api.posted)
+			require.LessOrEqual(t, xWeightedPostLength(tt.expected), xMaxWeightedPostLength)
+		})
+	}
+}
+
+func TestXReplyRejectsOversizedURLEntitiesBeforeProviderPost(t *testing.T) {
+	ctx, svc, _, _, _, _, _ := setupXServiceTest(t)
+	api := &fakeXAPI{}
+	svc.setAPI(api)
+
+	maxURL := "https://example.com/" + strings.Repeat("a", xMaxURLLength-len("https://example.com/"))
+	overlongURL := maxURL + "a"
+	tcoOverLimit := "https://t.co/" + strings.Repeat("a", xMaxTCOURLSlugLength+1)
+	overlongUnicodePrefixURL := strings.Repeat("界.", 2040) + "example.com"
+	for _, text := range []string{
+		overlongURL,
+		strings.Repeat("x", 240) + " " + tcoOverLimit,
+		overlongUnicodePrefixURL,
+	} {
+		api.posted = nil
+		svc.SendReply(ctx, "tweet", text, "")
+		require.Len(t, api.posted, 1)
+		posted := strings.TrimPrefix(api.posted[0], "tweet|")
+		require.NotEqual(t, text, posted)
+		require.LessOrEqual(t, xWeightedPostLength(posted), xMaxWeightedPostLength)
+	}
+}
+
+func TestXReplyDisabledOrEmptyDoesNotPost(t *testing.T) {
+	ctx, svc, settings, _, _, _, _ := setupXServiceTest(t)
+	api := &fakeXAPI{}
+	svc.setAPI(api)
+
+	require.NoError(t, settings.Set(ctx, XSettingSendResponses, "false"))
+	svc.SendReply(ctx, "tweet", "disabled", "")
+	require.Empty(t, api.posted)
+
+	require.NoError(t, settings.Set(ctx, XSettingSendResponses, "true"))
+	svc.SendReply(ctx, "tweet", "  \t\n", "")
+	require.Empty(t, api.posted)
+}
+
 func TestXOutboundRejectsUnsupportedTargetAndOversizeAndPropagatesProviderFailure(t *testing.T) {
 	_, svc, _, _, _, _, _ := setupXServiceTest(t)
 	api := &fakeXAPI{postErr: errors.New("write access unavailable")}

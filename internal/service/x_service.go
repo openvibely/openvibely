@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf16"
 	"unicode/utf8"
 
 	"github.com/openvibely/openvibely/internal/applog"
@@ -18,6 +19,9 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/util"
+	"github.com/rivo/uniseg"
+	"golang.org/x/net/idna"
+	"golang.org/x/text/unicode/norm"
 )
 
 const (
@@ -33,6 +37,11 @@ const (
 	xProcessTimeout             = 5 * time.Minute
 	xReceiptLease               = 10 * time.Minute
 	xMaxMentionPages            = 10
+	xMaxWeightedPostLength      = 280
+	xTransformedURLLength       = 23
+	xMaxURLLength               = 4096
+	xMaxTCOURLSlugLength        = 40
+	xDefaultCharacterWeight     = 2
 )
 
 var errXReceiptActive = errors.New("X mention receipt is actively leased")
@@ -683,8 +692,8 @@ func (s *XService) SendOutboundMessage(ctx context.Context, targetID, threadID, 
 	if targetID != "me" {
 		return sendMessageError("X outbound targets only support the authenticated account target x:me")
 	}
-	if utf8.RuneCountInString(text) > 280 {
-		return sendMessageError("X posts are limited to 280 characters")
+	if xWeightedPostLength(text) > xMaxWeightedPostLength {
+		return sendMessageError("X posts are limited to 280 weighted characters")
 	}
 	id, err := s.api.Post(ctx, text, "")
 	if err != nil {
@@ -733,10 +742,431 @@ func (s *XService) SendChatResponse(ctx context.Context, task models.Task, outpu
 	}
 	s.SendReplyForAccount(ctx, meta.AccountID, meta.ReplyToTweetID, output, errMsg)
 }
-func truncateXPost(v string) string {
-	r := []rune(strings.TrimSpace(v))
-	if len(r) <= 280 {
-		return string(r)
+
+type xTextRange struct {
+	start int
+	end   int
+}
+
+func xURLRanges(text string) []xTextRange {
+	matches := xURLPattern.FindAllStringSubmatchIndex(text, -1)
+	ranges := make([]xTextRange, 0, len(matches))
+	for _, match := range matches {
+		if len(match) < 4 {
+			continue
+		}
+		start, end := match[2], match[3]
+		if start < 0 || end <= start {
+			continue
+		}
+		urlStart := start
+		if end < len(text) && xURLDomainEndBlocked(text[end:]) {
+			continue
+		}
+		end = xURLSuffixEnd(text, end)
+		if !xURLWithinProviderLimit(text[urlStart:end]) {
+			continue
+		}
+
+		candidate := text[urlStart:end]
+		if xURLHasProtocol(candidate) {
+			validatedEnd, ok := xValidatedURLSuffixEnd(candidate)
+			if ok {
+				ranges = append(ranges, xTextRange{start: urlStart, end: urlStart + validatedEnd})
+			}
+			continue
+		}
+		if !isXURLWithoutProtocolStart(text, urlStart) {
+			continue
+		}
+
+		domain := xURLDomain(candidate)
+		suffixes := xASCIIURLSuffixRanges(domain)
+		for i, suffix := range suffixes {
+			suffixEnd := suffix.end
+			// twitter-text attaches a path or query to the final ASCII
+			// domain match. Only do so when that match reaches the end of
+			// the candidate's domain, so intervening Unicode labels remain
+			// ordinary text between separate URL entities.
+			if i == len(suffixes)-1 && suffix.end == len(domain) {
+				suffixEnd = len(candidate)
+			}
+			ranges = append(ranges, xTextRange{start: urlStart + suffix.start, end: urlStart + suffixEnd})
+		}
 	}
-	return string(r[:279]) + "…"
+	return ranges
+}
+
+func xValidatedURLSuffixEnd(candidate string) (int, bool) {
+	if !xURLWithinProviderLimit(candidate) {
+		return 0, false
+	}
+
+	lower := strings.ToLower(candidate)
+	protocolLength := 0
+	if strings.HasPrefix(lower, "http://") {
+		protocolLength = len("http://")
+	} else if strings.HasPrefix(lower, "https://") {
+		protocolLength = len("https://")
+	}
+	if protocolLength == 0 {
+		return len(candidate), true
+	}
+	if !strings.HasPrefix(lower[protocolLength:], "t.co/") {
+		return len(candidate), true
+	}
+
+	slugStart := protocolLength + len("t.co/")
+	slugEnd := slugStart
+	for slugEnd < len(candidate) {
+		c := candidate[slugEnd]
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) {
+			break
+		}
+		slugEnd++
+	}
+	if slugEnd == slugStart {
+		return len(candidate), true
+	}
+	if slugEnd-slugStart > xMaxTCOURLSlugLength {
+		return 0, false
+	}
+
+	end := slugEnd
+	if end < len(candidate) && candidate[end] == '?' {
+		if query := xURLQueryPattern.FindStringIndex(candidate[end:]); query != nil && query[0] == 0 {
+			end += query[1]
+		}
+	}
+	return end, true
+}
+
+func xURLWithinProviderLimit(candidate string) bool {
+	authorityStart := 0
+	lower := strings.ToLower(candidate)
+	if strings.HasPrefix(lower, "http://") {
+		authorityStart = len("http://")
+	} else if strings.HasPrefix(lower, "https://") {
+		authorityStart = len("https://")
+	}
+
+	domainEnd := authorityStart
+	for domainEnd < len(candidate) {
+		r, size := utf8.DecodeRuneInString(candidate[domainEnd:])
+		switch r {
+		case ':', '/', '?', '#':
+			goto domainComplete
+		default:
+			domainEnd += size
+		}
+	}
+
+domainComplete:
+	domain := candidate[authorityStart:domainEnd]
+	if !xURLIDNADomainValid(domain) {
+		return false
+	}
+
+	// twitter-text validates each IDNA label but measures the original
+	// UTF-16 URL. A protocol-less URL is checked as if it had the default
+	// https:// protocol for this validation.
+	length := xUTF16Length(candidate)
+	if authorityStart == 0 {
+		length += xUTF16Length("https://")
+	}
+	return length <= xMaxURLLength
+}
+
+func xURLIDNADomainValid(domain string) bool {
+	if domain == "" {
+		return false
+	}
+	// Match twitter-text's lightweight ACE-prefix guard. A domain beginning
+	// with xn-- must contain an ASCII-domain match; raw Punycode conversion
+	// alone must not accept a mixed Unicode label after that prefix.
+	if strings.HasPrefix(domain, "xn--") && len(xASCIIURLSuffixRanges(domain)) == 0 {
+		return false
+	}
+	for _, label := range strings.Split(domain, ".") {
+		if label == "" {
+			return false
+		}
+		encoded, err := idna.Punycode.ToASCII(label)
+		if err != nil || encoded == "" || len(encoded) > 63 {
+			return false
+		}
+	}
+	return true
+}
+
+func xUTF16Length(text string) int {
+	return len(utf16.Encode([]rune(text)))
+}
+
+func xURLHasProtocol(candidate string) bool {
+	lower := strings.ToLower(candidate)
+	return strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://")
+}
+
+func xURLDomain(candidate string) string {
+	authorityStart := 0
+	lower := strings.ToLower(candidate)
+	if strings.HasPrefix(lower, "http://") {
+		authorityStart = len("http://")
+	} else if strings.HasPrefix(lower, "https://") {
+		authorityStart = len("https://")
+	}
+
+	domainEnd := authorityStart
+	for domainEnd < len(candidate) {
+		r, size := utf8.DecodeRuneInString(candidate[domainEnd:])
+		switch r {
+		case ':', '/', '?', '#':
+			return candidate[authorityStart:domainEnd]
+		default:
+			domainEnd += size
+		}
+	}
+	return candidate[authorityStart:domainEnd]
+}
+
+func xASCIIURLSuffixRanges(domain string) []xTextRange {
+	labels := make([]xTextRange, 0, strings.Count(domain, ".")+1)
+	for start := 0; start < len(domain); {
+		end := start
+		for end < len(domain) && domain[end] != '.' {
+			_, size := utf8.DecodeRuneInString(domain[end:])
+			end += size
+		}
+		labels = append(labels, xTextRange{start: start, end: end})
+		if end == len(domain) {
+			break
+		}
+		start = end + 1
+	}
+
+	ranges := make([]xTextRange, 0, len(labels))
+	nextSearch := 0
+	for startIndex, label := range labels {
+		if label.start < nextSearch || !isXASCIIURLDomainLabel(domain[label.start:label.end]) {
+			continue
+		}
+
+		bestEnd := -1
+		for endIndex := startIndex; endIndex < len(labels); endIndex++ {
+			endLabel := labels[endIndex]
+			if endIndex > startIndex && !isXASCIIURLDomainLabel(domain[endLabel.start:endLabel.end]) {
+				candidate := domain[label.start:endLabel.end]
+				if xValidBareURLDomain(candidate) {
+					bestEnd = endLabel.end
+				}
+				break
+			}
+			if endIndex == startIndex {
+				continue
+			}
+			candidate := domain[label.start:endLabel.end]
+			if xValidBareURLDomain(candidate) {
+				bestEnd = endLabel.end
+			}
+		}
+		if bestEnd < 0 {
+			continue
+		}
+		ranges = append(ranges, xTextRange{start: label.start, end: bestEnd})
+		nextSearch = bestEnd
+	}
+	return ranges
+}
+
+func xValidBareURLDomain(candidate string) bool {
+	matches := xURLPattern.FindStringSubmatchIndex(candidate)
+	return len(matches) >= 4 && matches[2] == 0 && matches[3] == len(candidate)
+}
+
+func isXASCIIURLDomainLabel(label string) bool {
+	if label == "" {
+		return false
+	}
+	for _, r := range label {
+		if !isXASCIIURLDomainRune(r) {
+			return false
+		}
+	}
+	return true
+}
+
+func isXASCIIURLDomainRune(r rune) bool {
+	switch {
+	case r >= 'A' && r <= 'Z', r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '-':
+		return true
+	case r >= 0x00c0 && r <= 0x00d6, r >= 0x00d8 && r <= 0x00f6, r >= 0x00f8 && r <= 0x00ff:
+		return true
+	case r >= 0x0100 && r <= 0x024f:
+		return true
+	case r == 0x0253 || r == 0x0254 || r == 0x0256 || r == 0x0257 || r == 0x0259 || r == 0x025b || r == 0x0263 || r == 0x0268 || r == 0x026f || r == 0x0272 || r == 0x0289 || r == 0x028b || r == 0x02bb:
+		return true
+	case r >= 0x0300 && r <= 0x036f, r >= 0x1e00 && r <= 0x1eff:
+		return true
+	default:
+		return false
+	}
+}
+
+func isXURLWithoutProtocolStart(text string, start int) bool {
+	if start == 0 {
+		return true
+	}
+	previous, _ := utf8.DecodeLastRuneInString(text[:start])
+	return !strings.ContainsRune("-_./", previous)
+}
+
+func xURLDomainEndBlocked(text string) bool {
+	r, _ := utf8.DecodeRuneInString(text)
+	switch {
+	case r >= 'A' && r <= 'Z', r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+		return true
+	case r == '@' || r == '+' || r == '-':
+		return true
+	default:
+		return false
+	}
+}
+
+func xURLSuffixEnd(text string, baseEnd int) int {
+	end := baseEnd
+	if end < len(text) && text[end] == ':' {
+		offset := end + 1
+		for offset < len(text) && text[offset] >= '0' && text[offset] <= '9' {
+			offset++
+		}
+		if offset > end+1 {
+			end = offset
+		}
+	}
+	if end < len(text) && text[end] == '/' {
+		end++
+		if path := xURLPathPattern.FindStringIndex(text[end:]); path != nil {
+			end += path[1]
+		}
+	}
+	if end < len(text) && text[end] == '?' {
+		if query := xURLQueryPattern.FindStringIndex(text[end:]); query != nil {
+			end += query[1]
+		}
+	}
+	return end
+}
+
+// xWeightedPostLength follows the current twitter-text v3 configuration:
+// https://github.com/twitter/twitter-text/blob/master/config/v3.json
+func xWeightedPostLength(text string) int {
+	text = norm.NFC.String(text)
+	urls := xURLRanges(text)
+	weighted := 0
+	offset := 0
+	for _, url := range urls {
+		if url.start < offset {
+			continue
+		}
+		weighted += xWeightedCharacters(text[offset:url.start])
+		weighted += xTransformedURLLength
+		offset = url.end
+	}
+	return weighted + xWeightedCharacters(text[offset:])
+}
+
+func xEmojiRanges(text string) []xTextRange {
+	matches := xEmojiPattern.FindAllStringIndex(text, -1)
+	ranges := make([]xTextRange, 0, len(matches))
+	for _, match := range matches {
+		if len(match) == 2 && match[1] > match[0] {
+			ranges = append(ranges, xTextRange{start: match[0], end: match[1]})
+		}
+	}
+	return ranges
+}
+
+func xWeightedCharacters(text string) int {
+	emojis := xEmojiRanges(text)
+	weighted := 0
+	offset := 0
+	for _, emoji := range emojis {
+		if emoji.start < offset {
+			continue
+		}
+		weighted += xWeightedCharactersPlain(text[offset:emoji.start])
+		weighted += xDefaultCharacterWeight
+		offset = emoji.end
+	}
+	return weighted + xWeightedCharactersPlain(text[offset:])
+}
+
+func xWeightedCharactersPlain(text string) int {
+	weighted := 0
+	for offset := 0; offset < len(text); {
+		r, size := utf8.DecodeRuneInString(text[offset:])
+		weighted += xCharacterWeight(r)
+		offset += size
+	}
+	return weighted
+}
+
+func xCharacterWeight(r rune) int {
+	// These ranges are the one-unit ranges from twitter-text's v3 config;
+	// characters outside them have the two-unit default weight.
+	if r >= 0 && r <= 4351 ||
+		r >= 8192 && r <= 8205 ||
+		r >= 8208 && r <= 8223 ||
+		r >= 8242 && r <= 8247 {
+		return 1
+	}
+	return xDefaultCharacterWeight
+}
+
+func xTextEntityRanges(text string) []xTextRange {
+	ranges := append(xURLRanges(text), xEmojiRanges(text)...)
+	sort.Slice(ranges, func(i, j int) bool {
+		return ranges[i].start < ranges[j].start
+	})
+	return ranges
+}
+
+func truncateXPost(v string) string {
+	text := strings.TrimSpace(v)
+	normalized := norm.NFC.String(text)
+	if xWeightedPostLength(normalized) <= xMaxWeightedPostLength {
+		return text
+	}
+
+	entities := xTextEntityRanges(normalized)
+	entityIndex := 0
+	originalEnd := 0
+	normalizedEnd := 0
+	graphemes := uniseg.NewGraphemes(text)
+	for graphemes.Next() {
+		_, nextOriginalEnd := graphemes.Positions()
+		nextNormalizedEnd := len(norm.NFC.String(text[:nextOriginalEnd]))
+		for entityIndex < len(entities) && entities[entityIndex].end <= normalizedEnd {
+			entityIndex++
+		}
+
+		candidateOriginalEnd := nextOriginalEnd
+		candidateNormalizedEnd := nextNormalizedEnd
+		if entityIndex < len(entities) && entities[entityIndex].start >= normalizedEnd && entities[entityIndex].start < nextNormalizedEnd {
+			entityEnd := entities[entityIndex].end
+			for candidateNormalizedEnd < entityEnd && graphemes.Next() {
+				_, candidateOriginalEnd = graphemes.Positions()
+				candidateNormalizedEnd = len(norm.NFC.String(text[:candidateOriginalEnd]))
+			}
+			entityIndex++
+		}
+
+		if xWeightedPostLength(text[:candidateOriginalEnd]+"…") > xMaxWeightedPostLength {
+			break
+		}
+		originalEnd = candidateOriginalEnd
+		normalizedEnd = candidateNormalizedEnd
+	}
+	return text[:originalEnd] + "…"
 }
