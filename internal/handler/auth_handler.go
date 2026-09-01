@@ -73,6 +73,43 @@ func (h *Handler) isAuthPublicPath(path string) bool {
 		path == "/channels/slack/callback"
 }
 
+type hostedCookieState uint8
+
+const (
+	hostedCookieMissing hostedCookieState = iota
+	hostedCookieInvalid
+	hostedCookieValid
+)
+
+type sessionRecognition struct {
+	localUser         *auth.User
+	hostedClaims      *auth.SessionClaims
+	hostedCookieState hostedCookieState
+	err               error
+}
+
+func (h *Handler) recognizeSession(request *http.Request, now time.Time) sessionRecognition {
+	if h.authMode == auth.AuthModeHostedSSO {
+		cookie, err := request.Cookie(auth.DefaultCookieName)
+		if err != nil {
+			if errors.Is(err, http.ErrNoCookie) {
+				return sessionRecognition{hostedCookieState: hostedCookieMissing}
+			}
+			return sessionRecognition{hostedCookieState: hostedCookieInvalid}
+		}
+		claims, err := auth.VerifyHostedSession(cookie.Value, h.hostedSSOKey, h.hostedSSOInstanceID, now)
+		if err != nil {
+			return sessionRecognition{hostedCookieState: hostedCookieInvalid}
+		}
+		return sessionRecognition{hostedClaims: claims, hostedCookieState: hostedCookieValid}
+	}
+	if h.authMode == auth.AuthModeLocal && h.authCfg != nil {
+		user, err := auth.UserFromRequest(request, *h.authCfg, now)
+		return sessionRecognition{localUser: user, err: err}
+	}
+	return sessionRecognition{}
+}
+
 func (h *Handler) AuthMiddleware() echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
@@ -86,16 +123,11 @@ func (h *Handler) AuthMiddleware() echo.MiddlewareFunc {
 			}
 
 			var authenticated any
-			if h.authMode == auth.AuthModeHostedSSO {
-				if cookie, cookieErr := c.Request().Cookie(auth.DefaultCookieName); cookieErr == nil {
-					if claims, verifyErr := auth.VerifyHostedSession(cookie.Value, h.hostedSSOKey, h.hostedSSOInstanceID, time.Now()); verifyErr == nil {
-						authenticated = claims
-					}
-				}
-			} else if h.authCfg != nil {
-				if user, userErr := auth.UserFromRequest(c.Request(), *h.authCfg, time.Now()); userErr == nil {
-					authenticated = user
-				}
+			session := h.recognizeSession(c.Request(), time.Now())
+			if session.localUser != nil {
+				authenticated = session.localUser
+			} else if session.hostedClaims != nil {
+				authenticated = session.hostedClaims
 			}
 			if authenticated != nil {
 				c.Set("auth_user", authenticated)
@@ -123,7 +155,7 @@ func (h *Handler) AuthLoginPage(c echo.Context) error {
 		if err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, "bad request")
 		}
-		if h.validHostedSession(c.Request()) {
+		if h.recognizeSession(c.Request(), time.Now()).hostedClaims != nil {
 			return c.Redirect(http.StatusFound, destination)
 		}
 		return c.Redirect(http.StatusFound, auth.HostedSSOStartURL(destination))
@@ -131,7 +163,7 @@ func (h *Handler) AuthLoginPage(c echo.Context) error {
 	if !h.authEnabled() {
 		return c.Redirect(http.StatusFound, "/")
 	}
-	if _, err := auth.UserFromRequest(c.Request(), *h.authCfg, time.Now()); err == nil {
+	if h.recognizeSession(c.Request(), time.Now()).localUser != nil {
 		return c.Redirect(http.StatusFound, "/")
 	}
 
@@ -226,7 +258,7 @@ func (h *Handler) HostedSSOStart(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "bad request")
 	}
-	if h.validHostedSession(c.Request()) {
+	if h.recognizeSession(c.Request(), time.Now()).hostedClaims != nil {
 		return c.Redirect(http.StatusFound, destination)
 	}
 
@@ -334,15 +366,6 @@ func (h *Handler) LoggedOut(c echo.Context) error {
 	}
 	body := `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Signed out - OpenVibely</title></head><body><main><h1>Workspace session ended</h1><p>You have logged out of this workspace. Your hosted account session may still be active.</p><a href="/auth/sso/start">Sign in again</a></main></body></html>`
 	return c.HTML(http.StatusOK, body)
-}
-
-func (h *Handler) validHostedSession(request *http.Request) bool {
-	cookie, err := request.Cookie(auth.DefaultCookieName)
-	if err != nil {
-		return false
-	}
-	_, err = auth.VerifyHostedSession(cookie.Value, h.hostedSSOKey, h.hostedSSOInstanceID, time.Now())
-	return err == nil
 }
 
 func (h *Handler) hostedSecureCookies() bool {
@@ -481,15 +504,14 @@ func (h *Handler) AuthLogout(c echo.Context) error {
 func (h *Handler) AuthMe(c echo.Context) error {
 	c.Response().Header().Set("Cache-Control", "no-store")
 	if h.authMode == auth.AuthModeHostedSSO {
-		cookie, err := c.Request().Cookie(auth.DefaultCookieName)
-		if err != nil {
+		session := h.recognizeSession(c.Request(), time.Now())
+		if session.hostedClaims == nil {
+			if session.hostedCookieState == hostedCookieInvalid {
+				c.SetCookie(h.hostedSessionDeletionCookie())
+			}
 			return c.JSON(http.StatusUnauthorized, map[string]any{"authenticated": false})
 		}
-		claims, err := auth.VerifyHostedSession(cookie.Value, h.hostedSSOKey, h.hostedSSOInstanceID, time.Now())
-		if err != nil {
-			c.SetCookie(h.hostedSessionDeletionCookie())
-			return c.JSON(http.StatusUnauthorized, map[string]any{"authenticated": false})
-		}
+		claims := session.hostedClaims
 		return c.JSON(http.StatusOK, map[string]any{
 			"authenticated": true,
 			"auth_source":   auth.HostedAuthSource,
@@ -515,13 +537,14 @@ func (h *Handler) AuthMe(c echo.Context) error {
 		}
 	}
 
-	user, err := auth.UserFromRequest(c.Request(), *h.authCfg, time.Now())
-	if err != nil {
-		if errors.Is(err, http.ErrNoCookie) || errors.Is(err, auth.ErrExpiredToken) || errors.Is(err, auth.ErrInvalidToken) {
+	session := h.recognizeSession(c.Request(), time.Now())
+	if session.err != nil {
+		if errors.Is(session.err, http.ErrNoCookie) || errors.Is(session.err, auth.ErrExpiredToken) || errors.Is(session.err, auth.ErrInvalidToken) {
 			return c.JSON(http.StatusUnauthorized, map[string]any{"authenticated": false})
 		}
-		return echo.NewHTTPError(http.StatusUnauthorized, fmt.Sprintf("unauthorized: %v", err))
+		return echo.NewHTTPError(http.StatusUnauthorized, fmt.Sprintf("unauthorized: %v", session.err))
 	}
+	user := session.localUser
 
 	return c.JSON(http.StatusOK, map[string]any{
 		"authenticated": true,

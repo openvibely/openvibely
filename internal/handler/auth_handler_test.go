@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -133,6 +134,65 @@ func TestAuthMe_UnauthenticatedReturns401(t *testing.T) {
 
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d", rec.Code)
+	}
+}
+
+func TestAuthMe_LocalSessionMatrix(t *testing.T) {
+	h, e := authTestHandler(t)
+	cfg := *h.authCfg
+	cfg.CookieName = "custom_session"
+	h.SetAuthConfig(cfg)
+	now := time.Now()
+	validToken, err := h.authCfg.SignToken(now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expiredToken, err := h.authCfg.SignToken(now.Add(-2 * time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tamperedToken := validToken[:len(validToken)-1] + "A"
+	if tamperedToken == validToken {
+		tamperedToken = validToken[:len(validToken)-1] + "B"
+	}
+
+	for _, tt := range []struct {
+		name              string
+		cookie            string
+		wantAuthenticated bool
+	}{
+		{name: "missing"},
+		{name: "expired", cookie: expiredToken},
+		{name: "tampered", cookie: tamperedToken},
+		{name: "valid custom cookie", cookie: validToken, wantAuthenticated: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/auth/me", nil)
+			if tt.cookie != "" {
+				req.AddCookie(&http.Cookie{Name: cfg.CookieName, Value: tt.cookie})
+			}
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+			if tt.wantAuthenticated {
+				if rec.Code != http.StatusOK {
+					t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+				}
+				var body map[string]any
+				if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+					t.Fatal(err)
+				}
+				if body["authenticated"] != true || body["username"] != cfg.Username || body["display"] != cfg.Username {
+					t.Fatalf("body=%#v", body)
+				}
+				return
+			}
+			if rec.Code != http.StatusUnauthorized || strings.TrimSpace(rec.Body.String()) != `{"authenticated":false}` {
+				t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
+			}
+			if len(rec.Result().Cookies()) != 0 {
+				t.Fatalf("local auth emitted cookies for rejected session: %#v", rec.Result().Cookies())
+			}
+		})
 	}
 }
 
