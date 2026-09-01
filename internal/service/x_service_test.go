@@ -504,6 +504,64 @@ func TestXReadinessTracksPollingFailureAndRecovery(t *testing.T) {
 	require.Empty(t, status.LastError)
 }
 
+func TestXOutboundUsesWeightedPostLimit(t *testing.T) {
+	ctx, svc, _, _, _, _, _ := setupXServiceTest(t)
+	api := &fakeXAPI{}
+	svc.setAPI(api)
+
+	tests := []struct {
+		name       string
+		text       string
+		shouldPost bool
+	}{
+		{name: "ascii at limit", text: strings.Repeat("x", 280), shouldPost: true},
+		{name: "emoji at weighted limit", text: strings.Repeat("😀", 140), shouldPost: true},
+		{name: "emoji over limit", text: strings.Repeat("😀", 141), shouldPost: false},
+		{name: "CJK over limit", text: strings.Repeat("界", 141), shouldPost: false},
+		{name: "URL over limit despite rune count", text: strings.Repeat("x", 258) + " https://example.com", shouldPost: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			api.posted = nil
+			result := svc.SendOutboundMessage(ctx, "me", "", tt.text)
+			if tt.shouldPost {
+				require.True(t, result.OK)
+				require.Len(t, api.posted, 1)
+			} else {
+				require.False(t, result.OK)
+				require.Empty(t, api.posted)
+			}
+		})
+	}
+}
+
+func TestXReplyTruncatesToWeightedPostLimit(t *testing.T) {
+	ctx, svc, _, _, _, _, _ := setupXServiceTest(t)
+	api := &fakeXAPI{}
+	svc.setAPI(api)
+
+	svc.SendReply(ctx, "tweet", strings.Repeat("😀", 141), "")
+	require.Equal(t, []string{"tweet|" + strings.Repeat("😀", 139) + "…"}, api.posted)
+
+	api.posted = nil
+	svc.SendReply(ctx, "tweet", strings.Repeat("x", 281), "")
+	require.Equal(t, []string{"tweet|" + strings.Repeat("x", 278) + "…"}, api.posted)
+}
+
+func TestXReplyDisabledOrEmptyDoesNotPost(t *testing.T) {
+	ctx, svc, settings, _, _, _, _ := setupXServiceTest(t)
+	api := &fakeXAPI{}
+	svc.setAPI(api)
+
+	require.NoError(t, settings.Set(ctx, XSettingSendResponses, "false"))
+	svc.SendReply(ctx, "tweet", "disabled", "")
+	require.Empty(t, api.posted)
+
+	require.NoError(t, settings.Set(ctx, XSettingSendResponses, "true"))
+	svc.SendReply(ctx, "tweet", "  \t\n", "")
+	require.Empty(t, api.posted)
+}
+
 func TestXOutboundRejectsUnsupportedTargetAndOversizeAndPropagatesProviderFailure(t *testing.T) {
 	_, svc, _, _, _, _, _ := setupXServiceTest(t)
 	api := &fakeXAPI{postErr: errors.New("write access unavailable")}

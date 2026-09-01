@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/openvibely/openvibely/internal/applog"
@@ -33,6 +35,9 @@ const (
 	xProcessTimeout             = 5 * time.Minute
 	xReceiptLease               = 10 * time.Minute
 	xMaxMentionPages            = 10
+	xMaxWeightedPostLength      = 280
+	xTransformedURLLength       = 23
+	xDefaultCharacterWeight     = 2
 )
 
 var errXReceiptActive = errors.New("X mention receipt is actively leased")
@@ -674,8 +679,8 @@ func (s *XService) SendOutboundMessage(ctx context.Context, targetID, threadID, 
 	if targetID != "me" {
 		return sendMessageError("X outbound targets only support the authenticated account target x:me")
 	}
-	if utf8.RuneCountInString(text) > 280 {
-		return sendMessageError("X posts are limited to 280 characters")
+	if xWeightedPostLength(text) > xMaxWeightedPostLength {
+		return sendMessageError("X posts are limited to 280 weighted characters")
 	}
 	id, err := s.api.Post(ctx, text, "")
 	if err != nil {
@@ -724,10 +729,214 @@ func (s *XService) SendChatResponse(ctx context.Context, task models.Task, outpu
 	}
 	s.SendReplyForAccount(ctx, meta.AccountID, meta.ReplyToTweetID, output, errMsg)
 }
-func truncateXPost(v string) string {
-	r := []rune(strings.TrimSpace(v))
-	if len(r) <= 280 {
-		return string(r)
+
+var xURLPattern = regexp.MustCompile(`(?i)(https?://|www\.)[^\s<>"']+|([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}(:[0-9]+)?([/?#][^\s<>"']*)?`)
+
+// xWeightedPostLength follows the current twitter-text v3 configuration:
+// https://github.com/twitter/twitter-text/blob/master/config/v3.json
+func xWeightedPostLength(text string) int {
+	urls := xURLPattern.FindAllStringIndex(text, -1)
+	weighted := 0
+	offset := 0
+	for _, match := range urls {
+		start, end := match[0], trimXURL(text, match[0], match[1])
+		if start < offset || end <= start || !isXURLStart(text, start) {
+			continue
+		}
+		weighted += xWeightedCharacters(text[offset:start])
+		weighted += xTransformedURLLength
+		offset = end
 	}
-	return string(r[:279]) + "…"
+	return weighted + xWeightedCharacters(text[offset:])
+}
+
+func isXURLStart(text string, start int) bool {
+	if start == 0 {
+		return true
+	}
+	previous, _ := utf8.DecodeLastRuneInString(text[:start])
+	if unicode.IsLetter(previous) || unicode.IsDigit(previous) {
+		return false
+	}
+	switch previous {
+	case '_', '@', '＠', '$', '#', '＃':
+		return false
+	default:
+		return true
+	}
+}
+
+func trimXURL(text string, start, end int) int {
+	for end > start {
+		r, size := utf8.DecodeLastRuneInString(text[start:end])
+		switch r {
+		case '.', ',', '!', '?', ':', ';':
+			end -= size
+			continue
+		case ')':
+			if strings.Count(text[start:end], ")") > strings.Count(text[start:end], "(") {
+				end -= size
+				continue
+			}
+		case ']':
+			if strings.Count(text[start:end], "]") > strings.Count(text[start:end], "[") {
+				end -= size
+				continue
+			}
+		case '}':
+			if strings.Count(text[start:end], "}") > strings.Count(text[start:end], "{") {
+				end -= size
+				continue
+			}
+		}
+		break
+	}
+	return end
+}
+
+func xWeightedCharacters(text string) int {
+	weighted := 0
+	for offset := 0; offset < len(text); {
+		if end := xEmojiSequenceEnd(text, offset); end > offset {
+			weighted += xDefaultCharacterWeight
+			offset = end
+			continue
+		}
+		r, size := utf8.DecodeRuneInString(text[offset:])
+		if size == 0 {
+			break
+		}
+		weighted += xCharacterWeight(r)
+		offset += size
+	}
+	return weighted
+}
+
+func xCharacterWeight(r rune) int {
+	// These ranges are the one-unit ranges from twitter-text's v3 config;
+	// characters outside them have the two-unit default weight.
+	if r >= 0 && r <= 4351 ||
+		r >= 8192 && r <= 8205 ||
+		r >= 8208 && r <= 8223 ||
+		r >= 8242 && r <= 8247 {
+		return 1
+	}
+	return xDefaultCharacterWeight
+}
+
+func xEmojiSequenceEnd(text string, start int) int {
+	r, size := utf8.DecodeRuneInString(text[start:])
+	if size == 0 {
+		return 0
+	}
+	if isXRegionalIndicator(r) {
+		end := start + size
+		next, nextSize := utf8.DecodeRuneInString(text[end:])
+		if isXRegionalIndicator(next) {
+			end += nextSize
+		}
+		return end
+	}
+	if isXKeycapBase(r) {
+		end := consumeXEmojiModifiers(text, start+size)
+		next, nextSize := utf8.DecodeRuneInString(text[end:])
+		if next == '\u20e3' {
+			return end + nextSize
+		}
+		return 0
+	}
+	end := xEmojiBaseEnd(text, start)
+	if end == 0 {
+		return 0
+	}
+	for end < len(text) {
+		joiner, joinerSize := utf8.DecodeRuneInString(text[end:])
+		if joiner != '\u200d' {
+			break
+		}
+		nextEnd := xEmojiBaseEnd(text, end+joinerSize)
+		if nextEnd == 0 {
+			break
+		}
+		end = nextEnd
+	}
+	return end
+}
+
+func xEmojiBaseEnd(text string, start int) int {
+	r, size := utf8.DecodeRuneInString(text[start:])
+	if !isXEmojiBase(r) {
+		return 0
+	}
+	return consumeXEmojiModifiers(text, start+size)
+}
+
+func consumeXEmojiModifiers(text string, start int) int {
+	for start < len(text) {
+		r, size := utf8.DecodeRuneInString(text[start:])
+		if r != '\ufe0e' && r != '\ufe0f' && !isXEmojiModifier(r) && !(r >= 0xe0020 && r <= 0xe007f) {
+			break
+		}
+		start += size
+	}
+	return start
+}
+
+func isXEmojiBase(r rune) bool {
+	switch {
+	case r >= 0x1f000 && r <= 0x1faff:
+	case r >= 0x2600 && r <= 0x27bf:
+	case r == 0x00a9 || r == 0x00ae || r == 0x203c || r == 0x2049:
+	case r == 0x2122 || r == 0x2139:
+	case r >= 0x2194 && r <= 0x2199:
+	case r == 0x21a9 || r == 0x21aa:
+	case r >= 0x231a && r <= 0x231b:
+	case r == 0x2328 || r == 0x23cf:
+	case r >= 0x23e9 && r <= 0x23f3:
+	case r >= 0x23f8 && r <= 0x23fa:
+	case r == 0x24c2:
+	case r >= 0x25aa && r <= 0x25ab:
+	case r == 0x25b6 || r == 0x25c0:
+	case r >= 0x25fb && r <= 0x25fe:
+	case r >= 0x2934 && r <= 0x2935:
+	case r >= 0x2b05 && r <= 0x2b07:
+	case r == 0x2b1b || r == 0x2b1c || r == 0x2b50 || r == 0x2b55:
+	case r == 0x3030 || r == 0x303d || r == 0x3297 || r == 0x3299:
+	default:
+		return false
+	}
+	return true
+}
+
+func isXEmojiModifier(r rune) bool {
+	return r >= 0x1f3fb && r <= 0x1f3ff
+}
+
+func isXRegionalIndicator(r rune) bool {
+	return r >= 0x1f1e6 && r <= 0x1f1ff
+}
+
+func isXKeycapBase(r rune) bool {
+	return r == '#' || r == '*' || r >= '0' && r <= '9'
+}
+
+func truncateXPost(v string) string {
+	text := strings.TrimSpace(v)
+	if xWeightedPostLength(text) <= xMaxWeightedPostLength {
+		return text
+	}
+
+	end := 0
+	for end < len(text) {
+		_, size := utf8.DecodeRuneInString(text[end:])
+		next := end + size
+		if emojiEnd := xEmojiSequenceEnd(text, end); emojiEnd > end {
+			next = emojiEnd
+		}
+		if xWeightedPostLength(text[:next]+"…") > xMaxWeightedPostLength {
+			break
+		}
+		end = next
+	}
+	return text[:end] + "…"
 }
