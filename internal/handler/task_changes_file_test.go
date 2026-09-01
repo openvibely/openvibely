@@ -28,6 +28,8 @@ func TestHandler_GetTaskChangesFile_LoadsRequestedInlineFile(t *testing.T) {
 		t.Fatalf("expected default project, err=%v", err)
 	}
 	project := projects[0]
+	reviewRepo := repository.NewReviewCommentRepo(db)
+	h.SetReviewCommentRepo(reviewRepo)
 
 	task := &models.Task{
 		ProjectID: project.ID,
@@ -38,6 +40,17 @@ func TestHandler_GetTaskChangesFile_LoadsRequestedInlineFile(t *testing.T) {
 	}
 	if err := h.taskSvc.Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
+	}
+	comment := &models.ReviewComment{
+		TaskID:      task.ID,
+		FilePath:    "b.txt",
+		LineNumber:  1,
+		LineType:    "new",
+		CommentText: "Review this lazy file",
+		ReviewedBy:  "user",
+	}
+	if err := reviewRepo.Create(ctx, comment); err != nil {
+		t.Fatalf("create review comment: %v", err)
 	}
 
 	agents, err := h.llmConfigRepo.List(ctx)
@@ -90,6 +103,60 @@ diff --git a/b.txt b/b.txt
 	}
 	if !strings.Contains(body, "b.txt") {
 		t.Fatalf("expected loaded card to include requested file name, got: %s", body)
+	}
+	if !strings.Contains(body, `data-comment-id="`+comment.ID+`"`) || !strings.Contains(body, comment.CommentText) {
+		t.Fatalf("expected review comment in review-enabled lazy card, got: %s", body)
+	}
+
+	noReviewReq := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes/file?file_index=1&view=inline&review=false", nil)
+	noReviewRec := httptest.NewRecorder()
+	noReviewContext := e.NewContext(noReviewReq, noReviewRec)
+	noReviewContext.SetParamNames("taskId")
+	noReviewContext.SetParamValues(task.ID)
+	if err := h.GetTaskChangesFile(noReviewContext); err != nil {
+		t.Fatalf("GetTaskChangesFile without review mode failed: %v", err)
+	}
+	noReviewBody := noReviewRec.Body.String()
+	if strings.Contains(noReviewBody, comment.ID) || strings.Contains(noReviewBody, comment.CommentText) {
+		t.Fatalf("expected review=false lazy card to omit review comments, got: %s", noReviewBody)
+	}
+}
+
+func TestHandlerLoadTaskReviewComments_PreservesOptionalReadContract(t *testing.T) {
+	h, _, _, db := setupTestHandlerWithDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+	project := createProject(t, h, "Review comment loader")
+	task := createTask(t, h, project.ID, "Review comment loader task")
+	reviewRepo := repository.NewReviewCommentRepo(db)
+	h.SetReviewCommentRepo(reviewRepo)
+	comment := &models.ReviewComment{
+		TaskID:      task.ID,
+		FilePath:    "main.go",
+		LineNumber:  4,
+		LineType:    "new",
+		CommentText: "Keep this comment",
+		ReviewedBy:  "user",
+	}
+	if err := reviewRepo.Create(ctx, comment); err != nil {
+		t.Fatalf("create review comment: %v", err)
+	}
+
+	comments := h.loadTaskReviewComments(ctx, task.ID)
+	if len(comments) != 1 || comments[0].ID != comment.ID || comments[0].CommentText != comment.CommentText {
+		t.Fatalf("expected persisted review comment, got %+v", comments)
+	}
+
+	cancelledCtx, cancel := context.WithCancel(ctx)
+	cancel()
+	if comments := h.loadTaskReviewComments(cancelledCtx, task.ID); len(comments) != 0 {
+		t.Fatalf("expected listing errors to be suppressed, got %+v", comments)
+	}
+
+	h.SetReviewCommentRepo(nil)
+	if comments := h.loadTaskReviewComments(ctx, task.ID); comments != nil {
+		t.Fatalf("expected nil comments without a configured repository, got %+v", comments)
 	}
 }
 
