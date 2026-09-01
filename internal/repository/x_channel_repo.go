@@ -40,6 +40,27 @@ func (r *XAuthRepo) IsAuthorized(ctx context.Context, projectID, userID string) 
 	return err == nil, err
 }
 
+const xAuthorizedProjectQuery = `SELECT p.id
+	FROM x_authorized_users AS au
+	JOIN projects AS p ON p.id = au.project_id
+	WHERE au.x_user_id = ?
+	ORDER BY p.is_default DESC, p.name ASC
+	LIMIT 1`
+
+// FirstAuthorizedProject returns the first project that authorizes userID in
+// the same order used by the project selector fallback.
+func (r *XAuthRepo) FirstAuthorizedProject(ctx context.Context, userID string) (string, error) {
+	var projectID string
+	err := r.db.QueryRowContext(ctx, xAuthorizedProjectQuery, strings.TrimSpace(userID)).Scan(&projectID)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("find first X authorized project: %w", err)
+	}
+	return projectID, nil
+}
+
 func (r *XAuthRepo) Create(ctx context.Context, u *models.XAuthorizedUser) error {
 	if u == nil || strings.TrimSpace(u.ProjectID) == "" || strings.TrimSpace(u.XUserID) == "" {
 		return fmt.Errorf("project and X user ID are required")

@@ -1191,8 +1191,8 @@ func TestMigration100_RepairsSkippedChannelTargetsWhenOldLocalDiscordUsed099(t *
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 172 {
-		t.Fatalf("max goose version = %d, want 172", maxVersion)
+	if maxVersion != 173 {
+		t.Fatalf("max goose version = %d, want 173", maxVersion)
 	}
 }
 
@@ -1239,7 +1239,7 @@ func TestMigration172CreatesConsolidatedXSchemaFromPublicBaseline(t *testing.T) 
 	if err := goose.UpTo(db, ".", 171); err != nil {
 		t.Fatalf("migrate to public baseline 171: %v", err)
 	}
-	if err := goose.Up(db, "."); err != nil {
+	if err := goose.UpTo(db, ".", 172); err != nil {
 		t.Fatalf("apply consolidated X migration: %v", err)
 	}
 	assertXChannelSchema172(t, db)
@@ -1262,7 +1262,7 @@ func TestMigration172RollsBackConsolidatedXSchemaToPublicBaseline(t *testing.T) 
 	if err := goose.UpTo(db, ".", 171); err != nil {
 		t.Fatalf("migrate to public baseline 171: %v", err)
 	}
-	if err := goose.Up(db, "."); err != nil {
+	if err := goose.UpTo(db, ".", 172); err != nil {
 		t.Fatalf("apply consolidated X migration: %v", err)
 	}
 	if _, err := db.Exec(`
@@ -1296,6 +1296,59 @@ func TestMigration172RollsBackConsolidatedXSchemaToPublicBaseline(t *testing.T) 
 	if projectName != "X rollback" {
 		t.Fatalf("project name = %q, want X rollback", projectName)
 	}
+}
+
+func TestMigration173AddsXAuthorizedUserLookupIndex(t *testing.T) {
+	db := openMigrationTestDB(t, filepath.Join(t.TempDir(), "x-authorized-user-index-173.db"))
+	goose.SetBaseFS(migrations.FS)
+	defer goose.SetBaseFS(nil)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 172); err != nil {
+		t.Fatalf("migrate to X schema 172: %v", err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO projects(id, name, description, repo_path) VALUES('x-index-project', 'X index', '', '');
+		INSERT INTO x_authorized_users(project_id, x_user_id) VALUES('x-index-project', 'author');
+	`); err != nil {
+		t.Fatalf("seed X authorization lookup fixture: %v", err)
+	}
+
+	assertIndex := func(want bool) {
+		t.Helper()
+		var count int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?`, "idx_x_authorized_users_user_project").Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if got := count == 1; got != want {
+			t.Fatalf("X authorized-user lookup index exists = %v, want %v", got, want)
+		}
+	}
+	assertIndex(false)
+
+	if err := goose.UpTo(db, ".", 173); err != nil {
+		t.Fatalf("apply X authorized-user lookup index migration: %v", err)
+	}
+	assertIndex(true)
+	plan := explainQueryPlan(t, db, `
+		SELECT p.id
+		FROM x_authorized_users AS au
+		JOIN projects AS p ON p.id = au.project_id
+		WHERE au.x_user_id = ?
+		ORDER BY p.is_default DESC, p.name ASC
+		LIMIT 1`, "author")
+	if !strings.Contains(plan, "idx_x_authorized_users_user_project") {
+		t.Fatalf("X authorized-user lookup plan = %q, want user-keyed index", plan)
+	}
+	if strings.Contains(plan, "SCAN projects") {
+		t.Fatalf("X authorized-user lookup plan scans projects: %q", plan)
+	}
+
+	if err := goose.DownTo(db, ".", 172); err != nil {
+		t.Fatalf("roll back X authorized-user lookup index migration: %v", err)
+	}
+	assertIndex(false)
 }
 
 func TestMigration108_SystemChannelInboundAuthorizationDedupe(t *testing.T) {
@@ -1433,8 +1486,8 @@ func TestMigration107_AllowsLocalDatabaseWithOldSwarmVersion106(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 172 {
-		t.Fatalf("max goose version = %d, want 172", maxVersion)
+	if maxVersion != 173 {
+		t.Fatalf("max goose version = %d, want 173", maxVersion)
 	}
 }
 
@@ -1882,8 +1935,8 @@ func TestMigration082_SkipsWhenLocalDevDBAlreadyApplied082(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 172 {
-		t.Fatalf("max goose version = %d, want 172", maxVersion)
+	if maxVersion != 173 {
+		t.Fatalf("max goose version = %d, want 173", maxVersion)
 	}
 }
 
@@ -2218,8 +2271,8 @@ func TestMigration091_LocalDevAlreadyAppliedUsageChainStillMigrates(t *testing.T
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 172 {
-		t.Fatalf("max goose version = %d, want 172", maxVersion)
+	if maxVersion != 173 {
+		t.Fatalf("max goose version = %d, want 173", maxVersion)
 	}
 }
 

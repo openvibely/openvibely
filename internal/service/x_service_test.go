@@ -61,6 +61,189 @@ func setupXServiceTest(t *testing.T) (context.Context, *XService, *repository.Se
 	return ctx, svc, settings, auth, selections, p1, p2
 }
 
+func TestXProjectForUserUsesBoundedUserKeyedAuthorizationLookup(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	ctx := context.Background()
+	projects := repository.NewProjectRepo(db)
+	const projectCount = 100
+	var lastProject *models.Project
+	for i := 0; i < projectCount; i++ {
+		project := &models.Project{Name: fmt.Sprintf("Project %03d", i)}
+		require.NoError(t, projects.Create(ctx, project))
+		lastProject = project
+	}
+	auth := repository.NewXAuthRepo(db)
+	require.NoError(t, auth.Create(ctx, &models.XAuthorizedUser{ProjectID: lastProject.ID, XUserID: "author"}))
+	selections := repository.NewXUserProjectRepo(db)
+	svc := NewXService(
+		XCredentials{},
+		repository.NewSettingsRepo(db),
+		projects,
+		nil, nil, nil, nil, nil,
+	)
+	svc.SetRepositories(auth, selections, nil, nil, nil)
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	for i := 0; i < 2; i++ {
+		projectID, err := svc.projectForUser(ctx, "author")
+		require.NoError(t, err)
+		require.Equal(t, lastProject.ID, projectID)
+	}
+	counter.SetEnabled(false)
+
+	statements := counter.Statements()
+	require.Len(t, statements, 4)
+	for _, statement := range statements {
+		require.NotContains(t, statement, "FROM projects ORDER BY")
+	}
+}
+
+func TestXProjectForUserPreservesExplicitSelectionAndOrderedFallback(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projects := repository.NewProjectRepo(db)
+	defaultProject := &models.Project{Name: "Zulu"}
+	nameOrderedProject := &models.Project{Name: "Alpha"}
+	otherProject := &models.Project{Name: "Bravo"}
+	for _, project := range []*models.Project{defaultProject, nameOrderedProject, otherProject} {
+		require.NoError(t, projects.Create(ctx, project))
+	}
+	_, err := db.ExecContext(ctx, `UPDATE projects SET is_default = 1 WHERE id = ?`, defaultProject.ID)
+	require.NoError(t, err)
+
+	auth := repository.NewXAuthRepo(db)
+	selections := repository.NewXUserProjectRepo(db)
+	svc := NewXService(XCredentials{}, repository.NewSettingsRepo(db), projects, nil, nil, nil, nil, nil)
+	svc.SetRepositories(auth, selections, nil, nil, nil)
+
+	nameOrderedAuth := &models.XAuthorizedUser{ProjectID: nameOrderedProject.ID, XUserID: "author"}
+	otherAuth := &models.XAuthorizedUser{ProjectID: otherProject.ID, XUserID: "author"}
+	for _, user := range []*models.XAuthorizedUser{nameOrderedAuth, otherAuth} {
+		require.NoError(t, auth.Create(ctx, user))
+	}
+	projectID, err := svc.projectForUser(ctx, "author")
+	require.NoError(t, err)
+	require.Equal(t, nameOrderedProject.ID, projectID)
+
+	require.NoError(t, auth.Create(ctx, &models.XAuthorizedUser{ProjectID: defaultProject.ID, XUserID: "author"}))
+	projectID, err = svc.projectForUser(ctx, "author")
+	require.NoError(t, err)
+	require.Equal(t, defaultProject.ID, projectID)
+
+	require.NoError(t, selections.SetUserProject(ctx, "author", otherProject.ID))
+	projectID, err = svc.projectForUser(ctx, "author")
+	require.NoError(t, err)
+	require.Equal(t, otherProject.ID, projectID)
+
+	require.NoError(t, auth.Delete(ctx, otherProject.ID, otherAuth.ID))
+	projectID, err = svc.projectForUser(ctx, "author")
+	require.NoError(t, err)
+	require.Equal(t, defaultProject.ID, projectID)
+
+	projectID, err = svc.projectForUser(ctx, "unauthorized")
+	require.NoError(t, err)
+	require.Empty(t, projectID)
+}
+
+func BenchmarkXProjectForUserResolution(b *testing.B) {
+	for _, projectCount := range []int{100, 1000} {
+		projectCount := projectCount
+		b.Run(fmt.Sprintf("%d_projects", projectCount), func(b *testing.B) {
+			db, counter := testutil.NewStatementCountingTestDB(b)
+			ctx := context.Background()
+			projectRepo := repository.NewProjectRepo(db)
+			var existingProjectCount int
+			if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM projects`).Scan(&existingProjectCount); err != nil {
+				b.Fatalf("count seeded projects: %v", err)
+			}
+			var lastProject *models.Project
+			for i := existingProjectCount; i < projectCount; i++ {
+				project := &models.Project{Name: fmt.Sprintf("X benchmark project %04d", i)}
+				if err := projectRepo.Create(ctx, project); err != nil {
+					b.Fatalf("create benchmark project %d: %v", i, err)
+				}
+				lastProject = project
+			}
+			authRepo := repository.NewXAuthRepo(db)
+			if err := authRepo.Create(ctx, &models.XAuthorizedUser{ProjectID: lastProject.ID, XUserID: "benchmark-author"}); err != nil {
+				b.Fatalf("authorize benchmark user: %v", err)
+			}
+			selectionRepo := repository.NewXUserProjectRepo(db)
+			svc := NewXService(XCredentials{}, repository.NewSettingsRepo(db), projectRepo, nil, nil, nil, nil, nil)
+			svc.SetRepositories(authRepo, selectionRepo, nil, nil, nil)
+
+			b.Run("CurrentFanOut", func(b *testing.B) {
+				benchmarkXProjectResolution(b, counter, lastProject.ID, func() (string, error) {
+					return xProjectForUserFanoutBaseline(ctx, projectRepo, authRepo, selectionRepo, "benchmark-author")
+				})
+			})
+			b.Run("UserKeyedLookup", func(b *testing.B) {
+				benchmarkXProjectResolution(b, counter, lastProject.ID, func() (string, error) {
+					return svc.projectForUser(ctx, "benchmark-author")
+				})
+			})
+		})
+	}
+}
+
+func xProjectForUserFanoutBaseline(ctx context.Context, projects *repository.ProjectRepo, auth *repository.XAuthRepo, selections *repository.XUserProjectRepo, userID string) (string, error) {
+	if id, err := selections.GetUserProject(ctx, userID); err != nil {
+		return "", err
+	} else if id != "" {
+		ok, err := auth.IsAuthorized(ctx, id, userID)
+		if err != nil {
+			return "", err
+		}
+		if ok {
+			return id, nil
+		}
+	}
+	allProjects, err := projects.List(ctx)
+	if err != nil {
+		return "", err
+	}
+	for _, project := range allProjects {
+		ok, err := auth.IsAuthorized(ctx, project.ID, userID)
+		if err != nil {
+			return "", err
+		}
+		if ok {
+			return project.ID, nil
+		}
+	}
+	return "", nil
+}
+
+func benchmarkXProjectResolution(b *testing.B, counter *testutil.SQLStatementCounter, want string, resolve func() (string, error)) {
+	b.Helper()
+	counter.Reset()
+	counter.SetEnabled(true)
+	got, err := resolve()
+	counter.SetEnabled(false)
+	if err != nil {
+		b.Fatalf("warm resolution: %v", err)
+	}
+	if got != want {
+		b.Fatalf("warm resolution project = %q, want %q", got, want)
+	}
+	statementCount := len(counter.Statements())
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		got, err := resolve()
+		if err != nil {
+			b.Fatalf("resolve project: %v", err)
+		}
+		if got != want {
+			b.Fatalf("resolved project = %q, want %q", got, want)
+		}
+	}
+	b.StopTimer()
+	b.ReportMetric(float64(statementCount), "sql_statements/op")
+}
+
 func TestXRuntimeProjectSwitchRequiresTargetAuthorizationAndPersists(t *testing.T) {
 	ctx, svc, _, auth, selections, p1, p2 := setupXServiceTest(t)
 	require.NoError(t, auth.Create(ctx, &models.XAuthorizedUser{ProjectID: p1.ID, XUserID: "123"}))

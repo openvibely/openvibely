@@ -484,20 +484,7 @@ func (s *XService) projectForUser(ctx context.Context, userID string) (string, e
 			}
 		}
 	}
-	projects, err := s.projectRepo.List(ctx)
-	if err != nil {
-		return "", err
-	}
-	for _, p := range projects {
-		ok, err := s.authRepo.IsAuthorized(ctx, p.ID, userID)
-		if err != nil {
-			return "", err
-		}
-		if ok {
-			return p.ID, nil
-		}
-	}
-	return "", nil
+	return s.authRepo.FirstAuthorizedProject(ctx, userID)
 }
 func (s *XService) ingestMention(ctx context.Context, projectID string, tweet XTweet, user XUser, text, receiptToken string) (bool, string) {
 	ctx, cancel := context.WithTimeout(ctx, xProcessTimeout)
