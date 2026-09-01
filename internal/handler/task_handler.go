@@ -2257,7 +2257,7 @@ func (h *Handler) TaskThreadSteer(c echo.Context) error {
 	if task == nil {
 		return echo.NewHTTPError(http.StatusNotFound, "task not found")
 	}
-	active, err := h.execRepo.FindActiveTaskExecution(c.Request().Context(), taskID, "")
+	active, err := h.execRepo.FindActiveTaskThreadExecution(c.Request().Context(), taskID, "")
 	if err != nil {
 		applog.Infof("[handler] TaskThreadSteer active execution check failed task=%s: %v", taskID, err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to check active response")
