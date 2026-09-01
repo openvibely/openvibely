@@ -121,7 +121,12 @@ func (p *AutomationSaveValidator) SetGitHubConnectionProvider(provider automatio
 }
 
 func (v *AutomationSaveValidator) agentIssues(ctx context.Context, projectID string, candidate models.AutomationDraftCandidate) ([]models.AutomationValidationIssue, error) {
-	var issues []models.AutomationValidationIssue
+	type agentReference struct {
+		nodeKey string
+		ref     string
+	}
+
+	references := make([]agentReference, 0)
 	for _, node := range candidate.Nodes {
 		if node.Type != models.AutomationNodeAgentTask && node.Type != models.AutomationNodeTrigger {
 			continue
@@ -131,12 +136,34 @@ func (v *AutomationSaveValidator) agentIssues(ctx context.Context, projectID str
 		if ref == "" {
 			continue
 		}
-		agent, err := resolveAutomationAgent(ctx, v.agentRepo, projectID, ref)
+		references = append(references, agentReference{nodeKey: node.Key, ref: ref})
+	}
+	if len(references) == 0 {
+		return nil, nil
+	}
+
+	available := make(map[string]bool)
+	if v.agentRepo != nil {
+		agents, err := v.agentRepo.ListSelectableReferencesForProject(ctx, projectID, automationCapabilityLimit)
 		if err != nil {
 			return nil, err
 		}
-		if agent == nil {
-			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "agent_ref", Message: "Agent selection is unavailable in this project."})
+		available = make(map[string]bool, len(agents))
+		for _, agent := range agents {
+			key := strings.TrimSpace(agent.Key)
+			if key == "" {
+				key = agent.ID
+			}
+			if agent.ProjectID == "" || agent.ProjectID == projectID {
+				available[key] = true
+			}
+		}
+	}
+
+	var issues []models.AutomationValidationIssue
+	for _, reference := range references {
+		if !available[reference.ref] {
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: reference.nodeKey, Code: "agent_ref", Message: "Agent selection is unavailable in this project."})
 		}
 	}
 	return issues, nil
