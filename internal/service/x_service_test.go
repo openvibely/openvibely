@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
@@ -61,34 +63,70 @@ func setupXServiceTest(t *testing.T) (context.Context, *XService, *repository.Se
 	return ctx, svc, settings, auth, selections, p1, p2
 }
 
-func TestXProjectForUserUsesBoundedUserKeyedAuthorizationLookup(t *testing.T) {
-	db, counter := testutil.NewStatementCountingTestDB(t)
+type xProjectResolutionFixture struct {
+	ctx           context.Context
+	counter       *testutil.SQLStatementCounter
+	projectRepo   *repository.ProjectRepo
+	authRepo      *repository.XAuthRepo
+	selectionRepo *repository.XUserProjectRepo
+	svc           *XService
+	projectID     string
+}
+
+const (
+	xProjectResolutionMedianSamples  = 7
+	xProjectResolutionTimingRuns     = 3
+	xProjectResolutionAllocationRuns = 3
+)
+
+func newXProjectResolutionFixture(tb testing.TB, projectCount int) xProjectResolutionFixture {
+	tb.Helper()
+	db, counter := testutil.NewStatementCountingTestDB(tb)
 	ctx := context.Background()
-	projects := repository.NewProjectRepo(db)
-	const projectCount = 100
+	projectRepo := repository.NewProjectRepo(db)
+	var existingProjectCount int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM projects`).Scan(&existingProjectCount); err != nil {
+		tb.Fatalf("count seeded projects: %v", err)
+	}
+	if existingProjectCount >= projectCount {
+		tb.Fatalf("fixture already has %d projects, cannot create exact %d-project fixture", existingProjectCount, projectCount)
+	}
 	var lastProject *models.Project
-	for i := 0; i < projectCount; i++ {
-		project := &models.Project{Name: fmt.Sprintf("Project %03d", i)}
-		require.NoError(t, projects.Create(ctx, project))
+	for i := existingProjectCount; i < projectCount; i++ {
+		project := &models.Project{Name: fmt.Sprintf("X benchmark project %04d", i)}
+		if err := projectRepo.Create(ctx, project); err != nil {
+			tb.Fatalf("create benchmark project %d: %v", i, err)
+		}
 		lastProject = project
 	}
-	auth := repository.NewXAuthRepo(db)
-	require.NoError(t, auth.Create(ctx, &models.XAuthorizedUser{ProjectID: lastProject.ID, XUserID: "author"}))
-	selections := repository.NewXUserProjectRepo(db)
-	svc := NewXService(
-		XCredentials{},
-		repository.NewSettingsRepo(db),
-		projects,
-		nil, nil, nil, nil, nil,
-	)
-	svc.SetRepositories(auth, selections, nil, nil, nil)
+	authRepo := repository.NewXAuthRepo(db)
+	if err := authRepo.Create(ctx, &models.XAuthorizedUser{ProjectID: lastProject.ID, XUserID: "benchmark-author"}); err != nil {
+		tb.Fatalf("authorize benchmark user: %v", err)
+	}
+	selectionRepo := repository.NewXUserProjectRepo(db)
+	svc := NewXService(XCredentials{}, repository.NewSettingsRepo(db), projectRepo, nil, nil, nil, nil, nil)
+	svc.SetRepositories(authRepo, selectionRepo, nil, nil, nil)
+	return xProjectResolutionFixture{
+		ctx:           ctx,
+		counter:       counter,
+		projectRepo:   projectRepo,
+		authRepo:      authRepo,
+		selectionRepo: selectionRepo,
+		svc:           svc,
+		projectID:     lastProject.ID,
+	}
+}
+
+func TestXProjectForUserUsesBoundedUserKeyedAuthorizationLookup(t *testing.T) {
+	fixture := newXProjectResolutionFixture(t, 100)
+	counter := fixture.counter
 
 	counter.Reset()
 	counter.SetEnabled(true)
 	for i := 0; i < 2; i++ {
-		projectID, err := svc.projectForUser(ctx, "author")
+		projectID, err := fixture.svc.projectForUser(fixture.ctx, "benchmark-author")
 		require.NoError(t, err)
-		require.Equal(t, lastProject.ID, projectID)
+		require.Equal(t, fixture.projectID, projectID)
 	}
 	counter.SetEnabled(false)
 
@@ -146,44 +184,52 @@ func TestXProjectForUserPreservesExplicitSelectionAndOrderedFallback(t *testing.
 	require.Empty(t, projectID)
 }
 
+func TestXProjectForUserMeetsMedianResolutionThresholdAt1000Projects(t *testing.T) {
+	fixture := newXProjectResolutionFixture(t, 1000)
+	current := measureXProjectResolution(t, fixture.projectID, func() (string, error) {
+		return xProjectForUserFanoutBaseline(fixture.ctx, fixture.projectRepo, fixture.authRepo, fixture.selectionRepo, "benchmark-author")
+	})
+	candidate := measureXProjectResolution(t, fixture.projectID, func() (string, error) {
+		return fixture.svc.projectForUser(fixture.ctx, "benchmark-author")
+	})
+
+	require.LessOrEqual(t, float64(candidate.medianDuration), 0.25*float64(current.medianDuration),
+		"candidate median resolution time must be at least 75%% lower: current=%s candidate=%s", current.medianDuration, candidate.medianDuration)
+	require.LessOrEqual(t, candidate.medianAllocs, 0.25*current.medianAllocs,
+		"candidate median allocations must be at least 75%% lower: current=%.1f candidate=%.1f", current.medianAllocs, candidate.medianAllocs)
+}
+
 func BenchmarkXProjectForUserResolution(b *testing.B) {
+	var candidateMedians = make(map[int]time.Duration, 2)
 	for _, projectCount := range []int{100, 1000} {
 		projectCount := projectCount
 		b.Run(fmt.Sprintf("%d_projects", projectCount), func(b *testing.B) {
-			db, counter := testutil.NewStatementCountingTestDB(b)
-			ctx := context.Background()
-			projectRepo := repository.NewProjectRepo(db)
-			var existingProjectCount int
-			if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM projects`).Scan(&existingProjectCount); err != nil {
-				b.Fatalf("count seeded projects: %v", err)
+			fixture := newXProjectResolutionFixture(b, projectCount)
+			currentMeasurement := measureXProjectResolution(b, fixture.projectID, func() (string, error) {
+				return xProjectForUserFanoutBaseline(fixture.ctx, fixture.projectRepo, fixture.authRepo, fixture.selectionRepo, "benchmark-author")
+			})
+			candidateMeasurement := measureXProjectResolution(b, fixture.projectID, func() (string, error) {
+				return fixture.svc.projectForUser(fixture.ctx, "benchmark-author")
+			})
+			candidateMedians[projectCount] = candidateMeasurement.medianDuration
+			if projectCount == 1000 {
+				requireXProjectResolutionThreshold(b, currentMeasurement, candidateMeasurement)
 			}
-			var lastProject *models.Project
-			for i := existingProjectCount; i < projectCount; i++ {
-				project := &models.Project{Name: fmt.Sprintf("X benchmark project %04d", i)}
-				if err := projectRepo.Create(ctx, project); err != nil {
-					b.Fatalf("create benchmark project %d: %v", i, err)
-				}
-				lastProject = project
-			}
-			authRepo := repository.NewXAuthRepo(db)
-			if err := authRepo.Create(ctx, &models.XAuthorizedUser{ProjectID: lastProject.ID, XUserID: "benchmark-author"}); err != nil {
-				b.Fatalf("authorize benchmark user: %v", err)
-			}
-			selectionRepo := repository.NewXUserProjectRepo(db)
-			svc := NewXService(XCredentials{}, repository.NewSettingsRepo(db), projectRepo, nil, nil, nil, nil, nil)
-			svc.SetRepositories(authRepo, selectionRepo, nil, nil, nil)
 
 			b.Run("CurrentFanOut", func(b *testing.B) {
-				benchmarkXProjectResolution(b, counter, lastProject.ID, func() (string, error) {
-					return xProjectForUserFanoutBaseline(ctx, projectRepo, authRepo, selectionRepo, "benchmark-author")
+				benchmarkXProjectResolution(b, fixture.counter, fixture.projectID, currentMeasurement, func() (string, error) {
+					return xProjectForUserFanoutBaseline(fixture.ctx, fixture.projectRepo, fixture.authRepo, fixture.selectionRepo, "benchmark-author")
 				})
 			})
 			b.Run("UserKeyedLookup", func(b *testing.B) {
-				benchmarkXProjectResolution(b, counter, lastProject.ID, func() (string, error) {
-					return svc.projectForUser(ctx, "benchmark-author")
+				benchmarkXProjectResolution(b, fixture.counter, fixture.projectID, candidateMeasurement, func() (string, error) {
+					return fixture.svc.projectForUser(fixture.ctx, "benchmark-author")
 				})
 			})
 		})
+	}
+	if candidateMedians[100] > 0 && candidateMedians[1000] > 4*candidateMedians[100] {
+		b.Fatalf("candidate median resolution is not effectively flat: 100 projects=%s, 1000 projects=%s", candidateMedians[100], candidateMedians[1000])
 	}
 }
 
@@ -215,7 +261,59 @@ func xProjectForUserFanoutBaseline(ctx context.Context, projects *repository.Pro
 	return "", nil
 }
 
-func benchmarkXProjectResolution(b *testing.B, counter *testutil.SQLStatementCounter, want string, resolve func() (string, error)) {
+type xProjectResolutionMeasurement struct {
+	medianDuration time.Duration
+	medianAllocs   float64
+}
+
+func measureXProjectResolution(tb testing.TB, want string, resolve func() (string, error)) xProjectResolutionMeasurement {
+	tb.Helper()
+	durations := make([]time.Duration, xProjectResolutionMedianSamples)
+	allocations := make([]float64, xProjectResolutionMedianSamples)
+	for sample := 0; sample < xProjectResolutionMedianSamples; sample++ {
+		started := time.Now()
+		for run := 0; run < xProjectResolutionTimingRuns; run++ {
+			got, err := resolve()
+			if err != nil {
+				tb.Fatalf("timed resolution: %v", err)
+			}
+			if got != want {
+				tb.Fatalf("timed resolution project = %q, want %q", got, want)
+			}
+		}
+		durations[sample] = time.Since(started) / time.Duration(xProjectResolutionTimingRuns)
+
+		var got string
+		var err error
+		allocations[sample] = testing.AllocsPerRun(xProjectResolutionAllocationRuns, func() {
+			got, err = resolve()
+		})
+		if err != nil {
+			tb.Fatalf("allocation resolution: %v", err)
+		}
+		if got != want {
+			tb.Fatalf("allocation resolution project = %q, want %q", got, want)
+		}
+	}
+	sort.Slice(durations, func(i, j int) bool { return durations[i] < durations[j] })
+	sort.Float64s(allocations)
+	return xProjectResolutionMeasurement{
+		medianDuration: durations[len(durations)/2],
+		medianAllocs:   allocations[len(allocations)/2],
+	}
+}
+
+func requireXProjectResolutionThreshold(tb testing.TB, current, candidate xProjectResolutionMeasurement) {
+	tb.Helper()
+	if float64(candidate.medianDuration) > 0.25*float64(current.medianDuration) {
+		tb.Fatalf("candidate median resolution time must be at least 75%% lower: current=%s candidate=%s", current.medianDuration, candidate.medianDuration)
+	}
+	if candidate.medianAllocs > 0.25*current.medianAllocs {
+		tb.Fatalf("candidate median allocations must be at least 75%% lower: current=%.1f candidate=%.1f", current.medianAllocs, candidate.medianAllocs)
+	}
+}
+
+func benchmarkXProjectResolution(b *testing.B, counter *testutil.SQLStatementCounter, want string, median xProjectResolutionMeasurement, resolve func() (string, error)) {
 	b.Helper()
 	counter.Reset()
 	counter.SetEnabled(true)
@@ -241,6 +339,8 @@ func benchmarkXProjectResolution(b *testing.B, counter *testutil.SQLStatementCou
 		}
 	}
 	b.StopTimer()
+	b.ReportMetric(float64(median.medianDuration.Nanoseconds()), "median_ns/op")
+	b.ReportMetric(median.medianAllocs, "median_allocs/op")
 	b.ReportMetric(float64(statementCount), "sql_statements/op")
 }
 
