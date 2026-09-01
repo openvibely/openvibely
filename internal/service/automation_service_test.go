@@ -1099,7 +1099,7 @@ func TestAutomationSaveValidatorAgentIssuesBatchesSelectableAgentReferences(t *t
 					t.Fatalf("validation projection selected forbidden column %q: %s", forbidden, statements[0])
 				}
 			}
-			for _, requiredPredicate := range []string{"coalesce(generated_status, 'user_edited') <> 'archived'", "coalesce(enabled, 1) = 1", "coalesce(selectable_as_primary, 1) = 1", "project_id is null or project_id = '' or project_id = ?", "order by name asc, id asc", "limit ?"} {
+			for _, requiredPredicate := range []string{"coalesce(generated_status, 'user_edited') <> 'archived'", "archived_at is null", "coalesce(enabled, 1) = 1", "coalesce(selectable_as_primary, 1) = 1", "project_id is null or project_id = '' or project_id = ?", "order by name asc, id asc", "limit ?"} {
 				if !strings.Contains(query, requiredPredicate) {
 					t.Fatalf("validation query is missing %q: %s", requiredPredicate, statements[0])
 				}
@@ -1190,6 +1190,13 @@ func TestAutomationSaveValidatorAgentIssuesPreservesReferenceAvailabilitySemanti
 	if err := agentRepo.Create(ctx, archived); err != nil {
 		t.Fatalf("create archived Agent: %v", err)
 	}
+	archivedAt := automationValidationFixtureAgent("Archived at Agent", "archived-at-agent")
+	if err := agentRepo.Create(ctx, archivedAt); err != nil {
+		t.Fatalf("create archived-at Agent: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE agents SET archived_at = datetime('now') WHERE id = ?`, archivedAt.ID); err != nil {
+		t.Fatalf("archive Agent by timestamp: %v", err)
+	}
 	blankKey := automationValidationFixtureAgent("Blank key Agent", "")
 	if err := agentRepo.Create(ctx, blankKey); err != nil {
 		t.Fatalf("create blank-key Agent: %v", err)
@@ -1200,7 +1207,7 @@ func TestAutomationSaveValidatorAgentIssuesPreservesReferenceAvailabilitySemanti
 		t.Fatalf("create duplicate-name Agent: %v", err)
 	}
 
-	refs := []string{"  " + global.Key + " ", scoped.Key, foreign.Key, disabled.Key, nonSelectable.Key, archived.Key, blankKey.ID, "Duplicate name"}
+	refs := []string{"  " + global.Key + " ", scoped.Key, foreign.Key, disabled.Key, nonSelectable.Key, archived.Key, archivedAt.Key, blankKey.ID, "Duplicate name"}
 	validator := &AutomationSaveValidator{agentRepo: agentRepo}
 	counter.Reset()
 	counter.SetEnabled(true)
@@ -1209,20 +1216,27 @@ func TestAutomationSaveValidatorAgentIssuesPreservesReferenceAvailabilitySemanti
 	if err != nil {
 		t.Fatalf("agentIssues: %v", err)
 	}
-	if len(issues) != 5 {
-		t.Fatalf("agentIssues = %#v, want five unavailable references", issues)
+	if len(issues) != 6 {
+		t.Fatalf("agentIssues = %#v, want six unavailable references", issues)
 	}
 	unavailable := map[string]bool{}
 	for _, issue := range issues {
 		unavailable[issue.NodeKey] = true
 	}
-	for _, index := range []int{2, 3, 4, 5, 7} {
+	for _, index := range []int{2, 3, 4, 5, 6, 8} {
 		if !unavailable[fmt.Sprintf("agent-%02d", index)] {
 			t.Fatalf("missing unavailable issue for reference index %d: %#v", index, issues)
 		}
 	}
 	if len(selectableAgentValidationStatements(counter.Statements())) != 1 {
 		t.Fatalf("selectable Agent statements = %#v, want one query", counter.Statements())
+	}
+	resolvedArchivedAt, err := resolveAutomationAgent(ctx, agentRepo, project.ID, archivedAt.Key)
+	if err != nil {
+		t.Fatalf("resolve timestamp-archived Agent: %v", err)
+	}
+	if resolvedArchivedAt != nil {
+		t.Fatalf("timestamp-archived Agent resolved for materialization: %#v", resolvedArchivedAt)
 	}
 
 	for i := 0; i < automationCapabilityLimit; i++ {
@@ -1334,6 +1348,8 @@ func TestAutomationSaveValidatorAgentIssuesMeetsRichFixturePerformanceBudget(t *
 
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	project := automationTestProject(t, projectRepo, "Automation Agent validation performance")
 	agentRepo := repository.NewAgentRepo(db)
 	if _, err := db.ExecContext(ctx, `DELETE FROM agents WHERE id IS NOT NULL`); err != nil {
 		t.Fatalf("clear agents: %v", err)
@@ -1346,44 +1362,40 @@ func TestAutomationSaveValidatorAgentIssuesMeetsRichFixturePerformanceBudget(t *
 		}
 		refs = append(refs, agent.Key)
 	}
-	validator := &AutomationSaveValidator{agentRepo: agentRepo}
+	registry := NewAutomationAdapterRegistry()
+	automationRepo := repository.NewAutomationRepo(db)
+	drafts := NewAutomationDraftService(automationRepo, registry)
+	capabilities := NewAutomationCapabilitySnapshotBuilder(projectRepo, agentRepo, nil, nil)
+	drafts.SetCapabilitySnapshotBuilder(capabilities)
+	validator := NewAutomationSaveValidator(registry, drafts)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	compiler := NewAutomationCompiler(automationRepo, NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil), taskRepo, scheduleRepo, validator)
 
 	for _, referenceCount := range []int{1, 5, 20, 50} {
 		t.Run(fmt.Sprintf("references_%d", referenceCount), func(t *testing.T) {
 			candidate := automationValidationReferenceCandidate(refs[:referenceCount])
 			baselineAllocs := testing.AllocsPerRun(3, func() {
-				if err := automationValidationBaseline(ctx, agentRepo, "budget-project", candidate); err != nil {
+				if err := automationValidationBaselineConfigured(ctx, drafts, capabilities, agentRepo, project.ID, candidate); err != nil {
 					t.Fatalf("baseline validation: %v", err)
 				}
 			})
 			batchedAllocs := testing.AllocsPerRun(3, func() {
-				issues, err := validator.agentIssues(ctx, "budget-project", candidate)
-				if err != nil {
+				if err := automationValidationProduction(ctx, compiler, project.ID, candidate); err != nil {
 					t.Fatalf("batched validation: %v", err)
-				}
-				if len(issues) != 0 {
-					t.Fatalf("batched validation issues = %#v", issues)
 				}
 			})
 			baselineBytes := allocatedAutomationValidationBytes(t, 3, func() error {
-				return automationValidationBaseline(ctx, agentRepo, "budget-project", candidate)
+				return automationValidationBaselineConfigured(ctx, drafts, capabilities, agentRepo, project.ID, candidate)
 			})
 			batchedBytes := allocatedAutomationValidationBytes(t, 3, func() error {
-				issues, err := validator.agentIssues(ctx, "budget-project", candidate)
-				if err == nil && len(issues) != 0 {
-					return fmt.Errorf("batched validation issues = %#v", issues)
-				}
-				return err
+				return automationValidationProduction(ctx, compiler, project.ID, candidate)
 			})
 			baselineWall := medianAutomationValidationDuration(t, 3, func() error {
-				return automationValidationBaseline(ctx, agentRepo, "budget-project", candidate)
+				return automationValidationBaselineConfigured(ctx, drafts, capabilities, agentRepo, project.ID, candidate)
 			})
 			batchedWall := medianAutomationValidationDuration(t, 3, func() error {
-				issues, err := validator.agentIssues(ctx, "budget-project", candidate)
-				if err == nil && len(issues) != 0 {
-					return fmt.Errorf("batched validation issues = %#v", issues)
-				}
-				return err
+				return automationValidationProduction(ctx, compiler, project.ID, candidate)
 			})
 
 			if batchedAllocs > baselineAllocs {
@@ -1442,6 +1454,9 @@ func medianAutomationValidationDuration(t *testing.T, samples int, validate func
 func BenchmarkAutomationAgentReferenceValidationProjection(b *testing.B) {
 	db, counter := testutil.NewStatementCountingTestDB(b)
 	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	project := models.Project{Name: "Automation Agent validation benchmark"}
+	require.NoError(b, projectRepo.Create(ctx, &project))
 	agentRepo := repository.NewAgentRepo(db)
 	if _, err := db.ExecContext(ctx, `DELETE FROM agents WHERE id IS NOT NULL`); err != nil {
 		b.Fatalf("clear agents: %v", err)
@@ -1454,27 +1469,35 @@ func BenchmarkAutomationAgentReferenceValidationProjection(b *testing.B) {
 		}
 		refs = append(refs, agent.Key)
 	}
-	validator := &AutomationSaveValidator{agentRepo: agentRepo}
+	registry := NewAutomationAdapterRegistry()
+	automationRepo := repository.NewAutomationRepo(db)
+	drafts := NewAutomationDraftService(automationRepo, registry)
+	capabilities := NewAutomationCapabilitySnapshotBuilder(projectRepo, agentRepo, nil, nil)
+	drafts.SetCapabilitySnapshotBuilder(capabilities)
+	validator := NewAutomationSaveValidator(registry, drafts)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	compiler := NewAutomationCompiler(automationRepo, NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil), taskRepo, scheduleRepo, validator)
 
 	for _, referenceCount := range []int{1, 5, 20, 50} {
 		candidate := automationValidationReferenceCandidate(refs[:referenceCount])
 		b.Run(fmt.Sprintf("baseline_%d_references", referenceCount), func(b *testing.B) {
 			counter.Reset()
 			counter.SetEnabled(true)
-			if err := automationValidationBaseline(ctx, agentRepo, "benchmark-project", candidate); err != nil {
+			if err := automationValidationBaselineConfigured(ctx, drafts, capabilities, agentRepo, project.ID, candidate); err != nil {
 				counter.SetEnabled(false)
 				b.Fatalf("baseline validation: %v", err)
 			}
 			counter.SetEnabled(false)
 			queryCount := len(selectableAgentValidationStatements(counter.Statements()))
-			if queryCount != referenceCount {
-				b.Fatalf("baseline query count = %d, want %d", queryCount, referenceCount)
+			if queryCount != referenceCount+1 {
+				b.Fatalf("baseline query count = %d, want %d", queryCount, referenceCount+1)
 			}
 
 			b.ReportAllocs()
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				if err := automationValidationBaseline(ctx, agentRepo, "benchmark-project", candidate); err != nil {
+				if err := automationValidationBaselineConfigured(ctx, drafts, capabilities, agentRepo, project.ID, candidate); err != nil {
 					b.Fatal(err)
 				}
 			}
@@ -1485,7 +1508,7 @@ func BenchmarkAutomationAgentReferenceValidationProjection(b *testing.B) {
 		b.Run(fmt.Sprintf("batched_%d_references", referenceCount), func(b *testing.B) {
 			counter.Reset()
 			counter.SetEnabled(true)
-			if _, err := validator.agentIssues(ctx, "benchmark-project", candidate); err != nil {
+			if err := automationValidationProduction(ctx, compiler, project.ID, candidate); err != nil {
 				counter.SetEnabled(false)
 				b.Fatalf("batched validation: %v", err)
 			}
@@ -1498,7 +1521,7 @@ func BenchmarkAutomationAgentReferenceValidationProjection(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				if _, err := validator.agentIssues(ctx, "benchmark-project", candidate); err != nil {
+				if err := automationValidationProduction(ctx, compiler, project.ID, candidate); err != nil {
 					b.Fatal(err)
 				}
 			}
@@ -1506,6 +1529,36 @@ func BenchmarkAutomationAgentReferenceValidationProjection(b *testing.B) {
 			b.ReportMetric(float64(queryCount), "agent_queries/op")
 		})
 	}
+}
+
+func automationValidationBaselineConfigured(ctx context.Context, drafts *AutomationDraftService, capabilities *AutomationCapabilitySnapshotBuilder, agentRepo *repository.AgentRepo, projectID string, candidate models.AutomationDraftCandidate) error {
+	normalized, err := drafts.NormalizeCandidate(candidate)
+	if err != nil {
+		return err
+	}
+	snapshot, err := capabilities.Build(ctx, projectID)
+	if err != nil {
+		return err
+	}
+	issues := drafts.ValidateCandidateWithCapabilities(normalized, snapshot)
+	if len(issues) != 0 {
+		return fmt.Errorf("configured baseline validation issues = %#v", issues)
+	}
+	return automationValidationBaseline(ctx, agentRepo, projectID, normalized)
+}
+
+func automationValidationProduction(ctx context.Context, compiler *AutomationCompiler, projectID string, candidate models.AutomationDraftCandidate) error {
+	plan, _, err := compiler.PreviewSave(ctx, projectID, candidate)
+	if err != nil {
+		return err
+	}
+	if plan == nil {
+		return errors.New("configured production validation returned no plan")
+	}
+	if len(plan.Validation) != 0 {
+		return fmt.Errorf("configured production validation issues = %#v", plan.Validation)
+	}
+	return nil
 }
 
 func automationValidationBaseline(ctx context.Context, agentRepo *repository.AgentRepo, projectID string, candidate models.AutomationDraftCandidate) error {
