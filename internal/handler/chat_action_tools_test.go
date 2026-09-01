@@ -459,6 +459,7 @@ func TestListChannelsPlanModeReturnsPromptSafeStatus(t *testing.T) {
 	require.NoError(t, webhookRepo.Create(ctx, &models.WebhookEndpoint{ProjectID: project.ID, Name: "Deploy Alerts", Enabled: true, PathToken: secretValues[9], Secret: secretValues[8], DefaultPriority: 2}))
 	require.NoError(t, webhookRepo.Create(ctx, &models.WebhookEndpoint{ProjectID: project.ID, Name: "Disabled Hook", Enabled: false, DefaultPriority: 2}))
 	require.NoError(t, channelTargetRepo.Upsert(ctx, models.ChannelTarget{ID: repository.NewID(), ProjectID: project.ID, Platform: "slack", TargetKind: "channel", Name: "ops", TargetID: secretValues[10], ThreadID: secretValues[11], Home: true}))
+	require.NoError(t, channelTargetRepo.Upsert(ctx, models.ChannelTarget{ID: repository.NewID(), ProjectID: project.ID, Platform: "slack", TargetKind: "user", TargetID: "U123"}))
 	require.NoError(t, channelTargetRepo.Upsert(ctx, models.ChannelTarget{ID: repository.NewID(), ProjectID: project.ID, Platform: "email", TargetKind: "email", Name: "team", TargetID: "team@example.com", DefaultSubject: secretValues[12]}))
 
 	rt := h.buildChatActionToolRuntimeFromDefs(
@@ -491,10 +492,15 @@ func TestListChannelsPlanModeReturnsPromptSafeStatus(t *testing.T) {
 	require.Equal(t, "alerts@example.com", summary.Email.Address)
 	require.Equal(t, 2, summary.Webhooks.Total)
 	require.Equal(t, 1, summary.Webhooks.Active)
-	require.Equal(t, 2, summary.OutboundTargets.Total)
+	require.Equal(t, 3, summary.OutboundTargets.Total)
 	require.False(t, summary.OutboundTargets.ExplicitUnsavedTargetsAllowed)
+	require.Equal(t, 2, summary.OutboundTargets.ByPlatform["slack"].Total)
 	require.Equal(t, 1, summary.OutboundTargets.ByPlatform["slack"].Home)
-	require.Equal(t, 1, summary.OutboundTargets.ByPlatform["email"].ByKind["email"])
+	require.Equal(t, 1, summary.OutboundTargets.ByPlatform["slack"].Named)
+	require.Equal(t, map[string]int{"channel": 1, "user": 1}, summary.OutboundTargets.ByPlatform["slack"].ByKind)
+	require.Equal(t, 1, summary.OutboundTargets.ByPlatform["email"].Total)
+	require.Equal(t, 1, summary.OutboundTargets.ByPlatform["email"].Named)
+	require.Equal(t, map[string]int{"email": 1}, summary.OutboundTargets.ByPlatform["email"].ByKind)
 
 	for _, secret := range secretValues {
 		if strings.Contains(out, secret) {
@@ -530,6 +536,39 @@ func TestListChannelsOutboundTargetAggregateSummaryMatchesMaterializedOutput(t *
 	require.Equal(t, string(materializedJSON), string(aggregateJSON))
 }
 
+func TestListChannelsEmptyOutboundTargetSummaryKeepsEmptyByPlatform(t *testing.T) {
+	h, _, _, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	project := createProject(t, h, "Empty Channel Status Targets")
+	h.SetChannelTargetRepo(repository.NewChannelTargetRepo(db))
+
+	rt := h.buildChatActionToolRuntimeFromDefs(
+		streamingResponseParams{ProjectID: project.ID, ChatMode: models.ChatModePlan},
+		nil,
+		chatcontrol.ToolDefsForContext(models.ChatModePlan, chatcontrol.SurfaceWeb, false),
+		models.ChatModePlan,
+		chatcontrol.SurfaceWeb,
+	)
+	out, handled, isErr, err := rt.Executor(ctx, "list_channels", json.RawMessage(`{}`))
+	require.True(t, handled)
+	require.False(t, isErr)
+	require.NoError(t, err)
+
+	var result struct {
+		OutboundTargets struct {
+			Configured                    bool                       `json:"configured"`
+			ExplicitUnsavedTargetsAllowed bool                       `json:"explicit_unsaved_targets_allowed"`
+			MessagingAvailable            bool                       `json:"messaging_available"`
+			ByPlatform                    map[string]json.RawMessage `json:"by_platform"`
+		} `json:"outbound_message_targets"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &result))
+	require.False(t, result.OutboundTargets.Configured)
+	require.False(t, result.OutboundTargets.ExplicitUnsavedTargetsAllowed)
+	require.False(t, result.OutboundTargets.MessagingAvailable)
+	require.NotNil(t, result.OutboundTargets.ByPlatform)
+	require.Empty(t, result.OutboundTargets.ByPlatform)
+}
 func TestViewSystemUpdateRuntimeTool_NotApplicableWithoutVisibleCoordinator(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
@@ -1585,10 +1624,16 @@ func TestChatActionHandlers_CoverageWebAndAPI(t *testing.T) {
 	if err := chatcontrol.ValidateHandlerCoverage(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true, webHandlers); err != nil {
 		t.Fatalf("web handler coverage mismatch: %v", err)
 	}
+	if webHandlers["delete_automation"] == nil {
+		t.Fatal("web handler coverage missing delete_automation")
+	}
 
 	apiHandlers := h.chatActionHandlers(params, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceAPI)
 	if err := chatcontrol.ValidateHandlerCoverage(models.ChatModeOrchestrate, chatcontrol.SurfaceAPI, true, apiHandlers); err != nil {
 		t.Fatalf("api handler coverage mismatch: %v", err)
+	}
+	if apiHandlers["delete_automation"] == nil {
+		t.Fatal("api handler coverage missing delete_automation")
 	}
 }
 
@@ -2445,6 +2490,8 @@ func TestGitHubAuthAndInboxRuntimeToolsUseConfiguredRepository(t *testing.T) {
 	}
 	var sawMyAssignedIssues bool
 	var sawAssignedIssuesWithPRs bool
+	var myAssignedIssueCalls int
+	var assignedIssueCalls int
 	var assignedIssuesWithPRCalls int
 	var createdRepo, commentedRepo, labeledRepo, closedRepo string
 	h.SetGitHubService(&fakeGitHubService{
@@ -2464,12 +2511,14 @@ func TestGitHubAuthAndInboxRuntimeToolsUseConfiguredRepository(t *testing.T) {
 		},
 		listMyAssignedIssuesFn: func(_ context.Context, repo *service.GitHubRepoRef) (*service.GitHubAuthenticatedUser, []service.GitHubIssue, error) {
 			sawMyAssignedIssues = true
+			myAssignedIssueCalls++
 			if repo.Owner == "example" && repo.Name == "other" {
 				return &service.GitHubAuthenticatedUser{Login: "channel-user", Source: service.GitHubAuthModePAT}, []service.GitHubIssue{{Number: 7, URL: "https://github.com/example/other/issues/7", Title: "Explicit URL", State: "open", Assignees: []string{"channel-user"}}}, nil
 			}
 			return &service.GitHubAuthenticatedUser{Login: "channel-user", Source: service.GitHubAuthModePAT}, []service.GitHubIssue{{Number: 5, URL: "https://github.com/openvibely/openvibely/issues/5", Title: "Testing", State: "open", Assignees: []string{"channel-user"}}}, nil
 		},
 		listAssignedIssuesFn: func(_ context.Context, repo *service.GitHubRepoRef, assignee string) ([]service.GitHubIssue, error) {
+			assignedIssueCalls++
 			if assignee != "Dev-Bot" {
 				t.Fatalf("expected explicit assignee Dev-Bot, got %q", assignee)
 			}
@@ -2578,6 +2627,37 @@ func TestGitHubAuthAndInboxRuntimeToolsUseConfiguredRepository(t *testing.T) {
 	if assignedIssuesWithPRCalls != callsBeforeInvalid {
 		t.Fatalf("Web/API provider calls after invalid pagination=%d, want %d", assignedIssuesWithPRCalls, callsBeforeInvalid)
 	}
+
+	callsBeforeInvalidMyAssigned := myAssignedIssueCalls
+	callsBeforeInvalidAssigned := assignedIssueCalls
+	for _, surface := range []struct {
+		name     string
+		handlers map[string]chatcontrol.RuntimeActionHandler
+	}{
+		{name: "Web", handlers: handlers},
+		{name: "API", handlers: apiHandlers},
+	} {
+		for _, input := range []string{
+			`{"limit":0}`,
+			`{"Limit":0}`,
+			`{"LIMIT":0}`,
+			`{"limit":101}`,
+			`{"offset":-1}`,
+			`{"Offset":-1}`,
+		} {
+			if _, err := surface.handlers["github_list_my_assigned_issues"](ctx, json.RawMessage(input)); err == nil || err.Error() != "limit must be 1-100 and offset must be non-negative" {
+				t.Fatalf("%s my-assigned invalid pagination input %s error=%v, want validation error", surface.name, input, err)
+			}
+			assignedInput := strings.TrimSuffix(input, "}") + `,"assignee":"Dev-Bot"}`
+			if _, err := surface.handlers["github_list_assigned_issues"](ctx, json.RawMessage(assignedInput)); err == nil || err.Error() != "limit must be 1-100 and offset must be non-negative" {
+				t.Fatalf("%s assigned invalid pagination input %s error=%v, want validation error", surface.name, assignedInput, err)
+			}
+		}
+	}
+	if myAssignedIssueCalls != callsBeforeInvalidMyAssigned || assignedIssueCalls != callsBeforeInvalidAssigned {
+		t.Fatalf("Web/API ordinary provider calls after invalid pagination=%d/%d, want %d/%d", myAssignedIssueCalls, assignedIssueCalls, callsBeforeInvalidMyAssigned, callsBeforeInvalidAssigned)
+	}
+
 	if _, err = handlers["github_list_assigned_issues"](ctx, json.RawMessage(`{"assignee":"mallory"}`)); err == nil || !strings.Contains(err.Error(), "not authorized") {
 		t.Fatalf("expected unauthorized explicit-assignee error, got %v", err)
 	}

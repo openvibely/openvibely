@@ -661,6 +661,126 @@ func TestAutomationSaveCreatesCurrentGraphTaskAndScheduleAtomically(t *testing.T
 	require.False(t, tableExists(t, h.db, "automation_publication_steps"))
 }
 
+func TestAutomationSaveRecreatesDeletedRetainedNativeNodeResources(t *testing.T) {
+	h := newAutomationSaveHarness(t, "Recover deleted retained Native node resources")
+	ctx := context.Background()
+	candidate, err := h.drafts.TemplateCandidate(AutomationAdapterNativeSDLC)
+	require.NoError(t, err)
+	first, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "template", CreatedVia: "web", Candidate: candidate})
+	require.NoError(t, err)
+
+	optimizationTaskID := automationResourceID(t, first.Definition, "optimization_finder", "task")
+	optimizationScheduleID := automationResourceID(t, first.Definition, "optimization_finder", "schedule")
+	visionTaskID := automationResourceID(t, first.Definition, "vision_suggestions", "task")
+	visionScheduleID := automationResourceID(t, first.Definition, "vision_suggestions", "schedule")
+	originalNodeCount := len(first.Definition.Nodes)
+	originalEdgeCount := len(first.Definition.Edges)
+	originalOptimizationNode := automationDraftNodeByKey(t, candidate, "optimization_finder")
+
+	require.NoError(t, h.scheduleRepo.Delete(ctx, optimizationScheduleID))
+	require.NoError(t, h.taskRepo.Delete(ctx, optimizationTaskID))
+	deletedTask, err := h.taskRepo.GetByID(ctx, optimizationTaskID)
+	require.NoError(t, err)
+	require.Nil(t, deletedTask)
+	deletedSchedule, err := h.scheduleRepo.GetByID(ctx, optimizationScheduleID)
+	require.NoError(t, err)
+	require.Nil(t, deletedSchedule)
+
+	reopened, err := h.drafts.CurrentCandidate(ctx, h.project.ID, first.Definition.Automation.ID)
+	require.NoError(t, err)
+	plan, _, err := h.compiler.PreviewSave(ctx, h.project.ID, reopened.Candidate)
+	require.NoError(t, err)
+	require.Empty(t, plan.Validation)
+	optimizedReopenedNode := automationDraftNodeByKey(t, reopened.Candidate, "optimization_finder")
+	require.Equal(t, originalOptimizationNode.Name, optimizedReopenedNode.Name)
+	require.Equal(t, originalOptimizationNode.Config["prompt"], optimizedReopenedNode.Config["prompt"])
+
+	recovered, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, AutomationID: first.Definition.Automation.ID,
+		Source: "manual", CreatedVia: "web", Candidate: reopened.Candidate})
+	require.NoError(t, err)
+	require.Len(t, recovered.Definition.Nodes, originalNodeCount)
+	require.Len(t, recovered.Definition.Edges, originalEdgeCount)
+	recoveredOptimizationTaskID := automationResourceID(t, recovered.Definition, "optimization_finder", "task")
+	recoveredOptimizationScheduleID := automationResourceID(t, recovered.Definition, "optimization_finder", "schedule")
+	require.NotEqual(t, optimizationTaskID, recoveredOptimizationTaskID)
+	require.NotEqual(t, optimizationScheduleID, recoveredOptimizationScheduleID)
+	require.Equal(t, visionTaskID, automationResourceID(t, recovered.Definition, "vision_suggestions", "task"))
+	require.Equal(t, visionScheduleID, automationResourceID(t, recovered.Definition, "vision_suggestions", "schedule"))
+	require.Equal(t, originalOptimizationNode.Config["prompt"], automationDraftNodeByKey(t, reopened.Candidate, "optimization_finder").Config["prompt"])
+	require.Equal(t, originalNodeCount, countRows(t, h.db, `SELECT COUNT(*) FROM automation_nodes WHERE version_id = ?`, recovered.Definition.Version.ID))
+	require.Equal(t, 1, countRows(t, h.db, `SELECT COUNT(*) FROM automation_definition_resources WHERE automation_id = ? AND node_id = (SELECT id FROM automation_nodes WHERE version_id = ? AND node_key = 'optimization_finder') AND resource_type = 'task'`, recovered.Definition.Automation.ID, recovered.Definition.Version.ID))
+	require.Equal(t, 1, countRows(t, h.db, `SELECT COUNT(*) FROM automation_definition_resources WHERE automation_id = ? AND node_id = (SELECT id FROM automation_nodes WHERE version_id = ? AND node_key = 'optimization_finder') AND resource_type = 'schedule'`, recovered.Definition.Automation.ID, recovered.Definition.Version.ID))
+
+	repeated, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, AutomationID: first.Definition.Automation.ID,
+		Source: "manual", CreatedVia: "web", Candidate: reopened.Candidate})
+	require.NoError(t, err)
+	require.Equal(t, recoveredOptimizationTaskID, automationResourceID(t, repeated.Definition, "optimization_finder", "task"))
+	require.Equal(t, recoveredOptimizationScheduleID, automationResourceID(t, repeated.Definition, "optimization_finder", "schedule"))
+	require.Equal(t, 1, countRows(t, h.db, `SELECT COUNT(*) FROM tasks WHERE project_id = ? AND created_via = ?`, h.project.ID,
+		repository.AutomationCompilerTaskCreatedVia(first.Definition.Automation.ID, "optimization_finder")))
+	require.Equal(t, 1, countRows(t, h.db, `SELECT COUNT(*) FROM automation_trigger_owners WHERE project_id = ? AND automation_id = ? AND node_id = (SELECT id FROM automation_nodes WHERE version_id = ? AND node_key = 'optimization_finder')`, h.project.ID, first.Definition.Automation.ID, repeated.Definition.Version.ID))
+}
+
+func TestAutomationSaveRecreatesDeletedRetainedNativeResourcesPreservesPausedLifecycle(t *testing.T) {
+	h := newAutomationSaveHarness(t, "Recover deleted retained paused Native resources")
+	ctx := context.Background()
+	candidate, err := h.drafts.TemplateCandidate(AutomationAdapterNativeSDLC)
+	require.NoError(t, err)
+	first, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "template", CreatedVia: "web", Candidate: candidate})
+	require.NoError(t, err)
+	require.NoError(t, h.lifecycle.Pause(ctx, h.project.ID, first.Definition.Automation.ID))
+	oldTaskID := automationResourceID(t, first.Definition, "optimization_finder", "task")
+	oldScheduleID := automationResourceID(t, first.Definition, "optimization_finder", "schedule")
+	require.NoError(t, h.taskRepo.Delete(ctx, oldTaskID))
+	deletedSchedule, err := h.scheduleRepo.GetByID(ctx, oldScheduleID)
+	require.NoError(t, err)
+	require.Nil(t, deletedSchedule)
+
+	reopened, err := h.drafts.CurrentCandidate(ctx, h.project.ID, first.Definition.Automation.ID)
+	require.NoError(t, err)
+	recovered, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, AutomationID: first.Definition.Automation.ID,
+		Source: "manual", CreatedVia: "web", Candidate: reopened.Candidate})
+	require.NoError(t, err)
+	require.Equal(t, models.AutomationPaused, recovered.Definition.Automation.LifecycleState)
+
+	newTaskID := automationResourceID(t, recovered.Definition, "optimization_finder", "task")
+	newScheduleID := automationResourceID(t, recovered.Definition, "optimization_finder", "schedule")
+	require.NotEqual(t, oldTaskID, newTaskID)
+	require.NotEqual(t, oldScheduleID, newScheduleID)
+	newTask, err := h.taskRepo.GetByID(ctx, newTaskID)
+	require.NoError(t, err)
+	require.Equal(t, models.CategoryScheduled, newTask.Category)
+	newSchedule, err := h.scheduleRepo.GetByID(ctx, newScheduleID)
+	require.NoError(t, err)
+	require.False(t, newSchedule.Enabled)
+	var ownershipState string
+	require.NoError(t, h.db.QueryRowContext(ctx, `SELECT ownership_state FROM automation_trigger_owners WHERE schedule_id = ?`, newScheduleID).Scan(&ownershipState))
+	require.Equal(t, "paused", ownershipState)
+}
+
+func TestAutomationCurrentCandidateRecoversMissingScheduleContextAfterDeletion(t *testing.T) {
+	h := newAutomationSaveHarness(t, "Recover missing schedule context")
+	ctx := context.Background()
+	candidate := customScheduledTaskCandidate("Recover missing schedule context", "Review one request.")
+	first, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
+	require.NoError(t, err)
+	oldScheduleID := automationResourceID(t, first.Definition, "schedule", "schedule")
+	require.NoError(t, h.scheduleRepo.Delete(ctx, oldScheduleID))
+
+	reopened, err := h.drafts.CurrentCandidate(ctx, h.project.ID, first.Definition.Automation.ID)
+	require.NoError(t, err)
+	_, hasPersistedContext := automationDraftNodeByKey(t, reopened.Candidate, "schedule").Config["clear_context_on_start"]
+	require.False(t, hasPersistedContext, "a deleted schedule has no stored context value to hydrate")
+	recovered, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, AutomationID: first.Definition.Automation.ID,
+		Source: "manual", CreatedVia: "web", Candidate: reopened.Candidate})
+	require.NoError(t, err)
+	newScheduleID := automationResourceID(t, recovered.Definition, "schedule", "schedule")
+	require.NotEqual(t, oldScheduleID, newScheduleID)
+	newSchedule, err := h.scheduleRepo.GetByID(ctx, newScheduleID)
+	require.NoError(t, err)
+	require.True(t, newSchedule.ClearContextOnStart)
+}
+
 func TestAutomationSavePreservesLegacyScheduleClearContextValue(t *testing.T) {
 	h := newAutomationSaveHarness(t, "Legacy schedule context")
 	ctx := context.Background()

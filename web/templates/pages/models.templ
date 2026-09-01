@@ -12,13 +12,40 @@ import (
 
 templ Models(projects []models.Project, currentProjectID string, agents []models.LLMConfig, modelWorkerStats map[string]int, desktopMode bool) {
 	@layout.Base("Models", projects, currentProjectID) {
-		@modelsContent(agents, modelWorkerStats, desktopMode)
+		@modelsContent(agents, agents, modelWorkerStats, desktopMode, false)
+	}
+}
+
+// ModelsPage renders a paged Models card list while keeping dialog options
+// separate from the visible card page.
+templ ModelsPage(projects []models.Project, currentProjectID string, agents []models.LLMConfig, modelOptions []models.LLMConfig, modelWorkerStats map[string]int, desktopMode bool) {
+	@layout.Base("Models", projects, currentProjectID) {
+		@modelsContent(agents, modelOptions, modelWorkerStats, desktopMode, false)
+	}
+}
+
+// ModelsPageWithPagination includes the authoritative boundary for the initial
+// server-rendered page so mixed card projections do not infer it from DOM count.
+templ ModelsPageWithPagination(projects []models.Project, currentProjectID string, agents []models.LLMConfig, modelOptions []models.LLMConfig, modelWorkerStats map[string]int, desktopMode bool, hasMore bool) {
+	@layout.Base("Models", projects, currentProjectID) {
+		@modelsContent(agents, modelOptions, modelWorkerStats, desktopMode, hasMore)
 	}
 }
 
 // AgentsContent renders just the agents content for HTMX requests
 templ ModelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int, desktopMode bool) {
-	@modelsContent(agents, modelWorkerStats, desktopMode)
+	@modelsContent(agents, agents, modelWorkerStats, desktopMode, false)
+}
+
+// ModelsContentPage renders one bounded card page as an HTMX/browser fragment.
+templ ModelsContentPage(agents []models.LLMConfig, modelOptions []models.LLMConfig, modelWorkerStats map[string]int, desktopMode bool) {
+	@modelsContent(agents, modelOptions, modelWorkerStats, desktopMode, false)
+}
+
+// ModelsContentPageWithPagination renders a bounded card page with its end
+// boundary for the browser loader.
+templ ModelsContentPageWithPagination(agents []models.LLMConfig, modelOptions []models.LLMConfig, modelWorkerStats map[string]int, desktopMode bool, hasMore bool) {
+	@modelsContent(agents, modelOptions, modelWorkerStats, desktopMode, hasMore)
 }
 
 func hasDefault(agents []models.LLMConfig) bool {
@@ -160,8 +187,8 @@ templ providerIcon(provider models.LLMProvider) {
 	}
 }
 
-templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int, desktopMode bool) {
-	<div id="models-container" data-search-container hx-history="false">
+templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, modelWorkerStats map[string]int, desktopMode bool, hasMore bool) {
+		<div id="models-container" data-search-container hx-history="false" data-card-pagination-root data-card-pagination-url="/models" data-card-pagination-list="#models-card-list" data-card-pagination-card-selector="[data-model-id]" data-card-pagination-key="data-model-id" data-card-pagination-page-size="20" data-card-pagination-has-more={ cardPaginationHasMoreAttribute(hasMore) }>
 		@layout.PageTitle("Models")
 	<div class="flex items-center justify-between mb-6">
 			<h2 class="text-2xl font-bold">Models</h2>
@@ -169,10 +196,11 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int, 
 				+ Add Model
 			</button>
 		</div>
-		@CardSearchInput("models", "Search models...")
+			@CardSearchInput("models", "Search models...")
 
+			<div id="models-card-list" data-card-pagination-list>
 				if len(agents) == 0 {
-					<div class="text-center py-12">
+						<div class="text-center py-12" data-search-empty-state>
 						<p class="opacity-50 mb-4">No models configured yet. Add one to start executing tasks.</p>
 						<button class="btn btn-primary" onclick="openNewModelModal()">
 							Configure Model
@@ -282,7 +310,7 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int, 
 										}
 									</p>
 									if agent.Provider == models.ProviderMixture {
-										<p class="text-sm opacity-60">Aggregator: { mixtureAggregatorSummary(agent, agents) }</p>
+										<p class="text-sm opacity-60">Aggregator: { mixtureAggregatorSummary(agent, modelOptions) }</p>
 										<p class="text-sm opacity-60">References: { fmt.Sprintf("%d", mixtureReferenceCount(agent)) }</p>
 									} else if modelCardShowsTemperature(agent) {
 										<p class="text-sm opacity-60">
@@ -327,11 +355,12 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int, 
 						</div>
 					</div>
 				}
+				</div>
+				}
 			</div>
-		}
+			@CardPaginationStatusWithBoundary(hasMore)
 
-		<!-- Reassign Default Modal -->
-		<dialog id="reassign_default_modal" class="modal" onclose="if (typeof syncToastContainerHost === 'function') syncToastContainerHost()">
+			<!-- Reassign Default Modal -->		<dialog id="reassign_default_modal" class="modal" onclose="if (typeof syncToastContainerHost === 'function') syncToastContainerHost()">
 			<div class="modal-box">
 				@ModalCloseButton("reassign_default_modal", "Close reassign default model dialog")
 				<h3 class="font-bold text-lg mb-2 pr-10">Reassign Default Model</h3>
@@ -339,7 +368,7 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int, 
 				<div class="form-control mb-4">
 					<label class="label"><span class="label-text">New Default Model</span></label>
 					<select id="reassign_default_select" class="select select-bordered w-full">
-						for _, agent := range agents {
+for _, agent := range modelOptions {
 							if !agent.IsDefault {
 								<option value={ agent.ID }>{ agent.Name }</option>
 							}
@@ -682,7 +711,7 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int, 
 							</label>
 						</div>
 						</div>
-						<div id="mixture_fields" class="hidden" data-options={ mixtureModelOptionsJSON(agents) }>
+						<div id="mixture_fields" class="hidden" data-options={ mixtureModelOptionsJSON(modelOptions) }>
 							<input type="hidden" id="model_mixture_config_json" name="mixture_config_json" value=""/>
 							<div class="alert alert-info mb-3">
 								<div>
@@ -694,7 +723,7 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int, 
 								<label class="label"><span class="label-text">Aggregator Model</span></label>
 								<select id="model_mixture_aggregator" name="mixture_aggregator_id" class="select select-bordered" onchange="renderMixtureReferenceOptions(selectedMixtureReferenceIDs()); updateMixtureCostWarning()">
 									<option value="">Select aggregator</option>
-									for _, option := range callableMixtureModels(agents) {
+									for _, option := range callableMixtureModels(modelOptions) {
 										<option value={ option.ID }>{ option.Name } ({ string(option.Provider) }/{ option.Model })</option>
 									}
 								</select>
@@ -705,7 +734,7 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int, 
 										<div class="flex flex-col gap-2 sm:flex-row">
 											<select id="model_mixture_reference_available" class="select select-bordered flex-1" aria-label="Available reference models">
 												<option value="">Select reference to add</option>
-												for _, option := range callableMixtureModels(agents) {
+												for _, option := range callableMixtureModels(modelOptions) {
 													<option value={ option.ID }>{ option.Name } ({ string(option.Provider) }/{ option.Model })</option>
 												}
 											</select>

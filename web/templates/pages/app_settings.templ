@@ -8,19 +8,33 @@ import (
 
 templ AppSettingsPage(personality string, projects []models.Project, currentProjectID string, customPersonalities []models.CustomPersonality) {
 	@layout.Base("Personality", projects, currentProjectID) {
-		@appSettingsContent(personality, currentProjectID, customPersonalities)
+		@appSettingsContent(personality, currentProjectID, customPersonalities, false)
+	}
+}
+
+// AppSettingsPageWithPagination renders the initial Personality page with the
+// server's custom-card boundary.
+templ AppSettingsPageWithPagination(personality string, projects []models.Project, currentProjectID string, customPersonalities []models.CustomPersonality, hasMore bool) {
+	@layout.Base("Personality", projects, currentProjectID) {
+		@appSettingsContent(personality, currentProjectID, customPersonalities, hasMore)
 	}
 }
 
 // AppSettingsContent renders just the settings content for HTMX requests
 templ AppSettingsContent(personality string, currentProjectID string, customPersonalities []models.CustomPersonality) {
-	@appSettingsContent(personality, currentProjectID, customPersonalities)
+	@appSettingsContent(personality, currentProjectID, customPersonalities, false)
 }
 
-templ appSettingsContent(personality string, currentProjectID string, customPersonalities []models.CustomPersonality) {
+// AppSettingsContentWithPagination renders bounded Personality content with its
+// server-provided custom-card boundary.
+templ AppSettingsContentWithPagination(personality string, currentProjectID string, customPersonalities []models.CustomPersonality, hasMore bool) {
+	@appSettingsContent(personality, currentProjectID, customPersonalities, hasMore)
+}
+
+templ appSettingsContent(personality string, currentProjectID string, customPersonalities []models.CustomPersonality, hasMore bool) {
 	<div id="personality-container">
 		@layout.PageTitle("Personality")
-		@PersonalitySection(personality, customPersonalities)
+		@PersonalitySectionWithPagination(personality, customPersonalities, hasMore)
 	</div>
 }
 
@@ -150,7 +164,7 @@ templ builtInPersonalityCard(p service.PersonalityInfo, personality string, cust
 	</div>
 }
 
-templ customPersonalityCard(cp models.CustomPersonality, personality string) {
+templ customPersonalityCard(cp models.CustomPersonality, personality string, paginationCard bool) {
 	<div
 		class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
 		data-personality-key={ cp.Key }
@@ -158,6 +172,7 @@ templ customPersonalityCard(cp models.CustomPersonality, personality string) {
 		data-personality-description={ cp.Description }
 		data-personality-preview={ cp.SystemPromptPreview }
 		data-personality-is-preset="false"
+		data-personality-pagination-card={ cardPaginationHasMoreAttribute(paginationCard) }
 		data-personality-has-custom="true"
 		data-search-card
 		data-search-text={ cp.Name + " " + cp.Description + " " + cp.SystemPromptPreview }
@@ -219,14 +234,35 @@ templ customPersonalityCard(cp models.CustomPersonality, personality string) {
 
 // PersonalitySection renders the personality card list with create/edit modal.
 templ PersonalitySection(personality string, customPersonalities []models.CustomPersonality) {
-	<div id="personality-section" data-selected-personality={ personality } data-search-container>
-		<div class="flex items-center justify-between mb-6">
+	@personalitySection(personality, customPersonalities, false)
+}
+
+// PersonalitySectionPage renders a paged Personality fragment while retaining the existing card contract.
+templ PersonalitySectionPage(personality string, customPersonalities []models.CustomPersonality) {
+	@personalitySection(personality, customPersonalities, false)
+}
+
+// PersonalitySectionWithPagination includes the authoritative custom-card page
+// boundary for full pages and live HTMX replacements.
+templ PersonalitySectionWithPagination(personality string, customPersonalities []models.CustomPersonality, hasMore bool) {
+	@personalitySection(personality, customPersonalities, hasMore)
+}
+
+// PersonalitySectionPageWithPagination renders a bounded Personality fragment
+// with its server-provided custom-card boundary.
+templ PersonalitySectionPageWithPagination(personality string, customPersonalities []models.CustomPersonality, hasMore bool) {
+	@personalitySection(personality, customPersonalities, hasMore)
+}
+
+templ personalitySection(personality string, customPersonalities []models.CustomPersonality, hasMore bool) {
+		<div id="personality-section" data-selected-personality={ personality } data-search-container data-card-pagination-root data-card-pagination-url="/personality" data-card-pagination-list="#personality-card-list" data-card-pagination-card-selector="[data-personality-pagination-card='true']" data-card-pagination-replacement-card-selector="[data-personality-key]" data-card-pagination-key="data-personality-key" data-card-pagination-page-size="20" data-card-pagination-has-more={ cardPaginationHasMoreAttribute(hasMore) }>		<div class="flex items-center justify-between mb-6">
 			<h2 class="text-2xl font-bold">Personality</h2>
 			<button class="btn btn-primary btn-sm" onclick="openNewPersonalityModal()">
 				+ Add Personality
 			</button>
 		</div>
 		@CardSearchInput("personality", "Search personalities...")
+		<div id="personality-card-list" data-card-pagination-list>
 		<div class="grid gap-4">
 			if personality != "" {
 				for _, p := range service.AllPersonalities() {
@@ -236,7 +272,7 @@ templ PersonalitySection(personality string, customPersonalities []models.Custom
 				}
 				for _, cp := range nonPresetCustoms(customPersonalities) {
 					if cp.Key == personality {
-						@customPersonalityCard(cp, personality)
+						@customPersonalityCard(cp, personality, false)
 					}
 				}
 			}
@@ -295,10 +331,12 @@ templ PersonalitySection(personality string, customPersonalities []models.Custom
 			<!-- Non-preset custom personality cards -->
 			for _, cp := range nonPresetCustoms(customPersonalities) {
 				if cp.Key != personality {
-					@customPersonalityCard(cp, personality)
+					@customPersonalityCard(cp, personality, true)
 				}
 			}
 		</div>
+		</div>
+		@CardPaginationStatusWithBoundary(hasMore)
 		<!-- Create/Edit Personality Modal -->
 		<dialog id="personality_modal" class="modal" onclose="if (typeof syncToastContainerHost === 'function') syncToastContainerHost()">
 			<div class="modal-box">

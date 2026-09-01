@@ -129,6 +129,7 @@ type channelThreadActionHandlerOptions struct {
 	SettingsRepo             *repository.SettingsRepo
 	CustomPersonalityRepo    *repository.CustomPersonalityRepo
 	ChannelTaskRunner        ChannelTaskRunner
+	RuntimeToolsForTask      func(taskID string) *llmcontracts.RuntimeTools
 	QueuedTaskThreadPromoter func(taskID string)
 	CompleteExecution        func(context.Context, string, string, string, string, int, int64)
 	ChannelMessageRouter     *ChannelMessageRouter
@@ -349,6 +350,8 @@ type channelUtilityActionHandlerOptions struct {
 	TelegramAuthRepo          telegramAuthCountByProjectStore
 	DiscordStatus             func(context.Context) (DiscordConnectionStatus, error)
 	DiscordAuthRepo           *repository.DiscordAuthRepo
+	XStatus                   func() XConnectionStatus
+	XAuthRepo                 *repository.XAuthRepo
 	EmailStatus               func(context.Context) EmailConnectionStatus
 	EmailAuthRepo             *repository.EmailAuthRepo
 	WebhookRepo               *repository.WebhookRepo
@@ -639,11 +642,66 @@ func runChannelViewTaskThread(ctx context.Context, taskRepo *repository.TaskRepo
 	if execRepo == nil {
 		return "", fmt.Errorf("execution repository not configured")
 	}
-	executions, err := execRepo.ListByTaskChronological(ctx, task.ID)
+	total, err := execRepo.CountByTask(ctx, task.ID)
 	if err != nil {
-		return "", fmt.Errorf("retrieving thread for %q: %w", task.Title, err)
+		return "", fmt.Errorf("counting thread executions for %q: %w", task.Title, err)
 	}
-	return strings.TrimSpace(formatThreadTranscript(task, executions, req.Offset, req.Limit)), nil
+	offset := req.Offset
+	if offset < 0 {
+		offset = 0
+	}
+	var executions []models.Execution
+	if total > 0 && offset < total {
+		if req.Limit > 0 {
+			executions, err = execRepo.ListByTaskChronologicalPage(ctx, task.ID, offset, req.Limit)
+		} else {
+			executions, err = loadChannelTaskThreadExecutions(ctx, execRepo, task, total, offset)
+		}
+		if err != nil {
+			return "", fmt.Errorf("retrieving thread for %q: %w", task.Title, err)
+		}
+	}
+	return strings.TrimSpace(formatThreadTranscriptWithTotal(task, executions, total, offset)), nil
+}
+
+// channelTaskThreadExecutionFetchBatchSize bounds zero-limit channel reads to
+// formatter-sized chronological pages. The loader stops after the existing
+// 80 KiB transcript budget is reached instead of scanning the full history.
+const channelTaskThreadExecutionFetchBatchSize = 20
+
+func loadChannelTaskThreadExecutions(ctx context.Context, execRepo *repository.ExecutionRepo, task *models.Task, total, offset int) ([]models.Execution, error) {
+	if execRepo == nil || task == nil || total <= 0 || offset < 0 || offset >= total {
+		return []models.Execution{}, nil
+	}
+
+	executions := make([]models.Execution, 0, minServiceInt(channelTaskThreadExecutionFetchBatchSize, total-offset))
+	nextOffset := offset
+	for nextOffset < total {
+		batchLimit := minServiceInt(channelTaskThreadExecutionFetchBatchSize, total-nextOffset)
+		batch, err := execRepo.ListByTaskChronologicalPage(ctx, task.ID, nextOffset, batchLimit)
+		if err != nil {
+			return nil, err
+		}
+		if len(batch) == 0 {
+			break
+		}
+		executions = append(executions, batch...)
+		if formatThreadTranscriptPage(task, executions, total, offset).budgetExceeded {
+			break
+		}
+		if len(batch) < batchLimit {
+			break
+		}
+		nextOffset += len(batch)
+	}
+	return executions, nil
+}
+
+func minServiceInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func runChannelSendToTaskAction(ctx context.Context, opts channelThreadActionHandlerOptions, req SendToTaskRequest) string {
@@ -668,6 +726,7 @@ func runChannelSendToTaskAction(ctx context.Context, opts channelThreadActionHan
 		SettingsRepo:             opts.SettingsRepo,
 		CustomPersonalityRepo:    opts.CustomPersonalityRepo,
 		ChannelTaskRunner:        opts.ChannelTaskRunner,
+		RuntimeToolsForTask:      opts.RuntimeToolsForTask,
 		QueuedTaskThreadPromoter: opts.QueuedTaskThreadPromoter,
 		CompleteExecution:        opts.CompleteExecution,
 		NewQueuedInput:           opts.NewQueuedInput,
@@ -865,6 +924,7 @@ type channelStatusActionResponse struct {
 	Slack                  channelSlackStatusActionSummary    `json:"slack"`
 	Telegram               channelTelegramStatusActionSummary `json:"telegram"`
 	Discord                channelDiscordStatusActionSummary  `json:"discord"`
+	X                      channelXStatusActionSummary        `json:"x"`
 	Email                  channelEmailStatusActionSummary    `json:"email"`
 	Webhooks               channelWebhookStatusActionSummary  `json:"webhooks"`
 	OutboundTargets        channelTargetStatusActionSummary   `json:"outbound_message_targets"`
@@ -914,6 +974,17 @@ type channelDiscordStatusActionSummary struct {
 	AuthorizedUserCount int    `json:"authorized_user_count"`
 }
 
+type channelXStatusActionSummary struct {
+	Configured          bool   `json:"configured"`
+	Connected           bool   `json:"connected"`
+	Running             bool   `json:"running"`
+	Status              string `json:"status"`
+	Username            string `json:"username,omitempty"`
+	SendResponses       bool   `json:"send_responses"`
+	LastError           string `json:"last_error,omitempty"`
+	AuthorizedUserCount int    `json:"authorized_user_count"`
+}
+
 type channelEmailStatusActionSummary struct {
 	Configured            bool   `json:"configured"`
 	Running               bool   `json:"running"`
@@ -936,20 +1007,43 @@ type channelWebhookStatusActionSummary struct {
 	Configured bool `json:"configured"`
 }
 
-type channelTargetStatusActionSummary struct {
-	Total                         int                                     `json:"total"`
-	Configured                    bool                                    `json:"configured"`
-	ExplicitUnsavedTargetsAllowed bool                                    `json:"explicit_unsaved_targets_allowed"`
-	MessagingAvailable            bool                                    `json:"messaging_available"`
-	ByPlatform                    map[string]channelTargetPlatformSummary `json:"by_platform"`
+type OutboundTargetStatusSummary struct {
+	Total      int                                      `json:"total"`
+	Configured bool                                     `json:"configured"`
+	ByPlatform map[string]OutboundTargetPlatformSummary `json:"by_platform"`
 }
 
-type channelTargetPlatformSummary struct {
+type OutboundTargetPlatformSummary struct {
 	Total  int            `json:"total"`
 	Home   int            `json:"home"`
 	Named  int            `json:"named"`
 	ByKind map[string]int `json:"by_kind"`
 }
+
+func OutboundTargetStatusSummaryFromRepoSummary(summary repository.ChannelTargetProjectSummary) OutboundTargetStatusSummary {
+	out := OutboundTargetStatusSummary{
+		Total:      summary.Total,
+		Configured: summary.Configured,
+		ByPlatform: map[string]OutboundTargetPlatformSummary{},
+	}
+	for platform, platformSummary := range summary.ByPlatform {
+		out.ByPlatform[platform] = OutboundTargetPlatformSummary{
+			Total:  platformSummary.Total,
+			Home:   platformSummary.Home,
+			Named:  platformSummary.Named,
+			ByKind: platformSummary.ByKind,
+		}
+	}
+	return out
+}
+
+type channelTargetStatusActionSummary struct {
+	OutboundTargetStatusSummary
+	ExplicitUnsavedTargetsAllowed bool `json:"explicit_unsaved_targets_allowed"`
+	MessagingAvailable            bool `json:"messaging_available"`
+}
+
+type channelTargetPlatformSummary = OutboundTargetPlatformSummary
 
 func channelTargetsFromRouter(router *ChannelMessageRouter) channelTargetStore {
 	if router == nil {
@@ -978,7 +1072,9 @@ func channelListChannelsResult(ctx context.Context, opts channelUtilityActionHan
 		ProjectID:          projectID,
 		ConfiguredChannels: []string{},
 		OutboundTargets: channelTargetStatusActionSummary{
-			ByPlatform: map[string]channelTargetPlatformSummary{},
+			OutboundTargetStatusSummary: OutboundTargetStatusSummary{
+				ByPlatform: map[string]channelTargetPlatformSummary{},
+			},
 		},
 	}
 	if projectID == "" {
@@ -1096,6 +1192,30 @@ func channelListChannelsResult(ctx context.Context, opts channelUtilityActionHan
 		resp.ConfiguredChannels = append(resp.ConfiguredChannels, "discord")
 	}
 
+	xConfigured := get(XSettingConsumerKey) != "" && get(XSettingConsumerSecret) != "" && get(XSettingAccessToken) != "" && get(XSettingAccessTokenSecret) != ""
+	xStatus := XConnectionStatus{Configured: xConfigured}
+	if opts.XStatus != nil {
+		xStatus = opts.XStatus()
+		xStatus.Configured = xStatus.Configured || xConfigured
+	}
+	resp.X = channelXStatusActionSummary{
+		Configured:    xStatus.Configured,
+		Connected:     xStatus.Connected,
+		Running:       xStatus.Running,
+		Status:        channelConnectedStatus(xStatus.Configured, xStatus.Connected),
+		Username:      strings.TrimSpace(xStatus.Username),
+		SendResponses: !isFalse(XSettingSendResponses),
+		LastError:     channelSafeSingleLine(xStatus.LastError),
+	}
+	if opts.XAuthRepo != nil {
+		if count, err := opts.XAuthRepo.CountByProject(ctx, projectID); err == nil {
+			resp.X.AuthorizedUserCount = count
+		}
+	}
+	if resp.X.Configured {
+		resp.ConfiguredChannels = append(resp.ConfiguredChannels, "x")
+	}
+
 	email := EmailConnectionStatus{Provider: EmailProviderCustom, IMAPPort: 993, SMTPPort: 587}
 	if opts.EmailStatus != nil {
 		email = opts.EmailStatus(ctx)
@@ -1189,6 +1309,11 @@ func channelStatusSettings(ctx context.Context, settingsRepo *repository.Setting
 		TelegramSettingRichMessagesV2,
 		DiscordSettingBotToken,
 		DiscordSettingSendResponses,
+		XSettingConsumerKey,
+		XSettingConsumerSecret,
+		XSettingAccessToken,
+		XSettingAccessTokenSecret,
+		XSettingSendResponses,
 		EmailSettingProvider,
 		EmailSettingAddress,
 		EmailSettingPassword,
@@ -1220,27 +1345,18 @@ func channelSummarizeWebhooks(webhooks []models.WebhookEndpoint) channelWebhookS
 }
 
 func channelTargetStatusFromRepoSummary(summary repository.ChannelTargetProjectSummary) channelTargetStatusActionSummary {
-	out := channelTargetStatusActionSummary{
-		Total:      summary.Total,
-		Configured: summary.Configured,
-		ByPlatform: map[string]channelTargetPlatformSummary{},
+	return channelTargetStatusActionSummary{
+		OutboundTargetStatusSummary: OutboundTargetStatusSummaryFromRepoSummary(summary),
 	}
-	for platform, platformSummary := range summary.ByPlatform {
-		out.ByPlatform[platform] = channelTargetPlatformSummary{
-			Total:  platformSummary.Total,
-			Home:   platformSummary.Home,
-			Named:  platformSummary.Named,
-			ByKind: platformSummary.ByKind,
-		}
-	}
-	return out
 }
 
 func channelSummarizeTargets(targets []models.ChannelTarget) channelTargetStatusActionSummary {
 	out := channelTargetStatusActionSummary{
-		Total:      len(targets),
-		Configured: len(targets) > 0,
-		ByPlatform: map[string]channelTargetPlatformSummary{},
+		OutboundTargetStatusSummary: OutboundTargetStatusSummary{
+			Total:      len(targets),
+			Configured: len(targets) > 0,
+			ByPlatform: map[string]channelTargetPlatformSummary{},
+		},
 	}
 	for _, target := range targets {
 		platform := strings.ToLower(strings.TrimSpace(target.Platform))
@@ -1709,13 +1825,14 @@ func ExecuteUpdateProjectSettingsRuntime(ctx context.Context, opts UpdateProject
 		updatedFields = append(updatedFields, "default_model")
 	}
 
-	workerChanged, shouldDispatch, errMsg := applyProjectWorkerLimitUpdate(&updated, req)
+	workerChanged, projectLimitIncrease, errMsg := applyProjectWorkerLimitUpdate(&updated, req)
 	if errMsg != "" {
 		return fail(errMsg)
 	}
 	if workerChanged {
 		updatedFields = append(updatedFields, "max_workers")
 	}
+	shouldDispatch := modelChanged || projectLimitIncrease
 
 	if len(updatedFields) > 0 {
 		if err := opts.ProjectSvc.Update(ctx, &updated); err != nil {

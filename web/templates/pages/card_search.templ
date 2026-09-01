@@ -8,6 +8,7 @@ templ CardSearchInput(pageKey string, placeholder string) {
 		<div class="card bg-base-100 shadow-sm border border-base-300">
 			<input
 				type="text"
+				name="search"
 				data-card-search={ pageKey }
 				class="w-full bg-transparent px-4 py-2 text-sm border-0 focus:outline-none focus:ring-0"
 				placeholder={ placeholder }
@@ -16,5 +17,29 @@ templ CardSearchInput(pageKey string, placeholder string) {
 	</div>
 	<div data-search-no-results class="text-center py-8" style="display:none">
 		<p class="opacity-50">No results match your search.</p>
+	</div>
+}
+
+// cardPaginationHasMoreAttribute serializes the server's initial page boundary for
+// the browser loader. It is separate from the status component so each surface
+// can keep its existing public component signature.
+func cardPaginationHasMoreAttribute(hasMore bool) string {
+	if hasMore {
+		return "true"
+	}
+	return "false"
+}
+// CardPaginationStatus renders the shared status and intersection target for a paged card list.
+templ CardPaginationStatus() {
+	@CardPaginationStatusWithBoundary(false)
+}
+
+// CardPaginationStatusWithBoundary renders the status with the server's current page boundary.
+templ CardPaginationStatusWithBoundary(hasMore bool) {
+	<div data-card-pagination-status data-card-pagination-has-more={ cardPaginationHasMoreAttribute(hasMore) } class="mt-4 min-h-6 text-center text-sm" role="status" aria-live="polite" aria-atomic="true">
+		<span data-card-pagination-loading class="hidden">Loading more cards...</span>
+		<span data-card-pagination-error class="hidden text-error">Could not load more cards.</span>
+		<button type="button" data-card-pagination-retry class="btn btn-ghost btn-sm hidden" aria-label="Retry loading more cards">Try again</button>
+		<span data-card-pagination-sentinel aria-hidden="true" class="block h-px w-full"></span>
 	</div>
 }

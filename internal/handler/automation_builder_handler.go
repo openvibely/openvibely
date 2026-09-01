@@ -96,24 +96,20 @@ func (h *Handler) BuildAutomationWeb(c echo.Context) error {
 			if h.automationGraphSvc == nil {
 				return echo.NewHTTPError(http.StatusServiceUnavailable, "automations unavailable")
 			}
-			cards, listErr := h.automationGraphSvc.List(ctx, projectID)
+			page := parseCardPageRequest(c)
+			cards, listErr := h.automationGraphSvc.ListPage(ctx, projectID, page.PageSize+1, page.Offset, page.Search)
 			if listErr != nil {
 				return listErr
 			}
+			cards, hasMore := cardPageItems(cards, page.PageSize)
 			projects, _ := h.projectSvc.ListSelectorOptions(ctx)
-			return render(c, http.StatusUnprocessableEntity, pages.AutomationsDescribeFailure(projects, projectID, cards, description, message))
+			return render(c, http.StatusUnprocessableEntity, pages.AutomationsDescribeFailurePage(projects, projectID, cards, description, message, hasMore))
 		}
 		return err
 	}
 	if hasPostedCandidate {
-		if !yamlSubmitted {
-			h.discardStaleTemplateOnlyNodeConfig(&candidate)
-			applyAutomationDraftFormValues(c, &candidate)
-		}
-		if !yamlSubmitted || automationBuilderVisualActionRequested(c) {
-			if err := h.applyAutomationBuilderAction(c, &candidate); err != nil {
-				return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-			}
+		if err := h.applySubmittedAutomationBuilderCandidate(c, &candidate, yamlSubmitted); err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
 	}
 	result, err := h.previewAutomationBuilderCandidate(ctx, projectID, candidate, nil)
@@ -172,14 +168,8 @@ func (h *Handler) EditAutomationBuilder(c echo.Context) error {
 				YAML: rawYAML, YAMLProvided: true, Error: "YAML did not parse: " + err.Error(),
 			})
 		}
-		if !yamlSubmitted {
-			h.discardStaleTemplateOnlyNodeConfig(&candidate)
-			applyAutomationDraftFormValues(c, &candidate)
-		}
-		if !yamlSubmitted || automationBuilderVisualActionRequested(c) {
-			if err := h.applyAutomationBuilderAction(c, &candidate); err != nil {
-				return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-			}
+		if err := h.applySubmittedAutomationBuilderCandidate(c, &candidate, yamlSubmitted); err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
 	}
 	result, err := h.previewAutomationBuilderCandidate(ctx, projectID, candidate, opened.Definition)
@@ -195,6 +185,17 @@ func (h *Handler) EditAutomationBuilder(c echo.Context) error {
 		return h.renderAutomationBuilder(c, page)
 	}
 	return h.saveAutomationBuilderCandidate(c, projectID, page, updateTemplate)
+}
+
+func (h *Handler) applySubmittedAutomationBuilderCandidate(c echo.Context, candidate *models.AutomationDraftCandidate, yamlSubmitted bool) error {
+	if !yamlSubmitted {
+		h.discardStaleTemplateOnlyNodeConfig(candidate)
+		applyAutomationDraftFormValues(c, candidate)
+	}
+	if !yamlSubmitted || automationBuilderVisualActionRequested(c) {
+		return h.applyAutomationBuilderAction(c, candidate)
+	}
+	return nil
 }
 
 func (h *Handler) previewAutomationBuilderCandidate(ctx context.Context, projectID string, candidate models.AutomationDraftCandidate, definition *models.AutomationDefinition) (*models.AutomationDraftResult, error) {

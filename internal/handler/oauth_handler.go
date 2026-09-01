@@ -656,6 +656,9 @@ func (h *Handler) exchangeOAuthCodeAndSaveTokens(flow *oauthPendingFlow, code, s
 	if err := json.NewDecoder(tokenResp.Body).Decode(&tokenResult); err != nil {
 		return 0, err
 	}
+	if strings.TrimSpace(tokenResult.AccessToken) == "" {
+		return 0, fmt.Errorf("OAuth token response did not include a usable access token")
+	}
 
 	expiresAt := resolveOAuthExpiryAt(tokenResult.ExpiresIn)
 	openAIAccountID := ""

@@ -95,6 +95,10 @@ type HookInputCustomizer func(ctx context.Context, hook models.AgentLifecycleHoo
 
 type HookExecutionStartedObserver func(ctx context.Context, hook models.AgentLifecycleHook, input HookInput, exec models.LifecycleExecution)
 
+// LifecycleExecutionChangedObserver receives a project-scoped notification after
+// a lifecycle execution row is durably created or finalized.
+type LifecycleExecutionChangedObserver func(ctx context.Context, projectID string, exec models.LifecycleExecution)
+
 type Runner struct {
 	store                    HookStore
 	invoker                  HookInvoker
@@ -102,6 +106,7 @@ type Runner struct {
 	logger                   *log.Logger
 	inputCustomizer          HookInputCustomizer
 	executionStartedObserver HookExecutionStartedObserver
+	executionChangedObserver LifecycleExecutionChangedObserver
 }
 
 // NewRunner constructs a runner. invoker, resolver, and modes may be nil for
@@ -127,6 +132,27 @@ func (r *Runner) SetExecutionStartedObserver(observer HookExecutionStartedObserv
 		return
 	}
 	r.executionStartedObserver = observer
+}
+
+// SetExecutionChangedObserver registers a callback for durable lifecycle
+// execution creation and finalization notifications.
+func (r *Runner) SetExecutionChangedObserver(observer LifecycleExecutionChangedObserver) {
+	if r == nil {
+		return
+	}
+	r.executionChangedObserver = observer
+}
+
+func (r *Runner) notifyExecutionChanged(ctx context.Context, projectID string, exec models.LifecycleExecution) {
+	if r == nil || r.executionChangedObserver == nil {
+		return
+	}
+	defer func() {
+		if rec := recover(); rec != nil {
+			r.logger.Printf("[lifecycle] execution changed observer panic: %v", rec)
+		}
+	}()
+	r.executionChangedObserver(ctx, projectID, exec)
 }
 
 // SlotResult bundles every hook output produced inside one `when` slot.
@@ -305,15 +331,18 @@ func (r *Runner) runHook(ctx context.Context, hook models.AgentLifecycleHook, in
 	}
 	if err := r.store.CreateExecution(ctx, &exec); err != nil {
 		r.logger.Printf("[lifecycle] create execution failed: %v", err)
-	} else if r.executionStartedObserver != nil {
-		func() {
-			defer func() {
-				if rec := recover(); rec != nil {
-					r.logger.Printf("[lifecycle] execution observer panic: %v", rec)
-				}
+	} else {
+		r.notifyExecutionChanged(ctx, hookInput.ProjectID, exec)
+		if r.executionStartedObserver != nil {
+			func() {
+				defer func() {
+					if rec := recover(); rec != nil {
+						r.logger.Printf("[lifecycle] execution observer panic: %v", rec)
+					}
+				}()
+				r.executionStartedObserver(ctx, hook, hookInput, exec)
 			}()
-			r.executionStartedObserver(ctx, hook, hookInput, exec)
-		}()
+		}
 	}
 	var traceRecorder *TraceRecorder
 	if eventStore, ok := r.store.(ExecutionEventAppender); ok {
@@ -339,20 +368,20 @@ func (r *Runner) runHook(ctx context.Context, hook models.AgentLifecycleHook, in
 	defer func() {
 		if rec := recover(); rec != nil {
 			panicErr := fmt.Errorf("hook panic: %v", rec)
-			out = r.finishHook(ctx, &exec, hook, nil, panicErr)
+			out = r.finishHook(ctx, &exec, hook, hookInput.ProjectID, nil, panicErr)
 		}
 	}()
 
 	if r.resolver != nil && hook.SkillKey != "" {
 		body, err := r.resolver.ResolveSkill(ctx, hook)
 		if err != nil {
-			return r.finishHook(ctx, &exec, hook, nil, fmt.Errorf("resolve skill: %w", err))
+			return r.finishHook(ctx, &exec, hook, hookInput.ProjectID, nil, fmt.Errorf("resolve skill: %w", err))
 		}
 		hookInput.SkillBody = body
 	}
 
 	if r.invoker == nil {
-		return r.finishHook(ctx, &exec, hook, nil, errors.New("no hook invoker configured"))
+		return r.finishHook(ctx, &exec, hook, hookInput.ProjectID, nil, errors.New("no hook invoker configured"))
 	}
 
 	// Mark the context as "inside hook" so any RunSlot call from inside the
@@ -363,17 +392,17 @@ func (r *Runner) runHook(ctx context.Context, hook models.AgentLifecycleHook, in
 	hookCtx = llmcontracts.WithRuntimeToolTraceRecorder(hookCtx, traceRecorder)
 	raw, err := r.invoker.Invoke(hookCtx, hook, hookInput)
 	if err != nil {
-		return r.finishHook(hookCtx, &exec, hook, raw, err)
+		return r.finishHook(hookCtx, &exec, hook, hookInput.ProjectID, raw, err)
 	}
 	if err := ValidateOutput(hook.OutputContract, raw); err != nil {
 		RecordTraceEvent(hookCtx, "validation_failed", map[string]any{
 			"output_contract": string(hook.OutputContract),
 			"error":           err.Error(),
 		})
-		return r.finishHook(hookCtx, &exec, hook, raw, fmt.Errorf("validate output: %w", err))
+		return r.finishHook(hookCtx, &exec, hook, hookInput.ProjectID, raw, fmt.Errorf("validate output: %w", err))
 	}
 	RecordTraceEvent(hookCtx, "validation_passed", map[string]any{"output_contract": string(hook.OutputContract)})
-	return r.finishHook(hookCtx, &exec, hook, raw, nil)
+	return r.finishHook(hookCtx, &exec, hook, hookInput.ProjectID, raw, nil)
 }
 
 // buildIdempotencyKey returns the runbook's task_run_id + hook_id + snapshot
@@ -386,7 +415,7 @@ func buildIdempotencyKey(taskRunID, hookID, snapshot string) string {
 	return taskRunID + ":" + hookID + ":" + hex.EncodeToString(h[:8])
 }
 
-func (r *Runner) finishHook(ctx context.Context, exec *models.LifecycleExecution, hook models.AgentLifecycleHook, raw json.RawMessage, hookErr error) HookOutput {
+func (r *Runner) finishHook(ctx context.Context, exec *models.LifecycleExecution, hook models.AgentLifecycleHook, projectID string, raw json.RawMessage, hookErr error) HookOutput {
 	now := time.Now().UTC()
 	duration := time.Duration(0)
 	if !exec.StartedAt.IsZero() {
@@ -413,6 +442,8 @@ func (r *Runner) finishHook(ctx context.Context, exec *models.LifecycleExecution
 	defer cancel()
 	if err := r.store.UpdateExecution(updateCtx, exec); err != nil {
 		r.logger.Printf("[lifecycle] update execution failed task=%s when=%s hook=%s exec=%s: %v", exec.TaskID, hook.When, hook.ID, exec.ID, err)
+	} else {
+		r.notifyExecutionChanged(updateCtx, projectID, *exec)
 	}
 	if hookErr != nil {
 		r.logger.Printf("[lifecycle] hook finish task=%s when=%s hook=%s agent=%s skill=%s exec=%s status=%s duration=%s error=%q", exec.TaskID, hook.When, hook.ID, hook.AgentID, hook.SkillKey, exec.ID, exec.Status, duration, hookErr.Error())
@@ -555,6 +586,8 @@ func (r *Runner) RunTaskMode(ctx context.Context, runner TaskModeRunner, in Task
 	}
 	if err := r.store.CreateExecution(ctx, &exec); err != nil {
 		r.logger.Printf("[lifecycle] create task_mode execution failed: %v", err)
+	} else {
+		r.notifyExecutionChanged(ctx, in.ProjectID, exec)
 	}
 	if runner == nil {
 		// No task-mode runner supplied: mark skipped so the row is closed.
@@ -565,6 +598,8 @@ func (r *Runner) RunTaskMode(ctx context.Context, runner TaskModeRunner, in Task
 		defer cancel()
 		if err := r.store.UpdateExecution(updateCtx, &exec); err != nil {
 			r.logger.Printf("[lifecycle] update task_mode execution failed: %v", err)
+		} else {
+			r.notifyExecutionChanged(updateCtx, in.ProjectID, exec)
 		}
 		return TaskModeResult{}, nil
 	}
@@ -582,6 +617,8 @@ func (r *Runner) RunTaskMode(ctx context.Context, runner TaskModeRunner, in Task
 	defer cancel()
 	if err := r.store.UpdateExecution(updateCtx, &exec); err != nil {
 		r.logger.Printf("[lifecycle] update task_mode execution failed: %v", err)
+	} else {
+		r.notifyExecutionChanged(updateCtx, in.ProjectID, exec)
 	}
 	return result, err
 }

@@ -35,13 +35,13 @@ type UpcomingTaskRow struct {
 	// Agent name
 	AgentName *string
 	// Schedule fields (nullable)
-	ScheduleID       *string
-	RunAt            *time.Time
-	RepeatType       *string
-	RepeatInterval   *int
-	ScheduleEnabled  *bool
-	NextRun          *time.Time
-	LastRun          *time.Time
+	ScheduleID      *string
+	RunAt           *time.Time
+	RepeatType      *string
+	RepeatInterval  *int
+	ScheduleEnabled *bool
+	NextRun         *time.Time
+	LastRun         *time.Time
 }
 
 // upcomingTaskPromptPreviewLen bounds the prompt text selected by Pulse
@@ -52,56 +52,70 @@ type UpcomingTaskRow struct {
 // truncatePrompt on this preview matches truncating the full prompt.
 const upcomingTaskPromptPreviewLen = 200
 
+// upcomingTaskListColumns is the shared task and agent projection used by all
+// Pulse task-list queries. The prompt is deliberately bounded because these
+// rows only populate the dashboard preview.
+const upcomingTaskListColumns = `t.id, t.project_id, t.title, t.category, t.priority, t.status, SUBSTR(t.prompt, 1, ?),
+	t.agent_id, t.tag, t.display_order, t.created_at, t.updated_at,
+	ac.name AS agent_name`
+
+const upcomingTaskListWithoutScheduleColumns = `NULL, NULL, NULL, NULL, NULL, NULL, NULL`
+
+const upcomingTaskListScheduleColumns = `s.id, s.run_at, s.repeat_type, s.repeat_interval, s.enabled, s.next_run, s.last_run`
+
+const upcomingRunningTasksQuery = `SELECT ` + upcomingTaskListColumns + `,
+	` + upcomingTaskListWithoutScheduleColumns + `
+ FROM tasks t
+ LEFT JOIN agent_configs ac ON ac.id = t.agent_id
+ WHERE t.project_id = ? AND t.status = 'running' AND t.category != 'chat'
+ ORDER BY t.updated_at DESC`
+
+const upcomingPendingActiveTasksQuery = `SELECT ` + upcomingTaskListColumns + `,
+	` + upcomingTaskListWithoutScheduleColumns + `
+ FROM tasks t
+ LEFT JOIN agent_configs ac ON ac.id = t.agent_id
+ WHERE t.project_id = ? AND t.category = 'active' AND t.status = 'pending'
+ ORDER BY t.priority DESC, t.display_order ASC`
+
+const upcomingScheduledTasksQuery = `SELECT ` + upcomingTaskListColumns + `,
+	` + upcomingTaskListScheduleColumns + `
+ FROM tasks t
+ JOIN schedules s ON s.task_id = t.id
+ LEFT JOIN agent_configs ac ON ac.id = t.agent_id
+ WHERE t.project_id = ? AND s.enabled = 1 AND s.next_run IS NOT NULL AND s.next_run <= ?
+ ORDER BY s.next_run ASC`
+
 // ListRunningTasks returns tasks currently being executed for a project
 func (r *UpcomingRepo) ListRunningTasks(ctx context.Context, projectID string) ([]models.UpcomingTask, error) {
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT t.id, t.project_id, t.title, t.category, t.priority, t.status, SUBSTR(t.prompt, 1, ?),
-			t.agent_id, t.tag, t.display_order, t.created_at, t.updated_at,
-			ac.name as agent_name,
-			NULL, NULL, NULL, NULL, NULL, NULL, NULL
-		 FROM tasks t
-		 LEFT JOIN agent_configs ac ON ac.id = t.agent_id
-		 WHERE t.project_id = ? AND t.status = 'running' AND t.category != 'chat'
-		 ORDER BY t.updated_at DESC`, upcomingTaskPromptPreviewLen, projectID)
+	tasks, err := r.listUpcomingTasks(ctx, upcomingRunningTasksQuery, upcomingTaskPromptPreviewLen, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("listing running tasks: %w", err)
 	}
-	defer rows.Close()
-	return r.scanUpcomingTasks(rows)
+	return tasks, nil
 }
 
 // ListPendingActiveTasks returns active tasks with pending status (queued for execution)
 func (r *UpcomingRepo) ListPendingActiveTasks(ctx context.Context, projectID string) ([]models.UpcomingTask, error) {
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT t.id, t.project_id, t.title, t.category, t.priority, t.status, SUBSTR(t.prompt, 1, ?),
-			t.agent_id, t.tag, t.display_order, t.created_at, t.updated_at,
-			ac.name as agent_name,
-			NULL, NULL, NULL, NULL, NULL, NULL, NULL
-		 FROM tasks t
-		 LEFT JOIN agent_configs ac ON ac.id = t.agent_id
-		 WHERE t.project_id = ? AND t.category = 'active' AND t.status = 'pending'
-		 ORDER BY t.priority DESC, t.display_order ASC`, upcomingTaskPromptPreviewLen, projectID)
+	tasks, err := r.listUpcomingTasks(ctx, upcomingPendingActiveTasksQuery, upcomingTaskPromptPreviewLen, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("listing pending active tasks: %w", err)
 	}
-	defer rows.Close()
-	return r.scanUpcomingTasks(rows)
+	return tasks, nil
 }
 
 // ListUpcomingScheduledTasks returns scheduled tasks with a future next_run
 func (r *UpcomingRepo) ListUpcomingScheduledTasks(ctx context.Context, projectID string, until time.Time) ([]models.UpcomingTask, error) {
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT t.id, t.project_id, t.title, t.category, t.priority, t.status, SUBSTR(t.prompt, 1, ?),
-			t.agent_id, t.tag, t.display_order, t.created_at, t.updated_at,
-			ac.name as agent_name,
-			s.id, s.run_at, s.repeat_type, s.repeat_interval, s.enabled, s.next_run, s.last_run
-		 FROM tasks t
-		 JOIN schedules s ON s.task_id = t.id
-		 LEFT JOIN agent_configs ac ON ac.id = t.agent_id
-		 WHERE t.project_id = ? AND s.enabled = 1 AND s.next_run IS NOT NULL AND s.next_run <= ?
-		 ORDER BY s.next_run ASC`, upcomingTaskPromptPreviewLen, projectID, until)
+	tasks, err := r.listUpcomingTasks(ctx, upcomingScheduledTasksQuery, upcomingTaskPromptPreviewLen, projectID, until)
 	if err != nil {
 		return nil, fmt.Errorf("listing upcoming scheduled tasks: %w", err)
+	}
+	return tasks, nil
+}
+
+func (r *UpcomingRepo) listUpcomingTasks(ctx context.Context, query string, args ...any) ([]models.UpcomingTask, error) {
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
 	}
 	defer rows.Close()
 	return r.scanUpcomingTasks(rows)

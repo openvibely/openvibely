@@ -25,7 +25,7 @@ func (r *WorkerRepo) GetMaxWorkers(ctx context.Context) (int, error) {
 }
 
 func (r *WorkerRepo) SetMaxWorkers(ctx context.Context, n int) error {
-	_, err := r.db.ExecContext(ctx,
+	_, err := execBoundSQLite(ctx, r.db,
 		`UPDATE worker_settings SET max_workers = ?, updated_at = datetime('now') WHERE id = 'singleton'`, n)
 	if err != nil {
 		return fmt.Errorf("setting max workers: %w", err)

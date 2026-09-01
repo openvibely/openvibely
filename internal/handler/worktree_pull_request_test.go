@@ -46,6 +46,50 @@ func TestCreateTaskPullRequest_RequiresWorktreeBranch(t *testing.T) {
 	}
 }
 
+func TestCreateTaskPullRequest_TaskCardOwnershipFailuresAreIndistinguishable(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	h.SetTaskPullRequestRepo(repository.NewTaskPullRequestRepo(db))
+
+	project := &models.Project{Name: "PR Project", RepoPath: "/tmp/repo", RepoURL: "https://github.com/openvibely/openvibely"}
+	if err := h.projectSvc.Create(context.Background(), project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Scoped PR", Category: models.CategoryCompleted, Status: models.StatusCompleted, WorktreeBranch: "task/scoped-pr"}
+	if err := h.taskRepo.Create(context.Background(), task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	request := func(taskID string) *httptest.ResponseRecorder {
+		t.Helper()
+		form := url.Values{"merge_source": {"task_card"}, "project_id": {"foreign"}}
+		req := httptest.NewRequest(http.MethodPost, "/tasks/"+taskID+"/worktree/pull-request", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("HX-Request", "true")
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		return rec
+	}
+
+	missing := request("missing-task")
+	foreign := request(task.ID)
+	for name, rec := range map[string]*httptest.ResponseRecorder{"missing": missing, "foreign": foreign} {
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("%s task-card PR should return 404, got %d: %s", name, rec.Code, rec.Body.String())
+		}
+		trigger := rec.Header().Get("HX-Trigger")
+		if !strings.Contains(trigger, "openvibelyToast") || !strings.Contains(strings.ToLower(trigger), "task not found") {
+			t.Fatalf("%s task-card PR should emit the same failure toast, got %s", name, trigger)
+		}
+		if strings.Contains(rec.Body.String(), "kanban-board") || strings.Contains(rec.Body.String(), "changes-actions-dropdown") {
+			t.Fatalf("%s task-card PR should not return a replacement fragment: %s", name, rec.Body.String())
+		}
+	}
+	if missing.Body.String() != foreign.Body.String() || missing.Header().Get("HX-Trigger") != foreign.Header().Get("HX-Trigger") {
+		t.Fatalf("missing and foreign task-card ownership responses must be indistinguishable: missing=%d %q %q foreign=%d %q %q",
+			missing.Code, missing.Body.String(), missing.Header().Get("HX-Trigger"), foreign.Code, foreign.Body.String(), foreign.Header().Get("HX-Trigger"))
+	}
+}
+
 func TestCreateTaskPullRequest_UsesGlobalEnterpriseEndpointAndIgnoresRequestOverride(t *testing.T) {
 	const enterpriseEndpoint = "https://github.example.com/api/v3"
 	h, e, _, db := setupTestHandlerWithDB(t)
@@ -133,14 +177,15 @@ func TestCreateTaskPullRequest_CreatesAndPersistsPR(t *testing.T) {
 		t.Fatalf("create task: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/tasks/"+task.ID+"/worktree/pull-request", strings.NewReader(url.Values{}.Encode()))
+	form := url.Values{"merge_source": {"task_card"}, "project_id": {project.ID}}
+	req := httptest.NewRequest(http.MethodPost, "/tasks/"+task.ID+"/worktree/pull-request", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("HX-Request", "true")
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d (%s)", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `id="kanban-board"`) {
+		t.Fatalf("expected authoritative board status 200, got %d (%s)", rec.Code, rec.Body.String())
 	}
 	trigger := rec.Header().Get("HX-Trigger")
 	if !strings.Contains(trigger, "openvibelyToast") {
@@ -466,24 +511,36 @@ func TestHandler_GetTaskChanges_ShowsMergeOptions(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	ctx := context.Background()
 
-	repoPath := t.TempDir()
-	worktreePath := t.TempDir()
+	repoPath := createHandlerTestGitRepo(t)
+	targetBranch := service.GetCurrentBranch(repoPath)
 	project := &models.Project{Name: "Merge Options Project", RepoPath: repoPath, IsDefault: true}
 	if err := h.projectSvc.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
+	h.SetWorktreeService(service.NewWorktreeService(h.taskRepo, h.projectRepo, h.settingsRepo))
 	task := &models.Task{
 		ProjectID:         project.ID,
 		Title:             "Merge Options Task",
-		Category:          models.CategoryActive,
+		Category:          models.CategoryCompleted,
 		Status:            models.StatusCompleted,
-		WorktreePath:      worktreePath,
-		WorktreeBranch:    "task/merge-options",
-		MergeTargetBranch: "main",
+		MergeTargetBranch: targetBranch,
 		MergeStatus:       models.MergeStatusPending,
 	}
 	if err := h.taskRepo.Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
+	}
+	worktreePath, branchName, err := h.worktreeSvc.SetupWorktree(ctx, task, repoPath)
+	if err != nil {
+		t.Fatalf("setup worktree: %v", err)
+	}
+	if err := h.taskRepo.UpdateWorktreeInfo(ctx, task.ID, worktreePath, branchName); err != nil {
+		t.Fatalf("update worktree info: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(worktreePath, "merge-options.txt"), []byte("merge options\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.CommitWorktreeChanges(worktreePath, "merge options"); err != nil {
+		t.Fatal(err)
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes", nil)

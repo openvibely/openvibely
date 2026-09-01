@@ -3,6 +3,7 @@ package pages
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"strings"
 	"testing"
 	"time"
@@ -151,12 +152,31 @@ func TestAlertsContent_ListOmitsBodyAndMetadataAndLazyLoadsDetail(t *testing.T) 
 	for _, forbidden := range []string{
 		largeBody,
 		"secret payload",
-		`<pre class="hidden" data-alert-copy-text aria-hidden="true">`,
+		base64.StdEncoding.EncodeToString([]byte(largeBody)),
 	} {
 		if strings.Contains(html, forbidden) {
 			t.Fatalf("list fragment unexpectedly embedded detail content %q", forbidden)
 		}
 	}
+}
+
+func decodedAlertCopyBody(t *testing.T, detailHTML string) string {
+	t.Helper()
+	const prefix = `data-alert-copy-base64="`
+	start := strings.Index(detailHTML, prefix)
+	if start < 0 {
+		t.Fatal("encoded copy payload missing")
+	}
+	start += len(prefix)
+	end := strings.IndexByte(detailHTML[start:], '"')
+	if end < 0 {
+		t.Fatal("encoded copy payload is unterminated")
+	}
+	decoded, err := base64.StdEncoding.DecodeString(detailHTML[start : start+end])
+	if err != nil {
+		t.Fatalf("decode copy payload: %v", err)
+	}
+	return string(decoded)
 }
 
 func TestAlertDetail_IncludesBodyAndMetadataForSelectedAlert(t *testing.T) {
@@ -190,16 +210,69 @@ func TestAlertDetail_IncludesBodyAndMetadataForSelectedAlert(t *testing.T) {
 		}
 	}
 
-	payloadStart := strings.Index(html, `<pre class="hidden" data-alert-copy-text aria-hidden="true">`)
-	payloadEnd := strings.Index(html[payloadStart:], `</pre>`)
-	if payloadStart < 0 || payloadEnd < 0 {
-		t.Fatal("copy payload missing")
+	payload := decodedAlertCopyBody(t, html)
+	if payload != alert.Body {
+		t.Fatalf("body-only copy payload changed: got %q, want %q", payload, alert.Body)
 	}
-	payload := html[payloadStart : payloadStart+payloadEnd]
 	for _, forbidden := range []string{"OpenVibely", "ID:", "Title:", "hidden-idempotency-key"} {
 		if strings.Contains(payload, forbidden) {
 			t.Fatalf("body-only copy payload unexpectedly contains %q", forbidden)
 		}
+	}
+}
+
+func TestAlertDetail_UsesSharedMarkdownSurfaceWithoutChangingCopySource(t *testing.T) {
+	body := "# Heading\r\n\r\n**emphasis**\r\n\r\n- first\r\n- second\r\n\r\n[link](https://example.test)\r\n\r\n```go\r\nline 1\r\nline 2\r\n```\r\n\r\n<img src=x onerror=alert(1)>"
+	alert := models.Alert{
+		ID: "markdown-detail-1", ProjectID: "project-1", Title: "Markdown detail", Body: body,
+		Metadata:      map[string]any{"attempt": float64(2)},
+		DecisionState: models.AlertDecisionNotRequired, ProcessingState: models.AlertProcessingNotApplicable,
+	}
+
+	var detail bytes.Buffer
+	if err := AlertDetail(alert).Render(context.Background(), &detail); err != nil {
+		t.Fatalf("render alert detail: %v", err)
+	}
+	detailHTML := detail.String()
+	for _, required := range []string{
+		`data-alert-detail-loaded`,
+		`class="chat-markdown"`,
+		`data-alert-markdown`,
+		`data-raw-content=`,
+		`data-alert-copy-text`,
+		`attempt`,
+	} {
+		if !strings.Contains(detailHTML, required) {
+			t.Fatalf("Markdown detail fragment missing %q", required)
+		}
+	}
+	if strings.Contains(detailHTML, `class="whitespace-pre-wrap break-words text-sm"`) {
+		t.Fatal("detail body must not be emitted as a second plain-text rendering")
+	}
+
+	if got := decodedAlertCopyBody(t, detailHTML); got != body {
+		t.Fatalf("copy source changed the raw body: got %q, want %q", got, body)
+	}
+
+	var content bytes.Buffer
+	if err := AlertsContent(nil, "project-1", 0).Render(context.Background(), &content); err != nil {
+		t.Fatalf("render Alerts content: %v", err)
+	}
+	contentHTML := content.String()
+	for _, required := range []string{
+		`function hydrateAlertMarkdown(container)`,
+		`window.renderChatMarkdown(raw)`,
+		`window.addCodeCopyButtons(markdown)`,
+		`hydrateAlertMarkdown(container)`,
+		`function decodeAlertCopyText(copyText)`,
+		`new TextDecoder('utf-8', {fatal: true}).decode(bytes)`,
+	} {
+		if !strings.Contains(contentHTML, required) {
+			t.Fatalf("Alerts detail hydration missing shared renderer contract %q", required)
+		}
+	}
+	if strings.Contains(contentHTML, `marked.parse(`) || strings.Contains(contentHTML, `sanitizeChatHTML`) {
+		t.Fatal("Alerts detail must delegate Markdown parsing and sanitization to the shared pipeline")
 	}
 }
 
@@ -218,10 +291,50 @@ func TestAlertDetail_EmptyAlertOmitsCopyControl(t *testing.T) {
 	}
 }
 
+func TestAlertsContent_WorkflowFiltersRenderSelectedStateAndFilteredEmptyMessage(t *testing.T) {
+	var filtered bytes.Buffer
+	if err := AlertsContentPageWithFilters(nil, "project-1", 4, false, models.AlertDecisionPending, models.AlertProcessingFailed).Render(context.Background(), &filtered); err != nil {
+		t.Fatalf("render filtered alerts content: %v", err)
+	}
+	filteredHTML := filtered.String()
+	for _, required := range []string{
+		`id="alerts-filter-form"`,
+		`method="get"`,
+		`name="search"`,
+		`name="decision_state"`,
+		`name="processing_state"`,
+		`aria-label="Filter by decision state"`,
+		`aria-label="Filter by processing state"`,
+		`All decision states`,
+		`All processing states`,
+		`Implementation task linked`,
+		`data-card-pagination-preserve-params="decision_state,processing_state"`,
+		`data-card-pagination-url="/alerts?decision_state=pending&amp;processing_state=failed&amp;project_id=project-1"`,
+		`hx-get="/alerts?decision_state=pending&amp;processing_state=failed&amp;project_id=project-1"`,
+		`value="pending" selected`,
+		`value="failed" selected`,
+		`No alerts match the selected filters.`,
+	} {
+		if !strings.Contains(filteredHTML, required) {
+			t.Fatalf("filtered Alerts markup missing %q", required)
+		}
+	}
+	if strings.Contains(filteredHTML, "No alerts. You're all clear!") {
+		t.Fatal("filtered empty Alerts result should not claim the project has no alerts")
+	}
+
+	var unfiltered bytes.Buffer
+	if err := AlertsContentPageWithFilters(nil, "project-1", 0, false, "", "").Render(context.Background(), &unfiltered); err != nil {
+		t.Fatalf("render unfiltered alerts content: %v", err)
+	}
+	if !strings.Contains(unfiltered.String(), "No alerts. You're all clear!") {
+		t.Fatal("unfiltered empty Alerts result should retain the existing empty message")
+	}
+}
+
 func TestAlertsContent_CardsConformToNarrowViewport(t *testing.T) {
 	longText := strings.Repeat("SuperLongUnbrokenAlertToken", 8)
 	alerts := []models.AlertSummary{{ID: "alert-1", Title: longText, Message: longText, ProjectID: "project-1"}}
-
 	var buf bytes.Buffer
 	err := AlertsContent(alerts, "project-1", 1).Render(context.Background(), &buf)
 	if err != nil {

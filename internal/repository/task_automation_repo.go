@@ -29,20 +29,11 @@ func (r *TaskRepo) ActivateAutomationChainedTask(ctx context.Context, parent mod
 	if r == nil || child == nil || parent.ID == "" || child.ID == "" || event.Context.ProjectID == "" || event.EventKey == "" {
 		return nil, nil, false, errors.New("complete automation task handoff is required")
 	}
-	conn, err := r.db.Conn(ctx)
+	conn, finishImmediate, err := beginImmediateConn(ctx, r.db)
 	if err != nil {
 		return nil, nil, false, err
 	}
-	defer conn.Close()
-	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
-		return nil, nil, false, err
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
-		}
-	}()
+	defer finishImmediate()
 
 	var parentProject, parentCreatedVia string
 	if err := conn.QueryRowContext(ctx, `SELECT project_id, created_via FROM tasks WHERE id = ?`, parent.ID).Scan(&parentProject, &parentCreatedVia); err != nil {
@@ -104,7 +95,6 @@ func (r *TaskRepo) ActivateAutomationChainedTask(ctx context.Context, parent mod
 		if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 			return nil, nil, false, err
 		}
-		committed = true
 		child.Status = previousStatus
 		child.Category = previousCategory
 		return nil, nil, previousStatus == models.StatusPending && previousCategory == models.CategoryActive, nil
@@ -133,7 +123,6 @@ func (r *TaskRepo) ActivateAutomationChainedTask(ctx context.Context, parent mod
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 		return nil, nil, false, err
 	}
-	committed = true
 	child.Status = models.StatusPending
 	child.Category = effectiveCategory
 	if r.broadcaster != nil {
@@ -207,22 +196,14 @@ func (r *TaskRepo) ClaimQueuedAutomationDispatch(ctx context.Context, dispatchID
 }
 
 func (r *TaskRepo) claimAutomationDispatch(ctx context.Context, dispatchID, claimant string, queued bool, claimedTask **models.Task) (*models.Execution, error) {
-	conn, err := r.db.Conn(ctx)
+	conn, finishImmediate, err := beginImmediateConn(ctx, r.db)
 	if err != nil {
 		return nil, err
 	}
-	defer conn.Close()
-	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
-		return nil, err
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
-		}
-	}()
+	defer finishImmediate()
 
 	var invocationID, taskID, projectID, versionID, automationID, nodeID string
+	var lifecycle models.AutomationLifecycleState
 	var leaseExpiry sql.NullTime
 	claimPredicate := `d.status = 'processing' AND d.claimed_by = ? AND d.claim_expires_at > ?`
 	claimArgs := []any{dispatchID, claimant, time.Now().UTC()}
@@ -231,23 +212,28 @@ func (r *TaskRepo) claimAutomationDispatch(ctx context.Context, dispatchID, clai
 		claimArgs = []any{dispatchID}
 	}
 	err = conn.QueryRowContext(ctx, `SELECT d.invocation_id, d.task_id, i.project_id, i.version_id, i.automation_id,
-		COALESCE((SELECT dr.node_id FROM automation_definition_resources dr
-			WHERE dr.version_id = i.version_id AND dr.resource_type = 'task' AND dr.resource_id = d.task_id
-			ORDER BY dr.created_at, dr.id LIMIT 1), i.trigger_node_id), d.claim_expires_at
-		FROM automation_dispatch_outbox d
-		JOIN automation_invocations i ON i.id = d.invocation_id
-		JOIN automation_task_run_reservations r ON r.dispatch_id = d.id AND r.task_id = d.task_id AND r.project_id = i.project_id
-		WHERE d.id = ? AND `+claimPredicate, claimArgs...).
-		Scan(&invocationID, &taskID, &projectID, &versionID, &automationID, &nodeID, &leaseExpiry)
+			COALESCE((SELECT dr.node_id FROM automation_definition_resources dr
+				WHERE dr.version_id = i.version_id AND dr.resource_type = 'task' AND dr.resource_id = d.task_id
+				ORDER BY dr.created_at, dr.id LIMIT 1), i.trigger_node_id), d.claim_expires_at, a.lifecycle_state
+			FROM automation_dispatch_outbox d
+			JOIN automation_invocations i ON i.id = d.invocation_id
+			JOIN automations a ON a.id = i.automation_id AND a.project_id = i.project_id
+			JOIN automation_task_run_reservations r ON r.dispatch_id = d.id AND r.task_id = d.task_id AND r.project_id = i.project_id
+			WHERE d.id = ? AND `+claimPredicate, claimArgs...).
+		Scan(&invocationID, &taskID, &projectID, &versionID, &automationID, &nodeID, &leaseExpiry, &lifecycle)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrAutomationDispatchLease
 	}
 	if err != nil {
 		return nil, fmt.Errorf("validating automation dispatch claim: %w", err)
 	}
+	if queued && lifecycle != models.AutomationActive {
+		return nil, ErrAutomationTaskBusy
+	}
 
 	var executionID string
-	err = conn.QueryRowContext(ctx, `SELECT id FROM executions WHERE dispatch_id = ?`, dispatchID).Scan(&executionID)
+	var executionStatus models.ExecutionStatus
+	err = conn.QueryRowContext(ctx, `SELECT id, status FROM executions WHERE dispatch_id = ?`, dispatchID).Scan(&executionID, &executionStatus)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("resolving automation execution: %w", err)
 	}
@@ -284,6 +270,17 @@ func (r *TaskRepo) claimAutomationDispatch(ctx context.Context, dispatchID, clai
 		var existingTaskID string
 		if err := conn.QueryRowContext(ctx, `SELECT task_id FROM executions WHERE id = ?`, executionID).Scan(&existingTaskID); err != nil || existingTaskID != taskID {
 			return nil, errors.New("automation execution task mismatch")
+		}
+		if executionStatus == models.ExecRunning {
+			var taskStatus models.TaskStatus
+			var taskCategory models.TaskCategory
+			if err := conn.QueryRowContext(ctx, `SELECT status, category FROM tasks WHERE id = ?`, taskID).Scan(&taskStatus, &taskCategory); err != nil {
+				return nil, fmt.Errorf("loading prepared automation task: %w", err)
+			}
+			if taskStatus != models.StatusRunning ||
+				(taskCategory != models.CategoryActive && taskCategory != models.CategoryScheduled) {
+				return nil, ErrAutomationTaskBusy
+			}
 		}
 	}
 	outboxPredicate := `status = 'processing' AND claimed_by = ?`
@@ -341,8 +338,7 @@ func (r *TaskRepo) claimAutomationDispatch(ctx context.Context, dispatchID, clai
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 		return nil, err
 	}
-	committed = true
-	_ = conn.Close()
+	finishImmediate()
 
 	execution, err := NewExecutionRepo(r.db).GetByID(ctx, executionID)
 	if err != nil {

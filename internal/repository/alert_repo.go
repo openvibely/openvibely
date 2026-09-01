@@ -351,6 +351,28 @@ func buildAlertListQuery(columns, projectID string, filter models.AlertListFilte
 			query += ` AND implementation_task_id IS NULL`
 		}
 	}
+	if strings.TrimSpace(filter.Search) != "" {
+		query += ` AND INSTR(LOWER(
+				COALESCE(title, '') || ' ' || COALESCE(message, '') || ' ' ||
+				COALESCE(severity, '') || ' ' || COALESCE(decision_state, '') || ' ' ||
+				COALESCE(processing_state, '') || ' ' || COALESCE(source, '') || ' ' ||
+				COALESCE(
+				CASE strftime('%m', created_at, 'localtime')
+					WHEN '01' THEN 'Jan' WHEN '02' THEN 'Feb' WHEN '03' THEN 'Mar'
+					WHEN '04' THEN 'Apr' WHEN '05' THEN 'May' WHEN '06' THEN 'Jun'
+					WHEN '07' THEN 'Jul' WHEN '08' THEN 'Aug' WHEN '09' THEN 'Sep'
+					WHEN '10' THEN 'Oct' WHEN '11' THEN 'Nov' WHEN '12' THEN 'Dec'
+				END || ' ' ||
+				CAST(CAST(strftime('%d', created_at, 'localtime') AS INTEGER) AS TEXT) || ', ' ||
+				strftime('%Y', created_at, 'localtime') || ' ' ||
+				CAST(((CAST(strftime('%H', created_at, 'localtime') AS INTEGER) + 11) % 12) + 1 AS TEXT) || ':' ||
+				strftime('%M', created_at, 'localtime') || ' ' ||
+				CASE WHEN CAST(strftime('%H', created_at, 'localtime') AS INTEGER) < 12 THEN 'AM' ELSE 'PM' END,
+				''
+			)
+		), ?) > 0`
+		args = append(args, strings.ToLower(strings.TrimSpace(filter.Search)))
+	}
 	if len(filter.AutomationInboxBindings) > 0 {
 		query += ` AND (`
 		for i, binding := range filter.AutomationInboxBindings {
@@ -391,32 +413,24 @@ func requireAffected(result sql.Result) error {
 }
 
 func (r *AlertRepo) withImmediateAlertMutation(ctx context.Context, mutate func(*sql.Conn) error, afterCommit func()) error {
-	conn, err := r.db.Conn(ctx)
+	conn, finishImmediate, err := beginImmediateConn(ctx, r.db)
 	if err != nil {
 		return err
 	}
-	committed := false
-	closed := false
+	finished := false
 	defer func() {
-		if !committed {
-			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
-		}
-		if !closed {
-			_ = conn.Close()
+		if !finished {
+			finishImmediate()
 		}
 	}()
-	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
-		return err
-	}
 	if err := mutate(conn); err != nil {
 		return err
 	}
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 		return err
 	}
-	committed = true
-	_ = conn.Close()
-	closed = true
+	finishImmediate()
+	finished = true
 	if afterCommit != nil {
 		afterCommit()
 	}
@@ -424,7 +438,7 @@ func (r *AlertRepo) withImmediateAlertMutation(ctx context.Context, mutate func(
 }
 
 func (r *AlertRepo) MarkRead(ctx context.Context, projectID, id string) error {
-	result, err := r.db.ExecContext(ctx, `UPDATE alerts SET is_read = 1, updated_at = CURRENT_TIMESTAMP WHERE project_id = ? AND id = ?`, projectID, id)
+	result, err := execBoundSQLite(ctx, r.db, `UPDATE alerts SET is_read = 1, updated_at = CURRENT_TIMESTAMP WHERE project_id = ? AND id = ?`, projectID, id)
 	if err != nil {
 		return fmt.Errorf("marking alert read: %w", err)
 	}
@@ -432,7 +446,7 @@ func (r *AlertRepo) MarkRead(ctx context.Context, projectID, id string) error {
 }
 
 func (r *AlertRepo) MarkAllRead(ctx context.Context, projectID string) error {
-	_, err := r.db.ExecContext(ctx, `UPDATE alerts SET is_read = 1, updated_at = CURRENT_TIMESTAMP WHERE project_id = ? AND is_read = 0`, projectID)
+	_, err := execBoundSQLite(ctx, r.db, `UPDATE alerts SET is_read = 1, updated_at = CURRENT_TIMESTAMP WHERE project_id = ? AND is_read = 0`, projectID)
 	if err != nil {
 		return fmt.Errorf("marking all alerts read: %w", err)
 	}
@@ -440,7 +454,7 @@ func (r *AlertRepo) MarkAllRead(ctx context.Context, projectID string) error {
 }
 
 func (r *AlertRepo) Delete(ctx context.Context, projectID, id string) error {
-	result, err := r.db.ExecContext(ctx, `DELETE FROM alerts WHERE project_id = ? AND id = ?`, projectID, id)
+	result, err := execBoundSQLite(ctx, r.db, `DELETE FROM alerts WHERE project_id = ? AND id = ?`, projectID, id)
 	if err != nil {
 		return fmt.Errorf("deleting alert: %w", err)
 	}
@@ -448,7 +462,7 @@ func (r *AlertRepo) Delete(ctx context.Context, projectID, id string) error {
 }
 
 func (r *AlertRepo) DeleteAll(ctx context.Context, projectID string) error {
-	_, err := r.db.ExecContext(ctx, `DELETE FROM alerts WHERE project_id = ?`, projectID)
+	_, err := execBoundSQLite(ctx, r.db, `DELETE FROM alerts WHERE project_id = ?`, projectID)
 	if err != nil {
 		return fmt.Errorf("deleting all alerts: %w", err)
 	}

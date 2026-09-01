@@ -52,6 +52,14 @@ type taskDetailContentData struct {
 	reviewComments   []models.ReviewComment
 }
 
+func (h *Handler) loadTaskReviewComments(ctx context.Context, taskID string) []models.ReviewComment {
+	if h.reviewCommentRepo == nil {
+		return nil
+	}
+	comments, _ := h.reviewCommentRepo.ListByTask(ctx, taskID)
+	return comments
+}
+
 func getSortPreference(c echo.Context, cookieName string) string {
 	if cookie, err := c.Cookie(cookieName); err == nil {
 		return cookie.Value
@@ -181,6 +189,33 @@ func (h *Handler) listTaskFormAgentDefinitions(ctx context.Context, projectID st
 		}
 	}
 	return out
+}
+
+func (h *Handler) listScheduleAgentOptions(ctx context.Context, projectID string) []repository.AgentScheduleOption {
+	if h.agentRepo == nil {
+		return nil
+	}
+	options, err := h.agentRepo.ListScheduleOptions(ctx, projectID)
+	if err != nil {
+		applog.Infof("[handler] listScheduleAgentOptions error: %v", err)
+		return nil
+	}
+	return options
+}
+
+func (h *Handler) taskDetailAgentLabel(ctx context.Context, projectID string, agentDefinitionID *string) string {
+	if h.agentRepo == nil || agentDefinitionID == nil || *agentDefinitionID == "" {
+		return ""
+	}
+	option, err := h.agentRepo.GetTaskDetailAgentLabel(ctx, projectID, *agentDefinitionID)
+	if err != nil {
+		applog.Infof("[handler] taskDetailAgentLabel error: %v", err)
+		return ""
+	}
+	if option == nil {
+		return ""
+	}
+	return option.Name
 }
 
 func agentDefinitionAvailableToProject(agent models.Agent, projectID string) bool {
@@ -347,11 +382,11 @@ func (h *Handler) CreateTask(c echo.Context) error {
 		category = models.CategoryActive
 	}
 	var scheduledFormValues scheduleFormValues
-	var scheduledFormErr error
-	if category == models.CategoryScheduled && c.FormValue("run_at") != "" {
-		scheduledFormValues, scheduledFormErr = parseScheduleForm(c, models.RepeatDaily)
-		if _, ok := scheduledFormErr.(*echo.HTTPError); ok {
-			return scheduledFormErr
+	if category == models.CategoryScheduled {
+		var err error
+		scheduledFormValues, err = parseScheduleForm(c, models.RepeatDaily)
+		if err != nil {
+			return scheduleFormHTTPError(err)
 		}
 	}
 
@@ -424,25 +459,25 @@ func (h *Handler) CreateTask(c echo.Context) error {
 	}
 	applog.Infof("[handler] CreateTask success id=%s", t.ID)
 
-	// If category is scheduled and run_at is provided, create a schedule
-	if t.Category == models.CategoryScheduled && c.FormValue("run_at") != "" {
-		if scheduledFormErr != nil {
-			applog.Infof("[handler] CreateTask schedule parse error: %v", scheduledFormErr)
-		} else {
-			clearContextOnStart := formBoolEnabled(c, "clear_context_on_start", true)
-			sched, err := service.NewScheduleActionService(h.taskRepo, h.scheduleRepo).CreateForTask(c.Request().Context(), service.CreateScheduleForTaskRequest{
-				TaskID:              t.ID,
-				RunAt:               scheduledFormValues.runAt,
-				RepeatType:          scheduledFormValues.repeatType,
-				RepeatInterval:      scheduledFormValues.repeatInterval,
-				ClearContextOnStart: &clearContextOnStart,
-			})
-			if err != nil {
-				applog.Infof("[handler] CreateTask schedule create error: %v", err)
-			} else {
-				applog.Infof("[handler] CreateTask schedule created id=%s next_run=%v", sched.ID, sched.NextRun)
+	// If category is scheduled, create its schedule before reporting success.
+	if t.Category == models.CategoryScheduled {
+		clearContextOnStart := formBoolEnabled(c, "clear_context_on_start", true)
+		sched, err := service.NewScheduleActionService(h.taskRepo, h.scheduleRepo).CreateForTask(c.Request().Context(), service.CreateScheduleForTaskRequest{
+			TaskID:              t.ID,
+			RunAt:               scheduledFormValues.runAt,
+			RepeatType:          scheduledFormValues.repeatType,
+			RepeatInterval:      scheduledFormValues.repeatInterval,
+			ClearContextOnStart: &clearContextOnStart,
+		})
+		if err != nil {
+			applog.Infof("[handler] CreateTask schedule create error: %v", err)
+			rollbackCtx := context.WithoutCancel(c.Request().Context())
+			if rollbackErr := h.taskRepo.Delete(rollbackCtx, t.ID); rollbackErr != nil {
+				return fmt.Errorf("creating schedule: %w; rolling back task: %v", err, rollbackErr)
 			}
+			return err
 		}
+		applog.Infof("[handler] CreateTask schedule created id=%s next_run=%v", sched.ID, sched.NextRun)
 	}
 
 	// Handle optional file attachments (multiple files supported)
@@ -462,7 +497,7 @@ func (h *Handler) CreateTask(c echo.Context) error {
 		project, _ := h.projectSvc.GetByID(c.Request().Context(), projectID)
 		scheduledTasks, _ := h.taskSvc.GetTasksWithSchedulesByProject(c.Request().Context(), projectID)
 		agents, _ := h.llmConfigRepo.ListBadgeOptions(c.Request().Context())
-		agentDefs := h.listTaskFormAgentDefinitions(c.Request().Context(), projectID, t.AgentDefinitionID)
+		agentDefs := h.listScheduleAgentOptions(c.Request().Context(), projectID)
 		weekOffset := 0
 		if weekParam := c.QueryParam("week"); weekParam != "" {
 			if w, err := strconv.Atoi(weekParam); err == nil {
@@ -495,10 +530,6 @@ func (h *Handler) loadTaskDetailContentData(ctx context.Context, taskID string) 
 	agents, _ := h.llmConfigRepo.ListBadgeOptions(ctx)
 	attachments, _ := h.attachmentRepo.ListByTask(ctx, taskID)
 	agentDefs := h.listTaskFormAgentDefinitions(ctx, task.ProjectID, task.AgentDefinitionID)
-	var reviewComments []models.ReviewComment
-	if h.reviewCommentRepo != nil {
-		reviewComments, _ = h.reviewCommentRepo.ListByTask(ctx, taskID)
-	}
 
 	return &taskDetailContentData{
 		task:             task,
@@ -508,7 +539,7 @@ func (h *Handler) loadTaskDetailContentData(ctx context.Context, taskID string) 
 		agents:           agents,
 		agentDefs:        agentDefs,
 		attachments:      attachments,
-		reviewComments:   reviewComments,
+		reviewComments:   h.loadTaskReviewComments(ctx, taskID),
 	}, nil
 }
 
@@ -614,9 +645,9 @@ func (h *Handler) GetTaskDetailStatus(c echo.Context) error {
 	}
 
 	agents, _ := h.llmConfigRepo.ListBadgeOptions(c.Request().Context())
-	agentDefs := h.listTaskFormAgentDefinitions(c.Request().Context(), task.ProjectID, task.AgentDefinitionID)
+	agentLabel := h.taskDetailAgentLabel(c.Request().Context(), task.ProjectID, task.AgentDefinitionID)
 
-	return render(c, http.StatusOK, pages.TaskDetailMetrics(task, metrics, agents, agentDefs))
+	return render(c, http.StatusOK, pages.TaskDetailMetrics(task, metrics, agents, agentLabel))
 }
 
 // GetTaskDetailActions returns just the action buttons fragment (Run Now / Edit / Delete).
@@ -810,7 +841,10 @@ func (h *Handler) taskRebaseAvailable(task *models.Task, project *models.Project
 	if branchAlreadyMerged || task.MergeStatus == models.MergeStatusMerged || task.MergeStatus == models.MergeStatusConflict {
 		return false
 	}
-	if len(service.ActiveConflictFiles(project.RepoPath)) > 0 {
+	if len(service.ActiveConflictFiles(project.RepoPath)) > 0 || service.IsGitWorktreeLocked(project.RepoPath, task.WorktreePath) {
+		return false
+	}
+	if status, err := service.GitStatusPorcelain(task.WorktreePath); err != nil || strings.TrimSpace(status) != "" {
 		return false
 	}
 	targetBranch := task.MergeTargetBranch
@@ -853,12 +887,109 @@ func (h *Handler) reconcileAlreadyMergedBranch(ctx context.Context, task *models
 	return service.IsBranchTipMergedInto(project.RepoPath, task.WorktreeBranch, targetBranch)
 }
 
-type taskChangesWorktreeState struct {
+type taskMergeActionState struct {
 	UseWorktreeContent  bool
-	DiffOutput          string
-	FileStats           []service.WorktreeFileStat
 	BranchAlreadyMerged bool
 	RebaseAvailable     bool
+}
+
+func (h *Handler) resolveTaskMergeActionState(ctx context.Context, task *models.Task) taskMergeActionState {
+	var state taskMergeActionState
+	if task == nil {
+		return state
+	}
+	project, _ := h.projectRepo.GetByID(ctx, task.ProjectID)
+	h.recoverTaskWorktreeState(ctx, task, project)
+	if task.WorktreeBranch == "" {
+		return state
+	}
+	state.UseWorktreeContent = true
+	state.BranchAlreadyMerged = h.reconcileAlreadyMergedBranch(ctx, task)
+	state.RebaseAvailable = h.taskRebaseAvailable(task, project, state.BranchAlreadyMerged)
+	return state
+}
+
+type taskChangesWorktreeState struct {
+	UseWorktreeContent    bool
+	DiffOutput            string
+	FileStats             []service.WorktreeFileStat
+	BranchAlreadyMerged   bool
+	LocalMergeUnavailable bool
+	ConflictRecovery      bool
+	RebaseAvailable       bool
+}
+
+type taskMergeEligibility struct {
+	MergeAvailable   bool
+	ConflictRecovery bool
+	Reason           string
+	TargetBranch     string
+}
+
+func (h *Handler) resolveTaskMergeEligibility(ctx context.Context, task *models.Task, project *models.Project, branchAlreadyMerged bool) taskMergeEligibility {
+	if task == nil || project == nil || project.RepoPath == "" || !service.IsGitRepo(project.RepoPath) {
+		return taskMergeEligibility{Reason: "project repository is unavailable"}
+	}
+
+	targetBranch := task.MergeTargetBranch
+	if targetBranch == "" {
+		targetBranch = service.GetDefaultBranch(project.RepoPath)
+	}
+	result := taskMergeEligibility{TargetBranch: targetBranch}
+
+	hasActiveMerge := service.HasActiveMerge(project.RepoPath)
+	activeConflictFiles := service.ActiveConflictFiles(project.RepoPath)
+	ownsLiveConflict := (hasActiveMerge && service.ActiveMergeMatchesBranch(project.RepoPath, task.WorktreeBranch)) ||
+		(!hasActiveMerge && task.MergeStatus == models.MergeStatusConflict && len(activeConflictFiles) > 0)
+	if ownsLiveConflict {
+		if task.MergeStatus != models.MergeStatusConflict {
+			if err := h.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusConflict); err == nil {
+				task.MergeStatus = models.MergeStatusConflict
+			}
+		}
+		result.ConflictRecovery = true
+		return result
+	}
+	if hasActiveMerge || len(activeConflictFiles) > 0 {
+		result.Reason = "another merge or conflict is active in the project repository"
+		return result
+	}
+
+	if task.MergeStatus == models.MergeStatusConflict {
+		switch task.Status {
+		case models.StatusCompleted, models.StatusFailed, models.StatusCancelled:
+			if err := h.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusPending); err != nil {
+				result.Reason = "merge conflict status could not be refreshed"
+				return result
+			}
+			task.MergeStatus = models.MergeStatusPending
+		default:
+			result.Reason = "task conflict recovery is not ready"
+			return result
+		}
+	}
+
+	if branchAlreadyMerged || task.MergeStatus == models.MergeStatusMerged {
+		result.Reason = "task branch is already merged"
+		return result
+	}
+	switch task.Status {
+	case models.StatusCompleted, models.StatusFailed, models.StatusCancelled:
+	default:
+		result.Reason = fmt.Sprintf("task status %s is not mergeable", task.Status)
+		return result
+	}
+	if task.WorktreeBranch == "" || !gitRefExists(project.RepoPath, task.WorktreeBranch) {
+		result.Reason = "task branch does not exist"
+		return result
+	}
+	if targetBranch == "" || !gitRefExists(project.RepoPath, targetBranch) {
+		result.Reason = "target branch does not exist"
+		return result
+	}
+
+	result.MergeAvailable = true
+	return result
 }
 
 // resolveTaskChangesWorktreeState is the canonical handler-level resolver for
@@ -871,12 +1002,7 @@ func (h *Handler) resolveTaskChangesWorktreeState(ctx context.Context, task *mod
 		return state
 	}
 
-	// Lazy file/live requests can arrive directly, without the full Changes
-	// endpoint first repairing conventional worktree metadata. Recover here so
-	// every Changes surface resolves the same current lineage and comparison base.
 	project, _ := h.projectRepo.GetByID(ctx, task.ProjectID)
-	h.recoverTaskWorktreeState(ctx, task, project)
-
 	var preservedDiffOnce struct {
 		val  string
 		done bool
@@ -889,14 +1015,18 @@ func (h *Handler) resolveTaskChangesWorktreeState(ctx context.Context, task *mod
 		return preservedDiffOnce.val
 	}
 
-	if task.WorktreeBranch == "" {
+	mergeState := h.resolveTaskMergeActionState(ctx, task)
+	if !mergeState.UseWorktreeContent {
 		state.DiffOutput = preservedDiff()
 		return state
 	}
 
 	state.UseWorktreeContent = true
-	state.BranchAlreadyMerged = h.reconcileAlreadyMergedBranch(ctx, task)
-	state.RebaseAvailable = h.taskRebaseAvailable(task, project, state.BranchAlreadyMerged)
+	state.BranchAlreadyMerged = mergeState.BranchAlreadyMerged
+	mergeEligibility := h.resolveTaskMergeEligibility(ctx, task, project, state.BranchAlreadyMerged)
+	state.LocalMergeUnavailable = !mergeEligibility.MergeAvailable && !mergeEligibility.ConflictRecovery
+	state.ConflictRecovery = mergeEligibility.ConflictRecovery
+	state.RebaseAvailable = mergeEligibility.MergeAvailable && mergeState.RebaseAvailable
 	isActive := task.Status == models.StatusRunning || task.Status == models.StatusQueued
 
 	// For non-active merged tasks, live git diff is empty after integration;
@@ -1019,10 +1149,7 @@ func (h *Handler) GetTaskChanges(c echo.Context) error {
 	ctx := c.Request().Context()
 	state := h.resolveTaskChangesWorktreeState(ctx, task)
 
-	var reviewComments []models.ReviewComment
-	if h.reviewCommentRepo != nil {
-		reviewComments, _ = h.reviewCommentRepo.ListByTask(ctx, taskID)
-	}
+	reviewComments := h.loadTaskReviewComments(ctx, taskID)
 
 	diffView := h.uiDiffViewPreference(ctx)
 
@@ -1032,7 +1159,7 @@ func (h *Handler) GetTaskChanges(c echo.Context) error {
 			taskPR, _ = h.taskPullRequestRepo.GetByTaskID(ctx, taskID)
 		}
 		return render(c, http.StatusOK, pages.TaskChangesWorktreeContentWithView(
-			state.DiffOutput, task, state.FileStats, reviewComments, taskPR, state.BranchAlreadyMerged, state.RebaseAvailable, diffView,
+			state.DiffOutput, task, state.FileStats, reviewComments, taskPR, state.LocalMergeUnavailable, state.ConflictRecovery, state.RebaseAvailable, diffView,
 		))
 	}
 
@@ -1063,8 +1190,8 @@ func (h *Handler) GetTaskChangesFile(c echo.Context) error {
 
 	reviewMode := strings.EqualFold(c.QueryParam("review"), "true")
 	var reviewComments []models.ReviewComment
-	if reviewMode && h.reviewCommentRepo != nil {
-		reviewComments, _ = h.reviewCommentRepo.ListByTask(c.Request().Context(), taskID)
+	if reviewMode {
+		reviewComments = h.loadTaskReviewComments(c.Request().Context(), taskID)
 	}
 
 	meta, exists := h.resolveTaskChangesFileMeta(c.Request().Context(), task, fileIndex)
@@ -1097,10 +1224,7 @@ func (h *Handler) GetTaskChangesLive(c echo.Context) error {
 		diffOutput = resolvedDiff
 	}
 
-	var reviewComments []models.ReviewComment
-	if h.reviewCommentRepo != nil {
-		reviewComments, _ = h.reviewCommentRepo.ListByTask(c.Request().Context(), taskID)
-	}
+	reviewComments := h.loadTaskReviewComments(c.Request().Context(), taskID)
 
 	component := templ.ComponentFunc(func(ctx context.Context, w io.Writer) error {
 		if _, err := io.WriteString(w, `<div id="diff-viewer-container">`); err != nil {

@@ -12,22 +12,41 @@ import (
 
 templ Automations(projects []models.Project, currentProjectID string, cards []models.AutomationCard) {
 	@layout.Base("Automations", projects, currentProjectID) {
-		@automationsContent(cards, currentProjectID, "", "")
+		@automationsContent(cards, currentProjectID, "", "", false)
+	}
+}
+
+// AutomationsPage renders the initial bounded portfolio with its page boundary.
+templ AutomationsPage(projects []models.Project, currentProjectID string, cards []models.AutomationCard, hasMore bool) {
+	@layout.Base("Automations", projects, currentProjectID) {
+		@automationsContent(cards, currentProjectID, "", "", hasMore)
 	}
 }
 
 templ AutomationsDescribeFailure(projects []models.Project, currentProjectID string, cards []models.AutomationCard, description string, errorMessage string) {
 	@layout.Base("Automations", projects, currentProjectID) {
-		@automationsContent(cards, currentProjectID, description, errorMessage)
+		@automationsContent(cards, currentProjectID, description, errorMessage, false)
+	}
+}
+
+// AutomationsDescribeFailurePage keeps the portfolio error document paged.
+templ AutomationsDescribeFailurePage(projects []models.Project, currentProjectID string, cards []models.AutomationCard, description string, errorMessage string, hasMore bool) {
+	@layout.Base("Automations", projects, currentProjectID) {
+		@automationsContent(cards, currentProjectID, description, errorMessage, hasMore)
 	}
 }
 
 templ AutomationsContent(cards []models.AutomationCard, currentProjectID string) {
-	@automationsContent(cards, currentProjectID, "", "")
+	@automationsContent(cards, currentProjectID, "", "", false)
 }
 
-templ automationsContent(cards []models.AutomationCard, currentProjectID string, description string, errorMessage string) {
-	<div id="automations-container" class="h-full min-w-0 max-w-full overflow-y-auto" data-search-container>
+// AutomationsContentPage renders one bounded portfolio page with its boundary.
+templ AutomationsContentPage(cards []models.AutomationCard, currentProjectID string, hasMore bool) {
+	@automationsContent(cards, currentProjectID, "", "", hasMore)
+}
+
+templ automationsContent(cards []models.AutomationCard, currentProjectID string, description string, errorMessage string, hasMore bool) {
+		<div id="automations-container" class="h-full min-w-0 max-w-full overflow-y-auto" data-search-container data-card-pagination-root data-card-pagination-url={ fmt.Sprintf("/automations?project_id=%s", currentProjectID) } data-card-pagination-list="#automations-card-list" data-card-pagination-card-selector="[data-automation-url]" data-card-pagination-key="data-automation-url" data-card-pagination-page-size="20" data-card-pagination-has-more={ cardPaginationHasMoreAttribute(hasMore) }>
 		@layout.PageTitle("Automations")
 		<div class="mb-6 flex items-center justify-between gap-3">
 			<h2 class="text-2xl font-bold">Automations</h2>
@@ -44,9 +63,10 @@ templ automationsContent(cards []models.AutomationCard, currentProjectID string,
 				<input type="hidden" name="source" value="blank"/>
 			</form>
 		</div>
-		@CardSearchInput("automations", "Search automations...")
-		if len(cards) == 0 {
-			<div class="rounded-box bg-base-200/60 p-8 text-center">
+			@CardSearchInput("automations", "Search automations...")
+			<div id="automations-card-list" data-card-pagination-list>
+			if len(cards) == 0 {
+				<div class="rounded-box bg-base-200/60 p-8 text-center" data-search-empty-state>
 				<h3 class="font-semibold">No saved automations</h3>
 				<p class="mt-2 text-sm text-base-content/65">Create one from Template, Describe, or Custom. Maintained Native and GitHub setup can also register newly created resources. Existing tasks and schedules are never inferred or backfilled.</p>
 			</div>
@@ -175,8 +195,9 @@ templ automationsContent(cards []models.AutomationCard, currentProjectID string,
 					</div>
 				}
 			</div>
-		}
-		<dialog id="automation-template-modal" class="modal">
+			}
+			</div>
+				@CardPaginationStatusWithBoundary(hasMore)			<dialog id="automation-template-modal" class="modal">
 			<div class="modal-box">
 				@ModalCloseButton("document.getElementById('automation-template-modal')", "Close template selection")
 				<h3 class="pr-10 text-lg font-bold">Create from template</h3>
@@ -640,6 +661,10 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 						window._automationLiveRefreshTimer = setTimeout(function() {
 							window.openVibelyAutomationLiveRefresh('GET');
 						}, 250);
+					});
+					window.addEventListener('sse-live-connected', function() {
+						if (!document.getElementById('automation-live')) return;
+						window.openVibelyAutomationLiveRefresh('GET');
 					});
 					document.addEventListener('visibilitychange', function() {
 						if (document.visibilityState !== 'visible') return;

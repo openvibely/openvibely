@@ -36,30 +36,39 @@ const (
 
 func (h *Handler) ListModels(c echo.Context) error {
 	c.Response().Header().Set("Cache-Control", "no-store")
-	isHTMX := isHTMX(c)
-	// applog.Debugf("[handler] ListModels requested htmx=%v", isHTMX)
-	agents, err := h.llmConfigRepo.ListCards(c.Request().Context())
+	htmxRequest := isHTMX(c)
+	ctx := c.Request().Context()
+	page := parseCardPageRequest(c)
+	agents, err := h.llmConfigRepo.ListCardsPage(ctx, page.PageSize+1, page.Offset, page.Search)
 	if err != nil {
 		applog.Infof("[handler] ListModels error: %v", err)
 		return err
 	}
-	// applog.Debugf("[handler] ListModels found %d agents", len(agents))
+	agents, hasMore := cardPageItems(agents, page.PageSize)
 
-	// Build per-model worker utilization
-	modelWorkerStats := make(map[string]int)
+	// Build per-model worker utilization only for the rendered page.
+	modelWorkerStats := make(map[string]int, len(agents))
 	for _, agent := range agents {
 		modelWorkerStats[agent.ID] = h.workerSvc.ModelRunning(agent.ID)
 	}
 
-	// For HTMX requests, return just the agents content
-	if isHTMX {
-		return render(c, http.StatusOK, pages.ModelsContent(agents, modelWorkerStats, h.desktopMode))
+	// Model dialogs still need a compact option list for reassigning defaults and
+	// configuring mixtures. This is intentionally separate from the card page and
+	// never hydrates provider credentials or request payloads.
+	modelOptions, err := h.llmConfigRepo.ListModelCardOptions(ctx)
+	if err != nil {
+		applog.Infof("[handler] ListModels model options error: %v", err)
+		return err
+	}
+
+	if htmxRequest || page.IsFragment {
+		setCardPageResponse(c, hasMore)
+		return render(c, http.StatusOK, pages.ModelsContentPageWithPagination(agents, modelOptions, modelWorkerStats, h.desktopMode, hasMore))
 	}
 
 	currentProjectID, _ := h.getCurrentProjectID(c)
-	projects, _ := h.projectSvc.ListSelectorOptions(c.Request().Context())
-
-	return render(c, http.StatusOK, pages.Models(projects, currentProjectID, agents, modelWorkerStats, h.desktopMode))
+	projects, _ := h.projectSvc.ListSelectorOptions(ctx)
+	return render(c, http.StatusOK, pages.ModelsPageWithPagination(projects, currentProjectID, agents, modelOptions, modelWorkerStats, h.desktopMode, hasMore))
 }
 
 type modelEditDetails struct {
@@ -860,6 +869,9 @@ func (h *Handler) CreateModel(c echo.Context) error {
 		return err
 	}
 	applog.Infof("[handler] CreateModel success id=%s", a.ID)
+	if h.workerSvc != nil {
+		h.workerSvc.DispatchNext()
+	}
 
 	// Return updated agents list for HTMX
 	if isHTMX(c) {
@@ -928,6 +940,9 @@ func (h *Handler) updateModelByID(c echo.Context, id string) error {
 		return err
 	}
 	applog.Infof("[handler] UpdateModel success id=%s", id)
+	if h.workerSvc != nil {
+		h.workerSvc.DispatchNext()
+	}
 
 	// Return updated agents list for HTMX
 	if isHTMX(c) {
@@ -960,6 +975,9 @@ func (h *Handler) SetDefaultModel(c echo.Context) error {
 		return err
 	}
 	applog.Infof("[handler] SetDefaultModel success id=%s", id)
+	if h.workerSvc != nil {
+		h.workerSvc.DispatchNext()
+	}
 
 	// Return updated agents list for HTMX
 	if isHTMX(c) {
@@ -1029,6 +1047,10 @@ func (h *Handler) DeleteModel(c echo.Context) error {
 		applog.Infof("[handler] DeleteModel success id=%s", id)
 	}
 
+	if h.workerSvc != nil {
+		h.workerSvc.DispatchNext()
+	}
+
 	// Return updated agents list for HTMX
 	if isHTMX(c) {
 		return h.renderRefreshedModels(c)
@@ -1037,11 +1059,21 @@ func (h *Handler) DeleteModel(c echo.Context) error {
 }
 
 func (h *Handler) renderRefreshedModels(c echo.Context) error {
-	agents, err := h.llmConfigRepo.ListCards(c.Request().Context())
+	ctx := c.Request().Context()
+	page := parseCardPageRequest(c)
+	agents, err := h.llmConfigRepo.ListCardsPage(ctx, page.PageSize+1, page.Offset, page.Search)
 	if err != nil {
 		return err
 	}
-	return render(c, http.StatusOK, pages.ModelsContent(agents, h.buildModelWorkerStats(agents), h.desktopMode))
+	agents, hasMore := cardPageItems(agents, page.PageSize)
+	modelOptions, err := h.llmConfigRepo.ListModelCardOptions(ctx)
+	if err != nil {
+		return err
+	}
+	if page.IsFragment {
+		setCardPageResponse(c, hasMore)
+	}
+	return render(c, http.StatusOK, pages.ModelsContentPageWithPagination(agents, modelOptions, h.buildModelWorkerStats(agents), h.desktopMode, hasMore))
 }
 
 // buildModelWorkerStats returns a map of agent config ID -> running worker count.

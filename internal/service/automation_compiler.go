@@ -21,6 +21,10 @@ type automationTaskSubmissionService interface {
 	SubmitSavedAutomationTask(models.Task)
 }
 
+type automationQueuedWorkPruner interface {
+	PruneQueuedWork()
+}
+
 type AutomationCompiler struct {
 	automationRepo *repository.AutomationRepo
 	taskSvc        automationTaskMutationService
@@ -302,20 +306,19 @@ func (c *AutomationCompiler) Save(ctx context.Context, request AutomationSaveReq
 			if err != nil {
 				return nil, err
 			}
-			if stored == nil {
-				return nil, fmt.Errorf("schedule for node %q is unavailable", node.Key)
-			}
-			if !clearContextConfigured {
-				scheduleWrite.ClearContextOnStart = stored.ClearContextOnStart
-				for i := range write.Candidate.Nodes {
-					if write.Candidate.Nodes[i].Key == node.Key {
-						write.Candidate.Nodes[i].Config["clear_context_on_start"] = stored.ClearContextOnStart
-						break
+			if stored != nil {
+				if !clearContextConfigured {
+					scheduleWrite.ClearContextOnStart = stored.ClearContextOnStart
+					for i := range write.Candidate.Nodes {
+						if write.Candidate.Nodes[i].Key == node.Key {
+							write.Candidate.Nodes[i].Config["clear_context_on_start"] = stored.ClearContextOnStart
+							break
+						}
 					}
 				}
+				scheduleWrite.PreserveTiming = stored.RunAt.In(time.Local).Format("15:04") == schedule.RunAt.In(time.Local).Format("15:04") &&
+					stored.RepeatType == schedule.RepeatType && stored.RepeatInterval == schedule.RepeatInterval
 			}
-			scheduleWrite.PreserveTiming = stored.RunAt.In(time.Local).Format("15:04") == schedule.RunAt.In(time.Local).Format("15:04") &&
-				stored.RepeatType == schedule.RepeatType && stored.RepeatInterval == schedule.RepeatInterval
 		}
 		write.Schedules = append(write.Schedules, scheduleWrite)
 	}
@@ -397,7 +400,13 @@ func (s *AutomationLifecycleService) Pause(ctx context.Context, projectID, autom
 	if s == nil || s.repo == nil {
 		return errors.New("automation lifecycle service is unavailable")
 	}
-	return s.repo.SetAutomationLifecycle(ctx, projectID, automationID, models.AutomationPaused)
+	if err := s.repo.SetAutomationLifecycle(ctx, projectID, automationID, models.AutomationPaused); err != nil {
+		return err
+	}
+	if pruner, ok := s.taskSvc.(automationQueuedWorkPruner); ok {
+		pruner.PruneQueuedWork()
+	}
+	return nil
 }
 
 func (s *AutomationLifecycleService) Resume(ctx context.Context, projectID, automationID string) error {
@@ -421,7 +430,13 @@ func (s *AutomationLifecycleService) Archive(ctx context.Context, projectID, aut
 	if s == nil || s.repo == nil {
 		return errors.New("automation lifecycle service is unavailable")
 	}
-	return s.repo.SetAutomationLifecycle(ctx, projectID, automationID, models.AutomationArchived)
+	if err := s.repo.SetAutomationLifecycle(ctx, projectID, automationID, models.AutomationArchived); err != nil {
+		return err
+	}
+	if pruner, ok := s.taskSvc.(automationQueuedWorkPruner); ok {
+		pruner.PruneQueuedWork()
+	}
+	return nil
 }
 
 func (s *AutomationLifecycleService) Delete(ctx context.Context, projectID, automationID string) error {

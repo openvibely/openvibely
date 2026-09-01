@@ -290,11 +290,15 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 		"github_get_project_inbox":   core.ExecuteGetProjectInbox,
 		"github_is_actor_authorized": core.ExecuteIsActorAuthorized,
 		"github_list_my_assigned_issues": func(ctx context.Context, input json.RawMessage) (string, error) {
-			req, repo, err := core.requestAndRepo(ctx, input, nil)
+			req, err := core.request(input)
 			if err != nil {
 				return "", err
 			}
-			limit, offset, err := assignedIssueListPage(req)
+			limit, offset, err := assignedIssueListPageForInput(input, req)
+			if err != nil {
+				return "", err
+			}
+			repo, err := resolveGitHubRepoForRuntimeToolURL(ctx, opts, req.RepoURL)
 			if err != nil {
 				return "", err
 			}
@@ -315,7 +319,7 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 			if err != nil {
 				return "", err
 			}
-			limit, offset, err := assignedIssueListPage(req)
+			limit, offset, err := assignedIssueListPageForInput(input, req)
 			if err != nil {
 				return "", err
 			}

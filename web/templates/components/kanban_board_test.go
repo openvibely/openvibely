@@ -5,11 +5,54 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
 )
+
+func TestKanbanBoardRefreshPreservesSelectionAndOpenMenus(t *testing.T) {
+	var buf bytes.Buffer
+	tasks := []models.Task{{ID: "selected-task", ProjectID: "project-1", Title: "Selected", Category: models.CategoryBacklog, Status: models.StatusPending}}
+	if err := KanbanBoard(tasks, "project-1", "", "", nil, nil).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render kanban board: %v", err)
+	}
+	html := buf.String()
+	for _, required := range []string{
+		`data-kanban-menu-key="column-backlog"`,
+		`data-kanban-menu-key="column-completed"`,
+		`data-kanban-menu-key="task-selected-task"`,
+		`data-kanban-menu-trigger`,
+		`aria-expanded="false"`,
+		`data-kanban-menu-content`,
+		`<button type="button" tabindex="0"`,
+	} {
+		if !strings.Contains(html, required) {
+			t.Fatalf("kanban refresh state requires rendered contract %q", required)
+		}
+	}
+
+	for _, unsupported := range []string{`aria-haspopup="menu"`, `role="menu"`} {
+		if strings.Contains(html, unsupported) {
+			t.Fatalf("kanban dropdown must not claim unsupported ARIA menu semantics %q", unsupported)
+		}
+	}
+
+	if strings.Contains(html, `<a tabindex="0"`) {
+		t.Fatal("column HTMX actions must use native keyboard-operable buttons, not focusable anchors without href")
+	}
+
+	layoutSource, err := os.ReadFile(filepath.Join("..", "layout", "base.templ"))
+	if err != nil {
+		t.Fatalf("read base template: %v", err)
+	}
+	for _, required := range []string{"savedKanbanInteraction", "restoreKanbanInteraction", "selectedTaskIDs", "focusKey", "aria-expanded"} {
+		if !bytes.Contains(layoutSource, []byte(required)) {
+			t.Fatalf("kanban refresh script must preserve %q", required)
+		}
+	}
+}
 
 func TestActiveColumnContent_GroupsOnlyRunningTasksInProgress(t *testing.T) {
 	tasks := []models.Task{
@@ -50,7 +93,8 @@ func TestKanbanColumn_DropdownTriggersUseLabelForDesktopWebviewCompatibility(t *
 	html := buf.String()
 
 	if !strings.Contains(html, `<label tabindex="0" class="btn btn-xs btn-ghost`) ||
-		!strings.Contains(html, `title="More actions" onclick="handleDropdownToggle(event)">`) {
+		!strings.Contains(html, `title="More actions" onclick="handleDropdownToggle(event)"`) ||
+		!strings.Contains(html, `data-kanban-menu-trigger aria-label="More actions" aria-expanded="false"`) {
 		t.Fatal("expected backlog kebab trigger to use <label> for stable dropdown focus behavior")
 	}
 	if strings.Contains(html, `<button tabindex="0" class="btn btn-xs btn-ghost`) {
@@ -64,7 +108,8 @@ func TestKanbanColumn_DropdownTriggersUseLabelForDesktopWebviewCompatibility(t *
 	}
 	html = buf.String()
 	if !strings.Contains(html, `<label tabindex="0" class="btn btn-xs btn-ghost`) ||
-		!strings.Contains(html, `title="More actions" onclick="handleDropdownToggle(event)">`) {
+		!strings.Contains(html, `title="More actions" onclick="handleDropdownToggle(event)"`) ||
+		!strings.Contains(html, `data-kanban-menu-trigger aria-label="More actions" aria-expanded="false"`) {
 		t.Fatal("expected completed kebab trigger to use <label> for stable dropdown focus behavior")
 	}
 	if strings.Contains(html, `<button tabindex="0" class="btn btn-xs btn-ghost`) {
@@ -153,11 +198,57 @@ func TestKanbanColumn_BacklogPriorityActionsDoNotHardcodePriorityLabels(t *testi
 	}
 }
 
+func TestKanbanColumn_DeleteAllActionsOpenSharedConfirmation(t *testing.T) {
+	cases := []struct {
+		category  models.TaskCategory
+		name      string
+		ariaLabel string
+	}{
+		{models.CategoryCompleted, "completed tasks", "Delete all completed tasks"},
+		{models.CategoryBacklog, "backlog tasks", "Delete all backlog tasks"},
+	}
+
+	for _, tc := range cases {
+		t.Run(string(tc.category), func(t *testing.T) {
+			body := renderKanbanColumnForCategoryTest(t, tc.category, []models.Task{{
+				ID:        "task-1",
+				ProjectID: "project-1",
+				Title:     "Task to delete",
+				Category:  tc.category,
+				Status:    models.StatusCompleted,
+			}})
+
+			for _, want := range []string{
+				`data-delete-all-tasks-category="` + string(tc.category) + `"`,
+				`data-delete-all-tasks-name="` + tc.name + `"`,
+				`data-project-id="project-1"`,
+				`aria-label="` + tc.ariaLabel + `"`,
+				`onclick="openDeleteAllTasksConfirm(this)"`,
+				`Delete All</button>`,
+			} {
+				if !strings.Contains(body, want) {
+					t.Fatalf("expected %s delete action to contain %q, got %s", tc.category, want, body)
+				}
+			}
+			if strings.Contains(body, `hx-confirm="Are you sure you want to delete all`) {
+				t.Fatalf("%s delete-all action must not use the browser confirmation attribute", tc.category)
+			}
+			if strings.Contains(body, `hx-delete="/tasks/`+string(tc.category)) {
+				t.Fatalf("%s delete-all action must not delete before the shared modal is confirmed", tc.category)
+			}
+		})
+	}
+}
+
 func renderKanbanColumnForTest(t *testing.T, tasks []models.Task) string {
+	return renderKanbanColumnForCategoryTest(t, models.CategoryBacklog, tasks)
+}
+
+func renderKanbanColumnForCategoryTest(t *testing.T, category models.TaskCategory, tasks []models.Task) string {
 	t.Helper()
 	var buf bytes.Buffer
-	if err := KanbanColumn(tasks, "project-1", models.CategoryBacklog, "", "", nil, nil).Render(context.Background(), &buf); err != nil {
-		t.Fatalf("render backlog column: %v", err)
+	if err := KanbanColumn(tasks, "project-1", category, "", "", nil, nil).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render %s column: %v", category, err)
 	}
 	return buf.String()
 }

@@ -11,6 +11,22 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
+func TestCardPaginationCompletionIsSilent(t *testing.T) {
+	var buf bytes.Buffer
+	if err := ModelsContentPageWithPagination(nil, nil, nil, false, false).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render models pagination status: %v", err)
+	}
+	out := buf.String()
+	if strings.Contains(out, "End of list") || strings.Contains(out, "data-card-pagination-end") {
+		t.Fatalf("pagination completion should be silent, got visible end marker")
+	}
+	for _, required := range []string{"data-card-pagination-loading", "data-card-pagination-error", "data-card-pagination-retry", "data-card-pagination-sentinel"} {
+		if !strings.Contains(out, required) {
+			t.Errorf("expected pagination status to retain %s", required)
+		}
+	}
+}
+
 func TestModelsContent_NewModelVersionsInSelector(t *testing.T) {
 	// Render the models page and verify the new model versions appear in the
 	// HTML <option> elements and the JS modelOptionsByProvider catalog.

@@ -2,9 +2,9 @@
 name: ui_theming
 type: project
 created: 2026-08-11
-updated: 2026-08-19
-source: consolidation
-source_id: memory_consolidation_2026_08_19
+updated: 2026-08-30
+source: after_complete
+source_id: d8ce0caca4111ec20dfc1f3906d85000:54a19951cbe52c56
 confidence: high
 title: UI Theming
 ---
@@ -27,6 +27,8 @@ Core theming contracts:
 - Footer sun/moon control toggles between most recently selected light-side and dark-side themes. Light mode toggle track must be light; dark mode keeps dark track. Footer controls must sync after DOM insertion.
 - Apply theme CSS variables early before paint. Base layout embeds only compact runtime catalog needed for early application; full catalog remains server-side for Themes page.
 - Highlight.js must not load a fixed GitHub Dark stylesheet. Rendered Markdown/code syntax colors derive from selected theme and work for initial/HTMX content.
+- Native light-mode Alert inspection inline code uses `--ov-l-surface-active` with `--ov-l-text-strong` through `[data-theme="light"] [data-alert-markdown] :not(pre) > code`; this avoids interpreting DaisyUI's OKLCH `--b2` value through the generic `hsl(var(--b2))` rule. Fenced `<pre><code>` blocks and shared Chat/task-thread bubble styling remain unchanged, and the hydrated notification regression requires at least 4.5:1 computed contrast.
+- Running task status uses the shared `.task-state-running` selector and must exactly match the chat send button's normal primary-action color, with one light value and one dark value. Both controls consume one shared primary-action token rather than duplicated literals. On 2026-08-30, the implementation introduced `--ov-primary-action-color` and `chat-send-button`, corrected the native dark normal state to `#7480ff` (the prior `#646fe4` is the native dark hover value), and kept normal declarations non-important so native hover rules remain authoritative. The follow-up now drives Chrome's actual pointer through CDP and verifies computed normal and `:hover` colors for native dark, native light, and imported themes; it confirms the Send color changes on hover while the running icon retains the normal shared token. That interaction exposed a cascade issue in which native generic/primary rules matched imported themes; native generic/primary hover rules and the native light primary base rule are now scoped to their native `data-color-theme` IDs, preserving imported primary/hover behavior without `!important` on shared Send rules. Deterministic templ generation, the server build, all internal tests, all template tests, and `git diff --check` passed. A fresh strict read-only audit of exact head `279f16dc40a1468d0904a0e2d6026013b59a5471` found no material bugs, regressions, or missing requirements, confirmed the worktree clean and the branch `0 behind / 5 ahead` of `main` with no task-side merge commits, and made no workspace changes or validation runs.
 
 Exact imported-theme styling:
 - Imported VS Code application/content backgrounds must follow selected exact palette, not DaisyUI fallbacks. `contentBg` should prefer editor/window backgrounds, applied to root/page canvas, `.drawer-content`, and `#main-content`.
@@ -43,3 +45,10 @@ Exact imported-theme styling:
 - Generator and attribution docs should describe semantic fallback/derivation: ordered upstream keys win first, transparent/invalid values are ignored, missing roles derive through theme-aware mixes/alpha/best-text helpers, then fallback to bundled light/dark defaults.
 - Automation graph and YAML surfaces are exact-theme UI under imported themes: panels, nodes, connectors, arrows, handles, state colors, delete controls, focus outlines, editor backgrounds, gutters, line numbers, overlays, caret, YAML tokens, diagnostics, dots, and rails should use generated variables.
 - YAML indentation rails remain visible by default; when editor is focused only the innermost active group rail switches to focus role.
+
+Resolved contrast contracts (2026-08-28):
+- Imported Automation graph/YAML theming emits generated semantic roles `automationNodeBorder`, `automationEdge`, and `yamlIndentRail`, each derived against its actual drawing surface. The generator enforces minimum contrast ratios of `1.5` for node stroke versus node fill, `3.0` for connectors versus graph surface, and `1.5` for YAML rails versus code canvas, using a theme-aware foreground fallback when upstream values collapse into a surface.
+- Imported graph nodes consume `--ov-automation-node-border`; live/edit edges and arrows consume `--ov-automation-edge` at full opacity. This covers low-contrast palettes such as Dark Modern, Abyss, Kimbie Dark, and Monokai Dimmed without changing selected/active state roles.
+- YAML panel defaults consume `--ov-yaml-indent-rail`; imported rail CSS intentionally does not use `!important`, so the renderer's inline active-rail color can win. Default rails remain visible, and only the innermost active group rail changes to the focus color.
+- The early theme bootstrap keeps these three roles in a compact runtime `r` payload and expands them to allowlisted CSS variables, retaining the base-page size budget while the full catalog retains semantic/CSS data. Generated catalog, templ output, and attribution documentation remain source-derived and must stay synchronized through their generators.
+- Catalog, rendered CSS, runtime-script, and browser regressions cover the contrast and cascade invariants across imported themes.

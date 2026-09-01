@@ -97,6 +97,48 @@ func (r *AutomationRepo) ListPortfolioCards(ctx context.Context, projectID strin
 	return out, rows.Err()
 }
 
+// ListPortfolioCardsPage returns one bounded, project-scoped portfolio page.
+// Search is limited to the metadata rendered by automationCardSearchText.
+func (r *AutomationRepo) ListPortfolioCardsPage(ctx context.Context, projectID string, limit, offset int, search string) ([]models.AutomationCard, error) {
+	limit, offset = normalizeCardPageArgs(limit, offset)
+	query := `SELECT
+		a.id, a.project_id, a.stable_key, a.name, a.description, a.automation_type,
+		a.lifecycle_state, a.health_state, a.health_reason, a.health_evaluated_at, a.published_version_id, a.template_revision,
+		a.created_via, a.created_at, a.updated_at, a.archived_at,
+		v.id, v.project_id, v.automation_id, v.version, v.state, v.source, v.adapter_key, v.schema_version, v.created_at, v.published_at
+		FROM automations a
+		JOIN automation_versions v ON v.id = a.published_version_id AND v.automation_id = a.id AND v.project_id = a.project_id
+		WHERE a.project_id = ? AND v.state = 'published'`
+	args := []any{projectID}
+	if search = strings.TrimSpace(search); search != "" {
+		query += ` AND INSTR(LOWER(
+			COALESCE(a.name, '') || ' ' || COALESCE(a.description, '') || ' ' ||
+			COALESCE(v.adapter_key, '') || ' ' || COALESCE(a.lifecycle_state, '') || ' ' || COALESCE(a.health_state, '')
+		), ?) > 0`
+		args = append(args, strings.ToLower(search))
+	}
+	query += ` ORDER BY a.updated_at DESC, a.id ASC LIMIT ? OFFSET ?`
+	args = append(args, limit, offset)
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("listing automation portfolio card page: %w", err)
+	}
+	defer rows.Close()
+	out := make([]models.AutomationCard, 0, limit)
+	for rows.Next() {
+		var card models.AutomationCard
+		if err := rows.Scan(&card.Automation.ID, &card.Automation.ProjectID, &card.Automation.StableKey, &card.Automation.Name, &card.Automation.Description, &card.Automation.AutomationType,
+			&card.Automation.LifecycleState, &card.Automation.HealthState, &card.Automation.HealthReason, &card.Automation.HealthEvaluatedAt, &card.Automation.PublishedVersionID, &card.Automation.TemplateRevision,
+			&card.Automation.CreatedVia, &card.Automation.CreatedAt, &card.Automation.UpdatedAt, &card.Automation.ArchivedAt,
+			&card.Version.ID, &card.Version.ProjectID, &card.Version.AutomationID, &card.Version.Version, &card.Version.State, &card.Version.Source,
+			&card.Version.AdapterKey, &card.Version.SchemaVersion, &card.Version.CreatedAt, &card.Version.PublishedAt); err != nil {
+			return nil, fmt.Errorf("scanning automation portfolio card page: %w", err)
+		}
+		out = append(out, card)
+	}
+	return out, rows.Err()
+}
+
 func (r *AutomationRepo) GetByStableKey(ctx context.Context, projectID, stableKey string) (*models.Automation, error) {
 	var a models.Automation
 	err := scanAutomation(r.db.QueryRowContext(ctx, `SELECT id, project_id, stable_key, name, description, automation_type,
@@ -109,6 +151,14 @@ func (r *AutomationRepo) GetByStableKey(ctx context.Context, projectID, stableKe
 		return nil, fmt.Errorf("getting automation by stable key: %w", err)
 	}
 	return &a, nil
+}
+
+func (r *AutomationRepo) Exists(ctx context.Context, projectID, automationID string) (bool, error) {
+	var exists bool
+	if err := r.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM automations WHERE project_id = ? AND id = ?)`, projectID, automationID).Scan(&exists); err != nil {
+		return false, fmt.Errorf("checking automation existence: %w", err)
+	}
+	return exists, nil
 }
 
 func (r *AutomationRepo) GetDefinition(ctx context.Context, projectID, automationID string) (*models.AutomationDefinition, error) {
@@ -129,20 +179,11 @@ func (r *AutomationRepo) GetDefinition(ctx context.Context, projectID, automatio
 }
 
 func (r *AutomationRepo) PublishRegistered(ctx context.Context, in models.AutomationRegisteredPublication) (*models.AutomationDefinition, bool, error) {
-	conn, err := r.db.Conn(ctx)
+	conn, finishImmediate, err := beginImmediateConn(ctx, r.db)
 	if err != nil {
-		return nil, false, fmt.Errorf("automation publication connection: %w", err)
-	}
-	defer conn.Close()
-	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
 		return nil, false, fmt.Errorf("beginning automation publication: %w", err)
 	}
-	committed := false
-	defer func() {
-		if !committed {
-			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
-		}
-	}()
+	defer finishImmediate()
 
 	a, err := getAutomationByStableKeyQuery(ctx, conn, in.ProjectID, in.StableKey)
 	if err != nil {
@@ -175,7 +216,6 @@ func (r *AutomationRepo) PublishRegistered(ctx context.Context, in models.Automa
 		if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 			return nil, false, err
 		}
-		committed = true
 		return def, true, nil
 	}
 	if a == nil {
@@ -298,7 +338,6 @@ func (r *AutomationRepo) PublishRegistered(ctx context.Context, in models.Automa
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 		return nil, false, fmt.Errorf("committing automation publication: %w", err)
 	}
-	committed = true
 	r.PublishInvalidation(events.AutomationDefinitionUpdated, in.ProjectID, models.AutomationBinding{AutomationID: def.Automation.ID, VersionID: def.Version.ID})
 	return def, false, nil
 }

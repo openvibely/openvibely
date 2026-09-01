@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -9,6 +10,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -18,6 +21,34 @@ import (
 	"github.com/openvibely/openvibely/internal/repository"
 )
 
+// ErrMergeInProgress is returned when another repository merge, rebase, or
+// conflict-recovery mutation is already in progress.
+var ErrMergeInProgress = errors.New("repository merge, rebase, or conflict recovery already in progress")
+
+// ErrMergeEligibilityChanged is returned when live task/Git state becomes
+// ineligible after the request's initial check but before lease-held mutation.
+var ErrMergeEligibilityChanged = errors.New("merge eligibility changed before mutation")
+
+var repositoryWriterLocks sync.Map // canonical Git common directory -> *sync.Mutex
+
+func repositoryWriterLock(key string) *sync.Mutex {
+	value, _ := repositoryWriterLocks.LoadOrStore(key, &sync.Mutex{})
+	return value.(*sync.Mutex)
+}
+
+// WithRepositoryMutation serializes every repository-scoped Git writer using
+// the same canonical common-directory identity as merge/rebase recovery leases.
+func WithRepositoryMutation(repoDir string, mutate func() error) error {
+	lock := repositoryWriterLock(canonicalRepositoryMutationKey(repoDir))
+	lock.Lock()
+	defer lock.Unlock()
+	return mutate()
+}
+
+func (ws *WorktreeService) WithRepositoryMutation(repoDir string, mutate func() error) error {
+	return WithRepositoryMutation(repoDir, mutate)
+}
+
 // WorktreeService manages git worktrees for task isolation.
 type WorktreeService struct {
 	taskRepo     *repository.TaskRepo
@@ -25,6 +56,11 @@ type WorktreeService struct {
 	settingsRepo *repository.SettingsRepo
 	llmSvc       *LLMService
 }
+
+// repositoryMutationLeases is process-wide because handler, worker, and
+// scheduler wiring can hold separate WorktreeService instances while targeting
+// the same Git repository.
+var repositoryMutationLeases sync.Map // canonical Git common directory -> *atomic.Bool
 
 func NewWorktreeService(taskRepo *repository.TaskRepo, projectRepo *repository.ProjectRepo, settingsRepo *repository.SettingsRepo) *WorktreeService {
 	return &WorktreeService{
@@ -153,6 +189,15 @@ func (ws *WorktreeService) SetupFollowupWorktree(ctx context.Context, task *mode
 }
 
 func (ws *WorktreeService) setupWorktree(ctx context.Context, task *models.Task, repoDir string, continueFromCurrentTarget bool) (worktreePath string, branchName string, err error) {
+	err = ws.WithRepositoryMutation(repoDir, func() error {
+		var setupErr error
+		worktreePath, branchName, setupErr = ws.setupWorktreeUnlocked(ctx, task, repoDir, continueFromCurrentTarget)
+		return setupErr
+	})
+	return worktreePath, branchName, err
+}
+
+func (ws *WorktreeService) setupWorktreeUnlocked(ctx context.Context, task *models.Task, repoDir string, continueFromCurrentTarget bool) (worktreePath string, branchName string, err error) {
 	if repoDir == "" || !IsGitRepo(repoDir) {
 		return "", "", fmt.Errorf("not a git repository: %s", repoDir)
 	}
@@ -428,13 +473,29 @@ type StartupSyncConflictError struct {
 }
 
 func (e *StartupSyncConflictError) Error() string {
-	return fmt.Sprintf("startup auto-merge conflict while merging %s into %s (conflicts: %s); merge was aborted. Resolve conflicts in %s and rerun the task", e.TargetBranch, e.TaskBranch, strings.Join(e.ConflictFiles, ", "), e.WorktreePath)
+	return fmt.Sprintf("startup auto-merge conflict while merging %s into %s (conflicts: %s); merge was aborted and conflict resolution is required in %s", e.TargetBranch, e.TaskBranch, strings.Join(e.ConflictFiles, ", "), e.WorktreePath)
+}
+
+// StartupSyncConflictContext turns an aborted startup merge conflict into
+// recovery instructions for an agent that can continue in the clean,
+// preserved task worktree.
+func StartupSyncConflictContext(conflict *StartupSyncConflictError) string {
+	if conflict == nil {
+		return ""
+	}
+	return fmt.Sprintf("# Worktree Sync Warning\n\nStartup sync could not merge %s into %s because Git reported conflicts in: %s. The merge was aborted before this turn started, so the preserved worktree is clean but may be behind or diverged from %s. Before handling the task, run the merge in %s, resolve the conflicts while preserving both the task changes and current target changes, then build, test, and commit the resolution. Sync error: %v", conflict.TargetBranch, conflict.TaskBranch, strings.Join(conflict.ConflictFiles, ", "), conflict.TargetBranch, conflict.WorktreePath, conflict)
 }
 
 // SyncWorktreeFromMainAtStart updates a task branch with the latest local
 // merge target/default branch before task execution begins. It only runs when
 // the worktree is clean and does not implicitly fetch or merge remote branches.
 func (ws *WorktreeService) SyncWorktreeFromMainAtStart(ctx context.Context, task *models.Task, repoDir string) error {
+	return ws.WithRepositoryMutation(repoDir, func() error {
+		return ws.syncWorktreeFromMainAtStartUnlocked(ctx, task, repoDir)
+	})
+}
+
+func (ws *WorktreeService) syncWorktreeFromMainAtStartUnlocked(ctx context.Context, task *models.Task, repoDir string) error {
 	if task == nil || task.WorktreePath == "" {
 		return nil
 	}
@@ -489,7 +550,7 @@ func (ws *WorktreeService) SyncWorktreeFromMainAtStart(ctx context.Context, task
 	if mergeErr != nil {
 		conflictFiles := detectConflicts(task.WorktreePath)
 		if len(conflictFiles) > 0 {
-			abortErr := AbortMerge(task.WorktreePath)
+			abortErr := abortMergeLocked(task.WorktreePath)
 			if ws.taskRepo != nil {
 				_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusConflict)
 			}
@@ -1069,9 +1130,81 @@ type RebaseResult struct {
 	ErrorMessage  string
 }
 
+func canonicalRepositoryMutationKey(repoDir string) string {
+	key := filepath.Clean(repoDir)
+	if absolute, err := filepath.Abs(key); err == nil {
+		key = absolute
+	}
+	if resolved, err := filepath.EvalSymlinks(key); err == nil {
+		key = resolved
+	}
+
+	cmd := exec.Command("git", "rev-parse", "--git-common-dir")
+	cmd.Dir = key
+	if out, err := cmd.Output(); err == nil {
+		commonDir := strings.TrimSpace(string(out))
+		if commonDir != "" {
+			if !filepath.IsAbs(commonDir) {
+				commonDir = filepath.Join(key, commonDir)
+			}
+			if absolute, absErr := filepath.Abs(commonDir); absErr == nil {
+				commonDir = absolute
+			}
+			if resolved, resolveErr := filepath.EvalSymlinks(commonDir); resolveErr == nil {
+				commonDir = resolved
+			}
+			return filepath.Clean(commonDir)
+		}
+	}
+	return filepath.Clean(key)
+}
+
+func beginRepositoryMutation(repoDir string) (string, bool) {
+	key := canonicalRepositoryMutationKey(repoDir)
+	value, _ := repositoryMutationLeases.LoadOrStore(key, &atomic.Bool{})
+	if !value.(*atomic.Bool).CompareAndSwap(false, true) {
+		return key, false
+	}
+	repositoryWriterLock(key).Lock()
+	return key, true
+}
+
+func endRepositoryMutation(key string) {
+	repositoryWriterLock(key).Unlock()
+	if value, ok := repositoryMutationLeases.Load(key); ok {
+		value.(*atomic.Bool).Store(false)
+	}
+}
+
 // MergeBranch merges the task branch into the target branch.
 // mergeType: "merge" (merge commit), "ff" (fast-forward only), "squash"
 func (ws *WorktreeService) MergeBranch(ctx context.Context, task *models.Task, repoDir string, mergeType string) (*MergeResult, error) {
+	return ws.MergeBranchValidated(ctx, task, repoDir, mergeType, nil)
+}
+
+// MergeBranchValidated acquires the repository merge lease and then runs
+// validate immediately before any Git or task-status mutation. Handler callers
+// use this to close the render/check-to-mutation race with live eligibility and
+// ancestry state; internal callers without additional policy use MergeBranch.
+func (ws *WorktreeService) MergeBranchValidated(ctx context.Context, task *models.Task, repoDir string, mergeType string, validate func() error) (*MergeResult, error) {
+	leaseKey, acquired := beginRepositoryMutation(repoDir)
+	if !acquired {
+		return &MergeResult{ErrorMessage: ErrMergeInProgress.Error()}, ErrMergeInProgress
+	}
+	defer endRepositoryMutation(leaseKey)
+	if validate != nil {
+		if err := validate(); err != nil {
+			return &MergeResult{ErrorMessage: err.Error()}, err
+		}
+	}
+	if len(ActiveConflictFiles(repoDir)) > 0 {
+		err := fmt.Errorf("a repository merge conflict is already active")
+		return &MergeResult{ErrorMessage: err.Error()}, err
+	}
+	return ws.mergeBranchLocked(ctx, task, repoDir, mergeType)
+}
+
+func (ws *WorktreeService) mergeBranchLocked(ctx context.Context, task *models.Task, repoDir string, mergeType string) (*MergeResult, error) {
 	if task.WorktreeBranch == "" {
 		return nil, fmt.Errorf("task has no worktree branch")
 	}
@@ -1151,6 +1284,23 @@ func (ws *WorktreeService) MergeBranch(ctx context.Context, task *models.Task, r
 		// Check if it's a conflict
 		conflictFiles := detectConflicts(repoDir)
 		if len(conflictFiles) > 0 {
+			if mergeType == "squash" {
+				// A squash conflict has no MERGE_HEAD, so advertising `git merge
+				// --abort` would strand the recovery UI. Restore only paths added by
+				// this squash attempt, preserving unrelated pre-existing staged work,
+				// and return a retryable failed state instead.
+				squashPaths, pathErr := SquashMergePaths(repoDir, stagedBeforeSquash)
+				if pathErr == nil {
+					squashPaths = appendUniquePaths(squashPaths, conflictFiles...)
+					pathErr = ResetSquashMergeChanges(repoDir, squashPaths)
+				}
+				if pathErr == nil {
+					mergeErrMsg := strings.TrimSpace(string(mergeOut))
+					_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusFailed)
+					return &MergeResult{ErrorMessage: mergeErrMsg}, fmt.Errorf("squash merge conflicted and was restored: %w", mergeErr)
+				}
+				applog.Infof("[worktree] failed to restore squash conflict for task %s: %v", task.ID, pathErr)
+			}
 			_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusConflict)
 			return &MergeResult{
 				ConflictFiles: conflictFiles,
@@ -1211,6 +1361,26 @@ func (ws *WorktreeService) MergeBranch(ctx context.Context, task *models.Task, r
 
 // RebaseBranch rebases the task worktree branch onto its target branch without merging it.
 func (ws *WorktreeService) RebaseBranch(ctx context.Context, task *models.Task, repoDir string) (*RebaseResult, error) {
+	return ws.RebaseBranchValidated(ctx, task, repoDir, nil)
+}
+
+// RebaseBranchValidated serializes rebase with every merge/rebase mutation for
+// the same Git repository and validates live handler policy under that lease.
+func (ws *WorktreeService) RebaseBranchValidated(ctx context.Context, task *models.Task, repoDir string, validate func() error) (*RebaseResult, error) {
+	leaseKey, acquired := beginRepositoryMutation(repoDir)
+	if !acquired {
+		return &RebaseResult{ErrorMessage: ErrMergeInProgress.Error()}, ErrMergeInProgress
+	}
+	defer endRepositoryMutation(leaseKey)
+	if validate != nil {
+		if err := validate(); err != nil {
+			return &RebaseResult{ErrorMessage: err.Error()}, err
+		}
+	}
+	return ws.rebaseBranchLocked(ctx, task, repoDir)
+}
+
+func (ws *WorktreeService) rebaseBranchLocked(ctx context.Context, task *models.Task, repoDir string) (*RebaseResult, error) {
 	if task == nil || task.WorktreeBranch == "" {
 		return nil, fmt.Errorf("task has no worktree branch")
 	}
@@ -1457,13 +1627,24 @@ func gitOutput(repoDir string, args ...string) ([]byte, error) {
 	return cmd.CombinedOutput()
 }
 
+func splitNULPaths(out []byte) []string {
+	parts := strings.Split(string(out), "\x00")
+	paths := make([]string, 0, len(parts))
+	for _, path := range parts {
+		if path != "" {
+			paths = append(paths, path)
+		}
+	}
+	return paths
+}
+
 func StagedPaths(repoDir string) (map[string]bool, error) {
-	out, err := gitOutput(repoDir, "diff", "--name-only", "--cached")
+	out, err := gitOutput(repoDir, "diff", "--name-only", "-z", "--cached")
 	if err != nil {
 		return nil, fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
 	}
 	paths := make(map[string]bool)
-	for _, path := range strings.Fields(string(out)) {
+	for _, path := range splitNULPaths(out) {
 		paths[path] = true
 	}
 	return paths, nil
@@ -1487,6 +1668,20 @@ func SquashMergePaths(repoDir string, stagedBefore map[string]bool) ([]string, e
 	return changed, nil
 }
 
+func appendUniquePaths(paths []string, additions ...string) []string {
+	seen := make(map[string]bool, len(paths)+len(additions))
+	for _, path := range paths {
+		seen[path] = true
+	}
+	for _, path := range additions {
+		if path != "" && !seen[path] {
+			paths = append(paths, path)
+			seen[path] = true
+		}
+	}
+	return paths
+}
+
 // ResetSquashMergeChanges restores only files changed by a failed squash merge
 // attempt. Unlike `git reset --hard`, this does not reset the whole target
 // checkout or touch staged user changes that existed before the squash attempt.
@@ -1502,6 +1697,23 @@ func ResetSquashMergeChanges(repoDir string, squashPaths []string) error {
 	return nil
 }
 
+// HasActiveMerge reports whether Git has an in-progress merge in the repository,
+// including the resolved-but-not-yet-committed phase where no unmerged files remain.
+func HasActiveMerge(repoDir string) bool {
+	return worktreeHasActiveMerge(repoDir)
+}
+
+// ActiveMergeMatchesBranch reports whether the repository's current MERGE_HEAD
+// is the tip of the supplied task branch.
+func ActiveMergeMatchesBranch(repoDir, branchName string) bool {
+	if !worktreeHasActiveMerge(repoDir) || branchName == "" {
+		return false
+	}
+	mergeHead, mergeErr := gitCommitSHA(repoDir, "MERGE_HEAD")
+	branchHead, branchErr := gitCommitSHA(repoDir, branchName)
+	return mergeErr == nil && branchErr == nil && mergeHead != "" && mergeHead == branchHead
+}
+
 // ActiveConflictFiles returns files with active merge conflicts in the given repository.
 func ActiveConflictFiles(repoDir string) []string {
 	return detectConflicts(repoDir)
@@ -1509,29 +1721,146 @@ func ActiveConflictFiles(repoDir string) []string {
 
 // detectConflicts returns a list of files with merge conflicts.
 func detectConflicts(repoDir string) []string {
-	cmd := exec.Command("git", "diff", "--name-only", "--diff-filter=U")
+	cmd := exec.Command("git", "diff", "--name-only", "-z", "--diff-filter=U")
 	cmd.Dir = repoDir
 	out, err := cmd.Output()
 	if err != nil {
 		return nil
 	}
-	raw := strings.TrimSpace(string(out))
-	if raw == "" {
-		return nil
-	}
-	return strings.Split(raw, "\n")
+	return splitNULPaths(out)
 }
 
-// AbortMerge aborts an in-progress merge.
+// AbortMerge serializes a low-level git merge abort with every repository
+// mutation. Task-aware callers should prefer AbortMergeForTask.
 func AbortMerge(repoDir string) error {
+	leaseKey, acquired := beginRepositoryMutation(repoDir)
+	if !acquired {
+		return ErrMergeInProgress
+	}
+	defer endRepositoryMutation(leaseKey)
+	return abortMergeLocked(repoDir)
+}
+
+func abortMergeLocked(repoDir string) error {
 	cmd := exec.Command("git", "merge", "--abort")
 	cmd.Dir = repoDir
 	_, err := cmd.CombinedOutput()
 	return err
 }
 
+// AbortMergeForTask aborts a normal merge or restores task-branch paths from a
+// legacy/incomplete squash conflict, which has unmerged files but no MERGE_HEAD.
+func AbortMergeForTask(repoDir, branchName, targetBranch string) error {
+	return AbortMergeForTaskValidated(repoDir, branchName, targetBranch, nil)
+}
+
+// AbortMergeForTaskValidated serializes abort with every repository mutation and
+// validates live conflict ownership while the canonical repository lease is held.
+func AbortMergeForTaskValidated(repoDir, branchName, targetBranch string, validate func() error) error {
+	leaseKey, acquired := beginRepositoryMutation(repoDir)
+	if !acquired {
+		return ErrMergeInProgress
+	}
+	defer endRepositoryMutation(leaseKey)
+	if validate != nil {
+		if err := validate(); err != nil {
+			return err
+		}
+	}
+	return abortMergeForTaskLocked(repoDir, branchName, targetBranch)
+}
+
+// AbortMergeForTaskValidated aborts task-owned conflict state and persists the
+// resulting merge status before releasing the canonical repository lease.
+func (ws *WorktreeService) AbortMergeForTaskValidated(ctx context.Context, taskID, repoDir, branchName, targetBranch string, status models.MergeStatus, validate func() error) error {
+	leaseKey, acquired := beginRepositoryMutation(repoDir)
+	if !acquired {
+		return ErrMergeInProgress
+	}
+	defer endRepositoryMutation(leaseKey)
+	if validate != nil {
+		if err := validate(); err != nil {
+			return err
+		}
+	}
+	if err := abortMergeForTaskLocked(repoDir, branchName, targetBranch); err != nil {
+		return err
+	}
+	if ws.taskRepo == nil {
+		return fmt.Errorf("task repository not available")
+	}
+	return ws.taskRepo.UpdateMergeStatus(ctx, taskID, status)
+}
+
+func (ws *WorktreeService) validateAutoConflictRecovery(ctx context.Context, task *models.Task, repoDir string) error {
+	if ws.taskRepo == nil || task == nil || task.ID == "" {
+		return fmt.Errorf("%w: task conflict metadata is unavailable", ErrMergeEligibilityChanged)
+	}
+	fresh, err := ws.taskRepo.GetByID(ctx, task.ID)
+	if err != nil || fresh == nil {
+		return fmt.Errorf("%w: task could not be refreshed", ErrMergeEligibilityChanged)
+	}
+	freshTarget := fresh.MergeTargetBranch
+	if freshTarget == "" {
+		freshTarget = GetDefaultBranch(repoDir)
+	}
+	expectedTarget := task.MergeTargetBranch
+	if expectedTarget == "" {
+		expectedTarget = GetDefaultBranch(repoDir)
+	}
+	if fresh.WorktreeBranch == "" || fresh.WorktreeBranch != task.WorktreeBranch || freshTarget == "" || freshTarget != expectedTarget {
+		return fmt.Errorf("%w: task conflict metadata changed", ErrMergeEligibilityChanged)
+	}
+	if !ActiveMergeMatchesBranch(repoDir, fresh.WorktreeBranch) || len(detectConflicts(repoDir)) == 0 {
+		return fmt.Errorf("%w: active conflict no longer belongs to this task", ErrMergeEligibilityChanged)
+	}
+	*task = *fresh
+	return nil
+}
+
+func abortMergeForTaskLocked(repoDir, branchName, targetBranch string) error {
+	if HasActiveMerge(repoDir) {
+		return abortMergeLocked(repoDir)
+	}
+	conflicts := detectConflicts(repoDir)
+	if len(conflicts) == 0 {
+		return fmt.Errorf("no active merge conflicts found")
+	}
+	out, err := gitOutput(repoDir, "diff", "--name-only", "-z", targetBranch+"..."+branchName)
+	if err != nil {
+		return fmt.Errorf("resolving squash conflict paths: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	paths := splitNULPaths(out)
+	paths = appendUniquePaths(paths, conflicts...)
+	if len(paths) == 0 {
+		return fmt.Errorf("no task paths found for squash conflict")
+	}
+	return ResetSquashMergeChanges(repoDir, paths)
+}
+
 // ResolveConflictsWithAI uses the LLM service to resolve merge conflicts.
 func (ws *WorktreeService) ResolveConflictsWithAI(ctx context.Context, task *models.Task, repoDir string) (*MergeResult, error) {
+	return ws.ResolveConflictsWithAIValidated(ctx, task, repoDir, nil)
+}
+
+// ResolveConflictsWithAIValidated serializes AI conflict resolution with every
+// repository mutation and validates live conflict ownership while the canonical
+// repository lease is held.
+func (ws *WorktreeService) ResolveConflictsWithAIValidated(ctx context.Context, task *models.Task, repoDir string, validate func() error) (*MergeResult, error) {
+	leaseKey, acquired := beginRepositoryMutation(repoDir)
+	if !acquired {
+		return &MergeResult{ErrorMessage: ErrMergeInProgress.Error()}, ErrMergeInProgress
+	}
+	defer endRepositoryMutation(leaseKey)
+	if validate != nil {
+		if err := validate(); err != nil {
+			return &MergeResult{ErrorMessage: err.Error()}, err
+		}
+	}
+	return ws.resolveConflictsWithAILocked(ctx, task, repoDir)
+}
+
+func (ws *WorktreeService) resolveConflictsWithAILocked(ctx context.Context, task *models.Task, repoDir string) (*MergeResult, error) {
 	if ws.llmSvc == nil {
 		return nil, fmt.Errorf("LLM service not available for conflict resolution")
 	}
@@ -1617,6 +1946,12 @@ func (ws *WorktreeService) ResolveConflictsWithAI(ctx context.Context, task *mod
 
 // CleanupWorktree removes the worktree and optionally deletes the branch.
 func (ws *WorktreeService) CleanupWorktree(ctx context.Context, task *models.Task, repoDir string, deleteBranch bool) error {
+	return ws.WithRepositoryMutation(repoDir, func() error {
+		return ws.cleanupWorktreeUnlocked(ctx, task, repoDir, deleteBranch)
+	})
+}
+
+func (ws *WorktreeService) cleanupWorktreeUnlocked(ctx context.Context, task *models.Task, repoDir string, deleteBranch bool) error {
 	if task.WorktreePath == "" {
 		return nil
 	}
@@ -1849,8 +2184,17 @@ func worktreeDiffFileTargets(worktreePath string, mergeBase string) ([]worktreeD
 	return targets, nil
 }
 
-func parseWorktreeDiffFileTargets(out []byte) []worktreeDiffFileTarget {
-	var targets []worktreeDiffFileTarget
+type worktreeNameStatusRecord struct {
+	Status     string
+	Path       string
+	SourcePath string
+}
+
+// parseWorktreeNameStatus decodes tracked git diff --name-status records for the
+// Changes projections. Path is the destination for rename/copy records, while
+// SourcePath is populated with their source path.
+func parseWorktreeNameStatus(out []byte) []worktreeNameStatusRecord {
+	var records []worktreeNameStatusRecord
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		if line == "" {
 			continue
@@ -1859,12 +2203,26 @@ func parseWorktreeDiffFileTargets(out []byte) []worktreeDiffFileTarget {
 		if len(parts) < 2 {
 			continue
 		}
-		status := parts[0]
-		if (strings.HasPrefix(status, "R") || strings.HasPrefix(status, "C")) && len(parts) >= 3 {
-			targets = append(targets, worktreeDiffFileTarget{Path: parts[2], Pathspecs: []string{parts[1], parts[2]}})
-			continue
+
+		record := worktreeNameStatusRecord{Status: parts[0], Path: parts[1]}
+		if (strings.HasPrefix(record.Status, "R") || strings.HasPrefix(record.Status, "C")) && len(parts) >= 3 {
+			record.SourcePath = parts[1]
+			record.Path = parts[2]
 		}
-		targets = append(targets, worktreeDiffFileTarget{Path: parts[1], Pathspecs: []string{parts[1]}})
+		records = append(records, record)
+	}
+	return records
+}
+
+func parseWorktreeDiffFileTargets(out []byte) []worktreeDiffFileTarget {
+	records := parseWorktreeNameStatus(out)
+	var targets []worktreeDiffFileTarget
+	for _, record := range records {
+		pathspecs := []string{record.Path}
+		if record.SourcePath != "" {
+			pathspecs = []string{record.SourcePath, record.Path}
+		}
+		targets = append(targets, worktreeDiffFileTarget{Path: record.Path, Pathspecs: pathspecs})
 	}
 	return targets
 }
@@ -2040,16 +2398,10 @@ func GetWorktreeFileStatsWithUncommitted(repoDir string, branchName string, targ
 }
 
 func parseWorktreeFileStats(out []byte) []WorktreeFileStat {
+	records := parseWorktreeNameStatus(out)
 	var stats []WorktreeFileStat
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if line == "" {
-			continue
-		}
-		parts := strings.SplitN(line, "\t", 2)
-		if len(parts) != 2 {
-			continue
-		}
-		stats = append(stats, WorktreeFileStat{Path: parts[1], Status: gitStatusToWorktreeFileStatus(parts[0])})
+	for _, record := range records {
+		stats = append(stats, WorktreeFileStat{Path: record.Path, Status: gitStatusToWorktreeFileStatus(record.Status)})
 	}
 	return stats
 }
@@ -2272,12 +2624,12 @@ func (ws *WorktreeService) HandlePostExecution(ctx context.Context, task *models
 		commitCtx.DiffSummary = ws.llmSvc.SummarizeWorktreeCommitDiffForAgentID(ctx, task.WorktreePath, *task.AgentID, commitCtx)
 	}
 	msg := BuildWorktreeCommitMessage(task.WorktreePath, commitCtx)
-	var commitErr error
-	if ws.llmSvc != nil {
-		commitErr = ws.llmSvc.CommitTaskWorktreeChanges(ctx, task, execModel, task.WorktreePath, msg)
-	} else {
-		commitErr = CommitWorktreeChanges(task.WorktreePath, msg)
-	}
+	commitErr := ws.WithRepositoryMutation(repoDir, func() error {
+		if ws.llmSvc != nil {
+			return ws.llmSvc.CommitTaskWorktreeChanges(ctx, task, execModel, task.WorktreePath, msg)
+		}
+		return CommitWorktreeChanges(task.WorktreePath, msg)
+	})
 	if commitErr != nil {
 		applog.Infof("[worktree] error committing changes for task %s: %v", task.ID, commitErr)
 		if ws.taskRepo != nil {
@@ -2296,15 +2648,22 @@ func (ws *WorktreeService) HandlePostExecution(ctx context.Context, task *models
 		}
 		if !result.Success && len(result.ConflictFiles) > 0 {
 			applog.Infof("[worktree] auto-merge has conflicts for task %s, attempting AI resolution", task.ID)
-			aiResult, aiErr := ws.ResolveConflictsWithAI(ctx, task, repoDir)
+			validateConflictOwner := func() error {
+				return ws.validateAutoConflictRecovery(ctx, task, repoDir)
+			}
+			aiResult, aiErr := ws.ResolveConflictsWithAIValidated(ctx, task, repoDir, validateConflictOwner)
 			if aiErr != nil || (aiResult != nil && !aiResult.Success) {
 				applog.Infof("[worktree] AI conflict resolution failed for task %s, aborting merge", task.ID)
-				AbortMerge(repoDir)
-				_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusConflict)
+				targetBranch := task.MergeTargetBranch
+				if targetBranch == "" {
+					targetBranch = GetDefaultBranch(repoDir)
+				}
+				if abortErr := ws.AbortMergeForTaskValidated(ctx, task.ID, repoDir, task.WorktreeBranch, targetBranch, models.MergeStatusConflict, validateConflictOwner); abortErr != nil {
+					applog.Infof("[worktree] failed to abort unresolved auto-merge for task %s: %v", task.ID, abortErr)
+				}
 				return
 			}
 		}
-
 		// Cleanup after successful merge if policy says so
 		policy := ws.GetCleanupPolicy(ctx)
 		if policy == "after_merge" {
@@ -2523,58 +2882,117 @@ func (ws *WorktreeService) CleanupOrphanedWorktrees(ctx context.Context) (int, e
 				continue
 			}
 
-			deleteBranch := worktreeBranchSafeToDelete(ctx, project.RepoPath, worktree.Branch, targetBranch, knownLineageBranches)
-			if worktree.Branch != "" && !deleteBranch {
-				applog.Infof("[worktree] cleanup: orphaned worktree at %s has branch %s that is not safe to delete; removing worktree only", worktree.Path, worktree.Branch)
+			removed, err := ws.cleanupOrphanedWorktree(ctx, &project, worktree.Path)
+			if err != nil {
+				if ctxErr := ctx.Err(); ctxErr != nil {
+					return cleanedCount, ctxErr
+				}
+				applog.Infof("[worktree] cleanup: failed to revalidate/remove orphaned worktree %s: %v", worktree.Path, err)
+				continue
 			}
-
-			applog.Infof("[worktree] cleanup: found orphaned worktree at %s (branch: %s)", worktree.Path, worktree.Branch)
-
-			// Try to remove the worktree using git first
-			cmd := exec.CommandContext(ctx, "git", "worktree", "remove", "--force", worktree.Path)
-			cmd.Dir = project.RepoPath
-			if output, err := cmd.CombinedOutput(); err != nil {
-				outputText := string(output)
-				if err := ctx.Err(); err != nil {
-					return cleanedCount, err
-				}
-
-				// A locked worktree may still be actively initializing. Don't perform
-				// manual filesystem deletion in this case; retry on a future cleanup cycle.
-				if strings.Contains(outputText, "cannot remove a locked working tree") {
-					applog.Infof("[worktree] cleanup: skipping locked orphaned worktree at %s (output: %s)", worktree.Path, outputText)
-					continue
-				}
-
-				// If git worktree remove fails, try manual cleanup
-				applog.Infof("[worktree] cleanup: git worktree remove failed, attempting manual cleanup: %v (output: %s)", err, outputText)
-
-				// Remove the worktree directory manually
-				if err := os.RemoveAll(worktree.Path); err != nil {
-					applog.Infof("[worktree] cleanup: failed to remove orphaned worktree directory %s: %v", worktree.Path, err)
-					continue
-				}
-
-				// Prune stale worktree entries
-				pruneCmd := exec.CommandContext(ctx, "git", "worktree", "prune")
-				pruneCmd.Dir = project.RepoPath
-				_ = pruneCmd.Run() // Ignore errors
+			if removed {
+				cleanedCount++
 			}
-
-			// Delete the branch only when it is conclusively merged and unreferenced.
-			if deleteBranch {
-				cmd = exec.CommandContext(ctx, "git", "branch", "-D", worktree.Branch)
-				cmd.Dir = project.RepoPath
-				if out, err := cmd.CombinedOutput(); err != nil {
-					applog.Infof("[worktree] cleanup: failed to delete orphaned branch %s: %s", worktree.Branch, string(out))
-				}
-			}
-
-			cleanedCount++
 		}
 	}
 
 	return cleanedCount, nil
+}
+
+func (ws *WorktreeService) cleanupOrphanedWorktree(ctx context.Context, project *models.Project, candidatePath string) (bool, error) {
+	if project == nil || strings.TrimSpace(project.RepoPath) == "" {
+		return false, nil
+	}
+	removed := false
+	err := ws.WithRepositoryMutation(project.RepoPath, func() error {
+		worktrees, err := ListGitWorktreesContext(ctx, project.RepoPath)
+		if err != nil {
+			return err
+		}
+		var candidate *WorktreeInfo
+		for i := range worktrees {
+			if filepath.Clean(worktrees[i].Path) == filepath.Clean(candidatePath) {
+				candidate = &worktrees[i]
+				break
+			}
+		}
+		if candidate == nil || candidate.IsMain {
+			return nil
+		}
+
+		allTasks, err := ws.taskRepo.ListByProject(ctx, project.ID, "")
+		if err != nil {
+			return err
+		}
+		knownPaths := make(map[string]bool)
+		knownTaskIDs := make(map[string]bool)
+		knownLineageBranches := make(map[string]string)
+		for _, task := range allTasks {
+			knownTaskIDs[task.ID] = true
+			if task.WorktreePath != "" {
+				knownPaths[filepath.Clean(task.WorktreePath)] = true
+			}
+			if task.WorktreeBranch != "" {
+				knownLineageBranches[task.WorktreeBranch] = task.ID
+			}
+			if task.BaseBranch != "" {
+				knownLineageBranches[task.BaseBranch] = task.ID
+			}
+		}
+		if knownPaths[filepath.Clean(candidate.Path)] {
+			return nil
+		}
+		if taskID, ok := taskIDFromWorktreePath(candidate.Path); ok && knownTaskIDs[taskID] {
+			return nil
+		}
+		if _, ok := knownLineageBranches[candidate.Branch]; ok {
+			return nil
+		}
+		if dirty, ok := worktreeDirtyState(ctx, candidate.Path); !ok || dirty {
+			return nil
+		}
+		targetBranch := ws.getGlobalMergeTarget(ctx)
+		if targetBranch == "" {
+			targetBranch = GetDefaultBranchContext(ctx, project.RepoPath)
+		}
+		if !worktreeHeadMergedIntoTarget(ctx, candidate.Path, targetBranch) {
+			return nil
+		}
+		deleteBranch := worktreeBranchSafeToDelete(ctx, project.RepoPath, candidate.Branch, targetBranch, knownLineageBranches)
+		if candidate.Branch != "" && !deleteBranch {
+			applog.Infof("[worktree] cleanup: orphaned worktree at %s has branch %s that is not safe to delete; removing worktree only", candidate.Path, candidate.Branch)
+		}
+		applog.Infof("[worktree] cleanup: found orphaned worktree at %s (branch: %s)", candidate.Path, candidate.Branch)
+
+		cmd := exec.CommandContext(ctx, "git", "worktree", "remove", "--force", candidate.Path)
+		cmd.Dir = project.RepoPath
+		if output, removeErr := cmd.CombinedOutput(); removeErr != nil {
+			outputText := string(output)
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return ctxErr
+			}
+			if strings.Contains(outputText, "cannot remove a locked working tree") {
+				return nil
+			}
+			applog.Infof("[worktree] cleanup: git worktree remove failed, attempting manual cleanup: %v (output: %s)", removeErr, outputText)
+			if err := os.RemoveAll(candidate.Path); err != nil {
+				return err
+			}
+			pruneCmd := exec.CommandContext(ctx, "git", "worktree", "prune")
+			pruneCmd.Dir = project.RepoPath
+			_ = pruneCmd.Run()
+		}
+		if deleteBranch {
+			deleteCmd := exec.CommandContext(ctx, "git", "branch", "-D", candidate.Branch)
+			deleteCmd.Dir = project.RepoPath
+			if out, err := deleteCmd.CombinedOutput(); err != nil {
+				applog.Infof("[worktree] cleanup: failed to delete orphaned branch %s: %s", candidate.Branch, string(out))
+			}
+		}
+		removed = true
+		return nil
+	})
+	return removed, err
 }
 
 func taskIDFromWorktreePath(worktreePath string) (string, bool) {
@@ -2641,6 +3059,31 @@ type WorktreeInfo struct {
 	Path   string
 	Branch string
 	IsMain bool
+	Locked bool
+}
+
+func IsGitWorktreeLocked(repoDir, worktreePath string) bool {
+	if strings.TrimSpace(repoDir) == "" || strings.TrimSpace(worktreePath) == "" {
+		return false
+	}
+	worktrees, err := ListGitWorktrees(repoDir)
+	if err != nil {
+		return false
+	}
+	resolvedWanted, err := filepath.EvalSymlinks(worktreePath)
+	if err != nil {
+		resolvedWanted = filepath.Clean(worktreePath)
+	}
+	for _, worktree := range worktrees {
+		resolvedPath, err := filepath.EvalSymlinks(worktree.Path)
+		if err != nil {
+			resolvedPath = filepath.Clean(worktree.Path)
+		}
+		if resolvedPath == resolvedWanted {
+			return worktree.Locked
+		}
+	}
+	return false
 }
 
 // ListGitWorktrees lists all worktrees for a git repository.
@@ -2696,6 +3139,8 @@ func ListGitWorktreesContext(ctx context.Context, repoDir string) ([]WorktreeInf
 		} else if strings.HasPrefix(line, "HEAD ") && current.Branch == "" {
 			// Detached HEAD, not on a branch
 			current.Branch = ""
+		} else if line == "locked" || strings.HasPrefix(line, "locked ") {
+			current.Locked = true
 		}
 	}
 

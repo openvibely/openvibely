@@ -553,18 +553,69 @@ func TestAutomationTemplateBuilderAddsAndSavesCustomNodes(t *testing.T) {
 	// The browser synchronizes all rendered template settings into candidate_json.
 	// These stale extra-node values model a form submission from before the controls
 	// were removed; the handler must not merge template-only settings into custom nodes.
-	saved := post(url.Values{
-		"save_changes":                         {"true"},
+	staleTemplateFields := url.Values{
 		"node_vision_suggestions_skills":       {""},
 		"node_vision_suggestions_source_files": {""},
 		"node_extra_review_skills":             {"example:review"},
 		"node_extra_review_source_files":       {"README.md"},
 		"node_extra_follow_up_skills":          {"example:review"},
 		"node_extra_follow_up_source_files":    {"README.md"},
-	})
+	}
+	preview := post(staleTemplateFields)
+	require.Equal(t, http.StatusOK, preview.Code, preview.Body.String())
+	for _, key := range []string{"extra_review", "extra_follow_up"} {
+		node := automationDraftNodeByKeyHandler(t, candidate, key)
+		_, hasSkills := node.Config["skills"]
+		require.False(t, hasSkills, "preview must remove stale skills from custom node %s", key)
+		_, hasSourceFiles := node.Config["source_files"]
+		require.False(t, hasSourceFiles, "preview must remove stale source_files from custom node %s", key)
+	}
+
+	// Save the same browser-local candidate only after the preview mutation.
+	saved := post(url.Values{"save_changes": {"true"}})
 	require.Equal(t, http.StatusNoContent, saved.Code, saved.Body.String())
 	require.NotEmpty(t, saved.Header().Get("HX-Redirect"))
 	require.Equal(t, 1, tableCountHandler(t, tc, "automations"))
+
+	// Reintroduce the stale browser fields and exercise the same mutation sequence
+	// through the existing-Automation builder before any edit Save.
+	for i := range candidate.Nodes {
+		switch candidate.Nodes[i].Key {
+		case "extra_review", "extra_follow_up":
+			candidate.Nodes[i].Config["skills"] = []string{"example:review"}
+			candidate.Nodes[i].Config["source_files"] = []string{"README.md"}
+		}
+	}
+	rawEditCandidate, err := json.Marshal(candidate)
+	require.NoError(t, err)
+	var automationID string
+	require.NoError(t, tc.db.QueryRow(`SELECT id FROM automations WHERE project_id = ?`, project.ID).Scan(&automationID))
+	editedPreview := tc.HTMX().Post("/automations/" + automationID + "/builder?project_id=" + project.ID).WithForm(url.Values{
+		"project_id":                        {project.ID},
+		"builder_source":                    {"template"},
+		"candidate_json":                    {string(rawEditCandidate)},
+		"automation_name":                   {"Edited template preview"},
+		"builder_action":                    {"create_node"},
+		"node_kind":                         {"outcome"},
+		"node_name":                         {"Edit preview result"},
+		"node_extra_review_skills":          {"example:review"},
+		"node_extra_review_source_files":    {"README.md"},
+		"node_extra_follow_up_skills":       {"example:review"},
+		"node_extra_follow_up_source_files": {"README.md"},
+	}).Execute()
+	require.Equal(t, http.StatusOK, editedPreview.Code, editedPreview.Body.String())
+	editedCandidate := automationCandidateFromResponse(t, editedPreview)
+	require.Equal(t, "Edited template preview", editedCandidate.Name)
+	require.Equal(t, "Edit preview result", automationDraftNodeByKeyHandler(t, editedCandidate, "edit_preview_result").Name)
+	for _, key := range []string{"extra_review", "extra_follow_up"} {
+		node := automationDraftNodeByKeyHandler(t, editedCandidate, key)
+		_, hasSkills := node.Config["skills"]
+		require.False(t, hasSkills, "edit preview must remove stale skills from custom node %s", key)
+		_, hasSourceFiles := node.Config["source_files"]
+		require.False(t, hasSourceFiles, "edit preview must remove stale source_files from custom node %s", key)
+	}
+	require.Equal(t, 1, tableCountHandler(t, tc, "automation_versions"), "edit preview must remain browser-local")
+
 	countNodeResources := func(nodeKey, resourceType string) int {
 		t.Helper()
 		var count int
@@ -1686,6 +1737,92 @@ func TestAutomationBuilderWebSaveIsBrowserLocalUntilAtomicSaveAndProjectScoped(t
 	require.Nil(t, ownedSchedule, "deleted Automation trigger must not remain as a paused schedule")
 }
 
+func TestAutomationBuilderRecoversDeletedRetainedNativeResources(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().WithName("Recover Native automation resources").Build()
+	automationRepo := repository.NewAutomationRepo(tc.db)
+	registry := service.NewAutomationAdapterRegistry()
+	drafts := service.NewAutomationDraftService(automationRepo, registry)
+	planner := service.NewAutomationSaveValidator(registry, drafts)
+	compiler := service.NewAutomationCompiler(automationRepo, tc.handler.taskSvc, tc.taskRepo, tc.scheduleRepo, planner)
+	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
+	tc.handler.SetAutomationBuilderServices(drafts, nil, planner, compiler, nil, service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo))
+
+	preview := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(url.Values{
+		"project_id": {project.ID}, "source": {"template"}, "template_key": {service.AutomationAdapterNativeSDLC},
+	}).Execute()
+	require.Equal(t, http.StatusOK, preview.Code, preview.Body.String())
+	candidate := automationCandidateFromResponse(t, preview)
+	yaml, err := service.EncodeAutomationDraftYAML(candidate)
+	require.NoError(t, err)
+	created := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(url.Values{
+		"project_id": {project.ID}, "builder_source": {"template"}, "automation_yaml": {yaml}, "save_changes": {"true"},
+	}).Execute()
+	require.Equal(t, http.StatusNoContent, created.Code, created.Body.String())
+
+	var automationID string
+	require.NoError(t, tc.db.QueryRowContext(context.Background(), `SELECT id FROM automations WHERE project_id = ?`, project.ID).Scan(&automationID))
+	edit := tc.HTMX().Post("/automations/" + automationID + "/builder?project_id=" + project.ID).WithForm(url.Values{
+		"project_id": {project.ID},
+	}).Execute()
+	require.Equal(t, http.StatusOK, edit.Code, edit.Body.String())
+	require.Contains(t, edit.Body.String(), `data-automation-node-detail="optimization_finder"`)
+	require.Contains(t, edit.Body.String(), "optimization_finder")
+	unchanged := automationCandidateFromResponse(t, edit)
+	unchangedYAML, err := service.EncodeAutomationDraftYAML(unchanged)
+	require.NoError(t, err)
+
+	resourceID := func(nodeKey, resourceType string) string {
+		t.Helper()
+		var id string
+		require.NoError(t, tc.db.QueryRowContext(context.Background(), `SELECT resource.resource_id
+			FROM automation_definition_resources resource JOIN automation_nodes node ON node.id = resource.node_id
+			WHERE resource.project_id = ? AND resource.automation_id = ? AND resource.resource_type = ? AND node.node_key = ?`,
+			project.ID, automationID, resourceType, nodeKey).Scan(&id))
+		return id
+	}
+	oldTaskID := resourceID("optimization_finder", "task")
+	oldScheduleID := resourceID("optimization_finder", "schedule")
+	require.NoError(t, tc.scheduleRepo.Delete(context.Background(), oldScheduleID))
+	require.NoError(t, tc.taskRepo.Delete(context.Background(), oldTaskID))
+	staleEdit := tc.HTMX().Post("/automations/" + automationID + "/builder?project_id=" + project.ID).WithForm(url.Values{
+		"project_id": {project.ID},
+	}).Execute()
+	require.Equal(t, http.StatusOK, staleEdit.Code, staleEdit.Body.String())
+	require.Contains(t, staleEdit.Body.String(), `data-automation-node-detail="optimization_finder"`)
+	require.Contains(t, staleEdit.Body.String(), "optimization_finder")
+	staleLive := tc.HTTP().Get("/automations/" + automationID + "?project_id=" + project.ID).Execute()
+	require.Equal(t, http.StatusOK, staleLive.Code, staleLive.Body.String())
+	require.Contains(t, staleLive.Body.String(), `data-automation-live-node-detail="optimization_finder"`)
+	require.Contains(t, staleLive.Body.String(), "optimization_finder")
+
+	saved := tc.HTMX().Post("/automations/" + automationID + "/builder?project_id=" + project.ID).WithForm(url.Values{
+		"project_id": {project.ID}, "builder_source": {"template"}, "automation_yaml": {unchangedYAML}, "save_changes": {"true"},
+	}).Execute()
+	require.Equal(t, http.StatusNoContent, saved.Code, saved.Body.String())
+	require.Equal(t, "/automations/"+automationID+"?project_id="+project.ID, saved.Header().Get("HX-Redirect"))
+
+	definition, err := automationRepo.GetDefinition(context.Background(), project.ID, automationID)
+	require.NoError(t, err)
+	require.Len(t, definition.Nodes, len(unchanged.Nodes))
+	newTaskID := resourceID("optimization_finder", "task")
+	newScheduleID := resourceID("optimization_finder", "schedule")
+	require.NotEqual(t, oldTaskID, newTaskID)
+	require.NotEqual(t, oldScheduleID, newScheduleID)
+	var recoveredResourceCount int
+	require.NoError(t, tc.db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM automation_definition_resources resource
+		JOIN automation_nodes node ON node.id = resource.node_id AND node.version_id = resource.version_id
+		WHERE resource.project_id = ? AND resource.automation_id = ? AND resource.version_id = ? AND node.node_key = 'optimization_finder'`,
+		project.ID, automationID, definition.Version.ID).Scan(&recoveredResourceCount))
+	require.Equal(t, 2, recoveredResourceCount)
+
+	live := tc.HTTP().Get("/automations/" + automationID + "?project_id=" + project.ID).Execute()
+	require.Equal(t, http.StatusOK, live.Code, live.Body.String())
+	require.Contains(t, live.Body.String(), `data-automation-live-node-detail="optimization_finder"`)
+	require.Contains(t, live.Body.String(), "optimization_finder")
+	require.NotContains(t, live.Body.String(), "Save did not apply: schedule for node")
+}
+
 func tableCountHandler(t *testing.T, tc *TestContext, table string) int {
 	t.Helper()
 	var count int
@@ -1990,6 +2127,199 @@ func TestAutomationChatLifecycleActionsRunPauseAndResumeSavedAutomation(t *testi
 	get := executeOK("get_automation", json.RawMessage(fmt.Sprintf(`{"automation_id":%q}`, automationID)))
 	automation, _ := get["automation"].(map[string]any)
 	require.Equal(t, string(models.AutomationActive), automation["status"])
+}
+
+func TestAutomationChatDeleteAutomationByIDAndExactNamePreservesDomainTasks(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().WithName("Automation delete Chat").Build()
+	drafts, automationRepo := configureAutomationChatRuntimeTestServicesWithRepo(t, tc)
+
+	domainTask := &models.Task{ProjectID: project.ID, Title: "Authoritative domain task", Prompt: "Keep this task", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
+	require.NoError(t, tc.taskRepo.Create(ctx, domainTask))
+	domainRunAt := time.Now().UTC().Add(time.Hour)
+	domainSchedule := &models.Schedule{TaskID: domainTask.ID, RunAt: domainRunAt, NextRun: &domainRunAt, RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: true}
+	require.NoError(t, tc.scheduleRepo.Create(ctx, domainSchedule))
+
+	params := streamingResponseParams{ProjectID: project.ID, PrincipalID: "alice"}
+	runtime := tc.handler.buildChatActionToolRuntimeFromDefs(params, newChatActionSummaryCollector(), chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true), models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
+	save := func(name string) string {
+		t.Helper()
+		candidate := automationChatCustomApprovalCandidate(t, drafts)
+		candidate.Name = name
+		yamlDocument, err := service.EncodeAutomationDraftYAML(candidate)
+		require.NoError(t, err)
+		payload, err := json.Marshal(map[string]string{"source": "yaml", "automation_yaml": yamlDocument})
+		require.NoError(t, err)
+		output, handled, isError, execErr := runtime.Executor(ctx, "save_automation", payload)
+		require.NoError(t, execErr)
+		require.True(t, handled)
+		require.False(t, isError, output)
+		var result map[string]any
+		require.NoError(t, json.Unmarshal([]byte(output), &result))
+		automationID, _ := result["automation_id"].(string)
+		require.NotEmpty(t, automationID)
+		return automationID
+	}
+	delete := func(input string) map[string]any {
+		t.Helper()
+		output, handled, isError, execErr := runtime.Executor(ctx, "delete_automation", json.RawMessage(input))
+		require.NoError(t, execErr)
+		require.True(t, handled)
+		require.False(t, isError, output)
+		var result map[string]any
+		require.NoError(t, json.Unmarshal([]byte(output), &result))
+		return result
+	}
+
+	firstID := save("Nightly review loop")
+	secondID := save("Weekly review loop")
+	taskCountBeforeDelete := countRowsForProject(t, tc, "tasks", project.ID)
+	scheduleCountBeforeDelete := countRowsForProject(t, tc, "schedules", project.ID)
+	var firstScheduleID, secondScheduleID string
+	require.NoError(t, tc.db.QueryRow(`SELECT schedule_id FROM automation_trigger_owners WHERE automation_id = ?`, firstID).Scan(&firstScheduleID))
+	require.NoError(t, tc.db.QueryRow(`SELECT schedule_id FROM automation_trigger_owners WHERE automation_id = ?`, secondID).Scan(&secondScheduleID))
+
+	byName := delete(`{"name":"nightly review loop"}`)
+	require.Equal(t, "delete_automation", byName["action"])
+	require.Equal(t, firstID, byName["automation_id"])
+	require.Equal(t, "Nightly review loop", byName["name"])
+	require.Equal(t, true, byName["deleted"])
+	require.Equal(t, "deleted", byName["lifecycle_state"])
+	require.Contains(t, byName["message"], "Nightly review loop")
+	firstDefinition, err := automationRepo.GetDefinition(ctx, project.ID, firstID)
+	require.NoError(t, err)
+	require.Nil(t, firstDefinition)
+	firstSchedule, err := tc.scheduleRepo.GetByID(ctx, firstScheduleID)
+	require.NoError(t, err)
+	require.Nil(t, firstSchedule)
+
+	byID := delete(fmt.Sprintf(`{"automation_id":%q}`, secondID))
+	require.Equal(t, secondID, byID["automation_id"])
+	require.Equal(t, "Weekly review loop", byID["name"])
+	require.Equal(t, true, byID["deleted"])
+	secondDefinition, err := automationRepo.GetDefinition(ctx, project.ID, secondID)
+	require.NoError(t, err)
+	require.Nil(t, secondDefinition)
+	secondSchedule, err := tc.scheduleRepo.GetByID(ctx, secondScheduleID)
+	require.NoError(t, err)
+	require.Nil(t, secondSchedule)
+
+	require.Equal(t, taskCountBeforeDelete, countRowsForProject(t, tc, "tasks", project.ID), "deleting Automations must preserve existing domain and Automation-created tasks")
+	require.Equal(t, scheduleCountBeforeDelete-2, countRowsForProject(t, tc, "schedules", project.ID), "deleting Automations must remove only their owned trigger schedules")
+	retainedDomainTask, err := tc.taskRepo.GetByID(ctx, domainTask.ID)
+	require.NoError(t, err)
+	require.NotNil(t, retainedDomainTask)
+	retainedDomainSchedule, err := tc.scheduleRepo.GetByID(ctx, domainSchedule.ID)
+	require.NoError(t, err)
+	require.NotNil(t, retainedDomainSchedule)
+}
+
+func TestAutomationChatDeleteAutomationRejectsInvalidTargetsAndPlanMode(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().WithName("Automation delete guards").Build()
+	foreign := tc.CreateProject().WithName("Foreign Automation delete guards").Build()
+	drafts, automationRepo := configureAutomationChatRuntimeTestServicesWithRepo(t, tc)
+	params := streamingResponseParams{ProjectID: project.ID, PrincipalID: "alice"}
+	runtime := tc.handler.buildChatActionToolRuntimeFromDefs(params, newChatActionSummaryCollector(), chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true), models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
+	foreignRuntime := tc.handler.buildChatActionToolRuntimeFromDefs(streamingResponseParams{ProjectID: foreign.ID, PrincipalID: "alice"}, newChatActionSummaryCollector(), chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true), models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
+	save := func(rt *llmcontracts.RuntimeTools, name string) string {
+		t.Helper()
+		candidate := automationChatCustomApprovalCandidate(t, drafts)
+		candidate.Name = name
+		yamlDocument, err := service.EncodeAutomationDraftYAML(candidate)
+		require.NoError(t, err)
+		payload, err := json.Marshal(map[string]string{"source": "yaml", "automation_yaml": yamlDocument})
+		require.NoError(t, err)
+		output, handled, isError, execErr := rt.Executor(ctx, "save_automation", payload)
+		require.NoError(t, execErr)
+		require.True(t, handled)
+		require.False(t, isError, output)
+		var result map[string]any
+		require.NoError(t, json.Unmarshal([]byte(output), &result))
+		automationID, _ := result["automation_id"].(string)
+		require.NotEmpty(t, automationID)
+		return automationID
+	}
+	firstID := save(runtime, "Duplicate review loop")
+	secondID := save(runtime, "Duplicate review loop")
+	foreignID := save(foreignRuntime, "Foreign review loop")
+
+	for _, testCase := range []struct {
+		input string
+		want  string
+	}{
+		{input: `{}`, want: "automation_id or name is required"},
+		{input: `{"automation_id":"missing-automation"}`, want: "not found in current project"},
+		{input: `{"name":"Duplicate review loop"}`, want: "ambiguous"},
+	} {
+		_, handled, isError, err := runtime.Executor(ctx, "delete_automation", json.RawMessage(testCase.input))
+		require.True(t, handled)
+		require.True(t, isError)
+		require.ErrorContains(t, err, testCase.want)
+	}
+	_, handled, isError, err := runtime.Executor(ctx, "delete_automation", json.RawMessage(fmt.Sprintf(`{"automation_id":%q}`, foreignID)))
+	require.True(t, handled)
+	require.True(t, isError)
+	require.ErrorContains(t, err, "not found in current project")
+
+	for _, automationID := range []string{firstID, secondID, foreignID} {
+		projectID := project.ID
+		if automationID == foreignID {
+			projectID = foreign.ID
+		}
+		definition, getErr := automationRepo.GetDefinition(ctx, projectID, automationID)
+		require.NoError(t, getErr)
+		require.NotNil(t, definition, "invalid deletion target must remain intact: %s", automationID)
+	}
+
+	planRuntime := tc.handler.buildChatActionToolRuntimeFromDefs(params, newChatActionSummaryCollector(), chatcontrol.ToolDefsForContext(models.ChatModePlan, chatcontrol.SurfaceWeb, true), models.ChatModePlan, chatcontrol.SurfaceWeb)
+	require.False(t, planRuntime.HasDefinition("delete_automation"))
+	output, handled, isError, err := planRuntime.Executor(ctx, "delete_automation", json.RawMessage(fmt.Sprintf(`{"automation_id":%q}`, firstID)))
+	require.NoError(t, err)
+	require.True(t, handled)
+	require.True(t, isError)
+	require.Contains(t, output, "requires orchestrate mode")
+	definition, err := automationRepo.GetDefinition(ctx, project.ID, firstID)
+	require.NoError(t, err)
+	require.NotNil(t, definition)
+}
+
+func TestAutomationChatDeleteAutomationRejectsInFlightDispatch(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().WithName("Automation delete in-flight guard").Build()
+	drafts, automationRepo := configureAutomationChatRuntimeTestServicesWithRepo(t, tc)
+	candidate := automationChatCustomApprovalCandidate(t, drafts)
+	candidate.Name = "In-flight review loop"
+	yamlDocument, err := service.EncodeAutomationDraftYAML(candidate)
+	require.NoError(t, err)
+	payload, err := json.Marshal(map[string]string{"source": "yaml", "automation_yaml": yamlDocument})
+	require.NoError(t, err)
+	params := streamingResponseParams{ProjectID: project.ID, PrincipalID: "alice"}
+	runtime := tc.handler.buildChatActionToolRuntimeFromDefs(params, newChatActionSummaryCollector(), chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true), models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
+	output, handled, isError, err := runtime.Executor(ctx, "save_automation", payload)
+	require.NoError(t, err)
+	require.True(t, handled)
+	require.False(t, isError, output)
+	var saved map[string]any
+	require.NoError(t, json.Unmarshal([]byte(output), &saved))
+	automationID, _ := saved["automation_id"].(string)
+	require.NotEmpty(t, automationID)
+
+	runOutput, handled, isError, err := runtime.Executor(ctx, "run_automation_now", json.RawMessage(fmt.Sprintf(`{"automation_id":%q}`, automationID)))
+	require.NoError(t, err)
+	require.True(t, handled)
+	require.False(t, isError, runOutput)
+
+	_, handled, isError, err = runtime.Executor(ctx, "delete_automation", json.RawMessage(fmt.Sprintf(`{"automation_id":%q}`, automationID)))
+	require.True(t, handled)
+	require.True(t, isError)
+	require.ErrorContains(t, err, "in-flight dispatch work")
+	definition, err := automationRepo.GetDefinition(ctx, project.ID, automationID)
+	require.NoError(t, err)
+	require.NotNil(t, definition)
 }
 
 func TestAutomationChatUpdateTemplateAppliesNoopsAndRejectsUnsupportedTargets(t *testing.T) {
@@ -2967,4 +3297,58 @@ func TestAutomationSendToTaskPersistsCausalBindingsWithQueuedInput(t *testing.T)
 	require.NoError(t, err)
 	require.Len(t, loaded.Bindings, 1)
 	require.Equal(t, item.ID, loaded.Bindings[0].WorkItemID)
+}
+
+type handlerAutomationExternalProvider struct {
+	calls int
+}
+
+func (f *handlerAutomationExternalProvider) ResolveRepo(context.Context, string, string) (*service.GitHubRepoRef, error) {
+	return &service.GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime"}, nil
+}
+
+func (f *handlerAutomationExternalProvider) GetPullRequest(context.Context, *service.GitHubRepoRef, int) (*service.GitHubPullRequest, error) {
+	f.calls++
+	return &service.GitHubPullRequest{}, nil
+}
+
+func TestRefreshAutomationExternalStateRouteRendersLiveGraphAndPreservesProjectScope(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().WithName("External refresh handler project").Build()
+	automationRepo := repository.NewAutomationRepo(tc.db)
+	registration := service.NewAutomationRegistrationService(automationRepo, service.NewAutomationAdapterRegistry())
+	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), registration)
+
+	task := models.Task{ProjectID: project.ID, Title: "Refresh route task", Category: models.CategoryScheduled, Priority: 1, Status: models.StatusPending, Prompt: "refresh"}
+	require.NoError(t, tc.taskRepo.Create(ctx, &task))
+	schedule := models.Schedule{TaskID: task.ID, RunAt: time.Now().UTC().Add(time.Hour), RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: true}
+	require.NoError(t, tc.scheduleRepo.Create(ctx, &schedule))
+	definition, _, err := registration.Register(ctx, service.AutomationRegistrationRequest{
+		ProjectID: project.ID, AdapterKey: service.AutomationAdapterGitHubSDLC, StableKey: "github-sdlc/external-refresh-handler",
+		Resources: []models.AutomationResourceBinding{
+			{NodeKey: "dev_inbox", ResourceType: "schedule", ResourceID: schedule.ID},
+			{NodeKey: "dev_inbox", ResourceType: "task", ResourceID: task.ID},
+		},
+	})
+	require.NoError(t, err)
+	provider := &handlerAutomationExternalProvider{}
+	tc.handler.SetAutomationExternalStateService(service.NewAutomationExternalStateService(automationRepo, repository.NewTaskPullRequestRepo(tc.db), tc.projectRepo, provider))
+
+	response := tc.HTMX().Post(fmt.Sprintf("/automations/%s/refresh-external?project_id=%s", definition.Automation.ID, project.ID)).Execute()
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	require.Equal(t, "automationExternalRefreshed", response.Header().Get("HX-Trigger"))
+	require.Contains(t, response.Body.String(), `id="automation-live"`)
+	for _, node := range definition.Nodes {
+		require.Contains(t, response.Body.String(), node.Name, "the refresh route must render every Live graph node")
+	}
+	require.NotEmpty(t, definition.Edges)
+	require.Zero(t, provider.calls, "a zero-pull refresh must not call GitHub")
+
+	missing := tc.HTMX().Post("/automations/missing/refresh-external?project_id=" + project.ID).Execute()
+	require.Equal(t, http.StatusNotFound, missing.Code)
+	foreign := tc.CreateProject().WithName("External refresh other project").Build()
+	mismatched := tc.HTMX().Post(fmt.Sprintf("/automations/%s/refresh-external?project_id=%s", definition.Automation.ID, foreign.ID)).Execute()
+	require.Equal(t, http.StatusNotFound, mismatched.Code)
+	require.Zero(t, provider.calls, "missing and project-mismatched refreshes must not call GitHub")
 }

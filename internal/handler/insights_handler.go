@@ -1,10 +1,13 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
 
@@ -73,18 +76,31 @@ func (h *Handler) ExtractInsightsKnowledge(c echo.Context) error {
 // UpdateInsightStatus updates the status of an insight
 func (h *Handler) UpdateInsightStatus(c echo.Context) error {
 	id := c.Param("id")
+	projectID := strings.TrimSpace(c.QueryParam("project_id"))
 	status := models.InsightStatus(c.FormValue("status"))
 
 	if h.insightsSvc == nil {
 		return c.String(http.StatusBadRequest, "insights service not available")
 	}
+	if projectID == "" {
+		return c.String(http.StatusBadRequest, "missing project_id")
+	}
 
-	if err := h.insightsSvc.UpdateInsightStatus(c.Request().Context(), id, status); err != nil {
+	if err := h.insightsSvc.UpdateInsightStatus(c.Request().Context(), projectID, id, status); err != nil {
+		if errors.Is(err, service.ErrInsightNotFound) {
+			return c.String(http.StatusNotFound, "insight not found")
+		}
 		return c.String(http.StatusInternalServerError, err.Error())
 	}
 
-	insight, err := h.insightsSvc.GetInsight(c.Request().Context(), id)
-	if err != nil || insight == nil {
+	insight, err := h.insightsSvc.GetInsight(c.Request().Context(), projectID, id)
+	if err != nil {
+		if errors.Is(err, service.ErrInsightNotFound) {
+			return c.String(http.StatusNotFound, "insight not found")
+		}
+		return c.String(http.StatusInternalServerError, err.Error())
+	}
+	if insight == nil {
 		return c.String(http.StatusNotFound, "insight not found")
 	}
 
@@ -94,12 +110,19 @@ func (h *Handler) UpdateInsightStatus(c echo.Context) error {
 // DeleteInsight removes an insight
 func (h *Handler) DeleteInsight(c echo.Context) error {
 	id := c.Param("id")
+	projectID := strings.TrimSpace(c.QueryParam("project_id"))
 
 	if h.insightsSvc == nil {
 		return c.String(http.StatusBadRequest, "insights service not available")
 	}
+	if projectID == "" {
+		return c.String(http.StatusBadRequest, "missing project_id")
+	}
 
-	if err := h.insightsSvc.DeleteInsight(c.Request().Context(), id); err != nil {
+	if err := h.insightsSvc.DeleteInsight(c.Request().Context(), projectID, id); err != nil {
+		if errors.Is(err, service.ErrInsightNotFound) {
+			return c.String(http.StatusNotFound, "insight not found")
+		}
 		return c.String(http.StatusInternalServerError, err.Error())
 	}
 
@@ -173,10 +196,17 @@ func (h *Handler) GradeIdeas(c echo.Context) error {
 // DeleteKnowledgeEntry removes a knowledge entry
 func (h *Handler) DeleteKnowledgeEntry(c echo.Context) error {
 	id := c.Param("id")
+	projectID := strings.TrimSpace(c.QueryParam("project_id"))
 	if h.insightsSvc == nil {
 		return c.String(http.StatusBadRequest, "insights service not available")
 	}
-	if err := h.insightsSvc.DeleteKnowledge(c.Request().Context(), id); err != nil {
+	if projectID == "" {
+		return c.String(http.StatusBadRequest, "missing project_id")
+	}
+	if err := h.insightsSvc.DeleteKnowledge(c.Request().Context(), projectID, id); err != nil {
+		if errors.Is(err, service.ErrKnowledgeNotFound) {
+			return c.String(http.StatusNotFound, "knowledge entry not found")
+		}
 		return c.String(http.StatusInternalServerError, err.Error())
 	}
 	return c.String(http.StatusOK, "")

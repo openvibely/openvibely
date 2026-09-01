@@ -199,11 +199,6 @@ always_use:
 ## openvibely_optimization_finder_workflow
 
 [OpenVibely Optimization Finder Workflow](openvibely_optimization_finder_workflow/SKILL.md) — Perform focused, evidence-backed, read-only OpenVibely performance audits and publish actionable GitHub performance issues.
-
-## openvibely_github_suggestion_discovery
-
-[OpenVibely GitHub Suggestion Discovery](openvibely_github_suggestion_discovery/SKILL.md) — Review OpenVibely vision and source for small feature gaps, then publish reviewable GitHub suggestion issues.
-
 ## openvibely_runtime_tool_input_decoding
 
 [OpenVibely Runtime Tool Input Decoding](openvibely_runtime_tool_input_decoding/SKILL.md) — Keep runtime-tool JSON input normalization and error contracts consistent across OpenVibely surfaces.
@@ -219,11 +214,6 @@ always_use:
 ## openvibely_redundancy_finder_workflow
 
 [OpenVibely Redundancy Finder Workflow](openvibely_redundancy_finder_workflow/SKILL.md) — Perform focused, read-only OpenVibely duplication audits and publish actionable GitHub redundancy issues.
-
-## openvibely_bug_finder_workflow
-
-[OpenVibely Bug Finder Workflow](openvibely_bug_finder_workflow/SKILL.md) — Perform focused, evidence-backed, read-only OpenVibely correctness audits and publish actionable GitHub bug issues.
-
 ## openvibely_theme_system_workflow
 
 [OpenVibely Theme System Workflow](openvibely_theme_system_workflow/SKILL.md) — Implement and audit OpenVibely built-in theme catalogs, runtime theme selection, and theme-aware code styling.
@@ -286,11 +276,6 @@ always_use:
 ## openvibely_destructive_confirm_dialog_workflow
 
 [OpenVibely Destructive Confirm Dialog Workflow](openvibely_destructive_confirm_dialog_workflow/SKILL.md) — Consolidate and regress OpenVibely destructive delete-confirmation dialogs without over-generalizing entity-specific delete behavior.
-
-## openvibely_github_implementation_inbox_workflow
-
-[OpenVibely GitHub Implementation Inbox Workflow](openvibely_github_implementation_inbox_workflow/SKILL.md) — Poll GitHub implementation inbox work and PR review feedback using OpenVibely runtime tools without duplicate tasks.
-
 ## openvibely_llm_json_reply_extraction_workflow
 
 [OpenVibely LLM JSON Reply Extraction Workflow](openvibely_llm_json_reply_extraction_workflow/SKILL.md) — Implement and audit structured JSON extraction from model replies without duplicating parser mechanics.
@@ -302,3 +287,19 @@ always_use:
 ## openvibely_typed_broadcaster_workflow
 
 [OpenVibely Typed Broadcaster Workflow](openvibely_typed_broadcaster_workflow/SKILL.md) — Consolidate duplicated typed channel broadcasters while preserving SSE lifecycle, backpressure, and public APIs.
+
+## openvibely_sqlite_pool_concurrency_workflow
+
+[OpenVibely SQLite Pool And Concurrency Workflow](openvibely_sqlite_pool_concurrency_workflow/SKILL.md) — Safely change OpenVibely's SQLite connection pool, per-connection settings, transaction boundaries, concurrency tests, and pool-size benchmarks.
+
+## openvibely_task_reference_resolution_workflow
+
+[OpenVibely Task Reference Resolution Workflow](openvibely_task_reference_resolution_workflow/SKILL.md) — Consolidate and test task lookup by ID or title across web, channel, and schedule runtimes without leaking surface-specific targeting behavior.
+
+## openvibely_github_suggestion_discovery
+
+[OpenVibely GitHub Suggestion Discovery](openvibely_github_suggestion_discovery/SKILL.md) — Perform read-only, vision-guided product-gap audits and publish one deduplicated GitHub suggestion issue.
+
+## openvibely_bug_finder_workflow
+
+[OpenVibely Bug Finder Workflow](openvibely_bug_finder_workflow/SKILL.md) — Perform focused, evidence-backed, read-only OpenVibely correctness audits and publish one deduplicated GitHub bug issue.

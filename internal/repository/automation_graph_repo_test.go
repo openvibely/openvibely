@@ -61,6 +61,123 @@ func TestSaveCurrentGraphWritesGraphRowsAndUsesNodeIDsForResourceBindings(t *tes
 	require.Equal(t, 1, automationGraphCountRows(t, db, `SELECT COUNT(*) FROM automation_graph_metadata WHERE version_id = ? AND automation_id = ?`, definition.Version.ID, definition.Automation.ID))
 }
 
+func TestSaveCurrentGraphReconcilesDeletedOwnedResourcesAndRejectsForeignReferences(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	project := automationGraphTestProject(t, db, "Deleted resource recovery")
+	otherProject := automationGraphTestProject(t, db, "Foreign resource recovery")
+	repo := NewAutomationRepo(db)
+	taskRepo := NewTaskRepo(db, nil)
+	scheduleRepo := NewScheduleRepo(db)
+	ctx := context.Background()
+	automationID := NewID()
+	candidate := models.AutomationDraftCandidate{
+		SchemaVersion: 1, Name: "Deleted resource recovery", Description: "recover one retained trigger", AutomationType: "custom", AdapterKey: "custom",
+		Nodes: []models.AutomationDraftNode{{Key: "trigger", Name: "Trigger", Type: models.AutomationNodeTrigger, Role: "fixed_schedule",
+			Config:   map[string]any{"prompt": "Run the retained trigger.", "category": "active", "priority": 2, "run_at": "09:00", "repeat_type": "daily", "repeat_interval": 1, "enabled": true},
+			Position: &models.AutomationDraftPoint{X: 12, Y: 24}}},
+		Edges: []models.AutomationDraftEdge{},
+	}
+	write := func(graphID, expectedGraphID, existingTaskID, existingScheduleID string) AutomationSaveWrite {
+		return AutomationSaveWrite{ProjectID: project.ID, AutomationID: automationID, GraphID: graphID, ExpectedCurrentGraphID: expectedGraphID, Candidate: candidate,
+			Tasks: []AutomationSaveTask{{NodeKey: "trigger", ExistingTaskID: existingTaskID, Title: "Trigger", Prompt: "Run the retained trigger.", Category: models.CategoryActive, Priority: 2}},
+			Schedules: []AutomationSaveSchedule{{NodeKey: "trigger", ExistingScheduleID: existingScheduleID, TaskNodeKey: "trigger", RunAt: time.Date(2026, 8, 31, 9, 0, 0, 0, time.UTC), RepeatType: models.RepeatDaily,
+				RepeatInterval: 1, Enabled: true, ClearContextOnStart: true}}}
+	}
+
+	first, _, err := repo.SaveCurrentGraph(ctx, write(NewID(), "", "", ""))
+	require.NoError(t, err)
+	oldTaskID := automationGraphResourceID(t, first, "trigger", "task")
+	oldScheduleID := automationGraphResourceID(t, first, "trigger", "schedule")
+	require.NoError(t, scheduleRepo.Delete(ctx, oldScheduleID))
+	require.NoError(t, taskRepo.Delete(ctx, oldTaskID))
+
+	_, err = db.ExecContext(ctx, `CREATE TRIGGER fail_deleted_resource_recovery_schedule
+		BEFORE INSERT ON schedules BEGIN SELECT RAISE(ABORT, 'injected recovery schedule failure'); END`)
+	require.NoError(t, err)
+	_, _, err = repo.SaveCurrentGraph(ctx, write(NewID(), first.Version.ID, oldTaskID, oldScheduleID))
+	require.ErrorContains(t, err, "injected recovery schedule failure")
+	_, err = db.ExecContext(ctx, `DROP TRIGGER fail_deleted_resource_recovery_schedule`)
+	require.NoError(t, err)
+
+	current, err := repo.GetDefinition(ctx, project.ID, automationID)
+	require.NoError(t, err)
+	require.Equal(t, first.Version.ID, current.Version.ID, "a failed recovery must retain the current graph")
+	require.Equal(t, 1, automationGraphCountRows(t, db, `SELECT COUNT(*) FROM automation_versions WHERE automation_id = ?`, automationID))
+	require.Zero(t, automationGraphCountRows(t, db, `SELECT COUNT(*) FROM tasks WHERE project_id = ? AND created_via = ?`, project.ID, AutomationCompilerTaskCreatedVia(automationID, "trigger")))
+
+	recovered, _, err := repo.SaveCurrentGraph(ctx, write(NewID(), first.Version.ID, oldTaskID, oldScheduleID))
+	require.NoError(t, err)
+	recoveredTaskID := automationGraphResourceID(t, recovered, "trigger", "task")
+	recoveredScheduleID := automationGraphResourceID(t, recovered, "trigger", "schedule")
+	require.NotEqual(t, oldTaskID, recoveredTaskID)
+	require.NotEqual(t, oldScheduleID, recoveredScheduleID)
+
+	foreignTask := &models.Task{ProjectID: otherProject.ID, Title: "Foreign task", Prompt: "must not be adopted", Category: models.CategoryActive, Priority: 2, Status: models.StatusPending}
+	require.NoError(t, taskRepo.Create(ctx, foreignTask))
+	foreignSchedule := &models.Schedule{TaskID: foreignTask.ID, RunAt: time.Date(2026, 8, 31, 10, 0, 0, 0, time.UTC), RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: true}
+	require.NoError(t, scheduleRepo.Create(ctx, foreignSchedule))
+
+	_, _, err = repo.SaveCurrentGraph(ctx, write(NewID(), recovered.Version.ID, foreignTask.ID, recoveredScheduleID))
+	require.ErrorContains(t, err, "not owned by this Automation")
+	_, _, err = repo.SaveCurrentGraph(ctx, write(NewID(), recovered.Version.ID, recoveredTaskID, foreignSchedule.ID))
+	require.ErrorContains(t, err, "not owned by this Automation")
+	current, err = repo.GetDefinition(ctx, project.ID, automationID)
+	require.NoError(t, err)
+	require.Equal(t, recovered.Version.ID, current.Version.ID, "invalid resource references must not replace the current graph")
+	require.Equal(t, recoveredTaskID, automationGraphResourceID(t, current, "trigger", "task"))
+	require.Equal(t, recoveredScheduleID, automationGraphResourceID(t, current, "trigger", "schedule"))
+
+	repeated, _, err := repo.SaveCurrentGraph(ctx, write(NewID(), recovered.Version.ID, recoveredTaskID, recoveredScheduleID))
+	require.NoError(t, err)
+	require.Equal(t, recoveredTaskID, automationGraphResourceID(t, repeated, "trigger", "task"))
+	require.Equal(t, recoveredScheduleID, automationGraphResourceID(t, repeated, "trigger", "schedule"))
+	require.Equal(t, 1, automationGraphCountRows(t, db, `SELECT COUNT(*) FROM tasks WHERE project_id = ? AND created_via = ?`, project.ID, AutomationCompilerTaskCreatedVia(automationID, "trigger")))
+}
+
+func TestSaveCurrentGraphRejectsOwnedScheduleRetargeting(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	project := automationGraphTestProject(t, db, "Owned schedule retargeting")
+	repo := NewAutomationRepo(db)
+	taskRepo := NewTaskRepo(db, nil)
+	ctx := context.Background()
+	automationID := NewID()
+	candidate := models.AutomationDraftCandidate{
+		SchemaVersion: 1, Name: "Owned schedule retargeting", Description: "reject a repointed schedule", AutomationType: "custom", AdapterKey: "custom",
+		Nodes: []models.AutomationDraftNode{{Key: "trigger", Name: "Trigger", Type: models.AutomationNodeTrigger, Role: "fixed_schedule",
+			Config:   map[string]any{"prompt": "Run the retained trigger.", "category": "active", "priority": 2, "run_at": "09:00", "repeat_type": "daily", "repeat_interval": 1, "enabled": true},
+			Position: &models.AutomationDraftPoint{X: 12, Y: 24}}},
+	}
+	first, _, err := repo.SaveCurrentGraph(ctx, AutomationSaveWrite{
+		ProjectID: project.ID, AutomationID: automationID, GraphID: NewID(), Candidate: candidate,
+		Tasks: []AutomationSaveTask{{NodeKey: "trigger", Title: "Trigger", Prompt: "Run the retained trigger.", Category: models.CategoryActive, Priority: 2}},
+		Schedules: []AutomationSaveSchedule{{NodeKey: "trigger", TaskNodeKey: "trigger", RunAt: time.Date(2026, 8, 31, 9, 0, 0, 0, time.UTC), RepeatType: models.RepeatDaily,
+			RepeatInterval: 1, Enabled: true, ClearContextOnStart: true}},
+	})
+	require.NoError(t, err)
+	ownedTaskID := automationGraphResourceID(t, first, "trigger", "task")
+	scheduleID := automationGraphResourceID(t, first, "trigger", "schedule")
+
+	otherTask := &models.Task{ProjectID: project.ID, Title: "Unrelated same-project task", Prompt: "must remain unrelated", Category: models.CategoryActive, Priority: 2, Status: models.StatusPending}
+	require.NoError(t, taskRepo.Create(ctx, otherTask))
+	_, err = db.ExecContext(ctx, `UPDATE schedules SET task_id = ? WHERE id = ?`, otherTask.ID, scheduleID)
+	require.NoError(t, err)
+
+	_, _, err = repo.SaveCurrentGraph(ctx, AutomationSaveWrite{
+		ProjectID: project.ID, AutomationID: automationID, GraphID: NewID(), ExpectedCurrentGraphID: first.Version.ID, Candidate: candidate,
+		Tasks: []AutomationSaveTask{{NodeKey: "trigger", ExistingTaskID: ownedTaskID, Title: "Trigger", Prompt: "Run the retained trigger.", Category: models.CategoryActive, Priority: 2}},
+		Schedules: []AutomationSaveSchedule{{NodeKey: "trigger", ExistingScheduleID: scheduleID, TaskNodeKey: "trigger", RunAt: time.Date(2026, 8, 31, 9, 0, 0, 0, time.UTC), RepeatType: models.RepeatDaily,
+			RepeatInterval: 1, Enabled: true, ClearContextOnStart: true}},
+	})
+	require.ErrorContains(t, err, "must target the task bound to that same node")
+
+	current, err := repo.GetDefinition(ctx, project.ID, automationID)
+	require.NoError(t, err)
+	require.Equal(t, first.Version.ID, current.Version.ID, "a repointed schedule must not replace the current graph")
+	var linkedTaskID string
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT task_id FROM schedules WHERE id = ?`, scheduleID).Scan(&linkedTaskID))
+	require.Equal(t, otherTask.ID, linkedTaskID, "a rejected save must not retarget the schedule")
+}
+
 func TestSaveCurrentGraphSkipsStaleGitHubIssueTaskBackfillResources(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	project := automationGraphTestProject(t, db, "Stale GitHub task backfill")
@@ -134,6 +251,17 @@ func TestAutomationGraphWriterRejectsUnknownEdgeNodesForSaveAndRegistration(t *t
 	})
 	require.ErrorContains(t, err, `edge "missing_target" references an unknown node`)
 	require.Equal(t, 0, automationGraphCountRows(t, db, `SELECT COUNT(*) FROM automations WHERE project_id = ? AND stable_key = 'broken/registered'`, project.ID))
+}
+
+func automationGraphResourceID(t *testing.T, definition *models.AutomationDefinition, nodeKey, resourceType string) string {
+	t.Helper()
+	for _, resource := range definition.Resources {
+		if resource.NodeKey == nodeKey && resource.ResourceType == resourceType {
+			return resource.ResourceID
+		}
+	}
+	require.FailNow(t, "Automation resource not found", nodeKey+"/"+resourceType)
+	return ""
 }
 
 func automationGraphTestProject(t *testing.T, db *sql.DB, name string) models.Project {

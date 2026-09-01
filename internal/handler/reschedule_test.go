@@ -30,11 +30,11 @@ func TestHandler_RescheduleTask_RecurringTaskPreservesNewTime(t *testing.T) {
 
 	// Create a task with a daily schedule at 3:00 PM
 	task := &models.Task{
-		Title:      "Daily Task",
-		Prompt:     "Test daily task",
-		Category:   models.CategoryScheduled,
-		Status:     models.StatusPending,
-		ProjectID:  project.ID,
+		Title:     "Daily Task",
+		Prompt:    "Test daily task",
+		Category:  models.CategoryScheduled,
+		Status:    models.StatusPending,
+		ProjectID: project.ID,
 	}
 	if err := h.taskSvc.Create(ctx, task); err != nil {
 		t.Fatalf("failed to create task: %v", err)
@@ -130,11 +130,11 @@ func TestHandler_RescheduleTask_OneTimeTask(t *testing.T) {
 
 	// Create a task with a one-time schedule
 	task := &models.Task{
-		Title:      "One-time Task",
-		Prompt:     "Test one-time task",
-		Category:   models.CategoryScheduled,
-		Status:     models.StatusPending,
-		ProjectID:  project.ID,
+		Title:     "One-time Task",
+		Prompt:    "Test one-time task",
+		Category:  models.CategoryScheduled,
+		Status:    models.StatusPending,
+		ProjectID: project.ID,
 	}
 	if err := h.taskSvc.Create(ctx, task); err != nil {
 		t.Fatalf("failed to create task: %v", err)
@@ -478,5 +478,176 @@ func TestScheduler_NoTimeDrift(t *testing.T) {
 				i, nextRun.Hour(), nextRun.Minute(), nextRun.Second())
 		}
 		currentRun = *nextRun
+	}
+}
+
+func TestHandler_RescheduleTask_MultiSelectMovesEveryScheduleTogether(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	ctx := context.Background()
+	project := &models.Project{Name: "Grouped schedule project"}
+	if err := h.projectSvc.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+
+	makeSchedule := func(title string, hour, minute int) *models.Schedule {
+		t.Helper()
+		task := &models.Task{Title: title, Prompt: "test", Category: models.CategoryScheduled, Status: models.StatusPending, ProjectID: project.ID}
+		if err := h.taskSvc.Create(ctx, task); err != nil {
+			t.Fatal(err)
+		}
+		runAt := time.Date(2031, 4, 8, hour, minute, 0, 0, time.Local).UTC()
+		schedule := &models.Schedule{TaskID: task.ID, RunAt: runAt, RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: true}
+		if err := h.scheduleRepo.Create(ctx, schedule); err != nil {
+			t.Fatal(err)
+		}
+		return schedule
+	}
+	first := makeSchedule("Grouped first", 9, 15)
+	second := makeSchedule("Grouped second", 11, 45)
+
+	form := url.Values{
+		"new_date": {"2031-04-09"}, "hour": {"12"},
+		"source_date": {"2031-04-08"}, "source_hour": {"9"},
+		"schedule_ids": {first.ID + "," + second.ID}, "project_id": {project.ID},
+	}
+	req := httptest.NewRequest(http.MethodPatch, "/schedules/"+first.ID+"/reschedule?project_id="+url.QueryEscape(project.ID), strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	updatedFirst, _ := h.scheduleRepo.GetByID(ctx, first.ID)
+	updatedSecond, _ := h.scheduleRepo.GetByID(ctx, second.ID)
+	if got := updatedFirst.RunAt.Local(); got.Day() != 9 || got.Hour() != 12 || got.Minute() != 15 {
+		t.Fatalf("anchor moved to %v, want Apr 9 12:15", got)
+	}
+	if got := updatedSecond.RunAt.Local(); got.Day() != 9 || got.Hour() != 14 || got.Minute() != 45 {
+		t.Fatalf("second schedule moved to %v, want Apr 9 14:45", got)
+	}
+}
+
+func TestHandler_RescheduleTask_MultiSelectPreservesLocalHourAcrossDST(t *testing.T) {
+	location, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatal(err)
+	}
+	previousLocal := time.Local
+	time.Local = location
+	t.Cleanup(func() { time.Local = previousLocal })
+
+	h, e, _ := setupTestHandler(t)
+	ctx := context.Background()
+	project := &models.Project{Name: "DST grouped schedules"}
+	if err := h.projectSvc.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	makeSchedule := func(title string) *models.Schedule {
+		t.Helper()
+		task := &models.Task{Title: title, Prompt: "test", Category: models.CategoryScheduled, Status: models.StatusPending, ProjectID: project.ID}
+		if err := h.taskSvc.Create(ctx, task); err != nil {
+			t.Fatal(err)
+		}
+		runAt := time.Date(2031, 3, 9, 1, 30, 0, 0, location).UTC()
+		schedule := &models.Schedule{TaskID: task.ID, RunAt: runAt, RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: true}
+		if err := h.scheduleRepo.Create(ctx, schedule); err != nil {
+			t.Fatal(err)
+		}
+		return schedule
+	}
+	first := makeSchedule("DST first")
+	second := makeSchedule("DST second")
+
+	form := url.Values{
+		"new_date": {"2031-03-09"}, "hour": {"3"},
+		"source_date": {"2031-03-09"}, "source_hour": {"1"},
+		"schedule_ids": {first.ID + "," + second.ID}, "project_id": {project.ID},
+	}
+	req := httptest.NewRequest(http.MethodPatch, "/schedules/"+first.ID+"/reschedule?project_id="+url.QueryEscape(project.ID), strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	for _, id := range []string{first.ID, second.ID} {
+		stored, err := h.scheduleRepo.GetByID(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := stored.RunAt.In(location); got.Hour() != 3 || got.Minute() != 30 {
+			t.Fatalf("schedule %s moved to local %v, want 03:30 across spring-forward", id, got)
+		}
+	}
+}
+
+func TestHandler_RescheduleTask_MultiSelectMovesDisabledAndRejectsForeignWithoutMutation(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	ctx := context.Background()
+	ownedProject := &models.Project{Name: "Owned schedules"}
+	foreignProject := &models.Project{Name: "Foreign schedules"}
+	if err := h.projectSvc.Create(ctx, ownedProject); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.projectSvc.Create(ctx, foreignProject); err != nil {
+		t.Fatal(err)
+	}
+
+	makeSchedule := func(projectID, title string, enabled bool) *models.Schedule {
+		t.Helper()
+		task := &models.Task{Title: title, Prompt: "test", Category: models.CategoryScheduled, Status: models.StatusPending, ProjectID: projectID}
+		if err := h.taskSvc.Create(ctx, task); err != nil {
+			t.Fatal(err)
+		}
+		runAt := time.Date(2031, 5, 10, 8, 30, 0, 0, time.Local).UTC()
+		s := &models.Schedule{TaskID: task.ID, RunAt: runAt, RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: enabled}
+		if err := h.scheduleRepo.Create(ctx, s); err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	owned := makeSchedule(ownedProject.ID, "Owned", true)
+	disabled := makeSchedule(ownedProject.ID, "Disabled", false)
+	foreign := makeSchedule(foreignProject.ID, "Foreign", true)
+	original := owned.RunAt
+
+	form := url.Values{"new_date": {"2031-05-11"}, "hour": {"10"}, "source_date": {"2031-05-10"}, "source_hour": {"8"}, "schedule_ids": {owned.ID + "," + disabled.ID}, "project_id": {ownedProject.ID}}
+	req := httptest.NewRequest(http.MethodPatch, "/schedules/"+owned.ID+"/reschedule?project_id="+url.QueryEscape(ownedProject.ID), strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected mixed enabled/disabled grouped request to succeed, got %d: %s", rec.Code, rec.Body.String())
+	}
+	movedDisabled, _ := h.scheduleRepo.GetByID(ctx, disabled.ID)
+	if movedDisabled.Enabled {
+		t.Fatal("dragging a disabled schedule must not enable it")
+	}
+	if got := movedDisabled.RunAt.Local(); got.Day() != 11 || got.Hour() != 10 || got.Minute() != 30 {
+		t.Fatalf("disabled schedule moved to %v, want May 11 10:30", got)
+	}
+
+	movedOwned, _ := h.scheduleRepo.GetByID(ctx, owned.ID)
+	beforeForeignFailure := movedOwned.RunAt
+	form.Set("schedule_ids", owned.ID+","+foreign.ID)
+	req = httptest.NewRequest(http.MethodPatch, "/schedules/"+owned.ID+"/reschedule?project_id="+url.QueryEscape(ownedProject.ID), strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	rec = httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code == http.StatusNoContent {
+		t.Fatal("expected foreign grouped request to fail")
+	}
+	stored, _ := h.scheduleRepo.GetByID(ctx, owned.ID)
+	if !stored.RunAt.Equal(beforeForeignFailure) {
+		t.Fatalf("foreign grouped request partially moved owned schedule to %v", stored.RunAt)
+	}
+	if stored.RunAt.Equal(original) {
+		t.Fatal("fixture did not first move the owned schedule")
 	}
 }

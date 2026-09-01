@@ -45,9 +45,12 @@ func TestScheduleContent_EnabledCardsUseGrabCursorForDrag(t *testing.T) {
 		"active:cursor-grabbing",
 		"drag-cursor-surface",
 		`onpointerdown="handleSchedulePointerDown(event)"`,
+		`onclick="handleScheduleSelect(event)"`,
+		"function handleScheduleSelect(event)",
+		"selectedScheduleCards.has(card)",
 		"function handleSchedulePointerMove(event)",
-		"window.movePointerCard(state.motion, deltaX, deltaY)",
-		"window.beginPointerCardMotion(card)",
+		"state.motions.forEach(function(motion) { window.movePointerCard(motion, deltaX, deltaY); })",
+		"window.beginPointerCardMotion(selected)",
 		"function refreshSchedulePointerDropZone(clientX, clientY)",
 		"window.handlePointerAutoScroll(event, timeline, null, function()",
 		"refreshSchedulePointerDropZone(event.clientX, event.clientY)",
@@ -1385,7 +1388,7 @@ func TestScheduleContent_FullHeightTimelineUsesInnerFlexChain(t *testing.T) {
 		t.Fatal("expected schedule timeline wrapper opening tag")
 	}
 	wrapperTag := output[wrapperStart : wrapperStart+wrapperEnd]
-	for _, required := range []string{"flex-1", "flex", "flex-col"} {
+	for _, required := range []string{"flex-1", "flex", "flex-col", "min-h-0"} {
 		if !strings.Contains(wrapperTag, required) {
 			t.Fatalf("schedule timeline wrapper must contain %q, got %s", required, wrapperTag)
 		}
@@ -1401,7 +1404,7 @@ func TestScheduleContent_FullHeightTimelineUsesInnerFlexChain(t *testing.T) {
 		t.Fatal("expected schedule timeline grid body opening tag")
 	}
 	relativeTag := output[relativeStart : relativeStart+relativeEnd]
-	for _, required := range []string{"flex-1", "flex", "flex-col"} {
+	for _, required := range []string{"flex-1", "flex", "flex-col", "min-h-0"} {
 		if !strings.Contains(relativeTag, required) {
 			t.Fatalf("schedule timeline grid body must contain %q, got %s", required, relativeTag)
 		}
@@ -1465,7 +1468,7 @@ func TestBuildTaskOccurrenceMap_DisabledScheduleIncluded(t *testing.T) {
 
 // TestScheduleContent_DisabledScheduleRenderedWithGreyedStyle renders the
 // schedule page for a week containing a disabled schedule and asserts that the
-// HTML contains the greyed/non-draggable paused card markup.
+// card stays visibly paused while remaining selectable and draggable.
 func TestScheduleContent_DisabledScheduleRenderedWithGreyedStyle(t *testing.T) {
 	// Compute a task that falls on Wednesday of the NEXT week so it is always
 	// in the rendered range regardless of which day of the week the test runs.
@@ -1505,14 +1508,14 @@ func TestScheduleContent_DisabledScheduleRenderedWithGreyedStyle(t *testing.T) {
 	}
 	out := buf.String()
 
-	if !strings.Contains(out, "opacity-50 cursor-not-allowed") {
-		t.Error("expected greyed/cursor-not-allowed style for disabled schedule card")
+	if !strings.Contains(out, "opacity-50 cursor-grab") {
+		t.Error("expected greyed draggable style for disabled schedule card")
 	}
 	if !strings.Contains(out, "paused") {
 		t.Error("expected 'paused' text for disabled schedule card")
 	}
-	if !strings.Contains(out, `draggable="false"`) {
-		t.Error("expected draggable=\"false\" for disabled schedule card")
+	if !strings.Contains(out, `onclick="handleScheduleSelect(event)"`) || !strings.Contains(out, `onpointerdown="handleSchedulePointerDown(event)"`) {
+		t.Error("expected disabled schedule card to support modifier selection and pointer drag")
 	}
 	if !strings.Contains(out, "line-through") {
 		t.Error("expected line-through CSS class on disabled schedule card title")

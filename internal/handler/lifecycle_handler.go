@@ -3,13 +3,16 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/lifecycle"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/viewmodels"
 )
 
@@ -17,12 +20,23 @@ import (
 // as JSON so the agent edit dialog (Lifecycle Hooks tab) can hydrate the form.
 // Runbook §Agent Create/Edit Dialog → Lifecycle Hooks Tab (lines 2203-2246).
 func (h *Handler) GetAgentLifecycleHooks(c echo.Context) error {
-	if h.lifecycleRepo == nil {
+	if h.lifecycleRepo == nil || h.agentRepo == nil {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "lifecycle repo not configured")
 	}
 	agentID := strings.TrimSpace(c.Param("id"))
 	if agentID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "agent id is required")
+	}
+	agent, err := h.agentRepo.GetByID(c.Request().Context(), agentID)
+	if err != nil {
+		applog.Infof("[handler] GetAgentLifecycleHooks agent=%s lookup error: %v", agentID, err)
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	if agent == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "agent not found")
+	}
+	if err := h.ensureAgentProjectAccess(c, agent); err != nil {
+		return err
 	}
 	hooks, err := h.lifecycleRepo.HooksByAgent(c.Request().Context(), agentID)
 	if err != nil {
@@ -30,6 +44,38 @@ func (h *Handler) GetAgentLifecycleHooks(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return c.JSON(http.StatusOK, hooks)
+}
+
+// ensureAgentProjectAccess prevents project-scoped agent configuration from
+// being read or changed through a different project context. An explicit
+// project_id in the URL is authoritative; form submissions may carry the same
+// value in the form body. When neither is present, resolve the selected project
+// so requests from a project context cannot silently fall through to the
+// agent's owning project. Project-scoped agents without a recorded ProjectID
+// retain the legacy fallback used by agent-owned skill routes.
+func (h *Handler) ensureAgentProjectAccess(c echo.Context, agent *models.Agent) error {
+	if agent == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "agent not found")
+	}
+	if agent.Scope != models.AgentScopeProject || strings.TrimSpace(agent.ProjectID) == "" {
+		return nil
+	}
+
+	requestedProjectID := strings.TrimSpace(c.QueryParam("project_id"))
+	if requestedProjectID == "" && strings.HasPrefix(c.Request().Header.Get(echo.HeaderContentType), "application/x-www-form-urlencoded") {
+		requestedProjectID = strings.TrimSpace(c.FormValue("project_id"))
+	}
+	if requestedProjectID == "" && h.projectSvc != nil {
+		resolvedProjectID, err := h.getCurrentProjectID(c)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		}
+		requestedProjectID = strings.TrimSpace(resolvedProjectID)
+	}
+	if requestedProjectID != "" && requestedProjectID != strings.TrimSpace(agent.ProjectID) {
+		return echo.NewHTTPError(http.StatusNotFound, "agent not found")
+	}
+	return nil
 }
 
 // hookSavePayload is the wire format sent by the dialog's Lifecycle Hooks tab.
@@ -61,6 +107,9 @@ func (h *Handler) SaveAgentLifecycleHooks(c echo.Context) error {
 	agent, err := h.agentRepo.GetByID(c.Request().Context(), agentID)
 	if err != nil || agent == nil {
 		return echo.NewHTTPError(http.StatusNotFound, "agent not found")
+	}
+	if err := h.ensureAgentProjectAccess(c, agent); err != nil {
+		return err
 	}
 	if agent.GeneratedStatus == models.AgentStatusProtected {
 		return echo.NewHTTPError(http.StatusForbidden, "lifecycle hooks for protected built-in agents cannot be modified through the dialog")
@@ -179,19 +228,20 @@ func (h *Handler) reconcileAgentLifecycleHooks(ctx context.Context, agentID stri
 // summaries in task activity without cluttering the normal task board.
 //
 // @Summary List lifecycle executions for a task
-// @Description Returns lifecycle hook invocations (routing, before-run preparation, after-complete learning) recorded for the given task.
+// @Description Returns one bounded page of lifecycle hook invocations (routing, before-run preparation, after-complete learning) recorded for the given task. Results are newest-first; use next_cursor with before for older activity and the newest execution ID with after for live inserts.
 // @Tags Lifecycle
 // @Produce json
 // @Param id path string true "Task ID"
-// @Success 200 {array} viewmodels.LifecycleExecutionView
-// @Failure 400 {object} ErrorResponse "Invalid task ID"
+// @Param project_id query string false "Project ID"
+// @Param limit query int false "Page size (default 20, maximum 50)"
+// @Param before query string false "Opaque cursor for the next older page"
+// @Param after query string false "Newest execution ID or newer-page cursor"
+// @Success 200 {object} viewmodels.LifecycleExecutionPageView
+// @Failure 400 {object} ErrorResponse "Invalid task ID or page cursor"
 // @Failure 404 {object} ErrorResponse "Task not found"
 // @Failure 500 {object} ErrorResponse "Internal server error"
 // @Router /api/tasks/{id}/lifecycle-executions [get]
 func (h *Handler) GetTaskLifecycleExecutions(c echo.Context) error {
-	if h.lifecycleRepo == nil {
-		return c.JSON(http.StatusOK, []viewmodels.LifecycleExecutionView{})
-	}
 	taskID := strings.TrimSpace(c.Param("id"))
 	if taskID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "task id is required")
@@ -208,16 +258,93 @@ func (h *Handler) GetTaskLifecycleExecutions(c echo.Context) error {
 	if task == nil || task.ProjectID != projectID {
 		return echo.NewHTTPError(http.StatusNotFound, "task not found")
 	}
-	execs, err := h.lifecycleRepo.ListExecutionsForTask(c.Request().Context(), taskID)
+	if h.lifecycleRepo == nil {
+		return c.JSON(http.StatusOK, viewmodels.LifecycleExecutionPageView{
+			Items: make([]viewmodels.LifecycleExecutionView, 0),
+		})
+	}
+
+	before := strings.TrimSpace(c.QueryParam("before"))
+	after := strings.TrimSpace(c.QueryParam("after"))
+	if before != "" && after != "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "before and after cannot be used together")
+	}
+	limit := repository.LifecycleExecutionPageDefaultLimit
+	if rawLimit := strings.TrimSpace(c.QueryParam("limit")); rawLimit != "" {
+		if parsed, parseErr := strconv.Atoi(rawLimit); parseErr == nil && parsed > 0 {
+			limit = parsed
+			if limit > repository.LifecycleExecutionPageMaxLimit {
+				limit = repository.LifecycleExecutionPageMaxLimit
+			}
+		}
+	}
+	var page models.LifecycleExecutionPage
+	if before != "" {
+		page, err = h.lifecycleRepo.ListExecutionsForTaskPage(c.Request().Context(), taskID, limit, before)
+	} else if after != "" {
+		page, err = h.lifecycleRepo.ListExecutionsForTaskNewerPage(c.Request().Context(), taskID, limit, after)
+	} else {
+		page, err = h.lifecycleRepo.ListExecutionsForTaskPage(c.Request().Context(), taskID, limit, "")
+	}
 	if err != nil {
+		if errors.Is(err, repository.ErrLifecycleExecutionCursor) {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid lifecycle execution cursor")
+		}
 		applog.Infof("[handler] GetTaskLifecycleExecutions task=%s error: %v", taskID, err)
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
-	views := make([]viewmodels.LifecycleExecutionView, 0, len(execs))
-	for _, e := range execs {
+	views := make([]viewmodels.LifecycleExecutionView, 0, len(page.Items))
+	for _, e := range page.Items {
 		views = append(views, toLifecycleExecutionView(e))
 	}
-	return c.JSON(http.StatusOK, views)
+	return c.JSON(http.StatusOK, viewmodels.LifecycleExecutionPageView{
+		Items:      views,
+		HasMore:    page.HasMore,
+		NextCursor: page.NextCursor,
+	})
+}
+
+// GetTaskLifecycleExecution returns one compact lifecycle execution for a task.
+// It is used by live reconciliation when a retained row may have fallen outside
+// the newest lifecycle page.
+//
+// @Summary Get one lifecycle execution for a task
+// @Description Returns the prompt-safe current state of one lifecycle hook invocation when it belongs to the requested task and project.
+// @Tags Lifecycle
+// @Produce json
+// @Param id path string true "Task ID"
+// @Param executionID path string true "Lifecycle execution ID"
+// @Param project_id query string false "Project ID"
+// @Success 200 {object} viewmodels.LifecycleExecutionView
+// @Failure 400 {object} ErrorResponse "Invalid task or execution ID"
+// @Failure 404 {object} ErrorResponse "Task or lifecycle execution not found"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Router /api/tasks/{id}/lifecycle-executions/{executionID} [get]
+func (h *Handler) GetTaskLifecycleExecution(c echo.Context) error {
+	taskID := strings.TrimSpace(c.Param("id"))
+	if taskID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "task id is required")
+	}
+	executionID := strings.TrimSpace(c.Param("executionID"))
+	if executionID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "lifecycle execution id is required")
+	}
+	projectID, err := h.getCurrentProjectID(c)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	if h.lifecycleRepo == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "lifecycle execution not found")
+	}
+	execution, found, err := h.lifecycleRepo.GetExecutionForTaskProject(c.Request().Context(), taskID, executionID, projectID)
+	if err != nil {
+		applog.Infof("[handler] GetTaskLifecycleExecution task=%s exec=%s error: %v", taskID, executionID, err)
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	if !found {
+		return echo.NewHTTPError(http.StatusNotFound, "lifecycle execution not found")
+	}
+	return c.JSON(http.StatusOK, toLifecycleExecutionView(*execution))
 }
 
 // GetLifecycleExecutionEvents returns the durable trace for one lifecycle execution.
@@ -268,9 +395,8 @@ func toLifecycleExecutionView(e models.LifecycleExecution) viewmodels.LifecycleE
 		SkillKey:       e.SkillKey,
 		Status:         string(e.Status),
 		OutputContract: string(e.OutputContract),
-		Error:          e.Error,
-		StartedAt:      e.StartedAt,
-		CompletedAt:    e.CompletedAt,
+		Error:          truncateLifecycleDisplay(e.Error),
+		StartedAt:      e.StartedAt, CompletedAt: e.CompletedAt,
 	}
 	if e.OutputJSON != "" {
 		v.Summary = extractStructuredSummary(e.OutputContract, e.OutputJSON)
@@ -305,17 +431,17 @@ func extractStructuredSummary(contract models.LifecycleOutputContract, raw strin
 	switch contract {
 	case models.OutputContractContextBlock:
 		if s, ok := probe["title"].(string); ok && s != "" {
-			return s
+			return truncateLifecycleDisplay(s)
 		}
 	case models.OutputContractActivitySummary,
 		models.OutputContractLearningSummary,
 		models.OutputContractLibraryUpdateSummary:
 		if s, ok := probe["summary"].(string); ok {
-			return s
+			return truncateLifecycleDisplay(s)
 		}
 	case models.OutputContractSelectedMode:
 		if s, ok := probe["mode"].(string); ok {
-			return s
+			return truncateLifecycleDisplay(s)
 		}
 	case models.OutputContractSelectedSkills:
 		if summary := selectedSkillsSummary(probe); summary != "" {
@@ -326,13 +452,12 @@ func extractStructuredSummary(contract models.LifecycleOutputContract, raw strin
 	}
 	return ""
 }
-
 func selectedSkillsSummary(probe map[string]any) string {
 	parts := selectedSkillsFromProbe(probe)
 	if len(parts) == 0 {
 		return ""
 	}
-	return "Selected skills: " + strings.Join(parts, ", ")
+	return truncateLifecycleDisplay("Selected skills: " + strings.Join(parts, ", "))
 }
 
 func extractSelectedSkills(contract models.LifecycleOutputContract, raw string) []string {
@@ -366,12 +491,24 @@ func selectedSkillsFromProbe(probe map[string]any) []string {
 			continue
 		}
 		seen[s] = struct{}{}
+		if len(s) > maxLifecycleSkillLen {
+			s = s[:maxLifecycleSkillLen] + "..."
+		}
 		parts = append(parts, s)
+		if len(parts) == maxLifecycleSelectedSkills {
+			break
+		}
 	}
 	return parts
 }
 
-const maxLifecycleMemoryDetailLen = 240
+const (
+	maxLifecycleMemoryDetailLen = 240
+	maxLifecycleSelectedSkills  = 32
+	maxLifecycleSkillLen        = 160
+	maxLifecycleMemoryViews     = 24
+	maxLifecycleDisplayTextLen  = 240
+)
 
 func extractSelectedMemoryViews(e models.LifecycleExecution, raw string) []viewmodels.SelectedMemoryView {
 	if e.OutputContract == models.OutputContractSelectedMemories {
@@ -391,6 +528,9 @@ func extractSelectedMemoryViews(e models.LifecycleExecution, raw string) []viewm
 	out := make([]viewmodels.SelectedMemoryView, 0, len(cb.SelectedMemories)+len(cb.Sources))
 	seen := map[string]struct{}{}
 	for _, memory := range cb.SelectedMemories {
+		if len(out) >= maxLifecycleMemoryViews {
+			break
+		}
 		file := sanitizeMemoryIdentifier(memory.File)
 		if strings.TrimSpace(memory.File) != "" && file == "" {
 			continue
@@ -412,6 +552,9 @@ func extractSelectedMemoryViews(e models.LifecycleExecution, raw string) []viewm
 		})
 	}
 	for _, source := range cb.Sources {
+		if len(out) >= maxLifecycleMemoryViews {
+			break
+		}
 		file := sanitizeMemoryIdentifier(source)
 		if file == "" {
 			continue
@@ -434,6 +577,9 @@ func selectedMemoryViewsFromProbe(probe map[string]any) []viewmodels.SelectedMem
 	out := make([]viewmodels.SelectedMemoryView, 0, len(rawMemories))
 	seen := map[string]struct{}{}
 	for _, raw := range rawMemories {
+		if len(out) >= maxLifecycleMemoryViews {
+			break
+		}
 		entry, ok := raw.(map[string]any)
 		if !ok {
 			continue
@@ -477,6 +623,13 @@ func sanitizeMemoryIdentifier(value string) string {
 		return ""
 	}
 	return truncateLifecycleMemoryDetail(value)
+}
+
+func truncateLifecycleDisplay(value string) string {
+	if len(value) <= maxLifecycleDisplayTextLen {
+		return value
+	}
+	return value[:maxLifecycleDisplayTextLen] + "..."
 }
 
 func truncateLifecycleMemoryDetail(value string) string {

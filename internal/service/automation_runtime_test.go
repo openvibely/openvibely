@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/automationobs"
+	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
@@ -33,6 +34,11 @@ type automationRuntimeFixture struct {
 func newAutomationRuntimeFixture(t *testing.T, adapterKey string) automationRuntimeFixture {
 	t.Helper()
 	db := testutil.NewTestDB(t)
+	return newAutomationRuntimeFixtureWithDB(t, db, adapterKey)
+}
+
+func newAutomationRuntimeFixtureWithDB(t *testing.T, db *sql.DB, adapterKey string) automationRuntimeFixture {
+	t.Helper()
 	projectRepo := repository.NewProjectRepo(db)
 	taskRepo := repository.NewTaskRepo(db, nil)
 	scheduleRepo := repository.NewScheduleRepo(db)
@@ -58,6 +64,12 @@ func newAutomationRuntimeFixture(t *testing.T, adapterKey string) automationRunt
 	return automationRuntimeFixture{project: project, task: task, schedule: schedule, definition: definition, repo: automationRepo, taskRepo: taskRepo, schedRepo: scheduleRepo}
 }
 
+func newCountingAutomationRuntimeFixture(t *testing.T, adapterKey string) (automationRuntimeFixture, *testutil.SQLStatementCounter) {
+	t.Helper()
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	return newAutomationRuntimeFixtureWithDB(t, db, adapterKey), counter
+}
+
 func automationNodeByKey(t *testing.T, definition *models.AutomationDefinition, key string) models.AutomationNode {
 	t.Helper()
 	for _, node := range definition.Nodes {
@@ -69,9 +81,147 @@ func automationNodeByKey(t *testing.T, definition *models.AutomationDefinition, 
 	return models.AutomationNode{}
 }
 
+func TestGitHubIssueRuntimeAssignedIssuePaginationPresenceAware(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	project := models.Project{Name: "GitHub pagination runtime", RepoURL: "https://github.com/openvibely/openvibely"}
+	require.NoError(t, projectRepo.Create(ctx, &project))
+	authRepo := repository.NewGitHubAuthRepo(db)
+	require.NoError(t, authRepo.UpsertAuthorizedActor(ctx, &models.GitHubAuthorizedActor{GitHubLogin: "openvibely"}))
+
+	issues := make([]GitHubIssue, 101)
+	for i := range issues {
+		issues[i] = GitHubIssue{Number: i + 1, Title: fmt.Sprintf("Issue %d", i+1)}
+	}
+	var myAssignedCalls atomic.Int32
+	var assignedIssuesCalls atomic.Int32
+	provider := &fakeGitHubIssueRuntimeProvider{
+		listMyIssuesFn: func(context.Context, *GitHubRepoRef) (*GitHubAuthenticatedUser, []GitHubIssue, error) {
+			myAssignedCalls.Add(1)
+			return &GitHubAuthenticatedUser{Login: "openvibely"}, issues, nil
+		},
+		listAssignedIssuesFn: func(_ context.Context, _ *GitHubRepoRef, assignee string) ([]GitHubIssue, error) {
+			require.Equal(t, "openvibely", assignee)
+			assignedIssuesCalls.Add(1)
+			return issues, nil
+		},
+	}
+	handlers := buildGitHubIssueRuntimeHandlers(githubIssueRuntimeOptions{
+		ProjectID: project.ID, ProjectRepo: projectRepo, GitHubAuthRepo: authRepo, GitHub: provider,
+	})
+
+	type paginationMetadata struct {
+		Returned   int  `json:"returned"`
+		Total      int  `json:"total"`
+		Offset     int  `json:"offset"`
+		NextOffset int  `json:"next_offset"`
+		Truncated  bool `json:"truncated"`
+	}
+	type action struct {
+		name      string
+		omitted   string
+		invalid   []string
+		handler   chatcontrol.RuntimeActionHandler
+		callCount func() int32
+	}
+	actions := []action{
+		{
+			name:      "my assigned issues",
+			omitted:   `{}`,
+			invalid:   []string{`{"limit":0}`, `{"Limit":0}`, `{"LIMIT":0}`, `{"limit":101}`, `{"offset":-1}`, `{"Offset":-1}`},
+			handler:   handlers["github_list_my_assigned_issues"],
+			callCount: myAssignedCalls.Load,
+		},
+		{
+			name:      "assigned issues",
+			omitted:   `{"assignee":"openvibely"}`,
+			invalid:   []string{`{"assignee":"openvibely","limit":0}`, `{"assignee":"openvibely","Limit":0}`, `{"assignee":"openvibely","LIMIT":0}`, `{"assignee":"openvibely","limit":101}`, `{"assignee":"openvibely","offset":-1}`, `{"assignee":"openvibely","Offset":-1}`},
+			handler:   handlers["github_list_assigned_issues"],
+			callCount: assignedIssuesCalls.Load,
+		},
+	}
+
+	for _, action := range actions {
+		t.Run(action.name, func(t *testing.T) {
+			callsBeforeOmitted := action.callCount()
+			output, err := action.handler(ctx, json.RawMessage(action.omitted))
+			if err != nil {
+				t.Fatalf("omitted limit error=%v output=%q", err, output)
+			}
+			var metadata paginationMetadata
+			if err := json.Unmarshal([]byte(output), &metadata); err != nil {
+				t.Fatalf("decode omitted-limit output %q: %v", output, err)
+			}
+			if metadata.Returned != 100 || metadata.Total != 101 || metadata.Offset != 0 || metadata.NextOffset != 100 || !metadata.Truncated {
+				t.Fatalf("omitted-limit metadata=%+v, want returned=100 total=101 offset=0 next_offset=100 truncated=true", metadata)
+			}
+			if calls := action.callCount(); calls != callsBeforeOmitted+1 {
+				t.Fatalf("provider calls after omitted limit=%d, want %d", calls, callsBeforeOmitted+1)
+			}
+
+			callsBeforeInvalid := action.callCount()
+			for _, input := range action.invalid {
+				if output, err := action.handler(ctx, json.RawMessage(input)); err == nil || err.Error() != "limit must be 1-100 and offset must be non-negative" {
+					t.Fatalf("invalid input %s output=%q error=%v, want validation error", input, output, err)
+				}
+				if calls := action.callCount(); calls != callsBeforeInvalid {
+					t.Fatalf("provider calls after invalid input %s=%d, want %d", input, calls, callsBeforeInvalid)
+				}
+			}
+		})
+	}
+}
+
+func TestGitHubIssueRuntimeMyAssignedIssuesValidatesPaginationBeforeRepoResolution(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	var providerCalls atomic.Int32
+	provider := &fakeGitHubIssueRuntimeProvider{
+		listMyIssuesFn: func(context.Context, *GitHubRepoRef) (*GitHubAuthenticatedUser, []GitHubIssue, error) {
+			providerCalls.Add(1)
+			return &GitHubAuthenticatedUser{Login: "openvibely"}, nil, nil
+		},
+	}
+	handlers := buildGitHubIssueRuntimeHandlers(githubIssueRuntimeOptions{
+		ProjectID: "missing-project", ProjectRepo: projectRepo, GitHub: provider,
+	})
+
+	for _, input := range []string{
+		`{"limit":0}`,
+		`{"Limit":0}`,
+		`{"limit":101}`,
+		`{"offset":-1}`,
+	} {
+		if _, err := handlers["github_list_my_assigned_issues"](ctx, json.RawMessage(input)); err == nil || err.Error() != "limit must be 1-100 and offset must be non-negative" {
+			t.Fatalf("invalid page input %s error=%v, want validation error", input, err)
+		}
+	}
+	if providerCalls.Load() != 0 {
+		t.Fatalf("provider calls=%d, want 0 for invalid pagination", providerCalls.Load())
+	}
+}
+
 func TestAutomationManualRunUsesExistingDispatchWithoutChangingSchedule(t *testing.T) {
 	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
 	ctx := context.Background()
+	triggerNode := automationNodeByKey(t, fixture.definition, "vision_suggestions")
+	_, err := fixture.repo.DB().Exec(`INSERT INTO automation_invocations
+		(id, project_id, automation_id, version_id, trigger_node_id, trigger_resource_type, trigger_resource_id, occurrence_key, status, started_at, completed_at)
+		VALUES (?, ?, ?, ?, ?, 'manual', ?, 'manual:previous-failed', 'failed', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+		"previous-failed-manual-run", fixture.project.ID, fixture.definition.Automation.ID, fixture.definition.Version.ID, triggerNode.ID, fixture.schedule.ID)
+	require.NoError(t, err)
+	_, _, err = fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+		Context: models.AutomationContext{ProjectID: fixture.project.ID},
+		Binding: models.AutomationBinding{AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID,
+			NodeID: triggerNode.ID, InvocationID: "previous-failed-manual-run"},
+		ActivityKey: "previous-failed-manual-run:task", ActivityType: "task_execution", ActivityStatus: models.AutomationActivityFailed,
+		Resources: []models.AutomationActivityResource{{ResourceType: "task", ResourceID: fixture.task.ID}},
+	})
+	require.NoError(t, err)
+	_, err = fixture.repo.DB().Exec(`UPDATE tasks SET status = 'failed' WHERE id = ?`, fixture.task.ID)
+	require.NoError(t, err)
 	before, err := fixture.schedRepo.GetByID(ctx, fixture.schedule.ID)
 	require.NoError(t, err)
 
@@ -87,7 +237,6 @@ func TestAutomationManualRunUsesExistingDispatchWithoutChangingSchedule(t *testi
 	liveAfterClaim, err := NewAutomationGraphService(fixture.repo).GetLive(ctx, fixture.project.ID, fixture.definition.Automation.ID, time.Now().UTC())
 	require.NoError(t, err)
 	require.NotNil(t, liveAfterClaim)
-	triggerNode := automationNodeByKey(t, fixture.definition, "vision_suggestions")
 	var triggerLiveNode *models.AutomationLiveNode
 	for i := range liveAfterClaim.Nodes {
 		if liveAfterClaim.Nodes[i].ID == triggerNode.ID {
@@ -701,6 +850,442 @@ func TestAutomationRuntimeOverlappingInvocationsProjectConcurrently(t *testing.T
 	require.Equal(t, 2, graph.ActiveInvocations)
 }
 
+func TestAutomationRuntimeMultipleCapacityQueuedDispatchesDrainFIFOWithoutDuplicates(t *testing.T) {
+	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	secondTask, secondSchedule := automationTestTaskAndSchedule(t, fixture.taskRepo, fixture.schedRepo, fixture.project.ID, "Second capacity-queued Automation task")
+	secondDue := time.Now().UTC().Add(-2 * time.Minute)
+	secondSchedule.RunAt = secondDue.Add(-time.Hour)
+	secondSchedule.NextRun = &secondDue
+	secondSchedule.RepeatType = models.RepeatHours
+	secondSchedule.RepeatInterval = 1
+	require.NoError(t, fixture.schedRepo.Update(ctx, &secondSchedule))
+	secondNode := automationNodeByKey(t, fixture.definition, "bug_finder")
+	_, err := fixture.repo.DB().ExecContext(ctx, `INSERT INTO automation_definition_resources
+		(project_id, automation_id, version_id, node_id, resource_type, resource_id, relation)
+		VALUES (?, ?, ?, ?, 'schedule', ?, 'owned'), (?, ?, ?, ?, 'task', ?, 'owned')`,
+		fixture.project.ID, fixture.definition.Automation.ID, fixture.definition.Version.ID, secondNode.ID, secondSchedule.ID,
+		fixture.project.ID, fixture.definition.Automation.ID, fixture.definition.Version.ID, secondNode.ID, secondTask.ID)
+	require.NoError(t, err)
+	_, err = fixture.repo.DB().ExecContext(ctx, `INSERT INTO automation_trigger_owners
+		(schedule_id, project_id, automation_id, version_id, node_id, ownership_state)
+		VALUES (?, ?, ?, ?, ?, 'active')`, secondSchedule.ID, fixture.project.ID, fixture.definition.Automation.ID, fixture.definition.Version.ID, secondNode.ID)
+	require.NoError(t, err)
+
+	llmConfigRepo := repository.NewLLMConfigRepo(fixture.repo.DB())
+	agent := models.LLMConfig{Name: "Multiple queued Automation worker", Provider: models.ProviderTest, Model: "test", IsDefault: true}
+	require.NoError(t, llmConfigRepo.Create(ctx, &agent))
+	firstPrompt := "first capacity-queued Automation task"
+	secondPrompt := "second capacity-queued Automation task"
+	_, err = fixture.repo.DB().ExecContext(ctx, `UPDATE tasks SET prompt = ?, agent_id = ? WHERE id = ?`, firstPrompt, agent.ID, fixture.task.ID)
+	require.NoError(t, err)
+	_, err = fixture.repo.DB().ExecContext(ctx, `UPDATE tasks SET prompt = ?, agent_id = ? WHERE id = ?`, secondPrompt, agent.ID, secondTask.ID)
+	require.NoError(t, err)
+
+	projectRepo := repository.NewProjectRepo(fixture.repo.DB())
+	execRepo := repository.NewExecutionRepo(fixture.repo.DB())
+	execRepo.SetAutomationRepo(fixture.repo)
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, fixture.taskRepo, projectRepo, fixture.schedRepo, repository.NewAttachmentRepo(fixture.repo.DB()))
+	mockLLM := testutil.NewMockLLMCaller()
+	mockLLM.Response = "multiple queued Automation tasks completed"
+	mockLLM.TextOnly = mockLLM.Response
+	calls := make(chan testutil.MockLLMCall, 2)
+	firstRelease := make(chan struct{})
+	secondRelease := make(chan struct{})
+	var firstReleaseOnce, secondReleaseOnce sync.Once
+	closeFirst := func() { firstReleaseOnce.Do(func() { close(firstRelease) }) }
+	closeSecond := func() { secondReleaseOnce.Do(func() { close(secondRelease) }) }
+	defer closeFirst()
+	defer closeSecond()
+	mockLLM.OnCall = func(_ context.Context, call testutil.MockLLMCall) {
+		calls <- call
+		if strings.Contains(call.Prompt, firstPrompt) {
+			<-firstRelease
+			return
+		}
+		<-secondRelease
+	}
+	llmSvc.SetLLMCaller(mockLLM)
+	llmSvc.SetAutomationRepo(fixture.repo)
+
+	worker := NewWorkerService(llmSvc, 1, projectRepo)
+	worker.SetTaskRepo(fixture.taskRepo)
+	worker.SetLLMConfigRepo(llmConfigRepo)
+	worker.SetExecutionRepo(execRepo)
+	worker.SetAutomationRepo(fixture.repo)
+	worker.Start(ctx)
+	defer worker.Stop()
+
+	holder := automationTestProject(t, projectRepo, "Multiple queued Automation capacity holder")
+	require.True(t, worker.TryAcquireProjectSlot(holder.ID), "global capacity must be occupied")
+	capacityHeld := true
+	defer func() {
+		if capacityHeld {
+			worker.ReleaseProjectSlot(holder.ID)
+		}
+	}()
+
+	_, firstDispatch, err := fixture.repo.ClaimScheduledOccurrence(ctx, fixture.schedule, time.Now().UTC(), fixture.schedule.ComputeNextRun(time.Now().UTC()))
+	require.NoError(t, err)
+	require.NotNil(t, firstDispatch)
+	_, secondDispatch, err := fixture.repo.ClaimScheduledOccurrence(ctx, secondSchedule, time.Now().UTC(), secondSchedule.ComputeNextRun(time.Now().UTC()))
+	require.NoError(t, err)
+	require.NotNil(t, secondDispatch)
+	dispatcher := NewAutomationDispatcher(fixture.repo, fixture.taskRepo, worker)
+	for i := 0; i < 2; i++ {
+		dispatched, dispatchErr := dispatcher.DispatchOne(ctx)
+		require.NoError(t, dispatchErr, "dispatch %d", i)
+		require.True(t, dispatched, "dispatch %d should be submitted", i)
+	}
+	for _, dispatch := range []*models.AutomationDispatch{firstDispatch, secondDispatch} {
+		var status string
+		require.NoError(t, fixture.repo.DB().QueryRowContext(ctx, `SELECT status FROM automation_dispatch_outbox WHERE id = ?`, dispatch.ID).Scan(&status))
+		require.Equal(t, "submitted", status)
+	}
+	rows, err := fixture.repo.DB().QueryContext(ctx, `SELECT id FROM automation_dispatch_outbox WHERE id IN (?, ?) ORDER BY created_at, id`, firstDispatch.ID, secondDispatch.ID)
+	require.NoError(t, err)
+	var fifoIDs []string
+	for rows.Next() {
+		var id string
+		require.NoError(t, rows.Scan(&id))
+		fifoIDs = append(fifoIDs, id)
+	}
+	require.NoError(t, rows.Close())
+	require.Len(t, fifoIDs, 2)
+	fifoPrompts := map[string]string{firstDispatch.ID: firstPrompt, secondDispatch.ID: secondPrompt}
+	require.Equal(t, 2, worker.QueueSize(), "both capacity-limited Automation tasks must remain queued")
+	for _, task := range []models.Task{fixture.task, secondTask} {
+		stored, getErr := fixture.taskRepo.GetByID(ctx, task.ID)
+		require.NoError(t, getErr)
+		require.Equal(t, models.StatusPending, stored.Status)
+	}
+	var reservations int
+	require.NoError(t, fixture.repo.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_task_run_reservations WHERE task_id IN (?, ?)`, fixture.task.ID, secondTask.ID).Scan(&reservations))
+	require.Equal(t, 2, reservations, "each queued Automation occurrence must retain its reservation")
+
+	worker.ReleaseProjectSlot(holder.ID)
+	capacityHeld = false
+	worker.DispatchNext()
+	firstID, secondID := fifoIDs[0], fifoIDs[1]
+	firstCall := <-calls
+	require.Contains(t, firstCall.Prompt, fifoPrompts[firstID], "the first durable queue entry must dispatch first")
+	if firstID == firstDispatch.ID {
+		closeFirst()
+	} else {
+		closeSecond()
+	}
+	require.Eventually(t, func() bool {
+		var status string
+		return fixture.repo.DB().QueryRow(`SELECT status FROM automation_dispatch_outbox WHERE id = ?`, firstID).Scan(&status) == nil && status == "completed"
+	}, 5*time.Second, 20*time.Millisecond)
+
+	secondCall := <-calls
+	require.Contains(t, secondCall.Prompt, fifoPrompts[secondID], "the second durable queue entry must dispatch after the first")
+	if secondID == firstDispatch.ID {
+		closeFirst()
+	} else {
+		closeSecond()
+	}
+	require.Eventually(t, func() bool {
+		var firstStatus, secondStatus string
+		return fixture.repo.DB().QueryRow(`SELECT status FROM automation_dispatch_outbox WHERE id = ?`, firstID).Scan(&firstStatus) == nil &&
+			fixture.repo.DB().QueryRow(`SELECT status FROM automation_dispatch_outbox WHERE id = ?`, secondID).Scan(&secondStatus) == nil &&
+			firstStatus == "completed" && secondStatus == "completed"
+	}, 5*time.Second, 20*time.Millisecond)
+
+	for _, dispatch := range []*models.AutomationDispatch{firstDispatch, secondDispatch} {
+		var executions int
+		require.NoError(t, fixture.repo.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM executions WHERE dispatch_id = ?`, dispatch.ID).Scan(&executions))
+		require.Equal(t, 1, executions, "dispatch %s must create one execution", dispatch.ID)
+	}
+	require.Eventually(t, func() bool { return worker.QueueSize() == 0 && worker.TotalRunning() == 0 }, 5*time.Second, 20*time.Millisecond)
+	more, err := dispatcher.DispatchOne(ctx)
+	require.NoError(t, err)
+	require.False(t, more, "completed durable dispatches must not be submitted a second time")
+}
+
+func TestAutomationRuntimeCapacityQueueRespectsProjectAndModelLimits(t *testing.T) {
+	for _, testCase := range []struct {
+		name           string
+		projectLimited bool
+	}{
+		{name: "project limit", projectLimited: true},
+		{name: "model limit", projectLimited: false},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			llmConfigRepo := repository.NewLLMConfigRepo(fixture.repo.DB())
+			agent := models.LLMConfig{Name: "Capacity-limited Automation worker", Provider: models.ProviderTest, Model: "test", IsDefault: true}
+			if !testCase.projectLimited {
+				agent.MaxWorkers = 1
+			}
+			require.NoError(t, llmConfigRepo.Create(ctx, &agent))
+			require.NoError(t, fixture.repo.DB().QueryRow(`UPDATE tasks SET agent_id = ? WHERE id = ? RETURNING id`, agent.ID, fixture.task.ID).Scan(new(string)))
+
+			projectRepo := repository.NewProjectRepo(fixture.repo.DB())
+			if testCase.projectLimited {
+				maxWorkers := 1
+				fixture.project.MaxWorkers = &maxWorkers
+				require.NoError(t, projectRepo.Update(ctx, &fixture.project))
+			}
+			execRepo := repository.NewExecutionRepo(fixture.repo.DB())
+			execRepo.SetAutomationRepo(fixture.repo)
+			llmSvc := NewLLMService(llmConfigRepo, execRepo, fixture.taskRepo, projectRepo, fixture.schedRepo, repository.NewAttachmentRepo(fixture.repo.DB()))
+			mockLLM := testutil.NewMockLLMCaller()
+			mockLLM.Response = "capacity-limited Automation completed"
+			mockLLM.TextOnly = mockLLM.Response
+			llmSvc.SetLLMCaller(mockLLM)
+			llmSvc.SetAutomationRepo(fixture.repo)
+
+			worker := NewWorkerService(llmSvc, 2, projectRepo)
+			worker.SetTaskRepo(fixture.taskRepo)
+			worker.SetLLMConfigRepo(llmConfigRepo)
+			worker.SetExecutionRepo(execRepo)
+			worker.SetAutomationRepo(fixture.repo)
+			worker.Start(ctx)
+			defer worker.Stop()
+
+			capacityHeld := false
+			if testCase.projectLimited {
+				require.True(t, worker.TryAcquireProjectSlot(fixture.project.ID))
+				capacityHeld = true
+			} else {
+				require.True(t, worker.TryAcquireModelSlot(agent.ID))
+				capacityHeld = true
+			}
+			defer func() {
+				if !capacityHeld {
+					return
+				}
+				if testCase.projectLimited {
+					worker.ReleaseProjectSlot(fixture.project.ID)
+				} else {
+					worker.ReleaseModelSlot(agent.ID)
+				}
+			}()
+
+			_, dispatch, err := fixture.repo.ClaimScheduledOccurrence(ctx, fixture.schedule, time.Now().UTC(), fixture.schedule.ComputeNextRun(time.Now().UTC()))
+			require.NoError(t, err)
+			require.NotNil(t, dispatch)
+			dispatcher := NewAutomationDispatcher(fixture.repo, fixture.taskRepo, worker)
+			dispatched, err := dispatcher.DispatchOne(ctx)
+			require.NoError(t, err)
+			require.True(t, dispatched)
+			require.Equal(t, 1, worker.QueueSize(), "Automation work must remain queued at the configured limit")
+			require.Zero(t, mockLLM.CallCount(), "capacity-limited Automation work must not execute early")
+
+			stored, err := fixture.taskRepo.GetByID(ctx, fixture.task.ID)
+			require.NoError(t, err)
+			require.Equal(t, models.StatusPending, stored.Status)
+			var executionCount, reservations int
+			require.NoError(t, fixture.repo.DB().QueryRow(`SELECT COUNT(*) FROM executions WHERE dispatch_id = ?`, dispatch.ID).Scan(&executionCount))
+			require.NoError(t, fixture.repo.DB().QueryRow(`SELECT COUNT(*) FROM automation_task_run_reservations WHERE dispatch_id = ?`, dispatch.ID).Scan(&reservations))
+			require.Zero(t, executionCount)
+			require.Equal(t, 1, reservations)
+
+			if testCase.projectLimited {
+				worker.ReleaseProjectSlot(fixture.project.ID)
+			} else {
+				worker.ReleaseModelSlot(agent.ID)
+			}
+			capacityHeld = false
+			worker.DispatchNext()
+			require.Eventually(t, func() bool {
+				var status string
+				return fixture.repo.DB().QueryRow(`SELECT status FROM automation_dispatch_outbox WHERE id = ?`, dispatch.ID).Scan(&status) == nil && status == "completed"
+			}, 5*time.Second, 20*time.Millisecond)
+			require.Equal(t, 1, mockLLM.CallCount())
+			require.Eventually(t, func() bool { return worker.QueueSize() == 0 && worker.TotalRunning() == 0 }, 5*time.Second, 20*time.Millisecond)
+		})
+	}
+}
+
+func TestAutomationRuntimeModelTransferDoesNotHoldGlobalCapacity(t *testing.T) {
+	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	llmConfigRepo := repository.NewLLMConfigRepo(fixture.repo.DB())
+	originalAgent := models.LLMConfig{Name: "Original transfer capacity worker", Provider: models.ProviderTest, Model: "original", IsDefault: true, MaxWorkers: 1}
+	blockedAgent := models.LLMConfig{Name: "Blocked transfer capacity worker", Provider: models.ProviderTest, Model: "blocked", MaxWorkers: 1}
+	ordinaryAgent := models.LLMConfig{Name: "Ordinary capacity worker", Provider: models.ProviderTest, Model: "ordinary", MaxWorkers: 1}
+	require.NoError(t, llmConfigRepo.Create(ctx, &originalAgent))
+	require.NoError(t, llmConfigRepo.Create(ctx, &blockedAgent))
+	require.NoError(t, llmConfigRepo.Create(ctx, &ordinaryAgent))
+	require.NoError(t, fixture.repo.DB().QueryRow(`UPDATE tasks SET agent_id = ? WHERE id = ? RETURNING id`, originalAgent.ID, fixture.task.ID).Scan(new(string)))
+
+	projectRepo := repository.NewProjectRepo(fixture.repo.DB())
+	execRepo := repository.NewExecutionRepo(fixture.repo.DB())
+	execRepo.SetAutomationRepo(fixture.repo)
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, fixture.taskRepo, projectRepo, fixture.schedRepo, repository.NewAttachmentRepo(fixture.repo.DB()))
+	mockLLM := testutil.NewMockLLMCaller()
+	mockLLM.Response = "capacity transfer completed"
+	mockLLM.TextOnly = mockLLM.Response
+	providerStarted := make(chan testutil.MockLLMCall, 4)
+	releaseAutomation := make(chan struct{})
+	releaseOrdinary := make(chan struct{})
+	var releaseAutomationOnce, releaseOrdinaryOnce sync.Once
+	releaseAutomationNow := func() { releaseAutomationOnce.Do(func() { close(releaseAutomation) }) }
+	releaseOrdinaryNow := func() { releaseOrdinaryOnce.Do(func() { close(releaseOrdinary) }) }
+	mockLLM.OnCall = func(_ context.Context, call testutil.MockLLMCall) {
+		providerStarted <- call
+		if strings.Contains(call.Prompt, "ordinary queued task") {
+			<-releaseOrdinary
+			return
+		}
+		<-releaseAutomation
+	}
+	llmSvc.SetLLMCaller(mockLLM)
+	llmSvc.SetAutomationRepo(fixture.repo)
+
+	worker := NewWorkerService(llmSvc, 1, projectRepo)
+	worker.SetTaskRepo(fixture.taskRepo)
+	worker.SetLLMConfigRepo(llmConfigRepo)
+	worker.SetExecutionRepo(execRepo)
+	worker.SetAutomationRepo(fixture.repo)
+	worker.beforeQueuedAutomationTaskClaim = func(models.Task) {
+		_, err := fixture.repo.DB().Exec(`UPDATE tasks SET agent_id = ? WHERE id = ? AND status = 'pending'`, blockedAgent.ID, fixture.task.ID)
+		require.NoError(t, err)
+	}
+	worker.Start(ctx)
+	defer worker.Stop()
+	defer releaseAutomationNow()
+	defer releaseOrdinaryNow()
+	defer worker.CancelRunningTask(fixture.task.ID)
+
+	holder := automationTestProject(t, projectRepo, "Model transfer global capacity holder")
+	require.True(t, worker.TryAcquireProjectSlot(holder.ID), "global capacity must be occupied")
+	holderSlotHeld := true
+	defer func() {
+		if holderSlotHeld {
+			worker.ReleaseProjectSlot(holder.ID)
+		}
+	}()
+	require.True(t, worker.TryAcquireModelSlot(blockedAgent.ID), "test must saturate the claimed model")
+	blockedSlotHeld := true
+	defer func() {
+		if blockedSlotHeld {
+			worker.ReleaseModelSlot(blockedAgent.ID)
+		}
+	}()
+
+	_, dispatch, err := fixture.repo.ClaimScheduledOccurrence(ctx, fixture.schedule, time.Now().UTC(), fixture.schedule.ComputeNextRun(time.Now().UTC()))
+	require.NoError(t, err)
+	require.NotNil(t, dispatch)
+	dispatcher := NewAutomationDispatcher(fixture.repo, fixture.taskRepo, worker)
+	dispatched, err := dispatcher.DispatchOne(ctx)
+	require.NoError(t, err)
+	require.True(t, dispatched)
+
+	ordinaryProject := automationTestProject(t, projectRepo, "Ordinary task while Automation transfers model")
+	ordinary := models.Task{ProjectID: ordinaryProject.ID, Title: "Ordinary capacity task", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "ordinary queued task", AgentID: &ordinaryAgent.ID}
+	require.NoError(t, fixture.taskRepo.Create(ctx, &ordinary))
+	worker.Submit(ordinary)
+
+	worker.ReleaseProjectSlot(holder.ID)
+	holderSlotHeld = false
+	worker.DispatchNext()
+	require.Eventually(t, func() bool {
+		var status string
+		return fixture.repo.DB().QueryRow(`SELECT status FROM tasks WHERE id = ?`, fixture.task.ID).Scan(&status) == nil && status == string(models.StatusRunning)
+	}, 5*time.Second, 20*time.Millisecond, "Automation task did not reach its claim boundary")
+	require.Eventually(t, func() bool {
+		return worker.ModelRunning(originalAgent.ID) == 0 && worker.ModelRunning(blockedAgent.ID) == 1
+	}, 5*time.Second, 20*time.Millisecond, "Automation model reservation did not transfer to the blocked model")
+
+	var ordinaryCall testutil.MockLLMCall
+	select {
+	case ordinaryCall = <-providerStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("ordinary work remained blocked while Automation waited for model capacity")
+	}
+	require.Equal(t, ordinaryAgent.ID, ordinaryCall.Agent.ID, "the available global slot must dispatch ordinary work, not the blocked Automation model")
+	releaseOrdinaryNow()
+	require.Eventually(t, func() bool {
+		stored, getErr := fixture.taskRepo.GetByID(ctx, ordinary.ID)
+		return getErr == nil && stored != nil && stored.Status == models.StatusCompleted
+	}, 5*time.Second, 20*time.Millisecond)
+
+	worker.ReleaseModelSlot(blockedAgent.ID)
+	blockedSlotHeld = false
+	var automationCall testutil.MockLLMCall
+	select {
+	case automationCall = <-providerStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("capacity-queued Automation did not dispatch after model capacity was released")
+	}
+	require.Equal(t, blockedAgent.ID, automationCall.Agent.ID)
+	releaseAutomationNow()
+	require.Eventually(t, func() bool {
+		var status string
+		return fixture.repo.DB().QueryRow(`SELECT status FROM automation_dispatch_outbox WHERE id = ?`, dispatch.ID).Scan(&status) == nil && status == "completed"
+	}, 5*time.Second, 20*time.Millisecond)
+}
+
+func TestAutomationRuntimeCancelCapacityQueuedDispatchCleansQueueAndReservation(t *testing.T) {
+	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	llmConfigRepo := repository.NewLLMConfigRepo(fixture.repo.DB())
+	agent := models.LLMConfig{Name: "Cancellable queued Automation worker", Provider: models.ProviderTest, Model: "test", IsDefault: true}
+	require.NoError(t, llmConfigRepo.Create(ctx, &agent))
+	require.NoError(t, fixture.repo.DB().QueryRow(`UPDATE tasks SET agent_id = ? WHERE id = ? RETURNING id`, agent.ID, fixture.task.ID).Scan(new(string)))
+
+	projectRepo := repository.NewProjectRepo(fixture.repo.DB())
+	execRepo := repository.NewExecutionRepo(fixture.repo.DB())
+	execRepo.SetAutomationRepo(fixture.repo)
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, fixture.taskRepo, projectRepo, fixture.schedRepo, repository.NewAttachmentRepo(fixture.repo.DB()))
+	mockLLM := testutil.NewMockLLMCaller()
+	mockLLM.Response = "should not execute"
+	mockLLM.TextOnly = mockLLM.Response
+	llmSvc.SetLLMCaller(mockLLM)
+	llmSvc.SetAutomationRepo(fixture.repo)
+
+	worker := NewWorkerService(llmSvc, 1, projectRepo)
+	worker.SetTaskRepo(fixture.taskRepo)
+	worker.SetLLMConfigRepo(llmConfigRepo)
+	worker.SetExecutionRepo(execRepo)
+	worker.SetAutomationRepo(fixture.repo)
+	worker.Start(ctx)
+	defer worker.Stop()
+
+	holder := automationTestProject(t, projectRepo, "Queued Automation cancellation holder")
+	require.True(t, worker.TryAcquireProjectSlot(holder.ID), "global capacity must be occupied")
+	defer worker.ReleaseProjectSlot(holder.ID)
+
+	_, dispatch, err := fixture.repo.ClaimScheduledOccurrence(ctx, fixture.schedule, time.Now().UTC(), fixture.schedule.ComputeNextRun(time.Now().UTC()))
+	require.NoError(t, err)
+	require.NotNil(t, dispatch)
+	dispatcher := NewAutomationDispatcher(fixture.repo, fixture.taskRepo, worker)
+	dispatched, err := dispatcher.DispatchOne(ctx)
+	require.NoError(t, err)
+	require.True(t, dispatched)
+	require.Equal(t, 1, worker.QueueSize())
+
+	taskSvc := NewTaskService(fixture.taskRepo, repository.NewAttachmentRepo(fixture.repo.DB()), worker)
+	require.NoError(t, taskSvc.CancelTask(ctx, fixture.task.ID))
+
+	storedTask, err := fixture.taskRepo.GetByID(ctx, fixture.task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusCancelled, storedTask.Status)
+	require.Equal(t, models.CategoryBacklog, storedTask.Category)
+	require.Zero(t, worker.QueueSize(), "cancelled queued Automation work must leave the in-memory queue")
+
+	var dispatchStatus string
+	var reservations int
+	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT status FROM automation_dispatch_outbox WHERE id = ?`, dispatch.ID).Scan(&dispatchStatus))
+	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT COUNT(*) FROM automation_task_run_reservations WHERE dispatch_id = ?`, dispatch.ID).Scan(&reservations))
+	require.Equal(t, "failed", dispatchStatus, "cancellation must terminalize the durable dispatch")
+	require.Zero(t, reservations, "cancellation must release the durable reservation")
+	require.Zero(t, mockLLM.CallCount(), "cancelled capacity-queued Automation work must not reach the provider")
+}
+
 func TestAutomationRuntimePreparedDispatchWaitsPendingForGlobalCapacity(t *testing.T) {
 	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1155,6 +1740,84 @@ func TestAutomationRuntimeReconcilerAbandonsCancelledCapacityQueuedDispatch(t *t
 	require.Zero(t, reservations)
 }
 
+func TestAutomationRuntimeReconcilerCancelsPreparedDispatchForCancelledTask(t *testing.T) {
+	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
+	ctx := context.Background()
+	_, dispatch, err := fixture.repo.ClaimScheduledOccurrence(ctx, fixture.schedule, time.Now().UTC(), fixture.schedule.ComputeNextRun(time.Now().UTC()))
+	require.NoError(t, err)
+	require.NotNil(t, dispatch)
+	leased, err := fixture.repo.LeaseNextDispatch(ctx, "cancelled-task-owner", time.Now().UTC(), time.Minute)
+	require.NoError(t, err)
+	require.Equal(t, dispatch.ID, leased.ID)
+	execution, err := fixture.taskRepo.ClaimAutomationDispatch(ctx, dispatch.ID, "cancelled-task-owner")
+	require.NoError(t, err)
+	require.NoError(t, fixture.repo.MarkDispatchSubmitted(ctx, dispatch.ID, "cancelled-task-owner", execution.ID))
+
+	// Simulate a process loss after TaskService persisted cancellation but before
+	// its in-memory worker cleanup could cancel the prepared execution.
+	require.NoError(t, fixture.taskRepo.UpdateStatus(ctx, fixture.task.ID, models.StatusCancelled))
+	reconciler := NewAutomationReconciler(fixture.repo, repository.NewExecutionRepo(fixture.repo.DB()), NewWorkerService(nil, 1, nil))
+	require.NoError(t, reconciler.ReconcileOnce(ctx))
+
+	var dispatchStatus, invocationStatus, executionStatus string
+	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT d.status, i.status, e.status
+		FROM automation_dispatch_outbox d
+		JOIN automation_invocations i ON i.id = d.invocation_id
+		JOIN executions e ON e.id = d.execution_id
+		WHERE d.id = ?`, dispatch.ID).Scan(&dispatchStatus, &invocationStatus, &executionStatus))
+	require.Equal(t, "failed", dispatchStatus)
+	require.Equal(t, string(models.AutomationInvocationCancelled), invocationStatus)
+	require.Equal(t, string(models.ExecCancelled), executionStatus)
+	var reservations int
+	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT COUNT(*) FROM automation_task_run_reservations WHERE dispatch_id = ?`, dispatch.ID).Scan(&reservations))
+	require.Zero(t, reservations)
+	storedTask, err := fixture.taskRepo.GetByID(ctx, fixture.task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.CategoryBacklog, storedTask.Category, "recovered cancelled scheduled Automation task must remain visible in Backlog")
+}
+
+func TestAutomationRuntimeDispatcherDoesNotResurrectCancelledPreparedExecution(t *testing.T) {
+	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
+	ctx := context.Background()
+	_, dispatch, err := fixture.repo.ClaimScheduledOccurrence(ctx, fixture.schedule, time.Now().UTC(), fixture.schedule.ComputeNextRun(time.Now().UTC()))
+	require.NoError(t, err)
+	require.NotNil(t, dispatch)
+	leased, err := fixture.repo.LeaseNextDispatch(ctx, "dispatcher-crash-owner", time.Now().UTC(), time.Minute)
+	require.NoError(t, err)
+	require.Equal(t, dispatch.ID, leased.ID)
+	execution, err := fixture.taskRepo.ClaimAutomationDispatch(ctx, dispatch.ID, "dispatcher-crash-owner")
+	require.NoError(t, err)
+	require.NotEmpty(t, execution.ID)
+
+	// Simulate a crash after execution creation but before the dispatcher
+	// acknowledged the prepared execution in the outbox.
+	require.NoError(t, fixture.taskRepo.UpdateStatus(ctx, fixture.task.ID, models.StatusCancelled))
+	past := time.Now().UTC().Add(-time.Minute)
+	_, err = fixture.repo.DB().Exec(`UPDATE automation_dispatch_outbox SET claim_expires_at = ? WHERE id = ?`, past, dispatch.ID)
+	require.NoError(t, err)
+	_, err = fixture.repo.DB().Exec(`UPDATE automation_task_run_reservations SET lease_expires_at = ? WHERE dispatch_id = ?`, past, dispatch.ID)
+	require.NoError(t, err)
+
+	worker := NewWorkerService(nil, 1, nil)
+	dispatcher := NewAutomationDispatcher(fixture.repo, fixture.taskRepo, worker)
+	dispatched, err := dispatcher.DispatchOne(ctx)
+	require.NoError(t, err)
+	require.True(t, dispatched)
+
+	var dispatchStatus, invocationStatus, executionStatus string
+	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT d.status, i.status, e.status
+		FROM automation_dispatch_outbox d
+		JOIN automation_invocations i ON i.id = d.invocation_id
+		JOIN executions e ON e.id = d.execution_id
+		WHERE d.id = ?`, dispatch.ID).Scan(&dispatchStatus, &invocationStatus, &executionStatus))
+	require.Equal(t, "failed", dispatchStatus)
+	require.Equal(t, string(models.AutomationInvocationCancelled), invocationStatus)
+	require.Equal(t, string(models.ExecCancelled), executionStatus)
+	var reservations int
+	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT COUNT(*) FROM automation_task_run_reservations WHERE dispatch_id = ?`, dispatch.ID).Scan(&reservations))
+	require.Zero(t, reservations)
+}
+
 func TestAutomationRuntimeReconcilerResubmitsCapacityQueuedPreparedDispatch(t *testing.T) {
 	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
 	ctx := context.Background()
@@ -1596,6 +2259,12 @@ func TestAutomationRuntimeDispatchFailureBackoffIsOwnerOnlyAndTerminal(t *testin
 	require.NoError(t, err)
 	require.NotNil(t, leased)
 	require.NoError(t, fixture.repo.FailDispatch(ctx, dispatch.ID, "owner", "terminal", 2, nextAttempt.Add(time.Millisecond)))
+	storedTask, err := fixture.taskRepo.GetByID(ctx, fixture.task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusFailed, storedTask.Status)
+	require.Equal(t, models.CategoryCompleted, storedTask.Category)
+	require.NotNil(t, storedTask.CompletedAt)
+	require.ErrorIs(t, fixture.repo.FailDispatch(ctx, dispatch.ID, "owner", "duplicate terminal retry", 2, nextAttempt.Add(2*time.Millisecond)), repository.ErrAutomationDispatchLease)
 	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT status FROM automation_dispatch_outbox WHERE id = ?`, dispatch.ID).Scan(&status))
 	require.Equal(t, "failed", status)
 	var invocationStatus string
@@ -3563,6 +4232,171 @@ func TestAutomationLiveDisplayStateShowsRunningWhenMixedWithWaiting(t *testing.T
 	t.Fatalf("approval node not found")
 }
 
+func TestAutomationExternalRefreshValidatesIdentityWithoutLoadingDefinition(t *testing.T) {
+	fixture, counter := newCountingAutomationRuntimeFixture(t, AutomationAdapterGitHubSDLC)
+	ctx := context.Background()
+	pullRequests := repository.NewTaskPullRequestRepo(fixture.repo.DB())
+	projectRepo := repository.NewProjectRepo(fixture.repo.DB())
+	provider := &fakeAutomationPullRequestProvider{}
+	external := NewAutomationExternalStateService(fixture.repo, pullRequests, projectRepo, provider)
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	_, err := external.Refresh(ctx, fixture.project.ID, fixture.definition.Automation.ID, time.Now().UTC())
+	require.NoError(t, err)
+	require.Zero(t, provider.calls, "an Automation with no tracked pull requests must not call GitHub")
+
+	statements := counter.Statements()
+	require.Contains(t, statements, "SELECT EXISTS(SELECT 1 FROM automations WHERE project_id = ? AND id = ?)")
+	for _, statement := range statements {
+		lower := strings.ToLower(statement)
+		for _, table := range []string{"automation_versions", "automation_nodes", "automation_edges", "automation_definition_resources"} {
+			require.NotContains(t, lower, table, "external refresh must not hydrate graph table %s", table)
+		}
+	}
+}
+
+func automationDefinitionNodeLoadCount(statements []string) int {
+	count := 0
+	for _, statement := range statements {
+		normalized := strings.Join(strings.Fields(strings.ToLower(statement)), " ")
+		if strings.Contains(normalized, "select id, project_id, automation_id, version_id, node_key, name, node_type, role, config_json") && strings.Contains(normalized, "from automation_nodes") {
+			count++
+		}
+	}
+	return count
+}
+
+func refreshWithFormerDefinitionValidation(ctx context.Context, external *AutomationExternalStateService, projectID, automationID string, now time.Time) (models.AutomationExternalState, error) {
+	definition, err := external.automations.GetDefinition(ctx, projectID, automationID)
+	if err != nil {
+		return models.AutomationExternalState{}, err
+	}
+	if definition == nil {
+		return models.AutomationExternalState{}, errors.New("automation not found")
+	}
+	return external.refreshAfterValidation(ctx, projectID, automationID, now)
+}
+
+func TestAutomationExternalRefreshValidationPreservesMissingProjectAndDraftBehavior(t *testing.T) {
+	fixture, counter := newCountingAutomationRuntimeFixture(t, AutomationAdapterGitHubSDLC)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(fixture.repo.DB())
+	otherProject := models.Project{Name: "External refresh foreign project"}
+	require.NoError(t, projectRepo.Create(ctx, &otherProject))
+	provider := &fakeAutomationPullRequestProvider{}
+	external := NewAutomationExternalStateService(fixture.repo, repository.NewTaskPullRequestRepo(fixture.repo.DB()), projectRepo, provider)
+
+	assertNotFoundWithoutGitHub := func(name, projectID, automationID string) {
+		t.Helper()
+		counter.Reset()
+		counter.SetEnabled(true)
+		_, err := external.Refresh(ctx, projectID, automationID, time.Now().UTC())
+		require.EqualError(t, err, "automation not found", name)
+		require.Zero(t, provider.calls, name+" must not call GitHub")
+		statements := counter.Statements()
+		require.Equal(t, []string{"SELECT EXISTS(SELECT 1 FROM automations WHERE project_id = ? AND id = ?)"}, statements, name+" must stop after the project-scoped identity lookup")
+	}
+
+	assertNotFoundWithoutGitHub("missing automation", fixture.project.ID, "missing-automation")
+	assertNotFoundWithoutGitHub("project-mismatched automation", otherProject.ID, fixture.definition.Automation.ID)
+
+	counter.Reset()
+	provider.calls = 0
+	counter.SetEnabled(true)
+	_, err := fixture.repo.DB().ExecContext(ctx, `UPDATE automations SET published_version_id = NULL WHERE project_id = ? AND id = ?`, fixture.project.ID, fixture.definition.Automation.ID)
+	require.NoError(t, err)
+	_, err = external.Refresh(ctx, fixture.project.ID, fixture.definition.Automation.ID, time.Now().UTC())
+	require.NoError(t, err, "an unpublished Automation must remain refreshable")
+	require.Zero(t, provider.calls, "an unpublished Automation without tracked pulls must not call GitHub")
+	for _, statement := range counter.Statements() {
+		lower := strings.ToLower(statement)
+		for _, table := range []string{"automation_versions", "automation_nodes", "automation_edges", "automation_definition_resources"} {
+			require.NotContains(t, lower, table, "unpublished refresh must not load %s", table)
+		}
+	}
+}
+
+func TestAutomationExternalRefreshClosedPullRequestWithoutMergeReconcilesFailure(t *testing.T) {
+	fixture := newAutomationRuntimeFixture(t, AutomationAdapterGitHubSDLC)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(fixture.repo.DB())
+	fixture.project.RepoURL = "https://github.com/example/runtime"
+	require.NoError(t, projectRepo.Update(ctx, &fixture.project))
+
+	openPR := automationNodeByKey(t, fixture.definition, "open_pr")
+	review := automationNodeByKey(t, fixture.definition, "review")
+	binding := models.AutomationBinding{AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID, NodeID: openPR.ID}
+	_, _, err := fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+		Context: models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
+		WorkItemKey: "github:example/runtime:issue:77", ActivityKey: "github:example/runtime:pull:77:open",
+		ActivityType: "open_pull_request", ActivityStatus: models.AutomationActivityCompleted,
+		Resources: []models.AutomationActivityResource{{ResourceType: "task", ResourceID: fixture.task.ID}, {ResourceType: "pull_request", ResourceID: "github:example/runtime:pull:77"}},
+		EventKey:  "github:example/runtime:pull:77:review", FromNodeID: openPR.ID, ToNodeID: review.ID, Transition: models.AutomationTransitionWaiting,
+	})
+	require.NoError(t, err)
+
+	pullRequests := repository.NewTaskPullRequestRepo(fixture.repo.DB())
+	record := models.TaskPullRequest{TaskID: fixture.task.ID, PRNumber: 77, PRURL: "https://github.com/example/runtime/pull/77", PRState: "open"}
+	require.NoError(t, pullRequests.Upsert(ctx, &record))
+	now := time.Now().UTC().Truncate(time.Second)
+	_, err = fixture.repo.DB().ExecContext(ctx, `UPDATE task_pull_requests SET updated_at = datetime(?) WHERE id = ?`, now.Add(-time.Hour).Format("2006-01-02 15:04:05"), record.ID)
+	require.NoError(t, err)
+
+	provider := &fakeAutomationPullRequestProvider{pull: GitHubPullRequest{Number: 77, URL: record.PRURL, State: "closed"}}
+	external := NewAutomationExternalStateService(fixture.repo, pullRequests, projectRepo, provider)
+	_, err = external.Refresh(ctx, fixture.project.ID, fixture.definition.Automation.ID, now)
+	require.NoError(t, err)
+	require.Equal(t, 1, provider.calls)
+	stored, err := pullRequests.GetByTaskID(ctx, fixture.task.ID)
+	require.NoError(t, err)
+	require.Equal(t, "closed", stored.PRState, "closed but unmerged pull requests must remain closed")
+	require.NotZero(t, countRows(t, fixture.repo.DB(), `SELECT COUNT(*) FROM automation_activities WHERE automation_id = ? AND activity_type = 'pull_request_state' AND status = 'failed'`, fixture.definition.Automation.ID), "closed pull requests must project a failed state")
+	require.Zero(t, countRows(t, fixture.repo.DB(), `SELECT COUNT(*) FROM automation_work_items WHERE automation_id = ? AND status = 'completed'`, fixture.definition.Automation.ID), "closed but unmerged pull requests must not complete their work item")
+}
+
+func TestAutomationExternalRefreshAndLiveLoadDefinitionOnce(t *testing.T) {
+	fixture, counter := newCountingAutomationRuntimeFixture(t, AutomationAdapterGitHubSDLC)
+	ctx := context.Background()
+	pullRequests := repository.NewTaskPullRequestRepo(fixture.repo.DB())
+	projectRepo := repository.NewProjectRepo(fixture.repo.DB())
+	external := NewAutomationExternalStateService(fixture.repo, pullRequests, projectRepo, &fakeAutomationPullRequestProvider{})
+	graphService := NewAutomationGraphService(fixture.repo)
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	_, err := external.Refresh(ctx, fixture.project.ID, fixture.definition.Automation.ID, time.Now().UTC())
+	require.NoError(t, err)
+	graph, err := graphService.GetLive(ctx, fixture.project.ID, fixture.definition.Automation.ID, time.Now().UTC())
+	require.NoError(t, err)
+	require.NotNil(t, graph)
+	require.Len(t, graph.Nodes, len(fixture.definition.Nodes), "manual Live rendering must retain the complete graph")
+	require.Len(t, graph.Edges, len(fixture.definition.Edges), "manual Live rendering must retain the complete graph")
+	for _, expected := range fixture.definition.Nodes {
+		var found *models.AutomationLiveNode
+		for i := range graph.Nodes {
+			if graph.Nodes[i].ID == expected.ID {
+				found = &graph.Nodes[i]
+				break
+			}
+		}
+		require.NotNil(t, found, "manual Live rendering must retain node %s", expected.NodeKey)
+		require.Equal(t, expected.ConfigJSON, found.ConfigJSON, "manual Live rendering must retain node configuration %s", expected.NodeKey)
+	}
+	require.Len(t, graph.Resources, len(fixture.definition.Resources), "manual Live rendering must retain definition resources")
+	for _, expected := range fixture.definition.Resources {
+		found := false
+		for _, resource := range graph.Resources {
+			if resource.NodeID == expected.NodeID && resource.ResourceType == expected.ResourceType && resource.ResourceID == expected.ResourceID && resource.Relation == expected.Relation {
+				found = true
+				break
+			}
+		}
+		require.True(t, found, "manual Live rendering must retain resource %s/%s", expected.ResourceType, expected.ResourceID)
+	}
+	require.Equal(t, 1, automationDefinitionNodeLoadCount(counter.Statements()), "manual refresh validation plus Live rendering must hydrate the full graph once")
+}
+
 type fakeAutomationPullRequestProvider struct {
 	calls        int
 	resolveCalls int
@@ -3588,6 +4422,390 @@ func (f *fakeAutomationPullRequestProvider) GetPullRequest(context.Context, *Git
 	}
 	pull := f.pull
 	return &pull, nil
+}
+
+func seedAutomationExternalRefreshBenchmark(tb testing.TB, db *sql.DB, nodeCount int) (string, string) {
+	tb.Helper()
+	ctx := context.Background()
+	project := models.Project{Name: fmt.Sprintf("External refresh benchmark %d nodes", nodeCount)}
+	if err := repository.NewProjectRepo(db).Create(ctx, &project); err != nil {
+		tb.Fatalf("create benchmark project: %v", err)
+	}
+	automationID := repository.NewID()
+	versionID := repository.NewID()
+	if _, err := db.ExecContext(ctx, `INSERT INTO automations (id, project_id, stable_key, name, automation_type, lifecycle_state)
+		VALUES (?, ?, ?, ?, 'custom', 'active')`, automationID, project.ID, fmt.Sprintf("benchmark/%d", nodeCount), "External refresh benchmark"); err != nil {
+		tb.Fatalf("insert benchmark automation: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO automation_versions (id, project_id, automation_id, version, state, source, adapter_key, schema_version)
+		VALUES (?, ?, ?, 1, 'published', 'bootstrap', 'custom', 1)`, versionID, project.ID, automationID); err != nil {
+		tb.Fatalf("insert benchmark version: %v", err)
+	}
+	nodeIDs := make([]string, nodeCount)
+	configJSON := fmt.Sprintf(`{"payload":"%s"}`, strings.Repeat("x", 4096))
+	for i := range nodeIDs {
+		nodeIDs[i] = repository.NewID()
+		if _, err := db.ExecContext(ctx, `INSERT INTO automation_nodes
+			(id, project_id, automation_id, version_id, node_key, name, node_type, role, config_json, position_x, position_y)
+			VALUES (?, ?, ?, ?, ?, ?, 'agent_task', 'task', ?, ?, 0)`, nodeIDs[i], project.ID, automationID, versionID,
+			fmt.Sprintf("node-%d", i), fmt.Sprintf("Benchmark node %d", i), configJSON, i); err != nil {
+			tb.Fatalf("insert benchmark node %d: %v", i, err)
+		}
+	}
+	for i := 1; i < len(nodeIDs); i++ {
+		if _, err := db.ExecContext(ctx, `INSERT INTO automation_edges
+			(project_id, automation_id, version_id, source_node_id, target_node_id, edge_key, label, display_order)
+			VALUES (?, ?, ?, ?, ?, ?, 'next', ?)`, project.ID, automationID, versionID, nodeIDs[i-1], nodeIDs[i], fmt.Sprintf("edge-%d", i), i); err != nil {
+			tb.Fatalf("insert benchmark edge %d: %v", i, err)
+		}
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE automations SET published_version_id = ? WHERE id = ? AND project_id = ?`, versionID, automationID, project.ID); err != nil {
+		tb.Fatalf("publish benchmark automation: %v", err)
+	}
+	return project.ID, automationID
+}
+
+// BenchmarkOptimizationAutomationExternalRefreshDefinitionLoad compares the
+// former full graph load used for refresh existence validation with the
+// identity-only lookup now used by the refresh service.
+func BenchmarkOptimizationAutomationExternalRefreshDefinitionLoad(b *testing.B) {
+	for _, nodeCount := range []int{10, 50} {
+		b.Run(fmt.Sprintf("%d_nodes", nodeCount), func(b *testing.B) {
+			db := testutil.NewTestDB(b)
+			projectID, automationID := seedAutomationExternalRefreshBenchmark(b, db, nodeCount)
+			repo := repository.NewAutomationRepo(db)
+
+			b.Run("before_GetDefinition", func(b *testing.B) {
+				b.ReportAllocs()
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					if _, err := repo.GetDefinition(context.Background(), projectID, automationID); err != nil {
+						b.Fatal(err)
+					}
+				}
+			})
+			b.Run("after_Exists", func(b *testing.B) {
+				b.ReportAllocs()
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					if exists, err := repo.Exists(context.Background(), projectID, automationID); err != nil {
+						b.Fatal(err)
+					} else if !exists {
+						b.Fatal("benchmark automation unexpectedly missing")
+					}
+				}
+			})
+		})
+	}
+}
+
+type automationExternalRefreshBenchmarkFixture struct {
+	projectID     string
+	automationID  string
+	taskID        string
+	pullRequestID string
+}
+
+func seedAutomationExternalRefreshEndToEndFixture(tb testing.TB, db *sql.DB, nodeCount int) automationExternalRefreshBenchmarkFixture {
+	tb.Helper()
+	ctx := context.Background()
+	projectID, automationID := seedAutomationExternalRefreshBenchmark(tb, db, nodeCount)
+	if _, err := db.ExecContext(ctx, `UPDATE projects SET repo_url = ? WHERE id = ?`, "https://github.com/example/runtime", projectID); err != nil {
+		tb.Fatalf("set benchmark project repository: %v", err)
+	}
+	var versionID, nodeID string
+	if err := db.QueryRowContext(ctx, `SELECT id, version_id FROM automation_nodes WHERE project_id = ? AND automation_id = ? ORDER BY position_x, id LIMIT 1`, projectID, automationID).Scan(&nodeID, &versionID); err != nil {
+		tb.Fatalf("load benchmark graph identity: %v", err)
+	}
+	task := models.Task{ProjectID: projectID, Title: "External refresh benchmark task", Category: models.CategoryActive, Priority: 1, Status: models.StatusPending, Prompt: "benchmark external refresh"}
+	if err := repository.NewTaskRepo(db, nil).Create(ctx, &task); err != nil {
+		tb.Fatalf("create benchmark task: %v", err)
+	}
+	pull := models.TaskPullRequest{TaskID: task.ID, PRNumber: 7, PRURL: "https://github.com/example/runtime/pull/7", PRState: "open"}
+	pullRepo := repository.NewTaskPullRequestRepo(db)
+	if err := pullRepo.Upsert(ctx, &pull); err != nil {
+		tb.Fatalf("create benchmark pull request: %v", err)
+	}
+	automationRepo := repository.NewAutomationRepo(db)
+	binding := models.AutomationBinding{AutomationID: automationID, VersionID: versionID, NodeID: nodeID}
+	if _, _, err := automationRepo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+		Context: models.AutomationContext{ProjectID: projectID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
+		WorkItemKey: "benchmark:external-refresh", ActivityKey: "benchmark:external-refresh:pull",
+		ActivityType: "open_pull_request", ActivityStatus: models.AutomationActivityCompleted,
+		Resources: []models.AutomationActivityResource{{ResourceType: "task", ResourceID: task.ID}, {ResourceType: "pull_request", ResourceID: "github:example/runtime:pull:7"}},
+	}); err != nil {
+		tb.Fatalf("seed benchmark Automation activity: %v", err)
+	}
+	return automationExternalRefreshBenchmarkFixture{projectID: projectID, automationID: automationID, taskID: task.ID, pullRequestID: pull.ID}
+}
+
+func resetAutomationExternalRefreshBenchmarkPull(tb testing.TB, db *sql.DB, pullRequestID string, now time.Time) {
+	tb.Helper()
+	if _, err := db.ExecContext(context.Background(), `UPDATE task_pull_requests SET updated_at = datetime(?) WHERE id = ?`, now.Add(-time.Hour).Format("2006-01-02 15:04:05"), pullRequestID); err != nil {
+		tb.Fatalf("reset benchmark pull request freshness: %v", err)
+	}
+}
+
+func newAutomationExternalRefreshBenchmarkServices(db *sql.DB, fixture automationExternalRefreshBenchmarkFixture) (*AutomationExternalStateService, *AutomationGraphService, *AutomationReconciler, *fakeAutomationPullRequestProvider) {
+	provider := &fakeAutomationPullRequestProvider{pull: GitHubPullRequest{Number: 7, URL: "https://github.com/example/runtime/pull/7", State: "open"}}
+	automationRepo := repository.NewAutomationRepo(db)
+	external := NewAutomationExternalStateService(automationRepo, repository.NewTaskPullRequestRepo(db), repository.NewProjectRepo(db), provider)
+	graph := NewAutomationGraphService(automationRepo)
+	reconciler := NewAutomationReconciler(automationRepo, repository.NewExecutionRepo(db), NewWorkerService(nil, 1, nil))
+	reconciler.SetAutomationExternalStateService(external)
+	reconciler.SetAutomationLiveViewTracker(NewAutomationLiveViewTracker())
+	reconciler.liveViewTracker.MarkViewed(fixture.projectID, fixture.automationID)
+	return external, graph, reconciler, provider
+}
+
+func BenchmarkOptimizationAutomationExternalRefreshEndToEnd(b *testing.B) {
+	for _, nodeCount := range []int{10, 50} {
+		b.Run(fmt.Sprintf("%d_nodes", nodeCount), func(b *testing.B) {
+			db := testutil.NewTestDB(b)
+			fixture := seedAutomationExternalRefreshEndToEndFixture(b, db, nodeCount)
+			now := time.Now().UTC().Truncate(time.Second)
+			b.Run("manual_before_full_validation", func(b *testing.B) {
+				external, graph, _, _ := newAutomationExternalRefreshBenchmarkServices(db, fixture)
+				b.ReportAllocs()
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					b.StopTimer()
+					resetAutomationExternalRefreshBenchmarkPull(b, db, fixture.pullRequestID, now)
+					b.StartTimer()
+					if _, err := refreshWithFormerDefinitionValidation(context.Background(), external, fixture.projectID, fixture.automationID, now); err != nil {
+						b.Fatal(err)
+					}
+					if _, err := graph.GetLive(context.Background(), fixture.projectID, fixture.automationID, now); err != nil {
+						b.Fatal(err)
+					}
+				}
+			})
+			b.Run("manual_after_identity_validation", func(b *testing.B) {
+				external, graph, _, _ := newAutomationExternalRefreshBenchmarkServices(db, fixture)
+				b.ReportAllocs()
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					b.StopTimer()
+					resetAutomationExternalRefreshBenchmarkPull(b, db, fixture.pullRequestID, now)
+					b.StartTimer()
+					if _, err := external.Refresh(context.Background(), fixture.projectID, fixture.automationID, now); err != nil {
+						b.Fatal(err)
+					}
+					if _, err := graph.GetLive(context.Background(), fixture.projectID, fixture.automationID, now); err != nil {
+						b.Fatal(err)
+					}
+				}
+			})
+			b.Run("background_before_full_validation", func(b *testing.B) {
+				external, _, reconciler, _ := newAutomationExternalRefreshBenchmarkServices(db, fixture)
+				_ = external
+				b.ReportAllocs()
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					b.StopTimer()
+					resetAutomationExternalRefreshBenchmarkPull(b, db, fixture.pullRequestID, now)
+					reconciler.liveViewTracker.MarkViewed(fixture.projectID, fixture.automationID)
+					b.StartTimer()
+					if err := reconciler.refreshStaleExternalStateWith(context.Background(), func(ctx context.Context, projectID, automationID string, refreshNow time.Time) error {
+						_, err := refreshWithFormerDefinitionValidation(ctx, reconciler.externalStateSvc, projectID, automationID, refreshNow)
+						return err
+					}); err != nil {
+						b.Fatal(err)
+					}
+				}
+			})
+			b.Run("background_after_identity_validation", func(b *testing.B) {
+				external, _, reconciler, _ := newAutomationExternalRefreshBenchmarkServices(db, fixture)
+				_ = external
+				b.ReportAllocs()
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					b.StopTimer()
+					resetAutomationExternalRefreshBenchmarkPull(b, db, fixture.pullRequestID, now)
+					reconciler.liveViewTracker.MarkViewed(fixture.projectID, fixture.automationID)
+					b.StartTimer()
+					if err := reconciler.refreshStaleExternalState(context.Background()); err != nil {
+						b.Fatal(err)
+					}
+				}
+			})
+		})
+	}
+}
+
+type automationExternalRefreshContentionMeasurement struct {
+	refreshDuration time.Duration
+	waiterDuration  time.Duration
+	waitCount       int64
+	waitDuration    time.Duration
+	nodeQueries     int
+	providerCalls   int
+}
+
+func measureAutomationExternalRefreshContention(t *testing.T, formerDefinitionValidation, manual bool) automationExternalRefreshContentionMeasurement {
+	t.Helper()
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	fixture := seedAutomationExternalRefreshEndToEndFixture(t, db, 50)
+	external, graph, reconciler, provider := newAutomationExternalRefreshBenchmarkServices(db, fixture)
+	now := time.Now().UTC().Truncate(time.Second)
+	resetAutomationExternalRefreshBenchmarkPull(t, db, fixture.pullRequestID, now)
+	var seededUpdatedAt string
+	if err := db.QueryRowContext(context.Background(), `SELECT updated_at FROM task_pull_requests WHERE id = ?`, fixture.pullRequestID).Scan(&seededUpdatedAt); err != nil {
+		t.Fatalf("load benchmark pull request freshness: %v", err)
+	}
+	tracked, err := external.automations.ListAutomationPullRequests(context.Background(), fixture.projectID, fixture.automationID, 20)
+	if err != nil {
+		t.Fatalf("list benchmark tracked pull requests: %v", err)
+	}
+	if len(tracked) != 1 || !tracked[0].UpdatedAt.Before(now.Add(-time.Minute)) {
+		t.Fatalf("benchmark pull projection updated_at=%q tracked=%+v now=%s", seededUpdatedAt, tracked, now)
+	}
+
+	nodeEntered := make(chan struct{})
+	releaseNode := make(chan struct{})
+	var nodeOnce sync.Once
+	nodeQueries := 0
+	counter.SetObserver(func(_ context.Context, query string) {
+		normalized := strings.Join(strings.Fields(strings.ToLower(query)), " ")
+		if !strings.Contains(normalized, "from automation_nodes") {
+			return
+		}
+		nodeQueries++
+		if !manual && !formerDefinitionValidation {
+			return
+		}
+		nodeOnce.Do(func() {
+			close(nodeEntered)
+			<-releaseNode
+		})
+	})
+	counter.SetEnabled(true)
+
+	statsBeforeRefresh := db.Stats()
+	refreshDone := make(chan error, 1)
+	var callbackErr error
+	refreshStarted := time.Now()
+	go func() {
+		if manual {
+			var err error
+			if formerDefinitionValidation {
+				_, err = refreshWithFormerDefinitionValidation(context.Background(), external, fixture.projectID, fixture.automationID, now)
+			} else {
+				_, err = external.Refresh(context.Background(), fixture.projectID, fixture.automationID, now)
+			}
+			if err == nil {
+				live, liveErr := graph.GetLive(context.Background(), fixture.projectID, fixture.automationID, now)
+				if liveErr != nil {
+					err = liveErr
+				} else if live == nil {
+					err = errors.New("manual refresh returned no Live graph")
+				}
+			}
+			refreshDone <- err
+			return
+		}
+		if formerDefinitionValidation {
+			refreshDone <- reconciler.refreshStaleExternalStateWith(context.Background(), func(ctx context.Context, projectID, automationID string, refreshNow time.Time) error {
+				_, callbackErr = refreshWithFormerDefinitionValidation(ctx, reconciler.externalStateSvc, projectID, automationID, refreshNow)
+				return callbackErr
+			})
+			return
+		}
+		refreshDone <- reconciler.refreshStaleExternalState(context.Background())
+	}()
+
+	var waiterDuration time.Duration
+	var waitCount int64
+	var waitDuration time.Duration
+	if manual || formerDefinitionValidation {
+		select {
+		case <-nodeEntered:
+		case err := <-refreshDone:
+			close(releaseNode)
+			t.Fatalf("refresh completed before hydrating its expected graph: %v", err)
+		case <-time.After(2 * time.Second):
+			close(releaseNode)
+			t.Fatal("timed out waiting for expected refresh graph query")
+		}
+		statsBeforeWaiter := db.Stats()
+		waiterStarted := time.Now()
+		waiterDone := make(chan error, 1)
+		go func() {
+			var one int
+			waiterDone <- db.QueryRowContext(context.Background(), `SELECT 1`).Scan(&one)
+		}()
+		select {
+		case err := <-waiterDone:
+			close(releaseNode)
+			<-refreshDone
+			t.Fatalf("lightweight query completed while graph work held the only connection: %v", err)
+		case <-time.After(100 * time.Millisecond):
+		}
+		close(releaseNode)
+		if err := <-waiterDone; err != nil {
+			t.Fatalf("lightweight query after releasing graph work: %v", err)
+		}
+		if err := <-refreshDone; err != nil {
+			t.Fatalf("graph refresh: %v", err)
+		}
+		if callbackErr != nil {
+			t.Fatalf("background refresh callback: %v", callbackErr)
+		}
+		waiterDuration = time.Since(waiterStarted)
+		statsAfterWaiter := db.Stats()
+		waitCount = statsAfterWaiter.WaitCount - statsBeforeWaiter.WaitCount
+		waitDuration = statsAfterWaiter.WaitDuration - statsBeforeWaiter.WaitDuration
+	} else {
+		if err := <-refreshDone; err != nil {
+			t.Fatalf("identity-only background refresh: %v", err)
+		}
+		waiterStarted := time.Now()
+		var one int
+		if err := db.QueryRowContext(context.Background(), `SELECT 1`).Scan(&one); err != nil {
+			t.Fatalf("lightweight query after identity-only refresh: %v", err)
+		}
+		waiterDuration = time.Since(waiterStarted)
+		stats := db.Stats()
+		waitCount = stats.WaitCount - statsBeforeRefresh.WaitCount
+		waitDuration = stats.WaitDuration - statsBeforeRefresh.WaitDuration
+	}
+	refreshDuration := time.Since(refreshStarted)
+	counter.SetObserver(nil)
+	counter.SetEnabled(false)
+	return automationExternalRefreshContentionMeasurement{
+		refreshDuration: refreshDuration,
+		waiterDuration:  waiterDuration,
+		waitCount:       waitCount,
+		waitDuration:    waitDuration,
+		nodeQueries:     nodeQueries,
+		providerCalls:   provider.calls,
+	}
+}
+
+func TestAutomationExternalRefreshBackgroundContentionUsesNoGraphConnection(t *testing.T) {
+	before := measureAutomationExternalRefreshContention(t, true, false)
+	after := measureAutomationExternalRefreshContention(t, false, false)
+	require.Greater(t, before.nodeQueries, 0, "former background refresh must hydrate the graph")
+	require.Greater(t, before.waitCount, int64(0), "former graph hydration must make a concurrent query wait for the single connection")
+	require.Greater(t, before.waitDuration, time.Duration(0), "former graph hydration must record single-connection wait time")
+	require.Equal(t, 0, after.nodeQueries, "current background refresh must not hydrate the graph")
+	require.Equal(t, 1, before.providerCalls, "former refresh must use the shared fake provider once")
+	require.Equal(t, 1, after.providerCalls, "current refresh must use the shared fake provider once")
+	t.Logf("background external refresh before/after: refresh=%s/%s, lightweight query=%s/%s, WaitCount delta=%d/%d, WaitDuration delta=%s/%s, graph queries=%d/%d", before.refreshDuration, after.refreshDuration, before.waiterDuration, after.waiterDuration, before.waitCount, after.waitCount, before.waitDuration, after.waitDuration, before.nodeQueries, after.nodeQueries)
+}
+
+func TestAutomationExternalRefreshManualContentionLoadsGraphOnce(t *testing.T) {
+	before := measureAutomationExternalRefreshContention(t, true, true)
+	after := measureAutomationExternalRefreshContention(t, false, true)
+	require.Equal(t, 2, before.nodeQueries, "former manual refresh must hydrate once for validation and once for Live rendering")
+	require.Equal(t, 1, after.nodeQueries, "current manual refresh must hydrate the graph only for Live rendering")
+	require.Greater(t, before.waitCount, int64(0), "former manual refresh must contend for the single connection")
+	require.Greater(t, before.waitDuration, time.Duration(0), "former manual refresh must record single-connection wait time")
+	require.Greater(t, after.waitCount, int64(0), "Live rendering must still contend for the single connection")
+	require.Greater(t, after.waitDuration, time.Duration(0), "Live rendering must record single-connection wait time")
+	require.Equal(t, 1, before.providerCalls, "former manual refresh must use the shared fake provider once")
+	require.Equal(t, 1, after.providerCalls, "current manual refresh must use the shared fake provider once")
+	t.Logf("manual external refresh before/after: refresh=%s/%s, lightweight query=%s/%s, WaitCount delta=%d/%d, WaitDuration delta=%s/%s, graph queries=%d/%d", before.refreshDuration, after.refreshDuration, before.waiterDuration, after.waiterDuration, before.waitCount, after.waitCount, before.waitDuration, after.waitDuration, before.nodeQueries, after.nodeQueries)
 }
 
 func TestAutomationExternalPullRequestRefreshIsExplicitCachedAndReconcilesProjection(t *testing.T) {
@@ -3679,7 +4897,7 @@ func TestAutomationExternalPullRequestRefreshIsExplicitCachedAndReconcilesProjec
 }
 
 func TestAutomationReconcilerRefreshesStaleExternalPullRequestStateInBackground(t *testing.T) {
-	fixture := newAutomationRuntimeFixture(t, AutomationAdapterGitHubSDLC)
+	fixture, counter := newCountingAutomationRuntimeFixture(t, AutomationAdapterGitHubSDLC)
 	ctx := context.Background()
 	projectRepo := repository.NewProjectRepo(fixture.repo.DB())
 	fixture.project.RepoURL = "https://github.com/example/runtime"
@@ -3714,7 +4932,11 @@ func TestAutomationReconcilerRefreshesStaleExternalPullRequestStateInBackground(
 	external := NewAutomationExternalStateService(fixture.repo, pullRequests, projectRepo, provider)
 	reconciler := NewAutomationReconciler(fixture.repo, repository.NewExecutionRepo(fixture.repo.DB()), NewWorkerService(nil, 1, nil))
 	reconciler.SetAutomationExternalStateService(external)
+	counter.Reset()
+	counter.SetEnabled(true)
 	require.NoError(t, reconciler.ReconcileOnce(ctx))
+	require.Equal(t, 0, automationDefinitionNodeLoadCount(counter.Statements()), "background external refresh must not hydrate the full graph")
+	counter.SetEnabled(false)
 
 	require.Equal(t, 1, provider.calls, "the reconciler must refresh stale tracked pull request state automatically, without a manual click")
 	stored, err := pullRequests.GetByTaskID(ctx, fixture.task.ID)

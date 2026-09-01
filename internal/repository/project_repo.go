@@ -99,7 +99,7 @@ func (r *ProjectRepo) GetDefaultAgentConfigID(ctx context.Context, id string) (*
 }
 
 func (r *ProjectRepo) Create(ctx context.Context, p *models.Project) error {
-	return r.db.QueryRowContext(ctx,
+	return queryRowBoundSQLite(ctx, r.db,
 		`INSERT INTO projects (id, name, description, repo_path, repo_url, default_agent_config_id, max_workers)
 			 VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?)
 			 RETURNING id, repo_path, repo_url, created_at, updated_at`,
@@ -108,7 +108,7 @@ func (r *ProjectRepo) Create(ctx context.Context, p *models.Project) error {
 }
 
 func (r *ProjectRepo) Update(ctx context.Context, p *models.Project) error {
-	_, err := r.db.ExecContext(ctx,
+	_, err := execBoundSQLite(ctx, r.db,
 		`UPDATE projects SET name = ?, description = ?, repo_path = ?, repo_url = ?, default_agent_config_id = ?, max_workers = ?, updated_at = datetime('now')
 			 WHERE id = ?`,
 		p.Name, p.Description, p.RepoPath, p.RepoURL, p.DefaultAgentConfigID, p.MaxWorkers, p.ID)
@@ -128,11 +128,11 @@ func (r *ProjectRepo) HasTasks(ctx context.Context, id string) (bool, error) {
 }
 
 func (r *ProjectRepo) Delete(ctx context.Context, id string) error {
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, cleanup, err := beginImmediateTx(ctx, r.db)
 	if err != nil {
 		return fmt.Errorf("beginning transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer cleanup()
 
 	// Delete the project (related live tables use ON DELETE CASCADE)
 	result, err := tx.ExecContext(ctx, `DELETE FROM projects WHERE id = ? AND is_default = 0`, id)

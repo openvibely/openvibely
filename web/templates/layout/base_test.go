@@ -13,6 +13,19 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
+func TestBaseOmitsMultiSelectionCounter(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Base("Selection", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render Base: %v", err)
+	}
+	html := buf.String()
+	for _, forbidden := range []string{`id="selection-counter"`, `id="selection-count"`, `id="selection-label"`, `clearActiveSelection`} {
+		if strings.Contains(html, forbidden) {
+			t.Fatalf("base layout must not render the multi-selection counter contract %q", forbidden)
+		}
+	}
+}
+
 func TestBaseRuntimeModeAndChatLinkPolicyHooks(t *testing.T) {
 	var buf bytes.Buffer
 	if err := Base("Runtime", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
@@ -1124,7 +1137,7 @@ func TestLightTheme_UsesLightModernTokens(t *testing.T) {
 		"background-color: var(--ov-l-surface);",
 		"[data-theme=\"light\"] #main-content {",
 		"background-color: var(--ov-l-surface);",
-		"[data-theme=\"light\"] .btn-primary {",
+		"[data-color-theme=\"openvibely-light\"][data-theme=\"light\"] .btn-primary {",
 		"background-color: var(--ov-l-accent);",
 		"[data-theme=\"light\"] .sidebar-aside {",
 		"background-color: #FAFAFA;",
@@ -1192,6 +1205,55 @@ func TestThemeToggle_UsesImmediateSwitch(t *testing.T) {
 	}
 }
 
+func TestTaskRunningStateMatchesChatSendButtonByTheme(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Base("Test", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("failed to render Base: %v", err)
+	}
+	html := buf.String()
+
+	for _, fragment := range []string{
+		":root {",
+		"--ov-primary-action-color: #7480ff;",
+		"[data-theme=\"light\"] {",
+		"--ov-primary-action-color: #7480ff;",
+		"[data-color-theme]:not([data-color-theme=\"openvibely-dark\"]):not([data-color-theme=\"openvibely-light\"]) {",
+		"--ov-primary-action-color: oklch(var(--p) / 1);",
+		"[data-color-theme] .btn-primary.chat-send-button {",
+		"background-color: var(--ov-primary-action-color);",
+		"border-color: var(--ov-primary-action-color);",
+		".task-state-running {",
+		"color: var(--ov-primary-action-color);",
+	} {
+		if !strings.Contains(html, fragment) {
+			t.Errorf("expected chat send button and task running state to share primary action token via %q", fragment)
+		}
+	}
+	for _, forbidden := range []string{
+		"background-color: var(--ov-primary-action-color) !important;",
+		"border-color: var(--ov-primary-action-color) !important;",
+		"[data-color-theme=\"openvibely-dark\"] .btn-primary.chat-send-button,",
+		"\n\t\t\t\t\t.chat-send-button {",
+	} {
+		if strings.Contains(html, forbidden) {
+			t.Errorf("shared normal send color must remain theme-aware without suppressing hover via %q", forbidden)
+		}
+	}
+	sharedRule := strings.Index(html, `[data-color-theme] .btn-primary.chat-send-button {`)
+	for _, hoverSelector := range []string{
+		`[data-color-theme="openvibely-dark"][data-theme="dark"] .btn-primary:hover {`,
+		`[data-color-theme="openvibely-light"][data-theme="light"] .btn-primary:hover {`,
+	} {
+		hoverRule := strings.Index(html, hoverSelector)
+		if sharedRule < 0 || hoverRule < sharedRule {
+			t.Errorf("shared send normal rule must precede %q so hover remains authoritative", hoverSelector)
+		}
+	}
+	if strings.Contains(html, "--ov-task-running:") {
+		t.Error("task running state must not retain a separate color token")
+	}
+}
+
 // TestLoadingDots_UsesPrimaryThemeToken ensures the shared three-dot loader
 // stays tied to the same primary token used by primary buttons (chat send button).
 func TestLoadingDots_UsesPrimaryThemeToken(t *testing.T) {
@@ -1226,8 +1288,8 @@ func TestDarkMode_ButtonHoverParity(t *testing.T) {
 	html := buf.String()
 
 	expected := []string{
-		"[data-theme=\"dark\"] .btn:hover {",
-		"[data-theme=\"dark\"] .btn-primary:hover {",
+		"[data-color-theme=\"openvibely-dark\"][data-theme=\"dark\"] .btn:hover {",
+		"[data-color-theme=\"openvibely-dark\"][data-theme=\"dark\"] .btn-primary:hover {",
 		"[data-theme=\"dark\"] .btn-secondary:hover {",
 		"[data-theme=\"dark\"] .btn-accent:hover {",
 		"[data-theme=\"dark\"] .btn-info:hover {",
@@ -1263,8 +1325,8 @@ func TestLightMode_ButtonHoverParity(t *testing.T) {
 	html := buf.String()
 
 	expected := []string{
-		"[data-theme=\"light\"] .btn:hover {",
-		"[data-theme=\"light\"] .btn-primary:hover {",
+		"[data-color-theme=\"openvibely-light\"][data-theme=\"light\"] .btn:hover {",
+		"[data-color-theme=\"openvibely-light\"][data-theme=\"light\"] .btn-primary:hover {",
 		"[data-theme=\"light\"] .btn-secondary:hover {",
 		"[data-theme=\"light\"] .btn-accent:hover {",
 		"[data-theme=\"light\"] .btn-info:hover {",

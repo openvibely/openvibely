@@ -192,6 +192,58 @@ func TestTaskChangesWorktreeContent_LocalAndGitHubSections(t *testing.T) {
 	}
 }
 
+func TestTaskWorktreeMergeActionsShareMetadataAcrossWorktreeAndChanges(t *testing.T) {
+	task := &models.Task{ID: "task-1", WorktreeBranch: "task/feature", MergeTargetBranch: "develop", MergeStatus: models.MergeStatusPending}
+
+	var worktreeBuf bytes.Buffer
+	if err := WorktreeInfoPanel(task, nil).Render(context.Background(), &worktreeBuf); err != nil {
+		t.Fatalf("render worktree panel: %v", err)
+	}
+	worktree := worktreeBuf.String()
+	for _, want := range []string{
+		`data-task-worktree-merge-action`,
+		`data-merge-type="merge"`,
+		`data-merge-type="ff"`,
+		`data-merge-type="squash"`,
+		`data-merge-label="Merge commit"`,
+		`data-merge-label="Fast-forward only"`,
+		`data-merge-label="Squash merge"`,
+		`data-merge-endpoint="merge"`,
+		`hx-post="/tasks/task-1/worktree/merge"`,
+		`hx-target="#worktree-info-panel"`,
+		`Merge to develop`,
+	} {
+		if !strings.Contains(worktree, want) {
+			t.Fatalf("expected Worktree action metadata %q, body=%s", want, worktree)
+		}
+	}
+	if strings.Contains(worktree, `data-merge-type="rebase"`) {
+		t.Fatalf("Worktree panel must preserve its existing lack of a Rebase action, body=%s", worktree)
+	}
+
+	var changesBuf bytes.Buffer
+	if err := TaskChangesWorktreeContent("diff --git", task, nil, nil, nil, false, true).Render(context.Background(), &changesBuf); err != nil {
+		t.Fatalf("render Changes content: %v", err)
+	}
+	changes := changesBuf.String()
+	for _, want := range []string{
+		`data-merge-type="merge"`,
+		`data-merge-type="ff"`,
+		`data-merge-type="rebase"`,
+		`data-merge-type="squash"`,
+		`data-merge-label="Rebase"`,
+		`data-merge-endpoint="rebase"`,
+		`hx-post="/tasks/task-1/worktree/rebase"`,
+		`hx-target="#changes-content"`,
+		`Rebase onto develop`,
+		`merge_source`,
+		`changes_tab`,
+	} {
+		if !strings.Contains(changes, want) {
+			t.Fatalf("expected Changes action metadata %q, body=%s", want, changes)
+		}
+	}
+}
 func TestTaskChangesWorktreeContent_RebaseOnlyWhenAvailable(t *testing.T) {
 	task := &models.Task{ID: "task-1", WorktreeBranch: "task/feature", MergeStatus: models.MergeStatusPending}
 	var buf bytes.Buffer
@@ -205,7 +257,7 @@ func TestTaskChangesWorktreeContent_RebaseOnlyWhenAvailable(t *testing.T) {
 	if !strings.Contains(out, "Rebase onto main") {
 		t.Fatal("expected Rebase action label to include target branch")
 	}
-	if !strings.Contains(out, `hx-disabled-elt="this"`) {
+	if !strings.Contains(out, `hx-disabled-elt="#changes-actions-dropdown button"`) {
 		t.Fatal("expected Rebase action to disable while request is in flight")
 	}
 }
@@ -243,7 +295,7 @@ func TestTaskChangesWorktreeContent_MergedStatusWithoutDiffHidesLocalSection(t *
 	}
 }
 
-func TestTaskChangesWorktreeContent_ConflictStatusHidesLocalSection(t *testing.T) {
+func TestTaskChangesWorktreeContent_ConflictStatusShowsRecoveryWithoutMergeActions(t *testing.T) {
 	task := &models.Task{
 		ID:             "task-1",
 		WorktreeBranch: "task/feature",
@@ -256,11 +308,38 @@ func TestTaskChangesWorktreeContent_ConflictStatusHidesLocalSection(t *testing.T
 		t.Fatalf("render: %v", err)
 	}
 	out := buf.String()
-	if strings.Contains(out, "Fast-forward only") || strings.Contains(out, "Squash merge") || strings.Contains(out, "merge_source") {
-		t.Fatalf("expected Local merge section hidden while conflict is active, body=%s", out)
+	if strings.Contains(out, "/worktree/merge") || strings.Contains(out, "Fast-forward only") || strings.Contains(out, "Squash merge") {
+		t.Fatalf("expected ordinary merge actions hidden while conflict is active, body=%s", out)
+	}
+	for _, want := range []string{"Conflict recovery", "AI Resolve Conflicts", "Abort Merge", `data-merge-conflict-guidance`, `hx-vals='{"merge_source": "changes_tab"}'`} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected conflict recovery content %q, body=%s", want, out)
+		}
 	}
 	if !strings.Contains(out, "GitHub") {
 		t.Fatalf("expected GitHub section to remain available, body=%s", out)
+	}
+}
+
+func TestTaskChangesWorktreeContent_FailedStatusShowsRetryActions(t *testing.T) {
+	task := &models.Task{
+		ID:             "task-1",
+		WorktreeBranch: "task/feature",
+		MergeStatus:    models.MergeStatusFailed,
+		Status:         models.StatusCompleted,
+	}
+	var buf bytes.Buffer
+	if err := TaskChangesWorktreeContent("diff --git", task, nil, nil, nil, false, false).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render failed: %v", err)
+	}
+	out := buf.String()
+	for _, want := range []string{"Merge commit", "Fast-forward only", "Squash merge", `hx-disabled-elt="#changes-actions-dropdown button"`} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected failed status retry content %q, body=%s", want, out)
+		}
+	}
+	if strings.Contains(out, "Conflict recovery") {
+		t.Fatalf("failed status must not show conflict recovery actions, body=%s", out)
 	}
 }
 

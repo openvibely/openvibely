@@ -20,6 +20,7 @@ type channelStatusToolResponse struct {
 	Slack                  slackChannelStatusSummary    `json:"slack"`
 	Telegram               telegramChannelStatusSummary `json:"telegram"`
 	Discord                discordChannelStatusSummary  `json:"discord"`
+	X                      xChannelStatusSummary        `json:"x"`
 	Email                  emailChannelStatusSummary    `json:"email"`
 	Webhooks               webhookStatusSummary         `json:"webhooks"`
 	OutboundTargets        outboundTargetsStatusSummary `json:"outbound_message_targets"`
@@ -70,6 +71,17 @@ type discordChannelStatusSummary struct {
 	AuthorizedUserCount int    `json:"authorized_user_count"`
 }
 
+type xChannelStatusSummary struct {
+	Configured          bool   `json:"configured"`
+	Connected           bool   `json:"connected"`
+	Running             bool   `json:"running"`
+	Status              string `json:"status"`
+	Username            string `json:"username,omitempty"`
+	SendResponses       bool   `json:"send_responses"`
+	AuthorizedUserCount int    `json:"authorized_user_count"`
+	LastError           string `json:"last_error,omitempty"`
+}
+
 type emailChannelStatusSummary struct {
 	Configured            bool   `json:"configured"`
 	Running               bool   `json:"running"`
@@ -100,19 +112,12 @@ type webhookEndpointLabel struct {
 }
 
 type outboundTargetsStatusSummary struct {
-	Total                         int                                      `json:"total"`
-	Configured                    bool                                     `json:"configured"`
-	ExplicitUnsavedTargetsAllowed bool                                     `json:"explicit_unsaved_targets_allowed"`
-	MessagingAvailable            bool                                     `json:"messaging_available"`
-	ByPlatform                    map[string]outboundTargetPlatformSummary `json:"by_platform"`
+	service.OutboundTargetStatusSummary
+	ExplicitUnsavedTargetsAllowed bool `json:"explicit_unsaved_targets_allowed"`
+	MessagingAvailable            bool `json:"messaging_available"`
 }
 
-type outboundTargetPlatformSummary struct {
-	Total  int            `json:"total"`
-	Home   int            `json:"home"`
-	Named  int            `json:"named"`
-	ByKind map[string]int `json:"by_kind"`
-}
+type outboundTargetPlatformSummary = service.OutboundTargetPlatformSummary
 
 func (h *Handler) executeListChannels(ctx context.Context, projectID string) string {
 	resp := h.buildChannelStatusSummary(ctx, strings.TrimSpace(projectID))
@@ -134,7 +139,9 @@ func (h *Handler) buildChannelStatusSummary(ctx context.Context, projectID strin
 		ProjectID:          projectID,
 		ConfiguredChannels: []string{},
 		OutboundTargets: outboundTargetsStatusSummary{
-			ByPlatform: map[string]outboundTargetPlatformSummary{},
+			OutboundTargetStatusSummary: service.OutboundTargetStatusSummary{
+				ByPlatform: map[string]outboundTargetPlatformSummary{},
+			},
 		},
 	}
 	if projectID == "" {
@@ -252,6 +259,21 @@ func (h *Handler) buildChannelStatusSummary(ctx context.Context, projectID strin
 		resp.ConfiguredChannels = append(resp.ConfiguredChannels, "discord")
 	}
 
+	xStatus := service.XConnectionStatus{}
+	if xService := h.getXService(); xService != nil {
+		xStatus = xService.Status()
+	}
+	xStatus.Configured = xStatus.Configured || (get(service.XSettingConsumerKey) != "" && get(service.XSettingConsumerSecret) != "" && get(service.XSettingAccessToken) != "" && get(service.XSettingAccessTokenSecret) != "")
+	resp.X = xChannelStatusSummary{Configured: xStatus.Configured, Connected: xStatus.Connected, Running: xStatus.Running, Status: connectedStatus(xStatus.Configured, xStatus.Connected), Username: strings.TrimSpace(xStatus.Username), SendResponses: !isFalse(service.XSettingSendResponses), LastError: safeSingleLine(xStatus.LastError)}
+	if h.xAuthRepo != nil {
+		if count, err := h.xAuthRepo.CountByProject(ctx, projectID); err == nil {
+			resp.X.AuthorizedUserCount = count
+		}
+	}
+	if resp.X.Configured {
+		resp.ConfiguredChannels = append(resp.ConfiguredChannels, "x")
+	}
+
 	email := service.EmailConnectionStatus{Provider: service.EmailProviderCustom, IMAPPort: 993, SMTPPort: 587}
 	if h.emailService != nil {
 		email = h.emailService.GetConnectionStatus(ctx)
@@ -338,6 +360,11 @@ func (h *Handler) channelStatusSettings(ctx context.Context, projectID string) m
 		service.TelegramSettingRichMessagesV2,
 		service.DiscordSettingBotToken,
 		service.DiscordSettingSendResponses,
+		service.XSettingConsumerKey,
+		service.XSettingConsumerSecret,
+		service.XSettingAccessToken,
+		service.XSettingAccessTokenSecret,
+		service.XSettingSendResponses,
 		service.EmailSettingProvider,
 		service.EmailSettingAddress,
 		service.EmailSettingPassword,
@@ -374,27 +401,18 @@ func summarizeWebhooks(webhooks []models.WebhookEndpoint) webhookStatusSummary {
 }
 
 func outboundTargetsStatusFromRepoSummary(summary repository.ChannelTargetProjectSummary) outboundTargetsStatusSummary {
-	out := outboundTargetsStatusSummary{
-		Total:      summary.Total,
-		Configured: summary.Configured,
-		ByPlatform: map[string]outboundTargetPlatformSummary{},
+	return outboundTargetsStatusSummary{
+		OutboundTargetStatusSummary: service.OutboundTargetStatusSummaryFromRepoSummary(summary),
 	}
-	for platform, platformSummary := range summary.ByPlatform {
-		out.ByPlatform[platform] = outboundTargetPlatformSummary{
-			Total:  platformSummary.Total,
-			Home:   platformSummary.Home,
-			Named:  platformSummary.Named,
-			ByKind: platformSummary.ByKind,
-		}
-	}
-	return out
 }
 
 func summarizeOutboundTargets(targets []models.ChannelTarget) outboundTargetsStatusSummary {
 	out := outboundTargetsStatusSummary{
-		Total:      len(targets),
-		Configured: len(targets) > 0,
-		ByPlatform: map[string]outboundTargetPlatformSummary{},
+		OutboundTargetStatusSummary: service.OutboundTargetStatusSummary{
+			Total:      len(targets),
+			Configured: len(targets) > 0,
+			ByPlatform: map[string]outboundTargetPlatformSummary{},
+		},
 	}
 	for _, target := range targets {
 		platform := strings.ToLower(strings.TrimSpace(target.Platform))

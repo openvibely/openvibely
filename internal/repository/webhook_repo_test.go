@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
@@ -173,6 +174,15 @@ func TestWebhookRepo_Delete(t *testing.T) {
 	}
 }
 
+func TestWebhookRepo_DeleteMissingReturnsNotFound(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewWebhookRepo(db)
+
+	if err := repo.Delete(context.Background(), "missing-webhook"); !errors.Is(err, ErrWebhookNotFound) {
+		t.Fatalf("expected deleting a missing webhook to return ErrWebhookNotFound, got %v", err)
+	}
+}
+
 func TestWebhookRepo_RotateSecret(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewWebhookRepo(db)
@@ -204,6 +214,26 @@ func TestWebhookRepo_RotateSecret(t *testing.T) {
 	got, _ := repo.GetByID(context.Background(), w.ID)
 	if got.Secret != newSecret {
 		t.Errorf("stored secret = %q, want %q", got.Secret, newSecret)
+	}
+}
+
+func TestWebhookRepo_RotateSecretMissingReturnsNotFound(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewWebhookRepo(db)
+
+	newSecret, err := repo.RotateSecret(context.Background(), "missing-webhook")
+	if !errors.Is(err, ErrWebhookNotFound) {
+		t.Fatalf("expected rotating a missing webhook to return ErrWebhookNotFound, got %v", err)
+	}
+	if newSecret != "" {
+		t.Fatalf("expected no secret for a missing webhook, got %q", newSecret)
+	}
+	got, getErr := repo.GetByID(context.Background(), "missing-webhook")
+	if getErr != nil {
+		t.Fatalf("GetByID: %v", getErr)
+	}
+	if got != nil {
+		t.Fatal("expected missing webhook to remain absent")
 	}
 }
 

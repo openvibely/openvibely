@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -390,10 +391,10 @@ func TestInsightsService_AIBackedWorkflowsPersistAndListResults(t *testing.T) {
 	if err != nil || len(tags) == 0 {
 		t.Fatalf("knowledge tags=%v err=%v", tags, err)
 	}
-	if err := svc.DeleteKnowledge(ctx, knowledge[0].ID); err != nil {
+	if err := svc.DeleteKnowledge(ctx, project.ID, knowledge[0].ID); err != nil {
 		t.Fatalf("DeleteKnowledge: %v", err)
 	}
-	if deleted, err := insightsRepo.GetKnowledge(ctx, knowledge[0].ID); err != nil || deleted != nil {
+	if deleted, err := insightsRepo.GetKnowledge(ctx, project.ID, knowledge[0].ID); err != nil || deleted != nil {
 		t.Fatalf("knowledge should be deleted, got %#v err=%v", deleted, err)
 	}
 
@@ -401,7 +402,7 @@ func TestInsightsService_AIBackedWorkflowsPersistAndListResults(t *testing.T) {
 	if err := insightsRepo.CreateInsight(ctx, manual); err != nil {
 		t.Fatalf("create manual insight: %v", err)
 	}
-	gotInsight, err := svc.GetInsight(ctx, manual.ID)
+	gotInsight, err := svc.GetInsight(ctx, project.ID, manual.ID)
 	if err != nil || gotInsight == nil || gotInsight.Title != manual.Title {
 		t.Fatalf("GetInsight = %#v err=%v", gotInsight, err)
 	}
@@ -409,7 +410,7 @@ func TestInsightsService_AIBackedWorkflowsPersistAndListResults(t *testing.T) {
 	if err != nil || len(byType) != 1 {
 		t.Fatalf("ListByType len=%d err=%v", len(byType), err)
 	}
-	if err := svc.DeleteInsight(ctx, manual.ID); err != nil {
+	if err := svc.DeleteInsight(ctx, project.ID, manual.ID); err != nil {
 		t.Fatalf("DeleteInsight: %v", err)
 	}
 	reports, err := svc.ListReports(ctx, project.ID, 10)
@@ -449,21 +450,119 @@ func TestInsightsService_UpdateAndAcceptInsight(t *testing.T) {
 	}
 
 	// Accept without task
-	if err := svc.AcceptInsight(ctx, insight.ID, nil); err != nil {
+	if err := svc.AcceptInsight(ctx, project.ID, insight.ID, nil); err != nil {
 		t.Fatalf("accept insight: %v", err)
 	}
-	got, _ := insightsRepo.GetInsight(ctx, insight.ID)
+	got, _ := insightsRepo.GetInsight(ctx, project.ID, insight.ID)
 	if got.Status != models.InsightStatusAccepted {
 		t.Errorf("status: got %q, want accepted", got.Status)
 	}
 
 	// Update to resolved
-	if err := svc.UpdateInsightStatus(ctx, insight.ID, models.InsightStatusResolved); err != nil {
+	if err := svc.UpdateInsightStatus(ctx, project.ID, insight.ID, models.InsightStatusResolved); err != nil {
 		t.Fatalf("update status: %v", err)
 	}
-	got, _ = insightsRepo.GetInsight(ctx, insight.ID)
+	got, _ = insightsRepo.GetInsight(ctx, project.ID, insight.ID)
 	if got.Status != models.InsightStatusResolved {
 		t.Errorf("status: got %q, want resolved", got.Status)
+	}
+}
+
+func TestInsightsService_ProjectScopedMutations(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+
+	projectRepo := repository.NewProjectRepo(db)
+	insightsRepo := repository.NewInsightsRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	svc := NewInsightsService(insightsRepo, taskRepo, projectRepo, llmConfigRepo, execRepo)
+
+	projectA := &models.Project{Name: "Project A"}
+	projectB := &models.Project{Name: "Project B"}
+	if err := projectRepo.Create(ctx, projectA); err != nil {
+		t.Fatalf("create project A: %v", err)
+	}
+	if err := projectRepo.Create(ctx, projectB); err != nil {
+		t.Fatalf("create project B: %v", err)
+	}
+
+	insight := &models.Insight{
+		ProjectID:  projectB.ID,
+		Type:       models.InsightOptimization,
+		Severity:   models.InsightSeverityMedium,
+		Status:     models.InsightStatusNew,
+		Title:      "Project B insight",
+		Evidence:   "{}",
+		Confidence: 0.7,
+	}
+	if err := insightsRepo.CreateInsight(ctx, insight); err != nil {
+		t.Fatalf("create insight: %v", err)
+	}
+
+	if foreign, err := svc.GetInsight(ctx, projectA.ID, insight.ID); err != nil || foreign != nil {
+		t.Fatalf("foreign insight lookup = %#v, err=%v; want not found", foreign, err)
+	}
+	if err := svc.AcceptInsight(ctx, projectA.ID, insight.ID, nil); !errors.Is(err, ErrInsightNotFound) {
+		t.Fatalf("foreign accept error = %v, want %v", err, ErrInsightNotFound)
+	}
+	if err := svc.UpdateInsightStatus(ctx, projectA.ID, insight.ID, models.InsightStatusRejected); !errors.Is(err, ErrInsightNotFound) {
+		t.Fatalf("foreign status update error = %v, want %v", err, ErrInsightNotFound)
+	}
+	unchanged, err := svc.GetInsight(ctx, projectB.ID, insight.ID)
+	if err != nil || unchanged == nil || unchanged.Status != models.InsightStatusNew || unchanged.ResolvedAt != nil {
+		t.Fatalf("foreign insight changed after rejected service mutations: %#v err=%v", unchanged, err)
+	}
+
+	if err := svc.UpdateInsightStatus(ctx, projectB.ID, insight.ID, models.InsightStatusAccepted); err != nil {
+		t.Fatalf("same-project accept: %v", err)
+	}
+	if err := svc.UpdateInsightStatus(ctx, projectB.ID, insight.ID, models.InsightStatusResolved); err != nil {
+		t.Fatalf("same-project resolve: %v", err)
+	}
+	resolved, err := svc.GetInsight(ctx, projectB.ID, insight.ID)
+	if err != nil || resolved == nil || resolved.Status != models.InsightStatusResolved || resolved.ResolvedAt == nil {
+		t.Fatalf("same-project resolved insight = %#v err=%v", resolved, err)
+	}
+	resolvedAt := *resolved.ResolvedAt
+	if err := svc.UpdateInsightStatus(ctx, projectB.ID, insight.ID, models.InsightStatusRejected); err != nil {
+		t.Fatalf("same-project reject: %v", err)
+	}
+	preserved, err := svc.GetInsight(ctx, projectB.ID, insight.ID)
+	if err != nil || preserved == nil || preserved.Status != models.InsightStatusRejected || preserved.ResolvedAt == nil || !preserved.ResolvedAt.Equal(resolvedAt) {
+		t.Fatalf("same-project resolved_at preservation failed: %#v err=%v", preserved, err)
+	}
+
+	if err := svc.DeleteInsight(ctx, projectA.ID, insight.ID); !errors.Is(err, ErrInsightNotFound) {
+		t.Fatalf("foreign insight delete error = %v, want %v", err, ErrInsightNotFound)
+	}
+	if stillThere, err := svc.GetInsight(ctx, projectB.ID, insight.ID); err != nil || stillThere == nil {
+		t.Fatalf("foreign insight disappeared after rejected service delete: %#v err=%v", stillThere, err)
+	}
+
+	knowledge := &models.KnowledgeEntry{
+		ProjectID: projectB.ID,
+		Topic:     "Project B knowledge",
+		Content:   "Project B content",
+		Source:    "test",
+		SourceRef: "project-b",
+		Tags:      "[]",
+	}
+	if err := insightsRepo.CreateKnowledge(ctx, knowledge); err != nil {
+		t.Fatalf("create knowledge: %v", err)
+	}
+	if err := svc.DeleteKnowledge(ctx, projectA.ID, knowledge.ID); !errors.Is(err, ErrKnowledgeNotFound) {
+		t.Fatalf("foreign knowledge delete error = %v, want %v", err, ErrKnowledgeNotFound)
+	}
+	if stillThere, err := insightsRepo.GetKnowledge(ctx, projectB.ID, knowledge.ID); err != nil || stillThere == nil {
+		t.Fatalf("foreign knowledge disappeared after rejected service delete: %#v err=%v", stillThere, err)
+	}
+	if err := svc.DeleteKnowledge(ctx, projectB.ID, knowledge.ID); err != nil {
+		t.Fatalf("same-project knowledge delete: %v", err)
+	}
+	if err := svc.DeleteInsight(ctx, projectB.ID, insight.ID); err != nil {
+		t.Fatalf("same-project insight delete: %v", err)
 	}
 }
 

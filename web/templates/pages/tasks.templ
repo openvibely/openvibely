@@ -41,6 +41,105 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 		}
 	</div>
 
+	<!-- Delete All Tasks Dialog -->
+	if project != nil {
+		@DestructiveConfirmDialog("delete_all_tasks_confirm_modal", "Close delete all tasks confirmation", "Delete All Tasks", "Are you sure you want to delete ", "delete_all_tasks_confirm_name", "", "? This action cannot be undone.", templ.ComponentScript{Call: "delete_all_tasks_confirm_modal.close()"}, templ.ComponentScript{Call: "confirmDeleteAllTasks()"}) {
+			All tasks in the selected dropzone for this project will be permanently deleted.
+		}
+
+		<script>
+			var deleteAllTasksURL = '';
+			var deleteAllTasksRequestInFlight = false;
+
+			function openDeleteAllTasksConfirm(button) {
+				if (!button || deleteAllTasksRequestInFlight) return;
+				var modal = document.getElementById('delete_all_tasks_confirm_modal');
+				if (!modal || modal.open) return;
+				var category = button.dataset.deleteAllTasksCategory || '';
+				var projectID = button.dataset.projectId || '';
+				var displayName = button.dataset.deleteAllTasksName || '';
+				if ((category !== 'completed' && category !== 'backlog') || !projectID || !displayName) return;
+				deleteAllTasksURL = '/tasks/' + category + '?project_id=' + encodeURIComponent(projectID);
+				button.focus({preventScroll: true});
+				window.openDestructiveConfirmDialog('delete_all_tasks_confirm_modal', 'delete_all_tasks_confirm_name', displayName);
+			}
+
+			function confirmDeleteAllTasks() {
+				if (deleteAllTasksRequestInFlight || !deleteAllTasksURL) return;
+				var requestURL = deleteAllTasksURL;
+				var modal = document.getElementById('delete_all_tasks_confirm_modal');
+				var confirmButton = modal && modal.querySelector('.modal-action button.btn-error');
+				deleteAllTasksRequestInFlight = true;
+				if (confirmButton) confirmButton.disabled = true;
+				if (modal && modal.open) {
+					modal.__openVibelyDestructiveTrigger = null;
+					modal.close();
+					var restoredFocus = document.activeElement;
+					if (restoredFocus && restoredFocus.closest && restoredFocus.closest('.dropdown')) restoredFocus.blur();
+				}
+				htmx.ajax('DELETE', requestURL, {
+					target: '#kanban-board',
+					swap: 'outerHTML'
+				});
+			}
+
+			if (!window._tasksDeleteAllRequestHandlerAttached) {
+				window._tasksDeleteAllRequestHandlerAttached = true;
+				document.body.addEventListener('htmx:afterRequest', function(event) {
+					var detail = event && event.detail;
+					var requestConfig = detail && detail.requestConfig;
+					if (!requestConfig || requestConfig.path !== deleteAllTasksURL) return;
+					deleteAllTasksRequestInFlight = false;
+					var modal = document.getElementById('delete_all_tasks_confirm_modal');
+					var confirmButton = modal && modal.querySelector('.modal-action button.btn-error');
+					if (confirmButton) confirmButton.disabled = false;
+					var status = detail.xhr && detail.xhr.status;
+					if (status >= 200 && status < 300) deleteAllTasksURL = '';
+				});
+			}
+		</script>
+	}
+
+	<!-- Task card merge, rebase, and pull request actions execute directly. -->
+	if project != nil {
+		<script>
+			function runTaskCardAction(button) {
+				if (!button || !window.htmx || window._taskCardActionRequest) return;
+				if (!button.hasAttribute('data-task-card-merge-action') && !button.hasAttribute('data-task-card-pr-action')) return;
+				var taskID = button.dataset.taskId || '';
+				var projectID = button.dataset.projectId || '';
+				var mode = button.dataset.mergeType || '';
+				var endpoint = button.dataset.mergeEndpoint || '';
+				if (!taskID || !projectID || !mode || !endpoint) return;
+				var path = '/tasks/' + encodeURIComponent(taskID) + '/worktree/' + endpoint;
+				window._taskCardActionRequest = {path: path, taskID: taskID, button: button};
+				button.disabled = true;
+				htmx.ajax('POST', path, {
+					target: '#kanban-board',
+					swap: 'outerHTML',
+					values: {merge_type: mode, merge_source: 'task_card', project_id: projectID}
+				});
+			}
+
+			if (!window._taskCardActionHandlerAttached) {
+				window._taskCardActionHandlerAttached = true;
+				document.body.addEventListener('htmx:afterRequest', function(event) {
+					var request = window._taskCardActionRequest;
+					var config = event.detail && event.detail.requestConfig;
+					if (!request || !config || config.path !== request.path) return;
+					var status = event.detail.xhr && event.detail.xhr.status || 0;
+					if (request.button && request.button.isConnected) request.button.disabled = false;
+					window._taskCardActionRequest = null;
+					if (status >= 200 && status < 300 && window.closeKanbanMenu) {
+						var card = document.getElementById('task-' + request.taskID);
+						var trigger = card && card.querySelector('[data-task-card-menu-trigger]');
+						window.closeKanbanMenu(trigger && trigger.closest('[data-kanban-menu-key]'), !!trigger);
+					}
+				});
+			}
+		</script>
+	}
+
 	<!-- New Task Dialog -->
 	if project != nil {
 			<dialog id="new_task_modal" class="modal">
@@ -48,6 +147,7 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 					@ModalCloseButton("new_task_modal", "Close new task dialog")
 					<h3 class="font-bold text-lg mb-4 pr-10">New Task</h3>
 					<form
+						data-new-task-form
 						method="post"
 						hx-post={ fmt.Sprintf("/tasks?project_id=%s", project.ID) }
 						hx-target="#kanban-board"
@@ -474,10 +574,10 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 				}
 
 
-				// Handle HTMX response errors for duplicate task titles
-				document.body.addEventListener('htmx:responseError', function(event) {
-					// Check if this is the new task form
-					if (event.detail.target && event.detail.target.id === 'kanban-board') {
+					// Handle HTMX response errors for duplicate task titles.
+					document.body.addEventListener('htmx:responseError', function(event) {
+						var source = event.detail && event.detail.elt;
+						if (!source || !source.closest('form[data-new-task-form]')) return;
 						const xhr = event.detail.xhr;
 
 						// Check for 409 Conflict (duplicate task)
@@ -503,8 +603,7 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 								}
 							}
 						}
-					}
-				});
+					});
 
 				// Clear error when user starts typing in the title field
 				document.getElementById('task-title-input')?.addEventListener('input', function() {

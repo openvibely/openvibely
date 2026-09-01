@@ -565,7 +565,7 @@ func SchedulePrimaryAgentSelector(selected *string, agentDefs []models.Agent, se
 	})
 }
 
-func Schedule(projects []models.Project, currentProject *models.Project, tasks []repository.TaskWithSchedule, weekOffset int, agents []models.LLMConfig, agentDefs []models.Agent) templ.Component {
+func Schedule(projects []models.Project, currentProject *models.Project, tasks []repository.TaskWithSchedule, weekOffset int, agents []models.LLMConfig, agentDefs []repository.AgentScheduleOption) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -613,7 +613,7 @@ func Schedule(projects []models.Project, currentProject *models.Project, tasks [
 }
 
 // ScheduleContent renders just the schedule content for HTMX requests
-func ScheduleContent(currentProject *models.Project, tasks []repository.TaskWithSchedule, weekOffset int, agents []models.LLMConfig, agentDefs []models.Agent) templ.Component {
+func ScheduleContent(currentProject *models.Project, tasks []repository.TaskWithSchedule, weekOffset int, agents []models.LLMConfig, agentDefs []repository.AgentScheduleOption) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -642,7 +642,7 @@ func ScheduleContent(currentProject *models.Project, tasks []repository.TaskWith
 	})
 }
 
-func scheduleContent(currentProject *models.Project, weekData WeekData, weekOffset int, agents []models.LLMConfig, agentDefs []models.Agent) templ.Component {
+func scheduleContent(currentProject *models.Project, weekData WeekData, weekOffset int, agents []models.LLMConfig, agentDefs []repository.AgentScheduleOption) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -768,7 +768,7 @@ func scheduleContent(currentProject *models.Project, weekData WeekData, weekOffs
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "</span></div></div><!-- Week Timeline View --><div id=\"schedule-timeline-container\" class=\"bg-base-100 rounded-lg shadow-lg overflow-x-auto flex flex-1 flex-col min-h-0 overflow-y-auto opacity-0\" style=\"border: 1px solid var(--ov-schedule-grid-border);\"><div class=\"min-w-[800px] flex flex-1 flex-col\"><!-- Day Headers --><div class=\"grid bg-base-200 sticky top-0 z-20\" style=\"grid-template-columns: 60px repeat(7, 1fr); border-bottom: 1px solid var(--ov-schedule-grid-border);\"><div class=\"p-2 text-center font-semibold text-xs\" style=\"border-right: 1px solid var(--ov-schedule-grid-border);\"></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "</span></div></div><!-- Week Timeline View --><div id=\"schedule-timeline-container\" class=\"bg-base-100 rounded-lg shadow-lg overflow-x-auto flex flex-1 flex-col min-h-0 overflow-y-auto opacity-0\" style=\"border: 1px solid var(--ov-schedule-grid-border);\"><div class=\"min-w-[800px] flex flex-1 flex-col min-h-0\"><!-- Day Headers --><div class=\"grid bg-base-200 sticky top-0 z-20\" style=\"grid-template-columns: 60px repeat(7, 1fr); border-bottom: 1px solid var(--ov-schedule-grid-border);\"><div class=\"p-2 text-center font-semibold text-xs\" style=\"border-right: 1px solid var(--ov-schedule-grid-border);\"></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -846,7 +846,7 @@ func scheduleContent(currentProject *models.Project, weekData WeekData, weekOffs
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "</div><!-- Timeline Grid --><div class=\"relative flex flex-1 flex-col\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "</div><!-- Timeline Grid --><div class=\"relative flex flex-1 flex-col min-h-0\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -921,7 +921,7 @@ func scheduleContent(currentProject *models.Project, weekData WeekData, weekOffs
 				}
 				for _, occurrence := range getTasksForHour(weekData.TasksByDateTime, day.Date, slot.Hour) {
 					if occurrence.Task.Schedule != nil && !occurrence.Task.Schedule.Enabled {
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "<div class=\"text-[10px] px-1.5 py-1 mb-0.5 rounded bg-base-300 opacity-50 cursor-not-allowed border-l-2 border-base-content border-opacity-20 overflow-hidden\" title=\"")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "<div class=\"text-[10px] px-1.5 py-1 mb-0.5 rounded bg-base-300 opacity-50 cursor-grab active:cursor-grabbing drag-cursor-surface transition-colors border-l-2 border-base-content border-opacity-20 overflow-hidden\" title=\"")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
@@ -934,7 +934,7 @@ func scheduleContent(currentProject *models.Project, weekData WeekData, weekOffs
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "\" draggable=\"false\" data-schedule-id=\"")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "\" data-schedule-id=\"")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
@@ -973,7 +973,7 @@ func scheduleContent(currentProject *models.Project, weekData WeekData, weekOffs
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "\" onclick=\"openTaskDialog(this.dataset.taskId)\"><div class=\"font-semibold truncate leading-tight line-through\">")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "\" onclick=\"handleScheduleSelect(event)\" onpointerdown=\"handleSchedulePointerDown(event)\"><div class=\"font-semibold truncate leading-tight line-through\">")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
@@ -1043,7 +1043,7 @@ func scheduleContent(currentProject *models.Project, weekData WeekData, weekOffs
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, "\" onclick=\"openTaskDialog(this.dataset.taskId)\" onpointerdown=\"handleSchedulePointerDown(event)\"><div class=\"font-semibold truncate leading-tight\">")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, "\" onclick=\"handleScheduleSelect(event)\" onpointerdown=\"handleSchedulePointerDown(event)\"><div class=\"font-semibold truncate leading-tight\">")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
@@ -1223,7 +1223,7 @@ func scheduleContent(currentProject *models.Project, weekData WeekData, weekOffs
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = SchedulePrimaryAgentSelector(nil, agentDefs, "select select-bordered w-full max-w-full").Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = SchedulePrimaryAgentOptionSelector(nil, agentDefs, "select select-bordered w-full max-w-full").Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

@@ -3,12 +3,41 @@ package update
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestReadPackagedUpdateHelperStateFileRetriesTransientErrors(t *testing.T) {
+	attempts := 0
+	data, err := readPackagedUpdateHelperStateFileWithRetry("state.json", func(string) ([]byte, error) {
+		attempts++
+		if attempts < 3 {
+			return nil, errors.New("transient sharing violation")
+		}
+		return []byte(`{"state":"pending"}`), nil
+	}, time.Millisecond, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if attempts != 3 || string(data) != `{"state":"pending"}` {
+		t.Fatalf("attempts=%d data=%q", attempts, data)
+	}
+}
+
+func TestReadPackagedUpdateHelperStateFileDoesNotRetryMissingState(t *testing.T) {
+	attempts := 0
+	_, err := readPackagedUpdateHelperStateFileWithRetry("missing.json", func(string) ([]byte, error) {
+		attempts++
+		return nil, os.ErrNotExist
+	}, time.Millisecond, time.Second)
+	if !errors.Is(err, os.ErrNotExist) || attempts != 1 {
+		t.Fatalf("err=%v attempts=%d", err, attempts)
+	}
+}
 
 func TestExecutableUpdateHelperArgumentAndRelaunchParsingContracts(t *testing.T) {
 	root := t.TempDir()

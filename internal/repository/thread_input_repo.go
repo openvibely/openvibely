@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 )
@@ -15,6 +14,7 @@ type ThreadInputRepo struct {
 	slackTaskContextRepo   *SlackTaskContextRepo
 	emailTaskContextRepo   *EmailTaskContextRepo
 	discordTaskContextRepo *DiscordTaskContextRepo
+	xTaskContextRepo       *XTaskContextRepo
 }
 
 var (
@@ -30,6 +30,7 @@ func NewThreadInputRepo(db *sql.DB) *ThreadInputRepo {
 		slackTaskContextRepo:   NewSlackTaskContextRepo(db),
 		emailTaskContextRepo:   NewEmailTaskContextRepo(db),
 		discordTaskContextRepo: NewDiscordTaskContextRepo(db),
+		xTaskContextRepo:       NewXTaskContextRepo(db),
 	}
 }
 
@@ -40,7 +41,7 @@ func defaultThreadTaskJSON(raw string) string {
 	return raw
 }
 
-const threadInputSelectColumns = `id, scope, project_id, COALESCE(task_id, ''), COALESCE(run_execution_id, ''), COALESCE(agent_config_id, ''), input_mode, input_status, COALESCE(turn_id, ''), COALESCE(expected_turn_id, ''), content, COALESCE(attachment_session_id, ''), queue_position, COALESCE(chat_mode, ''), COALESCE(source, ''), COALESCE(origin_agent, ''), COALESCE(telegram_chat_id, 0), COALESCE(slack_team_id, ''), COALESCE(slack_channel_id, ''), COALESCE(slack_thread_ts, ''), COALESCE(slack_user_id, ''), COALESCE(email_from, ''), COALESCE(email_message_id, ''), COALESCE(email_references, ''), COALESCE(email_subject, ''), COALESCE(email_session_key, ''), COALESCE(discord_channel_id, ''), COALESCE(discord_thread_id, ''), COALESCE(discord_message_id, ''), COALESCE(discord_user_id, ''), created_at, updated_at, applied_at`
+const threadInputSelectColumns = `id, scope, project_id, COALESCE(task_id, ''), COALESCE(run_execution_id, ''), COALESCE(agent_config_id, ''), input_mode, input_status, COALESCE(turn_id, ''), COALESCE(expected_turn_id, ''), content, COALESCE(attachment_session_id, ''), queue_position, COALESCE(chat_mode, ''), COALESCE(source, ''), COALESCE(origin_agent, ''), COALESCE(telegram_chat_id, 0), COALESCE(slack_team_id, ''), COALESCE(slack_channel_id, ''), COALESCE(slack_thread_ts, ''), COALESCE(slack_user_id, ''), COALESCE(email_from, ''), COALESCE(email_message_id, ''), COALESCE(email_references, ''), COALESCE(email_subject, ''), COALESCE(email_session_key, ''), COALESCE(discord_channel_id, ''), COALESCE(discord_thread_id, ''), COALESCE(discord_message_id, ''), COALESCE(discord_user_id, ''), COALESCE(x_account_id, ''), COALESCE(x_conversation_id, ''), COALESCE(x_reply_to_tweet_id, ''), COALESCE(x_user_id, ''), COALESCE(x_username, ''), created_at, updated_at, applied_at`
 
 func scanThreadInput(scanner interface {
 	Scan(dest ...interface{}) error
@@ -77,6 +78,11 @@ func scanThreadInput(scanner interface {
 		&input.DiscordThreadID,
 		&input.DiscordMessageID,
 		&input.DiscordUserID,
+		&input.XAccountID,
+		&input.XConversationID,
+		&input.XReplyToTweetID,
+		&input.XUserID,
+		&input.XUsername,
 		&input.CreatedAt,
 		&input.UpdatedAt,
 		&input.AppliedAt,
@@ -91,7 +97,7 @@ func (r *ThreadInputRepo) CreateQueued(ctx context.Context, input *models.Thread
 	if input.InputStatus == "" {
 		input.InputStatus = models.ThreadInputPending
 	}
-	return r.WithImmediateTx(ctx, func(exec SQLExecutor) error {
+	return withImmediateTx(ctx, r.db, func(exec SQLExecutor) error {
 		return r.CreateQueuedWithExecutor(ctx, exec, input)
 	})
 }
@@ -106,7 +112,7 @@ func (r *ThreadInputRepo) CreateQueuedWithAutomationContext(ctx context.Context,
 	if bindingKey == "" {
 		return errors.New("automation binding key is required")
 	}
-	return r.WithImmediateTx(ctx, func(exec SQLExecutor) error {
+	return withImmediateTx(ctx, r.db, func(exec SQLExecutor) error {
 		if err := r.CreateQueuedWithExecutor(ctx, exec, input); err != nil {
 			return err
 		}
@@ -152,7 +158,7 @@ func (r *ThreadInputRepo) CreateSteeringForActiveExecution(ctx context.Context, 
 	if input.ExpectedTurnID != activeExecutionID {
 		return ErrActiveTurnChanged
 	}
-	return r.withTx(ctx, func(tx *sql.Tx) error {
+	return withImmediateTx(ctx, r.db, func(tx SQLExecutor) error {
 		input.RunExecutionID = activeExecutionID
 		input.TurnID = activeExecutionID
 		input.InputMode = models.ThreadInputModeSteering
@@ -169,14 +175,14 @@ func (r *ThreadInputRepo) CreateSteeringForActiveExecution(ctx context.Context, 
 		row := tx.QueryRowContext(ctx, `
 				INSERT INTO thread_inputs (
 					id, scope, project_id, task_id, run_execution_id, agent_config_id, input_mode, input_status,
-						turn_id, expected_turn_id, content, attachment_session_id, queue_position, chat_mode,
-							source, origin_agent, telegram_chat_id, slack_team_id, slack_channel_id, slack_thread_ts, slack_user_id,
-							email_from, email_message_id, email_references, email_subject, email_session_key,
-							discord_channel_id, discord_thread_id, discord_message_id, discord_user_id
-						)
-						SELECT lower(hex(randomblob(16))), ?, ?, NULLIF(?, ''), ?, NULLIF(?, ''), ?, ?, ?, ?, ?, NULLIF(?, ''), ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-					WHERE EXISTS (
-					SELECT 1 FROM executions e JOIN tasks t ON t.id = e.task_id
+					turn_id, expected_turn_id, content, attachment_session_id, queue_position, chat_mode,
+					source, origin_agent, telegram_chat_id, slack_team_id, slack_channel_id, slack_thread_ts, slack_user_id,
+					email_from, email_message_id, email_references, email_subject, email_session_key,
+					discord_channel_id, discord_thread_id, discord_message_id, discord_user_id,
+					x_account_id, x_conversation_id, x_reply_to_tweet_id, x_user_id, x_username
+				)
+				SELECT lower(hex(randomblob(16))), ?, ?, NULLIF(?, ''), ?, NULLIF(?, ''), ?, ?, ?, ?, ?, NULLIF(?, ''), ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+				WHERE EXISTS (					SELECT 1 FROM executions e JOIN tasks t ON t.id = e.task_id
 					WHERE e.id = ? AND e.status = 'running'
 					  AND (
 					    (? = ? AND e.task_id = ?)
@@ -213,8 +219,12 @@ func (r *ThreadInputRepo) CreateSteeringForActiveExecution(ctx context.Context, 
 			input.DiscordThreadID,
 			input.DiscordMessageID,
 			input.DiscordUserID,
-			activeExecutionID,
-			input.Scope,
+			input.XAccountID,
+			input.XConversationID,
+			input.XReplyToTweetID,
+			input.XUserID,
+			input.XUsername,
+			activeExecutionID, input.Scope,
 			models.ThreadInputScopeTask,
 			input.TaskID,
 			input.Scope,
@@ -244,15 +254,15 @@ func (r *ThreadInputRepo) createWithExecutor(ctx context.Context, exec sqlExecut
 		}
 	}
 	row := exec.QueryRowContext(ctx, `
-			INSERT INTO thread_inputs (
-				id, scope, project_id, task_id, run_execution_id, agent_config_id, input_mode, input_status,
-					turn_id, expected_turn_id, content, attachment_session_id, queue_position, chat_mode,
-						source, origin_agent, telegram_chat_id, slack_team_id, slack_channel_id, slack_thread_ts, slack_user_id,
-						email_from, email_message_id, email_references, email_subject, email_session_key,
-						discord_channel_id, discord_thread_id, discord_message_id, discord_user_id
-					) VALUES (lower(hex(randomblob(16))), ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, NULLIF(?, ''), ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-			RETURNING `+threadInputSelectColumns,
-		input.Scope,
+		INSERT INTO thread_inputs (
+			id, scope, project_id, task_id, run_execution_id, agent_config_id, input_mode, input_status,
+			turn_id, expected_turn_id, content, attachment_session_id, queue_position, chat_mode,
+			source, origin_agent, telegram_chat_id, slack_team_id, slack_channel_id, slack_thread_ts, slack_user_id,
+			email_from, email_message_id, email_references, email_subject, email_session_key,
+			discord_channel_id, discord_thread_id, discord_message_id, discord_user_id,
+			x_account_id, x_conversation_id, x_reply_to_tweet_id, x_user_id, x_username
+		) VALUES (lower(hex(randomblob(16))), ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, NULLIF(?, ''), ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		RETURNING `+threadInputSelectColumns, input.Scope,
 		input.ProjectID,
 		input.TaskID,
 		input.RunExecutionID,
@@ -281,6 +291,11 @@ func (r *ThreadInputRepo) createWithExecutor(ctx context.Context, exec sqlExecut
 		input.DiscordThreadID,
 		input.DiscordMessageID,
 		input.DiscordUserID,
+		input.XAccountID,
+		input.XConversationID,
+		input.XReplyToTweetID,
+		input.XUserID,
+		input.XUsername,
 	)
 	created, err := scanThreadInput(row)
 	if err != nil {
@@ -305,7 +320,7 @@ func (r *ThreadInputRepo) BindPreExecutionQueuedTaskInputs(ctx context.Context, 
 	if taskID == "" || executionID == "" {
 		return nil
 	}
-	_, err := r.db.ExecContext(ctx, `
+	_, err := execBoundSQLite(ctx, r.db, `
 		UPDATE thread_inputs
 		SET run_execution_id = ?, updated_at = datetime('now')
 		WHERE scope = 'task_thread'
@@ -346,7 +361,7 @@ func (r *ThreadInputRepo) PreparePendingTextSteering(ctx context.Context, runExe
 
 func (r *ThreadInputRepo) preparePendingSteering(ctx context.Context, runExecutionID, turnID string, textOnly bool) ([]models.ThreadInput, error) {
 	var prepared []models.ThreadInput
-	err := r.withTx(ctx, func(tx *sql.Tx) error {
+	err := withImmediateTx(ctx, r.db, func(tx SQLExecutor) error {
 		where := `WHERE run_execution_id = ? AND turn_id = ? AND input_mode = 'steering' AND input_status = 'pending' AND COALESCE(expected_turn_id, '') != ''`
 		if textOnly {
 			where += ` AND COALESCE(attachment_session_id, '') = ''`
@@ -558,7 +573,7 @@ func (r *ThreadInputRepo) ConvertQueuedToSteering(ctx context.Context, id, runEx
 		return nil, ErrExpectedTurnEmpty
 	}
 	var converted *models.ThreadInput
-	err := r.withTx(ctx, func(tx *sql.Tx) error {
+	err := withImmediateTx(ctx, r.db, func(tx SQLExecutor) error {
 		queued, err := scanThreadInput(tx.QueryRowContext(ctx, `SELECT `+threadInputSelectColumns+` FROM thread_inputs WHERE id = ?`, id))
 		if err == sql.ErrNoRows {
 			return ErrInputNotPending
@@ -616,7 +631,7 @@ func (r *ThreadInputRepo) ConvertQueuedToSteering(ctx context.Context, id, runEx
 }
 
 func (r *ThreadInputRepo) MarkApplied(ctx context.Context, id, runExecutionID, turnID string) error {
-	res, err := r.db.ExecContext(ctx, `
+	res, err := execBoundSQLite(ctx, r.db, `
 		UPDATE thread_inputs
 		SET input_status = 'applied', run_execution_id = NULLIF(?, ''), turn_id = NULLIF(?, ''), applied_at = datetime('now'), updated_at = datetime('now')
 		WHERE id = ? AND input_status = 'pending'`, runExecutionID, turnID, id)
@@ -634,7 +649,7 @@ func (r *ThreadInputRepo) RestorePreparedSteering(ctx context.Context, ids []str
 	if len(ids) == 0 {
 		return nil
 	}
-	return r.withTx(ctx, func(tx *sql.Tx) error {
+	return withImmediateTx(ctx, r.db, func(tx SQLExecutor) error {
 		for _, id := range ids {
 			if _, err := tx.ExecContext(ctx, `
 				UPDATE thread_inputs
@@ -652,7 +667,7 @@ func (r *ThreadInputRepo) RequeuePendingSteering(ctx context.Context, ids []stri
 		return nil, nil
 	}
 	var requeued []models.ThreadInput
-	err := r.withTx(ctx, func(tx *sql.Tx) error {
+	err := withImmediateTx(ctx, r.db, func(tx SQLExecutor) error {
 		for _, id := range ids {
 			if _, err := tx.ExecContext(ctx, `
 						UPDATE thread_inputs
@@ -682,7 +697,7 @@ func (r *ThreadInputRepo) RequeuePendingSteeringForExecution(ctx context.Context
 		return nil, nil
 	}
 	var requeued []models.ThreadInput
-	err := r.withTx(ctx, func(tx *sql.Tx) error {
+	err := withImmediateTx(ctx, r.db, func(tx SQLExecutor) error {
 		inputs, err := r.listWithExecutor(ctx, tx, `WHERE input_mode = 'steering' AND input_status = 'pending' AND run_execution_id = ? ORDER BY queue_position ASC, created_at ASC, rowid ASC`, runExecutionID)
 		if err != nil {
 			return err
@@ -715,7 +730,7 @@ func (r *ThreadInputRepo) ClaimQueuedForTaskExecution(ctx context.Context, input
 	if exec == nil {
 		return fmt.Errorf("execution is required")
 	}
-	return r.WithImmediateTx(ctx, func(dbexec SQLExecutor) error {
+	return withImmediateTx(ctx, r.db, func(dbexec SQLExecutor) error {
 		promoted, err := scanThreadInput(dbexec.QueryRowContext(ctx, `SELECT `+threadInputSelectColumns+` FROM thread_inputs WHERE id = ?`, inputID))
 		if err == sql.ErrNoRows {
 			return ErrInputNotPending
@@ -840,7 +855,7 @@ func (r *ThreadInputRepo) ClaimQueuedForChatExecution(ctx context.Context, input
 	if task == nil || exec == nil {
 		return fmt.Errorf("task and execution are required")
 	}
-	return r.withTx(ctx, func(tx *sql.Tx) error {
+	return withImmediateTx(ctx, r.db, func(tx SQLExecutor) error {
 		promoted, err := scanThreadInput(tx.QueryRowContext(ctx, `SELECT `+threadInputSelectColumns+` FROM thread_inputs WHERE id = ?`, inputID))
 		if err == sql.ErrNoRows {
 			return ErrInputNotPending
@@ -886,6 +901,11 @@ func (r *ThreadInputRepo) ClaimQueuedForChatExecution(ctx context.Context, input
 				return fmt.Errorf("creating queued discord context: %w", err)
 			}
 		}
+		if promoted.Source == models.TaskOriginX {
+			if err := r.xTaskContextRepo.UpsertWithExecutor(ctx, tx, &models.XTaskContext{TaskID: task.ID, ProjectID: promoted.ProjectID, AccountID: promoted.XAccountID, ConversationID: promoted.XConversationID, ReplyToTweetID: promoted.XReplyToTweetID, XUserID: promoted.XUserID, Username: promoted.XUsername}); err != nil {
+				return fmt.Errorf("creating queued X context: %w", err)
+			}
+		}
 
 		isFollowup := 0
 		if exec.IsFollowup {
@@ -915,7 +935,7 @@ func (r *ThreadInputRepo) ClaimQueuedForChatExecution(ctx context.Context, input
 }
 
 func (r *ThreadInputRepo) CancelPending(ctx context.Context, id string) (*models.ThreadInput, error) {
-	cancelled, err := scanThreadInput(r.db.QueryRowContext(ctx, `
+	cancelled, err := scanThreadInput(queryRowBoundSQLite(ctx, r.db, `
 		UPDATE thread_inputs
 		SET input_status = 'cancelled', updated_at = datetime('now')
 		WHERE id = ? AND input_status = 'pending'
@@ -936,7 +956,7 @@ func (r *ThreadInputRepo) CancelPending(ctx context.Context, id string) (*models
 }
 
 func (r *ThreadInputRepo) CancelPendingForTask(ctx context.Context, taskID string) error {
-	_, err := r.db.ExecContext(ctx, `
+	_, err := execBoundSQLite(ctx, r.db, `
 		UPDATE thread_inputs
 		SET input_status = 'cancelled', updated_at = datetime('now')
 		WHERE task_id = ? AND input_status = 'pending'
@@ -981,15 +1001,11 @@ func (r *ThreadInputRepo) IsAttachmentSessionRetired(ctx context.Context, sessio
 }
 
 func (r *ThreadInputRepo) RetireAttachmentSessionIfUnowned(ctx context.Context, sessionID string) (retired bool, err error) {
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, cleanup, err := beginImmediateTx(ctx, r.db)
 	if err != nil {
 		return false, fmt.Errorf("beginning attachment session retirement: %w", err)
 	}
-	defer func() {
-		if err != nil {
-			_ = tx.Rollback()
-		}
-	}()
+	defer cleanup()
 
 	var referenced int
 	if err = tx.QueryRowContext(ctx, `
@@ -1018,7 +1034,7 @@ func (r *ThreadInputRepo) RetireAttachmentSessionIfUnowned(ctx context.Context, 
 }
 
 func (r *ThreadInputRepo) CancelPendingForChat(ctx context.Context, projectID string) error {
-	_, err := r.db.ExecContext(ctx, `
+	_, err := execBoundSQLite(ctx, r.db, `
 		UPDATE thread_inputs
 		SET input_status = 'cancelled', updated_at = datetime('now')
 		WHERE scope = 'chat' AND project_id = ? AND input_status = 'pending'
@@ -1032,125 +1048,6 @@ func (r *ThreadInputRepo) CancelPendingForChat(ctx context.Context, projectID st
 		return fmt.Errorf("cancelling chat inputs: %w", err)
 	}
 	return nil
-}
-
-type SQLExecutor interface {
-	ExecContext(context.Context, string, ...interface{}) (sql.Result, error)
-	QueryContext(context.Context, string, ...interface{}) (*sql.Rows, error)
-	QueryRowContext(context.Context, string, ...interface{}) *sql.Row
-}
-
-type sqlExecutor = SQLExecutor
-
-type queryExecutor interface {
-	QueryContext(context.Context, string, ...interface{}) (*sql.Rows, error)
-}
-
-func (r *ThreadInputRepo) withTx(ctx context.Context, fn func(*sql.Tx) error) error {
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if err := fn(tx); err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
-func (r *ThreadInputRepo) WithImmediateTx(ctx context.Context, fn func(SQLExecutor) error) error {
-	conn, err := r.db.Conn(ctx)
-	if err != nil {
-		return err
-	}
-	defer conn.Close()
-	restoreBusyTimeout, err := boundSQLiteBusyTimeoutToContext(ctx, conn)
-	if err != nil {
-		return err
-	}
-	defer restoreBusyTimeout()
-	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
-		return err
-	}
-	tx := &manualTx{conn: conn, ctx: ctx}
-	defer tx.Rollback()
-	if err := fn(tx); err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
-const sqliteBusyTimeoutRestoreReserve = 20 * time.Millisecond
-
-func boundSQLiteBusyTimeoutToContext(ctx context.Context, conn *sql.Conn) (func(), error) {
-	deadline, ok := ctx.Deadline()
-	if !ok {
-		return func() {}, nil
-	}
-	var previousMS int
-	if err := conn.QueryRowContext(ctx, `PRAGMA busy_timeout`).Scan(&previousMS); err != nil {
-		return nil, err
-	}
-	remaining := time.Until(deadline) - sqliteBusyTimeoutRestoreReserve
-	boundedMS := int(remaining / time.Millisecond)
-	if boundedMS < 1 {
-		boundedMS = 1
-	}
-	if previousMS > 0 && previousMS <= boundedMS {
-		return func() {}, nil
-	}
-	if _, err := conn.ExecContext(ctx, fmt.Sprintf(`PRAGMA busy_timeout=%d`, boundedMS)); err != nil {
-		return nil, err
-	}
-	return func() {
-		restoreCtx, cancel := context.WithTimeout(context.Background(), sqliteBusyTimeoutRestoreReserve)
-		defer cancel()
-		_, _ = conn.ExecContext(restoreCtx, fmt.Sprintf(`PRAGMA busy_timeout=%d`, previousMS))
-	}, nil
-}
-
-type manualTx struct {
-	conn *sql.Conn
-	ctx  context.Context
-	done bool
-}
-
-func (t *manualTx) ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error) {
-	return t.conn.ExecContext(ctx, query, args...)
-}
-
-func (t *manualTx) QueryContext(ctx context.Context, query string, args ...interface{}) (*sql.Rows, error) {
-	return t.conn.QueryContext(ctx, query, args...)
-}
-
-func (t *manualTx) QueryRowContext(ctx context.Context, query string, args ...interface{}) *sql.Row {
-	return t.conn.QueryRowContext(ctx, query, args...)
-}
-
-func (t *manualTx) Commit() error {
-	if t.done {
-		return nil
-	}
-	_, err := t.conn.ExecContext(t.ctx, `COMMIT`)
-	if err == nil {
-		t.done = true
-	}
-	return err
-}
-
-func (t *manualTx) Rollback() error {
-	if t.done {
-		return nil
-	}
-	t.done = true
-	rollbackCtx := t.ctx
-	cancel := func() {}
-	if rollbackCtx.Err() != nil {
-		rollbackCtx, cancel = context.WithTimeout(context.WithoutCancel(t.ctx), sqliteBusyTimeoutRestoreReserve)
-	}
-	defer cancel()
-	_, err := t.conn.ExecContext(rollbackCtx, `ROLLBACK`)
-	return err
 }
 
 func (r *ThreadInputRepo) executionIsRunningForInput(ctx context.Context, exec sqlExecutor, executionID string, input *models.ThreadInput) (bool, error) {

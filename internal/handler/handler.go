@@ -59,11 +59,18 @@ type Handler struct {
 	fileChangeBroadcaster      *events.FileChangeBroadcaster
 	executionStreamHub         *events.ExecutionStreamHub
 	telegramService            *service.TelegramService
+	xService                   *service.XService
+	xServiceMu                 sync.RWMutex
+	xConfigMu                  sync.Mutex
 	emailService               EmailServiceProvider
 	telegramAuthRepo           *repository.TelegramAuthRepo
 	slackAuthRepo              *repository.SlackAuthRepo
 	emailAuthRepo              *repository.EmailAuthRepo
 	discordAuthRepo            *repository.DiscordAuthRepo
+	xAuthRepo                  *repository.XAuthRepo
+	xUserProjectRepo           *repository.XUserProjectRepo
+	xTaskContextRepo           *repository.XTaskContextRepo
+	xInboundReceiptRepo        *repository.XInboundReceiptRepo
 	emailTaskContextRepo       *repository.EmailTaskContextRepo
 	slackTaskContextRepo       *repository.SlackTaskContextRepo
 	discordTaskContextRepo     *repository.DiscordTaskContextRepo
@@ -484,6 +491,48 @@ func (h *Handler) SetDiscordService(svc DiscordServiceProvider) {
 	h.wireChannelIntegrationSummaryDeps(svc)
 }
 
+func (h *Handler) SetXRepositories(auth *repository.XAuthRepo, selections *repository.XUserProjectRepo, contexts *repository.XTaskContextRepo, receipts *repository.XInboundReceiptRepo) {
+	h.xAuthRepo = auth
+	h.xUserProjectRepo = selections
+	h.xTaskContextRepo = contexts
+	h.xInboundReceiptRepo = receipts
+}
+
+func (h *Handler) SetXService(svc *service.XService) {
+	h.xServiceMu.Lock()
+	h.xService = svc
+	h.xServiceMu.Unlock()
+}
+
+func (h *Handler) getXService() *service.XService {
+	h.xServiceMu.RLock()
+	defer h.xServiceMu.RUnlock()
+	return h.xService
+}
+
+func (h *Handler) swapXService(svc *service.XService) *service.XService {
+	h.xServiceMu.Lock()
+	old := h.xService
+	h.xService = svc
+	h.xServiceMu.Unlock()
+	return old
+}
+
+// StopXService stops whichever dynamically configured X service is currently
+// active. Server shutdown must not retain only the startup instance because the
+// Channels settings flow can replace it at runtime.
+func (h *Handler) StopXService() {
+	h.xConfigMu.Lock()
+	defer h.xConfigMu.Unlock()
+	old := h.swapXService(nil)
+	if h.channelMessageRouter != nil {
+		h.channelMessageRouter.SetXService(nil)
+	}
+	if old != nil {
+		old.Stop()
+	}
+}
+
 func (h *Handler) SetChannelMessageRouter(router *service.ChannelMessageRouter) {
 	h.channelMessageRouter = router
 }
@@ -775,6 +824,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.GET("/agents/:id/lifecycle-hooks", h.GetAgentLifecycleHooks)
 	e.PUT("/agents/:id/lifecycle-hooks", h.SaveAgentLifecycleHooks)
 	// Lifecycle execution activity (runbook §Rollout step 17)
+	e.GET("/api/tasks/:id/lifecycle-executions/:executionID", h.GetTaskLifecycleExecution)
 	e.GET("/api/tasks/:id/lifecycle-executions", h.GetTaskLifecycleExecutions)
 	e.GET("/api/lifecycle-executions/:id/events", h.GetLifecycleExecutionEvents)
 
@@ -835,6 +885,11 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.POST("/channels/discord/configure", h.handleDiscordConfigure)
 	e.POST("/channels/discord/remove", h.handleDiscordRemove)
 	e.POST("/channels/discord/test", h.handleDiscordTest)
+	e.POST("/channels/x/configure", h.handleXConfigure)
+	e.POST("/channels/x/test", h.handleXTest)
+	e.POST("/channels/x/remove", h.handleXRemove)
+	e.POST("/channels/x/authorized-users", h.AddXAuthorizedUser)
+	e.DELETE("/channels/x/authorized-users/:id", h.RemoveXAuthorizedUser)
 	e.POST("/channels/email/configure", h.handleEmailConfigure)
 	e.POST("/channels/email/remove", h.handleEmailRemove)
 	e.POST("/channels/email/test", h.handleEmailTest)
@@ -891,6 +946,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.POST("/webhooks/inbound/:pathToken", h.HandleWebhookInbound)
 
 	// Git Worktree
+	e.GET("/tasks/:taskId/card/merge-options", h.GetTaskCardMergeOptions)
 	e.GET("/tasks/:taskId/worktree", h.GetTaskWorktreeInfo)
 	e.POST("/tasks/:taskId/worktree/auto-merge", h.UpdateTaskAutoMerge)
 	e.POST("/tasks/:taskId/worktree/merge", h.MergeTaskBranch)

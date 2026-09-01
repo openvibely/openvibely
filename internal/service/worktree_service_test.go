@@ -3,9 +3,12 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +17,258 @@ import (
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
+
+func TestWorktreeServiceRepositoryMutationSerializesCanonicalAliasesAcrossInstances(t *testing.T) {
+	repoDir := t.TempDir()
+	aliasRoot := t.TempDir()
+	alias := filepath.Join(aliasRoot, "repo-alias")
+	if err := os.Symlink(repoDir, alias); err != nil {
+		t.Skipf("symlink repository alias: %v", err)
+	}
+
+	first := &WorktreeService{}
+	second := &WorktreeService{}
+	firstEntered := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	firstDone := make(chan error, 1)
+	go func() {
+		firstDone <- first.WithRepositoryMutation(repoDir, func() error {
+			close(firstEntered)
+			<-releaseFirst
+			return nil
+		})
+	}()
+	select {
+	case <-firstEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first repository mutation did not acquire lease")
+	}
+
+	secondDone := make(chan error, 1)
+	go func() {
+		_, err := second.MergeBranch(context.Background(), &models.Task{}, alias, "merge")
+		secondDone <- err
+	}()
+	select {
+	case err := <-secondDone:
+		t.Fatalf("canonical repository alias bypassed mutation serialization: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(releaseFirst)
+	select {
+	case err := <-firstDone:
+		if err != nil {
+			t.Fatalf("first repository mutation: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("first repository mutation did not finish")
+	}
+	select {
+	case err := <-secondDone:
+		if err == nil || !strings.Contains(err.Error(), "worktree branch") {
+			t.Fatalf("aliased production merge returned unexpected result: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("aliased production merge did not resume")
+	}
+}
+
+func TestWorktreeServiceRepositoryMutationSerializesLinkedWorktreeAndMainCheckout(t *testing.T) {
+	repoDir := createTestGitRepo(t)
+	worktreePath := filepath.Join(t.TempDir(), "linked-worktree")
+	runGitTest(t, repoDir, "branch", "task/linked-lease")
+	runGitTest(t, repoDir, "worktree", "add", worktreePath, "task/linked-lease")
+
+	leaseEntered := make(chan struct{})
+	releaseLease := make(chan struct{})
+	leaseDone := make(chan error, 1)
+	go func() {
+		leaseDone <- WithRepositoryMutation(repoDir, func() error {
+			close(leaseEntered)
+			<-releaseLease
+			return nil
+		})
+	}()
+	<-leaseEntered
+
+	linkedDone := make(chan error, 1)
+	go func() {
+		linkedDone <- WithRepositoryMutation(worktreePath, func() error { return nil })
+	}()
+	select {
+	case err := <-linkedDone:
+		close(releaseLease)
+		t.Fatalf("linked worktree bypassed main repository mutation lease: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(releaseLease)
+	if err := <-leaseDone; err != nil {
+		t.Fatalf("main repository mutation lease: %v", err)
+	}
+	select {
+	case err := <-linkedDone:
+		if err != nil {
+			t.Fatalf("linked repository mutation: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("linked repository mutation did not resume")
+	}
+}
+
+func TestInitialManagedTaskFinalizationUsesRepositoryMutationBoundary(t *testing.T) {
+	repoDir := createTestGitRepo(t)
+	worktreePath := filepath.Join(t.TempDir(), "finalization-worktree")
+	runGitTest(t, repoDir, "branch", "task/finalization")
+	runGitTest(t, repoDir, "worktree", "add", worktreePath, "task/finalization")
+
+	leaseEntered := make(chan struct{})
+	releaseLease := make(chan struct{})
+	leaseDone := make(chan error, 1)
+	go func() {
+		leaseDone <- WithRepositoryMutation(repoDir, func() error {
+			close(leaseEntered)
+			<-releaseLease
+			return nil
+		})
+	}()
+	<-leaseEntered
+
+	finalizationDone := make(chan string, 1)
+	svc := NewLLMService(nil, nil, nil, nil, nil, nil)
+	go func() {
+		finalizationDone <- svc.captureWorktreeDiffAfterExecution(context.Background(),
+			&models.Execution{ID: "finalization-exec"},
+			&models.Task{ID: "finalization-task", Title: "Finalize task", WorktreePath: worktreePath, WorktreeBranch: "task/finalization", MergeTargetBranch: "main"},
+			repoDir, "done", models.LLMConfig{})
+	}()
+	select {
+	case <-finalizationDone:
+		close(releaseLease)
+		t.Fatal("initial managed-task finalization bypassed repository mutation lease")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(releaseLease)
+	if err := <-leaseDone; err != nil {
+		t.Fatalf("main repository mutation lease: %v", err)
+	}
+	select {
+	case <-finalizationDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("initial managed-task finalization did not resume")
+	}
+}
+
+func TestWorktreeRepositoryWritersShareCanonicalMutationBoundary(t *testing.T) {
+	tests := []struct {
+		name   string
+		invoke func(context.Context, *WorktreeService, string) error
+	}{
+		{
+			name: "setup",
+			invoke: func(ctx context.Context, ws *WorktreeService, repo string) error {
+				cancelled, cancel := context.WithCancel(ctx)
+				cancel()
+				_, _, err := ws.SetupWorktree(cancelled, &models.Task{ID: "12345678", Title: "setup"}, repo)
+				return err
+			},
+		},
+		{
+			name: "startup sync",
+			invoke: func(ctx context.Context, ws *WorktreeService, repo string) error {
+				return ws.SyncWorktreeFromMainAtStart(ctx, nil, repo)
+			},
+		},
+		{
+			name: "explicit cleanup",
+			invoke: func(ctx context.Context, ws *WorktreeService, repo string) error {
+				return ws.CleanupWorktree(ctx, &models.Task{}, repo, true)
+			},
+		},
+		{
+			name: "orphan cleanup",
+			invoke: func(ctx context.Context, ws *WorktreeService, repo string) error {
+				_, err := ws.cleanupOrphanedWorktree(ctx, &models.Project{ID: "project", RepoPath: repo}, filepath.Join(repo, ".worktrees", "missing"))
+				return err
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repoDir := createTestGitRepo(t)
+			alias := filepath.Join(t.TempDir(), "repo-alias")
+			if err := os.Symlink(repoDir, alias); err != nil {
+				t.Skipf("symlink repository alias: %v", err)
+			}
+			leaseEntered := make(chan struct{})
+			releaseLease := make(chan struct{})
+			leaseDone := make(chan error, 1)
+			go func() {
+				leaseDone <- WithRepositoryMutation(repoDir, func() error {
+					close(leaseEntered)
+					<-releaseLease
+					return nil
+				})
+			}()
+			select {
+			case <-leaseEntered:
+			case <-time.After(2 * time.Second):
+				t.Fatal("repository mutation lease was not acquired")
+			}
+
+			writerDone := make(chan error, 1)
+			go func() { writerDone <- tt.invoke(context.Background(), &WorktreeService{}, alias) }()
+			select {
+			case err := <-writerDone:
+				t.Fatalf("writer bypassed canonical mutation boundary: %v", err)
+			case <-time.After(100 * time.Millisecond):
+			}
+			close(releaseLease)
+			select {
+			case err := <-leaseDone:
+				if err != nil {
+					t.Fatalf("repository mutation lease: %v", err)
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("repository mutation lease did not finish")
+			}
+			select {
+			case <-writerDone:
+			case <-time.After(2 * time.Second):
+				t.Fatal("writer did not resume after lease release")
+			}
+		})
+	}
+}
+
+func TestMergeBranchRejectsQueuedWriterWhenRepositoryHasActiveConflict(t *testing.T) {
+	repoDir := createTestGitRepo(t)
+	runGitTest(t, repoDir, "checkout", "-b", "task/conflicting")
+	if err := os.WriteFile(filepath.Join(repoDir, "initial.txt"), []byte("task\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGitTest(t, repoDir, "add", "initial.txt")
+	runGitTest(t, repoDir, "commit", "-m", "task change")
+	runGitTest(t, repoDir, "checkout", "main")
+	if err := os.WriteFile(filepath.Join(repoDir, "initial.txt"), []byte("target\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGitTest(t, repoDir, "add", "initial.txt")
+	runGitTest(t, repoDir, "commit", "-m", "target change")
+	cmd := exec.Command("git", "merge", "task/conflicting")
+	cmd.Dir = repoDir
+	if err := cmd.Run(); err == nil {
+		t.Fatal("expected fixture merge conflict")
+	}
+
+	ws := &WorktreeService{}
+	result, err := ws.MergeBranch(context.Background(), &models.Task{WorktreeBranch: "task/conflicting", MergeTargetBranch: "main"}, repoDir, "merge")
+	if err == nil || result == nil || !strings.Contains(result.ErrorMessage, "already active") {
+		t.Fatalf("queued merge should reject active conflict, result=%+v err=%v", result, err)
+	}
+	if conflicts := ActiveConflictFiles(repoDir); len(conflicts) == 0 {
+		t.Fatal("queued merge unexpectedly changed active conflict state")
+	}
+}
 
 // createTestGitRepo creates a temporary git repository with an initial commit.
 func createTestGitRepo(t *testing.T) string {
@@ -208,6 +463,100 @@ func TestParseGitStatusFileStats(t *testing.T) {
 		if stats[i] != want[i] {
 			t.Fatalf("stats[%d] = %#v, want %#v", i, stats[i], want[i])
 		}
+	}
+}
+
+func TestParseWorktreeNameStatus(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  []worktreeNameStatusRecord
+	}{
+		{
+			name:  "empty output",
+			input: "",
+			want:  nil,
+		},
+		{
+			name:  "blank lines",
+			input: "\n\n",
+			want:  nil,
+		},
+		{
+			name:  "ordinary modified record",
+			input: "M\tmodified.go\n",
+			want:  []worktreeNameStatusRecord{{Status: "M", Path: "modified.go"}},
+		},
+		{
+			name:  "added record",
+			input: "A\tadded.go\n",
+			want:  []worktreeNameStatusRecord{{Status: "A", Path: "added.go"}},
+		},
+		{
+			name:  "deleted record",
+			input: "D\tdeleted.go\n",
+			want:  []worktreeNameStatusRecord{{Status: "D", Path: "deleted.go"}},
+		},
+		{
+			name:  "rename record",
+			input: "R100\told.go\tnew.go\n",
+			want:  []worktreeNameStatusRecord{{Status: "R100", Path: "new.go", SourcePath: "old.go"}},
+		},
+		{
+			name:  "copy record",
+			input: "C75\tsource.go\tcopy.go\n",
+			want:  []worktreeNameStatusRecord{{Status: "C75", Path: "copy.go", SourcePath: "source.go"}},
+		},
+		{
+			name:  "malformed records are skipped",
+			input: "malformed\nM\n",
+			want:  nil,
+		},
+		{
+			name:  "valid and malformed records preserve order",
+			input: "M\tfirst.go\nmalformed\nA\tsecond.go\nD\n",
+			want: []worktreeNameStatusRecord{
+				{Status: "M", Path: "first.go"},
+				{Status: "A", Path: "second.go"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseWorktreeNameStatus([]byte(tt.input))
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("records = %#v, want %#v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseWorktreeNameStatusProjections(t *testing.T) {
+	input := []byte("\nM\tmodified.go\nA\tadded.go\nD\tdeleted.go\nR100\told.go\tnew.go\nC75\tsource.go\tcopy.go\nmalformed\nM\n")
+
+	targets := parseWorktreeDiffFileTargets(input)
+	wantTargets := []worktreeDiffFileTarget{
+		{Path: "modified.go", Pathspecs: []string{"modified.go"}},
+		{Path: "added.go", Pathspecs: []string{"added.go"}},
+		{Path: "deleted.go", Pathspecs: []string{"deleted.go"}},
+		{Path: "new.go", Pathspecs: []string{"old.go", "new.go"}},
+		{Path: "copy.go", Pathspecs: []string{"source.go", "copy.go"}},
+	}
+	if !reflect.DeepEqual(targets, wantTargets) {
+		t.Fatalf("targets = %#v, want %#v", targets, wantTargets)
+	}
+
+	stats := parseWorktreeFileStats(input)
+	wantStats := []WorktreeFileStat{
+		{Path: "modified.go", Status: "modified"},
+		{Path: "added.go", Status: "added"},
+		{Path: "deleted.go", Status: "deleted"},
+		{Path: "new.go", Status: "modified"},
+		{Path: "copy.go", Status: "modified"},
+	}
+	if !reflect.DeepEqual(stats, wantStats) {
+		t.Fatalf("stats = %#v, want %#v", stats, wantStats)
 	}
 }
 
@@ -1960,6 +2309,472 @@ func TestWorktreeRepo_UpdateAndClear(t *testing.T) {
 	}
 }
 
+func TestMergeBranchRevalidatesWhileRepositoryLeaseIsHeld(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	ws := NewWorktreeService(taskRepo, repository.NewProjectRepo(db), repository.NewSettingsRepo(db))
+	ctx := context.Background()
+	repoDir := createTestGitRepo(t)
+	target := GetCurrentBranch(repoDir)
+	task := &models.Task{
+		ProjectID: "default", Title: "Lease revalidation", Category: models.CategoryCompleted,
+		Status: models.StatusCompleted, MergeTargetBranch: target,
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	wtPath, branchName, err := ws.SetupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task.WorktreePath, task.WorktreeBranch = wtPath, branchName
+	if err := os.WriteFile(filepath.Join(wtPath, "lease-revalidation.txt"), []byte("once\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := CommitWorktreeChanges(wtPath, "lease revalidation"); err != nil {
+		t.Fatal(err)
+	}
+	runGit := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repoDir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	branchTip := runGit("rev-parse", branchName)
+
+	validateErr := errors.New("task branch became merged before mutation")
+	result, mergeErr := ws.MergeBranchValidated(ctx, task, repoDir, "merge", func() error {
+		leaseKey, acquired := beginRepositoryMutation(repoDir)
+		if acquired {
+			endRepositoryMutation(leaseKey)
+			t.Fatal("lease-held validation ran without the repository lease")
+		}
+		runGit("update-ref", "refs/heads/"+target, branchTip)
+		if !IsBranchTipMergedInto(repoDir, branchName, target) {
+			t.Fatal("fixture did not make the task branch merged before mutation")
+		}
+		return validateErr
+	})
+	if !errors.Is(mergeErr, validateErr) {
+		t.Fatalf("expected lease-held validation rejection, got result=%#v err=%v", result, mergeErr)
+	}
+	if got := runGit("rev-parse", target); got != branchTip {
+		t.Fatalf("target changed after validator rejection: got %s want %s", got, branchTip)
+	}
+	if log := runGit("log", "-1", "--pretty=%s", target); log != "lease revalidation" {
+		t.Fatalf("merge executed after validator rejection, target subject=%q", log)
+	}
+}
+
+func TestMergeBranchRejectsConcurrentRepositoryMutations(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+
+	repoDir := createTestGitRepo(t)
+	ws := NewWorktreeService(taskRepo, projectRepo, settingsRepo)
+	task := &models.Task{
+		ProjectID:         "default",
+		Title:             "Concurrent merge",
+		Category:          models.CategoryCompleted,
+		Status:            models.StatusCompleted,
+		MergeTargetBranch: GetCurrentBranch(repoDir),
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	wtPath, branchName, err := ws.SetupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task.WorktreePath = wtPath
+	task.WorktreeBranch = branchName
+	if err := os.WriteFile(filepath.Join(wtPath, "concurrent.txt"), []byte("merge once\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	otherTask := &models.Task{
+		ProjectID:         "default",
+		Title:             "Concurrent repository merge",
+		Category:          models.CategoryCompleted,
+		Status:            models.StatusCompleted,
+		MergeTargetBranch: task.MergeTargetBranch,
+	}
+	if err := taskRepo.Create(ctx, otherTask); err != nil {
+		t.Fatal(err)
+	}
+	otherPath, otherBranch, err := ws.SetupWorktree(ctx, otherTask, repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherTask.WorktreePath = otherPath
+	otherTask.WorktreeBranch = otherBranch
+	if err := os.WriteFile(filepath.Join(otherPath, "other-concurrent.txt"), []byte("must wait\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := CommitWorktreeChanges(otherPath, "other concurrent merge"); err != nil {
+		t.Fatal(err)
+	}
+
+	started := filepath.Join(t.TempDir(), "pre-commit-started")
+	hook := filepath.Join(repoDir, ".git", "hooks", "pre-commit")
+	hookBody := fmt.Sprintf("#!/bin/sh\ntouch %q\nsleep 2\n", started)
+	if err := os.WriteFile(hook, []byte(hookBody), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	firstDone := make(chan error, 1)
+	go func() {
+		_, mergeErr := ws.MergeBranch(ctx, task, repoDir, "merge")
+		firstDone <- mergeErr
+	}()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		if _, statErr := os.Stat(started); statErr == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("first merge did not reach pre-commit hook")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	secondDone := make(chan error, 1)
+	go func() {
+		_, mergeErr := ws.MergeBranch(ctx, otherTask, repoDir, "squash")
+		secondDone <- mergeErr
+	}()
+	select {
+	case secondErr := <-secondDone:
+		if secondErr == nil || !errors.Is(secondErr, ErrMergeInProgress) {
+			t.Fatalf("expected immediate concurrent merge rejection, got %v", secondErr)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("concurrent merge was not rejected promptly")
+	}
+
+	rebaseDone := make(chan error, 1)
+	go func() {
+		_, rebaseErr := ws.RebaseBranch(ctx, otherTask, repoDir)
+		rebaseDone <- rebaseErr
+	}()
+	select {
+	case rebaseErr := <-rebaseDone:
+		if rebaseErr == nil || !errors.Is(rebaseErr, ErrMergeInProgress) {
+			t.Fatalf("expected immediate concurrent rebase rejection, got %v", rebaseErr)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("concurrent rebase was not rejected promptly")
+	}
+	if firstErr := <-firstDone; firstErr != nil {
+		t.Fatalf("first merge failed: %v", firstErr)
+	}
+}
+
+func TestAbortMergeForTaskValidatedPersistsStatusUnderRepositoryLease(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	taskRepo := repository.NewTaskRepo(db, nil)
+	ws := NewWorktreeService(taskRepo, repository.NewProjectRepo(db), repository.NewSettingsRepo(db))
+	repoDir := createTestGitRepo(t)
+
+	writeAndCommitTestFile(t, repoDir, "abort-status.txt", "base\n", "abort status base")
+	runGitTest(t, repoDir, "checkout", "-b", "task/abort-status")
+	writeAndCommitTestFile(t, repoDir, "abort-status.txt", "task\n", "abort status task")
+	runGitTest(t, repoDir, "checkout", "main")
+	writeAndCommitTestFile(t, repoDir, "abort-status.txt", "target\n", "abort status target")
+	mergeCmd := exec.Command("git", "merge", "--no-ff", "task/abort-status")
+	mergeCmd.Dir = repoDir
+	if out, err := mergeCmd.CombinedOutput(); err == nil {
+		t.Fatalf("expected active conflict, got success: %s", out)
+	}
+
+	task := &models.Task{
+		ProjectID: "default", Title: "Atomic abort status", Category: models.CategoryCompleted,
+		Status: models.StatusCompleted, WorktreeBranch: "task/abort-status", MergeTargetBranch: "main", MergeStatus: models.MergeStatusConflict,
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ws.AbortMergeForTaskValidated(ctx, task.ID, repoDir, task.WorktreeBranch, task.MergeTargetBranch, models.MergeStatusPending, func() error {
+		if !ActiveMergeMatchesBranch(repoDir, task.WorktreeBranch) {
+			return errors.New("task no longer owns active conflict")
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("abort with atomic status: %v", err)
+	}
+	if HasActiveMerge(repoDir) || len(ActiveConflictFiles(repoDir)) != 0 {
+		t.Fatal("abort left active Git conflict state")
+	}
+	persisted, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.MergeStatus != models.MergeStatusPending {
+		t.Fatalf("abort persisted status = %q, want pending before lease release", persisted.MergeStatus)
+	}
+}
+
+func TestAutoConflictRecoveryValidationRejectsForeignMergeHead(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	taskRepo := repository.NewTaskRepo(db, nil)
+	ws := NewWorktreeService(taskRepo, repository.NewProjectRepo(db), repository.NewSettingsRepo(db))
+	repoDir := createTestGitRepo(t)
+
+	writeAndCommitTestFile(t, repoDir, "foreign-conflict.txt", "base\n", "foreign conflict base")
+	runGitTest(t, repoDir, "branch", "task/auto-owner")
+	runGitTest(t, repoDir, "checkout", "-b", "task/foreign-owner")
+	writeAndCommitTestFile(t, repoDir, "foreign-conflict.txt", "foreign\n", "foreign conflict task")
+	runGitTest(t, repoDir, "checkout", "main")
+	writeAndCommitTestFile(t, repoDir, "foreign-conflict.txt", "target\n", "foreign conflict target")
+	mergeCmd := exec.Command("git", "merge", "--no-ff", "task/foreign-owner")
+	mergeCmd.Dir = repoDir
+	if out, err := mergeCmd.CombinedOutput(); err == nil {
+		t.Fatalf("expected active foreign conflict, got success: %s", out)
+	}
+
+	task := &models.Task{
+		ProjectID: "default", Title: "Auto recovery owner", Category: models.CategoryCompleted,
+		Status: models.StatusCompleted, WorktreeBranch: "task/auto-owner", MergeTargetBranch: "main", MergeStatus: models.MergeStatusConflict,
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	validateOwner := func() error { return ws.validateAutoConflictRecovery(ctx, task, repoDir) }
+	if _, err := ws.ResolveConflictsWithAIValidated(ctx, task, repoDir, validateOwner); !errors.Is(err, ErrMergeEligibilityChanged) {
+		t.Fatalf("foreign active conflict Resolve validation = %v, want ErrMergeEligibilityChanged", err)
+	}
+	if err := ws.AbortMergeForTaskValidated(ctx, task.ID, repoDir, task.WorktreeBranch, task.MergeTargetBranch, models.MergeStatusConflict, validateOwner); !errors.Is(err, ErrMergeEligibilityChanged) {
+		t.Fatalf("foreign active conflict Abort validation = %v, want ErrMergeEligibilityChanged", err)
+	}
+	if !ActiveMergeMatchesBranch(repoDir, "task/foreign-owner") || len(ActiveConflictFiles(repoDir)) == 0 {
+		t.Fatal("validated auto recovery altered the foreign active conflict")
+	}
+	persisted, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.MergeStatus != models.MergeStatusConflict {
+		t.Fatalf("foreign recovery changed task status to %q", persisted.MergeStatus)
+	}
+}
+
+func TestConflictRecoverySharesRepositoryMutationLease(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ws := NewWorktreeService(repository.NewTaskRepo(db, nil), repository.NewProjectRepo(db), repository.NewSettingsRepo(db))
+	repoDir := createTestGitRepo(t)
+	stopValidation := errors.New("stop after recovery lease test")
+
+	assertBlocked := func(t *testing.T, hold func(started chan<- struct{}, release <-chan struct{}) error, blocked func() error) {
+		t.Helper()
+		started := make(chan struct{})
+		release := make(chan struct{})
+		done := make(chan error, 1)
+		go func() { done <- hold(started, release) }()
+		<-started
+		if err := blocked(); !errors.Is(err, ErrMergeInProgress) {
+			close(release)
+			<-done
+			t.Fatalf("concurrent repository mutation returned %v, want ErrMergeInProgress", err)
+		}
+		close(release)
+		if err := <-done; !errors.Is(err, stopValidation) {
+			t.Fatalf("lease holder returned %v, want validator stop", err)
+		}
+	}
+
+	holdResolve := func(started chan<- struct{}, release <-chan struct{}) error {
+		_, err := ws.ResolveConflictsWithAIValidated(context.Background(), &models.Task{}, repoDir, func() error {
+			close(started)
+			<-release
+			return stopValidation
+		})
+		return err
+	}
+	assertBlocked(t, holdResolve, func() error {
+		return AbortMergeForTask(repoDir, "task/recovery", "main")
+	})
+	assertBlocked(t, holdResolve, func() error {
+		_, err := ws.MergeBranch(context.Background(), &models.Task{}, repoDir, "merge")
+		return err
+	})
+	assertBlocked(t, holdResolve, func() error {
+		_, err := ws.RebaseBranch(context.Background(), &models.Task{}, repoDir)
+		return err
+	})
+
+	holdAbort := func(started chan<- struct{}, release <-chan struct{}) error {
+		return AbortMergeForTaskValidated(repoDir, "task/recovery", "main", func() error {
+			close(started)
+			<-release
+			return stopValidation
+		})
+	}
+	assertBlocked(t, holdAbort, func() error {
+		_, err := ws.ResolveConflictsWithAI(context.Background(), &models.Task{}, repoDir)
+		return err
+	})
+}
+
+func TestRepositoryMutationLeaseCanonicalizesAliasesAcrossServices(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+
+	assertAliasBlocked := func(t *testing.T, repoDir, aliasDir string) {
+		t.Helper()
+		first := NewWorktreeService(taskRepo, projectRepo, settingsRepo)
+		second := NewWorktreeService(taskRepo, projectRepo, settingsRepo)
+		started := make(chan struct{})
+		release := make(chan struct{})
+		firstDone := make(chan error, 1)
+		stopValidation := errors.New("stop after lease test")
+		go func() {
+			_, mergeErr := first.MergeBranchValidated(context.Background(), &models.Task{}, repoDir, "merge", func() error {
+				close(started)
+				<-release
+				return stopValidation
+			})
+			firstDone <- mergeErr
+		}()
+		<-started
+		_, aliasErr := second.MergeBranch(context.Background(), &models.Task{}, aliasDir, "merge")
+		if !errors.Is(aliasErr, ErrMergeInProgress) {
+			close(release)
+			<-firstDone
+			t.Fatalf("repository alias %q acquired a second lease: %v", aliasDir, aliasErr)
+		}
+		close(release)
+		if firstErr := <-firstDone; !errors.Is(firstErr, stopValidation) {
+			t.Fatalf("first lease holder returned %v, want validator stop", firstErr)
+		}
+	}
+
+	t.Run("symlink", func(t *testing.T) {
+		repoDir := createTestGitRepo(t)
+		aliasDir := filepath.Join(t.TempDir(), "repo-alias")
+		if err := os.Symlink(repoDir, aliasDir); err != nil {
+			t.Skipf("symlinks unavailable: %v", err)
+		}
+		assertAliasBlocked(t, repoDir, aliasDir)
+	})
+
+	t.Run("linked worktree", func(t *testing.T) {
+		repoDir := createTestGitRepo(t)
+		linkedDir := filepath.Join(t.TempDir(), "linked-worktree")
+		runGitTest(t, repoDir, "worktree", "add", "-b", "task/lease-linked-worktree", linkedDir, "main")
+		assertAliasBlocked(t, repoDir, linkedDir)
+	})
+}
+
+func TestGitPathDiscoveryPreservesWhitespaceAndNewlines(t *testing.T) {
+	repoDir := createTestGitRepo(t)
+	stagedNames := []string{"staged path.txt"}
+	if runtime.GOOS != "windows" {
+		stagedNames = append(stagedNames, "staged\npath.txt")
+	}
+	for _, name := range stagedNames {
+		if err := os.WriteFile(filepath.Join(repoDir, name), []byte(name), 0644); err != nil {
+			t.Fatal(err)
+		}
+		runGitTest(t, repoDir, "add", "--", name)
+	}
+	staged, err := StagedPaths(repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(staged) != len(stagedNames) {
+		t.Fatalf("staged paths = %#v, want exact names %#v", staged, stagedNames)
+	}
+	for _, name := range stagedNames {
+		if !staged[name] {
+			t.Fatalf("staged paths lost exact filename %q: %#v", name, staged)
+		}
+	}
+
+	runGitTest(t, repoDir, "reset", "--hard", "HEAD")
+	conflictName := "conflict path with spaces.txt"
+	if runtime.GOOS != "windows" {
+		conflictName = "conflict path\nwith newline.txt"
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, conflictName), []byte("base\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runGitTest(t, repoDir, "add", "--", conflictName)
+	runGitTest(t, repoDir, "commit", "-m", "add unusual conflict path")
+	runGitTest(t, repoDir, "checkout", "-b", "task/unusual-conflict")
+	if err := os.WriteFile(filepath.Join(repoDir, conflictName), []byte("task\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runGitTest(t, repoDir, "add", "--", conflictName)
+	runGitTest(t, repoDir, "commit", "-m", "task unusual conflict")
+	runGitTest(t, repoDir, "checkout", "main")
+	if err := os.WriteFile(filepath.Join(repoDir, conflictName), []byte("target\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runGitTest(t, repoDir, "add", "--", conflictName)
+	runGitTest(t, repoDir, "commit", "-m", "target unusual conflict")
+	merge := exec.Command("git", "merge", "--no-ff", "task/unusual-conflict")
+	merge.Dir = repoDir
+	if out, mergeErr := merge.CombinedOutput(); mergeErr == nil {
+		t.Fatalf("expected conflict for unusual filename: %s", out)
+	}
+	if conflicts := ActiveConflictFiles(repoDir); len(conflicts) != 1 || conflicts[0] != conflictName {
+		t.Fatalf("conflict paths = %#v, want exact filename %q", conflicts, conflictName)
+	}
+}
+
+func TestMergeBranchSquashPreservesUnusualFilename(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	ws := NewWorktreeService(taskRepo, repository.NewProjectRepo(db), repository.NewSettingsRepo(db))
+	ctx := context.Background()
+	repoDir := createTestGitRepo(t)
+	task := &models.Task{
+		ProjectID: "default", Title: "Unusual squash path", Category: models.CategoryCompleted,
+		Status: models.StatusCompleted, MergeTargetBranch: GetCurrentBranch(repoDir),
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	wtPath, branchName, err := ws.SetupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task.WorktreePath, task.WorktreeBranch = wtPath, branchName
+	name := "task change with space.txt"
+	if runtime.GOOS != "windows" {
+		name = "task change\nwith space.txt"
+	}
+	if err := os.WriteFile(filepath.Join(wtPath, name), []byte("squashed\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := CommitWorktreeChanges(wtPath, "commit unusual squash path"); err != nil {
+		t.Fatal(err)
+	}
+	result, mergeErr := ws.MergeBranch(ctx, task, repoDir, "squash")
+	if mergeErr != nil || result == nil || !result.Success {
+		t.Fatalf("squash unusual filename failed: result=%#v err=%v", result, mergeErr)
+	}
+	out, err := gitOutput(repoDir, "diff-tree", "--no-commit-id", "--name-only", "-r", "-z", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), name+"\x00") {
+		t.Fatalf("squash commit paths %q do not contain exact filename %q", out, name)
+	}
+}
+
 func TestMergeBranch(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	taskRepo := repository.NewTaskRepo(db, nil)
@@ -3100,6 +3915,134 @@ func TestMergeBranch_SquashCommitFailureMarksMergeFailedAndDoesNotUseHardReset(t
 	}
 	if strings.Contains(string(serviceSource), "reset\", \"--hard") {
 		t.Fatal("merge cleanup must not use git reset --hard")
+	}
+}
+
+func TestMergeBranch_SquashConflictCleansToRetryableFailure(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	ws := NewWorktreeService(taskRepo, repository.NewProjectRepo(db), repository.NewSettingsRepo(db))
+	ctx := context.Background()
+	repoDir := createTestGitRepo(t)
+	target := GetCurrentBranch(repoDir)
+	conflictPath := filepath.Join(repoDir, "squash-conflict.txt")
+	if err := os.WriteFile(conflictPath, []byte("base\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	mustGit := func(dir string, args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git -C %s %v: %v\n%s", dir, args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	mustGit(repoDir, "add", "squash-conflict.txt")
+	mustGit(repoDir, "commit", "-m", "conflict base")
+
+	task := &models.Task{
+		ProjectID: "default", Title: "Squash conflict", Category: models.CategoryCompleted,
+		Status: models.StatusCompleted, MergeTargetBranch: target,
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	wtPath, branchName, err := ws.SetupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task.WorktreePath, task.WorktreeBranch = wtPath, branchName
+	if err := os.WriteFile(filepath.Join(wtPath, "squash-conflict.txt"), []byte("task\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := CommitWorktreeChanges(wtPath, "task conflict"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(conflictPath, []byte("target\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(repoDir, "add", "squash-conflict.txt")
+	mustGit(repoDir, "commit", "-m", "target conflict")
+
+	result, mergeErr := ws.MergeBranch(ctx, task, repoDir, "squash")
+	if mergeErr == nil || result == nil || !strings.Contains(strings.ToLower(result.ErrorMessage), "conflict") {
+		t.Fatalf("expected cleaned squash conflict failure, result=%#v err=%v", result, mergeErr)
+	}
+	if HasActiveMerge(repoDir) || len(ActiveConflictFiles(repoDir)) != 0 {
+		t.Fatalf("squash conflict remained active: merge=%v conflicts=%v", HasActiveMerge(repoDir), ActiveConflictFiles(repoDir))
+	}
+	updated, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.MergeStatus != models.MergeStatusFailed {
+		t.Fatalf("merge status=%q, want failed retry state", updated.MergeStatus)
+	}
+	status := mustGit(repoDir, "status", "--porcelain")
+	if strings.Contains(status, "squash-conflict.txt") {
+		t.Fatalf("squash conflict changes remained after cleanup: %q", status)
+	}
+	content, err := os.ReadFile(conflictPath)
+	if err != nil || string(content) != "target\n" {
+		t.Fatalf("target content not restored after squash conflict: %q err=%v", content, err)
+	}
+}
+
+func TestAbortMergeForTaskRestoresSquashConflictWithoutMergeHead(t *testing.T) {
+	repoDir := createTestGitRepo(t)
+	target := GetCurrentBranch(repoDir)
+	conflictPath := filepath.Join(repoDir, "legacy-squash-conflict.txt")
+	if err := os.WriteFile(conflictPath, []byte("base\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	run := func(dir string, args ...string) ([]byte, error) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		return cmd.CombinedOutput()
+	}
+	if out, err := run(repoDir, "add", "legacy-squash-conflict.txt"); err != nil {
+		t.Fatalf("stage base: %v\n%s", err, out)
+	}
+	if out, err := run(repoDir, "commit", "-m", "legacy squash base"); err != nil {
+		t.Fatalf("commit base: %v\n%s", err, out)
+	}
+	branch := "task/legacy-squash-conflict"
+	if out, err := run(repoDir, "checkout", "-b", branch); err != nil {
+		t.Fatalf("checkout task branch: %v\n%s", err, out)
+	}
+	if err := os.WriteFile(conflictPath, []byte("task\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := run(repoDir, "commit", "-am", "legacy task conflict"); err != nil {
+		t.Fatalf("commit task side: %v\n%s", err, out)
+	}
+	if out, err := run(repoDir, "checkout", target); err != nil {
+		t.Fatalf("checkout target: %v\n%s", err, out)
+	}
+	if err := os.WriteFile(conflictPath, []byte("target\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := run(repoDir, "commit", "-am", "legacy target conflict"); err != nil {
+		t.Fatalf("commit target side: %v\n%s", err, out)
+	}
+	if out, err := run(repoDir, "merge", "--squash", branch); err == nil {
+		t.Fatalf("expected squash conflict, got success: %s", out)
+	}
+	if HasActiveMerge(repoDir) || len(ActiveConflictFiles(repoDir)) == 0 {
+		t.Fatalf("expected squash conflict without MERGE_HEAD, merge=%v conflicts=%v", HasActiveMerge(repoDir), ActiveConflictFiles(repoDir))
+	}
+
+	if err := AbortMergeForTask(repoDir, branch, target); err != nil {
+		t.Fatalf("abort squash conflict: %v", err)
+	}
+	if HasActiveMerge(repoDir) || len(ActiveConflictFiles(repoDir)) != 0 {
+		t.Fatalf("squash conflict remained after abort: merge=%v conflicts=%v", HasActiveMerge(repoDir), ActiveConflictFiles(repoDir))
+	}
+	content, err := os.ReadFile(conflictPath)
+	if err != nil || string(content) != "target\n" {
+		t.Fatalf("target content not restored: %q err=%v", content, err)
 	}
 }
 

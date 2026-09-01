@@ -177,6 +177,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						--ov-link-color-visited: #7480ff;
 						--ov-link-focus-ring: rgba(116, 128, 255, 0.45);
 						--ov-link-decoration: rgba(116, 128, 255, 0.85);
+						--ov-primary-action-color: #7480ff;
 							--ov-diff-add-bg: #1E3A38;
 							--ov-diff-del-bg: #3D2C34;
 							--ov-diff-add-fg: #559B70;
@@ -192,6 +193,16 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							transparent 4px,
 							transparent 6px
 						);
+					}
+					[data-color-theme]:not([data-color-theme="openvibely-dark"]):not([data-color-theme="openvibely-light"]) {
+						--ov-primary-action-color: oklch(var(--p) / 1);
+					}
+					[data-color-theme] .btn-primary.chat-send-button {
+						background-color: var(--ov-primary-action-color);
+						border-color: var(--ov-primary-action-color);
+					}
+					.task-state-running {
+						color: var(--ov-primary-action-color);
 					}
 					/* Canonical "Default" badge styling used across major settings pages. */
 					.ov-badge-default {
@@ -365,9 +376,24 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					z-index: 10;
 					box-shadow: 0 3px 8px rgba(0,0,0,0.5);
 				}
-				.task-selected .btn-circle {
-					display: none;
-				}
+					.task-selected .btn-circle {
+						display: none;
+					}
+					.schedule-selected {
+						position: relative;
+						overflow: visible !important;
+						background: oklch(var(--p) / 0.35) !important;
+					}
+					.schedule-selected::after {
+						content: '';
+						position: absolute;
+						inset: 0 0 0 -2px;
+						border: 2px solid oklch(var(--p));
+						border-radius: inherit;
+						box-sizing: border-box;
+						pointer-events: none;
+						z-index: 1;
+					}
 				/* Modal layering */
 				dialog.modal {
 					z-index: 1200;
@@ -549,24 +575,6 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					background: var(--ov-loading-dot-color-soft);
 				}
 			}
-			#selection-counter {
-					position: fixed;
-					bottom: 24px;
-					right: 24px;
-					background: hsl(var(--p));
-					color: white;
-					padding: 12px 20px;
-					border-radius: 12px;
-					font-weight: bold;
-					box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-					z-index: 50;
-					display: none;
-					align-items: center;
-					gap: 12px;
-				}
-				#selection-counter.visible {
-					display: flex;
-				}
 				/* Ensure dropdown menus appear above other cards */
 				.card:has(.dropdown:focus-within),
 				.card:has(.dropdown:hover),
@@ -606,8 +614,20 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						max-height: calc(100vh - 4rem);
 						overflow-y: auto;
 					}
-					/* Chat actions are explicitly state-driven so focus alone never opens the destructive menu. */
-					#chat-page-root [data-chat-actions-dropdown]:not([data-chat-actions-open="true"]) > .dropdown-content {
+				/* Kanban dropdowns are explicitly state-driven so dismissal can
+				   return focus to the trigger without focus reopening the menu. */
+				#kanban-board [data-kanban-menu-key]:not([data-kanban-menu-open="true"]) > [data-kanban-menu-content] {
+					visibility: hidden !important;
+					opacity: 0 !important;
+					pointer-events: none !important;
+				}
+				#kanban-board [data-kanban-menu-key][data-kanban-menu-open="true"] > [data-kanban-menu-content] {
+					visibility: visible !important;
+					opacity: 1 !important;
+					pointer-events: auto !important;
+				}
+				/* Chat actions are explicitly state-driven so focus alone never opens the destructive menu. */
+				#chat-page-root [data-chat-actions-dropdown]:not([data-chat-actions-open="true"]) > .dropdown-content {
 						visibility: hidden !important;
 						opacity: 0 !important;
 						pointer-events: none !important;
@@ -968,6 +988,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					--su: 0.7 0.12 145;
 					--wa: 0.79 0.08 84;
 					--er: 0.68 0.15 26;
+					--ov-primary-action-color: #7480ff;
 
 					/* Light 2026 semantic aliases — indigo/purple accent palette. */
 					--ov-l-bg: #FAFAFA;
@@ -1148,11 +1169,11 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 
 					/* --- Buttons --- */
 					/* Dark-mode hover parity across web and desktop (deterministic, engine-agnostic). */
-					[data-theme="dark"] .btn:hover {
+					[data-color-theme="openvibely-dark"][data-theme="dark"] .btn:hover {
 						background-color: #2f3540 !important;
 						border-color: #2f3540 !important;
 					}
-					[data-theme="dark"] .btn-primary:hover {
+					[data-color-theme="openvibely-dark"][data-theme="dark"] .btn-primary:hover {
 						background-color: #646fe4 !important;
 						border-color: #646fe4 !important;
 					}
@@ -1227,16 +1248,16 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						border-color: #e66465 !important;
 					}
 					/* Light-mode hover parity matrix (mirrors dark-mode coverage). */
-					[data-theme="light"] .btn:hover {
+					[data-color-theme="openvibely-light"][data-theme="light"] .btn:hover {
 						background-color: var(--ov-l-surface-hover);
 						border-color: var(--ov-l-border);
 					}
-					[data-theme="light"] .btn-primary {
+					[data-color-theme="openvibely-light"][data-theme="light"] .btn-primary {
 						background-color: var(--ov-l-accent);
 						border-color: var(--ov-l-accent);
 						color: #FFFFFF;
 					}
-					[data-theme="light"] .btn-primary:hover {
+					[data-color-theme="openvibely-light"][data-theme="light"] .btn-primary:hover {
 						background-color: var(--ov-l-accent-hover);
 						border-color: var(--ov-l-accent-hover);
 					}
@@ -1654,11 +1675,6 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					color: var(--ov-l-text-strong);
 				}
 
-				/* --- Selection counter shadow fix --- */
-				[data-theme="light"] #selection-counter {
-					box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-				}
-
 				/* --- Modal dialogs --- */
 				[data-theme="light"] .modal-box {
 					background-color: var(--ov-l-bg);
@@ -1726,6 +1742,10 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					background: hsl(var(--b2, var(--b1)) / 0.8);
 					padding: 0.15em 0.35em;
 					border-radius: 0.25rem;
+				}
+				[data-theme="light"] [data-alert-markdown] :not(pre) > code {
+					background: var(--ov-l-surface-active);
+					color: var(--ov-l-text-strong);
 				}
 				.chat-markdown pre {
 					margin: 0.5em 0;
@@ -2556,26 +2576,15 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				// No JavaScript workaround needed
 
 				let draggedElement = null;
+
 				let selectedTasks = new Set();
 				let draggedTaskIds = [];
+
 				window.isDragging = false;
 				let autoScrollInterval = null;
 				let currentScrollZone = null;
 
-				function updateSelectionCounter() {
-					const counter = document.getElementById('selection-counter');
-					if (!counter) return;
-
-					if (selectedTasks.size > 0) {
-						counter.querySelector('#selection-count').textContent = selectedTasks.size;
-						counter.classList.add('visible');
-					} else {
-						counter.classList.remove('visible');
-					}
-				}
-
-			// ── Tab Visibility Manager ──
-			// Centralized manager to pause/resume SSE connections and HTMX polling
+				// ── Tab Visibility Manager ──			// Centralized manager to pause/resume SSE connections and HTMX polling
 			// when a tab is hidden/visible. Prevents resource exhaustion with multiple tabs.
 			window._tabVisibility = (function() {
 				let sseConnections = {}; // name → { url, onmessage, onerror, onopen, instance }
@@ -2691,14 +2700,18 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				};
 			})();
 
-			// Track which element was focused before mousedown to properly detect dropdown toggle
+			// Track which element was focused before mousedown to properly detect dropdown toggle.
+			// Also record whether a Kanban menu was open so focus changes during the click
+			// do not invert first-click behavior.
 			let focusedBeforeClick = null;
+			let kanbanMenuWasOpenBeforeClick = false;
 
 			document.addEventListener('mousedown', function(e) {
-				// Record what was focused before this interaction starts
+				// Record state before this interaction starts.
 				focusedBeforeClick = document.activeElement;
+				const kanbanDropdown = e.target && e.target.closest ? e.target.closest('[data-kanban-menu-key]') : null;
+				kanbanMenuWasOpenBeforeClick = !!(kanbanDropdown && kanbanDropdown.getAttribute('data-kanban-menu-open') === 'true');
 			}, true);
-
 			function closestDropdownScrollBoundary(element) {
 				let current = element ? element.parentElement : null;
 				while (current && current !== document.body) {
@@ -2736,21 +2749,40 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				event.stopPropagation(); // Prevent event from bubbling to parent handlers
 				const label = event.currentTarget;
 				const dropdown = label && label.closest ? label.closest('[data-chat-actions-dropdown]') : null;
+				const kanbanDropdown = label && label.closest ? label.closest('[data-kanban-menu-key]') : null;
 				const desktopChatStartupFocus = dropdown && document.documentElement.getAttribute('data-openvibely-runtime') === 'desktop' && dropdown.getAttribute('data-chat-actions-open') !== 'true';
 
-				// Check if this dropdown was already open before the click. A desktop Chat
-				// trigger may only be focused by WebView startup, which is not an open action.
-				if (focusedBeforeClick === label && !desktopChatStartupFocus) {
-					// Dropdown was already open, close it
-					event.preventDefault();
-					label.blur();
-					return;
-				}
-				// Otherwise, let the default focus behavior open the dropdown, then place it in the visible viewport/scrollport.
-				requestAnimationFrame(function() { positionDropdownForViewport(label); });
-			}
+					// Check if this dropdown was already open before the click. A desktop Chat
+					// trigger may only be focused by WebView startup, which is not an open action.
+					if ((kanbanDropdown && kanbanMenuWasOpenBeforeClick) || (focusedBeforeClick === label && !kanbanDropdown && !desktopChatStartupFocus)) {
+						// Dropdown was already open, close it.
+						event.preventDefault();
+						if (kanbanDropdown && window.closeKanbanMenu) {
+							window.closeKanbanMenu(kanbanDropdown, true);
+						} else {
+							label.blur();
+						}
+						return;
+					}
 
-			function handleTaskSelect(event) {
+					// Otherwise, open the dropdown explicitly, then place it in the visible viewport/scrollport.
+					if (kanbanDropdown) {
+						openKanbanMenuKey = kanbanDropdown.getAttribute('data-kanban-menu-key') || '';
+						const board = kanbanDropdown.closest('#kanban-board');
+						if (board && openKanbanMenuKey) board.setAttribute('data-open-kanban-menu-key', openKanbanMenuKey);
+						setKanbanMenuExpanded(kanbanDropdown, true);
+					}
+					requestAnimationFrame(function() { positionDropdownForViewport(label); });
+					if (kanbanDropdown && label.matches('[data-task-card-menu-trigger]') && window.htmx) {
+						const options = kanbanDropdown.querySelector('[data-task-card-merge-options]');
+						const refreshURL = options && options.getAttribute('hx-get');
+						if (options && refreshURL) htmx.ajax('GET', refreshURL, {target: options, swap: 'outerHTML'});
+					}
+				}
+
+				function handleTaskSelect(event) {
+
+
 					const clickedTaskID = event.currentTarget.getAttribute('data-task-id');
 					if (clickedTaskID && clickedTaskID === suppressedTaskClickID) {
 						event.preventDefault();
@@ -2784,7 +2816,6 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							card.classList.add('task-selected');
 						}
 
-						updateSelectionCounter();
 						return;
 					}
 
@@ -2801,8 +2832,9 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					});
 					selectedTasks.clear();
 					draggedTaskIds = [];
-					updateSelectionCounter();
 				}
+
+
 
 				function beginPointerCardMotion(card) {
 					const rect = card.getBoundingClientRect();
@@ -3085,11 +3117,14 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							});
 						}
 					} else {
-						// Multi-select batch category change
+						// Multi-select batch category change. Clear selection before HTMX
+						// request hooks snapshot the board, while retaining the payload IDs.
+						const batchTaskIDs = draggedTaskIds.slice();
+						clearSelection();
 						htmx.ajax('PATCH', `/tasks/batch-category`, {
 							target: '#kanban-board',
 							swap: 'outerHTML',
-							values: { task_ids: draggedTaskIds.join(','), category: targetCategory, project_id: projectID }
+							values: { task_ids: batchTaskIDs.join(','), category: targetCategory, project_id: projectID }
 						}).catch(function(err) {
 							console.error('[drag] Batch category change failed:', err);
 							// Show error message to user
@@ -3192,11 +3227,14 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							});
 						}
 					} else {
-						// Multi-select drop into Active — batch category change
+						// Multi-select drop into Active. Clear selection before HTMX
+						// request hooks snapshot the board, while retaining the payload IDs.
+						const batchTaskIDs = draggedTaskIds.slice();
+						clearSelection();
 						htmx.ajax('PATCH', `/tasks/batch-category`, {
 							target: '#kanban-board',
 							swap: 'outerHTML',
-							values: { task_ids: draggedTaskIds.join(','), category: 'active', project_id: projectID }
+							values: { task_ids: batchTaskIDs.join(','), category: 'active', project_id: projectID }
 						}).catch(function(err) {
 							console.error('[drag] Batch category change to active failed:', err);
 							if (err.xhr && err.xhr.status === 400) {
@@ -3244,7 +3282,13 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					}
 
 					document.addEventListener('htmx:afterSwap', syncOpenVibelyTitleFromHTMX);
-					document.addEventListener('htmx:historyRestore', syncOpenVibelyTitleFromHTMX);
+					document.addEventListener('htmx:historyRestore', function(event) {
+						if (typeof resetKanbanInteractionForNavigation === 'function') resetKanbanInteractionForNavigation();
+						syncOpenVibelyTitleFromHTMX(event);
+					});
+					if (window.addEventListener) window.addEventListener('popstate', function() {
+						if (typeof resetKanbanInteractionForNavigation === 'function') resetKanbanInteractionForNavigation();
+					});
 
 					window.openVibelySubmitNavigate = function(form) {
 						if (!form || !window.htmx) return Promise.reject(new Error('HTMX navigation unavailable'));
@@ -3259,11 +3303,195 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					};
 
 				// Scroll position restoration for drop zones
+				// Interaction state is restored across the same authoritative kanban swaps.
 				let savedScrollPositions = new Map();
+				let savedKanbanInteraction = null;
+				let openKanbanMenuKey = '';
+				let suppressKanbanMenuFocusOpen = false;
 
-				// Save scroll positions before kanban board swap
+				function kanbanMenuItemKey(element) {
+					if (!element) return '';
+					return [
+						element.tagName,
+						element.getAttribute('href') || '',
+						element.getAttribute('hx-get') || '',
+						element.getAttribute('hx-post') || '',
+						element.getAttribute('hx-delete') || '',
+						(element.textContent || '').trim().replace(/\s+/g, ' ')
+					].join('|');
+				}
+
+				function snapshotKanbanInteraction(board) {
+					const active = document.activeElement;
+					let dropdown = active && board.contains(active) && active.closest ? active.closest('[data-kanban-menu-key]') : null;
+					if (dropdown && dropdown.getAttribute('data-kanban-menu-open') !== 'true') dropdown = null;
+					const durableMenuKey = board.getAttribute('data-open-kanban-menu-key') || openKanbanMenuKey;
+					if (!dropdown && durableMenuKey) {
+						dropdown = Array.from(board.querySelectorAll('[data-kanban-menu-key]')).find(function(candidate) {
+							return candidate.getAttribute('data-kanban-menu-key') === durableMenuKey;
+						}) || null;
+					}
+					let focusRole = dropdown && (!active || !dropdown.contains(active)) ? 'trigger' : '';
+					let focusKey = '';
+					if (dropdown && active && dropdown.contains(active)) {
+						if (active.matches('[data-kanban-menu-trigger]')) focusRole = 'trigger';
+						else if (active.matches('[data-kanban-menu-content]')) focusRole = 'content';
+						else {
+							focusRole = 'item';
+							focusKey = kanbanMenuItemKey(active);
+						}
+					}
+						savedKanbanInteraction = {
+							selectedTaskIDs: Array.from(selectedTasks),
+							menuKey: dropdown ? dropdown.getAttribute('data-kanban-menu-key') : '',
+							focusRole: focusRole,
+							focusKey: focusKey,
+							refreshTaskOptions: !!(active && active.closest && active.closest('[data-task-card-merge-options]'))
+						};				}
+
+				function setKanbanMenuExpanded(dropdown, expanded) {
+					const trigger = dropdown && dropdown.querySelector('[data-kanban-menu-trigger]');
+					if (trigger) trigger.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+					if (dropdown) {
+						if (expanded) dropdown.setAttribute('data-kanban-menu-open', 'true');
+						else dropdown.removeAttribute('data-kanban-menu-open');
+					}
+				}
+
+					function closeKanbanMenu(dropdown, restoreTriggerFocus) {
+						openKanbanMenuKey = '';
+						savedKanbanInteraction = null;
+						const activeMenu = document.activeElement && document.activeElement.closest ? document.activeElement.closest('[data-kanban-menu-key]') : null;
+						if (!restoreTriggerFocus && activeMenu && document.activeElement.blur) document.activeElement.blur();
+						const board = document.getElementById('kanban-board');
+						if (board) board.removeAttribute('data-open-kanban-menu-key');
+						document.querySelectorAll('[data-kanban-menu-key]').forEach(function(candidate) {
+							setKanbanMenuExpanded(candidate, false);
+						});
+						if (restoreTriggerFocus && dropdown) {
+							const trigger = dropdown.querySelector('[data-kanban-menu-trigger]');
+							if (trigger && document.contains(trigger)) {
+								suppressKanbanMenuFocusOpen = true;
+								trigger.focus({preventScroll: true});
+								suppressKanbanMenuFocusOpen = false;
+								setKanbanMenuExpanded(dropdown, false);
+							}
+						}
+					}				window.closeKanbanMenu = closeKanbanMenu;
+
+				function resetKanbanInteractionForNavigation() {
+					clearSelection();
+					closeKanbanMenu(null, false);
+					document.querySelectorAll('#kanban-board .task-selected').forEach(function(card) {
+						card.classList.remove('task-selected');
+					});
+				}
+
+				function restoreKanbanInteraction(board) {
+					const snapshot = savedKanbanInteraction;
+					if (!snapshot) return;
+					selectedTasks.clear();
+					snapshot.selectedTaskIDs.forEach(function(id) {
+						const card = document.getElementById('task-' + id);
+						if (!card || !board.contains(card)) return;
+						selectedTasks.add(id);
+						card.classList.add('task-selected');
+					});
+					const menuKey = snapshot.menuKey || openKanbanMenuKey;
+					if (!menuKey) return;
+					const dropdown = Array.from(board.querySelectorAll('[data-kanban-menu-key]')).find(function(candidate) {
+						return candidate.getAttribute('data-kanban-menu-key') === menuKey;
+					});
+					if (!dropdown) {
+						closeKanbanMenu(null, false);
+						return;
+					}
+					const trigger = dropdown.querySelector('[data-kanban-menu-trigger]');
+					let focusTarget = trigger;
+					if (snapshot.focusRole === 'content') focusTarget = dropdown.querySelector('[data-kanban-menu-content]') || trigger;
+					if (snapshot.focusRole === 'item') {
+						focusTarget = Array.from(dropdown.querySelectorAll('a, button, [tabindex]')).find(function(candidate) {
+							return kanbanMenuItemKey(candidate) === snapshot.focusKey;
+						}) || trigger;
+					}
+					if (focusTarget) {
+						openKanbanMenuKey = menuKey;
+						board.setAttribute('data-open-kanban-menu-key', menuKey);
+						setKanbanMenuExpanded(dropdown, true);
+						suppressKanbanMenuFocusOpen = true;
+						focusTarget.focus({preventScroll: true});
+						suppressKanbanMenuFocusOpen = false;
+						positionDropdownForViewport(trigger);
+					}
+				}
+
+				document.addEventListener('focusin', function(event) {
+					const dropdown = event.target && event.target.closest ? event.target.closest('[data-kanban-menu-key]') : null;
+					if (!dropdown || suppressKanbanMenuFocusOpen) return;
+					openKanbanMenuKey = dropdown.getAttribute('data-kanban-menu-key');
+					const board = dropdown.closest('#kanban-board');
+					if (board) {
+						board.setAttribute('data-open-kanban-menu-key', openKanbanMenuKey);
+						snapshotKanbanInteraction(board);
+					}
+					document.querySelectorAll('[data-kanban-menu-key]').forEach(function(candidate) {
+						setKanbanMenuExpanded(candidate, candidate === dropdown);
+					});
+				});
+				document.addEventListener('pointerdown', function(event) {
+					if (!event.target || !event.target.closest || !event.target.closest('[data-kanban-menu-key]')) {
+						closeKanbanMenu(null, false);
+					}
+				}, true);
+				document.addEventListener('keydown', function(event) {
+					if (event.key === 'Escape') {
+						const dropdown = event.target && event.target.closest ? event.target.closest('[data-kanban-menu-key]') : null;
+						if (dropdown) {
+							event.preventDefault();
+							event.stopPropagation();
+							closeKanbanMenu(dropdown, true);
+						}
+					}
+					if (event.key === 'Tab') {
+						setTimeout(function() {
+							if (!document.activeElement || !document.activeElement.closest || !document.activeElement.closest('[data-kanban-menu-key]')) {
+								closeKanbanMenu(null, false);
+							}
+						}, 0);
+					}
+				}, true);
+				document.addEventListener('focusout', function(event) {
+					const dropdown = event.target && event.target.closest ? event.target.closest('[data-kanban-menu-key]') : null;
+					if (!dropdown) return;
+					setTimeout(function() {
+						if (!dropdown.contains(document.activeElement) && dropdown.getAttribute('data-kanban-menu-open') !== 'true') setKanbanMenuExpanded(dropdown, false);
+					}, 0);
+				});
+
+				// Capture at the earliest HTMX request boundary, before request setup can move focus.
+				document.addEventListener('htmx:configRequest', function(event) {
+					if (event.detail.target && event.detail.target.id === 'kanban-board' && !savedKanbanInteraction) {
+						snapshotKanbanInteraction(event.detail.target);
+					}
+				});
+
+				// Retain compatibility with request paths that do not emit configRequest.
+				document.addEventListener('htmx:beforeRequest', function(event) {
+					const source = event.detail && event.detail.elt;
+					const menuContent = source && source.closest ? source.closest('[data-kanban-menu-content]') : null;
+					if (menuContent) closeKanbanMenu(menuContent.closest('[data-kanban-menu-key]'), false);
+					if (event.detail.target && event.detail.target.id === 'kanban-board' && !savedKanbanInteraction) {
+						snapshotKanbanInteraction(event.detail.target);
+					}
+				});
+
+				// Save scroll positions and provide a fallback snapshot for direct swaps.
 				document.addEventListener('htmx:beforeSwap', function(event) {
+					if (event.detail.target && event.detail.target.id === 'main-content') {
+						resetKanbanInteractionForNavigation();
+					}
 					if (event.detail.target && event.detail.target.id === 'kanban-board') {
+						if (!savedKanbanInteraction) snapshotKanbanInteraction(event.detail.target);
 						savedScrollPositions.clear();
 						// Save scroll positions of all scrollable drop zones
 						const dropZones = document.querySelectorAll('.category-drop-zone, .task-drop-zone');
@@ -3280,12 +3508,13 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					}
 				});
 
-				// Clear selection when kanban board is replaced via HTMX
-				// Use document.addEventListener instead of document.body.addEventListener
-				// because this script runs in <head> where document.body may not exist yet.
+
+				// Restore surviving selections, menu focus, and scroll after authoritative board replacement.
 				document.addEventListener('htmx:afterSwap', function(event) {
 					if (event.detail.target && event.detail.target.id === 'kanban-board') {
-						clearSelection();
+						const liveBoard = document.getElementById('kanban-board');
+						if (liveBoard) restoreKanbanInteraction(liveBoard);
+
 
 						// Restore scroll positions after board is re-rendered
 						if (savedScrollPositions.size > 0) {
@@ -3307,8 +3536,42 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						}
 					}
 				});
-			</script>
-		</head>
+
+				// HTMX may perform its own focus handling during settle; restore the
+				// authoritative menu focus once more, then release the snapshot.
+					document.addEventListener('htmx:afterSettle', function(event) {
+						const target = event.detail && event.detail.target;
+						if (target && target.id === 'kanban-board') {
+							const liveBoard = document.getElementById('kanban-board');
+							if (liveBoard) restoreKanbanInteraction(liveBoard);
+							const openDropdown = openKanbanMenuKey && liveBoard && Array.from(liveBoard.querySelectorAll('[data-kanban-menu-key]')).find(function(candidate) {
+								return candidate.getAttribute('data-kanban-menu-key') === openKanbanMenuKey;
+							});
+							if (openDropdown && (!document.activeElement || !liveBoard.contains(document.activeElement))) {
+								const fallbackTrigger = openDropdown.querySelector('[data-kanban-menu-trigger]');
+								if (fallbackTrigger) {
+									suppressKanbanMenuFocusOpen = true;
+									fallbackTrigger.focus({preventScroll: true});
+									suppressKanbanMenuFocusOpen = false;
+									setKanbanMenuExpanded(openDropdown, true);
+								}
+							}
+							const options = savedKanbanInteraction && savedKanbanInteraction.refreshTaskOptions && openDropdown && openDropdown.querySelector('[data-task-card-merge-options]');
+							const refreshURL = options && options.getAttribute('hx-get');
+							if (options && refreshURL && window.htmx) {
+								htmx.ajax('GET', refreshURL, {target: options, swap: 'outerHTML'});
+								return;
+							}
+							savedKanbanInteraction = null;
+							return;
+						}
+						if (target && target.matches && target.matches('[data-task-card-merge-options]')) {
+							const liveBoard = document.getElementById('kanban-board');
+							if (liveBoard) restoreKanbanInteraction(liveBoard);
+							savedKanbanInteraction = null;
+						}
+					});
+			</script>		</head>
 		<body class="h-screen bg-base-200 overflow-hidden" hx-ext="morph">
 			<script>
 						(function() {
@@ -3902,7 +4165,12 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 								if (match) visibleCount++;
 							}
 
-							// Show/hide no-results message
+								var emptyState = container.querySelector('[data-search-empty-state]');
+								if (emptyState) {
+									emptyState.style.display = term ? 'none' : '';
+								}
+
+								// Show/hide no-results message
 							var noResults = container.querySelector('[data-search-no-results]');
 							if (noResults) {
 								noResults.style.display = (term && visibleCount === 0) ? '' : 'none';
@@ -3937,6 +4205,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						var pageKey = input ? input.getAttribute('data-card-search') : '';
 						var activeTerm = input ? input.value || '' : (pageKey ? loadCardSearchTerm(pageKey) : '');
 						if (pageKey) storeCardSearchTerm(pageKey, activeTerm);
+						if (typeof window.destroyCardPagination === 'function') window.destroyCardPagination(container, true);
 						container.outerHTML = html;
 						var nextContainer = container.id ? document.getElementById(container.id) : null;
 						if (!nextContainer) return null;
@@ -3944,10 +4213,10 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						if (nextInput && pageKey && nextInput.getAttribute('data-card-search') === pageKey) {
 							nextInput.value = activeTerm;
 						}
-						if (window.htmx) htmx.process(nextContainer);
-						initAllCardSearches(nextContainer);
-						return nextContainer;
-					}
+							if (window.htmx) htmx.process(nextContainer);
+							initAllCardSearches(nextContainer);
+							if (typeof window.refreshCardPagination === 'function') window.refreshCardPagination(nextContainer);
+							return nextContainer;					}
 
 					window.refreshCardSearches = initAllCardSearches;
 					window.replaceSearchableCardContainer = replaceSearchableCardContainer;
@@ -3962,7 +4231,705 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						}
 					});
 				})();
-			</script>
+				</script>
+			<!-- Card Pagination Loader -->
+			<script>
+					(function() {
+						var rootSelector = '[data-card-pagination-root]';
+						var pageHeader = 'X-OpenVibely-Card-Page-Has-More';
+						var replacementSnapshots = Object.create(null);
+
+						function pageNumber(value, fallback) {
+							var parsed = parseInt(value, 10);
+							return isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+						}
+
+						function matchesRoot(node) {
+							return node && node.nodeType === 1 && typeof node.matches === 'function' && node.matches(rootSelector);
+						}
+
+						function closestPaginationRoot(node) {
+							if (!node || node === document || node === document.body || node.nodeType !== 1) return null;
+							if (matchesRoot(node)) return node;
+							return typeof node.closest === 'function' ? node.closest(rootSelector) : null;
+						}
+
+						function rootsIn(scope) {
+							var roots = [];
+							var node = scope && scope.nodeType === 1 ? scope : null;
+							if (matchesRoot(node)) roots.push(node);
+							if (node && typeof node.closest === 'function') {
+								var ancestor = node.closest(rootSelector);
+								if (ancestor && roots.indexOf(ancestor) === -1) roots.push(ancestor);
+							}
+							var queryRoot = scope && typeof scope.querySelectorAll === 'function' ? scope : document;
+							var found = queryRoot.querySelectorAll(rootSelector);
+							for (var i = 0; i < found.length; i++) {
+								if (roots.indexOf(found[i]) === -1) roots.push(found[i]);
+							}
+							return roots;
+						}
+
+						function listFor(root) {
+							var selector = root.getAttribute('data-card-pagination-list');
+							if (!selector) return null;
+							try { return root.querySelector(selector); } catch (_) { return null; }
+						}
+
+						function cardsMatching(list, root, selector) {
+							if (!list || !selector) return [];
+							try {
+								var matches = Array.prototype.slice.call(list.querySelectorAll(selector));
+								var keyAttribute = root.getAttribute('data-card-pagination-key') || '';
+								var seen = Object.create(null);
+								var cards = [];
+								for (var i = 0; i < matches.length; i++) {
+									var key = cardKey(matches[i], keyAttribute);
+									if (seen[key]) continue;
+									seen[key] = true;
+									cards.push(matches[i]);
+								}
+								return cards;
+							} catch (_) {
+								return [];
+							}
+						}
+
+						function cardsFor(list, root) {
+							return cardsMatching(list, root, root.getAttribute('data-card-pagination-card-selector'));
+						}
+
+						function replacementCardsFor(list, root) {
+							var selector = root.getAttribute('data-card-pagination-replacement-card-selector') || root.getAttribute('data-card-pagination-card-selector');
+							var scope = root.getAttribute('data-card-pagination-replacement-scope') === 'root' ? root : list;
+							return cardsMatching(scope, root, selector);
+						}
+
+						function cardKey(card, keyAttribute) {
+							var key = keyAttribute ? card.getAttribute(keyAttribute) : '';
+							if (key) return key;
+							return (card.getAttribute('data-search-text') || '') + '|' + (card.innerHTML || '');
+						}
+
+						function cardPaginationRefreshURL(scope, rawURL) {
+							var roots = rootsIn(scope || document);
+							var root = roots.length ? roots[0] : null;
+							if (!root || !rawURL) return rawURL;
+							var list = listFor(root);
+							var count = cardsFor(list, root).length;
+							var pageSize = pageNumber(root.getAttribute('data-card-pagination-page-size'), 20);
+							var input = root.querySelector('input[data-card-search]');
+							var search = input ? (input.value || '').trim() : '';
+							var url;
+							try { url = new URL(rawURL, window.location.href); } catch (_) { return rawURL; }
+							var preserveParams = (root.getAttribute('data-card-pagination-preserve-params') || '').split(',');
+							var endpoint = null;
+							try { endpoint = new URL(root.getAttribute('data-card-pagination-url') || '', window.location.href); } catch (_) {}
+							for (var i = 0; i < preserveParams.length; i++) {
+								var preserveKey = preserveParams[i].trim();
+								if (!preserveKey || !endpoint) continue;
+								if (endpoint.searchParams.has(preserveKey)) url.searchParams.set(preserveKey, endpoint.searchParams.get(preserveKey));
+								else url.searchParams.delete(preserveKey);
+							}
+							url.searchParams.set('card_window', '1');
+							url.searchParams.set('page_size', String(Math.max(pageSize, count)));
+							url.searchParams.set('page', '0');
+							if (search) url.searchParams.set('search', search);
+							else url.searchParams.delete('search');
+							return url.pathname + url.search + url.hash;
+						}
+
+						function rememberCards(state, cards, clear) {
+							if (clear) state.keys = Object.create(null);
+							var keyAttribute = state.root.getAttribute('data-card-pagination-key') || '';
+							for (var i = 0; i < cards.length; i++) {
+								state.keys[cardKey(cards[i], keyAttribute)] = true;
+							}
+						}
+
+						function scrollContainer(root) {
+							var node = root;
+							while (node && node !== document.body) {
+								try {
+									var overflow = window.getComputedStyle(node).overflowY;
+									if (overflow === 'auto' || overflow === 'scroll' || overflow === 'overlay') return node;
+								} catch (_) {}
+								node = node.parentElement;
+							}
+							return null;
+						}
+
+						function isCurrent(state) {
+							if (!state || !state.root || !state.list) return false;
+							if (state.root._openVibelyCardPaginationState !== state) return false;
+							if (typeof document.documentElement.contains === 'function' && !document.documentElement.contains(state.root)) return false;
+							return listFor(state.root) === state.list;
+						}
+
+						function setHidden(element, hidden) {
+							if (element) element.classList.toggle('hidden', hidden);
+						}
+
+						function setStatus(state, mode) {
+							if (!isCurrent(state)) return;
+							var status = state.root.querySelector('[data-card-pagination-status]');
+							var loading = status && status.querySelector('[data-card-pagination-loading]');
+							var error = status && status.querySelector('[data-card-pagination-error]');
+							var retry = status && status.querySelector('[data-card-pagination-retry]');
+							var sentinel = status && status.querySelector('[data-card-pagination-sentinel]');
+							setHidden(loading, mode !== 'loading');
+							setHidden(error, mode !== 'error');
+							setHidden(retry, mode !== 'error');
+							setHidden(sentinel, !state.hasMore);
+							state.root.setAttribute('aria-busy', mode === 'loading' ? 'true' : 'false');
+							state.list.setAttribute('aria-busy', mode === 'loading' ? 'true' : 'false');
+							if (retry && retry._openVibelyCardPaginationState !== state) {
+								retry._openVibelyCardPaginationState = state;
+								retry.addEventListener('click', function() {
+									if (!isCurrent(state) || state.loading) return;
+									var failedPage = state.failedPage === null ? state.nextPage : state.failedPage;
+									requestPage(state, failedPage, state.failedReplace);
+								});
+							}
+						}
+
+						function disconnectTrigger(state) {
+							if (state.observer) {
+								state.observer.disconnect();
+								state.observer = null;
+							}
+							if (state.scrollTarget && state.scrollHandler) {
+								state.scrollTarget.removeEventListener('scroll', state.scrollHandler);
+							}
+							state.scrollTarget = null;
+							state.scrollHandler = null;
+							state.sentinel = null;
+						}
+
+						function nearEnd(state) {
+							if (!isCurrent(state) || state.loading || !state.hasMore || !state.sentinel) return;
+							try {
+								var boundary = state.scrollTarget && state.scrollTarget !== window ? state.scrollTarget.getBoundingClientRect().bottom : window.innerHeight;
+								if (state.sentinel.getBoundingClientRect().top <= boundary + 480) requestPage(state, state.nextPage, false);
+							} catch (_) {}
+						}
+
+						function connectTrigger(state) {
+							if (!isCurrent(state)) return;
+							var status = state.root.querySelector('[data-card-pagination-status]');
+							var sentinel = status && status.querySelector('[data-card-pagination-sentinel]');
+							if (!sentinel || sentinel === state.sentinel) return;
+							disconnectTrigger(state);
+							state.sentinel = sentinel;
+							state.scrollTarget = scrollContainer(state.root) || window;
+							state.scrollHandler = function() { nearEnd(state); };
+							state.scrollTarget.addEventListener('scroll', state.scrollHandler, {passive: true});
+							if ('IntersectionObserver' in window) {
+								state.observer = new IntersectionObserver(function(entries) {
+									for (var i = 0; i < entries.length; i++) {
+										if (entries[i].isIntersecting) {
+											requestPage(state, state.nextPage, false);
+											break;
+										}
+									}
+								}, { root: state.scrollTarget === window ? null : state.scrollTarget, rootMargin: '0px 0px 480px 0px' });
+							state.observer.observe(sentinel);
+							}
+							nearEnd(state);
+						}
+
+						function bindSearch(state) {
+							var input = state.root.querySelector('input[data-card-search]');
+							if (!input || state.input === input) return;
+							state.input = input;
+							input.addEventListener('input', function() {
+								var term = (input.value || '').trim();
+								if (state.searchTimer) clearTimeout(state.searchTimer);
+								state.searchTimer = setTimeout(function() {
+									if (isCurrent(state)) resetSearch(state, term);
+								}, 150);
+							});
+						}
+
+							function relativeFocusSelector(card, active) {
+								if (!card || !active || !card.contains(active)) return null;
+								if (card === active) return '';
+								var parts = [];
+								var node = active;
+								while (node && node !== card) {
+									var tag = (node.localName || '').toLowerCase();
+									if (!tag || !node.parentElement) return null;
+									var siblings = node.parentElement.children;
+									var position = 0;
+									for (var i = 0; i < siblings.length; i++) {
+										if ((siblings[i].localName || '').toLowerCase() === tag) position++;
+										if (siblings[i] === node) break;
+									}
+									parts.unshift(tag + ':nth-of-type(' + position + ')');
+									node = node.parentElement;
+								}
+								return node === card ? parts.join(' > ') : null;
+							}
+
+								function visibleEnabledFocusTarget(target) {
+									if (!target || target.disabled || target.getAttribute('aria-disabled') === 'true') return null;
+									if (typeof target.matches === 'function' && target.matches(':disabled')) return null;
+									if (typeof target.closest === 'function' && target.closest('[hidden], [inert]')) return null;
+									try {
+										var style = window.getComputedStyle(target);
+										if (style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse') return null;
+										if (!target.getClientRects().length) return null;
+									} catch (_) {
+										return null;
+									}
+									return target;
+								}
+
+								function cardFallbackFocusTarget(card) {
+									if (!visibleEnabledFocusTarget(card)) return null;
+									if (!card.hasAttribute('tabindex')) card.setAttribute('tabindex', '-1');
+									return card;
+								}
+
+								function cardFocusTarget(card, snapshot) {
+									if (!card) return null;
+									if (snapshot.focusSelector === '') return cardFallbackFocusTarget(card);
+									var tag = snapshot.focusTag || '';
+									if (tag && (snapshot.focusAriaLabel || snapshot.focusText)) {
+										var controls = card.querySelectorAll(tag);
+										for (var i = 0; i < controls.length; i++) {
+											if (snapshot.focusAriaLabel && controls[i].getAttribute('aria-label') === snapshot.focusAriaLabel) {
+												var ariaMatch = visibleEnabledFocusTarget(controls[i]);
+												if (ariaMatch) return ariaMatch;
+											}
+											if (!snapshot.focusAriaLabel && (controls[i].textContent || '').trim() === snapshot.focusText) {
+												var textMatch = visibleEnabledFocusTarget(controls[i]);
+												if (textMatch) return textMatch;
+											}
+										}
+									}
+									if (!snapshot.focusAriaLabel && !snapshot.focusText && snapshot.focusSelector) {
+										try {
+											var matching = visibleEnabledFocusTarget(card.querySelector(snapshot.focusSelector));
+											if (matching) return matching;
+										} catch (_) {}
+									}
+									return cardFallbackFocusTarget(card);
+								}
+
+							function captureReplacementState(state) {
+								var scrollTarget = scrollContainer(state.root) || window;
+								var snapshot = {
+									scrollTarget: scrollTarget,
+									scrollTargetIsRoot: scrollTarget === state.root,
+									scrollTop: scrollTarget === window ? window.scrollY : scrollTarget.scrollTop,
+									activeKey: null,
+									activeIndex: -1,
+									cardKeys: [],
+									focusSelector: null,
+									focusTag: '',
+									focusText: '',
+									focusAriaLabel: '',
+									anchorKey: null,
+									anchorTop: null
+								};
+								var active = document.activeElement;
+								var keyAttribute = state.root.getAttribute('data-card-pagination-key') || '';
+								var cards = replacementCardsFor(state.list, state.root);
+								for (var cardIndex = 0; cardIndex < cards.length; cardIndex++) {
+									snapshot.cardKeys.push(cardKey(cards[cardIndex], keyAttribute));
+								}
+								if (active && state.root.contains(active)) {
+									var activeCard = null;
+									for (var activeIndex = 0; activeIndex < cards.length; activeIndex++) {
+										if (cards[activeIndex] === active || cards[activeIndex].contains(active)) {
+											activeCard = cards[activeIndex];
+											break;
+										}
+									}
+									if (activeCard) {
+										snapshot.activeKey = cardKey(activeCard, keyAttribute);
+										snapshot.activeIndex = snapshot.cardKeys.indexOf(snapshot.activeKey);
+										snapshot.focusSelector = relativeFocusSelector(activeCard, active);
+										snapshot.focusTag = (active.localName || '').toLowerCase();
+										snapshot.focusText = (active.textContent || '').trim();
+										snapshot.focusAriaLabel = active.getAttribute ? (active.getAttribute('aria-label') || '') : '';
+									}
+								}
+								var viewportTop = scrollTarget === window ? 0 : scrollTarget.getBoundingClientRect().top;
+								var viewportBottom = scrollTarget === window ? window.innerHeight : scrollTarget.getBoundingClientRect().bottom;
+								var anchorDistance = Infinity;
+								for (var i = 0; i < cards.length; i++) {
+									var rect = cards[i].getBoundingClientRect();
+									if (!rect || rect.bottom <= viewportTop || rect.top >= viewportBottom) continue;
+									var distance = Math.abs(rect.top - viewportTop);
+									if (distance < anchorDistance) {
+										anchorDistance = distance;
+										snapshot.anchorKey = cardKey(cards[i], keyAttribute);
+										snapshot.anchorTop = rect.top;
+									}
+								}
+								return snapshot;
+							}
+
+						function rememberReplacementSnapshot(state) {
+							if (!state || !state.root || !state.root.id) return;
+							if (state.root.getAttribute('data-card-pagination-replacement-managed') === 'true') return;
+							replacementSnapshots[state.root.id] = captureReplacementState(state);
+						}
+
+						function findCardByKey(state, key) {
+							if (!key) return null;
+							var keyAttribute = state.root.getAttribute('data-card-pagination-key') || '';
+							var cards = replacementCardsFor(state.list, state.root);
+							for (var i = 0; i < cards.length; i++) {
+								if (cardKey(cards[i], keyAttribute) === key) return cards[i];
+							}
+							return null;
+						}
+
+							function replacementFocusTarget(state, snapshot) {
+								if (!snapshot || !snapshot.activeKey) return null;
+								var card = findCardByKey(state, snapshot.activeKey);
+								var target = card ? cardFocusTarget(card, snapshot) : null;
+								if (target) return target;
+								var keys = snapshot.cardKeys || [];
+								var index = snapshot.activeIndex;
+								for (var next = index + 1; next < keys.length; next++) {
+									card = findCardByKey(state, keys[next]);
+									target = card ? cardFallbackFocusTarget(card) : null;
+									if (target) return target;
+								}
+								for (var previous = index - 1; previous >= 0; previous--) {
+									card = findCardByKey(state, keys[previous]);
+									target = card ? cardFallbackFocusTarget(card) : null;
+									if (target) return target;
+								}
+								return visibleEnabledFocusTarget(state.root.querySelector('input[data-card-search]'));
+							}
+
+						function restoreReplacementState(state, snapshot) {
+							if (!snapshot || !isCurrent(state)) return;
+							var scrollTarget = snapshot.scrollTargetIsRoot ? state.root : snapshot.scrollTarget;
+							if (scrollTarget === window) window.scrollTo(0, snapshot.scrollTop);
+							else if (scrollTarget) scrollTarget.scrollTop = snapshot.scrollTop;
+							var anchor = findCardByKey(state, snapshot.anchorKey);
+							if (anchor && snapshot.anchorTop !== null) {
+								var delta = anchor.getBoundingClientRect().top - snapshot.anchorTop;
+								if (Math.abs(delta) > 0.5) {
+									if (scrollTarget === window) window.scrollBy(0, delta);
+									else if (scrollTarget) scrollTarget.scrollTop += delta;
+								}
+							}
+							var focusTarget = replacementFocusTarget(state, snapshot);
+							if (focusTarget && typeof focusTarget.focus === 'function') focusTarget.focus({preventScroll: true});
+						}
+
+						function resetSearch(state, term) {
+							if (!isCurrent(state) || state.search === term && state.nextPage === 1 && !state.failedPage) return;
+							state.replaceSnapshot = captureReplacementState(state);
+							state.search = term;
+							state.generation++;
+							if (state.controller) state.controller.abort();
+							state.controller = null;
+							state.loading = false;
+							state.hasMore = true;
+							state.nextPage = 0;
+							state.nextOffset = 0;
+							state.requestedPages = Object.create(null);
+							state.keys = Object.create(null);
+							state.failedPage = null;
+							state.failedReplace = false;
+							requestPage(state, 0, true);
+						}
+
+						function parseResponse(html, selector) {
+							var documentFragment = new DOMParser().parseFromString(html, 'text/html');
+							var incomingList;
+							try { incomingList = documentFragment.querySelector(selector); } catch (_) { incomingList = null; }
+							if (!incomingList) throw new Error('paged card list missing');
+							return incomingList;
+						}
+
+						function appendCards(state, incomingList) {
+							var incomingCards = cardsFor(incomingList, state.root);
+							var currentCards = cardsFor(state.list, state.root);
+							var keyAttribute = state.root.getAttribute('data-card-pagination-key') || '';
+							var target = currentCards.length ? currentCards[0].parentElement : null;
+								if (!target && incomingCards.length) {
+									state.list.innerHTML = incomingList.innerHTML;
+									rememberCards(state, cardsFor(state.list, state.root), true);
+									if (window.htmx && typeof window.htmx.process === 'function') window.htmx.process(state.list);
+									return incomingCards.length;
+								}
+								var appended = [];
+								for (var i = 0; i < incomingCards.length; i++) {
+									var key = cardKey(incomingCards[i], keyAttribute);
+									if (state.keys[key]) continue;
+									var clone = incomingCards[i].cloneNode(true);
+									target.appendChild(clone);
+									appended.push(clone);
+									state.keys[key] = true;
+								}
+								if (window.htmx && typeof window.htmx.process === 'function') {
+									for (var j = 0; j < appended.length; j++) window.htmx.process(appended[j]);
+								}
+								return incomingCards.length;						}
+
+						function requestPage(state, page, replace) {
+							if (!isCurrent(state) || state.loading) return;
+							if (!replace && (!state.hasMore || page !== state.nextPage || state.requestedPages[page])) return;
+							state.requestedPages[page] = true;
+							var generation = state.generation;
+							var controller = typeof AbortController === 'function' ? new AbortController() : null;
+							state.controller = controller;
+							state.loading = true;
+							state.failedPage = null;
+							state.failedReplace = false;
+							setStatus(state, 'loading');
+							var endpoint = state.root.getAttribute('data-card-pagination-url');
+							if (!endpoint) endpoint = window.location.pathname + window.location.search;
+							var url;
+							try {
+								url = new URL(endpoint, window.location.href);
+							} catch (_) {
+								url = null;
+							}
+							if (!url) {
+								state.loading = false;
+								delete state.requestedPages[page];
+								state.failedPage = page;
+								state.failedReplace = replace;
+									state.hasMore = true;
+									setStatus(state, 'error');
+									disconnectTrigger(state);
+								return;
+							}
+							url.searchParams.set('page', String(page));
+							url.searchParams.set('page_size', String(state.pageSize));
+							url.searchParams.set('offset', String(replace ? 0 : state.nextOffset));
+							url.searchParams.set('card_page', '1');
+							if (state.search) url.searchParams.set('search', state.search);
+							else url.searchParams.delete('search');
+							var options = {
+								method: 'GET',
+								credentials: 'same-origin',
+								headers: {'HX-Request': 'true', 'Accept': 'text/html'}
+							};
+							if (controller) options.signal = controller.signal;
+							window.fetch(url.toString(), options).then(function(response) {
+								if (!response.ok) throw new Error('paged card request failed');
+								var header = response.headers.get(pageHeader);
+								return response.text().then(function(html) { return {html: html, header: header}; });
+							}).then(function(payload) {
+								if (!isCurrent(state) || state.generation !== generation) return;
+								var selector = state.root.getAttribute('data-card-pagination-list');
+								var incomingList = parseResponse(payload.html, selector);
+								var received = cardsFor(incomingList, state.root).length;
+									if (replace) {
+										state.list.innerHTML = incomingList.innerHTML;
+										rememberCards(state, cardsFor(state.list, state.root), true);
+										if (window.htmx && typeof window.htmx.process === 'function') window.htmx.process(state.list);
+									} else {
+										appendCards(state, incomingList);
+									}
+									if (typeof window.refreshCardSearches === 'function') window.refreshCardSearches(state.root);
+									state.nextPage = page + 1;
+									state.nextOffset = replace ? received : state.nextOffset + received;
+									state.hasMore = payload.header === null ? received >= state.pageSize : payload.header === 'true';
+									state.loading = false;
+									state.controller = null;
+									delete state.requestedPages[page];
+
+									var replacementSnapshot = state.replaceSnapshot;
+									state.replaceSnapshot = null;
+									restoreReplacementState(state, replacementSnapshot);
+									setStatus(state, 'idle');								connectTrigger(state);
+							}).catch(function(error) {
+								if (!isCurrent(state) || state.generation !== generation || error && error.name === 'AbortError') return;
+								state.loading = false;
+								state.controller = null;
+								delete state.requestedPages[page];
+								state.failedPage = page;
+								state.failedReplace = replace;
+									state.hasMore = true;
+									setStatus(state, 'error');
+									disconnectTrigger(state);
+							});
+						}
+
+						function createState(root, list, initialSearch) {
+							var pageSize = pageNumber(root.getAttribute('data-card-pagination-page-size'), 20);
+							if (pageSize < 1) pageSize = 20;
+							var initialHasMore = root.getAttribute('data-card-pagination-has-more');
+							var status = root.querySelector('[data-card-pagination-status]');
+							var statusHasMore = status && status.getAttribute('data-card-pagination-has-more');
+							if (statusHasMore !== null) initialHasMore = statusHasMore;
+							var initialCardCount = cardsFor(list, root).length;
+							var hasMore = initialHasMore === null ? initialCardCount >= pageSize : initialHasMore === 'true';
+							var state = {
+								root: root,
+								list: list,
+								pageSize: pageSize,
+								nextPage: Math.max(1, Math.ceil(initialCardCount / pageSize)),
+								nextOffset: initialCardCount,
+								hasMore: hasMore,
+								loading: false,
+								generation: 0,
+								controller: null,
+								requestedPages: Object.create(null),
+								keys: Object.create(null),
+								search: initialSearch || '',
+								searchTimer: null,
+								input: null,
+								observer: null,
+								scrollTarget: null,
+								scrollHandler: null,
+								sentinel: null,
+								failedPage: null,
+									failedReplace: false,
+									resetPending: false,
+									replaceSnapshot: null,
+									invalidated: false							};
+							rememberCards(state, cardsFor(list, root), true);
+							return state;
+						}
+
+						function destroyState(state) {
+							if (!state) return;
+							state.generation++;
+							if (state.controller) state.controller.abort();
+							if (state.searchTimer) clearTimeout(state.searchTimer);
+							disconnectTrigger(state);
+							state.loading = false;
+						}
+
+						function initRoot(root, initialDocument) {
+							var list = listFor(root);
+							if (!list) return;
+							var state = root._openVibelyCardPaginationState;
+							if (state && (state.list !== list || state.invalidated)) {
+								destroyState(state);
+								state = null;
+							}
+							var listChanged = !state;
+							var input = root.querySelector('input[data-card-search]');
+							var inputTerm = input ? (input.value || '').trim() : '';
+							var locationTerm = '';
+							try {
+								locationTerm = (new URL(window.location.href)).searchParams.get('search') || '';
+								locationTerm = locationTerm.trim();
+							} catch (_) {}
+							var useLocationSearch = !!(initialDocument && listChanged && locationTerm);
+								var term = useLocationSearch ? locationTerm : inputTerm;
+								var replacementSnapshot = root.id ? replacementSnapshots[root.id] : null;								if (!state) {
+									state = createState(root, list, useLocationSearch || replacementSnapshot ? term : '');
+									root._openVibelyCardPaginationState = state;
+								}							if (initialDocument && locationTerm && input && input.value !== locationTerm) {
+								input.value = locationTerm;
+								if (typeof window.refreshCardSearches === 'function') window.refreshCardSearches(root);
+							}
+							bindSearch(state);
+							setStatus(state, 'idle');
+							if (state.resetPending) return;
+								if (listChanged && term && state.search !== term) {								state.resetPending = true;
+								setTimeout(function() {
+									if (!isCurrent(state)) return;
+									state.resetPending = false;
+									resetSearch(state, term);
+								}, 0);
+									return;
+								}
+								if (replacementSnapshot && root.id) {
+									delete replacementSnapshots[root.id];
+									restoreReplacementState(state, replacementSnapshot);
+								}
+								connectTrigger(state);						}
+
+						function initRoots(scope, initialDocument) {
+							var roots = rootsIn(scope);
+							for (var i = 0; i < roots.length; i++) initRoot(roots[i], initialDocument);
+						}
+
+						function clearDetachedReplacementSnapshots() {
+							for (var id in replacementSnapshots) {
+								if (!document.getElementById(id)) delete replacementSnapshots[id];
+							}
+						}
+
+						function destroyCardPagination(scope, preserveReplacement) {
+							var roots = rootsIn(scope || document);
+							for (var i = 0; i < roots.length; i++) {
+								var state = roots[i]._openVibelyCardPaginationState;
+								if (!state) continue;
+								if (preserveReplacement) rememberReplacementSnapshot(state);
+								destroyState(state);
+								state.invalidated = true;
+								roots[i]._openVibelyCardPaginationState = null;
+							}
+						}
+
+						window.refreshCardPagination = function(scope) {
+							initRoots(scope || document, false);
+						};
+						window.cardPaginationRefreshURL = cardPaginationRefreshURL;
+						window.destroyCardPagination = destroyCardPagination;
+
+							function invalidateRoots(scope) {							var roots = rootsIn(scope);
+							for (var i = 0; i < roots.length; i++) {
+								var state = roots[i]._openVibelyCardPaginationState;
+								if (state) {
+									state.generation++;
+									if (state.controller) state.controller.abort();
+									state.controller = null;
+									state.loading = false;
+									state.invalidated = true;
+									disconnectTrigger(state);
+								}
+							}
+						}
+
+						setTimeout(function() {
+							initRoots(document, true);
+						}, 0);
+						if (document.body) {
+							document.body.addEventListener('htmx:configRequest', function(event) {
+								var detail = event.detail || {};
+								if (!detail.path) return;
+								var root = closestPaginationRoot(detail.elt) || closestPaginationRoot(detail.target);
+								if (!root) return;
+								var list = listFor(root);
+								var target = detail.target;
+								var replacesWindow = target === root || target === list || (target && list && typeof target.contains === 'function' && target.contains(list));
+								if (replacesWindow) detail.path = cardPaginationRefreshURL(root, detail.path);
+							});
+							document.body.addEventListener('htmx:beforeSwap', function(event) {
+								var target = event.detail && event.detail.target;
+								if (!target) return;
+								var roots = rootsIn(target);
+								for (var i = 0; i < roots.length; i++) {
+									var state = roots[i]._openVibelyCardPaginationState;
+									if (!state) continue;
+									var selector = roots[i].getAttribute('data-card-pagination-list');
+									var replacesList = target === state.root || target === state.list || (target.querySelector && selector && target.querySelector(selector));
+									if (replacesList) {
+										rememberReplacementSnapshot(state);
+										invalidateRoots(roots[i]);
+									}
+								}
+							});
+							document.body.addEventListener('htmx:afterSettle', function(event) {
+								var scope = event.detail && event.detail.elt ? event.detail.elt : document;
+								initRoots(scope);
+								if (scope !== document) initRoots(document);
+								setTimeout(function() {
+									initRoots(document);
+									clearDetachedReplacementSnapshots();
+								}, 0);
+							});
+						}
+					})();
+				</script>
 			<!-- Desktop external-link bridge -->
 			<script>
 					// In Wails desktop mode, the embedded WebView does not handle
@@ -4088,12 +5055,6 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					};
 				})();
 			</script>
-			<!-- Selection Counter -->
-			<div id="selection-counter">
-				<span id="selection-count">0</span>
-				<span>tasks selected</span>
-				<button onclick="clearSelection()" class="btn btn-sm btn-ghost">Clear</button>
-			</div>
 		</body>
 	</html>
 }

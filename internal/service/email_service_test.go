@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"io"
 	"net"
 	netmail "net/mail"
 	"net/textproto"
@@ -147,9 +148,211 @@ func TestEmailPollOnceDoesNotDeduplicateDistinctIdenticalMessagesWithoutMessageI
 	assert.Equal(t, []uint32{1, 2}, client.seenIDs())
 }
 
+func TestEmailPollOnceBatchesReceiptRecoveryWithNewHandoff(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	cfg := EmailRuntimeConfig{Address: "bot@example.com", IMAPHost: "imap.example.com"}
+	receipts := repository.NewEmailInboundReceiptRepo(db)
+	mailboxIdentity := emailMailboxIdentity(cfg)
+	require.NoError(t, receipts.Record(ctx, mailboxIdentity, "message-id:<message-1@example.com>"))
+	client := newFakeEmailIMAPClient(
+		testIMAPMessage(1, "already handed off", "alice@example.com"),
+		testIMAPMessage(2, "new handoff", "alice@example.com"),
+	)
+	processed := 0
+	svc := &EmailService{emailInboundReceiptStore: receipts}
+	svc.processIncomingMessageFn = func(context.Context, EmailInboundMessage) bool {
+		processed++
+		return true
+	}
+	svc.connectIMAP = func(context.Context, EmailRuntimeConfig) (emailIMAPClient, error) { return client, nil }
+
+	svc.pollOnce(ctx, cfg)
+
+	assert.Equal(t, 1, processed, "receipt recovery must skip durable work for the first message")
+	assert.Equal(t, []uint32{1, 2}, client.seenIDs())
+	assert.Equal(t, 1, client.storeCalls)
+	assert.Equal(t, [][]uint32{{1, 2}}, client.storeBatches())
+	assert.Equal(t, 1, client.fullBodyFetches)
+	assert.Equal(t, [][]uint32{{2}}, client.fullBodyFetchIDs, "already-receipted messages must be excluded from the full fetch")
+}
+
+func TestEmailPollOnceUsesMIMEMessageIDBeforeEnvelopeAndUID(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	cfg := EmailRuntimeConfig{Address: "bot@example.com", IMAPHost: "imap.example.com"}
+	receipts := repository.NewEmailInboundReceiptRepo(db)
+	mailboxIdentity := emailMailboxIdentity(cfg)
+	require.NoError(t, receipts.Record(ctx, mailboxIdentity, "message-id:<message-1@example.com>"))
+	message := testIMAPMessageWithBody(1, "already handed off", "alice@example.com", "body")
+	message.Envelope.MessageId = "<envelope-identity@example.com>"
+	client := newFakeEmailIMAPClient(message)
+	client.uidValidity = 77
+	processed := 0
+	svc := &EmailService{emailInboundReceiptStore: receipts}
+	svc.processIncomingMessageFn = func(context.Context, EmailInboundMessage) bool {
+		processed++
+		return true
+	}
+	svc.connectIMAP = func(context.Context, EmailRuntimeConfig) (emailIMAPClient, error) { return client, nil }
+
+	svc.pollOnce(ctx, cfg)
+
+	assert.Zero(t, processed)
+	assert.Equal(t, []uint32{1}, client.seenIDs())
+	assert.Equal(t, 1, client.fetchCount)
+	assert.Equal(t, [][]uint32{{1}}, client.fetchIDs)
+	assert.Equal(t, [][]imap.FetchItem{{imap.FetchEnvelope, imap.FetchUid, emailMessageIDHeaderSection().FetchItem()}}, client.fetchItems)
+	assert.Zero(t, client.fullBodyFetches, "MIME Message-ID from bounded headers must deduplicate before BODY[]")
+}
+
+func TestEmailPollOnceUsesMIMEMessageIDAfterUIDMetadataFallback(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	cfg := EmailRuntimeConfig{Address: "bot@example.com", IMAPHost: "imap.example.com"}
+	receipts := &countingEmailInboundReceiptStore{inner: repository.NewEmailInboundReceiptRepo(db)}
+	mailboxIdentity := emailMailboxIdentity(cfg)
+	require.NoError(t, receipts.Record(ctx, mailboxIdentity, "message-id:<message-1@example.com>"))
+	receipts.recordCalls = 0
+	message := testIMAPMessageWithBody(1, "MIME identity", "alice@example.com", "body")
+	message.Envelope.MessageId = ""
+	message.Uid = 101
+	client := newFakeEmailIMAPClient(message)
+	client.uidValidity = 77
+	client.metadataMessageIDOmissions = map[uint32]bool{1: true}
+	processed := 0
+	svc := &EmailService{emailInboundReceiptStore: receipts}
+	svc.processIncomingMessageFn = func(context.Context, EmailInboundMessage) bool {
+		processed++
+		return true
+	}
+	svc.connectIMAP = func(context.Context, EmailRuntimeConfig) (emailIMAPClient, error) { return client, nil }
+
+	svc.pollOnce(ctx, cfg)
+
+	assert.Zero(t, processed, "a MIME Message-ID discovered after UID fallback must still deduplicate")
+	assert.Equal(t, 2, receipts.existsCalls, "the final MIME key must be checked after the UID fallback")
+	assert.Equal(t, []uint32{1}, client.seenIDs())
+	assert.Zero(t, receipts.recordCalls, "receipt recovery must not write a UID-keyed duplicate receipt")
+}
+func TestEmailPollOnceRecordsMIMEMessageIDAfterUIDMetadataFallback(t *testing.T) {
+	h := newEmailPollReceiptTestHarness(t)
+	message := testIMAPMessageWithBody(1, "first", "alice@example.com", "start a new chat")
+	message.Envelope.MessageId = ""
+	message.Uid = 101
+	client := newFakeEmailIMAPClient(message)
+	client.uidValidity = 77
+	client.metadataMessageIDOmissions = map[uint32]bool{1: true}
+	client.storeFailures = 1
+	h.svc.connectIMAP = func(context.Context, EmailRuntimeConfig) (emailIMAPClient, error) { return client, nil }
+	cfg := EmailRuntimeConfig{Address: "bot@example.com", IMAPHost: "imap.example.com"}
+
+	h.svc.pollOnce(h.ctx, cfg)
+
+	assert.Empty(t, client.seenIDs(), "store failure leaves the canonical handoff unread for acknowledgement retry")
+	assert.Equal(t, 2, h.receipts.existsCalls, "the first poll checks the provisional UID and then the canonical MIME key")
+	assert.Equal(t, 1, h.receipts.withHandoffCalls)
+	assert.Zero(t, h.receipts.recordCalls, "a successful WithHandoff must not use the provisional UID Record path")
+	assert.Equal(t, [][]uint32{{1}}, client.fullBodyFetchIDs, "the canonical key must be discovered from the full MIME fetch after metadata falls back to UID")
+	canonicalKey := "message-id:<message-1@example.com>"
+	provisionalKey := "imap-uid:77:101"
+	canonicalExists, err := h.receipts.inner.Exists(h.ctx, emailMailboxIdentity(cfg), canonicalKey)
+	require.NoError(t, err)
+	assert.True(t, canonicalExists, "the durable handoff must be recorded under the MIME Message-ID")
+	provisionalExists, err := h.receipts.inner.Exists(h.ctx, emailMailboxIdentity(cfg), provisionalKey)
+	require.NoError(t, err)
+	assert.False(t, provisionalExists, "the provisional UID must not receive the durable handoff receipt")
+	tasks, err := h.taskRepo.ListByProject(h.ctx, h.project.ID, "")
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
+
+	h.svc.pollOnce(h.ctx, cfg)
+
+	assert.Equal(t, []uint32{1}, client.seenIDs())
+	assert.Equal(t, 4, h.receipts.existsCalls, "receipt recovery checks the same provisional and canonical identities")
+	assert.Equal(t, 1, h.receipts.withHandoffCalls, "receipt recovery must not repeat the durable first-turn handoff")
+	assert.Zero(t, h.receipts.recordCalls)
+	tasks, err = h.taskRepo.ListByProject(h.ctx, h.project.ID, "")
+	require.NoError(t, err)
+	assert.Len(t, tasks, 1)
+}
+
+func TestEmailPollOnceSkipsReceiptedLargeMIMEBodyBeforeParsing(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	cfg := EmailRuntimeConfig{Address: "bot@example.com", IMAPHost: "imap.example.com"}
+	receipts := &countingEmailInboundReceiptStore{inner: repository.NewEmailInboundReceiptRepo(db)}
+	mailboxIdentity := emailMailboxIdentity(cfg)
+	require.NoError(t, receipts.Record(ctx, mailboxIdentity, "message-id:<message-1@example.com>"))
+	receipts.recordCalls = 0
+	message := testIMAPMessageWithMIME(1, "large receipt", "alice@example.com", strings.Repeat("x", 256*1024), bytes.Repeat([]byte("a"), 16*1024))
+	client := newFakeEmailIMAPClient(message)
+	processed := 0
+	svc := &EmailService{emailInboundReceiptStore: receipts}
+	svc.processIncomingMessageFn = func(context.Context, EmailInboundMessage) bool {
+		processed++
+		return true
+	}
+	svc.parseIMAPMessageFn = func(msg *imap.Message, section *imap.BodySectionName, skipAttachments bool) (EmailInboundMessage, error) {
+		client.parseAttempts++
+		return parseIMAPMessage(msg, section, skipAttachments)
+	}
+	svc.connectIMAP = func(context.Context, EmailRuntimeConfig) (emailIMAPClient, error) { return client, nil }
+
+	svc.pollOnce(ctx, cfg)
+
+	assert.Zero(t, processed)
+	assert.Zero(t, client.fullBodyFetches, "a receipted large MIME message must not request BODY[]")
+	assert.Zero(t, client.fullBodyBytes)
+	assert.Zero(t, client.parseAttempts)
+	assert.Zero(t, receipts.recordCalls)
+	assert.Equal(t, []uint32{1}, client.seenIDs())
+}
+
+func TestEmailPollOncePreservesUnresolvedMIMEAttachmentAndOrdering(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	cfg := EmailRuntimeConfig{Address: "bot@example.com", IMAPHost: "imap.example.com"}
+	receipts := repository.NewEmailInboundReceiptRepo(db)
+	mailboxIdentity := emailMailboxIdentity(cfg)
+	require.NoError(t, receipts.Record(ctx, mailboxIdentity, "message-id:<message-1@example.com>"))
+	client := newFakeEmailIMAPClient(
+		testIMAPMessage(1, "already handled", "alice@example.com"),
+		testIMAPMessageWithMIME(2, "new MIME", "alice@example.com", "new body", []byte("attachment payload")),
+		testIMAPMessageWithBody(3, "new plain", "alice@example.com", "plain body"),
+	)
+	processed := make([]EmailInboundMessage, 0, 2)
+	svc := &EmailService{emailInboundReceiptStore: receipts}
+	svc.processIncomingMessageFn = func(_ context.Context, msg EmailInboundMessage) bool {
+		processed = append(processed, msg)
+		return true
+	}
+	svc.parseIMAPMessageFn = func(msg *imap.Message, section *imap.BodySectionName, skipAttachments bool) (EmailInboundMessage, error) {
+		client.parseAttempts++
+		return parseIMAPMessage(msg, section, skipAttachments)
+	}
+	svc.connectIMAP = func(context.Context, EmailRuntimeConfig) (emailIMAPClient, error) { return client, nil }
+
+	svc.pollOnce(ctx, cfg)
+
+	require.Len(t, processed, 2)
+	assert.Equal(t, []string{"new MIME", "new plain"}, []string{processed[0].Subject, processed[1].Subject})
+	assert.Equal(t, "new body", processed[0].Body)
+	require.Len(t, processed[0].Attachments, 1)
+	assert.Equal(t, "payload-2.bin", processed[0].Attachments[0].FileName)
+	assert.Equal(t, "application/octet-stream", processed[0].Attachments[0].ContentType)
+	assert.Equal(t, []byte("attachment payload"), processed[0].Attachments[0].Data)
+	assert.Equal(t, [][]uint32{{2, 3}}, client.fullBodyFetchIDs)
+	assert.Equal(t, int64(2), client.parseAttempts)
+	assert.Equal(t, []uint32{1, 2, 3}, client.seenIDs())
+	assert.Equal(t, [][]uint32{{1, 2, 3}}, client.storeBatches())
+}
 func TestEmailPollOnceDoesNotRepeatDurableHandoffAfterStoreFailure(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	client := newFakeEmailIMAPClient(testIMAPMessage(1, "durable", "alice@example.com"))
+	client := newFakeEmailIMAPClient(
+		testIMAPMessage(1, "durable-one", "alice@example.com"),
+		testIMAPMessage(2, "durable-two", "alice@example.com"),
+	)
 	client.storeFailures = 1
 	receipts := repository.NewEmailInboundReceiptRepo(db)
 	processed := 0
@@ -166,11 +369,14 @@ func TestEmailPollOnceDoesNotRepeatDurableHandoffAfterStoreFailure(t *testing.T)
 
 	newService().pollOnce(context.Background(), cfg)
 	require.Empty(t, client.seenIDs())
-	require.Equal(t, 1, processed)
+	require.Equal(t, 2, processed)
+	assert.Equal(t, [][]uint32{{1, 2}}, client.storeBatches())
 
 	newService().pollOnce(context.Background(), cfg)
-	assert.Equal(t, []uint32{1}, client.seenIDs())
-	assert.Equal(t, 1, processed)
+	assert.Equal(t, []uint32{1, 2}, client.seenIDs())
+	assert.Equal(t, 2, processed)
+	assert.Equal(t, [][]uint32{{1, 2}, {1, 2}}, client.storeBatches())
+	assert.Equal(t, 1, client.fullBodyFetches, "receipt recovery must not fetch full MIME bodies again")
 }
 
 func TestEmailPollOnceSkipsPostSuccessRecordAfterFirstTurnWithHandoff(t *testing.T) {
@@ -267,6 +473,7 @@ func TestEmailPollOnceMixedBatchRetriesRealTaskCreationFailure(t *testing.T) {
 
 	svc.pollOnce(ctx, cfg)
 	assert.Equal(t, []uint32{1}, client.seenIDs())
+	assert.Equal(t, [][]uint32{{1}}, client.storeBatches())
 	tasks, err := taskRepo.ListByProject(ctx, project.ID, "")
 	require.NoError(t, err)
 	require.Len(t, tasks, 1)
@@ -274,9 +481,10 @@ func TestEmailPollOnceMixedBatchRetriesRealTaskCreationFailure(t *testing.T) {
 
 	_, err = db.Exec(`DROP TRIGGER fail_email_task_insert`)
 	require.NoError(t, err)
-	client.messages[2] = testIMAPMessageWithBody(2, "retry", "alice@example.com", "transient task failure")
+	client.setMessage(testIMAPMessageWithBody(2, "retry", "alice@example.com", "transient task failure"))
 	svc.pollOnce(ctx, cfg)
 	assert.Equal(t, []uint32{1, 2}, client.seenIDs())
+	assert.Equal(t, [][]uint32{{1}, {2}}, client.storeBatches())
 	tasks, err = taskRepo.ListByProject(ctx, project.ID, "")
 	require.NoError(t, err)
 	assert.Len(t, tasks, 2)
@@ -339,12 +547,31 @@ func TestEmailPollOnceMixedBatchRetriesRealQueueWriteFailure(t *testing.T) {
 
 	_, err = db.Exec(`DROP TRIGGER fail_email_queue_insert`)
 	require.NoError(t, err)
-	client.messages[2] = testIMAPReplyWithBody(2, "Queue thread", "alice@example.com", rootMessageID, "transient queue failure")
+	client.setMessage(testIMAPReplyWithBody(2, "Queue thread", "alice@example.com", rootMessageID, "transient queue failure"))
 	svc.pollOnce(ctx, cfg)
 	assert.Equal(t, []uint32{1, 2}, client.seenIDs())
+	assert.Equal(t, [][]uint32{{1}, {2}}, client.storeBatches())
 	inputs, err = threadInputRepo.ListPendingForChat(ctx, project.ID)
 	require.NoError(t, err)
 	require.Len(t, inputs, 2)
+}
+
+func TestEmailPollOnceBatchesAcknowledgements(t *testing.T) {
+	client := newFakeEmailIMAPClient(
+		testIMAPMessage(1, "first", "alice@example.com"),
+		testIMAPMessage(2, "second", "alice@example.com"),
+	)
+	svc := &EmailService{}
+	svc.processIncomingMessageFn = func(context.Context, EmailInboundMessage) bool {
+		return true
+	}
+	svc.connectIMAP = func(context.Context, EmailRuntimeConfig) (emailIMAPClient, error) { return client, nil }
+
+	svc.pollOnce(context.Background(), EmailRuntimeConfig{})
+
+	assert.Equal(t, []uint32{1, 2}, client.seenIDs())
+	assert.Equal(t, 1, client.storeCalls)
+	assert.Equal(t, [][]uint32{{1, 2}}, client.storeBatches())
 }
 
 func TestEmailPollOnceAcknowledgesOnlySuccessfulMessagesAndRetriesFailures(t *testing.T) {
@@ -362,11 +589,243 @@ func TestEmailPollOnceAcknowledgesOnlySuccessfulMessagesAndRetriesFailures(t *te
 
 	svc.pollOnce(context.Background(), EmailRuntimeConfig{})
 	assert.Equal(t, []uint32{1}, client.seenIDs())
+	assert.Equal(t, [][]uint32{{1}}, client.storeBatches())
 	assert.Equal(t, map[string]int{"success": 1, "retry": 1}, attempts)
 
 	svc.pollOnce(context.Background(), EmailRuntimeConfig{})
 	assert.Equal(t, []uint32{1, 2}, client.seenIDs())
+	assert.Equal(t, [][]uint32{{1}, {2}}, client.storeBatches())
 	assert.Equal(t, map[string]int{"success": 1, "retry": 2}, attempts)
+}
+
+func BenchmarkEmailAcknowledgements(b *testing.B) {
+	for _, messageCount := range []int{10, 100, 1000} {
+		for _, batched := range []bool{false, true} {
+			name := "PerMessage"
+			if batched {
+				name = "Batched"
+			}
+			b.Run(fmt.Sprintf("%s/%d", name, messageCount), func(b *testing.B) {
+				client := newFakeEmailIMAPClient()
+				client.storeDelay = 100 * time.Microsecond
+				ids := make([]uint32, messageCount)
+				for i := range ids {
+					ids[i] = uint32(i + 1)
+				}
+
+				b.ReportAllocs()
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					if batched {
+						if err := storeSeen(client, ids); err != nil {
+							b.Fatal(err)
+						}
+						continue
+					}
+					for _, id := range ids {
+						if err := storeSeen(client, []uint32{id}); err != nil {
+							b.Fatal(err)
+						}
+					}
+				}
+				b.StopTimer()
+				b.ReportMetric(float64(client.storeCalls)/float64(b.N), "store_calls/op")
+			})
+		}
+	}
+}
+
+type benchmarkEmailInboundReceiptStore struct {
+	received         map[string]struct{}
+	existsCalls      int
+	recordCalls      int
+	withHandoffCalls int
+}
+
+func (s *benchmarkEmailInboundReceiptStore) Exists(_ context.Context, _, messageKey string) (bool, error) {
+	s.existsCalls++
+	_, ok := s.received[messageKey]
+	return ok, nil
+}
+
+func (s *benchmarkEmailInboundReceiptStore) Record(_ context.Context, _, _ string) error {
+	s.recordCalls++
+	return nil
+}
+
+func (s *benchmarkEmailInboundReceiptStore) WithHandoff(_ context.Context, _, _ string, _ func(repository.SQLExecutor) error) (bool, error) {
+	s.withHandoffCalls++
+	return false, nil
+}
+
+func newEmailPollBenchmarkFixture(messageCount, receiptedCount int) (*fakeEmailIMAPClient, *benchmarkEmailInboundReceiptStore, *EmailService) {
+	return newEmailPollBenchmarkFixtureWithMIME(messageCount, receiptedCount, 4*1024, 0)
+}
+
+func newEmailPollBenchmarkFixtureWithMIME(messageCount, receiptedCount, bodySize, attachmentSize int) (*fakeEmailIMAPClient, *benchmarkEmailInboundReceiptStore, *EmailService) {
+	messages := make([]*imap.Message, 0, messageCount)
+	received := make(map[string]struct{}, receiptedCount)
+	body := strings.Repeat("x", bodySize)
+	attachment := bytes.Repeat([]byte("a"), attachmentSize)
+	for i := 0; i < messageCount; i++ {
+		id := uint32(i + 1)
+		message := testIMAPMessageWithMIME(id, fmt.Sprintf("message-%d", id), "alice@example.com", body, attachment)
+		if attachmentSize == 0 {
+			message = testIMAPMessageWithBody(id, fmt.Sprintf("message-%d", id), "alice@example.com", body)
+		}
+		messages = append(messages, message)
+		if i < receiptedCount {
+			received[fmt.Sprintf("message-id:<message-%d@example.com>", id)] = struct{}{}
+		}
+	}
+	client := newFakeEmailIMAPClient(messages...)
+	client.uidValidity = 77
+	receipts := &benchmarkEmailInboundReceiptStore{received: received}
+	svc := &EmailService{emailInboundReceiptStore: receipts}
+	svc.processIncomingMessageFn = func(context.Context, EmailInboundMessage) bool { return true }
+	svc.parseIMAPMessageFn = func(msg *imap.Message, section *imap.BodySectionName, skipAttachments bool) (EmailInboundMessage, error) {
+		client.parseAttempts++
+		inbound, err := parseIMAPMessage(msg, section, skipAttachments)
+		if err == nil {
+			client.parsedMessages++
+		}
+		return inbound, err
+	}
+	svc.connectIMAP = func(context.Context, EmailRuntimeConfig) (emailIMAPClient, error) { return client, nil }
+	return client, receipts, svc
+}
+
+type emailPollBenchmarkRun func(context.Context, *EmailService, *fakeEmailIMAPClient, EmailRuntimeConfig)
+
+func runLegacyEmailPollOnceForBenchmark(ctx context.Context, svc *EmailService, client *fakeEmailIMAPClient, cfg EmailRuntimeConfig) {
+	mailbox, err := client.Select("INBOX", false)
+	if err != nil {
+		return
+	}
+	ids, err := client.Search(unseenCriteria())
+	if err != nil || len(ids) == 0 {
+		return
+	}
+	messages, err := svc.fetchEmailMessages(client, ids, cfg.SkipAttachments)
+	if err != nil {
+		return
+	}
+
+	mailboxIdentity := emailMailboxIdentity(cfg)
+	acknowledgementIDs := make([]uint32, 0, len(messages))
+	for _, fetched := range messages {
+		messageKey, ok := emailInboundMessageKey(fetched.Message, mailbox.UidValidity, fetched.UID)
+		if !ok {
+			continue
+		}
+		if svc.emailInboundReceiptStore != nil {
+			received, err := svc.emailInboundReceiptStore.Exists(ctx, mailboxIdentity, messageKey)
+			if err != nil {
+				continue
+			}
+			if received {
+				acknowledgementIDs = append(acknowledgementIDs, fetched.ID)
+				continue
+			}
+		}
+		result := emailIncomingProcessResult{}
+		if svc.processIncomingMessageFn != nil {
+			result.handled = svc.ProcessIncoming(ctx, fetched.Message)
+		} else {
+			result = svc.processIncomingMessage(ctx, fetched.Message, mailboxIdentity, messageKey)
+		}
+		if !result.handled {
+			continue
+		}
+		if svc.emailInboundReceiptStore != nil && !result.receiptRecorded {
+			_ = svc.emailInboundReceiptStore.Record(ctx, mailboxIdentity, messageKey)
+		}
+		acknowledgementIDs = append(acknowledgementIDs, fetched.ID)
+	}
+	if len(acknowledgementIDs) > 0 {
+		_ = storeSeen(client, acknowledgementIDs)
+	}
+}
+
+func benchmarkEmailPollOnce(b *testing.B, messageCount, receiptedRate, bodySize, attachmentSize int, run emailPollBenchmarkRun) {
+	b.Helper()
+	b.ReportAllocs()
+	var fetchCalls, fetchIDs, fetchItems, fullBodyFetches int
+	var fullBodyBytes, parseAttempts, parsedMessages, receiptLookups, storeCalls int64
+	var elapsed time.Duration
+	for i := 0; i < b.N; i++ {
+		b.StopTimer()
+		receiptedCount := messageCount * receiptedRate / 100
+		client, receipts, svc := newEmailPollBenchmarkFixtureWithMIME(messageCount, receiptedCount, bodySize, attachmentSize)
+		cfg := EmailRuntimeConfig{Address: "bot@example.com", IMAPHost: "imap.example.com"}
+		b.StartTimer()
+		started := time.Now()
+		run(context.Background(), svc, client, cfg)
+		elapsed += time.Since(started)
+		b.StopTimer()
+
+		fetchCalls += len(client.fetchItems)
+		for _, ids := range client.fetchIDs {
+			fetchIDs += len(ids)
+		}
+		for _, items := range client.fetchItems {
+			fetchItems += len(items)
+		}
+		fullBodyFetches += client.fullBodyFetches
+		fullBodyBytes += client.fullBodyBytes
+		parseAttempts += client.parseAttempts
+		parsedMessages += client.parsedMessages
+		receiptLookups += int64(receipts.existsCalls)
+		storeCalls += int64(client.storeCalls)
+	}
+
+	b.ReportMetric(float64(fetchCalls)/float64(b.N), "fetch_calls/op")
+	b.ReportMetric(float64(fetchIDs)/float64(b.N), "fetch_ids/op")
+	b.ReportMetric(float64(fetchItems)/float64(b.N), "fetch_items/op")
+	b.ReportMetric(float64(fetchCalls+int(storeCalls))/float64(b.N), "imap_commands/op")
+	b.ReportMetric(float64(fullBodyFetches)/float64(b.N), "full_body_fetches/op")
+	b.ReportMetric(float64(fullBodyBytes)/float64(b.N), "full_body_bytes/op")
+	b.ReportMetric(float64(parseAttempts)/float64(b.N), "parse_attempts/op")
+	b.ReportMetric(float64(parsedMessages)/float64(b.N), "parsed_messages/op")
+	b.ReportMetric(float64(receiptLookups)/float64(b.N), "receipt_lookups/op")
+	b.ReportMetric(float64(storeCalls)/float64(b.N), "store_calls/op")
+	b.ReportMetric(float64(elapsed)/float64(b.N), "elapsed_ns/op")
+}
+
+func BenchmarkEmailPollOnceReceiptDeduplication(b *testing.B) {
+	profiles := []struct {
+		name           string
+		bodySize       int
+		attachmentSize int
+	}{
+		{name: "Plain4KiB", bodySize: 4 * 1024},
+		{name: "MIME256KiBWith16KiBAttachment", bodySize: 256 * 1024, attachmentSize: 16 * 1024},
+	}
+	for _, profile := range profiles {
+		profile := profile
+		for _, messageCount := range []int{10, 100, 1000} {
+			messageCount := messageCount
+			for _, mix := range []struct {
+				name          string
+				receiptedRate int
+			}{
+				{name: "0%", receiptedRate: 0},
+				{name: "50%", receiptedRate: 50},
+				{name: "100%", receiptedRate: 100},
+			} {
+				mix := mix
+				name := fmt.Sprintf("%s/%d/%s", profile.name, messageCount, mix.name)
+				b.Run(name+"/Before", func(b *testing.B) {
+					benchmarkEmailPollOnce(b, messageCount, mix.receiptedRate, profile.bodySize, profile.attachmentSize, runLegacyEmailPollOnceForBenchmark)
+				})
+				b.Run(name+"/After", func(b *testing.B) {
+					benchmarkEmailPollOnce(b, messageCount, mix.receiptedRate, profile.bodySize, profile.attachmentSize, func(ctx context.Context, svc *EmailService, _ *fakeEmailIMAPClient, cfg EmailRuntimeConfig) {
+						svc.pollOnce(ctx, cfg)
+					})
+				})
+			}
+		}
+	}
 }
 
 func TestEmailPollOnceLeavesParseFailuresUnread(t *testing.T) {
@@ -383,24 +842,59 @@ func TestEmailPollOnceLeavesParseFailuresUnread(t *testing.T) {
 	svc.pollOnce(context.Background(), EmailRuntimeConfig{})
 
 	assert.Empty(t, client.seenIDs())
+	assert.Zero(t, client.storeCalls)
 	assert.Zero(t, processed)
-	assert.Equal(t, 2, client.fetchCount)
+	assert.Equal(t, 4, client.fetchCount)
+	assert.Equal(t, 2, client.fullBodyFetches)
 }
 
 type fakeEmailIMAPClient struct {
-	messages      map[uint32]*imap.Message
-	seen          map[uint32]bool
-	fetchCount    int
-	storeFailures int
-	uidValidity   uint32
+	messages                   map[uint32]*imap.Message
+	seen                       map[uint32]bool
+	fetchCount                 int
+	fullBodyFetches            int
+	fullBodyFetchIDs           [][]uint32
+	fullBodyBytes              int64
+	parseAttempts              int64
+	parsedMessages             int64
+	fetchItems                 [][]imap.FetchItem
+	fetchIDs                   [][]uint32
+	storeCalls                 int
+	storedIDs                  [][]uint32
+	storeFailures              int
+	storeDelay                 time.Duration
+	uidValidity                uint32
+	metadataMessageIDOmissions map[uint32]bool
+	bodyData                   map[uint32]map[*imap.BodySectionName][]byte
 }
 
 func newFakeEmailIMAPClient(messages ...*imap.Message) *fakeEmailIMAPClient {
-	client := &fakeEmailIMAPClient{messages: make(map[uint32]*imap.Message), seen: make(map[uint32]bool)}
+	client := &fakeEmailIMAPClient{
+		messages: make(map[uint32]*imap.Message),
+		seen:     make(map[uint32]bool),
+		bodyData: make(map[uint32]map[*imap.BodySectionName][]byte),
+	}
 	for _, msg := range messages {
-		client.messages[msg.SeqNum] = msg
+		client.setMessage(msg)
 	}
 	return client
+}
+
+func (c *fakeEmailIMAPClient) setMessage(msg *imap.Message) {
+	c.messages[msg.SeqNum] = msg
+	if len(msg.Body) == 0 {
+		delete(c.bodyData, msg.SeqNum)
+		return
+	}
+	bodyData := make(map[*imap.BodySectionName][]byte, len(msg.Body))
+	freshBody := make(map[*imap.BodySectionName]imap.Literal, len(msg.Body))
+	for section, body := range msg.Body {
+		data, _ := io.ReadAll(body)
+		bodyData[section] = data
+		freshBody[section] = bytes.NewReader(data)
+	}
+	c.bodyData[msg.SeqNum] = bodyData
+	msg.Body = freshBody
 }
 
 func testIMAPMessage(id uint32, subject, from string) *imap.Message {
@@ -419,28 +913,63 @@ func testIMAPMessageWithoutMessageID(id, uid uint32, subject, from, body string)
 		SeqNum:   id,
 		Uid:      uid,
 		Envelope: &imap.Envelope{Subject: subject, From: []*imap.Address{{MailboxName: parts[0], HostName: parts[1]}}},
-		Body:     map[*imap.BodySectionName]imap.Literal{&imap.BodySectionName{}: bytes.NewBufferString(raw)},
+		Body:     testIMAPBodySections(raw),
+	}
+}
+
+func testIMAPBodySections(raw string) map[*imap.BodySectionName]imap.Literal {
+	header := raw
+	if headerEnd := strings.Index(header, "\r\n\r\n"); headerEnd >= 0 {
+		header = header[:headerEnd+len("\r\n\r\n")]
+	}
+	responseSection := emailMessageIDHeaderSection()
+	responseSection.Peek = false
+	return map[*imap.BodySectionName]imap.Literal{
+		&imap.BodySectionName{}: bytes.NewBufferString(raw),
+		responseSection:         bytes.NewBufferString(header),
 	}
 }
 
 func testIMAPMessageWithBody(id uint32, subject, from, body string) *imap.Message {
 	msg := testIMAPMessage(id, subject, from)
 	raw := fmt.Sprintf("From: %s\r\nSubject: %s\r\nMessage-ID: <message-%d@example.com>\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n%s", from, subject, id, body)
-	msg.Body = map[*imap.BodySectionName]imap.Literal{&imap.BodySectionName{}: bytes.NewBufferString(raw)}
+	msg.Body = testIMAPBodySections(raw)
+	return msg
+}
+
+func testIMAPMessageWithMIME(id uint32, subject, from, body string, attachment []byte) *imap.Message {
+	msg := testIMAPMessage(id, subject, from)
+	boundary := fmt.Sprintf("BOUND-%d", id)
+	var raw strings.Builder
+	fmt.Fprintf(&raw, "From: %s\r\nSubject: %s\r\nMessage-ID: <message-%d@example.com>\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=\"%s\"\r\n\r\n", from, subject, id, boundary)
+	fmt.Fprintf(&raw, "--%s\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n%s\r\n", boundary, body)
+	if len(attachment) > 0 {
+		encoded := base64.StdEncoding.EncodeToString(attachment)
+		fmt.Fprintf(&raw, "--%s\r\nContent-Type: application/octet-stream\r\nContent-Disposition: attachment; filename=\"payload-%d.bin\"\r\nContent-Transfer-Encoding: base64\r\n\r\n", boundary, id)
+		for i := 0; i < len(encoded); i += 76 {
+			end := i + 76
+			if end > len(encoded) {
+				end = len(encoded)
+			}
+			raw.WriteString(encoded[i:end] + "\r\n")
+		}
+	}
+	fmt.Fprintf(&raw, "--%s--\r\n", boundary)
+	msg.Body = testIMAPBodySections(raw.String())
 	return msg
 }
 
 func testIMAPReplyWithBody(id uint32, subject, from, references, body string) *imap.Message {
 	msg := testIMAPMessage(id, subject, from)
 	raw := fmt.Sprintf("From: %s\r\nSubject: %s\r\nMessage-ID: <message-%d@example.com>\r\nReferences: %s\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n%s", from, subject, id, references, body)
-	msg.Body = map[*imap.BodySectionName]imap.Literal{&imap.BodySectionName{}: bytes.NewBufferString(raw)}
+	msg.Body = testIMAPBodySections(raw)
 	return msg
 }
 
 func testIMAPReplyInReplyToOnlyWithBody(id uint32, subject, from, inReplyTo, body string) *imap.Message {
 	msg := testIMAPMessage(id, subject, from)
 	raw := fmt.Sprintf("From: %s\r\nSubject: %s\r\nMessage-ID: <message-%d@example.com>\r\nIn-Reply-To: %s\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n%s", from, subject, id, inReplyTo, body)
-	msg.Body = map[*imap.BodySectionName]imap.Literal{&imap.BodySectionName{}: bytes.NewBufferString(raw)}
+	msg.Body = testIMAPBodySections(raw)
 	return msg
 }
 
@@ -457,29 +986,94 @@ func (c *fakeEmailIMAPClient) Search(*imap.SearchCriteria) ([]uint32, error) {
 	}
 	return ids, nil
 }
-func (c *fakeEmailIMAPClient) Fetch(seqset *imap.SeqSet, _ []imap.FetchItem, ch chan *imap.Message) error {
+func (c *fakeEmailIMAPClient) Fetch(seqset *imap.SeqSet, items []imap.FetchItem, ch chan *imap.Message) error {
 	c.fetchCount++
-	defer close(ch)
-	for id := uint32(1); id <= uint32(len(c.messages)); id++ {
+	c.fetchItems = append(c.fetchItems, append([]imap.FetchItem(nil), items...))
+	var fetchedIDs []uint32
+	for id := range c.messages {
 		if seqset.Contains(id) {
-			ch <- c.messages[id]
+			fetchedIDs = append(fetchedIDs, id)
 		}
+	}
+	sort.Slice(fetchedIDs, func(i, j int) bool { return fetchedIDs[i] < fetchedIDs[j] })
+	c.fetchIDs = append(c.fetchIDs, append([]uint32(nil), fetchedIDs...))
+	fullBody := false
+	for _, item := range items {
+		if item == (&imap.BodySectionName{}).FetchItem() {
+			fullBody = true
+			break
+		}
+	}
+	if fullBody {
+		c.fullBodyFetches++
+		c.fullBodyFetchIDs = append(c.fullBodyFetchIDs, append([]uint32(nil), fetchedIDs...))
+		for _, id := range fetchedIDs {
+			if body := c.messages[id].GetBody(&imap.BodySectionName{}); body != nil {
+				if sized, ok := body.(interface{ Len() int }); ok {
+					c.fullBodyBytes += int64(sized.Len())
+				}
+			}
+		}
+	}
+	defer close(ch)
+	for _, id := range fetchedIDs {
+		message := c.messages[id]
+		if bodyData := c.bodyData[id]; len(bodyData) > 0 {
+			copyMessage := *message
+			copyMessage.Body = make(map[*imap.BodySectionName]imap.Literal, len(bodyData))
+			for section, data := range bodyData {
+				copyMessage.Body[section] = bytes.NewReader(data)
+			}
+			message = &copyMessage
+		}
+		if !fullBody && c.metadataMessageIDOmissions[id] {
+			metadataSection := emailMessageIDHeaderSection()
+			metadataSection.Peek = false
+			copyMessage := *message
+			copyMessage.Body = make(map[*imap.BodySectionName]imap.Literal, len(message.Body))
+			for section, body := range message.Body {
+				if metadataSection.Equal(section) {
+					continue
+				}
+				copyMessage.Body[section] = body
+			}
+			message = &copyMessage
+		}
+		ch <- message
 	}
 	return nil
 }
 func (c *fakeEmailIMAPClient) Store(seqset *imap.SeqSet, _ imap.StoreItem, _ interface{}, _ chan *imap.Message) error {
+	c.storeCalls++
+	var storedIDs []uint32
+	for id := uint32(1); id <= uint32(len(c.messages)); id++ {
+		if seqset.Contains(id) {
+			storedIDs = append(storedIDs, id)
+		}
+	}
+	if len(storedIDs) > 0 {
+		c.storedIDs = append(c.storedIDs, storedIDs)
+	}
+	if c.storeDelay > 0 {
+		time.Sleep(c.storeDelay)
+	}
 	if c.storeFailures > 0 {
 		c.storeFailures--
 		return fmt.Errorf("transient store failure")
 	}
-	for id := range c.messages {
-		if seqset.Contains(id) {
-			c.seen[id] = true
-		}
+	for _, id := range storedIDs {
+		c.seen[id] = true
 	}
 	return nil
 }
 func (c *fakeEmailIMAPClient) Logout() error { return nil }
+func (c *fakeEmailIMAPClient) storeBatches() [][]uint32 {
+	batches := make([][]uint32, len(c.storedIDs))
+	for i, ids := range c.storedIDs {
+		batches[i] = append([]uint32(nil), ids...)
+	}
+	return batches
+}
 func (c *fakeEmailIMAPClient) seenIDs() []uint32 {
 	var ids []uint32
 	for id := uint32(1); id <= uint32(len(c.messages)); id++ {

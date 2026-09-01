@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -50,6 +51,12 @@ type Instance struct {
 	ShutdownRequested <-chan struct{}
 	UpdateCoordinator *update.Coordinator
 }
+
+var (
+	newDatabaseConnections           = database.NewReadWrite
+	registerDedicatedWriter          = repository.RegisterDedicatedWriter
+	loadAutomationConfirmationSecret = service.LoadOrCreateAutomationConfirmationSecret
+)
 
 func migrateLegacyStorage(cfg *config.Config) error {
 	if cfg == nil || os.Getenv("OPENVIBELY_DISABLE_LEGACY_STORAGE_MIGRATION") != "" {
@@ -436,14 +443,21 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	handler.SetUploadsDir(uploadsPath)
 
 	// Database
-	db, err := database.New(cfg.DatabasePath)
+	databaseConnections, err := newDatabaseConnections(cfg.DatabasePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize database: %w", err)
+	}
+	db := databaseConnections.Reader
+	writeDB := databaseConnections.Writer
+	unregisterDedicatedWriter := registerDedicatedWriter(db, writeDB)
+	closeDatabase := func() {
+		unregisterDedicatedWriter()
+		_ = databaseConnections.Close()
 	}
 	applog.Infof("database initialized")
 	var databaseSchema int
 	if err := db.QueryRowContext(ctx, `SELECT COALESCE(MAX(version_id), 0) FROM goose_db_version WHERE is_applied = 1`).Scan(&databaseSchema); err != nil {
-		db.Close()
+		closeDatabase()
 		return nil, fmt.Errorf("reading database schema version: %w", err)
 	}
 
@@ -531,7 +545,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	)
 	updateDrain.SetWorkTracker(updateTracker)
 	if err := updateDrain.SetPersistence(filepath.Join(cfg.AppDataDir, "update-drain.json")); err != nil {
-		db.Close()
+		closeDatabase()
 		return nil, fmt.Errorf("restoring update drain: %w", err)
 	}
 	workerSvc.SetUpdateWorkTracker(updateTracker)
@@ -539,7 +553,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	workerSvc.SetAdmissionGate(updateDrain.Admit)
 	updateKeys, err := update.DecodePublicKeys(buildinfo.ReleaseKeyID, buildinfo.ReleasePublicKey, cfg.UpdatePublicKeyFile)
 	if err != nil {
-		db.Close()
+		closeDatabase()
 		return nil, fmt.Errorf("loading update trust root: %w", err)
 	}
 	currentBuild := buildinfo.Current(cfg.BuildArtifact)
@@ -559,12 +573,12 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	case cfg.BuildArtifact == buildinfo.ArtifactBinary && cfg.ManagedUpdateError == "":
 		executable, execErr := os.Executable()
 		if execErr != nil {
-			db.Close()
+			closeDatabase()
 			return nil, fmt.Errorf("resolving update executable: %w", execErr)
 		}
 		workingDirectory, workdirErr := os.Getwd()
 		if workdirErr != nil {
-			db.Close()
+			closeDatabase()
 			return nil, fmt.Errorf("resolving update working directory: %w", workdirErr)
 		}
 		binaryUpdateInstaller = &update.BinaryInstaller{Client: updateClient, Current: current, Executable: executable, Arguments: append([]string(nil), os.Args...), WorkingDirectory: workingDirectory, Shutdown: func() {
@@ -577,24 +591,24 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	case cfg.UpdateMode == buildinfo.ModeDockerAgent && cfg.ManagedUpdateError == "":
 		agentAPI, apiErr := update.NewAgentHTTPClient(cfg.DockerAgentURL, cfg.DockerAgentToken, nil)
 		if apiErr != nil {
-			db.Close()
+			closeDatabase()
 			return nil, fmt.Errorf("configuring Docker update agent: %w", apiErr)
 		}
 		dockerInstaller := &update.DockerAgentInstaller{API: agentAPI, Client: updateClient, Current: current, Drain: updateDrain, StatePath: filepath.Join(cfg.AppDataDir, "docker-update-request.json")}
 		if err := dockerInstaller.Load(); err != nil {
-			db.Close()
+			closeDatabase()
 			return nil, fmt.Errorf("restoring Docker update request: %w", err)
 		}
 		updateInstaller = dockerInstaller
 	case cfg.UpdateMode == buildinfo.ModeHosted:
 		agentAPI, apiErr := update.NewAgentHTTPClient(cfg.HostedSSOControlURL, cfg.HostedAgentToken, nil)
 		if apiErr != nil {
-			db.Close()
+			closeDatabase()
 			return nil, fmt.Errorf("configuring Hosted update controller: %w", apiErr)
 		}
 		hostedUpdateController = update.NewHostedController(agentAPI, updateDrain, current, filepath.Join(cfg.AppDataDir, "hosted-update.json"))
 		if err := hostedUpdateController.Restore(); err != nil {
-			db.Close()
+			closeDatabase()
 			return nil, fmt.Errorf("restoring Hosted update controller: %w", err)
 		}
 	}
@@ -611,7 +625,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	updateCoordinator.SetUpdateNotificationsEnabled(!cfg.DisableUpdateNotifications)
 	protectedDataPaths, protectedPathsErr := desktopUpdateProtectedPaths(cfg)
 	if protectedPathsErr != nil {
-		db.Close()
+		closeDatabase()
 		return nil, fmt.Errorf("resolving desktop update data boundaries: %w", protectedPathsErr)
 	}
 	updateCoordinator.SetProtectedDataPaths(protectedDataPaths)
@@ -619,7 +633,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 		updateCoordinator.SetManagedStateProvider(hostedUpdateController.Lifecycle)
 	}
 	if err := updateCoordinator.SetPersistence(filepath.Join(cfg.AppDataDir, "update-coordinator.json")); err != nil {
-		db.Close()
+		closeDatabase()
 		return nil, fmt.Errorf("restoring update coordinator: %w", err)
 	}
 
@@ -677,6 +691,10 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	discordAuthRepo := repository.NewDiscordAuthRepo(db)
 	discordTaskContextRepo := repository.NewDiscordTaskContextRepo(db)
 	discordUserProjectRepo := repository.NewDiscordUserProjectRepo(db)
+	xAuthRepo := repository.NewXAuthRepo(db)
+	xUserProjectRepo := repository.NewXUserProjectRepo(db)
+	xTaskContextRepo := repository.NewXTaskContextRepo(db)
+	xInboundReceiptRepo := repository.NewXInboundReceiptRepo(db)
 	channelTargetRepo := repository.NewChannelTargetRepo(db)
 
 	// Custom personalities
@@ -692,8 +710,9 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	automationCompiler := service.NewAutomationCompiler(automationRepo, taskSvc, taskRepo, scheduleRepo, automationSaveValidator)
 	automationCompiler.SetAgentRepository(agentRepo)
 	automationLifecycleSvc := service.NewAutomationLifecycleService(automationRepo, scheduleRepo, taskSvc)
-	automationConfirmationSecret, confirmationSecretErr := service.LoadOrCreateAutomationConfirmationSecret(context.Background(), settingsRepo)
+	automationConfirmationSecret, confirmationSecretErr := loadAutomationConfirmationSecret(context.Background(), settingsRepo)
 	if confirmationSecretErr != nil {
+		closeDatabase()
 		return nil, fmt.Errorf("initializing automation confirmation secret: %w", confirmationSecretErr)
 	}
 	automationConfirmationSvc := service.NewAutomationConfirmationService(automationRepo, execRepo, automationConfirmationSecret)
@@ -775,6 +794,13 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	slackSvc.SetAgentRepo(agentRepo)
 	emailSvc := service.NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, scheduleRepo, taskSvc, llmSvc, workerSvc, emailAuthRepo, emailTaskContextRepo)
 	channelMessageRouter := service.NewChannelMessageRouter(channelTargetRepo, settingsRepo)
+	xSettingValues, _ := settingsRepo.GetMany(context.Background(), []string{service.XSettingConsumerKey, service.XSettingConsumerSecret, service.XSettingAccessToken, service.XSettingAccessTokenSecret, service.XSettingPollIntervalSeconds})
+	xCredentials := service.XCredentials{ConsumerKey: xSettingValues[service.XSettingConsumerKey], ConsumerSecret: xSettingValues[service.XSettingConsumerSecret], AccessToken: xSettingValues[service.XSettingAccessToken], AccessTokenSecret: xSettingValues[service.XSettingAccessTokenSecret]}
+	xSvc := service.NewXService(xCredentials, settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, scheduleRepo, taskSvc)
+	xSvc.SetRepositories(xAuthRepo, xUserProjectRepo, xTaskContextRepo, xInboundReceiptRepo, repository.NewThreadInputRepo(db))
+	if seconds, err := strconv.Atoi(strings.TrimSpace(xSettingValues[service.XSettingPollIntervalSeconds])); err == nil {
+		xSvc.SetPollInterval(time.Duration(seconds) * time.Second)
+	}
 	llmSvc.SetChannelMessageRouter(channelMessageRouter)
 	channelMessageRouter.SetSlackService(slackSvc)
 	channelMessageRouter.SetSlackAuthStore(slackAuthRepo)
@@ -880,6 +906,18 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 		return service.ProjectSkillRootForResolver(ctx, projectRepo, projectID)
 	})
 	lifecycleRunner := lifecycle.NewRunner(lifecycleRepo, llmHookInvoker, skillResolver)
+	lifecycleRunner.SetExecutionChangedObserver(func(_ context.Context, projectID string, exec models.LifecycleExecution) {
+		if broadcaster == nil {
+			return
+		}
+		broadcaster.Publish(events.TaskEvent{
+			Type:      events.TaskLifecycleExecutionChanged,
+			ProjectID: projectID,
+			TaskID:    exec.TaskID,
+			ExecID:    exec.ID,
+			Status:    string(exec.Status),
+		})
+	})
 	workerSvc.SetLifecycleRunner(lifecycleRunner)
 	workerSvc.SetLifecycleSkillRoot(globalSkillRoot)
 	// Give the LLM service the same root used for global skill catalog and
@@ -1033,7 +1071,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 		hostedPendingStore = auth.NewPendingStore(srvCtx, time.Now)
 	}
 
-	database.StartIncrementalVacuum(srvCtx, db)
+	database.StartIncrementalVacuum(srvCtx, writeDB)
 	updateDrain.StartExpirySupervisor(srvCtx)
 	workerSvc.Start(srvCtx)
 	automationReconciler.Start(srvCtx)
@@ -1085,6 +1123,8 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	h.SetSlackTaskContextRepo(slackTaskContextRepo)
 	h.SetDiscordAuthRepo(discordAuthRepo)
 	h.SetDiscordTaskContextRepo(discordTaskContextRepo)
+	h.SetXRepositories(xAuthRepo, xUserProjectRepo, xTaskContextRepo, xInboundReceiptRepo)
+	h.SetXService(xSvc)
 	h.SetReviewCommentRepo(reviewCommentRepo)
 	h.SetCustomPersonalityRepo(customPersonalityRepo)
 	h.SetWorktreeService(worktreeSvc)
@@ -1111,6 +1151,14 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	discordSvc.SetQueuedTaskThreadPromoter(h.PromoteQueuedTaskThreadInput)
 	discordSvc.SetChannelChatRunner(h.StartChannelChatRun)
 	discordSvc.SetChannelTaskRunner(h.StartChannelTaskRun)
+	xSvc.SetRuntime(agentRepo, customPersonalityRepo, chatBroadcaster, executionStreamHub, h.StartChannelChatRun, h.StartChannelTaskRun, h.PromoteQueuedChatInput, h.PromoteQueuedTaskThreadInput, channelMessageRouter)
+	if xCredentials.Ready() {
+		if err := xSvc.Start(); err != nil {
+			applog.Infof("warning: failed to start X mention polling: %v", err)
+		} else {
+			channelMessageRouter.SetXService(xSvc)
+		}
+	}
 	if telegramSvc != nil {
 		telegramSvc.SetChannelMessageRouter(channelMessageRouter)
 		channelMessageRouter.SetTelegramService(telegramSvc)
@@ -1182,7 +1230,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	ln, listenErr := net.Listen("tcp", addr)
 	if listenErr != nil {
 		srvCancel()
-		db.Close()
+		closeDatabase()
 		return nil, fmt.Errorf("failed to listen on %s: %w", addr, listenErr)
 	}
 
@@ -1232,8 +1280,9 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 		if discordSvc != nil {
 			discordSvc.Stop()
 		}
+		h.StopXService()
 		e.Close()
-		db.Close()
+		closeDatabase()
 		close(shutdownDone)
 	}
 

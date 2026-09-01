@@ -2,9 +2,9 @@
 name: agent_lifecycle_and_skills
 type: project
 created: 2026-05-24
-updated: 2026-08-24
-source: after_complete_update
-source_id: ce58dc08ee6cf3e3ca6d281fba596f35:8da8297f2204b6c5
+updated: 2026-08-30
+source: after_complete
+source_id: d06503a3e9b632d05f3d4e2e79c070f9:702754264fb67c7c
 confidence: high
 title: Agent Lifecycle and Skills
 ---
@@ -35,6 +35,10 @@ Agent and skill catalog facts:
 - Browser-dialog request-to-declaration conversion for standalone and agent-owned skill saves is centralized before importer persistence. Standalone saves reject agent-root/`agent.key` declarations; agent-owned saves validate `agent.key` scope.
 - Open duplication gap `#806`: agent plugin MCP server resolution is duplicated between `ResolveRuntimeBundle` and `pluginServersForIDs`, covering selected-plugin parsing, auto-install/load, deduplication, and sorting for runtime bundles and persistent MCP process reconciliation.
 - Open bug `#846`: the browser plugin-install path accepts an agent ID and persists plugin IDs without applying the protected system-agent read-only/`GeneratedStatus` guard, so a user can mutate a protected agent's plugin configuration through installation even though normal agent editing blocks it.
+- Open bug `#937`: a failed plugin materialization can leave an empty `cache/<marketplace>/<plugin>` parent or `.tmp-*` staging directory that discovery treats as installed. The next plugin-state request then reports a false installed row, the browser skips a retry because `isPluginInstalled` is true, and an empty bundle may be persisted onto the agent/runtime; regression coverage is needed for failed materialization, stale cache discovery, state rendering, retry, and runtime-bundle behavior.
+- Resolved issue `#928` in PR `#932`: project-scoped Agent lifecycle-hook GET/PUT routes, `/agents/:id/json` hydration, and normal Agent dialog updates enforce the recorded `Agent.ProjectID` before hook access or Agent mutation. An explicit query/form project or the selected project must match the owner; global Agents remain portable, same-project hook reconciliation remains supported, and foreign or unknown requests return controlled not-found responses without leaking hook data.
+- Resolved issue `#918` in PR `#934`: model-facing lifecycle/task `agent_list` calls use a repository-owned compact `AgentListSummary` projection from `agentInspector.ListAgents`, selecting identity/filter fields and SQL-derived ordered skill names rather than hydrating full Agent JSON. Existing filtering and prompt-safe output contracts are preserved, while `InspectAgent`/`agent_view` and other full-detail paths remain on their existing reads. On 2026-08-30, the follow-up non-audit fix moved SQL statement counting in `TestAgentInspectorListAgentsUsesCompactProjection` off the direct inspector call and onto the actual `agent_list` runtime executor, so exactly one captured query covers the model-facing path without mixing scopes. Local commit `3401497b` contains the test-only correction; `go build ./cmd/server`, the focused regression, uncached `internal/repository`/`internal/service`, and uncached `go test ./internal/... -count=1 -timeout 120s` passed. Supported PR reuse reconciled PR `#934` at published head `52ed978278be4eb092d67459dd7d61e9c472ced6`; the live source branch and `refs/pull/934/head` agree, and their tree/file blobs match the audited local tree despite publisher commit identity differences. A fresh strict read-only audit then found no material bugs, regressions, missing requirements, scope violations, or publication mismatch; it made no workspace changes or validation runs.
+- Per-agent materialization resolves project-scoped declarations and legacy embedded skills from the Agent's recorded `ProjectID`; refreshes must not create a project-B tree under project A. Project-aware declaration sync ignores mismatched stored project IDs, including warm-cache refreshes, while global/unowned legacy rows retain fallback behavior. Cross-project switching, legacy migration, and warm-refresh regressions cover this boundary.
 - `skill_import` is a skill-library write capability alongside `skill_manage`; grant it to write-authorized skill/curation agents rather than ordinary task turns.
 - The standalone `git_worktree_discipline` skill is intentionally compact at routing time; detailed recovery and prompt-orientation references live in support files.
 
@@ -59,6 +63,7 @@ Lifecycle facts:
 - Built-in route hooks default non-blocking, while the runner waits for route-slot completion before the main model turn starts.
 - Lifecycle hook skill resolution is scoped to the hook owner.
 - Routing/effective-mode logic has one primary agent/effective mode. Multi-agent permission merging is not part of the current design.
+- Open suggestion `#942`: lifecycle hooks cannot currently select an explicit per-hook model override. The hook model field is absent from the persisted model/schema, save payload, and editor, while `resolveLLMConfig` falls back to the assigned Agent's model or project default; the documented hook-specific precedence tier remains future work. The existing Agent model picker and `inherit` contract are suitable reuse points.
 - Ordinary tasks may have no assigned primary agent. Explicit assigned primary agents skip standalone skill routing and use that agent's curated/default or manual skill selection.
 - Maintenance/system agents are excluded from auto-routing via `selectable_as_primary=false`.
 - Lifecycle visibility renders structured selected-skill and selected-memory route decisions as compact prompt-safe badges/pills; text summaries remain useful for non-route hook rows.
@@ -71,6 +76,7 @@ Lifecycle facts:
 - Ordinary non-cancel failures, including `context.DeadlineExceeded`, still run detached `after_complete` hooks with `extras.execution_error` even if terminal bookkeeping later persists `status=cancelled`.
 - Lifecycle hook and task-mode terminal status writes must use a fresh short-timeout finalization context after hook/model work returns so LLM deadlines/cancellations do not leave rows `running`.
 - Each lifecycle hook invocation persists a sanitized JSON snapshot in `lifecycle_executions.input_json` and an `input_snapshot` trace event, so full hook inputs can materially contribute to SQLite size.
+- `lifecycle.Runner` exposes a durable execution-change observer that fires after lifecycle hook and `task_mode` rows are created or finalized; the server maps it to the project-scoped `task_lifecycle_execution_changed` task event for shared SSE/UI reconciliation. Focused runner regressions cover running and terminal notifications for both hook and task-mode executions.
 - Canonical task-thread runtime details live in `chat_thread_system.md`.
 
 Goal and Loop Agent facts:
@@ -96,3 +102,4 @@ Scheduled maintenance and UI facts:
 - Agent create/update browser handlers share server-side modal payload parsing/normalization. Handlers still own construction/loading, protected checks, repository writes, lifecycle hook persistence, disk materialization, legacy skill migration, logging, and list rendering.
 - Protected system agents are read-only in the agent modal and skipped by dialog disk materialization. Non-protected lifecycle hook form saves are ordinary user-agent edits and must be audited separately if they need to preserve custom `payload_json`.
 - Agent edit modals must hydrate persisted Advanced-tab values, including unchecked booleans such as `enabled` and `selectable_as_primary`, before saving so hidden defaults do not overwrite backend state.
+- Open suggestion `#886`: Agents cards currently hide the persisted routing-critical `enabled`, `selectable_as_primary`, and global/project `scope` values even though `/agents` loads them; users can see those controls only in the Advanced modal. Showing this state on each card would explain why an agent is absent from task or schedule pickers without changing routing or selection rules.

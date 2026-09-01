@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -46,15 +47,29 @@ func parseScheduleForm(c echo.Context, defaultRepeatType models.RepeatType) (sch
 	if err != nil {
 		return scheduleFormValues{}, err
 	}
-	repeatType := models.RepeatType(c.FormValue("repeat_type"))
+	repeatType := models.RepeatType(strings.ToLower(strings.TrimSpace(c.FormValue("repeat_type"))))
 	if repeatType == "" {
 		repeatType = defaultRepeatType
+	}
+	switch repeatType {
+	case models.RepeatOnce, models.RepeatSeconds, models.RepeatMinutes, models.RepeatHours,
+		models.RepeatDaily, models.RepeatWeekly, models.RepeatMonthly:
+	default:
+		return scheduleFormValues{}, echo.NewHTTPError(http.StatusBadRequest, "invalid repeat type")
 	}
 	return scheduleFormValues{
 		runAt:          runAt.UTC(),
 		repeatType:     repeatType,
 		repeatInterval: repeatInterval,
 	}, nil
+}
+
+func scheduleFormHTTPError(err error) error {
+	var parseErr *time.ParseError
+	if errors.As(err, &parseErr) {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid date/time format")
+	}
+	return err
 }
 
 func (h *Handler) mutationProjectID(c echo.Context) string {
@@ -168,9 +183,8 @@ func (h *Handler) CreateSchedule(c echo.Context) error {
 	if err != nil {
 		if _, ok := err.(*time.ParseError); ok {
 			applog.Infof("[handler] CreateSchedule invalid date: %v", err)
-			return echo.NewHTTPError(http.StatusBadRequest, "invalid date/time format")
 		}
-		return err
+		return scheduleFormHTTPError(err)
 	}
 
 	clearContextOnStart := formBoolEnabled(c, "clear_context_on_start", true)
@@ -235,9 +249,8 @@ func (h *Handler) UpdateSchedule(c echo.Context) error {
 	if err != nil {
 		if _, ok := err.(*time.ParseError); ok {
 			applog.Infof("[handler] UpdateSchedule invalid date: %v", err)
-			return echo.NewHTTPError(http.StatusBadRequest, "invalid date/time format")
 		}
-		return err
+		return scheduleFormHTTPError(err)
 	}
 
 	var clearContextOnStart *bool
@@ -275,55 +288,53 @@ func (h *Handler) UpdateSchedule(c echo.Context) error {
 }
 
 type scheduleToggleResult struct {
-	schedule          *models.Schedule
-	nextRunUpdateErr  error
-	errorOperation    string
-	finalLookupFailed bool
+	schedule       *models.Schedule
+	errorOperation string
+}
+
+func scheduleToggleHTTPError(err error) error {
+	var actionErr *service.ScheduleActionError
+	if !errors.As(err, &actionErr) {
+		return err
+	}
+	switch actionErr.Kind {
+	case service.ScheduleActionReferenceError:
+		return echo.NewHTTPError(http.StatusNotFound, "schedule not found")
+	case service.ScheduleActionTimeError, service.ScheduleActionRepeatError,
+		service.ScheduleActionDaysError, service.ScheduleActionIntervalError:
+		return echo.NewHTTPError(http.StatusBadRequest, actionErr.Error())
+	default:
+		return err
+	}
 }
 
 // toggleScheduleEnabled performs the schedule state transition shared by the
 // browser and JSON API transports.
 func (h *Handler) toggleScheduleEnabled(ctx context.Context, id, projectID string) (scheduleToggleResult, error) {
 	var result scheduleToggleResult
-	schedule, _, err := h.requireScheduleInRequestProject(ctx, id, projectID)
-	if err != nil {
+	if schedule, _, err := h.requireScheduleInRequestProject(ctx, id, projectID); err != nil {
 		result.errorOperation = "lookup"
 		return result, err
+	} else {
+		result.schedule = schedule
 	}
-	result.schedule = schedule
 
-	newEnabled := !schedule.Enabled
-	if err := h.scheduleRepo.ToggleEnabled(ctx, id, newEnabled); err != nil {
+	actionResult, err := service.NewScheduleActionService(h.taskRepo, h.scheduleRepo, h.workerSvc).Toggle(ctx, projectID, id)
+	if err != nil {
 		result.errorOperation = "toggle"
 		return result, err
 	}
-	schedule.Enabled = newEnabled
-
-	if newEnabled {
-		refreshed, refreshErr := h.scheduleRepo.GetByID(ctx, id)
-		if refreshErr == nil && refreshed != nil {
-			now := time.Now()
-			if refreshed.NextRun == nil || refreshed.NextRun.Before(now) {
-				if nextRun := refreshed.ComputeNextRun(now); nextRun != nil {
-					refreshed.NextRun = nextRun
-					result.nextRunUpdateErr = h.scheduleRepo.Update(ctx, refreshed)
-				}
-			}
-		}
+	if actionResult == nil || actionResult.Schedule == nil {
+		result.errorOperation = "toggle"
+		return result, echo.NewHTTPError(http.StatusNotFound, "schedule not found")
 	}
-
-	final, err := h.scheduleRepo.GetByID(ctx, id)
-	if err != nil || final == nil {
-		result.finalLookupFailed = true
-		return result, nil
-	}
-	result.schedule = final
+	result.schedule = actionResult.Schedule
 	return result, nil
 }
 
 // ToggleScheduleEnabled pauses or resumes a schedule.
-// When re-enabling a schedule whose NextRun has already passed, the next
-// future occurrence is recomputed so the scheduler picks it up correctly.
+// When re-enabling a schedule whose NextRun has already passed, the shared
+// schedule action service recomputes the next recurring occurrence.
 func (h *Handler) ToggleScheduleEnabled(c echo.Context) error {
 	id := c.Param("id")
 	ctx := c.Request().Context()
@@ -335,23 +346,32 @@ func (h *Handler) ToggleScheduleEnabled(c echo.Context) error {
 		} else {
 			applog.Infof("[handler] ToggleScheduleEnabled error toggling: %v", err)
 		}
-		return err
+		if isHTMX(c) && result.schedule != nil {
+			var actionErr *service.ScheduleActionError
+			if errors.As(err, &actionErr) && actionErr.Kind == service.ScheduleActionTimeError {
+				setHTMXToast(c, actionErr.Error(), "failed")
+				return h.renderScheduleTaskDetail(c, result.schedule.TaskID, "", true)
+			}
+		}
+		return scheduleToggleHTTPError(err)
 	}
 	if result.schedule == nil {
 		applog.Infof("[handler] ToggleScheduleEnabled schedule not found id=%s", id)
 		return echo.NewHTTPError(http.StatusNotFound, "schedule not found")
 	}
-	if result.nextRunUpdateErr != nil {
-		applog.Infof("[handler] ToggleScheduleEnabled error updating NextRun: %v", result.nextRunUpdateErr)
-	}
 	applog.Infof("[handler] ToggleScheduleEnabled id=%s enabled=%v", id, result.schedule.Enabled)
 
 	taskID := result.schedule.TaskID
 	if isHTMX(c) {
+		message := "Schedule paused"
+		if result.schedule.Enabled {
+			message = "Schedule resumed"
+		}
+		setHTMXToast(c, message, "success")
 		return h.renderScheduleTaskDetail(c, taskID, "", true)
 	}
 
-	return c.Redirect(http.StatusSeeOther, "/tasks/"+taskID)
+	return h.redirectToTaskSchedules(c, taskID)
 }
 
 // APIToggleScheduleEnabled pauses or resumes a schedule (JSON API).
@@ -367,10 +387,7 @@ func (h *Handler) APIToggleScheduleEnabled(c echo.Context) error {
 	id := c.Param("id")
 	result, err := h.toggleScheduleEnabled(c.Request().Context(), id, h.mutationProjectID(c))
 	if err != nil {
-		return err
-	}
-	if result.finalLookupFailed {
-		return echo.NewHTTPError(http.StatusNotFound, "schedule not found after toggle")
+		return scheduleToggleHTTPError(err)
 	}
 	if result.schedule == nil {
 		return echo.NewHTTPError(http.StatusNotFound, "schedule not found")
@@ -565,77 +582,129 @@ func (h *Handler) ModelWorkerStats(c echo.Context) error {
 	return render(c, http.StatusOK, pages.ModelStatsTableBody(modelStats))
 }
 
+func parseScheduleSelection(anchorID, raw string) ([]string, error) {
+	if strings.TrimSpace(raw) == "" {
+		return []string{anchorID}, nil
+	}
+	seen := make(map[string]struct{})
+	ids := make([]string, 0)
+	for _, part := range strings.Split(raw, ",") {
+		id := strings.TrimSpace(part)
+		if id == "" {
+			continue
+		}
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+		if len(ids) > 100 {
+			return nil, echo.NewHTTPError(http.StatusBadRequest, "too many schedules selected")
+		}
+	}
+	if len(ids) == 0 {
+		return nil, echo.NewHTTPError(http.StatusBadRequest, "no schedules selected")
+	}
+	if _, ok := seen[anchorID]; !ok {
+		return nil, echo.NewHTTPError(http.StatusBadRequest, "dragged schedule is not in the selection")
+	}
+	return ids, nil
+}
+
+func updateScheduleAfterMove(schedule *models.Schedule, move func(time.Time) time.Time, now time.Time) {
+	if schedule.RepeatType.IsSubDaily() {
+		base := schedule.RunAt
+		if schedule.NextRun != nil {
+			base = *schedule.NextRun
+		}
+		next := move(base)
+		schedule.NextRun = &next
+	} else {
+		schedule.RunAt = move(schedule.RunAt)
+		if schedule.NextRun != nil {
+			next := move(*schedule.NextRun)
+			schedule.NextRun = &next
+		} else {
+			next := schedule.RunAt
+			schedule.NextRun = &next
+		}
+	}
+	if schedule.NextRun != nil && schedule.NextRun.Before(now) {
+		if nextRun := schedule.ComputeNextRun(now); nextRun != nil && nextRun.After(now) {
+			schedule.NextRun = nextRun
+		}
+	}
+}
+
 func (h *Handler) RescheduleTask(c echo.Context) error {
 	scheduleID := c.Param("scheduleId")
 	newDateStr := c.FormValue("new_date")
 	hourStr := c.FormValue("hour")
 	applog.Infof("[handler] RescheduleTask schedule=%s new_date=%s hour=%s", scheduleID, newDateStr, hourStr)
 
-	// Parse the new date and hour
 	newDate, err := time.Parse("2006-01-02", newDateStr)
 	if err != nil {
-		applog.Infof("[handler] RescheduleTask invalid date: %v", err)
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid date format")
 	}
-
 	hour, err := strconv.Atoi(hourStr)
 	if err != nil || hour < 0 || hour > 23 {
-		applog.Infof("[handler] RescheduleTask invalid hour: %v", err)
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid hour")
 	}
-
-	// Get the existing schedule and verify it belongs to the requested project.
-	schedule, _, err := h.requireScheduleInRequestProject(c.Request().Context(), scheduleID, h.mutationProjectID(c))
+	ids, err := parseScheduleSelection(scheduleID, c.FormValue("schedule_ids"))
 	if err != nil {
-		applog.Infof("[handler] RescheduleTask error getting schedule: %v", err)
 		return err
 	}
+	projectID := h.mutationProjectID(c)
 
-	// Preserve the minute and second from the original RunAt (in local time for display consistency)
-	runAtLocal := schedule.RunAt.Local()
-	minute := runAtLocal.Minute()
-	second := runAtLocal.Second()
-
-	// Create the new scheduled time in local timezone (hour from form is local),
-	// then convert to UTC for consistent storage
-	newScheduleTime := time.Date(newDate.Year(), newDate.Month(), newDate.Day(), hour, minute, second, 0, time.Local).UTC()
-
-	// For sub-daily schedules (seconds, minutes, hours), only update NextRun.
-	// RunAt defines when the schedule originally started, which controls calendar display.
-	// Changing RunAt would shift the display start point and hide earlier entries.
-	if schedule.RepeatType.IsSubDaily() {
-		schedule.NextRun = &newScheduleTime
+	// Preserve the established exact-target behavior for ordinary single-card drags.
+	if len(ids) == 1 {
+		schedule, task, err := h.requireScheduleInRequestProject(c.Request().Context(), scheduleID, projectID)
+		if err != nil {
+			return err
+		}
+		runAtLocal := schedule.RunAt.Local()
+		newScheduleTime := time.Date(newDate.Year(), newDate.Month(), newDate.Day(), hour, runAtLocal.Minute(), runAtLocal.Second(), 0, time.Local).UTC()
+		updateScheduleAfterMove(schedule, func(time.Time) time.Time { return newScheduleTime }, time.Now())
+		if err := h.scheduleRepo.UpdateForTask(c.Request().Context(), schedule, task.ID); err != nil {
+			applog.Infof("[handler] RescheduleTask error updating schedule: %v", err)
+			return err
+		}
 	} else {
-		// For daily/weekly/monthly, update both RunAt and NextRun
-		// RunAt defines the base time-of-day pattern, NextRun is when it actually executes next
-		schedule.RunAt = newScheduleTime
-		schedule.NextRun = &newScheduleTime
-	}
-
-	// CRITICAL: If drag/drop results in a past time, compute the next FUTURE occurrence.
-	// This prevents the scheduler from immediately executing the task as a "missed schedule."
-	// Users expect drag/drop to reschedule the task, not trigger immediate execution.
-	now := time.Now()
-	if schedule.NextRun != nil && schedule.NextRun.Before(now) {
-		nextRun := schedule.ComputeNextRun(now)
-		if nextRun != nil && nextRun.After(now) {
-			schedule.NextRun = nextRun
-			applog.Infof("[handler] RescheduleTask adjusted past time to next occurrence: %v → %v", newScheduleTime, *nextRun)
+		if projectID == "" {
+			return echo.NewHTTPError(http.StatusBadRequest, "project_id is required for grouped rescheduling")
+		}
+		sourceDate, err := time.Parse("2006-01-02", c.FormValue("source_date"))
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid source date format")
+		}
+		sourceHour, err := strconv.Atoi(c.FormValue("source_hour"))
+		if err != nil || sourceHour < 0 || sourceHour > 23 {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid source hour")
+		}
+		calendarDayDelta := int(time.Date(newDate.Year(), newDate.Month(), newDate.Day(), 0, 0, 0, 0, time.UTC).
+			Sub(time.Date(sourceDate.Year(), sourceDate.Month(), sourceDate.Day(), 0, 0, 0, 0, time.UTC)).Hours() / 24)
+		hourDelta := hour - sourceHour
+		move := func(value time.Time) time.Time {
+			local := value.Local().AddDate(0, 0, calendarDayDelta)
+			moved := time.Date(local.Year(), local.Month(), local.Day(), local.Hour()+hourDelta,
+				local.Minute(), local.Second(), local.Nanosecond(), time.Local)
+			return moved.UTC()
+		}
+		for _, id := range ids {
+			if _, _, err := h.requireScheduleInRequestProject(c.Request().Context(), id, projectID); err != nil {
+				return err
+			}
+		}
+		now := time.Now()
+		if err := h.scheduleRepo.UpdateBatchForProject(c.Request().Context(), projectID, ids, func(schedule *models.Schedule) error {
+			updateScheduleAfterMove(schedule, move, now)
+			return nil
+		}); err != nil {
+			return err
 		}
 	}
 
-	if err := h.scheduleRepo.Update(c.Request().Context(), schedule); err != nil {
-		applog.Infof("[handler] RescheduleTask error updating schedule: %v", err)
-		return err
-	}
-
-	applog.Infof("[handler] RescheduleTask success schedule=%s new_time=%v next_run=%v", scheduleID, newScheduleTime, schedule.NextRun)
-
-	// NOTE: Do NOT reset task status to pending here. Drag-and-drop reschedule
-	// should only update the schedule time. The scheduler will handle status
-	// management (resetting to pending, submitting to worker) when the scheduled
-	// time arrives and next_run becomes due.
-
+	applog.Infof("[handler] RescheduleTask success schedule=%s selected=%d", scheduleID, len(ids))
 	if isHTMX(c) {
 		return c.NoContent(http.StatusNoContent)
 	}
@@ -778,6 +847,26 @@ type ModelCapacityResponse struct {
 	MaxWorkers     int    `json:"max_workers"`
 	HasCapacity    bool   `json:"has_capacity"`
 	AvailableSlots int    `json:"available_slots"`
+}
+
+func modelCapacityResponse(agent *models.LLMConfig, running int, hasCapacity bool) ModelCapacityResponse {
+	availableSlots := 0
+	if agent.MaxWorkers > 0 {
+		availableSlots = agent.MaxWorkers - running
+		if availableSlots < 0 {
+			availableSlots = 0
+		}
+	}
+
+	return ModelCapacityResponse{
+		ID:             agent.ID,
+		Name:           agent.Name,
+		Model:          agent.Model,
+		Running:        running,
+		MaxWorkers:     agent.MaxWorkers,
+		HasCapacity:    hasCapacity,
+		AvailableSlots: availableSlots,
+	}
 }
 
 // GetGlobalCapacity returns global worker pool capacity information (API endpoint)
@@ -930,22 +1019,10 @@ func (h *Handler) GetModelCapacities(c echo.Context) error {
 	}
 
 	capacities := make([]ModelCapacityResponse, 0, len(agents))
-	for _, agent := range agents {
+	for i := range agents {
+		agent := &agents[i]
 		running := h.workerSvc.ModelRunning(agent.ID)
-		availableSlots := agent.MaxWorkers - running
-		if availableSlots < 0 {
-			availableSlots = 0
-		}
-
-		capacities = append(capacities, ModelCapacityResponse{
-			ID:             agent.ID,
-			Name:           agent.Name,
-			Model:          agent.Model,
-			Running:        running,
-			MaxWorkers:     agent.MaxWorkers,
-			HasCapacity:    running < agent.MaxWorkers,
-			AvailableSlots: availableSlots,
-		})
+		capacities = append(capacities, modelCapacityResponse(agent, running, running < agent.MaxWorkers))
 	}
 
 	return c.JSON(http.StatusOK, capacities)
@@ -975,23 +1052,7 @@ func (h *Handler) GetModelCapacity(c echo.Context) error {
 
 	running := h.workerSvc.ModelRunning(agent.ID)
 	hasCapacity := h.workerSvc.HasModelCapacity(agent.ID)
-	availableSlots := 0
-	if agent.MaxWorkers > 0 {
-		availableSlots = agent.MaxWorkers - running
-		if availableSlots < 0 {
-			availableSlots = 0
-		}
-	}
-
-	resp := ModelCapacityResponse{
-		ID:             agent.ID,
-		Name:           agent.Name,
-		Model:          agent.Model,
-		Running:        running,
-		MaxWorkers:     agent.MaxWorkers,
-		HasCapacity:    hasCapacity,
-		AvailableSlots: availableSlots,
-	}
+	resp := modelCapacityResponse(agent, running, hasCapacity)
 
 	return c.JSON(http.StatusOK, resp)
 }

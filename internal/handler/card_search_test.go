@@ -268,6 +268,13 @@ func TestCardSearch_SkillsManualRefreshReappliesActiveSearch(t *testing.T) {
 	for _, want := range []string{
 		`window.refreshCardSearches = initAllCardSearches`,
 		`window.replaceSearchableCardContainer = replaceSearchableCardContainer`,
+		`window.cardPaginationRefreshURL = cardPaginationRefreshURL`,
+		`window.destroyCardPagination = destroyCardPagination`,
+		`destroyCardPagination(container, true);`,
+		`document.body.addEventListener('htmx:configRequest'`,
+		`detail.path = cardPaginationRefreshURL(root, detail.path)`,
+		`rememberReplacementSnapshot(state);`,
+		`nextPage: Math.max(1, Math.ceil(initialCardCount / pageSize))`,
 		`data-skill-scroll-anchor`,
 		`function captureSkillsViewportState(root, activeHandle)`,
 		`function restoreSkillsViewportState(root, saved)`,
@@ -300,9 +307,8 @@ func TestCardSearch_AgentsManualDeleteRefreshReappliesActiveSearch(t *testing.T)
 	body := rec.Body.String()
 	for _, want := range []string{
 		`data-card-search="agents"`,
-		`const refreshedContainer = document.getElementById('agents-container');`,
-		`htmx.process(refreshedContainer);`,
-		`if (window.refreshCardSearches) window.refreshCardSearches(refreshedContainer);`,
+		`window.replaceSearchableCardContainer('#agents-container', html)`,
+		`cardPaginationRefreshURL`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("expected Agents delete search refresh contract to contain %q", want)

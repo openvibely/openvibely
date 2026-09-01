@@ -42,7 +42,7 @@ func (r *GitHubPRFeedbackRepo) RecordForwardedAndQueue(ctx context.Context, thre
 		return false, fmt.Errorf("thread input is required")
 	}
 	var recorded bool
-	err := threadInputRepo.WithImmediateTx(ctx, func(exec SQLExecutor) error {
+	err := withImmediateTx(ctx, threadInputRepo.db, func(exec SQLExecutor) error {
 		ok, err := r.recordForwardedWithExecutor(ctx, exec, feedback)
 		if err != nil || !ok {
 			recorded = ok
@@ -64,8 +64,12 @@ func (r *GitHubPRFeedbackRepo) RecordForwardedAndQueue(ctx context.Context, thre
 	return recorded, nil
 }
 
-func (r *GitHubPRFeedbackRepo) RecordForwarded(ctx context.Context, feedback *models.GitHubPRFeedbackForwarded) (bool, error) {
-	return r.recordForwardedWithExecutor(ctx, r.db, feedback)
+func (r *GitHubPRFeedbackRepo) RecordForwarded(ctx context.Context, feedback *models.GitHubPRFeedbackForwarded) (recorded bool, err error) {
+	err = withBoundSQLiteConn(ctx, r.db, func(conn *sql.Conn) error {
+		recorded, err = r.recordForwardedWithExecutor(ctx, conn, feedback)
+		return err
+	})
+	return recorded, err
 }
 
 func (r *GitHubPRFeedbackRepo) recordForwardedWithExecutor(ctx context.Context, exec SQLExecutor, feedback *models.GitHubPRFeedbackForwarded) (bool, error) {

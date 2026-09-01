@@ -11,16 +11,19 @@ import (
 )
 
 func (h *Handler) ListAlerts(c echo.Context) error {
-	isHTMX := isHTMX(c)
+	htmxRequest := isHTMX(c)
 	ctx := c.Request().Context()
 
 	currentProjectID, _ := h.getCurrentProjectID(c)
 
-	alerts, err := h.alertSvc.ListSummariesByProject(ctx, currentProjectID, 100)
+	page := parseCardPageRequest(c)
+	filter := alertListFilter(c, page)
+	alerts, err := h.alertSvc.ListSummariesPage(ctx, currentProjectID, filter)
 	if err != nil {
 		applog.Infof("[handler] ListAlerts error: %v", err)
 		return err
 	}
+	alerts, hasMore := cardPageItems(alerts, page.PageSize)
 	if alertID := strings.TrimSpace(c.QueryParam("alert_id")); alertID != "" {
 		alert, getErr := h.alertSvc.GetByID(ctx, currentProjectID, alertID)
 		if getErr != nil {
@@ -30,17 +33,53 @@ func (h *Handler) ListAlerts(c echo.Context) error {
 			return echo.NewHTTPError(http.StatusNotFound, "notification not found")
 		}
 		alerts = []models.AlertSummary{alertSummaryFromAlert(alert)}
+		hasMore = false
 	}
 
 	unreadCount, _ := h.alertSvc.CountUnread(ctx, currentProjectID)
 
 	// applog.Debugf("[handler] ListAlerts project=%s count=%d unread=%d htmx=%v", currentProjectID, len(alerts), unreadCount, isHTMX)
 
-	if isHTMX {
-		return render(c, http.StatusOK, pages.AlertsContent(alerts, currentProjectID, unreadCount))
+	if htmxRequest || page.IsFragment {
+		if page.IsFragment {
+			setCardPageResponse(c, hasMore)
+		}
+		return render(c, http.StatusOK, pages.AlertsContentPageWithFilters(alerts, currentProjectID, unreadCount, hasMore, filter.DecisionState, filter.ProcessingState))
 	}
 	projects, _ := h.projectSvc.ListSelectorOptions(ctx)
-	return render(c, http.StatusOK, pages.Alerts(projects, currentProjectID, alerts, unreadCount))
+	return render(c, http.StatusOK, pages.AlertsPageWithFilters(projects, currentProjectID, alerts, unreadCount, hasMore, filter.DecisionState, filter.ProcessingState))
+}
+
+func alertListFilter(c echo.Context, page cardPageRequest) models.AlertListFilter {
+	return models.AlertListFilter{
+		DecisionState:   parseAlertDecisionState(c.QueryParam("decision_state")),
+		ProcessingState: parseAlertProcessingState(c.QueryParam("processing_state")),
+		Limit:           page.PageSize + 1,
+		Offset:          page.Offset,
+		Search:          page.Search,
+	}
+}
+
+func parseAlertDecisionState(value string) models.AlertDecisionState {
+	switch strings.TrimSpace(value) {
+	case "", "all":
+		return ""
+	case string(models.AlertDecisionNotRequired), string(models.AlertDecisionPending), string(models.AlertDecisionApproved), string(models.AlertDecisionRejected), string(models.AlertDecisionDismissed):
+		return models.AlertDecisionState(strings.TrimSpace(value))
+	default:
+		return ""
+	}
+}
+
+func parseAlertProcessingState(value string) models.AlertProcessingState {
+	switch strings.TrimSpace(value) {
+	case "", "all":
+		return ""
+	case string(models.AlertProcessingNotApplicable), string(models.AlertProcessingUnclaimed), string(models.AlertProcessingClaimed), string(models.AlertProcessingImplementationTaskLinked), string(models.AlertProcessingCompleted), string(models.AlertProcessingFailed):
+		return models.AlertProcessingState(strings.TrimSpace(value))
+	default:
+		return ""
+	}
 }
 
 // GetAlertDetail lazily returns the full body and metadata inspect fragment for
@@ -93,11 +132,18 @@ func alertSummaryFromAlert(a *models.Alert) models.AlertSummary {
 
 func (h *Handler) renderAlertListRefresh(c echo.Context, projectID string, alerts []models.AlertSummary, unreadCountOverride *int) error {
 	ctx := c.Request().Context()
+	page := parseCardPageRequest(c)
+	filter := alertListFilter(c, page)
+	hasMore := false
 	if alerts == nil {
 		var err error
-		alerts, err = h.alertSvc.ListSummariesByProject(ctx, projectID, 100)
+		alerts, err = h.alertSvc.ListSummariesPage(ctx, projectID, filter)
 		if err != nil {
 			return err
+		}
+		alerts, hasMore = cardPageItems(alerts, page.PageSize)
+		if page.IsFragment {
+			setCardPageResponse(c, hasMore)
 		}
 	}
 	unreadCount := 0
@@ -107,7 +153,7 @@ func (h *Handler) renderAlertListRefresh(c echo.Context, projectID string, alert
 		unreadCount, _ = h.alertSvc.CountUnread(ctx, projectID)
 	}
 	c.Response().Header().Set("HX-Trigger", "alertUpdate")
-	return render(c, http.StatusOK, pages.AlertsContent(alerts, projectID, unreadCount))
+	return render(c, http.StatusOK, pages.AlertsContentPageWithFilters(alerts, projectID, unreadCount, hasMore, filter.DecisionState, filter.ProcessingState))
 }
 
 func (h *Handler) setAlertDecision(c echo.Context, state models.AlertDecisionState) error {

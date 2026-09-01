@@ -2,9 +2,9 @@
 name: provider_architecture
 type: project
 created: 2026-05-09
-updated: 2026-08-23
+updated: 2026-08-30
 source: consolidation
-source_id: memory_consolidation_2026_08_23
+source_id: memory_consolidation_2026-08-30
 confidence: high
 title: Provider Architecture
 ---
@@ -24,6 +24,7 @@ Provider and model selection:
 - Provider/model selection is based on selected `models.LLMConfig`, especially `Provider`, `Model`, and `AuthMethod`; model string alone does not choose the provider.
 - Normal task runs and task-thread execution starts select model config in this order: current `Task.AgentID`, project `DefaultAgentConfigID`, global default `agent_configs.is_default = 1`. Stored per-run/queued model IDs are history/accounting evidence, not immutable rerun assignment.
 - Interactive Chat model selection: explicit `agent_id` uses that model config; empty/`auto` triggers complexity/vision-based selection; browser `agent_id=default` resolves after selected-project loading, preferring `projects.default_agent_config_id` before global default. Queued browser Chat inputs preserve the same project-aware effective model ID.
+- Vision-capable Chat/task fallback uses `resolveVisionRoutingDecision`: compact routing rows retain model identity/tier/default/provider/auth metadata and non-secret credential-presence flags, then only the selected stored model is fully hydrated through `GetByID`. No-attachment/already-capable paths remain query-free; legacy Anthropic CLI filtering and `AuthMethod` semantics remain intact. Regression coverage must verify compact projection secrecy, tier/default eligibility, empty-store `ANTHROPIC_API_KEY` fallback, and complete selected-model delivery for task/direct streaming paths.
 - API Chat immediate and queued execution paths should use compact model-selection/context rows before auto-selection or prompt-context rendering, then hydrate only the selected full `LLMConfig` at provider execution.
 - Runtime `create_task` model selection in browser Chat and shared channel/Automation paths uses compact task-creation selection rows containing only `ID`, `Name`, `Provider`, `Model`, `IsDefault`, and `AutoStartTasks`; full configs should be hydrated only when provider execution needs them.
 - `Task.AgentDefinitionID` selects persona/system prompt/skills, not provider/model.
@@ -46,6 +47,7 @@ OpenAI and Anthropic facts:
 OpenAI-compatible and Ollama facts:
 - `ProviderOpenAICompatible` is a separate generic Chat Completions path for inference servers/gateways exposing `/chat/completions`; provider/model selection still comes from `LLMConfig.Provider`.
 - OpenAI-compatible supports API-key or optional missing auth for local servers, base URL/transport/preset config, streaming text, provider tool calls/tool-result replay, usage normalization, and advanced extra headers/body JSON. Extra-body fields must not override protected request ownership such as `model`, `messages`, `stream`, or tool fields.
+- Z.AI's `GLM-5.3-Flash` remains a bounded support gap tracked by `#911`: documented native image input, function calling, 1M-token context, and mandatory `low`/`high`/`max` thinking are not fully represented because the Z.AI preset lacks the model entry, custom-model fallback drops reasoning controls, and OpenAI-compatible models are treated as non-vision-capable for routing. The issue is an unassigned enhancement/model-support handoff; human assignment remains the approval boundary.
 - Setup includes presets and best-effort `/models` discovery via `/models/openai-compatible/available`; discovery credentials are accepted via header, not query parameters.
 - Models setup intentionally has no manual “Discover Models” button; presets are shown in the Provider dropdown and submissions normalize to backend provider `openai_compatible` with hidden `preset_slug`.
 - Preset catalog includes named providers such as OpenRouter, NVIDIA NIM, Local vLLM, LM Studio, SGLang, LiteLLM, DeepInfra, Fireworks, Groq, Mistral, Cerebras, Together, Hugging Face Router, DeepSeek, Moonshot, DashScope variants, Alibaba Coding Plan, Z.AI/GLM, NovitaAI, Venice, Qianfan, Kilo Code, Arcee AI, StepFun variants, Tencent TokenHub variants, Xiaomi MiMo, Inferrs, ds4 Local, GMI Cloud, Chutes, plus Custom OpenAI-Compatible.
@@ -71,6 +73,7 @@ OAuth account facts:
 - Durable direction is a provider-account token table with model configs referencing shared provider-account credentials; Anthropic needs a reliable account identity source before this can be keyed.
 - Provider 401 recovery reloads the model config from DB and may refresh/persist rotated tokens; it does not reread OAuth token material from disk, keychain, or environment.
 - Built-in OpenAI/Anthropic OAuth callbacks persist tokens only when the target still matches the initiating provider, `auth_method='oauth'`, and `oauth_config_revision`; deleted or stale-edited targets fail without reporting success or writing credentials. Zero-row token updates are failures; custom OpenAI-compatible revision guards remain intact.
+- Built-in OpenAI/Anthropic OAuth callbacks reject missing, empty, or whitespace-only `access_token` values before expiry derivation or repository mutation, preserving prior credentials; custom OpenAI-compatible strict validation remains separate.
 - Chat model discovery currently omits the connected/expired/not-connected OAuth status shown on model cards; issue `#695` tracks compact status exposure.
 
 Provider-native and runtime tools:

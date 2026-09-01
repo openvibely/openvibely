@@ -2,9 +2,9 @@
 name: chat_thread_system
 type: project
 created: 2026-05-09
-updated: 2026-08-24
-source: after_complete_update
-source_id: fd37f46bb8f14052236f06e2550dd109:7f7998065fd5c7be
+updated: 2026-08-30
+source: consolidation
+source_id: memory_consolidation_2026-08-30
 confidence: high
 title: Chat and Task-Thread Behavior
 ---
@@ -46,6 +46,7 @@ Task-thread admission and lifecycle:
 - Task-thread follow-ups use chronological execution history, not reinjection of original task prompt. Replay history is bounded to preserve up to 20 prior turns after filtering current execution.
 - Task-thread HTTP send/acceptance stays lightweight; full transcript/model-context setup runs in background after durable acceptance. Deferred setup failures should still run terminal cleanup that can promote queued input.
 - Task-thread transcript/pagination renders `executions` history; `tasks.prompt` may not appear as the oldest paged item unless also recorded as execution prompt.
+- Runtime `view_task_thread` now pushes execution pagination into the repository for both web/API and connected-channel runtimes: total is counted without payload hydration, positive limits use chronological indexed `LIMIT/OFFSET`, and omitted/zero limits load bounded 20-row chunks until the existing 80 KiB transcript budget. It preserves total/offset messages, first-execution prompt substitution, rowid tie-breaking, cleaned output, per-message/total truncation, and error-only rendering.
 - Lifecycle-agent activity belongs in the Lifecycle tab rather than main Thread. Task-thread follow-ups run normal task lifecycle routing before model call.
 
 Composer shortcuts and steering races:
@@ -69,6 +70,7 @@ Routes, modes, and runtime actions:
 - Browser/API `PUT /personality/custom/:key` updates only existing custom personalities or creates an intentional override for a non-empty built-in preset key such as `pirate_captain`; missing non-preset keys return controlled not-found responses without inserting rows. Runtime `save_custom_personality` remains stricter for missing custom targets and built-in prompt mutation, so arbitrary missing-key upserts stay rejected across surfaces.
 - Orchestrate-only `cancel_task` spans Chat/runtime capabilities for web/API Chat, task-thread follow-ups, and supported channel/generic runtimes. It resolves current-project tasks by ID, exact title, or task-thread `task_id="current"`, requires confirmation as a destructive task action, reuses existing browser/`TaskService.CancelTask` side effects for running, queued, active-pending, and swarm-parent tasks, cancels pending queued inputs where appropriate, publishes active-execution cancellation state, moves cancelled non-Chat tasks to Backlog, and returns controlled not-cancellable feedback for terminal/inactive states. Plan mode must not advertise or execute it.
 - `list_channels` is a read-only Chat action available across normal Chat surfaces in Plan and Orchestrate modes. It returns a prompt-safe current-project integration summary for GitHub, Slack, Telegram, Discord, Email, inbound webhooks, and outbound message target counts/status/policy without exposing tokens, passwords, private keys, webhook secrets, or raw target credentials.
+- X-origin Chat and task-thread turns use shared channel ingress/runtime. Project-scoped authorized mentions retain immutable author identity, conversation/reply metadata, originating account, and identity-sensitive `RuntimeTools` through queued `thread_inputs`, immediate `send_to_task`, promoted runs, and the shared streaming runner; completion rejects a mismatched replacement account. Missing expanded user metadata does not skip an otherwise authorized mention, but missing immutable `tweet.author_id` fails closed before authorization/receipt handling and leaves the cursor retryable. Configuration-generation and poller-fencing details live in `integrations_and_channels.md`.
 - Channel-provided runtime handlers take precedence by name over generic fallbacks while preserving prompt-safe channel readiness summaries. Canonical integration details live in `integrations_and_channels.md`.
 - Known Chat inspection/control-plane gaps: no prompt-safe detail view for a specific agent's capabilities/configuration (`#595`), no read-only Chat action to inspect Agent plugin marketplace, installed plugin, and runtime-health state (`#790`), no Chat action to create/save reusable user-managed Agent profiles from the conversation (`#732`), no read-only Chat action to inspect a task's linked GitHub PR record/state (`#765`), no project skill catalog discovery action (`#621`), no live worker-capacity pressure action (`#604`), no Insights query action (`#624`), and no prompt-safe model endpoint/base-URL visibility for OpenAI-compatible or non-default Ollama configs (`#808`).
 - Orchestrate-only `update_agent` spans web/API Chat and channel runtimes for bounded user-managed Agent updates by ID, exact name, or key. It can patch safe visible fields such as prompt, description, model inherit/override, safe tools, scoped-file grants, enabled state, and primary-Agent selectability while preserving scope/project ownership and unsupported fields. It is not advertised/executed in Plan mode and rejects protected, archived, cross-project, missing/ambiguous targets, duplicate enabled/selectable names, unknown tools, malformed scoped files, unsupported top-level keys, and unsupported nested keys inside `scoped_files` entries. Each scoped-file object accepts only `directory` and `permissions`, with no partial save on invalid nested data.
@@ -83,7 +85,7 @@ Routes, modes, and runtime actions:
 - Browser Task Detail edit validates `agent_definition_id` with the shared primary-Agent resolver before saving; blank submissions clear assignment, and cross-project, unknown, disabled, archived, or non-selectable Agents return controlled `400` without persistence.
 - Known task-discovery gaps include merge state, assigned Agent, tags, goal badges/state, triage badges, bounded diffs/review comments/lifecycle evidence, attachments, and related Task Detail metadata.
 - Saved Automation state inspection is available through read-only Chat actions `list_automations` and `get_automation` backed by compact Automation card shape, including prompt-safe maintained-template update fields `template_update_available`, stored `template_revision`, and `current_template_revision` where applicable.
-- Orchestrate-only Automation lifecycle tools `run_automation_now`, `pause_automation`, `resume_automation`, and `update_automation_template` resolve project-scoped targets and delegate to service-layer lifecycle/template helpers; they are not advertised or executable in Plan mode.
+- Orchestrate-only Automation lifecycle tools `run_automation_now`, `pause_automation`, `resume_automation`, `update_automation_template`, and `delete_automation` resolve project-scoped targets and delegate to service-layer lifecycle/template helpers; they are not advertised or executable in Plan mode. `delete_automation` is confirmation-gated/destructive, accepts an exact ID or case-insensitive exact name, preserves domain tasks, removes only Automation-owned trigger schedules, and retains the existing in-flight guard.
 - `list_schedules` is bounded read-only current-project schedule discovery across supported runtimes; it supports task ID/title/enabled filters, deterministic pagination, and returns IDs accepted by modify/delete actions.
 - `view_pulse` is the registry-backed read-only upcoming-work summary action for web/API Chat, supported channels, task-thread follow-ups, and generic initial/scheduled runs. Email is intentionally not advertised for this handler unless separate Email runtime support is added.
 - Legacy bracket markers such as `[CREATE_TASK]`, `[EDIT_TASK]`, `[EXECUTE_TASKS]`, `[SEND_TO_TASK]`, and `[SCHEDULE_TASK]` are inert model prose. Runtime-tool handlers decode typed JSON and invoke services; tool-incapable providers receive no textual fallback.
@@ -91,6 +93,7 @@ Routes, modes, and runtime actions:
 - Chat output cleaning preserves control-looking examples inside Markdown code while stripping/normalizing real provider controls outside code.
 - Open/replace PR runtime actions share target-resolution logic for task selectors, project ownership/loading, and Automation repository validation.
 - Known task-thread runtime gaps: PR tools reject omitted current task (`#536`), `execute_tasks` mishandles `task_id="current"` or omitted current task (`#423`/duplicates), channel task-thread runtimes do not resolve current task (`#326`), goal tools reject omitted current task (`#338`), and scheduled `list_capabilities` can advertise tools unavailable to executor (`#341`).
+- Explicit task ID/title resolution across web, channel, and schedule runtimes is centralized in `internal/service/task_reference_resolver.go`; ownership and lookup semantics are canonical in `openvibely_architecture.md`, while this topic owns task-thread `current` handling and runtime behavior.
 
 Task goals, continuations, and cancellation:
 - Plan handoff is driven by completed Plan-mode responses containing `<proposed_plan>`.
@@ -98,6 +101,7 @@ Task goals, continuations, and cancellation:
 - Goal continuation uses normal task-thread follow-ups through `thread_inputs`; it does not start work inline.
 - Tasks do not support direct peer-to-peer chat. Coordination is through app state and control-plane tools such as `send_to_task`, `view_task_thread`, child tasks, schedules, dynamic wakeups, goals, and `thread_inputs`.
 - `view_task_thread` and other task-identity tools are strictly project-scoped. Cross-project task IDs return an explicit different-project error; there is no cross-project switch/view capability.
+- Browser task-goal routes (`GET/POST /tasks/:taskId/goal` and pause/resume/clear siblings) enforce a non-empty explicit `project_id` or selected-project boundary before reading or mutating goals. Known tasks requested without either scope source return controlled `400` without invoking goal services; unknown tasks remain `404`, and explicit/selected foreign-task requests remain rejected without leaking or changing state.
 - A durable “inbox task” pattern is a canonical task thread, not an automatic mailbox.
 - Goal status writes use stale `goal_id` plus active-status guards. Goal tools can be granted beyond Goal Agent, but ungranted/default agents do not see or execute them.
 - Manual/user follow-ups on achieved goals reactivate the same goal before prompt context/lifecycle evaluation; Goal Agent/system continuations do not reopen achieved goals.
@@ -111,7 +115,7 @@ Task goals, continuations, and cancellation:
 - Known task-control gap `#235`: Task Details replaces Run Now with disabled state for running/queued tasks instead of exposing Stop/Cancel.
 - Normal active terminal failed/cancelled rows normalize to Backlog; Chat preserves `category=chat`.
 - Direct cancel and Active-to-Backlog/Completed moves cancel queued/running executions, pause active goal, and preserve requested target category. `TaskService.UpdateCategory` must use pre-update category/status for stop semantics.
-- Maintenance finding `#845`: `TaskService.UpdateCategory` and `TaskService.CancelTask` independently implement the same active-work stop subset: worker cancellation, active-goal pause, cancellation request, and the `cancelled` status transition. Category changes (including drag/drop and Task Detail) and explicit cancel/Chat-stop paths are live callers; consolidation should share only those transitions while leaving category, swarm, queued-input, and rendering behavior at their existing callers.
+- Task cancellation/category behavior is centralized through `TaskService.cancelActiveTaskWork`: preserve worker cancellation intent, pause active goals, persist durable cancellation before category changes, retain requested category, and handle pending swarm-child notification. Capture the pre-update category/status before mutation and cancel only work that originated in Active; explicit CancelTask retains its Backlog behavior. Regression coverage must include non-Active running/queued tasks so category writes cannot trigger accidental cancellation.
 - Lifecycle-origin `send_to_task` must re-check goal state, execution freshness, and cancellation state before queueing continuations. Timeout/deadline failures are ordinary failures for lifecycle purposes; only explicit Stop/Cancel suppresses optional after-complete work.
 
 Task execution, schedules, capacity, and swarms:
@@ -141,8 +145,3 @@ Task execution, schedules, capacity, and swarms:
 - Read-only `view_swarm` is available in Plan and Orchestrate modes for web/API Chat, supported channels, and task-thread follow-ups. It accepts a project-scoped swarm parent task ID, exact title, or task-thread `current`, resolves child-task selectors back to the parent hierarchy, returns controlled non-swarm responses, and keeps output compact by omitting prompts, execution outputs, diff hunks, and large config blobs.
 - Swarm child cancellation/deletion should cancel running child work. Swarm cancellation marks parent/child in-process cancellation intent before runtime callbacks/status persistence, preventing lifecycle continuations during races.
 - Known swarm gap `#502`: `shared` isolation is exposed in UI/runtime creation but planner output application rejects inherited `shared` isolation when planner entries omit per-worker isolation.
-
-Retained incident lessons:
-- Attachment-bearing steering is one-shot and race-safe: accepted submissions clear their draft/session, stale-steer `409` retries once as normal send/queue, and late attachments are requeued rather than attached to the completed execution.
-- A failed task-thread rerun resolves the current task model at retry/promotion time, so a later provider change is honored.
-- Supported task-thread follow-up tools resolve omitted/current task selectors where implemented; PR, execute, goal, and channel-runtime gaps remain explicit. One-time schedules reset terminal non-running tasks to pending, legitimate scheduled work clears stale cancellation markers, goal resume after user Stop is conditional, and completed-task edits remain metadata-only.

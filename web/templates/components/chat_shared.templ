@@ -619,8 +619,6 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 								streamTerminalHandled = true;
 								if (Object.prototype.hasOwnProperty.call(container, '_authoritativeTerminalContent')) {
 									textBuffer = String(container._authoritativeTerminalContent || '');
-									delete container._authoritativeTerminalContent;
-									container.removeAttribute('data-authoritative-terminal-content');
 								}
 								var terminalStatus = event && event.data ? event.data : 'completed';
 								if (window.hideMixtureProgress) window.hideMixtureProgress(execId);
@@ -694,8 +692,6 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 							streamTerminalHandled = true;
 							if (Object.prototype.hasOwnProperty.call(container, '_authoritativeTerminalContent')) {
 								textBuffer = String(container._authoritativeTerminalContent || '');
-								delete container._authoritativeTerminalContent;
-								container.removeAttribute('data-authoritative-terminal-content');
 							}
 							flushBufferedOutput();
 							// Hide thinking indicator and streaming dots, ensure content shows
@@ -1106,8 +1102,6 @@ templ ChatStreamingResumeInitScript() {
 								streamTerminalHandled = true;
 								if (Object.prototype.hasOwnProperty.call(container, '_authoritativeTerminalContent')) {
 									cumulativeContent = String(container._authoritativeTerminalContent || '');
-									delete container._authoritativeTerminalContent;
-									container.removeAttribute('data-authoritative-terminal-content');
 								}
 								persistResumeStreamState(false);
 								var terminalStatus = event && event.data ? event.data : 'completed';
@@ -1161,8 +1155,6 @@ templ ChatStreamingResumeInitScript() {
 						streamTerminalHandled = true;
 							if (Object.prototype.hasOwnProperty.call(container, '_authoritativeTerminalContent')) {
 								cumulativeContent = String(container._authoritativeTerminalContent || '');
-								delete container._authoritativeTerminalContent;
-								container.removeAttribute('data-authoritative-terminal-content');
 							}
 							persistResumeStreamState(false);
 							flushCumulativeContent();
@@ -1437,7 +1429,7 @@ templ chatComposerActionButton(stopEndpoint string, isRunning bool) {
 			</svg>
 		</button>
 	} else {
-		<button type="submit" class="btn btn-primary btn-sm rounded-full min-h-0 h-8 w-8 p-0 flex-shrink-0" title="Send message" aria-label="Send message">
+		<button type="submit" class="btn btn-primary btn-sm chat-send-button rounded-full min-h-0 h-8 w-8 p-0 flex-shrink-0" title="Send message" aria-label="Send message">
 			<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
 				<path d="M2 3l20 9-20 9 5-9-5-9z"></path>
 			</svg>
@@ -1819,7 +1811,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 								}
 								function buildPrimaryActionButton(kind, stopEndpoint) {
 									var button = document.createElement('button');
-									button.className = 'btn btn-primary btn-sm rounded-full min-h-0 h-8 w-8 p-0 flex-shrink-0';
+									button.className = 'btn btn-primary btn-sm' + (kind === 'stop' ? '' : ' chat-send-button') + ' rounded-full min-h-0 h-8 w-8 p-0 flex-shrink-0';
 									if (kind === 'stop') {
 										button.type = 'button';
 										button.setAttribute('hx-post', stopEndpoint);

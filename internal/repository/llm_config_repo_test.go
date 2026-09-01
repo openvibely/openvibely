@@ -2,10 +2,12 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"os"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1252,6 +1254,134 @@ func TestLLMConfigRepo_ListChatSelectionOptionsUsesBoundedProjection(t *testing.
 	}
 }
 
+func TestLLMConfigRepo_ListVisionSelectionOptionsUsesBoundedProjection(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	repo := NewLLMConfigRepo(db)
+	ctx := context.Background()
+	if _, err := db.Exec(`DELETE FROM agent_configs`); err != nil {
+		t.Fatalf("clear model configs: %v", err)
+	}
+
+	largeBody := strings.Repeat("x", 64*1024)
+	legacyCLI := &models.LLMConfig{
+		Name:       "Legacy CLI",
+		Provider:   models.ProviderAnthropic,
+		AuthMethod: models.AuthMethodCLI,
+		Model:      "claude-cli",
+	}
+	apiKey := &models.LLMConfig{
+		Name:                 "Anthropic API",
+		Provider:             models.ProviderAnthropic,
+		AuthMethod:           models.AuthMethodAPIKey,
+		Model:                "claude-sonnet-4-5-20250929",
+		APIKey:               "api-secret",
+		OAuthRefreshToken:    "refresh-secret",
+		OAuthClientSecret:    "client-secret",
+		BaseURL:              "https://api.example.com",
+		ExtraHeadersJSON:     `{"header":"secret"}`,
+		ExtraBodyJSON:        largeBody,
+		CustomAuthConfigJSON: `{"signing_secret":"secret"}`,
+		CustomAuthStateJSON:  `{"token":"secret"}`,
+		MixtureConfigJSON:    `{"large":"` + largeBody + `"}`,
+		IsDefault:            true,
+	}
+	oauth := &models.LLMConfig{
+		Name:              "Anthropic OAuth",
+		Provider:          models.ProviderAnthropic,
+		AuthMethod:        models.AuthMethodOAuth,
+		Model:             "claude-opus-5-20250929",
+		OAuthAccessToken:  "oauth-secret",
+		OAuthRefreshToken: "oauth-refresh-secret",
+	}
+	otherProvider := &models.LLMConfig{
+		Name:       "OpenAI API",
+		Provider:   models.ProviderOpenAI,
+		AuthMethod: models.AuthMethodAPIKey,
+		Model:      "gpt-5",
+		APIKey:     "openai-secret",
+	}
+	for _, cfg := range []*models.LLMConfig{legacyCLI, apiKey, oauth, otherProvider} {
+		if err := repo.Create(ctx, cfg); err != nil {
+			t.Fatalf("create %s: %v", cfg.Name, err)
+		}
+	}
+
+	full, err := repo.List(ctx)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	counter.Reset()
+	counter.SetEnabled(true)
+	selection, err := repo.ListVisionSelectionOptions(ctx)
+	counter.SetEnabled(false)
+	if err != nil {
+		t.Fatalf("ListVisionSelectionOptions: %v", err)
+	}
+	if len(selection) != len(full) {
+		t.Fatalf("selection len = %d, full len = %d", len(selection), len(full))
+	}
+	for i := range full {
+		if selection[i].ID != full[i].ID || selection[i].Name != full[i].Name ||
+			selection[i].Provider != full[i].Provider || selection[i].Model != full[i].Model ||
+			selection[i].AuthMethod != full[i].AuthMethod || selection[i].IsDefault != full[i].IsDefault {
+			t.Fatalf("selection[%d] = %#v, full[%d] = %#v", i, selection[i], i, full[i])
+		}
+	}
+
+	byID := make(map[string]models.LLMConfig, len(selection))
+	for _, option := range selection {
+		byID[option.ID] = option
+	}
+	legacySelection := byID[legacyCLI.ID]
+	apiSelection := byID[apiKey.ID]
+	oauthSelection := byID[oauth.ID]
+	if !legacySelection.IsAnthropicCLI() {
+		t.Fatalf("legacy CLI selection row should remain CLI-only: %#v", legacySelection)
+	}
+	if apiSelection.APIKey != "present" || apiSelection.OAuthAccessToken != "" || apiSelection.IsAnthropicCLI() {
+		t.Fatalf("API-key presence was not preserved as a non-secret sentinel: %#v", apiSelection)
+	}
+	if oauthSelection.OAuthAccessToken != "present" || oauthSelection.APIKey != "" || oauthSelection.IsAnthropicCLI() {
+		t.Fatalf("OAuth presence was not preserved as a non-secret sentinel: %#v", oauthSelection)
+	}
+	for _, option := range selection {
+		if option.OAuthRefreshToken != "" || option.OAuthClientSecret != "" || option.BaseURL != "" ||
+			option.ExtraHeadersJSON != "" || option.ExtraBodyJSON != "" || option.CustomAuthConfigJSON != "" ||
+			option.CustomAuthStateJSON != "" || option.MixtureConfigJSON != "" || !option.CreatedAt.IsZero() || !option.UpdatedAt.IsZero() {
+			t.Fatalf("vision selection materialized execution/edit-only fields: %#v", option)
+		}
+	}
+
+	statements := counter.Statements()
+	if len(statements) != 1 {
+		t.Fatalf("statements = %#v, want exactly one compact vision-selection query", statements)
+	}
+	stmt := strings.ToLower(strings.Join(strings.Fields(statements[0]), " "))
+	projection := strings.Split(stmt, " from agent_configs ")[0]
+	wantProjection := "select id, name, provider, model, auth_method, is_default, case when coalesce(api_key, '') != '' then 1 else 0 end, case when coalesce(oauth_access_token, '') != '' then 1 else 0 end"
+	if projection != wantProjection {
+		t.Fatalf("vision selection projection = %q, want %q", projection, wantProjection)
+	}
+	for _, forbidden := range []string{"oauth_refresh_token", "oauth_client_id", "oauth_client_secret", "oauth_authorize_url", "oauth_token_url", "oauth_scopes", "ollama_base_url", "base_url", "transport", "preset_slug", "models_url", "auth_header_name", "auth_header_value_prefix", "extra_headers_json", "extra_body_json", "default_max_tokens", "token_exchange_format", "token_refresh_format", "custom_auth_config_json", "custom_auth_state_json", "oauth_config_revision", "mixture_config_json", "auto_start_tasks", "created_at", "updated_at", "max_tokens", "temperature", "reasoning_effort", "max_workers", "worker_timeout"} {
+		if strings.Contains(projection, forbidden) {
+			t.Fatalf("vision selection query selected forbidden column %q: %s", forbidden, statements[0])
+		}
+	}
+	if !strings.Contains(stmt, "order by is_default desc, name asc") {
+		t.Fatalf("vision selection query must preserve default/name ordering: %s", statements[0])
+	}
+
+	fullSelected, err := repo.GetByID(ctx, apiKey.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if fullSelected == nil || fullSelected.APIKey != "api-secret" || fullSelected.OAuthRefreshToken != "refresh-secret" ||
+		fullSelected.OAuthClientSecret != "client-secret" || fullSelected.BaseURL != "https://api.example.com" ||
+		fullSelected.ExtraBodyJSON != largeBody || fullSelected.CustomAuthStateJSON == "" || fullSelected.MixtureConfigJSON == "" {
+		t.Fatalf("full detail path lost provider fields: %#v", fullSelected)
+	}
+}
+
 func TestLLMConfigRepo_ListTaskCreationSelectionOptionsUsesBoundedProjection(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	repo := NewLLMConfigRepo(db)
@@ -1533,6 +1663,263 @@ func BenchmarkAPIChatModelSelectionFullListVsCompactSelectionThenGet(b *testing.
 			}
 		}
 	})
+}
+
+func prepareLargeVisionSelectionFixture(tb testing.TB, db *sql.DB, repo *LLMConfigRepo, ctx context.Context) string {
+	tb.Helper()
+	if _, err := db.Exec(`DELETE FROM agent_configs`); err != nil {
+		tb.Fatalf("clear model configs: %v", err)
+	}
+	seedLargeCustomProviderModelConfigs(tb, ctx, repo, 50)
+	if _, err := db.Exec(`UPDATE agent_configs SET provider = ?, auth_method = ?, model = ?`, models.ProviderAnthropic, models.AuthMethodAPIKey, "claude-sonnet-4-5-20250929"); err != nil {
+		tb.Fatalf("configure vision model fixture: %v", err)
+	}
+	var selectedID string
+	if err := db.QueryRowContext(ctx, `SELECT id FROM agent_configs ORDER BY is_default DESC, name ASC LIMIT 1`).Scan(&selectedID); err != nil {
+		tb.Fatalf("select vision fixture model: %v", err)
+	}
+	return selectedID
+}
+
+func TestLLMConfigRepo_VisionSelectionProjectionMeetsPerformanceTargetOnLargeFixture(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping production-shaped vision selection performance guard in short mode")
+	}
+	db := testutil.NewTestDB(t)
+	repo := NewLLMConfigRepo(db)
+	ctx := context.Background()
+	selectedID := prepareLargeVisionSelectionFixture(t, db, repo, ctx)
+
+	fullList := testing.Benchmark(func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			configs, err := repo.List(ctx)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if len(configs) != 50 || configs[0].ID == "" || configs[0].APIKey == "" {
+				b.Fatalf("full vision selection fixture returned %d incomplete configs", len(configs))
+			}
+		}
+	})
+	compactThenGet := testing.Benchmark(func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			options, err := repo.ListVisionSelectionOptions(ctx)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if len(options) != 50 || options[0].ID == "" {
+				b.Fatalf("compact vision selection fixture returned %d options", len(options))
+			}
+			full, err := repo.GetByID(ctx, selectedID)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if full == nil || full.APIKey == "" || full.ExtraBodyJSON == "" || full.MixtureConfigJSON == "" {
+				b.Fatalf("selected full vision model was not hydrated: %#v", full)
+			}
+		}
+	})
+
+	const (
+		maxCompactDuration     = 200 * time.Microsecond
+		maxCompactBytesPerOp   = 300 * 1024
+		minFullListImprovement = 20
+	)
+	t.Logf("full List: %d ns/op, %d B/op; compact vision selection+GetByID: %d ns/op, %d B/op", fullList.NsPerOp(), fullList.AllocedBytesPerOp(), compactThenGet.NsPerOp(), compactThenGet.AllocedBytesPerOp())
+	// Coverage instrumentation adds enough overhead to make an absolute
+	// wall-clock target machine-dependent. Keep enforcing the allocation and
+	// relative-improvement guards under coverage; enforce latency on normal
+	// builds where the measurement represents production code.
+	if testing.CoverMode() == "" && compactThenGet.NsPerOp() > maxCompactDuration.Nanoseconds() {
+		t.Fatalf("compact vision selection took %d ns/op, want <= %s", compactThenGet.NsPerOp(), maxCompactDuration)
+	}
+	if compactThenGet.AllocedBytesPerOp() > maxCompactBytesPerOp {
+		t.Fatalf("compact vision selection allocated %d B/op, want <= %d", compactThenGet.AllocedBytesPerOp(), maxCompactBytesPerOp)
+	}
+	if fullList.NsPerOp() < compactThenGet.NsPerOp()*minFullListImprovement {
+		t.Fatalf("compact vision selection is not at least %dx faster: full %d ns/op, compact %d ns/op", minFullListImprovement, fullList.NsPerOp(), compactThenGet.NsPerOp())
+	}
+	if fullList.AllocedBytesPerOp() < compactThenGet.AllocedBytesPerOp()*minFullListImprovement {
+		t.Fatalf("compact vision selection is not at least %dx lower allocation: full %d B/op, compact %d B/op", minFullListImprovement, fullList.AllocedBytesPerOp(), compactThenGet.AllocedBytesPerOp())
+	}
+}
+
+func BenchmarkVisionModelSelectionFullListVsCompactSelectionThenGetByID(b *testing.B) {
+	db := testutil.NewTestDB(b)
+	repo := NewLLMConfigRepo(db)
+	ctx := context.Background()
+	selectedID := prepareLargeVisionSelectionFixture(b, db, repo, ctx)
+
+	b.Run("full_list", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			configs, err := repo.List(ctx)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if len(configs) != 50 || configs[0].ID == "" {
+				b.Fatalf("full vision selection fixture returned %d configs", len(configs))
+			}
+		}
+	})
+	b.Run("compact_selection_plus_get_by_id", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			options, err := repo.ListVisionSelectionOptions(ctx)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if len(options) != 50 || options[0].ID == "" {
+				b.Fatalf("compact vision selection fixture returned %d options", len(options))
+			}
+			full, err := repo.GetByID(ctx, selectedID)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if full == nil || full.APIKey == "" || full.ExtraBodyJSON == "" || full.MixtureConfigJSON == "" {
+				b.Fatalf("selected full vision model was not hydrated: %#v", full)
+			}
+		}
+	})
+}
+
+func BenchmarkVisionModelSelectionSingleConnectionContention(b *testing.B) {
+	db, counter := testutil.NewStatementCountingTestDB(b)
+	repo := NewLLMConfigRepo(db)
+	ctx := context.Background()
+	selectedID := prepareLargeVisionSelectionFixture(b, db, repo, ctx)
+	lightweightLookup := func() error {
+		var projectID string
+		return db.QueryRowContext(context.Background(), `SELECT id FROM projects ORDER BY id LIMIT 1`).Scan(&projectID)
+	}
+
+	b.Run("full_list", func(b *testing.B) {
+		benchmarkVisionSelectionWithContention(b, db, counter, 1, func() error {
+			configs, err := repo.List(ctx)
+			if err != nil {
+				return err
+			}
+			if len(configs) != 50 {
+				return fmt.Errorf("full vision selection fixture returned %d configs", len(configs))
+			}
+			return nil
+		}, lightweightLookup)
+	})
+	b.Run("compact_selection_plus_get_by_id", func(b *testing.B) {
+		benchmarkVisionSelectionWithContention(b, db, counter, 2, func() error {
+			options, err := repo.ListVisionSelectionOptions(ctx)
+			if err != nil {
+				return err
+			}
+			if len(options) != 50 || options[0].ID == "" {
+				return fmt.Errorf("compact vision selection fixture returned %d options", len(options))
+			}
+			full, err := repo.GetByID(ctx, selectedID)
+			if err != nil {
+				return err
+			}
+			if full == nil || full.APIKey == "" || full.ExtraBodyJSON == "" || full.MixtureConfigJSON == "" {
+				return fmt.Errorf("selected full vision model was not hydrated")
+			}
+			return nil
+		}, lightweightLookup)
+	})
+}
+
+func benchmarkVisionSelectionWithContention(b *testing.B, db *sql.DB, counter *testutil.SQLStatementCounter, expectedModelQueryCloses int, lookup func() error, lightweightLookup func() error) {
+	b.Helper()
+	b.ReportAllocs()
+	if expectedModelQueryCloses < 1 {
+		b.Fatal("expected at least one model query close")
+	}
+
+	var totalLightweightWait time.Duration
+	for i := 0; i < b.N; i++ {
+		func() {
+			releaseRows := make(chan struct{})
+			var releaseOnce sync.Once
+			release := func() {
+				releaseOnce.Do(func() { close(releaseRows) })
+			}
+			defer func() {
+				release()
+				counter.SetRowsCloseObserver(nil)
+			}()
+
+			finalModelRowsClosing := make(chan struct{})
+			modelQueryCloses := 0
+			counter.SetRowsCloseObserver(func(_ context.Context, query string) {
+				if !strings.Contains(strings.ToLower(query), "from agent_configs") {
+					return
+				}
+				modelQueryCloses++
+				if modelQueryCloses == expectedModelQueryCloses {
+					// The row set is fully materialized. The observer runs before the
+					// wrapped rows.Close calls the underlying driver, so the single
+					// pool connection is still held while the competing query waits.
+					close(finalModelRowsClosing)
+					<-releaseRows
+				}
+			})
+
+			lookupResult := make(chan error, 1)
+			go func() { lookupResult <- lookup() }()
+
+			var lookupErr error
+			select {
+			case <-finalModelRowsClosing:
+			case lookupErr = <-lookupResult:
+				b.Fatalf("vision model lookup completed before its final rows-close boundary: %v", lookupErr)
+			case <-time.After(2 * time.Second):
+				b.Fatalf("vision model lookup did not reach its final rows-close boundary")
+			}
+
+			waitCountBefore := db.Stats().WaitCount
+			waitDurationBefore := db.Stats().WaitDuration
+			lightweightResult := make(chan error, 1)
+			go func() { lightweightResult <- lightweightLookup() }()
+
+			waitObserved := false
+			waitDeadline := time.NewTimer(2 * time.Second)
+			waitPoll := time.NewTicker(time.Millisecond)
+			for !waitObserved {
+				if db.Stats().WaitCount > waitCountBefore {
+					waitObserved = true
+					break
+				}
+				select {
+				case err := <-lightweightResult:
+					b.Fatalf("competing lightweight query completed before observing a pool wait: %v", err)
+				case <-waitPoll.C:
+				case <-waitDeadline.C:
+					b.Fatalf("competing lightweight query did not enter the single-connection pool wait")
+				}
+			}
+			waitPoll.Stop()
+			if !waitDeadline.Stop() {
+				select {
+				case <-waitDeadline.C:
+				default:
+				}
+			}
+
+			release()
+			if lookupErr = <-lookupResult; lookupErr != nil {
+				b.Fatal(lookupErr)
+			}
+			if err := <-lightweightResult; err != nil {
+				b.Fatalf("lightweight project lookup: %v", err)
+			}
+			if modelQueryCloses != expectedModelQueryCloses {
+				b.Fatalf("model query closes = %d, want %d", modelQueryCloses, expectedModelQueryCloses)
+			}
+			totalLightweightWait += db.Stats().WaitDuration - waitDurationBefore
+		}()
+	}
+	b.StopTimer()
+	b.ReportMetric(float64(totalLightweightWait.Nanoseconds())/float64(b.N), "lightweight_db_wait_after_full_model_path_ns/op")
 }
 
 func TestLLMConfigRepo_BrowserChatContextModelLoadingProjectionIsFasterAndLowerAllocationThanFullListOnLargeFixture(t *testing.T) {

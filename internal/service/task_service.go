@@ -56,6 +56,14 @@ func (s *TaskService) SetSwarmService(swarmSvc *SwarmService) {
 	s.swarmSvc = swarmSvc
 }
 
+// PruneQueuedWork refreshes the worker queue after an Automation lifecycle
+// transition demotes pending work without going through a task edit endpoint.
+func (s *TaskService) PruneQueuedWork() {
+	if s != nil && s.workerSvc != nil {
+		s.workerSvc.PruneQueuedWork()
+	}
+}
+
 func (s *TaskService) resumeGoalStoppedByUser(ctx context.Context, taskID string, actor string) {
 	if s.goalSvc == nil || taskID == "" {
 		return
@@ -281,19 +289,42 @@ func (s *TaskService) Update(ctx context.Context, t *models.Task) error {
 	return nil
 }
 
-func (s *TaskService) UpdateCategory(ctx context.Context, id string, category models.TaskCategory) error {
-	applog.Infof("[task-svc] UpdateCategory id=%s -> %s", id, category)
-	var previousTask *models.Task
-	if category == models.CategoryActive {
-		var err error
-		previousTask, err = s.repo.GetByID(ctx, id)
-		if err != nil {
-			applog.Infof("[task-svc] UpdateCategory error fetching previous task state: %v", err)
+func (s *TaskService) cancelActiveTaskWork(ctx context.Context, id string) error {
+	if s.workerSvc != nil {
+		s.workerSvc.MarkCancellationRequested(id)
+	}
+	if s.goalSvc != nil {
+		if err := s.goalSvc.PauseActiveGoalStoppedByUser(ctx, id); err != nil && !errors.Is(err, ErrTaskGoalNotFound) {
+			applog.Infof("[task-svc] cancelActiveTaskWork error pausing active goal after user stop id=%s: %v", id, err)
+		}
+	}
+	if s.workerSvc != nil {
+		s.workerSvc.CancelRunningTask(id)
+	}
+	if err := s.repo.UpdateStatus(ctx, id, models.StatusCancelled); err != nil {
+		applog.Infof("[task-svc] cancelActiveTaskWork error marking active task cancelled id=%s: %v", id, err)
+		return err
+	}
+	if s.workerSvc != nil {
+		if err := s.workerSvc.CancelQueuedTask(context.WithoutCancel(ctx), id, "Automation task was cancelled by the user"); err != nil {
+			applog.Infof("[task-svc] cancelActiveTaskWork error cancelling queued Automation dispatch id=%s: %v", id, err)
 			return err
 		}
 	}
+	return nil
+}
+
+func (s *TaskService) UpdateCategory(ctx context.Context, id string, category models.TaskCategory) error {
+	applog.Infof("[task-svc] UpdateCategory id=%s -> %s", id, category)
+	var previousTask *models.Task
+	var err error
+	previousTask, err = s.repo.GetByID(ctx, id)
+	if err != nil {
+		applog.Infof("[task-svc] UpdateCategory error fetching previous task state: %v", err)
+		return err
+	}
 	rollbackActivation := func(activationErr error) error {
-		if previousTask == nil {
+		if category != models.CategoryActive || previousTask == nil {
 			return activationErr
 		}
 		rollbackCtx := context.WithoutCancel(ctx)
@@ -328,30 +359,20 @@ func (s *TaskService) UpdateCategory(ctx context.Context, id string, category mo
 		return nil
 	}
 
-	// If moved AWAY from Active while running or queued, cancel the execution
-	// to release the project concurrency slot or abort the queued wait.
-	// Pending swarm children are also submitted runnable work; moving them out
-	// of Active must notify swarm orchestration instead of letting the worker
-	// queue silently prune them.
-	isCancellableActiveWork := task.Status == models.StatusRunning || task.Status == models.StatusQueued || (task.Status == models.StatusPending && models.IsSwarmChildRole(task.SwarmRole))
+	// If moved AWAY from a runnable category while running or queued, cancel
+	// the execution to release project/model capacity or abort the queued wait.
+	// Pending work also has to be removed from the worker queue; Automation
+	// pending dispatches are cancelled durably by CancelQueuedTask.
+	isCancellableActiveWork := previousTask != nil && previousTask.Category == models.CategoryActive &&
+		(previousTask.Status == models.StatusRunning || previousTask.Status == models.StatusQueued || (previousTask.Status == models.StatusPending && models.IsSwarmChildRole(previousTask.SwarmRole)))
+	isPendingRunnableWork := previousTask != nil && previousTask.Status == models.StatusPending &&
+		(previousTask.Category == models.CategoryActive || previousTask.Category == models.CategoryScheduled)
 	if category != models.CategoryActive && isCancellableActiveWork {
-		applog.Infof("[task-svc] UpdateCategory cancelling active task id=%s status=%s (moved to %s)", id, task.Status, category)
-		if s.workerSvc != nil {
-			s.workerSvc.MarkCancellationRequested(id)
-		}
-		if s.goalSvc != nil {
-			if err := s.goalSvc.PauseActiveGoalStoppedByUser(ctx, id); err != nil && !errors.Is(err, ErrTaskGoalNotFound) {
-				applog.Infof("[task-svc] UpdateCategory error pausing active goal after user stop id=%s: %v", id, err)
-			}
-		}
-		if s.workerSvc != nil {
-			s.workerSvc.CancelRunningTask(id)
-		}
-		if err := s.repo.UpdateStatus(ctx, id, models.StatusCancelled); err != nil {
-			applog.Infof("[task-svc] UpdateCategory error marking active task cancelled id=%s: %v", id, err)
+		applog.Infof("[task-svc] UpdateCategory cancelling active task id=%s status=%s (moved to %s)", id, previousTask.Status, category)
+		if err := s.cancelActiveTaskWork(ctx, id); err != nil {
 			return err
 		}
-		if s.swarmSvc != nil && models.IsSwarmChildRole(task.SwarmRole) {
+		if s.swarmSvc != nil && models.IsSwarmChildRole(previousTask.SwarmRole) {
 			if err := s.swarmSvc.OnChildCompleted(ctx, id); err != nil {
 				applog.Infof("[task-svc] UpdateCategory error notifying swarm child cancellation id=%s: %v", id, err)
 				return err
@@ -359,7 +380,12 @@ func (s *TaskService) UpdateCategory(ctx context.Context, id string, category mo
 		}
 		applog.Infof("[task-svc] UpdateCategory cancelled active task id=%s and kept requested category=%s", id, category)
 	}
-
+	if category != models.CategoryActive && !isCancellableActiveWork && isPendingRunnableWork && s.workerSvc != nil {
+		if err := s.workerSvc.CancelQueuedTask(context.WithoutCancel(ctx), id, "Automation task was moved out of a runnable category"); err != nil {
+			applog.Infof("[task-svc] UpdateCategory error cancelling queued Automation dispatch id=%s: %v", id, err)
+			return err
+		}
+	}
 	// If moved to Active, prefer a pending task-thread follow-up over rerunning the original prompt.
 	// ClaimTask provides atomic guard against double execution for normal task runs.
 	if category == models.CategoryActive {
@@ -607,36 +633,29 @@ func (s *TaskService) CancelTask(ctx context.Context, id string) error {
 		applog.Infof("[task-svc] CancelTask not found id=%s", id)
 		return fmt.Errorf("task not found: %s", id)
 	}
-	if task.Status != models.StatusRunning && task.Status != models.StatusQueued && !(task.Status == models.StatusPending && task.Category == models.CategoryActive) {
+	pendingAutomationDispatch := false
+	if task.Status == models.StatusPending && task.Category == models.CategoryScheduled {
+		pendingAutomationDispatch, err = s.repo.HasPendingAutomationDispatch(ctx, id)
+		if err != nil {
+			applog.Infof("[task-svc] CancelTask error checking Automation dispatch id=%s: %v", id, err)
+			return err
+		}
+	}
+	if task.Status != models.StatusRunning && task.Status != models.StatusQueued &&
+		!(task.Status == models.StatusPending && (task.Category == models.CategoryActive || pendingAutomationDispatch)) {
 		applog.Infof("[task-svc] CancelTask task not cancellable id=%s status=%s category=%s", id, task.Status, task.Category)
 		return fmt.Errorf("task is not running, queued, or active pending")
-	}
-
-	if s.workerSvc != nil {
-		s.workerSvc.MarkCancellationRequested(id)
-	}
-
-	if s.goalSvc != nil {
-		if err := s.goalSvc.PauseActiveGoalStoppedByUser(ctx, id); err != nil && !errors.Is(err, ErrTaskGoalNotFound) {
-			applog.Infof("[task-svc] CancelTask error pausing active goal after user stop id=%s: %v", id, err)
-		}
 	}
 
 	// Kill the running CLI process or cancel a queued follow-up waiting for a worker slot.
 	// This must happen BEFORE updating the DB status so the worker/handler sees
 	// context.Canceled and marks the execution as cancelled (not failed).
-	if s.workerSvc != nil {
-		s.workerSvc.CancelRunningTask(id)
+	if err := s.cancelActiveTaskWork(ctx, id); err != nil {
+		return err
 	}
-
-	applog.Infof("[task-svc] CancelTask setting status=cancelled, category=backlog id=%s title=%q", id, task.Title)
 
 	// Move cancelled tasks to backlog so they remain visible in the kanban board
 	// and can be re-run later. Status stays "cancelled" to reflect what happened.
-	if err := s.repo.UpdateStatus(ctx, id, models.StatusCancelled); err != nil {
-		applog.Infof("[task-svc] CancelTask error updating status: %v", err)
-		return err
-	}
 	if err := s.repo.UpdateCategory(ctx, id, models.CategoryBacklog); err != nil {
 		applog.Infof("[task-svc] CancelTask error moving to backlog: %v", err)
 		return fmt.Errorf("move cancelled task to backlog: %w", err)

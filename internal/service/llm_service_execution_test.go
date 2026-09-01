@@ -2583,6 +2583,101 @@ func TestLLMService_ExecuteTask_MemoryConsolidationUsesNormalExecutionPath(t *te
 	}
 }
 
+func TestLLMService_ExecuteTaskKeepsTaskRunningWhileManagedFinalizationWaitsForLease(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+
+	repoDir := createTestGitRepo(t)
+	project := &models.Project{Name: "Finalization lease", RepoPath: repoDir}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	agent := ensureDefaultAgent(t, llmConfigRepo)
+	task := &models.Task{ProjectID: project.ID, Title: "Finalize under lease", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "finish", AgentID: &agent.ID}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
+	svc.SetWorktreeService(NewWorktreeService(taskRepo, projectRepo, settingsRepo))
+	modelEntered := make(chan struct{})
+	releaseModel := make(chan struct{})
+	var modelOnce sync.Once
+	mock := &testutil.MockLLMCaller{Response: "done", TextOnly: "done"}
+	mock.OnCall = func(context.Context, testutil.MockLLMCall) {
+		modelOnce.Do(func() { close(modelEntered) })
+		<-releaseModel
+	}
+	svc.SetLLMCaller(mock)
+
+	executionDone := make(chan error, 1)
+	go func() {
+		_, err := svc.ExecuteTaskWithAgent(ctx, *task, *agent)
+		executionDone <- err
+	}()
+	select {
+	case <-modelEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("model execution did not start")
+	}
+
+	leaseEntered := make(chan struct{})
+	releaseLease := make(chan struct{})
+	leaseDone := make(chan error, 1)
+	go func() {
+		leaseDone <- WithRepositoryMutation(repoDir, func() error {
+			close(leaseEntered)
+			<-releaseLease
+			return nil
+		})
+	}()
+	<-leaseEntered
+	close(releaseModel)
+
+	select {
+	case err := <-executionDone:
+		close(releaseLease)
+		t.Fatalf("execution bypassed finalization lease: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	current, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		close(releaseLease)
+		t.Fatalf("load task during finalization: %v", err)
+	}
+	if current.Status != models.StatusRunning {
+		close(releaseLease)
+		t.Fatalf("task became merge-eligible before managed finalization completed: %s", current.Status)
+	}
+
+	close(releaseLease)
+	if err := <-leaseDone; err != nil {
+		t.Fatalf("repository mutation lease: %v", err)
+	}
+	select {
+	case err := <-executionDone:
+		if err != nil {
+			t.Fatalf("ExecuteTaskWithAgent: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("execution did not complete after finalization lease release")
+	}
+	current, err = taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("load completed task: %v", err)
+	}
+	if current.Status != models.StatusCompleted {
+		t.Fatalf("task status after finalization = %s, want completed", current.Status)
+	}
+}
+
 func TestLLMService_ExecuteTask_GitWorktreeIsolation(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -2672,6 +2767,89 @@ func TestLLMService_ExecuteTask_GitWorktreeIsolation(t *testing.T) {
 				t.Fatalf("test repository should have no remote, output=%q err=%v", remotes, remoteErr)
 			}
 		})
+	}
+}
+
+func TestLLMService_ExecuteTask_StartupConflictContinuesWithRecoveryContext(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+
+	repoDir := createTestGitRepo(t)
+	project := &models.Project{Name: "Startup Conflict Recovery", RepoPath: repoDir}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	agent := ensureDefaultAgent(t, llmConfigRepo)
+	task := &models.Task{
+		ProjectID:         project.ID,
+		Title:             "Continue conflicted task",
+		Category:          models.CategoryScheduled,
+		Status:            models.StatusPending,
+		Prompt:            "finish the scheduled update",
+		AgentID:           &agent.ID,
+		MergeTargetBranch: "main",
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	worktreeSvc := NewWorktreeService(taskRepo, projectRepo, settingsRepo)
+	wtPath, wtBranch, err := worktreeSvc.SetupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatalf("setup worktree: %v", err)
+	}
+	task.WorktreePath = wtPath
+	task.WorktreeBranch = wtBranch
+
+	if err := os.WriteFile(filepath.Join(wtPath, "conflict.txt"), []byte("task version\n"), 0o644); err != nil {
+		t.Fatalf("write task version: %v", err)
+	}
+	if err := CommitWorktreeChanges(wtPath, "task version"); err != nil {
+		t.Fatalf("commit task version: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "conflict.txt"), []byte("main version\n"), 0o644); err != nil {
+		t.Fatalf("write main version: %v", err)
+	}
+	runGitTest(t, repoDir, "add", "conflict.txt")
+	runGitTest(t, repoDir, "commit", "-m", "main version")
+
+	mock := &testutil.MockLLMCaller{Response: "conflict resolved", TextOnly: "conflict resolved"}
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
+	svc.SetWorktreeService(worktreeSvc)
+	svc.SetLLMCaller(mock)
+
+	execRec, err := svc.ExecuteTaskWithAgent(ctx, *task, *agent)
+	if err != nil {
+		t.Fatalf("startup conflict should continue to the model: %v", err)
+	}
+	if execRec == nil || execRec.Status != models.ExecCompleted {
+		t.Fatalf("expected completed execution, got %#v", execRec)
+	}
+	if mock.CallCount() != 1 {
+		t.Fatalf("expected one model call, got %d", mock.CallCount())
+	}
+	request := mock.LastAgentRequest()
+	if request.WorkDir != wtPath {
+		t.Fatalf("expected preserved worktree %q, got %q", wtPath, request.WorkDir)
+	}
+	for _, want := range []string{"Worktree Sync Warning", "merge was aborted", "conflict.txt", "run the merge", "build, test, and commit"} {
+		if !strings.Contains(request.ProjectInstructions, want) {
+			t.Fatalf("expected recovery instructions to contain %q, got %q", want, request.ProjectInstructions)
+		}
+	}
+	status, err := GitStatusPorcelain(wtPath)
+	if err != nil {
+		t.Fatalf("git status: %v", err)
+	}
+	if strings.TrimSpace(status) != "" || worktreeHasActiveMerge(wtPath) {
+		t.Fatalf("expected clean aborted merge state, status=%q", status)
 	}
 }
 

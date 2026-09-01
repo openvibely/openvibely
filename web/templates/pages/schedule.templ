@@ -452,18 +452,18 @@ templ SchedulePrimaryAgentSelector(selected *string, agentDefs []models.Agent, s
 	</select>
 }
 
-templ Schedule(projects []models.Project, currentProject *models.Project, tasks []repository.TaskWithSchedule, weekOffset int, agents []models.LLMConfig, agentDefs []models.Agent) {
+templ Schedule(projects []models.Project, currentProject *models.Project, tasks []repository.TaskWithSchedule, weekOffset int, agents []models.LLMConfig, agentDefs []repository.AgentScheduleOption) {
 	@layout.Base("Schedule", projects, projectID(currentProject)) {
 		@scheduleContent(currentProject, buildWeekData(tasks, weekOffset), weekOffset, agents, agentDefs)
 	}
 }
 
 // ScheduleContent renders just the schedule content for HTMX requests
-templ ScheduleContent(currentProject *models.Project, tasks []repository.TaskWithSchedule, weekOffset int, agents []models.LLMConfig, agentDefs []models.Agent) {
+templ ScheduleContent(currentProject *models.Project, tasks []repository.TaskWithSchedule, weekOffset int, agents []models.LLMConfig, agentDefs []repository.AgentScheduleOption) {
 	@scheduleContent(currentProject, buildWeekData(tasks, weekOffset), weekOffset, agents, agentDefs)
 }
 
-templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOffset int, agents []models.LLMConfig, agentDefs []models.Agent) {
+templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOffset int, agents []models.LLMConfig, agentDefs []repository.AgentScheduleOption) {
 	<div id="schedule-content" class="flex flex-col h-full" data-project-id={ projectID(currentProject) }>
 		@layout.PageTitle("Schedule")
 		<!-- Header: Row 1 – Title + New Task button -->
@@ -522,7 +522,7 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 
 						<!-- Week Timeline View -->
 						<div id="schedule-timeline-container" class="bg-base-100 rounded-lg shadow-lg overflow-x-auto flex flex-1 flex-col min-h-0 overflow-y-auto opacity-0" style="border: 1px solid var(--ov-schedule-grid-border);">
-							<div class="min-w-[800px] flex flex-1 flex-col">
+							<div class="min-w-[800px] flex flex-1 flex-col min-h-0">
 								<!-- Day Headers -->
 								<div class="grid bg-base-200 sticky top-0 z-20" style="grid-template-columns: 60px repeat(7, 1fr); border-bottom: 1px solid var(--ov-schedule-grid-border);">
 									<div class="p-2 text-center font-semibold text-xs" style="border-right: 1px solid var(--ov-schedule-grid-border);"></div>
@@ -545,7 +545,7 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 								</div>
 
 								<!-- Timeline Grid -->
-									<div class="relative flex flex-1 flex-col">
+									<div class="relative flex flex-1 flex-col min-h-0">
 										for _, slot := range getTimeSlots() {
 											<div class="grid flex-1 schedule-grid-row last:border-b-0" style="grid-template-columns: 60px repeat(7, 1fr); border-bottom: 1px solid var(--ov-schedule-grid-border);">
 												<!-- Time Label -->
@@ -565,16 +565,15 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 												>
 													for _, occurrence := range getTasksForHour(weekData.TasksByDateTime, day.Date, slot.Hour) {
 														if occurrence.Task.Schedule != nil && !occurrence.Task.Schedule.Enabled {
-															<div
-																class="text-[10px] px-1.5 py-1 mb-0.5 rounded bg-base-300 opacity-50 cursor-not-allowed border-l-2 border-base-content border-opacity-20 overflow-hidden"
-																title={ scheduleDisplayTitle(occurrence.Task) + " (disabled)" }
-																draggable="false"
-																data-schedule-id={ getScheduleID(occurrence.Task) }
-																data-task-id={ occurrence.Task.Task.ID }
-																data-has-schedule={ fmt.Sprintf("%t", occurrence.Task.Schedule != nil && getScheduleID(occurrence.Task) != "") }
-																onclick="openTaskDialog(this.dataset.taskId)"
-															>
-																<div class="font-semibold truncate leading-tight line-through">{ scheduleDisplayTitle(occurrence.Task) }</div>
+																	<div
+																		class="text-[10px] px-1.5 py-1 mb-0.5 rounded bg-base-300 opacity-50 cursor-grab active:cursor-grabbing drag-cursor-surface transition-colors border-l-2 border-base-content border-opacity-20 overflow-hidden"
+																		title={ scheduleDisplayTitle(occurrence.Task) + " (disabled)" }
+																		data-schedule-id={ getScheduleID(occurrence.Task) }
+																		data-task-id={ occurrence.Task.Task.ID }
+																		data-has-schedule={ fmt.Sprintf("%t", occurrence.Task.Schedule != nil && getScheduleID(occurrence.Task) != "") }
+																		onclick="handleScheduleSelect(event)"
+																		onpointerdown="handleSchedulePointerDown(event)"
+																	>																<div class="font-semibold truncate leading-tight line-through">{ scheduleDisplayTitle(occurrence.Task) }</div>
 																<div class="opacity-60 leading-tight">paused</div>
 															</div>
 														} else {
@@ -584,7 +583,7 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 																data-schedule-id={ getScheduleID(occurrence.Task) }
 																data-task-id={ occurrence.Task.Task.ID }
 																data-has-schedule={ fmt.Sprintf("%t", occurrence.Task.Schedule != nil && getScheduleID(occurrence.Task) != "") }
-																onclick="openTaskDialog(this.dataset.taskId)"
+																onclick="handleScheduleSelect(event)"
 																onpointerdown="handleSchedulePointerDown(event)"
 															>
 																<div class="font-semibold truncate leading-tight">{ scheduleDisplayTitle(occurrence.Task) }</div>
@@ -683,7 +682,7 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 						</div>
 						<div class="form-control min-w-0">
 							<label class="label"><span class="label-text">Primary Agent</span></label>
-							@SchedulePrimaryAgentSelector(nil, agentDefs, "select select-bordered w-full max-w-full")
+							@SchedulePrimaryAgentOptionSelector(nil, agentDefs, "select select-bordered w-full max-w-full")
 							<label class="label"><span class="label-text-alt opacity-60">Agent definition used for scheduled runs</span></label>
 						</div>
 					</div>
@@ -910,6 +909,7 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 				// Close modal on successful task creation (schedule-content swap)
 				document.body.addEventListener('htmx:afterSwap', function(event) {
 					if (event.detail.target && event.detail.target.id === 'schedule-content') {
+						if (typeof clearScheduleSelection === 'function') clearScheduleSelection();
 						const modal = document.getElementById('new_scheduled_task_modal');
 						if (modal && modal.open) {
 							modal.close();
@@ -918,16 +918,46 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 				});
 			}
 
-			let draggedScheduleId = null;
-			let draggedTaskId = null;
-			let draggedHasSchedule = false;
+			var draggedScheduleId = null;
+			var draggedScheduleIds = [];
+			var selectedScheduleCards = new Set();
+			var draggedTaskId = null;
+			var draggedHasSchedule = false;
 			// Flag to suppress scroll-to-now after drag-drop reschedule
-			let _schedDragDropJustCompleted = false;
+			var _schedDragDropJustCompleted = false;
 			// Flag to suppress click events that fire after short drags.
 			// Browsers may fire click after a very short drag (e.g. adjacent slot),
 			// even though the drag completed successfully. Without this guard,
 			// openTaskDialog navigates away and the user never sees the reschedule.
-			let _schedDragActive = false;
+			var _schedDragActive = false;
+
+			function clearScheduleSelection() {
+				selectedScheduleCards.forEach(function(card) { card.classList.remove('schedule-selected'); });
+				selectedScheduleCards.clear();
+				draggedScheduleIds = [];
+			}
+
+			function handleScheduleSelect(event) {
+				var card = event.currentTarget;
+				if (!card || _schedDragActive) {
+					event.preventDefault();
+					return;
+				}
+				if (event.metaKey || event.ctrlKey) {
+					event.preventDefault();
+					event.stopPropagation();
+					if (selectedScheduleCards.has(card)) {
+						selectedScheduleCards.delete(card);
+						card.classList.remove('schedule-selected');
+					} else {
+						selectedScheduleCards.add(card);
+						card.classList.add('schedule-selected');
+					}
+					return;
+				}
+				openTaskDialog(card.dataset.taskId);
+			}
+			window.handleScheduleSelect = handleScheduleSelect;
 
 			function openTaskDialog(taskId) {
 				// Only navigate if not dragging and not just finished dragging
@@ -940,8 +970,8 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 				}
 			}
 
-			let _dragSourceHour = null;
-			let _dragSourceDate = null;
+			var _dragSourceHour = null;
+			var _dragSourceDate = null;
 
 				var _schedulePointerDrag = null;
 
@@ -959,9 +989,15 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 
 				function resetSchedulePointerDrag() {
 					var state = _schedulePointerDrag;
+					var wasStarted = !!(state && state.started);
 					if (window.stopPointerAutoScroll) window.stopPointerAutoScroll();
 					if (state && state.dropZone) clearDropZoneFeedback(state.dropZone);
-					if (state && state.card) {
+					if (state && state.motions) {
+						state.motions.forEach(function(motion) {
+							window.endPointerCardMotion(motion);
+							motion.card.classList.remove('dragging');
+						});
+					} else if (state && state.card) {
 						window.endPointerCardMotion(state.motion);
 						state.card.classList.remove('dragging');
 					}
@@ -972,13 +1008,14 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 					window.removeEventListener('pointercancel', handleSchedulePointerCancel, true);
 					_schedulePointerDrag = null;
 					draggedScheduleId = null;
+					draggedScheduleIds = [];
 					draggedTaskId = null;
 					draggedHasSchedule = false;
 					_dragSourceHour = null;
 					_dragSourceDate = null;
-					setTimeout(function() { _schedDragActive = false; }, 150);
+					if (wasStarted) clearScheduleSelection();
+					setTimeout(function() { _schedDragActive = false; }, 0);
 				}
-
 				function beginSchedulePointerDrag() {
 					var state = _schedulePointerDrag;
 					if (!state || state.started) return;
@@ -987,16 +1024,27 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 					draggedScheduleId = card.dataset.scheduleId;
 					draggedTaskId = card.dataset.taskId;
 					draggedHasSchedule = card.dataset.hasSchedule === 'true';
+					if (selectedScheduleCards.has(card) && selectedScheduleCards.size > 1) {
+						state.dragCards = Array.from(selectedScheduleCards);
+					} else {
+						clearScheduleSelection();
+						state.dragCards = [card];
+					}
+					draggedScheduleIds = Array.from(new Set(state.dragCards.map(function(selected) {
+						return selected.dataset.scheduleId;
+					}).filter(Boolean)));
 					_schedDragActive = true;
 					document.documentElement.classList.add('drag-cursor-active');
 					document.body.classList.add('drag-cursor-active');
-					card.classList.add('dragging');
-					state.motion = window.beginPointerCardMotion(card);
+					state.motions = state.dragCards.map(function(selected) {
+						selected.classList.add('dragging');
+						return window.beginPointerCardMotion(selected);
+					});
+					state.motion = state.motions[state.dragCards.indexOf(card)];
 					var sourceZone = state.motion.placeholder.closest('.drop-zone');
 					_dragSourceHour = sourceZone ? sourceZone.dataset.hour : null;
 					_dragSourceDate = sourceZone ? sourceZone.dataset.date : null;
 				}
-
 				function refreshSchedulePointerDropZone(clientX, clientY) {
 					var state = _schedulePointerDrag;
 					if (!state || !state.started) return null;
@@ -1034,7 +1082,7 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 					if (!state.started && Math.hypot(deltaX, deltaY) < 4) return;
 					beginSchedulePointerDrag();
 					event.preventDefault();
-					window.movePointerCard(state.motion, deltaX, deltaY);
+					state.motions.forEach(function(motion) { window.movePointerCard(motion, deltaX, deltaY); });
 					updateSchedulePointerDropZone(event);
 				}
 
@@ -1139,8 +1187,15 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 					var formData = new FormData();
 					formData.append('new_date', newDate);
 					formData.append('hour', newHour);
+					formData.append('source_date', _dragSourceDate || '');
+					formData.append('source_hour', _dragSourceHour || '');
+					formData.append('schedule_ids', draggedScheduleIds.join(','));
+					var scheduleRoot = document.getElementById('schedule-content');
+					var mutationProjectId = scheduleRoot ? (scheduleRoot.dataset.projectId || '') : '';
+					var mutationURL = '/schedules/' + encodeURIComponent(draggedScheduleId) + '/reschedule';
+					if (mutationProjectId) mutationURL += '?project_id=' + encodeURIComponent(mutationProjectId);
 
-					fetch('/schedules/' + draggedScheduleId + '/reschedule', {
+					fetch(mutationURL, {
 						method: 'PATCH',
 						headers: {
 							'HX-Request': 'true'
@@ -1375,7 +1430,7 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 			}
 
 			// Track if we've already scrolled for this page visit
-			let hasScrolledToNow = false;
+			var hasScrolledToNow = false;
 
 			// Update on load — run synchronously (no setTimeout) so scroll
 			// position is set before the browser's first paint. The script
@@ -1425,3 +1480,27 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 	</div>
 }
 
+templ SchedulePrimaryAgentOptionSelector(selected *string, agentDefs []repository.AgentScheduleOption, selectClass string) {
+	<input type="hidden" name="schedule_agent_definition_present" value="1"/>
+	<select name="agent_definition_id" class={ selectClass }>
+		<option
+			value=""
+			if selected == nil || *selected == "" {
+				selected
+			}
+		>No Agent</option>
+		for _, ad := range agentDefs {
+			<option
+				value={ ad.ID }
+				if selected != nil && *selected == ad.ID {
+					selected
+				}
+			>
+				{ ad.Name }
+				if ad.Model != "inherit" {
+					({ ad.Model })
+				}
+			</option>
+		}
+	</select>
+}

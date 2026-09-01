@@ -939,6 +939,40 @@ func TestBinaryInstallerPassesRelaunchContextOutsideCommandLineAndDurableState(t
 	}
 }
 
+func TestAttachDetachedHelperIntegrationLog(t *testing.T) {
+	root := t.TempDir()
+	logPath := filepath.Join(root, "helper.log")
+	t.Setenv(updateIntegrationHelperLogEnv, logPath)
+	cmd := exec.Command("ignored")
+	logFile, err := attachDetachedHelperIntegrationLog(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if logFile == nil || cmd.Stdout != logFile || cmd.Stderr != logFile {
+		t.Fatalf("helper log was not attached: stdout=%T stderr=%T", cmd.Stdout, cmd.Stderr)
+	}
+	if _, err := fmt.Fprint(cmd.Stderr, "helper failure details"); err != nil {
+		t.Fatal(err)
+	}
+	if err := logFile.Close(); err != nil {
+		t.Fatal(err)
+	}
+	contents, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(contents) != "helper failure details" {
+		t.Fatalf("helper log = %q", contents)
+	}
+}
+
+func TestAttachDetachedHelperIntegrationLogRejectsRelativePath(t *testing.T) {
+	t.Setenv(updateIntegrationHelperLogEnv, "helper.log")
+	if _, err := attachDetachedHelperIntegrationLog(exec.Command("ignored")); err == nil {
+		t.Fatal("relative helper log path unexpectedly succeeded")
+	}
+}
+
 func TestBinaryInstallerRecoveryRequiresInitializedHealthURL(t *testing.T) {
 	installer := &BinaryInstaller{}
 	if installer.RecoveryReady() {

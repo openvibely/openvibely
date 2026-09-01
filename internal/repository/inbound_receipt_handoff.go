@@ -23,8 +23,7 @@ func inboundReceiptHandoff(ctx context.Context, db *sql.DB, spec inboundReceiptH
 	if persist == nil {
 		return false, errors.New(spec.persistRequiredError)
 	}
-	threadRepo := NewThreadInputRepo(db)
-	err = threadRepo.WithImmediateTx(ctx, func(exec SQLExecutor) error {
+	err = withImmediateTx(ctx, db, func(exec SQLExecutor) error {
 		result, err := exec.ExecContext(ctx, spec.insertSQL, spec.insertArgs...)
 		if err != nil {
 			return fmt.Errorf("%s: %w", spec.recordError, err)

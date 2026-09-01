@@ -20,6 +20,10 @@ type TaskPullRequestGitHubProvider interface {
 	GlobalAPIEndpoint(ctx context.Context) string
 }
 
+type taskPullRequestBodyUpdater interface {
+	UpdatePullRequestBody(ctx context.Context, repo *GitHubRepoRef, number int, body string) error
+}
+
 type taskPullRequestBranchReplacer interface {
 	GetPullRequest(ctx context.Context, repo *GitHubRepoRef, number int) (*GitHubPullRequest, error)
 	ReplaceBranchHead(ctx context.Context, repo *GitHubRepoRef, req GitHubReplaceBranchHeadRequest) error
@@ -124,11 +128,24 @@ func expectedTaskPullRequestRepoFullName(project *models.Project, repoRef *GitHu
 }
 
 func (s *TaskPullRequestService) ReplaceBranchHeadForTask(ctx context.Context, project *models.Project, task *models.Task, expectedHead string) (*models.TaskPullRequest, error) {
-	return s.replaceBranchHeadForTask(ctx, project, task, expectedHead)
+	return s.replaceBranchHeadWithRepositoryMutation(ctx, project, task, expectedHead)
 }
 
 func (s *TaskPullRequestService) ReplaceBranchHeadForAutomationTask(ctx context.Context, project *models.Project, task *models.Task, expectedHead string) (*models.TaskPullRequest, error) {
-	return s.replaceBranchHeadForTask(ctx, project, task, expectedHead)
+	return s.replaceBranchHeadWithRepositoryMutation(ctx, project, task, expectedHead)
+}
+
+func (s *TaskPullRequestService) replaceBranchHeadWithRepositoryMutation(ctx context.Context, project *models.Project, task *models.Task, expectedHead string) (*models.TaskPullRequest, error) {
+	if project == nil || strings.TrimSpace(project.RepoPath) == "" {
+		return nil, fmt.Errorf("project has no repository path configured")
+	}
+	var result *models.TaskPullRequest
+	err := WithRepositoryMutation(project.RepoPath, func() error {
+		var err error
+		result, err = s.replaceBranchHeadForTask(ctx, project, task, expectedHead)
+		return err
+	})
+	return result, err
 }
 
 func (s *TaskPullRequestService) replaceBranchHeadForTask(ctx context.Context, project *models.Project, task *models.Task, expectedHead string) (*models.TaskPullRequest, error) {
@@ -206,11 +223,38 @@ func (s *TaskPullRequestService) replaceBranchHeadForTask(ctx context.Context, p
 }
 
 func (s *TaskPullRequestService) OpenForTask(ctx context.Context, project *models.Project, task *models.Task, opts OpenTaskPullRequestOptions) (*OpenTaskPullRequestResult, error) {
-	return s.openForTask(ctx, project, task, opts)
+	return s.openForTaskWithRepositoryMutation(ctx, project, task, opts, nil)
+}
+
+// OpenForTaskValidated serializes publication and reloads authoritative task
+// state inside the same repository mutation boundary before any Git write.
+func (s *TaskPullRequestService) OpenForTaskValidated(ctx context.Context, project *models.Project, task *models.Task, opts OpenTaskPullRequestOptions, validate func() (*models.Task, error)) (*OpenTaskPullRequestResult, error) {
+	return s.openForTaskWithRepositoryMutation(ctx, project, task, opts, validate)
 }
 
 func (s *TaskPullRequestService) OpenForAutomationTask(ctx context.Context, project *models.Project, task *models.Task, opts OpenTaskPullRequestOptions) (*OpenTaskPullRequestResult, error) {
-	return s.openForTask(ctx, project, task, opts)
+	return s.openForTaskWithRepositoryMutation(ctx, project, task, opts, nil)
+}
+
+func (s *TaskPullRequestService) openForTaskWithRepositoryMutation(ctx context.Context, project *models.Project, task *models.Task, opts OpenTaskPullRequestOptions, validate func() (*models.Task, error)) (*OpenTaskPullRequestResult, error) {
+	if project == nil || strings.TrimSpace(project.RepoPath) == "" {
+		return nil, fmt.Errorf("project has no repository path configured")
+	}
+	var result *OpenTaskPullRequestResult
+	err := WithRepositoryMutation(project.RepoPath, func() error {
+		currentTask := task
+		if validate != nil {
+			var err error
+			currentTask, err = validate()
+			if err != nil {
+				return err
+			}
+		}
+		var err error
+		result, err = s.openForTask(ctx, project, currentTask, opts)
+		return err
+	})
+	return result, err
 }
 
 func (s *TaskPullRequestService) openForTask(ctx context.Context, project *models.Project, task *models.Task, opts OpenTaskPullRequestOptions) (*OpenTaskPullRequestResult, error) {
@@ -286,6 +330,13 @@ func (s *TaskPullRequestService) openForTask(ctx context.Context, project *model
 			return nil, fmt.Errorf("verifying existing pull request #%d: %w", existingPR.PRNumber, err)
 		}
 		if err := ValidateTaskPullRequestCurrentPublication(project, task, repoRef, livePR, publishedHeadSHA); err == nil {
+			if body := strings.TrimSpace(opts.Body); body != "" {
+				if updater, ok := s.github.(taskPullRequestBodyUpdater); ok {
+					if err := updater.UpdatePullRequestBody(ctx, repoRef, existingPR.PRNumber, body); err != nil {
+						return nil, fmt.Errorf("updating existing pull request #%d body: %w", existingPR.PRNumber, err)
+					}
+				}
+			}
 			liveURL := strings.TrimSpace(livePR.URL)
 			liveState := strings.TrimSpace(livePR.State)
 			changed := existingPR.PRURL != liveURL || existingPR.PRState != liveState || existingPR.PublishedHeadSHA != publishedHeadSHA
@@ -346,6 +397,15 @@ func (s *TaskPullRequestService) openForTask(ctx context.Context, project *model
 	}
 	if err := ValidateTaskPullRequestCurrentPublication(project, task, repoRef, pr, publishedHeadSHA); err != nil {
 		return nil, fmt.Errorf("pull request #%d is not current: %w", prNumber, err)
+	}
+	if !created {
+		if body := strings.TrimSpace(opts.Body); body != "" {
+			if updater, ok := s.github.(taskPullRequestBodyUpdater); ok {
+				if err := updater.UpdatePullRequestBody(ctx, repoRef, prNumber, body); err != nil {
+					return nil, fmt.Errorf("updating existing pull request #%d body: %w", prNumber, err)
+				}
+			}
+		}
 	}
 
 	record := &models.TaskPullRequest{

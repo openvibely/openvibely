@@ -48,7 +48,7 @@ func (r *UsageRepo) RecordUsageEvent(ctx context.Context, event *models.LLMUsage
 	}
 
 	var occurredRaw, createdRaw string
-	err := r.db.QueryRowContext(ctx, `
+	err := queryRowBoundSQLite(ctx, r.db, `
 		INSERT OR IGNORE INTO llm_usage_events (
 			id, provider, account_id, project_id, task_id, execution_id, chat_thread_id, turn_id,
 			agent_config_id, model, operation, status, error_message,
@@ -88,11 +88,11 @@ func (r *UsageRepo) CreateAccountUsageSnapshot(ctx context.Context, snapshot *mo
 		fetchedAt = time.Now().UTC()
 	}
 
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, cleanup, err := beginImmediateTx(ctx, r.db)
 	if err != nil {
 		return fmt.Errorf("starting account usage snapshot transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer cleanup()
 
 	var fetchedRaw, createdRaw string
 	err = tx.QueryRowContext(ctx, `
@@ -679,7 +679,7 @@ func usagePeriodExpression(groupBy string) string {
 	}
 }
 
-func insertAccountUsageExtraLimits(ctx context.Context, tx *sql.Tx, snapshot *models.AccountUsageSnapshot) error {
+func insertAccountUsageExtraLimits(ctx context.Context, tx SQLExecutor, snapshot *models.AccountUsageSnapshot) error {
 	if snapshot == nil || len(snapshot.ExtraLimits) == 0 {
 		return nil
 	}

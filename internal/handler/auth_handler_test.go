@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -164,6 +165,54 @@ func TestAuthMiddleware_HTMXGets401WithHXRedirect(t *testing.T) {
 	}
 }
 
+func TestAuthMiddleware_HTMXRejectsUnauthenticatedMergeMutation(t *testing.T) {
+	_, e := authTestHandler(t)
+	req := httptest.NewRequest(http.MethodPost, "/tasks/unauthorized/worktree/merge", strings.NewReader("merge_type=merge"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected unauthenticated merge mutation to return 401, got %d", rec.Code)
+	}
+	if !strings.HasPrefix(rec.Header().Get("HX-Redirect"), "/login?next=") {
+		t.Fatalf("expected merge mutation to redirect authentication through HTMX, got %q", rec.Header().Get("HX-Redirect"))
+	}
+}
+
+func TestAuthMiddleware_RejectsLocalSessionAtExpirationBoundary(t *testing.T) {
+	h, e := authTestHandler(t)
+	cfg := *h.authCfg
+	cfg.SessionTTL = time.Second
+	h.SetAuthConfig(cfg)
+
+	for attempt := 0; attempt < 20; attempt++ {
+		expiresAt := time.Now().Unix()
+		token, err := h.authCfg.SignToken(time.Unix(expiresAt-1, 0))
+		if err != nil {
+			t.Fatalf("SignToken error: %v", err)
+		}
+		if time.Now().Unix() != expiresAt {
+			continue
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/tasks?project_id=p1", nil)
+		req.AddCookie(&http.Cookie{Name: h.authCfg.CookieName, Value: token})
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+
+		if rec.Code == http.StatusFound && strings.HasPrefix(rec.Header().Get("Location"), "/login?next=") {
+			return
+		}
+		if time.Now().Unix() == expiresAt {
+			t.Fatalf("local session was accepted at its expiration boundary: status=%d location=%q", rec.Code, rec.Header().Get("Location"))
+		}
+	}
+
+	t.Fatal("could not observe a stable exact expiration boundary")
+}
+
 func TestAuthMiddleware_AllowsAuthenticatedPassThrough(t *testing.T) {
 	h, e := authTestHandler(t)
 	token, err := h.authCfg.SignToken(time.Now())
@@ -202,24 +251,99 @@ func TestAuthMiddleware_PublicRouteExceptions(t *testing.T) {
 	}
 }
 
-func TestAuthLoginRedirectsToNext(t *testing.T) {
+func TestAuthLoginFlowSanitizesRedirectDestinations(t *testing.T) {
 	_, e := authTestHandler(t)
-	nextEncoded := strings.TrimPrefix(auth.RedirectURL("/chat?project_id=p1"), "/login?next=")
-	form := url.Values{}
-	form.Set("username", "admin")
-	form.Set("password", "secret")
-	form.Set("next", nextEncoded)
-
-	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(form.Encode()))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusFound {
-		t.Fatalf("expected 302, got %d", rec.Code)
+	tests := []struct {
+		name        string
+		destination string
+		want        string
+	}{
+		{name: "safe internal path", destination: "/chat?project_id=p1", want: "/chat?project_id=p1"},
+		{name: "backslash authority form", destination: "/\\attacker.example", want: "/"},
+		{name: "double backslash authority form", destination: "/\\\\attacker.example", want: "/"},
+		{name: "mixed slash authority form", destination: "/\\/attacker.example", want: "/"},
 	}
-	if got := rec.Header().Get("Location"); got != "/chat?project_id=p1" {
-		t.Fatalf("expected redirect to next URL, got %q", got)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodGet, tt.destination, nil)
+			loginResponse := httptest.NewRecorder()
+			e.ServeHTTP(loginResponse, request)
+			if loginResponse.Code != http.StatusFound {
+				t.Fatalf("protected request: expected 302, got %d", loginResponse.Code)
+			}
+
+			loginLocation := loginResponse.Header().Get("Location")
+			if !strings.HasPrefix(loginLocation, "/login?next=") {
+				t.Fatalf("protected request: expected login redirect, got %q", loginLocation)
+			}
+
+			loginPageRequest := httptest.NewRequest(http.MethodGet, loginLocation, nil)
+			loginPageResponse := httptest.NewRecorder()
+			e.ServeHTTP(loginPageResponse, loginPageRequest)
+			if loginPageResponse.Code != http.StatusOK {
+				t.Fatalf("login page: expected 200, got %d", loginPageResponse.Code)
+			}
+
+			const hiddenNextPrefix = `<input type="hidden" name="next" value="`
+			body := loginPageResponse.Body.String()
+			nextStart := strings.Index(body, hiddenNextPrefix)
+			if nextStart < 0 {
+				t.Fatalf("login page did not contain hidden next value")
+			}
+			nextStart += len(hiddenNextPrefix)
+			nextEnd := strings.IndexByte(body[nextStart:], '"')
+			if nextEnd < 0 {
+				t.Fatalf("login page hidden next value was not terminated")
+			}
+			nextEncoded := body[nextStart : nextStart+nextEnd]
+
+			form := url.Values{}
+			form.Set("username", "admin")
+			form.Set("password", "secret")
+			form.Set("next", nextEncoded)
+			loginRequest := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(form.Encode()))
+			loginRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			finalResponse := httptest.NewRecorder()
+			e.ServeHTTP(finalResponse, loginRequest)
+
+			if finalResponse.Code != http.StatusFound {
+				t.Fatalf("login submission: expected 302, got %d", finalResponse.Code)
+			}
+			if got := finalResponse.Header().Get("Location"); got != tt.want {
+				t.Fatalf("login submission: expected redirect %q, got %q", tt.want, got)
+			}
+		})
+	}
+}
+
+func TestAuthLogin_RejectsTamperedBackslashNext(t *testing.T) {
+	_, e := authTestHandler(t)
+	for _, destination := range []string{
+		"/\\attacker.example",
+		"/\\\\attacker.example",
+		"/\\/attacker.example",
+		"/%5Cattacker.example",
+		"/safe\\path",
+	} {
+		t.Run(destination, func(t *testing.T) {
+			encodedNext := base64.RawURLEncoding.EncodeToString([]byte(destination))
+			form := url.Values{}
+			form.Set("username", "admin")
+			form.Set("password", "secret")
+			form.Set("next", encodedNext)
+			request := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(form.Encode()))
+			request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			response := httptest.NewRecorder()
+			e.ServeHTTP(response, request)
+
+			if response.Code != http.StatusFound {
+				t.Fatalf("expected 302, got %d", response.Code)
+			}
+			if got := response.Header().Get("Location"); got != "/" {
+				t.Fatalf("expected safe local redirect '/', got %q", got)
+			}
+		})
 	}
 }
 
@@ -308,7 +432,7 @@ func TestAuthLoginLockout_SlidingWindowAndDuration(t *testing.T) {
 	if !h.isLoginLocked(thirdInWindow) {
 		t.Fatal("expected lock after third failure within one-hour sliding window")
 	}
-	if !h.isLoginLocked(thirdInWindow.Add(6*time.Hour-time.Second)) {
+	if !h.isLoginLocked(thirdInWindow.Add(6*time.Hour - time.Second)) {
 		t.Fatal("expected lock to remain active until full six-hour duration elapsed")
 	}
 	if h.isLoginLocked(thirdInWindow.Add(6*time.Hour + time.Second)) {

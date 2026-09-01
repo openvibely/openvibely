@@ -108,6 +108,7 @@ func TestResolveAuthSessionTTL(t *testing.T) {
 		{name: "empty defaults", raw: "", want: "24h0m0s"},
 		{name: "valid hours", raw: "48h", want: "48h0m0s"},
 		{name: "valid minutes", raw: "30m", want: "30m0s"},
+		{name: "valid subsecond", raw: "100ms", want: "100ms"},
 		{name: "invalid defaults", raw: "abc", want: "24h0m0s"},
 		{name: "non-positive defaults", raw: "0s", want: "24h0m0s"},
 	}

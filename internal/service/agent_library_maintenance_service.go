@@ -97,11 +97,19 @@ func (s *AgentLibraryMaintenanceService) DeclarationSyncMetrics() AgentDeclarati
 }
 
 func (s *AgentLibraryMaintenanceService) SyncRootDeclarations(ctx context.Context, projectRoot string) error {
-	_, err := s.syncRootDeclarations(ctx, projectRoot)
+	_, err := s.syncRootDeclarations(ctx, projectRoot, "")
 	return err
 }
 
-func (s *AgentLibraryMaintenanceService) syncRootDeclarations(ctx context.Context, projectRoot string) (bool, error) {
+// SyncRootDeclarationsForProject synchronizes the global root and the selected
+// project's root. Declarations in the project root that name a different
+// project are ignored so a stale copy cannot overwrite another project's agent.
+func (s *AgentLibraryMaintenanceService) SyncRootDeclarationsForProject(ctx context.Context, projectRoot, projectID string) error {
+	_, err := s.syncRootDeclarations(ctx, projectRoot, strings.TrimSpace(projectID))
+	return err
+}
+
+func (s *AgentLibraryMaintenanceService) syncRootDeclarations(ctx context.Context, projectRoot, projectID string) (bool, error) {
 	if s == nil || s.agentRepo == nil {
 		return false, nil
 	}
@@ -119,13 +127,13 @@ func (s *AgentLibraryMaintenanceService) syncRootDeclarations(ctx context.Contex
 	}
 	applier := agentlibrary.NewRepoApplier(s.agentRepo, hookStore)
 	projectChanged := !s.activeProjectRootKnown || s.activeProjectRoot != projectRoot
-	globalResult, err := s.syncRootDeclarationsFromRoot(ctx, s.agentsRootPath, applier, projectChanged)
+	globalResult, err := s.syncRootDeclarationsFromRoot(ctx, s.agentsRootPath, applier, projectChanged, "")
 	if err != nil {
 		return globalResult.changed, err
 	}
 	changed := globalResult.changed
 	if projectRoot != "" {
-		projectResult, syncErr := s.syncRootDeclarationsFromRoot(ctx, projectRoot, applier, projectChanged || changed)
+		projectResult, syncErr := s.syncRootDeclarationsFromRoot(ctx, projectRoot, applier, projectChanged || changed, projectID)
 		if syncErr != nil {
 			return changed, syncErr
 		}
@@ -144,7 +152,7 @@ func (s *AgentLibraryMaintenanceService) syncRootDeclarations(ctx context.Contex
 	return changed, nil
 }
 
-func (s *AgentLibraryMaintenanceService) syncRootDeclarationsFromRoot(ctx context.Context, root string, applier *agentlibrary.RepoApplier, forceCached bool) (declarationRootSyncResult, error) {
+func (s *AgentLibraryMaintenanceService) syncRootDeclarationsFromRoot(ctx context.Context, root string, applier *agentlibrary.RepoApplier, forceCached bool, projectID string) (declarationRootSyncResult, error) {
 	result := declarationRootSyncResult{active: map[string]struct{}{}, displaced: map[string]struct{}{}}
 	if root == "" || applier == nil {
 		return result, nil
@@ -175,6 +183,10 @@ func (s *AgentLibraryMaintenanceService) syncRootDeclarationsFromRoot(ctx contex
 		fingerprint := fingerprintDeclaration(info)
 		cached, cachedOK := s.declarationCache[path]
 		if cachedOK && cached.fingerprint == fingerprint {
+			if cached.declaration != nil && !declarationMatchesProjectRoot(cached.declaration, projectID) {
+				result.displaced[cached.declaration.Agent.Key] = struct{}{}
+				continue
+			}
 			if cached.declaration != nil {
 				result.active[cached.declaration.Agent.Key] = struct{}{}
 			}
@@ -208,6 +220,13 @@ func (s *AgentLibraryMaintenanceService) syncRootDeclarationsFromRoot(ctx contex
 		if decl.Agent.SystemPrompt == "" {
 			decl.Agent.SystemPrompt = strings.TrimSpace(body)
 		}
+		if !declarationMatchesProjectRoot(decl, projectID) {
+			if cachedOK && cached.declaration != nil {
+				result.displaced[cached.declaration.Agent.Key] = struct{}{}
+			}
+			s.declarationCache[path] = declarationCacheEntry{fingerprint: fingerprint, declaration: decl}
+			continue
+		}
 		if cachedOK && cached.declaration != nil && cached.declaration.Agent.Key != decl.Agent.Key {
 			result.displaced[cached.declaration.Agent.Key] = struct{}{}
 		}
@@ -221,6 +240,17 @@ func (s *AgentLibraryMaintenanceService) syncRootDeclarationsFromRoot(ctx contex
 	}
 	s.pruneMissingDeclarationPaths(agentsDir, currentPaths, result.displaced)
 	return result, nil
+}
+
+func declarationMatchesProjectRoot(decl *agentlibrary.SkillDeclaration, projectID string) bool {
+	if decl == nil || strings.TrimSpace(projectID) == "" {
+		return true
+	}
+	declaredProjectID := strings.TrimSpace(decl.Agent.ProjectID)
+	// Empty project_id is retained for legacy project declarations that predate
+	// persisted project ownership. A non-empty owner must match the root being
+	// synchronized.
+	return declaredProjectID == "" || declaredProjectID == strings.TrimSpace(projectID)
 }
 
 func (s *AgentLibraryMaintenanceService) pruneMissingDeclarationPaths(agentsDir string, currentPaths map[string]struct{}, displaced map[string]struct{}) {

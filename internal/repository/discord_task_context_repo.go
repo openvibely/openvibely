@@ -41,7 +41,9 @@ var discordTaskContextLifecycle = taskContextLifecycle[models.DiscordTaskContext
 }
 
 func (r *DiscordTaskContextRepo) Upsert(ctx context.Context, dtc *models.DiscordTaskContext) error {
-	return r.UpsertWithExecutor(ctx, r.db, dtc)
+	return withBoundSQLiteConn(ctx, r.db, func(conn *sql.Conn) error {
+		return r.UpsertWithExecutor(ctx, conn, dtc)
+	})
 }
 
 // UpsertWithExecutor persists Discord task context using the caller's transaction.

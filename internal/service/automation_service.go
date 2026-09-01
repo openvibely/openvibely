@@ -266,6 +266,21 @@ func (s *AutomationGraphService) List(ctx context.Context, projectID string) ([]
 	return cards, nil
 }
 
+// ListPage returns one bounded portfolio page while keeping template revision
+// enrichment identical to the full portfolio path.
+func (s *AutomationGraphService) ListPage(ctx context.Context, projectID string, limit, offset int, search string) ([]models.AutomationCard, error) {
+	cards, err := s.repo.ListPortfolioCardsPage(ctx, projectID, limit, offset, search)
+	if err != nil {
+		return nil, err
+	}
+	for i := range cards {
+		currentTemplateRevision := CurrentAutomationTemplateRevision(cards[i].Version.AdapterKey)
+		cards[i].TemplateUpdateAvailable = currentTemplateRevision > 0 &&
+			(cards[i].Automation.TemplateRevision == nil || *cards[i].Automation.TemplateRevision < currentTemplateRevision)
+	}
+	return cards, nil
+}
+
 func (s *AutomationGraphService) GetLive(ctx context.Context, projectID, automationID string, now time.Time) (*models.AutomationLiveGraph, error) {
 	queryStarted := time.Now()
 	definition, err := s.repo.GetDefinition(ctx, projectID, automationID)

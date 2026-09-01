@@ -272,6 +272,72 @@ func TestRegisteredMaintainedAutomationCanBeReopenedAndSaved(t *testing.T) {
 	require.Equal(t, "github_assignment", automationDraftNodeByKey(t, githubReopened.Candidate, "assignment").Config["approval_method"])
 }
 
+func TestRegisteredSharedInboxTaskCanBeReopenedAndSaved(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	project := automationTestProject(t, repository.NewProjectRepo(db), "Editable shared inbox Automation")
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	automationRepo := repository.NewAutomationRepo(db)
+	registry := NewAutomationAdapterRegistry()
+	worker, schedule := automationTestTaskAndSchedule(t, taskRepo, scheduleRepo, project.ID, "Shared inbox worker")
+
+	definition, reused, err := NewAutomationRegistrationService(automationRepo, registry).Register(ctx, AutomationRegistrationRequest{
+		ProjectID: project.ID, AdapterKey: AutomationAdapterNativeSDLC, StableKey: "native-sdlc/shared-inbox-editable",
+		Resources: []models.AutomationResourceBinding{
+			{NodeKey: "inbox", ResourceType: "task", ResourceID: worker.ID, Relation: "shared"},
+			{NodeKey: "inbox", ResourceType: "schedule", ResourceID: schedule.ID},
+		},
+	})
+	require.NoError(t, err)
+	require.False(t, reused)
+	var initialTaskRelation string
+	for _, resource := range definition.Resources {
+		if resource.NodeKey == "inbox" && resource.ResourceType == "task" {
+			initialTaskRelation = resource.Relation
+		}
+	}
+	require.Equal(t, "shared", initialTaskRelation)
+
+	before, err := taskRepo.GetByID(ctx, worker.ID)
+	require.NoError(t, err)
+	require.NotNil(t, before)
+	drafts := NewAutomationDraftService(automationRepo, registry)
+	reopened, err := drafts.CurrentCandidate(ctx, project.ID, definition.Automation.ID)
+	require.NoError(t, err)
+	require.Empty(t, reopened.ValidationErrors)
+	for i := range reopened.Candidate.Nodes {
+		if reopened.Candidate.Nodes[i].Key == "inbox" {
+			reopened.Candidate.Nodes[i].Config["prompt"] = "Edited graph-only inbox prompt"
+			reopened.Candidate.Nodes[i].Config["priority"] = 3
+		}
+	}
+	validator := NewAutomationSaveValidator(registry, drafts)
+	compiler := NewAutomationCompiler(automationRepo, NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil), taskRepo, scheduleRepo, validator)
+
+	saved, err := compiler.Save(ctx, AutomationSaveRequest{ProjectID: project.ID, AutomationID: definition.Automation.ID,
+		Source: "manual", CreatedVia: "web", Candidate: reopened.Candidate})
+	require.NoError(t, err)
+	require.Equal(t, worker.ID, automationResourceID(t, saved.Definition, "inbox", "task"))
+	require.Equal(t, schedule.ID, automationResourceID(t, saved.Definition, "inbox", "schedule"))
+	var savedTaskRelation string
+	for _, resource := range saved.Definition.Resources {
+		if resource.NodeKey == "inbox" && resource.ResourceType == "task" {
+			savedTaskRelation = resource.Relation
+		}
+	}
+	require.Equal(t, "shared", savedTaskRelation)
+
+	after, err := taskRepo.GetByID(ctx, worker.ID)
+	require.NoError(t, err)
+	require.NotNil(t, after)
+	require.Equal(t, before.Title, after.Title)
+	require.Equal(t, before.Prompt, after.Prompt)
+	require.Equal(t, before.Category, after.Category)
+	require.Equal(t, before.Priority, after.Priority)
+	require.Equal(t, before.Status, after.Status)
+}
+
 func TestAutomationPortfolioListUsesCompactPublishedCardProjection(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	ctx := context.Background()

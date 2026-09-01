@@ -3,9 +3,15 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/openvibely/openvibely/internal/models"
+)
+
+var (
+	ErrInsightNotFound   = errors.New("insight not found")
+	ErrKnowledgeNotFound = errors.New("knowledge entry not found")
 )
 
 type InsightsRepo struct {
@@ -19,7 +25,7 @@ func NewInsightsRepo(db *sql.DB) *InsightsRepo {
 // --- Insights ---
 
 func (r *InsightsRepo) CreateInsight(ctx context.Context, i *models.Insight) error {
-	return r.db.QueryRowContext(ctx, `
+	return queryRowBoundSQLite(ctx, r.db, `
 		INSERT INTO insights (project_id, type, severity, status, title, description, evidence, suggestion, impact, task_id, confidence)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		RETURNING id, created_at, updated_at`,
@@ -27,11 +33,11 @@ func (r *InsightsRepo) CreateInsight(ctx context.Context, i *models.Insight) err
 	).Scan(&i.ID, &i.CreatedAt, &i.UpdatedAt)
 }
 
-func (r *InsightsRepo) GetInsight(ctx context.Context, id string) (*models.Insight, error) {
+func (r *InsightsRepo) GetInsight(ctx context.Context, projectID, id string) (*models.Insight, error) {
 	var i models.Insight
 	err := r.db.QueryRowContext(ctx, `
 		SELECT id, project_id, type, severity, status, title, description, evidence, suggestion, impact, task_id, confidence, created_at, updated_at, resolved_at
-		FROM insights WHERE id = ?`, id,
+		FROM insights WHERE project_id = ? AND id = ?`, projectID, id,
 	).Scan(&i.ID, &i.ProjectID, &i.Type, &i.Severity, &i.Status, &i.Title, &i.Description, &i.Evidence, &i.Suggestion, &i.Impact, &i.TaskID, &i.Confidence, &i.CreatedAt, &i.UpdatedAt, &i.ResolvedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -84,23 +90,53 @@ func (r *InsightsRepo) ListByType(ctx context.Context, projectID string, insight
 	return scanInsights(rows)
 }
 
-func (r *InsightsRepo) UpdateStatus(ctx context.Context, id string, status models.InsightStatus) error {
-	query := `UPDATE insights SET status = ?, updated_at = datetime('now') WHERE id = ?`
+func (r *InsightsRepo) UpdateStatus(ctx context.Context, projectID, id string, status models.InsightStatus) error {
+	query := `UPDATE insights SET status = ?, updated_at = datetime('now') WHERE project_id = ? AND id = ?`
 	if status == models.InsightStatusResolved {
-		query = `UPDATE insights SET status = ?, updated_at = datetime('now'), resolved_at = datetime('now') WHERE id = ?`
+		query = `UPDATE insights SET status = ?, updated_at = datetime('now'), resolved_at = datetime('now') WHERE project_id = ? AND id = ?`
 	}
-	_, err := r.db.ExecContext(ctx, query, status, id)
-	return err
+	result, err := execBoundSQLite(ctx, r.db, query, status, projectID, id)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return ErrInsightNotFound
+	}
+	return nil
 }
 
-func (r *InsightsRepo) LinkTask(ctx context.Context, insightID, taskID string) error {
-	_, err := r.db.ExecContext(ctx, `UPDATE insights SET task_id = ?, status = 'accepted', updated_at = datetime('now') WHERE id = ?`, taskID, insightID)
-	return err
+func (r *InsightsRepo) LinkTask(ctx context.Context, projectID, insightID, taskID string) error {
+	result, err := execBoundSQLite(ctx, r.db, `UPDATE insights SET task_id = ?, status = 'accepted', updated_at = datetime('now') WHERE project_id = ? AND id = ?`, taskID, projectID, insightID)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return ErrInsightNotFound
+	}
+	return nil
 }
 
-func (r *InsightsRepo) DeleteInsight(ctx context.Context, id string) error {
-	_, err := r.db.ExecContext(ctx, `DELETE FROM insights WHERE id = ?`, id)
-	return err
+func (r *InsightsRepo) DeleteInsight(ctx context.Context, projectID, id string) error {
+	result, err := execBoundSQLite(ctx, r.db, `DELETE FROM insights WHERE project_id = ? AND id = ?`, projectID, id)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return ErrInsightNotFound
+	}
+	return nil
 }
 
 func (r *InsightsRepo) CountByStatus(ctx context.Context, projectID string) (map[string]int, error) {
@@ -174,7 +210,7 @@ func (r *InsightsRepo) ExistingInsight(ctx context.Context, projectID string, ti
 // --- Insight Reports ---
 
 func (r *InsightsRepo) CreateReport(ctx context.Context, rpt *models.InsightReport) error {
-	return r.db.QueryRowContext(ctx, `
+	return queryRowBoundSQLite(ctx, r.db, `
 		INSERT INTO insight_reports (project_id, report_date, summary, insight_ids, stats, analysis_log)
 		VALUES (?, ?, ?, ?, ?, ?)
 		RETURNING id, created_at`,
@@ -223,7 +259,7 @@ func (r *InsightsRepo) ListReports(ctx context.Context, projectID string, limit 
 // --- Knowledge Entries ---
 
 func (r *InsightsRepo) CreateKnowledge(ctx context.Context, k *models.KnowledgeEntry) error {
-	return r.db.QueryRowContext(ctx, `
+	return queryRowBoundSQLite(ctx, r.db, `
 		INSERT INTO knowledge_entries (project_id, topic, content, source, source_ref, tags)
 		VALUES (?, ?, ?, ?, ?, ?)
 		RETURNING id, created_at, updated_at`,
@@ -231,11 +267,11 @@ func (r *InsightsRepo) CreateKnowledge(ctx context.Context, k *models.KnowledgeE
 	).Scan(&k.ID, &k.CreatedAt, &k.UpdatedAt)
 }
 
-func (r *InsightsRepo) GetKnowledge(ctx context.Context, id string) (*models.KnowledgeEntry, error) {
+func (r *InsightsRepo) GetKnowledge(ctx context.Context, projectID, id string) (*models.KnowledgeEntry, error) {
 	var k models.KnowledgeEntry
 	err := r.db.QueryRowContext(ctx, `
 		SELECT id, project_id, topic, content, source, source_ref, tags, created_at, updated_at
-		FROM knowledge_entries WHERE id = ?`, id,
+		FROM knowledge_entries WHERE project_id = ? AND id = ?`, projectID, id,
 	).Scan(&k.ID, &k.ProjectID, &k.Topic, &k.Content, &k.Source, &k.SourceRef, &k.Tags, &k.CreatedAt, &k.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -268,9 +304,19 @@ func (r *InsightsRepo) ListKnowledge(ctx context.Context, projectID string, limi
 	return entries, rows.Err()
 }
 
-func (r *InsightsRepo) DeleteKnowledge(ctx context.Context, id string) error {
-	_, err := r.db.ExecContext(ctx, `DELETE FROM knowledge_entries WHERE id = ?`, id)
-	return err
+func (r *InsightsRepo) DeleteKnowledge(ctx context.Context, projectID, id string) error {
+	result, err := execBoundSQLite(ctx, r.db, `DELETE FROM knowledge_entries WHERE project_id = ? AND id = ?`, projectID, id)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return ErrKnowledgeNotFound
+	}
+	return nil
 }
 
 // --- Aggregate queries for analysis ---
@@ -372,7 +418,7 @@ func (r *InsightsRepo) GetSlowExecutions(ctx context.Context, projectID string, 
 // --- Health Checks ---
 
 func (r *InsightsRepo) CreateHealthCheck(ctx context.Context, hc *models.HealthCheck) error {
-	return r.db.QueryRowContext(ctx, `
+	return queryRowBoundSQLite(ctx, r.db, `
 		INSERT INTO health_checks (project_id, grade, strengths, improvements, assessment, how_to_improve, tasks_total, tasks_completed, tasks_failed, tasks_pending, backlog_size, avg_completion_pct)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		RETURNING id, created_at`,
@@ -536,7 +582,7 @@ func (r *InsightsRepo) GetTagDistribution(ctx context.Context, projectID string)
 // --- Idea Grades ---
 
 func (r *InsightsRepo) CreateIdeaGrade(ctx context.Context, ig *models.IdeaGrade) error {
-	return r.db.QueryRowContext(ctx, `
+	return queryRowBoundSQLite(ctx, r.db, `
 		INSERT INTO idea_grades (project_id, grade, summary, strengths, improvements, how_to_next_grade, next_grade, tasks_evaluated, clarity_score, ambition_score, follow_through, diversity_score, strategy_score)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		RETURNING id, created_at`,

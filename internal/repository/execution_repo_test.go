@@ -24,6 +24,73 @@ func TestExecutionRepo_ListByTaskHistoryPageUsesTaskStartedIndex(t *testing.T) {
 	}
 }
 
+func TestExecutionRepo_ListByTaskChronologicalPageUsesTaskStartedIndex(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	plan := explainExecutionRepoPlan(t, db, taskExecutionChronologicalPageSQL, "thread-page-plan", 20, 0)
+	if !strings.Contains(plan, "idx_executions_task_started_at") {
+		t.Fatalf("expected task-thread page query to use idx_executions_task_started_at, plan:\n%s", plan)
+	}
+	if strings.Contains(plan, "USE TEMP B-TREE FOR ORDER BY") {
+		t.Fatalf("task-thread page query should not sort with a temp B-tree, plan:\n%s", plan)
+	}
+
+	countPlan := explainExecutionRepoPlan(t, db, taskExecutionCountSQL, "thread-page-plan")
+	if !strings.Contains(countPlan, "idx_executions_task_started_at") {
+		t.Fatalf("expected task-thread count query to use idx_executions_task_started_at, plan:\n%s", countPlan)
+	}
+}
+
+func TestExecutionRepo_ListByTaskChronologicalPage(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := NewTaskRepo(db, nil)
+	execRepo := NewExecutionRepo(db)
+	ctx := context.Background()
+	task := &models.Task{ProjectID: "default", Title: "Thread Page Test", Category: models.CategoryBacklog, Status: models.StatusCompleted, Prompt: "original"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	startedAt := "2026-08-18 12:00:00"
+	rows := []struct {
+		id         string
+		prompt     string
+		isFollowup int
+	}{
+		{id: "thread-page-0", prompt: "first"},
+		{id: "thread-page-1", prompt: "second", isFollowup: 1},
+		{id: "thread-page-2", prompt: "third", isFollowup: 1},
+		{id: "thread-page-3", prompt: "fourth", isFollowup: 1},
+	}
+	for _, row := range rows {
+		if _, err := db.ExecContext(ctx, `INSERT INTO executions
+			(id, task_id, status, prompt_sent, output, is_followup, started_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?)`, row.id, task.ID, models.ExecCompleted, row.prompt, "output "+row.prompt, row.isFollowup, startedAt); err != nil {
+			t.Fatalf("insert execution %s: %v", row.id, err)
+		}
+	}
+
+	total, err := execRepo.CountByTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("CountByTask: %v", err)
+	}
+	if total != len(rows) {
+		t.Fatalf("CountByTask = %d, want %d", total, len(rows))
+	}
+
+	page, err := execRepo.ListByTaskChronologicalPage(ctx, task.ID, 1, 2)
+	if err != nil {
+		t.Fatalf("ListByTaskChronologicalPage: %v", err)
+	}
+	if len(page) != 2 {
+		t.Fatalf("page length = %d, want 2", len(page))
+	}
+	if page[0].ID != rows[1].id || page[1].ID != rows[2].id {
+		t.Fatalf("page IDs = [%s, %s], want [%s, %s]", page[0].ID, page[1].ID, rows[1].id, rows[2].id)
+	}
+	if page[0].DiffOutput != "" || page[1].ReasoningContent != "" {
+		t.Fatal("chronological page should use the light execution projection")
+	}
+}
 func TestExecutionRepo_GetTaskExecutionMetrics(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	taskRepo := NewTaskRepo(db, nil)

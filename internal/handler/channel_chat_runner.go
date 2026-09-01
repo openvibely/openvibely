@@ -79,5 +79,6 @@ func (h *Handler) StartChannelTaskRun(ctx context.Context, req service.ChannelTa
 		Surface:         req.Surface,
 		ChannelReply:    req.ReplyContext,
 		InputOrigin:     req.ReplyContext.Source,
+		RuntimeTools:    req.RuntimeTools,
 	})
 }

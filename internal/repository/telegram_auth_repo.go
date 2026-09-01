@@ -63,7 +63,7 @@ func (r *TelegramAuthRepo) IsAuthorized(ctx context.Context, projectID string, t
 // Called when a user first messages the bot, so future checks can use the numeric ID.
 // projectID is accepted for compatibility but does not scope inbound authorization.
 func (r *TelegramAuthRepo) BackfillUserID(ctx context.Context, projectID string, username string, userID int64) error {
-	_, err := r.db.ExecContext(ctx,
+	_, err := execBoundSQLite(ctx, r.db,
 		`UPDATE telegram_authorized_users SET telegram_user_id = ?
 		 WHERE telegram_user_id = 0 AND telegram_username != '' AND LOWER(telegram_username) = LOWER(?)`,
 		userID, username)
@@ -93,7 +93,7 @@ func (r *TelegramAuthRepo) IsAuthorizedAnywhere(ctx context.Context, telegramUse
 // Create adds a system-level authorized Telegram user.
 func (r *TelegramAuthRepo) Create(ctx context.Context, u *models.TelegramAuthorizedUser) error {
 	u.TelegramUsername = strings.ToLower(strings.TrimSpace(strings.TrimPrefix(u.TelegramUsername, "@")))
-	err := r.db.QueryRowContext(ctx,
+	err := queryRowBoundSQLite(ctx, r.db,
 		`INSERT INTO telegram_authorized_users (project_id, telegram_user_id, telegram_username, display_name, added_by)
 		 VALUES (?, ?, ?, ?, ?)
 		 ON CONFLICT DO NOTHING
@@ -113,7 +113,7 @@ func (r *TelegramAuthRepo) Create(ctx context.Context, u *models.TelegramAuthori
 		arg = u.TelegramUsername
 	}
 	if u.DisplayName != "" {
-		if _, updateErr := r.db.ExecContext(ctx, `UPDATE telegram_authorized_users SET display_name = ?, added_by = ? WHERE `+where, u.DisplayName, u.AddedBy, arg); updateErr != nil {
+		if _, updateErr := execBoundSQLite(ctx, r.db, `UPDATE telegram_authorized_users SET display_name = ?, added_by = ? WHERE `+where, u.DisplayName, u.AddedBy, arg); updateErr != nil {
 			return updateErr
 		}
 	}
