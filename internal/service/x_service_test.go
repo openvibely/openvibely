@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
@@ -331,6 +332,7 @@ func BenchmarkXPollBatch(b *testing.B) {
 		})
 	}
 }
+
 type xProjectResolutionFixture struct {
 	ctx           context.Context
 	counter       *testutil.SQLStatementCounter
