@@ -1707,7 +1707,10 @@ func (s *AutomationDraftService) PreviewCandidate(ctx context.Context, projectID
 	return result, nil
 }
 
-func (s *AutomationDraftService) CurrentCandidate(ctx context.Context, projectID, automationID string) (*models.AutomationDraftResult, error) {
+// LoadCurrentCandidate loads and normalizes the persisted candidate without
+// validating it against the current project capabilities. Edit callers can use
+// this when they will validate the candidate that is actually being submitted.
+func (s *AutomationDraftService) LoadCurrentCandidate(ctx context.Context, projectID, automationID string) (*models.AutomationDraftResult, error) {
 	if s == nil || s.repo == nil {
 		return nil, errors.New("automation repository is unavailable")
 	}
@@ -1730,7 +1733,15 @@ func (s *AutomationDraftService) CurrentCandidate(ctx context.Context, projectID
 	if err != nil {
 		return nil, err
 	}
-	return s.PreviewCandidate(ctx, projectID, candidate, current)
+	return draftPreviewResult(candidate, current), nil
+}
+
+func (s *AutomationDraftService) CurrentCandidate(ctx context.Context, projectID, automationID string) (*models.AutomationDraftResult, error) {
+	loaded, err := s.LoadCurrentCandidate(ctx, projectID, automationID)
+	if err != nil {
+		return nil, err
+	}
+	return s.PreviewCandidate(ctx, projectID, loaded.Candidate, loaded.Definition)
 }
 
 func (s *AutomationDraftService) hydratePersistedScheduleContext(ctx context.Context, projectID string, candidate models.AutomationDraftCandidate, current *models.AutomationDefinition) (models.AutomationDraftCandidate, error) {
