@@ -292,6 +292,12 @@ func (s *XService) requireConfigurationWithExecutor(ctx context.Context, exec re
 }
 
 func (s *XService) pollOnce(ctx context.Context) error {
+	return s.pollOnceWithMentionConfigurationCheck(ctx, false)
+}
+
+// pollOnceWithMentionConfigurationCheck shares the complete polling path between
+// normal polling and the historical per-mention-check benchmark comparison.
+func (s *XService) pollOnceWithMentionConfigurationCheck(ctx context.Context, checkEachMention bool) error {
 	if s.receiptRepo == nil || s.authRepo == nil || s.projectRepo == nil {
 		return fmt.Errorf("X channel persistence is not configured")
 	}
@@ -333,6 +339,11 @@ func (s *XService) pollOnce(ctx context.Context) error {
 		}
 		if tweet.AuthorID == s.me.ID {
 			continue
+		}
+		if checkEachMention {
+			if _, err := s.pollingSettings(ctx); err != nil {
+				return err
+			}
 		}
 		user := users[tweet.AuthorID]
 		// The immutable tweet author_id is the authorization identity. Expanded
