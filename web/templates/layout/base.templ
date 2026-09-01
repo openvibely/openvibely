@@ -4322,6 +4322,15 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							var search = input ? (input.value || '').trim() : '';
 							var url;
 							try { url = new URL(rawURL, window.location.href); } catch (_) { return rawURL; }
+							var preserveParams = (root.getAttribute('data-card-pagination-preserve-params') || '').split(',');
+							var endpoint = null;
+							try { endpoint = new URL(root.getAttribute('data-card-pagination-url') || '', window.location.href); } catch (_) {}
+							for (var i = 0; i < preserveParams.length; i++) {
+								var preserveKey = preserveParams[i].trim();
+								if (!preserveKey || !endpoint) continue;
+								if (endpoint.searchParams.has(preserveKey)) url.searchParams.set(preserveKey, endpoint.searchParams.get(preserveKey));
+								else url.searchParams.delete(preserveKey);
+							}
 							url.searchParams.set('card_window', '1');
 							url.searchParams.set('page_size', String(Math.max(pageSize, count)));
 							url.searchParams.set('page', '0');

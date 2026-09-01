@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/labstack/echo/v4"
@@ -360,6 +361,97 @@ func TestHandler_ListAlerts(t *testing.T) {
 		require.NoError(t, err)
 		assertCode(t, rec, http.StatusOK)
 		assertContains(t, rec, "3 unread")
+	})
+}
+
+func TestHandler_ListAlertsSupportsWorkflowFiltersAndRefreshPreservation(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	project := createProject(t, h, "Alert filter project")
+	foreign := createProject(t, h, "Foreign alert filter project")
+
+	createFilteredAlert := func(projectID, title string, decision models.AlertDecisionState, processing models.AlertProcessingState, message string) *models.Alert {
+		t.Helper()
+		alert := &models.Alert{
+			ProjectID:       projectID,
+			Scope:           models.AlertScopeProject,
+			Type:            models.AlertCustom,
+			Severity:        models.SeverityInfo,
+			Title:           title,
+			Message:         message,
+			Source:          "alert-filter-test",
+			DecisionState:   decision,
+			ProcessingState: processing,
+		}
+		require.NoError(t, h.alertSvc.Create(context.Background(), alert))
+		return alert
+	}
+
+	pendingUnclaimed := createFilteredAlert(project.ID, "Pending unclaimed match", models.AlertDecisionPending, models.AlertProcessingUnclaimed, "needle")
+	pendingFailedFirst := createFilteredAlert(project.ID, "Pending failed first", models.AlertDecisionPending, models.AlertProcessingFailed, "needle")
+	pendingFailedSecond := createFilteredAlert(project.ID, "Pending failed second", models.AlertDecisionPending, models.AlertProcessingFailed, "needle")
+	approvedFailed := createFilteredAlert(project.ID, "Approved failed excluded", models.AlertDecisionApproved, models.AlertProcessingFailed, "needle")
+	createFilteredAlert(project.ID, "Operational excluded", models.AlertDecisionNotRequired, models.AlertProcessingNotApplicable, "other")
+	foreignAlert := createFilteredAlert(foreign.ID, "Foreign pending match", models.AlertDecisionPending, models.AlertProcessingFailed, "needle")
+
+	t.Run("combined filters and search are project scoped", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/alerts?project_id="+project.ID+"&decision_state=pending&processing_state=failed&search=needle", nil)
+		rec := httptest.NewRecorder()
+		require.NoError(t, h.ListAlerts(e.NewContext(req, rec)))
+		require.Equal(t, http.StatusOK, rec.Code)
+		body := rec.Body.String()
+		for _, want := range []string{pendingFailedFirst.Title, pendingFailedSecond.Title, `data-card-pagination-preserve-params="decision_state,processing_state"`, `value="pending" selected`, `value="failed" selected`, "5 unread"} {
+			require.Contains(t, body, want)
+		}
+		for _, excluded := range []string{pendingUnclaimed.Title, approvedFailed.Title, foreignAlert.Title, "Operational excluded"} {
+			require.NotContains(t, body, excluded)
+		}
+		require.Contains(t, body, "/alerts?decision_state=pending&amp;processing_state=failed&amp;project_id="+project.ID)
+	})
+
+	t.Run("filtered page keeps both predicates and page boundary", func(t *testing.T) {
+		firstReq := httptest.NewRequest(http.MethodGet, "/alerts?project_id="+project.ID+"&decision_state=pending&processing_state=failed&search=needle&page=0&page_size=1&card_page=1", nil)
+		firstRec := httptest.NewRecorder()
+		require.NoError(t, h.ListAlerts(e.NewContext(firstReq, firstRec)))
+		require.Equal(t, http.StatusOK, firstRec.Code)
+		require.Equal(t, "true", firstRec.Header().Get(cardPageHasMoreHeader))
+		firstBody := firstRec.Body.String()
+		secondReq := httptest.NewRequest(http.MethodGet, "/alerts?project_id="+project.ID+"&decision_state=pending&processing_state=failed&search=needle&page=1&page_size=1&card_page=1", nil)
+		secondRec := httptest.NewRecorder()
+		require.NoError(t, h.ListAlerts(e.NewContext(secondReq, secondRec)))
+		require.Equal(t, http.StatusOK, secondRec.Code)
+		secondBody := secondRec.Body.String()
+		require.NotEqual(t, strings.Contains(firstBody, pendingFailedFirst.Title), strings.Contains(secondBody, pendingFailedFirst.Title))
+		require.NotEqual(t, strings.Contains(firstBody, pendingFailedSecond.Title), strings.Contains(secondBody, pendingFailedSecond.Title))
+		require.Contains(t, secondBody, `data-card-pagination-url="/alerts?decision_state=pending&amp;processing_state=failed&amp;project_id=`+project.ID+`"`)
+	})
+
+	t.Run("mutation refresh keeps active filters", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/alerts/"+pendingUnclaimed.ID+"/approve?project_id="+project.ID+"&decision_state=pending&processing_state=unclaimed", nil)
+		req.Header.Set("HX-Request", "true")
+		rec := httptest.NewRecorder()
+		ctx := e.NewContext(req, rec)
+		ctx.SetParamNames("id")
+		ctx.SetParamValues(pendingUnclaimed.ID)
+		require.NoError(t, h.ApproveAlert(ctx))
+		require.Equal(t, http.StatusOK, rec.Code)
+		body := rec.Body.String()
+		require.NotContains(t, body, pendingUnclaimed.Title)
+		require.Contains(t, body, `value="pending" selected`)
+		require.Contains(t, body, `value="unclaimed" selected`)
+		require.Contains(t, body, "/alerts?decision_state=pending&amp;processing_state=unclaimed&amp;project_id="+project.ID)
+	})
+
+	t.Run("invalid values fall back to unfiltered project list", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/alerts?project_id="+project.ID+"&decision_state=unknown&processing_state=unknown", nil)
+		rec := httptest.NewRecorder()
+		require.NoError(t, h.ListAlerts(e.NewContext(req, rec)))
+		body := rec.Body.String()
+		for _, want := range []string{pendingFailedFirst.Title, pendingFailedSecond.Title, approvedFailed.Title, "Operational excluded"} {
+			require.Contains(t, body, want)
+		}
+		require.NotContains(t, body, foreignAlert.Title)
+		require.Contains(t, body, `value="" selected`)
+		require.NotContains(t, body, "unknown")
 	})
 }
 

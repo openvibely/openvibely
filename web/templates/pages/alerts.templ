@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net/url"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/web/templates/layout"
@@ -11,30 +12,40 @@ import (
 
 templ Alerts(projects []models.Project, currentProjectID string, alerts []models.AlertSummary, unreadCount int) {
 	@layout.Base("Alerts", projects, currentProjectID) {
-		@alertsContent(alerts, currentProjectID, unreadCount, false)
+		@alertsContent(alerts, currentProjectID, unreadCount, false, "", "")
 	}
 }
 
 // AlertsPage renders the initial bounded alert page with its page boundary.
 templ AlertsPage(projects []models.Project, currentProjectID string, alerts []models.AlertSummary, unreadCount int, hasMore bool) {
+	@AlertsPageWithFilters(projects, currentProjectID, alerts, unreadCount, hasMore, "", "")
+}
+
+// AlertsPageWithFilters renders the initial alert page with its active workflow filters.
+templ AlertsPageWithFilters(projects []models.Project, currentProjectID string, alerts []models.AlertSummary, unreadCount int, hasMore bool, decisionState models.AlertDecisionState, processingState models.AlertProcessingState) {
 	@layout.Base("Alerts", projects, currentProjectID) {
-		@alertsContent(alerts, currentProjectID, unreadCount, hasMore)
+		@alertsContent(alerts, currentProjectID, unreadCount, hasMore, decisionState, processingState)
 	}
 }
 
 templ AlertsContent(alerts []models.AlertSummary, currentProjectID string, unreadCount int) {
-	@alertsContent(alerts, currentProjectID, unreadCount, false)
+	@alertsContent(alerts, currentProjectID, unreadCount, false, "", "")
 }
 
 // AlertsContentPage renders a bounded alert page with its page boundary.
 templ AlertsContentPage(alerts []models.AlertSummary, currentProjectID string, unreadCount int, hasMore bool) {
-	@alertsContent(alerts, currentProjectID, unreadCount, hasMore)
+	@AlertsContentPageWithFilters(alerts, currentProjectID, unreadCount, hasMore, "", "")
 }
 
-templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unreadCount int, hasMore bool) {
-		<div id="alerts-container" class="h-full overflow-y-auto overflow-x-hidden max-w-full min-w-0" data-search-container data-card-pagination-root data-card-pagination-replacement-managed="true" data-card-pagination-url={ fmt.Sprintf("/alerts?project_id=%s", currentProjectID) } data-card-pagination-list="#alerts-card-list" data-card-pagination-card-selector="[data-alert-id]" data-card-pagination-key="data-alert-id" data-card-pagination-page-size="20" data-card-pagination-has-more={ cardPaginationHasMoreAttribute(hasMore) }>
+// AlertsContentPageWithFilters renders a bounded alert page with its active workflow filters.
+templ AlertsContentPageWithFilters(alerts []models.AlertSummary, currentProjectID string, unreadCount int, hasMore bool, decisionState models.AlertDecisionState, processingState models.AlertProcessingState) {
+	@alertsContent(alerts, currentProjectID, unreadCount, hasMore, decisionState, processingState)
+}
+
+templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unreadCount int, hasMore bool, decisionState models.AlertDecisionState, processingState models.AlertProcessingState) {
+		<div id="alerts-container" class="h-full overflow-y-auto overflow-x-hidden max-w-full min-w-0" data-search-container data-card-pagination-root data-card-pagination-replacement-managed="true" data-card-pagination-url={ alertListURL(currentProjectID, decisionState, processingState) } data-card-pagination-preserve-params="decision_state,processing_state" data-card-pagination-list="#alerts-card-list" data-card-pagination-card-selector="[data-alert-id]" data-card-pagination-key="data-alert-id" data-card-pagination-page-size="20" data-card-pagination-has-more={ cardPaginationHasMoreAttribute(hasMore) }>
 		<div id="alerts-content"
-			hx-get={ fmt.Sprintf("/alerts?project_id=%s", currentProjectID) }
+			hx-get={ alertListURL(currentProjectID, decisionState, processingState) }
 			hx-trigger="alertUpdate from:body"
 			hx-target="this"
 			hx-select="#alerts-content"
@@ -107,22 +118,54 @@ templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unrea
 			</div>
 			<div class="mb-4 rounded-box bg-base-200/60 px-4 py-3 text-sm text-base-content/70">			Showing notifications for the selected project only. Approval permits creation of an implementation task; it does not authorize merge, release, or deployment.
 		</div>
-			@CardSearchInput("alerts", "Search alerts...")
+			<form id="alerts-filter-form" method="get" action="/alerts" class="mb-4 flex flex-wrap items-end gap-3" data-alert-filter-form>
+				<input type="hidden" name="project_id" value={ currentProjectID } />
+				@CardSearchInput("alerts", "Search alerts...")
+				<div class="flex flex-wrap items-end gap-2" data-alert-filter-controls>
+					<label class="form-control w-48 max-w-full">
+						<span class="label-text text-xs">Decision state</span>
+						<select name="decision_state" class="select select-bordered select-sm" aria-label="Filter by decision state" onchange="this.form.submit()">
+							<option value="" selected?={ decisionState == "" }>All decision states</option>
+							<option value={ string(models.AlertDecisionPending) } selected?={ decisionState == models.AlertDecisionPending }>Pending</option>
+							<option value={ string(models.AlertDecisionApproved) } selected?={ decisionState == models.AlertDecisionApproved }>Approved</option>
+							<option value={ string(models.AlertDecisionRejected) } selected?={ decisionState == models.AlertDecisionRejected }>Rejected</option>
+							<option value={ string(models.AlertDecisionDismissed) } selected?={ decisionState == models.AlertDecisionDismissed }>Dismissed</option>
+							<option value={ string(models.AlertDecisionNotRequired) } selected?={ decisionState == models.AlertDecisionNotRequired }>Operational (not required)</option>
+						</select>
+					</label>
+					<label class="form-control w-56 max-w-full">
+						<span class="label-text text-xs">Processing state</span>
+						<select name="processing_state" class="select select-bordered select-sm" aria-label="Filter by processing state" onchange="this.form.submit()">
+							<option value="" selected?={ processingState == "" }>All processing states</option>
+							<option value={ string(models.AlertProcessingUnclaimed) } selected?={ processingState == models.AlertProcessingUnclaimed }>Unclaimed</option>
+							<option value={ string(models.AlertProcessingClaimed) } selected?={ processingState == models.AlertProcessingClaimed }>Claimed</option>
+							<option value={ string(models.AlertProcessingImplementationTaskLinked) } selected?={ processingState == models.AlertProcessingImplementationTaskLinked }>Implementation task linked</option>
+							<option value={ string(models.AlertProcessingCompleted) } selected?={ processingState == models.AlertProcessingCompleted }>Completed</option>
+							<option value={ string(models.AlertProcessingFailed) } selected?={ processingState == models.AlertProcessingFailed }>Failed</option>
+							<option value={ string(models.AlertProcessingNotApplicable) } selected?={ processingState == models.AlertProcessingNotApplicable }>Not applicable</option>
+						</select>
+					</label>
+				</div>
+			</form>
 			<div id="alerts-card-list" data-card-pagination-list>
-			if len(alerts) == 0 {
-				<div class="text-center py-12" data-search-empty-state>
-				<svg xmlns="http://www.w3.org/2000/svg" class="h-16 w-16 mx-auto opacity-30 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"></path>
-				</svg>
-				<p class="opacity-50">No alerts. You're all clear!</p>
-			</div>
-		} else {
-			<div class="grid grid-cols-1 gap-4 max-w-full min-w-0">
-				for _, alert := range alerts {
-					@alertRow(alert, currentProjectID)
+				if len(alerts) == 0 {
+					<div class="text-center py-12" data-search-empty-state>
+						<svg xmlns="http://www.w3.org/2000/svg" class="h-16 w-16 mx-auto opacity-30 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"></path>
+						</svg>
+						if decisionState != "" || processingState != "" {
+							<p class="opacity-50">No alerts match the selected filters.</p>
+						} else {
+							<p class="opacity-50">No alerts. You're all clear!</p>
+						}
+					</div>
+				} else {
+					<div class="grid grid-cols-1 gap-4 max-w-full min-w-0">
+						for _, alert := range alerts {
+							@alertRow(alert, currentProjectID)
+						}
+					</div>
 				}
-			</div>
-		}
 			</div>
 			@CardPaginationStatusWithBoundary(hasMore)
 		</div>
@@ -396,6 +439,18 @@ templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unrea
 		})();
 		</script>
 	</div>
+}
+
+func alertListURL(projectID string, decisionState models.AlertDecisionState, processingState models.AlertProcessingState) string {
+	query := url.Values{}
+	query.Set("project_id", projectID)
+	if decisionState != "" {
+		query.Set("decision_state", string(decisionState))
+	}
+	if processingState != "" {
+		query.Set("processing_state", string(processingState))
+	}
+	return "/alerts?" + query.Encode()
 }
 
 // alertSearchText intentionally excludes the full body and metadata so the
