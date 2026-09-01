@@ -386,6 +386,84 @@ func TestAutomationTaskAdmissionPersistsClaimedAndReservedResults(t *testing.T) 
 	}
 }
 
+func TestAutomationScheduledCustomCategoryValidationPrecedesAdmissionSkip(t *testing.T) {
+	for _, testCase := range []struct {
+		name     string
+		status   models.TaskStatus
+		reserved bool
+	}{
+		{name: "pending", status: models.StatusPending},
+		{name: "queued", status: models.StatusQueued},
+		{name: "running", status: models.StatusRunning},
+		{name: "reserved", status: models.StatusPending, reserved: true},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			db := testutil.NewTestDB(t)
+			ctx := context.Background()
+			fixture := seedAutomationLiveCountsDefinition(t, db, map[string]string{"trigger": "trigger"})
+			repo := NewAutomationRepo(db)
+			task := createRuntimeScheduledTask(t, ctx, NewTaskRepo(db, nil), fixture.ProjectID, "Invalid custom category")
+			if _, err := db.ExecContext(ctx, `UPDATE tasks SET status = ?, category = 'active' WHERE id = ?`, testCase.status, task.ID); err != nil {
+				t.Fatalf("set invalid custom task state: %v", err)
+			}
+			due := time.Now().UTC().Add(-time.Minute).Truncate(time.Second)
+			schedule := createRuntimeAutomationSchedule(t, ctx, db, fixture, task.ID, fixture.Nodes["trigger"], due)
+			if testCase.reserved {
+				if _, err := db.ExecContext(ctx, `INSERT INTO automation_invocations
+					(id, project_id, automation_id, version_id, trigger_node_id, trigger_resource_type, trigger_resource_id,
+					 occurrence_key, scheduled_for, status)
+					VALUES ('custom-category-existing-invocation', ?, ?, ?, ?, 'schedule', ?, 'custom-category-existing', ?, 'claimed')`,
+					fixture.ProjectID, fixture.AutomationID, fixture.VersionID, fixture.Nodes["trigger"], schedule.ID, due); err != nil {
+					t.Fatalf("insert existing invocation: %v", err)
+				}
+				if _, err := db.ExecContext(ctx, `INSERT INTO automation_dispatch_outbox (id, invocation_id, task_id)
+					VALUES ('custom-category-existing-dispatch', 'custom-category-existing-invocation', ?)`, task.ID); err != nil {
+					t.Fatalf("insert existing dispatch: %v", err)
+				}
+				if _, err := db.ExecContext(ctx, `INSERT INTO automation_task_run_reservations (task_id, dispatch_id, project_id)
+					VALUES (?, 'custom-category-existing-dispatch', ?)`, task.ID, fixture.ProjectID); err != nil {
+					t.Fatalf("insert existing reservation: %v", err)
+				}
+			}
+
+			now := due.Add(time.Minute)
+			nextRun := now.Add(time.Hour)
+			invocation, dispatch, err := repo.ClaimScheduledOccurrence(ctx, schedule, now, &nextRun)
+			if !errors.Is(err, ErrAutomationScheduleChanged) {
+				t.Fatalf("ClaimScheduledOccurrence error = %v, want %v", err, ErrAutomationScheduleChanged)
+			}
+			if invocation != nil || dispatch != nil {
+				t.Fatalf("ClaimScheduledOccurrence result invocation=%#v dispatch=%#v, want nil results", invocation, dispatch)
+			}
+
+			stored, err := NewScheduleRepo(db).GetByID(ctx, schedule.ID)
+			if err != nil {
+				t.Fatalf("reload schedule: %v", err)
+			}
+			if stored.NextRun == nil || !stored.NextRun.Equal(due) {
+				t.Fatalf("schedule next_run = %v, want unchanged due %v", stored.NextRun, due)
+			}
+			var invocationCount, dispatchCount, reservationCount int
+			if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_invocations`).Scan(&invocationCount); err != nil {
+				t.Fatalf("count invocations: %v", err)
+			}
+			if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_dispatch_outbox`).Scan(&dispatchCount); err != nil {
+				t.Fatalf("count dispatches: %v", err)
+			}
+			if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_task_run_reservations`).Scan(&reservationCount); err != nil {
+				t.Fatalf("count reservations: %v", err)
+			}
+			wantExisting := 0
+			if testCase.reserved {
+				wantExisting = 1
+			}
+			if invocationCount != wantExisting || dispatchCount != wantExisting || reservationCount != wantExisting {
+				t.Fatalf("persisted rows invocations=%d dispatches=%d reservations=%d, want each %d", invocationCount, dispatchCount, reservationCount, wantExisting)
+			}
+		})
+	}
+}
+
 func TestAutomationRepoScheduledDispatchLifecycle(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
