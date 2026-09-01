@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf16"
 	"unicode/utf8"
 
 	"github.com/openvibely/openvibely/internal/applog"
@@ -19,6 +20,7 @@ import (
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/util"
 	"github.com/rivo/uniseg"
+	"golang.org/x/net/idna"
 	"golang.org/x/text/unicode/norm"
 )
 
@@ -37,6 +39,8 @@ const (
 	xMaxMentionPages            = 10
 	xMaxWeightedPostLength      = 280
 	xTransformedURLLength       = 23
+	xMaxURLLength               = 4096
+	xMaxTCOURLSlugLength        = 40
 	xDefaultCharacterWeight     = 2
 )
 
@@ -756,21 +760,189 @@ func xURLRanges(text string) []xTextRange {
 			continue
 		}
 		candidate := text[start:end]
-		if !xURLHasProtocol(candidate) && !isXURLWithoutProtocolStart(text, start) {
-			continue
+		if !xURLHasProtocol(candidate) {
+			if !isXURLWithoutProtocolStart(text, start) || !isXASCIIURLDomain(xURLDomain(candidate)) {
+				continue
+			}
 		}
 		if end < len(text) && xURLDomainEndBlocked(text[end:]) {
 			continue
 		}
 		end = xURLSuffixEnd(text, end)
-		ranges = append(ranges, xTextRange{start: start, end: end})
+		candidate = text[start:end]
+		validatedEnd, ok := xValidatedURLSuffixEnd(candidate)
+		if !ok {
+			continue
+		}
+		ranges = append(ranges, xTextRange{start: start, end: start + validatedEnd})
 	}
 	return ranges
+}
+
+func xValidatedURLSuffixEnd(candidate string) (int, bool) {
+	if !xURLWithinProviderLimit(candidate) {
+		return 0, false
+	}
+
+	lower := strings.ToLower(candidate)
+	protocolLength := 0
+	if strings.HasPrefix(lower, "http://") {
+		protocolLength = len("http://")
+	} else if strings.HasPrefix(lower, "https://") {
+		protocolLength = len("https://")
+	}
+	if protocolLength == 0 {
+		return len(candidate), true
+	}
+	if !strings.HasPrefix(lower[protocolLength:], "t.co/") {
+		return len(candidate), true
+	}
+
+	slugStart := protocolLength + len("t.co/")
+	slugEnd := slugStart
+	for slugEnd < len(candidate) {
+		c := candidate[slugEnd]
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) {
+			break
+		}
+		slugEnd++
+	}
+	if slugEnd == slugStart {
+		return len(candidate), true
+	}
+	if slugEnd-slugStart > xMaxTCOURLSlugLength {
+		return 0, false
+	}
+
+	end := slugEnd
+	if end < len(candidate) && candidate[end] == '?' {
+		if query := xURLQueryPattern.FindStringIndex(candidate[end:]); query != nil && query[0] == 0 {
+			end += query[1]
+		}
+	}
+	return end, true
+}
+
+func xURLWithinProviderLimit(candidate string) bool {
+	authorityStart := 0
+	lower := strings.ToLower(candidate)
+	if strings.HasPrefix(lower, "http://") {
+		authorityStart = len("http://")
+	} else if strings.HasPrefix(lower, "https://") {
+		authorityStart = len("https://")
+	}
+
+	domainEnd := authorityStart
+	for domainEnd < len(candidate) {
+		r, size := utf8.DecodeRuneInString(candidate[domainEnd:])
+		switch r {
+		case ':', '/', '?', '#':
+			goto domainComplete
+		default:
+			domainEnd += size
+		}
+	}
+
+domainComplete:
+	domain := candidate[authorityStart:domainEnd]
+	encodedDomainLength, ok := xURLIDNADomainLength(domain)
+	if !ok {
+		return false
+	}
+
+	// X counts the URL after replacing a Unicode domain with its ASCII
+	// IDNA form. A protocol-less URL is treated as if it had the default
+	// https:// protocol for this validation.
+	length := xUTF16Length(candidate) - xUTF16Length(domain) + encodedDomainLength
+	if authorityStart == 0 {
+		length += xUTF16Length("https://")
+	}
+	return length <= xMaxURLLength
+}
+
+func xURLIDNADomainLength(domain string) (int, bool) {
+	if domain == "" {
+		return 0, false
+	}
+	labels := strings.Split(domain, ".")
+	length := len(labels) - 1
+	for _, label := range labels {
+		if label == "" {
+			return 0, false
+		}
+		encoded, err := idna.Punycode.ToASCII(label)
+		if err != nil || encoded == "" || len(encoded) > 63 {
+			return 0, false
+		}
+		length += len(encoded)
+	}
+	return length, true
+}
+
+func xUTF16Length(text string) int {
+	return len(utf16.Encode([]rune(text)))
 }
 
 func xURLHasProtocol(candidate string) bool {
 	lower := strings.ToLower(candidate)
 	return strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://")
+}
+
+func xURLDomain(candidate string) string {
+	authorityStart := 0
+	lower := strings.ToLower(candidate)
+	if strings.HasPrefix(lower, "http://") {
+		authorityStart = len("http://")
+	} else if strings.HasPrefix(lower, "https://") {
+		authorityStart = len("https://")
+	}
+
+	domainEnd := authorityStart
+	for domainEnd < len(candidate) {
+		r, size := utf8.DecodeRuneInString(candidate[domainEnd:])
+		switch r {
+		case ':', '/', '?', '#':
+			return candidate[authorityStart:domainEnd]
+		default:
+			domainEnd += size
+		}
+	}
+	return candidate[authorityStart:domainEnd]
+}
+
+func isXASCIIURLDomain(domain string) bool {
+	labels := strings.Split(domain, ".")
+	if len(labels) < 2 {
+		return false
+	}
+	for _, label := range labels[:len(labels)-1] {
+		if label == "" {
+			return false
+		}
+		for _, r := range label {
+			if !isXASCIIURLDomainRune(r) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func isXASCIIURLDomainRune(r rune) bool {
+	switch {
+	case r >= 'A' && r <= 'Z', r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '-':
+		return true
+	case r >= 0x00c0 && r <= 0x00d6, r >= 0x00d8 && r <= 0x00f6, r >= 0x00f8 && r <= 0x00ff:
+		return true
+	case r >= 0x0100 && r <= 0x024f:
+		return true
+	case r == 0x0253 || r == 0x0254 || r == 0x0256 || r == 0x0257 || r == 0x0259 || r == 0x025b || r == 0x0263 || r == 0x0268 || r == 0x026f || r == 0x0272 || r == 0x0289 || r == 0x028b || r == 0x02bb:
+		return true
+	case r >= 0x0300 && r <= 0x036f, r >= 0x1e00 && r <= 0x1eff:
+		return true
+	default:
+		return false
+	}
 }
 
 func isXURLWithoutProtocolStart(text string, start int) bool {

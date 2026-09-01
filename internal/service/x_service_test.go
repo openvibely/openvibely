@@ -1138,6 +1138,12 @@ func TestXOutboundUsesWeightedPostLimit(t *testing.T) {
 	api := &fakeXAPI{}
 	svc.setAPI(api)
 
+	maxURL := "https://example.com/" + strings.Repeat("a", xMaxURLLength-len("https://example.com/"))
+	overlongURL := maxURL + "a"
+	tcoAtLimit := strings.Repeat("x", 240) + " https://t.co/" + strings.Repeat("a", xMaxTCOURLSlugLength)
+	tcoOverLimit := strings.Repeat("x", 240) + " https://t.co/" + strings.Repeat("a", xMaxTCOURLSlugLength+1)
+	overlongIDNALabel := strings.Repeat("x", 120) + " " + strings.Repeat("界", 80) + ".com"
+
 	tests := []struct {
 		name       string
 		text       string
@@ -1159,6 +1165,11 @@ func TestXOutboundUsesWeightedPostLimit(t *testing.T) {
 		{name: "malformed URL-shaped text remains ordinary text", text: strings.Repeat("x", 258) + " https://not-a-url", shouldPost: true},
 		{name: "pseudo-TLD is not a URL entity", text: strings.Repeat("x", 258) + " example.invalid", shouldPost: true},
 		{name: "embedded email is not a URL entity", text: strings.Repeat("x", 258) + " hello@example.com", shouldPost: true},
+		{name: "URL exactly at provider maximum", text: maxURL, shouldPost: true},
+		{name: "URL over provider maximum", text: overlongURL, shouldPost: false},
+		{name: "t.co slug at provider maximum", text: tcoAtLimit, shouldPost: true},
+		{name: "t.co slug over provider maximum", text: tcoOverLimit, shouldPost: false},
+		{name: "IDNA label over provider maximum", text: overlongIDNALabel, shouldPost: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1223,12 +1234,19 @@ func TestXWeightedLengthConformanceRegressions(t *testing.T) {
 }
 
 func TestXURLRangesFollowTwitterTextEntityBoundaries(t *testing.T) {
+	maxURL := "https://example.com/" + strings.Repeat("a", xMaxURLLength-len("https://example.com/"))
+	overlongURL := maxURL + "a"
+	tcoAtLimit := "https://t.co/" + strings.Repeat("a", xMaxTCOURLSlugLength)
+	tcoOverLimit := "https://t.co/" + strings.Repeat("a", xMaxTCOURLSlugLength+1)
+	tcoWithExtraPath := tcoAtLimit + "/extra"
 	tests := []struct {
 		name     string
 		text     string
 		expected []string
 	}{
 		{name: "internationalized domain", text: "example.рф", expected: []string{"example.рф"}},
+		{name: "internationalized subdomain is not protocolless URL", text: "пример.рф", expected: []string{}},
+		{name: "Unicode subdomain is not protocolless URL", text: "例.example.com", expected: []string{}},
 		{name: "uppercase path and query", text: "HTTPS://EXAMPLE.COM/Path?X=Y", expected: []string{"HTTPS://EXAMPLE.COM/Path?X=Y"}},
 		{name: "balanced path punctuation", text: "https://example.com/(foo).", expected: []string{"https://example.com/(foo)"}},
 		{name: "slash before unsupported Unicode path", text: "https://example.com/界", expected: []string{"https://example.com/"}},
@@ -1239,6 +1257,11 @@ func TestXURLRangesFollowTwitterTextEntityBoundaries(t *testing.T) {
 		{name: "URL after slash", text: "foo/example.com", expected: []string{}},
 		{name: "URL after hyphen", text: "-example.com", expected: []string{}},
 		{name: "malformed protocol URL", text: "https://not-a-url", expected: []string{}},
+		{name: "URL exactly at provider maximum", text: maxURL, expected: []string{maxURL}},
+		{name: "URL over provider maximum", text: overlongURL, expected: []string{}},
+		{name: "t.co slug exactly at maximum", text: tcoAtLimit, expected: []string{tcoAtLimit}},
+		{name: "t.co slug over maximum", text: tcoOverLimit, expected: []string{}},
+		{name: "t.co path after slug is ordinary text", text: tcoWithExtraPath, expected: []string{tcoAtLimit}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1275,6 +1298,27 @@ func TestXReplyConformanceTruncatesEntitiesWithoutProviderRejection(t *testing.T
 			require.Equal(t, []string{"tweet|" + tt.expected}, api.posted)
 			require.LessOrEqual(t, xWeightedPostLength(tt.expected), xMaxWeightedPostLength)
 		})
+	}
+}
+
+func TestXReplyRejectsOversizedURLEntitiesBeforeProviderPost(t *testing.T) {
+	ctx, svc, _, _, _, _, _ := setupXServiceTest(t)
+	api := &fakeXAPI{}
+	svc.setAPI(api)
+
+	maxURL := "https://example.com/" + strings.Repeat("a", xMaxURLLength-len("https://example.com/"))
+	overlongURL := maxURL + "a"
+	tcoOverLimit := "https://t.co/" + strings.Repeat("a", xMaxTCOURLSlugLength+1)
+	for _, text := range []string{
+		overlongURL,
+		strings.Repeat("x", 240) + " " + tcoOverLimit,
+	} {
+		api.posted = nil
+		svc.SendReply(ctx, "tweet", text, "")
+		require.Len(t, api.posted, 1)
+		posted := strings.TrimPrefix(api.posted[0], "tweet|")
+		require.NotEqual(t, text, posted)
+		require.LessOrEqual(t, xWeightedPostLength(posted), xMaxWeightedPostLength)
 	}
 }
 

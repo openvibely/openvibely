@@ -769,6 +769,7 @@ window.addEventListener('DOMContentLoaded', async function() {
     if (pair.getAttribute('data-exec-status') !== '` + string(terminalStatus) + `') fail('Chat terminal status did not remain authoritative: ' + pair.getAttribute('data-exec-status'));
     var terminalOutput = pair.querySelector('[data-raw-content]');
     if (!terminalOutput || terminalOutput.getAttribute('data-raw-content') !== 'partial authoritative') fail('Chat late terminal event overwrote authoritative output: ' + (terminalOutput && terminalOutput.getAttribute('data-raw-content')));
+    if (terminalOutput.getAttribute('data-authoritative-terminal-content') !== 'true' || terminalOutput._authoritativeTerminalContent !== 'partial authoritative') fail('Chat terminal handler discarded the authoritative output guard');
     var expectedHolder = document.createElement('template');
     expectedHolder.innerHTML = window.__snapshots.terminal;
     var expectedRevision = expectedHolder.content.querySelector('#chat-page-root').getAttribute('data-chat-revision');
@@ -875,6 +876,7 @@ window.addEventListener('DOMContentLoaded', async function() {
     if (pair.getAttribute('data-exec-status') !== '` + string(terminalStatus) + `') fail('Task Thread terminal status did not remain authoritative: ' + pair.getAttribute('data-exec-status'));
     var terminalOutput = pair.querySelector('[data-raw-content]');
     if (!terminalOutput || terminalOutput.getAttribute('data-raw-content') !== 'partial authoritative') fail('Task Thread late terminal event overwrote authoritative output: ' + (terminalOutput && terminalOutput.getAttribute('data-raw-content')));
+    if (terminalOutput.getAttribute('data-authoritative-terminal-content') !== 'true' || terminalOutput._authoritativeTerminalContent !== 'partial authoritative') fail('Task Thread terminal handler discarded the authoritative output guard');
     var expectedHolder = document.createElement('template');
     expectedHolder.innerHTML = window.__snapshots.terminal;
     var expectedRevision = expectedHolder.content.querySelector('#task-thread-view').getAttribute('data-thread-revision');

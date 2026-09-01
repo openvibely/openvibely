@@ -1012,8 +1012,6 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 								if (window.hideMixtureProgress) window.hideMixtureProgress(execId);
 								if (Object.prototype.hasOwnProperty.call(contentDiv, '_authoritativeTerminalContent')) {
 									textBuffer = String(contentDiv._authoritativeTerminalContent || '');
-									delete contentDiv._authoritativeTerminalContent;
-									contentDiv.removeAttribute('data-authoritative-terminal-content');
 								}
 								persistLiveStreamState(false);
 								var completedPair = bubble.closest('[data-execution-pair="true"]');
@@ -1064,8 +1062,6 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							}
 								if (Object.prototype.hasOwnProperty.call(contentDiv, '_authoritativeTerminalContent')) {
 									textBuffer = String(contentDiv._authoritativeTerminalContent || '');
-									delete contentDiv._authoritativeTerminalContent;
-									contentDiv.removeAttribute('data-authoritative-terminal-content');
 									renderBufferedOutput(true);
 								}
 								persistLiveStreamState(false);
