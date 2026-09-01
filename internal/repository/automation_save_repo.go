@@ -63,6 +63,90 @@ type AutomationSaveSchedule struct {
 	PreserveTiming      bool
 }
 
+func currentAutomationOwnsResource(ctx context.Context, q queryer, projectID, automationID, versionID, nodeKey, resourceType, resourceID string) (bool, error) {
+	var owned int
+	if err := q.QueryRowContext(ctx, `SELECT EXISTS (
+		SELECT 1 FROM automation_definition_resources resource
+		JOIN automation_nodes node ON node.id = resource.node_id
+			AND node.version_id = resource.version_id
+			AND node.automation_id = resource.automation_id
+			AND node.project_id = resource.project_id
+		WHERE resource.project_id = ? AND resource.automation_id = ? AND resource.version_id = ?
+		  AND node.node_key = ? AND resource.resource_type = ? AND resource.resource_id = ?
+		  AND resource.relation = 'owned'
+	)`, projectID, automationID, versionID, nodeKey, resourceType, resourceID).Scan(&owned); err != nil {
+		return false, fmt.Errorf("checking current Automation ownership for %s node %q: %w", resourceType, nodeKey, err)
+	}
+	return owned == 1, nil
+}
+
+func reconcileExistingAutomationTask(ctx context.Context, q queryer, in AutomationSaveWrite, write AutomationSaveTask) (string, error) {
+	owned, err := currentAutomationOwnsResource(ctx, q, in.ProjectID, in.AutomationID, in.ExpectedCurrentGraphID,
+		write.NodeKey, "task", write.ExistingTaskID)
+	if err != nil {
+		return "", err
+	}
+	if !owned {
+		return "", fmt.Errorf("task for node %q is not owned by this Automation", write.NodeKey)
+	}
+	var projectID string
+	if err := q.QueryRowContext(ctx, `SELECT project_id FROM tasks WHERE id = ?`, write.ExistingTaskID).Scan(&projectID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", nil
+		}
+		return "", fmt.Errorf("loading bound task for node %q: %w", write.NodeKey, err)
+	}
+	if projectID != in.ProjectID {
+		return "", fmt.Errorf("task for node %q belongs to another project", write.NodeKey)
+	}
+	return write.ExistingTaskID, nil
+}
+
+func reconcileExistingAutomationSchedule(ctx context.Context, q queryer, in AutomationSaveWrite, write AutomationSaveSchedule) (string, error) {
+	owned, err := currentAutomationOwnsResource(ctx, q, in.ProjectID, in.AutomationID, in.ExpectedCurrentGraphID,
+		write.NodeKey, "schedule", write.ExistingScheduleID)
+	if err != nil {
+		return "", err
+	}
+	if !owned {
+		return "", fmt.Errorf("schedule for node %q is not owned by this Automation", write.NodeKey)
+	}
+
+	var ownerAutomationID, ownerProjectID string
+	ownerErr := q.QueryRowContext(ctx, `SELECT automation_id, project_id FROM automation_trigger_owners WHERE schedule_id = ?`, write.ExistingScheduleID).
+		Scan(&ownerAutomationID, &ownerProjectID)
+	if ownerErr != nil && !errors.Is(ownerErr, sql.ErrNoRows) {
+		return "", fmt.Errorf("loading schedule ownership for node %q: %w", write.NodeKey, ownerErr)
+	}
+	if ownerErr == nil && (ownerAutomationID != in.AutomationID || ownerProjectID != in.ProjectID) {
+		return "", fmt.Errorf("schedule for node %q is not owned by this Automation", write.NodeKey)
+	}
+
+	var scheduleProjectID string
+	scheduleErr := q.QueryRowContext(ctx, `SELECT t.project_id FROM schedules s JOIN tasks t ON t.id = s.task_id WHERE s.id = ?`, write.ExistingScheduleID).
+		Scan(&scheduleProjectID)
+	if scheduleErr != nil {
+		if !errors.Is(scheduleErr, sql.ErrNoRows) {
+			return "", fmt.Errorf("loading schedule for node %q: %w", write.NodeKey, scheduleErr)
+		}
+		var scheduleExists int
+		if err := q.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM schedules WHERE id = ?)`, write.ExistingScheduleID).Scan(&scheduleExists); err != nil {
+			return "", fmt.Errorf("checking schedule for node %q: %w", write.NodeKey, err)
+		}
+		if scheduleExists == 0 {
+			return "", nil
+		}
+		return "", fmt.Errorf("schedule for node %q has no valid project task", write.NodeKey)
+	}
+	if scheduleProjectID != in.ProjectID {
+		return "", fmt.Errorf("schedule for node %q belongs to another project", write.NodeKey)
+	}
+	if ownerErr != nil {
+		return "", fmt.Errorf("schedule for node %q is not owned by this Automation", write.NodeKey)
+	}
+	return write.ExistingScheduleID, nil
+}
+
 func (r *AutomationRepo) SaveCurrentGraph(ctx context.Context, in AutomationSaveWrite) (*models.AutomationDefinition, []models.Task, error) {
 	if r == nil || r.db == nil {
 		return nil, nil, errors.New("automation repository is unavailable")
@@ -184,6 +268,13 @@ func (r *AutomationRepo) SaveCurrentGraph(ctx context.Context, in AutomationSave
 	taskRepo := NewTaskRepo(r.db, nil)
 	taskIDs := make(map[string]string, len(in.Tasks))
 	for _, write := range in.Tasks {
+		if write.ExistingTaskID != "" {
+			reconciledTaskID, err := reconcileExistingAutomationTask(ctx, conn, in, write)
+			if err != nil {
+				return nil, nil, err
+			}
+			write.ExistingTaskID = reconciledTaskID
+		}
 		restoreMaintainedTask := in.ExpectedCurrentGraphID != "" &&
 			(in.Candidate.AdapterKey == "native_sdlc" || in.Candidate.AdapterKey == "github_sdlc")
 		if write.ExistingTaskID == "" && restoreMaintainedTask {
@@ -328,6 +419,12 @@ func (r *AutomationRepo) SaveCurrentGraph(ctx context.Context, in AutomationSave
 		}
 		enabled := automation.LifecycleState == models.AutomationActive && write.Enabled
 		scheduleID := write.ExistingScheduleID
+		if scheduleID != "" {
+			scheduleID, err = reconcileExistingAutomationSchedule(ctx, conn, in, write)
+			if err != nil {
+				return nil, nil, err
+			}
+		}
 		if scheduleID == "" {
 			nextRun := write.RunAt
 			if err := conn.QueryRowContext(ctx, `INSERT INTO schedules
@@ -337,14 +434,6 @@ func (r *AutomationRepo) SaveCurrentGraph(ctx context.Context, in AutomationSave
 				return nil, nil, fmt.Errorf("creating schedule for node %q: %w", write.NodeKey, err)
 			}
 		} else {
-			var ownerAutomationID, ownerProjectID string
-			if err := conn.QueryRowContext(ctx, `SELECT automation_id, project_id FROM automation_trigger_owners WHERE schedule_id = ?`, scheduleID).
-				Scan(&ownerAutomationID, &ownerProjectID); err != nil {
-				return nil, nil, fmt.Errorf("loading schedule ownership for node %q: %w", write.NodeKey, err)
-			}
-			if ownerAutomationID != in.AutomationID || ownerProjectID != in.ProjectID {
-				return nil, nil, fmt.Errorf("schedule for node %q is not owned by this Automation", write.NodeKey)
-			}
 			if write.PreserveTiming {
 				if _, err := conn.ExecContext(ctx, `UPDATE schedules SET task_id = ?, enabled = ?, clear_context_on_start = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
 					taskID, enabled, write.ClearContextOnStart, scheduleID); err != nil {

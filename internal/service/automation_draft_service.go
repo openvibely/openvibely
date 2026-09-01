@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	_ "embed"
 	"encoding/json"
 	"errors"
@@ -1736,6 +1737,9 @@ func (s *AutomationDraftService) hydratePersistedScheduleContext(ctx context.Con
 		if err := s.repo.DB().QueryRowContext(ctx, `SELECT s.clear_context_on_start
 			FROM schedules s JOIN tasks t ON t.id = s.task_id
 			WHERE s.id = ? AND t.project_id = ?`, scheduleID, projectID).Scan(&clearContextOnStart); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				continue
+			}
 			return candidate, fmt.Errorf("load saved schedule context for node %q: %w", node.Key, err)
 		}
 		node.Config["clear_context_on_start"] = clearContextOnStart

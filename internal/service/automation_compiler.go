@@ -306,20 +306,19 @@ func (c *AutomationCompiler) Save(ctx context.Context, request AutomationSaveReq
 			if err != nil {
 				return nil, err
 			}
-			if stored == nil {
-				return nil, fmt.Errorf("schedule for node %q is unavailable", node.Key)
-			}
-			if !clearContextConfigured {
-				scheduleWrite.ClearContextOnStart = stored.ClearContextOnStart
-				for i := range write.Candidate.Nodes {
-					if write.Candidate.Nodes[i].Key == node.Key {
-						write.Candidate.Nodes[i].Config["clear_context_on_start"] = stored.ClearContextOnStart
-						break
+			if stored != nil {
+				if !clearContextConfigured {
+					scheduleWrite.ClearContextOnStart = stored.ClearContextOnStart
+					for i := range write.Candidate.Nodes {
+						if write.Candidate.Nodes[i].Key == node.Key {
+							write.Candidate.Nodes[i].Config["clear_context_on_start"] = stored.ClearContextOnStart
+							break
+						}
 					}
 				}
+				scheduleWrite.PreserveTiming = stored.RunAt.In(time.Local).Format("15:04") == schedule.RunAt.In(time.Local).Format("15:04") &&
+					stored.RepeatType == schedule.RepeatType && stored.RepeatInterval == schedule.RepeatInterval
 			}
-			scheduleWrite.PreserveTiming = stored.RunAt.In(time.Local).Format("15:04") == schedule.RunAt.In(time.Local).Format("15:04") &&
-				stored.RepeatType == schedule.RepeatType && stored.RepeatInterval == schedule.RepeatInterval
 		}
 		write.Schedules = append(write.Schedules, scheduleWrite)
 	}

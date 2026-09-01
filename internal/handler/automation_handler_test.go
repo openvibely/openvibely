@@ -1737,6 +1737,92 @@ func TestAutomationBuilderWebSaveIsBrowserLocalUntilAtomicSaveAndProjectScoped(t
 	require.Nil(t, ownedSchedule, "deleted Automation trigger must not remain as a paused schedule")
 }
 
+func TestAutomationBuilderRecoversDeletedRetainedNativeResources(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().WithName("Recover Native automation resources").Build()
+	automationRepo := repository.NewAutomationRepo(tc.db)
+	registry := service.NewAutomationAdapterRegistry()
+	drafts := service.NewAutomationDraftService(automationRepo, registry)
+	planner := service.NewAutomationSaveValidator(registry, drafts)
+	compiler := service.NewAutomationCompiler(automationRepo, tc.handler.taskSvc, tc.taskRepo, tc.scheduleRepo, planner)
+	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
+	tc.handler.SetAutomationBuilderServices(drafts, nil, planner, compiler, nil, service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo))
+
+	preview := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(url.Values{
+		"project_id": {project.ID}, "source": {"template"}, "template_key": {service.AutomationAdapterNativeSDLC},
+	}).Execute()
+	require.Equal(t, http.StatusOK, preview.Code, preview.Body.String())
+	candidate := automationCandidateFromResponse(t, preview)
+	yaml, err := service.EncodeAutomationDraftYAML(candidate)
+	require.NoError(t, err)
+	created := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(url.Values{
+		"project_id": {project.ID}, "builder_source": {"template"}, "automation_yaml": {yaml}, "save_changes": {"true"},
+	}).Execute()
+	require.Equal(t, http.StatusNoContent, created.Code, created.Body.String())
+
+	var automationID string
+	require.NoError(t, tc.db.QueryRowContext(context.Background(), `SELECT id FROM automations WHERE project_id = ?`, project.ID).Scan(&automationID))
+	edit := tc.HTMX().Post("/automations/" + automationID + "/builder?project_id=" + project.ID).WithForm(url.Values{
+		"project_id": {project.ID},
+	}).Execute()
+	require.Equal(t, http.StatusOK, edit.Code, edit.Body.String())
+	require.Contains(t, edit.Body.String(), `data-automation-node-detail="optimization_finder"`)
+	require.Contains(t, edit.Body.String(), "optimization_finder")
+	unchanged := automationCandidateFromResponse(t, edit)
+	unchangedYAML, err := service.EncodeAutomationDraftYAML(unchanged)
+	require.NoError(t, err)
+
+	resourceID := func(nodeKey, resourceType string) string {
+		t.Helper()
+		var id string
+		require.NoError(t, tc.db.QueryRowContext(context.Background(), `SELECT resource.resource_id
+			FROM automation_definition_resources resource JOIN automation_nodes node ON node.id = resource.node_id
+			WHERE resource.project_id = ? AND resource.automation_id = ? AND resource.resource_type = ? AND node.node_key = ?`,
+			project.ID, automationID, resourceType, nodeKey).Scan(&id))
+		return id
+	}
+	oldTaskID := resourceID("optimization_finder", "task")
+	oldScheduleID := resourceID("optimization_finder", "schedule")
+	require.NoError(t, tc.scheduleRepo.Delete(context.Background(), oldScheduleID))
+	require.NoError(t, tc.taskRepo.Delete(context.Background(), oldTaskID))
+	staleEdit := tc.HTMX().Post("/automations/" + automationID + "/builder?project_id=" + project.ID).WithForm(url.Values{
+		"project_id": {project.ID},
+	}).Execute()
+	require.Equal(t, http.StatusOK, staleEdit.Code, staleEdit.Body.String())
+	require.Contains(t, staleEdit.Body.String(), `data-automation-node-detail="optimization_finder"`)
+	require.Contains(t, staleEdit.Body.String(), "optimization_finder")
+	staleLive := tc.HTTP().Get("/automations/" + automationID + "?project_id=" + project.ID).Execute()
+	require.Equal(t, http.StatusOK, staleLive.Code, staleLive.Body.String())
+	require.Contains(t, staleLive.Body.String(), `data-automation-live-node-detail="optimization_finder"`)
+	require.Contains(t, staleLive.Body.String(), "optimization_finder")
+
+	saved := tc.HTMX().Post("/automations/" + automationID + "/builder?project_id=" + project.ID).WithForm(url.Values{
+		"project_id": {project.ID}, "builder_source": {"template"}, "automation_yaml": {unchangedYAML}, "save_changes": {"true"},
+	}).Execute()
+	require.Equal(t, http.StatusNoContent, saved.Code, saved.Body.String())
+	require.Equal(t, "/automations/"+automationID+"?project_id="+project.ID, saved.Header().Get("HX-Redirect"))
+
+	definition, err := automationRepo.GetDefinition(context.Background(), project.ID, automationID)
+	require.NoError(t, err)
+	require.Len(t, definition.Nodes, len(unchanged.Nodes))
+	newTaskID := resourceID("optimization_finder", "task")
+	newScheduleID := resourceID("optimization_finder", "schedule")
+	require.NotEqual(t, oldTaskID, newTaskID)
+	require.NotEqual(t, oldScheduleID, newScheduleID)
+	var recoveredResourceCount int
+	require.NoError(t, tc.db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM automation_definition_resources resource
+		JOIN automation_nodes node ON node.id = resource.node_id AND node.version_id = resource.version_id
+		WHERE resource.project_id = ? AND resource.automation_id = ? AND resource.version_id = ? AND node.node_key = 'optimization_finder'`,
+		project.ID, automationID, definition.Version.ID).Scan(&recoveredResourceCount))
+	require.Equal(t, 2, recoveredResourceCount)
+
+	live := tc.HTTP().Get("/automations/" + automationID + "?project_id=" + project.ID).Execute()
+	require.Equal(t, http.StatusOK, live.Code, live.Body.String())
+	require.Contains(t, live.Body.String(), `data-automation-live-node-detail="optimization_finder"`)
+	require.Contains(t, live.Body.String(), "optimization_finder")
+	require.NotContains(t, live.Body.String(), "Save did not apply: schedule for node")
+}
+
 func tableCountHandler(t *testing.T, tc *TestContext, table string) int {
 	t.Helper()
 	var count int
