@@ -374,11 +374,11 @@ func (h *Handler) CreateTask(c echo.Context) error {
 		category = models.CategoryActive
 	}
 	var scheduledFormValues scheduleFormValues
-	var scheduledFormErr error
-	if category == models.CategoryScheduled && c.FormValue("run_at") != "" {
-		scheduledFormValues, scheduledFormErr = parseScheduleForm(c, models.RepeatDaily)
-		if _, ok := scheduledFormErr.(*echo.HTTPError); ok {
-			return scheduledFormErr
+	if category == models.CategoryScheduled {
+		var err error
+		scheduledFormValues, err = parseScheduleForm(c, models.RepeatDaily)
+		if err != nil {
+			return scheduleFormHTTPError(err)
 		}
 	}
 
@@ -451,25 +451,25 @@ func (h *Handler) CreateTask(c echo.Context) error {
 	}
 	applog.Infof("[handler] CreateTask success id=%s", t.ID)
 
-	// If category is scheduled and run_at is provided, create a schedule
-	if t.Category == models.CategoryScheduled && c.FormValue("run_at") != "" {
-		if scheduledFormErr != nil {
-			applog.Infof("[handler] CreateTask schedule parse error: %v", scheduledFormErr)
-		} else {
-			clearContextOnStart := formBoolEnabled(c, "clear_context_on_start", true)
-			sched, err := service.NewScheduleActionService(h.taskRepo, h.scheduleRepo).CreateForTask(c.Request().Context(), service.CreateScheduleForTaskRequest{
-				TaskID:              t.ID,
-				RunAt:               scheduledFormValues.runAt,
-				RepeatType:          scheduledFormValues.repeatType,
-				RepeatInterval:      scheduledFormValues.repeatInterval,
-				ClearContextOnStart: &clearContextOnStart,
-			})
-			if err != nil {
-				applog.Infof("[handler] CreateTask schedule create error: %v", err)
-			} else {
-				applog.Infof("[handler] CreateTask schedule created id=%s next_run=%v", sched.ID, sched.NextRun)
+	// If category is scheduled, create its schedule before reporting success.
+	if t.Category == models.CategoryScheduled {
+		clearContextOnStart := formBoolEnabled(c, "clear_context_on_start", true)
+		sched, err := service.NewScheduleActionService(h.taskRepo, h.scheduleRepo).CreateForTask(c.Request().Context(), service.CreateScheduleForTaskRequest{
+			TaskID:              t.ID,
+			RunAt:               scheduledFormValues.runAt,
+			RepeatType:          scheduledFormValues.repeatType,
+			RepeatInterval:      scheduledFormValues.repeatInterval,
+			ClearContextOnStart: &clearContextOnStart,
+		})
+		if err != nil {
+			applog.Infof("[handler] CreateTask schedule create error: %v", err)
+			rollbackCtx := context.WithoutCancel(c.Request().Context())
+			if rollbackErr := h.taskRepo.Delete(rollbackCtx, t.ID); rollbackErr != nil {
+				return fmt.Errorf("creating schedule: %w; rolling back task: %v", err, rollbackErr)
 			}
+			return err
 		}
+		applog.Infof("[handler] CreateTask schedule created id=%s next_run=%v", sched.ID, sched.NextRun)
 	}
 
 	// Handle optional file attachments (multiple files supported)
