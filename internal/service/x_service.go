@@ -759,16 +759,28 @@ func xURLRanges(text string) []xTextRange {
 		if start < 0 || end <= start {
 			continue
 		}
+		urlStart := start
 		candidate := text[start:end]
 		if !xURLHasProtocol(candidate) {
-			if !isXURLWithoutProtocolStart(text, start) || !isXASCIIURLDomain(xURLDomain(candidate)) {
+			if !isXURLWithoutProtocolStart(text, start) {
 				continue
+			}
+			domain := xURLDomain(candidate)
+			if !isXASCIIURLDomain(domain) {
+				suffixStart := xASCIIURLSuffixStart(domain)
+				if suffixStart < 0 {
+					continue
+				}
+				start += suffixStart
 			}
 		}
 		if end < len(text) && xURLDomainEndBlocked(text[end:]) {
 			continue
 		}
 		end = xURLSuffixEnd(text, end)
+		if !xURLWithinProviderLimit(text[urlStart:end]) {
+			continue
+		}
 		candidate = text[start:end]
 		validatedEnd, ok := xValidatedURLSuffixEnd(candidate)
 		if !ok {
@@ -943,6 +955,20 @@ func isXASCIIURLDomainRune(r rune) bool {
 	default:
 		return false
 	}
+}
+
+func xASCIIURLSuffixStart(domain string) int {
+	for offset := 0; offset < len(domain); {
+		if isXASCIIURLDomain(domain[offset:]) {
+			return offset
+		}
+		_, size := utf8.DecodeRuneInString(domain[offset:])
+		if size == 0 {
+			break
+		}
+		offset += size
+	}
+	return -1
 }
 
 func isXURLWithoutProtocolStart(text string, start int) bool {
