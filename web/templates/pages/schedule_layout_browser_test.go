@@ -23,10 +23,23 @@ func TestScheduleContentTimelineFillsAvailableHeightInChrome(t *testing.T) {
 	if err := ScheduleContent(&models.Project{ID: "project-1", Name: "Project 1"}, nil, 0, nil, nil).Render(context.Background(), &content); err != nil {
 		t.Fatalf("render schedule content: %v", err)
 	}
+	renderedContent := content.String()
+	for {
+		scriptStart := strings.Index(renderedContent, "<script")
+		if scriptStart < 0 {
+			break
+		}
+		scriptEnd := strings.Index(renderedContent[scriptStart:], "</script>")
+		if scriptEnd < 0 {
+			t.Fatal("rendered schedule content has an unterminated script element")
+		}
+		scriptEnd += scriptStart + len("</script>")
+		renderedContent = renderedContent[:scriptStart] + renderedContent[scriptEnd:]
+	}
 
 	page := `<!doctype html>
 <html><head><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>` + scheduleLayoutBrowserCSS() + `</style></head>
-<body class="h-screen bg-base-200 overflow-hidden"><div class="drawer lg:drawer-open h-full"><div class="drawer-content flex flex-col h-full overflow-hidden"><main id="main-content" class="p-6 flex-1 overflow-y-auto overflow-x-hidden">` + content.String() + `</main></div></div>
+<body class="h-screen bg-base-200 overflow-hidden"><div class="drawer lg:drawer-open h-full"><div class="drawer-content flex flex-col h-full overflow-hidden"><main id="main-content" class="p-6 flex-1 overflow-y-auto overflow-x-hidden">` + renderedContent + `</main></div></div>
 <script>
 (function() {
   function report(status, message) {
