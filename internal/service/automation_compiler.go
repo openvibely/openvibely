@@ -77,12 +77,14 @@ func (c *AutomationCompiler) validateSaveCandidate(ctx context.Context, projectI
 	if err != nil {
 		return normalized, nil, err
 	}
-	agentIssues, err := c.validator.agentIssues(ctx, projectID, normalized)
-	if err != nil {
-		return normalized, nil, err
-	}
 	issues = append(issues, capabilityIssues...)
-	issues = append(issues, agentIssues...)
+	if c.validator.drafts.capabilities == nil {
+		agentIssues, err := c.validator.agentIssues(ctx, projectID, normalized)
+		if err != nil {
+			return normalized, nil, err
+		}
+		issues = append(issues, agentIssues...)
+	}
 	return normalized, issues, nil
 }
 

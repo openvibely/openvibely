@@ -1252,7 +1252,8 @@ func TestAutomationSaveValidatorAgentIssuesPreservesReferenceAvailabilitySemanti
 func TestAutomationCompilerPreviewAndSaveUseBatchedAgentValidation(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	ctx := context.Background()
-	project := automationTestProject(t, repository.NewProjectRepo(db), "Compiler Agent Validation")
+	projectRepo := repository.NewProjectRepo(db)
+	project := automationTestProject(t, projectRepo, "Compiler Agent Validation")
 	agentRepo := repository.NewAgentRepo(db)
 	if _, err := db.ExecContext(ctx, `DELETE FROM agents WHERE id IS NOT NULL`); err != nil {
 		t.Fatalf("clear agents: %v", err)
@@ -1268,6 +1269,8 @@ func TestAutomationCompilerPreviewAndSaveUseBatchedAgentValidation(t *testing.T)
 
 	registry := NewAutomationAdapterRegistry()
 	drafts := NewAutomationDraftService(repository.NewAutomationRepo(db), registry)
+	capabilities := NewAutomationCapabilitySnapshotBuilder(projectRepo, agentRepo, nil, nil)
+	drafts.SetCapabilitySnapshotBuilder(capabilities)
 	validator := NewAutomationSaveValidator(registry, drafts)
 	validator.SetAgentRepository(agentRepo)
 	automationRepo := repository.NewAutomationRepo(db)
@@ -1282,11 +1285,29 @@ func TestAutomationCompilerPreviewAndSaveUseBatchedAgentValidation(t *testing.T)
 	if err != nil {
 		t.Fatalf("PreviewSave: %v", err)
 	}
-	if plan == nil || len(plan.Validation) != len(refs) {
-		t.Fatalf("PreviewSave validation = %#v, want one capability-unavailable issue per reference", plan)
+	if plan == nil || len(plan.Validation) != 0 {
+		t.Fatalf("PreviewSave validation = %#v, want no issues for available references", plan)
 	}
 	if len(selectableAgentValidationStatements(counter.Statements())) != 1 {
-		t.Fatalf("PreviewSave selectable Agent statements = %#v, want one query", counter.Statements())
+		t.Fatalf("PreviewSave selectable Agent statements = %#v, want one compact query", counter.Statements())
+	}
+	if statements := selectableAgentValidationStatements(counter.Statements()); len(statements) == 1 {
+		assertAutomationValidationProjection(t, statements[0])
+	}
+
+	noReferences := customTaskOnlyCandidate("No Agent references", "Run without a primary Agent.", models.CategoryBacklog)
+	counter.Reset()
+	counter.SetEnabled(true)
+	noReferencePlan, _, err := compiler.PreviewSave(ctx, project.ID, noReferences)
+	counter.SetEnabled(false)
+	if err != nil {
+		t.Fatalf("PreviewSave without Agent reference: %v", err)
+	}
+	if noReferencePlan == nil || len(noReferencePlan.Validation) != 0 {
+		t.Fatalf("PreviewSave without Agent reference validation = %#v, want no issues", noReferencePlan)
+	}
+	if statements := selectableAgentValidationStatements(counter.Statements()); len(statements) != 0 {
+		t.Fatalf("PreviewSave selectable Agent statements without references = %#v, want none", statements)
 	}
 
 	invalid := automationValidationReferenceCandidate([]string{"missing-agent"})
@@ -1512,6 +1533,22 @@ func automationValidationFixtureAgent(name, key string) *models.Agent {
 		SourceRefs:          []string{"agents/validation/SKILLS.md", strings.Repeat("ref", 128)},
 		Enabled:             true,
 		SelectableAsPrimary: true,
+	}
+}
+
+func assertAutomationValidationProjection(t *testing.T, statement string) {
+	t.Helper()
+	query := strings.ToLower(strings.Join(strings.Fields(statement), " "))
+	projection := strings.TrimSpace(strings.SplitN(query, " from agents", 2)[0])
+	for _, required := range []string{"select id", "coalesce(key, '')", "project_id"} {
+		if !strings.Contains(projection, required) {
+			t.Fatalf("validation projection = %q, want %q in %s", projection, required, statement)
+		}
+	}
+	for _, forbidden := range []string{"system_prompt", "tools", "tool_config", "plugins", "mcp_servers", "skills", "permission_defaults_json", "model_defaults_json", "source_refs_json", "created_at", "updated_at"} {
+		if strings.Contains(projection, forbidden) {
+			t.Fatalf("validation projection selected forbidden column %q: %s", forbidden, statement)
+		}
 	}
 }
 

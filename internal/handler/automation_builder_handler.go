@@ -206,10 +206,7 @@ func (h *Handler) previewAutomationBuilderCandidate(ctx context.Context, project
 	if err != nil {
 		return nil, err
 	}
-	result, err := h.automationDraftSvc.PreviewCandidate(ctx, projectID, normalized, definition)
-	if err != nil {
-		return nil, err
-	}
+	result := h.automationDraftSvc.PreviewValidatedCandidate(normalized, definition)
 	result.Candidate = normalized
 	result.ValidationErrors = plan.Validation
 	return result, nil

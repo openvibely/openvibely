@@ -1554,6 +1554,19 @@ func (s *AutomationDraftService) ValidateCandidateWithCapabilities(candidate mod
 	return issues
 }
 
+func automationCandidateHasAgentReferences(candidate models.AutomationDraftCandidate) bool {
+	for _, node := range candidate.Nodes {
+		if node.Type != models.AutomationNodeAgentTask && node.Type != models.AutomationNodeTrigger {
+			continue
+		}
+		ref, _ := node.Config["agent_ref"].(string)
+		if strings.TrimSpace(ref) != "" {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *AutomationDraftService) validateCandidateForProject(ctx context.Context, projectID string, candidate models.AutomationDraftCandidate) ([]models.AutomationValidationIssue, error) {
 	if s.capabilities == nil {
 		issues := s.ValidateCandidate(candidate)
@@ -1568,7 +1581,7 @@ func (s *AutomationDraftService) validateCandidateForProject(ctx context.Context
 		sortAutomationValidationIssues(issues)
 		return issues, nil
 	}
-	snapshot, err := s.capabilities.Build(ctx, projectID)
+	snapshot, err := s.capabilities.BuildForValidation(ctx, projectID, automationCandidateHasAgentReferences(candidate))
 	if err != nil {
 		return nil, err
 	}
@@ -1672,6 +1685,12 @@ func defaultAutomationNodePrompt(adapterKey, role string) (string, error) {
 			return fmt.Sprintf("Run the %s role for this %s automation using the existing project-scoped tools and human review boundaries.", strings.ReplaceAll(role, "_", " "), strings.ReplaceAll(adapterKey, "_", " ")), nil
 		}
 	}
+}
+
+// PreviewValidatedCandidate builds the display result for a candidate that has
+// already been normalized and validated by AutomationCompiler.
+func (s *AutomationDraftService) PreviewValidatedCandidate(candidate models.AutomationDraftCandidate, definition *models.AutomationDefinition) *models.AutomationDraftResult {
+	return draftPreviewResult(candidate, definition)
 }
 
 func (s *AutomationDraftService) PreviewCandidate(ctx context.Context, projectID string, candidate models.AutomationDraftCandidate, definition *models.AutomationDefinition) (*models.AutomationDraftResult, error) {
