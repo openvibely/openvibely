@@ -20,6 +20,10 @@ type TaskPullRequestGitHubProvider interface {
 	GlobalAPIEndpoint(ctx context.Context) string
 }
 
+type taskPullRequestBodyUpdater interface {
+	UpdatePullRequestBody(ctx context.Context, repo *GitHubRepoRef, number int, body string) error
+}
+
 type taskPullRequestBranchReplacer interface {
 	GetPullRequest(ctx context.Context, repo *GitHubRepoRef, number int) (*GitHubPullRequest, error)
 	ReplaceBranchHead(ctx context.Context, repo *GitHubRepoRef, req GitHubReplaceBranchHeadRequest) error
@@ -326,6 +330,13 @@ func (s *TaskPullRequestService) openForTask(ctx context.Context, project *model
 			return nil, fmt.Errorf("verifying existing pull request #%d: %w", existingPR.PRNumber, err)
 		}
 		if err := ValidateTaskPullRequestCurrentPublication(project, task, repoRef, livePR, publishedHeadSHA); err == nil {
+			if body := strings.TrimSpace(opts.Body); body != "" {
+				if updater, ok := s.github.(taskPullRequestBodyUpdater); ok {
+					if err := updater.UpdatePullRequestBody(ctx, repoRef, existingPR.PRNumber, body); err != nil {
+						return nil, fmt.Errorf("updating existing pull request #%d body: %w", existingPR.PRNumber, err)
+					}
+				}
+			}
 			liveURL := strings.TrimSpace(livePR.URL)
 			liveState := strings.TrimSpace(livePR.State)
 			changed := existingPR.PRURL != liveURL || existingPR.PRState != liveState || existingPR.PublishedHeadSHA != publishedHeadSHA

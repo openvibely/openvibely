@@ -173,6 +173,33 @@ func TestXPollUsesOneConfigurationSnapshotPerBatch(t *testing.T) {
 	}
 }
 
+type xPollBatchFixture struct {
+	ctx      context.Context
+	svc      *XService
+	settings *repository.SettingsRepo
+	counter  *testutil.SQLStatementCounter
+}
+
+func newXPollBatchFixture(t testing.TB, profile xPollBatchProfile) *xPollBatchFixture {
+	t.Helper()
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	ctx, svc, settings := setupXBatchService(t, db, counter, profile.mentionsPerPage, profile.pages)
+	return &xPollBatchFixture{ctx: ctx, svc: svc, settings: settings, counter: counter}
+}
+
+func resetXPollBatchFixture(t testing.TB, fixture *xPollBatchFixture) {
+	t.Helper()
+	fixture.counter.SetEnabled(false)
+	require.NoError(t, fixture.settings.Set(fixture.ctx, XSettingSinceID, ""))
+	fixture.counter.Reset()
+}
+
+func warmXPollBatchFixture(t testing.TB, fixture *xPollBatchFixture) {
+	t.Helper()
+	require.NoError(t, pollXBatchMode(fixture.svc, fixture.ctx, false))
+	resetXPollBatchFixture(t, fixture)
+}
+
 type xPollBatchMetrics struct {
 	wallNs          float64
 	bytesPerOp      float64
@@ -189,33 +216,30 @@ func medianXPollBatch(values []float64) float64 {
 	return ordered[len(ordered)/2]
 }
 
-func measureXPollBatch(t *testing.T, profile xPollBatchProfile, checkEachMention bool) xPollBatchMetrics {
+func measureXPollBatchMode(t *testing.T, fixture *xPollBatchFixture, checkEachMention bool) xPollBatchMetrics {
 	t.Helper()
-	db, counter := testutil.NewStatementCountingTestDB(t)
-	ctx, svc, _ := setupXBatchService(t, db, counter, profile.mentionsPerPage, profile.pages)
-	require.NoError(t, pollXBatchMode(svc, ctx, checkEachMention))
-
 	wallSamples := make([]float64, 0, xPollBatchBenchmarkSamples)
 	bytesSamples := make([]float64, 0, xPollBatchBenchmarkSamples)
 	allocSamples := make([]float64, 0, xPollBatchBenchmarkSamples)
 	statementSamples := make([]float64, 0, xPollBatchBenchmarkSamples)
 	snapshotSamples := make([]float64, 0, xPollBatchBenchmarkSamples)
 	for i := 0; i < xPollBatchBenchmarkSamples; i++ {
-		counter.Reset()
-		counter.SetEnabled(true)
-		err := pollXBatchMode(svc, ctx, checkEachMention)
-		counter.SetEnabled(false)
+		resetXPollBatchFixture(t, fixture)
+		fixture.counter.SetEnabled(true)
+		err := pollXBatchMode(fixture.svc, fixture.ctx, checkEachMention)
+		fixture.counter.SetEnabled(false)
 		require.NoError(t, err)
-		statements := counter.Statements()
+		statements := fixture.counter.Statements()
 		statementSamples = append(statementSamples, float64(len(statements)))
 		snapshotSamples = append(snapshotSamples, float64(countXSettingsSnapshots(statements)))
 
+		resetXPollBatchFixture(t, fixture)
 		var pollErr error
 		result := testing.Benchmark(func(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
 			for j := 0; j < b.N; j++ {
-				if pollErr = pollXBatchMode(svc, ctx, checkEachMention); pollErr != nil {
+				if pollErr = pollXBatchMode(fixture.svc, fixture.ctx, checkEachMention); pollErr != nil {
 					return
 				}
 			}
@@ -235,11 +259,19 @@ func measureXPollBatch(t *testing.T, profile xPollBatchProfile, checkEachMention
 	}
 }
 
+func measureXPollBatchPair(t *testing.T, profile xPollBatchProfile) (xPollBatchMetrics, xPollBatchMetrics) {
+	t.Helper()
+	fixture := newXPollBatchFixture(t, profile)
+	warmXPollBatchFixture(t, fixture)
+	baseline := measureXPollBatchMode(t, fixture, true)
+	candidate := measureXPollBatchMode(t, fixture, false)
+	return baseline, candidate
+}
+
 func TestXPollBatchBenchmarkThresholds(t *testing.T) {
 	for _, profile := range xPollBatchProfileList() {
 		t.Run(profile.name, func(t *testing.T) {
-			baseline := measureXPollBatch(t, profile, true)
-			candidate := measureXPollBatch(t, profile, false)
+			baseline, candidate := measureXPollBatchPair(t, profile)
 			mentions := profile.mentionsPerPage * profile.pages
 			t.Logf("median baseline: wall=%.0f ns/op bytes=%.0f B/op allocs=%.0f statements=%.0f snapshots=%.0f; candidate: wall=%.0f ns/op bytes=%.0f B/op allocs=%.0f statements=%.0f snapshots=%.0f", baseline.wallNs, baseline.bytesPerOp, baseline.allocsPerOp, baseline.statementsPerOp, baseline.snapshotsPerOp, candidate.wallNs, candidate.bytesPerOp, candidate.allocsPerOp, candidate.statementsPerOp, candidate.snapshotsPerOp)
 
@@ -261,42 +293,42 @@ func TestXPollBatchBenchmarkThresholds(t *testing.T) {
 
 func BenchmarkXPollBatch(b *testing.B) {
 	for _, profile := range xPollBatchProfileList() {
-		for _, mode := range []struct {
-			name             string
-			checkEachMention bool
-		}{
-			{name: "baseline", checkEachMention: true},
-			{name: "candidate", checkEachMention: false},
-		} {
-			b.Run(profile.name+"/"+mode.name, func(b *testing.B) {
-				db, counter := testutil.NewStatementCountingTestDB(b)
-				ctx, svc, _ := setupXBatchService(b, db, counter, profile.mentionsPerPage, profile.pages)
-				require.NoError(b, pollXBatchMode(svc, ctx, mode.checkEachMention))
-
-				counter.Reset()
-				counter.SetEnabled(true)
-				err := pollXBatchMode(svc, ctx, mode.checkEachMention)
-				counter.SetEnabled(false)
-				require.NoError(b, err)
-				statements := counter.Statements()
-				mentions := profile.mentionsPerPage * profile.pages
-				expectedSnapshots := 1
-				if mode.checkEachMention {
-					expectedSnapshots = mentions + 1
-				}
-				require.Equal(b, expectedSnapshots, countXSettingsSnapshots(statements))
-
-				b.ReportAllocs()
-				b.ResetTimer()
-				b.ReportMetric(float64(len(statements)), "sqlite-statements/op")
-				b.ReportMetric(float64(countXSettingsSnapshots(statements)), "settings-snapshots/op")
-				for i := 0; i < b.N; i++ {
-					if err := pollXBatchMode(svc, ctx, mode.checkEachMention); err != nil {
-						b.Fatal(err)
+		b.Run(profile.name, func(b *testing.B) {
+			fixture := newXPollBatchFixture(b, profile)
+			warmXPollBatchFixture(b, fixture)
+			for _, mode := range []struct {
+				name             string
+				checkEachMention bool
+			}{
+				{name: "baseline", checkEachMention: true},
+				{name: "candidate", checkEachMention: false},
+			} {
+				b.Run(mode.name, func(b *testing.B) {
+					resetXPollBatchFixture(b, fixture)
+					fixture.counter.SetEnabled(true)
+					err := pollXBatchMode(fixture.svc, fixture.ctx, mode.checkEachMention)
+					fixture.counter.SetEnabled(false)
+					require.NoError(b, err)
+					statements := fixture.counter.Statements()
+					mentions := profile.mentionsPerPage * profile.pages
+					expectedSnapshots := 1
+					if mode.checkEachMention {
+						expectedSnapshots = mentions + 1
 					}
-				}
-			})
-		}
+					require.Equal(b, expectedSnapshots, countXSettingsSnapshots(statements))
+
+					b.ReportAllocs()
+					b.ResetTimer()
+					b.ReportMetric(float64(len(statements)), "sqlite-statements/op")
+					b.ReportMetric(float64(countXSettingsSnapshots(statements)), "settings-snapshots/op")
+					for i := 0; i < b.N; i++ {
+						if err := pollXBatchMode(fixture.svc, fixture.ctx, mode.checkEachMention); err != nil {
+							b.Fatal(err)
+						}
+					}
+				})
+			}
+		})
 	}
 }
 func TestXRuntimeProjectSwitchRequiresTargetAuthorizationAndPersists(t *testing.T) {
@@ -684,6 +716,8 @@ func TestXReplyRequiresOriginatingAccount(t *testing.T) {
 
 func TestXPollActiveReceiptLeaseDoesNotAdvanceCursorOrDegradeReplacementHealth(t *testing.T) {
 	ctx, old, settings, auth, selections, project, _ := setupXServiceTest(t)
+	require.NoError(t, settings.Set(ctx, XSettingConfigurationID, "generation"))
+	old.SetConfigurationID("generation")
 	require.NoError(t, auth.Create(ctx, &models.XAuthorizedUser{ProjectID: project.ID, XUserID: "author"}))
 	api := &fakeXAPI{me: XUser{ID: "bot", Username: "openvibely"}}
 	api.mentions.Meta.NewestID = "10"
@@ -697,16 +731,25 @@ func TestXPollActiveReceiptLeaseDoesNotAdvanceCursorOrDegradeReplacementHealth(t
 	replacement.SetRepositories(auth, selections, old.taskContextRepo, old.receiptRepo, old.threadInputRepo)
 	replacement.setAPI(api)
 	replacement.me = api.me
+	replacement.SetConfigurationID("generation")
 	replacement.running = true
 	replacement.connected = true
 	err = replacement.pollOnce(ctx)
-	require.Error(t, err)
+	require.ErrorIs(t, err, errXReceiptActive)
 	replacement.recordPollResult(err)
 	cursor, err := settings.Get(ctx, XSettingSinceID)
 	require.NoError(t, err)
 	require.Empty(t, cursor)
 	require.True(t, replacement.Status().Connected)
 	require.Empty(t, replacement.Status().LastError)
+
+	// An active receipt is retryable only for the same configuration generation.
+	require.NoError(t, settings.Set(ctx, XSettingConfigurationID, "replacement-generation"))
+	err = replacement.pollOnce(ctx)
+	require.ErrorContains(t, err, "configuration changed")
+	cursor, err = settings.Get(ctx, XSettingSinceID)
+	require.NoError(t, err)
+	require.Empty(t, cursor)
 }
 
 func TestXRuntimeOwnsOnlyIdentitySensitiveOverrides(t *testing.T) {

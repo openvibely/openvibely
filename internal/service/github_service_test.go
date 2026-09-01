@@ -1443,6 +1443,39 @@ func TestGitHubServicePullRequestAndIssueHTTPActions(t *testing.T) {
 	}
 }
 
+func TestGitHubServiceUpdatePullRequestBody(t *testing.T) {
+	ctx := context.Background()
+	var seenPayload map[string]string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPatch || r.URL.Path != "/repos/acme/widgets/pulls/22" {
+			t.Fatalf("unexpected pull request body update request: %s %s", r.Method, r.URL.RequestURI())
+		}
+		if err := json.NewDecoder(r.Body).Decode(&seenPayload); err != nil {
+			t.Fatalf("decode body update payload: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+
+	svc := newPATGitHubService(t, server.URL)
+	repo := &GitHubRepoRef{Owner: "acme", Name: "widgets"}
+	if err := svc.UpdatePullRequestBody(ctx, repo, 22, " refreshed body "); err != nil {
+		t.Fatalf("UpdatePullRequestBody: %v", err)
+	}
+	if seenPayload["body"] != "refreshed body" {
+		t.Fatalf("unexpected body update payload: %#v", seenPayload)
+	}
+	if err := svc.UpdatePullRequestBody(ctx, repo, 0, "body"); err == nil {
+		t.Fatal("expected invalid pull request number error")
+	}
+	if err := svc.UpdatePullRequestBody(ctx, repo, 22, " "); err == nil {
+		t.Fatal("expected empty pull request body error")
+	}
+	if err := svc.UpdatePullRequestBody(ctx, nil, 22, "body"); err == nil {
+		t.Fatal("expected nil repository error")
+	}
+}
 func newPATGitHubService(t *testing.T, apiBaseURL string) *GitHubService {
 	t.Helper()
 	settingsRepo := repository.NewSettingsRepo(testutil.NewTestDB(t))
