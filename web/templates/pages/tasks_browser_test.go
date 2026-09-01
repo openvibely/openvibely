@@ -497,24 +497,35 @@ func TestTaskRunningIconSharesThemeAwareSendColorWithoutSuppressingHoverInChrome
 		t.Fatalf("render base layout: %v", err)
 	}
 
-	html := page.String()
+	renderedLayout := page.String()
+	headEnd := strings.Index(renderedLayout, "</head>")
+	if headEnd < 0 {
+		t.Fatal("rendered base layout is missing its head")
+	}
+	var inlineStyles strings.Builder
+	remainingHead := renderedLayout[:headEnd]
+	for {
+		styleStart := strings.Index(remainingHead, "<style")
+		if styleStart < 0 {
+			break
+		}
+		styleEnd := strings.Index(remainingHead[styleStart:], "</style>")
+		if styleEnd < 0 {
+			t.Fatal("rendered base layout has an unterminated style element")
+		}
+		styleEnd += styleStart + len("</style>")
+		inlineStyles.WriteString(remainingHead[styleStart:styleEnd])
+		remainingHead = remainingHead[styleEnd:]
+	}
+	if inlineStyles.Len() == 0 {
+		t.Fatal("rendered base layout is missing inline theme styles")
+	}
 	importedCSS := `<style>
 	[data-color-theme="vscode-test"][data-theme="dark"] { --p: 0.7 0.12 190; }
 	[data-color-theme="vscode-test"][data-theme="dark"] .btn-primary:hover { background-color: rgb(4, 5, 6); border-color: rgb(4, 5, 6); }
 	</style>`
-	html = strings.Replace(html, "</head>", importedCSS+"</head>", 1)
-	bodyStart := strings.Index(html, "<body")
-	bodyEnd := strings.LastIndex(html, "</body>")
-	if bodyStart < 0 || bodyEnd < bodyStart {
-		t.Fatal("rendered base layout is missing its body")
-	}
-	bodyContentStart := strings.Index(html[bodyStart:bodyEnd], ">")
-	if bodyContentStart < 0 {
-		t.Fatal("rendered base layout has an invalid body start tag")
-	}
-	bodyContentStart += bodyStart + 1
 	fixture := `<button class="btn btn-primary chat-send-button" style="position:fixed;left:20px;top:20px;width:100px;transform:none;transition:none;z-index:2147483647" data-test-send>Send</button><span class="task-state-running" style="position:fixed;left:20px;top:80px;z-index:2147483647" data-test-running>Running</span>`
-	html = html[:bodyContentStart] + fixture + html[bodyEnd:]
+	html := `<!doctype html><html data-theme="dark" data-color-theme="openvibely-dark"><head><meta charset="utf-8">` + inlineStyles.String() + importedCSS + `</head><body>` + fixture + `</body></html>`
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -650,11 +661,16 @@ func TestTaskRunningIconSharesThemeAwareSendColorWithoutSuppressingHoverInChrome
 	}
 
 	pageReadyDeadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(pageReadyDeadline) && evaluate(t, `document.readyState`) != "complete" {
+	pageState := ""
+	for time.Now().Before(pageReadyDeadline) {
+		pageState = evaluate(t, `document.readyState + ':' + Boolean(document.querySelector('[data-test-send]')) + ':' + Boolean(document.querySelector('[data-test-running]'))`)
+		if pageState == "complete:true:true" {
+			break
+		}
 		time.Sleep(25 * time.Millisecond)
 	}
-	if evaluate(t, `document.readyState + ':' + Boolean(document.querySelector('[data-test-send]')) + ':' + Boolean(document.querySelector('[data-test-running]'))`) != "complete:true:true" {
-		t.Fatal("Chrome page did not finish loading the primary-action fixture")
+	if pageState != "complete:true:true" {
+		t.Fatalf("Chrome page did not finish loading the primary-action fixture; final state %q", pageState)
 	}
 	type themeCase struct {
 		name      string

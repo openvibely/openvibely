@@ -398,6 +398,15 @@ func (s *TaskPullRequestService) openForTask(ctx context.Context, project *model
 	if err := ValidateTaskPullRequestCurrentPublication(project, task, repoRef, pr, publishedHeadSHA); err != nil {
 		return nil, fmt.Errorf("pull request #%d is not current: %w", prNumber, err)
 	}
+	if !created {
+		if body := strings.TrimSpace(opts.Body); body != "" {
+			if updater, ok := s.github.(taskPullRequestBodyUpdater); ok {
+				if err := updater.UpdatePullRequestBody(ctx, repoRef, prNumber, body); err != nil {
+					return nil, fmt.Errorf("updating existing pull request #%d body: %w", prNumber, err)
+				}
+			}
+		}
+	}
 
 	record := &models.TaskPullRequest{
 		TaskID:           task.ID,
