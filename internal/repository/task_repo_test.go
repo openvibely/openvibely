@@ -3264,6 +3264,62 @@ func TestTaskRepo_ListTasksForDiscoveryOrdersIdenticalTimestampsByID(t *testing.
 	}
 }
 
+func TestTaskRepo_ListTasksForDiscoveryOrdersIdenticalTimestampsWithinTitleRelevance(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewTaskRepo(db, nil)
+	projectRepo := NewProjectRepo(db)
+	ctx := context.Background()
+
+	project := &models.Project{Name: "Title relevance tie discovery project"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	create := func(title string) string {
+		t.Helper()
+		task := &models.Task{
+			ProjectID: project.ID,
+			Title:     title,
+			Category:  models.CategoryActive,
+			Status:    models.StatusPending,
+			Prompt:    "p",
+		}
+		if err := repo.Create(ctx, task); err != nil {
+			t.Fatalf("create %q: %v", title, err)
+		}
+		return task.ID
+	}
+
+	exactID := create("Deploy")
+	prefixIDs := []string{create("Deploy alpha"), create("Deploy beta")}
+	containsIDs := []string{create("Refactor deploy"), create("Cleanup deploy")}
+	tieTime := time.Date(2024, time.January, 2, 3, 4, 5, 0, time.UTC)
+	if _, err := db.ExecContext(ctx, `UPDATE tasks SET updated_at = ? WHERE project_id = ?`, tieTime, project.ID); err != nil {
+		t.Fatalf("set identical title relevance timestamps: %v", err)
+	}
+
+	got, total, err := repo.ListTasksForDiscovery(ctx, project.ID, TaskDiscoveryFilter{Query: "deploy", Limit: 20})
+	if err != nil {
+		t.Fatalf("ListTasksForDiscovery: %v", err)
+	}
+	if total != 5 || len(got) != 5 {
+		t.Fatalf("title relevance result size = total %d len %d, want 5", total, len(got))
+	}
+
+	sort.Strings(prefixIDs)
+	sort.Strings(containsIDs)
+	expectedIDs := append([]string{exactID}, prefixIDs...)
+	expectedIDs = append(expectedIDs, containsIDs...)
+	for i, task := range got {
+		if task.ID != expectedIDs[i] {
+			t.Fatalf("title relevance result %d has ID %q, want %q; result=%#v", i, task.ID, expectedIDs[i], got)
+		}
+		if !task.UpdatedAt.Equal(tieTime) {
+			t.Fatalf("title relevance result %d has updated_at %s", i, task.UpdatedAt)
+		}
+	}
+}
+
 func TestTaskRepo_ListWithSchedulesByProject_UsesCalendarProjection(t *testing.T) {
 	if got, want := scheduleCalendarTaskSelectColumns, "t.id, t.project_id, t.title, t.category, t.status"; got != want {
 		t.Fatalf("calendar projection changed: got %q, want %q", got, want)
