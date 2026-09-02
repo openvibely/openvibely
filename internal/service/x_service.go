@@ -886,14 +886,15 @@ func xURLIDNADomainValid(domain string) bool {
 	if strings.HasPrefix(domain, "xn--") && len(xASCIIURLSuffixRanges(domain)) == 0 {
 		return false
 	}
-	// punycode.toASCII normalizes the RFC 3490 label separators before it
-	// validates each label. Keep the original domain for URL length/ranges.
-	domain = xNormalizeIDNASeparators(domain)
+	// punycode.toASCII normalizes RFC 3490 label separators within each
+	// ASCII-dot-delimited outer label. Keep that order so the normalized
+	// encoded label length is checked as one label, matching twitter-text.
+	// Keep the original domain for URL length/ranges.
 	for _, label := range strings.Split(domain, ".") {
 		if label == "" {
 			return false
 		}
-		if !xURLIDNALabelValid(label) {
+		if !xURLIDNALabelValid(xNormalizeIDNASeparators(label)) {
 			return false
 		}
 	}
