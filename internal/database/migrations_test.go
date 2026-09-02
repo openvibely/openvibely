@@ -1398,43 +1398,42 @@ func TestMigration174UsesOrderedTaskDiscoveryAccessPath(t *testing.T) {
 	if err := goose.UpTo(db, ".", 174); err != nil {
 		t.Fatalf("apply task discovery order index migration: %v", err)
 	}
-	assertOrderedDiscoveryPlan := func(limit int) {
-		t.Helper()
-		plan := explainQueryPlan(t, db, pageQuery, "task-discovery-index-project-174", limit, 0)
+	assertOrderedDiscoveryPlan := func(tb *testing.T, name, query string, args ...any) {
+		tb.Helper()
+		plan := explainQueryPlan(tb, db, query, args...)
 		if strings.Contains(plan, "USE TEMP B-TREE FOR ORDER BY") {
-			t.Fatalf("discovery page plan for limit %d = %q, want no temporary sort", limit, plan)
+			tb.Fatalf("%s discovery page plan = %q, want no temporary sort", name, plan)
 		}
 		if !strings.Contains(plan, "USING") || !strings.Contains(plan, "project_id=?") {
-			t.Fatalf("discovery page plan for limit %d = %q, want project-scoped ordered access", limit, plan)
+			tb.Fatalf("%s discovery page plan = %q, want project-scoped ordered access", name, plan)
 		}
 	}
-	assertOrderedDiscoveryPlan(20)
-	assertOrderedDiscoveryPlan(50)
+	for _, limit := range []int{20, 50} {
+		assertOrderedDiscoveryPlan(t, "default", pageQuery, "task-discovery-index-project-174", limit, 0)
+	}
 
-	for _, filter := range []struct {
-		name  string
-		where string
-		args  []any
-	}{
-		{name: "category", where: ` AND category = ?`, args: []any{"active"}},
-		{name: "status", where: ` AND status = ?`, args: []any{"pending"}},
-	} {
-		t.Run(filter.name, func(t *testing.T) {
+	for _, category := range []string{"active", "backlog", "scheduled", "completed"} {
+		category := category
+		t.Run("category_"+category, func(t *testing.T) {
 			query := `
 				SELECT id, title, category, status, priority, updated_at, parent_task_id, swarm_role
 				FROM tasks
-				WHERE project_id = ? AND category != 'chat'` + filter.where + `
+				WHERE project_id = ? AND category != 'chat' AND category = ?
 				ORDER BY updated_at DESC, id ASC
 				LIMIT ? OFFSET ?`
-			args := append([]any{"task-discovery-index-project-174"}, filter.args...)
-			args = append(args, 20, 0)
-			plan := explainQueryPlan(t, db, query, args...)
-			if strings.Contains(plan, "USE TEMP B-TREE FOR ORDER BY") {
-				t.Fatalf("%s-filtered discovery plan = %q, want no temporary sort", filter.name, plan)
-			}
-			if !strings.Contains(plan, "USING") || !strings.Contains(plan, "project_id=?") {
-				t.Fatalf("%s-filtered discovery plan = %q, want project-scoped ordered access", filter.name, plan)
-			}
+			assertOrderedDiscoveryPlan(t, "category="+category, query, "task-discovery-index-project-174", category, 20, 0)
+		})
+	}
+	for _, status := range []string{"pending", "queued", "running", "completed", "failed", "cancelled", "blocked"} {
+		status := status
+		t.Run("status_"+status, func(t *testing.T) {
+			query := `
+				SELECT id, title, category, status, priority, updated_at, parent_task_id, swarm_role
+				FROM tasks
+				WHERE project_id = ? AND category != 'chat' AND status = ?
+				ORDER BY updated_at DESC, id ASC
+				LIMIT ? OFFSET ?`
+			assertOrderedDiscoveryPlan(t, "status="+status, query, "task-discovery-index-project-174", status, 20, 0)
 		})
 	}
 

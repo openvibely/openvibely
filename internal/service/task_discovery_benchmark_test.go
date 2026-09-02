@@ -174,6 +174,12 @@ const (
 	taskDiscoveryAllocationRuns       = 3
 	taskDiscoveryMaxPage20Improvement = 0.30
 	taskDiscoveryMaxControlRegression = 1.10
+
+	// The discovery index must add no more than 20% to the production UpdateStatus
+	// path and must stay below 2 MiB for the 10,000-task fixture.
+	taskDiscoveryWriteOperations                 = 40
+	taskDiscoveryMaxWriteLatencyRegression       = 1.20
+	taskDiscoveryMaxIndexStorageBytes      int64 = 2 * 1024 * 1024
 )
 
 type taskDiscoveryPairedMetrics struct {
@@ -310,11 +316,62 @@ func TestTaskDiscoveryOrderIndexMeetsPairedLatencyThresholds(t *testing.T) {
 				if taskCount == 10000 && page.name == "Default20" && candidateNs > baselineNs*taskDiscoveryMaxPage20Improvement {
 					t.Fatalf("10,000-task default page latency did not improve by at least 70%%: baseline=%.0f ns/op candidate=%.0f ns/op", baselineNs, candidateNs)
 				}
-				if taskCount == 100 && page.name == "Default20" && candidateNs > baselineNs*taskDiscoveryMaxControlRegression {
-					t.Fatalf("100-task default page latency regressed by more than 10%%: baseline=%.0f ns/op candidate=%.0f ns/op", baselineNs, candidateNs)
+				if taskCount == 100 && candidateNs > baselineNs*taskDiscoveryMaxControlRegression {
+					t.Fatalf("100-task control page latency regressed by more than 10%%: baseline=%.0f ns/op candidate=%.0f ns/op", baselineNs, candidateNs)
 				}
 			})
 		}
+	}
+}
+
+func measureTaskDiscoveryWriteSample(tb testing.TB, taskRepo *repository.TaskRepo, taskID string) float64 {
+	tb.Helper()
+	started := time.Now()
+	for i := 0; i < taskDiscoveryWriteOperations; i++ {
+		status := models.StatusPending
+		if i%2 == 1 {
+			status = models.StatusRunning
+		}
+		if err := taskRepo.UpdateStatus(context.Background(), taskID, status); err != nil {
+			tb.Fatalf("UpdateStatus write-budget sample: %v", err)
+		}
+	}
+	return float64(time.Since(started).Nanoseconds()) / float64(taskDiscoveryWriteOperations)
+}
+
+func TestTaskDiscoveryOrderIndexWriteBudget(t *testing.T) {
+	db, taskRepo := newTaskDiscoveryOrderBenchmarkRepo(t, 10000, 128, 128)
+	const taskID = "task-discovery-benchmark-00001"
+	setTaskDiscoveryOrderIndex(t, db, false)
+	if err := taskRepo.UpdateStatus(context.Background(), taskID, models.StatusPending); err != nil {
+		t.Fatalf("warm task write target: %v", err)
+	}
+
+	var baseline, candidate taskDiscoveryPairedMetrics
+	for sample := 0; sample < taskDiscoveryPairedSamples; sample++ {
+		if sample%2 == 0 {
+			setTaskDiscoveryOrderIndex(t, db, false)
+			baseline.wallNs = append(baseline.wallNs, measureTaskDiscoveryWriteSample(t, taskRepo, taskID))
+			setTaskDiscoveryOrderIndex(t, db, true)
+			candidate.wallNs = append(candidate.wallNs, measureTaskDiscoveryWriteSample(t, taskRepo, taskID))
+			continue
+		}
+		setTaskDiscoveryOrderIndex(t, db, true)
+		candidate.wallNs = append(candidate.wallNs, measureTaskDiscoveryWriteSample(t, taskRepo, taskID))
+		setTaskDiscoveryOrderIndex(t, db, false)
+		baseline.wallNs = append(baseline.wallNs, measureTaskDiscoveryWriteSample(t, taskRepo, taskID))
+	}
+	setTaskDiscoveryOrderIndex(t, db, true)
+
+	baselineNs := baseline.medianWallNs()
+	candidateNs := candidate.medianWallNs()
+	indexBytes := taskDiscoveryOrderIndexBytes(t, db)
+	t.Logf("paired write median ns/op: baseline=%.0f candidate=%.0f; discovery index storage bytes=%d", baselineNs, candidateNs, indexBytes)
+	if candidateNs > baselineNs*taskDiscoveryMaxWriteLatencyRegression {
+		t.Fatalf("discovery index write latency regressed by more than 20%%: baseline=%.0f ns/op candidate=%.0f ns/op", baselineNs, candidateNs)
+	}
+	if indexBytes <= 0 || indexBytes > taskDiscoveryMaxIndexStorageBytes {
+		t.Fatalf("discovery index storage = %d bytes, want 1..%d bytes for the 10,000-task fixture", indexBytes, taskDiscoveryMaxIndexStorageBytes)
 	}
 }
 
@@ -350,7 +407,7 @@ func BenchmarkTaskDiscoveryIndexWriteBudget(b *testing.B) {
 				}
 			}
 			b.StopTimer()
-			b.ReportMetric(float64(taskDiscoveryOrderIndexBytes(b, db)), "discovery_index_bytes/op")
+			b.ReportMetric(float64(taskDiscoveryOrderIndexBytes(b, db)), "discovery_index_storage_bytes")
 		})
 	}
 }
