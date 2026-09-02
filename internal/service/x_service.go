@@ -948,33 +948,67 @@ func xASCIIURLSuffixRanges(domain string) []xTextRange {
 	ranges := make([]xTextRange, 0, len(labels))
 	nextSearch := 0
 	for startIndex, label := range labels {
-		if label.start < nextSearch || !isXASCIIURLDomainLabel(domain[label.start:label.end]) {
+		if label.start < nextSearch {
 			continue
 		}
 
-		bestEnd := -1
-		for endIndex := startIndex; endIndex < len(labels); endIndex++ {
-			endLabel := labels[endIndex]
-			if endIndex > startIndex && !isXASCIIURLDomainLabel(domain[endLabel.start:endLabel.end]) {
+		if isXASCIIURLDomainLabel(domain[label.start:label.end]) {
+			bestEnd := -1
+			for endIndex := startIndex; endIndex < len(labels); endIndex++ {
+				endLabel := labels[endIndex]
+				if endIndex > startIndex && !isXASCIIURLDomainLabel(domain[endLabel.start:endLabel.end]) {
+					candidate := domain[label.start:endLabel.end]
+					if xValidBareURLDomain(candidate) {
+						bestEnd = endLabel.end
+					}
+					break
+				}
+				if endIndex == startIndex {
+					continue
+				}
 				candidate := domain[label.start:endLabel.end]
 				if xValidBareURLDomain(candidate) {
 					bestEnd = endLabel.end
 				}
-				break
 			}
-			if endIndex == startIndex {
+			if bestEnd >= 0 {
+				ranges = append(ranges, xTextRange{start: label.start, end: bestEnd})
+				nextSearch = bestEnd
 				continue
 			}
-			candidate := domain[label.start:endLabel.end]
-			if xValidBareURLDomain(candidate) {
-				bestEnd = endLabel.end
+		}
+
+		// twitter-text's validAsciiDomain regexp is unanchored, so a mixed
+		// Unicode label can contain an ASCII URL suffix that starts after its
+		// first rune. Scan those rune boundaries after preserving the label-
+		// based pass for complete IDN domains such as example.рф.
+		for start := label.start; start < label.end; {
+			first, size := utf8.DecodeRuneInString(domain[start:])
+			if !isXASCIIURLDomainRune(first) {
+				start += size
+				continue
 			}
+
+			bestEnd := -1
+			for end := start; end < len(domain); {
+				r, size := utf8.DecodeRuneInString(domain[end:])
+				if r != '.' && !isXASCIIURLDomainRune(r) {
+					break
+				}
+				end += size
+				if xValidBareURLDomain(domain[start:end]) {
+					bestEnd = end
+				}
+			}
+			if bestEnd < 0 {
+				start += size
+				continue
+			}
+
+			ranges = append(ranges, xTextRange{start: start, end: bestEnd})
+			nextSearch = bestEnd
+			break
 		}
-		if bestEnd < 0 {
-			continue
-		}
-		ranges = append(ranges, xTextRange{start: label.start, end: bestEnd})
-		nextSearch = bestEnd
 	}
 	return ranges
 }
