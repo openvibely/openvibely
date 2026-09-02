@@ -1145,7 +1145,10 @@ func TestXOutboundUsesWeightedPostLimit(t *testing.T) {
 	overlongIDNALabel := strings.Repeat("x", 120) + " " + strings.Repeat("界", 80) + ".com"
 	multiSuffixURL := strings.Repeat("x", 241) + " example.com.例.foo.org"
 	unicodeURLWithinRawLimit := "https://" + strings.Repeat("界.", 500) + "com"
-	unicodeURLWithinRawLimit += "/" + strings.Repeat("a", xMaxURLLength-len(unicodeURLWithinRawLimit)-1)
+	unicodeURLWithinRawLimit += "/" + strings.Repeat("a", xMaxURLLength-xUTF16Length(unicodeURLWithinRawLimit)-1)
+	require.Equal(t, xMaxURLLength, xUTF16Length(unicodeURLWithinRawLimit))
+	overlongUnicodePrefixURL := strings.Repeat("界.", 2040) + "example.com"
+	require.Greater(t, xUTF16Length(overlongUnicodePrefixURL)+xUTF16Length("https://"), xMaxURLLength)
 
 	tests := []struct {
 		name       string
@@ -1175,6 +1178,7 @@ func TestXOutboundUsesWeightedPostLimit(t *testing.T) {
 		{name: "IDNA label over provider maximum", text: overlongIDNALabel, shouldPost: false},
 		{name: "multiple URL entities separated by Unicode label", text: multiSuffixURL, shouldPost: false},
 		{name: "Unicode URL uses original length for provider maximum", text: unicodeURLWithinRawLimit, shouldPost: true},
+		{name: "overlong full protocol-less Unicode-prefixed URL", text: overlongUnicodePrefixURL, shouldPost: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1246,6 +1250,7 @@ func TestXURLRangesFollowTwitterTextEntityBoundaries(t *testing.T) {
 	tcoAtLimit := "https://t.co/" + strings.Repeat("a", xMaxTCOURLSlugLength)
 	tcoOverLimit := "https://t.co/" + strings.Repeat("a", xMaxTCOURLSlugLength+1)
 	tcoWithExtraPath := tcoAtLimit + "/extra"
+	overlongUnicodePrefixURL := strings.Repeat("界.", 2040) + "example.com"
 	tests := []struct {
 		name     string
 		text     string
@@ -1271,6 +1276,7 @@ func TestXURLRangesFollowTwitterTextEntityBoundaries(t *testing.T) {
 		{name: "t.co slug exactly at maximum", text: tcoAtLimit, expected: []string{tcoAtLimit}},
 		{name: "t.co slug over maximum", text: tcoOverLimit, expected: []string{}},
 		{name: "t.co path after slug is ordinary text", text: tcoWithExtraPath, expected: []string{tcoAtLimit}},
+		{name: "overlong full protocol-less Unicode-prefixed URL", text: overlongUnicodePrefixURL, expected: []string{}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1321,9 +1327,11 @@ func TestXReplyRejectsOversizedURLEntitiesBeforeProviderPost(t *testing.T) {
 	maxURL := "https://example.com/" + strings.Repeat("a", xMaxURLLength-len("https://example.com/"))
 	overlongURL := maxURL + "a"
 	tcoOverLimit := "https://t.co/" + strings.Repeat("a", xMaxTCOURLSlugLength+1)
+	overlongUnicodePrefixURL := strings.Repeat("界.", 2040) + "example.com"
 	for _, text := range []string{
 		overlongURL,
 		strings.Repeat("x", 240) + " " + tcoOverLimit,
+		overlongUnicodePrefixURL,
 	} {
 		api.posted = nil
 		svc.SendReply(ctx, "tweet", text, "")
