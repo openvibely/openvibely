@@ -3116,6 +3116,9 @@ func TestTaskRepo_ListTasksForDiscovery(t *testing.T) {
 	if partialTotal != 3 || len(partial) != 3 {
 		t.Fatalf("expected 3 partial matches, got total=%d len=%d", partialTotal, len(partial))
 	}
+	if partial[0].ID != exact.ID || partial[1].Title != "Deploy pipeline docs" || partial[2].Title != "Refactor deploy hooks" {
+		t.Fatalf("title relevance ordering changed: %#v", partial)
+	}
 	for _, task := range partial {
 		if task.Category == models.CategoryChat {
 			t.Fatalf("chat row leaked into discovery: %q", task.Title)
