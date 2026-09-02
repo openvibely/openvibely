@@ -1252,6 +1252,44 @@ func TestXWeightedLengthConformanceRegressions(t *testing.T) {
 	}
 }
 
+func TestXEmojiRangesRespectVariationSelectorPresentation(t *testing.T) {
+	require.Len(t, xEmojiRanges("✈"), 1)
+	require.Empty(t, xEmojiRanges("✈︎"))
+	ranges := xEmojiRanges("✈️")
+	require.Len(t, ranges, 1)
+	require.Equal(t, "✈️", "✈️"[ranges[0].start:ranges[0].end])
+}
+
+func TestXIDNASeparatorsPreserveURLEntitiesAndWeightedLimit(t *testing.T) {
+	ctx, svc, _, _, _, _, _ := setupXServiceTest(t)
+	api := &fakeXAPI{}
+	svc.setAPI(api)
+
+	for _, tt := range []struct {
+		name      string
+		separator string
+	}{
+		{name: "ideographic full stop", separator: "\u3002"},
+		{name: "fullwidth full stop", separator: "\uff0e"},
+		{name: "halfwidth ideographic full stop", separator: "\uff61"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			domain := strings.Repeat("a"+tt.separator, 32) + "example.com"
+			url := "https://" + domain
+			require.True(t, xURLIDNADomainValid(domain))
+			ranges := xURLRanges(url)
+			require.Len(t, ranges, 1)
+			require.Equal(t, url, url[ranges[0].start:ranges[0].end])
+
+			text := strings.Repeat("x", 256) + " " + url
+			api.posted = nil
+			result := svc.SendOutboundMessage(ctx, "me", "", text)
+			require.True(t, result.OK)
+			require.Equal(t, []string{"|" + text}, api.posted)
+		})
+	}
+}
+
 func TestXURLRangesFollowTwitterTextEntityBoundaries(t *testing.T) {
 	maxURL := "https://example.com/" + strings.Repeat("a", xMaxURLLength-len("https://example.com/"))
 	overlongURL := maxURL + "a"
@@ -1320,8 +1358,7 @@ func TestXReplyConformanceTruncatesEntitiesWithoutProviderRejection(t *testing.T
 	}{
 		{name: "text presentation variation selector", text: strings.Repeat("✈︎", 94), expected: strings.Repeat("✈︎", 69) + "…"},
 		{name: "unsupported arbitrary ZWJ sequence", text: strings.Repeat("😀\u200d😀", 57), expected: strings.Repeat("😀\u200d😀", 55) + "…"},
-		{name: "CJK text", text: strings.Repeat("界", 141), expected: strings.Repeat("界", 139) + "…"},
-		{name: "URL entity", text: strings.Repeat("x", 258) + " example.рф", expected: strings.Repeat("x", 258) + " …"},
+		{name: "CJK text", text: strings.Repeat("界", 141), expected: strings.Repeat("界", 139) + "…"}, {name: "URL entity", text: strings.Repeat("x", 258) + " example.рф", expected: strings.Repeat("x", 258) + " …"},
 		{name: "URL after Unicode prefix", text: strings.Repeat("x", 258) + " 例.example.com", expected: strings.Repeat("x", 258) + " 例.…"},
 		{name: "URL inside mixed Unicode label", text: strings.Repeat("x", 258) + " 例example.com", expected: strings.Repeat("x", 258) + " 例…"},
 		{name: "multiple URL entities separated by Unicode label", text: multiSuffixURL, expected: strings.Repeat("x", 241) + " example.com.例.…"},
