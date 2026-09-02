@@ -1230,6 +1230,7 @@ func TestXWeightedLengthConformanceRegressions(t *testing.T) {
 		{name: "NFC equivalent decomposed text", text: strings.Repeat("e\u0301", 141), shouldPost: true},
 		{name: "valid bare IDN URL", text: strings.Repeat("x", 258) + " example.рф", shouldPost: false},
 		{name: "valid bare URL after Unicode prefix", text: strings.Repeat("x", 258) + " 例.example.com", shouldPost: false},
+		{name: "valid bare URL inside mixed Unicode label", text: strings.Repeat("x", 258) + " 例example.com", shouldPost: false},
 		{name: "mixed ACE-prefixed Unicode domain remains ordinary text", text: strings.Repeat("x", 257) + " https://xn--abc.界.com", shouldPost: true},
 	}
 	for _, tt := range directCases {
@@ -1262,6 +1263,7 @@ func TestXURLRangesFollowTwitterTextEntityBoundaries(t *testing.T) {
 		{name: "internationalized domain", text: "example.рф", expected: []string{"example.рф"}},
 		{name: "internationalized subdomain is not protocolless URL", text: "пример.рф", expected: []string{}},
 		{name: "Unicode prefix before ASCII protocolless URL", text: "例.example.com", expected: []string{"example.com"}},
+		{name: "ASCII URL inside mixed Unicode label", text: "例example.com", expected: []string{"example.com"}},
 		{name: "multiple ASCII URLs separated by Unicode label", text: "example.com.例.foo.org", expected: []string{"example.com", "foo.org"}},
 		{name: "uppercase path and query", text: "HTTPS://EXAMPLE.COM/Path?X=Y", expected: []string{"HTTPS://EXAMPLE.COM/Path?X=Y"}},
 		{name: "balanced path punctuation", text: "https://example.com/(foo).", expected: []string{"https://example.com/(foo)"}},
@@ -1308,6 +1310,7 @@ func TestXReplyConformanceTruncatesEntitiesWithoutProviderRejection(t *testing.T
 		{name: "CJK text", text: strings.Repeat("界", 141), expected: strings.Repeat("界", 139) + "…"},
 		{name: "URL entity", text: strings.Repeat("x", 258) + " example.рф", expected: strings.Repeat("x", 258) + " …"},
 		{name: "URL after Unicode prefix", text: strings.Repeat("x", 258) + " 例.example.com", expected: strings.Repeat("x", 258) + " 例.…"},
+		{name: "URL inside mixed Unicode label", text: strings.Repeat("x", 258) + " 例example.com", expected: strings.Repeat("x", 258) + " 例…"},
 		{name: "multiple URL entities separated by Unicode label", text: multiSuffixURL, expected: strings.Repeat("x", 241) + " example.com.例.…"},
 		{name: "URL followed by CJK text", text: strings.Repeat("x", 255) + " https://example.com/界", expected: strings.Repeat("x", 255) + " …"},
 		{name: "decomposed text preserves original prefix boundary", text: strings.Repeat("e\u0301", 281), expected: strings.Repeat("e\u0301", 278) + "…"},
