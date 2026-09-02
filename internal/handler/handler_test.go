@@ -1931,6 +1931,7 @@ func TestHandler_CreateModel_Normalization(t *testing.T) {
 		{"openai_preserves_gpt54", "openai", "gpt-5.4", "xhigh", "gpt-5.4", "xhigh"},
 		{"openai_normalizes_unknown", "openai", "unknown-model", "high", "gpt-5.6-sol", "high"},
 		{"non_openai_preserves", "anthropic", "claude-opus-4-6", "xhigh", "claude-opus-4-6", ""},
+		{"anthropic_preserves_mythos51", "anthropic", "claude-mythos-5-1", "xhigh", "claude-mythos-5-1", "xhigh"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

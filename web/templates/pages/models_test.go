@@ -43,6 +43,7 @@ func TestModelsContent_NewModelVersionsInSelector(t *testing.T) {
 		"claude-sonnet-5",
 		"claude-opus-5",
 		"claude-fable-5-1",
+		"claude-mythos-5-1",
 		"claude-fable-5",
 		"claude-mythos-5",
 		"claude-opus-4-8",
@@ -66,6 +67,7 @@ func TestModelsContent_NewModelVersionsInSelector(t *testing.T) {
 		"claude-sonnet-5",
 		"claude-opus-5",
 		"claude-fable-5-1",
+		"claude-mythos-5-1",
 		"claude-fable-5",
 		"claude-mythos-5",
 		"claude-opus-4-8",
@@ -157,6 +159,9 @@ func TestModelsContent_NewModelVersionsInSelector(t *testing.T) {
 	if !strings.Contains(out, "{ value: 'claude-fable-5', label: 'Claude Fable 5', efforts: ['low', 'medium', 'high', 'xhigh', 'max']") {
 		t.Error("expected Claude Fable 5 effort options")
 	}
+	if !strings.Contains(out, "{ value: 'claude-mythos-5-1', label: 'Claude Mythos 5.1', efforts: ['low', 'medium', 'high', 'xhigh', 'max']") {
+		t.Error("expected Claude Mythos 5.1 effort options")
+	}
 	if !strings.Contains(out, "{ value: 'claude-mythos-5', label: 'Claude Mythos 5', efforts: ['low', 'medium', 'high', 'xhigh', 'max']") {
 		t.Error("expected Claude Mythos 5 effort options")
 	}
@@ -185,6 +190,7 @@ func TestModelsContent_AnthropicDefaultModelSelection(t *testing.T) {
 	sonnet5Idx := strings.Index(out, `value="claude-sonnet-5"`)
 	sonnet46Idx := strings.Index(out, `value="claude-sonnet-4-6"`)
 	fable51Idx := strings.Index(out, `value="claude-fable-5-1"`)
+	mythos51Idx := strings.Index(out, `value="claude-mythos-5-1"`)
 	fableIdx := strings.Index(out, `value="claude-fable-5"`)
 	mythosIdx := strings.Index(out, `value="claude-mythos-5"`)
 	if sonnet5Idx < 0 {
@@ -195,6 +201,9 @@ func TestModelsContent_AnthropicDefaultModelSelection(t *testing.T) {
 	}
 	if fable51Idx < 0 {
 		t.Fatal("expected claude-fable-5-1 to be present as an HTML option")
+	}
+	if mythos51Idx < 0 {
+		t.Fatal("expected claude-mythos-5-1 to be present as an HTML option")
 	}
 	if fableIdx < 0 {
 		t.Fatal("expected claude-fable-5 to be present as an HTML option")
@@ -207,6 +216,9 @@ func TestModelsContent_AnthropicDefaultModelSelection(t *testing.T) {
 	}
 	if sonnet5Idx > fable51Idx {
 		t.Errorf("expected claude-sonnet-5 to appear before claude-fable-5-1 in the HTML selector (fable-5.1 must not be the default)")
+	}
+	if sonnet5Idx > mythos51Idx {
+		t.Errorf("expected claude-sonnet-5 to appear before claude-mythos-5-1 in the HTML selector (mythos-5.1 must not be the default)")
 	}
 	if sonnet5Idx > fableIdx {
 		t.Errorf("expected claude-sonnet-5 to appear before claude-fable-5 in the HTML selector (fable-5 must not be the default)")
@@ -228,6 +240,7 @@ func TestModelsContent_AnthropicDefaultModelSelection(t *testing.T) {
 	jsSonnet5Idx := strings.Index(jsCatalog, "'claude-sonnet-5'")
 	jsSonnet46Idx := strings.Index(jsCatalog, "'claude-sonnet-4-6'")
 	jsFable51Idx := strings.Index(jsCatalog, "'claude-fable-5-1'")
+	jsMythos51Idx := strings.Index(jsCatalog, "'claude-mythos-5-1'")
 	jsFableIdx := strings.Index(jsCatalog, "'claude-fable-5'")
 	jsMythosIdx := strings.Index(jsCatalog, "'claude-mythos-5'")
 	if jsSonnet5Idx < 0 {
@@ -238,6 +251,9 @@ func TestModelsContent_AnthropicDefaultModelSelection(t *testing.T) {
 	}
 	if jsFable51Idx < 0 {
 		t.Fatal("expected claude-fable-5-1 in JS anthropic catalog")
+	}
+	if jsMythos51Idx < 0 {
+		t.Fatal("expected claude-mythos-5-1 in JS anthropic catalog")
 	}
 	if jsFableIdx < 0 {
 		t.Fatal("expected claude-fable-5 in JS anthropic catalog")
@@ -250,6 +266,9 @@ func TestModelsContent_AnthropicDefaultModelSelection(t *testing.T) {
 	}
 	if jsSonnet5Idx > jsFable51Idx {
 		t.Errorf("expected claude-sonnet-5 to appear before claude-fable-5-1 in JS anthropic catalog (fable-5.1 must not be the first/default entry)")
+	}
+	if jsSonnet5Idx > jsMythos51Idx {
+		t.Errorf("expected claude-sonnet-5 to appear before claude-mythos-5-1 in JS anthropic catalog (mythos-5.1 must not be the first/default entry)")
 	}
 	if jsSonnet5Idx > jsFableIdx {
 		t.Errorf("expected claude-sonnet-5 to appear before claude-fable-5 in JS anthropic catalog (fable-5 must not be the first/default entry)")
