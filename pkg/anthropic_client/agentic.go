@@ -94,7 +94,7 @@ type AgenticOptions struct {
 func NormalizeEffort(model, value string) string {
 	effort := strings.ToLower(strings.TrimSpace(value))
 	switch effort {
-	case "low", "medium", "high", "max":
+	case "low", "medium", "high", "xhigh", "max":
 	default:
 		return ""
 	}
@@ -105,14 +105,17 @@ func NormalizeEffort(model, value string) string {
 		strings.Contains(m, "claude-sonnet-5"),
 		strings.Contains(m, "claude-fable-5"),
 		strings.Contains(m, "claude-mythos-5"),
-		strings.Contains(m, "claude-mythos-preview"),
 		strings.Contains(m, "claude-opus-4-8"),
-		strings.Contains(m, "claude-opus-4-7"),
+		strings.Contains(m, "claude-opus-4-7"):
+		return effort
+	case strings.Contains(m, "claude-mythos-preview"),
 		strings.Contains(m, "claude-opus-4-6"),
 		strings.Contains(m, "claude-sonnet-4-6"):
-		return effort
+		if effort != "xhigh" {
+			return effort
+		}
 	case strings.Contains(m, "claude-opus-4-5"):
-		if effort != "max" {
+		if effort == "low" || effort == "medium" || effort == "high" {
 			return effort
 		}
 	}

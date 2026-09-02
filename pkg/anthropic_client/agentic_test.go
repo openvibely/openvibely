@@ -1879,9 +1879,18 @@ func TestNormalizeEffortRejectsUnsupportedModelCombinations(t *testing.T) {
 		want   string
 	}{
 		{"claude-opus-5", " LOW ", "low"},
+		{"claude-opus-5", "xhigh", "xhigh"},
+		{"claude-sonnet-5", "xhigh", "xhigh"},
+		{"claude-fable-5-1", "xhigh", "xhigh"},
 		{"claude-fable-5-1", "max", "max"},
+		{"claude-fable-5", "xhigh", "xhigh"},
+		{"claude-mythos-5", "xhigh", "xhigh"},
+		{"claude-opus-4-8", "xhigh", "xhigh"},
+		{"claude-opus-4-7", "xhigh", "xhigh"},
+		{"claude-opus-4-6", "xhigh", ""},
 		{"claude-sonnet-4-6", "max", "max"},
 		{"claude-opus-4-5-20251101", "high", "high"},
+		{"claude-opus-4-5-20251101", "xhigh", ""},
 		{"claude-opus-4-5-20251101", "max", ""},
 		{"claude-sonnet-4-5-20250929", "low", ""},
 		{"claude-haiku-4-5-20251001", "high", ""},

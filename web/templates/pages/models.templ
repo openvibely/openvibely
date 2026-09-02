@@ -975,17 +975,17 @@ for _, agent := range modelOptions {
 				};
 			var modelOptionsByProvider = {
 					anthropic: [
-						{ value: 'claude-sonnet-5', label: 'Claude Sonnet 5', efforts: ['low', 'medium', 'high', 'max'] },
-						{ value: 'claude-opus-5', label: 'Claude Opus 5', efforts: ['low', 'medium', 'high', 'max'] },
+						{ value: 'claude-sonnet-5', label: 'Claude Sonnet 5', efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
+						{ value: 'claude-opus-5', label: 'Claude Opus 5', efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
 						{ value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', efforts: ['low', 'medium', 'high', 'max'] },
-						{ value: 'claude-opus-4-8', label: 'Claude Opus 4.8', efforts: ['low', 'medium', 'high', 'max'] },
-						{ value: 'claude-opus-4-7', label: 'Claude Opus 4.7', efforts: ['low', 'medium', 'high', 'max'] },
+						{ value: 'claude-opus-4-8', label: 'Claude Opus 4.8', efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
+						{ value: 'claude-opus-4-7', label: 'Claude Opus 4.7', efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
 						{ value: 'claude-sonnet-4-5-20250929', label: 'Claude Sonnet 4.5', efforts: [] },
 						{ value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5', efforts: [] },
 						{ value: 'claude-opus-4-6', label: 'Claude Opus 4.6', efforts: ['low', 'medium', 'high', 'max'] },
-						{ value: 'claude-fable-5-1', label: 'Claude Fable 5.1', efforts: ['low', 'medium', 'high', 'max'] },
-						{ value: 'claude-fable-5', label: 'Claude Fable 5', efforts: ['low', 'medium', 'high', 'max'] },
-						{ value: 'claude-mythos-5', label: 'Claude Mythos 5', efforts: ['low', 'medium', 'high', 'max'] }
+						{ value: 'claude-fable-5-1', label: 'Claude Fable 5.1', efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
+						{ value: 'claude-fable-5', label: 'Claude Fable 5', efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
+						{ value: 'claude-mythos-5', label: 'Claude Mythos 5', efforts: ['low', 'medium', 'high', 'xhigh', 'max'] }
 				],				openai: [
 					{ value: 'gpt-5.6-sol', label: 'gpt-5.6-sol', efforts: ['none', 'low', 'medium', 'high', 'xhigh', 'max'] },
 					{ value: 'gpt-5.6-terra', label: 'gpt-5.6-terra', efforts: ['none', 'low', 'medium', 'high', 'xhigh', 'max'] },
@@ -1196,7 +1196,7 @@ for _, agent := range modelOptions {
 					reasoningSelect.disabled = false;
 					if (provider === 'anthropic') {
 						reasoningLabel.textContent = 'Claude Effort';
-						reasoningHelp.textContent = 'Matches Claude Code effort: low, medium, high, or max. Blank saved configs keep the provider default.';
+						reasoningHelp.textContent = 'Matches Claude Code effort: low, medium, high, xhigh, or max. Availability varies by model. Blank saved configs keep the provider default.';
 					} else if (isOpenAICompatibleProvider(provider) && (model || '').trim().toLowerCase() === 'kimi-k3') {
 						reasoningLabel.textContent = 'Kimi Reasoning Effort';
 						reasoningHelp.textContent = 'Controls Kimi K3 reasoning effort: low, high, or max.';
