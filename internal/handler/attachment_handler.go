@@ -272,21 +272,6 @@ func SetUploadsDir(dir string) {
 	}
 }
 
-func (h *Handler) attachmentMutationProjectID(c echo.Context) string {
-	if projectID := strings.TrimSpace(c.QueryParam("project_id")); projectID != "" {
-		return projectID
-	}
-	if h.settingsRepo == nil {
-		return ""
-	}
-	selectedProjectID, err := h.settingsRepo.Get(c.Request().Context(), uiPreferenceSelectedProjectIDKey)
-	if err != nil {
-		applog.Debugf("[handler] failed to load selected project preference for attachment mutation: %v", err)
-		return ""
-	}
-	return strings.TrimSpace(selectedProjectID)
-}
-
 func (h *Handler) UploadAttachment(c echo.Context) error {
 	taskID := c.Param("taskId")
 	applog.Infof("[handler] UploadAttachment task=%s", taskID)
@@ -297,7 +282,7 @@ func (h *Handler) UploadAttachment(c echo.Context) error {
 		applog.Infof("[handler] UploadAttachment task not found: %v", err)
 		return echo.NewHTTPError(http.StatusNotFound, "task not found")
 	}
-	projectID := h.attachmentMutationProjectID(c)
+	projectID := h.mutationProjectID(c)
 	if projectID != "" && task.ProjectID != projectID {
 		applog.Infof("[handler] UploadAttachment task not found in project=%s", projectID)
 		return echo.NewHTTPError(http.StatusNotFound, "task not found")
@@ -417,7 +402,7 @@ func (h *Handler) DeleteAttachment(c echo.Context) error {
 	applog.Infof("[handler] DeleteAttachment id=%s", attachmentID)
 
 	ctx := c.Request().Context()
-	projectID := h.attachmentMutationProjectID(c)
+	projectID := h.mutationProjectID(c)
 
 	// Get attachment to find the parent task and file path, scoped to the active/requested project when present.
 	var (

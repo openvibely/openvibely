@@ -46,6 +46,58 @@ func setupProjectTestHandlerWithDB(t *testing.T) (*Handler, *service.ProjectServ
 	return h, projectSvc, db
 }
 
+func TestMutationProjectID(t *testing.T) {
+	newContext := func(path string) echo.Context {
+		e := echo.New()
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		return e.NewContext(req, httptest.NewRecorder())
+	}
+
+	t.Run("explicit project is trimmed and wins", func(t *testing.T) {
+		h, _, _ := setupProjectTestHandlerWithDB(t)
+		if err := h.settingsRepo.Set(context.Background(), uiPreferenceSelectedProjectIDKey, " saved-project "); err != nil {
+			t.Fatalf("failed to save selected project preference: %v", err)
+		}
+
+		got := h.mutationProjectID(newContext("/?project_id=%20explicit-project%20"))
+		if got != "explicit-project" {
+			t.Fatalf("got %q, want trimmed explicit project", got)
+		}
+	})
+
+	t.Run("saved project is trimmed", func(t *testing.T) {
+		h, _, _ := setupProjectTestHandlerWithDB(t)
+		if err := h.settingsRepo.Set(context.Background(), uiPreferenceSelectedProjectIDKey, " saved-project "); err != nil {
+			t.Fatalf("failed to save selected project preference: %v", err)
+		}
+
+		got := h.mutationProjectID(newContext("/"))
+		if got != "saved-project" {
+			t.Fatalf("got %q, want trimmed saved project", got)
+		}
+	})
+
+	t.Run("missing settings returns empty scope", func(t *testing.T) {
+		h, _, _ := setupProjectTestHandlerWithDB(t)
+		h.settingsRepo = nil
+
+		if got := h.mutationProjectID(newContext("/")); got != "" {
+			t.Fatalf("got %q, want empty scope", got)
+		}
+	})
+
+	t.Run("preference read errors return empty scope", func(t *testing.T) {
+		h, _, db := setupProjectTestHandlerWithDB(t)
+		if err := db.Close(); err != nil {
+			t.Fatalf("close test database: %v", err)
+		}
+
+		if got := h.mutationProjectID(newContext("/")); got != "" {
+			t.Fatalf("got %q, want empty scope", got)
+		}
+	})
+}
+
 func TestGetCurrentProjectID_WithValidID(t *testing.T) {
 	h, projectSvc := setupProjectTestHandler(t)
 	ctx := context.Background()
