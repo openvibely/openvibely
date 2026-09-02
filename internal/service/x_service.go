@@ -862,14 +862,15 @@ func xURLWithinProviderLimit(candidate string) bool {
 
 domainComplete:
 	domain := candidate[authorityStart:domainEnd]
-	if !xURLIDNADomainValid(domain) {
+	encodedDomain, ok := xURLIDNAEncodedDomain(domain)
+	if !ok {
 		return false
 	}
 
-	// twitter-text validates each IDNA label but measures the original
-	// UTF-16 URL. A protocol-less URL is checked as if it had the default
-	// https:// protocol for this validation.
-	length := xUTF16Length(candidate)
+	// twitter-text validates each IDNA label and charges the URL-length delta
+	// between the original UTF-16 domain and its Punycode form. A
+	// protocol-less URL is checked as if it had the default https:// protocol.
+	length := xUTF16Length(candidate) + xUTF16Length(encodedDomain) - xUTF16Length(domain)
 	if authorityStart == 0 {
 		length += xUTF16Length("https://")
 	}
@@ -877,28 +878,52 @@ domainComplete:
 }
 
 func xURLIDNADomainValid(domain string) bool {
+	_, ok := xURLIDNAEncodedDomain(domain)
+	return ok
+}
+
+func xURLIDNAEncodedDomain(domain string) (string, bool) {
 	if domain == "" {
-		return false
+		return "", false
 	}
 	// Match twitter-text's lightweight ACE-prefix guard. A domain beginning
 	// with xn-- must contain an ASCII-domain match; raw Punycode conversion
 	// alone must not accept a mixed Unicode label after that prefix.
 	if strings.HasPrefix(domain, "xn--") && len(xASCIIURLSuffixRanges(domain)) == 0 {
-		return false
+		return "", false
 	}
-	// punycode.toASCII normalizes RFC 3490 label separators within each
-	// ASCII-dot-delimited outer label. Keep that order so the normalized
-	// encoded label length is checked as one label, matching twitter-text.
-	// Keep the original domain for URL length/ranges.
+
+	encodedLabels := make([]string, 0, strings.Count(domain, ".")+1)
 	for _, label := range strings.Split(domain, ".") {
-		if label == "" {
-			return false
+		encoded, ok := xURLIDNAEncodedOuterLabel(label)
+		if !ok {
+			return "", false
 		}
-		if !xURLIDNALabelValid(xNormalizeIDNASeparators(label)) {
-			return false
-		}
+		encodedLabels = append(encodedLabels, encoded)
 	}
-	return true
+	return strings.Join(encodedLabels, "."), true
+}
+
+func xURLIDNAEncodedOuterLabel(label string) (string, bool) {
+	if label == "" {
+		return "", false
+	}
+
+	// punycode.toASCII normalizes RFC 3490 separators inside one
+	// ASCII-dot-delimited outer label, then converts each resulting segment.
+	// Keep this order so alternate separators cannot evade the outer label
+	// length limit.
+	segments := strings.Split(xNormalizeIDNASeparators(label), ".")
+	encodedSegments := make([]string, 0, len(segments))
+	for _, segment := range segments {
+		encoded, ok := xURLIDNAEncodedSegment(segment)
+		if !ok {
+			return "", false
+		}
+		encodedSegments = append(encodedSegments, encoded)
+	}
+	encoded := strings.Join(encodedSegments, ".")
+	return encoded, encoded != "" && xUTF16Length(encoded) <= 63
 }
 
 func xNormalizeIDNASeparators(domain string) string {
@@ -912,20 +937,19 @@ func xNormalizeIDNASeparators(domain string) string {
 	}, domain)
 }
 
-func xURLIDNALabelValid(label string) bool {
-	// twitter-text's punycode.toASCII treats every non-ASCII label as raw
-	// Unicode, including labels that happen to begin with xn--. Go's raw
-	// Punycode profile interprets that prefix as an already-encoded label, so
-	// change its case only for the conversion; the encoded length is unchanged
-	// while the prefix no longer triggers ACE decoding.
-	if strings.HasPrefix(label, "xn--") {
-		if xURLLabelIsASCII(label) {
-			return len(label) <= 63
-		}
-		label = "X" + label[1:]
+func xURLIDNAEncodedSegment(segment string) (string, bool) {
+	// twitter-text's punycode.toASCII leaves an ASCII label, including an
+	// inner xn---prefixed label, unchanged. Go's Punycode profile decodes a
+	// lowercase xn-- prefix, so invoke it only for segments containing
+	// non-ASCII text and neutralize that prefix for the conversion.
+	if xURLLabelIsASCII(segment) {
+		return segment, segment != ""
 	}
-	encoded, err := idna.Punycode.ToASCII(label)
-	return err == nil && encoded != "" && len(encoded) <= 63
+	if strings.HasPrefix(segment, "xn--") {
+		segment = "X" + segment[1:]
+	}
+	encoded, err := idna.Punycode.ToASCII(segment)
+	return encoded, err == nil && encoded != ""
 }
 
 func xURLLabelIsASCII(label string) bool {
@@ -1117,7 +1141,7 @@ func xURLSuffixEnd(text string, baseEnd int) int {
 }
 
 // xWeightedPostLength follows the current twitter-text v3 configuration:
-// https://github.com/twitter/twitter-text/blob/master/config/v3.json
+	// https://github.com/twitter/twitter-text/blob/30e2430d90cff3b46393ea54caf511441983c260/config/v3.json
 func xWeightedPostLength(text string) int {
 	text = norm.NFC.String(text)
 	urls := xURLRanges(text)
