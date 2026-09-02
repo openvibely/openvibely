@@ -40,13 +40,13 @@ For lower cost, use `gpt-5.6-terra`; for efficient high-volume work, use `gpt-5.
 
 | Model | Effort Options | Notes |
 |---|---|---|
-| Claude Opus 5 (`claude-opus-5`) | low / medium / high / max | Latest Opus generation. 128k max output, 1M context. |
-| Claude Sonnet 5 (`claude-sonnet-5`) | low / medium / high / max | Latest Sonnet generation. 128k max output, 1M context. |
-| Claude Fable 5.1 (`claude-fable-5-1`) | low / medium / high / max | Latest Fable generation. 128k max output, 1M context; adaptive thinking is always on. |
-| Claude Fable 5 (`claude-fable-5`) | low / medium / high / max | 128k max output, 1M context; adaptive thinking is always on. |
-| Claude Mythos 5 (`claude-mythos-5`) | low / medium / high / max | Limited-availability model. 128k max output, 1M context; adaptive thinking is always on. |
-| Claude Opus 4.8 (`claude-opus-4-8`) | low / medium / high / max | 128k max output, 1M context. |
-| Claude Opus 4.7 (`claude-opus-4-7`) | low / medium / high / max | 128k max output, 1M context. |
+| Claude Opus 5 (`claude-opus-5`) | low / medium / high / xhigh / max | Latest Opus generation. 128k max output, 1M context. |
+| Claude Sonnet 5 (`claude-sonnet-5`) | low / medium / high / xhigh / max | Latest Sonnet generation. 128k max output, 1M context. |
+| Claude Fable 5.1 (`claude-fable-5-1`) | low / medium / high / xhigh / max | Latest Fable generation. 128k max output, 1M context; adaptive thinking is always on. |
+| Claude Fable 5 (`claude-fable-5`) | low / medium / high / xhigh / max | 128k max output, 1M context; adaptive thinking is always on. |
+| Claude Mythos 5 (`claude-mythos-5`) | low / medium / high / xhigh / max | Limited-availability model. 128k max output, 1M context; adaptive thinking is always on. |
+| Claude Opus 4.8 (`claude-opus-4-8`) | low / medium / high / xhigh / max | 128k max output, 1M context. |
+| Claude Opus 4.7 (`claude-opus-4-7`) | low / medium / high / xhigh / max | 128k max output, 1M context. |
 | Claude Sonnet 4.6 (`claude-sonnet-4-6`) | low / medium / high / max | 64k max output, 1M context. |
 | Claude Sonnet 4.5 (`claude-sonnet-4-5-20250929`) | none | Supports manual extended thinking, but not the newer effort parameter. Legacy. |
 | Claude Haiku 4.5 (`claude-haiku-4-5-20251001`) | none | No reasoning effort support. Legacy. |
@@ -81,7 +81,7 @@ Where a low-level provider API still requires an output limit, OpenVibely choose
 ### Anthropic
 
 - Supports API key or OAuth-based flows.
-- For supported models, `Claude Effort` (`low`, `medium`, `high`, `max`) is sent to API/OAuth calls as `output_config.effort`. The selected value is validated against the model before it is saved and again before a request is sent.
+- For supported models, `Claude Effort` (`low`, `medium`, `high`, `xhigh`, `max`; availability varies by model) is sent to API/OAuth calls as `output_config.effort`. The selected value is validated against the model before it is saved and again before a request is sent.
 - Effort and thinking mode are separate controls. Claude 5 models use adaptive thinking; older models may use manual extended thinking budgets. Blank or unsupported effort values are omitted so the provider default applies.
 
 ### OpenAI

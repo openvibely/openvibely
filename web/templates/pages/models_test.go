@@ -114,16 +114,16 @@ func TestModelsContent_NewModelVersionsInSelector(t *testing.T) {
 	if !strings.Contains(out, "Claude Effort") {
 		t.Error("expected Claude effort label in model dialog")
 	}
-	if !strings.Contains(out, "Matches Claude Code effort: low, medium, high, or max") {
+	if !strings.Contains(out, "Matches Claude Code effort: low, medium, high, xhigh, or max. Availability varies by model.") {
 		t.Error("expected Claude effort behavior to be explained")
 	}
-	if !strings.Contains(out, "{ value: 'claude-sonnet-5', label: 'Claude Sonnet 5', efforts: ['low', 'medium', 'high', 'max']") {
+	if !strings.Contains(out, "{ value: 'claude-sonnet-5', label: 'Claude Sonnet 5', efforts: ['low', 'medium', 'high', 'xhigh', 'max']") {
 		t.Error("expected Claude Sonnet 5 effort options")
 	}
-	if !strings.Contains(out, "{ value: 'claude-opus-5', label: 'Claude Opus 5', efforts: ['low', 'medium', 'high', 'max']") {
+	if !strings.Contains(out, "{ value: 'claude-opus-5', label: 'Claude Opus 5', efforts: ['low', 'medium', 'high', 'xhigh', 'max']") {
 		t.Error("expected Claude Opus 5 effort options")
 	}
-	if !strings.Contains(out, "{ value: 'claude-fable-5-1', label: 'Claude Fable 5.1', efforts: ['low', 'medium', 'high', 'max']") {
+	if !strings.Contains(out, "{ value: 'claude-fable-5-1', label: 'Claude Fable 5.1', efforts: ['low', 'medium', 'high', 'xhigh', 'max']") {
 		t.Error("expected Claude Fable 5.1 effort options")
 	}
 	if !strings.Contains(out, "{ value: 'gpt-5.6-sol', label: 'gpt-5.6-sol', efforts: ['none', 'low', 'medium', 'high', 'xhigh', 'max']") {
@@ -154,16 +154,16 @@ func TestModelsContent_NewModelVersionsInSelector(t *testing.T) {
 	if !strings.Contains(out, "GLM Reasoning Effort") {
 		t.Error("expected GLM reasoning effort label")
 	}
-	if !strings.Contains(out, "{ value: 'claude-fable-5', label: 'Claude Fable 5', efforts: ['low', 'medium', 'high', 'max']") {
+	if !strings.Contains(out, "{ value: 'claude-fable-5', label: 'Claude Fable 5', efforts: ['low', 'medium', 'high', 'xhigh', 'max']") {
 		t.Error("expected Claude Fable 5 effort options")
 	}
-	if !strings.Contains(out, "{ value: 'claude-mythos-5', label: 'Claude Mythos 5', efforts: ['low', 'medium', 'high', 'max']") {
+	if !strings.Contains(out, "{ value: 'claude-mythos-5', label: 'Claude Mythos 5', efforts: ['low', 'medium', 'high', 'xhigh', 'max']") {
 		t.Error("expected Claude Mythos 5 effort options")
 	}
-	if !strings.Contains(out, "{ value: 'claude-opus-4-7', label: 'Claude Opus 4.7', efforts: ['low', 'medium', 'high', 'max']") {
+	if !strings.Contains(out, "{ value: 'claude-opus-4-7', label: 'Claude Opus 4.7', efforts: ['low', 'medium', 'high', 'xhigh', 'max']") {
 		t.Error("expected Claude Opus 4.7 effort options")
 	}
-	if !strings.Contains(out, "{ value: 'claude-opus-4-8', label: 'Claude Opus 4.8', efforts: ['low', 'medium', 'high', 'max']") {
+	if !strings.Contains(out, "{ value: 'claude-opus-4-8', label: 'Claude Opus 4.8', efforts: ['low', 'medium', 'high', 'xhigh', 'max']") {
 		t.Error("expected Claude Opus 4.8 effort options")
 	}
 }
