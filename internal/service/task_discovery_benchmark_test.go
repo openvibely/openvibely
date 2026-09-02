@@ -223,17 +223,22 @@ func setTaskDiscoveryOrderIndex(tb testing.TB, db *sql.DB, enabled bool) {
 
 func measureTaskDiscoveryOrderSample(tb testing.TB, taskRepo *repository.TaskRepo, input json.RawMessage, want string) taskDiscoveryPairedMetrics {
 	tb.Helper()
-	wallStarted := time.Now()
+	outputs := make([]string, taskDiscoveryTimingRuns)
 	outputBytes := 0
+	wallStarted := time.Now()
 	for i := 0; i < taskDiscoveryTimingRuns; i++ {
 		out, err := ExecuteListTasksTool(context.Background(), taskRepo, "default", input)
 		if err != nil {
 			tb.Fatalf("timed ExecuteListTasksTool: %v", err)
 		}
+		outputs[i] = out
+		outputBytes = len(out)
+	}
+	wallNs := float64(time.Since(wallStarted).Nanoseconds()) / float64(taskDiscoveryTimingRuns)
+	for _, out := range outputs {
 		if out != want {
 			tb.Fatalf("discovery output changed during measurement:\nwant %s\n got %s", want, out)
 		}
-		outputBytes = len(out)
 	}
 
 	var allocationOutput string
@@ -249,7 +254,7 @@ func measureTaskDiscoveryOrderSample(tb testing.TB, taskRepo *repository.TaskRep
 	}
 
 	return taskDiscoveryPairedMetrics{
-		wallNs:      []float64{float64(time.Since(wallStarted).Nanoseconds()) / taskDiscoveryTimingRuns},
+		wallNs:      []float64{wallNs},
 		allocsPerOp: []float64{allocsPerOp},
 		outputBytes: []int{outputBytes},
 	}
