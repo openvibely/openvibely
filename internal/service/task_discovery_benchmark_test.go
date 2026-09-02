@@ -175,13 +175,19 @@ const (
 	taskDiscoveryMaxPage20Improvement = 0.30
 	taskDiscoveryMaxControlRegression = 1.10
 
-	// The discovery index must add no more than 20% to the production UpdateStatus
-	// path and must stay below 2 MiB for the 10,000-task fixture.
+	// The discovery index must add no more than 20% to substantive task-write
+	// paths, no more than 5µs to lightweight metadata setters, and must stay
+	// below 2 MiB for the 10,000-task fixture.
 	// Use a long measured phase so scheduler and coverage overhead do not dominate
 	// the small per-update index cost.
-	taskDiscoveryWriteOperations                 = 1000
-	taskDiscoveryMaxWriteLatencyRegression       = 1.20
-	taskDiscoveryMaxIndexStorageBytes      int64 = 2 * 1024 * 1024
+	taskDiscoveryWriteOperations           = 1000
+	taskDiscoveryMaxWriteLatencyRegression = 1.20
+	// Lightweight metadata setters have a sub-10µs unindexed baseline, so a
+	// relative ratio overstates their small fixed index cost. Keep their explicit
+	// absolute overhead budget at 5µs while the substantive task-write paths below
+	// retain the 20% relative gate.
+	taskDiscoveryMaxLightweightWriteOverheadNs       = 5_000
+	taskDiscoveryMaxIndexStorageBytes          int64 = 2 * 1024 * 1024
 )
 
 type taskDiscoveryPairedMetrics struct {
@@ -326,91 +332,313 @@ func TestTaskDiscoveryOrderIndexMeetsPairedLatencyThresholds(t *testing.T) {
 	}
 }
 
-func measureTaskDiscoveryWriteSample(tb testing.TB, taskRepo *repository.TaskRepo, taskID string) float64 {
+type taskDiscoveryWritePath struct {
+	name  string
+	setup func(testing.TB, *sql.DB, *repository.TaskRepo) func(context.Context, int) error
+	clean func(testing.TB, *sql.DB)
+}
+
+const (
+	taskDiscoveryWriteTargetID     = "task-discovery-benchmark-00001"
+	taskDiscoveryWriteNeighborID   = "task-discovery-benchmark-00002"
+	taskDiscoveryCreateTitlePrefix = "Discovery write-budget create "
+	taskDiscoveryReorderOtherOrder = -1000000
+)
+
+func taskDiscoveryWriteTarget(tb testing.TB, taskRepo *repository.TaskRepo) *models.Task {
 	tb.Helper()
+	task, err := taskRepo.GetByID(context.Background(), taskDiscoveryWriteTargetID)
+	if err != nil {
+		tb.Fatalf("load task discovery write target: %v", err)
+	}
+	if task == nil {
+		tb.Fatalf("task discovery write target %q not found", taskDiscoveryWriteTargetID)
+	}
+	return task
+}
+
+func taskDiscoveryWritePaths() []taskDiscoveryWritePath {
+	return []taskDiscoveryWritePath{
+		{
+			name: "Create",
+			setup: func(tb testing.TB, _ *sql.DB, taskRepo *repository.TaskRepo) func(context.Context, int) error {
+				tb.Helper()
+				return func(ctx context.Context, i int) error {
+					category := models.CategoryActive
+					if i%2 == 1 {
+						category = models.CategoryChat
+					}
+					return taskRepo.Create(ctx, &models.Task{
+						ProjectID: "default",
+						Title:     fmt.Sprintf("%s%06d", taskDiscoveryCreateTitlePrefix, i),
+						Category:  category,
+						Status:    models.StatusPending,
+						Prompt:    "p",
+					})
+				}
+			},
+			clean: func(tb testing.TB, db *sql.DB) {
+				tb.Helper()
+				if _, err := db.ExecContext(context.Background(), `DELETE FROM tasks WHERE project_id = ? AND title LIKE ?`, "default", taskDiscoveryCreateTitlePrefix+"%"); err != nil {
+					tb.Fatalf("clean task discovery write fixtures: %v", err)
+				}
+			},
+		},
+		{
+			name: "Update",
+			setup: func(tb testing.TB, _ *sql.DB, taskRepo *repository.TaskRepo) func(context.Context, int) error {
+				tb.Helper()
+				task := taskDiscoveryWriteTarget(tb, taskRepo)
+				return func(ctx context.Context, i int) error {
+					switch i % 3 {
+					case 0:
+						task.Category = models.CategoryActive
+					case 1:
+						task.Category = models.CategoryBacklog
+					default:
+						task.Category = models.CategoryChat
+					}
+					task.Priority = (i % 4) + 1
+					return taskRepo.Update(ctx, task)
+				}
+			},
+		},
+		{
+			name: "UpdateCategory",
+			setup: func(tb testing.TB, _ *sql.DB, taskRepo *repository.TaskRepo) func(context.Context, int) error {
+				tb.Helper()
+				targetID := taskDiscoveryWriteTarget(tb, taskRepo).ID
+				return func(ctx context.Context, i int) error {
+					var category models.TaskCategory
+					switch i % 3 {
+					case 0:
+						category = models.CategoryActive
+					case 1:
+						category = models.CategoryBacklog
+					default:
+						category = models.CategoryChat
+					}
+					return taskRepo.UpdateCategory(ctx, targetID, category)
+				}
+			},
+		},
+		{
+			name: "ReorderTask",
+			setup: func(tb testing.TB, db *sql.DB, taskRepo *repository.TaskRepo) func(context.Context, int) error {
+				tb.Helper()
+				ctx := context.Background()
+				if _, err := db.ExecContext(ctx, `UPDATE tasks SET display_order = ? WHERE project_id = ?`, taskDiscoveryReorderOtherOrder, "default"); err != nil {
+					tb.Fatalf("set task discovery reorder filler order: %v", err)
+				}
+				if _, err := db.ExecContext(ctx, `UPDATE tasks SET display_order = -1 WHERE id = ?`, taskDiscoveryWriteTargetID); err != nil {
+					tb.Fatalf("set task discovery reorder target order: %v", err)
+				}
+				if _, err := db.ExecContext(ctx, `UPDATE tasks SET display_order = 0 WHERE id = ?`, taskDiscoveryWriteNeighborID); err != nil {
+					tb.Fatalf("set task discovery reorder neighbor order: %v", err)
+				}
+				targetID := taskDiscoveryWriteTarget(tb, taskRepo).ID
+				return func(ctx context.Context, i int) error {
+					newPosition := -1
+					if i%2 == 0 {
+						newPosition = 0
+					}
+					return taskRepo.ReorderTask(ctx, targetID, newPosition)
+				}
+			},
+		},
+		{
+			name: "UpdateStatus",
+			setup: func(tb testing.TB, _ *sql.DB, taskRepo *repository.TaskRepo) func(context.Context, int) error {
+				tb.Helper()
+				targetID := taskDiscoveryWriteTarget(tb, taskRepo).ID
+				return func(ctx context.Context, i int) error {
+					status := models.StatusPending
+					if i%2 == 1 {
+						status = models.StatusRunning
+					}
+					return taskRepo.UpdateStatus(ctx, targetID, status)
+				}
+			},
+		},
+		{
+			name: "UpdateSwarmFields",
+			setup: func(tb testing.TB, _ *sql.DB, taskRepo *repository.TaskRepo) func(context.Context, int) error {
+				tb.Helper()
+				targetID := taskDiscoveryWriteTarget(tb, taskRepo).ID
+				return func(ctx context.Context, i int) error {
+					role := models.SwarmRoleNone
+					status := "idle"
+					if i%2 == 1 {
+						role = models.SwarmRoleWorker
+						status = "running"
+					}
+					return taskRepo.UpdateSwarmFields(ctx, targetID, role, status, fmt.Sprintf(`{"phase":%d}`, i%2), i%2)
+				}
+			},
+		},
+		{
+			name: "UpdateAgentID",
+			setup: func(tb testing.TB, _ *sql.DB, taskRepo *repository.TaskRepo) func(context.Context, int) error {
+				tb.Helper()
+				targetID := taskDiscoveryWriteTarget(tb, taskRepo).ID
+				return func(ctx context.Context, _ int) error {
+					return taskRepo.UpdateAgentID(ctx, targetID, "")
+				}
+			},
+		},
+		{
+			name: "UpdateWorktreeInfo",
+			setup: func(tb testing.TB, _ *sql.DB, taskRepo *repository.TaskRepo) func(context.Context, int) error {
+				tb.Helper()
+				targetID := taskDiscoveryWriteTarget(tb, taskRepo).ID
+				return func(ctx context.Context, i int) error {
+					return taskRepo.UpdateWorktreeInfo(ctx, targetID, fmt.Sprintf("/tmp/discovery-worktree-%d", i%2), fmt.Sprintf("task/discovery-%d", i%2))
+				}
+			},
+		},
+		{
+			name: "UpdateMergeStatus",
+			setup: func(tb testing.TB, _ *sql.DB, taskRepo *repository.TaskRepo) func(context.Context, int) error {
+				tb.Helper()
+				targetID := taskDiscoveryWriteTarget(tb, taskRepo).ID
+				return func(ctx context.Context, i int) error {
+					status := models.MergeStatusPending
+					if i%2 == 1 {
+						status = models.MergeStatusFailed
+					}
+					return taskRepo.UpdateMergeStatus(ctx, targetID, status)
+				}
+			},
+		},
+		{
+			name: "UpdateAutoMerge",
+			setup: func(tb testing.TB, _ *sql.DB, taskRepo *repository.TaskRepo) func(context.Context, int) error {
+				tb.Helper()
+				targetID := taskDiscoveryWriteTarget(tb, taskRepo).ID
+				return func(ctx context.Context, i int) error {
+					return taskRepo.UpdateAutoMerge(ctx, targetID, i%2 == 1, "main")
+				}
+			},
+		},
+		{
+			name: "UpdateLineage",
+			setup: func(tb testing.TB, _ *sql.DB, taskRepo *repository.TaskRepo) func(context.Context, int) error {
+				tb.Helper()
+				targetID := taskDiscoveryWriteTarget(tb, taskRepo).ID
+				return func(ctx context.Context, i int) error {
+					return taskRepo.UpdateLineage(ctx, targetID, "main", strings.Repeat(fmt.Sprintf("%x", i%16), 40), i%2)
+				}
+			},
+		},
+		{
+			name: "UpdateTelegramOrigin",
+			setup: func(tb testing.TB, _ *sql.DB, taskRepo *repository.TaskRepo) func(context.Context, int) error {
+				tb.Helper()
+				targetID := taskDiscoveryWriteTarget(tb, taskRepo).ID
+				return func(ctx context.Context, i int) error {
+					return taskRepo.UpdateTelegramOrigin(ctx, targetID, int64(i%2))
+				}
+			},
+		},
+	}
+}
+
+func taskDiscoveryWriteUsesRelativeBudget(name string) bool {
+	switch name {
+	case "Create", "Update", "UpdateCategory", "ReorderTask", "UpdateStatus":
+		return true
+	default:
+		return false
+	}
+}
+
+func measureTaskDiscoveryWritePathSample(tb testing.TB, path taskDiscoveryWritePath, db *sql.DB, taskRepo *repository.TaskRepo, indexed bool) float64 {
+	tb.Helper()
+	setTaskDiscoveryOrderIndex(tb, db, indexed)
+	write := path.setup(tb, db, taskRepo)
 	started := time.Now()
 	for i := 0; i < taskDiscoveryWriteOperations; i++ {
-		status := models.StatusPending
-		if i%2 == 1 {
-			status = models.StatusRunning
-		}
-		if err := taskRepo.UpdateStatus(context.Background(), taskID, status); err != nil {
-			tb.Fatalf("UpdateStatus write-budget sample: %v", err)
+		if err := write(context.Background(), i); err != nil {
+			tb.Fatalf("%s write-budget sample: %v", path.name, err)
 		}
 	}
-	return float64(time.Since(started).Nanoseconds()) / float64(taskDiscoveryWriteOperations)
+	elapsed := time.Since(started)
+	if path.clean != nil {
+		path.clean(tb, db)
+	}
+	return float64(elapsed.Nanoseconds()) / float64(taskDiscoveryWriteOperations)
 }
 
 func TestTaskDiscoveryOrderIndexWriteBudget(t *testing.T) {
 	db, taskRepo := newTaskDiscoveryOrderBenchmarkRepo(t, 10000, 128, 128)
-	const taskID = "task-discovery-benchmark-00001"
-	setTaskDiscoveryOrderIndex(t, db, false)
-	if err := taskRepo.UpdateStatus(context.Background(), taskID, models.StatusPending); err != nil {
-		t.Fatalf("warm task write target: %v", err)
+	defer db.Close()
+
+	for _, path := range taskDiscoveryWritePaths() {
+		path := path
+		t.Run(path.name, func(t *testing.T) {
+			var baseline, candidate taskDiscoveryPairedMetrics
+			for sample := 0; sample < taskDiscoveryPairedSamples; sample++ {
+				if sample%2 == 0 {
+					baseline.wallNs = append(baseline.wallNs, measureTaskDiscoveryWritePathSample(t, path, db, taskRepo, false))
+					candidate.wallNs = append(candidate.wallNs, measureTaskDiscoveryWritePathSample(t, path, db, taskRepo, true))
+					continue
+				}
+				candidate.wallNs = append(candidate.wallNs, measureTaskDiscoveryWritePathSample(t, path, db, taskRepo, true))
+				baseline.wallNs = append(baseline.wallNs, measureTaskDiscoveryWritePathSample(t, path, db, taskRepo, false))
+			}
+
+			baselineNs := baseline.medianWallNs()
+			candidateNs := candidate.medianWallNs()
+			t.Logf("paired %s median ns/op: baseline=%.0f candidate=%.0f overhead=%.1f%% delta=%.0f ns", path.name, baselineNs, candidateNs, (candidateNs/baselineNs-1)*100, candidateNs-baselineNs)
+			if taskDiscoveryWriteUsesRelativeBudget(path.name) {
+				if candidateNs > baselineNs*taskDiscoveryMaxWriteLatencyRegression {
+					t.Fatalf("%s indexed write latency regressed by more than 20%%: baseline=%.0f ns/op candidate=%.0f ns/op", path.name, baselineNs, candidateNs)
+				}
+			} else if candidateNs > baselineNs+float64(taskDiscoveryMaxLightweightWriteOverheadNs) {
+				t.Fatalf("%s indexed write latency added more than %d ns: baseline=%.0f ns/op candidate=%.0f ns/op", path.name, taskDiscoveryMaxLightweightWriteOverheadNs, baselineNs, candidateNs)
+			}
+		})
 	}
 
-	var baseline, candidate taskDiscoveryPairedMetrics
-	for sample := 0; sample < taskDiscoveryPairedSamples; sample++ {
-		if sample%2 == 0 {
-			setTaskDiscoveryOrderIndex(t, db, false)
-			baseline.wallNs = append(baseline.wallNs, measureTaskDiscoveryWriteSample(t, taskRepo, taskID))
-			setTaskDiscoveryOrderIndex(t, db, true)
-			candidate.wallNs = append(candidate.wallNs, measureTaskDiscoveryWriteSample(t, taskRepo, taskID))
-			continue
-		}
-		setTaskDiscoveryOrderIndex(t, db, true)
-		candidate.wallNs = append(candidate.wallNs, measureTaskDiscoveryWriteSample(t, taskRepo, taskID))
-		setTaskDiscoveryOrderIndex(t, db, false)
-		baseline.wallNs = append(baseline.wallNs, measureTaskDiscoveryWriteSample(t, taskRepo, taskID))
-	}
 	setTaskDiscoveryOrderIndex(t, db, true)
-
-	baselineNs := baseline.medianWallNs()
-	candidateNs := candidate.medianWallNs()
 	indexBytes := taskDiscoveryOrderIndexBytes(t, db)
-	t.Logf("paired write median ns/op: baseline=%.0f candidate=%.0f; discovery index storage bytes=%d", baselineNs, candidateNs, indexBytes)
-	if candidateNs > baselineNs*taskDiscoveryMaxWriteLatencyRegression {
-		t.Fatalf("discovery index write latency regressed by more than 20%%: baseline=%.0f ns/op candidate=%.0f ns/op", baselineNs, candidateNs)
-	}
+	t.Logf("discovery index storage bytes on 10,000-task fixture: %d", indexBytes)
 	if indexBytes <= 0 || indexBytes > taskDiscoveryMaxIndexStorageBytes {
 		t.Fatalf("discovery index storage = %d bytes, want 1..%d bytes for the 10,000-task fixture", indexBytes, taskDiscoveryMaxIndexStorageBytes)
 	}
 }
 
 // BenchmarkTaskDiscoveryIndexWriteBudget records the write-time and storage
-// cost of the partial order index on the same 10,000-task workload used for
-// the read benchmark. UpdateStatus exercises the repository path that mutates
-// status and updated_at.
+// cost of the partial order index across every distinct task mutation shape in
+// the production repository. UpdateStatus alone is not representative because
+// Create, full updates, category membership changes, bulk reorder updates, and
+// metadata setters can all maintain the same indexed updated_at key.
 func BenchmarkTaskDiscoveryIndexWriteBudget(b *testing.B) {
-	for _, indexed := range []bool{false, true} {
-		name := "WithoutDiscoveryOrderIndex"
-		if indexed {
-			name = "WithDiscoveryOrderIndex"
-		}
-		indexed := indexed
-		b.Run(name, func(b *testing.B) {
-			db, taskRepo := newTaskDiscoveryOrderBenchmarkRepo(b, 10000, 128, 128)
-			setTaskDiscoveryOrderIndex(b, db, indexed)
-			ctx := context.Background()
-			const taskID = "task-discovery-benchmark-00001"
-			if _, err := taskRepo.GetByID(ctx, taskID); err != nil {
-				b.Fatalf("warm task write target: %v", err)
+	for _, path := range taskDiscoveryWritePaths() {
+		path := path
+		for _, indexed := range []bool{false, true} {
+			name := "WithoutDiscoveryOrderIndex"
+			if indexed {
+				name = "WithDiscoveryOrderIndex"
 			}
+			b.Run(path.name+"/"+name, func(b *testing.B) {
+				db, taskRepo := newTaskDiscoveryOrderBenchmarkRepo(b, 10000, 128, 128)
+				defer db.Close()
+				setTaskDiscoveryOrderIndex(b, db, indexed)
+				write := path.setup(b, db, taskRepo)
+				ctx := context.Background()
 
-			b.ReportAllocs()
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
-				status := models.StatusPending
-				if i%2 == 0 {
-					status = models.StatusRunning
+				b.ReportAllocs()
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					if err := write(ctx, i); err != nil {
+						b.Fatalf("%s %s: %v", path.name, name, err)
+					}
 				}
-				if err := taskRepo.UpdateStatus(ctx, taskID, status); err != nil {
-					b.Fatalf("UpdateStatus: %v", err)
-				}
-			}
-			b.StopTimer()
-			b.ReportMetric(float64(taskDiscoveryOrderIndexBytes(b, db)), "discovery_index_storage_bytes")
-		})
+				b.StopTimer()
+				b.ReportMetric(float64(taskDiscoveryOrderIndexBytes(b, db)), "discovery_index_storage_bytes")
+			})
+		}
 	}
 }
 
