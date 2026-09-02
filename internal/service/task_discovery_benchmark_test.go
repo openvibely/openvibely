@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"sort"
 	"strings"
@@ -175,17 +176,26 @@ const (
 	taskDiscoveryMaxPage20Improvement = 0.30
 	taskDiscoveryMaxControlRegression = 1.10
 
-	// The discovery index write budget remains a strict 20% relative cap. The
-	// original per-path gate is retained for the five high-volume repository
-	// writers, and the same relative cap is applied to the complete weighted
-	// writer inventory below. There is no alternate absolute fallback for small
-	// setters; their measured ratios remain visible in the per-path diagnostics.
+	// The discovery index write budget has an explicit check for every writer.
+	// Substantive task transitions use the strict 20% relative cap. Lightweight
+	// metadata setters have a small fixed index-maintenance cost relative to their
+	// sub-10µs baseline, so each uses a 5µs absolute cap instead of an unstable
+	// ratio. Bulk paths report and aggregate affected rows rather than counting
+	// one multi-row statement as one row of work.
 	// Use a long measured phase so scheduler and coverage overhead do not dominate
 	// the small per-update index cost.
-	taskDiscoveryWriteOperations                 = 1000
-	taskDiscoveryMaxWriteLatencyRegression       = 1.20
-	taskDiscoveryMaxIndexStorageBytes      int64 = 2 * 1024 * 1024
+	taskDiscoveryWriteOperations                        = 1000
+	taskDiscoveryMaxWriteLatencyRegression              = 1.20
+	taskDiscoveryMaxFixedPerAffectedRowOverheadNs       = 5_000
+	taskDiscoveryMaxIndexStorageBytes             int64 = 2 * 1024 * 1024
 )
+
+func skipTaskDiscoveryTimingTestsUnderCoverage(t *testing.T) {
+	t.Helper()
+	if coverProfile := flag.Lookup("test.coverprofile"); coverProfile != nil && coverProfile.Value.String() != "" {
+		t.Skip("task discovery timing thresholds are not valid under coverage instrumentation")
+	}
+}
 
 type taskDiscoveryPairedMetrics struct {
 	wallNs      []float64
@@ -299,6 +309,7 @@ func measureTaskDiscoveryOrderPair(tb testing.TB, taskCount int, input json.RawM
 }
 
 func TestTaskDiscoveryOrderIndexMeetsPairedLatencyThresholds(t *testing.T) {
+	skipTaskDiscoveryTimingTestsUnderCoverage(t)
 	for _, taskCount := range []int{100, 1000, 5000, 10000} {
 		for _, page := range []taskDiscoveryOrderPage{
 			{name: "Default20", input: nil},
@@ -333,24 +344,23 @@ func TestTaskDiscoveryOrderIndexMeetsPairedLatencyThresholds(t *testing.T) {
 // UPDATE, and DELETE shape, including single-row, multi-row, and bulk paths.
 // It also invokes the external task writers that use a distinct task SQL shape:
 // AlertRepo.CreateImplementationTask, ExecutionRepo direct-follow-up and restart
-// recovery, and ThreadInputRepo task-thread/chat promotion. Direct SQL in
-// automation_lifecycle_repo.go, automation_runtime_repo.go,
-// automation_save_repo.go, and task_automation_repo.go, including
-// ActivateAutomationChainedTask and ClaimAutomationDispatch, is grouped by the
-// same indexed key shapes (category-only, status-only, status+category, full
-// update, and bulk transition); their graph/outbox predicates do not change
-// index maintenance. AgentRepo and LLMConfigRepo task nullifiers update only
-// agent columns and do not write project_id, category, or updated_at, so they
-// cannot affect this index and are explicitly out of scope.
+// recovery, and ThreadInputRepo task-thread/chat promotion. Automation task
+// writers are exercised through their public repository entry points below,
+// including SaveCurrentGraph, lifecycle transitions, dispatch admission and
+// completion, cancellation/failure, and chained-task activation. AgentRepo and
+// LLMConfigRepo task nullifiers update only agent columns and do not write
+// project_id, category, or updated_at, so they cannot affect this index and are
+// explicitly out of scope.
 type taskDiscoveryWriteRun struct {
 	write   func(context.Context, int) error
 	cleanup func(testing.TB)
 }
 
 type taskDiscoveryWritePath struct {
-	name       string
-	operations int
-	setup      func(testing.TB, *sql.DB, *repository.TaskRepo) taskDiscoveryWriteRun
+	name         string
+	operations   int
+	affectedRows int
+	setup        func(testing.TB, *sql.DB, *repository.TaskRepo) taskDiscoveryWriteRun
 }
 
 const (
@@ -559,7 +569,8 @@ func taskDiscoveryWritePoolRun(tb testing.TB, db *sql.DB, prefix string, categor
 
 func taskDiscoveryTargetWritePath(name string, operation func(context.Context, *repository.TaskRepo, string, int) error) taskDiscoveryWritePath {
 	return taskDiscoveryWritePath{
-		name: name,
+		name:         name,
+		affectedRows: 1,
 		setup: func(tb testing.TB, db *sql.DB, taskRepo *repository.TaskRepo) taskDiscoveryWriteRun {
 			resetTaskDiscoveryWriteTarget(tb, db)
 			targetID := taskDiscoveryWriteTarget(tb, taskRepo).ID
@@ -574,8 +585,9 @@ func taskDiscoveryTargetWritePath(name string, operation func(context.Context, *
 
 func taskDiscoveryBulkWritePath(name, prefix string, category models.TaskCategory, status models.TaskStatus, operation func(context.Context, *repository.TaskRepo) error) taskDiscoveryWritePath {
 	return taskDiscoveryWritePath{
-		name:       name,
-		operations: taskDiscoveryBulkWriteOperations,
+		name:         name,
+		operations:   taskDiscoveryBulkWriteOperations,
+		affectedRows: taskDiscoveryWritePoolSize,
 		setup: func(tb testing.TB, db *sql.DB, taskRepo *repository.TaskRepo) taskDiscoveryWriteRun {
 			seedTaskDiscoveryWritePool(tb, db, prefix, category, status, "2020-01-01 00:00:00", "", taskDiscoveryWritePoolSize)
 			return taskDiscoveryWriteRun{
@@ -588,6 +600,282 @@ func taskDiscoveryBulkWritePath(name, prefix string, category models.TaskCategor
 			}
 		},
 	}
+}
+
+type taskDiscoveryAutomationFixture struct {
+	prefix        string
+	automationID  string
+	versionID     string
+	triggerNodeID string
+	taskIDs       []string
+	schedule      models.Schedule
+}
+
+func seedTaskDiscoveryAutomationFixture(tb testing.TB, db *sql.DB, prefix string, category models.TaskCategory, status models.TaskStatus, count int) taskDiscoveryAutomationFixture {
+	tb.Helper()
+	ctx := context.Background()
+	fixture := taskDiscoveryAutomationFixture{
+		prefix:       prefix,
+		automationID: prefix + "automation",
+		taskIDs:      seedTaskDiscoveryWritePool(tb, db, prefix+"task-", category, status, "2020-01-01 00:00:00", "", count),
+	}
+	if len(fixture.taskIDs) == 0 {
+		tb.Fatalf("task discovery Automation fixture has no tasks")
+	}
+	due := time.Date(2020, time.January, 1, 0, 0, 0, 0, time.UTC)
+	fixture.schedule = models.Schedule{
+		TaskID:         fixture.taskIDs[0],
+		RunAt:          due,
+		RepeatType:     models.RepeatDaily,
+		RepeatInterval: 1,
+		Enabled:        true,
+		NextRun:        &due,
+	}
+	if err := repository.NewScheduleRepo(db).Create(ctx, &fixture.schedule); err != nil {
+		tb.Fatalf("create task discovery Automation schedule: %v", err)
+	}
+	definition, _, err := repository.NewAutomationRepo(db).PublishRegistered(ctx, models.AutomationRegisteredPublication{
+		ProjectID:      "default",
+		StableKey:      prefix + "stable",
+		Name:           "Task discovery write-budget Automation " + prefix,
+		AutomationType: "scheduled",
+		AdapterKey:     "custom",
+		CreatedVia:     "test",
+		Nodes:          []models.AutomationNodeSpec{{Key: "trigger", Name: "Trigger", Type: models.AutomationNodeTrigger, Role: "trigger"}},
+		Resources: []models.AutomationResourceBinding{
+			{NodeKey: "trigger", ResourceType: "schedule", ResourceID: fixture.schedule.ID, Relation: "owned"},
+			{NodeKey: "trigger", ResourceType: "task", ResourceID: fixture.taskIDs[0], Relation: "owned"},
+		},
+	})
+	if err != nil {
+		tb.Fatalf("publish task discovery Automation fixture: %v", err)
+	}
+	if definition == nil || len(definition.Nodes) != 1 || definition.Version.ID == "" {
+		tb.Fatalf("published task discovery Automation fixture is incomplete: %#v", definition)
+	}
+	fixture.versionID = definition.Version.ID
+	fixture.automationID = definition.Automation.ID
+	fixture.triggerNodeID = definition.Nodes[0].ID
+	for _, taskID := range fixture.taskIDs[1:] {
+		if _, err := db.ExecContext(ctx, `INSERT INTO automation_definition_resources
+			(project_id, automation_id, version_id, node_id, resource_type, resource_id, relation)
+			VALUES ('default', ?, ?, ?, 'task', ?, 'owned')`, fixture.automationID, fixture.versionID, fixture.triggerNodeID, taskID); err != nil {
+			tb.Fatalf("bind task discovery Automation task %q: %v", taskID, err)
+		}
+	}
+	return fixture
+}
+
+func cleanupTaskDiscoveryAutomationFixture(tb testing.TB, db *sql.DB, fixture taskDiscoveryAutomationFixture) {
+	tb.Helper()
+	ctx := context.Background()
+	if fixture.schedule.ID != "" {
+		if _, err := db.ExecContext(ctx, `DELETE FROM schedules WHERE id = ?`, fixture.schedule.ID); err != nil {
+			tb.Fatalf("clean task discovery Automation schedule: %v", err)
+		}
+	}
+	if fixture.automationID != "" {
+		if _, err := db.ExecContext(ctx, `DELETE FROM automations WHERE id = ? AND project_id = 'default'`, fixture.automationID); err != nil {
+			tb.Fatalf("clean task discovery Automation %q: %v", fixture.automationID, err)
+		}
+	}
+	cleanupTaskDiscoveryWritePool(tb, db, fixture.prefix+"task-")
+}
+
+func cleanupTaskDiscoveryAutomationByPrefix(tb testing.TB, db *sql.DB, prefix, automationID string) {
+	tb.Helper()
+	ctx := context.Background()
+	if automationID != "" {
+		if _, err := db.ExecContext(ctx, `DELETE FROM automations WHERE id = ? AND project_id = 'default'`, automationID); err != nil {
+			tb.Fatalf("clean task discovery Automation %q: %v", automationID, err)
+		}
+	}
+	if _, err := db.ExecContext(ctx, `DELETE FROM tasks WHERE project_id = 'default' AND title LIKE ?`, prefix+"%"); err != nil {
+		tb.Fatalf("clean task discovery Automation tasks %q: %v", prefix, err)
+	}
+}
+
+func prepareTaskDiscoveryAutomationDispatch(tb testing.TB, db *sql.DB, prefix string) (taskDiscoveryAutomationFixture, models.AutomationDispatch) {
+	tb.Helper()
+	ctx := context.Background()
+	fixture := seedTaskDiscoveryAutomationFixture(tb, db, prefix, models.CategoryScheduled, models.StatusPending, 1)
+	automationRepo := repository.NewAutomationRepo(db)
+	invocations, dispatches, err := automationRepo.ClaimManualAutomationRun(ctx, "default", fixture.automationID, time.Date(2020, time.January, 2, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		cleanupTaskDiscoveryAutomationFixture(tb, db, fixture)
+		tb.Fatalf("seed task discovery Automation dispatch: %v", err)
+	}
+	if len(invocations) != 1 || len(dispatches) != 1 {
+		cleanupTaskDiscoveryAutomationFixture(tb, db, fixture)
+		tb.Fatalf("seed task discovery Automation dispatch returned invocations=%d dispatches=%d", len(invocations), len(dispatches))
+	}
+	return fixture, dispatches[0]
+}
+
+func leaseTaskDiscoveryAutomationDispatch(tb testing.TB, db *sql.DB, dispatch models.AutomationDispatch, claimant string) models.AutomationDispatch {
+	tb.Helper()
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, `UPDATE automation_dispatch_outbox
+		SET status = 'processing', claimed_by = ?, claim_expires_at = ?
+		WHERE id = ? AND status = 'pending'`, claimant, time.Date(2099, time.January, 1, 0, 0, 0, 0, time.UTC), dispatch.ID); err != nil {
+		tb.Fatalf("lease task discovery Automation dispatch %q: %v", dispatch.ID, err)
+	}
+	dispatch.Status = "processing"
+	dispatch.ClaimedBy = claimant
+	return dispatch
+}
+
+func taskDiscoveryAutomationCandidate(name string) models.AutomationDraftCandidate {
+	return models.AutomationDraftCandidate{
+		SchemaVersion:  1,
+		Name:           name,
+		AutomationType: "custom",
+		AdapterKey:     "custom",
+		Nodes: []models.AutomationDraftNode{{
+			Key: "task", Name: "Task", Type: models.AutomationNodeAgentTask, Role: "task",
+			Config: map[string]any{"category": string(models.CategoryActive)},
+		}},
+	}
+}
+
+type taskDiscoveryAutomationChainFixture struct {
+	automationID string
+	prefix       string
+	parent       models.Task
+	child        models.Task
+	event        repository.AutomationProjectionEvent
+}
+
+func seedTaskDiscoveryAutomationChainFixture(tb testing.TB, db *sql.DB, prefix string) taskDiscoveryAutomationChainFixture {
+	tb.Helper()
+	ctx := context.Background()
+	automationRepo := repository.NewAutomationRepo(db)
+	candidate := models.AutomationDraftCandidate{
+		SchemaVersion:  1,
+		Name:           "Task discovery chained Automation",
+		AutomationType: "custom",
+		AdapterKey:     "custom",
+		Nodes: []models.AutomationDraftNode{
+			{Key: "parent", Name: "Parent", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"category": string(models.CategoryActive)}},
+			{Key: "child", Name: "Child", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"category": string(models.CategoryActive)}},
+		},
+		Edges: []models.AutomationDraftEdge{{Key: "parent-child", From: "parent", To: "child"}},
+	}
+	automationID := prefix + "automation"
+	definition, _, err := automationRepo.SaveCurrentGraph(ctx, repository.AutomationSaveWrite{
+		ProjectID: "default", AutomationID: automationID, GraphID: prefix + "graph", Candidate: candidate,
+		Tasks: []repository.AutomationSaveTask{
+			{NodeKey: "parent", Title: prefix + "parent", Prompt: "parent", Category: models.CategoryActive, Priority: 2, ApplyTopology: true,
+				ChildNodeKey: "child", ChildTitle: prefix + "child", ChildPromptPrefix: "child: ", ChildCategory: models.CategoryActive},
+			{NodeKey: "child", Title: prefix + "child", Prompt: "child", Category: models.CategoryActive, Priority: 2, ApplyTopology: true, ParentNodeKey: "parent"},
+		},
+	})
+	if err != nil {
+		tb.Fatalf("seed task discovery Automation chain: %v", err)
+	}
+	if definition == nil || len(definition.Nodes) != 2 || len(definition.Edges) != 1 {
+		tb.Fatalf("task discovery Automation chain definition is incomplete: %#v", definition)
+	}
+	nodeKeys := make(map[string]string, len(definition.Nodes))
+	for _, node := range definition.Nodes {
+		nodeKeys[node.NodeKey] = node.ID
+	}
+	taskIDs := make(map[string]string, 2)
+	for _, resource := range definition.Resources {
+		if resource.ResourceType == "task" {
+			for key, nodeID := range nodeKeys {
+				if resource.NodeID == nodeID {
+					taskIDs[key] = resource.ResourceID
+				}
+			}
+		}
+	}
+	if taskIDs["parent"] == "" || taskIDs["child"] == "" {
+		tb.Fatalf("task discovery Automation chain task resources are incomplete: %#v", definition.Resources)
+	}
+	parent, err := repository.NewTaskRepo(db, nil).GetByID(ctx, taskIDs["parent"])
+	if err != nil || parent == nil {
+		tb.Fatalf("load task discovery Automation chain parent: %v", err)
+	}
+	child, err := repository.NewTaskRepo(db, nil).GetByID(ctx, taskIDs["child"])
+	if err != nil || child == nil {
+		tb.Fatalf("load task discovery Automation chain child: %v", err)
+	}
+	return taskDiscoveryAutomationChainFixture{
+		automationID: definition.Automation.ID,
+		prefix:       prefix,
+		parent:       *parent,
+		child:        *child,
+		event: repository.AutomationProjectionEvent{
+			Context:        models.AutomationContext{ProjectID: "default"},
+			Binding:        models.AutomationBinding{AutomationID: definition.Automation.ID, VersionID: definition.Version.ID, NodeID: nodeKeys["child"]},
+			WorkItemKey:    prefix + "work",
+			WorkItemKind:   "task",
+			WorkItemTitle:  prefix + "work",
+			WorkItemStatus: models.AutomationWorkItemActive,
+			ActivityKey:    prefix + "activity",
+			ActivityType:   "task",
+			ActivityStatus: models.AutomationActivityRunning,
+			Resources:      []models.AutomationActivityResource{{ResourceType: "task", ResourceID: child.ID, Relation: "child"}},
+			EventKey:       prefix + "event",
+			FromNodeID:     nodeKeys["parent"],
+			ToNodeID:       nodeKeys["child"],
+			EdgeID:         definition.Edges[0].ID,
+			Transition:     models.AutomationTransitionEntered,
+			MetadataJSON:   "{}",
+		},
+	}
+}
+
+func cleanupTaskDiscoveryAutomationChainFixture(tb testing.TB, db *sql.DB, fixture taskDiscoveryAutomationChainFixture) {
+	tb.Helper()
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, `DELETE FROM automations WHERE id = ? AND project_id = 'default'`, fixture.automationID); err != nil {
+		tb.Fatalf("clean task discovery Automation chain %q: %v", fixture.automationID, err)
+	}
+	if _, err := db.ExecContext(ctx, `DELETE FROM tasks WHERE project_id = 'default' AND title LIKE ?`, fixture.prefix+"%"); err != nil {
+		tb.Fatalf("clean task discovery Automation chain tasks %q: %v", fixture.prefix, err)
+	}
+}
+
+func seedTaskDiscoveryAutomationResumeFixture(tb testing.TB, db *sql.DB, prefix string) taskDiscoveryAutomationFixture {
+	tb.Helper()
+	ctx := context.Background()
+	fixture := seedTaskDiscoveryAutomationFixture(tb, db, prefix, models.CategoryBacklog, models.StatusPending, 1)
+	candidate := models.AutomationDraftCandidate{
+		SchemaVersion:  1,
+		Name:           "Task discovery resumable Automation",
+		AutomationType: "custom",
+		AdapterKey:     "custom",
+		Nodes: []models.AutomationDraftNode{{
+			Key: "trigger", Name: "Task", Type: models.AutomationNodeAgentTask, Role: "task",
+			Config: map[string]any{"category": string(models.CategoryActive)},
+		}},
+	}
+	candidateJSON, err := json.Marshal(candidate)
+	if err != nil {
+		cleanupTaskDiscoveryAutomationFixture(tb, db, fixture)
+		tb.Fatalf("encode task discovery Automation resume candidate: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO automation_graph_metadata
+		(version_id, project_id, automation_id, candidate_json)
+		VALUES (?, 'default', ?, ?)`, fixture.versionID, fixture.automationID, string(candidateJSON)); err != nil {
+		cleanupTaskDiscoveryAutomationFixture(tb, db, fixture)
+		tb.Fatalf("seed task discovery Automation resume metadata: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE automations SET lifecycle_state = 'paused' WHERE id = ? AND project_id = 'default'`, fixture.automationID); err != nil {
+		cleanupTaskDiscoveryAutomationFixture(tb, db, fixture)
+		tb.Fatalf("pause task discovery Automation resume fixture: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE schedules SET enabled = 0 WHERE id = ?`, fixture.schedule.ID); err != nil {
+		cleanupTaskDiscoveryAutomationFixture(tb, db, fixture)
+		tb.Fatalf("disable task discovery Automation resume schedule: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE automation_trigger_owners SET ownership_state = 'paused' WHERE schedule_id = ?`, fixture.schedule.ID); err != nil {
+		cleanupTaskDiscoveryAutomationFixture(tb, db, fixture)
+		tb.Fatalf("pause task discovery Automation resume owner: %v", err)
+	}
+	return fixture
 }
 
 func taskDiscoveryWritePaths() []taskDiscoveryWritePath {
@@ -652,7 +940,8 @@ func taskDiscoveryWritePaths() []taskDiscoveryWritePath {
 			return taskRepo.UpdateCategory(ctx, id, category)
 		}),
 		taskDiscoveryWritePath{
-			name: "ReorderTask",
+			name:         "ReorderTask",
+			affectedRows: 2,
 			setup: func(tb testing.TB, db *sql.DB, taskRepo *repository.TaskRepo) taskDiscoveryWriteRun {
 				resetTaskDiscoveryWriteTarget(tb, db)
 				ctx := context.Background()
@@ -760,6 +1049,305 @@ func taskDiscoveryWritePaths() []taskDiscoveryWritePath {
 						if _, err := db.ExecContext(context.Background(), `DELETE FROM schedules WHERE id = ?`, taskDiscoveryWriteScheduleID); err != nil {
 							tb.Fatalf("clean task discovery write schedule: %v", err)
 						}
+					},
+				}
+			},
+		},
+		{
+			name:         "AutomationSaveCurrentGraph",
+			operations:   1,
+			affectedRows: 2,
+			setup: func(tb testing.TB, db *sql.DB, _ *repository.TaskRepo) taskDiscoveryWriteRun {
+				prefix := taskDiscoveryWritePoolPrefix + "automation-save-"
+				automationID := prefix + "automation"
+				candidate := taskDiscoveryAutomationCandidate("Task discovery saved graph")
+				automationRepo := repository.NewAutomationRepo(db)
+				return taskDiscoveryWriteRun{
+					write: func(ctx context.Context, _ int) error {
+						_, _, err := automationRepo.SaveCurrentGraph(ctx, repository.AutomationSaveWrite{
+							ProjectID: "default", AutomationID: automationID, GraphID: prefix + "graph", Candidate: candidate,
+							Tasks: []repository.AutomationSaveTask{{
+								NodeKey: "task", Title: prefix + "task", Prompt: "p", Category: models.CategoryActive, Priority: 2,
+							}},
+						})
+						return err
+					},
+					cleanup: func(tb testing.TB) {
+						cleanupTaskDiscoveryAutomationByPrefix(tb, db, prefix, automationID)
+					},
+				}
+			},
+		},
+		{
+			name:         "AutomationResume",
+			operations:   1,
+			affectedRows: 1,
+			setup: func(tb testing.TB, db *sql.DB, _ *repository.TaskRepo) taskDiscoveryWriteRun {
+				prefix := taskDiscoveryWritePoolPrefix + "automation-resume-"
+				fixture := seedTaskDiscoveryAutomationResumeFixture(tb, db, prefix)
+				automationRepo := repository.NewAutomationRepo(db)
+				return taskDiscoveryWriteRun{
+					write: func(ctx context.Context, _ int) error {
+						_, err := automationRepo.ResumeAutomation(ctx, "default", fixture.automationID)
+						return err
+					},
+					cleanup: func(tb testing.TB) {
+						cleanupTaskDiscoveryAutomationFixture(tb, db, fixture)
+					},
+				}
+			},
+		},
+		{
+			name: "AutomationSetLifecyclePaused", operations: 1,
+			affectedRows: taskDiscoveryWritePoolSize,
+			setup: func(tb testing.TB, db *sql.DB, _ *repository.TaskRepo) taskDiscoveryWriteRun {
+				prefix := taskDiscoveryWritePoolPrefix + "automation-lifecycle-"
+				fixture := seedTaskDiscoveryAutomationFixture(tb, db, prefix, models.CategoryActive, models.StatusPending, taskDiscoveryWritePoolSize)
+				automationRepo := repository.NewAutomationRepo(db)
+				return taskDiscoveryWriteRun{
+					write: func(ctx context.Context, _ int) error {
+						return automationRepo.SetAutomationLifecycle(ctx, "default", fixture.automationID, models.AutomationPaused)
+					},
+					cleanup: func(tb testing.TB) {
+						cleanupTaskDiscoveryAutomationFixture(tb, db, fixture)
+					},
+				}
+			},
+		},
+		{
+			name:         "AutomationClaimManualRun",
+			operations:   1,
+			affectedRows: 1,
+			setup: func(tb testing.TB, db *sql.DB, _ *repository.TaskRepo) taskDiscoveryWriteRun {
+				prefix := taskDiscoveryWritePoolPrefix + "automation-manual-"
+				fixture := seedTaskDiscoveryAutomationFixture(tb, db, prefix, models.CategoryScheduled, models.StatusPending, 1)
+				automationRepo := repository.NewAutomationRepo(db)
+				return taskDiscoveryWriteRun{
+					write: func(ctx context.Context, _ int) error {
+						_, _, err := automationRepo.ClaimManualAutomationRun(ctx, "default", fixture.automationID, time.Date(2020, time.January, 2, 0, 0, 0, 0, time.UTC))
+						return err
+					},
+					cleanup: func(tb testing.TB) {
+						cleanupTaskDiscoveryAutomationFixture(tb, db, fixture)
+					},
+				}
+			},
+		},
+		{
+			name:         "AutomationClaimScheduledOccurrence",
+			operations:   1,
+			affectedRows: 1,
+			setup: func(tb testing.TB, db *sql.DB, _ *repository.TaskRepo) taskDiscoveryWriteRun {
+				prefix := taskDiscoveryWritePoolPrefix + "automation-scheduled-"
+				fixture := seedTaskDiscoveryAutomationFixture(tb, db, prefix, models.CategoryScheduled, models.StatusPending, 1)
+				automationRepo := repository.NewAutomationRepo(db)
+				nextRun := fixture.schedule.RunAt.Add(24 * time.Hour)
+				return taskDiscoveryWriteRun{
+					write: func(ctx context.Context, _ int) error {
+						_, _, err := automationRepo.ClaimScheduledOccurrence(ctx, fixture.schedule, time.Date(2020, time.January, 2, 0, 0, 0, 0, time.UTC), &nextRun)
+						return err
+					},
+					cleanup: func(tb testing.TB) {
+						cleanupTaskDiscoveryAutomationFixture(tb, db, fixture)
+					},
+				}
+			},
+		},
+		{
+			name:         "AutomationClaimDispatch",
+			operations:   1,
+			affectedRows: 1,
+			setup: func(tb testing.TB, db *sql.DB, taskRepo *repository.TaskRepo) taskDiscoveryWriteRun {
+				prefix := taskDiscoveryWritePoolPrefix + "automation-claim-dispatch-"
+				fixture, dispatch := prepareTaskDiscoveryAutomationDispatch(tb, db, prefix)
+				claimant := "task-discovery-claim"
+				leaseTaskDiscoveryAutomationDispatch(tb, db, dispatch, claimant)
+				return taskDiscoveryWriteRun{
+					write: func(ctx context.Context, _ int) error {
+						_, err := taskRepo.ClaimAutomationDispatch(ctx, dispatch.ID, claimant)
+						return err
+					},
+					cleanup: func(tb testing.TB) {
+						cleanupTaskDiscoveryAutomationFixture(tb, db, fixture)
+					},
+				}
+			},
+		},
+		{
+			name:         "AutomationClaimQueuedDispatch",
+			operations:   1,
+			affectedRows: 1,
+			setup: func(tb testing.TB, db *sql.DB, taskRepo *repository.TaskRepo) taskDiscoveryWriteRun {
+				prefix := taskDiscoveryWritePoolPrefix + "automation-queued-dispatch-"
+				fixture, dispatch := prepareTaskDiscoveryAutomationDispatch(tb, db, prefix)
+				automationRepo := repository.NewAutomationRepo(db)
+				now := time.Date(2020, time.January, 2, 0, 0, 0, 0, time.UTC)
+				if _, err := db.ExecContext(context.Background(), `UPDATE automation_dispatch_outbox
+						SET next_attempt_at = ? WHERE id = ?`, now, dispatch.ID); err != nil {
+					cleanupTaskDiscoveryAutomationFixture(tb, db, fixture)
+					tb.Fatalf("prepare task discovery queued Automation dispatch: %v", err)
+				}
+				leased, err := automationRepo.LeaseNextDispatch(context.Background(), "task-discovery-queued", now, time.Minute)
+				if err != nil {
+					cleanupTaskDiscoveryAutomationFixture(tb, db, fixture)
+					tb.Fatalf("lease task discovery queued Automation dispatch: %v", err)
+				}
+				if leased == nil || leased.ID != dispatch.ID {
+					cleanupTaskDiscoveryAutomationFixture(tb, db, fixture)
+					tb.Fatalf("leased task discovery queued Automation dispatch = %#v, want %q", leased, dispatch.ID)
+				}
+				if err := automationRepo.MarkDispatchQueued(context.Background(), dispatch.ID, "task-discovery-queued"); err != nil {
+					cleanupTaskDiscoveryAutomationFixture(tb, db, fixture)
+					tb.Fatalf("queue task discovery Automation dispatch: %v", err)
+				}
+				return taskDiscoveryWriteRun{
+					write: func(ctx context.Context, _ int) error {
+						_, err := taskRepo.ClaimQueuedAutomationDispatch(ctx, dispatch.ID)
+						return err
+					},
+					cleanup: func(tb testing.TB) {
+						cleanupTaskDiscoveryAutomationFixture(tb, db, fixture)
+					},
+				}
+			},
+		},
+		{
+			name: "AutomationCancelDispatch", operations: 1,
+			affectedRows: 1,
+			setup: func(tb testing.TB, db *sql.DB, _ *repository.TaskRepo) taskDiscoveryWriteRun {
+				prefix := taskDiscoveryWritePoolPrefix + "automation-cancel-dispatch-"
+				fixture, dispatch := prepareTaskDiscoveryAutomationDispatch(tb, db, prefix)
+				if _, err := db.ExecContext(context.Background(), `UPDATE tasks SET category = 'active', status = 'running' WHERE id = ?`, dispatch.TaskID); err != nil {
+					tb.Fatalf("prepare task discovery Automation cancellation task: %v", err)
+				}
+				if _, err := db.ExecContext(context.Background(), `INSERT INTO executions (id, task_id, status, prompt_sent, dispatch_id)
+						VALUES (?, ?, 'running', 'p', ?)`, prefix+"execution", dispatch.TaskID, dispatch.ID); err != nil {
+					tb.Fatalf("prepare task discovery Automation cancellation execution: %v", err)
+				}
+				if _, err := db.ExecContext(context.Background(), `UPDATE automation_dispatch_outbox
+						SET status = 'processing', execution_id = ?, claimed_by = 'task-discovery-cancel', claim_expires_at = ?
+						WHERE id = ?`, prefix+"execution", time.Date(2099, time.January, 1, 0, 0, 0, 0, time.UTC), dispatch.ID); err != nil {
+					tb.Fatalf("prepare task discovery Automation cancellation dispatch: %v", err)
+				}
+				automationRepo := repository.NewAutomationRepo(db)
+				return taskDiscoveryWriteRun{
+					write: func(ctx context.Context, _ int) error {
+						return automationRepo.CancelDispatchesForTask(ctx, dispatch.TaskID, "task discovery write budget")
+					},
+					cleanup: func(tb testing.TB) {
+						cleanupTaskDiscoveryAutomationFixture(tb, db, fixture)
+					},
+				}
+			},
+		},
+		{
+			name:         "AutomationCancelPendingDispatch",
+			operations:   1,
+			affectedRows: 1,
+			setup: func(tb testing.TB, db *sql.DB, _ *repository.TaskRepo) taskDiscoveryWriteRun {
+				prefix := taskDiscoveryWritePoolPrefix + "automation-cancel-pending-"
+				fixture, dispatch := prepareTaskDiscoveryAutomationDispatch(tb, db, prefix)
+				if _, err := db.ExecContext(context.Background(), `UPDATE tasks
+						SET category = 'active', status = 'failed' WHERE id = ?`, dispatch.TaskID); err != nil {
+					cleanupTaskDiscoveryAutomationFixture(tb, db, fixture)
+					tb.Fatalf("prepare task discovery pending Automation cancellation task: %v", err)
+				}
+				automationRepo := repository.NewAutomationRepo(db)
+				return taskDiscoveryWriteRun{
+					write: func(ctx context.Context, _ int) error {
+						return automationRepo.CancelDispatchesForTask(ctx, dispatch.TaskID, "task discovery write budget")
+					},
+					cleanup: func(tb testing.TB) {
+						cleanupTaskDiscoveryAutomationFixture(tb, db, fixture)
+					},
+				}
+			},
+		},
+		{
+			name: "AutomationFailDispatch", operations: 1,
+			affectedRows: 1,
+			setup: func(tb testing.TB, db *sql.DB, _ *repository.TaskRepo) taskDiscoveryWriteRun {
+				prefix := taskDiscoveryWritePoolPrefix + "automation-fail-dispatch-"
+				fixture, dispatch := prepareTaskDiscoveryAutomationDispatch(tb, db, prefix)
+				claimant := "task-discovery-fail"
+				leaseTaskDiscoveryAutomationDispatch(tb, db, dispatch, claimant)
+				if _, err := db.ExecContext(context.Background(), `UPDATE automation_dispatch_outbox SET attempts = 1 WHERE id = ?`, dispatch.ID); err != nil {
+					tb.Fatalf("prepare task discovery Automation failure attempts: %v", err)
+				}
+				automationRepo := repository.NewAutomationRepo(db)
+				return taskDiscoveryWriteRun{
+					write: func(ctx context.Context, _ int) error {
+						return automationRepo.FailDispatch(ctx, dispatch.ID, claimant, "task discovery write budget", 1, time.Date(2020, time.January, 2, 0, 0, 0, 0, time.UTC))
+					},
+					cleanup: func(tb testing.TB) {
+						cleanupTaskDiscoveryAutomationFixture(tb, db, fixture)
+					},
+				}
+			},
+		},
+		{
+			name:         "AutomationCompleteDispatch",
+			operations:   1,
+			affectedRows: 1,
+			setup: func(tb testing.TB, db *sql.DB, taskRepo *repository.TaskRepo) taskDiscoveryWriteRun {
+				prefix := taskDiscoveryWritePoolPrefix + "automation-complete-dispatch-"
+				fixture, dispatch := prepareTaskDiscoveryAutomationDispatch(tb, db, prefix)
+				claimant := "task-discovery-complete"
+				leaseTaskDiscoveryAutomationDispatch(tb, db, dispatch, claimant)
+				execution, err := taskRepo.ClaimAutomationDispatch(context.Background(), dispatch.ID, claimant)
+				if err != nil {
+					cleanupTaskDiscoveryAutomationFixture(tb, db, fixture)
+					tb.Fatalf("prepare task discovery Automation completion execution: %v", err)
+				}
+				automationRepo := repository.NewAutomationRepo(db)
+				return taskDiscoveryWriteRun{
+					write: func(ctx context.Context, _ int) error {
+						return automationRepo.CompleteDispatch(ctx, dispatch.ID, execution.ID, models.ExecCompleted, "")
+					},
+					cleanup: func(tb testing.TB) {
+						cleanupTaskDiscoveryAutomationFixture(tb, db, fixture)
+					},
+				}
+			},
+		},
+		{
+			name:         "AutomationCompleteFailedDispatch",
+			operations:   1,
+			affectedRows: 1,
+			setup: func(tb testing.TB, db *sql.DB, taskRepo *repository.TaskRepo) taskDiscoveryWriteRun {
+				prefix := taskDiscoveryWritePoolPrefix + "automation-complete-failed-"
+				fixture, dispatch := prepareTaskDiscoveryAutomationDispatch(tb, db, prefix)
+				claimant := "task-discovery-complete-failed"
+				leaseTaskDiscoveryAutomationDispatch(tb, db, dispatch, claimant)
+				execution, err := taskRepo.ClaimAutomationDispatch(context.Background(), dispatch.ID, claimant)
+				if err != nil {
+					cleanupTaskDiscoveryAutomationFixture(tb, db, fixture)
+					tb.Fatalf("prepare task discovery failed Automation completion execution: %v", err)
+				}
+				automationRepo := repository.NewAutomationRepo(db)
+				return taskDiscoveryWriteRun{
+					write: func(ctx context.Context, _ int) error {
+						return automationRepo.CompleteDispatch(ctx, dispatch.ID, execution.ID, models.ExecFailed, "task discovery write budget")
+					},
+					cleanup: func(tb testing.TB) {
+						cleanupTaskDiscoveryAutomationFixture(tb, db, fixture)
+					},
+				}
+			},
+		},
+		{
+			name: "AutomationActivateChainedTask", operations: 1,
+			affectedRows: 1,
+			setup: func(tb testing.TB, db *sql.DB, taskRepo *repository.TaskRepo) taskDiscoveryWriteRun {
+				prefix := taskDiscoveryWritePoolPrefix + "automation-chain-"
+				fixture := seedTaskDiscoveryAutomationChainFixture(tb, db, prefix)
+				return taskDiscoveryWriteRun{
+					write: func(ctx context.Context, _ int) error {
+						_, _, _, err := taskRepo.ActivateAutomationChainedTask(ctx, fixture.parent, &fixture.child, fixture.event)
+						return err
+					},
+					cleanup: func(tb testing.TB) {
+						cleanupTaskDiscoveryAutomationChainFixture(tb, db, fixture)
 					},
 				}
 			},
@@ -893,8 +1481,9 @@ func taskDiscoveryWritePaths() []taskDiscoveryWritePath {
 			return err
 		}),
 		{
-			name:       "ExecutionRecoverPreRestartRunningTaskExecutions",
-			operations: taskDiscoveryBulkWriteOperations,
+			name:         "ExecutionRecoverPreRestartRunningTaskExecutions",
+			operations:   taskDiscoveryBulkWriteOperations,
+			affectedRows: taskDiscoveryWritePoolSize,
 			setup: func(tb testing.TB, db *sql.DB, _ *repository.TaskRepo) taskDiscoveryWriteRun {
 				prefix := taskDiscoveryWritePoolPrefix + "execution-recovery-"
 				seedTaskDiscoveryRunningExecutions(tb, db, prefix, taskDiscoveryWritePoolSize)
@@ -937,8 +1526,9 @@ func taskDiscoveryWritePaths() []taskDiscoveryWritePath {
 			},
 		},
 		{
-			name:       "DeleteWithCleanupManifestTerminalizesSwarmChildren",
-			operations: taskDiscoveryBulkWriteOperations,
+			name:         "DeleteWithCleanupManifestTerminalizesSwarmChildren",
+			operations:   taskDiscoveryBulkWriteOperations,
+			affectedRows: taskDiscoveryWritePoolSize + 1,
 			setup: func(tb testing.TB, db *sql.DB, taskRepo *repository.TaskRepo) taskDiscoveryWriteRun {
 				parentPrefix := taskDiscoveryWritePoolPrefix + "delete-swarm-parent-"
 				parentIDs := seedTaskDiscoveryWritePool(tb, db, parentPrefix, models.CategoryActive, models.StatusPending, "2020-01-01 00:00:00", "", 1)
@@ -963,8 +1553,9 @@ func taskDiscoveryWritePaths() []taskDiscoveryWritePath {
 			},
 		},
 		{
-			name:       "DeleteBlockedChildrenByParent",
-			operations: taskDiscoveryBulkWriteOperations,
+			name:         "DeleteBlockedChildrenByParent",
+			operations:   taskDiscoveryBulkWriteOperations,
+			affectedRows: taskDiscoveryWritePoolSize,
 			setup: func(tb testing.TB, db *sql.DB, taskRepo *repository.TaskRepo) taskDiscoveryWriteRun {
 				parentPrefix := taskDiscoveryWritePoolPrefix + "delete-blocked-parent-"
 				parentIDs := seedTaskDiscoveryWritePool(tb, db, parentPrefix, models.CategoryActive, models.StatusPending, "2020-01-01 00:00:00", "", 1)
@@ -996,13 +1587,25 @@ func taskDiscoveryWritePaths() []taskDiscoveryWritePath {
 	}
 }
 
-func taskDiscoveryWritePathRequiresRelativeBudget(name string) bool {
-	switch name {
-	case "Create", "Update", "UpdateCategory", "ReorderTask", "UpdateStatus":
-		return true
-	default:
+func taskDiscoveryWritePathUsesRelativeBudget(path taskDiscoveryWritePath) bool {
+	if path.affectedRows >= taskDiscoveryWritePoolSize {
 		return false
 	}
+	switch path.name {
+	case "UpdateSwarmFields", "UpdateAgentID", "UpdateWorktreeInfo", "UpdateMergeStatus", "UpdateAutoMerge", "UpdateLineage",
+		"UpdateTelegramOrigin", "UpdateSlackOrigin", "UpdateEmailOrigin", "UpdateDiscordOrigin", "UpdateXOrigin",
+		"UpdateAgentDefinition", "ClearWorktreeInfo":
+		return false
+	default:
+		return true
+	}
+}
+
+func taskDiscoveryWritePathAffectedRows(path taskDiscoveryWritePath) int {
+	if path.affectedRows > 0 {
+		return path.affectedRows
+	}
+	return 1
 }
 
 func measureTaskDiscoveryWritePathSample(tb testing.TB, path taskDiscoveryWritePath, db *sql.DB, taskRepo *repository.TaskRepo, indexed bool) float64 {
@@ -1027,11 +1630,12 @@ func measureTaskDiscoveryWritePathSample(tb testing.TB, path taskDiscoveryWriteP
 }
 
 func TestTaskDiscoveryOrderIndexWriteBudget(t *testing.T) {
+	skipTaskDiscoveryTimingTestsUnderCoverage(t)
 	db, taskRepo := newTaskDiscoveryOrderBenchmarkRepo(t, 10000, 128, 128)
 	defer db.Close()
 
 	var aggregateBaselineNs, aggregateCandidateNs float64
-	var aggregateOperations int
+	var aggregateOperations, aggregateAffectedRows int
 	for _, path := range taskDiscoveryWritePaths() {
 		path := path
 		t.Run(path.name, func(t *testing.T) {
@@ -1052,20 +1656,31 @@ func TestTaskDiscoveryOrderIndexWriteBudget(t *testing.T) {
 			if operations <= 0 {
 				operations = taskDiscoveryWriteOperations
 			}
-			aggregateBaselineNs += baselineNs * float64(operations)
-			aggregateCandidateNs += candidateNs * float64(operations)
+			affectedRows := taskDiscoveryWritePathAffectedRows(path)
+			workUnits := operations * affectedRows
+			aggregateBaselineNs += (baselineNs / float64(affectedRows)) * float64(workUnits)
+			aggregateCandidateNs += (candidateNs / float64(affectedRows)) * float64(workUnits)
 			aggregateOperations += operations
-			t.Logf("paired %s median ns/op: baseline=%.0f candidate=%.0f overhead=%.1f%% delta=%.0f ns", path.name, baselineNs, candidateNs, (candidateNs/baselineNs-1)*100, candidateNs-baselineNs)
-			if taskDiscoveryWritePathRequiresRelativeBudget(path.name) && candidateNs > baselineNs*taskDiscoveryMaxWriteLatencyRegression {
-				t.Fatalf("%s indexed write latency regressed by more than 20%%: baseline=%.0f ns/op candidate=%.0f ns/op", path.name, baselineNs, candidateNs)
+			aggregateAffectedRows += workUnits
+			t.Logf("paired %s median ns/op: baseline=%.0f candidate=%.0f overhead=%.1f%% delta=%.0f ns; operations=%d affected_rows=%d", path.name, baselineNs, candidateNs, (candidateNs/baselineNs-1)*100, candidateNs-baselineNs, operations, workUnits)
+			baselinePerAffectedRowNs := baselineNs / float64(affectedRows)
+			candidatePerAffectedRowNs := candidateNs / float64(affectedRows)
+			if taskDiscoveryWritePathUsesRelativeBudget(path) {
+				if candidatePerAffectedRowNs > baselinePerAffectedRowNs*taskDiscoveryMaxWriteLatencyRegression {
+					t.Fatalf("%s indexed write latency regressed by more than 20%%: baseline=%.0f candidate=%.0f ns/op across %d affected rows", path.name, baselineNs, candidateNs, workUnits)
+				}
+			} else if candidatePerAffectedRowNs-baselinePerAffectedRowNs > taskDiscoveryMaxFixedPerAffectedRowOverheadNs {
+				t.Fatalf("%s indexed write latency exceeded the lightweight absolute budget: baseline=%.0f candidate=%.0f ns/op, delta=%.0f ns/affected-row across %d affected rows", path.name, baselineNs, candidateNs, candidatePerAffectedRowNs-baselinePerAffectedRowNs, workUnits)
 			}
 		})
 	}
 
-	if aggregateCandidateNs > aggregateBaselineNs*taskDiscoveryMaxWriteLatencyRegression {
-		t.Fatalf("complete indexed task-writer workload regressed by more than 20%%: baseline=%.0f candidate=%.0f across %d operations", aggregateBaselineNs, aggregateCandidateNs, aggregateOperations)
+	baselinePerAffectedRowNs := aggregateBaselineNs / float64(aggregateAffectedRows)
+	candidatePerAffectedRowNs := aggregateCandidateNs / float64(aggregateAffectedRows)
+	if candidatePerAffectedRowNs > baselinePerAffectedRowNs*taskDiscoveryMaxWriteLatencyRegression {
+		t.Fatalf("complete indexed task-writer workload regressed by more than 20%%: baseline=%.0f candidate=%.0f ns/affected-row across %d operations and %d affected rows", baselinePerAffectedRowNs, candidatePerAffectedRowNs, aggregateOperations, aggregateAffectedRows)
 	}
-	t.Logf("complete indexed task-writer workload: baseline=%.0f candidate=%.0f overhead=%.1f%% across %d operations", aggregateBaselineNs, aggregateCandidateNs, (aggregateCandidateNs/aggregateBaselineNs-1)*100, aggregateOperations)
+	t.Logf("complete indexed task-writer workload: baseline=%.0f candidate=%.0f ns/affected-row overhead=%.1f%% across %d operations and %d affected rows", baselinePerAffectedRowNs, candidatePerAffectedRowNs, (candidatePerAffectedRowNs/baselinePerAffectedRowNs-1)*100, aggregateOperations, aggregateAffectedRows)
 
 	setTaskDiscoveryOrderIndex(t, db, true)
 	indexBytes := taskDiscoveryOrderIndexBytes(t, db)
@@ -1078,8 +1693,9 @@ func TestTaskDiscoveryOrderIndexWriteBudget(t *testing.T) {
 // BenchmarkTaskDiscoveryIndexWriteBudget records the write-time and storage
 // cost of the partial order index across every distinct task mutation shape in
 // the production repository. The paired TestTaskDiscoveryOrderIndexWriteBudget
-// applies the authoritative relative gate to the complete inventory; this
-// benchmark exposes each path's ns/op and index storage for diagnosis.
+// applies the authoritative per-path budget (relative or fixed per affected row)
+// to the complete inventory and the weighted aggregate cap; this benchmark
+// exposes each path's ns/op and index storage for diagnosis.
 func BenchmarkTaskDiscoveryIndexWriteBudget(b *testing.B) {
 	for _, path := range taskDiscoveryWritePaths() {
 		path := path
