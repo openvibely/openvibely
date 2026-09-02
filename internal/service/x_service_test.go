@@ -1231,6 +1231,10 @@ func TestXWeightedLengthConformanceRegressions(t *testing.T) {
 		{name: "valid bare IDN URL", text: strings.Repeat("x", 258) + " example.рф", shouldPost: false},
 		{name: "valid bare URL after Unicode prefix", text: strings.Repeat("x", 258) + " 例.example.com", shouldPost: false},
 		{name: "valid bare URL inside mixed Unicode label", text: strings.Repeat("x", 258) + " 例example.com", shouldPost: false},
+		{name: "valid bare Unicode TLD URL inside mixed Unicode label", text: strings.Repeat("x", 258) + " 例example.рф", shouldPost: false},
+		{name: "valid URL with inner ACE-prefixed label", text: strings.Repeat("x", 257) + " https://foo.xn--é.com", shouldPost: false},
+		{name: "bare URL port is ordinary suffix", text: strings.Repeat("x", 251) + " example.com:12345", shouldPost: false},
+		{name: "bare URL query is ordinary suffix", text: strings.Repeat("x", 249) + " example.com?foo=bar", shouldPost: false},
 		{name: "mixed ACE-prefixed Unicode domain remains ordinary text", text: strings.Repeat("x", 257) + " https://xn--abc.界.com", shouldPost: true},
 	}
 	for _, tt := range directCases {
@@ -1255,6 +1259,7 @@ func TestXURLRangesFollowTwitterTextEntityBoundaries(t *testing.T) {
 	tcoOverLimit := "https://t.co/" + strings.Repeat("a", xMaxTCOURLSlugLength+1)
 	tcoWithExtraPath := tcoAtLimit + "/extra"
 	overlongUnicodePrefixURL := strings.Repeat("界.", 2040) + "example.com"
+	overlongInnerACEURL := "https://foo.xn--" + strings.Repeat("é", 100) + ".com"
 	tests := []struct {
 		name     string
 		text     string
@@ -1264,7 +1269,14 @@ func TestXURLRangesFollowTwitterTextEntityBoundaries(t *testing.T) {
 		{name: "internationalized subdomain is not protocolless URL", text: "пример.рф", expected: []string{}},
 		{name: "Unicode prefix before ASCII protocolless URL", text: "例.example.com", expected: []string{"example.com"}},
 		{name: "ASCII URL inside mixed Unicode label", text: "例example.com", expected: []string{"example.com"}},
+		{name: "Unicode TLD URL inside mixed Unicode label", text: "例example.рф", expected: []string{"example.рф"}},
 		{name: "multiple ASCII URLs separated by Unicode label", text: "example.com.例.foo.org", expected: []string{"example.com", "foo.org"}},
+		{name: "inner ACE-prefixed Unicode label", text: "https://foo.xn--é.com", expected: []string{"https://foo.xn--é.com"}},
+		{name: "overlong inner ACE-prefixed Unicode label", text: overlongInnerACEURL, expected: []string{}},
+		{name: "bare URL port is ordinary suffix", text: "example.com:12345", expected: []string{"example.com"}},
+		{name: "bare URL port with path remains attached", text: "example.com:12345/path?foo=bar", expected: []string{"example.com:12345/path?foo=bar"}},
+		{name: "bare URL query is ordinary suffix", text: "example.com?foo=bar", expected: []string{"example.com"}},
+		{name: "bare URL slash path and query remain attached", text: "example.com/path?foo=bar", expected: []string{"example.com/path?foo=bar"}},
 		{name: "uppercase path and query", text: "HTTPS://EXAMPLE.COM/Path?X=Y", expected: []string{"HTTPS://EXAMPLE.COM/Path?X=Y"}},
 		{name: "balanced path punctuation", text: "https://example.com/(foo).", expected: []string{"https://example.com/(foo)"}},
 		{name: "slash before unsupported Unicode path", text: "https://example.com/界", expected: []string{"https://example.com/"}},
@@ -1338,6 +1350,10 @@ func TestXReplyRejectsOversizedURLEntitiesBeforeProviderPost(t *testing.T) {
 		overlongURL,
 		strings.Repeat("x", 240) + " " + tcoOverLimit,
 		overlongUnicodePrefixURL,
+		strings.Repeat("x", 258) + " 例example.рф",
+		strings.Repeat("x", 257) + " https://foo.xn--é.com",
+		strings.Repeat("x", 251) + " example.com:12345",
+		strings.Repeat("x", 249) + " example.com?foo=bar",
 	} {
 		api.posted = nil
 		svc.SendReply(ctx, "tweet", text, "")

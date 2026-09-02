@@ -785,10 +785,10 @@ func xURLRanges(text string) []xTextRange {
 		for i, suffix := range suffixes {
 			suffixEnd := suffix.end
 			// twitter-text attaches a path or query to the final ASCII
-			// domain match. Only do so when that match reaches the end of
-			// the candidate's domain, so intervening Unicode labels remain
-			// ordinary text between separate URL entities.
-			if i == len(suffixes)-1 && suffix.end == len(domain) {
+			// domain match only when a slash path exists. Bare ports and
+			// query-only suffixes remain ordinary weighted text.
+			if i == len(suffixes)-1 && len(candidate) > len(domain) &&
+				strings.Contains(candidate[len(domain):], "/") {
 				suffixEnd = len(candidate)
 			}
 			ranges = append(ranges, xTextRange{start: urlStart + suffix.start, end: urlStart + suffixEnd})
@@ -891,8 +891,32 @@ func xURLIDNADomainValid(domain string) bool {
 		if label == "" {
 			return false
 		}
-		encoded, err := idna.Punycode.ToASCII(label)
-		if err != nil || encoded == "" || len(encoded) > 63 {
+		if !xURLIDNALabelValid(label) {
+			return false
+		}
+	}
+	return true
+}
+
+func xURLIDNALabelValid(label string) bool {
+	// twitter-text's punycode.toASCII treats every non-ASCII label as raw
+	// Unicode, including labels that happen to begin with xn--. Go's raw
+	// Punycode profile interprets that prefix as an already-encoded label, so
+	// change its case only for the conversion; the encoded length is unchanged
+	// while the prefix no longer triggers ACE decoding.
+	if strings.HasPrefix(label, "xn--") {
+		if xURLLabelIsASCII(label) {
+			return len(label) <= 63
+		}
+		label = "X" + label[1:]
+	}
+	encoded, err := idna.Punycode.ToASCII(label)
+	return err == nil && encoded != "" && len(encoded) <= 63
+}
+
+func xURLLabelIsASCII(label string) bool {
+	for i := 0; i < len(label); i++ {
+		if label[i] >= utf8.RuneSelf {
 			return false
 		}
 	}
@@ -931,86 +955,54 @@ func xURLDomain(candidate string) string {
 }
 
 func xASCIIURLSuffixRanges(domain string) []xTextRange {
-	labels := make([]xTextRange, 0, strings.Count(domain, ".")+1)
-	for start := 0; start < len(domain); {
-		end := start
-		for end < len(domain) && domain[end] != '.' {
-			_, size := utf8.DecodeRuneInString(domain[end:])
-			end += size
-		}
-		labels = append(labels, xTextRange{start: start, end: end})
-		if end == len(domain) {
-			break
-		}
-		start = end + 1
-	}
-
-	ranges := make([]xTextRange, 0, len(labels))
-	nextSearch := 0
-	for startIndex, label := range labels {
-		if label.start < nextSearch {
-			continue
-		}
-
-		if isXASCIIURLDomainLabel(domain[label.start:label.end]) {
-			bestEnd := -1
-			for endIndex := startIndex; endIndex < len(labels); endIndex++ {
-				endLabel := labels[endIndex]
-				if endIndex > startIndex && !isXASCIIURLDomainLabel(domain[endLabel.start:endLabel.end]) {
-					candidate := domain[label.start:endLabel.end]
-					if xValidBareURLDomain(candidate) {
-						bestEnd = endLabel.end
-					}
-					break
-				}
-				if endIndex == startIndex {
-					continue
-				}
-				candidate := domain[label.start:endLabel.end]
-				if xValidBareURLDomain(candidate) {
-					bestEnd = endLabel.end
-				}
-			}
-			if bestEnd >= 0 {
-				ranges = append(ranges, xTextRange{start: label.start, end: bestEnd})
-				nextSearch = bestEnd
-				continue
-			}
-		}
-
-		// twitter-text's validAsciiDomain regexp is unanchored, so a mixed
-		// Unicode label can contain an ASCII URL suffix that starts after its
-		// first rune. Scan those rune boundaries after preserving the label-
-		// based pass for complete IDN domains such as example.рф.
-		for start := label.start; start < label.end; {
+	ranges := make([]xTextRange, 0)
+	searchStart := 0
+	for searchStart < len(domain) {
+		bestStart, bestEnd := -1, -1
+		for start := searchStart; start < len(domain); {
 			first, size := utf8.DecodeRuneInString(domain[start:])
 			if !isXASCIIURLDomainRune(first) {
 				start += size
 				continue
 			}
 
-			bestEnd := -1
 			for end := start; end < len(domain); {
 				r, size := utf8.DecodeRuneInString(domain[end:])
-				if r != '.' && !isXASCIIURLDomainRune(r) {
-					break
-				}
 				end += size
-				if xValidBareURLDomain(domain[start:end]) {
-					bestEnd = end
+				if r == '.' {
+					if xValidASCIIURLSuffix(domain[start : end-size]) {
+						bestStart, bestEnd = start, end-size
+					}
 				}
 			}
-			if bestEnd < 0 {
-				start += size
-				continue
+			if xValidASCIIURLSuffix(domain[start:]) {
+				bestStart, bestEnd = start, len(domain)
 			}
-
-			ranges = append(ranges, xTextRange{start: start, end: bestEnd})
-			nextSearch = bestEnd
+			if bestEnd >= 0 {
+				break
+			}
+			start += size
+		}
+		if bestEnd < 0 {
 			break
 		}
+		ranges = append(ranges, xTextRange{start: bestStart, end: bestEnd})
+		searchStart = bestEnd
 	}
 	return ranges
+}
+
+func xValidASCIIURLSuffix(candidate string) bool {
+	labels := strings.Split(candidate, ".")
+	if len(labels) < 2 {
+		return false
+	}
+	for _, label := range labels[:len(labels)-1] {
+		if !isXASCIIURLDomainLabel(label) {
+			return false
+		}
+	}
+	return xValidBareURLDomain(candidate)
 }
 
 func xValidBareURLDomain(candidate string) bool {
