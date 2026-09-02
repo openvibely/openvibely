@@ -141,6 +141,65 @@ func TestExecuteListTasksTool(t *testing.T) {
 	}
 }
 
+func TestExecuteListTasksToolSupportsEveryCategoryAndStatusFilter(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	ctx := context.Background()
+
+	create := func(title string, category models.TaskCategory, status models.TaskStatus) {
+		t.Helper()
+		if err := taskRepo.Create(ctx, &models.Task{
+			ProjectID: "default",
+			Title:     title,
+			Category:  category,
+			Status:    status,
+			Prompt:    "p",
+		}); err != nil {
+			t.Fatalf("create %q: %v", title, err)
+		}
+	}
+	assertSingle := func(input, title, category, status string) {
+		t.Helper()
+		out, err := ExecuteListTasksTool(ctx, taskRepo, "default", json.RawMessage(input))
+		if err != nil {
+			t.Fatalf("ExecuteListTasksTool %s: %v", input, err)
+		}
+		result := decodeListTasksResult(t, out)
+		if result.Total != 1 || result.Count != 1 || len(result.Tasks) != 1 {
+			t.Fatalf("filter %s returned total=%d count=%d tasks=%d: %+v", input, result.Total, result.Count, len(result.Tasks), result)
+		}
+		if result.Tasks[0].Title != title || result.Tasks[0].Category != category || result.Tasks[0].Status != status {
+			t.Fatalf("filter %s returned wrong task: %+v", input, result.Tasks[0])
+		}
+	}
+
+	for _, category := range []models.TaskCategory{
+		models.CategoryActive,
+		models.CategoryBacklog,
+		models.CategoryScheduled,
+		models.CategoryCompleted,
+	} {
+		title := fmt.Sprintf("all category filter %s", category)
+		create(title, category, models.StatusPending)
+		input := fmt.Sprintf(`{"query":%q,"category":%q}`, title, string(category))
+		assertSingle(input, title, string(category), string(models.StatusPending))
+	}
+	for _, status := range []models.TaskStatus{
+		models.StatusPending,
+		models.StatusQueued,
+		models.StatusRunning,
+		models.StatusCompleted,
+		models.StatusFailed,
+		models.StatusCancelled,
+		models.StatusBlocked,
+	} {
+		title := fmt.Sprintf("all status filter %s", status)
+		create(title, models.CategoryActive, status)
+		input := fmt.Sprintf(`{"query":%q,"status":%q}`, title, string(status))
+		assertSingle(input, title, string(models.CategoryActive), string(status))
+	}
+}
+
 func TestExecuteListTasksToolUsesCountAndBoundedPageOperations(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	taskRepo := repository.NewTaskRepo(db, nil)
