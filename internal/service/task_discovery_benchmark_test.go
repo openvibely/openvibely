@@ -177,7 +177,9 @@ const (
 
 	// The discovery index must add no more than 20% to the production UpdateStatus
 	// path and must stay below 2 MiB for the 10,000-task fixture.
-	taskDiscoveryWriteOperations                 = 40
+	// Use a long measured phase so scheduler and coverage overhead do not dominate
+	// the small per-update index cost.
+	taskDiscoveryWriteOperations                 = 1000
 	taskDiscoveryMaxWriteLatencyRegression       = 1.20
 	taskDiscoveryMaxIndexStorageBytes      int64 = 2 * 1024 * 1024
 )
