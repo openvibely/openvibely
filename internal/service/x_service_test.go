@@ -1276,6 +1276,7 @@ func TestXURLRangesFollowTwitterTextEntityBoundaries(t *testing.T) {
 		{name: "bare URL port is ordinary suffix", text: "example.com:12345", expected: []string{"example.com"}},
 		{name: "bare URL port with path remains attached", text: "example.com:12345/path?foo=bar", expected: []string{"example.com:12345/path?foo=bar"}},
 		{name: "bare URL query is ordinary suffix", text: "example.com?foo=bar", expected: []string{"example.com"}},
+		{name: "bare URL query slash is ordinary suffix", text: "example.com?foo=/bar", expected: []string{"example.com"}},
 		{name: "bare URL slash path and query remain attached", text: "example.com/path?foo=bar", expected: []string{"example.com/path?foo=bar"}},
 		{name: "uppercase path and query", text: "HTTPS://EXAMPLE.COM/Path?X=Y", expected: []string{"HTTPS://EXAMPLE.COM/Path?X=Y"}},
 		{name: "balanced path punctuation", text: "https://example.com/(foo).", expected: []string{"https://example.com/(foo)"}},

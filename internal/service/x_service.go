@@ -787,8 +787,7 @@ func xURLRanges(text string) []xTextRange {
 			// twitter-text attaches a path or query to the final ASCII
 			// domain match only when a slash path exists. Bare ports and
 			// query-only suffixes remain ordinary weighted text.
-			if i == len(suffixes)-1 && len(candidate) > len(domain) &&
-				strings.Contains(candidate[len(domain):], "/") {
+			if i == len(suffixes)-1 && xURLHasBarePath(candidate, len(domain)) {
 				suffixEnd = len(candidate)
 			}
 			ranges = append(ranges, xTextRange{start: urlStart + suffix.start, end: urlStart + suffixEnd})
@@ -1057,6 +1056,24 @@ func xURLDomainEndBlocked(text string) bool {
 	default:
 		return false
 	}
+}
+
+func xURLHasBarePath(candidate string, domainLength int) bool {
+	if domainLength < 0 || domainLength >= len(candidate) {
+		return false
+	}
+	remainder := candidate[domainLength:]
+	if remainder[0] == '/' {
+		return true
+	}
+	if remainder[0] != ':' {
+		return false
+	}
+	portEnd := 1
+	for portEnd < len(remainder) && remainder[portEnd] >= '0' && remainder[portEnd] <= '9' {
+		portEnd++
+	}
+	return portEnd < len(remainder) && remainder[portEnd] == '/'
 }
 
 func xURLSuffixEnd(text string, baseEnd int) int {
