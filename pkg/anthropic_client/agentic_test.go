@@ -1811,7 +1811,7 @@ func TestContextManagementEdits_BothTypes(t *testing.T) {
 }
 
 func TestSendAgentic_Claude5ModelsUseAdaptiveThinkingWithoutBudget(t *testing.T) {
-	models := []string{"claude-opus-5", "claude-sonnet-5", "claude-fable-5", "claude-mythos-5"}
+	models := []string{"claude-opus-5", "claude-sonnet-5", "claude-fable-5-1", "claude-mythos-5-1", "claude-fable-5", "claude-mythos-5"}
 	for _, model := range models {
 		t.Run(model, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1833,6 +1833,12 @@ func TestSendAgentic_Claude5ModelsUseAdaptiveThinkingWithoutBudget(t *testing.T)
 				outputConfig, ok := reqBody["output_config"].(map[string]interface{})
 				if !ok || outputConfig["effort"] != "low" {
 					t.Fatalf("output_config = %v, want effort low", reqBody["output_config"])
+				}
+				if tools, ok := reqBody["tools"].([]interface{}); !ok || len(tools) == 0 {
+					t.Fatalf("expected a tool-enabled request, got tools = %v", reqBody["tools"])
+				}
+				if toolChoice, ok := reqBody["tool_choice"]; ok {
+					t.Fatalf("Claude 5 request must not force tool_choice: %v", toolChoice)
 				}
 
 				w.Header().Set("Content-Type", "text/event-stream")
@@ -1862,7 +1868,6 @@ func TestSendAgentic_Claude5ModelsUseAdaptiveThinkingWithoutBudget(t *testing.T)
 				EnableThinking: true,
 				BudgetTokens:   4000,
 				Effort:         " LOW ",
-				DisableTools:   true,
 				MaxTurns:       1,
 			})
 			if err != nil {
@@ -1879,8 +1884,20 @@ func TestNormalizeEffortRejectsUnsupportedModelCombinations(t *testing.T) {
 		want   string
 	}{
 		{"claude-opus-5", " LOW ", "low"},
+		{"claude-opus-5", "xhigh", "xhigh"},
+		{"claude-sonnet-5", "xhigh", "xhigh"},
+		{"claude-fable-5-1", "xhigh", "xhigh"},
+		{"claude-fable-5-1", "max", "max"},
+		{"claude-fable-5", "xhigh", "xhigh"},
+		{"claude-mythos-5-1", "xhigh", "xhigh"},
+		{"claude-mythos-5-1", "max", "max"},
+		{"claude-mythos-5", "xhigh", "xhigh"},
+		{"claude-opus-4-8", "xhigh", "xhigh"},
+		{"claude-opus-4-7", "xhigh", "xhigh"},
+		{"claude-opus-4-6", "xhigh", ""},
 		{"claude-sonnet-4-6", "max", "max"},
 		{"claude-opus-4-5-20251101", "high", "high"},
+		{"claude-opus-4-5-20251101", "xhigh", ""},
 		{"claude-opus-4-5-20251101", "max", ""},
 		{"claude-sonnet-4-5-20250929", "low", ""},
 		{"claude-haiku-4-5-20251001", "high", ""},

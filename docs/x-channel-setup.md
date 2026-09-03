@@ -39,7 +39,7 @@ OpenVibely durably records mention receipt IDs before handing work to the shared
 
 ## Replies and Outbound Posts
 
-`Post assistant responses as replies` controls replies for X-created chat and task turns. X responses are limited to 280 Unicode characters and longer assistant output is truncated for reply delivery.
+`Post assistant responses as replies` controls replies for X-created chat and task turns. X responses are limited to 280 weighted characters. OpenVibely follows X's entity accounting: recognized URLs count as 23 characters, emoji sequences count as one entity, and characters outside X's one-unit ranges count as two. Longer assistant output is truncated without splitting recognized entities.
 
 For explicit `send_message` actions, create an outbound target with platform `X`, target ID `me`, and a project-local name such as `announcements`. X outbound targets intentionally support only the authenticated account (`x:me`); arbitrary usernames, user IDs, direct messages, and thread IDs are unsupported.
 

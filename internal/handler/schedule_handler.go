@@ -72,21 +72,6 @@ func scheduleFormHTTPError(err error) error {
 	return err
 }
 
-func (h *Handler) mutationProjectID(c echo.Context) string {
-	if projectID := strings.TrimSpace(c.QueryParam("project_id")); projectID != "" {
-		return projectID
-	}
-	if h.settingsRepo == nil {
-		return ""
-	}
-	selectedProjectID, err := h.settingsRepo.Get(c.Request().Context(), uiPreferenceSelectedProjectIDKey)
-	if err != nil {
-		applog.Debugf("[handler] failed to load selected project preference for schedule mutation: %v", err)
-		return ""
-	}
-	return strings.TrimSpace(selectedProjectID)
-}
-
 func (h *Handler) requireTaskInRequestProject(ctx context.Context, taskID, projectID string) (*models.Task, error) {
 	var (
 		task *models.Task

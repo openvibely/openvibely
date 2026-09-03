@@ -112,8 +112,9 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 				var endpoint = button.dataset.mergeEndpoint || '';
 				if (!taskID || !projectID || !mode || !endpoint) return;
 				var path = '/tasks/' + encodeURIComponent(taskID) + '/worktree/' + endpoint;
-				window._taskCardActionRequest = {path: path, taskID: taskID, button: button};
-				button.disabled = true;
+				var dropdown = button.closest('[data-kanban-menu-key]');
+				window._taskCardActionRequest = {path: path, taskID: taskID};
+				if (window.closeKanbanMenu) window.closeKanbanMenu(dropdown, false);
 				htmx.ajax('POST', path, {
 					target: '#kanban-board',
 					swap: 'outerHTML',
@@ -128,7 +129,6 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 					var config = event.detail && event.detail.requestConfig;
 					if (!request || !config || config.path !== request.path) return;
 					var status = event.detail.xhr && event.detail.xhr.status || 0;
-					if (request.button && request.button.isConnected) request.button.disabled = false;
 					window._taskCardActionRequest = null;
 					if (status >= 200 && status < 300 && window.closeKanbanMenu) {
 						var card = document.getElementById('task-' + request.taskID);

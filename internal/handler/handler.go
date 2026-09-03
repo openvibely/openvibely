@@ -595,6 +595,21 @@ func (h *Handler) SetAgentLibraryMaintenanceService(svc *service.AgentLibraryMai
 	h.agentLibraryMaintenanceSvc = svc
 }
 
+func (h *Handler) mutationProjectID(c echo.Context) string {
+	if projectID := strings.TrimSpace(c.QueryParam("project_id")); projectID != "" {
+		return projectID
+	}
+	if h.settingsRepo == nil {
+		return ""
+	}
+	selectedProjectID, err := h.settingsRepo.Get(c.Request().Context(), uiPreferenceSelectedProjectIDKey)
+	if err != nil {
+		applog.Debugf("[handler] failed to load selected project preference for mutation: %v", err)
+		return ""
+	}
+	return strings.TrimSpace(selectedProjectID)
+}
+
 // getCurrentProjectID resolves the current project ID from the query param.
 // If project_id is provided and valid, it uses GetByID to verify it exists.
 // Otherwise it falls back to the first compact selector option.

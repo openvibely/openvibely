@@ -141,6 +141,105 @@ func TestExecuteListTasksTool(t *testing.T) {
 	}
 }
 
+func TestExecuteListTasksToolSupportsEveryCategoryAndStatusFilter(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	ctx := context.Background()
+
+	create := func(title string, category models.TaskCategory, status models.TaskStatus) {
+		t.Helper()
+		if err := taskRepo.Create(ctx, &models.Task{
+			ProjectID: "default",
+			Title:     title,
+			Category:  category,
+			Status:    status,
+			Prompt:    "p",
+		}); err != nil {
+			t.Fatalf("create %q: %v", title, err)
+		}
+	}
+	assertSingle := func(input, title, category, status string) {
+		t.Helper()
+		out, err := ExecuteListTasksTool(ctx, taskRepo, "default", json.RawMessage(input))
+		if err != nil {
+			t.Fatalf("ExecuteListTasksTool %s: %v", input, err)
+		}
+		result := decodeListTasksResult(t, out)
+		if result.Total != 1 || result.Count != 1 || len(result.Tasks) != 1 {
+			t.Fatalf("filter %s returned total=%d count=%d tasks=%d: %+v", input, result.Total, result.Count, len(result.Tasks), result)
+		}
+		if result.Tasks[0].Title != title || result.Tasks[0].Category != category || result.Tasks[0].Status != status {
+			t.Fatalf("filter %s returned wrong task: %+v", input, result.Tasks[0])
+		}
+	}
+
+	for _, category := range []models.TaskCategory{
+		models.CategoryActive,
+		models.CategoryBacklog,
+		models.CategoryScheduled,
+		models.CategoryCompleted,
+	} {
+		title := fmt.Sprintf("all category filter %s", category)
+		create(title, category, models.StatusPending)
+		input := fmt.Sprintf(`{"query":%q,"category":%q}`, title, string(category))
+		assertSingle(input, title, string(category), string(models.StatusPending))
+	}
+	for _, status := range []models.TaskStatus{
+		models.StatusPending,
+		models.StatusQueued,
+		models.StatusRunning,
+		models.StatusCompleted,
+		models.StatusFailed,
+		models.StatusCancelled,
+		models.StatusBlocked,
+	} {
+		title := fmt.Sprintf("all status filter %s", status)
+		create(title, models.CategoryActive, status)
+		input := fmt.Sprintf(`{"query":%q,"status":%q}`, title, string(status))
+		assertSingle(input, title, string(models.CategoryActive), string(status))
+	}
+}
+
+func TestExecuteListTasksToolUsesCountAndBoundedPageOperations(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	ctx := context.Background()
+	for i := 0; i < 3; i++ {
+		task := &models.Task{
+			ProjectID: "default",
+			Title:     fmt.Sprintf("Count and page task %d", i),
+			Category:  models.CategoryActive,
+			Status:    models.StatusPending,
+			Prompt:    "not selected",
+		}
+		if err := taskRepo.Create(ctx, task); err != nil {
+			t.Fatalf("create task %d: %v", i, err)
+		}
+	}
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	out, err := ExecuteListTasksTool(ctx, taskRepo, "default", json.RawMessage(`{"limit":50}`))
+	counter.SetEnabled(false)
+	if err != nil {
+		t.Fatalf("ExecuteListTasksTool: %v", err)
+	}
+	statements := counter.Statements()
+	if len(statements) != 2 {
+		t.Fatalf("list_tasks used %d SQL operations, want count plus page: %#v", len(statements), statements)
+	}
+	if !strings.Contains(strings.ToUpper(statements[0]), "SELECT COUNT(*)") {
+		t.Fatalf("first list_tasks operation = %q, want total count", statements[0])
+	}
+	if !strings.Contains(strings.ToUpper(statements[1]), "SELECT ID") || !strings.Contains(strings.ToUpper(statements[1]), "LIMIT") || !strings.Contains(strings.ToUpper(statements[1]), "OFFSET") {
+		t.Fatalf("second list_tasks operation = %q, want bounded compact page", statements[1])
+	}
+	result := decodeListTasksResult(t, out)
+	if result.Total != 3 || result.Count != 3 || result.Limit != 50 || result.Offset != 0 || result.HasMore {
+		t.Fatalf("unexpected count/page result: %+v", result)
+	}
+}
+
 func TestExecuteListTasksTool_PreservesCompactJSONContract(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	taskRepo := repository.NewTaskRepo(db, nil)

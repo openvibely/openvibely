@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -3116,6 +3117,19 @@ func TestTaskRepo_ListTasksForDiscovery(t *testing.T) {
 	if partialTotal != 3 || len(partial) != 3 {
 		t.Fatalf("expected 3 partial matches, got total=%d len=%d", partialTotal, len(partial))
 	}
+	prefixTitles := map[string]bool{
+		"Deploy pipeline":      false,
+		"Deploy pipeline docs": false,
+	}
+	for _, task := range partial[:2] {
+		if _, ok := prefixTitles[task.Title]; !ok {
+			t.Fatalf("title relevance ordering changed: prefix result %q was not expected", task.Title)
+		}
+		prefixTitles[task.Title] = true
+	}
+	if !prefixTitles["Deploy pipeline"] || !prefixTitles["Deploy pipeline docs"] || partial[2].Title != "Refactor deploy hooks" {
+		t.Fatalf("title relevance ordering changed: %#v", partial)
+	}
 	for _, task := range partial {
 		if task.Category == models.CategoryChat {
 			t.Fatalf("chat row leaked into discovery: %q", task.Title)
@@ -3199,6 +3213,110 @@ func TestTaskRepo_ListTasksForDiscovery(t *testing.T) {
 			t.Fatalf("pagination returned duplicate task %q", task.ID)
 		}
 		seen[task.ID] = true
+	}
+}
+
+func TestTaskRepo_ListTasksForDiscoveryOrdersIdenticalTimestampsByID(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewTaskRepo(db, nil)
+	projectRepo := NewProjectRepo(db)
+	ctx := context.Background()
+
+	project := &models.Project{Name: "Identical timestamp discovery project"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	var expectedIDs []string
+	for _, title := range []string{"Tie task A", "Tie task B", "Tie task C"} {
+		task := &models.Task{
+			ProjectID: project.ID,
+			Title:     title,
+			Category:  models.CategoryActive,
+			Status:    models.StatusPending,
+			Prompt:    "p",
+		}
+		if err := repo.Create(ctx, task); err != nil {
+			t.Fatalf("create %q: %v", title, err)
+		}
+		expectedIDs = append(expectedIDs, task.ID)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE tasks SET updated_at = ? WHERE project_id = ?`, time.Date(2024, time.January, 2, 3, 4, 5, 0, time.UTC), project.ID); err != nil {
+		t.Fatalf("set identical timestamps: %v", err)
+	}
+
+	got, total, err := repo.ListTasksForDiscovery(ctx, project.ID, TaskDiscoveryFilter{Limit: 20})
+	if err != nil {
+		t.Fatalf("ListTasksForDiscovery: %v", err)
+	}
+	if total != len(expectedIDs) || len(got) != len(expectedIDs) {
+		t.Fatalf("discovery result size = total %d len %d, want %d", total, len(got), len(expectedIDs))
+	}
+
+	sort.Strings(expectedIDs)
+	for i, task := range got {
+		if task.ID != expectedIDs[i] {
+			t.Fatalf("identical-timestamp result %d has ID %q, want ascending ID %q; result=%#v", i, task.ID, expectedIDs[i], got)
+		}
+		if !task.UpdatedAt.Equal(time.Date(2024, time.January, 2, 3, 4, 5, 0, time.UTC)) {
+			t.Fatalf("identical-timestamp result %d has updated_at %s", i, task.UpdatedAt)
+		}
+	}
+}
+
+func TestTaskRepo_ListTasksForDiscoveryOrdersIdenticalTimestampsWithinTitleRelevance(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewTaskRepo(db, nil)
+	projectRepo := NewProjectRepo(db)
+	ctx := context.Background()
+
+	project := &models.Project{Name: "Title relevance tie discovery project"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	create := func(title string) string {
+		t.Helper()
+		task := &models.Task{
+			ProjectID: project.ID,
+			Title:     title,
+			Category:  models.CategoryActive,
+			Status:    models.StatusPending,
+			Prompt:    "p",
+		}
+		if err := repo.Create(ctx, task); err != nil {
+			t.Fatalf("create %q: %v", title, err)
+		}
+		return task.ID
+	}
+
+	exactID := create("Deploy")
+	prefixIDs := []string{create("Deploy alpha"), create("Deploy beta")}
+	containsIDs := []string{create("Refactor deploy"), create("Cleanup deploy")}
+	tieTime := time.Date(2024, time.January, 2, 3, 4, 5, 0, time.UTC)
+	if _, err := db.ExecContext(ctx, `UPDATE tasks SET updated_at = ? WHERE project_id = ?`, tieTime, project.ID); err != nil {
+		t.Fatalf("set identical title relevance timestamps: %v", err)
+	}
+
+	got, total, err := repo.ListTasksForDiscovery(ctx, project.ID, TaskDiscoveryFilter{Query: "deploy", Limit: 20})
+	if err != nil {
+		t.Fatalf("ListTasksForDiscovery: %v", err)
+	}
+	if total != 5 || len(got) != 5 {
+		t.Fatalf("title relevance result size = total %d len %d, want 5", total, len(got))
+	}
+
+	sort.Strings(prefixIDs)
+	sort.Strings(containsIDs)
+	expectedIDs := append([]string{exactID}, prefixIDs...)
+	expectedIDs = append(expectedIDs, containsIDs...)
+	for i, task := range got {
+		if task.ID != expectedIDs[i] {
+			t.Fatalf("title relevance result %d has ID %q, want %q; result=%#v", i, task.ID, expectedIDs[i], got)
+		}
+		if !task.UpdatedAt.Equal(tieTime) {
+			t.Fatalf("title relevance result %d has updated_at %s", i, task.UpdatedAt)
+		}
 	}
 }
 

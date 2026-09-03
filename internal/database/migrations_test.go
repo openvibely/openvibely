@@ -1191,8 +1191,8 @@ func TestMigration100_RepairsSkippedChannelTargetsWhenOldLocalDiscordUsed099(t *
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 173 {
-		t.Fatalf("max goose version = %d, want 173", maxVersion)
+	if maxVersion != 174 {
+		t.Fatalf("max goose version = %d, want 174", maxVersion)
 	}
 }
 
@@ -1351,6 +1351,117 @@ func TestMigration173AddsXAuthorizedUserLookupIndex(t *testing.T) {
 	assertIndex(false)
 }
 
+func TestMigration174UsesOrderedTaskDiscoveryAccessPath(t *testing.T) {
+	db := openMigrationTestDB(t, filepath.Join(t.TempDir(), "task-discovery-order-index-174.db"))
+	goose.SetBaseFS(migrations.FS)
+	defer goose.SetBaseFS(nil)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 173); err != nil {
+		t.Fatalf("migrate to task schema 173: %v", err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO projects(id, name, description, repo_path)
+		VALUES('task-discovery-index-project-174', 'Task discovery index', '', '');
+		WITH RECURSIVE seq(n) AS (
+			SELECT 1
+			UNION ALL
+			SELECT n + 1 FROM seq WHERE n < 4000
+		)
+		INSERT INTO tasks (id, project_id, title, category, status, updated_at)
+		SELECT
+			'task-discovery-index-174-' || printf('%05d', n),
+			'task-discovery-index-project-174',
+			'Discovery task ' || n,
+			CASE WHEN n % 20 = 0 THEN 'chat' ELSE 'active' END,
+			'pending',
+			datetime('2026-01-01 00:00:00', '+' || n || ' seconds')
+		FROM seq;
+	`); err != nil {
+		t.Fatalf("seed task discovery index fixture: %v", err)
+	}
+
+	pageQuery := `
+		SELECT id, title, category, status, priority, updated_at, parent_task_id, swarm_role
+		FROM tasks
+		WHERE project_id = ? AND category != 'chat'
+		ORDER BY updated_at DESC, id ASC
+		LIMIT ? OFFSET ?`
+	for _, limit := range []int{20, 50} {
+		before := explainQueryPlan(t, db, pageQuery, "task-discovery-index-project-174", limit, 0)
+		if !strings.Contains(before, "USE TEMP B-TREE FOR ORDER BY") {
+			t.Fatalf("pre-174 discovery page plan for limit %d = %q, want temporary sort baseline", limit, before)
+		}
+	}
+
+	if err := goose.UpTo(db, ".", 174); err != nil {
+		t.Fatalf("apply task discovery order index migration: %v", err)
+	}
+	assertOrderedDiscoveryPlan := func(tb *testing.T, name, query string, args ...any) {
+		tb.Helper()
+		plan := explainQueryPlan(tb, db, query, args...)
+		if strings.Contains(plan, "USE TEMP B-TREE FOR ORDER BY") {
+			tb.Fatalf("%s discovery page plan = %q, want no temporary sort", name, plan)
+		}
+		if !strings.Contains(plan, "USING") || !strings.Contains(plan, "project_id=?") {
+			tb.Fatalf("%s discovery page plan = %q, want project-scoped ordered access", name, plan)
+		}
+	}
+	for _, limit := range []int{20, 50} {
+		assertOrderedDiscoveryPlan(t, "default", pageQuery, "task-discovery-index-project-174", limit, 0)
+	}
+
+	for _, category := range []string{"active", "backlog", "scheduled", "completed"} {
+		category := category
+		t.Run("category_"+category, func(t *testing.T) {
+			query := `
+				SELECT id, title, category, status, priority, updated_at, parent_task_id, swarm_role
+				FROM tasks
+				WHERE project_id = ? AND category != 'chat' AND category = ?
+				ORDER BY updated_at DESC, id ASC
+				LIMIT ? OFFSET ?`
+			assertOrderedDiscoveryPlan(t, "category="+category, query, "task-discovery-index-project-174", category, 20, 0)
+		})
+	}
+	for _, status := range []string{"pending", "queued", "running", "completed", "failed", "cancelled", "blocked"} {
+		status := status
+		t.Run("status_"+status, func(t *testing.T) {
+			query := `
+				SELECT id, title, category, status, priority, updated_at, parent_task_id, swarm_role
+				FROM tasks
+				WHERE project_id = ? AND category != 'chat' AND status = ?
+				ORDER BY updated_at DESC, id ASC
+				LIMIT ? OFFSET ?`
+			assertOrderedDiscoveryPlan(t, "status="+status, query, "task-discovery-index-project-174", status, 20, 0)
+		})
+	}
+
+	titlePlan := explainQueryPlan(t, db, `
+		SELECT id, title, category, status, priority, updated_at, parent_task_id, swarm_role
+		FROM tasks
+		WHERE project_id = ? AND category != 'chat' AND title LIKE ?
+		ORDER BY
+			CASE WHEN LOWER(title) = LOWER(?) THEN 0
+			     WHEN LOWER(title) LIKE LOWER(? || '%') THEN 1
+			     ELSE 2 END,
+			updated_at DESC, id ASC
+		LIMIT ? OFFSET ?`, "task-discovery-index-project-174", "%Discovery%", "Discovery", "Discovery", 20, 0)
+	if !strings.Contains(titlePlan, "USE TEMP B-TREE FOR ORDER BY") {
+		t.Fatalf("title-filtered discovery plan = %q, want CASE ordering to remain separately planned", titlePlan)
+	}
+
+	if err := goose.DownTo(db, ".", 173); err != nil {
+		t.Fatalf("roll back task discovery order index migration: %v", err)
+	}
+	for _, limit := range []int{20, 50} {
+		afterDown := explainQueryPlan(t, db, pageQuery, "task-discovery-index-project-174", limit, 0)
+		if !strings.Contains(afterDown, "USE TEMP B-TREE FOR ORDER BY") {
+			t.Fatalf("post-174-down discovery page plan for limit %d = %q, want temporary sort restored", limit, afterDown)
+		}
+	}
+}
+
 func TestMigration108_SystemChannelInboundAuthorizationDedupe(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "system-channel-auth.db")
@@ -1486,8 +1597,8 @@ func TestMigration107_AllowsLocalDatabaseWithOldSwarmVersion106(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 173 {
-		t.Fatalf("max goose version = %d, want 173", maxVersion)
+	if maxVersion != 174 {
+		t.Fatalf("max goose version = %d, want 174", maxVersion)
 	}
 }
 
@@ -1935,8 +2046,8 @@ func TestMigration082_SkipsWhenLocalDevDBAlreadyApplied082(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 173 {
-		t.Fatalf("max goose version = %d, want 173", maxVersion)
+	if maxVersion != 174 {
+		t.Fatalf("max goose version = %d, want 174", maxVersion)
 	}
 }
 
@@ -2271,8 +2382,8 @@ func TestMigration091_LocalDevAlreadyAppliedUsageChainStillMigrates(t *testing.T
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 173 {
-		t.Fatalf("max goose version = %d, want 173", maxVersion)
+	if maxVersion != 174 {
+		t.Fatalf("max goose version = %d, want 174", maxVersion)
 	}
 }
 

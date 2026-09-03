@@ -785,10 +785,9 @@ func xURLRanges(text string) []xTextRange {
 		for i, suffix := range suffixes {
 			suffixEnd := suffix.end
 			// twitter-text attaches a path or query to the final ASCII
-			// domain match. Only do so when that match reaches the end of
-			// the candidate's domain, so intervening Unicode labels remain
-			// ordinary text between separate URL entities.
-			if i == len(suffixes)-1 && suffix.end == len(domain) {
+			// domain match only when a slash path exists. Bare ports and
+			// query-only suffixes remain ordinary weighted text.
+			if i == len(suffixes)-1 && xURLHasBarePath(candidate, len(domain)) {
 				suffixEnd = len(candidate)
 			}
 			ranges = append(ranges, xTextRange{start: urlStart + suffix.start, end: urlStart + suffixEnd})
@@ -863,14 +862,15 @@ func xURLWithinProviderLimit(candidate string) bool {
 
 domainComplete:
 	domain := candidate[authorityStart:domainEnd]
-	if !xURLIDNADomainValid(domain) {
+	encodedDomain, ok := xURLIDNAEncodedDomain(domain)
+	if !ok {
 		return false
 	}
 
-	// twitter-text validates each IDNA label but measures the original
-	// UTF-16 URL. A protocol-less URL is checked as if it had the default
-	// https:// protocol for this validation.
-	length := xUTF16Length(candidate)
+	// twitter-text validates each IDNA label and charges the URL-length delta
+	// between the original UTF-16 domain and its Punycode form. A
+	// protocol-less URL is checked as if it had the default https:// protocol.
+	length := xUTF16Length(candidate) + xUTF16Length(encodedDomain) - xUTF16Length(domain)
 	if authorityStart == 0 {
 		length += xUTF16Length("https://")
 	}
@@ -878,21 +878,83 @@ domainComplete:
 }
 
 func xURLIDNADomainValid(domain string) bool {
+	_, ok := xURLIDNAEncodedDomain(domain)
+	return ok
+}
+
+func xURLIDNAEncodedDomain(domain string) (string, bool) {
 	if domain == "" {
-		return false
+		return "", false
 	}
 	// Match twitter-text's lightweight ACE-prefix guard. A domain beginning
 	// with xn-- must contain an ASCII-domain match; raw Punycode conversion
 	// alone must not accept a mixed Unicode label after that prefix.
 	if strings.HasPrefix(domain, "xn--") && len(xASCIIURLSuffixRanges(domain)) == 0 {
-		return false
+		return "", false
 	}
+
+	encodedLabels := make([]string, 0, strings.Count(domain, ".")+1)
 	for _, label := range strings.Split(domain, ".") {
-		if label == "" {
-			return false
+		encoded, ok := xURLIDNAEncodedOuterLabel(label)
+		if !ok {
+			return "", false
 		}
-		encoded, err := idna.Punycode.ToASCII(label)
-		if err != nil || encoded == "" || len(encoded) > 63 {
+		encodedLabels = append(encodedLabels, encoded)
+	}
+	return strings.Join(encodedLabels, "."), true
+}
+
+func xURLIDNAEncodedOuterLabel(label string) (string, bool) {
+	if label == "" {
+		return "", false
+	}
+
+	// punycode.toASCII normalizes RFC 3490 separators inside one
+	// ASCII-dot-delimited outer label, then converts each resulting segment.
+	// Keep this order so alternate separators cannot evade the outer label
+	// length limit.
+	segments := strings.Split(xNormalizeIDNASeparators(label), ".")
+	encodedSegments := make([]string, 0, len(segments))
+	for _, segment := range segments {
+		encoded, ok := xURLIDNAEncodedSegment(segment)
+		if !ok {
+			return "", false
+		}
+		encodedSegments = append(encodedSegments, encoded)
+	}
+	encoded := strings.Join(encodedSegments, ".")
+	return encoded, encoded != "" && xUTF16Length(encoded) <= 63
+}
+
+func xNormalizeIDNASeparators(domain string) string {
+	return strings.Map(func(r rune) rune {
+		switch r {
+		case '\u3002', '\uff0e', '\uff61':
+			return '.'
+		default:
+			return r
+		}
+	}, domain)
+}
+
+func xURLIDNAEncodedSegment(segment string) (string, bool) {
+	// twitter-text's punycode.toASCII leaves an ASCII label, including an
+	// inner xn---prefixed label, unchanged. Go's Punycode profile decodes a
+	// lowercase xn-- prefix, so invoke it only for segments containing
+	// non-ASCII text and neutralize that prefix for the conversion.
+	if xURLLabelIsASCII(segment) {
+		return segment, segment != ""
+	}
+	if strings.HasPrefix(segment, "xn--") {
+		segment = "X" + segment[1:]
+	}
+	encoded, err := idna.Punycode.ToASCII(segment)
+	return encoded, err == nil && encoded != ""
+}
+
+func xURLLabelIsASCII(label string) bool {
+	for i := 0; i < len(label); i++ {
+		if label[i] >= utf8.RuneSelf {
 			return false
 		}
 	}
@@ -931,52 +993,54 @@ func xURLDomain(candidate string) string {
 }
 
 func xASCIIURLSuffixRanges(domain string) []xTextRange {
-	labels := make([]xTextRange, 0, strings.Count(domain, ".")+1)
-	for start := 0; start < len(domain); {
-		end := start
-		for end < len(domain) && domain[end] != '.' {
-			_, size := utf8.DecodeRuneInString(domain[end:])
-			end += size
-		}
-		labels = append(labels, xTextRange{start: start, end: end})
-		if end == len(domain) {
-			break
-		}
-		start = end + 1
-	}
-
-	ranges := make([]xTextRange, 0, len(labels))
-	nextSearch := 0
-	for startIndex, label := range labels {
-		if label.start < nextSearch || !isXASCIIURLDomainLabel(domain[label.start:label.end]) {
-			continue
-		}
-
-		bestEnd := -1
-		for endIndex := startIndex; endIndex < len(labels); endIndex++ {
-			endLabel := labels[endIndex]
-			if endIndex > startIndex && !isXASCIIURLDomainLabel(domain[endLabel.start:endLabel.end]) {
-				candidate := domain[label.start:endLabel.end]
-				if xValidBareURLDomain(candidate) {
-					bestEnd = endLabel.end
-				}
-				break
-			}
-			if endIndex == startIndex {
+	ranges := make([]xTextRange, 0)
+	searchStart := 0
+	for searchStart < len(domain) {
+		bestStart, bestEnd := -1, -1
+		for start := searchStart; start < len(domain); {
+			first, size := utf8.DecodeRuneInString(domain[start:])
+			if !isXASCIIURLDomainRune(first) {
+				start += size
 				continue
 			}
-			candidate := domain[label.start:endLabel.end]
-			if xValidBareURLDomain(candidate) {
-				bestEnd = endLabel.end
+
+			for end := start; end < len(domain); {
+				r, size := utf8.DecodeRuneInString(domain[end:])
+				end += size
+				if r == '.' {
+					if xValidASCIIURLSuffix(domain[start : end-size]) {
+						bestStart, bestEnd = start, end-size
+					}
+				}
 			}
+			if xValidASCIIURLSuffix(domain[start:]) {
+				bestStart, bestEnd = start, len(domain)
+			}
+			if bestEnd >= 0 {
+				break
+			}
+			start += size
 		}
 		if bestEnd < 0 {
-			continue
+			break
 		}
-		ranges = append(ranges, xTextRange{start: label.start, end: bestEnd})
-		nextSearch = bestEnd
+		ranges = append(ranges, xTextRange{start: bestStart, end: bestEnd})
+		searchStart = bestEnd
 	}
 	return ranges
+}
+
+func xValidASCIIURLSuffix(candidate string) bool {
+	labels := strings.Split(candidate, ".")
+	if len(labels) < 2 {
+		return false
+	}
+	for _, label := range labels[:len(labels)-1] {
+		if !isXASCIIURLDomainLabel(label) {
+			return false
+		}
+	}
+	return xValidBareURLDomain(candidate)
 }
 
 func xValidBareURLDomain(candidate string) bool {
@@ -1033,6 +1097,24 @@ func xURLDomainEndBlocked(text string) bool {
 	}
 }
 
+func xURLHasBarePath(candidate string, domainLength int) bool {
+	if domainLength < 0 || domainLength >= len(candidate) {
+		return false
+	}
+	remainder := candidate[domainLength:]
+	if remainder[0] == '/' {
+		return true
+	}
+	if remainder[0] != ':' {
+		return false
+	}
+	portEnd := 1
+	for portEnd < len(remainder) && remainder[portEnd] >= '0' && remainder[portEnd] <= '9' {
+		portEnd++
+	}
+	return portEnd < len(remainder) && remainder[portEnd] == '/'
+}
+
 func xURLSuffixEnd(text string, baseEnd int) int {
 	end := baseEnd
 	if end < len(text) && text[end] == ':' {
@@ -1059,7 +1141,7 @@ func xURLSuffixEnd(text string, baseEnd int) int {
 }
 
 // xWeightedPostLength follows the current twitter-text v3 configuration:
-// https://github.com/twitter/twitter-text/blob/master/config/v3.json
+	// https://github.com/twitter/twitter-text/blob/30e2430d90cff3b46393ea54caf511441983c260/config/v3.json
 func xWeightedPostLength(text string) int {
 	text = norm.NFC.String(text)
 	urls := xURLRanges(text)
@@ -1080,9 +1162,20 @@ func xEmojiRanges(text string) []xTextRange {
 	matches := xEmojiPattern.FindAllStringIndex(text, -1)
 	ranges := make([]xTextRange, 0, len(matches))
 	for _, match := range matches {
-		if len(match) == 2 && match[1] > match[0] {
-			ranges = append(ranges, xTextRange{start: match[0], end: match[1]})
+		if len(match) != 2 || match[1] <= match[0] {
+			continue
 		}
+		// RE2 cannot express twitter-text's (?!VS15) lookahead. The generated
+		// pattern keeps VS16 optional, so discard a match that ends immediately
+		// before a text-presentation variation selector unless it already
+		// contains VS16.
+		if match[1] < len(text) {
+			nextRune, _ := utf8.DecodeRuneInString(text[match[1]:])
+			if nextRune == '\ufe0e' && !strings.ContainsRune(text[match[0]:match[1]], '\ufe0f') {
+				continue
+			}
+		}
+		ranges = append(ranges, xTextRange{start: match[0], end: match[1]})
 	}
 	return ranges
 }
