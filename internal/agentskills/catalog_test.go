@@ -142,6 +142,53 @@ func TestBuildAgentCatalog_EmptyCatalogStillReportsAgentOwned(t *testing.T) {
 	}
 }
 
+func TestCatalogEntriesForHandlesPreservesOrderAndEntryMetadata(t *testing.T) {
+	catalog := NewCatalog("turn", []Entry{
+		{Handle: "one", Skill: "one", Source: SourceProject},
+		{Handle: "two", Skill: "two", Source: SourceGlobal},
+		{Handle: "review", Skill: "review", Source: SourceAgent, AgentKey: "reviewer"},
+	})
+
+	got := catalog.EntriesForHandles([]string{" one ", "missing", "one", "", "review", "two"})
+	if len(got) != 3 {
+		t.Fatalf("expected three authorized entries, got %#v", got)
+	}
+	want := []Entry{
+		{Handle: "one", Skill: "one", Source: SourceProject},
+		{Handle: "review", Skill: "review", Source: SourceAgent, AgentKey: "reviewer"},
+		{Handle: "two", Skill: "two", Source: SourceGlobal},
+	}
+	for i := range want {
+		if got[i].Handle != want[i].Handle || got[i].Skill != want[i].Skill || got[i].Source != want[i].Source || got[i].AgentKey != want[i].AgentKey {
+			t.Fatalf("entry %d = %#v, want %#v", i, got[i], want[i])
+		}
+	}
+	if entries := (*Catalog)(nil).EntriesForHandles([]string{"one"}); entries != nil {
+		t.Fatalf("nil catalog should produce no entries, got %#v", entries)
+	}
+	if entries := catalog.EntriesForHandles(nil); entries != nil {
+		t.Fatalf("empty selection should produce no entries, got %#v", entries)
+	}
+}
+
+func TestCatalogFilterPreservesTurnAndAgentOwnedScope(t *testing.T) {
+	catalog := newCatalog("original", []Entry{{Handle: "review", Skill: "review", Source: SourceAgent, AgentKey: "reviewer"}}, true)
+	filtered := catalog.Filter("filtered", []string{" review ", "review", "missing"})
+	if filtered == nil {
+		t.Fatal("expected filtered catalog")
+	}
+	if filtered.TurnID() != "filtered" {
+		t.Fatalf("filtered turn id = %q, want filtered", filtered.TurnID())
+	}
+	if !filtered.IsAgentOwned() {
+		t.Fatal("filtered catalog should preserve assigned-agent scope")
+	}
+	entries := filtered.Entries()
+	if len(entries) != 1 || entries[0].Handle != "review" || entries[0].AgentKey != "reviewer" {
+		t.Fatalf("filtered entries = %#v", entries)
+	}
+}
+
 func TestBuildCatalog_ProjectOverridesGlobalForSameHandle(t *testing.T) {
 	globalRoot := t.TempDir()
 	projectRoot := t.TempDir()
