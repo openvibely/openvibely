@@ -15,6 +15,7 @@ import (
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/net/idna"
 )
 
 type fakeXAPI struct {
@@ -1147,9 +1148,13 @@ func TestXOutboundUsesWeightedPostLimit(t *testing.T) {
 	tcoOverLimit := strings.Repeat("x", 240) + " https://t.co/" + strings.Repeat("a", xMaxTCOURLSlugLength+1)
 	overlongIDNALabel := strings.Repeat("x", 120) + " " + strings.Repeat("界", 80) + ".com"
 	multiSuffixURL := strings.Repeat("x", 241) + " example.com.例.foo.org"
-	unicodeURLWithinRawLimit := "https://" + strings.Repeat("界.", 500) + "com"
-	unicodeURLWithinRawLimit += "/" + strings.Repeat("a", xMaxURLLength-xUTF16Length(unicodeURLWithinRawLimit)-1)
-	require.Equal(t, xMaxURLLength, xUTF16Length(unicodeURLWithinRawLimit))
+	idnaDomainWithExpandedLimit := strings.Repeat("界.", 500) + "com"
+	unicodeURLOverEncodedLimit := "https://" + idnaDomainWithExpandedLimit
+	unicodeURLOverEncodedLimit += "/" + strings.Repeat("a", xMaxURLLength-xUTF16Length(unicodeURLOverEncodedLimit)-1)
+	encodedIDNADomain, err := idna.Punycode.ToASCII(idnaDomainWithExpandedLimit)
+	require.NoError(t, err)
+	require.LessOrEqual(t, xUTF16Length(unicodeURLOverEncodedLimit), xMaxURLLength)
+	require.Greater(t, xUTF16Length(unicodeURLOverEncodedLimit)+xUTF16Length(encodedIDNADomain)-xUTF16Length(idnaDomainWithExpandedLimit), xMaxURLLength)
 	overlongUnicodePrefixURL := strings.Repeat("界.", 2040) + "example.com"
 	require.Greater(t, xUTF16Length(overlongUnicodePrefixURL)+xUTF16Length("https://"), xMaxURLLength)
 
@@ -1180,7 +1185,7 @@ func TestXOutboundUsesWeightedPostLimit(t *testing.T) {
 		{name: "t.co slug over provider maximum", text: tcoOverLimit, shouldPost: false},
 		{name: "IDNA label over provider maximum", text: overlongIDNALabel, shouldPost: false},
 		{name: "multiple URL entities separated by Unicode label", text: multiSuffixURL, shouldPost: false},
-		{name: "Unicode URL uses original length for provider maximum", text: unicodeURLWithinRawLimit, shouldPost: true},
+		{name: "Unicode URL exceeds provider maximum after Punycode expansion", text: unicodeURLOverEncodedLimit, shouldPost: false},
 		{name: "overlong full protocol-less Unicode-prefixed URL", text: overlongUnicodePrefixURL, shouldPost: false},
 	}
 	for _, tt := range tests {
@@ -1196,6 +1201,32 @@ func TestXOutboundUsesWeightedPostLimit(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestXIDNAPunycodeExpansionRejectsURLEntityAndTruncatesReply(t *testing.T) {
+	ctx, svc, _, _, _, _, _ := setupXServiceTest(t)
+	api := &fakeXAPI{}
+	svc.setAPI(api)
+
+	domain := strings.Repeat("界.", 500) + "com"
+	url := "https://" + domain
+	url += "/" + strings.Repeat("a", xMaxURLLength-xUTF16Length(url)-1)
+	encodedDomain, err := idna.Punycode.ToASCII(domain)
+	require.NoError(t, err)
+	require.Equal(t, xMaxURLLength, xUTF16Length(url))
+	require.Greater(t, xUTF16Length(url)+xUTF16Length(encodedDomain)-xUTF16Length(domain), xMaxURLLength)
+
+	require.Empty(t, xURLRanges(url))
+	result := svc.SendOutboundMessage(ctx, "me", "", url)
+	require.False(t, result.OK)
+	require.Empty(t, api.posted)
+
+	svc.SendReply(ctx, "tweet", url, "")
+	require.Len(t, api.posted, 1)
+	posted := strings.TrimPrefix(api.posted[0], "tweet|")
+	require.NotEqual(t, url, posted)
+	require.Contains(t, posted, "…")
+	require.LessOrEqual(t, xWeightedPostLength(posted), xMaxWeightedPostLength)
 }
 
 func TestXReplyTruncatesToWeightedPostLimit(t *testing.T) {
@@ -1275,6 +1306,21 @@ func TestXIDNASeparatorsRespectOuterASCIIDotLabelLimits(t *testing.T) {
 	} {
 		t.Run(tt.name+" valid within outer label", func(t *testing.T) {
 			domain := "example" + tt.separator + "foo.com"
+			url := "https://" + domain
+			require.True(t, xURLIDNADomainValid(domain))
+			ranges := xURLRanges(url)
+			require.Len(t, ranges, 1)
+			require.Equal(t, url, url[ranges[0].start:ranges[0].end])
+
+			text := strings.Repeat("x", 256) + " " + url
+			api.posted = nil
+			result := svc.SendOutboundMessage(ctx, "me", "", text)
+			require.True(t, result.OK)
+			require.Equal(t, []string{"|" + text}, api.posted)
+		})
+
+		t.Run(tt.name+" preserves inner ACE-looking label", func(t *testing.T) {
+			domain := "foo" + tt.separator + "xn--a.com"
 			url := "https://" + domain
 			require.True(t, xURLIDNADomainValid(domain))
 			ranges := xURLRanges(url)
