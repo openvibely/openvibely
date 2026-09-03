@@ -886,6 +886,9 @@ func xURLIDNADomainValid(domain string) bool {
 	if strings.HasPrefix(domain, "xn--") && len(xASCIIURLSuffixRanges(domain)) == 0 {
 		return false
 	}
+	// punycode.toASCII normalizes the RFC 3490 label separators before it
+	// validates each label. Keep the original domain for URL length/ranges.
+	domain = xNormalizeIDNASeparators(domain)
 	for _, label := range strings.Split(domain, ".") {
 		if label == "" {
 			return false
@@ -895,6 +898,17 @@ func xURLIDNADomainValid(domain string) bool {
 		}
 	}
 	return true
+}
+
+func xNormalizeIDNASeparators(domain string) string {
+	return strings.Map(func(r rune) rune {
+		switch r {
+		case '\u3002', '\uff0e', '\uff61':
+			return '.'
+		default:
+			return r
+		}
+	}, domain)
 }
 
 func xURLIDNALabelValid(label string) bool {
@@ -1123,9 +1137,20 @@ func xEmojiRanges(text string) []xTextRange {
 	matches := xEmojiPattern.FindAllStringIndex(text, -1)
 	ranges := make([]xTextRange, 0, len(matches))
 	for _, match := range matches {
-		if len(match) == 2 && match[1] > match[0] {
-			ranges = append(ranges, xTextRange{start: match[0], end: match[1]})
+		if len(match) != 2 || match[1] <= match[0] {
+			continue
 		}
+		// RE2 cannot express twitter-text's (?!VS15) lookahead. The generated
+		// pattern keeps VS16 optional, so discard a match that ends immediately
+		// before a text-presentation variation selector unless it already
+		// contains VS16.
+		if match[1] < len(text) {
+			nextRune, _ := utf8.DecodeRuneInString(text[match[1]:])
+			if nextRune == '\ufe0e' && !strings.ContainsRune(text[match[0]:match[1]], '\ufe0f') {
+				continue
+			}
+		}
+		ranges = append(ranges, xTextRange{start: match[0], end: match[1]})
 	}
 	return ranges
 }
