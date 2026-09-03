@@ -1260,7 +1260,7 @@ func TestXEmojiRangesRespectVariationSelectorPresentation(t *testing.T) {
 	require.Equal(t, "✈️", "✈️"[ranges[0].start:ranges[0].end])
 }
 
-func TestXIDNASeparatorsPreserveURLEntitiesAndWeightedLimit(t *testing.T) {
+func TestXIDNASeparatorsRespectOuterASCIIDotLabelLimits(t *testing.T) {
 	ctx, svc, _, _, _, _, _ := setupXServiceTest(t)
 	api := &fakeXAPI{}
 	svc.setAPI(api)
@@ -1273,8 +1273,8 @@ func TestXIDNASeparatorsPreserveURLEntitiesAndWeightedLimit(t *testing.T) {
 		{name: "fullwidth full stop", separator: "\uff0e"},
 		{name: "halfwidth ideographic full stop", separator: "\uff61"},
 	} {
-		t.Run(tt.name, func(t *testing.T) {
-			domain := strings.Repeat("a"+tt.separator, 32) + "example.com"
+		t.Run(tt.name+" valid within outer label", func(t *testing.T) {
+			domain := "example" + tt.separator + "foo.com"
 			url := "https://" + domain
 			require.True(t, xURLIDNADomainValid(domain))
 			ranges := xURLRanges(url)
@@ -1286,6 +1286,27 @@ func TestXIDNASeparatorsPreserveURLEntitiesAndWeightedLimit(t *testing.T) {
 			result := svc.SendOutboundMessage(ctx, "me", "", text)
 			require.True(t, result.OK)
 			require.Equal(t, []string{"|" + text}, api.posted)
+		})
+
+		t.Run(tt.name+" overlong outer label", func(t *testing.T) {
+			domain := strings.Repeat("a"+tt.separator, 32) + "example.com"
+			url := "https://" + domain
+			require.False(t, xURLIDNADomainValid(domain))
+			require.Empty(t, xURLRanges(url))
+
+			text := strings.Repeat("x", 256) + " " + url
+			api.posted = nil
+			result := svc.SendOutboundMessage(ctx, "me", "", text)
+			require.False(t, result.OK)
+			require.Empty(t, api.posted)
+
+			api.posted = nil
+			svc.SendReply(ctx, "tweet", text, "")
+			require.Len(t, api.posted, 1)
+			posted := strings.TrimPrefix(api.posted[0], "tweet|")
+			require.NotEqual(t, text, posted)
+			require.Contains(t, posted, "…")
+			require.LessOrEqual(t, xWeightedPostLength(posted), xMaxWeightedPostLength)
 		})
 	}
 }
