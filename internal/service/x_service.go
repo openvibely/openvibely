@@ -911,8 +911,10 @@ func xURLIDNAEncodedOuterLabel(label string) (string, bool) {
 
 	// punycode.toASCII normalizes RFC 3490 separators inside one
 	// ASCII-dot-delimited outer label, then converts each resulting segment.
-	// Keep this order so alternate separators cannot evade the outer label
-	// length limit.
+	// Empty inner segments are preserved; the provider checks the complete
+	// normalized outer label length rather than validating those segments as
+	// standalone DNS labels. Keep this order so alternate separators cannot
+	// evade the outer label length limit.
 	segments := strings.Split(xNormalizeIDNASeparators(label), ".")
 	encodedSegments := make([]string, 0, len(segments))
 	for _, segment := range segments {
@@ -943,7 +945,7 @@ func xURLIDNAEncodedSegment(segment string) (string, bool) {
 	// lowercase xn-- prefix, so invoke it only for segments containing
 	// non-ASCII text and neutralize that prefix for the conversion.
 	if xURLLabelIsASCII(segment) {
-		return segment, segment != ""
+		return segment, true
 	}
 	if strings.HasPrefix(segment, "xn--") {
 		segment = "X" + segment[1:]
@@ -1141,7 +1143,7 @@ func xURLSuffixEnd(text string, baseEnd int) int {
 }
 
 // xWeightedPostLength follows the current twitter-text v3 configuration:
-	// https://github.com/twitter/twitter-text/blob/30e2430d90cff3b46393ea54caf511441983c260/config/v3.json
+// https://github.com/twitter/twitter-text/blob/30e2430d90cff3b46393ea54caf511441983c260/config/v3.json
 func xWeightedPostLength(text string) int {
 	text = norm.NFC.String(text)
 	urls := xURLRanges(text)

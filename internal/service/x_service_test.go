@@ -1357,6 +1357,49 @@ func TestXIDNASeparatorsRespectOuterASCIIDotLabelLimits(t *testing.T) {
 	}
 }
 
+func TestXIDNASeparatorsPreserveEmptyInnerSegments(t *testing.T) {
+	ctx, svc, _, _, _, _, _ := setupXServiceTest(t)
+	api := &fakeXAPI{}
+	svc.setAPI(api)
+
+	for _, tt := range []struct {
+		name      string
+		separator string
+	}{
+		{name: "ideographic full stop", separator: "\u3002"},
+		{name: "fullwidth full stop", separator: "\uff0e"},
+		{name: "halfwidth ideographic full stop", separator: "\uff61"},
+	} {
+		for _, variant := range []struct {
+			name   string
+			domain string
+		}{
+			{name: "leading", domain: tt.separator + "foo.com"},
+			{name: "consecutive", domain: "foo" + tt.separator + tt.separator + "bar.com"},
+			{name: "trailing", domain: "foo" + tt.separator + ".com"},
+		} {
+			t.Run(tt.name+" "+variant.name, func(t *testing.T) {
+				url := "https://" + variant.domain
+				require.True(t, xURLIDNADomainValid(variant.domain))
+				ranges := xURLRanges(url)
+				require.Len(t, ranges, 1)
+				require.Equal(t, url, url[ranges[0].start:ranges[0].end])
+
+				text := strings.Repeat("x", 254) + " " + url + "!!!"
+				api.posted = nil
+				result := svc.SendOutboundMessage(ctx, "me", "", text)
+				require.False(t, result.OK)
+				require.Empty(t, api.posted)
+
+				api.posted = nil
+				svc.SendReply(ctx, "tweet", text, "")
+				require.Equal(t, []string{"tweet|" + strings.Repeat("x", 254) + " " + url + "…"}, api.posted)
+				require.Equal(t, xMaxWeightedPostLength, xWeightedPostLength(strings.Repeat("x", 254)+" "+url+"…"))
+			})
+		}
+	}
+}
+
 func TestXURLRangesFollowTwitterTextEntityBoundaries(t *testing.T) {
 	maxURL := "https://example.com/" + strings.Repeat("a", xMaxURLLength-len("https://example.com/"))
 	overlongURL := maxURL + "a"
