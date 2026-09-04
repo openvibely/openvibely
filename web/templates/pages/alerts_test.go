@@ -291,36 +291,63 @@ func TestAlertDetail_EmptyAlertOmitsCopyControl(t *testing.T) {
 	}
 }
 
-func TestAlertsContent_WorkflowFiltersRenderSelectedStateAndFilteredEmptyMessage(t *testing.T) {
+func TestAlertsContent_DecisionFilterRendersSelectedStateAndSearchState(t *testing.T) {
 	var filtered bytes.Buffer
-	if err := AlertsContentPageWithFilters(nil, "project-1", 4, false, models.AlertDecisionPending, models.AlertProcessingFailed).Render(context.Background(), &filtered); err != nil {
+	if err := AlertsContentPageWithFiltersAndSearch(nil, "project-1", 4, false, models.AlertDecisionPending, models.AlertProcessingFailed, "needle").Render(context.Background(), &filtered); err != nil {
 		t.Fatalf("render filtered alerts content: %v", err)
 	}
 	filteredHTML := filtered.String()
 	for _, required := range []string{
 		`id="alerts-filter-form"`,
 		`method="get"`,
+		`data-alert-search-slot`,
+		`class="w-full max-w-xs flex-none"`,
 		`name="search"`,
+		`value="needle"`,
+		`data-card-search-initial="needle"`,
 		`name="decision_state"`,
-		`name="processing_state"`,
 		`aria-label="Filter by decision state"`,
-		`aria-label="Filter by processing state"`,
 		`All decision states`,
-		`All processing states`,
-		`Implementation task linked`,
-		`data-card-pagination-preserve-params="decision_state,processing_state"`,
-		`data-card-pagination-url="/alerts?decision_state=pending&amp;processing_state=failed&amp;project_id=project-1"`,
-		`hx-get="/alerts?decision_state=pending&amp;processing_state=failed&amp;project_id=project-1"`,
+		`data-card-pagination-preserve-params="decision_state,processing_state,search"`,
+		`data-card-pagination-url="/alerts?decision_state=pending&amp;processing_state=failed&amp;project_id=project-1&amp;search=needle"`,
+		`hx-get="/alerts?decision_state=pending&amp;processing_state=failed&amp;project_id=project-1&amp;search=needle"`,
 		`value="pending" selected`,
-		`value="failed" selected`,
 		`No alerts match the selected filters.`,
 	} {
 		if !strings.Contains(filteredHTML, required) {
 			t.Fatalf("filtered Alerts markup missing %q", required)
 		}
 	}
+	for _, removed := range []string{
+		`name="processing_state"`,
+		`aria-label="Filter by processing state"`,
+		`All processing states`,
+	} {
+		if strings.Contains(filteredHTML, removed) {
+			t.Fatalf("Alerts markup should not contain the removed processing selector %q", removed)
+		}
+	}
 	if strings.Contains(filteredHTML, "No alerts. You're all clear!") {
 		t.Fatal("filtered empty Alerts result should not claim the project has no alerts")
+	}
+
+	var searchOnly bytes.Buffer
+	if err := AlertsContentPageWithFiltersAndSearch(nil, "project-1", 0, false, "", "", "missing").Render(context.Background(), &searchOnly); err != nil {
+		t.Fatalf("render search-only alerts content: %v", err)
+	}
+	searchOnlyHTML := searchOnly.String()
+	for _, required := range []string{
+		`value="missing"`,
+		`data-card-search-initial="missing"`,
+		`data-card-pagination-url="/alerts?project_id=project-1&amp;search=missing"`,
+		`No alerts match the selected filters.`,
+	} {
+		if !strings.Contains(searchOnlyHTML, required) {
+			t.Fatalf("search-only Alerts markup missing %q", required)
+		}
+	}
+	if strings.Contains(searchOnlyHTML, "No alerts. You're all clear!") {
+		t.Fatal("search-only empty Alerts result should not claim the project has no alerts")
 	}
 
 	var unfiltered bytes.Buffer
@@ -329,6 +356,31 @@ func TestAlertsContent_WorkflowFiltersRenderSelectedStateAndFilteredEmptyMessage
 	}
 	if !strings.Contains(unfiltered.String(), "No alerts. You're all clear!") {
 		t.Fatal("unfiltered empty Alerts result should retain the existing empty message")
+	}
+}
+
+func TestAlertsContent_ActiveFilterURLsReachRowMutations(t *testing.T) {
+	alert := models.AlertSummary{
+		ID:              "alert-1",
+		ProjectID:       "project-1",
+		Title:           "Pending alert",
+		DecisionState:   models.AlertDecisionPending,
+		ProcessingState: models.AlertProcessingFailed,
+	}
+	var buf bytes.Buffer
+	if err := AlertsContentPageWithFiltersAndSearch([]models.AlertSummary{alert}, "project-1", 0, false, models.AlertDecisionPending, models.AlertProcessingFailed, "needle").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render active Alerts content: %v", err)
+	}
+	html := buf.String()
+	for _, required := range []string{
+		`hx-post="/alerts/alert-1/approve?decision_state=pending&amp;processing_state=failed&amp;project_id=project-1&amp;search=needle"`,
+		`hx-post="/alerts/alert-1/reject?decision_state=pending&amp;processing_state=failed&amp;project_id=project-1&amp;search=needle"`,
+		`hx-post="/alerts/alert-1/read?decision_state=pending&amp;processing_state=failed&amp;project_id=project-1&amp;search=needle"`,
+		`data-delete-url="/alerts/alert-1?decision_state=pending&amp;processing_state=failed&amp;project_id=project-1&amp;search=needle"`,
+	} {
+		if !strings.Contains(html, required) {
+			t.Fatalf("active Alerts markup missing mutation URL %q", required)
+		}
 	}
 }
 
