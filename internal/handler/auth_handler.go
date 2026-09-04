@@ -57,7 +57,7 @@ func (h *Handler) authEnabled() bool {
 }
 
 func (h *Handler) isAuthPublicPath(path string) bool {
-	if path == "/login" || path == "/logout" || path == "/auth/me" || path == "/auth/sso/start" || path == "/auth/sso/callback" || path == "/logged-out" || path == "/api/system/health" {
+	if path == "/login" || path == "/logout" || path == "/auth/me" || path == "/auth/sso/start" || path == "/auth/sso/callback" || path == "/logged-out" || path == "/api/system/health" || path == "/favicon.png" || path == "/favicon.ico" {
 		return true
 	}
 	if strings.HasPrefix(path, "/swagger/") {

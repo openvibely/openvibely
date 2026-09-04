@@ -22,6 +22,8 @@ import (
 	"github.com/openvibely/openvibely/internal/update"
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
+
+	desktopicons "github.com/openvibely/openvibely/assets/desktop/icons"
 )
 
 type desktopBackend struct {
@@ -244,6 +246,7 @@ func launchNativeWindow(baseURL string, onShutdown func(), coordinator *update.C
 	app := application.New(application.Options{
 		Name:        "OpenVibely",
 		Description: "OpenVibely desktop application",
+		Icon:        desktopicons.OpenVibelyPNG,
 		OnShutdown:  onShutdown,
 		Mac: application.MacOptions{
 			ApplicationShouldTerminateAfterLastWindowClosed: true,

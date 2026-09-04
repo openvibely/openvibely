@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"net/http"
 	"reflect"
 	"strconv"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
+	desktopicons "github.com/openvibely/openvibely/assets/desktop/icons"
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/auth"
 	"github.com/openvibely/openvibely/internal/buildinfo"
@@ -685,6 +687,8 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 			return next(c)
 		}
 	})
+	e.GET("/favicon.png", h.AppIcon)
+	e.GET("/favicon.ico", h.AppIcon)
 
 	// Machine-readable readiness and immutable build identity.
 	e.GET("/api/system/health", h.SystemHealth)
@@ -1037,4 +1041,10 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	// Server-Sent Events for real-time updates
 	e.GET("/events/live", h.LiveEventsSSE)
 	e.GET("/events/chat/:exec_id", h.ChatStreamSSE)
+}
+
+// AppIcon serves the shared browser icon for server and desktop web views.
+func (h *Handler) AppIcon(c echo.Context) error {
+	c.Response().Header().Set("Cache-Control", "public, max-age=86400")
+	return c.Blob(http.StatusOK, "image/png", desktopicons.BrowserPNG)
 }
