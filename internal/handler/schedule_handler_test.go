@@ -927,6 +927,118 @@ func TestViewSchedule_PrimaryAgentOptionsAreEligibleAndProjectScoped(t *testing.
 	}
 }
 
+func TestViewSchedule_AutoMergeOptionRendered(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().Build()
+
+	rec := tc.HTTP().Get("/schedule?project_id=" + project.ID).Execute()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	body := rec.Body.String()
+	modalStart := strings.Index(body, `id="new_scheduled_task_modal"`)
+	if modalStart < 0 {
+		t.Fatal("expected new scheduled task modal")
+	}
+	modal := body[modalStart:]
+	for _, want := range []string{
+		`type="checkbox" name="auto_merge"`,
+		`Auto-merge to target branch on completion`,
+	} {
+		if !strings.Contains(modal, want) {
+			t.Fatalf("scheduled task modal missing %q", want)
+		}
+	}
+}
+
+func TestCreateScheduledTask_AutoMergeIntent(t *testing.T) {
+	for _, tcse := range []struct {
+		name       string
+		htmx       bool
+		autoMerge  bool
+		wantStatus int
+	}{
+		{name: "HTMX enabled", htmx: true, autoMerge: true, wantStatus: http.StatusOK},
+		{name: "native enabled", autoMerge: true, wantStatus: http.StatusSeeOther},
+		{name: "HTMX omitted", htmx: true, wantStatus: http.StatusOK},
+		{name: "native omitted", wantStatus: http.StatusSeeOther},
+	} {
+		t.Run(tcse.name, func(t *testing.T) {
+			tc := NewTestContext(t)
+			project := tc.CreateProject().Build()
+			title := "Scheduled Auto-Merge " + tcse.name
+			form := url.Values{
+				"title":           {title},
+				"prompt":          {"Run later"},
+				"category":        {"scheduled"},
+				"priority":        {"2"},
+				"run_at":          {time.Now().Add(time.Hour).Format("2006-01-02T15:04")},
+				"repeat_type":     {"daily"},
+				"repeat_interval": {"1"},
+			}
+			if tcse.autoMerge {
+				form.Set("auto_merge", "on")
+			}
+
+			path := "/tasks?project_id=" + project.ID + "&from=schedule"
+			var rec *httptest.ResponseRecorder
+			if tcse.htmx {
+				rec = tc.HTMX().Post(path).WithForm(form).Execute()
+			} else {
+				rec = tc.HTTP().Post(path).WithForm(form).Execute()
+			}
+			if rec.Code != tcse.wantStatus {
+				t.Fatalf("expected %d, got %d body=%s", tcse.wantStatus, rec.Code, rec.Body.String())
+			}
+
+			tasks, err := tc.taskRepo.ListByProject(context.Background(), project.ID, "")
+			if err != nil {
+				t.Fatalf("list tasks: %v", err)
+			}
+			if len(tasks) != 1 {
+				t.Fatalf("expected one scheduled task, got %d", len(tasks))
+			}
+			created := tasks[0]
+			if created.AutoMerge != tcse.autoMerge {
+				t.Fatalf("AutoMerge = %t, want %t", created.AutoMerge, tcse.autoMerge)
+			}
+
+			schedules, err := tc.scheduleRepo.ListByTask(context.Background(), created.ID)
+			if err != nil {
+				t.Fatalf("list schedules: %v", err)
+			}
+			if len(schedules) != 1 {
+				t.Fatalf("expected one schedule, got %d", len(schedules))
+			}
+			schedule := schedules[0]
+			if schedule.RepeatType != models.RepeatDaily || schedule.RepeatInterval != 1 || !schedule.Enabled || !schedule.ClearContextOnStart {
+				t.Fatalf("scheduled fields changed unexpectedly: %+v", schedule)
+			}
+			if schedule.NextRun == nil || !schedule.NextRun.Equal(schedule.RunAt) {
+				t.Fatalf("scheduled task must start NextRun at RunAt, run_at=%v next_run=%v", schedule.RunAt, schedule.NextRun)
+			}
+
+			if tcse.autoMerge {
+				detail := tc.HTMX().Get("/tasks/" + created.ID + "?project_id=" + project.ID).Execute()
+				if detail.Code != http.StatusOK {
+					t.Fatalf("expected task detail 200, got %d body=%s", detail.Code, detail.Body.String())
+				}
+				detailBody := detail.Body.String()
+				nameIndex := strings.Index(detailBody, `name="auto_merge"`)
+				if nameIndex < 0 {
+					t.Fatal("task detail missing auto_merge control")
+				}
+				tagStart := strings.LastIndex(detailBody[:nameIndex], "<input")
+				tagEnd := strings.Index(detailBody[tagStart:], ">")
+				if tagStart < 0 || tagEnd < 0 || !strings.Contains(detailBody[tagStart:tagStart+tagEnd], "checked") {
+					t.Fatalf("task detail auto_merge control is not checked: %s", detailBody[tagStart:])
+				}
+			}
+		})
+	}
+}
+
 func TestCreateScheduledTask_NativeFormRedirectsToProjectSchedule(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().Build()

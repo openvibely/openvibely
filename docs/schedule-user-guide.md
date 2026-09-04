@@ -28,12 +28,13 @@ Use this to plan load across days/hours instead of crowding everything into one 
 
 1. Click `+ New Scheduled Task`.
 2. Fill task fields (`Title`, `Prompt`, optional model, priority, tag).
-3. Set schedule fields:
+3. Optional: enable `Auto-merge to target branch on completion` for worktree changes that should merge automatically after the task completes. Leave it unchecked to keep the existing manual-merge behavior. This task-level option does not change the schedule cadence.
+4. Set schedule fields:
    - `Run At`
    - `Repeat` (`Once`, `Every N Seconds`, `Every N Minutes`, `Every N Hours`, `Daily`, `Weekly`, `Monthly`)
    - `Repeat Every` interval (shown when repeat is not `Once`)
    - `Clear context on start` (selected by default)
-4. Click `Create Scheduled Task`.
+5. Click `Create Scheduled Task`.
 
 ## Repeat Types
 
