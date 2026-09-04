@@ -986,6 +986,7 @@ func TestStart_ServerModeDefaults(t *testing.T) {
 		Port:             "0",
 		DatabasePath:     tmpDir + "/test.db",
 		ProjectRepoRoot:  tmpDir + "/repos",
+		AppDataDir:       tmpDir + "/appdata",
 		Environment:      "test",
 		UpdateServiceURL: mockUpdateServiceURL(t),
 	}
