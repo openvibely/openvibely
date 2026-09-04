@@ -2,58 +2,35 @@
 name: usage_analytics
 type: project
 created: 2026-06-03
-updated: 2026-08-30
-source: after_complete
-source_id: 40e607e3815c48800073cc6f9674d3c7:0b7169a7ae9950d2
+updated: 2026-09-03
+source: consolidation
+source_id: memory_consolidation_2026-09-03
 confidence: high
 title: Usage Analytics
 ---
 
-OpenVibely usage analytics are local operational analytics, not third-party product telemetry. Third-party frontend tracking such as PostHog, Segment, Mixpanel, or Google Analytics is outside the intended architecture.
+OpenVibely analytics are local operational analytics, not third-party product telemetry. PostHog, Segment, Mixpanel, and Google Analytics are outside the intended architecture.
 
-Durable analytics model:
-- Persistent model-usage analytics exist for Anthropic and OpenAI OAuth/API-key paths, plus OpenAI-compatible Chat Completions API-key configs. OpenAI-compatible usage is normalized into input/output/total/cached/reasoning fields and persisted through `RecordUsageFromResult`.
-- Skill analytics events are stored locally in `skill_analytics_events`; usage rows are stored locally in `llm_usage_events`.
-- Analytics date/hour buckets reflect current app/local timezone semantics at query time, matching Schedules. The direction for `#334` is to aggregate indexed raw `occurred_at` rows in Go rather than add persisted `localtime` bucket columns or triggers.
-- OAuth account-limit snapshots are stored in `account_usage_snapshots`, with extra/model-specific limits in `account_usage_extra_limits`.
-- Usage capture is one final row per completed provider model call at the owning execution/call-site boundary, not per streamed chunk. Late attachment-bearing steering discovered after a provider call is requeued while the original successful execution still records usage.
-- Skill analytics distinguish `selected`, `loaded`, `viewed`, `created`, and `edited`. Agent-owned lifecycle hook executions record real hook starts as `selected` with lifecycle metadata; hook resolution does not synthesize `loaded` or `viewed`.
-- Lifecycle hook analytics keep ordinary task foreign keys intact by storing lifecycle execution ID in the analytics turn/thread field rather than `skill_analytics_events.execution_id`.
-- Skill create/edit telemetry separates create/import from overwrite/edit/mutation events. Provider cost fields are stored only when provider data exists; OpenVibely does not estimate costs silently.
+Durable data model:
+- Model usage is persisted locally for Anthropic and OpenAI API/OAuth paths and OpenAI-compatible API-key Chat Completions. Usage is normalized into input/output/total/cached/reasoning fields and recorded once per completed provider model call at the owning execution/call-site boundary, never per stream chunk.
+- `llm_usage_events` stores usage; `skill_analytics_events` stores skill activity. Skill events distinguish `selected`, `loaded`, `viewed`, `created`, and `edited`; lifecycle hook starts record real `selected` events with lifecycle metadata and do not synthesize loaded/viewed. Skill create/import and overwrite/edit telemetry remain distinct.
+- Lifecycle analytics preserve ordinary task foreign keys and store lifecycle execution ID in the analytics turn/thread field. Late attachment-bearing steering is requeued while the original successful call still records usage. Provider cost is recorded only when provider data exists; costs are never silently estimated.
+- OAuth account-limit snapshots live in `account_usage_snapshots` with model/extra limits in `account_usage_extra_limits`. API-key accounts contribute usage but never receive subscription/account-limit snapshots or fabricated billing cards.
+- Date/hour grouping follows current app/local timezone semantics at query time, matching Schedules. The preferred direction for `#334` is Go aggregation of indexed raw `occurred_at`, not persisted localtime bucket columns/triggers.
 
-Provider normalization facts:
-- Anthropic API/OAuth usage preserves input/output tokens plus cache creation/read fields when returned. Anthropic thinking/reasoning is treated as output because separate reasoning counters are unavailable.
-- OpenAI API/OAuth usage preserves input/output plus cached/reasoning fields from Responses API usage.
-- OpenAI and Anthropic totals are not directly comparable: OpenAI `input_tokens` includes cached tokens as a subcount, while Anthropic `input_tokens` excludes cache reads and reports cache creation/read separately. Approximate normalized values are OpenAI uncached input `input_tokens - cached_input_tokens` and Anthropic raw context `input_tokens + cache_creation_input_tokens + cache_read_input_tokens`.
-- Historical rows backfilled from `executions.tokens_used` are total-only and do not invent input/output/cache/cost breakdowns.
-- Analytics group by stored provider/model strings rather than hardcoded allowlists. Claude Fable/Mythos usage appears as Anthropic rows when counters exist; provider failures with no counters produce no usage row. HTTP 200 Anthropic refusals can still record failed usage when counters exist.
+Provider normalization:
+- Anthropic preserves input/output and cache creation/read fields; thinking is treated as output because no separate counter exists. OpenAI preserves input/output/cached/reasoning Responses usage. OpenAI and Anthropic totals are not directly comparable: OpenAI input includes cached tokens, while Anthropic input excludes cache reads. Approximate uncached/context values must account for those differences.
+- Historical rows backfilled from `executions.tokens_used` are total-only. Analytics group by stored provider/model strings rather than hardcoded allowlists; provider failures with no counters create no usage row, while counted HTTP 200 refusals can record failed usage.
 
-Analytics surface facts:
-- `/analytics` includes local task/execution/productivity analytics, LLM usage/account-limit views, and Skill Curator analytics. `/api/analytics/usage` backs model usage; `/api/analytics/skills` backs Skill Curator Analytics.
-- Project memory recall effectiveness and follow-through are not currently inspectable alongside skill analytics; proposed in issue `#85`.
-- Analytics task-result queries already return task IDs, but the dashboard currently renders only titles, counts, and chart labels without links; issue `#841` proposes project-scoped read-only drill-down links to matching task details. This is distinct from execution-detail navigation gaps.
-- `NormalizeUsageFilter`/`UsageFilterInput` is the shared service-layer core for web usage analytics and Chat `view_usage_analytics`. It owns grouping defaults, RFC3339/date-only parsing, positive `Nd` ranges, local `month`/`all`/default-30-day calculation, and unknown-range fallback; surface adapters retain decoding, refresh policy, response shaping, and limits.
-- Skill Analytics now reuses `service.ParseUsageAnalyticsRangeDays` with the raw `range` query value; the local `skillAnalyticsRangeDays` duplicate was removed in issue `#916`/PR `#931`. Skill-specific filters, date construction, defaults including whitespace fallback, grouping, limits, and response shaping remain separate and unchanged. This is distinct from `#884`, which covers Usage filter normalization across the web API and Chat.
-- Failed-task-pattern analytics and Insights should share task-level latest-error query/projection semantics while preserving API fields, project scoping, limits, and minimum-failure behavior.
-- `InsightsRepo` list methods currently duplicate the full `insights` projection, row/query-context lifecycle, and `scanInsights` path while differing only in predicate, ordering, and limit; duplication issue `#913` proposes consolidating that shared list-query assembly without changing filters or ordering.
-- Insights status/accept/link/delete and knowledge-entry deletion are project-scoped through handler, service, repository, and rendered action URLs. Foreign/unknown IDs return controlled not-found responses without mutation or leakage; same-project status transitions preserve `resolved_at`.
-- Read-only `view_usage_analytics` exposes current-project model usage, token totals, cost availability, top model/provider breakdowns, recent buckets, and sanitized stored account-limit summaries in Plan and Orchestrate modes. It uses local data through `BuildLocalAnalyticsUsage`, compact model-account projections, no external provider refresh, and no raw payloads, account IDs, config IDs, events, or provider response IDs.
-- The Analytics page sends selected/current project ID to every local analytics endpoint and ties the visible project label to that ID. Model usage filters `llm_usage_events.project_id`; Skill Curator analytics filters `skill_analytics_events.project_id`; task/productivity analytics filter through `tasks.project_id`.
-- Provider account-limit cards are account-wide OAuth snapshots, not project-scoped data, and are labeled separately from local usage. Direct/background calls infer project ID from exact repo paths, paths inside repos, and conventional `.worktrees/task_*` paths; nested repos choose the most specific project.
-- Provider account cards appear before usage charts/tables, and Skill Curator Analytics appears immediately above Failed Task Patterns. Chart labels are `Token Usage`, `Model Breakdown by Tokens`, and `Model Breakdown by Executions`.
-- Analytics line graphs use Chart.js canvas rendering with shared pointer-nearest highlighting while preserving index-mode tooltips. Account-limit cards use normalized provider/plan metadata and never expose raw account IDs, config IDs, emails, tokens, JWTs, auth headers, fingerprints, or provider identity fields.
-- Account-limit bars use explicit shared-theme track/fill markup because native/DaisyUI progress bars can be invisible in packaged macOS desktop light-mode WebView.
+Surfaces and isolation:
+- `/analytics` combines local task/execution/productivity, LLM usage/account limits, and Skill Curator analytics. `/api/analytics/usage` and `/api/analytics/skills` back the views. Task/productivity queries, `llm_usage_events`, and `skill_analytics_events` are project-filtered; visible project labels and every endpoint use the selected project ID.
+- `NormalizeUsageFilter`/`UsageFilterInput` is the shared web/Chat filter core for defaults, RFC3339/date-only parsing, positive `Nd` ranges, local month/all/default-30-day calculation, and unknown-range fallback. Surface adapters retain decoding, refresh, response shaping, and limits. Skill Analytics reuses `ParseUsageAnalyticsRangeDays` while keeping skill-specific filters/defaults.
+- Chat `view_usage_analytics` is read-only, Plan/Orchestrate-safe, current-project, local-only, and compact. It reports usage totals, cost availability, top provider/model breakdowns, recent buckets, and sanitized account-limit summaries without raw payloads, account/config IDs, events, response IDs, or external refreshes.
+- OAuth account-limit cards are account-wide, explicitly separated from project-scoped local usage. OpenAI ChatGPT/Codex usage uses the `wham/usage` endpoint and real `OAuthAccountID`; Anthropic account identity uses stable profile/org data when available, otherwise safer per-config display. When merging snapshots, current resolved account ID wins and newest full snapshot owns dynamic limits; older snapshots supply only safe descriptive metadata.
+- Persisted OpenAI snapshots from before duration-based windows are normalized during view assembly. Supported five-hour, daily, weekly, monthly, and annual windows retain stable ordering; reset labels are `Reset due` or omitted, never `Resets: 0 minutes`. Charts use Chart.js with shared pointer-nearest highlighting; account bars use explicit theme-aware track/fill markup for packaged macOS light WebView reliability.
+- Dashboard labels are `Token Usage`, `Model Breakdown by Tokens`, and `Model Breakdown by Executions`. Skill chart `Skill Activity Over Time` has `Used` (selected+loaded+viewed), `Created`, and `Edited` lines; filters default to all/hidden and least-active enabled skills remain visible.
 
-Skill Curator analytics UI:
-- Trend chart is `Skill Activity Over Time` with exactly three visible lines: `Used` (`selected + loaded + viewed`), `Created`, and `Edited`.
-- Dashboard uses standalone cards and standard graph styling. Ordering is activity next to Top Skills, Follow-through/Selected Outcomes next to Top Agent/Skill Pairs, and Least Active Enabled Skills full-width.
-- Skill-specific filters such as surface, scope, and agent default to all and are not shown by default. Agent heatmap/cell counts include selected/loaded/viewed; edited belongs in drilldown or tooltip context.
-- The shared date-range selector preserves 365-day/Last Year for non-skill analytics while skill analytics may map supported ranges separately.
-
-OAuth account facts:
-- OpenAI ChatGPT/Codex account usage targets `https://chatgpt.com/backend-api/wham/usage`; grouping uses real `OAuthAccountID`, so configs for one account collapse to one card.
-- Anthropic usage payloads provide windows/utilization, while profile metadata drives public subscription labels when available. Stable organization/account identity is used when profile lookup succeeds; otherwise per-config display is safer than guessing.
-- API-key accounts contribute local usage but do not receive subscription/account-limit snapshots or fake billing cards.
-- When merging persisted snapshots with current configs, prefer the current resolved `OAuthAccountID` over stale snapshot `account_id`. For multiple configs in one account, the newest full snapshot exclusively owns dynamic limit state; older snapshots may backfill only safe descriptive metadata.
-- Persisted OpenAI snapshots created before duration-based window normalization are repaired at account-view assembly time without schema migration. Recognized 5-hour, daily, weekly, monthly, and annual windows use `limit_window_seconds` with tolerance and stable ordering.
-- Analytics renders canonical account-limit ordering from normalized `limits` and displays elapsed reset times as `Reset due` or omits the line, never `Resets: 0 minutes`.
+Known gaps and ownership:
+- Project memory recall effectiveness/follow-through is not yet shown beside skill analytics (`#85`). Task-result analytics lack project-scoped links to task details (`#841`).
+- Failed-task patterns and Insights should share latest-error query/projection semantics. Insights list methods duplicate projection/query/scan assembly (`#913`); status/delete/link behavior remains project-scoped and preserves `resolved_at`.
+- Chat does not expose compact OAuth connected/expired/not-connected status shown on model cards (`#695`). Account cards must never expose account IDs, emails, tokens, JWTs, auth headers, fingerprints, or provider identity fields.
