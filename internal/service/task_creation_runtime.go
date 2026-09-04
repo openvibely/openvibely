@@ -23,6 +23,7 @@ type RuntimeTaskCreationOptions struct {
 	LLMConfigRepo       *repository.LLMConfigRepo
 	PrepareTaskCreation func(context.Context, *TaskCreationRequest) error
 	CreateTask          RuntimeTaskCreationCreateFunc
+	PersistTaskCreation TaskCreationPersistence
 	OnTasksCreated      func(context.Context, []TaskCreationRequest, []models.Task) error
 	AddCreatedSummary   func(string)
 	RequireCreated      bool
@@ -70,7 +71,7 @@ func ExecuteCreateTaskRuntimeAction(ctx context.Context, input json.RawMessage, 
 		}
 	}
 	if !creationHandled {
-		createdTasks, summary = ExecuteTaskCreationsWithReturn(ctx, []TaskCreationRequest{req}, opts.ProjectID, opts.TaskSvc, agents)
+		createdTasks, summary = ExecuteTaskCreationsWithReturnAndPersistence(ctx, []TaskCreationRequest{req}, opts.ProjectID, opts.TaskSvc, opts.PersistTaskCreation, agents)
 	}
 	if !creationHandled && opts.OnTasksCreated != nil && len(createdTasks) > 0 {
 		if err := opts.OnTasksCreated(ctx, []TaskCreationRequest{req}, createdTasks); err != nil {

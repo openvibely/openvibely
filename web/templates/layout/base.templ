@@ -2771,9 +2771,9 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						const board = kanbanDropdown.closest('#kanban-board');
 						if (board && openKanbanMenuKey) board.setAttribute('data-open-kanban-menu-key', openKanbanMenuKey);
 						setKanbanMenuExpanded(kanbanDropdown, true);
+						window.dispatchEvent(new CustomEvent('kanban-menu-opened'));
 					}
-					requestAnimationFrame(function() { positionDropdownForViewport(label); });
-					if (kanbanDropdown && label.matches('[data-task-card-menu-trigger]') && window.htmx) {
+					requestAnimationFrame(function() { positionDropdownForViewport(label); });					if (kanbanDropdown && label.matches('[data-task-card-menu-trigger]') && window.htmx) {
 						const options = kanbanDropdown.querySelector('[data-task-card-merge-options]');
 						const refreshURL = options && options.getAttribute('hx-get');
 						if (options && refreshURL) htmx.ajax('GET', refreshURL, {target: options, swap: 'outerHTML'});
@@ -3359,11 +3359,12 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				}
 
 					function closeKanbanMenu(dropdown, restoreTriggerFocus) {
+						const board = document.getElementById('kanban-board');
+						const hadOpenMenu = !!openKanbanMenuKey || !!(board && board.getAttribute('data-open-kanban-menu-key'));
 						openKanbanMenuKey = '';
 						savedKanbanInteraction = null;
 						const activeMenu = document.activeElement && document.activeElement.closest ? document.activeElement.closest('[data-kanban-menu-key]') : null;
 						if (!restoreTriggerFocus && activeMenu && document.activeElement.blur) document.activeElement.blur();
-						const board = document.getElementById('kanban-board');
 						if (board) board.removeAttribute('data-open-kanban-menu-key');
 						document.querySelectorAll('[data-kanban-menu-key]').forEach(function(candidate) {
 							setKanbanMenuExpanded(candidate, false);
@@ -3377,6 +3378,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 								setKanbanMenuExpanded(dropdown, false);
 							}
 						}
+						if (hadOpenMenu) window.dispatchEvent(new CustomEvent('kanban-refresh-unblocked'));
 					}				window.closeKanbanMenu = closeKanbanMenu;
 
 				function resetKanbanInteractionForNavigation() {

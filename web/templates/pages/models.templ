@@ -58,11 +58,7 @@ func hasDefault(agents []models.LLMConfig) bool {
 }
 
 func modelCardShowsTemperature(agent models.LLMConfig) bool {
-	if agent.Provider == models.ProviderMixture {
-		return false
-	}
-	return agent.Provider != models.ProviderOpenAICompatible ||
-		!strings.HasPrefix(strings.ToLower(strings.TrimSpace(agent.Model)), "kimi-")
+	return models.ModelSupportsTemperature(agent.Provider, agent.Model)
 }
 
 func oauthStatusText(agent models.LLMConfig) string {
@@ -1273,9 +1269,11 @@ for _, agent := range modelOptions {
 				}
 
 				function modelSupportsTemperature(provider, model) {
+					var normalizedModel = (model || '').trim().toLowerCase();
 					if (provider === 'mixture') return false;
+					if (provider === 'openai') return normalizedModel !== 'gpt-6-astra';
 					if (!isOpenAICompatibleProvider(provider)) return true;
-					return (model || '').trim().toLowerCase().indexOf('kimi-') !== 0;
+					return normalizedModel.indexOf('kimi-') !== 0;
 				}
 
 				function updateTemperatureField(provider, model) {

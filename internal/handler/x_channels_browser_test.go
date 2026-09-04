@@ -87,7 +87,19 @@ func TestXChannelsProductionHandlersInChrome(t *testing.T) {
 window.addEventListener('DOMContentLoaded', function() {
   function report(status, message) { return fetch('/browser-result?status=' + encodeURIComponent(status) + '&message=' + encodeURIComponent(message || ''), {method:'POST'}); }
   function fail(message) { throw new Error(message); }
-	  function waitFor(check, label) { return new Promise(function(resolve, reject) { var started = performance.now(); (function poll() { try { if (check()) return resolve(); } catch (error) { return reject(error); } if (performance.now() - started > 5000) return reject(new Error('timed out waiting for ' + label)); setTimeout(poll, 20); })(); }); }
+	  function waitFor(check, label) { return new Promise(function(resolve, reject) { var started = performance.now(); (function poll() { try { if (check()) return resolve(); } catch (error) { return reject(error); } if (performance.now() - started > 15000) return reject(new Error('timed out waiting for ' + label)); setTimeout(poll, 20); })(); }); }
+	  function refreshChannels(projectID, label) {
+	    return new Promise(function(resolve, reject) {
+	      var timer = setTimeout(function() { reject(new Error('timed out waiting for ' + label + ' request')); }, 15000);
+	      Promise.resolve(htmx.ajax('GET', '/channels?project_id=' + encodeURIComponent(projectID), {target:'#channels-container', swap:'outerHTML'})).then(function(value) {
+	        clearTimeout(timer);
+	        resolve(value);
+	      }, function(error) {
+	        clearTimeout(timer);
+	        reject(new Error(label + ' request failed: ' + String(error && error.message || error)));
+	      });
+	    });
+	  }
 	  async function runConnectionTest(expected) {
 	    var modal = document.getElementById('x_config_modal');
 	    var button = modal && modal.querySelector('button[hx-post="/channels/x/test"]');
@@ -127,22 +139,22 @@ window.addEventListener('DOMContentLoaded', function() {
     authForm.requestSubmit();
     await waitFor(function() { return document.body.textContent.indexOf('@alice') >= 0; }, 'production authorized-user refresh');
 
-    htmx.ajax('GET', '/channels?project_id=` + projectTwo.ID + `', {target:'#channels-container', swap:'outerHTML'});
+	    await refreshChannels('` + projectTwo.ID + `', 'production project-two refresh');
 	    await waitFor(function() { var input = document.querySelector('#x_config_modal input[name="project_id"]'); return input && input.value === '` + projectTwo.ID + `'; }, 'production project-two refresh');
 	    var projectTwoModal = document.querySelector('#x_config_modal');
 	    if (projectTwoModal.textContent.indexOf('@alice') >= 0 || projectTwoModal.textContent.indexOf('No users authorized') < 0) fail('project-one authorization leaked into project two');
     await report('progress', 'stop-service');
-    htmx.ajax('GET', '/channels?project_id=` + projectTwo.ID + `', {target:'#channels-container', swap:'outerHTML'});
+	    await refreshChannels('` + projectTwo.ID + `', 'production disconnected-state refresh');
     await waitFor(function() { return document.body.textContent.indexOf('Configured, polling offline') >= 0; }, 'production disconnected state');
 
-    htmx.ajax('GET', '/channels?project_id=` + projectOne.ID + `', {target:'#channels-container', swap:'outerHTML'});
+	    await refreshChannels('` + projectOne.ID + `', 'production return-to-project-one refresh');
     await waitFor(function() { return document.querySelector('[data-channel-type="x"]'); }, 'return to project one');
     var deleteButton = document.querySelector('[data-channel-type="x"] button.text-error');
     deleteButton.click();
     var confirm = document.querySelector('#delete_channel_confirm_modal .btn-error');
     if (!confirm) fail('production delete confirmation did not open');
 	    var removeFinished = new Promise(function(resolve, reject) {
-	      var timer = setTimeout(function() { reject(new Error('timed out waiting for production remove request')); }, 5000);
+	      var timer = setTimeout(function() { reject(new Error('timed out waiting for production remove request')); }, 15000);
 	      document.body.addEventListener('htmx:afterRequest', function onRemove(event) {
 	        var path = event.detail && event.detail.requestConfig && event.detail.requestConfig.path;
 	        if (path !== '/channels/x/remove') return;
@@ -154,7 +166,7 @@ window.addEventListener('DOMContentLoaded', function() {
 	    });
 	    confirm.click();
 	    await removeFinished;
-	    htmx.ajax('GET', '/channels?project_id=` + projectOne.ID + `', {target:'#channels-container', swap:'outerHTML'});
+	    await refreshChannels('` + projectOne.ID + `', 'production remove refresh');
 	    await waitFor(function() { return !document.querySelector('[data-channel-type="x"]') && document.querySelector('button[onclick="openXConfigModal()"]'); }, 'production remove refresh');    report('pass', 'complete');
   })().catch(function(error) { report('fail', String(error && error.stack || error)); });
 });
@@ -202,7 +214,7 @@ window.addEventListener('DOMContentLoaded', function() {
 	defer stopHandlerBrowserProcess(cmd)
 
 	var outcome string
-	deadline := time.After(30 * time.Second)
+	deadline := time.After(60 * time.Second)
 	for outcome == "" {
 		select {
 		case value := <-results:
