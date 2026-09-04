@@ -1499,7 +1499,8 @@ func normalizeOpenAIModel(value string) string {
 		return ""
 	}
 	switch trimmed {
-	case "gpt-5.6-sol",
+	case "gpt-6-astra",
+		"gpt-5.6-sol",
 		"gpt-5.6-terra",
 		"gpt-5.6-luna",
 		"gpt-5.5",
