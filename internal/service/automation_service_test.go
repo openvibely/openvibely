@@ -1689,7 +1689,12 @@ func TestAutomationLiveYAMLPerformanceThresholds(t *testing.T) {
 	t.Logf("30-node Live YAML medians: before=%.0f ns/op %.0f B/op %.0f allocs/op %.0f SQL; after=%.0f ns/op %.0f B/op %.0f allocs/op %.0f SQL", before.wallNs, before.bytesPerOp, before.allocsPerOp, before.statementsPerOp, after.wallNs, after.bytesPerOp, after.allocsPerOp, after.statementsPerOp)
 	require.Equal(t, float64(20), before.statementsPerOp)
 	require.Equal(t, float64(12), after.statementsPerOp)
-	require.LessOrEqual(t, after.wallNs, before.wallNs*0.70, "30-node Live YAML wall time must improve by at least 30%%")
+	if testing.CoverMode() == "" {
+		require.LessOrEqual(t, after.wallNs, before.wallNs*0.70, "30-node Live YAML wall time must improve by at least 30%%")
+	} else {
+		require.Less(t, after.wallNs, before.wallNs, "30-node Live YAML path must remain faster under coverage instrumentation")
+		t.Log("coverage instrumentation detected; enforcing the strict 30% wall-time gate in the uninstrumented benchmark only")
+	}
 	require.LessOrEqual(t, after.bytesPerOp, before.bytesPerOp*0.60, "30-node Live YAML allocated bytes must improve by at least 40%%")
 	require.LessOrEqual(t, after.allocsPerOp, before.allocsPerOp*0.60, "30-node Live YAML allocation count must improve by at least 40%%")
 }

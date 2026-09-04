@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 )
 
 type fakeXAPI struct {
+	mu           sync.Mutex
 	me           XUser
 	mentions     xMentionsResponse
 	mentionsErr  error
@@ -35,8 +37,16 @@ func (f *fakeXAPI) Mentions(ctx context.Context, userID, sinceID, pagination str
 	return f.mentions, f.mentionsErr
 }
 func (f *fakeXAPI) Post(_ context.Context, text, reply string) (string, error) {
+	f.mu.Lock()
 	f.posted = append(f.posted, reply+"|"+text)
+	f.mu.Unlock()
 	return "posted", f.postErr
+}
+
+func (f *fakeXAPI) Posts() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.posted...)
 }
 
 func setupXServiceTest(t testing.TB) (context.Context, *XService, *repository.SettingsRepo, *repository.XAuthRepo, *repository.XUserProjectRepo, *models.Project, *models.Project) {
@@ -1540,4 +1550,313 @@ func TestXOutboundRejectsUnsupportedTargetAndOversizeAndPropagatesProviderFailur
 	result = svc.SendOutboundMessage(context.Background(), "me", "", "short")
 	require.False(t, result.OK)
 	require.Contains(t, result.Error, "write access unavailable")
+}
+
+func TestXRuntimeCreateSwarmTaskPreservesReplyContext(t *testing.T) {
+	ctx, svc, _, _, _, project, _ := setupXServiceTest(t)
+	taskSvc := NewTaskService(svc.taskRepo, nil, nil)
+	swarmSvc := NewSwarmService(taskSvc, svc.taskRepo, nil, nil)
+	taskSvc.SetSwarmService(swarmSvc)
+	svc.taskSvc = taskSvc
+
+	runtime := svc.RuntimeTools("parent-task", project.ID, "bot", "author", "conversation", "source-tweet", "alice")
+	output, handled, isError, err := runtime.Executor(ctx, "create_swarm_task", json.RawMessage(`{"title":"X swarm","prompt":"preserve the destination","category":"backlog"}`))
+	require.True(t, handled)
+	require.False(t, isError)
+	require.NoError(t, err)
+	require.Contains(t, output, "X swarm")
+
+	tasks, err := svc.taskRepo.ListByProject(ctx, project.ID, "")
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
+	require.Equal(t, models.TaskOriginX, tasks[0].CreatedVia)
+	meta, err := svc.taskContextRepo.GetByTaskID(ctx, tasks[0].ID)
+	require.NoError(t, err)
+	require.NotNil(t, meta)
+	require.Equal(t, project.ID, meta.ProjectID)
+	require.Equal(t, "bot", meta.AccountID)
+	require.Equal(t, "conversation", meta.ConversationID)
+	require.Equal(t, "source-tweet", meta.ReplyToTweetID)
+	require.Equal(t, "author", meta.XUserID)
+	require.Equal(t, "alice", meta.Username)
+}
+
+func TestXRuntimeCreateTaskPersistsReplyContextBeforeWorkerSubmission(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	project := &models.Project{Name: "X runtime project"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	settingsRepo := repository.NewSettingsRepo(db)
+	require.NoError(t, settingsRepo.Set(ctx, XSettingSendResponses, "true"))
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	agent := &models.LLMConfig{
+		Name:           "X auto-start test model",
+		Provider:       models.ProviderTest,
+		Model:          "test",
+		IsDefault:      true,
+		AutoStartTasks: true,
+	}
+	require.NoError(t, llmConfigRepo.Create(ctx, agent))
+	taskRepo := repository.NewTaskRepo(db, nil)
+	worker := NewWorkerService(nil, 1, projectRepo)
+	worker.SetTaskRepo(taskRepo)
+	worker.submitted = make(chan models.Task)
+	taskSvc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), worker)
+	xTaskContextRepo := repository.NewXTaskContextRepo(db)
+	xSvc := NewXService(
+		XCredentials{ConsumerKey: "a", ConsumerSecret: "b", AccessToken: "c", AccessTokenSecret: "d"},
+		settingsRepo,
+		projectRepo,
+		llmConfigRepo,
+		taskRepo,
+		repository.NewExecutionRepo(db),
+		repository.NewScheduleRepo(db),
+		taskSvc,
+	)
+	xSvc.SetRepositories(repository.NewXAuthRepo(db), repository.NewXUserProjectRepo(db), xTaskContextRepo, repository.NewXInboundReceiptRepo(db), repository.NewThreadInputRepo(db))
+	xSvc.me = XUser{ID: "bot", Username: "openvibely"}
+	xSvc.setAPI(&fakeXAPI{me: xSvc.me})
+
+	runtime := xSvc.RuntimeTools("parent-task", project.ID, "bot", "author", "conversation", "source-tweet", "alice")
+	type actionResult struct {
+		output  string
+		handled bool
+		isError bool
+		err     error
+	}
+	resultCh := make(chan actionResult, 1)
+	go func() {
+		output, handled, isError, err := runtime.Executor(ctx, "create_task", json.RawMessage(`{"title":"Child task","prompt":"complete immediately"}`))
+		resultCh <- actionResult{output: output, handled: handled, isError: isError, err: err}
+	}()
+
+	var submitted models.Task
+	select {
+	case submitted = <-worker.Submitted():
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for runtime task submission")
+	}
+	meta, err := xTaskContextRepo.GetByTaskID(ctx, submitted.ID)
+	require.NoError(t, err)
+	require.NotNil(t, meta, "X reply context must exist before worker submission")
+	require.Equal(t, project.ID, meta.ProjectID)
+	require.Equal(t, "bot", meta.AccountID)
+	require.Equal(t, "conversation", meta.ConversationID)
+	require.Equal(t, "source-tweet", meta.ReplyToTweetID)
+	require.Equal(t, "author", meta.XUserID)
+	require.Equal(t, "alice", meta.Username)
+	stored, err := taskRepo.GetByID(ctx, submitted.ID)
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	require.Equal(t, models.TaskOriginX, stored.CreatedVia)
+
+	select {
+	case result := <-resultCh:
+		require.True(t, result.handled)
+		require.False(t, result.isError)
+		require.NoError(t, result.err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for create_task result")
+	}
+}
+
+type xRuntimeWorkerFixture struct {
+	ctx              context.Context
+	db               *sql.DB
+	project          *models.Project
+	taskRepo         *repository.TaskRepo
+	xTaskContextRepo *repository.XTaskContextRepo
+	worker           *WorkerService
+	xSvc             *XService
+	api              *fakeXAPI
+	mockLLM          *testutil.MockLLMCaller
+}
+
+func newXRuntimeWorkerFixture(t *testing.T) *xRuntimeWorkerFixture {
+	t.Helper()
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	project := &models.Project{Name: "X runtime worker project"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+
+	settingsRepo := repository.NewSettingsRepo(db)
+	require.NoError(t, settingsRepo.Set(ctx, XSettingSendResponses, "true"))
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	agent := &models.LLMConfig{
+		Name:           "X auto-start worker model",
+		Provider:       models.ProviderTest,
+		Model:          "test",
+		IsDefault:      true,
+		AutoStartTasks: true,
+	}
+	require.NoError(t, llmConfigRepo.Create(ctx, agent))
+
+	taskRepo := repository.NewTaskRepo(db, nil)
+	execRepo := repository.NewExecutionRepo(db)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
+	mockLLM := testutil.NewMockLLMCaller()
+	mockLLM.Response = "child completed"
+	mockLLM.TextOnly = mockLLM.Response
+	llmSvc.SetLLMCaller(mockLLM)
+
+	worker := NewWorkerService(llmSvc, 1, projectRepo)
+	worker.SetTaskRepo(taskRepo)
+	worker.SetLLMConfigRepo(llmConfigRepo)
+	worker.SetExecutionRepo(execRepo)
+	taskSvc := NewTaskService(taskRepo, attachmentRepo, worker)
+	llmSvc.SetTaskService(taskSvc)
+
+	xTaskContextRepo := repository.NewXTaskContextRepo(db)
+	xSvc := NewXService(
+		XCredentials{ConsumerKey: "a", ConsumerSecret: "b", AccessToken: "c", AccessTokenSecret: "d"},
+		settingsRepo,
+		projectRepo,
+		llmConfigRepo,
+		taskRepo,
+		execRepo,
+		scheduleRepo,
+		taskSvc,
+	)
+	xSvc.SetRepositories(repository.NewXAuthRepo(db), repository.NewXUserProjectRepo(db), xTaskContextRepo, repository.NewXInboundReceiptRepo(db), repository.NewThreadInputRepo(db))
+	xSvc.me = XUser{ID: "bot", Username: "openvibely"}
+	api := &fakeXAPI{me: xSvc.me}
+	xSvc.setAPI(api)
+	llmSvc.SetXService(xSvc)
+
+	worker.Start(ctx)
+	t.Cleanup(worker.Stop)
+	return &xRuntimeWorkerFixture{
+		ctx:              ctx,
+		db:               db,
+		project:          project,
+		taskRepo:         taskRepo,
+		xTaskContextRepo: xTaskContextRepo,
+		worker:           worker,
+		xSvc:             xSvc,
+		api:              api,
+		mockLLM:          mockLLM,
+	}
+}
+
+func TestXRuntimeCreateTaskCompletesWithExactlyOneReply(t *testing.T) {
+	fixture := newXRuntimeWorkerFixture(t)
+	runtime := fixture.xSvc.RuntimeTools("parent-task", fixture.project.ID, "bot", "author", "conversation", "source-tweet", "alice")
+
+	output, handled, isError, err := runtime.Executor(fixture.ctx, "create_task", json.RawMessage(`{"title":"Child task","prompt":"complete immediately"}`))
+	require.True(t, handled)
+	require.False(t, isError)
+	require.NoError(t, err)
+	require.Contains(t, output, "[TASK_ID:")
+
+	var completed *models.Task
+	require.Eventually(t, func() bool {
+		tasks, listErr := fixture.taskRepo.ListByProject(fixture.ctx, fixture.project.ID, "")
+		if listErr != nil || len(tasks) != 1 {
+			return false
+		}
+		if tasks[0].Status != models.StatusCompleted {
+			return false
+		}
+		completed = &tasks[0]
+		return true
+	}, 2*time.Second, 10*time.Millisecond)
+	require.NotNil(t, completed)
+	require.Equal(t, models.TaskOriginX, completed.CreatedVia)
+
+	meta, err := fixture.xTaskContextRepo.GetByTaskID(fixture.ctx, completed.ID)
+	require.NoError(t, err)
+	require.Equal(t, &models.XTaskContext{
+		TaskID:         completed.ID,
+		ProjectID:      fixture.project.ID,
+		AccountID:      "bot",
+		ConversationID: "conversation",
+		ReplyToTweetID: "source-tweet",
+		XUserID:        "author",
+		Username:       "alice",
+	}, &models.XTaskContext{
+		TaskID:         meta.TaskID,
+		ProjectID:      meta.ProjectID,
+		AccountID:      meta.AccountID,
+		ConversationID: meta.ConversationID,
+		ReplyToTweetID: meta.ReplyToTweetID,
+		XUserID:        meta.XUserID,
+		Username:       meta.Username,
+	})
+	require.Eventually(t, func() bool {
+		return len(fixture.api.Posts()) == 1
+	}, time.Second, 10*time.Millisecond)
+	require.Equal(t, []string{"source-tweet|child completed"}, fixture.api.Posts())
+	require.Equal(t, 1, fixture.mockLLM.CallCount())
+}
+
+func TestXRuntimeCreateTaskMetadataFailureDoesNotAdmitTask(t *testing.T) {
+	tests := []struct {
+		name  string
+		query string
+	}{
+		{name: "origin", query: `CREATE TRIGGER fail_x_origin BEFORE UPDATE OF created_via ON tasks WHEN NEW.created_via = 'x' BEGIN SELECT RAISE(ABORT, 'forced X origin failure'); END`},
+		{name: "context", query: `CREATE TRIGGER fail_x_context BEFORE INSERT ON x_task_context BEGIN SELECT RAISE(ABORT, 'forced X context failure'); END`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fixture := newXRuntimeWorkerFixture(t)
+			_, err := fixture.db.ExecContext(fixture.ctx, tt.query)
+			require.NoError(t, err)
+
+			runtime := fixture.xSvc.RuntimeTools("parent-task", fixture.project.ID, "bot", "author", "conversation", "source-tweet", "alice")
+			output, handled, isError, actionErr := runtime.Executor(fixture.ctx, "create_task", json.RawMessage(`{"title":"Child task","prompt":"must not run"}`))
+			require.True(t, handled)
+			require.True(t, isError)
+			require.Error(t, actionErr)
+			require.Contains(t, output, "Failed to create 1 task(s)")
+			require.Contains(t, actionErr.Error(), "no tasks were persisted")
+
+			tasks, err := fixture.taskRepo.ListByProject(fixture.ctx, fixture.project.ID, "")
+			require.NoError(t, err)
+			require.Empty(t, tasks)
+			require.Equal(t, 0, fixture.worker.QueueSize())
+			require.Equal(t, 0, fixture.worker.TotalRunning())
+			require.Empty(t, fixture.api.Posts())
+			require.Equal(t, 0, fixture.mockLLM.CallCount())
+			select {
+			case submitted := <-fixture.worker.Submitted():
+				t.Fatalf("metadata failure submitted task %s", submitted.ID)
+			default:
+			}
+		})
+	}
+}
+
+func TestXRuntimeCreateTaskExplicitBacklogDoesNotAutoStart(t *testing.T) {
+	fixture := newXRuntimeWorkerFixture(t)
+	runtime := fixture.xSvc.RuntimeTools("parent-task", fixture.project.ID, "bot", "author", "conversation", "source-tweet", "alice")
+
+	output, handled, isError, err := runtime.Executor(fixture.ctx, "create_task", json.RawMessage(`{"title":"Backlog task","prompt":"wait for a later start","category":"backlog"}`))
+	require.True(t, handled)
+	require.False(t, isError)
+	require.NoError(t, err)
+	require.Contains(t, output, "[TASK_ID:")
+
+	tasks, err := fixture.taskRepo.ListByProject(fixture.ctx, fixture.project.ID, "")
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
+	require.Equal(t, models.CategoryBacklog, tasks[0].Category)
+	require.Equal(t, models.TaskOriginX, tasks[0].CreatedVia)
+	meta, err := fixture.xTaskContextRepo.GetByTaskID(fixture.ctx, tasks[0].ID)
+	require.NoError(t, err)
+	require.NotNil(t, meta)
+	require.Equal(t, "source-tweet", meta.ReplyToTweetID)
+	require.Equal(t, 0, fixture.worker.QueueSize())
+	require.Equal(t, 0, fixture.worker.TotalRunning())
+	require.Empty(t, fixture.api.Posts())
+	require.Equal(t, 0, fixture.mockLLM.CallCount())
+	select {
+	case submitted := <-fixture.worker.Submitted():
+		t.Fatalf("explicit backlog task %s was submitted", submitted.ID)
+	default:
+	}
 }

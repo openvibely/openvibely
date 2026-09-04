@@ -2224,7 +2224,11 @@ func (h *Handler) sendChannelResponse(ctx context.Context, task *models.Task, re
 		}
 	case models.TaskOriginX:
 		if xService := h.getXService(); xService != nil {
-			xService.SendChatResponse(ctx, *task, output, errMsg)
+			if task.Category == models.CategoryChat {
+				xService.SendChatResponse(ctx, *task, output, errMsg)
+			} else {
+				xService.SendTaskCompletionNotification(ctx, *task, output, errMsg)
+			}
 		}
 	case models.TaskOriginDiscord:
 		if task.Category == models.CategoryChat {
