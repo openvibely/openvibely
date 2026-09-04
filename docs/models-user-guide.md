@@ -14,7 +14,7 @@ Why this matters:
 
 ## Recommended Setup
 
-**Start with Codex `gpt-5.6-sol` at `medium` reasoning effort.** This is the default model and the setup OpenVibely is tuned against. It is the flagship GPT-5.6 tier for complex coding and professional work, while `medium` is the model's balanced default. For most teams this is the only model config they need.
+**Start with Codex `gpt-5.6-sol` at `medium` reasoning effort.** This remains OpenVibely's default model and the setup it is tuned against. Choose `gpt-6-astra` for the hardest end-to-end work when it is available to your OpenAI account.
 
 For lower cost, use `gpt-5.6-terra`; for efficient high-volume work, use `gpt-5.6-luna`. Increase effort to `high`, `xhigh`, or `max` only when representative tasks show a useful quality gain. Use `none` or `low` for latency-sensitive work.
 
@@ -57,6 +57,7 @@ For lower cost, use `gpt-5.6-terra`; for efficient high-volume work, use `gpt-5.
 
 | Model | Reasoning Efforts | Notes |
 |---|---|---|
+| gpt-6-astra | low / medium / high / xhigh / max | OpenAI's most capable model for complex coding, computer use, and research. 1.05M context, 128k max output. Availability depends on OpenAI account rollout. |
 | gpt-5.6-sol | none / low / medium / high / xhigh / max | Default flagship tier. 1.05M context, 128k max output. |
 | gpt-5.6-terra | none / low / medium / high / xhigh / max | Balances intelligence and cost. 1.05M context, 128k max output. |
 | gpt-5.6-luna | none / low / medium / high / xhigh / max | Efficient high-volume tier. 1.05M context, 128k max output. |
@@ -88,7 +89,7 @@ Where a low-level provider API still requires an output limit, OpenVibely choose
 ### OpenAI
 
 - Auth options include API key and OAuth.
-- For supported Codex models, `Codex Reasoning Effort` is available. GPT-5.6 supports `none`, `low`, `medium`, `high`, `xhigh`, and `max`; its default is `medium`.
+- For supported Codex models, `Codex Reasoning Effort` is available. GPT-6 Astra supports `low`, `medium`, `high`, `xhigh`, and `max` (not `none`); GPT-5.6 also supports `none`. OpenVibely uses `medium` by default for these models.
 - First-party OpenAI configs use OpenVibely's OpenAI/Codex provider path, not the generic OpenAI-compatible Chat Completions adapter.
 
 ### OpenAI-Compatible Chat Completions
