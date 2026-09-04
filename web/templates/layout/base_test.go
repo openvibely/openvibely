@@ -56,6 +56,60 @@ func TestBaseRuntimeModeAndChatLinkPolicyHooks(t *testing.T) {
 	}
 }
 
+func TestBaseCardSearchHonorsServerRenderedInitialValue(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Base("Search", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render base: %v", err)
+	}
+	html := buf.String()
+	start := strings.Index(html, "function cardSearchStorageKey")
+	end := strings.Index(html[start:], "})();")
+	if start < 0 || end < 0 {
+		t.Fatal("could not extract card search helper")
+	}
+	searchScript := "(function() {\n" + html[start:start+end+len("})();")]
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is required to execute the card search helper")
+	}
+	script := `
+const storage = { 'ov_card_search_alerts': 'stale' };
+global.sessionStorage = {
+  getItem: function(key) { return Object.prototype.hasOwnProperty.call(storage, key) ? storage[key] : null; },
+  setItem: function(key, value) { storage[key] = String(value); }
+};
+global.window = {};
+global.document = { querySelectorAll: function() { return []; }, body: { addEventListener: function() {} } };
+global.setTimeout = function(callback) { callback(); };
+const noResults = { style: {} };
+const input = {
+  value: 'needle',
+  dataset: {},
+  getAttribute: function(name) {
+    const values = { 'data-card-search': 'alerts', 'data-card-search-initial': 'needle' };
+    return Object.prototype.hasOwnProperty.call(values, name) ? values[name] : null;
+  },
+  closest: function() { return container; },
+  addEventListener: function() {}
+};
+const container = {
+  querySelectorAll: function(selector) {
+    return selector === 'input[data-card-search]' ? [input] : [];
+  },
+  querySelector: function(selector) {
+    return selector === '[data-search-no-results]' ? noResults : null;
+  }
+};
+` + searchScript + `
+window.refreshCardSearches(container);
+if (input.value !== 'needle') throw new Error('server-rendered search was overwritten by session storage: ' + input.value);
+if (storage.ov_card_search_alerts !== 'needle') throw new Error('server-rendered search was not persisted');
+`
+	if output, err := exec.Command(node, "-e", script).CombinedOutput(); err != nil {
+		t.Fatalf("server-rendered card search initialization failed: %v\n%s", err, output)
+	}
+}
+
 func TestBaseProvidesCentralClientSidePageTitleAndHistorySynchronization(t *testing.T) {
 	var buf bytes.Buffer
 	if err := Base("Initial", []models.Project{}, "").Render(context.Background(), &buf); err != nil {

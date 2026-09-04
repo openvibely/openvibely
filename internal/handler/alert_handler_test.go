@@ -399,13 +399,18 @@ func TestHandler_ListAlertsSupportsWorkflowFiltersAndRefreshPreservation(t *test
 		require.NoError(t, h.ListAlerts(e.NewContext(req, rec)))
 		require.Equal(t, http.StatusOK, rec.Code)
 		body := rec.Body.String()
-		for _, want := range []string{pendingFailedFirst.Title, pendingFailedSecond.Title, `data-card-pagination-preserve-params="decision_state,processing_state"`, `value="pending" selected`, `value="failed" selected`, "5 unread"} {
+		for _, want := range []string{pendingFailedFirst.Title, pendingFailedSecond.Title, `data-card-pagination-preserve-params="decision_state,processing_state,search"`, `value="pending" selected`, `value="needle"`, `data-card-search-initial="needle"`, "5 unread"} {
 			require.Contains(t, body, want)
+		}
+		for _, removed := range []string{`name="processing_state"`, `aria-label="Filter by processing state"`, `All processing states`} {
+			require.NotContains(t, body, removed)
 		}
 		for _, excluded := range []string{pendingUnclaimed.Title, approvedFailed.Title, foreignAlert.Title, "Operational excluded"} {
 			require.NotContains(t, body, excluded)
 		}
-		require.Contains(t, body, "/alerts?decision_state=pending&amp;processing_state=failed&amp;project_id="+project.ID)
+		require.Contains(t, body, "/alerts?decision_state=pending&amp;processing_state=failed&amp;project_id="+project.ID+"&amp;search=needle")
+		require.Contains(t, body, `data-card-pagination-url="/alerts?decision_state=pending&amp;processing_state=failed&amp;project_id=`+project.ID+`&amp;search=needle"`)
+		require.Contains(t, body, "/alerts/"+pendingFailedFirst.ID+"/approve?decision_state=pending&amp;processing_state=failed&amp;project_id="+project.ID+"&amp;search=needle")
 	})
 
 	t.Run("filtered page keeps both predicates and page boundary", func(t *testing.T) {
@@ -422,11 +427,11 @@ func TestHandler_ListAlertsSupportsWorkflowFiltersAndRefreshPreservation(t *test
 		secondBody := secondRec.Body.String()
 		require.NotEqual(t, strings.Contains(firstBody, pendingFailedFirst.Title), strings.Contains(secondBody, pendingFailedFirst.Title))
 		require.NotEqual(t, strings.Contains(firstBody, pendingFailedSecond.Title), strings.Contains(secondBody, pendingFailedSecond.Title))
-		require.Contains(t, secondBody, `data-card-pagination-url="/alerts?decision_state=pending&amp;processing_state=failed&amp;project_id=`+project.ID+`"`)
+		require.Contains(t, secondBody, `data-card-pagination-url="/alerts?decision_state=pending&amp;processing_state=failed&amp;project_id=`+project.ID+`&amp;search=needle"`)
 	})
 
 	t.Run("mutation refresh keeps active filters", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPost, "/alerts/"+pendingUnclaimed.ID+"/approve?project_id="+project.ID+"&decision_state=pending&processing_state=unclaimed", nil)
+		req := httptest.NewRequest(http.MethodPost, "/alerts/"+pendingUnclaimed.ID+"/approve?project_id="+project.ID+"&decision_state=pending&processing_state=unclaimed&search=needle", nil)
 		req.Header.Set("HX-Request", "true")
 		rec := httptest.NewRecorder()
 		ctx := e.NewContext(req, rec)
@@ -437,8 +442,23 @@ func TestHandler_ListAlertsSupportsWorkflowFiltersAndRefreshPreservation(t *test
 		body := rec.Body.String()
 		require.NotContains(t, body, pendingUnclaimed.Title)
 		require.Contains(t, body, `value="pending" selected`)
-		require.Contains(t, body, `value="unclaimed" selected`)
-		require.Contains(t, body, "/alerts?decision_state=pending&amp;processing_state=unclaimed&amp;project_id="+project.ID)
+		require.Contains(t, body, `value="needle"`)
+		require.Contains(t, body, `data-card-search-initial="needle"`)
+		require.NotContains(t, body, `name="processing_state"`)
+		require.NotContains(t, body, `aria-label="Filter by processing state"`)
+		require.Contains(t, body, "/alerts?decision_state=pending&amp;processing_state=unclaimed&amp;project_id="+project.ID+"&amp;search=needle")
+	})
+
+	t.Run("search-only empty results use the filtered empty state", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/alerts?project_id="+project.ID+"&search=does-not-exist", nil)
+		rec := httptest.NewRecorder()
+		require.NoError(t, h.ListAlerts(e.NewContext(req, rec)))
+		body := rec.Body.String()
+		require.Contains(t, body, "No alerts match the selected filters.")
+		require.NotContains(t, body, "No alerts. You're all clear!")
+		require.Contains(t, body, `value="does-not-exist"`)
+		require.Contains(t, body, `data-card-search-initial="does-not-exist"`)
+		require.Contains(t, body, `/alerts?project_id=`+project.ID+`&amp;search=does-not-exist`)
 	})
 
 	t.Run("invalid values fall back to unfiltered project list", func(t *testing.T) {
