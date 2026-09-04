@@ -120,7 +120,7 @@ func (h *Handler) GetAutomationLive(c echo.Context) error {
 	graph.TemplateUpdateAvailable = currentTemplateRevision > 0 &&
 		(graph.Automation.TemplateRevision == nil || *graph.Automation.TemplateRevision < currentTemplateRevision)
 	if h.automationDraftSvc != nil {
-		current, currentErr := h.automationDraftSvc.CurrentCandidate(ctx, projectID, graph.Automation.ID)
+		current, currentErr := h.automationDraftSvc.LoadLiveCandidate(ctx, projectID, graph)
 		if currentErr != nil {
 			return currentErr
 		}

@@ -1531,6 +1531,240 @@ func BenchmarkAutomationAgentReferenceValidationProjection(b *testing.B) {
 	}
 }
 
+const automationLiveYAMLBenchmarkSamples = 3
+
+type automationLiveYAMLBenchmarkFixture struct {
+	ctx           context.Context
+	project       models.Project
+	counter       *testutil.SQLStatementCounter
+	drafts        *AutomationDraftService
+	graphSvc      *AutomationGraphService
+	automationIDs map[int]string
+}
+
+func newAutomationLiveYAMLBenchmarkFixture(tb testing.TB, nodeCounts []int) *automationLiveYAMLBenchmarkFixture {
+	tb.Helper()
+	db, counter := testutil.NewStatementCountingTestDB(tb)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	project := models.Project{Name: "Automation Live YAML benchmark"}
+	if err := projectRepo.Create(ctx, &project); err != nil {
+		tb.Fatalf("create benchmark project: %v", err)
+	}
+
+	registry := NewAutomationAdapterRegistry()
+	automationRepo := repository.NewAutomationRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	drafts := NewAutomationDraftService(automationRepo, registry)
+	capabilities := NewAutomationCapabilitySnapshotBuilder(projectRepo, nil, taskRepo, nil)
+	capabilities.SetLLMConfigRepository(repository.NewLLMConfigRepo(db))
+	drafts.SetCapabilitySnapshotBuilder(capabilities)
+	validator := NewAutomationSaveValidator(registry, drafts)
+	taskSvc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil)
+	compiler := NewAutomationCompiler(automationRepo, taskSvc, taskRepo, scheduleRepo, validator)
+	automationIDs := make(map[int]string, len(nodeCounts))
+	for _, nodeCount := range nodeCounts {
+		saved, err := compiler.Save(ctx, AutomationSaveRequest{
+			ProjectID: project.ID, Source: "manual", CreatedVia: "benchmark",
+			Candidate: automationLiveBenchmarkCandidate(nodeCount),
+		})
+		if err != nil {
+			tb.Fatalf("save %d-node benchmark fixture: %v", nodeCount, err)
+		}
+		automationIDs[nodeCount] = saved.Definition.Automation.ID
+	}
+	return &automationLiveYAMLBenchmarkFixture{ctx: ctx, project: project, counter: counter,
+		drafts: drafts, graphSvc: NewAutomationGraphService(automationRepo), automationIDs: automationIDs}
+}
+
+func (f *automationLiveYAMLBenchmarkFixture) run(nodeCount int, before bool) error {
+	automationID := f.automationIDs[nodeCount]
+	graph, err := f.graphSvc.GetLive(f.ctx, f.project.ID, automationID, time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	var current *models.AutomationDraftResult
+	if before {
+		current, err = f.drafts.CurrentCandidate(f.ctx, f.project.ID, automationID)
+	} else {
+		current, err = f.drafts.LoadLiveCandidate(f.ctx, f.project.ID, graph)
+	}
+	if err != nil {
+		return err
+	}
+	if len(current.Candidate.Nodes) != nodeCount {
+		return fmt.Errorf("Live path returned %d nodes, want %d", len(current.Candidate.Nodes), nodeCount)
+	}
+	return nil
+}
+
+func (f *automationLiveYAMLBenchmarkFixture) warm(nodeCount int, before bool) (int, error) {
+	f.counter.Reset()
+	f.counter.SetEnabled(true)
+	err := f.run(nodeCount, before)
+	f.counter.SetEnabled(false)
+	return len(f.counter.Statements()), err
+}
+
+type automationLiveYAMLBenchmarkMetrics struct {
+	wallNs          float64
+	bytesPerOp      float64
+	allocsPerOp     float64
+	statementsPerOp float64
+}
+
+func medianAutomationLiveYAMLMetric(values []float64) float64 {
+	ordered := append([]float64(nil), values...)
+	sort.Float64s(ordered)
+	return ordered[len(ordered)/2]
+}
+
+func medianAutomationLiveYAMLMetrics(samples []automationLiveYAMLBenchmarkMetrics) automationLiveYAMLBenchmarkMetrics {
+	wall := make([]float64, 0, len(samples))
+	bytes := make([]float64, 0, len(samples))
+	allocs := make([]float64, 0, len(samples))
+	statements := make([]float64, 0, len(samples))
+	for _, sample := range samples {
+		wall = append(wall, sample.wallNs)
+		bytes = append(bytes, sample.bytesPerOp)
+		allocs = append(allocs, sample.allocsPerOp)
+		statements = append(statements, sample.statementsPerOp)
+	}
+	return automationLiveYAMLBenchmarkMetrics{wallNs: medianAutomationLiveYAMLMetric(wall),
+		bytesPerOp: medianAutomationLiveYAMLMetric(bytes), allocsPerOp: medianAutomationLiveYAMLMetric(allocs),
+		statementsPerOp: medianAutomationLiveYAMLMetric(statements)}
+}
+
+func measureAutomationLiveYAMLPath(tb testing.TB, fixture *automationLiveYAMLBenchmarkFixture, nodeCount int, before bool) automationLiveYAMLBenchmarkMetrics {
+	tb.Helper()
+	queryCount, err := fixture.warm(nodeCount, before)
+	if err != nil {
+		tb.Fatalf("warm Live YAML path: %v", err)
+	}
+	wantQueries := 12
+	if before {
+		wantQueries = 20
+	}
+	if queryCount != wantQueries {
+		tb.Fatalf("Live YAML path statements = %d, want %d", queryCount, wantQueries)
+	}
+
+	var runErr error
+	result := testing.Benchmark(func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			if runErr = fixture.run(nodeCount, before); runErr != nil {
+				return
+			}
+		}
+	})
+	if runErr != nil {
+		tb.Fatalf("measure Live YAML path: %v", runErr)
+	}
+	return automationLiveYAMLBenchmarkMetrics{wallNs: float64(result.NsPerOp()),
+		bytesPerOp: float64(result.AllocedBytesPerOp()), allocsPerOp: float64(result.AllocsPerOp()),
+		statementsPerOp: float64(queryCount)}
+}
+
+func TestAutomationLiveYAMLPerformanceThresholds(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping production-shaped Live YAML performance fixture in short mode")
+	}
+	fixture := newAutomationLiveYAMLBenchmarkFixture(t, []int{30})
+	beforeSamples := make([]automationLiveYAMLBenchmarkMetrics, 0, automationLiveYAMLBenchmarkSamples)
+	afterSamples := make([]automationLiveYAMLBenchmarkMetrics, 0, automationLiveYAMLBenchmarkSamples)
+	for sample := 0; sample < automationLiveYAMLBenchmarkSamples; sample++ {
+		if sample%2 == 0 {
+			beforeSamples = append(beforeSamples, measureAutomationLiveYAMLPath(t, fixture, 30, true))
+			afterSamples = append(afterSamples, measureAutomationLiveYAMLPath(t, fixture, 30, false))
+			continue
+		}
+		afterSamples = append(afterSamples, measureAutomationLiveYAMLPath(t, fixture, 30, false))
+		beforeSamples = append(beforeSamples, measureAutomationLiveYAMLPath(t, fixture, 30, true))
+	}
+	before := medianAutomationLiveYAMLMetrics(beforeSamples)
+	after := medianAutomationLiveYAMLMetrics(afterSamples)
+	t.Logf("30-node Live YAML medians: before=%.0f ns/op %.0f B/op %.0f allocs/op %.0f SQL; after=%.0f ns/op %.0f B/op %.0f allocs/op %.0f SQL", before.wallNs, before.bytesPerOp, before.allocsPerOp, before.statementsPerOp, after.wallNs, after.bytesPerOp, after.allocsPerOp, after.statementsPerOp)
+	require.Equal(t, float64(20), before.statementsPerOp)
+	require.Equal(t, float64(12), after.statementsPerOp)
+	if testing.CoverMode() == "" {
+		require.LessOrEqual(t, after.wallNs, before.wallNs*0.70, "30-node Live YAML wall time must improve by at least 30%%")
+	} else {
+		t.Log("coverage instrumentation detected; reporting wall time without enforcing the production latency gate")
+	}
+	require.LessOrEqual(t, after.bytesPerOp, before.bytesPerOp*0.60, "30-node Live YAML allocated bytes must improve by at least 40%%")
+	require.LessOrEqual(t, after.allocsPerOp, before.allocsPerOp*0.60, "30-node Live YAML allocation count must improve by at least 40%%")
+}
+
+// BenchmarkAutomationLiveYAMLCurrentAndLoadedPath compares the Live graph and
+// candidate-loading portion measured by the issue's SQL/allocation probe. YAML
+// encoding is intentionally outside the timed section because it is shared by
+// both paths and is covered separately by the serialization equivalence tests.
+func BenchmarkAutomationLiveYAMLCurrentAndLoadedPath(b *testing.B) {
+	fixture := newAutomationLiveYAMLBenchmarkFixture(b, []int{1, 10, 30})
+	for _, nodeCount := range []int{1, 10, 30} {
+		nodeCount := nodeCount
+		b.Run(fmt.Sprintf("before_%d_nodes", nodeCount), func(b *testing.B) {
+			benchmarkAutomationLiveYAMLPath(b, fixture, nodeCount, true)
+		})
+		b.Run(fmt.Sprintf("after_%d_nodes", nodeCount), func(b *testing.B) {
+			benchmarkAutomationLiveYAMLPath(b, fixture, nodeCount, false)
+		})
+	}
+}
+
+func benchmarkAutomationLiveYAMLPath(b *testing.B, fixture *automationLiveYAMLBenchmarkFixture, nodeCount int, before bool) {
+	b.Helper()
+	queryCount, err := fixture.warm(nodeCount, before)
+	if err != nil {
+		b.Fatalf("measure Live YAML path: %v", err)
+	}
+	wantQueries := 12
+	if before {
+		wantQueries = 20
+	}
+	if queryCount != wantQueries {
+		b.Fatalf("Live YAML path statements = %d, want %d", queryCount, wantQueries)
+	}
+
+	var runErr error
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if runErr = fixture.run(nodeCount, before); runErr != nil {
+			break
+		}
+	}
+	b.StopTimer()
+	if runErr != nil {
+		b.Fatalf("measure Live YAML path: %v", runErr)
+	}
+	b.ReportMetric(float64(queryCount), "sql_statements/op")
+}
+
+func automationLiveBenchmarkCandidate(nodeCount int) models.AutomationDraftCandidate {
+	promptSize := 4096
+	if nodeCount >= 30 {
+		promptSize = 1024
+	}
+	candidate := models.AutomationDraftCandidate{SchemaVersion: 1, Name: fmt.Sprintf("Live benchmark %d nodes", nodeCount),
+		Description: "Production-shaped Live YAML benchmark", AutomationType: "custom", AdapterKey: AutomationAdapterCustom,
+		Nodes: make([]models.AutomationDraftNode, 0, nodeCount)}
+	for i := 0; i < nodeCount; i++ {
+		candidate.Nodes = append(candidate.Nodes, models.AutomationDraftNode{
+			Key: fmt.Sprintf("schedule_%02d", i), Name: fmt.Sprintf("Schedule %02d", i),
+			Type: models.AutomationNodeTrigger, Role: "fixed_schedule",
+			Config: map[string]any{"prompt": strings.Repeat("p", promptSize), "category": string(models.CategoryScheduled),
+				"priority": 2, "run_at": "09:00", "repeat_type": string(models.RepeatDaily), "repeat_interval": 1,
+				"enabled": true, "clear_context_on_start": true},
+			Position: &models.AutomationDraftPoint{X: float64(i * 220), Y: 0},
+		})
+	}
+	return candidate
+}
+
 func automationValidationBaselineConfigured(ctx context.Context, drafts *AutomationDraftService, capabilities *AutomationCapabilitySnapshotBuilder, agentRepo *repository.AgentRepo, projectID string, candidate models.AutomationDraftCandidate) error {
 	normalized, err := drafts.NormalizeCandidate(candidate)
 	if err != nil {

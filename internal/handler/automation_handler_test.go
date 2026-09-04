@@ -3473,6 +3473,69 @@ func (f *handlerAutomationExternalProvider) GetPullRequest(context.Context, *ser
 	return &service.GitHubPullRequest{}, nil
 }
 
+func TestAutomationLiveYAMLUsesLoadedGraphWithoutSecondDefinitionRead(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	project := &models.Project{Name: "Automation Live YAML query budget"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+
+	taskRepo := repository.NewTaskRepo(db, nil)
+	task := &models.Task{ProjectID: project.ID, Title: "Live YAML task", Category: models.CategoryScheduled,
+		Priority: 2, Status: models.StatusPending, Prompt: "Review the current request."}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	schedule := &models.Schedule{TaskID: task.ID, RunAt: time.Now().UTC().Add(time.Hour),
+		RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: true, ClearContextOnStart: true}
+	require.NoError(t, repository.NewScheduleRepo(db).Create(ctx, schedule))
+
+	automationRepo := repository.NewAutomationRepo(db)
+	registry := service.NewAutomationAdapterRegistry()
+	registration := service.NewAutomationRegistrationService(automationRepo, registry)
+	drafts := service.NewAutomationDraftService(automationRepo, registry)
+	capabilities := service.NewAutomationCapabilitySnapshotBuilder(projectRepo, nil, taskRepo, nil)
+	capabilities.SetLLMConfigRepository(llmConfigRepo)
+	h.SetAutomationServices(service.NewAutomationGraphService(automationRepo), registration)
+	h.SetAutomationBuilderServices(drafts, capabilities, nil, nil, nil, nil)
+	definition, _, err := registration.Register(ctx, service.AutomationRegistrationRequest{
+		ProjectID: project.ID, AdapterKey: service.AutomationAdapterNativeSDLC,
+		StableKey: "native-sdlc/live-yaml-query-budget",
+		Resources: []models.AutomationResourceBinding{
+			{NodeKey: "vision_suggestions", ResourceType: "task", ResourceID: task.ID},
+			{NodeKey: "vision_suggestions", ResourceType: "schedule", ResourceID: schedule.ID},
+		},
+	})
+	require.NoError(t, err)
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	response := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/automations/"+definition.Automation.ID+"?project_id="+project.ID, nil)
+	req.Header.Set("HX-Request", "true")
+	e.ServeHTTP(response, req)
+	counter.SetEnabled(false)
+
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	require.Contains(t, response.Body.String(), "schema_version")
+	statements := counter.Statements()
+	count := func(fragment string) int {
+		count := 0
+		for _, statement := range statements {
+			if strings.Contains(strings.ToLower(strings.Join(strings.Fields(statement), " ")), fragment) {
+				count++
+			}
+		}
+		return count
+	}
+	require.Equal(t, 1, count("from automation_versions"), "Live YAML must not reload the published version")
+	require.Equal(t, 1, count("from automation_nodes"), "Live YAML must not reload automation nodes")
+	require.Equal(t, 1, count("from automation_edges"), "Live YAML must not reload automation edges")
+	require.Equal(t, 1, count("select adr.id, adr.project_id"), "Live YAML must not reload definition resources")
+	require.Equal(t, 1, count("from automation_graph_metadata"), "Live YAML should read candidate metadata once")
+	require.Zero(t, count("from agent_configs"), "Live YAML must not run capability validation")
+	require.Equal(t, 13, len(statements), "Live YAML should perform only the bounded metadata read after GetLive plus the route project lookup; statements: %#v", statements)
+}
+
 func TestRefreshAutomationExternalStateRouteRendersLiveGraphAndPreservesProjectScope(t *testing.T) {
 	tc := NewTestContext(t)
 	ctx := context.Background()

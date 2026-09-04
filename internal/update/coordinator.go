@@ -117,6 +117,8 @@ type Coordinator struct {
 	packagedUpdateRecoveryLeaseHook func()
 	recoveryOnce                    sync.Once
 	checksOnce                      sync.Once
+	checksCancel                    context.CancelFunc
+	checksWG                        sync.WaitGroup
 	updateNotificationsEnabled      bool
 }
 
@@ -1516,29 +1518,52 @@ func (c *Coordinator) StartRecovery(ctx context.Context) {
 
 func (c *Coordinator) StartChecks(ctx context.Context) {
 	c.checksOnce.Do(func() {
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		checkCtx, cancel := context.WithCancel(ctx)
+		c.mu.Lock()
+		c.checksWG.Add(1)
+		c.checksCancel = cancel
 		// Capture startup eligibility before launching the goroutine. Recovery can
 		// settle a restarting packaged update immediately after Start returns; an
 		// asynchronous initial Check must not race that settlement and erase the
 		// terminal outcome before callers can observe it.
-		c.mu.RLock()
 		initialCheck := !isTransitionState(c.state) && !c.accepted && c.state != StateSucceeded && c.state != StateRolledBack
-		c.mu.RUnlock()
+		c.mu.Unlock()
 		go func() {
+			defer c.checksWG.Done()
 			if initialCheck {
-				_ = c.Check(ctx)
+				_ = c.Check(checkCtx)
 			}
 			ticker := time.NewTicker(time.Minute)
 			defer ticker.Stop()
 			for {
 				select {
-				case <-ctx.Done():
+				case <-checkCtx.Done():
 					return
 				case <-ticker.C:
-					_ = c.Check(ctx)
+					_ = c.Check(checkCtx)
 				}
 			}
 		}()
 	})
+}
+
+// StopChecks cancels and joins the background update-check loop. Callers that
+// own the coordinator lifecycle should invoke it before closing files used by
+// the update client.
+func (c *Coordinator) StopChecks() {
+	if c == nil {
+		return
+	}
+	c.mu.RLock()
+	cancel := c.checksCancel
+	c.mu.RUnlock()
+	if cancel != nil {
+		cancel()
+	}
+	c.checksWG.Wait()
 }
 
 func (c *Coordinator) Start(ctx context.Context) {

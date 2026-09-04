@@ -758,6 +758,80 @@ func TestAutomationSaveRecreatesDeletedRetainedNativeResourcesPreservesPausedLif
 	require.Equal(t, "paused", ownershipState)
 }
 
+func TestAutomationLiveCandidateDerivesMissingMetadataFromLiveGraph(t *testing.T) {
+	h := newAutomationSaveHarness(t, "Live candidate graph fallback")
+	ctx := context.Background()
+	candidate := customScheduledTaskCandidate("Live candidate graph fallback", "Review the current request.")
+	saved, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
+	require.NoError(t, err)
+	_, err = h.db.ExecContext(ctx, `DELETE FROM automation_graph_metadata WHERE project_id = ? AND automation_id = ? AND version_id = ?`,
+		h.project.ID, saved.Definition.Automation.ID, saved.Definition.Version.ID)
+	require.NoError(t, err)
+
+	graph, err := NewAutomationGraphService(h.automationRepo).GetLive(ctx, h.project.ID, saved.Definition.Automation.ID, time.Now().UTC())
+	require.NoError(t, err)
+	live, err := h.drafts.LoadLiveCandidate(ctx, h.project.ID, graph)
+	require.NoError(t, err)
+
+	expected, err := h.drafts.candidateFromDefinition(ctx, h.project.ID, saved.Definition.Automation.ID, saved.Definition)
+	require.NoError(t, err)
+	expected, err = h.drafts.hydratePersistedScheduleContext(ctx, h.project.ID, expected, saved.Definition)
+	require.NoError(t, err)
+	expected, err = h.drafts.normalizeReopenedCandidate(expected)
+	require.NoError(t, err)
+	require.Equal(t, expected, live.Candidate)
+	require.Equal(t, "right", live.Candidate.Edges[0].FromPort)
+	require.Equal(t, "left", live.Candidate.Edges[0].ToPort)
+}
+
+func TestAutomationLiveCandidateMatchesCurrentCandidate(t *testing.T) {
+	h := newAutomationSaveHarness(t, "Live candidate serialization")
+	ctx := context.Background()
+	candidate := customScheduledTaskCandidate("Live candidate serialization", "Review the current request.")
+	saved, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
+	require.NoError(t, err)
+
+	graph, err := NewAutomationGraphService(h.automationRepo).GetLive(ctx, h.project.ID, saved.Definition.Automation.ID, time.Now().UTC())
+	require.NoError(t, err)
+	live, err := h.drafts.LoadLiveCandidate(ctx, h.project.ID, graph)
+	require.NoError(t, err)
+	current, err := h.drafts.CurrentCandidate(ctx, h.project.ID, saved.Definition.Automation.ID)
+	require.NoError(t, err)
+	require.Equal(t, current.Candidate, live.Candidate)
+
+	expectedYAML, err := EncodeAutomationDraftYAML(current.Candidate)
+	require.NoError(t, err)
+	actualYAML, err := EncodeAutomationDraftYAML(live.Candidate)
+	require.NoError(t, err)
+	require.Equal(t, expectedYAML, actualYAML)
+}
+
+func TestAutomationLiveCandidatePreservesLegacyScheduleContext(t *testing.T) {
+	h := newAutomationSaveHarness(t, "Live legacy schedule context")
+	ctx := context.Background()
+	candidate := customScheduledTaskCandidate("Live legacy schedule context", "Review the current request.")
+	saved, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
+	require.NoError(t, err)
+	scheduleID := automationResourceID(t, saved.Definition, "schedule", "schedule")
+	_, err = h.db.ExecContext(ctx, `UPDATE schedules SET clear_context_on_start = 0 WHERE id = ?`, scheduleID)
+	require.NoError(t, err)
+
+	graph, err := NewAutomationGraphService(h.automationRepo).GetLive(ctx, h.project.ID, saved.Definition.Automation.ID, time.Now().UTC())
+	require.NoError(t, err)
+	live, err := h.drafts.LoadLiveCandidate(ctx, h.project.ID, graph)
+	require.NoError(t, err)
+	liveSchedule := automationDraftNodeByKey(t, live.Candidate, "schedule")
+	require.Equal(t, false, liveSchedule.Config["clear_context_on_start"])
+
+	require.NoError(t, h.scheduleRepo.Delete(ctx, scheduleID))
+	graph, err = NewAutomationGraphService(h.automationRepo).GetLive(ctx, h.project.ID, saved.Definition.Automation.ID, time.Now().UTC())
+	require.NoError(t, err)
+	live, err = h.drafts.LoadLiveCandidate(ctx, h.project.ID, graph)
+	require.NoError(t, err)
+	_, hasPersistedContext := automationDraftNodeByKey(t, live.Candidate, "schedule").Config["clear_context_on_start"]
+	require.False(t, hasPersistedContext, "a deleted schedule has no stored context value to hydrate")
+}
+
 func TestAutomationCurrentCandidateRecoversMissingScheduleContextAfterDeletion(t *testing.T) {
 	h := newAutomationSaveHarness(t, "Recover missing schedule context")
 	ctx := context.Background()

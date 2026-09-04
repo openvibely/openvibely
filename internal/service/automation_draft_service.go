@@ -1736,6 +1736,45 @@ func (s *AutomationDraftService) LoadCurrentCandidate(ctx context.Context, proje
 	return draftPreviewResult(candidate, current), nil
 }
 
+// LoadLiveCandidate loads the YAML candidate for an already-loaded Live graph.
+// Unlike CurrentCandidate, this serialization-only path does not reload the
+// definition or validate project capabilities. The Live graph is the source of
+// truth for the current published version and its nodes, edges, and resources.
+func (s *AutomationDraftService) LoadLiveCandidate(ctx context.Context, projectID string, graph *models.AutomationLiveGraph) (*models.AutomationDraftResult, error) {
+	if s == nil || s.repo == nil {
+		return nil, errors.New("automation repository is unavailable")
+	}
+	if graph == nil || graph.Automation.ID == "" || graph.Automation.ProjectID != projectID ||
+		graph.Automation.PublishedVersionID == nil || *graph.Automation.PublishedVersionID != graph.Version.ID ||
+		graph.Version.ID == "" || graph.Version.ProjectID != projectID ||
+		graph.Version.AutomationID != graph.Automation.ID || graph.Version.State != models.AutomationVersionPublished {
+		return nil, errors.New("saved automation not found")
+	}
+
+	metadata, err := s.repo.GetAutomationGraphMetadata(ctx, projectID, graph.Automation.ID, graph.Version.ID)
+	if err != nil {
+		return nil, err
+	}
+	var candidate models.AutomationDraftCandidate
+	if metadata != nil {
+		candidate, err = metadata.Candidate()
+	} else {
+		candidate, err = candidateFromLiveGraph(graph)
+	}
+	if err != nil {
+		return nil, err
+	}
+	candidate, err = s.hydratePersistedScheduleContextFromLive(ctx, projectID, candidate, graph.Resources)
+	if err != nil {
+		return nil, err
+	}
+	candidate, err = s.normalizeReopenedCandidate(candidate)
+	if err != nil {
+		return nil, err
+	}
+	return draftPreviewResult(candidate, nil), nil
+}
+
 func (s *AutomationDraftService) CurrentCandidate(ctx context.Context, projectID, automationID string) (*models.AutomationDraftResult, error) {
 	loaded, err := s.LoadCurrentCandidate(ctx, projectID, automationID)
 	if err != nil {
@@ -1751,6 +1790,20 @@ func (s *AutomationDraftService) hydratePersistedScheduleContext(ctx context.Con
 			scheduleByNode[resource.NodeKey] = resource.ResourceID
 		}
 	}
+	return s.hydratePersistedScheduleContextForNodes(ctx, projectID, candidate, scheduleByNode)
+}
+
+func (s *AutomationDraftService) hydratePersistedScheduleContextFromLive(ctx context.Context, projectID string, candidate models.AutomationDraftCandidate, resources []models.AutomationResourceSummary) (models.AutomationDraftCandidate, error) {
+	scheduleByNode := make(map[string]string)
+	for _, resource := range resources {
+		if resource.ResourceType == "schedule" {
+			scheduleByNode[resource.NodeKey] = resource.ResourceID
+		}
+	}
+	return s.hydratePersistedScheduleContextForNodes(ctx, projectID, candidate, scheduleByNode)
+}
+
+func (s *AutomationDraftService) hydratePersistedScheduleContextForNodes(ctx context.Context, projectID string, candidate models.AutomationDraftCandidate, scheduleByNode map[string]string) (models.AutomationDraftCandidate, error) {
 	for i := range candidate.Nodes {
 		node := &candidate.Nodes[i]
 		if node.Config == nil {
@@ -1773,6 +1826,37 @@ func (s *AutomationDraftService) hydratePersistedScheduleContext(ctx context.Con
 			return candidate, fmt.Errorf("load saved schedule context for node %q: %w", node.Key, err)
 		}
 		node.Config["clear_context_on_start"] = clearContextOnStart
+	}
+	return candidate, nil
+}
+
+func candidateFromLiveGraph(graph *models.AutomationLiveGraph) (models.AutomationDraftCandidate, error) {
+	candidate := models.AutomationDraftCandidate{SchemaVersion: automationDraftSchemaVersion,
+		Name: graph.Automation.Name, Description: graph.Automation.Description,
+		AutomationType: graph.Automation.AutomationType, AdapterKey: graph.Version.AdapterKey}
+	nodeKeys := make(map[string]string, len(graph.Nodes))
+	for _, liveNode := range graph.Nodes {
+		node := liveNode.AutomationNode
+		var config map[string]any
+		if err := json.Unmarshal([]byte(node.ConfigJSON), &config); err != nil {
+			return candidate, err
+		}
+		if config == nil {
+			config = map[string]any{}
+		}
+		nodeKeys[node.ID] = node.NodeKey
+		candidate.Nodes = append(candidate.Nodes, models.AutomationDraftNode{Key: node.NodeKey, Name: node.Name,
+			Type: node.NodeType, Role: node.Role, Config: config,
+			Position: &models.AutomationDraftPoint{X: node.PositionX, Y: node.PositionY}})
+	}
+	for _, liveEdge := range graph.Edges {
+		edge := liveEdge.AutomationEdge
+		var condition map[string]any
+		if err := json.Unmarshal([]byte(edge.ConditionJSON), &condition); err != nil {
+			return candidate, err
+		}
+		candidate.Edges = append(candidate.Edges, models.AutomationDraftEdge{Key: edge.EdgeKey,
+			From: nodeKeys[edge.SourceNodeID], To: nodeKeys[edge.TargetNodeID], Label: edge.Label, Condition: condition})
 	}
 	return candidate, nil
 }
