@@ -705,7 +705,14 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 							</select>
 						</div>
 					</div>
-					<!-- Schedule Configuration -->
+						<!-- Git Worktree: Auto-merge -->
+						<div class="form-control mt-3">
+							<label class="label cursor-pointer justify-start gap-2">
+								<input type="checkbox" name="auto_merge" class="toggle toggle-sm toggle-primary"/>
+								<span class="label-text">Auto-merge to target branch on completion</span>
+							</label>
+						</div>
+						<!-- Schedule Configuration -->
 					<div class="divider text-xs opacity-60">Schedule Configuration</div>
 					<div class="grid grid-cols-1 gap-3 md:grid-cols-2">
 						<div class="form-control">
