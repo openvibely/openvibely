@@ -2771,9 +2771,9 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						const board = kanbanDropdown.closest('#kanban-board');
 						if (board && openKanbanMenuKey) board.setAttribute('data-open-kanban-menu-key', openKanbanMenuKey);
 						setKanbanMenuExpanded(kanbanDropdown, true);
+						window.dispatchEvent(new CustomEvent('kanban-menu-opened'));
 					}
-					requestAnimationFrame(function() { positionDropdownForViewport(label); });
-					if (kanbanDropdown && label.matches('[data-task-card-menu-trigger]') && window.htmx) {
+					requestAnimationFrame(function() { positionDropdownForViewport(label); });					if (kanbanDropdown && label.matches('[data-task-card-menu-trigger]') && window.htmx) {
 						const options = kanbanDropdown.querySelector('[data-task-card-merge-options]');
 						const refreshURL = options && options.getAttribute('hx-get');
 						if (options && refreshURL) htmx.ajax('GET', refreshURL, {target: options, swap: 'outerHTML'});
