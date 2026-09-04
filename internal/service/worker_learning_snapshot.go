@@ -74,7 +74,27 @@ func assignedAgentIdentity(snapshot lifecycle.LearningInputSnapshot) lifecycle.A
 }
 
 func selectedLearningSkillEntries(catalog *agentskills.Catalog, handles []string) []agentskills.Entry {
-	return catalog.EntriesForHandles(handles)
+	if catalog == nil {
+		return nil
+	}
+	out := make([]agentskills.Entry, 0, len(handles))
+	seen := map[string]struct{}{}
+	for _, handle := range handles {
+		handle = strings.TrimSpace(handle)
+		if handle == "" {
+			continue
+		}
+		if _, ok := seen[handle]; ok {
+			continue
+		}
+		entry, ok := catalog.Lookup(handle)
+		if !ok {
+			continue
+		}
+		seen[handle] = struct{}{}
+		out = append(out, entry)
+	}
+	return out
 }
 
 func learningSkillWritePolicy(hasAssignedAgent bool) []string {

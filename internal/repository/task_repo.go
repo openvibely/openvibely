@@ -30,18 +30,6 @@ const swarmChildTaskSelectColumns = `id, project_id, title, category, priority, 
 
 const scheduleCalendarTaskSelectColumns = `t.id, t.project_id, t.title, t.category, t.status`
 
-const scheduleCalendarQuery = `SELECT ` + scheduleCalendarTaskSelectColumns + `,
-		 s.id, s.task_id, s.run_at, s.repeat_type, s.repeat_interval, s.enabled, s.clear_context_on_start, s.next_run, s.last_run, s.created_at, s.updated_at,
-		 COALESCE(automation_node.name, '')
-		 FROM tasks t
-		 LEFT JOIN schedules s ON t.id = s.task_id
-		 LEFT JOIN automation_trigger_owners automation_owner ON automation_owner.schedule_id = s.id AND automation_owner.project_id = t.project_id
-		 LEFT JOIN automation_nodes automation_node ON automation_node.id = automation_owner.node_id
-			AND automation_node.version_id = automation_owner.version_id
-			AND automation_node.automation_id = automation_owner.automation_id
-			AND automation_node.project_id = automation_owner.project_id
-		 WHERE t.project_id = ? AND (t.category = 'scheduled' OR s.id IS NOT NULL)`
-
 const taskSelectColumnsWithGoal = `t.id, t.project_id, t.title, t.category, t.priority, t.status, t.prompt, t.agent_id, t.agent_definition_id, t.tag, t.display_order, t.parent_task_id, t.chain_config, t.swarm_role, t.swarm_status, t.swarm_config, t.swarm_sequence, t.worktree_path, t.worktree_branch, t.auto_merge, t.merge_target_branch, t.merge_status, t.base_branch, t.base_commit_sha, t.lineage_depth, t.created_via, t.telegram_chat_id,
 				EXISTS(SELECT 1 FROM task_goals g WHERE g.task_id = t.id AND g.status != 'cleared') AS has_goal,
 				EXISTS(SELECT 1 FROM task_goals g WHERE g.task_id = t.id AND g.status = 'achieved') AS goal_met,
@@ -410,14 +398,26 @@ func (r *TaskRepo) CreateWithExecutor(ctx context.Context, exec SQLExecutor, t *
 }
 
 func (r *TaskRepo) CreateWithGoal(ctx context.Context, t *models.Task, goal *models.TaskGoal) error {
-	if goal == nil || strings.TrimSpace(goal.Objective) == "" {
-		return r.Create(ctx, t)
-	}
-	return withImmediateTx(ctx, r.db, func(exec sqlExecutor) error {
+	return r.CreateWithGoalAndCallback(ctx, t, goal, nil)
+}
+
+// CreateWithGoalAndCallback persists a task, its optional goal, and any related
+// metadata callback in one transaction. The callback runs after the task ID is
+// assigned and before the transaction is committed.
+func (r *TaskRepo) CreateWithGoalAndCallback(ctx context.Context, t *models.Task, goal *models.TaskGoal, callback func(SQLExecutor) error) error {
+	return withImmediateTx(ctx, r.db, func(exec SQLExecutor) error {
 		if err := r.createWithExecutor(ctx, exec, t); err != nil {
 			return err
 		}
-		return createTaskGoalWithExecutor(ctx, exec, t.ID, goal)
+		if goal != nil && strings.TrimSpace(goal.Objective) != "" {
+			if err := createTaskGoalWithExecutor(ctx, exec, t.ID, goal); err != nil {
+				return err
+			}
+		}
+		if callback != nil {
+			return callback(exec)
+		}
+		return nil
 	})
 }
 
@@ -1505,11 +1505,19 @@ type TaskWithSchedule struct {
 }
 
 func (r *TaskRepo) ListWithSchedulesByProject(ctx context.Context, projectID string) ([]TaskWithSchedule, error) {
-	return r.listWithSchedulesByProjectQuery(ctx, scheduleCalendarQuery, projectID)
-}
-
-func (r *TaskRepo) listWithSchedulesByProjectQuery(ctx context.Context, query, projectID string) ([]TaskWithSchedule, error) {
-	rows, err := r.db.QueryContext(ctx, query, projectID)
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT `+scheduleCalendarTaskSelectColumns+`,
+			 s.id, s.task_id, s.run_at, s.repeat_type, s.repeat_interval, s.enabled, s.clear_context_on_start, s.next_run, s.last_run, s.created_at, s.updated_at,
+			 COALESCE(automation_node.name, '')
+			 FROM tasks t
+			 LEFT JOIN schedules s ON t.id = s.task_id
+			 LEFT JOIN automation_trigger_owners automation_owner ON automation_owner.schedule_id = s.id AND automation_owner.project_id = t.project_id
+			 LEFT JOIN automation_nodes automation_node ON automation_node.id = automation_owner.node_id
+				AND automation_node.version_id = automation_owner.version_id
+				AND automation_node.automation_id = automation_owner.automation_id
+				AND automation_node.project_id = automation_owner.project_id
+			 WHERE t.project_id = ? AND (t.category = 'scheduled' OR s.id IS NOT NULL)
+			 ORDER BY s.next_run ASC`, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("listing tasks with schedules: %w", err)
 	}
@@ -2122,7 +2130,15 @@ func (r *TaskRepo) UpdateDiscordOrigin(ctx context.Context, id string) error {
 
 // UpdateXOrigin marks a task as created through X.
 func (r *TaskRepo) UpdateXOrigin(ctx context.Context, id string) error {
-	_, err := execBoundSQLite(ctx, r.db, `UPDATE tasks SET created_via = 'x', updated_at = datetime('now') WHERE id = ?`, id)
+	return withBoundSQLiteConn(ctx, r.db, func(conn *sql.Conn) error {
+		return r.UpdateXOriginWithExecutor(ctx, conn, id)
+	})
+}
+
+// UpdateXOriginWithExecutor marks a task as created through X using the
+// caller's transaction.
+func (r *TaskRepo) UpdateXOriginWithExecutor(ctx context.Context, exec SQLExecutor, id string) error {
+	_, err := exec.ExecContext(ctx, `UPDATE tasks SET created_via = 'x', updated_at = datetime('now') WHERE id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("updating X origin: %w", err)
 	}

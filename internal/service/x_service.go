@@ -9,7 +9,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode/utf16"
 	"unicode/utf8"
 
 	"github.com/openvibely/openvibely/internal/applog"
@@ -19,9 +18,6 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/util"
-	"github.com/rivo/uniseg"
-	"golang.org/x/net/idna"
-	"golang.org/x/text/unicode/norm"
 )
 
 const (
@@ -37,11 +33,6 @@ const (
 	xProcessTimeout             = 5 * time.Minute
 	xReceiptLease               = 10 * time.Minute
 	xMaxMentionPages            = 10
-	xMaxWeightedPostLength      = 280
-	xTransformedURLLength       = 23
-	xMaxURLLength               = 4096
-	xMaxTCOURLSlugLength        = 40
-	xDefaultCharacterWeight     = 2
 )
 
 var errXReceiptActive = errors.New("X mention receipt is actively leased")
@@ -617,19 +608,33 @@ func (s *XService) runtimeTools(callerTaskID, projectID, accountID, userID, conv
 		TaskSvc:   s.taskSvc, TaskRepo: s.taskRepo, ExecRepo: s.execRepo,
 		ThreadInputRepo: s.threadInputRepo, ExecutionStreamHub: s.executionStreamHub,
 		LLMConfigRepo: s.llmConfigRepo, SwarmSvc: swarmFromTaskService(s.taskSvc),
-		OnTasksCreated: func(ctx context.Context, _ []TaskCreationRequest, tasks []models.Task) error {
+		PersistTaskCreation: func(ctx context.Context, exec repository.SQLExecutor, task *models.Task) error {
+			if s.taskRepo == nil {
+				return fmt.Errorf("X task repository is not configured")
+			}
 			if s.taskContextRepo == nil {
 				return fmt.Errorf("X task context repository is not configured")
 			}
-			for _, task := range tasks {
-				if err := s.taskRepo.UpdateXOrigin(ctx, task.ID); err != nil {
-					return err
-				}
-				if err := s.taskContextRepo.Upsert(ctx, &models.XTaskContext{TaskID: task.ID, ProjectID: projectID, AccountID: accountID, ConversationID: conversationID, ReplyToTweetID: replyToTweetID, XUserID: userID, Username: username}); err != nil {
-					return err
-				}
+			if err := s.taskRepo.UpdateXOriginWithExecutor(ctx, exec, task.ID); err != nil {
+				return err
 			}
+			if err := s.taskContextRepo.UpsertWithExecutor(ctx, exec, &models.XTaskContext{TaskID: task.ID, ProjectID: projectID, AccountID: accountID, ConversationID: conversationID, ReplyToTweetID: replyToTweetID, XUserID: userID, Username: username}); err != nil {
+				return err
+			}
+			task.CreatedVia = models.TaskOriginX
 			return nil
+		},
+		OnSwarmCreated: func(ctx context.Context, task *models.Task) error {
+			if s.taskRepo == nil {
+				return fmt.Errorf("X task repository is not configured")
+			}
+			if s.taskContextRepo == nil {
+				return fmt.Errorf("X task context repository is not configured")
+			}
+			if err := s.taskRepo.UpdateXOrigin(ctx, task.ID); err != nil {
+				return err
+			}
+			return s.taskContextRepo.Upsert(ctx, &models.XTaskContext{TaskID: task.ID, ProjectID: projectID, AccountID: accountID, ConversationID: conversationID, ReplyToTweetID: replyToTweetID, XUserID: userID, Username: username})
 		},
 	})
 	mergeSelectedChannelRuntimeActionHandlers(handlers, taskHandlers, "create_task", "create_swarm_task")
@@ -692,8 +697,8 @@ func (s *XService) SendOutboundMessage(ctx context.Context, targetID, threadID, 
 	if targetID != "me" {
 		return sendMessageError("X outbound targets only support the authenticated account target x:me")
 	}
-	if xWeightedPostLength(text) > xMaxWeightedPostLength {
-		return sendMessageError("X posts are limited to 280 weighted characters")
+	if utf8.RuneCountInString(text) > 280 {
+		return sendMessageError("X posts are limited to 280 characters")
 	}
 	id, err := s.api.Post(ctx, text, "")
 	if err != nil {
@@ -743,525 +748,25 @@ func (s *XService) SendChatResponse(ctx context.Context, task models.Task, outpu
 	s.SendReplyForAccount(ctx, meta.AccountID, meta.ReplyToTweetID, output, errMsg)
 }
 
-type xTextRange struct {
-	start int
-	end   int
-}
-
-func xURLRanges(text string) []xTextRange {
-	matches := xURLPattern.FindAllStringSubmatchIndex(text, -1)
-	ranges := make([]xTextRange, 0, len(matches))
-	for _, match := range matches {
-		if len(match) < 4 {
-			continue
-		}
-		start, end := match[2], match[3]
-		if start < 0 || end <= start {
-			continue
-		}
-		urlStart := start
-		if end < len(text) && xURLDomainEndBlocked(text[end:]) {
-			continue
-		}
-		end = xURLSuffixEnd(text, end)
-		if !xURLWithinProviderLimit(text[urlStart:end]) {
-			continue
-		}
-
-		candidate := text[urlStart:end]
-		if xURLHasProtocol(candidate) {
-			validatedEnd, ok := xValidatedURLSuffixEnd(candidate)
-			if ok {
-				ranges = append(ranges, xTextRange{start: urlStart, end: urlStart + validatedEnd})
-			}
-			continue
-		}
-		if !isXURLWithoutProtocolStart(text, urlStart) {
-			continue
-		}
-
-		domain := xURLDomain(candidate)
-		suffixes := xASCIIURLSuffixRanges(domain)
-		for i, suffix := range suffixes {
-			suffixEnd := suffix.end
-			// twitter-text attaches a path or query to the final ASCII
-			// domain match only when a slash path exists. Bare ports and
-			// query-only suffixes remain ordinary weighted text.
-			if i == len(suffixes)-1 && xURLHasBarePath(candidate, len(domain)) {
-				suffixEnd = len(candidate)
-			}
-			ranges = append(ranges, xTextRange{start: urlStart + suffix.start, end: urlStart + suffixEnd})
+// SendTaskCompletionNotification sends a completed active-task result to the
+// X conversation that created it. Chat tasks use SendChatResponse through the
+// interactive streaming path and must not be notified a second time here.
+func (s *XService) SendTaskCompletionNotification(ctx context.Context, task models.Task, output, errMsg string) {
+	if task.CreatedVia != models.TaskOriginX && task.ID != "" && s.taskRepo != nil {
+		loaded, err := s.taskRepo.GetByID(ctx, task.ID)
+		if err == nil && loaded != nil {
+			task = *loaded
 		}
 	}
-	return ranges
+	if task.CreatedVia != models.TaskOriginX || task.Category == models.CategoryChat {
+		return
+	}
+	s.SendChatResponse(ctx, task, output, errMsg)
 }
-
-func xValidatedURLSuffixEnd(candidate string) (int, bool) {
-	if !xURLWithinProviderLimit(candidate) {
-		return 0, false
-	}
-
-	lower := strings.ToLower(candidate)
-	protocolLength := 0
-	if strings.HasPrefix(lower, "http://") {
-		protocolLength = len("http://")
-	} else if strings.HasPrefix(lower, "https://") {
-		protocolLength = len("https://")
-	}
-	if protocolLength == 0 {
-		return len(candidate), true
-	}
-	if !strings.HasPrefix(lower[protocolLength:], "t.co/") {
-		return len(candidate), true
-	}
-
-	slugStart := protocolLength + len("t.co/")
-	slugEnd := slugStart
-	for slugEnd < len(candidate) {
-		c := candidate[slugEnd]
-		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) {
-			break
-		}
-		slugEnd++
-	}
-	if slugEnd == slugStart {
-		return len(candidate), true
-	}
-	if slugEnd-slugStart > xMaxTCOURLSlugLength {
-		return 0, false
-	}
-
-	end := slugEnd
-	if end < len(candidate) && candidate[end] == '?' {
-		if query := xURLQueryPattern.FindStringIndex(candidate[end:]); query != nil && query[0] == 0 {
-			end += query[1]
-		}
-	}
-	return end, true
-}
-
-func xURLWithinProviderLimit(candidate string) bool {
-	authorityStart := 0
-	lower := strings.ToLower(candidate)
-	if strings.HasPrefix(lower, "http://") {
-		authorityStart = len("http://")
-	} else if strings.HasPrefix(lower, "https://") {
-		authorityStart = len("https://")
-	}
-
-	domainEnd := authorityStart
-	for domainEnd < len(candidate) {
-		r, size := utf8.DecodeRuneInString(candidate[domainEnd:])
-		switch r {
-		case ':', '/', '?', '#':
-			goto domainComplete
-		default:
-			domainEnd += size
-		}
-	}
-
-domainComplete:
-	domain := candidate[authorityStart:domainEnd]
-	encodedDomain, ok := xURLIDNAEncodedDomain(domain)
-	if !ok {
-		return false
-	}
-
-	// twitter-text validates each IDNA label and charges the URL-length delta
-	// between the original UTF-16 domain and its Punycode form. A
-	// protocol-less URL is checked as if it had the default https:// protocol.
-	length := xUTF16Length(candidate) + xUTF16Length(encodedDomain) - xUTF16Length(domain)
-	if authorityStart == 0 {
-		length += xUTF16Length("https://")
-	}
-	return length <= xMaxURLLength
-}
-
-func xURLIDNADomainValid(domain string) bool {
-	_, ok := xURLIDNAEncodedDomain(domain)
-	return ok
-}
-
-func xURLIDNAEncodedDomain(domain string) (string, bool) {
-	if domain == "" {
-		return "", false
-	}
-	// Match twitter-text's lightweight ACE-prefix guard. A domain beginning
-	// with xn-- must contain an ASCII-domain match; raw Punycode conversion
-	// alone must not accept a mixed Unicode label after that prefix.
-	if strings.HasPrefix(domain, "xn--") && len(xASCIIURLSuffixRanges(domain)) == 0 {
-		return "", false
-	}
-
-	encodedLabels := make([]string, 0, strings.Count(domain, ".")+1)
-	for _, label := range strings.Split(domain, ".") {
-		encoded, ok := xURLIDNAEncodedOuterLabel(label)
-		if !ok {
-			return "", false
-		}
-		encodedLabels = append(encodedLabels, encoded)
-	}
-	return strings.Join(encodedLabels, "."), true
-}
-
-func xURLIDNAEncodedOuterLabel(label string) (string, bool) {
-	if label == "" {
-		return "", false
-	}
-
-	// punycode.toASCII normalizes RFC 3490 separators inside one
-	// ASCII-dot-delimited outer label, then converts each resulting segment.
-	// Empty inner segments are preserved; the provider checks the complete
-	// normalized outer label length rather than validating those segments as
-	// standalone DNS labels. Keep this order so alternate separators cannot
-	// evade the outer label length limit.
-	segments := strings.Split(xNormalizeIDNASeparators(label), ".")
-	encodedSegments := make([]string, 0, len(segments))
-	for _, segment := range segments {
-		encoded, ok := xURLIDNAEncodedSegment(segment)
-		if !ok {
-			return "", false
-		}
-		encodedSegments = append(encodedSegments, encoded)
-	}
-	encoded := strings.Join(encodedSegments, ".")
-	return encoded, encoded != "" && xUTF16Length(encoded) <= 63
-}
-
-func xNormalizeIDNASeparators(domain string) string {
-	return strings.Map(func(r rune) rune {
-		switch r {
-		case '\u3002', '\uff0e', '\uff61':
-			return '.'
-		default:
-			return r
-		}
-	}, domain)
-}
-
-func xURLIDNAEncodedSegment(segment string) (string, bool) {
-	// twitter-text's punycode.toASCII leaves an ASCII label, including an
-	// inner xn---prefixed label, unchanged. Go's Punycode profile decodes a
-	// lowercase xn-- prefix, so invoke it only for segments containing
-	// non-ASCII text and neutralize that prefix for the conversion.
-	if xURLLabelIsASCII(segment) {
-		return segment, true
-	}
-	if strings.HasPrefix(segment, "xn--") {
-		segment = "X" + segment[1:]
-	}
-	encoded, err := idna.Punycode.ToASCII(segment)
-	return encoded, err == nil && encoded != ""
-}
-
-func xURLLabelIsASCII(label string) bool {
-	for i := 0; i < len(label); i++ {
-		if label[i] >= utf8.RuneSelf {
-			return false
-		}
-	}
-	return true
-}
-
-func xUTF16Length(text string) int {
-	return len(utf16.Encode([]rune(text)))
-}
-
-func xURLHasProtocol(candidate string) bool {
-	lower := strings.ToLower(candidate)
-	return strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://")
-}
-
-func xURLDomain(candidate string) string {
-	authorityStart := 0
-	lower := strings.ToLower(candidate)
-	if strings.HasPrefix(lower, "http://") {
-		authorityStart = len("http://")
-	} else if strings.HasPrefix(lower, "https://") {
-		authorityStart = len("https://")
-	}
-
-	domainEnd := authorityStart
-	for domainEnd < len(candidate) {
-		r, size := utf8.DecodeRuneInString(candidate[domainEnd:])
-		switch r {
-		case ':', '/', '?', '#':
-			return candidate[authorityStart:domainEnd]
-		default:
-			domainEnd += size
-		}
-	}
-	return candidate[authorityStart:domainEnd]
-}
-
-func xASCIIURLSuffixRanges(domain string) []xTextRange {
-	ranges := make([]xTextRange, 0)
-	searchStart := 0
-	for searchStart < len(domain) {
-		bestStart, bestEnd := -1, -1
-		for start := searchStart; start < len(domain); {
-			first, size := utf8.DecodeRuneInString(domain[start:])
-			if !isXASCIIURLDomainRune(first) {
-				start += size
-				continue
-			}
-
-			for end := start; end < len(domain); {
-				r, size := utf8.DecodeRuneInString(domain[end:])
-				end += size
-				if r == '.' {
-					if xValidASCIIURLSuffix(domain[start : end-size]) {
-						bestStart, bestEnd = start, end-size
-					}
-				}
-			}
-			if xValidASCIIURLSuffix(domain[start:]) {
-				bestStart, bestEnd = start, len(domain)
-			}
-			if bestEnd >= 0 {
-				break
-			}
-			start += size
-		}
-		if bestEnd < 0 {
-			break
-		}
-		ranges = append(ranges, xTextRange{start: bestStart, end: bestEnd})
-		searchStart = bestEnd
-	}
-	return ranges
-}
-
-func xValidASCIIURLSuffix(candidate string) bool {
-	labels := strings.Split(candidate, ".")
-	if len(labels) < 2 {
-		return false
-	}
-	for _, label := range labels[:len(labels)-1] {
-		if !isXASCIIURLDomainLabel(label) {
-			return false
-		}
-	}
-	return xValidBareURLDomain(candidate)
-}
-
-func xValidBareURLDomain(candidate string) bool {
-	matches := xURLPattern.FindStringSubmatchIndex(candidate)
-	return len(matches) >= 4 && matches[2] == 0 && matches[3] == len(candidate)
-}
-
-func isXASCIIURLDomainLabel(label string) bool {
-	if label == "" {
-		return false
-	}
-	for _, r := range label {
-		if !isXASCIIURLDomainRune(r) {
-			return false
-		}
-	}
-	return true
-}
-
-func isXASCIIURLDomainRune(r rune) bool {
-	switch {
-	case r >= 'A' && r <= 'Z', r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '-':
-		return true
-	case r >= 0x00c0 && r <= 0x00d6, r >= 0x00d8 && r <= 0x00f6, r >= 0x00f8 && r <= 0x00ff:
-		return true
-	case r >= 0x0100 && r <= 0x024f:
-		return true
-	case r == 0x0253 || r == 0x0254 || r == 0x0256 || r == 0x0257 || r == 0x0259 || r == 0x025b || r == 0x0263 || r == 0x0268 || r == 0x026f || r == 0x0272 || r == 0x0289 || r == 0x028b || r == 0x02bb:
-		return true
-	case r >= 0x0300 && r <= 0x036f, r >= 0x1e00 && r <= 0x1eff:
-		return true
-	default:
-		return false
-	}
-}
-
-func isXURLWithoutProtocolStart(text string, start int) bool {
-	if start == 0 {
-		return true
-	}
-	previous, _ := utf8.DecodeLastRuneInString(text[:start])
-	return !strings.ContainsRune("-_./", previous)
-}
-
-func xURLDomainEndBlocked(text string) bool {
-	r, _ := utf8.DecodeRuneInString(text)
-	switch {
-	case r >= 'A' && r <= 'Z', r >= 'a' && r <= 'z', r >= '0' && r <= '9':
-		return true
-	case r == '@' || r == '+' || r == '-':
-		return true
-	default:
-		return false
-	}
-}
-
-func xURLHasBarePath(candidate string, domainLength int) bool {
-	if domainLength < 0 || domainLength >= len(candidate) {
-		return false
-	}
-	remainder := candidate[domainLength:]
-	if remainder[0] == '/' {
-		return true
-	}
-	if remainder[0] != ':' {
-		return false
-	}
-	portEnd := 1
-	for portEnd < len(remainder) && remainder[portEnd] >= '0' && remainder[portEnd] <= '9' {
-		portEnd++
-	}
-	return portEnd < len(remainder) && remainder[portEnd] == '/'
-}
-
-func xURLSuffixEnd(text string, baseEnd int) int {
-	end := baseEnd
-	if end < len(text) && text[end] == ':' {
-		offset := end + 1
-		for offset < len(text) && text[offset] >= '0' && text[offset] <= '9' {
-			offset++
-		}
-		if offset > end+1 {
-			end = offset
-		}
-	}
-	if end < len(text) && text[end] == '/' {
-		end++
-		if path := xURLPathPattern.FindStringIndex(text[end:]); path != nil {
-			end += path[1]
-		}
-	}
-	if end < len(text) && text[end] == '?' {
-		if query := xURLQueryPattern.FindStringIndex(text[end:]); query != nil {
-			end += query[1]
-		}
-	}
-	return end
-}
-
-// xWeightedPostLength follows the current twitter-text v3 configuration:
-// https://github.com/twitter/twitter-text/blob/30e2430d90cff3b46393ea54caf511441983c260/config/v3.json
-func xWeightedPostLength(text string) int {
-	text = norm.NFC.String(text)
-	urls := xURLRanges(text)
-	weighted := 0
-	offset := 0
-	for _, url := range urls {
-		if url.start < offset {
-			continue
-		}
-		weighted += xWeightedCharacters(text[offset:url.start])
-		weighted += xTransformedURLLength
-		offset = url.end
-	}
-	return weighted + xWeightedCharacters(text[offset:])
-}
-
-func xEmojiRanges(text string) []xTextRange {
-	matches := xEmojiPattern.FindAllStringIndex(text, -1)
-	ranges := make([]xTextRange, 0, len(matches))
-	for _, match := range matches {
-		if len(match) != 2 || match[1] <= match[0] {
-			continue
-		}
-		// RE2 cannot express twitter-text's (?!VS15) lookahead. The generated
-		// pattern keeps VS16 optional, so discard a match that ends immediately
-		// before a text-presentation variation selector unless it already
-		// contains VS16.
-		if match[1] < len(text) {
-			nextRune, _ := utf8.DecodeRuneInString(text[match[1]:])
-			if nextRune == '\ufe0e' && !strings.ContainsRune(text[match[0]:match[1]], '\ufe0f') {
-				continue
-			}
-		}
-		ranges = append(ranges, xTextRange{start: match[0], end: match[1]})
-	}
-	return ranges
-}
-
-func xWeightedCharacters(text string) int {
-	emojis := xEmojiRanges(text)
-	weighted := 0
-	offset := 0
-	for _, emoji := range emojis {
-		if emoji.start < offset {
-			continue
-		}
-		weighted += xWeightedCharactersPlain(text[offset:emoji.start])
-		weighted += xDefaultCharacterWeight
-		offset = emoji.end
-	}
-	return weighted + xWeightedCharactersPlain(text[offset:])
-}
-
-func xWeightedCharactersPlain(text string) int {
-	weighted := 0
-	for offset := 0; offset < len(text); {
-		r, size := utf8.DecodeRuneInString(text[offset:])
-		weighted += xCharacterWeight(r)
-		offset += size
-	}
-	return weighted
-}
-
-func xCharacterWeight(r rune) int {
-	// These ranges are the one-unit ranges from twitter-text's v3 config;
-	// characters outside them have the two-unit default weight.
-	if r >= 0 && r <= 4351 ||
-		r >= 8192 && r <= 8205 ||
-		r >= 8208 && r <= 8223 ||
-		r >= 8242 && r <= 8247 {
-		return 1
-	}
-	return xDefaultCharacterWeight
-}
-
-func xTextEntityRanges(text string) []xTextRange {
-	ranges := append(xURLRanges(text), xEmojiRanges(text)...)
-	sort.Slice(ranges, func(i, j int) bool {
-		return ranges[i].start < ranges[j].start
-	})
-	return ranges
-}
-
 func truncateXPost(v string) string {
-	text := strings.TrimSpace(v)
-	normalized := norm.NFC.String(text)
-	if xWeightedPostLength(normalized) <= xMaxWeightedPostLength {
-		return text
+	r := []rune(strings.TrimSpace(v))
+	if len(r) <= 280 {
+		return string(r)
 	}
-
-	entities := xTextEntityRanges(normalized)
-	entityIndex := 0
-	originalEnd := 0
-	normalizedEnd := 0
-	graphemes := uniseg.NewGraphemes(text)
-	for graphemes.Next() {
-		_, nextOriginalEnd := graphemes.Positions()
-		nextNormalizedEnd := len(norm.NFC.String(text[:nextOriginalEnd]))
-		for entityIndex < len(entities) && entities[entityIndex].end <= normalizedEnd {
-			entityIndex++
-		}
-
-		candidateOriginalEnd := nextOriginalEnd
-		candidateNormalizedEnd := nextNormalizedEnd
-		if entityIndex < len(entities) && entities[entityIndex].start >= normalizedEnd && entities[entityIndex].start < nextNormalizedEnd {
-			entityEnd := entities[entityIndex].end
-			for candidateNormalizedEnd < entityEnd && graphemes.Next() {
-				_, candidateOriginalEnd = graphemes.Positions()
-				candidateNormalizedEnd = len(norm.NFC.String(text[:candidateOriginalEnd]))
-			}
-			entityIndex++
-		}
-
-		if xWeightedPostLength(text[:candidateOriginalEnd]+"…") > xMaxWeightedPostLength {
-			break
-		}
-		originalEnd = candidateOriginalEnd
-		normalizedEnd = candidateNormalizedEnd
-	}
-	return text[:originalEnd] + "…"
+	return string(r[:279]) + "…"
 }

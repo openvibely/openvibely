@@ -4,7 +4,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/openvibely/openvibely/internal/agentskills"
 	"github.com/openvibely/openvibely/internal/lifecycle"
 	"github.com/openvibely/openvibely/internal/models"
 )
@@ -153,24 +152,6 @@ func TestLearningSnapshotOmitsDuplicateRequestText(t *testing.T) {
 	snapshot := w.buildLearningSnapshot(context.Background(), task, "task-1:run", nil)
 	if snapshot.UserRequestSummary != "" {
 		t.Fatalf("learning snapshot must not repeat the request text, got %q", snapshot.UserRequestSummary)
-	}
-}
-
-func TestSelectedLearningSkillEntriesPreserveOrderedAuthorizedEntries(t *testing.T) {
-	catalog := agentskills.NewCatalog("turn", []agentskills.Entry{
-		{Handle: "standalone", Skill: "standalone", Source: agentskills.SourceProject},
-		{Handle: "assigned", Skill: "assigned", Source: agentskills.SourceAgent, AgentKey: "reviewer"},
-	})
-
-	got := selectedLearningSkillEntries(catalog, []string{" assigned ", "missing", "assigned", "", "standalone"})
-	if len(got) != 2 {
-		t.Fatalf("expected two selected learning entries, got %#v", got)
-	}
-	if got[0].Handle != "assigned" || got[0].Source != agentskills.SourceAgent || got[0].AgentKey != "reviewer" {
-		t.Fatalf("assigned learning entry = %#v", got[0])
-	}
-	if got[1].Handle != "standalone" || got[1].Source != agentskills.SourceProject {
-		t.Fatalf("standalone learning entry = %#v", got[1])
 	}
 }
 

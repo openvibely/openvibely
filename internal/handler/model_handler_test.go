@@ -3451,7 +3451,6 @@ func TestNormalizeOpenAIModel(t *testing.T) {
 		input string
 		want  string
 	}{
-		{"gpt-6-astra", "gpt-6-astra"},
 		{"gpt-5.6-sol", "gpt-5.6-sol"},
 		{"gpt-5.6-terra", "gpt-5.6-terra"},
 		{"gpt-5.6-luna", "gpt-5.6-luna"},
@@ -3490,8 +3489,6 @@ func TestNormalizeProviderReasoningEffort(t *testing.T) {
 		input    string
 		want     string
 	}{
-		{"openai astra max", models.ProviderOpenAI, "gpt-6-astra", "max", "max"},
-		{"openai astra rejects none", models.ProviderOpenAI, "gpt-6-astra", "none", ""},
 		{"openai none", models.ProviderOpenAI, "gpt-5.6-sol", "none", "none"},
 		{"openai xhigh", models.ProviderOpenAI, "gpt-5.6-sol", "xhigh", "xhigh"},
 		{"openai max", models.ProviderOpenAI, "gpt-5.6-sol", "max", "max"},

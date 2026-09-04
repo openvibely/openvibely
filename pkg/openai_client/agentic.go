@@ -795,8 +795,6 @@ func openAIAutoCompactionTokenLimit(model string) int {
 
 func openAIModelContextWindow(model string) (int, bool) {
 	switch strings.ToLower(strings.TrimSpace(model)) {
-	case "gpt-6-astra":
-		return 1050000, true
 	case "gpt-5.6-sol",
 		"gpt-5.6-terra",
 		"gpt-5.6-luna":
@@ -2136,8 +2134,7 @@ func providerNativeOutputItemKey(item map[string]any, outputIndex int) string {
 // field; gpt-5.2+ families support it.
 func openAIModelSupportsWebSearch(model string) bool {
 	m := strings.ToLower(strings.TrimSpace(model))
-	return strings.HasPrefix(m, "gpt-6-astra") ||
-		strings.HasPrefix(m, "gpt-5.5") ||
+	return strings.HasPrefix(m, "gpt-5.5") ||
 		strings.HasPrefix(m, "gpt-5.4") ||
 		strings.HasPrefix(m, "gpt-5.3") ||
 		strings.HasPrefix(m, "gpt-5.2")

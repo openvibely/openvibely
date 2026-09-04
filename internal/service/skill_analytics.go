@@ -88,10 +88,22 @@ func (w *WorkerService) recordSelectedSkillEvents(ctx context.Context, task mode
 	if w == nil || w.skillAnalyticsRepo == nil || catalog == nil {
 		return
 	}
-	entries := catalog.EntriesForHandles(handles)
-	for _, entry := range entries {
+	seen := map[string]struct{}{}
+	for _, handle := range handles {
+		handle = strings.TrimSpace(handle)
+		if handle == "" {
+			continue
+		}
+		if _, ok := seen[handle]; ok {
+			continue
+		}
+		seen[handle] = struct{}{}
+		entry, ok := catalog.Lookup(handle)
+		if !ok {
+			continue
+		}
 		source := models.SkillEventSourceSkillCurator
-		if provenance != nil && provenance[entry.Handle] == agentskills.ProvenanceAlwaysUse {
+		if provenance != nil && provenance[handle] == agentskills.ProvenanceAlwaysUse {
 			source = models.SkillEventSourceAlwaysUse
 		}
 		agentID := ""

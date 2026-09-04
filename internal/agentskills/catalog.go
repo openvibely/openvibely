@@ -222,14 +222,14 @@ func (c *Catalog) IsAgentOwned() bool {
 	return c.agentOwned
 }
 
-// EntriesForHandles returns the unique catalog entries for handles in request
-// order. Handles are trimmed before blank, duplicate, and catalog lookup checks;
-// unknown handles are ignored.
-func (c *Catalog) EntriesForHandles(handles []string) []Entry {
-	if c == nil || len(handles) == 0 {
+// Filter returns a catalog containing only the requested handles that exist in
+// this catalog. Missing handles are ignored so callers can validate/log them
+// without exposing unauthorized paths to the model.
+func (c *Catalog) Filter(turnID string, handles []string) *Catalog {
+	if c == nil {
 		return nil
 	}
-	seen := make(map[string]struct{}, len(handles))
+	seen := map[string]struct{}{}
 	entries := make([]Entry, 0, len(handles))
 	for _, handle := range handles {
 		handle = strings.TrimSpace(handle)
@@ -246,17 +246,6 @@ func (c *Catalog) EntriesForHandles(handles []string) []Entry {
 		seen[handle] = struct{}{}
 		entries = append(entries, entry)
 	}
-	return entries
-}
-
-// Filter returns a catalog containing only the requested handles that exist in
-// this catalog. Missing handles are ignored so callers can validate/log them
-// without exposing unauthorized paths to the model.
-func (c *Catalog) Filter(turnID string, handles []string) *Catalog {
-	if c == nil {
-		return nil
-	}
-	entries := c.EntriesForHandles(handles)
 	if turnID == "" {
 		turnID = c.turnID
 	}

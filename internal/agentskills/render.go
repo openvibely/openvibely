@@ -77,10 +77,6 @@ func RenderSelectedSkillsMarkdown(catalog *Catalog, handles []string) string {
 	if catalog == nil || len(handles) == 0 {
 		return ""
 	}
-	entries := catalog.EntriesForHandles(handles)
-	if len(entries) == 0 {
-		return ""
-	}
 	var sb strings.Builder
 	sb.WriteString("## Selected Skills For This Task\n\n")
 	if catalog.IsAgentOwned() {
@@ -89,12 +85,30 @@ func RenderSelectedSkillsMarkdown(catalog *Catalog, handles []string) string {
 		sb.WriteString("The task keeps its assigned/default agent. The lifecycle router selected these standalone skills for this turn. Load any needed full body with `skill_view(\"<skill>\")`.\n\n")
 	}
 	sb.WriteString("<selected_skills>\n")
-	for _, entry := range entries {
+	wrote := false
+	seen := map[string]struct{}{}
+	for _, handle := range handles {
+		handle = strings.TrimSpace(handle)
+		if handle == "" {
+			continue
+		}
+		if _, ok := seen[handle]; ok {
+			continue
+		}
+		entry, ok := catalog.Lookup(handle)
+		if !ok {
+			continue
+		}
+		seen[handle] = struct{}{}
 		if entry.AgentKey != "" {
 			fmt.Fprintf(&sb, "- `%s` (agent:%s)\n", entry.Handle, entry.AgentKey)
 		} else {
 			fmt.Fprintf(&sb, "- `%s` (%s)\n", entry.Handle, entry.Source)
 		}
+		wrote = true
+	}
+	if !wrote {
+		return ""
 	}
 	sb.WriteString("</selected_skills>\n")
 	return sb.String()
