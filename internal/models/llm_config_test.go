@@ -5,30 +5,6 @@ import (
 	"time"
 )
 
-func TestModelSupportsTemperature(t *testing.T) {
-	tests := []struct {
-		name     string
-		provider LLMProvider
-		model    string
-		want     bool
-	}{
-		{name: "Astra", provider: ProviderOpenAI, model: "gpt-6-astra", want: false},
-		{name: "Astra normalized", provider: ProviderOpenAI, model: " GPT-6-ASTRA ", want: false},
-		{name: "other OpenAI", provider: ProviderOpenAI, model: "gpt-5.6-sol", want: true},
-		{name: "Kimi", provider: ProviderOpenAICompatible, model: "kimi-k3", want: false},
-		{name: "other compatible", provider: ProviderOpenAICompatible, model: "glm-5.2", want: true},
-		{name: "mixture", provider: ProviderMixture, model: "default", want: false},
-		{name: "Anthropic", provider: ProviderAnthropic, model: "claude-opus-5", want: true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := ModelSupportsTemperature(tt.provider, tt.model); got != tt.want {
-				t.Fatalf("ModelSupportsTemperature(%q, %q) = %v, want %v", tt.provider, tt.model, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestLLMConfig_IsOAuth(t *testing.T) {
 	tests := []struct {
 		name     string

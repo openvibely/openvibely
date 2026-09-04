@@ -31,7 +31,7 @@ For lower cost, use `gpt-5.6-terra`; for efficient high-volume work, use `gpt-5.
    - `Provider` (`Anthropic`, `OpenAI`, `Ollama`, `Mixture of Models`, or an OpenAI-compatible preset such as `OpenRouter`, `Groq`, `LM Studio`, or `Custom OpenAI-Compatible`)
    - `Authentication` / `Connection Method` (provider-dependent)
    - `Model`
-   - Optional, model-dependent runtime settings (`Temperature` when supported, worker pool settings, etc.)
+   - Optional runtime settings (`Temperature`, worker pool settings, etc.)
 4. Click `Create`.
 
 ## Supported Models
@@ -57,7 +57,7 @@ For lower cost, use `gpt-5.6-terra`; for efficient high-volume work, use `gpt-5.
 
 | Model | Reasoning Efforts | Notes |
 |---|---|---|
-| gpt-6-astra | low / medium / high / xhigh / max | OpenAI's most capable model for complex coding, computer use, and research. 1.05M context, 128k max output. Temperature is unsupported. Availability depends on OpenAI account rollout. |
+| gpt-6-astra | low / medium / high / xhigh / max | OpenAI's most capable model for complex coding, computer use, and research. 1.05M context, 128k max output. Availability depends on OpenAI account rollout. |
 | gpt-5.6-sol | none / low / medium / high / xhigh / max | Default flagship tier. 1.05M context, 128k max output. |
 | gpt-5.6-terra | none / low / medium / high / xhigh / max | Balances intelligence and cost. 1.05M context, 128k max output. |
 | gpt-5.6-luna | none / low / medium / high / xhigh / max | Efficient high-volume tier. 1.05M context, 128k max output. |
@@ -90,7 +90,6 @@ Where a low-level provider API still requires an output limit, OpenVibely choose
 
 - Auth options include API key and OAuth.
 - For supported Codex models, `Codex Reasoning Effort` is available. GPT-6 Astra supports `low`, `medium`, `high`, `xhigh`, and `max` (not `none`); GPT-5.6 also supports `none`. OpenVibely uses `medium` by default for these models.
-- GPT-6 Astra does not support configurable temperature. OpenVibely hides the field and discards submitted or stale values for Astra configurations.
 - First-party OpenAI configs use OpenVibely's OpenAI/Codex provider path, not the generic OpenAI-compatible Chat Completions adapter.
 
 ### OpenAI-Compatible Chat Completions

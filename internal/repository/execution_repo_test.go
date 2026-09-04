@@ -13,15 +13,14 @@ import (
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
-func TestExecutionRepo_ListByTaskExecutionWindowUsesTaskStartedIndex(t *testing.T) {
+func TestExecutionRepo_ListByTaskHistoryPageUsesTaskStartedIndex(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	query, args := taskExecutionPageSQL("task-execution-window-plan", "", 21)
-	plan := explainExecutionRepoPlan(t, db, query, args...)
+	plan := explainExecutionRepoPlan(t, db, taskExecutionHistoryPageSQL, "task-history-plan", 21)
 	if !strings.Contains(plan, "idx_executions_task_started_at") {
-		t.Fatalf("expected task-execution window query to use idx_executions_task_started_at, plan:\n%s", plan)
+		t.Fatalf("expected execution-history page query to use idx_executions_task_started_at, plan:\n%s", plan)
 	}
 	if strings.Contains(plan, "USE TEMP B-TREE FOR ORDER BY") {
-		t.Fatalf("task-execution window query should not sort with a temp B-tree, plan:\n%s", plan)
+		t.Fatalf("execution-history page query should not sort with a temp B-tree, plan:\n%s", plan)
 	}
 }
 
