@@ -731,6 +731,9 @@ func (h *Handler) normalizeBrowserModelForm(ctx context.Context, c echo.Context,
 	if temp, err := strconv.ParseFloat(c.FormValue("temperature"), 64); err == nil {
 		agent.Temperature = temp
 	}
+	if !models.ModelSupportsTemperature(agent.Provider, agent.Model) {
+		agent.Temperature = 0
+	}
 	agent.IsDefault = c.FormValue("is_default") == "on"
 	agent.AutoStartTasks = c.FormValue("auto_start_tasks") == "on"
 	if mw, err := strconv.Atoi(c.FormValue("model_max_workers")); err == nil {
