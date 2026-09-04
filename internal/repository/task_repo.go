@@ -13,6 +13,8 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
+
+
 var ErrDuplicateTask = errors.New("task with this name already exists in this project")
 
 const taskSelectColumns = `id, project_id, title, category, priority, status, prompt, agent_id, agent_definition_id, tag, display_order, parent_task_id, chain_config, swarm_role, swarm_status, swarm_config, swarm_sequence, worktree_path, worktree_branch, auto_merge, merge_target_branch, merge_status, base_branch, base_commit_sha, lineage_depth, created_via, telegram_chat_id, created_at, updated_at, completed_at`
@@ -1505,7 +1507,7 @@ func (r *TaskRepo) ListWithSchedulesByProject(ctx context.Context, projectID str
 				AND automation_node.automation_id = automation_owner.automation_id
 				AND automation_node.project_id = automation_owner.project_id
 			 WHERE t.project_id = ? AND (t.category = 'scheduled' OR s.id IS NOT NULL)
-			 ORDER BY s.next_run ASC`, projectID)
+			 `, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("listing tasks with schedules: %w", err)
 	}

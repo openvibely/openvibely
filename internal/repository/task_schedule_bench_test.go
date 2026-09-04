@@ -17,9 +17,11 @@ func BenchmarkTaskRepo_ListWithSchedulesByProject(b *testing.B) {
 		name       string
 		taskCount  int
 		promptSize int
-	}{
+	}{    
 		{name: "Small20x512B", taskCount: 20, promptSize: 512},
 		{name: "Large300x32KiB", taskCount: 300, promptSize: 32 * 1024},
+		{name: "Scale20k", taskCount: 20000, promptSize: 512},
+		{name: "Scale250k", taskCount: 250000, promptSize: 512},
 	}
 
 	for _, fixture := range fixtures {
@@ -37,6 +39,58 @@ func BenchmarkTaskRepo_ListWithSchedulesByProject(b *testing.B) {
 		})
 	}
 }
+
+func TestCalendarQuery_NoTempBTreeSort(t *testing.T) {
+	
+	db := testutil.NewTestDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+
+	
+	query := `EXPLAIN QUERY PLAN SELECT ` + scheduleCalendarTaskSelectColumns + `,
+		s.id, s.task_id, s.run_at, s.repeat_type, s.repeat_interval, s.enabled, s.clear_context_on_start, s.next_run, s.last_run, s.created_at, s.updated_at,
+		COALESCE(automation_node.name, '')
+		FROM tasks t
+		LEFT JOIN schedules s ON t.id = s.task_id
+		LEFT JOIN automation_trigger_owners automation_owner ON automation_owner.schedule_id = s.id AND automation_owner.project_id = t.project_id
+		LEFT JOIN automation_nodes automation_node ON automation_node.id = automation_owner.node_id
+			AND automation_node.version_id = automation_owner.version_id
+			AND automation_node.automation_id = automation_owner.automation_id
+			AND automation_node.project_id = automation_owner.project_id
+		WHERE t.project_id = ? AND (t.category = 'scheduled' OR s.id IS NOT NULL)`
+
+	rows, err := db.QueryContext(ctx, query, "default")
+	if err != nil {
+		t.Fatalf("failed to explain query plan: %v", err)
+	}
+	defer rows.Close()
+
+	
+	var id, parent, notused int
+	var detail string
+	for rows.Next() {
+		if err := rows.Scan(&id, &parent, &notused, &detail); err != nil {
+			t.Fatalf("failed to scan query plan row: %v", err)
+		}
+
+		
+		if strings.Contains(detail, "USE TEMP B-TREE FOR ORDER BY") {
+			t.Errorf("Query plan contains redundant sorting: %s", detail)
+		}
+	}
+
+	if err := rows.Err(); err != nil {
+		t.Fatalf("error iterating query plan rows: %v", err)
+	}
+}
+
+
+
+
+
+
+
 
 func benchmarkListWithSchedulesCalendarProjection(b *testing.B, repo *TaskRepo, projectID string) {
 	b.Helper()
