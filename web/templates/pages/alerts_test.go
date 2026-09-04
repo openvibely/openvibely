@@ -368,11 +368,13 @@ func TestAlertsContent_ActiveFilterURLsReachRowMutations(t *testing.T) {
 		ProcessingState: models.AlertProcessingFailed,
 	}
 	var buf bytes.Buffer
-	if err := AlertsContentPageWithFiltersAndSearch([]models.AlertSummary{alert}, "project-1", 0, false, models.AlertDecisionPending, models.AlertProcessingFailed, "needle").Render(context.Background(), &buf); err != nil {
+	if err := AlertsContentPageWithFiltersAndSearch([]models.AlertSummary{alert}, "project-1", 1, false, models.AlertDecisionPending, models.AlertProcessingFailed, "needle").Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render active Alerts content: %v", err)
 	}
 	html := buf.String()
 	for _, required := range []string{
+		`hx-post="/alerts/read-all?decision_state=pending&amp;processing_state=failed&amp;project_id=project-1&amp;search=needle"`,
+		`data-delete-url="/alerts?decision_state=pending&amp;processing_state=failed&amp;project_id=project-1&amp;search=needle"`,
 		`hx-post="/alerts/alert-1/approve?decision_state=pending&amp;processing_state=failed&amp;project_id=project-1&amp;search=needle"`,
 		`hx-post="/alerts/alert-1/reject?decision_state=pending&amp;processing_state=failed&amp;project_id=project-1&amp;search=needle"`,
 		`hx-post="/alerts/alert-1/read?decision_state=pending&amp;processing_state=failed&amp;project_id=project-1&amp;search=needle"`,
