@@ -617,19 +617,33 @@ func (s *XService) runtimeTools(callerTaskID, projectID, accountID, userID, conv
 		TaskSvc:   s.taskSvc, TaskRepo: s.taskRepo, ExecRepo: s.execRepo,
 		ThreadInputRepo: s.threadInputRepo, ExecutionStreamHub: s.executionStreamHub,
 		LLMConfigRepo: s.llmConfigRepo, SwarmSvc: swarmFromTaskService(s.taskSvc),
-		OnTasksCreated: func(ctx context.Context, _ []TaskCreationRequest, tasks []models.Task) error {
+		PersistTaskCreation: func(ctx context.Context, exec repository.SQLExecutor, task *models.Task) error {
+			if s.taskRepo == nil {
+				return fmt.Errorf("X task repository is not configured")
+			}
 			if s.taskContextRepo == nil {
 				return fmt.Errorf("X task context repository is not configured")
 			}
-			for _, task := range tasks {
-				if err := s.taskRepo.UpdateXOrigin(ctx, task.ID); err != nil {
-					return err
-				}
-				if err := s.taskContextRepo.Upsert(ctx, &models.XTaskContext{TaskID: task.ID, ProjectID: projectID, AccountID: accountID, ConversationID: conversationID, ReplyToTweetID: replyToTweetID, XUserID: userID, Username: username}); err != nil {
-					return err
-				}
+			if err := s.taskRepo.UpdateXOriginWithExecutor(ctx, exec, task.ID); err != nil {
+				return err
 			}
+			if err := s.taskContextRepo.UpsertWithExecutor(ctx, exec, &models.XTaskContext{TaskID: task.ID, ProjectID: projectID, AccountID: accountID, ConversationID: conversationID, ReplyToTweetID: replyToTweetID, XUserID: userID, Username: username}); err != nil {
+				return err
+			}
+			task.CreatedVia = models.TaskOriginX
 			return nil
+		},
+		OnSwarmCreated: func(ctx context.Context, task *models.Task) error {
+			if s.taskRepo == nil {
+				return fmt.Errorf("X task repository is not configured")
+			}
+			if s.taskContextRepo == nil {
+				return fmt.Errorf("X task context repository is not configured")
+			}
+			if err := s.taskRepo.UpdateXOrigin(ctx, task.ID); err != nil {
+				return err
+			}
+			return s.taskContextRepo.Upsert(ctx, &models.XTaskContext{TaskID: task.ID, ProjectID: projectID, AccountID: accountID, ConversationID: conversationID, ReplyToTweetID: replyToTweetID, XUserID: userID, Username: username})
 		},
 	})
 	mergeSelectedChannelRuntimeActionHandlers(handlers, taskHandlers, "create_task", "create_swarm_task")
@@ -1225,6 +1239,22 @@ func xTextEntityRanges(text string) []xTextRange {
 		return ranges[i].start < ranges[j].start
 	})
 	return ranges
+}
+
+// SendTaskCompletionNotification sends a completed active-task result to the
+// X conversation that created it. Chat tasks use SendChatResponse through the
+// interactive streaming path and must not be notified a second time here.
+func (s *XService) SendTaskCompletionNotification(ctx context.Context, task models.Task, output, errMsg string) {
+	if task.CreatedVia != models.TaskOriginX && task.ID != "" && s.taskRepo != nil {
+		loaded, err := s.taskRepo.GetByID(ctx, task.ID)
+		if err == nil && loaded != nil {
+			task = *loaded
+		}
+	}
+	if task.CreatedVia != models.TaskOriginX || task.Category == models.CategoryChat {
+		return
+	}
+	s.SendChatResponse(ctx, task, output, errMsg)
 }
 
 func truncateXPost(v string) string {

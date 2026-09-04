@@ -643,6 +643,55 @@ func TestCoordinatorStartupCheckDoesNotRacePackagedRecoveryOutcome(t *testing.T)
 	}
 }
 
+type blockingUpdateCheckTransport struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (transport *blockingUpdateCheckTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	close(transport.started)
+	<-transport.release
+	return &http.Response{StatusCode: http.StatusServiceUnavailable, Status: "503 Service Unavailable", Header: make(http.Header), Body: http.NoBody, Request: req}, nil
+}
+
+func TestCoordinatorStopChecksWaitsForInFlightStartupCheck(t *testing.T) {
+	transport := &blockingUpdateCheckTransport{started: make(chan struct{}), release: make(chan struct{})}
+	statePath := filepath.Join(t.TempDir(), "client.json")
+	client := NewClient(ClientConfig{
+		ServiceURL: "http://updates.invalid",
+		Channel:    "stable",
+		StatePath:  statePath,
+		HTTPClient: &http.Client{Transport: transport},
+		Random:     func(time.Duration) time.Duration { return 0 },
+	})
+	coordinator := NewCoordinator(client, CurrentBuild{Build: buildinfo.Build{Version: "0.5.0"}, Distribution: buildinfo.DistributionSource}, "stable", NewDrainManager(nil, nil, 0, nil), nil, false, "", nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	coordinator.StartChecks(ctx)
+	<-transport.started
+
+	stopped := make(chan struct{})
+	go func() {
+		coordinator.StopChecks()
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+		t.Fatal("StopChecks returned while the startup check was still in flight")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(transport.release)
+	select {
+	case <-stopped:
+	case <-time.After(time.Second):
+		t.Fatal("StopChecks did not wait for the startup check to finish")
+	}
+	if _, err := os.Stat(statePath); err != nil {
+		t.Fatalf("startup check state was not persisted before StopChecks returned: %v", err)
+	}
+}
+
 func TestCoordinatorStartupCheckStillRunsFromIdle(t *testing.T) {
 	requests := make(chan struct{}, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
