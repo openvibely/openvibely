@@ -92,10 +92,20 @@ type TaskCreationResult struct {
 	Task         models.Task
 }
 
+// TaskCreationPersistence runs inside the task creation transaction after the
+// task ID has been assigned and before active work can be submitted.
+type TaskCreationPersistence func(context.Context, repository.SQLExecutor, *models.Task) error
+
 // ExecuteTaskCreationsWithReturn creates tasks from typed action requests and returns both the created tasks and a summary.
 // This variant is used when the caller needs access to the created task objects.
 func ExecuteTaskCreationsWithReturn(ctx context.Context, requests []TaskCreationRequest, projectID string, taskSvc *TaskService, agents ...[]models.LLMConfig) ([]models.Task, string) {
-	results, summary := ExecuteTaskCreationsWithIndexedReturn(ctx, requests, projectID, taskSvc, agents...)
+	return ExecuteTaskCreationsWithReturnAndPersistence(ctx, requests, projectID, taskSvc, nil, agents...)
+}
+
+// ExecuteTaskCreationsWithReturnAndPersistence creates tasks and persists
+// caller-specific metadata in the same transaction as each task.
+func ExecuteTaskCreationsWithReturnAndPersistence(ctx context.Context, requests []TaskCreationRequest, projectID string, taskSvc *TaskService, persist TaskCreationPersistence, agents ...[]models.LLMConfig) ([]models.Task, string) {
+	results, summary := ExecuteTaskCreationsWithIndexedReturnAndPersistence(ctx, requests, projectID, taskSvc, persist, agents...)
 	createdTasks := make([]models.Task, 0, len(results))
 	for _, result := range results {
 		createdTasks = append(createdTasks, result.Task)
@@ -106,6 +116,12 @@ func ExecuteTaskCreationsWithReturn(ctx context.Context, requests []TaskCreation
 // ExecuteTaskCreationsWithIndexedReturn creates tasks and retains each successful
 // task's original request index so callers never need to correlate by title.
 func ExecuteTaskCreationsWithIndexedReturn(ctx context.Context, requests []TaskCreationRequest, projectID string, taskSvc *TaskService, agents ...[]models.LLMConfig) ([]TaskCreationResult, string) {
+	return ExecuteTaskCreationsWithIndexedReturnAndPersistence(ctx, requests, projectID, taskSvc, nil, agents...)
+}
+
+// ExecuteTaskCreationsWithIndexedReturnAndPersistence is the indexed creation
+// path with an optional transaction-scoped metadata callback.
+func ExecuteTaskCreationsWithIndexedReturnAndPersistence(ctx context.Context, requests []TaskCreationRequest, projectID string, taskSvc *TaskService, persist TaskCreationPersistence, agents ...[]models.LLMConfig) ([]TaskCreationResult, string) {
 	if len(requests) == 0 {
 		return nil, ""
 	}
@@ -167,7 +183,12 @@ func ExecuteTaskCreationsWithIndexedReturn(ctx context.Context, requests []TaskC
 			task.AgentDefinitionID = &agentDefinitionID
 		}
 
-		if err := taskSvc.CreateWithGoal(ctx, task, req.Goal); err != nil {
+		if err := taskSvc.CreateWithGoalAndCallback(ctx, task, req.Goal, func(exec repository.SQLExecutor) error {
+			if persist == nil {
+				return nil
+			}
+			return persist(ctx, exec, task)
+		}); err != nil {
 			applog.Infof("[task-creation] error creating task %q: %v", req.Title, err)
 			failed = append(failed, fmt.Sprintf("- \"%s\": %v", req.Title, err))
 		} else {
