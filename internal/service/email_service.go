@@ -526,6 +526,7 @@ func (s *EmailService) pollOnce(ctx context.Context, cfg EmailRuntimeConfig) {
 	}
 
 	mailboxIdentity := emailMailboxIdentity(cfg)
+	selfAddress := repository.NormalizeEmailAddress(cfg.Address)
 	acknowledgementSet := make(map[uint32]struct{}, len(metadata))
 	unresolved := make([]emailMessageCandidate, 0, len(metadata))
 	for _, meta := range metadata {
@@ -587,7 +588,7 @@ func (s *EmailService) pollOnce(ctx context.Context, cfg EmailRuntimeConfig) {
 				if s.processIncomingMessageFn != nil {
 					result.handled = s.ProcessIncoming(ctx, fetched.Message)
 				} else {
-					result = s.processIncomingMessage(ctx, fetched.Message, mailboxIdentity, messageKey)
+					result = s.processIncomingMessageWithSelfAddress(ctx, fetched.Message, mailboxIdentity, messageKey, selfAddress)
 				}
 				if !result.handled {
 					continue
@@ -918,7 +919,11 @@ func (s *EmailService) ProcessIncoming(ctx context.Context, msg EmailInboundMess
 }
 
 func (s *EmailService) processIncomingMessage(ctx context.Context, msg EmailInboundMessage, mailboxIdentity, messageKey string) emailIncomingProcessResult {
-	if isIgnoredEmail(msg, s.getConfiguredAddress(ctx)) ||
+	return s.processIncomingMessageWithSelfAddress(ctx, msg, mailboxIdentity, messageKey, s.getConfiguredAddress(ctx))
+}
+
+func (s *EmailService) processIncomingMessageWithSelfAddress(ctx context.Context, msg EmailInboundMessage, mailboxIdentity, messageKey, selfAddress string) emailIncomingProcessResult {
+	if isIgnoredEmail(msg, selfAddress) ||
 		(strings.TrimSpace(msg.Body) == "" && len(msg.Attachments) == 0) {
 		return emailIncomingProcessResult{handled: true}
 	}

@@ -294,6 +294,8 @@ func TestAuthMiddleware_PublicRouteExceptions(t *testing.T) {
 	_, e := authTestHandler(t)
 	allowed := []string{
 		"/login",
+		"/favicon.png",
+		"/favicon.ico",
 		"/webhooks/inbound/token123",
 		"/callback",
 		"/auth/callback",
