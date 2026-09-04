@@ -564,6 +564,7 @@ build_macos_app() {
 
     mkdir -p "${bundle}/MacOS" "${bundle}/Resources"
     cp "$TMP_BIN/${bin_name}" "${bundle}/MacOS/OpenVibely"
+    cp "${REPO_ROOT}/assets/desktop/icons/openvibely.icns" "${bundle}/Resources/OpenVibely.icns"
     chmod +x "${bundle}/MacOS/OpenVibely"
 
     cat > "${bundle}/Info.plist" << PLIST
@@ -578,6 +579,7 @@ build_macos_app() {
   <key>CFBundleShortVersionString</key><string>${VERSION}</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleExecutable</key><string>OpenVibely</string>
+  <key>CFBundleIconFile</key><string>OpenVibely.icns</string>
   <key>LSMinimumSystemVersion</key><string>12.0</string>
 </dict>
 </plist>

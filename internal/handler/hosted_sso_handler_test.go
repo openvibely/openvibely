@@ -580,6 +580,7 @@ func TestHostedAbsoluteURLsUseInjectedCanonicalOrigin(t *testing.T) {
 func TestAuthPublicPathAllowlistPreserved(t *testing.T) {
 	paths := []string{
 		"/login", "/logout", "/auth/me", "/auth/sso/start", "/auth/sso/callback", "/logged-out",
+		"/favicon.png", "/favicon.ico",
 		"/swagger/doc.json", "/webhooks/inbound", "/webhooks/inbound/token", "/callback", "/auth/callback",
 		"/models/oauth/callback", "/channels/github/callback", "/channels/slack/callback",
 	}
@@ -857,6 +858,7 @@ func TestHostedAuthMeRejectedCookieMatrix(t *testing.T) {
 func TestAuthPublicPathsReachHandlersInEveryRuntimeMode(t *testing.T) {
 	paths := []string{
 		"/login", "/logout", "/auth/me", "/logged-out", "/swagger/doc.json",
+		"/favicon.png", "/favicon.ico",
 		"/webhooks/inbound", "/webhooks/inbound/token", "/callback", "/auth/callback",
 		"/models/oauth/callback", "/channels/github/callback", "/channels/slack/callback",
 	}
