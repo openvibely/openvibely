@@ -220,6 +220,9 @@ func TestTaskWorktreeMergeActionsShareMetadataAcrossWorktreeAndChanges(t *testin
 	if strings.Contains(worktree, `data-merge-type="rebase"`) {
 		t.Fatalf("Worktree panel must preserve its existing lack of a Rebase action, body=%s", worktree)
 	}
+	if !strings.Contains(worktree, `class="text-xs" data-task-worktree-merge-action`) {
+		t.Fatalf("Worktree actions must preserve their compact typography, body=%s", worktree)
+	}
 
 	var changesBuf bytes.Buffer
 	if err := TaskChangesWorktreeContent("diff --git", task, nil, nil, nil, false, true).Render(context.Background(), &changesBuf); err != nil {
@@ -242,6 +245,9 @@ func TestTaskWorktreeMergeActionsShareMetadataAcrossWorktreeAndChanges(t *testin
 		if !strings.Contains(changes, want) {
 			t.Fatalf("expected Changes action metadata %q, body=%s", want, changes)
 		}
+	}
+	if strings.Contains(changes, `class="text-xs" data-task-worktree-merge-action`) {
+		t.Fatalf("Changes actions must retain the menu's default typography, body=%s", changes)
 	}
 }
 func TestTaskChangesWorktreeContent_RebaseOnlyWhenAvailable(t *testing.T) {
