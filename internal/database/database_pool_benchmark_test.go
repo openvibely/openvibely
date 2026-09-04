@@ -281,7 +281,7 @@ func runSQLitePoolBenchmarkOperation(writeDB *sql.DB, taskRepo *repository.TaskR
 		if _, err := taskRepo.GetByID(context.Background(), taskID); err != nil {
 			return err
 		}
-		_, err := executionRepo.ListByTaskHistoryPage(context.Background(), fmt.Sprintf("stream-task-%03d", id), 20)
+		_, err := executionRepo.ListByTaskChronologicalLimit(context.Background(), fmt.Sprintf("stream-task-%03d", id), 20)
 		return err
 	case "write":
 		return executionRepo.UpdateOutput(context.Background(), fmt.Sprintf("pool-exec-%03d", id), payload)
