@@ -2457,7 +2457,28 @@ func (h *Handler) TaskThreadPendingInputs(c echo.Context) error {
 	}, taskID))
 }
 
-func (h *Handler) loadTaskExecutionWindow(ctx context.Context, taskID, beforeExecID string, limit int) ([]models.Execution, bool, error) {
+func (h *Handler) loadTaskExecutionHistoryWindow(ctx context.Context, taskID, beforeExecID string, limit int) ([]models.Execution, bool, error) {
+	queryLimit := limit + 1
+	var rows []models.Execution
+	var err error
+	if beforeExecID != "" {
+		rows, err = h.execRepo.ListByTaskChronologicalBefore(ctx, taskID, beforeExecID, queryLimit)
+		for i, j := 0, len(rows)-1; i < j; i, j = i+1, j-1 {
+			rows[i], rows[j] = rows[j], rows[i]
+		}
+	} else {
+		rows, err = h.execRepo.ListByTaskHistoryPage(ctx, taskID, queryLimit)
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	if len(rows) <= limit {
+		return rows, false, nil
+	}
+	return rows[:limit], true, nil
+}
+
+func (h *Handler) loadTaskThreadExecutionWindow(ctx context.Context, taskID, beforeExecID string, limit int) ([]models.Execution, bool, error) {
 	queryLimit := limit + 1
 	var rows []models.Execution
 	var err error
@@ -2471,21 +2492,6 @@ func (h *Handler) loadTaskExecutionWindow(ctx context.Context, taskID, beforeExe
 	}
 	visible, hasEarlier := trimExecutionWindow(rows, limit)
 	return visible, hasEarlier, nil
-}
-
-func (h *Handler) loadTaskExecutionHistoryWindow(ctx context.Context, taskID, beforeExecID string, limit int) ([]models.Execution, bool, error) {
-	visible, hasOlder, err := h.loadTaskExecutionWindow(ctx, taskID, beforeExecID, limit)
-	if err != nil {
-		return nil, false, err
-	}
-	for i, j := 0, len(visible)-1; i < j; i, j = i+1, j-1 {
-		visible[i], visible[j] = visible[j], visible[i]
-	}
-	return visible, hasOlder, nil
-}
-
-func (h *Handler) loadTaskThreadExecutionWindow(ctx context.Context, taskID, beforeExecID string, limit int) ([]models.Execution, bool, error) {
-	return h.loadTaskExecutionWindow(ctx, taskID, beforeExecID, limit)
 }
 
 func (h *Handler) GetTaskThreadExecutionFragment(c echo.Context) error {

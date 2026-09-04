@@ -85,22 +85,6 @@ type LLMConfig struct {
 	AutoStartTasks bool `json:"auto_start_tasks"` // When enabled, tasks created with this model start immediately
 }
 
-// ModelSupportsTemperature reports whether the provider/model pair accepts a
-// configurable sampling temperature.
-func ModelSupportsTemperature(provider LLMProvider, model string) bool {
-	normalizedModel := strings.ToLower(strings.TrimSpace(model))
-	switch provider {
-	case ProviderMixture:
-		return false
-	case ProviderOpenAI:
-		return normalizedModel != "gpt-6-astra"
-	case ProviderOpenAICompatible:
-		return !strings.HasPrefix(normalizedModel, "kimi-")
-	default:
-		return true
-	}
-}
-
 // IsOAuth returns true if this config uses OAuth authentication.
 func (c *LLMConfig) IsOAuth() bool {
 	return c.AuthMethod == AuthMethodOAuth &&

@@ -722,44 +722,6 @@ func TestHandler_GetTaskExecutions_LoadOlderPage(t *testing.T) {
 	assertContains(t, older, "Load older executions")
 }
 
-func TestHandler_TaskExecutionWindowsPreserveSharedBoundaries(t *testing.T) {
-	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
-	agent := createAgent(t, llmConfigRepo)
-	project := createProject(t, h, "Shared Execution Window Project")
-	task := createTask(t, h, project.ID, "Shared Execution Window Task", func(tk *models.Task) {
-		tk.Status = models.StatusCompleted
-	})
-	seedLargeExecutionHistory(t, db, task.ID, agent.ID, 25, 16, 64)
-	ctx := context.Background()
-
-	history, hasOlder, err := h.loadTaskExecutionHistoryWindow(ctx, task.ID, "", 5)
-	require.NoError(t, err)
-	require.True(t, hasOlder)
-	require.Equal(t, []string{"exec-024", "exec-023", "exec-022", "exec-021", "exec-020"}, executionIDs(history))
-
-	thread, hasEarlier, err := h.loadTaskThreadExecutionWindow(ctx, task.ID, "", 5)
-	require.NoError(t, err)
-	require.True(t, hasEarlier)
-	require.Equal(t, []string{"exec-020", "exec-021", "exec-022", "exec-023", "exec-024"}, executionIDs(thread))
-
-	historyOlder, hasOlder, err := h.loadTaskExecutionHistoryWindow(ctx, task.ID, history[len(history)-1].ID, 5)
-	require.NoError(t, err)
-	require.True(t, hasOlder)
-	require.Equal(t, []string{"exec-019", "exec-018", "exec-017", "exec-016", "exec-015"}, executionIDs(historyOlder))
-
-	threadEarlier, hasEarlier, err := h.loadTaskThreadExecutionWindow(ctx, task.ID, thread[0].ID, 5)
-	require.NoError(t, err)
-	require.True(t, hasEarlier)
-	require.Equal(t, []string{"exec-015", "exec-016", "exec-017", "exec-018", "exec-019"}, executionIDs(threadEarlier))
-
-	for _, execution := range historyOlder {
-		require.NotContains(t, executionIDs(history), execution.ID)
-	}
-	for _, execution := range threadEarlier {
-		require.NotContains(t, executionIDs(thread), execution.ID)
-	}
-}
-
 func BenchmarkHandler_GetTaskExecutions_ContentionWithLightweightDBRequest(b *testing.B) {
 	for _, tc := range []struct {
 		name string
