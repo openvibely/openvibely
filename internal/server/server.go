@@ -391,9 +391,19 @@ type updateCoordinatorStarter interface {
 	StartChecks(context.Context)
 }
 
+type updateCoordinatorCheckStopper interface {
+	StopChecks()
+}
+
 func startUpdateCoordinator(ctx context.Context, coordinator updateCoordinatorStarter) {
 	coordinator.StartRecovery(ctx)
 	coordinator.StartChecks(ctx)
+}
+
+func stopUpdateCoordinatorChecks(coordinator updateCoordinatorStarter) {
+	if stopper, ok := coordinator.(updateCoordinatorCheckStopper); ok {
+		stopper.StopChecks()
+	}
 }
 
 // Start wires the full OpenVibely backend and starts serving HTTP on cfg.Port.
@@ -1230,6 +1240,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	ln, listenErr := net.Listen("tcp", addr)
 	if listenErr != nil {
 		srvCancel()
+		stopUpdateCoordinatorChecks(updateCoordinator)
 		closeDatabase()
 		return nil, fmt.Errorf("failed to listen on %s: %w", addr, listenErr)
 	}
@@ -1261,6 +1272,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 		close(shutdownOnce)
 		applog.Infof("shutting down...")
 		srvCancel()
+		stopUpdateCoordinatorChecks(updateCoordinator)
 		if hostedPendingStore != nil {
 			hostedPendingStore.Close()
 		}
