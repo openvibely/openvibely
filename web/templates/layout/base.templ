@@ -4180,15 +4180,22 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							}
 						}
 
-						if (!input.dataset.cardSearchInit) {
-							// Restore persisted term once per input instance.
-							var saved = loadCardSearchTerm(pageKey);
-							if (saved) {
-								input.value = saved;
+							if (!input.dataset.cardSearchInit) {
+								// A server-rendered query is authoritative on direct navigation and HTMX refreshes.
+								var initial = input.getAttribute('data-card-search-initial');
+								if (initial !== null) {
+									input.value = initial;
+									storeCardSearchTerm(pageKey, initial);
+								} else {
+									// Restore persisted term once per input instance.
+									var saved = loadCardSearchTerm(pageKey);
+									if (saved) {
+										input.value = saved;
+									}
+								}
+								input.addEventListener('input', applyFilter);
+								input.dataset.cardSearchInit = 'true';
 							}
-							input.addEventListener('input', applyFilter);
-							input.dataset.cardSearchInit = 'true';
-						}
 
 						// Apply on init/re-init (for restored term or HTMX re-swap)
 						applyFilter();

@@ -44,10 +44,10 @@ func (h *Handler) ListAlerts(c echo.Context) error {
 		if page.IsFragment {
 			setCardPageResponse(c, hasMore)
 		}
-		return render(c, http.StatusOK, pages.AlertsContentPageWithFilters(alerts, currentProjectID, unreadCount, hasMore, filter.DecisionState, filter.ProcessingState))
+		return render(c, http.StatusOK, pages.AlertsContentPageWithFiltersAndSearch(alerts, currentProjectID, unreadCount, hasMore, filter.DecisionState, filter.ProcessingState, filter.Search))
 	}
 	projects, _ := h.projectSvc.ListSelectorOptions(ctx)
-	return render(c, http.StatusOK, pages.AlertsPageWithFilters(projects, currentProjectID, alerts, unreadCount, hasMore, filter.DecisionState, filter.ProcessingState))
+	return render(c, http.StatusOK, pages.AlertsPageWithFiltersAndSearch(projects, currentProjectID, alerts, unreadCount, hasMore, filter.DecisionState, filter.ProcessingState, filter.Search))
 }
 
 func alertListFilter(c echo.Context, page cardPageRequest) models.AlertListFilter {
@@ -153,7 +153,7 @@ func (h *Handler) renderAlertListRefresh(c echo.Context, projectID string, alert
 		unreadCount, _ = h.alertSvc.CountUnread(ctx, projectID)
 	}
 	c.Response().Header().Set("HX-Trigger", "alertUpdate")
-	return render(c, http.StatusOK, pages.AlertsContentPageWithFilters(alerts, projectID, unreadCount, hasMore, filter.DecisionState, filter.ProcessingState))
+	return render(c, http.StatusOK, pages.AlertsContentPageWithFiltersAndSearch(alerts, projectID, unreadCount, hasMore, filter.DecisionState, filter.ProcessingState, filter.Search))
 }
 
 func (h *Handler) setAlertDecision(c echo.Context, state models.AlertDecisionState) error {
