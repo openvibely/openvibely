@@ -13,8 +13,6 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
-
-
 var ErrDuplicateTask = errors.New("task with this name already exists in this project")
 
 const taskSelectColumns = `id, project_id, title, category, priority, status, prompt, agent_id, agent_definition_id, tag, display_order, parent_task_id, chain_config, swarm_role, swarm_status, swarm_config, swarm_sequence, worktree_path, worktree_branch, auto_merge, merge_target_branch, merge_status, base_branch, base_commit_sha, lineage_depth, created_via, telegram_chat_id, created_at, updated_at, completed_at`
@@ -31,6 +29,18 @@ const worktreeCleanupTaskSelectColumns = `id, project_id, status, worktree_path,
 const swarmChildTaskSelectColumns = `id, project_id, title, category, priority, status, agent_id, agent_definition_id, tag, display_order, parent_task_id, swarm_role, swarm_status, swarm_config, swarm_sequence, worktree_path, worktree_branch, auto_merge, merge_target_branch, merge_status, base_branch, base_commit_sha, lineage_depth, created_via, telegram_chat_id, created_at, updated_at, completed_at`
 
 const scheduleCalendarTaskSelectColumns = `t.id, t.project_id, t.title, t.category, t.status`
+
+const scheduleCalendarQuery = `SELECT ` + scheduleCalendarTaskSelectColumns + `,
+		 s.id, s.task_id, s.run_at, s.repeat_type, s.repeat_interval, s.enabled, s.clear_context_on_start, s.next_run, s.last_run, s.created_at, s.updated_at,
+		 COALESCE(automation_node.name, '')
+		 FROM tasks t
+		 LEFT JOIN schedules s ON t.id = s.task_id
+		 LEFT JOIN automation_trigger_owners automation_owner ON automation_owner.schedule_id = s.id AND automation_owner.project_id = t.project_id
+		 LEFT JOIN automation_nodes automation_node ON automation_node.id = automation_owner.node_id
+			AND automation_node.version_id = automation_owner.version_id
+			AND automation_node.automation_id = automation_owner.automation_id
+			AND automation_node.project_id = automation_owner.project_id
+		 WHERE t.project_id = ? AND (t.category = 'scheduled' OR s.id IS NOT NULL)`
 
 const taskSelectColumnsWithGoal = `t.id, t.project_id, t.title, t.category, t.priority, t.status, t.prompt, t.agent_id, t.agent_definition_id, t.tag, t.display_order, t.parent_task_id, t.chain_config, t.swarm_role, t.swarm_status, t.swarm_config, t.swarm_sequence, t.worktree_path, t.worktree_branch, t.auto_merge, t.merge_target_branch, t.merge_status, t.base_branch, t.base_commit_sha, t.lineage_depth, t.created_via, t.telegram_chat_id,
 				EXISTS(SELECT 1 FROM task_goals g WHERE g.task_id = t.id AND g.status != 'cleared') AS has_goal,
@@ -1495,19 +1505,11 @@ type TaskWithSchedule struct {
 }
 
 func (r *TaskRepo) ListWithSchedulesByProject(ctx context.Context, projectID string) ([]TaskWithSchedule, error) {
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT `+scheduleCalendarTaskSelectColumns+`,
-			 s.id, s.task_id, s.run_at, s.repeat_type, s.repeat_interval, s.enabled, s.clear_context_on_start, s.next_run, s.last_run, s.created_at, s.updated_at,
-			 COALESCE(automation_node.name, '')
-			 FROM tasks t
-			 LEFT JOIN schedules s ON t.id = s.task_id
-			 LEFT JOIN automation_trigger_owners automation_owner ON automation_owner.schedule_id = s.id AND automation_owner.project_id = t.project_id
-			 LEFT JOIN automation_nodes automation_node ON automation_node.id = automation_owner.node_id
-				AND automation_node.version_id = automation_owner.version_id
-				AND automation_node.automation_id = automation_owner.automation_id
-				AND automation_node.project_id = automation_owner.project_id
-			 WHERE t.project_id = ? AND (t.category = 'scheduled' OR s.id IS NOT NULL)
-			 `, projectID)
+	return r.listWithSchedulesByProjectQuery(ctx, scheduleCalendarQuery, projectID)
+}
+
+func (r *TaskRepo) listWithSchedulesByProjectQuery(ctx context.Context, query, projectID string) ([]TaskWithSchedule, error) {
+	rows, err := r.db.QueryContext(ctx, query, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("listing tasks with schedules: %w", err)
 	}
