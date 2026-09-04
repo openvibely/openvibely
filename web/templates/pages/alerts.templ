@@ -83,7 +83,7 @@ templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unrea
 							if unreadCount > 0 {
 								<li>
 									<a
-										hx-post={ fmt.Sprintf("/alerts/read-all?project_id=%s", currentProjectID) }
+										hx-post={ alertActionURL("/alerts/read-all", currentProjectID, decisionState, processingState, search) }
 										hx-target="#alerts-content"
 										hx-select="#alerts-content"
 										hx-swap="outerHTML show:none"
@@ -97,7 +97,7 @@ templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unrea
 									<a
 										class="text-error"
 										href="#"
-										data-delete-url={ fmt.Sprintf("/alerts?project_id=%s", currentProjectID) }
+										data-delete-url={ alertActionURL("/alerts", currentProjectID, decisionState, processingState, search) }
 										onclick="return deleteAlertsFromDataset(this)"
 									>
 										Delete All Alerts
