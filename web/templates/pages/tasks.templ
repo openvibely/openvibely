@@ -130,6 +130,7 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 					if (!request || !config || config.path !== request.path) return;
 					var status = event.detail.xhr && event.detail.xhr.status || 0;
 					window._taskCardActionRequest = null;
+					window.dispatchEvent(new CustomEvent('kanban-refresh-unblocked'));
 					if (status >= 200 && status < 300 && window.closeKanbanMenu) {
 						var card = document.getElementById('task-' + request.taskID);
 						var trigger = card && card.querySelector('[data-task-card-menu-trigger]');
@@ -439,6 +440,9 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 					function isRefreshBlocked() {
 						if (window.isDragging) return 'drag';
 						if (document.hidden) return 'hidden';
+						if (window._taskCardActionRequest) return 'task action';
+						const board = document.getElementById('kanban-board');
+						if (board && board.getAttribute('data-open-kanban-menu-key')) return 'task menu';
 						const openModals = document.querySelectorAll('dialog[open]');
 						if (openModals.length > 0) return 'modal';
 						return '';
@@ -524,6 +528,7 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 					// Listen to events dispatched by the sidebar's shared SSE connection
 					window.addEventListener('sse-task-event', handleTaskEvent);
 					window.addEventListener('sse-live-connected', handleSSEReconnected);
+					window.addEventListener('kanban-refresh-unblocked', flushPendingRefresh);
 					document.addEventListener('visibilitychange', handleVisibilityChange);
 						document.addEventListener('dragend', handleDragEnd, true);
 						document.addEventListener('drop', handleDragEnd, true);
@@ -535,6 +540,7 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 						if (event.detail.target && event.detail.target.id === 'main-content') {
 							window.removeEventListener('sse-task-event', handleTaskEvent);
 							window.removeEventListener('sse-live-connected', handleSSEReconnected);
+							window.removeEventListener('kanban-refresh-unblocked', flushPendingRefresh);
 							document.removeEventListener('visibilitychange', handleVisibilityChange);
 							document.removeEventListener('dragend', handleDragEnd, true);
 							document.removeEventListener('drop', handleDragEnd, true);
