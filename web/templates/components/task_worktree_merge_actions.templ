@@ -94,7 +94,9 @@ templ TaskWorktreeMergeActionItem(task *models.Task, action TaskWorktreeMergeAct
 	<li>
 		<button
 			type="button"
-			class="text-xs"
+			if surface == "worktree" {
+				class="text-xs"
+			}
 			data-task-worktree-merge-action
 			data-merge-type={ action.MergeType }
 			data-merge-label={ action.Label }
