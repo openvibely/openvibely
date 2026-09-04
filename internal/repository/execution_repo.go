@@ -48,8 +48,6 @@ const executionSelectColumnsAlias = `e.id, e.task_id, COALESCE(e.agent_config_id
 const executionSelectColumnsAliasLight = `e.id, e.task_id, COALESCE(e.agent_config_id, ''), e.status, e.prompt_sent, e.output, '' AS reasoning_content, e.error_message,
 			e.tokens_used, e.duration_ms, e.is_followup, e.starts_new_context, '' AS diff_output, e.cli_session_id, COALESCE(e.dispatch_id, ''), e.started_at, e.completed_at`
 
-const taskExecutionHistoryPageSQL = `SELECT ` + executionSelectColumnsLight + ` FROM executions WHERE task_id = ? ORDER BY started_at DESC, rowid DESC LIMIT ?`
-
 const taskExecutionCountSQL = `SELECT COUNT(*) FROM executions WHERE task_id = ?`
 
 // taskThreadExecutionSelectColumns contains only the fields needed to render a
@@ -89,22 +87,6 @@ func (r *ExecutionRepo) ListByTask(ctx context.Context, taskID string) ([]models
 		`SELECT `+executionSelectColumnsLight+` FROM executions WHERE task_id = ? ORDER BY started_at DESC`, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("listing executions: %w", err)
-	}
-	defer rows.Close()
-
-	return scanExecutionsNewestFirst(rows)
-}
-
-// ListByTaskHistoryPage returns the latest executions for a task in display order
-// for the execution-history panel. Callers request limit+1 rows to discover
-// whether an older page exists without loading the whole task history.
-func (r *ExecutionRepo) ListByTaskHistoryPage(ctx context.Context, taskID string, limit int) ([]models.Execution, error) {
-	if limit <= 0 {
-		return []models.Execution{}, nil
-	}
-	rows, err := r.db.QueryContext(ctx, taskExecutionHistoryPageSQL, taskID, limit)
-	if err != nil {
-		return nil, fmt.Errorf("listing execution history page: %w", err)
 	}
 	defer rows.Close()
 
@@ -1059,6 +1041,18 @@ func (r *ExecutionRepo) listTaskExecutionPage(ctx context.Context, taskID, befor
 	if limit <= 0 {
 		return []models.Execution{}, nil
 	}
+	query, args := taskExecutionPageSQL(taskID, beforeExecID, limit)
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("listing executions chronological page: %w", err)
+	}
+	defer rows.Close()
+
+	return scanExecutionsNewestFirstAsChronological(rows)
+}
+
+func taskExecutionPageSQL(taskID, beforeExecID string, limit int) (string, []interface{}) {
 	query := `SELECT ` + executionSelectColumnsLight + ` FROM executions WHERE task_id = ?`
 	args := []interface{}{taskID}
 	if beforeExecID != "" {
@@ -1068,14 +1062,7 @@ func (r *ExecutionRepo) listTaskExecutionPage(ctx context.Context, taskID, befor
 	}
 	query += ` ORDER BY started_at DESC, rowid DESC LIMIT ?`
 	args = append(args, limit)
-
-	rows, err := r.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("listing executions chronological page: %w", err)
-	}
-	defer rows.Close()
-
-	return scanExecutionsNewestFirstAsChronological(rows)
+	return query, args
 }
 
 func scanExecutionsNewestFirst(rows *sql.Rows) ([]models.Execution, error) {
