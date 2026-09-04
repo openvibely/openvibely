@@ -410,14 +410,26 @@ func (r *TaskRepo) CreateWithExecutor(ctx context.Context, exec SQLExecutor, t *
 }
 
 func (r *TaskRepo) CreateWithGoal(ctx context.Context, t *models.Task, goal *models.TaskGoal) error {
-	if goal == nil || strings.TrimSpace(goal.Objective) == "" {
-		return r.Create(ctx, t)
-	}
-	return withImmediateTx(ctx, r.db, func(exec sqlExecutor) error {
+	return r.CreateWithGoalAndCallback(ctx, t, goal, nil)
+}
+
+// CreateWithGoalAndCallback persists a task, its optional goal, and any related
+// metadata callback in one transaction. The callback runs after the task ID is
+// assigned and before the transaction is committed.
+func (r *TaskRepo) CreateWithGoalAndCallback(ctx context.Context, t *models.Task, goal *models.TaskGoal, callback func(SQLExecutor) error) error {
+	return withImmediateTx(ctx, r.db, func(exec SQLExecutor) error {
 		if err := r.createWithExecutor(ctx, exec, t); err != nil {
 			return err
 		}
-		return createTaskGoalWithExecutor(ctx, exec, t.ID, goal)
+		if goal != nil && strings.TrimSpace(goal.Objective) != "" {
+			if err := createTaskGoalWithExecutor(ctx, exec, t.ID, goal); err != nil {
+				return err
+			}
+		}
+		if callback != nil {
+			return callback(exec)
+		}
+		return nil
 	})
 }
 
@@ -2122,7 +2134,15 @@ func (r *TaskRepo) UpdateDiscordOrigin(ctx context.Context, id string) error {
 
 // UpdateXOrigin marks a task as created through X.
 func (r *TaskRepo) UpdateXOrigin(ctx context.Context, id string) error {
-	_, err := execBoundSQLite(ctx, r.db, `UPDATE tasks SET created_via = 'x', updated_at = datetime('now') WHERE id = ?`, id)
+	return withBoundSQLiteConn(ctx, r.db, func(conn *sql.Conn) error {
+		return r.UpdateXOriginWithExecutor(ctx, conn, id)
+	})
+}
+
+// UpdateXOriginWithExecutor marks a task as created through X using the
+// caller's transaction.
+func (r *TaskRepo) UpdateXOriginWithExecutor(ctx context.Context, exec SQLExecutor, id string) error {
+	_, err := exec.ExecContext(ctx, `UPDATE tasks SET created_via = 'x', updated_at = datetime('now') WHERE id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("updating X origin: %w", err)
 	}
