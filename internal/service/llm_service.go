@@ -46,8 +46,6 @@ type LLMService struct {
 	telegramSvc               *TelegramService
 	slackSvc                  *SlackService
 	discordSvc                *DiscordService
-	xServiceMu                sync.RWMutex
-	xSvc                      *XService
 	llmCaller                 LLMCaller
 	providerAdapters          map[models.LLMProvider]ProviderAdapter
 	routing                   *agentRoutingStrategy
@@ -127,23 +125,6 @@ func (s *LLMService) SetSlackService(ss *SlackService) {
 // SetDiscordService sets the Discord service for sending task completion notifications.
 func (s *LLMService) SetDiscordService(ds *DiscordService) {
 	s.discordSvc = ds
-}
-
-// SetXService sets the current X service used for active-task completion
-// notifications. The Handler updates it when X configuration is replaced.
-func (s *LLMService) SetXService(xSvc *XService) {
-	s.xServiceMu.Lock()
-	s.xSvc = xSvc
-	s.xServiceMu.Unlock()
-}
-
-func (s *LLMService) sendXTaskCompletionNotification(ctx context.Context, task models.Task, output, errMsg string) {
-	s.xServiceMu.RLock()
-	xSvc := s.xSvc
-	s.xServiceMu.RUnlock()
-	if xSvc != nil {
-		xSvc.SendTaskCompletionNotification(ctx, task, output, errMsg)
-	}
 }
 
 // SetFileChangeBroadcaster sets the file change broadcaster for real-time file change updates.
@@ -1327,7 +1308,6 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 					if s.discordSvc != nil {
 						s.discordSvc.SendTaskCompletionNotification(finalizeCtx, task, "", syncErr.Error())
 					}
-					s.sendXTaskCompletionNotification(finalizeCtx, task, "", syncErr.Error())
 					s.promoteQueuedTaskThreadAfterCompletion(task.ID)
 					return exec, llmcontracts.ChatContext{}, fmt.Errorf("startup worktree auto-merge failed: %w", syncErr)
 				}
@@ -1525,7 +1505,6 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 		if s.discordSvc != nil {
 			s.discordSvc.SendTaskCompletionNotification(bgCtx, task, "", err.Error())
 		}
-		s.sendXTaskCompletionNotification(bgCtx, task, "", err.Error())
 		s.promoteQueuedTaskThreadAfterCompletion(task.ID)
 		return exec, result.ChatContext, fmt.Errorf("calling LLM: %w", err)
 	}
@@ -1629,7 +1608,6 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 		if s.discordSvc != nil {
 			s.discordSvc.SendTaskCompletionNotification(finalizeCtx, task, "", reason)
 		}
-		s.sendXTaskCompletionNotification(finalizeCtx, task, "", reason)
 		s.promoteQueuedTaskThreadAfterCompletion(task.ID)
 		return exec, result.ChatContext, nil
 	}
@@ -1738,7 +1716,6 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	if s.discordSvc != nil {
 		s.discordSvc.SendTaskCompletionNotification(finalizeCtx, task, output, "")
 	}
-	s.sendXTaskCompletionNotification(finalizeCtx, task, output, "")
 	s.promoteQueuedTaskThreadAfterCompletion(task.ID)
 
 	return exec, result.ChatContext, nil

@@ -130,7 +130,6 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 					if (!request || !config || config.path !== request.path) return;
 					var status = event.detail.xhr && event.detail.xhr.status || 0;
 					window._taskCardActionRequest = null;
-					window.dispatchEvent(new CustomEvent('kanban-refresh-unblocked'));
 					if (status >= 200 && status < 300 && window.closeKanbanMenu) {
 						var card = document.getElementById('task-' + request.taskID);
 						var trigger = card && card.querySelector('[data-task-card-menu-trigger]');
@@ -428,58 +427,21 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 					if (!tasksPage) return;
 
 					const projectID = tasksPage.getAttribute('data-project-id');
-					const backgroundRefreshPath = '/tasks?project_id=' + encodeURIComponent(projectID) + '&refresh_source=sse';
 					let refreshTimeout = null;
-					let backgroundRefreshXHR = null;
 					// Deferred-refresh flag: when a refresh would interrupt the user
-					// (modal, menu, action, drag, or hidden tab) we retain one
-					// invalidation and retry after the blocker clears. The same gate
-					// runs before the final swap so a request started before an
-					// interaction cannot replace the board during that interaction.
+					// (modal open, drag in progress, tab hidden) we set this flag
+					// and re-trigger the refresh once the blocker clears, instead
+					// of dropping the event. This fixes stale kanban dropzones
+					// (queued/in-progress/completed) when lifecycle hooks fire
+					// while the user has any dialog open.
 					let pendingRefresh = false;
 
 					function isRefreshBlocked() {
 						if (window.isDragging) return 'drag';
 						if (document.hidden) return 'hidden';
-						if (window._taskCardActionRequest) return 'task action';
-						const board = document.getElementById('kanban-board');
-						if (board && board.getAttribute('data-open-kanban-menu-key')) return 'task menu';
 						const openModals = document.querySelectorAll('dialog[open]');
 						if (openModals.length > 0) return 'modal';
 						return '';
-					}
-
-					function isBackgroundRefreshEvent(event) {
-						const requestConfig = event && event.detail && event.detail.requestConfig;
-						return !!requestConfig && requestConfig.path === backgroundRefreshPath;
-					}
-
-					function handleBackgroundRefreshBeforeRequest(event) {
-						if (isBackgroundRefreshEvent(event)) backgroundRefreshXHR = event.detail.xhr;
-					}
-
-					function handleBackgroundRefreshAfterRequest(event) {
-						if (isBackgroundRefreshEvent(event) && event.detail.xhr === backgroundRefreshXHR) backgroundRefreshXHR = null;
-					}
-
-					function handleKanbanMenuOpened() {
-						if (!backgroundRefreshXHR) return;
-						pendingRefresh = true;
-						const xhr = backgroundRefreshXHR;
-						backgroundRefreshXHR = null;
-						xhr.abort();
-					}
-
-					function handleBackgroundRefreshBeforeSwap(event) {
-						const detail = event && event.detail;
-						const target = detail && detail.target;
-						const requestConfig = detail && detail.requestConfig;
-						if (!target || target.id !== 'kanban-board' || !requestConfig || requestConfig.path !== backgroundRefreshPath) return;
-						const blocker = isRefreshBlocked();
-						if (!blocker) return;
-						console.log('[SSE] Refresh response blocked by ' + blocker + ', deferring swap');
-						detail.shouldSwap = false;
-						pendingRefresh = true;
 					}
 
 					function scheduleRefresh(delay) {
@@ -493,7 +455,7 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 								return;
 							}
 							pendingRefresh = false;
-							htmx.ajax('GET', backgroundRefreshPath, {
+							htmx.ajax('GET', '/tasks?project_id=' + projectID, {
 								target: '#kanban-board',
 								swap: 'outerHTML'
 							});
@@ -562,11 +524,6 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 					// Listen to events dispatched by the sidebar's shared SSE connection
 					window.addEventListener('sse-task-event', handleTaskEvent);
 					window.addEventListener('sse-live-connected', handleSSEReconnected);
-					window.addEventListener('kanban-menu-opened', handleKanbanMenuOpened);
-					window.addEventListener('kanban-refresh-unblocked', flushPendingRefresh);
-					document.body.addEventListener('htmx:beforeRequest', handleBackgroundRefreshBeforeRequest);
-					document.body.addEventListener('htmx:afterRequest', handleBackgroundRefreshAfterRequest);
-					document.body.addEventListener('htmx:beforeSwap', handleBackgroundRefreshBeforeSwap);
 					document.addEventListener('visibilitychange', handleVisibilityChange);
 						document.addEventListener('dragend', handleDragEnd, true);
 						document.addEventListener('drop', handleDragEnd, true);
@@ -578,11 +535,6 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 						if (event.detail.target && event.detail.target.id === 'main-content') {
 							window.removeEventListener('sse-task-event', handleTaskEvent);
 							window.removeEventListener('sse-live-connected', handleSSEReconnected);
-							window.removeEventListener('kanban-menu-opened', handleKanbanMenuOpened);
-							window.removeEventListener('kanban-refresh-unblocked', flushPendingRefresh);
-							document.body.removeEventListener('htmx:beforeRequest', handleBackgroundRefreshBeforeRequest);
-							document.body.removeEventListener('htmx:afterRequest', handleBackgroundRefreshAfterRequest);
-							document.body.removeEventListener('htmx:beforeSwap', handleBackgroundRefreshBeforeSwap);
 							document.removeEventListener('visibilitychange', handleVisibilityChange);
 							document.removeEventListener('dragend', handleDragEnd, true);
 							document.removeEventListener('drop', handleDragEnd, true);

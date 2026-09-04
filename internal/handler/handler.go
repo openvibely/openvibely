@@ -502,9 +502,6 @@ func (h *Handler) SetXService(svc *service.XService) {
 	h.xServiceMu.Lock()
 	h.xService = svc
 	h.xServiceMu.Unlock()
-	if h.llmSvc != nil {
-		h.llmSvc.SetXService(svc)
-	}
 }
 
 func (h *Handler) getXService() *service.XService {
@@ -518,9 +515,6 @@ func (h *Handler) swapXService(svc *service.XService) *service.XService {
 	old := h.xService
 	h.xService = svc
 	h.xServiceMu.Unlock()
-	if h.llmSvc != nil {
-		h.llmSvc.SetXService(svc)
-	}
 	return old
 }
 

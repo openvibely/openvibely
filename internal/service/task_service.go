@@ -224,13 +224,6 @@ func normalizeTaskCreatePriority(t *models.Task) {
 }
 
 func (s *TaskService) CreateWithGoal(ctx context.Context, t *models.Task, objective string) error {
-	return s.CreateWithGoalAndCallback(ctx, t, objective, nil)
-}
-
-// CreateWithGoalAndCallback persists a task and its optional goal before
-// invoking the worker. The callback is committed atomically with the task so
-// channel-specific metadata is complete before active-task admission.
-func (s *TaskService) CreateWithGoalAndCallback(ctx context.Context, t *models.Task, objective string, callback func(repository.SQLExecutor) error) error {
 	if err := normalizeTaskTitleAndPrompt(t); err != nil {
 		return err
 	}
@@ -257,7 +250,7 @@ func (s *TaskService) CreateWithGoalAndCallback(ctx context.Context, t *models.T
 			Reason:    "set at task creation",
 		}
 	}
-	if err := s.repo.CreateWithGoalAndCallback(ctx, t, goal, callback); err != nil {
+	if err := s.repo.CreateWithGoal(ctx, t, goal); err != nil {
 		if errors.Is(err, repository.ErrDuplicateTask) {
 			applog.Infof("[task-svc] Create duplicate task title=%q", t.Title)
 			return ErrDuplicateTask

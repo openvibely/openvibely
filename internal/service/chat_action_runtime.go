@@ -107,9 +107,7 @@ type channelTaskActionHandlerOptions struct {
 	Collector           *channelActionSummaryCollector
 	PrepareTaskCreation func(context.Context, *TaskCreationRequest) error
 	CreatePreparedTask  func(context.Context, TaskCreationRequest, []models.LLMConfig) ([]models.Task, string, bool, error)
-	PersistTaskCreation TaskCreationPersistence
 	OnTasksCreated      func(context.Context, []TaskCreationRequest, []models.Task) error
-	OnSwarmCreated      func(context.Context, *models.Task) error
 }
 
 type channelGoalActionHandlerOptions struct {
@@ -524,8 +522,6 @@ func buildChannelTaskActionHandlers(opts channelTaskActionHandlerOptions) map[st
 				LLMConfigRepo:       opts.LLMConfigRepo,
 				PrepareTaskCreation: opts.PrepareTaskCreation,
 				CreateTask:          opts.CreatePreparedTask,
-				PersistTaskCreation: opts.PersistTaskCreation,
-				RequireCreated:      opts.PersistTaskCreation != nil,
 				OnTasksCreated:      opts.OnTasksCreated,
 				AddCreatedSummary: func(summary string) {
 					if opts.Collector != nil {
@@ -545,11 +541,7 @@ func buildChannelTaskActionHandlers(opts channelTaskActionHandlerOptions) map[st
 			if err != nil {
 				return "", err
 			}
-			if opts.OnSwarmCreated != nil {
-				if err := opts.OnSwarmCreated(ctx, parent); err != nil {
-					return "", err
-				}
-			} else if opts.OnTasksCreated != nil {
+			if opts.OnTasksCreated != nil {
 				if err := opts.OnTasksCreated(ctx, nil, []models.Task{*parent}); err != nil {
 					return "", err
 				}
