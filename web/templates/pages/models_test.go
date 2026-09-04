@@ -493,8 +493,15 @@ func TestModelsContent_CardsCarryOnlyBoundedListData(t *testing.T) {
 	}
 }
 
-func TestModelsContent_CompatibleModelCardsShowEffectiveSettings(t *testing.T) {
+func TestModelsContent_ModelCardsShowEffectiveSettings(t *testing.T) {
 	agents := []models.LLMConfig{
+		{
+			ID:          "astra-model",
+			Name:        "Astra",
+			Provider:    models.ProviderOpenAI,
+			Model:       "gpt-6-astra",
+			Temperature: 0.8,
+		},
 		{
 			ID:              "kimi-model",
 			Name:            "Kimi",
@@ -515,6 +522,11 @@ func TestModelsContent_CompatibleModelCardsShowEffectiveSettings(t *testing.T) {
 	var buf bytes.Buffer
 	if err := ModelsContent(agents, nil, false).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render models content: %v", err)
+	}
+
+	astraCard := renderedModelCard(t, buf.String(), "astra-model")
+	if strings.Contains(astraCard, "Temperature:") {
+		t.Fatalf("Astra card should not show an unsupported temperature:\n%s", astraCard)
 	}
 
 	kimiCard := renderedModelCard(t, buf.String(), "kimi-model")
@@ -546,6 +558,8 @@ func TestModelsContent_MixtureReferenceOrderingControls(t *testing.T) {
 		`if (modelField) modelField.classList.toggle('hidden', provider === 'mixture');`,
 		`id="model_temperature_field"`,
 		`function modelSupportsTemperature(provider, model)`,
+		`provider === 'openai'`,
+		`normalizedModel !== 'gpt-6-astra'`,
 		`indexOf('kimi-') !== 0`,
 		`function updateTemperatureField(provider, model)`,
 		`field.classList.toggle('hidden', !supported);`,
