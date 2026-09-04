@@ -3446,6 +3446,41 @@ func TestCreateModel_OpenAI_GPT54(t *testing.T) {
 	}
 }
 
+func TestCreateModel_OpenAI_AstraClearsTemperature(t *testing.T) {
+	_, e, llmConfigRepo := setupTestHandler(t)
+
+	form := url.Values{}
+	form.Set("name", "OpenAI GPT-6 Astra")
+	form.Set("provider", "openai")
+	form.Set("openai_auth_type", "api_key")
+	form.Set("model", "gpt-6-astra")
+	form.Set("api_key", "sk-openai-test")
+	form.Set("temperature", "0.8")
+	form.Set("reasoning_effort", "medium")
+
+	req := httptest.NewRequest(http.MethodPost, "/models", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303, got %d: %s", rec.Code, rec.Body.String())
+	}
+	configs, err := llmConfigRepo.List(context.Background())
+	if err != nil {
+		t.Fatalf("list error: %v", err)
+	}
+	for _, config := range configs {
+		if config.Name == "OpenAI GPT-6 Astra" {
+			if config.Temperature != 0 {
+				t.Fatalf("temperature = %v, want 0 for Astra", config.Temperature)
+			}
+			return
+		}
+	}
+	t.Fatal("created Astra model not found")
+}
+
 func TestNormalizeOpenAIModel(t *testing.T) {
 	tests := []struct {
 		input string
