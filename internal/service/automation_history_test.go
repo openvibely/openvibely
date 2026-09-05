@@ -544,41 +544,18 @@ func TestAutomationHistoryTransitionQueryPlanUsesInvocationIndex(t *testing.T) {
 		"idx_automation_transitions_work_item")
 }
 
-func setAutomationWorkItemHistoryIndexes(tb testing.TB, db *sql.DB, candidate bool) {
-	tb.Helper()
-	if !candidate {
-		_, err := db.Exec(`DROP INDEX IF EXISTS idx_automation_work_items_history;
-			DROP INDEX IF EXISTS idx_automation_work_items_history_status;`)
-		require.NoError(tb, err)
-		return
-	}
-	_, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_automation_work_items_history
-			ON automation_work_items(project_id, automation_id, created_at DESC, id DESC);
-		CREATE INDEX IF NOT EXISTS idx_automation_work_items_history_status
-			ON automation_work_items(project_id, automation_id, status, created_at DESC, id DESC);`)
-	require.NoError(tb, err)
-}
-
 func BenchmarkAutomationWorkItemsHistoryQuery(b *testing.B) {
 	for _, tc := range []struct {
-		name      string
-		status    string
-		candidate bool
+		name   string
+		status string
 	}{
-		{name: "BaselineUnfilteredTempSort", candidate: false},
-		{name: "IndexedUnfiltered", candidate: true},
-		{name: "BaselineStatusTempSort", status: "active", candidate: false},
-		{name: "IndexedStatus", status: "active", candidate: true},
+		{name: "Unfiltered"},
+		{name: "Status", status: "active"},
 	} {
 		b.Run(tc.name, func(b *testing.B) {
 			db, repo, projectID, automationID := newAutomationWorkItemHistoryBenchFixture(b, 10000)
-			setAutomationWorkItemHistoryIndexes(b, db, tc.candidate)
 			plan := explainAutomationWorkItemsHistoryPlan(b, db, projectID, automationID, tc.status, false)
-			if tc.candidate {
-				require.NotContains(b, plan, "USE TEMP B-TREE FOR ORDER BY")
-			} else {
-				require.Contains(b, plan, "USE TEMP B-TREE FOR ORDER BY")
-			}
+			require.NotContains(b, plan, "USE TEMP B-TREE FOR ORDER BY")
 			ctx := context.Background()
 			b.ReportAllocs()
 			b.ResetTimer()
@@ -592,31 +569,16 @@ func BenchmarkAutomationWorkItemsHistoryQuery(b *testing.B) {
 	}
 }
 
-func setAutomationTransitionInvocationIndex(tb testing.TB, db *sql.DB, candidate bool) {
-	tb.Helper()
-	if !candidate {
-		_, err := db.Exec(`DROP INDEX IF EXISTS idx_automation_transitions_invocation;`)
-		require.NoError(tb, err)
-		return
-	}
-	_, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_automation_transitions_invocation
-		ON automation_transitions(project_id, automation_id, invocation_id, occurred_at, id);`)
-	require.NoError(tb, err)
-}
-
 func BenchmarkAutomationTransitionHistoryQuery(b *testing.B) {
 	for _, tc := range []struct {
 		name       string
 		invocation bool
-		candidate  bool
 	}{
-		{name: "BaselineInvocationTempSort", invocation: true, candidate: false},
-		{name: "IndexedInvocation", invocation: true, candidate: true},
-		{name: "IndexedWorkItem", candidate: true},
+		{name: "Invocation", invocation: true},
+		{name: "WorkItem"},
 	} {
 		b.Run(tc.name, func(b *testing.B) {
 			db, repo, projectID, automationID, invocationID, workItemID := newAutomationTransitionHistoryBenchFixture(b, 500, 20)
-			setAutomationTransitionInvocationIndex(b, db, tc.candidate)
 			planInvocationID := ""
 			planWorkItemID := workItemID
 			if tc.invocation {
@@ -624,12 +586,9 @@ func BenchmarkAutomationTransitionHistoryQuery(b *testing.B) {
 				planWorkItemID = ""
 			}
 			plan := explainAutomationTransitionsHistoryPlan(b, db, projectID, automationID, planInvocationID, planWorkItemID, false)
-			if tc.invocation && tc.candidate {
+			if tc.invocation {
 				require.Contains(b, plan, "idx_automation_transitions_invocation")
 				require.NotContains(b, plan, "USE TEMP B-TREE FOR ORDER BY")
-			}
-			if tc.invocation && !tc.candidate {
-				require.Contains(b, plan, "USE TEMP B-TREE FOR ORDER BY")
 			}
 			if !tc.invocation {
 				require.Contains(b, plan, "idx_automation_transitions_work_item")
