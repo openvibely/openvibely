@@ -133,9 +133,8 @@ window.addEventListener('DOMContentLoaded', function() {
     button().click();
     await waitFor(function(){ return dialog().open; }, 'Task selector reopen');
     if (showCalls!==1) fail('selector initialized duplicate click listeners: '+showCalls);
-    dialog().querySelector('.modal-backdrop button').click();
-    await waitFor(function(){ return !dialog().open && button().getAttribute('aria-expanded')==='false'; }, 'backdrop dismissal');
-
+		dialog().dispatchEvent(new MouseEvent('click',{bubbles:true}));
+		await waitFor(function(){ return !dialog().open && button().getAttribute('aria-expanded')==='false'; }, 'outside dismissal');
     button().click();
     await waitFor(function(){ return dialog().open; }, 'Task selector before route change');
     await window.openVibelyNavigate('/other');

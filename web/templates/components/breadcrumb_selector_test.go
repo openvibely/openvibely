@@ -32,10 +32,16 @@ func TestBreadcrumbSelectorRendersAccessibleBoundedDialog(t *testing.T) {
 		`role="dialog"`, `aria-modal="true"`, `Switch Task`, `Search Tasks`,
 		`hx-trigger="input changed delay:200ms, search"`, `hx-sync="this:replace"`,
 		`hx-include="closest [data-breadcrumb-selector]"`, `name="tab" value="changes"`,
-		`max-w-[calc(100vw-2rem)]`, `overflow-hidden`, `data-breadcrumb-selector-status`,
+		`max-w-[calc(100vw-1rem)]`, `overflow-hidden`, `data-breadcrumb-selector-status`,
+		`class="w-full min-w-0 border-0 bg-transparent px-4 py-2 pr-10 text-sm focus:outline-none focus:ring-0"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("missing %q in selector markup", want)
+		}
+	}
+	for _, forbidden := range []string{`class="modal p-4"`, `class="input input-bordered`, `min-h-8 items-center border-t`, `1 result.`, `2 results.`} {
+		if strings.Contains(body, forbidden) {
+			t.Errorf("selector markup should not contain %q", forbidden)
 		}
 	}
 }
@@ -64,10 +70,11 @@ func TestBreadcrumbSelectorKeyboardFocusAndContainmentInChrome(t *testing.T) {
 	    document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
 	    if(dialog.open || document.activeElement!==button || button.getAttribute('aria-expanded')!=='false') throw new Error('Escape did not close and restore focus');
 	    button.click(); await waitFor(function(){ return dialog.open; });
-	    var box=dialog.querySelector('.modal-box').getBoundingClientRect();
-	    if(box.left < 15 || box.right > innerWidth-15 || box.bottom > innerHeight-15) throw new Error('selector escaped viewport: '+JSON.stringify(box));
-		    document.documentElement.setAttribute('data-theme','light');
-		    var themeBox=dialog.querySelector('.modal-box'), lightStyle=getComputedStyle(themeBox);
+		    var box=dialog.getBoundingClientRect(), triggerBox=button.getBoundingClientRect();
+		    if(box.left < 7 || box.right > innerWidth-7 || box.bottom > innerHeight-7) throw new Error('selector escaped viewport: '+JSON.stringify(box));
+		    if(Math.abs(box.top-triggerBox.bottom-4) > 2) throw new Error('selector is not anchored below trigger: '+JSON.stringify({box:box,trigger:triggerBox}));
+		    if(triggerBox.right < box.left || triggerBox.right > box.right+8) throw new Error('selector is not horizontally linked to caret');		    document.documentElement.setAttribute('data-theme','light');
+		    var themeBox=dialog, lightStyle=getComputedStyle(themeBox);
 		    var light=[lightStyle.backgroundColor,lightStyle.borderColor,lightStyle.color].join('|');
 		    document.documentElement.setAttribute('data-theme','dark');
 		    var darkStyle=getComputedStyle(themeBox), dark=[darkStyle.backgroundColor,darkStyle.borderColor,darkStyle.color].join('|');
@@ -75,11 +82,11 @@ func TestBreadcrumbSelectorKeyboardFocusAndContainmentInChrome(t *testing.T) {
 		    document.documentElement.setAttribute('data-theme','imported-contrast');
 		    var contrastStyle=getComputedStyle(themeBox);
 		    if(contrastStyle.backgroundColor!=='rgb(0, 0, 0)' || contrastStyle.color!=='rgb(255, 255, 255)' || contrastStyle.borderColor!=='rgb(255, 255, 255)') throw new Error('imported high-contrast variables were not honored: '+[contrastStyle.backgroundColor,contrastStyle.color,contrastStyle.borderColor].join('|'));
-		    if(!dialog.querySelector('.bg-base-100') || !dialog.querySelector('.border-base-300')) throw new Error('theme semantic classes missing');	    document.body.setAttribute('data-test-result','pass');
+		    if(!dialog.matches('.bg-base-100') || !dialog.matches('.border-base-300')) throw new Error('theme semantic classes missing');	    document.body.setAttribute('data-test-result','pass');
 	  })().catch(function(error){ document.body.setAttribute('data-test-result','fail'); document.body.setAttribute('data-test-error',String(error.stack||error)); });
 	});
 	</script>`
-	page := `<!doctype html><html data-theme="light"><head><meta name="viewport" content="width=device-width"><style>dialog{border:0;background:transparent}.modal-box{box-sizing:border-box;color:var(--fixture-content)}.w-\[28rem\]{width:28rem}.max-w-\[calc\(100vw-2rem\)\]{max-width:calc(100vw - 2rem)}.max-h-\[min\(32rem\,calc\(100dvh-2rem\)\)\]{max-height:min(32rem,calc(100dvh - 2rem))}.bg-base-100{background-color:var(--fixture-base)}.border-base-300{border-color:var(--fixture-border)}[data-theme="light"]{--fixture-base:rgb(255,255,255);--fixture-border:rgb(210,210,210);--fixture-content:rgb(20,20,20)}[data-theme="dark"]{--fixture-base:rgb(24,24,27);--fixture-border:rgb(82,82,91);--fixture-content:rgb(244,244,245)}[data-theme="imported-contrast"]{--fixture-base:rgb(0,0,0);--fixture-border:rgb(255,255,255);--fixture-content:rgb(255,255,255)}</style><script src="/htmx.js"></script></head><body data-test-result="pending">` + selector.String() + runner + `</body></html>`
+	page := `<!doctype html><html data-theme="light"><head><meta name="viewport" content="width=device-width"><style>dialog{border:0;background:transparent;box-sizing:border-box}.fixed{position:fixed}.m-0{margin:0}.w-\[28rem\]{width:28rem}.max-w-\[calc\(100vw-1rem\)\]{max-width:calc(100vw - 1rem)}.max-h-\[min\(32rem\,calc\(100dvh-1rem\)\)\]{max-height:min(32rem,calc(100dvh - 1rem))}.bg-base-100{background-color:var(--fixture-base)}.border-base-300{border:1px solid var(--fixture-border)}.text-base-content{color:var(--fixture-content)}[data-theme="light"]{--fixture-base:rgb(255,255,255);--fixture-border:rgb(210,210,210);--fixture-content:rgb(20,20,20)}[data-theme="dark"]{--fixture-base:rgb(24,24,27);--fixture-border:rgb(82,82,91);--fixture-content:rgb(244,244,245)}[data-theme="imported-contrast"]{--fixture-base:rgb(0,0,0);--fixture-border:rgb(255,255,255);--fixture-content:rgb(255,255,255)}</style><script src="/htmx.js"></script></head><body data-test-result="pending">` + selector.String() + runner + `</body></html>`
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/":

@@ -123,20 +123,20 @@ func BreadcrumbSelector(config models.BreadcrumbSelector) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "\" class=\"modal p-4\" role=\"dialog\" aria-modal=\"true\" aria-labelledby=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "\" class=\"fixed m-0 max-h-[min(32rem,calc(100dvh-1rem))] w-[28rem] max-w-[calc(100vw-1rem)] overflow-hidden rounded-box border border-base-300 bg-base-100 p-0 text-base-content shadow-xl backdrop:bg-transparent\" role=\"dialog\" aria-modal=\"true\" aria-labelledby=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var8 string
 		templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.ResolveAttributeValue(config.ID + "-heading")
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/breadcrumb_selector.templ`, Line: 26, Col: 129}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/breadcrumb_selector.templ`, Line: 26, Col: 320}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var8)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "\" data-breadcrumb-selector-dialog><div class=\"modal-box flex max-h-[min(32rem,calc(100dvh-2rem))] w-[28rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden border border-base-300 bg-base-100 p-0 shadow-xl\"><div class=\"flex items-center justify-between gap-3 border-b border-base-300 px-4 py-3\"><h2 id=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "\" data-breadcrumb-selector-dialog><div class=\"flex max-h-[inherit] min-h-0 flex-col overflow-hidden\"><div class=\"flex items-center justify-between gap-3 border-b border-base-300 px-4 py-3\"><h2 id=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -175,7 +175,7 @@ func BreadcrumbSelector(config models.BreadcrumbSelector) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "\" data-breadcrumb-selector-close>✕</button></div><div class=\"border-b border-base-300 p-3\"><label class=\"sr-only\" for=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "\" data-breadcrumb-selector-close>✕</button></div><div class=\"relative border-b border-base-300\"><label class=\"sr-only\" for=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -201,27 +201,27 @@ func BreadcrumbSelector(config models.BreadcrumbSelector) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "s</label> <label class=\"input input-bordered flex w-full items-center gap-2\"><svg class=\"h-4 w-4 shrink-0 opacity-50\" width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" aria-hidden=\"true\"><circle cx=\"11\" cy=\"11\" r=\"7\"></circle><path d=\"m20 20-3.5-3.5\"></path></svg> <input id=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "s</label> <input id=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var14 string
 		templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.ResolveAttributeValue(config.ID + "-search")
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/breadcrumb_selector.templ`, Line: 37, Col: 33}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/breadcrumb_selector.templ`, Line: 35, Col: 32}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var14)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "\" class=\"min-w-0 grow\" type=\"search\" name=\"search\" placeholder=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "\" class=\"w-full min-w-0 border-0 bg-transparent px-4 py-2 pr-10 text-sm focus:outline-none focus:ring-0\" type=\"search\" name=\"search\" placeholder=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var15 string
 		templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.ResolveAttributeValue("Search " + config.Kind + "s")
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/breadcrumb_selector.templ`, Line: 41, Col: 50}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/breadcrumb_selector.templ`, Line: 39, Col: 49}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var15)
 		if templ_7745c5c3_Err != nil {
@@ -234,7 +234,7 @@ func BreadcrumbSelector(config models.BreadcrumbSelector) templ.Component {
 		var templ_7745c5c3_Var16 string
 		templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.ResolveAttributeValue(config.SearchURL)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/breadcrumb_selector.templ`, Line: 43, Col: 32}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/breadcrumb_selector.templ`, Line: 41, Col: 31}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var16)
 		if templ_7745c5c3_Err != nil {
@@ -247,7 +247,7 @@ func BreadcrumbSelector(config models.BreadcrumbSelector) templ.Component {
 		var templ_7745c5c3_Var17 string
 		templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.ResolveAttributeValue("#" + config.ID + "-results")
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/breadcrumb_selector.templ`, Line: 46, Col: 47}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/breadcrumb_selector.templ`, Line: 44, Col: 46}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var17)
 		if templ_7745c5c3_Err != nil {
@@ -260,65 +260,52 @@ func BreadcrumbSelector(config models.BreadcrumbSelector) templ.Component {
 		var templ_7745c5c3_Var18 string
 		templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.ResolveAttributeValue("#" + config.ID + "-loading")
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/breadcrumb_selector.templ`, Line: 49, Col: 50}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/breadcrumb_selector.templ`, Line: 47, Col: 49}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var18)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "\" data-breadcrumb-selector-search></label></div><div id=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "\" data-breadcrumb-selector-search> <span id=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var19 string
-		templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.ResolveAttributeValue(config.ID + "-results")
+		templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.ResolveAttributeValue(config.ID + "-loading")
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/breadcrumb_selector.templ`, Line: 54, Col: 36}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/breadcrumb_selector.templ`, Line: 50, Col: 38}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var19)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "\" class=\"min-h-0 flex-1 overflow-y-auto overscroll-contain p-2\" data-breadcrumb-selector-results><p class=\"px-3 py-6 text-center text-sm text-base-content/60\">Loading ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "\" class=\"loading loading-spinner loading-xs htmx-indicator pointer-events-none absolute right-3 top-1/2 -translate-y-1/2\" aria-hidden=\"true\"></span></div><div id=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var20 string
-		templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.JoinStringErrs(config.Kind)
+		templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.ResolveAttributeValue(config.ID + "-results")
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/breadcrumb_selector.templ`, Line: 55, Col: 88}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/breadcrumb_selector.templ`, Line: 52, Col: 36}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var20))
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var20)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "s…</p></div><div class=\"flex min-h-8 items-center border-t border-base-300 px-4 py-2 text-xs text-base-content/60\"><span id=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "\" class=\"min-h-0 flex-1 overflow-y-auto overscroll-contain p-2\" data-breadcrumb-selector-results><p class=\"px-3 py-6 text-center text-sm text-base-content/60\">Loading ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var21 string
-		templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.ResolveAttributeValue(config.ID + "-loading")
+		templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.JoinStringErrs(config.Kind)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/breadcrumb_selector.templ`, Line: 58, Col: 38}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/breadcrumb_selector.templ`, Line: 53, Col: 88}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var21)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "\" class=\"loading loading-spinner loading-xs htmx-indicator\" aria-hidden=\"true\"></span> <span class=\"ml-2\" role=\"status\" aria-live=\"polite\" data-breadcrumb-selector-status>Search results update as you type.</span></div></div><form method=\"dialog\" class=\"modal-backdrop\"><button aria-label=\"")
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var21))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var22 string
-		templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.ResolveAttributeValue("Close " + config.Kind + " selector")
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/breadcrumb_selector.templ`, Line: 62, Col: 105}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var22)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "\">close</button></form></dialog></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "s…</p></div><span class=\"sr-only\" role=\"status\" aria-live=\"polite\" data-breadcrumb-selector-status>Search results update as you type.</span></div></dialog></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -346,124 +333,124 @@ func BreadcrumbSelectorResults(kind string, currentID string, items []models.Bre
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var23 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var23 == nil {
-			templ_7745c5c3_Var23 = templ.NopComponent
+		templ_7745c5c3_Var22 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var22 == nil {
+			templ_7745c5c3_Var22 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
 		if len(items) == 0 {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "<div class=\"px-3 py-8 text-center\" data-breadcrumb-selector-empty><p class=\"font-medium\">No ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "<div class=\"px-3 py-8 text-center\" data-breadcrumb-selector-empty><p class=\"font-medium\">No ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var24 string
-			templ_7745c5c3_Var24, templ_7745c5c3_Err = templ.JoinStringErrs(kind)
+			var templ_7745c5c3_Var23 string
+			templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.JoinStringErrs(kind)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/breadcrumb_selector.templ`, Line: 71, Col: 35}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/breadcrumb_selector.templ`, Line: 65, Col: 35}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var24))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var23))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "s found</p><p class=\"mt-1 text-sm text-base-content/60\">Try a different search.</p></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "s found</p><p class=\"mt-1 text-sm text-base-content/60\">Try a different search.</p></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		} else {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "<div role=\"listbox\" aria-label=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "<div role=\"listbox\" aria-label=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var25 string
-			templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.ResolveAttributeValue(kind + "s")
+			var templ_7745c5c3_Var24 string
+			templ_7745c5c3_Var24, templ_7745c5c3_Err = templ.ResolveAttributeValue(kind + "s")
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/breadcrumb_selector.templ`, Line: 75, Col: 45}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/breadcrumb_selector.templ`, Line: 69, Col: 45}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var25)
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var24)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "\" class=\"menu w-full gap-1 p-0\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "\" class=\"menu w-full gap-1 p-0\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			for _, item := range items {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, "<a class=\"flex min-h-11 min-w-0 items-center gap-2 rounded-btn px-3 py-2 hover:bg-base-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary\" href=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "<a class=\"flex min-h-11 min-w-0 items-center gap-2 rounded-btn px-3 py-2 hover:bg-base-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary\" href=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var26 templ.SafeURL
-				templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.JoinURLErrs(templ.URL(item.URL))
+				var templ_7745c5c3_Var25 templ.SafeURL
+				templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.JoinURLErrs(templ.URL(item.URL))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/breadcrumb_selector.templ`, Line: 79, Col: 31}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/breadcrumb_selector.templ`, Line: 73, Col: 31}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var26))
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var25))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, "\" role=\"option\" aria-selected=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, "\" role=\"option\" aria-selected=\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var26 string
+				templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%t", item.ID == currentID))
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/breadcrumb_selector.templ`, Line: 75, Col: 60}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var26)
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, "\" aria-current=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var27 string
 				templ_7745c5c3_Var27, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%t", item.ID == currentID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/breadcrumb_selector.templ`, Line: 81, Col: 60}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/breadcrumb_selector.templ`, Line: 76, Col: 59}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var27)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "\" aria-current=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "\" data-breadcrumb-selector-option onclick=\"event.preventDefault(); var dialog=this.closest('dialog'); if(dialog) dialog.close(); window.openVibelyNavigate(this.getAttribute('href')); return false;\"><span class=\"w-4 shrink-0\" aria-hidden=\"true\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var28 string
-				templ_7745c5c3_Var28, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%t", item.ID == currentID))
+				templ_7745c5c3_Var28, templ_7745c5c3_Err = templ.JoinStringErrs(breadcrumbSelectorCheck(item.ID == currentID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/breadcrumb_selector.templ`, Line: 82, Col: 59}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/breadcrumb_selector.templ`, Line: 80, Col: 98}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var28)
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var28))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "\" data-breadcrumb-selector-option onclick=\"event.preventDefault(); var dialog=this.closest('dialog'); if(dialog) dialog.close(); window.openVibelyNavigate(this.getAttribute('href')); return false;\"><span class=\"w-4 shrink-0\" aria-hidden=\"true\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "</span> <span class=\"min-w-0 break-words\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var29 string
-				templ_7745c5c3_Var29, templ_7745c5c3_Err = templ.JoinStringErrs(breadcrumbSelectorCheck(item.ID == currentID))
+				templ_7745c5c3_Var29, templ_7745c5c3_Err = templ.JoinStringErrs(item.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/breadcrumb_selector.templ`, Line: 86, Col: 98}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/breadcrumb_selector.templ`, Line: 81, Col: 50}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var29))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "</span> <span class=\"min-w-0 break-words\">")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				var templ_7745c5c3_Var30 string
-				templ_7745c5c3_Var30, templ_7745c5c3_Err = templ.JoinStringErrs(item.Name)
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/breadcrumb_selector.templ`, Line: 87, Col: 50}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var30))
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "</span></a>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "</span></a>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "</div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "</div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			if hasMore {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "<p class=\"px-3 py-2 text-center text-xs text-base-content/60\">More matches are available. Refine your search.</p>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "<p class=\"px-3 py-2 text-center text-xs text-base-content/60\">More matches are available. Refine your search.</p>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -496,12 +483,12 @@ func breadcrumbSelectorScript() templ.Component {
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var31 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var31 == nil {
-			templ_7745c5c3_Var31 = templ.NopComponent
+		templ_7745c5c3_Var30 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var30 == nil {
+			templ_7745c5c3_Var30 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "<script>\n\t\t(function() {\n\t\t\tif (window.openVibelyBreadcrumbSelectorInstalled) return;\n\t\t\twindow.openVibelyBreadcrumbSelectorInstalled = true;\n\t\t\tfunction rootFor(node) { return node && node.closest ? node.closest('[data-breadcrumb-selector]') : null; }\n\t\t\tfunction close(dialog, restore) {\n\t\t\t\tif (!dialog || !dialog.open) return;\n\t\t\t\tvar root = rootFor(dialog), button = root && root.querySelector('[data-breadcrumb-selector-button]');\n\t\t\t\tdialog.close();\n\t\t\t\tif (button) button.setAttribute('aria-expanded', 'false');\n\t\t\t\tif (restore && button && button.isConnected) button.focus({preventScroll: true});\n\t\t\t}\n\t\t\tdocument.addEventListener('click', function(event) {\n\t\t\t\tvar button = event.target.closest && event.target.closest('[data-breadcrumb-selector-button]');\n\t\t\t\tif (button) {\n\t\t\t\t\tvar root = rootFor(button), dialog = root && root.querySelector('[data-breadcrumb-selector-dialog]');\n\t\t\t\t\tif (!dialog) return;\n\t\t\t\t\tdialog.showModal(); button.setAttribute('aria-expanded', 'true');\n\t\t\t\t\tvar input = root.querySelector('[data-breadcrumb-selector-search]');\n\t\t\t\t\tif (input) { input.focus(); input.select(); if (window.htmx) htmx.trigger(input, 'search'); }\n\t\t\t\t\treturn;\n\t\t\t\t}\n\t\t\t\tvar dismiss = event.target.closest && event.target.closest('[data-breadcrumb-selector-close]');\n\t\t\t\tif (dismiss) close(dismiss.closest('dialog'), true);\n\t\t\t});\n\t\t\tdocument.addEventListener('keydown', function(event) {\n\t\t\t\tvar root = rootFor(event.target); if (!root) return;\n\t\t\t\tvar dialog = root.querySelector('[data-breadcrumb-selector-dialog]');\n\t\t\t\tif (event.key === 'Escape') { event.preventDefault(); close(dialog, true); return; }\n\t\t\t\tif ((event.key === 'ArrowDown' || event.key === 'Enter') && event.target.matches('[data-breadcrumb-selector-button]')) { event.preventDefault(); event.target.click(); return; }\n\t\t\t\tvar options = Array.prototype.slice.call(root.querySelectorAll('[data-breadcrumb-selector-option]'));\n\t\t\t\tif (event.target.matches('[data-breadcrumb-selector-search]') && event.key === 'ArrowDown' && options.length) { event.preventDefault(); options[0].focus(); return; }\n\t\t\t\tvar index = options.indexOf(event.target);\n\t\t\t\tif (index >= 0 && event.key === 'Enter') { event.preventDefault(); event.target.click(); return; }\n\t\t\t\tif (index >= 0 && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) { event.preventDefault(); options[(index + (event.key === 'ArrowDown' ? 1 : options.length - 1)) % options.length].focus(); }\n\t\t\t});\n\t\t\tdocument.addEventListener('cancel', function(event) { var root = rootFor(event.target); if (!root) return; event.preventDefault(); close(event.target, true); }, true);\n\t\t\tdocument.addEventListener('close', function(event) { var root = rootFor(event.target); if (!root) return; var button = root.querySelector('[data-breadcrumb-selector-button]'); if (button) button.setAttribute('aria-expanded', 'false'); }, true);\n\t\t\tdocument.addEventListener('htmx:responseError', function(event) {\n\t\t\t\tvar root = rootFor(event.detail && event.detail.elt); if (!root) return;\n\t\t\t\tvar results = root.querySelector('[data-breadcrumb-selector-results]'), status = root.querySelector('[data-breadcrumb-selector-status]');\n\t\t\t\tif (results) results.innerHTML = '<div class=\"px-3 py-8 text-center\"><p class=\"font-medium\">Could not load results</p><p class=\"mt-1 text-sm opacity-60\">Try searching again.</p></div>';\n\t\t\t\tif (status) status.textContent = 'Could not load results.';\n\t\t\t});\n\t\t\tdocument.addEventListener('htmx:afterSwap', function(event) {\n\t\t\t\tvar root = rootFor(event.detail && event.detail.target); if (!root) return;\n\t\t\t\tvar count = root.querySelectorAll('[data-breadcrumb-selector-option]').length, status = root.querySelector('[data-breadcrumb-selector-status]');\n\t\t\t\tif (status) status.textContent = count ? count + (count === 1 ? ' result.' : ' results.') : 'No results.';\n\t\t\t});\n\t\t\tdocument.addEventListener('htmx:beforeSwap', function(event) {\n\t\t\t\tvar target = event.detail && event.detail.target;\n\t\t\t\tif (!target || rootFor(target) || target.id !== 'main-content') return;\n\t\t\t\tdocument.querySelectorAll('[data-breadcrumb-selector-dialog][open]').forEach(function(dialog) { close(dialog, false); });\n\t\t\t});\n\t\t\twindow.addEventListener('popstate', function() { document.querySelectorAll('[data-breadcrumb-selector-dialog][open]').forEach(function(dialog) { close(dialog, false); }); });\n\t\t})();\n\t</script>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "<script>\n\t\t(function() {\n\t\t\tif (window.openVibelyBreadcrumbSelectorInstalled) return;\n\t\t\twindow.openVibelyBreadcrumbSelectorInstalled = true;\n\t\t\tfunction rootFor(node) { return node && node.closest ? node.closest('[data-breadcrumb-selector]') : null; }\n\t\t\tfunction position(dialog) {\n\t\t\t\tif (!dialog || !dialog.open) return;\n\t\t\t\tvar root = rootFor(dialog), button = root && root.querySelector('[data-breadcrumb-selector-button]');\n\t\t\t\tif (!button) return;\n\t\t\t\tvar margin = 8, gap = 4, trigger = button.getBoundingClientRect();\n\t\t\t\tdialog.style.maxHeight = '';\n\t\t\t\tvar width = dialog.offsetWidth, height = dialog.offsetHeight;\n\t\t\t\tvar left = Math.max(margin, Math.min(trigger.right - width, window.innerWidth - width - margin));\n\t\t\t\tvar belowTop = trigger.bottom + gap, below = window.innerHeight - belowTop - margin, above = trigger.top - gap - margin;\n\t\t\t\tvar top = belowTop, available = below;\n\t\t\t\tif (below < Math.min(height, 160) && above > below) {\n\t\t\t\t\tavailable = above;\n\t\t\t\t\ttop = Math.max(margin, trigger.top - gap - Math.min(height, available));\n\t\t\t\t}\n\t\t\t\tdialog.style.left = left + 'px';\n\t\t\t\tdialog.style.top = top + 'px';\n\t\t\t\tdialog.style.maxHeight = Math.max(0, available) + 'px';\n\t\t\t}\n\t\t\tfunction close(dialog, restore) {\n\t\t\t\tif (!dialog || !dialog.open) return;\n\t\t\t\tvar root = rootFor(dialog), button = root && root.querySelector('[data-breadcrumb-selector-button]');\n\t\t\t\tdialog.close();\n\t\t\t\tif (button) button.setAttribute('aria-expanded', 'false');\n\t\t\t\tif (restore && button && button.isConnected) button.focus({preventScroll: true});\n\t\t\t}\n\t\t\tdocument.addEventListener('click', function(event) {\n\t\t\t\tif (event.target && event.target.matches && event.target.matches('[data-breadcrumb-selector-dialog]')) {\n\t\t\t\t\tclose(event.target, true);\n\t\t\t\t\treturn;\n\t\t\t\t}\n\t\t\t\tvar button = event.target.closest && event.target.closest('[data-breadcrumb-selector-button]');\n\t\t\t\tif (button) {\n\t\t\t\t\tvar root = rootFor(button), dialog = root && root.querySelector('[data-breadcrumb-selector-dialog]');\n\t\t\t\t\tif (!dialog) return;\n\t\t\t\t\tdialog.showModal(); button.setAttribute('aria-expanded', 'true');\n\t\t\t\t\tposition(dialog);\n\t\t\t\t\tvar input = root.querySelector('[data-breadcrumb-selector-search]');\n\t\t\t\t\tif (input) { input.focus(); input.select(); if (window.htmx) htmx.trigger(input, 'search'); }\n\t\t\t\t\treturn;\n\t\t\t\t}\n\t\t\t\tvar dismiss = event.target.closest && event.target.closest('[data-breadcrumb-selector-close]');\n\t\t\t\tif (dismiss) close(dismiss.closest('dialog'), true);\n\t\t\t});\n\t\t\tdocument.addEventListener('keydown', function(event) {\n\t\t\t\tvar root = rootFor(event.target); if (!root) return;\n\t\t\t\tvar dialog = root.querySelector('[data-breadcrumb-selector-dialog]');\n\t\t\t\tif (event.key === 'Escape') { event.preventDefault(); close(dialog, true); return; }\n\t\t\t\tif ((event.key === 'ArrowDown' || event.key === 'Enter') && event.target.matches('[data-breadcrumb-selector-button]')) { event.preventDefault(); event.target.click(); return; }\n\t\t\t\tvar options = Array.prototype.slice.call(root.querySelectorAll('[data-breadcrumb-selector-option]'));\n\t\t\t\tif (event.target.matches('[data-breadcrumb-selector-search]') && event.key === 'ArrowDown' && options.length) { event.preventDefault(); options[0].focus(); return; }\n\t\t\t\tvar index = options.indexOf(event.target);\n\t\t\t\tif (index >= 0 && event.key === 'Enter') { event.preventDefault(); event.target.click(); return; }\n\t\t\t\tif (index >= 0 && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) { event.preventDefault(); options[(index + (event.key === 'ArrowDown' ? 1 : options.length - 1)) % options.length].focus(); }\n\t\t\t});\n\t\t\tdocument.addEventListener('cancel', function(event) { var root = rootFor(event.target); if (!root) return; event.preventDefault(); close(event.target, true); }, true);\n\t\t\tdocument.addEventListener('close', function(event) { var root = rootFor(event.target); if (!root) return; var button = root.querySelector('[data-breadcrumb-selector-button]'); if (button) button.setAttribute('aria-expanded', 'false'); }, true);\n\t\t\tdocument.addEventListener('htmx:responseError', function(event) {\n\t\t\t\tvar root = rootFor(event.detail && event.detail.elt); if (!root) return;\n\t\t\t\tvar results = root.querySelector('[data-breadcrumb-selector-results]'), status = root.querySelector('[data-breadcrumb-selector-status]');\n\t\t\t\tif (results) results.innerHTML = '<div class=\"px-3 py-8 text-center\"><p class=\"font-medium\">Could not load results</p><p class=\"mt-1 text-sm opacity-60\">Try searching again.</p></div>';\n\t\t\t\tif (status) status.textContent = 'Could not load results.';\n\t\t\t});\n\t\t\tdocument.addEventListener('htmx:afterSwap', function(event) {\n\t\t\t\tvar root = rootFor(event.detail && event.detail.target); if (!root) return;\n\t\t\t\tvar status = root.querySelector('[data-breadcrumb-selector-status]');\n\t\t\t\tif (status) status.textContent = root.querySelector('[data-breadcrumb-selector-empty]') ? 'No results.' : 'Search results updated.';\n\t\t\t\tposition(root.querySelector('[data-breadcrumb-selector-dialog]'));\n\t\t\t});\n\t\t\tdocument.addEventListener('htmx:beforeSwap', function(event) {\n\t\t\t\tvar target = event.detail && event.detail.target;\n\t\t\t\tif (!target || rootFor(target) || target.id !== 'main-content') return;\n\t\t\t\tdocument.querySelectorAll('[data-breadcrumb-selector-dialog][open]').forEach(function(dialog) { close(dialog, false); });\n\t\t\t});\n\t\t\twindow.addEventListener('resize', function() { document.querySelectorAll('[data-breadcrumb-selector-dialog][open]').forEach(position); });\n\t\t\tdocument.addEventListener('scroll', function(event) {\n\t\t\t\tif (event.target && event.target.closest && event.target.closest('[data-breadcrumb-selector-dialog]')) return;\n\t\t\t\tdocument.querySelectorAll('[data-breadcrumb-selector-dialog][open]').forEach(position);\n\t\t\t}, true);\n\t\t\twindow.addEventListener('popstate', function() { document.querySelectorAll('[data-breadcrumb-selector-dialog][open]').forEach(function(dialog) { close(dialog, false); }); });\n\t\t})();\n\t</script>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
