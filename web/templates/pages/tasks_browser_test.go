@@ -1095,14 +1095,15 @@ func TestTaskCardMergeMenuDirectActionConflictRetryAndBoardRefreshInChrome(t *te
 			if(!card.classList.contains('task-selected'))fail('card selection was not established');
 			var trigger=card.querySelector('[data-task-card-menu-trigger]'),menu=card.querySelector('[data-kanban-menu-content]');
 			var menuHTML=menu.innerHTML;
-			clickTrigger(trigger);await frame();var menuWidth=menu.getBoundingClientRect().width;
+			clickTrigger(trigger);await frame();var menuRectBefore=menu.getBoundingClientRect(),menuWidth=menuRectBefore.width,menuHeight=menuRectBefore.height;
 			if(menu.innerHTML!==menuHTML)fail('opening the kebab changed its pre-rendered contents');
 			if(menuWidth<190)fail('kebab was too narrow: '+menuWidth);
 			if(parseInt(await fetch('/option-count').then(function(r){return r.text()}),10)!==0)fail('opening the kebab fetched merge options');
 			if(menu.querySelector('details')||menu.querySelector('summary'))fail('kebab contains an expand/collapse control');
 			var local=menu.querySelector('[data-task-card-local-submenu]'),localTrigger=local.querySelector(':scope > button'),localPanel=local.querySelector(':scope > ul');
 				localTrigger.scrollIntoView({block:'center'});await frame();local.dispatchEvent(new MouseEvent('mouseenter',{bubbles:false}));await frame();
-				if(getComputedStyle(localPanel).display==='none')fail('Local submenu did not open on hover');				var localRect=localPanel.getBoundingClientRect(),menuRect=menu.getBoundingClientRect(),localTriggerRect=localTrigger.getBoundingClientRect();if(localRect.left<0||localRect.right>window.innerWidth+1)fail('Local submenu escaped viewport');
+				if(localPanel.parentElement!==local)fail('opening Local submenu moved its source panel out of the main menu');var portaledLocalPanel=document.querySelector('[data-task-card-submenu-portaled="true"]');if(!portaledLocalPanel)fail('Local submenu did not create a portaled interaction panel');localPanel=portaledLocalPanel;
+				if(getComputedStyle(localPanel).display==='none')fail('Local submenu did not open on hover');				var menuRectAfter=menu.getBoundingClientRect();if(Math.abs(menuRectAfter.width-menuWidth)>1||Math.abs(menuRectAfter.height-menuHeight)>1)fail('opening Local submenu resized the main menu from '+menuWidth+'x'+menuHeight+' to '+menuRectAfter.width+'x'+menuRectAfter.height);var localRect=localPanel.getBoundingClientRect(),menuRect=menuRectAfter,localTriggerRect=localTrigger.getBoundingClientRect();if(localRect.left<0||localRect.right>window.innerWidth+1)fail('Local submenu escaped viewport');
 				var horizontalOverlap=Math.min(localRect.right,menuRect.right)-Math.max(localRect.left,menuRect.left);if(horizontalOverlap>3)fail('Local submenu covers the main menu: overlap='+horizontalOverlap+' local='+JSON.stringify({left:localRect.left,right:localRect.right})+' menu='+JSON.stringify({left:menuRect.left,right:menuRect.right}));
 				if(localRect.top>localTriggerRect.bottom+1||localRect.bottom<localTriggerRect.top-1)fail('Local submenu has no continuous pointer corridor from its parent row; local='+JSON.stringify({top:localRect.top,bottom:localRect.bottom})+' trigger='+JSON.stringify({top:localTriggerRect.top,bottom:localTriggerRect.bottom}));
 				var merge=localPanel.querySelector('[data-merge-type="merge"]'),rebase=localPanel.querySelector('[data-merge-type="rebase"]');
@@ -1110,7 +1111,7 @@ func TestTaskCardMergeMenuDirectActionConflictRetryAndBoardRefreshInChrome(t *te
 				localTrigger.focus();localTrigger.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true,cancelable:true}));if(!localPanel.contains(document.activeElement))fail('keyboard could not enter portaled Local submenu');
 				var focusedLocalAction=document.activeElement;focusedLocalAction.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));await frame();if(menu.closest('[data-kanban-menu-key]').getAttribute('data-kanban-menu-open')==='true'||document.querySelector('[data-task-card-submenu-portaled="true"]'))fail('Escape inside portaled submenu did not close its owning menu');if(document.activeElement!==trigger)fail('Escape inside portaled submenu did not restore trigger focus');
 				clickTrigger(trigger);await frame();var github=menu.querySelector('[data-task-card-github-submenu]'),githubTrigger=github.querySelector(':scope > button'),githubPanel=github.querySelector(':scope > ul');
-				githubTrigger.focus();await frame();if(getComputedStyle(githubPanel).display==='none'||!githubPanel.querySelector('[data-task-card-pr-action]')||githubPanel.querySelector('[data-task-card-pr-action]').disabled)fail('eligible GitHub submenu was not precomputed');
+				githubTrigger.focus();await frame();githubPanel=document.querySelector('[data-task-card-submenu-portaled="true"]');if(!githubPanel||getComputedStyle(githubPanel).display==='none'||!githubPanel.querySelector('[data-task-card-pr-action]')||githubPanel.querySelector('[data-task-card-pr-action]').disabled)fail('eligible GitHub submenu was not precomputed');
 				document.body.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,cancelable:true,pointerId:2,pointerType:'mouse',isPrimary:true}));await frame();if(menu.closest('[data-kanban-menu-key]').getAttribute('data-kanban-menu-open')==='true'||document.querySelector('[data-task-card-submenu-portaled="true"]'))fail('outside pointerdown did not dismiss the owning menu');clickTrigger(trigger);await frame();			var boardBefore=document.getElementById('kanban-board');window.dispatchEvent(new CustomEvent('sse-task-event',{detail:{type:'task_updated',project_id:'project-card-merge-browser'}}));await new Promise(function(r){setTimeout(r,700)});
 			if(document.getElementById('kanban-board')!==boardBefore)fail('SSE replaced board while kebab was open');
 			clickTrigger(trigger);await waitFor(function(){return document.getElementById('kanban-board')!==boardBefore},'deferred board refresh after close');
@@ -1343,6 +1344,8 @@ func TestTaskCardKebabMenuEscapesCardAndRepositionsAtDropZoneBottomInChrome(t *t
 		    if (!localTrigger || !localPanel) fail('missing Local submenu controls');
 		    localTrigger.focus();
 		    await frame();
+		    localPanel = document.querySelector('[data-task-card-submenu-portaled="true"]');
+		    if (!localPanel) fail('Local submenu did not create a portaled interaction panel');
 		    var localRect = localPanel.getBoundingClientRect();
 		    if (localRect.top < zoneRect.top - 1 || localRect.bottom > zoneRect.bottom + 1) fail('Local submenu is clipped by the task scroll boundary: submenu=' + JSON.stringify({top:localRect.top,bottom:localRect.bottom}) + ' zone=' + JSON.stringify({top:zoneRect.top,bottom:zoneRect.bottom}));
 		    var localAction = localPanel.querySelector('[data-task-card-merge-action]:not([disabled])');

@@ -169,7 +169,7 @@ func TasksContent(project *models.Project, tasks []models.Task, agents []models.
 			return templ_7745c5c3_Err
 		}
 		if project != nil {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "<script>\n\t\t\tfunction runTaskCardAction(button) {\n\t\t\t\tif (!button || !window.htmx || window._taskCardActionRequest) return;\n\t\t\t\tif (!button.hasAttribute('data-task-card-merge-action') && !button.hasAttribute('data-task-card-pr-action')) return;\n\t\t\t\tvar taskID = button.dataset.taskId || '';\n\t\t\t\tvar projectID = button.dataset.projectId || '';\n\t\t\t\tvar mode = button.dataset.mergeType || '';\n\t\t\t\tvar endpoint = button.dataset.mergeEndpoint || '';\n\t\t\t\tif (!taskID || !projectID || !mode || !endpoint) return;\n\t\t\t\tvar path = '/tasks/' + encodeURIComponent(taskID) + '/worktree/' + endpoint;\n\t\t\t\tvar dropdown = window.kanbanDropdownForTarget ? window.kanbanDropdownForTarget(button) : button.closest('[data-kanban-menu-key]');\n\t\t\t\twindow._taskCardActionRequest = {path: path, taskID: taskID};\n\t\t\t\tif (window.closeKanbanMenu) window.closeKanbanMenu(dropdown, false);\n\t\t\t\thtmx.ajax('POST', path, {\n\t\t\t\t\ttarget: '#kanban-board',\n\t\t\t\t\tswap: 'outerHTML',\n\t\t\t\t\tvalues: {merge_type: mode, merge_source: 'task_card', project_id: projectID}\n\t\t\t\t});\n\t\t\t}\n\n\t\t\tif (!window._taskCardActionHandlerAttached) {\n\t\t\t\twindow._taskCardActionHandlerAttached = true;\n\t\t\t\tdocument.body.addEventListener('htmx:afterRequest', function(event) {\n\t\t\t\t\tvar request = window._taskCardActionRequest;\n\t\t\t\t\tvar config = event.detail && event.detail.requestConfig;\n\t\t\t\t\tif (!request || !config || config.path !== request.path) return;\n\t\t\t\t\tvar status = event.detail.xhr && event.detail.xhr.status || 0;\n\t\t\t\t\twindow._taskCardActionRequest = null;\n\t\t\t\t\twindow.dispatchEvent(new CustomEvent('kanban-refresh-unblocked'));\n\t\t\t\t\tif (status >= 200 && status < 300 && window.closeKanbanMenu) {\n\t\t\t\t\t\tvar card = document.getElementById('task-' + request.taskID);\n\t\t\t\t\t\tvar trigger = card && card.querySelector('[data-task-card-menu-trigger]');\n\t\t\t\t\t\twindow.closeKanbanMenu(trigger && trigger.closest('[data-kanban-menu-key]'), !!trigger);\n\t\t\t\t\t}\n\t\t\t\t});\n\t\t\t}\n\t\t</script>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "<script>\n\t\t\tfunction runTaskCardAction(button) {\n\t\t\t\tif (!button || !window.htmx || window._taskCardActionRequest) return;\n\t\t\t\tif (!button.hasAttribute('data-task-card-merge-action') && !button.hasAttribute('data-task-card-pr-action')) return;\n\t\t\t\tvar taskID = button.dataset.taskId || '';\n\t\t\t\tvar projectID = button.dataset.projectId || '';\n\t\t\t\tvar mode = button.dataset.mergeType || '';\n\t\t\t\tvar endpoint = button.dataset.mergeEndpoint || '';\n\t\t\t\tif (!taskID || !projectID || !mode || !endpoint) return;\n\t\t\t\tvar path = '/tasks/' + encodeURIComponent(taskID) + '/worktree/' + endpoint;\n\t\t\t\tvar dropdown = window.kanbanDropdownForTarget ? window.kanbanDropdownForTarget(button) : button.closest('[data-kanban-menu-key]');\n\t\t\t\twindow._taskCardActionRequest = {path: path, taskID: taskID};\n\t\t\t\tif (window.closeKanbanMenu) window.closeKanbanMenu(dropdown, false);\n\t\t\t\thtmx.ajax('POST', path, {\n\t\t\t\t\ttarget: '#kanban-board',\n\t\t\t\t\tswap: 'outerHTML',\n\t\t\t\t\tvalues: {merge_type: mode, merge_source: 'task_card', project_id: projectID}\n\t\t\t\t});\n\t\t\t}\n\n\t\t\tif (!window._taskCardActionHandlerAttached) {\n\t\t\t\twindow._taskCardActionHandlerAttached = true;\n\t\t\t\tdocument.body.addEventListener('click', function(event) {\n\t\t\t\t\tvar button = event.target && event.target.closest ? event.target.closest('[data-task-card-merge-action], [data-task-card-pr-action]') : null;\n\t\t\t\t\tif (!button || button.disabled) return;\n\t\t\t\t\tevent.preventDefault();\n\t\t\t\t\trunTaskCardAction(button);\n\t\t\t\t}, true);\n\t\t\t\tdocument.body.addEventListener('htmx:afterRequest', function(event) {\n\t\t\t\t\tvar request = window._taskCardActionRequest;\n\t\t\t\t\tvar config = event.detail && event.detail.requestConfig;\n\t\t\t\t\tif (!request || !config || config.path !== request.path) return;\n\t\t\t\t\tvar status = event.detail.xhr && event.detail.xhr.status || 0;\n\t\t\t\t\twindow._taskCardActionRequest = null;\n\t\t\t\t\twindow.dispatchEvent(new CustomEvent('kanban-refresh-unblocked'));\n\t\t\t\t\tif (status >= 200 && status < 300 && window.closeKanbanMenu) {\n\t\t\t\t\t\tvar card = document.getElementById('task-' + request.taskID);\n\t\t\t\t\t\tvar trigger = card && card.querySelector('[data-task-card-menu-trigger]');\n\t\t\t\t\t\twindow.closeKanbanMenu(trigger && trigger.closest('[data-kanban-menu-key]'), !!trigger);\n\t\t\t\t\t}\n\t\t\t\t});\n\t\t\t}\n\t\t</script>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -194,7 +194,7 @@ func TasksContent(project *models.Project, tasks []models.Task, agents []models.
 			var templ_7745c5c3_Var6 string
 			templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks?project_id=%s", project.ID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 153, Col: 63}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 159, Col: 63}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var6)
 			if templ_7745c5c3_Err != nil {
@@ -212,7 +212,7 @@ func TasksContent(project *models.Project, tasks []models.Task, agents []models.
 				var templ_7745c5c3_Var7 string
 				templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.ResolveAttributeValue(agent.ID)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 180, Col: 33}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 186, Col: 33}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var7)
 				if templ_7745c5c3_Err != nil {
@@ -225,7 +225,7 @@ func TasksContent(project *models.Project, tasks []models.Task, agents []models.
 				var templ_7745c5c3_Var8 string
 				templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(agent.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 181, Col: 22}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 187, Col: 22}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
 				if templ_7745c5c3_Err != nil {
@@ -263,7 +263,7 @@ func TasksContent(project *models.Project, tasks []models.Task, agents []models.
 					var templ_7745c5c3_Var9 string
 					templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.ResolveAttributeValue(ad.ID)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 195, Col: 31}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 201, Col: 31}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var9)
 					if templ_7745c5c3_Err != nil {
@@ -276,7 +276,7 @@ func TasksContent(project *models.Project, tasks []models.Task, agents []models.
 					var templ_7745c5c3_Var10 string
 					templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.ResolveAttributeValue(ad.Model)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 195, Col: 61}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 201, Col: 61}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var10)
 					if templ_7745c5c3_Err != nil {
@@ -289,7 +289,7 @@ func TasksContent(project *models.Project, tasks []models.Task, agents []models.
 					var templ_7745c5c3_Var11 string
 					templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.JoinStringErrs(ad.Name)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 196, Col: 20}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 202, Col: 20}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var11))
 					if templ_7745c5c3_Err != nil {
@@ -307,7 +307,7 @@ func TasksContent(project *models.Project, tasks []models.Task, agents []models.
 						var templ_7745c5c3_Var12 string
 						templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.JoinStringErrs(ad.Model)
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 198, Col: 23}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 204, Col: 23}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var12))
 						if templ_7745c5c3_Err != nil {
@@ -340,7 +340,7 @@ func TasksContent(project *models.Project, tasks []models.Task, agents []models.
 				var templ_7745c5c3_Var13 string
 				templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.ResolveAttributeValue(string(cat))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 209, Col: 37}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 215, Col: 37}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var13)
 				if templ_7745c5c3_Err != nil {
@@ -353,7 +353,7 @@ func TasksContent(project *models.Project, tasks []models.Task, agents []models.
 				var templ_7745c5c3_Var14 string
 				templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.JoinStringErrs(string(cat))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 210, Col: 24}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 216, Col: 24}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var14))
 				if templ_7745c5c3_Err != nil {
