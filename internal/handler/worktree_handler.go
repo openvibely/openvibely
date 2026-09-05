@@ -494,7 +494,7 @@ func (h *Handler) RebaseTaskBranch(c echo.Context) error {
 				}
 				return reason
 			}
-			if !preflight.operationEligible && preflight.operationReason != "" {
+			if !preflight.operationEligible && fromTaskCard && preflight.operationReason != "" {
 				return preflight.operationReason
 			}
 			return "task branch is no longer eligible to rebase onto its target"
