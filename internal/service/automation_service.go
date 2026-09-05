@@ -281,6 +281,10 @@ func (s *AutomationGraphService) ListPage(ctx context.Context, projectID string,
 	return cards, nil
 }
 
+func (s *AutomationGraphService) ListBreadcrumbSelector(ctx context.Context, projectID, search, currentID string, limit int) ([]models.BreadcrumbSelectorItem, error) {
+	return s.repo.ListBreadcrumbSelector(ctx, projectID, search, currentID, limit)
+}
+
 func (s *AutomationGraphService) GetLive(ctx context.Context, projectID, automationID string, now time.Time) (*models.AutomationLiveGraph, error) {
 	queryStarted := time.Now()
 	definition, err := s.repo.GetDefinition(ctx, projectID, automationID)

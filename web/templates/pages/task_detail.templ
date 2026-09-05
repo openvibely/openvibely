@@ -79,7 +79,12 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 				Tasks
 			</a>
 			<span class="text-2xl text-base-content/30 flex-shrink-0">/</span>
-			<h2 class="text-2xl font-bold truncate">{ task.Title }</h2>
+			<div class="min-w-0 flex-1">
+				@components.BreadcrumbSelector(models.BreadcrumbSelector{
+					ID: "task-resource-selector", Kind: "Task", CurrentID: task.ID, CurrentName: task.Title,
+					SearchURL: fmt.Sprintf("/breadcrumb-selectors/tasks?project_id=%s&current_id=%s&tab=%s", task.ProjectID, task.ID, defaultTab),
+				})
+			</div>
 			<script>
 				(function() {
 					var params = new URLSearchParams(window.location.search);
