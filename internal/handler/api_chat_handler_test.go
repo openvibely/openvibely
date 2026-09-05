@@ -1481,35 +1481,17 @@ func BenchmarkAPIChatMessageStatusCompactProjection(b *testing.B) {
 	h, e, _ := setupTestHandlerForDB(b, db)
 	execID, _ := setupAPIChatStatusMarkerFixture(b, h, db, 25, true)
 
-	b.Run("full_row_n_plus_one", func(b *testing.B) {
-		counter.Reset()
-		counter.SetEnabled(true)
-		serveAPIChatMessageStatusBaselineNPlusOne(b, h, e, execID)
-		counter.SetEnabled(false)
-		statementCount := len(counter.Statements())
+	counter.SetEnabled(true)
+	serveAPIChatMessageStatusCompact(b, h, e, execID)
+	counter.SetEnabled(false)
+	statementCount := len(counter.Statements())
 
-		b.ReportAllocs()
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			serveAPIChatMessageStatusBaselineNPlusOne(b, h, e, execID)
-		}
-		b.ReportMetric(float64(statementCount), "sqlite-statements/op")
-	})
-
-	b.Run("compact_batched", func(b *testing.B) {
-		counter.Reset()
-		counter.SetEnabled(true)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
 		serveAPIChatMessageStatusCompact(b, h, e, execID)
-		counter.SetEnabled(false)
-		statementCount := len(counter.Statements())
-
-		b.ReportAllocs()
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			serveAPIChatMessageStatusCompact(b, h, e, execID)
-		}
-		b.ReportMetric(float64(statementCount), "sqlite-statements/op")
-	})
+	}
+	b.ReportMetric(float64(statementCount), "sqlite-statements/op")
 }
 
 func setupAPIChatStatusMarkerFixture(tb testing.TB, h *Handler, db *sql.DB, markerCount int, large bool) (string, []string) {
@@ -1586,46 +1568,6 @@ func serveAPIChatMessageStatusCompact(tb testing.TB, h *Handler, e *echo.Echo, e
 	c.SetParamNames("id")
 	c.SetParamValues(execID)
 	require.NoError(tb, h.APIChatMessageStatus(c))
-	return rec
-}
-
-func serveAPIChatMessageStatusBaselineNPlusOne(tb testing.TB, h *Handler, e *echo.Echo, execID string) *httptest.ResponseRecorder {
-	tb.Helper()
-	req := httptest.NewRequest(http.MethodGet, "/api/chat/message/"+execID, nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-	exec, err := h.execRepo.GetByID(req.Context(), execID)
-	require.NoError(tb, err)
-	require.NotNil(tb, exec)
-
-	resp := ChatMessageStatusResponse{MessageID: exec.ID}
-	switch exec.Status {
-	case models.ExecCompleted:
-		resp.Status = "completed"
-		resp.Response = exec.Output
-		resp.TokensUsed = exec.TokensUsed
-		resp.DurationMs = exec.DurationMs
-		for _, taskID := range extractTaskIDsFromOutput(exec.Output) {
-			if task, taskErr := h.taskRepo.GetByID(req.Context(), taskID); taskErr == nil && task != nil && task.Category != models.CategoryChat {
-				resp.TaskIDs = append(resp.TaskIDs, taskID)
-			}
-		}
-	case models.ExecFailed:
-		resp.Status = "failed"
-		resp.Error = exec.ErrorMessage
-		resp.DurationMs = exec.DurationMs
-	case models.ExecCancelled:
-		resp.Status = "cancelled"
-		resp.Error = exec.ErrorMessage
-		resp.Response = exec.Output
-		resp.DurationMs = exec.DurationMs
-	default:
-		resp.Status = "processing"
-		if exec.Output != "" {
-			resp.Response = exec.Output
-		}
-	}
-	require.NoError(tb, c.JSON(http.StatusOK, resp))
 	return rec
 }
 
