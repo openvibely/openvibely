@@ -783,7 +783,7 @@ func TestAutomationLiveMatchesEditVisualScale(t *testing.T) {
 	}
 }
 
-func TestAutomationEditUsesSearchableBreadcrumbAndRetainsRenameField(t *testing.T) {
+func TestAutomationEditKeepsEditableBreadcrumbWithSelectorCaretAfterName(t *testing.T) {
 	candidate := models.AutomationDraftCandidate{SchemaVersion: 1, Name: "Saved Automation", AutomationType: "custom", AdapterKey: "custom"}
 	page := models.AutomationBuilderPage{AutomationID: "automation-saved", Source: "blank", Result: models.AutomationDraftResult{Candidate: candidate}}
 	if got := automationBuilderPageTitle(page); got != candidate.Name {
@@ -794,9 +794,29 @@ func TestAutomationEditUsesSearchableBreadcrumbAndRetainsRenameField(t *testing.
 		t.Fatal(err)
 	}
 	body := out.String()
-	for _, want := range []string{`data-breadcrumb-selector`, `Switch Automation`, `/breadcrumb-selectors/automations?project_id=project-saved&amp;current_id=automation-saved&amp;view=edit`, `data-automation-name`, `>Edit</h2>`} {
+	for _, want := range []string{
+		`data-automation-editable-breadcrumb`,
+		`data-automation-name`,
+		`data-breadcrumb-selector-caret-only`,
+		`aria-label="Switch Automation"`,
+		`/breadcrumb-selectors/automations?project_id=project-saved&amp;current_id=automation-saved&amp;view=edit`,
+	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("saved Automation edit is missing %q", want)
+		}
+	}
+	if got := len(regexp.MustCompile(`<input[^>]+data-automation-name`).FindAllString(body, -1)); got != 1 {
+		t.Errorf("saved Automation edit rendered %d name inputs, want 1", got)
+	}
+	breadcrumbStart := strings.Index(body, `data-automation-editable-breadcrumb`)
+	namePosition := strings.Index(body[breadcrumbStart:], `data-automation-name`)
+	selectorPosition := strings.Index(body[breadcrumbStart:], `data-breadcrumb-selector`)
+	if breadcrumbStart < 0 || namePosition < 0 || selectorPosition < 0 || namePosition >= selectorPosition {
+		t.Errorf("selector caret must follow the editable name input in the breadcrumb")
+	}
+	for _, forbidden := range []string{`>Automation name</span>`, `>Edit</h2>`} {
+		if strings.Contains(body, forbidden) {
+			t.Errorf("saved Automation edit must preserve its prior header without %q", forbidden)
 		}
 	}
 }

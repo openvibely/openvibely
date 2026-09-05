@@ -9,6 +9,7 @@ type BreadcrumbSelector struct {
 	SearchURL    string
 	ContextName  string
 	ContextValue string
+	CaretOnly    bool
 }
 
 // BreadcrumbSelectorItem is the compact, authoritative result rendered by a selector endpoint.

@@ -3959,45 +3959,26 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			if page.AutomationID != "" {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 312, "<label class=\"form-control mt-3 max-w-xl\"><span class=\"label-text mb-1 font-medium\">Automation name</span><input class=\"input input-bordered w-full text-xl font-bold sm:text-2xl\" form=\"automation-design-form\" name=\"automation_name\" value=\"")
+			if strings.TrimSpace(page.Result.Candidate.Description) != "" {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 312, "<p class=\"mt-1 text-sm opacity-60\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var209 string
-				templ_7745c5c3_Var209, templ_7745c5c3_Err = templ.ResolveAttributeValue(page.Result.Candidate.Name)
+				templ_7745c5c3_Var209, templ_7745c5c3_Err = templ.JoinStringErrs(page.Result.Candidate.Description)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1063, Col: 272}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1063, Col: 76}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var209)
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 313, "\" maxlength=\"200\" required data-automation-name aria-label=\"Automation name\"></label> ")
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var209))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-			}
-			if strings.TrimSpace(page.Result.Candidate.Description) != "" {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 314, "<p class=\"mt-1 text-sm opacity-60\">")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				var templ_7745c5c3_Var210 string
-				templ_7745c5c3_Var210, templ_7745c5c3_Err = templ.JoinStringErrs(page.Result.Candidate.Description)
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1066, Col: 76}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var210))
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 315, "</p>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 313, "</p>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 316, "</div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 314, "</div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -4008,26 +3989,26 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 			}
 		}
 		if !automationBuilderUsesEditShell(page) {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 317, "<div class=\"mb-4 flex flex-wrap items-end justify-between gap-3\"><div class=\"min-w-0 flex-1\"><label class=\"form-control max-w-xl\"><span class=\"label-text mb-1 font-medium\">Automation name</span><input class=\"input input-bordered w-full text-xl font-bold sm:text-2xl\" form=\"automation-design-form\" name=\"automation_name\" value=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 315, "<div class=\"mb-4 flex flex-wrap items-end justify-between gap-3\"><div class=\"min-w-0 flex-1\"><label class=\"form-control max-w-xl\"><span class=\"label-text mb-1 font-medium\">Automation name</span><input class=\"input input-bordered w-full text-xl font-bold sm:text-2xl\" form=\"automation-design-form\" name=\"automation_name\" value=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var211 string
-			templ_7745c5c3_Var211, templ_7745c5c3_Err = templ.ResolveAttributeValue(page.Result.Candidate.Name)
+			var templ_7745c5c3_Var210 string
+			templ_7745c5c3_Var210, templ_7745c5c3_Err = templ.ResolveAttributeValue(page.Result.Candidate.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1074, Col: 266}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1071, Col: 266}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var211)
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var210)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 318, "\" maxlength=\"200\" required data-automation-name aria-label=\"Automation name\"></label><p class=\"mt-2 text-sm text-base-content/65\">Saving validates and applies this Automation immediately.</p></div><button class=\"btn btn-primary btn-sm\" type=\"submit\" form=\"automation-design-form\" name=\"save_changes\" value=\"true\">Save changes</button></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 316, "\" maxlength=\"200\" required data-automation-name aria-label=\"Automation name\"></label><p class=\"mt-2 text-sm text-base-content/65\">Saving validates and applies this Automation immediately.</p></div><button class=\"btn btn-primary btn-sm\" type=\"submit\" form=\"automation-design-form\" name=\"save_changes\" value=\"true\">Save changes</button></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
 		if page.AutomationID != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 319, "<dialog id=\"delete-automation-modal\" class=\"modal\"><div class=\"modal-box\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 317, "<dialog id=\"delete-automation-modal\" class=\"modal\"><div class=\"modal-box\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -4035,65 +4016,65 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 320, "<h3 class=\"pr-10 text-lg font-bold text-error\">Delete automation</h3><p class=\"py-4\">Delete <strong>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 318, "<h3 class=\"pr-10 text-lg font-bold text-error\">Delete automation</h3><p class=\"py-4\">Delete <strong>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var212 string
-			templ_7745c5c3_Var212, templ_7745c5c3_Err = templ.JoinStringErrs(page.Result.Candidate.Name)
+			var templ_7745c5c3_Var211 string
+			templ_7745c5c3_Var211, templ_7745c5c3_Err = templ.JoinStringErrs(page.Result.Candidate.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1085, Col: 64}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1082, Col: 64}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var211))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 319, "</strong>? This permanently deletes this Automation graph and its saved design.</p><div class=\"rounded-lg bg-base-200 p-3 text-sm text-base-content/70\">Existing tasks remain. Any Automation-owned trigger schedules will be deleted. This cannot be undone.</div><div class=\"modal-action\"><button class=\"btn\" type=\"button\" onclick=\"document.getElementById('delete-automation-modal').close()\">Cancel</button><form method=\"post\" action=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var212 templ.SafeURL
+			templ_7745c5c3_Var212, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/automations/%s/delete?project_id=%s", page.AutomationID, currentProjectID)))
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1086, Col: 138}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var212))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 321, "</strong>? This permanently deletes this Automation graph and its saved design.</p><div class=\"rounded-lg bg-base-200 p-3 text-sm text-base-content/70\">Existing tasks remain. Any Automation-owned trigger schedules will be deleted. This cannot be undone.</div><div class=\"modal-action\"><button class=\"btn\" type=\"button\" onclick=\"document.getElementById('delete-automation-modal').close()\">Cancel</button><form method=\"post\" action=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 320, "\" hx-post=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var213 templ.SafeURL
-			templ_7745c5c3_Var213, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/automations/%s/delete?project_id=%s", page.AutomationID, currentProjectID)))
+			var templ_7745c5c3_Var213 string
+			templ_7745c5c3_Var213, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/automations/%s/delete?project_id=%s", page.AutomationID, currentProjectID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1089, Col: 138}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1086, Col: 239}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var213))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var213)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 322, "\" hx-post=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 321, "\" hx-swap=\"none\"><input type=\"hidden\" name=\"project_id\" value=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var214 string
-			templ_7745c5c3_Var214, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/automations/%s/delete?project_id=%s", page.AutomationID, currentProjectID))
+			templ_7745c5c3_Var214, templ_7745c5c3_Err = templ.ResolveAttributeValue(currentProjectID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1089, Col: 239}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1086, Col: 320}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var214)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 323, "\" hx-swap=\"none\"><input type=\"hidden\" name=\"project_id\" value=\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var215 string
-			templ_7745c5c3_Var215, templ_7745c5c3_Err = templ.ResolveAttributeValue(currentProjectID)
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1089, Col: 320}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var215)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 324, "\"><button class=\"btn btn-error\" type=\"submit\">Delete automation</button></form></div></div><form method=\"dialog\" class=\"modal-backdrop\"><button>Cancel</button></form></dialog> ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 322, "\"><button class=\"btn btn-error\" type=\"submit\">Delete automation</button></form></div></div><form method=\"dialog\" class=\"modal-backdrop\"><button>Cancel</button></form></dialog> ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
 		if page.AutomationID != "" && page.TemplateUpdateAvailable {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 325, "<dialog id=\"update-automation-template-modal\" class=\"modal\"><div class=\"modal-box\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 323, "<dialog id=\"update-automation-template-modal\" class=\"modal\"><div class=\"modal-box\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -4101,214 +4082,236 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 326, "<h3 class=\"pr-10 text-lg font-bold\">Update to latest template</h3><p class=\"py-4\">This replaces your current nodes, connections, prompts, and schedules with the latest ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 324, "<h3 class=\"pr-10 text-lg font-bold\">Update to latest template</h3><p class=\"py-4\">This replaces your current nodes, connections, prompts, and schedules with the latest ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var216 string
-			templ_7745c5c3_Var216, templ_7745c5c3_Err = templ.JoinStringErrs(automationAdapterLabel(page.Result.Candidate.AdapterKey))
+			var templ_7745c5c3_Var215 string
+			templ_7745c5c3_Var215, templ_7745c5c3_Err = templ.JoinStringErrs(automationAdapterLabel(page.Result.Candidate.AdapterKey))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1100, Col: 165}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1097, Col: 165}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var215))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 325, " template.</p><div class=\"rounded-lg bg-base-200 p-3 text-sm text-base-content/70\">Your Automation name and lifecycle state are preserved. Template customizations are not merged.</div><div class=\"modal-action\"><button class=\"btn\" type=\"button\" onclick=\"document.getElementById('update-automation-template-modal').close()\">Cancel</button><form method=\"post\" action=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var216 templ.SafeURL
+			templ_7745c5c3_Var216, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(automationBuilderPostURL(page, currentProjectID)))
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1101, Col: 98}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var216))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 327, " template.</p><div class=\"rounded-lg bg-base-200 p-3 text-sm text-base-content/70\">Your Automation name and lifecycle state are preserved. Template customizations are not merged.</div><div class=\"modal-action\"><button class=\"btn\" type=\"button\" onclick=\"document.getElementById('update-automation-template-modal').close()\">Cancel</button><form method=\"post\" action=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 326, "\" hx-post=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var217 templ.SafeURL
-			templ_7745c5c3_Var217, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(automationBuilderPostURL(page, currentProjectID)))
+			var templ_7745c5c3_Var217 string
+			templ_7745c5c3_Var217, templ_7745c5c3_Err = templ.ResolveAttributeValue(automationBuilderPostURL(page, currentProjectID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1104, Col: 98}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1101, Col: 159}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var217))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var217)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 328, "\" hx-post=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 327, "\" hx-target=\"#main-content\"><input type=\"hidden\" name=\"project_id\" value=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var218 string
-			templ_7745c5c3_Var218, templ_7745c5c3_Err = templ.ResolveAttributeValue(automationBuilderPostURL(page, currentProjectID))
+			templ_7745c5c3_Var218, templ_7745c5c3_Err = templ.ResolveAttributeValue(currentProjectID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1104, Col: 159}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1101, Col: 251}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var218)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 329, "\" hx-target=\"#main-content\"><input type=\"hidden\" name=\"project_id\" value=\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var219 string
-			templ_7745c5c3_Var219, templ_7745c5c3_Err = templ.ResolveAttributeValue(currentProjectID)
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1104, Col: 251}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var219)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 330, "\"><input type=\"hidden\" name=\"update_template\" value=\"true\"><button class=\"btn btn-primary\" type=\"submit\">Update to latest</button></form></div></div><form method=\"dialog\" class=\"modal-backdrop\"><button>Cancel</button></form></dialog> ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 328, "\"><input type=\"hidden\" name=\"update_template\" value=\"true\"><button class=\"btn btn-primary\" type=\"submit\">Update to latest</button></form></div></div><form method=\"dialog\" class=\"modal-backdrop\"><button>Cancel</button></form></dialog> ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
 		if page.Error != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 331, "<div class=\"alert alert-error mb-4\" role=\"alert\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 329, "<div class=\"alert alert-error mb-4\" role=\"alert\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var220 string
-			templ_7745c5c3_Var220, templ_7745c5c3_Err = templ.JoinStringErrs(page.Error)
+			var templ_7745c5c3_Var219 string
+			templ_7745c5c3_Var219, templ_7745c5c3_Err = templ.JoinStringErrs(page.Error)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1111, Col: 64}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1108, Col: 64}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var220))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var219))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 332, "</div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 330, "</div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
 		if page.AutomationID == "" && (len(page.Result.Assumptions) > 0 || len(page.Result.Warnings) > 0) {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 333, "<div class=\"mb-4 grid grid-cols-1 gap-3 lg:grid-cols-2\" data-automation-builder-insights><div class=\"rounded-box bg-base-200/60 p-4\"><h3 class=\"font-semibold\">Assumptions</h3><ul class=\"mt-2 list-disc pl-5 text-sm\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 331, "<div class=\"mb-4 grid grid-cols-1 gap-3 lg:grid-cols-2\" data-automation-builder-insights><div class=\"rounded-box bg-base-200/60 p-4\"><h3 class=\"font-semibold\">Assumptions</h3><ul class=\"mt-2 list-disc pl-5 text-sm\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			for _, item := range page.Result.Assumptions {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 334, "<li>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 332, "<li>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var220 string
+				templ_7745c5c3_Var220, templ_7745c5c3_Err = templ.JoinStringErrs(item)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1114, Col: 16}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var220))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 333, "</li>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 334, "</ul></div><div class=\"rounded-box bg-base-200/60 p-4\"><h3 class=\"font-semibold\">Warnings</h3><ul class=\"mt-2 list-disc pl-5 text-sm\">")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			for _, item := range page.Result.Warnings {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 335, "<li>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var221 string
 				templ_7745c5c3_Var221, templ_7745c5c3_Err = templ.JoinStringErrs(item)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1117, Col: 16}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1119, Col: 16}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var221))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 335, "</li>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 336, "</li>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 336, "</ul></div><div class=\"rounded-box bg-base-200/60 p-4\"><h3 class=\"font-semibold\">Warnings</h3><ul class=\"mt-2 list-disc pl-5 text-sm\">")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			for _, item := range page.Result.Warnings {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 337, "<li>")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				var templ_7745c5c3_Var222 string
-				templ_7745c5c3_Var222, templ_7745c5c3_Err = templ.JoinStringErrs(item)
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1122, Col: 16}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var222))
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 338, "</li>")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 339, "</ul></div></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 337, "</ul></div></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
 		if len(page.Result.ValidationErrors) > 0 {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 340, "<details class=\"mb-3 rounded-box border border-base-300 bg-base-200/40 px-4 py-3\" data-automation-validation-summary data-automation-yaml-validation")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 338, "<details class=\"mb-3 rounded-box border border-base-300 bg-base-200/40 px-4 py-3\" data-automation-validation-summary data-automation-yaml-validation")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			if page.Error != "" {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 341, " open")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 339, " open")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 342, "><summary class=\"cursor-pointer text-sm font-medium\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 340, "><summary class=\"cursor-pointer text-sm font-medium\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var223 string
-			templ_7745c5c3_Var223, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d setup items before this design can run", len(automationValidationMessages(page.Result.ValidationErrors, page.NodePalette))))
+			var templ_7745c5c3_Var222 string
+			templ_7745c5c3_Var222, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d setup items before this design can run", len(automationValidationMessages(page.Result.ValidationErrors, page.NodePalette))))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1129, Col: 198}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1126, Col: 198}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var223))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var222))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 343, "</summary><ul class=\"mt-2 list-disc pl-5 text-sm text-base-content/70\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 341, "</summary><ul class=\"mt-2 list-disc pl-5 text-sm text-base-content/70\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			for _, message := range automationValidationMessages(page.Result.ValidationErrors, page.NodePalette) {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 344, "<li>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 342, "<li>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var224 string
-				templ_7745c5c3_Var224, templ_7745c5c3_Err = templ.JoinStringErrs(message)
+				var templ_7745c5c3_Var223 string
+				templ_7745c5c3_Var223, templ_7745c5c3_Err = templ.JoinStringErrs(message)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1132, Col: 20}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1129, Col: 20}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var224))
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var223))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 345, "</li>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 343, "</li>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 346, "</ul></details>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 344, "</ul></details>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		var templ_7745c5c3_Var225 = []any{"rounded-box border border-base-300 bg-base-100", templ.KV("mb-5 p-3 sm:p-4", !automationBuilderUsesEditShell(page)), templ.KV("mb-0 p-4", automationBuilderUsesEditShell(page)), templ.KV("flex flex-1 min-h-[20rem] flex-col", automationBuilderUsesEditShell(page))}
-		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var225...)
+		var templ_7745c5c3_Var224 = []any{"rounded-box border border-base-300 bg-base-100", templ.KV("mb-5 p-3 sm:p-4", !automationBuilderUsesEditShell(page)), templ.KV("mb-0 p-4", automationBuilderUsesEditShell(page)), templ.KV("flex flex-1 min-h-[20rem] flex-col", automationBuilderUsesEditShell(page))}
+		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var224...)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 347, "<section class=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 345, "<section class=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var225 string
+		templ_7745c5c3_Var225, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var224).String())
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1, Col: 0}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var225)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 346, "\" data-automation-draft-canvas data-automation-view-root data-edge-palette=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var226 string
-		templ_7745c5c3_Var226, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var225).String())
+		templ_7745c5c3_Var226, templ_7745c5c3_Err = templ.ResolveAttributeValue(automationDraftEdgesJSON(page.EdgePalette))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1, Col: 0}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1134, Col: 403}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var226)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 348, "\" data-automation-draft-canvas data-automation-view-root data-edge-palette=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 347, "\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var227 string
-		templ_7745c5c3_Var227, templ_7745c5c3_Err = templ.ResolveAttributeValue(automationDraftEdgesJSON(page.EdgePalette))
+		var templ_7745c5c3_Var227 = []any{"flex flex-wrap justify-between gap-3", templ.KV("items-start", !automationBuilderUsesEditShell(page)), templ.KV("mb-3 items-center", automationBuilderUsesEditShell(page))}
+		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var227...)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1137, Col: 403}
+			return templ_7745c5c3_Err
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var227)
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 348, "<div class=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var228 string
+		templ_7745c5c3_Var228, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var227).String())
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1, Col: 0}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var228)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -4316,140 +4319,118 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var228 = []any{"flex flex-wrap justify-between gap-3", templ.KV("items-start", !automationBuilderUsesEditShell(page)), templ.KV("mb-3 items-center", automationBuilderUsesEditShell(page))}
-		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var228...)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 350, "<div class=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var229 string
-		templ_7745c5c3_Var229, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var228).String())
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1, Col: 0}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var229)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 351, "\">")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
 		templ_7745c5c3_Err = automationViewSwitcher("Automation builder view").Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 352, "<div class=\"flex shrink-0 flex-wrap items-center justify-end gap-2\" data-automation-node-tool><button class=\"btn btn-primary btn-sm\" type=\"button\" data-automation-add-node-open onclick=\"document.getElementById('automation-node-dialog').showModal()\">Add node</button></div></div><span class=\"sr-only\" data-automation-connect-status aria-live=\"polite\"></span> ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 350, "<div class=\"flex shrink-0 flex-wrap items-center justify-end gap-2\" data-automation-node-tool><button class=\"btn btn-primary btn-sm\" type=\"button\" data-automation-add-node-open onclick=\"document.getElementById('automation-node-dialog').showModal()\">Add node</button></div></div><span class=\"sr-only\" data-automation-connect-status aria-live=\"polite\"></span> ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if page.AutomationID != "" && page.LifecycleState == models.AutomationActive {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 353, "<form id=\"automation-builder-pause-form\" class=\"hidden\" method=\"post\" action=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 351, "<form id=\"automation-builder-pause-form\" class=\"hidden\" method=\"post\" action=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var230 templ.SafeURL
-			templ_7745c5c3_Var230, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/automations/%s/pause?project_id=%s", page.AutomationID, currentProjectID)))
+			var templ_7745c5c3_Var229 templ.SafeURL
+			templ_7745c5c3_Var229, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/automations/%s/pause?project_id=%s", page.AutomationID, currentProjectID)))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1145, Col: 187}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1142, Col: 187}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var230))
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 354, "\"><input type=\"hidden\" name=\"project_id\" value=\"")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var229))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var231 string
-			templ_7745c5c3_Var231, templ_7745c5c3_Err = templ.ResolveAttributeValue(currentProjectID)
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1146, Col: 70}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var231)
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 352, "\"><input type=\"hidden\" name=\"project_id\" value=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 355, "\"></form>")
+			var templ_7745c5c3_Var230 string
+			templ_7745c5c3_Var230, templ_7745c5c3_Err = templ.ResolveAttributeValue(currentProjectID)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1143, Col: 70}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var230)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 353, "\"></form>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
 		if page.AutomationID != "" && page.LifecycleState == models.AutomationPaused {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 356, "<form id=\"automation-builder-resume-form\" class=\"hidden\" method=\"post\" action=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 354, "<form id=\"automation-builder-resume-form\" class=\"hidden\" method=\"post\" action=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var232 templ.SafeURL
-			templ_7745c5c3_Var232, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/automations/%s/resume?project_id=%s", page.AutomationID, currentProjectID)))
+			var templ_7745c5c3_Var231 templ.SafeURL
+			templ_7745c5c3_Var231, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/automations/%s/resume?project_id=%s", page.AutomationID, currentProjectID)))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1150, Col: 189}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1147, Col: 189}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var232))
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 357, "\"><input type=\"hidden\" name=\"project_id\" value=\"")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var231))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var233 string
-			templ_7745c5c3_Var233, templ_7745c5c3_Err = templ.ResolveAttributeValue(currentProjectID)
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1151, Col: 70}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var233)
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 355, "\"><input type=\"hidden\" name=\"project_id\" value=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 358, "\"></form>")
+			var templ_7745c5c3_Var232 string
+			templ_7745c5c3_Var232, templ_7745c5c3_Err = templ.ResolveAttributeValue(currentProjectID)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1148, Col: 70}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var232)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 356, "\"></form>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 359, "<div data-automation-yaml-panel hidden style=\"display: none\" class=\"flex min-h-[20rem] flex-1 flex-col overflow-hidden rounded-box border border-base-300 bg-base-200/20 px-0 py-4 font-mono text-sm leading-6\"><div class=\"flex min-h-0 flex-1 overflow-hidden\" data-automation-yaml-editor-shell><div class=\"group relative shrink-0 overflow-hidden border-r border-base-300\" style=\"box-sizing: border-box; width: max-content; min-width: 3.25rem; flex: 0 0 auto;\" data-automation-yaml-gutter><pre class=\"m-0 h-full w-full min-w-0 select-none overflow-hidden whitespace-nowrap pb-0 pl-2 pr-2 pt-0 text-left text-xs text-base-content/45\" style=\"box-sizing: border-box; text-align: left !important;\" aria-label=\"YAML line numbers\" data-automation-yaml-line-numbers>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 357, "<div data-automation-yaml-panel hidden style=\"display: none\" class=\"flex min-h-[20rem] flex-1 flex-col overflow-hidden rounded-box border border-base-300 bg-base-200/20 px-0 py-4 font-mono text-sm leading-6\"><div class=\"flex min-h-0 flex-1 overflow-hidden\" data-automation-yaml-editor-shell><div class=\"group relative shrink-0 overflow-hidden border-r border-base-300\" style=\"box-sizing: border-box; width: max-content; min-width: 3.25rem; flex: 0 0 auto;\" data-automation-yaml-gutter><pre class=\"m-0 h-full w-full min-w-0 select-none overflow-hidden whitespace-nowrap pb-0 pl-2 pr-2 pt-0 text-left text-xs text-base-content/45\" style=\"box-sizing: border-box; text-align: left !important;\" aria-label=\"YAML line numbers\" data-automation-yaml-line-numbers>")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var233 string
+		templ_7745c5c3_Var233, templ_7745c5c3_Err = templ.JoinStringErrs(automationYAMLLineNumbers(page.YAML))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1153, Col: 319}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var233))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 358, "</pre><div class=\"pointer-events-none absolute inset-y-0 right-0 z-10 hidden w-8\" aria-label=\"YAML section controls\" data-automation-yaml-fold-controls hidden></div></div><div class=\"relative min-h-0 min-w-0 flex-1 overflow-hidden\" data-automation-yaml-editor-viewport><pre class=\"absolute left-0 top-0 m-0 min-h-full w-max min-w-full overflow-hidden whitespace-pre px-3 font-mono text-sm leading-6\" aria-hidden=\"true\" data-automation-yaml-highlight></pre><textarea class=\"absolute inset-0 block h-full w-full resize-none overflow-auto border-0 bg-transparent whitespace-pre px-3 font-mono text-sm leading-6 text-transparent outline-none caret-base-content\" style=\"caret-color: oklch(var(--bc));\" form=\"automation-design-form\" name=\"automation_yaml\" data-automation-yaml-editor data-automation-yaml-parse-url=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var234 string
-		templ_7745c5c3_Var234, templ_7745c5c3_Err = templ.JoinStringErrs(automationYAMLLineNumbers(page.YAML))
+		templ_7745c5c3_Var234, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/automations/yaml/parse?project_id=%s", currentProjectID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1156, Col: 319}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1155, Col: 435}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var234))
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var234)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 360, "</pre><div class=\"pointer-events-none absolute inset-y-0 right-0 z-10 hidden w-8\" aria-label=\"YAML section controls\" data-automation-yaml-fold-controls hidden></div></div><div class=\"relative min-h-0 min-w-0 flex-1 overflow-hidden\" data-automation-yaml-editor-viewport><pre class=\"absolute left-0 top-0 m-0 min-h-full w-max min-w-full overflow-hidden whitespace-pre px-3 font-mono text-sm leading-6\" aria-hidden=\"true\" data-automation-yaml-highlight></pre><textarea class=\"absolute inset-0 block h-full w-full resize-none overflow-auto border-0 bg-transparent whitespace-pre px-3 font-mono text-sm leading-6 text-transparent outline-none caret-base-content\" style=\"caret-color: oklch(var(--bc));\" form=\"automation-design-form\" name=\"automation_yaml\" data-automation-yaml-editor data-automation-yaml-parse-url=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 359, "\" spellcheck=\"false\" wrap=\"off\" aria-label=\"Automation definition.\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var235 string
-		templ_7745c5c3_Var235, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/automations/yaml/parse?project_id=%s", currentProjectID))
+		templ_7745c5c3_Var235, templ_7745c5c3_Err = templ.JoinStringErrs(page.YAML)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1158, Col: 435}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1155, Col: 515}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var235)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 361, "\" spellcheck=\"false\" wrap=\"off\" aria-label=\"Automation definition.\">")
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var235))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var236 string
-		templ_7745c5c3_Var236, templ_7745c5c3_Err = templ.JoinStringErrs(page.YAML)
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1158, Col: 515}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var236))
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 362, "</textarea></div></div><p class=\"mt-3 hidden rounded-box border border-error/30 bg-error/10 px-3 py-2 font-sans text-sm text-error\" role=\"alert\" data-automation-yaml-diagnostic></p></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 360, "</textarea></div></div><p class=\"mt-3 hidden rounded-box border border-error/30 bg-error/10 px-3 py-2 font-sans text-sm text-error\" role=\"alert\" data-automation-yaml-diagnostic></p></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -4457,7 +4438,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 363, "<dialog id=\"automation-node-dialog\" class=\"modal\" data-automation-node-dialog><div class=\"modal-box relative max-w-md\"><div class=\"absolute right-4 top-4\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 361, "<dialog id=\"automation-node-dialog\" class=\"modal\" data-automation-node-dialog><div class=\"modal-box relative max-w-md\"><div class=\"absolute right-4 top-4\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -4465,210 +4446,210 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 364, "</div><div class=\"pr-10\"><h3 class=\"text-lg font-semibold\">Add node</h3>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 362, "</div><div class=\"pr-10\"><h3 class=\"text-lg font-semibold\">Add node</h3>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if page.Result.Candidate.AdapterKey == "custom" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 365, "<p class=\"mt-1 text-sm text-base-content/65\">Add an OpenVibely capability, then connect it to the next step.</p>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 363, "<p class=\"mt-1 text-sm text-base-content/65\">Add an OpenVibely capability, then connect it to the next step.</p>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		} else {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 366, "<p class=\"mt-1 text-sm text-base-content/65\">Add an OpenVibely capability or restore a removed template step, then connect supported handoffs.</p>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 364, "<p class=\"mt-1 text-sm text-base-content/65\">Add an OpenVibely capability or restore a removed template step, then connect supported handoffs.</p>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 367, "</div><form class=\"mt-5 space-y-4\" method=\"post\" action=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 365, "</div><form class=\"mt-5 space-y-4\" method=\"post\" action=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var237 templ.SafeURL
-		templ_7745c5c3_Var237, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(automationBuilderPostURL(page, currentProjectID)))
+		var templ_7745c5c3_Var236 templ.SafeURL
+		templ_7745c5c3_Var236, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(automationBuilderPostURL(page, currentProjectID)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1172, Col: 120}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1169, Col: 120}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var237))
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var236))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 368, "\" hx-post=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 366, "\" hx-post=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var237 string
+		templ_7745c5c3_Var237, templ_7745c5c3_Err = templ.ResolveAttributeValue(automationBuilderPostURL(page, currentProjectID))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1169, Col: 181}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var237)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 367, "\" hx-target=\"#main-content\"><input type=\"hidden\" name=\"project_id\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var238 string
-		templ_7745c5c3_Var238, templ_7745c5c3_Err = templ.ResolveAttributeValue(automationBuilderPostURL(page, currentProjectID))
+		templ_7745c5c3_Var238, templ_7745c5c3_Err = templ.ResolveAttributeValue(currentProjectID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1172, Col: 181}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1170, Col: 69}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var238)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 369, "\" hx-target=\"#main-content\"><input type=\"hidden\" name=\"project_id\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 368, "\"><input type=\"hidden\" name=\"builder_source\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var239 string
-		templ_7745c5c3_Var239, templ_7745c5c3_Err = templ.ResolveAttributeValue(currentProjectID)
+		templ_7745c5c3_Var239, templ_7745c5c3_Err = templ.ResolveAttributeValue(page.Source)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1173, Col: 69}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1170, Col: 135}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var239)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 370, "\"><input type=\"hidden\" name=\"builder_source\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 369, "\"><input type=\"hidden\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var240 string
-		templ_7745c5c3_Var240, templ_7745c5c3_Err = templ.ResolveAttributeValue(page.Source)
+		templ_7745c5c3_Var240, templ_7745c5c3_Err = templ.ResolveAttributeValue(automationDraftCandidateJSON(page.Result.Candidate))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1173, Col: 135}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1170, Col: 219}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var240)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 371, "\"><input type=\"hidden\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 370, "\" data-candidate-json><input type=\"hidden\" name=\"automation_yaml\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var241 string
-		templ_7745c5c3_Var241, templ_7745c5c3_Err = templ.ResolveAttributeValue(automationDraftCandidateJSON(page.Result.Candidate))
+		templ_7745c5c3_Var241, templ_7745c5c3_Err = templ.ResolveAttributeValue(page.YAML)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1173, Col: 219}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1170, Col: 304}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var241)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 372, "\" data-candidate-json><input type=\"hidden\" name=\"automation_yaml\" value=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var242 string
-		templ_7745c5c3_Var242, templ_7745c5c3_Err = templ.ResolveAttributeValue(page.YAML)
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1173, Col: 304}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var242)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 373, "\" data-automation-yaml-submission><input type=\"hidden\" name=\"builder_action\" value=\"create_node\"> <label class=\"form-control\"><span class=\"label-text\">Node purpose</span><select class=\"select select-bordered\" name=\"node_kind\" required><option value=\"schedule\">Schedule</option> <option value=\"task\">Task</option> <option value=\"create_notification\">Create notification</option> <option value=\"human_approval\">Human approval</option> <option value=\"native_inbox\">Approved inbox</option> <option value=\"native_implementation\">Native implementation</option> <option value=\"create_github_issue\">Create GitHub issue</option> <option value=\"human_assignment\">Human assignment</option> <option value=\"github_inbox\">GitHub inbox</option> <option value=\"open_pull_request\">Open pull request</option> <option value=\"human_review\">Human review</option> <option value=\"outcome\">Outcome</option> ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 371, "\" data-automation-yaml-submission><input type=\"hidden\" name=\"builder_action\" value=\"create_node\"> <label class=\"form-control\"><span class=\"label-text\">Node purpose</span><select class=\"select select-bordered\" name=\"node_kind\" required><option value=\"schedule\">Schedule</option> <option value=\"task\">Task</option> <option value=\"create_notification\">Create notification</option> <option value=\"human_approval\">Human approval</option> <option value=\"native_inbox\">Approved inbox</option> <option value=\"native_implementation\">Native implementation</option> <option value=\"create_github_issue\">Create GitHub issue</option> <option value=\"human_assignment\">Human assignment</option> <option value=\"github_inbox\">GitHub inbox</option> <option value=\"open_pull_request\">Open pull request</option> <option value=\"human_review\">Human review</option> <option value=\"outcome\">Outcome</option> ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if page.Result.Candidate.AdapterKey != "custom" {
 			for _, node := range page.NodePalette {
 				if !automationDraftHasNode(page.Result.Candidate.Nodes, node.Key) {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 374, "<option value=\"")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 372, "<option value=\"")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					var templ_7745c5c3_Var242 string
+					templ_7745c5c3_Var242, templ_7745c5c3_Err = templ.ResolveAttributeValue("runtime:" + node.Key)
+					if templ_7745c5c3_Err != nil {
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1187, Col: 47}
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var242)
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 373, "\">")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var243 string
-					templ_7745c5c3_Var243, templ_7745c5c3_Err = templ.ResolveAttributeValue("runtime:" + node.Key)
+					templ_7745c5c3_Var243, templ_7745c5c3_Err = templ.JoinStringErrs("Restore: " + node.Name + " · " + automationNodeTypeLabel(node.Type))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1190, Col: 47}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1187, Col: 121}
 					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var243)
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 375, "\">")
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var243))
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					var templ_7745c5c3_Var244 string
-					templ_7745c5c3_Var244, templ_7745c5c3_Err = templ.JoinStringErrs("Restore: " + node.Name + " · " + automationNodeTypeLabel(node.Type))
-					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1190, Col: 121}
-					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var244))
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 376, "</option>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 374, "</option>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				}
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 377, "</select><span class=\"label-text-alt mt-1\">Add real schedules, tasks, Native Alert approvals, GitHub issue/assignment/PR/review steps, and outcomes. Connect them to define supported handoffs.</span></label> <label class=\"form-control\"><span class=\"label-text\">Name</span><input class=\"input input-bordered\" name=\"node_name\" maxlength=\"200\" placeholder=\"Review result\" required autofocus></label><div class=\"modal-action\"><button class=\"btn btn-ghost\" type=\"button\" onclick=\"document.getElementById('automation-node-dialog').close()\">Cancel</button><button class=\"btn btn-primary\" type=\"submit\" data-automation-create-node>Add node</button></div></form></div><form method=\"dialog\" class=\"modal-backdrop\"><button aria-label=\"Close add node dialog\">close</button></form></dialog>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 375, "</select><span class=\"label-text-alt mt-1\">Add real schedules, tasks, Native Alert approvals, GitHub issue/assignment/PR/review steps, and outcomes. Connect them to define supported handoffs.</span></label> <label class=\"form-control\"><span class=\"label-text\">Name</span><input class=\"input input-bordered\" name=\"node_name\" maxlength=\"200\" placeholder=\"Review result\" required autofocus></label><div class=\"modal-action\"><button class=\"btn btn-ghost\" type=\"button\" onclick=\"document.getElementById('automation-node-dialog').close()\">Cancel</button><button class=\"btn btn-primary\" type=\"submit\" data-automation-create-node>Add node</button></div></form></div><form method=\"dialog\" class=\"modal-backdrop\"><button aria-label=\"Close add node dialog\">close</button></form></dialog>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var245 = []any{"automation-canvas-shell relative w-full overflow-hidden rounded-box border border-base-300 bg-base-200/30", templ.KV("mt-3", !automationBuilderUsesEditShell(page)), templ.KV("flex-1 min-h-[20rem]", automationBuilderUsesEditShell(page)), templ.KV("min-h-[calc(100dvh-15rem)]", !automationBuilderUsesEditShell(page))}
-		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var245...)
+		var templ_7745c5c3_Var244 = []any{"automation-canvas-shell relative w-full overflow-hidden rounded-box border border-base-300 bg-base-200/30", templ.KV("mt-3", !automationBuilderUsesEditShell(page)), templ.KV("flex-1 min-h-[20rem]", automationBuilderUsesEditShell(page)), templ.KV("min-h-[calc(100dvh-15rem)]", !automationBuilderUsesEditShell(page))}
+		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var244...)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 378, "<div data-automation-graph-panel class=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 376, "<div data-automation-graph-panel class=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var246 string
-		templ_7745c5c3_Var246, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var245).String())
+		var templ_7745c5c3_Var245 string
+		templ_7745c5c3_Var245, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var244).String())
 		if templ_7745c5c3_Err != nil {
 			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1, Col: 0}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var246)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var245)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 379, "\" role=\"region\" aria-label=\"Automation graph builder\"><div class=\"absolute right-3 top-3 z-10 flex flex-wrap items-center gap-1 rounded-box border border-base-300 bg-base-100/90 p-1 shadow-sm backdrop-blur\" aria-label=\"Canvas controls\" data-automation-builder-viewport-controls><button class=\"btn btn-ghost btn-sm\" type=\"button\" data-automation-zoom-out aria-label=\"Zoom out\">−</button> <button class=\"btn btn-ghost btn-sm\" type=\"button\" data-automation-zoom-in aria-label=\"Zoom in\">+</button> <button class=\"btn btn-ghost btn-sm\" type=\"button\" data-automation-fit>Fit</button> <button class=\"btn btn-ghost btn-sm\" type=\"button\" data-automation-reset>Reset layout</button></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 377, "\" role=\"region\" aria-label=\"Automation graph builder\"><div class=\"absolute right-3 top-3 z-10 flex flex-wrap items-center gap-1 rounded-box border border-base-300 bg-base-100/90 p-1 shadow-sm backdrop-blur\" aria-label=\"Canvas controls\" data-automation-builder-viewport-controls><button class=\"btn btn-ghost btn-sm\" type=\"button\" data-automation-zoom-out aria-label=\"Zoom out\">−</button> <button class=\"btn btn-ghost btn-sm\" type=\"button\" data-automation-zoom-in aria-label=\"Zoom in\">+</button> <button class=\"btn btn-ghost btn-sm\" type=\"button\" data-automation-fit>Fit</button> <button class=\"btn btn-ghost btn-sm\" type=\"button\" data-automation-reset>Reset layout</button></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var247 = []any{"block w-full touch-none select-none", templ.KV("h-full", automationBuilderUsesEditShell(page)), templ.KV("h-[calc(100dvh-15rem)] min-h-[42rem]", !automationBuilderUsesEditShell(page))}
-		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var247...)
+		var templ_7745c5c3_Var246 = []any{"block w-full touch-none select-none", templ.KV("h-full", automationBuilderUsesEditShell(page)), templ.KV("h-[calc(100dvh-15rem)] min-h-[42rem]", !automationBuilderUsesEditShell(page))}
+		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var246...)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 380, "<svg data-automation-canvas viewBox=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 378, "<svg data-automation-canvas viewBox=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var247 string
+		templ_7745c5c3_Var247, templ_7745c5c3_Err = templ.ResolveAttributeValue(automationDraftGraphViewBox(page.Result.Candidate.Nodes))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1204, Col: 99}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var247)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 379, "\" class=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var248 string
-		templ_7745c5c3_Var248, templ_7745c5c3_Err = templ.ResolveAttributeValue(automationDraftGraphViewBox(page.Result.Candidate.Nodes))
+		templ_7745c5c3_Var248, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var246).String())
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1207, Col: 99}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1, Col: 0}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var248)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 381, "\" class=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 380, "\" role=\"img\" aria-label=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var249 string
-		templ_7745c5c3_Var249, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var247).String())
+		templ_7745c5c3_Var249, templ_7745c5c3_Err = templ.ResolveAttributeValue(page.Result.Candidate.Name + " graph design")
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1, Col: 0}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1204, Col: 365}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var249)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 382, "\" role=\"img\" aria-label=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var250 string
-		templ_7745c5c3_Var250, templ_7745c5c3_Err = templ.ResolveAttributeValue(page.Result.Candidate.Name + " graph design")
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1207, Col: 365}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var250)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 383, "\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 381, "\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -4676,117 +4657,117 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 384, "<defs><marker id=\"automation-draft-arrow\" markerWidth=\"10\" markerHeight=\"10\" refX=\"8\" refY=\"3\" orient=\"auto\"><path d=\"M0,0 L0,6 L9,3 z\" class=\"automation-graph-arrow automation-edge-foreground-arrow\"></path></marker> <marker id=\"automation-draft-preview-arrow\" markerWidth=\"10\" markerHeight=\"10\" refX=\"8\" refY=\"3\" orient=\"auto\"><path d=\"M0,0 L0,6 L9,3 z\" class=\"automation-graph-preview-arrow\"></path></marker></defs> ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 382, "<defs><marker id=\"automation-draft-arrow\" markerWidth=\"10\" markerHeight=\"10\" refX=\"8\" refY=\"3\" orient=\"auto\"><path d=\"M0,0 L0,6 L9,3 z\" class=\"automation-graph-arrow automation-edge-foreground-arrow\"></path></marker> <marker id=\"automation-draft-preview-arrow\" markerWidth=\"10\" markerHeight=\"10\" refX=\"8\" refY=\"3\" orient=\"auto\"><path d=\"M0,0 L0,6 L9,3 z\" class=\"automation-graph-preview-arrow\"></path></marker></defs> ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		for _, edge := range page.Result.Candidate.Edges {
 			if source, target, ok := automationDraftEdgeNodes(page.Result.Candidate.Nodes, edge); ok {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 385, "<g class=\"automation-draft-edge\" data-edge-key=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 383, "<g class=\"automation-draft-edge\" data-edge-key=\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var250 string
+				templ_7745c5c3_Var250, templ_7745c5c3_Err = templ.ResolveAttributeValue(edge.Key)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1212, Col: 65}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var250)
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 384, "\" data-from=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var251 string
-				templ_7745c5c3_Var251, templ_7745c5c3_Err = templ.ResolveAttributeValue(edge.Key)
+				templ_7745c5c3_Var251, templ_7745c5c3_Err = templ.ResolveAttributeValue(edge.From)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1215, Col: 65}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1212, Col: 89}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var251)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 386, "\" data-from=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 385, "\" data-to=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var252 string
-				templ_7745c5c3_Var252, templ_7745c5c3_Err = templ.ResolveAttributeValue(edge.From)
+				templ_7745c5c3_Var252, templ_7745c5c3_Err = templ.ResolveAttributeValue(edge.To)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1215, Col: 89}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1212, Col: 109}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var252)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 387, "\" data-to=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 386, "\" tabindex=\"0\" role=\"group\" aria-label=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var253 string
-				templ_7745c5c3_Var253, templ_7745c5c3_Err = templ.ResolveAttributeValue(edge.To)
+				templ_7745c5c3_Var253, templ_7745c5c3_Err = templ.ResolveAttributeValue(automationDraftNodeName(page.Result.Candidate.Nodes, edge.From) + " to " + automationDraftNodeName(page.Result.Candidate.Nodes, edge.To) + " connection")
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1215, Col: 109}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1212, Col: 303}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var253)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 388, "\" tabindex=\"0\" role=\"group\" aria-label=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 387, "\"><line data-edge-hit x1=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var254 string
-				templ_7745c5c3_Var254, templ_7745c5c3_Err = templ.ResolveAttributeValue(automationDraftNodeName(page.Result.Candidate.Nodes, edge.From) + " to " + automationDraftNodeName(page.Result.Candidate.Nodes, edge.To) + " connection")
+				templ_7745c5c3_Var254, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", source.Position.X+automationGraphNodeWidth))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1215, Col: 303}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1213, Col: 97}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var254)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 389, "\"><line data-edge-hit x1=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 388, "\" y1=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var255 string
-				templ_7745c5c3_Var255, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", source.Position.X+automationGraphNodeWidth))
+				templ_7745c5c3_Var255, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", source.Position.Y+automationGraphNodeHeight/2))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1216, Col: 97}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1213, Col: 171}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var255)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 390, "\" y1=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 389, "\" x2=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var256 string
-				templ_7745c5c3_Var256, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", source.Position.Y+automationGraphNodeHeight/2))
+				templ_7745c5c3_Var256, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", target.Position.X))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1216, Col: 171}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1213, Col: 217}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var256)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 391, "\" x2=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 390, "\" y2=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var257 string
-				templ_7745c5c3_Var257, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", target.Position.X))
+				templ_7745c5c3_Var257, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", target.Position.Y+automationGraphNodeHeight/2))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1216, Col: 217}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1213, Col: 291}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var257)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 392, "\" y2=\"")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				var templ_7745c5c3_Var258 string
-				templ_7745c5c3_Var258, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", target.Position.Y+automationGraphNodeHeight/2))
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1216, Col: 291}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var258)
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 393, "\" class=\"automation-edge-hit\"></line></g> ")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 391, "\" class=\"automation-edge-hit\"></line></g> ")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -4794,107 +4775,133 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 		}
 		for _, node := range page.Result.Candidate.Nodes {
 			if node.Position != nil {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 394, "<g class=\"automation-draft-node automation-graph-focus cursor-grab active:cursor-grabbing\" data-node-key=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 392, "<g class=\"automation-draft-node automation-graph-focus cursor-grab active:cursor-grabbing\" data-node-key=\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var258 string
+				templ_7745c5c3_Var258, templ_7745c5c3_Err = templ.ResolveAttributeValue(node.Key)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1219, Col: 123}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var258)
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 393, "\" data-node-x=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var259 string
-				templ_7745c5c3_Var259, templ_7745c5c3_Err = templ.ResolveAttributeValue(node.Key)
+				templ_7745c5c3_Var259, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", node.Position.X))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1222, Col: 123}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1219, Col: 176}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var259)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 395, "\" data-node-x=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 394, "\" data-node-y=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var260 string
-				templ_7745c5c3_Var260, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", node.Position.X))
+				templ_7745c5c3_Var260, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", node.Position.Y))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1222, Col: 176}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1219, Col: 229}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var260)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 396, "\" data-node-y=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 395, "\" data-default-x=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var261 string
-				templ_7745c5c3_Var261, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", node.Position.Y))
+				templ_7745c5c3_Var261, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", automationDraftDefaultX(page.NodePalette, node.Key)))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1222, Col: 229}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1219, Col: 321}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var261)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 397, "\" data-default-x=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 396, "\" data-default-y=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var262 string
-				templ_7745c5c3_Var262, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", automationDraftDefaultX(page.NodePalette, node.Key)))
+				templ_7745c5c3_Var262, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", automationDraftDefaultY(page.NodePalette, node.Key)))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1222, Col: 321}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1219, Col: 413}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var262)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 398, "\" data-default-y=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 397, "\" transform=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var263 string
-				templ_7745c5c3_Var263, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", automationDraftDefaultY(page.NodePalette, node.Key)))
+				templ_7745c5c3_Var263, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("translate(%.0f %.0f)", node.Position.X, node.Position.Y))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1222, Col: 413}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1219, Col: 497}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var263)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 399, "\" transform=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 398, "\" tabindex=\"0\" role=\"group\" aria-label=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var264 string
-				templ_7745c5c3_Var264, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("translate(%.0f %.0f)", node.Position.X, node.Position.Y))
+				templ_7745c5c3_Var264, templ_7745c5c3_Err = templ.ResolveAttributeValue(node.Name + ", " + string(node.Type) + ", use arrow keys to move")
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1222, Col: 497}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1219, Col: 604}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var264)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 400, "\" tabindex=\"0\" role=\"group\" aria-label=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 399, "\"><rect width=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var265 string
-				templ_7745c5c3_Var265, templ_7745c5c3_Err = templ.ResolveAttributeValue(node.Name + ", " + string(node.Type) + ", use arrow keys to move")
+				templ_7745c5c3_Var265, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", automationGraphNodeWidth))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1222, Col: 604}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1220, Col: 68}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var265)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 401, "\"><rect width=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 400, "\" height=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var266 string
-				templ_7745c5c3_Var266, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", automationGraphNodeWidth))
+				templ_7745c5c3_Var266, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", automationGraphNodeHeight))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1223, Col: 68}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1220, Col: 126}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var266)
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 401, "\" rx=\"12\" class=\"automation-graph-node automation-graph-node--idle\" stroke-width=\"2\"></rect> <foreignObject x=\"0\" y=\"0\" width=\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var267 string
+				templ_7745c5c3_Var267, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", automationGraphNodeWidth))
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1221, Col: 90}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var267)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -4902,315 +4909,315 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var267 string
-				templ_7745c5c3_Var267, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", automationGraphNodeHeight))
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1223, Col: 126}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var267)
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 403, "\" rx=\"12\" class=\"automation-graph-node automation-graph-node--idle\" stroke-width=\"2\"></rect> <foreignObject x=\"0\" y=\"0\" width=\"")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
 				var templ_7745c5c3_Var268 string
-				templ_7745c5c3_Var268, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", automationGraphNodeWidth))
+				templ_7745c5c3_Var268, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", automationGraphNodeHeight))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1224, Col: 90}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1221, Col: 148}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var268)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 404, "\" height=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 403, "\" class=\"pointer-events-none\"><div xmlns=\"http://www.w3.org/1999/xhtml\" class=\"automation-node-content\"><strong>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var269 string
-				templ_7745c5c3_Var269, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", automationGraphNodeHeight))
+				templ_7745c5c3_Var269, templ_7745c5c3_Err = templ.JoinStringErrs(node.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1224, Col: 148}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1221, Col: 272}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var269)
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var269))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 405, "\" class=\"pointer-events-none\"><div xmlns=\"http://www.w3.org/1999/xhtml\" class=\"automation-node-content\"><strong>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 404, "</strong><span>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var270 string
-				templ_7745c5c3_Var270, templ_7745c5c3_Err = templ.JoinStringErrs(node.Name)
+				templ_7745c5c3_Var270, templ_7745c5c3_Err = templ.JoinStringErrs(automationNodeTypeLabel(node.Type))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1224, Col: 272}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1221, Col: 325}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var270))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 406, "</strong><span>")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				var templ_7745c5c3_Var271 string
-				templ_7745c5c3_Var271, templ_7745c5c3_Err = templ.JoinStringErrs(automationNodeTypeLabel(node.Type))
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1224, Col: 325}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var271))
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 407, "</span> ")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 405, "</span> ")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				if automationDraftNodeModelLabel(node, page.Capabilities.Models) != "" {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 408, "<small>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 406, "<small>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					var templ_7745c5c3_Var272 string
-					templ_7745c5c3_Var272, templ_7745c5c3_Err = templ.JoinStringErrs(automationDraftNodeModelLabel(node, page.Capabilities.Models))
+					var templ_7745c5c3_Var271 string
+					templ_7745c5c3_Var271, templ_7745c5c3_Err = templ.JoinStringErrs(automationDraftNodeModelLabel(node, page.Capabilities.Models))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1226, Col: 82}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1223, Col: 82}
 					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var272))
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var271))
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 409, "</small>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 407, "</small>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 410, "</div></foreignObject> <circle cx=\"0\" cy=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 408, "</div></foreignObject> <circle cx=\"0\" cy=\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var272 string
+				templ_7745c5c3_Var272, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", automationGraphNodeHeight/2))
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1225, Col: 109}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var272)
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 409, "\" r=\"9\" class=\"automation-connect-handle automation-connect-handle--input\" data-connect-port=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var273 string
-				templ_7745c5c3_Var273, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", automationGraphNodeHeight/2))
+				templ_7745c5c3_Var273, templ_7745c5c3_Err = templ.ResolveAttributeValue(node.Key)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1228, Col: 109}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1225, Col: 213}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var273)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 411, "\" r=\"9\" class=\"automation-connect-handle automation-connect-handle--input\" data-connect-port=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 410, "\" data-port-side=\"left\" data-port-kind=\"input\" tabindex=\"0\" role=\"button\" aria-label=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var274 string
-				templ_7745c5c3_Var274, templ_7745c5c3_Err = templ.ResolveAttributeValue(node.Key)
+				templ_7745c5c3_Var274, templ_7745c5c3_Err = templ.ResolveAttributeValue("Input for " + node.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1228, Col: 213}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1225, Col: 325}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var274)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 412, "\" data-port-side=\"left\" data-port-kind=\"input\" tabindex=\"0\" role=\"button\" aria-label=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 411, "\"></circle> <circle cx=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var275 string
-				templ_7745c5c3_Var275, templ_7745c5c3_Err = templ.ResolveAttributeValue("Input for " + node.Name)
+				templ_7745c5c3_Var275, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", automationGraphNodeWidth))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1228, Col: 325}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1226, Col: 67}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var275)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 413, "\"></circle> <circle cx=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 412, "\" cy=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var276 string
-				templ_7745c5c3_Var276, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", automationGraphNodeWidth))
+				templ_7745c5c3_Var276, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", automationGraphNodeHeight/2))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1229, Col: 67}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1226, Col: 123}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var276)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 414, "\" cy=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 413, "\" r=\"9\" class=\"automation-connect-handle automation-connect-handle--output\" data-connect-port=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var277 string
-				templ_7745c5c3_Var277, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", automationGraphNodeHeight/2))
+				templ_7745c5c3_Var277, templ_7745c5c3_Err = templ.ResolveAttributeValue(node.Key)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1229, Col: 123}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1226, Col: 228}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var277)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 415, "\" r=\"9\" class=\"automation-connect-handle automation-connect-handle--output\" data-connect-port=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 414, "\" data-port-side=\"right\" data-port-kind=\"output\" tabindex=\"0\" role=\"button\" aria-label=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var278 string
-				templ_7745c5c3_Var278, templ_7745c5c3_Err = templ.ResolveAttributeValue(node.Key)
+				templ_7745c5c3_Var278, templ_7745c5c3_Err = templ.ResolveAttributeValue("Output from " + node.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1229, Col: 228}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1226, Col: 344}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var278)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 416, "\" data-port-side=\"right\" data-port-kind=\"output\" tabindex=\"0\" role=\"button\" aria-label=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 415, "\"></circle> <g data-delete-node transform=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var279 string
-				templ_7745c5c3_Var279, templ_7745c5c3_Err = templ.ResolveAttributeValue("Output from " + node.Name)
+				templ_7745c5c3_Var279, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("translate(%.0f 16)", automationGraphNodeWidth-16))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1229, Col: 344}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1227, Col: 103}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var279)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 417, "\"></circle> <g data-delete-node transform=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 416, "\" class=\"automation-node-delete\" tabindex=\"0\" role=\"button\" aria-label=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var280 string
-				templ_7745c5c3_Var280, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("translate(%.0f 16)", automationGraphNodeWidth-16))
+				templ_7745c5c3_Var280, templ_7745c5c3_Err = templ.ResolveAttributeValue("Delete " + node.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1230, Col: 103}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1227, Col: 198}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var280)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 418, "\" class=\"automation-node-delete\" tabindex=\"0\" role=\"button\" aria-label=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 417, "\"><circle r=\"11\"></circle><path d=\"M-4 -4 L4 4 M4 -4 L-4 4\" class=\"automation-delete-x\"></path></g></g> ")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			}
+		}
+		for _, edge := range page.Result.Candidate.Edges {
+			if source, target, ok := automationDraftEdgeNodes(page.Result.Candidate.Nodes, edge); ok {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 418, "<line data-edge-foreground data-edge-key=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var281 string
-				templ_7745c5c3_Var281, templ_7745c5c3_Err = templ.ResolveAttributeValue("Delete " + node.Name)
+				templ_7745c5c3_Var281, templ_7745c5c3_Err = templ.ResolveAttributeValue(edge.Key)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1230, Col: 198}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1233, Col: 60}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var281)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 419, "\"><circle r=\"11\"></circle><path d=\"M-4 -4 L4 4 M4 -4 L-4 4\" class=\"automation-delete-x\"></path></g></g> ")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-			}
-		}
-		for _, edge := range page.Result.Candidate.Edges {
-			if source, target, ok := automationDraftEdgeNodes(page.Result.Candidate.Nodes, edge); ok {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 420, "<line data-edge-foreground data-edge-key=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 419, "\" x1=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var282 string
-				templ_7745c5c3_Var282, templ_7745c5c3_Err = templ.ResolveAttributeValue(edge.Key)
+				templ_7745c5c3_Var282, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", source.Position.X+automationGraphNodeWidth))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1236, Col: 60}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1233, Col: 131}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var282)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 421, "\" x1=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 420, "\" y1=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var283 string
-				templ_7745c5c3_Var283, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", source.Position.X+automationGraphNodeWidth))
+				templ_7745c5c3_Var283, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", source.Position.Y+automationGraphNodeHeight/2))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1236, Col: 131}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1233, Col: 205}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var283)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 422, "\" y1=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 421, "\" x2=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var284 string
-				templ_7745c5c3_Var284, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", source.Position.Y+automationGraphNodeHeight/2))
+				templ_7745c5c3_Var284, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", target.Position.X))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1236, Col: 205}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1233, Col: 251}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var284)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 423, "\" x2=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 422, "\" y2=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var285 string
-				templ_7745c5c3_Var285, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", target.Position.X))
+				templ_7745c5c3_Var285, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", target.Position.Y+automationGraphNodeHeight/2))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1236, Col: 251}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1233, Col: 325}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var285)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 424, "\" y2=\"")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				var templ_7745c5c3_Var286 string
-				templ_7745c5c3_Var286, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", target.Position.Y+automationGraphNodeHeight/2))
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1236, Col: 325}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var286)
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 425, "\" class=\"automation-graph-edge automation-edge-foreground\" stroke-width=\"2\" marker-end=\"url(#automation-draft-arrow)\"></line> ")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 423, "\" class=\"automation-graph-edge automation-edge-foreground\" stroke-width=\"2\" marker-end=\"url(#automation-draft-arrow)\"></line> ")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 426, "<line data-automation-edge-preview x1=\"0\" y1=\"0\" x2=\"0\" y2=\"0\" class=\"automation-graph-edge automation-graph-edge--preview\" marker-end=\"url(#automation-draft-preview-arrow)\" hidden></line> ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 424, "<line data-automation-edge-preview x1=\"0\" y1=\"0\" x2=\"0\" y2=\"0\" class=\"automation-graph-edge automation-graph-edge--preview\" marker-end=\"url(#automation-draft-preview-arrow)\" hidden></line> ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		for _, edge := range page.Result.Candidate.Edges {
 			if source, target, ok := automationDraftEdgeNodes(page.Result.Candidate.Nodes, edge); ok {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 427, "<g data-edge-controls data-edge-key=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 425, "<g data-edge-controls data-edge-key=\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var286 string
+				templ_7745c5c3_Var286, templ_7745c5c3_Err = templ.ResolveAttributeValue(edge.Key)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1239, Col: 55}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var286)
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 426, "\" class=\"automation-edge-controls\"><circle data-reconnect-edge data-edge-endpoint=\"from\" cx=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var287 string
-				templ_7745c5c3_Var287, templ_7745c5c3_Err = templ.ResolveAttributeValue(edge.Key)
+				templ_7745c5c3_Var287, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", source.Position.X+automationGraphNodeWidth))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1242, Col: 55}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1240, Col: 132}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var287)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 428, "\" class=\"automation-edge-controls\"><circle data-reconnect-edge data-edge-endpoint=\"from\" cx=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 427, "\" cy=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var288 string
-				templ_7745c5c3_Var288, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", source.Position.X+automationGraphNodeWidth))
+				templ_7745c5c3_Var288, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", source.Position.Y+automationGraphNodeHeight/2))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1243, Col: 132}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1240, Col: 206}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var288)
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 428, "\" r=\"7\" class=\"automation-edge-endpoint\" tabindex=\"0\" role=\"button\" aria-label=\"Reconnect connection start\"></circle> <circle data-reconnect-edge data-edge-endpoint=\"to\" cx=\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var289 string
+				templ_7745c5c3_Var289, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", target.Position.X))
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1241, Col: 105}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var289)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -5218,205 +5225,179 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var289 string
-				templ_7745c5c3_Var289, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", source.Position.Y+automationGraphNodeHeight/2))
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1243, Col: 206}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var289)
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 430, "\" r=\"7\" class=\"automation-edge-endpoint\" tabindex=\"0\" role=\"button\" aria-label=\"Reconnect connection start\"></circle> <circle data-reconnect-edge data-edge-endpoint=\"to\" cx=\"")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
 				var templ_7745c5c3_Var290 string
-				templ_7745c5c3_Var290, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", target.Position.X))
+				templ_7745c5c3_Var290, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", target.Position.Y+automationGraphNodeHeight/2))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1244, Col: 105}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1241, Col: 179}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var290)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 431, "\" cy=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 430, "\" r=\"7\" class=\"automation-edge-endpoint\" tabindex=\"0\" role=\"button\" aria-label=\"Reconnect connection end\"></circle> <g data-delete-edge transform=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var291 string
-				templ_7745c5c3_Var291, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", target.Position.Y+automationGraphNodeHeight/2))
+				templ_7745c5c3_Var291, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("translate(%.0f %.0f)", (source.Position.X+automationGraphNodeWidth+target.Position.X)/2, (source.Position.Y+target.Position.Y)/2+automationGraphNodeHeight/2))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1244, Col: 179}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1242, Col: 212}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var291)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 432, "\" r=\"7\" class=\"automation-edge-endpoint\" tabindex=\"0\" role=\"button\" aria-label=\"Reconnect connection end\"></circle> <g data-delete-edge transform=\"")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				var templ_7745c5c3_Var292 string
-				templ_7745c5c3_Var292, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("translate(%.0f %.0f)", (source.Position.X+automationGraphNodeWidth+target.Position.X)/2, (source.Position.Y+target.Position.Y)/2+automationGraphNodeHeight/2))
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1245, Col: 212}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var292)
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 433, "\" class=\"automation-edge-delete\" tabindex=\"0\" role=\"button\" aria-label=\"Delete connection\"><circle r=\"11\"></circle><path d=\"M-4 -4 L4 4 M4 -4 L-4 4\" class=\"automation-delete-x\"></path></g></g>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 431, "\" class=\"automation-edge-delete\" tabindex=\"0\" role=\"button\" aria-label=\"Delete connection\"><circle r=\"11\"></circle><path d=\"M-4 -4 L4 4 M4 -4 L-4 4\" class=\"automation-delete-x\"></path></g></g>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 434, "</svg> ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 432, "</svg> ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if len(page.Result.Candidate.Nodes) == 0 {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 435, "<div class=\"pointer-events-none absolute inset-0 flex items-center justify-center p-6\"><div class=\"pointer-events-auto max-w-sm rounded-box border border-base-300 bg-base-100/95 p-6 text-center shadow-xl\"><h4 class=\"text-lg font-semibold\">Start your graph</h4><p class=\"mt-2 text-sm text-base-content/65\">Add nodes, drag them into place, then connect each node's right handle to the next node's left handle.</p><button class=\"btn btn-primary mt-4\" type=\"button\" data-automation-add-first-node onclick=\"document.getElementById('automation-node-dialog').showModal()\">Add first node</button></div></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 433, "<div class=\"pointer-events-none absolute inset-0 flex items-center justify-center p-6\"><div class=\"pointer-events-auto max-w-sm rounded-box border border-base-300 bg-base-100/95 p-6 text-center shadow-xl\"><h4 class=\"text-lg font-semibold\">Start your graph</h4><p class=\"mt-2 text-sm text-base-content/65\">Add nodes, drag them into place, then connect each node's right handle to the next node's left handle.</p><button class=\"btn btn-primary mt-4\" type=\"button\" data-automation-add-first-node onclick=\"document.getElementById('automation-node-dialog').showModal()\">Add first node</button></div></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 436, "</div></section></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 434, "</div></section></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if page.AutomationID != "" && (len(page.Result.Assumptions) > 0 || len(page.Result.Warnings) > 0) {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 437, "<div class=\"mb-4 grid grid-cols-1 gap-3 lg:grid-cols-2\" data-automation-builder-insights><div class=\"rounded-box bg-base-200/60 p-4\"><h3 class=\"font-semibold\">Assumptions</h3><ul class=\"mt-2 list-disc pl-5 text-sm\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 435, "<div class=\"mb-4 grid grid-cols-1 gap-3 lg:grid-cols-2\" data-automation-builder-insights><div class=\"rounded-box bg-base-200/60 p-4\"><h3 class=\"font-semibold\">Assumptions</h3><ul class=\"mt-2 list-disc pl-5 text-sm\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			for _, item := range page.Result.Assumptions {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 438, "<li>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 436, "<li>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var292 string
+				templ_7745c5c3_Var292, templ_7745c5c3_Err = templ.JoinStringErrs(item)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1259, Col: 17}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var292))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 437, "</li>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 438, "</ul></div><div class=\"rounded-box bg-base-200/60 p-4\"><h3 class=\"font-semibold\">Warnings</h3><ul class=\"mt-2 list-disc pl-5 text-sm\">")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			for _, item := range page.Result.Warnings {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 439, "<li>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var293 string
 				templ_7745c5c3_Var293, templ_7745c5c3_Err = templ.JoinStringErrs(item)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1262, Col: 17}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1264, Col: 17}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var293))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 439, "</li>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 440, "</li>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 440, "</ul></div><div class=\"rounded-box bg-base-200/60 p-4\"><h3 class=\"font-semibold\">Warnings</h3><ul class=\"mt-2 list-disc pl-5 text-sm\">")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			for _, item := range page.Result.Warnings {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 441, "<li>")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				var templ_7745c5c3_Var294 string
-				templ_7745c5c3_Var294, templ_7745c5c3_Err = templ.JoinStringErrs(item)
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1267, Col: 17}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var294))
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 442, "</li>")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 443, "</ul></div></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 441, "</ul></div></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 444, "<form id=\"automation-design-form\" method=\"post\" action=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 442, "<form id=\"automation-design-form\" method=\"post\" action=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var295 templ.SafeURL
-		templ_7745c5c3_Var295, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(automationBuilderPostURL(page, currentProjectID)))
+		var templ_7745c5c3_Var294 templ.SafeURL
+		templ_7745c5c3_Var294, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(automationBuilderPostURL(page, currentProjectID)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1272, Col: 123}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1269, Col: 123}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var295))
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var294))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 445, "\" hx-post=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 443, "\" hx-post=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var295 string
+		templ_7745c5c3_Var295, templ_7745c5c3_Err = templ.ResolveAttributeValue(automationBuilderPostURL(page, currentProjectID))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1269, Col: 184}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var295)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 444, "\" hx-target=\"#main-content\" class=\"hidden\" data-automation-yaml-form><input type=\"hidden\" name=\"project_id\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var296 string
-		templ_7745c5c3_Var296, templ_7745c5c3_Err = templ.ResolveAttributeValue(automationBuilderPostURL(page, currentProjectID))
+		templ_7745c5c3_Var296, templ_7745c5c3_Err = templ.ResolveAttributeValue(currentProjectID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1272, Col: 184}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1270, Col: 67}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var296)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 446, "\" hx-target=\"#main-content\" class=\"hidden\" data-automation-yaml-form><input type=\"hidden\" name=\"project_id\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 445, "\"> <input type=\"hidden\" name=\"builder_source\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var297 string
-		templ_7745c5c3_Var297, templ_7745c5c3_Err = templ.ResolveAttributeValue(currentProjectID)
+		templ_7745c5c3_Var297, templ_7745c5c3_Err = templ.ResolveAttributeValue(page.Source)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1273, Col: 67}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1271, Col: 67}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var297)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 447, "\"> <input type=\"hidden\" name=\"builder_source\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 446, "\"> <input type=\"hidden\" name=\"initial_view\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var298 string
-		templ_7745c5c3_Var298, templ_7745c5c3_Err = templ.ResolveAttributeValue(page.Source)
+		templ_7745c5c3_Var298, templ_7745c5c3_Err = templ.ResolveAttributeValue(page.InitialView)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1274, Col: 67}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1272, Col: 70}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var298)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 448, "\"> <input type=\"hidden\" name=\"initial_view\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 447, "\" data-automation-initial-view></form><input type=\"hidden\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var299 string
-		templ_7745c5c3_Var299, templ_7745c5c3_Err = templ.ResolveAttributeValue(page.InitialView)
+		templ_7745c5c3_Var299, templ_7745c5c3_Err = templ.ResolveAttributeValue(automationDraftCandidateJSON(page.Result.Candidate))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1275, Col: 70}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1273, Col: 94}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var299)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 449, "\" data-automation-initial-view></form><input type=\"hidden\" value=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var300 string
-		templ_7745c5c3_Var300, templ_7745c5c3_Err = templ.ResolveAttributeValue(automationDraftCandidateJSON(page.Result.Candidate))
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1276, Col: 94}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var300)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 450, "\" data-candidate-json><script>\n\t\t\t(function() {\n\t\t\t\tvar root = document.querySelector('[data-automation-draft-canvas]');\n\t\t\t\tvar builder = document.getElementById('automation-builder');\n\t\t\t\tvar svg = root && root.querySelector('[data-automation-canvas]');\n\t\t\t\tvar source = builder && builder.querySelector('[data-candidate-json]');\n\t\t\t\tif (!root || !builder || !svg || !source) return;\n\t\t\t\t\tvar candidate;\n\t\t\t\t\ttry { candidate = JSON.parse(source.value); } catch (_) { return; }\n\t\t\t\t\tvar edgePalette = [];\t\t\t\ttry { edgePalette = JSON.parse(root.dataset.edgePalette || '[]'); } catch (_) { return; }\n\t\t\t\tvar connectStatus = root.querySelector('[data-automation-connect-status]');\n\t\t\t\tvar preview = svg.querySelector('[data-automation-edge-preview]');\n\t\t\t\t\tvar selectedEdgeKey = '';\n\t\t\t\t\tvar keyboardSource = null;\n\t\t\t\t\tvar activeConnection = null;\n\t\t\t\t\tvar initialViewBox = svg.getAttribute('viewBox').split(/\\s+/).map(Number);\n\t\t\t\t\tvar viewBox = initialViewBox.slice();\n\n\t\t\t\t\tfunction nodeCandidate(key) { return (candidate.nodes || []).find(function(node) { return node.key === key; }); }\n\t\t\t\t\tfunction edgeCandidate(key) { return (candidate.edges || []).find(function(edge) { return edge.key === key; }); }\n\t\t\t\t\tfunction nodeName(key) { var node = nodeCandidate(key); return node ? node.name : key; }\n\t\t\t\t\t\tfunction nodeGroup(key) { return svg.querySelector('[data-node-key=\"' + CSS.escape(key) + '\"]'); }\n\t\t\t\t\t\tfunction foregroundEdge(key) { return svg.querySelector('[data-edge-foreground][data-edge-key=\"' + CSS.escape(key) + '\"]'); }\n\t\t\t\t\t\tfunction edgeControls(key) { return svg.querySelector('[data-edge-controls][data-edge-key=\"' + CSS.escape(key) + '\"]'); }\t\t\t\t\tfunction nodePortPoint(key, side) { var group = nodeGroup(key); if (!group) return null; return {x: Number(group.dataset.nodeX) + (side === 'right' ? 170 : 0), y: Number(group.dataset.nodeY) + 52}; }\n\t\t\t\t\tfunction yamlString(value) { return JSON.stringify(String(value == null ? '' : value)); }\n\t\t\t\t\tfunction yamlPlainKeyPattern() { return /^[A-Za-z_][A-Za-z0-9_]*$/; }\n\t\t\t\t\tfunction yamlKey(key) { return yamlPlainKeyPattern().test(String(key)) ? String(key) : yamlString(key); }\n\t\t\t\t\tfunction yamlScalar(value) {\n\t\t\t\t\t\tif (value === null || value === undefined) return 'null';\n\t\t\t\t\t\tif (typeof value === 'boolean' || typeof value === 'number') return String(value);\n\t\t\t\t\t\treturn yamlString(value);\n\t\t\t\t\t}\n\t\t\t\t\tfunction yamlIndent(level) { return '  '.repeat(level); }\n\t\t\t\t\tfunction yamlIsEmptyContainer(value) {\n\t\t\t\t\t\tif (Array.isArray(value)) return value.length === 0;\n\t\t\t\t\t\tif (value !== null && typeof value === 'object') return Object.keys(value).length === 0;\n\t\t\t\t\t\treturn false;\n\t\t\t\t\t}\n\t\t\t\t\tfunction yamlBlockLines(value, level) {\n\t\t\t\t\t\tif (Array.isArray(value)) {\n\t\t\t\t\t\t\tvar lines = [];\n\t\t\t\t\t\t\tvalue.forEach(function(item) {\n\t\t\t\t\t\t\t\tif (item !== null && typeof item === 'object' && !yamlIsEmptyContainer(item)) {\n\t\t\t\t\t\t\t\t\tvar subLines = yamlBlockLines(item, level + 1);\n\t\t\t\t\t\t\t\t\tlines.push(yamlIndent(level) + '- ' + subLines[0].slice(yamlIndent(level + 1).length));\n\t\t\t\t\t\t\t\t\tsubLines.slice(1).forEach(function(line) { lines.push(line); });\n\t\t\t\t\t\t\t\t} else if (item !== null && typeof item === 'object') {\n\t\t\t\t\t\t\t\t\tlines.push(yamlIndent(level) + '- ' + (Array.isArray(item) ? '[]' : '{}'));\n\t\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\t\tlines.push(yamlIndent(level) + '- ' + yamlScalar(item));\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\treturn lines;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tif (value !== null && typeof value === 'object') {\n\t\t\t\t\t\t\tvar lines = [];\n\t\t\t\t\t\t\tObject.keys(value).forEach(function(key) {\n\t\t\t\t\t\t\t\tvar nested = value[key];\n\t\t\t\t\t\t\t\tif (nested !== null && typeof nested === 'object' && !yamlIsEmptyContainer(nested)) {\n\t\t\t\t\t\t\t\t\tlines.push(yamlIndent(level) + yamlKey(key) + ':');\n\t\t\t\t\t\t\t\t\tyamlBlockLines(nested, level + 1).forEach(function(line) { lines.push(line); });\n\t\t\t\t\t\t\t\t} else if (nested !== null && typeof nested === 'object') {\n\t\t\t\t\t\t\t\t\tlines.push(yamlIndent(level) + yamlKey(key) + ': ' + (Array.isArray(nested) ? '[]' : '{}'));\n\t\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\t\tlines.push(yamlIndent(level) + yamlKey(key) + ': ' + yamlScalar(nested));\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\treturn lines;\n\t\t\t\t\t\t}\n\t\t\t\t\t\treturn [yamlIndent(level) + yamlScalar(value)];\n\t\t\t\t\t}\n\t\t\t\t\tfunction yamlNestedField(lines, label, value, level) {\n\t\t\t\t\t\tvar normalized = (value && typeof value === 'object') ? value : {};\n\t\t\t\t\t\tif (yamlIsEmptyContainer(normalized)) {\n\t\t\t\t\t\t\tlines.push(yamlIndent(level) + label + ': ' + (Array.isArray(normalized) ? '[]' : '{}'));\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tlines.push(yamlIndent(level) + label + ':');\n\t\t\t\t\t\tyamlBlockLines(normalized, level + 1).forEach(function(line) { lines.push(line); });\n\t\t\t\t\t}\n\t\t\t\t\tfunction visualCandidateYAML() {\n\t\t\t\t\t\tvar lines = [\n\t\t\t\t\t\t\t'schema_version: ' + Number(candidate.schema_version || 1),\n\t\t\t\t\t\t\t'name: ' + yamlString(candidate.name),\n\t\t\t\t\t\t\t'description: ' + yamlString(candidate.description),\n\t\t\t\t\t\t\t'automation_type: ' + yamlString(candidate.automation_type),\n\t\t\t\t\t\t\t'adapter_key: ' + yamlString(candidate.adapter_key),\n\t\t\t\t\t\t\t'nodes:'\n\t\t\t\t\t\t];\n\t\t\t\t\t\t(candidate.nodes || []).forEach(function(node) {\n\t\t\t\t\t\t\tlines.push('  - key: ' + yamlString(node.key));\n\t\t\t\t\t\t\tlines.push('    name: ' + yamlString(node.name));\n\t\t\t\t\t\t\tlines.push('    type: ' + yamlString(node.type));\n\t\t\t\t\t\t\tlines.push('    role: ' + yamlString(node.role));\n\t\t\t\t\t\t\tyamlNestedField(lines, 'config', node.config || {}, 2);\n\t\t\t\t\t\t\tif (node.position) yamlNestedField(lines, 'position', node.position, 2);\n\t\t\t\t\t\t});\n\t\t\t\t\t\tlines.push('edges:');\n\t\t\t\t\t\t(candidate.edges || []).forEach(function(edge) {\n\t\t\t\t\t\t\tlines.push('  - key: ' + yamlString(edge.key));\n\t\t\t\t\t\t\tlines.push('    from: ' + yamlString(edge.from));\n\t\t\t\t\t\t\tlines.push('    to: ' + yamlString(edge.to));\n\t\t\t\t\t\t\tlines.push('    from_port: ' + yamlString(edge.from_port || 'right'));\n\t\t\t\t\t\t\tlines.push('    to_port: ' + yamlString(edge.to_port || 'left'));\n\t\t\t\t\t\t\tif (edge.label) lines.push('    label: ' + yamlString(edge.label));\n\t\t\t\t\t\t\tif (edge.condition && Object.keys(edge.condition).length) yamlNestedField(lines, 'condition', edge.condition, 2);\n\t\t\t\t\t\t});\n\t\t\t\t\t\tif (candidate.assumptions && candidate.assumptions.length) yamlNestedField(lines, 'assumptions', candidate.assumptions, 0);\n\t\t\t\t\t\tif (candidate.warnings && candidate.warnings.length) yamlNestedField(lines, 'warnings', candidate.warnings, 0);\n\t\t\t\t\t\treturn lines.join('\\n') + '\\n';\n\t\t\t\t\t}\n\t\t\t\t\tvar yamlEditor = builder.querySelector('[data-automation-yaml-editor]');\n\t\t\t\t\tvar yamlLineNumbers = builder.querySelector('[data-automation-yaml-line-numbers]');\n\t\t\t\t\tvar yamlFoldControls = builder.querySelector('[data-automation-yaml-fold-controls]');\n\t\t\t\t\tvar yamlGutter = builder.querySelector('[data-automation-yaml-gutter]');\n\t\t\t\t\tvar yamlViewport = builder.querySelector('[data-automation-yaml-editor-viewport]');\n\t\t\t\t\tvar yamlHighlight = builder.querySelector('[data-automation-yaml-highlight]');\n\t\t\t\t\tvar yamlDiagnostic = builder.querySelector('[data-automation-yaml-diagnostic]');\n\t\t\t\t\tvar yamlDiagnosticLine = 0;\n\t\t\t\t\tvar yamlShared = window.openVibelyYAML;\n\t\t\t\t\t\tvar yamlFoldingEnabled = false;\n\t\t\t\t\t\tvar yamlFoldedLines = new Set();\n\t\t\t\t\t\tvar yamlSourceValue = yamlEditor ? yamlEditor.value : '';\n\t\t\t\t\t\tvar yamlVisibleLineMap = [];\n\t\t\t\t\t\tvar yamlRenderingValue = false;\n\t\t\t\t\t\tvar yamlPendingSelectionStart = 0;\n\t\t\t\t\t\tvar yamlPendingSelectionEnd = 0;\n\t\t\t\t\t\tvar yamlPendingValue = '';\n\t\t\t\t\t\tvar yamlPendingInputType = '';\n\t\t\t\t\t\tvar yamlParseTimer = 0;\t\t\t\t\tvar yamlParseRequest = 0;\n\t\t\t\t\tvar yamlLineLayoutFrame = 0;\n\t\t\t\t\t\tfunction yamlActiveScrollTop() { return yamlEditor ? yamlEditor.scrollTop : 0; }\n\t\t\t\t\t\tfunction restoreYAMLScrollTop(value) {\n\t\t\t\t\t\t\tif (!yamlEditor) return;\n\t\t\t\t\t\t\tyamlEditor.scrollTop = value;\n\t\t\t\t\t\t\tif (yamlViewport) yamlViewport.scrollTop = 0;\n\t\t\t\t\t\t\tsyncYAMLHighlightScroll();\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction scrollYAMLFromWheel(event) {\n\t\t\t\t\t\t\tif (!yamlEditor || !event.deltaY) return;\n\t\t\t\t\t\t\tvar scroller = yamlEditor;\n\t\t\t\t\t\t\tif (!scroller) return;\t\t\t\t\t\tvar delta = event.deltaY;\n\t\t\t\t\t\tif (event.deltaMode === WheelEvent.DOM_DELTA_LINE) delta *= 24;\n\t\t\t\t\t\tif (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) delta *= scroller.clientHeight;\n\t\t\t\t\t\tvar previousTop = scroller.scrollTop;\n\t\t\t\t\t\tscroller.scrollTop += delta;\n\t\t\t\t\t\tif (scroller.scrollTop !== previousTop) {\n\t\t\t\t\t\t\tif (scroller === yamlEditor) syncYAMLHighlightScroll();\n\t\t\t\t\t\t\telse {\n\t\t\t\t\t\t\t\tif (yamlLineNumbers) yamlLineNumbers.scrollTop = scroller.scrollTop;\n\t\t\t\t\t\t\t\tif (yamlFoldControls) yamlFoldControls.style.transform = 'translateY(' + (-scroller.scrollTop) + 'px)';\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tevent.preventDefault();\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t\t\tfunction automationYAMLValue() { return yamlFoldedLines.size > 0 ? yamlSourceValue : (yamlEditor ? yamlEditor.value : yamlSourceValue); }\n\t\t\t\t\t\tfunction setYAMLEditorDisplay(value) {\n\t\t\t\t\t\t\tif (!yamlEditor || yamlEditor.value === value) return;\n\t\t\t\t\t\t\tyamlRenderingValue = true;\n\t\t\t\t\t\t\tyamlEditor.value = value;\n\t\t\t\t\t\t\tyamlRenderingValue = false;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction escapeYAMLHTML(value) { return yamlShared.escapeHTML(value); }\n\t\t\t\t\t\tfunction yamlLineIndent(line) { return yamlShared.lineIndent(line); }\n\t\t\t\t\t\tfunction yamlFoldRanges(lines) {\n\t\t\t\t\t\t\tvar ranges = {};\t\t\t\t\t\tfor (var index = 0; index < lines.length; index++) {\n\t\t\t\t\t\t\tvar line = lines[index];\n\t\t\t\t\t\t\tif (!line.trim() || line.trim().charAt(0) === '#') continue;\n\t\t\t\t\t\t\tvar indent = yamlLineIndent(line), next = index + 1;\n\t\t\t\t\t\t\twhile (next < lines.length && (!lines[next].trim() || lines[next].trim().charAt(0) === '#')) next++;\n\t\t\t\t\t\t\tif (next >= lines.length || yamlLineIndent(lines[next]) <= indent) continue;\n\t\t\t\t\t\t\tvar end = next;\n\t\t\t\t\t\t\twhile (end + 1 < lines.length && (!lines[end + 1].trim() || lines[end + 1].trim().charAt(0) === '#' || yamlLineIndent(lines[end + 1]) > indent)) end++;\n\t\t\t\t\t\t\tranges[index] = end;\n\t\t\t\t\t\t}\n\t\t\t\t\t\t\treturn ranges;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction reconcileYAMLFolds(ranges) {\n\t\t\t\t\t\t\tArray.from(yamlFoldedLines).forEach(function(line) { if (ranges[line] === undefined) yamlFoldedLines.delete(line); });\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction yamlActiveRailInfo() {\n\t\t\t\t\t\t\tif (!yamlEditor || document.activeElement !== yamlEditor) return null;\n\t\t\t\t\t\t\treturn {line: yamlOffsetToLineCol(yamlEditor.value, yamlEditor.selectionStart).line + 1};\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction yamlRailColor(active) {\n\t\t\t\t\t\t\tif (!active) return 'oklch(var(--bc) / 0.3)';\n\t\t\t\t\t\t\tvar isDark = document.documentElement.getAttribute('data-theme') === 'dark';\n\t\t\t\t\t\t\treturn isDark ? 'rgba(212, 212, 212, 0.8)' : 'rgba(64, 64, 64, 0.6)';\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction yamlContinuousIndentationRails(lines, visibleLines, activeInfo) {\n\t\t\t\t\t\tvar rails = [], maxIndent = 0, candidates = [];\n\t\t\t\t\t\tvisibleLines.forEach(function(lineIndex) { maxIndent = Math.max(maxIndent, yamlLineIndent(lines[lineIndex])); });\n\t\t\t\t\t\t\tfor (var column = 0; column < maxIndent; column += 2) {\n\t\t\t\t\t\t\t\tvar startLine = 0, endLine = 0, startRow = 0, endRow = 0;\n\t\t\t\t\t\t\t\tvisibleLines.forEach(function(lineIndex, rowIndex) {\n\t\t\t\t\t\t\t\t\tvar line = lines[lineIndex], ignorable = !line.trim() || /^\\s*#/.test(line), continues = yamlLineIndent(line) > column || (startLine && ignorable);\n\t\t\t\t\t\t\t\t\tif (continues) {\n\t\t\t\t\t\t\t\t\t\tif (!startLine) startLine = lineIndex + 1;\n\t\t\t\t\t\t\t\t\t\tendLine = lineIndex + 1;\n\t\t\t\t\t\t\t\t\t\tif (!startRow) startRow = rowIndex + 1;\n\t\t\t\t\t\t\t\t\t\tendRow = rowIndex + 1;\n\t\t\t\t\t\t\t\t\t} else if (startLine) {\n\t\t\t\t\t\t\t\t\t\tcandidates.push({column: column, start: startLine, end: endLine, rowStart: startRow, rowEnd: endRow});\n\t\t\t\t\t\t\t\t\t\tstartLine = 0;\n\t\t\t\t\t\t\t\t\t\tstartRow = 0;\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\t\tif (startLine) candidates.push({column: column, start: startLine, end: endLine, rowStart: startRow, rowEnd: endRow});\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tvar activeCandidate = null;\n\t\t\t\t\t\t\tif (activeInfo) {\n\t\t\t\t\t\t\t\tcandidates.forEach(function(candidate) {\n\t\t\t\t\t\t\t\t\tvar withinGroup = activeInfo.line >= candidate.start && activeInfo.line <= candidate.end;\n\t\t\t\t\t\t\t\t\tvar onGroupHeader = activeInfo.line === candidate.start - 1;\n\t\t\t\t\t\t\t\t\tif ((withinGroup || onGroupHeader) && (!activeCandidate || candidate.column > activeCandidate.column)) activeCandidate = candidate;\n\t\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tcandidates.forEach(function(candidate) {\n\t\t\t\t\t\t\t\t\tvar color = yamlRailColor(candidate === activeCandidate);\n\t\t\t\t\t\t\t\t\trails.push('<span class=\"pointer-events-none absolute transition-colors\" style=\"left:calc(0.75rem + ' + candidate.column + 'ch);top:calc(' + (candidate.rowStart - 1) + ' * 1.5rem);height:calc(' + (candidate.rowEnd - candidate.rowStart + 1) + ' * 1.5rem);width:1px;z-index:20;background-color:' + color + '\" data-automation-yaml-indent-rail data-yaml-rail-start=\"' + candidate.start + '\" data-yaml-rail-end=\"' + candidate.end + '\" data-yaml-rail-column=\"' + candidate.column + '\" aria-hidden=\"true\"></span>');\n\t\t\t\t\t\t\t\t});\n\t\t\t\t\t\treturn rails.join('');\n\t\t\t\t\t}\n\t\t\t\t\t\tfunction updateYAMLActiveRail() {\n\t\t\t\t\t\t\tif (!yamlHighlight || !yamlEditor) return;\n\t\t\t\t\t\t\tvar rails = yamlHighlight.querySelectorAll('[data-automation-yaml-indent-rail]');\n\t\t\t\t\t\t\tif (!rails.length) return;\n\t\t\t\t\t\t\tvar activeInfo = yamlActiveRailInfo();\n\t\t\t\t\t\t\tvar active = null;\n\t\t\t\t\t\t\trails.forEach(function(rail) {\n\t\t\t\t\t\t\t\tvar start = Number(rail.dataset.yamlRailStart), end = Number(rail.dataset.yamlRailEnd), column = Number(rail.dataset.yamlRailColumn);\n\t\t\t\t\t\t\t\tvar withinGroup = activeInfo && activeInfo.line >= start && activeInfo.line <= end;\n\t\t\t\t\t\t\t\tvar onGroupHeader = activeInfo && activeInfo.line === start - 1;\n\t\t\t\t\t\t\t\tif (activeInfo && (withinGroup || onGroupHeader) && (!active || column > Number(active.dataset.yamlRailColumn))) active = rail;\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\trails.forEach(function(rail) { rail.style.backgroundColor = yamlRailColor(rail === active); });\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction layoutYAMLIndentationRails() {\n\t\t\t\t\t\tif (!yamlHighlight) return;\n\t\t\t\t\t\tyamlHighlight.querySelectorAll('[data-automation-yaml-indent-rail]').forEach(function(rail) {\n\t\t\t\t\t\t\tvar start = yamlHighlight.querySelector('[data-automation-yaml-highlight-line][data-yaml-line=\"' + rail.dataset.yamlRailStart + '\"]');\n\t\t\t\t\t\t\tvar end = yamlHighlight.querySelector('[data-automation-yaml-highlight-line][data-yaml-line=\"' + rail.dataset.yamlRailEnd + '\"]');\n\t\t\t\t\t\t\tif (!start || !end) return;\n\t\t\t\t\t\t\trail.style.top = start.offsetTop + 'px';\n\t\t\t\t\t\t\trail.style.height = Math.max(0, end.offsetTop + end.offsetHeight - start.offsetTop) + 'px';\n\t\t\t\t\t\t});\n\t\t\t\t\t}\n\t\t\t\t\tfunction layoutYAMLLines() {\n\t\t\t\t\t\tyamlLineLayoutFrame = 0;\n\t\t\t\t\t\tif (!yamlLineNumbers || !yamlFoldControls || !yamlHighlight || !yamlViewport || !yamlViewport.clientWidth) return;\n\t\t\t\t\t\tvar lineNumberRows = yamlLineNumbers.querySelectorAll('[data-automation-yaml-line-number]');\n\t\t\t\t\t\tlineNumberRows.forEach(function(lineNumberRow) {\n\t\t\t\t\t\t\tvar sourceLine = lineNumberRow.dataset.yamlLine;\n\t\t\t\t\t\t\tvar highlightLine = yamlHighlight.querySelector('[data-automation-yaml-highlight-line][data-yaml-line=\"' + sourceLine + '\"]');\n\t\t\t\t\t\t\tif (!highlightLine) return;\n\t\t\t\t\t\t\tlineNumberRow.style.height = Math.ceil(highlightLine.getBoundingClientRect().height) + 'px';\n\t\t\t\t\t\t\tvar control = yamlFoldControls.querySelector('[data-yaml-line=\"' + sourceLine + '\"]');\n\t\t\t\t\t\t\tif (control) control.style.top = highlightLine.offsetTop + 'px';\n\t\t\t\t\t\t});\n\t\t\t\t\t\tlayoutYAMLIndentationRails();\n\t\t\t\t\t}\n\t\t\t\t\tfunction queueYAMLLineLayout() {\n\t\t\t\t\t\tif (yamlLineLayoutFrame) cancelAnimationFrame(yamlLineLayoutFrame);\n\t\t\t\t\t\tyamlLineLayoutFrame = requestAnimationFrame(layoutYAMLLines);\n\t\t\t\t\t}\n\t\t\t\t\t\tfunction updateYAMLLineNumbers() {\n\t\t\t\t\t\t\tif (!yamlEditor || !yamlLineNumbers || !yamlFoldControls || !yamlHighlight) return;\nvar lines = yamlSourceValue.split('\\n'), ranges = yamlFoldRanges(lines), highlighted = [], lineNumbers = [], controls = [], visibleLines = [], displayLines = [], index = 0;\n\t\t\t\t\t\t\treconcileYAMLFolds(ranges);\n\t\t\t\t\t\t\tvar folded = yamlFoldedLines.size > 0;\n\t\t\t\t\t\t\twhile (index < lines.length) {\t\t\t\t\t\t\tvar foldEnd = ranges[index], canFold = foldEnd !== undefined, isFolded = yamlFoldedLines.has(index), indent = yamlLineIndent(lines[index]);\n\t\t\t\t\t\t\tvisibleLines.push(index);\n\t\t\t\t\t\t\tdisplayLines.push(lines[index]);\n\t\t\t\t\t\t\tlineNumbers.push('<span class=\"block min-h-6\" data-automation-yaml-line-number data-yaml-line=\"' + (index + 1) + '\">' + (index + 1) + '</span>');\t\t\t\t\t\t\t\tif (canFold && yamlFoldingEnabled) {\n\t\t\t\t\t\t\t\t\tvar visibilityClass = isFolded ? '' : ' opacity-0 group-hover:opacity-100 focus-visible:opacity-100';\n\t\t\t\t\t\t\t\t\tcontrols.push('<button class=\"pointer-events-auto absolute right-1 inline-flex h-6 w-6 items-center justify-center rounded bg-transparent p-0 text-base-content/60 transition-opacity hover:bg-transparent hover:text-base-content/60 focus-visible:bg-transparent focus-visible:text-base-content/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary' + visibilityClass + '\" style=\"top:0\" type=\"button\" data-automation-yaml-fold data-yaml-line=\"' + (index + 1) + '\" data-yaml-indent=\"' + indent + '\" aria-label=\"' + (isFolded ? 'Expand' : 'Collapse') + ' YAML section starting on line ' + (index + 1) + '\"><svg class=\"h-5 w-5 transition-transform' + (isFolded ? ' -rotate-90' : '') + '\" viewBox=\"0 0 20 20\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M5 7.5 10 12.5 15 7.5\"></path></svg></button>');\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\thighlighted.push(yamlShared.renderLineSpan(lines[index], index + 1, {diagnosticLine: yamlDiagnosticLine, folded: isFolded}));\t\t\t\t\t\t\t\tif (isFolded) index = foldEnd + 1; else index++;\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tyamlHighlight.innerHTML = yamlContinuousIndentationRails(lines, visibleLines, yamlActiveRailInfo()) + highlighted.join('');\n\t\t\t\t\t\t\tyamlLineNumbers.innerHTML = lineNumbers.join('');\n\t\t\t\t\t\t\tyamlFoldControls.innerHTML = controls.join('');\n\t\t\t\t\t\t\tyamlVisibleLineMap = visibleLines.slice();\n\t\t\t\t\t\t\tif (folded) {\n\t\t\t\t\t\t\t\tyamlEditor.hidden = false;\n\t\t\t\t\t\t\t\tsetYAMLEditorDisplay(displayLines.join('\\n'));\n\t\t\t\t\t\t\t\tyamlHighlight.classList.remove('absolute', 'left-0', 'right-0', 'top-0', 'min-h-full');\n\t\t\t\t\t\t\t\tyamlHighlight.classList.add('min-h-full');\n\t\t\t\t\t\t\t\tyamlHighlight.style.transform = '';\n\t\t\t\t\t\t\t\tyamlFoldControls.style.transform = '';\n\t\t\t\t\t\t\t\tif (yamlViewport) {\nyamlViewport.classList.remove('overflow-hidden');\n\t\t\t\t\t\t\t\t\t\tyamlViewport.classList.add('overflow-y-auto', 'overflow-x-hidden');\n\t\t\t\t\t\t\t\t\t\tyamlViewport.tabIndex = 0;\n\t\t\t\t\t\t\t\t\t\tyamlViewport.setAttribute('aria-label', 'Collapsed YAML source');\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\tyamlEditor.hidden = false;\n\t\t\t\t\t\t\t\tsetYAMLEditorDisplay(yamlSourceValue);\n\t\t\t\t\t\t\t\tyamlVisibleLineMap = [];\n\t\t\t\t\t\t\t\tyamlHighlight.classList.add('absolute', 'left-0', 'right-0', 'top-0', 'min-h-full');\n\t\t\t\t\t\t\t\tif (yamlViewport) {\nyamlViewport.scrollTop = 0;\n\t\t\t\t\t\t\t\t\t\tyamlViewport.classList.remove('overflow-y-auto', 'overflow-x-hidden');\n\t\t\t\t\t\t\t\t\t\tyamlViewport.classList.add('overflow-hidden');\n\t\t\t\t\t\t\t\t\t\tyamlViewport.tabIndex = -1;\t\t\t\t\t\t\t\t\tyamlViewport.removeAttribute('aria-label');\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tsyncYAMLHighlightScroll();\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tqueueYAMLLineLayout();\n\t\t\t\t\t\t\tupdateYAMLActiveRail();\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction yamlOffsetToLineCol(text, offset) {\n\t\t\t\t\t\t\tvar prefix = text.slice(0, offset).split('\\n');\n\t\t\t\t\t\t\treturn {line: prefix.length - 1, col: prefix[prefix.length - 1].length};\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction yamlLineColToSourceOffset(sourceLines, sourceLineIndex, col) {\n\t\t\t\t\t\t\tvar offset = 0;\n\t\t\t\t\t\t\tfor (var i = 0; i < sourceLineIndex; i++) offset += sourceLines[i].length + 1;\n\t\t\t\t\t\t\treturn offset + col;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction syncYAMLHighlightScroll() {\n\t\t\t\t\t\t\tif (!yamlEditor) return;\n\t\t\t\t\t\t\tif (yamlHighlight) yamlHighlight.style.transform = 'translate(' + (-yamlEditor.scrollLeft) + 'px, ' + (-yamlEditor.scrollTop) + 'px)';\n\t\t\t\t\t\t\tif (yamlFoldControls) yamlFoldControls.style.transform = 'translateY(' + (-yamlEditor.scrollTop) + 'px)';\n\t\t\t\t\t\t\tif (yamlLineNumbers) yamlLineNumbers.scrollTop = yamlEditor.scrollTop;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction showYAMLDiagnostic(message) {\t\t\t\t\t\tvar match = String(message || '').match(/line\\s+(\\d+)/i);\n\t\t\t\t\t\tyamlDiagnosticLine = match ? Number(match[1]) : 0;\n\t\t\t\t\t\tif (yamlDiagnostic) {\n\t\t\t\t\t\t\tyamlDiagnostic.textContent = message || '';\n\t\t\t\t\t\t\tyamlDiagnostic.classList.toggle('hidden', !message);\n\t\t\t\t\t\t}\n\t\t\t\t\t\tupdateYAMLLineNumbers();\n\t\t\t\t\t}\n\t\t\t\t\tfunction validateYAMLWhileTyping() {\n\t\t\t\t\t\tif (!yamlEditor || !yamlEditor.dataset.automationYamlParseUrl) return;\n\t\t\t\t\t\tvar request = ++yamlParseRequest;\n\t\t\t\t\t\twindow.clearTimeout(yamlParseTimer);\n\t\t\t\t\t\tyamlParseTimer = window.setTimeout(function() {\n\t\t\t\t\t\t\tfetch(yamlEditor.dataset.automationYamlParseUrl, {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: new URLSearchParams({automation_yaml: automationYAMLValue()})})\n\t\t\t\t\t\t\t\t.then(function(response) { return response.ok ? response.json() : Promise.reject(new Error('YAML validation is unavailable.')); })\n\t\t\t\t\t\t\t\t.then(function(result) { if (request === yamlParseRequest) showYAMLDiagnostic(result.valid ? '' : result.message); })\n\t\t\t\t\t\t\t\t.catch(function(error) { if (request === yamlParseRequest) showYAMLDiagnostic(error.message); });\n\t\t\t\t\t\t}, 300);\n\t\t\t\t\t}\n\t\t\t\t\tfunction validateYAMLNow() {\n\t\t\t\t\t\tif (!yamlEditor || !yamlEditor.dataset.automationYamlParseUrl) return;\n\t\t\t\t\t\tvar request = ++yamlParseRequest;\n\t\t\t\t\t\twindow.clearTimeout(yamlParseTimer);\n\t\t\t\t\t\tfetch(yamlEditor.dataset.automationYamlParseUrl, {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: new URLSearchParams({automation_yaml: automationYAMLValue()})})\n\t\t\t\t\t\t\t.then(function(response) { return response.ok ? response.json() : Promise.reject(new Error('YAML validation is unavailable.')); })\n\t\t\t\t\t\t\t.then(function(result) { if (request === yamlParseRequest) showYAMLDiagnostic(result.valid ? '' : result.message); })\n\t\t\t\t\t\t\t.catch(function(error) { if (request === yamlParseRequest) showYAMLDiagnostic(error.message); });\n\t\t\t\t\t}\n\t\t\t\t\tif (yamlEditor) {\n\t\t\t\t\t\tyamlEditor.addEventListener('scroll', syncYAMLHighlightScroll);\n\t\t\t\t\t\t\tyamlEditor.addEventListener('keydown', function(event) {\n\t\t\t\t\t\t\t\tif (event.key !== 'Tab' || event.altKey || event.metaKey || event.ctrlKey) return;\n\t\t\t\t\t\t\t\tevent.preventDefault();\n\t\t\t\t\t\t\t\tvar value = yamlEditor.value;\n\t\t\t\t\t\t\t\tvar start = yamlEditor.selectionStart, end = yamlEditor.selectionEnd;\n\t\t\t\t\t\t\t\tyamlPendingValue = value;\n\t\t\t\t\t\t\t\tif (event.shiftKey) {\n\t\t\t\t\t\t\t\t\tvar lineStart = value.lastIndexOf('\\n', start - 1) + 1;\n\t\t\t\t\t\t\t\t\tvar removable = 0;\n\t\t\t\t\t\t\t\t\twhile (removable < 2 && value.charAt(lineStart + removable) === ' ') removable++;\n\t\t\t\t\t\t\t\t\tif (removable === 0) return;\n\t\t\t\t\t\t\t\t\tyamlPendingSelectionStart = start;\n\t\t\t\t\t\t\t\t\tyamlPendingSelectionEnd = end;\n\t\t\t\t\t\t\t\t\tyamlPendingInputType = 'deleteContentBackward';\n\t\t\t\t\t\t\t\t\tyamlEditor.setRangeText('', lineStart, lineStart + removable, 'preserve');\n\t\t\t\t\t\t\t\t\tyamlEditor.selectionStart = Math.max(lineStart, start - removable);\n\t\t\t\t\t\t\t\t\tyamlEditor.selectionEnd = Math.max(lineStart, end - removable);\n\t\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\t\tyamlPendingSelectionStart = start;\n\t\t\t\t\t\t\t\t\tyamlPendingSelectionEnd = end;\n\t\t\t\t\t\t\t\t\tyamlPendingInputType = 'insertText';\n\t\t\t\t\t\t\t\t\tyamlEditor.setRangeText('  ', start, end, 'end');\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tyamlEditor.dispatchEvent(new Event('input', {bubbles: true}));\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\tyamlEditor.addEventListener('beforeinput', function(event) {\n\t\t\t\t\t\t\t\tif (yamlRenderingValue) return;\n\t\t\t\t\t\t\t\tyamlPendingSelectionStart = yamlEditor.selectionStart;\n\t\t\t\t\t\t\t\tyamlPendingSelectionEnd = yamlEditor.selectionEnd;\n\t\t\t\t\t\t\t\tyamlPendingValue = yamlEditor.value;\n\t\t\t\t\t\t\t\tyamlPendingInputType = event && event.inputType ? event.inputType : '';\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\tyamlEditor.addEventListener('input', function() {\n\t\t\t\t\t\t\t\tif (yamlRenderingValue) return;\n\t\t\t\t\t\t\t\tif (yamlFoldedLines.size === 0) {\n\t\t\t\t\t\t\t\t\tyamlSourceValue = yamlEditor.value;\n\t\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\t\tvar oldSourceLines = yamlSourceValue.split('\\n');\n\t\t\t\t\t\t\t\t\tvar newVisibleValue = yamlEditor.value;\n\t\t\t\t\t\t\t\t\tvar preEditVisibleValue = yamlPendingValue || newVisibleValue;\n\t\t\t\t\t\t\t\t\tvar preEditStart = yamlOffsetToLineCol(preEditVisibleValue, yamlPendingSelectionStart);\n\t\t\t\t\t\t\t\t\tvar preEditEnd = yamlOffsetToLineCol(preEditVisibleValue, yamlPendingSelectionEnd);\n\t\t\t\t\t\t\t\t\tvar postEditOffset = yamlEditor.selectionStart;\n\t\t\t\t\t\t\t\t\tvar startVisibleLine = Math.min(preEditStart.line, yamlVisibleLineMap.length - 1);\n\t\t\t\t\t\t\t\t\tvar endVisibleLine = Math.min(preEditEnd.line, yamlVisibleLineMap.length - 1);\n\t\t\t\t\t\t\t\t\tif (startVisibleLine < 0 || endVisibleLine < 0 || !yamlVisibleLineMap.length) {\n\t\t\t\t\t\t\t\t\t\tyamlSourceValue = newVisibleValue;\n\t\t\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\t\t\tvar sourceStartLine = yamlVisibleLineMap[startVisibleLine];\n\t\t\t\t\t\t\t\t\t\tvar sourceEndLine = yamlVisibleLineMap[endVisibleLine];\n\t\t\t\t\t\t\t\t\t\tvar sourceStartOffset = yamlLineColToSourceOffset(oldSourceLines, sourceStartLine, preEditStart.col);\n\t\t\t\t\t\t\t\t\t\tvar sourceEndOffset = yamlLineColToSourceOffset(oldSourceLines, sourceEndLine, preEditEnd.col);\n\t\t\t\t\t\t\t\t\t\tvar collapsedDeletion = preEditStart.line === preEditEnd.line && preEditStart.col === preEditEnd.col && newVisibleValue.length < preEditVisibleValue.length;\n\t\t\t\t\t\t\t\t\t\tif (collapsedDeletion) {\n\t\t\t\t\t\t\t\t\t\t\tvar removedLength = preEditVisibleValue.length - newVisibleValue.length;\n\t\t\t\t\t\t\t\t\t\t\tvar sourceLineText = oldSourceLines[sourceStartLine] || '';\n\t\t\t\t\t\t\t\t\t\t\tif (yamlPendingInputType === 'deleteContentForward') {\n\t\t\t\t\t\t\t\t\t\t\t\tvar nextVisibleSourceLine = yamlVisibleLineMap[startVisibleLine + 1];\n\t\t\t\t\t\t\t\t\t\t\t\tvar atFoldBoundaryForward = preEditStart.col === sourceLineText.length && nextVisibleSourceLine !== undefined && nextVisibleSourceLine !== sourceStartLine + 1;\n\t\t\t\t\t\t\t\t\t\t\t\tif (atFoldBoundaryForward) {\n\t\t\t\t\t\t\t\t\t\t\t\t\tvar forwardBoundaryOffset = yamlLineColToSourceOffset(oldSourceLines, nextVisibleSourceLine, 0) - 1;\n\t\t\t\t\t\t\t\t\t\t\t\t\tsourceStartOffset = forwardBoundaryOffset;\n\t\t\t\t\t\t\t\t\t\t\t\t\tsourceEndOffset = forwardBoundaryOffset + removedLength;\n\t\t\t\t\t\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\t\t\t\t\t\tsourceEndOffset = sourceStartOffset + removedLength;\n\t\t\t\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\t\t\t\t\tvar prevVisibleSourceLine = startVisibleLine > 0 ? yamlVisibleLineMap[startVisibleLine - 1] : undefined;\n\t\t\t\t\t\t\t\t\t\t\t\tvar atFoldBoundaryBackward = preEditStart.col === 0 && startVisibleLine > 0 && prevVisibleSourceLine !== sourceStartLine - 1;\n\t\t\t\t\t\t\t\t\t\t\t\tif (atFoldBoundaryBackward) {\n\t\t\t\t\t\t\t\t\t\t\t\t\tvar backwardBoundaryOffset = yamlLineColToSourceOffset(oldSourceLines, sourceStartLine, 0) - 1;\n\t\t\t\t\t\t\t\t\t\t\t\t\tsourceStartOffset = Math.max(0, backwardBoundaryOffset);\n\t\t\t\t\t\t\t\t\t\t\t\t\tsourceEndOffset = sourceStartOffset + removedLength;\n\t\t\t\t\t\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\t\t\t\t\t\tsourceStartOffset = Math.max(0, sourceStartOffset - removedLength);\n\t\t\t\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t\tyamlSourceValue = yamlSourceValue.slice(0, sourceStartOffset) + yamlSourceValue.slice(sourceEndOffset);\n\t\t\t\t\t\t\t\t\t} else {\t\t\t\t\t\t\t\t\t\t\tvar visibleEditStartOffset = 0;\n\t\t\t\t\t\t\t\t\t\t\tfor (var k = 0; k < startVisibleLine; k++) visibleEditStartOffset += (yamlVisibleLineMap[k] !== undefined ? oldSourceLines[yamlVisibleLineMap[k]].length : 0) + 1;\n\t\t\t\t\t\t\t\t\t\t\tvisibleEditStartOffset += preEditStart.col;\n\t\t\t\t\t\t\t\t\t\t\tvar insertedText = newVisibleValue.slice(visibleEditStartOffset, postEditOffset);\n\t\t\t\t\t\t\t\t\t\t\tyamlSourceValue = yamlSourceValue.slice(0, sourceStartOffset) + insertedText + yamlSourceValue.slice(sourceEndOffset);\n\t\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tupdateYAMLLineNumbers();\n\t\t\t\t\t\t\t\tvalidateYAMLWhileTyping();\n\t\t\t\t\t\t\t\t});\t\t\t\t\t\tupdateYAMLLineNumbers();\n\t\t\t\t\t\tvalidateYAMLWhileTyping();\n\t\t\t\t\t\tyamlEditor.addEventListener('mousedown', function() { window.requestAnimationFrame(updateYAMLActiveRail); });\n\t\t\t\t\t\tyamlEditor.addEventListener('keyup', updateYAMLActiveRail);\n\t\t\t\t\t\tyamlEditor.addEventListener('input', updateYAMLActiveRail);\n\t\t\t\t\t\tyamlEditor.addEventListener('focus', updateYAMLActiveRail);\n\t\t\t\t\t\tyamlEditor.addEventListener('blur', updateYAMLActiveRail);\n\t\t\t\t\t}\t\t\t\t\tif (yamlFoldControls) yamlFoldControls.addEventListener('click', function(event) {\n\t\t\t\t\t\tvar toggle = event.target.closest('[data-automation-yaml-fold]');\n\t\t\t\t\t\tif (!toggle) return;\n\t\t\t\t\t\tvar line = Number(toggle.dataset.yamlLine) - 1;\n\t\t\t\t\t\tvar scrollTop = yamlActiveScrollTop();\n\t\t\t\t\t\tif (yamlFoldedLines.has(line)) yamlFoldedLines.delete(line); else yamlFoldedLines.add(line);\n\t\t\t\t\t\tif (yamlEditor) yamlEditor.blur();\n\t\t\t\t\t\tupdateYAMLLineNumbers();\n\t\t\t\t\t\trestoreYAMLScrollTop(scrollTop);\n\t\t\t\t\t});\n\t\t\t\t\t\tif (yamlViewport) yamlViewport.addEventListener('scroll', function() {\n\t\t\t\t\t\t\tif (!yamlEditor || !yamlEditor.hidden) return;\n\t\t\t\t\t\t\tif (yamlLineNumbers) yamlLineNumbers.scrollTop = yamlViewport.scrollTop;\n\t\t\t\t\t\t\tif (yamlFoldControls) yamlFoldControls.style.transform = 'translateY(' + (-yamlViewport.scrollTop) + 'px)';\n\t\t\t\t\t\t});\n\t\t\t\t\t\tif (yamlViewport) yamlViewport.addEventListener('wheel', function(event) {\n\t\t\t\t\t\t\tif (!yamlEditor || !yamlEditor.hidden) return;\n\t\t\t\t\t\t\tscrollYAMLFromWheel(event);\n\t\t\t\t\t\t}, {passive: false});\n\t\t\t\t\t\tif (yamlGutter) yamlGutter.addEventListener('wheel', scrollYAMLFromWheel, {passive: false});\n\t\t\t\t\t\twindow.addEventListener('resize', queueYAMLLineLayout);\t\t\t\t\tfunction syncCandidate(writeYAML) {\n\t\t\t\t\t\tvar automationName = builder.querySelector('[data-automation-name]');\n\t\t\t\t\t\tvar automationNameValue = automationName ? automationName.value : '';\n\t\t\t\t\t\tif (automationName) candidate.name = automationNameValue;\n\t\t\t\t\t\tbuilder.querySelectorAll('[data-automation-details-name]').forEach(function(input) { input.value = automationNameValue; });\n\t\t\t\t\t\tbuilder.querySelectorAll('[data-candidate-json]').forEach(function(input) { input.value = JSON.stringify(candidate); });\n\t\t\t\t\t\tif (writeYAML !== false) {\n\t\t\t\t\t\t\tvar serializedYAML = visualCandidateYAML();\n\t\t\t\t\t\t\t\tif (yamlEditor) {\n\t\t\t\t\t\t\t\t\tyamlSourceValue = serializedYAML;\n\t\t\t\t\t\t\t\t\tyamlFoldedLines.clear();\n\t\t\t\t\t\t\t\t\tsetYAMLEditorDisplay(serializedYAML);\n\t\t\t\t\t\t\t\t\tupdateYAMLLineNumbers();\n\t\t\t\t\t\t\t\t}\t\t\t\t\t\t\tbuilder.querySelectorAll('[data-automation-yaml-submission]').forEach(function(input) { input.value = serializedYAML; });\n\t\t\t\t\t\t}\n\t\t\t\t\t}\t\t\t\t\tfunction applyViewBox() { svg.setAttribute('viewBox', viewBox.join(' ')); }\n\t\t\t\tfunction graphPoint(event) {\n\t\t\t\t\tvar point = svg.createSVGPoint();\n\t\t\t\t\tpoint.x = event.clientX;\n\t\t\t\t\tpoint.y = event.clientY;\n\t\t\t\t\treturn point.matrixTransform(svg.getScreenCTM().inverse());\n\t\t\t\t}\n\t\t\t\tfunction renderNode(group, x, y) {\n\t\t\t\t\tgroup.dataset.nodeX = String(x);\n\t\t\t\t\tgroup.dataset.nodeY = String(y);\n\t\t\t\t\tgroup.setAttribute('transform', 'translate(' + x + ' ' + y + ')');\n\t\t\t\t\tvar node = nodeCandidate(group.dataset.nodeKey);\n\t\t\t\t\tif (node) node.position = {x: x, y: y};\n\t\t\t\t}\n\t\t\t\t\tfunction edgePoints(edge) {\n\t\t\t\t\t\tvar from = nodeGroup(edge.from), to = nodeGroup(edge.to); if (!from || !to) return null;\n\t\t\t\t\t\treturn {start: nodePortPoint(edge.from, 'right'), finish: nodePortPoint(edge.to, 'left')};\n\t\t\t\t\t}\n\t\t\t\t\tfunction setEdgeLine(line, points) { line.setAttribute('x1', points.start.x); line.setAttribute('y1', points.start.y); line.setAttribute('x2', points.finish.x); line.setAttribute('y2', points.finish.y); }\n\t\t\t\t\tfunction renderEdge(group) {\n\t\t\t\t\t\tvar edge = edgeCandidate(group.dataset.edgeKey), points = edge && edgePoints(edge); if (!edge || !points) return;\n\t\t\t\t\t\tgroup.dataset.from = edge.from; group.dataset.to = edge.to;\n\t\t\t\t\t\tgroup.querySelectorAll('[data-edge-hit]').forEach(function(line) { setEdgeLine(line, points); });\n\t\t\t\t\t\t\tvar foreground = foregroundEdge(edge.key); if (foreground) setEdgeLine(foreground, points);\n\t\t\t\t\t\t\tvar controls = edgeControls(edge.key); if (!controls) return;\n\t\t\t\t\t\t\tvar start = controls.querySelector('[data-edge-endpoint=\"from\"]'), finish = controls.querySelector('[data-edge-endpoint=\"to\"]');\n\t\t\t\t\t\t\tstart.setAttribute('cx', points.start.x); start.setAttribute('cy', points.start.y); finish.setAttribute('cx', points.finish.x); finish.setAttribute('cy', points.finish.y);\n\t\t\t\t\t\t\tcontrols.querySelector('[data-delete-edge]').setAttribute('transform', 'translate(' + ((points.start.x + points.finish.x) / 2) + ' ' + ((points.start.y + points.finish.y) / 2) + ')');\t\t\t\t\t}\n\t\t\t\t\tfunction renderEdges() { svg.querySelectorAll('.automation-draft-edge').forEach(renderEdge); }\n\t\t\t\t\tfunction connectionExists(from, to, exceptKey) { return (candidate.edges || []).some(function(edge) { return edge.key !== exceptKey && edge.from === from && edge.to === to; }); }\n\t\t\t\t\tfunction safeKey(value, fallback) {\n\t\t\t\t\tvar key = String(value || '').toLowerCase().trim().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 80).replace(/_+$/g, '');\n\t\t\t\t\treturn key || fallback;\n\t\t\t\t}\n\t\t\t\t\tfunction uniqueEdgeKey(base, exceptKey) {\n\t\t\t\t\t\tvar keys = new Set((candidate.edges || []).filter(function(edge) { return edge.key !== exceptKey; }).map(function(edge) { return edge.key; }));\n\t\t\t\t\t\tif (!keys.has(base)) return base;\n\t\t\t\t\t\tfor (var suffix = 2; ; suffix++) if (!keys.has(base + '_' + suffix)) return base + '_' + suffix;\n\t\t\t\t\t}\n\t\t\t\t\tfunction svgElement(name, attributes) { var element = document.createElementNS('http://www.w3.org/2000/svg', name); Object.keys(attributes || {}).forEach(function(key) { element.setAttribute(key, attributes[key]); }); return element; }\n\t\t\t\t\t\tfunction appendEdgeGroup(edge) {\n\t\t\t\t\t\t\tvar group = svgElement('g', {class: 'automation-draft-edge', tabindex: '0', role: 'group', 'aria-label': nodeName(edge.from) + ' to ' + nodeName(edge.to) + ' connection'}); group.dataset.edgeKey = edge.key; group.dataset.from = edge.from; group.dataset.to = edge.to;\n\t\t\t\t\t\t\tgroup.appendChild(svgElement('line', {class: 'automation-edge-hit', 'data-edge-hit': ''}));\n\t\t\t\t\t\t\tvar controls = svgElement('g', {class: 'automation-edge-controls', 'data-edge-controls': '', 'data-edge-key': edge.key});\n\t\t\t\t\t\t\t['from', 'to'].forEach(function(endpoint) { controls.appendChild(svgElement('circle', {r: '7', class: 'automation-edge-endpoint', tabindex: '0', role: 'button', 'data-reconnect-edge': '', 'data-edge-endpoint': endpoint, 'aria-label': 'Reconnect connection ' + (endpoint === 'from' ? 'start' : 'end')})); });\n\t\t\t\t\t\t\tvar remove = svgElement('g', {class: 'automation-edge-delete', tabindex: '0', role: 'button', 'data-delete-edge': '', 'aria-label': 'Delete connection'}); remove.appendChild(svgElement('circle', {r: '11'})); remove.appendChild(svgElement('path', {d: 'M-4 -4 L4 4 M4 -4 L-4 4', class: 'automation-delete-x'})); controls.appendChild(remove);\n\t\t\t\t\t\t\tvar foreground = svgElement('line', {class: 'automation-graph-edge automation-edge-foreground', 'stroke-width': '2', 'marker-end': 'url(#automation-draft-arrow)', 'data-edge-foreground': '', 'data-edge-key': edge.key});\n\t\t\t\t\t\t\tsvg.insertBefore(group, svg.querySelector('.automation-draft-node')); svg.insertBefore(foreground, preview); svg.appendChild(controls); bindEdgeGroup(group); renderEdge(group);\n\t\t\t\t\t\t}\t\t\t\t\tfunction canonicalEdge(from, to, exceptKey) { return edgePalette.find(function(edge) { return edge.from === from && edge.to === to && !(candidate.edges || []).some(function(current) { return current.key !== exceptKey && current.key === edge.key; }); }); }\n\t\t\t\t\tfunction addConnection(from, to) {\n\t\t\t\t\t\tif (!from || !to || from === to) { if (connectStatus) connectStatus.textContent = 'Connect two different nodes.'; return; }\n\t\t\t\t\t\tif (connectionExists(from, to, '')) { if (connectStatus) connectStatus.textContent = 'Those nodes are already connected in that direction.'; return; }\n\t\t\t\t\t\tcandidate.edges = candidate.edges || [];\n\t\t\t\t\t\tvar canonical = canonicalEdge(from, to, '');\n\t\t\t\t\t\tvar edge = canonical ? JSON.parse(JSON.stringify(canonical)) : {key: uniqueEdgeKey('edge_' + safeKey(from, 'source') + '_' + safeKey(to, 'target'), ''), from: from, to: to, label: '', condition: {}};\n\t\t\t\t\t\tedge.from_port = 'right'; edge.to_port = 'left'; candidate.edges.push(edge);\n\t\t\t\t\t\tappendEdgeGroup(edge); syncCandidate();\n\t\t\t\t\t\tif (connectStatus) connectStatus.textContent = 'Connected ' + nodeName(from) + ' to ' + nodeName(to) + '. Select a line to rewire or delete it.';\n\t\t\t\t\t}\n\t\t\t\t\tfunction reconnectEdge(key, endpoint, nodeKey) {\n\t\t\t\t\t\tvar edge = edgeCandidate(key); if (!edge) return; var from = endpoint === 'from' ? nodeKey : edge.from; var to = endpoint === 'to' ? nodeKey : edge.to;\n\t\t\t\t\t\tif (!from || !to || from === to || connectionExists(from, to, key)) { if (connectStatus) connectStatus.textContent = 'That reconnection would duplicate or loop back to the same node.'; return; }\n\t\t\t\t\t\tvar oldKey = edge.key, canonical = canonicalEdge(from, to, oldKey); edge.from = from; edge.to = to; edge.from_port = 'right'; edge.to_port = 'left';\n\t\t\t\t\t\tif (canonical) { edge.key = canonical.key; edge.label = canonical.label || ''; edge.condition = canonical.condition || {}; } else if (edgePalette.some(function(item) { return item.key === edge.key; })) { edge.key = uniqueEdgeKey('edge_' + safeKey(from, 'source') + '_' + safeKey(to, 'target'), oldKey); edge.condition = {}; }\n\t\t\t\t\t\t\tvar group = svg.querySelector('.automation-draft-edge[data-edge-key=\"' + CSS.escape(oldKey) + '\"]');\n\t\t\t\t\t\t\tvar foreground = foregroundEdge(oldKey); if (foreground) foreground.dataset.edgeKey = edge.key;\n\t\t\t\t\t\t\tvar controls = edgeControls(oldKey); if (controls) controls.dataset.edgeKey = edge.key;\n\t\t\t\t\t\t\tif (group) { group.dataset.edgeKey = edge.key; renderEdge(group); } syncCandidate(); if (connectStatus) connectStatus.textContent = 'Reconnected ' + nodeName(from) + ' to ' + nodeName(to) + '.';\t\t\t\t\t}\n\t\t\t\t\tfunction removeEdge(key) {\n\t\t\t\t\t\tcandidate.edges = (candidate.edges || []).filter(function(edge) { return edge.key !== key; });\n\t\t\t\t\t\t\tvar group = svg.querySelector('.automation-draft-edge[data-edge-key=\"' + CSS.escape(key) + '\"]'); if (group) group.remove();\n\t\t\t\t\t\t\tvar foreground = foregroundEdge(key); if (foreground) foreground.remove();\n\t\t\t\t\t\t\tvar controls = edgeControls(key); if (controls) controls.remove();\t\t\t\t\t\tif (selectedEdgeKey === key) selectEdge(null);\n\t\t\t\t\t\tsyncCandidate(); if (connectStatus) connectStatus.textContent = 'Connection disconnected. Draw a new one from a right handle to a left handle.';\n\t\t\t\t\t}\n\t\t\t\t\tfunction removeNode(key) { var name = nodeName(key); candidate.nodes = (candidate.nodes || []).filter(function(node) { return node.key !== key; }); candidate.edges = (candidate.edges || []).filter(function(edge) { return edge.from !== key && edge.to !== key; }); var group = nodeGroup(key); if (group) group.remove(); svg.querySelectorAll('.automation-draft-edge').forEach(function(edgeGroup) { if (!edgeCandidate(edgeGroup.dataset.edgeKey)) edgeGroup.remove(); }); svg.querySelectorAll('[data-edge-foreground]').forEach(function(edgeLine) { if (!edgeCandidate(edgeLine.dataset.edgeKey)) edgeLine.remove(); }); svg.querySelectorAll('[data-edge-controls]').forEach(function(controls) { if (!edgeCandidate(controls.dataset.edgeKey)) controls.remove(); }); if (selectedEdgeKey && !edgeCandidate(selectedEdgeKey)) selectEdge(null); syncCandidate(); if (connectStatus) connectStatus.textContent = name + ' deleted with its connections.'; }\n\t\t\t\t\tfunction selectEdge(group) {\n\t\t\t\t\t\tselectedEdgeKey = group ? group.dataset.edgeKey : '';\n\t\t\t\t\t\t\tsvg.querySelectorAll('.automation-draft-edge').forEach(function(edge) { edge.classList.toggle('automation-draft-edge--selected', edge === group); });\n\t\t\t\t\t\t\tsvg.querySelectorAll('[data-edge-foreground]').forEach(function(edge) { edge.classList.toggle('automation-edge-foreground--selected', !!group && edge.dataset.edgeKey === selectedEdgeKey); });\n\t\t\t\t\t\t\tsvg.querySelectorAll('[data-edge-controls]').forEach(function(controls) { controls.classList.toggle('automation-edge-controls--selected', !!group && controls.dataset.edgeKey === selectedEdgeKey); });\n\t\t\t\t\t\tif (group && connectStatus) connectStatus.textContent = 'Connection selected. Drag either endpoint to reconnect it, or use the × control to delete it.';\n\t\t\t\t\t}\n\t\t\t\t\tfunction beginReconnect(group, handle, event) {\n\t\t\t\t\t\tif (event.button !== 0) return; event.preventDefault(); event.stopPropagation(); clearActiveConnection(); var edge = edgeCandidate(group.dataset.edgeKey), points = edge && edgePoints(edge); if (!points) return;\n\t\t\t\t\t\tvar endpoint = handle.dataset.edgeEndpoint, start = endpoint === 'from' ? points.start : points.finish;\n\t\t\t\t\t\tactiveConnection = {reconnectKey: edge.key, endpoint: endpoint, pointerId: event.pointerId, requiredPortKind: endpoint === 'from' ? 'output' : 'input'};\n\t\t\t\t\t\tpreview.setAttribute('x1', start.x); preview.setAttribute('y1', start.y); preview.setAttribute('x2', start.x); preview.setAttribute('y2', start.y); preview.removeAttribute('hidden');\n\t\t\t\t\t\tshowConnectionTargets('', '', activeConnection.requiredPortKind); window.addEventListener('pointermove', moveConnection); window.addEventListener('pointerup', finishConnection); window.addEventListener('pointercancel', cancelConnection);\n\t\t\t\t\t}\n\t\t\t\t\tfunction bindEdgeGroup(group) {\n\t\t\t\t\t\tvar hit = group.querySelector('[data-edge-hit]'); hit.addEventListener('pointerdown', function(event) { event.stopPropagation(); }); hit.addEventListener('click', function(event) { event.preventDefault(); event.stopPropagation(); selectEdge(group); });\n\t\t\t\t\t\tvar controls = edgeControls(group.dataset.edgeKey); if (!controls) return;\n\t\t\t\t\t\tcontrols.querySelectorAll('[data-reconnect-edge]').forEach(function(handle) { handle.addEventListener('pointerdown', function(event) { beginReconnect(group, handle, event); }); });\n\t\t\t\t\t\tvar remove = controls.querySelector('[data-delete-edge]'); function deleteCurrent(event) { event.preventDefault(); event.stopPropagation(); removeEdge(group.dataset.edgeKey); } remove.addEventListener('pointerdown', function(event) { event.stopPropagation(); }); remove.addEventListener('click', deleteCurrent); remove.addEventListener('keydown', function(event) { if (event.key === 'Enter' || event.key === ' ') deleteCurrent(event); });\n\t\t\t\t\t\tgroup.addEventListener('keydown', function(event) { if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); removeEdge(group.dataset.edgeKey); } });\n\t\t\t\t\t}\n\t\t\t\t\tfunction clearConnectionHandles() {\n\t\t\t\t\t\tsvg.querySelectorAll('[data-connect-port]').forEach(function(handle) { handle.classList.remove('automation-connect-handle--selected', 'automation-connect-handle--eligible'); });\n\t\t\t\t\t}\n\t\t\t\t\tfunction showConnectionTargets(selectedNode, selectedSide, requiredPortKind) {\n\t\t\t\t\t\tclearConnectionHandles();\n\t\t\t\t\t\tif (selectedNode) {\n\t\t\t\t\t\t\tvar sourceHandle = svg.querySelector('[data-connect-port=\"' + CSS.escape(selectedNode) + '\"][data-port-side=\"' + selectedSide + '\"]');\n\t\t\t\t\t\t\tif (sourceHandle) sourceHandle.classList.add('automation-connect-handle--selected');\n\t\t\t\t\t\t}\n\t\t\t\t\t\tsvg.querySelectorAll('[data-connect-port]').forEach(function(handle) {\n\t\t\t\t\t\t\tif (handle.dataset.portKind === requiredPortKind && handle.dataset.connectPort !== selectedNode) handle.classList.add('automation-connect-handle--eligible');\n\t\t\t\t\t\t});\n\t\t\t\t\t}\n\t\t\t\t\tfunction removeConnectionListeners() {\n\t\t\t\t\twindow.removeEventListener('pointermove', moveConnection);\n\t\t\t\t\twindow.removeEventListener('pointerup', finishConnection);\n\t\t\t\t\twindow.removeEventListener('pointercancel', cancelConnection);\n\t\t\t\t}\n\t\t\t\tfunction clearActiveConnection() {\n\t\t\t\t\tactiveConnection = null; keyboardSource = null; preview.setAttribute('hidden', ''); clearConnectionHandles(); removeConnectionListeners();\n\t\t\t\t}\n\t\t\t\tfunction moveConnection(event) {\n\t\t\t\t\tif (!activeConnection || event.pointerId !== activeConnection.pointerId) return;\n\t\t\t\t\tvar point = graphPoint(event); preview.setAttribute('x2', point.x); preview.setAttribute('y2', point.y);\n\t\t\t\t}\n\t\t\t\t\tfunction finishConnection(event) {\n\t\t\t\t\t\tif (!activeConnection || event.pointerId !== activeConnection.pointerId) return;\n\t\t\t\t\t\tvar target = null;\n\t\t\t\t\t\tif (document.elementFromPoint) { var underPointer = document.elementFromPoint(event.clientX, event.clientY); target = underPointer && underPointer.closest('[data-connect-port]'); }\n\t\t\t\t\t\tif (!target && event.target instanceof Element) target = event.target.closest('[data-connect-port]');\n\t\t\t\t\t\tvar connection = activeConnection; clearActiveConnection();\n\t\t\t\t\t\tif (target && target.dataset.portKind === connection.requiredPortKind) {\n\t\t\t\t\t\t\tif (connection.reconnectKey) reconnectEdge(connection.reconnectKey, connection.endpoint, target.dataset.connectPort);\n\t\t\t\t\t\t\telse addConnection(connection.from, target.dataset.connectPort);\n\t\t\t\t\t\t} else if (target && connectStatus) {\n\t\t\t\t\t\t\tconnectStatus.textContent = connection.requiredPortKind === 'input' ? 'Connections must end at a left handle.' : 'Connection sources must use a right handle.';\n\t\t\t\t\t\t} else if (connectStatus) connectStatus.textContent = 'Connection cancelled. Drop a connection from a right handle onto another node\\'s left handle.';\n\t\t\t\t\t}\n\t\t\t\t\tfunction cancelConnection(event) { if (activeConnection && event.pointerId === activeConnection.pointerId) clearActiveConnection(); }\n\t\t\t\t\tfunction beginConnection(handle, event) {\n\t\t\t\t\t\tif (event.button !== 0) return; event.preventDefault(); event.stopPropagation(); clearActiveConnection();\n\t\t\t\t\t\tif (handle.dataset.portKind !== 'output') { if (connectStatus) connectStatus.textContent = 'Start a connection from a right handle.'; return; }\n\t\t\t\t\t\tvar start = nodePortPoint(handle.dataset.connectPort, 'right'); if (!start) return;\n\t\t\t\t\t\tactiveConnection = {from: handle.dataset.connectPort, fromSide: 'right', pointerId: event.pointerId, requiredPortKind: 'input'};\n\t\t\t\t\t\tpreview.setAttribute('x1', start.x); preview.setAttribute('y1', start.y); preview.setAttribute('x2', start.x); preview.setAttribute('y2', start.y); preview.removeAttribute('hidden');\n\t\t\t\t\t\tshowConnectionTargets(activeConnection.from, 'right', 'input'); window.addEventListener('pointermove', moveConnection); window.addEventListener('pointerup', finishConnection); window.addEventListener('pointercancel', cancelConnection);\n\t\t\t\t\t}\n\t\t\t\t\tsvg.querySelectorAll('.automation-draft-edge').forEach(bindEdgeGroup);\n\t\t\t\t\tsvg.querySelectorAll('[data-connect-port]').forEach(function(handle) {\n\t\t\t\t\t\thandle.addEventListener('pointerdown', function(event) { beginConnection(handle, event); });\n\t\t\t\t\t\thandle.addEventListener('click', function(event) { event.preventDefault(); event.stopPropagation(); });\n\t\t\t\t\t\t\thandle.addEventListener('keydown', function(event) {\n\t\t\t\t\t\t\t\tevent.stopPropagation(); if (event.key !== 'Enter' && event.key !== ' ') return; event.preventDefault();\n\t\t\t\t\t\t\t\tif (!keyboardSource) {\n\t\t\t\t\t\t\t\t\tif (handle.dataset.portKind !== 'output') { if (connectStatus) connectStatus.textContent = 'Start a connection from a right handle.'; return; }\n\t\t\t\t\t\t\t\t\tkeyboardSource = {key: handle.dataset.connectPort, side: 'right'}; showConnectionTargets(keyboardSource.key, 'right', 'input'); if (connectStatus) connectStatus.textContent = 'Source selected. Focus another node\\'s left handle and press Enter.'; return;\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tif (handle.dataset.portKind !== 'input') { if (connectStatus) connectStatus.textContent = 'Connections must end at a left handle.'; return; }\n\t\t\t\t\t\t\t\tvar start = keyboardSource; keyboardSource = null; clearConnectionHandles(); addConnection(start.key, handle.dataset.connectPort);\n\t\t\t\t\t\t\t});\t\t\t\t\t});\n\t\t\t\t\tsvg.querySelectorAll('.automation-draft-node').forEach(function(group) {\n\t\t\t\t\t\tvar remove = group.querySelector('[data-delete-node]');\n\t\t\t\t\t\tfunction deleteCurrent(event) { event.preventDefault(); event.stopPropagation(); removeNode(group.dataset.nodeKey); }\n\t\t\t\t\t\tremove.addEventListener('pointerdown', function(event) { event.stopPropagation(); }); remove.addEventListener('click', deleteCurrent);\n\t\t\t\t\t\tremove.addEventListener('keydown', function(event) { if (event.key === 'Enter' || event.key === ' ') deleteCurrent(event); });\n\t\t\t\t\t\tgroup.addEventListener('pointerdown', function(event) {\n\t\t\t\t\t\t\tif (event.button !== 0 || event.target.closest('[data-connect-port], [data-delete-node]')) return;\n\t\t\t\t\t\t\tevent.preventDefault(); event.stopPropagation(); try { group.setPointerCapture(event.pointerId); } catch (_) {}\n\t\t\t\t\t\tvar start = graphPoint(event), originX = Number(group.dataset.nodeX), originY = Number(group.dataset.nodeY);\n\t\t\t\t\t\tvar dragFrame = 0;\n\t\t\t\t\t\tfunction move(moveEvent) {\n\t\t\t\t\t\t\tvar point = graphPoint(moveEvent);\n\t\t\t\t\t\t\trenderNode(group, Math.round(originX + point.x - start.x), Math.round(originY + point.y - start.y)); renderEdges();\n\t\t\t\t\t\t\tif (!dragFrame) dragFrame = requestAnimationFrame(function() { dragFrame = 0; syncCandidate(); });\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction done() {\n\t\t\t\t\t\t\tgroup.removeEventListener('pointermove', move); group.removeEventListener('pointerup', done); group.removeEventListener('pointercancel', done);\n\t\t\t\t\t\t\tif (dragFrame) { cancelAnimationFrame(dragFrame); dragFrame = 0; }\n\t\t\t\t\t\t\tsyncCandidate();\n\t\t\t\t\t\t}\n\t\t\t\t\t\tgroup.addEventListener('pointermove', move); group.addEventListener('pointerup', done); group.addEventListener('pointercancel', done);\n\t\t\t\t\t});\n\t\t\t\t\t\tgroup.addEventListener('keydown', function(event) {\n\t\t\t\t\t\t\tif (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); removeNode(group.dataset.nodeKey); return; }\n\t\t\t\t\t\t\tvar dx = 0, dy = 0;\n\t\t\t\t\t\t\tif (event.key === 'ArrowLeft') dx = -10; if (event.key === 'ArrowRight') dx = 10;\n\t\t\t\t\t\tif (event.key === 'ArrowUp') dy = -10; if (event.key === 'ArrowDown') dy = 10;\n\t\t\t\t\t\tif (!dx && !dy) return;\n\t\t\t\t\t\tevent.preventDefault(); renderNode(group, Number(group.dataset.nodeX) + dx, Number(group.dataset.nodeY) + dy); renderEdges(); syncCandidate();\n\t\t\t\t\t});\n\t\t\t\t});\n\t\t\t\t\tvar pan = null;\n\t\t\t\t\tvar panFrame = 0;\n\t\t\t\t\tfunction applyBuilderPan() {\n\t\t\t\t\t\tpanFrame = 0;\n\t\t\t\t\t\tif (!pan || !pan.pending) return;\n\t\t\t\t\t\tviewBox[0] = pan.view[0] - (pan.pending.x - pan.clientX) * pan.unitsX;\n\t\t\t\t\t\tviewBox[1] = pan.view[1] - (pan.pending.y - pan.clientY) * pan.unitsY;\n\t\t\t\t\t\tapplyViewBox();\n\t\t\t\t\t}\n\t\t\t\t\tsvg.addEventListener('pointerdown', function(event) {\n\t\t\t\t\t\tif (event.target !== svg || event.button !== 0) return;\n\t\t\t\t\t\tvar rect = svg.getBoundingClientRect();\n\t\t\t\t\t\tif (!rect.width || !rect.height) return;\n\t\t\t\t\t\tpan = {pointerId:event.pointerId, clientX:event.clientX, clientY:event.clientY, view:viewBox.slice(), unitsX:viewBox[2]/rect.width, unitsY:viewBox[3]/rect.height, pending:null};\n\t\t\t\t\t\ttry { svg.setPointerCapture(event.pointerId); } catch (_) {}\n\t\t\t\t\t});\n\t\t\t\t\tsvg.addEventListener('pointermove', function(event) {\n\t\t\t\t\t\tif (!pan || event.pointerId !== pan.pointerId) return;\n\t\t\t\t\t\tpan.pending = {x:event.clientX, y:event.clientY};\n\t\t\t\t\t\tif (!panFrame) panFrame = requestAnimationFrame(applyBuilderPan);\n\t\t\t\t\t});\n\t\t\t\t\tfunction finishBuilderPan(event) {\n\t\t\t\t\t\tif (!pan || event.pointerId !== pan.pointerId) return;\n\t\t\t\t\t\tpan.pending = {x:event.clientX, y:event.clientY};\n\t\t\t\t\t\tif (panFrame) { cancelAnimationFrame(panFrame); panFrame = 0; }\n\t\t\t\t\t\tapplyBuilderPan(); pan = null;\n\t\t\t\t\t}\n\t\t\t\t\tsvg.addEventListener('pointerup', finishBuilderPan);\n\t\t\t\t\tsvg.addEventListener('pointercancel', finishBuilderPan);\n\t\t\t\t\tfunction zoom(factor) {\n\t\t\t\t\tvar cx = viewBox[0] + viewBox[2] / 2, cy = viewBox[1] + viewBox[3] / 2;\n\t\t\t\t\tviewBox[2] = Math.max(240, Math.min(3000, viewBox[2] * factor)); viewBox[3] = Math.max(160, Math.min(2000, viewBox[3] * factor));\n\t\t\t\t\tviewBox[0] = cx - viewBox[2] / 2; viewBox[1] = cy - viewBox[3] / 2; applyViewBox();\n\t\t\t\t}\n\t\t\t\tsvg.addEventListener('wheel', function(event) {\n\t\t\t\t\tif (!event.ctrlKey && !event.metaKey) return;\n\t\t\t\t\tevent.preventDefault(); zoom(event.deltaY > 0 ? 1.12 : 0.88);\n\t\t\t\t}, {passive: false});\n\t\t\t\troot.querySelector('[data-automation-zoom-in]').addEventListener('click', function() { zoom(0.82); });\n\t\t\t\troot.querySelector('[data-automation-zoom-out]').addEventListener('click', function() { zoom(1.22); });\n\t\t\t\troot.querySelector('[data-automation-fit]').addEventListener('click', function() {\n\t\t\t\t\tvar groups = Array.from(svg.querySelectorAll('.automation-draft-node'));\n\t\t\t\t\tif (!groups.length) { viewBox = initialViewBox.slice(); applyViewBox(); return; }\n\t\t\t\t\tvar xs = groups.map(function(group) { return Number(group.dataset.nodeX); });\n\t\t\t\t\tvar ys = groups.map(function(group) { return Number(group.dataset.nodeY); });\n\t\t\t\t\tvar minX = Math.min.apply(null, xs) - 60, minY = Math.min.apply(null, ys) - 60;\n\t\t\t\t\tvar maxX = Math.max.apply(null, xs) + 230, maxY = Math.max.apply(null, ys) + 164;\n\t\t\t\t\tviewBox = [minX, minY, maxX - minX, maxY - minY]; applyViewBox();\n\t\t\t\t});\n\t\t\t\troot.querySelector('[data-automation-reset]').addEventListener('click', function() {\n\t\t\t\t\tsvg.querySelectorAll('.automation-draft-node').forEach(function(group) { renderNode(group, Number(group.dataset.defaultX), Number(group.dataset.defaultY)); });\n\t\t\t\t\trenderEdges(); syncCandidate(); viewBox = initialViewBox.slice(); applyViewBox();\n\t\t\t\t});\n\t\t\t\t\tbuilder.addEventListener('htmx:beforeCleanupElement', function(event) {\n\t\t\t\t\t\tif (event.target === builder) clearActiveConnection();\n\t\t\t\t\t});\n\t\t\t\t\t\tvar automationName = builder.querySelector('[data-automation-name]');\n\t\t\t\t\t\tif (automationName) automationName.addEventListener('input', syncCandidate);\t\t\t\t\tbuilder.addEventListener('input', function(event) { if (event.target !== yamlEditor && !event.target.closest('[data-automation-node-dialog]')) syncCandidate(); });\n\t\t\t\t\tbuilder.addEventListener('change', function(event) { if (event.target !== yamlEditor && !event.target.closest('[data-automation-node-dialog]')) syncCandidate(); });\n\t\t\t\t\tbuilder.addEventListener('submit', function() {\n\t\t\t\t\t\tif (yamlEditor && automationYAMLValue() !== visualCandidateYAML()) {\n\t\t\t\t\t\t\tvar submittedYAML = automationYAMLValue();\n\t\t\t\t\t\t\tsetYAMLEditorDisplay(submittedYAML);\n\t\t\t\t\t\t\tbuilder.querySelectorAll('[data-automation-yaml-submission]').forEach(function(input) { input.value = submittedYAML; });\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tsyncCandidate();\n\t\t\t\t\t});\n\t\t\t\t\t\tvar viewRoot = builder.querySelector('[data-automation-view-root]');\n\t\t\t\t\t\tvar yamlPanel = viewRoot && viewRoot.querySelector('[data-automation-yaml-panel]');\n\t\t\t\t\t\tvar detailsPanel = viewRoot && viewRoot.querySelector('[data-automation-details-panel]');\n\t\t\t\t\t\tvar graphButton = viewRoot && viewRoot.querySelector('[data-automation-view-graph]');\n\t\t\t\t\t\tvar yamlButton = viewRoot && viewRoot.querySelector('[data-automation-view-yaml]');\n\t\t\t\t\t\tvar detailsButton = viewRoot && viewRoot.querySelector('[data-automation-view-details]');\n\t\t\t\t\t\tvar detailsForm = builder.querySelector('[data-automation-details-form]');\n\t\t\t\t\t\tfunction selectAutomationBuilderView(view) {\n\t\t\t\t\t\t\tvar applied = window.setAutomationCanvasView && window.setAutomationCanvasView(viewRoot, view, {detailsPanelSelector: '[data-automation-details-panel]'});\n\t\t\t\t\t\t\tif (!applied) return;\n\t\t\t\t\t\t\tqueueYAMLLineLayout();\n\t\t\t\t\t\t\tif (view === 'yaml') validateYAMLNow();\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction previewYAMLThenSelect(view) {\n\t\t\t\t\t\t\tvar form = document.getElementById('automation-design-form');\n\t\t\t\t\t\t\tif (yamlEditor && form && automationYAMLValue() !== visualCandidateYAML()) {\n\t\t\t\t\t\t\t\tvar initialView = form.querySelector('[data-automation-initial-view]');\n\t\t\t\t\t\t\t\tif (initialView) initialView.value = view === 'details' ? 'details' : '';\n\t\t\t\t\t\t\t\tform.requestSubmit();\n\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tselectAutomationBuilderView(view);\n\t\t\t\t\t\t}\n\t\t\t\t\t\tgraphButton && graphButton.addEventListener('click', function() { previewYAMLThenSelect('graph'); });\n\t\t\t\t\t\tyamlButton && yamlButton.addEventListener('click', function() { selectAutomationBuilderView('yaml'); });\n\t\t\t\t\t\t\tdetailsButton && detailsButton.addEventListener('click', function() { previewYAMLThenSelect('details'); });\t\t\t\t\t\tbuilder.querySelectorAll('[data-automation-builder-save]').forEach(function(button) {\n\t\t\t\t\t\t\tbutton.addEventListener('click', function(event) {\n\t\t\t\t\t\t\t\tif (!detailsPanel || detailsPanel.hidden || !detailsForm) return;\n\t\t\t\t\t\t\t\tevent.preventDefault();\n\t\t\t\t\t\t\t\tsyncCandidate();\n\t\t\t\t\t\t\t\tdetailsForm.requestSubmit();\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t});\n\t\t\t\t\t\t\trenderEdges(); syncCandidate(false);\n\t\t\t\t\t\t\tvar initialView = builder.querySelector('[data-automation-initial-view]');\n\t\t\t\t\t\t\tif (initialView && initialView.value === 'details') selectAutomationBuilderView('details');\n\t\t\t\t\t})();\t\t</script></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 448, "\" data-candidate-json><script>\n\t\t\t(function() {\n\t\t\t\tvar root = document.querySelector('[data-automation-draft-canvas]');\n\t\t\t\tvar builder = document.getElementById('automation-builder');\n\t\t\t\tvar svg = root && root.querySelector('[data-automation-canvas]');\n\t\t\t\tvar source = builder && builder.querySelector('[data-candidate-json]');\n\t\t\t\tif (!root || !builder || !svg || !source) return;\n\t\t\t\t\tvar candidate;\n\t\t\t\t\ttry { candidate = JSON.parse(source.value); } catch (_) { return; }\n\t\t\t\t\tvar edgePalette = [];\t\t\t\ttry { edgePalette = JSON.parse(root.dataset.edgePalette || '[]'); } catch (_) { return; }\n\t\t\t\tvar connectStatus = root.querySelector('[data-automation-connect-status]');\n\t\t\t\tvar preview = svg.querySelector('[data-automation-edge-preview]');\n\t\t\t\t\tvar selectedEdgeKey = '';\n\t\t\t\t\tvar keyboardSource = null;\n\t\t\t\t\tvar activeConnection = null;\n\t\t\t\t\tvar initialViewBox = svg.getAttribute('viewBox').split(/\\s+/).map(Number);\n\t\t\t\t\tvar viewBox = initialViewBox.slice();\n\n\t\t\t\t\tfunction nodeCandidate(key) { return (candidate.nodes || []).find(function(node) { return node.key === key; }); }\n\t\t\t\t\tfunction edgeCandidate(key) { return (candidate.edges || []).find(function(edge) { return edge.key === key; }); }\n\t\t\t\t\tfunction nodeName(key) { var node = nodeCandidate(key); return node ? node.name : key; }\n\t\t\t\t\t\tfunction nodeGroup(key) { return svg.querySelector('[data-node-key=\"' + CSS.escape(key) + '\"]'); }\n\t\t\t\t\t\tfunction foregroundEdge(key) { return svg.querySelector('[data-edge-foreground][data-edge-key=\"' + CSS.escape(key) + '\"]'); }\n\t\t\t\t\t\tfunction edgeControls(key) { return svg.querySelector('[data-edge-controls][data-edge-key=\"' + CSS.escape(key) + '\"]'); }\t\t\t\t\tfunction nodePortPoint(key, side) { var group = nodeGroup(key); if (!group) return null; return {x: Number(group.dataset.nodeX) + (side === 'right' ? 170 : 0), y: Number(group.dataset.nodeY) + 52}; }\n\t\t\t\t\tfunction yamlString(value) { return JSON.stringify(String(value == null ? '' : value)); }\n\t\t\t\t\tfunction yamlPlainKeyPattern() { return /^[A-Za-z_][A-Za-z0-9_]*$/; }\n\t\t\t\t\tfunction yamlKey(key) { return yamlPlainKeyPattern().test(String(key)) ? String(key) : yamlString(key); }\n\t\t\t\t\tfunction yamlScalar(value) {\n\t\t\t\t\t\tif (value === null || value === undefined) return 'null';\n\t\t\t\t\t\tif (typeof value === 'boolean' || typeof value === 'number') return String(value);\n\t\t\t\t\t\treturn yamlString(value);\n\t\t\t\t\t}\n\t\t\t\t\tfunction yamlIndent(level) { return '  '.repeat(level); }\n\t\t\t\t\tfunction yamlIsEmptyContainer(value) {\n\t\t\t\t\t\tif (Array.isArray(value)) return value.length === 0;\n\t\t\t\t\t\tif (value !== null && typeof value === 'object') return Object.keys(value).length === 0;\n\t\t\t\t\t\treturn false;\n\t\t\t\t\t}\n\t\t\t\t\tfunction yamlBlockLines(value, level) {\n\t\t\t\t\t\tif (Array.isArray(value)) {\n\t\t\t\t\t\t\tvar lines = [];\n\t\t\t\t\t\t\tvalue.forEach(function(item) {\n\t\t\t\t\t\t\t\tif (item !== null && typeof item === 'object' && !yamlIsEmptyContainer(item)) {\n\t\t\t\t\t\t\t\t\tvar subLines = yamlBlockLines(item, level + 1);\n\t\t\t\t\t\t\t\t\tlines.push(yamlIndent(level) + '- ' + subLines[0].slice(yamlIndent(level + 1).length));\n\t\t\t\t\t\t\t\t\tsubLines.slice(1).forEach(function(line) { lines.push(line); });\n\t\t\t\t\t\t\t\t} else if (item !== null && typeof item === 'object') {\n\t\t\t\t\t\t\t\t\tlines.push(yamlIndent(level) + '- ' + (Array.isArray(item) ? '[]' : '{}'));\n\t\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\t\tlines.push(yamlIndent(level) + '- ' + yamlScalar(item));\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\treturn lines;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tif (value !== null && typeof value === 'object') {\n\t\t\t\t\t\t\tvar lines = [];\n\t\t\t\t\t\t\tObject.keys(value).forEach(function(key) {\n\t\t\t\t\t\t\t\tvar nested = value[key];\n\t\t\t\t\t\t\t\tif (nested !== null && typeof nested === 'object' && !yamlIsEmptyContainer(nested)) {\n\t\t\t\t\t\t\t\t\tlines.push(yamlIndent(level) + yamlKey(key) + ':');\n\t\t\t\t\t\t\t\t\tyamlBlockLines(nested, level + 1).forEach(function(line) { lines.push(line); });\n\t\t\t\t\t\t\t\t} else if (nested !== null && typeof nested === 'object') {\n\t\t\t\t\t\t\t\t\tlines.push(yamlIndent(level) + yamlKey(key) + ': ' + (Array.isArray(nested) ? '[]' : '{}'));\n\t\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\t\tlines.push(yamlIndent(level) + yamlKey(key) + ': ' + yamlScalar(nested));\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\treturn lines;\n\t\t\t\t\t\t}\n\t\t\t\t\t\treturn [yamlIndent(level) + yamlScalar(value)];\n\t\t\t\t\t}\n\t\t\t\t\tfunction yamlNestedField(lines, label, value, level) {\n\t\t\t\t\t\tvar normalized = (value && typeof value === 'object') ? value : {};\n\t\t\t\t\t\tif (yamlIsEmptyContainer(normalized)) {\n\t\t\t\t\t\t\tlines.push(yamlIndent(level) + label + ': ' + (Array.isArray(normalized) ? '[]' : '{}'));\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tlines.push(yamlIndent(level) + label + ':');\n\t\t\t\t\t\tyamlBlockLines(normalized, level + 1).forEach(function(line) { lines.push(line); });\n\t\t\t\t\t}\n\t\t\t\t\tfunction visualCandidateYAML() {\n\t\t\t\t\t\tvar lines = [\n\t\t\t\t\t\t\t'schema_version: ' + Number(candidate.schema_version || 1),\n\t\t\t\t\t\t\t'name: ' + yamlString(candidate.name),\n\t\t\t\t\t\t\t'description: ' + yamlString(candidate.description),\n\t\t\t\t\t\t\t'automation_type: ' + yamlString(candidate.automation_type),\n\t\t\t\t\t\t\t'adapter_key: ' + yamlString(candidate.adapter_key),\n\t\t\t\t\t\t\t'nodes:'\n\t\t\t\t\t\t];\n\t\t\t\t\t\t(candidate.nodes || []).forEach(function(node) {\n\t\t\t\t\t\t\tlines.push('  - key: ' + yamlString(node.key));\n\t\t\t\t\t\t\tlines.push('    name: ' + yamlString(node.name));\n\t\t\t\t\t\t\tlines.push('    type: ' + yamlString(node.type));\n\t\t\t\t\t\t\tlines.push('    role: ' + yamlString(node.role));\n\t\t\t\t\t\t\tyamlNestedField(lines, 'config', node.config || {}, 2);\n\t\t\t\t\t\t\tif (node.position) yamlNestedField(lines, 'position', node.position, 2);\n\t\t\t\t\t\t});\n\t\t\t\t\t\tlines.push('edges:');\n\t\t\t\t\t\t(candidate.edges || []).forEach(function(edge) {\n\t\t\t\t\t\t\tlines.push('  - key: ' + yamlString(edge.key));\n\t\t\t\t\t\t\tlines.push('    from: ' + yamlString(edge.from));\n\t\t\t\t\t\t\tlines.push('    to: ' + yamlString(edge.to));\n\t\t\t\t\t\t\tlines.push('    from_port: ' + yamlString(edge.from_port || 'right'));\n\t\t\t\t\t\t\tlines.push('    to_port: ' + yamlString(edge.to_port || 'left'));\n\t\t\t\t\t\t\tif (edge.label) lines.push('    label: ' + yamlString(edge.label));\n\t\t\t\t\t\t\tif (edge.condition && Object.keys(edge.condition).length) yamlNestedField(lines, 'condition', edge.condition, 2);\n\t\t\t\t\t\t});\n\t\t\t\t\t\tif (candidate.assumptions && candidate.assumptions.length) yamlNestedField(lines, 'assumptions', candidate.assumptions, 0);\n\t\t\t\t\t\tif (candidate.warnings && candidate.warnings.length) yamlNestedField(lines, 'warnings', candidate.warnings, 0);\n\t\t\t\t\t\treturn lines.join('\\n') + '\\n';\n\t\t\t\t\t}\n\t\t\t\t\tvar yamlEditor = builder.querySelector('[data-automation-yaml-editor]');\n\t\t\t\t\tvar yamlLineNumbers = builder.querySelector('[data-automation-yaml-line-numbers]');\n\t\t\t\t\tvar yamlFoldControls = builder.querySelector('[data-automation-yaml-fold-controls]');\n\t\t\t\t\tvar yamlGutter = builder.querySelector('[data-automation-yaml-gutter]');\n\t\t\t\t\tvar yamlViewport = builder.querySelector('[data-automation-yaml-editor-viewport]');\n\t\t\t\t\tvar yamlHighlight = builder.querySelector('[data-automation-yaml-highlight]');\n\t\t\t\t\tvar yamlDiagnostic = builder.querySelector('[data-automation-yaml-diagnostic]');\n\t\t\t\t\tvar yamlDiagnosticLine = 0;\n\t\t\t\t\tvar yamlShared = window.openVibelyYAML;\n\t\t\t\t\t\tvar yamlFoldingEnabled = false;\n\t\t\t\t\t\tvar yamlFoldedLines = new Set();\n\t\t\t\t\t\tvar yamlSourceValue = yamlEditor ? yamlEditor.value : '';\n\t\t\t\t\t\tvar yamlVisibleLineMap = [];\n\t\t\t\t\t\tvar yamlRenderingValue = false;\n\t\t\t\t\t\tvar yamlPendingSelectionStart = 0;\n\t\t\t\t\t\tvar yamlPendingSelectionEnd = 0;\n\t\t\t\t\t\tvar yamlPendingValue = '';\n\t\t\t\t\t\tvar yamlPendingInputType = '';\n\t\t\t\t\t\tvar yamlParseTimer = 0;\t\t\t\t\tvar yamlParseRequest = 0;\n\t\t\t\t\tvar yamlLineLayoutFrame = 0;\n\t\t\t\t\t\tfunction yamlActiveScrollTop() { return yamlEditor ? yamlEditor.scrollTop : 0; }\n\t\t\t\t\t\tfunction restoreYAMLScrollTop(value) {\n\t\t\t\t\t\t\tif (!yamlEditor) return;\n\t\t\t\t\t\t\tyamlEditor.scrollTop = value;\n\t\t\t\t\t\t\tif (yamlViewport) yamlViewport.scrollTop = 0;\n\t\t\t\t\t\t\tsyncYAMLHighlightScroll();\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction scrollYAMLFromWheel(event) {\n\t\t\t\t\t\t\tif (!yamlEditor || !event.deltaY) return;\n\t\t\t\t\t\t\tvar scroller = yamlEditor;\n\t\t\t\t\t\t\tif (!scroller) return;\t\t\t\t\t\tvar delta = event.deltaY;\n\t\t\t\t\t\tif (event.deltaMode === WheelEvent.DOM_DELTA_LINE) delta *= 24;\n\t\t\t\t\t\tif (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) delta *= scroller.clientHeight;\n\t\t\t\t\t\tvar previousTop = scroller.scrollTop;\n\t\t\t\t\t\tscroller.scrollTop += delta;\n\t\t\t\t\t\tif (scroller.scrollTop !== previousTop) {\n\t\t\t\t\t\t\tif (scroller === yamlEditor) syncYAMLHighlightScroll();\n\t\t\t\t\t\t\telse {\n\t\t\t\t\t\t\t\tif (yamlLineNumbers) yamlLineNumbers.scrollTop = scroller.scrollTop;\n\t\t\t\t\t\t\t\tif (yamlFoldControls) yamlFoldControls.style.transform = 'translateY(' + (-scroller.scrollTop) + 'px)';\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tevent.preventDefault();\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t\t\tfunction automationYAMLValue() { return yamlFoldedLines.size > 0 ? yamlSourceValue : (yamlEditor ? yamlEditor.value : yamlSourceValue); }\n\t\t\t\t\t\tfunction setYAMLEditorDisplay(value) {\n\t\t\t\t\t\t\tif (!yamlEditor || yamlEditor.value === value) return;\n\t\t\t\t\t\t\tyamlRenderingValue = true;\n\t\t\t\t\t\t\tyamlEditor.value = value;\n\t\t\t\t\t\t\tyamlRenderingValue = false;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction escapeYAMLHTML(value) { return yamlShared.escapeHTML(value); }\n\t\t\t\t\t\tfunction yamlLineIndent(line) { return yamlShared.lineIndent(line); }\n\t\t\t\t\t\tfunction yamlFoldRanges(lines) {\n\t\t\t\t\t\t\tvar ranges = {};\t\t\t\t\t\tfor (var index = 0; index < lines.length; index++) {\n\t\t\t\t\t\t\tvar line = lines[index];\n\t\t\t\t\t\t\tif (!line.trim() || line.trim().charAt(0) === '#') continue;\n\t\t\t\t\t\t\tvar indent = yamlLineIndent(line), next = index + 1;\n\t\t\t\t\t\t\twhile (next < lines.length && (!lines[next].trim() || lines[next].trim().charAt(0) === '#')) next++;\n\t\t\t\t\t\t\tif (next >= lines.length || yamlLineIndent(lines[next]) <= indent) continue;\n\t\t\t\t\t\t\tvar end = next;\n\t\t\t\t\t\t\twhile (end + 1 < lines.length && (!lines[end + 1].trim() || lines[end + 1].trim().charAt(0) === '#' || yamlLineIndent(lines[end + 1]) > indent)) end++;\n\t\t\t\t\t\t\tranges[index] = end;\n\t\t\t\t\t\t}\n\t\t\t\t\t\t\treturn ranges;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction reconcileYAMLFolds(ranges) {\n\t\t\t\t\t\t\tArray.from(yamlFoldedLines).forEach(function(line) { if (ranges[line] === undefined) yamlFoldedLines.delete(line); });\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction yamlActiveRailInfo() {\n\t\t\t\t\t\t\tif (!yamlEditor || document.activeElement !== yamlEditor) return null;\n\t\t\t\t\t\t\treturn {line: yamlOffsetToLineCol(yamlEditor.value, yamlEditor.selectionStart).line + 1};\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction yamlRailColor(active) {\n\t\t\t\t\t\t\tif (!active) return 'oklch(var(--bc) / 0.3)';\n\t\t\t\t\t\t\tvar isDark = document.documentElement.getAttribute('data-theme') === 'dark';\n\t\t\t\t\t\t\treturn isDark ? 'rgba(212, 212, 212, 0.8)' : 'rgba(64, 64, 64, 0.6)';\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction yamlContinuousIndentationRails(lines, visibleLines, activeInfo) {\n\t\t\t\t\t\tvar rails = [], maxIndent = 0, candidates = [];\n\t\t\t\t\t\tvisibleLines.forEach(function(lineIndex) { maxIndent = Math.max(maxIndent, yamlLineIndent(lines[lineIndex])); });\n\t\t\t\t\t\t\tfor (var column = 0; column < maxIndent; column += 2) {\n\t\t\t\t\t\t\t\tvar startLine = 0, endLine = 0, startRow = 0, endRow = 0;\n\t\t\t\t\t\t\t\tvisibleLines.forEach(function(lineIndex, rowIndex) {\n\t\t\t\t\t\t\t\t\tvar line = lines[lineIndex], ignorable = !line.trim() || /^\\s*#/.test(line), continues = yamlLineIndent(line) > column || (startLine && ignorable);\n\t\t\t\t\t\t\t\t\tif (continues) {\n\t\t\t\t\t\t\t\t\t\tif (!startLine) startLine = lineIndex + 1;\n\t\t\t\t\t\t\t\t\t\tendLine = lineIndex + 1;\n\t\t\t\t\t\t\t\t\t\tif (!startRow) startRow = rowIndex + 1;\n\t\t\t\t\t\t\t\t\t\tendRow = rowIndex + 1;\n\t\t\t\t\t\t\t\t\t} else if (startLine) {\n\t\t\t\t\t\t\t\t\t\tcandidates.push({column: column, start: startLine, end: endLine, rowStart: startRow, rowEnd: endRow});\n\t\t\t\t\t\t\t\t\t\tstartLine = 0;\n\t\t\t\t\t\t\t\t\t\tstartRow = 0;\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\t\tif (startLine) candidates.push({column: column, start: startLine, end: endLine, rowStart: startRow, rowEnd: endRow});\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tvar activeCandidate = null;\n\t\t\t\t\t\t\tif (activeInfo) {\n\t\t\t\t\t\t\t\tcandidates.forEach(function(candidate) {\n\t\t\t\t\t\t\t\t\tvar withinGroup = activeInfo.line >= candidate.start && activeInfo.line <= candidate.end;\n\t\t\t\t\t\t\t\t\tvar onGroupHeader = activeInfo.line === candidate.start - 1;\n\t\t\t\t\t\t\t\t\tif ((withinGroup || onGroupHeader) && (!activeCandidate || candidate.column > activeCandidate.column)) activeCandidate = candidate;\n\t\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tcandidates.forEach(function(candidate) {\n\t\t\t\t\t\t\t\t\tvar color = yamlRailColor(candidate === activeCandidate);\n\t\t\t\t\t\t\t\t\trails.push('<span class=\"pointer-events-none absolute transition-colors\" style=\"left:calc(0.75rem + ' + candidate.column + 'ch);top:calc(' + (candidate.rowStart - 1) + ' * 1.5rem);height:calc(' + (candidate.rowEnd - candidate.rowStart + 1) + ' * 1.5rem);width:1px;z-index:20;background-color:' + color + '\" data-automation-yaml-indent-rail data-yaml-rail-start=\"' + candidate.start + '\" data-yaml-rail-end=\"' + candidate.end + '\" data-yaml-rail-column=\"' + candidate.column + '\" aria-hidden=\"true\"></span>');\n\t\t\t\t\t\t\t\t});\n\t\t\t\t\t\treturn rails.join('');\n\t\t\t\t\t}\n\t\t\t\t\t\tfunction updateYAMLActiveRail() {\n\t\t\t\t\t\t\tif (!yamlHighlight || !yamlEditor) return;\n\t\t\t\t\t\t\tvar rails = yamlHighlight.querySelectorAll('[data-automation-yaml-indent-rail]');\n\t\t\t\t\t\t\tif (!rails.length) return;\n\t\t\t\t\t\t\tvar activeInfo = yamlActiveRailInfo();\n\t\t\t\t\t\t\tvar active = null;\n\t\t\t\t\t\t\trails.forEach(function(rail) {\n\t\t\t\t\t\t\t\tvar start = Number(rail.dataset.yamlRailStart), end = Number(rail.dataset.yamlRailEnd), column = Number(rail.dataset.yamlRailColumn);\n\t\t\t\t\t\t\t\tvar withinGroup = activeInfo && activeInfo.line >= start && activeInfo.line <= end;\n\t\t\t\t\t\t\t\tvar onGroupHeader = activeInfo && activeInfo.line === start - 1;\n\t\t\t\t\t\t\t\tif (activeInfo && (withinGroup || onGroupHeader) && (!active || column > Number(active.dataset.yamlRailColumn))) active = rail;\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\trails.forEach(function(rail) { rail.style.backgroundColor = yamlRailColor(rail === active); });\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction layoutYAMLIndentationRails() {\n\t\t\t\t\t\tif (!yamlHighlight) return;\n\t\t\t\t\t\tyamlHighlight.querySelectorAll('[data-automation-yaml-indent-rail]').forEach(function(rail) {\n\t\t\t\t\t\t\tvar start = yamlHighlight.querySelector('[data-automation-yaml-highlight-line][data-yaml-line=\"' + rail.dataset.yamlRailStart + '\"]');\n\t\t\t\t\t\t\tvar end = yamlHighlight.querySelector('[data-automation-yaml-highlight-line][data-yaml-line=\"' + rail.dataset.yamlRailEnd + '\"]');\n\t\t\t\t\t\t\tif (!start || !end) return;\n\t\t\t\t\t\t\trail.style.top = start.offsetTop + 'px';\n\t\t\t\t\t\t\trail.style.height = Math.max(0, end.offsetTop + end.offsetHeight - start.offsetTop) + 'px';\n\t\t\t\t\t\t});\n\t\t\t\t\t}\n\t\t\t\t\tfunction layoutYAMLLines() {\n\t\t\t\t\t\tyamlLineLayoutFrame = 0;\n\t\t\t\t\t\tif (!yamlLineNumbers || !yamlFoldControls || !yamlHighlight || !yamlViewport || !yamlViewport.clientWidth) return;\n\t\t\t\t\t\tvar lineNumberRows = yamlLineNumbers.querySelectorAll('[data-automation-yaml-line-number]');\n\t\t\t\t\t\tlineNumberRows.forEach(function(lineNumberRow) {\n\t\t\t\t\t\t\tvar sourceLine = lineNumberRow.dataset.yamlLine;\n\t\t\t\t\t\t\tvar highlightLine = yamlHighlight.querySelector('[data-automation-yaml-highlight-line][data-yaml-line=\"' + sourceLine + '\"]');\n\t\t\t\t\t\t\tif (!highlightLine) return;\n\t\t\t\t\t\t\tlineNumberRow.style.height = Math.ceil(highlightLine.getBoundingClientRect().height) + 'px';\n\t\t\t\t\t\t\tvar control = yamlFoldControls.querySelector('[data-yaml-line=\"' + sourceLine + '\"]');\n\t\t\t\t\t\t\tif (control) control.style.top = highlightLine.offsetTop + 'px';\n\t\t\t\t\t\t});\n\t\t\t\t\t\tlayoutYAMLIndentationRails();\n\t\t\t\t\t}\n\t\t\t\t\tfunction queueYAMLLineLayout() {\n\t\t\t\t\t\tif (yamlLineLayoutFrame) cancelAnimationFrame(yamlLineLayoutFrame);\n\t\t\t\t\t\tyamlLineLayoutFrame = requestAnimationFrame(layoutYAMLLines);\n\t\t\t\t\t}\n\t\t\t\t\t\tfunction updateYAMLLineNumbers() {\n\t\t\t\t\t\t\tif (!yamlEditor || !yamlLineNumbers || !yamlFoldControls || !yamlHighlight) return;\nvar lines = yamlSourceValue.split('\\n'), ranges = yamlFoldRanges(lines), highlighted = [], lineNumbers = [], controls = [], visibleLines = [], displayLines = [], index = 0;\n\t\t\t\t\t\t\treconcileYAMLFolds(ranges);\n\t\t\t\t\t\t\tvar folded = yamlFoldedLines.size > 0;\n\t\t\t\t\t\t\twhile (index < lines.length) {\t\t\t\t\t\t\tvar foldEnd = ranges[index], canFold = foldEnd !== undefined, isFolded = yamlFoldedLines.has(index), indent = yamlLineIndent(lines[index]);\n\t\t\t\t\t\t\tvisibleLines.push(index);\n\t\t\t\t\t\t\tdisplayLines.push(lines[index]);\n\t\t\t\t\t\t\tlineNumbers.push('<span class=\"block min-h-6\" data-automation-yaml-line-number data-yaml-line=\"' + (index + 1) + '\">' + (index + 1) + '</span>');\t\t\t\t\t\t\t\tif (canFold && yamlFoldingEnabled) {\n\t\t\t\t\t\t\t\t\tvar visibilityClass = isFolded ? '' : ' opacity-0 group-hover:opacity-100 focus-visible:opacity-100';\n\t\t\t\t\t\t\t\t\tcontrols.push('<button class=\"pointer-events-auto absolute right-1 inline-flex h-6 w-6 items-center justify-center rounded bg-transparent p-0 text-base-content/60 transition-opacity hover:bg-transparent hover:text-base-content/60 focus-visible:bg-transparent focus-visible:text-base-content/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary' + visibilityClass + '\" style=\"top:0\" type=\"button\" data-automation-yaml-fold data-yaml-line=\"' + (index + 1) + '\" data-yaml-indent=\"' + indent + '\" aria-label=\"' + (isFolded ? 'Expand' : 'Collapse') + ' YAML section starting on line ' + (index + 1) + '\"><svg class=\"h-5 w-5 transition-transform' + (isFolded ? ' -rotate-90' : '') + '\" viewBox=\"0 0 20 20\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M5 7.5 10 12.5 15 7.5\"></path></svg></button>');\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\thighlighted.push(yamlShared.renderLineSpan(lines[index], index + 1, {diagnosticLine: yamlDiagnosticLine, folded: isFolded}));\t\t\t\t\t\t\t\tif (isFolded) index = foldEnd + 1; else index++;\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tyamlHighlight.innerHTML = yamlContinuousIndentationRails(lines, visibleLines, yamlActiveRailInfo()) + highlighted.join('');\n\t\t\t\t\t\t\tyamlLineNumbers.innerHTML = lineNumbers.join('');\n\t\t\t\t\t\t\tyamlFoldControls.innerHTML = controls.join('');\n\t\t\t\t\t\t\tyamlVisibleLineMap = visibleLines.slice();\n\t\t\t\t\t\t\tif (folded) {\n\t\t\t\t\t\t\t\tyamlEditor.hidden = false;\n\t\t\t\t\t\t\t\tsetYAMLEditorDisplay(displayLines.join('\\n'));\n\t\t\t\t\t\t\t\tyamlHighlight.classList.remove('absolute', 'left-0', 'right-0', 'top-0', 'min-h-full');\n\t\t\t\t\t\t\t\tyamlHighlight.classList.add('min-h-full');\n\t\t\t\t\t\t\t\tyamlHighlight.style.transform = '';\n\t\t\t\t\t\t\t\tyamlFoldControls.style.transform = '';\n\t\t\t\t\t\t\t\tif (yamlViewport) {\nyamlViewport.classList.remove('overflow-hidden');\n\t\t\t\t\t\t\t\t\t\tyamlViewport.classList.add('overflow-y-auto', 'overflow-x-hidden');\n\t\t\t\t\t\t\t\t\t\tyamlViewport.tabIndex = 0;\n\t\t\t\t\t\t\t\t\t\tyamlViewport.setAttribute('aria-label', 'Collapsed YAML source');\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\tyamlEditor.hidden = false;\n\t\t\t\t\t\t\t\tsetYAMLEditorDisplay(yamlSourceValue);\n\t\t\t\t\t\t\t\tyamlVisibleLineMap = [];\n\t\t\t\t\t\t\t\tyamlHighlight.classList.add('absolute', 'left-0', 'right-0', 'top-0', 'min-h-full');\n\t\t\t\t\t\t\t\tif (yamlViewport) {\nyamlViewport.scrollTop = 0;\n\t\t\t\t\t\t\t\t\t\tyamlViewport.classList.remove('overflow-y-auto', 'overflow-x-hidden');\n\t\t\t\t\t\t\t\t\t\tyamlViewport.classList.add('overflow-hidden');\n\t\t\t\t\t\t\t\t\t\tyamlViewport.tabIndex = -1;\t\t\t\t\t\t\t\t\tyamlViewport.removeAttribute('aria-label');\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tsyncYAMLHighlightScroll();\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tqueueYAMLLineLayout();\n\t\t\t\t\t\t\tupdateYAMLActiveRail();\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction yamlOffsetToLineCol(text, offset) {\n\t\t\t\t\t\t\tvar prefix = text.slice(0, offset).split('\\n');\n\t\t\t\t\t\t\treturn {line: prefix.length - 1, col: prefix[prefix.length - 1].length};\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction yamlLineColToSourceOffset(sourceLines, sourceLineIndex, col) {\n\t\t\t\t\t\t\tvar offset = 0;\n\t\t\t\t\t\t\tfor (var i = 0; i < sourceLineIndex; i++) offset += sourceLines[i].length + 1;\n\t\t\t\t\t\t\treturn offset + col;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction syncYAMLHighlightScroll() {\n\t\t\t\t\t\t\tif (!yamlEditor) return;\n\t\t\t\t\t\t\tif (yamlHighlight) yamlHighlight.style.transform = 'translate(' + (-yamlEditor.scrollLeft) + 'px, ' + (-yamlEditor.scrollTop) + 'px)';\n\t\t\t\t\t\t\tif (yamlFoldControls) yamlFoldControls.style.transform = 'translateY(' + (-yamlEditor.scrollTop) + 'px)';\n\t\t\t\t\t\t\tif (yamlLineNumbers) yamlLineNumbers.scrollTop = yamlEditor.scrollTop;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction showYAMLDiagnostic(message) {\t\t\t\t\t\tvar match = String(message || '').match(/line\\s+(\\d+)/i);\n\t\t\t\t\t\tyamlDiagnosticLine = match ? Number(match[1]) : 0;\n\t\t\t\t\t\tif (yamlDiagnostic) {\n\t\t\t\t\t\t\tyamlDiagnostic.textContent = message || '';\n\t\t\t\t\t\t\tyamlDiagnostic.classList.toggle('hidden', !message);\n\t\t\t\t\t\t}\n\t\t\t\t\t\tupdateYAMLLineNumbers();\n\t\t\t\t\t}\n\t\t\t\t\tfunction validateYAMLWhileTyping() {\n\t\t\t\t\t\tif (!yamlEditor || !yamlEditor.dataset.automationYamlParseUrl) return;\n\t\t\t\t\t\tvar request = ++yamlParseRequest;\n\t\t\t\t\t\twindow.clearTimeout(yamlParseTimer);\n\t\t\t\t\t\tyamlParseTimer = window.setTimeout(function() {\n\t\t\t\t\t\t\tfetch(yamlEditor.dataset.automationYamlParseUrl, {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: new URLSearchParams({automation_yaml: automationYAMLValue()})})\n\t\t\t\t\t\t\t\t.then(function(response) { return response.ok ? response.json() : Promise.reject(new Error('YAML validation is unavailable.')); })\n\t\t\t\t\t\t\t\t.then(function(result) { if (request === yamlParseRequest) showYAMLDiagnostic(result.valid ? '' : result.message); })\n\t\t\t\t\t\t\t\t.catch(function(error) { if (request === yamlParseRequest) showYAMLDiagnostic(error.message); });\n\t\t\t\t\t\t}, 300);\n\t\t\t\t\t}\n\t\t\t\t\tfunction validateYAMLNow() {\n\t\t\t\t\t\tif (!yamlEditor || !yamlEditor.dataset.automationYamlParseUrl) return;\n\t\t\t\t\t\tvar request = ++yamlParseRequest;\n\t\t\t\t\t\twindow.clearTimeout(yamlParseTimer);\n\t\t\t\t\t\tfetch(yamlEditor.dataset.automationYamlParseUrl, {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: new URLSearchParams({automation_yaml: automationYAMLValue()})})\n\t\t\t\t\t\t\t.then(function(response) { return response.ok ? response.json() : Promise.reject(new Error('YAML validation is unavailable.')); })\n\t\t\t\t\t\t\t.then(function(result) { if (request === yamlParseRequest) showYAMLDiagnostic(result.valid ? '' : result.message); })\n\t\t\t\t\t\t\t.catch(function(error) { if (request === yamlParseRequest) showYAMLDiagnostic(error.message); });\n\t\t\t\t\t}\n\t\t\t\t\tif (yamlEditor) {\n\t\t\t\t\t\tyamlEditor.addEventListener('scroll', syncYAMLHighlightScroll);\n\t\t\t\t\t\t\tyamlEditor.addEventListener('keydown', function(event) {\n\t\t\t\t\t\t\t\tif (event.key !== 'Tab' || event.altKey || event.metaKey || event.ctrlKey) return;\n\t\t\t\t\t\t\t\tevent.preventDefault();\n\t\t\t\t\t\t\t\tvar value = yamlEditor.value;\n\t\t\t\t\t\t\t\tvar start = yamlEditor.selectionStart, end = yamlEditor.selectionEnd;\n\t\t\t\t\t\t\t\tyamlPendingValue = value;\n\t\t\t\t\t\t\t\tif (event.shiftKey) {\n\t\t\t\t\t\t\t\t\tvar lineStart = value.lastIndexOf('\\n', start - 1) + 1;\n\t\t\t\t\t\t\t\t\tvar removable = 0;\n\t\t\t\t\t\t\t\t\twhile (removable < 2 && value.charAt(lineStart + removable) === ' ') removable++;\n\t\t\t\t\t\t\t\t\tif (removable === 0) return;\n\t\t\t\t\t\t\t\t\tyamlPendingSelectionStart = start;\n\t\t\t\t\t\t\t\t\tyamlPendingSelectionEnd = end;\n\t\t\t\t\t\t\t\t\tyamlPendingInputType = 'deleteContentBackward';\n\t\t\t\t\t\t\t\t\tyamlEditor.setRangeText('', lineStart, lineStart + removable, 'preserve');\n\t\t\t\t\t\t\t\t\tyamlEditor.selectionStart = Math.max(lineStart, start - removable);\n\t\t\t\t\t\t\t\t\tyamlEditor.selectionEnd = Math.max(lineStart, end - removable);\n\t\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\t\tyamlPendingSelectionStart = start;\n\t\t\t\t\t\t\t\t\tyamlPendingSelectionEnd = end;\n\t\t\t\t\t\t\t\t\tyamlPendingInputType = 'insertText';\n\t\t\t\t\t\t\t\t\tyamlEditor.setRangeText('  ', start, end, 'end');\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tyamlEditor.dispatchEvent(new Event('input', {bubbles: true}));\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\tyamlEditor.addEventListener('beforeinput', function(event) {\n\t\t\t\t\t\t\t\tif (yamlRenderingValue) return;\n\t\t\t\t\t\t\t\tyamlPendingSelectionStart = yamlEditor.selectionStart;\n\t\t\t\t\t\t\t\tyamlPendingSelectionEnd = yamlEditor.selectionEnd;\n\t\t\t\t\t\t\t\tyamlPendingValue = yamlEditor.value;\n\t\t\t\t\t\t\t\tyamlPendingInputType = event && event.inputType ? event.inputType : '';\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\tyamlEditor.addEventListener('input', function() {\n\t\t\t\t\t\t\t\tif (yamlRenderingValue) return;\n\t\t\t\t\t\t\t\tif (yamlFoldedLines.size === 0) {\n\t\t\t\t\t\t\t\t\tyamlSourceValue = yamlEditor.value;\n\t\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\t\tvar oldSourceLines = yamlSourceValue.split('\\n');\n\t\t\t\t\t\t\t\t\tvar newVisibleValue = yamlEditor.value;\n\t\t\t\t\t\t\t\t\tvar preEditVisibleValue = yamlPendingValue || newVisibleValue;\n\t\t\t\t\t\t\t\t\tvar preEditStart = yamlOffsetToLineCol(preEditVisibleValue, yamlPendingSelectionStart);\n\t\t\t\t\t\t\t\t\tvar preEditEnd = yamlOffsetToLineCol(preEditVisibleValue, yamlPendingSelectionEnd);\n\t\t\t\t\t\t\t\t\tvar postEditOffset = yamlEditor.selectionStart;\n\t\t\t\t\t\t\t\t\tvar startVisibleLine = Math.min(preEditStart.line, yamlVisibleLineMap.length - 1);\n\t\t\t\t\t\t\t\t\tvar endVisibleLine = Math.min(preEditEnd.line, yamlVisibleLineMap.length - 1);\n\t\t\t\t\t\t\t\t\tif (startVisibleLine < 0 || endVisibleLine < 0 || !yamlVisibleLineMap.length) {\n\t\t\t\t\t\t\t\t\t\tyamlSourceValue = newVisibleValue;\n\t\t\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\t\t\tvar sourceStartLine = yamlVisibleLineMap[startVisibleLine];\n\t\t\t\t\t\t\t\t\t\tvar sourceEndLine = yamlVisibleLineMap[endVisibleLine];\n\t\t\t\t\t\t\t\t\t\tvar sourceStartOffset = yamlLineColToSourceOffset(oldSourceLines, sourceStartLine, preEditStart.col);\n\t\t\t\t\t\t\t\t\t\tvar sourceEndOffset = yamlLineColToSourceOffset(oldSourceLines, sourceEndLine, preEditEnd.col);\n\t\t\t\t\t\t\t\t\t\tvar collapsedDeletion = preEditStart.line === preEditEnd.line && preEditStart.col === preEditEnd.col && newVisibleValue.length < preEditVisibleValue.length;\n\t\t\t\t\t\t\t\t\t\tif (collapsedDeletion) {\n\t\t\t\t\t\t\t\t\t\t\tvar removedLength = preEditVisibleValue.length - newVisibleValue.length;\n\t\t\t\t\t\t\t\t\t\t\tvar sourceLineText = oldSourceLines[sourceStartLine] || '';\n\t\t\t\t\t\t\t\t\t\t\tif (yamlPendingInputType === 'deleteContentForward') {\n\t\t\t\t\t\t\t\t\t\t\t\tvar nextVisibleSourceLine = yamlVisibleLineMap[startVisibleLine + 1];\n\t\t\t\t\t\t\t\t\t\t\t\tvar atFoldBoundaryForward = preEditStart.col === sourceLineText.length && nextVisibleSourceLine !== undefined && nextVisibleSourceLine !== sourceStartLine + 1;\n\t\t\t\t\t\t\t\t\t\t\t\tif (atFoldBoundaryForward) {\n\t\t\t\t\t\t\t\t\t\t\t\t\tvar forwardBoundaryOffset = yamlLineColToSourceOffset(oldSourceLines, nextVisibleSourceLine, 0) - 1;\n\t\t\t\t\t\t\t\t\t\t\t\t\tsourceStartOffset = forwardBoundaryOffset;\n\t\t\t\t\t\t\t\t\t\t\t\t\tsourceEndOffset = forwardBoundaryOffset + removedLength;\n\t\t\t\t\t\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\t\t\t\t\t\tsourceEndOffset = sourceStartOffset + removedLength;\n\t\t\t\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\t\t\t\t\tvar prevVisibleSourceLine = startVisibleLine > 0 ? yamlVisibleLineMap[startVisibleLine - 1] : undefined;\n\t\t\t\t\t\t\t\t\t\t\t\tvar atFoldBoundaryBackward = preEditStart.col === 0 && startVisibleLine > 0 && prevVisibleSourceLine !== sourceStartLine - 1;\n\t\t\t\t\t\t\t\t\t\t\t\tif (atFoldBoundaryBackward) {\n\t\t\t\t\t\t\t\t\t\t\t\t\tvar backwardBoundaryOffset = yamlLineColToSourceOffset(oldSourceLines, sourceStartLine, 0) - 1;\n\t\t\t\t\t\t\t\t\t\t\t\t\tsourceStartOffset = Math.max(0, backwardBoundaryOffset);\n\t\t\t\t\t\t\t\t\t\t\t\t\tsourceEndOffset = sourceStartOffset + removedLength;\n\t\t\t\t\t\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\t\t\t\t\t\tsourceStartOffset = Math.max(0, sourceStartOffset - removedLength);\n\t\t\t\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t\tyamlSourceValue = yamlSourceValue.slice(0, sourceStartOffset) + yamlSourceValue.slice(sourceEndOffset);\n\t\t\t\t\t\t\t\t\t} else {\t\t\t\t\t\t\t\t\t\t\tvar visibleEditStartOffset = 0;\n\t\t\t\t\t\t\t\t\t\t\tfor (var k = 0; k < startVisibleLine; k++) visibleEditStartOffset += (yamlVisibleLineMap[k] !== undefined ? oldSourceLines[yamlVisibleLineMap[k]].length : 0) + 1;\n\t\t\t\t\t\t\t\t\t\t\tvisibleEditStartOffset += preEditStart.col;\n\t\t\t\t\t\t\t\t\t\t\tvar insertedText = newVisibleValue.slice(visibleEditStartOffset, postEditOffset);\n\t\t\t\t\t\t\t\t\t\t\tyamlSourceValue = yamlSourceValue.slice(0, sourceStartOffset) + insertedText + yamlSourceValue.slice(sourceEndOffset);\n\t\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tupdateYAMLLineNumbers();\n\t\t\t\t\t\t\t\tvalidateYAMLWhileTyping();\n\t\t\t\t\t\t\t\t});\t\t\t\t\t\tupdateYAMLLineNumbers();\n\t\t\t\t\t\tvalidateYAMLWhileTyping();\n\t\t\t\t\t\tyamlEditor.addEventListener('mousedown', function() { window.requestAnimationFrame(updateYAMLActiveRail); });\n\t\t\t\t\t\tyamlEditor.addEventListener('keyup', updateYAMLActiveRail);\n\t\t\t\t\t\tyamlEditor.addEventListener('input', updateYAMLActiveRail);\n\t\t\t\t\t\tyamlEditor.addEventListener('focus', updateYAMLActiveRail);\n\t\t\t\t\t\tyamlEditor.addEventListener('blur', updateYAMLActiveRail);\n\t\t\t\t\t}\t\t\t\t\tif (yamlFoldControls) yamlFoldControls.addEventListener('click', function(event) {\n\t\t\t\t\t\tvar toggle = event.target.closest('[data-automation-yaml-fold]');\n\t\t\t\t\t\tif (!toggle) return;\n\t\t\t\t\t\tvar line = Number(toggle.dataset.yamlLine) - 1;\n\t\t\t\t\t\tvar scrollTop = yamlActiveScrollTop();\n\t\t\t\t\t\tif (yamlFoldedLines.has(line)) yamlFoldedLines.delete(line); else yamlFoldedLines.add(line);\n\t\t\t\t\t\tif (yamlEditor) yamlEditor.blur();\n\t\t\t\t\t\tupdateYAMLLineNumbers();\n\t\t\t\t\t\trestoreYAMLScrollTop(scrollTop);\n\t\t\t\t\t});\n\t\t\t\t\t\tif (yamlViewport) yamlViewport.addEventListener('scroll', function() {\n\t\t\t\t\t\t\tif (!yamlEditor || !yamlEditor.hidden) return;\n\t\t\t\t\t\t\tif (yamlLineNumbers) yamlLineNumbers.scrollTop = yamlViewport.scrollTop;\n\t\t\t\t\t\t\tif (yamlFoldControls) yamlFoldControls.style.transform = 'translateY(' + (-yamlViewport.scrollTop) + 'px)';\n\t\t\t\t\t\t});\n\t\t\t\t\t\tif (yamlViewport) yamlViewport.addEventListener('wheel', function(event) {\n\t\t\t\t\t\t\tif (!yamlEditor || !yamlEditor.hidden) return;\n\t\t\t\t\t\t\tscrollYAMLFromWheel(event);\n\t\t\t\t\t\t}, {passive: false});\n\t\t\t\t\t\tif (yamlGutter) yamlGutter.addEventListener('wheel', scrollYAMLFromWheel, {passive: false});\n\t\t\t\t\t\twindow.addEventListener('resize', queueYAMLLineLayout);\t\t\t\t\tfunction syncCandidate(writeYAML) {\n\t\t\t\t\t\tvar automationName = builder.querySelector('[data-automation-name]');\n\t\t\t\t\t\tvar automationNameValue = automationName ? automationName.value : '';\n\t\t\t\t\t\tif (automationName) candidate.name = automationNameValue;\n\t\t\t\t\t\tbuilder.querySelectorAll('[data-automation-details-name]').forEach(function(input) { input.value = automationNameValue; });\n\t\t\t\t\t\tbuilder.querySelectorAll('[data-candidate-json]').forEach(function(input) { input.value = JSON.stringify(candidate); });\n\t\t\t\t\t\tif (writeYAML !== false) {\n\t\t\t\t\t\t\tvar serializedYAML = visualCandidateYAML();\n\t\t\t\t\t\t\t\tif (yamlEditor) {\n\t\t\t\t\t\t\t\t\tyamlSourceValue = serializedYAML;\n\t\t\t\t\t\t\t\t\tyamlFoldedLines.clear();\n\t\t\t\t\t\t\t\t\tsetYAMLEditorDisplay(serializedYAML);\n\t\t\t\t\t\t\t\t\tupdateYAMLLineNumbers();\n\t\t\t\t\t\t\t\t}\t\t\t\t\t\t\tbuilder.querySelectorAll('[data-automation-yaml-submission]').forEach(function(input) { input.value = serializedYAML; });\n\t\t\t\t\t\t}\n\t\t\t\t\t}\t\t\t\t\tfunction applyViewBox() { svg.setAttribute('viewBox', viewBox.join(' ')); }\n\t\t\t\tfunction graphPoint(event) {\n\t\t\t\t\tvar point = svg.createSVGPoint();\n\t\t\t\t\tpoint.x = event.clientX;\n\t\t\t\t\tpoint.y = event.clientY;\n\t\t\t\t\treturn point.matrixTransform(svg.getScreenCTM().inverse());\n\t\t\t\t}\n\t\t\t\tfunction renderNode(group, x, y) {\n\t\t\t\t\tgroup.dataset.nodeX = String(x);\n\t\t\t\t\tgroup.dataset.nodeY = String(y);\n\t\t\t\t\tgroup.setAttribute('transform', 'translate(' + x + ' ' + y + ')');\n\t\t\t\t\tvar node = nodeCandidate(group.dataset.nodeKey);\n\t\t\t\t\tif (node) node.position = {x: x, y: y};\n\t\t\t\t}\n\t\t\t\t\tfunction edgePoints(edge) {\n\t\t\t\t\t\tvar from = nodeGroup(edge.from), to = nodeGroup(edge.to); if (!from || !to) return null;\n\t\t\t\t\t\treturn {start: nodePortPoint(edge.from, 'right'), finish: nodePortPoint(edge.to, 'left')};\n\t\t\t\t\t}\n\t\t\t\t\tfunction setEdgeLine(line, points) { line.setAttribute('x1', points.start.x); line.setAttribute('y1', points.start.y); line.setAttribute('x2', points.finish.x); line.setAttribute('y2', points.finish.y); }\n\t\t\t\t\tfunction renderEdge(group) {\n\t\t\t\t\t\tvar edge = edgeCandidate(group.dataset.edgeKey), points = edge && edgePoints(edge); if (!edge || !points) return;\n\t\t\t\t\t\tgroup.dataset.from = edge.from; group.dataset.to = edge.to;\n\t\t\t\t\t\tgroup.querySelectorAll('[data-edge-hit]').forEach(function(line) { setEdgeLine(line, points); });\n\t\t\t\t\t\t\tvar foreground = foregroundEdge(edge.key); if (foreground) setEdgeLine(foreground, points);\n\t\t\t\t\t\t\tvar controls = edgeControls(edge.key); if (!controls) return;\n\t\t\t\t\t\t\tvar start = controls.querySelector('[data-edge-endpoint=\"from\"]'), finish = controls.querySelector('[data-edge-endpoint=\"to\"]');\n\t\t\t\t\t\t\tstart.setAttribute('cx', points.start.x); start.setAttribute('cy', points.start.y); finish.setAttribute('cx', points.finish.x); finish.setAttribute('cy', points.finish.y);\n\t\t\t\t\t\t\tcontrols.querySelector('[data-delete-edge]').setAttribute('transform', 'translate(' + ((points.start.x + points.finish.x) / 2) + ' ' + ((points.start.y + points.finish.y) / 2) + ')');\t\t\t\t\t}\n\t\t\t\t\tfunction renderEdges() { svg.querySelectorAll('.automation-draft-edge').forEach(renderEdge); }\n\t\t\t\t\tfunction connectionExists(from, to, exceptKey) { return (candidate.edges || []).some(function(edge) { return edge.key !== exceptKey && edge.from === from && edge.to === to; }); }\n\t\t\t\t\tfunction safeKey(value, fallback) {\n\t\t\t\t\tvar key = String(value || '').toLowerCase().trim().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 80).replace(/_+$/g, '');\n\t\t\t\t\treturn key || fallback;\n\t\t\t\t}\n\t\t\t\t\tfunction uniqueEdgeKey(base, exceptKey) {\n\t\t\t\t\t\tvar keys = new Set((candidate.edges || []).filter(function(edge) { return edge.key !== exceptKey; }).map(function(edge) { return edge.key; }));\n\t\t\t\t\t\tif (!keys.has(base)) return base;\n\t\t\t\t\t\tfor (var suffix = 2; ; suffix++) if (!keys.has(base + '_' + suffix)) return base + '_' + suffix;\n\t\t\t\t\t}\n\t\t\t\t\tfunction svgElement(name, attributes) { var element = document.createElementNS('http://www.w3.org/2000/svg', name); Object.keys(attributes || {}).forEach(function(key) { element.setAttribute(key, attributes[key]); }); return element; }\n\t\t\t\t\t\tfunction appendEdgeGroup(edge) {\n\t\t\t\t\t\t\tvar group = svgElement('g', {class: 'automation-draft-edge', tabindex: '0', role: 'group', 'aria-label': nodeName(edge.from) + ' to ' + nodeName(edge.to) + ' connection'}); group.dataset.edgeKey = edge.key; group.dataset.from = edge.from; group.dataset.to = edge.to;\n\t\t\t\t\t\t\tgroup.appendChild(svgElement('line', {class: 'automation-edge-hit', 'data-edge-hit': ''}));\n\t\t\t\t\t\t\tvar controls = svgElement('g', {class: 'automation-edge-controls', 'data-edge-controls': '', 'data-edge-key': edge.key});\n\t\t\t\t\t\t\t['from', 'to'].forEach(function(endpoint) { controls.appendChild(svgElement('circle', {r: '7', class: 'automation-edge-endpoint', tabindex: '0', role: 'button', 'data-reconnect-edge': '', 'data-edge-endpoint': endpoint, 'aria-label': 'Reconnect connection ' + (endpoint === 'from' ? 'start' : 'end')})); });\n\t\t\t\t\t\t\tvar remove = svgElement('g', {class: 'automation-edge-delete', tabindex: '0', role: 'button', 'data-delete-edge': '', 'aria-label': 'Delete connection'}); remove.appendChild(svgElement('circle', {r: '11'})); remove.appendChild(svgElement('path', {d: 'M-4 -4 L4 4 M4 -4 L-4 4', class: 'automation-delete-x'})); controls.appendChild(remove);\n\t\t\t\t\t\t\tvar foreground = svgElement('line', {class: 'automation-graph-edge automation-edge-foreground', 'stroke-width': '2', 'marker-end': 'url(#automation-draft-arrow)', 'data-edge-foreground': '', 'data-edge-key': edge.key});\n\t\t\t\t\t\t\tsvg.insertBefore(group, svg.querySelector('.automation-draft-node')); svg.insertBefore(foreground, preview); svg.appendChild(controls); bindEdgeGroup(group); renderEdge(group);\n\t\t\t\t\t\t}\t\t\t\t\tfunction canonicalEdge(from, to, exceptKey) { return edgePalette.find(function(edge) { return edge.from === from && edge.to === to && !(candidate.edges || []).some(function(current) { return current.key !== exceptKey && current.key === edge.key; }); }); }\n\t\t\t\t\tfunction addConnection(from, to) {\n\t\t\t\t\t\tif (!from || !to || from === to) { if (connectStatus) connectStatus.textContent = 'Connect two different nodes.'; return; }\n\t\t\t\t\t\tif (connectionExists(from, to, '')) { if (connectStatus) connectStatus.textContent = 'Those nodes are already connected in that direction.'; return; }\n\t\t\t\t\t\tcandidate.edges = candidate.edges || [];\n\t\t\t\t\t\tvar canonical = canonicalEdge(from, to, '');\n\t\t\t\t\t\tvar edge = canonical ? JSON.parse(JSON.stringify(canonical)) : {key: uniqueEdgeKey('edge_' + safeKey(from, 'source') + '_' + safeKey(to, 'target'), ''), from: from, to: to, label: '', condition: {}};\n\t\t\t\t\t\tedge.from_port = 'right'; edge.to_port = 'left'; candidate.edges.push(edge);\n\t\t\t\t\t\tappendEdgeGroup(edge); syncCandidate();\n\t\t\t\t\t\tif (connectStatus) connectStatus.textContent = 'Connected ' + nodeName(from) + ' to ' + nodeName(to) + '. Select a line to rewire or delete it.';\n\t\t\t\t\t}\n\t\t\t\t\tfunction reconnectEdge(key, endpoint, nodeKey) {\n\t\t\t\t\t\tvar edge = edgeCandidate(key); if (!edge) return; var from = endpoint === 'from' ? nodeKey : edge.from; var to = endpoint === 'to' ? nodeKey : edge.to;\n\t\t\t\t\t\tif (!from || !to || from === to || connectionExists(from, to, key)) { if (connectStatus) connectStatus.textContent = 'That reconnection would duplicate or loop back to the same node.'; return; }\n\t\t\t\t\t\tvar oldKey = edge.key, canonical = canonicalEdge(from, to, oldKey); edge.from = from; edge.to = to; edge.from_port = 'right'; edge.to_port = 'left';\n\t\t\t\t\t\tif (canonical) { edge.key = canonical.key; edge.label = canonical.label || ''; edge.condition = canonical.condition || {}; } else if (edgePalette.some(function(item) { return item.key === edge.key; })) { edge.key = uniqueEdgeKey('edge_' + safeKey(from, 'source') + '_' + safeKey(to, 'target'), oldKey); edge.condition = {}; }\n\t\t\t\t\t\t\tvar group = svg.querySelector('.automation-draft-edge[data-edge-key=\"' + CSS.escape(oldKey) + '\"]');\n\t\t\t\t\t\t\tvar foreground = foregroundEdge(oldKey); if (foreground) foreground.dataset.edgeKey = edge.key;\n\t\t\t\t\t\t\tvar controls = edgeControls(oldKey); if (controls) controls.dataset.edgeKey = edge.key;\n\t\t\t\t\t\t\tif (group) { group.dataset.edgeKey = edge.key; renderEdge(group); } syncCandidate(); if (connectStatus) connectStatus.textContent = 'Reconnected ' + nodeName(from) + ' to ' + nodeName(to) + '.';\t\t\t\t\t}\n\t\t\t\t\tfunction removeEdge(key) {\n\t\t\t\t\t\tcandidate.edges = (candidate.edges || []).filter(function(edge) { return edge.key !== key; });\n\t\t\t\t\t\t\tvar group = svg.querySelector('.automation-draft-edge[data-edge-key=\"' + CSS.escape(key) + '\"]'); if (group) group.remove();\n\t\t\t\t\t\t\tvar foreground = foregroundEdge(key); if (foreground) foreground.remove();\n\t\t\t\t\t\t\tvar controls = edgeControls(key); if (controls) controls.remove();\t\t\t\t\t\tif (selectedEdgeKey === key) selectEdge(null);\n\t\t\t\t\t\tsyncCandidate(); if (connectStatus) connectStatus.textContent = 'Connection disconnected. Draw a new one from a right handle to a left handle.';\n\t\t\t\t\t}\n\t\t\t\t\tfunction removeNode(key) { var name = nodeName(key); candidate.nodes = (candidate.nodes || []).filter(function(node) { return node.key !== key; }); candidate.edges = (candidate.edges || []).filter(function(edge) { return edge.from !== key && edge.to !== key; }); var group = nodeGroup(key); if (group) group.remove(); svg.querySelectorAll('.automation-draft-edge').forEach(function(edgeGroup) { if (!edgeCandidate(edgeGroup.dataset.edgeKey)) edgeGroup.remove(); }); svg.querySelectorAll('[data-edge-foreground]').forEach(function(edgeLine) { if (!edgeCandidate(edgeLine.dataset.edgeKey)) edgeLine.remove(); }); svg.querySelectorAll('[data-edge-controls]').forEach(function(controls) { if (!edgeCandidate(controls.dataset.edgeKey)) controls.remove(); }); if (selectedEdgeKey && !edgeCandidate(selectedEdgeKey)) selectEdge(null); syncCandidate(); if (connectStatus) connectStatus.textContent = name + ' deleted with its connections.'; }\n\t\t\t\t\tfunction selectEdge(group) {\n\t\t\t\t\t\tselectedEdgeKey = group ? group.dataset.edgeKey : '';\n\t\t\t\t\t\t\tsvg.querySelectorAll('.automation-draft-edge').forEach(function(edge) { edge.classList.toggle('automation-draft-edge--selected', edge === group); });\n\t\t\t\t\t\t\tsvg.querySelectorAll('[data-edge-foreground]').forEach(function(edge) { edge.classList.toggle('automation-edge-foreground--selected', !!group && edge.dataset.edgeKey === selectedEdgeKey); });\n\t\t\t\t\t\t\tsvg.querySelectorAll('[data-edge-controls]').forEach(function(controls) { controls.classList.toggle('automation-edge-controls--selected', !!group && controls.dataset.edgeKey === selectedEdgeKey); });\n\t\t\t\t\t\tif (group && connectStatus) connectStatus.textContent = 'Connection selected. Drag either endpoint to reconnect it, or use the × control to delete it.';\n\t\t\t\t\t}\n\t\t\t\t\tfunction beginReconnect(group, handle, event) {\n\t\t\t\t\t\tif (event.button !== 0) return; event.preventDefault(); event.stopPropagation(); clearActiveConnection(); var edge = edgeCandidate(group.dataset.edgeKey), points = edge && edgePoints(edge); if (!points) return;\n\t\t\t\t\t\tvar endpoint = handle.dataset.edgeEndpoint, start = endpoint === 'from' ? points.start : points.finish;\n\t\t\t\t\t\tactiveConnection = {reconnectKey: edge.key, endpoint: endpoint, pointerId: event.pointerId, requiredPortKind: endpoint === 'from' ? 'output' : 'input'};\n\t\t\t\t\t\tpreview.setAttribute('x1', start.x); preview.setAttribute('y1', start.y); preview.setAttribute('x2', start.x); preview.setAttribute('y2', start.y); preview.removeAttribute('hidden');\n\t\t\t\t\t\tshowConnectionTargets('', '', activeConnection.requiredPortKind); window.addEventListener('pointermove', moveConnection); window.addEventListener('pointerup', finishConnection); window.addEventListener('pointercancel', cancelConnection);\n\t\t\t\t\t}\n\t\t\t\t\tfunction bindEdgeGroup(group) {\n\t\t\t\t\t\tvar hit = group.querySelector('[data-edge-hit]'); hit.addEventListener('pointerdown', function(event) { event.stopPropagation(); }); hit.addEventListener('click', function(event) { event.preventDefault(); event.stopPropagation(); selectEdge(group); });\n\t\t\t\t\t\tvar controls = edgeControls(group.dataset.edgeKey); if (!controls) return;\n\t\t\t\t\t\tcontrols.querySelectorAll('[data-reconnect-edge]').forEach(function(handle) { handle.addEventListener('pointerdown', function(event) { beginReconnect(group, handle, event); }); });\n\t\t\t\t\t\tvar remove = controls.querySelector('[data-delete-edge]'); function deleteCurrent(event) { event.preventDefault(); event.stopPropagation(); removeEdge(group.dataset.edgeKey); } remove.addEventListener('pointerdown', function(event) { event.stopPropagation(); }); remove.addEventListener('click', deleteCurrent); remove.addEventListener('keydown', function(event) { if (event.key === 'Enter' || event.key === ' ') deleteCurrent(event); });\n\t\t\t\t\t\tgroup.addEventListener('keydown', function(event) { if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); removeEdge(group.dataset.edgeKey); } });\n\t\t\t\t\t}\n\t\t\t\t\tfunction clearConnectionHandles() {\n\t\t\t\t\t\tsvg.querySelectorAll('[data-connect-port]').forEach(function(handle) { handle.classList.remove('automation-connect-handle--selected', 'automation-connect-handle--eligible'); });\n\t\t\t\t\t}\n\t\t\t\t\tfunction showConnectionTargets(selectedNode, selectedSide, requiredPortKind) {\n\t\t\t\t\t\tclearConnectionHandles();\n\t\t\t\t\t\tif (selectedNode) {\n\t\t\t\t\t\t\tvar sourceHandle = svg.querySelector('[data-connect-port=\"' + CSS.escape(selectedNode) + '\"][data-port-side=\"' + selectedSide + '\"]');\n\t\t\t\t\t\t\tif (sourceHandle) sourceHandle.classList.add('automation-connect-handle--selected');\n\t\t\t\t\t\t}\n\t\t\t\t\t\tsvg.querySelectorAll('[data-connect-port]').forEach(function(handle) {\n\t\t\t\t\t\t\tif (handle.dataset.portKind === requiredPortKind && handle.dataset.connectPort !== selectedNode) handle.classList.add('automation-connect-handle--eligible');\n\t\t\t\t\t\t});\n\t\t\t\t\t}\n\t\t\t\t\tfunction removeConnectionListeners() {\n\t\t\t\t\twindow.removeEventListener('pointermove', moveConnection);\n\t\t\t\t\twindow.removeEventListener('pointerup', finishConnection);\n\t\t\t\t\twindow.removeEventListener('pointercancel', cancelConnection);\n\t\t\t\t}\n\t\t\t\tfunction clearActiveConnection() {\n\t\t\t\t\tactiveConnection = null; keyboardSource = null; preview.setAttribute('hidden', ''); clearConnectionHandles(); removeConnectionListeners();\n\t\t\t\t}\n\t\t\t\tfunction moveConnection(event) {\n\t\t\t\t\tif (!activeConnection || event.pointerId !== activeConnection.pointerId) return;\n\t\t\t\t\tvar point = graphPoint(event); preview.setAttribute('x2', point.x); preview.setAttribute('y2', point.y);\n\t\t\t\t}\n\t\t\t\t\tfunction finishConnection(event) {\n\t\t\t\t\t\tif (!activeConnection || event.pointerId !== activeConnection.pointerId) return;\n\t\t\t\t\t\tvar target = null;\n\t\t\t\t\t\tif (document.elementFromPoint) { var underPointer = document.elementFromPoint(event.clientX, event.clientY); target = underPointer && underPointer.closest('[data-connect-port]'); }\n\t\t\t\t\t\tif (!target && event.target instanceof Element) target = event.target.closest('[data-connect-port]');\n\t\t\t\t\t\tvar connection = activeConnection; clearActiveConnection();\n\t\t\t\t\t\tif (target && target.dataset.portKind === connection.requiredPortKind) {\n\t\t\t\t\t\t\tif (connection.reconnectKey) reconnectEdge(connection.reconnectKey, connection.endpoint, target.dataset.connectPort);\n\t\t\t\t\t\t\telse addConnection(connection.from, target.dataset.connectPort);\n\t\t\t\t\t\t} else if (target && connectStatus) {\n\t\t\t\t\t\t\tconnectStatus.textContent = connection.requiredPortKind === 'input' ? 'Connections must end at a left handle.' : 'Connection sources must use a right handle.';\n\t\t\t\t\t\t} else if (connectStatus) connectStatus.textContent = 'Connection cancelled. Drop a connection from a right handle onto another node\\'s left handle.';\n\t\t\t\t\t}\n\t\t\t\t\tfunction cancelConnection(event) { if (activeConnection && event.pointerId === activeConnection.pointerId) clearActiveConnection(); }\n\t\t\t\t\tfunction beginConnection(handle, event) {\n\t\t\t\t\t\tif (event.button !== 0) return; event.preventDefault(); event.stopPropagation(); clearActiveConnection();\n\t\t\t\t\t\tif (handle.dataset.portKind !== 'output') { if (connectStatus) connectStatus.textContent = 'Start a connection from a right handle.'; return; }\n\t\t\t\t\t\tvar start = nodePortPoint(handle.dataset.connectPort, 'right'); if (!start) return;\n\t\t\t\t\t\tactiveConnection = {from: handle.dataset.connectPort, fromSide: 'right', pointerId: event.pointerId, requiredPortKind: 'input'};\n\t\t\t\t\t\tpreview.setAttribute('x1', start.x); preview.setAttribute('y1', start.y); preview.setAttribute('x2', start.x); preview.setAttribute('y2', start.y); preview.removeAttribute('hidden');\n\t\t\t\t\t\tshowConnectionTargets(activeConnection.from, 'right', 'input'); window.addEventListener('pointermove', moveConnection); window.addEventListener('pointerup', finishConnection); window.addEventListener('pointercancel', cancelConnection);\n\t\t\t\t\t}\n\t\t\t\t\tsvg.querySelectorAll('.automation-draft-edge').forEach(bindEdgeGroup);\n\t\t\t\t\tsvg.querySelectorAll('[data-connect-port]').forEach(function(handle) {\n\t\t\t\t\t\thandle.addEventListener('pointerdown', function(event) { beginConnection(handle, event); });\n\t\t\t\t\t\thandle.addEventListener('click', function(event) { event.preventDefault(); event.stopPropagation(); });\n\t\t\t\t\t\t\thandle.addEventListener('keydown', function(event) {\n\t\t\t\t\t\t\t\tevent.stopPropagation(); if (event.key !== 'Enter' && event.key !== ' ') return; event.preventDefault();\n\t\t\t\t\t\t\t\tif (!keyboardSource) {\n\t\t\t\t\t\t\t\t\tif (handle.dataset.portKind !== 'output') { if (connectStatus) connectStatus.textContent = 'Start a connection from a right handle.'; return; }\n\t\t\t\t\t\t\t\t\tkeyboardSource = {key: handle.dataset.connectPort, side: 'right'}; showConnectionTargets(keyboardSource.key, 'right', 'input'); if (connectStatus) connectStatus.textContent = 'Source selected. Focus another node\\'s left handle and press Enter.'; return;\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tif (handle.dataset.portKind !== 'input') { if (connectStatus) connectStatus.textContent = 'Connections must end at a left handle.'; return; }\n\t\t\t\t\t\t\t\tvar start = keyboardSource; keyboardSource = null; clearConnectionHandles(); addConnection(start.key, handle.dataset.connectPort);\n\t\t\t\t\t\t\t});\t\t\t\t\t});\n\t\t\t\t\tsvg.querySelectorAll('.automation-draft-node').forEach(function(group) {\n\t\t\t\t\t\tvar remove = group.querySelector('[data-delete-node]');\n\t\t\t\t\t\tfunction deleteCurrent(event) { event.preventDefault(); event.stopPropagation(); removeNode(group.dataset.nodeKey); }\n\t\t\t\t\t\tremove.addEventListener('pointerdown', function(event) { event.stopPropagation(); }); remove.addEventListener('click', deleteCurrent);\n\t\t\t\t\t\tremove.addEventListener('keydown', function(event) { if (event.key === 'Enter' || event.key === ' ') deleteCurrent(event); });\n\t\t\t\t\t\tgroup.addEventListener('pointerdown', function(event) {\n\t\t\t\t\t\t\tif (event.button !== 0 || event.target.closest('[data-connect-port], [data-delete-node]')) return;\n\t\t\t\t\t\t\tevent.preventDefault(); event.stopPropagation(); try { group.setPointerCapture(event.pointerId); } catch (_) {}\n\t\t\t\t\t\tvar start = graphPoint(event), originX = Number(group.dataset.nodeX), originY = Number(group.dataset.nodeY);\n\t\t\t\t\t\tvar dragFrame = 0;\n\t\t\t\t\t\tfunction move(moveEvent) {\n\t\t\t\t\t\t\tvar point = graphPoint(moveEvent);\n\t\t\t\t\t\t\trenderNode(group, Math.round(originX + point.x - start.x), Math.round(originY + point.y - start.y)); renderEdges();\n\t\t\t\t\t\t\tif (!dragFrame) dragFrame = requestAnimationFrame(function() { dragFrame = 0; syncCandidate(); });\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction done() {\n\t\t\t\t\t\t\tgroup.removeEventListener('pointermove', move); group.removeEventListener('pointerup', done); group.removeEventListener('pointercancel', done);\n\t\t\t\t\t\t\tif (dragFrame) { cancelAnimationFrame(dragFrame); dragFrame = 0; }\n\t\t\t\t\t\t\tsyncCandidate();\n\t\t\t\t\t\t}\n\t\t\t\t\t\tgroup.addEventListener('pointermove', move); group.addEventListener('pointerup', done); group.addEventListener('pointercancel', done);\n\t\t\t\t\t});\n\t\t\t\t\t\tgroup.addEventListener('keydown', function(event) {\n\t\t\t\t\t\t\tif (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); removeNode(group.dataset.nodeKey); return; }\n\t\t\t\t\t\t\tvar dx = 0, dy = 0;\n\t\t\t\t\t\t\tif (event.key === 'ArrowLeft') dx = -10; if (event.key === 'ArrowRight') dx = 10;\n\t\t\t\t\t\tif (event.key === 'ArrowUp') dy = -10; if (event.key === 'ArrowDown') dy = 10;\n\t\t\t\t\t\tif (!dx && !dy) return;\n\t\t\t\t\t\tevent.preventDefault(); renderNode(group, Number(group.dataset.nodeX) + dx, Number(group.dataset.nodeY) + dy); renderEdges(); syncCandidate();\n\t\t\t\t\t});\n\t\t\t\t});\n\t\t\t\t\tvar pan = null;\n\t\t\t\t\tvar panFrame = 0;\n\t\t\t\t\tfunction applyBuilderPan() {\n\t\t\t\t\t\tpanFrame = 0;\n\t\t\t\t\t\tif (!pan || !pan.pending) return;\n\t\t\t\t\t\tviewBox[0] = pan.view[0] - (pan.pending.x - pan.clientX) * pan.unitsX;\n\t\t\t\t\t\tviewBox[1] = pan.view[1] - (pan.pending.y - pan.clientY) * pan.unitsY;\n\t\t\t\t\t\tapplyViewBox();\n\t\t\t\t\t}\n\t\t\t\t\tsvg.addEventListener('pointerdown', function(event) {\n\t\t\t\t\t\tif (event.target !== svg || event.button !== 0) return;\n\t\t\t\t\t\tvar rect = svg.getBoundingClientRect();\n\t\t\t\t\t\tif (!rect.width || !rect.height) return;\n\t\t\t\t\t\tpan = {pointerId:event.pointerId, clientX:event.clientX, clientY:event.clientY, view:viewBox.slice(), unitsX:viewBox[2]/rect.width, unitsY:viewBox[3]/rect.height, pending:null};\n\t\t\t\t\t\ttry { svg.setPointerCapture(event.pointerId); } catch (_) {}\n\t\t\t\t\t});\n\t\t\t\t\tsvg.addEventListener('pointermove', function(event) {\n\t\t\t\t\t\tif (!pan || event.pointerId !== pan.pointerId) return;\n\t\t\t\t\t\tpan.pending = {x:event.clientX, y:event.clientY};\n\t\t\t\t\t\tif (!panFrame) panFrame = requestAnimationFrame(applyBuilderPan);\n\t\t\t\t\t});\n\t\t\t\t\tfunction finishBuilderPan(event) {\n\t\t\t\t\t\tif (!pan || event.pointerId !== pan.pointerId) return;\n\t\t\t\t\t\tpan.pending = {x:event.clientX, y:event.clientY};\n\t\t\t\t\t\tif (panFrame) { cancelAnimationFrame(panFrame); panFrame = 0; }\n\t\t\t\t\t\tapplyBuilderPan(); pan = null;\n\t\t\t\t\t}\n\t\t\t\t\tsvg.addEventListener('pointerup', finishBuilderPan);\n\t\t\t\t\tsvg.addEventListener('pointercancel', finishBuilderPan);\n\t\t\t\t\tfunction zoom(factor) {\n\t\t\t\t\tvar cx = viewBox[0] + viewBox[2] / 2, cy = viewBox[1] + viewBox[3] / 2;\n\t\t\t\t\tviewBox[2] = Math.max(240, Math.min(3000, viewBox[2] * factor)); viewBox[3] = Math.max(160, Math.min(2000, viewBox[3] * factor));\n\t\t\t\t\tviewBox[0] = cx - viewBox[2] / 2; viewBox[1] = cy - viewBox[3] / 2; applyViewBox();\n\t\t\t\t}\n\t\t\t\tsvg.addEventListener('wheel', function(event) {\n\t\t\t\t\tif (!event.ctrlKey && !event.metaKey) return;\n\t\t\t\t\tevent.preventDefault(); zoom(event.deltaY > 0 ? 1.12 : 0.88);\n\t\t\t\t}, {passive: false});\n\t\t\t\troot.querySelector('[data-automation-zoom-in]').addEventListener('click', function() { zoom(0.82); });\n\t\t\t\troot.querySelector('[data-automation-zoom-out]').addEventListener('click', function() { zoom(1.22); });\n\t\t\t\troot.querySelector('[data-automation-fit]').addEventListener('click', function() {\n\t\t\t\t\tvar groups = Array.from(svg.querySelectorAll('.automation-draft-node'));\n\t\t\t\t\tif (!groups.length) { viewBox = initialViewBox.slice(); applyViewBox(); return; }\n\t\t\t\t\tvar xs = groups.map(function(group) { return Number(group.dataset.nodeX); });\n\t\t\t\t\tvar ys = groups.map(function(group) { return Number(group.dataset.nodeY); });\n\t\t\t\t\tvar minX = Math.min.apply(null, xs) - 60, minY = Math.min.apply(null, ys) - 60;\n\t\t\t\t\tvar maxX = Math.max.apply(null, xs) + 230, maxY = Math.max.apply(null, ys) + 164;\n\t\t\t\t\tviewBox = [minX, minY, maxX - minX, maxY - minY]; applyViewBox();\n\t\t\t\t});\n\t\t\t\troot.querySelector('[data-automation-reset]').addEventListener('click', function() {\n\t\t\t\t\tsvg.querySelectorAll('.automation-draft-node').forEach(function(group) { renderNode(group, Number(group.dataset.defaultX), Number(group.dataset.defaultY)); });\n\t\t\t\t\trenderEdges(); syncCandidate(); viewBox = initialViewBox.slice(); applyViewBox();\n\t\t\t\t});\n\t\t\t\t\tbuilder.addEventListener('htmx:beforeCleanupElement', function(event) {\n\t\t\t\t\t\tif (event.target === builder) clearActiveConnection();\n\t\t\t\t\t});\n\t\t\t\t\t\tvar automationName = builder.querySelector('[data-automation-name]');\n\t\t\t\t\t\tif (automationName) automationName.addEventListener('input', syncCandidate);\t\t\t\t\tbuilder.addEventListener('input', function(event) { if (event.target !== yamlEditor && !event.target.closest('[data-automation-node-dialog]')) syncCandidate(); });\n\t\t\t\t\tbuilder.addEventListener('change', function(event) { if (event.target !== yamlEditor && !event.target.closest('[data-automation-node-dialog]')) syncCandidate(); });\n\t\t\t\t\tbuilder.addEventListener('submit', function() {\n\t\t\t\t\t\tif (yamlEditor && automationYAMLValue() !== visualCandidateYAML()) {\n\t\t\t\t\t\t\tvar submittedYAML = automationYAMLValue();\n\t\t\t\t\t\t\tsetYAMLEditorDisplay(submittedYAML);\n\t\t\t\t\t\t\tbuilder.querySelectorAll('[data-automation-yaml-submission]').forEach(function(input) { input.value = submittedYAML; });\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tsyncCandidate();\n\t\t\t\t\t});\n\t\t\t\t\t\tvar viewRoot = builder.querySelector('[data-automation-view-root]');\n\t\t\t\t\t\tvar yamlPanel = viewRoot && viewRoot.querySelector('[data-automation-yaml-panel]');\n\t\t\t\t\t\tvar detailsPanel = viewRoot && viewRoot.querySelector('[data-automation-details-panel]');\n\t\t\t\t\t\tvar graphButton = viewRoot && viewRoot.querySelector('[data-automation-view-graph]');\n\t\t\t\t\t\tvar yamlButton = viewRoot && viewRoot.querySelector('[data-automation-view-yaml]');\n\t\t\t\t\t\tvar detailsButton = viewRoot && viewRoot.querySelector('[data-automation-view-details]');\n\t\t\t\t\t\tvar detailsForm = builder.querySelector('[data-automation-details-form]');\n\t\t\t\t\t\tfunction selectAutomationBuilderView(view) {\n\t\t\t\t\t\t\tvar applied = window.setAutomationCanvasView && window.setAutomationCanvasView(viewRoot, view, {detailsPanelSelector: '[data-automation-details-panel]'});\n\t\t\t\t\t\t\tif (!applied) return;\n\t\t\t\t\t\t\tqueueYAMLLineLayout();\n\t\t\t\t\t\t\tif (view === 'yaml') validateYAMLNow();\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction previewYAMLThenSelect(view) {\n\t\t\t\t\t\t\tvar form = document.getElementById('automation-design-form');\n\t\t\t\t\t\t\tif (yamlEditor && form && automationYAMLValue() !== visualCandidateYAML()) {\n\t\t\t\t\t\t\t\tvar initialView = form.querySelector('[data-automation-initial-view]');\n\t\t\t\t\t\t\t\tif (initialView) initialView.value = view === 'details' ? 'details' : '';\n\t\t\t\t\t\t\t\tform.requestSubmit();\n\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tselectAutomationBuilderView(view);\n\t\t\t\t\t\t}\n\t\t\t\t\t\tgraphButton && graphButton.addEventListener('click', function() { previewYAMLThenSelect('graph'); });\n\t\t\t\t\t\tyamlButton && yamlButton.addEventListener('click', function() { selectAutomationBuilderView('yaml'); });\n\t\t\t\t\t\t\tdetailsButton && detailsButton.addEventListener('click', function() { previewYAMLThenSelect('details'); });\t\t\t\t\t\tbuilder.querySelectorAll('[data-automation-builder-save]').forEach(function(button) {\n\t\t\t\t\t\t\tbutton.addEventListener('click', function(event) {\n\t\t\t\t\t\t\t\tif (!detailsPanel || detailsPanel.hidden || !detailsForm) return;\n\t\t\t\t\t\t\t\tevent.preventDefault();\n\t\t\t\t\t\t\t\tsyncCandidate();\n\t\t\t\t\t\t\t\tdetailsForm.requestSubmit();\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t});\n\t\t\t\t\t\t\trenderEdges(); syncCandidate(false);\n\t\t\t\t\t\t\tvar initialView = builder.querySelector('[data-automation-initial-view]');\n\t\t\t\t\t\t\tif (initialView && initialView.value === 'details') selectAutomationBuilderView('details');\n\t\t\t\t\t})();\t\t</script></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -5701,12 +5682,12 @@ func automationGraphThemeStyles() templ.Component {
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var301 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var301 == nil {
-			templ_7745c5c3_Var301 = templ.NopComponent
+		templ_7745c5c3_Var300 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var300 == nil {
+			templ_7745c5c3_Var300 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 451, "<style>\n\t\t.automation-graph-edge { fill: none; stroke: oklch(var(--bc) / 0.35); vector-effect: non-scaling-stroke; }\n\t\t\t.automation-graph-edge--highlighted { stroke: oklch(var(--p)); }\n\t\t\t.automation-graph-edge--preview { stroke: oklch(var(--p)); stroke-width: 4; stroke-linecap: round; vector-effect: non-scaling-stroke; pointer-events: none; }\n\t\t\t.automation-graph-arrow { fill: oklch(var(--bc) / 0.45); }\n\t\t\t.automation-graph-preview-arrow { fill: oklch(var(--p)); }\n\t\t.automation-graph-node { fill: oklch(var(--b2)); stroke: oklch(var(--bc) / 0.3); vector-effect: non-scaling-stroke; }\n\t\t.automation-graph-node--failed { fill: oklch(var(--er) / 0.15); stroke: oklch(var(--er)); }\n\t\t.automation-graph-node--blocked { fill: oklch(var(--wa) / 0.15); stroke: oklch(var(--wa)); }\n\t\t.automation-graph-node--waiting { fill: oklch(var(--in) / 0.15); stroke: oklch(var(--in)); }\n\t\t\t.automation-graph-node--running { fill: oklch(var(--p) / 0.15); stroke: oklch(var(--p)); animation: automation-running-pulse 1.8s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }\n\t\t\t@keyframes automation-running-pulse { 0%, 100% { stroke-opacity: 0.72; } 50% { stroke-opacity: 1; stroke-width: 5; } }\n\t\t\t@media (prefers-reduced-motion: reduce) { .automation-graph-node--running { animation: none; } }\t\t.automation-graph-node--completed { fill: oklch(var(--su) / 0.15); stroke: oklch(var(--su)); }\n\t\t.automation-graph-label { fill: oklch(var(--bc)); pointer-events: none; }\n\t\t.automation-graph-label--primary { fill: oklch(var(--bc)); }\n\t\t.automation-graph-label--secondary { fill: oklch(var(--bc) / 0.7); }\n\t\t.automation-graph-label--muted { fill: oklch(var(--bc) / 0.6); }\n\t\t.automation-node-content { box-sizing: border-box; display: flex; height: 100%; width: 100%; flex-direction: column; align-items: center; justify-content: center; gap: 4px; padding: 10px 12px; color: oklch(var(--bc)); text-align: center; line-height: 1.15; overflow: hidden; }\n\t\t.automation-node-content strong { display: -webkit-box; max-width: 100%; overflow: hidden; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; font-size: 13px; }\n\t\t.automation-node-content span { font-size: 10px; font-weight: 650; }\n\t\t.automation-node-content small { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: oklch(var(--bc) / 0.65); font-size: 9px; }\n\t\t.automation-state-dot { display: inline-block; width: 0.65rem; height: 0.65rem; border-radius: 9999px; border: 2px solid oklch(var(--bc) / 0.4); }\n\t\t.automation-state-dot--failed { border-color: oklch(var(--er)); background: oklch(var(--er) / 0.35); }\n\t\t.automation-state-dot--blocked { border-color: oklch(var(--wa)); background: oklch(var(--wa) / 0.35); }\n\t\t.automation-state-dot--waiting { border-color: oklch(var(--in)); background: oklch(var(--in) / 0.35); }\n\t\t.automation-state-dot--running { border-color: oklch(var(--p)); background: oklch(var(--p) / 0.35); }\n\t\t.automation-state-dot--recently_completed { border-color: oklch(var(--su)); background: oklch(var(--su) / 0.35); }\n\t\t.automation-node-state--failed { color: oklch(var(--er)); }\n\t\t.automation-node-state--blocked { color: oklch(var(--wa)); }\n\t\t.automation-node-state--waiting { color: oklch(var(--in)); }\n\t\t.automation-node-state--running { color: oklch(var(--p)); }\n\t\t.automation-node-state--recently_completed { color: oklch(var(--su)); }\n\t\t.automation-canvas-shell svg { cursor: grab; }\n\t\t.automation-graph-link { -webkit-user-drag: none; }\n\t\t.automation-canvas-shell svg:active { cursor: grabbing; }\n\t\t.automation-canvas-shell .automation-draft-node { cursor: grab; }\n\t\t.automation-canvas-shell .automation-draft-node:active { cursor: grabbing; }\n\t\t\t.automation-connect-handle { stroke: oklch(var(--p)); stroke-width: 2; vector-effect: non-scaling-stroke; }\n\t\t\t.automation-connect-handle--input { fill: oklch(var(--b2)); cursor: default; }\n\t\t\t.automation-connect-handle--output { fill: oklch(var(--p)); cursor: crosshair; }\n\t\t\t.automation-connect-handle--selected { fill: oklch(var(--p)); stroke-width: 4; }\n\t\t\t.automation-connect-handle--eligible { fill: oklch(var(--su)); stroke: oklch(var(--su)); cursor: crosshair; opacity: 1; stroke-width: 4; }\t\t\t.automation-connect-handle:focus-visible { outline: none; stroke: oklch(var(--p)); stroke-width: 5; }\n\t\t\t.automation-edge-hit { fill: none; stroke: transparent; stroke-width: 16; vector-effect: non-scaling-stroke; cursor: pointer; }\n\t\t\t.automation-draft-edge:focus { outline: none; }\n\t\t\t.automation-edge-foreground { pointer-events: none; stroke: oklch(var(--bc)); }\n\t\t\t.automation-edge-foreground-arrow { fill: oklch(var(--bc)); }\n\t\t\t.automation-edge-foreground--selected { stroke: oklch(var(--p)); stroke-width: 3; }\n\t\t\t.automation-edge-endpoint, .automation-edge-delete { opacity: 0; pointer-events: none; }\n\t\t\t\t.automation-edge-controls--selected .automation-edge-endpoint, .automation-edge-controls--selected .automation-edge-delete, .automation-edge-controls:focus-within .automation-edge-endpoint, .automation-edge-controls:focus-within .automation-edge-delete { opacity: 1; pointer-events: auto; }\t\t\t.automation-edge-endpoint { fill: oklch(var(--p)); stroke: oklch(var(--b1)); stroke-width: 2; vector-effect: non-scaling-stroke; cursor: crosshair; }\n\t\t\t.automation-edge-delete circle, .automation-node-delete circle { fill: oklch(var(--er)); stroke: oklch(var(--b1)); stroke-width: 2; vector-effect: non-scaling-stroke; }\n\t\t\t.automation-edge-delete .automation-delete-x, .automation-node-delete .automation-delete-x { fill: none; stroke: oklch(var(--b1)); stroke-width: 2.5; stroke-linecap: round; vector-effect: non-scaling-stroke; pointer-events: none; }\n\t\t\t.automation-edge-delete, .automation-node-delete { cursor: pointer; }\n\t\t\t.automation-edge-delete:focus-visible, .automation-node-delete:focus-visible { outline: none; }\n\t\t\t.automation-edge-delete:focus-visible circle, .automation-node-delete:focus-visible circle { stroke: oklch(var(--bc)); stroke-width: 4; }\n\t\t\t.automation-graph-link:focus-visible .automation-graph-node,\n\t\t.automation-graph-focus:focus-visible .automation-graph-node { stroke-width: 4; }\n\t</style>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 449, "<style>\n\t\t.automation-graph-edge { fill: none; stroke: oklch(var(--bc) / 0.35); vector-effect: non-scaling-stroke; }\n\t\t\t.automation-graph-edge--highlighted { stroke: oklch(var(--p)); }\n\t\t\t.automation-graph-edge--preview { stroke: oklch(var(--p)); stroke-width: 4; stroke-linecap: round; vector-effect: non-scaling-stroke; pointer-events: none; }\n\t\t\t.automation-graph-arrow { fill: oklch(var(--bc) / 0.45); }\n\t\t\t.automation-graph-preview-arrow { fill: oklch(var(--p)); }\n\t\t.automation-graph-node { fill: oklch(var(--b2)); stroke: oklch(var(--bc) / 0.3); vector-effect: non-scaling-stroke; }\n\t\t.automation-graph-node--failed { fill: oklch(var(--er) / 0.15); stroke: oklch(var(--er)); }\n\t\t.automation-graph-node--blocked { fill: oklch(var(--wa) / 0.15); stroke: oklch(var(--wa)); }\n\t\t.automation-graph-node--waiting { fill: oklch(var(--in) / 0.15); stroke: oklch(var(--in)); }\n\t\t\t.automation-graph-node--running { fill: oklch(var(--p) / 0.15); stroke: oklch(var(--p)); animation: automation-running-pulse 1.8s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }\n\t\t\t@keyframes automation-running-pulse { 0%, 100% { stroke-opacity: 0.72; } 50% { stroke-opacity: 1; stroke-width: 5; } }\n\t\t\t@media (prefers-reduced-motion: reduce) { .automation-graph-node--running { animation: none; } }\t\t.automation-graph-node--completed { fill: oklch(var(--su) / 0.15); stroke: oklch(var(--su)); }\n\t\t.automation-graph-label { fill: oklch(var(--bc)); pointer-events: none; }\n\t\t.automation-graph-label--primary { fill: oklch(var(--bc)); }\n\t\t.automation-graph-label--secondary { fill: oklch(var(--bc) / 0.7); }\n\t\t.automation-graph-label--muted { fill: oklch(var(--bc) / 0.6); }\n\t\t.automation-node-content { box-sizing: border-box; display: flex; height: 100%; width: 100%; flex-direction: column; align-items: center; justify-content: center; gap: 4px; padding: 10px 12px; color: oklch(var(--bc)); text-align: center; line-height: 1.15; overflow: hidden; }\n\t\t.automation-node-content strong { display: -webkit-box; max-width: 100%; overflow: hidden; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; font-size: 13px; }\n\t\t.automation-node-content span { font-size: 10px; font-weight: 650; }\n\t\t.automation-node-content small { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: oklch(var(--bc) / 0.65); font-size: 9px; }\n\t\t.automation-state-dot { display: inline-block; width: 0.65rem; height: 0.65rem; border-radius: 9999px; border: 2px solid oklch(var(--bc) / 0.4); }\n\t\t.automation-state-dot--failed { border-color: oklch(var(--er)); background: oklch(var(--er) / 0.35); }\n\t\t.automation-state-dot--blocked { border-color: oklch(var(--wa)); background: oklch(var(--wa) / 0.35); }\n\t\t.automation-state-dot--waiting { border-color: oklch(var(--in)); background: oklch(var(--in) / 0.35); }\n\t\t.automation-state-dot--running { border-color: oklch(var(--p)); background: oklch(var(--p) / 0.35); }\n\t\t.automation-state-dot--recently_completed { border-color: oklch(var(--su)); background: oklch(var(--su) / 0.35); }\n\t\t.automation-node-state--failed { color: oklch(var(--er)); }\n\t\t.automation-node-state--blocked { color: oklch(var(--wa)); }\n\t\t.automation-node-state--waiting { color: oklch(var(--in)); }\n\t\t.automation-node-state--running { color: oklch(var(--p)); }\n\t\t.automation-node-state--recently_completed { color: oklch(var(--su)); }\n\t\t.automation-canvas-shell svg { cursor: grab; }\n\t\t.automation-graph-link { -webkit-user-drag: none; }\n\t\t.automation-canvas-shell svg:active { cursor: grabbing; }\n\t\t.automation-canvas-shell .automation-draft-node { cursor: grab; }\n\t\t.automation-canvas-shell .automation-draft-node:active { cursor: grabbing; }\n\t\t\t.automation-connect-handle { stroke: oklch(var(--p)); stroke-width: 2; vector-effect: non-scaling-stroke; }\n\t\t\t.automation-connect-handle--input { fill: oklch(var(--b2)); cursor: default; }\n\t\t\t.automation-connect-handle--output { fill: oklch(var(--p)); cursor: crosshair; }\n\t\t\t.automation-connect-handle--selected { fill: oklch(var(--p)); stroke-width: 4; }\n\t\t\t.automation-connect-handle--eligible { fill: oklch(var(--su)); stroke: oklch(var(--su)); cursor: crosshair; opacity: 1; stroke-width: 4; }\t\t\t.automation-connect-handle:focus-visible { outline: none; stroke: oklch(var(--p)); stroke-width: 5; }\n\t\t\t.automation-edge-hit { fill: none; stroke: transparent; stroke-width: 16; vector-effect: non-scaling-stroke; cursor: pointer; }\n\t\t\t.automation-draft-edge:focus { outline: none; }\n\t\t\t.automation-edge-foreground { pointer-events: none; stroke: oklch(var(--bc)); }\n\t\t\t.automation-edge-foreground-arrow { fill: oklch(var(--bc)); }\n\t\t\t.automation-edge-foreground--selected { stroke: oklch(var(--p)); stroke-width: 3; }\n\t\t\t.automation-edge-endpoint, .automation-edge-delete { opacity: 0; pointer-events: none; }\n\t\t\t\t.automation-edge-controls--selected .automation-edge-endpoint, .automation-edge-controls--selected .automation-edge-delete, .automation-edge-controls:focus-within .automation-edge-endpoint, .automation-edge-controls:focus-within .automation-edge-delete { opacity: 1; pointer-events: auto; }\t\t\t.automation-edge-endpoint { fill: oklch(var(--p)); stroke: oklch(var(--b1)); stroke-width: 2; vector-effect: non-scaling-stroke; cursor: crosshair; }\n\t\t\t.automation-edge-delete circle, .automation-node-delete circle { fill: oklch(var(--er)); stroke: oklch(var(--b1)); stroke-width: 2; vector-effect: non-scaling-stroke; }\n\t\t\t.automation-edge-delete .automation-delete-x, .automation-node-delete .automation-delete-x { fill: none; stroke: oklch(var(--b1)); stroke-width: 2.5; stroke-linecap: round; vector-effect: non-scaling-stroke; pointer-events: none; }\n\t\t\t.automation-edge-delete, .automation-node-delete { cursor: pointer; }\n\t\t\t.automation-edge-delete:focus-visible, .automation-node-delete:focus-visible { outline: none; }\n\t\t\t.automation-edge-delete:focus-visible circle, .automation-node-delete:focus-visible circle { stroke: oklch(var(--bc)); stroke-width: 4; }\n\t\t\t.automation-graph-link:focus-visible .automation-graph-node,\n\t\t.automation-graph-focus:focus-visible .automation-graph-node { stroke-width: 4; }\n\t</style>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -5730,53 +5711,53 @@ func automationLiveMoreActions(graph models.AutomationLiveGraph, deleteAvailable
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var302 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var302 == nil {
-			templ_7745c5c3_Var302 = templ.NopComponent
+		templ_7745c5c3_Var301 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var301 == nil {
+			templ_7745c5c3_Var301 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 452, "<div class=\"dropdown dropdown-end shrink-0\" data-automation-live-menu><label tabindex=\"0\" class=\"btn btn-ghost btn-sm\" title=\"More actions\" aria-label=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 450, "<div class=\"dropdown dropdown-end shrink-0\" data-automation-live-menu><label tabindex=\"0\" class=\"btn btn-ghost btn-sm\" title=\"More actions\" aria-label=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var303 string
-		templ_7745c5c3_Var303, templ_7745c5c3_Err = templ.ResolveAttributeValue("More actions for " + graph.Automation.Name)
+		var templ_7745c5c3_Var302 string
+		templ_7745c5c3_Var302, templ_7745c5c3_Err = templ.ResolveAttributeValue("More actions for " + graph.Automation.Name)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 2259, Col: 128}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 2256, Col: 128}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var303)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var302)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 453, "\" onclick=\"handleDropdownToggle(event)\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z\"></path></svg></label><ul tabindex=\"0\" class=\"dropdown-content z-[100] menu w-48 rounded-box border border-base-300 bg-base-100 p-2 shadow\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 451, "\" onclick=\"handleDropdownToggle(event)\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z\"></path></svg></label><ul tabindex=\"0\" class=\"dropdown-content z-[100] menu w-48 rounded-box border border-base-300 bg-base-100 p-2 shadow\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if graph.TemplateUpdateAvailable {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 454, "<li><button type=\"button\" data-automation-live-update-template onclick=\"document.getElementById('update-automation-template-modal').showModal()\">Update to latest template</button></li>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 452, "<li><button type=\"button\" data-automation-live-update-template onclick=\"document.getElementById('update-automation-template-modal').showModal()\">Update to latest template</button></li>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
 		if graph.Automation.LifecycleState == models.AutomationActive {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 455, "<li><button type=\"submit\" form=\"automation-live-pause-form\" data-automation-live-pause>Disable</button></li>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 453, "<li><button type=\"submit\" form=\"automation-live-pause-form\" data-automation-live-pause>Disable</button></li>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
 		if graph.Automation.LifecycleState == models.AutomationPaused {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 456, "<li><button type=\"submit\" form=\"automation-live-resume-form\" data-automation-live-resume>Enable</button></li>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 454, "<li><button type=\"submit\" form=\"automation-live-resume-form\" data-automation-live-resume>Enable</button></li>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
 		if deleteAvailable {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 457, "<li><button class=\"text-error\" type=\"button\" data-automation-live-delete onclick=\"document.getElementById('delete-automation-modal').showModal()\">Delete</button></li>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 455, "<li><button class=\"text-error\" type=\"button\" data-automation-live-delete onclick=\"document.getElementById('delete-automation-modal').showModal()\">Delete</button></li>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 458, "</ul></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 456, "</ul></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -5800,47 +5781,47 @@ func automationBuilderMoreActions(page models.AutomationBuilderPage, currentProj
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var304 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var304 == nil {
-			templ_7745c5c3_Var304 = templ.NopComponent
+		templ_7745c5c3_Var303 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var303 == nil {
+			templ_7745c5c3_Var303 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 459, "<div class=\"dropdown dropdown-end shrink-0\" data-automation-builder-actions><label tabindex=\"0\" class=\"btn btn-ghost btn-sm\" title=\"More actions\" aria-label=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 457, "<div class=\"dropdown dropdown-end shrink-0\" data-automation-builder-actions><label tabindex=\"0\" class=\"btn btn-ghost btn-sm\" title=\"More actions\" aria-label=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var305 string
-		templ_7745c5c3_Var305, templ_7745c5c3_Err = templ.ResolveAttributeValue("More actions for " + page.Result.Candidate.Name)
+		var templ_7745c5c3_Var304 string
+		templ_7745c5c3_Var304, templ_7745c5c3_Err = templ.ResolveAttributeValue("More actions for " + page.Result.Candidate.Name)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 2283, Col: 133}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 2280, Col: 133}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var305)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var304)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 460, "\" onclick=\"handleDropdownToggle(event)\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z\"></path></svg></label><ul tabindex=\"0\" class=\"dropdown-content z-[100] menu w-48 rounded-box border border-base-300 bg-base-100 p-2 shadow\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 458, "\" onclick=\"handleDropdownToggle(event)\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z\"></path></svg></label><ul tabindex=\"0\" class=\"dropdown-content z-[100] menu w-48 rounded-box border border-base-300 bg-base-100 p-2 shadow\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if page.LifecycleState == models.AutomationActive {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 461, "<li><button type=\"submit\" form=\"automation-builder-pause-form\" data-automation-builder-pause>Disable</button></li>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 459, "<li><button type=\"submit\" form=\"automation-builder-pause-form\" data-automation-builder-pause>Disable</button></li>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
 		if page.LifecycleState == models.AutomationPaused {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 462, "<li><button type=\"submit\" form=\"automation-builder-resume-form\" data-automation-builder-resume>Enable</button></li>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 460, "<li><button type=\"submit\" form=\"automation-builder-resume-form\" data-automation-builder-resume>Enable</button></li>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
 		if page.TemplateUpdateAvailable {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 463, "<li><button type=\"button\" data-update-automation-template-open onclick=\"document.getElementById('update-automation-template-modal').showModal()\">Update to latest template</button></li>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 461, "<li><button type=\"button\" data-update-automation-template-open onclick=\"document.getElementById('update-automation-template-modal').showModal()\">Update to latest template</button></li>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 464, "<li><button class=\"text-error\" type=\"button\" data-delete-automation-open onclick=\"document.getElementById('delete-automation-modal').showModal()\">Delete</button></li></ul></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 462, "<li><button class=\"text-error\" type=\"button\" data-delete-automation-open onclick=\"document.getElementById('delete-automation-modal').showModal()\">Delete</button></li></ul></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -5864,51 +5845,51 @@ func automationNewEditableBreadcrumb(currentProjectID string, automationName str
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var306 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var306 == nil {
-			templ_7745c5c3_Var306 = templ.NopComponent
+		templ_7745c5c3_Var305 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var305 == nil {
+			templ_7745c5c3_Var305 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 465, "<nav class=\"flex min-w-0 flex-shrink-0 flex-wrap items-start\" aria-label=\"Breadcrumb\" data-automation-breadcrumb data-automation-editable-breadcrumb><a class=\"flex-shrink-0 text-2xl text-base-content/50 transition-colors hover:text-base-content/80\" href=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 463, "<nav class=\"flex min-w-0 flex-shrink-0 flex-wrap items-start\" aria-label=\"Breadcrumb\" data-automation-breadcrumb data-automation-editable-breadcrumb><a class=\"flex-shrink-0 text-2xl text-base-content/50 transition-colors hover:text-base-content/80\" href=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var307 templ.SafeURL
-		templ_7745c5c3_Var307, templ_7745c5c3_Err = templ.JoinURLErrs(templ.URL(fmt.Sprintf("/automations?project_id=%s", currentProjectID)))
+		var templ_7745c5c3_Var306 templ.SafeURL
+		templ_7745c5c3_Var306, templ_7745c5c3_Err = templ.JoinURLErrs(templ.URL(fmt.Sprintf("/automations?project_id=%s", currentProjectID)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 2305, Col: 179}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 2302, Col: 179}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var307))
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var306))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 466, "\" hx-get=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 464, "\" hx-get=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var307 string
+		templ_7745c5c3_Var307, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/automations?project_id=%s", currentProjectID))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 2302, Col: 250}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var307)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 465, "\" hx-target=\"#main-content\" hx-push-url=\"true\" onclick=\"event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;\">Automations</a> <span class=\"ml-2 flex-shrink-0 text-2xl text-base-content/30\">/</span> <input class=\"input input-bordered ml-1 h-8 min-w-0 flex-1 px-[3px] py-0 text-xl font-bold leading-none sm:max-w-xl sm:text-2xl\" form=\"automation-design-form\" name=\"automation_name\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var308 string
-		templ_7745c5c3_Var308, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/automations?project_id=%s", currentProjectID))
+		templ_7745c5c3_Var308, templ_7745c5c3_Err = templ.ResolveAttributeValue(automationName)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 2305, Col: 250}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 2304, Col: 206}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var308)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 467, "\" hx-target=\"#main-content\" hx-push-url=\"true\" onclick=\"event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;\">Automations</a> <span class=\"ml-2 flex-shrink-0 text-2xl text-base-content/30\">/</span> <input class=\"input input-bordered ml-1 h-8 min-w-0 flex-1 px-[3px] py-0 text-xl font-bold leading-none sm:max-w-xl sm:text-2xl\" form=\"automation-design-form\" name=\"automation_name\" value=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var309 string
-		templ_7745c5c3_Var309, templ_7745c5c3_Err = templ.ResolveAttributeValue(automationName)
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 2307, Col: 206}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var309)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 468, "\" maxlength=\"200\" required data-automation-name aria-label=\"Automation name\"></nav>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 466, "\" maxlength=\"200\" required data-automation-name aria-label=\"Automation name\"></nav>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -5932,49 +5913,63 @@ func automationEditableBreadcrumb(currentProjectID string, automationID string, 
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var310 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var310 == nil {
-			templ_7745c5c3_Var310 = templ.NopComponent
+		templ_7745c5c3_Var309 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var309 == nil {
+			templ_7745c5c3_Var309 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 469, "<nav class=\"flex min-w-0 flex-shrink-0 items-center gap-2\" aria-label=\"Breadcrumb\" data-automation-breadcrumb data-automation-editable-breadcrumb><a class=\"flex-shrink-0 text-2xl text-base-content/50 transition-colors hover:text-base-content/80\" href=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 467, "<nav class=\"flex min-w-0 flex-shrink-0 flex-wrap items-start\" aria-label=\"Breadcrumb\" data-automation-breadcrumb data-automation-editable-breadcrumb><a class=\"flex-shrink-0 text-2xl text-base-content/50 transition-colors hover:text-base-content/80\" href=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var311 templ.SafeURL
-		templ_7745c5c3_Var311, templ_7745c5c3_Err = templ.JoinURLErrs(templ.URL(fmt.Sprintf("/automations?project_id=%s", currentProjectID)))
+		var templ_7745c5c3_Var310 templ.SafeURL
+		templ_7745c5c3_Var310, templ_7745c5c3_Err = templ.JoinURLErrs(templ.URL(fmt.Sprintf("/automations?project_id=%s", currentProjectID)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 2313, Col: 179}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 2310, Col: 179}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var311))
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var310))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 470, "\" hx-get=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 468, "\" hx-get=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var311 string
+		templ_7745c5c3_Var311, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/automations?project_id=%s", currentProjectID))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 2310, Col: 250}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var311)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 469, "\" hx-target=\"#main-content\" hx-push-url=\"true\" onclick=\"event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;\">Automations</a> <span class=\"ml-2 flex-shrink-0 text-2xl text-base-content/30\">/</span><div class=\"ml-1 flex min-w-0 flex-1 items-start sm:max-w-xl\"><input class=\"input input-bordered h-8 min-w-0 flex-1 px-[3px] py-0 text-xl font-bold leading-none sm:text-2xl\" form=\"automation-design-form\" name=\"automation_name\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var312 string
-		templ_7745c5c3_Var312, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/automations?project_id=%s", currentProjectID))
+		templ_7745c5c3_Var312, templ_7745c5c3_Err = templ.ResolveAttributeValue(automationName)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 2313, Col: 250}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 2313, Col: 190}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var312)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 471, "\" hx-target=\"#main-content\" hx-push-url=\"true\" onclick=\"event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;\">Automations</a> <span class=\"flex-shrink-0 text-2xl text-base-content/30\">/</span><div class=\"min-w-0\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 470, "\" maxlength=\"200\" required data-automation-name aria-label=\"Automation name\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		templ_7745c5c3_Err = components.BreadcrumbSelector(models.BreadcrumbSelector{
 			ID: "automation-resource-selector", Kind: "Automation", CurrentID: automationID, CurrentName: automationName,
 			SearchURL: fmt.Sprintf("/breadcrumb-selectors/automations?project_id=%s&current_id=%s&view=edit", currentProjectID, automationID),
+			CaretOnly: true,
 		}).Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 472, "</div><span class=\"flex-shrink-0 text-2xl text-base-content/30\">/</span><h2 class=\"min-w-0 truncate text-2xl font-bold\">Edit</h2></nav>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 471, "</div></nav>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -6008,7 +6003,7 @@ func automationBreadcrumb(currentProjectID string, automationID string, automati
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 473, "<nav class=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 472, "<nav class=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -6021,43 +6016,43 @@ func automationBreadcrumb(currentProjectID string, automationID string, automati
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 474, "\" aria-label=\"Breadcrumb\" data-automation-breadcrumb><a class=\"flex-shrink-0 text-2xl text-base-content/50 transition-colors hover:text-base-content/80\" href=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 473, "\" aria-label=\"Breadcrumb\" data-automation-breadcrumb><a class=\"flex-shrink-0 text-2xl text-base-content/50 transition-colors hover:text-base-content/80\" href=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var316 templ.SafeURL
 		templ_7745c5c3_Var316, templ_7745c5c3_Err = templ.JoinURLErrs(templ.URL(fmt.Sprintf("/automations?project_id=%s", currentProjectID)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 2326, Col: 179}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 2323, Col: 179}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var316))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 475, "\" hx-get=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 474, "\" hx-get=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var317 string
 		templ_7745c5c3_Var317, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/automations?project_id=%s", currentProjectID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 2326, Col: 250}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 2323, Col: 250}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var317)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 476, "\" hx-target=\"#main-content\" hx-push-url=\"true\" onclick=\"event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;\">Automations</a> ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 475, "\" hx-target=\"#main-content\" hx-push-url=\"true\" onclick=\"event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;\">Automations</a> ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if automationName != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 477, "<span class=\"flex-shrink-0 text-2xl text-base-content/30\">/</span> ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 476, "<span class=\"flex-shrink-0 text-2xl text-base-content/30\">/</span> ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			if currentLabel != "" && automationID != "" {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 478, "<div class=\"min-w-0\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 477, "<div class=\"min-w-0\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -6068,12 +6063,12 @@ func automationBreadcrumb(currentProjectID string, automationID string, automati
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 479, "</div>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 478, "</div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			} else {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 480, "<div class=\"min-w-0 flex-1\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 479, "<div class=\"min-w-0 flex-1\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -6084,32 +6079,32 @@ func automationBreadcrumb(currentProjectID string, automationID string, automati
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 481, "</div>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 480, "</div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
 		}
 		if currentLabel != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 482, "<span class=\"flex-shrink-0 text-2xl text-base-content/30\">/</span><h2 class=\"min-w-0 truncate text-2xl font-bold\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 481, "<span class=\"flex-shrink-0 text-2xl text-base-content/30\">/</span><h2 class=\"min-w-0 truncate text-2xl font-bold\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var318 string
 			templ_7745c5c3_Var318, templ_7745c5c3_Err = templ.JoinStringErrs(currentLabel)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 2347, Col: 65}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 2344, Col: 65}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var318))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 483, "</h2>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 482, "</h2>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 484, "</nav>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 483, "</nav>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
