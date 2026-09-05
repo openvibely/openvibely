@@ -10,11 +10,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
-	"sync"
 
 	"github.com/a-h/templ"
+	git "github.com/go-git/go-git/v5"
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/events"
@@ -359,19 +360,7 @@ func newTaskCardRepositorySnapshot(ctx context.Context, project *models.Project,
 			}
 		}
 	}
-	uniqueTargets := make(map[string]bool)
-	for _, target := range targets {
-		target = strings.TrimPrefix(strings.TrimSpace(target), "refs/heads/")
-		if target == "" || uniqueTargets[target] {
-			continue
-		}
-		uniqueTargets[target] = true
-		merged, mergedOK := taskCardBranchesFromRefQuery(ctx, project.RepoPath, "--merged="+target)
-		containing, containsOK := taskCardBranchesFromRefQuery(ctx, project.RepoPath, "--contains="+target)
-		snapshot.mergedByTarget[target] = merged
-		snapshot.containsTarget[target] = containing
-		snapshot.relationsValid[target] = mergedOK && containsOK
-	}
+	taskCardLoadBranchRelations(ctx, project.RepoPath, targets, snapshot)
 	snapshot.activeMerge = service.HasActiveMerge(project.RepoPath)
 	if snapshot.activeMerge {
 		mergeHeadCmd := exec.CommandContext(ctx, "git", "rev-parse", "--verify", "MERGE_HEAD")
@@ -384,18 +373,82 @@ func newTaskCardRepositorySnapshot(ctx context.Context, project *models.Project,
 	return snapshot
 }
 
-func taskCardBranchesFromRefQuery(ctx context.Context, repoPath, relation string) (map[string]bool, bool) {
-	branches := make(map[string]bool)
-	cmd := exec.CommandContext(ctx, "git", "for-each-ref", "--format=%(refname:short)", relation, "refs/heads")
+func taskCardLoadBranchRelations(ctx context.Context, repoPath string, targets []string, snapshot *taskCardRepositorySnapshot) {
+	if snapshot == nil {
+		return
+	}
+	targetsByTip := make(map[string][]string)
+	for _, target := range targets {
+		target = strings.TrimPrefix(strings.TrimSpace(target), "refs/heads/")
+		tip := snapshot.refTip(target)
+		if target == "" || tip == "" {
+			continue
+		}
+		if snapshot.mergedByTarget[target] == nil {
+			snapshot.mergedByTarget[target] = make(map[string]bool)
+			snapshot.containsTarget[target] = make(map[string]bool)
+			targetsByTip[tip] = append(targetsByTip[tip], target)
+		}
+	}
+	tips := make([]string, 0, len(targetsByTip))
+	for tip := range targetsByTip {
+		tips = append(tips, tip)
+	}
+	sort.Strings(tips)
+	if len(tips) == 0 {
+		return
+	}
+
+	format := "%(refname:short)"
+	for _, tip := range tips {
+		format += "%00%(ahead-behind:" + tip + ")"
+	}
+	cmd := exec.CommandContext(ctx, "git", "for-each-ref", "--format="+format, "refs/heads")
 	cmd.Dir = repoPath
 	output, err := cmd.Output()
 	if err != nil {
-		return branches, false
+		return
 	}
-	for _, branch := range strings.Fields(string(output)) {
-		branches[strings.TrimPrefix(branch, "refs/heads/")] = true
+	valid := true
+	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		fields := strings.Split(line, "\x00")
+		if len(fields) != len(tips)+1 {
+			valid = false
+			continue
+		}
+		branch := strings.TrimPrefix(fields[0], "refs/heads/")
+		for i, tip := range tips {
+			counts := strings.Fields(fields[i+1])
+			if len(counts) != 2 {
+				valid = false
+				continue
+			}
+			ahead, aheadErr := strconv.Atoi(counts[0])
+			behind, behindErr := strconv.Atoi(counts[1])
+			if aheadErr != nil || behindErr != nil {
+				valid = false
+				continue
+			}
+			for _, target := range targetsByTip[tip] {
+				snapshot.mergedByTarget[target][branch] = ahead == 0
+				snapshot.containsTarget[target][branch] = behind == 0
+			}
+		}
 	}
-	return branches, true
+	if !valid {
+		for _, targetNames := range targetsByTip {
+			for _, target := range targetNames {
+				delete(snapshot.mergedByTarget, target)
+				delete(snapshot.containsTarget, target)
+			}
+		}
+		return
+	}
+	for _, targetNames := range targetsByTip {
+		for _, target := range targetNames {
+			snapshot.relationsValid[target] = true
+		}
+	}
 }
 
 func (snapshot *taskCardRepositorySnapshot) worktree(path string) (service.WorktreeInfo, bool) {
@@ -439,7 +492,7 @@ func (snapshot *taskCardRepositorySnapshot) diverged(branch, target string) bool
 		!snapshot.isAncestor(branch, target) && !snapshot.isAncestor(target, branch)
 }
 
-func (snapshot *taskCardRepositorySnapshot) loadDirtyWorktrees(ctx context.Context, paths []string) {
+func (snapshot *taskCardRepositorySnapshot) loadDirtyWorktrees(paths []string) {
 	if snapshot == nil || len(paths) == 0 {
 		return
 	}
@@ -449,32 +502,22 @@ func (snapshot *taskCardRepositorySnapshot) loadDirtyWorktrees(ctx context.Conte
 			unique[taskCardWorktreePath(path)] = path
 		}
 	}
-	jobs := make(chan string)
-	var wg sync.WaitGroup
-	var mu sync.Mutex
-	workers := 8
-	if len(unique) < workers {
-		workers = len(unique)
-	}
-	for i := 0; i < workers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for path := range jobs {
-				cmd := exec.CommandContext(ctx, "git", "status", "--porcelain")
-				cmd.Dir = path
-				output, err := cmd.Output()
-				mu.Lock()
-				snapshot.dirty[taskCardWorktreePath(path)] = err != nil || strings.TrimSpace(string(output)) != ""
-				mu.Unlock()
+	for key, path := range unique {
+		dirty := true
+		if info, statErr := os.Stat(path); statErr != nil || !info.IsDir() {
+			snapshot.dirty[key] = dirty
+			continue
+		}
+		repo, err := git.PlainOpenWithOptions(path, &git.PlainOpenOptions{DetectDotGit: false, EnableDotGitCommonDir: true})
+		if err == nil {
+			if worktree, worktreeErr := repo.Worktree(); worktreeErr == nil {
+				if status, statusErr := worktree.StatusWithOptions(git.StatusOptions{Strategy: git.Preload}); statusErr == nil {
+					dirty = !status.IsClean()
+				}
 			}
-		}()
+		}
+		snapshot.dirty[key] = dirty
 	}
-	for _, path := range unique {
-		jobs <- path
-	}
-	close(jobs)
-	wg.Wait()
 }
 
 func (snapshot *taskCardRepositorySnapshot) worktreeDirty(path string) bool {
@@ -560,7 +603,7 @@ func (h *Handler) taskCardMergeMenuStates(ctx context.Context, tasks []models.Ta
 			terminalPaths = append(terminalPaths, task.WorktreePath)
 		}
 	}
-	snapshot.loadDirtyWorktrees(ctx, terminalPaths)
+	snapshot.loadDirtyWorktrees(terminalPaths)
 
 	for i := range tasks {
 		task := &tasks[i]
