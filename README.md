@@ -4,19 +4,46 @@
 [![codecov](https://codecov.io/github/openvibely/openvibely/graph/badge.svg?token=VL6VTQEKR7)](https://codecov.io/github/openvibely/openvibely)
 [![License: MIT](docs/badges/license-mit.svg)](LICENSE)
 
-The only recursive self-improvement command center for software teams.
+## Run coding agents at scale across your projects
 
-OpenVibely turns one Chat into the control plane for your entire AI development workflow. Describe a goal once, then coordinate parallel task sessions, reusable Automation Graphs, scheduled work, live agent execution, and reviewable changes from one place.
+Coding agents do the work. OpenVibely runs the operation.
 
-Agents do the work. You stay in command. Inspect any thread, review any diff, steer any task, and keep the whole plan moving from the original conversation.
+OpenVibely is a software factory for agent-powered development. It coordinates parallel work across projects, keeps long-running efforts moving, and gives you one place to review the results.
 
-Goal loops drive unfinished work forward. Memory Curator preserves project context. Skill Curator turns completed tasks into sharper reusable workflows. Every run can make the next one better, while your team stays in control.
+Built-in Native and GitHub SDLC automations inspect each project for product gaps, bugs, performance opportunities, and redundant code. They propose what to build or improve, wait for approval, and send approved work to coding agents.
 
-Self-hosted, single binary, SQLite by default, and built for teams that want speed without giving up control, auditability, or ownership.
+OpenVibely does not just work through your backlog. It helps discover what should come next and continuously moves each project toward its vision.
+
+Each project keeps its own code, context, history, memory, agents, and workflows while OpenVibely gives you one place to manage the entire operation. Scale development output without scaling coordination overhead.
+
+Use the desktop app, self-host a single Go binary with SQLite, or run it on a VPS or with Docker.
 
 <a href="https://github.com/user-attachments/assets/377521fa-b117-476c-a52a-cfc10befb981">
   <img src="docs/screenshots/openvibely-ui-demo-poster.png" alt="Watch the OpenVibely UI demo" width="100%" />
 </a>
+
+## A Dependable Engineering System
+
+Keep the agents you already trust. Add the structure that turns separate runs into a dependable engineering system.
+
+### Individual Coding Agents
+
+Excellent at the task in front of them. Give an agent a problem and it can write, debug, explain, and review code.
+
+- Focused execution within a working session
+- Direct interaction with code and development tools
+- Strong results from a clear, current request
+
+### OpenVibely
+
+Built to manage what happens across tasks and projects. Turn individual agent runs into persistent, coordinated engineering work.
+
+- A backlog with ownership, state, history, and evidence
+- Parallel agents running across projects and coordinated around clear outcomes
+- Goals, schedules, and task chains that keep work moving
+- Native and GitHub SDLC automations that find and advance valuable work
+- Project memory and reusable skills that carry forward
+- Review workflows and alerts when judgment is needed
 
 ## Documentation
 
@@ -34,14 +61,16 @@ Useful starting points:
 
 | Capability | Product Outcome |
 |---|---|
-| Project workspaces | Keep repository context, model defaults, worker limits, schedules, memory, insights, and integrations tied to a real codebase. |
-| Chat-first planning | Explore fuzzy ideas, attach context, create tasks, and orchestrate work from a project-aware conversation. |
-| Task board execution | Queue coding work, stream progress, inspect logs and threads, review changed files, and decide what ships. |
+| Multi-project operations | Run coding agents across projects while keeping each repository's context, work, memory, schedules, and integrations separate. |
+| Autonomous SDLC | Use [Native](./docs/openvibely-native-autonomous-sdlc-user-guide.md) or [GitHub](./docs/github-autonomous-sdlc-user-guide.md) automation to inspect projects for vision gaps, bugs, performance opportunities, and redundant code; propose findings for approval and start implementation when approved. |
+| Parallel task execution | Queue coding work, run tasks concurrently, stream progress, inspect logs and threads, and decide what ships. |
+| Continued execution | Use goals, schedules, and task chains to keep longer efforts moving across agent runs. |
 | Reviewable changes | Use isolated Git worktrees and GitHub issue-to-PR workflows so AI output becomes visible diffs, pull requests, and review follow-ups rather than hidden edits. |
-| Reusable agents | Capture system prompts, personalities, tools, skills, plugins, permissions, routing hints, and lifecycle behavior as reusable worker profiles. |
+| Reusable agent profiles | Capture system prompts, personalities, tools, skills, plugins, permissions, routing hints, and lifecycle behavior as reusable worker profiles. |
 | Memory curation | Autonomously create, recall, update, and consolidate durable project memory so repeated context does not have to be re-explained. |
 | Skill curation | Learn from completed work and improve reusable standalone or agent-owned skills for future tasks. |
 | Automation Graphs | Build project-scoped graphs from schedules, Tasks and Agents, Native approvals, GitHub actions, and outcomes; save them into real resources and watch current state on the Live graph. |
+| Chat-first planning | Explore fuzzy ideas, attach context, create tasks, and orchestrate work from a project-aware conversation. |
 | External channels | Create, monitor, and proactively message through Slack, Telegram, Discord, Email, GitHub, inbound webhooks, and the REST API. |
 | Model providers | Run with Anthropic, OpenAI, Ollama, OpenAI-compatible Chat Completions providers, or Mixture of Models virtual configs that combine reference models through an aggregator. |
 | Operations footprint | Self-host a single Go binary with SQLite by default, plus optional Docker/VPS and desktop modes. |
