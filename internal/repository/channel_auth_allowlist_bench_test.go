@@ -410,8 +410,7 @@ func assertOrderedAuthRows[T any](t *testing.T, label string, rows []T, wantRows
 
 // BenchmarkChannelAuthAllowlistSettingsPathListQueries measures the Settings
 // path's four sequential allowlist repository calls against randomized added_at
-// rows. Baseline drops the migration-152 list indexes; candidate recreates the
-// covering list-order indexes. Run with:
+// rows using the current covering list-order indexes. Run with:
 //
 //	go test ./internal/repository -run '^$' -bench BenchmarkChannelAuthAllowlistSettingsPathListQueries -benchmem -count=10
 //
