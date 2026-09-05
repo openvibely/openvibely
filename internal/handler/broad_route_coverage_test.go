@@ -235,7 +235,6 @@ func TestBroadMutationRouteContractsExerciseMoreHandlers(t *testing.T) {
 		{"/automations/builder" + projectQuery, url.Values{"description": {"When a task completes, create an alert"}}},
 		{"/automations/yaml/parse" + projectQuery, url.Values{"yaml": {"name: Broad Automation\nversion: 1\nnodes: []\nedges: []\n"}}},
 		{"/tasks" + projectQuery, url.Values{"title": {"Created broad task"}, "prompt": {"Do broad coverage"}, "priority": {"2"}, "category": {string(models.CategoryBacklog)}, "agent_id": {agent.ID}}},
-		{"/tasks/backlog/activate" + projectQuery, nil},
 		{"/tasks/backlog/execute" + projectQuery, nil},
 		{"/tasks/" + active.ID + "/run" + projectQuery, nil},
 		{"/tasks/" + active.ID + "/cancel" + projectQuery, nil},

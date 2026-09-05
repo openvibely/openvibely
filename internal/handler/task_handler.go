@@ -1801,25 +1801,6 @@ func (h *Handler) DeleteAllBacklogTasks(c echo.Context) error {
 	return c.Redirect(http.StatusSeeOther, "/tasks?project_id="+projectID)
 }
 
-func (h *Handler) ActivateAllBacklogTasks(c echo.Context) error {
-	projectID := c.QueryParam("project_id")
-	applog.Infof("[handler] ActivateAllBacklogTasks project=%s", projectID)
-
-	count, err := h.taskSvc.ActivateAllBacklog(c.Request().Context(), projectID)
-	if err != nil {
-		applog.Infof("[handler] ActivateAllBacklogTasks error: %v", err)
-		return err
-	}
-	applog.Infof("[handler] ActivateAllBacklogTasks activated %d tasks", count)
-
-	// Return the full kanban board
-	if isHTMX(c) {
-		return h.renderTaskBoardRefresh(c, projectID, nil)
-	}
-
-	return c.Redirect(http.StatusSeeOther, "/tasks?project_id="+projectID)
-}
-
 func (h *Handler) ReorderTask(c echo.Context) error {
 	taskID := c.Param("taskId")
 	newPosition, err := strconv.Atoi(c.FormValue("position"))

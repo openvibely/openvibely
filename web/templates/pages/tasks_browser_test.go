@@ -316,6 +316,178 @@ window.addEventListener('DOMContentLoaded', function() {
 	}
 }
 
+func TestBacklogExecuteAllSubmitsWithoutConfirmationInChrome(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))
+	if err != nil {
+		t.Fatalf("read pinned HTMX fixture: %v", err)
+	}
+
+	project := models.Project{ID: "project-backlog-execute-browser", Name: "Backlog Execute Browser"}
+	var stateMu sync.Mutex
+	var requestMu sync.Mutex
+	var requestLog []string
+	tasks := []models.Task{
+		{ID: "bulk-pending", ProjectID: project.ID, Title: "Pending bulk task", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 3},
+		{ID: "bulk-failed", ProjectID: project.ID, Title: "Failed bulk task", Category: models.CategoryBacklog, Status: models.StatusFailed, Priority: 2},
+	}
+	boardTasks := func() []models.Task {
+		stateMu.Lock()
+		defer stateMu.Unlock()
+		return append([]models.Task(nil), tasks...)
+	}
+	renderBoard := func() []byte {
+		var out bytes.Buffer
+		if err := components.KanbanBoard(boardTasks(), project.ID, "created_desc", "completed_desc", nil, nil).Render(context.Background(), &out); err != nil {
+			t.Fatalf("render kanban board: %v", err)
+		}
+		return out.Bytes()
+	}
+	runner := `<script>
+window.addEventListener('DOMContentLoaded', function() {
+  var confirmationCalls = [];
+  window.confirm = function(message) { confirmationCalls.push(String(message)); return true; };
+  function report(status, message) { return fetch('/browser-result?status=' + encodeURIComponent(status) + '&message=' + encodeURIComponent(message || ''), {method:'POST'}); }
+  function fail(message) { throw new Error(message); }
+  function waitFor(check, label) {
+    var started = performance.now();
+    return new Promise(function(resolve, reject) {
+      function poll() {
+        try { if (check()) return resolve(); } catch (error) { return reject(error); }
+        if (performance.now() - started > 6000) return reject(new Error('timed out waiting for ' + label));
+        setTimeout(poll, 10);
+      }
+      poll();
+    });
+  }
+  window.addEventListener('error', function(event) { report('fail', String(event.error && event.error.stack || event.message)); });
+  (async function() {
+    await waitFor(function() { return window.htmx && document.getElementById('kanban-board'); }, 'Tasks board');
+    htmx.process(document.body);
+    var backlog = document.querySelector('[data-kanban-menu-key="column-backlog"]');
+    var trigger = backlog && backlog.querySelector('[data-kanban-menu-trigger]');
+    if (!backlog || !trigger) fail('Backlog menu trigger is missing');
+    trigger.click();
+    await waitFor(function() { return backlog.getAttribute('data-kanban-menu-open') === 'true'; }, 'Backlog menu to open');
+
+    var menu = backlog.querySelector('[data-kanban-menu-content]');
+    var activate = Array.from(menu.querySelectorAll('button')).find(function(button) { return button.textContent.trim().indexOf('Activate All') === 0; });
+    if (activate) fail('Backlog menu still contains Activate All');
+    var execute = Array.from(menu.querySelectorAll('button')).find(function(button) { return button.textContent.trim().indexOf('Execute All') === 0; });
+    if (!execute) fail('Backlog menu is missing Execute All');
+    if (execute.hasAttribute('hx-confirm')) fail('Execute All still has an hx-confirm attribute');
+
+    var requestPath = '';
+    document.body.addEventListener('htmx:beforeRequest', function(event) {
+      var config = event.detail && event.detail.requestConfig;
+      if (config && config.path && config.path.indexOf('/tasks/backlog/execute') === 0) requestPath = config.path;
+    });
+    execute.click();
+    await waitFor(function() { return requestPath !== ''; }, 'Execute All request');
+    await waitFor(function() {
+      var pending = document.getElementById('task-bulk-pending');
+      var failed = document.getElementById('task-bulk-failed');
+      return pending && failed && pending.closest('.category-drop-zone[data-category="active"]') && failed.closest('.category-drop-zone[data-category="active"]') && !document.querySelector('.category-drop-zone[data-category="backlog"] #task-bulk-pending');
+    }, 'authoritative board refresh');
+    if (confirmationCalls.length !== 0) fail('Execute All opened a confirmation dialog');
+    if (requestPath !== '/tasks/backlog/execute?project_id=project-backlog-execute-browser') fail('unexpected Execute All request path: ' + requestPath);
+    await report('pass', '');
+  })().catch(function(error) { report('fail', String(error && error.stack || error)); });
+});
+</script>`
+
+	browserResult := make(chan string, 4)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestMu.Lock()
+		requestLog = append(requestLog, r.Method+" "+r.URL.RequestURI()+" HX="+r.Header.Get("HX-Request"))
+		requestMu.Unlock()
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		switch {
+		case r.URL.Path == "/htmx-2.0.4.min.js":
+			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+			_, _ = w.Write(htmxJS)
+		case r.URL.Path == "/tasks" && r.Method == http.MethodGet:
+			if r.Header.Get("HX-Request") == "true" {
+				_, _ = w.Write(renderBoard())
+				return
+			}
+			var out bytes.Buffer
+			if err := Tasks([]models.Project{project}, &project, boardTasks(), nil, nil, "created_desc", "completed_desc").Render(context.Background(), &out); err != nil {
+				t.Fatalf("render Tasks page: %v", err)
+			}
+			page := strings.Replace(out.String(), "https://unpkg.com/htmx.org@2.0.4", "/htmx-2.0.4.min.js", 1)
+			page = strings.Replace(page, "</head>", runner+"</head>", 1)
+			_, _ = w.Write([]byte(page))
+		case r.URL.Path == "/tasks/backlog/execute" && r.Method == http.MethodPost:
+			if r.URL.Query().Get("project_id") != project.ID {
+				http.Error(w, "unexpected project", http.StatusBadRequest)
+				return
+			}
+			stateMu.Lock()
+			for i := range tasks {
+				if tasks[i].ProjectID == project.ID && tasks[i].Category == models.CategoryBacklog && (tasks[i].Status == models.StatusPending || tasks[i].Status == models.StatusFailed || tasks[i].Status == models.StatusCancelled) {
+					tasks[i].Category = models.CategoryActive
+					tasks[i].Status = models.StatusPending
+				}
+			}
+			stateMu.Unlock()
+			_, _ = w.Write(renderBoard())
+		case r.URL.Path == "/browser-result":
+			browserResult <- r.URL.Query().Get("status") + ":" + r.URL.Query().Get("message")
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	stderrPath := filepath.Join(t.TempDir(), "backlog-execute-browser.stderr")
+	stderrFile, err := os.Create(stderrPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stderrFile.Close()
+	cmd := exec.Command(chrome,
+		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
+		"--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling",
+		"--no-first-run", "--no-default-browser-check", "--window-size=1280,900",
+		"--user-data-dir="+filepath.Join(t.TempDir(), "backlog-execute-browser-profile"),
+		server.URL+"/tasks?project_id="+project.ID,
+	)
+	cmd.Stderr = stderrFile
+	if err := startBrowserProcess(cmd); err != nil {
+		t.Fatalf("start Chrome: %v", err)
+	}
+	var outcome string
+	select {
+	case outcome = <-browserResult:
+	case <-time.After(20 * time.Second):
+		outcome = "fail: timed out waiting for browser result"
+	}
+	stopBrowserProcess(cmd)
+	if !strings.HasPrefix(outcome, "pass:") {
+		stderr, _ := os.ReadFile(stderrPath)
+		requestMu.Lock()
+		requests := strings.Join(requestLog, "\n")
+		requestMu.Unlock()
+		t.Fatalf("Backlog Execute All browser regression failed: %s\nRequests:\n%s\nChrome:\n%s", outcome, requests, strings.TrimSpace(string(stderr)))
+	}
+	requestMu.Lock()
+	defer requestMu.Unlock()
+	var executeRequests []string
+	for _, request := range requestLog {
+		if strings.HasPrefix(request, "POST /tasks/backlog/execute?") {
+			executeRequests = append(executeRequests, request)
+		}
+	}
+	if len(executeRequests) != 1 {
+		t.Fatalf("expected exactly one bulk Execute All request, got %d: %v", len(executeRequests), executeRequests)
+	}
+	if !strings.HasPrefix(executeRequests[0], "POST /tasks/backlog/execute?project_id="+project.ID+" ") {
+		t.Fatalf("bulk Execute All request lost project scoping: %s", executeRequests[0])
+	}
+}
+
 func TestCapacityQueuedAutomationAndTerminalTasksAreVisibleInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))

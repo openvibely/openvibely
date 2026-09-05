@@ -3655,40 +3655,64 @@ func TestHandler_DeleteAllTasksByCategory_CancelledRequestPreservesProjectTasks(
 	}
 }
 
-func TestHandler_ActivateAllBacklogTasks(t *testing.T) {
+func TestHandler_ExecuteBacklogTasks(t *testing.T) {
 	tc := NewTestContext(t)
 	ctx := context.Background()
-	project1 := createProject(t, tc.handler, "Test Project 1")
-	bt1 := createTask(t, tc.handler, project1.ID, "Backlog Task 1", func(tk *models.Task) { tk.Category = models.CategoryBacklog })
-	bt2 := createTask(t, tc.handler, project1.ID, "Backlog Task 2", func(tk *models.Task) {
-		tk.Category = models.CategoryBacklog
-		tk.Status = models.StatusCancelled
+	project := createProject(t, tc.handler, "Execute Backlog Project")
+	otherProject := createProject(t, tc.handler, "Other Execute Backlog Project")
+
+	eligiblePending := createTask(t, tc.handler, project.ID, "Pending backlog task", func(task *models.Task) {
+		task.Category = models.CategoryBacklog
 	})
-	goal, err := tc.handler.taskGoalSvc.SetGoal(ctx, bt2.ID, "finish the objective", service.GoalOptions{Actor: "test"})
-	require.NoError(t, err)
-	require.NoError(t, tc.handler.taskGoalSvc.PauseActiveGoalStoppedByUser(ctx, bt2.ID))
+	eligibleFailed := createTask(t, tc.handler, project.ID, "Failed backlog task", func(task *models.Task) {
+		task.Category = models.CategoryBacklog
+		task.Status = models.StatusFailed
+	})
+	eligibleCancelled := createTask(t, tc.handler, project.ID, "Cancelled backlog task", func(task *models.Task) {
+		task.Category = models.CategoryBacklog
+		task.Status = models.StatusCancelled
+	})
+	runningBacklog := createTask(t, tc.handler, project.ID, "Running backlog task", func(task *models.Task) {
+		task.Category = models.CategoryBacklog
+		task.Status = models.StatusRunning
+	})
+	foreignBacklog := createTask(t, tc.handler, otherProject.ID, "Foreign backlog task", func(task *models.Task) {
+		task.Category = models.CategoryBacklog
+	})
 
-	rec := tc.HTMX().Post("/tasks/backlog/activate?project_id=" + project1.ID).Execute()
+	rec := tc.HTMX().Post("/tasks/backlog/execute?project_id=" + project.ID).Execute()
 	assertCode(t, rec, http.StatusOK)
+	if !strings.HasPrefix(strings.TrimSpace(rec.Body.String()), `<div id="kanban-board"`) {
+		t.Fatalf("expected Execute All response to refresh the kanban board, got %s", rec.Body.String())
+	}
 
-	for _, id := range []string{bt1.ID, bt2.ID} {
-		task, _ := tc.handler.taskSvc.GetByID(ctx, id)
-		if task == nil {
-			t.Fatalf("expected task %s to exist", id)
-		}
-		if task.Category != models.CategoryActive {
-			t.Errorf("task %s: expected category active, got %s", id, task.Category)
-		}
-		if task.Status != models.StatusPending {
-			t.Errorf("task %s: expected status pending, got %s", id, task.Status)
+	for _, taskID := range []string{eligiblePending.ID, eligibleFailed.ID, eligibleCancelled.ID} {
+		updated, err := tc.taskRepo.GetByID(ctx, taskID)
+		require.NoError(t, err)
+		require.NotNil(t, updated)
+		assert.Equal(t, models.CategoryActive, updated.Category, "task %s category", taskID)
+		assert.Equal(t, models.StatusPending, updated.Status, "task %s status", taskID)
+	}
+	for _, task := range []*models.Task{runningBacklog, foreignBacklog} {
+		updated, err := tc.taskRepo.GetByID(ctx, task.ID)
+		require.NoError(t, err)
+		require.NotNil(t, updated)
+		assert.Equal(t, models.CategoryBacklog, updated.Category, "task %s category", task.ID)
+		assert.Equal(t, task.Status, updated.Status, "task %s status", task.ID)
+	}
+
+	submittedIDs := make(map[string]bool)
+	for range 3 {
+		select {
+		case submitted := <-tc.handler.workerSvc.Submitted():
+			submittedIDs[submitted.ID] = true
+		case <-time.After(100 * time.Millisecond):
+			t.Fatalf("expected three eligible tasks to be submitted, got %d", len(submittedIDs))
 		}
 	}
-	resumed, err := tc.handler.taskGoalSvc.GetGoal(ctx, bt2.ID)
-	require.NoError(t, err)
-	require.NotNil(t, resumed)
-	assert.Equal(t, goal.GoalID, resumed.GoalID)
-	assert.Equal(t, models.TaskGoalStatusActive, resumed.Status)
-	assert.Equal(t, "resumed by user", resumed.Reason)
+	for _, task := range []*models.Task{eligiblePending, eligibleFailed, eligibleCancelled} {
+		assert.True(t, submittedIDs[task.ID], "expected %s to be submitted", task.ID)
+	}
 }
 
 func TestHandler_DeleteTask_HTMX_UpdatesKanbanBoard(t *testing.T) {
