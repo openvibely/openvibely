@@ -319,6 +319,9 @@ templ skillsContent(skills []SkillCard, canManage bool, currentProjectID string,
 				}
 
 				function skillsRefreshURL(url) {
+					if (typeof window.cardCollectionActionURL === 'function') {
+						return window.cardCollectionActionURL(document.getElementById('skills-container'), url);
+					}
 					if (typeof window.cardPaginationRefreshURL !== 'function') return url;
 					return window.cardPaginationRefreshURL(document.getElementById('skills-container'), url);
 				}
@@ -625,7 +628,7 @@ templ skillsContent(skills []SkillCard, canManage bool, currentProjectID string,
 						if (document.activeElement && modal.contains(document.activeElement)) document.activeElement.blur();
 						modal.close();
 					}
-					htmx.ajax('DELETE', '/skills/' + encodeURIComponent(deleteSkillHandle) + '?scope=' + encodeURIComponent(deleteSkillScope) + currentSkillsProjectQuery().replace(/^\?/, '&'), {
+					htmx.ajax('DELETE', skillsRefreshURL('/skills/' + encodeURIComponent(deleteSkillHandle) + '?scope=' + encodeURIComponent(deleteSkillScope) + currentSkillsProjectQuery().replace(/^\?/, '&')), {
 						target: '#skills-container',
 						swap: 'outerHTML show:none'
 					}).catch(function(xhr) {
