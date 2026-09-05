@@ -4,6 +4,11 @@ DOCKER ?= docker
 IMAGE ?= openvibely/openvibely:local
 VERSION ?= dev-unknown
 
+DESKTOP_BUILD_TAGS :=
+ifeq ($(shell go env GOOS),linux)
+DESKTOP_BUILD_TAGS := -tags gtk3
+endif
+
 TEMPL_VERSION := $(shell go list -m -f '{{.Version}}' github.com/a-h/templ)
 SWAG_VERSION := $(shell go list -m -f '{{.Version}}' github.com/swaggo/swag)
 GOOSE_VERSION := $(shell go list -m -f '{{.Version}}' github.com/pressly/goose/v3)
@@ -41,7 +46,7 @@ build: templ swagger
 
 # Build desktop binary (Wails integration - see cmd/desktop)
 build-desktop: templ swagger
-	go build -ldflags="-s -w" -o bin/openvibely-desktop ./cmd/desktop
+	go build $(DESKTOP_BUILD_TAGS) -ldflags="-s -w" -o bin/openvibely-desktop ./cmd/desktop
 
 # Package desktop app bundle for macOS Finder/Dock launch (no Terminal)
 package-desktop-macos: build-desktop

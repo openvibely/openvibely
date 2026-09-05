@@ -37,6 +37,13 @@ type desktopLauncher func(baseURL string, onShutdown func(), coordinator *update
 
 func main() {
 	log.SetOutput(os.Stderr)
+	runtime.KeepAlive(desktopIconBuildMarker)
+	if handled, err := handleDesktopIntegrationCommand(os.Args); handled {
+		if err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 	if handled, err := runPackagedUpdateHelperCommand(context.Background(), os.Args, os.Stdin); handled {
 		if err != nil {
 			log.Fatal(err)
@@ -250,6 +257,9 @@ func launchNativeWindow(baseURL string, onShutdown func(), coordinator *update.C
 		OnShutdown:  onShutdown,
 		Mac: application.MacOptions{
 			ApplicationShouldTerminateAfterLastWindowClosed: true,
+		},
+		Linux: application.LinuxOptions{
+			ProgramName: "com.openvibely.desktop",
 		},
 	})
 	if coordinator == nil {

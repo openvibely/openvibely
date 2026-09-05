@@ -941,11 +941,18 @@ func describePackagedUpdateHelperState(current string) string {
 }
 
 func buildGoCommand(t *testing.T, pkg, output string, values map[string]string) {
+	buildGoCommandWithTags(t, pkg, output, values, nil)
+}
+
+func buildGoCommandWithTags(t *testing.T, pkg, output string, values map[string]string, tags []string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(output), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	args := []string{"build", "-o", output}
+	if len(tags) > 0 {
+		args = append(args, "-tags", strings.Join(tags, ","))
+	}
 	if len(values) > 0 {
 		var ldflags []string
 		for key, value := range values {
@@ -964,11 +971,15 @@ func buildGoCommand(t *testing.T, pkg, output string, values map[string]string) 
 
 func buildDesktopCommand(t *testing.T, output, version string) {
 	t.Helper()
-	buildGoCommand(t, "./cmd/desktop", output, map[string]string{
+	var tags []string
+	if runtime.GOOS == "linux" {
+		tags = []string{"gtk3"}
+	}
+	buildGoCommandWithTags(t, "./cmd/desktop", output, map[string]string{
 		"github.com/openvibely/openvibely/internal/buildinfo.Version":  version,
 		"github.com/openvibely/openvibely/internal/buildinfo.Commit":   "e2e-desktop-" + version,
 		"github.com/openvibely/openvibely/internal/buildinfo.Artifact": "desktop",
-	})
+	}, tags)
 }
 
 func writeRealDesktopConfig(t *testing.T, root, dataRoot, updateURL, publicKeyFile string) string {

@@ -687,8 +687,8 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 			return next(c)
 		}
 	})
-	e.GET("/favicon.png", h.AppIcon)
-	e.GET("/favicon.ico", h.AppIcon)
+	e.GET("/favicon.png", h.AppIconPNG)
+	e.GET("/favicon.ico", h.AppIconICO)
 
 	// Machine-readable readiness and immutable build identity.
 	e.GET("/api/system/health", h.SystemHealth)
@@ -1043,8 +1043,14 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.GET("/events/chat/:exec_id", h.ChatStreamSSE)
 }
 
-// AppIcon serves the shared browser icon for server and desktop web views.
-func (h *Handler) AppIcon(c echo.Context) error {
+// AppIconPNG serves the shared browser icon for server and desktop web views.
+func (h *Handler) AppIconPNG(c echo.Context) error {
 	c.Response().Header().Set("Cache-Control", "public, max-age=86400")
 	return c.Blob(http.StatusOK, "image/png", desktopicons.BrowserPNG)
+}
+
+// AppIconICO serves the conventional multi-resolution favicon resource.
+func (h *Handler) AppIconICO(c echo.Context) error {
+	c.Response().Header().Set("Cache-Control", "public, max-age=86400")
+	return c.Blob(http.StatusOK, "image/x-icon", desktopicons.BrowserICO)
 }
