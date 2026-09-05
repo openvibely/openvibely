@@ -30,11 +30,8 @@ func BenchmarkTaskRepo_ListWithSchedulesByProject(b *testing.B) {
 			defer db.Close()
 			repo := NewTaskRepo(db, nil)
 
-			b.Run("CompactOrderedBaseline", func(b *testing.B) {
-				benchmarkListWithSchedulesCalendarQuery(b, repo, scheduleCalendarQuery+" ORDER BY s.next_run ASC", "default")
-			})
-			b.Run("CompactUnordered", func(b *testing.B) {
-				benchmarkListWithSchedulesCalendarQuery(b, repo, scheduleCalendarQuery, "default")
+			b.Run("Repository", func(b *testing.B) {
+				benchmarkListWithSchedulesCalendarQuery(b, repo, "default")
 			})
 		})
 	}
@@ -71,7 +68,7 @@ func TestCalendarQuery_NoTempBTreeSort(t *testing.T) {
 	}
 }
 
-func benchmarkListWithSchedulesCalendarQuery(b *testing.B, repo *TaskRepo, query, projectID string) {
+func benchmarkListWithSchedulesCalendarQuery(b *testing.B, repo *TaskRepo, projectID string) {
 	b.Helper()
 	ctx := context.Background()
 	var unboundedPayloadBytes int64
@@ -79,7 +76,7 @@ func benchmarkListWithSchedulesCalendarQuery(b *testing.B, repo *TaskRepo, query
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		tasks, err := repo.listWithSchedulesByProjectQuery(ctx, query, projectID)
+		tasks, err := repo.listWithSchedulesByProjectQuery(ctx, scheduleCalendarQuery, projectID)
 		if err != nil {
 			b.Fatalf("list schedule calendar tasks: %v", err)
 		}
