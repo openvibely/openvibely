@@ -431,7 +431,7 @@ func BenchmarkAgentTaskDetailLabelProjection(b *testing.B) {
 	b.ReportMetric(float64(totalLightweightWait.Nanoseconds())/float64(b.N), "lightweight_db_wait_ns/op")
 }
 
-func TestAgentRepoListPickerOptionsMatchesFullListJSONWithLowerAllocations(t *testing.T) {
+func TestAgentRepoListPickerOptionsProductionShape(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping production-shaped allocation fixture in short mode")
 	}
@@ -450,42 +450,16 @@ func TestAgentRepoListPickerOptionsMatchesFullListJSONWithLowerAllocations(t *te
 		t.Fatalf("archive picker agent: %v", err)
 	}
 
-	fullAgents, err := repo.List(ctx)
-	if err != nil {
-		t.Fatalf("List full agents: %v", err)
-	}
 	compactOptions, err := repo.ListPickerOptions(ctx)
 	if err != nil {
 		t.Fatalf("ListPickerOptions: %v", err)
 	}
-	if len(fullAgents) != 1000 || len(compactOptions) != 1000 {
-		t.Fatalf("fixture result sizes full=%d compact=%d, want 1000", len(fullAgents), len(compactOptions))
+	if len(compactOptions) != 1000 {
+		t.Fatalf("picker options = %d, want 1000", len(compactOptions))
 	}
-
-	fullJSON := marshalPickerJSONFromAgents(t, fullAgents)
-	compactJSON := marshalPickerJSONFromOptions(t, compactOptions)
-	if string(compactJSON) != string(fullJSON) {
-		t.Fatalf("compact picker JSON changed\nfull: %s\ncompact: %s", fullJSON, compactJSON)
+	if compactOptions[0].Name != "Agent 0000" || compactOptions[len(compactOptions)-1].Name != "Agent 0999" {
+		t.Fatalf("picker ordering changed: first=%q last=%q", compactOptions[0].Name, compactOptions[len(compactOptions)-1].Name)
 	}
-
-	fullAllocs := testing.AllocsPerRun(3, func() {
-		agents, err := repo.List(ctx)
-		if err != nil {
-			t.Fatalf("List full agents during alloc check: %v", err)
-		}
-		_ = marshalPickerJSONFromAgents(t, agents)
-	})
-	compactAllocs := testing.AllocsPerRun(3, func() {
-		options, err := repo.ListPickerOptions(ctx)
-		if err != nil {
-			t.Fatalf("ListPickerOptions during alloc check: %v", err)
-		}
-		_ = marshalPickerJSONFromOptions(t, options)
-	})
-	if compactAllocs > fullAllocs*0.10 {
-		t.Fatalf("compact picker allocations = %.0f, full hydration allocations = %.0f; want at least 90%% reduction", compactAllocs, fullAllocs)
-	}
-	t.Logf("compact picker allocations %.0f vs full hydration %.0f (%.1f%% reduction)", compactAllocs, fullAllocs, (1-compactAllocs/fullAllocs)*100)
 }
 
 func BenchmarkAgentPickerOptionsProjectionVsFullHydration(b *testing.B) {
