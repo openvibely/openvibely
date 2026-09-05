@@ -11,121 +11,99 @@ import (
 )
 
 func BenchmarkThreadInputRepo_ListRecoverableQueuedChatProjectIDsAfter(b *testing.B) {
-	for _, tc := range []struct {
-		name              string
-		withRecoveryIndex bool
-	}{
-		{name: "without_recovery_index", withRecoveryIndex: false},
-		{name: "with_recovery_index", withRecoveryIndex: true},
-	} {
-		b.Run(tc.name, func(b *testing.B) {
-			db := newThreadInputBenchmarkDB(b, tc.withRecoveryIndex)
-			seedThreadInputRecoveryBenchmarkFixture(b, db, 200000, 100)
-			repo := NewThreadInputRepo(db)
-			ctx := context.Background()
+	b.Run("current", func(b *testing.B) {
+		db := newThreadInputBenchmarkDB(b)
+		seedThreadInputRecoveryBenchmarkFixture(b, db, 200000, 100)
+		repo := NewThreadInputRepo(db)
+		ctx := context.Background()
 
+		ids, err := repo.ListRecoverableQueuedChatProjectIDsAfter(ctx, "", 100)
+		if err != nil {
+			b.Fatalf("warm recoverable chat project page: %v", err)
+		}
+		if len(ids) != 100 {
+			b.Fatalf("warm recoverable chat project count = %d, want 100", len(ids))
+		}
+		b.Logf("query plan: %s", explainThreadInputQueryPlan(b, db, listRecoverableQueuedChatProjectIDsAfterSQL, "", 100))
+
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
 			ids, err := repo.ListRecoverableQueuedChatProjectIDsAfter(ctx, "", 100)
 			if err != nil {
-				b.Fatalf("warm recoverable chat project page: %v", err)
+				b.Fatalf("ListRecoverableQueuedChatProjectIDsAfter: %v", err)
 			}
 			if len(ids) != 100 {
-				b.Fatalf("warm recoverable chat project count = %d, want 100", len(ids))
+				b.Fatalf("recoverable chat project count = %d, want 100", len(ids))
 			}
-			b.Logf("query plan: %s", explainThreadInputQueryPlan(b, db, listRecoverableQueuedChatProjectIDsAfterSQL, "", 100))
-
-			b.ReportAllocs()
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
-				ids, err := repo.ListRecoverableQueuedChatProjectIDsAfter(ctx, "", 100)
-				if err != nil {
-					b.Fatalf("ListRecoverableQueuedChatProjectIDsAfter: %v", err)
-				}
-				if len(ids) != 100 {
-					b.Fatalf("recoverable chat project count = %d, want 100", len(ids))
-				}
-			}
-		})
-	}
+		}
+	})
 }
 
 func BenchmarkThreadInputRepo_QueuedChatInputWriteIndexOverhead(b *testing.B) {
-	for _, tc := range []struct {
-		name              string
-		withRecoveryIndex bool
-	}{
-		{name: "without_recovery_index", withRecoveryIndex: false},
-		{name: "with_recovery_index", withRecoveryIndex: true},
-	} {
-		b.Run(tc.name+"/create_queued", func(b *testing.B) {
-			db := newThreadInputBenchmarkDB(b, tc.withRecoveryIndex)
-			agentID := threadInputBenchmarkAgentID(b, db)
-			seedThreadInputWriteProject(b, db)
-			repo := NewThreadInputRepo(db)
-			ctx := context.Background()
+	b.Run("create_queued", func(b *testing.B) {
+		db := newThreadInputBenchmarkDB(b)
+		agentID := threadInputBenchmarkAgentID(b, db)
+		seedThreadInputWriteProject(b, db)
+		repo := NewThreadInputRepo(db)
+		ctx := context.Background()
 
-			b.ReportAllocs()
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
-				input := &models.ThreadInput{
-					Scope:         models.ThreadInputScopeChat,
-					ProjectID:     "bench-write-project",
-					AgentConfigID: agentID,
-					InputMode:     models.ThreadInputModeQueued,
-					Content:       fmt.Sprintf("queued input %d", i),
-					QueuePosition: int64(i + 1),
-					ChatMode:      models.ChatModeOrchestrate,
-				}
-				if err := repo.CreateQueued(ctx, input); err != nil {
-					b.Fatalf("CreateQueued: %v", err)
-				}
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			input := &models.ThreadInput{
+				Scope:         models.ThreadInputScopeChat,
+				ProjectID:     "bench-write-project",
+				AgentConfigID: agentID,
+				InputMode:     models.ThreadInputModeQueued,
+				Content:       fmt.Sprintf("queued input %d", i),
+				QueuePosition: int64(i + 1),
+				ChatMode:      models.ChatModeOrchestrate,
 			}
-		})
-
-		b.Run(tc.name+"/mark_applied", func(b *testing.B) {
-			db := newThreadInputBenchmarkDB(b, tc.withRecoveryIndex)
-			seedThreadInputWriteProject(b, db)
-			seedThreadInputPendingWrites(b, db, "apply-bench", b.N)
-			repo := NewThreadInputRepo(db)
-			ctx := context.Background()
-
-			b.ReportAllocs()
-			b.ResetTimer()
-			for i := 1; i <= b.N; i++ {
-				id := fmt.Sprintf("apply-bench-%08d", i)
-				if err := repo.MarkApplied(ctx, id, "", ""); err != nil {
-					b.Fatalf("MarkApplied: %v", err)
-				}
+			if err := repo.CreateQueued(ctx, input); err != nil {
+				b.Fatalf("CreateQueued: %v", err)
 			}
-		})
+		}
+	})
 
-		b.Run(tc.name+"/cancel_pending", func(b *testing.B) {
-			db := newThreadInputBenchmarkDB(b, tc.withRecoveryIndex)
-			seedThreadInputWriteProject(b, db)
-			seedThreadInputPendingWrites(b, db, "cancel-bench", b.N)
-			repo := NewThreadInputRepo(db)
-			ctx := context.Background()
+	b.Run("mark_applied", func(b *testing.B) {
+		db := newThreadInputBenchmarkDB(b)
+		seedThreadInputWriteProject(b, db)
+		seedThreadInputPendingWrites(b, db, "apply-bench", b.N)
+		repo := NewThreadInputRepo(db)
+		ctx := context.Background()
 
-			b.ReportAllocs()
-			b.ResetTimer()
-			for i := 1; i <= b.N; i++ {
-				id := fmt.Sprintf("cancel-bench-%08d", i)
-				if _, err := repo.CancelPending(ctx, id); err != nil {
-					b.Fatalf("CancelPending: %v", err)
-				}
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 1; i <= b.N; i++ {
+			id := fmt.Sprintf("apply-bench-%08d", i)
+			if err := repo.MarkApplied(ctx, id, "", ""); err != nil {
+				b.Fatalf("MarkApplied: %v", err)
 			}
-		})
-	}
+		}
+	})
+
+	b.Run("cancel_pending", func(b *testing.B) {
+		db := newThreadInputBenchmarkDB(b)
+		seedThreadInputWriteProject(b, db)
+		seedThreadInputPendingWrites(b, db, "cancel-bench", b.N)
+		repo := NewThreadInputRepo(db)
+		ctx := context.Background()
+
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 1; i <= b.N; i++ {
+			id := fmt.Sprintf("cancel-bench-%08d", i)
+			if _, err := repo.CancelPending(ctx, id); err != nil {
+				b.Fatalf("CancelPending: %v", err)
+			}
+		}
+	})
 }
 
-func newThreadInputBenchmarkDB(b *testing.B, withRecoveryIndex bool) *sql.DB {
+func newThreadInputBenchmarkDB(b *testing.B) *sql.DB {
 	b.Helper()
-	db := testutil.NewTestDB(b)
-	if !withRecoveryIndex {
-		if _, err := db.Exec(`DROP INDEX IF EXISTS idx_thread_inputs_recover_chat_project`); err != nil {
-			b.Fatalf("drop recovery index: %v", err)
-		}
-	}
-	return db
+	return testutil.NewTestDB(b)
 }
 
 func seedThreadInputRecoveryBenchmarkFixture(b *testing.B, db *sql.DB, historicalInputs, pendingProjects int) {
