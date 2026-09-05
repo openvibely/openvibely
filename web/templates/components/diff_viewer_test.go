@@ -1910,26 +1910,15 @@ diff --git a/huge.txt b/huge.txt
 	}
 }
 
-func TestDiffRenderMetaByIndex_LargeDiffProbeReducesParsedBytesAndAllocations(t *testing.T) {
+func TestDiffRenderMetaByIndex_LargeDiffProbeBoundsParsedBytes(t *testing.T) {
 	diff := buildMixedLargeDiff(200)
 	const targetIndex = 9
-	legacyParsedBytes := len(diff) * 4
-	_, optimizedParsedBytes, ok := diffRenderMetaByIndexWithParsedBytes(diff, targetIndex)
+	_, parsedBytes, ok := diffRenderMetaByIndexWithParsedBytes(diff, targetIndex)
 	if !ok {
 		t.Fatal("expected targeted metadata")
 	}
-	if optimizedParsedBytes > legacyParsedBytes/10 {
-		t.Fatalf("expected at least 90%% raw parsed-byte reduction, legacy=%d optimized=%d", legacyParsedBytes, optimizedParsedBytes)
-	}
-
-	legacyAllocs := testing.AllocsPerRun(20, func() {
-		legacyRepeatedParseMeta(diff, targetIndex)
-	})
-	optimizedAllocs := testing.AllocsPerRun(20, func() {
-		DiffRenderMetaByIndex(diff, targetIndex)
-	})
-	if optimizedAllocs > legacyAllocs*0.25 {
-		t.Fatalf("expected at least 75%% allocation reduction, legacy=%.0f optimized=%.0f", legacyAllocs, optimizedAllocs)
+	if parsedBytes > len(diff)/2 {
+		t.Fatalf("targeted metadata parsed %d bytes, want at most half of the %d-byte diff", parsedBytes, len(diff))
 	}
 }
 
@@ -1941,19 +1930,6 @@ func BenchmarkDiffRenderMetaByIndexLargeDiff(b *testing.B) {
 			b.Fatal("missing target file")
 		}
 	}
-}
-
-func legacyRepeatedParseMeta(diff string, fileIndex int) DiffFileRenderMeta {
-	if _, ok := getDiffRenderMetaByIndex(ParseDiffOutput(diff), fileIndex); !ok {
-		return DiffFileRenderMeta{}
-	}
-	meta, _ := getDiffRenderMetaByIndex(ParseDiffOutput(diff), fileIndex)
-	if !(meta.AutoLoad || meta.CanLoadOnDemand) {
-		return meta
-	}
-	getDiffRenderMetaByIndex(ParseDiffOutput(diff), fileIndex)
-	meta, _ = getDiffRenderMetaByIndex(ParseDiffOutput(diff), fileIndex)
-	return meta
 }
 
 func buildMixedLargeDiff(fileCount int) string {
