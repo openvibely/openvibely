@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"reflect"
 	"sort"
 	"strings"
@@ -20,6 +21,46 @@ func getDefaultProjectID(t *testing.T, db interface {
 	t.Helper()
 	// The migration seeds a default project
 	return "default"
+}
+
+func TestTaskRepo_BreadcrumbSelectorIsProjectScopedAndBounded(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	tasks := NewTaskRepo(db, nil)
+	projects := NewProjectRepo(db)
+	foreignProject := &models.Project{Name: "Foreign selector project", RepoPath: t.TempDir()}
+	if err := projects.Create(ctx, foreignProject); err != nil {
+		t.Fatal(err)
+	}
+
+	var currentID string
+	for i := 0; i < 25; i++ {
+		task := &models.Task{ProjectID: "default", Title: fmt.Sprintf("Selector task %02d", i), Category: models.CategoryBacklog, Priority: 2, Status: models.StatusPending}
+		if err := tasks.Create(ctx, task); err != nil {
+			t.Fatal(err)
+		}
+		currentID = task.ID
+	}
+	foreign := &models.Task{ProjectID: foreignProject.ID, Title: "Selector task foreign secret", Category: models.CategoryBacklog, Priority: 2, Status: models.StatusPending}
+	if err := tasks.Create(ctx, foreign); err != nil {
+		t.Fatal(err)
+	}
+
+	items, err := tasks.ListBreadcrumbSelector(ctx, "default", "selector", currentID, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 20 {
+		t.Fatalf("got %d items, want bounded 20", len(items))
+	}
+	if items[0].ID != currentID {
+		t.Fatalf("current item was not first: %#v", items[0])
+	}
+	for _, item := range items {
+		if item.ID == foreign.ID || strings.Contains(item.Name, "foreign secret") {
+			t.Fatalf("foreign task leaked: %#v", item)
+		}
+	}
 }
 
 func TestTaskRepo_GetThreadRenderMetadataUsesCompactProjection(t *testing.T) {

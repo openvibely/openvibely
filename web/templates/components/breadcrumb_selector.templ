@@ -1,0 +1,156 @@
+package components
+
+import (
+	"fmt"
+
+	"github.com/openvibely/openvibely/internal/models"
+)
+
+templ BreadcrumbSelector(config models.BreadcrumbSelector) {
+	<div class="min-w-0" data-breadcrumb-selector>
+		<button
+			id={ config.ID + "-button" }
+			class="inline-flex max-w-full items-center gap-1 rounded-btn px-1 py-0 text-left text-2xl font-bold leading-tight transition-colors hover:bg-base-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+			type="button"
+			aria-haspopup="dialog"
+			aria-expanded="false"
+			aria-controls={ config.ID + "-dialog" }
+			data-breadcrumb-selector-button
+		>
+			<span class="min-w-0 truncate">{ config.CurrentName }</span>
+			<svg class="h-4 w-4 shrink-0 opacity-60" width="16" height="16" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd"></path></svg>
+		</button>
+		<dialog id={ config.ID + "-dialog" } class="modal p-4" role="dialog" aria-modal="true" aria-labelledby={ config.ID + "-heading" } data-breadcrumb-selector-dialog>
+			<div class="modal-box flex max-h-[min(32rem,calc(100dvh-2rem))] w-[28rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden border border-base-300 bg-base-100 p-0 shadow-xl">
+				<div class="flex items-center justify-between gap-3 border-b border-base-300 px-4 py-3">
+					<h2 id={ config.ID + "-heading" } class="min-w-0 truncate text-base font-bold">Switch { config.Kind }</h2>
+					<button class="btn btn-ghost btn-sm btn-square shrink-0" type="button" aria-label={ "Close " + config.Kind + " selector" } data-breadcrumb-selector-close>✕</button>
+				</div>
+				<div class="border-b border-base-300 p-3">
+					<label class="sr-only" for={ config.ID + "-search" }>Search { config.Kind }s</label>
+					<label class="input input-bordered flex w-full items-center gap-2">
+						<svg class="h-4 w-4 shrink-0 opacity-50" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg>
+						<input
+							id={ config.ID + "-search" }
+							class="min-w-0 grow"
+							type="search"
+							name="search"
+							placeholder={ "Search " + config.Kind + "s" }
+							autocomplete="off"
+							hx-get={ config.SearchURL }
+							hx-trigger="input changed delay:200ms, search"
+							hx-target={ "#" + config.ID + "-results" }
+							hx-swap="innerHTML"
+							hx-sync="this:replace"
+							hx-indicator={ "#" + config.ID + "-loading" }
+							data-breadcrumb-selector-search
+						/>
+					</label>
+				</div>
+				<div id={ config.ID + "-results" } class="min-h-0 flex-1 overflow-y-auto overscroll-contain p-2" data-breadcrumb-selector-results>
+					<p class="px-3 py-6 text-center text-sm text-base-content/60">Loading { config.Kind }s…</p>
+				</div>
+				<div class="flex min-h-8 items-center border-t border-base-300 px-4 py-2 text-xs text-base-content/60">
+					<span id={ config.ID + "-loading" } class="loading loading-spinner loading-xs htmx-indicator" aria-hidden="true"></span>
+					<span class="ml-2" role="status" aria-live="polite" data-breadcrumb-selector-status>Search results update as you type.</span>
+				</div>
+			</div>
+			<form method="dialog" class="modal-backdrop"><button aria-label={ "Close " + config.Kind + " selector" }>close</button></form>
+		</dialog>
+	</div>
+	@breadcrumbSelectorScript()
+}
+
+templ BreadcrumbSelectorResults(kind string, currentID string, items []models.BreadcrumbSelectorItem, hasMore bool) {
+	if len(items) == 0 {
+		<div class="px-3 py-8 text-center" data-breadcrumb-selector-empty>
+			<p class="font-medium">No { kind }s found</p>
+			<p class="mt-1 text-sm text-base-content/60">Try a different search.</p>
+		</div>
+	} else {
+		<div role="listbox" aria-label={ kind + "s" } class="menu w-full gap-1 p-0">
+			for _, item := range items {
+				<a
+					class="flex min-h-11 min-w-0 items-center gap-2 rounded-btn px-3 py-2 hover:bg-base-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+					href={ templ.URL(item.URL) }
+					role="option"
+					aria-selected={ fmt.Sprintf("%t", item.ID == currentID) }
+					aria-current={ fmt.Sprintf("%t", item.ID == currentID) }
+					data-breadcrumb-selector-option
+					onclick="event.preventDefault(); var dialog=this.closest('dialog'); if(dialog) dialog.close(); window.openVibelyNavigate(this.getAttribute('href')); return false;"
+				>
+					<span class="w-4 shrink-0" aria-hidden="true">{ breadcrumbSelectorCheck(item.ID == currentID) }</span>
+					<span class="min-w-0 break-words">{ item.Name }</span>
+				</a>
+			}
+		</div>
+		if hasMore {
+			<p class="px-3 py-2 text-center text-xs text-base-content/60">More matches are available. Refine your search.</p>
+		}
+	}
+}
+
+func breadcrumbSelectorCheck(current bool) string {
+	if current {
+		return "✓"
+	}
+	return ""
+}
+
+templ breadcrumbSelectorScript() {
+	<script>
+		(function() {
+			if (window.openVibelyBreadcrumbSelectorInstalled) return;
+			window.openVibelyBreadcrumbSelectorInstalled = true;
+			function rootFor(node) { return node && node.closest ? node.closest('[data-breadcrumb-selector]') : null; }
+			function close(dialog, restore) {
+				if (!dialog || !dialog.open) return;
+				var root = rootFor(dialog), button = root && root.querySelector('[data-breadcrumb-selector-button]');
+				dialog.close();
+				if (button) button.setAttribute('aria-expanded', 'false');
+				if (restore && button && button.isConnected) button.focus({preventScroll: true});
+			}
+			document.addEventListener('click', function(event) {
+				var button = event.target.closest && event.target.closest('[data-breadcrumb-selector-button]');
+				if (button) {
+					var root = rootFor(button), dialog = root && root.querySelector('[data-breadcrumb-selector-dialog]');
+					if (!dialog) return;
+					dialog.showModal(); button.setAttribute('aria-expanded', 'true');
+					var input = root.querySelector('[data-breadcrumb-selector-search]');
+					if (input) { input.focus(); input.select(); if (window.htmx) htmx.trigger(input, 'search'); }
+					return;
+				}
+				var dismiss = event.target.closest && event.target.closest('[data-breadcrumb-selector-close]');
+				if (dismiss) close(dismiss.closest('dialog'), true);
+			});
+			document.addEventListener('keydown', function(event) {
+				var root = rootFor(event.target); if (!root) return;
+				var dialog = root.querySelector('[data-breadcrumb-selector-dialog]');
+				if (event.key === 'Escape') { event.preventDefault(); close(dialog, true); return; }
+				if ((event.key === 'ArrowDown' || event.key === 'Enter') && event.target.matches('[data-breadcrumb-selector-button]')) { event.preventDefault(); event.target.click(); return; }
+				var options = Array.prototype.slice.call(root.querySelectorAll('[data-breadcrumb-selector-option]'));
+				if (event.target.matches('[data-breadcrumb-selector-search]') && event.key === 'ArrowDown' && options.length) { event.preventDefault(); options[0].focus(); return; }
+				var index = options.indexOf(event.target);
+				if (index >= 0 && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) { event.preventDefault(); options[(index + (event.key === 'ArrowDown' ? 1 : options.length - 1)) % options.length].focus(); }
+			});
+			document.addEventListener('cancel', function(event) { var root = rootFor(event.target); if (!root) return; event.preventDefault(); close(event.target, true); }, true);
+			document.addEventListener('close', function(event) { var root = rootFor(event.target); if (!root) return; var button = root.querySelector('[data-breadcrumb-selector-button]'); if (button) button.setAttribute('aria-expanded', 'false'); }, true);
+			document.addEventListener('htmx:responseError', function(event) {
+				var root = rootFor(event.detail && event.detail.elt); if (!root) return;
+				var results = root.querySelector('[data-breadcrumb-selector-results]'), status = root.querySelector('[data-breadcrumb-selector-status]');
+				if (results) results.innerHTML = '<div class="px-3 py-8 text-center"><p class="font-medium">Could not load results</p><p class="mt-1 text-sm opacity-60">Try searching again.</p></div>';
+				if (status) status.textContent = 'Could not load results.';
+			});
+			document.addEventListener('htmx:afterSwap', function(event) {
+				var root = rootFor(event.detail && event.detail.target); if (!root) return;
+				var count = root.querySelectorAll('[data-breadcrumb-selector-option]').length, status = root.querySelector('[data-breadcrumb-selector-status]');
+				if (status) status.textContent = count ? count + (count === 1 ? ' result.' : ' results.') : 'No results.';
+			});
+			document.addEventListener('htmx:beforeSwap', function(event) {
+				if (rootFor(event.detail && event.detail.target)) return;
+				document.querySelectorAll('[data-breadcrumb-selector-dialog][open]').forEach(function(dialog) { close(dialog, false); });
+			});
+			window.addEventListener('popstate', function() { document.querySelectorAll('[data-breadcrumb-selector-dialog][open]').forEach(function(dialog) { close(dialog, false); }); });
+		})();
+	</script>
+}

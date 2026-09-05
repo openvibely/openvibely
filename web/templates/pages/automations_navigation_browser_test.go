@@ -148,6 +148,9 @@ func TestAutomationLiveLinksOnlyTaskBackedNodesAndOmitsAuxiliarySurfaces(t *test
 		`window.openVibelyAutomationLiveRefresh = function(method, url)`,
 		`X-OpenVibely-Automation-Live-Generation`,
 		`htmx:beforeSwap`,
+		`data-breadcrumb-selector`,
+		`Switch Automation`,
+		`/breadcrumb-selectors/automations?project_id=project-live&amp;current_id=automation-live&amp;view=live`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("expected simplified Automation Live to contain %q", want)
@@ -776,6 +779,24 @@ func TestAutomationLiveMatchesEditVisualScale(t *testing.T) {
 	for _, scaled := range []string{`translate(150 -46)`, `x1="320"`, `x2="650"`} {
 		if strings.Contains(body, scaled) {
 			t.Errorf("Live graph must not shrink nodes through legacy expanded coordinates %q", scaled)
+		}
+	}
+}
+
+func TestAutomationEditUsesSearchableBreadcrumbAndRetainsRenameField(t *testing.T) {
+	candidate := models.AutomationDraftCandidate{SchemaVersion: 1, Name: "Saved Automation", AutomationType: "custom", AdapterKey: "custom"}
+	page := models.AutomationBuilderPage{AutomationID: "automation-saved", Source: "blank", Result: models.AutomationDraftResult{Candidate: candidate}}
+	if got := automationBuilderPageTitle(page); got != candidate.Name {
+		t.Fatalf("saved Automation builder title = %q, want %q", got, candidate.Name)
+	}
+	var out bytes.Buffer
+	if err := AutomationBuilderContent(page, "project-saved").Render(context.Background(), &out); err != nil {
+		t.Fatal(err)
+	}
+	body := out.String()
+	for _, want := range []string{`data-breadcrumb-selector`, `Switch Automation`, `/breadcrumb-selectors/automations?project_id=project-saved&amp;current_id=automation-saved&amp;view=edit`, `data-automation-name`, `>Edit</h2>`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("saved Automation edit is missing %q", want)
 		}
 	}
 }

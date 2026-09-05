@@ -24,6 +24,36 @@ func (r *AutomationRepo) SetBroadcaster(b *events.Broadcaster) {
 	r.broadcaster = b
 }
 
+// ListBreadcrumbSelector returns a bounded compact saved-Automation search for one project.
+func (r *AutomationRepo) ListBreadcrumbSelector(ctx context.Context, projectID, search, currentID string, limit int) ([]models.BreadcrumbSelectorItem, error) {
+	if limit <= 0 || limit > 50 {
+		limit = 20
+	}
+	search = strings.ToLower(strings.TrimSpace(search))
+	rows, err := r.db.QueryContext(ctx, `SELECT a.id, a.name
+		FROM automations a
+		JOIN automation_versions v ON v.id = a.published_version_id
+			AND v.project_id = a.project_id AND v.automation_id = a.id AND v.state = 'published'
+		WHERE a.project_id = ? AND (? = '' OR INSTR(LOWER(a.name), ?) > 0)
+		ORDER BY CASE WHEN a.id = ? THEN 0 ELSE 1 END,
+			CASE WHEN LOWER(a.name) = ? THEN 0 WHEN LOWER(a.name) LIKE ? || '%' THEN 1 ELSE 2 END,
+			a.updated_at DESC, a.id ASC
+		LIMIT ?`, projectID, search, search, currentID, search, search, limit)
+	if err != nil {
+		return nil, fmt.Errorf("listing automation breadcrumb selector: %w", err)
+	}
+	defer rows.Close()
+	items := make([]models.BreadcrumbSelectorItem, 0, limit)
+	for rows.Next() {
+		var item models.BreadcrumbSelectorItem
+		if err := rows.Scan(&item.ID, &item.Name); err != nil {
+			return nil, fmt.Errorf("scanning automation breadcrumb selector: %w", err)
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 func (r *AutomationRepo) ListByProject(ctx context.Context, projectID string, limit int) ([]models.Automation, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 100
