@@ -117,6 +117,41 @@ func TestKanbanColumn_DropdownTriggersUseLabelForDesktopWebviewCompatibility(t *
 	}
 }
 
+func TestKanbanColumn_BacklogExecuteAllActionHasNoActivationOrConfirmation(t *testing.T) {
+	body := renderKanbanColumnForTest(t, []models.Task{{
+		ID:        "eligible-backlog",
+		ProjectID: "project-1",
+		Title:     "Eligible backlog task",
+		Category:  models.CategoryBacklog,
+		Status:    models.StatusPending,
+	}})
+
+	if strings.Contains(body, "Activate All") || strings.Contains(body, "/tasks/backlog/activate") {
+		t.Fatalf("backlog menu must not render the redundant Activate All action: %s", body)
+	}
+
+	actionStart := strings.Index(body, `hx-post="/tasks/backlog/execute?project_id=project-1"`)
+	if actionStart < 0 {
+		t.Fatalf("backlog menu is missing the Execute All request: %s", body)
+	}
+	actionEnd := strings.Index(body[actionStart:], "</button>")
+	if actionEnd < 0 {
+		t.Fatalf("backlog Execute All action is missing its closing button: %s", body)
+	}
+	action := body[actionStart : actionStart+actionEnd]
+	if !strings.Contains(action, "Execute All (1)") {
+		t.Fatalf("backlog Execute All action has unexpected markup: %s", action)
+	}
+	if strings.Contains(action, "hx-confirm") {
+		t.Fatalf("backlog Execute All action must submit without confirmation: %s", action)
+	}
+	for _, required := range []string{`hx-target="#kanban-board"`, `hx-swap="outerHTML"`} {
+		if !strings.Contains(action, required) {
+			t.Fatalf("backlog Execute All action must preserve %s: %s", required, action)
+		}
+	}
+}
+
 func TestKanbanColumn_BacklogPriorityExecuteActionsUsePriorityLabelsAndRoutes(t *testing.T) {
 	tasks := []models.Task{
 		{ID: "priority-4", ProjectID: "project-1", Title: "Urgent task", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 4},

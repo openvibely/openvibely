@@ -7,20 +7,24 @@ import (
 )
 
 templ BreadcrumbSelector(config models.BreadcrumbSelector) {
-	<div class="min-w-0" data-breadcrumb-selector>
+	<div class={ "min-w-0", templ.KV("shrink-0 w-0 overflow-visible", config.CaretOnly) } data-breadcrumb-selector>
 		if config.ContextName != "" {
 			<input type="hidden" name={ config.ContextName } value={ config.ContextValue } data-breadcrumb-selector-context/>
 		}
 		<button
 			id={ config.ID + "-button" }
-			class="inline-flex max-w-full items-center gap-1 rounded-btn px-1 py-0 text-left text-2xl font-bold leading-tight transition-colors hover:bg-base-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+			class={ "inline-flex items-center rounded-btn py-0 text-left font-bold leading-tight transition-colors hover:bg-base-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary", templ.KV("max-w-full gap-1 px-1 text-2xl", !config.CaretOnly), templ.KV("h-8 w-7 justify-center px-0", config.CaretOnly) }
 			type="button"
+			aria-label={ "Switch " + config.Kind }
 			aria-haspopup="dialog"
 			aria-expanded="false"
 			aria-controls={ config.ID + "-dialog" }
 			data-breadcrumb-selector-button
+			data-breadcrumb-selector-caret-only?={ config.CaretOnly }
 		>
-			<span class="min-w-0 truncate">{ config.CurrentName }</span>
+			if !config.CaretOnly {
+				<span class="min-w-0 truncate">{ config.CurrentName }</span>
+			}
 			<svg class="h-4 w-4 shrink-0 opacity-60" width="16" height="16" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" data-breadcrumb-selector-caret><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd"></path></svg>
 		</button>
 		<dialog id={ config.ID + "-dialog" } class="fixed m-0 max-h-[min(32rem,calc(100dvh-1rem))] w-[28rem] max-w-[calc(100vw-1rem)] overflow-hidden rounded-box border border-base-300 bg-base-100 p-0 text-base-content shadow-xl backdrop:bg-transparent" role="dialog" aria-modal="true" aria-labelledby={ config.ID + "-heading" } data-breadcrumb-selector-dialog>

@@ -1,25 +1,28 @@
 # OpenVibely Vision
 
-OpenVibely exists to make AI software development feel like running a capable,
-auditable team instead of juggling disconnected chat sessions.
+OpenVibely exists to make it practical to run coding agents at scale across
+projects without losing context, visibility, or human control.
 
-The long-term goal is a self-hosted command center where one project-aware
-conversation can plan work, split it into tasks, run specialized agents in
-parallel, connect those tasks into automations, review their changes, learn
-from the results, and keep unfinished goals moving without losing human
-control.
+It is a software factory for agent-powered development: coordinating parallel
+execution, discovering what should be improved next, and moving approved work
+toward completion. Teams can operate many projects while each one retains its
+own code, vision, tasks, memory, skills, schedules, integrations, and history.
 
-Agents do the work. Humans stay in command.
+Coding agents do the work. OpenVibely runs the operation. Humans decide what
+moves forward.
 
 ## The Product We Are Building
 
-OpenVibely should become the recursive self-improvement control plane for
-software teams.
+OpenVibely should become the open-source software factory for running coding
+agents at scale across projects.
 
 That means:
 
 - A user can describe an outcome once, then watch the system turn it into
   reviewable, executable work.
+- Maintained SDLC automations can compare a project with its vision, detect
+  concrete problems and opportunities, and propose valuable work that a person
+  can approve or reject.
 - Work can be modeled at the right level: one task, a swarm of tasks, a
   scheduled follow-up, or an automation graph that ties triggers, agents,
   tasks, approvals, GitHub actions, and outcomes together.
@@ -28,10 +31,13 @@ That means:
   memory, skill usage, graph state, validation, provenance, and approvals.
 - Work happens in isolated, inspectable branches or worktrees so AI output is
   never a hidden mutation.
-- Chat remains the coordination surface for the whole project, while task
-  detail pages remain the operational surface for individual units of work.
+- Chat turns fuzzy intent into coordinated work, while task detail pages,
+  automation graphs, alerts, GitHub, and integrations provide other operational
+  surfaces for creating, advancing, and reviewing it.
 - The system improves through durable project memory and reusable skills, not
   through opaque personalization or unreviewable background behavior.
+- Teams can increase development output without increasing the time spent
+  coordinating individual agent sessions.
 - Teams can run it themselves, keep their data, choose their model providers,
   and understand what happened after every run.
 
@@ -44,7 +50,9 @@ remembers to ask for it. Lessons learned in one run rarely make the next run
 better.
 
 OpenVibely is built around a different premise: AI development work should be
-orchestrated, inspectable, repeatable, and improvable.
+orchestrated, inspectable, repeatable, and improvable. Scaling agent activity is
+not enough. The system should increase useful development throughput while
+preserving project context, review boundaries, and accountability.
 
 The product should help a team answer:
 
@@ -58,12 +66,13 @@ The product should help a team answer:
 
 ## Principles
 
-### Chat Is The Control Plane
+### Chat Turns Intent Into Work
 
 The project chat should be the place where fuzzy intent becomes coordinated
 execution. Users should be able to plan, create tasks, steer active work,
 inspect status, schedule follow-ups, and ask what comes next without opening a
-new AI session for every subproblem.
+new AI session for every subproblem. Chat is an important entrance to the
+system, not the only way work begins or moves forward.
 
 ### Tasks Are The Unit Of Accountability
 
@@ -71,6 +80,13 @@ Every meaningful piece of work should become a task with durable state,
 execution history, reviewable output, and clear status. A task should be small
 enough to inspect and steer, but rich enough to carry the context an agent needs
 to make real progress.
+
+### Scale Must Preserve Project Context
+
+OpenVibely should run work across many projects while keeping each project's
+code, vision, tasks, memory, skills, schedules, integrations, and history
+correctly scoped. Increasing agent throughput must not blur project boundaries
+or make the overall operation harder to understand.
 
 ### Automations Are The Unit Of Repeatable Orchestration
 
@@ -82,6 +98,18 @@ should be declarative enough to review, diff, template, and regenerate from a
 description without silently changing running resources. They are not a second
 executor or a shortcut around review; they are a higher-level way to make the
 existing lifecycle repeatable, visible, and easier to improve.
+
+### Project Vision Should Drive Work
+
+A project vision should be an active input to development, not a document that
+slowly becomes outdated. OpenVibely should compare the current product with its
+intended direction, find concrete gaps and problems, and propose reviewable work
+that moves the project forward.
+
+Autonomous discovery should cover product gaps, correctness defects, measurable
+optimization opportunities, and unnecessary duplication. Findings should
+include evidence, avoid duplicating existing work, and require human approval
+before implementation begins.
 
 ### Autonomy Must Stay Reviewable
 
@@ -157,21 +185,27 @@ OpenVibely should not become:
 
 The product should keep deepening the loop that already defines it:
 
-1. A user describes a goal in Chat.
-2. OpenVibely turns the goal into concrete tasks.
-3. When the work should repeat or coordinate multiple handoffs, OpenVibely turns
-   the plan into an automation graph.
-4. Agents execute the graph's tasks with the right model, skills, memory, and
-   tools.
-5. The user reviews diffs, threads, logs, graph state, approvals, and lifecycle
-   evidence.
-6. Goal loops, schedules, automations, and integrations keep useful work moving.
-7. Insights reveal trends, costs, failures, upcoming work, and learning quality.
-8. Memory Curator and Skill Curator preserve what should improve the next run.
+1. A person describes an outcome, or an automation discovers a problem or
+   opportunity.
+2. OpenVibely turns it into a concrete, evidence-backed proposal.
+3. A person approves and prioritizes the work when approval is required.
+4. OpenVibely creates and coordinates implementation tasks, using automation
+   graphs when work should repeat or requires multiple handoffs.
+5. Coding agents execute in parallel with the right project context, model,
+   tools, memory, and skills.
+6. OpenVibely collects changes, validation, history, and review feedback.
+7. Goals, schedules, inboxes, integrations, and automation graphs keep unfinished
+   work moving.
+8. Insights expose trends, costs, failures, upcoming work, and learning quality.
+9. Memory Curator and Skill Curator improve how future work is discovered and
+   executed.
 
 Near-term product decisions should strengthen that loop. Features are most
 valuable when they make work easier to orchestrate, safer to review, clearer to
 operate, or more reusable over time.
+
+OpenVibely should not only execute the backlog. It should help each project
+discover the right backlog and continuously move toward its vision.
 
 The north star is not simply "more automation." It is compounding capability
 under human command.
