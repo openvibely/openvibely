@@ -21,7 +21,7 @@ templ BreadcrumbSelector(config models.BreadcrumbSelector) {
 			data-breadcrumb-selector-button
 		>
 			<span class="min-w-0 truncate">{ config.CurrentName }</span>
-			<svg class="h-4 w-4 shrink-0 opacity-60" width="16" height="16" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd"></path></svg>
+			<svg class="h-4 w-4 shrink-0 opacity-60" width="16" height="16" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" data-breadcrumb-selector-caret><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd"></path></svg>
 		</button>
 		<dialog id={ config.ID + "-dialog" } class="fixed m-0 max-h-[min(32rem,calc(100dvh-1rem))] w-[28rem] max-w-[calc(100vw-1rem)] overflow-hidden rounded-box border border-base-300 bg-base-100 p-0 text-base-content shadow-xl backdrop:bg-transparent" role="dialog" aria-modal="true" aria-labelledby={ config.ID + "-heading" } data-breadcrumb-selector-dialog>
 			<div class="flex max-h-[inherit] min-h-0 flex-col overflow-hidden">
@@ -106,9 +106,11 @@ templ breadcrumbSelectorScript() {
 				var root = rootFor(dialog), button = root && root.querySelector('[data-breadcrumb-selector-button]');
 				if (!button) return;
 				var margin = 8, gap = 4, trigger = button.getBoundingClientRect();
+				var caret = button.querySelector('[data-breadcrumb-selector-caret]');
+				var anchorLeft = caret ? caret.getBoundingClientRect().left : trigger.right;
 				dialog.style.maxHeight = '';
 				var width = dialog.offsetWidth, height = dialog.offsetHeight;
-				var left = Math.max(margin, Math.min(trigger.right - width, window.innerWidth - width - margin));
+				var left = Math.max(margin, Math.min(anchorLeft, window.innerWidth - width - margin));
 				var belowTop = trigger.bottom + gap, below = window.innerHeight - belowTop - margin, above = trigger.top - gap - margin;
 				var top = belowTop, available = below;
 				if (below < Math.min(height, 160) && above > below) {
