@@ -78,6 +78,9 @@ func (h *Handler) handleChannels(c echo.Context) error {
 
 	ctx := c.Request().Context()
 	page := parseCardPageRequest(c)
+	channelTypeFilter := allowlistedQuery(c, "type", "", "github", "slack", "telegram", "discord", "x", "email", "webhook", "outbound_targets")
+	connectionStateFilter := allowlistedQuery(c, "connection_state", "", "connected", "configured", "disconnected")
+	webhookEnabledFilter := allowlistedQuery(c, "webhook_enabled", "", "true", "false")
 	resolvedProjectID := projectID
 	if id, err := h.getCurrentProjectID(c); err == nil && id != "" {
 		resolvedProjectID = id
@@ -334,11 +337,24 @@ func (h *Handler) handleChannels(c echo.Context) error {
 	var webhooks []models.WebhookEndpoint
 	var webhooksHasMore bool
 	if resolvedProjectID != "" && h.webhookRepo != nil {
-		pageItems, err := h.webhookRepo.ListCardsByProjectPage(ctx, resolvedProjectID, page.PageSize+1, page.Offset, page.Search)
-		if err != nil {
-			return err
+		channelType := channelTypeFilter
+		connectionState := connectionStateFilter
+		enabled := optionalBoolQuery(c, "webhook_enabled")
+		if enabled == nil && connectionState == "connected" {
+			value := true
+			enabled = &value
 		}
-		webhooks, webhooksHasMore = cardPageItems(pageItems, page.PageSize)
+		if enabled == nil && connectionState == "disconnected" {
+			value := false
+			enabled = &value
+		}
+		if channelType == "" || channelType == "webhook" {
+			pageItems, err := h.webhookRepo.ListCardsByProjectPageFiltered(ctx, resolvedProjectID, page.PageSize+1, page.Offset, repository.WebhookCardFilter{Search: page.Search, Enabled: enabled})
+			if err != nil {
+				return err
+			}
+			webhooks, webhooksHasMore = cardPageItems(pageItems, page.PageSize)
+		}
 	}
 	setCardPageResponse(c, webhooksHasMore)
 
@@ -406,6 +422,9 @@ func (h *Handler) handleChannels(c echo.Context) error {
 		Webhooks:                     webhooks,
 		WebhooksPageOffset:           page.Offset,
 		WebhooksSearch:               page.Search,
+		ChannelTypeFilter:            channelTypeFilter,
+		ConnectionStateFilter:        connectionStateFilter,
+		WebhookEnabledFilter:         webhookEnabledFilter,
 		WebhooksHasMore:              webhooksHasMore,
 		AgentPickerOptions:           agentPickerOptions,
 		WebhookAgents:                webhookAgents,
@@ -442,10 +461,11 @@ func (h *Handler) handleAppSettings(c echo.Context) error {
 	}
 	setCardPageResponse(c, customPersonalitiesHasMore)
 
+	state := personalityListState(page)
 	if isHTMX(c) || page.IsFragment {
-		return render(c, http.StatusOK, pages.AppSettingsContentWithPagination(personality, projectID, customPersonalities, customPersonalitiesHasMore))
+		return render(c, http.StatusOK, pages.AppSettingsContentWithPaginationState(personality, projectID, customPersonalities, customPersonalitiesHasMore, state))
 	}
-	return render(c, http.StatusOK, pages.AppSettingsPageWithPagination(personality, projects, projectID, customPersonalities, customPersonalitiesHasMore))
+	return render(c, http.StatusOK, pages.AppSettingsPageWithPaginationState(personality, projects, projectID, customPersonalities, customPersonalitiesHasMore, state))
 }
 
 // handleTelegramSave saves the Telegram bot token and starts the bot

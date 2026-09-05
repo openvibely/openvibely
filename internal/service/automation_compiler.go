@@ -455,6 +455,13 @@ func (s *AutomationLifecycleService) Archive(ctx context.Context, projectID, aut
 	return nil
 }
 
+func (s *AutomationLifecycleService) DeleteBulk(ctx context.Context, projectID string, automationIDs []string) error {
+	if s == nil || s.repo == nil {
+		return errors.New("automation lifecycle service is unavailable")
+	}
+	return s.repo.DeleteAutomations(ctx, projectID, automationIDs)
+}
+
 func (s *AutomationLifecycleService) Delete(ctx context.Context, projectID, automationID string) error {
 	if s == nil || s.repo == nil {
 		return errors.New("automation lifecycle service is unavailable")

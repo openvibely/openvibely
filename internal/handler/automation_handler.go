@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
+	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
@@ -85,7 +86,15 @@ func (h *Handler) ListAutomations(c echo.Context) error {
 		return err
 	}
 	page := parseCardPageRequest(c)
-	cards, err := h.automationGraphSvc.ListPage(ctx, projectID, page.PageSize+1, page.Offset, page.Search)
+	filter := repository.AutomationCardListFilter{
+		Search:         page.Search,
+		LifecycleState: allowlistedQuery(c, "lifecycle_state", "", "active", "paused", "draft", "archived"),
+		HealthState:    allowlistedQuery(c, "health_state", "", "unknown", "healthy", "degraded", "unhealthy"),
+		AutomationType: allowlistedQuery(c, "automation_type", "", "custom", "native_sdlc", "github_sdlc", "vision_driver", "scheduled"),
+		Adapter:        allowlistedQuery(c, "adapter", "", "custom", "native_sdlc", "github_sdlc", "vision_driver"),
+		Sort:           allowlistedQuery(c, "sort", "updated_desc", "updated_desc", "updated_asc", "name_asc", "name_desc"),
+	}
+	cards, err := h.automationGraphSvc.ListPageFiltered(ctx, projectID, page.PageSize+1, page.Offset, filter)
 	if err != nil {
 		return err
 	}

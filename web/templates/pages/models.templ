@@ -192,7 +192,7 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 				+ Add Model
 			</button>
 		</div>
-			@CardSearchInput("models", "Search models...")
+			@CardListToolbar(collectionToolbarConfig("models", "", ""))
 
 			<div id="models-card-list" data-card-pagination-list>
 				if len(agents) == 0 {
@@ -226,6 +226,11 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 						data-model-model={ agent.Model }
 						data-search-card
 						data-search-text={ modelSearchText(agent) }
+						data-card-select-id={ agent.ID }
+						data-card-select-eligible={ boolString(!agent.IsDefault) }
+						if agent.IsDefault {
+							data-card-select-disabled-reason="Default models cannot be deleted"
+						}
 						onclick="editModelFromData(this)"
 					>
 						<div class="card-body relative">

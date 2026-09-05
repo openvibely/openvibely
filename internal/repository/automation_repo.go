@@ -97,9 +97,22 @@ func (r *AutomationRepo) ListPortfolioCards(ctx context.Context, projectID strin
 	return out, rows.Err()
 }
 
+type AutomationCardListFilter struct {
+	Search         string
+	LifecycleState string
+	HealthState    string
+	AutomationType string
+	Adapter        string
+	Sort           string
+}
+
 // ListPortfolioCardsPage returns one bounded, project-scoped portfolio page.
 // Search is limited to the metadata rendered by automationCardSearchText.
 func (r *AutomationRepo) ListPortfolioCardsPage(ctx context.Context, projectID string, limit, offset int, search string) ([]models.AutomationCard, error) {
+	return r.ListPortfolioCardsPageFiltered(ctx, projectID, limit, offset, AutomationCardListFilter{Search: search})
+}
+
+func (r *AutomationRepo) ListPortfolioCardsPageFiltered(ctx context.Context, projectID string, limit, offset int, filter AutomationCardListFilter) ([]models.AutomationCard, error) {
 	limit, offset = normalizeCardPageArgs(limit, offset)
 	query := `SELECT
 		a.id, a.project_id, a.stable_key, a.name, a.description, a.automation_type,
@@ -110,14 +123,30 @@ func (r *AutomationRepo) ListPortfolioCardsPage(ctx context.Context, projectID s
 		JOIN automation_versions v ON v.id = a.published_version_id AND v.automation_id = a.id AND v.project_id = a.project_id
 		WHERE a.project_id = ? AND v.state = 'published'`
 	args := []any{projectID}
-	if search = strings.TrimSpace(search); search != "" {
+	if search := strings.TrimSpace(filter.Search); search != "" {
 		query += ` AND INSTR(LOWER(
 			COALESCE(a.name, '') || ' ' || COALESCE(a.description, '') || ' ' ||
 			COALESCE(v.adapter_key, '') || ' ' || COALESCE(a.lifecycle_state, '') || ' ' || COALESCE(a.health_state, '')
 		), ?) > 0`
 		args = append(args, strings.ToLower(search))
 	}
-	query += ` ORDER BY a.updated_at DESC, a.id ASC LIMIT ? OFFSET ?`
+	for _, condition := range []struct{ column, value string }{{"a.lifecycle_state", filter.LifecycleState}, {"a.health_state", filter.HealthState}, {"a.automation_type", filter.AutomationType}, {"v.adapter_key", filter.Adapter}} {
+		if condition.value != "" {
+			query += ` AND ` + condition.column + ` = ?`
+			args = append(args, condition.value)
+		}
+	}
+	switch filter.Sort {
+	case "updated_asc":
+		query += ` ORDER BY a.updated_at ASC, a.id ASC`
+	case "name_asc":
+		query += ` ORDER BY a.name ASC, a.id ASC`
+	case "name_desc":
+		query += ` ORDER BY a.name DESC, a.id DESC`
+	default:
+		query += ` ORDER BY a.updated_at DESC, a.id ASC`
+	}
+	query += ` LIMIT ? OFFSET ?`
 	args = append(args, limit, offset)
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {

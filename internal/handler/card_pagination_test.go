@@ -31,6 +31,75 @@ func serveCardPageRequest(t *testing.T, e *echo.Echo, path string) *httptest.Res
 	e.ServeHTTP(rec, req)
 	return rec
 }
+func TestCollectionFilterAndSortAllowlists(t *testing.T) {
+	tests := []struct {
+		key, fallback string
+		values        []string
+	}{
+		{"lifecycle_state", "", []string{"active", "paused", "draft", "archived"}},
+		{"health_state", "", []string{"unknown", "healthy", "degraded", "unhealthy"}},
+		{"automation_type", "", []string{"custom", "native_sdlc", "github_sdlc", "vision_driver", "scheduled"}},
+		{"adapter", "", []string{"custom", "native_sdlc", "github_sdlc", "vision_driver"}},
+		{"enabled", "", []string{"true", "false"}}, {"scope", "", []string{"global", "project"}},
+		{"origin", "", []string{"custom", "generated", "protected"}}, {"always_use", "", []string{"true", "false"}},
+		{"archived", "", []string{"true", "false"}}, {"source", "", []string{"global", "project"}},
+		{"provider", "", []string{"openai", "anthropic", "ollama", "openai_compatible", "mixture"}},
+		{"auth_status", "", []string{"connected", "not_connected", "not_required"}}, {"kind", "", []string{"direct", "mixture"}},
+		{"type", "", []string{"github", "slack", "telegram", "discord", "x", "email", "webhook", "outbound_targets"}},
+		{"connection_state", "", []string{"connected", "configured", "disconnected"}}, {"webhook_enabled", "", []string{"true", "false"}},
+		{"sort", "name_asc", []string{"name_asc", "name_desc", "updated_desc", "created_desc"}},
+	}
+	e := echo.New()
+	for _, tt := range tests {
+		for _, value := range tt.values {
+			ctx := e.NewContext(httptest.NewRequest(http.MethodGet, "/?"+tt.key+"="+value, nil), httptest.NewRecorder())
+			require.Equal(t, value, allowlistedQuery(ctx, tt.key, tt.fallback, tt.values...), tt.key+"="+value)
+		}
+		ctx := e.NewContext(httptest.NewRequest(http.MethodGet, "/?"+tt.key+"=invalid", nil), httptest.NewRecorder())
+		require.Equal(t, tt.fallback, allowlistedQuery(ctx, tt.key, tt.fallback, tt.values...), tt.key)
+	}
+}
+
+func TestBulkIDsRequestValidation(t *testing.T) {
+	ids, err := decodeBulkIDs(strings.NewReader(`{"ids":[" a ","a","b"]}`))
+	require.NoError(t, err)
+	require.Equal(t, []string{"a", "b"}, ids)
+	for _, body := range []string{`{}`, `{"ids":[]}`, `{"ids":[""]}`, `{"ids":["a"],"extra":true}`, `{`, `{"ids":["a"]} {}`} {
+		_, err := decodeBulkIDs(strings.NewReader(body))
+		require.Error(t, err, body)
+	}
+	tooMany := make([]string, bulkDeleteMaxItems+1)
+	for i := range tooMany {
+		tooMany[i] = fmt.Sprintf("id-%d", i)
+	}
+	payload, err := json.Marshal(bulkIDsRequest{IDs: tooMany})
+	require.NoError(t, err)
+	_, err = decodeBulkIDs(bytes.NewReader(payload))
+	require.ErrorContains(t, err, "at most")
+}
+
+func TestAlertListFilterAllowlistedValues(t *testing.T) {
+	e := echo.New()
+	accepted := "/alerts?read=unread&severity=error&decision_state=approved&type=custom&source=native&sort=severity"
+	ctx := e.NewContext(httptest.NewRequest(http.MethodGet, accepted, nil), httptest.NewRecorder())
+	filter := alertListFilter(ctx, parseCardPageRequest(ctx))
+	require.NotNil(t, filter.Read)
+	require.False(t, *filter.Read)
+	require.Equal(t, models.SeverityError, filter.Severity)
+	require.Equal(t, models.AlertDecisionApproved, filter.DecisionState)
+	require.Equal(t, models.AlertCustom, filter.Type)
+	require.Equal(t, "native", filter.Source)
+	require.Equal(t, "severity", filter.Sort)
+
+	rejected := e.NewContext(httptest.NewRequest(http.MethodGet, "/alerts?read=maybe&severity=fatal&decision_state=queued&type=other&sort=title", nil), httptest.NewRecorder())
+	filter = alertListFilter(rejected, parseCardPageRequest(rejected))
+	require.Nil(t, filter.Read)
+	require.Empty(t, filter.Severity)
+	require.Empty(t, filter.DecisionState)
+	require.Empty(t, filter.Type)
+	require.Equal(t, "newest", filter.Sort)
+}
+
 func TestParseCardPageRequestKeepsFullDocumentsAlignedWithLoaderSize(t *testing.T) {
 	e := echo.New()
 	full := e.NewContext(httptest.NewRequest(http.MethodGet, "/models?page=0&page_size=2", nil), httptest.NewRecorder())
@@ -296,7 +365,7 @@ func TestCardPaginationAlertsAndWebhooksStayProjectScoped(t *testing.T) {
 	require.NotContains(t, webhooks.Body.String(), "Foreign webhook")
 }
 
-func TestCardPaginationPersonalityHandlerKeepsBuiltInsAndPagesCustomCards(t *testing.T) {
+func TestCardPaginationPersonalityHandlerFiltersFixedCardsAndPagesCustomCards(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
 	repo := repository.NewCustomPersonalityRepo(db)
 	h.SetCustomPersonalityRepo(repo)
@@ -325,7 +394,7 @@ func TestCardPaginationPersonalityHandlerKeepsBuiltInsAndPagesCustomCards(t *tes
 	require.Contains(t, first.Body.String(), `data-card-pagination-has-more="true"`)
 	require.Equal(t, 2, strings.Count(first.Body.String(), `data-personality-is-preset="false"`))
 	require.Contains(t, first.Body.String(), "Paged custom 00")
-	require.Contains(t, first.Body.String(), "data-personality-is-preset=\"true\"")
+	require.NotContains(t, first.Body.String(), "data-personality-is-preset=\"true\"")
 
 	last := serveCardPageRequest(t, e, "/personality?page=1&page_size=2&search=paged+custom&card_page=1")
 	require.Equal(t, http.StatusOK, last.Code)
@@ -334,7 +403,7 @@ func TestCardPaginationPersonalityHandlerKeepsBuiltInsAndPagesCustomCards(t *tes
 	require.Contains(t, last.Body.String(), "Paged custom 02")
 }
 
-func TestCardPaginationPersonalityHandlerKeepsFixedOverridesOutsidePageWindow(t *testing.T) {
+func TestCardPaginationPersonalityHandlerKeepsMatchingActiveCardOutsidePageWindow(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
 	repo := repository.NewCustomPersonalityRepo(db)
 	h.SetCustomPersonalityRepo(repo)
@@ -362,8 +431,8 @@ func TestCardPaginationPersonalityHandlerKeepsFixedOverridesOutsidePageWindow(t 
 	require.Equal(t, http.StatusOK, first.Code)
 	require.Equal(t, "true", first.Header().Get(cardPageHasMoreHeader))
 	require.Contains(t, first.Body.String(), `data-personality-key="paged_custom_21"`)
-	require.Contains(t, first.Body.String(), `data-personality-key="`+presets[1].Key+`"`)
-	require.Contains(t, first.Body.String(), `data-personality-name="Overridden preset"`)
+	require.NotContains(t, first.Body.String(), `data-personality-key="`+presets[1].Key+`"`)
+	require.NotContains(t, first.Body.String(), `data-personality-name="Overridden preset"`)
 	require.Equal(t, 20, strings.Count(first.Body.String(), `data-personality-pagination-card="true"`))
 	require.Equal(t, 1, strings.Count(first.Body.String(), `data-personality-pagination-card="false"`))
 	for i := 0; i < 20; i++ {
@@ -1308,10 +1377,9 @@ func TestCardPaginationProductionBrowserRejectsStalePagesAndRecoversLiveRefresh(
     if (card && cards().length === 21 && !old) {
       var root = document.getElementById('models-container');
       var state = root && root._openVibelyCardPaginationState;
-      var locationStable = window._paginationInitialLocation === window.location.href;
-      if (state && state.hasMore === false && locationStable) {
-        return result('pass', 'stale page ignored, retry recovered, and live refresh reset pagination');
-      }
+	      var searchStateInURL = new URL(window.location.href).searchParams.get('search') === 'retry';
+	      if (state && state.hasMore === false && searchStateInURL) {
+	        return result('pass', 'stale page ignored, retry recovered, live refresh reset pagination, and search state remained in the URL');      }
     }
     scrollToSentinel();
     setTimeout(waitForLiveResult, 30);
@@ -1321,7 +1389,11 @@ func TestCardPaginationProductionBrowserRejectsStalePagesAndRecoversLiveRefresh(
     setTimeout(waitForPageOneStart, 50);
   });
   setTimeout(function() {
-    if (!document.getElementById('browser-result')) fail('pagination race fixture timed out');
+    if (!document.getElementById('browser-result')) {
+      var root = document.getElementById('models-container');
+      var state = root && root._openVibelyCardPaginationState;
+      fail('pagination race fixture timed out; cards=' + Array.prototype.map.call(cards(), function(card) { return card.getAttribute('data-model-id'); }).join(',') + '; hasMore=' + (state && state.hasMore) + '; page=' + (state && state.page) + '; location=' + window.location.href + '; initial=' + window._paginationInitialLocation + '; url=' + (root && root.getAttribute('data-card-pagination-url')) + '; search=' + (document.querySelector('input[data-card-search="models"]') || {}).value);
+    }
   }, 10000);
 })();
 </script></body>`, 1)

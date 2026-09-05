@@ -708,6 +708,7 @@ func TestAlertsLiveRefreshAndSingleDeletePreserveViewportInChrome(t *testing.T) 
 		    if (getComputedStyle(row('live-operational')).display !== 'none') fail('card search was not reapplied before live refresh settled');
 		    liveSearch.value = '';
 		    liveSearch.dispatchEvent(new Event('input', {bubbles:true}));
+		    await waitFor(function() { return !new URL(window.location.href).searchParams.has('search'); }, 'search URL clear');
 		    await wait(50);
 
 		    var stableTop = row('item-14').getBoundingClientRect().top;
@@ -761,8 +762,7 @@ func TestAlertsLiveRefreshAndSingleDeletePreserveViewportInChrome(t *testing.T) 
 	    var filteredTop = row('item-08').getBoundingClientRect().top;
 	    await remove('item-11');
 	    await wait(250);
-	    assertNear(row('item-08').getBoundingClientRect().top, filteredTop, 'filtered delete nearest surviving visible anchor');
-	    if (document.activeElement !== row('item-14').querySelector('[data-alert-delete]')) fail('filtered delete did not focus the next visible delete control');
+		    assertNear(row('item-08').getBoundingClientRect().top, filteredTop, 'filtered delete nearest surviving visible anchor');	    if (document.activeElement !== row('item-14').querySelector('[data-alert-delete]')) fail('filtered delete did not focus the next visible delete control');
 	    if (getComputedStyle(row('item-12')).display !== 'none') fail('persisted card search was not reapplied after deletion');
 	    await report('pass', '');
 	  })().catch(function(error) { report('fail', String(error && error.stack || error)); });

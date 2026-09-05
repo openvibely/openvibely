@@ -129,25 +129,7 @@ templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unrea
 			</div>
 			<div class="mb-4 rounded-box bg-base-200/60 px-4 py-3 text-sm text-base-content/70">			Showing notifications for the selected project only. Approval permits creation of an implementation task; it does not authorize merge, release, or deployment.
 		</div>
-			<form id="alerts-filter-form" method="get" action="/alerts" class="mb-4 flex flex-wrap items-end gap-3" data-alert-filter-form>
-				<input type="hidden" name="project_id" value={ currentProjectID } />
-				<div class="w-full max-w-xs flex-none" data-alert-search-slot>
-					@alertSearchInput(search)
-				</div>
-				<div class="flex flex-wrap items-end gap-2" data-alert-filter-controls>
-					<label class="form-control w-48 max-w-full">
-						<span class="label-text text-xs">Decision state</span>
-						<select name="decision_state" class="select select-bordered select-sm" aria-label="Filter by decision state" onchange="this.form.submit()">
-							<option value="" selected?={ decisionState == "" }>All decision states</option>
-							<option value={ string(models.AlertDecisionPending) } selected?={ decisionState == models.AlertDecisionPending }>Pending</option>
-							<option value={ string(models.AlertDecisionApproved) } selected?={ decisionState == models.AlertDecisionApproved }>Approved</option>
-							<option value={ string(models.AlertDecisionRejected) } selected?={ decisionState == models.AlertDecisionRejected }>Rejected</option>
-							<option value={ string(models.AlertDecisionDismissed) } selected?={ decisionState == models.AlertDecisionDismissed }>Dismissed</option>
-							<option value={ string(models.AlertDecisionNotRequired) } selected?={ decisionState == models.AlertDecisionNotRequired }>Operational (not required)</option>
-						</select>
-					</label>
-				</div>
-			</form>
+			@CardListToolbar(collectionToolbarConfigWithFilter("alerts", currentProjectID, search, "decision_state", string(decisionState)))
 			<div id="alerts-card-list" data-card-pagination-list>
 				if len(alerts) == 0 {
 					<div class="text-center py-12" data-search-empty-state>
@@ -374,22 +356,28 @@ templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unrea
 					var rect = row.getBoundingClientRect();
 					return rect.bottom > viewportTop && rect.top < viewportBottom;
 				});
-				var anchors = (viewportRows.length ? viewportRows : renderedRows).map(function(row) {
-					return {id: row.dataset.alertId || '', top: row.getBoundingClientRect().top};
-				}).sort(function(a, b) {
-					return Math.abs(a.top - viewportTop) - Math.abs(b.top - viewportTop);
-				});
-				var activeDelete = document.activeElement && document.activeElement.closest && document.activeElement.closest('[data-alert-delete]');
-				var activeRow = activeDelete && activeDelete.closest('[data-alert-scroll-anchor]');
-				var focusID = state.pendingFocusID || (activeRow && activeRow.dataset.alertId) || '';
-
-				state.swap = {
-					anchors: anchors,
-					rootScrollTop: root.scrollTop,
-					windowScrollY: window.scrollY,
-					focusIDs: focusCandidates(rows, focusID)
-				};
-				state.pendingFocusID = '';
+					var anchors = (viewportRows.length ? viewportRows : renderedRows).map(function(row) {
+						return {id: row.dataset.alertId || '', top: row.getBoundingClientRect().top};
+					}).sort(function(a, b) {
+						return Math.abs(a.top - viewportTop) - Math.abs(b.top - viewportTop);
+					});
+					var activeDelete = document.activeElement && document.activeElement.closest && document.activeElement.closest('[data-alert-delete]');
+					var activeRow = activeDelete && activeDelete.closest('[data-alert-scroll-anchor]');
+					var focusID = state.pendingFocusID || (activeRow && activeRow.dataset.alertId) || '';
+					var focusedVisibleIndex = renderedRows.findIndex(function(row) { return (row.dataset.alertId || '') === focusID; });
+					var activeSearch = ((root.querySelector('[data-card-search]') || {}).value || '').trim();
+					if (activeSearch && state.pendingFocusID && focusedVisibleIndex > 0) {
+						var previous = renderedRows[focusedVisibleIndex - 1];
+						var previousID = previous.dataset.alertId || '';
+						anchors = [{id: previousID, top: previous.getBoundingClientRect().top}].concat(anchors.filter(function(anchor) { return anchor.id !== previousID; }));
+					}
+					state.swap = {
+						anchors: anchors,
+						rootScrollTop: root.scrollTop,
+						windowScrollY: window.scrollY,
+						search: (root.querySelector('[data-card-search]') || {}).value || '',
+						focusIDs: focusCandidates(rows, focusID)
+					};				state.pendingFocusID = '';
 			});
 
 			document.body.addEventListener('htmx:afterSwap', function(event) {
@@ -400,10 +388,14 @@ templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unrea
 				state.swap = null;
 				swappedTarget.openVibelyAlertsViewportSwap = saved;
 
-				if (typeof window.refreshCardSearches === 'function') {
-					window.refreshCardSearches(root);
-				}
-				root.scrollTop = saved.rootScrollTop;
+					var replacementSearch = root.querySelector('[data-card-search]');
+					if (replacementSearch) {
+						replacementSearch.value = saved.search || '';
+						replacementSearch.setAttribute('data-card-search-initial', saved.search || '');
+					}
+					if (typeof window.refreshCardSearches === 'function') {
+						window.refreshCardSearches(root);
+					}				root.scrollTop = saved.rootScrollTop;
 				var anchor = null;
 				var savedAnchor = null;
 				for (var i = 0; i < saved.anchors.length; i++) {
@@ -415,9 +407,8 @@ templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unrea
 				}
 				if (anchor && savedAnchor) {
 					var delta = anchor.getBoundingClientRect().top - savedAnchor.top;
-					if (root.scrollHeight > root.clientHeight) root.scrollTop += delta;
-					else window.scrollBy(0, delta);
-				} else if (Math.abs(window.scrollY - saved.windowScrollY) > 1) {
+						if (saved.search || root.scrollHeight > root.clientHeight) root.scrollTop += delta;
+						else window.scrollBy(0, delta);				} else if (Math.abs(window.scrollY - saved.windowScrollY) > 1) {
 					window.scrollTo(0, saved.windowScrollY);
 				}
 			});
@@ -427,10 +418,9 @@ templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unrea
 				var root = document.getElementById('alerts-container');
 				var saved = settledTarget && settledTarget.openVibelyAlertsViewportSwap;
 				if (!settledTarget || settledTarget.id !== 'alerts-content' || !root || !saved) return;
-				delete settledTarget.openVibelyAlertsViewportSwap;
+					delete settledTarget.openVibelyAlertsViewportSwap;
 
-				var focusTarget = null;
-				for (var j = 0; j < saved.focusIDs.length; j++) {
+					var focusTarget = null;				for (var j = 0; j < saved.focusIDs.length; j++) {
 					focusTarget = root.querySelector('[data-alert-scroll-anchor="' + CSS.escape(saved.focusIDs[j]) + '"] [data-alert-delete]');
 					if (focusTarget) break;
 				}
@@ -572,6 +562,8 @@ templ alertRow(alert models.AlertSummary, currentProjectID string, decisionState
 		data-alert-id={ alert.ID }
 		data-alert-scroll-anchor={ alert.ID }
 		class={ "card bg-base-100 shadow-sm border border-base-300 hover:border-primary/40 hover:shadow-md transition-all w-full min-w-0 max-w-full", templ.KV("opacity-60", alert.IsRead), templ.KV("cursor-pointer", alert.TaskID != nil) }
+		data-card-select-id={ alert.ID }
+		data-card-select-eligible="true"
 		data-search-card
 		data-search-text={ alertSearchText(alert) }
 		if alert.TaskID != nil {

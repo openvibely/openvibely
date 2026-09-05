@@ -716,6 +716,24 @@ func (h *Handler) ResumeAutomation(c echo.Context) error {
 	return h.changeAutomationLifecycle(c, "resume")
 }
 
+func (h *Handler) DeleteAutomationsBulk(c echo.Context) error {
+	if h.automationLifecycleSvc == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "automation lifecycle unavailable")
+	}
+	ids, err := decodeBulkIDs(c.Request().Body)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	projectID, err := h.getCurrentProjectID(c)
+	if err != nil {
+		return err
+	}
+	if err := h.automationLifecycleSvc.DeleteBulk(c.Request().Context(), projectID, ids); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	return c.JSON(http.StatusOK, map[string]int{"deleted": len(ids)})
+}
+
 func (h *Handler) DeleteAutomation(c echo.Context) error {
 	if h.automationLifecycleSvc == nil {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "automation lifecycle unavailable")

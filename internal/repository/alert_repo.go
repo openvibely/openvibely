@@ -336,6 +336,10 @@ func buildAlertListQuery(columns, projectID string, filter models.AlertListFilte
 		query += ` AND type = ?`
 		args = append(args, filter.Type)
 	}
+	if filter.Severity != "" {
+		query += ` AND severity = ?`
+		args = append(args, filter.Severity)
+	}
 	if strings.TrimSpace(filter.Source) != "" {
 		query += ` AND source = ?`
 		args = append(args, strings.TrimSpace(filter.Source))
@@ -388,7 +392,17 @@ func buildAlertListQuery(columns, projectID string, filter models.AlertListFilte
 		}
 		query += `)`
 	}
-	query += ` ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`
+	switch filter.Sort {
+	case "oldest":
+		query += ` ORDER BY created_at ASC, id ASC`
+	case "severity":
+		query += ` ORDER BY CASE severity WHEN 'error' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END ASC, created_at DESC, id DESC`
+	case "unread_first":
+		query += ` ORDER BY is_read ASC, created_at DESC, id DESC`
+	default:
+		query += ` ORDER BY created_at DESC, id DESC`
+	}
+	query += ` LIMIT ? OFFSET ?`
 	args = append(args, filter.Limit, filter.Offset)
 	return query, args
 }
@@ -459,6 +473,31 @@ func (r *AlertRepo) Delete(ctx context.Context, projectID, id string) error {
 		return fmt.Errorf("deleting alert: %w", err)
 	}
 	return requireAffected(result)
+}
+
+func (r *AlertRepo) DeleteBulk(ctx context.Context, projectID string, ids []string) error {
+	if len(ids) == 0 {
+		return fmt.Errorf("at least one alert is required")
+	}
+	placeholders := strings.TrimRight(strings.Repeat("?,", len(ids)), ",")
+	args := make([]any, 0, len(ids)+1)
+	args = append(args, projectID)
+	for _, id := range ids {
+		args = append(args, id)
+	}
+	return r.withImmediateAlertMutation(ctx, func(conn *sql.Conn) error {
+		var count int
+		if err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM alerts WHERE project_id = ? AND id IN (`+placeholders+`)`, args...).Scan(&count); err != nil {
+			return err
+		}
+		if count != len(ids) {
+			return ErrAlertNotFound
+		}
+		if _, err := conn.ExecContext(ctx, `DELETE FROM alerts WHERE project_id = ? AND id IN (`+placeholders+`)`, args...); err != nil {
+			return fmt.Errorf("deleting alerts: %w", err)
+		}
+		return nil
+	}, nil)
 }
 
 func (r *AlertRepo) DeleteAll(ctx context.Context, projectID string) error {

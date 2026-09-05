@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -201,7 +202,7 @@ func TestHandler_AlertMutationHTMXRefreshContract(t *testing.T) {
 		rec := performHTMXMutation(t, e, http.MethodPost, "/alerts/read-all?project_id="+project.ID, "", h.MarkAllAlertsRead)
 		assertContains(t, rec, alert1.Title)
 		assertContains(t, rec, alert2.Title)
-		assertNotContains(t, rec, "unread")
+		assertNotContains(t, rec, `badge-error">0 unread`)
 		count, err := h.alertSvc.CountUnread(context.Background(), project.ID)
 		require.NoError(t, err)
 		require.Zero(t, count)
@@ -470,8 +471,10 @@ func TestHandler_ListAlertsSupportsWorkflowFiltersAndRefreshPreservation(t *test
 			require.Contains(t, body, want)
 		}
 		require.NotContains(t, body, foreignAlert.Title)
-		require.Contains(t, body, `value="" selected`)
-		require.NotContains(t, body, "unknown")
+		require.Contains(t, body, `name="decision_state"`)
+		require.Contains(t, body, `<option value="">All</option>`)
+		require.NotContains(t, body, `data-card-filter-chip="decision_state"`)
+		require.NotContains(t, body, `data-card-filter-chip="processing_state"`)
 	})
 }
 
@@ -595,6 +598,34 @@ func TestHandler_MarkAllAlertsRead(t *testing.T) {
 		require.NoError(t, err)
 		require.False(t, updatedAlert2.IsRead)
 	})
+}
+
+func TestHandler_DeleteAlertsBulkDeduplicatesAndPreflightsProject(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	project := createProject(t, h, "Bulk alerts")
+	foreignProject := createProject(t, h, "Foreign bulk alerts")
+	own := &models.Alert{ProjectID: project.ID, Type: models.AlertCustom, Severity: models.SeverityInfo, Title: "own"}
+	foreign := &models.Alert{ProjectID: foreignProject.ID, Type: models.AlertCustom, Severity: models.SeverityInfo, Title: "foreign"}
+	require.NoError(t, h.alertSvc.Create(context.Background(), own))
+	require.NoError(t, h.alertSvc.Create(context.Background(), foreign))
+
+	body := strings.NewReader(fmt.Sprintf(`{"ids":[%q,%q]}`, own.ID, foreign.ID))
+	req := httptest.NewRequest(http.MethodDelete, "/alerts/bulk?project_id="+project.ID, body)
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	remaining, err := h.alertSvc.ListSummariesPage(context.Background(), project.ID, models.AlertListFilter{Limit: 10})
+	require.NoError(t, err)
+	require.Len(t, remaining, 1)
+
+	body = strings.NewReader(fmt.Sprintf(`{"ids":[%q,%q]}`, own.ID, own.ID))
+	req = httptest.NewRequest(http.MethodDelete, "/alerts/bulk?project_id="+project.ID, body)
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec = httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.JSONEq(t, `{"deleted":1}`, rec.Body.String())
 }
 
 func TestHandler_DeleteAlert(t *testing.T) {

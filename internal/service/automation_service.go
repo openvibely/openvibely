@@ -269,7 +269,11 @@ func (s *AutomationGraphService) List(ctx context.Context, projectID string) ([]
 // ListPage returns one bounded portfolio page while keeping template revision
 // enrichment identical to the full portfolio path.
 func (s *AutomationGraphService) ListPage(ctx context.Context, projectID string, limit, offset int, search string) ([]models.AutomationCard, error) {
-	cards, err := s.repo.ListPortfolioCardsPage(ctx, projectID, limit, offset, search)
+	return s.ListPageFiltered(ctx, projectID, limit, offset, repository.AutomationCardListFilter{Search: search})
+}
+
+func (s *AutomationGraphService) ListPageFiltered(ctx context.Context, projectID string, limit, offset int, filter repository.AutomationCardListFilter) ([]models.AutomationCard, error) {
+	cards, err := s.repo.ListPortfolioCardsPageFiltered(ctx, projectID, limit, offset, filter)
 	if err != nil {
 		return nil, err
 	}

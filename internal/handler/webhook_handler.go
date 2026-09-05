@@ -446,13 +446,35 @@ func (h *Handler) HandleWebhookUpdate(c echo.Context) error {
 	return c.JSON(http.StatusOK, w)
 }
 
+func (h *Handler) HandleWebhookBulkDelete(c echo.Context) error {
+	if h.webhookRepo == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "webhook repository not configured")
+	}
+	ids, err := decodeBulkIDs(c.Request().Body)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	projectID, err := h.getCurrentProjectID(c)
+	if err != nil {
+		return err
+	}
+	if err := h.webhookRepo.DeleteBulk(c.Request().Context(), projectID, ids); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "all selected webhooks must belong to the current project")
+	}
+	return c.JSON(http.StatusOK, map[string]int{"deleted": len(ids)})
+}
+
 func (h *Handler) HandleWebhookDelete(c echo.Context) error {
 	if h.webhookRepo == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "webhook repository not configured")
 	}
 
 	id := c.Param("id")
-	if err := h.webhookRepo.Delete(c.Request().Context(), id); err != nil {
+	projectID, err := h.getCurrentProjectID(c)
+	if err != nil {
+		return err
+	}
+	if err := h.webhookRepo.DeleteForProject(c.Request().Context(), projectID, id); err != nil {
 		if errors.Is(err, repository.ErrWebhookNotFound) {
 			return echo.NewHTTPError(http.StatusNotFound, "webhook not found")
 		}

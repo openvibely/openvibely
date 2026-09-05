@@ -1791,7 +1791,7 @@ func TestAutomationBuilderWebSaveIsBrowserLocalUntilAtomicSaveAndProjectScoped(t
 	} {
 		require.Contains(t, body, marker)
 	}
-	require.NotContains(t, body, `value="vision_driver"`)
+	require.NotContains(t, body, `data-template-key="vision_driver"`)
 	require.NotContains(t, body, `Create one from Template, Describe It, or Blank.`)
 	require.NotContains(t, body, ">Vision Driver</option>")
 	require.NotContains(t, body, "Register Existing")

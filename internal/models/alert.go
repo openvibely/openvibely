@@ -109,8 +109,10 @@ type AlertListFilter struct {
 	DecisionState            AlertDecisionState
 	ProcessingState          AlertProcessingState
 	Type                     AlertType
+	Severity                 AlertSeverity
 	Source                   string
 	Read                     *bool
+	Sort                     string
 	ImplementationTaskLinked *bool
 	AutomationInboxBindings  []AutomationBinding
 	Search                   string

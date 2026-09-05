@@ -111,7 +111,7 @@ func TestSkillsPageHeaderUsesAddSkillDropdownMenu(t *testing.T) {
 			t.Fatalf("expected body to contain %q", want)
 		}
 	}
-	if strings.Contains(body, `class="btn btn-ghost btn-sm"`) {
+	if strings.Contains(body, `data-skill-header-kebab`) {
 		t.Fatalf("expected skills header not to use a separate kebab button")
 	}
 }
@@ -775,7 +775,7 @@ func TestSetSkillEnabledDisablesAndEnablesSkill(t *testing.T) {
 		t.Fatalf("expected SKILL.md to not contain 'enabled: false' after re-enable, got:\n%s", data2)
 	}
 	body2 := rec2.Body.String()
-	if strings.Contains(body2, "Disabled") {
+	if strings.Contains(body2, `<span class="badge badge-warning badge-sm">Disabled</span>`) {
 		t.Fatalf("expected Disabled badge to be gone after re-enable")
 	}
 }
