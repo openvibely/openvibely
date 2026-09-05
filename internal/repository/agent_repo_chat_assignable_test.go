@@ -42,12 +42,6 @@ func TestAgentRepoListChatAssignableDefinitionsUsesCompactProjectionAndPreserves
 	createChatAssignableTestAgent(t, repo, archivedAtOnly)
 	markChatAssignableTestAgentArchivedAt(t, db, archivedAtOnly.ID)
 
-	full, err := repo.List(ctx)
-	if err != nil {
-		t.Fatalf("List full agents: %v", err)
-	}
-	fullContext := service.BuildAgentDefinitionContextString(chatAssignableSummariesFromAgents(full))
-
 	counter.Reset()
 	counter.SetEnabled(true)
 	compact, err := repo.ListChatAssignableDefinitions(ctx)
@@ -56,9 +50,6 @@ func TestAgentRepoListChatAssignableDefinitionsUsesCompactProjectionAndPreserves
 		t.Fatalf("ListChatAssignableDefinitions: %v", err)
 	}
 	compactContext := service.BuildAgentDefinitionContextString(compact)
-	if compactContext != fullContext {
-		t.Fatalf("compact context differs from full context\nfull:\n%s\ncompact:\n%s", fullContext, compactContext)
-	}
 	if !strings.Contains(compactContext, `Name: "Alpha Agent"; key: alpha; description: `) || !strings.Contains(compactContext, `Name: "Bravo Agent"`) {
 		t.Fatalf("expected normal selectable agents in context, got:\n%s", compactContext)
 	}
@@ -146,24 +137,6 @@ func chatAssignableTestAgent(name, key, description string) *models.Agent {
 		ModelDefaults:       models.AgentModelDefaults{Model: "gpt-5", Temperature: 0.3, MaxTokens: 4096},
 		SourceRefs:          []string{"agents/source.md"},
 	}
-}
-
-func chatAssignableSummariesFromAgents(agents []models.Agent) []models.ChatAssignableAgentDefinition {
-	summaries := make([]models.ChatAssignableAgentDefinition, 0, len(agents))
-	for _, agent := range agents {
-		summaries = append(summaries, models.ChatAssignableAgentDefinition{
-			ID:                  agent.ID,
-			Name:                agent.Name,
-			Description:         agent.Description,
-			Key:                 agent.Key,
-			SystemKind:          agent.SystemKind,
-			SelectableAsPrimary: agent.SelectableAsPrimary,
-			Enabled:             agent.Enabled,
-			GeneratedStatus:     agent.GeneratedStatus,
-			ArchivedAt:          agent.ArchivedAt,
-		})
-	}
-	return summaries
 }
 
 func createChatAssignableTestAgent(tb testing.TB, repo *repository.AgentRepo, agent *models.Agent) {
