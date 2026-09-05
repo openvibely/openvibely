@@ -193,8 +193,44 @@ func (w *WorkerService) SetAdmissionGate(open func() bool) {
 	w.mu.Unlock()
 }
 
-// ResumeDispatch offers all queued durable work for admission after a drain ends.
-func (w *WorkerService) ResumeDispatch() { w.dispatchNext() }
+// ReconcilePendingTasks offers durably pending active tasks to the worker queue.
+// This repairs tasks that were persisted before a worker restart or whose initial
+// submission was missed. Swarm parents remain scheduler-owned so they can enter
+// the planner path instead of ordinary task execution.
+func (w *WorkerService) ReconcilePendingTasks(ctx context.Context) {
+	if w == nil || w.taskRepo == nil {
+		return
+	}
+
+	admissions, err := w.taskRepo.ListActivePendingAdmissions(ctx)
+	if err != nil {
+		applog.Infof("[worker] pending task reconciliation failed: %v", err)
+		return
+	}
+	for _, admission := range admissions {
+		if admission.SwarmRole == models.SwarmRoleParent {
+			continue
+		}
+		w.Submit(models.Task{
+			ID:                admission.ID,
+			ProjectID:         admission.ProjectID,
+			Title:             admission.Title,
+			Category:          admission.Category,
+			Priority:          admission.Priority,
+			Status:            admission.Status,
+			AgentID:           admission.AgentID,
+			AgentDefinitionID: admission.AgentDefinitionID,
+			ParentTaskID:      admission.ParentTaskID,
+			SwarmRole:         admission.SwarmRole,
+		})
+	}
+}
+
+// ResumeDispatch offers all queued and durably pending work for admission after a drain ends.
+func (w *WorkerService) ResumeDispatch() {
+	w.ReconcilePendingTasks(context.Background())
+	w.dispatchNext()
+}
 
 func (w *WorkerService) Start(ctx context.Context) {
 	w.mu.Lock()

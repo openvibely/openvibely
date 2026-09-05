@@ -167,6 +167,97 @@ func TestExecuteTaskWithAgent_FailsOnMissingRepoPath(t *testing.T) {
 	}
 }
 
+func TestProjectService_ValidatesProjectWorkerLimitAgainstGlobal(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	workerRepo := repository.NewWorkerRepo(db)
+	svc := NewProjectService(projectRepo)
+	svc.SetWorkerRepo(workerRepo)
+
+	if err := workerRepo.SetMaxWorkers(ctx, 25); err != nil {
+		t.Fatalf("SetMaxWorkers(25): %v", err)
+	}
+
+	tooHigh := 26
+	rejected := &models.Project{Name: "Over Global", MaxWorkers: &tooHigh}
+	if err := svc.Create(ctx, rejected); err == nil {
+		t.Fatal("Create accepted a project limit above the finite global limit")
+	}
+	if rejected.ID != "" {
+		t.Fatalf("rejected project received an ID %q, suggesting it was persisted", rejected.ID)
+	}
+
+	equal := 25
+	equalProject := &models.Project{Name: "At Global", MaxWorkers: &equal}
+	if err := svc.Create(ctx, equalProject); err != nil {
+		t.Fatalf("Create at global limit: %v", err)
+	}
+
+	below := 20
+	belowProject := &models.Project{Name: "Below Global", MaxWorkers: &below}
+	if err := svc.Create(ctx, belowProject); err != nil {
+		t.Fatalf("Create below global limit: %v", err)
+	}
+
+	zero := 0
+	zeroProject := &models.Project{Name: "Inherited Limit", MaxWorkers: &zero}
+	if err := svc.Create(ctx, zeroProject); err != nil {
+		t.Fatalf("Create with zero project limit: %v", err)
+	}
+	storedZero, err := projectRepo.GetByID(ctx, zeroProject.ID)
+	if err != nil {
+		t.Fatalf("GetByID zero project: %v", err)
+	}
+	if storedZero.MaxWorkers != nil {
+		t.Fatalf("zero project limit persisted as %v, want nil", storedZero.MaxWorkers)
+	}
+
+	if err := workerRepo.SetMaxWorkers(ctx, 10); err != nil {
+		t.Fatalf("SetMaxWorkers(10): %v", err)
+	}
+	stale := *belowProject
+	stale.Name = "Below Global After Reduction"
+	if err := svc.Update(ctx, &stale); err != nil {
+		t.Fatalf("Update with unchanged stale project cap after global reduction: %v", err)
+	}
+	updated, err := projectRepo.GetByID(ctx, belowProject.ID)
+	if err != nil {
+		t.Fatalf("GetByID after global reduction: %v", err)
+	}
+	if updated.MaxWorkers == nil || *updated.MaxWorkers != below {
+		t.Fatalf("global reduction changed existing project cap to %v, want %d", updated.MaxWorkers, below)
+	}
+
+	invalid := *updated
+	invalid.MaxWorkers = &tooHigh
+	if err := svc.Update(ctx, &invalid); err == nil {
+		t.Fatal("Update accepted a changed project limit above the finite global limit")
+	}
+	unchanged, err := projectRepo.GetByID(ctx, belowProject.ID)
+	if err != nil {
+		t.Fatalf("GetByID after rejected update: %v", err)
+	}
+	if unchanged.MaxWorkers == nil || *unchanged.MaxWorkers != below {
+		t.Fatalf("rejected update changed project cap to %v, want %d", unchanged.MaxWorkers, below)
+	}
+
+	cleared := *updated
+	cleared.MaxWorkers = nil
+	if err := svc.Update(ctx, &cleared); err != nil {
+		t.Fatalf("clear project limit after global reduction: %v", err)
+	}
+
+	if err := workerRepo.SetMaxWorkers(ctx, 0); err != nil {
+		t.Fatalf("SetMaxWorkers(0): %v", err)
+	}
+	high := 100
+	unlimitedProject := &models.Project{Name: "Unlimited Global High Project", MaxWorkers: &high}
+	if err := svc.Create(ctx, unlimitedProject); err != nil {
+		t.Fatalf("Create high project under unlimited global: %v", err)
+	}
+}
+
 // TestEnsureRepoRoot_UnderDataVolume verifies that when PROJECT_REPO_ROOT
 // points to a /data subdirectory, cloned repos are stored under the
 // persistent volume path.

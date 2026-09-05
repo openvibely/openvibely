@@ -2649,6 +2649,49 @@ func TestHandler_WorkersPage_DoesNotContainChatRootSelector(t *testing.T) {
 }
 
 func TestHandler_UpdateWorkerSettings(t *testing.T) {
+	t.Run("accepts global worker limits above ten", func(t *testing.T) {
+		h, e, _ := setupTestHandler(t)
+		ctx := context.Background()
+		h.workerSvc.Start(ctx)
+		defer h.workerSvc.Stop()
+
+		rec := htmxPost(e, "/workers", url.Values{"max_workers": {"25"}})
+		assertCode(t, rec, http.StatusOK)
+		if n := h.workerSvc.NumWorkers(); n != 25 {
+			t.Fatalf("expected worker pool to be resized to 25, got %d", n)
+		}
+		maxWorkers, err := h.workerRepo.GetMaxWorkers(ctx)
+		if err != nil {
+			t.Fatalf("GetMaxWorkers: %v", err)
+		}
+		if maxWorkers != 25 {
+			t.Fatalf("expected max_workers=25 in DB, got %d", maxWorkers)
+		}
+		assertContains(t, rec, `value="25"`)
+		assertNotContains(t, rec, `max="10"`)
+	})
+
+	t.Run("rejects malformed global worker limits", func(t *testing.T) {
+		h, e, _ := setupTestHandler(t)
+		ctx := context.Background()
+		before, err := h.workerRepo.GetMaxWorkers(ctx)
+		if err != nil {
+			t.Fatalf("GetMaxWorkers before: %v", err)
+		}
+		rec := htmxPost(e, "/workers", url.Values{"max_workers": {"-1"}})
+		assertCode(t, rec, http.StatusNoContent)
+		if trigger := rec.Header().Get("HX-Trigger"); !strings.Contains(trigger, "Max concurrent workers") {
+			t.Fatalf("expected malformed-limit toast, got %q", trigger)
+		}
+		maxWorkers, err := h.workerRepo.GetMaxWorkers(ctx)
+		if err != nil {
+			t.Fatalf("GetMaxWorkers after: %v", err)
+		}
+		if maxWorkers != before {
+			t.Fatalf("expected malformed global limit to leave %d unchanged, got %d", before, maxWorkers)
+		}
+	})
+
 	t.Run("regular request redirects", func(t *testing.T) {
 		_, e, _ := setupTestHandler(t)
 		form := url.Values{}
@@ -2714,6 +2757,149 @@ func TestHandler_UpdateWorkerSettings(t *testing.T) {
 			t.Errorf("expected max_workers in DB to be 3, got %d", maxWorkers)
 		}
 	})
+}
+
+func TestHandler_UnlimitedGlobalAndProjectSettingsAdmitQueuedTask(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+
+	if err := h.workerRepo.SetMaxWorkers(ctx, 1); err != nil {
+		t.Fatalf("set finite global worker limit: %v", err)
+	}
+	h.workerSvc.Resize(1)
+	h.workerSvc.SetProjectRepo(h.projectRepo)
+	h.workerSvc.SetTaskRepo(h.taskRepo)
+	h.workerSvc.SetLLMConfigRepo(llmConfigRepo)
+
+	projectLimit := 1
+	project := &models.Project{Name: "Unlimited Settings Project", MaxWorkers: &projectLimit}
+	if err := h.projectSvc.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	agent := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
+		a.MaxWorkers = 0
+	})
+
+	providerStarted := make(chan struct{})
+	providerRelease := make(chan struct{})
+	mockCaller := testutil.NewMockLLMCaller()
+	mockCaller.OnCall = func(callCtx context.Context, _ testutil.MockLLMCall) {
+		close(providerStarted)
+		select {
+		case <-providerRelease:
+		case <-callCtx.Done():
+		}
+	}
+	h.llmSvc.SetLLMCaller(mockCaller)
+
+	h.workerSvc.Start(ctx)
+	defer h.workerSvc.Stop()
+
+	// Occupy the only global and project slot, then create an active task. The
+	// task service submits it to the real worker queue, where it must wait.
+	if !h.workerSvc.TryAcquireProjectSlot(project.ID) {
+		t.Fatal("expected to occupy the finite global/project slot")
+	}
+	defer h.workerSvc.ReleaseProjectSlot(project.ID)
+
+	task := createTask(t, h, project.ID, "Queued Until Unlimited", func(task *models.Task) {
+		task.AgentID = &agent.ID
+	})
+	require.Eventually(t, func() bool {
+		return h.workerSvc.QueueSize() == 1
+	}, time.Second, 10*time.Millisecond, "task should wait while global and project limits are finite")
+
+	globalRec := htmxPost(e, "/workers", url.Values{"max_workers": {"0"}})
+	assertCode(t, globalRec, http.StatusOK)
+	if got := h.workerSvc.QueueSize(); got != 1 {
+		t.Fatalf("queue size after only global limit became unlimited = %d, want 1", got)
+	}
+
+	projectRec := htmxPost(e, "/workers/projects/"+project.ID+"/limit", url.Values{"max_workers": {"0"}})
+	assertCode(t, projectRec, http.StatusOK)
+
+	select {
+	case <-providerStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("queued task did not reach the provider after global and project limits became unlimited")
+	}
+	close(providerRelease)
+
+	require.Eventually(t, func() bool {
+		return h.workerSvc.QueueSize() == 0 && h.workerSvc.TotalRunning() == 1
+	}, 2*time.Second, 10*time.Millisecond, "admitted task should leave the worker queue while the held slot remains")
+	storedProject, err := h.projectSvc.GetByID(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("reload project: %v", err)
+	}
+	if storedProject.MaxWorkers != nil {
+		t.Fatalf("project unlimited setting persisted as %v, want nil", storedProject.MaxWorkers)
+	}
+	storedTask, err := h.taskSvc.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("reload task: %v", err)
+	}
+	if storedTask.Status == models.StatusPending {
+		t.Fatalf("task remained pending after unlimited settings: %s", storedTask.Status)
+	}
+}
+
+func TestHandler_UnlimitedSettingsReconcileDurablePendingTask(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	h.workerSvc.Start(ctx)
+	defer h.workerSvc.Stop()
+
+	globalRec := htmxPost(e, "/workers", url.Values{"max_workers": {"1"}})
+	assertCode(t, globalRec, http.StatusOK)
+
+	projectLimit := 1
+	project := &models.Project{Name: "Durable Pending Project", MaxWorkers: &projectLimit}
+	require.NoError(t, h.projectSvc.Create(ctx, project))
+	h.workerSvc.SetProjectRepo(h.projectRepo)
+	h.workerSvc.SetTaskRepo(h.taskRepo)
+	h.workerSvc.SetLLMConfigRepo(llmConfigRepo)
+	agent := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
+		a.MaxWorkers = 0
+	})
+
+	providerStarted := make(chan struct{})
+	providerRelease := make(chan struct{})
+	h.llmSvc.SetLLMCaller(llmCallerFunc(func(callCtx context.Context, _ string, _ []models.Attachment, _ models.LLMConfig, _ string, _ string) (string, string, int, error) {
+		close(providerStarted)
+		select {
+		case <-providerRelease:
+		case <-callCtx.Done():
+		}
+		return "durable task completed", "", 1, nil
+	}))
+
+	require.True(t, h.workerSvc.TryAcquireProjectSlot(project.ID))
+	defer h.workerSvc.ReleaseProjectSlot(project.ID)
+
+	// Simulate a task that survived a worker restart or a missed submission: it
+	// is durably runnable but has not yet been offered to WorkerService.Submit.
+	task := &models.Task{
+		ProjectID: project.ID,
+		Title:     "Durable pending task",
+		Prompt:    "run when limits become unlimited",
+		Category:  models.CategoryActive,
+		Status:    models.StatusPending,
+		AgentID:   &agent.ID,
+	}
+	require.NoError(t, h.taskRepo.Create(ctx, task))
+
+	globalRec = htmxPost(e, "/workers", url.Values{"max_workers": {"0"}})
+	assertCode(t, globalRec, http.StatusOK)
+	projectRec := htmxPost(e, "/workers/projects/"+project.ID+"/limit", url.Values{"max_workers": {"0"}})
+	assertCode(t, projectRec, http.StatusOK)
+
+	select {
+	case <-providerStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("durable pending task was not reconciled after global and project limits became unlimited")
+	}
+	close(providerRelease)
 }
 
 func TestHandler_GlobalWorkerStats(t *testing.T) {
@@ -2792,12 +2978,42 @@ func TestHandler_UpdateProjectWorkerLimit(t *testing.T) {
 			t.Errorf("expected max_workers nil, got %d", *p.MaxWorkers)
 		}
 	})
-	t.Run("enforce max limit of 10", func(t *testing.T) {
+	t.Run("accepts a project worker limit above ten", func(t *testing.T) {
 		rec := postLimit(t, path, "50")
 		assertCode(t, rec, http.StatusOK)
 		p, _ := h.projectSvc.GetByID(ctx, project.ID)
+		if p.MaxWorkers == nil || *p.MaxWorkers != 50 {
+			t.Errorf("expected max_workers=50, got %v", p.MaxWorkers)
+		}
+	})
+	t.Run("project limits respect a finite global limit", func(t *testing.T) {
+		globalRec := htmxPost(e, "/workers", url.Values{"max_workers": {"10"}})
+		assertCode(t, globalRec, http.StatusOK)
+		assertContains(t, globalRec, `max="10"`)
+		assertContains(t, globalRec, "Exceeds global")
+
+		rec := postLimit(t, path, "11")
+		assertCode(t, rec, http.StatusNoContent)
+		if trigger := rec.Header().Get("HX-Trigger"); !strings.Contains(trigger, "global worker limit") {
+			t.Fatalf("expected finite-global validation toast, got %q", trigger)
+		}
+		p, _ := h.projectSvc.GetByID(ctx, project.ID)
+		if p.MaxWorkers == nil || *p.MaxWorkers != 50 {
+			t.Fatalf("expected rejected update to preserve max_workers=50, got %v", p.MaxWorkers)
+		}
+
+		rec = postLimit(t, path, "10")
+		assertCode(t, rec, http.StatusOK)
+		p, _ = h.projectSvc.GetByID(ctx, project.ID)
 		if p.MaxWorkers == nil || *p.MaxWorkers != 10 {
-			t.Errorf("expected max_workers=10, got %v", p.MaxWorkers)
+			t.Fatalf("expected max_workers=10 at global limit, got %v", p.MaxWorkers)
+		}
+
+		rec = postLimit(t, path, "5")
+		assertCode(t, rec, http.StatusOK)
+		p, _ = h.projectSvc.GetByID(ctx, project.ID)
+		if p.MaxWorkers == nil || *p.MaxWorkers != 5 {
+			t.Fatalf("expected max_workers=5 below global limit, got %v", p.MaxWorkers)
 		}
 	})
 	t.Run("project not found returns 404", func(t *testing.T) {

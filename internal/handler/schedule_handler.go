@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -15,8 +16,30 @@ import (
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
 
-// GlobalCapacityResponse contains global worker capacity information.
-// swagger:model
+// parseNonNegativeWorkerLimit parses the shared global/project worker limit
+// input. Empty and zero both represent the unlimited/cleared value.
+func parseNonNegativeWorkerLimit(raw string) (int, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0, nil
+	}
+	maxWorkers, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, errors.New("Max concurrent workers must be a whole number; use 0 for Unlimited or no project limit")
+	}
+	if err := models.ValidateGlobalWorkerLimit(maxWorkers); err != nil {
+		return 0, errors.New("Max concurrent workers must be 0 or a positive whole number")
+	}
+	return maxWorkers, nil
+}
+
+func (h *Handler) workerLimitErrorResponse(c echo.Context, message string) error {
+	if isHTMX(c) {
+		setHTMXToast(c, message, "failed")
+		return c.NoContent(http.StatusNoContent)
+	}
+	return echo.NewHTTPError(http.StatusBadRequest, message)
+}
 
 func parseScheduleRepeatInterval(raw string) (int, error) {
 	if raw == "" {
@@ -472,12 +495,9 @@ func (h *Handler) WorkerSettings(c echo.Context) error {
 }
 
 func (h *Handler) UpdateWorkerSettings(c echo.Context) error {
-	maxWorkers, err := strconv.Atoi(c.FormValue("max_workers"))
-	if err != nil || maxWorkers < 0 {
-		maxWorkers = 0
-	}
-	if maxWorkers > 10 {
-		maxWorkers = 10
+	maxWorkers, err := parseNonNegativeWorkerLimit(c.FormValue("max_workers"))
+	if err != nil {
+		return h.workerLimitErrorResponse(c, err.Error())
 	}
 	applog.Infof("[handler] UpdateWorkerSettings max_workers=%d", maxWorkers)
 
@@ -488,6 +508,8 @@ func (h *Handler) UpdateWorkerSettings(c echo.Context) error {
 
 	// Apply the new worker count to the running worker pool
 	h.workerSvc.Resize(maxWorkers)
+	h.workerSvc.ReconcilePendingTasks(c.Request().Context())
+	h.workerSvc.DispatchNext()
 	runningWorkers := h.workerSvc.NumWorkers()
 	totalRunning := h.workerSvc.TotalRunning()
 	applog.Infof("[handler] UpdateWorkerSettings success, resized to %d workers (actual running: %d)", maxWorkers, runningWorkers)
@@ -735,14 +757,9 @@ func (h *Handler) GetExecution(c echo.Context) error {
 
 func (h *Handler) UpdateProjectWorkerLimit(c echo.Context) error {
 	projectID := c.Param("projectId")
-	maxWorkersStr := c.FormValue("max_workers")
-
-	maxWorkers, err := strconv.Atoi(maxWorkersStr)
-	if err != nil || maxWorkers < 0 {
-		maxWorkers = 0 // 0 means no limit
-	}
-	if maxWorkers > 10 {
-		maxWorkers = 10 // Cap at 10
+	maxWorkers, err := parseNonNegativeWorkerLimit(c.FormValue("max_workers"))
+	if err != nil {
+		return h.workerLimitErrorResponse(c, err.Error())
 	}
 
 	applog.Infof("[handler] UpdateProjectWorkerLimit project=%s max_workers=%d", projectID, maxWorkers)
@@ -758,7 +775,17 @@ func (h *Handler) UpdateProjectWorkerLimit(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, "project not found")
 	}
 
-	// Update max_workers (0 or nil means no limit)
+	if maxWorkers > 0 {
+		globalMaxWorkers, err := h.configuredGlobalWorkerLimit(c.Request().Context())
+		if err != nil {
+			return err
+		}
+		if err := models.ValidateProjectWorkerLimit(&maxWorkers, globalMaxWorkers); err != nil {
+			return h.workerLimitErrorResponse(c, fmt.Sprintf("Max concurrent workers %s", strings.TrimPrefix(err.Error(), "project max_workers ")))
+		}
+	}
+
+	// Update max_workers (0 or empty means no project limit)
 	if maxWorkers == 0 {
 		project.MaxWorkers = nil
 	} else {
@@ -773,7 +800,9 @@ func (h *Handler) UpdateProjectWorkerLimit(c echo.Context) error {
 	applog.Infof("[handler] UpdateProjectWorkerLimit success project=%s max_workers=%v", projectID, project.MaxWorkers)
 
 	// Trigger dispatch check — if the limit was increased and there are queued
-	// tasks for this project, they should start immediately.
+	// tasks for this project, they should start immediately. Reconcile durable
+	// active tasks as well so a missed submission does not remain pending.
+	h.workerSvc.ReconcilePendingTasks(c.Request().Context())
 	h.workerSvc.DispatchNext()
 
 	// Return the updated worker settings content for HTMX
@@ -806,6 +835,10 @@ func (h *Handler) UpdateProjectWorkerLimit(c echo.Context) error {
 
 // API endpoints for capacity information
 
+// GlobalCapacityResponse contains global worker capacity information.
+// MaxWorkers is zero for an unlimited global pool; positive values are finite
+// ceilings without a product-level upper bound.
+// swagger:model
 type GlobalCapacityResponse struct {
 	MaxWorkers     int  `json:"max_workers"`
 	TotalRunning   int  `json:"total_running"`
@@ -814,6 +847,9 @@ type GlobalCapacityResponse struct {
 	AvailableSlots int  `json:"available_slots"`
 }
 
+// ProjectCapacityResponse contains independent per-project capacity information.
+// A nil or zero MaxWorkers means the project inherits the global pool limit.
+// swagger:model
 type ProjectCapacityResponse struct {
 	ID             string `json:"id"`
 	Name           string `json:"name"`
@@ -856,7 +892,7 @@ func modelCapacityResponse(agent *models.LLMConfig, running int, hasCapacity boo
 
 // GetGlobalCapacity returns global worker pool capacity information (API endpoint)
 // @Summary Get global worker capacity
-// @Description Returns global worker pool usage and available slots.
+// @Description Returns global worker pool usage and available slots. max_workers=0 means unlimited; any positive value is a finite ceiling without a product-level upper bound.
 // @Tags capacity
 // @Produce json
 // @Success 200 {object} GlobalCapacityResponse "Global capacity information"
@@ -887,7 +923,7 @@ func (h *Handler) GetGlobalCapacity(c echo.Context) error {
 
 // GetProjectCapacities returns per-project capacity information (API endpoint)
 // @Summary Get project worker capacities
-// @Description Returns worker capacity and queue information for each project.
+// @Description Returns independent per-project worker capacity and queue information. A nil or zero max_workers means the project inherits the global pool; project capacity does not aggregate configured caps across projects.
 // @Tags capacity
 // @Produce json
 // @Success 200 {array} ProjectCapacityResponse "Per-project capacity information"
@@ -937,7 +973,7 @@ func (h *Handler) GetProjectCapacities(c echo.Context) error {
 
 // GetProjectCapacity returns capacity information for a specific project (API endpoint)
 // @Summary Get project worker capacity
-// @Description Returns worker capacity and queue information for a specific project.
+// @Description Returns independent worker capacity and queue information for a project. max_workers is nil or zero when the project inherits the global pool; runtime admission still enforces actual global usage.
 // @Tags capacity
 // @Produce json
 // @Param projectId path string true "Project ID"

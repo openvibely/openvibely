@@ -84,12 +84,15 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 					ID: "task-resource-selector", Kind: "Task", CurrentID: task.ID, CurrentName: task.Title,
 					SearchURL: fmt.Sprintf("/breadcrumb-selectors/tasks?project_id=%s&current_id=%s", task.ProjectID, task.ID),
 					ContextName: "tab", ContextValue: defaultTab,
+					OriginName: "from",
 				})
 			</div>
 			<script>
 				(function() {
 					var params = new URLSearchParams(window.location.search);
 					var from = params.get('from');
+					var selectorOrigin = document.querySelector('[data-breadcrumb-selector-origin][name="from"]');
+					if (selectorOrigin && from === 'schedule') selectorOrigin.value = 'schedule';
 					var btn = document.getElementById('task-back-btn');
 					var automationsBtn = document.getElementById('task-automations-back-btn');
 					var automationsSeparator = document.getElementById('task-automations-separator');

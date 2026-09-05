@@ -303,8 +303,11 @@ func New(
 		telegramService:     telegramSvc,
 		projectFolderPicker: pickProjectFolderNative,
 	}
-	if projectSvc != nil && taskSvc != nil {
-		projectSvc.SetTaskService(taskSvc)
+	if projectSvc != nil {
+		projectSvc.SetWorkerRepo(workerRepo)
+		if taskSvc != nil {
+			projectSvc.SetTaskService(taskSvc)
+		}
 	}
 	if taskSvc != nil {
 		taskSvc.SetQueuedTaskThreadFollowupHook(h.StartPendingTaskThreadFollowup)

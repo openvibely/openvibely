@@ -35,7 +35,8 @@ func TestCollectionSelectionBrowserContractIsShared(t *testing.T) {
 		`data-card-select-mode`, `data-card-mobile-actions`, `data-card-bulk-confirm`, `if (selectLoaded.checked) state.ids[id] = true`, `selectLoaded.indeterminate`, `selectLoaded.checked`, `data-card-filters-popover`, `setCardFilterDropdown(dropdown, false)`,
 		`data-card-query-secondary`, `data-card-selection-actions`, `data-card-mark-read-selected`,
 		`[data-card-list-toolbar] .dropdown:not(.dropdown-open) > [data-card-filters-popover]`,
-		`absolute left-5 top-8 z-20 hidden md:block`, `card.classList.add('md:pl-8')`, `alignSelectionGutter(card, gutter)`, `_openVibelyInstallSelectionCards`, `if (!existing[id]) delete state.ids[id]`, `focus({preventScroll: true})`} {
+		`absolute left-5 top-8 z-20 hidden md:block`, `card.classList.add('md:pl-8')`, `alignSelectionGutter(card, gutter)`, `_openVibelyInstallSelectionCards`, `if (!existing[id]) delete state.ids[id]`, `focus({preventScroll: true})`,
+		`window.refreshCardListToolbars(nextContainer)`} {
 		require.Contains(t, body, want)
 	}
 }
@@ -69,7 +70,10 @@ func TestCollectionSelectionProductionBrowserInteractions(t *testing.T) {
 		{ID: "c", Name: "Charlie", Provider: models.ProviderTest, Model: "charlie"},
 		{ID: "e", Name: "Echo", Provider: models.ProviderTest, Model: "echo"},
 	}
-	finalCards := []models.LLMConfig{{ID: "default", Name: "Default", Provider: models.ProviderTest, Model: "default", IsDefault: true}}
+	finalCards := []models.LLMConfig{
+		{ID: "default", Name: "Default", Provider: models.ProviderTest, Model: "default", IsDefault: true},
+		{ID: "survivor", Name: "Survivor", Provider: models.ProviderTest, Model: "survivor"},
+	}
 	replacementJSON, err := json.Marshal(render(replacement))
 	require.NoError(t, err)
 	var unmanagedSkills bytes.Buffer
@@ -185,10 +189,17 @@ func TestCollectionSelectionProductionBrowserInteractions(t *testing.T) {
     dialog.querySelector('[data-card-bulk-confirm-delete]').click();
     for (var i=0;i<80 && !window.bulkFinished;i++) await wait(25);
     if (!window.bulkFinished) fail('bulk deletion did not finish');
-    for (var j=0;j<80 && document.querySelectorAll('#models-card-list [data-card-select-id]').length!==1;j++) await wait(25);
-	    if (document.querySelectorAll('#models-card-list [data-card-select-id]').length !== 1 || document.activeElement !== document.querySelector('[data-card-search]')) fail('bulk refresh was not authoritative or did not restore focus');
-	    history.replaceState({}, '', '/models?provider=anthropic&sort=provider');
-	    var authoritativeMutation=window.cardCollectionActionURL(document.getElementById('models-container'), '/models/example');
+	    for (var j=0;j<80 && document.querySelectorAll('#models-card-list [data-card-select-id]').length!==2;j++) await wait(25);
+		    if (document.querySelectorAll('#models-card-list [data-card-select-id]').length !== 2 || document.activeElement !== document.querySelector('[data-card-search]')) fail('bulk refresh was not authoritative or did not restore focus');
+		    var replacementMaster=document.querySelector('[data-card-select-loaded]'), replacementFilter=document.querySelector('[data-card-filters-button]'), replacementSecondary=document.querySelector('[data-card-query-secondary]');
+		    replacementMaster.click();
+		    if (!replacementMaster.checked || !checkbox('survivor').checked || selectedCount()!=='1 selected') fail('replacement master checkbox was not reinitialized after bulk refresh');
+		    replacementMaster.click();
+		    if (replacementMaster.checked || checkbox('survivor').checked || selectedCount()!=='0 selected' || replacementSecondary.classList.contains('hidden')) fail('replacement master checkbox could not clear selection after bulk refresh');
+		    replacementFilter.click();
+		    if (!replacementFilter.closest('.dropdown').classList.contains('dropdown-open') || replacementFilter.getAttribute('aria-expanded')!=='true') fail('replacement toolbar controls were not reinitialized after bulk refresh');
+		    replacementFilter.click();
+		    history.replaceState({}, '', '/models?provider=anthropic&sort=provider');	    var authoritativeMutation=window.cardCollectionActionURL(document.getElementById('models-container'), '/models/example');
 	    if (!authoritativeMutation.includes('provider=openai') || authoritativeMutation.includes('anthropic') || authoritativeMutation.includes('sort=')) fail('mutation URL did not use server-rendered root state');
 	    history.replaceState({}, '', '/skills?enabled=true');    var parsed=new DOMParser().parseFromString(UNMANAGED_SKILLS_HTML, 'text/html'), skillsRoot=parsed.getElementById('skills-container');
     document.querySelector('main').appendChild(document.importNode(skillsRoot, true));

@@ -2,14 +2,14 @@
 name: integrations_and_channels
 type: project
 created: 2026-05-09
-updated: 2026-09-03
-source: consolidation
-source_id: memory_consolidation_2026-09-03
+updated: 2026-09-05
+source: after_complete
+source_id: 5c74fe91144a0f84866bf7d8ad82be85
 confidence: high
 title: Integrations and Channels
 ---
 
-OpenVibely integrates with GitHub, Slack, Telegram, Discord, Email, X, generic inbound webhooks, and outbound message targets. Integration UIs separate discovery/add flows from management cards, show explicit configured/running/connected states, and use consistent confirmed `Delete` actions.
+OpenVibely integrates with GitHub, Slack, Telegram, Discord, Email, X, generic inbound webhooks, and outbound message targets. Integration UIs separate discovery/add flows from management cards, show explicit configured/running/connected states, and use consistent confirmed `Delete` actions. Configured provider cards can participate in shared selection/removal while individual confirmed cards retain provider-specific routes; Outbound Target cards remain a separate, non-selectable management surface. Channels bulk removal uses one `/channels/bulk` request: the server validates every selected provider and project-owned webhook before an immediate transaction resets provider settings, deletes webhooks, and clears system-level Discord authorization when selected. Runtime teardown occurs only after commit, so failures roll back without partial deletion or stale UI.
 
 Shared channel contracts:
 - Status badges share configured/running/connected classes and labels across providers, with intentional provider wording differences. Configured wins over a stored connected installation when the integration is not actually configured.

@@ -1409,6 +1409,7 @@ func (s *TelegramService) telegramActionHandlersForTask(projectID, callerTaskID 
 		CreateProject: CreateGitHubProjectRuntimeOptions{
 			ProjectSvc:                 s.projectSvc,
 			GitHubSvc:                  s.githubProjectSvc,
+			WorkerSvc:                  s.workerSvc,
 			MemorySvc:                  s.memorySvc,
 			AgentLibraryMaintenanceSvc: s.agentLibraryMaintenanceSvc,
 		},

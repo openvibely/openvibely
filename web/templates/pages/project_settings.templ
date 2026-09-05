@@ -31,7 +31,7 @@ script deleteProjectAction(projectID string) {
 	htmx.ajax('DELETE', '/projects/' + projectID, {target: 'body', swap: 'none'});
 }
 
-templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, localRepoPathEnabled bool) {
+templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, localRepoPathEnabled bool, globalMaxWorkers int) {
 	<dialog id="edit_project_modal" class="modal" data-local-repo-path-enabled={ fmt.Sprintf("%t", localRepoPathEnabled) }>
 			<div class="modal-box">
 				@ModalCloseButton("edit_project_modal", "Close project settings")
@@ -134,26 +134,25 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
 				<div class="form-control mb-4">
 					<label class="label">
 						<span class="label-text">Max Concurrent Workers</span>
-						<span class="label-text-alt opacity-60">Limit parallel tasks for this project</span>
+						<span class="label-text-alt opacity-60">Positive values up to the current global limit; leave blank to inherit</span>
 					</label>
-					<select name="max_workers" class="select select-bordered" id="edit-project-max-workers">
-						<option value="" if project.MaxWorkers == nil { selected }>No limit (use global)</option>
-						for _, v := range []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10} {
-							<option
-								value={ fmt.Sprintf("%d", v) }
-								if project.MaxWorkers != nil && *project.MaxWorkers == v {
-									selected
-								}
-							>
-								{ fmt.Sprintf("%d", v) }
-								if v == 1 {
-									worker
-								} else {
-									workers
-								}
-							</option>
+					<input
+						type="number"
+						name="max_workers"
+						id="edit-project-max-workers"
+						value={ projectMaxWorkersValue(project) }
+						min="0"
+						if globalMaxWorkers > 0 {
+							max={ fmt.Sprintf("%d", globalMaxWorkers) }
 						}
-					</select>
+						step="1"
+						placeholder="No limit"
+						class="input input-bordered"
+						title="0 or blank = inherit the global worker limit"
+					/>
+					if projectWorkerLimitExceedsGlobal(globalMaxWorkers, project.MaxWorkers) {
+						<p class="text-xs text-warning mt-1">The current project limit exceeds the global limit of { fmt.Sprintf("%d", globalMaxWorkers) }. Lower it before saving.</p>
+					}
 				</div>
 				<div class="modal-action">
 					if !project.IsDefault {
@@ -288,7 +287,7 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
 	</script>
 }
 
-templ NewProjectDialog(agents []models.LLMConfig, localRepoPathEnabled bool) {
+templ NewProjectDialog(agents []models.LLMConfig, localRepoPathEnabled bool, globalMaxWorkers int) {
 	<dialog id="new_project_modal" class="modal" data-local-repo-path-enabled={ fmt.Sprintf("%t", localRepoPathEnabled) }>
 			<div class="modal-box">
 				@ModalCloseButton("new_project_modal", "Close new project dialog")
@@ -382,21 +381,21 @@ templ NewProjectDialog(agents []models.LLMConfig, localRepoPathEnabled bool) {
 				<div class="form-control mb-4">
 					<label class="label">
 						<span class="label-text">Max Concurrent Workers</span>
-						<span class="label-text-alt opacity-60">Limit parallel tasks for this project</span>
+						<span class="label-text-alt opacity-60">Positive values up to the current global limit; leave blank to inherit</span>
 					</label>
-					<select name="max_workers" class="select select-bordered">
-						<option value="" selected>No limit (use global)</option>
-						for _, v := range []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10} {
-							<option value={ fmt.Sprintf("%d", v) }>
-								{ fmt.Sprintf("%d", v) }
-								if v == 1 {
-									worker
-								} else {
-									workers
-								}
-							</option>
+					<input
+						type="number"
+						name="max_workers"
+						value=""
+						min="0"
+						if globalMaxWorkers > 0 {
+							max={ fmt.Sprintf("%d", globalMaxWorkers) }
 						}
-					</select>
+						step="1"
+						placeholder="No limit"
+						class="input input-bordered"
+						title="0 or blank = inherit the global worker limit"
+					/>
 				</div>
 				<div id="new-project-error" class="alert alert-error mb-4 hidden">
 					<svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-5 w-5" fill="none" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>

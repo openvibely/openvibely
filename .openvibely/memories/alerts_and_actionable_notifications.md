@@ -2,9 +2,9 @@
 name: alerts_and_actionable_notifications
 type: project
 created: 2026-07-15
-updated: 2026-09-03
-source: consolidation
-source_id: memory_consolidation_2026-09-03
+updated: 2026-09-05
+source: after_complete
+source_id: 5c74fe91144a0f84866bf7d8ad82be85
 confidence: high
 title: Alerts and Actionable Notifications
 ---
@@ -29,7 +29,7 @@ Runtime contracts:
 - Custom Automation graphs reuse this approval lifecycle; topology and ownership belong in `automation_graphs.md`.
 
 Alerts UI:
-- Alerts supports inspection, approve/reject controls, decision/processing badges, claimant/failure details, linked-task navigation, project context, and project-filtered live refresh. Pending summaries should be scannable without expansion; detail provides full evidence/metadata/copy.
+- Alerts supports inspection, approve/reject controls, decision/processing badges, claimant/failure details, linked-task navigation, project context, project-filtered live refresh, and contextual bulk actions for selected cards. Pending summaries should be scannable without expansion; detail provides full evidence/metadata/copy. Selected `Mark as read` uses a project-preflighted bulk mutation so mixed or foreign IDs do not partially change state; the authoritative Alerts fragment is refreshed afterward.
 - Runtime lists and browser `/alerts` use compact summaries without body/metadata; project-scoped detail hydration loads one full record. Browser mutations replace only inner `#alerts-content` inside the mounted `#alerts-container`, preserving search/reading position and unread state. Shared refresh behavior should cover decisions, mark-read, delete-one/last, and delete-all without changing mutation semantics.
 - Inspection reuses shared Chat/task-thread Markdown parsing, sanitization, code-copy, and link behavior. Raw body is carried as Base64 UTF-8 and decoded immediately before clipboard write, preserving LF, CRLF, and bare-CR bytes; empty bodies have no copy control and parser failures render escaped inert text. Native light inline code uses dedicated contrast variables; fenced code remains unchanged.
 - New alerts are never auto-focused. Deletion moves focus with `preventScroll` to the next/previous visible delete control. Scroll restoration uses a surviving intersecting row after search/geometry settle and suppresses HTMX show-to-top. `#system-update-card` is API-authoritative and `hx-preserve`d during Alerts swaps.

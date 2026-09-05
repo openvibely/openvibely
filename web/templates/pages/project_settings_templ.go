@@ -45,7 +45,7 @@ func deleteProjectAction(projectID string) templ.ComponentScript {
 	}
 }
 
-func EditProjectDialog(project *models.Project, agents []models.LLMConfig, localRepoPathEnabled bool) templ.Component {
+func EditProjectDialog(project *models.Project, agents []models.LLMConfig, localRepoPathEnabled bool, globalMaxWorkers int) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -333,93 +333,81 @@ func EditProjectDialog(project *models.Project, agents []models.LLMConfig, local
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "</select></div><div class=\"form-control mb-4\"><label class=\"label\"><span class=\"label-text\">Max Concurrent Workers</span> <span class=\"label-text-alt opacity-60\">Limit parallel tasks for this project</span></label> <select name=\"max_workers\" class=\"select select-bordered\" id=\"edit-project-max-workers\"><option value=\"\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "</select></div><div class=\"form-control mb-4\"><label class=\"label\"><span class=\"label-text\">Max Concurrent Workers</span> <span class=\"label-text-alt opacity-60\">Positive values up to the current global limit; leave blank to inherit</span></label> <input type=\"number\" name=\"max_workers\" id=\"edit-project-max-workers\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		if project.MaxWorkers == nil {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, " selected")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
+		var templ_7745c5c3_Var15 string
+		templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.ResolveAttributeValue(projectMaxWorkersValue(project))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 143, Col: 45}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, ">No limit (use global)</option> ")
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var15)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		for _, v := range []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10} {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "<option value=\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var15 string
-			templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", v))
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 143, Col: 36}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var15)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			if project.MaxWorkers != nil && *project.MaxWorkers == v {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, " selected")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, ">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "\" min=\"0\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		if globalMaxWorkers > 0 {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, " max=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var16 string
-			templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", v))
+			templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", globalMaxWorkers))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 148, Col: 30}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 146, Col: 48}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var16))
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, " ")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var16)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			if v == 1 {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, "worker")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-			} else {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "workers")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "</option>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "</select></div><div class=\"modal-action\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, " step=\"1\" placeholder=\"No limit\" class=\"input input-bordered\" title=\"0 or blank = inherit the global worker limit\"> ")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		if projectWorkerLimitExceedsGlobal(globalMaxWorkers, project.MaxWorkers) {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "<p class=\"text-xs text-warning mt-1\">The current project limit exceeds the global limit of ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var17 string
+			templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", globalMaxWorkers))
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 154, Col: 134}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var17))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, ". Lower it before saving.</p>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "</div><div class=\"modal-action\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if !project.IsDefault {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "<button type=\"button\" class=\"btn btn-error btn-outline mr-auto\" onclick=\"window.openDestructiveConfirmDialog('delete_project_confirm_modal', '', '')\">Delete Project</button> ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, "<button type=\"button\" class=\"btn btn-error btn-outline mr-auto\" onclick=\"window.openDestructiveConfirmDialog('delete_project_confirm_modal', '', '')\">Delete Project</button> ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, "<button type=\"button\" class=\"btn\" onclick=\"edit_project_modal.close()\">Cancel</button> <button type=\"submit\" class=\"btn btn-primary\">Save</button></div></form></div><form method=\"dialog\" class=\"modal-backdrop\"><button>close</button></form></dialog> ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "<button type=\"button\" class=\"btn\" onclick=\"edit_project_modal.close()\">Cancel</button> <button type=\"submit\" class=\"btn btn-primary\">Save</button></div></form></div><form method=\"dialog\" class=\"modal-backdrop\"><button>close</button></form></dialog> ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if !project.IsDefault {
-			templ_7745c5c3_Var17 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+			templ_7745c5c3_Var18 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 				templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 				templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
 				if !templ_7745c5c3_IsBuffer {
@@ -431,18 +419,18 @@ func EditProjectDialog(project *models.Project, agents []models.LLMConfig, local
 					}()
 				}
 				ctx = templ.InitializeContext(ctx)
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "<p class=\"font-medium mb-1\">The following data will be permanently deleted:</p><ul class=\"list-disc list-inside space-y-1\"><li>All tasks and their execution history</li><li>All scheduled runs</li><li>Chat history for this project</li><li>Project-specific settings and configurations</li></ul>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "<p class=\"font-medium mb-1\">The following data will be permanently deleted:</p><ul class=\"list-disc list-inside space-y-1\"><li>All tasks and their execution history</li><li>All scheduled runs</li><li>Chat history for this project</li><li>Project-specific settings and configurations</li></ul>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				return nil
 			})
-			templ_7745c5c3_Err = DestructiveConfirmDialog("delete_project_confirm_modal", "Close delete project confirmation", "Delete Project", "Are you sure you want to delete ", "", project.Name, "? This action cannot be undone.", templ.ComponentScript{Call: "delete_project_confirm_modal.close()"}, deleteProjectAction(project.ID)).Render(templ.WithChildren(ctx, templ_7745c5c3_Var17), templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = DestructiveConfirmDialog("delete_project_confirm_modal", "Close delete project confirmation", "Delete Project", "Are you sure you want to delete ", "", project.Name, "? This action cannot be undone.", templ.ComponentScript{Call: "delete_project_confirm_modal.close()"}, deleteProjectAction(project.ID)).Render(templ.WithChildren(ctx, templ_7745c5c3_Var18), templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "<script>\n\t\t(function() {\n\t\t\tvar m = document.getElementById('edit_project_modal');\n\t\t\tif (m) m.showModal();\n\n\t\t\tvar input = document.getElementById('edit-project-repo-path');\n\t\t\tvar githubInput = document.getElementById('edit-project-repo-url');\n\t\t\tvar browseBtn = document.getElementById('edit-project-browse-btn');\n\t\t\tvar pickerFeedback = document.getElementById('edit-project-picker-feedback');\n\t\t\tvar repoSourceSelect = document.getElementById('edit-project-repo-source');\n\t\t\tvar localFields = document.getElementById('edit-project-local-fields');\n\t\t\tvar githubFields = document.getElementById('edit-project-github-fields');\n\t\t\tvar localRepoPathEnabled = !!m && m.dataset.localRepoPathEnabled === 'true';\n\n\t\t\tfunction isAbsolutePath(pathValue) {\n\t\t\t\treturn !!pathValue && (pathValue.startsWith('/') || pathValue.startsWith('~/') || pathValue.startsWith('~\\\\') || /^[a-zA-Z]:[\\\\/]/.test(pathValue) || pathValue.startsWith('\\\\\\\\'));\n\t\t\t}\n\n\t\t\tfunction applySelectedDirectoryPath(selectedPath) {\n\t\t\t\tif (!input || !isAbsolutePath(selectedPath)) return;\n\t\t\t\tinput.value = selectedPath;\n\t\t\t\tinput.dispatchEvent(new Event('input', { bubbles: true }));\n\t\t\t}\n\n\t\t\tfunction setPickerFeedback(message, isError) {\n\t\t\t\tif (!pickerFeedback) return;\n\t\t\t\tpickerFeedback.textContent = message || '';\n\t\t\t\tpickerFeedback.classList.remove('hidden');\n\t\t\t\tpickerFeedback.classList.toggle('text-error', !!isError);\n\t\t\t}\n\n\t\t\tasync function chooseDirectoryNative() {\n\t\t\t\tif (!browseBtn || !localRepoPathEnabled) return;\n\t\t\t\tbrowseBtn.disabled = true;\n\t\t\t\ttry {\n\t\t\t\t\tvar response = await fetch('/projects/pick-folder', {\n\t\t\t\t\t\tmethod: 'POST',\n\t\t\t\t\t\theaders: {\n\t\t\t\t\t\t\t'HX-Request': 'true'\n\t\t\t\t\t\t}\n\t\t\t\t\t});\n\t\t\t\t\tvar payload = {};\n\t\t\t\t\ttry {\n\t\t\t\t\t\tpayload = await response.json();\n\t\t\t\t\t} catch (err) {\n\t\t\t\t\t\tpayload = {};\n\t\t\t\t\t}\n\n\t\t\t\t\tif (response.status === 501) {\n\t\t\t\t\t\tvar unavailableMessage = payload && payload.error ? payload.error : 'Native folder picker is unavailable on this system. Paste an absolute path manually.';\n\t\t\t\t\t\tsetPickerFeedback(unavailableMessage, true);\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\tif (response.status === 403) {\n\t\t\t\t\t\tsetPickerFeedback('Local repository path mode is disabled in this environment.', true);\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\tif (!response.ok) {\n\t\t\t\t\t\tvar message = payload && payload.message ? payload.message : 'Unable to open folder picker. Paste an absolute path manually.';\n\t\t\t\t\t\tsetPickerFeedback(message, true);\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\tif (!payload.selected) {\n\t\t\t\t\t\tsetPickerFeedback('No folder selected. You can paste an absolute path manually.', false);\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\tif (!isAbsolutePath(payload.path)) {\n\t\t\t\t\t\tsetPickerFeedback('Folder picker returned a non-absolute path. Paste an absolute path manually.', true);\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\tapplySelectedDirectoryPath(payload.path);\n\t\t\t\t\tsetPickerFeedback('Folder selected from native picker.', false);\n\t\t\t\t} catch (err) {\n\t\t\t\t\tsetPickerFeedback('Native folder picker is unavailable. Paste an absolute path manually.', true);\n\t\t\t\t} finally {\n\t\t\t\t\tbrowseBtn.disabled = false;\n\t\t\t\t}\n\t\t\t}\n\n\t\t\tfunction updateRepoSourceFields() {\n\t\t\t\tif (!repoSourceSelect || !localFields || !githubFields) return;\n\t\t\t\tvar source = repoSourceSelect.value === 'github' ? 'github' : 'local';\n\t\t\t\tlocalFields.classList.toggle('hidden', source !== 'local');\n\t\t\t\tgithubFields.classList.toggle('hidden', source !== 'github');\n\t\t\t\tif (localRepoPathEnabled) {\n\t\t\t\t\tif (input) input.required = (source === 'local');\n\t\t\t\t}\n\t\t\t\tif (githubInput) githubInput.required = (source === 'github');\n\t\t\t\tif (pickerFeedback) pickerFeedback.classList.add('hidden');\n\t\t\t}\n\n\t\t\tif (browseBtn && localRepoPathEnabled) {\n\t\t\t\tbrowseBtn.addEventListener('click', function() {\n\t\t\t\t\tchooseDirectoryNative();\n\t\t\t\t});\n\t\t\t}\n\n\t\t\tif (repoSourceSelect) {\n\t\t\t\trepoSourceSelect.addEventListener('change', updateRepoSourceFields);\n\t\t\t\tupdateRepoSourceFields();\n\t\t\t}\n\t\t})();\n\t</script>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "<script>\n\t\t(function() {\n\t\t\tvar m = document.getElementById('edit_project_modal');\n\t\t\tif (m) m.showModal();\n\n\t\t\tvar input = document.getElementById('edit-project-repo-path');\n\t\t\tvar githubInput = document.getElementById('edit-project-repo-url');\n\t\t\tvar browseBtn = document.getElementById('edit-project-browse-btn');\n\t\t\tvar pickerFeedback = document.getElementById('edit-project-picker-feedback');\n\t\t\tvar repoSourceSelect = document.getElementById('edit-project-repo-source');\n\t\t\tvar localFields = document.getElementById('edit-project-local-fields');\n\t\t\tvar githubFields = document.getElementById('edit-project-github-fields');\n\t\t\tvar localRepoPathEnabled = !!m && m.dataset.localRepoPathEnabled === 'true';\n\n\t\t\tfunction isAbsolutePath(pathValue) {\n\t\t\t\treturn !!pathValue && (pathValue.startsWith('/') || pathValue.startsWith('~/') || pathValue.startsWith('~\\\\') || /^[a-zA-Z]:[\\\\/]/.test(pathValue) || pathValue.startsWith('\\\\\\\\'));\n\t\t\t}\n\n\t\t\tfunction applySelectedDirectoryPath(selectedPath) {\n\t\t\t\tif (!input || !isAbsolutePath(selectedPath)) return;\n\t\t\t\tinput.value = selectedPath;\n\t\t\t\tinput.dispatchEvent(new Event('input', { bubbles: true }));\n\t\t\t}\n\n\t\t\tfunction setPickerFeedback(message, isError) {\n\t\t\t\tif (!pickerFeedback) return;\n\t\t\t\tpickerFeedback.textContent = message || '';\n\t\t\t\tpickerFeedback.classList.remove('hidden');\n\t\t\t\tpickerFeedback.classList.toggle('text-error', !!isError);\n\t\t\t}\n\n\t\t\tasync function chooseDirectoryNative() {\n\t\t\t\tif (!browseBtn || !localRepoPathEnabled) return;\n\t\t\t\tbrowseBtn.disabled = true;\n\t\t\t\ttry {\n\t\t\t\t\tvar response = await fetch('/projects/pick-folder', {\n\t\t\t\t\t\tmethod: 'POST',\n\t\t\t\t\t\theaders: {\n\t\t\t\t\t\t\t'HX-Request': 'true'\n\t\t\t\t\t\t}\n\t\t\t\t\t});\n\t\t\t\t\tvar payload = {};\n\t\t\t\t\ttry {\n\t\t\t\t\t\tpayload = await response.json();\n\t\t\t\t\t} catch (err) {\n\t\t\t\t\t\tpayload = {};\n\t\t\t\t\t}\n\n\t\t\t\t\tif (response.status === 501) {\n\t\t\t\t\t\tvar unavailableMessage = payload && payload.error ? payload.error : 'Native folder picker is unavailable on this system. Paste an absolute path manually.';\n\t\t\t\t\t\tsetPickerFeedback(unavailableMessage, true);\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\tif (response.status === 403) {\n\t\t\t\t\t\tsetPickerFeedback('Local repository path mode is disabled in this environment.', true);\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\tif (!response.ok) {\n\t\t\t\t\t\tvar message = payload && payload.message ? payload.message : 'Unable to open folder picker. Paste an absolute path manually.';\n\t\t\t\t\t\tsetPickerFeedback(message, true);\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\tif (!payload.selected) {\n\t\t\t\t\t\tsetPickerFeedback('No folder selected. You can paste an absolute path manually.', false);\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\tif (!isAbsolutePath(payload.path)) {\n\t\t\t\t\t\tsetPickerFeedback('Folder picker returned a non-absolute path. Paste an absolute path manually.', true);\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\tapplySelectedDirectoryPath(payload.path);\n\t\t\t\t\tsetPickerFeedback('Folder selected from native picker.', false);\n\t\t\t\t} catch (err) {\n\t\t\t\t\tsetPickerFeedback('Native folder picker is unavailable. Paste an absolute path manually.', true);\n\t\t\t\t} finally {\n\t\t\t\t\tbrowseBtn.disabled = false;\n\t\t\t\t}\n\t\t\t}\n\n\t\t\tfunction updateRepoSourceFields() {\n\t\t\t\tif (!repoSourceSelect || !localFields || !githubFields) return;\n\t\t\t\tvar source = repoSourceSelect.value === 'github' ? 'github' : 'local';\n\t\t\t\tlocalFields.classList.toggle('hidden', source !== 'local');\n\t\t\t\tgithubFields.classList.toggle('hidden', source !== 'github');\n\t\t\t\tif (localRepoPathEnabled) {\n\t\t\t\t\tif (input) input.required = (source === 'local');\n\t\t\t\t}\n\t\t\t\tif (githubInput) githubInput.required = (source === 'github');\n\t\t\t\tif (pickerFeedback) pickerFeedback.classList.add('hidden');\n\t\t\t}\n\n\t\t\tif (browseBtn && localRepoPathEnabled) {\n\t\t\t\tbrowseBtn.addEventListener('click', function() {\n\t\t\t\t\tchooseDirectoryNative();\n\t\t\t\t});\n\t\t\t}\n\n\t\t\tif (repoSourceSelect) {\n\t\t\t\trepoSourceSelect.addEventListener('change', updateRepoSourceFields);\n\t\t\t\tupdateRepoSourceFields();\n\t\t\t}\n\t\t})();\n\t</script>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -450,7 +438,7 @@ func EditProjectDialog(project *models.Project, agents []models.LLMConfig, local
 	})
 }
 
-func NewProjectDialog(agents []models.LLMConfig, localRepoPathEnabled bool) templ.Component {
+func NewProjectDialog(agents []models.LLMConfig, localRepoPathEnabled bool, globalMaxWorkers int) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -466,25 +454,25 @@ func NewProjectDialog(agents []models.LLMConfig, localRepoPathEnabled bool) temp
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var18 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var18 == nil {
-			templ_7745c5c3_Var18 = templ.NopComponent
+		templ_7745c5c3_Var19 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var19 == nil {
+			templ_7745c5c3_Var19 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, "<dialog id=\"new_project_modal\" class=\"modal\" data-local-repo-path-enabled=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "<dialog id=\"new_project_modal\" class=\"modal\" data-local-repo-path-enabled=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var19 string
-		templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%t", localRepoPathEnabled))
+		var templ_7745c5c3_Var20 string
+		templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%t", localRepoPathEnabled))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 292, Col: 116}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 291, Col: 116}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var19)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var20)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 50, "\"><div class=\"modal-box\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, "\"><div class=\"modal-box\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -492,160 +480,132 @@ func NewProjectDialog(agents []models.LLMConfig, localRepoPathEnabled bool) temp
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 51, "<h3 class=\"font-bold text-lg mb-4 pr-10\">New Project</h3><form id=\"new-project-form\" method=\"post\" action=\"/projects\" hx-post=\"/projects\" hx-swap=\"none\" hx-indicator=\"#new-project-create-progress\"><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Name</span></label> <input type=\"text\" id=\"new-project-name\" name=\"name\" class=\"input input-bordered\" required placeholder=\"My Project\"></div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Description</span></label> <textarea name=\"description\" class=\"textarea textarea-bordered\" placeholder=\"Project description\"></textarea></div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Repository Source</span></label> ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "<h3 class=\"font-bold text-lg mb-4 pr-10\">New Project</h3><form id=\"new-project-form\" method=\"post\" action=\"/projects\" hx-post=\"/projects\" hx-swap=\"none\" hx-indicator=\"#new-project-create-progress\"><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Name</span></label> <input type=\"text\" id=\"new-project-name\" name=\"name\" class=\"input input-bordered\" required placeholder=\"My Project\"></div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Description</span></label> <textarea name=\"description\" class=\"textarea textarea-bordered\" placeholder=\"Project description\"></textarea></div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Repository Source</span></label> ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if localRepoPathEnabled {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 52, "<select id=\"new-project-repo-source\" name=\"repo_source\" class=\"select select-bordered\"><option value=\"local\" selected>Local Path</option> <option value=\"github\">GitHub URL</option></select>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "<select id=\"new-project-repo-source\" name=\"repo_source\" class=\"select select-bordered\"><option value=\"local\" selected>Local Path</option> <option value=\"github\">GitHub URL</option></select>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		} else {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 53, "<input type=\"hidden\" id=\"new-project-repo-source\" name=\"repo_source\" value=\"github\"><div class=\"text-sm text-base-content/70 bg-base-200 rounded-lg px-3 py-2\">GitHub URL</div><label class=\"label\"><span class=\"label-text-alt opacity-70\">Local repository paths are disabled in this environment.</span></label>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, "<input type=\"hidden\" id=\"new-project-repo-source\" name=\"repo_source\" value=\"github\"><div class=\"text-sm text-base-content/70 bg-base-200 rounded-lg px-3 py-2\">GitHub URL</div><label class=\"label\"><span class=\"label-text-alt opacity-70\">Local repository paths are disabled in this environment.</span></label>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 54, "</div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 50, "</div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if localRepoPathEnabled {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 55, "<div id=\"new-project-local-fields\" class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Repository Path</span></label><div class=\"flex gap-2\"><input type=\"text\" id=\"new-project-repo-path\" name=\"repo_path\" class=\"input input-bordered flex-1\" placeholder=\"/path/to/repo\"> <button type=\"button\" id=\"new-project-browse-btn\" class=\"btn btn-outline btn-sm self-center\">Choose Folder</button></div><label class=\"label\"><span class=\"label-text-alt opacity-70\">Use native folder picker when available. If unavailable, paste an absolute path manually.</span></label><p id=\"new-project-picker-feedback\" class=\"text-xs text-base-content/70 hidden\"></p></div><div id=\"new-project-github-fields\" class=\"form-control mb-3 hidden\"><label class=\"label\"><span class=\"label-text\">GitHub URL</span></label> <input type=\"url\" id=\"new-project-repo-url\" name=\"repo_url\" class=\"input input-bordered\" placeholder=\"https://github.com/owner/repo\"> <label class=\"label\"><span class=\"label-text-alt opacity-60\">The repository is cloned into managed storage using configured GitHub auth or your local git credentials.</span></label></div><div id=\"new-project-create-dir-wrapper\" class=\"form-control mb-2\"><label class=\"label cursor-pointer justify-start gap-3\"><input type=\"checkbox\" id=\"new-project-create-dir\" name=\"create_directory\" value=\"true\" class=\"checkbox checkbox-sm checkbox-primary\"> <span class=\"label-text\">Create directory if it doesn't exist</span></label></div><div id=\"new-project-path-preview\" class=\"mb-4 hidden\"><div class=\"text-xs text-base-content/60 bg-base-200 rounded-lg px-3 py-2\"><span class=\"font-medium\">Will create:</span> <code id=\"new-project-path-preview-text\" class=\"ml-1 break-all\"></code></div></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 51, "<div id=\"new-project-local-fields\" class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Repository Path</span></label><div class=\"flex gap-2\"><input type=\"text\" id=\"new-project-repo-path\" name=\"repo_path\" class=\"input input-bordered flex-1\" placeholder=\"/path/to/repo\"> <button type=\"button\" id=\"new-project-browse-btn\" class=\"btn btn-outline btn-sm self-center\">Choose Folder</button></div><label class=\"label\"><span class=\"label-text-alt opacity-70\">Use native folder picker when available. If unavailable, paste an absolute path manually.</span></label><p id=\"new-project-picker-feedback\" class=\"text-xs text-base-content/70 hidden\"></p></div><div id=\"new-project-github-fields\" class=\"form-control mb-3 hidden\"><label class=\"label\"><span class=\"label-text\">GitHub URL</span></label> <input type=\"url\" id=\"new-project-repo-url\" name=\"repo_url\" class=\"input input-bordered\" placeholder=\"https://github.com/owner/repo\"> <label class=\"label\"><span class=\"label-text-alt opacity-60\">The repository is cloned into managed storage using configured GitHub auth or your local git credentials.</span></label></div><div id=\"new-project-create-dir-wrapper\" class=\"form-control mb-2\"><label class=\"label cursor-pointer justify-start gap-3\"><input type=\"checkbox\" id=\"new-project-create-dir\" name=\"create_directory\" value=\"true\" class=\"checkbox checkbox-sm checkbox-primary\"> <span class=\"label-text\">Create directory if it doesn't exist</span></label></div><div id=\"new-project-path-preview\" class=\"mb-4 hidden\"><div class=\"text-xs text-base-content/60 bg-base-200 rounded-lg px-3 py-2\"><span class=\"font-medium\">Will create:</span> <code id=\"new-project-path-preview-text\" class=\"ml-1 break-all\"></code></div></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		} else {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 56, "<div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">GitHub URL</span></label> <input type=\"url\" id=\"new-project-repo-url\" name=\"repo_url\" class=\"input input-bordered\" placeholder=\"https://github.com/owner/repo\" required> <label class=\"label\"><span class=\"label-text-alt opacity-60\">The repository is cloned into managed storage using configured GitHub auth or your local git credentials.</span></label></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 52, "<div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">GitHub URL</span></label> <input type=\"url\" id=\"new-project-repo-url\" name=\"repo_url\" class=\"input input-bordered\" placeholder=\"https://github.com/owner/repo\" required> <label class=\"label\"><span class=\"label-text-alt opacity-60\">The repository is cloned into managed storage using configured GitHub auth or your local git credentials.</span></label></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 57, "<div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Default Model</span> <span class=\"label-text-alt opacity-60\">Used when no model is specified on a task</span></label> <select name=\"default_agent_config_id\" class=\"select select-bordered\"><option value=\"\">Use global default</option> ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 53, "<div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Default Model</span> <span class=\"label-text-alt opacity-60\">Used when no model is specified on a task</span></label> <select name=\"default_agent_config_id\" class=\"select select-bordered\"><option value=\"\">Use global default</option> ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		for _, agent := range agents {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 58, "<option value=\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var20 string
-			templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.ResolveAttributeValue(agent.ID)
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 373, Col: 31}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var20)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 59, "\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 54, "<option value=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var21 string
-			templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.JoinStringErrs(agent.Name)
+			templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.ResolveAttributeValue(agent.ID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 374, Col: 20}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 372, Col: 31}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var21))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var21)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 60, " (")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 55, "\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var22 string
-			templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.JoinStringErrs(string(agent.Provider))
+			templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.JoinStringErrs(agent.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 374, Col: 48}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 373, Col: 20}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var22))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 61, "/")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 56, " (")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var23 string
-			templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.JoinStringErrs(agent.Model)
+			templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.JoinStringErrs(string(agent.Provider))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 374, Col: 64}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 373, Col: 48}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var23))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 62, ") ")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			if agent.IsDefault {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 63, "[global default]")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 64, "</option>")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 65, "</select></div><div class=\"form-control mb-4\"><label class=\"label\"><span class=\"label-text\">Max Concurrent Workers</span> <span class=\"label-text-alt opacity-60\">Limit parallel tasks for this project</span></label> <select name=\"max_workers\" class=\"select select-bordered\"><option value=\"\" selected>No limit (use global)</option> ")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		for _, v := range []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10} {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 66, "<option value=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 57, "/")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var24 string
-			templ_7745c5c3_Var24, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", v))
+			templ_7745c5c3_Var24, templ_7745c5c3_Err = templ.JoinStringErrs(agent.Model)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 390, Col: 43}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 373, Col: 64}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var24)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 67, "\">")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var24))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var25 string
-			templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", v))
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 391, Col: 30}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var25))
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 58, ") ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 68, " ")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			if v == 1 {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 69, "worker")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-			} else {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 70, "workers")
+			if agent.IsDefault {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 59, "[global default]")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 71, "</option>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 60, "</option>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 72, "</select></div><div id=\"new-project-error\" class=\"alert alert-error mb-4 hidden\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"stroke-current shrink-0 h-5 w-5\" fill=\"none\" viewBox=\"0 0 24 24\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z\"></path></svg> <span id=\"new-project-error-text\"></span></div><div class=\"modal-action\"><button type=\"button\" id=\"new-project-cancel-button\" class=\"btn\" onclick=\"new_project_modal.close()\">Cancel</button> <button type=\"submit\" id=\"new-project-create-button\" class=\"btn btn-primary\"><span id=\"new-project-create-progress\" class=\"loading loading-spinner loading-sm htmx-indicator\" aria-hidden=\"true\"></span> <span class=\"new-project-create-label\">Create</span> <span class=\"new-project-create-busy-label hidden\">Cloning repository...</span></button></div></form></div><form method=\"dialog\" class=\"modal-backdrop\"><button>close</button></form></dialog><script>\n\t\t(function() {\n\t\t\tvar modal = document.getElementById('new_project_modal');\n\t\t\tif (modal) modal.showModal();\n\n\t\t\tvar repoPathInput = document.getElementById('new-project-repo-path');\n\t\t\tvar repoURLInput = document.getElementById('new-project-repo-url');\n\t\t\tvar createDirCheckbox = document.getElementById('new-project-create-dir');\n\t\t\tvar createDirWrapper = document.getElementById('new-project-create-dir-wrapper');\n\t\t\tvar pathPreview = document.getElementById('new-project-path-preview');\n\t\t\tvar pathPreviewText = document.getElementById('new-project-path-preview-text');\n\t\t\tvar errorDiv = document.getElementById('new-project-error');\n\t\t\tvar pickerFeedback = document.getElementById('new-project-picker-feedback');\n\t\t\tvar repoSourceSelect = document.getElementById('new-project-repo-source');\n\t\t\tvar localFields = document.getElementById('new-project-local-fields');\n\t\t\tvar githubFields = document.getElementById('new-project-github-fields');\n\t\t\t\tvar browseBtn = document.getElementById('new-project-browse-btn');\n\t\t\t\tvar form = document.getElementById('new-project-form');\n\t\t\t\tvar createButton = document.getElementById('new-project-create-button');\n\t\t\t\tvar cancelButton = document.getElementById('new-project-cancel-button');\n\t\t\t\tvar createLabel = createButton ? createButton.querySelector('.new-project-create-label') : null;\n\t\t\t\tvar createBusyLabel = createButton ? createButton.querySelector('.new-project-create-busy-label') : null;\n\t\t\t\tvar localRepoPathEnabled = !!modal && modal.dataset.localRepoPathEnabled === 'true';\n\n\t\t\t\tfunction setCreateBusy(isBusy) {\n\t\t\t\t\tif (createButton) createButton.disabled = !!isBusy;\n\t\t\t\t\tif (cancelButton) cancelButton.disabled = !!isBusy;\n\t\t\t\t\tif (createLabel) createLabel.classList.toggle('hidden', !!isBusy);\n\t\t\t\t\tif (createBusyLabel) createBusyLabel.classList.toggle('hidden', !isBusy);\n\t\t\t\t}\n\n\t\t\t\tfunction updatePathPreview() {\n\t\t\t\tif (!repoPathInput || !createDirCheckbox || !repoSourceSelect || !pathPreview || !pathPreviewText) return;\n\t\t\t\tvar path = repoPathInput.value.trim();\n\t\t\t\tif (repoSourceSelect.value === 'local' && createDirCheckbox.checked && path) {\n\t\t\t\t\tpathPreviewText.textContent = path;\n\t\t\t\t\tpathPreview.classList.remove('hidden');\n\t\t\t\t} else {\n\t\t\t\t\tpathPreview.classList.add('hidden');\n\t\t\t\t}\n\t\t\t\tif (errorDiv) {\n\t\t\t\t\terrorDiv.classList.add('hidden');\n\t\t\t\t}\n\t\t\t}\n\n\t\t\tfunction updateRepoSourceFields() {\n\t\t\t\tif (!repoSourceSelect || !localFields || !githubFields) return;\n\t\t\t\tvar source = repoSourceSelect.value === 'github' ? 'github' : 'local';\n\t\t\t\tlocalFields.classList.toggle('hidden', source !== 'local');\n\t\t\t\tgithubFields.classList.toggle('hidden', source !== 'github');\n\t\t\t\tif (createDirWrapper) {\n\t\t\t\t\tcreateDirWrapper.classList.toggle('hidden', source !== 'local');\n\t\t\t\t}\n\t\t\t\tif (repoPathInput) {\n\t\t\t\t\trepoPathInput.required = (source === 'local');\n\t\t\t\t}\n\t\t\t\tif (repoURLInput) repoURLInput.required = (source === 'github');\n\t\t\t\tif (createDirCheckbox && source !== 'local') {\n\t\t\t\t\tcreateDirCheckbox.checked = false;\n\t\t\t\t}\n\t\t\t\tupdatePathPreview();\n\t\t\t}\n\n\t\t\tfunction isAbsolutePath(pathValue) {\n\t\t\t\treturn !!pathValue && (pathValue.startsWith('/') || pathValue.startsWith('~/') || pathValue.startsWith('~\\\\') || /^[a-zA-Z]:[\\\\/]/.test(pathValue) || pathValue.startsWith('\\\\\\\\'));\n\t\t\t}\n\n\t\t\tfunction applySelectedDirectoryPath(selectedPath) {\n\t\t\t\tif (!repoPathInput || !isAbsolutePath(selectedPath)) return;\n\t\t\t\trepoPathInput.value = selectedPath;\n\t\t\t\trepoPathInput.dispatchEvent(new Event('input', { bubbles: true }));\n\t\t\t}\n\n\t\t\tfunction setPickerFeedback(message, isError) {\n\t\t\t\tif (!pickerFeedback) return;\n\t\t\t\tpickerFeedback.textContent = message || '';\n\t\t\t\tpickerFeedback.classList.remove('hidden');\n\t\t\t\tpickerFeedback.classList.toggle('text-error', !!isError);\n\t\t\t}\n\n\t\t\tasync function chooseDirectoryNative() {\n\t\t\t\tif (!browseBtn || !localRepoPathEnabled) return;\n\t\t\t\tbrowseBtn.disabled = true;\n\t\t\t\ttry {\n\t\t\t\t\tvar response = await fetch('/projects/pick-folder', {\n\t\t\t\t\t\tmethod: 'POST',\n\t\t\t\t\t\theaders: {\n\t\t\t\t\t\t\t'HX-Request': 'true'\n\t\t\t\t\t\t}\n\t\t\t\t\t});\n\t\t\t\t\tvar payload = {};\n\t\t\t\t\ttry {\n\t\t\t\t\t\tpayload = await response.json();\n\t\t\t\t\t} catch (err) {\n\t\t\t\t\t\tpayload = {};\n\t\t\t\t\t}\n\n\t\t\t\t\tif (response.status === 501) {\n\t\t\t\t\t\tvar unavailableMessage = payload && payload.error ? payload.error : 'Native folder picker is unavailable on this system. Paste an absolute path manually.';\n\t\t\t\t\t\tsetPickerFeedback(unavailableMessage, true);\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\tif (response.status === 403) {\n\t\t\t\t\t\tsetPickerFeedback('Local repository path mode is disabled in this environment.', true);\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\tif (!response.ok) {\n\t\t\t\t\t\tvar message = payload && payload.message ? payload.message : 'Unable to open folder picker. Paste an absolute path manually.';\n\t\t\t\t\t\tsetPickerFeedback(message, true);\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\tif (!payload.selected) {\n\t\t\t\t\t\tsetPickerFeedback('No folder selected. You can paste an absolute path manually.', false);\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\tif (!isAbsolutePath(payload.path)) {\n\t\t\t\t\t\tsetPickerFeedback('Folder picker returned a non-absolute path. Paste an absolute path manually.', true);\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\tapplySelectedDirectoryPath(payload.path);\n\t\t\t\t\tsetPickerFeedback('Folder selected from native picker.', false);\n\t\t\t\t} catch (err) {\n\t\t\t\t\tsetPickerFeedback('Native folder picker is unavailable. Paste an absolute path manually.', true);\n\t\t\t\t} finally {\n\t\t\t\t\tbrowseBtn.disabled = false;\n\t\t\t\t}\n\t\t\t}\n\n\t\t\tif (repoPathInput) {\n\t\t\t\trepoPathInput.addEventListener('input', updatePathPreview);\n\t\t\t}\n\t\t\tif (createDirCheckbox) {\n\t\t\t\tcreateDirCheckbox.addEventListener('change', updatePathPreview);\n\t\t\t}\n\t\t\tif (browseBtn && localRepoPathEnabled) {\n\t\t\t\tbrowseBtn.addEventListener('click', function() {\n\t\t\t\t\tchooseDirectoryNative();\n\t\t\t\t});\n\t\t\t}\n\t\t\t\tif (repoSourceSelect && localRepoPathEnabled) {\n\t\t\t\t\trepoSourceSelect.addEventListener('change', updateRepoSourceFields);\n\t\t\t\t\tupdateRepoSourceFields();\n\t\t\t\t}\n\t\t\t\tif (form) {\n\t\t\t\t\tform.addEventListener('htmx:beforeRequest', function() {\n\t\t\t\t\t\tsetCreateBusy(true);\n\t\t\t\t\t});\n\t\t\t\t\tform.addEventListener('htmx:afterRequest', function() {\n\t\t\t\t\t\tsetCreateBusy(false);\n\t\t\t\t\t});\n\t\t\t\t\tform.addEventListener('htmx:sendError', function() {\n\t\t\t\t\t\tsetCreateBusy(false);\n\t\t\t\t\t});\n\t\t\t\t\tform.addEventListener('htmx:abort', function() {\n\t\t\t\t\t\tsetCreateBusy(false);\n\t\t\t\t\t});\n\t\t\t\t}\n\n\t\t\t\tif (modal) {\n\t\t\t\tmodal.addEventListener('close', function() {\n\t\t\t\t\tvar form = document.getElementById('new-project-form');\n\t\t\t\t\tif (form) form.reset();\n\t\t\t\t\tif (errorDiv) errorDiv.classList.add('hidden');\n\t\t\t\t\tif (pathPreview) pathPreview.classList.add('hidden');\n\t\t\t\t\tif (pickerFeedback) pickerFeedback.classList.add('hidden');\n\t\t\t\t\tif (repoSourceSelect && localRepoPathEnabled) {\n\t\t\t\t\t\tupdateRepoSourceFields();\n\t\t\t\t\t}\n\t\t\t\t});\n\t\t\t}\n\t\t})();\n\t</script>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 61, "</select></div><div class=\"form-control mb-4\"><label class=\"label\"><span class=\"label-text\">Max Concurrent Workers</span> <span class=\"label-text-alt opacity-60\">Positive values up to the current global limit; leave blank to inherit</span></label> <input type=\"number\" name=\"max_workers\" value=\"\" min=\"0\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		if globalMaxWorkers > 0 {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 62, " max=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var25 string
+			templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", globalMaxWorkers))
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 392, Col: 48}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var25)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 63, "\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 64, " step=\"1\" placeholder=\"No limit\" class=\"input input-bordered\" title=\"0 or blank = inherit the global worker limit\"></div><div id=\"new-project-error\" class=\"alert alert-error mb-4 hidden\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"stroke-current shrink-0 h-5 w-5\" fill=\"none\" viewBox=\"0 0 24 24\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z\"></path></svg> <span id=\"new-project-error-text\"></span></div><div class=\"modal-action\"><button type=\"button\" id=\"new-project-cancel-button\" class=\"btn\" onclick=\"new_project_modal.close()\">Cancel</button> <button type=\"submit\" id=\"new-project-create-button\" class=\"btn btn-primary\"><span id=\"new-project-create-progress\" class=\"loading loading-spinner loading-sm htmx-indicator\" aria-hidden=\"true\"></span> <span class=\"new-project-create-label\">Create</span> <span class=\"new-project-create-busy-label hidden\">Cloning repository...</span></button></div></form></div><form method=\"dialog\" class=\"modal-backdrop\"><button>close</button></form></dialog><script>\n\t\t(function() {\n\t\t\tvar modal = document.getElementById('new_project_modal');\n\t\t\tif (modal) modal.showModal();\n\n\t\t\tvar repoPathInput = document.getElementById('new-project-repo-path');\n\t\t\tvar repoURLInput = document.getElementById('new-project-repo-url');\n\t\t\tvar createDirCheckbox = document.getElementById('new-project-create-dir');\n\t\t\tvar createDirWrapper = document.getElementById('new-project-create-dir-wrapper');\n\t\t\tvar pathPreview = document.getElementById('new-project-path-preview');\n\t\t\tvar pathPreviewText = document.getElementById('new-project-path-preview-text');\n\t\t\tvar errorDiv = document.getElementById('new-project-error');\n\t\t\tvar pickerFeedback = document.getElementById('new-project-picker-feedback');\n\t\t\tvar repoSourceSelect = document.getElementById('new-project-repo-source');\n\t\t\tvar localFields = document.getElementById('new-project-local-fields');\n\t\t\tvar githubFields = document.getElementById('new-project-github-fields');\n\t\t\t\tvar browseBtn = document.getElementById('new-project-browse-btn');\n\t\t\t\tvar form = document.getElementById('new-project-form');\n\t\t\t\tvar createButton = document.getElementById('new-project-create-button');\n\t\t\t\tvar cancelButton = document.getElementById('new-project-cancel-button');\n\t\t\t\tvar createLabel = createButton ? createButton.querySelector('.new-project-create-label') : null;\n\t\t\t\tvar createBusyLabel = createButton ? createButton.querySelector('.new-project-create-busy-label') : null;\n\t\t\t\tvar localRepoPathEnabled = !!modal && modal.dataset.localRepoPathEnabled === 'true';\n\n\t\t\t\tfunction setCreateBusy(isBusy) {\n\t\t\t\t\tif (createButton) createButton.disabled = !!isBusy;\n\t\t\t\t\tif (cancelButton) cancelButton.disabled = !!isBusy;\n\t\t\t\t\tif (createLabel) createLabel.classList.toggle('hidden', !!isBusy);\n\t\t\t\t\tif (createBusyLabel) createBusyLabel.classList.toggle('hidden', !isBusy);\n\t\t\t\t}\n\n\t\t\t\tfunction updatePathPreview() {\n\t\t\t\tif (!repoPathInput || !createDirCheckbox || !repoSourceSelect || !pathPreview || !pathPreviewText) return;\n\t\t\t\tvar path = repoPathInput.value.trim();\n\t\t\t\tif (repoSourceSelect.value === 'local' && createDirCheckbox.checked && path) {\n\t\t\t\t\tpathPreviewText.textContent = path;\n\t\t\t\t\tpathPreview.classList.remove('hidden');\n\t\t\t\t} else {\n\t\t\t\t\tpathPreview.classList.add('hidden');\n\t\t\t\t}\n\t\t\t\tif (errorDiv) {\n\t\t\t\t\terrorDiv.classList.add('hidden');\n\t\t\t\t}\n\t\t\t}\n\n\t\t\tfunction updateRepoSourceFields() {\n\t\t\t\tif (!repoSourceSelect || !localFields || !githubFields) return;\n\t\t\t\tvar source = repoSourceSelect.value === 'github' ? 'github' : 'local';\n\t\t\t\tlocalFields.classList.toggle('hidden', source !== 'local');\n\t\t\t\tgithubFields.classList.toggle('hidden', source !== 'github');\n\t\t\t\tif (createDirWrapper) {\n\t\t\t\t\tcreateDirWrapper.classList.toggle('hidden', source !== 'local');\n\t\t\t\t}\n\t\t\t\tif (repoPathInput) {\n\t\t\t\t\trepoPathInput.required = (source === 'local');\n\t\t\t\t}\n\t\t\t\tif (repoURLInput) repoURLInput.required = (source === 'github');\n\t\t\t\tif (createDirCheckbox && source !== 'local') {\n\t\t\t\t\tcreateDirCheckbox.checked = false;\n\t\t\t\t}\n\t\t\t\tupdatePathPreview();\n\t\t\t}\n\n\t\t\tfunction isAbsolutePath(pathValue) {\n\t\t\t\treturn !!pathValue && (pathValue.startsWith('/') || pathValue.startsWith('~/') || pathValue.startsWith('~\\\\') || /^[a-zA-Z]:[\\\\/]/.test(pathValue) || pathValue.startsWith('\\\\\\\\'));\n\t\t\t}\n\n\t\t\tfunction applySelectedDirectoryPath(selectedPath) {\n\t\t\t\tif (!repoPathInput || !isAbsolutePath(selectedPath)) return;\n\t\t\t\trepoPathInput.value = selectedPath;\n\t\t\t\trepoPathInput.dispatchEvent(new Event('input', { bubbles: true }));\n\t\t\t}\n\n\t\t\tfunction setPickerFeedback(message, isError) {\n\t\t\t\tif (!pickerFeedback) return;\n\t\t\t\tpickerFeedback.textContent = message || '';\n\t\t\t\tpickerFeedback.classList.remove('hidden');\n\t\t\t\tpickerFeedback.classList.toggle('text-error', !!isError);\n\t\t\t}\n\n\t\t\tasync function chooseDirectoryNative() {\n\t\t\t\tif (!browseBtn || !localRepoPathEnabled) return;\n\t\t\t\tbrowseBtn.disabled = true;\n\t\t\t\ttry {\n\t\t\t\t\tvar response = await fetch('/projects/pick-folder', {\n\t\t\t\t\t\tmethod: 'POST',\n\t\t\t\t\t\theaders: {\n\t\t\t\t\t\t\t'HX-Request': 'true'\n\t\t\t\t\t\t}\n\t\t\t\t\t});\n\t\t\t\t\tvar payload = {};\n\t\t\t\t\ttry {\n\t\t\t\t\t\tpayload = await response.json();\n\t\t\t\t\t} catch (err) {\n\t\t\t\t\t\tpayload = {};\n\t\t\t\t\t}\n\n\t\t\t\t\tif (response.status === 501) {\n\t\t\t\t\t\tvar unavailableMessage = payload && payload.error ? payload.error : 'Native folder picker is unavailable on this system. Paste an absolute path manually.';\n\t\t\t\t\t\tsetPickerFeedback(unavailableMessage, true);\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\tif (response.status === 403) {\n\t\t\t\t\t\tsetPickerFeedback('Local repository path mode is disabled in this environment.', true);\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\tif (!response.ok) {\n\t\t\t\t\t\tvar message = payload && payload.message ? payload.message : 'Unable to open folder picker. Paste an absolute path manually.';\n\t\t\t\t\t\tsetPickerFeedback(message, true);\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\tif (!payload.selected) {\n\t\t\t\t\t\tsetPickerFeedback('No folder selected. You can paste an absolute path manually.', false);\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\tif (!isAbsolutePath(payload.path)) {\n\t\t\t\t\t\tsetPickerFeedback('Folder picker returned a non-absolute path. Paste an absolute path manually.', true);\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\tapplySelectedDirectoryPath(payload.path);\n\t\t\t\t\tsetPickerFeedback('Folder selected from native picker.', false);\n\t\t\t\t} catch (err) {\n\t\t\t\t\tsetPickerFeedback('Native folder picker is unavailable. Paste an absolute path manually.', true);\n\t\t\t\t} finally {\n\t\t\t\t\tbrowseBtn.disabled = false;\n\t\t\t\t}\n\t\t\t}\n\n\t\t\tif (repoPathInput) {\n\t\t\t\trepoPathInput.addEventListener('input', updatePathPreview);\n\t\t\t}\n\t\t\tif (createDirCheckbox) {\n\t\t\t\tcreateDirCheckbox.addEventListener('change', updatePathPreview);\n\t\t\t}\n\t\t\tif (browseBtn && localRepoPathEnabled) {\n\t\t\t\tbrowseBtn.addEventListener('click', function() {\n\t\t\t\t\tchooseDirectoryNative();\n\t\t\t\t});\n\t\t\t}\n\t\t\t\tif (repoSourceSelect && localRepoPathEnabled) {\n\t\t\t\t\trepoSourceSelect.addEventListener('change', updateRepoSourceFields);\n\t\t\t\t\tupdateRepoSourceFields();\n\t\t\t\t}\n\t\t\t\tif (form) {\n\t\t\t\t\tform.addEventListener('htmx:beforeRequest', function() {\n\t\t\t\t\t\tsetCreateBusy(true);\n\t\t\t\t\t});\n\t\t\t\t\tform.addEventListener('htmx:afterRequest', function() {\n\t\t\t\t\t\tsetCreateBusy(false);\n\t\t\t\t\t});\n\t\t\t\t\tform.addEventListener('htmx:sendError', function() {\n\t\t\t\t\t\tsetCreateBusy(false);\n\t\t\t\t\t});\n\t\t\t\t\tform.addEventListener('htmx:abort', function() {\n\t\t\t\t\t\tsetCreateBusy(false);\n\t\t\t\t\t});\n\t\t\t\t}\n\n\t\t\t\tif (modal) {\n\t\t\t\tmodal.addEventListener('close', function() {\n\t\t\t\t\tvar form = document.getElementById('new-project-form');\n\t\t\t\t\tif (form) form.reset();\n\t\t\t\t\tif (errorDiv) errorDiv.classList.add('hidden');\n\t\t\t\t\tif (pathPreview) pathPreview.classList.add('hidden');\n\t\t\t\t\tif (pickerFeedback) pickerFeedback.classList.add('hidden');\n\t\t\t\t\tif (repoSourceSelect && localRepoPathEnabled) {\n\t\t\t\t\t\tupdateRepoSourceFields();\n\t\t\t\t\t}\n\t\t\t\t});\n\t\t\t}\n\t\t})();\n\t</script>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

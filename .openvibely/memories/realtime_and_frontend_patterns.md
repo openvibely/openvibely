@@ -2,9 +2,9 @@
 name: realtime_and_frontend_patterns
 type: project
 created: 2026-05-09
-updated: 2026-09-03
-source: consolidation
-source_id: memory_consolidation_2026-09-03
+updated: 2026-09-05
+source: after_complete
+source_id: 5c74fe91144a0f84866bf7d8ad82be85
 confidence: high
 title: Realtime and Frontend Patterns
 ---
@@ -38,7 +38,10 @@ Shared composer and navigation:
 
 Cards, pagination, and responsive behavior:
 - Card lists use `data-card-search` and `window.refreshCardSearches`. URL search seeds only initial render. Refreshes carry bounded `card_window`, preserve search/window/anchor/focus, and continue from explicit rendered offset. Fixed injected cards can participate in replacement focus/anchor snapshots without affecting page counts, offsets, appends, or deduplication. Pagination completion is silent: hide sentinel/status when `hasMore=false` and retain transient loading/error/retry hooks without an end marker.
-- HTMX/root replacement aborts requests, clears timers/observers/listeners, and snapshots/restores search, viewport, anchor, and focus. Focus restoration rejects hidden/inert/disabled/aria-disabled targets, avoids reopening menus, and falls back to a visible adjacent card or search input. Channels includes fixed provider/Outbound Target cards in root replacement while webhook pagination remains scoped to `#webhook-card-list`.
+- Shared collection-card toolbars use a checkbox master control for currently loaded eligible cards rather than a text `Select loaded` action. The master reflects checked/indeterminate state, query changes clear selection, and fixed ineligible cards receive disabled checkboxes with accessible explanations while eligible dynamic cards remain selectable. Selection mode keeps the master checkbox and search mounted, replacing only Filters/Sort with contextual actions; unchecking the master clears selection and restores those query controls. Filter popovers use explicit `aria-expanded` and class-driven state, so a second trigger click, outside click, or Escape dismisses them; injected selection gutters are title-aligned and reinitialized after HTMX swaps.
+- Shared card-root refreshes through `refreshCollection()` now reinitialize the replacement toolbar inside `replaceSearchableCardContainer()` after manual `outerHTML` replacement and search/HTMX setup. This preserves the master checkbox, filter trigger, and bulk-action handlers for Alerts and other collection-card pages; production Chromium coverage exercises a successful bulk mutation followed by replacement master-checkbox selection/clearing and Filters interaction.
+- HTMX/root replacement aborts requests, clears timers/observers/listeners, and snapshots/restores search, viewport, anchor, and focus. Focus restoration rejects hidden/inert/disabled/aria-disabled targets, avoids reopening menus, and falls back to a visible adjacent card or search input. Channels keeps fixed provider/Outbound Target cards in the root while webhook pagination remains scoped to `#webhook-card-list`; configured GitHub, Slack, Telegram, Discord, X, and Email cards are eligible for shared selection/removal, while Outbound Target cards remain ineligible. Bulk removal submits all selected provider and webhook IDs to one `/channels/bulk` request; server-side preflight and the atomic transaction prevent partial deletion, and the UI refreshes authoritative state only after success.
+- Channels preserves `data-search-card` on its `data-search-empty-state` placeholder so search behavior remains correct, while shared selection initialization excludes `[data-search-empty-state]` from card-control injection. The empty “No channels added yet” state therefore receives no checkbox or selection padding; production Chromium coverage exercises the real empty fragment alongside ordinary mixed-card behavior.
 - Sidebar collapse and Ctrl/Cmd+B use one helper for DOM/accessibility state, localStorage mirror, and background `/ui/preferences` persistence. Full documents embed early state; fragments do not fetch preferences. Sidebar selection is hover-only, not DaisyUI `.active`.
 - Clipboard uses `window.openVibelyCopyText`; toasts use `openvibelyToast`, account for native-dialog top layers/mobile insets, and deduplicate Automation-start notices by neutral `toast_key`. Worktree success paths preserve unrelated HTMX trigger keys.
 - Destructive deletes use one accessible DaisyUI `<dialog>` pattern. Task-board Delete All is page-scoped with allowlisted category/project inputs, duplicate-submit protection, retry, and authoritative refresh. Cancel/Escape restore the invoker or visible kebab; confirmed deletion deliberately suppresses invoker restoration so a closing dialog cannot reopen a menu.

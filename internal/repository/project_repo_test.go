@@ -341,6 +341,38 @@ func TestProjectRepo_List_IncludesMaxWorkers(t *testing.T) {
 	}
 }
 
+func TestProjectRepo_MaxWorkersAllowsHighValuesAndRejectsNegative(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewProjectRepo(db)
+	ctx := context.Background()
+
+	high := 100
+	project := &models.Project{Name: "High Limit", MaxWorkers: &high}
+	if err := repo.Create(ctx, project); err != nil {
+		t.Fatalf("Create high-limit project: %v", err)
+	}
+	got, err := repo.GetByID(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("GetByID high-limit project: %v", err)
+	}
+	if got.MaxWorkers == nil || *got.MaxWorkers != high {
+		t.Fatalf("high project MaxWorkers = %v, want %d", got.MaxWorkers, high)
+	}
+
+	negative := -1
+	project.MaxWorkers = &negative
+	if err := repo.Update(ctx, project); err == nil {
+		t.Fatal("Update with negative project limit succeeded")
+	}
+	got, err = repo.GetByID(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("GetByID after rejected update: %v", err)
+	}
+	if got.MaxWorkers == nil || *got.MaxWorkers != high {
+		t.Fatalf("rejected negative update changed MaxWorkers to %v", got.MaxWorkers)
+	}
+}
+
 func TestProjectRepo_DefaultAgentFKConstraint(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	projectRepo := NewProjectRepo(db)

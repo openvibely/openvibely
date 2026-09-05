@@ -792,6 +792,7 @@ func (s *DiscordService) discordActionHandlersForTask(projectID, callerTaskID st
 		CreateProject: CreateGitHubProjectRuntimeOptions{
 			ProjectSvc:                 s.projectSvc,
 			GitHubSvc:                  s.githubProjectSvc,
+			WorkerSvc:                  s.workerSvc,
 			MemorySvc:                  s.memorySvc,
 			AgentLibraryMaintenanceSvc: s.agentLibraryMaintenanceSvc,
 		},

@@ -104,8 +104,13 @@ Projects may still provide root instruction files such as `AGENTS.md` or `CLAUDE
 
 `Max Concurrent Workers` limits parallel task execution for this project only.
 
-- Empty (`No limit`): project uses global worker capacity rules.
-- Set value (for example `2`): this project can run up to that many tasks concurrently.
+- Empty or `0` (`No limit`): the project inherits the global worker capacity rules.
+- A positive value: this project can run up to that many tasks concurrently, provided the value does not exceed the current finite global limit.
+- With an unlimited global limit (`0`), any positive project value is valid; there is no product-level maximum.
+
+Project limits are independent caps, not a sum that must fit inside the global limit. The runtime enforces the global limit using actual concurrent reservations, so multiple projects may each have a cap equal to the global limit without reducing one another's configured values.
+
+Lowering the global limit does not cancel running work. Existing project caps that are now above the global limit are retained for safe runtime behavior and marked `Exceeds global` in Workers; lower those caps before saving a new finite project limit. New admissions remain blocked whenever actual global usage has reached the lowered ceiling.
 
 Use this to keep one project from consuming all worker slots.
 
