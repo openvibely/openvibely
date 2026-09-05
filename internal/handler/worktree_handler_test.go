@@ -292,7 +292,7 @@ func TestHandler_TaskCardMergeMenuStatesUseConstantDatabaseQueriesForNonMergeabl
 	}
 }
 
-func TestHandler_TaskBoardSkipsLocalRecoveryForNonMergeableCards(t *testing.T) {
+func TestHandler_TaskBoardRecoversMetadataWithoutLocalEligibilityForNonMergeableCards(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
 	h.taskPullRequestRepo = repository.NewTaskPullRequestRepo(db)
 	ctx := context.Background()
@@ -336,14 +336,14 @@ func TestHandler_TaskBoardSkipsLocalRecoveryForNonMergeableCards(t *testing.T) {
 		t.Fatal(err)
 	}
 	if pendingAfter.WorktreePath != "" || pendingAfter.WorktreeBranch != "" {
-		t.Fatalf("non-mergeable card performed worktree recovery: path=%q branch=%q", pendingAfter.WorktreePath, pendingAfter.WorktreeBranch)
+		t.Fatalf("board render persisted pending recovery metadata: path=%q branch=%q", pendingAfter.WorktreePath, pendingAfter.WorktreeBranch)
 	}
 	completedAfter, err := h.taskRepo.GetByID(ctx, completed.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if completedAfter.WorktreePath == "" || completedAfter.WorktreeBranch == "" {
-		t.Fatalf("mergeable card skipped authoritative worktree recovery: %#v", completedAfter)
+	if completedAfter.WorktreePath != "" || completedAfter.WorktreeBranch != "" {
+		t.Fatalf("board render persisted completed recovery metadata: %#v", completedAfter)
 	}
 	states := h.taskCardMergeMenuStates(ctx, []models.Task{*pendingAfter, *completedAfter}, project.ID)
 	if states[pending.ID].LocalEligible {
@@ -351,6 +351,144 @@ func TestHandler_TaskBoardSkipsLocalRecoveryForNonMergeableCards(t *testing.T) {
 	}
 	if !states[completed.ID].LocalEligible {
 		t.Fatalf("completed card lost authoritative Local actions: %#v", states[completed.ID])
+	}
+}
+
+func TestHandler_TaskBoardBatchesTerminalCardGitState(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	h.taskPullRequestRepo = repository.NewTaskPullRequestRepo(db)
+	ctx := context.Background()
+	repoDir := createHandlerTestGitRepo(t)
+	project := &models.Project{Name: "Terminal Git Budget", RepoPath: repoDir, IsDefault: true}
+	if err := h.projectSvc.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+
+	const taskCount = 8
+	for i := 0; i < taskCount; i++ {
+		branch := fmt.Sprintf("task/terminal-%02d", i)
+		runGit(t, repoDir, "checkout", "-b", branch)
+		if err := os.WriteFile(filepath.Join(repoDir, fmt.Sprintf("terminal-%02d.txt", i)), []byte("task\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		runGit(t, repoDir, "add", ".")
+		runGit(t, repoDir, "commit", "-m", fmt.Sprintf("terminal %02d", i))
+		runGit(t, repoDir, "checkout", "main")
+		task := &models.Task{
+			ProjectID: project.ID, Title: fmt.Sprintf("Terminal %02d", i), Prompt: "test", Category: models.CategoryCompleted,
+			Status: models.StatusCompleted, WorktreeBranch: branch, MergeTargetBranch: "main", MergeStatus: models.MergeStatusPending,
+		}
+		if err := h.taskRepo.Create(ctx, task); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrapperDir := t.TempDir()
+	logPath := filepath.Join(wrapperDir, "git.log")
+	wrapperPath := filepath.Join(wrapperDir, "git")
+	wrapper := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$OPENVIBELY_GIT_LOG\"\nexec \"$OPENVIBELY_REAL_GIT\" \"$@\"\n"
+	if err := os.WriteFile(wrapperPath, []byte(wrapper), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("OPENVIBELY_GIT_LOG", logPath)
+	t.Setenv("OPENVIBELY_REAL_GIT", realGit)
+	t.Setenv("PATH", wrapperDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	req := httptest.NewRequest(http.MethodGet, "/tasks?project_id="+project.ID, nil)
+	req.Header.Set("HX-Request", "true")
+	req.Header.Set("HX-Target", "kanban-board")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("tasks refresh status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for i := 0; i < taskCount; i++ {
+		if !strings.Contains(body, fmt.Sprintf("Terminal %02d", i)) {
+			t.Fatalf("terminal card %d missing from board refresh", i)
+		}
+	}
+	enabledMergeActions := 0
+	for searchFrom := 0; ; {
+		markerIndex := strings.Index(body[searchFrom:], `data-merge-type="merge"`)
+		if markerIndex < 0 {
+			break
+		}
+		markerIndex += searchFrom
+		buttonIndex := strings.LastIndex(body[:markerIndex], "<button")
+		if buttonIndex >= 0 && !strings.Contains(body[buttonIndex:markerIndex], " disabled") {
+			enabledMergeActions++
+		}
+		searchFrom = markerIndex + 1
+	}
+	if enabledMergeActions != taskCount {
+		t.Fatalf("enabled terminal merge actions=%d, want %d", enabledMergeActions, taskCount)
+	}
+	logData, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	invocations := len(strings.FieldsFunc(strings.TrimSpace(string(logData)), func(r rune) bool { return r == '\n' }))
+	if invocations > 6 {
+		t.Fatalf("%d terminal cards executed %d git commands, want one batched repository snapshot; commands:\n%s", taskCount, invocations, logData)
+	}
+}
+
+func TestHandler_TaskBoardRecoversPendingAndBlockedBranchesForCreatePR(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	h.taskPullRequestRepo = repository.NewTaskPullRequestRepo(db)
+	h.SetGitHubService(&fakeGitHubService{})
+	ctx := context.Background()
+	repoDir := createHandlerTestGitRepo(t)
+	project := &models.Project{Name: "PR Recovery", RepoPath: repoDir, IsDefault: true}
+	if err := h.projectSvc.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+
+	var tasks []*models.Task
+	for _, status := range []models.TaskStatus{models.StatusPending, models.StatusBlocked} {
+		task := &models.Task{
+			ProjectID: project.ID, Title: "Recover " + string(status), Prompt: "test", Category: models.CategoryBacklog,
+			Status: status, MergeTargetBranch: "main", MergeStatus: models.MergeStatusPending,
+		}
+		if err := h.taskRepo.Create(ctx, task); err != nil {
+			t.Fatal(err)
+		}
+		branch := expectedTaskBranchName(task)
+		worktreePath := filepath.Join(repoDir, ".worktrees", "task_"+task.ID)
+		runGit(t, repoDir, "worktree", "add", "-b", branch, worktreePath, "main")
+		tasks = append(tasks, task)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/tasks?project_id="+project.ID, nil)
+	req.Header.Set("HX-Request", "true")
+	req.Header.Set("HX-Target", "kanban-board")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("tasks refresh status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	for _, task := range tasks {
+		updated, err := h.taskRepo.GetByID(ctx, task.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if updated.WorktreePath != "" || updated.WorktreeBranch != "" {
+			t.Fatalf("%s card persisted request-local recovery metadata: %#v", task.Status, updated)
+		}
+		marker := `data-task-id="` + task.ID + `" data-project-id="` + project.ID + `" data-target-branch="main" data-merge-type="pr"`
+		markerIndex := strings.Index(rec.Body.String(), marker)
+		if markerIndex < 0 {
+			t.Fatalf("%s card missing Create PR action", task.Status)
+		}
+		buttonIndex := strings.LastIndex(rec.Body.String()[:markerIndex], "<button")
+		if buttonIndex < 0 || strings.Contains(rec.Body.String()[buttonIndex:markerIndex], " disabled") {
+			t.Fatalf("%s card disabled Create PR after conventional worktree recovery", task.Status)
+		}
 	}
 }
 
