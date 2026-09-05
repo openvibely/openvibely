@@ -30,14 +30,13 @@ func newAlertBenchDB(tb testing.TB) *sql.DB {
 // alertBenchFixture describes the production-shaped population used by the
 // project-scoped alert ordering benchmarks and query-plan assertions.
 const (
-	alertBenchTargetProjectID  = "bench-target-project"
-	alertBenchTargetRows       = 3000 // older alerts owned by the target project
-	alertBenchOtherProjects    = 99   // additional projects
-	alertBenchRowsPerOther     = 3000 // newer alerts each other project owns
-	alertBenchTotalOtherRows   = alertBenchOtherProjects * alertBenchRowsPerOther
-	alertBenchTotalRows        = alertBenchTargetRows + alertBenchTotalOtherRows // 300,000
-	alertBenchIndexComposite   = "idx_alerts_project_created"
-	alertBenchIndexProjectOnly = "idx_alerts_project_id"
+	alertBenchTargetProjectID = "bench-target-project"
+	alertBenchTargetRows      = 3000 // older alerts owned by the target project
+	alertBenchOtherProjects   = 99   // additional projects
+	alertBenchRowsPerOther    = 3000 // newer alerts each other project owns
+	alertBenchTotalOtherRows  = alertBenchOtherProjects * alertBenchRowsPerOther
+	alertBenchTotalRows       = alertBenchTargetRows + alertBenchTotalOtherRows // 300,000
+	alertBenchIndexComposite  = "idx_alerts_project_created"
 )
 
 // seedAlertBenchFixture populates a fully migrated in-memory database with more
@@ -115,30 +114,6 @@ func seedAlertBenchFixture(tb testing.TB, db *sql.DB) {
 	}
 }
 
-// setAlertBenchIndexes configures the alerts table to either the pre-migration
-// baseline (narrow project-only index, no composite ordering index) or the
-// migration-135 candidate (composite project+order index, no redundant
-// project-only index). Both share the identical seeded rows.
-func setAlertBenchIndexes(tb testing.TB, db *sql.DB, candidate bool) {
-	tb.Helper()
-	if candidate {
-		if _, err := db.Exec(`DROP INDEX IF EXISTS ` + alertBenchIndexProjectOnly); err != nil {
-			tb.Fatalf("drop project-only index: %v", err)
-		}
-		if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS ` + alertBenchIndexComposite +
-			` ON alerts(project_id, created_at DESC, id DESC)`); err != nil {
-			tb.Fatalf("create composite index: %v", err)
-		}
-		return
-	}
-	if _, err := db.Exec(`DROP INDEX IF EXISTS ` + alertBenchIndexComposite); err != nil {
-		tb.Fatalf("drop composite index: %v", err)
-	}
-	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS ` + alertBenchIndexProjectOnly + ` ON alerts(project_id)`); err != nil {
-		tb.Fatalf("create project-only index: %v", err)
-	}
-}
-
 func alertBenchExplain(tb testing.TB, db *sql.DB, query string, args ...any) string {
 	tb.Helper()
 	rows, err := db.Query("EXPLAIN QUERY PLAN "+query, args...)
@@ -175,21 +150,12 @@ func TestAlertListFilteredNewest100UsesProjectOrderIndex(t *testing.T) {
 
 	productionQuery := `SELECT ` + alertSelectColumns + ` FROM alerts WHERE project_id = ? ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`
 
-	// Baseline (project-only index) builds a temporary sort.
-	setAlertBenchIndexes(t, db, false)
-	baseline := alertBenchExplain(t, db, productionQuery, alertBenchTargetProjectID, 100, 0)
-	if !strings.Contains(baseline, "USE TEMP B-TREE FOR ORDER BY") {
-		t.Fatalf("baseline plan = %s, want temporary sort", baseline)
+	plan := alertBenchExplain(t, db, productionQuery, alertBenchTargetProjectID, 100, 0)
+	if !strings.Contains(plan, alertBenchIndexComposite) {
+		t.Fatalf("plan = %s, want composite index", plan)
 	}
-
-	// Candidate (composite project+order index) removes the temporary sort.
-	setAlertBenchIndexes(t, db, true)
-	candidate := alertBenchExplain(t, db, productionQuery, alertBenchTargetProjectID, 100, 0)
-	if !strings.Contains(candidate, alertBenchIndexComposite) {
-		t.Fatalf("candidate plan = %s, want composite index", candidate)
-	}
-	if strings.Contains(candidate, "USE TEMP B-TREE FOR ORDER BY") {
-		t.Fatalf("candidate plan = %s, want no temporary sort", candidate)
+	if strings.Contains(plan, "USE TEMP B-TREE FOR ORDER BY") {
+		t.Fatalf("plan = %s, want no temporary sort", plan)
 	}
 
 	// Ordering, pagination, and project scoping must be preserved.
@@ -234,9 +200,7 @@ func TestAlertListFilteredNewest100UsesProjectOrderIndex(t *testing.T) {
 }
 
 // BenchmarkAlertListFilteredNewest100 measures the newest-100 project-scoped
-// ListFiltered latency, allocations, and per-iteration median for the baseline
-// (project-only index) and candidate (composite project+order index) shapes over
-// an identical 300,000-row fixture. Run with:
+// ListFiltered latency, allocations, and per-iteration median. Run with:
 //
 //	go test ./internal/repository -run '^$' -bench BenchmarkAlertListFilteredNewest100 -benchmem -count=10
 //
@@ -249,95 +213,74 @@ func BenchmarkAlertListFilteredNewest100(b *testing.B) {
 	ctx := context.Background()
 	filter := models.AlertListFilter{Limit: 100, Offset: 0}
 
-	for _, tc := range []struct {
-		name      string
-		candidate bool
-	}{
-		{"baseline", false},
-		{"candidate", true},
-	} {
-		b.Run(tc.name, func(b *testing.B) {
-			setAlertBenchIndexes(b, db, tc.candidate)
+	b.Run("current", func(b *testing.B) {
+		// Warm the query and confirm both shapes return the same rows.
+		warm, err := repo.ListFiltered(ctx, alertBenchTargetProjectID, filter)
+		if err != nil {
+			b.Fatalf("warm list: %v", err)
+		}
+		if len(warm) != 100 {
+			b.Fatalf("warm list returned %d rows, want 100", len(warm))
+		}
 
-			// Warm the query and confirm both shapes return the same rows.
-			warm, err := repo.ListFiltered(ctx, alertBenchTargetProjectID, filter)
+		durations := make([]time.Duration, 0, b.N)
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			start := time.Now()
+			alerts, err := repo.ListFiltered(ctx, alertBenchTargetProjectID, filter)
+			elapsed := time.Since(start)
 			if err != nil {
-				b.Fatalf("warm list: %v", err)
+				b.Fatalf("list filtered: %v", err)
 			}
-			if len(warm) != 100 {
-				b.Fatalf("warm list returned %d rows, want 100", len(warm))
+			if len(alerts) != 100 {
+				b.Fatalf("list returned %d rows, want 100", len(alerts))
 			}
+			durations = append(durations, elapsed)
+		}
+		b.StopTimer()
 
-			durations := make([]time.Duration, 0, b.N)
-			b.ReportAllocs()
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
-				start := time.Now()
-				alerts, err := repo.ListFiltered(ctx, alertBenchTargetProjectID, filter)
-				elapsed := time.Since(start)
-				if err != nil {
-					b.Fatalf("list filtered: %v", err)
-				}
-				if len(alerts) != 100 {
-					b.Fatalf("list returned %d rows, want 100", len(alerts))
-				}
-				durations = append(durations, elapsed)
-			}
-			b.StopTimer()
-
-			if len(durations) > 0 {
-				sort.Slice(durations, func(i, j int) bool { return durations[i] < durations[j] })
-				median := durations[len(durations)/2]
-				b.ReportMetric(float64(median.Nanoseconds())/1e6, "p50_ms")
-			}
-		})
-	}
+		if len(durations) > 0 {
+			sort.Slice(durations, func(i, j int) bool { return durations[i] < durations[j] })
+			median := durations[len(durations)/2]
+			b.ReportMetric(float64(median.Nanoseconds())/1e6, "p50_ms")
+		}
+	})
 }
 
-// BenchmarkAlertInsertThroughput measures single-alert insert latency for the
-// baseline (project-only index) and candidate (composite project+order index)
-// shapes so the write-throughput tradeoff of the added index is quantified. It
+// BenchmarkAlertInsertThroughput measures single-alert insert latency and
 // reports a per-iteration median insert time in addition to ns/op.
 func BenchmarkAlertInsertThroughput(b *testing.B) {
-	for _, tc := range []struct {
-		name      string
-		candidate bool
-	}{
-		{"baseline", false},
-		{"candidate", true},
-	} {
-		b.Run(tc.name, func(b *testing.B) {
-			db := newAlertBenchDB(b)
-			seedAlertBenchFixture(b, db)
-			setAlertBenchIndexes(b, db, tc.candidate)
-			repo := NewAlertRepo(db)
-			ctx := context.Background()
+	b.Run("current", func(b *testing.B) {
+		db := newAlertBenchDB(b)
+		seedAlertBenchFixture(b, db)
+		repo := NewAlertRepo(db)
+		ctx := context.Background()
 
-			durations := make([]time.Duration, 0, b.N)
-			b.ReportAllocs()
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
-				a := &models.Alert{
-					ProjectID: alertBenchTargetProjectID,
-					Type:      models.AlertTaskFailed,
-					Severity:  models.SeverityError,
-					Title:     fmt.Sprintf("insert-bench-%d", i),
-				}
-				start := time.Now()
-				if err := repo.Create(ctx, a); err != nil {
-					b.Fatalf("create alert: %v", err)
-				}
-				durations = append(durations, time.Since(start))
+		durations := make([]time.Duration, 0, b.N)
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			a := &models.Alert{
+				ProjectID: alertBenchTargetProjectID,
+				Type:      models.AlertTaskFailed,
+				Severity:  models.SeverityError,
+				Title:     fmt.Sprintf("insert-bench-%d", i),
 			}
-			b.StopTimer()
+			start := time.Now()
+			if err := repo.Create(ctx, a); err != nil {
+				b.Fatalf("create alert: %v", err)
+			}
+			durations = append(durations, time.Since(start))
+		}
+		b.StopTimer()
 
-			if len(durations) > 0 {
-				sort.Slice(durations, func(i, j int) bool { return durations[i] < durations[j] })
-				median := durations[len(durations)/2]
-				b.ReportMetric(float64(median.Nanoseconds())/1e6, "p50_ms")
-			}
-		})
-	}
+		if len(durations) > 0 {
+			sort.Slice(durations, func(i, j int) bool { return durations[i] < durations[j] })
+			median := durations[len(durations)/2]
+			b.ReportMetric(float64(median.Nanoseconds())/1e6, "p50_ms")
+		}
+	})
 }
 
 func seedAlertRuntimeProjectionBenchFixture(tb testing.TB, db *sql.DB) {
@@ -376,9 +319,7 @@ const (
 )
 
 // BenchmarkAlertRuntimeListProjectionResponse measures the production-shaped
-// runtime list payload path over alerts with large body and metadata fields. The
-// full-row sub-benchmark represents the previous runtime list shape; the compact
-// summaries sub-benchmark is the bounded projection used by list_alerts.
+// runtime list payload path over alerts with large body and metadata fields.
 func BenchmarkAlertRuntimeListProjectionResponse(b *testing.B) {
 	db := newAlertBenchDB(b)
 	seedAlertRuntimeProjectionBenchFixture(b, db)
@@ -386,34 +327,7 @@ func BenchmarkAlertRuntimeListProjectionResponse(b *testing.B) {
 	ctx := context.Background()
 	filter := models.AlertListFilter{Limit: alertRuntimeProjectionLimit, Offset: 0}
 
-	b.Run("full_rows_response", func(b *testing.B) {
-		warm, err := repo.ListFiltered(ctx, alertRuntimeProjectionProjectID, filter)
-		if err != nil {
-			b.Fatalf("warm full list: %v", err)
-		}
-		payload, err := json.Marshal(map[string]any{"notifications": warm, "project_id": alertRuntimeProjectionProjectID, "offset": 0, "next_offset": alertRuntimeProjectionLimit})
-		if err != nil {
-			b.Fatalf("marshal warm full payload: %v", err)
-		}
-		b.ReportMetric(float64(len(payload)), "response_B")
-		b.ReportAllocs()
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			alerts, err := repo.ListFiltered(ctx, alertRuntimeProjectionProjectID, filter)
-			if err != nil {
-				b.Fatalf("list full alerts: %v", err)
-			}
-			payload, err := json.Marshal(map[string]any{"notifications": alerts, "project_id": alertRuntimeProjectionProjectID, "offset": 0, "next_offset": alertRuntimeProjectionLimit})
-			if err != nil {
-				b.Fatalf("marshal full payload: %v", err)
-			}
-			if len(payload) == 0 {
-				b.Fatal("empty full payload")
-			}
-		}
-	})
-
-	b.Run("compact_summaries_response", func(b *testing.B) {
+	b.Run("summaries_response", func(b *testing.B) {
 		warm, err := repo.ListFilteredSummaries(ctx, alertRuntimeProjectionProjectID, filter)
 		if err != nil {
 			b.Fatalf("warm summary list: %v", err)
