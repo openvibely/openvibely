@@ -1130,6 +1130,15 @@ type RebaseResult struct {
 	ErrorMessage  string
 }
 
+// SameRepositoryMutationScope reports whether two paths are serialized by the
+// same canonical repository mutation lease.
+func SameRepositoryMutationScope(first, second string) bool {
+	if strings.TrimSpace(first) == "" || strings.TrimSpace(second) == "" {
+		return false
+	}
+	return canonicalRepositoryMutationKey(first) == canonicalRepositoryMutationKey(second)
+}
+
 func canonicalRepositoryMutationKey(repoDir string) string {
 	key := filepath.Clean(repoDir)
 	if absolute, err := filepath.Abs(key); err == nil {
