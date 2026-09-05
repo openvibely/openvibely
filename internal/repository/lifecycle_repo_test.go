@@ -960,39 +960,21 @@ func BenchmarkLifecycleRepo_ListExecutionsForTaskCompactProjection(b *testing.B)
 	seedLifecycleExecutionBenchmarkRows(b, db, target.ID, agent.ID, "target", rowsPerTask, largeInput, outputJSON)
 	seedLifecycleExecutionBenchmarkRows(b, db, other.ID, agent.ID, "other", rowsPerTask, largeInput, outputJSON)
 
-	b.Run("old_full_row_baseline", func(b *testing.B) {
-		b.ReportAllocs()
-		var totalStringBytes int64
-		for i := 0; i < b.N; i++ {
-			list, stringBytes, err := listExecutionsForTaskFullBaseline(ctx, db, target.ID)
-			if err != nil {
-				b.Fatalf("baseline list: %v", err)
-			}
-			if len(list) != rowsPerTask {
-				b.Fatalf("baseline rows = %d, want %d", len(list), rowsPerTask)
-			}
-			totalStringBytes += int64(stringBytes)
+	b.ReportAllocs()
+	var totalStringBytes int64
+	for i := 0; i < b.N; i++ {
+		list, err := repo.ListExecutionsForTask(ctx, target.ID)
+		if err != nil {
+			b.Fatalf("compact list: %v", err)
 		}
-		b.ReportMetric(float64(totalStringBytes)/float64(b.N), "scanned_string_bytes/op")
-	})
-
-	b.Run("compact_projection", func(b *testing.B) {
-		b.ReportAllocs()
-		var totalStringBytes int64
-		for i := 0; i < b.N; i++ {
-			list, err := repo.ListExecutionsForTask(ctx, target.ID)
-			if err != nil {
-				b.Fatalf("compact list: %v", err)
-			}
-			if len(list) != rowsPerTask {
-				b.Fatalf("compact rows = %d, want %d", len(list), rowsPerTask)
-			}
-			for _, e := range list {
-				totalStringBytes += int64(lifecycleExecutionListStringBytes(e))
-			}
+		if len(list) != rowsPerTask {
+			b.Fatalf("compact rows = %d, want %d", len(list), rowsPerTask)
 		}
-		b.ReportMetric(float64(totalStringBytes)/float64(b.N), "scanned_string_bytes/op")
-	})
+		for _, e := range list {
+			totalStringBytes += int64(lifecycleExecutionListStringBytes(e))
+		}
+	}
+	b.ReportMetric(float64(totalStringBytes)/float64(b.N), "scanned_string_bytes/op")
 }
 
 func seedLifecycleExecutionBenchmarkRows(b *testing.B, db *sql.DB, taskID, agentID, prefix string, count int, inputJSON, outputJSON string) {
@@ -1022,34 +1004,6 @@ func seedLifecycleExecutionBenchmarkRows(b *testing.B, db *sql.DB, taskID, agent
 	if err := tx.Commit(); err != nil {
 		b.Fatalf("commit seed tx: %v", err)
 	}
-}
-
-func listExecutionsForTaskFullBaseline(ctx context.Context, db *sql.DB, taskID string) ([]models.LifecycleExecution, int, error) {
-	rows, err := db.QueryContext(ctx, `
-		SELECT `+execCols+`
-		FROM lifecycle_executions
-		WHERE task_id = ?
-		ORDER BY started_at DESC, id DESC`, taskID)
-	if err != nil {
-		return nil, 0, err
-	}
-	defer rows.Close()
-	var out []models.LifecycleExecution
-	stringBytes := 0
-	for rows.Next() {
-		e, err := scanExecution(rows)
-		if err != nil {
-			return nil, 0, err
-		}
-		out = append(out, *e)
-		stringBytes += lifecycleExecutionFullStringBytes(*e)
-	}
-	return out, stringBytes, rows.Err()
-}
-
-func lifecycleExecutionFullStringBytes(e models.LifecycleExecution) int {
-	return len(e.ID) + len(e.TaskID) + len(e.TaskRunID) + len(e.AgentID) + len(string(e.When)) + len(e.SkillKey) +
-		len(string(e.OutputContract)) + len(string(e.Status)) + len(e.InputJSON) + len(e.OutputJSON) + len(e.Error) + len(e.IdempotencyKey)
 }
 
 func lifecycleExecutionListStringBytes(e models.LifecycleExecution) int {
