@@ -640,81 +640,55 @@ func TestHandler_TaskExecutionWindowsPreserveSharedBoundaries(t *testing.T) {
 }
 
 func BenchmarkHandler_GetTaskExecutions_ContentionWithLightweightDBRequest(b *testing.B) {
-	for _, tc := range []struct {
-		name string
-		run  func(context.Context, *Handler, *echo.Echo, *models.Task) error
-	}{
-		{
-			name: "legacy_unbounded",
-			run: func(ctx context.Context, h *Handler, _ *echo.Echo, task *models.Task) error {
-				loadedTask, err := h.taskSvc.GetByID(ctx, task.ID)
-				if err != nil {
-					return err
+	b.Run("bounded_poll", func(b *testing.B) {
+		db, counter := testutil.NewStatementCountingTestDB(b)
+		h, e, llmConfigRepo := setupTestHandlerForDB(b, db)
+		agent := createAgentTB(b, llmConfigRepo)
+		project := createProjectTB(b, h, "Contention Benchmark Project")
+		task := createTaskTB(b, h, project.ID, "Contention Benchmark Task", func(tk *models.Task) {
+			tk.Status = models.StatusRunning
+		})
+		seedLargeExecutionHistory(b, db, task.ID, agent.ID, 200, 4*1024, 64*1024)
+
+		var totalLightweightLatency int64
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			queryStarted := make(chan struct{})
+			var once sync.Once
+			counter.SetObserver(func(_ context.Context, query string) {
+				if strings.Contains(query, "FROM executions WHERE task_id = ? ORDER BY started_at DESC") {
+					once.Do(func() { close(queryStarted) })
 				}
-				executions, err := h.execRepo.ListByTask(ctx, task.ID)
-				if err != nil {
-					return err
-				}
-				var out bytes.Buffer
-				return components.TaskExecutionHistory(loadedTask, executions, false, len(executions)).Render(ctx, &out)
-			},
-		},
-		{
-			name: "bounded_poll",
-			run: func(_ context.Context, _ *Handler, e *echo.Echo, task *models.Task) error {
+			})
+			errCh := make(chan error, 1)
+			go func() {
 				rec := htmxGet(e, "/tasks/"+task.ID+"/executions")
 				if rec.Code != http.StatusOK {
-					return fmt.Errorf("execution-history request status=%d", rec.Code)
+					errCh <- fmt.Errorf("execution-history request status=%d", rec.Code)
+					return
 				}
-				return nil
-			},
-		},
-	} {
-		b.Run(tc.name, func(b *testing.B) {
-			db, counter := testutil.NewStatementCountingTestDB(b)
-			h, e, llmConfigRepo := setupTestHandlerForDB(b, db)
-			agent := createAgentTB(b, llmConfigRepo)
-			project := createProjectTB(b, h, "Contention Benchmark Project")
-			task := createTaskTB(b, h, project.ID, "Contention Benchmark Task", func(tk *models.Task) {
-				tk.Status = models.StatusRunning
-			})
-			seedLargeExecutionHistory(b, db, task.ID, agent.ID, 200, 4*1024, 64*1024)
-
-			var totalLightweightLatency int64
-			b.ReportAllocs()
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
-				queryStarted := make(chan struct{})
-				var once sync.Once
-				counter.SetObserver(func(_ context.Context, query string) {
-					if strings.Contains(query, "FROM executions WHERE task_id = ? ORDER BY started_at DESC") {
-						once.Do(func() { close(queryStarted) })
-					}
-				})
-				errCh := make(chan error, 1)
-				go func() {
-					errCh <- tc.run(context.Background(), h, e, task)
-				}()
-				select {
-				case <-queryStarted:
-				case err := <-errCh:
-					b.Fatalf("execution-history request ended before query started: %v", err)
-				case <-time.After(2 * time.Second):
-					b.Fatalf("execution-history query did not start")
-				}
-				lightweightStart := time.Now()
-				if _, err := h.projectSvc.List(context.Background()); err != nil {
-					b.Fatalf("lightweight project list: %v", err)
-				}
-				totalLightweightLatency += time.Since(lightweightStart).Nanoseconds()
-				if err := <-errCh; err != nil {
-					b.Fatal(err)
-				}
-				counter.SetObserver(nil)
+				errCh <- nil
+			}()
+			select {
+			case <-queryStarted:
+			case err := <-errCh:
+				b.Fatalf("execution-history request ended before query started: %v", err)
+			case <-time.After(2 * time.Second):
+				b.Fatalf("execution-history query did not start")
 			}
-			b.ReportMetric(float64(totalLightweightLatency)/float64(b.N), "lightweight_db_block_ns/op")
-		})
-	}
+			lightweightStart := time.Now()
+			if _, err := h.projectSvc.List(context.Background()); err != nil {
+				b.Fatalf("lightweight project list: %v", err)
+			}
+			totalLightweightLatency += time.Since(lightweightStart).Nanoseconds()
+			if err := <-errCh; err != nil {
+				b.Fatal(err)
+			}
+			counter.SetObserver(nil)
+		}
+		b.ReportMetric(float64(totalLightweightLatency)/float64(b.N), "lightweight_db_block_ns/op")
+	})
 }
 
 func seedLargeExecutionHistory(t testing.TB, db *sql.DB, taskID, agentID string, count, promptBytes, outputBytes int) {
