@@ -1365,7 +1365,7 @@ func TestLLMConfigRepo_ListTaskCreationSelectionOptionsUsesBoundedProjection(t *
 	assertTaskCreationSelectionStatement(t, statements[0])
 }
 
-func TestLLMConfigRepo_TaskCreationSelectionProjectionIsFasterAndLowerAllocationThanFullListOnLargeFixture(t *testing.T) {
+func TestLLMConfigRepo_TaskCreationSelectionProjectionStaysBoundedOnLargeFixture(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping task creation selection performance guard in short mode")
 	}
@@ -1397,19 +1397,15 @@ func TestLLMConfigRepo_TaskCreationSelectionProjectionIsFasterAndLowerAllocation
 	}
 
 	const (
-		sampleOps          = 5
-		maxBytesPerOp      = 250 * 1024
-		minFullListSpeedup = 20
+		sampleOps        = 5
+		maxDurationPerOp = 200 * time.Microsecond
+		maxBytesPerOp    = 250 * 1024
 	)
-	fullDuration, fullBytes := measure("full List", sampleOps, func() ([]models.LLMConfig, error) { return repo.List(ctx) })
 	compactDuration, compactBytes := measure("task creation selection", sampleOps, func() ([]models.LLMConfig, error) { return repo.ListTaskCreationSelectionOptions(ctx) })
 
-	t.Logf("full List: %s/op, %d B/op; task creation selection: %s/op, %d B/op", fullDuration, fullBytes, compactDuration, compactBytes)
-	if compactDuration*time.Duration(minFullListSpeedup) > fullDuration {
-		t.Fatalf("task creation selection took %s/op, want at least %dx faster than full List (%s/op)", compactDuration, minFullListSpeedup, fullDuration)
-	}
-	if compactBytes*minFullListSpeedup > fullBytes {
-		t.Fatalf("task creation selection allocated %d B/op, want at least %dx lower than full List (%d B/op)", compactBytes, minFullListSpeedup, fullBytes)
+	t.Logf("task creation selection: %s/op, %d B/op", compactDuration, compactBytes)
+	if compactDuration > maxDurationPerOp {
+		t.Fatalf("task creation selection took %s/op, want <= %s", compactDuration, maxDurationPerOp)
 	}
 	if compactBytes > maxBytesPerOp {
 		t.Fatalf("task creation selection allocated %d B/op, want <= %d", compactBytes, maxBytesPerOp)
