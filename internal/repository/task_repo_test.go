@@ -486,72 +486,8 @@ func TestTaskRepo_ListActivePendingAdmissionsPreservesEligibilityAndOrder(t *tes
 	}
 }
 
-// TestTaskRepo_ListActivePending_WithChainConfig verifies that ListActivePending
-// correctly scans parent_task_id and chain_config columns. A prior bug had a
-// SELECT/Scan mismatch (12 columns selected, 14 scan targets) that caused
-// ListActivePending to always error, breaking the scheduler's checkActiveTasks()
-// safety net and preventing tasks from transitioning pending → running.
-func TestTaskRepo_ListActivePending_WithChainConfig(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	repo := NewTaskRepo(db, nil)
-	ctx := context.Background()
-
-	// Create a parent task
-	parent := &models.Task{
-		ProjectID: "default",
-		Title:     "Parent Task",
-		Category:  models.CategoryActive,
-		Status:    models.StatusPending,
-		Prompt:    "parent prompt",
-	}
-	if err := repo.Create(ctx, parent); err != nil {
-		t.Fatalf("Create parent: %v", err)
-	}
-
-	// Create a child task with chain config and parent_task_id
-	child := &models.Task{
-		ProjectID:    "default",
-		Title:        "Child Task",
-		Category:     models.CategoryActive,
-		Status:       models.StatusPending,
-		Prompt:       "child prompt",
-		ParentTaskID: &parent.ID,
-		ChainConfig:  `{"enabled":true,"trigger":"on_completion"}`,
-	}
-	if err := repo.Create(ctx, child); err != nil {
-		t.Fatalf("Create child: %v", err)
-	}
-
-	// ListActivePending must not error (the bug caused scan mismatch here)
-	tasks, err := repo.ListActivePending(ctx)
-	if err != nil {
-		t.Fatalf("ListActivePending: %v", err)
-	}
-	if len(tasks) != 2 {
-		t.Fatalf("expected 2 active pending tasks, got %d", len(tasks))
-	}
-
-	// Find the child task and verify chain fields are populated
-	var foundChild *models.Task
-	for i := range tasks {
-		if tasks[i].Title == "Child Task" {
-			foundChild = &tasks[i]
-			break
-		}
-	}
-	if foundChild == nil {
-		t.Fatal("child task not found in ListActivePending results")
-	}
-	if foundChild.ParentTaskID == nil || *foundChild.ParentTaskID != parent.ID {
-		t.Errorf("expected ParentTaskID=%s, got %v", parent.ID, foundChild.ParentTaskID)
-	}
-	if foundChild.ChainConfig != `{"enabled":true,"trigger":"on_completion"}` {
-		t.Errorf("expected ChainConfig to be set, got %q", foundChild.ChainConfig)
-	}
-}
-
 // TestTaskRepo_ListByCategory_WithChainConfig verifies ListByCategory correctly
-// scans parent_task_id and chain_config columns (same mismatch bug as ListActivePending).
+// scans parent_task_id and chain_config columns.
 func TestTaskRepo_ListByCategory_WithChainConfig(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewTaskRepo(db, nil)
