@@ -211,7 +211,7 @@ func TestLLMConfigRepo_HasAnyStaysBoundedOnLargeFixture(t *testing.T) {
 	}
 }
 
-func BenchmarkLLMConfigRepoHasAnyVsListLargeCustomProviders(b *testing.B) {
+func BenchmarkLLMConfigRepoHasAnyLargeCustomProviders(b *testing.B) {
 	db := testutil.NewTestDB(b)
 	repo := NewLLMConfigRepo(db)
 	ctx := context.Background()
@@ -220,30 +220,16 @@ func BenchmarkLLMConfigRepoHasAnyVsListLargeCustomProviders(b *testing.B) {
 	}
 	seedLargeCustomProviderModelConfigs(b, ctx, repo, 50)
 
-	b.Run("full_list", func(b *testing.B) {
-		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			configs, err := repo.List(ctx)
-			if err != nil {
-				b.Fatal(err)
-			}
-			if len(configs) != 50 {
-				b.Fatalf("expected 50 configs, got %d", len(configs))
-			}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		exists, err := repo.HasAny(ctx)
+		if err != nil {
+			b.Fatal(err)
 		}
-	})
-	b.Run("has_any", func(b *testing.B) {
-		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			exists, err := repo.HasAny(ctx)
-			if err != nil {
-				b.Fatal(err)
-			}
-			if !exists {
-				b.Fatal("expected HasAny to return true")
-			}
+		if !exists {
+			b.Fatal("expected HasAny to return true")
 		}
-	})
+	}
 }
 
 func TestLLMConfigRepo_RuntimeSummariesStayUnderLargeFixtureBudget(t *testing.T) {
