@@ -152,6 +152,10 @@ window.addEventListener('DOMContentLoaded', function() {
     await window.openVibelyNavigate('/automations/auto-one?project_id=project-browser');
     await waitFor(function(){ return route('automation-live', 'auto-one'); }, 'Automation Live');
     htmx.process(selector());
+    var liveName=button().querySelector('span');
+    var liveNameLeft=liveName.getBoundingClientRect().left;
+    var liveSlash=document.querySelector('[data-automation-breadcrumb] > span').getBoundingClientRect();
+    var liveButtonBox=button().getBoundingClientRect();
     button().click();
     await waitFor(function(){ return dialog().open && options().length>0; }, 'Automation Live selector');
     setSearch('two');
@@ -165,6 +169,10 @@ window.addEventListener('DOMContentLoaded', function() {
     await window.openVibelyNavigate('/automations/auto-one/builder?project_id=project-browser');
     await waitFor(function(){ return route('automation-edit', 'auto-one'); }, 'Automation Edit');
     var editName=document.querySelector('[data-automation-name]');
+    var editNameStyle=getComputedStyle(editName);
+    var editNameTextLeft=editName.getBoundingClientRect().left+parseFloat(editNameStyle.borderLeftWidth)+parseFloat(editNameStyle.paddingLeft);
+    var editSlash=document.querySelector('[data-automation-editable-breadcrumb] > span').getBoundingClientRect();
+    if(Math.abs(editNameTextLeft-liveNameLeft)>1) fail('Automation name shifted horizontally when Edit opened: '+JSON.stringify({liveNameLeft:liveNameLeft,editNameTextLeft:editNameTextLeft,liveSlashRight:liveSlash.right,editSlashRight:editSlash.right,liveButtonLeft:liveButtonBox.left,inputLeft:editName.getBoundingClientRect().left,inputPadding:editNameStyle.paddingLeft,inputBorder:editNameStyle.borderLeftWidth}));
     var editSelector=editName && editName.nextElementSibling;
     var editButton=editSelector && editSelector.querySelector('[data-breadcrumb-selector-button]');
     var editDialog=editSelector && editSelector.querySelector('[data-breadcrumb-selector-dialog]');
@@ -203,8 +211,7 @@ window.addEventListener('DOMContentLoaded', function() {
 </script>`
 
 	style := `<style>
-		.hidden{display:none!important} dialog{border:0;background:transparent}.modal-box{box-sizing:border-box}.modal-backdrop{position:fixed;inset:0}.modal-backdrop button{width:100%;height:100%}
-		.w-0{width:0}.w-7{width:1.75rem}.h-8{height:2rem}.max-w-full{max-width:100%}.overflow-visible{overflow:visible}
+		.hidden{display:none!important} .flex{display:flex}.items-center{align-items:center}.gap-2{gap:.5rem}.px-1{padding-left:.25rem;padding-right:.25rem}.ml-1{margin-left:.25rem}.ml-2{margin-left:.5rem}.-ml-1{margin-left:-.25rem}.px-\[3px\]{padding-left:3px;padding-right:3px}.input-bordered{border:1px solid transparent}.relative{position:relative}.z-10{z-index:10}button{border:0} dialog{border:0;background:transparent}.modal-box{box-sizing:border-box}.modal-backdrop{position:fixed;inset:0}.modal-backdrop button{width:100%;height:100%}		.w-0{width:0}.w-7{width:1.75rem}.h-8{height:2rem}.max-w-full{max-width:100%}.overflow-visible{overflow:visible}
 		[data-breadcrumb-selector-dialog][open]{display:grid}.max-w-\[calc\(100vw-2rem\)\]{max-width:calc(100vw - 2rem)}</style>`
 
 	var taskSlow, taskTwo, taskBlank atomic.Int32
