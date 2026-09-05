@@ -634,6 +634,137 @@ func TestHandler_TaskExecutionWindowsPreserveSharedBoundaries(t *testing.T) {
 	}
 }
 
+func TestHandler_TaskExecutionWindowRoutesNormalizeInvalidLimits(t *testing.T) {
+	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Execution Window Limit Project")
+	task := createTask(t, h, project.ID, "Execution Window Limit Task", func(tk *models.Task) {
+		tk.Status = models.StatusRunning
+	})
+	seedLargeExecutionHistory(t, db, task.ID, agent.ID, 6, 8, 16)
+
+	for _, rawLimit := range []string{"", "0", "-3"} {
+		historyPath := "/tasks/" + task.ID + "/executions"
+		threadPath := "/tasks/" + task.ID + "/thread"
+		if rawLimit != "" {
+			historyPath += "?limit=" + rawLimit
+			threadPath += "?limit=" + rawLimit
+		}
+
+		history := htmxGet(e, historyPath)
+		assertCode(t, history, http.StatusOK)
+		historyBody := history.Body.String()
+		assert.Contains(t, historyBody, `data-execution-history-card="exec-005"`)
+		assert.Contains(t, historyBody, `data-execution-history-card="exec-000"`)
+		assert.NotContains(t, historyBody, "Load older executions")
+		assert.Contains(t, historyBody, fmt.Sprintf(`hx-get="/tasks/%s/executions?limit=%d"`, task.ID, taskExecutionHistoryWindowDefault))
+
+		thread := htmxGet(e, threadPath)
+		assertCode(t, thread, http.StatusOK)
+		threadBody := thread.Body.String()
+		assert.Contains(t, threadBody, `data-window-limit="5"`)
+		assert.Contains(t, threadBody, `id="chat-execution-exec-001"`)
+		assert.Contains(t, threadBody, `id="chat-execution-exec-005"`)
+		assert.NotContains(t, threadBody, `id="chat-execution-exec-000"`)
+		assert.Contains(t, threadBody, `id="task-thread-messages-earlier-loader"`)
+		assert.Contains(t, threadBody, `before=exec-001`)
+		assert.Contains(t, threadBody, fmt.Sprintf(`hx-get="/tasks/%s/thread?poll=1&amp;limit=%d"`, task.ID, taskThreadWindowLimitDefault))
+	}
+}
+
+func TestHandler_TaskExecutionWindowRoutesKeepExactShortAndEmptyHistories(t *testing.T) {
+	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Execution Window Boundary Project")
+	task := createTask(t, h, project.ID, "Execution Window Boundary Task", func(tk *models.Task) {
+		tk.Status = models.StatusCompleted
+	})
+
+	for _, tc := range []struct {
+		name  string
+		count int
+	}{
+		{name: "exact", count: 5},
+		{name: "short", count: 3},
+		{name: "empty", count: 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := db.ExecContext(context.Background(), "DELETE FROM executions WHERE task_id = ?", task.ID)
+			require.NoError(t, err)
+			seedLargeExecutionHistory(t, db, task.ID, agent.ID, tc.count, 8, 16)
+
+			history := htmxGet(e, "/tasks/"+task.ID+"/executions?limit=5")
+			assertCode(t, history, http.StatusOK)
+			historyBody := history.Body.String()
+			assert.NotContains(t, historyBody, "Load older executions")
+
+			thread := htmxGet(e, "/tasks/"+task.ID+"/thread?limit=5")
+			assertCode(t, thread, http.StatusOK)
+			threadBody := thread.Body.String()
+			assert.NotContains(t, threadBody, `id="task-thread-messages-earlier-loader"`)
+
+			if tc.count == 0 {
+				assert.Contains(t, historyBody, "No executions yet")
+				assert.Contains(t, threadBody, "No messages yet")
+				return
+			}
+
+			latestID := fmt.Sprintf("exec-%03d", tc.count-1)
+			assert.Contains(t, historyBody, `data-execution-history-card="`+latestID+`"`)
+			assert.Contains(t, threadBody, `id="chat-execution-`+latestID+`"`)
+		})
+	}
+}
+
+func TestHandler_GetTaskThreadActivePollUsesSharedExecutionWindow(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Active Poll Execution Window Project")
+	task := createTask(t, h, project.ID, "Active Poll Execution Window Task", func(tk *models.Task) {
+		tk.Status = models.StatusRunning
+	})
+	seedLargeExecutionHistory(t, db, task.ID, agent.ID, 7, 8, 16)
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	defer counter.SetEnabled(false)
+	poll := htmxGet(e, "/tasks/"+task.ID+"/thread?poll=1&limit=3")
+	assertCode(t, poll, http.StatusOK)
+	body := poll.Body.String()
+	assert.Contains(t, body, `data-task-active="true"`)
+	assert.Contains(t, body, `data-window-limit="3"`)
+	assert.Contains(t, body, `id="task-thread-messages-earlier-loader"`)
+	assert.Contains(t, body, `before=exec-004`)
+	assert.NotContains(t, body, `id="chat-execution-exec-003"`)
+
+	lastIndex := -1
+	for _, id := range []string{"exec-004", "exec-005", "exec-006"} {
+		marker := `id="chat-execution-` + id + `"`
+		index := strings.Index(body, marker)
+		if index <= lastIndex {
+			t.Fatalf("active poll rendered execution %s out of chronological order: index=%d previous=%d", id, index, lastIndex)
+		}
+		lastIndex = index
+	}
+
+	windowQuerySeen := false
+	for _, statement := range counter.Statements() {
+		if !strings.Contains(statement, "FROM executions") {
+			continue
+		}
+		if strings.Contains(statement, "ORDER BY started_at ASC") {
+			t.Fatalf("active poll executed an unbounded chronological execution query: %s", statement)
+		}
+		if strings.Contains(statement, "ORDER BY started_at DESC, rowid DESC LIMIT ?") {
+			windowQuerySeen = true
+		}
+	}
+	if !windowQuerySeen {
+		t.Fatalf("active poll did not execute the canonical bounded task execution query; statements: %#v", counter.Statements())
+	}
+}
+
 func BenchmarkHandler_GetTaskExecutions_ContentionWithLightweightDBRequest(b *testing.B) {
 	b.Run("bounded_poll", func(b *testing.B) {
 		db, counter := testutil.NewStatementCountingTestDB(b)
