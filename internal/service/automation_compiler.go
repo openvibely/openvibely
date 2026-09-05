@@ -25,14 +25,19 @@ type automationQueuedWorkPruner interface {
 	PruneQueuedWork()
 }
 
+type automationSaveAgentResolver func(context.Context, string, []AutomationAdapterNode, map[string]models.AutomationDraftNode) (map[string]string, error)
+
 type AutomationCompiler struct {
 	automationRepo *repository.AutomationRepo
 	taskSvc        automationTaskMutationService
 	taskRepo       *repository.TaskRepo
 	agentRepo      *repository.AgentRepo
-	scheduleRepo   *repository.ScheduleRepo
-	validator      *AutomationSaveValidator
-	now            func() time.Time
+	// saveAgentResolver is nil in production; tests may replace it to replay a
+	// pre-optimization resolver through the same atomic Save path.
+	saveAgentResolver automationSaveAgentResolver
+	scheduleRepo      *repository.ScheduleRepo
+	validator         *AutomationSaveValidator
+	now               func() time.Time
 }
 
 type AutomationSaveRequest struct {
@@ -236,7 +241,11 @@ func (c *AutomationCompiler) Save(ctx context.Context, request AutomationSaveReq
 		candidateNodes[node.Key] = node
 	}
 	resourceNodes := automationResourceNodes(adapter, candidate)
-	agentDefinitionIDs, err := c.resolveSaveAgentDefinitions(ctx, request.ProjectID, resourceNodes, candidateNodes)
+	resolveAgentDefinitions := c.resolveSaveAgentDefinitions
+	if c.saveAgentResolver != nil {
+		resolveAgentDefinitions = c.saveAgentResolver
+	}
+	agentDefinitionIDs, err := resolveAgentDefinitions(ctx, request.ProjectID, resourceNodes, candidateNodes)
 	if err != nil {
 		return nil, err
 	}

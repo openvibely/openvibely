@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -1565,6 +1567,233 @@ func TestAutomationCompilerSavePreservesAgentReferenceSemanticsAndRollback(t *te
 	}
 }
 
+type automationSavePerformanceFixture struct {
+	ctx       context.Context
+	project   models.Project
+	counter   *testutil.SQLStatementCounter
+	refs      []string
+	baseline  *AutomationCompiler
+	optimized *AutomationCompiler
+}
+
+type automationSavePerformanceSample struct {
+	agentQueries   int
+	sqlStatements  int
+	medianWallTime time.Duration
+	bytesPerOp     uint64
+	allocsPerOp    uint64
+}
+
+const automationSavePerformanceSamples = 5
+
+func newAutomationSavePerformanceFixture(tb testing.TB) *automationSavePerformanceFixture {
+	tb.Helper()
+	db, counter := testutil.NewStatementCountingTestDB(tb)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	project := models.Project{Name: "Automation Agent Save performance"}
+	if err := projectRepo.Create(ctx, &project); err != nil {
+		tb.Fatalf("create performance project: %v", err)
+	}
+	agentRepo := repository.NewAgentRepo(db)
+	if _, err := db.ExecContext(ctx, `DELETE FROM agents WHERE id IS NOT NULL`); err != nil {
+		tb.Fatalf("clear performance Agents: %v", err)
+	}
+	refs := make([]string, 0, automationCapabilityLimit)
+	for i := 0; i < automationCapabilityLimit; i++ {
+		agent := automationValidationFixtureAgent(fmt.Sprintf("Performance Agent %02d", i), fmt.Sprintf("performance-agent-%02d", i))
+		if err := agentRepo.Create(ctx, agent); err != nil {
+			tb.Fatalf("create performance Agent %d: %v", i, err)
+		}
+		refs = append(refs, agent.Key)
+	}
+
+	registry := NewAutomationAdapterRegistry()
+	automationRepo := repository.NewAutomationRepo(db)
+	drafts := NewAutomationDraftService(automationRepo, registry)
+	validator := NewAutomationSaveValidator(registry, drafts)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	newCompiler := func() *AutomationCompiler {
+		compiler := NewAutomationCompiler(automationRepo, NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil), taskRepo, scheduleRepo, validator)
+		compiler.SetAgentRepository(agentRepo)
+		return compiler
+	}
+	optimized := newCompiler()
+	baseline := newCompiler()
+	baseline.saveAgentResolver = func(ctx context.Context, projectID string, resourceNodes []AutomationAdapterNode, candidateNodes map[string]models.AutomationDraftNode) (map[string]string, error) {
+		return baselineAutomationSaveAgentDefinitions(ctx, agentRepo, projectID, resourceNodes, candidateNodes)
+	}
+	return &automationSavePerformanceFixture{ctx: ctx, project: project, counter: counter, refs: refs, baseline: baseline, optimized: optimized}
+}
+
+func baselineAutomationSaveAgentDefinitions(ctx context.Context, agentRepo *repository.AgentRepo, projectID string, resourceNodes []AutomationAdapterNode, candidateNodes map[string]models.AutomationDraftNode) (map[string]string, error) {
+	resolved := make(map[string]string)
+	for _, resourceNode := range resourceNodes {
+		if !resourceNode.AllowedResources["task"] {
+			continue
+		}
+		node := candidateNodes[resourceNode.Key]
+		ref, _ := node.Config["agent_ref"].(string)
+		ref = strings.TrimSpace(ref)
+		if ref == "" {
+			continue
+		}
+		agent, err := resolveAutomationAgent(ctx, agentRepo, projectID, ref)
+		if err != nil {
+			return nil, err
+		}
+		if agent == nil {
+			return nil, fmt.Errorf("Agent selection for node %q is unavailable in this project", node.Key)
+		}
+		resolved[ref] = agent.ID
+	}
+	return resolved, nil
+}
+
+func measureAutomationSavePerformance(tb testing.TB, fixture *automationSavePerformanceFixture, compiler *AutomationCompiler, candidate models.AutomationDraftCandidate, automationID string) automationSavePerformanceSample {
+	tb.Helper()
+	request := AutomationSaveRequest{ProjectID: fixture.project.ID, AutomationID: automationID, Source: "manual", CreatedVia: "benchmark", Candidate: candidate}
+	fixture.counter.SetEnabled(false)
+	if _, err := compiler.SaveValidatedCandidate(fixture.ctx, request); err != nil {
+		tb.Fatalf("warm-up SaveValidatedCandidate: %v", err)
+	}
+	fixture.counter.Reset()
+	fixture.counter.SetEnabled(true)
+	if _, err := compiler.SaveValidatedCandidate(fixture.ctx, request); err != nil {
+		fixture.counter.SetEnabled(false)
+		tb.Fatalf("counted SaveValidatedCandidate: %v", err)
+	}
+	fixture.counter.SetEnabled(false)
+	statements := fixture.counter.Statements()
+	sample := automationSavePerformanceSample{
+		agentQueries:  len(selectableAgentValidationStatements(statements)),
+		sqlStatements: len(statements),
+	}
+
+	durations := make([]time.Duration, automationSavePerformanceSamples)
+	runtime.GC()
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	for i := range durations {
+		started := time.Now()
+		if _, err := compiler.SaveValidatedCandidate(fixture.ctx, request); err != nil {
+			tb.Fatalf("measured SaveValidatedCandidate sample %d: %v", i, err)
+		}
+		durations[i] = time.Since(started)
+	}
+	runtime.ReadMemStats(&after)
+	sort.Slice(durations, func(i, j int) bool { return durations[i] < durations[j] })
+	sample.medianWallTime = durations[len(durations)/2]
+	sample.bytesPerOp = (after.TotalAlloc - before.TotalAlloc) / uint64(len(durations))
+	sample.allocsPerOp = (after.Mallocs - before.Mallocs) / uint64(len(durations))
+	return sample
+}
+
+func automationSavePerformanceCandidate(candidate models.AutomationDraftCandidate, suffix string) models.AutomationDraftCandidate {
+	copy := candidate
+	copy.Name = strings.TrimSpace(candidate.Name + " " + suffix)
+	copy.Nodes = make([]models.AutomationDraftNode, len(candidate.Nodes))
+	for i, node := range candidate.Nodes {
+		copy.Nodes[i] = node
+		copy.Nodes[i].Name = strings.TrimSpace(node.Name + " " + suffix)
+		copy.Nodes[i].Config = make(map[string]any, len(node.Config))
+		for key, value := range node.Config {
+			copy.Nodes[i].Config[key] = value
+		}
+	}
+	return copy
+}
+
+func automationSavePerformanceCandidateWithoutAgentRefs(candidate models.AutomationDraftCandidate, suffix string) models.AutomationDraftCandidate {
+	copy := automationSavePerformanceCandidate(candidate, suffix)
+	for i := range copy.Nodes {
+		delete(copy.Nodes[i].Config, "agent_ref")
+	}
+	return copy
+}
+
+func automationSavePerformanceDurationDelta(withReferences, withoutReferences time.Duration) time.Duration {
+	return withReferences - withoutReferences
+}
+
+func automationSavePerformanceValueDelta(withReferences, withoutReferences uint64) int64 {
+	return int64(withReferences) - int64(withoutReferences)
+}
+
+func TestAutomationCompilerSaveAgentResolutionPerformanceBudget(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping production-shaped Automation Agent Save performance budget in short mode")
+	}
+	originalLogWriter := log.Writer()
+	log.SetOutput(io.Discard)
+	t.Cleanup(func() { log.SetOutput(originalLogWriter) })
+	fixture := newAutomationSavePerformanceFixture(t)
+
+	for _, referenceCount := range []int{1, 5, 20, 50} {
+		t.Run(fmt.Sprintf("references_%d", referenceCount), func(t *testing.T) {
+			rawCandidate := automationValidationReferenceCandidate(fixture.refs[:referenceCount])
+			baselineCandidate := automationSavePerformanceCandidate(rawCandidate, fmt.Sprintf("baseline%03d", referenceCount))
+			baselineWithoutReferences := automationSavePerformanceCandidateWithoutAgentRefs(rawCandidate, fmt.Sprintf("baseline-no-ref%03d", referenceCount))
+			optimizedCandidate := automationSavePerformanceCandidate(rawCandidate, fmt.Sprintf("optimized%03d", referenceCount))
+			optimizedWithoutReferences := automationSavePerformanceCandidateWithoutAgentRefs(rawCandidate, fmt.Sprintf("optimized-no-ref%03d", referenceCount))
+
+			baselineWithout := measureAutomationSavePerformance(t, fixture, fixture.baseline, baselineWithoutReferences, fmt.Sprintf("bn%03d", referenceCount))
+			baseline := measureAutomationSavePerformance(t, fixture, fixture.baseline, baselineCandidate, fmt.Sprintf("br%03d", referenceCount))
+			optimizedWithout := measureAutomationSavePerformance(t, fixture, fixture.optimized, optimizedWithoutReferences, fmt.Sprintf("on%03d", referenceCount))
+			optimized := measureAutomationSavePerformance(t, fixture, fixture.optimized, optimizedCandidate, fmt.Sprintf("or%03d", referenceCount))
+
+			baselineAddedWall := automationSavePerformanceDurationDelta(baseline.medianWallTime, baselineWithout.medianWallTime)
+			optimizedAddedWall := automationSavePerformanceDurationDelta(optimized.medianWallTime, optimizedWithout.medianWallTime)
+			baselineAddedBytes := automationSavePerformanceValueDelta(baseline.bytesPerOp, baselineWithout.bytesPerOp)
+			optimizedAddedBytes := automationSavePerformanceValueDelta(optimized.bytesPerOp, optimizedWithout.bytesPerOp)
+			baselineAddedAllocs := automationSavePerformanceValueDelta(baseline.allocsPerOp, baselineWithout.allocsPerOp)
+			optimizedAddedAllocs := automationSavePerformanceValueDelta(optimized.allocsPerOp, optimizedWithout.allocsPerOp)
+			t.Logf("references=%d current(no-ref -> refs) queries=%d->%d sql=%d->%d median=%s->%s bytes/op=%d->%d allocs/op=%d->%d added=%s/%d/%d optimized(no-ref -> refs) queries=%d->%d sql=%d->%d median=%s->%s bytes/op=%d->%d allocs/op=%d->%d added=%s/%d/%d",
+				referenceCount,
+				baselineWithout.agentQueries, baseline.agentQueries, baselineWithout.sqlStatements, baseline.sqlStatements, baselineWithout.medianWallTime, baseline.medianWallTime, baselineWithout.bytesPerOp, baseline.bytesPerOp, baselineWithout.allocsPerOp, baseline.allocsPerOp, baselineAddedWall, baselineAddedBytes, baselineAddedAllocs,
+				optimizedWithout.agentQueries, optimized.agentQueries, optimizedWithout.sqlStatements, optimized.sqlStatements, optimizedWithout.medianWallTime, optimized.medianWallTime, optimizedWithout.bytesPerOp, optimized.bytesPerOp, optimizedWithout.allocsPerOp, optimized.allocsPerOp, optimizedAddedWall, optimizedAddedBytes, optimizedAddedAllocs)
+			if baselineWithout.agentQueries != 0 || optimizedWithout.agentQueries != 0 {
+				t.Fatalf("no-reference Agent queries = current %d, optimized %d; want zero for both", baselineWithout.agentQueries, optimizedWithout.agentQueries)
+			}
+			if baseline.agentQueries != referenceCount {
+				t.Fatalf("current Agent queries = %d, want %d", baseline.agentQueries, referenceCount)
+			}
+			if optimized.agentQueries != 1 {
+				t.Fatalf("optimized Agent queries = %d, want 1", optimized.agentQueries)
+			}
+			if baseline.sqlStatements-baselineWithout.sqlStatements != referenceCount {
+				t.Fatalf("current Agent-reference SQL statement delta = %d, want %d", baseline.sqlStatements-baselineWithout.sqlStatements, referenceCount)
+			}
+			if optimized.sqlStatements-optimizedWithout.sqlStatements != 1 {
+				t.Fatalf("optimized Agent-reference SQL statement delta = %d, want 1", optimized.sqlStatements-optimizedWithout.sqlStatements)
+			}
+			if referenceCount == 1 {
+				if optimizedAddedWall > baselineAddedWall {
+					t.Fatalf("one-reference optimized added median = %s, current = %s; optimized Save regressed", optimizedAddedWall, baselineAddedWall)
+				}
+				if optimizedAddedBytes > baselineAddedBytes {
+					t.Fatalf("one-reference optimized added bytes/op = %d, current = %d; optimized Save regressed", optimizedAddedBytes, baselineAddedBytes)
+				}
+				if optimizedAddedAllocs > baselineAddedAllocs {
+					t.Fatalf("one-reference optimized added allocs/op = %d, current = %d; optimized Save regressed", optimizedAddedAllocs, baselineAddedAllocs)
+				}
+			}
+			if referenceCount == 20 || referenceCount == 50 {
+				if optimizedAddedWall*5 > baselineAddedWall {
+					t.Fatalf("optimized added median = %s, current = %s; want at least 80%% Agent-reference latency reduction", optimizedAddedWall, baselineAddedWall)
+				}
+				if optimizedAddedBytes*10 > baselineAddedBytes {
+					t.Fatalf("optimized added bytes/op = %d, current = %d; want at least 90%% Agent-reference reduction", optimizedAddedBytes, baselineAddedBytes)
+				}
+				if optimizedAddedAllocs*10 > baselineAddedAllocs {
+					t.Fatalf("optimized added allocs/op = %d, current = %d; want at least 90%% Agent-reference reduction", optimizedAddedAllocs, baselineAddedAllocs)
+				}
+			}
+		})
+	}
+}
+
 func BenchmarkAutomationCompilerSaveAgentResolution(b *testing.B) {
 	originalLogWriter := log.Writer()
 	log.SetOutput(io.Discard)
@@ -1601,6 +1830,11 @@ func BenchmarkAutomationCompilerSaveAgentResolution(b *testing.B) {
 	scheduleRepo := repository.NewScheduleRepo(db)
 	compiler := NewAutomationCompiler(automationRepo, NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil), taskRepo, scheduleRepo, validator)
 	compiler.SetAgentRepository(agentRepo)
+	baselineCompiler := NewAutomationCompiler(automationRepo, NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil), taskRepo, scheduleRepo, validator)
+	baselineCompiler.SetAgentRepository(agentRepo)
+	baselineCompiler.saveAgentResolver = func(ctx context.Context, projectID string, resourceNodes []AutomationAdapterNode, candidateNodes map[string]models.AutomationDraftNode) (map[string]string, error) {
+		return baselineAutomationSaveAgentDefinitions(ctx, agentRepo, projectID, resourceNodes, candidateNodes)
+	}
 
 	for _, referenceCount := range []int{1, 5, 20, 50} {
 		candidate := automationValidationReferenceCandidate(refs[:referenceCount])
@@ -1685,17 +1919,17 @@ func BenchmarkAutomationCompilerSaveAgentResolution(b *testing.B) {
 				}
 				delete(withoutReferences.Nodes[i].Config, "agent_ref")
 			}
-			runSave := func(b *testing.B, saveCandidate models.AutomationDraftCandidate) {
+			runSave := func(b *testing.B, saveCompiler *AutomationCompiler, saveCandidate models.AutomationDraftCandidate) {
 				b.Helper()
 				automationID := repository.NewID()
 				request := AutomationSaveRequest{ProjectID: project.ID, AutomationID: automationID, Source: "manual", CreatedVia: "benchmark", Candidate: saveCandidate}
 				counter.SetEnabled(false)
-				if _, err := compiler.SaveValidatedCandidate(ctx, request); err != nil {
+				if _, err := saveCompiler.SaveValidatedCandidate(ctx, request); err != nil {
 					b.Fatalf("warm-up SaveValidatedCandidate: %v", err)
 				}
 				counter.Reset()
 				counter.SetEnabled(true)
-				if _, err := compiler.SaveValidatedCandidate(ctx, request); err != nil {
+				if _, err := saveCompiler.SaveValidatedCandidate(ctx, request); err != nil {
 					counter.SetEnabled(false)
 					b.Fatalf("counted SaveValidatedCandidate: %v", err)
 				}
@@ -1706,7 +1940,7 @@ func BenchmarkAutomationCompilerSaveAgentResolution(b *testing.B) {
 				b.ReportAllocs()
 				b.ResetTimer()
 				for i := 0; i < b.N; i++ {
-					if _, err := compiler.SaveValidatedCandidate(ctx, request); err != nil {
+					if _, err := saveCompiler.SaveValidatedCandidate(ctx, request); err != nil {
 						b.Fatal(err)
 					}
 				}
@@ -1714,11 +1948,14 @@ func BenchmarkAutomationCompilerSaveAgentResolution(b *testing.B) {
 				b.ReportMetric(float64(agentQueryCount), "agent_queries/op")
 				b.ReportMetric(float64(totalStatementCount), "sql_statements/op")
 			}
+			b.Run("baseline_full_save_per_node", func(b *testing.B) {
+				runSave(b, baselineCompiler, candidate)
+			})
 			b.Run("optimized_full_save_without_agent_refs", func(b *testing.B) {
-				runSave(b, withoutReferences)
+				runSave(b, compiler, withoutReferences)
 			})
 			b.Run("optimized_full_save_with_agent_refs", func(b *testing.B) {
-				runSave(b, candidate)
+				runSave(b, compiler, candidate)
 			})
 		})
 	}
