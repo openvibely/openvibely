@@ -355,6 +355,131 @@ func TestHandler_TaskBoardRecoversMetadataWithoutLocalEligibilityForNonMergeable
 	}
 }
 
+func TestHandler_TaskBoardRelationshipSnapshotSupportsShallowRepositories(t *testing.T) {
+	ctx := context.Background()
+	originDir := createHandlerTestGitRepo(t)
+	for i := 0; i < 4; i++ {
+		if err := os.WriteFile(filepath.Join(originDir, "README.md"), []byte(fmt.Sprintf("base %d\n", i)), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		runGit(t, originDir, "add", "README.md")
+		runGit(t, originDir, "commit", "-m", fmt.Sprintf("base %d", i))
+	}
+
+	repoDir := filepath.Join(t.TempDir(), "shallow")
+	runGit(t, t.TempDir(), "clone", "--depth", "2", "--branch", "main", "file://"+originDir, repoDir)
+	runGit(t, repoDir, "config", "user.email", "test@example.com")
+	runGit(t, repoDir, "config", "user.name", "Test User")
+	worktreePath := filepath.Join(repoDir, ".worktrees", "shallow-task")
+	runGit(t, repoDir, "worktree", "add", "-b", "task/shallow", worktreePath, "main")
+	if err := os.WriteFile(filepath.Join(worktreePath, "feature.txt"), []byte("feature\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, worktreePath, "add", "feature.txt")
+	runGit(t, worktreePath, "commit", "-m", "shallow feature")
+
+	h, e, _, db := setupTestHandlerWithDB(t)
+	h.taskPullRequestRepo = repository.NewTaskPullRequestRepo(db)
+	project := &models.Project{Name: "Shallow Relationship", RepoPath: repoDir, IsDefault: true}
+	if err := h.projectSvc.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	task := &models.Task{
+		ProjectID: project.ID, Title: "Shallow task", Prompt: "test", Category: models.CategoryCompleted,
+		Status: models.StatusCompleted, WorktreePath: worktreePath, WorktreeBranch: "task/shallow",
+		MergeTargetBranch: "main", MergeStatus: models.MergeStatusPending,
+	}
+	if err := h.taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/tasks?project_id="+project.ID, nil)
+	req.Header.Set("HX-Request", "true")
+	req.Header.Set("HX-Target", "kanban-board")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("tasks refresh status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if taskCardActionDisabled(rec.Body.String(), "merge") || taskCardActionDisabled(rec.Body.String(), "ff") {
+		t.Fatalf("shallow repository disabled canonically eligible Local actions: %s", rec.Body.String())
+	}
+	if !taskCardActionDisabled(rec.Body.String(), "rebase") {
+		t.Fatalf("shallow repository exposed Rebase without two-sided divergence: %s", rec.Body.String())
+	}
+}
+
+func TestTaskCardRelationshipSnapshotDoesNotMaterializeLargeHistory(t *testing.T) {
+	repoDir := createHandlerTestGitRepo(t)
+	for i := 0; i < 256; i++ {
+		if err := os.WriteFile(filepath.Join(repoDir, "history.txt"), []byte(fmt.Sprintf("history %d\n", i)), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		runGit(t, repoDir, "add", "history.txt")
+		runGit(t, repoDir, "commit", "-m", fmt.Sprintf("history %d", i))
+	}
+	runGit(t, repoDir, "branch", "target-large", "main")
+	runGit(t, repoDir, "checkout", "-b", "task/large-history")
+	if err := os.WriteFile(filepath.Join(repoDir, "feature.txt"), []byte("feature\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repoDir, "add", "feature.txt")
+	runGit(t, repoDir, "commit", "-m", "large history feature")
+	runGit(t, repoDir, "checkout", "main")
+
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrapperDir := t.TempDir()
+	logPath := filepath.Join(wrapperDir, "git.log")
+	wrapperPath := filepath.Join(wrapperDir, "git")
+	wrapper := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$OPENVIBELY_GIT_LOG\"\nexec \"$OPENVIBELY_REAL_GIT\" \"$@\"\n"
+	if err := os.WriteFile(wrapperPath, []byte(wrapper), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("OPENVIBELY_GIT_LOG", logPath)
+	t.Setenv("OPENVIBELY_REAL_GIT", realGit)
+	t.Setenv("PATH", wrapperDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	snapshot := newTaskCardRepositorySnapshot(t.Context(), &models.Project{RepoPath: repoDir})
+	taskCardLoadBranchRelations(t.Context(), repoDir, []taskCardBranchRelation{{branch: "task/large-history", target: "target-large"}}, snapshot)
+	if !snapshot.relationshipValid("task/large-history", "target-large") || !snapshot.isAncestor("target-large", "task/large-history") {
+		t.Fatal("large-history relationship snapshot lost canonical ancestry")
+	}
+	logData, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commands := string(logData)
+	if strings.Contains(commands, "rev-list --parents") || strings.Contains(commands, "cat-file --batch") {
+		t.Fatalf("relationship snapshot materialized repository history:\n%s", commands)
+	}
+	if strings.Count(commands, "for-each-ref") != 1 {
+		t.Fatalf("relationship snapshot commands=%q, want one bounded for-each-ref query", commands)
+	}
+}
+
+func TestTaskCardRelationshipSnapshotFailsClosedAbovePairLimit(t *testing.T) {
+	snapshot := &taskCardRepositorySnapshot{
+		refs:      make(map[string]string, taskCardRelationshipPairMax+1),
+		ancestors: make(map[string]bool),
+	}
+	requests := make([]taskCardBranchRelation, 0, taskCardRelationshipPairMax+1)
+	for i := 0; i <= taskCardRelationshipPairMax; i++ {
+		branch := fmt.Sprintf("task/pair-%04d", i)
+		target := "main"
+		snapshot.refs[branch] = fmt.Sprintf("%040x", i+1)
+		snapshot.refs[target] = strings.Repeat("f", 40)
+		requests = append(requests, taskCardBranchRelation{branch: branch, target: target})
+	}
+
+	taskCardLoadBranchRelations(t.Context(), t.TempDir(), requests, snapshot)
+	if snapshot.graphValid || snapshot.relationshipValid(requests[0].branch, requests[0].target) {
+		t.Fatal("oversized relationship request did not fail closed")
+	}
+}
+
 func TestHandler_TaskBoardRelationshipSnapshotFailureDisablesLocalActions(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
 	h.taskPullRequestRepo = repository.NewTaskPullRequestRepo(db)
@@ -385,6 +510,7 @@ func TestHandler_TaskBoardRelationshipSnapshotFailureDisablesLocalActions(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
+	wrongTip := runGit(t, repoDir, "rev-parse", "main")
 	wrapperDir := t.TempDir()
 	wrapperPath := filepath.Join(wrapperDir, "git")
 	wrapper := `#!/bin/sh
@@ -394,10 +520,11 @@ case "$*" in
       printf 'unsupported relationship query\n' >&2
       exit 129
     fi
+    if [ "$OPENVIBELY_RELATION_FAILURE" = "timeout" ]; then
+      exec sleep 5
+    fi
     if [ "$OPENVIBELY_RELATION_FAILURE" = "incomplete" ]; then
-      while IFS= read -r tip; do
-        [ -n "$tip" ] && printf '%s\n' "$tip"
-      done
+      printf '%s\0001 0\n' "$OPENVIBELY_RELATION_WRONG_TIP"
       exit 0
     fi
     printf 'malformed relationship output\n'
@@ -410,9 +537,10 @@ exec "$OPENVIBELY_REAL_GIT" "$@"
 		t.Fatal(err)
 	}
 	t.Setenv("OPENVIBELY_REAL_GIT", realGit)
+	t.Setenv("OPENVIBELY_RELATION_WRONG_TIP", wrongTip)
 	t.Setenv("PATH", wrapperDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	for _, failureMode := range []string{"malformed", "unsupported", "incomplete"} {
+	for _, failureMode := range []string{"malformed", "unsupported", "incomplete", "timeout"} {
 		t.Run(failureMode, func(t *testing.T) {
 			mergeStatus := models.MergeStatusPending
 			if failureMode == "incomplete" {
@@ -574,8 +702,8 @@ func TestHandler_TaskBoardBatchesTerminalCardGitState(t *testing.T) {
 		t.Fatal(err)
 	}
 	invocations := len(strings.FieldsFunc(strings.TrimSpace(string(logData)), func(r rune) bool { return r == '\n' }))
-	if invocations > 6 {
-		t.Fatalf("%d terminal cards across %d targets executed %d git commands, want one six-command repository snapshot; commands:\n%s", taskCount, len(targets), invocations, logData)
+	if invocations > 5 {
+		t.Fatalf("%d terminal cards across %d targets executed %d git commands, want one five-command repository snapshot; commands:\n%s", taskCount, len(targets), invocations, logData)
 	}
 }
 

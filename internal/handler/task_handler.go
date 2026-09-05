@@ -1,8 +1,6 @@
 package handler
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -16,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/a-h/templ"
 	git "github.com/go-git/go-git/v5"
@@ -317,12 +316,17 @@ func taskStatusMayMerge(status models.TaskStatus) bool {
 	}
 }
 
+type taskCardBranchRelation struct {
+	branch string
+	target string
+}
+
 type taskCardRepositorySnapshot struct {
 	project         *models.Project
 	valid           bool
 	worktreesByPath map[string]service.WorktreeInfo
 	refs            map[string]string
-	parents         map[string][]string
+	ancestors       map[string]bool
 	graphValid      bool
 	activeMerge     bool
 	mergeHead       string
@@ -336,7 +340,7 @@ func newTaskCardRepositorySnapshot(ctx context.Context, project *models.Project)
 		project:         project,
 		worktreesByPath: make(map[string]service.WorktreeInfo),
 		refs:            make(map[string]string),
-		parents:         make(map[string][]string),
+		ancestors:       make(map[string]bool),
 		dirty:           make(map[string]bool),
 		loadDirty:       taskCardWorktreeDirty,
 	}
@@ -374,144 +378,154 @@ func newTaskCardRepositorySnapshot(ctx context.Context, project *models.Project)
 	return snapshot
 }
 
-func taskCardLoadBranchRelations(ctx context.Context, repoPath string, refs []string, snapshot *taskCardRepositorySnapshot) {
+const (
+	taskCardRelationshipTimeout   = 2 * time.Second
+	taskCardRelationshipOutputMax = 1 << 20
+	taskCardRelationshipPairMax   = 4096
+)
+
+func taskCardRelationKey(ancestorTip, descendantTip string) string {
+	return ancestorTip + "\x00" + descendantTip
+}
+
+func taskCardLoadBranchRelations(ctx context.Context, repoPath string, requests []taskCardBranchRelation, snapshot *taskCardRepositorySnapshot) {
 	if snapshot == nil {
 		return
 	}
 	snapshot.graphValid = false
-	snapshot.parents = make(map[string][]string)
-	if len(refs) == 0 {
-		return
-	}
-	tips := make([]string, 0, len(refs))
-	seen := make(map[string]bool, len(refs))
-	for _, ref := range refs {
-		tip := snapshot.refTip(ref)
-		if tip != "" && !seen[tip] {
-			seen[tip] = true
-			tips = append(tips, tip)
-		}
-	}
-	sort.Strings(tips)
-	if len(tips) == 0 {
+	snapshot.ancestors = make(map[string]bool)
+	if len(requests) == 0 {
 		return
 	}
 
-	cmd := exec.CommandContext(ctx, "git", "rev-list", "--parents", "--stdin")
-	cmd.Dir = repoPath
-	cmd.Stdin = strings.NewReader(strings.Join(tips, "\n") + "\n")
-	output, err := cmd.Output()
-	if err != nil {
+	uniqueRequests := make(map[string]taskCardBranchRelation, len(requests))
+	for _, request := range requests {
+		request.branch = strings.TrimSpace(request.branch)
+		request.target = strings.TrimSpace(request.target)
+		if request.branch == "" || request.target == "" {
+			return
+		}
+		uniqueRequests[request.branch+"\x00"+request.target] = request
+	}
+	if len(uniqueRequests) == 0 || len(uniqueRequests) > taskCardRelationshipPairMax {
 		return
 	}
-	parents := make(map[string][]string)
-	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) == 0 {
+	requests = requests[:0]
+	for _, request := range uniqueRequests {
+		requests = append(requests, request)
+	}
+	sort.Slice(requests, func(i, j int) bool {
+		if requests[i].branch == requests[j].branch {
+			return requests[i].target < requests[j].target
+		}
+		return requests[i].branch < requests[j].branch
+	})
+
+	branches := make(map[string]string)
+	targets := make(map[string]bool)
+	for _, request := range requests {
+		branchTip := snapshot.refTip(request.branch)
+		targetTip := snapshot.refTip(request.target)
+		if branchTip == "" || targetTip == "" {
+			return
+		}
+		branches[request.branch] = branchTip
+		targets[targetTip] = true
+	}
+	branchNames := make([]string, 0, len(branches))
+	for branch := range branches {
+		branchNames = append(branchNames, branch)
+	}
+	sort.Strings(branchNames)
+	targetTips := make([]string, 0, len(targets))
+	for targetTip := range targets {
+		targetTips = append(targetTips, targetTip)
+	}
+	sort.Strings(targetTips)
+
+	format := "%(objectname)"
+	for _, targetTip := range targetTips {
+		format += "%00%(ahead-behind:" + targetTip + ")"
+	}
+	args := []string{"for-each-ref", "--format=" + format}
+	for _, branch := range branchNames {
+		args = append(args, "refs/heads/"+branch)
+	}
+
+	relationCtx, cancel := context.WithTimeout(ctx, taskCardRelationshipTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(relationCtx, "git", args...)
+	cmd.Dir = repoPath
+	stdout, err := cmd.StdoutPipe()
+	if err != nil || cmd.Start() != nil {
+		return
+	}
+	output, readErr := io.ReadAll(io.LimitReader(stdout, taskCardRelationshipOutputMax+1))
+	if readErr != nil || len(output) > taskCardRelationshipOutputMax {
+		cancel()
+	}
+	waitErr := cmd.Wait()
+	if readErr != nil || waitErr != nil || relationCtx.Err() != nil || len(output) > taskCardRelationshipOutputMax {
+		return
+	}
+
+	expectedTips := make(map[string]bool, len(branches))
+	for _, tip := range branches {
+		expectedTips[tip] = true
+	}
+	rows := make(map[string][]string, len(expectedTips))
+	for _, line := range strings.Split(strings.TrimSuffix(string(output), "\n"), "\n") {
+		if line == "" {
 			continue
 		}
-		for _, field := range fields {
-			if !taskCardValidObjectID(field) {
+		fields := strings.Split(line, "\x00")
+		if len(fields) != len(targetTips)+1 || !expectedTips[fields[0]] {
+			return
+		}
+		if previous, duplicate := rows[fields[0]]; duplicate {
+			if strings.Join(previous, "\x00") != strings.Join(fields[1:], "\x00") {
 				return
 			}
+			continue
 		}
-		if _, duplicate := parents[fields[0]]; duplicate {
-			return
-		}
-		parents[fields[0]] = append([]string(nil), fields[1:]...)
+		rows[fields[0]] = append([]string(nil), fields[1:]...)
 	}
-	for _, tip := range tips {
-		if _, ok := parents[tip]; !ok {
-			return
-		}
-	}
-	if !taskCardGraphMatchesRepository(ctx, repoPath, parents) {
+	if len(rows) != len(expectedTips) {
 		return
 	}
-	snapshot.parents = parents
+
+	ancestors := make(map[string]bool, len(requests)*2)
+	for branchTip, countsByTarget := range rows {
+		for i, countsText := range countsByTarget {
+			counts := strings.Fields(countsText)
+			if len(counts) != 2 {
+				return
+			}
+			ahead, err := strconv.ParseUint(counts[0], 10, 64)
+			if err != nil {
+				return
+			}
+			behind, err := strconv.ParseUint(counts[1], 10, 64)
+			if err != nil {
+				return
+			}
+			targetTip := targetTips[i]
+			ancestors[taskCardRelationKey(branchTip, targetTip)] = ahead == 0
+			ancestors[taskCardRelationKey(targetTip, branchTip)] = behind == 0
+		}
+	}
+	for _, request := range requests {
+		branchTip := snapshot.refTip(request.branch)
+		targetTip := snapshot.refTip(request.target)
+		if _, ok := ancestors[taskCardRelationKey(branchTip, targetTip)]; !ok {
+			return
+		}
+		if _, ok := ancestors[taskCardRelationKey(targetTip, branchTip)]; !ok {
+			return
+		}
+	}
+	snapshot.ancestors = ancestors
 	snapshot.graphValid = true
-}
-
-func taskCardGraphMatchesRepository(ctx context.Context, repoPath string, parents map[string][]string) bool {
-	commits := make([]string, 0, len(parents))
-	for commit := range parents {
-		commits = append(commits, commit)
-	}
-	sort.Strings(commits)
-	if len(commits) == 0 {
-		return false
-	}
-
-	cmd := exec.CommandContext(ctx, "git", "cat-file", "--batch")
-	cmd.Dir = repoPath
-	cmd.Stdin = strings.NewReader(strings.Join(commits, "\n") + "\n")
-	output, err := cmd.Output()
-	if err != nil {
-		return false
-	}
-	reader := bufio.NewReader(bytes.NewReader(output))
-	for _, commit := range commits {
-		header, err := reader.ReadString('\n')
-		if err != nil {
-			return false
-		}
-		fields := strings.Fields(header)
-		if len(fields) != 3 || !strings.EqualFold(fields[0], commit) || fields[1] != "commit" {
-			return false
-		}
-		size, err := strconv.Atoi(fields[2])
-		if err != nil || size < 0 || size > len(output) {
-			return false
-		}
-		body := make([]byte, size)
-		if _, err := io.ReadFull(reader, body); err != nil {
-			return false
-		}
-		terminator, err := reader.ReadByte()
-		if err != nil || terminator != '\n' {
-			return false
-		}
-
-		actualParents := make([]string, 0)
-		for _, line := range strings.Split(string(body), "\n") {
-			if line == "" {
-				break
-			}
-			if strings.HasPrefix(line, "parent ") {
-				parent := strings.TrimSpace(strings.TrimPrefix(line, "parent "))
-				if !taskCardValidObjectID(parent) {
-					return false
-				}
-				actualParents = append(actualParents, parent)
-			}
-		}
-		parsedParents := parents[commit]
-		if len(actualParents) != len(parsedParents) {
-			return false
-		}
-		for i, parent := range actualParents {
-			if !strings.EqualFold(parent, parsedParents[i]) {
-				return false
-			}
-			if _, ok := parents[parsedParents[i]]; !ok {
-				return false
-			}
-		}
-	}
-	_, err = reader.Peek(1)
-	return errors.Is(err, io.EOF)
-}
-
-func taskCardValidObjectID(value string) bool {
-	if len(value) != 40 && len(value) != 64 {
-		return false
-	}
-	for _, char := range value {
-		if !((char >= '0' && char <= '9') || (char >= 'a' && char <= 'f') || (char >= 'A' && char <= 'F')) {
-			return false
-		}
-	}
-	return true
 }
 
 func (snapshot *taskCardRepositorySnapshot) worktree(path string) (service.WorktreeInfo, bool) {
@@ -530,30 +544,24 @@ func (snapshot *taskCardRepositorySnapshot) refTip(ref string) string {
 }
 
 func (snapshot *taskCardRepositorySnapshot) relationshipValid(branch, target string) bool {
-	return snapshot != nil && snapshot.graphValid && snapshot.refTip(branch) != "" && snapshot.refTip(target) != ""
+	if snapshot == nil || !snapshot.graphValid {
+		return false
+	}
+	branchTip := snapshot.refTip(branch)
+	targetTip := snapshot.refTip(target)
+	if branchTip == "" || targetTip == "" {
+		return false
+	}
+	_, branchKnown := snapshot.ancestors[taskCardRelationKey(branchTip, targetTip)]
+	_, targetKnown := snapshot.ancestors[taskCardRelationKey(targetTip, branchTip)]
+	return branchKnown && targetKnown
 }
 
 func (snapshot *taskCardRepositorySnapshot) isAncestor(ancestorRef, descendantRef string) bool {
 	if !snapshot.relationshipValid(ancestorRef, descendantRef) {
 		return false
 	}
-	ancestor := snapshot.refTip(ancestorRef)
-	descendant := snapshot.refTip(descendantRef)
-	seen := make(map[string]bool)
-	stack := []string{descendant}
-	for len(stack) > 0 {
-		commit := stack[len(stack)-1]
-		stack = stack[:len(stack)-1]
-		if commit == ancestor {
-			return true
-		}
-		if seen[commit] {
-			continue
-		}
-		seen[commit] = true
-		stack = append(stack, snapshot.parents[commit]...)
-	}
-	return false
+	return snapshot.ancestors[taskCardRelationKey(snapshot.refTip(ancestorRef), snapshot.refTip(descendantRef))]
 }
 
 func (snapshot *taskCardRepositorySnapshot) diverged(branch, target string) bool {
@@ -715,7 +723,7 @@ func (h *Handler) taskCardMergeMenuStates(ctx context.Context, tasks []models.Ta
 		repoPath = project.RepoPath
 	}
 	terminalPaths := make([]string, 0)
-	relationRefs := make([]string, 0)
+	relationRequests := make([]taskCardBranchRelation, 0)
 	for i := range tasks {
 		task := &tasks[i]
 		recoverTaskCardMetadata(task, snapshot)
@@ -723,7 +731,7 @@ func (h *Handler) taskCardMergeMenuStates(ctx context.Context, tasks []models.Ta
 			if task.WorktreePath != "" {
 				terminalPaths = append(terminalPaths, task.WorktreePath)
 			}
-			relationRefs = append(relationRefs, task.WorktreeBranch, task.MergeTargetBranch)
+			relationRequests = append(relationRequests, taskCardBranchRelation{branch: task.WorktreeBranch, target: task.MergeTargetBranch})
 		}
 	}
 	var snapshotWG sync.WaitGroup
@@ -734,7 +742,7 @@ func (h *Handler) taskCardMergeMenuStates(ctx context.Context, tasks []models.Ta
 	}()
 	go func() {
 		defer snapshotWG.Done()
-		taskCardLoadBranchRelations(ctx, repoPath, relationRefs, snapshot)
+		taskCardLoadBranchRelations(ctx, repoPath, relationRequests, snapshot)
 	}()
 	snapshotWG.Wait()
 
