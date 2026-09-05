@@ -5774,7 +5774,7 @@ func TestSaveUIPreferences_RejectsInvalidThemeID(t *testing.T) {
 	}
 }
 
-func TestSidebar_ProjectSelectorSingleBorderAndFocusVisible(t *testing.T) {
+func TestSidebar_ProjectSelectorSearchTriggerAndFocusVisible(t *testing.T) {
 	_, e, _ := setupTestHandler(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/tasks", nil)
@@ -5784,22 +5784,38 @@ func TestSidebar_ProjectSelectorSingleBorderAndFocusVisible(t *testing.T) {
 
 	required := []string{
 		`id="project-selector"`,
-		`class="select select-bordered select-sm w-full sidebar-project-select"`,
-		`.sidebar-project-select,`,
-		`.sidebar-project-select:hover,`,
-		`.sidebar-project-select:focus,`,
-		`.sidebar-project-select:active {`,
+		`class="sr-only"`,
+		`aria-hidden="true"`,
+		`data-project-selector-value`,
+		`id="project-selector-trigger"`,
+		`class="sidebar-project-trigger btn btn-ghost btn-sm w-full min-w-0 justify-between gap-2 border border-base-300 px-3 normal-case font-normal"`,
+		`aria-haspopup="dialog"`,
+		`aria-controls="project-selector-dialog"`,
+		`id="project-selector-dialog"`,
+		`id="project-selector-search"`,
+		`type="search"`,
+		`placeholder="Search projects"`,
+		`role="listbox"`,
+		`data-project-selector-option`,
+		`data-project-selector-clear`,
+		`.sidebar-project-trigger,`,
+		`.sidebar-project-trigger:hover,`,
+		`.sidebar-project-trigger:focus,`,
+		`.sidebar-project-trigger:active {`,
 		`box-shadow: none;`,
 		`--tw-ring-shadow: 0 0 #0000;`,
-		`.sidebar-project-select:focus-visible {`,
+		`.sidebar-project-trigger:focus-visible {`,
 		`box-shadow: 0 0 0 2px hsl(var(--p) / 0.28);`,
-		`[data-theme="dark"] .sidebar-project-select:focus-visible {`,
+		`[data-theme="dark"] .sidebar-project-trigger:focus-visible {`,
 		`box-shadow: 0 0 0 2px hsl(var(--bc) / 0.35);`,
 	}
 	for _, snippet := range required {
 		if !strings.Contains(body, snippet) {
-			t.Fatalf("sidebar project selector styling missing snippet: %s", snippet)
+			t.Fatalf("sidebar searchable project selector missing snippet: %s", snippet)
 		}
+	}
+	if strings.Contains(body, `class="select select-bordered select-sm w-full sidebar-project-select"`) {
+		t.Fatal("sidebar project selector must not expose the old native dropdown")
 	}
 }
 

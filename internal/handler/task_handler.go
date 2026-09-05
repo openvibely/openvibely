@@ -2238,17 +2238,32 @@ func (h *Handler) UpdateTaskStatus(c echo.Context) error {
 
 func (h *Handler) BatchUpdateTaskCategory(c echo.Context) error {
 	projectID := c.FormValue("project_id")
-	taskIDs := c.FormValue("task_ids")
+	taskIDsValue := c.FormValue("task_ids")
 	category := models.TaskCategory(c.FormValue("category"))
-	applog.Infof("[handler] BatchUpdateTaskCategory project=%s category=%s task_ids=%s", projectID, category, taskIDs)
+	applog.Infof("[handler] BatchUpdateTaskCategory project=%s category=%s task_ids=%s", projectID, category, taskIDsValue)
+
+	taskIDs := make([]string, 0)
+	for _, rawID := range strings.Split(taskIDsValue, ",") {
+		if id := strings.TrimSpace(rawID); id != "" {
+			taskIDs = append(taskIDs, id)
+		}
+	}
+
+	// Preflight every selected task before any schedule, model, worker, or
+	// category mutation can occur. This prevents stale selections from changing
+	// a task outside the project whose board is currently open.
+	if err := h.taskSvc.ValidateTaskIDsForProject(c.Request().Context(), projectID, taskIDs); err != nil {
+		if errors.Is(err, service.ErrTaskNotFoundInProject) {
+			applog.Infof("[handler] BatchUpdateTaskCategory rejected: selected task is not in project=%s", projectID)
+			return echo.NewHTTPError(http.StatusBadRequest, "one or more selected tasks were not found in the selected project")
+		}
+		applog.Infof("[handler] BatchUpdateTaskCategory error validating task ownership: %v", err)
+		return err
+	}
 
 	// Validate: if moving to scheduled category, all tasks must have schedules
 	if category == models.CategoryScheduled {
-		for _, id := range strings.Split(taskIDs, ",") {
-			id = strings.TrimSpace(id)
-			if id == "" {
-				continue
-			}
+		for _, id := range taskIDs {
 			schedules, err := h.scheduleRepo.ListByTask(c.Request().Context(), id)
 			if err != nil {
 				applog.Infof("[handler] BatchUpdateTaskCategory error checking schedules for task=%s: %v", id, err)
@@ -2272,11 +2287,7 @@ func (h *Handler) BatchUpdateTaskCategory(c echo.Context) error {
 		}
 	}
 
-	for _, id := range strings.Split(taskIDs, ",") {
-		id = strings.TrimSpace(id)
-		if id == "" {
-			continue
-		}
+	for _, id := range taskIDs {
 		if err := h.taskSvc.UpdateCategory(c.Request().Context(), id, category); err != nil {
 			applog.Infof("[handler] BatchUpdateTaskCategory error task=%s: %v", id, err)
 			return err
