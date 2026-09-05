@@ -54,6 +54,25 @@ err()  { echo -e "${RED}[build]${NC} $*" >&2; }
 info() { echo -e "${CYAN}[build]${NC} $*"; }
 fail() { err "$*"; exit 1; }
 
+verify_desktop_icon_marker() {
+    local binary="$1" expected="$2"
+    if [[ "${DRY_RUN:-0}" == "1" ]]; then
+        echo -e "${YELLOW}[DRY-RUN]${NC} Would verify desktop icon marker ${expected} in ${binary}"
+        return
+    fi
+    grep -aFq "$expected" "$binary" || fail "Desktop binary $(basename "$binary") does not contain required icon marker ${expected}."
+}
+
+verify_windows_icon_resource() {
+    local binary="$1"
+    if [[ "${DRY_RUN:-0}" == "1" ]]; then
+        echo -e "${YELLOW}[DRY-RUN]${NC} Would verify Windows icon resources in ${binary}"
+        return
+    fi
+    (cd "$REPO_ROOT" && go run ./internal/releaseassets/cmd/verify-pe-icon "$binary") || \
+        fail "Windows binary $(basename "$binary") does not contain valid icon resources."
+}
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=release-version.sh
 source "${SCRIPT_DIR}/release-version.sh"
@@ -310,6 +329,18 @@ build_desktop_binary() {
     else
         OPENVIBELY_DESKTOP_LDFLAGS="$ldflags" run_wails3 build "GOOS=$goos" "GOARCH=$goarch" "OUTPUT=$output"
     fi
+    case "$goos" in
+        linux)
+            verify_desktop_icon_marker "$output" "openvibely-desktop-icon-linux-gtk3-v1"
+            ;;
+        windows)
+            verify_desktop_icon_marker "$output" "openvibely-desktop-icon-native-v1"
+            verify_windows_icon_resource "$output"
+            ;;
+        *)
+            verify_desktop_icon_marker "$output" "openvibely-desktop-icon-native-v1"
+            ;;
+    esac
 }
 
 host_goarch() {
@@ -527,10 +558,12 @@ build_binary "$TMP_BIN/server_linux_arm64" ./cmd/server linux arm64
 
 # windows/amd64 server
 build_binary "$TMP_BIN/server_windows_amd64.exe" ./cmd/server windows amd64
+verify_windows_icon_resource "$TMP_BIN/server_windows_amd64.exe"
 sign_windows_binary "$TMP_BIN/server_windows_amd64.exe"
 
 # windows/arm64 server
 build_binary "$TMP_BIN/server_windows_arm64.exe" ./cmd/server windows arm64
+verify_windows_icon_resource "$TMP_BIN/server_windows_arm64.exe"
 sign_windows_binary "$TMP_BIN/server_windows_arm64.exe"
 
 ###############################################################################
@@ -549,6 +582,7 @@ build_macos_app() {
     local state_key="desktop-darwin-${goarch}"
 
     log "Building macOS desktop app ($goarch)..."
+    [[ -f "${REPO_ROOT}/assets/desktop/icons/openvibely.icns" ]] || fail "macOS application icon is missing."
     if [[ "${DRY_RUN:-0}" != "1" ]] && use_existing_macos_notarization "$state_key"; then
         return
     fi
@@ -609,6 +643,8 @@ fi
 if [[ -n "$WINDOWS_DESKTOP_BINARY" ]]; then
     [[ "${DRY_RUN:-0}" == "1" || -f "$WINDOWS_DESKTOP_BINARY" ]] || fail "OPENVIBELY_WINDOWS_DESKTOP_BINARY does not exist."
     run cp "$WINDOWS_DESKTOP_BINARY" "$TMP_BIN/desktop_windows_amd64.exe"
+    verify_desktop_icon_marker "$TMP_BIN/desktop_windows_amd64.exe" "openvibely-desktop-icon-native-v1"
+    verify_windows_icon_resource "$TMP_BIN/desktop_windows_amd64.exe"
 else
     build_desktop_binary "$TMP_BIN/desktop_windows_amd64.exe" windows amd64 0
 fi
@@ -643,6 +679,7 @@ build_linux_desktop() {
     elif [[ -n "$prebuilt" ]]; then
         [[ "${DRY_RUN:-0}" == "1" || -f "$prebuilt" ]] || fail "${prebuilt_var} does not exist."
         run cp "$prebuilt" "$output"
+        verify_desktop_icon_marker "$output" "openvibely-desktop-icon-linux-gtk3-v1"
     elif command -v docker &>/dev/null && has_wails3; then
         cross_image="$(wails_cross_image_for_arch "$goarch")"
         ensure_wails_cross_image "$goarch" "$cross_image"

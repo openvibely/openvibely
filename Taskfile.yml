@@ -82,7 +82,7 @@ tasks:
     summary: Builds the Linux desktop binary on a Linux host.
     cmds:
       - mkdir -p "$(dirname "{{.OUTPUT}}")"
-      - go build -trimpath -buildvcs=false -ldflags="${OPENVIBELY_DESKTOP_LDFLAGS:--s -w}" -o "{{.OUTPUT}}" {{.DESKTOP_PACKAGE}}
+      - go build -tags gtk3 -trimpath -buildvcs=false -ldflags="${OPENVIBELY_DESKTOP_LDFLAGS:--s -w}" -o "{{.OUTPUT}}" {{.DESKTOP_PACKAGE}}
     vars:
       DEFAULT_OUTPUT: '{{.BIN_DIR}}/{{.APP_NAME}}'
       OUTPUT: '{{.OUTPUT | default .DEFAULT_OUTPUT}}'
@@ -112,7 +112,7 @@ tasks:
           -e OPENVIBELY_DESKTOP_LDFLAGS="${OPENVIBELY_DESKTOP_LDFLAGS:--s -w}" \
           --entrypoint /bin/sh \
           "{{.CROSS_IMAGE}}" \
-          -lc 'cd /app && /usr/local/go/bin/go build -trimpath -buildvcs=false -ldflags="$OPENVIBELY_DESKTOP_LDFLAGS" -o "{{.OUTPUT}}" {{.DESKTOP_PACKAGE}}'
+          -lc 'cd /app && /usr/local/go/bin/go build -tags gtk3 -trimpath -buildvcs=false -ldflags="$OPENVIBELY_DESKTOP_LDFLAGS" -o "{{.OUTPUT}}" {{.DESKTOP_PACKAGE}}'
       - cmd: docker run --rm -v "{{.ROOT_DIR}}:/app" alpine chown -R $(id -u):$(id -g) "/app/$(dirname "{{.OUTPUT}}")"
         platforms: [linux, darwin]
     vars:
