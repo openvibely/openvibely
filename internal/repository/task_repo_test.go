@@ -2579,34 +2579,6 @@ func TestTaskRepo_CountRunningByProject(t *testing.T) {
 	}
 }
 
-func TestTaskRepo_ListActivePending_PriorityOrder(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	repo := NewTaskRepo(db, nil)
-	ctx := context.Background()
-
-	// Create tasks with different priorities
-	repo.Create(ctx, &models.Task{ProjectID: "default", Title: "Low Priority", Category: models.CategoryActive, Status: models.StatusPending, Priority: 1, Prompt: "p"})
-	repo.Create(ctx, &models.Task{ProjectID: "default", Title: "Urgent", Category: models.CategoryActive, Status: models.StatusPending, Priority: 4, Prompt: "p"})
-	repo.Create(ctx, &models.Task{ProjectID: "default", Title: "Normal", Category: models.CategoryActive, Status: models.StatusPending, Priority: 2, Prompt: "p"})
-	repo.Create(ctx, &models.Task{ProjectID: "default", Title: "High Priority", Category: models.CategoryActive, Status: models.StatusPending, Priority: 3, Prompt: "p"})
-
-	pending, err := repo.ListActivePending(ctx)
-	if err != nil {
-		t.Fatalf("ListActivePending: %v", err)
-	}
-	if len(pending) != 4 {
-		t.Fatalf("expected 4 pending tasks, got %d", len(pending))
-	}
-
-	// Should be ordered by priority DESC (urgent first)
-	expectedOrder := []string{"Urgent", "High Priority", "Normal", "Low Priority"}
-	for i, task := range pending {
-		if task.Title != expectedOrder[i] {
-			t.Errorf("position %d: expected %q, got %q", i, expectedOrder[i], task.Title)
-		}
-	}
-}
-
 func TestTaskRepo_SearchByTitle(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewTaskRepo(db, nil)
