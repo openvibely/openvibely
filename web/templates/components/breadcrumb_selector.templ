@@ -23,43 +23,37 @@ templ BreadcrumbSelector(config models.BreadcrumbSelector) {
 			<span class="min-w-0 truncate">{ config.CurrentName }</span>
 			<svg class="h-4 w-4 shrink-0 opacity-60" width="16" height="16" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd"></path></svg>
 		</button>
-		<dialog id={ config.ID + "-dialog" } class="modal p-4" role="dialog" aria-modal="true" aria-labelledby={ config.ID + "-heading" } data-breadcrumb-selector-dialog>
-			<div class="modal-box flex max-h-[min(32rem,calc(100dvh-2rem))] w-[28rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden border border-base-300 bg-base-100 p-0 shadow-xl">
+		<dialog id={ config.ID + "-dialog" } class="fixed m-0 max-h-[min(32rem,calc(100dvh-1rem))] w-[28rem] max-w-[calc(100vw-1rem)] overflow-hidden rounded-box border border-base-300 bg-base-100 p-0 text-base-content shadow-xl backdrop:bg-transparent" role="dialog" aria-modal="true" aria-labelledby={ config.ID + "-heading" } data-breadcrumb-selector-dialog>
+			<div class="flex max-h-[inherit] min-h-0 flex-col overflow-hidden">
 				<div class="flex items-center justify-between gap-3 border-b border-base-300 px-4 py-3">
 					<h2 id={ config.ID + "-heading" } class="min-w-0 truncate text-base font-bold">Switch { config.Kind }</h2>
 					<button class="btn btn-ghost btn-sm btn-square shrink-0" type="button" aria-label={ "Close " + config.Kind + " selector" } data-breadcrumb-selector-close>✕</button>
 				</div>
-				<div class="border-b border-base-300 p-3">
+				<div class="relative border-b border-base-300">
 					<label class="sr-only" for={ config.ID + "-search" }>Search { config.Kind }s</label>
-					<label class="input input-bordered flex w-full items-center gap-2">
-						<svg class="h-4 w-4 shrink-0 opacity-50" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg>
-						<input
-							id={ config.ID + "-search" }
-							class="min-w-0 grow"
-							type="search"
-							name="search"
-							placeholder={ "Search " + config.Kind + "s" }
-							autocomplete="off"
-							hx-get={ config.SearchURL }
-							hx-include="closest [data-breadcrumb-selector]"
-							hx-trigger="input changed delay:200ms, search"
-							hx-target={ "#" + config.ID + "-results" }
-							hx-swap="innerHTML"
-							hx-sync="this:replace"
-							hx-indicator={ "#" + config.ID + "-loading" }
-							data-breadcrumb-selector-search
-						/>
-					</label>
+					<input
+						id={ config.ID + "-search" }
+						class="w-full min-w-0 border-0 bg-transparent px-4 py-2 pr-10 text-sm focus:outline-none focus:ring-0"
+						type="search"
+						name="search"
+						placeholder={ "Search " + config.Kind + "s" }
+						autocomplete="off"
+						hx-get={ config.SearchURL }
+						hx-include="closest [data-breadcrumb-selector]"
+						hx-trigger="input changed delay:200ms, search"
+						hx-target={ "#" + config.ID + "-results" }
+						hx-swap="innerHTML"
+						hx-sync="this:replace"
+						hx-indicator={ "#" + config.ID + "-loading" }
+						data-breadcrumb-selector-search
+					/>
+					<span id={ config.ID + "-loading" } class="loading loading-spinner loading-xs htmx-indicator pointer-events-none absolute right-3 top-1/2 -translate-y-1/2" aria-hidden="true"></span>
 				</div>
 				<div id={ config.ID + "-results" } class="min-h-0 flex-1 overflow-y-auto overscroll-contain p-2" data-breadcrumb-selector-results>
 					<p class="px-3 py-6 text-center text-sm text-base-content/60">Loading { config.Kind }s…</p>
 				</div>
-				<div class="flex min-h-8 items-center border-t border-base-300 px-4 py-2 text-xs text-base-content/60">
-					<span id={ config.ID + "-loading" } class="loading loading-spinner loading-xs htmx-indicator" aria-hidden="true"></span>
-					<span class="ml-2" role="status" aria-live="polite" data-breadcrumb-selector-status>Search results update as you type.</span>
-				</div>
+				<span class="sr-only" role="status" aria-live="polite" data-breadcrumb-selector-status>Search results update as you type.</span>
 			</div>
-			<form method="dialog" class="modal-backdrop"><button aria-label={ "Close " + config.Kind + " selector" }>close</button></form>
 		</dialog>
 	</div>
 	@breadcrumbSelectorScript()
@@ -107,6 +101,24 @@ templ breadcrumbSelectorScript() {
 			if (window.openVibelyBreadcrumbSelectorInstalled) return;
 			window.openVibelyBreadcrumbSelectorInstalled = true;
 			function rootFor(node) { return node && node.closest ? node.closest('[data-breadcrumb-selector]') : null; }
+			function position(dialog) {
+				if (!dialog || !dialog.open) return;
+				var root = rootFor(dialog), button = root && root.querySelector('[data-breadcrumb-selector-button]');
+				if (!button) return;
+				var margin = 8, gap = 4, trigger = button.getBoundingClientRect();
+				dialog.style.maxHeight = '';
+				var width = dialog.offsetWidth, height = dialog.offsetHeight;
+				var left = Math.max(margin, Math.min(trigger.right - width, window.innerWidth - width - margin));
+				var belowTop = trigger.bottom + gap, below = window.innerHeight - belowTop - margin, above = trigger.top - gap - margin;
+				var top = belowTop, available = below;
+				if (below < Math.min(height, 160) && above > below) {
+					available = above;
+					top = Math.max(margin, trigger.top - gap - Math.min(height, available));
+				}
+				dialog.style.left = left + 'px';
+				dialog.style.top = top + 'px';
+				dialog.style.maxHeight = Math.max(0, available) + 'px';
+			}
 			function close(dialog, restore) {
 				if (!dialog || !dialog.open) return;
 				var root = rootFor(dialog), button = root && root.querySelector('[data-breadcrumb-selector-button]');
@@ -115,11 +127,16 @@ templ breadcrumbSelectorScript() {
 				if (restore && button && button.isConnected) button.focus({preventScroll: true});
 			}
 			document.addEventListener('click', function(event) {
+				if (event.target && event.target.matches && event.target.matches('[data-breadcrumb-selector-dialog]')) {
+					close(event.target, true);
+					return;
+				}
 				var button = event.target.closest && event.target.closest('[data-breadcrumb-selector-button]');
 				if (button) {
 					var root = rootFor(button), dialog = root && root.querySelector('[data-breadcrumb-selector-dialog]');
 					if (!dialog) return;
 					dialog.showModal(); button.setAttribute('aria-expanded', 'true');
+					position(dialog);
 					var input = root.querySelector('[data-breadcrumb-selector-search]');
 					if (input) { input.focus(); input.select(); if (window.htmx) htmx.trigger(input, 'search'); }
 					return;
@@ -148,14 +165,20 @@ templ breadcrumbSelectorScript() {
 			});
 			document.addEventListener('htmx:afterSwap', function(event) {
 				var root = rootFor(event.detail && event.detail.target); if (!root) return;
-				var count = root.querySelectorAll('[data-breadcrumb-selector-option]').length, status = root.querySelector('[data-breadcrumb-selector-status]');
-				if (status) status.textContent = count ? count + (count === 1 ? ' result.' : ' results.') : 'No results.';
+				var status = root.querySelector('[data-breadcrumb-selector-status]');
+				if (status) status.textContent = root.querySelector('[data-breadcrumb-selector-empty]') ? 'No results.' : 'Search results updated.';
+				position(root.querySelector('[data-breadcrumb-selector-dialog]'));
 			});
 			document.addEventListener('htmx:beforeSwap', function(event) {
 				var target = event.detail && event.detail.target;
 				if (!target || rootFor(target) || target.id !== 'main-content') return;
 				document.querySelectorAll('[data-breadcrumb-selector-dialog][open]').forEach(function(dialog) { close(dialog, false); });
 			});
+			window.addEventListener('resize', function() { document.querySelectorAll('[data-breadcrumb-selector-dialog][open]').forEach(position); });
+			document.addEventListener('scroll', function(event) {
+				if (event.target && event.target.closest && event.target.closest('[data-breadcrumb-selector-dialog]')) return;
+				document.querySelectorAll('[data-breadcrumb-selector-dialog][open]').forEach(position);
+			}, true);
 			window.addEventListener('popstate', function() { document.querySelectorAll('[data-breadcrumb-selector-dialog][open]').forEach(function(dialog) { close(dialog, false); }); });
 		})();
 	</script>
