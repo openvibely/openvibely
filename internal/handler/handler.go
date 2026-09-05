@@ -896,6 +896,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 
 	// Channels (Integrations)
 	e.GET("/channels", h.handleChannels)
+	e.DELETE("/channels/bulk", h.handleChannelsBulkDelete)
 	e.GET("/channels/github/runtime-settings", h.GitHubRuntimeSettingsFragment)
 	e.POST("/channels/telegram", h.handleTelegramSave)
 	e.POST("/channels/telegram/test", h.handleTelegramTest)

@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"strings"
 )
 
@@ -99,6 +100,48 @@ func (r *SettingsRepo) SetMany(ctx context.Context, values map[string]string) er
 			if _, err := tx.ExecContext(ctx,
 				"INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
 				key, value); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// RemoveChannelsBulk atomically resets provider settings and removes project-owned
+// webhooks. Discord authorization is system-wide and is cleared only when the
+// Discord provider is part of the same removal request.
+func (r *SettingsRepo) RemoveChannelsBulk(ctx context.Context, projectID string, values map[string]string, webhookIDs []string, removeDiscordAuthorization bool) error {
+	if len(values) == 0 && len(webhookIDs) == 0 {
+		return fmt.Errorf("at least one channel is required")
+	}
+	return withImmediateTx(ctx, r.db, func(tx SQLExecutor) error {
+		if len(webhookIDs) > 0 {
+			placeholders := strings.TrimSuffix(strings.Repeat("?,", len(webhookIDs)), ",")
+			args := make([]any, 0, len(webhookIDs)+1)
+			args = append(args, projectID)
+			for _, id := range webhookIDs {
+				args = append(args, id)
+			}
+			var count int
+			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM webhook_endpoints WHERE project_id = ? AND id IN (`+placeholders+`)`, args...).Scan(&count); err != nil {
+				return err
+			}
+			if count != len(webhookIDs) {
+				return ErrWebhookNotFound
+			}
+			if _, err := tx.ExecContext(ctx, `DELETE FROM webhook_endpoints WHERE project_id = ? AND id IN (`+placeholders+`)`, args...); err != nil {
+				return err
+			}
+		}
+		for key, value := range values {
+			if _, err := tx.ExecContext(ctx,
+				"INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+				key, value); err != nil {
+				return err
+			}
+		}
+		if removeDiscordAuthorization {
+			if _, err := tx.ExecContext(ctx, `DELETE FROM discord_authorized_users`); err != nil {
 				return err
 			}
 		}
