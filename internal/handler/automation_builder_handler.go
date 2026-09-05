@@ -148,7 +148,8 @@ func (h *Handler) EditAutomationBuilder(c echo.Context) error {
 	currentTemplateRevision := service.CurrentAutomationTemplateRevision(candidate.AdapterKey)
 	templateUpdateAvailable := currentTemplateRevision > 0 &&
 		(opened.Definition.Automation.TemplateRevision == nil || *opened.Definition.Automation.TemplateRevision < currentTemplateRevision)
-	updateTemplate := c.FormValue("update_template") == "true"
+	isOpenRequest := c.Request().Method == http.MethodGet
+	updateTemplate := !isOpenRequest && c.FormValue("update_template") == "true"
 	if updateTemplate {
 		if !templateUpdateAvailable {
 			return echo.NewHTTPError(http.StatusBadRequest, "this Automation already uses the latest template")
@@ -159,7 +160,7 @@ func (h *Handler) EditAutomationBuilder(c echo.Context) error {
 		}
 		h.applyAutomationTemplateDefaultModel(ctx, projectID, &candidate)
 		candidate.Name = opened.Candidate.Name
-	} else if rawYAML, yamlSubmitted := automationDraftFormValue(c, "automation_yaml"); yamlSubmitted || strings.TrimSpace(c.FormValue("candidate_json")) != "" {
+	} else if rawYAML, yamlSubmitted := automationDraftFormValue(c, "automation_yaml"); !isOpenRequest && (yamlSubmitted || strings.TrimSpace(c.FormValue("candidate_json")) != "") {
 		candidate, err = decodeAutomationBuilderCandidate(c)
 		if err != nil {
 			validated, validationErr := h.automationDraftSvc.PreviewCandidate(ctx, projectID, opened.Candidate, opened.Definition)
@@ -183,9 +184,9 @@ func (h *Handler) EditAutomationBuilder(c echo.Context) error {
 	page := models.AutomationBuilderPage{Result: *result, AutomationID: automationID, Source: opened.Definition.Version.Source,
 		TemplateUpdateAvailable: templateUpdateAvailable, LifecycleState: opened.Definition.Automation.LifecycleState, InitialView: automationBuilderInitialView(c)}
 	if isHTMX(c) {
-		c.Response().Header().Set("HX-Push-Url", "/automations/"+automationID+"?project_id="+projectID)
+		c.Response().Header().Set("HX-Push-Url", "/automations/"+automationID+"/builder?project_id="+projectID)
 	}
-	if !updateTemplate && !automationBuilderSaveRequested(c) {
+	if isOpenRequest || (!updateTemplate && !automationBuilderSaveRequested(c)) {
 		return h.renderAutomationBuilder(c, page)
 	}
 	return h.saveAutomationBuilderCandidate(c, projectID, page, updateTemplate)

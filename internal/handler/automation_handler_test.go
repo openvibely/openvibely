@@ -428,6 +428,18 @@ func TestAutomationWebBuilderKeepsUnsavedChangesBrowserLocal(t *testing.T) {
 	require.NoError(t, tc.db.QueryRow(`SELECT COUNT(*) FROM automation_versions WHERE automation_id = ? AND state = 'draft'`, automationID).Scan(&draftCount))
 	require.Zero(t, draftCount, "opening Edit automation must not clone a persisted draft")
 
+	malicious := valid
+	malicious.Name = "GET must not save this name"
+	rawMalicious, err := json.Marshal(malicious)
+	require.NoError(t, err)
+	openedByGET := tc.HTTP().Get("/automations/" + automationID + "/builder?" + url.Values{
+		"project_id": {project.ID}, "candidate_json": {string(rawMalicious)}, "save_changes": {"true"},
+	}.Encode()).Execute()
+	require.Equal(t, http.StatusOK, openedByGET.Code, openedByGET.Body.String())
+	var persistedName string
+	require.NoError(t, tc.db.QueryRow(`SELECT name FROM automations WHERE id = ?`, automationID).Scan(&persistedName))
+	require.Equal(t, "Saved task automation", persistedName, "hard-refreshable Edit GET must never process mutation form values")
+
 	valid.Name = "Unsaved browser name"
 	rawEdited, err := json.Marshal(valid)
 	require.NoError(t, err)

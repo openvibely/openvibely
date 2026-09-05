@@ -280,6 +280,9 @@ func TestTaskThreadScheduledSteeringFallsBackToNormalFollowupInChrome(t *testing
       check();
     });
   }
+  if (document.readyState === 'loading') {
+    await new Promise(function(resolve) { document.addEventListener('DOMContentLoaded', resolve, {once: true}); });
+  }
   var input = document.getElementById('task-message-input');
   var apple = input.placeholder.indexOf('⌘+⏎ steers') !== -1;
   input.value = 'queue after stale scheduled steer';
