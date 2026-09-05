@@ -5,6 +5,18 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
+func sidebarProjectDisplayName(projects []models.Project, currentProjectID string) string {
+	for _, project := range projects {
+		if project.ID == currentProjectID {
+			return project.Name
+		}
+	}
+	if len(projects) > 0 {
+		return projects[0].Name
+	}
+	return "No projects available"
+}
+
 templ Sidebar(projects []models.Project, currentProjectID string) {
 	<aside id="sidebar" class="sidebar-aside relative z-[210] lg:z-auto bg-base-100 w-64 h-screen border-r border-base-300 flex flex-col">
 		<div class="p-4 flex-1 overflow-y-auto overflow-x-hidden sidebar-inner">
@@ -31,7 +43,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 			</div>
 
 			<!-- Project Selector -->
-			<div class="form-control mb-6 sidebar-hide-collapsed">
+			<div class="form-control mb-6 sidebar-hide-collapsed" data-project-selector>
 				<div class="flex items-center justify-between mb-1">
 					<span class="label-text text-xs uppercase tracking-wider opacity-60">Project</span>
 					<div class="flex items-center gap-1">
@@ -58,22 +70,222 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 				</div>
 				<select
 					id="project-selector"
-					class="select select-bordered select-sm w-full sidebar-project-select"
+					class="sr-only"
+					aria-hidden="true"
+					tabindex="-1"
+					data-project-selector-value
 				>
 					for _, p := range projects {
 						<option
 							value={ p.ID }
-							if p.ID == currentProjectID {
-								selected
-							}
+							selected?={ p.ID == currentProjectID }
 						>
 							{ p.Name }
 						</option>
 					}
 				</select>
+				<button
+					id="project-selector-trigger"
+					class="sidebar-project-trigger btn btn-ghost btn-sm w-full min-w-0 justify-between gap-2 border border-base-300 px-3 normal-case font-normal"
+					type="button"
+					aria-label="Switch project"
+					aria-haspopup="dialog"
+					aria-expanded="false"
+					aria-controls="project-selector-dialog"
+					disabled?={ len(projects) == 0 }
+				>
+					<span id="project-selector-current-label" class="min-w-0 truncate">{ sidebarProjectDisplayName(projects, currentProjectID) }</span>
+					<svg class="h-4 w-4 shrink-0 opacity-60" width="16" height="16" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-.02-1.06z" clip-rule="evenodd"></path></svg>
+				</button>
+				<dialog id="project-selector-dialog" class="sidebar-project-dialog fixed inset-0 m-auto max-h-[min(32rem,calc(100dvh-1rem))] w-[28rem] max-w-[calc(100vw-1rem)] overflow-hidden rounded-box border border-base-300 bg-base-100 p-0 text-base-content shadow-xl backdrop:bg-transparent" role="dialog" aria-modal="true" aria-labelledby="project-selector-heading" data-project-selector-dialog>
+					<div class="modal-box flex w-full max-w-none max-h-[inherit] min-h-0 flex-col overflow-hidden rounded-none bg-transparent p-0 shadow-none">
+						<div class="flex items-center justify-between gap-3 border-b border-base-300 px-4 py-3">
+							<h2 id="project-selector-heading" class="min-w-0 truncate text-base font-bold">Switch project</h2>
+							<button class="btn btn-ghost btn-sm btn-square ov-modal-close shrink-0" type="button" aria-label="Close project selector" title="Close project selector" data-project-selector-close>✕</button>
+						</div>
+						<div class="relative border-b border-base-300">
+							<label class="sr-only" for="project-selector-search">Search projects</label>
+							<input
+								id="project-selector-search"
+								class="w-full min-w-0 border-0 bg-transparent px-4 py-2 pr-10 text-sm focus:outline-none focus:ring-0"
+								type="search"
+								name="search"
+								placeholder="Search projects"
+								autocomplete="off"
+								aria-controls="project-selector-results"
+								aria-autocomplete="list"
+								data-project-selector-search
+							/>
+							<button class="btn btn-ghost btn-xs absolute right-1 top-1/2 -translate-y-1/2" type="button" aria-label="Clear project search" data-project-selector-clear hidden>Clear</button>
+						</div>
+						<div id="project-selector-results" class="min-h-0 flex-1 overflow-y-auto overscroll-contain p-2" role="listbox" aria-label="Projects" data-project-selector-results>
+							if len(projects) == 0 {
+								<div class="px-3 py-8 text-center text-sm text-base-content/60" data-project-selector-no-projects>No projects available.</div>
+							} else {
+								for _, p := range projects {
+									<button
+										class="flex min-h-11 w-full min-w-0 items-center justify-between gap-3 rounded-btn px-3 py-2 text-left hover:bg-base-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+										type="button"
+										role="option"
+										aria-selected={ fmt.Sprintf("%t", p.ID == currentProjectID) }
+										tabindex="-1"
+										data-project-selector-option
+										data-project-id={ p.ID }
+										data-project-name={ p.Name }
+									>
+										<span class="min-w-0 break-words">{ p.Name }</span>
+										<span class="badge badge-sm badge-outline shrink-0" data-project-selector-current hidden?={ p.ID != currentProjectID }>Current</span>
+									</button>
+								}
+								<div class="px-3 py-8 text-center" data-project-selector-no-match hidden>
+									<p class="font-medium">No projects match your search.</p>
+									<p class="mt-1 text-sm text-base-content/60">Try a different name.</p>
+								</div>
+							}
+						</div>
+						<span class="sr-only" role="status" aria-live="polite" data-project-selector-status>All projects shown.</span>
+					</div>
+				</dialog>
 			</div>
 			<script>
+				// Project selector behavior is installed once so full-page and HTMX paths share one controller.
 				(function() {
+					if (window.openVibelyProjectSelectorInstalled) return;
+					window.openVibelyProjectSelectorInstalled = true;
+					var root = document.querySelector('[data-project-selector]');
+					var sel = document.getElementById('project-selector');
+					var trigger = document.getElementById('project-selector-trigger');
+					var dialog = document.getElementById('project-selector-dialog');
+					var search = document.getElementById('project-selector-search');
+					if (!root || !sel || !trigger || !dialog || !search) return;
+
+					function normalize(value) {
+						return String(value || '').trim().toLowerCase();
+					}
+
+					function projectOptions() {
+						return Array.prototype.slice.call(root.querySelectorAll('[data-project-selector-option]'));
+					}
+
+					function visibleProjectOptions() {
+						return projectOptions().filter(function(option) { return !option.hidden; });
+					}
+
+					function applyFilter() {
+						var query = normalize(search.value);
+						var matchCount = 0;
+						var currentProjectID = sel.value;
+						projectOptions().forEach(function(option) {
+							var isMatch = !query || normalize(option.getAttribute('data-project-name')).indexOf(query) !== -1;
+							var isCurrent = option.getAttribute('data-project-id') === currentProjectID;
+							if (isMatch) matchCount++;
+							option.hidden = !(isMatch || (query && isCurrent));
+							option.setAttribute('aria-hidden', option.hidden ? 'true' : 'false');
+							option.tabIndex = option.hidden ? -1 : 0;
+						});
+						var noMatch = root.querySelector('[data-project-selector-no-match]');
+						if (noMatch) noMatch.hidden = !query || matchCount > 0;
+						var clear = root.querySelector('[data-project-selector-clear]');
+						if (clear) clear.hidden = !query;
+						var status = root.querySelector('[data-project-selector-status]');
+						if (status) status.textContent = query && matchCount === 0 ? 'No projects match your search.' : (query ? 'Matching projects updated.' : 'All projects shown.');
+					}
+
+					function syncCurrentProject(projectID) {
+						var currentName = '';
+						projectOptions().forEach(function(option) {
+							var isCurrent = option.getAttribute('data-project-id') === projectID;
+							option.setAttribute('aria-selected', isCurrent ? 'true' : 'false');
+							var marker = option.querySelector('[data-project-selector-current]');
+							if (marker) marker.hidden = !isCurrent;
+							if (isCurrent) currentName = option.getAttribute('data-project-name') || '';
+						});
+						var label = root.querySelector('#project-selector-current-label');
+						if (label && currentName) label.textContent = currentName;
+						applyFilter();
+					}
+
+					function closeSelector(restoreFocus) {
+						if (dialog.open) dialog.close();
+						trigger.setAttribute('aria-expanded', 'false');
+						if (restoreFocus && trigger.isConnected) trigger.focus({preventScroll: true});
+					}
+
+					function openSelector() {
+						if (trigger.disabled || dialog.open) return;
+						dialog.showModal();
+						trigger.setAttribute('aria-expanded', 'true');
+						syncCurrentProject(sel.value);
+						search.focus();
+						search.select();
+					}
+
+					function selectProject(projectID) {
+						if (!projectID) return;
+						closeSelector(true);
+						if (projectID === sel.value) return;
+						sel.value = projectID;
+						sel.dispatchEvent(new Event('change', { bubbles: true }));
+					}
+
+					projectOptions().forEach(function(option) {
+						option.addEventListener('click', function() { selectProject(option.getAttribute('data-project-id')); });
+					});
+					search.addEventListener('input', applyFilter);
+					var clear = root.querySelector('[data-project-selector-clear]');
+					if (clear) clear.addEventListener('click', function() { search.value = ''; applyFilter(); search.focus(); });
+					var closeButton = root.querySelector('[data-project-selector-close]');
+					if (closeButton) closeButton.addEventListener('click', function() { closeSelector(true); });
+					trigger.addEventListener('click', openSelector);
+					dialog.addEventListener('click', function(event) { if (event.target === dialog) closeSelector(true); });
+					dialog.addEventListener('cancel', function(event) { event.preventDefault(); closeSelector(true); });
+					dialog.addEventListener('close', function() { trigger.setAttribute('aria-expanded', 'false'); });
+
+					document.addEventListener('keydown', function(event) {
+						if (event.target === trigger && (event.key === 'Enter' || event.key === ' ' || event.key === 'ArrowDown')) {
+							event.preventDefault();
+							openSelector();
+							return;
+						}
+						if (!dialog.open) return;
+						if (event.key === 'Escape') {
+							event.preventDefault();
+							closeSelector(true);
+							return;
+						}
+						var options = visibleProjectOptions();
+						if (event.target === search && (event.key === 'ArrowDown' || event.key === 'ArrowUp') && options.length) {
+							event.preventDefault();
+							(options[event.key === 'ArrowDown' ? 0 : options.length - 1]).focus();
+							return;
+						}
+						var index = options.indexOf(event.target);
+						if (index < 0) return;
+						if (event.key === 'Enter' || event.key === ' ') {
+							event.preventDefault();
+							event.target.click();
+							return;
+						}
+						if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+							event.preventDefault();
+							options[(index + (event.key === 'ArrowDown' ? 1 : options.length - 1)) % options.length].focus();
+						}
+					});
+
+					document.addEventListener('htmx:beforeSwap', function(event) {
+						var target = event.detail && event.detail.target;
+						if (target && target.id === 'main-content') closeSelector(false);
+					});
+					document.addEventListener('htmx:historyRestore', function() { closeSelector(false); });
+					window.addEventListener('popstate', function() { closeSelector(false); });
+					window.openVibelyProjectSelectorSync = syncCurrentProject;
+					syncCurrentProject(sel.value);
+				})();
+			</script>
+			<script>
+				(function() {
+					if (window.openVibelyProjectSelectorChangeInstalled) return;
+					window.openVibelyProjectSelectorChangeInstalled = true;
 					const sel = document.getElementById('project-selector');
 					if (!sel) return;
 
@@ -88,26 +300,39 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 						} catch (_) {}
 					}
 
+					var previousProjectID = sel.value;
+					function syncProjectSelector() {
+						if (typeof window.openVibelyProjectSelectorSync === 'function') {
+							window.openVibelyProjectSelectorSync(sel.value);
+						}
+					}
+
 					sel.addEventListener('change', function() {
 						const newProjectId = sel.value;
+						if (!newProjectId || newProjectId === previousProjectID) {
+							syncProjectSelector();
+							return;
+						}
 
 						// Check for open modals with unsaved changes
 						const openModals = document.querySelectorAll('dialog[open]');
 						if (openModals.length > 0) {
 							if (!confirm('You may have unsaved changes. Switch project anyway?')) {
-								// Revert selector to previous value
-								const params = new URLSearchParams(window.location.search);
-								const prevId = params.get('project_id');
-								if (prevId) sel.value = prevId;
+								// Revert selector to the last confirmed value.
+								sel.value = previousProjectID;
+								syncProjectSelector();
 								return;
 							}
 							openModals.forEach(m => m.close());
 						}
 
+						previousProjectID = newProjectId;
+						syncProjectSelector();
+
 						// Update all sidebar nav links with new project_id
 						document.querySelectorAll('[data-nav-base]').forEach(function(link) {
 							const base = link.getAttribute('data-nav-base');
-							const newUrl = base + '?project_id=' + newProjectId;
+							const newUrl = base + '?project_id=' + encodeURIComponent(newProjectId);
 							link.setAttribute('href', newUrl);
 							link.setAttribute('hx-get', newUrl);
 							htmx.process(link);
@@ -116,7 +341,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 						// Update alert badge polling URL
 						const alertBadge = document.getElementById('alert-badge');
 						if (alertBadge) {
-							alertBadge.setAttribute('hx-get', '/alerts/unread-count?project_id=' + newProjectId);
+							alertBadge.setAttribute('hx-get', '/alerts/unread-count?project_id=' + encodeURIComponent(newProjectId));
 							htmx.process(alertBadge);
 							htmx.trigger(alertBadge, 'load');
 						}
@@ -125,42 +350,58 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 						const currentPath = window.location.pathname;
 						let newUrl;
 						if (currentPath.includes('/automations')) {
-							newUrl = '/automations?project_id=' + newProjectId;
+							newUrl = '/automations?project_id=' + encodeURIComponent(newProjectId);
 						} else if (currentPath.includes('/schedule')) {
-							newUrl = '/schedule?project_id=' + newProjectId;
+							newUrl = '/schedule?project_id=' + encodeURIComponent(newProjectId);
 						} else if (currentPath.includes('/agents')) {
-							newUrl = '/agents?project_id=' + newProjectId;
+							newUrl = '/agents?project_id=' + encodeURIComponent(newProjectId);
 						} else if (currentPath.includes('/skills')) {
-							newUrl = '/skills?project_id=' + newProjectId;
+							newUrl = '/skills?project_id=' + encodeURIComponent(newProjectId);
 						} else if (currentPath.includes('/models')) {
-							newUrl = '/models?project_id=' + newProjectId;
+							newUrl = '/models?project_id=' + encodeURIComponent(newProjectId);
 						} else if (currentPath.includes('/chat')) {
-							newUrl = '/chat?project_id=' + newProjectId;
+							newUrl = '/chat?project_id=' + encodeURIComponent(newProjectId);
 						} else if (currentPath.includes('/upcoming')) {
-							newUrl = '/upcoming?project_id=' + newProjectId;
+							newUrl = '/upcoming?project_id=' + encodeURIComponent(newProjectId);
 						} else if (currentPath.includes('/history')) {
-							newUrl = '/history?project_id=' + newProjectId;
+							newUrl = '/history?project_id=' + encodeURIComponent(newProjectId);
 						} else if (currentPath.includes('/analytics')) {
-							newUrl = '/analytics?project_id=' + newProjectId;
+							newUrl = '/analytics?project_id=' + encodeURIComponent(newProjectId);
 						} else if (currentPath.includes('/alerts')) {
-							newUrl = '/alerts?project_id=' + newProjectId;
+							newUrl = '/alerts?project_id=' + encodeURIComponent(newProjectId);
 						} else if (currentPath.includes('/workers')) {
-							newUrl = '/workers?project_id=' + newProjectId;
+							newUrl = '/workers?project_id=' + encodeURIComponent(newProjectId);
 						} else if (currentPath.includes('/insights')) {
-							newUrl = '/insights?project_id=' + newProjectId;
+							newUrl = '/insights?project_id=' + encodeURIComponent(newProjectId);
 						} else if (currentPath.includes('/channels')) {
-							newUrl = '/channels?project_id=' + newProjectId;
+							newUrl = '/channels?project_id=' + encodeURIComponent(newProjectId);
 						} else if (currentPath.includes('/personality')) {
-							newUrl = '/personality?project_id=' + newProjectId;
+							newUrl = '/personality?project_id=' + encodeURIComponent(newProjectId);
 						} else {
-							newUrl = '/tasks?project_id=' + newProjectId;
+							newUrl = '/tasks?project_id=' + encodeURIComponent(newProjectId);
 						}
 
 						persistSelectedProject(newProjectId);
 
 						// HTMX owns the content swap, URL update, and history cache.
 						window.openVibelyNavigate(newUrl);
-						});
+					});
+
+					function syncProjectSelectorFromURL() {
+						var projectID = new URLSearchParams(window.location.search).get('project_id');
+						if (!projectID) return;
+						var option = Array.prototype.slice.call(sel.options).find(function(candidate) { return candidate.value === projectID; });
+						if (!option || sel.value === projectID) return;
+						sel.value = projectID;
+						previousProjectID = projectID;
+						syncProjectSelector();
+					}
+					document.addEventListener('htmx:afterSwap', function(event) {
+						var target = event.detail && event.detail.target;
+						if (target && target.id === 'main-content') syncProjectSelectorFromURL();
+					});
+					document.addEventListener('htmx:historyRestore', syncProjectSelectorFromURL);
+					window.addEventListener('popstate', syncProjectSelectorFromURL);
 				})();
 
 				// Setup Server-Sent Events for real-time alert badge updates and toast notifications
@@ -813,21 +1054,27 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 			[data-theme="dark"] .theme-collapsed-moon {
 				display: block;
 			}
-			/* Project selector: keep single border in nav, avoid extra outer ring */
-			.sidebar-project-select,
-			.sidebar-project-select:hover,
-			.sidebar-project-select:focus,
-			.sidebar-project-select:active {
+			/* Project selector trigger: keep a single visible focus ring and border. */
+			.sidebar-project-trigger,
+			.sidebar-project-trigger:hover,
+			.sidebar-project-trigger:focus,
+			.sidebar-project-trigger:active {
 				outline: none;
 				box-shadow: none;
 				--tw-ring-shadow: 0 0 #0000;
 			}
-			.sidebar-project-select:focus-visible {
+			.sidebar-project-trigger:focus-visible {
 				outline: none;
 				box-shadow: 0 0 0 2px hsl(var(--p) / 0.28);
 			}
-			[data-theme="dark"] .sidebar-project-select:focus-visible {
+			[data-theme="dark"] .sidebar-project-trigger:focus-visible {
 				box-shadow: 0 0 0 2px hsl(var(--bc) / 0.35);
+			}
+			.sidebar-project-dialog {
+				box-sizing: border-box;
+			}
+			.sidebar-project-dialog::backdrop {
+				background: transparent;
 			}
 		</style>
 

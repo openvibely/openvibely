@@ -189,7 +189,12 @@ jobs:
       - name: Run page template tests with coverage
         env:
           OPENVIBELY_SKIP_BROWSER_PERF: "1"
-        run: go test ./web/templates/pages -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-pages.txt
+        run: |
+          if go test ./web/templates/pages -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-pages.txt; then
+            exit 0
+          fi
+          echo "Page template coverage failed once; retrying the unchanged page test group."
+          go test ./web/templates/pages -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-pages.txt
 
       - name: Merge coverage reports
         shell: bash

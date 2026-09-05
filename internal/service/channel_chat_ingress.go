@@ -88,21 +88,23 @@ type channelTaskThreadSendOptions struct {
 }
 
 type channelChatIngressFirstTurnOptions struct {
-	Platform          string
-	ProjectID         string
-	Message           string
-	Source            string
-	Task              *models.Task
-	Agent             *models.LLMConfig
-	Attachments       []models.ChatAttachment
-	AttachmentContext string
-	ImageAttachments  []models.Attachment
-	HasAttachments    bool
-	Surface           chatcontrol.Surface
-	ReplyContext      ChannelReplyContext
-	InitialAckID      int
-	Start             time.Time
-	ChatHistoryLimit  int
+	Platform              string
+	ProjectID             string
+	Message               string
+	Source                string
+	Task                  *models.Task
+	Agent                 *models.LLMConfig
+	AvailableModels       []models.LLMConfig
+	AvailableModelsLoaded bool
+	Attachments           []models.ChatAttachment
+	AttachmentContext     string
+	ImageAttachments      []models.Attachment
+	HasAttachments        bool
+	Surface               chatcontrol.Surface
+	ReplyContext          ChannelReplyContext
+	InitialAckID          int
+	Start                 time.Time
+	ChatHistoryLimit      int
 
 	// RuntimeTools holds channel-specific runtime tools to pass to the handler
 	// runner. RuntimeToolsForTask is preferred when tool handlers require the
@@ -202,27 +204,73 @@ func (opts channelChatIngressOptions) selectionPrompt() string {
 	return opts.Message
 }
 
-func selectChannelChatAgent(ctx context.Context, repo *repository.LLMConfigRepo, message string, hasImages bool) (*models.LLMConfig, error) {
+type channelChatAgentSelection struct {
+	Agent           *models.LLMConfig
+	AvailableModels []models.LLMConfig
+}
+
+func selectChannelChatAgentOptions(ctx context.Context, repo *repository.LLMConfigRepo, message string, hasImages bool) (*channelChatAgentSelection, error) {
 	if repo == nil {
 		return nil, fmt.Errorf("no model repository configured")
 	}
-	agents, err := repo.List(ctx)
+
+	var (
+		agents []models.LLMConfig
+		err    error
+	)
+	if hasImages {
+		agents, err = repo.ListVisionSelectionOptions(ctx)
+	} else {
+		agents, err = repo.ListChatSelectionOptions(ctx)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to list agents: %w", err)
 	}
 	if len(agents) == 0 {
 		return nil, fmt.Errorf("no agents configured")
 	}
+
 	complexity := AnalyzeComplexity(message)
-	if result := SelectLLMWithVision(complexity, agents, hasImages); result != nil {
-		return result.LLMConfig, nil
-	}
-	for i := range agents {
-		if agents[i].IsDefault {
-			return &agents[i], nil
+	var selected models.LLMConfig
+	if result := SelectLLMWithVision(complexity, agents, hasImages); result != nil && result.LLMConfig != nil {
+		selected = *result.LLMConfig
+	} else {
+		for i := range agents {
+			if agents[i].IsDefault {
+				selected = agents[i]
+				break
+			}
+		}
+		if selected.ID == "" {
+			selected = agents[0]
 		}
 	}
-	return &agents[0], nil
+	return &channelChatAgentSelection{Agent: &selected, AvailableModels: agents}, nil
+}
+
+func hydrateSelectedChannelChatAgent(ctx context.Context, repo *repository.LLMConfigRepo, selection *channelChatAgentSelection) (*models.LLMConfig, error) {
+	if repo == nil {
+		return nil, fmt.Errorf("no model repository configured")
+	}
+	if selection == nil || selection.Agent == nil || strings.TrimSpace(selection.Agent.ID) == "" {
+		return nil, fmt.Errorf("no selected agent")
+	}
+	agent, err := repo.GetByID(ctx, selection.Agent.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load selected agent: %w", err)
+	}
+	if agent == nil {
+		return nil, fmt.Errorf("selected agent %q no longer exists", selection.Agent.ID)
+	}
+	return agent, nil
+}
+
+func selectChannelChatAgent(ctx context.Context, repo *repository.LLMConfigRepo, message string, hasImages bool) (*models.LLMConfig, error) {
+	selection, err := selectChannelChatAgentOptions(ctx, repo, message, hasImages)
+	if err != nil {
+		return nil, err
+	}
+	return hydrateSelectedChannelChatAgent(ctx, repo, selection)
 }
 
 type channelChatContextOptions struct {
@@ -230,6 +278,8 @@ type channelChatContextOptions struct {
 	ProjectID             string
 	TaskSvc               *TaskService
 	LLMConfigRepo         *repository.LLMConfigRepo
+	AvailableModels       []models.LLMConfig
+	AvailableModelsLoaded bool
 	ScheduleRepo          *repository.ScheduleRepo
 	AgentRepo             *repository.AgentRepo
 	SettingsRepo          *repository.SettingsRepo
@@ -244,9 +294,9 @@ func buildChannelChatContext(ctx context.Context, opts channelChatContextOptions
 			existingTasks = tasks
 		}
 	}
-	availableModels := []models.LLMConfig{}
-	if opts.LLMConfigRepo != nil {
-		if configs, err := opts.LLMConfigRepo.List(ctx); err == nil {
+	availableModels := opts.AvailableModels
+	if !opts.AvailableModelsLoaded && opts.LLMConfigRepo != nil {
+		if configs, err := opts.LLMConfigRepo.ListChatSelectionOptions(ctx); err == nil {
 			availableModels = configs
 		}
 	}
@@ -635,7 +685,7 @@ func runChannelChatIngress(ctx context.Context, opts channelChatIngressOptions) 
 			if opts.ContinueWithoutAttachmentsOnDownloadError {
 				// Preserve adapters such as Telegram that currently warn but continue the text turn.
 			} else {
-				agent, agentErr := selectChannelChatAgent(ctx, opts.LLMConfigRepo, opts.selectionPrompt(), opts.IncomingAttachmentsNeedVision != nil && opts.IncomingAttachmentsNeedVision())
+				agentSelection, agentErr := selectChannelChatAgentOptions(ctx, opts.LLMConfigRepo, opts.selectionPrompt(), opts.IncomingAttachmentsNeedVision != nil && opts.IncomingAttachmentsNeedVision())
 				if agentErr != nil {
 					if opts.OnModelSelectionFailed != nil {
 						opts.OnModelSelectionFailed(ctx, agentErr)
@@ -643,7 +693,7 @@ func runChannelChatIngress(ctx context.Context, opts channelChatIngressOptions) 
 					return true
 				}
 				if opts.RecordAttachmentFailure != nil {
-					opts.RecordAttachmentFailure(ctx, agent.ID, msgText)
+					opts.RecordAttachmentFailure(ctx, agentSelection.Agent.ID, msgText)
 				}
 				return true
 			}
@@ -653,7 +703,7 @@ func runChannelChatIngress(ctx context.Context, opts channelChatIngressOptions) 
 		chatAttachments = downloaded.ChatAttachments
 	}
 
-	agent, err := selectChannelChatAgent(ctx, opts.LLMConfigRepo, opts.selectionPrompt(), len(imageAttachments) > 0)
+	modelSelection, err := selectChannelChatAgentOptions(ctx, opts.LLMConfigRepo, opts.selectionPrompt(), len(imageAttachments) > 0)
 	if err != nil {
 		cleanupChannelChatAttachmentSources(ctx, opts.CleanupAttachmentSources, chatAttachments)
 		if opts.OnModelSelectionFailed != nil {
@@ -682,7 +732,7 @@ func runChannelChatIngress(ctx context.Context, opts channelChatIngressOptions) 
 				applog.Infof("[%s] queue chat attachment staging failed: %v", platform, stageErr)
 				msgText := "Failed to process attachment: unable to store attachment. Please try again."
 				if opts.RecordAttachmentFailure != nil {
-					opts.RecordAttachmentFailure(ctx, agent.ID, msgText)
+					opts.RecordAttachmentFailure(ctx, modelSelection.Agent.ID, msgText)
 				}
 				if opts.OnAttachmentStoreFailed != nil {
 					opts.OnAttachmentStoreFailed(ctx, msgText)
@@ -694,7 +744,7 @@ func runChannelChatIngress(ctx context.Context, opts channelChatIngressOptions) 
 			Platform:                platform,
 			ProjectID:               opts.ProjectID,
 			ActiveExecID:            activeChatExec.ID,
-			AgentID:                 agent.ID,
+			AgentID:                 modelSelection.Agent.ID,
 			Message:                 opts.Message,
 			Source:                  opts.Source,
 			AttachmentSessionID:     attachmentSessionID,
@@ -711,12 +761,23 @@ func runChannelChatIngress(ctx context.Context, opts channelChatIngressOptions) 
 		})
 	}
 
+	agent, err := hydrateSelectedChannelChatAgent(ctx, opts.LLMConfigRepo, modelSelection)
+	if err != nil {
+		cleanupChannelChatAttachmentSources(ctx, opts.CleanupAttachmentSources, chatAttachments)
+		if opts.OnModelSelectionFailed != nil {
+			opts.OnModelSelectionFailed(ctx, err)
+		}
+		return true
+	}
+
 	first := opts.FirstTurn
 	first.Platform = platform
 	first.ProjectID = opts.ProjectID
 	first.Message = opts.Message
 	first.Source = opts.Source
 	first.Agent = agent
+	first.AvailableModels = modelSelection.AvailableModels
+	first.AvailableModelsLoaded = true
 	first.Attachments = chatAttachments
 	first.AttachmentContext = attachmentContext
 	first.ImageAttachments = imageAttachments
@@ -1027,6 +1088,8 @@ func runChannelChatFirstTurn(ctx context.Context, opts channelChatIngressFirstTu
 		ProjectID:             opts.ProjectID,
 		TaskSvc:               opts.TaskSvc,
 		LLMConfigRepo:         opts.LLMConfigRepo,
+		AvailableModels:       opts.AvailableModels,
+		AvailableModelsLoaded: opts.AvailableModelsLoaded,
 		ScheduleRepo:          opts.ScheduleRepo,
 		AgentRepo:             opts.AgentRepo,
 		SettingsRepo:          opts.SettingsRepo,

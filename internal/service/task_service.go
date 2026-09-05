@@ -19,6 +19,7 @@ var ErrDuplicateTask = errors.New("task with this name already exists in this pr
 var ErrTaskTitleRequired = errors.New("task title is required")
 var ErrTaskPromptRequired = errors.New("task prompt is required")
 var ErrInvalidTaskPriority = errors.New("task priority must be between 1 and 4")
+var ErrTaskNotFoundInProject = errors.New("task not found in project")
 
 type TaskService struct {
 	repo                              *repository.TaskRepo
@@ -181,6 +182,21 @@ func (s *TaskService) normalizeActiveTerminalTasks(ctx context.Context, tasks []
 func (s *TaskService) GetByID(ctx context.Context, id string) (*models.Task, error) {
 	applog.Infof("[task-svc] GetByID id=%s", id)
 	return s.repo.GetByID(ctx, id)
+}
+
+// ValidateTaskIDsForProject preflights every selected task against the project
+// before a batch category mutation can perform any side effects.
+func (s *TaskService) ValidateTaskIDsForProject(ctx context.Context, projectID string, ids []string) error {
+	for _, id := range ids {
+		task, err := s.repo.GetByIDForProject(ctx, projectID, id)
+		if err != nil {
+			return fmt.Errorf("validating task %s for project %s: %w", id, projectID, err)
+		}
+		if task == nil {
+			return fmt.Errorf("%w: %s", ErrTaskNotFoundInProject, id)
+		}
+	}
+	return nil
 }
 
 func (s *TaskService) GetThreadRenderMetadata(ctx context.Context, id string) (*models.Task, error) {
