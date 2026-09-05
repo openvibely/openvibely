@@ -41,18 +41,19 @@ type AutomationCompiler struct {
 }
 
 type AutomationSaveRequest struct {
-	ProjectID              string
-	AutomationID           string
-	StableKey              string
-	Source                 string
-	CreatedVia             string
-	Candidate              models.AutomationDraftCandidate
-	ConfirmationTokenID    string
-	ConfirmationPrincipal  string
-	ConfirmationThreadID   string
-	ConfirmingUserInputID  string
-	UpdateToLatestTemplate bool
-	validatedCandidate     bool
+	ProjectID                  string
+	AutomationID               string
+	StableKey                  string
+	Source                     string
+	CreatedVia                 string
+	Candidate                  models.AutomationDraftCandidate
+	ConfirmationTokenID        string
+	ConfirmationPrincipal      string
+	ConfirmationThreadID       string
+	ConfirmingUserInputID      string
+	UpdateToLatestTemplate     bool
+	ResolvedAgentDefinitionIDs map[string]string `json:"-"`
+	validatedCandidate         bool
 }
 
 type AutomationSaveResult struct {
@@ -67,39 +68,50 @@ func (c *AutomationCompiler) SetAgentRepository(agentRepo *repository.AgentRepo)
 	c.agentRepo = agentRepo
 }
 
-func (c *AutomationCompiler) validateSaveCandidate(ctx context.Context, projectID string, candidate models.AutomationDraftCandidate) (models.AutomationDraftCandidate, []models.AutomationValidationIssue, error) {
+func (c *AutomationCompiler) validateSaveCandidate(ctx context.Context, projectID string, candidate models.AutomationDraftCandidate) (models.AutomationDraftCandidate, []models.AutomationValidationIssue, map[string]string, error) {
 	if c == nil || c.validator == nil || c.validator.drafts == nil || c.validator.registry == nil {
-		return candidate, nil, errors.New("automation save is unavailable")
+		return candidate, nil, nil, errors.New("automation save is unavailable")
 	}
 	normalized, err := c.validator.drafts.NormalizeCandidate(candidate)
 	if err != nil {
-		return candidate, nil, err
+		return candidate, nil, nil, err
 	}
-	issues, err := c.validator.drafts.validateCandidateForProject(ctx, projectID, normalized)
+	issues, snapshot, err := c.validator.drafts.validateCandidateForProjectWithSnapshot(ctx, projectID, normalized)
 	if err != nil {
-		return normalized, nil, err
+		return normalized, nil, nil, err
 	}
 	capabilityIssues, err := c.validator.capabilityIssues(ctx, projectID, normalized)
 	if err != nil {
-		return normalized, nil, err
+		return normalized, nil, nil, err
 	}
 	issues = append(issues, capabilityIssues...)
 	if c.validator.drafts.capabilities == nil {
 		agentIssues, err := c.validator.agentIssues(ctx, projectID, normalized)
 		if err != nil {
-			return normalized, nil, err
+			return normalized, nil, nil, err
 		}
 		issues = append(issues, agentIssues...)
 	}
-	return normalized, issues, nil
+	return normalized, issues, cloneAutomationAgentDefinitionIDs(snapshot.AgentDefinitionIDs), nil
+}
+
+func cloneAutomationAgentDefinitionIDs(source map[string]string) map[string]string {
+	if source == nil {
+		return nil
+	}
+	clone := make(map[string]string, len(source))
+	for key, value := range source {
+		clone[key] = value
+	}
+	return clone
 }
 
 func (c *AutomationCompiler) PreviewSave(ctx context.Context, projectID string, candidate models.AutomationDraftCandidate) (*models.AutomationSavePlan, models.AutomationDraftCandidate, error) {
-	normalized, issues, err := c.validateSaveCandidate(ctx, projectID, candidate)
+	normalized, issues, agentDefinitionIDs, err := c.validateSaveCandidate(ctx, projectID, candidate)
 	if err != nil {
 		return nil, normalized, err
 	}
-	plan := &models.AutomationSavePlan{Validation: issues, WillNot: []string{"merge pull requests", "release software", "deploy software"}}
+	plan := &models.AutomationSavePlan{Validation: issues, WillNot: []string{"merge pull requests", "release software", "deploy software"}, AgentDefinitionIDs: agentDefinitionIDs}
 	if len(issues) > 0 {
 		automationobs.Event("automation.save.validation_failure", automationobs.String("project_id", projectID), automationobs.String("adapter_key", normalized.AdapterKey))
 		return plan, normalized, nil
@@ -189,7 +201,7 @@ func (c *AutomationCompiler) Save(ctx context.Context, request AutomationSaveReq
 	if !request.validatedCandidate {
 		var issues []models.AutomationValidationIssue
 		var err error
-		candidate, issues, err = c.validateSaveCandidate(ctx, request.ProjectID, request.Candidate)
+		candidate, issues, request.ResolvedAgentDefinitionIDs, err = c.validateSaveCandidate(ctx, request.ProjectID, request.Candidate)
 		if err != nil {
 			return nil, err
 		}
@@ -241,13 +253,16 @@ func (c *AutomationCompiler) Save(ctx context.Context, request AutomationSaveReq
 		candidateNodes[node.Key] = node
 	}
 	resourceNodes := automationResourceNodes(adapter, candidate)
-	resolveAgentDefinitions := c.resolveSaveAgentDefinitions
-	if c.saveAgentResolver != nil {
-		resolveAgentDefinitions = c.saveAgentResolver
-	}
-	agentDefinitionIDs, err := resolveAgentDefinitions(ctx, request.ProjectID, resourceNodes, candidateNodes)
-	if err != nil {
-		return nil, err
+	resolvedAgentDefinitionIDs := request.ResolvedAgentDefinitionIDs
+	if resolvedAgentDefinitionIDs == nil {
+		resolveAgentDefinitions := c.resolveSaveAgentDefinitions
+		if c.saveAgentResolver != nil {
+			resolveAgentDefinitions = c.saveAgentResolver
+		}
+		resolvedAgentDefinitionIDs, err = resolveAgentDefinitions(ctx, request.ProjectID, resourceNodes, candidateNodes)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	write := repository.AutomationSaveWrite{ProjectID: request.ProjectID, AutomationID: automationID, GraphID: repository.NewID(),
@@ -263,7 +278,7 @@ func (c *AutomationCompiler) Save(ctx context.Context, request AutomationSaveReq
 		prompt, category, priority := automationNodeTaskConfiguration(candidate, node)
 		var agentDefinitionID *string
 		if ref, _ := node.Config["agent_ref"].(string); strings.TrimSpace(ref) != "" {
-			if resolvedID := agentDefinitionIDs[strings.TrimSpace(ref)]; resolvedID != "" {
+			if resolvedID := resolvedAgentDefinitionIDs[strings.TrimSpace(ref)]; resolvedID != "" {
 				agentDefinitionID = &resolvedID
 			}
 		}

@@ -214,6 +214,7 @@ func (h *Handler) previewAutomationBuilderCandidate(ctx context.Context, project
 	result := h.automationDraftSvc.PreviewValidatedCandidate(normalized, definition)
 	result.Candidate = normalized
 	result.ValidationErrors = plan.Validation
+	result.ResolvedAgentDefinitionIDs = plan.AgentDefinitionIDs
 	return result, nil
 }
 
@@ -256,7 +257,8 @@ func (h *Handler) saveAutomationBuilderCandidate(c echo.Context, projectID strin
 	}
 	saved, err := h.automationCompiler.SaveValidatedCandidate(c.Request().Context(), service.AutomationSaveRequest{
 		ProjectID: projectID, AutomationID: page.AutomationID, Source: source, CreatedVia: "web", Candidate: page.Result.Candidate,
-		UpdateToLatestTemplate: updateToLatestTemplate,
+		ResolvedAgentDefinitionIDs: page.Result.ResolvedAgentDefinitionIDs,
+		UpdateToLatestTemplate:     updateToLatestTemplate,
 	})
 	if err != nil {
 		page.Error = "Save did not apply: " + err.Error()

@@ -1568,6 +1568,12 @@ func automationCandidateHasAgentReferences(candidate models.AutomationDraftCandi
 }
 
 func (s *AutomationDraftService) validateCandidateForProject(ctx context.Context, projectID string, candidate models.AutomationDraftCandidate) ([]models.AutomationValidationIssue, error) {
+	issues, _, err := s.validateCandidateForProjectWithSnapshot(ctx, projectID, candidate)
+	return issues, err
+}
+
+func (s *AutomationDraftService) validateCandidateForProjectWithSnapshot(ctx context.Context, projectID string, candidate models.AutomationDraftCandidate) ([]models.AutomationValidationIssue, models.AutomationCapabilitySnapshot, error) {
+	var snapshot models.AutomationCapabilitySnapshot
 	if s.capabilities == nil {
 		issues := s.ValidateCandidate(candidate)
 		for _, node := range candidate.Nodes {
@@ -1579,13 +1585,13 @@ func (s *AutomationDraftService) validateCandidateForProject(ctx context.Context
 			}
 		}
 		sortAutomationValidationIssues(issues)
-		return issues, nil
+		return issues, snapshot, nil
 	}
 	snapshot, err := s.capabilities.BuildForValidation(ctx, projectID, automationCandidateHasAgentReferences(candidate))
 	if err != nil {
-		return nil, err
+		return nil, snapshot, err
 	}
-	return s.ValidateCandidateWithCapabilities(candidate, snapshot), nil
+	return s.ValidateCandidateWithCapabilities(candidate, snapshot), snapshot, nil
 }
 
 func sortAutomationValidationIssues(issues []models.AutomationValidationIssue) {

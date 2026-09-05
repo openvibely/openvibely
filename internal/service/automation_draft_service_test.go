@@ -1068,6 +1068,7 @@ func TestAutomationTaskReferencesResolveInsideSelectedProject(t *testing.T) {
 	snapshot, err := capabilities.Build(ctx, project.ID)
 	require.NoError(t, err)
 	require.Contains(t, snapshot.Agents, models.AutomationCapabilityRef{ID: "project_architect", Name: "Project Architect"})
+	require.Equal(t, agent.ID, snapshot.AgentDefinitionIDs["project_architect"])
 
 	svc := NewAutomationDraftService(repository.NewAutomationRepo(db), NewAutomationAdapterRegistry())
 	svc.SetCapabilitySnapshotBuilder(capabilities)

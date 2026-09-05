@@ -80,6 +80,7 @@ func (b *AutomationCapabilitySnapshotBuilder) build(ctx context.Context, project
 			if listErr != nil {
 				return snapshot, listErr
 			}
+			snapshot.AgentDefinitionIDs = make(map[string]string, len(agents))
 			for _, agent := range agents {
 				if len(snapshot.Agents) >= automationCapabilityLimit {
 					break
@@ -94,18 +95,29 @@ func (b *AutomationCapabilitySnapshotBuilder) build(ctx context.Context, project
 				capabilities := append([]string(nil), agent.Tools...)
 				sort.Strings(capabilities)
 				snapshot.Agents = append(snapshot.Agents, models.AutomationCapabilityRef{ID: key, Name: agent.Name, Capabilities: capabilities})
+				if key != "" && agent.ID != "" {
+					if _, exists := snapshot.AgentDefinitionIDs[key]; !exists {
+						snapshot.AgentDefinitionIDs[key] = agent.ID
+					}
+				}
 			}
 		} else if includeAgentReferences {
 			references, listErr := b.agentRepo.ListSelectableReferencesForProject(ctx, projectID, automationCapabilityLimit)
 			if listErr != nil {
 				return snapshot, listErr
 			}
+			snapshot.AgentDefinitionIDs = make(map[string]string, len(references))
 			for _, reference := range references {
 				key := strings.TrimSpace(reference.Key)
 				if key == "" {
 					key = reference.ID
 				}
 				snapshot.Agents = append(snapshot.Agents, models.AutomationCapabilityRef{ID: key})
+				if key != "" && reference.ID != "" {
+					if _, exists := snapshot.AgentDefinitionIDs[key]; !exists {
+						snapshot.AgentDefinitionIDs[key] = reference.ID
+					}
+				}
 			}
 		}
 	}

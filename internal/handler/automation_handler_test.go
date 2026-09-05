@@ -1025,7 +1025,7 @@ func TestAutomationBuilderEditUsesSingleCompactAgentValidationPass(t *testing.T)
 	counter.SetEnabled(false)
 	require.Equal(t, http.StatusNoContent, response.Code, response.Body.String())
 	compactAgentQueries, richAgentQueries = countAgentQueries()
-	require.Equal(t, 2, compactAgentQueries, "edit save must perform one compact validation query and one save-scoped compact resolution query")
+	require.Equal(t, 1, compactAgentQueries, "edit save must reuse the compact validation projection for save-scoped resolution")
 	require.Zero(t, richAgentQueries, "edit save must not hydrate the rich Agent catalog during materialization")
 
 	_, err = db.ExecContext(ctx, `UPDATE agents SET enabled = 0 WHERE id = ?`, agent.ID)
@@ -1100,7 +1100,7 @@ func TestAutomationBuilderCreateBatchesAgentResolution(t *testing.T) {
 			compactAgentQueries++
 		}
 	}
-	require.Equal(t, 2, compactAgentQueries, "builder create should perform one compact validation query and one save-scoped compact resolution query")
+	require.Equal(t, 1, compactAgentQueries, "builder create must reuse the compact validation projection for save-scoped resolution")
 	require.Zero(t, richAgentQueries, "builder create must not hydrate rich Agent rows during Save")
 
 	rows, err := db.QueryContext(ctx, `SELECT agent_definition_id FROM tasks WHERE project_id = ? AND agent_definition_id IS NOT NULL`, project.ID)

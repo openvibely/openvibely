@@ -62,12 +62,13 @@ type AutomationGraphMetadata struct {
 }
 
 type AutomationDraftResult struct {
-	Definition       *AutomationDefinition       `json:"definition,omitempty"`
-	Candidate        AutomationDraftCandidate    `json:"candidate"`
-	Assumptions      []string                    `json:"assumptions"`
-	Warnings         []string                    `json:"warnings"`
-	ValidationErrors []AutomationValidationIssue `json:"validation_errors"`
-	Summary          string                      `json:"summary"`
+	Definition                 *AutomationDefinition       `json:"definition,omitempty"`
+	Candidate                  AutomationDraftCandidate    `json:"candidate"`
+	Assumptions                []string                    `json:"assumptions"`
+	Warnings                   []string                    `json:"warnings"`
+	ValidationErrors           []AutomationValidationIssue `json:"validation_errors"`
+	Summary                    string                      `json:"summary"`
+	ResolvedAgentDefinitionIDs map[string]string           `json:"-"`
 }
 
 type AutomationCapabilityRef struct {
@@ -93,6 +94,7 @@ type AutomationCapabilitySnapshot struct {
 	Integrations       map[string]AutomationIntegrationCapability `json:"integrations"`
 	ReusableResources  []AutomationCapabilityRef                  `json:"reusable_resources"`
 	SafetyBoundaries   map[string]bool                            `json:"safety_boundaries"`
+	AgentDefinitionIDs map[string]string                          `json:"-"`
 }
 
 type AutomationSaveEffect struct {
@@ -102,9 +104,10 @@ type AutomationSaveEffect struct {
 }
 
 type AutomationSavePlan struct {
-	Effects    []AutomationSaveEffect      `json:"effects"`
-	Validation []AutomationValidationIssue `json:"validation_errors"`
-	WillNot    []string                    `json:"will_not"`
+	Effects            []AutomationSaveEffect      `json:"effects"`
+	Validation         []AutomationValidationIssue `json:"validation_errors"`
+	WillNot            []string                    `json:"will_not"`
+	AgentDefinitionIDs map[string]string           `json:"-"`
 }
 
 type AutomationChatConfirmationReceipt struct {

@@ -1304,6 +1304,9 @@ func TestAutomationCompilerPreviewAndSaveUseBatchedAgentValidation(t *testing.T)
 	if plan == nil || len(plan.Validation) != 0 {
 		t.Fatalf("PreviewSave validation = %#v, want no issues for available references", plan)
 	}
+	if len(plan.AgentDefinitionIDs) != len(refs) {
+		t.Fatalf("PreviewSave Agent definition IDs = %#v, want one entry per reference", plan.AgentDefinitionIDs)
+	}
 	if len(selectableAgentValidationStatements(counter.Statements())) != 1 {
 		t.Fatalf("PreviewSave selectable Agent statements = %#v, want one compact query", counter.Statements())
 	}
