@@ -118,7 +118,7 @@ func TestAgentRepoListSkillCatalogRefsProductionShape(t *testing.T) {
 	}
 }
 
-func BenchmarkAgentSkillCatalogRefsProjectionVsFullHydration(b *testing.B) {
+func BenchmarkAgentSkillCatalogRefsProjection(b *testing.B) {
 	db := testutil.NewTestDB(b)
 	repo := NewAgentRepo(db)
 	ctx := context.Background()
@@ -132,31 +132,16 @@ func BenchmarkAgentSkillCatalogRefsProjectionVsFullHydration(b *testing.B) {
 		createSkillCatalogRefAgent(b, repo, fmt.Sprintf("Agent %04d", i), fmt.Sprintf("agent_%04d", i), projectID)
 	}
 
-	b.Run("full_hydration", func(b *testing.B) {
-		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			agents, err := repo.List(ctx)
-			if err != nil {
-				b.Fatal(err)
-			}
-			if len(agents) != 1000 {
-				b.Fatalf("agents len = %d, want 1000", len(agents))
-			}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		refs, err := repo.ListSkillCatalogRefs(ctx)
+		if err != nil {
+			b.Fatal(err)
 		}
-	})
-
-	b.Run("compact_projection", func(b *testing.B) {
-		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			refs, err := repo.ListSkillCatalogRefs(ctx)
-			if err != nil {
-				b.Fatal(err)
-			}
-			if len(refs) != 1000 {
-				b.Fatalf("refs len = %d, want 1000", len(refs))
-			}
+		if len(refs) != 1000 {
+			b.Fatalf("refs len = %d, want 1000", len(refs))
 		}
-	})
+	}
 }
 
 func createSkillCatalogRefProject(tb testing.TB, db interface {
