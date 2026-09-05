@@ -100,7 +100,7 @@ func (h *Handler) GetTaskCardMergeOptions(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, "task not found")
 	}
 
-	state, eligible, reason := h.taskCardMergeEligibility(c.Request().Context(), task, "merge")
+	state, eligible, _ := h.taskCardMergeEligibility(c.Request().Context(), task, "merge")
 	project, _ := h.projectRepo.GetByID(c.Request().Context(), projectID)
 
 	if task.MergeTargetBranch == "" && project != nil && project.RepoPath != "" {
@@ -110,8 +110,8 @@ func (h *Handler) GetTaskCardMergeOptions(c echo.Context) error {
 	if h.taskPullRequestRepo != nil {
 		taskPR, _ = h.taskPullRequestRepo.GetByTaskID(c.Request().Context(), task.ID)
 	}
-	prEligible, prUnavailableReason := h.taskCardPullRequestEligibility(task, project)
-	return render(c, http.StatusOK, components.TaskCardMergeOptions(task, projectID, eligible, state.RebaseAvailable, reason, taskPR, prEligible, prUnavailableReason))
+	prEligible, _ := h.taskCardPullRequestEligibility(task, project)
+	return render(c, http.StatusOK, components.TaskCardMergeOptions(task, projectID, eligible, state.RebaseAvailable, taskPR, prEligible))
 }
 
 // UpdateTaskAutoMerge toggles auto-merge for a task.
