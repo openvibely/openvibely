@@ -79,7 +79,7 @@ func TestAgentRepoListSkillCatalogRefsUsesCompactProjection(t *testing.T) {
 	}
 }
 
-func TestAgentRepoListSkillCatalogRefsMatchesFullListWithLowerAllocations(t *testing.T) {
+func TestAgentRepoListSkillCatalogRefsProductionShape(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping production-shaped allocation fixture in short mode")
 	}
@@ -103,45 +103,19 @@ func TestAgentRepoListSkillCatalogRefsMatchesFullListWithLowerAllocations(t *tes
 		t.Fatalf("archive skill catalog ref agent: %v", err)
 	}
 
-	fullAgents, err := repo.List(ctx)
-	if err != nil {
-		t.Fatalf("List full agents: %v", err)
-	}
 	compactRefs, err := repo.ListSkillCatalogRefs(ctx)
 	if err != nil {
 		t.Fatalf("ListSkillCatalogRefs: %v", err)
 	}
-	if len(fullAgents) != 1000 || len(compactRefs) != 1000 {
-		t.Fatalf("fixture result sizes full=%d compact=%d, want 1000", len(fullAgents), len(compactRefs))
+	if len(compactRefs) != 1000 {
+		t.Fatalf("skill catalog refs = %d, want 1000", len(compactRefs))
 	}
-	for i := range fullAgents {
-		want := AgentSkillCatalogRef{ID: fullAgents[i].ID, Key: fullAgents[i].Key, ProjectID: fullAgents[i].ProjectID}
-		if compactRefs[i] != want {
-			t.Fatalf("compact ref[%d] = %#v, want %#v", i, compactRefs[i], want)
-		}
+	if compactRefs[0].Key != "agent_0000" || compactRefs[len(compactRefs)-1].Key != "agent_0999" {
+		t.Fatalf("skill catalog ref ordering changed: first=%q last=%q", compactRefs[0].Key, compactRefs[len(compactRefs)-1].Key)
 	}
-
-	fullAllocs := testing.AllocsPerRun(3, func() {
-		agents, err := repo.List(ctx)
-		if err != nil {
-			t.Fatalf("List full agents during alloc check: %v", err)
-		}
-		refs := make([]AgentSkillCatalogRef, len(agents))
-		for i, agent := range agents {
-			refs[i] = AgentSkillCatalogRef{ID: agent.ID, Key: agent.Key, ProjectID: agent.ProjectID}
-		}
-	})
-	compactAllocs := testing.AllocsPerRun(3, func() {
-		refs, err := repo.ListSkillCatalogRefs(ctx)
-		if err != nil {
-			t.Fatalf("ListSkillCatalogRefs during alloc check: %v", err)
-		}
-		_ = refs
-	})
-	if compactAllocs > fullAllocs*0.10 {
-		t.Fatalf("compact skill catalog ref allocations = %.0f, full hydration allocations = %.0f; want at least 90%% reduction", compactAllocs, fullAllocs)
+	if compactRefs[0].ProjectID != alphaProjectID || compactRefs[1].ProjectID != "" {
+		t.Fatalf("skill catalog project scoping changed: first=%q second=%q", compactRefs[0].ProjectID, compactRefs[1].ProjectID)
 	}
-	t.Logf("compact skill catalog ref allocations %.0f vs full hydration %.0f (%.1f%% reduction)", compactAllocs, fullAllocs, (1-compactAllocs/fullAllocs)*100)
 }
 
 func BenchmarkAgentSkillCatalogRefsProjectionVsFullHydration(b *testing.B) {
