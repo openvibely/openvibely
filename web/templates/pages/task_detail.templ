@@ -82,7 +82,8 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 			<div class="min-w-0 flex-1">
 				@components.BreadcrumbSelector(models.BreadcrumbSelector{
 					ID: "task-resource-selector", Kind: "Task", CurrentID: task.ID, CurrentName: task.Title,
-					SearchURL: fmt.Sprintf("/breadcrumb-selectors/tasks?project_id=%s&current_id=%s&tab=%s", task.ProjectID, task.ID, defaultTab),
+					SearchURL: fmt.Sprintf("/breadcrumb-selectors/tasks?project_id=%s&current_id=%s", task.ProjectID, task.ID),
+					ContextName: "tab", ContextValue: defaultTab,
 				})
 			</div>
 			<script>
@@ -2060,6 +2061,8 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 
 					var tab = container.querySelector('[data-tab="' + tabName + '"]');
 					if (tab) tab.classList.add('tab-active');
+					var selectorContext = container.querySelector('[data-breadcrumb-selector-context][name="tab"]');
+					if (selectorContext) selectorContext.value = tabName;
 
 					// Auto-scroll thread to bottom when switching to thread tab
 						if (tabName === 'chat') {

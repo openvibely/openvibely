@@ -20,7 +20,8 @@ func TestBreadcrumbSelectorRendersAccessibleBoundedDialog(t *testing.T) {
 		Kind:        "Task",
 		CurrentID:   "task-1",
 		CurrentName: "A very long current task title",
-		SearchURL:   "/breadcrumb-selectors/tasks?project_id=project-1&current_id=task-1&tab=changes",
+		SearchURL:   "/breadcrumb-selectors/tasks?project_id=project-1&current_id=task-1",
+		ContextName: "tab", ContextValue: "changes",
 	}).Render(context.Background(), &out)
 	if err != nil {
 		t.Fatal(err)
@@ -30,6 +31,7 @@ func TestBreadcrumbSelectorRendersAccessibleBoundedDialog(t *testing.T) {
 		`data-breadcrumb-selector`, `aria-expanded="false"`, `aria-haspopup="dialog"`,
 		`role="dialog"`, `aria-modal="true"`, `Switch Task`, `Search Tasks`,
 		`hx-trigger="input changed delay:200ms, search"`, `hx-sync="this:replace"`,
+		`hx-include="closest [data-breadcrumb-selector]"`, `name="tab" value="changes"`,
 		`max-w-[calc(100vw-2rem)]`, `overflow-hidden`, `data-breadcrumb-selector-status`,
 	} {
 		if !strings.Contains(body, want) {

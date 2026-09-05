@@ -34,11 +34,11 @@ func (r *AutomationRepo) ListBreadcrumbSelector(ctx context.Context, projectID, 
 		FROM automations a
 		JOIN automation_versions v ON v.id = a.published_version_id
 			AND v.project_id = a.project_id AND v.automation_id = a.id AND v.state = 'published'
-		WHERE a.project_id = ? AND (? = '' OR INSTR(LOWER(a.name), ?) > 0)
+		WHERE a.project_id = ? AND (? = '' OR INSTR(LOWER(a.name), ?) > 0 OR a.id = ?)
 		ORDER BY CASE WHEN a.id = ? THEN 0 ELSE 1 END,
 			CASE WHEN LOWER(a.name) = ? THEN 0 WHEN LOWER(a.name) LIKE ? || '%' THEN 1 ELSE 2 END,
 			a.updated_at DESC, a.id ASC
-		LIMIT ?`, projectID, search, search, currentID, search, search, limit)
+		LIMIT ?`, projectID, search, search, currentID, currentID, search, search, limit)
 	if err != nil {
 		return nil, fmt.Errorf("listing automation breadcrumb selector: %w", err)
 	}

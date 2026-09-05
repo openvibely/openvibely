@@ -8,6 +8,9 @@ import (
 
 templ BreadcrumbSelector(config models.BreadcrumbSelector) {
 	<div class="min-w-0" data-breadcrumb-selector>
+		if config.ContextName != "" {
+			<input type="hidden" name={ config.ContextName } value={ config.ContextValue } data-breadcrumb-selector-context/>
+		}
 		<button
 			id={ config.ID + "-button" }
 			class="inline-flex max-w-full items-center gap-1 rounded-btn px-1 py-0 text-left text-2xl font-bold leading-tight transition-colors hover:bg-base-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
@@ -38,6 +41,7 @@ templ BreadcrumbSelector(config models.BreadcrumbSelector) {
 							placeholder={ "Search " + config.Kind + "s" }
 							autocomplete="off"
 							hx-get={ config.SearchURL }
+							hx-include="closest [data-breadcrumb-selector]"
 							hx-trigger="input changed delay:200ms, search"
 							hx-target={ "#" + config.ID + "-results" }
 							hx-swap="innerHTML"

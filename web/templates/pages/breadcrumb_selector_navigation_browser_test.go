@@ -42,7 +42,7 @@ func TestBreadcrumbSelectorsNavigateAndCleanUpAcrossHTMXHistoryInChrome(t *testi
 		t.Helper()
 		task := &models.Task{ID: id, ProjectID: "project-browser", Title: title, Status: models.StatusPending, Category: models.CategoryBacklog}
 		var out bytes.Buffer
-		if err := TaskDetailContent(task, nil, nil, nil, nil, nil, nil, "changes", nil).Render(context.Background(), &out); err != nil {
+		if err := TaskDetailContent(task, nil, nil, nil, nil, nil, nil, "details", nil).Render(context.Background(), &out); err != nil {
 			t.Fatalf("render Task detail: %v", err)
 		}
 		return `<section data-fixture-route="task" data-resource-id="` + id + `">` + out.String() + `</section>`
@@ -105,6 +105,9 @@ window.addEventListener('DOMContentLoaded', function() {
 
   (async function() {
     await waitFor(function(){ return route('task', 'task-one'); }, 'initial Task detail');
+    var changesTab=document.querySelector('[data-tab="changes"]');
+    changesTab.click();
+    await waitFor(function(){ return changesTab.classList.contains('tab-active') && !document.getElementById('tab-changes').classList.contains('hidden'); }, 'client-side Changes tab transition');
     key(button(), 'Enter');
     await waitFor(function(){ return dialog() && dialog().open; }, 'Task selector dialog open');
     await waitFor(function(){ return document.activeElement===input(); }, 'Task selector search focus');
@@ -220,6 +223,10 @@ window.addEventListener('DOMContentLoaded', function() {
 			_, _ = w.Write([]byte(`<section data-fixture-route="other"><span hidden data-openvibely-page-title="Other - OpenVibely"></span>Other</section>`))
 		case "/breadcrumb-selectors/tasks":
 			search := r.URL.Query().Get("search")
+			taskDestination := "/tasks/task-two?project_id=project-browser"
+			if tab := r.URL.Query().Get("tab"); tab != "" {
+				taskDestination += "&tab=" + tab
+			}
 			if search == "slow" {
 				taskSlow.Add(1)
 				time.Sleep(350 * time.Millisecond)
@@ -228,11 +235,11 @@ window.addEventListener('DOMContentLoaded', function() {
 			}
 			if search == "two" {
 				taskTwo.Add(1)
-				_, _ = w.Write([]byte(renderResults("Task", r.URL.Query().Get("current_id"), []models.BreadcrumbSelectorItem{{ID: "task-two", Name: "Task Two", URL: "/tasks/task-two?project_id=project-browser&tab=changes"}})))
+				_, _ = w.Write([]byte(renderResults("Task", r.URL.Query().Get("current_id"), []models.BreadcrumbSelectorItem{{ID: "task-two", Name: "Task Two", URL: taskDestination}})))
 				return
 			}
 			taskBlank.Add(1)
-			_, _ = w.Write([]byte(renderResults("Task", r.URL.Query().Get("current_id"), []models.BreadcrumbSelectorItem{{ID: r.URL.Query().Get("current_id"), Name: "Current Task", URL: r.URL.Query().Get("current_id")}, {ID: "task-two", Name: "Task Two", URL: "/tasks/task-two?project_id=project-browser&tab=changes"}})))
+			_, _ = w.Write([]byte(renderResults("Task", r.URL.Query().Get("current_id"), []models.BreadcrumbSelectorItem{{ID: r.URL.Query().Get("current_id"), Name: "Current Task", URL: r.URL.Query().Get("current_id")}, {ID: "task-two", Name: "Task Two", URL: taskDestination}})))
 		case "/breadcrumb-selectors/automations":
 			view := r.URL.Query().Get("view")
 			destination := "/automations/auto-two?project_id=project-browser"
@@ -261,7 +268,7 @@ window.addEventListener('DOMContentLoaded', function() {
 		t.Fatal(err)
 	}
 	defer stderrFile.Close()
-	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer", "--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling", "--no-first-run", "--no-default-browser-check", "--window-size=390,844", "--user-data-dir="+filepath.Join(t.TempDir(), "breadcrumb-navigation-profile"), server.URL+"/tasks/task-one?project_id=project-browser&tab=changes")
+	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer", "--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling", "--no-first-run", "--no-default-browser-check", "--window-size=390,844", "--user-data-dir="+filepath.Join(t.TempDir(), "breadcrumb-navigation-profile"), server.URL+"/tasks/task-one?project_id=project-browser&tab=details")
 	cmd.Stderr = stderrFile
 	if err := startBrowserProcess(cmd); err != nil {
 		t.Fatalf("start Chrome breadcrumb fixture: %v", err)

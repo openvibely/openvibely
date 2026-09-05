@@ -48,7 +48,8 @@ func TestTaskDetailBreadcrumbSupportsAutomationOrigin(t *testing.T) {
 		`automationsSeparator.hidden = false`,
 		`data-breadcrumb-selector`,
 		`Switch Task`,
-		`/breadcrumb-selectors/tasks?project_id=project-origin&amp;current_id=task-automation-origin&amp;tab=details`,
+		`/breadcrumb-selectors/tasks?project_id=project-origin&amp;current_id=task-automation-origin`,
+		`name="tab" value="details" data-breadcrumb-selector-context`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("expected Automation-origin breadcrumb support to contain %q", want)

@@ -100,11 +100,11 @@ func (r *TaskRepo) ListBreadcrumbSelector(ctx context.Context, projectID, search
 	rows, err := r.db.QueryContext(ctx, `SELECT id, title
 		FROM tasks
 		WHERE project_id = ? AND category != 'chat'
-			AND (? = '' OR INSTR(LOWER(title), ?) > 0)
+			AND (? = '' OR INSTR(LOWER(title), ?) > 0 OR id = ?)
 		ORDER BY CASE WHEN id = ? THEN 0 ELSE 1 END,
 			CASE WHEN LOWER(title) = ? THEN 0 WHEN LOWER(title) LIKE ? || '%' THEN 1 ELSE 2 END,
 			updated_at DESC, id ASC
-		LIMIT ?`, projectID, search, search, currentID, search, search, limit)
+		LIMIT ?`, projectID, search, search, currentID, currentID, search, search, limit)
 	if err != nil {
 		return nil, fmt.Errorf("listing task breadcrumb selector: %w", err)
 	}

@@ -61,6 +61,14 @@ func TestTaskRepo_BreadcrumbSelectorIsProjectScopedAndBounded(t *testing.T) {
 			t.Fatalf("foreign task leaked: %#v", item)
 		}
 	}
+
+	items, err = tasks.ListBreadcrumbSelector(ctx, "default", "no title matches this", currentID, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].ID != currentID {
+		t.Fatalf("current item must remain available while filtering, got %#v", items)
+	}
 }
 
 func TestTaskRepo_GetThreadRenderMetadataUsesCompactProjection(t *testing.T) {
