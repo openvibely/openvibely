@@ -41,18 +41,7 @@ func BenchmarkTaskRepo_KanbanRefresh(b *testing.B) {
 			defer db.Close()
 			repo := repository.NewTaskRepo(db, nil)
 
-			implementations := []struct {
-				name string
-				list taskBoardListFunc
-			}{
-				{name: "FullPromptBaseline", list: repo.ListByProjectWithCategorySorts},
-				{name: "ProjectedPrompt", list: repo.ListBoardByProjectWithCategorySorts},
-			}
-			for _, implementation := range implementations {
-				b.Run(implementation.name, func(b *testing.B) {
-					benchmarkKanbanRefresh(b, implementation.list)
-				})
-			}
+			benchmarkKanbanRefresh(b, repo.ListBoardByProjectWithCategorySorts)
 		})
 	}
 }
