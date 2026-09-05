@@ -7,6 +7,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
@@ -32,7 +33,12 @@ func (h *Handler) listPersonalityCardPage(ctx context.Context, page cardPageRequ
 		}
 	}
 
-	pageItems, err := h.customPersonalityRepo.ListPageExcludingKeys(ctx, page.PageSize+1, page.Offset, page.Search, excludedKeys)
+	pageItems, err := h.customPersonalityRepo.ListPageExcludingKeysFiltered(ctx, page.PageSize+1, page.Offset, repository.CustomPersonalityPageFilter{
+		Search:   page.Search,
+		Active:   page.PersonalityActive,
+		Selected: selected,
+		Sort:     page.PersonalitySort,
+	}, excludedKeys)
 	if err != nil {
 		return nil, false, err
 	}
@@ -44,6 +50,16 @@ func (h *Handler) listPersonalityCardPage(ctx context.Context, page cardPageRequ
 	merged := make([]models.CustomPersonality, 0, len(pageItems)+len(fixed))
 	seen := make(map[string]struct{}, len(pageItems)+len(fixed))
 	for _, personality := range append(pageItems, fixed...) {
+		isPreset := service.IsPresetPersonality(personality.Key)
+		if page.PersonalityKind == "custom" && isPreset {
+			continue
+		}
+		if page.PersonalityKind == "override" && !isPreset {
+			continue
+		}
+		if page.PersonalityKind == "base" || page.PersonalityKind == "built_in" {
+			continue
+		}
 		if _, ok := seen[personality.Key]; ok {
 			continue
 		}
@@ -51,6 +67,18 @@ func (h *Handler) listPersonalityCardPage(ctx context.Context, page cardPageRequ
 		merged = append(merged, personality)
 	}
 	return merged, hasMore, nil
+}
+
+func personalityListState(page cardPageRequest) pages.PersonalityListState {
+	active := ""
+	if page.PersonalityActive != nil {
+		if *page.PersonalityActive {
+			active = "true"
+		} else {
+			active = "false"
+		}
+	}
+	return pages.PersonalityListState{Search: page.Search, Kind: page.PersonalityKind, Active: active, Sort: page.PersonalitySort}
 }
 
 // renderPersonalitySection re-renders the personality section with current data.
@@ -69,7 +97,7 @@ func (h *Handler) renderPersonalitySection(c echo.Context) error {
 	}
 	setCardPageResponse(c, hasMore)
 
-	return render(c, http.StatusOK, pages.PersonalitySectionPageWithPagination(personality, customs, hasMore))
+	return render(c, http.StatusOK, pages.PersonalitySectionPageWithPaginationState(personality, customs, hasMore, personalityListState(page)))
 }
 
 type customPersonalitySavePayload struct {
@@ -224,6 +252,36 @@ func (h *Handler) UpdateCustomPersonality(c echo.Context) error {
 		return c.JSON(http.StatusOK, updated)
 	}
 	return h.renderPersonalitySection(c)
+}
+
+func (h *Handler) DeleteCustomPersonalitiesBulk(c echo.Context) error {
+	if h.customPersonalityRepo == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "custom personalities unavailable")
+	}
+	keys, err := decodeBulkIDs(c.Request().Body)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	active := ""
+	if h.settingsRepo != nil {
+		active, _ = h.settingsRepo.Get(c.Request().Context(), "personality")
+	}
+	for _, key := range keys {
+		if key == active {
+			return echo.NewHTTPError(http.StatusBadRequest, "the active personality cannot be deleted")
+		}
+		if service.IsPresetPersonality(key) {
+			return echo.NewHTTPError(http.StatusBadRequest, "built-in personalities and their overrides cannot be bulk deleted")
+		}
+		personality, getErr := h.customPersonalityRepo.GetByKey(c.Request().Context(), key)
+		if getErr != nil || personality == nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "all selected personalities must be inactive custom entries")
+		}
+	}
+	if err := h.customPersonalityRepo.DeleteBulk(c.Request().Context(), keys); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	return c.JSON(http.StatusOK, map[string]int{"deleted": len(keys)})
 }
 
 // DeleteCustomPersonality handles DELETE /personality/custom/:key

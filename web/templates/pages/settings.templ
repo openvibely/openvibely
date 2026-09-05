@@ -23,6 +23,22 @@ type channelStatusBadgeOptions struct {
 	NotConfiguredClass string
 }
 
+func channelCardMatchesFilters(view ChannelsSettingsView, channelType string, configured, connected bool) bool {
+	if view.ChannelTypeFilter != "" && view.ChannelTypeFilter != channelType {
+		return false
+	}
+	switch view.ConnectionStateFilter {
+	case "connected":
+		return connected
+	case "configured":
+		return configured
+	case "disconnected":
+		return !connected
+	default:
+		return true
+	}
+}
+
 func channelConnectionStatusBadge(configured, connectedOrRunning bool, options channelStatusBadgeOptions) channelStatusBadge {
 	configuredLabel := options.ConfiguredLabel
 	if configuredLabel == "" {
@@ -231,13 +247,15 @@ templ settingsContent(view ChannelsSettingsView) {
 			</div>
 		</div>
 
-		@CardSearchInput("channels", "Search channels...")
+		@CardListToolbar(collectionToolbarConfig("channels", view.CurrentProjectID, view.WebhooksSearch))
 
 			<!-- Active Channels -->
 			<div class="grid gap-4 mb-8">
-				@OutboundTargetsCard(view.CurrentProjectID, view.ChannelTargets, view.SendMessageExplicitTargets)
+				if channelCardMatchesFilters(view, "outbound_targets", len(view.ChannelTargets) > 0, len(view.ChannelTargets) > 0) {
+					@OutboundTargetsCard(view.CurrentProjectID, view.ChannelTargets, view.SendMessageExplicitTargets)
+				}
 				if view.HasXChannel {
-					<div class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40" data-channel-type="x" data-search-card data-search-text="X formerly Twitter mentions posts" onclick="openXConfigModal()">
+					<div class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40" data-channel-type="x" data-search-card data-search-text="X formerly Twitter mentions posts" onclick="openXConfigModal()" hidden?={ !channelCardMatchesFilters(view, "x", view.XStatus.Configured, view.XStatus.Connected) }>
 						<div class="card-body p-5">
 							<div class="flex items-start justify-between gap-3">
 								<div><h3 class="card-title">X (formerly Twitter)</h3><p class="text-sm opacity-60">Receive authorized mentions and post replies using X API v2.</p></div>
@@ -267,6 +285,7 @@ templ settingsContent(view ChannelsSettingsView) {
 				<div
 					class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
 					data-channel-type="github"
+					hidden?={ !channelCardMatchesFilters(view, "github", view.GitHubStatus.Configured, view.GitHubStatus.Connected) }
 					data-search-card
 					data-search-text={ "GitHub " + githubConnectionBadge(view.GitHubStatus).Label }
 					onclick="editChannelFromData(this)"
@@ -341,6 +360,7 @@ templ settingsContent(view ChannelsSettingsView) {
 				<div
 					class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
 					data-channel-type="slack"
+					hidden?={ !channelCardMatchesFilters(view, "slack", view.SlackStatus.Configured, view.SlackStatus.Connected) }
 					data-search-card
 					data-search-text={ "Slack " + slackConnectionBadge(view.SlackStatus).Label }
 					onclick="editChannelFromData(this)"
@@ -418,6 +438,7 @@ templ settingsContent(view ChannelsSettingsView) {
 				<div
 					class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
 					data-channel-type="telegram"
+					hidden?={ !channelCardMatchesFilters(view, "telegram", strings.TrimSpace(view.TelegramToken) != "", view.IsBotRunning) }
 					data-channel-token={ view.TelegramToken }
 					data-channel-running={ templ.JSONString(view.IsBotRunning) }
 					data-search-card
@@ -491,6 +512,7 @@ templ settingsContent(view ChannelsSettingsView) {
 					<div
 						class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
 						data-channel-type="discord"
+						hidden?={ !channelCardMatchesFilters(view, "discord", view.DiscordStatus.Configured, view.DiscordStatus.Running) }
 						data-search-card
 						data-search-text={ "Discord " + discordConnectionBadge(view.DiscordStatus).Label }
 						onclick="editChannelFromData(this)"
@@ -554,6 +576,7 @@ templ settingsContent(view ChannelsSettingsView) {
 					<div
 						class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
 						data-channel-type="email"
+						hidden?={ !channelCardMatchesFilters(view, "email", view.EmailStatus.Configured, view.EmailStatus.Running) }
 						data-search-card
 						data-search-text={ "Email " + view.EmailStatus.Address }
 						onclick="openEmailConfigModal()"
@@ -606,6 +629,8 @@ templ settingsContent(view ChannelsSettingsView) {
 						data-webhook-enabled={ fmt.Sprintf("%t", wh.Enabled) }
 						data-webhook-token={ wh.PathToken }
 							data-webhook-default-priority={ fmt.Sprintf("%d", wh.DefaultPriority) }
+						data-card-select-id={ wh.ID }
+						data-card-select-eligible="true"
 						onclick={ templ.ComponentScript{Call: fmt.Sprintf("openWebhookEditModal('%s')", wh.ID)} }
 				>
 				<div class="card-body relative">
@@ -620,7 +645,7 @@ templ settingsContent(view ChannelsSettingsView) {
 								<li><button type="button" onclick={ templ.ComponentScript{Call: fmt.Sprintf("openWebhookEditModal('%s')", wh.ID)} }>Edit</button></li>									<li>
 										<button
 											type="button"
-											hx-post={ "/channels/webhooks/" + wh.ID + "/rotate-secret" }
+											hx-post={ "/channels/webhooks/" + wh.ID + "/rotate-secret?project_id=" + view.CurrentProjectID }
 											hx-swap="none"
 											hx-confirm="Rotate the secret for this webhook? Existing integrations will need to be updated."
 										>
@@ -630,7 +655,7 @@ templ settingsContent(view ChannelsSettingsView) {
 									<li>
 										<button
 											type="button"
-											hx-post={ "/channels/webhooks/" + wh.ID + "/test" }
+											hx-post={ "/channels/webhooks/" + wh.ID + "/test?project_id=" + view.CurrentProjectID }
 											hx-target={ "#webhook-test-" + wh.ID }
 											hx-swap="innerHTML"
 										>
@@ -642,8 +667,7 @@ templ settingsContent(view ChannelsSettingsView) {
 												type="button"
 												class="text-error"
 												data-channel-delete-name={ wh.Name }
-												data-channel-delete-url={ "/channels/webhooks/" + wh.ID }
-												data-channel-delete-method="DELETE"
+													data-channel-delete-url={ "/channels/webhooks/" + wh.ID + "?project_id=" + view.CurrentProjectID }												data-channel-delete-method="DELETE"
 												onclick="openDeleteChannelConfirmFromButton(this)"
 											>
 												Delete

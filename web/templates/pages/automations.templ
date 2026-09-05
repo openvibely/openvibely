@@ -63,7 +63,7 @@ templ automationsContent(cards []models.AutomationCard, currentProjectID string,
 				<input type="hidden" name="source" value="blank"/>
 			</form>
 		</div>
-			@CardSearchInput("automations", "Search automations...")
+			@CardListToolbar(collectionToolbarConfig("automations", currentProjectID, ""))
 			<div id="automations-card-list" data-card-pagination-list>
 			if len(cards) == 0 {
 				<div class="rounded-box bg-base-200/60 p-8 text-center" data-search-empty-state>
@@ -78,6 +78,8 @@ templ automationsContent(cards []models.AutomationCard, currentProjectID string,
 						data-automation-url={ automationCardURL(card, currentProjectID) }
 						data-search-card
 						data-search-text={ automationCardSearchText(card) }
+						data-card-select-id={ card.Automation.ID }
+						data-card-select-eligible="true"
 						onclick="window.openVibelyNavigate(this.dataset.automationUrl)"
 					>
 						<div class="card-body relative">

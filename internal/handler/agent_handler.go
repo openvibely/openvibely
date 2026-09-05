@@ -1546,7 +1546,14 @@ func (h *Handler) ListAgents(c echo.Context) error {
 		}
 	}
 
-	agents, err := h.agentRepo.ListPage(c.Request().Context(), page.PageSize+1, page.Offset, page.Search)
+	agentFilter := repository.AgentPageFilter{
+		Search:  page.Search,
+		Enabled: optionalBoolQuery(c, "enabled"),
+		Scope:   allowlistedQuery(c, "scope", "", "global", "project"),
+		Origin:  allowlistedQuery(c, "origin", "", "custom", "generated", "protected"),
+		Sort:    allowlistedQuery(c, "sort", "name_asc", "name_asc", "name_desc", "updated_desc", "created_desc"),
+	}
+	agents, err := h.agentRepo.ListPageFiltered(c.Request().Context(), page.PageSize+1, page.Offset, agentFilter)
 	if err != nil {
 		applog.Infof("[handler] ListAgents error: %v", err)
 		return err
@@ -1651,6 +1658,51 @@ func (h *Handler) UpdateAgent(c echo.Context) error {
 	}
 
 	return h.ListAgents(c)
+}
+
+func (h *Handler) DeleteAgentsBulk(c echo.Context) error {
+	if h.agentRepo == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "agent repository unavailable")
+	}
+	ids, err := decodeBulkIDs(c.Request().Body)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	agents := make([]*models.Agent, 0, len(ids))
+	for _, id := range ids {
+		agent, getErr := h.agentRepo.GetByID(c.Request().Context(), id)
+		if getErr != nil || agent == nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "all selected agents must exist")
+		}
+		if accessErr := h.ensureAgentProjectAccess(c, agent); accessErr != nil {
+			return accessErr
+		}
+		if agent.GeneratedStatus == models.AgentStatusProtected {
+			return echo.NewHTTPError(http.StatusBadRequest, "protected system agents cannot be deleted")
+		}
+		agents = append(agents, agent)
+	}
+	for _, agent := range agents {
+		if key := strings.TrimSpace(agent.Key); key != "" && h.agentSkillRoot != "" {
+			root := h.agentSkillRoot
+			if agent.Scope == models.AgentScopeProject {
+				root = h.projectSkillRootForAgent(c, agent)
+			}
+			if root != "" {
+				dir := filepath.Join(root, "agents", key)
+				if err := os.RemoveAll(dir); err != nil {
+					return echo.NewHTTPError(http.StatusInternalServerError, "agent package cleanup failed; no database agents were deleted")
+				}
+				if _, err := agentlibrary.RemoveAgentIndexEntry(filepath.Join(root, "agents", "AGENTS.md"), key); err != nil {
+					return echo.NewHTTPError(http.StatusInternalServerError, "agent index cleanup failed; no database agents were deleted")
+				}
+			}
+		}
+	}
+	if err := h.agentRepo.DeleteBulk(c.Request().Context(), ids); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	return c.JSON(http.StatusOK, map[string]int{"deleted": len(ids)})
 }
 
 func (h *Handler) DeleteAgent(c echo.Context) error {

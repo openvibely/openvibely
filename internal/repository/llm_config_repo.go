@@ -208,12 +208,25 @@ func (r *LLMConfigRepo) ListCards(ctx context.Context) ([]models.LLMConfig, erro
 
 // ListCardsPage returns one bounded, ordered Models-page projection. Search
 // matches the same visible card metadata as the browser card-search helper.
+type ModelCardListFilter struct {
+	Search     string
+	Provider   string
+	Default    *bool
+	AuthStatus string
+	Kind       string
+	Sort       string
+}
+
 func (r *LLMConfigRepo) ListCardsPage(ctx context.Context, limit, offset int, search string) ([]models.LLMConfig, error) {
+	return r.ListCardsPageFiltered(ctx, limit, offset, ModelCardListFilter{Search: search})
+}
+
+func (r *LLMConfigRepo) ListCardsPageFiltered(ctx context.Context, limit, offset int, filter ModelCardListFilter) ([]models.LLMConfig, error) {
 	limit, offset = normalizeCardPageArgs(limit, offset)
-	query := `SELECT ` + llmConfigCardColumns + ` FROM agent_configs`
-	args := make([]any, 0, 3)
-	if search = strings.TrimSpace(search); search != "" {
-		query += ` WHERE INSTR(LOWER(
+	query := `SELECT ` + llmConfigCardColumns + ` FROM agent_configs WHERE 1=1`
+	args := make([]any, 0, 8)
+	if search := strings.TrimSpace(filter.Search); search != "" {
+		query += ` AND INSTR(LOWER(
 			COALESCE(name, '') || ' ' || COALESCE(provider, '') || ' ' ||
 			COALESCE(model, '') || ' ' ||
 			CASE WHEN is_default = 1 THEN 'default' ELSE 'active' END || ' ' ||
@@ -225,7 +238,38 @@ func (r *LLMConfigRepo) ListCardsPage(ctx context.Context, limit, offset int, se
 		), ?) > 0`
 		args = append(args, strings.ToLower(search))
 	}
-	query += ` ORDER BY is_default DESC, name ASC, id ASC LIMIT ? OFFSET ?`
+	if filter.Provider != "" {
+		query += ` AND provider = ?`
+		args = append(args, filter.Provider)
+	}
+	if filter.Default != nil {
+		query += ` AND is_default = ?`
+		args = append(args, *filter.Default)
+	}
+	switch filter.AuthStatus {
+	case "connected":
+		query += ` AND auth_method = 'oauth' AND COALESCE(oauth_access_token, '') != '' AND (COALESCE(oauth_expires_at, 0) = 0 OR oauth_expires_at > CAST(strftime('%s', 'now') AS INTEGER) * 1000)`
+	case "not_connected":
+		query += ` AND auth_method = 'oauth' AND (COALESCE(oauth_access_token, '') = '' OR (COALESCE(oauth_expires_at, 0) != 0 AND oauth_expires_at <= CAST(strftime('%s', 'now') AS INTEGER) * 1000))`
+	case "not_required":
+		query += ` AND auth_method != 'oauth'`
+	}
+	if filter.Kind == "mixture" {
+		query += ` AND provider = 'mixture'`
+	} else if filter.Kind == "direct" {
+		query += ` AND provider != 'mixture'`
+	}
+	switch filter.Sort {
+	case "name_asc":
+		query += ` ORDER BY name ASC, id ASC`
+	case "name_desc":
+		query += ` ORDER BY name DESC, id DESC`
+	case "provider":
+		query += ` ORDER BY provider ASC, name ASC, id ASC`
+	default:
+		query += ` ORDER BY is_default DESC, name ASC, id ASC`
+	}
+	query += ` LIMIT ? OFFSET ?`
 	args = append(args, limit, offset)
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -974,6 +1018,44 @@ func (r *LLMConfigRepo) GetByIDs(ctx context.Context, ids []string) (map[string]
 		result[a.ID] = &a
 	}
 	return result, rows.Err()
+}
+
+func (r *LLMConfigRepo) DeleteBulk(ctx context.Context, ids []string) error {
+	if len(ids) == 0 {
+		return fmt.Errorf("at least one model is required")
+	}
+	tx, cleanup, err := beginImmediateTx(ctx, r.db)
+	if err != nil {
+		return fmt.Errorf("begin bulk delete model config tx: %w", err)
+	}
+	defer cleanup()
+	placeholders := strings.TrimRight(strings.Repeat("?,", len(ids)), ",")
+	args := make([]any, len(ids))
+	for i := range ids {
+		args[i] = ids[i]
+	}
+	var count, defaults int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*), COALESCE(SUM(is_default), 0) FROM agent_configs WHERE id IN (`+placeholders+`)`, args...).Scan(&count, &defaults); err != nil {
+		return err
+	}
+	if count != len(ids) {
+		return fmt.Errorf("model not found")
+	}
+	if defaults > 0 {
+		return fmt.Errorf("default models cannot be deleted in bulk")
+	}
+	for _, id := range ids {
+		if err := r.deleteWithTx(ctx, tx, id); err != nil {
+			return err
+		}
+	}
+	if err := r.ensureDefaultModelTx(ctx, tx); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit bulk delete model config tx: %w", err)
+	}
+	return nil
 }
 
 func (r *LLMConfigRepo) Delete(ctx context.Context, id string) error {

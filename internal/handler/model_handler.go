@@ -34,12 +34,24 @@ const (
 	openAICompatibleModelIDFieldHeader     = "X-OpenAI-Compatible-Model-ID-Field"
 )
 
+func modelCardListFilter(c echo.Context, page cardPageRequest) repository.ModelCardListFilter {
+	return repository.ModelCardListFilter{
+		Search:     page.Search,
+		Provider:   allowlistedQuery(c, "provider", "", "openai", "anthropic", "ollama", "openai_compatible", "mixture"),
+		Default:    optionalBoolQuery(c, "default"),
+		AuthStatus: allowlistedQuery(c, "auth_status", "", "connected", "not_connected", "not_required"),
+		Kind:       allowlistedQuery(c, "kind", "", "direct", "mixture"),
+		Sort:       allowlistedQuery(c, "sort", "default_name", "default_name", "name_asc", "name_desc", "provider"),
+	}
+}
+
 func (h *Handler) ListModels(c echo.Context) error {
 	c.Response().Header().Set("Cache-Control", "no-store")
 	htmxRequest := isHTMX(c)
 	ctx := c.Request().Context()
 	page := parseCardPageRequest(c)
-	agents, err := h.llmConfigRepo.ListCardsPage(ctx, page.PageSize+1, page.Offset, page.Search)
+	filter := modelCardListFilter(c, page)
+	agents, err := h.llmConfigRepo.ListCardsPageFiltered(ctx, page.PageSize+1, page.Offset, filter)
 	if err != nil {
 		applog.Infof("[handler] ListModels error: %v", err)
 		return err
@@ -989,6 +1001,39 @@ func (h *Handler) SetDefaultModel(c echo.Context) error {
 	return c.Redirect(http.StatusSeeOther, "/models")
 }
 
+func (h *Handler) DeleteModelsBulk(c echo.Context) error {
+	ids, err := decodeBulkIDs(c.Request().Body)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	configs, err := h.llmConfigRepo.GetByIDs(c.Request().Context(), ids)
+	if err != nil {
+		return err
+	}
+	if len(configs) != len(ids) {
+		return echo.NewHTTPError(http.StatusBadRequest, "all selected models must exist")
+	}
+	for _, id := range ids {
+		if configs[id].IsDefault {
+			return echo.NewHTTPError(http.StatusBadRequest, "default models cannot be deleted in bulk")
+		}
+		mixtures, dependencyErr := h.mixturesUsingModel(c.Request().Context(), id)
+		if dependencyErr != nil {
+			return dependencyErr
+		}
+		if len(mixtures) > 0 {
+			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Model %s is used by mixtures: %s. Remove the dependency before deleting.", configs[id].Name, strings.Join(mixtures, ", ")))
+		}
+	}
+	if err := h.llmConfigRepo.DeleteBulk(c.Request().Context(), ids); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	if h.workerSvc != nil {
+		h.workerSvc.DispatchNext()
+	}
+	return c.JSON(http.StatusOK, map[string]int{"deleted": len(ids)})
+}
+
 func (h *Handler) DeleteModel(c echo.Context) error {
 	id := c.Param("id")
 	applog.Infof("[handler] DeleteModel id=%s", id)
@@ -1064,7 +1109,8 @@ func (h *Handler) DeleteModel(c echo.Context) error {
 func (h *Handler) renderRefreshedModels(c echo.Context) error {
 	ctx := c.Request().Context()
 	page := parseCardPageRequest(c)
-	agents, err := h.llmConfigRepo.ListCardsPage(ctx, page.PageSize+1, page.Offset, page.Search)
+	filter := modelCardListFilter(c, page)
+	agents, err := h.llmConfigRepo.ListCardsPageFiltered(ctx, page.PageSize+1, page.Offset, filter)
 	if err != nil {
 		return err
 	}

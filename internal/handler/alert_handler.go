@@ -51,12 +51,34 @@ func (h *Handler) ListAlerts(c echo.Context) error {
 }
 
 func alertListFilter(c echo.Context, page cardPageRequest) models.AlertListFilter {
+	source := strings.TrimSpace(c.QueryParam("source"))
+	if len(source) > 100 {
+		source = ""
+	}
 	return models.AlertListFilter{
 		DecisionState:   parseAlertDecisionState(c.QueryParam("decision_state")),
 		ProcessingState: parseAlertProcessingState(c.QueryParam("processing_state")),
+		Type:            models.AlertType(allowlistedQuery(c, "type", "", string(models.AlertTaskFailed), string(models.AlertTaskNeedsFollowup), string(models.AlertCustom))),
+		Severity:        models.AlertSeverity(allowlistedQuery(c, "severity", "", string(models.SeverityInfo), string(models.SeverityWarning), string(models.SeverityError))),
+		Source:          source,
+		Read:            parseAlertRead(c.QueryParam("read")),
+		Sort:            allowlistedQuery(c, "sort", "newest", "newest", "oldest", "severity", "unread_first"),
 		Limit:           page.PageSize + 1,
 		Offset:          page.Offset,
 		Search:          page.Search,
+	}
+}
+
+func parseAlertRead(value string) *bool {
+	switch strings.TrimSpace(value) {
+	case "read":
+		read := true
+		return &read
+	case "unread":
+		read := false
+		return &read
+	default:
+		return nil
 	}
 }
 
@@ -240,6 +262,21 @@ func (h *Handler) GetUnreadAlertCount(c echo.Context) error {
 	}
 
 	return render(c, http.StatusOK, pages.AlertBadge(count))
+}
+
+func (h *Handler) DeleteAlertsBulk(c echo.Context) error {
+	ids, err := decodeBulkIDs(c.Request().Body)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	projectID, err := h.getCurrentProjectID(c)
+	if err != nil {
+		return err
+	}
+	if err := h.alertSvc.DeleteBulk(c.Request().Context(), projectID, ids); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "all selected alerts must belong to the current project")
+	}
+	return c.JSON(http.StatusOK, map[string]int{"deleted": len(ids)})
 }
 
 func (h *Handler) DeleteAllAlerts(c echo.Context) error {

@@ -298,16 +298,16 @@ func TestAlertsContent_DecisionFilterRendersSelectedStateAndSearchState(t *testi
 	}
 	filteredHTML := filtered.String()
 	for _, required := range []string{
-		`id="alerts-filter-form"`,
+		`data-card-list-toolbar="alerts"`,
 		`method="get"`,
-		`data-alert-search-slot`,
-		`class="w-full max-w-xs flex-none"`,
 		`name="search"`,
 		`value="needle"`,
 		`data-card-search-initial="needle"`,
+		`data-card-filters-button`,
+		`data-card-filter-group="decision_state"`,
 		`name="decision_state"`,
-		`aria-label="Filter by decision state"`,
-		`All decision states`,
+		`data-card-filter-chip="decision_state"`,
+		`Filters (1)`,
 		`data-card-pagination-preserve-params="decision_state,processing_state,search"`,
 		`data-card-pagination-url="/alerts?decision_state=pending&amp;processing_state=failed&amp;project_id=project-1&amp;search=needle"`,
 		`hx-get="/alerts?decision_state=pending&amp;processing_state=failed&amp;project_id=project-1&amp;search=needle"`,

@@ -163,13 +163,26 @@ func (r *WebhookRepo) ListCardsByProject(ctx context.Context, projectID string) 
 }
 
 // ListCardsByProjectPage returns one bounded, project-scoped webhook card page.
+type WebhookCardFilter struct {
+	Search  string
+	Enabled *bool
+}
+
 func (r *WebhookRepo) ListCardsByProjectPage(ctx context.Context, projectID string, limit, offset int, search string) ([]models.WebhookEndpoint, error) {
+	return r.ListCardsByProjectPageFiltered(ctx, projectID, limit, offset, WebhookCardFilter{Search: search})
+}
+
+func (r *WebhookRepo) ListCardsByProjectPageFiltered(ctx context.Context, projectID string, limit, offset int, filter WebhookCardFilter) ([]models.WebhookEndpoint, error) {
 	limit, offset = normalizeCardPageArgs(limit, offset)
 	query := `SELECT ` + webhookCardColumns + ` FROM webhook_endpoints WHERE project_id = ?`
 	args := []any{projectID}
-	if search = strings.TrimSpace(search); search != "" {
+	if search := strings.TrimSpace(filter.Search); search != "" {
 		query += ` AND INSTR(LOWER('webhook ' || COALESCE(name, '')), ?) > 0`
 		args = append(args, strings.ToLower(search))
+	}
+	if filter.Enabled != nil {
+		query += ` AND enabled = ?`
+		args = append(args, *filter.Enabled)
 	}
 	query += ` ORDER BY name ASC, id ASC LIMIT ? OFFSET ?`
 	args = append(args, limit, offset)
@@ -206,6 +219,49 @@ func (r *WebhookRepo) Update(ctx context.Context, w *models.WebhookEndpoint) err
 		w.TitleTemplate, w.PromptTemplate, w.DefaultPriority, w.ID)
 	if err != nil {
 		return fmt.Errorf("updating webhook endpoint: %w", err)
+	}
+	return nil
+}
+
+func (r *WebhookRepo) DeleteBulk(ctx context.Context, projectID string, ids []string) error {
+	if len(ids) == 0 {
+		return fmt.Errorf("at least one webhook is required")
+	}
+	conn, finish, err := beginImmediateConn(ctx, r.db)
+	if err != nil {
+		return err
+	}
+	defer finish()
+	placeholders := strings.TrimRight(strings.Repeat("?,", len(ids)), ",")
+	args := []any{projectID}
+	for _, id := range ids {
+		args = append(args, id)
+	}
+	var count int
+	if err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM webhook_endpoints WHERE project_id = ? AND id IN (`+placeholders+`)`, args...).Scan(&count); err != nil {
+		return err
+	}
+	if count != len(ids) {
+		return ErrWebhookNotFound
+	}
+	if _, err := conn.ExecContext(ctx, `DELETE FROM webhook_endpoints WHERE project_id = ? AND id IN (`+placeholders+`)`, args...); err != nil {
+		return err
+	}
+	_, err = conn.ExecContext(ctx, `COMMIT`)
+	return err
+}
+
+func (r *WebhookRepo) DeleteForProject(ctx context.Context, projectID, id string) error {
+	result, err := execBoundSQLite(ctx, r.db, `DELETE FROM webhook_endpoints WHERE project_id = ? AND id = ?`, projectID, id)
+	if err != nil {
+		return fmt.Errorf("deleting webhook endpoint: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("checking deleted webhook endpoint: %w", err)
+	}
+	if affected == 0 {
+		return ErrWebhookNotFound
 	}
 	return nil
 }

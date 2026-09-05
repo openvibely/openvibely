@@ -4183,6 +4183,10 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							if (!input.dataset.cardSearchInit) {
 								// A server-rendered query is authoritative on direct navigation and HTMX refreshes.
 								var initial = input.getAttribute('data-card-search-initial');
+								try {
+									var locationURL = new URL(window.location.href);
+									if (locationURL.searchParams.has('search')) initial = locationURL.searchParams.get('search') || '';
+								} catch (_) {}
 								if (initial !== null) {
 									input.value = initial;
 									storeCardSearchTerm(pageKey, initial);
@@ -4219,11 +4223,11 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						container.outerHTML = html;
 						var nextContainer = container.id ? document.getElementById(container.id) : null;
 						if (!nextContainer) return null;
-						var nextInput = nextContainer.querySelector('input[data-card-search]');
-						if (nextInput && pageKey && nextInput.getAttribute('data-card-search') === pageKey) {
-							nextInput.value = activeTerm;
-						}
-							if (window.htmx) htmx.process(nextContainer);
+							var nextInput = nextContainer.querySelector('input[data-card-search]');
+							if (nextInput && pageKey && nextInput.getAttribute('data-card-search') === pageKey) {
+								nextInput.value = activeTerm;
+								nextInput.setAttribute('data-card-search-initial', activeTerm);
+							}							if (window.htmx) htmx.process(nextContainer);
 							initAllCardSearches(nextContainer);
 							if (typeof window.refreshCardPagination === 'function') window.refreshCardPagination(nextContainer);
 							return nextContainer;					}
@@ -4242,8 +4246,187 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					});
 				})();
 				</script>
-			<!-- Card Pagination Loader -->
-			<script>
+				<!-- Collection Card Selection -->
+				<script>
+					(function() {
+						window._openVibelyCardSelections = window._openVibelyCardSelections || Object.create(null);
+
+						function visible(element) {
+							return !!(element && !element.hidden && element.getClientRects && element.getClientRects().length);
+						}
+
+						function querySignature(root) {
+							var url;
+							try { url = new URL(root.getAttribute('data-card-pagination-url') || window.location.href, window.location.href); } catch (_) { return ''; }
+							try {
+								var current = new URL(window.location.href);
+								current.searchParams.forEach(function(value, key) { url.searchParams.set(key, value); });
+							} catch (_) {}
+							['card_page', 'card_window', 'page', 'page_size', 'offset'].forEach(function(key) { url.searchParams.delete(key); });
+							return url.pathname + '?' + url.searchParams.toString();
+						}
+
+						function initToolbar(toolbar) {
+							if (!toolbar || toolbar.dataset.cardToolbarInit === 'true') return;
+							toolbar.dataset.cardToolbarInit = 'true';
+							var root = toolbar.closest('[data-card-pagination-root]');
+							if (!root) return;
+							var key = toolbar.getAttribute('data-card-list-toolbar');
+							var state = window._openVibelyCardSelections[key] || {ids: Object.create(null), last: '', signature: '', mobile: false};
+							window._openVibelyCardSelections[key] = state;
+							var signature = querySignature(root);
+							if (state.signature && state.signature !== signature) state.ids = Object.create(null);
+							state.signature = signature;
+
+							var form = toolbar.querySelector('[data-card-query-form]');
+							var filtersButton = toolbar.querySelector('[data-card-filters-button]');
+							var filterChips = toolbar.querySelector('[data-card-filter-chips]');
+							var currentURL;
+							try { currentURL = new URL(window.location.href); } catch (_) { currentURL = null; }
+							if (currentURL && form) {
+								var searchInput = form.querySelector('[data-card-search]');
+								if (searchInput && currentURL.searchParams.has('search')) {
+									searchInput.value = currentURL.searchParams.get('search') || '';
+									searchInput.setAttribute('data-card-search-initial', searchInput.value);
+								}
+								var active = [];
+								form.querySelectorAll('[data-card-filter]').forEach(function(control) {
+									var value = currentURL.searchParams.get(control.name) || '';
+									if (value && (!control.options || Array.prototype.some.call(control.options, function(option) { return option.value === value; }))) control.value = value;
+									if (control.value) active.push({key: control.name, label: control.closest('label').querySelector('.label-text').textContent + ': ' + (control.options ? control.options[control.selectedIndex].text : control.value)});
+								});
+								var sort = form.querySelector('[data-card-sort]');
+								if (sort) {
+									var sortValue = currentURL.searchParams.get('sort') || '';
+									if (sortValue && Array.prototype.some.call(sort.options, function(option) { return option.value === sortValue; })) sort.value = sortValue;
+								}
+								if (filtersButton) filtersButton.firstChild.nodeValue = active.length ? 'Filters (' + active.length + ') ' : 'Filters ';
+								if (!filterChips && active.length) {
+									filterChips = document.createElement('div');
+									filterChips.className = 'mt-2 flex flex-wrap items-center gap-2';
+									filterChips.setAttribute('data-card-filter-chips', '');
+									toolbar.querySelector('[data-card-selection-actions]').before(filterChips);
+								}
+								if (filterChips) {
+									filterChips.innerHTML = '';
+									active.forEach(function(item) {
+										var chip = document.createElement('button');
+										chip.type = 'button'; chip.className = 'badge badge-outline gap-1'; chip.setAttribute('data-card-filter-chip', item.key); chip.textContent = item.label + ' ×';
+										chip.addEventListener('click', function() { var control = form.elements[item.key]; if (control) control.value = ''; form.requestSubmit(); });
+										filterChips.appendChild(chip);
+									});
+									if (active.length) {
+										var clear = document.createElement('button'); clear.type = 'button'; clear.className = 'btn btn-ghost btn-xs'; clear.setAttribute('data-card-clear-filters', ''); clear.textContent = 'Clear all';
+										clear.addEventListener('click', function() { form.querySelectorAll('[data-card-filter]').forEach(function(control) { control.value = ''; }); form.requestSubmit(); });
+										filterChips.appendChild(clear);
+									} else filterChips.remove();
+								}
+							}
+
+							if (form) form.addEventListener('submit', function(event) {
+								event.preventDefault();
+								var target;
+								try { target = new URL(window.location.href); } catch (_) { return; }
+								form.querySelectorAll('[name]').forEach(function(control) {
+									if (!control.name || control.disabled) return;
+									var value = (control.value || '').trim(); if (value) target.searchParams.set(control.name, value); else target.searchParams.delete(control.name);
+								});
+								target.searchParams.delete('page'); target.searchParams.delete('offset'); target.searchParams.delete('card_page'); target.searchParams.delete('card_window');
+								state.ids = Object.create(null); state.last = '';
+								var path = target.pathname + target.search + target.hash;
+								if (window.openVibelyNavigate) window.openVibelyNavigate(path); else window.location.assign(path);
+							});
+
+							function cards() { return Array.prototype.slice.call(root.querySelectorAll('[data-card-select-id]')); }
+							function eligible(card) { return card.getAttribute('data-card-select-eligible') === 'true' && visible(card); }
+							function selectedCards() { return cards().filter(function(card) { return eligible(card) && !!state.ids[card.getAttribute('data-card-select-id')]; }); }
+							function reconcile() {
+								var existing = Object.create(null);
+								cards().forEach(function(card) { if (eligible(card)) existing[card.getAttribute('data-card-select-id')] = true; });
+								Object.keys(state.ids).forEach(function(id) { if (!existing[id]) delete state.ids[id]; });
+							}
+							function render() {
+								reconcile();
+								var selected = selectedCards();
+								cards().forEach(function(card) {
+									var checkbox = card.querySelector(':scope > [data-card-selection-gutter] input');
+									if (checkbox) checkbox.checked = !!state.ids[card.getAttribute('data-card-select-id')];
+								});
+								var normal = toolbar.querySelector('[data-card-query-form]');
+								var actions = toolbar.querySelector('[data-card-selection-actions]');
+								if (normal) normal.classList.toggle('hidden', selected.length > 0);
+								if (actions) { actions.classList.toggle('hidden', selected.length === 0); actions.classList.toggle('flex', selected.length > 0); }
+								toolbar.querySelectorAll('[data-card-selected-count], [data-card-mobile-selected-count]').forEach(function(node) { node.textContent = selected.length + ' selected'; });
+								var mobileActions = toolbar.querySelector('[data-card-mobile-actions]');
+								if (mobileActions) { var show = state.mobile && selected.length > 0; mobileActions.classList.toggle('hidden', !show); mobileActions.classList.toggle('flex', show); }
+							}
+							function clearSelection() { state.ids = Object.create(null); state.last = ''; state.mobile = false; cards().forEach(function(card) { var gutter = card.querySelector(':scope > [data-card-selection-gutter]'); if (gutter) gutter.classList.add('hidden'); }); render(); }
+							function toggle(card, checked, shift) {
+								var id = card.getAttribute('data-card-select-id');
+								var selectable = cards().filter(eligible);
+								if (shift && state.last) {
+									var from = selectable.findIndex(function(item) { return item.getAttribute('data-card-select-id') === state.last; });
+									var to = selectable.indexOf(card);
+									if (from >= 0 && to >= 0) selectable.slice(Math.min(from, to), Math.max(from, to) + 1).forEach(function(item) { var itemID = item.getAttribute('data-card-select-id'); if (checked) state.ids[itemID] = true; else delete state.ids[itemID]; });
+								} else if (checked) state.ids[id] = true; else delete state.ids[id];
+								state.last = id; render();
+							}
+							function installCards() {
+								cards().forEach(function(card) {
+									if (card.querySelector(':scope > [data-card-selection-gutter]')) return;
+									card.classList.add('relative');
+									var gutter = document.createElement('div'); gutter.className = 'absolute left-2 top-4 z-20 hidden md:block'; gutter.setAttribute('data-card-selection-gutter', '');
+									var checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.className = 'checkbox checkbox-sm'; checkbox.setAttribute('aria-label', 'Select ' + (card.getAttribute('data-card-select-id') || 'card'));
+									if (!eligible(card)) { checkbox.disabled = true; checkbox.title = card.getAttribute('data-card-select-disabled-reason') || 'This card cannot be selected'; checkbox.setAttribute('aria-describedby', key + '-selection-help'); }
+									checkbox.addEventListener('click', function(event) { checkbox._openVibelyShift = !!event.shiftKey; event.stopPropagation(); });
+									checkbox.addEventListener('change', function(event) { event.stopPropagation(); toggle(card, checkbox.checked, !!checkbox._openVibelyShift); checkbox._openVibelyShift = false; });
+									gutter.appendChild(checkbox); card.insertBefore(gutter, card.firstChild); card.classList.add('md:pl-8');
+									if (state.mobile) gutter.classList.remove('hidden');
+								});
+								render();
+							}
+							function enterMobile() { state.mobile = true; cards().forEach(function(card) { var gutter = card.querySelector(':scope > [data-card-selection-gutter]'); if (gutter) gutter.classList.remove('hidden'); }); render(); }
+							function openConfirm() {
+								var selected = selectedCards(); if (!selected.length) return;
+								var dialog = toolbar.querySelector('[data-card-bulk-confirm]');
+								var entity = toolbar.getAttribute('data-card-entity-type') || 'items';
+								dialog.querySelector('[data-card-bulk-confirm-title]').textContent = 'Delete ' + selected.length + ' selected ' + entity + '?';
+								dialog.showModal();
+							}
+							async function deleteSelected() {
+								var selected = selectedCards(); if (!selected.length) return;
+								var dialog = toolbar.querySelector('[data-card-bulk-confirm]'); var confirm = dialog.querySelector('[data-card-bulk-confirm-delete]'); var error = dialog.querySelector('[data-card-bulk-error]');
+								var kind = toolbar.getAttribute('data-card-identity-kind'); var body;
+								if (kind === 'skills') body = {skills: selected.map(function(card) { return JSON.parse(card.getAttribute('data-card-select-ref')); })};
+								else body = {ids: selected.map(function(card) { return card.getAttribute('data-card-select-id'); })};
+								confirm.disabled = true; error.classList.add('hidden');
+								try {
+									var endpoint = new URL(toolbar.getAttribute('data-card-bulk-url'), window.location.href); var project = new URL(window.location.href).searchParams.get('project_id'); if (project) endpoint.searchParams.set('project_id', project);
+									var response = await fetch(endpoint.toString(), {method: 'DELETE', credentials: 'same-origin', headers: {'Content-Type': 'application/json', 'Accept': 'application/json'}, body: JSON.stringify(body)});
+									if (!response.ok) { var payload = await response.json().catch(function() { return {}; }); throw new Error(payload.message || 'Bulk deletion failed'); }
+									dialog.close(); clearSelection();
+									var refreshURL = root.getAttribute('data-card-pagination-url') || window.location.href; if (window.cardPaginationRefreshURL) refreshURL = window.cardPaginationRefreshURL(root, refreshURL);
+									var html = await fetch(refreshURL, {credentials: 'same-origin', headers: {'HX-Request': 'true'}}).then(function(result) { if (!result.ok) throw new Error('Refresh failed'); return result.text(); });
+									var next = window.replaceSearchableCardContainer ? window.replaceSearchableCardContainer(root, html) : null; var focus = next && next.querySelector('[data-card-search]'); if (focus) focus.focus({preventScroll: true});
+								} catch (err) { error.textContent = err.message || 'Bulk deletion failed'; error.classList.remove('hidden'); } finally { confirm.disabled = false; }
+							}
+							toolbar._openVibelyClearSelection = clearSelection;
+							var selectLoaded = toolbar.querySelector('[data-card-select-loaded]'); if (selectLoaded) selectLoaded.addEventListener('click', function() { cards().filter(eligible).forEach(function(card) { state.ids[card.getAttribute('data-card-select-id')] = true; }); render(); });
+							var selectMode = toolbar.querySelector('[data-card-select-mode]'); if (selectMode) selectMode.addEventListener('click', enterMobile);
+							toolbar.querySelectorAll('[data-card-cancel-selection], [data-card-mobile-cancel]').forEach(function(button) { button.addEventListener('click', clearSelection); });
+							toolbar.querySelectorAll('[data-card-delete-selected], [data-card-mobile-delete]').forEach(function(button) { button.addEventListener('click', openConfirm); });
+							var cancel = toolbar.querySelector('[data-card-bulk-confirm-cancel]'); if (cancel) cancel.addEventListener('click', function() { cancel.closest('dialog').close(); });
+							var confirm = toolbar.querySelector('[data-card-bulk-confirm-delete]'); if (confirm) confirm.addEventListener('click', deleteSelected);
+							root._openVibelyInstallSelectionCards = installCards; installCards();
+						}
+
+						window.refreshCardListToolbars = function(scope) { (scope || document).querySelectorAll('[data-card-list-toolbar]').forEach(initToolbar); };
+						document.addEventListener('keydown', function(event) { if (event.key !== 'Escape') return; document.querySelectorAll('[data-card-list-toolbar]').forEach(function(toolbar) { if (toolbar._openVibelyClearSelection) toolbar._openVibelyClearSelection(); }); });
+						document.body.addEventListener('htmx:afterSettle', function(event) { window.refreshCardListToolbars(event.detail && event.detail.elt || document); });
+						setTimeout(function() { window.refreshCardListToolbars(document); }, 0);
+					})();
+				</script>
+				<!-- Card Pagination Loader -->			<script>
 					(function() {
 						var rootSelector = '[data-card-pagination-root]';
 						var pageHeader = 'X-OpenVibely-Card-Page-Has-More';
@@ -4333,10 +4516,15 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							var url;
 							try { url = new URL(rawURL, window.location.href); } catch (_) { return rawURL; }
 							var preserveParams = (root.getAttribute('data-card-pagination-preserve-params') || '').split(',');
-							var endpoint = null;
-							try { endpoint = new URL(root.getAttribute('data-card-pagination-url') || '', window.location.href); } catch (_) {}
-							for (var i = 0; i < preserveParams.length; i++) {
-								var preserveKey = preserveParams[i].trim();
+								var endpoint = null;
+								try { endpoint = new URL(root.getAttribute('data-card-pagination-url') || '', window.location.href); } catch (_) {}
+								try {
+									var current = new URL(window.location.href);
+									current.searchParams.forEach(function(value, key) {
+										if (['card_page', 'card_window', 'page', 'page_size', 'offset'].indexOf(key) === -1 && !url.searchParams.has(key)) url.searchParams.set(key, value);
+									});
+								} catch (_) {}
+								for (var i = 0; i < preserveParams.length; i++) {								var preserveKey = preserveParams[i].trim();
 								if (!preserveKey || !endpoint) continue;
 								if (endpoint.searchParams.has(preserveKey)) url.searchParams.set(preserveKey, endpoint.searchParams.get(preserveKey));
 								else url.searchParams.delete(preserveKey);
@@ -4638,9 +4826,16 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						function resetSearch(state, term) {
 							if (!isCurrent(state) || state.search === term && state.nextPage === 1 && !state.failedPage) return;
 							state.replaceSnapshot = captureReplacementState(state);
-							state.search = term;
-							state.generation++;
-							if (state.controller) state.controller.abort();
+								state.search = term;
+								try {
+									var currentURL = new URL(window.location.href);
+									if (term) currentURL.searchParams.set('search', term); else currentURL.searchParams.delete('search');
+									currentURL.searchParams.delete('page'); currentURL.searchParams.delete('offset');
+									window.history.replaceState(window.history.state, '', currentURL.pathname + currentURL.search + currentURL.hash);
+									var toolbar = state.root.querySelector('[data-card-list-toolbar]');
+									if (toolbar) { var selection = window._openVibelyCardSelections && window._openVibelyCardSelections[toolbar.getAttribute('data-card-list-toolbar')]; if (selection) { selection.ids = Object.create(null); selection.last = ''; } }
+								} catch (_) {}
+								state.generation++;							if (state.controller) state.controller.abort();
 							state.controller = null;
 							state.loading = false;
 							state.hasMore = true;
@@ -4705,7 +4900,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							} catch (_) {
 								url = null;
 							}
-							if (!url) {
+								if (!url) {
 								state.loading = false;
 								delete state.requestedPages[page];
 								state.failedPage = page;
@@ -4715,8 +4910,13 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 									disconnectTrigger(state);
 								return;
 							}
-							url.searchParams.set('page', String(page));
-							url.searchParams.set('page_size', String(state.pageSize));
+								try {
+									var currentURL = new URL(window.location.href);
+									currentURL.searchParams.forEach(function(value, key) {
+										if (['card_page', 'card_window', 'page', 'page_size', 'offset'].indexOf(key) === -1) url.searchParams.set(key, value);
+									});
+								} catch (_) {}
+								url.searchParams.set('page', String(page));							url.searchParams.set('page_size', String(state.pageSize));
 							url.searchParams.set('offset', String(replace ? 0 : state.nextOffset));
 							url.searchParams.set('card_page', '1');
 							if (state.search) url.searchParams.set('search', state.search);
@@ -4744,6 +4944,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 										appendCards(state, incomingList);
 									}
 									if (typeof window.refreshCardSearches === 'function') window.refreshCardSearches(state.root);
+									if (typeof state.root._openVibelyInstallSelectionCards === 'function') state.root._openVibelyInstallSelectionCards();
 									state.nextPage = page + 1;
 									state.nextOffset = replace ? received : state.nextOffset + received;
 									state.hasMore = payload.header === null ? received >= state.pageSize : payload.header === 'true';

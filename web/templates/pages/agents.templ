@@ -65,7 +65,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 				+ Add Agent
 			</button>
 		</div>
-		@CardSearchInput("agents", "Search agents...")
+		@CardListToolbar(collectionToolbarConfig("agents", "", ""))
 
 			<div id="agents-card-list" data-card-pagination-list>
 			if len(agents) == 0 {
@@ -99,6 +99,11 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 						data-agent-generated-status={ string(agent.GeneratedStatus) }
 						data-search-card
 						data-search-text={ agent.Name + " " + agent.Description + " " + agent.Model + " " + agent.SystemPrompt }
+						data-card-select-id={ agent.ID }
+						data-card-select-eligible={ boolString(agent.GeneratedStatus != models.AgentStatusProtected) }
+						if agent.GeneratedStatus == models.AgentStatusProtected {
+							data-card-select-disabled-reason="Protected agents cannot be deleted"
+						}
 						onclick="editAgentFromData(this)"
 					>
 						<div class="card-body relative">

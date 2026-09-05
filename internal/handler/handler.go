@@ -748,6 +748,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.POST("/automations/:automationId/pause", h.PauseAutomation)
 	e.POST("/automations/:automationId/resume", h.ResumeAutomation)
 	e.POST("/automations/:automationId/refresh-external", h.RefreshAutomationExternalState)
+	e.DELETE("/automations/bulk", h.DeleteAutomationsBulk)
 	e.POST("/automations/:automationId/delete", h.DeleteAutomation)
 	e.GET("/automations/:automationId", h.GetAutomationLive)
 
@@ -842,8 +843,10 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.PUT("/skills/:skill", h.UpdateSkill)
 	e.POST("/skills/:skill/enabled", h.SetSkillEnabled)
 	e.POST("/skills/:skill/always_use", h.SetSkillAlwaysUse)
+	e.DELETE("/skills/bulk", h.DeleteSkillsBulk)
 	e.DELETE("/skills/:skill", h.DeleteSkill)
 	e.PUT("/agents/:id", h.UpdateAgent)
+	e.DELETE("/agents/bulk", h.DeleteAgentsBulk)
 	e.DELETE("/agents/:id", h.DeleteAgent)
 	// Lifecycle hooks (runbook §Agent Create/Edit Dialog → Lifecycle Hooks Tab)
 	e.GET("/agents/:id/lifecycle-hooks", h.GetAgentLifecycleHooks)
@@ -861,6 +864,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.POST("/models/:id", h.UpdateModel)
 	e.PUT("/models/:id", h.UpdateModel)
 	e.POST("/models/:id/set-default", h.SetDefaultModel)
+	e.DELETE("/models/bulk", h.DeleteModelsBulk)
 	e.DELETE("/models/:id", h.DeleteModel)
 
 	// OAuth for model providers
@@ -932,6 +936,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.POST("/personality/custom", h.CreateCustomPersonality)
 	e.GET("/personality/custom/:key", h.GetCustomPersonality)
 	e.PUT("/personality/custom/:key", h.UpdateCustomPersonality)
+	e.DELETE("/personality/custom/bulk", h.DeleteCustomPersonalitiesBulk)
 	e.DELETE("/personality/custom/:key", h.DeleteCustomPersonality)
 
 	// GitHub runtime trust and inbox settings
@@ -963,6 +968,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.POST("/channels/webhooks", h.HandleWebhookCreate)
 	e.GET("/channels/webhooks/:id", h.HandleWebhookDetail)
 	e.PUT("/channels/webhooks/:id", h.HandleWebhookUpdate)
+	e.DELETE("/channels/webhooks/bulk", h.HandleWebhookBulkDelete)
 	e.DELETE("/channels/webhooks/:id", h.HandleWebhookDelete)
 	e.POST("/channels/webhooks/:id/rotate-secret", h.HandleWebhookRotateSecret)
 	e.POST("/channels/webhooks/:id/test", h.HandleWebhookTest)
@@ -1022,6 +1028,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.POST("/alerts/:id/reject", h.RejectAlert)
 	e.POST("/alerts/:id/dismiss", h.DismissAlert)
 	e.POST("/alerts/read-all", h.MarkAllAlertsRead)
+	e.DELETE("/alerts/bulk", h.DeleteAlertsBulk)
 	e.DELETE("/alerts/:id", h.DeleteAlert)
 	e.DELETE("/alerts", h.DeleteAllAlerts)
 	e.GET("/alerts/unread-count", h.GetUnreadAlertCount)

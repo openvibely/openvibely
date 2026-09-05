@@ -225,6 +225,14 @@ func (s *AlertService) Delete(ctx context.Context, projectID, id string) error {
 	return nil
 }
 
+func (s *AlertService) DeleteBulk(ctx context.Context, projectID string, ids []string) error {
+	if err := s.alertRepo.DeleteBulk(ctx, projectID, ids); err != nil {
+		return err
+	}
+	s.publishProjectAlert(projectID, "")
+	return nil
+}
+
 func (s *AlertService) DeleteAll(ctx context.Context, projectID string) error {
 	if err := s.alertRepo.DeleteAll(ctx, projectID); err != nil {
 		return fmt.Errorf("deleting all alerts: %w", err)

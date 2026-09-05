@@ -129,7 +129,22 @@ func (r *CustomPersonalityRepo) ListPageExcludingKeys(ctx context.Context, limit
 	return r.listPage(ctx, limit, offset, search, excludedKeys)
 }
 
+type CustomPersonalityPageFilter struct {
+	Search   string
+	Active   *bool
+	Selected string
+	Sort     string
+}
+
+func (r *CustomPersonalityRepo) ListPageExcludingKeysFiltered(ctx context.Context, limit, offset int, filter CustomPersonalityPageFilter, excludedKeys []string) ([]models.CustomPersonality, error) {
+	return r.listPageFiltered(ctx, limit, offset, filter, excludedKeys)
+}
+
 func (r *CustomPersonalityRepo) listPage(ctx context.Context, limit, offset int, search string, excludedKeys []string) ([]models.CustomPersonality, error) {
+	return r.listPageFiltered(ctx, limit, offset, CustomPersonalityPageFilter{Search: search}, excludedKeys)
+}
+
+func (r *CustomPersonalityRepo) listPageFiltered(ctx context.Context, limit, offset int, filter CustomPersonalityPageFilter, excludedKeys []string) ([]models.CustomPersonality, error) {
 	limit, offset = normalizeCardPageArgs(limit, offset)
 	query := `SELECT id, name, key, description, SUBSTR(system_prompt, 1, ?) AS system_prompt_preview, created_at, updated_at
 		FROM custom_personalities`
@@ -156,8 +171,22 @@ func (r *CustomPersonalityRepo) listPage(ctx context.Context, limit, offset int,
 		}
 		query += ` WHERE key NOT IN (` + strings.Join(placeholders, ",") + `)`
 	}
-	if search = strings.TrimSpace(search); search != "" {
+	activeCondition := filter.Active != nil && strings.TrimSpace(filter.Selected) != ""
+	if activeCondition {
 		if len(normalizedExcluded) == 0 {
+			query += ` WHERE`
+		} else {
+			query += ` AND`
+		}
+		if *filter.Active {
+			query += ` key = ?`
+		} else {
+			query += ` key != ?`
+		}
+		args = append(args, strings.TrimSpace(filter.Selected))
+	}
+	if search := strings.TrimSpace(filter.Search); search != "" {
+		if len(normalizedExcluded) == 0 && !activeCondition {
 			query += ` WHERE`
 		} else {
 			query += ` AND`
@@ -168,7 +197,12 @@ func (r *CustomPersonalityRepo) listPage(ctx context.Context, limit, offset int,
 		), ?) > 0`
 		args = append(args, strings.ToLower(search))
 	}
-	query += ` ORDER BY name ASC, id ASC LIMIT ? OFFSET ?`
+	if filter.Sort == "name_desc" {
+		query += ` ORDER BY name DESC, id DESC`
+	} else {
+		query += ` ORDER BY name ASC, id ASC`
+	}
+	query += ` LIMIT ? OFFSET ?`
 	args = append(args, limit, offset)
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -204,6 +238,34 @@ func (r *CustomPersonalityRepo) Update(ctx context.Context, key string, p *model
 }
 
 // Delete removes a custom personality by key.
+func (r *CustomPersonalityRepo) DeleteBulk(ctx context.Context, keys []string) error {
+	if len(keys) == 0 {
+		return fmt.Errorf("at least one personality is required")
+	}
+	conn, finish, err := beginImmediateConn(ctx, r.db)
+	if err != nil {
+		return err
+	}
+	defer finish()
+	placeholders := strings.TrimRight(strings.Repeat("?,", len(keys)), ",")
+	args := make([]any, len(keys))
+	for i := range keys {
+		args[i] = keys[i]
+	}
+	var count int
+	if err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM custom_personalities WHERE key IN (`+placeholders+`)`, args...).Scan(&count); err != nil {
+		return err
+	}
+	if count != len(keys) {
+		return fmt.Errorf("custom personality not found")
+	}
+	if _, err := conn.ExecContext(ctx, `DELETE FROM custom_personalities WHERE key IN (`+placeholders+`)`, args...); err != nil {
+		return err
+	}
+	_, err = conn.ExecContext(ctx, `COMMIT`)
+	return err
+}
+
 func (r *CustomPersonalityRepo) Delete(ctx context.Context, key string) error {
 	result, err := execBoundSQLite(ctx, r.db,
 		`DELETE FROM custom_personalities WHERE key = ?`, key)

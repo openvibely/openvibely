@@ -8,10 +8,154 @@ package pages
 import "github.com/a-h/templ"
 import templruntime "github.com/a-h/templ/runtime"
 
-// CardSearchInput renders a search input for filtering cards on a page.
-// pageKey is used for sessionStorage persistence (e.g. "personality", "channels").
-// placeholder is the input placeholder text.
-func CardSearchInput(pageKey string, placeholder string) templ.Component {
+import (
+	"net/url"
+	"strconv"
+	"strings"
+)
+
+type CardListOption struct {
+	Value string
+	Label string
+}
+
+type CardListFilter struct {
+	Key     string
+	Label   string
+	Value   string
+	Text    bool
+	Options []CardListOption
+}
+
+type CardListToolbarConfig struct {
+	PageKey       string
+	Placeholder   string
+	Action        string
+	ProjectID     string
+	Search        string
+	Filters       []CardListFilter
+	Sort          string
+	SortOptions   []CardListOption
+	EntityType    string
+	BulkDeleteURL string
+	IdentityKind  string
+	CanSelect     bool
+}
+
+func activeCardFilterCount(filters []CardListFilter) int {
+	count := 0
+	for _, filter := range filters {
+		if strings.TrimSpace(filter.Value) != "" {
+			count++
+		}
+	}
+	return count
+}
+
+func cardFilterLabel(config CardListToolbarConfig, filter CardListFilter) string {
+	for _, option := range filter.Options {
+		if option.Value == filter.Value {
+			return filter.Label + ": " + option.Label
+		}
+	}
+	return filter.Label + ": " + filter.Value
+}
+
+func cardToolbarURL(config CardListToolbarConfig, removedKey string, clearAll bool) string {
+	values := url.Values{}
+	if config.ProjectID != "" {
+		values.Set("project_id", config.ProjectID)
+	}
+	if config.Search != "" {
+		values.Set("search", config.Search)
+	}
+	if config.Sort != "" {
+		values.Set("sort", config.Sort)
+	}
+	if !clearAll {
+		for _, filter := range config.Filters {
+			if filter.Key != removedKey && filter.Value != "" {
+				values.Set(filter.Key, filter.Value)
+			}
+		}
+	}
+	if encoded := values.Encode(); encoded != "" {
+		return config.Action + "?" + encoded
+	}
+	return config.Action
+}
+
+func cardListOptions(values ...string) []CardListOption {
+	options := make([]CardListOption, 0, len(values)/2)
+	for i := 0; i+1 < len(values); i += 2 {
+		options = append(options, CardListOption{Value: values[i], Label: values[i+1]})
+	}
+	return options
+}
+
+func collectionToolbarConfig(pageKey, projectID, search string) CardListToolbarConfig {
+	config := CardListToolbarConfig{PageKey: pageKey, ProjectID: projectID, Search: search, CanSelect: true, IdentityKind: "ids"}
+	switch pageKey {
+	case "alerts":
+		config.Action, config.Placeholder, config.EntityType, config.BulkDeleteURL = "/alerts", "Search alerts...", "alerts", "/alerts/bulk"
+		config.Filters = []CardListFilter{
+			{Key: "read", Label: "Read", Options: cardListOptions("read", "Read", "unread", "Unread")},
+			{Key: "severity", Label: "Severity", Options: cardListOptions("info", "Info", "warning", "Warning", "error", "Error")},
+			{Key: "decision_state", Label: "Decision state", Options: cardListOptions("not_required", "Not required", "pending", "Pending", "approved", "Approved", "rejected", "Rejected", "dismissed", "Dismissed")},
+			{Key: "type", Label: "Type", Options: cardListOptions("task_failed", "Task failed", "task_needs_followup", "Task needs follow-up", "custom", "Custom")},
+			{Key: "source", Label: "Source", Text: true},
+		}
+		config.Sort, config.SortOptions = "newest", cardListOptions("newest", "Newest", "oldest", "Oldest", "severity", "Severity", "unread_first", "Unread first")
+	case "automations":
+		config.Action, config.Placeholder, config.EntityType, config.BulkDeleteURL = "/automations", "Search automations...", "automations", "/automations/bulk"
+		config.Filters = []CardListFilter{
+			{Key: "lifecycle_state", Label: "Lifecycle", Options: cardListOptions("active", "Active", "paused", "Paused", "draft", "Draft", "archived", "Archived")},
+			{Key: "health_state", Label: "Health", Options: cardListOptions("unknown", "Unknown", "healthy", "Healthy", "degraded", "Degraded", "unhealthy", "Unhealthy")},
+			{Key: "automation_type", Label: "Automation type", Options: cardListOptions("custom", "Custom", "native_sdlc", "Native SDLC", "github_sdlc", "GitHub SDLC", "vision_driver", "Vision driver", "scheduled", "Scheduled")},
+			{Key: "adapter", Label: "Adapter", Options: cardListOptions("custom", "Custom", "native_sdlc", "Native SDLC", "github_sdlc", "GitHub SDLC", "vision_driver", "Vision driver")},
+		}
+		config.Sort, config.SortOptions = "updated_desc", cardListOptions("updated_desc", "Recently updated", "updated_asc", "Least recently updated", "name_asc", "Name A–Z", "name_desc", "Name Z–A")
+	case "agents":
+		config.Action, config.Placeholder, config.EntityType, config.BulkDeleteURL = "/agents", "Search agents...", "agents", "/agents/bulk"
+		config.Filters = []CardListFilter{{Key: "enabled", Label: "Enabled", Options: cardListOptions("true", "Enabled", "false", "Disabled")}, {Key: "scope", Label: "Scope", Options: cardListOptions("global", "Global", "project", "Project")}, {Key: "origin", Label: "Origin", Options: cardListOptions("custom", "Custom", "generated", "Generated", "protected", "Protected")}}
+		config.Sort, config.SortOptions = "name_asc", cardListOptions("name_asc", "Name A–Z", "name_desc", "Name Z–A", "updated_desc", "Recently updated", "created_desc", "Recently created")
+	case "skills":
+		config.Action, config.Placeholder, config.EntityType, config.BulkDeleteURL, config.IdentityKind = "/skills", "Search skills...", "skills", "/skills/bulk", "skills"
+		config.Filters = []CardListFilter{{Key: "enabled", Label: "Enabled", Options: cardListOptions("true", "Enabled", "false", "Disabled")}, {Key: "scope", Label: "Scope", Options: cardListOptions("global", "Global", "project", "Project")}, {Key: "always_use", Label: "Always use", Options: cardListOptions("true", "Always use", "false", "Not always use")}, {Key: "archived", Label: "Archived", Options: cardListOptions("true", "Archived", "false", "Active")}, {Key: "source", Label: "Source", Options: cardListOptions("global", "Global", "project", "Project")}}
+		config.Sort, config.SortOptions = "name_asc", cardListOptions("name_asc", "Name A–Z", "name_desc", "Name Z–A", "scope", "Scope", "source", "Source")
+	case "models":
+		config.Action, config.Placeholder, config.EntityType, config.BulkDeleteURL = "/models", "Search models...", "models", "/models/bulk"
+		config.Filters = []CardListFilter{{Key: "provider", Label: "Provider", Options: cardListOptions("openai", "OpenAI", "anthropic", "Anthropic", "ollama", "Ollama", "openai_compatible", "OpenAI-compatible", "mixture", "Mixture")}, {Key: "default", Label: "Default", Options: cardListOptions("true", "Default", "false", "Non-default")}, {Key: "auth_status", Label: "Authentication", Options: cardListOptions("connected", "Connected", "not_connected", "Not connected", "not_required", "Not required")}, {Key: "kind", Label: "Kind", Options: cardListOptions("direct", "Direct", "mixture", "Mixture")}}
+		config.Sort, config.SortOptions = "default_name", cardListOptions("default_name", "Default then name", "name_asc", "Name A–Z", "name_desc", "Name Z–A", "provider", "Provider")
+	case "channels":
+		config.Action, config.Placeholder, config.EntityType, config.BulkDeleteURL = "/channels", "Search channels...", "webhooks", "/channels/webhooks/bulk"
+		config.Filters = []CardListFilter{{Key: "type", Label: "Type", Options: cardListOptions("github", "GitHub", "slack", "Slack", "telegram", "Telegram", "discord", "Discord", "x", "X", "email", "Email", "webhook", "Webhook", "outbound_targets", "Outbound targets")}, {Key: "connection_state", Label: "Connection", Options: cardListOptions("connected", "Connected", "configured", "Configured", "disconnected", "Disconnected")}, {Key: "webhook_enabled", Label: "Webhook", Options: cardListOptions("true", "Enabled", "false", "Disabled")}}
+	case "personality":
+		config.Action, config.Placeholder, config.EntityType, config.BulkDeleteURL = "/personality", "Search personalities...", "personalities", "/personality/custom/bulk"
+		config.Filters = []CardListFilter{{Key: "kind", Label: "Kind", Options: cardListOptions("base", "Base", "built_in", "Built-in", "custom", "Custom", "override", "Override")}, {Key: "active", Label: "Status", Options: cardListOptions("true", "Active", "false", "Inactive")}}
+		config.Sort, config.SortOptions = "curated", cardListOptions("curated", "Curated", "name_asc", "Name A–Z", "name_desc", "Name Z–A")
+	}
+	return config
+}
+
+func collectionToolbarConfigWithSelection(pageKey, projectID, search string, canSelect bool) CardListToolbarConfig {
+	config := collectionToolbarConfig(pageKey, projectID, search)
+	config.CanSelect = canSelect
+	return config
+}
+
+func collectionToolbarConfigWithFilter(pageKey, projectID, search, key, value string) CardListToolbarConfig {
+	config := collectionToolbarConfig(pageKey, projectID, search)
+	for i := range config.Filters {
+		if config.Filters[i].Key == key {
+			config.Filters[i].Value = value
+		}
+	}
+	return config
+}
+
+// CardListToolbar renders the shared collection toolbar and destructive bulk confirmation shell.
+func CardListToolbar(config CardListToolbarConfig) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -32,33 +176,520 @@ func CardSearchInput(pageKey string, placeholder string) templ.Component {
 			templ_7745c5c3_Var1 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"mb-4 max-w-xs\"><div class=\"card bg-base-100 shadow-sm border border-base-300\"><input type=\"text\" name=\"search\" data-card-search=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"mb-4\" data-card-list-toolbar=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var2 string
-		templ_7745c5c3_Var2, templ_7745c5c3_Err = templ.ResolveAttributeValue(pageKey)
+		templ_7745c5c3_Var2, templ_7745c5c3_Err = templ.ResolveAttributeValue(config.PageKey)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/card_search.templ`, Line: 12, Col: 30}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/card_search.templ`, Line: 153, Col: 41}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var2)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "\" class=\"w-full bg-transparent px-4 py-2 text-sm border-0 focus:outline-none focus:ring-0\" placeholder=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "\" data-card-bulk-url=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var3 string
-		templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.ResolveAttributeValue(placeholder)
+		templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.ResolveAttributeValue(config.BulkDeleteURL)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/card_search.templ`, Line: 14, Col: 29}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/card_search.templ`, Line: 154, Col: 43}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var3)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "\"></div></div><div data-search-no-results class=\"text-center py-8\" style=\"display:none\"><p class=\"opacity-50\">No results match your search.</p></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "\" data-card-entity-type=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var4 string
+		templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.ResolveAttributeValue(config.EntityType)
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/card_search.templ`, Line: 155, Col: 43}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var4)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "\" data-card-identity-kind=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var5 string
+		templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.ResolveAttributeValue(config.IdentityKind)
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/card_search.templ`, Line: 156, Col: 47}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var5)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "\"><form method=\"get\" action=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var6 templ.SafeURL
+		templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinURLErrs(config.Action)
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/card_search.templ`, Line: 158, Col: 43}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "\" class=\"flex flex-wrap items-center gap-2\" data-card-query-form>")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		if config.ProjectID != "" {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "<input type=\"hidden\" name=\"project_id\" value=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var7 string
+			templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.ResolveAttributeValue(config.ProjectID)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/card_search.templ`, Line: 160, Col: 67}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var7)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "\"> ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		}
+		if config.CanSelect {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "<button type=\"button\" class=\"btn btn-sm btn-ghost hidden md:inline-flex\" data-card-select-loaded>Select loaded</button> <button type=\"button\" class=\"btn btn-sm btn-ghost md:hidden\" data-card-select-mode>Select</button>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "<div class=\"w-full max-w-xs flex-1 min-w-44\"><div class=\"card border border-base-300 bg-base-100 shadow-sm\"><input type=\"search\" name=\"search\" value=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var8 string
+		templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.ResolveAttributeValue(config.Search)
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/card_search.templ`, Line: 171, Col: 27}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var8)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "\" data-card-search=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var9 string
+		templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.ResolveAttributeValue(config.PageKey)
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/card_search.templ`, Line: 172, Col: 39}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var9)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "\" data-card-search-initial=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var10 string
+		templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.ResolveAttributeValue(config.Search)
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/card_search.templ`, Line: 173, Col: 46}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var10)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "\" class=\"w-full border-0 bg-transparent px-4 py-2 text-sm focus:outline-none focus:ring-0\" placeholder=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var11 string
+		templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.ResolveAttributeValue(config.Placeholder)
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/card_search.templ`, Line: 175, Col: 38}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var11)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "\"></div></div><div class=\"dropdown dropdown-end\"><button type=\"button\" class=\"btn btn-sm\" data-card-filters-button onclick=\"this.parentElement.classList.toggle('dropdown-open')\">Filters ")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		if activeCardFilterCount(config.Filters) > 0 {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "(")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var12 string
+			templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.JoinStringErrs(strconv.Itoa(activeCardFilterCount(config.Filters)))
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/card_search.templ`, Line: 183, Col: 60}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var12))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, ")")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "</button><div class=\"dropdown-content z-[100] mt-2 w-72 max-w-[calc(100vw-2rem)] rounded-box border border-base-300 bg-base-100 p-4 shadow\" data-card-filters-popover>")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		for _, filter := range config.Filters {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "<label class=\"form-control mb-3\" data-card-filter-group=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var13 string
+			templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.ResolveAttributeValue(filter.Key)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/card_search.templ`, Line: 188, Col: 74}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var13)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "\"><span class=\"label-text mb-1 text-xs font-semibold\">")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var14 string
+			templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.JoinStringErrs(filter.Label)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/card_search.templ`, Line: 189, Col: 73}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var14))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "</span> ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			if filter.Text {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "<input class=\"input input-bordered input-sm\" name=\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var15 string
+				templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.ResolveAttributeValue(filter.Key)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/card_search.templ`, Line: 191, Col: 70}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var15)
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "\" value=\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var16 string
+				templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.ResolveAttributeValue(filter.Value)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/card_search.templ`, Line: 191, Col: 93}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var16)
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "\" data-card-filter>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			} else {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "<select class=\"select select-bordered select-sm\" name=\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var17 string
+				templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.ResolveAttributeValue(filter.Key)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/card_search.templ`, Line: 193, Col: 74}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var17)
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "\" data-card-filter><option value=\"\">All</option> ")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				for _, option := range filter.Options {
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "<option value=\"")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					var templ_7745c5c3_Var18 string
+					templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.ResolveAttributeValue(option.Value)
+					if templ_7745c5c3_Err != nil {
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/card_search.templ`, Line: 196, Col: 38}
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var18)
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "\"")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					if option.Value == filter.Value {
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, " selected")
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+					}
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, ">")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					var templ_7745c5c3_Var19 string
+					templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.JoinStringErrs(option.Label)
+					if templ_7745c5c3_Err != nil {
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/card_search.templ`, Line: 196, Col: 98}
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var19))
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, "</option>")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "</select>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "</label>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "<div class=\"flex justify-end\"><button class=\"btn btn-primary btn-sm\" type=\"submit\">Apply filters</button></div></div></div>")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		if len(config.SortOptions) > 0 {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "<label class=\"sr-only\" for=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var20 string
+			templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.ResolveAttributeValue(config.PageKey + "-card-sort")
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/card_search.templ`, Line: 206, Col: 62}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var20)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "\">Sort</label> <select id=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var21 string
+			templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.ResolveAttributeValue(config.PageKey + "-card-sort")
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/card_search.templ`, Line: 207, Col: 46}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var21)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "\" class=\"select select-bordered select-sm\" name=\"sort\" data-card-sort onchange=\"this.form.requestSubmit()\">")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			for _, option := range config.SortOptions {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "<option value=\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var22 string
+				templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.ResolveAttributeValue(option.Value)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/card_search.templ`, Line: 209, Col: 34}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var22)
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				if option.Value == config.Sort {
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, " selected")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, ">")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var23 string
+				templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.JoinStringErrs(option.Label)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/card_search.templ`, Line: 209, Col: 93}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var23))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, "</option>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "</select>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "</form>")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		if activeCardFilterCount(config.Filters) > 0 {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "<div class=\"mt-2 flex flex-wrap items-center gap-2\" data-card-filter-chips>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			for _, filter := range config.Filters {
+				if filter.Value != "" {
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "<a class=\"badge badge-outline gap-1\" data-card-filter-chip=\"")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					var templ_7745c5c3_Var24 string
+					templ_7745c5c3_Var24, templ_7745c5c3_Err = templ.ResolveAttributeValue(filter.Key)
+					if templ_7745c5c3_Err != nil {
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/card_search.templ`, Line: 218, Col: 77}
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var24)
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, "\" href=\"")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					var templ_7745c5c3_Var25 templ.SafeURL
+					templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(cardToolbarURL(config, filter.Key, false)))
+					if templ_7745c5c3_Err != nil {
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/card_search.templ`, Line: 218, Col: 143}
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var25))
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "\">")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					var templ_7745c5c3_Var26 string
+					templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.JoinStringErrs(cardFilterLabel(config, filter))
+					if templ_7745c5c3_Err != nil {
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/card_search.templ`, Line: 218, Col: 179}
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var26))
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, " <span aria-hidden=\"true\">×</span></a> ")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+				}
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, "<a class=\"btn btn-ghost btn-xs\" data-card-clear-filters href=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var27 templ.SafeURL
+			templ_7745c5c3_Var27, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(cardToolbarURL(config, "", true)))
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/card_search.templ`, Line: 221, Col: 114}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var27))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 50, "\">Clear all</a></div>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 51, "<div class=\"hidden items-center gap-2 rounded-box border border-base-300 bg-base-100 p-2 shadow-sm\" data-card-selection-actions><strong data-card-selected-count>0 selected</strong> <button type=\"button\" class=\"btn btn-error btn-sm\" data-card-delete-selected>Delete selected</button> <button type=\"button\" class=\"btn btn-ghost btn-sm\" data-card-cancel-selection>Cancel</button></div><div data-search-no-results class=\"py-8 text-center\" style=\"display:none\"><p class=\"opacity-50\">No results match your search.</p></div><dialog class=\"modal\" data-card-bulk-confirm aria-labelledby=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var28 string
+		templ_7745c5c3_Var28, templ_7745c5c3_Err = templ.ResolveAttributeValue(config.PageKey + "-bulk-title")
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/card_search.templ`, Line: 230, Col: 95}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var28)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 52, "\" aria-describedby=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var29 string
+		templ_7745c5c3_Var29, templ_7745c5c3_Err = templ.ResolveAttributeValue(config.PageKey + "-bulk-description")
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/card_search.templ`, Line: 230, Col: 153}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var29)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 53, "\"><div class=\"modal-box\"><h3 id=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var30 string
+		templ_7745c5c3_Var30, templ_7745c5c3_Err = templ.ResolveAttributeValue(config.PageKey + "-bulk-title")
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/card_search.templ`, Line: 232, Col: 43}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var30)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 54, "\" class=\"text-lg font-bold text-error\" data-card-bulk-confirm-title>Delete selected?</h3><p id=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var31 string
+		templ_7745c5c3_Var31, templ_7745c5c3_Err = templ.ResolveAttributeValue(config.PageKey + "-bulk-description")
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/card_search.templ`, Line: 233, Col: 48}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var31)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 55, "\" class=\"py-4\">This action cannot be undone.</p><p class=\"hidden text-sm text-error\" data-card-bulk-error role=\"alert\"></p><div class=\"modal-action\"><button type=\"button\" class=\"btn\" data-card-bulk-confirm-cancel autofocus>Cancel</button><button type=\"button\" class=\"btn btn-error\" data-card-bulk-confirm-delete>Delete selected</button></div></div><form method=\"dialog\" class=\"modal-backdrop\"><button>close</button></form></dialog><div class=\"fixed inset-x-3 bottom-3 z-[90] hidden items-center justify-between gap-2 rounded-box border border-base-300 bg-base-100 p-3 shadow-xl md:hidden\" data-card-mobile-actions><strong data-card-mobile-selected-count>0 selected</strong><div class=\"flex gap-2\"><button type=\"button\" class=\"btn btn-error btn-sm\" data-card-mobile-delete>Delete</button><button type=\"button\" class=\"btn btn-ghost btn-sm\" data-card-mobile-cancel>Cancel</button></div></div></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -66,9 +697,62 @@ func CardSearchInput(pageKey string, placeholder string) templ.Component {
 	})
 }
 
-// cardPaginationHasMoreAttribute serializes the server's initial page boundary for
-// the browser loader. It is separate from the status component so each surface
-// can keep its existing public component signature.
+// CardSearchInput is retained for card surfaces outside the collection-toolbar scope.
+func CardSearchInput(pageKey string, placeholder string) templ.Component {
+	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
+		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
+			return templ_7745c5c3_CtxErr
+		}
+		templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
+		if !templ_7745c5c3_IsBuffer {
+			defer func() {
+				templ_7745c5c3_BufErr := templruntime.ReleaseBuffer(templ_7745c5c3_Buffer)
+				if templ_7745c5c3_Err == nil {
+					templ_7745c5c3_Err = templ_7745c5c3_BufErr
+				}
+			}()
+		}
+		ctx = templ.InitializeContext(ctx)
+		templ_7745c5c3_Var32 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var32 == nil {
+			templ_7745c5c3_Var32 = templ.NopComponent
+		}
+		ctx = templ.ClearChildren(ctx)
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 56, "<div class=\"mb-4 max-w-xs\"><div class=\"card bg-base-100 shadow-sm border border-base-300\"><input type=\"text\" name=\"search\" data-card-search=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var33 string
+		templ_7745c5c3_Var33, templ_7745c5c3_Err = templ.ResolveAttributeValue(pageKey)
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/card_search.templ`, Line: 249, Col: 62}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var33)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 57, "\" class=\"w-full bg-transparent px-4 py-2 text-sm border-0 focus:outline-none focus:ring-0\" placeholder=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var34 string
+		templ_7745c5c3_Var34, templ_7745c5c3_Err = templ.ResolveAttributeValue(placeholder)
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/card_search.templ`, Line: 249, Col: 179}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var34)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 58, "\"></div></div><div data-search-no-results class=\"text-center py-8\" style=\"display:none\"><p class=\"opacity-50\">No results match your search.</p></div>")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		return nil
+	})
+}
+
 func cardPaginationHasMoreAttribute(hasMore bool) string {
 	if hasMore {
 		return "true"
@@ -76,7 +760,6 @@ func cardPaginationHasMoreAttribute(hasMore bool) string {
 	return "false"
 }
 
-// CardPaginationStatus renders the shared status and intersection target for a paged card list.
 func CardPaginationStatus() templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
@@ -93,9 +776,9 @@ func CardPaginationStatus() templ.Component {
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var4 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var4 == nil {
-			templ_7745c5c3_Var4 = templ.NopComponent
+		templ_7745c5c3_Var35 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var35 == nil {
+			templ_7745c5c3_Var35 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
 		templ_7745c5c3_Err = CardPaginationStatusWithBoundary(false).Render(ctx, templ_7745c5c3_Buffer)
@@ -106,7 +789,6 @@ func CardPaginationStatus() templ.Component {
 	})
 }
 
-// CardPaginationStatusWithBoundary renders the status with the server's current page boundary.
 func CardPaginationStatusWithBoundary(hasMore bool) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
@@ -123,25 +805,25 @@ func CardPaginationStatusWithBoundary(hasMore bool) templ.Component {
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var5 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var5 == nil {
-			templ_7745c5c3_Var5 = templ.NopComponent
+		templ_7745c5c3_Var36 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var36 == nil {
+			templ_7745c5c3_Var36 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "<div data-card-pagination-status data-card-pagination-has-more=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 59, "<div data-card-pagination-status data-card-pagination-has-more=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var6 string
-		templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.ResolveAttributeValue(cardPaginationHasMoreAttribute(hasMore))
+		var templ_7745c5c3_Var37 string
+		templ_7745c5c3_Var37, templ_7745c5c3_Err = templ.ResolveAttributeValue(cardPaginationHasMoreAttribute(hasMore))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/card_search.templ`, Line: 39, Col: 105}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/card_search.templ`, Line: 267, Col: 105}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var6)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var37)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "\" class=\"mt-4 min-h-6 text-center text-sm\" role=\"status\" aria-live=\"polite\" aria-atomic=\"true\"><span data-card-pagination-loading class=\"hidden\">Loading more cards...</span> <span data-card-pagination-error class=\"hidden text-error\">Could not load more cards.</span> <button type=\"button\" data-card-pagination-retry class=\"btn btn-ghost btn-sm hidden\" aria-label=\"Retry loading more cards\">Try again</button> <span data-card-pagination-sentinel aria-hidden=\"true\" class=\"block h-px w-full\"></span></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 60, "\" class=\"mt-4 min-h-6 text-center text-sm\" role=\"status\" aria-live=\"polite\" aria-atomic=\"true\"><span data-card-pagination-loading class=\"hidden\">Loading more cards...</span> <span data-card-pagination-error class=\"hidden text-error\">Could not load more cards.</span> <button type=\"button\" data-card-pagination-retry class=\"btn btn-ghost btn-sm hidden\" aria-label=\"Retry loading more cards\">Try again</button> <span data-card-pagination-sentinel aria-hidden=\"true\" class=\"block h-px w-full\"></span></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

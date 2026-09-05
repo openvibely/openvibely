@@ -97,7 +97,7 @@ templ skillsContent(skills []SkillCard, canManage bool, currentProjectID string,
 				</ul>
 			</div>
 		</div>
-		@CardSearchInput("skills", "Search skills...")
+		@CardListToolbar(collectionToolbarConfigWithSelection("skills", currentProjectID, "", canManage))
 			<div id="skills-card-list" data-card-pagination-list>
 			if len(skills) == 0 {
 				<div class="text-center py-12" data-search-empty-state>
@@ -127,8 +127,10 @@ templ skillsContent(skills []SkillCard, canManage bool, currentProjectID string,
 							data-search-card
 							data-skill-scroll-anchor={ skill.Handle }
 							data-search-text={ skillSearchText(skill) }						tabindex="-1"
-						onclick="editSkillFromData(this)"
-					>
+							data-card-select-id={ skill.Scope + ":" + skill.Handle }
+							data-card-select-ref={ `{"handle":"` + skill.Handle + `","scope":"` + skill.Scope + `"}` }
+							data-card-select-eligible={ boolString(canManage) }
+							onclick="editSkillFromData(this)"					>
 						<div class="card-body relative">
 							<div class="absolute top-4 right-4" onclick="event.stopPropagation()">
 								<div class="dropdown dropdown-end">

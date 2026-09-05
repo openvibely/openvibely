@@ -611,8 +611,8 @@ func TestHandler_PersonalityTemplateUsesSharedCardComponentsForSelectedAndNonSel
 	require.NoError(t, err)
 	src := string(source)
 
-	assert.Equal(t, 2, strings.Count(src, "@builtInPersonalityCard("), "selected and non-selected built-in cards should both use the shared helper")
-	assert.Equal(t, 2, strings.Count(src, "@customPersonalityCard("), "selected and non-selected custom cards should both use the shared helper")
+	assert.Equal(t, 1, strings.Count(src, "@builtInPersonalityCard("), "the unified ordered projection should use the shared built-in card helper")
+	assert.Equal(t, 1, strings.Count(src, "@customPersonalityCard("), "the unified ordered projection should use the shared custom card helper")
 }
 
 func TestHandler_PersonalityPage_SharedCardRenderingPreservesBuiltinVariants(t *testing.T) {
@@ -862,10 +862,11 @@ func TestHandler_PersonalityPage_BaseCardKebabHiddenWhenSelected(t *testing.T) {
 	// since the kebab is conditionally hidden when personality == ""
 	baseCardIdx := strings.Index(body, `data-personality-is-default-card="true"`)
 	require.Greater(t, baseCardIdx, 0)
-	// Find next card after the base card
-	nextCardIdx := strings.Index(body[baseCardIdx:], `data-personality-key="sarcastic_engineer"`)
+	// Find the next rendered card after the base card regardless of curated preset order.
+	remaining := body[baseCardIdx+len(`data-personality-is-default-card="true"`):]
+	nextCardIdx := strings.Index(remaining, `data-personality-key="`)
 	require.Greater(t, nextCardIdx, 0)
-	baseCardHTML := body[baseCardIdx : baseCardIdx+nextCardIdx]
+	baseCardHTML := body[baseCardIdx : baseCardIdx+len(`data-personality-is-default-card="true"`)+nextCardIdx]
 	// Base card should NOT contain kebab dropdown when selected
 	assert.NotContains(t, baseCardHTML, "handleDropdownToggle")
 }

@@ -1113,7 +1113,7 @@ func TestWebhookCRUD_HTMXMutationsTriggerChannelsRefresh(t *testing.T) {
 		t.Fatalf("expected rotated secret to change")
 	}
 
-	deleteReq := httptest.NewRequest("DELETE", "/channels/webhooks/"+endpoint.ID, nil)
+	deleteReq := httptest.NewRequest("DELETE", "/channels/webhooks/"+endpoint.ID+"?project_id="+project.ID, nil)
 	deleteReq.Header.Set("HX-Request", "true")
 	deleteRec := httptest.NewRecorder()
 	wtc.echo.ServeHTTP(deleteRec, deleteReq)
@@ -1133,7 +1133,7 @@ func TestWebhookCRUD_Delete(t *testing.T) {
 	project := wtc.CreateProject().WithName("WH Delete").Build()
 	endpoint := wtc.createEndpoint(t, project.ID, "ToDelete", true)
 
-	req := httptest.NewRequest("DELETE", "/channels/webhooks/"+endpoint.ID, nil)
+	req := httptest.NewRequest("DELETE", "/channels/webhooks/"+endpoint.ID+"?project_id="+project.ID, nil)
 	rec := httptest.NewRecorder()
 	wtc.echo.ServeHTTP(rec, req)
 

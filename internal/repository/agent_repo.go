@@ -368,18 +368,56 @@ func (r *AgentRepo) ListAgentListSummaries(ctx context.Context) ([]AgentListSumm
 // ListPage returns one bounded Models-page-compatible agent projection. The
 // Agents card currently carries its edit metadata, so this method retains the
 // existing row shape while bounding both the result count and response HTML.
+type AgentPageFilter struct {
+	Search  string
+	Enabled *bool
+	Scope   string
+	Origin  string
+	Sort    string
+}
+
 func (r *AgentRepo) ListPage(ctx context.Context, limit, offset int, search string) ([]models.Agent, error) {
+	return r.ListPageFiltered(ctx, limit, offset, AgentPageFilter{Search: search})
+}
+
+func (r *AgentRepo) ListPageFiltered(ctx context.Context, limit, offset int, filter AgentPageFilter) ([]models.Agent, error) {
 	limit, offset = normalizeCardPageArgs(limit, offset)
 	query := `SELECT ` + agentColumns + ` FROM agents WHERE COALESCE(generated_status, 'user_edited') <> 'archived'`
 	args := make([]any, 0, 3)
-	if search = strings.TrimSpace(search); search != "" {
+	if search := strings.TrimSpace(filter.Search); search != "" {
 		query += ` AND INSTR(LOWER(
 			COALESCE(name, '') || ' ' || COALESCE(description, '') || ' ' ||
 			COALESCE(model, '') || ' ' || COALESCE(system_prompt, '')
 		), ?) > 0`
 		args = append(args, strings.ToLower(search))
 	}
-	query += ` ORDER BY name ASC, id ASC LIMIT ? OFFSET ?`
+	if filter.Enabled != nil {
+		query += ` AND COALESCE(enabled, 1) = ?`
+		args = append(args, *filter.Enabled)
+	}
+	if filter.Scope != "" {
+		query += ` AND scope = ?`
+		args = append(args, filter.Scope)
+	}
+	if filter.Origin != "" {
+		status := filter.Origin
+		if status == "custom" {
+			status = string(models.AgentStatusUserEdited)
+		}
+		query += ` AND COALESCE(generated_status, 'user_edited') = ?`
+		args = append(args, status)
+	}
+	switch filter.Sort {
+	case "name_desc":
+		query += ` ORDER BY name DESC, id DESC`
+	case "updated_desc":
+		query += ` ORDER BY updated_at DESC, id DESC`
+	case "created_desc":
+		query += ` ORDER BY created_at DESC, id DESC`
+	default:
+		query += ` ORDER BY name ASC, id ASC`
+	}
+	query += ` LIMIT ? OFFSET ?`
 	args = append(args, limit, offset)
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -939,6 +977,40 @@ func (r *AgentRepo) Update(ctx context.Context, a *models.Agent) error {
 		return fmt.Errorf("updating agent: %w", err)
 	}
 	return nil
+}
+
+func (r *AgentRepo) DeleteBulk(ctx context.Context, ids []string) error {
+	if len(ids) == 0 {
+		return fmt.Errorf("at least one agent is required")
+	}
+	conn, finish, err := beginImmediateConn(ctx, r.db)
+	if err != nil {
+		return err
+	}
+	defer finish()
+	placeholders := strings.TrimRight(strings.Repeat("?,", len(ids)), ",")
+	args := make([]any, len(ids))
+	for i := range ids {
+		args[i] = ids[i]
+	}
+	var count, protected int
+	if err := conn.QueryRowContext(ctx, `SELECT COUNT(*), COALESCE(SUM(CASE WHEN generated_status = 'protected' THEN 1 ELSE 0 END), 0) FROM agents WHERE id IN (`+placeholders+`)`, args...).Scan(&count, &protected); err != nil {
+		return err
+	}
+	if count != len(ids) {
+		return fmt.Errorf("agent not found")
+	}
+	if protected > 0 {
+		return fmt.Errorf("protected system agents cannot be deleted")
+	}
+	if _, err := conn.ExecContext(ctx, `UPDATE tasks SET agent_definition_id = NULL WHERE agent_definition_id IN (`+placeholders+`)`, args...); err != nil {
+		return err
+	}
+	if _, err := conn.ExecContext(ctx, `DELETE FROM agents WHERE id IN (`+placeholders+`)`, args...); err != nil {
+		return err
+	}
+	_, err = conn.ExecContext(ctx, `COMMIT`)
+	return err
 }
 
 func (r *AgentRepo) Delete(ctx context.Context, id string) error {

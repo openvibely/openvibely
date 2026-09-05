@@ -11,6 +11,90 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestModelAndAgentBulkDeleteEligibilityIsAtomic(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	modelsRepo := NewLLMConfigRepo(db)
+	first := &models.LLMConfig{Name: "Default bulk model", Provider: models.ProviderTest, Model: "default-bulk", IsDefault: true}
+	second := &models.LLMConfig{Name: "Other bulk model", Provider: models.ProviderTest, Model: "other-bulk"}
+	require.NoError(t, modelsRepo.Create(ctx, first))
+	require.NoError(t, modelsRepo.Create(ctx, second))
+	require.ErrorContains(t, modelsRepo.DeleteBulk(ctx, []string{first.ID, second.ID}), "default")
+	configs, err := modelsRepo.GetByIDs(ctx, []string{first.ID, second.ID})
+	require.NoError(t, err)
+	require.Len(t, configs, 2)
+
+	agentsRepo := NewAgentRepo(db)
+	protected := &models.Agent{Name: "Protected bulk", Model: "inherit", GeneratedStatus: models.AgentStatusProtected}
+	ordinary := &models.Agent{Name: "Ordinary bulk", Model: "inherit"}
+	require.NoError(t, agentsRepo.Create(ctx, protected))
+	require.NoError(t, agentsRepo.Create(ctx, ordinary))
+	require.ErrorContains(t, agentsRepo.DeleteBulk(ctx, []string{protected.ID, ordinary.ID}), "protected")
+	agents, err := agentsRepo.GetByIDs(ctx, []string{protected.ID, ordinary.ID})
+	require.NoError(t, err)
+	require.Len(t, agents, 2)
+}
+
+func TestScopedBulkDeletesPreflightWithoutPartialDeletion(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := NewProjectRepo(db)
+	first := &models.Project{Name: "Bulk first"}
+	second := &models.Project{Name: "Bulk second"}
+	require.NoError(t, projectRepo.Create(ctx, first))
+	require.NoError(t, projectRepo.Create(ctx, second))
+	alerts := NewAlertRepo(db)
+	own := &models.Alert{ProjectID: first.ID, Type: models.AlertCustom, Severity: models.SeverityInfo, Title: "own"}
+	foreign := &models.Alert{ProjectID: second.ID, Type: models.AlertCustom, Severity: models.SeverityInfo, Title: "foreign"}
+	require.NoError(t, alerts.Create(ctx, own))
+	require.NoError(t, alerts.Create(ctx, foreign))
+	require.Error(t, alerts.DeleteBulk(ctx, first.ID, []string{own.ID, foreign.ID}))
+	remaining, err := alerts.ListByProject(ctx, first.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, remaining, 1)
+
+	webhooks := NewWebhookRepo(db)
+	ownHook := &models.WebhookEndpoint{ProjectID: first.ID, Name: "own", Enabled: true}
+	foreignHook := &models.WebhookEndpoint{ProjectID: second.ID, Name: "foreign", Enabled: true}
+	require.NoError(t, webhooks.Create(ctx, ownHook))
+	require.NoError(t, webhooks.Create(ctx, foreignHook))
+	require.Error(t, webhooks.DeleteBulk(ctx, first.ID, []string{ownHook.ID, foreignHook.ID}))
+	hooks, err := webhooks.ListByProject(ctx, first.ID)
+	require.NoError(t, err)
+	require.Len(t, hooks, 1)
+}
+
+func TestCollectionFiltersAndSortsApplyBeforePagination(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	modelsRepo := NewLLMConfigRepo(db)
+	for _, item := range []struct {
+		name     string
+		provider models.LLMProvider
+	}{
+		{"Zulu Anthropic", models.ProviderAnthropic}, {"Alpha OpenAI", models.ProviderOpenAI}, {"Beta Anthropic", models.ProviderAnthropic},
+	} {
+		require.NoError(t, modelsRepo.Create(ctx, &models.LLMConfig{Name: item.name, Provider: item.provider, Model: strings.ToLower(strings.ReplaceAll(item.name, " ", "-"))}))
+	}
+	page, err := modelsRepo.ListCardsPageFiltered(ctx, 1, 1, ModelCardListFilter{Provider: string(models.ProviderAnthropic), Sort: "name_asc"})
+	require.NoError(t, err)
+	require.Len(t, page, 1)
+	require.Equal(t, "Zulu Anthropic", page[0].Name)
+
+	projectRepo := NewProjectRepo(db)
+	project := &models.Project{Name: "Filtered hooks"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	webhookRepo := NewWebhookRepo(db)
+	for _, endpoint := range []*models.WebhookEndpoint{{ProjectID: project.ID, Name: "A disabled", Enabled: false}, {ProjectID: project.ID, Name: "B enabled", Enabled: true}, {ProjectID: project.ID, Name: "C enabled", Enabled: true}} {
+		require.NoError(t, webhookRepo.Create(ctx, endpoint))
+	}
+	enabled := true
+	hooks, err := webhookRepo.ListCardsByProjectPageFiltered(ctx, project.ID, 1, 1, WebhookCardFilter{Enabled: &enabled})
+	require.NoError(t, err)
+	require.Len(t, hooks, 1)
+	require.Equal(t, "C enabled", hooks[0].Name)
+}
+
 func TestLLMConfigRepoListCardsPageBoundsSearchAndCompactProjection(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewLLMConfigRepo(db)

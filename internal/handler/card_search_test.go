@@ -9,7 +9,92 @@ import (
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/service"
+	"github.com/stretchr/testify/require"
 )
+
+func TestCollectionSelectionBrowserContractIsShared(t *testing.T) {
+	_, e, _ := setupTestHandler(t)
+	req := httptest.NewRequest(http.MethodGet, "/alerts?project_id=default", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	body := rec.Body.String()
+	for _, want := range []string{
+		`checkbox.addEventListener('click'`, `event.stopPropagation()`, `state.last`, `event.key !== 'Escape'`,
+		`data-card-select-mode`, `data-card-mobile-actions`, `data-card-bulk-confirm`, `state.ids[card.getAttribute('data-card-select-id')] = true`,
+		`_openVibelyInstallSelectionCards`, `if (!existing[id]) delete state.ids[id]`, `focus({preventScroll: true})`,
+	} {
+		require.Contains(t, body, want)
+	}
+}
+
+func TestCollectionCardToolbars(t *testing.T) {
+	tests := []struct {
+		name     string
+		path     string
+		pageKey  string
+		wantSort bool
+	}{
+		{name: "alerts", path: "/alerts?project_id=default", pageKey: "alerts", wantSort: true},
+		{name: "automations", path: "/automations?project_id=default", pageKey: "automations", wantSort: true},
+		{name: "agents", path: "/agents?project_id=default", pageKey: "agents", wantSort: true},
+		{name: "skills", path: "/skills?project_id=default", pageKey: "skills", wantSort: true},
+		{name: "models", path: "/models?project_id=default", pageKey: "models", wantSort: true},
+		{name: "channels", path: "/channels?project_id=default", pageKey: "channels", wantSort: false},
+		{name: "personality", path: "/personality?project_id=default", pageKey: "personality", wantSort: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h, e, _, db := setupTestHandlerWithDB(t)
+			h.SetAgentRepo(repository.NewAgentRepo(db))
+			if tt.name == "automations" {
+				h.SetAutomationServices(service.NewAutomationGraphService(repository.NewAutomationRepo(db)), nil)
+			}
+			h.SetAgentSkillRoot(t.TempDir())
+			req := httptest.NewRequest(http.MethodGet, tt.path, nil)
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+			}
+			body := rec.Body.String()
+			for _, want := range []string{
+				`data-card-list-toolbar="` + tt.pageKey + `"`,
+				`data-card-select-loaded`,
+				`data-card-filters-button`,
+				`data-card-selection-actions`,
+			} {
+				if !strings.Contains(body, want) {
+					t.Errorf("expected %s toolbar to contain %q", tt.name, want)
+				}
+			}
+			if got := strings.Contains(body, `id="`+tt.pageKey+`-card-sort"`); got != tt.wantSort {
+				t.Errorf("sort presence = %v, want %v", got, tt.wantSort)
+			}
+		})
+	}
+}
+
+func TestAlertsFiltersDecisionStateOnlyInsidePopover(t *testing.T) {
+	_, e, _ := setupTestHandler(t)
+	req := httptest.NewRequest(http.MethodGet, "/alerts?project_id=default&decision_state=pending", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if strings.Contains(body, `aria-label="Filter by decision state"`) {
+		t.Fatal("standalone decision-state selector must not be rendered")
+	}
+	if !strings.Contains(body, `data-card-filter-group="decision_state"`) {
+		t.Fatal("decision state must be rendered as a Filters popover group")
+	}
+	if !strings.Contains(body, `data-card-filter-chip="decision_state"`) {
+		t.Fatal("active decision state must be rendered as a removable chip")
+	}
+}
 
 func TestCardSearch_PersonalityPage(t *testing.T) {
 	_, e, _ := setupTestHandler(t)

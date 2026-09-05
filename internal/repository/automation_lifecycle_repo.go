@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"strings"
 
 	"github.com/openvibely/openvibely/internal/automationobs"
 	"github.com/openvibely/openvibely/internal/events"
@@ -344,6 +345,63 @@ func (r *AutomationRepo) SetAutomationLifecycle(ctx context.Context, projectID, 
 		automationobs.String("project_id", projectID), automationobs.String("automation_id", automationID),
 		automationobs.String("version_id", published.String), automationobs.String("state", string(state)))
 	r.PublishInvalidation(events.AutomationDefinitionUpdated, projectID, models.AutomationBinding{AutomationID: automationID, VersionID: published.String})
+	return nil
+}
+
+func (r *AutomationRepo) DeleteAutomations(ctx context.Context, projectID string, automationIDs []string) error {
+	if len(automationIDs) == 0 {
+		return errors.New("at least one automation is required")
+	}
+	conn, finishImmediate, err := beginImmediateConn(ctx, r.db)
+	if err != nil {
+		return err
+	}
+	defer finishImmediate()
+	placeholders := strings.TrimRight(strings.Repeat("?,", len(automationIDs)), ",")
+	args := []any{projectID}
+	for _, id := range automationIDs {
+		args = append(args, id)
+	}
+	var count int
+	if err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM automations WHERE project_id = ? AND id IN (`+placeholders+`)`, args...).Scan(&count); err != nil {
+		return err
+	}
+	if count != len(automationIDs) {
+		return errors.New("automation not found")
+	}
+	flightArgs := []any{projectID}
+	for _, id := range automationIDs {
+		flightArgs = append(flightArgs, id)
+	}
+	flightArgs = append(flightArgs, projectID)
+	for _, id := range automationIDs {
+		flightArgs = append(flightArgs, id)
+	}
+	var inFlight int
+	if err := conn.QueryRowContext(ctx, `SELECT CASE WHEN EXISTS (
+		SELECT 1 FROM automation_invocations i LEFT JOIN automation_dispatch_outbox d ON d.invocation_id = i.id
+		WHERE i.project_id = ? AND i.automation_id IN (`+placeholders+`) AND ((i.status IN ('claimed','dispatched','running') AND d.id IS NOT NULL) OR d.status IN ('pending','processing','submitted') OR EXISTS (SELECT 1 FROM executions e WHERE e.dispatch_id = d.id AND e.status = 'running'))
+	) OR EXISTS (
+		SELECT 1 FROM automation_activities a JOIN automation_activity_resources ar ON ar.activity_id = a.id AND ar.resource_type = 'execution' JOIN executions e ON e.id = ar.resource_id
+		WHERE a.project_id = ? AND a.automation_id IN (`+placeholders+`) AND e.status = 'running'
+	) THEN 1 ELSE 0 END`, flightArgs...).Scan(&inFlight); err != nil {
+		return err
+	}
+	if inFlight > 0 {
+		return ErrAutomationDispatchInFlight
+	}
+	if _, err := conn.ExecContext(ctx, `DELETE FROM schedules WHERE id IN (SELECT schedule_id FROM automation_trigger_owners WHERE project_id = ? AND automation_id IN (`+placeholders+`))`, args...); err != nil {
+		return err
+	}
+	if _, err := conn.ExecContext(ctx, `DELETE FROM automations WHERE project_id = ? AND id IN (`+placeholders+`)`, args...); err != nil {
+		return err
+	}
+	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+		return err
+	}
+	for _, id := range automationIDs {
+		r.PublishInvalidation(events.AutomationDefinitionUpdated, projectID, models.AutomationBinding{AutomationID: id})
+	}
 	return nil
 }
 

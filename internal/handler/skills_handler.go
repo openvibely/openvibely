@@ -85,12 +85,55 @@ func (h *Handler) ListSkills(c echo.Context) error {
 	page := parseCardPageRequest(c)
 	skills := make([]pages.SkillCard, 0, len(allSkills))
 	search := strings.ToLower(page.Search)
+	enabled := optionalBoolQuery(c, "enabled")
+	scope := allowlistedQuery(c, "scope", "", "global", "project")
+	alwaysUse := optionalBoolQuery(c, "always_use")
+	archived := optionalBoolQuery(c, "archived")
+	source := allowlistedQuery(c, "source", "", "global", "project")
+	sortValue := allowlistedQuery(c, "sort", "name_asc", "name_asc", "name_desc", "scope", "source")
 	for _, skill := range allSkills {
 		if search != "" && !skillCardMatchesSearch(skill, search) {
 			continue
 		}
+		if enabled != nil && skill.Enabled != *enabled {
+			continue
+		}
+		if scope != "" && skill.Scope != scope {
+			continue
+		}
+		if alwaysUse != nil && skill.AlwaysUse != *alwaysUse {
+			continue
+		}
+		if archived != nil && skill.Archived != *archived {
+			continue
+		}
+		if source != "" && skill.Source != source {
+			continue
+		}
 		skills = append(skills, skill)
 	}
+	sort.SliceStable(skills, func(i, j int) bool {
+		a, b := skills[i], skills[j]
+		switch sortValue {
+		case "name_desc":
+			if strings.EqualFold(a.Name, b.Name) {
+				return a.Scope+":"+a.Handle > b.Scope+":"+b.Handle
+			}
+			return strings.ToLower(a.Name) > strings.ToLower(b.Name)
+		case "scope":
+			if a.Scope != b.Scope {
+				return a.Scope < b.Scope
+			}
+		case "source":
+			if a.Source != b.Source {
+				return a.Source < b.Source
+			}
+		}
+		if strings.EqualFold(a.Name, b.Name) {
+			return a.Scope+":"+a.Handle < b.Scope+":"+b.Handle
+		}
+		return strings.ToLower(a.Name) < strings.ToLower(b.Name)
+	})
 	start := page.Offset
 	if start > len(skills) {
 		start = len(skills)
@@ -265,6 +308,67 @@ func (h *Handler) ImportSkillPackage(c echo.Context) error {
 	}
 	h.recordManualSkillEvent(c, eventType, decl.Skill.Key, scope, "")
 	return h.ListSkills(c)
+}
+
+type bulkSkillRef struct {
+	Handle string `json:"handle"`
+	Scope  string `json:"scope"`
+}
+type bulkSkillsRequest struct {
+	Skills []bulkSkillRef `json:"skills"`
+}
+
+func (h *Handler) DeleteSkillsBulk(c echo.Context) error {
+	decoder := json.NewDecoder(io.LimitReader(c.Request().Body, 64<<10))
+	decoder.DisallowUnknownFields()
+	var request bulkSkillsRequest
+	if err := decoder.Decode(&request); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid JSON request")
+	}
+	if err := ensureJSONEOF(decoder); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	seen := map[string]struct{}{}
+	refs := make([]bulkSkillRef, 0, len(request.Skills))
+	roots := make([]string, 0, len(request.Skills))
+	for _, ref := range request.Skills {
+		ref.Handle = strings.TrimSpace(ref.Handle)
+		ref.Scope = strings.TrimSpace(ref.Scope)
+		if !validDialogSkillKey(ref.Handle) || (ref.Scope != "global" && ref.Scope != "project") {
+			return echo.NewHTTPError(http.StatusBadRequest, "every skill must have a valid handle and scope")
+		}
+		identity := ref.Scope + ":" + ref.Handle
+		if _, ok := seen[identity]; ok {
+			continue
+		}
+		seen[identity] = struct{}{}
+		root, err := h.rootForDialogScope(c, ref.Scope)
+		if err != nil {
+			return err
+		}
+		path := filepath.Join(root, "skills", ref.Handle)
+		stat, err := os.Stat(path)
+		if err != nil || !stat.IsDir() {
+			return echo.NewHTTPError(http.StatusBadRequest, "all selected skills must exist at the selected scope")
+		}
+		refs = append(refs, ref)
+		roots = append(roots, root)
+	}
+	if len(refs) == 0 {
+		return echo.NewHTTPError(http.StatusBadRequest, "at least one skill is required")
+	}
+	if len(refs) > bulkDeleteMaxItems {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("at most %d skills may be deleted at once", bulkDeleteMaxItems))
+	}
+	for i, ref := range refs {
+		if err := os.RemoveAll(filepath.Join(roots[i], "skills", ref.Handle)); err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, "skill deletion stopped after a filesystem failure; some earlier packages may already be removed")
+		}
+		if err := removeStandaloneSkillIndexEntry(filepath.Join(roots[i], "skills", "SKILLS.md"), ref.Handle); err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, "skill index cleanup failed after package deletion; manual repair may be required")
+		}
+	}
+	return c.JSON(http.StatusOK, map[string]int{"deleted": len(refs)})
 }
 
 func (h *Handler) DeleteSkill(c echo.Context) error {
