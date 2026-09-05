@@ -99,9 +99,18 @@ func TestSkillsDeleteBrowserPreservesFilteredScrollAnchor(t *testing.T) {
       }
     }
   };
+  window.cardCollectionActionURL = function(root, rawURL) {
+    var action = new URL(rawURL, window.location.href);
+    var state = new URL(root.getAttribute('data-card-pagination-url'), window.location.href);
+    state.searchParams.forEach(function(value, key) {
+      if (!action.searchParams.has(key)) action.searchParams.set(key, value);
+    });
+    return action.pathname + '?' + action.searchParams.toString();
+  };
   window.htmx = {
     process: function() {},
     ajax: function(method, url, options) {
+      window.lastSkillMutationURL = url;
       window.scrollTo(0, document.body.scrollHeight);
       var target = document.querySelector(options.target);
       document.body.dispatchEvent(new CustomEvent('htmx:beforeSwap', {detail: {target: target}}));
@@ -162,11 +171,13 @@ func TestSkillsDeleteBrowserPreservesFilteredScrollAnchor(t *testing.T) {
             return menu.getClientRects().length > 0;
           });
           var focusedSurvivor = nextSurvivor && document.activeElement === nextSurvivor;
-          if (removed && filtered && delta <= 6 && !focusedDropdown && openDropdowns.length === 0 && focusedSurvivor) {
-            finish('pass', 'anchor preserved delta=' + delta.toFixed(2));
+          var mutationURL = new URL(window.lastSkillMutationURL || '', window.location.href);
+          var statePreserved = mutationURL.searchParams.get('project_id') === 'project-1' && mutationURL.searchParams.get('search') === 'keep' && mutationURL.searchParams.get('enabled') === 'true' && mutationURL.searchParams.get('scope') === 'project' && mutationURL.searchParams.get('always_use') === 'false' && mutationURL.searchParams.get('archived') === 'false' && mutationURL.searchParams.get('source') === 'project' && mutationURL.searchParams.get('sort') === 'scope';
+          if (removed && filtered && delta <= 6 && !focusedDropdown && openDropdowns.length === 0 && focusedSurvivor && statePreserved) {
+            finish('pass', 'anchor and query state preserved delta=' + delta.toFixed(2));
           } else {
             var state = window.openVibelySkillsViewport || {};
-            finish('fail', 'removed=' + removed + ' filtered=' + filtered + ' delta=' + delta.toFixed(2) + ' focusedDropdown=' + focusedDropdown + ' openDropdowns=' + openDropdowns.length + ' focusedSurvivor=' + focusedSurvivor + ' active=' + (document.activeElement && document.activeElement.tagName) + ' scrollY=' + window.scrollY + ' installed=' + !!state.installed + ' prepared=' + !!state.preparedSwap + ' swap=' + !!state.swap + ' ops=' + (window._skillScrollOps || []).join('|'));
+            finish('fail', 'removed=' + removed + ' filtered=' + filtered + ' delta=' + delta.toFixed(2) + ' focusedDropdown=' + focusedDropdown + ' openDropdowns=' + openDropdowns.length + ' focusedSurvivor=' + focusedSurvivor + ' statePreserved=' + statePreserved + ' mutationURL=' + (window.lastSkillMutationURL || '') + ' active=' + (document.activeElement && document.activeElement.tagName) + ' scrollY=' + window.scrollY + ' installed=' + !!state.installed + ' prepared=' + !!state.preparedSwap + ' swap=' + !!state.swap + ' ops=' + (window._skillScrollOps || []).join('|'));
           }
         } catch (err) {
           finish('fail', err && err.stack ? err.stack : String(err));
@@ -232,7 +243,19 @@ func TestSkillsDeleteBrowserPreservesFilteredScrollAnchor(t *testing.T) {
 func renderSkillsContentForBrowserTest(t *testing.T, skills []pages.SkillCard) string {
 	t.Helper()
 	var buf bytes.Buffer
-	if err := pages.SkillsContent(skills, true).Render(context.Background(), &buf); err != nil {
+	state := pages.CardListState{
+		ProjectID: "project-1",
+		Search:    "keep",
+		Filters: map[string]string{
+			"enabled":    "true",
+			"scope":      "project",
+			"always_use": "false",
+			"archived":   "false",
+			"source":     "project",
+		},
+		Sort: "scope",
+	}
+	if err := pages.SkillsContentForProjectPageWithState(skills, true, "project-1", false, state).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render skills content: %v", err)
 	}
 	return buf.String()

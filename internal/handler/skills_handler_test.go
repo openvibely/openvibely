@@ -15,6 +15,8 @@ import (
 
 	"github.com/openvibely/openvibely/internal/agentlibrary"
 	"github.com/openvibely/openvibely/internal/agentskills"
+	"github.com/openvibely/openvibely/web/templates/pages"
+	"github.com/stretchr/testify/require"
 )
 
 func TestSkillsPageListsGlobalAndProjectStandaloneSkillCards(t *testing.T) {
@@ -76,7 +78,7 @@ func TestSkillsPageDeleteConfirmationDialog(t *testing.T) {
 		`class="btn btn-error"`,
 		`onclick="deleteSkill(this)"`,
 		`modal.showModal()`,
-		`htmx.ajax('DELETE', '/skills/' + encodeURIComponent(deleteSkillHandle)`,
+		`htmx.ajax('DELETE', skillsRefreshURL('/skills/' + encodeURIComponent(deleteSkillHandle)`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("expected skills delete confirmation markup/script to contain %q", want)
@@ -242,6 +244,27 @@ func TestSkillsPageEditModalLazyLoadsPackageFileList(t *testing.T) {
 	if len(detail.Files) != 1 || detail.Files[0] != "references/notes.md" {
 		t.Fatalf("expected detail support files, got %v", detail.Files)
 	}
+}
+
+func TestSkillsMutationRefreshURLsUseAuthoritativeCollectionState(t *testing.T) {
+	var body bytes.Buffer
+	state := pages.CardListState{
+		ProjectID: "project-1",
+		Search:    "needle",
+		Filters: map[string]string{
+			"enabled":    "true",
+			"scope":      "project",
+			"always_use": "false",
+			"archived":   "false",
+			"source":     "project",
+		},
+		Sort: "scope",
+	}
+	require.NoError(t, pages.SkillsContentForProjectPageWithState(nil, true, "project-1", false, state).Render(t.Context(), &body))
+	html := body.String()
+	require.Contains(t, html, `return window.cardCollectionActionURL(document.getElementById('skills-container'), url);`)
+	require.Contains(t, html, `htmx.ajax('DELETE', skillsRefreshURL('/skills/' + encodeURIComponent(deleteSkillHandle)`)
+	require.Equal(t, 5, strings.Count(html, `fetch(skillsRefreshURL(`), "enable, always-use, import, save, and post-save always-use must share authoritative state")
 }
 
 func TestDeleteSkillRemovesStandaloneSkillAndReturnsCards(t *testing.T) {
