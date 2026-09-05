@@ -236,6 +236,10 @@ func (c *AutomationCompiler) Save(ctx context.Context, request AutomationSaveReq
 		candidateNodes[node.Key] = node
 	}
 	resourceNodes := automationResourceNodes(adapter, candidate)
+	agentDefinitionIDs, err := c.resolveSaveAgentDefinitions(ctx, request.ProjectID, resourceNodes, candidateNodes)
+	if err != nil {
+		return nil, err
+	}
 
 	write := repository.AutomationSaveWrite{ProjectID: request.ProjectID, AutomationID: automationID, GraphID: repository.NewID(),
 		ExpectedCurrentGraphID: expectedGraphID, StableKey: request.StableKey, Source: request.Source,
@@ -248,13 +252,11 @@ func (c *AutomationCompiler) Save(ctx context.Context, request AutomationSaveReq
 		}
 		node := candidateNodes[resourceNode.Key]
 		prompt, category, priority := automationNodeTaskConfiguration(candidate, node)
-		agent, err := c.resolveNodeAgent(ctx, request.ProjectID, node)
-		if err != nil {
-			return nil, err
-		}
 		var agentDefinitionID *string
-		if agent != nil {
-			agentDefinitionID = &agent.ID
+		if ref, _ := node.Config["agent_ref"].(string); strings.TrimSpace(ref) != "" {
+			if resolvedID := agentDefinitionIDs[strings.TrimSpace(ref)]; resolvedID != "" {
+				agentDefinitionID = &resolvedID
+			}
 		}
 		modelConfigID := automationExplicitModelConfigID(node.Config["model_config_id"])
 		var agentID *string
@@ -353,19 +355,57 @@ func (c *AutomationCompiler) Save(ctx context.Context, request AutomationSaveReq
 	return &AutomationSaveResult{Definition: definition}, nil
 }
 
-func (c *AutomationCompiler) resolveNodeAgent(ctx context.Context, projectID string, node models.AutomationDraftNode) (*models.Agent, error) {
-	ref, _ := node.Config["agent_ref"].(string)
-	if strings.TrimSpace(ref) == "" {
+// resolveSaveAgentDefinitions loads the compact selectable Agent identities once
+// for this Save and preserves the catalog's ordered first-match semantics.
+func (c *AutomationCompiler) resolveSaveAgentDefinitions(ctx context.Context, projectID string, resourceNodes []AutomationAdapterNode, candidateNodes map[string]models.AutomationDraftNode) (map[string]string, error) {
+	type agentReference struct {
+		nodeKey string
+		ref     string
+	}
+
+	references := make([]agentReference, 0)
+	for _, resourceNode := range resourceNodes {
+		if !resourceNode.AllowedResources["task"] {
+			continue
+		}
+		node := candidateNodes[resourceNode.Key]
+		ref, _ := node.Config["agent_ref"].(string)
+		ref = strings.TrimSpace(ref)
+		if ref == "" {
+			continue
+		}
+		references = append(references, agentReference{nodeKey: node.Key, ref: ref})
+	}
+	if len(references) == 0 {
 		return nil, nil
 	}
-	agent, err := resolveAutomationAgent(ctx, c.agentRepo, projectID, ref)
+	if c.agentRepo == nil {
+		return nil, fmt.Errorf("Agent selection for node %q is unavailable in this project", references[0].nodeKey)
+	}
+
+	available, err := c.agentRepo.ListSelectableReferencesForProject(ctx, projectID, automationCapabilityLimit)
 	if err != nil {
 		return nil, err
 	}
-	if agent == nil {
-		return nil, fmt.Errorf("Agent selection for node %q is unavailable in this project", node.Key)
+	resolved := make(map[string]string, len(available))
+	for _, reference := range available {
+		key := strings.TrimSpace(reference.Key)
+		if key == "" {
+			key = reference.ID
+		}
+		if key == "" || (reference.ProjectID != "" && reference.ProjectID != projectID) {
+			continue
+		}
+		if _, exists := resolved[key]; !exists {
+			resolved[key] = reference.ID
+		}
 	}
-	return agent, nil
+	for _, reference := range references {
+		if resolved[reference.ref] == "" {
+			return nil, fmt.Errorf("Agent selection for node %q is unavailable in this project", reference.nodeKey)
+		}
+	}
+	return resolved, nil
 }
 
 func (c *AutomationCompiler) scheduleFromNode(taskID string, node models.AutomationDraftNode) (models.Schedule, error) {
