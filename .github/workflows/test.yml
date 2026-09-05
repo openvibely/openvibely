@@ -151,10 +151,25 @@ jobs:
       - name: Ensure generated files are committed
         run: git diff --exit-code
 
-      - name: Run core tests with coverage
+      - name: Run foundation tests with coverage
         env:
           OPENVIBELY_SKIP_BROWSER_PERF: "1"
-        run: go test ./cmd/... ./internal/... -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-core.txt
+        run: go test ./cmd/... $(go list ./internal/... | grep -Ev '/(handler|repository|service)(/|$)') -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-core-foundation.txt
+
+      - name: Run handler tests with coverage
+        env:
+          OPENVIBELY_SKIP_BROWSER_PERF: "1"
+        run: go test ./internal/handler/... -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-core-handler.txt
+
+      - name: Run repository tests with coverage
+        env:
+          OPENVIBELY_SKIP_BROWSER_PERF: "1"
+        run: go test ./internal/repository/... -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-core-repository.txt
+
+      - name: Run service tests with coverage
+        env:
+          OPENVIBELY_SKIP_BROWSER_PERF: "1"
+        run: go test ./internal/service/... -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-core-service.txt
 
       - name: Run package and web tests with coverage
         env:
@@ -164,9 +179,10 @@ jobs:
       - name: Merge coverage reports
         shell: bash
         run: |
-          head -n 1 coverage-core.txt > coverage.txt
-          tail -n +2 coverage-core.txt >> coverage.txt
-          tail -n +2 coverage-web.txt >> coverage.txt
+          head -n 1 coverage-core-foundation.txt > coverage.txt
+          for profile in coverage-core-handler.txt coverage-core-repository.txt coverage-core-service.txt coverage-web.txt; do
+            tail -n +2 "$profile" >> coverage.txt
+          done
 
       - name: Compile and test the Linux GTK3 desktop path
         run: go test -tags gtk3 ./cmd/desktop -count=1 -timeout 120s
