@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/base64"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"net/textproto"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -147,6 +149,38 @@ func TestEmailPollOnceUsesPollSnapshotForSelfAddress(t *testing.T) {
 
 	assert.Empty(t, counter.Statements(), "the poll snapshot must avoid per-message settings queries")
 	assert.Equal(t, []uint32{1, 2}, client.seenIDs(), "self-sent messages must still be ignored and acknowledged")
+}
+
+func TestEmailPollOncePreservesFilteringAndAcknowledgement(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	ctx := context.Background()
+	settingsRepo := repository.NewSettingsRepo(db)
+	require.NoError(t, settingsRepo.Set(ctx, EmailSettingAddress, "old@example.com"))
+	messageWithHeaders := func(id uint32, subject, envelopeFrom, headerFrom, extraHeaders, body string) *imap.Message {
+		msg := testIMAPMessageWithBody(id, subject, envelopeFrom, body)
+		msg.Body = testIMAPBodySections(fmt.Sprintf("From: %s\r\nSubject: %s\r\nMessage-ID: <message-%d@example.com>\r\n%sContent-Type: text/plain; charset=utf-8\r\n\r\n%s", headerFrom, subject, id, extraHeaders, body))
+		return msg
+	}
+	client := newFakeEmailIMAPClient(
+		messageWithHeaders(1, "self", "bot@example.com", "Display Name <BOT@example.com>", "", "self body"),
+		messageWithHeaders(2, "automated", "noreply@example.com", "noreply@example.com", "Auto-Submitted: auto-generated\r\n", "automated body"),
+		messageWithHeaders(3, "list", "user@example.com", "user@example.com", "List-Unsubscribe: <mailto:unsubscribe@example.com>\r\n", "list body"),
+		messageWithHeaders(4, "bulk", "user@example.com", "user@example.com", "Precedence: bulk\r\n", "bulk body"),
+		messageWithHeaders(5, "junk", "user@example.com", "user@example.com", "Precedence: junk\r\n", "junk body"),
+		messageWithHeaders(6, "empty", "user@example.com", "user@example.com", "", ""),
+		messageWithHeaders(7, "ordinary", "user@example.com", "user@example.com", "", "ordinary body"),
+	)
+	svc := &EmailService{settingsRepo: settingsRepo}
+	svc.connectIMAP = func(context.Context, EmailRuntimeConfig) (emailIMAPClient, error) { return client, nil }
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	svc.pollOnce(ctx, EmailRuntimeConfig{Address: " Bot@Example.com ", IMAPHost: "imap.example.com"})
+	counter.SetEnabled(false)
+
+	assert.Equal(t, []uint32{1, 2, 3, 4, 5, 6}, client.seenIDs(), "ignored messages must be acknowledged while ordinary messages remain retryable")
+	assert.Equal(t, [][]uint32{{1, 2, 3, 4, 5, 6}}, client.storeBatches())
+	assert.Empty(t, counter.Statements(), "the poll snapshot must supply the self address without settings reads")
 }
 
 func TestEmailPollOnceDoesNotDeduplicateDistinctIdenticalMessagesWithoutMessageID(t *testing.T) {
@@ -791,6 +825,356 @@ func BenchmarkEmailPollOnceReceiptDeduplication(b *testing.B) {
 			}
 		}
 	}
+}
+
+type emailPollAddressSnapshotBenchmarkFixture struct {
+	db           *sql.DB
+	counter      *testutil.SQLStatementCounter
+	settingsRepo *repository.SettingsRepo
+	svc          *EmailService
+	client       *fakeEmailIMAPClient
+	cfg          EmailRuntimeConfig
+}
+
+func newEmailPollAddressSnapshotBenchmarkFixture(tb testing.TB, messageCount int) *emailPollAddressSnapshotBenchmarkFixture {
+	tb.Helper()
+	db, counter := testutil.NewStatementCountingTestDB(tb)
+	ctx := context.Background()
+	settingsRepo := repository.NewSettingsRepo(db)
+	if err := settingsRepo.Set(ctx, EmailSettingAddress, "bot@example.com"); err != nil {
+		tb.Fatalf("save email address: %v", err)
+	}
+	fixture := &emailPollAddressSnapshotBenchmarkFixture{
+		db:           db,
+		counter:      counter,
+		settingsRepo: settingsRepo,
+		client:       newFakeEmailIMAPClient(emailPollSelfMessages(messageCount)...),
+		cfg:          EmailRuntimeConfig{Address: " Bot@Example.com ", IMAPHost: "imap.example.com"},
+	}
+	fixture.svc = &EmailService{settingsRepo: settingsRepo}
+	fixture.svc.connectIMAP = func(context.Context, EmailRuntimeConfig) (emailIMAPClient, error) {
+		return fixture.client, nil
+	}
+	return fixture
+}
+
+func emailPollSelfMessages(messageCount int) []*imap.Message {
+	messages := make([]*imap.Message, 0, messageCount)
+	body := strings.Repeat("x", 4*1024)
+	for i := 1; i <= messageCount; i++ {
+		messages = append(messages, testIMAPMessageWithBody(uint32(i), fmt.Sprintf("self-%d", i), "bot@example.com", body))
+	}
+	return messages
+}
+
+func (f *emailPollAddressSnapshotBenchmarkFixture) reset() {
+	for id := range f.client.messages {
+		f.client.seen[id] = false
+	}
+	f.client.fetchCount = 0
+	f.client.fullBodyFetches = 0
+	f.client.fullBodyFetchIDs = nil
+	f.client.fullBodyBytes = 0
+	f.client.parseAttempts = 0
+	f.client.parsedMessages = 0
+	f.client.fetchItems = nil
+	f.client.fetchIDs = nil
+	f.client.storeCalls = 0
+	f.client.storedIDs = nil
+	f.client.fetchStarted = nil
+	f.client.fetchRelease = nil
+	f.client.fetchGateOnce = sync.Once{}
+}
+
+func (f *emailPollAddressSnapshotBenchmarkFixture) useAddressSnapshot(legacy bool) {
+	f.svc.processIncomingMessageFn = nil
+	if legacy {
+		svc := f.svc
+		f.svc.processIncomingMessageFn = func(ctx context.Context, msg EmailInboundMessage) bool {
+			return svc.processIncomingMessage(ctx, msg, "", "").handled
+		}
+	}
+}
+
+func (f *emailPollAddressSnapshotBenchmarkFixture) poll(ctx context.Context) {
+	f.svc.pollOnce(ctx, f.cfg)
+}
+
+const emailPollAddressPointQuery = "SELECT value FROM app_settings WHERE key = ?"
+
+func isEmailPollAddressPointQuery(query string) bool {
+	return strings.EqualFold(strings.TrimSpace(query), emailPollAddressPointQuery)
+}
+
+type emailPollAddressSnapshotMeasurement struct {
+	medianWall            time.Duration
+	bytesPerRun           float64
+	allocsPerRun          float64
+	totalStatements       int64
+	appSettingsStatements int64
+}
+
+func medianEmailPollFloat(values []float64) float64 {
+	ordered := append([]float64(nil), values...)
+	sort.Float64s(ordered)
+	return ordered[len(ordered)/2]
+}
+
+func emailPollAllocatedBytes(tb testing.TB, runs int, poll func()) float64 {
+	tb.Helper()
+	runtime.GC()
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	for i := 0; i < runs; i++ {
+		poll()
+	}
+	runtime.ReadMemStats(&after)
+	return float64(after.TotalAlloc-before.TotalAlloc) / float64(runs)
+}
+
+func measureEmailPollAddressSnapshot(tb testing.TB, messageCount int, legacy bool) emailPollAddressSnapshotMeasurement {
+	tb.Helper()
+	fixture := newEmailPollAddressSnapshotBenchmarkFixture(tb, messageCount)
+	fixture.useAddressSnapshot(legacy)
+	ctx := context.Background()
+	var totalStatements atomic.Int64
+	var appSettingsStatements atomic.Int64
+	fixture.counter.SetObserver(func(_ context.Context, query string) {
+		totalStatements.Add(1)
+		if isEmailPollAddressPointQuery(query) {
+			appSettingsStatements.Add(1)
+		}
+	})
+	defer fixture.counter.SetObserver(nil)
+
+	const (
+		medianSamples = 5
+		timingRuns    = 3
+	)
+	poll := func() {
+		fixture.reset()
+		fixture.poll(ctx)
+	}
+	poll()
+	totalStatements.Store(0)
+	appSettingsStatements.Store(0)
+	wallSamples := make([]float64, medianSamples)
+	bytesSamples := make([]float64, medianSamples)
+	allocSamples := make([]float64, medianSamples)
+	for sample := range wallSamples {
+		var elapsed time.Duration
+		for i := 0; i < timingRuns; i++ {
+			started := time.Now()
+			poll()
+			elapsed += time.Since(started)
+		}
+		wallSamples[sample] = float64(elapsed) / float64(timingRuns)
+		bytesSamples[sample] = emailPollAllocatedBytes(tb, timingRuns, poll)
+		allocSamples[sample] = testing.AllocsPerRun(timingRuns, poll)
+	}
+
+	totalStatements.Store(0)
+	appSettingsStatements.Store(0)
+	poll()
+	require.Len(tb, fixture.client.seenIDs(), messageCount, "measured poll must acknowledge every self-sent message")
+	return emailPollAddressSnapshotMeasurement{
+		medianWall:            time.Duration(medianEmailPollFloat(wallSamples)),
+		bytesPerRun:           medianEmailPollFloat(bytesSamples),
+		allocsPerRun:          medianEmailPollFloat(allocSamples),
+		totalStatements:       totalStatements.Load(),
+		appSettingsStatements: appSettingsStatements.Load(),
+	}
+}
+
+func TestEmailPollOnceAddressSnapshotPerformance(t *testing.T) {
+	for _, messageCount := range []int{1, 10, 100} {
+		t.Run(fmt.Sprintf("%d messages", messageCount), func(t *testing.T) {
+			baseline := measureEmailPollAddressSnapshot(t, messageCount, true)
+			candidate := measureEmailPollAddressSnapshot(t, messageCount, false)
+			t.Logf("median baseline: wall=%s bytes=%.0f B/op allocs=%.0f statements=%d app_settings=%d; candidate: wall=%s bytes=%.0f B/op allocs=%.0f statements=%d app_settings=%d", baseline.medianWall, baseline.bytesPerRun, baseline.allocsPerRun, baseline.totalStatements, baseline.appSettingsStatements, candidate.medianWall, candidate.bytesPerRun, candidate.allocsPerRun, candidate.totalStatements, candidate.appSettingsStatements)
+
+			require.Equal(t, int64(messageCount), baseline.totalStatements)
+			require.Equal(t, int64(messageCount), baseline.appSettingsStatements)
+			require.Zero(t, candidate.totalStatements)
+			require.Zero(t, candidate.appSettingsStatements)
+			switch messageCount {
+			case 1:
+				require.LessOrEqual(t, float64(candidate.medianWall), float64(baseline.medianWall)*1.05, "one-message poll wall time must not regress by more than 5%%")
+			case 100:
+				require.LessOrEqual(t, float64(candidate.medianWall), float64(baseline.medianWall)*0.95, "100-message poll wall time must improve by at least 5%%")
+			}
+		})
+	}
+}
+
+func BenchmarkEmailPollAddressSnapshot(b *testing.B) {
+	for _, messageCount := range []int{1, 10, 100} {
+		for _, mode := range []struct {
+			name   string
+			legacy bool
+		}{
+			{name: "baseline", legacy: true},
+			{name: "candidate", legacy: false},
+		} {
+			mode := mode
+			b.Run(fmt.Sprintf("%d/%s", messageCount, mode.name), func(b *testing.B) {
+				fixture := newEmailPollAddressSnapshotBenchmarkFixture(b, messageCount)
+				fixture.useAddressSnapshot(mode.legacy)
+				ctx := context.Background()
+				var totalStatements atomic.Int64
+				var appSettingsStatements atomic.Int64
+				fixture.counter.SetObserver(func(_ context.Context, query string) {
+					totalStatements.Add(1)
+					if isEmailPollAddressPointQuery(query) {
+						appSettingsStatements.Add(1)
+					}
+				})
+				fixture.reset()
+				fixture.poll(ctx)
+				require.Len(b, fixture.client.seenIDs(), messageCount, "warm poll must acknowledge every self-sent message")
+				totalStatements.Store(0)
+				appSettingsStatements.Store(0)
+				fixture.counter.Reset()
+				durations := make([]time.Duration, 0, b.N)
+				b.ReportAllocs()
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					fixture.reset()
+					started := time.Now()
+					fixture.poll(ctx)
+					durations = append(durations, time.Since(started))
+				}
+				b.StopTimer()
+				sort.Slice(durations, func(i, j int) bool { return durations[i] < durations[j] })
+				b.ReportMetric(float64(durations[len(durations)/2].Nanoseconds()), "median_wall_ns/op")
+				b.ReportMetric(float64(totalStatements.Load())/float64(b.N), "sql_statements/op")
+				b.ReportMetric(float64(appSettingsStatements.Load())/float64(b.N), "app_settings_statements/op")
+			})
+		}
+	}
+}
+
+const (
+	emailPollContentionMessageCount = 100
+	emailPollContentionQueries      = 16
+	emailPollContentionSamples      = 5
+	emailPollContentionHold         = time.Millisecond
+)
+
+func measureEmailPollAddressSnapshotContention(tb testing.TB, legacy bool) []time.Duration {
+	tb.Helper()
+	fixture := newEmailPollAddressSnapshotBenchmarkFixture(tb, emailPollContentionMessageCount)
+	fixture.useAddressSnapshot(legacy)
+	ctx := context.Background()
+	waits := make([]time.Duration, 0, emailPollContentionSamples*emailPollContentionQueries)
+	for sample := 0; sample < emailPollContentionSamples; sample++ {
+		fixture.client = newFakeEmailIMAPClient(emailPollSelfMessages(emailPollContentionMessageCount)...)
+		fixture.reset()
+		fixture.useAddressSnapshot(legacy)
+		acquired := make(chan struct{})
+		release := make(chan struct{})
+		if legacy {
+			var firstQuery sync.Once
+			fixture.settingsRepo.SetQueryAcquiredObserver(func(query string) {
+				if isEmailPollAddressPointQuery(query) {
+					firstQuery.Do(func() {
+						close(acquired)
+						<-release
+					})
+				}
+			})
+		} else {
+			fixture.client.fetchStarted = make(chan struct{})
+			fixture.client.fetchRelease = make(chan struct{})
+		}
+
+		pollDone := make(chan struct{})
+		go func() {
+			fixture.poll(ctx)
+			close(pollDone)
+		}()
+		if legacy {
+			select {
+			case <-acquired:
+			case <-time.After(time.Second):
+				tb.Fatalf("baseline poll did not acquire its address query")
+			}
+		} else {
+			select {
+			case <-fixture.client.fetchStarted:
+			case <-time.After(time.Second):
+				tb.Fatalf("candidate poll did not reach the gated IMAP fetch")
+			}
+		}
+
+		queryStarted := make(chan struct{}, emailPollContentionQueries)
+		queryWaits := make(chan time.Duration, emailPollContentionQueries)
+		queryErrors := make(chan error, emailPollContentionQueries)
+		waitCount := fixture.db.Stats().WaitCount
+		var queries sync.WaitGroup
+		queries.Add(emailPollContentionQueries)
+		for i := 0; i < emailPollContentionQueries; i++ {
+			go func() {
+				defer queries.Done()
+				queryStarted <- struct{}{}
+				started := time.Now()
+				var projectCount int
+				err := fixture.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM projects").Scan(&projectCount)
+				if err != nil {
+					queryErrors <- err
+					return
+				}
+				queryWaits <- time.Since(started)
+			}()
+		}
+		for i := 0; i < emailPollContentionQueries; i++ {
+			<-queryStarted
+		}
+		if legacy {
+			require.Eventually(tb, func() bool {
+				return fixture.db.Stats().WaitCount >= waitCount+emailPollContentionQueries
+			}, time.Second, time.Millisecond, "unrelated queries must queue behind the baseline address query")
+			timer := time.NewTimer(emailPollContentionHold)
+			<-timer.C
+			close(release)
+		} else {
+			queries.Wait()
+			close(fixture.client.fetchRelease)
+		}
+		queries.Wait()
+		for i := 0; i < emailPollContentionQueries; i++ {
+			select {
+			case err := <-queryErrors:
+				tb.Fatalf("unrelated SQLite query failed: %v", err)
+			case wait := <-queryWaits:
+				waits = append(waits, wait)
+			}
+		}
+		select {
+		case <-pollDone:
+		case <-time.After(time.Second):
+			tb.Fatalf("poll did not finish after contention release")
+		}
+		fixture.settingsRepo.SetQueryAcquiredObserver(nil)
+	}
+	return waits
+}
+
+func emailPollDurationPercentile(values []time.Duration, percentile int) time.Duration {
+	sorted := append([]time.Duration(nil), values...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
+	return sorted[(len(sorted)-1)*percentile/100]
+}
+
+func TestEmailPollAddressSnapshotContentionDoesNotRegressP95(t *testing.T) {
+	baseline := measureEmailPollAddressSnapshotContention(t, true)
+	candidate := measureEmailPollAddressSnapshotContention(t, false)
+	baselineMedian := emailPollDurationPercentile(baseline, 50)
+	baselineP95 := emailPollDurationPercentile(baseline, 95)
+	candidateMedian := emailPollDurationPercentile(candidate, 50)
+	candidateP95 := emailPollDurationPercentile(candidate, 95)
+	t.Logf("unrelated query wait: baseline median=%s p95=%s; candidate median=%s p95=%s", baselineMedian, baselineP95, candidateMedian, candidateP95)
+	require.LessOrEqual(t, candidateP95, baselineP95, "poll snapshot reuse must not regress unrelated SQLite query p95 wait")
 }
 
 func TestEmailPollOnceLeavesParseFailuresUnread(t *testing.T) {
@@ -2061,6 +2445,60 @@ func TestEmailServiceLifecycleStatusWithConfigLoader(t *testing.T) {
 	require.Equal(t, "bot@example.com", status.Address)
 	require.Equal(t, "imap.example.com", status.IMAPHost)
 	require.Equal(t, 993, status.IMAPPort)
+}
+
+func TestEmailServiceReloadFromSettingsUsesNewPollSnapshot(t *testing.T) {
+	oldConfig := EmailRuntimeConfig{
+		Provider:                EmailProviderCustom,
+		Address:                 "old@example.com",
+		Password:                "old-secret",
+		IMAPHost:                "imap.example.com",
+		SMTPHost:                "smtp.example.com",
+		PollInterval:            time.Hour,
+		MarkExistingSeenOnStart: false,
+	}
+	newConfig := oldConfig
+	newConfig.Address = "new@example.com"
+	newConfig.Password = "new-secret"
+	removedConfig := EmailRuntimeConfig{}
+
+	var loadCalls atomic.Int32
+	observedAddresses := make(chan string, 4)
+	svc := &EmailService{}
+	svc.configLoader = func(context.Context) (EmailRuntimeConfig, error) {
+		switch loadCalls.Add(1) {
+		case 1:
+			return oldConfig, nil
+		case 2:
+			return newConfig, nil
+		default:
+			return removedConfig, nil
+		}
+	}
+	svc.connectIMAP = func(_ context.Context, cfg EmailRuntimeConfig) (emailIMAPClient, error) {
+		observedAddresses <- cfg.Address
+		return newFakeEmailIMAPClient(), nil
+	}
+
+	require.NoError(t, svc.Start())
+	select {
+	case address := <-observedAddresses:
+		require.Equal(t, "old@example.com", address)
+	case <-time.After(time.Second):
+		t.Fatal("initial poll did not observe the loaded address")
+	}
+
+	require.NoError(t, svc.ReloadFromSettings(context.Background()))
+	select {
+	case address := <-observedAddresses:
+		require.Equal(t, "new@example.com", address)
+	case <-time.After(time.Second):
+		t.Fatal("reloaded poll did not observe the new address")
+	}
+
+	require.NoError(t, svc.ReloadFromSettings(context.Background()))
+	assert.False(t, svc.IsRunning(), "removing the address must stop the poller instead of retaining the prior snapshot")
+	svc.Stop()
 }
 
 func TestEmailService_CompleteExecutionUsesSharedChatPromotion(t *testing.T) {
