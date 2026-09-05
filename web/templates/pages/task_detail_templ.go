@@ -307,25 +307,24 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "\" data-automation-url-base=\"/automations/\">Tasks</a> <span class=\"text-2xl text-base-content/30 flex-shrink-0\">/</span><h2 class=\"text-2xl font-bold truncate\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "\" data-automation-url-base=\"/automations/\">Tasks</a> <span class=\"text-2xl text-base-content/30 flex-shrink-0\">/</span><div class=\"min-w-0 flex-1\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var16 string
-		templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.JoinStringErrs(task.Title)
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 82, Col: 55}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var16))
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "</h2><script>\n\t\t\t\t(function() {\n\t\t\t\t\tvar params = new URLSearchParams(window.location.search);\n\t\t\t\t\tvar from = params.get('from');\n\t\t\t\t\tvar btn = document.getElementById('task-back-btn');\n\t\t\t\t\tvar automationsBtn = document.getElementById('task-automations-back-btn');\n\t\t\t\t\tvar automationsSeparator = document.getElementById('task-automations-separator');\n\t\t\t\t\tif (btn) {\n\t\t\t\t\t\tvar url = null;\n\t\t\t\t\t\tvar text = 'Tasks';\n\t\t\t\t\t\tif (from === 'schedule') {\n\t\t\t\t\t\t\turl = btn.dataset.scheduleUrl;\n\t\t\t\t\t\t\ttext = 'Schedule';\n\t\t\t\t\t\t} else if (from === 'chat') {\n\t\t\t\t\t\t\turl = btn.dataset.chatUrl;\n\t\t\t\t\t\t\ttext = 'Chat';\n\t\t\t\t\t\t} else if (from === 'alerts') {\n\t\t\t\t\t\t\turl = btn.dataset.alertsUrl;\n\t\t\t\t\t\t\ttext = 'Alerts';\n\t\t\t\t\t\t} else if (from === 'automation') {\n\t\t\t\t\t\t\tvar automationID = params.get('automation_id');\n\t\t\t\t\t\t\tvar automationName = params.get('automation_name');\n\t\t\t\t\t\t\tif (automationID) {\n\t\t\t\t\t\t\t\turl = btn.dataset.automationUrlBase + encodeURIComponent(automationID) + '?project_id=' + encodeURIComponent(btn.dataset.projectId);\n\t\t\t\t\t\t\t\ttext = automationName || 'Automation';\n\t\t\t\t\t\t\t\tif (automationsBtn && automationsSeparator) {\n\t\t\t\t\t\t\t\t\tautomationsBtn.hidden = false;\n\t\t\t\t\t\t\t\t\tautomationsSeparator.hidden = false;\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\t\t\t\t\t\tif (url) {\n\t\t\t\t\t\t\tbtn.setAttribute('href', url);\n\t\t\t\t\t\t\tbtn.setAttribute('hx-get', url);\n\t\t\t\t\t\t\tbtn.textContent = text;\n\t\t\t\t\t\t\tif (typeof htmx !== 'undefined') {\n\t\t\t\t\t\t\t\thtmx.process(btn);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t})();\n\t\t\t</script></div><!-- Tabs Navigation --><div role=\"tablist\" class=\"tabs tabs-bordered tabs-sm mb-6 flex-shrink-0 w-full overflow-x-auto flex-nowrap\">")
+		templ_7745c5c3_Err = components.BreadcrumbSelector(models.BreadcrumbSelector{
+			ID: "task-resource-selector", Kind: "Task", CurrentID: task.ID, CurrentName: task.Title,
+			SearchURL:   fmt.Sprintf("/breadcrumb-selectors/tasks?project_id=%s&current_id=%s", task.ProjectID, task.ID),
+			ContextName: "tab", ContextValue: defaultTab,
+		}).Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var17 = []any{"tab", templ.KV("tab-active", defaultTab == "details")}
-		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var17...)
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "</div><script>\n\t\t\t\t(function() {\n\t\t\t\t\tvar params = new URLSearchParams(window.location.search);\n\t\t\t\t\tvar from = params.get('from');\n\t\t\t\t\tvar btn = document.getElementById('task-back-btn');\n\t\t\t\t\tvar automationsBtn = document.getElementById('task-automations-back-btn');\n\t\t\t\t\tvar automationsSeparator = document.getElementById('task-automations-separator');\n\t\t\t\t\tif (btn) {\n\t\t\t\t\t\tvar url = null;\n\t\t\t\t\t\tvar text = 'Tasks';\n\t\t\t\t\t\tif (from === 'schedule') {\n\t\t\t\t\t\t\turl = btn.dataset.scheduleUrl;\n\t\t\t\t\t\t\ttext = 'Schedule';\n\t\t\t\t\t\t} else if (from === 'chat') {\n\t\t\t\t\t\t\turl = btn.dataset.chatUrl;\n\t\t\t\t\t\t\ttext = 'Chat';\n\t\t\t\t\t\t} else if (from === 'alerts') {\n\t\t\t\t\t\t\turl = btn.dataset.alertsUrl;\n\t\t\t\t\t\t\ttext = 'Alerts';\n\t\t\t\t\t\t} else if (from === 'automation') {\n\t\t\t\t\t\t\tvar automationID = params.get('automation_id');\n\t\t\t\t\t\t\tvar automationName = params.get('automation_name');\n\t\t\t\t\t\t\tif (automationID) {\n\t\t\t\t\t\t\t\turl = btn.dataset.automationUrlBase + encodeURIComponent(automationID) + '?project_id=' + encodeURIComponent(btn.dataset.projectId);\n\t\t\t\t\t\t\t\ttext = automationName || 'Automation';\n\t\t\t\t\t\t\t\tif (automationsBtn && automationsSeparator) {\n\t\t\t\t\t\t\t\t\tautomationsBtn.hidden = false;\n\t\t\t\t\t\t\t\t\tautomationsSeparator.hidden = false;\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\t\t\t\t\t\tif (url) {\n\t\t\t\t\t\t\tbtn.setAttribute('href', url);\n\t\t\t\t\t\t\tbtn.setAttribute('hx-get', url);\n\t\t\t\t\t\t\tbtn.textContent = text;\n\t\t\t\t\t\t\tif (typeof htmx !== 'undefined') {\n\t\t\t\t\t\t\t\thtmx.process(btn);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t})();\n\t\t\t</script></div><!-- Tabs Navigation --><div role=\"tablist\" class=\"tabs tabs-bordered tabs-sm mb-6 flex-shrink-0 w-full overflow-x-auto flex-nowrap\">")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var16 = []any{"tab", templ.KV("tab-active", defaultTab == "details")}
+		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var16...)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -333,12 +332,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var18 string
-		templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var17).String())
+		var templ_7745c5c3_Var17 string
+		templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var16).String())
 		if templ_7745c5c3_Err != nil {
 			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1, Col: 0}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var18)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var17)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -346,8 +345,8 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var19 = []any{"tab", templ.KV("tab-active", defaultTab == "chat")}
-		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var19...)
+		var templ_7745c5c3_Var18 = []any{"tab", templ.KV("tab-active", defaultTab == "chat")}
+		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var18...)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -355,12 +354,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var20 string
-		templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var19).String())
+		var templ_7745c5c3_Var19 string
+		templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var18).String())
 		if templ_7745c5c3_Err != nil {
 			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1, Col: 0}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var20)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var19)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -368,8 +367,8 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var21 = []any{"tab", templ.KV("tab-active", defaultTab == "changes")}
-		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var21...)
+		var templ_7745c5c3_Var20 = []any{"tab", templ.KV("tab-active", defaultTab == "changes")}
+		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var20...)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -377,12 +376,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var22 string
-		templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var21).String())
+		var templ_7745c5c3_Var21 string
+		templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var20).String())
 		if templ_7745c5c3_Err != nil {
 			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1, Col: 0}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var22)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var21)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -390,8 +389,8 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var23 = []any{"tab", templ.KV("tab-active", defaultTab == "schedules")}
-		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var23...)
+		var templ_7745c5c3_Var22 = []any{"tab", templ.KV("tab-active", defaultTab == "schedules")}
+		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var22...)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -399,12 +398,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var24 string
-		templ_7745c5c3_Var24, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var23).String())
+		var templ_7745c5c3_Var23 string
+		templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var22).String())
 		if templ_7745c5c3_Err != nil {
 			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1, Col: 0}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var24)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var23)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -412,8 +411,8 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var25 = []any{"tab", templ.KV("tab-active", defaultTab == "chaining")}
-		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var25...)
+		var templ_7745c5c3_Var24 = []any{"tab", templ.KV("tab-active", defaultTab == "chaining")}
+		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var24...)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -421,12 +420,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var26 string
-		templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var25).String())
+		var templ_7745c5c3_Var25 string
+		templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var24).String())
 		if templ_7745c5c3_Err != nil {
 			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1, Col: 0}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var26)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var25)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -434,8 +433,8 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var27 = []any{"tab", templ.KV("tab-active", defaultTab == "attachments")}
-		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var27...)
+		var templ_7745c5c3_Var26 = []any{"tab", templ.KV("tab-active", defaultTab == "attachments")}
+		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var26...)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -443,12 +442,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var28 string
-		templ_7745c5c3_Var28, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var27).String())
+		var templ_7745c5c3_Var27 string
+		templ_7745c5c3_Var27, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var26).String())
 		if templ_7745c5c3_Err != nil {
 			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1, Col: 0}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var28)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var27)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -456,8 +455,8 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var29 = []any{"tab", templ.KV("tab-active", defaultTab == "lifecycle")}
-		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var29...)
+		var templ_7745c5c3_Var28 = []any{"tab", templ.KV("tab-active", defaultTab == "lifecycle")}
+		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var28...)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -465,12 +464,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var30 string
-		templ_7745c5c3_Var30, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var29).String())
+		var templ_7745c5c3_Var29 string
+		templ_7745c5c3_Var29, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var28).String())
 		if templ_7745c5c3_Err != nil {
 			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1, Col: 0}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var30)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var29)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -478,8 +477,8 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var31 = []any{"task-tab-panel flex-1 flex flex-col min-h-0", templ.KV("hidden", defaultTab != "details")}
-		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var31...)
+		var templ_7745c5c3_Var30 = []any{"task-tab-panel flex-1 flex flex-col min-h-0", templ.KV("hidden", defaultTab != "details")}
+		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var30...)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -487,12 +486,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var32 string
-		templ_7745c5c3_Var32, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var31).String())
+		var templ_7745c5c3_Var31 string
+		templ_7745c5c3_Var31, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var30).String())
 		if templ_7745c5c3_Err != nil {
 			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1, Col: 0}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var32)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var31)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -521,12 +520,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var33 string
-			templ_7745c5c3_Var33, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s/worktree", task.ID))
+			var templ_7745c5c3_Var32 string
+			templ_7745c5c3_Var32, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s/worktree", task.ID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 150, Col: 59}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 156, Col: 59}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var33)
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var32)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -559,12 +558,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var34 string
-		templ_7745c5c3_Var34, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s?redirect=list", task.ID))
+		var templ_7745c5c3_Var33 string
+		templ_7745c5c3_Var33, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s?redirect=list", task.ID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 172, Col: 69}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 178, Col: 69}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var34)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var33)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -572,12 +571,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var35 string
-		templ_7745c5c3_Var35, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s?redirect=list", task.ID))
+		var templ_7745c5c3_Var34 string
+		templ_7745c5c3_Var34, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s?redirect=list", task.ID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 174, Col: 75}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 180, Col: 75}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var35)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var34)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -585,12 +584,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var36 string
-		templ_7745c5c3_Var36, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s?redirect=list&return_to=schedule", task.ID))
+		var templ_7745c5c3_Var35 string
+		templ_7745c5c3_Var35, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s?redirect=list&return_to=schedule", task.ID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 175, Col: 103}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 181, Col: 103}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var36)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var35)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -598,12 +597,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var37 string
-		templ_7745c5c3_Var37, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("edit-task-form-%s", task.ID))
+		var templ_7745c5c3_Var36 string
+		templ_7745c5c3_Var36, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("edit-task-form-%s", task.ID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 203, Col: 53}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 209, Col: 53}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var37)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var36)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -611,12 +610,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var38 string
-		templ_7745c5c3_Var38, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s", task.ID))
+		var templ_7745c5c3_Var37 string
+		templ_7745c5c3_Var37, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s", task.ID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 204, Col: 49}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 210, Col: 49}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var38)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var37)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -624,12 +623,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var39 string
-		templ_7745c5c3_Var39, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("edit-task-title-%s", task.ID))
+		var templ_7745c5c3_Var38 string
+		templ_7745c5c3_Var38, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("edit-task-title-%s", task.ID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 215, Col: 56}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 221, Col: 56}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var39)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var38)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -637,12 +636,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var40 string
-		templ_7745c5c3_Var40, templ_7745c5c3_Err = templ.ResolveAttributeValue(task.Title)
+		var templ_7745c5c3_Var39 string
+		templ_7745c5c3_Var39, templ_7745c5c3_Err = templ.ResolveAttributeValue(task.Title)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 217, Col: 27}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 223, Col: 27}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var40)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var39)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -650,12 +649,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var41 string
-		templ_7745c5c3_Var41, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("edit-title-error-%s", task.ID))
+		var templ_7745c5c3_Var40 string
+		templ_7745c5c3_Var40, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("edit-title-error-%s", task.ID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 221, Col: 61}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 227, Col: 61}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var41)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var40)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -663,12 +662,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var42 string
-		templ_7745c5c3_Var42, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("edit-title-error-message-%s", task.ID))
+		var templ_7745c5c3_Var41 string
+		templ_7745c5c3_Var41, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("edit-title-error-message-%s", task.ID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 225, Col: 71}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 231, Col: 71}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var42)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var41)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -681,12 +680,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var43 string
-			templ_7745c5c3_Var43, templ_7745c5c3_Err = templ.ResolveAttributeValue(string(cat))
+			var templ_7745c5c3_Var42 string
+			templ_7745c5c3_Var42, templ_7745c5c3_Err = templ.ResolveAttributeValue(string(cat))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 236, Col: 31}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 242, Col: 31}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var43)
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var42)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -704,12 +703,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var44 string
-			templ_7745c5c3_Var44, templ_7745c5c3_Err = templ.JoinStringErrs(string(cat))
+			var templ_7745c5c3_Var43 string
+			templ_7745c5c3_Var43, templ_7745c5c3_Err = templ.JoinStringErrs(string(cat))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 241, Col: 25}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 247, Col: 25}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var44))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var43))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -767,12 +766,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var45 string
-			templ_7745c5c3_Var45, templ_7745c5c3_Err = templ.ResolveAttributeValue(string(tag))
+			var templ_7745c5c3_Var44 string
+			templ_7745c5c3_Var44, templ_7745c5c3_Err = templ.ResolveAttributeValue(string(tag))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 285, Col: 30}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 291, Col: 30}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var45)
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var44)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -796,12 +795,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 					return templ_7745c5c3_Err
 				}
 			} else {
-				var templ_7745c5c3_Var46 string
-				templ_7745c5c3_Var46, templ_7745c5c3_Err = templ.JoinStringErrs(components.TagLabel(tag))
+				var templ_7745c5c3_Var45 string
+				templ_7745c5c3_Var45, templ_7745c5c3_Err = templ.JoinStringErrs(components.TagLabel(tag))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 293, Col: 38}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 299, Col: 38}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var46))
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var45))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -815,12 +814,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var47 string
-		templ_7745c5c3_Var47, templ_7745c5c3_Err = templ.JoinStringErrs(task.Prompt)
+		var templ_7745c5c3_Var46 string
+		templ_7745c5c3_Var46, templ_7745c5c3_Err = templ.JoinStringErrs(task.Prompt)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 307, Col: 22}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 313, Col: 22}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var47))
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var46))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -828,12 +827,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var48 string
-		templ_7745c5c3_Var48, templ_7745c5c3_Err = templ.JoinStringErrs(goalValue(goal))
+		var templ_7745c5c3_Var47 string
+		templ_7745c5c3_Var47, templ_7745c5c3_Err = templ.JoinStringErrs(goalValue(goal))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 319, Col: 26}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 325, Col: 26}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var48))
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var47))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -876,12 +875,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var49 string
-			templ_7745c5c3_Var49, templ_7745c5c3_Err = templ.ResolveAttributeValue(agent.ID)
+			var templ_7745c5c3_Var48 string
+			templ_7745c5c3_Var48, templ_7745c5c3_Err = templ.ResolveAttributeValue(agent.ID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 351, Col: 27}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 357, Col: 27}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var49)
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var48)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -899,12 +898,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var50 string
-			templ_7745c5c3_Var50, templ_7745c5c3_Err = templ.JoinStringErrs(agent.Name)
+			var templ_7745c5c3_Var49 string
+			templ_7745c5c3_Var49, templ_7745c5c3_Err = templ.JoinStringErrs(agent.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 356, Col: 23}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 362, Col: 23}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var50))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var49))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -947,12 +946,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var51 string
-				templ_7745c5c3_Var51, templ_7745c5c3_Err = templ.ResolveAttributeValue(ad.ID)
+				var templ_7745c5c3_Var50 string
+				templ_7745c5c3_Var50, templ_7745c5c3_Err = templ.ResolveAttributeValue(ad.ID)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 378, Col: 25}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 384, Col: 25}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var51)
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var50)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -970,12 +969,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var52 string
-				templ_7745c5c3_Var52, templ_7745c5c3_Err = templ.JoinStringErrs(ad.Name)
+				var templ_7745c5c3_Var51 string
+				templ_7745c5c3_Var51, templ_7745c5c3_Err = templ.JoinStringErrs(ad.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 383, Col: 21}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 389, Col: 21}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var52))
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var51))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -988,12 +987,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					var templ_7745c5c3_Var53 string
-					templ_7745c5c3_Var53, templ_7745c5c3_Err = templ.JoinStringErrs(ad.Model)
+					var templ_7745c5c3_Var52 string
+					templ_7745c5c3_Var52, templ_7745c5c3_Err = templ.JoinStringErrs(ad.Model)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 385, Col: 24}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 391, Col: 24}
 					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var53))
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var52))
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
@@ -1036,12 +1035,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var54 string
-				templ_7745c5c3_Var54, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("edit-att-%s", att.ID))
+				var templ_7745c5c3_Var53 string
+				templ_7745c5c3_Var53, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("edit-att-%s", att.ID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 415, Col: 125}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 421, Col: 125}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var54)
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var53)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -1049,12 +1048,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var55 string
-				templ_7745c5c3_Var55, templ_7745c5c3_Err = templ.JoinStringErrs(att.FileName)
+				var templ_7745c5c3_Var54 string
+				templ_7745c5c3_Var54, templ_7745c5c3_Err = templ.JoinStringErrs(att.FileName)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 419, Col: 56}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 425, Col: 56}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var55))
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var54))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -1062,12 +1061,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var56 string
-				templ_7745c5c3_Var56, templ_7745c5c3_Err = templ.JoinStringErrs(components.FormatFileSize(att.FileSize))
+				var templ_7745c5c3_Var55 string
+				templ_7745c5c3_Var55, templ_7745c5c3_Err = templ.JoinStringErrs(components.FormatFileSize(att.FileSize))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 420, Col: 88}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 426, Col: 88}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var56))
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var55))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -1083,8 +1082,8 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var57 templ.ComponentScript = removeEditAttachment(att.ID)
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var57.Call)
+				var templ_7745c5c3_Var56 templ.ComponentScript = removeEditAttachment(att.ID)
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var56.Call)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -1102,8 +1101,8 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var58 = []any{"task-tab-panel flex-shrink-0", templ.KV("hidden", defaultTab != "schedules")}
-		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var58...)
+		var templ_7745c5c3_Var57 = []any{"task-tab-panel flex-shrink-0", templ.KV("hidden", defaultTab != "schedules")}
+		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var57...)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1111,12 +1110,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var59 string
-		templ_7745c5c3_Var59, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var58).String())
+		var templ_7745c5c3_Var58 string
+		templ_7745c5c3_Var58, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var57).String())
 		if templ_7745c5c3_Err != nil {
 			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1, Col: 0}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var59)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var58)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1124,12 +1123,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var60 templ.SafeURL
-		templ_7745c5c3_Var60, templ_7745c5c3_Err = templ.JoinURLErrs(fmt.Sprintf("/tasks/%s/schedule?project_id=%s", task.ID, task.ProjectID))
+		var templ_7745c5c3_Var59 templ.SafeURL
+		templ_7745c5c3_Var59, templ_7745c5c3_Err = templ.JoinURLErrs(fmt.Sprintf("/tasks/%s/schedule?project_id=%s", task.ID, task.ProjectID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 506, Col: 89}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 512, Col: 89}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var60))
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var59))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1137,12 +1136,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var61 string
-		templ_7745c5c3_Var61, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s/schedule?project_id=%s", task.ID, task.ProjectID))
+		var templ_7745c5c3_Var60 string
+		templ_7745c5c3_Var60, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s/schedule?project_id=%s", task.ID, task.ProjectID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 507, Col: 90}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 513, Col: 90}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var61)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var60)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1174,12 +1173,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var62 string
-				templ_7745c5c3_Var62, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("schedule-card-%s", s.ID))
+				var templ_7745c5c3_Var61 string
+				templ_7745c5c3_Var61, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("schedule-card-%s", s.ID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 647, Col: 117}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 653, Col: 117}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var62)
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var61)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -1187,12 +1186,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var63 string
-				templ_7745c5c3_Var63, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("schedule-view-%s", s.ID))
+				var templ_7745c5c3_Var62 string
+				templ_7745c5c3_Var62, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("schedule-view-%s", s.ID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 650, Col: 56}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 656, Col: 56}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var63)
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var62)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -1205,12 +1204,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					var templ_7745c5c3_Var64 string
-					templ_7745c5c3_Var64, templ_7745c5c3_Err = templ.JoinStringErrs(components.ScheduleRepeatLabel(s))
+					var templ_7745c5c3_Var63 string
+					templ_7745c5c3_Var63, templ_7745c5c3_Err = templ.JoinStringErrs(components.ScheduleRepeatLabel(s))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 654, Col: 82}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 660, Col: 82}
 					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var64))
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var63))
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
@@ -1223,12 +1222,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					var templ_7745c5c3_Var65 string
-					templ_7745c5c3_Var65, templ_7745c5c3_Err = templ.JoinStringErrs(string(s.RepeatType))
+					var templ_7745c5c3_Var64 string
+					templ_7745c5c3_Var64, templ_7745c5c3_Err = templ.JoinStringErrs(string(s.RepeatType))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 656, Col: 69}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 662, Col: 69}
 					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var65))
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var64))
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
@@ -1241,12 +1240,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
-						var templ_7745c5c3_Var66 string
-						templ_7745c5c3_Var66, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", s.RepeatInterval))
+						var templ_7745c5c3_Var65 string
+						templ_7745c5c3_Var65, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", s.RepeatInterval))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 658, Col: 91}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 664, Col: 91}
 						}
-						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var66))
+						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var65))
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
@@ -1263,8 +1262,8 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 					}
 				}
 				if s.NextRun != nil {
-					var templ_7745c5c3_Var67 = []any{"text-sm ml-2", templ.KV("opacity-60", s.Enabled), templ.KV("opacity-30 line-through", !s.Enabled)}
-					templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var67...)
+					var templ_7745c5c3_Var66 = []any{"text-sm ml-2", templ.KV("opacity-60", s.Enabled), templ.KV("opacity-30 line-through", !s.Enabled)}
+					templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var66...)
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
@@ -1272,12 +1271,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					var templ_7745c5c3_Var68 string
-					templ_7745c5c3_Var68, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var67).String())
+					var templ_7745c5c3_Var67 string
+					templ_7745c5c3_Var67, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var66).String())
 					if templ_7745c5c3_Err != nil {
 						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1, Col: 0}
 					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var68)
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var67)
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
@@ -1285,12 +1284,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					var templ_7745c5c3_Var69 string
-					templ_7745c5c3_Var69, templ_7745c5c3_Err = templ.JoinStringErrs(s.NextRun.Local().Format("2006-01-02 3:04 PM"))
+					var templ_7745c5c3_Var68 string
+					templ_7745c5c3_Var68, templ_7745c5c3_Err = templ.JoinStringErrs(s.NextRun.Local().Format("2006-01-02 3:04 PM"))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 666, Col: 68}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 672, Col: 68}
 					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var69))
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var68))
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
@@ -1303,12 +1302,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var70 templ.SafeURL
-				templ_7745c5c3_Var70, templ_7745c5c3_Err = templ.JoinURLErrs(fmt.Sprintf("/schedules/%s/toggle?project_id=%s", s.ID, task.ProjectID))
+				var templ_7745c5c3_Var69 templ.SafeURL
+				templ_7745c5c3_Var69, templ_7745c5c3_Err = templ.JoinURLErrs(fmt.Sprintf("/schedules/%s/toggle?project_id=%s", s.ID, task.ProjectID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 673, Col: 93}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 679, Col: 93}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var70))
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var69))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -1316,12 +1315,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var71 string
-				templ_7745c5c3_Var71, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/schedules/%s/toggle?project_id=%s", s.ID, task.ProjectID))
+				var templ_7745c5c3_Var70 string
+				templ_7745c5c3_Var70, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/schedules/%s/toggle?project_id=%s", s.ID, task.ProjectID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 674, Col: 94}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 680, Col: 94}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var71)
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var70)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -1352,8 +1351,8 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var72 templ.ComponentScript = templ.ComponentScript{Call: fmt.Sprintf("document.getElementById('schedule-view-%s').classList.add('hidden'); document.getElementById('schedule-edit-%s').classList.remove('hidden')", s.ID, s.ID)}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var72.Call)
+				var templ_7745c5c3_Var71 templ.ComponentScript = templ.ComponentScript{Call: fmt.Sprintf("document.getElementById('schedule-view-%s').classList.add('hidden'); document.getElementById('schedule-edit-%s').classList.remove('hidden')", s.ID, s.ID)}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var71.Call)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -1361,12 +1360,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var73 string
-				templ_7745c5c3_Var73, templ_7745c5c3_Err = templ.ResolveAttributeValue(s.ID)
+				var templ_7745c5c3_Var72 string
+				templ_7745c5c3_Var72, templ_7745c5c3_Err = templ.ResolveAttributeValue(s.ID)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 696, Col: 36}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 702, Col: 36}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var73)
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var72)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -1374,12 +1373,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var74 string
-				templ_7745c5c3_Var74, templ_7745c5c3_Err = templ.ResolveAttributeValue(task.Title)
+				var templ_7745c5c3_Var73 string
+				templ_7745c5c3_Var73, templ_7745c5c3_Err = templ.ResolveAttributeValue(task.Title)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 697, Col: 45}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 703, Col: 45}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var74)
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var73)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -1387,12 +1386,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var75 string
-				templ_7745c5c3_Var75, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("schedule-edit-%s", s.ID))
+				var templ_7745c5c3_Var74 string
+				templ_7745c5c3_Var74, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("schedule-edit-%s", s.ID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 708, Col: 56}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 714, Col: 56}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var75)
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var74)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -1400,12 +1399,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var76 string
-				templ_7745c5c3_Var76, templ_7745c5c3_Err = templ.ResolveAttributeValue(s.ID)
+				var templ_7745c5c3_Var75 string
+				templ_7745c5c3_Var75, templ_7745c5c3_Err = templ.ResolveAttributeValue(s.ID)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 708, Col: 97}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 714, Col: 97}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var76)
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var75)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -1413,12 +1412,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var77 templ.SafeURL
-				templ_7745c5c3_Var77, templ_7745c5c3_Err = templ.JoinURLErrs(fmt.Sprintf("/schedules/%s?project_id=%s", s.ID, task.ProjectID))
+				var templ_7745c5c3_Var76 templ.SafeURL
+				templ_7745c5c3_Var76, templ_7745c5c3_Err = templ.JoinURLErrs(fmt.Sprintf("/schedules/%s?project_id=%s", s.ID, task.ProjectID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 711, Col: 83}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 717, Col: 83}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var77))
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var76))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -1426,12 +1425,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var78 string
-				templ_7745c5c3_Var78, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/schedules/%s?project_id=%s", s.ID, task.ProjectID))
+				var templ_7745c5c3_Var77 string
+				templ_7745c5c3_Var77, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/schedules/%s?project_id=%s", s.ID, task.ProjectID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 712, Col: 83}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 718, Col: 83}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var78)
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var77)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -1439,12 +1438,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var79 string
-				templ_7745c5c3_Var79, templ_7745c5c3_Err = templ.ResolveAttributeValue(components.GetScheduleEditTime(s))
+				var templ_7745c5c3_Var78 string
+				templ_7745c5c3_Var78, templ_7745c5c3_Err = templ.ResolveAttributeValue(components.GetScheduleEditTime(s))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 725, Col: 56}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 731, Col: 56}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var79)
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var78)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -1452,12 +1451,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var80 string
-				templ_7745c5c3_Var80, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("edit-repeat-type-%s", s.ID))
+				var templ_7745c5c3_Var79 string
+				templ_7745c5c3_Var79, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("edit-repeat-type-%s", s.ID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 736, Col: 126}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 742, Col: 126}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var80)
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var79)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -1553,12 +1552,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var81 string
-				templ_7745c5c3_Var81, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("edit-repeat-interval-%s", s.ID))
+				var templ_7745c5c3_Var80 string
+				templ_7745c5c3_Var80, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("edit-repeat-interval-%s", s.ID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 791, Col: 91}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 797, Col: 91}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var81)
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var80)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -1566,12 +1565,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var82 string
-				templ_7745c5c3_Var82, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("edit-repeat-interval-input-%s", s.ID))
+				var templ_7745c5c3_Var81 string
+				templ_7745c5c3_Var81, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("edit-repeat-interval-input-%s", s.ID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 798, Col: 69}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 804, Col: 69}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var82)
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var81)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -1579,12 +1578,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var83 string
-				templ_7745c5c3_Var83, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", s.RepeatInterval))
+				var templ_7745c5c3_Var82 string
+				templ_7745c5c3_Var82, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", s.RepeatInterval))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 800, Col: 57}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 806, Col: 57}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var83)
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var82)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -1592,12 +1591,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var84 string
-				templ_7745c5c3_Var84, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("edit-repeat-label-%s", s.ID))
+				var templ_7745c5c3_Var83 string
+				templ_7745c5c3_Var83, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("edit-repeat-label-%s", s.ID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 806, Col: 92}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 812, Col: 92}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var84)
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var83)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -1623,8 +1622,8 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var85 templ.ComponentScript = templ.ComponentScript{Call: fmt.Sprintf("document.getElementById('schedule-edit-%s').classList.add('hidden'); document.getElementById('schedule-view-%s').classList.remove('hidden')", s.ID, s.ID)}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var85.Call)
+				var templ_7745c5c3_Var84 templ.ComponentScript = templ.ComponentScript{Call: fmt.Sprintf("document.getElementById('schedule-edit-%s').classList.add('hidden'); document.getElementById('schedule-view-%s').classList.remove('hidden')", s.ID, s.ID)}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var84.Call)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -1643,8 +1642,8 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var86 = []any{"task-tab-panel flex-shrink-0", templ.KV("hidden", defaultTab != "chaining")}
-		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var86...)
+		var templ_7745c5c3_Var85 = []any{"task-tab-panel flex-shrink-0", templ.KV("hidden", defaultTab != "chaining")}
+		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var85...)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1652,12 +1651,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var87 string
-		templ_7745c5c3_Var87, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var86).String())
+		var templ_7745c5c3_Var86 string
+		templ_7745c5c3_Var86, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var85).String())
 		if templ_7745c5c3_Err != nil {
 			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1, Col: 0}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var87)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var86)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1673,8 +1672,8 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var88 = []any{"task-tab-panel flex-shrink-0", templ.KV("hidden", defaultTab != "attachments")}
-		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var88...)
+		var templ_7745c5c3_Var87 = []any{"task-tab-panel flex-shrink-0", templ.KV("hidden", defaultTab != "attachments")}
+		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var87...)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1682,12 +1681,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var89 string
-		templ_7745c5c3_Var89, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var88).String())
+		var templ_7745c5c3_Var88 string
+		templ_7745c5c3_Var88, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var87).String())
 		if templ_7745c5c3_Err != nil {
 			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1, Col: 0}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var89)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var88)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1703,8 +1702,8 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var90 = []any{"task-tab-panel flex-1 flex flex-col min-h-0", templ.KV("hidden", defaultTab != "lifecycle")}
-		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var90...)
+		var templ_7745c5c3_Var89 = []any{"task-tab-panel flex-1 flex flex-col min-h-0", templ.KV("hidden", defaultTab != "lifecycle")}
+		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var89...)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1712,12 +1711,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var91 string
-		templ_7745c5c3_Var91, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var90).String())
+		var templ_7745c5c3_Var90 string
+		templ_7745c5c3_Var90, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var89).String())
 		if templ_7745c5c3_Err != nil {
 			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1, Col: 0}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var91)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var90)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1733,8 +1732,8 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var92 templ.ComponentScript = templ.ComponentScript{Call: "refreshLifecycleActivity('" + task.ID + "', '" + task.ProjectID + "')"}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var92.Call)
+		var templ_7745c5c3_Var91 templ.ComponentScript = templ.ComponentScript{Call: "refreshLifecycleActivity('" + task.ID + "', '" + task.ProjectID + "')"}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var91.Call)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1742,12 +1741,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var93 string
-		templ_7745c5c3_Var93, templ_7745c5c3_Err = templ.ResolveAttributeValue(task.ID)
+		var templ_7745c5c3_Var92 string
+		templ_7745c5c3_Var92, templ_7745c5c3_Err = templ.ResolveAttributeValue(task.ID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 928, Col: 64}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 934, Col: 64}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var93)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var92)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1755,12 +1754,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var94 string
-		templ_7745c5c3_Var94, templ_7745c5c3_Err = templ.ResolveAttributeValue(task.ProjectID)
+		var templ_7745c5c3_Var93 string
+		templ_7745c5c3_Var93, templ_7745c5c3_Err = templ.ResolveAttributeValue(task.ProjectID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 928, Col: 99}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 934, Col: 99}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var94)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var93)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1768,12 +1767,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var95 string
-		templ_7745c5c3_Var95, templ_7745c5c3_Err = templ.ResolveAttributeValue(task.ID)
+		var templ_7745c5c3_Var94 string
+		templ_7745c5c3_Var94, templ_7745c5c3_Err = templ.ResolveAttributeValue(task.ID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 929, Col: 63}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 935, Col: 63}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var95)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var94)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1781,12 +1780,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var96 string
-		templ_7745c5c3_Var96, templ_7745c5c3_Err = templ.ResolveAttributeValue(task.ProjectID)
+		var templ_7745c5c3_Var95 string
+		templ_7745c5c3_Var95, templ_7745c5c3_Err = templ.ResolveAttributeValue(task.ProjectID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 929, Col: 98}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 935, Col: 98}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var96)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var95)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1794,8 +1793,8 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var97 = []any{"task-tab-panel flex-shrink-0", templ.KV("hidden", defaultTab != "changes")}
-		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var97...)
+		var templ_7745c5c3_Var96 = []any{"task-tab-panel flex-shrink-0", templ.KV("hidden", defaultTab != "changes")}
+		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var96...)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1803,12 +1802,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var98 string
-		templ_7745c5c3_Var98, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var97).String())
+		var templ_7745c5c3_Var97 string
+		templ_7745c5c3_Var97, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var96).String())
 		if templ_7745c5c3_Err != nil {
 			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1, Col: 0}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var98)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var97)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1816,12 +1815,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var99 string
-		templ_7745c5c3_Var99, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s/changes", task.ID))
+		var templ_7745c5c3_Var98 string
+		templ_7745c5c3_Var98, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s/changes", task.ID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1805, Col: 54}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1811, Col: 54}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var99)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var98)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1829,12 +1828,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var100 string
-		templ_7745c5c3_Var100, templ_7745c5c3_Err = templ.ResolveAttributeValue(task.ID)
+		var templ_7745c5c3_Var99 string
+		templ_7745c5c3_Var99, templ_7745c5c3_Err = templ.ResolveAttributeValue(task.ID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1808, Col: 26}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1814, Col: 26}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var100)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var99)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1847,12 +1846,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var101 string
-			templ_7745c5c3_Var101, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s/changes", task.ID))
+			var templ_7745c5c3_Var100 string
+			templ_7745c5c3_Var100, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s/changes", task.ID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1811, Col: 118}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1817, Col: 118}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var101)
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var100)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1870,8 +1869,8 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var102 = []any{"task-tab-panel flex-1 flex flex-col min-h-0", templ.KV("hidden", defaultTab != "chat")}
-		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var102...)
+		var templ_7745c5c3_Var101 = []any{"task-tab-panel flex-1 flex flex-col min-h-0", templ.KV("hidden", defaultTab != "chat")}
+		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var101...)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1879,12 +1878,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var103 string
-		templ_7745c5c3_Var103, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var102).String())
+		var templ_7745c5c3_Var102 string
+		templ_7745c5c3_Var102, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var101).String())
 		if templ_7745c5c3_Err != nil {
 			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1, Col: 0}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var103)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var102)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1892,12 +1891,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var104 string
-		templ_7745c5c3_Var104, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s/thread", task.ID))
+		var templ_7745c5c3_Var103 string
+		templ_7745c5c3_Var103, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s/thread", task.ID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1834, Col: 53}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1840, Col: 53}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var104)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var103)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1905,12 +1904,12 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var105 string
-		templ_7745c5c3_Var105, templ_7745c5c3_Err = templ.ResolveAttributeValue(task.ID)
+		var templ_7745c5c3_Var104 string
+		templ_7745c5c3_Var104, templ_7745c5c3_Err = templ.ResolveAttributeValue(task.ID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1837, Col: 26}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1843, Col: 26}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var105)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var104)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1933,7 +1932,7 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Var106 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+		templ_7745c5c3_Var105 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 			templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 			templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
 			if !templ_7745c5c3_IsBuffer {
@@ -1951,11 +1950,11 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = DestructiveConfirmDialog("delete_schedule_confirm_modal", "Close delete schedule confirmation", "Delete Schedule", "Are you sure you want to delete the schedule for ", "delete_schedule_confirm_name", "", "? This action cannot be undone.", templ.ComponentScript{Call: "delete_schedule_confirm_modal.close()"}, templ.ComponentScript{Call: "confirmDeleteSchedule()"}).Render(templ.WithChildren(ctx, templ_7745c5c3_Var106), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = DestructiveConfirmDialog("delete_schedule_confirm_modal", "Close delete schedule confirmation", "Delete Schedule", "Are you sure you want to delete the schedule for ", "delete_schedule_confirm_name", "", "? This action cannot be undone.", templ.ComponentScript{Call: "delete_schedule_confirm_modal.close()"}, templ.ComponentScript{Call: "confirmDeleteSchedule()"}).Render(templ.WithChildren(ctx, templ_7745c5c3_Var105), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 200, "<script>\n\t\t\t\t\t\t\tvar deleteScheduleID = '';\n\t\t\t\t\t\t\tvar deleteScheduleTarget = '#task-detail-content';\n\t\t\t\t\t\t\tvar deleteScheduleTargetElement = null;\n\t\t\t\t\t\t\tvar deleteScheduleSwap = 'outerHTML';\n\n\t\t\t\t\t\t\tfunction openDeleteScheduleConfirm(button) {\n\t\t\t\t\t\t\t\tif (!button) return;\n\t\t\t\t\t\t\t\tdeleteScheduleID = button.dataset.scheduleId || '';\n\t\t\t\t\t\t\t\tif (!deleteScheduleID) return;\n\t\t\t\t\t\t\t\tdeleteScheduleTarget = button.dataset.scheduleTarget || '#task-detail-content';\n\t\t\t\t\t\t\t\tdeleteScheduleTargetElement = deleteScheduleTarget.indexOf('closest ') === 0 ? button.closest(deleteScheduleTarget.replace(/^closest\\s+/, '')) : null;\n\t\t\t\t\t\t\t\tdeleteScheduleSwap = button.dataset.scheduleSwap || 'outerHTML';\n\t\t\t\t\t\t\t\twindow.openDestructiveConfirmDialog('delete_schedule_confirm_modal', 'delete_schedule_confirm_name', button.dataset.scheduleTitle || 'this task');\n\t\t\t\t\t\t\t}\n\n\t\t\t\t\t\t\tfunction confirmDeleteSchedule() {\n\t\t\t\t\t\t\t\tif (!deleteScheduleID) return;\n\t\t\t\t\t\t\t\tvar modal = document.getElementById('delete_schedule_confirm_modal');\n\t\t\t\t\t\t\t\tif (modal) modal.close();\n\t\t\t\t\t\t\t\tvar target = deleteScheduleTargetElement || deleteScheduleTarget;\n\t\t\t\t\t\t\t\thtmx.ajax('DELETE', '/schedules/' + deleteScheduleID, {\n\t\t\t\t\t\t\t\t\ttarget: target,\n\t\t\t\t\t\t\t\t\tswap: deleteScheduleSwap\n\t\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\t}\n\n\t\t\t\t\t\t\tfunction openScheduleRunAtPicker(container, event) {\t\t\t\t\t\t\tif (!container) return;\n\t\t\t\t\t\t\tvar pickerInput = container.querySelector('input[data-run-at-picker]');\n\t\t\t\t\t\t\tif (!pickerInput) return;\n\t\t\t\t\t\t\tif (event && event.target && !event.target.closest('input[data-run-at-picker]')) return;\n\t\t\t\t\t\t\tpickerInput.focus();\n\t\t\t\t\t\t\tif (typeof pickerInput.showPicker === 'function') {\n\t\t\t\t\t\t\t\tpickerInput.showPicker();\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\tvar _threadContentLoading = false;\n\t\t\t\t\tfunction _currentTaskIdFromPath() {\n\t\t\t\t\t\tvar taskIdMatch = window.location.pathname.match(/\\/tasks\\/([^\\/]+)/);\n\t\t\t\t\t\treturn taskIdMatch && taskIdMatch[1] ? taskIdMatch[1] : '';\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction _isChatTabActive() {\n\t\t\t\t\t\tvar chatTab = document.querySelector('[data-tab=\"chat\"]');\n\t\t\t\t\t\tif (!chatTab || !chatTab.classList.contains('tab-active')) return false;\n\t\t\t\t\t\tvar chatPanel = document.getElementById('tab-chat');\n\t\t\t\t\t\treturn !!chatPanel && !chatPanel.classList.contains('hidden');\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction _taskThreadScrollStateKey(taskId) {\n\t\t\t\t\t\treturn taskId ? 'task-thread-scroll-' + taskId : '';\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction _getTaskThreadScrollState(taskId) {\n\t\t\t\t\t\twindow._taskThreadScrollStates = window._taskThreadScrollStates || {};\n\t\t\t\t\t\tvar key = _taskThreadScrollStateKey(taskId || _currentTaskIdFromPath());\n\t\t\t\t\t\treturn key ? window._taskThreadScrollStates[key] : null;\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction _saveTaskThreadScrollState(taskId) {\n\t\t\t\t\t\ttaskId = taskId || _currentTaskIdFromPath();\n\t\t\t\t\t\tvar key = _taskThreadScrollStateKey(taskId);\n\t\t\t\t\t\tvar chatMessages = document.getElementById('task-thread-messages');\n\t\t\t\t\t\tif (!key || !chatMessages || !window.chatAutoScroll) return;\n\t\t\t\t\t\tvar tracker = window._taskThreadPageTracker;\n\t\t\t\t\t\tvar userScrolledUp = tracker\n\t\t\t\t\t\t\t? !!tracker.userScrolledUp\n\t\t\t\t\t\t\t: !!window._taskThreadUserScrolledUp;\n\t\t\t\t\t\tvar snapshot = tracker && typeof tracker.snapshot === 'function'\n\t\t\t\t\t\t\t? tracker.snapshot()\n\t\t\t\t\t\t\t: { scrollTop: chatMessages.scrollTop || 0, userScrolledUp: userScrolledUp, pinned: !userScrolledUp };\n\t\t\t\t\t\twindow._taskThreadScrollStates = window._taskThreadScrollStates || {};\n\t\t\t\t\t\twindow._taskThreadScrollStates[key] = snapshot;\n\t\t\t\t\t\twindow._taskThreadUserScrolledUp = !!snapshot.userScrolledUp;\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction _restoreThreadScrollOrBottom(taskId, forceBottom) {\n\t\t\t\t\t\trequestAnimationFrame(function() {\n\t\t\t\t\t\t\tvar chatMessages = document.getElementById('task-thread-messages');\n\t\t\t\t\t\t\tif (!chatMessages || !window.chatAutoScroll) return;\n\n\t\t\t\t\t\t\tvar state = _getTaskThreadScrollState(taskId);\n\t\t\t\t\t\t\tif (!forceBottom && state) {\n\t\t\t\t\t\t\t\tchatMessages.scrollTop = state.userScrolledUp ? (state.scrollTop || 0) : chatMessages.scrollHeight;\n\t\t\t\t\t\t\t\tif (window._taskThreadPageTracker) window._taskThreadPageTracker.userScrolledUp = !!state.userScrolledUp;\n\t\t\t\t\t\t\t\twindow._taskThreadUserScrolledUp = !!state.userScrolledUp;\n\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t}\n\n\t\t\t\t\t\t\tif (!forceBottom) {\n\t\t\t\t\t\t\t\tvar tracker = window._taskThreadPageTracker;\n\t\t\t\t\t\t\t\tvar userScrolledUp = false;\n\t\t\t\t\t\t\t\tif (tracker && typeof tracker.userScrolledUp === 'boolean') {\n\t\t\t\t\t\t\t\t\tuserScrolledUp = tracker.userScrolledUp;\n\t\t\t\t\t\t\t\t} else if (typeof window._taskThreadUserScrolledUp === 'boolean') {\n\t\t\t\t\t\t\t\t\tuserScrolledUp = window._taskThreadUserScrolledUp;\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tif (userScrolledUp) return;\n\t\t\t\t\t\t\t}\n\n\t\t\t\t\t\t\twindow.chatAutoScroll.scrollToBottom(chatMessages, !!forceBottom);\n\t\t\t\t\t\t\t_saveTaskThreadScrollState(taskId);\n\t\t\t\t\t\t});\n\t\t\t\t\t}\n\n\t\t\t\t\t\tfunction _closeTaskThreadEventSourcesForRefresh() {\n\t\t\t\t\t\t\tif (!window._threadEventSources) return;\n\t\t\t\t\t\t\twindow._threadEventSources.forEach(function(es) {\n\t\t\t\t\t\t\t\ttry { es.close(); } catch(e) {}\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\twindow._threadEventSources = [];\n\t\t\t\t\t\t\twindow._taskThreadStreamingActive = false;\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\tfunction _threadHasExecution(execId) {\n\t\t\t\t\t\t\treturn !!(execId && document.querySelector('[data-exec-id=\"' + execId.replace(/\"/g, '\\\\\"') + '\"]'));\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\tfunction _loadThreadContent(taskId, forceReload, expectedExecId) {\n\t\t\t\t\t\t\tvar threadContent = document.getElementById('thread-content');\n\t\t\t\t\t\t\tif (!threadContent || !taskId || threadContent.dataset.taskId !== taskId) return Promise.resolve(false);\n\t\t\t\t\t\t\tif (!forceReload && threadContent.dataset.loaded === 'true' && (!expectedExecId || _threadHasExecution(expectedExecId))) return Promise.resolve(true);\n\t\t\t\t\t\t\tif (_threadContentLoading) return Promise.resolve(false);\n\t\t\t\t\t\t\tif (typeof htmx === 'undefined') return Promise.resolve(false);\n\n\t\t\t\t\t\t\tif (forceReload) _closeTaskThreadEventSourcesForRefresh();\n\t\t\t\t\t\t\t_threadContentLoading = true;\n\t\t\t\t\t\t\tthreadContent.dataset.loading = 'true';\n\t\t\t\t\t\t\treturn htmx.ajax('GET', '/tasks/' + taskId + '/thread', {\n\t\t\t\t\t\t\t\ttarget: '#thread-content[data-task-id=\"' + taskId.replace(/\"/g, '\\\\\"') + '\"]',\n\t\t\t\t\t\t\t\tswap: 'innerHTML'\n\t\t\t\t\t\t\t}).then(function() {\n\t\t\t\t\t\t\t\tvar updated = document.getElementById('thread-content');\n\t\t\t\t\t\t\t\tif (!updated || updated.dataset.taskId !== taskId) return false;\n\t\t\t\t\t\t\t\tupdated.dataset.loaded = 'true';\n\t\t\t\t\t\t\t\tupdated.dataset.loading = 'false';\n\t\t\t\t\t\t\t\tif (window.htmx && typeof htmx.process === 'function') htmx.process(updated);\n\t\t\t\t\t\t\t\tif (expectedExecId && !_threadHasExecution(expectedExecId)) return false;\n\t\t\t\t\t\t\t\treturn true;\n\t\t\t\t\t\t\t}).catch(function(err) {\n\t\t\t\t\t\t\t\tconsole.error('Failed to load thread content:', err);\n\t\t\t\t\t\t\t\tvar updated = document.getElementById('thread-content');\n\t\t\t\t\t\t\t\tif (updated) updated.dataset.loading = 'false';\n\t\t\t\t\t\t\t\treturn false;\n\t\t\t\t\t\t\t}).finally(function() {\n\t\t\t\t\t\t\t\t_threadContentLoading = false;\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\tfunction _refreshActiveThreadContent(taskId, forceReload, expectedExecId, attempt) {\n\t\t\t\t\t\t\tvar threadContent = document.getElementById('thread-content');\n\t\t\t\t\t\t\tif (!taskId || !_isChatTabActive() || !threadContent || threadContent.dataset.taskId !== taskId) return;\n\t\t\t\t\t\t\tattempt = attempt || 0;\n\t\t\t\t\t\t\t_loadThreadContent(taskId, forceReload, expectedExecId).then(function(loaded) {\n\t\t\t\t\t\t\t\tvar currentThreadContent = document.getElementById('thread-content');\n\t\t\t\t\t\t\t\tif (!currentThreadContent || currentThreadContent.dataset.taskId !== taskId) return;\n\t\t\t\t\t\t\t\tif (!loaded && forceReload && attempt < 8) {\n\t\t\t\t\t\t\t\t\tsetTimeout(function() { _refreshActiveThreadContent(taskId, true, expectedExecId, attempt + 1); }, 150 * (attempt + 1));\n\t\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t_restoreThreadScrollOrBottom(taskId, false);\n\t\t\t\t\t\t\t\tif (window._initThreadStreaming) window._initThreadStreaming();\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\t\twindow._openTaskThreadAfterRun = function(taskId) {\n\t\t\t\t\t\t\t\ttaskId = taskId || _currentTaskIdFromPath();\n\t\t\t\t\t\t\t\tif (!taskId) return;\n\t\t\t\t\t\t\t\tswitchTaskTab('chat');\n\t\t\t\t\t\t\t\tvar nextURL = '/tasks/' + taskId + '?tab=chat';\n\t\t\t\t\t\t\t\tif (window.location.pathname !== '/tasks/' + taskId || window.location.search !== '?tab=chat') {\n\t\t\t\t\t\t\t\t\twindow.openVibelyNavigate(nextURL).catch(function(err) {\n\t\t\t\t\t\t\t\t\t\tconsole.error('[task-thread] Failed to open task thread:', err);\n\t\t\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t_refreshActiveThreadContent(taskId, true, '', 0);\n\t\t\t\t\t\t\t};\n\t\t\t\t\tfunction switchTaskTab(tabName) {\n\t\t\t\t\tvar container = document.getElementById('task-detail-content');\n\t\t\t\t\tif (!container) return;\n\n\t\t\t\t\tif (_isChatTabActive()) {\n\t\t\t\t\t\t_saveTaskThreadScrollState();\n\t\t\t\t\t}\n\n\t\t\t\tcontainer.querySelectorAll('.task-tab-panel').forEach(function(panel) {\n\t\t\t\t\tpanel.classList.add('hidden');\n\t\t\t\t});\n\n\t\t\t\tcontainer.querySelectorAll('[data-tab]').forEach(function(tab) {\n\t\t\t\t\ttab.classList.remove('tab-active');\n\t\t\t\t});\n\n\t\t\t\tvar panel = container.querySelector('#tab-' + tabName);\n\t\t\t\tif (panel) panel.classList.remove('hidden');\n\n\t\t\t\t\tvar tab = container.querySelector('[data-tab=\"' + tabName + '\"]');\n\t\t\t\t\tif (tab) tab.classList.add('tab-active');\n\n\t\t\t\t\t// Auto-scroll thread to bottom when switching to thread tab\n\t\t\t\t\t\tif (tabName === 'chat') {\n\t\t\t\t\t\t\tvar threadContent = document.getElementById('thread-content');\n\t\t\t\t\t\t\tvar taskId = (threadContent && threadContent.dataset.taskId) || _currentTaskIdFromPath();\n\t\t\t\t\t\t\tif (taskId) {\n\t\t\t\t\t\t\t\t_loadThreadContent(taskId).then(function() {\n\t\t\t\t\t\t\t\t\t\t_restoreThreadScrollOrBottom(taskId, false);\n\t\t\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\t\t_restoreThreadScrollOrBottom(taskId, false);\n\t\t\t\t\t\t\t\t}\t\t\t\t\t}\n\n\t\t\t\t// Reload changes content and start SSE when switching to changes tab\n\t\t\t\tif (tabName === 'changes') {\n\t\t\t\t\tvar taskIdMatch = window.location.pathname.match(/\\/tasks\\/([^\\/]+)/);\n\t\t\t\t\tif (taskIdMatch && taskIdMatch[1]) {\n\t\t\t\t\t\tvar taskId = taskIdMatch[1];\n\t\t\t\t\t\tif (typeof htmx !== 'undefined') {\n\t\t\t\t\t\t\thtmx.ajax('GET', '/tasks/' + taskId + '/changes', {\n\t\t\t\t\t\t\t\ttarget: '#changes-content',\n\t\t\t\t\t\t\t\tswap: 'innerHTML'\n\t\t\t\t\t\t\t}).then(function() {\n\t\t\t\t\t\t\t\t// Seed fingerprint so the first SSE update can detect no-ops.\n\t\t\t\t\t\t\t\tvar cc = document.getElementById('changes-content');\n\t\t\t\t\t\t\t\tif (cc) _lastDiffFingerprint = _computeDiffFingerprint(cc);\n\t\t\t\t\t\t\t}).catch(function() {});\n\t\t\t\t\t\t}\n\t\t\t\t\t\t// Start SSE for real-time file changes\n\t\t\t\t\t\t_startFileChangesSSE(taskId);\n\t\t\t\t\t}\n\t\t\t\t} else {\n\t\t\t\t\t// Stop SSE when switching away from changes tab\n\t\t\t\t\t_stopFileChangesSSE();\n\t\t\t\t}\n\t\t\t\t}\n\n\t\t\t\t// File changes are consumed from the shared sidebar live stream.\n\t\t\t\t// Keep per-task filtering in-page to avoid creating another EventSource.\n\t\t\t\tvar _fileChangesListening = false;\n\t\t\t\tvar _fileChangesUpdatePending = false;\n\t\t\t\tvar _fileChangesTaskId = null;\n\n\t\t\t\tfunction _isChangesTabActive() {\n\t\t\t\t\tvar changesTab = document.querySelector('[data-tab=\"changes\"]');\n\t\t\t\t\tif (!changesTab || !changesTab.classList.contains('tab-active')) return false;\n\t\t\t\t\tvar changesPanel = document.getElementById('tab-changes');\n\t\t\t\t\treturn !!changesPanel && !changesPanel.classList.contains('hidden');\n\t\t\t\t}\n\n\t\t\tfunction _handleSharedFileChangeEvent(event) {\n\t\t\t\tif (!_fileChangesListening || !_fileChangesTaskId) return;\n\t\t\t\tvar data = event.detail || {};\n\t\t\t\tif (!data.task_id || data.task_id !== _fileChangesTaskId) return;\n\n\t\t\t\tif (data.type === 'diff_snapshot') {\n\t\t\t\t\t_updateDiffViewer();\n\t\t\t\t\treturn;\n\t\t\t\t}\n\t\t\t\tif (data.type === 'file_modified') {\n\t\t\t\t\tconsole.log('File modified:', data.file_path, 'via', data.tool_name);\n\t\t\t\t}\n\t\t\t}\n\n\t\t\tfunction _startFileChangesSSE(taskId) {\n\t\t\t\tif (!taskId) return;\n\t\t\t\tif (_fileChangesListening && _fileChangesTaskId === taskId) return;\n\t\t\t\t_fileChangesTaskId = taskId;\n\t\t\t\t_fileChangesListening = true;\n\t\t\t\tconsole.log('File changes live listener active for task:', taskId);\n\t\t\t}\n\n\t\t\tfunction _stopFileChangesSSE() {\n\t\t\t\t_fileChangesListening = false;\n\t\t\t\tconsole.log('File changes live listener paused');\n\t\t\t}\n\n\t\t\t\t// Track the last diff fingerprint to skip no-op DOM replacements.\n\t\t\t\tvar _lastDiffFingerprint = '';\n\n\t\t\t\tfunction _computeDiffFingerprint(container) {\n\t\t\t\t\tvar viewer = container && container.querySelector('#diff-viewer');\n\t\t\t\t\tif (!viewer) return '';\n\t\t\t\t\t// Use a simple hash of the full diff viewer HTML for accurate\n\t\t\t\t\t// change detection. The previous badge+row-count approach missed\n\t\t\t\t\t// content changes within existing lines.\n\t\t\t\t\tvar raw = viewer.innerHTML;\n\t\t\t\t\tvar h = 0;\n\t\t\t\t\tfor (var i = 0; i < raw.length; i++) {\n\t\t\t\t\t\th = ((h << 5) - h + raw.charCodeAt(i)) | 0;\n\t\t\t\t\t}\n\t\t\t\t\treturn String(h);\n\t\t\t\t}\n\n\t\t\t\tfunction _getDiffViewMode() {\n\t\t\t\t\tvar splitBtn = document.getElementById('diff-btn-split');\n\t\t\t\t\treturn (splitBtn && splitBtn.classList.contains('btn-active')) ? 'split' : 'inline';\n\t\t\t\t}\n\n\t\t\t\tfunction _updateDiffViewer(diffOutput) {\n\t\t\t\t\tvar changesContent = document.getElementById('changes-content');\n\t\t\t\t\tif (!changesContent) return;\n\t\t\t\t\tif (!_isChangesTabActive()) return;\n\n\t\t\t\t\t// Debounce: skip if an update is already in flight\n\t\t\t\t\tif (_fileChangesUpdatePending) return;\n\t\t\t\t\t_fileChangesUpdatePending = true;\n\n\t\t\t\tvar taskId = changesContent.dataset.taskId;\n\t\t\t\tif (taskId) {\n\t\t\t\t\t// Fetch new HTML in the background WITHOUT touching the live DOM.\n\t\t\t\t\t// Only swap if content actually changed — this prevents the viewport\n\t\t\t\t\t// jumps caused by the old htmx.ajax() path which replaced innerHTML\n\t\t\t\t\t// before the fingerprint check could run.\n\t\t\t\t\tfetch('/tasks/' + taskId + '/changes', {\n\t\t\t\t\t\theaders: { 'HX-Request': 'true' }\n\t\t\t\t\t}).then(function(resp) {\n\t\t\t\t\t\tif (!resp.ok) throw new Error('HTTP ' + resp.status);\n\t\t\t\t\t\treturn resp.text();\n\t\t\t\t\t}).then(function(html) {\n\t\t\t\t\t\t_fileChangesUpdatePending = false;\n\n\t\t\t\t\t\t// Parse the response in a detached element to compute fingerprint\n\t\t\t\t\t\t// without touching the live DOM at all.\n\t\t\t\t\t\tvar offscreen = document.createElement('div');\n\t\t\t\t\t\toffscreen.innerHTML = html;\n\n\t\t\t\t\t\tvar newFp = _computeDiffFingerprint(offscreen);\n\t\t\t\t\t\tif (newFp && newFp === _lastDiffFingerprint) {\n\t\t\t\t\t\t\t// Diff unchanged — no DOM mutation, no scroll disruption.\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\t_lastDiffFingerprint = newFp;\n\n\t\t\t\t\t\t// Content changed — apply the swap with UI state preservation.\n\t\t\t\t\t\tvar scrollX = window.scrollX || window.pageXOffset || 0;\n\t\t\t\t\t\tvar scrollY = window.scrollY || window.pageYOffset || 0;\n\t\t\t\t\t\tvar viewMode = _getDiffViewMode();\n\n\t\t\t\t\t\t\tchangesContent.innerHTML = html;\n\t\t\t\t\t\t\tif (typeof htmx !== 'undefined' && typeof htmx.process === 'function') {\n\t\t\t\t\t\t\t\thtmx.process(changesContent);\n\t\t\t\t\t\t\t}\n\n\t\t\t\t\t\t\t// Let the browser settle the new DOM, then restore UI state.\n\t\t\t\t\t\t\trequestAnimationFrame(function() {\n\t\t\t\t\t\t\t\t// Restore diff view mode (inline/split) without saving during refresh restore.\n\t\t\t\t\t\t\t\tif ((viewMode === 'inline' || viewMode === 'split') && typeof switchDiffView === 'function') {\n\t\t\t\t\t\t\t\t\tswitchDiffView(viewMode, false);\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t// Restore scroll position so the user stays where they were.\n\t\t\t\t\t\t\t\twindow.scrollTo(scrollX, scrollY);\n\t\t\t\t\t\t\t});\n\t\t\t\t\t}).catch(function() {\n\t\t\t\t\t\t_fileChangesUpdatePending = false;\n\t\t\t\t\t});\n\t\t\t\t} else {\n\t\t\t\t\t_fileChangesUpdatePending = false;\n\t\t\t\t}\n\t\t\t}\n\n\t\t\t\t// Start SSE if changes tab is active on page load and task is running/queued\n\t\t\t\t(function() {\n\t\t\t\t\tsetTimeout(function() {\n\t\t\t\t\t\tif (_isChatTabActive()) {\n\t\t\t\t\t\t\tvar threadContent = document.getElementById('thread-content');\n\t\t\t\t\t\t\tvar taskId = (threadContent && threadContent.dataset.taskId) || _currentTaskIdFromPath();\n\t\t\t\t\t\t\tif (taskId) {\n\t\t\t\t\t\t\t\t_loadThreadContent(taskId).then(function() {\n\t\t\t\t\t\t\t\t\t\t_restoreThreadScrollOrBottom(taskId, false);\n\t\t\t\t\t\t\t\t\t});\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\t\t\t\t\t\tif (_isChangesTabActive()) {\n\t\t\t\t\t\t\tvar changesContent = document.getElementById('changes-content');\n\t\t\t\t\t\t\tif (changesContent) {\n\t\t\t\t\t\t\t\tvar taskId = changesContent.dataset.taskId;\n\t\t\t\t\t\t\t\tif (taskId) {\n\t\t\t\t\t\t\t\t\t_startFileChangesSSE(taskId);\n\t\t\t\t\t\t\t\t\t// Seed fingerprint from initial server render.\n\t\t\t\t\t\t\t\t\t_lastDiffFingerprint = _computeDiffFingerprint(changesContent);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t}, 100);\n\t\t\t\t})();\n\n\t\t\t\t// Refresh the action buttons (Run Now / Edit / Delete) via the lightweight\n\t\t\t\t// /tasks/:id/detail-actions fragment endpoint.  Called both from the polling\n\t\t\t\t// afterSettle handler (up to 3s after completion) and from the SSE task-event\n\t\t\t\t// listener below (fires immediately on task_status_changed events).\n\t\t\t\tfunction _refreshTaskDetailActions() {\n\t\t\t\t\tvar actions = document.getElementById('task-detail-actions');\n\t\t\t\t\tif (!actions) return;\n\t\t\t\t\tvar taskIdMatch = window.location.pathname.match(/\\/tasks\\/([^\\/]+)/);\n\t\t\t\t\tif (!taskIdMatch || !taskIdMatch[1]) return;\n\t\t\t\t\tif (typeof htmx === 'undefined') return;\n\t\t\t\t\thtmx.ajax('GET', '/tasks/' + taskIdMatch[1] + '/detail-actions', {\n\t\t\t\t\t\ttarget: '#task-detail-actions',\n\t\t\t\t\t\tswap: 'outerHTML'\n\t\t\t\t\t});\n\t\t\t\t}\n\n\t\t\t\tvar _prevTaskStatus = null;\n\t\t\t\t\tif (window._taskDetailFileChangesHandlers) {\n\t\t\t\t\t\tif (window._taskDetailFileChangesHandlers.beforeUnload) {\n\t\t\t\t\t\t\twindow.removeEventListener('beforeunload', window._taskDetailFileChangesHandlers.beforeUnload);\n\t\t\t\t\t\t}\n\t\t\t\t\t\tif (window._taskDetailFileChangesHandlers.liveConnected) {\n\t\t\t\t\t\t\twindow.removeEventListener('sse-live-connected', window._taskDetailFileChangesHandlers.liveConnected);\n\t\t\t\t\t\t}\n\t\t\t\t\tif (window._taskDetailFileChangesHandlers.afterSettle) {\n\t\t\t\t\t\tdocument.removeEventListener('htmx:afterSettle', window._taskDetailFileChangesHandlers.afterSettle);\n\t\t\t\t\t}\n\t\t\t\t\tif (window._taskDetailFileChangesHandlers.beforeSwap) {\n\t\t\t\t\t\tdocument.body.removeEventListener('htmx:beforeSwap', window._taskDetailFileChangesHandlers.beforeSwap);\n\t\t\t\t\t}\n\t\t\t\t\tif (window._taskDetailFileChangesHandlers.beforeRequest) {\n\t\t\t\t\t\tdocument.body.removeEventListener('htmx:beforeRequest', window._taskDetailFileChangesHandlers.beforeRequest);\n\t\t\t\t\t}\n\t\t\t\t\tif (window._taskDetailFileChangesHandlers.fileChangeEvent) {\n\t\t\t\t\t\twindow.removeEventListener('sse-file-change-event', window._taskDetailFileChangesHandlers.fileChangeEvent);\n\t\t\t\t\t}\n\t\t\t\t\tif (window._taskDetailFileChangesHandlers.taskEvent) {\n\t\t\t\t\t\twindow.removeEventListener('sse-task-event', window._taskDetailFileChangesHandlers.taskEvent);\n\t\t\t\t\t}\n\t\t\t\t}\n\n\t\t\t\tvar _taskDetailFileChangeEventHandler = _handleSharedFileChangeEvent;\n\n\t\t\t\t// Listen for SSE task_status_changed events so action buttons refresh immediately\n\t\t\t\t// on task completion — without waiting up to 3s for the next metrics poll cycle.\n\t\t\t\t\tvar _taskDetailTaskEventHandler = function(event) {\n\t\t\t\t\t\tvar data = event.detail || {};\n\t\t\t\t\t\t// Only react to this task's events\n\t\t\t\t\t\tvar taskIdMatch = window.location.pathname.match(/\\/tasks\\/([^\\/]+)/);\n\t\t\t\t\t\tif (!taskIdMatch || !taskIdMatch[1] || data.task_id !== taskIdMatch[1]) return;\n\t\t\t\t\t\tif (data.type === 'task_thread_execution_started' || data.type === 'task_thread_input_applied') {\n\t\t\t\t\t\t\t// TaskThreadLiveEventsScript owns these events. It appends the\n\t\t\t\t\t\t\t// authoritative execution fragment and attaches /events/chat/:exec_id\n\t\t\t\t\t\t\t// without replacing #thread-content or closing the fresh stream.\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tif (data.type === 'task_status_changed') {\n\t\t\t\t\t\t\tvar activeStatuses = { pending: true, queued: true, running: true };\n\t\t\t\t\t\t\tif (activeStatuses[data.status]) {\n\t\t\t\t\t\t\t\t// Skip the full thread reload if the composer has a pending attachment\n\t\t\t\t\t\t\t\t// upload session to avoid destroying unsent attachment state while a\n\t\t\t\t\t\t\t\t// parallel task activation event arrives.\n\t\t\t\t\t\t\t\tvar sessionInputSC = document.getElementById('task-thread-form-session-id');\n\t\t\t\t\t\t\t\tif (!sessionInputSC || !sessionInputSC.value) {\n\t\t\t\t\t\t\t\t\tif (window.reconcileTaskThreadState) window.reconcileTaskThreadState(data.task_id);\n\t\t\t\t\t\t\t\t\telse _refreshActiveThreadContent(data.task_id, true, data.exec_id || '', 0);\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tvar terminalStatuses = { completed: true, failed: true, cancelled: true };\n\t\t\t\t\t\t\tif (terminalStatuses[data.status]) {\n\t\t\t\t\t\t\t\t_refreshTaskDetailActions();\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\t\t\t\t\t};\n\n\t\t\t\t\tvar _taskDetailLiveConnectedHandler = function(event) {\n\t\t\t\t\t\tvar detail = event.detail || {};\n\t\t\t\t\t\t// Only react to actual SSE reconnects (e.g. after tab blur/refocus).\n\t\t\t\t\t\t// The initial SSE connection is handled by the page-load init below.\n\t\t\t\t\t\tif (!detail.reconnected) return;\n\t\t\t\t\t\tvar taskId = _currentTaskIdFromPath();\n\t\t\t\t\t\tif (!taskId || !_isChatTabActive()) return;\n\t\t\t\t\t\tvar threadContent = document.getElementById('thread-content');\n\t\t\t\t\t\tif (!threadContent || threadContent.dataset.taskId !== taskId) return;\n\t\t\t\t\t\t// Never replace the composer while it owns a pending upload session.\n\t\t\t\t\t\tvar sessionInput = document.getElementById('task-thread-form-session-id');\n\t\t\t\t\t\tif (sessionInput && sessionInput.value) return;\n\t\t\t\t\t\tif (threadContent.dataset.loaded !== 'true') {\n\t\t\t\t\t\t\t_loadThreadContent(taskId, false);\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\t// The scoped thread script compares authoritative snapshot revisions and\n\t\t\t\t\t\t// suppresses unchanged morphs before streams or DOM state are touched.\n\t\t\t\t\t\tif (window.reconcileTaskThreadState) window.reconcileTaskThreadState(taskId);\n\t\t\t\t\t};\n\n\t\t\t\t\tvar _taskDetailBeforeUnloadHandler = function() {\n\t\t\t\t\t\t_stopFileChangesSSE();\n\t\t\t\t\t};\n\n\t\t\t\tvar _taskDetailBeforeSwapHandler = function(evt) {\n\t\t\t\t\tvar target = evt.detail && evt.detail.target;\n\t\t\t\t\tif (!target) return;\n\t\t\t\t\t\tif (target.id === 'main-content' || target.id === 'task-detail-content') {\n\t\t\t\t\t\t\t_stopFileChangesSSE();\n\t\t\t\t\t\t\twindow.removeEventListener('sse-file-change-event', _taskDetailFileChangeEventHandler);\n\t\t\t\t\t\t\twindow.removeEventListener('sse-task-event', _taskDetailTaskEventHandler);\n\t\t\t\t\t\t\twindow.removeEventListener('sse-live-connected', _taskDetailLiveConnectedHandler);\n\t\t\t\t\t\t}\n\t\t\t\t};\n\n\t\t\t\t// Block event-triggered changes refreshes while Changes tab is not active.\n\t\t\t\tvar _taskDetailBeforeRequestHandler = function(evt) {\n\t\t\t\t\tvar triggerEl = evt.detail && evt.detail.elt;\n\t\t\t\t\tif (!triggerEl) return;\n\t\t\t\t\tif (triggerEl.id === 'changes-content' && !_isChangesTabActive()) {\n\t\t\t\t\t\tevt.preventDefault();\n\t\t\t\t\t}\n\t\t\t\t};\n\n\t\t\t\t// Watch for task status changes to stop SSE and do final refresh.\n\t\t\t\tvar _taskDetailAfterSettleHandler = function(evt) {\n\t\t\t\t\tvar metrics = document.getElementById('task-detail-metrics');\n\t\t\t\t\tif (!metrics) return;\n\t\t\t\t\tvar status = metrics.dataset.taskStatus;\n\t\t\t\t\tif (!status) return;\n\t\t\t\t\tif (_prevTaskStatus === null) {\n\t\t\t\t\t_prevTaskStatus = status;\n\t\t\t\t\treturn;\n\t\t\t\t}\n\t\t\t\tif (_prevTaskStatus !== status) {\n\t\t\t\t\tvar wasActive = (_prevTaskStatus === 'running' || _prevTaskStatus === 'queued');\n\t\t\t\t\tvar nowActive = (status === 'running' || status === 'queued');\n\t\t\t\t\t\tvar nowDone = (status === 'completed' || status === 'failed' || status === 'cancelled');\n\t\t\t\t\t\t_prevTaskStatus = status;\n\t\t\t\t\t\tif (wasActive && nowDone) {\n\t\t\t\t\t\t\t// Task just finished — stop SSE, do final changes refresh, and update action buttons\n\t\t\t\t\t\t\t_stopFileChangesSSE();\n\t\t\t\t\t\t\t_updateDiffViewer('final');\n\t\t\t\t\t\t\t_refreshTaskDetailActions();\n\t\t\t\t\t\t}\n\t\t\t\t\t\tif (!wasActive && nowActive && _fileChangesTaskId && _isChangesTabActive()) {\n\t\t\t\t\t\t\t// Task reactivated (e.g., follow-up on completed task) while changes tab is open.\n\t\t\t\t\t\t\t// Restart SSE so realtime diff snapshots resume for this execution.\n\t\t\t\t\t\t\t_startFileChangesSSE(_fileChangesTaskId);\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t};\n\n\t\t\t\t\twindow._taskDetailFileChangesHandlers = {\n\t\t\t\t\t\tbeforeUnload: _taskDetailBeforeUnloadHandler,\n\t\t\t\t\t\tbeforeSwap: _taskDetailBeforeSwapHandler,\n\t\t\t\t\t\tbeforeRequest: _taskDetailBeforeRequestHandler,\n\t\t\t\t\t\tafterSettle: _taskDetailAfterSettleHandler,\n\t\t\t\t\t\tfileChangeEvent: _taskDetailFileChangeEventHandler,\n\t\t\t\t\t\ttaskEvent: _taskDetailTaskEventHandler,\n\t\t\t\t\t\tliveConnected: _taskDetailLiveConnectedHandler\n\t\t\t\t\t};\n\n\t\t\t\t\twindow.addEventListener('beforeunload', _taskDetailBeforeUnloadHandler);\n\t\t\t\t\tdocument.body.addEventListener('htmx:beforeSwap', _taskDetailBeforeSwapHandler);\n\t\t\t\t\tdocument.body.addEventListener('htmx:beforeRequest', _taskDetailBeforeRequestHandler);\n\t\t\t\t\tdocument.addEventListener('htmx:afterSettle', _taskDetailAfterSettleHandler);\n\t\t\t\t\twindow.addEventListener('sse-file-change-event', _taskDetailFileChangeEventHandler);\n\t\t\t\t\twindow.addEventListener('sse-task-event', _taskDetailTaskEventHandler);\n\t\t\t\t\twindow.addEventListener('sse-live-connected', _taskDetailLiveConnectedHandler);\n\n\t\t\tfunction copyToClipboard(elementId, button) {\n\t\t\t\tvar element = document.getElementById(elementId);\n\t\t\t\tif (!element) return;\n\n\t\t\t\tvar text = element.textContent;\n\t\t\t\tnavigator.clipboard.writeText(text).then(function() {\n\t\t\t\t\tvar originalHTML = button.innerHTML;\n\t\t\t\t\tbutton.innerHTML = '<svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M5 13l4 4L19 7\"></path></svg>';\n\t\t\t\t\tbutton.classList.add('btn-success');\n\n\t\t\t\t\tsetTimeout(function() {\n\t\t\t\t\t\tbutton.innerHTML = originalHTML;\n\t\t\t\t\t\tbutton.classList.remove('btn-success');\n\t\t\t\t\t}, 2000);\n\t\t\t\t}).catch(function(err) {\n\t\t\t\t\tconsole.error('Failed to copy text: ', err);\n\t\t\t\t});\n\t\t\t}\n\t\t</script></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 200, "<script>\n\t\t\t\t\t\t\tvar deleteScheduleID = '';\n\t\t\t\t\t\t\tvar deleteScheduleTarget = '#task-detail-content';\n\t\t\t\t\t\t\tvar deleteScheduleTargetElement = null;\n\t\t\t\t\t\t\tvar deleteScheduleSwap = 'outerHTML';\n\n\t\t\t\t\t\t\tfunction openDeleteScheduleConfirm(button) {\n\t\t\t\t\t\t\t\tif (!button) return;\n\t\t\t\t\t\t\t\tdeleteScheduleID = button.dataset.scheduleId || '';\n\t\t\t\t\t\t\t\tif (!deleteScheduleID) return;\n\t\t\t\t\t\t\t\tdeleteScheduleTarget = button.dataset.scheduleTarget || '#task-detail-content';\n\t\t\t\t\t\t\t\tdeleteScheduleTargetElement = deleteScheduleTarget.indexOf('closest ') === 0 ? button.closest(deleteScheduleTarget.replace(/^closest\\s+/, '')) : null;\n\t\t\t\t\t\t\t\tdeleteScheduleSwap = button.dataset.scheduleSwap || 'outerHTML';\n\t\t\t\t\t\t\t\twindow.openDestructiveConfirmDialog('delete_schedule_confirm_modal', 'delete_schedule_confirm_name', button.dataset.scheduleTitle || 'this task');\n\t\t\t\t\t\t\t}\n\n\t\t\t\t\t\t\tfunction confirmDeleteSchedule() {\n\t\t\t\t\t\t\t\tif (!deleteScheduleID) return;\n\t\t\t\t\t\t\t\tvar modal = document.getElementById('delete_schedule_confirm_modal');\n\t\t\t\t\t\t\t\tif (modal) modal.close();\n\t\t\t\t\t\t\t\tvar target = deleteScheduleTargetElement || deleteScheduleTarget;\n\t\t\t\t\t\t\t\thtmx.ajax('DELETE', '/schedules/' + deleteScheduleID, {\n\t\t\t\t\t\t\t\t\ttarget: target,\n\t\t\t\t\t\t\t\t\tswap: deleteScheduleSwap\n\t\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\t}\n\n\t\t\t\t\t\t\tfunction openScheduleRunAtPicker(container, event) {\t\t\t\t\t\t\tif (!container) return;\n\t\t\t\t\t\t\tvar pickerInput = container.querySelector('input[data-run-at-picker]');\n\t\t\t\t\t\t\tif (!pickerInput) return;\n\t\t\t\t\t\t\tif (event && event.target && !event.target.closest('input[data-run-at-picker]')) return;\n\t\t\t\t\t\t\tpickerInput.focus();\n\t\t\t\t\t\t\tif (typeof pickerInput.showPicker === 'function') {\n\t\t\t\t\t\t\t\tpickerInput.showPicker();\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\tvar _threadContentLoading = false;\n\t\t\t\t\tfunction _currentTaskIdFromPath() {\n\t\t\t\t\t\tvar taskIdMatch = window.location.pathname.match(/\\/tasks\\/([^\\/]+)/);\n\t\t\t\t\t\treturn taskIdMatch && taskIdMatch[1] ? taskIdMatch[1] : '';\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction _isChatTabActive() {\n\t\t\t\t\t\tvar chatTab = document.querySelector('[data-tab=\"chat\"]');\n\t\t\t\t\t\tif (!chatTab || !chatTab.classList.contains('tab-active')) return false;\n\t\t\t\t\t\tvar chatPanel = document.getElementById('tab-chat');\n\t\t\t\t\t\treturn !!chatPanel && !chatPanel.classList.contains('hidden');\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction _taskThreadScrollStateKey(taskId) {\n\t\t\t\t\t\treturn taskId ? 'task-thread-scroll-' + taskId : '';\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction _getTaskThreadScrollState(taskId) {\n\t\t\t\t\t\twindow._taskThreadScrollStates = window._taskThreadScrollStates || {};\n\t\t\t\t\t\tvar key = _taskThreadScrollStateKey(taskId || _currentTaskIdFromPath());\n\t\t\t\t\t\treturn key ? window._taskThreadScrollStates[key] : null;\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction _saveTaskThreadScrollState(taskId) {\n\t\t\t\t\t\ttaskId = taskId || _currentTaskIdFromPath();\n\t\t\t\t\t\tvar key = _taskThreadScrollStateKey(taskId);\n\t\t\t\t\t\tvar chatMessages = document.getElementById('task-thread-messages');\n\t\t\t\t\t\tif (!key || !chatMessages || !window.chatAutoScroll) return;\n\t\t\t\t\t\tvar tracker = window._taskThreadPageTracker;\n\t\t\t\t\t\tvar userScrolledUp = tracker\n\t\t\t\t\t\t\t? !!tracker.userScrolledUp\n\t\t\t\t\t\t\t: !!window._taskThreadUserScrolledUp;\n\t\t\t\t\t\tvar snapshot = tracker && typeof tracker.snapshot === 'function'\n\t\t\t\t\t\t\t? tracker.snapshot()\n\t\t\t\t\t\t\t: { scrollTop: chatMessages.scrollTop || 0, userScrolledUp: userScrolledUp, pinned: !userScrolledUp };\n\t\t\t\t\t\twindow._taskThreadScrollStates = window._taskThreadScrollStates || {};\n\t\t\t\t\t\twindow._taskThreadScrollStates[key] = snapshot;\n\t\t\t\t\t\twindow._taskThreadUserScrolledUp = !!snapshot.userScrolledUp;\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction _restoreThreadScrollOrBottom(taskId, forceBottom) {\n\t\t\t\t\t\trequestAnimationFrame(function() {\n\t\t\t\t\t\t\tvar chatMessages = document.getElementById('task-thread-messages');\n\t\t\t\t\t\t\tif (!chatMessages || !window.chatAutoScroll) return;\n\n\t\t\t\t\t\t\tvar state = _getTaskThreadScrollState(taskId);\n\t\t\t\t\t\t\tif (!forceBottom && state) {\n\t\t\t\t\t\t\t\tchatMessages.scrollTop = state.userScrolledUp ? (state.scrollTop || 0) : chatMessages.scrollHeight;\n\t\t\t\t\t\t\t\tif (window._taskThreadPageTracker) window._taskThreadPageTracker.userScrolledUp = !!state.userScrolledUp;\n\t\t\t\t\t\t\t\twindow._taskThreadUserScrolledUp = !!state.userScrolledUp;\n\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t}\n\n\t\t\t\t\t\t\tif (!forceBottom) {\n\t\t\t\t\t\t\t\tvar tracker = window._taskThreadPageTracker;\n\t\t\t\t\t\t\t\tvar userScrolledUp = false;\n\t\t\t\t\t\t\t\tif (tracker && typeof tracker.userScrolledUp === 'boolean') {\n\t\t\t\t\t\t\t\t\tuserScrolledUp = tracker.userScrolledUp;\n\t\t\t\t\t\t\t\t} else if (typeof window._taskThreadUserScrolledUp === 'boolean') {\n\t\t\t\t\t\t\t\t\tuserScrolledUp = window._taskThreadUserScrolledUp;\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tif (userScrolledUp) return;\n\t\t\t\t\t\t\t}\n\n\t\t\t\t\t\t\twindow.chatAutoScroll.scrollToBottom(chatMessages, !!forceBottom);\n\t\t\t\t\t\t\t_saveTaskThreadScrollState(taskId);\n\t\t\t\t\t\t});\n\t\t\t\t\t}\n\n\t\t\t\t\t\tfunction _closeTaskThreadEventSourcesForRefresh() {\n\t\t\t\t\t\t\tif (!window._threadEventSources) return;\n\t\t\t\t\t\t\twindow._threadEventSources.forEach(function(es) {\n\t\t\t\t\t\t\t\ttry { es.close(); } catch(e) {}\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\twindow._threadEventSources = [];\n\t\t\t\t\t\t\twindow._taskThreadStreamingActive = false;\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\tfunction _threadHasExecution(execId) {\n\t\t\t\t\t\t\treturn !!(execId && document.querySelector('[data-exec-id=\"' + execId.replace(/\"/g, '\\\\\"') + '\"]'));\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\tfunction _loadThreadContent(taskId, forceReload, expectedExecId) {\n\t\t\t\t\t\t\tvar threadContent = document.getElementById('thread-content');\n\t\t\t\t\t\t\tif (!threadContent || !taskId || threadContent.dataset.taskId !== taskId) return Promise.resolve(false);\n\t\t\t\t\t\t\tif (!forceReload && threadContent.dataset.loaded === 'true' && (!expectedExecId || _threadHasExecution(expectedExecId))) return Promise.resolve(true);\n\t\t\t\t\t\t\tif (_threadContentLoading) return Promise.resolve(false);\n\t\t\t\t\t\t\tif (typeof htmx === 'undefined') return Promise.resolve(false);\n\n\t\t\t\t\t\t\tif (forceReload) _closeTaskThreadEventSourcesForRefresh();\n\t\t\t\t\t\t\t_threadContentLoading = true;\n\t\t\t\t\t\t\tthreadContent.dataset.loading = 'true';\n\t\t\t\t\t\t\treturn htmx.ajax('GET', '/tasks/' + taskId + '/thread', {\n\t\t\t\t\t\t\t\ttarget: '#thread-content[data-task-id=\"' + taskId.replace(/\"/g, '\\\\\"') + '\"]',\n\t\t\t\t\t\t\t\tswap: 'innerHTML'\n\t\t\t\t\t\t\t}).then(function() {\n\t\t\t\t\t\t\t\tvar updated = document.getElementById('thread-content');\n\t\t\t\t\t\t\t\tif (!updated || updated.dataset.taskId !== taskId) return false;\n\t\t\t\t\t\t\t\tupdated.dataset.loaded = 'true';\n\t\t\t\t\t\t\t\tupdated.dataset.loading = 'false';\n\t\t\t\t\t\t\t\tif (window.htmx && typeof htmx.process === 'function') htmx.process(updated);\n\t\t\t\t\t\t\t\tif (expectedExecId && !_threadHasExecution(expectedExecId)) return false;\n\t\t\t\t\t\t\t\treturn true;\n\t\t\t\t\t\t\t}).catch(function(err) {\n\t\t\t\t\t\t\t\tconsole.error('Failed to load thread content:', err);\n\t\t\t\t\t\t\t\tvar updated = document.getElementById('thread-content');\n\t\t\t\t\t\t\t\tif (updated) updated.dataset.loading = 'false';\n\t\t\t\t\t\t\t\treturn false;\n\t\t\t\t\t\t\t}).finally(function() {\n\t\t\t\t\t\t\t\t_threadContentLoading = false;\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\tfunction _refreshActiveThreadContent(taskId, forceReload, expectedExecId, attempt) {\n\t\t\t\t\t\t\tvar threadContent = document.getElementById('thread-content');\n\t\t\t\t\t\t\tif (!taskId || !_isChatTabActive() || !threadContent || threadContent.dataset.taskId !== taskId) return;\n\t\t\t\t\t\t\tattempt = attempt || 0;\n\t\t\t\t\t\t\t_loadThreadContent(taskId, forceReload, expectedExecId).then(function(loaded) {\n\t\t\t\t\t\t\t\tvar currentThreadContent = document.getElementById('thread-content');\n\t\t\t\t\t\t\t\tif (!currentThreadContent || currentThreadContent.dataset.taskId !== taskId) return;\n\t\t\t\t\t\t\t\tif (!loaded && forceReload && attempt < 8) {\n\t\t\t\t\t\t\t\t\tsetTimeout(function() { _refreshActiveThreadContent(taskId, true, expectedExecId, attempt + 1); }, 150 * (attempt + 1));\n\t\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t_restoreThreadScrollOrBottom(taskId, false);\n\t\t\t\t\t\t\t\tif (window._initThreadStreaming) window._initThreadStreaming();\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\t\twindow._openTaskThreadAfterRun = function(taskId) {\n\t\t\t\t\t\t\t\ttaskId = taskId || _currentTaskIdFromPath();\n\t\t\t\t\t\t\t\tif (!taskId) return;\n\t\t\t\t\t\t\t\tswitchTaskTab('chat');\n\t\t\t\t\t\t\t\tvar nextURL = '/tasks/' + taskId + '?tab=chat';\n\t\t\t\t\t\t\t\tif (window.location.pathname !== '/tasks/' + taskId || window.location.search !== '?tab=chat') {\n\t\t\t\t\t\t\t\t\twindow.openVibelyNavigate(nextURL).catch(function(err) {\n\t\t\t\t\t\t\t\t\t\tconsole.error('[task-thread] Failed to open task thread:', err);\n\t\t\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t_refreshActiveThreadContent(taskId, true, '', 0);\n\t\t\t\t\t\t\t};\n\t\t\t\t\tfunction switchTaskTab(tabName) {\n\t\t\t\t\tvar container = document.getElementById('task-detail-content');\n\t\t\t\t\tif (!container) return;\n\n\t\t\t\t\tif (_isChatTabActive()) {\n\t\t\t\t\t\t_saveTaskThreadScrollState();\n\t\t\t\t\t}\n\n\t\t\t\tcontainer.querySelectorAll('.task-tab-panel').forEach(function(panel) {\n\t\t\t\t\tpanel.classList.add('hidden');\n\t\t\t\t});\n\n\t\t\t\tcontainer.querySelectorAll('[data-tab]').forEach(function(tab) {\n\t\t\t\t\ttab.classList.remove('tab-active');\n\t\t\t\t});\n\n\t\t\t\tvar panel = container.querySelector('#tab-' + tabName);\n\t\t\t\tif (panel) panel.classList.remove('hidden');\n\n\t\t\t\t\tvar tab = container.querySelector('[data-tab=\"' + tabName + '\"]');\n\t\t\t\t\tif (tab) tab.classList.add('tab-active');\n\t\t\t\t\tvar selectorContext = container.querySelector('[data-breadcrumb-selector-context][name=\"tab\"]');\n\t\t\t\t\tif (selectorContext) selectorContext.value = tabName;\n\n\t\t\t\t\t// Auto-scroll thread to bottom when switching to thread tab\n\t\t\t\t\t\tif (tabName === 'chat') {\n\t\t\t\t\t\t\tvar threadContent = document.getElementById('thread-content');\n\t\t\t\t\t\t\tvar taskId = (threadContent && threadContent.dataset.taskId) || _currentTaskIdFromPath();\n\t\t\t\t\t\t\tif (taskId) {\n\t\t\t\t\t\t\t\t_loadThreadContent(taskId).then(function() {\n\t\t\t\t\t\t\t\t\t\t_restoreThreadScrollOrBottom(taskId, false);\n\t\t\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\t\t_restoreThreadScrollOrBottom(taskId, false);\n\t\t\t\t\t\t\t\t}\t\t\t\t\t}\n\n\t\t\t\t// Reload changes content and start SSE when switching to changes tab\n\t\t\t\tif (tabName === 'changes') {\n\t\t\t\t\tvar taskIdMatch = window.location.pathname.match(/\\/tasks\\/([^\\/]+)/);\n\t\t\t\t\tif (taskIdMatch && taskIdMatch[1]) {\n\t\t\t\t\t\tvar taskId = taskIdMatch[1];\n\t\t\t\t\t\tif (typeof htmx !== 'undefined') {\n\t\t\t\t\t\t\thtmx.ajax('GET', '/tasks/' + taskId + '/changes', {\n\t\t\t\t\t\t\t\ttarget: '#changes-content',\n\t\t\t\t\t\t\t\tswap: 'innerHTML'\n\t\t\t\t\t\t\t}).then(function() {\n\t\t\t\t\t\t\t\t// Seed fingerprint so the first SSE update can detect no-ops.\n\t\t\t\t\t\t\t\tvar cc = document.getElementById('changes-content');\n\t\t\t\t\t\t\t\tif (cc) _lastDiffFingerprint = _computeDiffFingerprint(cc);\n\t\t\t\t\t\t\t}).catch(function() {});\n\t\t\t\t\t\t}\n\t\t\t\t\t\t// Start SSE for real-time file changes\n\t\t\t\t\t\t_startFileChangesSSE(taskId);\n\t\t\t\t\t}\n\t\t\t\t} else {\n\t\t\t\t\t// Stop SSE when switching away from changes tab\n\t\t\t\t\t_stopFileChangesSSE();\n\t\t\t\t}\n\t\t\t\t}\n\n\t\t\t\t// File changes are consumed from the shared sidebar live stream.\n\t\t\t\t// Keep per-task filtering in-page to avoid creating another EventSource.\n\t\t\t\tvar _fileChangesListening = false;\n\t\t\t\tvar _fileChangesUpdatePending = false;\n\t\t\t\tvar _fileChangesTaskId = null;\n\n\t\t\t\tfunction _isChangesTabActive() {\n\t\t\t\t\tvar changesTab = document.querySelector('[data-tab=\"changes\"]');\n\t\t\t\t\tif (!changesTab || !changesTab.classList.contains('tab-active')) return false;\n\t\t\t\t\tvar changesPanel = document.getElementById('tab-changes');\n\t\t\t\t\treturn !!changesPanel && !changesPanel.classList.contains('hidden');\n\t\t\t\t}\n\n\t\t\tfunction _handleSharedFileChangeEvent(event) {\n\t\t\t\tif (!_fileChangesListening || !_fileChangesTaskId) return;\n\t\t\t\tvar data = event.detail || {};\n\t\t\t\tif (!data.task_id || data.task_id !== _fileChangesTaskId) return;\n\n\t\t\t\tif (data.type === 'diff_snapshot') {\n\t\t\t\t\t_updateDiffViewer();\n\t\t\t\t\treturn;\n\t\t\t\t}\n\t\t\t\tif (data.type === 'file_modified') {\n\t\t\t\t\tconsole.log('File modified:', data.file_path, 'via', data.tool_name);\n\t\t\t\t}\n\t\t\t}\n\n\t\t\tfunction _startFileChangesSSE(taskId) {\n\t\t\t\tif (!taskId) return;\n\t\t\t\tif (_fileChangesListening && _fileChangesTaskId === taskId) return;\n\t\t\t\t_fileChangesTaskId = taskId;\n\t\t\t\t_fileChangesListening = true;\n\t\t\t\tconsole.log('File changes live listener active for task:', taskId);\n\t\t\t}\n\n\t\t\tfunction _stopFileChangesSSE() {\n\t\t\t\t_fileChangesListening = false;\n\t\t\t\tconsole.log('File changes live listener paused');\n\t\t\t}\n\n\t\t\t\t// Track the last diff fingerprint to skip no-op DOM replacements.\n\t\t\t\tvar _lastDiffFingerprint = '';\n\n\t\t\t\tfunction _computeDiffFingerprint(container) {\n\t\t\t\t\tvar viewer = container && container.querySelector('#diff-viewer');\n\t\t\t\t\tif (!viewer) return '';\n\t\t\t\t\t// Use a simple hash of the full diff viewer HTML for accurate\n\t\t\t\t\t// change detection. The previous badge+row-count approach missed\n\t\t\t\t\t// content changes within existing lines.\n\t\t\t\t\tvar raw = viewer.innerHTML;\n\t\t\t\t\tvar h = 0;\n\t\t\t\t\tfor (var i = 0; i < raw.length; i++) {\n\t\t\t\t\t\th = ((h << 5) - h + raw.charCodeAt(i)) | 0;\n\t\t\t\t\t}\n\t\t\t\t\treturn String(h);\n\t\t\t\t}\n\n\t\t\t\tfunction _getDiffViewMode() {\n\t\t\t\t\tvar splitBtn = document.getElementById('diff-btn-split');\n\t\t\t\t\treturn (splitBtn && splitBtn.classList.contains('btn-active')) ? 'split' : 'inline';\n\t\t\t\t}\n\n\t\t\t\tfunction _updateDiffViewer(diffOutput) {\n\t\t\t\t\tvar changesContent = document.getElementById('changes-content');\n\t\t\t\t\tif (!changesContent) return;\n\t\t\t\t\tif (!_isChangesTabActive()) return;\n\n\t\t\t\t\t// Debounce: skip if an update is already in flight\n\t\t\t\t\tif (_fileChangesUpdatePending) return;\n\t\t\t\t\t_fileChangesUpdatePending = true;\n\n\t\t\t\tvar taskId = changesContent.dataset.taskId;\n\t\t\t\tif (taskId) {\n\t\t\t\t\t// Fetch new HTML in the background WITHOUT touching the live DOM.\n\t\t\t\t\t// Only swap if content actually changed — this prevents the viewport\n\t\t\t\t\t// jumps caused by the old htmx.ajax() path which replaced innerHTML\n\t\t\t\t\t// before the fingerprint check could run.\n\t\t\t\t\tfetch('/tasks/' + taskId + '/changes', {\n\t\t\t\t\t\theaders: { 'HX-Request': 'true' }\n\t\t\t\t\t}).then(function(resp) {\n\t\t\t\t\t\tif (!resp.ok) throw new Error('HTTP ' + resp.status);\n\t\t\t\t\t\treturn resp.text();\n\t\t\t\t\t}).then(function(html) {\n\t\t\t\t\t\t_fileChangesUpdatePending = false;\n\n\t\t\t\t\t\t// Parse the response in a detached element to compute fingerprint\n\t\t\t\t\t\t// without touching the live DOM at all.\n\t\t\t\t\t\tvar offscreen = document.createElement('div');\n\t\t\t\t\t\toffscreen.innerHTML = html;\n\n\t\t\t\t\t\tvar newFp = _computeDiffFingerprint(offscreen);\n\t\t\t\t\t\tif (newFp && newFp === _lastDiffFingerprint) {\n\t\t\t\t\t\t\t// Diff unchanged — no DOM mutation, no scroll disruption.\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\t_lastDiffFingerprint = newFp;\n\n\t\t\t\t\t\t// Content changed — apply the swap with UI state preservation.\n\t\t\t\t\t\tvar scrollX = window.scrollX || window.pageXOffset || 0;\n\t\t\t\t\t\tvar scrollY = window.scrollY || window.pageYOffset || 0;\n\t\t\t\t\t\tvar viewMode = _getDiffViewMode();\n\n\t\t\t\t\t\t\tchangesContent.innerHTML = html;\n\t\t\t\t\t\t\tif (typeof htmx !== 'undefined' && typeof htmx.process === 'function') {\n\t\t\t\t\t\t\t\thtmx.process(changesContent);\n\t\t\t\t\t\t\t}\n\n\t\t\t\t\t\t\t// Let the browser settle the new DOM, then restore UI state.\n\t\t\t\t\t\t\trequestAnimationFrame(function() {\n\t\t\t\t\t\t\t\t// Restore diff view mode (inline/split) without saving during refresh restore.\n\t\t\t\t\t\t\t\tif ((viewMode === 'inline' || viewMode === 'split') && typeof switchDiffView === 'function') {\n\t\t\t\t\t\t\t\t\tswitchDiffView(viewMode, false);\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t// Restore scroll position so the user stays where they were.\n\t\t\t\t\t\t\t\twindow.scrollTo(scrollX, scrollY);\n\t\t\t\t\t\t\t});\n\t\t\t\t\t}).catch(function() {\n\t\t\t\t\t\t_fileChangesUpdatePending = false;\n\t\t\t\t\t});\n\t\t\t\t} else {\n\t\t\t\t\t_fileChangesUpdatePending = false;\n\t\t\t\t}\n\t\t\t}\n\n\t\t\t\t// Start SSE if changes tab is active on page load and task is running/queued\n\t\t\t\t(function() {\n\t\t\t\t\tsetTimeout(function() {\n\t\t\t\t\t\tif (_isChatTabActive()) {\n\t\t\t\t\t\t\tvar threadContent = document.getElementById('thread-content');\n\t\t\t\t\t\t\tvar taskId = (threadContent && threadContent.dataset.taskId) || _currentTaskIdFromPath();\n\t\t\t\t\t\t\tif (taskId) {\n\t\t\t\t\t\t\t\t_loadThreadContent(taskId).then(function() {\n\t\t\t\t\t\t\t\t\t\t_restoreThreadScrollOrBottom(taskId, false);\n\t\t\t\t\t\t\t\t\t});\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\t\t\t\t\t\tif (_isChangesTabActive()) {\n\t\t\t\t\t\t\tvar changesContent = document.getElementById('changes-content');\n\t\t\t\t\t\t\tif (changesContent) {\n\t\t\t\t\t\t\t\tvar taskId = changesContent.dataset.taskId;\n\t\t\t\t\t\t\t\tif (taskId) {\n\t\t\t\t\t\t\t\t\t_startFileChangesSSE(taskId);\n\t\t\t\t\t\t\t\t\t// Seed fingerprint from initial server render.\n\t\t\t\t\t\t\t\t\t_lastDiffFingerprint = _computeDiffFingerprint(changesContent);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t}, 100);\n\t\t\t\t})();\n\n\t\t\t\t// Refresh the action buttons (Run Now / Edit / Delete) via the lightweight\n\t\t\t\t// /tasks/:id/detail-actions fragment endpoint.  Called both from the polling\n\t\t\t\t// afterSettle handler (up to 3s after completion) and from the SSE task-event\n\t\t\t\t// listener below (fires immediately on task_status_changed events).\n\t\t\t\tfunction _refreshTaskDetailActions() {\n\t\t\t\t\tvar actions = document.getElementById('task-detail-actions');\n\t\t\t\t\tif (!actions) return;\n\t\t\t\t\tvar taskIdMatch = window.location.pathname.match(/\\/tasks\\/([^\\/]+)/);\n\t\t\t\t\tif (!taskIdMatch || !taskIdMatch[1]) return;\n\t\t\t\t\tif (typeof htmx === 'undefined') return;\n\t\t\t\t\thtmx.ajax('GET', '/tasks/' + taskIdMatch[1] + '/detail-actions', {\n\t\t\t\t\t\ttarget: '#task-detail-actions',\n\t\t\t\t\t\tswap: 'outerHTML'\n\t\t\t\t\t});\n\t\t\t\t}\n\n\t\t\t\tvar _prevTaskStatus = null;\n\t\t\t\t\tif (window._taskDetailFileChangesHandlers) {\n\t\t\t\t\t\tif (window._taskDetailFileChangesHandlers.beforeUnload) {\n\t\t\t\t\t\t\twindow.removeEventListener('beforeunload', window._taskDetailFileChangesHandlers.beforeUnload);\n\t\t\t\t\t\t}\n\t\t\t\t\t\tif (window._taskDetailFileChangesHandlers.liveConnected) {\n\t\t\t\t\t\t\twindow.removeEventListener('sse-live-connected', window._taskDetailFileChangesHandlers.liveConnected);\n\t\t\t\t\t\t}\n\t\t\t\t\tif (window._taskDetailFileChangesHandlers.afterSettle) {\n\t\t\t\t\t\tdocument.removeEventListener('htmx:afterSettle', window._taskDetailFileChangesHandlers.afterSettle);\n\t\t\t\t\t}\n\t\t\t\t\tif (window._taskDetailFileChangesHandlers.beforeSwap) {\n\t\t\t\t\t\tdocument.body.removeEventListener('htmx:beforeSwap', window._taskDetailFileChangesHandlers.beforeSwap);\n\t\t\t\t\t}\n\t\t\t\t\tif (window._taskDetailFileChangesHandlers.beforeRequest) {\n\t\t\t\t\t\tdocument.body.removeEventListener('htmx:beforeRequest', window._taskDetailFileChangesHandlers.beforeRequest);\n\t\t\t\t\t}\n\t\t\t\t\tif (window._taskDetailFileChangesHandlers.fileChangeEvent) {\n\t\t\t\t\t\twindow.removeEventListener('sse-file-change-event', window._taskDetailFileChangesHandlers.fileChangeEvent);\n\t\t\t\t\t}\n\t\t\t\t\tif (window._taskDetailFileChangesHandlers.taskEvent) {\n\t\t\t\t\t\twindow.removeEventListener('sse-task-event', window._taskDetailFileChangesHandlers.taskEvent);\n\t\t\t\t\t}\n\t\t\t\t}\n\n\t\t\t\tvar _taskDetailFileChangeEventHandler = _handleSharedFileChangeEvent;\n\n\t\t\t\t// Listen for SSE task_status_changed events so action buttons refresh immediately\n\t\t\t\t// on task completion — without waiting up to 3s for the next metrics poll cycle.\n\t\t\t\t\tvar _taskDetailTaskEventHandler = function(event) {\n\t\t\t\t\t\tvar data = event.detail || {};\n\t\t\t\t\t\t// Only react to this task's events\n\t\t\t\t\t\tvar taskIdMatch = window.location.pathname.match(/\\/tasks\\/([^\\/]+)/);\n\t\t\t\t\t\tif (!taskIdMatch || !taskIdMatch[1] || data.task_id !== taskIdMatch[1]) return;\n\t\t\t\t\t\tif (data.type === 'task_thread_execution_started' || data.type === 'task_thread_input_applied') {\n\t\t\t\t\t\t\t// TaskThreadLiveEventsScript owns these events. It appends the\n\t\t\t\t\t\t\t// authoritative execution fragment and attaches /events/chat/:exec_id\n\t\t\t\t\t\t\t// without replacing #thread-content or closing the fresh stream.\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tif (data.type === 'task_status_changed') {\n\t\t\t\t\t\t\tvar activeStatuses = { pending: true, queued: true, running: true };\n\t\t\t\t\t\t\tif (activeStatuses[data.status]) {\n\t\t\t\t\t\t\t\t// Skip the full thread reload if the composer has a pending attachment\n\t\t\t\t\t\t\t\t// upload session to avoid destroying unsent attachment state while a\n\t\t\t\t\t\t\t\t// parallel task activation event arrives.\n\t\t\t\t\t\t\t\tvar sessionInputSC = document.getElementById('task-thread-form-session-id');\n\t\t\t\t\t\t\t\tif (!sessionInputSC || !sessionInputSC.value) {\n\t\t\t\t\t\t\t\t\tif (window.reconcileTaskThreadState) window.reconcileTaskThreadState(data.task_id);\n\t\t\t\t\t\t\t\t\telse _refreshActiveThreadContent(data.task_id, true, data.exec_id || '', 0);\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tvar terminalStatuses = { completed: true, failed: true, cancelled: true };\n\t\t\t\t\t\t\tif (terminalStatuses[data.status]) {\n\t\t\t\t\t\t\t\t_refreshTaskDetailActions();\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\t\t\t\t\t};\n\n\t\t\t\t\tvar _taskDetailLiveConnectedHandler = function(event) {\n\t\t\t\t\t\tvar detail = event.detail || {};\n\t\t\t\t\t\t// Only react to actual SSE reconnects (e.g. after tab blur/refocus).\n\t\t\t\t\t\t// The initial SSE connection is handled by the page-load init below.\n\t\t\t\t\t\tif (!detail.reconnected) return;\n\t\t\t\t\t\tvar taskId = _currentTaskIdFromPath();\n\t\t\t\t\t\tif (!taskId || !_isChatTabActive()) return;\n\t\t\t\t\t\tvar threadContent = document.getElementById('thread-content');\n\t\t\t\t\t\tif (!threadContent || threadContent.dataset.taskId !== taskId) return;\n\t\t\t\t\t\t// Never replace the composer while it owns a pending upload session.\n\t\t\t\t\t\tvar sessionInput = document.getElementById('task-thread-form-session-id');\n\t\t\t\t\t\tif (sessionInput && sessionInput.value) return;\n\t\t\t\t\t\tif (threadContent.dataset.loaded !== 'true') {\n\t\t\t\t\t\t\t_loadThreadContent(taskId, false);\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\t// The scoped thread script compares authoritative snapshot revisions and\n\t\t\t\t\t\t// suppresses unchanged morphs before streams or DOM state are touched.\n\t\t\t\t\t\tif (window.reconcileTaskThreadState) window.reconcileTaskThreadState(taskId);\n\t\t\t\t\t};\n\n\t\t\t\t\tvar _taskDetailBeforeUnloadHandler = function() {\n\t\t\t\t\t\t_stopFileChangesSSE();\n\t\t\t\t\t};\n\n\t\t\t\tvar _taskDetailBeforeSwapHandler = function(evt) {\n\t\t\t\t\tvar target = evt.detail && evt.detail.target;\n\t\t\t\t\tif (!target) return;\n\t\t\t\t\t\tif (target.id === 'main-content' || target.id === 'task-detail-content') {\n\t\t\t\t\t\t\t_stopFileChangesSSE();\n\t\t\t\t\t\t\twindow.removeEventListener('sse-file-change-event', _taskDetailFileChangeEventHandler);\n\t\t\t\t\t\t\twindow.removeEventListener('sse-task-event', _taskDetailTaskEventHandler);\n\t\t\t\t\t\t\twindow.removeEventListener('sse-live-connected', _taskDetailLiveConnectedHandler);\n\t\t\t\t\t\t}\n\t\t\t\t};\n\n\t\t\t\t// Block event-triggered changes refreshes while Changes tab is not active.\n\t\t\t\tvar _taskDetailBeforeRequestHandler = function(evt) {\n\t\t\t\t\tvar triggerEl = evt.detail && evt.detail.elt;\n\t\t\t\t\tif (!triggerEl) return;\n\t\t\t\t\tif (triggerEl.id === 'changes-content' && !_isChangesTabActive()) {\n\t\t\t\t\t\tevt.preventDefault();\n\t\t\t\t\t}\n\t\t\t\t};\n\n\t\t\t\t// Watch for task status changes to stop SSE and do final refresh.\n\t\t\t\tvar _taskDetailAfterSettleHandler = function(evt) {\n\t\t\t\t\tvar metrics = document.getElementById('task-detail-metrics');\n\t\t\t\t\tif (!metrics) return;\n\t\t\t\t\tvar status = metrics.dataset.taskStatus;\n\t\t\t\t\tif (!status) return;\n\t\t\t\t\tif (_prevTaskStatus === null) {\n\t\t\t\t\t_prevTaskStatus = status;\n\t\t\t\t\treturn;\n\t\t\t\t}\n\t\t\t\tif (_prevTaskStatus !== status) {\n\t\t\t\t\tvar wasActive = (_prevTaskStatus === 'running' || _prevTaskStatus === 'queued');\n\t\t\t\t\tvar nowActive = (status === 'running' || status === 'queued');\n\t\t\t\t\t\tvar nowDone = (status === 'completed' || status === 'failed' || status === 'cancelled');\n\t\t\t\t\t\t_prevTaskStatus = status;\n\t\t\t\t\t\tif (wasActive && nowDone) {\n\t\t\t\t\t\t\t// Task just finished — stop SSE, do final changes refresh, and update action buttons\n\t\t\t\t\t\t\t_stopFileChangesSSE();\n\t\t\t\t\t\t\t_updateDiffViewer('final');\n\t\t\t\t\t\t\t_refreshTaskDetailActions();\n\t\t\t\t\t\t}\n\t\t\t\t\t\tif (!wasActive && nowActive && _fileChangesTaskId && _isChangesTabActive()) {\n\t\t\t\t\t\t\t// Task reactivated (e.g., follow-up on completed task) while changes tab is open.\n\t\t\t\t\t\t\t// Restart SSE so realtime diff snapshots resume for this execution.\n\t\t\t\t\t\t\t_startFileChangesSSE(_fileChangesTaskId);\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t};\n\n\t\t\t\t\twindow._taskDetailFileChangesHandlers = {\n\t\t\t\t\t\tbeforeUnload: _taskDetailBeforeUnloadHandler,\n\t\t\t\t\t\tbeforeSwap: _taskDetailBeforeSwapHandler,\n\t\t\t\t\t\tbeforeRequest: _taskDetailBeforeRequestHandler,\n\t\t\t\t\t\tafterSettle: _taskDetailAfterSettleHandler,\n\t\t\t\t\t\tfileChangeEvent: _taskDetailFileChangeEventHandler,\n\t\t\t\t\t\ttaskEvent: _taskDetailTaskEventHandler,\n\t\t\t\t\t\tliveConnected: _taskDetailLiveConnectedHandler\n\t\t\t\t\t};\n\n\t\t\t\t\twindow.addEventListener('beforeunload', _taskDetailBeforeUnloadHandler);\n\t\t\t\t\tdocument.body.addEventListener('htmx:beforeSwap', _taskDetailBeforeSwapHandler);\n\t\t\t\t\tdocument.body.addEventListener('htmx:beforeRequest', _taskDetailBeforeRequestHandler);\n\t\t\t\t\tdocument.addEventListener('htmx:afterSettle', _taskDetailAfterSettleHandler);\n\t\t\t\t\twindow.addEventListener('sse-file-change-event', _taskDetailFileChangeEventHandler);\n\t\t\t\t\twindow.addEventListener('sse-task-event', _taskDetailTaskEventHandler);\n\t\t\t\t\twindow.addEventListener('sse-live-connected', _taskDetailLiveConnectedHandler);\n\n\t\t\tfunction copyToClipboard(elementId, button) {\n\t\t\t\tvar element = document.getElementById(elementId);\n\t\t\t\tif (!element) return;\n\n\t\t\t\tvar text = element.textContent;\n\t\t\t\tnavigator.clipboard.writeText(text).then(function() {\n\t\t\t\t\tvar originalHTML = button.innerHTML;\n\t\t\t\t\tbutton.innerHTML = '<svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M5 13l4 4L19 7\"></path></svg>';\n\t\t\t\t\tbutton.classList.add('btn-success');\n\n\t\t\t\t\tsetTimeout(function() {\n\t\t\t\t\t\tbutton.innerHTML = originalHTML;\n\t\t\t\t\t\tbutton.classList.remove('btn-success');\n\t\t\t\t\t}, 2000);\n\t\t\t\t}).catch(function(err) {\n\t\t\t\t\tconsole.error('Failed to copy text: ', err);\n\t\t\t\t});\n\t\t\t}\n\t\t</script></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1982,9 +1981,9 @@ func TaskDetailActions(task *models.Task) templ.Component {
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var107 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var107 == nil {
-			templ_7745c5c3_Var107 = templ.NopComponent
+		templ_7745c5c3_Var106 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var106 == nil {
+			templ_7745c5c3_Var106 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
 		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 201, "<div id=\"task-detail-actions\" class=\"flex gap-2\">")
@@ -2005,12 +2004,12 @@ func TaskDetailActions(task *models.Task) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var108 string
-			templ_7745c5c3_Var108, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s/run", task.ID))
+			var templ_7745c5c3_Var107 string
+			templ_7745c5c3_Var107, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s/run", task.ID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2449, Col: 51}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2457, Col: 51}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var108)
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var107)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -2018,8 +2017,8 @@ func TaskDetailActions(task *models.Task) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var109 templ.ComponentScript = templ.ComponentScript{Call: fmt.Sprintf("if(event.detail.successful) { window._openTaskThreadAfterRun && window._openTaskThreadAfterRun('%s'); }", task.ID)}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var109.Call)
+			var templ_7745c5c3_Var108 templ.ComponentScript = templ.ComponentScript{Call: fmt.Sprintf("if(event.detail.successful) { window._openTaskThreadAfterRun && window._openTaskThreadAfterRun('%s'); }", task.ID)}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var108.Call)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -2067,21 +2066,21 @@ func TaskDetailMetrics(task *models.Task, metrics models.TaskExecutionMetrics, a
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var110 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var110 == nil {
-			templ_7745c5c3_Var110 = templ.NopComponent
+		templ_7745c5c3_Var109 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var109 == nil {
+			templ_7745c5c3_Var109 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
 		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 208, "<div id=\"task-detail-metrics\" class=\"grid grid-cols-2 md:grid-cols-4 gap-4 mb-6\" hx-get=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var111 string
-		templ_7745c5c3_Var111, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s/detail-status", task.ID))
+		var templ_7745c5c3_Var110 string
+		templ_7745c5c3_Var110, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s/detail-status", task.ID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2486, Col: 58}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2494, Col: 58}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var111)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var110)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -2089,12 +2088,12 @@ func TaskDetailMetrics(task *models.Task, metrics models.TaskExecutionMetrics, a
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var112 string
-		templ_7745c5c3_Var112, templ_7745c5c3_Err = templ.ResolveAttributeValue(string(task.Status))
+		var templ_7745c5c3_Var111 string
+		templ_7745c5c3_Var111, templ_7745c5c3_Err = templ.ResolveAttributeValue(string(task.Status))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2490, Col: 40}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2498, Col: 40}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var112)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var111)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -2102,12 +2101,12 @@ func TaskDetailMetrics(task *models.Task, metrics models.TaskExecutionMetrics, a
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var113 string
-		templ_7745c5c3_Var113, templ_7745c5c3_Err = templ.JoinStringErrs(string(task.Category))
+		var templ_7745c5c3_Var112 string
+		templ_7745c5c3_Var112, templ_7745c5c3_Err = templ.JoinStringErrs(string(task.Category))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2494, Col: 74}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2502, Col: 74}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var113))
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var112))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -2120,8 +2119,8 @@ func TaskDetailMetrics(task *models.Task, metrics models.TaskExecutionMetrics, a
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var114 = []any{"ml-2 badge badge-sm", components.StatusBadgeClass(task.Status)}
-			templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var114...)
+			var templ_7745c5c3_Var113 = []any{"ml-2 badge badge-sm", components.StatusBadgeClass(task.Status)}
+			templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var113...)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -2129,12 +2128,12 @@ func TaskDetailMetrics(task *models.Task, metrics models.TaskExecutionMetrics, a
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var115 string
-			templ_7745c5c3_Var115, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var114).String())
+			var templ_7745c5c3_Var114 string
+			templ_7745c5c3_Var114, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var113).String())
 			if templ_7745c5c3_Err != nil {
 				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1, Col: 0}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var115)
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var114)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -2142,12 +2141,12 @@ func TaskDetailMetrics(task *models.Task, metrics models.TaskExecutionMetrics, a
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var116 string
-			templ_7745c5c3_Var116, templ_7745c5c3_Err = templ.JoinStringErrs(components.StatusLabelForTask(task.Status, task.Category))
+			var templ_7745c5c3_Var115 string
+			templ_7745c5c3_Var115, templ_7745c5c3_Err = templ.JoinStringErrs(components.StatusLabelForTask(task.Status, task.Category))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2501, Col: 143}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2509, Col: 143}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var116))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var115))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -2165,12 +2164,12 @@ func TaskDetailMetrics(task *models.Task, metrics models.TaskExecutionMetrics, a
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var117 string
-			templ_7745c5c3_Var117, templ_7745c5c3_Err = templ.JoinStringErrs(components.TagLabel(task.Tag))
+			var templ_7745c5c3_Var116 string
+			templ_7745c5c3_Var116, templ_7745c5c3_Err = templ.JoinStringErrs(components.TagLabel(task.Tag))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2507, Col: 108}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2515, Col: 108}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var117))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var116))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -2193,12 +2192,12 @@ func TaskDetailMetrics(task *models.Task, metrics models.TaskExecutionMetrics, a
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var118 string
-			templ_7745c5c3_Var118, templ_7745c5c3_Err = templ.JoinStringErrs(components.PriorityLabel(task.Priority))
+			var templ_7745c5c3_Var117 string
+			templ_7745c5c3_Var117, templ_7745c5c3_Err = templ.JoinStringErrs(components.PriorityLabel(task.Priority))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2515, Col: 93}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2523, Col: 93}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var118))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var117))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -2211,12 +2210,12 @@ func TaskDetailMetrics(task *models.Task, metrics models.TaskExecutionMetrics, a
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var119 string
-		templ_7745c5c3_Var119, templ_7745c5c3_Err = templ.JoinStringErrs(taskModelLabel(task, agents))
+		var templ_7745c5c3_Var118 string
+		templ_7745c5c3_Var118, templ_7745c5c3_Err = templ.JoinStringErrs(taskModelLabel(task, agents))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2520, Col: 81}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2528, Col: 81}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var119))
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var118))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -2224,12 +2223,12 @@ func TaskDetailMetrics(task *models.Task, metrics models.TaskExecutionMetrics, a
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var120 string
-		templ_7745c5c3_Var120, templ_7745c5c3_Err = templ.JoinStringErrs(taskAgentLabel(task, agentLabel))
+		var templ_7745c5c3_Var119 string
+		templ_7745c5c3_Var119, templ_7745c5c3_Err = templ.JoinStringErrs(taskAgentLabel(task, agentLabel))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2524, Col: 85}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2532, Col: 85}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var120))
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var119))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -2242,12 +2241,12 @@ func TaskDetailMetrics(task *models.Task, metrics models.TaskExecutionMetrics, a
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var121 string
-			templ_7745c5c3_Var121, templ_7745c5c3_Err = templ.JoinStringErrs(components.FormatElapsedTime(*metrics.LatestStartedAt))
+			var templ_7745c5c3_Var120 string
+			templ_7745c5c3_Var120, templ_7745c5c3_Err = templ.JoinStringErrs(components.FormatElapsedTime(*metrics.LatestStartedAt))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2529, Col: 99}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2537, Col: 99}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var121))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var120))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -2262,12 +2261,12 @@ func TaskDetailMetrics(task *models.Task, metrics models.TaskExecutionMetrics, a
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var122 string
-				templ_7745c5c3_Var122, templ_7745c5c3_Err = templ.JoinStringErrs(dur)
+				var templ_7745c5c3_Var121 string
+				templ_7745c5c3_Var121, templ_7745c5c3_Err = templ.JoinStringErrs(dur)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2536, Col: 58}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2544, Col: 58}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var122))
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var121))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -2301,9 +2300,9 @@ func SwarmContextPanel(task *models.Task) templ.Component {
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var123 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var123 == nil {
-			templ_7745c5c3_Var123 = templ.NopComponent
+		templ_7745c5c3_Var122 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var122 == nil {
+			templ_7745c5c3_Var122 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
 		if task.SwarmRole == models.SwarmRoleParent {
@@ -2311,12 +2310,12 @@ func SwarmContextPanel(task *models.Task) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var124 string
-			templ_7745c5c3_Var124, templ_7745c5c3_Err = templ.JoinStringErrs(components.SwarmStatusDisplayName(task.SwarmStatus))
+			var templ_7745c5c3_Var123 string
+			templ_7745c5c3_Var123, templ_7745c5c3_Err = templ.JoinStringErrs(components.SwarmStatusDisplayName(task.SwarmStatus))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2549, Col: 104}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2557, Col: 104}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var124))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var123))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -2324,12 +2323,12 @@ func SwarmContextPanel(task *models.Task) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var125 string
-			templ_7745c5c3_Var125, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", len(task.SwarmChildren)))
+			var templ_7745c5c3_Var124 string
+			templ_7745c5c3_Var124, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", len(task.SwarmChildren)))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2550, Col: 97}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2558, Col: 97}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var125))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var124))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -2342,12 +2341,12 @@ func SwarmContextPanel(task *models.Task) templ.Component {
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var126 string
-				templ_7745c5c3_Var126, templ_7745c5c3_Err = templ.JoinStringErrs(task.WorktreeBranch)
+				var templ_7745c5c3_Var125 string
+				templ_7745c5c3_Var125, templ_7745c5c3_Err = templ.JoinStringErrs(task.WorktreeBranch)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2552, Col: 135}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2560, Col: 135}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var126))
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var125))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -2370,8 +2369,8 @@ func SwarmContextPanel(task *models.Task) templ.Component {
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					var templ_7745c5c3_Var127 = []any{"badge badge-sm", components.StatusBadgeClass(child.Status)}
-					templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var127...)
+					var templ_7745c5c3_Var126 = []any{"badge badge-sm", components.StatusBadgeClass(child.Status)}
+					templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var126...)
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
@@ -2379,12 +2378,12 @@ func SwarmContextPanel(task *models.Task) templ.Component {
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					var templ_7745c5c3_Var128 string
-					templ_7745c5c3_Var128, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var127).String())
+					var templ_7745c5c3_Var127 string
+					templ_7745c5c3_Var127, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var126).String())
 					if templ_7745c5c3_Err != nil {
 						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1, Col: 0}
 					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var128)
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var127)
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
@@ -2392,12 +2391,12 @@ func SwarmContextPanel(task *models.Task) templ.Component {
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					var templ_7745c5c3_Var129 string
-					templ_7745c5c3_Var129, templ_7745c5c3_Err = templ.JoinStringErrs(components.StatusLabelForTask(child.Status, child.Category))
+					var templ_7745c5c3_Var128 string
+					templ_7745c5c3_Var128, templ_7745c5c3_Err = templ.JoinStringErrs(components.StatusLabelForTask(child.Status, child.Category))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2559, Col: 145}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2567, Col: 145}
 					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var129))
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var128))
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
@@ -2405,12 +2404,12 @@ func SwarmContextPanel(task *models.Task) templ.Component {
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					var templ_7745c5c3_Var130 templ.SafeURL
-					templ_7745c5c3_Var130, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/tasks/%s", child.ID)))
+					var templ_7745c5c3_Var129 templ.SafeURL
+					templ_7745c5c3_Var129, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/tasks/%s", child.ID)))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2560, Col: 93}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2568, Col: 93}
 					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var130))
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var129))
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
@@ -2418,12 +2417,12 @@ func SwarmContextPanel(task *models.Task) templ.Component {
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					var templ_7745c5c3_Var131 string
-					templ_7745c5c3_Var131, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s", child.ID))
+					var templ_7745c5c3_Var130 string
+					templ_7745c5c3_Var130, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s", child.ID))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2560, Col: 139}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2568, Col: 139}
 					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var131)
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var130)
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
@@ -2431,12 +2430,12 @@ func SwarmContextPanel(task *models.Task) templ.Component {
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					var templ_7745c5c3_Var132 string
-					templ_7745c5c3_Var132, templ_7745c5c3_Err = templ.JoinStringErrs(child.Title)
+					var templ_7745c5c3_Var131 string
+					templ_7745c5c3_Var131, templ_7745c5c3_Err = templ.JoinStringErrs(child.Title)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2560, Col: 220}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2568, Col: 220}
 					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var132))
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var131))
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
@@ -2444,12 +2443,12 @@ func SwarmContextPanel(task *models.Task) templ.Component {
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					var templ_7745c5c3_Var133 string
-					templ_7745c5c3_Var133, templ_7745c5c3_Err = templ.JoinStringErrs(components.SwarmRoleDisplayName(child.SwarmRole))
+					var templ_7745c5c3_Var132 string
+					templ_7745c5c3_Var132, templ_7745c5c3_Err = templ.JoinStringErrs(components.SwarmRoleDisplayName(child.SwarmRole))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2561, Col: 84}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2569, Col: 84}
 					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var133))
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var132))
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
@@ -2462,12 +2461,12 @@ func SwarmContextPanel(task *models.Task) templ.Component {
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
-						var templ_7745c5c3_Var134 templ.SafeURL
-						templ_7745c5c3_Var134, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/tasks/%s?tab=changes", child.ID)))
+						var templ_7745c5c3_Var133 templ.SafeURL
+						templ_7745c5c3_Var133, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/tasks/%s?tab=changes", child.ID)))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2563, Col: 93}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2571, Col: 93}
 						}
-						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var134))
+						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var133))
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
@@ -2475,12 +2474,12 @@ func SwarmContextPanel(task *models.Task) templ.Component {
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
-						var templ_7745c5c3_Var135 string
-						templ_7745c5c3_Var135, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s?tab=changes", child.ID))
+						var templ_7745c5c3_Var134 string
+						templ_7745c5c3_Var134, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s?tab=changes", child.ID))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2563, Col: 151}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2571, Col: 151}
 						}
-						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var135)
+						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var134)
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
@@ -2513,12 +2512,12 @@ func SwarmContextPanel(task *models.Task) templ.Component {
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var136 templ.SafeURL
-				templ_7745c5c3_Var136, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/tasks/%s", *task.ParentTaskID)))
+				var templ_7745c5c3_Var135 templ.SafeURL
+				templ_7745c5c3_Var135, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/tasks/%s", *task.ParentTaskID)))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2577, Col: 121}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2585, Col: 121}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var136))
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var135))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -2526,12 +2525,12 @@ func SwarmContextPanel(task *models.Task) templ.Component {
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var137 string
-				templ_7745c5c3_Var137, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s", *task.ParentTaskID))
+				var templ_7745c5c3_Var136 string
+				templ_7745c5c3_Var136, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s", *task.ParentTaskID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2577, Col: 177}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2585, Col: 177}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var137)
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var136)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -2539,12 +2538,12 @@ func SwarmContextPanel(task *models.Task) templ.Component {
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var138 string
-				templ_7745c5c3_Var138, templ_7745c5c3_Err = templ.JoinStringErrs(*task.ParentTaskID)
+				var templ_7745c5c3_Var137 string
+				templ_7745c5c3_Var137, templ_7745c5c3_Err = templ.JoinStringErrs(*task.ParentTaskID)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2577, Col: 265}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2585, Col: 265}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var138))
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var137))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -2557,12 +2556,12 @@ func SwarmContextPanel(task *models.Task) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var139 string
-			templ_7745c5c3_Var139, templ_7745c5c3_Err = templ.JoinStringErrs(components.SwarmRoleDisplayName(task.SwarmRole))
+			var templ_7745c5c3_Var138 string
+			templ_7745c5c3_Var138, templ_7745c5c3_Err = templ.JoinStringErrs(components.SwarmRoleDisplayName(task.SwarmRole))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2579, Col: 65}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2587, Col: 65}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var139))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var138))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -2575,12 +2574,12 @@ func SwarmContextPanel(task *models.Task) templ.Component {
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var140 string
-				templ_7745c5c3_Var140, templ_7745c5c3_Err = templ.JoinStringErrs(task.WorktreeBranch)
+				var templ_7745c5c3_Var139 string
+				templ_7745c5c3_Var139, templ_7745c5c3_Err = templ.JoinStringErrs(task.WorktreeBranch)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2581, Col: 60}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2589, Col: 60}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var140))
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var139))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -2614,9 +2613,9 @@ func TaskPromptPanel(task *models.Task) templ.Component {
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var141 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var141 == nil {
-			templ_7745c5c3_Var141 = templ.NopComponent
+		templ_7745c5c3_Var140 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var140 == nil {
+			templ_7745c5c3_Var140 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
 		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 262, "<div id=\"task-prompt-panel\" class=\"card bg-base-200/50 border border-base-300 mb-4\"><div class=\"card-body p-4 gap-3\"><div class=\"text-sm font-semibold\">Prompt</div>")
@@ -2628,12 +2627,12 @@ func TaskPromptPanel(task *models.Task) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var142 string
-			templ_7745c5c3_Var142, templ_7745c5c3_Err = templ.JoinStringErrs(task.Prompt)
+			var templ_7745c5c3_Var141 string
+			templ_7745c5c3_Var141, templ_7745c5c3_Err = templ.JoinStringErrs(task.Prompt)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2594, Col: 177}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2602, Col: 177}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var142))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var141))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -2671,21 +2670,21 @@ func TaskGoalPanel(taskID string, goal *models.TaskGoal) templ.Component {
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var143 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var143 == nil {
-			templ_7745c5c3_Var143 = templ.NopComponent
+		templ_7745c5c3_Var142 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var142 == nil {
+			templ_7745c5c3_Var142 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
 		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 267, "<div id=\"task-goal-panel\" class=\"card bg-base-200/50 border border-base-300 mb-4\" data-task-id=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var144 string
-		templ_7745c5c3_Var144, templ_7745c5c3_Err = templ.ResolveAttributeValue(taskID)
+		var templ_7745c5c3_Var143 string
+		templ_7745c5c3_Var143, templ_7745c5c3_Err = templ.ResolveAttributeValue(taskID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2603, Col: 104}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2611, Col: 104}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var144)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var143)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -2708,12 +2707,12 @@ func TaskGoalPanel(taskID string, goal *models.TaskGoal) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var145 string
-			templ_7745c5c3_Var145, templ_7745c5c3_Err = templ.JoinStringErrs(goalStatusLabel(goal))
+			var templ_7745c5c3_Var144 string
+			templ_7745c5c3_Var144, templ_7745c5c3_Err = templ.JoinStringErrs(goalStatusLabel(goal))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2613, Col: 62}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2621, Col: 62}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var145))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var144))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -2731,12 +2730,12 @@ func TaskGoalPanel(taskID string, goal *models.TaskGoal) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var146 string
-			templ_7745c5c3_Var146, templ_7745c5c3_Err = templ.JoinStringErrs(goal.Objective)
+			var templ_7745c5c3_Var145 string
+			templ_7745c5c3_Var145, templ_7745c5c3_Err = templ.JoinStringErrs(goal.Objective)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2617, Col: 180}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2625, Col: 180}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var146))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var145))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -2749,12 +2748,12 @@ func TaskGoalPanel(taskID string, goal *models.TaskGoal) templ.Component {
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var147 string
-				templ_7745c5c3_Var147, templ_7745c5c3_Err = templ.JoinStringErrs(goal.Reason)
+				var templ_7745c5c3_Var146 string
+				templ_7745c5c3_Var146, templ_7745c5c3_Err = templ.JoinStringErrs(goal.Reason)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2619, Col: 56}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2627, Col: 56}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var147))
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var146))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -2772,12 +2771,12 @@ func TaskGoalPanel(taskID string, goal *models.TaskGoal) templ.Component {
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var148 string
-				templ_7745c5c3_Var148, templ_7745c5c3_Err = templ.JoinStringErrs(goal.LastCheckedAt.Local().Format("Jan 2, 2006 3:04 PM"))
+				var templ_7745c5c3_Var147 string
+				templ_7745c5c3_Var147, templ_7745c5c3_Err = templ.JoinStringErrs(goal.LastCheckedAt.Local().Format("Jan 2, 2006 3:04 PM"))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2622, Col: 107}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 2630, Col: 107}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var148))
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var147))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}

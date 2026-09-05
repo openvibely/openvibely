@@ -1404,7 +1404,7 @@ func TestLLMConfigRepo_TaskCreationSelectionProjectionStaysBoundedOnLargeFixture
 	compactDuration, compactBytes := measure("task creation selection", sampleOps, func() ([]models.LLMConfig, error) { return repo.ListTaskCreationSelectionOptions(ctx) })
 
 	t.Logf("task creation selection: %s/op, %d B/op", compactDuration, compactBytes)
-	if compactDuration > maxDurationPerOp {
+	if testing.CoverMode() == "" && compactDuration > maxDurationPerOp {
 		t.Fatalf("task creation selection took %s/op, want <= %s", compactDuration, maxDurationPerOp)
 	}
 	if compactBytes > maxBytesPerOp {

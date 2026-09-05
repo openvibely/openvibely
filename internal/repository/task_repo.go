@@ -91,6 +91,35 @@ func (r *TaskRepo) ListByProject(ctx context.Context, projectID string, category
 	return r.ListByProjectWithSort(ctx, projectID, category, "")
 }
 
+// ListBreadcrumbSelector returns a bounded compact task-title search for one project.
+func (r *TaskRepo) ListBreadcrumbSelector(ctx context.Context, projectID, search, currentID string, limit int) ([]models.BreadcrumbSelectorItem, error) {
+	if limit <= 0 || limit > 50 {
+		limit = 20
+	}
+	search = strings.ToLower(strings.TrimSpace(search))
+	rows, err := r.db.QueryContext(ctx, `SELECT id, title
+		FROM tasks
+		WHERE project_id = ? AND category != 'chat'
+			AND (? = '' OR INSTR(LOWER(title), ?) > 0 OR id = ?)
+		ORDER BY CASE WHEN id = ? THEN 0 ELSE 1 END,
+			CASE WHEN LOWER(title) = ? THEN 0 WHEN LOWER(title) LIKE ? || '%' THEN 1 ELSE 2 END,
+			updated_at DESC, id ASC
+		LIMIT ?`, projectID, search, search, currentID, currentID, search, search, limit)
+	if err != nil {
+		return nil, fmt.Errorf("listing task breadcrumb selector: %w", err)
+	}
+	defer rows.Close()
+	items := make([]models.BreadcrumbSelectorItem, 0, limit)
+	for rows.Next() {
+		var item models.BreadcrumbSelectorItem
+		if err := rows.Scan(&item.ID, &item.Name); err != nil {
+			return nil, fmt.Errorf("scanning task breadcrumb selector: %w", err)
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 // HasPendingAutomationDispatch reports whether a task has an unfinished,
 // execution-free Automation dispatch holding a durable run reservation.
 func (r *TaskRepo) HasPendingAutomationDispatch(ctx context.Context, taskID string) (bool, error) {

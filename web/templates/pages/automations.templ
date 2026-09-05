@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/openvibely/openvibely/web/templates/layout"
 )
 
@@ -1020,9 +1021,16 @@ templ automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPr
 }
 
 templ AutomationBuilder(projects []models.Project, currentProjectID string, page models.AutomationBuilderPage) {
-	@layout.Base("Automation Builder", projects, currentProjectID) {
+	@layout.Base(automationBuilderPageTitle(page), projects, currentProjectID) {
 		@AutomationBuilderContent(page, currentProjectID)
 	}
+}
+
+func automationBuilderPageTitle(page models.AutomationBuilderPage) string {
+	if page.AutomationID != "" && strings.TrimSpace(page.Result.Candidate.Name) != "" {
+		return page.Result.Candidate.Name
+	}
+	return "Automation Builder"
 }
 
 templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectID string) {
@@ -1034,7 +1042,13 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 		if automationBuilderUsesEditShell(page) {
 			<div class="mb-6 min-w-0 shrink-0" data-automation-builder-header>
 				<div class="flex flex-wrap items-start justify-between gap-3">
-					<div class="min-w-0 flex-1">@automationEditableBreadcrumb(currentProjectID, page.Result.Candidate.Name)</div>
+					<div class="min-w-0 flex-1">
+						if page.AutomationID != "" {
+							@automationEditableBreadcrumb(currentProjectID, page.AutomationID, page.Result.Candidate.Name)
+						} else {
+							@automationNewEditableBreadcrumb(currentProjectID, page.Result.Candidate.Name)
+						}
+					</div>
 					if page.AutomationID != "" {
 						<div class="flex shrink-0 flex-wrap items-center justify-end gap-2" data-automation-builder-header-actions>
 							<a class="btn btn-ghost btn-sm" href={ templ.URL(fmt.Sprintf("/automations/%s?project_id=%s", page.AutomationID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s?project_id=%s", page.AutomationID, currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;" data-automation-builder-cancel>Cancel</a>
@@ -1046,9 +1060,12 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 							<button class="btn btn-primary btn-sm" type="submit" form="automation-design-form" name="save_changes" value="true" data-automation-builder-save>Save</button>
 						</div>
 					}
-				</div>
-				if strings.TrimSpace(page.Result.Candidate.Description) != "" {
-					<p class="mt-1 text-sm opacity-60">{ page.Result.Candidate.Description }</p>
+					</div>
+					if page.AutomationID != "" {
+						<label class="form-control mt-3 max-w-xl"><span class="label-text mb-1 font-medium">Automation name</span><input class="input input-bordered w-full text-xl font-bold sm:text-2xl" form="automation-design-form" name="automation_name" value={ page.Result.Candidate.Name } maxlength="200" required data-automation-name aria-label="Automation name"/></label>
+					}
+					if strings.TrimSpace(page.Result.Candidate.Description) != "" {
+						<p class="mt-1 text-sm opacity-60">{ page.Result.Candidate.Description }</p>
 				}
 			</div>
 		} else {
@@ -2285,11 +2302,26 @@ templ automationBuilderMoreActions(page models.AutomationBuilderPage, currentPro
 	</div>
 }
 
-templ automationEditableBreadcrumb(currentProjectID string, automationName string) {
+templ automationNewEditableBreadcrumb(currentProjectID string, automationName string) {
 	<nav class="flex min-w-0 flex-shrink-0 flex-wrap items-start" aria-label="Breadcrumb" data-automation-breadcrumb data-automation-editable-breadcrumb>
 		<a class="flex-shrink-0 text-2xl text-base-content/50 transition-colors hover:text-base-content/80" href={ templ.URL(fmt.Sprintf("/automations?project_id=%s", currentProjectID)) } hx-get={ fmt.Sprintf("/automations?project_id=%s", currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;">Automations</a>
 		<span class="ml-2 flex-shrink-0 text-2xl text-base-content/30">/</span>
 		<input class="input input-bordered ml-1 h-8 min-w-0 flex-1 px-[3px] py-0 text-xl font-bold leading-none sm:max-w-xl sm:text-2xl" form="automation-design-form" name="automation_name" value={ automationName } maxlength="200" required data-automation-name aria-label="Automation name"/>
+	</nav>
+}
+
+templ automationEditableBreadcrumb(currentProjectID string, automationID string, automationName string) {
+	<nav class="flex min-w-0 flex-shrink-0 items-center gap-2" aria-label="Breadcrumb" data-automation-breadcrumb data-automation-editable-breadcrumb>
+		<a class="flex-shrink-0 text-2xl text-base-content/50 transition-colors hover:text-base-content/80" href={ templ.URL(fmt.Sprintf("/automations?project_id=%s", currentProjectID)) } hx-get={ fmt.Sprintf("/automations?project_id=%s", currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;">Automations</a>
+		<span class="flex-shrink-0 text-2xl text-base-content/30">/</span>
+		<div class="min-w-0">
+			@components.BreadcrumbSelector(models.BreadcrumbSelector{
+				ID: "automation-resource-selector", Kind: "Automation", CurrentID: automationID, CurrentName: automationName,
+				SearchURL: fmt.Sprintf("/breadcrumb-selectors/automations?project_id=%s&current_id=%s&view=edit", currentProjectID, automationID),
+			})
+		</div>
+		<span class="flex-shrink-0 text-2xl text-base-content/30">/</span>
+		<h2 class="min-w-0 truncate text-2xl font-bold">Edit</h2>
 	</nav>
 }templ automationBreadcrumb(currentProjectID string, automationID string, automationName string, currentLabel string, withBottomMargin bool) {
 	<nav class={ "flex min-w-0 flex-shrink-0 items-center gap-2", templ.KV("mb-6", withBottomMargin) } aria-label="Breadcrumb" data-automation-breadcrumb>
@@ -2297,9 +2329,19 @@ templ automationEditableBreadcrumb(currentProjectID string, automationName strin
 		if automationName != "" {
 			<span class="flex-shrink-0 text-2xl text-base-content/30">/</span>
 			if currentLabel != "" && automationID != "" {
-				<a class="min-w-0 truncate text-2xl text-base-content/50 transition-colors hover:text-base-content/80" href={ templ.URL(fmt.Sprintf("/automations/%s?project_id=%s", automationID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s?project_id=%s", automationID, currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;">{ automationName }</a>
+				<div class="min-w-0">
+					@components.BreadcrumbSelector(models.BreadcrumbSelector{
+						ID: "automation-resource-selector", Kind: "Automation", CurrentID: automationID, CurrentName: automationName,
+						SearchURL: fmt.Sprintf("/breadcrumb-selectors/automations?project_id=%s&current_id=%s&view=live", currentProjectID, automationID),
+					})
+				</div>
 			} else {
-				<h2 class="min-w-0 truncate text-2xl font-bold">{ automationName }</h2>
+				<div class="min-w-0 flex-1">
+					@components.BreadcrumbSelector(models.BreadcrumbSelector{
+						ID: "automation-resource-selector", Kind: "Automation", CurrentID: automationID, CurrentName: automationName,
+						SearchURL: fmt.Sprintf("/breadcrumb-selectors/automations?project_id=%s&current_id=%s&view=live", currentProjectID, automationID),
+					})
+				</div>
 			}
 		}
 		if currentLabel != "" {
