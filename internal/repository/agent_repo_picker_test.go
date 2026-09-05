@@ -360,7 +360,7 @@ func TestAgentRepoGetTaskDetailAgentLabelUsesCompactProjection(t *testing.T) {
 	}
 }
 
-func BenchmarkAgentTaskDetailLabelProjectionVsFullHydration(b *testing.B) {
+func BenchmarkAgentTaskDetailLabelProjection(b *testing.B) {
 	db, counter := testutil.NewStatementCountingTestDB(b)
 	repo := NewAgentRepo(db)
 	clearAgentsForRuntimeSummaryTest(b, db)
@@ -373,90 +373,62 @@ func BenchmarkAgentTaskDetailLabelProjectionVsFullHydration(b *testing.B) {
 		}
 	}
 
-	for _, tc := range []struct {
-		name   string
-		lookup func(context.Context) (string, error)
-	}{
-		{
-			name: "full_hydration",
-			lookup: func(ctx context.Context) (string, error) {
-				agents, err := repo.List(ctx)
-				if err != nil {
-					return "", err
-				}
-				for _, agent := range agents {
-					if agent.ID == targetID {
-						return agent.Name, nil
-					}
-				}
-				return "", fmt.Errorf("target agent %q not found", targetID)
-			},
-		},
-		{
-			name: "task_detail_label",
-			lookup: func(ctx context.Context) (string, error) {
-				label, err := repo.GetTaskDetailAgentLabel(ctx, "benchmark-project", targetID)
-				if err != nil {
-					return "", err
-				}
-				if label == nil {
-					return "", fmt.Errorf("target agent %q not found", targetID)
-				}
-				return label.Name, nil
-			},
-		},
-	} {
-		b.Run(tc.name, func(b *testing.B) {
-			b.ReportAllocs()
-			b.ResetTimer()
-			var totalLightweightWait time.Duration
-			for i := 0; i < b.N; i++ {
-				queryStarted := make(chan struct{})
-				var once sync.Once
-				counter.SetObserver(func(_ context.Context, query string) {
-					if strings.Contains(strings.ToLower(query), "from agents") {
-						once.Do(func() { close(queryStarted) })
-					}
-				})
-
-				type lookupResult struct {
-					name string
-					err  error
-				}
-				resultCh := make(chan lookupResult, 1)
-				go func() {
-					name, err := tc.lookup(context.Background())
-					resultCh <- lookupResult{name: name, err: err}
-				}()
-				var result lookupResult
-				lookupComplete := false
-				select {
-				case <-queryStarted:
-				case result = <-resultCh:
-					lookupComplete = true
-				case <-time.After(2 * time.Second):
-					b.Fatalf("Agent lookup query did not start")
-				}
-
-				lightweightStart := time.Now()
-				var projectID string
-				if err := db.QueryRowContext(context.Background(), `SELECT id FROM projects ORDER BY id LIMIT 1`).Scan(&projectID); err != nil {
-					b.Fatalf("lightweight project lookup: %v", err)
-				}
-				totalLightweightWait += time.Since(lightweightStart)
-
-				if !lookupComplete {
-					result = <-resultCh
-				}
-				counter.SetObserver(nil)
-				if result.err != nil {
-					b.Fatal(result.err)
-				}
+	b.ReportAllocs()
+	b.ResetTimer()
+	var totalLightweightWait time.Duration
+	for i := 0; i < b.N; i++ {
+		queryStarted := make(chan struct{})
+		var once sync.Once
+		counter.SetObserver(func(_ context.Context, query string) {
+			if strings.Contains(strings.ToLower(query), "from agents") {
+				once.Do(func() { close(queryStarted) })
 			}
-			b.StopTimer()
-			b.ReportMetric(float64(totalLightweightWait.Nanoseconds())/float64(b.N), "lightweight_db_wait_ns/op")
 		})
+
+		type lookupResult struct {
+			name string
+			err  error
+		}
+		resultCh := make(chan lookupResult, 1)
+		go func() {
+			label, err := repo.GetTaskDetailAgentLabel(context.Background(), "benchmark-project", targetID)
+			if err != nil {
+				resultCh <- lookupResult{err: err}
+				return
+			}
+			if label == nil {
+				resultCh <- lookupResult{err: fmt.Errorf("target agent %q not found", targetID)}
+				return
+			}
+			resultCh <- lookupResult{name: label.Name}
+		}()
+		var result lookupResult
+		lookupComplete := false
+		select {
+		case <-queryStarted:
+		case result = <-resultCh:
+			lookupComplete = true
+		case <-time.After(2 * time.Second):
+			b.Fatalf("Agent lookup query did not start")
+		}
+
+		lightweightStart := time.Now()
+		var projectID string
+		if err := db.QueryRowContext(context.Background(), `SELECT id FROM projects ORDER BY id LIMIT 1`).Scan(&projectID); err != nil {
+			b.Fatalf("lightweight project lookup: %v", err)
+		}
+		totalLightweightWait += time.Since(lightweightStart)
+
+		if !lookupComplete {
+			result = <-resultCh
+		}
+		counter.SetObserver(nil)
+		if result.err != nil {
+			b.Fatal(result.err)
+		}
 	}
+	b.StopTimer()
+	b.ReportMetric(float64(totalLightweightWait.Nanoseconds())/float64(b.N), "lightweight_db_wait_ns/op")
 }
 
 func TestAgentRepoListPickerOptionsMatchesFullListJSONWithLowerAllocations(t *testing.T) {
