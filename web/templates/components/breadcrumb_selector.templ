@@ -7,7 +7,7 @@ import (
 )
 
 templ BreadcrumbSelector(config models.BreadcrumbSelector) {
-	<div class={ "min-w-0", templ.KV("shrink-0", config.CaretOnly) } data-breadcrumb-selector>
+	<div class={ "min-w-0", templ.KV("shrink-0 w-0 overflow-visible", config.CaretOnly) } data-breadcrumb-selector>
 		if config.ContextName != "" {
 			<input type="hidden" name={ config.ContextName } value={ config.ContextValue } data-breadcrumb-selector-context/>
 		}

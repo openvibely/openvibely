@@ -35,7 +35,7 @@ func BreadcrumbSelector(config models.BreadcrumbSelector) templ.Component {
 			templ_7745c5c3_Var1 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		var templ_7745c5c3_Var2 = []any{"min-w-0", templ.KV("shrink-0", config.CaretOnly)}
+		var templ_7745c5c3_Var2 = []any{"min-w-0", templ.KV("shrink-0 w-0 overflow-visible", config.CaretOnly)}
 		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var2...)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
