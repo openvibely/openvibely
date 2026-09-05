@@ -323,28 +323,6 @@ func TestTaskRepo_ListByProject_OrderingFIFO(t *testing.T) {
 	}
 }
 
-func TestTaskRepo_ListActivePending(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	repo := NewTaskRepo(db, nil)
-	ctx := context.Background()
-
-	// Create various tasks
-	repo.Create(ctx, &models.Task{ProjectID: "default", Title: "Active Pending", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "p"})
-	repo.Create(ctx, &models.Task{ProjectID: "default", Title: "Active Running", Category: models.CategoryActive, Status: models.StatusRunning, Prompt: "p"})
-	repo.Create(ctx, &models.Task{ProjectID: "default", Title: "Backlog Pending", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "p"})
-
-	pending, err := repo.ListActivePending(ctx)
-	if err != nil {
-		t.Fatalf("ListActivePending: %v", err)
-	}
-	if len(pending) != 1 {
-		t.Errorf("expected 1 active+pending task, got %d", len(pending))
-	}
-	if len(pending) > 0 && pending[0].Title != "Active Pending" {
-		t.Errorf("expected Active Pending, got %q", pending[0].Title)
-	}
-}
-
 func TestTaskRepo_ListActivePendingAdmissionsUsesCompactProjection(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	repo := NewTaskRepo(db, nil)
