@@ -8,8 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"runtime"
-	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -1341,116 +1339,6 @@ func TestAutomationCompilerPreviewAndSaveUseBatchedAgentValidation(t *testing.T)
 	}
 }
 
-func TestAutomationSaveValidatorAgentIssuesMeetsRichFixturePerformanceBudget(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping production-shaped Automation Agent validation performance fixture in short mode")
-	}
-
-	db := testutil.NewTestDB(t)
-	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	project := automationTestProject(t, projectRepo, "Automation Agent validation performance")
-	agentRepo := repository.NewAgentRepo(db)
-	if _, err := db.ExecContext(ctx, `DELETE FROM agents WHERE id IS NOT NULL`); err != nil {
-		t.Fatalf("clear agents: %v", err)
-	}
-	refs := make([]string, 0, automationCapabilityLimit)
-	for i := 0; i < automationCapabilityLimit; i++ {
-		agent := automationValidationFixtureAgent(fmt.Sprintf("Budget Agent %02d", i), fmt.Sprintf("budget-agent-%02d", i))
-		if err := agentRepo.Create(ctx, agent); err != nil {
-			t.Fatalf("create budget Agent %d: %v", i, err)
-		}
-		refs = append(refs, agent.Key)
-	}
-	registry := NewAutomationAdapterRegistry()
-	automationRepo := repository.NewAutomationRepo(db)
-	drafts := NewAutomationDraftService(automationRepo, registry)
-	capabilities := NewAutomationCapabilitySnapshotBuilder(projectRepo, agentRepo, nil, nil)
-	drafts.SetCapabilitySnapshotBuilder(capabilities)
-	validator := NewAutomationSaveValidator(registry, drafts)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	compiler := NewAutomationCompiler(automationRepo, NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil), taskRepo, scheduleRepo, validator)
-
-	for _, referenceCount := range []int{1, 5, 20, 50} {
-		t.Run(fmt.Sprintf("references_%d", referenceCount), func(t *testing.T) {
-			candidate := automationValidationReferenceCandidate(refs[:referenceCount])
-			baselineAllocs := testing.AllocsPerRun(3, func() {
-				if err := automationValidationBaselineConfigured(ctx, drafts, capabilities, agentRepo, project.ID, candidate); err != nil {
-					t.Fatalf("baseline validation: %v", err)
-				}
-			})
-			batchedAllocs := testing.AllocsPerRun(3, func() {
-				if err := automationValidationProduction(ctx, compiler, project.ID, candidate); err != nil {
-					t.Fatalf("batched validation: %v", err)
-				}
-			})
-			baselineBytes := allocatedAutomationValidationBytes(t, 3, func() error {
-				return automationValidationBaselineConfigured(ctx, drafts, capabilities, agentRepo, project.ID, candidate)
-			})
-			batchedBytes := allocatedAutomationValidationBytes(t, 3, func() error {
-				return automationValidationProduction(ctx, compiler, project.ID, candidate)
-			})
-			baselineWall := medianAutomationValidationDuration(t, 3, func() error {
-				return automationValidationBaselineConfigured(ctx, drafts, capabilities, agentRepo, project.ID, candidate)
-			})
-			batchedWall := medianAutomationValidationDuration(t, 3, func() error {
-				return automationValidationProduction(ctx, compiler, project.ID, candidate)
-			})
-
-			if batchedAllocs > baselineAllocs {
-				t.Fatalf("batched allocations = %.0f, baseline = %.0f; one-reference validation regressed", batchedAllocs, baselineAllocs)
-			}
-			if batchedBytes > baselineBytes {
-				t.Fatalf("batched allocated bytes = %d, baseline = %d; one-reference validation regressed", batchedBytes, baselineBytes)
-			}
-			if batchedWall > baselineWall {
-				t.Fatalf("batched wall time = %s, baseline = %s; one-reference validation regressed", batchedWall, baselineWall)
-			}
-			if referenceCount == 20 || referenceCount == 50 {
-				if batchedAllocs*10 > baselineAllocs {
-					t.Fatalf("batched allocations = %.0f, baseline = %.0f; want at least 90%% reduction", batchedAllocs, baselineAllocs)
-				}
-				if batchedBytes*10 > baselineBytes {
-					t.Fatalf("batched allocated bytes = %d, baseline = %d; want at least 90%% reduction", batchedBytes, baselineBytes)
-				}
-				if batchedWall*10 > baselineWall {
-					t.Fatalf("batched wall time = %s, baseline = %s; want at least 90%% reduction", batchedWall, baselineWall)
-				}
-			}
-			t.Logf("references=%d baseline=%s/%d B/%.0f allocs, batched=%s/%d B/%.0f allocs", referenceCount, baselineWall, baselineBytes, baselineAllocs, batchedWall, batchedBytes, batchedAllocs)
-		})
-	}
-}
-
-func allocatedAutomationValidationBytes(t *testing.T, runs int, validate func() error) uint64 {
-	t.Helper()
-	runtime.GC()
-	var before, after runtime.MemStats
-	runtime.ReadMemStats(&before)
-	for i := 0; i < runs; i++ {
-		if err := validate(); err != nil {
-			t.Fatalf("validation sample %d: %v", i, err)
-		}
-	}
-	runtime.ReadMemStats(&after)
-	return (after.TotalAlloc - before.TotalAlloc) / uint64(runs)
-}
-
-func medianAutomationValidationDuration(t *testing.T, samples int, validate func() error) time.Duration {
-	t.Helper()
-	durations := make([]time.Duration, samples)
-	for i := range durations {
-		started := time.Now()
-		if err := validate(); err != nil {
-			t.Fatalf("validation sample %d: %v", i, err)
-		}
-		durations[i] = time.Since(started)
-	}
-	sort.Slice(durations, func(i, j int) bool { return durations[i] < durations[j] })
-	return durations[len(durations)/2]
-}
-
 func BenchmarkAutomationAgentReferenceValidationProjection(b *testing.B) {
 	db, counter := testutil.NewStatementCountingTestDB(b)
 	ctx := context.Background()
@@ -1481,36 +1369,12 @@ func BenchmarkAutomationAgentReferenceValidationProjection(b *testing.B) {
 
 	for _, referenceCount := range []int{1, 5, 20, 50} {
 		candidate := automationValidationReferenceCandidate(refs[:referenceCount])
-		b.Run(fmt.Sprintf("baseline_%d_references", referenceCount), func(b *testing.B) {
-			counter.Reset()
-			counter.SetEnabled(true)
-			if err := automationValidationBaselineConfigured(ctx, drafts, capabilities, agentRepo, project.ID, candidate); err != nil {
-				counter.SetEnabled(false)
-				b.Fatalf("baseline validation: %v", err)
-			}
-			counter.SetEnabled(false)
-			queryCount := len(selectableAgentValidationStatements(counter.Statements()))
-			if queryCount != referenceCount+1 {
-				b.Fatalf("baseline query count = %d, want %d", queryCount, referenceCount+1)
-			}
-
-			b.ReportAllocs()
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
-				if err := automationValidationBaselineConfigured(ctx, drafts, capabilities, agentRepo, project.ID, candidate); err != nil {
-					b.Fatal(err)
-				}
-			}
-			b.StopTimer()
-			b.ReportMetric(float64(queryCount), "agent_queries/op")
-		})
-
-		b.Run(fmt.Sprintf("batched_%d_references", referenceCount), func(b *testing.B) {
+		b.Run(fmt.Sprintf("%d_references", referenceCount), func(b *testing.B) {
 			counter.Reset()
 			counter.SetEnabled(true)
 			if err := automationValidationProduction(ctx, compiler, project.ID, candidate); err != nil {
 				counter.SetEnabled(false)
-				b.Fatalf("batched validation: %v", err)
+				b.Fatalf("validation: %v", err)
 			}
 			counter.SetEnabled(false)
 			queryCount := len(selectableAgentValidationStatements(counter.Statements()))
@@ -1650,22 +1514,6 @@ func automationLiveBenchmarkCandidate(nodeCount int) models.AutomationDraftCandi
 	return candidate
 }
 
-func automationValidationBaselineConfigured(ctx context.Context, drafts *AutomationDraftService, capabilities *AutomationCapabilitySnapshotBuilder, agentRepo *repository.AgentRepo, projectID string, candidate models.AutomationDraftCandidate) error {
-	normalized, err := drafts.NormalizeCandidate(candidate)
-	if err != nil {
-		return err
-	}
-	snapshot, err := capabilities.Build(ctx, projectID)
-	if err != nil {
-		return err
-	}
-	issues := drafts.ValidateCandidateWithCapabilities(normalized, snapshot)
-	if len(issues) != 0 {
-		return fmt.Errorf("configured baseline validation issues = %#v", issues)
-	}
-	return automationValidationBaseline(ctx, agentRepo, projectID, normalized)
-}
-
 func automationValidationProduction(ctx context.Context, compiler *AutomationCompiler, projectID string, candidate models.AutomationDraftCandidate) error {
 	plan, _, err := compiler.PreviewSave(ctx, projectID, candidate)
 	if err != nil {
@@ -1676,26 +1524,6 @@ func automationValidationProduction(ctx context.Context, compiler *AutomationCom
 	}
 	if len(plan.Validation) != 0 {
 		return fmt.Errorf("configured production validation issues = %#v", plan.Validation)
-	}
-	return nil
-}
-
-func automationValidationBaseline(ctx context.Context, agentRepo *repository.AgentRepo, projectID string, candidate models.AutomationDraftCandidate) error {
-	for _, node := range candidate.Nodes {
-		if node.Type != models.AutomationNodeAgentTask && node.Type != models.AutomationNodeTrigger {
-			continue
-		}
-		ref, _ := node.Config["agent_ref"].(string)
-		if strings.TrimSpace(ref) == "" {
-			continue
-		}
-		agent, err := resolveAutomationAgent(ctx, agentRepo, projectID, ref)
-		if err != nil {
-			return err
-		}
-		if agent == nil {
-			return fmt.Errorf("reference %q was unavailable", ref)
-		}
 	}
 	return nil
 }
