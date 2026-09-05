@@ -86,7 +86,6 @@ Backlog menu includes:
 
 - Sorting options
 - `Execute All` (and priority-specific execute actions)
-- `Activate All`
 - `Delete All`
 
 Completed menu includes:

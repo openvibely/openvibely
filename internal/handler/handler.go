@@ -760,7 +760,6 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.POST("/tasks/move-completed", h.MoveCompletedActiveToCompleted)
 	e.DELETE("/tasks/completed", h.DeleteAllCompletedTasks)
 	e.DELETE("/tasks/backlog", h.DeleteAllBacklogTasks)
-	e.POST("/tasks/backlog/activate", h.ActivateAllBacklogTasks)
 	e.POST("/tasks/backlog/execute", h.ExecuteBacklogTasks)
 	e.GET("/tasks/backlog/priority-counts", h.CountBacklogByPriority)
 	e.POST("/tasks/backlog/sort", h.SetBacklogSort)

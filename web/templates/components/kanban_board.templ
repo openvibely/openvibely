@@ -377,7 +377,6 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 										hx-post={ fmt.Sprintf("/tasks/backlog/execute?project_id=%s", projectID) }
 										hx-target="#kanban-board"
 										hx-swap="outerHTML"
-										hx-confirm={ fmt.Sprintf("Execute all %d eligible backlog tasks? They will be moved to Active and submitted for execution.", countEligibleBacklogTasks(tasks)) }
 										class="text-sm min-h-11"
 									>
 										<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -403,20 +402,6 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 									}
 								}
 							}
-							<li>
-								<button type="button" tabindex="0"
-									hx-post={ fmt.Sprintf("/tasks/backlog/activate?project_id=%s", projectID) }
-									hx-target="#kanban-board"
-									hx-swap="outerHTML"
-									hx-confirm="Are you sure you want to activate all backlog tasks? They will be moved to Active and submitted for execution."
-									class="text-sm min-h-11"
-								>
-									<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path>
-									</svg>
-									Activate All
-								</button>
-							</li>
 							<li>
 								<button
 									type="button"
