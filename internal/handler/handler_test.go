@@ -27,7 +27,6 @@ import (
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/openvibely/openvibely/web/templates/components"
-	"github.com/openvibely/openvibely/web/templates/pages"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -1173,7 +1172,7 @@ func BenchmarkHandler_GetTaskDetailStatus_MetricsProjection(b *testing.B) {
 	})
 }
 
-func BenchmarkHandler_GetTaskDetailStatus_AgentProjectionVsFullHydration(b *testing.B) {
+func BenchmarkHandler_GetTaskDetailStatus_AgentProjection(b *testing.B) {
 	db, counter := testutil.NewStatementCountingTestDB(b)
 	h, e, llmConfigRepo := setupTestHandlerForDB(b, db)
 	ctx := context.Background()
@@ -1202,114 +1201,64 @@ func BenchmarkHandler_GetTaskDetailStatus_AgentProjectionVsFullHydration(b *test
 		tk.AgentDefinitionID = &targetAgent.ID
 	})
 
-	for _, tc := range []struct {
-		name string
-		run  func(context.Context) (int, error)
-	}{
-		{
-			name: "full_hydration",
-			run: func(ctx context.Context) (int, error) {
-				loadedTask, err := h.taskSvc.GetByID(ctx, task.ID)
-				if err != nil {
-					return 0, err
-				}
-				metrics, err := h.execRepo.GetTaskExecutionMetrics(ctx, task.ID)
-				if err != nil {
-					return 0, err
-				}
-				agents, err := h.llmConfigRepo.ListBadgeOptions(ctx)
-				if err != nil {
-					return 0, err
-				}
-				agentDefs, err := agentRepo.List(ctx)
-				if err != nil {
-					return 0, err
-				}
-				if len(agentDefs) != 1000 {
-					return 0, fmt.Errorf("full Agent list length = %d, want 1000", len(agentDefs))
-				}
-				agentName := ""
-				for _, agentDef := range agentDefs {
-					if loadedTask.AgentDefinitionID != nil && agentDef.ID == *loadedTask.AgentDefinitionID {
-						agentName = agentDef.Name
-						break
-					}
-				}
-				var out bytes.Buffer
-				if err := pages.TaskDetailMetrics(loadedTask, metrics, agents, agentName).Render(ctx, &out); err != nil {
-					return 0, err
-				}
-				return out.Len(), nil
-			},
-		},
-		{
-			name: "task_detail_status",
-			run: func(_ context.Context) (int, error) {
-				rec := htmxGet(e, "/tasks/"+task.ID+"/detail-status")
-				if rec.Code != http.StatusOK {
-					return 0, fmt.Errorf("detail-status request status=%d", rec.Code)
-				}
-				return rec.Body.Len(), nil
-			},
-		},
-	} {
-		b.Run(tc.name, func(b *testing.B) {
-			b.ReportAllocs()
-			b.ResetTimer()
-			var totalResponseBytes int64
-			var totalLightweightWait time.Duration
-			for i := 0; i < b.N; i++ {
-				queryStarted := make(chan struct{})
-				var once sync.Once
-				counter.SetObserver(func(_ context.Context, query string) {
-					if strings.Contains(strings.ToLower(query), "from agents") {
-						once.Do(func() { close(queryStarted) })
-					}
-				})
-
-				type lookupResult struct {
-					responseBytes int
-					err           error
-				}
-				resultCh := make(chan lookupResult, 1)
-				go func() {
-					responseBytes, err := tc.run(context.Background())
-					resultCh <- lookupResult{responseBytes: responseBytes, err: err}
-				}()
-				var result lookupResult
-				lookupComplete := false
-				select {
-				case <-queryStarted:
-				case result = <-resultCh:
-					lookupComplete = true
-				case <-time.After(2 * time.Second):
-					b.Fatalf("Agent lookup query did not start")
-				}
-
-				lightweightStart := time.Now()
-				var projectID string
-				if err := db.QueryRowContext(context.Background(), `SELECT id FROM projects ORDER BY id LIMIT 1`).Scan(&projectID); err != nil {
-					b.Fatalf("lightweight project lookup: %v", err)
-				}
-				totalLightweightWait += time.Since(lightweightStart)
-
-				if !lookupComplete {
-					result = <-resultCh
-				}
-				counter.SetObserver(nil)
-				if result.err != nil {
-					b.Fatal(result.err)
-				}
-				if result.responseBytes <= 0 {
-					b.Fatal("Agent status response body was empty")
-				}
-				totalResponseBytes += int64(result.responseBytes)
+	b.ReportAllocs()
+	b.ResetTimer()
+	var totalResponseBytes int64
+	var totalLightweightWait time.Duration
+	for i := 0; i < b.N; i++ {
+		queryStarted := make(chan struct{})
+		var once sync.Once
+		counter.SetObserver(func(_ context.Context, query string) {
+			if strings.Contains(strings.ToLower(query), "from agents") {
+				once.Do(func() { close(queryStarted) })
 			}
-			b.StopTimer()
-			b.ReportMetric(float64(totalResponseBytes)/float64(b.N), "response_bytes/op")
-			b.ReportMetric(float64(totalLightweightWait.Nanoseconds())/float64(b.N), "lightweight_db_wait_ns/op")
 		})
+
+		type lookupResult struct {
+			responseBytes int
+			err           error
+		}
+		resultCh := make(chan lookupResult, 1)
+		go func() {
+			rec := htmxGet(e, "/tasks/"+task.ID+"/detail-status")
+			if rec.Code != http.StatusOK {
+				resultCh <- lookupResult{err: fmt.Errorf("detail-status request status=%d", rec.Code)}
+				return
+			}
+			resultCh <- lookupResult{responseBytes: rec.Body.Len()}
+		}()
+		var result lookupResult
+		lookupComplete := false
+		select {
+		case <-queryStarted:
+		case result = <-resultCh:
+			lookupComplete = true
+		case <-time.After(2 * time.Second):
+			b.Fatalf("Agent lookup query did not start")
+		}
+
+		lightweightStart := time.Now()
+		var projectID string
+		if err := db.QueryRowContext(context.Background(), `SELECT id FROM projects ORDER BY id LIMIT 1`).Scan(&projectID); err != nil {
+			b.Fatalf("lightweight project lookup: %v", err)
+		}
+		totalLightweightWait += time.Since(lightweightStart)
+
+		if !lookupComplete {
+			result = <-resultCh
+		}
+		counter.SetObserver(nil)
+		if result.err != nil {
+			b.Fatal(result.err)
+		}
+		if result.responseBytes <= 0 {
+			b.Fatal("Agent status response body was empty")
+		}
+		totalResponseBytes += int64(result.responseBytes)
 	}
+	b.StopTimer()
+	b.ReportMetric(float64(totalResponseBytes)/float64(b.N), "response_bytes/op")
+	b.ReportMetric(float64(totalLightweightWait.Nanoseconds())/float64(b.N), "lightweight_db_wait_ns/op")
 }
 
 func createRichTaskDetailBenchmarkAgent(tb testing.TB, repo *repository.AgentRepo, name string) *models.Agent {
