@@ -2309,14 +2309,12 @@ templ automationEditableBreadcrumb(currentProjectID string, automationID string,
 	<nav class="flex min-w-0 flex-shrink-0 flex-wrap items-start" aria-label="Breadcrumb" data-automation-breadcrumb data-automation-editable-breadcrumb>
 		<a class="flex-shrink-0 text-2xl text-base-content/50 transition-colors hover:text-base-content/80" href={ templ.URL(fmt.Sprintf("/automations?project_id=%s", currentProjectID)) } hx-get={ fmt.Sprintf("/automations?project_id=%s", currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;">Automations</a>
 		<span class="ml-2 flex-shrink-0 text-2xl text-base-content/30">/</span>
-		<div class="ml-1 flex min-w-0 flex-1 items-start sm:max-w-xl">
-			<input class="input input-bordered h-8 min-w-0 flex-1 px-[3px] py-0 text-xl font-bold leading-none sm:text-2xl" form="automation-design-form" name="automation_name" value={ automationName } maxlength="200" required data-automation-name aria-label="Automation name"/>
-			@components.BreadcrumbSelector(models.BreadcrumbSelector{
-				ID: "automation-resource-selector", Kind: "Automation", CurrentID: automationID, CurrentName: automationName,
-				SearchURL: fmt.Sprintf("/breadcrumb-selectors/automations?project_id=%s&current_id=%s&view=edit", currentProjectID, automationID),
-				CaretOnly: true,
-			})
-		</div>
+		<input class="input input-bordered ml-1 h-8 min-w-0 flex-1 px-[3px] py-0 text-xl font-bold leading-none sm:max-w-xl sm:text-2xl" form="automation-design-form" name="automation_name" value={ automationName } maxlength="200" required data-automation-name aria-label="Automation name"/>
+		@components.BreadcrumbSelector(models.BreadcrumbSelector{
+			ID: "automation-resource-selector", Kind: "Automation", CurrentID: automationID, CurrentName: automationName,
+			SearchURL: fmt.Sprintf("/breadcrumb-selectors/automations?project_id=%s&current_id=%s&view=edit", currentProjectID, automationID),
+			CaretOnly: true,
+		})
 	</nav>
 }templ automationBreadcrumb(currentProjectID string, automationID string, automationName string, currentLabel string, withBottomMargin bool) {
 	<nav class={ "flex min-w-0 flex-shrink-0 items-center gap-2", templ.KV("mb-6", withBottomMargin) } aria-label="Breadcrumb" data-automation-breadcrumb>

@@ -158,7 +158,7 @@ func isSortActive(sortBy, option string) string {
 	return ""
 }
 
-func KanbanBoard(tasks []models.Task, projectID string, backlogSort string, completedSort string, llmModels []models.LLMConfig, agentDefs []models.Agent) templ.Component {
+func KanbanBoard(tasks []models.Task, projectID string, backlogSort string, completedSort string, llmModels []models.LLMConfig, agentDefs []models.Agent, menuStates ...map[string]TaskCardMergeMenuState) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -185,12 +185,12 @@ func KanbanBoard(tasks []models.Task, projectID string, backlogSort string, comp
 		}
 		for _, cat := range models.AllCategories {
 			if cat == models.CategoryActive {
-				templ_7745c5c3_Err = KanbanColumn(filterActiveColumn(tasks), projectID, cat, backlogSort, completedSort, llmModels, agentDefs).Render(ctx, templ_7745c5c3_Buffer)
+				templ_7745c5c3_Err = KanbanColumn(filterActiveColumn(tasks), projectID, cat, backlogSort, completedSort, llmModels, agentDefs, taskCardMergeMenuStateMap(menuStates)).Render(ctx, templ_7745c5c3_Buffer)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			} else {
-				templ_7745c5c3_Err = KanbanColumn(filterByCategory(tasks, cat), projectID, cat, backlogSort, completedSort, llmModels, agentDefs).Render(ctx, templ_7745c5c3_Buffer)
+				templ_7745c5c3_Err = KanbanColumn(filterByCategory(tasks, cat), projectID, cat, backlogSort, completedSort, llmModels, agentDefs, taskCardMergeMenuStateMap(menuStates)).Render(ctx, templ_7745c5c3_Buffer)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -204,7 +204,7 @@ func KanbanBoard(tasks []models.Task, projectID string, backlogSort string, comp
 	})
 }
 
-func KanbanColumn(tasks []models.Task, projectID string, category models.TaskCategory, backlogSort string, completedSort string, llmModels []models.LLMConfig, agentDefs []models.Agent) templ.Component {
+func KanbanColumn(tasks []models.Task, projectID string, category models.TaskCategory, backlogSort string, completedSort string, llmModels []models.LLMConfig, agentDefs []models.Agent, menuStates ...map[string]TaskCardMergeMenuState) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -853,7 +853,7 @@ func KanbanColumn(tasks []models.Task, projectID string, category models.TaskCat
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = activeColumnContent(tasks, projectID, llmModels, agentDefs).Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = activeColumnContent(tasks, projectID, llmModels, agentDefs, taskCardMergeMenuStateMap(menuStates)).Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -894,7 +894,7 @@ func KanbanColumn(tasks []models.Task, projectID string, category models.TaskCat
 			}
 			if len(tasks) > 0 {
 				for _, task := range tasks {
-					templ_7745c5c3_Err = TaskCard(task, projectID, "", llmModels, agentDefs).Render(ctx, templ_7745c5c3_Buffer)
+					templ_7745c5c3_Err = TaskCard(task, projectID, "", llmModels, agentDefs, taskCardMergeMenuStateMap(menuStates)).Render(ctx, templ_7745c5c3_Buffer)
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
@@ -918,7 +918,7 @@ func KanbanColumn(tasks []models.Task, projectID string, category models.TaskCat
 	})
 }
 
-func activeColumnContent(tasks []models.Task, projectID string, llmModels []models.LLMConfig, agentDefs []models.Agent) templ.Component {
+func activeColumnContent(tasks []models.Task, projectID string, llmModels []models.LLMConfig, agentDefs []models.Agent, menuStates ...map[string]TaskCardMergeMenuState) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -958,7 +958,7 @@ func activeColumnContent(tasks []models.Task, projectID string, llmModels []mode
 		}
 		if len(filterRunningTasks(tasks)) > 0 {
 			for _, task := range filterRunningTasks(tasks) {
-				templ_7745c5c3_Err = TaskCard(task, projectID, "active", llmModels, agentDefs).Render(ctx, templ_7745c5c3_Buffer)
+				templ_7745c5c3_Err = TaskCard(task, projectID, "active", llmModels, agentDefs, taskCardMergeMenuStateMap(menuStates)).Render(ctx, templ_7745c5c3_Buffer)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -988,7 +988,7 @@ func activeColumnContent(tasks []models.Task, projectID string, llmModels []mode
 		}
 		if len(filterPendingTasks(tasks)) > 0 {
 			for _, task := range filterPendingTasks(tasks) {
-				templ_7745c5c3_Err = TaskCard(task, projectID, "active", llmModels, agentDefs).Render(ctx, templ_7745c5c3_Buffer)
+				templ_7745c5c3_Err = TaskCard(task, projectID, "active", llmModels, agentDefs, taskCardMergeMenuStateMap(menuStates)).Render(ctx, templ_7745c5c3_Buffer)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}

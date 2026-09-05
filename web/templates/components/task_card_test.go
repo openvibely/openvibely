@@ -356,13 +356,14 @@ func activeStatusDropZone(t *testing.T, body, status string) string {
 	return body[start : start+len(marker)+next]
 }
 
-func TestTaskCard_LazilyLoadsAuthoritativeMergeOptions(t *testing.T) {
+func TestTaskCardPreRendersStableMergeSubmenus(t *testing.T) {
 	task := models.Task{
-		ID:        "merge-card-task",
-		ProjectID: "project-1",
-		Title:     "Merge card task",
-		Category:  models.CategoryCompleted,
-		Status:    models.StatusCompleted,
+		ID:                "merge-card-task",
+		ProjectID:         "project-1",
+		Title:             "Merge card task",
+		Category:          models.CategoryCompleted,
+		Status:            models.StatusCompleted,
+		MergeTargetBranch: "main",
 	}
 	var buf bytes.Buffer
 	if err := TaskCard(task, "project-1", "completed", nil, nil).Render(context.Background(), &buf); err != nil {
@@ -371,17 +372,35 @@ func TestTaskCard_LazilyLoadsAuthoritativeMergeOptions(t *testing.T) {
 	body := buf.String()
 	for _, want := range []string{
 		`data-task-card-menu-trigger`,
-		`data-task-card-merge-options`,
-		`hx-get="/tasks/merge-card-task/card/merge-options?project_id=project-1"`,
-		`hx-trigger="task-card-menu-open"`,
+		`data-task-card-local-submenu`,
+		`data-task-card-github-submenu`,
+		`group-hover:block`,
+		`group-focus-within:block`,
+		`w-52`,
+		`Merge commit`,
+		`Fast-forward only`,
+		`Rebase onto main`,
+		`Squash merge`,
+		`Create PR`,
 	} {
 		if !strings.Contains(body, want) {
-			t.Fatalf("expected task card merge menu contract %q, body=%s", want, body)
+			t.Fatalf("expected stable pre-rendered task card menu contract %q, body=%s", want, body)
+		}
+	}
+	for _, unwanted := range []string{
+		`hx-get="/tasks/merge-card-task/card/merge-options`,
+		`hx-trigger="task-card-menu-open"`,
+		`>Merge options<`,
+		`<details`,
+		`<summary`,
+	} {
+		if strings.Contains(body, unwanted) {
+			t.Fatalf("task card menu must not hydrate or expand after opening, found %q in %s", unwanted, body)
 		}
 	}
 }
 
-func TestTaskCardMergeOptionsRemainRefreshableAndExposeCreatePR(t *testing.T) {
+func TestTaskCardMergeOptionsArePrecomputedAndExposeCreatePR(t *testing.T) {
 	task := models.Task{ID: "merge-card-task", ProjectID: "project-1", Title: "Merge card task", MergeTargetBranch: "main"}
 	var buf bytes.Buffer
 	if err := TaskCardMergeOptions(&task, "project-1", true, false, nil, true).Render(context.Background(), &buf); err != nil {
@@ -389,14 +408,19 @@ func TestTaskCardMergeOptionsRemainRefreshableAndExposeCreatePR(t *testing.T) {
 	}
 	body := buf.String()
 	for _, want := range []string{
-		`hx-get="/tasks/merge-card-task/card/merge-options?project_id=project-1"`,
-		`hx-trigger="task-card-menu-open"`,
+		`data-task-card-local-submenu`,
+		`data-task-card-github-submenu`,
 		`data-task-card-pr-action`,
 		`data-merge-type="pr"`,
 		`Create PR`,
 	} {
 		if !strings.Contains(body, want) {
-			t.Fatalf("expected authoritative card action contract %q, body=%s", want, body)
+			t.Fatalf("expected precomputed card action contract %q, body=%s", want, body)
+		}
+	}
+	for _, unwanted := range []string{`hx-get=`, `hx-trigger="task-card-menu-open"`} {
+		if strings.Contains(body, unwanted) {
+			t.Fatalf("precomputed card actions must not hydrate after menu open, found %q in %s", unwanted, body)
 		}
 	}
 }
@@ -433,21 +457,21 @@ func TestTaskCardMergeOptionsExposeSharedLocalActionMetadata(t *testing.T) {
 	}
 }
 
-func TestTaskCardMergeOptionsHideUnavailableActions(t *testing.T) {
+func TestTaskCardMergeOptionsDisableIneligibleActionsWithoutUnavailableRows(t *testing.T) {
 	task := models.Task{ID: "merge-card-task", ProjectID: "project-1", Title: "Merge card task", MergeTargetBranch: "main"}
 	var buf bytes.Buffer
 	if err := TaskCardMergeOptions(&task, "project-1", false, false, nil, false).Render(context.Background(), &buf); err != nil {
 		t.Fatal(err)
 	}
 	body := buf.String()
-	for _, unwanted := range []string{"Merge unavailable", "Create PR unavailable", `aria-disabled="true"`, `title="The task is not eligible."`, `title="No branch exists."`} {
+	for _, unwanted := range []string{"Merge unavailable", "Create PR unavailable", `aria-disabled="true"`, `hx-get=`, `hx-trigger=`} {
 		if strings.Contains(body, unwanted) {
-			t.Fatalf("ineligible card actions must be omitted rather than shown as unavailable, found %q in %s", unwanted, body)
+			t.Fatalf("ineligible card actions must use stable disabled controls without unavailable copy, found %q in %s", unwanted, body)
 		}
 	}
-	for _, want := range []string{`data-task-card-merge-options`, `hx-trigger="task-card-menu-open"`} {
+	for _, want := range []string{`data-task-card-local-submenu`, `data-task-card-github-submenu`, `disabled data-task-card-merge-action`, `disabled data-task-card-pr-action`} {
 		if !strings.Contains(body, want) {
-			t.Fatalf("empty authoritative options fragment must remain refreshable, missing %q in %s", want, body)
+			t.Fatalf("ineligible precomputed options must remain stable and disabled, missing %q in %s", want, body)
 		}
 	}
 }

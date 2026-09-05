@@ -18,16 +18,27 @@ import (
 var errTaskMutationEligibilityChanged = errors.New("task mutation eligibility changed")
 
 func (h *Handler) taskCardMergeEligibility(ctx context.Context, task *models.Task, mergeType string) (taskMergeActionState, bool, string) {
+	if task == nil {
+		return taskMergeActionState{}, false, "Task not found."
+	}
+	project, _ := h.projectRepo.GetByID(ctx, task.ProjectID)
+	return h.taskCardMergeEligibilityForProject(ctx, task, project, mergeType)
+}
+
+func (h *Handler) taskCardMergeEligibilityForProject(ctx context.Context, task *models.Task, project *models.Project, mergeType string) (taskMergeActionState, bool, string) {
+	return h.taskCardMergeEligibilityForProjectWithLocks(ctx, task, project, mergeType, nil)
+}
+
+func (h *Handler) taskCardMergeEligibilityForProjectWithLocks(ctx context.Context, task *models.Task, project *models.Project, mergeType string, worktreeLocks map[string]bool) (taskMergeActionState, bool, string) {
 	var state taskMergeActionState
 	if task == nil {
 		return state, false, "Task not found."
 	}
-	project, _ := h.projectRepo.GetByID(ctx, task.ProjectID)
 	if project == nil || project.RepoPath == "" {
 		return state, false, "The project has no repository path."
 	}
-	state = h.resolveTaskMergeActionState(ctx, task)
-	if service.IsGitWorktreeLocked(project.RepoPath, task.WorktreePath) {
+	state = h.resolveTaskMergeActionStateForProjectWithLocks(ctx, task, project, worktreeLocks)
+	if taskCardWorktreeLocked(project, task, worktreeLocks) {
 		return state, false, "The task worktree is locked."
 	}
 	eligibility := h.resolveTaskMergeEligibility(ctx, task, project, state.BranchAlreadyMerged)
@@ -41,16 +52,21 @@ func (h *Handler) taskCardMergeEligibility(ctx context.Context, task *models.Tas
 		}
 		return state, false, reason
 	}
+	eligible, reason := taskCardMergeModeEligibility(task, state, mergeType)
+	return state, eligible, reason
+}
+
+func taskCardMergeModeEligibility(task *models.Task, state taskMergeActionState, mergeType string) (bool, string) {
 	if mergeType == "rebase" && !state.RebaseAvailable {
-		return state, false, "Rebase is not available for the current branch state."
+		return false, "Rebase is not available for the current branch state."
 	}
 	if mergeType == "ff" && task.WorktreePath != "" {
 		status, err := service.GitStatusPorcelain(task.WorktreePath)
 		if err != nil || strings.TrimSpace(status) != "" {
-			return state, false, "Fast-forward requires a clean task worktree."
+			return false, "Fast-forward requires a clean task worktree."
 		}
 	}
-	return state, true, ""
+	return true, ""
 }
 
 func cardMutationSource(c echo.Context) bool {
@@ -65,6 +81,10 @@ func rejectTaskCardMutation(c echo.Context, message string) error {
 }
 
 func (h *Handler) taskCardPullRequestEligibility(task *models.Task, project *models.Project) (bool, string) {
+	return h.taskCardPullRequestEligibilityWithLocks(task, project, nil)
+}
+
+func (h *Handler) taskCardPullRequestEligibilityWithLocks(task *models.Task, project *models.Project, worktreeLocks map[string]bool) (bool, string) {
 	if task == nil || strings.TrimSpace(task.WorktreeBranch) == "" {
 		return false, "A task worktree branch is required."
 	}
@@ -74,7 +94,7 @@ func (h *Handler) taskCardPullRequestEligibility(task *models.Task, project *mod
 	if task.Status == models.StatusRunning || task.Status == models.StatusQueued {
 		return false, "The task worktree is currently in use."
 	}
-	if service.IsGitWorktreeLocked(project.RepoPath, task.WorktreePath) {
+	if taskCardWorktreeLocked(project, task, worktreeLocks) {
 		return false, "The task worktree is locked."
 	}
 	if h.githubSvc == nil {
@@ -110,8 +130,19 @@ func (h *Handler) GetTaskCardMergeOptions(c echo.Context) error {
 	if h.taskPullRequestRepo != nil {
 		taskPR, _ = h.taskPullRequestRepo.GetByTaskID(c.Request().Context(), task.ID)
 	}
+	fastForwardEligible := false
+	if eligible {
+		fastForwardEligible, _ = taskCardMergeModeEligibility(task, state, "ff")
+	}
 	prEligible, _ := h.taskCardPullRequestEligibility(task, project)
-	return render(c, http.StatusOK, components.TaskCardMergeOptions(task, projectID, eligible, state.RebaseAvailable, taskPR, prEligible))
+	return render(c, http.StatusOK, components.TaskCardMergeSubmenus(task, projectID, components.TaskCardMergeMenuState{
+		LocalEligible:       eligible,
+		FastForwardEligible: fastForwardEligible,
+		RebaseEligible:      eligible && state.RebaseAvailable,
+		PullEligible:        prEligible,
+		PullRequest:         taskPR,
+		TargetBranch:        task.MergeTargetBranch,
+	}))
 }
 
 // UpdateTaskAutoMerge toggles auto-merge for a task.
@@ -476,6 +507,11 @@ func (h *Handler) CreateTaskPullRequest(c echo.Context) error {
 			return taskCardPullRequestNotFound(c)
 		}
 	}
+	project, err := h.projectRepo.GetByID(c.Request().Context(), task.ProjectID)
+	if err != nil || project == nil || project.RepoPath == "" {
+		return taskPullRequestFailure(c, fromTaskCard, "Project has no repository path configured")
+	}
+	h.recoverTaskWorktreeState(c.Request().Context(), task, project)
 	if task.WorktreeBranch == "" {
 		return taskPullRequestFailure(c, fromTaskCard, "Task has no worktree branch")
 	}
@@ -490,10 +526,6 @@ func (h *Handler) CreateTaskPullRequest(c echo.Context) error {
 		return taskPullRequestFailure(c, fromTaskCard, "Task pull request repository not available")
 	}
 
-	project, err := h.projectRepo.GetByID(c.Request().Context(), task.ProjectID)
-	if err != nil || project == nil || project.RepoPath == "" {
-		return taskPullRequestFailure(c, fromTaskCard, "Project has no repository path configured")
-	}
 	var eligibilityReason string
 	result, mutationErr := h.newTaskPullRequestService().OpenForTaskValidated(c.Request().Context(), project, task, service.OpenTaskPullRequestOptions{
 		CommitMessage: h.buildPullRequestPrepCommitMessage(c.Request().Context(), task),
@@ -503,6 +535,7 @@ func (h *Handler) CreateTaskPullRequest(c echo.Context) error {
 			eligibilityReason = "Task not found."
 			return nil, errTaskMutationEligibilityChanged
 		}
+		h.recoverTaskWorktreeState(c.Request().Context(), currentTask, project)
 		if fromTaskCard {
 			if eligible, reason := h.taskCardPullRequestEligibility(currentTask, project); !eligible {
 				eligibilityReason = reason
