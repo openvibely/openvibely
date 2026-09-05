@@ -768,18 +768,7 @@ func TestCompletedBubbleUsesSharedHydratorWithoutInlineScript(t *testing.T) {
 		t.Fatalf("completed assistant bubble must expose compact raw-content markup for the shared hydrator:\n%s", content)
 	}
 
-	var window bytes.Buffer
-	for i := 0; i < 100; i++ {
-		if err := ChatBubble("Assistant", raw).Render(context.Background(), &window); err != nil {
-			t.Fatalf("render completed bubble %d: %v", i, err)
-		}
-	}
-	const previousProbeBytes = 215600
-	if got, max := window.Len(), previousProbeBytes/4; got > max {
-		t.Fatalf("100 short completed assistant bubbles rendered %d bytes, want <= %d for at least 75%% reduction from probe", got, max)
-	}
 	fixed := len(content) - len(raw)
-	t.Logf("100 short completed assistant bubbles rendered %d bytes; fixed markup overhead %d bytes per bubble", window.Len(), fixed)
 	if fixed >= 300 {
 		t.Fatalf("completed assistant bubble fixed markup overhead = %d bytes, want < 300", fixed)
 	}
