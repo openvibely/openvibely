@@ -146,14 +146,26 @@ func (h *Handler) ListSkills(c echo.Context) error {
 	pageItems, hasMore := cardPageItems(pageItems, page.PageSize)
 	canManage := h.agentSkillRoot != "" || h.currentProjectSkillRoot(c) != ""
 	currentProjectID, _ := h.getCurrentProjectID(c)
+	listState := pages.CardListState{
+		ProjectID: currentProjectID,
+		Search:    page.Search,
+		Sort:      sortValue,
+		Filters: map[string]string{
+			"enabled":    optionalBoolString(enabled),
+			"scope":      scope,
+			"always_use": optionalBoolString(alwaysUse),
+			"archived":   optionalBoolString(archived),
+			"source":     source,
+		},
+	}
 	if page.IsFragment {
 		setCardPageResponse(c, hasMore)
 	}
 	if isHTMX(c) || page.IsFragment {
-		return render(c, http.StatusOK, pages.SkillsContentForProjectPage(pageItems, canManage, currentProjectID, hasMore))
+		return render(c, http.StatusOK, pages.SkillsContentForProjectPageWithState(pageItems, canManage, currentProjectID, hasMore, listState))
 	}
 	projects, _ := h.projectSvc.ListSelectorOptions(c.Request().Context())
-	return render(c, http.StatusOK, pages.SkillsPage(projects, currentProjectID, pageItems, canManage, hasMore))
+	return render(c, http.StatusOK, pages.SkillsPageWithState(projects, currentProjectID, pageItems, canManage, hasMore, listState))
 }
 
 func skillCardMatchesSearch(skill pages.SkillCard, search string) bool {

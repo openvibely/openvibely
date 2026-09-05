@@ -308,7 +308,8 @@ func TestAlertsContent_DecisionFilterRendersSelectedStateAndSearchState(t *testi
 		`name="decision_state"`,
 		`data-card-filter-chip="decision_state"`,
 		`Filters (1)`,
-		`data-card-pagination-preserve-params="decision_state,processing_state,search"`,
+		`data-card-pagination-preserve-params="read,severity,decision_state,processing_state,type,source,sort,search"`,
+		`type="hidden" name="processing_state" value="failed"`,
 		`data-card-pagination-url="/alerts?decision_state=pending&amp;processing_state=failed&amp;project_id=project-1&amp;search=needle"`,
 		`hx-get="/alerts?decision_state=pending&amp;processing_state=failed&amp;project_id=project-1&amp;search=needle"`,
 		`value="pending" selected`,
@@ -319,7 +320,6 @@ func TestAlertsContent_DecisionFilterRendersSelectedStateAndSearchState(t *testi
 		}
 	}
 	for _, removed := range []string{
-		`name="processing_state"`,
 		`aria-label="Filter by processing state"`,
 		`All processing states`,
 	} {

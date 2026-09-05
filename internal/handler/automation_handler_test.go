@@ -1897,9 +1897,9 @@ func TestAutomationBuilderWebSaveIsBrowserLocalUntilAtomicSaveAndProjectScoped(t
 	require.NoError(t, err)
 	require.NotNil(t, stillPresent)
 
-	deleted := tc.HTMX().Post(fmt.Sprintf("/automations/%s/delete?project_id=%s", automationID, project.ID)).WithForm(url.Values{"project_id": {project.ID}}).Execute()
+	deleted := tc.HTMX().Post(fmt.Sprintf("/automations/%s/delete?project_id=%s&search=needle&lifecycle_state=paused&health_state=degraded&automation_type=custom&adapter=custom&sort=name_desc", automationID, project.ID)).WithForm(url.Values{"project_id": {project.ID}}).Execute()
 	require.Equal(t, 204, deleted.Code)
-	require.Equal(t, "/automations?project_id="+project.ID, deleted.Header().Get("HX-Redirect"))
+	require.Equal(t, "/automations?adapter=custom&automation_type=custom&health_state=degraded&lifecycle_state=paused&project_id="+project.ID+"&search=needle&sort=name_desc", deleted.Header().Get("HX-Redirect"))
 	gone, err := automationRepo.GetDefinition(context.Background(), project.ID, automationID)
 	require.NoError(t, err)
 	require.Nil(t, gone)

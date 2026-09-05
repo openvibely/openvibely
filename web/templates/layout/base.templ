@@ -4305,7 +4305,9 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 									filterChips = document.createElement('div');
 									filterChips.className = 'mt-2 flex flex-wrap items-center gap-2';
 									filterChips.setAttribute('data-card-filter-chips', '');
-									toolbar.querySelector('[data-card-selection-actions]').before(filterChips);
+									var selectionActions = toolbar.querySelector('[data-card-selection-actions]');
+									if (selectionActions) selectionActions.before(filterChips);
+									else form.insertAdjacentElement('afterend', filterChips);
 								}
 								if (filterChips) {
 									filterChips.innerHTML = '';

@@ -22,26 +22,36 @@ type SkillCard struct {
 
 templ Skills(projects []models.Project, currentProjectID string, skills []SkillCard, canManage bool) {
 	@layout.Base("Skills", projects, currentProjectID) {
-		@skillsContent(skills, canManage, currentProjectID, false)
+		@skillsContent(skills, canManage, currentProjectID, false, CardListState{ProjectID: currentProjectID})
 	}
 }
 
 templ SkillsPage(projects []models.Project, currentProjectID string, skills []SkillCard, canManage bool, hasMore bool) {
 	@layout.Base("Skills", projects, currentProjectID) {
-		@skillsContent(skills, canManage, currentProjectID, hasMore)
+		@skillsContent(skills, canManage, currentProjectID, hasMore, CardListState{ProjectID: currentProjectID})
 	}
 }
 
 templ SkillsContent(skills []SkillCard, canManage bool) {
-	@skillsContent(skills, canManage, "", false)
+	@skillsContent(skills, canManage, "", false, CardListState{})
 }
 
 templ SkillsContentForProject(skills []SkillCard, canManage bool, currentProjectID string) {
-	@skillsContent(skills, canManage, currentProjectID, false)
+	@skillsContent(skills, canManage, currentProjectID, false, CardListState{ProjectID: currentProjectID})
 }
 
 templ SkillsContentForProjectPage(skills []SkillCard, canManage bool, currentProjectID string, hasMore bool) {
-	@skillsContent(skills, canManage, currentProjectID, hasMore)
+	@skillsContent(skills, canManage, currentProjectID, hasMore, CardListState{ProjectID: currentProjectID})
+}
+
+templ SkillsPageWithState(projects []models.Project, currentProjectID string, skills []SkillCard, canManage bool, hasMore bool, state CardListState) {
+	@layout.Base("Skills", projects, currentProjectID) {
+		@skillsContent(skills, canManage, currentProjectID, hasMore, state)
+	}
+}
+
+templ SkillsContentForProjectPageWithState(skills []SkillCard, canManage bool, currentProjectID string, hasMore bool, state CardListState) {
+	@skillsContent(skills, canManage, currentProjectID, hasMore, state)
 }
 
 func skillSearchText(skill SkillCard) string {
@@ -72,8 +82,8 @@ func defaultSkillBodyTemplate() string {
 		"---\n\nDescribe when to use this skill and the workflow the agent should follow.\n"
 }
 
-templ skillsContent(skills []SkillCard, canManage bool, currentProjectID string, hasMore bool) {
-		<div id="skills-container" data-search-container data-card-pagination-root data-card-pagination-replacement-managed="true" data-card-pagination-url={ "/skills?project_id=" + currentProjectID } data-card-pagination-list="#skills-card-list" data-card-pagination-card-selector="[data-skill-handle]" data-card-pagination-key="data-skill-handle" data-card-pagination-page-size="20" data-card-pagination-has-more={ cardPaginationHasMoreAttribute(hasMore) }>		@layout.PageTitle("Skills")
+templ skillsContent(skills []SkillCard, canManage bool, currentProjectID string, hasMore bool, state CardListState) {
+		<div id="skills-container" data-search-container data-card-pagination-root data-card-pagination-replacement-managed="true" data-card-pagination-url={ CardListURL("skills", state) } data-card-pagination-list="#skills-card-list" data-card-pagination-card-selector="[data-skill-handle]" data-card-pagination-key="data-skill-handle" data-card-pagination-page-size="20" data-card-pagination-has-more={ cardPaginationHasMoreAttribute(hasMore) }>		@layout.PageTitle("Skills")
 		<div class="flex items-center justify-between mb-6">
 			<h2 class="text-2xl font-bold">Skills</h2>
 			<div class="dropdown dropdown-end">
@@ -97,7 +107,7 @@ templ skillsContent(skills []SkillCard, canManage bool, currentProjectID string,
 				</ul>
 			</div>
 		</div>
-		@CardListToolbar(collectionToolbarConfigWithSelection("skills", currentProjectID, "", canManage))
+		@CardListToolbar(collectionToolbarConfigWithSelectionState("skills", state, canManage))
 			<div id="skills-card-list" data-card-pagination-list>
 			if len(skills) == 0 {
 				<div class="text-center py-12" data-search-empty-state>

@@ -76,6 +76,31 @@ func (h *Handler) SetAutomationBuilderServices(drafts *service.AutomationDraftSe
 	}
 }
 
+func automationCardListFilter(c echo.Context, page cardPageRequest) repository.AutomationCardListFilter {
+	return repository.AutomationCardListFilter{
+		Search:         page.Search,
+		LifecycleState: allowlistedQuery(c, "lifecycle_state", "", "active", "paused", "draft", "archived"),
+		HealthState:    allowlistedQuery(c, "health_state", "", "unknown", "healthy", "degraded", "unhealthy"),
+		AutomationType: allowlistedQuery(c, "automation_type", "", "custom", "native_sdlc", "github_sdlc", "vision_driver", "scheduled"),
+		Adapter:        allowlistedQuery(c, "adapter", "", "custom", "native_sdlc", "github_sdlc", "vision_driver"),
+		Sort:           allowlistedQuery(c, "sort", "updated_desc", "updated_desc", "updated_asc", "name_asc", "name_desc"),
+	}
+}
+
+func automationCardListState(projectID string, filter repository.AutomationCardListFilter) pages.CardListState {
+	return pages.CardListState{
+		ProjectID: projectID,
+		Search:    filter.Search,
+		Sort:      filter.Sort,
+		Filters: map[string]string{
+			"lifecycle_state": filter.LifecycleState,
+			"health_state":    filter.HealthState,
+			"automation_type": filter.AutomationType,
+			"adapter":         filter.Adapter,
+		},
+	}
+}
+
 func (h *Handler) ListAutomations(c echo.Context) error {
 	if h.automationGraphSvc == nil {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "automations unavailable")
@@ -86,14 +111,8 @@ func (h *Handler) ListAutomations(c echo.Context) error {
 		return err
 	}
 	page := parseCardPageRequest(c)
-	filter := repository.AutomationCardListFilter{
-		Search:         page.Search,
-		LifecycleState: allowlistedQuery(c, "lifecycle_state", "", "active", "paused", "draft", "archived"),
-		HealthState:    allowlistedQuery(c, "health_state", "", "unknown", "healthy", "degraded", "unhealthy"),
-		AutomationType: allowlistedQuery(c, "automation_type", "", "custom", "native_sdlc", "github_sdlc", "vision_driver", "scheduled"),
-		Adapter:        allowlistedQuery(c, "adapter", "", "custom", "native_sdlc", "github_sdlc", "vision_driver"),
-		Sort:           allowlistedQuery(c, "sort", "updated_desc", "updated_desc", "updated_asc", "name_asc", "name_desc"),
-	}
+	filter := automationCardListFilter(c, page)
+	listState := automationCardListState(projectID, filter)
 	cards, err := h.automationGraphSvc.ListPageFiltered(ctx, projectID, page.PageSize+1, page.Offset, filter)
 	if err != nil {
 		return err
@@ -101,10 +120,10 @@ func (h *Handler) ListAutomations(c echo.Context) error {
 	cards, hasMore := cardPageItems(cards, page.PageSize)
 	if page.IsFragment || isHTMX(c) {
 		setCardPageResponse(c, hasMore)
-		return render(c, http.StatusOK, pages.AutomationsContentPage(cards, projectID, hasMore))
+		return render(c, http.StatusOK, pages.AutomationsContentPageWithState(cards, projectID, hasMore, listState))
 	}
 	projects, _ := h.projectSvc.ListSelectorOptions(ctx)
-	return render(c, http.StatusOK, pages.AutomationsPage(projects, projectID, cards, hasMore))
+	return render(c, http.StatusOK, pages.AutomationsPageWithState(projects, projectID, cards, hasMore, listState))
 }
 
 func (h *Handler) GetAutomationLive(c echo.Context) error {

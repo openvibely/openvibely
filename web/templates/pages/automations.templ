@@ -13,41 +13,47 @@ import (
 
 templ Automations(projects []models.Project, currentProjectID string, cards []models.AutomationCard) {
 	@layout.Base("Automations", projects, currentProjectID) {
-		@automationsContent(cards, currentProjectID, "", "", false)
-	}
+			@automationsContent(cards, currentProjectID, "", "", false, CardListState{ProjectID: currentProjectID})	}
 }
 
 // AutomationsPage renders the initial bounded portfolio with its page boundary.
 templ AutomationsPage(projects []models.Project, currentProjectID string, cards []models.AutomationCard, hasMore bool) {
 	@layout.Base("Automations", projects, currentProjectID) {
-		@automationsContent(cards, currentProjectID, "", "", hasMore)
-	}
+			@automationsContent(cards, currentProjectID, "", "", hasMore, CardListState{ProjectID: currentProjectID})	}
 }
 
 templ AutomationsDescribeFailure(projects []models.Project, currentProjectID string, cards []models.AutomationCard, description string, errorMessage string) {
 	@layout.Base("Automations", projects, currentProjectID) {
-		@automationsContent(cards, currentProjectID, description, errorMessage, false)
-	}
+			@automationsContent(cards, currentProjectID, description, errorMessage, false, CardListState{ProjectID: currentProjectID})	}
 }
 
 // AutomationsDescribeFailurePage keeps the portfolio error document paged.
 templ AutomationsDescribeFailurePage(projects []models.Project, currentProjectID string, cards []models.AutomationCard, description string, errorMessage string, hasMore bool) {
 	@layout.Base("Automations", projects, currentProjectID) {
-		@automationsContent(cards, currentProjectID, description, errorMessage, hasMore)
-	}
+			@automationsContent(cards, currentProjectID, description, errorMessage, hasMore, CardListState{ProjectID: currentProjectID})	}
 }
 
 templ AutomationsContent(cards []models.AutomationCard, currentProjectID string) {
-	@automationsContent(cards, currentProjectID, "", "", false)
-}
+			@automationsContent(cards, currentProjectID, "", "", false, CardListState{ProjectID: currentProjectID})}
 
 // AutomationsContentPage renders one bounded portfolio page with its boundary.
 templ AutomationsContentPage(cards []models.AutomationCard, currentProjectID string, hasMore bool) {
-	@automationsContent(cards, currentProjectID, "", "", hasMore)
+			@automationsContent(cards, currentProjectID, "", "", hasMore, CardListState{ProjectID: currentProjectID})}
+
+// AutomationsPageWithState renders the initial bounded portfolio with authoritative list state.
+templ AutomationsPageWithState(projects []models.Project, currentProjectID string, cards []models.AutomationCard, hasMore bool, state CardListState) {
+	@layout.Base("Automations", projects, currentProjectID) {
+		@automationsContent(cards, currentProjectID, "", "", hasMore, state)
+	}
 }
 
-templ automationsContent(cards []models.AutomationCard, currentProjectID string, description string, errorMessage string, hasMore bool) {
-		<div id="automations-container" class="h-full min-w-0 max-w-full overflow-y-auto" data-search-container data-card-pagination-root data-card-pagination-url={ fmt.Sprintf("/automations?project_id=%s", currentProjectID) } data-card-pagination-list="#automations-card-list" data-card-pagination-card-selector="[data-automation-url]" data-card-pagination-key="data-automation-url" data-card-pagination-page-size="20" data-card-pagination-has-more={ cardPaginationHasMoreAttribute(hasMore) }>
+// AutomationsContentPageWithState renders a bounded portfolio fragment with authoritative list state.
+templ AutomationsContentPageWithState(cards []models.AutomationCard, currentProjectID string, hasMore bool, state CardListState) {
+	@automationsContent(cards, currentProjectID, "", "", hasMore, state)
+}
+
+templ automationsContent(cards []models.AutomationCard, currentProjectID string, description string, errorMessage string, hasMore bool, state CardListState) {
+		<div id="automations-container" class="h-full min-w-0 max-w-full overflow-y-auto" data-search-container data-card-pagination-root data-card-pagination-url={ CardListURL("automations", state) } data-card-pagination-list="#automations-card-list" data-card-pagination-card-selector="[data-automation-url]" data-card-pagination-key="data-automation-url" data-card-pagination-page-size="20" data-card-pagination-has-more={ cardPaginationHasMoreAttribute(hasMore) }>
 		@layout.PageTitle("Automations")
 		<div class="mb-6 flex items-center justify-between gap-3">
 			<h2 class="text-2xl font-bold">Automations</h2>
@@ -64,7 +70,7 @@ templ automationsContent(cards []models.AutomationCard, currentProjectID string,
 				<input type="hidden" name="source" value="blank"/>
 			</form>
 		</div>
-			@CardListToolbar(collectionToolbarConfig("automations", currentProjectID, ""))
+			@CardListToolbar(collectionToolbarConfigWithState("automations", state))
 			<div id="automations-card-list" data-card-pagination-list>
 			if len(cards) == 0 {
 				<div class="rounded-box bg-base-200/60 p-8 text-center" data-search-empty-state>
@@ -160,7 +166,7 @@ templ automationsContent(cards []models.AutomationCard, currentProjectID string,
 												type="button"
 												data-automation-card-delete={ card.Automation.ID }
 												data-automation-name={ card.Automation.Name }
-												data-automation-delete-url={ fmt.Sprintf("/automations/%s/delete?project_id=%s", card.Automation.ID, currentProjectID) }
+												data-automation-delete-url={ CardListActionURL("automations", fmt.Sprintf("/automations/%s/delete", card.Automation.ID), state) }
 												onclick="event.stopPropagation(); openAutomationCardDelete(this)"
 											>Delete</button>
 										</li>

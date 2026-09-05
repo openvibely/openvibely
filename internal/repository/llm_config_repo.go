@@ -248,11 +248,11 @@ func (r *LLMConfigRepo) ListCardsPageFiltered(ctx context.Context, limit, offset
 	}
 	switch filter.AuthStatus {
 	case "connected":
-		query += ` AND auth_method = 'oauth' AND COALESCE(oauth_access_token, '') != '' AND (COALESCE(oauth_expires_at, 0) = 0 OR oauth_expires_at > CAST(strftime('%s', 'now') AS INTEGER) * 1000)`
+		query += ` AND auth_method = 'oauth' AND provider IN ('anthropic', 'openai', 'openai_compatible') AND COALESCE(oauth_access_token, '') != '' AND ((provider = 'openai_compatible' AND COALESCE(oauth_expires_at, 0) = 0) OR COALESCE(oauth_expires_at, 0) > CAST(strftime('%s', 'now') AS INTEGER) * 1000)`
 	case "not_connected":
-		query += ` AND auth_method = 'oauth' AND (COALESCE(oauth_access_token, '') = '' OR (COALESCE(oauth_expires_at, 0) != 0 AND oauth_expires_at <= CAST(strftime('%s', 'now') AS INTEGER) * 1000))`
+		query += ` AND auth_method = 'oauth' AND provider IN ('anthropic', 'openai', 'openai_compatible') AND (COALESCE(oauth_access_token, '') = '' OR NOT ((provider = 'openai_compatible' AND COALESCE(oauth_expires_at, 0) = 0) OR COALESCE(oauth_expires_at, 0) > CAST(strftime('%s', 'now') AS INTEGER) * 1000))`
 	case "not_required":
-		query += ` AND auth_method != 'oauth'`
+		query += ` AND (auth_method != 'oauth' OR provider NOT IN ('anthropic', 'openai', 'openai_compatible'))`
 	}
 	if filter.Kind == "mixture" {
 		query += ` AND provider = 'mixture'`

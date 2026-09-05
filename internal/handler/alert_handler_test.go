@@ -400,10 +400,10 @@ func TestHandler_ListAlertsSupportsWorkflowFiltersAndRefreshPreservation(t *test
 		require.NoError(t, h.ListAlerts(e.NewContext(req, rec)))
 		require.Equal(t, http.StatusOK, rec.Code)
 		body := rec.Body.String()
-		for _, want := range []string{pendingFailedFirst.Title, pendingFailedSecond.Title, `data-card-pagination-preserve-params="decision_state,processing_state,search"`, `value="pending" selected`, `value="needle"`, `data-card-search-initial="needle"`, "5 unread"} {
+		for _, want := range []string{pendingFailedFirst.Title, pendingFailedSecond.Title, `data-card-pagination-preserve-params="read,severity,decision_state,processing_state,type,source,sort,search"`, `value="pending" selected`, `value="needle"`, `data-card-search-initial="needle"`, `type="hidden" name="processing_state" value="failed"`, "5 unread"} {
 			require.Contains(t, body, want)
 		}
-		for _, removed := range []string{`name="processing_state"`, `aria-label="Filter by processing state"`, `All processing states`} {
+		for _, removed := range []string{`aria-label="Filter by processing state"`, `All processing states`} {
 			require.NotContains(t, body, removed)
 		}
 		for _, excluded := range []string{pendingUnclaimed.Title, approvedFailed.Title, foreignAlert.Title, "Operational excluded"} {
@@ -445,7 +445,7 @@ func TestHandler_ListAlertsSupportsWorkflowFiltersAndRefreshPreservation(t *test
 		require.Contains(t, body, `value="pending" selected`)
 		require.Contains(t, body, `value="needle"`)
 		require.Contains(t, body, `data-card-search-initial="needle"`)
-		require.NotContains(t, body, `name="processing_state"`)
+		require.Contains(t, body, `type="hidden" name="processing_state" value="unclaimed"`)
 		require.NotContains(t, body, `aria-label="Filter by processing state"`)
 		require.Contains(t, body, "/alerts?decision_state=pending&amp;processing_state=unclaimed&amp;project_id="+project.ID+"&amp;search=needle")
 	})

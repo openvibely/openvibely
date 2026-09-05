@@ -1567,16 +1567,26 @@ func (h *Handler) ListAgents(c echo.Context) error {
 	}
 	modelOptions := buildAgentModelOptions(modelPickerOptions)
 
+	currentProjectID, _ := h.getCurrentProjectID(c)
+	listState := pages.CardListState{
+		ProjectID: currentProjectID,
+		Search:    page.Search,
+		Sort:      agentFilter.Sort,
+		Filters: map[string]string{
+			"enabled": optionalBoolString(agentFilter.Enabled),
+			"scope":   agentFilter.Scope,
+			"origin":  agentFilter.Origin,
+		},
+	}
 	if isHtmx || page.IsFragment {
 		if page.IsFragment {
 			setCardPageResponse(c, hasMore)
 		}
-		return render(c, http.StatusOK, pages.AgentsContentPage(agents, modelOptions, hasMore))
+		return render(c, http.StatusOK, pages.AgentsContentPageWithState(agents, modelOptions, hasMore, listState))
 	}
 
-	currentProjectID, _ := h.getCurrentProjectID(c)
 	projects, _ := h.projectSvc.ListSelectorOptions(c.Request().Context())
-	return render(c, http.StatusOK, pages.AgentsPage(projects, currentProjectID, agents, modelOptions, hasMore))
+	return render(c, http.StatusOK, pages.AgentsPageWithState(projects, currentProjectID, agents, modelOptions, hasMore, listState))
 }
 
 func agentNameValidationHTTPError(err error) error {

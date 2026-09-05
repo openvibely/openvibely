@@ -47,10 +47,13 @@ func TestCollectionSelectionProductionBrowserInteractions(t *testing.T) {
 		t.Skip("Chrome/Chromium executable not found")
 	}
 
-	render := func(cards []models.LLMConfig) string {
+	renderWithState := func(cards []models.LLMConfig, state pages.CardListState) string {
 		var out bytes.Buffer
-		require.NoError(t, pages.ModelsContentPageWithPagination(cards, cards, map[string]int{}, false, false).Render(t.Context(), &out))
+		require.NoError(t, pages.ModelsContentPageWithPaginationAndState(cards, cards, map[string]int{}, false, false, state).Render(t.Context(), &out))
 		return out.String()
+	}
+	render := func(cards []models.LLMConfig) string {
+		return renderWithState(cards, pages.CardListState{})
 	}
 	initial := []models.LLMConfig{
 		{ID: "default", Name: "Default", Provider: models.ProviderTest, Model: "default", IsDefault: true},
@@ -67,6 +70,10 @@ func TestCollectionSelectionProductionBrowserInteractions(t *testing.T) {
 	finalCards := []models.LLMConfig{{ID: "default", Name: "Default", Provider: models.ProviderTest, Model: "default", IsDefault: true}}
 	replacementJSON, err := json.Marshal(render(replacement))
 	require.NoError(t, err)
+	var unmanagedSkills bytes.Buffer
+	require.NoError(t, pages.SkillsContentForProjectPage([]pages.SkillCard{{Handle: "read-only", Name: "Read only", Scope: "global", Source: "global", Enabled: true}}, false, "project", false).Render(t.Context(), &unmanagedSkills))
+	unmanagedSkillsJSON, err := json.Marshal(unmanagedSkills.String())
+	require.NoError(t, err)
 
 	var base bytes.Buffer
 	require.NoError(t, layout.Base("Collection selection browser", nil, "").Render(t.Context(), &base))
@@ -77,7 +84,12 @@ func TestCollectionSelectionProductionBrowserInteractions(t *testing.T) {
 		}
 		local = append(local, line)
 	}
-	page := strings.Replace(strings.Join(local, "\n"), "</main>", render(initial)+"</main>", 1)
+	initialHTML := renderWithState(initial, pages.CardListState{Filters: map[string]string{"provider": "openai"}})
+	page := strings.Replace(strings.Join(local, "\n"), "</head>", `<style>
+.hidden{display:none!important}.flex{display:flex!important}.fixed{position:fixed!important}
+@media (min-width:768px){.md\:inline-flex{display:inline-flex!important}.md\:hidden{display:none!important}}
+</style></head>`, 1)
+	page = strings.Replace(page, "</main>", initialHTML+"</main>", 1)
 	runner := `<script>
 (function() {
   function result(status, message) { var n=document.createElement('div'); n.id='browser-result'; n.dataset.status=status; n.textContent=message||status; document.body.appendChild(n); }
@@ -88,6 +100,14 @@ func TestCollectionSelectionProductionBrowserInteractions(t *testing.T) {
   function selectedCount() { return document.querySelector('[data-card-selected-count]').textContent.trim(); }
   async function run() {
     await wait(100);
+    var chip=document.querySelector('[data-card-filter-chip="provider"]'), clear=document.querySelector('[data-card-clear-filters]');
+    if (!chip || !clear || !chip.textContent.includes('OpenAI')) fail('server-rendered active filter chip or Clear all is missing');
+    window.openVibelyNavigate=function(path){window.selectionNavigation=path;};
+    clear.click();
+    if (!window.selectionNavigation || window.selectionNavigation.includes('provider=')) fail('Clear all did not navigate without the active filter');
+    var desktopSelect=document.querySelector('[data-card-select-loaded]'), mobileSelect=document.querySelector('[data-card-select-mode]');
+    for (var cssWait=0;cssWait<80 && getComputedStyle(desktopSelect).display!=='none';cssWait++) await wait(25);
+    if (getComputedStyle(desktopSelect).display!=='none' || getComputedStyle(mobileSelect).display==='none') fail('production responsive styles did not expose mobile selection mode');
     var clicks=0; ['a','b','c'].forEach(function(id) { card(id).onclick=function(){clicks++;}; });
     checkbox('a').click();
     if (clicks !== 0 || selectedCount() !== '1 selected') fail('checkbox click activated card or did not select');
@@ -113,7 +133,7 @@ func TestCollectionSelectionProductionBrowserInteractions(t *testing.T) {
     if (selectedCount() !== '0 selected' || !checkbox('e')) fail('HTMX/SSE replacement did not reconcile removed and new cards');
     document.querySelector('[data-card-select-mode]').click(); checkbox('b').click();
     var mobile=document.querySelector('[data-card-mobile-actions]');
-    if (!mobile.classList.contains('flex') || selectedCount() !== '1 selected') fail('mobile Select mode did not expose actions');
+    if (!mobile.classList.contains('flex') || selectedCount() !== '1 selected' || getComputedStyle(mobile).position !== 'fixed' || getComputedStyle(mobile).display === 'none') fail('mobile Select mode did not expose fixed actions');
     mobile.querySelector('[data-card-mobile-cancel]').click();
     if (selectedCount() !== '0 selected' || !mobile.classList.contains('hidden')) fail('mobile cancel did not clear mode');
     document.querySelector('[data-card-select-loaded]').click(); document.querySelector('[data-card-delete-selected]').click();
@@ -124,9 +144,16 @@ func TestCollectionSelectionProductionBrowserInteractions(t *testing.T) {
     if (!window.bulkFinished) fail('bulk deletion did not finish');
     for (var j=0;j<80 && document.querySelectorAll('#models-card-list [data-card-select-id]').length!==1;j++) await wait(25);
     if (document.querySelectorAll('#models-card-list [data-card-select-id]').length !== 1 || document.activeElement !== document.querySelector('[data-card-search]')) fail('bulk refresh was not authoritative or did not restore focus');
+    history.replaceState({}, '', '/skills?enabled=true');
+    var parsed=new DOMParser().parseFromString(UNMANAGED_SKILLS_HTML, 'text/html'), skillsRoot=parsed.getElementById('skills-container');
+    document.querySelector('main').appendChild(document.importNode(skillsRoot, true));
+    skillsRoot=document.getElementById('skills-container');
+    window.refreshCardListToolbars(skillsRoot);
+    if (!skillsRoot.querySelector('[data-card-filter-chip="enabled"]') || skillsRoot.querySelector('[data-card-selection-actions]')) fail('unmanaged Skills active-filter toolbar did not initialize safely');
     result('pass','selection interactions passed');
   }
   var REPLACEMENT_HTML=` + string(replacementJSON) + `;
+  var UNMANAGED_SKILLS_HTML=` + string(unmanagedSkillsJSON) + `;
   window.addEventListener('load', function(){run().catch(function(error){result('fail', String(error&&error.stack||error));});});
 })();
 </script>`
@@ -167,7 +194,7 @@ func TestCollectionSelectionProductionBrowserInteractions(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, chrome, "--headless=new", "--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage", "--disable-background-networking", "--disable-extensions", "--no-first-run", "--window-size=390,844", "--virtual-time-budget=8000", "--dump-dom", fixture.URL)
+	cmd := exec.CommandContext(ctx, chrome, "--headless=new", "--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage", "--disable-background-networking", "--disable-extensions", "--no-first-run", "--window-size=390,844", "--virtual-time-budget=8000", "--dump-dom", fixture.URL+"?provider=openai")
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, "Chrome output: %s", out)
 	dom := string(out)
