@@ -112,7 +112,7 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 				var endpoint = button.dataset.mergeEndpoint || '';
 				if (!taskID || !projectID || !mode || !endpoint) return;
 				var path = '/tasks/' + encodeURIComponent(taskID) + '/worktree/' + endpoint;
-				var dropdown = button.closest('[data-kanban-menu-key]');
+				var dropdown = window.kanbanDropdownForTarget ? window.kanbanDropdownForTarget(button) : button.closest('[data-kanban-menu-key]');
 				window._taskCardActionRequest = {path: path, taskID: taskID};
 				if (window.closeKanbanMenu) window.closeKanbanMenu(dropdown, false);
 				htmx.ajax('POST', path, {

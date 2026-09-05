@@ -2738,7 +2738,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 			document.addEventListener('mousedown', function(e) {
 				// Record state before this interaction starts.
 				focusedBeforeClick = document.activeElement;
-				const kanbanDropdown = e.target && e.target.closest ? e.target.closest('[data-kanban-menu-key]') : null;
+				const kanbanDropdown = kanbanDropdownForTarget(e.target);
 				kanbanMenuWasOpenBeforeClick = !!(kanbanDropdown && kanbanDropdown.getAttribute('data-kanban-menu-open') === 'true');
 			}, true);
 			function closestDropdownScrollBoundary(element) {
@@ -2751,6 +2751,15 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				}
 				return null;
 			}
+
+			function kanbanDropdownForTarget(target) {
+				if (!target || !target.closest) return null;
+				const dropdown = target.closest('[data-kanban-menu-key]');
+				if (dropdown) return dropdown;
+				const panel = target.closest('[data-task-card-submenu-portaled="true"]');
+				return panel && panel.__openVibelySubmenuDropdown || null;
+			}
+			window.kanbanDropdownForTarget = kanbanDropdownForTarget;
 
 			function restoreKanbanSubmenu(panel) {
 				if (!panel || panel.getAttribute('data-task-card-submenu-portaled') !== 'true') return;
@@ -3418,17 +3427,17 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 
 				function snapshotKanbanInteraction(board) {
 					const active = document.activeElement;
-					let dropdown = active && board.contains(active) && active.closest ? active.closest('[data-kanban-menu-key]') : null;
-					if (dropdown && dropdown.getAttribute('data-kanban-menu-open') !== 'true') dropdown = null;
+					let dropdown = kanbanDropdownForTarget(active);
+					if (dropdown && (!board.contains(dropdown) || dropdown.getAttribute('data-kanban-menu-open') !== 'true')) dropdown = null;
 					const durableMenuKey = board.getAttribute('data-open-kanban-menu-key') || openKanbanMenuKey;
 					if (!dropdown && durableMenuKey) {
 						dropdown = Array.from(board.querySelectorAll('[data-kanban-menu-key]')).find(function(candidate) {
 							return candidate.getAttribute('data-kanban-menu-key') === durableMenuKey;
 						}) || null;
 					}
-					let focusRole = dropdown && (!active || !dropdown.contains(active)) ? 'trigger' : '';
+					let focusRole = dropdown && (!active || kanbanDropdownForTarget(active) !== dropdown) ? 'trigger' : '';
 					let focusKey = '';
-					if (dropdown && active && dropdown.contains(active)) {
+					if (dropdown && active && kanbanDropdownForTarget(active) === dropdown) {
 						if (active.matches('[data-kanban-menu-trigger]')) focusRole = 'trigger';
 						else if (active.matches('[data-kanban-menu-content]')) focusRole = 'content';
 						else {
@@ -3466,7 +3475,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						const hadOpenMenu = !!openKanbanMenuKey || !!(board && board.getAttribute('data-open-kanban-menu-key'));
 						openKanbanMenuKey = '';
 						savedKanbanInteraction = null;
-						const activeMenu = document.activeElement && document.activeElement.closest ? document.activeElement.closest('[data-kanban-menu-key]') : null;
+						const activeMenu = kanbanDropdownForTarget(document.activeElement);
 						if (!restoreTriggerFocus && activeMenu && document.activeElement.blur) document.activeElement.blur();
 						if (board) board.removeAttribute('data-open-kanban-menu-key');
 						document.querySelectorAll('[data-kanban-menu-key]').forEach(function(candidate) {
@@ -3531,7 +3540,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				}
 
 				document.addEventListener('focusin', function(event) {
-					const dropdown = event.target && event.target.closest ? event.target.closest('[data-kanban-menu-key]') : null;
+					const dropdown = kanbanDropdownForTarget(event.target);
 					if (!dropdown || suppressKanbanMenuFocusOpen) return;
 					openKanbanMenuKey = dropdown.getAttribute('data-kanban-menu-key');
 					const board = dropdown.closest('#kanban-board');
@@ -3544,13 +3553,13 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					});
 				});
 				document.addEventListener('pointerdown', function(event) {
-					if (!event.target || !event.target.closest || !event.target.closest('[data-kanban-menu-key]')) {
+					if (!kanbanDropdownForTarget(event.target)) {
 						closeKanbanMenu(null, false);
 					}
 				}, true);
 				document.addEventListener('keydown', function(event) {
 					if (event.key === 'Escape') {
-						const dropdown = event.target && event.target.closest ? event.target.closest('[data-kanban-menu-key]') : null;
+						const dropdown = kanbanDropdownForTarget(event.target);
 						if (dropdown) {
 							event.preventDefault();
 							event.stopPropagation();
@@ -3559,17 +3568,17 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					}
 					if (event.key === 'Tab') {
 						setTimeout(function() {
-							if (!document.activeElement || !document.activeElement.closest || !document.activeElement.closest('[data-kanban-menu-key]')) {
+							if (!kanbanDropdownForTarget(document.activeElement)) {
 								closeKanbanMenu(null, false);
 							}
 						}, 0);
 					}
 				}, true);
 				document.addEventListener('focusout', function(event) {
-					const dropdown = event.target && event.target.closest ? event.target.closest('[data-kanban-menu-key]') : null;
+					const dropdown = kanbanDropdownForTarget(event.target);
 					if (!dropdown) return;
 					setTimeout(function() {
-						if (!dropdown.contains(document.activeElement) && dropdown.getAttribute('data-kanban-menu-open') !== 'true') setKanbanMenuExpanded(dropdown, false);
+						if (kanbanDropdownForTarget(document.activeElement) !== dropdown && dropdown.getAttribute('data-kanban-menu-open') !== 'true') setKanbanMenuExpanded(dropdown, false);
 					}, 0);
 				});
 
@@ -3583,8 +3592,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				// Retain compatibility with request paths that do not emit configRequest.
 				document.addEventListener('htmx:beforeRequest', function(event) {
 					const source = event.detail && event.detail.elt;
-					const menuContent = source && source.closest ? source.closest('[data-kanban-menu-content]') : null;
-					if (menuContent) closeKanbanMenu(menuContent.closest('[data-kanban-menu-key]'), false);
+					const sourceDropdown = kanbanDropdownForTarget(source);
+					if (sourceDropdown) closeKanbanMenu(sourceDropdown, false);
 					if (event.detail.target && event.detail.target.id === 'kanban-board' && !savedKanbanInteraction) {
 						snapshotKanbanInteraction(event.detail.target);
 					}
