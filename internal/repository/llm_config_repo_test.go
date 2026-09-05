@@ -615,7 +615,7 @@ func BenchmarkLLMConfigRepoAgentPickerValidationLargeCustomProviders(b *testing.
 	}
 }
 
-func BenchmarkLLMConfigRepoListFullVsCardsLargeCustomProviders(b *testing.B) {
+func BenchmarkLLMConfigRepoCardsAndPickerLargeCustomProviders(b *testing.B) {
 	db := testutil.NewTestDB(b)
 	repo := NewLLMConfigRepo(db)
 	ctx := context.Background()
@@ -645,18 +645,6 @@ func BenchmarkLLMConfigRepoListFullVsCardsLargeCustomProviders(b *testing.B) {
 		}
 	}
 
-	b.Run("full_list", func(b *testing.B) {
-		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			configs, err := repo.List(ctx)
-			if err != nil {
-				b.Fatal(err)
-			}
-			if len(configs) < 50 {
-				b.Fatalf("expected production-shaped fixture, got %d configs", len(configs))
-			}
-		}
-	})
 	b.Run("card_projection", func(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
