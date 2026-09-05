@@ -73,10 +73,7 @@ func BenchmarkTaskRepo_ListSwarmChildrenProjection(b *testing.B) {
 			defer db.Close()
 			repo := NewTaskRepo(db, nil)
 
-			b.Run("FullRowBaseline", func(b *testing.B) {
-				benchmarkListSwarmChildrenFullRow(b, db, parentID)
-			})
-			b.Run("BoundedProjection", func(b *testing.B) {
+			b.Run("Repository", func(b *testing.B) {
 				benchmarkListSwarmChildrenBoundedProjection(b, repo, parentID)
 			})
 		})
@@ -210,44 +207,6 @@ func benchmarkListSwarmChildrenBoundedProjection(b *testing.B, repo *TaskRepo, p
 		if err != nil {
 			b.Fatalf("list swarm children: %v", err)
 		}
-		unboundedPayloadBytes = swarmChildrenUnboundedPayloadBytes(children)
-	}
-	b.StopTimer()
-	b.ReportMetric(float64(unboundedPayloadBytes), "unbounded_payload_bytes/op")
-}
-
-func benchmarkListSwarmChildrenFullRow(b *testing.B, db *sql.DB, parentID string) {
-	b.Helper()
-	ctx := context.Background()
-	var unboundedPayloadBytes int64
-
-	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		rows, err := db.QueryContext(ctx, `SELECT `+taskSelectColumns+`
-			FROM tasks WHERE parent_task_id = ? AND swarm_role IN ('planner','worker','reviewer','merger','integrator')
-			ORDER BY swarm_sequence ASC,
-			CASE swarm_role WHEN 'planner' THEN 0 WHEN 'worker' THEN 1 WHEN 'reviewer' THEN 2 WHEN 'merger' THEN 3 WHEN 'integrator' THEN 3 ELSE 9 END,
-			created_at ASC`, parentID)
-		if err != nil {
-			b.Fatalf("query full swarm children: %v", err)
-		}
-
-		var children []models.Task
-		for rows.Next() {
-			var child models.Task
-			if err := rows.Scan(&child.ID, &child.ProjectID, &child.Title, &child.Category,
-				&child.Priority, &child.Status, &child.Prompt, &child.AgentID, &child.AgentDefinitionID, &child.Tag, &child.DisplayOrder, &child.ParentTaskID, &child.ChainConfig, &child.SwarmRole, &child.SwarmStatus, &child.SwarmConfig, &child.SwarmSequence, &child.WorktreePath, &child.WorktreeBranch, &child.AutoMerge, &child.MergeTargetBranch, &child.MergeStatus, &child.BaseBranch, &child.BaseCommitSHA, &child.LineageDepth, &child.CreatedVia, &child.TelegramChatID, &child.CreatedAt, &child.UpdatedAt, &child.CompletedAt); err != nil {
-				rows.Close()
-				b.Fatalf("scan full swarm child row: %v", err)
-			}
-			children = append(children, child)
-		}
-		if err := rows.Err(); err != nil {
-			rows.Close()
-			b.Fatalf("iterate full swarm child rows: %v", err)
-		}
-		rows.Close()
 		unboundedPayloadBytes = swarmChildrenUnboundedPayloadBytes(children)
 	}
 	b.StopTimer()
