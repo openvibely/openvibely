@@ -171,30 +171,142 @@ func (h *Handler) UpdateTaskAutoMerge(c echo.Context) error {
 	return h.renderWorktreeInfo(c, task)
 }
 
+type taskBranchMutationPreflight struct {
+	task                *models.Task
+	project             *models.Project
+	branchAlreadyMerged bool
+	eligibility         taskMergeEligibility
+	cardReason          string
+	operationEligible   bool
+	operationReason     string
+}
+
+type taskBranchMutationOptions struct {
+	taskID         string
+	projectID      string
+	fromTaskCard   bool
+	operationCheck func(*models.Task, *models.Project, bool) (bool, string)
+	leaseReason    func(*taskBranchMutationPreflight) string
+}
+
+func taskBranchMutationOwnershipMatches(task *models.Task, projectID string, fromTaskCard bool) bool {
+	return !fromTaskCard || (task != nil && strings.TrimSpace(projectID) != "" && task.ProjectID == projectID)
+}
+
+func (h *Handler) loadTaskBranchMutation(ctx context.Context, taskID, projectID string, fromTaskCard bool) (*taskBranchMutationPreflight, error) {
+	task, err := h.taskSvc.GetByID(ctx, taskID)
+	if err != nil || task == nil {
+		return nil, echo.NewHTTPError(http.StatusNotFound, "task not found")
+	}
+	if !taskBranchMutationOwnershipMatches(task, projectID, fromTaskCard) {
+		return nil, echo.NewHTTPError(http.StatusNotFound, "task not found")
+	}
+
+	project, err := h.projectRepo.GetByID(ctx, task.ProjectID)
+	if err != nil || project == nil || project.RepoPath == "" {
+		return nil, echo.NewHTTPError(http.StatusBadRequest, "project has no repo path")
+	}
+	task, err = h.taskSvc.GetByID(ctx, taskID)
+	if err != nil || task == nil || !taskBranchMutationOwnershipMatches(task, projectID, fromTaskCard) {
+		return nil, echo.NewHTTPError(http.StatusNotFound, "task not found")
+	}
+
+	return &taskBranchMutationPreflight{task: task, project: project, operationEligible: true}, nil
+}
+
+// refreshTaskBranchMutation performs the common live recovery, ancestry, and
+// merge-eligibility checks. Operation-specific policy is supplied by the
+// callback so Merge and Rebase retain their distinct gates.
+func (h *Handler) refreshTaskBranchMutation(ctx context.Context, preflight *taskBranchMutationPreflight, options taskBranchMutationOptions) {
+	h.recoverTaskWorktreeState(ctx, preflight.task, preflight.project)
+	preflight.branchAlreadyMerged = taskBranchAlreadyMergedForProject(preflight.task, preflight.project)
+	preflight.eligibility = taskMergeEligibility{}
+	preflight.cardReason = ""
+	preflight.operationEligible = true
+	preflight.operationReason = ""
+
+	if options.fromTaskCard && taskCardWorktreeLocked(preflight.project, preflight.task, nil) {
+		preflight.cardReason = "The task worktree is locked."
+		preflight.operationEligible = false
+		return
+	}
+
+	preflight.eligibility = h.resolveTaskMergeEligibility(ctx, preflight.task, preflight.project, preflight.branchAlreadyMerged)
+	if options.fromTaskCard {
+		if preflight.eligibility.ConflictRecovery {
+			preflight.cardReason = "Resolve or abort the active merge conflict first."
+			preflight.operationEligible = false
+			return
+		}
+		if !preflight.eligibility.MergeAvailable {
+			reason := strings.TrimSpace(preflight.eligibility.Reason)
+			if reason == "" {
+				reason = "No mergeable task branch is available."
+			}
+			preflight.cardReason = reason
+			preflight.operationEligible = false
+			return
+		}
+	}
+	if !preflight.eligibility.MergeAvailable {
+		preflight.operationEligible = false
+		return
+	}
+	if options.operationCheck != nil {
+		preflight.operationEligible, preflight.operationReason = options.operationCheck(preflight.task, preflight.project, preflight.branchAlreadyMerged)
+	}
+}
+
+// revalidateTaskBranchMutation reloads task/project identity and reruns the
+// shared policy checks while the repository mutation lease is held.
+func (h *Handler) revalidateTaskBranchMutation(ctx context.Context, preflight *taskBranchMutationPreflight, options taskBranchMutationOptions) error {
+	freshTask, err := h.taskSvc.GetByID(ctx, options.taskID)
+	if err != nil || freshTask == nil {
+		return fmt.Errorf("%w: task is no longer available", service.ErrMergeEligibilityChanged)
+	}
+	if freshTask.ProjectID != preflight.project.ID || !taskBranchMutationOwnershipMatches(freshTask, options.projectID, options.fromTaskCard) {
+		return fmt.Errorf("%w: task project ownership changed", service.ErrMergeEligibilityChanged)
+	}
+
+	freshProject, err := h.projectRepo.GetByID(ctx, freshTask.ProjectID)
+	if err != nil || freshProject == nil || freshProject.RepoPath == "" {
+		return fmt.Errorf("%w: project repository is no longer available", service.ErrMergeEligibilityChanged)
+	}
+	if freshProject.ID != preflight.project.ID || freshProject.RepoPath != preflight.project.RepoPath {
+		return fmt.Errorf("%w: project repository context changed", service.ErrMergeEligibilityChanged)
+	}
+
+	preflight.task = freshTask
+	preflight.project = freshProject
+	h.refreshTaskBranchMutation(ctx, preflight, options)
+	if preflight.cardReason != "" {
+		return fmt.Errorf("%w: %s", service.ErrMergeEligibilityChanged, preflight.cardReason)
+	}
+	if !preflight.eligibility.MergeAvailable || !preflight.operationEligible {
+		reason := ""
+		if options.leaseReason != nil {
+			reason = options.leaseReason(preflight)
+		}
+		if reason == "" {
+			reason = "task branch is no longer eligible for this operation"
+		}
+		return fmt.Errorf("%w: %s", service.ErrMergeEligibilityChanged, reason)
+	}
+	return nil
+}
+
 // MergeTaskBranch manually merges a task's worktree branch to target.
 func (h *Handler) MergeTaskBranch(c echo.Context) error {
 	taskID := c.Param("taskId")
-	task, err := h.taskSvc.GetByID(c.Request().Context(), taskID)
-	if err != nil || task == nil {
-		return echo.NewHTTPError(http.StatusNotFound, "task not found")
-	}
 	fromTaskCard := c.FormValue("merge_source") == "task_card"
-	if fromTaskCard {
-		projectID := strings.TrimSpace(c.FormValue("project_id"))
-		if projectID == "" || task.ProjectID != projectID {
-			return echo.NewHTTPError(http.StatusNotFound, "task not found")
-		}
+	projectID := strings.TrimSpace(c.FormValue("project_id"))
+	preflight, err := h.loadTaskBranchMutation(c.Request().Context(), taskID, projectID, fromTaskCard)
+	if err != nil {
+		return err
 	}
+	task := preflight.task
+	project := preflight.project
 
-	// Get the repo path from the project
-	project, err := h.projectRepo.GetByID(c.Request().Context(), task.ProjectID)
-	if err != nil || project == nil || project.RepoPath == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "project has no repo path")
-	}
-	task, err = h.taskSvc.GetByID(c.Request().Context(), taskID)
-	if err != nil || task == nil {
-		return echo.NewHTTPError(http.StatusNotFound, "task not found")
-	}
 	mergeType := c.FormValue("merge_type")
 	if mergeType == "" {
 		mergeType = "merge"
@@ -205,17 +317,49 @@ func (h *Handler) MergeTaskBranch(c echo.Context) error {
 		}
 		return c.String(http.StatusBadRequest, "unsupported merge type")
 	}
-	if fromTaskCard {
-		if _, eligible, reason := h.taskCardMergeEligibility(c.Request().Context(), task, mergeType); !eligible {
-			return rejectTaskCardMutation(c, reason)
-		}
+
+	options := taskBranchMutationOptions{
+		taskID:       taskID,
+		projectID:    projectID,
+		fromTaskCard: fromTaskCard,
+		operationCheck: func(task *models.Task, project *models.Project, branchAlreadyMerged bool) (bool, string) {
+			if !fromTaskCard {
+				return true, ""
+			}
+			state := taskMergeActionState{
+				BranchAlreadyMerged: branchAlreadyMerged,
+				RebaseAvailable:     h.taskRebaseAvailable(task, project, branchAlreadyMerged),
+			}
+			return taskCardMergeModeEligibility(task, state, mergeType)
+		},
+		leaseReason: func(preflight *taskBranchMutationPreflight) string {
+			if !preflight.eligibility.MergeAvailable {
+				reason := preflight.eligibility.Reason
+				if preflight.eligibility.ConflictRecovery {
+					reason = "a merge conflict is now active"
+				}
+				if reason == "" {
+					reason = "task branch is no longer eligible to merge"
+				}
+				return reason
+			}
+			if !preflight.operationEligible && preflight.operationReason != "" {
+				return preflight.operationReason
+			}
+			return "task branch is no longer eligible to merge"
+		},
 	}
-	h.recoverTaskWorktreeState(c.Request().Context(), task, project)
-	branchAlreadyMerged := h.reconcileAlreadyMergedBranch(c.Request().Context(), task)
-	eligibility := h.resolveTaskMergeEligibility(c.Request().Context(), task, project, branchAlreadyMerged)
-	if !eligibility.MergeAvailable {
-		msg := eligibility.Reason
-		if eligibility.ConflictRecovery {
+	h.refreshTaskBranchMutation(c.Request().Context(), preflight, options)
+	if fromTaskCard {
+		if preflight.cardReason != "" {
+			return rejectTaskCardMutation(c, preflight.cardReason)
+		}
+		if !preflight.operationEligible {
+			return rejectTaskCardMutation(c, preflight.operationReason)
+		}
+	} else if !preflight.eligibility.MergeAvailable {
+		msg := preflight.eligibility.Reason
+		if preflight.eligibility.ConflictRecovery {
 			msg = "A merge conflict is already active. Resolve conflicts or abort the merge before trying another merge."
 		}
 		if msg == "" {
@@ -226,38 +370,19 @@ func (h *Handler) MergeTaskBranch(c echo.Context) error {
 		}
 		return c.String(http.StatusConflict, msg)
 	}
-	targetBranch := eligibility.TargetBranch
 
 	if h.worktreeSvc == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "worktree service not available")
 	}
 
 	fromChangesTab := c.FormValue("merge_source") == "changes_tab"
-
+	targetBranch := preflight.eligibility.TargetBranch
 	result, mergeErr := h.worktreeSvc.MergeBranchValidated(c.Request().Context(), task, project.RepoPath, mergeType, func() error {
-		freshTask, err := h.taskSvc.GetByID(c.Request().Context(), taskID)
-		if err != nil || freshTask == nil {
-			return fmt.Errorf("%w: task is no longer available", service.ErrMergeEligibilityChanged)
+		if err := h.revalidateTaskBranchMutation(c.Request().Context(), preflight, options); err != nil {
+			return err
 		}
-		h.recoverTaskWorktreeState(c.Request().Context(), freshTask, project)
-		if fromTaskCard {
-			if _, eligible, reason := h.taskCardMergeEligibility(c.Request().Context(), freshTask, mergeType); !eligible {
-				return fmt.Errorf("%w: %s", service.ErrMergeEligibilityChanged, reason)
-			}
-		}
-		freshEligibility := h.resolveTaskMergeEligibility(c.Request().Context(), freshTask, project, h.reconcileAlreadyMergedBranch(c.Request().Context(), freshTask))
-		if !freshEligibility.MergeAvailable {
-			reason := freshEligibility.Reason
-			if freshEligibility.ConflictRecovery {
-				reason = "a merge conflict is now active"
-			}
-			if reason == "" {
-				reason = "task branch is no longer eligible to merge"
-			}
-			return fmt.Errorf("%w: %s", service.ErrMergeEligibilityChanged, reason)
-		}
-		*task = *freshTask
-		targetBranch = freshEligibility.TargetBranch
+		*task = *preflight.task
+		targetBranch = preflight.eligibility.TargetBranch
 		return nil
 	})
 	if mergeErr != nil {
@@ -343,39 +468,57 @@ func (h *Handler) MergeTaskBranch(c echo.Context) error {
 // RebaseTaskBranch rebases a task's worktree branch onto its target branch.
 func (h *Handler) RebaseTaskBranch(c echo.Context) error {
 	taskID := c.Param("taskId")
-	task, err := h.taskSvc.GetByID(c.Request().Context(), taskID)
-	if err != nil || task == nil {
-		return echo.NewHTTPError(http.StatusNotFound, "task not found")
-	}
 	fromTaskCard := c.FormValue("merge_source") == "task_card"
+	projectID := strings.TrimSpace(c.FormValue("project_id"))
+	options := taskBranchMutationOptions{
+		taskID:       taskID,
+		projectID:    projectID,
+		fromTaskCard: fromTaskCard,
+		operationCheck: func(task *models.Task, project *models.Project, branchAlreadyMerged bool) (bool, string) {
+			if h.taskRebaseAvailable(task, project, branchAlreadyMerged) {
+				return true, ""
+			}
+			if fromTaskCard {
+				return false, "Rebase is not available for the current branch state."
+			}
+			return false, "Task branch is not currently eligible to rebase onto its target"
+		},
+		leaseReason: func(preflight *taskBranchMutationPreflight) string {
+			if !preflight.eligibility.MergeAvailable {
+				reason := preflight.eligibility.Reason
+				if preflight.eligibility.ConflictRecovery {
+					reason = "a merge conflict is now active"
+				}
+				if reason == "" {
+					reason = "task branch is no longer eligible to rebase"
+				}
+				return reason
+			}
+			if !preflight.operationEligible && preflight.operationReason != "" {
+				return preflight.operationReason
+			}
+			return "task branch is no longer eligible to rebase onto its target"
+		},
+	}
+	preflight, err := h.loadTaskBranchMutation(c.Request().Context(), taskID, projectID, fromTaskCard)
+	if err != nil {
+		return err
+	}
+	task := preflight.task
+	project := preflight.project
+	h.refreshTaskBranchMutation(c.Request().Context(), preflight, options)
 	if fromTaskCard {
-		projectID := strings.TrimSpace(c.FormValue("project_id"))
-		if projectID == "" || task.ProjectID != projectID {
-			return echo.NewHTTPError(http.StatusNotFound, "task not found")
+		if preflight.cardReason != "" {
+			return rejectTaskCardMutation(c, preflight.cardReason)
 		}
-	}
-
-	project, err := h.projectRepo.GetByID(c.Request().Context(), task.ProjectID)
-	if err != nil || project == nil || project.RepoPath == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "project has no repo path")
-	}
-	task, err = h.taskSvc.GetByID(c.Request().Context(), taskID)
-	if err != nil || task == nil {
-		return echo.NewHTTPError(http.StatusNotFound, "task not found")
-	}
-	if fromTaskCard {
-		if _, eligible, reason := h.taskCardMergeEligibility(c.Request().Context(), task, "rebase"); !eligible {
-			return rejectTaskCardMutation(c, reason)
+		if !preflight.operationEligible {
+			return rejectTaskCardMutation(c, preflight.operationReason)
 		}
-	}
-	h.recoverTaskWorktreeState(c.Request().Context(), task, project)
-	branchAlreadyMerged := h.reconcileAlreadyMergedBranch(c.Request().Context(), task)
-	eligibility := h.resolveTaskMergeEligibility(c.Request().Context(), task, project, branchAlreadyMerged)
-	if !eligibility.MergeAvailable || !h.taskRebaseAvailable(task, project, branchAlreadyMerged) {
-		msg := eligibility.Reason
-		if eligibility.ConflictRecovery {
+	} else if !preflight.eligibility.MergeAvailable || !preflight.operationEligible {
+		msg := preflight.eligibility.Reason
+		if preflight.eligibility.ConflictRecovery {
 			msg = "A merge conflict is already active. Resolve conflicts or abort the merge before rebasing."
-		} else if eligibility.MergeAvailable {
+		} else if preflight.eligibility.MergeAvailable {
 			msg = "Task branch is not currently eligible to rebase onto its target"
 		}
 		if msg == "" {
@@ -390,35 +533,13 @@ func (h *Handler) RebaseTaskBranch(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "worktree service not available")
 	}
 
-	targetBranch := eligibility.TargetBranch
-
+	targetBranch := preflight.eligibility.TargetBranch
 	result, rebaseErr := h.worktreeSvc.RebaseBranchValidated(c.Request().Context(), task, project.RepoPath, func() error {
-		freshTask, err := h.taskSvc.GetByID(c.Request().Context(), taskID)
-		if err != nil || freshTask == nil {
-			return fmt.Errorf("%w: task is no longer available", service.ErrMergeEligibilityChanged)
+		if err := h.revalidateTaskBranchMutation(c.Request().Context(), preflight, options); err != nil {
+			return err
 		}
-		h.recoverTaskWorktreeState(c.Request().Context(), freshTask, project)
-		if fromTaskCard {
-			if _, eligible, reason := h.taskCardMergeEligibility(c.Request().Context(), freshTask, "rebase"); !eligible {
-				return fmt.Errorf("%w: %s", service.ErrMergeEligibilityChanged, reason)
-			}
-		}
-		freshAlreadyMerged := h.reconcileAlreadyMergedBranch(c.Request().Context(), freshTask)
-		freshEligibility := h.resolveTaskMergeEligibility(c.Request().Context(), freshTask, project, freshAlreadyMerged)
-		if !freshEligibility.MergeAvailable || !h.taskRebaseAvailable(freshTask, project, freshAlreadyMerged) {
-			reason := freshEligibility.Reason
-			if freshEligibility.ConflictRecovery {
-				reason = "a merge conflict is now active"
-			} else if freshEligibility.MergeAvailable {
-				reason = "task branch is no longer eligible to rebase onto its target"
-			}
-			if reason == "" {
-				reason = "task branch is no longer eligible to rebase"
-			}
-			return fmt.Errorf("%w: %s", service.ErrMergeEligibilityChanged, reason)
-		}
-		*task = *freshTask
-		targetBranch = freshEligibility.TargetBranch
+		*task = *preflight.task
+		targetBranch = preflight.eligibility.TargetBranch
 		return nil
 	})
 	if rebaseErr != nil {
