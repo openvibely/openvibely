@@ -1967,7 +1967,7 @@ func TestNormalizeBrowserModelFormCommonWorkerAndCheckboxSettings(t *testing.T) 
 	if err := h.normalizeBrowserModelForm(context.Background(), e.NewContext(createReq, httptest.NewRecorder()), created, modelFormOptions{mode: modelFormCreate}); err != nil {
 		t.Fatal(err)
 	}
-	if created.MaxWorkers != 10 || created.WorkerTimeout != 0 || !created.IsDefault || !created.AutoStartTasks || created.Temperature != 0.2 {
+	if created.MaxWorkers != 99 || created.WorkerTimeout != 0 || !created.IsDefault || !created.AutoStartTasks || created.Temperature != 0.2 {
 		t.Fatalf("create normalization mismatch: %#v", created)
 	}
 

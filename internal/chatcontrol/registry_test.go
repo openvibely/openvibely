@@ -381,8 +381,8 @@ func TestCreateProjectRegisteredOrchestrateOnly(t *testing.T) {
 	if err := json.Unmarshal(schema.Properties["max_workers"], &maxWorkersSchema); err != nil {
 		t.Fatalf("decode create_project max_workers schema: %v", err)
 	}
-	if maxWorkersSchema.Minimum != 1 || maxWorkersSchema.Maximum != 10 {
-		t.Fatalf("create_project max_workers bounds = %d..%d, want 1..10", maxWorkersSchema.Minimum, maxWorkersSchema.Maximum)
+	if maxWorkersSchema.Minimum != 1 || maxWorkersSchema.Maximum != 0 {
+		t.Fatalf("create_project max_workers bounds = %d..%d, want minimum 1 and no maximum", maxWorkersSchema.Minimum, maxWorkersSchema.Maximum)
 	}
 }
 
@@ -419,6 +419,16 @@ func TestUpdateProjectSettingsRegisteredOrchestrateOnly(t *testing.T) {
 		if _, ok := schema.Properties[forbidden]; ok {
 			t.Fatalf("update_project_settings schema must not expose %s", forbidden)
 		}
+	}
+	var maxWorkersSchema struct {
+		Minimum int `json:"minimum"`
+		Maximum int `json:"maximum"`
+	}
+	if err := json.Unmarshal(schema.Properties["max_workers"], &maxWorkersSchema); err != nil {
+		t.Fatalf("decode update_project_settings max_workers schema: %v", err)
+	}
+	if maxWorkersSchema.Minimum != 0 || maxWorkersSchema.Maximum != 0 {
+		t.Fatalf("update_project_settings max_workers bounds = %d..%d, want minimum 0 and no maximum", maxWorkersSchema.Minimum, maxWorkersSchema.Maximum)
 	}
 }
 

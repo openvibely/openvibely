@@ -417,7 +417,11 @@ func TestNewProjectDialog(t *testing.T) {
 
 	projectRepo := repository.NewProjectRepo(db)
 	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	workerRepo := repository.NewWorkerRepo(db)
 	projectSvc := service.NewProjectService(projectRepo)
+	if err := workerRepo.SetMaxWorkers(ctx, 25); err != nil {
+		t.Fatalf("set global worker limit: %v", err)
+	}
 
 	e := echo.New()
 	h := New(
@@ -430,16 +434,16 @@ func TestNewProjectDialog(t *testing.T) {
 		nil, // upcomingSvc
 		nil, // insightsSvc
 		llmConfigRepo,
-		nil, // taskRepo
-		nil, // scheduleRepo
-		nil, // execRepo
-		nil, // workerRepo
-		nil, // attachmentRepo
-		nil, // chatAttachmentRepo
-		nil, // projectRepo
-		nil, // settingsRepo
-		nil, // broadcaster
-		nil, // telegramSvc
+		nil,        // taskRepo
+		nil,        // scheduleRepo
+		nil,        // execRepo
+		workerRepo, // workerRepo
+		nil,        // attachmentRepo
+		nil,        // chatAttachmentRepo
+		nil,        // projectRepo
+		nil,        // settingsRepo
+		nil,        // broadcaster
+		nil,        // telegramSvc
 	)
 
 	// Create LLM configs
@@ -479,9 +483,15 @@ func TestNewProjectDialog(t *testing.T) {
 	if !strings.Contains(body, "Default Model") {
 		t.Error("dialog should contain 'Default Model' label")
 	}
-	// Check that the dialog contains max workers selector
-	if !strings.Contains(body, "Max Concurrent Workers") {
-		t.Error("dialog should contain 'Max Concurrent Workers' label")
+	// Check that it contains the project worker limit input and current global ceiling.
+	if !strings.Contains(body, `type="number" name="max_workers"`) {
+		t.Error("dialog should contain a numeric max workers input")
+	}
+	if !strings.Contains(body, `max="25"`) {
+		t.Error("dialog should expose the configured finite global worker limit")
+	}
+	if strings.Contains(body, `max="10"`) {
+		t.Error("dialog should not retain the removed hard maximum of 10")
 	}
 	// Check that both configs are in the dropdown
 	if !strings.Contains(body, "Opus Config") {
@@ -501,9 +511,9 @@ func TestNewProjectDialog(t *testing.T) {
 	if !strings.Contains(body, "Use global default") {
 		t.Error("dialog should contain 'Use global default' option")
 	}
-	// Check that "No limit (use global)" option exists
-	if !strings.Contains(body, "No limit (use global)") {
-		t.Error("dialog should contain 'No limit (use global)' option")
+	// Check that blank/zero inheritance guidance exists for the numeric input.
+	if !strings.Contains(body, "leave blank to inherit") {
+		t.Error("dialog should explain how to inherit the global worker limit")
 	}
 	// Regression: directory selection UI should use folder-selection wording, not upload
 	if !strings.Contains(body, "Choose Folder") {

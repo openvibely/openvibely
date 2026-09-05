@@ -36,13 +36,19 @@ When you open Workers you see three things:
 
 In the `Global` row, edit the limit value and click `Set`. This sets the hard ceiling across every project.
 
-Use this when the whole app feels slow due to queueing, or when your machine needs stricter load control.
+Enter any non-negative whole number. `0` or an empty value means `Unlimited`; positive values are finite ceilings and are not restricted by a product-level maximum.
+
+Use this when the whole app feels slow due to queueing, or when your machine needs stricter load control. Lowering the global limit does not cancel tasks that are already running. Those reservations finish normally, while new admissions wait until actual global usage is below the new ceiling.
 
 ## Change Per-Project Limit
 
-Find a project row, edit the limit value, and click `Set`. Setting a project to `0` removes the project-specific cap — that project is then only bounded by the global limit.
+Find a project row, edit the limit value, and click `Set`. A project may use any positive whole-number limit up to the current finite global limit. Setting a project to `0` or leaving it empty removes the project-specific cap, so that project inherits the global limit.
 
-The page preserves any limit field you're actively editing during live refreshes, so typing a new value won't get overwritten before you hit Set.
+Project caps are independent maximums, not a combined allocation. For example, two projects may each be configured for 25 workers under a global limit of 25; they can share the pool, but actual concurrent usage across both projects never exceeds 25.
+
+If the global limit is lowered below an existing project cap, the Workers page marks that project `Exceeds global` and asks you to lower the project cap before saving other project-limit changes. Running work is not cancelled, and new work remains governed by the actual global ceiling.
+
+The page preserves any limit field you're actively editing during live refreshes, so typing a new value won't get overwritten before you click `Set`.
 
 ## How The Two Layers Work Together
 

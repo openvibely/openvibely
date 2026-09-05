@@ -99,6 +99,9 @@ func (r *ProjectRepo) GetDefaultAgentConfigID(ctx context.Context, id string) (*
 }
 
 func (r *ProjectRepo) Create(ctx context.Context, p *models.Project) error {
+	if err := models.ValidateProjectWorkerLimit(p.MaxWorkers, 0); err != nil {
+		return err
+	}
 	return queryRowBoundSQLite(ctx, r.db,
 		`INSERT INTO projects (id, name, description, repo_path, repo_url, default_agent_config_id, max_workers)
 			 VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?)
@@ -108,6 +111,9 @@ func (r *ProjectRepo) Create(ctx context.Context, p *models.Project) error {
 }
 
 func (r *ProjectRepo) Update(ctx context.Context, p *models.Project) error {
+	if err := models.ValidateProjectWorkerLimit(p.MaxWorkers, 0); err != nil {
+		return err
+	}
 	_, err := execBoundSQLite(ctx, r.db,
 		`UPDATE projects SET name = ?, description = ?, repo_path = ?, repo_url = ?, default_agent_config_id = ?, max_workers = ?, updated_at = datetime('now')
 			 WHERE id = ?`,

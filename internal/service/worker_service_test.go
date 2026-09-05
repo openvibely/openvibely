@@ -36,6 +36,92 @@ func TestGlobalWorkerCapacityUnlimitedAndFinite(t *testing.T) {
 	}
 }
 
+func TestWorkerService_GlobalAdmissionUsesActualRunningAcrossProjectCaps(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+
+	projectLimit := 100
+	projectA := &models.Project{Name: "Independent Project A", MaxWorkers: &projectLimit}
+	projectB := &models.Project{Name: "Independent Project B", MaxWorkers: &projectLimit}
+	if err := projectRepo.Create(ctx, projectA); err != nil {
+		t.Fatalf("Create project A: %v", err)
+	}
+	if err := projectRepo.Create(ctx, projectB); err != nil {
+		t.Fatalf("Create project B: %v", err)
+	}
+
+	ws := &WorkerService{
+		pending:     make(map[string]bool),
+		numWorkers:  2,
+		submitted:   make(chan models.Task, 100),
+		cancelFuncs: make(map[string]context.CancelFunc),
+		projectRepo: projectRepo,
+	}
+
+	if !ws.TryAcquireProjectSlot(projectA.ID) {
+		t.Fatal("expected project A to acquire the first global slot")
+	}
+	if !ws.TryAcquireProjectSlot(projectB.ID) {
+		t.Fatal("expected project B to acquire the second global slot")
+	}
+	if ws.TryAcquireProjectSlot(projectA.ID) {
+		t.Fatal("expected actual global usage to reject a third task")
+	}
+	if got := ws.TotalRunning(); got != 2 {
+		t.Fatalf("TotalRunning = %d, want 2", got)
+	}
+	if got := ws.ProjectRunning(projectA.ID); got != 1 {
+		t.Fatalf("project A running = %d, want 1", got)
+	}
+	if got := ws.ProjectRunning(projectB.ID); got != 1 {
+		t.Fatalf("project B running = %d, want 1", got)
+	}
+
+	ws.ReleaseProjectSlot(projectA.ID)
+	ws.ReleaseProjectSlot(projectB.ID)
+	if got := ws.TotalRunning(); got != 0 {
+		t.Fatalf("TotalRunning after releases = %d, want 0", got)
+	}
+}
+
+func TestWorkerService_LoweringGlobalLimitDoesNotCancelRunningSlots(t *testing.T) {
+	ws := &WorkerService{
+		pending:     make(map[string]bool),
+		numWorkers:  3,
+		submitted:   make(chan models.Task, 100),
+		cancelFuncs: make(map[string]context.CancelFunc),
+	}
+
+	if !ws.TryAcquireProjectSlot("project-a") || !ws.TryAcquireProjectSlot("project-b") {
+		t.Fatal("expected two running slots before lowering the global limit")
+	}
+	ws.Resize(1)
+	if got := ws.TotalRunning(); got != 2 {
+		t.Fatalf("lowering global limit cancelled running work: TotalRunning = %d, want 2", got)
+	}
+	if ws.TryAcquireProjectSlot("project-c") {
+		t.Fatal("expected new admission to remain blocked while usage exceeds lowered limit")
+	}
+
+	ws.ReleaseProjectSlot("project-a")
+	if got := ws.TotalRunning(); got != 1 {
+		t.Fatalf("TotalRunning after first release = %d, want 1", got)
+	}
+	if ws.TryAcquireProjectSlot("project-c") {
+		t.Fatal("expected admission to remain blocked while one existing slot uses the lowered limit")
+	}
+
+	ws.ReleaseProjectSlot("project-b")
+	if got := ws.TotalRunning(); got != 0 {
+		t.Fatalf("TotalRunning after second release = %d, want 0", got)
+	}
+	if !ws.TryAcquireProjectSlot("project-c") {
+		t.Fatal("expected admission after all pre-reduction work released")
+	}
+	ws.ReleaseProjectSlot("project-c")
+}
+
 func TestWorkerService_ModelSlotAcquireRelease(t *testing.T) {
 	ws := &WorkerService{
 		pending:     make(map[string]bool),
