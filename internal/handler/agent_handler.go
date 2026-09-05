@@ -1546,12 +1546,14 @@ func (h *Handler) ListAgents(c echo.Context) error {
 		}
 	}
 
+	currentProjectID, _ := h.getCurrentProjectID(c)
 	agentFilter := repository.AgentPageFilter{
-		Search:  page.Search,
-		Enabled: optionalBoolQuery(c, "enabled"),
-		Scope:   allowlistedQuery(c, "scope", "", "global", "project"),
-		Origin:  allowlistedQuery(c, "origin", "", "custom", "generated", "protected"),
-		Sort:    allowlistedQuery(c, "sort", "name_asc", "name_asc", "name_desc", "updated_desc", "created_desc"),
+		ProjectID: currentProjectID,
+		Search:    page.Search,
+		Enabled:   optionalBoolQuery(c, "enabled"),
+		Scope:     allowlistedQuery(c, "scope", "", "global", "project"),
+		Origin:    allowlistedQuery(c, "origin", "", "custom", "generated", "protected"),
+		Sort:      allowlistedQuery(c, "sort", "name_asc", "name_asc", "name_desc", "updated_desc", "created_desc"),
 	}
 	agents, err := h.agentRepo.ListPageFiltered(c.Request().Context(), page.PageSize+1, page.Offset, agentFilter)
 	if err != nil {
@@ -1567,7 +1569,6 @@ func (h *Handler) ListAgents(c echo.Context) error {
 	}
 	modelOptions := buildAgentModelOptions(modelPickerOptions)
 
-	currentProjectID, _ := h.getCurrentProjectID(c)
 	listState := pages.CardListState{
 		ProjectID: currentProjectID,
 		Search:    page.Search,
