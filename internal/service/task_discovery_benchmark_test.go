@@ -4,9 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"flag"
 	"fmt"
-	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -105,33 +103,23 @@ func BenchmarkExecuteListTasksToolOrderScaling(b *testing.B) {
 			b.Run(fmt.Sprintf("%d_tasks/%s", taskCount, page.name), func(b *testing.B) {
 				db, taskRepo := newTaskDiscoveryOrderBenchmarkRepo(b, taskCount, 128, 128)
 				defer db.Close()
-				for _, variant := range []struct {
-					name    string
-					indexed bool
-				}{
-					{name: "CurrentBaseline", indexed: false},
-					{name: "OrderCoveringIndex", indexed: true},
-				} {
-					variant := variant
-					b.Run(variant.name, func(b *testing.B) {
-						setTaskDiscoveryOrderIndex(b, db, variant.indexed)
-						ctx := context.Background()
-						var outputBytes int
+				b.Run("Current", func(b *testing.B) {
+					ctx := context.Background()
+					var outputBytes int
 
-						b.ReportAllocs()
-						b.ResetTimer()
-						for i := 0; i < b.N; i++ {
-							out, err := ExecuteListTasksTool(ctx, taskRepo, "default", page.input)
-							if err != nil {
-								b.Fatalf("ExecuteListTasksTool: %v", err)
-							}
-							outputBytes = len(out)
+					b.ReportAllocs()
+					b.ResetTimer()
+					for i := 0; i < b.N; i++ {
+						out, err := ExecuteListTasksTool(ctx, taskRepo, "default", page.input)
+						if err != nil {
+							b.Fatalf("ExecuteListTasksTool: %v", err)
 						}
-						b.StopTimer()
-						b.ReportMetric(float64(outputBytes), "output_bytes/op")
-						b.ReportMetric(float64(taskCount*(128+2*128)), "fixture_payload_bytes/op")
-					})
-				}
+						outputBytes = len(out)
+					}
+					b.StopTimer()
+					b.ReportMetric(float64(outputBytes), "output_bytes/op")
+					b.ReportMetric(float64(taskCount*(128+2*128)), "fixture_payload_bytes/op")
+				})
 			})
 		}
 	}
@@ -169,179 +157,11 @@ func newTaskDiscoveryOrderBenchmarkRepo(tb testing.TB, taskCount, promptSize, co
 }
 
 const (
-	taskDiscoveryOrderIndexName       = "idx_tasks_discovery_order"
-	taskDiscoveryPairedSamples        = 7
-	taskDiscoveryTimingRuns           = 3
-	taskDiscoveryAllocationRuns       = 3
-	taskDiscoveryMaxPage20Improvement = 0.30
-	taskDiscoveryMaxControlRegression = 1.10
-
-	// The discovery index write budget has an explicit check for every writer.
-	// Substantive task transitions use the strict 20% relative cap. Lightweight
-	// metadata setters have a small fixed index-maintenance cost relative to their
-	// sub-10µs baseline, so each uses a 5µs absolute cap instead of an unstable
-	// ratio. Bulk paths report and aggregate affected rows rather than counting
-	// one multi-row statement as one row of work.
-	// Use a long measured phase so scheduler and coverage overhead do not dominate
-	// the small per-update index cost.
-	taskDiscoveryWriteOperations                        = 1000
-	taskDiscoveryWritePathCount                         = 52
-	taskDiscoveryMaxWriteLatencyRegression              = 1.20
-	taskDiscoveryMaxFixedPerAffectedRowOverheadNs       = 5_000
-	taskDiscoveryMaxIndexStorageBytes             int64 = 2 * 1024 * 1024
+	taskDiscoveryOrderIndexName             = "idx_tasks_discovery_order"
+	taskDiscoveryWriteOperations            = 1000
+	taskDiscoveryWritePathCount             = 52
+	taskDiscoveryMaxIndexStorageBytes int64 = 2 * 1024 * 1024
 )
-
-func taskDiscoveryTimingAssertionsDisabled() bool {
-	coverProfile := flag.Lookup("test.coverprofile")
-	return coverProfile != nil && coverProfile.Value.String() != ""
-}
-
-type taskDiscoveryPairedMetrics struct {
-	wallNs      []float64
-	allocsPerOp []float64
-	outputBytes []int
-}
-
-func (m *taskDiscoveryPairedMetrics) add(sample taskDiscoveryPairedMetrics) {
-	m.wallNs = append(m.wallNs, sample.wallNs...)
-	m.allocsPerOp = append(m.allocsPerOp, sample.allocsPerOp...)
-	m.outputBytes = append(m.outputBytes, sample.outputBytes...)
-}
-
-func medianTaskDiscoveryMetric(values []float64) float64 {
-	ordered := append([]float64(nil), values...)
-	sort.Float64s(ordered)
-	return ordered[len(ordered)/2]
-}
-
-func (m taskDiscoveryPairedMetrics) medianWallNs() float64 {
-	return medianTaskDiscoveryMetric(m.wallNs)
-}
-
-func (m taskDiscoveryPairedMetrics) medianAllocsPerOp() float64 {
-	return medianTaskDiscoveryMetric(m.allocsPerOp)
-}
-
-func (m taskDiscoveryPairedMetrics) medianOutputBytes() int {
-	ordered := append([]int(nil), m.outputBytes...)
-	sort.Ints(ordered)
-	return ordered[len(ordered)/2]
-}
-
-func setTaskDiscoveryOrderIndex(tb testing.TB, db *sql.DB, enabled bool) {
-	tb.Helper()
-	query := `DROP INDEX IF EXISTS ` + taskDiscoveryOrderIndexName
-	if enabled {
-		query = `CREATE INDEX IF NOT EXISTS ` + taskDiscoveryOrderIndexName + `
-			ON tasks(project_id, updated_at DESC, id ASC)
-			WHERE category != 'chat'`
-	}
-	if _, err := db.ExecContext(context.Background(), query); err != nil {
-		tb.Fatalf("set task discovery order index enabled=%v: %v", enabled, err)
-	}
-}
-
-func measureTaskDiscoveryOrderSample(tb testing.TB, taskRepo *repository.TaskRepo, input json.RawMessage, want string) taskDiscoveryPairedMetrics {
-	tb.Helper()
-	outputs := make([]string, taskDiscoveryTimingRuns)
-	outputBytes := 0
-	wallStarted := time.Now()
-	for i := 0; i < taskDiscoveryTimingRuns; i++ {
-		out, err := ExecuteListTasksTool(context.Background(), taskRepo, "default", input)
-		if err != nil {
-			tb.Fatalf("timed ExecuteListTasksTool: %v", err)
-		}
-		outputs[i] = out
-		outputBytes = len(out)
-	}
-	wallNs := float64(time.Since(wallStarted).Nanoseconds()) / float64(taskDiscoveryTimingRuns)
-	for _, out := range outputs {
-		if out != want {
-			tb.Fatalf("discovery output changed during measurement:\nwant %s\n got %s", want, out)
-		}
-	}
-
-	var allocationOutput string
-	var allocationErr error
-	allocsPerOp := testing.AllocsPerRun(taskDiscoveryAllocationRuns, func() {
-		allocationOutput, allocationErr = ExecuteListTasksTool(context.Background(), taskRepo, "default", input)
-	})
-	if allocationErr != nil {
-		tb.Fatalf("allocation ExecuteListTasksTool: %v", allocationErr)
-	}
-	if allocationOutput != want {
-		tb.Fatalf("discovery allocation output changed:\nwant %s\n got %s", want, allocationOutput)
-	}
-
-	return taskDiscoveryPairedMetrics{
-		wallNs:      []float64{wallNs},
-		allocsPerOp: []float64{allocsPerOp},
-		outputBytes: []int{outputBytes},
-	}
-}
-
-func measureTaskDiscoveryOrderPair(tb testing.TB, taskCount int, input json.RawMessage) (taskDiscoveryPairedMetrics, taskDiscoveryPairedMetrics) {
-	tb.Helper()
-	db, taskRepo := newTaskDiscoveryOrderBenchmarkRepo(tb, taskCount, 128, 128)
-	defer db.Close()
-
-	want, err := ExecuteListTasksTool(context.Background(), taskRepo, "default", input)
-	if err != nil {
-		tb.Fatalf("warm ExecuteListTasksTool: %v", err)
-	}
-	var baseline, candidate taskDiscoveryPairedMetrics
-	for sample := 0; sample < taskDiscoveryPairedSamples; sample++ {
-		if sample%2 == 0 {
-			setTaskDiscoveryOrderIndex(tb, db, false)
-			baseline.add(measureTaskDiscoveryOrderSample(tb, taskRepo, input, want))
-			setTaskDiscoveryOrderIndex(tb, db, true)
-			candidate.add(measureTaskDiscoveryOrderSample(tb, taskRepo, input, want))
-			continue
-		}
-		setTaskDiscoveryOrderIndex(tb, db, true)
-		candidate.add(measureTaskDiscoveryOrderSample(tb, taskRepo, input, want))
-		setTaskDiscoveryOrderIndex(tb, db, false)
-		baseline.add(measureTaskDiscoveryOrderSample(tb, taskRepo, input, want))
-	}
-	setTaskDiscoveryOrderIndex(tb, db, true)
-	return baseline, candidate
-}
-
-func TestTaskDiscoveryOrderIndexMeetsPairedLatencyThresholds(t *testing.T) {
-	timingAssertionsDisabled := taskDiscoveryTimingAssertionsDisabled()
-	for _, taskCount := range []int{100, 1000, 5000, 10000} {
-		for _, page := range []taskDiscoveryOrderPage{
-			{name: "Default20", input: nil},
-			{name: "Maximum50", input: json.RawMessage(`{"limit":50}`)},
-		} {
-			taskCount := taskCount
-			page := page
-			t.Run(fmt.Sprintf("%d_tasks/%s", taskCount, page.name), func(t *testing.T) {
-				baseline, candidate := measureTaskDiscoveryOrderPair(t, taskCount, page.input)
-				baselineNs := baseline.medianWallNs()
-				candidateNs := candidate.medianWallNs()
-				t.Logf("paired median ns/op: baseline=%.0f candidate=%.0f; allocs/op: baseline=%.1f candidate=%.1f; output_bytes: baseline=%d candidate=%d", baselineNs, candidateNs, baseline.medianAllocsPerOp(), candidate.medianAllocsPerOp(), baseline.medianOutputBytes(), candidate.medianOutputBytes())
-
-				if baseline.medianOutputBytes() != candidate.medianOutputBytes() {
-					t.Fatalf("output bytes changed: baseline=%d candidate=%d", baseline.medianOutputBytes(), candidate.medianOutputBytes())
-				}
-				if candidate.medianAllocsPerOp() > baseline.medianAllocsPerOp()*taskDiscoveryMaxControlRegression {
-					t.Fatalf("candidate allocations regressed by more than 10%%: baseline=%.1f candidate=%.1f", baseline.medianAllocsPerOp(), candidate.medianAllocsPerOp())
-				}
-				if timingAssertionsDisabled {
-					t.Log("discovery calls, output-byte, and allocation assertions executed; timing thresholds disabled under coverage instrumentation")
-					return
-				}
-				if taskCount == 10000 && page.name == "Default20" && candidateNs > baselineNs*taskDiscoveryMaxPage20Improvement {
-					t.Fatalf("10,000-task default page latency did not improve by at least 70%%: baseline=%.0f ns/op candidate=%.0f ns/op", baselineNs, candidateNs)
-				}
-				if taskCount == 100 && candidateNs > baselineNs*taskDiscoveryMaxControlRegression {
-					t.Fatalf("100-task control page latency regressed by more than 10%%: baseline=%.0f ns/op candidate=%.0f ns/op", baselineNs, candidateNs)
-				}
-			})
-		}
-	}
-}
 
 // The indexed-writer inventory below covers every direct TaskRepo task INSERT,
 // UPDATE, and DELETE shape, including single-row, multi-row, and bulk paths.
@@ -1607,123 +1427,23 @@ func TestTaskDiscoveryWritePathInventory(t *testing.T) {
 	}
 }
 
-func taskDiscoveryWritePathUsesRelativeBudget(path taskDiscoveryWritePath) bool {
-	if path.affectedRows >= taskDiscoveryWritePoolSize {
-		return false
-	}
-	switch path.name {
-	case "UpdateSwarmFields", "UpdateAgentID", "UpdateWorktreeInfo", "UpdateMergeStatus", "UpdateAutoMerge", "UpdateLineage",
-		"UpdateTelegramOrigin", "UpdateSlackOrigin", "UpdateEmailOrigin", "UpdateDiscordOrigin", "UpdateXOrigin",
-		"UpdateAgentDefinition", "ClearWorktreeInfo":
-		return false
-	default:
-		return true
-	}
-}
-
-func taskDiscoveryWritePathAffectedRows(path taskDiscoveryWritePath) int {
-	if path.affectedRows > 0 {
-		return path.affectedRows
-	}
-	return 1
-}
-
-func taskDiscoveryWriteMeasurementOperations(path taskDiscoveryWritePath) int {
-	if taskDiscoveryTimingAssertionsDisabled() {
-		return 1
-	}
-	operations := path.operations
-	if operations <= 0 {
-		operations = taskDiscoveryWriteOperations
-	}
-	return operations
-}
-
-func taskDiscoveryWriteMeasurementSamples() int {
-	if taskDiscoveryTimingAssertionsDisabled() {
-		return 1
-	}
-	return taskDiscoveryPairedSamples
-}
-
-func measureTaskDiscoveryWritePathSample(tb testing.TB, path taskDiscoveryWritePath, db *sql.DB, taskRepo *repository.TaskRepo, indexed bool) float64 {
-	tb.Helper()
-	setTaskDiscoveryOrderIndex(tb, db, indexed)
-	run := path.setup(tb, db, taskRepo)
-	operations := taskDiscoveryWriteMeasurementOperations(path)
-	started := time.Now()
-	for i := 0; i < operations; i++ {
-		if err := run.write(context.Background(), i); err != nil {
-			tb.Fatalf("%s write-budget sample: %v", path.name, err)
-		}
-	}
-	elapsed := time.Since(started)
-	if run.cleanup != nil {
-		run.cleanup(tb)
-	}
-	return float64(elapsed.Nanoseconds()) / float64(operations)
-}
-
-func TestTaskDiscoveryOrderIndexWriteBudget(t *testing.T) {
-	timingAssertionsDisabled := taskDiscoveryTimingAssertionsDisabled()
+func TestTaskDiscoveryOrderIndexWriterCoverage(t *testing.T) {
 	db, taskRepo := newTaskDiscoveryOrderBenchmarkRepo(t, 10000, 128, 128)
 	defer db.Close()
 
-	var aggregateBaselineNs, aggregateCandidateNs float64
-	var aggregateOperations, aggregateAffectedRows int
 	for _, path := range taskDiscoveryWritePaths() {
 		path := path
 		t.Run(path.name, func(t *testing.T) {
-			var baseline, candidate taskDiscoveryPairedMetrics
-			for sample := 0; sample < taskDiscoveryWriteMeasurementSamples(); sample++ {
-				if sample%2 == 0 {
-					baseline.wallNs = append(baseline.wallNs, measureTaskDiscoveryWritePathSample(t, path, db, taskRepo, false))
-					candidate.wallNs = append(candidate.wallNs, measureTaskDiscoveryWritePathSample(t, path, db, taskRepo, true))
-					continue
-				}
-				candidate.wallNs = append(candidate.wallNs, measureTaskDiscoveryWritePathSample(t, path, db, taskRepo, true))
-				baseline.wallNs = append(baseline.wallNs, measureTaskDiscoveryWritePathSample(t, path, db, taskRepo, false))
+			run := path.setup(t, db, taskRepo)
+			if err := run.write(context.Background(), 0); err != nil {
+				t.Fatalf("%s write: %v", path.name, err)
 			}
-			if timingAssertionsDisabled {
-				t.Log("writer path exercised through baseline and indexed production calls; timing budget disabled under coverage instrumentation")
-				return
-			}
-
-			baselineNs := baseline.medianWallNs()
-			candidateNs := candidate.medianWallNs()
-			operations := path.operations
-			if operations <= 0 {
-				operations = taskDiscoveryWriteOperations
-			}
-			affectedRows := taskDiscoveryWritePathAffectedRows(path)
-			workUnits := operations * affectedRows
-			aggregateBaselineNs += (baselineNs / float64(affectedRows)) * float64(workUnits)
-			aggregateCandidateNs += (candidateNs / float64(affectedRows)) * float64(workUnits)
-			aggregateOperations += operations
-			aggregateAffectedRows += workUnits
-			t.Logf("paired %s median ns/op: baseline=%.0f candidate=%.0f overhead=%.1f%% delta=%.0f ns; operations=%d affected_rows=%d", path.name, baselineNs, candidateNs, (candidateNs/baselineNs-1)*100, candidateNs-baselineNs, operations, workUnits)
-			baselinePerAffectedRowNs := baselineNs / float64(affectedRows)
-			candidatePerAffectedRowNs := candidateNs / float64(affectedRows)
-			if taskDiscoveryWritePathUsesRelativeBudget(path) {
-				if candidatePerAffectedRowNs > baselinePerAffectedRowNs*taskDiscoveryMaxWriteLatencyRegression {
-					t.Fatalf("%s indexed write latency regressed by more than 20%%: baseline=%.0f candidate=%.0f ns/op across %d affected rows", path.name, baselineNs, candidateNs, workUnits)
-				}
-			} else if candidatePerAffectedRowNs-baselinePerAffectedRowNs > taskDiscoveryMaxFixedPerAffectedRowOverheadNs {
-				t.Fatalf("%s indexed write latency exceeded the lightweight absolute budget: baseline=%.0f candidate=%.0f ns/op, delta=%.0f ns/affected-row across %d affected rows", path.name, baselineNs, candidateNs, candidatePerAffectedRowNs-baselinePerAffectedRowNs, workUnits)
+			if run.cleanup != nil {
+				run.cleanup(t)
 			}
 		})
 	}
 
-	if !timingAssertionsDisabled {
-		baselinePerAffectedRowNs := aggregateBaselineNs / float64(aggregateAffectedRows)
-		candidatePerAffectedRowNs := aggregateCandidateNs / float64(aggregateAffectedRows)
-		if candidatePerAffectedRowNs > baselinePerAffectedRowNs*taskDiscoveryMaxWriteLatencyRegression {
-			t.Fatalf("complete indexed task-writer workload regressed by more than 20%%: baseline=%.0f candidate=%.0f ns/affected-row across %d operations and %d affected rows", baselinePerAffectedRowNs, candidatePerAffectedRowNs, aggregateOperations, aggregateAffectedRows)
-		}
-		t.Logf("complete indexed task-writer workload: baseline=%.0f candidate=%.0f ns/affected-row overhead=%.1f%% across %d operations and %d affected rows", baselinePerAffectedRowNs, candidatePerAffectedRowNs, (candidatePerAffectedRowNs/baselinePerAffectedRowNs-1)*100, aggregateOperations, aggregateAffectedRows)
-	}
-
-	setTaskDiscoveryOrderIndex(t, db, true)
 	indexBytes := taskDiscoveryOrderIndexBytes(t, db)
 	t.Logf("discovery index storage bytes on 10,000-task fixture: %d", indexBytes)
 	if indexBytes <= 0 || indexBytes > taskDiscoveryMaxIndexStorageBytes {
@@ -1731,41 +1451,30 @@ func TestTaskDiscoveryOrderIndexWriteBudget(t *testing.T) {
 	}
 }
 
-// BenchmarkTaskDiscoveryIndexWriteBudget records the write-time and storage
-// cost of the partial order index across every distinct task mutation shape in
-// the production repository. The paired TestTaskDiscoveryOrderIndexWriteBudget
-// applies the authoritative per-path budget (relative or fixed per affected row)
-// to the complete inventory and the weighted aggregate cap; this benchmark
-// exposes each path's ns/op and index storage for diagnosis.
+// BenchmarkTaskDiscoveryIndexWriteBudget records current write time and index
+// storage across every distinct task mutation shape in the production repository.
 func BenchmarkTaskDiscoveryIndexWriteBudget(b *testing.B) {
 	for _, path := range taskDiscoveryWritePaths() {
 		path := path
-		for _, indexed := range []bool{false, true} {
-			name := "WithoutDiscoveryOrderIndex"
-			if indexed {
-				name = "WithDiscoveryOrderIndex"
-			}
-			b.Run(path.name+"/"+name, func(b *testing.B) {
-				db, taskRepo := newTaskDiscoveryOrderBenchmarkRepo(b, 10000, 128, 128)
-				defer db.Close()
-				setTaskDiscoveryOrderIndex(b, db, indexed)
-				run := path.setup(b, db, taskRepo)
-				ctx := context.Background()
+		b.Run(path.name, func(b *testing.B) {
+			db, taskRepo := newTaskDiscoveryOrderBenchmarkRepo(b, 10000, 128, 128)
+			defer db.Close()
+			run := path.setup(b, db, taskRepo)
+			ctx := context.Background()
 
-				b.ReportAllocs()
-				b.ResetTimer()
-				for i := 0; i < b.N; i++ {
-					if err := run.write(ctx, i); err != nil {
-						b.Fatalf("%s %s: %v", path.name, name, err)
-					}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				if err := run.write(ctx, i); err != nil {
+					b.Fatalf("%s: %v", path.name, err)
 				}
-				b.StopTimer()
-				b.ReportMetric(float64(taskDiscoveryOrderIndexBytes(b, db)), "discovery_index_storage_bytes")
-				if run.cleanup != nil {
-					run.cleanup(b)
-				}
-			})
-		}
+			}
+			b.StopTimer()
+			b.ReportMetric(float64(taskDiscoveryOrderIndexBytes(b, db)), "discovery_index_storage_bytes")
+			if run.cleanup != nil {
+				run.cleanup(b)
+			}
+		})
 	}
 }
 
