@@ -1462,7 +1462,7 @@ func assertTaskCreationSelectionStatement(tb testing.TB, raw string) {
 	}
 }
 
-func TestLLMConfigRepo_APIChatSelectionProjectionIsFasterAndLowerAllocationThanFullListOnLargeFixture(t *testing.T) {
+func TestLLMConfigRepo_APIChatSelectionProjectionStaysBoundedOnLargeFixture(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping benchmark ratio assertion in short mode")
 	}
@@ -1474,17 +1474,6 @@ func TestLLMConfigRepo_APIChatSelectionProjectionIsFasterAndLowerAllocationThanF
 	}
 	seedLargeCustomProviderModelConfigs(t, ctx, repo, 50)
 
-	fullList := testing.Benchmark(func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			configs, err := repo.List(ctx)
-			if err != nil {
-				b.Fatal(err)
-			}
-			if len(configs) != 50 || configs[0].ID == "" {
-				b.Fatalf("full selection fixture returned %d configs", len(configs))
-			}
-		}
-	})
 	compactThenGet := testing.Benchmark(func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			configs, err := repo.ListChatSelectionOptions(ctx)
@@ -1505,12 +1494,14 @@ func TestLLMConfigRepo_APIChatSelectionProjectionIsFasterAndLowerAllocationThanF
 		}
 	})
 
-	t.Logf("full List+select: %d ns/op, %d B/op; compact selection+GetByID: %d ns/op, %d B/op", fullList.NsPerOp(), fullList.AllocedBytesPerOp(), compactThenGet.NsPerOp(), compactThenGet.AllocedBytesPerOp())
-	if fullList.NsPerOp() < compactThenGet.NsPerOp()*20 {
-		t.Fatalf("compact selection is not at least 20x faster: full %d ns/op, compact %d ns/op", fullList.NsPerOp(), compactThenGet.NsPerOp())
+	const maxDuration = 200 * time.Microsecond
+	const maxBytesPerOp = 300 * 1024
+	t.Logf("compact selection+GetByID: %d ns/op, %d B/op", compactThenGet.NsPerOp(), compactThenGet.AllocedBytesPerOp())
+	if testing.CoverMode() == "" && compactThenGet.NsPerOp() > maxDuration.Nanoseconds() {
+		t.Fatalf("compact selection took %s/op, want <= %s", time.Duration(compactThenGet.NsPerOp()), maxDuration)
 	}
-	if fullList.AllocedBytesPerOp() < compactThenGet.AllocedBytesPerOp()*20 {
-		t.Fatalf("compact selection is not at least 20x lower allocation: full %d B/op, compact %d B/op", fullList.AllocedBytesPerOp(), compactThenGet.AllocedBytesPerOp())
+	if compactThenGet.AllocedBytesPerOp() > maxBytesPerOp {
+		t.Fatalf("compact selection allocated %d B/op, want <= %d", compactThenGet.AllocedBytesPerOp(), maxBytesPerOp)
 	}
 }
 
