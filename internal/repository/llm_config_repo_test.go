@@ -1505,7 +1505,7 @@ func TestLLMConfigRepo_APIChatSelectionProjectionStaysBoundedOnLargeFixture(t *t
 	}
 }
 
-func BenchmarkAPIChatModelSelectionFullListVsCompactSelectionThenGet(b *testing.B) {
+func BenchmarkAPIChatModelSelectionThenGet(b *testing.B) {
 	db := testutil.NewTestDB(b)
 	repo := NewLLMConfigRepo(db)
 	ctx := context.Background()
@@ -1514,38 +1514,24 @@ func BenchmarkAPIChatModelSelectionFullListVsCompactSelectionThenGet(b *testing.
 	}
 	seedLargeCustomProviderModelConfigs(b, ctx, repo, 50)
 
-	b.Run("full_list", func(b *testing.B) {
-		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			configs, err := repo.List(ctx)
-			if err != nil {
-				b.Fatal(err)
-			}
-			if len(configs) != 50 || configs[0].ID == "" {
-				b.Fatalf("full selection fixture returned %d configs", len(configs))
-			}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		configs, err := repo.ListChatSelectionOptions(ctx)
+		if err != nil {
+			b.Fatal(err)
 		}
-	})
-	b.Run("compact_selection_plus_get_by_id", func(b *testing.B) {
-		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			configs, err := repo.ListChatSelectionOptions(ctx)
-			if err != nil {
-				b.Fatal(err)
-			}
-			if len(configs) != 50 || configs[0].ID == "" {
-				b.Fatalf("compact selection fixture returned %d configs", len(configs))
-			}
-			selectedID := configs[0].ID
-			full, err := repo.GetByID(ctx, selectedID)
-			if err != nil {
-				b.Fatal(err)
-			}
-			if full == nil || full.APIKey == "" || full.ExtraBodyJSON == "" || full.MixtureConfigJSON == "" {
-				b.Fatalf("selected full model was not hydrated: %#v", full)
-			}
+		if len(configs) != 50 || configs[0].ID == "" {
+			b.Fatalf("selection fixture returned %d configs", len(configs))
 		}
-	})
+		selectedID := configs[0].ID
+		full, err := repo.GetByID(ctx, selectedID)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if full == nil || full.APIKey == "" || full.ExtraBodyJSON == "" || full.MixtureConfigJSON == "" {
+			b.Fatalf("selected full model was not hydrated: %#v", full)
+		}
+	}
 }
 
 func prepareLargeVisionSelectionFixture(tb testing.TB, db *sql.DB, repo *LLMConfigRepo, ctx context.Context) string {
