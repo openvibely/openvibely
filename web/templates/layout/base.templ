@@ -610,6 +610,17 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							overflow-y: auto !important;
 						}
 					}
+					/* Collection Filters are class-driven so trigger focus cannot reopen a dismissed popover. */
+					[data-card-list-toolbar] .dropdown:not(.dropdown-open) > [data-card-filters-popover] {
+						visibility: hidden !important;
+						opacity: 0 !important;
+						pointer-events: none !important;
+					}
+					[data-card-list-toolbar] .dropdown.dropdown-open > [data-card-filters-popover] {
+						visibility: visible !important;
+						opacity: 1 !important;
+						pointer-events: auto !important;
+					}
 					/* Prevent dropdown menus from causing scrollbars */
 					.dropdown-content {
 						max-height: calc(100vh - 4rem);
@@ -4312,10 +4323,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 								event.stopPropagation();
 								var dropdown = filterButton.closest('.dropdown');
 								var open = dropdown && !dropdown.classList.contains('dropdown-open');
-								if (dropdown) dropdown.classList.toggle('dropdown-open', open);
-								filterButton.setAttribute('aria-expanded', open ? 'true' : 'false');
+								setCardFilterDropdown(dropdown, !!open);
 							});
-
 							if (form) form.addEventListener('submit', function(event) {
 								event.preventDefault();
 								var target;
@@ -4346,9 +4355,9 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 									var checkbox = card.querySelector(':scope > [data-card-selection-gutter] input');
 									if (checkbox) checkbox.checked = !!state.ids[card.getAttribute('data-card-select-id')];
 								});
-								var normal = toolbar.querySelector('[data-card-query-form]');
+								var secondary = toolbar.querySelector('[data-card-query-secondary]');
 								var actions = toolbar.querySelector('[data-card-selection-actions]');
-								if (normal) normal.classList.toggle('hidden', selected.length > 0);
+								if (secondary) secondary.classList.toggle('hidden', selected.length > 0);
 								if (actions) { actions.classList.toggle('hidden', selected.length === 0); actions.classList.toggle('flex', selected.length > 0); }
 								toolbar.querySelectorAll('[data-card-selected-count], [data-card-mobile-selected-count]').forEach(function(node) { node.textContent = selected.length + ' selected'; });
 								var mobileActions = toolbar.querySelector('[data-card-mobile-actions]');
@@ -4392,7 +4401,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 									if (!eligible(card)) {
 										var reason = card.getAttribute('data-card-select-disabled-reason');
 										if (!reason && key === 'personality') reason = 'Only custom personalities can be selected';
-										if (!reason && key === 'channels') reason = 'Only webhook cards can be selected';
+										if (!reason && key === 'channels') reason = 'This channel cannot be selected';
 										if (!reason) reason = 'This card cannot be selected';
 										var help = document.createElement('span'); help.id = key + '-selection-help-' + index; help.className = 'sr-only'; help.textContent = reason;
 										checkbox.disabled = true; checkbox.title = reason; checkbox.setAttribute('aria-disabled', 'true'); checkbox.setAttribute('aria-describedby', help.id); gutter.appendChild(help);
@@ -4412,6 +4421,13 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 								dialog.querySelector('[data-card-bulk-confirm-title]').textContent = 'Delete ' + selected.length + ' selected ' + entity + '?';
 								dialog.showModal();
 							}
+							async function refreshCollection() {
+								var refreshURL = root.getAttribute('data-card-pagination-url') || window.location.href;
+								if (window.cardPaginationRefreshURL) refreshURL = window.cardPaginationRefreshURL(root, refreshURL);
+								var html = await fetch(refreshURL, {credentials: 'same-origin', headers: {'HX-Request': 'true'}}).then(function(result) { if (!result.ok) throw new Error('Refresh failed'); return result.text(); });
+								var next = window.replaceSearchableCardContainer ? window.replaceSearchableCardContainer(root, html) : null;
+								var focus = next && next.querySelector('[data-card-search]'); if (focus) focus.focus({preventScroll: true});
+							}
 							async function deleteSelected() {
 								var selected = selectedCards(); if (!selected.length) return;
 								var dialog = toolbar.querySelector('[data-card-bulk-confirm]'); var confirm = dialog.querySelector('[data-card-bulk-confirm-delete]'); var error = dialog.querySelector('[data-card-bulk-error]');
@@ -4420,14 +4436,40 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 								else body = {ids: selected.map(function(card) { return card.getAttribute('data-card-select-id'); })};
 								confirm.disabled = true; error.classList.add('hidden');
 								try {
-									var endpoint = new URL(toolbar.getAttribute('data-card-bulk-url'), window.location.href); var project = new URL(window.location.href).searchParams.get('project_id'); if (project) endpoint.searchParams.set('project_id', project);
-									var response = await fetch(endpoint.toString(), {method: 'DELETE', credentials: 'same-origin', headers: {'Content-Type': 'application/json', 'Accept': 'application/json'}, body: JSON.stringify(body)});
-									if (!response.ok) { var payload = await response.json().catch(function() { return {}; }); throw new Error(payload.message || 'Bulk deletion failed'); }
-									dialog.close(); clearSelection();
-									var refreshURL = root.getAttribute('data-card-pagination-url') || window.location.href; if (window.cardPaginationRefreshURL) refreshURL = window.cardPaginationRefreshURL(root, refreshURL);
-									var html = await fetch(refreshURL, {credentials: 'same-origin', headers: {'HX-Request': 'true'}}).then(function(result) { if (!result.ok) throw new Error('Refresh failed'); return result.text(); });
-									var next = window.replaceSearchableCardContainer ? window.replaceSearchableCardContainer(root, html) : null; var focus = next && next.querySelector('[data-card-search]'); if (focus) focus.focus({preventScroll: true});
+									var project = new URL(window.location.href).searchParams.get('project_id');
+									if (key === 'channels') {
+										var fixed = selected.filter(function(card) { return !!card.getAttribute('data-card-delete-url'); });
+										for (var i = 0; i < fixed.length; i++) {
+											var fixedEndpoint = new URL(fixed[i].getAttribute('data-card-delete-url'), window.location.href);
+											if (project) fixedEndpoint.searchParams.set('project_id', project);
+											var fixedResponse = await fetch(fixedEndpoint.toString(), {method: fixed[i].getAttribute('data-card-delete-method') || 'POST', credentials: 'same-origin', headers: {'HX-Request': 'true'}});
+											if (!fixedResponse.ok) throw new Error('Failed to delete ' + (fixed[i].getAttribute('data-channel-type') || 'channel'));
+										}
+										var webhookIDs = selected.filter(function(card) { return !card.getAttribute('data-card-delete-url'); }).map(function(card) { return card.getAttribute('data-card-select-id'); });
+										if (webhookIDs.length) {
+											var webhookEndpoint = new URL(toolbar.getAttribute('data-card-bulk-url'), window.location.href); if (project) webhookEndpoint.searchParams.set('project_id', project);
+											var webhookResponse = await fetch(webhookEndpoint.toString(), {method: 'DELETE', credentials: 'same-origin', headers: {'Content-Type': 'application/json', 'Accept': 'application/json'}, body: JSON.stringify({ids: webhookIDs})});
+											if (!webhookResponse.ok) throw new Error('Failed to delete selected webhooks');
+										}
+									} else {
+										var endpoint = new URL(toolbar.getAttribute('data-card-bulk-url'), window.location.href); if (project) endpoint.searchParams.set('project_id', project);
+										var response = await fetch(endpoint.toString(), {method: 'DELETE', credentials: 'same-origin', headers: {'Content-Type': 'application/json', 'Accept': 'application/json'}, body: JSON.stringify(body)});
+										if (!response.ok) { var payload = await response.json().catch(function() { return {}; }); throw new Error(payload.message || 'Bulk deletion failed'); }
+									}
+									dialog.close(); clearSelection(); await refreshCollection();
 								} catch (err) { error.textContent = err.message || 'Bulk deletion failed'; error.classList.remove('hidden'); } finally { confirm.disabled = false; }
+							}
+							async function markSelectedRead() {
+								var selected = selectedCards(); if (!selected.length) return;
+								var buttons = toolbar.querySelectorAll('[data-card-mark-read-selected], [data-card-mobile-mark-read]');
+								var actionError = toolbar.querySelector('[data-card-action-error]');
+								buttons.forEach(function(button) { button.disabled = true; }); if (actionError) actionError.classList.add('hidden');
+								try {
+									var endpoint = new URL('/alerts/read-bulk', window.location.href); var project = new URL(window.location.href).searchParams.get('project_id'); if (project) endpoint.searchParams.set('project_id', project);
+									var response = await fetch(endpoint.toString(), {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json', 'Accept': 'application/json'}, body: JSON.stringify({ids: selected.map(function(card) { return card.getAttribute('data-card-select-id'); })})});
+									if (!response.ok) { var payload = await response.json().catch(function() { return {}; }); throw new Error(payload.message || 'Failed to mark selected alerts as read'); }
+									clearSelection(); await refreshCollection();
+								} catch (err) { if (actionError) { actionError.textContent = err.message || 'Failed to mark selected alerts as read'; actionError.classList.remove('hidden'); } } finally { buttons.forEach(function(button) { button.disabled = false; }); }
 							}
 							toolbar._openVibelyClearSelection = clearSelection;
 							var selectLoaded = toolbar.querySelector('[data-card-select-loaded]');
@@ -4442,19 +4484,28 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							var selectMode = toolbar.querySelector('[data-card-select-mode]'); if (selectMode) selectMode.addEventListener('click', enterMobile);
 							toolbar.querySelectorAll('[data-card-cancel-selection], [data-card-mobile-cancel]').forEach(function(button) { button.addEventListener('click', clearSelection); });
 							toolbar.querySelectorAll('[data-card-delete-selected], [data-card-mobile-delete]').forEach(function(button) { button.addEventListener('click', openConfirm); });
+							toolbar.querySelectorAll('[data-card-mark-read-selected], [data-card-mobile-mark-read]').forEach(function(button) { button.addEventListener('click', markSelectedRead); });
 							var cancel = toolbar.querySelector('[data-card-bulk-confirm-cancel]'); if (cancel) cancel.addEventListener('click', function() { cancel.closest('dialog').close(); });
 							var confirm = toolbar.querySelector('[data-card-bulk-confirm-delete]'); if (confirm) confirm.addEventListener('click', deleteSelected);
 							root._openVibelyInstallSelectionCards = installCards; installCards();
 						}
 
-						function closeCardFilterDropdown(dropdown) {
+						function setCardFilterDropdown(dropdown, open) {
 							if (!dropdown) return;
-							dropdown.classList.remove('dropdown-open');
+							dropdown.classList.toggle('dropdown-open', open);
 							var button = dropdown.querySelector('[data-card-filters-button]');
-							if (button) button.setAttribute('aria-expanded', 'false');
+							if (button) button.setAttribute('aria-expanded', open ? 'true' : 'false');
+							var popover = dropdown.querySelector('[data-card-filters-popover]');
+							if (popover) {
+								popover.style.setProperty('visibility', open ? 'visible' : 'hidden', 'important');
+								popover.style.setProperty('opacity', open ? '1' : '0', 'important');
+								popover.style.setProperty('pointer-events', open ? 'auto' : 'none', 'important');
+							}
 						}
-						document.addEventListener('click', function(event) {
-							var target = event.target;
+						function closeCardFilterDropdown(dropdown) {
+							setCardFilterDropdown(dropdown, false);
+						}
+						document.addEventListener('click', function(event) {							var target = event.target;
 							if (target && target.closest && target.closest('[data-card-filters-button], [data-card-filters-popover]')) return;
 							document.querySelectorAll('[data-card-filters-button]').forEach(function(button) { closeCardFilterDropdown(button.closest('.dropdown')); });
 						});

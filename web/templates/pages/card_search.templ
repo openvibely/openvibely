@@ -145,7 +145,7 @@ func collectionToolbarConfig(pageKey, projectID, search string) CardListToolbarC
 		config.Filters = []CardListFilter{{Key: "provider", Label: "Provider", Options: cardListOptions("openai", "OpenAI", "anthropic", "Anthropic", "ollama", "Ollama", "openai_compatible", "OpenAI-compatible", "mixture", "Mixture")}, {Key: "default", Label: "Default", Options: cardListOptions("true", "Default", "false", "Non-default")}, {Key: "auth_status", Label: "Authentication", Options: cardListOptions("connected", "Connected", "not_connected", "Not connected", "not_required", "Not required")}, {Key: "kind", Label: "Kind", Options: cardListOptions("direct", "Direct", "mixture", "Mixture")}}
 		config.Sort, config.SortOptions = "default_name", cardListOptions("default_name", "Default then name", "name_asc", "Name A–Z", "name_desc", "Name Z–A", "provider", "Provider")
 	case "channels":
-		config.Action, config.Placeholder, config.EntityType, config.BulkDeleteURL = "/channels", "Search channels...", "webhooks", "/channels/webhooks/bulk"
+		config.Action, config.Placeholder, config.EntityType, config.BulkDeleteURL = "/channels", "Search channels...", "channels", "/channels/webhooks/bulk"
 		config.Filters = []CardListFilter{{Key: "type", Label: "Type", Options: cardListOptions("github", "GitHub", "slack", "Slack", "telegram", "Telegram", "discord", "Discord", "x", "X", "email", "Email", "webhook", "Webhook", "outbound_targets", "Outbound targets")}, {Key: "connection_state", Label: "Connection", Options: cardListOptions("connected", "Connected", "configured", "Configured", "disconnected", "Disconnected")}, {Key: "webhook_enabled", Label: "Webhook", Options: cardListOptions("true", "Enabled", "false", "Disabled")}}
 	case "personality":
 		config.Action, config.Placeholder, config.EntityType, config.BulkDeleteURL = "/personality", "Search personalities...", "personalities", "/personality/custom/bulk"
@@ -240,40 +240,52 @@ templ CardListToolbar(config CardListToolbarConfig) {
 					/>
 				</div>
 			</div>
-			<div class="dropdown dropdown-end">
-				<button type="button" class="btn btn-sm" data-card-filters-button aria-haspopup="true" aria-expanded="false">
-					Filters
-					if activeCardFilterCount(config.Filters) > 0 {
-						({ strconv.Itoa(activeCardFilterCount(config.Filters)) })
+			if config.CanSelect {
+				<div class="hidden items-center gap-2" data-card-selection-actions>
+					<strong class="whitespace-nowrap text-sm" data-card-selected-count>0 selected</strong>
+					if config.PageKey == "alerts" {
+						<button type="button" class="btn btn-sm" data-card-mark-read-selected>Mark as read</button>
 					}
-				</button>
-				<div class="dropdown-content z-[100] mt-2 w-72 max-w-[calc(100vw-2rem)] rounded-box border border-base-300 bg-base-100 p-4 shadow" data-card-filters-popover>
-					for _, filter := range config.Filters {
-						<label class="form-control mb-3" data-card-filter-group={ filter.Key }>
-							<span class="label-text mb-1 text-xs font-semibold">{ filter.Label }</span>
-							if filter.Text {
-								<input class="input input-bordered input-sm" name={ filter.Key } value={ filter.Value } data-card-filter/>
-							} else {
-								<select class="select select-bordered select-sm" name={ filter.Key } data-card-filter>
-									<option value="">All</option>
-									for _, option := range filter.Options {
-										<option value={ option.Value } selected?={ option.Value == filter.Value }>{ option.Label }</option>
-									}
-								</select>
-							}
-						</label>
-					}
-					<div class="flex justify-end"><button class="btn btn-primary btn-sm" type="submit">Apply filters</button></div>
+					<button type="button" class="btn btn-error btn-sm" data-card-delete-selected>Delete selected</button>
+					<span class="hidden text-sm text-error" data-card-action-error role="alert"></span>
 				</div>
-			</div>
-			if len(config.SortOptions) > 0 {
-				<label class="sr-only" for={ config.PageKey + "-card-sort" }>Sort</label>
-				<select id={ config.PageKey + "-card-sort" } class="select select-bordered select-sm" name="sort" data-card-sort onchange="this.form.requestSubmit()">
-					for _, option := range config.SortOptions {
-						<option value={ option.Value } selected?={ option.Value == config.Sort }>{ option.Label }</option>
-					}
-				</select>
 			}
+			<div class="contents" data-card-query-secondary>
+				<div class="dropdown dropdown-end">
+					<button type="button" class="btn btn-sm" data-card-filters-button aria-haspopup="true" aria-expanded="false">
+						Filters
+						if activeCardFilterCount(config.Filters) > 0 {
+							({ strconv.Itoa(activeCardFilterCount(config.Filters)) })
+						}
+					</button>
+					<div class="dropdown-content z-[100] mt-2 w-72 max-w-[calc(100vw-2rem)] rounded-box border border-base-300 bg-base-100 p-4 shadow" data-card-filters-popover>
+						for _, filter := range config.Filters {
+							<label class="form-control mb-3" data-card-filter-group={ filter.Key }>
+								<span class="label-text mb-1 text-xs font-semibold">{ filter.Label }</span>
+								if filter.Text {
+									<input class="input input-bordered input-sm" name={ filter.Key } value={ filter.Value } data-card-filter/>
+								} else {
+									<select class="select select-bordered select-sm" name={ filter.Key } data-card-filter>
+										<option value="">All</option>
+										for _, option := range filter.Options {
+											<option value={ option.Value } selected?={ option.Value == filter.Value }>{ option.Label }</option>
+										}
+									</select>
+								}
+							</label>
+						}
+						<div class="flex justify-end"><button class="btn btn-primary btn-sm" type="submit">Apply filters</button></div>
+					</div>
+				</div>
+				if len(config.SortOptions) > 0 {
+					<label class="sr-only" for={ config.PageKey + "-card-sort" }>Sort</label>
+					<select id={ config.PageKey + "-card-sort" } class="select select-bordered select-sm" name="sort" data-card-sort onchange="this.form.requestSubmit()">
+						for _, option := range config.SortOptions {
+							<option value={ option.Value } selected?={ option.Value == config.Sort }>{ option.Label }</option>
+						}
+					</select>
+				}
+			</div>
 		</form>
 		if activeCardFilterCount(config.Filters) > 0 {
 			<div class="mt-2 flex flex-wrap items-center gap-2" data-card-filter-chips>
@@ -283,13 +295,6 @@ templ CardListToolbar(config CardListToolbarConfig) {
 					}
 				}
 				<a class="btn btn-ghost btn-xs" data-card-clear-filters href={ templ.SafeURL(cardToolbarURL(config, "", true)) }>Clear all</a>
-			</div>
-		}
-		if config.CanSelect {
-			<div class="hidden items-center gap-2 rounded-box border border-base-300 bg-base-100 p-2 shadow-sm" data-card-selection-actions>
-				<strong data-card-selected-count>0 selected</strong>
-				<button type="button" class="btn btn-error btn-sm" data-card-delete-selected>Delete selected</button>
-				<button type="button" class="btn btn-ghost btn-sm" data-card-cancel-selection>Cancel</button>
 			</div>
 		}
 		<div data-search-no-results class="py-8 text-center" style="display:none"><p class="opacity-50">No results match your search.</p></div>
@@ -304,7 +309,14 @@ templ CardListToolbar(config CardListToolbarConfig) {
 				<form method="dialog" class="modal-backdrop"><button>close</button></form>
 			</dialog>
 			<div class="fixed inset-x-3 bottom-3 z-[90] hidden items-center justify-between gap-2 rounded-box border border-base-300 bg-base-100 p-3 shadow-xl md:hidden" data-card-mobile-actions>
-				<strong data-card-mobile-selected-count>0 selected</strong><div class="flex gap-2"><button type="button" class="btn btn-error btn-sm" data-card-mobile-delete>Delete</button><button type="button" class="btn btn-ghost btn-sm" data-card-mobile-cancel>Cancel</button></div>
+				<strong data-card-mobile-selected-count>0 selected</strong>
+				<div class="flex gap-2">
+					if config.PageKey == "alerts" {
+						<button type="button" class="btn btn-sm" data-card-mobile-mark-read>Mark as read</button>
+					}
+					<button type="button" class="btn btn-error btn-sm" data-card-mobile-delete>Delete</button>
+					<button type="button" class="btn btn-ghost btn-sm" data-card-mobile-cancel>Cancel</button>
+				</div>
 			</div>
 		}
 	</div>

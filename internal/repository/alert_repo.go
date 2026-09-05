@@ -459,6 +459,32 @@ func (r *AlertRepo) MarkRead(ctx context.Context, projectID, id string) error {
 	return requireAffected(result)
 }
 
+func (r *AlertRepo) MarkReadBulk(ctx context.Context, projectID string, ids []string) error {
+	if len(ids) == 0 {
+		return fmt.Errorf("at least one alert is required")
+	}
+	placeholders := strings.TrimRight(strings.Repeat("?,", len(ids)), ",")
+	args := make([]any, 0, len(ids)+1)
+	args = append(args, projectID)
+	for _, id := range ids {
+		args = append(args, id)
+	}
+	return r.withImmediateAlertMutation(ctx, func(conn *sql.Conn) error {
+		var count int
+		if err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM alerts WHERE project_id = ? AND id IN (`+placeholders+`)`, args...).Scan(&count); err != nil {
+			return err
+		}
+		if count != len(ids) {
+			return ErrAlertNotFound
+		}
+		_, err := conn.ExecContext(ctx, `UPDATE alerts SET is_read = 1, updated_at = CURRENT_TIMESTAMP WHERE project_id = ? AND id IN (`+placeholders+`)`, args...)
+		if err != nil {
+			return fmt.Errorf("marking alerts read: %w", err)
+		}
+		return nil
+	}, nil)
+}
+
 func (r *AlertRepo) MarkAllRead(ctx context.Context, projectID string) error {
 	_, err := execBoundSQLite(ctx, r.db, `UPDATE alerts SET is_read = 1, updated_at = CURRENT_TIMESTAMP WHERE project_id = ? AND is_read = 0`, projectID)
 	if err != nil {

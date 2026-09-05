@@ -1269,6 +1269,16 @@ func TestChannelsPageDeleteActionsUseConfirmationDialog(t *testing.T) {
 		if !strings.Contains(card, tc.method) {
 			t.Fatalf("expected %s delete action to preserve method %q", tc.channelType, tc.method)
 		}
+		if !strings.Contains(card, `data-card-select-eligible="true"`) {
+			t.Fatalf("expected %s channel card to be selectable", tc.channelType)
+		}
+		if tc.channelType != "webhook" {
+			for _, marker := range []string{`data-card-select-id="channel:` + tc.channelType + `"`, `data-card-delete-url="` + tc.url, `data-card-delete-method="` + tc.method + `"`} {
+				if !strings.Contains(card, marker) {
+					t.Fatalf("expected %s selectable channel card to contain %q", tc.channelType, marker)
+				}
+			}
+		}
 		if strings.Contains(card, `hx-confirm="Delete this `) {
 			t.Fatalf("did not expect %s delete action to use immediate delete hx-confirm", tc.channelType)
 		}
