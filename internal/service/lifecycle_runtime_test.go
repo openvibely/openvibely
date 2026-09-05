@@ -170,37 +170,7 @@ func BenchmarkLifecycleAgentListProjection(b *testing.B) {
 	}
 	inspector := newAgentInspector(repo, nil, nil)
 
-	b.Run("full_inspector", func(b *testing.B) {
-		b.ReportAllocs()
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			agents, err := repo.List(ctx)
-			if err != nil {
-				b.Fatal(err)
-			}
-			summaries := make([]agentskills.AgentSummary, 0, len(agents))
-			for _, agent := range agents {
-				if !agent.Enabled || agent.GeneratedStatus == models.AgentStatusProtected || agent.GeneratedStatus == models.AgentStatusArchived || agent.ArchivedAt != nil || strings.TrimSpace(agent.SystemKind) != "" || isBuiltInSystemAgentKeyForList(agent.Key) {
-					continue
-				}
-				summaries = append(summaries, agentskills.AgentSummary{
-					Key:             agent.Key,
-					Name:            agent.Name,
-					Description:     agent.Description,
-					Scope:           string(agent.Scope),
-					Enabled:         agent.Enabled,
-					Selectable:      agent.SelectableAsPrimary,
-					GeneratedStatus: string(agent.GeneratedStatus),
-					AttachedSkills:  embeddedAgentSkillNames(agent.Skills),
-				})
-			}
-			if len(summaries) != 100 {
-				b.Fatalf("full inspector summaries = %d, want 100", len(summaries))
-			}
-		}
-	})
-
-	b.Run("compact_projection", func(b *testing.B) {
+	b.Run("current", func(b *testing.B) {
 		b.ReportAllocs()
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
