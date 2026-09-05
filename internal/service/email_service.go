@@ -588,7 +588,7 @@ func (s *EmailService) pollOnce(ctx context.Context, cfg EmailRuntimeConfig) {
 				if s.processIncomingMessageFn != nil {
 					result.handled = s.ProcessIncoming(ctx, fetched.Message)
 				} else {
-					result = s.processIncomingMessageWithSelfAddress(ctx, fetched.Message, mailboxIdentity, messageKey, selfAddress)
+					result = s.processIncomingMessageWithNormalizedSelfAddress(ctx, fetched.Message, mailboxIdentity, messageKey, selfAddress)
 				}
 				if !result.handled {
 					continue
@@ -923,7 +923,11 @@ func (s *EmailService) processIncomingMessage(ctx context.Context, msg EmailInbo
 }
 
 func (s *EmailService) processIncomingMessageWithSelfAddress(ctx context.Context, msg EmailInboundMessage, mailboxIdentity, messageKey, selfAddress string) emailIncomingProcessResult {
-	if isIgnoredEmail(msg, selfAddress) ||
+	return s.processIncomingMessageWithNormalizedSelfAddress(ctx, msg, mailboxIdentity, messageKey, repository.NormalizeEmailAddress(selfAddress))
+}
+
+func (s *EmailService) processIncomingMessageWithNormalizedSelfAddress(ctx context.Context, msg EmailInboundMessage, mailboxIdentity, messageKey, selfAddress string) emailIncomingProcessResult {
+	if isIgnoredEmailWithNormalizedSelfAddress(msg, selfAddress) ||
 		(strings.TrimSpace(msg.Body) == "" && len(msg.Attachments) == 0) {
 		return emailIncomingProcessResult{handled: true}
 	}
@@ -1239,8 +1243,12 @@ func (s *EmailService) getConfiguredAddress(ctx context.Context) string {
 }
 
 func isIgnoredEmail(msg EmailInboundMessage, selfAddress string) bool {
+	return isIgnoredEmailWithNormalizedSelfAddress(msg, repository.NormalizeEmailAddress(selfAddress))
+}
+
+func isIgnoredEmailWithNormalizedSelfAddress(msg EmailInboundMessage, selfAddress string) bool {
 	from := repository.NormalizeEmailAddress(msg.FromAddress)
-	if from == "" || (selfAddress != "" && from == repository.NormalizeEmailAddress(selfAddress)) {
+	if from == "" || (selfAddress != "" && from == selfAddress) {
 		return true
 	}
 	if auto := strings.TrimSpace(strings.ToLower(msg.AutoSubmitted)); auto != "" && auto != "no" {
