@@ -8,7 +8,10 @@ import (
 	"html"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync/atomic"
@@ -42,15 +45,18 @@ func TestEveryCollectionBulkRouteRejectsMalformedPayload(t *testing.T) {
 	tc.handler.SetAutomationBuilderServices(nil, nil, nil, nil, nil, service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo))
 	project := tc.CreateProject().WithName("Bulk validation").Build()
 
+	malformedBodies := []string{`{}`, `{`, `{"ids":["a"],"extra":true}`, `{"ids":["a"]} {}`, `{"ids":[]}`, `{"skills":[]}`}
 	for _, path := range []string{
 		"/alerts/bulk", "/automations/bulk", "/agents/bulk", "/skills/bulk", "/models/bulk", "/channels/webhooks/bulk", "/personality/custom/bulk",
 	} {
 		t.Run(path, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodDelete, path+"?project_id="+project.ID, strings.NewReader(`{}`))
-			req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
-			rec := httptest.NewRecorder()
-			tc.echo.ServeHTTP(rec, req)
-			require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+			for _, body := range malformedBodies {
+				req := httptest.NewRequest(http.MethodDelete, path+"?project_id="+project.ID, strings.NewReader(body))
+				req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+				rec := httptest.NewRecorder()
+				tc.echo.ServeHTTP(rec, req)
+				require.Equal(t, http.StatusBadRequest, rec.Code, body+": "+rec.Body.String())
+			}
 		})
 	}
 }
@@ -108,6 +114,54 @@ func TestBulkHandlersPreflightWithoutPartialDeletion(t *testing.T) {
 			require.NotNil(t, endpoint)
 		}
 	})
+	t.Run("agents", func(t *testing.T) {
+		tc := NewTestContext(t)
+		repo := repository.NewAgentRepo(tc.db)
+		tc.handler.SetAgentRepo(repo)
+		ordinary := &models.Agent{Name: "Ordinary bulk agent", Key: "ordinary_bulk_agent", Scope: models.AgentScopeGlobal, Enabled: true, GeneratedStatus: models.AgentStatusUserEdited}
+		protected := &models.Agent{Name: "Protected bulk agent", Key: "protected_bulk_agent", Scope: models.AgentScopeGlobal, Enabled: true, GeneratedStatus: models.AgentStatusProtected}
+		require.NoError(t, repo.Create(t.Context(), ordinary))
+		require.NoError(t, repo.Create(t.Context(), protected))
+		rec := serveBulkDeleteRequest(t, tc.echo, "/agents/bulk", bulkIDsRequest{IDs: []string{ordinary.ID, protected.ID}})
+		require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+		for _, id := range []string{ordinary.ID, protected.ID} {
+			agent, err := repo.GetByID(t.Context(), id)
+			require.NoError(t, err)
+			require.NotNil(t, agent)
+		}
+	})
+
+	t.Run("automations", func(t *testing.T) {
+		tc := NewTestContext(t)
+		repo := repository.NewAutomationRepo(tc.db)
+		tc.handler.SetAutomationBuilderServices(nil, nil, nil, nil, nil, service.NewAutomationLifecycleService(repo, tc.scheduleRepo))
+		firstProject := tc.CreateProject().WithName("Bulk automation first").Build()
+		secondProject := tc.CreateProject().WithName("Bulk automation second").Build()
+		var ownID, foreignID string
+		require.NoError(t, tc.db.QueryRow(`INSERT INTO automations (project_id, stable_key, name) VALUES (?, 'own', 'Own') RETURNING id`, firstProject.ID).Scan(&ownID))
+		require.NoError(t, tc.db.QueryRow(`INSERT INTO automations (project_id, stable_key, name) VALUES (?, 'foreign', 'Foreign') RETURNING id`, secondProject.ID).Scan(&foreignID))
+		rec := serveBulkDeleteRequest(t, tc.echo, "/automations/bulk?project_id="+firstProject.ID, bulkIDsRequest{IDs: []string{ownID, foreignID}})
+		require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+		for _, id := range []string{ownID, foreignID} {
+			var count int
+			require.NoError(t, tc.db.QueryRow(`SELECT COUNT(*) FROM automations WHERE id = ?`, id).Scan(&count))
+			require.Equal(t, 1, count)
+		}
+	})
+
+	t.Run("skills", func(t *testing.T) {
+		tc := NewTestContext(t)
+		root := t.TempDir()
+		tc.handler.SetAgentSkillRoot(root)
+		existing := filepath.Join(root, "skills", "existing-skill")
+		require.NoError(t, os.MkdirAll(existing, 0o755))
+		payload := bulkSkillsRequest{Skills: []bulkSkillRef{{Handle: "existing-skill", Scope: "global"}, {Handle: "missing-skill", Scope: "global"}}}
+		rec := serveBulkDeleteRequest(t, tc.echo, "/skills/bulk", payload)
+		require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+		stat, err := os.Stat(existing)
+		require.NoError(t, err)
+		require.True(t, stat.IsDir())
+	})
 }
 
 func serveBulkDeleteRequest(t *testing.T, e *echo.Echo, path string, payload any) *httptest.ResponseRecorder {
@@ -142,6 +196,109 @@ func TestCollectionHandlersNormalizeRejectedToolbarState(t *testing.T) {
 		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 		require.NotContains(t, rec.Body.String(), `data-card-filter-chip=`)
 	}
+}
+
+func TestCollectionMutationMarkupPreservesValidatedListState(t *testing.T) {
+	state := pages.CardListState{
+		ProjectID: "project-state",
+		Search:    "needle",
+		Sort:      "name_desc",
+		Filters: map[string]string{
+			"lifecycle_state": "active",
+			"health_state":    "degraded",
+		},
+	}
+	var automations bytes.Buffer
+	automation := models.AutomationCard{Automation: models.Automation{ID: "automation-state", Name: "Stateful", LifecycleState: models.AutomationActive}}
+	require.NoError(t, pages.AutomationsContentPageWithState([]models.AutomationCard{automation}, state.ProjectID, false, state).Render(t.Context(), &automations))
+	for _, endpoint := range []string{"run-now", "pause"} {
+		require.Contains(t, automations.String(), "/automations/automation-state/"+endpoint+"?health_state=degraded&amp;lifecycle_state=active&amp;project_id=project-state&amp;search=needle&amp;sort=name_desc")
+	}
+
+	personalityState := pages.PersonalityListState{ProjectID: "project-state", Search: "needle", Kind: "custom", Active: "false", Sort: "name_desc"}
+	cards := []pages.PersonalityListCard{{Key: "custom-state", Name: "Custom state", Kind: "custom", Custom: &models.CustomPersonality{Key: "custom-state", Name: "Custom state"}}}
+	var personality bytes.Buffer
+	require.NoError(t, pages.PersonalitySectionPageWithPaginationState("", cards, false, personalityState).Render(t.Context(), &personality))
+	require.Contains(t, personality.String(), "/personality/custom/custom-state?active=false&amp;kind=custom&amp;project_id=project-state&amp;search=needle&amp;sort=name_desc")
+	require.Contains(t, personality.String(), "/personality/save?active=false&amp;kind=custom&amp;personality=custom-state&amp;project_id=project-state&amp;search=needle&amp;sort=name_desc")
+
+	for _, marker := range []string{
+		"cardCollectionActionURL(document.getElementById('agents-container')",
+		"cardCollectionActionURL(document.getElementById('models-container')",
+		"cardCollectionActionURL(root, path)",
+	} {
+		require.Contains(t, automations.String()+personality.String()+renderCollectionPageScripts(t), marker)
+	}
+}
+
+func renderCollectionPageScripts(t *testing.T) string {
+	t.Helper()
+	var agents, modelsPage bytes.Buffer
+	require.NoError(t, pages.AgentsContentPageWithState(nil, nil, false, pages.CardListState{}).Render(t.Context(), &agents))
+	require.NoError(t, pages.ModelsContentPageWithPaginationAndState(nil, nil, nil, false, false, pages.CardListState{}).Render(t.Context(), &modelsPage))
+	return agents.String() + modelsPage.String()
+}
+
+func TestAlertsEmptyStateRecognizesEveryActiveFilter(t *testing.T) {
+	for _, filter := range []struct{ key, value string }{{"read", "unread"}, {"severity", "error"}, {"decision_state", "pending"}, {"type", "custom"}, {"source", "native"}} {
+		t.Run(filter.key, func(t *testing.T) {
+			state := pages.CardListState{Filters: map[string]string{filter.key: filter.value}}
+			var body bytes.Buffer
+			require.NoError(t, pages.AlertsContentPageWithState(nil, "project-alerts", 0, false, "", "", state).Render(t.Context(), &body))
+			require.Contains(t, body.String(), "No alerts match the selected filters.")
+			require.NotContains(t, body.String(), "No alerts. You&#39;re all clear!")
+		})
+	}
+}
+
+func TestIndividualMutationRefreshesPreserveValidatedListState(t *testing.T) {
+	t.Run("agent create", func(t *testing.T) {
+		tc := NewTestContext(t)
+		tc.handler.SetAgentRepo(repository.NewAgentRepo(tc.db))
+		tc.handler.SetAgentSkillRoot(t.TempDir())
+		form := url.Values{
+			"name": {"mutation-agent"}, "description": {"mutation"}, "system_prompt": {"do work"},
+			"model": {"inherit"}, "scope": {"global"}, "tools_json": {`[]`}, "plugins_json": {`[]`}, "skills_json": {`[]`}, "mcp_servers_json": {`[]`},
+		}
+		req := httptest.NewRequest(http.MethodPost, "/agents?scope=project&sort=name_desc&search=mutation", strings.NewReader(form.Encode()))
+		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationForm)
+		req.Header.Set("HX-Request", "true")
+		rec := httptest.NewRecorder()
+		tc.echo.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		require.Contains(t, rec.Body.String(), `data-card-pagination-url="/agents?project_id=default&amp;scope=project&amp;search=mutation&amp;sort=name_desc"`)
+		require.NotContains(t, rec.Body.String(), `data-agent-name="mutation-agent"`)
+	})
+
+	t.Run("model set default", func(t *testing.T) {
+		tc := NewTestContext(t)
+		first := &models.LLMConfig{Name: "First model", Provider: models.ProviderTest, Model: "first", IsDefault: true}
+		second := &models.LLMConfig{Name: "Second model", Provider: models.ProviderTest, Model: "second"}
+		require.NoError(t, tc.llmConfigRepo.Create(t.Context(), first))
+		require.NoError(t, tc.llmConfigRepo.Create(t.Context(), second))
+		req := httptest.NewRequest(http.MethodPost, "/models/"+second.ID+"/set-default?default=false&sort=name_desc&search=Second", nil)
+		req.Header.Set("HX-Request", "true")
+		rec := httptest.NewRecorder()
+		tc.echo.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		require.Contains(t, rec.Body.String(), `data-card-pagination-url="/models?default=false&amp;project_id=default&amp;search=Second&amp;sort=name_desc"`)
+		require.NotContains(t, rec.Body.String(), `data-model-id="`+second.ID+`"`)
+	})
+
+	t.Run("personality create", func(t *testing.T) {
+		tc := NewTestContext(t)
+		tc.handler.SetCustomPersonalityRepo(repository.NewCustomPersonalityRepo(tc.db))
+		project := tc.CreateProject().WithName("Personality mutation state").Build()
+		form := url.Values{"name": {"Mutation personality"}, "description": {"mutation"}, "system_prompt": {"A sufficiently long personality prompt."}}
+		req := httptest.NewRequest(http.MethodPost, "/personality/custom?project_id="+project.ID+"&kind=base&active=false&sort=name_desc&search=Base", strings.NewReader(form.Encode()))
+		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationForm)
+		req.Header.Set("HX-Request", "true")
+		rec := httptest.NewRecorder()
+		tc.echo.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		require.Contains(t, rec.Body.String(), `data-card-pagination-url="/personality?active=false&amp;kind=base&amp;project_id=`+project.ID+`&amp;search=Base&amp;sort=name_desc"`)
+		require.NotContains(t, rec.Body.String(), `data-personality-name="Mutation personality"`)
+	})
 }
 
 func TestCollectionHandlersRenderValidatedToolbarState(t *testing.T) {
@@ -227,6 +384,85 @@ func TestUnmanagedSkillsRenderNoSelectionUIOrMetadata(t *testing.T) {
 	} {
 		require.NotContains(t, rec.Body.String(), forbidden)
 	}
+}
+
+func TestEveryCollectionPageAcceptsAndRejectsItsFilterAndSortValues(t *testing.T) {
+	tc := NewTestContext(t)
+	tc.handler.SetAgentRepo(repository.NewAgentRepo(tc.db))
+	tc.handler.SetWebhookRepo(repository.NewWebhookRepo(tc.db))
+	tc.handler.SetCustomPersonalityRepo(repository.NewCustomPersonalityRepo(tc.db))
+	tc.handler.SetAgentSkillRoot(t.TempDir())
+	automationRepo := repository.NewAutomationRepo(tc.db)
+	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
+	project := tc.CreateProject().WithName("Collection parser matrix").Build()
+
+	type pageSpec struct {
+		path     string
+		filters  map[string][]string
+		sorts    []string
+		fallback string
+	}
+	specs := map[string]pageSpec{
+		"alerts": {path: "/alerts?project_id=" + project.ID, filters: map[string][]string{
+			"read": {"read", "unread"}, "severity": {"info", "warning", "error"}, "decision_state": {"not_required", "pending", "approved", "rejected", "dismissed"},
+			"type": {"task_failed", "task_needs_followup", "custom"}, "source": {"native"},
+		}, sorts: []string{"newest", "oldest", "severity", "unread_first"}, fallback: "newest"},
+		"automations": {path: "/automations?project_id=" + project.ID, filters: map[string][]string{
+			"lifecycle_state": {"active", "paused", "draft", "archived"}, "health_state": {"unknown", "healthy", "degraded", "unhealthy"},
+			"automation_type": {"custom", "native_sdlc", "github_sdlc", "vision_driver", "scheduled"}, "adapter": {"custom", "native_sdlc", "github_sdlc", "vision_driver"},
+		}, sorts: []string{"updated_desc", "updated_asc", "name_asc", "name_desc"}, fallback: "updated_desc"},
+		"agents": {path: "/agents?project_id=" + project.ID, filters: map[string][]string{
+			"enabled": {"true", "false"}, "scope": {"global", "project"}, "origin": {"custom", "generated", "protected"},
+		}, sorts: []string{"name_asc", "name_desc", "updated_desc", "created_desc"}, fallback: "name_asc"},
+		"skills": {path: "/skills?project_id=" + project.ID, filters: map[string][]string{
+			"enabled": {"true", "false"}, "scope": {"global", "project"}, "always_use": {"true", "false"}, "archived": {"true", "false"}, "source": {"global", "project"},
+		}, sorts: []string{"name_asc", "name_desc", "scope", "source"}, fallback: "name_asc"},
+		"models": {path: "/models?project_id=" + project.ID, filters: map[string][]string{
+			"provider": {"openai", "anthropic", "ollama", "openai_compatible", "mixture"}, "default": {"true", "false"}, "auth_status": {"connected", "not_connected", "not_required"}, "kind": {"direct", "mixture"},
+		}, sorts: []string{"default_name", "name_asc", "name_desc", "provider"}, fallback: "default_name"},
+		"channels": {path: "/channels?project_id=" + project.ID, filters: map[string][]string{
+			"type": {"github", "slack", "telegram", "discord", "x", "email", "webhook", "outbound_targets"}, "connection_state": {"connected", "configured", "disconnected"}, "webhook_enabled": {"true", "false"},
+		}},
+		"personality": {path: "/personality?project_id=" + project.ID, filters: map[string][]string{
+			"kind": {"base", "built_in", "custom", "override"}, "active": {"true", "false"},
+		}, sorts: []string{"curated", "name_asc", "name_desc"}, fallback: "curated"},
+	}
+
+	for pageName, spec := range specs {
+		t.Run(pageName, func(t *testing.T) {
+			separator := "&"
+			for key, values := range spec.filters {
+				for _, value := range values {
+					rec := serveCardPageRequest(t, tc.echo, spec.path+separator+url.QueryEscape(key)+"="+url.QueryEscape(value))
+					require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+					require.Contains(t, rec.Body.String(), `data-card-filter-chip="`+key+`"`, key+"="+value)
+				}
+				if pageName == "alerts" && key == "source" {
+					continue
+				}
+				rec := serveCardPageRequest(t, tc.echo, spec.path+separator+url.QueryEscape(key)+"=invalid")
+				require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+				require.NotContains(t, rec.Body.String(), `data-card-filter-chip="`+key+`"`, key)
+			}
+			for _, sortValue := range spec.sorts {
+				rec := serveCardPageRequest(t, tc.echo, spec.path+separator+"sort="+url.QueryEscape(sortValue))
+				require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+				require.Contains(t, rec.Body.String(), `<option value="`+sortValue+`" selected`, sortValue)
+			}
+			if spec.fallback != "" {
+				rec := serveCardPageRequest(t, tc.echo, spec.path+separator+"sort=invalid")
+				require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+				require.Contains(t, rec.Body.String(), `<option value="`+spec.fallback+`" selected`)
+				require.NotContains(t, rec.Body.String(), `<option value="invalid" selected`)
+			}
+		})
+	}
+
+	overlongSource := strings.Repeat("s", 101)
+	rec := serveCardPageRequest(t, tc.echo, "/alerts?project_id="+project.ID+"&source="+overlongSource)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.NotContains(t, rec.Body.String(), `data-card-filter-chip="source"`)
+	require.NotContains(t, rec.Body.String(), "source="+overlongSource)
 }
 
 func TestCollectionFilterAndSortAllowlists(t *testing.T) {

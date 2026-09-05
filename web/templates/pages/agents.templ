@@ -483,6 +483,12 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 				return url + currentProjectQueryString();
 			}
 
+			function withCurrentAgentListState(url) {
+				var scoped = withCurrentProject(url);
+				if (window.cardCollectionActionURL) return window.cardCollectionActionURL(document.getElementById('agents-container'), scoped);
+				return scoped;
+			}
+
 			let agentPluginState = { marketplaces: [], installed: [], available: [], runtime: [] };
 			let selectedPluginIDs = [];
 			let generatedSkillsState = [];
@@ -513,7 +519,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 					var modal = document.getElementById('delete_agent_confirm_modal');
 					if (modal) modal.close();
 					var container = document.getElementById('agents-container');
-					var deleteURL = withCurrentProject('/agents/' + encodeURIComponent(id));
+					var deleteURL = withCurrentAgentListState('/agents/' + encodeURIComponent(id));
 					if (window.cardPaginationRefreshURL) deleteURL = window.cardPaginationRefreshURL(container, deleteURL);
 					try {
 						const response = await fetch(deleteURL, {
@@ -1362,9 +1368,9 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 			activeAgentID = '';
 			document.getElementById('agent_modal_title').textContent = 'New Agent';
 			const form = document.getElementById('agent_form');
-			form.action = withCurrentProject('/agents');
+			form.action = withCurrentAgentListState('/agents');
 			form.method = 'post';
-			form.setAttribute('hx-post', withCurrentProject('/agents'));
+			form.setAttribute('hx-post', withCurrentAgentListState('/agents'));
 			form.setAttribute('hx-target', '#agents-container');
 			form.setAttribute('hx-swap', 'outerHTML');
 			form.removeAttribute('hx-put');
@@ -1390,9 +1396,9 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 			activeAgentID = String(id || '').trim();
 			document.getElementById('agent_modal_title').textContent = 'Edit Agent';
 			const form = document.getElementById('agent_form');
-			form.action = withCurrentProject('/agents/' + id);
+			form.action = withCurrentAgentListState('/agents/' + id);
 			form.removeAttribute('hx-post');
-			form.setAttribute('hx-put', withCurrentProject('/agents/' + id));
+			form.setAttribute('hx-put', withCurrentAgentListState('/agents/' + id));
 			form.setAttribute('hx-target', '#agents-container');
 			form.setAttribute('hx-swap', 'outerHTML');
 			htmx.process(form);

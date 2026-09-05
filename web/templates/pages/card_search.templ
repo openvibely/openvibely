@@ -68,7 +68,13 @@ func cardFilterLabel(config CardListToolbarConfig, filter CardListFilter) string
 }
 
 func cardToolbarURL(config CardListToolbarConfig, removedKey string, clearAll bool) string {
+	action := config.Action
 	values := url.Values{}
+	if parsed, err := url.Parse(action); err == nil {
+		values = parsed.Query()
+		parsed.RawQuery = ""
+		action = parsed.String()
+	}
 	if config.ProjectID != "" {
 		values.Set("project_id", config.ProjectID)
 	}
@@ -91,9 +97,9 @@ func cardToolbarURL(config CardListToolbarConfig, removedKey string, clearAll bo
 		}
 	}
 	if encoded := values.Encode(); encoded != "" {
-		return config.Action + "?" + encoded
+		return action + "?" + encoded
 	}
-	return config.Action
+	return action
 }
 
 func cardListOptions(values ...string) []CardListOption {

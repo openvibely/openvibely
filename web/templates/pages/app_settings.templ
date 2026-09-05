@@ -177,13 +177,17 @@ func BuildPersonalityListCards(personality string, customPersonalities []models.
 	return filtered
 }
 
-func personalityToolbarConfig(state PersonalityListState) CardListToolbarConfig {
-	config := collectionToolbarConfigWithState("personality", CardListState{
+func personalityCardListState(state PersonalityListState) CardListState {
+	return CardListState{
 		ProjectID: state.ProjectID,
-		Search: state.Search,
-		Sort: state.Sort,
-		Filters: map[string]string{"kind": state.Kind, "active": state.Active},
-	})
+		Search:    state.Search,
+		Sort:      state.Sort,
+		Filters:   map[string]string{"kind": state.Kind, "active": state.Active},
+	}
+}
+
+func personalityToolbarConfig(state PersonalityListState) CardListToolbarConfig {
+	config := collectionToolbarConfigWithState("personality", personalityCardListState(state))
 	if config.Sort == "" { config.Sort = "curated" }
 	return config
 }
@@ -225,7 +229,7 @@ func boolString(v bool) string {
 	return "false"
 }
 
-templ builtInPersonalityCard(card PersonalityListCard, personality string) {
+templ builtInPersonalityCard(card PersonalityListCard, personality string, state PersonalityListState) {
 	<div
 		class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
 		data-personality-key={ card.Key }
@@ -254,7 +258,7 @@ templ builtInPersonalityCard(card PersonalityListCard, personality string) {
 						if personality != card.Key {
 							<li>
 								<button
-									hx-post={ "/personality/save?personality=" + card.Key }
+									hx-post={ CardListActionURL("personality", "/personality/save?personality=" + card.Key, personalityCardListState(state)) }
 									hx-target="#personality-section"
 									hx-swap="outerHTML"
 								>
@@ -292,7 +296,7 @@ func personalitySelectionDisabledReason(cp models.CustomPersonality, personality
 	return ""
 }
 
-templ customPersonalityCard(cp models.CustomPersonality, personality string, paginationCard bool) {
+templ customPersonalityCard(cp models.CustomPersonality, personality string, paginationCard bool, state PersonalityListState) {
 	<div
 		class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
 		data-personality-key={ cp.Key }
@@ -324,7 +328,7 @@ templ customPersonalityCard(cp models.CustomPersonality, personality string, pag
 						if personality != cp.Key {
 							<li>
 								<button
-									hx-post={ "/personality/save?personality=" + cp.Key }
+									hx-post={ CardListActionURL("personality", "/personality/save?personality=" + cp.Key, personalityCardListState(state)) }
 									hx-target="#personality-section"
 									hx-swap="outerHTML"
 								>
@@ -335,7 +339,7 @@ templ customPersonalityCard(cp models.CustomPersonality, personality string, pag
 						<li>
 							<button
 								class="text-error"
-								hx-delete={ "/personality/custom/" + cp.Key }
+								hx-delete={ CardListActionURL("personality", "/personality/custom/" + cp.Key, personalityCardListState(state)) }
 								hx-target="#personality-section"
 								hx-swap="outerHTML"
 								hx-confirm="Delete this custom personality?"
@@ -391,7 +395,7 @@ templ PersonalitySectionPageWithPaginationState(personality string, cards []Pers
 }
 
 templ personalitySection(personality string, cards []PersonalityListCard, hasMore bool, state PersonalityListState) {
-		<div id="personality-section" data-selected-personality={ personality } data-search-container data-card-pagination-root data-card-pagination-url={ CardListURL("personality", CardListState{ProjectID: state.ProjectID, Search: state.Search, Sort: state.Sort, Filters: map[string]string{"kind": state.Kind, "active": state.Active}}) } data-card-pagination-list="#personality-card-list" data-card-pagination-card-selector="[data-personality-pagination-card='true']" data-card-pagination-replacement-card-selector="[data-personality-key]" data-card-pagination-key="data-personality-key" data-card-pagination-page-size="20" data-card-pagination-has-more={ cardPaginationHasMoreAttribute(hasMore) }>		<div class="flex items-center justify-between mb-6">
+		<div id="personality-section" data-selected-personality={ personality } data-search-container data-card-pagination-root data-card-pagination-url={ CardListURL("personality", personalityCardListState(state)) } data-card-pagination-list="#personality-card-list" data-card-pagination-card-selector="[data-personality-pagination-card='true']" data-card-pagination-replacement-card-selector="[data-personality-key]" data-card-pagination-key="data-personality-key" data-card-pagination-page-size="20" data-card-pagination-has-more={ cardPaginationHasMoreAttribute(hasMore) }>		<div class="flex items-center justify-between mb-6">
 			<h2 class="text-2xl font-bold">Personality</h2>
 			<button class="btn btn-primary btn-sm" onclick="openNewPersonalityModal()">
 				+ Add Personality
@@ -402,9 +406,9 @@ templ personalitySection(personality string, cards []PersonalityListCard, hasMor
 			<div class="grid gap-4">
 				for _, card := range cards {
 					if card.Preset != nil {
-						@builtInPersonalityCard(card, personality)
+						@builtInPersonalityCard(card, personality, state)
 					} else if card.Custom != nil {
-						@customPersonalityCard(*card.Custom, personality, true)
+						@customPersonalityCard(*card.Custom, personality, true, state)
 					} else {
 						<!-- Base (No Personality) card — non-clickable -->			<div
 				class="card bg-base-100 shadow-sm border border-base-300"
@@ -430,7 +434,7 @@ templ personalitySection(personality string, cards []PersonalityListCard, hasMor
 								<ul tabindex="0" class="dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-48 border border-base-300">
 									<li>
 										<button
-											hx-post="/personality/save?personality="
+											hx-post={ CardListActionURL("personality", "/personality/save?personality=", personalityCardListState(state)) }
 											hx-target="#personality-section"
 											hx-swap="outerHTML"
 										>
@@ -494,12 +498,18 @@ templ personalitySection(personality string, cards []PersonalityListCard, hasMor
 		<script type="text/javascript">
 			window.openVibelyPersonalityEditGeneration = window.openVibelyPersonalityEditGeneration || 0;
 
+			function personalityMutationURL(path) {
+				var root = document.getElementById('personality-section');
+				if (window.cardCollectionActionURL) return window.cardCollectionActionURL(root, path);
+				return path;
+			}
+
 			function openNewPersonalityModal() {
 				window.openVibelyPersonalityEditGeneration++;
 				var form = document.getElementById('personality_form');
 				document.getElementById('personality_modal_title').textContent = 'New Custom Personality';
 				form.removeAttribute('hx-put');
-				form.setAttribute('hx-post', '/personality/custom');
+				form.setAttribute('hx-post', personalityMutationURL('/personality/custom'));
 				form.setAttribute('hx-target', '#personality-section');
 				form.setAttribute('hx-swap', 'outerHTML');
 				if (window.htmx) htmx.process(form);
@@ -524,7 +534,7 @@ templ personalitySection(personality string, cards []PersonalityListCard, hasMor
 				var form = document.getElementById('personality_form');
 				document.getElementById('personality_modal_title').textContent = 'Edit: ' + name;
 				form.removeAttribute('hx-post');
-				form.setAttribute('hx-put', '/personality/custom/' + encodeURIComponent(key));
+				form.setAttribute('hx-put', personalityMutationURL('/personality/custom/' + encodeURIComponent(key)));
 				form.setAttribute('hx-target', '#personality-section');
 				form.setAttribute('hx-swap', 'outerHTML');
 				if (window.htmx) htmx.process(form);
@@ -553,7 +563,7 @@ templ personalitySection(personality string, cards []PersonalityListCard, hasMor
 					resetBtn.type = 'button';
 					resetBtn.className = 'btn btn-outline btn-warning btn-sm';
 					resetBtn.textContent = 'Reset to Default';
-					resetBtn.setAttribute('hx-delete', '/personality/custom/' + encodeURIComponent(key));
+					resetBtn.setAttribute('hx-delete', personalityMutationURL('/personality/custom/' + encodeURIComponent(key)));
 					resetBtn.setAttribute('hx-target', '#personality-section');
 					resetBtn.setAttribute('hx-swap', 'outerHTML');
 					resetBtn.setAttribute('hx-confirm', 'Reset this personality to its built-in default?');
@@ -566,7 +576,7 @@ templ personalitySection(personality string, cards []PersonalityListCard, hasMor
 					delBtn.type = 'button';
 					delBtn.className = 'btn btn-outline btn-error btn-sm';
 					delBtn.textContent = 'Delete';
-					delBtn.setAttribute('hx-delete', '/personality/custom/' + encodeURIComponent(key));
+					delBtn.setAttribute('hx-delete', personalityMutationURL('/personality/custom/' + encodeURIComponent(key)));
 					delBtn.setAttribute('hx-target', '#personality-section');
 					delBtn.setAttribute('hx-swap', 'outerHTML');
 					delBtn.setAttribute('hx-confirm', 'Delete this custom personality?');
@@ -584,7 +594,7 @@ templ personalitySection(personality string, cards []PersonalityListCard, hasMor
 					setDefaultBtn.type = 'button';
 					setDefaultBtn.className = 'btn btn-outline btn-primary btn-sm';
 					setDefaultBtn.textContent = 'Set as Default';
-					setDefaultBtn.setAttribute('hx-post', '/personality/save?personality=' + encodeURIComponent(key));
+					setDefaultBtn.setAttribute('hx-post', personalityMutationURL('/personality/save?personality=' + encodeURIComponent(key)));
 					setDefaultBtn.setAttribute('hx-target', '#personality-section');
 					setDefaultBtn.setAttribute('hx-swap', 'outerHTML');
 					if (window.htmx) {
@@ -595,7 +605,7 @@ templ personalitySection(personality string, cards []PersonalityListCard, hasMor
 
 				personality_modal.showModal();
 
-				fetch('/personality/custom/' + encodeURIComponent(key), { headers: { 'Accept': 'application/json' } })
+				fetch(personalityMutationURL('/personality/custom/' + encodeURIComponent(key)), { headers: { 'Accept': 'application/json' } })
 					.then(function(response) {
 						if (!response.ok) throw new Error('Failed to load personality');
 						return response.json();

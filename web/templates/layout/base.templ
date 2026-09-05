@@ -4290,10 +4290,6 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						function querySignature(root) {
 							var url;
 							try { url = new URL(root.getAttribute('data-card-pagination-url') || window.location.href, window.location.href); } catch (_) { return ''; }
-							try {
-								var current = new URL(window.location.href);
-								current.searchParams.forEach(function(value, key) { url.searchParams.set(key, value); });
-							} catch (_) {}
 							['card_page', 'card_window', 'page', 'page_size', 'offset'].forEach(function(key) { url.searchParams.delete(key); });
 							return url.pathname + '?' + url.searchParams.toString();
 						}
@@ -4311,51 +4307,6 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							state.signature = signature;
 
 							var form = toolbar.querySelector('[data-card-query-form]');
-							var filtersButton = toolbar.querySelector('[data-card-filters-button]');
-							var filterChips = toolbar.querySelector('[data-card-filter-chips]');
-							var currentURL;
-							try { currentURL = new URL(window.location.href); } catch (_) { currentURL = null; }
-							if (currentURL && form) {
-								var searchInput = form.querySelector('[data-card-search]');
-								if (searchInput && currentURL.searchParams.has('search')) {
-									searchInput.value = currentURL.searchParams.get('search') || '';
-									searchInput.setAttribute('data-card-search-initial', searchInput.value);
-								}
-								var active = [];
-								form.querySelectorAll('[data-card-filter]').forEach(function(control) {
-									var value = currentURL.searchParams.get(control.name) || '';
-									if (value && (!control.options || Array.prototype.some.call(control.options, function(option) { return option.value === value; }))) control.value = value;
-									if (control.value) active.push({key: control.name, label: control.closest('label').querySelector('.label-text').textContent + ': ' + (control.options ? control.options[control.selectedIndex].text : control.value)});
-								});
-								var sort = form.querySelector('[data-card-sort]');
-								if (sort) {
-									var sortValue = currentURL.searchParams.get('sort') || '';
-									if (sortValue && Array.prototype.some.call(sort.options, function(option) { return option.value === sortValue; })) sort.value = sortValue;
-								}
-								if (filtersButton) filtersButton.firstChild.nodeValue = active.length ? 'Filters (' + active.length + ') ' : 'Filters ';
-								if (!filterChips && active.length) {
-									filterChips = document.createElement('div');
-									filterChips.className = 'mt-2 flex flex-wrap items-center gap-2';
-									filterChips.setAttribute('data-card-filter-chips', '');
-									var selectionActions = toolbar.querySelector('[data-card-selection-actions]');
-									if (selectionActions) selectionActions.before(filterChips);
-									else form.insertAdjacentElement('afterend', filterChips);
-								}
-								if (filterChips) {
-									filterChips.innerHTML = '';
-									active.forEach(function(item) {
-										var chip = document.createElement('button');
-										chip.type = 'button'; chip.className = 'badge badge-outline gap-1'; chip.setAttribute('data-card-filter-chip', item.key); chip.textContent = item.label + ' ×';
-										chip.addEventListener('click', function() { var control = form.elements[item.key]; if (control) control.value = ''; form.requestSubmit(); });
-										filterChips.appendChild(chip);
-									});
-									if (active.length) {
-										var clear = document.createElement('button'); clear.type = 'button'; clear.className = 'btn btn-ghost btn-xs'; clear.setAttribute('data-card-clear-filters', ''); clear.textContent = 'Clear all';
-										clear.addEventListener('click', function() { form.querySelectorAll('[data-card-filter]').forEach(function(control) { control.value = ''; }); form.requestSubmit(); });
-										filterChips.appendChild(clear);
-									} else filterChips.remove();
-								}
-							}
 
 							if (form) form.addEventListener('submit', function(event) {
 								event.preventDefault();
@@ -4542,6 +4493,30 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							return (card.getAttribute('data-search-text') || '') + '|' + (card.innerHTML || '');
 						}
 
+						function cardCollectionActionURL(scope, rawURL) {
+							var roots = rootsIn(scope || document);
+							var root = roots.length ? roots[0] : null;
+							if (!root || !rawURL) return rawURL;
+							var url, endpoint;
+							try {
+								url = new URL(rawURL, window.location.href);
+								endpoint = new URL(root.getAttribute('data-card-pagination-url') || '', window.location.href);
+							} catch (_) { return rawURL; }
+							var authoritative = ['project_id', 'search', 'sort'];
+							var form = root.querySelector('[data-card-query-form]');
+							if (form) form.querySelectorAll('[name]').forEach(function(control) {
+								if (authoritative.indexOf(control.name) === -1) authoritative.push(control.name);
+							});
+							(root.getAttribute('data-card-pagination-preserve-params') || '').split(',').forEach(function(key) {
+								key = key.trim(); if (key && authoritative.indexOf(key) === -1) authoritative.push(key);
+							});
+							authoritative.forEach(function(key) {
+								url.searchParams.delete(key);
+								if (endpoint.searchParams.has(key)) url.searchParams.set(key, endpoint.searchParams.get(key));
+							});
+							return url.pathname + url.search + url.hash;
+						}
+
 						function cardPaginationRefreshURL(scope, rawURL) {
 							var roots = rootsIn(scope || document);
 							var root = roots.length ? roots[0] : null;
@@ -4553,20 +4528,6 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							var search = input ? (input.value || '').trim() : '';
 							var url;
 							try { url = new URL(rawURL, window.location.href); } catch (_) { return rawURL; }
-							var preserveParams = (root.getAttribute('data-card-pagination-preserve-params') || '').split(',');
-								var endpoint = null;
-								try { endpoint = new URL(root.getAttribute('data-card-pagination-url') || '', window.location.href); } catch (_) {}
-								try {
-									var current = new URL(window.location.href);
-									current.searchParams.forEach(function(value, key) {
-										if (['card_page', 'card_window', 'page', 'page_size', 'offset'].indexOf(key) === -1 && !url.searchParams.has(key)) url.searchParams.set(key, value);
-									});
-								} catch (_) {}
-								for (var i = 0; i < preserveParams.length; i++) {								var preserveKey = preserveParams[i].trim();
-								if (!preserveKey || !endpoint) continue;
-								if (endpoint.searchParams.has(preserveKey)) url.searchParams.set(preserveKey, endpoint.searchParams.get(preserveKey));
-								else url.searchParams.delete(preserveKey);
-							}
 							url.searchParams.set('card_window', '1');
 							url.searchParams.set('page_size', String(Math.max(pageSize, count)));
 							url.searchParams.set('page', '0');
@@ -5062,23 +5023,13 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 								state = null;
 							}
 							var listChanged = !state;
-							var input = root.querySelector('input[data-card-search]');
-							var inputTerm = input ? (input.value || '').trim() : '';
-							var locationTerm = '';
-							try {
-								locationTerm = (new URL(window.location.href)).searchParams.get('search') || '';
-								locationTerm = locationTerm.trim();
-							} catch (_) {}
-							var useLocationSearch = !!(initialDocument && listChanged && locationTerm);
-								var term = useLocationSearch ? locationTerm : inputTerm;
-								var replacementSnapshot = root.id ? replacementSnapshots[root.id] : null;								if (!state) {
-									state = createState(root, list, useLocationSearch || replacementSnapshot ? term : '');
+								var input = root.querySelector('input[data-card-search]');
+								var term = input ? (input.value || '').trim() : '';
+								var replacementSnapshot = root.id ? replacementSnapshots[root.id] : null;
+								if (!state) {
+									state = createState(root, list, replacementSnapshot ? term : '');
 									root._openVibelyCardPaginationState = state;
-								}							if (initialDocument && locationTerm && input && input.value !== locationTerm) {
-								input.value = locationTerm;
-								if (typeof window.refreshCardSearches === 'function') window.refreshCardSearches(root);
-							}
-							bindSearch(state);
+								}							bindSearch(state);
 							setStatus(state, 'idle');
 							if (state.resetPending) return;
 								if (listChanged && term && state.search !== term) {								state.resetPending = true;
@@ -5121,6 +5072,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						window.refreshCardPagination = function(scope) {
 							initRoots(scope || document, false);
 						};
+						window.cardCollectionActionURL = cardCollectionActionURL;
 						window.cardPaginationRefreshURL = cardPaginationRefreshURL;
 						window.destroyCardPagination = destroyCardPagination;
 
