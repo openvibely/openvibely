@@ -46,7 +46,7 @@ func TestTaskRepo_BreadcrumbSelectorIsProjectScopedAndBounded(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	items, err := tasks.ListBreadcrumbSelector(ctx, "default", "selector", currentID, 20)
+	items, err := tasks.ListBreadcrumbSelector(ctx, "default", "selector", currentID, false, 20)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +62,7 @@ func TestTaskRepo_BreadcrumbSelectorIsProjectScopedAndBounded(t *testing.T) {
 		}
 	}
 
-	items, err = tasks.ListBreadcrumbSelector(ctx, "default", "no title matches this", currentID, 20)
+	items, err = tasks.ListBreadcrumbSelector(ctx, "default", "no title matches this", currentID, false, 20)
 	if err != nil {
 		t.Fatal(err)
 	}

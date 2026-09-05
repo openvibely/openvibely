@@ -109,8 +109,8 @@ func (s *TaskService) ListByProject(ctx context.Context, projectID, category str
 	return s.ListByProjectWithSort(ctx, projectID, category, "")
 }
 
-func (s *TaskService) ListBreadcrumbSelector(ctx context.Context, projectID, search, currentID string, limit int) ([]models.BreadcrumbSelectorItem, error) {
-	return s.repo.ListBreadcrumbSelector(ctx, projectID, search, currentID, limit)
+func (s *TaskService) ListBreadcrumbSelector(ctx context.Context, projectID, search, currentID string, scheduleOnly bool, limit int) ([]models.BreadcrumbSelectorItem, error) {
+	return s.repo.ListBreadcrumbSelector(ctx, projectID, search, currentID, scheduleOnly, limit)
 }
 
 func (s *TaskService) ListByProjectWithSort(ctx context.Context, projectID, category string, sortBy string) ([]models.Task, error) {

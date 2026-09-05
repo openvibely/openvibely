@@ -6,7 +6,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/stretchr/testify/require"
@@ -36,6 +38,32 @@ func TestBreadcrumbSelectorTaskResultsAreProjectScopedAndPreserveAllowlistedTab(
 	e.ServeHTTP(rec, req)
 	require.Equal(t, http.StatusNotFound, rec.Code)
 	require.NotContains(t, rec.Body.String(), secret.Title)
+}
+
+func TestBreadcrumbSelectorScheduleOriginShowsOnlyScheduleCalendarTasks(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	project := createProject(t, h, "Schedule selector project")
+	scheduledCategory := createTask(t, h, project.ID, "Scheduled category selector task", func(task *models.Task) {
+		task.Category = models.CategoryScheduled
+	})
+	activeWithSchedule := createTask(t, h, project.ID, "Active scheduled selector task")
+	createSchedule(t, h, activeWithSchedule.ID, time.Now().UTC().Add(time.Hour))
+	ordinary := createTask(t, h, project.ID, "Ordinary selector task")
+	foreignProject := createProject(t, h, "Foreign schedule selector project")
+	foreignScheduled := createTask(t, h, foreignProject.ID, "Foreign scheduled selector secret", func(task *models.Task) {
+		task.Category = models.CategoryScheduled
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/breadcrumb-selectors/tasks?project_id="+project.ID+"&current_id="+scheduledCategory.ID+"&search=selector&tab=schedules&from=schedule", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	body := rec.Body.String()
+	require.Contains(t, body, scheduledCategory.Title)
+	require.Contains(t, body, activeWithSchedule.Title)
+	require.NotContains(t, body, ordinary.Title)
+	require.NotContains(t, body, foreignScheduled.Title)
+	require.Contains(t, body, "/tasks/"+activeWithSchedule.ID+"?from=schedule&amp;project_id="+project.ID+"&amp;tab=schedules")
 }
 
 func TestBreadcrumbSelectorAutomationResultsAreProjectScopedBoundedAndPreserveViews(t *testing.T) {
@@ -92,9 +120,11 @@ func TestBreadcrumbSelectorAutomationResultsAreProjectScopedBoundedAndPreserveVi
 }
 
 func TestBreadcrumbSelectorItemURLPreservesOnlySupportedContext(t *testing.T) {
-	taskURL := breadcrumbSelectorItemURL("tasks", "task/id", "project id", "changes", "")
+	taskURL := breadcrumbSelectorItemURL("tasks", "task/id", "project id", "changes", "", "")
 	require.Equal(t, "/tasks/task%2Fid?project_id=project+id&tab=changes", taskURL)
-	require.NotContains(t, breadcrumbSelectorItemURL("tasks", "task", "project", "../../admin", ""), "tab=")
-	require.Equal(t, "/automations/automation/builder?project_id=project", breadcrumbSelectorItemURL("automations", "automation", "project", "", "edit"))
-	require.Equal(t, "/automations/automation?project_id=project", breadcrumbSelectorItemURL("automations", "automation", "project", "", strings.Repeat("x", 20)))
+	require.NotContains(t, breadcrumbSelectorItemURL("tasks", "task", "project", "../../admin", "", ""), "tab=")
+	require.Equal(t, "/tasks/task?from=schedule&project_id=project&tab=schedules", breadcrumbSelectorItemURL("tasks", "task", "project", "schedules", "", "schedule"))
+	require.NotContains(t, breadcrumbSelectorItemURL("tasks", "task", "project", "", "", "other"), "from=")
+	require.Equal(t, "/automations/automation/builder?project_id=project", breadcrumbSelectorItemURL("automations", "automation", "project", "", "edit", ""))
+	require.Equal(t, "/automations/automation?project_id=project", breadcrumbSelectorItemURL("automations", "automation", "project", "", strings.Repeat("x", 20), ""))
 }

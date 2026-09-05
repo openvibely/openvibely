@@ -124,8 +124,7 @@ window.addEventListener('DOMContentLoaded', function() {
     if (!document.activeElement.matches('[data-breadcrumb-selector-option]')) fail('ArrowDown did not focus Task result; active='+document.activeElement.outerHTML+'; options='+options().length+'; installed='+window.openVibelyBreadcrumbSelectorInstalled);
     key(document.activeElement, 'Enter');
     await waitFor(function(){ return route('task', 'task-two'); }, 'Task switch');
-    if (location.pathname!='/tasks/task-two' || new URLSearchParams(location.search).get('tab')!=='changes' || new URLSearchParams(location.search).get('project_id')!=='project-browser') fail('Task switch lost project or tab context: '+location.href);
-    if (document.title!=='Task Two - OpenVibely') fail('Task switch did not update title: '+document.title);
+	    if (location.pathname!='/tasks/task-two' || new URLSearchParams(location.search).get('tab')!=='changes' || new URLSearchParams(location.search).get('project_id')!=='project-browser' || new URLSearchParams(location.search).get('from')!=='schedule') fail('Task switch lost project, tab, or Schedule context: '+location.href);    if (document.title!=='Task Two - OpenVibely') fail('Task switch did not update title: '+document.title);
     if (document.querySelector('[data-nav-base="/tasks"]').getAttribute('href')!='/tasks?project_id=project-browser') fail('Task sidebar destination changed');
 
     var reopenedDialog=dialog(), showCalls=0, originalShow=reopenedDialog.showModal.bind(reopenedDialog);
@@ -199,8 +198,7 @@ window.addEventListener('DOMContentLoaded', function() {
     if (document.title!=='Automation Two - OpenVibely') fail('Automation Edit switch did not update title');
 
     var finalCounts=await counts();
-    if (finalCounts.taskSlow!==1 || finalCounts.taskTwo!==1) fail('unexpected Task search request counts: '+JSON.stringify(finalCounts));
-    document.body.setAttribute('data-test-result', 'pass');
+	    if (finalCounts.taskSlow!==1 || finalCounts.taskTwo!==1 || finalCounts.taskScheduleOrigin<3) fail('unexpected Task search request counts or missing Schedule origin: '+JSON.stringify(finalCounts));    document.body.setAttribute('data-test-result', 'pass');
     await report('pass', '');
   })().catch(async function(error) {
     var message=String(error && error.stack || error);
@@ -214,7 +212,7 @@ window.addEventListener('DOMContentLoaded', function() {
 		.hidden{display:none!important} .flex{display:flex}.items-center{align-items:center}.gap-2{gap:.5rem}.px-1{padding-left:.25rem;padding-right:.25rem}.ml-1{margin-left:.25rem}.ml-2{margin-left:.5rem}.-ml-1{margin-left:-.25rem}.px-\[3px\]{padding-left:3px;padding-right:3px}.input-bordered{border:1px solid transparent}.relative{position:relative}.z-10{z-index:10}button{border:0} dialog{border:0;background:transparent}.modal-box{box-sizing:border-box}.modal-backdrop{position:fixed;inset:0}.modal-backdrop button{width:100%;height:100%}		.w-0{width:0}.w-7{width:1.75rem}.h-8{height:2rem}.max-w-full{max-width:100%}.overflow-visible{overflow:visible}
 		[data-breadcrumb-selector-dialog][open]{display:grid}.max-w-\[calc\(100vw-2rem\)\]{max-width:calc(100vw - 2rem)}</style>`
 
-	var taskSlow, taskTwo, taskBlank atomic.Int32
+	var taskSlow, taskTwo, taskBlank, taskScheduleOrigin atomic.Int32
 	browserResult := make(chan string, 8)
 	var server *httptest.Server
 	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -246,6 +244,13 @@ window.addEventListener('DOMContentLoaded', function() {
 		case "/breadcrumb-selectors/tasks":
 			search := r.URL.Query().Get("search")
 			taskDestination := "/tasks/task-two?project_id=project-browser"
+			if r.URL.Query().Get("from") == "schedule" {
+				taskScheduleOrigin.Add(1)
+				taskDestination += "&from=schedule"
+			} else {
+				_, _ = w.Write([]byte(renderResults("Task", r.URL.Query().Get("current_id"), []models.BreadcrumbSelectorItem{{ID: "ordinary", Name: "Ordinary Unscheduled Task", URL: "/tasks/ordinary?project_id=project-browser"}})))
+				return
+			}
 			if tab := r.URL.Query().Get("tab"); tab != "" {
 				taskDestination += "&tab=" + tab
 			}
@@ -271,7 +276,7 @@ window.addEventListener('DOMContentLoaded', function() {
 			_, _ = w.Write([]byte(renderResults("Automation", r.URL.Query().Get("current_id"), []models.BreadcrumbSelectorItem{{ID: "auto-two", Name: "Automation Two", URL: destination}})))
 		case "/counts":
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]int32{"taskSlow": taskSlow.Load(), "taskTwo": taskTwo.Load(), "taskBlank": taskBlank.Load()})
+			_ = json.NewEncoder(w).Encode(map[string]int32{"taskSlow": taskSlow.Load(), "taskTwo": taskTwo.Load(), "taskBlank": taskBlank.Load(), "taskScheduleOrigin": taskScheduleOrigin.Load()})
 		case "/browser-result":
 			select {
 			case browserResult <- r.URL.Query().Get("status") + ":" + r.URL.Query().Get("message"):
@@ -290,7 +295,7 @@ window.addEventListener('DOMContentLoaded', function() {
 		t.Fatal(err)
 	}
 	defer stderrFile.Close()
-	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer", "--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling", "--no-first-run", "--no-default-browser-check", "--window-size=390,844", "--user-data-dir="+filepath.Join(t.TempDir(), "breadcrumb-navigation-profile"), server.URL+"/tasks/task-one?project_id=project-browser&tab=details")
+	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer", "--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling", "--no-first-run", "--no-default-browser-check", "--window-size=390,844", "--user-data-dir="+filepath.Join(t.TempDir(), "breadcrumb-navigation-profile"), server.URL+"/tasks/task-one?project_id=project-browser&tab=details&from=schedule")
 	cmd.Stderr = stderrFile
 	if err := startBrowserProcess(cmd); err != nil {
 		t.Fatalf("start Chrome breadcrumb fixture: %v", err)
