@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"strings"
 	"sync"
@@ -1336,6 +1337,390 @@ func TestAutomationCompilerPreviewAndSaveUseBatchedAgentValidation(t *testing.T)
 	}
 	if countRows(t, db, `SELECT COUNT(*) FROM automations`) != 0 || countRows(t, db, `SELECT COUNT(*) FROM tasks`) != 0 || countRows(t, db, `SELECT COUNT(*) FROM schedules`) != 0 {
 		t.Fatal("invalid Agent reference persisted Automation resources")
+	}
+}
+
+func TestAutomationCompilerSaveBatchesAgentResolution(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	ctx := context.Background()
+	project := automationTestProject(t, repository.NewProjectRepo(db), "Compiler Agent Save")
+	agentRepo := repository.NewAgentRepo(db)
+	if _, err := db.ExecContext(ctx, `DELETE FROM agents WHERE id IS NOT NULL`); err != nil {
+		t.Fatalf("clear agents: %v", err)
+	}
+
+	refs := make([]string, 0, automationCapabilityLimit)
+	agentsByKey := make(map[string]*models.Agent, automationCapabilityLimit)
+	for i := 0; i < automationCapabilityLimit; i++ {
+		agent := automationValidationFixtureAgent(fmt.Sprintf("Compiler Save Agent %02d", i), fmt.Sprintf("compiler-save-agent-%02d", i))
+		if err := agentRepo.Create(ctx, agent); err != nil {
+			t.Fatalf("create compiler save fixture Agent %d: %v", i, err)
+		}
+		refs = append(refs, agent.Key)
+		agentsByKey[agent.Key] = agent
+	}
+
+	registry := NewAutomationAdapterRegistry()
+	automationRepo := repository.NewAutomationRepo(db)
+	drafts := NewAutomationDraftService(automationRepo, registry)
+	validator := NewAutomationSaveValidator(registry, drafts)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	compiler := NewAutomationCompiler(automationRepo, NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil), taskRepo, scheduleRepo, validator)
+	compiler.SetAgentRepository(agentRepo)
+
+	for _, referenceCount := range []int{1, 5, 20, 50} {
+		t.Run(fmt.Sprintf("references_%d", referenceCount), func(t *testing.T) {
+			candidate := automationValidationReferenceCandidate(refs[:referenceCount])
+			counter.Reset()
+			counter.SetEnabled(true)
+			saved, err := compiler.SaveValidatedCandidate(ctx, AutomationSaveRequest{
+				ProjectID: project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate,
+			})
+			counter.SetEnabled(false)
+			if err != nil {
+				t.Fatalf("SaveValidatedCandidate: %v", err)
+			}
+			if saved == nil || saved.Definition == nil {
+				t.Fatal("SaveValidatedCandidate returned no definition")
+			}
+
+			statements := selectableAgentValidationStatements(counter.Statements())
+			if len(statements) != 1 {
+				t.Fatalf("save Agent statements = %#v, want exactly one compact query", statements)
+			}
+			assertAutomationValidationProjection(t, statements[0])
+
+			for _, node := range candidate.Nodes {
+				if node.Type != models.AutomationNodeAgentTask && node.Type != models.AutomationNodeTrigger {
+					continue
+				}
+				ref, _ := node.Config["agent_ref"].(string)
+				if strings.TrimSpace(ref) == "" {
+					continue
+				}
+				taskID := automationResourceID(t, saved.Definition, node.Key, "task")
+				task, err := taskRepo.GetByID(ctx, taskID)
+				if err != nil {
+					t.Fatalf("get materialized task for %q: %v", node.Key, err)
+				}
+				if task == nil || task.AgentDefinitionID == nil {
+					t.Fatalf("task %q has no Agent-definition ID: %#v", node.Key, task)
+				}
+				if got, want := *task.AgentDefinitionID, agentsByKey[strings.TrimSpace(ref)].ID; got != want {
+					t.Fatalf("task %q Agent-definition ID = %q, want %q", node.Key, got, want)
+				}
+			}
+		})
+	}
+
+	noReferences := customTaskOnlyCandidate("Compiler save without Agent", "Run without a primary Agent.", models.CategoryBacklog)
+	counter.Reset()
+	counter.SetEnabled(true)
+	if _, err := compiler.SaveValidatedCandidate(ctx, AutomationSaveRequest{
+		ProjectID: project.ID, Source: "manual", CreatedVia: "web", Candidate: noReferences,
+	}); err != nil {
+		counter.SetEnabled(false)
+		t.Fatalf("SaveValidatedCandidate without Agent reference: %v", err)
+	}
+	counter.SetEnabled(false)
+	if statements := selectableAgentValidationStatements(counter.Statements()); len(statements) != 0 {
+		t.Fatalf("save Agent statements without references = %#v, want none", statements)
+	}
+}
+
+func TestAutomationCompilerSavePreservesAgentReferenceSemanticsAndRollback(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	project := automationTestProject(t, projectRepo, "Compiler Agent Semantics")
+	otherProject := automationTestProject(t, projectRepo, "Compiler Agent Foreign Project")
+	agentRepo := repository.NewAgentRepo(db)
+	if _, err := db.ExecContext(ctx, `DELETE FROM agents WHERE id IS NOT NULL`); err != nil {
+		t.Fatalf("clear agents: %v", err)
+	}
+
+	createAgent := func(agent *models.Agent) *models.Agent {
+		t.Helper()
+		if err := agentRepo.Create(ctx, agent); err != nil {
+			t.Fatalf("create Agent %q: %v", agent.Name, err)
+		}
+		return agent
+	}
+	global := createAgent(automationValidationFixtureAgent("001 Global Agent", "global-agent"))
+	scoped := automationValidationFixtureAgent("002 Project Agent", "project-agent")
+	scoped.Scope = models.AgentScopeProject
+	scoped.ProjectID = project.ID
+	createAgent(scoped)
+	foreign := automationValidationFixtureAgent("003 Foreign Agent", "foreign-agent")
+	foreign.Scope = models.AgentScopeProject
+	foreign.ProjectID = otherProject.ID
+	createAgent(foreign)
+	orderedFirst := createAgent(automationValidationFixtureAgent("004 Ordered Agent A", "ordered-agent-a"))
+	orderedSecond := createAgent(automationValidationFixtureAgent("005 Ordered Agent B", "ordered-agent-b"))
+	blankKey := createAgent(automationValidationFixtureAgent("006 Blank-key Agent", ""))
+	disabled := automationValidationFixtureAgent("007 Disabled Agent", "disabled-agent")
+	disabled.Enabled = false
+	createAgent(disabled)
+	nonSelectable := automationValidationFixtureAgent("008 Non-selectable Agent", "non-selectable-agent")
+	nonSelectable.SelectableAsPrimary = false
+	createAgent(nonSelectable)
+	generatedArchived := automationValidationFixtureAgent("009 Generated-archived Agent", "generated-archived-agent")
+	generatedArchived.GeneratedStatus = models.AgentStatusArchived
+	createAgent(generatedArchived)
+	timestampArchived := createAgent(automationValidationFixtureAgent("010 Timestamp-archived Agent", "timestamp-archived-agent"))
+	if _, err := db.ExecContext(ctx, `UPDATE agents SET archived_at = datetime('now') WHERE id = ?`, timestampArchived.ID); err != nil {
+		t.Fatalf("archive Agent by timestamp: %v", err)
+	}
+
+	registry := NewAutomationAdapterRegistry()
+	automationRepo := repository.NewAutomationRepo(db)
+	drafts := NewAutomationDraftService(automationRepo, registry)
+	validator := NewAutomationSaveValidator(registry, drafts)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	compiler := NewAutomationCompiler(automationRepo, NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil), taskRepo, scheduleRepo, validator)
+	compiler.SetAgentRepository(agentRepo)
+
+	candidate := automationValidationReferenceCandidate([]string{global.Key, scoped.Key, global.Key, blankKey.ID, orderedFirst.Key, orderedSecond.Key})
+	counter.Reset()
+	counter.SetEnabled(true)
+	saved, err := compiler.SaveValidatedCandidate(ctx, AutomationSaveRequest{
+		ProjectID: project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate,
+	})
+	counter.SetEnabled(false)
+	if err != nil {
+		t.Fatalf("save valid reference candidate: %v", err)
+	}
+	if statements := selectableAgentValidationStatements(counter.Statements()); len(statements) != 1 {
+		t.Fatalf("valid reference Agent statements = %#v, want one compact query", statements)
+	} else {
+		assertAutomationValidationProjection(t, statements[0])
+	}
+	expectedIDs := []string{global.ID, scoped.ID, global.ID, blankKey.ID, orderedFirst.ID, orderedSecond.ID}
+	for i, node := range candidate.Nodes {
+		taskID := automationResourceID(t, saved.Definition, node.Key, "task")
+		task, err := taskRepo.GetByID(ctx, taskID)
+		if err != nil {
+			t.Fatalf("get valid task %q: %v", node.Key, err)
+		}
+		if task == nil || task.AgentDefinitionID == nil {
+			t.Fatalf("valid task %q has no Agent-definition ID: %#v", node.Key, task)
+		}
+		if got, want := *task.AgentDefinitionID, expectedIDs[i]; got != want {
+			t.Fatalf("valid task %q Agent-definition ID = %q, want %q", node.Key, got, want)
+		}
+	}
+
+	for i := 0; i < automationCapabilityLimit; i++ {
+		createAgent(automationValidationFixtureAgent(fmt.Sprintf("eligible-%02d", i), fmt.Sprintf("eligible-%02d", i)))
+	}
+	outside := createAgent(automationValidationFixtureAgent("zzzz outside first 50", "outside-first-50"))
+
+	invalidReferences := []struct {
+		name string
+		ref  string
+	}{
+		{name: "foreign project", ref: foreign.Key},
+		{name: "disabled", ref: disabled.Key},
+		{name: "non-selectable", ref: nonSelectable.Key},
+		{name: "generated archived", ref: generatedArchived.Key},
+		{name: "timestamp archived", ref: timestampArchived.Key},
+		{name: "outside first 50", ref: outside.Key},
+	}
+	for _, invalid := range invalidReferences {
+		t.Run(invalid.name, func(t *testing.T) {
+			candidate := customTaskOnlyCandidate("Invalid Agent reference", "Must not persist.", models.CategoryBacklog)
+			candidate.Nodes[0].Config["agent_ref"] = invalid.ref
+			before := []int{
+				countRows(t, db, `SELECT COUNT(*) FROM automations`),
+				countRows(t, db, `SELECT COUNT(*) FROM automation_versions`),
+				countRows(t, db, `SELECT COUNT(*) FROM tasks`),
+				countRows(t, db, `SELECT COUNT(*) FROM schedules`),
+			}
+			counter.Reset()
+			counter.SetEnabled(true)
+			_, err := compiler.SaveValidatedCandidate(ctx, AutomationSaveRequest{
+				ProjectID: project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate,
+			})
+			counter.SetEnabled(false)
+			if err == nil || !strings.Contains(err.Error(), "Agent selection for node \"root\" is unavailable in this project") {
+				t.Fatalf("invalid Agent reference error = %v", err)
+			}
+			after := []int{
+				countRows(t, db, `SELECT COUNT(*) FROM automations`),
+				countRows(t, db, `SELECT COUNT(*) FROM automation_versions`),
+				countRows(t, db, `SELECT COUNT(*) FROM tasks`),
+				countRows(t, db, `SELECT COUNT(*) FROM schedules`),
+			}
+			if fmt.Sprint(after) != fmt.Sprint(before) {
+				t.Fatalf("invalid Agent reference changed resource counts: before=%v after=%v", before, after)
+			}
+			statements := selectableAgentValidationStatements(counter.Statements())
+			if len(statements) != 1 {
+				t.Fatalf("invalid reference Agent statements = %#v, want one compact query", statements)
+			}
+			assertAutomationValidationProjection(t, statements[0])
+		})
+	}
+}
+
+func BenchmarkAutomationCompilerSaveAgentResolution(b *testing.B) {
+	originalLogWriter := log.Writer()
+	log.SetOutput(io.Discard)
+	b.Cleanup(func() { log.SetOutput(originalLogWriter) })
+	db, counter := testutil.NewStatementCountingTestDB(b)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	project := models.Project{Name: "Automation Agent Save benchmark"}
+	if err := projectRepo.Create(ctx, &project); err != nil {
+		b.Fatalf("create benchmark project: %v", err)
+	}
+	agentRepo := repository.NewAgentRepo(db)
+	if _, err := db.ExecContext(ctx, `DELETE FROM agents WHERE id IS NOT NULL`); err != nil {
+		b.Fatalf("clear Agents: %v", err)
+	}
+	refs := make([]string, 0, automationCapabilityLimit)
+	for i := 0; i < automationCapabilityLimit; i++ {
+		agent := automationValidationFixtureAgent(fmt.Sprintf("Save benchmark Agent %02d", i), fmt.Sprintf("save-benchmark-agent-%02d", i))
+		if err := agentRepo.Create(ctx, agent); err != nil {
+			b.Fatalf("create benchmark Agent %d: %v", i, err)
+		}
+		refs = append(refs, agent.Key)
+	}
+
+	registry := NewAutomationAdapterRegistry()
+	adapter, ok := registry.Get(AutomationAdapterCustom)
+	if !ok {
+		b.Fatal("custom Automation adapter is unavailable")
+	}
+	automationRepo := repository.NewAutomationRepo(db)
+	drafts := NewAutomationDraftService(automationRepo, registry)
+	validator := NewAutomationSaveValidator(registry, drafts)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	compiler := NewAutomationCompiler(automationRepo, NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil), taskRepo, scheduleRepo, validator)
+	compiler.SetAgentRepository(agentRepo)
+
+	for _, referenceCount := range []int{1, 5, 20, 50} {
+		candidate := automationValidationReferenceCandidate(refs[:referenceCount])
+		resourceNodes := automationResourceNodes(adapter, candidate)
+		candidateNodes := make(map[string]models.AutomationDraftNode, len(candidate.Nodes))
+		for _, node := range candidate.Nodes {
+			candidateNodes[node.Key] = node
+		}
+		references := make([]string, 0, referenceCount)
+		for _, node := range candidate.Nodes {
+			if ref, _ := node.Config["agent_ref"].(string); strings.TrimSpace(ref) != "" {
+				references = append(references, strings.TrimSpace(ref))
+			}
+		}
+
+		b.Run(fmt.Sprintf("%d_references", referenceCount), func(b *testing.B) {
+			measure := func(name string, resolve func() error) int {
+				b.Helper()
+				counter.Reset()
+				counter.SetEnabled(true)
+				if err := resolve(); err != nil {
+					counter.SetEnabled(false)
+					b.Fatalf("%s warm-up: %v", name, err)
+				}
+				counter.SetEnabled(false)
+				return len(selectableAgentValidationStatements(counter.Statements()))
+			}
+
+			b.Run("baseline_full_catalog_per_node", func(b *testing.B) {
+				queryCount := measure("baseline", func() error {
+					for _, ref := range references {
+						if _, err := resolveAutomationAgent(ctx, agentRepo, project.ID, ref); err != nil {
+							return err
+						}
+					}
+					return nil
+				})
+				if queryCount != referenceCount {
+					b.Fatalf("baseline Agent queries = %d, want %d", queryCount, referenceCount)
+				}
+				b.ReportAllocs()
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					for _, ref := range references {
+						if _, err := resolveAutomationAgent(ctx, agentRepo, project.ID, ref); err != nil {
+							b.Fatal(err)
+						}
+					}
+				}
+				b.StopTimer()
+				b.ReportMetric(float64(queryCount), "agent_queries/op")
+				b.ReportMetric(float64(queryCount), "sql_statements/op")
+			})
+
+			b.Run("optimized_compact_batch", func(b *testing.B) {
+				queryCount := measure("optimized", func() error {
+					_, err := compiler.resolveSaveAgentDefinitions(ctx, project.ID, resourceNodes, candidateNodes)
+					return err
+				})
+				if queryCount != 1 {
+					b.Fatalf("optimized Agent queries = %d, want 1", queryCount)
+				}
+				b.ReportAllocs()
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					if _, err := compiler.resolveSaveAgentDefinitions(ctx, project.ID, resourceNodes, candidateNodes); err != nil {
+						b.Fatal(err)
+					}
+				}
+				b.StopTimer()
+				b.ReportMetric(float64(queryCount), "agent_queries/op")
+				b.ReportMetric(float64(queryCount), "sql_statements/op")
+			})
+
+			withoutReferences := candidate
+			withoutReferences.Nodes = make([]models.AutomationDraftNode, len(candidate.Nodes))
+			for i, node := range candidate.Nodes {
+				withoutReferences.Nodes[i] = node
+				withoutReferences.Nodes[i].Config = make(map[string]any, len(node.Config))
+				for key, value := range node.Config {
+					withoutReferences.Nodes[i].Config[key] = value
+				}
+				delete(withoutReferences.Nodes[i].Config, "agent_ref")
+			}
+			runSave := func(b *testing.B, saveCandidate models.AutomationDraftCandidate) {
+				b.Helper()
+				automationID := repository.NewID()
+				request := AutomationSaveRequest{ProjectID: project.ID, AutomationID: automationID, Source: "manual", CreatedVia: "benchmark", Candidate: saveCandidate}
+				counter.SetEnabled(false)
+				if _, err := compiler.SaveValidatedCandidate(ctx, request); err != nil {
+					b.Fatalf("warm-up SaveValidatedCandidate: %v", err)
+				}
+				counter.Reset()
+				counter.SetEnabled(true)
+				if _, err := compiler.SaveValidatedCandidate(ctx, request); err != nil {
+					counter.SetEnabled(false)
+					b.Fatalf("counted SaveValidatedCandidate: %v", err)
+				}
+				counter.SetEnabled(false)
+				statements := counter.Statements()
+				agentQueryCount := len(selectableAgentValidationStatements(statements))
+				totalStatementCount := len(statements)
+				b.ReportAllocs()
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					if _, err := compiler.SaveValidatedCandidate(ctx, request); err != nil {
+						b.Fatal(err)
+					}
+				}
+				b.StopTimer()
+				b.ReportMetric(float64(agentQueryCount), "agent_queries/op")
+				b.ReportMetric(float64(totalStatementCount), "sql_statements/op")
+			}
+			b.Run("optimized_full_save_without_agent_refs", func(b *testing.B) {
+				runSave(b, withoutReferences)
+			})
+			b.Run("optimized_full_save_with_agent_refs", func(b *testing.B) {
+				runSave(b, candidate)
+			})
+		})
 	}
 }
 
