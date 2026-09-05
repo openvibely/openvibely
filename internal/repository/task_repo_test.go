@@ -2822,7 +2822,7 @@ func TestTaskRepo_FirstTurnQueuedInputStillAllowsSchedulerAndAtomicDispatch(t *t
 		t.Fatal(err)
 	}
 
-	listed, err := taskRepo.ListActivePending(ctx)
+	listed, err := taskRepo.ListActivePendingAdmissions(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
