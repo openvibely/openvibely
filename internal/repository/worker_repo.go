@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+
+	"github.com/openvibely/openvibely/internal/models"
 )
 
 type WorkerRepo struct {
@@ -25,6 +27,9 @@ func (r *WorkerRepo) GetMaxWorkers(ctx context.Context) (int, error) {
 }
 
 func (r *WorkerRepo) SetMaxWorkers(ctx context.Context, n int) error {
+	if err := models.ValidateGlobalWorkerLimit(n); err != nil {
+		return err
+	}
 	_, err := execBoundSQLite(ctx, r.db,
 		`UPDATE worker_settings SET max_workers = ?, updated_at = datetime('now') WHERE id = 'singleton'`, n)
 	if err != nil {

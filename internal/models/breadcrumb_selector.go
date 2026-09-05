@@ -9,6 +9,8 @@ type BreadcrumbSelector struct {
 	SearchURL    string
 	ContextName  string
 	ContextValue string
+	OriginName   string
+	OriginValue  string
 	CaretOnly    bool
 }
 

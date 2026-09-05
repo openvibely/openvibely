@@ -742,7 +742,7 @@ func TestParseProjectFormSettings_ValidatesMaxWorkersContract(t *testing.T) {
 		{name: "empty clears", value: "", includeField: true},
 		{name: "zero clears", value: "0", includeField: true},
 		{name: "minimum saves", value: "1", includeField: true, want: intPointer(1)},
-		{name: "maximum saves", value: "10", includeField: true, want: intPointer(10)},
+		{name: "high finite saves", value: "25", includeField: true, want: intPointer(25)},
 		{name: "trimmed finite saves", value: " 5 ", includeField: true, want: intPointer(5)},
 	}
 	for _, tc := range validCases {
@@ -763,13 +763,24 @@ func TestParseProjectFormSettings_ValidatesMaxWorkersContract(t *testing.T) {
 		})
 	}
 
-	for _, value := range []string{"-1", "11", "not-a-number"} {
+	for _, value := range []string{"-1", "not-a-number"} {
 		t.Run("rejects "+value, func(t *testing.T) {
 			_, err := parse(value, true)
 			if err == nil || !strings.Contains(err.Error(), "Max concurrent workers") {
 				t.Fatalf("expected max-workers validation error for %q, got %v", value, err)
 			}
 		})
+	}
+
+	form := url.Values{"name": {"Worker Limit Project"}, "repo_source": {"local"}, "max_workers": {"11"}}
+	req := httptest.NewRequest(http.MethodPost, "/projects", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	_, err := parseProjectFormSettings(tc.echo.NewContext(req, httptest.NewRecorder()), projectFormSettingsOptions{
+		LocalRepoPathEnabled: true,
+		GlobalMaxWorkers:     10,
+	})
+	if err == nil || !strings.Contains(err.Error(), "global worker limit") {
+		t.Fatalf("expected finite global worker limit validation error, got %v", err)
 	}
 }
 

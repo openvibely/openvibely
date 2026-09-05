@@ -2356,7 +2356,6 @@ func TestExecuteCreateGitHubProjectRuntimeRejectsUnsupportedWorkerLimitsBeforeSi
 	}{
 		{name: "negative", maxWorkers: -1},
 		{name: "zero", maxWorkers: 0},
-		{name: "above maximum", maxWorkers: 100},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			projectName := "Invalid Worker Limit " + tc.name
@@ -2377,6 +2376,72 @@ func TestExecuteCreateGitHubProjectRuntimeRejectsUnsupportedWorkerLimitsBeforeSi
 	}
 
 	require.Zero(t, cloneCalls, "invalid worker limits must be rejected before cloning")
+}
+
+func TestExecuteCreateGitHubProjectRuntimeAllowsWorkerLimitAboveTen(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	projectSvc := NewProjectService(projectRepo)
+	cloneCalls := 0
+
+	out, err := ExecuteCreateGitHubProjectRuntime(ctx, json.RawMessage(`{"name":"High Limit Project","repo_url":"https://github.com/acme/high-limit","max_workers":100}`), CreateGitHubProjectRuntimeOptions{
+		ProjectSvc: projectSvc,
+		GitHubSvc: fakeProjectCloneProvider{cloneFn: func(ctx context.Context, projectID, repoURL string) (string, string, error) {
+			cloneCalls++
+			return "/repos/" + projectID, repoURL, nil
+		}},
+	})
+	require.NoError(t, err)
+
+	var resp createGitHubProjectRuntimeResponse
+	require.NoError(t, json.Unmarshal([]byte(out), &resp))
+	require.True(t, resp.OK, resp.Error)
+	require.Equal(t, 1, cloneCalls)
+	created, err := projectRepo.GetByID(ctx, resp.ProjectID)
+	require.NoError(t, err)
+	require.NotNil(t, created)
+	require.NotNil(t, created.MaxWorkers)
+	require.Equal(t, 100, *created.MaxWorkers)
+}
+
+func TestExecuteCreateGitHubProjectRuntimeHonorsFiniteGlobalWorkerLimit(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	projectSvc := NewProjectService(projectRepo)
+	workerSvc := NewWorkerService(nil, 25, projectRepo)
+	cloneCalls := 0
+	opts := CreateGitHubProjectRuntimeOptions{
+		ProjectSvc: projectSvc,
+		WorkerSvc:  workerSvc,
+		GitHubSvc: fakeProjectCloneProvider{cloneFn: func(ctx context.Context, projectID, repoURL string) (string, string, error) {
+			cloneCalls++
+			return "/repos/" + projectID, repoURL, nil
+		}},
+	}
+
+	for _, limit := range []int{20, 25} {
+		name := fmt.Sprintf("Finite Global Project %d", limit)
+		out, err := ExecuteCreateGitHubProjectRuntime(ctx, json.RawMessage(fmt.Sprintf(`{"name":%q,"repo_url":"https://github.com/acme/%d","max_workers":%d}`, name, limit, limit)), opts)
+		require.NoError(t, err)
+		var resp createGitHubProjectRuntimeResponse
+		require.NoError(t, json.Unmarshal([]byte(out), &resp))
+		require.True(t, resp.OK, resp.Error)
+	}
+
+	out, err := ExecuteCreateGitHubProjectRuntime(ctx, json.RawMessage(`{"name":"Over Global Project","repo_url":"https://github.com/acme/over-global","max_workers":26}`), opts)
+	require.NoError(t, err)
+	var resp createGitHubProjectRuntimeResponse
+	require.NoError(t, json.Unmarshal([]byte(out), &resp))
+	require.False(t, resp.OK)
+	require.Contains(t, resp.Error, "global worker limit")
+	require.Equal(t, 2, cloneCalls, "a project over the finite global limit must be rejected before cloning")
+	projects, err := projectRepo.List(ctx)
+	require.NoError(t, err)
+	for _, project := range projects {
+		require.NotEqual(t, "Over Global Project", project.Name)
+	}
 }
 
 func TestExecuteCreateGitHubProjectRuntimeRollsBackOnCloneFailure(t *testing.T) {
@@ -2596,6 +2661,28 @@ func TestExecuteUpdateProjectSettingsRuntimeUpdatesAndClearsDefaults(t *testing.
 	require.Nil(t, updated.MaxWorkers)
 }
 
+func TestExecuteUpdateProjectSettingsRuntimeTreatsZeroProjectLimitAsInherited(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	projectSvc := NewProjectService(projectRepo)
+	zero := 0
+	project := &models.Project{Name: "Legacy Zero Project", MaxWorkers: &zero}
+	require.NoError(t, projectRepo.Create(ctx, project))
+
+	out, err := ExecuteUpdateProjectSettingsRuntime(ctx, UpdateProjectSettingsRuntimeOptions{
+		ProjectID:   project.ID,
+		Input:       json.RawMessage(`{}`),
+		ProjectSvc:  projectSvc,
+		ProjectRepo: projectRepo,
+	})
+	require.NoError(t, err)
+	var resp updateProjectSettingsRuntimeResponse
+	require.NoError(t, json.Unmarshal([]byte(out), &resp))
+	require.True(t, resp.OK, resp.Error)
+	require.False(t, resp.WorkerLimit.Set)
+}
+
 func TestExecuteUpdateProjectSettingsRuntimeRejectsInvalidInputsWithoutPartialUpdate(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
@@ -2629,7 +2716,6 @@ func TestExecuteUpdateProjectSettingsRuntimeRejectsInvalidInputsWithoutPartialUp
 		`{"default_model":"missing","max_workers":3}`,
 		`{"project_id":"different-project","max_workers":3}`,
 		`{"max_workers":-1}`,
-		`{"max_workers":11}`,
 		`{"repo_path":"/tmp/other","max_workers":3}`,
 		`{"clear_default_model":true,"default_model":"Safe Model"}`,
 	} {
@@ -2645,6 +2731,35 @@ func TestExecuteUpdateProjectSettingsRuntimeRejectsInvalidInputsWithoutPartialUp
 		require.Equal(t, 2, *updated.MaxWorkers)
 		require.Equal(t, project.RepoPath, updated.RepoPath)
 	}
+}
+
+func TestExecuteUpdateProjectSettingsRuntimeRejectsWorkerLimitAboveFiniteGlobal(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	projectSvc := NewProjectService(projectRepo)
+	workerSvc := NewWorkerService(nil, 10, projectRepo)
+	currentLimit := 5
+	project := &models.Project{Name: "Finite Update Project", MaxWorkers: &currentLimit}
+	require.NoError(t, projectRepo.Create(ctx, project))
+
+	out, err := ExecuteUpdateProjectSettingsRuntime(ctx, UpdateProjectSettingsRuntimeOptions{
+		ProjectID:   project.ID,
+		Input:       json.RawMessage(`{"max_workers":11}`),
+		ProjectSvc:  projectSvc,
+		ProjectRepo: projectRepo,
+		WorkerSvc:   workerSvc,
+	})
+	require.NoError(t, err)
+	var resp updateProjectSettingsRuntimeResponse
+	require.NoError(t, json.Unmarshal([]byte(out), &resp))
+	require.False(t, resp.OK)
+	require.Contains(t, resp.Error, "global worker limit")
+
+	updated, err := projectRepo.GetByID(ctx, project.ID)
+	require.NoError(t, err)
+	require.NotNil(t, updated.MaxWorkers)
+	require.Equal(t, 5, *updated.MaxWorkers)
 }
 
 func TestExecuteUpdateProjectSettingsRuntimeRejectsAmbiguousModelName(t *testing.T) {
@@ -2699,6 +2814,35 @@ func TestBuildChannelProjectActionHandlersUpdateProjectSettings(t *testing.T) {
 	require.True(t, resp.OK, resp.Error)
 	require.Equal(t, model.ID, resp.DefaultModel.ModelID)
 	require.True(t, resp.WorkerLimit.Set)
+}
+
+func TestBuildChannelProjectActionHandlersCreateProjectUsesOuterWorkerService(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	projectSvc := NewProjectService(projectRepo)
+	workerSvc := NewWorkerService(nil, 25, projectRepo)
+
+	handlers := buildChannelProjectActionHandlers(channelProjectActionHandlerOptions{
+		ProjectRepo: projectRepo,
+		ProjectSvc:  projectSvc,
+		WorkerSvc:   workerSvc,
+		CreateProject: CreateGitHubProjectRuntimeOptions{
+			ProjectSvc: projectSvc,
+			GitHubSvc:  fakeProjectCloneProvider{},
+		},
+	})
+	out, err := handlers["create_project"](ctx, json.RawMessage(`{"name":"Channel Over Global","repo_url":"https://github.com/acme/channel-over-global","max_workers":26}`))
+	require.NoError(t, err)
+	var resp createGitHubProjectRuntimeResponse
+	require.NoError(t, json.Unmarshal([]byte(out), &resp))
+	require.False(t, resp.OK)
+	require.Contains(t, resp.Error, "global worker limit")
+	projects, err := projectRepo.List(ctx)
+	require.NoError(t, err)
+	for _, project := range projects {
+		require.NotEqual(t, "Channel Over Global", project.Name)
+	}
 }
 
 func TestCreateAgentRuntimeCreatesAgentAndRejectsUnsafeInputs(t *testing.T) {

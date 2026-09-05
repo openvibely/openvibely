@@ -2330,14 +2330,14 @@ templ automationEditableBreadcrumb(currentProjectID string, automationID string,
 		if automationName != "" {
 			<span class="flex-shrink-0 text-2xl text-base-content/30">/</span>
 			if currentLabel != "" && automationID != "" {
-				<div class="min-w-0">
+				<div class="-ml-1 min-w-0">
 					@components.BreadcrumbSelector(models.BreadcrumbSelector{
 						ID: "automation-resource-selector", Kind: "Automation", CurrentID: automationID, CurrentName: automationName,
 						SearchURL: fmt.Sprintf("/breadcrumb-selectors/automations?project_id=%s&current_id=%s&view=live", currentProjectID, automationID),
 					})
 				</div>
 			} else {
-				<div class="min-w-0 flex-1">
+				<div class="-ml-1 min-w-0 flex-1">
 					@components.BreadcrumbSelector(models.BreadcrumbSelector{
 						ID: "automation-resource-selector", Kind: "Automation", CurrentID: automationID, CurrentName: automationName,
 						SearchURL: fmt.Sprintf("/breadcrumb-selectors/automations?project_id=%s&current_id=%s&view=live", currentProjectID, automationID),

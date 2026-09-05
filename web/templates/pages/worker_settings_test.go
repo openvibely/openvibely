@@ -59,6 +59,65 @@ func TestWorkerSettingsContentUsesNonShrinkingScrollableTableLayout(t *testing.T
 	}
 }
 
+func TestWorkerSettingsContentSupportsHighLimitsAndReportsStaleProjectCaps(t *testing.T) {
+	overGlobal := 50
+	equalGlobal := 25
+	projectStats := []ProjectWorkerStats{
+		{ID: "project-over", Name: "Project Over Global", MaxWorkers: &overGlobal},
+		{ID: "project-equal", Name: "Project At Global", MaxWorkers: &equalGlobal},
+		{ID: "project-inherited", Name: "Project Inherited", MaxWorkers: nil},
+	}
+
+	var buf bytes.Buffer
+	if err := WorkerSettingsContent(25, 2, 2, 0, projectStats, nil).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render worker settings content: %v", err)
+	}
+	html := buf.String()
+
+	for _, required := range []string{
+		`id="limit-input-global"`,
+		`value="25"`,
+		`id="limit-input-project-over"`,
+		`value="50"`,
+		`max="25"`,
+		"Exceeds global limit; lower this cap",
+		"Exceeds global",
+		"positive values must not exceed the global worker limit",
+	} {
+		if !strings.Contains(html, required) {
+			t.Fatalf("high-limit UI contract missing %q", required)
+		}
+	}
+	if strings.Contains(html, `max="10"`) {
+		t.Fatal("worker settings UI retained the removed hard maximum of 10")
+	}
+}
+
+func TestWorkerSettingsContentShowsUnlimitedForProjectRunningColumn(t *testing.T) {
+	zero := 0
+	projectStats := []ProjectWorkerStats{
+		{ID: "project-nil", Name: "Inherited Project", Running: 3, MaxWorkers: nil},
+		{ID: "project-zero", Name: "Legacy Zero Project", Running: 4, MaxWorkers: &zero},
+	}
+
+	var buf bytes.Buffer
+	if err := WorkerSettingsContent(0, 0, 0, 0, projectStats, nil).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render worker settings content: %v", err)
+	}
+	html := buf.String()
+
+	for _, want := range []string{"3 / Unlimited", "4 / Unlimited"} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("project running column missing unlimited label %q", want)
+		}
+	}
+	for _, forbidden := range []string{"3 / 0", "4 / 0"} {
+		if strings.Contains(html, forbidden) {
+			t.Fatalf("project running column rendered unlimited project as %q", forbidden)
+		}
+	}
+}
+
 func TestWorkerSettingsManyRowsScrollInMainContentAfterHTMXRefreshInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))
@@ -73,7 +132,7 @@ func TestWorkerSettingsManyRowsScrollInMainContentAfterHTMXRefreshInChrome(t *te
 		stats := makeWorkerStats(rowCount)
 		mu.Unlock()
 		var buf bytes.Buffer
-		if err := WorkerSettingsContent(0, 0, 0, 0, stats, nil).Render(context.Background(), &buf); err != nil {
+		if err := WorkerSettingsContent(25, 0, 0, 0, stats, nil).Render(context.Background(), &buf); err != nil {
 			t.Fatalf("render worker settings content: %v", err)
 		}
 		return buf.String()
@@ -83,7 +142,7 @@ func TestWorkerSettingsManyRowsScrollInMainContentAfterHTMXRefreshInChrome(t *te
 		stats := makeWorkerStats(rowCount)
 		mu.Unlock()
 		var buf bytes.Buffer
-		if err := ProjectStatsTableBody(0, 0, 0, 0, stats).Render(context.Background(), &buf); err != nil {
+		if err := ProjectStatsTableBody(25, 0, 0, 0, stats).Render(context.Background(), &buf); err != nil {
 			t.Fatalf("render worker stats table body: %v", err)
 		}
 		return buf.String()
@@ -125,6 +184,10 @@ window.addEventListener('DOMContentLoaded', function() {
   (async function() {
     await waitFor(function() { return window.htmx && document.getElementById('project-stats-tbody'); }, 'Workers hydration');
     htmx.process(document.body);
+    var globalInput = document.getElementById('limit-input-global');
+    var firstProjectInput = document.getElementById('limit-input-project-00');
+    if (!globalInput || globalInput.value !== '25' || globalInput.getAttribute('max') !== null) fail('global high worker limit input contract is incorrect');
+    if (!firstProjectInput || firstProjectInput.value !== '25' || firstProjectInput.getAttribute('max') !== '25') fail('project worker limit input did not inherit the finite global ceiling');
     var initialHeight = assertWorkerTableLayout('initial many-row render', 0);
     var beforeScrollHeight = document.getElementById('main-content').scrollHeight;
     await fetch('/browser-expand', {method:'POST'});
@@ -201,6 +264,9 @@ func makeWorkerStats(count int) []ProjectWorkerStats {
 	stats := make([]ProjectWorkerStats, count)
 	for i := range stats {
 		limit := (i % 5) + 1
+		if i == 0 {
+			limit = 25
+		}
 		stats[i] = ProjectWorkerStats{
 			ID:         fmt.Sprintf("project-%02d", i),
 			Name:       fmt.Sprintf("Project %02d With A Descriptive Name", i),

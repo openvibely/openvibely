@@ -92,19 +92,22 @@ func (r *TaskRepo) ListByProject(ctx context.Context, projectID string, category
 }
 
 // ListBreadcrumbSelector returns a bounded compact task-title search for one project.
-func (r *TaskRepo) ListBreadcrumbSelector(ctx context.Context, projectID, search, currentID string, limit int) ([]models.BreadcrumbSelectorItem, error) {
+func (r *TaskRepo) ListBreadcrumbSelector(ctx context.Context, projectID, search, currentID string, scheduleOnly bool, limit int) ([]models.BreadcrumbSelectorItem, error) {
 	if limit <= 0 || limit > 50 {
 		limit = 20
 	}
 	search = strings.ToLower(strings.TrimSpace(search))
 	rows, err := r.db.QueryContext(ctx, `SELECT id, title
-		FROM tasks
-		WHERE project_id = ? AND category != 'chat'
-			AND (? = '' OR INSTR(LOWER(title), ?) > 0 OR id = ?)
-		ORDER BY CASE WHEN id = ? THEN 0 ELSE 1 END,
-			CASE WHEN LOWER(title) = ? THEN 0 WHEN LOWER(title) LIKE ? || '%' THEN 1 ELSE 2 END,
-			updated_at DESC, id ASC
-		LIMIT ?`, projectID, search, search, currentID, currentID, search, search, limit)
+			FROM tasks
+			WHERE project_id = ? AND category != 'chat'
+				AND (? = FALSE OR category = 'scheduled' OR EXISTS (
+					SELECT 1 FROM schedules WHERE schedules.task_id = tasks.id
+				))
+				AND (? = '' OR INSTR(LOWER(title), ?) > 0 OR id = ?)
+			ORDER BY CASE WHEN id = ? THEN 0 ELSE 1 END,
+				CASE WHEN LOWER(title) = ? THEN 0 WHEN LOWER(title) LIKE ? || '%' THEN 1 ELSE 2 END,
+				updated_at DESC, id ASC
+			LIMIT ?`, projectID, scheduleOnly, search, search, currentID, currentID, search, search, limit)
 	if err != nil {
 		return nil, fmt.Errorf("listing task breadcrumb selector: %w", err)
 	}

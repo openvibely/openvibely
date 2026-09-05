@@ -2,9 +2,9 @@
 name: testing_coverage_and_performance
 type: project
 created: 2026-06-07
-updated: 2026-09-04
+updated: 2026-09-05
 source: after_complete
-source_id: c40d4c53c4ceffef788e76b12207674c
+source_id: 5c74fe91144a0f84866bf7d8ad82be85
 confidence: high
 title: Testing Coverage and Performance
 ---
@@ -20,6 +20,8 @@ Coverage and fixtures:
 - Production-shaped integration tests must invoke the real service/repository and shared SSE/router boundary. Synthetic mutations or manually dispatched events do not prove claims, broadcaster transport, listeners, project isolation, or authoritative refresh.
 - Changes/worktree coverage must prove recoverable failure refreshes retry actions, duplicate action suppression, genuine conflict guidance, project ownership, live eligibility, repository lease races, unusual filenames, squash/no-`MERGE_HEAD` recovery, and authoritative state. Kanban coverage must include selection/focus across refresh, grouped drops, navigation/history cleanup, stale card options, PR ownership failures, and browser geometry.
 - Real Chromium/CDP interaction is required for pointer/hover/cascade, keyboard, focus restoration, dialog/menu, scroll, and HTMX replacement behavior. A source/template assertion alone does not establish browser behavior. Lifecycle viewport, Automation Live reconnect/run-now, task status icon, card pagination, and theme contrast have production-shaped browser coverage.
+- Collection-selection browser coverage exercises real empty and mixed collection markup. The Channels empty fragment is rendered through `pages.SettingsContent` and checked in Chromium to ensure the searchable empty state gets no selection gutter or padding and the master control remains disabled, while mixed collection behavior remains covered. Production-shaped selection coverage also verifies second-click Filters dismissal, persistent master/search controls during selection, master uncheck restoration of Filters/Sort, configured provider-card selection, and Alerts’ selected Mark-as-read action. Channels bulk-removal handler/repository regressions prove one atomic request preflights mixed provider/webhook selections, rejects foreign or unsupported IDs without mutation, and rolls back settings and webhook state after a mid-transaction failure.
+- Production Chromium now covers the shared card-list refresh regression: a successful bulk mutation manually replaces the collection root, then the replacement master checkbox selects and clears an eligible card and the replacement Filters control responds. This specifically protects the non-HTMX `outerHTML` path, which does not emit `htmx:afterSettle`, across the shared collection-card implementations.
 
 Performance and SQLite evidence:
 - Representative file-backed tests use multiple physical `*sql.Conn` handles and real repository entry points to verify the production `1W + 1R` layout, per-connection pragmas, WAL pressure, atomic writes, busy behavior, context-bounded lock waits, timeout restoration, terminal stream protection, claims, Automation leases, thread inputs, attachment retirement/publication, incremental vacuum, startup serialization, and failure cleanup.

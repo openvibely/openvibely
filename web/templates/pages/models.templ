@@ -830,7 +830,7 @@ for _, agent := range modelOptions {
 							<label class="label"><span class="label-text">Max Workers</span></label>
 							<input type="text" inputmode="numeric" pattern="[0-9]*" id="model_max_workers" name="model_max_workers" class="input input-bordered" value="0" placeholder="0"/>
 							<label class="label">
-								<span class="label-text-alt opacity-70">0 = use global pool</span>
+								<span class="label-text-alt opacity-70">0 = use global pool; positive values set a per-model cap with no product-level maximum</span>
 							</label>
 						</div>
 						<div class="form-control">

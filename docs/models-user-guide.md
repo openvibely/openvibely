@@ -161,7 +161,7 @@ This mode keeps localhost redirect URIs provider-compatible while still completi
 
 In the model modal:
 
-- `Max Workers` (0 means use global worker pool)
+- `Max Workers` (`0` means use the global worker pool; positive values set a per-model cap with no product-level maximum)
 - `Inactivity timeout (seconds)` (resets on model and tool activity; 0 uses the 30-minute default)
 
 Per-model utilization is visible in `/workers`.

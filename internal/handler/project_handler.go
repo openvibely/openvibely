@@ -27,7 +27,6 @@ const (
 	githubPATSetupLinkURL               = "/channels"
 	githubPATSetupLinkText              = "Open Channels"
 	projectMaxWorkersMin                = 1
-	projectMaxWorkersMax                = 10
 )
 
 func (h *Handler) Home(c echo.Context) error {
@@ -100,6 +99,7 @@ type projectFormSettingsOptions struct {
 	LocalRepoPathEnabled bool
 	GitHubSvc            GitHubServiceProvider
 	CurrentProject       *models.Project
+	GlobalMaxWorkers     int
 }
 
 func parseProjectFormSettings(c echo.Context, opts projectFormSettingsOptions) (projectFormSettings, error) {
@@ -131,12 +131,15 @@ func parseProjectFormSettings(c echo.Context, opts projectFormSettingsOptions) (
 	if mw := strings.TrimSpace(c.FormValue("max_workers")); mw != "" {
 		v, err := strconv.Atoi(mw)
 		if err != nil {
-			return settings, fmt.Errorf("Max concurrent workers must be a number from %d to %d, or 0 for no project limit", projectMaxWorkersMin, projectMaxWorkersMax)
+			return settings, fmt.Errorf("Max concurrent workers must be a whole number; use 0 for no project limit")
 		}
-		if v < 0 || v > projectMaxWorkersMax {
-			return settings, fmt.Errorf("Max concurrent workers must be between %d and %d, or 0 for no project limit", projectMaxWorkersMin, projectMaxWorkersMax)
+		if v < 0 {
+			return settings, fmt.Errorf("Max concurrent workers must be 0 or a positive whole number")
 		}
 		if v >= projectMaxWorkersMin {
+			if opts.GlobalMaxWorkers > 0 && v > opts.GlobalMaxWorkers {
+				return settings, fmt.Errorf("Max concurrent workers cannot exceed the global worker limit of %d", opts.GlobalMaxWorkers)
+			}
 			settings.MaxWorkers = &v
 		}
 	}
@@ -148,6 +151,23 @@ func (h *Handler) isLocalRepoPathEnabled() bool {
 		return *h.localRepoPathEnabled
 	}
 	return config.ResolveEnableLocalRepoPath(os.Getenv("OPENVIBELY_ENABLE_LOCAL_REPO_PATH"))
+}
+
+func (h *Handler) configuredGlobalWorkerLimit(ctx context.Context) (int, error) {
+	if h.workerRepo != nil {
+		maxWorkers, err := h.workerRepo.GetMaxWorkers(ctx)
+		if err != nil {
+			return 0, err
+		}
+		if err := models.ValidateGlobalWorkerLimit(maxWorkers); err != nil {
+			return 0, err
+		}
+		return maxWorkers, nil
+	}
+	if h.workerSvc != nil {
+		return h.workerSvc.NumWorkers(), nil
+	}
+	return 0, nil
 }
 
 var errProjectFolderPickerUnavailable = errors.New("project folder picker is unavailable on this operating system")
@@ -287,9 +307,14 @@ func (h *Handler) PickProjectFolder(c echo.Context) error {
 
 func (h *Handler) CreateProject(c echo.Context) error {
 	localRepoPathEnabled := h.isLocalRepoPathEnabled()
+	globalMaxWorkers, err := h.configuredGlobalWorkerLimit(c.Request().Context())
+	if err != nil {
+		return h.projectErrorResponse(c, http.StatusInternalServerError, "failed to read global worker limit")
+	}
 	settings, err := parseProjectFormSettings(c, projectFormSettingsOptions{
 		LocalRepoPathEnabled: localRepoPathEnabled,
 		GitHubSvc:            h.githubSvc,
+		GlobalMaxWorkers:     globalMaxWorkers,
 	})
 	if err != nil {
 		return h.projectErrorResponse(c, http.StatusBadRequest, err.Error())
@@ -394,11 +419,16 @@ func (h *Handler) UpdateProject(c echo.Context) error {
 	}
 
 	localRepoPathEnabled := h.isLocalRepoPathEnabled()
+	globalMaxWorkers, err := h.configuredGlobalWorkerLimit(c.Request().Context())
+	if err != nil {
+		return h.projectErrorResponse(c, http.StatusInternalServerError, "failed to read global worker limit")
+	}
 	currentRepoPath := p.RepoPath
 	settings, err := parseProjectFormSettings(c, projectFormSettingsOptions{
 		LocalRepoPathEnabled: localRepoPathEnabled,
 		GitHubSvc:            h.githubSvc,
 		CurrentProject:       p,
+		GlobalMaxWorkers:     globalMaxWorkers,
 	})
 	if err != nil {
 		return h.projectErrorResponse(c, http.StatusBadRequest, err.Error())
@@ -436,6 +466,7 @@ func (h *Handler) UpdateProject(c echo.Context) error {
 	}
 	applog.Infof("[handler] UpdateProject success id=%s", projectID)
 	if h.workerSvc != nil {
+		h.workerSvc.ReconcilePendingTasks(c.Request().Context())
 		h.workerSvc.DispatchNext()
 	}
 
@@ -474,7 +505,11 @@ func isGitHubPATNotConfiguredError(err error) bool {
 func (h *Handler) NewProjectDialog(c echo.Context) error {
 	applog.Infof("[handler] NewProjectDialog requested")
 	agents, _ := h.llmConfigRepo.ListChatSelectionOptions(c.Request().Context())
-	return render(c, http.StatusOK, pages.NewProjectDialog(agents, h.isLocalRepoPathEnabled()))
+	globalMaxWorkers, err := h.configuredGlobalWorkerLimit(c.Request().Context())
+	if err != nil {
+		return err
+	}
+	return render(c, http.StatusOK, pages.NewProjectDialog(agents, h.isLocalRepoPathEnabled(), globalMaxWorkers))
 }
 
 func (h *Handler) EditProjectDialog(c echo.Context) error {
@@ -492,8 +527,12 @@ func (h *Handler) EditProjectDialog(c echo.Context) error {
 	}
 
 	agents, _ := h.llmConfigRepo.ListChatSelectionOptions(c.Request().Context())
+	globalMaxWorkers, err := h.configuredGlobalWorkerLimit(c.Request().Context())
+	if err != nil {
+		return err
+	}
 
-	return render(c, http.StatusOK, pages.EditProjectDialog(p, agents, h.isLocalRepoPathEnabled()))
+	return render(c, http.StatusOK, pages.EditProjectDialog(p, agents, h.isLocalRepoPathEnabled(), globalMaxWorkers))
 }
 
 func (h *Handler) DeleteProject(c echo.Context) error {

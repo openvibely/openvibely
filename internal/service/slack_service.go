@@ -1506,8 +1506,10 @@ func (s *SlackService) slackActionHandlersForTask(projectID, callerTaskID string
 		ProjectSvc:    s.projectSvc,
 		LLMConfigRepo: s.llmConfigRepo,
 		WorkerSvc:     s.workerSvc,
-		CreateProject: CreateGitHubProjectRuntimeOptions{ProjectSvc: s.projectSvc,
+		CreateProject: CreateGitHubProjectRuntimeOptions{
+			ProjectSvc:                 s.projectSvc,
 			GitHubSvc:                  s.githubProjectSvc,
+			WorkerSvc:                  s.workerSvc,
 			MemorySvc:                  s.memorySvc,
 			AgentLibraryMaintenanceSvc: s.agentLibraryMaintenanceSvc,
 		},

@@ -767,9 +767,6 @@ func (h *Handler) normalizeBrowserModelForm(ctx context.Context, c echo.Context,
 		if mw < 0 {
 			mw = 0
 		}
-		if mw > 10 {
-			mw = 10
-		}
 		agent.MaxWorkers = mw
 	}
 	if wt, err := strconv.Atoi(c.FormValue("worker_timeout")); err == nil {

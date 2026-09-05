@@ -36,6 +36,92 @@ func TestGlobalWorkerCapacityUnlimitedAndFinite(t *testing.T) {
 	}
 }
 
+func TestWorkerService_GlobalAdmissionUsesActualRunningAcrossProjectCaps(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+
+	projectLimit := 100
+	projectA := &models.Project{Name: "Independent Project A", MaxWorkers: &projectLimit}
+	projectB := &models.Project{Name: "Independent Project B", MaxWorkers: &projectLimit}
+	if err := projectRepo.Create(ctx, projectA); err != nil {
+		t.Fatalf("Create project A: %v", err)
+	}
+	if err := projectRepo.Create(ctx, projectB); err != nil {
+		t.Fatalf("Create project B: %v", err)
+	}
+
+	ws := &WorkerService{
+		pending:     make(map[string]bool),
+		numWorkers:  2,
+		submitted:   make(chan models.Task, 100),
+		cancelFuncs: make(map[string]context.CancelFunc),
+		projectRepo: projectRepo,
+	}
+
+	if !ws.TryAcquireProjectSlot(projectA.ID) {
+		t.Fatal("expected project A to acquire the first global slot")
+	}
+	if !ws.TryAcquireProjectSlot(projectB.ID) {
+		t.Fatal("expected project B to acquire the second global slot")
+	}
+	if ws.TryAcquireProjectSlot(projectA.ID) {
+		t.Fatal("expected actual global usage to reject a third task")
+	}
+	if got := ws.TotalRunning(); got != 2 {
+		t.Fatalf("TotalRunning = %d, want 2", got)
+	}
+	if got := ws.ProjectRunning(projectA.ID); got != 1 {
+		t.Fatalf("project A running = %d, want 1", got)
+	}
+	if got := ws.ProjectRunning(projectB.ID); got != 1 {
+		t.Fatalf("project B running = %d, want 1", got)
+	}
+
+	ws.ReleaseProjectSlot(projectA.ID)
+	ws.ReleaseProjectSlot(projectB.ID)
+	if got := ws.TotalRunning(); got != 0 {
+		t.Fatalf("TotalRunning after releases = %d, want 0", got)
+	}
+}
+
+func TestWorkerService_LoweringGlobalLimitDoesNotCancelRunningSlots(t *testing.T) {
+	ws := &WorkerService{
+		pending:     make(map[string]bool),
+		numWorkers:  3,
+		submitted:   make(chan models.Task, 100),
+		cancelFuncs: make(map[string]context.CancelFunc),
+	}
+
+	if !ws.TryAcquireProjectSlot("project-a") || !ws.TryAcquireProjectSlot("project-b") {
+		t.Fatal("expected two running slots before lowering the global limit")
+	}
+	ws.Resize(1)
+	if got := ws.TotalRunning(); got != 2 {
+		t.Fatalf("lowering global limit cancelled running work: TotalRunning = %d, want 2", got)
+	}
+	if ws.TryAcquireProjectSlot("project-c") {
+		t.Fatal("expected new admission to remain blocked while usage exceeds lowered limit")
+	}
+
+	ws.ReleaseProjectSlot("project-a")
+	if got := ws.TotalRunning(); got != 1 {
+		t.Fatalf("TotalRunning after first release = %d, want 1", got)
+	}
+	if ws.TryAcquireProjectSlot("project-c") {
+		t.Fatal("expected admission to remain blocked while one existing slot uses the lowered limit")
+	}
+
+	ws.ReleaseProjectSlot("project-b")
+	if got := ws.TotalRunning(); got != 0 {
+		t.Fatalf("TotalRunning after second release = %d, want 0", got)
+	}
+	if !ws.TryAcquireProjectSlot("project-c") {
+		t.Fatal("expected admission after all pre-reduction work released")
+	}
+	ws.ReleaseProjectSlot("project-c")
+}
+
 func TestWorkerService_ModelSlotAcquireRelease(t *testing.T) {
 	ws := &WorkerService{
 		pending:     make(map[string]bool),
@@ -1642,6 +1728,97 @@ func TestWorkerService_ProjectLimitIncreaseDispatchesQueued(t *testing.T) {
 	if qs := ws.QueueSize(); qs != 0 {
 		t.Errorf("expected queue size=0 after limit increase + DispatchNext, got %d", qs)
 	}
+}
+
+func TestWorkerService_UnlimitedGlobalAndProjectDispatchQueuedTask(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping goroutine-timing test in short mode")
+	}
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	workerRepo := repository.NewWorkerRepo(db)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+
+	projectLimit := 1
+	project := &models.Project{Name: "unlimited-transition", MaxWorkers: &projectLimit}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("Create project: %v", err)
+	}
+	if err := workerRepo.SetMaxWorkers(ctx, 1); err != nil {
+		t.Fatalf("SetMaxWorkers(1): %v", err)
+	}
+
+	agent := &models.LLMConfig{
+		Name:       "Unlimited Transition Agent",
+		Provider:   models.ProviderTest,
+		Model:      "test-model",
+		MaxTokens:  4096,
+		AuthMethod: models.AuthMethodCLI,
+		IsDefault:  true,
+		MaxWorkers: 0,
+	}
+	if err := llmConfigRepo.Create(ctx, agent); err != nil {
+		t.Fatalf("Create agent: %v", err)
+	}
+	task := &models.Task{
+		ProjectID: project.ID,
+		Title:     "Queued before unlimited settings",
+		Category:  models.CategoryActive,
+		Status:    models.StatusPending,
+		Prompt:    "run after both limits become unlimited",
+		AgentID:   &agent.ID,
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("Create task: %v", err)
+	}
+
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, nil, attachmentRepo)
+	llmSvc.SetLLMCaller(testutil.NewMockLLMCaller())
+	worker := NewWorkerService(llmSvc, 1, projectRepo)
+	worker.SetTaskRepo(taskRepo)
+	worker.SetLLMConfigRepo(llmConfigRepo)
+	worker.Start(ctx)
+	defer worker.Stop()
+
+	admitted := make(chan struct{}, 1)
+	worker.beforeOrdinaryTaskClaim = func(models.Task) { admitted <- struct{}{} }
+
+	// Fill both finite pools so the task enters the worker queue.
+	if !worker.TryAcquireProjectSlot(project.ID) {
+		t.Fatal("expected running task to consume the finite global/project capacity")
+	}
+	worker.Submit(*task)
+	waitForWorkerCondition(t, func() bool { return worker.QueueSize() == 1 }, "task should wait while global and project limits are finite")
+
+	// Mirror the settings handlers: persist unlimited global capacity and clear
+	// the project cap, update the in-memory global limit, then retry admission.
+	if err := workerRepo.SetMaxWorkers(ctx, 0); err != nil {
+		t.Fatalf("SetMaxWorkers(0): %v", err)
+	}
+	worker.Resize(0)
+	project.MaxWorkers = nil
+	if err := projectRepo.Update(ctx, project); err != nil {
+		t.Fatalf("clear project worker limit: %v", err)
+	}
+	worker.DispatchNext()
+
+	select {
+	case <-admitted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("task remained queued after global and project limits became unlimited")
+	}
+	if got := worker.QueueSize(); got != 0 {
+		t.Fatalf("QueueSize after unlimited transition = %d, want 0", got)
+	}
+
+	worker.ReleaseProjectSlot(project.ID)
+	waitForWorkerCondition(t, func() bool {
+		return worker.TotalRunning() == 0 && worker.ProjectRunning(project.ID) == 0 && worker.ModelRunning(agent.ID) == 0
+	}, "unlimited transition task should release all reservations")
 }
 
 // TestWorkerService_ProjectLimitIncreaseNoDispatchWhenGlobalFull verifies that

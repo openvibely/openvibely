@@ -46,7 +46,7 @@ type LLMConfig struct {
 	OAuthAccountID    string     `json:"-"` // ChatGPT workspace/account id for OpenAI OAuth
 
 	// Per-model worker pool configuration
-	MaxWorkers    int `json:"max_workers"`    // 0 = use global default
+	MaxWorkers    int `json:"max_workers"`    // 0 = use global default; positive values have no product-level maximum
 	WorkerTimeout int `json:"worker_timeout"` // Inactivity timeout; 0 = use global default (seconds)
 
 	// Configurable OAuth endpoints (used for OpenAI OAuth; Claude Max uses hardcoded endpoints)

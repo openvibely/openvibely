@@ -86,6 +86,20 @@ func TestModelsContent_NewModelVersionsInSelector(t *testing.T) {
 	if strings.Contains(out, "Max Output Tokens / Request") || strings.Contains(out, "model_max_tokens") {
 		t.Error("expected model dialog not to expose internal output-token cap")
 	}
+	if !strings.Contains(out, "0 = use global pool; positive values set a per-model cap with no product-level maximum") {
+		t.Error("expected model worker limit guidance to describe inherited and positive per-model limits")
+	}
+	modelWorkerInputStart := strings.Index(out, `id="model_max_workers"`)
+	if modelWorkerInputStart < 0 {
+		t.Fatal("expected model worker input")
+	}
+	modelWorkerInputEnd := strings.Index(out[modelWorkerInputStart:], ">")
+	if modelWorkerInputEnd < 0 {
+		t.Fatal("expected model worker input to be well-formed")
+	}
+	if strings.Contains(out[modelWorkerInputStart:modelWorkerInputStart+modelWorkerInputEnd], `max="10"`) {
+		t.Error("expected model worker input not to retain a hard maximum of 10")
+	}
 	if !strings.Contains(out, "Save endpoint changes and reconnect before discovering models.") {
 		t.Error("expected edit-mode discovery to explain that endpoint changes must be saved first")
 	}

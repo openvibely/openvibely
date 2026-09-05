@@ -11,8 +11,9 @@ import (
 )
 
 type ProjectService struct {
-	repo    *repository.ProjectRepo
-	taskSvc *TaskService
+	repo       *repository.ProjectRepo
+	taskSvc    *TaskService
+	workerRepo *repository.WorkerRepo
 }
 
 func NewProjectService(repo *repository.ProjectRepo) *ProjectService {
@@ -21,6 +22,10 @@ func NewProjectService(repo *repository.ProjectRepo) *ProjectService {
 
 func (s *ProjectService) SetTaskService(taskSvc *TaskService) {
 	s.taskSvc = taskSvc
+}
+
+func (s *ProjectService) SetWorkerRepo(workerRepo *repository.WorkerRepo) {
+	s.workerRepo = workerRepo
 }
 
 func (s *ProjectService) List(ctx context.Context) ([]models.Project, error) {
@@ -39,11 +44,53 @@ func (s *ProjectService) GetByID(ctx context.Context, id string) (*models.Projec
 }
 
 func (s *ProjectService) Create(ctx context.Context, p *models.Project) error {
+	if err := s.validateProjectWorkerLimit(ctx, p, false); err != nil {
+		return err
+	}
 	return s.repo.Create(ctx, p)
 }
 
 func (s *ProjectService) Update(ctx context.Context, p *models.Project) error {
+	if err := s.validateProjectWorkerLimit(ctx, p, true); err != nil {
+		return err
+	}
 	return s.repo.Update(ctx, p)
+}
+
+func (s *ProjectService) validateProjectWorkerLimit(ctx context.Context, p *models.Project, allowUnchanged bool) error {
+	if p.MaxWorkers != nil && *p.MaxWorkers == 0 {
+		p.MaxWorkers = nil
+	}
+
+	globalMaxWorkers := 0
+	if s.workerRepo != nil {
+		var err error
+		globalMaxWorkers, err = s.workerRepo.GetMaxWorkers(ctx)
+		if err != nil {
+			return err
+		}
+		if err := models.ValidateGlobalWorkerLimit(globalMaxWorkers); err != nil {
+			return err
+		}
+	}
+
+	if allowUnchanged && s.workerRepo != nil {
+		current, err := s.repo.GetByID(ctx, p.ID)
+		if err != nil {
+			return err
+		}
+		if current != nil && projectWorkerLimitsEqual(current.MaxWorkers, p.MaxWorkers) {
+			return nil
+		}
+	}
+	return models.ValidateProjectWorkerLimit(p.MaxWorkers, globalMaxWorkers)
+}
+
+func projectWorkerLimitsEqual(a, b *int) bool {
+	if a == nil || b == nil {
+		return (a == nil || *a == 0) && (b == nil || *b == 0)
+	}
+	return *a == *b
 }
 
 func (s *ProjectService) Delete(ctx context.Context, id string) error {
