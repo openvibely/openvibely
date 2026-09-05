@@ -263,8 +263,33 @@ func TestSkillsMutationRefreshURLsUseAuthoritativeCollectionState(t *testing.T) 
 	require.NoError(t, pages.SkillsContentForProjectPageWithState(nil, true, "project-1", false, state).Render(t.Context(), &body))
 	html := body.String()
 	require.Contains(t, html, `return window.cardCollectionActionURL(document.getElementById('skills-container'), url);`)
-	require.Contains(t, html, `htmx.ajax('DELETE', skillsRefreshURL('/skills/' + encodeURIComponent(deleteSkillHandle)`)
+	require.Contains(t, html, `htmx.ajax('DELETE', skillsRefreshURL('/skills/' + encodeURIComponent(deleteSkillHandle) + '?target_scope=' + encodeURIComponent(deleteSkillScope)`)
 	require.Equal(t, 5, strings.Count(html, `fetch(skillsRefreshURL(`), "enable, always-use, import, save, and post-save always-use must share authoritative state")
+}
+
+func TestDeleteGlobalSkillUsesTargetScopeOnUnfilteredProjectPage(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	globalRoot := t.TempDir()
+	projectRepoPath := t.TempDir()
+	h.SetAgentSkillRoot(globalRoot)
+	project := createProject(t, h, "Global Skill Delete Project")
+	project.RepoPath = projectRepoPath
+	require.NoError(t, h.projectRepo.Update(t.Context(), project))
+	writeStandaloneSkill(t, globalRoot, "global_delete", "Global Delete", "Delete from global root", "global")
+	projectSkillRoot := filepath.Join(projectRepoPath, ".openvibely")
+	writeStandaloneSkill(t, projectSkillRoot, "global_delete", "Project Survivor", "Keep the project package", "project")
+
+	req := httptest.NewRequest(http.MethodDelete, "/skills/global_delete?target_scope=global&project_id="+project.ID, nil)
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	_, err := os.Stat(filepath.Join(globalRoot, "skills", "global_delete"))
+	require.ErrorIs(t, err, os.ErrNotExist)
+	stat, err := os.Stat(filepath.Join(projectSkillRoot, "skills", "global_delete"))
+	require.NoError(t, err)
+	require.True(t, stat.IsDir())
 }
 
 func TestDeleteSkillRemovesStandaloneSkillAndReturnsCards(t *testing.T) {

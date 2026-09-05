@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/openvibely/openvibely/web/templates/layout"
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
 
@@ -38,8 +39,8 @@ func TestSkillsDeleteBrowserPreservesFilteredScrollAnchor(t *testing.T) {
 			Handle:      fmt.Sprintf("skill_%02d", i),
 			Name:        fmt.Sprintf("%s skill %02d", group, i),
 			Description: group + " searchable skill",
-			Scope:       "project",
-			Source:      "project",
+			Scope:       "global",
+			Source:      "global",
 			Content:     "body",
 			Enabled:     true,
 		})
@@ -58,11 +59,18 @@ func TestSkillsDeleteBrowserPreservesFilteredScrollAnchor(t *testing.T) {
 		t.Fatalf("marshal replacement: %v", err)
 	}
 
-	page := `<!doctype html>
-<html>
-<head>
-<meta charset="utf-8">
-<style>
+	var base bytes.Buffer
+	if err := layout.Base("Skills delete browser", nil, "project-1").Render(context.Background(), &base); err != nil {
+		t.Fatalf("render base: %v", err)
+	}
+	var local []string
+	for _, line := range strings.Split(base.String(), "\n") {
+		if strings.Contains(line, "<script src=") || strings.Contains(line, "<link href=") || strings.Contains(line, `<link rel="stylesheet" href=`) {
+			continue
+		}
+		local = append(local, line)
+	}
+	page := strings.Replace(strings.Join(local, "\n"), "</head>", `<style>
   html, body { margin: 0; padding: 0; }
   body { font-family: sans-serif; }
   #skills-container { padding: 16px; }
@@ -73,40 +81,10 @@ func TestSkillsDeleteBrowserPreservesFilteredScrollAnchor(t *testing.T) {
   .dropdown:focus-within .dropdown-content { display: block; }
   .hidden { display: none !important; }
   dialog:not([open]) { display: none; }
-</style>
-</head>
-<body>
-` + initial + `
-<script>
+</style></head>`, 1)
+	page = strings.Replace(page, "</main>", initial+"</main>", 1)
+	runner := `<script>
 (function() {
-  function storageKey(pageKey) { return 'ov_card_search_' + pageKey; }
-  window.refreshCardSearches = function(root) {
-    root = root || document;
-    var inputs = root.querySelectorAll('input[data-card-search]');
-    for (var i = 0; i < inputs.length; i++) {
-      var input = inputs[i];
-      var pageKey = input.getAttribute('data-card-search') || '';
-      var saved = pageKey ? sessionStorage.getItem(storageKey(pageKey)) || '' : '';
-      if (!input.value && saved) input.value = saved;
-      if (pageKey) sessionStorage.setItem(storageKey(pageKey), input.value || '');
-      var container = input.closest('[data-search-container]');
-      if (!container) continue;
-      var term = (input.value || '').toLowerCase().trim();
-      var cards = container.querySelectorAll('[data-search-card]');
-      for (var j = 0; j < cards.length; j++) {
-        var text = (cards[j].getAttribute('data-search-text') || '').toLowerCase();
-        cards[j].style.display = (!term || text.indexOf(term) !== -1) ? '' : 'none';
-      }
-    }
-  };
-  window.cardCollectionActionURL = function(root, rawURL) {
-    var action = new URL(rawURL, window.location.href);
-    var state = new URL(root.getAttribute('data-card-pagination-url'), window.location.href);
-    state.searchParams.forEach(function(value, key) {
-      if (!action.searchParams.has(key)) action.searchParams.set(key, value);
-    });
-    return action.pathname + '?' + action.searchParams.toString();
-  };
   window.htmx = {
     process: function() {},
     ajax: function(method, url, options) {
@@ -150,7 +128,7 @@ func TestSkillsDeleteBrowserPreservesFilteredScrollAnchor(t *testing.T) {
       window.scrollBy(0, -120);
       var beforeTop = survivor.getBoundingClientRect().top;
       window.deleteSkillHandle = 'skill_30';
-      window.deleteSkillScope = 'project';
+      window.deleteSkillScope = 'global';
       var modal = document.getElementById('delete_skill_confirm_modal');
       if (modal && modal.showModal) {
         modal.showModal();
@@ -172,7 +150,7 @@ func TestSkillsDeleteBrowserPreservesFilteredScrollAnchor(t *testing.T) {
           });
           var focusedSurvivor = nextSurvivor && document.activeElement === nextSurvivor;
           var mutationURL = new URL(window.lastSkillMutationURL || '', window.location.href);
-          var statePreserved = mutationURL.searchParams.get('project_id') === 'project-1' && mutationURL.searchParams.get('search') === 'keep' && mutationURL.searchParams.get('enabled') === 'true' && mutationURL.searchParams.get('scope') === 'project' && mutationURL.searchParams.get('always_use') === 'false' && mutationURL.searchParams.get('archived') === 'false' && mutationURL.searchParams.get('source') === 'project' && mutationURL.searchParams.get('sort') === 'scope';
+          var statePreserved = mutationURL.searchParams.get('target_scope') === 'global' && mutationURL.searchParams.get('scope') === null && mutationURL.searchParams.get('project_id') === 'project-1' && mutationURL.searchParams.get('search') === 'keep' && mutationURL.searchParams.get('enabled') === 'true' && mutationURL.searchParams.get('always_use') === 'false' && mutationURL.searchParams.get('archived') === 'false' && mutationURL.searchParams.get('source') === 'global' && mutationURL.searchParams.get('sort') === 'source';
           if (removed && filtered && delta <= 6 && !focusedDropdown && openDropdowns.length === 0 && focusedSurvivor && statePreserved) {
             finish('pass', 'anchor and query state preserved delta=' + delta.toFixed(2));
           } else {
@@ -190,9 +168,8 @@ func TestSkillsDeleteBrowserPreservesFilteredScrollAnchor(t *testing.T) {
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run);
   else run();
 })();
-</script>
-</body>
-</html>`
+</script>`
+	page = strings.Replace(page, "</body>", runner+"</body>", 1)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -248,12 +225,11 @@ func renderSkillsContentForBrowserTest(t *testing.T, skills []pages.SkillCard) s
 		Search:    "keep",
 		Filters: map[string]string{
 			"enabled":    "true",
-			"scope":      "project",
 			"always_use": "false",
 			"archived":   "false",
-			"source":     "project",
+			"source":     "global",
 		},
-		Sort: "scope",
+		Sort: "source",
 	}
 	if err := pages.SkillsContentForProjectPageWithState(skills, true, "project-1", false, state).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render skills content: %v", err)
