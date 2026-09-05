@@ -1535,7 +1535,9 @@ func TestChannelServiceListChannelsIncludesProviderStatusAndCountsSafely(t *test
 			out, err := tc.handlers["list_channels"](ctx, json.RawMessage(`{}`))
 			require.NoError(t, err)
 			var result struct {
-				ConfiguredChannelCount int `json:"configured_channel_count"`
+				ConfiguredChannelCount int      `json:"configured_channel_count"`
+				ConfiguredChannels     []string `json:"configured_channels"`
+				NoneConfigured         bool     `json:"none_configured"`
 				Slack                  struct {
 					Configured    bool   `json:"configured"`
 					Connected     bool   `json:"connected"`
@@ -1605,6 +1607,8 @@ func TestChannelServiceListChannelsIncludesProviderStatusAndCountsSafely(t *test
 			}
 			require.NoError(t, json.Unmarshal([]byte(out), &result))
 			require.Equal(t, 6, result.ConfiguredChannelCount)
+			require.Equal(t, []string{"slack", "telegram", "discord", "x", "email", "webhooks"}, result.ConfiguredChannels)
+			require.False(t, result.NoneConfigured)
 			require.True(t, result.Slack.Configured)
 			require.Equal(t, tc.wantSlackConnected, result.Slack.Connected)
 			if tc.wantSlackConnected {
