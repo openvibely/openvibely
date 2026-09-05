@@ -17,13 +17,13 @@ func getProjectID(project *models.Project, projects []models.Project) string {
 	return ""
 }
 
-templ Tasks(projects []models.Project, project *models.Project, tasks []models.Task, agents []models.LLMConfig, agentDefs []models.Agent, backlogSort string, completedSort string) {
+templ Tasks(projects []models.Project, project *models.Project, tasks []models.Task, agents []models.LLMConfig, agentDefs []models.Agent, backlogSort string, completedSort string, menuStates ...map[string]components.TaskCardMergeMenuState) {
 	@layout.Base("Tasks", projects, getProjectID(project, projects)) {
-		@TasksContent(project, tasks, agents, agentDefs, backlogSort, completedSort)
+		@TasksContent(project, tasks, agents, agentDefs, backlogSort, completedSort, menuStates...)
 	}
 }
 
-templ TasksContent(project *models.Project, tasks []models.Task, agents []models.LLMConfig, agentDefs []models.Agent, backlogSort string, completedSort string) {
+templ TasksContent(project *models.Project, tasks []models.Task, agents []models.LLMConfig, agentDefs []models.Agent, backlogSort string, completedSort string, menuStates ...map[string]components.TaskCardMergeMenuState) {
 	<div class="flex flex-col h-full min-h-0 overflow-x-hidden overflow-y-hidden">
 		@layout.PageTitle("Tasks")
 		<div class="flex items-center justify-between mb-6 flex-shrink-0">
@@ -36,7 +36,7 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 		if project != nil {
 			<div id="tasks-page" data-project-id={ project.ID } class="flex-1 min-h-0 overflow-x-hidden overflow-y-auto lg:overflow-y-hidden">
 			<!-- Kanban Board -->
-			@components.KanbanBoard(tasks, project.ID, backlogSort, completedSort, agents, agentDefs)
+			@components.KanbanBoard(tasks, project.ID, backlogSort, completedSort, agents, agentDefs, menuStates...)
 			</div>
 		}
 	</div>

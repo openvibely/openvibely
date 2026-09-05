@@ -165,14 +165,27 @@ window.addEventListener('DOMContentLoaded', function() {
     await window.openVibelyNavigate('/automations/auto-one/builder?project_id=project-browser');
     await waitFor(function(){ return route('automation-edit', 'auto-one'); }, 'Automation Edit');
     var editName=document.querySelector('[data-automation-name]');
-    if(!editName || editName.nextElementSibling!==selector()) fail('Automation Edit selector caret is not attached after the editable name');
-    if(!button().hasAttribute('data-breadcrumb-selector-caret-only') || button().textContent.trim()!=='') fail('Automation Edit selector must render only the caret trigger');
-    htmx.process(selector());
-    button().click();
-    await waitFor(function(){ return dialog().open && options().length>0; }, 'Automation Edit selector');
-    setSearch('two');
-    await waitFor(function(){ return options().length===1; }, 'Automation Edit search');
-    key(input(), 'ArrowDown'); key(document.activeElement, 'Enter');
+    var editSelector=editName && editName.nextElementSibling;
+    var editButton=editSelector && editSelector.querySelector('[data-breadcrumb-selector-button]');
+    var editDialog=editSelector && editSelector.querySelector('[data-breadcrumb-selector-dialog]');
+    var editSearch=editSelector && editSelector.querySelector('[data-breadcrumb-selector-search]');
+    if(!editName || !editSelector || !editButton) fail('Automation Edit selector caret is not attached after the editable name');
+    if(!editButton.hasAttribute('data-breadcrumb-selector-caret-only') || editButton.textContent.trim()!=='') fail('Automation Edit selector must render only the caret trigger');
+    await waitFor(function(){ return editButton.classList.contains('w-7') && editButton.classList.contains('h-8'); }, 'Automation Edit caret class settling');
+    var selectorBox=editSelector.getBoundingClientRect();
+    if(selectorBox.width > 0.5) fail('Automation Edit selector wrapper changed the name input layout width: '+JSON.stringify(selectorBox));
+    var caretButtonBox=editButton.getBoundingClientRect();
+    if(caretButtonBox.width < 27 || caretButtonBox.height < 31) fail('Automation Edit selector caret has a collapsed hit area: '+JSON.stringify({rect:caretButtonBox,className:editButton.className,width:getComputedStyle(editButton).width,minWidth:getComputedStyle(editButton).minWidth,maxWidth:getComputedStyle(editButton).maxWidth,height:getComputedStyle(editButton).height}));
+    var caretHit=document.elementFromPoint(caretButtonBox.left+caretButtonBox.width/2, caretButtonBox.top+caretButtonBox.height/2);
+    if(!caretHit || (caretHit!==editButton && !editButton.contains(caretHit))) fail('Automation Edit selector caret does not own its pointer hit area');
+    editButton.focus();
+    if(document.activeElement!==editButton) fail('Automation Edit selector caret cannot receive focus');
+    htmx.process(editSelector);
+    editButton.click();
+    await waitFor(function(){ return editDialog.open && editSelector.querySelectorAll('[data-breadcrumb-selector-option]').length>0; }, 'Automation Edit selector');
+    editSearch.value='two'; htmx.trigger(editSearch, 'search');
+    await waitFor(function(){ return editSelector.querySelectorAll('[data-breadcrumb-selector-option]').length===1; }, 'Automation Edit search');
+    key(editSearch, 'ArrowDown'); key(document.activeElement, 'Enter');
     await waitFor(function(){ return route('automation-edit', 'auto-two'); }, 'Automation Edit switch');
     if (location.pathname!='/automations/auto-two/builder' || new URLSearchParams(location.search).get('project_id')!=='project-browser') fail('Automation Edit switch lost context: '+location.href);
     if (document.title!=='Automation Two - OpenVibely') fail('Automation Edit switch did not update title');
@@ -190,9 +203,9 @@ window.addEventListener('DOMContentLoaded', function() {
 </script>`
 
 	style := `<style>
-.hidden{display:none!important} dialog{border:0;background:transparent}.modal-box{box-sizing:border-box}.modal-backdrop{position:fixed;inset:0}.modal-backdrop button{width:100%;height:100%}
-[data-breadcrumb-selector-dialog][open]{display:grid}.max-w-\[calc\(100vw-2rem\)\]{max-width:calc(100vw - 2rem)}
-</style>`
+		.hidden{display:none!important} dialog{border:0;background:transparent}.modal-box{box-sizing:border-box}.modal-backdrop{position:fixed;inset:0}.modal-backdrop button{width:100%;height:100%}
+		.w-0{width:0}.w-7{width:1.75rem}.h-8{height:2rem}.max-w-full{max-width:100%}.overflow-visible{overflow:visible}
+		[data-breadcrumb-selector-dialog][open]{display:grid}.max-w-\[calc\(100vw-2rem\)\]{max-width:calc(100vw - 2rem)}</style>`
 
 	var taskSlow, taskTwo, taskBlank atomic.Int32
 	browserResult := make(chan string, 8)
