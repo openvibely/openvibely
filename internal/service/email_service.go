@@ -525,6 +525,9 @@ func (s *EmailService) pollOnce(ctx context.Context, cfg EmailRuntimeConfig) {
 		return
 	}
 
+	// cfg is the coherent snapshot loaded for this poll by Start/ReloadFromSettings.
+	// Normalize the self address once here; direct ProcessIncoming callers intentionally
+	// resolve the current setting through processIncomingMessage instead.
 	mailboxIdentity := emailMailboxIdentity(cfg)
 	selfAddress := repository.NormalizeEmailAddress(cfg.Address)
 	acknowledgementSet := make(map[uint32]struct{}, len(metadata))
