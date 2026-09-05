@@ -1206,10 +1206,14 @@ func measureEmailPollAddressSnapshotContention(tb testing.TB, legacy bool) []tim
 			}, time.Second, time.Millisecond, "unrelated queries must queue behind the baseline address query")
 			time.Sleep(emailPollContentionHold)
 			close(release)
-		} else {
-			close(fixture.client.fetchRelease)
 		}
 		queries.Wait()
+		if !legacy {
+			// Keep the candidate poll gated until the unrelated queries finish so
+			// MIME parsing and acknowledgement work cannot add scheduler noise to
+			// the SQLite wait-time measurement.
+			close(fixture.client.fetchRelease)
+		}
 		close(queryWaits)
 		for wait := range queryWaits {
 			waits = append(waits, wait)
