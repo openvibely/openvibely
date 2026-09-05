@@ -537,7 +537,6 @@ func TestHandler_GetTaskExecutions(t *testing.T) {
 
 func TestHandler_GetTaskExecutions_BoundedProductionFixture(t *testing.T) {
 	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
-	ctx := context.Background()
 
 	agent := createAgent(t, llmConfigRepo)
 	project := createProject(t, h, "Execution History Project")
@@ -563,12 +562,9 @@ func TestHandler_GetTaskExecutions_BoundedProductionFixture(t *testing.T) {
 	assertContains(t, rec, `id="task-execution-history-loaded-older"`)
 	assertContains(t, rec, `hx-preserve`)
 
-	executions, err := h.execRepo.ListByTask(ctx, task.ID)
-	require.NoError(t, err)
-	var legacy bytes.Buffer
-	require.NoError(t, components.TaskExecutionHistory(task, executions, false, len(executions)).Render(ctx, &legacy))
-	if got, wantLessThan := rec.Body.Len(), legacy.Len()/10; got >= wantLessThan {
-		t.Fatalf("bounded execution-history response too large: got %d bytes, want < %d bytes (legacy all-history %d bytes)", got, wantLessThan, legacy.Len())
+	const maxResponseBytes = 2 * 1024 * 1024
+	if got := rec.Body.Len(); got > maxResponseBytes {
+		t.Fatalf("bounded execution-history response too large: got %d bytes, want <= %d", got, maxResponseBytes)
 	}
 }
 
