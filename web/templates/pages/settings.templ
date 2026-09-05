@@ -42,6 +42,18 @@ func channelCardMatchesFilters(view ChannelsSettingsView, channelType string, co
 	}
 }
 
+func channelCardListState(view ChannelsSettingsView) CardListState {
+	return CardListState{
+		ProjectID: view.CurrentProjectID,
+		Search: view.WebhooksSearch,
+		Filters: map[string]string{
+			"type": view.ChannelTypeFilter,
+			"connection_state": view.ConnectionStateFilter,
+			"webhook_enabled": view.WebhookEnabledFilter,
+		},
+	}
+}
+
 func channelConnectionStatusBadge(configured, connectedOrRunning bool, options channelStatusBadgeOptions) channelStatusBadge {
 	configuredLabel := options.ConfiguredLabel
 	if configuredLabel == "" {
@@ -181,14 +193,14 @@ templ settingsContent(view ChannelsSettingsView) {
 		id="channels-container"
 			data-search-container
 			data-card-pagination-root
-			data-card-pagination-url={ "/channels?project_id=" + view.CurrentProjectID }
+			data-card-pagination-url={ CardListURL("channels", channelCardListState(view)) }
 			data-card-pagination-list="#webhook-card-list"
 			data-card-pagination-card-selector="[data-webhook-id]"
 			data-card-pagination-replacement-card-selector="[data-channel-type]"
 			data-card-pagination-replacement-scope="root"
 			data-card-pagination-key="data-webhook-id"
 				data-card-pagination-page-size="20"
-				data-card-pagination-has-more={ cardPaginationHasMoreAttribute(view.WebhooksHasMore) }			hx-get={ "/channels?project_id=" + view.CurrentProjectID }		hx-trigger="channels-refresh from:body"
+				data-card-pagination-has-more={ cardPaginationHasMoreAttribute(view.WebhooksHasMore) }			hx-get={ CardListURL("channels", channelCardListState(view)) }		hx-trigger="channels-refresh from:body"
 		hx-target="this"
 		hx-swap="outerHTML"
 	>
@@ -250,7 +262,7 @@ templ settingsContent(view ChannelsSettingsView) {
 			</div>
 		</div>
 
-		@CardListToolbar(collectionToolbarConfig("channels", view.CurrentProjectID, view.WebhooksSearch))
+		@CardListToolbar(collectionToolbarConfigWithState("channels", channelCardListState(view)))
 
 			<!-- Active Channels -->
 			<div class="grid gap-4 mb-8">

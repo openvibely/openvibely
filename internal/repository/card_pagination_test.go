@@ -84,15 +84,86 @@ func TestCollectionFiltersAndSortsApplyBeforePagination(t *testing.T) {
 	projectRepo := NewProjectRepo(db)
 	project := &models.Project{Name: "Filtered hooks"}
 	require.NoError(t, projectRepo.Create(ctx, project))
+	agentsRepo := NewAgentRepo(db)
+	enabled := true
+	for _, agent := range []*models.Agent{
+		{Name: "A disabled agent", Model: "inherit", Enabled: false},
+		{Name: "B enabled agent", Model: "inherit", Enabled: true},
+		{Name: "C enabled agent", Model: "inherit", Enabled: true},
+	} {
+		require.NoError(t, agentsRepo.Create(ctx, agent))
+	}
+	agentsPage, err := agentsRepo.ListPageFiltered(ctx, 1, 1, AgentPageFilter{Enabled: &enabled, Sort: "name_asc"})
+	require.NoError(t, err)
+	require.Len(t, agentsPage, 1)
+	require.Equal(t, "C enabled agent", agentsPage[0].Name)
+
+	automationsRepo := NewAutomationRepo(db)
+	for _, item := range []struct{ key, name, lifecycle string }{
+		{"alpha-paused", "Alpha paused", "paused"},
+		{"beta-active", "Beta active", "active"},
+		{"zulu-paused", "Zulu paused", "paused"},
+	} {
+		automationID, versionID := NewID(), NewID()
+		_, insertErr := db.ExecContext(ctx, `INSERT INTO automations (id, project_id, stable_key, name, description, automation_type, lifecycle_state, health_state, created_via) VALUES (?, ?, ?, ?, 'pagination filter', 'custom', ?, 'unknown', 'test')`, automationID, project.ID, item.key, item.name, item.lifecycle)
+		require.NoError(t, insertErr)
+		_, insertErr = db.ExecContext(ctx, `INSERT INTO automation_versions (id, project_id, automation_id, version, state, source, adapter_key, published_at) VALUES (?, ?, ?, 1, 'published', 'manual', 'custom', CURRENT_TIMESTAMP)`, versionID, project.ID, automationID)
+		require.NoError(t, insertErr)
+		_, insertErr = db.ExecContext(ctx, `UPDATE automations SET published_version_id = ? WHERE id = ?`, versionID, automationID)
+		require.NoError(t, insertErr)
+	}
+	automationsPage, err := automationsRepo.ListPortfolioCardsPageFiltered(ctx, project.ID, 1, 1, AutomationCardListFilter{LifecycleState: "paused", Sort: "name_asc"})
+	require.NoError(t, err)
+	require.Len(t, automationsPage, 1)
+	require.Equal(t, "Zulu paused", automationsPage[0].Automation.Name)
+
 	webhookRepo := NewWebhookRepo(db)
 	for _, endpoint := range []*models.WebhookEndpoint{{ProjectID: project.ID, Name: "A disabled", Enabled: false}, {ProjectID: project.ID, Name: "B enabled", Enabled: true}, {ProjectID: project.ID, Name: "C enabled", Enabled: true}} {
 		require.NoError(t, webhookRepo.Create(ctx, endpoint))
 	}
-	enabled := true
 	hooks, err := webhookRepo.ListCardsByProjectPageFiltered(ctx, project.ID, 1, 1, WebhookCardFilter{Enabled: &enabled})
 	require.NoError(t, err)
 	require.Len(t, hooks, 1)
 	require.Equal(t, "C enabled", hooks[0].Name)
+}
+
+func TestModelAuthStatusFilterMatchesOAuthValidityRule(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewLLMConfigRepo(db)
+	ctx := context.Background()
+	configs := []*models.LLMConfig{
+		{Name: "OpenAI zero expiry", Provider: models.ProviderOpenAI, Model: "gpt-test", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "token", OAuthExpiresAt: 0},
+		{Name: "Anthropic zero expiry", Provider: models.ProviderAnthropic, Model: "claude-test", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "token", OAuthExpiresAt: 0},
+		{Name: "Compatible zero expiry", Provider: models.ProviderOpenAICompatible, Model: "compatible-test", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "token", OAuthExpiresAt: 0},
+		{Name: "API key", Provider: models.ProviderOpenAI, Model: "api-key-test", AuthMethod: models.AuthMethodAPIKey, APIKey: "key"},
+	}
+	for _, config := range configs {
+		require.NoError(t, repo.Create(ctx, config))
+	}
+
+	connected, err := repo.ListCardsPageFiltered(ctx, 20, 0, ModelCardListFilter{AuthStatus: "connected"})
+	require.NoError(t, err)
+	require.Equal(t, []string{"Compatible zero expiry"}, modelConfigNames(connected))
+
+	notConnected, err := repo.ListCardsPageFiltered(ctx, 20, 0, ModelCardListFilter{AuthStatus: "not_connected", Sort: "name_asc"})
+	require.NoError(t, err)
+	require.Equal(t, []string{"Anthropic zero expiry", "OpenAI zero expiry"}, modelConfigNames(notConnected))
+
+	notRequired, err := repo.ListCardsPageFiltered(ctx, 20, 0, ModelCardListFilter{AuthStatus: "not_required"})
+	require.NoError(t, err)
+	notRequiredNames := modelConfigNames(notRequired)
+	require.Contains(t, notRequiredNames, "API key")
+	require.NotContains(t, notRequiredNames, "OpenAI zero expiry")
+	require.NotContains(t, notRequiredNames, "Anthropic zero expiry")
+	require.NotContains(t, notRequiredNames, "Compatible zero expiry")
+}
+
+func modelConfigNames(configs []models.LLMConfig) []string {
+	names := make([]string, len(configs))
+	for i := range configs {
+		names[i] = configs[i].Name
+	}
+	return names
 }
 
 func TestLLMConfigRepoListCardsPageBoundsSearchAndCompactProjection(t *testing.T) {

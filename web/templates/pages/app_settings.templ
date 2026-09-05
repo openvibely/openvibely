@@ -89,7 +89,8 @@ func personalityHasCustomEntry(key string, customPersonalities []models.CustomPe
 }
 
 type PersonalityListState struct {
-	Search string
+	ProjectID string
+	Search    string
 	Kind   string
 	Active string
 	Sort   string
@@ -177,15 +178,13 @@ func BuildPersonalityListCards(personality string, customPersonalities []models.
 }
 
 func personalityToolbarConfig(state PersonalityListState) CardListToolbarConfig {
-	config := collectionToolbarConfig("personality", "", state.Search)
-	config.Sort = state.Sort
+	config := collectionToolbarConfigWithState("personality", CardListState{
+		ProjectID: state.ProjectID,
+		Search: state.Search,
+		Sort: state.Sort,
+		Filters: map[string]string{"kind": state.Kind, "active": state.Active},
+	})
 	if config.Sort == "" { config.Sort = "curated" }
-	for i := range config.Filters {
-		switch config.Filters[i].Key {
-		case "kind": config.Filters[i].Value = state.Kind
-		case "active": config.Filters[i].Value = state.Active
-		}
-	}
 	return config
 }
 
@@ -392,7 +391,7 @@ templ PersonalitySectionPageWithPaginationState(personality string, cards []Pers
 }
 
 templ personalitySection(personality string, cards []PersonalityListCard, hasMore bool, state PersonalityListState) {
-		<div id="personality-section" data-selected-personality={ personality } data-search-container data-card-pagination-root data-card-pagination-url="/personality" data-card-pagination-list="#personality-card-list" data-card-pagination-card-selector="[data-personality-pagination-card='true']" data-card-pagination-replacement-card-selector="[data-personality-key]" data-card-pagination-key="data-personality-key" data-card-pagination-page-size="20" data-card-pagination-has-more={ cardPaginationHasMoreAttribute(hasMore) }>		<div class="flex items-center justify-between mb-6">
+		<div id="personality-section" data-selected-personality={ personality } data-search-container data-card-pagination-root data-card-pagination-url={ CardListURL("personality", CardListState{ProjectID: state.ProjectID, Search: state.Search, Sort: state.Sort, Filters: map[string]string{"kind": state.Kind, "active": state.Active}}) } data-card-pagination-list="#personality-card-list" data-card-pagination-card-selector="[data-personality-pagination-card='true']" data-card-pagination-replacement-card-selector="[data-personality-key]" data-card-pagination-key="data-personality-key" data-card-pagination-page-size="20" data-card-pagination-has-more={ cardPaginationHasMoreAttribute(hasMore) }>		<div class="flex items-center justify-between mb-6">
 			<h2 class="text-2xl font-bold">Personality</h2>
 			<button class="btn btn-primary btn-sm" onclick="openNewPersonalityModal()">
 				+ Add Personality

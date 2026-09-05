@@ -749,12 +749,13 @@ func (h *Handler) DeleteAutomation(c echo.Context) error {
 		}
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	url := "/automations?project_id=" + projectID
+	listPage := parseCardPageRequest(c)
+	listURL := pages.CardListURL("automations", automationCardListState(projectID, automationCardListFilter(c, listPage)))
 	if isHTMX(c) {
-		c.Response().Header().Set("HX-Redirect", url)
+		c.Response().Header().Set("HX-Redirect", listURL)
 		return c.NoContent(http.StatusNoContent)
 	}
-	return c.Redirect(http.StatusSeeOther, url)
+	return c.Redirect(http.StatusSeeOther, listURL)
 }
 
 func (h *Handler) changeAutomationLifecycle(c echo.Context, action string) error {

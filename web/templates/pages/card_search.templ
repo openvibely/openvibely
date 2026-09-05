@@ -19,6 +19,19 @@ type CardListFilter struct {
 	Options []CardListOption
 }
 
+type CardListQueryValue struct {
+	Key   string
+	Value string
+}
+
+type CardListState struct {
+	ProjectID string
+	Search    string
+	Filters   map[string]string
+	Sort      string
+	Preserved []CardListQueryValue
+}
+
 type CardListToolbarConfig struct {
 	PageKey       string
 	Placeholder   string
@@ -28,6 +41,7 @@ type CardListToolbarConfig struct {
 	Filters       []CardListFilter
 	Sort          string
 	SortOptions   []CardListOption
+	Preserved     []CardListQueryValue
 	EntityType    string
 	BulkDeleteURL string
 	IdentityKind  string
@@ -61,8 +75,13 @@ func cardToolbarURL(config CardListToolbarConfig, removedKey string, clearAll bo
 	if config.Search != "" {
 		values.Set("search", config.Search)
 	}
-	if config.Sort != "" {
+	if config.Sort != "" && (len(config.SortOptions) == 0 || config.Sort != config.SortOptions[0].Value) {
 		values.Set("sort", config.Sort)
+	}
+	for _, preserved := range config.Preserved {
+		if preserved.Key != "" && preserved.Value != "" {
+			values.Set(preserved.Key, preserved.Value)
+		}
 	}
 	if !clearAll {
 		for _, filter := range config.Filters {
@@ -130,6 +149,36 @@ func collectionToolbarConfig(pageKey, projectID, search string) CardListToolbarC
 	return config
 }
 
+func collectionToolbarConfigWithState(pageKey string, state CardListState) CardListToolbarConfig {
+	config := collectionToolbarConfig(pageKey, state.ProjectID, state.Search)
+	if state.Sort != "" {
+		config.Sort = state.Sort
+	}
+	config.Preserved = append([]CardListQueryValue(nil), state.Preserved...)
+	for i := range config.Filters {
+		config.Filters[i].Value = state.Filters[config.Filters[i].Key]
+	}
+	return config
+}
+
+func CardListURL(pageKey string, state CardListState) string {
+	return CardListActionURL(pageKey, "", state)
+}
+
+func CardListActionURL(pageKey, action string, state CardListState) string {
+	config := collectionToolbarConfigWithState(pageKey, state)
+	if action != "" {
+		config.Action = action
+	}
+	return cardToolbarURL(config, "", false)
+}
+
+func collectionToolbarConfigWithSelectionState(pageKey string, state CardListState, canSelect bool) CardListToolbarConfig {
+	config := collectionToolbarConfigWithState(pageKey, state)
+	config.CanSelect = canSelect
+	return config
+}
+
 func collectionToolbarConfigWithSelection(pageKey, projectID, search string, canSelect bool) CardListToolbarConfig {
 	config := collectionToolbarConfig(pageKey, projectID, search)
 	config.CanSelect = canSelect
@@ -160,6 +209,11 @@ templ CardListToolbar(config CardListToolbarConfig) {
 		<form method="get" action={ config.Action } class="flex flex-wrap items-center gap-2" data-card-query-form>
 			if config.ProjectID != "" {
 				<input type="hidden" name="project_id" value={ config.ProjectID }/>
+			}
+			for _, preserved := range config.Preserved {
+				if preserved.Key != "" && preserved.Value != "" {
+					<input type="hidden" name={ preserved.Key } value={ preserved.Value }/>
+				}
 			}
 			if config.CanSelect {
 				<button type="button" class="btn btn-sm btn-ghost hidden md:inline-flex" data-card-select-loaded>Select loaded</button>

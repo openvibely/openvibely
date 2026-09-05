@@ -32,6 +32,150 @@ func serveCardPageRequest(t *testing.T, e *echo.Echo, path string) *httptest.Res
 	e.ServeHTTP(rec, req)
 	return rec
 }
+func TestEveryCollectionBulkRouteRejectsMalformedPayload(t *testing.T) {
+	tc := NewTestContext(t)
+	tc.handler.SetAgentRepo(repository.NewAgentRepo(tc.db))
+	tc.handler.SetWebhookRepo(repository.NewWebhookRepo(tc.db))
+	tc.handler.SetCustomPersonalityRepo(repository.NewCustomPersonalityRepo(tc.db))
+	automationRepo := repository.NewAutomationRepo(tc.db)
+	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
+	tc.handler.SetAutomationBuilderServices(nil, nil, nil, nil, nil, service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo))
+	project := tc.CreateProject().WithName("Bulk validation").Build()
+
+	for _, path := range []string{
+		"/alerts/bulk", "/automations/bulk", "/agents/bulk", "/skills/bulk", "/models/bulk", "/channels/webhooks/bulk", "/personality/custom/bulk",
+	} {
+		t.Run(path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodDelete, path+"?project_id="+project.ID, strings.NewReader(`{}`))
+			req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+			rec := httptest.NewRecorder()
+			tc.echo.ServeHTTP(rec, req)
+			require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+		})
+	}
+}
+
+func TestBulkHandlersPreflightWithoutPartialDeletion(t *testing.T) {
+	t.Run("models", func(t *testing.T) {
+		tc := NewTestContext(t)
+		defaultModel := &models.LLMConfig{Name: "Default protected", Provider: models.ProviderTest, Model: "default-protected", IsDefault: true}
+		ordinaryModel := &models.LLMConfig{Name: "Ordinary model", Provider: models.ProviderTest, Model: "ordinary-model"}
+		require.NoError(t, tc.llmConfigRepo.Create(t.Context(), defaultModel))
+		require.NoError(t, tc.llmConfigRepo.Create(t.Context(), ordinaryModel))
+
+		rec := serveBulkDeleteRequest(t, tc.echo, "/models/bulk", bulkIDsRequest{IDs: []string{ordinaryModel.ID, defaultModel.ID}})
+		require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+		remaining, err := tc.llmConfigRepo.GetByIDs(t.Context(), []string{ordinaryModel.ID, defaultModel.ID})
+		require.NoError(t, err)
+		require.Len(t, remaining, 2)
+	})
+
+	t.Run("personalities", func(t *testing.T) {
+		tc := NewTestContext(t)
+		repo := repository.NewCustomPersonalityRepo(tc.db)
+		tc.handler.SetCustomPersonalityRepo(repo)
+		active := &models.CustomPersonality{Name: "Active custom", Key: "active_custom", SystemPrompt: "A sufficiently long active prompt."}
+		inactive := &models.CustomPersonality{Name: "Inactive custom", Key: "inactive_custom", SystemPrompt: "A sufficiently long inactive prompt."}
+		require.NoError(t, repo.Create(t.Context(), active))
+		require.NoError(t, repo.Create(t.Context(), inactive))
+		require.NoError(t, tc.settingsRepo.Set(t.Context(), "personality", active.Key))
+
+		rec := serveBulkDeleteRequest(t, tc.echo, "/personality/custom/bulk", bulkIDsRequest{IDs: []string{inactive.Key, active.Key}})
+		require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+		for _, key := range []string{inactive.Key, active.Key} {
+			personality, err := repo.GetByKey(t.Context(), key)
+			require.NoError(t, err)
+			require.NotNil(t, personality)
+		}
+	})
+
+	t.Run("webhooks", func(t *testing.T) {
+		tc := NewTestContext(t)
+		repo := repository.NewWebhookRepo(tc.db)
+		tc.handler.SetWebhookRepo(repo)
+		firstProject := tc.CreateProject().WithName("Bulk webhook first").Build()
+		secondProject := tc.CreateProject().WithName("Bulk webhook second").Build()
+		own := &models.WebhookEndpoint{ProjectID: firstProject.ID, Name: "Own webhook", Enabled: true}
+		foreign := &models.WebhookEndpoint{ProjectID: secondProject.ID, Name: "Foreign webhook", Enabled: true}
+		require.NoError(t, repo.Create(t.Context(), own))
+		require.NoError(t, repo.Create(t.Context(), foreign))
+
+		rec := serveBulkDeleteRequest(t, tc.echo, "/channels/webhooks/bulk?project_id="+firstProject.ID, bulkIDsRequest{IDs: []string{own.ID, foreign.ID}})
+		require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+		for _, id := range []string{own.ID, foreign.ID} {
+			endpoint, err := repo.GetByID(t.Context(), id)
+			require.NoError(t, err)
+			require.NotNil(t, endpoint)
+		}
+	})
+}
+
+func serveBulkDeleteRequest(t *testing.T, e *echo.Echo, path string, payload any) *httptest.ResponseRecorder {
+	t.Helper()
+	body, err := json.Marshal(payload)
+	require.NoError(t, err)
+	req := httptest.NewRequest(http.MethodDelete, path, bytes.NewReader(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	return rec
+}
+
+func TestCollectionHandlersNormalizeRejectedToolbarState(t *testing.T) {
+	tc := NewTestContext(t)
+	tc.handler.SetAgentRepo(repository.NewAgentRepo(tc.db))
+	tc.handler.SetWebhookRepo(repository.NewWebhookRepo(tc.db))
+	tc.handler.SetCustomPersonalityRepo(repository.NewCustomPersonalityRepo(tc.db))
+	automationRepo := repository.NewAutomationRepo(tc.db)
+	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
+	project := tc.CreateProject().WithName("Rejected toolbar state").Build()
+	for _, path := range []string{
+		"/alerts?project_id=" + project.ID + "&read=bad&severity=fatal&decision_state=queued&type=other&sort=title",
+		"/automations?project_id=" + project.ID + "&lifecycle_state=bad&health_state=bad&automation_type=bad&adapter=bad&sort=bad",
+		"/agents?project_id=" + project.ID + "&enabled=bad&scope=bad&origin=bad&sort=bad",
+		"/skills?project_id=" + project.ID + "&enabled=bad&scope=bad&always_use=bad&archived=bad&source=bad&sort=bad",
+		"/models?project_id=" + project.ID + "&provider=bad&default=bad&auth_status=bad&kind=bad&sort=bad",
+		"/channels?project_id=" + project.ID + "&type=bad&connection_state=bad&webhook_enabled=bad",
+		"/personality?project_id=" + project.ID + "&kind=bad&active=bad&sort=bad",
+	} {
+		rec := serveCardPageRequest(t, tc.echo, path)
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		require.NotContains(t, rec.Body.String(), `data-card-filter-chip=`)
+	}
+}
+
+func TestCollectionHandlersRenderValidatedToolbarState(t *testing.T) {
+	tc := NewTestContext(t)
+	tc.handler.SetAgentRepo(repository.NewAgentRepo(tc.db))
+	tc.handler.SetWebhookRepo(repository.NewWebhookRepo(tc.db))
+	tc.handler.SetCustomPersonalityRepo(repository.NewCustomPersonalityRepo(tc.db))
+	automationRepo := repository.NewAutomationRepo(tc.db)
+	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
+	project := tc.CreateProject().WithName("Toolbar state").Build()
+	tests := []struct {
+		name     string
+		path     string
+		contains []string
+	}{
+		{name: "automations", path: "/automations?project_id=" + project.ID + "&lifecycle_state=paused&health_state=degraded&automation_type=custom&adapter=custom&sort=name_desc", contains: []string{`data-card-filter-chip="lifecycle_state"`, `data-card-filter-chip="health_state"`, `data-card-filter-chip="automation_type"`, `data-card-filter-chip="adapter"`, `<option value="name_desc" selected`}},
+		{name: "models", path: "/models?provider=openai&default=false&auth_status=not_connected&kind=direct&sort=name_desc", contains: []string{`data-card-filter-chip="provider"`, `data-card-filter-chip="default"`, `data-card-filter-chip="auth_status"`, `data-card-filter-chip="kind"`, `<option value="name_desc" selected`}},
+		{name: "agents", path: "/agents?enabled=true&scope=global&origin=custom&sort=updated_desc", contains: []string{`data-card-filter-chip="enabled"`, `data-card-filter-chip="scope"`, `data-card-filter-chip="origin"`, `<option value="updated_desc" selected`}},
+		{name: "skills", path: "/skills?project_id=" + project.ID + "&enabled=true&scope=global&always_use=false&archived=false&source=global&sort=scope", contains: []string{`data-card-filter-chip="enabled"`, `data-card-filter-chip="scope"`, `data-card-filter-chip="always_use"`, `data-card-filter-chip="archived"`, `data-card-filter-chip="source"`, `<option value="scope" selected`}},
+		{name: "channels", path: "/channels?project_id=" + project.ID + "&type=webhook&connection_state=configured&webhook_enabled=true", contains: []string{`data-card-filter-chip="type"`, `data-card-filter-chip="connection_state"`, `data-card-filter-chip="webhook_enabled"`}},
+		{name: "personality", path: "/personality?project_id=" + project.ID + "&kind=custom&active=false&sort=name_desc", contains: []string{`data-card-filter-chip="kind"`, `data-card-filter-chip="active"`, `project_id=` + project.ID, `<option value="name_desc" selected`}},
+		{name: "alerts", path: "/alerts?project_id=" + project.ID + "&read=unread&severity=error&decision_state=pending&type=custom&source=native&processing_state=failed&sort=severity", contains: []string{`data-card-filter-chip="read"`, `data-card-filter-chip="severity"`, `data-card-filter-chip="decision_state"`, `data-card-filter-chip="type"`, `data-card-filter-chip="source"`, `<option value="severity" selected`, `processing_state=failed`}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := serveCardPageRequest(t, tc.echo, tt.path)
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			for _, expected := range tt.contains {
+				require.Contains(t, rec.Body.String(), expected)
+			}
+		})
+	}
+}
+
 func TestPersonalityFilteringAndSortingPrecedePagination(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
 	repo := repository.NewCustomPersonalityRepo(db)
@@ -1081,8 +1225,9 @@ func TestCardPaginationProductionBrowserPreservesGenericFocusAndPartialWindowOff
 	}
 	render := func(cards []models.LLMConfig, hasMore bool) string {
 		var buf bytes.Buffer
-		require.NoError(t, pages.ModelsContentPageWithPagination(cards, nil, map[string]int{}, false, hasMore).Render(context.Background(), &buf))
-		return strings.Replace(buf.String(), `data-card-pagination-url="/models"`, `data-card-pagination-url="/models?partial=1"`, 1)
+		state := pages.CardListState{Preserved: []pages.CardListQueryValue{{Key: "partial", Value: "1"}}}
+		require.NoError(t, pages.ModelsContentPageWithPaginationAndState(cards, nil, map[string]int{}, false, hasMore, state).Render(context.Background(), &buf))
+		return buf.String()
 	}
 	initialHTML := render(makeCards(0, 35), false)
 	sameHTMLJSON, err := json.Marshal(render(makeCards(0, 35), false))
@@ -1322,18 +1467,21 @@ func TestCardPaginationProductionBrowserRejectsStalePagesAndRecoversLiveRefresh(
 	}
 	liveLater := []models.LLMConfig{makeModel("live-later", "Live later result")}
 
-	render := func(cards []models.LLMConfig) string {
+	renderWithState := func(cards []models.LLMConfig, state pages.CardListState) string {
 		var buf bytes.Buffer
-		if err := pages.ModelsContentPageWithPagination(cards, cards, map[string]int{}, false, true).Render(context.Background(), &buf); err != nil {
+		if err := pages.ModelsContentPageWithPaginationAndState(cards, cards, map[string]int{}, false, true, state).Render(context.Background(), &buf); err != nil {
 			t.Fatalf("render models fragment: %v", err)
 		}
 		return buf.String()
+	}
+	render := func(cards []models.LLMConfig) string {
+		return renderWithState(cards, pages.CardListState{})
 	}
 	initialHTML := render(initial)
 	staleHTML := render(stale)
 	freshHTML := render(fresh)
 	retryHTML := render(retry)
-	liveHTML := strings.Replace(render(liveInitial), `data-card-pagination-url="/models"`, `data-card-pagination-url="/models?live=1"`, 1)
+	liveHTML := renderWithState(liveInitial, pages.CardListState{Preserved: []pages.CardListQueryValue{{Key: "live", Value: "1"}}})
 	liveLaterHTML := render(liveLater)
 	liveHTMLJSON, err := json.Marshal(liveHTML)
 	require.NoError(t, err)

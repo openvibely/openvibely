@@ -462,6 +462,7 @@ func (h *Handler) handleAppSettings(c echo.Context) error {
 	setCardPageResponse(c, customPersonalitiesHasMore)
 
 	state := personalityListState(page)
+	state.ProjectID = projectID
 	if isHTMX(c) || page.IsFragment {
 		return render(c, http.StatusOK, pages.AppSettingsContentWithPaginationState(personality, projectID, customPersonalities, customPersonalitiesHasMore, state))
 	}

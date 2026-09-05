@@ -9,22 +9,32 @@ import (
 
 templ Agents(projects []models.Project, currentProjectID string, agents []models.Agent, modelOptions []models.AgentModelOption) {
 	@layout.Base("Agents", projects, currentProjectID) {
-		@agentsContent(agents, modelOptions, false)
+		@agentsContent(agents, modelOptions, false, CardListState{ProjectID: currentProjectID})
 	}
 }
 
 templ AgentsPage(projects []models.Project, currentProjectID string, agents []models.Agent, modelOptions []models.AgentModelOption, hasMore bool) {
 	@layout.Base("Agents", projects, currentProjectID) {
-		@agentsContent(agents, modelOptions, hasMore)
+		@agentsContent(agents, modelOptions, hasMore, CardListState{ProjectID: currentProjectID})
 	}
 }
 
 templ AgentsContent(agents []models.Agent, modelOptions []models.AgentModelOption) {
-	@agentsContent(agents, modelOptions, false)
+	@agentsContent(agents, modelOptions, false, CardListState{})
 }
 
 templ AgentsContentPage(agents []models.Agent, modelOptions []models.AgentModelOption, hasMore bool) {
-	@agentsContent(agents, modelOptions, hasMore)
+	@agentsContent(agents, modelOptions, hasMore, CardListState{})
+}
+
+templ AgentsPageWithState(projects []models.Project, currentProjectID string, agents []models.Agent, modelOptions []models.AgentModelOption, hasMore bool, state CardListState) {
+	@layout.Base("Agents", projects, currentProjectID) {
+		@agentsContent(agents, modelOptions, hasMore, state)
+	}
+}
+
+templ AgentsContentPageWithState(agents []models.Agent, modelOptions []models.AgentModelOption, hasMore bool, state CardListState) {
+	@agentsContent(agents, modelOptions, hasMore, state)
 }
 
 func agentToolsJSON(tools []string) string {
@@ -57,15 +67,15 @@ func agentPermissionDefaultsJSON(perms models.AgentPermissionDefaults) string {
 	return string(b)
 }
 
-templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOption, hasMore bool) {
-		<div id="agents-container" class="overflow-x-hidden max-w-full min-w-0" data-search-container data-card-pagination-root data-card-pagination-url="/agents" data-card-pagination-list="#agents-card-list" data-card-pagination-card-selector="[data-agent-id]" data-card-pagination-key="data-agent-id" data-card-pagination-page-size="20" data-card-pagination-has-more={ cardPaginationHasMoreAttribute(hasMore) }>		@layout.PageTitle("Agents")
+templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOption, hasMore bool, state CardListState) {
+		<div id="agents-container" class="overflow-x-hidden max-w-full min-w-0" data-search-container data-card-pagination-root data-card-pagination-url={ CardListURL("agents", state) } data-card-pagination-list="#agents-card-list" data-card-pagination-card-selector="[data-agent-id]" data-card-pagination-key="data-agent-id" data-card-pagination-page-size="20" data-card-pagination-has-more={ cardPaginationHasMoreAttribute(hasMore) }>		@layout.PageTitle("Agents")
 		<div class="flex items-center justify-between mb-6">
 			<h2 class="text-2xl font-bold">Agents</h2>
 			<button class="btn btn-primary btn-sm" onclick="openNewAgentModal()">
 				+ Add Agent
 			</button>
 		</div>
-		@CardListToolbar(collectionToolbarConfig("agents", "", ""))
+		@CardListToolbar(collectionToolbarConfigWithState("agents", state))
 
 			<div id="agents-card-list" data-card-pagination-list>
 			if len(agents) == 0 {

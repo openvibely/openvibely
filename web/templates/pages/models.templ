@@ -12,7 +12,7 @@ import (
 
 templ Models(projects []models.Project, currentProjectID string, agents []models.LLMConfig, modelWorkerStats map[string]int, desktopMode bool) {
 	@layout.Base("Models", projects, currentProjectID) {
-		@modelsContent(agents, agents, modelWorkerStats, desktopMode, false)
+		@modelsContent(agents, agents, modelWorkerStats, desktopMode, false, CardListState{ProjectID: currentProjectID})
 	}
 }
 
@@ -20,7 +20,7 @@ templ Models(projects []models.Project, currentProjectID string, agents []models
 // separate from the visible card page.
 templ ModelsPage(projects []models.Project, currentProjectID string, agents []models.LLMConfig, modelOptions []models.LLMConfig, modelWorkerStats map[string]int, desktopMode bool) {
 	@layout.Base("Models", projects, currentProjectID) {
-		@modelsContent(agents, modelOptions, modelWorkerStats, desktopMode, false)
+		@modelsContent(agents, modelOptions, modelWorkerStats, desktopMode, false, CardListState{ProjectID: currentProjectID})
 	}
 }
 
@@ -28,24 +28,34 @@ templ ModelsPage(projects []models.Project, currentProjectID string, agents []mo
 // server-rendered page so mixed card projections do not infer it from DOM count.
 templ ModelsPageWithPagination(projects []models.Project, currentProjectID string, agents []models.LLMConfig, modelOptions []models.LLMConfig, modelWorkerStats map[string]int, desktopMode bool, hasMore bool) {
 	@layout.Base("Models", projects, currentProjectID) {
-		@modelsContent(agents, modelOptions, modelWorkerStats, desktopMode, hasMore)
+		@modelsContent(agents, modelOptions, modelWorkerStats, desktopMode, hasMore, CardListState{ProjectID: currentProjectID})
 	}
 }
 
 // AgentsContent renders just the agents content for HTMX requests
 templ ModelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int, desktopMode bool) {
-	@modelsContent(agents, agents, modelWorkerStats, desktopMode, false)
+	@modelsContent(agents, agents, modelWorkerStats, desktopMode, false, CardListState{})
 }
 
 // ModelsContentPage renders one bounded card page as an HTMX/browser fragment.
 templ ModelsContentPage(agents []models.LLMConfig, modelOptions []models.LLMConfig, modelWorkerStats map[string]int, desktopMode bool) {
-	@modelsContent(agents, modelOptions, modelWorkerStats, desktopMode, false)
+	@modelsContent(agents, modelOptions, modelWorkerStats, desktopMode, false, CardListState{})
 }
 
 // ModelsContentPageWithPagination renders a bounded card page with its end
 // boundary for the browser loader.
 templ ModelsContentPageWithPagination(agents []models.LLMConfig, modelOptions []models.LLMConfig, modelWorkerStats map[string]int, desktopMode bool, hasMore bool) {
-	@modelsContent(agents, modelOptions, modelWorkerStats, desktopMode, hasMore)
+	@modelsContent(agents, modelOptions, modelWorkerStats, desktopMode, hasMore, CardListState{})
+}
+
+templ ModelsPageWithPaginationAndState(projects []models.Project, currentProjectID string, agents []models.LLMConfig, modelOptions []models.LLMConfig, modelWorkerStats map[string]int, desktopMode bool, hasMore bool, state CardListState) {
+	@layout.Base("Models", projects, currentProjectID) {
+		@modelsContent(agents, modelOptions, modelWorkerStats, desktopMode, hasMore, state)
+	}
+}
+
+templ ModelsContentPageWithPaginationAndState(agents []models.LLMConfig, modelOptions []models.LLMConfig, modelWorkerStats map[string]int, desktopMode bool, hasMore bool, state CardListState) {
+	@modelsContent(agents, modelOptions, modelWorkerStats, desktopMode, hasMore, state)
 }
 
 func hasDefault(agents []models.LLMConfig) bool {
@@ -183,8 +193,8 @@ templ providerIcon(provider models.LLMProvider) {
 	}
 }
 
-templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, modelWorkerStats map[string]int, desktopMode bool, hasMore bool) {
-		<div id="models-container" data-search-container hx-history="false" data-card-pagination-root data-card-pagination-url="/models" data-card-pagination-list="#models-card-list" data-card-pagination-card-selector="[data-model-id]" data-card-pagination-key="data-model-id" data-card-pagination-page-size="20" data-card-pagination-has-more={ cardPaginationHasMoreAttribute(hasMore) }>
+templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, modelWorkerStats map[string]int, desktopMode bool, hasMore bool, state CardListState) {
+		<div id="models-container" data-search-container hx-history="false" data-card-pagination-root data-card-pagination-url={ CardListURL("models", state) } data-card-pagination-list="#models-card-list" data-card-pagination-card-selector="[data-model-id]" data-card-pagination-key="data-model-id" data-card-pagination-page-size="20" data-card-pagination-has-more={ cardPaginationHasMoreAttribute(hasMore) }>
 		@layout.PageTitle("Models")
 	<div class="flex items-center justify-between mb-6">
 			<h2 class="text-2xl font-bold">Models</h2>
@@ -192,7 +202,7 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 				+ Add Model
 			</button>
 		</div>
-			@CardListToolbar(collectionToolbarConfig("models", "", ""))
+			@CardListToolbar(collectionToolbarConfigWithState("models", state))
 
 			<div id="models-card-list" data-card-pagination-list>
 				if len(agents) == 0 {

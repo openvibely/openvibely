@@ -140,6 +140,13 @@ func allowlistedQuery(c echo.Context, key, fallback string, allowed ...string) s
 	return fallback
 }
 
+func optionalBoolString(value *bool) string {
+	if value == nil {
+		return ""
+	}
+	return strconv.FormatBool(*value)
+}
+
 func optionalBoolQuery(c echo.Context, key string) *bool {
 	switch strings.TrimSpace(c.QueryParam(key)) {
 	case "true":

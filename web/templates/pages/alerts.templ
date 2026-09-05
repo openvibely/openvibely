@@ -4,16 +4,23 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"net/url"
 	"strings"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/web/templates/layout"
 )
 
+func alertCardListState(projectID string, decisionState models.AlertDecisionState, processingState models.AlertProcessingState, search string) CardListState {
+	state := CardListState{ProjectID: projectID, Search: search, Filters: map[string]string{"decision_state": string(decisionState)}}
+	if processingState != "" {
+		state.Preserved = []CardListQueryValue{{Key: "processing_state", Value: string(processingState)}}
+	}
+	return state
+}
+
 templ Alerts(projects []models.Project, currentProjectID string, alerts []models.AlertSummary, unreadCount int) {
 	@layout.Base("Alerts", projects, currentProjectID) {
-		@alertsContent(alerts, currentProjectID, unreadCount, false, "", "", "")
+		@alertsContent(alerts, currentProjectID, unreadCount, false, "", "", "", alertCardListState(currentProjectID, "", "", ""))
 	}
 }
 
@@ -30,12 +37,12 @@ templ AlertsPageWithFilters(projects []models.Project, currentProjectID string, 
 // AlertsPageWithFiltersAndSearch renders the initial alert page with active workflow filters and search.
 templ AlertsPageWithFiltersAndSearch(projects []models.Project, currentProjectID string, alerts []models.AlertSummary, unreadCount int, hasMore bool, decisionState models.AlertDecisionState, processingState models.AlertProcessingState, search string) {
 	@layout.Base("Alerts", projects, currentProjectID) {
-		@alertsContent(alerts, currentProjectID, unreadCount, hasMore, decisionState, processingState, search)
+		@alertsContent(alerts, currentProjectID, unreadCount, hasMore, decisionState, processingState, search, alertCardListState(currentProjectID, decisionState, processingState, search))
 	}
 }
 
 templ AlertsContent(alerts []models.AlertSummary, currentProjectID string, unreadCount int) {
-	@alertsContent(alerts, currentProjectID, unreadCount, false, "", "", "")
+	@alertsContent(alerts, currentProjectID, unreadCount, false, "", "", "", alertCardListState(currentProjectID, "", "", ""))
 }
 
 // AlertsContentPage renders a bounded alert page with its page boundary.
@@ -50,13 +57,23 @@ templ AlertsContentPageWithFilters(alerts []models.AlertSummary, currentProjectI
 
 // AlertsContentPageWithFiltersAndSearch renders a bounded alert page with active workflow filters and search.
 templ AlertsContentPageWithFiltersAndSearch(alerts []models.AlertSummary, currentProjectID string, unreadCount int, hasMore bool, decisionState models.AlertDecisionState, processingState models.AlertProcessingState, search string) {
-	@alertsContent(alerts, currentProjectID, unreadCount, hasMore, decisionState, processingState, search)
+	@alertsContent(alerts, currentProjectID, unreadCount, hasMore, decisionState, processingState, search, alertCardListState(currentProjectID, decisionState, processingState, search))
 }
 
-templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unreadCount int, hasMore bool, decisionState models.AlertDecisionState, processingState models.AlertProcessingState, search string) {
-		<div id="alerts-container" class="h-full overflow-y-auto overflow-x-hidden max-w-full min-w-0" data-search-container data-card-pagination-root data-card-pagination-replacement-managed="true" data-card-pagination-url={ alertListURL(currentProjectID, decisionState, processingState, search) } data-card-pagination-preserve-params="decision_state,processing_state,search" data-card-pagination-list="#alerts-card-list" data-card-pagination-card-selector="[data-alert-id]" data-card-pagination-key="data-alert-id" data-card-pagination-page-size="20" data-card-pagination-has-more={ cardPaginationHasMoreAttribute(hasMore) }>
+templ AlertsPageWithState(projects []models.Project, currentProjectID string, alerts []models.AlertSummary, unreadCount int, hasMore bool, decisionState models.AlertDecisionState, processingState models.AlertProcessingState, state CardListState) {
+	@layout.Base("Alerts", projects, currentProjectID) {
+		@alertsContent(alerts, currentProjectID, unreadCount, hasMore, decisionState, processingState, state.Search, state)
+	}
+}
+
+templ AlertsContentPageWithState(alerts []models.AlertSummary, currentProjectID string, unreadCount int, hasMore bool, decisionState models.AlertDecisionState, processingState models.AlertProcessingState, state CardListState) {
+	@alertsContent(alerts, currentProjectID, unreadCount, hasMore, decisionState, processingState, state.Search, state)
+}
+
+templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unreadCount int, hasMore bool, decisionState models.AlertDecisionState, processingState models.AlertProcessingState, search string, state CardListState) {
+		<div id="alerts-container" class="h-full overflow-y-auto overflow-x-hidden max-w-full min-w-0" data-search-container data-card-pagination-root data-card-pagination-replacement-managed="true" data-card-pagination-url={ CardListURL("alerts", state) } data-card-pagination-preserve-params="read,severity,decision_state,processing_state,type,source,sort,search" data-card-pagination-list="#alerts-card-list" data-card-pagination-card-selector="[data-alert-id]" data-card-pagination-key="data-alert-id" data-card-pagination-page-size="20" data-card-pagination-has-more={ cardPaginationHasMoreAttribute(hasMore) }>
 		<div id="alerts-content"
-			hx-get={ alertListURL(currentProjectID, decisionState, processingState, search) }
+			hx-get={ CardListURL("alerts", state) }
 			hx-trigger="alertUpdate from:body"
 			hx-target="this"
 			hx-select="#alerts-content"
@@ -83,7 +100,7 @@ templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unrea
 							if unreadCount > 0 {
 								<li>
 									<a
-										hx-post={ alertActionURL("/alerts/read-all", currentProjectID, decisionState, processingState, search) }
+										hx-post={ CardListActionURL("alerts", "/alerts/read-all", state) }
 										hx-target="#alerts-content"
 										hx-select="#alerts-content"
 										hx-swap="outerHTML show:none"
@@ -97,7 +114,7 @@ templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unrea
 									<a
 										class="text-error"
 										href="#"
-										data-delete-url={ alertActionURL("/alerts", currentProjectID, decisionState, processingState, search) }
+										data-delete-url={ CardListActionURL("alerts", "/alerts", state) }
 										onclick="return deleteAlertsFromDataset(this)"
 									>
 										Delete All Alerts
@@ -129,7 +146,7 @@ templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unrea
 			</div>
 			<div class="mb-4 rounded-box bg-base-200/60 px-4 py-3 text-sm text-base-content/70">			Showing notifications for the selected project only. Approval permits creation of an implementation task; it does not authorize merge, release, or deployment.
 		</div>
-			@CardListToolbar(collectionToolbarConfigWithFilter("alerts", currentProjectID, search, "decision_state", string(decisionState)))
+			@CardListToolbar(collectionToolbarConfigWithState("alerts", state))
 			<div id="alerts-card-list" data-card-pagination-list>
 				if len(alerts) == 0 {
 					<div class="text-center py-12" data-search-empty-state>
@@ -145,7 +162,7 @@ templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unrea
 				} else {
 					<div class="grid grid-cols-1 gap-4 max-w-full min-w-0">
 						for _, alert := range alerts {
-							@alertRow(alert, currentProjectID, decisionState, processingState, search)
+							@alertRow(alert, currentProjectID, state)
 						}
 					</div>
 				}
@@ -455,29 +472,6 @@ templ alertSearchInput(search string) {
 	</div>
 }
 
-func alertFilterQuery(projectID string, decisionState models.AlertDecisionState, processingState models.AlertProcessingState, search string) string {
-	query := url.Values{}
-	query.Set("project_id", projectID)
-	if decisionState != "" {
-		query.Set("decision_state", string(decisionState))
-	}
-	if processingState != "" {
-		query.Set("processing_state", string(processingState))
-	}
-	if search = strings.TrimSpace(search); search != "" {
-		query.Set("search", search)
-	}
-	return query.Encode()
-}
-
-func alertListURL(projectID string, decisionState models.AlertDecisionState, processingState models.AlertProcessingState, search string) string {
-	return "/alerts?" + alertFilterQuery(projectID, decisionState, processingState, search)
-}
-
-func alertActionURL(path, projectID string, decisionState models.AlertDecisionState, processingState models.AlertProcessingState, search string) string {
-	return path + "?" + alertFilterQuery(projectID, decisionState, processingState, search)
-}
-
 // alertSearchText intentionally excludes the full body and metadata so the
 // list DOM stays bounded. Full body/metadata search would require an explicit
 // server-side detail search path.
@@ -556,7 +550,7 @@ templ alertDetailBody(alert models.Alert) {
 	}
 }
 
-templ alertRow(alert models.AlertSummary, currentProjectID string, decisionState models.AlertDecisionState, processingState models.AlertProcessingState, search string) {
+templ alertRow(alert models.AlertSummary, currentProjectID string, state CardListState) {
 	<div
 		id={ "alert-" + alert.ID }
 		data-alert-id={ alert.ID }
@@ -634,8 +628,8 @@ templ alertRow(alert models.AlertSummary, currentProjectID string, decisionState
 					}
 					if alert.DecisionState == models.AlertDecisionPending {
 						<div class="mt-4 flex flex-wrap gap-2" onclick="event.stopPropagation()">
-							<button class="btn btn-success btn-sm" hx-post={ alertActionURL(fmt.Sprintf("/alerts/%s/approve", alert.ID), currentProjectID, decisionState, processingState, search) } hx-target="#alerts-content" hx-select="#alerts-content" hx-swap="outerHTML show:none">Approve</button>
-							<button class="btn btn-error btn-outline btn-sm" hx-post={ alertActionURL(fmt.Sprintf("/alerts/%s/reject", alert.ID), currentProjectID, decisionState, processingState, search) } hx-target="#alerts-content" hx-select="#alerts-content" hx-swap="outerHTML show:none">Reject</button>
+							<button class="btn btn-success btn-sm" hx-post={ CardListActionURL("alerts", fmt.Sprintf("/alerts/%s/approve", alert.ID), state) } hx-target="#alerts-content" hx-select="#alerts-content" hx-swap="outerHTML show:none">Approve</button>
+							<button class="btn btn-error btn-outline btn-sm" hx-post={ CardListActionURL("alerts", fmt.Sprintf("/alerts/%s/reject", alert.ID), state) } hx-target="#alerts-content" hx-select="#alerts-content" hx-swap="outerHTML show:none">Reject</button>
 						</div>
 					}
 				</div>
@@ -643,7 +637,7 @@ templ alertRow(alert models.AlertSummary, currentProjectID string, decisionState
 					if !alert.IsRead {
 						<button
 							class="btn btn-ghost btn-xs"
-							hx-post={ alertActionURL(fmt.Sprintf("/alerts/%s/read", alert.ID), currentProjectID, decisionState, processingState, search) }
+							hx-post={ CardListActionURL("alerts", fmt.Sprintf("/alerts/%s/read", alert.ID), state) }
 							hx-target="#alerts-content"
 							hx-select="#alerts-content"
 							hx-swap="outerHTML show:none"
@@ -658,7 +652,7 @@ templ alertRow(alert models.AlertSummary, currentProjectID string, decisionState
 						class="btn btn-ghost btn-xs text-error"
 						data-alert-delete
 						aria-label={ "Delete alert " + alert.Title }
-						data-delete-url={ alertActionURL(fmt.Sprintf("/alerts/%s", alert.ID), currentProjectID, decisionState, processingState, search) }
+						data-delete-url={ CardListActionURL("alerts", fmt.Sprintf("/alerts/%s", alert.ID), state) }
 						onclick="event.preventDefault(); event.stopPropagation(); return deleteAlertsFromDataset(this)"
 					>
 						<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">

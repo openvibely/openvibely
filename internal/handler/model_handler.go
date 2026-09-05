@@ -45,6 +45,20 @@ func modelCardListFilter(c echo.Context, page cardPageRequest) repository.ModelC
 	}
 }
 
+func modelCardListState(projectID string, filter repository.ModelCardListFilter) pages.CardListState {
+	return pages.CardListState{
+		ProjectID: projectID,
+		Search:    filter.Search,
+		Sort:      filter.Sort,
+		Filters: map[string]string{
+			"provider":    filter.Provider,
+			"default":     optionalBoolString(filter.Default),
+			"auth_status": filter.AuthStatus,
+			"kind":        filter.Kind,
+		},
+	}
+}
+
 func (h *Handler) ListModels(c echo.Context) error {
 	c.Response().Header().Set("Cache-Control", "no-store")
 	htmxRequest := isHTMX(c)
@@ -73,14 +87,15 @@ func (h *Handler) ListModels(c echo.Context) error {
 		return err
 	}
 
+	currentProjectID, _ := h.getCurrentProjectID(c)
+	listState := modelCardListState(currentProjectID, filter)
 	if htmxRequest || page.IsFragment {
 		setCardPageResponse(c, hasMore)
-		return render(c, http.StatusOK, pages.ModelsContentPageWithPagination(agents, modelOptions, modelWorkerStats, h.desktopMode, hasMore))
+		return render(c, http.StatusOK, pages.ModelsContentPageWithPaginationAndState(agents, modelOptions, modelWorkerStats, h.desktopMode, hasMore, listState))
 	}
 
-	currentProjectID, _ := h.getCurrentProjectID(c)
 	projects, _ := h.projectSvc.ListSelectorOptions(ctx)
-	return render(c, http.StatusOK, pages.ModelsPageWithPagination(projects, currentProjectID, agents, modelOptions, modelWorkerStats, h.desktopMode, hasMore))
+	return render(c, http.StatusOK, pages.ModelsPageWithPaginationAndState(projects, currentProjectID, agents, modelOptions, modelWorkerStats, h.desktopMode, hasMore, listState))
 }
 
 type modelEditDetails struct {
@@ -1122,7 +1137,8 @@ func (h *Handler) renderRefreshedModels(c echo.Context) error {
 	if page.IsFragment {
 		setCardPageResponse(c, hasMore)
 	}
-	return render(c, http.StatusOK, pages.ModelsContentPageWithPagination(agents, modelOptions, h.buildModelWorkerStats(agents), h.desktopMode, hasMore))
+	projectID, _ := h.getCurrentProjectID(c)
+	return render(c, http.StatusOK, pages.ModelsContentPageWithPaginationAndState(agents, modelOptions, h.buildModelWorkerStats(agents), h.desktopMode, hasMore, modelCardListState(projectID, filter)))
 }
 
 // buildModelWorkerStats returns a map of agent config ID -> running worker count.

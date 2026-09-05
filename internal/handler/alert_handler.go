@@ -10,6 +10,33 @@ import (
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
 
+func alertCardListState(projectID string, filter models.AlertListFilter) pages.CardListState {
+	read := ""
+	if filter.Read != nil {
+		if *filter.Read {
+			read = "read"
+		} else {
+			read = "unread"
+		}
+	}
+	state := pages.CardListState{
+		ProjectID: projectID,
+		Search:    filter.Search,
+		Sort:      filter.Sort,
+		Filters: map[string]string{
+			"read":           read,
+			"severity":       string(filter.Severity),
+			"decision_state": string(filter.DecisionState),
+			"type":           string(filter.Type),
+			"source":         filter.Source,
+		},
+	}
+	if filter.ProcessingState != "" {
+		state.Preserved = []pages.CardListQueryValue{{Key: "processing_state", Value: string(filter.ProcessingState)}}
+	}
+	return state
+}
+
 func (h *Handler) ListAlerts(c echo.Context) error {
 	htmxRequest := isHTMX(c)
 	ctx := c.Request().Context()
@@ -44,10 +71,10 @@ func (h *Handler) ListAlerts(c echo.Context) error {
 		if page.IsFragment {
 			setCardPageResponse(c, hasMore)
 		}
-		return render(c, http.StatusOK, pages.AlertsContentPageWithFiltersAndSearch(alerts, currentProjectID, unreadCount, hasMore, filter.DecisionState, filter.ProcessingState, filter.Search))
+		return render(c, http.StatusOK, pages.AlertsContentPageWithState(alerts, currentProjectID, unreadCount, hasMore, filter.DecisionState, filter.ProcessingState, alertCardListState(currentProjectID, filter)))
 	}
 	projects, _ := h.projectSvc.ListSelectorOptions(ctx)
-	return render(c, http.StatusOK, pages.AlertsPageWithFiltersAndSearch(projects, currentProjectID, alerts, unreadCount, hasMore, filter.DecisionState, filter.ProcessingState, filter.Search))
+	return render(c, http.StatusOK, pages.AlertsPageWithState(projects, currentProjectID, alerts, unreadCount, hasMore, filter.DecisionState, filter.ProcessingState, alertCardListState(currentProjectID, filter)))
 }
 
 func alertListFilter(c echo.Context, page cardPageRequest) models.AlertListFilter {
@@ -175,7 +202,7 @@ func (h *Handler) renderAlertListRefresh(c echo.Context, projectID string, alert
 		unreadCount, _ = h.alertSvc.CountUnread(ctx, projectID)
 	}
 	c.Response().Header().Set("HX-Trigger", "alertUpdate")
-	return render(c, http.StatusOK, pages.AlertsContentPageWithFiltersAndSearch(alerts, projectID, unreadCount, hasMore, filter.DecisionState, filter.ProcessingState, filter.Search))
+	return render(c, http.StatusOK, pages.AlertsContentPageWithState(alerts, projectID, unreadCount, hasMore, filter.DecisionState, filter.ProcessingState, alertCardListState(projectID, filter)))
 }
 
 func (h *Handler) setAlertDecision(c echo.Context, state models.AlertDecisionState) error {
