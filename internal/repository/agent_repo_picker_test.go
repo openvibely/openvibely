@@ -522,15 +522,6 @@ func createPickerAgent(tb testing.TB, repo *AgentRepo, name string) *models.Agen
 	return agent
 }
 
-func marshalPickerJSONFromAgents(tb testing.TB, agents []models.Agent) []byte {
-	tb.Helper()
-	options := make([]AgentPickerOption, len(agents))
-	for i, agent := range agents {
-		options[i] = AgentPickerOption{ID: agent.ID, Name: agent.Name}
-	}
-	return marshalPickerJSONFromOptions(tb, options)
-}
-
 func marshalPickerJSONFromOptions(tb testing.TB, options []AgentPickerOption) []byte {
 	tb.Helper()
 	type agentData struct {
