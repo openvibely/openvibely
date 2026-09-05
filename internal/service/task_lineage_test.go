@@ -329,9 +329,9 @@ func TestTaskLineage_NonChainedTasksUnaffected(t *testing.T) {
 	}
 
 	// Verify all tasks have empty lineage
-	tasks, err := taskRepo.ListActivePending(ctx)
+	tasks, err := taskRepo.ListByProject(ctx, project.ID, "")
 	if err != nil {
-		t.Fatalf("ListActivePending: %v", err)
+		t.Fatalf("ListByProject: %v", err)
 	}
 	for _, task := range tasks {
 		if task.BaseBranch != "" || task.BaseCommitSHA != "" || task.LineageDepth != 0 {
