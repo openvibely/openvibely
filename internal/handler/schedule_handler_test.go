@@ -667,21 +667,7 @@ func BenchmarkScheduleAgentOptionProjectionAndContent(b *testing.B) {
 		return pages.ScheduleContent(project, nil, 0, nil, options).Render(ctx, io.Discard)
 	}
 
-	b.Run("full_agent_loading", func(b *testing.B) {
-		b.ReportAllocs()
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			options, err := fullScheduleAgentOptionsForBenchmark(ctx, agentRepo, project.ID)
-			if err != nil {
-				b.Fatal(err)
-			}
-			if len(options) != 1000 {
-				b.Fatalf("full schedule options len = %d, want 1000", len(options))
-			}
-		}
-	})
-
-	b.Run("compact_agent_loading", func(b *testing.B) {
+	b.Run("agent_loading", func(b *testing.B) {
 		b.ReportAllocs()
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
@@ -695,21 +681,7 @@ func BenchmarkScheduleAgentOptionProjectionAndContent(b *testing.B) {
 		}
 	})
 
-	b.Run("full_schedule_content", func(b *testing.B) {
-		b.ReportAllocs()
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			options, err := fullScheduleAgentOptionsForBenchmark(ctx, agentRepo, project.ID)
-			if err != nil {
-				b.Fatal(err)
-			}
-			if err := renderScheduleContent(options); err != nil {
-				b.Fatal(err)
-			}
-		}
-	})
-
-	b.Run("compact_schedule_content", func(b *testing.B) {
+	b.Run("schedule_content", func(b *testing.B) {
 		b.ReportAllocs()
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
@@ -724,22 +696,6 @@ func BenchmarkScheduleAgentOptionProjectionAndContent(b *testing.B) {
 	})
 }
 
-func fullScheduleAgentOptionsForBenchmark(ctx context.Context, repo *repository.AgentRepo, projectID string) ([]repository.AgentScheduleOption, error) {
-	agents, err := repo.List(ctx)
-	if err != nil {
-		return nil, err
-	}
-	eligible := selectableTaskAgentDefinitionsForProject(agents, projectID)
-	options := make([]repository.AgentScheduleOption, 0, len(eligible))
-	for _, agent := range eligible {
-		options = append(options, repository.AgentScheduleOption{
-			ID:    agent.ID,
-			Name:  agent.Name,
-			Model: agent.Model,
-		})
-	}
-	return options, nil
-}
 func createScheduleTestAgent(t *testing.T, repo *repository.AgentRepo, name string, scope models.AgentScope, projectID string, selectable bool) *models.Agent {
 	t.Helper()
 	agent := &models.Agent{
