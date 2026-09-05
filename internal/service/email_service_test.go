@@ -717,59 +717,7 @@ func newEmailPollBenchmarkFixtureWithMIME(messageCount, receiptedCount, bodySize
 	return client, receipts, svc
 }
 
-type emailPollBenchmarkRun func(context.Context, *EmailService, *fakeEmailIMAPClient, EmailRuntimeConfig)
-
-func runLegacyEmailPollOnceForBenchmark(ctx context.Context, svc *EmailService, client *fakeEmailIMAPClient, cfg EmailRuntimeConfig) {
-	mailbox, err := client.Select("INBOX", false)
-	if err != nil {
-		return
-	}
-	ids, err := client.Search(unseenCriteria())
-	if err != nil || len(ids) == 0 {
-		return
-	}
-	messages, err := svc.fetchEmailMessages(client, ids, cfg.SkipAttachments)
-	if err != nil {
-		return
-	}
-
-	mailboxIdentity := emailMailboxIdentity(cfg)
-	acknowledgementIDs := make([]uint32, 0, len(messages))
-	for _, fetched := range messages {
-		messageKey, ok := emailInboundMessageKey(fetched.Message, mailbox.UidValidity, fetched.UID)
-		if !ok {
-			continue
-		}
-		if svc.emailInboundReceiptStore != nil {
-			received, err := svc.emailInboundReceiptStore.Exists(ctx, mailboxIdentity, messageKey)
-			if err != nil {
-				continue
-			}
-			if received {
-				acknowledgementIDs = append(acknowledgementIDs, fetched.ID)
-				continue
-			}
-		}
-		result := emailIncomingProcessResult{}
-		if svc.processIncomingMessageFn != nil {
-			result.handled = svc.ProcessIncoming(ctx, fetched.Message)
-		} else {
-			result = svc.processIncomingMessage(ctx, fetched.Message, mailboxIdentity, messageKey)
-		}
-		if !result.handled {
-			continue
-		}
-		if svc.emailInboundReceiptStore != nil && !result.receiptRecorded {
-			_ = svc.emailInboundReceiptStore.Record(ctx, mailboxIdentity, messageKey)
-		}
-		acknowledgementIDs = append(acknowledgementIDs, fetched.ID)
-	}
-	if len(acknowledgementIDs) > 0 {
-		_ = storeSeen(client, acknowledgementIDs)
-	}
-}
-
-func benchmarkEmailPollOnce(b *testing.B, messageCount, receiptedRate, bodySize, attachmentSize int, run emailPollBenchmarkRun) {
+func benchmarkEmailPollOnce(b *testing.B, messageCount, receiptedRate, bodySize, attachmentSize int) {
 	b.Helper()
 	b.ReportAllocs()
 	var fetchCalls, fetchIDs, fetchItems, fullBodyFetches int
@@ -782,7 +730,7 @@ func benchmarkEmailPollOnce(b *testing.B, messageCount, receiptedRate, bodySize,
 		cfg := EmailRuntimeConfig{Address: "bot@example.com", IMAPHost: "imap.example.com"}
 		b.StartTimer()
 		started := time.Now()
-		run(context.Background(), svc, client, cfg)
+		svc.pollOnce(context.Background(), cfg)
 		elapsed += time.Since(started)
 		b.StopTimer()
 
@@ -837,13 +785,8 @@ func BenchmarkEmailPollOnceReceiptDeduplication(b *testing.B) {
 			} {
 				mix := mix
 				name := fmt.Sprintf("%s/%d/%s", profile.name, messageCount, mix.name)
-				b.Run(name+"/Before", func(b *testing.B) {
-					benchmarkEmailPollOnce(b, messageCount, mix.receiptedRate, profile.bodySize, profile.attachmentSize, runLegacyEmailPollOnceForBenchmark)
-				})
-				b.Run(name+"/After", func(b *testing.B) {
-					benchmarkEmailPollOnce(b, messageCount, mix.receiptedRate, profile.bodySize, profile.attachmentSize, func(ctx context.Context, svc *EmailService, _ *fakeEmailIMAPClient, cfg EmailRuntimeConfig) {
-						svc.pollOnce(ctx, cfg)
-					})
+				b.Run(name, func(b *testing.B) {
+					benchmarkEmailPollOnce(b, messageCount, mix.receiptedRate, profile.bodySize, profile.attachmentSize)
 				})
 			}
 		}
