@@ -7949,44 +7949,16 @@ func BenchmarkTaskFollowupHardenedGitHubRuntime50Dispatches(b *testing.B) {
 		b.Fatal("fixture must construct the real hardened Automation GitHub runtime")
 	}
 
-	benchmarkDispatches := func(b *testing.B, buildRuntime func() *llmcontracts.RuntimeTools) {
-		b.Helper()
-		for i := 0; i < b.N; i++ {
-			runtime := buildRuntime()
-			for call := 0; call < 50; call++ {
-				output, handled, isError, err := runtime.Executor(ctx, "memory_view", nil)
-				if err != nil || !handled || isError || !strings.Contains(output, "memory_view") {
-					b.Fatalf("real generic dispatch failed: output=%q handled=%v isError=%v err=%v", output, handled, isError, err)
-				}
-				taskFollowupDispatchBenchmarkOutput = output
+	for i := 0; i < b.N; i++ {
+		runtime := h.buildStreamingResponseActionRuntime(ctx, params, nil, defs, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
+		for call := 0; call < 50; call++ {
+			output, handled, isError, err := runtime.Executor(ctx, "memory_view", nil)
+			if err != nil || !handled || isError || !strings.Contains(output, "memory_view") {
+				b.Fatalf("real generic dispatch failed: output=%q handled=%v isError=%v err=%v", output, handled, isError, err)
 			}
+			taskFollowupDispatchBenchmarkOutput = output
 		}
 	}
-
-	b.Run("legacy_reconstruct", func(b *testing.B) {
-		benchmarkDispatches(b, func() *llmcontracts.RuntimeTools {
-			initial := h.llmSvc.AutomationGitHubRuntimeTools(ctx, *params.Task, defs)
-			genericExecutor := h.chatActionExecutor(params, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
-			legacyGeneric := &llmcontracts.RuntimeTools{
-				Definitions: defs,
-				Executor: func(dispatchCtx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
-					hardened := h.llmSvc.AutomationGitHubRuntimeTools(dispatchCtx, *params.Task, defs)
-					if hardened != nil {
-						if output, handled, isError, err := hardened.Executor(dispatchCtx, name, input); handled {
-							return output, true, isError, err
-						}
-					}
-					return genericExecutor(dispatchCtx, name, input)
-				},
-			}
-			return llmcontracts.CompositeRuntimeTools(initial, llmcontracts.RuntimeToolsFromContext(ctx), params.RuntimeTools, legacyGeneric)
-		})
-	})
-	b.Run("reused", func(b *testing.B) {
-		benchmarkDispatches(b, func() *llmcontracts.RuntimeTools {
-			return h.buildStreamingResponseActionRuntime(ctx, params, nil, defs, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
-		})
-	})
 }
 
 func TestExecuteListAgentsUsesRuntimeSummariesAndPreservesOutput(t *testing.T) {
