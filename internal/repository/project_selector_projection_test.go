@@ -255,30 +255,7 @@ func benchSeedProjects(b *testing.B, db *sql.DB, n int) {
 	}
 }
 
-// BenchmarkProjectRepoListForSidebarFullRows measures the current full-row
-// baseline that page shells previously paid on every navigation.
-func BenchmarkProjectRepoListForSidebarFullRows(b *testing.B) {
-	db := testutil.NewTestDB(b)
-	benchSeedProjects(b, db, 500)
-	repo := NewProjectRepo(db)
-	ctx := context.Background()
-
-	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		projects, err := repo.List(ctx)
-		if err != nil {
-			b.Fatalf("List: %v", err)
-		}
-		if len(projects) < 500 {
-			b.Fatalf("expected >=500 projects, got %d", len(projects))
-		}
-	}
-}
-
-// BenchmarkProjectRepoListForSidebarCompactRows measures the compact selector
-// projection that shared page shells now use.
-func BenchmarkProjectRepoListForSidebarCompactRows(b *testing.B) {
+func BenchmarkProjectRepoListForSidebar(b *testing.B) {
 	db := testutil.NewTestDB(b)
 	benchSeedProjects(b, db, 500)
 	repo := NewProjectRepo(db)
