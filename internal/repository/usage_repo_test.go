@@ -461,13 +461,13 @@ func TestUsageRepo_ProjectDateBoundedAggregatesComputeLocaltimeAtReadTime(t *tes
 	if len(byModel) != 1 || byModel[0].Period != "2025-12-31" || byModel[0].Provider != "openai" || byModel[0].Model != "gpt-timezone" {
 		t.Fatalf("GetDailyUsageByModel after timezone change = %+v, want one openai/gpt-timezone 2025-12-31 bucket", byModel)
 	}
-	legacy := legacyUsageRateBuckets(t, db, filter)
 	optimized, err := repo.GetUsageRateBuckets(ctx, filter)
 	if err != nil {
 		t.Fatalf("GetUsageRateBuckets: %v", err)
 	}
-	if !reflect.DeepEqual(optimized, legacy) {
-		t.Fatalf("read-time localtime mismatch after timezone change\noptimized=%+v\nlegacy=%+v", optimized, legacy)
+	want := []models.UsageRatePoint{{Period: "2025-12-31", TotalTokens: 19, CallCount: 1}}
+	if !reflect.DeepEqual(optimized, want) {
+		t.Fatalf("read-time localtime buckets = %+v, want %+v", optimized, want)
 	}
 }
 
@@ -507,15 +507,33 @@ func TestUsageRepo_ProjectDateBoundedAggregatesPreserveDSTSensitiveLocaltimeSema
 		DateFrom:  time.Date(2026, 3, 8, 0, 0, 0, 0, time.UTC),
 		DateTo:    time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC),
 	}
+	wants := map[string][]models.UsageRatePoint{
+		"hour": {
+			{Period: "2026-03-08 01:00:00", TotalTokens: 10, CallCount: 1},
+			{Period: "2026-03-08 03:00:00", TotalTokens: 11, CallCount: 1},
+			{Period: "2026-11-01 01:00:00", TotalTokens: 25, CallCount: 2},
+		},
+		"day": {
+			{Period: "2026-03-08", TotalTokens: 21, CallCount: 2},
+			{Period: "2026-11-01", TotalTokens: 25, CallCount: 2},
+		},
+		"week": {
+			{Period: "2026-W09", TotalTokens: 21, CallCount: 2},
+			{Period: "2026-W43", TotalTokens: 25, CallCount: 2},
+		},
+		"month": {
+			{Period: "2026-03", TotalTokens: 21, CallCount: 2},
+			{Period: "2026-11", TotalTokens: 25, CallCount: 2},
+		},
+	}
 	for _, groupBy := range []string{"hour", "day", "week", "month"} {
 		filter.GroupBy = groupBy
-		legacy := legacyUsageRateBuckets(t, db, filter)
 		optimized, err := repo.GetUsageRateBuckets(ctx, filter)
 		if err != nil {
 			t.Fatalf("GetUsageRateBuckets(%s): %v", groupBy, err)
 		}
-		if !reflect.DeepEqual(optimized, legacy) {
-			t.Fatalf("%s localtime bucket mismatch\noptimized=%+v\nlegacy=%+v", groupBy, optimized, legacy)
+		if !reflect.DeepEqual(optimized, wants[groupBy]) {
+			t.Fatalf("%s localtime buckets = %+v, want %+v", groupBy, optimized, wants[groupBy])
 		}
 	}
 }
@@ -540,33 +558,6 @@ func setUsageRepoTestLocalTimezone(t *testing.T, name string) {
 		t.Fatalf("load location: %v", err)
 	}
 	time.Local = loc
-}
-
-func legacyUsageRateBuckets(t *testing.T, db *sql.DB, filter UsageFilter) []models.UsageRatePoint {
-	t.Helper()
-	where, args := usageWhere(filter)
-	periodExpr := usagePeriodExpression(filter.GroupBy)
-	rows, err := db.QueryContext(context.Background(), `
-		SELECT `+periodExpr+` AS period, COALESCE(SUM(total_tokens), 0), COUNT(*)
-		FROM llm_usage_events `+where+`
-		GROUP BY period
-		ORDER BY period ASC`, args...)
-	if err != nil {
-		t.Fatalf("legacy usage rate buckets: %v", err)
-	}
-	defer rows.Close()
-	var points []models.UsageRatePoint
-	for rows.Next() {
-		var point models.UsageRatePoint
-		if err := rows.Scan(&point.Period, &point.TotalTokens, &point.CallCount); err != nil {
-			t.Fatalf("scan legacy usage rate: %v", err)
-		}
-		points = append(points, point)
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("iterate legacy usage rate: %v", err)
-	}
-	return points
 }
 
 func assertNoTempBTree(t *testing.T, db *sql.DB, name, query string, args ...any) {
