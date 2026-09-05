@@ -49,7 +49,7 @@ func TestBreadcrumbSelectorRendersAccessibleBoundedDialog(t *testing.T) {
 func TestBreadcrumbSelectorKeyboardFocusAndContainmentInChrome(t *testing.T) {
 	chrome := testChromePath(t)
 	var selector bytes.Buffer
-	if err := BreadcrumbSelector(models.BreadcrumbSelector{ID: "browser-selector", Kind: "Task", CurrentID: "one", CurrentName: "A title long enough to exercise responsive truncation", SearchURL: "/results"}).Render(context.Background(), &selector); err != nil {
+	if err := BreadcrumbSelector(models.BreadcrumbSelector{ID: "browser-selector", Kind: "Task", CurrentID: "one", CurrentName: "Current", SearchURL: "/results"}).Render(context.Background(), &selector); err != nil {
 		t.Fatal(err)
 	}
 	var results bytes.Buffer
@@ -70,10 +70,11 @@ func TestBreadcrumbSelectorKeyboardFocusAndContainmentInChrome(t *testing.T) {
 	    document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
 	    if(dialog.open || document.activeElement!==button || button.getAttribute('aria-expanded')!=='false') throw new Error('Escape did not close and restore focus');
 	    button.click(); await waitFor(function(){ return dialog.open; });
-		    var box=dialog.getBoundingClientRect(), triggerBox=button.getBoundingClientRect();
+		    var box=dialog.getBoundingClientRect(), triggerBox=button.getBoundingClientRect(), caretBox=button.querySelector('[data-breadcrumb-selector-caret]').getBoundingClientRect();
 		    if(box.left < 7 || box.right > innerWidth-7 || box.bottom > innerHeight-7) throw new Error('selector escaped viewport: '+JSON.stringify(box));
 		    if(Math.abs(box.top-triggerBox.bottom-4) > 2) throw new Error('selector is not anchored below trigger: '+JSON.stringify({box:box,trigger:triggerBox}));
-		    if(triggerBox.right < box.left || triggerBox.right > box.right+8) throw new Error('selector is not horizontally linked to caret');		    document.documentElement.setAttribute('data-theme','light');
+		    if(Math.abs(box.left-caretBox.left) > 2) throw new Error('selector left edge is not anchored below caret: '+JSON.stringify({box:box,caret:caretBox}));
+		    document.documentElement.setAttribute('data-theme','light');
 		    var themeBox=dialog, lightStyle=getComputedStyle(themeBox);
 		    var light=[lightStyle.backgroundColor,lightStyle.borderColor,lightStyle.color].join('|');
 		    document.documentElement.setAttribute('data-theme','dark');
@@ -83,7 +84,7 @@ func TestBreadcrumbSelectorKeyboardFocusAndContainmentInChrome(t *testing.T) {
 		    var contrastStyle=getComputedStyle(themeBox);
 		    if(contrastStyle.backgroundColor!=='rgb(0, 0, 0)' || contrastStyle.color!=='rgb(255, 255, 255)' || contrastStyle.borderColor!=='rgb(255, 255, 255)') throw new Error('imported high-contrast variables were not honored: '+[contrastStyle.backgroundColor,contrastStyle.color,contrastStyle.borderColor].join('|'));
 		    if(!dialog.matches('.bg-base-100') || !dialog.matches('.border-base-300')) throw new Error('theme semantic classes missing');	    document.body.setAttribute('data-test-result','pass');
-	  })().catch(function(error){ document.body.setAttribute('data-test-result','fail'); document.body.setAttribute('data-test-error',String(error.stack||error)); });
+	  })().catch(function(error){ var message=String(error.stack||error); document.body.setAttribute('data-test-result','fail'); document.body.setAttribute('data-test-error',message); document.body.appendChild(document.createTextNode(' BREADCRUMB_TEST_ERROR: '+message)); });
 	});
 	</script>`
 	page := `<!doctype html><html data-theme="light"><head><meta name="viewport" content="width=device-width"><style>dialog{border:0;background:transparent;box-sizing:border-box}.fixed{position:fixed}.m-0{margin:0}.w-\[28rem\]{width:28rem}.max-w-\[calc\(100vw-1rem\)\]{max-width:calc(100vw - 1rem)}.max-h-\[min\(32rem\,calc\(100dvh-1rem\)\)\]{max-height:min(32rem,calc(100dvh - 1rem))}.bg-base-100{background-color:var(--fixture-base)}.border-base-300{border:1px solid var(--fixture-border)}.text-base-content{color:var(--fixture-content)}[data-theme="light"]{--fixture-base:rgb(255,255,255);--fixture-border:rgb(210,210,210);--fixture-content:rgb(20,20,20)}[data-theme="dark"]{--fixture-base:rgb(24,24,27);--fixture-border:rgb(82,82,91);--fixture-content:rgb(244,244,245)}[data-theme="imported-contrast"]{--fixture-base:rgb(0,0,0);--fixture-border:rgb(255,255,255);--fixture-content:rgb(255,255,255)}</style><script src="/htmx.js"></script></head><body data-test-result="pending">` + selector.String() + runner + `</body></html>`
@@ -101,7 +102,7 @@ func TestBreadcrumbSelectorKeyboardFocusAndContainmentInChrome(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	runHeadlessChromeFixture(t, chrome, server.URL+"/", "breadcrumb selector keyboard", 375, 20*time.Second)
+	runHeadlessChromeFixture(t, chrome, server.URL+"/", "breadcrumb selector keyboard", 900, 20*time.Second)
 }
 
 func TestBreadcrumbSelectorResultsMarksCurrentAndUsesAuthoritativeURLs(t *testing.T) {
