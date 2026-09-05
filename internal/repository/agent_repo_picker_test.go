@@ -462,7 +462,7 @@ func TestAgentRepoListPickerOptionsProductionShape(t *testing.T) {
 	}
 }
 
-func BenchmarkAgentPickerOptionsProjectionVsFullHydration(b *testing.B) {
+func BenchmarkAgentPickerOptionsProjection(b *testing.B) {
 	db := testutil.NewTestDB(b)
 	repo := NewAgentRepo(db)
 	ctx := context.Background()
@@ -471,37 +471,19 @@ func BenchmarkAgentPickerOptionsProjectionVsFullHydration(b *testing.B) {
 		createPickerAgent(b, repo, fmt.Sprintf("Agent %04d", i))
 	}
 
-	b.Run("full_hydration", func(b *testing.B) {
-		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			agents, err := repo.List(ctx)
-			if err != nil {
-				b.Fatal(err)
-			}
-			if len(agents) != 1000 {
-				b.Fatalf("agents len = %d, want 1000", len(agents))
-			}
-			if i == 0 {
-				b.ReportMetric(float64(len(marshalPickerJSONFromAgents(b, agents))), "json_bytes")
-			}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		options, err := repo.ListPickerOptions(ctx)
+		if err != nil {
+			b.Fatal(err)
 		}
-	})
-
-	b.Run("compact_projection", func(b *testing.B) {
-		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			options, err := repo.ListPickerOptions(ctx)
-			if err != nil {
-				b.Fatal(err)
-			}
-			if len(options) != 1000 {
-				b.Fatalf("options len = %d, want 1000", len(options))
-			}
-			if i == 0 {
-				b.ReportMetric(float64(len(marshalPickerJSONFromOptions(b, options))), "json_bytes")
-			}
+		if len(options) != 1000 {
+			b.Fatalf("options len = %d, want 1000", len(options))
 		}
-	})
+		if i == 0 {
+			b.ReportMetric(float64(len(marshalPickerJSONFromOptions(b, options))), "json_bytes")
+		}
+	}
 }
 
 func createPickerAgent(tb testing.TB, repo *AgentRepo, name string) *models.Agent {
