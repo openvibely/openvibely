@@ -1232,7 +1232,7 @@ func TestAutomationSaveValidatorAgentIssuesPreservesReferenceAvailabilitySemanti
 	if len(selectableAgentValidationStatements(counter.Statements())) != 1 {
 		t.Fatalf("selectable Agent statements = %#v, want one query", counter.Statements())
 	}
-	resolvedArchivedAt, err := resolveAutomationAgent(ctx, agentRepo, project.ID, archivedAt.Key)
+	resolvedArchivedAt, err := resolveAutomationAgentRichForTest(ctx, agentRepo, project.ID, archivedAt.Key)
 	if err != nil {
 		t.Fatalf("resolve timestamp-archived Agent: %v", err)
 	}
@@ -1627,6 +1627,27 @@ func newAutomationSavePerformanceFixture(tb testing.TB) *automationSavePerforman
 	return &automationSavePerformanceFixture{ctx: ctx, project: project, counter: counter, refs: refs, baseline: baseline, optimized: optimized}
 }
 
+func resolveAutomationAgentRichForTest(ctx context.Context, agentRepo *repository.AgentRepo, projectID, ref string) (*models.Agent, error) {
+	if agentRepo == nil || strings.TrimSpace(ref) == "" {
+		return nil, nil
+	}
+	agents, err := agentRepo.ListSelectableForProject(ctx, projectID, automationCapabilityLimit)
+	if err != nil {
+		return nil, err
+	}
+	ref = strings.TrimSpace(ref)
+	for i := range agents {
+		key := strings.TrimSpace(agents[i].Key)
+		if key == "" {
+			key = agents[i].ID
+		}
+		if key == ref && (agents[i].ProjectID == "" || agents[i].ProjectID == projectID) {
+			return &agents[i], nil
+		}
+	}
+	return nil, nil
+}
+
 func baselineAutomationSaveAgentDefinitions(ctx context.Context, agentRepo *repository.AgentRepo, projectID string, resourceNodes []AutomationAdapterNode, candidateNodes map[string]models.AutomationDraftNode) (map[string]string, error) {
 	resolved := make(map[string]string)
 	for _, resourceNode := range resourceNodes {
@@ -1639,7 +1660,7 @@ func baselineAutomationSaveAgentDefinitions(ctx context.Context, agentRepo *repo
 		if ref == "" {
 			continue
 		}
-		agent, err := resolveAutomationAgent(ctx, agentRepo, projectID, ref)
+		agent, err := resolveAutomationAgentRichForTest(ctx, agentRepo, projectID, ref)
 		if err != nil {
 			return nil, err
 		}
