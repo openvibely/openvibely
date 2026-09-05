@@ -1511,6 +1511,9 @@ func TestChannelServiceListChannelsIncludesProviderStatusAndCountsSafely(t *test
 	discordSvc.SetEmailAuthRepo(emailAuthRepo)
 	discordSvc.SetWebhookRepo(webhookRepo)
 	discordSvc.SetChannelMessageRouter(router)
+	discordSvc.mu.Lock()
+	discordSvc.lastStartError = "gateway unavailable\nsecond line\twith formatting"
+	discordSvc.mu.Unlock()
 	telegramSvc := &TelegramService{settingsRepo: settingsRepo, projectRepo: projectRepo}
 	telegramSvc.SetEmailStatusProvider(emailStatus)
 	telegramSvc.SetEmailAuthRepo(emailAuthRepo)
@@ -1521,9 +1524,10 @@ func TestChannelServiceListChannelsIncludesProviderStatusAndCountsSafely(t *test
 		name               string
 		handlers           map[string]chatcontrol.RuntimeActionHandler
 		wantSlackConnected bool
+		wantDiscordError   bool
 	}{
 		{name: "slack", handlers: slackSvc.slackActionHandlers(project.ID, slackActionContext{TeamID: "T1", ChannelID: "C1", UserID: "U1"}, nil), wantSlackConnected: true},
-		{name: "discord", handlers: discordSvc.discordActionHandlers(project.ID, discordActionContext{ChannelID: "C1", UserID: "U1"}, nil)},
+		{name: "discord", handlers: discordSvc.discordActionHandlers(project.ID, discordActionContext{ChannelID: "C1", UserID: "U1"}, nil), wantDiscordError: true},
 		{name: "telegram", handlers: telegramSvc.telegramActionHandlers(project.ID, 1001, 2002, nil)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1553,6 +1557,7 @@ func TestChannelServiceListChannelsIncludesProviderStatusAndCountsSafely(t *test
 					Running       bool   `json:"running"`
 					Status        string `json:"status"`
 					SendResponses bool   `json:"send_responses"`
+					LastError     string `json:"last_error"`
 				} `json:"discord"`
 				X struct {
 					Configured bool   `json:"configured"`
@@ -1620,6 +1625,11 @@ func TestChannelServiceListChannelsIncludesProviderStatusAndCountsSafely(t *test
 			require.False(t, result.Discord.Connected)
 			require.False(t, result.Discord.Running)
 			require.Equal(t, "gateway_offline", result.Discord.Status)
+			if tc.wantDiscordError {
+				require.Equal(t, "gateway unavailable second line with formatting", result.Discord.LastError)
+			} else {
+				require.Empty(t, result.Discord.LastError)
+			}
 			require.False(t, result.Discord.SendResponses)
 			require.True(t, result.X.Configured)
 			require.Equal(t, "configured_not_connected", result.X.Status)
