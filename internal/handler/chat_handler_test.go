@@ -3805,6 +3805,80 @@ func TestHandler_TaskThreadSend_QueuesWhenAtCapacity(t *testing.T) {
 	assert.Equal(t, models.CategoryActive, updatedTask.Category)
 }
 
+func TestHandler_TaskThreadSend_LeavesCapacityQueueWhenGlobalAndProjectBecomeUnlimited(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+
+	// Set the global ceiling through the same endpoint used by the Workers page
+	// before creating the project so the project cap is valid under that ceiling.
+	globalRec := htmxPost(e, "/workers", url.Values{"max_workers": {"1"}})
+	assertCode(t, globalRec, http.StatusOK)
+
+	projectLimit := 1
+	project := &models.Project{Name: "Follow-up Unlimited Project", MaxWorkers: &projectLimit}
+	require.NoError(t, h.projectSvc.Create(ctx, project))
+	h.workerSvc.SetProjectRepo(h.projectRepo)
+	h.workerSvc.SetLLMConfigRepo(h.llmConfigRepo)
+
+	agent := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
+		a.MaxWorkers = 0
+	})
+	task := &models.Task{
+		ProjectID: project.ID,
+		Title:     "Capacity queued follow-up",
+		Status:    models.StatusCompleted,
+		Category:  models.CategoryCompleted,
+		AgentID:   &agent.ID,
+	}
+	require.NoError(t, h.taskRepo.Create(ctx, task))
+
+	providerStarted := make(chan struct{})
+	providerRelease := make(chan struct{})
+	h.llmSvc.SetLLMCaller(llmCallerFunc(func(callCtx context.Context, _ string, _ []models.Attachment, _ models.LLMConfig, _ string, _ string) (string, string, int, error) {
+		close(providerStarted)
+		select {
+		case <-providerRelease:
+		case <-callCtx.Done():
+		}
+		return "follow-up completed", "", 1, nil
+	}))
+
+	// Occupy the only global and project slot so the follow-up starts in the
+	// durable queued state and waits for capacity.
+	require.True(t, h.workerSvc.TryAcquireProjectSlot(project.ID))
+	defer h.workerSvc.ReleaseProjectSlot(project.ID)
+
+	form := url.Values{"message": {"run after limits are unlimited"}}
+	req := httptest.NewRequest(http.MethodPost, "/tasks/"+task.ID+"/thread", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	require.Eventually(t, func() bool {
+		stored, err := h.taskSvc.GetByID(ctx, task.ID)
+		return err == nil && stored != nil && stored.Status == models.StatusQueued
+	}, 2*time.Second, 20*time.Millisecond, "follow-up should wait in the queued state while capacity is finite")
+
+	globalRec = htmxPost(e, "/workers", url.Values{"max_workers": {"0"}})
+	assertCode(t, globalRec, http.StatusOK)
+	projectRec := htmxPost(e, "/workers/projects/"+project.ID+"/limit", url.Values{"max_workers": {"0"}})
+	assertCode(t, projectRec, http.StatusOK)
+
+	select {
+	case <-providerStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("capacity-waiting follow-up did not reach the provider after both limits became unlimited")
+	}
+	close(providerRelease)
+
+	require.Eventually(t, func() bool {
+		execs, err := h.execRepo.ListByTaskChronological(ctx, task.ID)
+		return err == nil && len(execs) == 1 && execs[0].Status == models.ExecCompleted
+	}, 2*time.Second, 20*time.Millisecond, "unlimited follow-up should complete")
+}
+
 func TestHandler_TaskThreadSend_QueueWaitDoesNotConsumeWorkerTimeout(t *testing.T) {
 	h, e, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()

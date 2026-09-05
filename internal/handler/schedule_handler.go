@@ -508,6 +508,8 @@ func (h *Handler) UpdateWorkerSettings(c echo.Context) error {
 
 	// Apply the new worker count to the running worker pool
 	h.workerSvc.Resize(maxWorkers)
+	h.workerSvc.ReconcilePendingTasks(c.Request().Context())
+	h.workerSvc.DispatchNext()
 	runningWorkers := h.workerSvc.NumWorkers()
 	totalRunning := h.workerSvc.TotalRunning()
 	applog.Infof("[handler] UpdateWorkerSettings success, resized to %d workers (actual running: %d)", maxWorkers, runningWorkers)
@@ -798,7 +800,9 @@ func (h *Handler) UpdateProjectWorkerLimit(c echo.Context) error {
 	applog.Infof("[handler] UpdateProjectWorkerLimit success project=%s max_workers=%v", projectID, project.MaxWorkers)
 
 	// Trigger dispatch check — if the limit was increased and there are queued
-	// tasks for this project, they should start immediately.
+	// tasks for this project, they should start immediately. Reconcile durable
+	// active tasks as well so a missed submission does not remain pending.
+	h.workerSvc.ReconcilePendingTasks(c.Request().Context())
 	h.workerSvc.DispatchNext()
 
 	// Return the updated worker settings content for HTMX

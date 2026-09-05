@@ -37,6 +37,13 @@ func workerLimitLabel(maxWorkers int) string {
 	return fmt.Sprintf("%d", maxWorkers)
 }
 
+func projectWorkerLimitLabel(maxWorkers *int) string {
+	if maxWorkers == nil || *maxWorkers <= 0 {
+		return "Unlimited"
+	}
+	return fmt.Sprintf("%d", *maxWorkers)
+}
+
 func projectWorkerLimitExceedsGlobal(globalMaxWorkers int, projectMaxWorkers *int) bool {
 	return globalMaxWorkers > 0 && projectMaxWorkers != nil && *projectMaxWorkers > globalMaxWorkers
 }
@@ -239,7 +246,7 @@ func globalWorkerStats(maxWorkers int, totalRunning int, queueSize int) templ.Co
 		var templ_7745c5c3_Var7 string
 		templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinStringErrs(workerLimitLabel(maxWorkers))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 264, Col: 72}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 271, Col: 72}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var7))
 		if templ_7745c5c3_Err != nil {
@@ -274,7 +281,7 @@ func globalWorkerStats(maxWorkers int, totalRunning int, queueSize int) templ.Co
 		var templ_7745c5c3_Var10 string
 		templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d / %s", totalRunning, workerLimitLabel(maxWorkers)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 269, Col: 72}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 276, Col: 72}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var10))
 		if templ_7745c5c3_Err != nil {
@@ -309,7 +316,7 @@ func globalWorkerStats(maxWorkers int, totalRunning int, queueSize int) templ.Co
 		var templ_7745c5c3_Var13 string
 		templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", queueSize))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 275, Col: 34}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 282, Col: 34}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var13))
 		if templ_7745c5c3_Err != nil {
@@ -403,7 +410,7 @@ func projectStatsTableBody(maxWorkers int, runningWorkers int, totalRunning int,
 		var templ_7745c5c3_Var18 string
 		templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d / %s", totalRunning, workerLimitLabel(maxWorkers)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 300, Col: 73}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 307, Col: 73}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var18))
 		if templ_7745c5c3_Err != nil {
@@ -438,7 +445,7 @@ func projectStatsTableBody(maxWorkers int, runningWorkers int, totalRunning int,
 		var templ_7745c5c3_Var21 string
 		templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", queueSize))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 305, Col: 35}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 312, Col: 35}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var21))
 		if templ_7745c5c3_Err != nil {
@@ -451,7 +458,7 @@ func projectStatsTableBody(maxWorkers int, runningWorkers int, totalRunning int,
 		var templ_7745c5c3_Var22 string
 		templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", maxWorkers))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 322, Col: 43}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 329, Col: 43}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var22)
 		if templ_7745c5c3_Err != nil {
@@ -499,7 +506,7 @@ func projectStatsTableBody(maxWorkers int, runningWorkers int, totalRunning int,
 			var templ_7745c5c3_Var23 string
 			templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("project-row-%s", ps.ID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 346, Col: 48}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 353, Col: 48}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var23)
 			if templ_7745c5c3_Err != nil {
@@ -512,7 +519,7 @@ func projectStatsTableBody(maxWorkers int, runningWorkers int, totalRunning int,
 			var templ_7745c5c3_Var24 string
 			templ_7745c5c3_Var24, templ_7745c5c3_Err = templ.JoinStringErrs(ps.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 350, Col: 37}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 357, Col: 37}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var24))
 			if templ_7745c5c3_Err != nil {
@@ -528,9 +535,9 @@ func projectStatsTableBody(maxWorkers int, runningWorkers int, totalRunning int,
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var25 string
-				templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d / %d", ps.Running, *ps.MaxWorkers))
+				templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d / %s", ps.Running, projectWorkerLimitLabel(ps.MaxWorkers)))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 353, Col: 101}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 360, Col: 125}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var25))
 				if templ_7745c5c3_Err != nil {
@@ -546,15 +553,9 @@ func projectStatsTableBody(maxWorkers int, runningWorkers int, totalRunning int,
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var26 string
-				templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d / %d", ps.Running, func() int {
-					if ps.MaxWorkers != nil {
-						return *ps.MaxWorkers
-					} else {
-						return 0
-					}
-				}()))
+				templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d / %s", ps.Running, projectWorkerLimitLabel(ps.MaxWorkers)))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 356, Col: 129}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 363, Col: 83}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var26))
 				if templ_7745c5c3_Err != nil {
@@ -570,15 +571,9 @@ func projectStatsTableBody(maxWorkers int, runningWorkers int, totalRunning int,
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var27 string
-				templ_7745c5c3_Var27, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("0 / %d", func() int {
-					if ps.MaxWorkers != nil {
-						return *ps.MaxWorkers
-					} else {
-						return 0
-					}
-				}()))
+				templ_7745c5c3_Var27, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("0 / %s", projectWorkerLimitLabel(ps.MaxWorkers)))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 360, Col: 116}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 367, Col: 70}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var27))
 				if templ_7745c5c3_Err != nil {
@@ -618,7 +613,7 @@ func projectStatsTableBody(maxWorkers int, runningWorkers int, totalRunning int,
 			var templ_7745c5c3_Var30 string
 			templ_7745c5c3_Var30, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", ps.QueueSize))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 366, Col: 39}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 373, Col: 39}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var30))
 			if templ_7745c5c3_Err != nil {
@@ -631,7 +626,7 @@ func projectStatsTableBody(maxWorkers int, runningWorkers int, totalRunning int,
 			var templ_7745c5c3_Var31 string
 			templ_7745c5c3_Var31, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("limit-cell-%s", ps.ID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 369, Col: 48}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 376, Col: 48}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var31)
 			if templ_7745c5c3_Err != nil {
@@ -644,7 +639,7 @@ func projectStatsTableBody(maxWorkers int, runningWorkers int, totalRunning int,
 			var templ_7745c5c3_Var32 string
 			templ_7745c5c3_Var32, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/workers/projects/%s/limit", ps.ID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 372, Col: 64}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 379, Col: 64}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var32)
 			if templ_7745c5c3_Err != nil {
@@ -657,7 +652,7 @@ func projectStatsTableBody(maxWorkers int, runningWorkers int, totalRunning int,
 			var templ_7745c5c3_Var33 string
 			templ_7745c5c3_Var33, templ_7745c5c3_Err = templ.ResolveAttributeValue(ps.ID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 376, Col: 29}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 383, Col: 29}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var33)
 			if templ_7745c5c3_Err != nil {
@@ -670,7 +665,7 @@ func projectStatsTableBody(maxWorkers int, runningWorkers int, totalRunning int,
 			var templ_7745c5c3_Var34 string
 			templ_7745c5c3_Var34, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("limit-input-%s", ps.ID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 381, Col: 48}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 388, Col: 48}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var34)
 			if templ_7745c5c3_Err != nil {
@@ -689,7 +684,7 @@ func projectStatsTableBody(maxWorkers int, runningWorkers int, totalRunning int,
 				}
 			}()))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 382, Col: 118}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 389, Col: 118}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var35)
 			if templ_7745c5c3_Err != nil {
@@ -707,7 +702,7 @@ func projectStatsTableBody(maxWorkers int, runningWorkers int, totalRunning int,
 				var templ_7745c5c3_Var36 string
 				templ_7745c5c3_Var36, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", maxWorkers))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 385, Col: 43}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 392, Col: 43}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var36)
 				if templ_7745c5c3_Err != nil {
@@ -725,7 +720,7 @@ func projectStatsTableBody(maxWorkers int, runningWorkers int, totalRunning int,
 			var templ_7745c5c3_Var37 string
 			templ_7745c5c3_Var37, templ_7745c5c3_Err = templ.ResolveAttributeValue(ps.ID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 391, Col: 29}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 398, Col: 29}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var37)
 			if templ_7745c5c3_Err != nil {
@@ -743,7 +738,7 @@ func projectStatsTableBody(maxWorkers int, runningWorkers int, totalRunning int,
 				var templ_7745c5c3_Var38 string
 				templ_7745c5c3_Var38, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("This project limit exceeds the current global limit of %d", maxWorkers))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 395, Col: 144}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 402, Col: 144}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var38)
 				if templ_7745c5c3_Err != nil {
@@ -776,7 +771,7 @@ func projectStatsTableBody(maxWorkers int, runningWorkers int, totalRunning int,
 				var templ_7745c5c3_Var39 string
 				templ_7745c5c3_Var39, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("Current project limit exceeds the global limit of %d; new work remains globally capped", maxWorkers))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 404, Col: 170}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 411, Col: 170}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var39)
 				if templ_7745c5c3_Err != nil {
@@ -794,7 +789,7 @@ func projectStatsTableBody(maxWorkers int, runningWorkers int, totalRunning int,
 				var templ_7745c5c3_Var40 string
 				templ_7745c5c3_Var40, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("Project is using all %d allowed workers", *ps.MaxWorkers))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 406, Col: 127}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 413, Col: 127}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var40)
 				if templ_7745c5c3_Err != nil {
@@ -891,7 +886,7 @@ func modelStatsTableBody(modelStats []ModelWorkerStats) templ.Component {
 			var templ_7745c5c3_Var43 string
 			templ_7745c5c3_Var43, templ_7745c5c3_Err = templ.JoinStringErrs(ms.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 433, Col: 39}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 440, Col: 39}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var43))
 			if templ_7745c5c3_Err != nil {
@@ -904,7 +899,7 @@ func modelStatsTableBody(modelStats []ModelWorkerStats) templ.Component {
 			var templ_7745c5c3_Var44 string
 			templ_7745c5c3_Var44, templ_7745c5c3_Err = templ.JoinStringErrs(ms.Model)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 434, Col: 47}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 441, Col: 47}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var44))
 			if templ_7745c5c3_Err != nil {
@@ -939,7 +934,7 @@ func modelStatsTableBody(modelStats []ModelWorkerStats) templ.Component {
 			var templ_7745c5c3_Var47 string
 			templ_7745c5c3_Var47, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d / %d", ms.Running, ms.MaxWorkers))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 438, Col: 57}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 445, Col: 57}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var47))
 			if templ_7745c5c3_Err != nil {
@@ -952,7 +947,7 @@ func modelStatsTableBody(modelStats []ModelWorkerStats) templ.Component {
 			var templ_7745c5c3_Var48 string
 			templ_7745c5c3_Var48, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", ms.MaxWorkers))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 442, Col: 39}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 449, Col: 39}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var48))
 			if templ_7745c5c3_Err != nil {
