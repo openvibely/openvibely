@@ -347,7 +347,7 @@ window.addEventListener('DOMContentLoaded', function() {
 			page = strings.Replace(page, "</head>", runner+"</head>", 1)
 			_, _ = w.Write([]byte(page))
 		case "/tasks/task-active-status-drag/card/merge-options":
-			_, _ = w.Write([]byte(`<li data-task-card-merge-options hx-get="/tasks/task-active-status-drag/card/merge-options"><span>Merge unavailable</span></li>`))
+			_, _ = w.Write([]byte(`<li data-task-card-merge-options hx-get="/tasks/task-active-status-drag/card/merge-options" hx-trigger="task-card-menu-open" hx-swap="outerHTML"></li>`))
 		case "/refresh-kanban":
 			refreshedTasks := append([]models.Task(nil), tasks...)
 			if r.URL.Query().Get("state") == "removed" {

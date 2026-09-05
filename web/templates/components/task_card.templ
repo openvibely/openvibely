@@ -349,7 +349,7 @@ templ taskCardStateIcon(task models.Task) {
 	</span>
 }
 
-templ TaskCardMergeOptions(task *models.Task, projectID string, eligible bool, rebaseAvailable bool, unavailableReason string, taskPR *models.TaskPullRequest, prEligible bool, prUnavailableReason string) {
+templ TaskCardMergeOptions(task *models.Task, projectID string, eligible bool, rebaseAvailable bool, taskPR *models.TaskPullRequest, prEligible bool) {
 	<li
 		data-task-card-merge-options
 		data-task-id={ task.ID }
@@ -358,18 +358,11 @@ templ TaskCardMergeOptions(task *models.Task, projectID string, eligible bool, r
 		hx-swap="outerHTML"
 	>
 		if eligible {
-			<details open class="w-full">
-				<summary class="text-sm min-h-11">Merge</summary>
-				<ul class="menu menu-sm p-0 w-full">
-					for _, action := range TaskWorktreeMergeActions() {
-						if !action.RequiresRebaseEligibility || rebaseAvailable {
-							@TaskCardWorktreeMergeAction(task, projectID, action)
-						}
-					}
-				</ul>
-			</details>
-		} else {
-			<span class="text-sm min-h-11 opacity-50" aria-disabled="true" title={ unavailableReason }>Merge unavailable</span>
+			for _, action := range TaskWorktreeMergeActions() {
+				if !action.RequiresRebaseEligibility || rebaseAvailable {
+					@TaskCardWorktreeMergeAction(task, projectID, action)
+				}
+			}
 		}
 		if taskPR != nil && taskPR.PRURL != "" && strings.EqualFold(strings.TrimSpace(taskPR.PRState), "open") {
 			<a class="text-sm min-h-11" href={ templ.SafeURL(taskPR.PRURL) } target="_blank" rel="noopener noreferrer">View PR #{ fmt.Sprintf("%d", taskPR.PRNumber) }</a>
@@ -387,8 +380,6 @@ templ TaskCardMergeOptions(task *models.Task, projectID string, eligible bool, r
 				data-merge-endpoint="pull-request"
 				onclick="runTaskCardAction(this)"
 			>Create PR</button>
-		} else {
-			<span class="text-sm min-h-11 opacity-50" aria-disabled="true" title={ prUnavailableReason }>Create PR unavailable</span>
 		}
 	</li>
 }

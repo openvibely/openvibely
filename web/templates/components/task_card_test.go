@@ -384,7 +384,7 @@ func TestTaskCard_LazilyLoadsAuthoritativeMergeOptions(t *testing.T) {
 func TestTaskCardMergeOptionsRemainRefreshableAndExposeCreatePR(t *testing.T) {
 	task := models.Task{ID: "merge-card-task", ProjectID: "project-1", Title: "Merge card task", MergeTargetBranch: "main"}
 	var buf bytes.Buffer
-	if err := TaskCardMergeOptions(&task, "project-1", true, false, "", nil, true, "").Render(context.Background(), &buf); err != nil {
+	if err := TaskCardMergeOptions(&task, "project-1", true, false, nil, true).Render(context.Background(), &buf); err != nil {
 		t.Fatal(err)
 	}
 	body := buf.String()
@@ -404,7 +404,7 @@ func TestTaskCardMergeOptionsRemainRefreshableAndExposeCreatePR(t *testing.T) {
 func TestTaskCardMergeOptionsExposeSharedLocalActionMetadata(t *testing.T) {
 	task := models.Task{ID: "merge-card-task", ProjectID: "project-1", Title: "Merge card task", MergeTargetBranch: "main"}
 	var buf bytes.Buffer
-	if err := TaskCardMergeOptions(&task, "project-1", true, true, "", nil, true, "").Render(context.Background(), &buf); err != nil {
+	if err := TaskCardMergeOptions(&task, "project-1", true, true, nil, true).Render(context.Background(), &buf); err != nil {
 		t.Fatal(err)
 	}
 	body := buf.String()
@@ -424,6 +424,30 @@ func TestTaskCardMergeOptionsExposeSharedLocalActionMetadata(t *testing.T) {
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("expected shared card merge metadata %q, body=%s", want, body)
+		}
+	}
+	for _, unwanted := range []string{"<details", "<summary", ">Merge</summary>"} {
+		if strings.Contains(body, unwanted) {
+			t.Fatalf("card merge actions must be flat menu rows without an expandable section, found %q in %s", unwanted, body)
+		}
+	}
+}
+
+func TestTaskCardMergeOptionsHideUnavailableActions(t *testing.T) {
+	task := models.Task{ID: "merge-card-task", ProjectID: "project-1", Title: "Merge card task", MergeTargetBranch: "main"}
+	var buf bytes.Buffer
+	if err := TaskCardMergeOptions(&task, "project-1", false, false, nil, false).Render(context.Background(), &buf); err != nil {
+		t.Fatal(err)
+	}
+	body := buf.String()
+	for _, unwanted := range []string{"Merge unavailable", "Create PR unavailable", `aria-disabled="true"`, `title="The task is not eligible."`, `title="No branch exists."`} {
+		if strings.Contains(body, unwanted) {
+			t.Fatalf("ineligible card actions must be omitted rather than shown as unavailable, found %q in %s", unwanted, body)
+		}
+	}
+	for _, want := range []string{`data-task-card-merge-options`, `hx-trigger="task-card-menu-open"`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("empty authoritative options fragment must remain refreshable, missing %q in %s", want, body)
 		}
 	}
 }
@@ -466,7 +490,7 @@ func TestTaskCardMergeOptionsClosedHistoricalPRExposesCreatePR(t *testing.T) {
 	task := models.Task{ID: "merge-card-task", ProjectID: "project-1", Title: "Merge card task", MergeTargetBranch: "main"}
 	closedPR := &models.TaskPullRequest{TaskID: task.ID, PRNumber: 17, PRURL: "https://github.com/example/repo/pull/17", PRState: "closed"}
 	var buf bytes.Buffer
-	if err := TaskCardMergeOptions(&task, "project-1", true, false, "", closedPR, true, "").Render(context.Background(), &buf); err != nil {
+	if err := TaskCardMergeOptions(&task, "project-1", true, false, closedPR, true).Render(context.Background(), &buf); err != nil {
 		t.Fatal(err)
 	}
 	body := buf.String()
