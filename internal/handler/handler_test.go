@@ -1119,124 +1119,74 @@ func TestHandler_GetTaskDetailStatusLargeHistoryUsesNarrowExecutionMetrics(t *te
 }
 
 func BenchmarkHandler_GetTaskDetailStatus_MetricsProjection(b *testing.B) {
-	for _, tc := range []struct {
-		name             string
-		dbTextBytes      func(*sql.DB, string) int64
-		run              func(context.Context, *Handler, *echo.Echo, *models.Task, []models.LLMConfig, []models.Agent) error
-		waitQueryPattern string
-	}{
-		{
-			name: "legacy_all_history",
-			dbTextBytes: func(db *sql.DB, taskID string) int64 {
-				var total int64
-				if err := db.QueryRow(`SELECT COALESCE(SUM(LENGTH(COALESCE(prompt_sent, '')) + LENGTH(COALESCE(output, '')) + LENGTH(COALESCE(error_message, ''))), 0) FROM executions WHERE task_id = ?`, taskID).Scan(&total); err != nil {
-					b.Fatalf("legacy text bytes: %v", err)
+	b.Run("narrow_projection", func(b *testing.B) {
+		db, counter := testutil.NewStatementCountingTestDB(b)
+		h, e, llmConfigRepo := setupTestHandlerForDB(b, db)
+		ctx := context.Background()
+		agentRepo := repository.NewAgentRepo(db)
+		h.SetAgentRepo(agentRepo)
+		agent := createAgentTB(b, llmConfigRepo)
+		agentDef := &models.Agent{Name: "Primary Metrics Agent", Key: "primary_metrics_agent", SystemPrompt: "Handle metrics tasks.", Model: "inherit", Enabled: true, SelectableAsPrimary: true}
+		if err := agentRepo.Create(ctx, agentDef); err != nil {
+			b.Fatalf("create agent definition: %v", err)
+		}
+		project := createProjectTB(b, h, "Detail Status Benchmark Project")
+		task := createTaskTB(b, h, project.ID, "Detail Status Benchmark Task", func(tk *models.Task) {
+			tk.Category = models.CategoryBacklog
+			tk.Status = models.StatusCompleted
+			tk.Priority = 3
+			tk.Tag = models.TagFeature
+			tk.AgentID = &agent.ID
+			tk.AgentDefinitionID = &agentDef.ID
+		})
+		task.Category = models.CategoryActive
+		if err := h.taskSvc.Update(ctx, task); err != nil {
+			b.Fatalf("update task to active completed: %v", err)
+		}
+		seedLargeExecutionHistory(b, db, task.ID, agent.ID, 200, 4*1024, 64*1024)
+		if _, err := db.ExecContext(ctx, `UPDATE executions SET status = ?, duration_ms = ?, completed_at = ? WHERE id = ?`, models.ExecCompleted, int64(65_000), "2026-08-13 12:03:20", "exec-199"); err != nil {
+			b.Fatalf("complete latest execution: %v", err)
+		}
+		var totalLightweightLatency int64
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			queryStarted := make(chan struct{})
+			var once sync.Once
+			counter.SetObserver(func(_ context.Context, query string) {
+				if strings.Contains(query, "latest_started_at") {
+					once.Do(func() { close(queryStarted) })
 				}
-				return total
-			},
-			run: func(ctx context.Context, h *Handler, _ *echo.Echo, task *models.Task, agents []models.LLMConfig, agentDefs []models.Agent) error {
-				loadedTask, err := h.taskSvc.GetByID(ctx, task.ID)
-				if err != nil {
-					return err
-				}
-				executions, err := h.execRepo.ListByTaskChronological(ctx, task.ID)
-				if err != nil {
-					return err
-				}
-				var out bytes.Buffer
-				agentName := ""
-				for _, agentDef := range agentDefs {
-					if loadedTask.AgentDefinitionID != nil && agentDef.ID == *loadedTask.AgentDefinitionID {
-						agentName = agentDef.Name
-						break
-					}
-				}
-				return pages.TaskDetailMetrics(loadedTask, taskExecutionMetricsFromExecutionsForBenchmark(executions), agents, agentName).Render(ctx, &out)
-			},
-			waitQueryPattern: "prompt_sent, output"},
-		{
-			name:        "narrow_projection",
-			dbTextBytes: func(*sql.DB, string) int64 { return 0 },
-			run: func(_ context.Context, _ *Handler, e *echo.Echo, task *models.Task, _ []models.LLMConfig, _ []models.Agent) error {
+			})
+			errCh := make(chan error, 1)
+			go func() {
 				rec := htmxGet(e, "/tasks/"+task.ID+"/detail-status")
 				if rec.Code != http.StatusOK {
-					return fmt.Errorf("detail-status request status=%d", rec.Code)
+					errCh <- fmt.Errorf("detail-status request status=%d", rec.Code)
+					return
 				}
-				return nil
-			},
-			waitQueryPattern: "latest_started_at",
-		},
-	} {
-		b.Run(tc.name, func(b *testing.B) {
-			db, counter := testutil.NewStatementCountingTestDB(b)
-			h, e, llmConfigRepo := setupTestHandlerForDB(b, db)
-			ctx := context.Background()
-			agentRepo := repository.NewAgentRepo(db)
-			h.SetAgentRepo(agentRepo)
-			agent := createAgentTB(b, llmConfigRepo)
-			agentDef := &models.Agent{Name: "Primary Metrics Agent", Key: "primary_metrics_agent", SystemPrompt: "Handle metrics tasks.", Model: "inherit", Enabled: true, SelectableAsPrimary: true}
-			if err := agentRepo.Create(ctx, agentDef); err != nil {
-				b.Fatalf("create agent definition: %v", err)
+				errCh <- nil
+			}()
+			select {
+			case <-queryStarted:
+			case err := <-errCh:
+				b.Fatalf("detail-status request ended before query started: %v", err)
+			case <-time.After(2 * time.Second):
+				b.Fatalf("detail-status query did not start")
 			}
-			project := createProjectTB(b, h, "Detail Status Benchmark Project")
-			task := createTaskTB(b, h, project.ID, "Detail Status Benchmark Task", func(tk *models.Task) {
-				tk.Category = models.CategoryBacklog
-				tk.Status = models.StatusCompleted
-				tk.Priority = 3
-				tk.Tag = models.TagFeature
-				tk.AgentID = &agent.ID
-				tk.AgentDefinitionID = &agentDef.ID
-			})
-			task.Category = models.CategoryActive
-			if err := h.taskSvc.Update(ctx, task); err != nil {
-				b.Fatalf("update task to active completed: %v", err)
+			lightweightStart := time.Now()
+			if _, err := h.projectSvc.List(context.Background()); err != nil {
+				b.Fatalf("lightweight project list: %v", err)
 			}
-			seedLargeExecutionHistory(b, db, task.ID, agent.ID, 200, 4*1024, 64*1024)
-			if _, err := db.ExecContext(ctx, `UPDATE executions SET status = ?, duration_ms = ?, completed_at = ? WHERE id = ?`, models.ExecCompleted, int64(65_000), "2026-08-13 12:03:20", "exec-199"); err != nil {
-				b.Fatalf("complete latest execution: %v", err)
+			totalLightweightLatency += time.Since(lightweightStart).Nanoseconds()
+			if err := <-errCh; err != nil {
+				b.Fatal(err)
 			}
-			agents, err := h.llmConfigRepo.ListBadgeOptions(ctx)
-			if err != nil {
-				b.Fatalf("list badge options: %v", err)
-			}
-			agentDefs := h.listTaskFormAgentDefinitions(ctx, task.ProjectID, task.AgentDefinitionID)
-			textBytes := tc.dbTextBytes(db, task.ID)
-			var totalLightweightLatency int64
-			b.ReportAllocs()
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
-				queryStarted := make(chan struct{})
-				var once sync.Once
-				counter.SetObserver(func(_ context.Context, query string) {
-					if strings.Contains(query, tc.waitQueryPattern) {
-						once.Do(func() { close(queryStarted) })
-					}
-				})
-				errCh := make(chan error, 1)
-				go func() {
-					errCh <- tc.run(context.Background(), h, e, task, agents, agentDefs)
-				}()
-				select {
-				case <-queryStarted:
-				case err := <-errCh:
-					b.Fatalf("detail-status request ended before query started: %v", err)
-				case <-time.After(2 * time.Second):
-					b.Fatalf("detail-status query did not start")
-				}
-				lightweightStart := time.Now()
-				if _, err := h.projectSvc.List(context.Background()); err != nil {
-					b.Fatalf("lightweight project list: %v", err)
-				}
-				totalLightweightLatency += time.Since(lightweightStart).Nanoseconds()
-				if err := <-errCh; err != nil {
-					b.Fatal(err)
-				}
-				counter.SetObserver(nil)
-			}
-			b.ReportMetric(float64(totalLightweightLatency)/float64(b.N), "lightweight_db_block_ns/op")
-			b.ReportMetric(float64(textBytes), "db_text_bytes_scanned/op")
-		})
-	}
+			counter.SetObserver(nil)
+		}
+		b.ReportMetric(float64(totalLightweightLatency)/float64(b.N), "lightweight_db_block_ns/op")
+		b.ReportMetric(0, "db_text_bytes_scanned/op")
+	})
 }
 
 func BenchmarkHandler_GetTaskDetailStatus_AgentProjectionVsFullHydration(b *testing.B) {
@@ -1412,21 +1362,6 @@ func createRichTaskDetailBenchmarkAgent(tb testing.TB, repo *repository.AgentRep
 		tb.Fatalf("create benchmark Agent %q: %v", name, err)
 	}
 	return agent
-}
-
-func taskExecutionMetricsFromExecutionsForBenchmark(executions []models.Execution) models.TaskExecutionMetrics {
-	var metrics models.TaskExecutionMetrics
-	if len(executions) > 0 {
-		started := executions[len(executions)-1].StartedAt
-		metrics.LatestStartedAt = &started
-	}
-	for i := len(executions) - 1; i >= 0; i-- {
-		if executions[i].DurationMs > 0 {
-			metrics.LatestDurationMs = executions[i].DurationMs
-			break
-		}
-	}
-	return metrics
 }
 
 func TestHandler_GetTaskDetailActions(t *testing.T) {
