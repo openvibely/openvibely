@@ -20,10 +20,20 @@ func TestInstallLinuxDesktopIntegration(t *testing.T) {
 	root := t.TempDir()
 	dataHome := filepath.Join(root, "data")
 	binHome := filepath.Join(root, "bin")
+	mockBin := filepath.Join(root, "mock-bin")
+	cacheArgsPath := filepath.Join(root, "icon-cache-args")
+	if err := os.MkdirAll(mockBin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cacheCommand := filepath.Join(mockBin, "gtk-update-icon-cache")
+	if err := os.WriteFile(cacheCommand, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$OPENVIBELY_ICON_CACHE_ARGS\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv("HOME", root)
 	t.Setenv("XDG_DATA_HOME", dataHome)
 	t.Setenv("XDG_BIN_HOME", binHome)
-	t.Setenv("PATH", "")
+	t.Setenv("OPENVIBELY_ICON_CACHE_ARGS", cacheArgsPath)
+	t.Setenv("PATH", mockBin)
 
 	if err := installLinuxDesktopIntegration(); err != nil {
 		t.Fatal(err)
@@ -48,6 +58,49 @@ func TestInstallLinuxDesktopIntegration(t *testing.T) {
 		if info, err := os.Stat(icon); err != nil || info.Size() == 0 {
 			t.Fatalf("installed %spx icon = %v, err = %v", size, info, err)
 		}
+	}
+	cacheArgs, err := os.ReadFile(cacheArgsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantCacheArgs := "-q\n-t\n-f\n" + filepath.Join(dataHome, "icons", "hicolor") + "\n"
+	if string(cacheArgs) != wantCacheArgs {
+		t.Fatalf("gtk-update-icon-cache args = %q, want %q", cacheArgs, wantCacheArgs)
+	}
+}
+
+func TestInstallLinuxDesktopIntegrationRefreshesDesktopDatabaseAfterIconCacheFailure(t *testing.T) {
+	root := t.TempDir()
+	dataHome := filepath.Join(root, "data")
+	mockBin := filepath.Join(root, "mock-bin")
+	databaseArgsPath := filepath.Join(root, "desktop-database-args")
+	if err := os.MkdirAll(mockBin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(mockBin, "gtk-update-icon-cache"), []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	databaseCommand := filepath.Join(mockBin, "update-desktop-database")
+	if err := os.WriteFile(databaseCommand, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$OPENVIBELY_DESKTOP_DATABASE_ARGS\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", root)
+	t.Setenv("XDG_DATA_HOME", dataHome)
+	t.Setenv("XDG_BIN_HOME", filepath.Join(root, "bin"))
+	t.Setenv("OPENVIBELY_DESKTOP_DATABASE_ARGS", databaseArgsPath)
+	t.Setenv("PATH", mockBin)
+
+	err := installLinuxDesktopIntegration()
+	if err == nil || !strings.Contains(err.Error(), "refresh application icon cache") {
+		t.Fatalf("installLinuxDesktopIntegration() error = %v, want icon-cache refresh error", err)
+	}
+	databaseArgs, readErr := os.ReadFile(databaseArgsPath)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	wantDatabaseArgs := filepath.Join(dataHome, "applications") + "\n"
+	if string(databaseArgs) != wantDatabaseArgs {
+		t.Fatalf("update-desktop-database args = %q, want %q", databaseArgs, wantDatabaseArgs)
 	}
 }
 

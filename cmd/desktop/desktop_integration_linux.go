@@ -46,6 +46,7 @@ func installLinuxDesktopIntegration() error {
 	}
 	destinationExecutable := filepath.Join(binHome, "openvibely-desktop")
 	desktopPath := filepath.Join(dataHome, "applications", "com.openvibely.desktop.desktop")
+	iconThemePath := filepath.Join(dataHome, "icons", "hicolor")
 	escapedExecutable, err := escapeDesktopExec(destinationExecutable)
 	if err != nil {
 		return fmt.Errorf("prepare application-menu entry: %w", err)
@@ -72,7 +73,7 @@ StartupWMClass=com.openvibely.desktop
 		if readErr != nil {
 			return fmt.Errorf("read %spx application icon: %w", size, readErr)
 		}
-		iconPath := filepath.Join(dataHome, "icons", "hicolor", size+"x"+size, "apps", "com.openvibely.desktop.png")
+		iconPath := filepath.Join(iconThemePath, size+"x"+size, "apps", "com.openvibely.desktop.png")
 		if err := writeLinuxDesktopFile(iconPath, icon, 0o644); err != nil {
 			return fmt.Errorf("install %spx application icon: %w", size, err)
 		}
@@ -82,8 +83,17 @@ StartupWMClass=com.openvibely.desktop
 		return fmt.Errorf("install application-menu entry: %w", err)
 	}
 
+	var iconCacheErr error
+	if updateIconCache, lookupErr := exec.LookPath("gtk-update-icon-cache"); lookupErr == nil {
+		if err := exec.Command(updateIconCache, "-q", "-t", "-f", iconThemePath).Run(); err != nil {
+			iconCacheErr = fmt.Errorf("refresh application icon cache: %w", err)
+		}
+	}
 	if updateDatabase, lookupErr := exec.LookPath("update-desktop-database"); lookupErr == nil {
 		_ = exec.Command(updateDatabase, filepath.Dir(desktopPath)).Run()
+	}
+	if iconCacheErr != nil {
+		return iconCacheErr
 	}
 	fmt.Printf("Installed OpenVibely desktop integration in %s\n", dataHome)
 	return nil
