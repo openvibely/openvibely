@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
@@ -87,6 +89,106 @@ func TestCreateTaskPullRequest_TaskCardOwnershipFailuresAreIndistinguishable(t *
 	if missing.Body.String() != foreign.Body.String() || missing.Header().Get("HX-Trigger") != foreign.Header().Get("HX-Trigger") {
 		t.Fatalf("missing and foreign task-card ownership responses must be indistinguishable: missing=%d %q %q foreign=%d %q %q",
 			missing.Code, missing.Body.String(), missing.Header().Get("HX-Trigger"), foreign.Code, foreign.Body.String(), foreign.Header().Get("HX-Trigger"))
+	}
+}
+
+func TestCreateTaskPullRequest_TaskCardRevalidatesProjectContextInsideRepositoryLease(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		mutate func(context.Context, *testing.T, *models.Project, *models.Project, *models.Task, *sql.DB)
+	}{
+		{
+			name: "task moved to another project",
+			mutate: func(ctx context.Context, t *testing.T, _ *models.Project, foreign *models.Project, task *models.Task, db *sql.DB) {
+				if _, err := db.ExecContext(ctx, "UPDATE tasks SET project_id = ? WHERE id = ?", foreign.ID, task.ID); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name: "project repository changed",
+			mutate: func(ctx context.Context, t *testing.T, project, _ *models.Project, _ *models.Task, db *sql.DB) {
+				if _, err := db.ExecContext(ctx, "UPDATE projects SET repo_path = ? WHERE id = ?", t.TempDir(), project.ID); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			h, e, _, db := setupTestHandlerWithDB(t)
+			h.SetTaskPullRequestRepo(repository.NewTaskPullRequestRepo(db))
+			repositoryCalls := 0
+			h.SetGitHubService(&fakeGitHubService{
+				resolveRepoFn: func(context.Context, string, string) (*service.GitHubRepoRef, error) {
+					repositoryCalls++
+					return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely"}, nil
+				},
+			})
+
+			repoDir := t.TempDir()
+			project := &models.Project{Name: "PR lease project", RepoPath: repoDir, RepoURL: "https://github.com/openvibely/openvibely"}
+			if err := h.projectSvc.Create(ctx, project); err != nil {
+				t.Fatal(err)
+			}
+			foreign := &models.Project{Name: "Foreign PR lease project", RepoPath: t.TempDir(), RepoURL: "https://github.com/foreign/repository"}
+			if err := h.projectSvc.Create(ctx, foreign); err != nil {
+				t.Fatal(err)
+			}
+			task := &models.Task{ProjectID: project.ID, Title: "Lease PR", Category: models.CategoryCompleted, Status: models.StatusCompleted, WorktreeBranch: "task/lease-pr", MergeTargetBranch: "main"}
+			if err := h.taskRepo.Create(ctx, task); err != nil {
+				t.Fatal(err)
+			}
+
+			leaseEntered := make(chan struct{})
+			releaseLease := make(chan struct{})
+			leaseDone := make(chan error, 1)
+			go func() {
+				leaseDone <- service.WithRepositoryMutation(repoDir, func() error {
+					close(leaseEntered)
+					<-releaseLease
+					return nil
+				})
+			}()
+			<-leaseEntered
+
+			result := make(chan *httptest.ResponseRecorder, 1)
+			go func() {
+				form := url.Values{"merge_source": {"task_card"}, "project_id": {project.ID}}
+				req := httptest.NewRequest(http.MethodPost, "/tasks/"+task.ID+"/worktree/pull-request", strings.NewReader(form.Encode()))
+				req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+				req.Header.Set("HX-Request", "true")
+				rec := httptest.NewRecorder()
+				e.ServeHTTP(rec, req)
+				result <- rec
+			}()
+			select {
+			case rec := <-result:
+				close(releaseLease)
+				t.Fatalf("card Create PR bypassed repository lease: %d %s", rec.Code, rec.Body.String())
+			case <-time.After(100 * time.Millisecond):
+			}
+
+			tt.mutate(ctx, t, project, foreign, task, db)
+			close(releaseLease)
+			if err := <-leaseDone; err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case rec := <-result:
+				if rec.Code != http.StatusConflict {
+					t.Fatalf("stale card Create PR returned %d, want 409: %s", rec.Code, rec.Body.String())
+				}
+				if !strings.Contains(strings.ToLower(rec.Body.String()), "project") && !strings.Contains(strings.ToLower(rec.Body.String()), "eligibility") {
+					t.Fatalf("stale card Create PR did not report changed project context: %s", rec.Body.String())
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("card Create PR did not resume after repository lease release")
+			}
+			if repositoryCalls != 0 {
+				t.Fatalf("stale card Create PR reached GitHub repository resolution %d times", repositoryCalls)
+			}
+		})
 	}
 }
 

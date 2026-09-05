@@ -226,9 +226,9 @@ func (s *TaskPullRequestService) OpenForTask(ctx context.Context, project *model
 	return s.openForTaskWithRepositoryMutation(ctx, project, task, opts, nil)
 }
 
-// OpenForTaskValidated serializes publication and reloads authoritative task
-// state inside the same repository mutation boundary before any Git write.
-func (s *TaskPullRequestService) OpenForTaskValidated(ctx context.Context, project *models.Project, task *models.Task, opts OpenTaskPullRequestOptions, validate func() (*models.Task, error)) (*OpenTaskPullRequestResult, error) {
+// OpenForTaskValidated serializes publication and reloads authoritative project
+// and task state inside the same repository mutation boundary before any Git write.
+func (s *TaskPullRequestService) OpenForTaskValidated(ctx context.Context, project *models.Project, task *models.Task, opts OpenTaskPullRequestOptions, validate func() (*models.Project, *models.Task, error)) (*OpenTaskPullRequestResult, error) {
 	return s.openForTaskWithRepositoryMutation(ctx, project, task, opts, validate)
 }
 
@@ -236,22 +236,23 @@ func (s *TaskPullRequestService) OpenForAutomationTask(ctx context.Context, proj
 	return s.openForTaskWithRepositoryMutation(ctx, project, task, opts, nil)
 }
 
-func (s *TaskPullRequestService) openForTaskWithRepositoryMutation(ctx context.Context, project *models.Project, task *models.Task, opts OpenTaskPullRequestOptions, validate func() (*models.Task, error)) (*OpenTaskPullRequestResult, error) {
+func (s *TaskPullRequestService) openForTaskWithRepositoryMutation(ctx context.Context, project *models.Project, task *models.Task, opts OpenTaskPullRequestOptions, validate func() (*models.Project, *models.Task, error)) (*OpenTaskPullRequestResult, error) {
 	if project == nil || strings.TrimSpace(project.RepoPath) == "" {
 		return nil, fmt.Errorf("project has no repository path configured")
 	}
 	var result *OpenTaskPullRequestResult
 	err := WithRepositoryMutation(project.RepoPath, func() error {
+		currentProject := project
 		currentTask := task
 		if validate != nil {
 			var err error
-			currentTask, err = validate()
+			currentProject, currentTask, err = validate()
 			if err != nil {
 				return err
 			}
 		}
 		var err error
-		result, err = s.openForTask(ctx, project, currentTask, opts)
+		result, err = s.openForTask(ctx, currentProject, currentTask, opts)
 		return err
 	})
 	return result, err

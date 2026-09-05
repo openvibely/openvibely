@@ -655,21 +655,34 @@ func (h *Handler) CreateTaskPullRequest(c echo.Context) error {
 	var eligibilityReason string
 	result, mutationErr := h.newTaskPullRequestService().OpenForTaskValidated(c.Request().Context(), project, task, service.OpenTaskPullRequestOptions{
 		CommitMessage: h.buildPullRequestPrepCommitMessage(c.Request().Context(), task),
-	}, func() (*models.Task, error) {
+	}, func() (*models.Project, *models.Task, error) {
 		currentTask, loadErr := h.taskSvc.GetByID(c.Request().Context(), taskID)
 		if loadErr != nil || currentTask == nil {
 			eligibilityReason = "Task not found."
-			return nil, errTaskMutationEligibilityChanged
+			return nil, nil, errTaskMutationEligibilityChanged
 		}
-		h.recoverTaskWorktreeState(c.Request().Context(), currentTask, project)
+		if currentTask.ProjectID != project.ID {
+			eligibilityReason = "Task project eligibility changed."
+			return nil, nil, errTaskMutationEligibilityChanged
+		}
+		currentProject, loadErr := h.projectRepo.GetByID(c.Request().Context(), currentTask.ProjectID)
+		if loadErr != nil || currentProject == nil || strings.TrimSpace(currentProject.RepoPath) == "" {
+			eligibilityReason = "Task project repository eligibility changed."
+			return nil, nil, errTaskMutationEligibilityChanged
+		}
+		if !service.SameRepositoryMutationScope(project.RepoPath, currentProject.RepoPath) {
+			eligibilityReason = "Task project repository eligibility changed."
+			return nil, nil, errTaskMutationEligibilityChanged
+		}
+		h.recoverTaskWorktreeState(c.Request().Context(), currentTask, currentProject)
 		if fromTaskCard {
-			if eligible, reason := h.taskCardPullRequestEligibility(currentTask, project); !eligible {
+			if eligible, reason := h.taskCardPullRequestEligibility(currentTask, currentProject); !eligible {
 				eligibilityReason = reason
-				return nil, errTaskMutationEligibilityChanged
+				return nil, nil, errTaskMutationEligibilityChanged
 			}
 		}
 		task = currentTask
-		return currentTask, nil
+		return currentProject, currentTask, nil
 	})
 	if errors.Is(mutationErr, errTaskMutationEligibilityChanged) {
 		return rejectTaskCardMutation(c, eligibilityReason)
