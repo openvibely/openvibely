@@ -64,10 +64,7 @@ func BenchmarkTaskRepoListWithWorktreesCleanupProjection(b *testing.B) {
 			defer db.Close()
 			repo := NewTaskRepo(db, nil)
 
-			b.Run("FullRowBaseline", func(b *testing.B) {
-				benchmarkListWithWorktreesFullRow(b, db)
-			})
-			b.Run("CleanupProjection", func(b *testing.B) {
+			b.Run("Repository", func(b *testing.B) {
 				benchmarkListWithWorktreesCleanupProjection(b, repo)
 			})
 		})
@@ -126,41 +123,6 @@ func benchmarkListWithWorktreesCleanupProjection(b *testing.B, repo *TaskRepo) {
 		if err != nil {
 			b.Fatalf("list cleanup worktrees: %v", err)
 		}
-		payloadBytes = cleanupProjectionPayloadBytes(tasks)
-	}
-	b.StopTimer()
-	b.ReportMetric(float64(payloadBytes), "payload_bytes/op")
-}
-
-func benchmarkListWithWorktreesFullRow(b *testing.B, db *sql.DB) {
-	b.Helper()
-	ctx := context.Background()
-	var payloadBytes int64
-
-	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		rows, err := db.QueryContext(ctx, `SELECT `+taskSelectColumns+`
-			FROM tasks WHERE worktree_path != '' AND worktree_branch != ''
-			ORDER BY created_at ASC`)
-		if err != nil {
-			b.Fatalf("query full worktree rows: %v", err)
-		}
-		var tasks []models.Task
-		for rows.Next() {
-			var task models.Task
-			if err := rows.Scan(&task.ID, &task.ProjectID, &task.Title, &task.Category,
-				&task.Priority, &task.Status, &task.Prompt, &task.AgentID, &task.AgentDefinitionID, &task.Tag, &task.DisplayOrder, &task.ParentTaskID, &task.ChainConfig, &task.SwarmRole, &task.SwarmStatus, &task.SwarmConfig, &task.SwarmSequence, &task.WorktreePath, &task.WorktreeBranch, &task.AutoMerge, &task.MergeTargetBranch, &task.MergeStatus, &task.BaseBranch, &task.BaseCommitSHA, &task.LineageDepth, &task.CreatedVia, &task.TelegramChatID, &task.CreatedAt, &task.UpdatedAt, &task.CompletedAt); err != nil {
-				rows.Close()
-				b.Fatalf("scan full worktree row: %v", err)
-			}
-			tasks = append(tasks, task)
-		}
-		if err := rows.Err(); err != nil {
-			rows.Close()
-			b.Fatalf("iterate full worktree rows: %v", err)
-		}
-		rows.Close()
 		payloadBytes = cleanupProjectionPayloadBytes(tasks)
 	}
 	b.StopTimer()
