@@ -1456,7 +1456,7 @@ func TestBuildChannelUtilityActionHandlersListChannelsReportsGitHubAppConnection
 	require.True(t, result.GitHub.PATConfigured)
 }
 
-func TestChannelServiceListChannelsIncludesEmailWebhooksAndTargetsSafely(t *testing.T) {
+func TestChannelServiceListChannelsIncludesProviderStatusAndCountsSafely(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 	settingsRepo := repository.NewSettingsRepo(db)
@@ -1466,11 +1466,33 @@ func TestChannelServiceListChannelsIncludesEmailWebhooksAndTargetsSafely(t *test
 	channelTargetRepo := repository.NewChannelTargetRepo(db)
 	project := &models.Project{Name: "Channel Surface Complete Status"}
 	require.NoError(t, projectRepo.Create(ctx, project))
-	require.NoError(t, settingsRepo.Set(ctx, EmailSettingProvider, EmailProviderCustom))
-	require.NoError(t, settingsRepo.Set(ctx, EmailSettingAddress, "bot@example.com"))
-	require.NoError(t, settingsRepo.Set(ctx, EmailSettingPassword, "EMAIL-PASSWORD-MUST-NOT-LEAK"))
-	require.NoError(t, settingsRepo.Set(ctx, EmailSettingIMAPHost, "imap.example.com"))
-	require.NoError(t, settingsRepo.Set(ctx, EmailSettingSMTPHost, "smtp.example.com"))
+	settings := map[string]string{
+		SlackSettingClientID:          "SLACK-CLIENT-ID-MUST-NOT-LEAK",
+		SlackSettingClientSecret:      "SLACK-CLIENT-SECRET-MUST-NOT-LEAK",
+		SlackSettingBotToken:          "SLACK-BOT-TOKEN-MUST-NOT-LEAK",
+		SlackSettingBotTokenSource:    SlackBotTokenSourceOAuth,
+		SlackSettingTeamID:            "T-CHANNEL-STATUS",
+		SlackSettingTeamName:          "Channel Status Team",
+		SlackSettingBotUserID:         "B-CHANNEL-STATUS",
+		SlackSettingSendResponses:     "false",
+		TelegramSettingBotToken:       "TELEGRAM-BOT-TOKEN-MUST-NOT-LEAK",
+		TelegramSettingSendResponses:  "false",
+		TelegramSettingRichMessagesV2: "false",
+		DiscordSettingBotToken:        "DISCORD-BOT-TOKEN-MUST-NOT-LEAK",
+		DiscordSettingSendResponses:   "false",
+		XSettingConsumerKey:           "X-CONSUMER-KEY-MUST-NOT-LEAK",
+		XSettingConsumerSecret:        "X-CONSUMER-SECRET-MUST-NOT-LEAK",
+		XSettingAccessToken:           "X-ACCESS-TOKEN-MUST-NOT-LEAK",
+		XSettingAccessTokenSecret:     "X-ACCESS-TOKEN-SECRET-MUST-NOT-LEAK",
+		EmailSettingProvider:          EmailProviderCustom,
+		EmailSettingAddress:           "bot@example.com",
+		EmailSettingPassword:          "EMAIL-PASSWORD-MUST-NOT-LEAK",
+		EmailSettingIMAPHost:          "imap.example.com",
+		EmailSettingSMTPHost:          "smtp.example.com",
+	}
+	for key, value := range settings {
+		require.NoError(t, settingsRepo.Set(ctx, key, value))
+	}
 	require.NoError(t, emailAuthRepo.Create(ctx, &models.EmailAuthorizedSender{ProjectID: project.ID, EmailAddress: "sender@example.com", DisplayName: "Sender", AddedBy: "test"}))
 	require.NoError(t, webhookRepo.Create(ctx, &models.WebhookEndpoint{ProjectID: project.ID, Name: "Deploy", Enabled: true, PathToken: "WEBHOOK-PATH-TOKEN-MUST-NOT-LEAK", Secret: "WEBHOOK-SECRET-MUST-NOT-LEAK", DefaultPriority: 2}))
 	require.NoError(t, channelTargetRepo.Upsert(ctx, models.ChannelTarget{ID: "target-1", ProjectID: project.ID, Platform: "slack", TargetKind: "channel", Name: "ops", TargetID: "RAW-TARGET-ID-MUST-NOT-LEAK", Home: true}))
@@ -1496,21 +1518,46 @@ func TestChannelServiceListChannelsIncludesEmailWebhooksAndTargetsSafely(t *test
 	telegramSvc.SetChannelMessageRouter(router)
 
 	for _, tc := range []struct {
-		name     string
-		handlers map[string]chatcontrol.RuntimeActionHandler
+		name               string
+		handlers           map[string]chatcontrol.RuntimeActionHandler
+		wantSlackConnected bool
 	}{
-		{name: "slack", handlers: slackSvc.slackActionHandlers(project.ID, slackActionContext{TeamID: "T1", ChannelID: "C1", UserID: "U1"}, nil)},
+		{name: "slack", handlers: slackSvc.slackActionHandlers(project.ID, slackActionContext{TeamID: "T1", ChannelID: "C1", UserID: "U1"}, nil), wantSlackConnected: true},
 		{name: "discord", handlers: discordSvc.discordActionHandlers(project.ID, discordActionContext{ChannelID: "C1", UserID: "U1"}, nil)},
 		{name: "telegram", handlers: telegramSvc.telegramActionHandlers(project.ID, 1001, 2002, nil)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			out, err := tc.handlers["list_channels"](ctx, json.RawMessage(`{}`))
 			require.NoError(t, err)
-			for _, secret := range []string{"EMAIL-PASSWORD-MUST-NOT-LEAK", "WEBHOOK-PATH-TOKEN-MUST-NOT-LEAK", "WEBHOOK-SECRET-MUST-NOT-LEAK", "RAW-TARGET-ID-MUST-NOT-LEAK"} {
-				require.NotContains(t, out, secret)
-			}
-
 			var result struct {
+				ConfiguredChannelCount int `json:"configured_channel_count"`
+				Slack                  struct {
+					Configured    bool   `json:"configured"`
+					Connected     bool   `json:"connected"`
+					Status        string `json:"status"`
+					TeamName      string `json:"team_name"`
+					TeamID        string `json:"team_id"`
+					BotUserID     string `json:"bot_user_id"`
+					SendResponses bool   `json:"send_responses"`
+				} `json:"slack"`
+				Telegram struct {
+					Configured     bool   `json:"configured"`
+					Running        bool   `json:"running"`
+					Status         string `json:"status"`
+					SendResponses  bool   `json:"send_responses"`
+					RichMessagesV2 bool   `json:"rich_messages_v2"`
+				} `json:"telegram"`
+				Discord struct {
+					Configured    bool   `json:"configured"`
+					Connected     bool   `json:"connected"`
+					Running       bool   `json:"running"`
+					Status        string `json:"status"`
+					SendResponses bool   `json:"send_responses"`
+				} `json:"discord"`
+				X struct {
+					Configured bool   `json:"configured"`
+					Status     string `json:"status"`
+				} `json:"x"`
 				Email struct {
 					Configured            bool   `json:"configured"`
 					Running               bool   `json:"running"`
@@ -1532,7 +1579,50 @@ func TestChannelServiceListChannelsIncludesEmailWebhooksAndTargetsSafely(t *test
 					} `json:"by_platform"`
 				} `json:"outbound_message_targets"`
 			}
+			for _, secret := range []string{
+				"SLACK-CLIENT-ID-MUST-NOT-LEAK",
+				"SLACK-CLIENT-SECRET-MUST-NOT-LEAK",
+				"SLACK-BOT-TOKEN-MUST-NOT-LEAK",
+				"TELEGRAM-BOT-TOKEN-MUST-NOT-LEAK",
+				"DISCORD-BOT-TOKEN-MUST-NOT-LEAK",
+				"X-CONSUMER-KEY-MUST-NOT-LEAK",
+				"X-CONSUMER-SECRET-MUST-NOT-LEAK",
+				"X-ACCESS-TOKEN-MUST-NOT-LEAK",
+				"X-ACCESS-TOKEN-SECRET-MUST-NOT-LEAK",
+				"EMAIL-PASSWORD-MUST-NOT-LEAK",
+				"WEBHOOK-PATH-TOKEN-MUST-NOT-LEAK",
+				"WEBHOOK-SECRET-MUST-NOT-LEAK",
+				"RAW-TARGET-ID-MUST-NOT-LEAK",
+			} {
+				require.NotContains(t, out, secret)
+			}
 			require.NoError(t, json.Unmarshal([]byte(out), &result))
+			require.Equal(t, 6, result.ConfiguredChannelCount)
+			require.True(t, result.Slack.Configured)
+			require.Equal(t, tc.wantSlackConnected, result.Slack.Connected)
+			if tc.wantSlackConnected {
+				require.Equal(t, "connected", result.Slack.Status)
+			} else {
+				require.Equal(t, "configured_not_connected", result.Slack.Status)
+			}
+			if tc.wantSlackConnected {
+				require.Equal(t, "Channel Status Team", result.Slack.TeamName)
+				require.Equal(t, "T-CHANNEL-STATUS", result.Slack.TeamID)
+				require.Equal(t, "B-CHANNEL-STATUS", result.Slack.BotUserID)
+			}
+			require.False(t, result.Slack.SendResponses)
+			require.True(t, result.Telegram.Configured)
+			require.False(t, result.Telegram.Running)
+			require.Equal(t, "configured_not_running", result.Telegram.Status)
+			require.False(t, result.Telegram.SendResponses)
+			require.False(t, result.Telegram.RichMessagesV2)
+			require.True(t, result.Discord.Configured)
+			require.False(t, result.Discord.Connected)
+			require.False(t, result.Discord.Running)
+			require.Equal(t, "gateway_offline", result.Discord.Status)
+			require.False(t, result.Discord.SendResponses)
+			require.True(t, result.X.Configured)
+			require.Equal(t, "configured_not_connected", result.X.Status)
 			require.True(t, result.Email.Configured)
 			require.True(t, result.Email.Running)
 			require.Equal(t, "running", result.Email.Status)
