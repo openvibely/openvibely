@@ -1493,6 +1493,7 @@ func TestChannelServiceListChannelsIncludesProviderStatusAndCountsSafely(t *test
 	for key, value := range settings {
 		require.NoError(t, settingsRepo.Set(ctx, key, value))
 	}
+	require.NoError(t, settingsRepo.Set(ctx, SendMessageAllowExplicitTargetsSetting+":"+project.ID, "true"))
 	require.NoError(t, emailAuthRepo.Create(ctx, &models.EmailAuthorizedSender{ProjectID: project.ID, EmailAddress: "sender@example.com", DisplayName: "Sender", AddedBy: "test"}))
 	require.NoError(t, webhookRepo.Create(ctx, &models.WebhookEndpoint{ProjectID: project.ID, Name: "Deploy", Enabled: true, PathToken: "WEBHOOK-PATH-TOKEN-MUST-NOT-LEAK", Secret: "WEBHOOK-SECRET-MUST-NOT-LEAK", DefaultPriority: 2}))
 	require.NoError(t, channelTargetRepo.Upsert(ctx, models.ChannelTarget{ID: "target-1", ProjectID: project.ID, Platform: "slack", TargetKind: "channel", Name: "ops", TargetID: "RAW-TARGET-ID-MUST-NOT-LEAK", Home: true}))
@@ -1577,6 +1578,7 @@ func TestChannelServiceListChannelsIncludesProviderStatusAndCountsSafely(t *test
 				OutboundTargets struct {
 					Total              int  `json:"total"`
 					Configured         bool `json:"configured"`
+					ExplicitAllowed    bool `json:"explicit_unsaved_targets_allowed"`
 					MessagingAvailable bool `json:"messaging_available"`
 					ByPlatform         map[string]struct {
 						Total int `json:"total"`
@@ -1641,6 +1643,7 @@ func TestChannelServiceListChannelsIncludesProviderStatusAndCountsSafely(t *test
 			require.Equal(t, 1, result.Webhooks.Total)
 			require.Equal(t, 1, result.Webhooks.Active)
 			require.True(t, result.OutboundTargets.Configured)
+			require.True(t, result.OutboundTargets.ExplicitAllowed)
 			require.True(t, result.OutboundTargets.MessagingAvailable)
 			require.Equal(t, 1, result.OutboundTargets.Total)
 			require.Equal(t, 1, result.OutboundTargets.ByPlatform["slack"].Total)
