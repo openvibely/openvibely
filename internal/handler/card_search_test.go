@@ -32,9 +32,8 @@ func TestCollectionSelectionBrowserContractIsShared(t *testing.T) {
 	body := rec.Body.String()
 	for _, want := range []string{
 		`checkbox.addEventListener('click'`, `event.stopPropagation()`, `state.last`, `event.key !== 'Escape'`,
-		`data-card-select-mode`, `data-card-mobile-actions`, `data-card-bulk-confirm`, `state.ids[card.getAttribute('data-card-select-id')] = true`,
-		`_openVibelyInstallSelectionCards`, `if (!existing[id]) delete state.ids[id]`, `focus({preventScroll: true})`,
-	} {
+		`data-card-select-mode`, `data-card-mobile-actions`, `data-card-bulk-confirm`, `if (selectLoaded.checked) state.ids[id] = true`, `selectLoaded.indeterminate`, `selectLoaded.checked`, `data-card-filters-popover`, `dropdown.classList.remove('dropdown-open')`,
+		`absolute left-5 top-8 z-20 hidden md:block`, `card.classList.add('md:pl-8')`, `alignSelectionGutter(card, gutter)`, `_openVibelyInstallSelectionCards`, `if (!existing[id]) delete state.ids[id]`, `focus({preventScroll: true})`} {
 		require.Contains(t, body, want)
 	}
 }
@@ -91,9 +90,9 @@ func TestCollectionSelectionProductionBrowserInteractions(t *testing.T) {
 	}
 	initialHTML := renderWithState(initial, pages.CardListState{Filters: map[string]string{"provider": "openai"}})
 	page := strings.Replace(strings.Join(local, "\n"), "</head>", `<style>
-.hidden{display:none!important}.flex{display:flex!important}.fixed{position:fixed!important}
-@media (min-width:768px){.md\:inline-flex{display:inline-flex!important}.md\:hidden{display:none!important}}
-</style></head>`, 1)
+	.hidden{display:none!important}.flex{display:flex!important}.fixed{position:fixed!important}.card{position:relative}.card-body{padding:2rem}.left-5{left:1.25rem}.top-8{top:2rem}
+	@media (min-width:768px){.md\:inline-flex{display:inline-flex!important}.md\:hidden{display:none!important}.md\:pl-8{padding-left:2rem!important}}
+	</style></head>`, 1)
 	page = strings.Replace(page, "</main>", initialHTML+"</main>", 1)
 	runner := `<script>
 (function() {
@@ -101,26 +100,44 @@ func TestCollectionSelectionProductionBrowserInteractions(t *testing.T) {
   function wait(ms) { return new Promise(function(resolve) { setTimeout(resolve, ms); }); }
   function card(id) { return document.querySelector('[data-model-id="'+id+'"]'); }
   function checkbox(id) { return card(id).querySelector('[data-card-selection-gutter] input'); }
-  function selectedCount() { return document.querySelector('[data-card-selected-count]').textContent.trim(); }
-  async function run() {
-    await wait(100);
+	  function selectedCount() { return document.querySelector('[data-card-selected-count]').textContent.trim(); }
+	  function verifyMixedCollection(key) {
+	    var root=document.createElement('section'); root.setAttribute('data-card-pagination-root','');
+	    root.innerHTML='<div data-card-list-toolbar="'+key+'" data-card-bulk-url="/'+key+'/bulk" data-card-entity-type="items" data-card-identity-kind="ids"><form data-card-query-form><label data-card-select-loaded-control><input type="checkbox" data-card-select-loaded></label></form><div class="hidden" data-card-selection-actions><strong data-card-selected-count>0 selected</strong></div><dialog data-card-bulk-confirm><span data-card-bulk-confirm-title></span><button data-card-bulk-confirm-delete></button><span data-card-bulk-error></span></dialog></div><article data-search-card><h3>Fixed</h3></article><article data-search-card data-card-select-id="eligible" data-card-select-eligible="true"><h3>Eligible</h3></article>';
+	    document.querySelector('main').appendChild(root); window.refreshCardListToolbars(root);
+	    var controls=root.querySelectorAll('[data-card-selection-gutter] input'), master=root.querySelector('[data-card-select-loaded]');
+	    if (controls.length!==2 || !controls[0].disabled || controls[1].disabled) fail(key+' did not distinguish fixed and eligible cards');
+	    if (!controls[0].title || controls[0].title.toLowerCase().indexOf(key==='channels'?'webhook':'custom personalities')<0) fail(key+' fixed card lacks the page-specific selection explanation');
+	    master.click();
+	    if (!master.checked || !controls[1].checked || root.querySelector('[data-card-selected-count]').textContent.trim()!=='1 selected') fail(key+' master checkbox did not select its loaded eligible card');
+	    root.remove();
+	  }
+	  async function run() {    await wait(100);
     var chip=document.querySelector('[data-card-filter-chip="provider"]'), clear=document.querySelector('[data-card-clear-filters]');
     if (!chip || !clear || !chip.textContent.includes('OpenAI')) fail('server-rendered active filter chip or Clear all is missing');
 	    clear.addEventListener('click', function(event) { event.preventDefault(); window.selectionNavigation=clear.getAttribute('href'); }, {once:true});
 	    clear.click();    if (!window.selectionNavigation || window.selectionNavigation.includes('provider=')) fail('Clear all did not navigate without the active filter');
-    var desktopSelect=document.querySelector('[data-card-select-loaded]'), mobileSelect=document.querySelector('[data-card-select-mode]');
-    for (var cssWait=0;cssWait<80 && getComputedStyle(desktopSelect).display!=='none';cssWait++) await wait(25);
-    if (getComputedStyle(desktopSelect).display!=='none' || getComputedStyle(mobileSelect).display==='none') fail('production responsive styles did not expose mobile selection mode');
-    var clicks=0; ['a','b','c'].forEach(function(id) { card(id).onclick=function(){clicks++;}; });
-    checkbox('a').click();
-    if (clicks !== 0 || selectedCount() !== '1 selected') fail('checkbox click activated card or did not select');
-    checkbox('b').dispatchEvent(new MouseEvent('click', {bubbles:true, shiftKey:true}));
-    if (selectedCount() !== '2 selected' || !checkbox('a').checked || !checkbox('b').checked) fail('Shift-click range selection failed');
-    document.dispatchEvent(new KeyboardEvent('keydown', {key:'Escape', bubbles:true}));
-    if (selectedCount() !== '0 selected' || checkbox('a').checked) fail('Escape did not clear selection');
-    document.querySelector('[data-card-select-loaded]').click();
-    if (selectedCount() !== '3 selected' || checkbox('default').checked) fail('Select loaded included an ineligible card or missed eligible cards');
-    var disabled=checkbox('default'), help=document.getElementById(disabled.getAttribute('aria-describedby'));
+	    var filterButton=document.querySelector('[data-card-filters-button]'), filterDropdown=filterButton.closest('.dropdown');
+	    filterButton.click();
+	    if (!filterDropdown.classList.contains('dropdown-open') || filterButton.getAttribute('aria-expanded') !== 'true') fail('Filters did not open accessibly');
+	    document.body.dispatchEvent(new MouseEvent('click', {bubbles:true}));
+	    if (filterDropdown.classList.contains('dropdown-open') || filterButton.getAttribute('aria-expanded') !== 'false') fail('outside click did not close Filters');
+	    var desktopSelect=document.querySelector('[data-card-select-loaded]'), mobileSelect=document.querySelector('[data-card-select-mode]');
+	    if (!desktopSelect || desktopSelect.tagName !== 'INPUT' || desktopSelect.type !== 'checkbox' || !desktopSelect.getAttribute('aria-label')) fail('loaded-card control is not an accessible checkbox');
+	    var alignedCard=card('a'), alignedTitle=alignedCard.querySelector('h3'), alignedGutter=alignedCard.querySelector('[data-card-selection-gutter]');
+	    var lineHeight=parseFloat(getComputedStyle(alignedTitle).lineHeight); if (!Number.isFinite(lineHeight)) lineHeight=alignedTitle.getBoundingClientRect().height;
+	    var expectedTop=alignedTitle.getBoundingClientRect().top-alignedCard.getBoundingClientRect().top+Math.max(0,(lineHeight-20)/2);
+	    if (!alignedGutter.style.top || Math.abs(parseFloat(alignedGutter.style.top)-expectedTop)>1) fail('card checkbox is not aligned with the title');
+	    for (var cssWait=0;cssWait<80 && getComputedStyle(desktopSelect.closest('[data-card-select-loaded-control]')).display!=='none';cssWait++) await wait(25);
+	    if (getComputedStyle(desktopSelect.closest('[data-card-select-loaded-control]')).display!=='none' || getComputedStyle(mobileSelect).display==='none') fail('production responsive styles did not expose mobile selection mode');    var clicks=0; ['a','b','c'].forEach(function(id) { card(id).onclick=function(){clicks++;}; });
+	    checkbox('a').click();
+	    if (clicks !== 0 || selectedCount() !== '1 selected' || !desktopSelect.indeterminate || desktopSelect.checked) fail('checkbox click activated card or did not update the master checkbox');
+	    checkbox('b').dispatchEvent(new MouseEvent('click', {bubbles:true, shiftKey:true}));
+	    if (selectedCount() !== '2 selected' || !checkbox('a').checked || !checkbox('b').checked || !desktopSelect.indeterminate) fail('Shift-click range selection failed');
+	    document.dispatchEvent(new KeyboardEvent('keydown', {key:'Escape', bubbles:true}));
+	    if (selectedCount() !== '0 selected' || checkbox('a').checked || desktopSelect.checked || desktopSelect.indeterminate) fail('Escape did not clear selection');
+	    desktopSelect.click();
+	    if (selectedCount() !== '3 selected' || checkbox('default').checked || !desktopSelect.checked || desktopSelect.indeterminate) fail('master checkbox included an ineligible card or missed eligible cards');    var disabled=checkbox('default'), help=document.getElementById(disabled.getAttribute('aria-describedby'));
     if (!disabled.disabled || !help || !help.textContent.trim()) fail('disabled selection control lacks an accessible explanation');
     window.openVibelyNavigate=function(path){window.selectionNavigation=path;};
     var provider=document.querySelector('[name="provider"]'); provider.value='openai'; provider.form.requestSubmit();
@@ -128,9 +145,12 @@ func TestCollectionSelectionProductionBrowserInteractions(t *testing.T) {
     document.dispatchEvent(new KeyboardEvent('keydown', {key:'Escape', bubbles:true}));
     checkbox('a').click();
     var root=document.getElementById('models-container');
-    var appended=card('c').cloneNode(true); appended.setAttribute('data-model-id','appended'); appended.setAttribute('data-card-select-id','appended'); appended.querySelector('[data-card-selection-gutter]').remove(); document.querySelector('#models-card-list .grid').appendChild(appended); root._openVibelyInstallSelectionCards();
-    if (!checkbox('a').checked || !checkbox('appended') || checkbox('appended').checked) fail('loaded-card reconciliation changed selection or missed the new checkbox');
-    window.addEventListener('sse-card-refresh', function() { root=window.replaceSearchableCardContainer(root, REPLACEMENT_HTML); document.body.dispatchEvent(new CustomEvent('htmx:afterSettle', {detail:{elt:root}})); });
+	    var appended=card('c').cloneNode(true); appended.setAttribute('data-model-id','appended'); appended.setAttribute('data-card-select-id','appended'); appended.querySelector('[data-card-selection-gutter]').remove(); document.querySelector('#models-card-list .grid').appendChild(appended);
+	    var fixed=card('c').cloneNode(true); fixed.setAttribute('data-model-id','fixed'); fixed.removeAttribute('data-card-select-id'); fixed.removeAttribute('data-card-select-eligible'); fixed.querySelector('[data-card-selection-gutter]').remove(); document.querySelector('#models-card-list .grid').appendChild(fixed);
+	    root._openVibelyInstallSelectionCards();
+	    var fixedCheckbox=checkbox('fixed');
+	    if (!checkbox('a').checked || !checkbox('appended') || checkbox('appended').checked) fail('loaded-card reconciliation changed selection or missed the new checkbox');
+	    if (!fixedCheckbox || !fixedCheckbox.disabled || !fixedCheckbox.title) fail('fixed Personality/Channel-style card did not receive an explained disabled checkbox');    window.addEventListener('sse-card-refresh', function() { root=window.replaceSearchableCardContainer(root, REPLACEMENT_HTML); document.body.dispatchEvent(new CustomEvent('htmx:afterSettle', {detail:{elt:root}})); });
     window.dispatchEvent(new CustomEvent('sse-card-refresh'));
     await wait(25);
     if (selectedCount() !== '0 selected' || !checkbox('e')) fail('HTMX/SSE replacement did not reconcile removed and new cards');
@@ -162,6 +182,7 @@ func TestCollectionSelectionProductionBrowserInteractions(t *testing.T) {
 	    window.refreshCardListToolbars(alertsRoot);
 	    if (alertsRoot.querySelector('[data-card-filter-chip="source"]') || alertsRoot.querySelector('[name="source"]').value) fail('raw rejected Alert source was reactivated by client hydration');
 	    if ((alertsRoot.getAttribute('data-card-pagination-url') || '').includes('source=')) fail('rejected Alert source contaminated authoritative root state');
+	    verifyMixedCollection('personality'); verifyMixedCollection('channels');
 	    result('pass','selection interactions passed');
 	  }
 	  var REPLACEMENT_HTML=` + string(replacementJSON) + `;
@@ -275,13 +296,17 @@ func TestCollectionCardToolbars(t *testing.T) {
 			body := rec.Body.String()
 			for _, want := range []string{
 				`data-card-list-toolbar="` + tt.pageKey + `"`,
-				`data-card-select-loaded`,
+				`type="checkbox" class="checkbox checkbox-sm" data-card-select-loaded`,
+				`aria-label="Select all loaded ` + tt.pageKey + `"`,
 				`data-card-filters-button`,
 				`data-card-selection-actions`,
 			} {
 				if !strings.Contains(body, want) {
 					t.Errorf("expected %s toolbar to contain %q", tt.name, want)
 				}
+			}
+			if strings.Contains(body, ">Select loaded<") {
+				t.Errorf("expected %s toolbar to use a master checkbox without visible Select loaded text", tt.name)
 			}
 			if got := strings.Contains(body, `id="`+tt.pageKey+`-card-sort"`); got != tt.wantSort {
 				t.Errorf("sort presence = %v, want %v", got, tt.wantSort)

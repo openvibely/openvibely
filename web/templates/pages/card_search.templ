@@ -222,7 +222,9 @@ templ CardListToolbar(config CardListToolbarConfig) {
 				}
 			}
 			if config.CanSelect {
-				<button type="button" class="btn btn-sm btn-ghost hidden md:inline-flex" data-card-select-loaded>Select loaded</button>
+				<label class="hidden cursor-pointer items-center md:inline-flex" data-card-select-loaded-control>
+					<input type="checkbox" class="checkbox checkbox-sm" data-card-select-loaded aria-label={ "Select all loaded " + config.PageKey }/>
+				</label>
 				<button type="button" class="btn btn-sm btn-ghost md:hidden" data-card-select-mode>Select</button>
 			}
 			<div class="w-full max-w-xs flex-1 min-w-44">
@@ -239,7 +241,7 @@ templ CardListToolbar(config CardListToolbarConfig) {
 				</div>
 			</div>
 			<div class="dropdown dropdown-end">
-				<button type="button" class="btn btn-sm" data-card-filters-button onclick="this.parentElement.classList.toggle('dropdown-open')">
+				<button type="button" class="btn btn-sm" data-card-filters-button aria-haspopup="true" aria-expanded="false">
 					Filters
 					if activeCardFilterCount(config.Filters) > 0 {
 						({ strconv.Itoa(activeCardFilterCount(config.Filters)) })
