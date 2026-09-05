@@ -52,24 +52,29 @@ func TestAutomationPortfolioCardKebabEnablesAndDisablesInPlace(t *testing.T) {
 	require.NotContains(t, portfolio.Body.String(), ">Pause</button>")
 	require.NotContains(t, portfolio.Body.String(), fmt.Sprintf(`hx-post="/automations/%s/resume?project_id=%s"`, definition.Automation.ID, project.ID))
 
-	paused := tc.HTMX().Post(fmt.Sprintf("/automations/%s/pause?project_id=%s", definition.Automation.ID, project.ID)).WithForm(url.Values{
+	paused := tc.HTMX().Post(fmt.Sprintf("/automations/%s/pause?project_id=%s&lifecycle_state=active&sort=name_desc", definition.Automation.ID, project.ID)).WithForm(url.Values{
 		"project_id": {project.ID}, "return_to": {"portfolio"},
 	}).Execute()
 	require.Equal(t, http.StatusOK, paused.Code, paused.Body.String())
 	require.Contains(t, paused.Body.String(), `id="automations-container"`)
-	require.Contains(t, paused.Body.String(), fmt.Sprintf(`hx-post="/automations/%s/resume?project_id=%s"`, definition.Automation.ID, project.ID))
-	require.Contains(t, paused.Body.String(), ">Enable</button>")
-	require.NotContains(t, paused.Body.String(), ">Resume</button>")
-	require.NotContains(t, paused.Body.String(), fmt.Sprintf(`hx-post="/automations/%s/pause?project_id=%s"`, definition.Automation.ID, project.ID))
+	require.Contains(t, paused.Body.String(), `data-card-pagination-url="/automations?lifecycle_state=active&amp;project_id=`+project.ID+`&amp;sort=name_desc"`)
+	require.NotContains(t, paused.Body.String(), `data-card-select-id="`+definition.Automation.ID+`"`)
 	storedSchedule, err := tc.scheduleRepo.GetByID(context.Background(), schedule.ID)
 	require.NoError(t, err)
 	require.False(t, storedSchedule.Enabled)
 
-	resumed := tc.HTMX().Post(fmt.Sprintf("/automations/%s/resume?project_id=%s", definition.Automation.ID, project.ID)).WithForm(url.Values{
+	pausedPortfolio := tc.HTTP().Get("/automations?project_id=" + project.ID).Execute()
+	require.Equal(t, http.StatusOK, pausedPortfolio.Code, pausedPortfolio.Body.String())
+	require.Contains(t, pausedPortfolio.Body.String(), fmt.Sprintf(`hx-post="/automations/%s/resume?project_id=%s"`, definition.Automation.ID, project.ID))
+	require.Contains(t, pausedPortfolio.Body.String(), ">Enable</button>")
+	require.NotContains(t, pausedPortfolio.Body.String(), ">Resume</button>")
+
+	resumed := tc.HTMX().Post(fmt.Sprintf("/automations/%s/resume?project_id=%s&lifecycle_state=paused&sort=name_desc", definition.Automation.ID, project.ID)).WithForm(url.Values{
 		"project_id": {project.ID}, "return_to": {"portfolio"},
 	}).Execute()
 	require.Equal(t, http.StatusOK, resumed.Code, resumed.Body.String())
-	require.Contains(t, resumed.Body.String(), fmt.Sprintf(`hx-post="/automations/%s/pause?project_id=%s"`, definition.Automation.ID, project.ID))
+	require.Contains(t, resumed.Body.String(), `data-card-pagination-url="/automations?lifecycle_state=paused&amp;project_id=`+project.ID+`&amp;sort=name_desc"`)
+	require.NotContains(t, resumed.Body.String(), `data-card-select-id="`+definition.Automation.ID+`"`)
 	storedSchedule, err = tc.scheduleRepo.GetByID(context.Background(), schedule.ID)
 	require.NoError(t, err)
 	require.True(t, storedSchedule.Enabled)

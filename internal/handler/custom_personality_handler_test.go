@@ -814,7 +814,7 @@ func TestHandler_PersonalityPage_DoesNotRenderFullPromptBodiesInCardAttributes(t
 	assert.NotContains(t, body, promptTail)
 	assert.NotContains(t, body, "data-personality-prompt=")
 	assert.Less(t, len(body), 512*1024, "personality section should be bounded by card metadata and previews")
-	assert.Contains(t, body, "fetch('/personality/custom/'")
+	assert.Contains(t, body, "fetch(personalityMutationURL('/personality/custom/'")
 }
 
 func TestHandler_PersonalityPage_DefaultCardNotClickable(t *testing.T) {

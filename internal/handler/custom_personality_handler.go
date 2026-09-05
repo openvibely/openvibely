@@ -63,7 +63,9 @@ func (h *Handler) renderPersonalitySection(c echo.Context) error {
 	}
 	setCardPageResponse(c, hasMore)
 
-	return render(c, http.StatusOK, pages.PersonalitySectionPageWithPaginationState(personality, customs, hasMore, personalityListState(page)))
+	state := personalityListState(page)
+	state.ProjectID, _ = h.getCurrentProjectID(c)
+	return render(c, http.StatusOK, pages.PersonalitySectionPageWithPaginationState(personality, customs, hasMore, state))
 }
 
 type customPersonalitySavePayload struct {

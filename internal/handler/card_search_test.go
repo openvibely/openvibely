@@ -4,10 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"html"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -71,8 +72,12 @@ func TestCollectionSelectionProductionBrowserInteractions(t *testing.T) {
 	replacementJSON, err := json.Marshal(render(replacement))
 	require.NoError(t, err)
 	var unmanagedSkills bytes.Buffer
-	require.NoError(t, pages.SkillsContentForProjectPage([]pages.SkillCard{{Handle: "read-only", Name: "Read only", Scope: "global", Source: "global", Enabled: true}}, false, "project", false).Render(t.Context(), &unmanagedSkills))
+	require.NoError(t, pages.SkillsContentForProjectPageWithState([]pages.SkillCard{{Handle: "read-only", Name: "Read only", Scope: "global", Source: "global", Enabled: true}}, false, "project", false, pages.CardListState{Filters: map[string]string{"enabled": "true"}}).Render(t.Context(), &unmanagedSkills))
 	unmanagedSkillsJSON, err := json.Marshal(unmanagedSkills.String())
+	require.NoError(t, err)
+	var rejectedAlerts bytes.Buffer
+	require.NoError(t, pages.AlertsContentPageWithState(nil, "project", 0, false, "", "", pages.CardListState{ProjectID: "project", Filters: map[string]string{}}).Render(t.Context(), &rejectedAlerts))
+	rejectedAlertsJSON, err := json.Marshal(rejectedAlerts.String())
 	require.NoError(t, err)
 
 	var base bytes.Buffer
@@ -92,8 +97,7 @@ func TestCollectionSelectionProductionBrowserInteractions(t *testing.T) {
 	page = strings.Replace(page, "</main>", initialHTML+"</main>", 1)
 	runner := `<script>
 (function() {
-  function result(status, message) { var n=document.createElement('div'); n.id='browser-result'; n.dataset.status=status; n.textContent=message||status; document.body.appendChild(n); }
-  function fail(message) { throw new Error(message); }
+	  function result(status, message) { var n=document.createElement('div'); n.id='browser-result'; n.dataset.status=status; n.textContent=message||status; document.body.appendChild(n); fetch('/browser-result', {method:'POST', headers:{'X-Browser-Status':status}, body:message||status, keepalive:true}).catch(function(){}); }  function fail(message) { throw new Error(message); }
   function wait(ms) { return new Promise(function(resolve) { setTimeout(resolve, ms); }); }
   function card(id) { return document.querySelector('[data-model-id="'+id+'"]'); }
   function checkbox(id) { return card(id).querySelector('[data-card-selection-gutter] input'); }
@@ -102,9 +106,8 @@ func TestCollectionSelectionProductionBrowserInteractions(t *testing.T) {
     await wait(100);
     var chip=document.querySelector('[data-card-filter-chip="provider"]'), clear=document.querySelector('[data-card-clear-filters]');
     if (!chip || !clear || !chip.textContent.includes('OpenAI')) fail('server-rendered active filter chip or Clear all is missing');
-    window.openVibelyNavigate=function(path){window.selectionNavigation=path;};
-    clear.click();
-    if (!window.selectionNavigation || window.selectionNavigation.includes('provider=')) fail('Clear all did not navigate without the active filter');
+	    clear.addEventListener('click', function(event) { event.preventDefault(); window.selectionNavigation=clear.getAttribute('href'); }, {once:true});
+	    clear.click();    if (!window.selectionNavigation || window.selectionNavigation.includes('provider=')) fail('Clear all did not navigate without the active filter');
     var desktopSelect=document.querySelector('[data-card-select-loaded]'), mobileSelect=document.querySelector('[data-card-select-mode]');
     for (var cssWait=0;cssWait<80 && getComputedStyle(desktopSelect).display!=='none';cssWait++) await wait(25);
     if (getComputedStyle(desktopSelect).display!=='none' || getComputedStyle(mobileSelect).display==='none') fail('production responsive styles did not expose mobile selection mode');
@@ -143,18 +146,27 @@ func TestCollectionSelectionProductionBrowserInteractions(t *testing.T) {
     for (var i=0;i<80 && !window.bulkFinished;i++) await wait(25);
     if (!window.bulkFinished) fail('bulk deletion did not finish');
     for (var j=0;j<80 && document.querySelectorAll('#models-card-list [data-card-select-id]').length!==1;j++) await wait(25);
-    if (document.querySelectorAll('#models-card-list [data-card-select-id]').length !== 1 || document.activeElement !== document.querySelector('[data-card-search]')) fail('bulk refresh was not authoritative or did not restore focus');
-    history.replaceState({}, '', '/skills?enabled=true');
-    var parsed=new DOMParser().parseFromString(UNMANAGED_SKILLS_HTML, 'text/html'), skillsRoot=parsed.getElementById('skills-container');
+	    if (document.querySelectorAll('#models-card-list [data-card-select-id]').length !== 1 || document.activeElement !== document.querySelector('[data-card-search]')) fail('bulk refresh was not authoritative or did not restore focus');
+	    history.replaceState({}, '', '/models?provider=anthropic&sort=provider');
+	    var authoritativeMutation=window.cardCollectionActionURL(document.getElementById('models-container'), '/models/example');
+	    if (!authoritativeMutation.includes('provider=openai') || authoritativeMutation.includes('anthropic') || authoritativeMutation.includes('sort=')) fail('mutation URL did not use server-rendered root state');
+	    history.replaceState({}, '', '/skills?enabled=true');    var parsed=new DOMParser().parseFromString(UNMANAGED_SKILLS_HTML, 'text/html'), skillsRoot=parsed.getElementById('skills-container');
     document.querySelector('main').appendChild(document.importNode(skillsRoot, true));
     skillsRoot=document.getElementById('skills-container');
     window.refreshCardListToolbars(skillsRoot);
-    if (!skillsRoot.querySelector('[data-card-filter-chip="enabled"]') || skillsRoot.querySelector('[data-card-selection-actions]')) fail('unmanaged Skills active-filter toolbar did not initialize safely');
-    result('pass','selection interactions passed');
-  }
-  var REPLACEMENT_HTML=` + string(replacementJSON) + `;
-  var UNMANAGED_SKILLS_HTML=` + string(unmanagedSkillsJSON) + `;
-  window.addEventListener('load', function(){run().catch(function(error){result('fail', String(error&&error.stack||error));});});
+	    if (!skillsRoot.querySelector('[data-card-filter-chip="enabled"]') || skillsRoot.querySelector('[data-card-selection-actions]')) fail('unmanaged Skills active-filter toolbar did not initialize safely');
+	    history.replaceState({}, '', '/alerts?project_id=project&source=' + 's'.repeat(101));
+	    var alertParsed=new DOMParser().parseFromString(REJECTED_ALERTS_HTML, 'text/html'), alertsRoot=alertParsed.getElementById('alerts-container');
+	    document.querySelector('main').appendChild(document.importNode(alertsRoot, true));
+	    alertsRoot=document.getElementById('alerts-container');
+	    window.refreshCardListToolbars(alertsRoot);
+	    if (alertsRoot.querySelector('[data-card-filter-chip="source"]') || alertsRoot.querySelector('[name="source"]').value) fail('raw rejected Alert source was reactivated by client hydration');
+	    if ((alertsRoot.getAttribute('data-card-pagination-url') || '').includes('source=')) fail('rejected Alert source contaminated authoritative root state');
+	    result('pass','selection interactions passed');
+	  }
+	  var REPLACEMENT_HTML=` + string(replacementJSON) + `;
+	  var UNMANAGED_SKILLS_HTML=` + string(unmanagedSkillsJSON) + `;
+	  var REJECTED_ALERTS_HTML=` + string(rejectedAlertsJSON) + `;  window.addEventListener('load', function(){run().catch(function(error){result('fail', String(error&&error.stack||error));});});
 })();
 </script>`
 	page = strings.Replace(page, "</body>", runner+"</body>", 1)
@@ -162,9 +174,21 @@ func TestCollectionSelectionProductionBrowserInteractions(t *testing.T) {
 	var deletes atomic.Int32
 	var payloadMu sync.Mutex
 	var deletedIDs []string
+	type browserResult struct {
+		status  string
+		message string
+	}
+	browserResults := make(chan browserResult, 1)
 	fixture := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		switch {
+		case r.URL.Path == "/browser-result" && r.Method == http.MethodPost:
+			message, _ := io.ReadAll(io.LimitReader(r.Body, 8192))
+			select {
+			case browserResults <- browserResult{status: r.Header.Get("X-Browser-Status"), message: string(message)}:
+			default:
+			}
+			w.WriteHeader(http.StatusNoContent)
 		case r.URL.Path == "/models/bulk" && r.Method == http.MethodDelete:
 			var request bulkIDsRequest
 			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
@@ -178,7 +202,7 @@ func TestCollectionSelectionProductionBrowserInteractions(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"deleted":3}`))
 		case r.URL.Path == "/models" && r.Method == http.MethodGet:
-			_, _ = w.Write([]byte(render(finalCards)))
+			_, _ = w.Write([]byte(renderWithState(finalCards, pages.CardListState{Filters: map[string]string{"provider": "openai"}})))
 		case r.URL.Path == "/bulk-finished":
 			if deletes.Load() > 0 {
 				_, _ = w.Write([]byte("true"))
@@ -194,21 +218,25 @@ func TestCollectionSelectionProductionBrowserInteractions(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, chrome, "--headless=new", "--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage", "--disable-background-networking", "--disable-extensions", "--no-first-run", "--window-size=390,844", "--virtual-time-budget=8000", "--dump-dom", fixture.URL+"?provider=openai")
-	out, err := cmd.CombinedOutput()
-	require.NoError(t, err, "Chrome output: %s", out)
-	dom := string(out)
-	if !strings.Contains(dom, `id="browser-result" data-status="pass"`) {
-		idx := strings.Index(dom, `id="browser-result"`)
-		if idx >= 0 {
-			end := idx + 800
-			if end > len(dom) {
-				end = len(dom)
-			}
-			t.Fatalf("selection browser regression failed: %s", html.UnescapeString(dom[idx:end]))
-		}
-		t.Fatalf("selection browser regression did not report a result; DOM length=%d", len(dom))
+	cmd := exec.CommandContext(ctx, chrome, "--headless=new", "--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage", "--disable-background-networking", "--disable-extensions", "--no-first-run", "--user-data-dir="+filepath.Join(t.TempDir(), "chrome-profile"), "--window-size=390,844", fixture.URL+"?provider=openai")
+	var chromeOutput bytes.Buffer
+	cmd.Stdout = &chromeOutput
+	cmd.Stderr = &chromeOutput
+	require.NoError(t, cmd.Start())
+	chromeDone := make(chan error, 1)
+	go func() { chromeDone <- cmd.Wait() }()
+	var browser browserResult
+	select {
+	case browser = <-browserResults:
+		cancel()
+		<-chromeDone
+	case err := <-chromeDone:
+		require.NoError(t, err, "Chrome exited before reporting a result: %s", chromeOutput.String())
+		t.Fatal("selection browser regression did not report a result")
+	case <-ctx.Done():
+		t.Fatalf("selection browser regression timed out: %s", chromeOutput.String())
 	}
+	require.Equal(t, "pass", browser.status, "selection browser regression failed: %s\nChrome output: %s", browser.message, chromeOutput.String())
 	require.Equal(t, int32(1), deletes.Load())
 	payloadMu.Lock()
 	require.ElementsMatch(t, []string{"b", "c", "e"}, deletedIDs)

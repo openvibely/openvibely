@@ -1680,7 +1680,9 @@ for _, agent := range modelOptions {
 
 				function modelMutationURL(path) {
 					var projectID = selectedProjectIDForModelMutation();
-					return path + (projectID ? (path.indexOf('?') === -1 ? '?' : '&') + 'project_id=' + encodeURIComponent(projectID) : '');
+					var scoped = path + (projectID ? (path.indexOf('?') === -1 ? '?' : '&') + 'project_id=' + encodeURIComponent(projectID) : '');
+					if (window.cardCollectionActionURL) return window.cardCollectionActionURL(document.getElementById('models-container'), scoped);
+					return scoped;
 				}
 
 				var _deleteModelId = '';

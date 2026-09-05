@@ -124,7 +124,7 @@ templ automationsContent(cards []models.AutomationCard, currentProjectID string,
 												<button
 													class="w-full"
 													type="button"
-													hx-post={ fmt.Sprintf("/automations/%s/run-now?project_id=%s", card.Automation.ID, currentProjectID) }
+													hx-post={ CardListActionURL("automations", fmt.Sprintf("/automations/%s/run-now", card.Automation.ID), state) }
 													hx-include={ fmt.Sprintf("#run-now-automation-card-form-%s", card.Automation.ID) }
 													hx-target="#automations-container"
 													hx-swap="outerHTML"
@@ -137,7 +137,7 @@ templ automationsContent(cards []models.AutomationCard, currentProjectID string,
 												<button
 													class="w-full"
 													type="button"
-													hx-post={ fmt.Sprintf("/automations/%s/pause?project_id=%s", card.Automation.ID, currentProjectID) }
+													hx-post={ CardListActionURL("automations", fmt.Sprintf("/automations/%s/pause", card.Automation.ID), state) }
 													hx-include={ fmt.Sprintf("#pause-automation-card-form-%s", card.Automation.ID) }
 													hx-target="#automations-container"
 													hx-swap="outerHTML"
@@ -151,7 +151,7 @@ templ automationsContent(cards []models.AutomationCard, currentProjectID string,
 												<button
 													class="w-full"
 													type="button"
-													hx-post={ fmt.Sprintf("/automations/%s/resume?project_id=%s", card.Automation.ID, currentProjectID) }
+													hx-post={ CardListActionURL("automations", fmt.Sprintf("/automations/%s/resume", card.Automation.ID), state) }
 													hx-include={ fmt.Sprintf("#resume-automation-card-form-%s", card.Automation.ID) }
 													hx-target="#automations-container"
 													hx-swap="outerHTML"
@@ -172,17 +172,17 @@ templ automationsContent(cards []models.AutomationCard, currentProjectID string,
 										</li>
 									</ul>
 									if card.Automation.LifecycleState == models.AutomationActive {
-										<form id={ fmt.Sprintf("run-now-automation-card-form-%s", card.Automation.ID) } class="hidden" method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/run-now?project_id=%s", card.Automation.ID, currentProjectID)) }>
+										<form id={ fmt.Sprintf("run-now-automation-card-form-%s", card.Automation.ID) } class="hidden" method="post" action={ templ.SafeURL(CardListActionURL("automations", fmt.Sprintf("/automations/%s/run-now", card.Automation.ID), state)) }>
 											<input type="hidden" name="project_id" value={ currentProjectID }/>
 											<input type="hidden" name="return_to" value="portfolio"/>
 										</form>
-										<form id={ fmt.Sprintf("pause-automation-card-form-%s", card.Automation.ID) } class="hidden" method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/pause?project_id=%s", card.Automation.ID, currentProjectID)) }>
+										<form id={ fmt.Sprintf("pause-automation-card-form-%s", card.Automation.ID) } class="hidden" method="post" action={ templ.SafeURL(CardListActionURL("automations", fmt.Sprintf("/automations/%s/pause", card.Automation.ID), state)) }>
 											<input type="hidden" name="project_id" value={ currentProjectID }/>
 											<input type="hidden" name="return_to" value="portfolio"/>
 										</form>
 									}
 									if card.Automation.LifecycleState == models.AutomationPaused {
-										<form id={ fmt.Sprintf("resume-automation-card-form-%s", card.Automation.ID) } class="hidden" method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/resume?project_id=%s", card.Automation.ID, currentProjectID)) }>
+										<form id={ fmt.Sprintf("resume-automation-card-form-%s", card.Automation.ID) } class="hidden" method="post" action={ templ.SafeURL(CardListActionURL("automations", fmt.Sprintf("/automations/%s/resume", card.Automation.ID), state)) }>
 											<input type="hidden" name="project_id" value={ currentProjectID }/>
 											<input type="hidden" name="return_to" value="portfolio"/>
 										</form>
