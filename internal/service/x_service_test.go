@@ -1486,8 +1486,24 @@ func newXRuntimeWorkerFixture(t *testing.T) *xRuntimeWorkerFixture {
 	}
 }
 
+type xRuntimeTaskAdmissionObservation struct {
+	task   models.Task
+	stored *models.Task
+	meta   *models.XTaskContext
+	err    error
+}
+
 func TestXRuntimeCreateTaskCompletesWithExactlyOneReply(t *testing.T) {
 	fixture := newXRuntimeWorkerFixture(t)
+	admissionCh := make(chan xRuntimeTaskAdmissionObservation, 1)
+	fixture.worker.beforeOrdinaryTaskClaim = func(task models.Task) {
+		observation := xRuntimeTaskAdmissionObservation{task: task}
+		observation.stored, observation.err = fixture.taskRepo.GetByID(fixture.ctx, task.ID)
+		if observation.err == nil {
+			observation.meta, observation.err = fixture.xTaskContextRepo.GetByTaskID(fixture.ctx, task.ID)
+		}
+		admissionCh <- observation
+	}
 	runtime := fixture.xSvc.RuntimeTools("parent-task", fixture.project.ID, "bot", "author", "conversation", "source-tweet", "alice")
 
 	output, handled, isError, err := runtime.Executor(fixture.ctx, "create_task", json.RawMessage(`{"title":"Child task","prompt":"complete immediately"}`))
@@ -1495,6 +1511,23 @@ func TestXRuntimeCreateTaskCompletesWithExactlyOneReply(t *testing.T) {
 	require.False(t, isError)
 	require.NoError(t, err)
 	require.Contains(t, output, "[TASK_ID:")
+
+	select {
+	case observation := <-admissionCh:
+		require.NoError(t, observation.err)
+		require.Equal(t, models.TaskOriginX, observation.task.CreatedVia)
+		require.NotNil(t, observation.stored)
+		require.Equal(t, models.TaskOriginX, observation.stored.CreatedVia)
+		require.NotNil(t, observation.meta, "X reply context must exist before worker claim")
+		require.Equal(t, fixture.project.ID, observation.meta.ProjectID)
+		require.Equal(t, "bot", observation.meta.AccountID)
+		require.Equal(t, "conversation", observation.meta.ConversationID)
+		require.Equal(t, "source-tweet", observation.meta.ReplyToTweetID)
+		require.Equal(t, "author", observation.meta.XUserID)
+		require.Equal(t, "alice", observation.meta.Username)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for worker claim admission")
+	}
 
 	var completed *models.Task
 	require.Eventually(t, func() bool {
@@ -1534,6 +1567,107 @@ func TestXRuntimeCreateTaskCompletesWithExactlyOneReply(t *testing.T) {
 		return len(fixture.api.Posts()) == 1
 	}, time.Second, 10*time.Millisecond)
 	require.Equal(t, []string{"source-tweet|child completed"}, fixture.api.Posts())
+	require.Equal(t, 1, fixture.mockLLM.CallCount())
+}
+
+func TestXAuthorizedMentionRuntimeCreateTaskClaimsWithContextAndRepliesOnce(t *testing.T) {
+	fixture := newXRuntimeWorkerFixture(t)
+	ctx := fixture.ctx
+	require.NoError(t, fixture.xSvc.settingsRepo.SetMany(ctx, map[string]string{
+		XSettingAccountID:       "bot",
+		XSettingConfigurationID: "generation",
+	}))
+	fixture.xSvc.SetConfigurationID("generation")
+	require.NoError(t, fixture.xSvc.authRepo.Create(ctx, &models.XAuthorizedUser{ProjectID: fixture.project.ID, XUserID: "author"}))
+
+	admissionCh := make(chan xRuntimeTaskAdmissionObservation, 1)
+	claimRelease := make(chan struct{})
+	claimReleased := false
+	defer func() {
+		if !claimReleased {
+			close(claimRelease)
+		}
+	}()
+	fixture.worker.beforeOrdinaryTaskClaim = func(task models.Task) {
+		observation := xRuntimeTaskAdmissionObservation{task: task}
+		observation.stored, observation.err = fixture.taskRepo.GetByID(ctx, task.ID)
+		if observation.err == nil {
+			observation.meta, observation.err = fixture.xTaskContextRepo.GetByTaskID(ctx, task.ID)
+		}
+		admissionCh <- observation
+		<-claimRelease
+	}
+
+	type actionResult struct {
+		output  string
+		handled bool
+		isError bool
+		err     error
+	}
+	runnerResultCh := make(chan actionResult, 1)
+	fixture.xSvc.SetRuntime(nil, nil, nil, nil, func(_ context.Context, req ChannelChatRunRequest) {
+		result := actionResult{}
+		if req.RuntimeTools == nil {
+			result.err = errors.New("X runtime tools were not provided")
+		} else {
+			result.output, result.handled, result.isError, result.err = req.RuntimeTools.Executor(ctx, "create_task", json.RawMessage(`{"title":"Mention child","prompt":"complete from the mention"}`))
+		}
+		runnerResultCh <- result
+	}, nil, nil, nil, nil)
+	fixture.api.mentions.Meta.NewestID = "20"
+	fixture.api.mentions.Data = []XTweet{{ID: "20", Text: "@openvibely create a child", AuthorID: "author", ConversationID: "conversation"}}
+	fixture.api.mentions.Includes.Users = []XUser{{ID: "author", Username: "alice"}}
+
+	require.NoError(t, fixture.xSvc.pollOnce(ctx))
+	select {
+	case result := <-runnerResultCh:
+		require.True(t, result.handled)
+		require.False(t, result.isError)
+		require.NoError(t, result.err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for X chat runner")
+	}
+
+	select {
+	case observation := <-admissionCh:
+		require.NoError(t, observation.err)
+		require.Equal(t, models.TaskOriginX, observation.task.CreatedVia)
+		require.NotNil(t, observation.stored)
+		require.Equal(t, models.TaskOriginX, observation.stored.CreatedVia)
+		require.NotNil(t, observation.meta, "X reply context must exist before worker claim")
+		require.Equal(t, fixture.project.ID, observation.meta.ProjectID)
+		require.Equal(t, "bot", observation.meta.AccountID)
+		require.Equal(t, "conversation", observation.meta.ConversationID)
+		require.Equal(t, "20", observation.meta.ReplyToTweetID)
+		require.Equal(t, "author", observation.meta.XUserID)
+		require.Equal(t, "alice", observation.meta.Username)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for worker claim admission")
+	}
+	close(claimRelease)
+	claimReleased = true
+
+	var child *models.Task
+	require.Eventually(t, func() bool {
+		tasks, listErr := fixture.taskRepo.ListByProject(ctx, fixture.project.ID, "")
+		if listErr != nil {
+			return false
+		}
+		for i := range tasks {
+			if tasks[i].Category != models.CategoryChat {
+				child = &tasks[i]
+				return tasks[i].Status == models.StatusCompleted
+			}
+		}
+		return false
+	}, 2*time.Second, 10*time.Millisecond)
+	require.NotNil(t, child)
+	require.Equal(t, models.TaskOriginX, child.CreatedVia)
+	require.Eventually(t, func() bool {
+		posts := fixture.api.Posts()
+		return len(posts) == 1 && posts[0] == "20|child completed"
+	}, time.Second, 10*time.Millisecond)
+	require.Equal(t, []string{"20|child completed"}, fixture.api.Posts())
 	require.Equal(t, 1, fixture.mockLLM.CallCount())
 }
 
