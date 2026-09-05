@@ -171,16 +171,31 @@ jobs:
           OPENVIBELY_SKIP_BROWSER_PERF: "1"
         run: go test ./internal/service/... -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-core-service.txt
 
-      - name: Run package and web tests with coverage
+      - name: Run package tests with coverage
         env:
           OPENVIBELY_SKIP_BROWSER_PERF: "1"
-        run: go test ./pkg/... ./web/... -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-web.txt
+        run: go test ./pkg/... -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-pkg.txt
+
+      - name: Run component template tests with coverage
+        env:
+          OPENVIBELY_SKIP_BROWSER_PERF: "1"
+        run: go test ./web/templates/components -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-components.txt
+
+      - name: Run layout template tests with coverage
+        env:
+          OPENVIBELY_SKIP_BROWSER_PERF: "1"
+        run: go test ./web/templates/layout -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-layout.txt
+
+      - name: Run page template tests with coverage
+        env:
+          OPENVIBELY_SKIP_BROWSER_PERF: "1"
+        run: go test ./web/templates/pages -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-pages.txt
 
       - name: Merge coverage reports
         shell: bash
         run: |
           head -n 1 coverage-core-foundation.txt > coverage.txt
-          for profile in coverage-core-handler.txt coverage-core-repository.txt coverage-core-service.txt coverage-web.txt; do
+          for profile in coverage-core-handler.txt coverage-core-repository.txt coverage-core-service.txt coverage-pkg.txt coverage-components.txt coverage-layout.txt coverage-pages.txt; do
             tail -n +2 "$profile" >> coverage.txt
           done
 
