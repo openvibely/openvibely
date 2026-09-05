@@ -463,6 +463,40 @@ func TestEmailPollOnceSkipsPostSuccessRecordAfterFirstTurnWithHandoff(t *testing
 	assert.Len(t, tasks, 1)
 }
 
+func TestEmailPollOnceOptimizedSnapshotPreservesAuthorizedHandoffAndReceiptRecovery(t *testing.T) {
+	h := newEmailPollReceiptTestHarness(t)
+	require.NoError(t, h.svc.settingsRepo.Set(h.ctx, EmailSettingAddress, "old@example.com"))
+	client := newFakeEmailIMAPClient(
+		testIMAPMessageWithBody(1, "self", "BOT@example.com", "self body"),
+		testIMAPMessageWithBody(2, "authorized", "alice@example.com", "start a new chat"),
+	)
+	client.storeFailures = 1
+	h.svc.connectIMAP = func(context.Context, EmailRuntimeConfig) (emailIMAPClient, error) { return client, nil }
+	cfg := EmailRuntimeConfig{Address: " Bot@Example.COM ", IMAPHost: "imap.example.com"}
+
+	// Keep the hook unset so pollOnce takes the normalized snapshot branch for
+	// both the self-filter and the authorized durable handoff.
+	require.Nil(t, h.svc.processIncomingMessageFn)
+	h.svc.pollOnce(h.ctx, cfg)
+
+	assert.Empty(t, client.seenIDs(), "STORE failure must leave both handled messages unread for retry")
+	assert.Equal(t, 1, h.receipts.withHandoffCalls, "the authorized message must use the durable handoff path")
+	assert.Equal(t, 1, h.receipts.recordCalls, "the self-filtered message must record its receipt")
+	tasks, err := h.taskRepo.ListByProject(h.ctx, h.project.ID, "")
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
+
+	h.svc.pollOnce(h.ctx, cfg)
+
+	assert.Equal(t, []uint32{1, 2}, client.seenIDs(), "receipt recovery must acknowledge both messages together")
+	assert.Equal(t, 4, h.receipts.existsCalls, "receipt recovery must check both canonical message identities")
+	assert.Equal(t, 1, h.receipts.withHandoffCalls, "receipt recovery must not repeat durable handoff")
+	assert.Equal(t, 1, h.receipts.recordCalls, "receipt recovery must not repeat the self-message receipt")
+	tasks, err = h.taskRepo.ListByProject(h.ctx, h.project.ID, "")
+	require.NoError(t, err)
+	assert.Len(t, tasks, 1, "receipt recovery must not create a duplicate task")
+}
+
 func TestEmailPollOnceSkipsPostSuccessRecordAfterQueuedWithHandoff(t *testing.T) {
 	h := newEmailPollReceiptTestHarness(t)
 	rootMessageID := "<queue-root@example.com>"
@@ -1061,39 +1095,44 @@ const (
 
 const emailPollContentionQuery = "SELECT COUNT(*) FROM projects"
 
-// emailPollContentionReceiptStore holds a real pollOnce receipt query open so
-// both the legacy and snapshot paths contend at the same SQLite point.
+// emailPollContentionReceiptStore holds a real SQLite query open after the first
+// message reaches the receipt-record boundary. Both the legacy and snapshot
+// paths invoke Record at that same pollOnce boundary, so their unrelated-query
+// waits share the same database hold while legacy address reads are queued.
 type emailPollContentionReceiptStore struct {
-	db              *sql.DB
-	acquired        chan struct{}
-	release         <-chan struct{}
-	competitorsDone <-chan struct{}
-	abort           <-chan struct{}
-	once            sync.Once
-	queryErr        error
+	db       *sql.DB
+	acquired chan struct{}
+	release  <-chan struct{}
+	finished chan struct{}
+	abort    <-chan struct{}
+	once     sync.Once
+	queryErr error
 }
 
-func (s *emailPollContentionReceiptStore) Exists(ctx context.Context, _, _ string) (bool, error) {
-	s.once.Do(func() {
-		rows, err := s.db.QueryContext(ctx, emailPollContentionQuery)
-		if err != nil {
-			s.queryErr = err
-			close(s.acquired)
-			return
-		}
-		close(s.acquired)
-		<-s.release
-		s.queryErr = rows.Close()
-		select {
-		case <-s.competitorsDone:
-		case <-s.abort:
-		}
-	})
-	return false, s.queryErr
+func (s *emailPollContentionReceiptStore) Exists(_ context.Context, _, _ string) (bool, error) {
+	return false, nil
+}
+
+func (s *emailPollContentionReceiptStore) holdCommonQuery() {
+	rows, err := s.db.QueryContext(context.Background(), emailPollContentionQuery)
+	s.queryErr = err
+	close(s.acquired)
+	if err != nil {
+		close(s.finished)
+		return
+	}
+	select {
+	case <-s.release:
+	case <-s.abort:
+	}
+	_ = rows.Close()
+	close(s.finished)
 }
 
 func (s *emailPollContentionReceiptStore) Record(_ context.Context, _, _ string) error {
-	return nil
+	s.once.Do(func() { go s.holdCommonQuery() })
+	<-s.acquired
+	return s.queryErr
 }
 
 func (s *emailPollContentionReceiptStore) WithHandoff(_ context.Context, _, _ string, _ func(repository.SQLExecutor) error) (bool, error) {
@@ -1112,6 +1151,7 @@ func measureEmailPollAddressSnapshotContention(tb testing.TB, legacy bool) []tim
 		fixture.useAddressSnapshot(legacy)
 		acquired := make(chan struct{})
 		release := make(chan struct{})
+		finished := make(chan struct{})
 		abort := make(chan struct{})
 		releaseReceipt := func() {
 			select {
@@ -1120,19 +1160,37 @@ func measureEmailPollAddressSnapshotContention(tb testing.TB, legacy bool) []tim
 				close(release)
 			}
 		}
-		queriesDone := make(chan struct{})
 		receipts := &emailPollContentionReceiptStore{
-			db:              fixture.db,
-			acquired:        acquired,
-			release:         release,
-			competitorsDone: queriesDone,
-			abort:           abort,
+			db:       fixture.db,
+			acquired: acquired,
+			release:  release,
+			finished: finished,
+			abort:    abort,
 		}
 		fixture.svc.emailInboundReceiptStore = receipts
-		defer func() {
+		pointQueries := atomic.Int64{}
+		secondLegacyQuery := make(chan struct{})
+		var secondLegacyQueryOnce sync.Once
+		fixture.settingsRepo.SetQueryObserver(func(query string) {
+			if !legacy || !isEmailPollAddressPointQuery(query) {
+				return
+			}
+			if pointQueries.Add(1) == 2 {
+				secondLegacyQueryOnce.Do(func() { close(secondLegacyQuery) })
+			}
+		})
+
+		cleanup := func() {
 			releaseReceipt()
+			select {
+			case <-finished:
+			case <-time.After(time.Second):
+			}
 			close(abort)
-		}()
+			fixture.settingsRepo.SetQueryObserver(nil)
+			fixture.svc.emailInboundReceiptStore = nil
+		}
+		defer cleanup()
 
 		pollDone := make(chan struct{})
 		go func() {
@@ -1144,20 +1202,17 @@ func measureEmailPollAddressSnapshotContention(tb testing.TB, legacy bool) []tim
 		case <-time.After(time.Second):
 			tb.Fatalf("poll did not acquire the common SQLite contention query")
 		}
+		require.NoError(tb, receipts.queryErr)
 
 		queryReady := make(chan struct{}, emailPollContentionQueries)
 		startQueries := make(chan struct{})
 		queryWaits := make(chan time.Duration, emailPollContentionQueries)
 		queryErrors := make(chan error, emailPollContentionQueries)
-		// Snapshot before launching competitors; the ready/start barrier then
-		// proves all of them were released to queue before the poll query is let go.
+		// Snapshot before launching competitors. The ready/start barrier proves all
+		// competitors are queued behind the same held database connection.
 		waitCount := fixture.db.Stats().WaitCount
 		var queries sync.WaitGroup
 		queries.Add(emailPollContentionQueries)
-		go func() {
-			queries.Wait()
-			close(queriesDone)
-		}()
 		for i := 0; i < emailPollContentionQueries; i++ {
 			go func() {
 				defer queries.Done()
@@ -1180,11 +1235,36 @@ func measureEmailPollAddressSnapshotContention(tb testing.TB, legacy bool) []tim
 		require.Eventually(tb, func() bool {
 			return fixture.db.Stats().WaitCount >= waitCount+emailPollContentionQueries
 		}, time.Second, time.Millisecond, "all unrelated queries must queue behind the common poll query")
-		timer := time.NewTimer(emailPollContentionHold)
-		<-timer.C
+
+		started := time.Now()
+		if legacy {
+			select {
+			case <-secondLegacyQuery:
+			case <-time.After(time.Second):
+				tb.Fatalf("legacy poll did not queue a per-message app_settings query")
+			}
+			require.Equal(tb, 1, fixture.db.Stats().InUse, "the common SQLite hold must still own the only connection while the legacy settings query is issued")
+		}
+		if remaining := emailPollContentionHold - time.Since(started); remaining > 0 {
+			timer := time.NewTimer(remaining)
+			<-timer.C
+		}
+		// Release the common database hold, then let the real poll finish before
+		// collecting competitor waits. This keeps legacy address reads and
+		// competing queries in the same post-release queue rather than measuring
+		// competitors after legacy processing has already ended.
 		releaseReceipt()
+		select {
+		case <-pollDone:
+		case <-time.After(time.Second):
+			tb.Fatalf("poll did not finish after contention release")
+		}
 		queries.Wait()
-		<-queriesDone
+		select {
+		case <-finished:
+		case <-time.After(time.Second):
+			tb.Fatalf("common SQLite contention query did not finish")
+		}
 		for i := 0; i < emailPollContentionQueries; i++ {
 			select {
 			case err := <-queryErrors:
@@ -1193,12 +1273,6 @@ func measureEmailPollAddressSnapshotContention(tb testing.TB, legacy bool) []tim
 				waits = append(waits, wait)
 			}
 		}
-		select {
-		case <-pollDone:
-		case <-time.After(time.Second):
-			tb.Fatalf("poll did not finish after contention release")
-		}
-		fixture.svc.emailInboundReceiptStore = nil
 	}
 	return waits
 }
