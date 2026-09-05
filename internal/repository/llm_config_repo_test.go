@@ -1596,43 +1596,29 @@ func TestLLMConfigRepo_VisionSelectionProjectionMeetsPerformanceTargetOnLargeFix
 	}
 }
 
-func BenchmarkVisionModelSelectionFullListVsCompactSelectionThenGetByID(b *testing.B) {
+func BenchmarkVisionModelSelectionThenGetByID(b *testing.B) {
 	db := testutil.NewTestDB(b)
 	repo := NewLLMConfigRepo(db)
 	ctx := context.Background()
 	selectedID := prepareLargeVisionSelectionFixture(b, db, repo, ctx)
 
-	b.Run("full_list", func(b *testing.B) {
-		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			configs, err := repo.List(ctx)
-			if err != nil {
-				b.Fatal(err)
-			}
-			if len(configs) != 50 || configs[0].ID == "" {
-				b.Fatalf("full vision selection fixture returned %d configs", len(configs))
-			}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		options, err := repo.ListVisionSelectionOptions(ctx)
+		if err != nil {
+			b.Fatal(err)
 		}
-	})
-	b.Run("compact_selection_plus_get_by_id", func(b *testing.B) {
-		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			options, err := repo.ListVisionSelectionOptions(ctx)
-			if err != nil {
-				b.Fatal(err)
-			}
-			if len(options) != 50 || options[0].ID == "" {
-				b.Fatalf("compact vision selection fixture returned %d options", len(options))
-			}
-			full, err := repo.GetByID(ctx, selectedID)
-			if err != nil {
-				b.Fatal(err)
-			}
-			if full == nil || full.APIKey == "" || full.ExtraBodyJSON == "" || full.MixtureConfigJSON == "" {
-				b.Fatalf("selected full vision model was not hydrated: %#v", full)
-			}
+		if len(options) != 50 || options[0].ID == "" {
+			b.Fatalf("vision selection fixture returned %d options", len(options))
 		}
-	})
+		full, err := repo.GetByID(ctx, selectedID)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if full == nil || full.APIKey == "" || full.ExtraBodyJSON == "" || full.MixtureConfigJSON == "" {
+			b.Fatalf("selected full vision model was not hydrated: %#v", full)
+		}
+	}
 }
 
 func BenchmarkVisionModelSelectionSingleConnectionContention(b *testing.B) {
