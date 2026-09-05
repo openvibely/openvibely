@@ -365,23 +365,42 @@ func TestHandler_TaskBoardBatchesTerminalCardGitState(t *testing.T) {
 	}
 
 	const taskCount = 8
+	targets := []string{"target-one", "target-two", "target-three"}
+	tasks := make([]*models.Task, 0, taskCount)
+	for _, target := range targets {
+		runGit(t, repoDir, "branch", target, "main")
+	}
 	for i := 0; i < taskCount; i++ {
 		branch := fmt.Sprintf("task/terminal-%02d", i)
-		runGit(t, repoDir, "checkout", "-b", branch)
-		if err := os.WriteFile(filepath.Join(repoDir, fmt.Sprintf("terminal-%02d.txt", i)), []byte("task\n"), 0o644); err != nil {
+		target := targets[i%len(targets)]
+		worktreePath := filepath.Join(repoDir, ".worktrees", fmt.Sprintf("terminal-%02d", i))
+		runGit(t, repoDir, "worktree", "add", "-b", branch, worktreePath, target)
+		if err := os.WriteFile(filepath.Join(worktreePath, fmt.Sprintf("terminal-%02d.txt", i)), []byte("task\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		runGit(t, repoDir, "add", ".")
-		runGit(t, repoDir, "commit", "-m", fmt.Sprintf("terminal %02d", i))
-		runGit(t, repoDir, "checkout", "main")
+		runGit(t, worktreePath, "add", ".")
+		runGit(t, worktreePath, "commit", "-m", fmt.Sprintf("terminal %02d", i))
+		if i == taskCount-1 {
+			if err := os.WriteFile(filepath.Join(worktreePath, "dirty.txt"), []byte("dirty\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
 		task := &models.Task{
 			ProjectID: project.ID, Title: fmt.Sprintf("Terminal %02d", i), Prompt: "test", Category: models.CategoryCompleted,
-			Status: models.StatusCompleted, WorktreeBranch: branch, MergeTargetBranch: "main", MergeStatus: models.MergeStatusPending,
+			Status: models.StatusCompleted, WorktreePath: worktreePath, WorktreeBranch: branch, MergeTargetBranch: target, MergeStatus: models.MergeStatusPending,
 		}
 		if err := h.taskRepo.Create(ctx, task); err != nil {
 			t.Fatal(err)
 		}
+		tasks = append(tasks, task)
 	}
+	runGit(t, repoDir, "checkout", "target-two")
+	if err := os.WriteFile(filepath.Join(repoDir, "target-two.txt"), []byte("target advance\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repoDir, "add", ".")
+	runGit(t, repoDir, "commit", "-m", "advance target two")
+	runGit(t, repoDir, "checkout", "main")
 
 	realGit, err := exec.LookPath("git")
 	if err != nil {
@@ -428,13 +447,88 @@ func TestHandler_TaskBoardBatchesTerminalCardGitState(t *testing.T) {
 	if enabledMergeActions != taskCount {
 		t.Fatalf("enabled terminal merge actions=%d, want %d", enabledMergeActions, taskCount)
 	}
+	for i, task := range tasks {
+		cardStart := strings.Index(body, `id="task-`+task.ID+`"`)
+		if cardStart < 0 {
+			t.Fatalf("terminal card %d missing task id", i)
+		}
+		cardEnd := strings.Index(body[cardStart+1:], `id="task-`)
+		if cardEnd < 0 {
+			cardEnd = len(body) - cardStart
+		} else {
+			cardEnd++
+		}
+		cardBody := body[cardStart : cardStart+cardEnd]
+		ffDisabled := taskCardActionDisabled(cardBody, "ff")
+		rebaseDisabled := taskCardActionDisabled(cardBody, "rebase")
+		if i == taskCount-1 {
+			if !ffDisabled || !rebaseDisabled {
+				t.Fatalf("dirty terminal card retained clean-only actions: %s", cardBody)
+			}
+		} else {
+			if ffDisabled {
+				t.Fatalf("clean terminal card %d lost fast-forward action: %s", i, cardBody)
+			}
+			wantRebase := task.MergeTargetBranch == "target-two"
+			if rebaseDisabled == wantRebase {
+				t.Fatalf("terminal card %d rebase disabled=%v, want %v for target %s", i, rebaseDisabled, !wantRebase, task.MergeTargetBranch)
+			}
+		}
+	}
 	logData, err := os.ReadFile(logPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	invocations := len(strings.FieldsFunc(strings.TrimSpace(string(logData)), func(r rune) bool { return r == '\n' }))
-	if invocations > 6 {
-		t.Fatalf("%d terminal cards executed %d git commands, want one batched repository snapshot; commands:\n%s", taskCount, invocations, logData)
+	if invocations > 5 {
+		t.Fatalf("%d terminal cards across %d targets executed %d git commands, want one five-command repository snapshot; commands:\n%s", taskCount, len(targets), invocations, logData)
+	}
+}
+
+func TestTaskCardRepositorySnapshotLoadsExactWorktreeDirtyStateInProcess(t *testing.T) {
+	repoDir := createHandlerTestGitRepo(t)
+	worktreePath := filepath.Join(repoDir, ".worktrees", "dirty-state")
+	runGit(t, repoDir, "worktree", "add", "-b", "task/dirty-state", worktreePath, "main")
+	snapshot := &taskCardRepositorySnapshot{dirty: make(map[string]bool)}
+
+	assertDirty := func(want bool) {
+		t.Helper()
+		snapshot.loadDirtyWorktrees([]string{worktreePath})
+		if got := snapshot.worktreeDirty(worktreePath); got != want {
+			t.Fatalf("worktree dirty=%v, want %v", got, want)
+		}
+	}
+	assertDirty(false)
+
+	trackedPath := filepath.Join(worktreePath, "README.md")
+	if err := os.WriteFile(trackedPath, []byte("unstaged\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	assertDirty(true)
+	runGit(t, worktreePath, "reset", "--hard", "HEAD")
+
+	if err := os.WriteFile(filepath.Join(worktreePath, "untracked.txt"), []byte("untracked\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	assertDirty(true)
+	runGit(t, worktreePath, "clean", "-fd")
+
+	if err := os.WriteFile(trackedPath, []byte("staged\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, worktreePath, "add", "README.md")
+	assertDirty(true)
+	runGit(t, worktreePath, "reset", "--hard", "HEAD")
+
+	if err := os.Remove(trackedPath); err != nil {
+		t.Fatal(err)
+	}
+	assertDirty(true)
+
+	missingPath := filepath.Join(repoDir, ".worktrees", "missing")
+	snapshot.loadDirtyWorktrees([]string{missingPath})
+	if !snapshot.worktreeDirty(missingPath) {
+		t.Fatal("invalid worktree status must fail closed as dirty")
 	}
 }
 
