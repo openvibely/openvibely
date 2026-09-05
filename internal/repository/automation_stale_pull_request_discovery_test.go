@@ -11,18 +11,6 @@ import (
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
-const automationStalePRDiscoveryLegacySQL = `SELECT a.project_id, a.automation_id
-			FROM automation_activities a
-			JOIN automation_activity_resources pull_resource ON pull_resource.activity_id = a.id
-				AND pull_resource.resource_type = 'pull_request'
-			JOIN automation_activity_resources task_resource ON task_resource.activity_id = a.id
-				AND task_resource.resource_type = 'task'
-			JOIN task_pull_requests pr ON pr.task_id = task_resource.resource_id
-			GROUP BY a.project_id, a.automation_id
-			HAVING MIN(pr.updated_at) < ?
-			ORDER BY a.project_id, a.automation_id
-			LIMIT ?`
-
 const automationStalePRDiscoveryProjectID = "automation-stale-pr-project"
 
 func TestAutomationRepoListAutomationsWithStaleExternalPullRequestsUsesStalePullRequestIndex(t *testing.T) {
@@ -73,25 +61,10 @@ func BenchmarkAutomationStaleExternalPullRequestDiscovery50k(b *testing.B) {
 	ctx := context.Background()
 	staleBefore := time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC)
 
-	legacyPlan := explainAutomationStalePRDiscoveryPlanForQuery(b, db, automationStalePRDiscoveryLegacySQL)
 	optimizedPlan := explainAutomationStalePRDiscoveryPlanForQuery(b, db, listAutomationsWithStaleExternalPullRequestsSQL)
-	b.Logf("legacy no-stale plan: %s", legacyPlan)
-	b.Logf("optimized no-stale plan: %s", optimizedPlan)
 	assertAutomationStalePRDiscoveryPlan(b, optimizedPlan)
 
-	b.Run("legacy_no_stale_50k_tracked", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			rows, err := db.QueryContext(ctx, automationStalePRDiscoveryLegacySQL, staleBefore.Format("2006-01-02 15:04:05"), 100)
-			if err != nil {
-				b.Fatal(err)
-			}
-			if got := drainAutomationStalePRRows(b, rows); got != 0 {
-				b.Fatalf("rows = %d, want 0", got)
-			}
-		}
-	})
-
-	b.Run("stale_first_no_stale_50k_tracked", func(b *testing.B) {
+	b.Run("no_stale_50k_tracked", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			rows, err := repo.ListAutomationsWithStaleExternalPullRequests(ctx, staleBefore, 100)
 			if err != nil {
@@ -104,18 +77,7 @@ func BenchmarkAutomationStaleExternalPullRequestDiscovery50k(b *testing.B) {
 	})
 
 	markBenchmarkSparseAutomationStalePRs(b, db, 50)
-	b.Run("legacy_sparse_stale_50_of_50k_tracked", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			rows, err := db.QueryContext(ctx, automationStalePRDiscoveryLegacySQL, staleBefore.Format("2006-01-02 15:04:05"), 100)
-			if err != nil {
-				b.Fatal(err)
-			}
-			if got := drainAutomationStalePRRows(b, rows); got != 50 {
-				b.Fatalf("rows = %d, want 50", got)
-			}
-		}
-	})
-	b.Run("stale_first_sparse_stale_50_of_50k_tracked", func(b *testing.B) {
+	b.Run("sparse_stale_50_of_50k_tracked", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			rows, err := repo.ListAutomationsWithStaleExternalPullRequests(ctx, staleBefore, 100)
 			if err != nil {
@@ -331,21 +293,4 @@ func assertAutomationStalePRDiscoveryPlan(tb testing.TB, plan string) {
 	if strings.Contains(plan, "idx_automation_activity_resources_reverse (resource_type=?)") {
 		tb.Fatalf("plan = %s, want no scan of all tracked resources by resource_type", plan)
 	}
-}
-
-func drainAutomationStalePRRows(tb testing.TB, rows *sql.Rows) int {
-	tb.Helper()
-	defer rows.Close()
-	count := 0
-	for rows.Next() {
-		var projectID, automationID string
-		if err := rows.Scan(&projectID, &automationID); err != nil {
-			tb.Fatalf("scan stale PR discovery row: %v", err)
-		}
-		count++
-	}
-	if err := rows.Err(); err != nil {
-		tb.Fatalf("stale PR discovery rows: %v", err)
-	}
-	return count
 }
