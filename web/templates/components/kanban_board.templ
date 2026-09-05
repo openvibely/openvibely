@@ -150,19 +150,19 @@ func isSortActive(sortBy, option string) string {
 	return ""
 }
 
-templ KanbanBoard(tasks []models.Task, projectID string, backlogSort string, completedSort string, llmModels []models.LLMConfig, agentDefs []models.Agent) {
+templ KanbanBoard(tasks []models.Task, projectID string, backlogSort string, completedSort string, llmModels []models.LLMConfig, agentDefs []models.Agent, menuStates ...map[string]TaskCardMergeMenuState) {
 	<div id="kanban-board" class="grid grid-cols-1 gap-4 h-full overflow-x-hidden overflow-y-auto md:grid-cols-2 lg:grid-cols-3 lg:overflow-y-hidden">
 		for _, cat := range models.AllCategories {
 			if cat == models.CategoryActive {
-				@KanbanColumn(filterActiveColumn(tasks), projectID, cat, backlogSort, completedSort, llmModels, agentDefs)
+				@KanbanColumn(filterActiveColumn(tasks), projectID, cat, backlogSort, completedSort, llmModels, agentDefs, taskCardMergeMenuStateMap(menuStates))
 			} else {
-				@KanbanColumn(filterByCategory(tasks, cat), projectID, cat, backlogSort, completedSort, llmModels, agentDefs)
+				@KanbanColumn(filterByCategory(tasks, cat), projectID, cat, backlogSort, completedSort, llmModels, agentDefs, taskCardMergeMenuStateMap(menuStates))
 			}
 		}
 	</div>
 }
 
-templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCategory, backlogSort string, completedSort string, llmModels []models.LLMConfig, agentDefs []models.Agent) {
+templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCategory, backlogSort string, completedSort string, llmModels []models.LLMConfig, agentDefs []models.Agent, menuStates ...map[string]TaskCardMergeMenuState) {
 	<div class="kanban-column w-full min-w-0 bg-base-300 rounded-lg p-3 flex flex-col h-[60dvh] min-h-[24rem] lg:h-full lg:min-h-0">
 		<div class="flex items-center justify-between mb-3 flex-shrink-0">
 			<div class="flex items-center gap-2">
@@ -377,7 +377,6 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 										hx-post={ fmt.Sprintf("/tasks/backlog/execute?project_id=%s", projectID) }
 										hx-target="#kanban-board"
 										hx-swap="outerHTML"
-										hx-confirm={ fmt.Sprintf("Execute all %d eligible backlog tasks? They will be moved to Active and submitted for execution.", countEligibleBacklogTasks(tasks)) }
 										class="text-sm min-h-11"
 									>
 										<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -404,20 +403,6 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 								}
 							}
 							<li>
-								<button type="button" tabindex="0"
-									hx-post={ fmt.Sprintf("/tasks/backlog/activate?project_id=%s", projectID) }
-									hx-target="#kanban-board"
-									hx-swap="outerHTML"
-									hx-confirm="Are you sure you want to activate all backlog tasks? They will be moved to Active and submitted for execution."
-									class="text-sm min-h-11"
-								>
-									<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path>
-									</svg>
-									Activate All
-								</button>
-							</li>
-							<li>
 								<button
 									type="button"
 									data-delete-all-tasks-category="backlog"
@@ -440,7 +425,7 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 		</div>
 		if category == models.CategoryActive {
 			<div class="flex-1 flex flex-col min-h-0">
-				@activeColumnContent(tasks, projectID, llmModels, agentDefs)
+				@activeColumnContent(tasks, projectID, llmModels, agentDefs, taskCardMergeMenuStateMap(menuStates))
 			</div>
 		} else {
 			<div
@@ -451,7 +436,7 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 			>
 				if len(tasks) > 0 {
 					for _, task := range tasks {
-						@TaskCard(task, projectID, "", llmModels, agentDefs)
+						@TaskCard(task, projectID, "", llmModels, agentDefs, taskCardMergeMenuStateMap(menuStates))
 					}
 				} else {
 					<div class="text-center py-8 opacity-30 text-sm">Drop tasks here</div>
@@ -461,7 +446,7 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 	</div>
 }
 
-templ activeColumnContent(tasks []models.Task, projectID string, llmModels []models.LLMConfig, agentDefs []models.Agent) {
+templ activeColumnContent(tasks []models.Task, projectID string, llmModels []models.LLMConfig, agentDefs []models.Agent, menuStates ...map[string]TaskCardMergeMenuState) {
 	<!-- In Progress -->
 	<div class="mb-4 flex-1 flex flex-col min-h-0">
 		<h4 class="text-sm font-semibold mb-2 text-primary flex-shrink-0">In Progress</h4>
@@ -474,7 +459,7 @@ templ activeColumnContent(tasks []models.Task, projectID string, llmModels []mod
 		>
 			if len(filterRunningTasks(tasks)) > 0 {
 				for _, task := range filterRunningTasks(tasks) {
-					@TaskCard(task, projectID, "active", llmModels, agentDefs)
+					@TaskCard(task, projectID, "active", llmModels, agentDefs, taskCardMergeMenuStateMap(menuStates))
 				}
 			} else {
 				<div class="text-center py-4 opacity-30 text-sm">Drop tasks here</div>
@@ -493,7 +478,7 @@ templ activeColumnContent(tasks []models.Task, projectID string, llmModels []mod
 		>
 			if len(filterPendingTasks(tasks)) > 0 {
 				for _, task := range filterPendingTasks(tasks) {
-					@TaskCard(task, projectID, "active", llmModels, agentDefs)
+					@TaskCard(task, projectID, "active", llmModels, agentDefs, taskCardMergeMenuStateMap(menuStates))
 				}
 			} else {
 				<div class="text-center py-4 opacity-30 text-sm">Drop tasks here</div>

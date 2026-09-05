@@ -10,10 +10,14 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/a-h/templ"
+	git "github.com/go-git/go-git/v5"
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/events"
@@ -268,10 +272,516 @@ func (h *Handler) resolvePrimaryAgentDefinition(ctx context.Context, projectID, 
 	return &agent.ID, nil
 }
 
+func taskCardWorktreePath(path string) string {
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		return resolved
+	}
+	return filepath.Clean(path)
+}
+
+func taskCardWorktreeLocks(ctx context.Context, project *models.Project) map[string]bool {
+	locks := make(map[string]bool)
+	if project == nil || strings.TrimSpace(project.RepoPath) == "" {
+		return locks
+	}
+	worktrees, err := service.ListGitWorktreesContext(ctx, project.RepoPath)
+	if err != nil {
+		return locks
+	}
+	for _, worktree := range worktrees {
+		locks[taskCardWorktreePath(worktree.Path)] = worktree.Locked
+	}
+	return locks
+}
+
+func taskCardWorktreeLocked(project *models.Project, task *models.Task, locks map[string]bool) bool {
+	if task == nil || strings.TrimSpace(task.WorktreePath) == "" {
+		return false
+	}
+	if locks != nil {
+		return locks[taskCardWorktreePath(task.WorktreePath)]
+	}
+	if project == nil {
+		return false
+	}
+	return service.IsGitWorktreeLocked(project.RepoPath, task.WorktreePath)
+}
+
+func taskStatusMayMerge(status models.TaskStatus) bool {
+	switch status {
+	case models.StatusCompleted, models.StatusFailed, models.StatusCancelled:
+		return true
+	default:
+		return false
+	}
+}
+
+type taskCardBranchRelation struct {
+	branch string
+	target string
+}
+
+type taskCardRepositorySnapshot struct {
+	project         *models.Project
+	valid           bool
+	worktreesByPath map[string]service.WorktreeInfo
+	refs            map[string]string
+	ancestors       map[string]bool
+	graphValid      bool
+	activeMerge     bool
+	mergeHead       string
+	activeConflicts bool
+	dirty           map[string]bool
+	loadDirty       func(string) bool
+}
+
+func newTaskCardRepositorySnapshot(ctx context.Context, project *models.Project) *taskCardRepositorySnapshot {
+	snapshot := &taskCardRepositorySnapshot{
+		project:         project,
+		worktreesByPath: make(map[string]service.WorktreeInfo),
+		refs:            make(map[string]string),
+		ancestors:       make(map[string]bool),
+		dirty:           make(map[string]bool),
+		loadDirty:       taskCardWorktreeDirty,
+	}
+	if project == nil || strings.TrimSpace(project.RepoPath) == "" {
+		return snapshot
+	}
+	worktrees, err := service.ListGitWorktreesContext(ctx, project.RepoPath)
+	if err != nil {
+		return snapshot
+	}
+	snapshot.valid = true
+	for _, worktree := range worktrees {
+		snapshot.worktreesByPath[taskCardWorktreePath(worktree.Path)] = worktree
+	}
+
+	refsCmd := exec.CommandContext(ctx, "git", "show-ref", "--heads")
+	refsCmd.Dir = project.RepoPath
+	if output, err := refsCmd.Output(); err == nil {
+		for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+			fields := strings.Fields(line)
+			if len(fields) == 2 {
+				snapshot.refs[strings.TrimPrefix(fields[1], "refs/heads/")] = fields[0]
+			}
+		}
+	}
+	snapshot.activeMerge = service.HasActiveMerge(project.RepoPath)
+	if snapshot.activeMerge {
+		mergeHeadCmd := exec.CommandContext(ctx, "git", "rev-parse", "--verify", "MERGE_HEAD")
+		mergeHeadCmd.Dir = project.RepoPath
+		if output, err := mergeHeadCmd.Output(); err == nil {
+			snapshot.mergeHead = strings.TrimSpace(string(output))
+		}
+	}
+	snapshot.activeConflicts = len(service.ActiveConflictFiles(project.RepoPath)) > 0
+	return snapshot
+}
+
+const (
+	taskCardRelationshipTimeout   = 2 * time.Second
+	taskCardRelationshipOutputMax = 1 << 20
+	taskCardRelationshipPairMax   = 4096
+)
+
+func taskCardRelationKey(ancestorTip, descendantTip string) string {
+	return ancestorTip + "\x00" + descendantTip
+}
+
+func taskCardLoadBranchRelations(ctx context.Context, repoPath string, requests []taskCardBranchRelation, snapshot *taskCardRepositorySnapshot) {
+	if snapshot == nil {
+		return
+	}
+	snapshot.graphValid = false
+	snapshot.ancestors = make(map[string]bool)
+	if len(requests) == 0 {
+		return
+	}
+
+	uniqueRequests := make(map[string]taskCardBranchRelation, len(requests))
+	for _, request := range requests {
+		request.branch = strings.TrimSpace(request.branch)
+		request.target = strings.TrimSpace(request.target)
+		if request.branch == "" || request.target == "" {
+			return
+		}
+		uniqueRequests[request.branch+"\x00"+request.target] = request
+	}
+	if len(uniqueRequests) == 0 || len(uniqueRequests) > taskCardRelationshipPairMax {
+		return
+	}
+	requests = requests[:0]
+	for _, request := range uniqueRequests {
+		requests = append(requests, request)
+	}
+	sort.Slice(requests, func(i, j int) bool {
+		if requests[i].branch == requests[j].branch {
+			return requests[i].target < requests[j].target
+		}
+		return requests[i].branch < requests[j].branch
+	})
+
+	branches := make(map[string]string)
+	targets := make(map[string]bool)
+	for _, request := range requests {
+		branchTip := snapshot.refTip(request.branch)
+		targetTip := snapshot.refTip(request.target)
+		if branchTip == "" || targetTip == "" {
+			return
+		}
+		branches[request.branch] = branchTip
+		targets[targetTip] = true
+	}
+	branchNames := make([]string, 0, len(branches))
+	for branch := range branches {
+		branchNames = append(branchNames, branch)
+	}
+	sort.Strings(branchNames)
+	targetTips := make([]string, 0, len(targets))
+	for targetTip := range targets {
+		targetTips = append(targetTips, targetTip)
+	}
+	sort.Strings(targetTips)
+
+	format := "%(objectname)"
+	for _, targetTip := range targetTips {
+		format += "%00%(ahead-behind:" + targetTip + ")"
+	}
+	args := []string{"for-each-ref", "--format=" + format}
+	for _, branch := range branchNames {
+		args = append(args, "refs/heads/"+branch)
+	}
+
+	relationCtx, cancel := context.WithTimeout(ctx, taskCardRelationshipTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(relationCtx, "git", args...)
+	cmd.Dir = repoPath
+	stdout, err := cmd.StdoutPipe()
+	if err != nil || cmd.Start() != nil {
+		return
+	}
+	output, readErr := io.ReadAll(io.LimitReader(stdout, taskCardRelationshipOutputMax+1))
+	if readErr != nil || len(output) > taskCardRelationshipOutputMax {
+		cancel()
+	}
+	waitErr := cmd.Wait()
+	if readErr != nil || waitErr != nil || relationCtx.Err() != nil || len(output) > taskCardRelationshipOutputMax {
+		return
+	}
+
+	expectedTips := make(map[string]bool, len(branches))
+	for _, tip := range branches {
+		expectedTips[tip] = true
+	}
+	rows := make(map[string][]string, len(expectedTips))
+	for _, line := range strings.Split(strings.TrimSuffix(string(output), "\n"), "\n") {
+		if line == "" {
+			continue
+		}
+		fields := strings.Split(line, "\x00")
+		if len(fields) != len(targetTips)+1 || !expectedTips[fields[0]] {
+			return
+		}
+		if previous, duplicate := rows[fields[0]]; duplicate {
+			if strings.Join(previous, "\x00") != strings.Join(fields[1:], "\x00") {
+				return
+			}
+			continue
+		}
+		rows[fields[0]] = append([]string(nil), fields[1:]...)
+	}
+	if len(rows) != len(expectedTips) {
+		return
+	}
+
+	ancestors := make(map[string]bool, len(requests)*2)
+	for branchTip, countsByTarget := range rows {
+		for i, countsText := range countsByTarget {
+			counts := strings.Fields(countsText)
+			if len(counts) != 2 {
+				return
+			}
+			ahead, err := strconv.ParseUint(counts[0], 10, 64)
+			if err != nil {
+				return
+			}
+			behind, err := strconv.ParseUint(counts[1], 10, 64)
+			if err != nil {
+				return
+			}
+			targetTip := targetTips[i]
+			ancestors[taskCardRelationKey(branchTip, targetTip)] = ahead == 0
+			ancestors[taskCardRelationKey(targetTip, branchTip)] = behind == 0
+		}
+	}
+	for _, request := range requests {
+		branchTip := snapshot.refTip(request.branch)
+		targetTip := snapshot.refTip(request.target)
+		if _, ok := ancestors[taskCardRelationKey(branchTip, targetTip)]; !ok {
+			return
+		}
+		if _, ok := ancestors[taskCardRelationKey(targetTip, branchTip)]; !ok {
+			return
+		}
+	}
+	snapshot.ancestors = ancestors
+	snapshot.graphValid = true
+}
+
+func (snapshot *taskCardRepositorySnapshot) worktree(path string) (service.WorktreeInfo, bool) {
+	if snapshot == nil || strings.TrimSpace(path) == "" {
+		return service.WorktreeInfo{}, false
+	}
+	worktree, ok := snapshot.worktreesByPath[taskCardWorktreePath(path)]
+	return worktree, ok
+}
+
+func (snapshot *taskCardRepositorySnapshot) refTip(ref string) string {
+	if snapshot == nil {
+		return ""
+	}
+	return snapshot.refs[strings.TrimPrefix(strings.TrimSpace(ref), "refs/heads/")]
+}
+
+func (snapshot *taskCardRepositorySnapshot) relationshipValid(branch, target string) bool {
+	if snapshot == nil || !snapshot.graphValid {
+		return false
+	}
+	branchTip := snapshot.refTip(branch)
+	targetTip := snapshot.refTip(target)
+	if branchTip == "" || targetTip == "" {
+		return false
+	}
+	_, branchKnown := snapshot.ancestors[taskCardRelationKey(branchTip, targetTip)]
+	_, targetKnown := snapshot.ancestors[taskCardRelationKey(targetTip, branchTip)]
+	return branchKnown && targetKnown
+}
+
+func (snapshot *taskCardRepositorySnapshot) isAncestor(ancestorRef, descendantRef string) bool {
+	if !snapshot.relationshipValid(ancestorRef, descendantRef) {
+		return false
+	}
+	return snapshot.ancestors[taskCardRelationKey(snapshot.refTip(ancestorRef), snapshot.refTip(descendantRef))]
+}
+
+func (snapshot *taskCardRepositorySnapshot) diverged(branch, target string) bool {
+	return snapshot.relationshipValid(branch, target) &&
+		!snapshot.isAncestor(branch, target) && !snapshot.isAncestor(target, branch)
+}
+
+const taskCardDirtyWorkerLimit = 8
+
+type taskCardDirtyResult struct {
+	key   string
+	path  string
+	dirty bool
+}
+
+func taskCardWorktreeDirty(path string) bool {
+	if info, err := os.Stat(path); err != nil || !info.IsDir() {
+		return true
+	}
+	repo, err := git.PlainOpenWithOptions(path, &git.PlainOpenOptions{DetectDotGit: false, EnableDotGitCommonDir: true})
+	if err != nil {
+		return true
+	}
+	worktree, err := repo.Worktree()
+	if err != nil {
+		return true
+	}
+	status, err := worktree.StatusWithOptions(git.StatusOptions{Strategy: git.Preload})
+	return err != nil || !status.IsClean()
+}
+
+func (snapshot *taskCardRepositorySnapshot) loadDirtyWorktrees(paths []string) {
+	if snapshot == nil || len(paths) == 0 {
+		return
+	}
+	if snapshot.dirty == nil {
+		snapshot.dirty = make(map[string]bool)
+	}
+	loader := snapshot.loadDirty
+	if loader == nil {
+		loader = taskCardWorktreeDirty
+	}
+	unique := make(map[string]string)
+	for _, path := range paths {
+		if strings.TrimSpace(path) != "" {
+			unique[taskCardWorktreePath(path)] = path
+		}
+	}
+	if len(unique) == 0 {
+		return
+	}
+
+	workers := taskCardDirtyWorkerLimit
+	if len(unique) < workers {
+		workers = len(unique)
+	}
+	jobs := make(chan taskCardDirtyResult)
+	results := make(chan taskCardDirtyResult)
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for job := range jobs {
+				job.dirty = loader(job.path)
+				results <- job
+			}
+		}()
+	}
+	go func() {
+		for key, path := range unique {
+			jobs <- taskCardDirtyResult{key: key, path: path}
+		}
+		close(jobs)
+		wg.Wait()
+		close(results)
+	}()
+	for result := range results {
+		snapshot.dirty[result.key] = result.dirty
+	}
+}
+
+func (snapshot *taskCardRepositorySnapshot) worktreeDirty(path string) bool {
+	if snapshot == nil || strings.TrimSpace(path) == "" {
+		return false
+	}
+	return snapshot.dirty[taskCardWorktreePath(path)]
+}
+
+func (snapshot *taskCardRepositorySnapshot) worktreeLocked(path string) bool {
+	worktree, ok := snapshot.worktree(path)
+	return ok && worktree.Locked
+}
+
+func recoverTaskCardMetadata(task *models.Task, snapshot *taskCardRepositorySnapshot) {
+	if task == nil || snapshot == nil || snapshot.project == nil {
+		return
+	}
+	if task.WorktreePath == "" && task.ID != "" {
+		candidate := filepath.Join(snapshot.project.RepoPath, ".worktrees", "task_"+task.ID)
+		if _, ok := snapshot.worktree(candidate); ok {
+			task.WorktreePath = candidate
+		}
+	}
+	if worktree, ok := snapshot.worktree(task.WorktreePath); ok && worktree.Branch != "" {
+		task.WorktreeBranch = worktree.Branch
+	}
+	if task.WorktreeBranch == "" {
+		candidate := expectedTaskBranchName(task)
+		if snapshot.refTip(candidate) != "" {
+			task.WorktreeBranch = candidate
+		}
+	}
+}
+
+func reconcileTaskCardMergeStatus(task *models.Task, snapshot *taskCardRepositorySnapshot, targetBranch string) bool {
+	if task == nil || snapshot == nil || task.WorktreeBranch == "" || !taskStatusMayMerge(task.Status) ||
+		!snapshot.relationshipValid(task.WorktreeBranch, targetBranch) {
+		return false
+	}
+	merged := snapshot.isAncestor(task.WorktreeBranch, targetBranch) && !snapshot.worktreeDirty(task.WorktreePath)
+	if merged {
+		task.MergeStatus = models.MergeStatusMerged
+	} else if task.MergeStatus == models.MergeStatusMerged && !snapshot.isAncestor(task.WorktreeBranch, targetBranch) {
+		task.MergeStatus = models.MergeStatusPending
+	}
+	return merged
+}
+
+func (h *Handler) taskCardMergeMenuStates(ctx context.Context, tasks []models.Task, projectID string) map[string]components.TaskCardMergeMenuState {
+	states := make(map[string]components.TaskCardMergeMenuState, len(tasks))
+	project, _ := h.projectRepo.GetByID(ctx, projectID)
+	defaultTargetBranch := ""
+	if project != nil && strings.TrimSpace(project.RepoPath) != "" {
+		for i := range tasks {
+			if strings.TrimSpace(tasks[i].MergeTargetBranch) == "" {
+				defaultTargetBranch = service.GetDefaultBranchContext(ctx, project.RepoPath)
+				break
+			}
+		}
+	}
+	openPRs := make(map[string]*models.TaskPullRequest)
+	if h.taskPullRequestRepo != nil {
+		if prs, err := h.taskPullRequestRepo.ListOpenByProjectID(ctx, projectID); err == nil {
+			for i := range prs {
+				openPRs[prs[i].TaskID] = &prs[i]
+			}
+		}
+	}
+
+	for i := range tasks {
+		if tasks[i].MergeTargetBranch == "" {
+			tasks[i].MergeTargetBranch = defaultTargetBranch
+		}
+	}
+	snapshot := newTaskCardRepositorySnapshot(ctx, project)
+	repoPath := ""
+	if project != nil {
+		repoPath = project.RepoPath
+	}
+	terminalPaths := make([]string, 0)
+	relationRequests := make([]taskCardBranchRelation, 0)
+	for i := range tasks {
+		task := &tasks[i]
+		recoverTaskCardMetadata(task, snapshot)
+		if taskStatusMayMerge(task.Status) {
+			if task.WorktreePath != "" {
+				terminalPaths = append(terminalPaths, task.WorktreePath)
+			}
+			relationRequests = append(relationRequests, taskCardBranchRelation{branch: task.WorktreeBranch, target: task.MergeTargetBranch})
+		}
+	}
+	var snapshotWG sync.WaitGroup
+	snapshotWG.Add(2)
+	go func() {
+		defer snapshotWG.Done()
+		snapshot.loadDirtyWorktrees(terminalPaths)
+	}()
+	go func() {
+		defer snapshotWG.Done()
+		taskCardLoadBranchRelations(ctx, repoPath, relationRequests, snapshot)
+	}()
+	snapshotWG.Wait()
+
+	for i := range tasks {
+		task := &tasks[i]
+		targetBranch := strings.TrimSpace(task.MergeTargetBranch)
+		branchAlreadyMerged := reconcileTaskCardMergeStatus(task, snapshot, targetBranch)
+		locked := snapshot.worktreeLocked(task.WorktreePath)
+		ownsConflict := (snapshot.activeMerge && snapshot.mergeHead != "" && snapshot.mergeHead == snapshot.refTip(task.WorktreeBranch)) ||
+			(!snapshot.activeMerge && task.MergeStatus == models.MergeStatusConflict && snapshot.activeConflicts)
+		relationsValid := snapshot.relationshipValid(task.WorktreeBranch, targetBranch)
+		localEligible := taskStatusMayMerge(task.Status) && snapshot.valid && relationsValid && !locked && !ownsConflict &&
+			!snapshot.activeMerge && !snapshot.activeConflicts && !branchAlreadyMerged && task.MergeStatus != models.MergeStatusMerged &&
+			snapshot.refTip(task.WorktreeBranch) != "" && snapshot.refTip(targetBranch) != ""
+		if task.MergeStatus == models.MergeStatusConflict && !snapshot.activeMerge && !snapshot.activeConflicts && taskStatusMayMerge(task.Status) && relationsValid {
+			task.MergeStatus = models.MergeStatusPending
+			localEligible = snapshot.refTip(task.WorktreeBranch) != "" && snapshot.refTip(targetBranch) != "" && !locked && !branchAlreadyMerged
+		}
+		clean := task.WorktreePath == "" || !snapshot.worktreeDirty(task.WorktreePath)
+		fastForwardEligible := localEligible && clean
+		rebaseEligible := localEligible && task.WorktreePath != "" && clean && snapshot.diverged(task.WorktreeBranch, targetBranch)
+		pullEligible, _ := h.taskCardPullRequestEligibilityWithLocks(task, project, map[string]bool{taskCardWorktreePath(task.WorktreePath): locked})
+		states[task.ID] = components.TaskCardMergeMenuState{
+			LocalEligible:       localEligible,
+			FastForwardEligible: fastForwardEligible,
+			RebaseEligible:      rebaseEligible,
+			PullEligible:        pullEligible,
+			PullRequest:         openPRs[task.ID],
+			TargetBranch:        targetBranch,
+		}
+	}
+	return states
+}
+
 func (h *Handler) renderKanbanBoard(c echo.Context, tasks []models.Task, projectID string, sortPrefs taskSortPreferences, llmModels []models.LLMConfig) error {
 	tasks = service.AttachSwarmChildren(tasks)
 	agentDefs := h.listAgentDefinitions(c.Request().Context())
-	return render(c, http.StatusOK, components.KanbanBoard(tasks, projectID, sortPrefs.Backlog, sortPrefs.Completed, llmModels, agentDefs))
+	menuStates := h.taskCardMergeMenuStates(c.Request().Context(), tasks, projectID)
+	return render(c, http.StatusOK, components.KanbanBoard(tasks, projectID, sortPrefs.Backlog, sortPrefs.Completed, llmModels, agentDefs, menuStates))
 }
 
 func (h *Handler) renderTaskBoardRefresh(c echo.Context, projectID string, adjustSort func(*taskSortPreferences)) error {
@@ -341,12 +851,13 @@ func (h *Handler) ListTasks(c echo.Context) error {
 	project, _ := h.projectSvc.GetByID(c.Request().Context(), projectID)
 	agents, _ := h.llmConfigRepo.ListBadgeOptions(c.Request().Context())
 	agentDefs := h.listTaskFormAgentDefinitions(c.Request().Context(), projectID, nil)
+	menuStates := h.taskCardMergeMenuStates(c.Request().Context(), tasks, projectID)
 
 	if isHTMX {
-		return render(c, http.StatusOK, pages.TasksContent(project, tasks, agents, agentDefs, sortPrefs.Backlog, sortPrefs.Completed))
+		return render(c, http.StatusOK, pages.TasksContent(project, tasks, agents, agentDefs, sortPrefs.Backlog, sortPrefs.Completed, menuStates))
 	}
 
-	return render(c, http.StatusOK, pages.Tasks(projects, project, tasks, agents, agentDefs, sortPrefs.Backlog, sortPrefs.Completed))
+	return render(c, http.StatusOK, pages.Tasks(projects, project, tasks, agents, agentDefs, sortPrefs.Backlog, sortPrefs.Completed, menuStates))
 }
 
 func isSwarmTaskForm(c echo.Context) bool {
@@ -835,13 +1346,17 @@ func (h *Handler) recoverTaskWorktreeState(ctx context.Context, task *models.Tas
 // Active tasks (running/queued) are skipped because their worktree is in use
 // and the branch may legitimately match the target tip mid-execution.
 func (h *Handler) taskRebaseAvailable(task *models.Task, project *models.Project, branchAlreadyMerged bool) bool {
+	return h.taskRebaseAvailableWithLocks(task, project, branchAlreadyMerged, nil)
+}
+
+func (h *Handler) taskRebaseAvailableWithLocks(task *models.Task, project *models.Project, branchAlreadyMerged bool, worktreeLocks map[string]bool) bool {
 	if task == nil || project == nil || project.RepoPath == "" || task.WorktreeBranch == "" || task.WorktreePath == "" {
 		return false
 	}
 	if branchAlreadyMerged || task.MergeStatus == models.MergeStatusMerged || task.MergeStatus == models.MergeStatusConflict {
 		return false
 	}
-	if len(service.ActiveConflictFiles(project.RepoPath)) > 0 || service.IsGitWorktreeLocked(project.RepoPath, task.WorktreePath) {
+	if len(service.ActiveConflictFiles(project.RepoPath)) > 0 || taskCardWorktreeLocked(project, task, worktreeLocks) {
 		return false
 	}
 	if status, err := service.GitStatusPorcelain(task.WorktreePath); err != nil || strings.TrimSpace(status) != "" {
@@ -857,19 +1372,13 @@ func (h *Handler) taskRebaseAvailable(task *models.Task, project *models.Project
 	return service.IsBranchDivergedFromTarget(project.RepoPath, task.WorktreeBranch, targetBranch)
 }
 
-func (h *Handler) reconcileAlreadyMergedBranch(ctx context.Context, task *models.Task) bool {
-	if task == nil || task.WorktreeBranch == "" {
+func taskBranchAlreadyMergedForProject(task *models.Task, project *models.Project) bool {
+	if task == nil || task.WorktreeBranch == "" || project == nil || project.RepoPath == "" {
 		return false
 	}
 	if task.Status == models.StatusRunning || task.Status == models.StatusQueued {
 		return false
 	}
-
-	project, err := h.projectRepo.GetByID(ctx, task.ProjectID)
-	if err != nil || project == nil || project.RepoPath == "" {
-		return false
-	}
-	h.recoverTaskWorktreeState(ctx, task, project)
 	if task.WorktreePath != "" {
 		if statusOut, statusErr := service.GitStatusPorcelain(task.WorktreePath); statusErr == nil && strings.TrimSpace(statusOut) != "" {
 			return false
@@ -883,8 +1392,19 @@ func (h *Handler) reconcileAlreadyMergedBranch(ctx context.Context, task *models
 	if targetBranch == "" {
 		return false
 	}
-
 	return service.IsBranchTipMergedInto(project.RepoPath, task.WorktreeBranch, targetBranch)
+}
+
+func (h *Handler) reconcileAlreadyMergedBranch(ctx context.Context, task *models.Task) bool {
+	if task == nil || task.WorktreeBranch == "" {
+		return false
+	}
+	project, err := h.projectRepo.GetByID(ctx, task.ProjectID)
+	if err != nil || project == nil || project.RepoPath == "" {
+		return false
+	}
+	h.recoverTaskWorktreeState(ctx, task, project)
+	return taskBranchAlreadyMergedForProject(task, project)
 }
 
 type taskMergeActionState struct {
@@ -893,20 +1413,31 @@ type taskMergeActionState struct {
 	RebaseAvailable     bool
 }
 
-func (h *Handler) resolveTaskMergeActionState(ctx context.Context, task *models.Task) taskMergeActionState {
+func (h *Handler) resolveTaskMergeActionStateForProject(ctx context.Context, task *models.Task, project *models.Project) taskMergeActionState {
+	return h.resolveTaskMergeActionStateForProjectWithLocks(ctx, task, project, nil)
+}
+
+func (h *Handler) resolveTaskMergeActionStateForProjectWithLocks(ctx context.Context, task *models.Task, project *models.Project, worktreeLocks map[string]bool) taskMergeActionState {
 	var state taskMergeActionState
 	if task == nil {
 		return state
 	}
-	project, _ := h.projectRepo.GetByID(ctx, task.ProjectID)
 	h.recoverTaskWorktreeState(ctx, task, project)
 	if task.WorktreeBranch == "" {
 		return state
 	}
 	state.UseWorktreeContent = true
-	state.BranchAlreadyMerged = h.reconcileAlreadyMergedBranch(ctx, task)
-	state.RebaseAvailable = h.taskRebaseAvailable(task, project, state.BranchAlreadyMerged)
+	state.BranchAlreadyMerged = taskBranchAlreadyMergedForProject(task, project)
+	state.RebaseAvailable = h.taskRebaseAvailableWithLocks(task, project, state.BranchAlreadyMerged, worktreeLocks)
 	return state
+}
+
+func (h *Handler) resolveTaskMergeActionState(ctx context.Context, task *models.Task) taskMergeActionState {
+	if task == nil {
+		return taskMergeActionState{}
+	}
+	project, _ := h.projectRepo.GetByID(ctx, task.ProjectID)
+	return h.resolveTaskMergeActionStateForProject(ctx, task, project)
 }
 
 type taskChangesWorktreeState struct {
@@ -956,26 +1487,22 @@ func (h *Handler) resolveTaskMergeEligibility(ctx context.Context, task *models.
 	}
 
 	if task.MergeStatus == models.MergeStatusConflict {
-		switch task.Status {
-		case models.StatusCompleted, models.StatusFailed, models.StatusCancelled:
-			if err := h.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusPending); err != nil {
-				result.Reason = "merge conflict status could not be refreshed"
-				return result
-			}
-			task.MergeStatus = models.MergeStatusPending
-		default:
+		if !taskStatusMayMerge(task.Status) {
 			result.Reason = "task conflict recovery is not ready"
 			return result
 		}
+		if err := h.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusPending); err != nil {
+			result.Reason = "merge conflict status could not be refreshed"
+			return result
+		}
+		task.MergeStatus = models.MergeStatusPending
 	}
 
 	if branchAlreadyMerged || task.MergeStatus == models.MergeStatusMerged {
 		result.Reason = "task branch is already merged"
 		return result
 	}
-	switch task.Status {
-	case models.StatusCompleted, models.StatusFailed, models.StatusCancelled:
-	default:
+	if !taskStatusMayMerge(task.Status) {
 		result.Reason = fmt.Sprintf("task status %s is not mergeable", task.Status)
 		return result
 	}
@@ -1792,25 +2319,6 @@ func (h *Handler) DeleteAllBacklogTasks(c echo.Context) error {
 		return err
 	}
 	applog.Infof("[handler] DeleteAllBacklogTasks deleted %d tasks", count)
-
-	// Return the full kanban board
-	if isHTMX(c) {
-		return h.renderTaskBoardRefresh(c, projectID, nil)
-	}
-
-	return c.Redirect(http.StatusSeeOther, "/tasks?project_id="+projectID)
-}
-
-func (h *Handler) ActivateAllBacklogTasks(c echo.Context) error {
-	projectID := c.QueryParam("project_id")
-	applog.Infof("[handler] ActivateAllBacklogTasks project=%s", projectID)
-
-	count, err := h.taskSvc.ActivateAllBacklog(c.Request().Context(), projectID)
-	if err != nil {
-		applog.Infof("[handler] ActivateAllBacklogTasks error: %v", err)
-		return err
-	}
-	applog.Infof("[handler] ActivateAllBacklogTasks activated %d tasks", count)
 
 	// Return the full kanban board
 	if isHTMX(c) {

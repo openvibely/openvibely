@@ -92,7 +92,7 @@ func TestKanbanColumnHasMobileSafeWidthAndTouchMenu(t *testing.T) {
 		"w-11",
 		"max-w-[calc(100vw-2rem)]",
 		`class="text-sm min-h-11`,
-		`/tasks/backlog/activate?project_id=project-1`,
+		`/tasks/backlog/execute?project_id=project-1`,
 		`class="text-sm pl-8 min-h-11`,
 	} {
 		if !strings.Contains(body, want) {
@@ -109,15 +109,21 @@ func TestKanbanColumnHasMobileSafeWidthAndTouchMenu(t *testing.T) {
 		t.Fatalf("kanban column dropzone must have overflow-y-auto for independent scroll on mobile, got %s", body)
 	}
 
-	activateIdx := strings.Index(body, `/tasks/backlog/activate?project_id=project-1`)
-	if activateIdx == -1 {
-		t.Fatalf("expected backlog activate action in markup, got %s", body)
+	executeIdx := strings.Index(body, `/tasks/backlog/execute?project_id=project-1`)
+	if executeIdx == -1 {
+		t.Fatalf("expected backlog Execute All action in markup, got %s", body)
 	}
-	activateSnippet := body[activateIdx:]
-	if len(activateSnippet) > 500 {
-		activateSnippet = activateSnippet[:500]
+	executeSnippet := body[executeIdx:]
+	if len(executeSnippet) > 500 {
+		executeSnippet = executeSnippet[:500]
 	}
-	if !strings.Contains(activateSnippet, `class="text-sm min-h-11"`) {
-		t.Fatalf("expected backlog activate action to have touch-friendly min height, got %s", activateSnippet)
+	if !strings.Contains(executeSnippet, `class="text-sm min-h-11"`) {
+		t.Fatalf("expected backlog Execute All action to have touch-friendly min height, got %s", executeSnippet)
+	}
+	if strings.Contains(executeSnippet, "hx-confirm") {
+		t.Fatalf("expected backlog Execute All action to submit without confirmation, got %s", executeSnippet)
+	}
+	if strings.Contains(body, "Activate All") || strings.Contains(body, `/tasks/backlog/activate?project_id=project-1`) {
+		t.Fatalf("backlog menu must not render the removed Activate All action, got %s", body)
 	}
 }
