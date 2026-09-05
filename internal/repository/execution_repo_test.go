@@ -1220,6 +1220,84 @@ func TestExecutionRepo_TaskExecutionWindowReturnsLatestChronologicalAndBeforeCur
 	}
 }
 
+func TestExecutionRepo_TaskExecutionWindowUsesRowIDForEqualStartTimes(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := NewTaskRepo(db, nil)
+	execRepo := NewExecutionRepo(db)
+	ctx := context.Background()
+	task := &models.Task{ProjectID: "default", Title: "Equal Start Time Task", Category: models.CategoryActive, Status: models.StatusCompleted, Prompt: "prompt"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	const startedAt = "2026-08-18 12:00:00"
+	const completedAt = "2026-08-18 12:00:01"
+	const executionCount = 6
+	for i := 0; i < executionCount; i++ {
+		id := fmt.Sprintf("equal-start-%d", i)
+		if _, err := db.ExecContext(ctx, `INSERT INTO executions
+			(id, task_id, status, prompt_sent, output, started_at, completed_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?)`, id, task.ID, models.ExecCompleted, id, "output", startedAt, completedAt); err != nil {
+			t.Fatalf("insert execution %s: %v", id, err)
+		}
+	}
+
+	latest, err := execRepo.ListByTaskChronologicalLimit(ctx, task.ID, 3)
+	if err != nil {
+		t.Fatalf("ListByTaskChronologicalLimit: %v", err)
+	}
+	latestIDs := make([]string, len(latest))
+	for i, execution := range latest {
+		latestIDs[i] = execution.ID
+	}
+	if want := []string{"equal-start-3", "equal-start-4", "equal-start-5"}; !reflect.DeepEqual(latestIDs, want) {
+		t.Fatalf("latest IDs = %#v, want %#v", latestIDs, want)
+	}
+
+	earlier, err := execRepo.ListByTaskChronologicalBefore(ctx, task.ID, latest[0].ID, 3)
+	if err != nil {
+		t.Fatalf("ListByTaskChronologicalBefore: %v", err)
+	}
+	earlierIDs := make([]string, len(earlier))
+	for i, execution := range earlier {
+		earlierIDs[i] = execution.ID
+	}
+	if want := []string{"equal-start-0", "equal-start-1", "equal-start-2"}; !reflect.DeepEqual(earlierIDs, want) {
+		t.Fatalf("earlier IDs = %#v, want %#v", earlierIDs, want)
+	}
+	for _, execution := range earlier {
+		for _, latestExecution := range latest {
+			if execution.ID == latestExecution.ID {
+				t.Fatalf("cursor page overlaps latest page at execution %s", execution.ID)
+			}
+		}
+	}
+}
+
+func TestExecutionRepo_TaskExecutionWindowRejectsNonpositiveLimits(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	execRepo := NewExecutionRepo(db)
+	ctx := context.Background()
+
+	for _, limit := range []int{0, -1} {
+		latest, err := execRepo.ListByTaskChronologicalLimit(ctx, "missing-task", limit)
+		if err != nil {
+			t.Fatalf("ListByTaskChronologicalLimit limit=%d: %v", limit, err)
+		}
+		if len(latest) != 0 {
+			t.Fatalf("ListByTaskChronologicalLimit limit=%d returned %d rows, want empty", limit, len(latest))
+		}
+
+		earlier, err := execRepo.ListByTaskChronologicalBefore(ctx, "missing-task", "missing-execution", limit)
+		if err != nil {
+			t.Fatalf("ListByTaskChronologicalBefore limit=%d: %v", limit, err)
+		}
+		if len(earlier) != 0 {
+			t.Fatalf("ListByTaskChronologicalBefore limit=%d returned %d rows, want empty", limit, len(earlier))
+		}
+	}
+}
+
 func promptsOf(execs []models.Execution) []string {
 	out := make([]string, len(execs))
 	for i, exec := range execs {
