@@ -1432,31 +1432,6 @@ func (r *TaskRepo) ListActivePendingAdmissions(ctx context.Context) ([]ActiveTas
 	return admissions, nil
 }
 
-func (r *TaskRepo) ListActivePending(ctx context.Context) ([]models.Task, error) {
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT `+taskSelectColumns+`
-		 FROM tasks WHERE category = 'active' AND status = 'pending'
-		 AND NOT EXISTS (SELECT 1 FROM automation_task_run_reservations r WHERE r.task_id = tasks.id)
-		 AND NOT EXISTS (SELECT 1 FROM executions e WHERE e.task_id = tasks.id AND e.status IN ('queued', 'running'))
-		 AND NOT `+taskThreadInputOwnsAdmissionPredicate+`
-		 ORDER BY priority DESC, display_order ASC, created_at ASC`)
-	if err != nil {
-		return nil, fmt.Errorf("listing active pending tasks: %w", err)
-	}
-	defer rows.Close()
-
-	var tasks []models.Task
-	for rows.Next() {
-		var t models.Task
-		if err := rows.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Category,
-			&t.Priority, &t.Status, &t.Prompt, &t.AgentID, &t.AgentDefinitionID, &t.Tag, &t.DisplayOrder, &t.ParentTaskID, &t.ChainConfig, &t.SwarmRole, &t.SwarmStatus, &t.SwarmConfig, &t.SwarmSequence, &t.WorktreePath, &t.WorktreeBranch, &t.AutoMerge, &t.MergeTargetBranch, &t.MergeStatus, &t.BaseBranch, &t.BaseCommitSHA, &t.LineageDepth, &t.CreatedVia, &t.TelegramChatID, &t.CreatedAt, &t.UpdatedAt, &t.CompletedAt); err != nil {
-			return nil, fmt.Errorf("scanning task: %w", err)
-		}
-		tasks = append(tasks, t)
-	}
-	return tasks, rows.Err()
-}
-
 // ListStaleQueuedTasks finds active tasks with status='queued' that have been
 // in that state for longer than the given duration. These may be orphaned by
 // a thread follow-up goroutine that crashed or timed out without cleaning up.
