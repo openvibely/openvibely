@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
+	"regexp"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -31,6 +32,59 @@ func serveCardPageRequest(t *testing.T, e *echo.Echo, path string) *httptest.Res
 	e.ServeHTTP(rec, req)
 	return rec
 }
+func TestPersonalityFilteringAndSortingPrecedePagination(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	repo := repository.NewCustomPersonalityRepo(db)
+	h.SetCustomPersonalityRepo(repo)
+	for _, personality := range []*models.CustomPersonality{
+		{Name: "Aardvark custom", Key: "aardvark_custom", Description: "first by name", SystemPrompt: "A sufficiently long custom personality prompt."},
+		{Name: "Zulu custom", Key: "zulu_custom", Description: "last by name", SystemPrompt: "Another sufficiently long custom personality prompt."},
+	} {
+		require.NoError(t, repo.Create(t.Context(), personality))
+	}
+
+	baseOnly := serveCardPageRequest(t, e, "/personality?kind=base&page_size=2&card_page=1")
+	require.Equal(t, http.StatusOK, baseOnly.Code)
+	require.Equal(t, "false", baseOnly.Header().Get(cardPageHasMoreHeader))
+	require.Equal(t, 1, strings.Count(baseOnly.Body.String(), `data-personality-key=`))
+	require.Contains(t, baseOnly.Body.String(), `data-personality-name="Base"`)
+
+	ascending := serveCardPageRequest(t, e, "/personality?sort=name_asc&page_size=2&card_page=1")
+	require.Equal(t, http.StatusOK, ascending.Code)
+	require.Equal(t, 2, strings.Count(ascending.Body.String(), `data-personality-key=`))
+	matches := regexp.MustCompile(`data-personality-name="([^"]+)"`).FindAllStringSubmatch(ascending.Body.String(), -1)
+	require.Len(t, matches, 2)
+	require.LessOrEqual(t, strings.ToLower(matches[0][1]), strings.ToLower(matches[1][1]))
+}
+
+func TestChannelsSearchFiltersFixedCardsOnServer(t *testing.T) {
+	var body bytes.Buffer
+	view := pages.ChannelsSettingsView{
+		CurrentProjectID: "project-channels-search",
+		HasGitHubChannel: true,
+		HasSlackChannel:  true,
+		WebhooksSearch:   "github",
+		GitHubStatus:     service.GitHubConnectionStatus{Configured: true, Connected: true},
+		SlackStatus:      service.SlackConnectionStatus{Configured: true, Connected: true},
+	}
+	require.NoError(t, pages.SettingsContent(view).Render(t.Context(), &body))
+	require.Contains(t, body.String(), `data-channel-type="github"`)
+	require.Regexp(t, `data-channel-type="slack"[^>]* hidden`, body.String())
+}
+
+func TestUnmanagedSkillsRenderNoSelectionUIOrMetadata(t *testing.T) {
+	h, e, _, _ := setupTestHandlerWithDB(t)
+	h.SetAgentSkillRoot("")
+	rec := serveCardPageRequest(t, e, "/skills?project_id=default")
+	require.Equal(t, http.StatusOK, rec.Code)
+	for _, forbidden := range []string{
+		`data-card-select-loaded`, `data-card-select-mode`, `data-card-selection-actions`,
+		`data-card-bulk-confirm`, `data-card-mobile-actions`, `data-card-select-id`,
+	} {
+		require.NotContains(t, rec.Body.String(), forbidden)
+	}
+}
+
 func TestCollectionFilterAndSortAllowlists(t *testing.T) {
 	tests := []struct {
 		key, fallback string
@@ -434,19 +488,21 @@ func TestCardPaginationPersonalityHandlerKeepsMatchingActiveCardOutsidePageWindo
 	require.NotContains(t, first.Body.String(), `data-personality-key="`+presets[1].Key+`"`)
 	require.NotContains(t, first.Body.String(), `data-personality-name="Overridden preset"`)
 	require.Equal(t, 20, strings.Count(first.Body.String(), `data-personality-pagination-card="true"`))
-	require.Equal(t, 1, strings.Count(first.Body.String(), `data-personality-pagination-card="false"`))
-	for i := 0; i < 20; i++ {
+	require.NotContains(t, first.Body.String(), `data-personality-pagination-card="false"`)
+	for i := 0; i < 19; i++ {
 		require.Contains(t, first.Body.String(), fmt.Sprintf(`data-personality-key="paged_custom_%02d"`, i))
 	}
+	require.NotContains(t, first.Body.String(), `data-personality-key="paged_custom_19"`)
 	require.NotContains(t, first.Body.String(), `data-personality-key="paged_custom_20"`)
 
 	continuationOffset := strings.Count(first.Body.String(), `data-personality-pagination-card="true"`)
 	continuation := serveCardPageRequest(t, e, fmt.Sprintf("/personality?page=1&page_size=20&offset=%d&search=paged+custom&card_page=1", continuationOffset))
 	require.Equal(t, http.StatusOK, continuation.Code)
 	require.Equal(t, "false", continuation.Header().Get(cardPageHasMoreHeader))
-	require.Equal(t, 1, strings.Count(continuation.Body.String(), `data-personality-pagination-card="true"`))
+	require.Equal(t, 2, strings.Count(continuation.Body.String(), `data-personality-pagination-card="true"`))
+	require.Contains(t, continuation.Body.String(), `data-personality-key="paged_custom_19"`)
 	require.Contains(t, continuation.Body.String(), `data-personality-key="paged_custom_20"`)
-	require.Contains(t, continuation.Body.String(), `data-personality-key="paged_custom_21"`)
+	require.NotContains(t, continuation.Body.String(), `data-personality-key="paged_custom_21"`)
 }
 
 func TestCardPaginationProductionBrowserLoadsSequentialPagesAndResetsSearch(t *testing.T) {

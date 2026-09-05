@@ -151,9 +151,11 @@ templ CardListToolbar(config CardListToolbarConfig) {
 	<div
 		class="mb-4"
 		data-card-list-toolbar={ config.PageKey }
-		data-card-bulk-url={ config.BulkDeleteURL }
-		data-card-entity-type={ config.EntityType }
-		data-card-identity-kind={ config.IdentityKind }
+		if config.CanSelect {
+			data-card-bulk-url={ config.BulkDeleteURL }
+			data-card-entity-type={ config.EntityType }
+			data-card-identity-kind={ config.IdentityKind }
+		}
 	>
 		<form method="get" action={ config.Action } class="flex flex-wrap items-center gap-2" data-card-query-form>
 			if config.ProjectID != "" {
@@ -221,24 +223,28 @@ templ CardListToolbar(config CardListToolbarConfig) {
 				<a class="btn btn-ghost btn-xs" data-card-clear-filters href={ templ.SafeURL(cardToolbarURL(config, "", true)) }>Clear all</a>
 			</div>
 		}
-		<div class="hidden items-center gap-2 rounded-box border border-base-300 bg-base-100 p-2 shadow-sm" data-card-selection-actions>
-			<strong data-card-selected-count>0 selected</strong>
-			<button type="button" class="btn btn-error btn-sm" data-card-delete-selected>Delete selected</button>
-			<button type="button" class="btn btn-ghost btn-sm" data-card-cancel-selection>Cancel</button>
-		</div>
-		<div data-search-no-results class="py-8 text-center" style="display:none"><p class="opacity-50">No results match your search.</p></div>
-		<dialog class="modal" data-card-bulk-confirm aria-labelledby={ config.PageKey + "-bulk-title" } aria-describedby={ config.PageKey + "-bulk-description" }>
-			<div class="modal-box">
-				<h3 id={ config.PageKey + "-bulk-title" } class="text-lg font-bold text-error" data-card-bulk-confirm-title>Delete selected?</h3>
-				<p id={ config.PageKey + "-bulk-description" } class="py-4">This action cannot be undone.</p>
-				<p class="hidden text-sm text-error" data-card-bulk-error role="alert"></p>
-				<div class="modal-action"><button type="button" class="btn" data-card-bulk-confirm-cancel autofocus>Cancel</button><button type="button" class="btn btn-error" data-card-bulk-confirm-delete>Delete selected</button></div>
+		if config.CanSelect {
+			<div class="hidden items-center gap-2 rounded-box border border-base-300 bg-base-100 p-2 shadow-sm" data-card-selection-actions>
+				<strong data-card-selected-count>0 selected</strong>
+				<button type="button" class="btn btn-error btn-sm" data-card-delete-selected>Delete selected</button>
+				<button type="button" class="btn btn-ghost btn-sm" data-card-cancel-selection>Cancel</button>
 			</div>
-			<form method="dialog" class="modal-backdrop"><button>close</button></form>
-		</dialog>
-		<div class="fixed inset-x-3 bottom-3 z-[90] hidden items-center justify-between gap-2 rounded-box border border-base-300 bg-base-100 p-3 shadow-xl md:hidden" data-card-mobile-actions>
-			<strong data-card-mobile-selected-count>0 selected</strong><div class="flex gap-2"><button type="button" class="btn btn-error btn-sm" data-card-mobile-delete>Delete</button><button type="button" class="btn btn-ghost btn-sm" data-card-mobile-cancel>Cancel</button></div>
-		</div>
+		}
+		<div data-search-no-results class="py-8 text-center" style="display:none"><p class="opacity-50">No results match your search.</p></div>
+		if config.CanSelect {
+			<dialog class="modal" data-card-bulk-confirm aria-labelledby={ config.PageKey + "-bulk-title" } aria-describedby={ config.PageKey + "-bulk-description" }>
+				<div class="modal-box">
+					<h3 id={ config.PageKey + "-bulk-title" } class="text-lg font-bold text-error" data-card-bulk-confirm-title>Delete selected?</h3>
+					<p id={ config.PageKey + "-bulk-description" } class="py-4">This action cannot be undone.</p>
+					<p class="hidden text-sm text-error" data-card-bulk-error role="alert"></p>
+					<div class="modal-action"><button type="button" class="btn" data-card-bulk-confirm-cancel autofocus>Cancel</button><button type="button" class="btn btn-error" data-card-bulk-confirm-delete>Delete selected</button></div>
+				</div>
+				<form method="dialog" class="modal-backdrop"><button>close</button></form>
+			</dialog>
+			<div class="fixed inset-x-3 bottom-3 z-[90] hidden items-center justify-between gap-2 rounded-box border border-base-300 bg-base-100 p-3 shadow-xl md:hidden" data-card-mobile-actions>
+				<strong data-card-mobile-selected-count>0 selected</strong><div class="flex gap-2"><button type="button" class="btn btn-error btn-sm" data-card-mobile-delete>Delete</button><button type="button" class="btn btn-ghost btn-sm" data-card-mobile-cancel>Cancel</button></div>
+			</div>
+		}
 	</div>
 }
 

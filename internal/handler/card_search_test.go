@@ -1,15 +1,24 @@
 package handler
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"html"
 	"net/http"
 	"net/http/httptest"
+	"os/exec"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
+	"github.com/openvibely/openvibely/web/templates/layout"
+	"github.com/openvibely/openvibely/web/templates/pages"
 	"github.com/stretchr/testify/require"
 )
 
@@ -27,6 +36,156 @@ func TestCollectionSelectionBrowserContractIsShared(t *testing.T) {
 	} {
 		require.Contains(t, body, want)
 	}
+}
+
+func TestCollectionSelectionProductionBrowserInteractions(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping browser regression in short mode")
+	}
+	chrome := findChromeForBrowserTest(t)
+	if chrome == "" {
+		t.Skip("Chrome/Chromium executable not found")
+	}
+
+	render := func(cards []models.LLMConfig) string {
+		var out bytes.Buffer
+		require.NoError(t, pages.ModelsContentPageWithPagination(cards, cards, map[string]int{}, false, false).Render(t.Context(), &out))
+		return out.String()
+	}
+	initial := []models.LLMConfig{
+		{ID: "default", Name: "Default", Provider: models.ProviderTest, Model: "default", IsDefault: true},
+		{ID: "a", Name: "Alpha", Provider: models.ProviderTest, Model: "alpha"},
+		{ID: "b", Name: "Bravo", Provider: models.ProviderTest, Model: "bravo"},
+		{ID: "c", Name: "Charlie", Provider: models.ProviderTest, Model: "charlie"},
+	}
+	replacement := []models.LLMConfig{
+		{ID: "default", Name: "Default", Provider: models.ProviderTest, Model: "default", IsDefault: true},
+		{ID: "b", Name: "Bravo", Provider: models.ProviderTest, Model: "bravo"},
+		{ID: "c", Name: "Charlie", Provider: models.ProviderTest, Model: "charlie"},
+		{ID: "e", Name: "Echo", Provider: models.ProviderTest, Model: "echo"},
+	}
+	finalCards := []models.LLMConfig{{ID: "default", Name: "Default", Provider: models.ProviderTest, Model: "default", IsDefault: true}}
+	replacementJSON, err := json.Marshal(render(replacement))
+	require.NoError(t, err)
+
+	var base bytes.Buffer
+	require.NoError(t, layout.Base("Collection selection browser", nil, "").Render(t.Context(), &base))
+	var local []string
+	for _, line := range strings.Split(base.String(), "\n") {
+		if strings.Contains(line, "<script src=") || strings.Contains(line, "<link href=") || strings.Contains(line, `<link rel="stylesheet" href=`) {
+			continue
+		}
+		local = append(local, line)
+	}
+	page := strings.Replace(strings.Join(local, "\n"), "</main>", render(initial)+"</main>", 1)
+	runner := `<script>
+(function() {
+  function result(status, message) { var n=document.createElement('div'); n.id='browser-result'; n.dataset.status=status; n.textContent=message||status; document.body.appendChild(n); }
+  function fail(message) { throw new Error(message); }
+  function wait(ms) { return new Promise(function(resolve) { setTimeout(resolve, ms); }); }
+  function card(id) { return document.querySelector('[data-model-id="'+id+'"]'); }
+  function checkbox(id) { return card(id).querySelector('[data-card-selection-gutter] input'); }
+  function selectedCount() { return document.querySelector('[data-card-selected-count]').textContent.trim(); }
+  async function run() {
+    await wait(100);
+    var clicks=0; ['a','b','c'].forEach(function(id) { card(id).onclick=function(){clicks++;}; });
+    checkbox('a').click();
+    if (clicks !== 0 || selectedCount() !== '1 selected') fail('checkbox click activated card or did not select');
+    checkbox('b').dispatchEvent(new MouseEvent('click', {bubbles:true, shiftKey:true}));
+    if (selectedCount() !== '2 selected' || !checkbox('a').checked || !checkbox('b').checked) fail('Shift-click range selection failed');
+    document.dispatchEvent(new KeyboardEvent('keydown', {key:'Escape', bubbles:true}));
+    if (selectedCount() !== '0 selected' || checkbox('a').checked) fail('Escape did not clear selection');
+    document.querySelector('[data-card-select-loaded]').click();
+    if (selectedCount() !== '3 selected' || checkbox('default').checked) fail('Select loaded included an ineligible card or missed eligible cards');
+    var disabled=checkbox('default'), help=document.getElementById(disabled.getAttribute('aria-describedby'));
+    if (!disabled.disabled || !help || !help.textContent.trim()) fail('disabled selection control lacks an accessible explanation');
+    window.openVibelyNavigate=function(path){window.selectionNavigation=path;};
+    var provider=document.querySelector('[name="provider"]'); provider.value='openai'; provider.form.requestSubmit();
+    if (Object.keys(window._openVibelyCardSelections.models.ids).length !== 0 || !window.selectionNavigation.includes('provider=openai')) fail('query change did not clear selection state');
+    document.dispatchEvent(new KeyboardEvent('keydown', {key:'Escape', bubbles:true}));
+    checkbox('a').click();
+    var root=document.getElementById('models-container');
+    var appended=card('c').cloneNode(true); appended.setAttribute('data-model-id','appended'); appended.setAttribute('data-card-select-id','appended'); appended.querySelector('[data-card-selection-gutter]').remove(); document.querySelector('#models-card-list .grid').appendChild(appended); root._openVibelyInstallSelectionCards();
+    if (!checkbox('a').checked || !checkbox('appended') || checkbox('appended').checked) fail('loaded-card reconciliation changed selection or missed the new checkbox');
+    window.addEventListener('sse-card-refresh', function() { root=window.replaceSearchableCardContainer(root, REPLACEMENT_HTML); document.body.dispatchEvent(new CustomEvent('htmx:afterSettle', {detail:{elt:root}})); });
+    window.dispatchEvent(new CustomEvent('sse-card-refresh'));
+    await wait(25);
+    if (selectedCount() !== '0 selected' || !checkbox('e')) fail('HTMX/SSE replacement did not reconcile removed and new cards');
+    document.querySelector('[data-card-select-mode]').click(); checkbox('b').click();
+    var mobile=document.querySelector('[data-card-mobile-actions]');
+    if (!mobile.classList.contains('flex') || selectedCount() !== '1 selected') fail('mobile Select mode did not expose actions');
+    mobile.querySelector('[data-card-mobile-cancel]').click();
+    if (selectedCount() !== '0 selected' || !mobile.classList.contains('hidden')) fail('mobile cancel did not clear mode');
+    document.querySelector('[data-card-select-loaded]').click(); document.querySelector('[data-card-delete-selected]').click();
+    var dialog=document.querySelector('[data-card-bulk-confirm]');
+    if (!dialog.open || !dialog.textContent.includes('3 selected models')) fail('bulk confirmation did not open with the selected count');
+    dialog.querySelector('[data-card-bulk-confirm-delete]').click();
+    for (var i=0;i<80 && !window.bulkFinished;i++) await wait(25);
+    if (!window.bulkFinished) fail('bulk deletion did not finish');
+    for (var j=0;j<80 && document.querySelectorAll('#models-card-list [data-card-select-id]').length!==1;j++) await wait(25);
+    if (document.querySelectorAll('#models-card-list [data-card-select-id]').length !== 1 || document.activeElement !== document.querySelector('[data-card-search]')) fail('bulk refresh was not authoritative or did not restore focus');
+    result('pass','selection interactions passed');
+  }
+  var REPLACEMENT_HTML=` + string(replacementJSON) + `;
+  window.addEventListener('load', function(){run().catch(function(error){result('fail', String(error&&error.stack||error));});});
+})();
+</script>`
+	page = strings.Replace(page, "</body>", runner+"</body>", 1)
+
+	var deletes atomic.Int32
+	var payloadMu sync.Mutex
+	var deletedIDs []string
+	fixture := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		switch {
+		case r.URL.Path == "/models/bulk" && r.Method == http.MethodDelete:
+			var request bulkIDsRequest
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			payloadMu.Lock()
+			deletedIDs = append([]string(nil), request.IDs...)
+			payloadMu.Unlock()
+			deletes.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"deleted":3}`))
+		case r.URL.Path == "/models" && r.Method == http.MethodGet:
+			_, _ = w.Write([]byte(render(finalCards)))
+		case r.URL.Path == "/bulk-finished":
+			if deletes.Load() > 0 {
+				_, _ = w.Write([]byte("true"))
+			} else {
+				_, _ = w.Write([]byte("false"))
+			}
+		default:
+			_, _ = w.Write([]byte(page))
+		}
+	}))
+	defer fixture.Close()
+	page = strings.Replace(page, "for (var i=0;i<80 && !window.bulkFinished;i++) await wait(25);", "for (var i=0;i<80 && !window.bulkFinished;i++){ window.bulkFinished=(await fetch('/bulk-finished').then(function(r){return r.text();}))==='true'; if(!window.bulkFinished) await wait(25); }", 1)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, chrome, "--headless=new", "--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage", "--disable-background-networking", "--disable-extensions", "--no-first-run", "--window-size=390,844", "--virtual-time-budget=8000", "--dump-dom", fixture.URL)
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, "Chrome output: %s", out)
+	dom := string(out)
+	if !strings.Contains(dom, `id="browser-result" data-status="pass"`) {
+		idx := strings.Index(dom, `id="browser-result"`)
+		if idx >= 0 {
+			end := idx + 800
+			if end > len(dom) {
+				end = len(dom)
+			}
+			t.Fatalf("selection browser regression failed: %s", html.UnescapeString(dom[idx:end]))
+		}
+		t.Fatalf("selection browser regression did not report a result; DOM length=%d", len(dom))
+	}
+	require.Equal(t, int32(1), deletes.Load())
+	payloadMu.Lock()
+	require.ElementsMatch(t, []string{"b", "c", "e"}, deletedIDs)
+	payloadMu.Unlock()
 }
 
 func TestCollectionCardToolbars(t *testing.T) {

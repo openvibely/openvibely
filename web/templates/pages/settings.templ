@@ -23,7 +23,10 @@ type channelStatusBadgeOptions struct {
 	NotConfiguredClass string
 }
 
-func channelCardMatchesFilters(view ChannelsSettingsView, channelType string, configured, connected bool) bool {
+func channelCardMatchesFilters(view ChannelsSettingsView, channelType string, configured, connected bool, searchText string) bool {
+	if search := strings.ToLower(strings.TrimSpace(view.WebhooksSearch)); search != "" && !strings.Contains(strings.ToLower(searchText), search) {
+		return false
+	}
 	if view.ChannelTypeFilter != "" && view.ChannelTypeFilter != channelType {
 		return false
 	}
@@ -251,11 +254,11 @@ templ settingsContent(view ChannelsSettingsView) {
 
 			<!-- Active Channels -->
 			<div class="grid gap-4 mb-8">
-				if channelCardMatchesFilters(view, "outbound_targets", len(view.ChannelTargets) > 0, len(view.ChannelTargets) > 0) {
+				if channelCardMatchesFilters(view, "outbound_targets", len(view.ChannelTargets) > 0, len(view.ChannelTargets) > 0, "Outbound Message Targets send_message Slack Telegram Email Discord X") {
 					@OutboundTargetsCard(view.CurrentProjectID, view.ChannelTargets, view.SendMessageExplicitTargets)
 				}
 				if view.HasXChannel {
-					<div class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40" data-channel-type="x" data-search-card data-search-text="X formerly Twitter mentions posts" onclick="openXConfigModal()" hidden?={ !channelCardMatchesFilters(view, "x", view.XStatus.Configured, view.XStatus.Connected) }>
+					<div class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40" data-channel-type="x" data-search-card data-search-text="X formerly Twitter mentions posts" onclick="openXConfigModal()" hidden?={ !channelCardMatchesFilters(view, "x", view.XStatus.Configured, view.XStatus.Connected, "X formerly Twitter mentions posts") }>
 						<div class="card-body p-5">
 							<div class="flex items-start justify-between gap-3">
 								<div><h3 class="card-title">X (formerly Twitter)</h3><p class="text-sm opacity-60">Receive authorized mentions and post replies using X API v2.</p></div>
@@ -285,7 +288,7 @@ templ settingsContent(view ChannelsSettingsView) {
 				<div
 					class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
 					data-channel-type="github"
-					hidden?={ !channelCardMatchesFilters(view, "github", view.GitHubStatus.Configured, view.GitHubStatus.Connected) }
+					hidden?={ !channelCardMatchesFilters(view, "github", view.GitHubStatus.Configured, view.GitHubStatus.Connected, "GitHub "+githubConnectionBadge(view.GitHubStatus).Label) }
 					data-search-card
 					data-search-text={ "GitHub " + githubConnectionBadge(view.GitHubStatus).Label }
 					onclick="editChannelFromData(this)"
@@ -360,7 +363,7 @@ templ settingsContent(view ChannelsSettingsView) {
 				<div
 					class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
 					data-channel-type="slack"
-					hidden?={ !channelCardMatchesFilters(view, "slack", view.SlackStatus.Configured, view.SlackStatus.Connected) }
+					hidden?={ !channelCardMatchesFilters(view, "slack", view.SlackStatus.Configured, view.SlackStatus.Connected, "Slack "+slackConnectionBadge(view.SlackStatus).Label) }
 					data-search-card
 					data-search-text={ "Slack " + slackConnectionBadge(view.SlackStatus).Label }
 					onclick="editChannelFromData(this)"
@@ -438,7 +441,7 @@ templ settingsContent(view ChannelsSettingsView) {
 				<div
 					class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
 					data-channel-type="telegram"
-					hidden?={ !channelCardMatchesFilters(view, "telegram", strings.TrimSpace(view.TelegramToken) != "", view.IsBotRunning) }
+					hidden?={ !channelCardMatchesFilters(view, "telegram", strings.TrimSpace(view.TelegramToken) != "", view.IsBotRunning, "Telegram Bot "+telegramChannelStatusText(view.IsBotRunning)) }
 					data-channel-token={ view.TelegramToken }
 					data-channel-running={ templ.JSONString(view.IsBotRunning) }
 					data-search-card
@@ -512,7 +515,7 @@ templ settingsContent(view ChannelsSettingsView) {
 					<div
 						class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
 						data-channel-type="discord"
-						hidden?={ !channelCardMatchesFilters(view, "discord", view.DiscordStatus.Configured, view.DiscordStatus.Running) }
+						hidden?={ !channelCardMatchesFilters(view, "discord", view.DiscordStatus.Configured, view.DiscordStatus.Running, "Discord "+discordConnectionBadge(view.DiscordStatus).Label) }
 						data-search-card
 						data-search-text={ "Discord " + discordConnectionBadge(view.DiscordStatus).Label }
 						onclick="editChannelFromData(this)"
@@ -576,7 +579,7 @@ templ settingsContent(view ChannelsSettingsView) {
 					<div
 						class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
 						data-channel-type="email"
-						hidden?={ !channelCardMatchesFilters(view, "email", view.EmailStatus.Configured, view.EmailStatus.Running) }
+						hidden?={ !channelCardMatchesFilters(view, "email", view.EmailStatus.Configured, view.EmailStatus.Running, "Email "+view.EmailStatus.Address) }
 						data-search-card
 						data-search-text={ "Email " + view.EmailStatus.Address }
 						onclick="openEmailConfigModal()"

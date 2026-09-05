@@ -4372,12 +4372,16 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 								state.last = id; render();
 							}
 							function installCards() {
-								cards().forEach(function(card) {
+								cards().forEach(function(card, index) {
 									if (card.querySelector(':scope > [data-card-selection-gutter]')) return;
 									card.classList.add('relative');
 									var gutter = document.createElement('div'); gutter.className = 'absolute left-2 top-4 z-20 hidden md:block'; gutter.setAttribute('data-card-selection-gutter', '');
 									var checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.className = 'checkbox checkbox-sm'; checkbox.setAttribute('aria-label', 'Select ' + (card.getAttribute('data-card-select-id') || 'card'));
-									if (!eligible(card)) { checkbox.disabled = true; checkbox.title = card.getAttribute('data-card-select-disabled-reason') || 'This card cannot be selected'; checkbox.setAttribute('aria-describedby', key + '-selection-help'); }
+									if (!eligible(card)) {
+										var reason = card.getAttribute('data-card-select-disabled-reason') || 'This card cannot be selected';
+										var help = document.createElement('span'); help.id = key + '-selection-help-' + index; help.className = 'sr-only'; help.textContent = reason;
+										checkbox.disabled = true; checkbox.title = reason; checkbox.setAttribute('aria-disabled', 'true'); checkbox.setAttribute('aria-describedby', help.id); gutter.appendChild(help);
+									}
 									checkbox.addEventListener('click', function(event) { checkbox._openVibelyShift = !!event.shiftKey; event.stopPropagation(); });
 									checkbox.addEventListener('change', function(event) { event.stopPropagation(); toggle(card, checkbox.checked, !!checkbox._openVibelyShift); checkbox._openVibelyShift = false; });
 									gutter.appendChild(checkbox); card.insertBefore(gutter, card.firstChild); card.classList.add('md:pl-8');
