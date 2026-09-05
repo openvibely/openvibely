@@ -211,19 +211,7 @@ func BenchmarkExecutionRepoViewTaskThreadPage(b *testing.B) {
 		}
 	}
 
-	b.Run("unbounded_history", func(b *testing.B) {
-		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			executions, err := repo.ListByTaskChronological(ctx, task.ID)
-			if err != nil {
-				b.Fatal(err)
-			}
-			if len(executions) != 200 {
-				b.Fatalf("executions = %d, want 200", len(executions))
-			}
-		}
-	})
-	b.Run("count_plus_20_row_page", func(b *testing.B) {
+	b.Run("current", func(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
 			total, err := repo.CountByTask(ctx, task.ID)
