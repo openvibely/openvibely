@@ -1853,62 +1853,38 @@ func TestSettingsQueryAcquiredObserverRunsWhileConnectionIsHeld(t *testing.T) {
 }
 
 func BenchmarkEmailServiceSettingsBurst(b *testing.B) {
-	for _, legacy := range []bool{true, false} {
-		name := "candidate"
-		if legacy {
-			name = "baseline"
-		}
-		b.Run(name, func(b *testing.B) {
-			db := testutil.NewTestDB(b)
-			ctx := context.Background()
-			settingsRepo := repository.NewSettingsRepo(db)
-			for key, value := range map[string]string{
-				EmailSettingProvider: EmailProviderCustom, EmailSettingAddress: "bot@example.com", EmailSettingPassword: "secret",
-				EmailSettingIMAPHost: "imap.example.com", EmailSettingSMTPHost: "smtp.example.com", EmailSettingSendResponses: "true",
-			} {
-				require.NoError(b, settingsRepo.Set(ctx, key, value))
-			}
-			svc := NewEmailService(settingsRepo, repository.NewProjectRepo(db), repository.NewLLMConfigRepo(db), repository.NewTaskRepo(db, nil), repository.NewExecutionRepo(db), repository.NewScheduleRepo(db), nil, nil, nil, repository.NewEmailAuthRepo(db), repository.NewEmailTaskContextRepo(db))
-			svc.sendMail = func(context.Context, EmailRuntimeConfig, string, string, string, string, string, string) error {
-				return nil
-			}
-			var settingsSelects atomic.Int64
-			settingsRepo.SetQueryObserver(func(query string) {
-				if strings.Contains(query, "FROM app_settings") {
-					settingsSelects.Add(1)
-				}
-			})
-
-			b.ReportAllocs()
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
-				for n := 0; n < 100; n++ {
-					if legacy {
-						cfg, err := loadEmailConfigPointReadsForBenchmark(ctx, settingsRepo)
-						require.NoError(b, err)
-						require.NoError(b, svc.sendMail(ctx, cfg, "person@example.com", "Notice", "body", "", "", ""))
-					} else {
-						require.True(b, svc.SendOutboundMessage(ctx, "person@example.com", "Notice", "body").OK)
-					}
-				}
-				for n := 0; n < 100; n++ {
-					if legacy {
-						gate, err := loadEmailConfigPointReadsForBenchmark(ctx, settingsRepo)
-						require.NoError(b, err)
-						if gate.SendResponses {
-							cfg, err := loadEmailConfigPointReadsForBenchmark(ctx, settingsRepo)
-							require.NoError(b, err)
-							require.NoError(b, svc.sendMail(ctx, cfg, "person@example.com", "Re: Question", "body", "<outbound@example.com>", "<message@example.com>", "<root@example.com> <message@example.com>"))
-						}
-					} else {
-						svc.SendTaskCompletionToThread(ctx, "person@example.com", "<message@example.com>", "<root@example.com>", "Question", "Task", "done", "")
-					}
-				}
-			}
-			b.StopTimer()
-			b.ReportMetric(float64(settingsSelects.Load())/float64(b.N), "settings_selects/op")
-		})
+	db := testutil.NewTestDB(b)
+	ctx := context.Background()
+	settingsRepo := repository.NewSettingsRepo(db)
+	for key, value := range map[string]string{
+		EmailSettingProvider: EmailProviderCustom, EmailSettingAddress: "bot@example.com", EmailSettingPassword: "secret",
+		EmailSettingIMAPHost: "imap.example.com", EmailSettingSMTPHost: "smtp.example.com", EmailSettingSendResponses: "true",
+	} {
+		require.NoError(b, settingsRepo.Set(ctx, key, value))
 	}
+	svc := NewEmailService(settingsRepo, repository.NewProjectRepo(db), repository.NewLLMConfigRepo(db), repository.NewTaskRepo(db, nil), repository.NewExecutionRepo(db), repository.NewScheduleRepo(db), nil, nil, nil, repository.NewEmailAuthRepo(db), repository.NewEmailTaskContextRepo(db))
+	svc.sendMail = func(context.Context, EmailRuntimeConfig, string, string, string, string, string, string) error {
+		return nil
+	}
+	var settingsSelects atomic.Int64
+	settingsRepo.SetQueryObserver(func(query string) {
+		if strings.Contains(query, "FROM app_settings") {
+			settingsSelects.Add(1)
+		}
+	})
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		for n := 0; n < 100; n++ {
+			require.True(b, svc.SendOutboundMessage(ctx, "person@example.com", "Notice", "body").OK)
+		}
+		for n := 0; n < 100; n++ {
+			svc.SendTaskCompletionToThread(ctx, "person@example.com", "<message@example.com>", "<root@example.com>", "Question", "Task", "done", "")
+		}
+	}
+	b.StopTimer()
+	b.ReportMetric(float64(settingsSelects.Load())/float64(b.N), "settings_selects/op")
 }
 
 func BenchmarkEmailServiceSettingsContention(b *testing.B) {
@@ -1916,144 +1892,108 @@ func BenchmarkEmailServiceSettingsContention(b *testing.B) {
 		emailOperations  = 100
 		unrelatedQueries = 100
 	)
-	for _, legacy := range []bool{true, false} {
-		name := "candidate"
-		if legacy {
-			name = "baseline"
+	b.Run("current", func(b *testing.B) {
+		db := testutil.NewTestDB(b)
+		ctx := context.Background()
+		settingsRepo := repository.NewSettingsRepo(db)
+		for key, value := range map[string]string{
+			EmailSettingProvider: EmailProviderCustom, EmailSettingAddress: "bot@example.com", EmailSettingPassword: "secret",
+			EmailSettingIMAPHost: "imap.example.com", EmailSettingSMTPHost: "smtp.example.com", EmailSettingSendResponses: "true",
+		} {
+			require.NoError(b, settingsRepo.Set(ctx, key, value))
 		}
-		b.Run(name, func(b *testing.B) {
-			db := testutil.NewTestDB(b)
-			ctx := context.Background()
-			settingsRepo := repository.NewSettingsRepo(db)
-			for key, value := range map[string]string{
-				EmailSettingProvider: EmailProviderCustom, EmailSettingAddress: "bot@example.com", EmailSettingPassword: "secret",
-				EmailSettingIMAPHost: "imap.example.com", EmailSettingSMTPHost: "smtp.example.com", EmailSettingSendResponses: "true",
-			} {
-				require.NoError(b, settingsRepo.Set(ctx, key, value))
-			}
-			svc := NewEmailService(settingsRepo, repository.NewProjectRepo(db), repository.NewLLMConfigRepo(db), repository.NewTaskRepo(db, nil), repository.NewExecutionRepo(db), repository.NewScheduleRepo(db), nil, nil, nil, repository.NewEmailAuthRepo(db), repository.NewEmailTaskContextRepo(db))
-			if legacy {
-				svc.configLoader = func(ctx context.Context) (EmailRuntimeConfig, error) {
-					return loadEmailConfigPointReadsForBenchmark(ctx, settingsRepo)
-				}
-			}
-			var settingsSelects atomic.Int64
-			settingsRepo.SetQueryObserver(func(query string) {
-				if strings.Contains(query, "FROM app_settings") {
-					settingsSelects.Add(1)
-				}
-			})
-			var smtpCalls atomic.Int64
-			svc.sendMail = func(context.Context, EmailRuntimeConfig, string, string, string, string, string, string) error {
-				smtpCalls.Add(1)
-				return nil
-			}
-
-			waits := make([]time.Duration, 0, b.N*unrelatedQueries)
-			totals := make([]time.Duration, 0, b.N)
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
-				acquired := make(chan struct{})
-				release := make(chan struct{})
-				var blockFirst sync.Once
-				settingsRepo.SetQueryAcquiredObserver(func(query string) {
-					if strings.Contains(query, "FROM app_settings") {
-						blockFirst.Do(func() {
-							close(acquired)
-							<-release
-						})
-					}
-				})
-
-				iterationStart := time.Now()
-				emailDone := make(chan error, 1)
-				go func() {
-					for n := 0; n < emailOperations; n++ {
-						if n%2 == 0 {
-							result := svc.SendOutboundMessage(ctx, "person@example.com", "Notice", "body")
-							if !result.OK {
-								emailDone <- fmt.Errorf("direct outbound failed: %s", result.Error)
-								return
-							}
-						} else {
-							if legacy {
-								gate, err := svc.configLoader(ctx)
-								if err != nil {
-									emailDone <- fmt.Errorf("reply response gate failed: %w", err)
-									return
-								}
-								if !gate.SendResponses {
-									continue
-								}
-							}
-							svc.SendTaskCompletionToThread(ctx, "person@example.com", "<message@example.com>", "<root@example.com>", "Question", "Task", "done", "")
-						}
-					}
-					emailDone <- nil
-				}()
-				<-acquired
-
-				waitCount := db.Stats().WaitCount
-				waitResults := make(chan time.Duration, unrelatedQueries)
-				var unrelated sync.WaitGroup
-				unrelated.Add(unrelatedQueries)
-				for n := 0; n < unrelatedQueries; n++ {
-					go func() {
-						defer unrelated.Done()
-						waitStart := time.Now()
-						var value string
-						err := db.QueryRowContext(ctx, "SELECT value FROM app_settings WHERE key = ?", EmailSettingAddress).Scan(&value)
-						if err != nil {
-							b.Errorf("unrelated query failed: %v", err)
-						}
-						waitResults <- time.Since(waitStart)
-					}()
-				}
-				require.Eventually(b, func() bool {
-					return db.Stats().WaitCount >= waitCount+unrelatedQueries
-				}, time.Second, time.Millisecond, "all unrelated queries must queue behind acquired settings query")
-				close(release)
-				unrelated.Wait()
-				require.NoError(b, <-emailDone)
-				totals = append(totals, time.Since(iterationStart))
-				close(waitResults)
-				for wait := range waitResults {
-					waits = append(waits, wait)
-				}
-			}
-			b.StopTimer()
-			settingsRepo.SetQueryAcquiredObserver(nil)
-			require.Equal(b, int64(b.N*emailOperations), smtpCalls.Load(), "every measured operation must reach the stubbed SMTP handoff")
-			expectedSettingsSelects := int64(b.N * emailOperations)
-			if legacy {
-				expectedSettingsSelects = int64(b.N * (emailOperations/2*len(emailRuntimeSettingKeys) + emailOperations/2*2*len(emailRuntimeSettingKeys)))
-			}
-			require.Equal(b, expectedSettingsSelects, settingsSelects.Load(), "measured service paths must match the historical and candidate settings-read ledgers")
-			b.ReportMetric(float64(settingsSelects.Load())/float64(b.N), "settings_selects/op")
-			sort.Slice(waits, func(i, j int) bool { return waits[i] < waits[j] })
-			sort.Slice(totals, func(i, j int) bool { return totals[i] < totals[j] })
-			if len(waits) > 0 {
-				b.ReportMetric(float64(waits[len(waits)/2].Nanoseconds()), "median_wait_ns")
-				b.ReportMetric(float64(waits[(len(waits)-1)*95/100].Nanoseconds()), "p95_wait_ns")
-			}
-			if len(totals) > 0 {
-				b.ReportMetric(float64(totals[len(totals)/2].Nanoseconds()), "median_total_ns")
-				b.ReportMetric(float64(totals[(len(totals)-1)*95/100].Nanoseconds()), "p95_total_ns")
+		svc := NewEmailService(settingsRepo, repository.NewProjectRepo(db), repository.NewLLMConfigRepo(db), repository.NewTaskRepo(db, nil), repository.NewExecutionRepo(db), repository.NewScheduleRepo(db), nil, nil, nil, repository.NewEmailAuthRepo(db), repository.NewEmailTaskContextRepo(db))
+		var settingsSelects atomic.Int64
+		settingsRepo.SetQueryObserver(func(query string) {
+			if strings.Contains(query, "FROM app_settings") {
+				settingsSelects.Add(1)
 			}
 		})
-	}
-}
-
-func loadEmailConfigPointReadsForBenchmark(ctx context.Context, settingsRepo *repository.SettingsRepo) (EmailRuntimeConfig, error) {
-	values := make(map[string]string, len(emailRuntimeSettingKeys))
-	for _, key := range emailRuntimeSettingKeys {
-		value, err := settingsRepo.Get(ctx, key)
-		if err != nil {
-			return EmailRuntimeConfig{}, err
+		var smtpCalls atomic.Int64
+		svc.sendMail = func(context.Context, EmailRuntimeConfig, string, string, string, string, string, string) error {
+			smtpCalls.Add(1)
+			return nil
 		}
-		values[key] = value
-	}
-	return emailRuntimeConfigFromValues(values), nil
+
+		waits := make([]time.Duration, 0, b.N*unrelatedQueries)
+		totals := make([]time.Duration, 0, b.N)
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			acquired := make(chan struct{})
+			release := make(chan struct{})
+			var blockFirst sync.Once
+			settingsRepo.SetQueryAcquiredObserver(func(query string) {
+				if strings.Contains(query, "FROM app_settings") {
+					blockFirst.Do(func() {
+						close(acquired)
+						<-release
+					})
+				}
+			})
+
+			iterationStart := time.Now()
+			emailDone := make(chan error, 1)
+			go func() {
+				for n := 0; n < emailOperations; n++ {
+					if n%2 == 0 {
+						result := svc.SendOutboundMessage(ctx, "person@example.com", "Notice", "body")
+						if !result.OK {
+							emailDone <- fmt.Errorf("direct outbound failed: %s", result.Error)
+							return
+						}
+					} else {
+						svc.SendTaskCompletionToThread(ctx, "person@example.com", "<message@example.com>", "<root@example.com>", "Question", "Task", "done", "")
+					}
+				}
+				emailDone <- nil
+			}()
+			<-acquired
+
+			waitCount := db.Stats().WaitCount
+			waitResults := make(chan time.Duration, unrelatedQueries)
+			var unrelated sync.WaitGroup
+			unrelated.Add(unrelatedQueries)
+			for n := 0; n < unrelatedQueries; n++ {
+				go func() {
+					defer unrelated.Done()
+					waitStart := time.Now()
+					var value string
+					err := db.QueryRowContext(ctx, "SELECT value FROM app_settings WHERE key = ?", EmailSettingAddress).Scan(&value)
+					if err != nil {
+						b.Errorf("unrelated query failed: %v", err)
+					}
+					waitResults <- time.Since(waitStart)
+				}()
+			}
+			require.Eventually(b, func() bool {
+				return db.Stats().WaitCount >= waitCount+unrelatedQueries
+			}, time.Second, time.Millisecond, "all unrelated queries must queue behind acquired settings query")
+			close(release)
+			unrelated.Wait()
+			require.NoError(b, <-emailDone)
+			totals = append(totals, time.Since(iterationStart))
+			close(waitResults)
+			for wait := range waitResults {
+				waits = append(waits, wait)
+			}
+		}
+		b.StopTimer()
+		settingsRepo.SetQueryAcquiredObserver(nil)
+		require.Equal(b, int64(b.N*emailOperations), smtpCalls.Load(), "every measured operation must reach the stubbed SMTP handoff")
+		expectedSettingsSelects := int64(b.N * emailOperations)
+		require.Equal(b, expectedSettingsSelects, settingsSelects.Load(), "measured service path must match the settings-read ledger")
+		b.ReportMetric(float64(settingsSelects.Load())/float64(b.N), "settings_selects/op")
+		sort.Slice(waits, func(i, j int) bool { return waits[i] < waits[j] })
+		sort.Slice(totals, func(i, j int) bool { return totals[i] < totals[j] })
+		if len(waits) > 0 {
+			b.ReportMetric(float64(waits[len(waits)/2].Nanoseconds()), "median_wait_ns")
+			b.ReportMetric(float64(waits[(len(waits)-1)*95/100].Nanoseconds()), "p95_wait_ns")
+		}
+		if len(totals) > 0 {
+			b.ReportMetric(float64(totals[len(totals)/2].Nanoseconds()), "median_total_ns")
+			b.ReportMetric(float64(totals[(len(totals)-1)*95/100].Nanoseconds()), "p95_total_ns")
+		}
+	})
 }
 
 func TestEmailProviderSettingsAndHelpers(t *testing.T) {
