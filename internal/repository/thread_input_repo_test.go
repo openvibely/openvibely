@@ -1040,7 +1040,7 @@ func TestExecutionRepo_RecoverPreRestartRunningTaskExecutionsTerminalizesDirectF
 	require.NoError(t, err)
 	require.Equal(t, models.StatusFailed, storedTask.Status)
 	require.Equal(t, models.CategoryBacklog, storedTask.Category)
-	activePending, err := taskRepo.ListActivePending(ctx)
+	activePending, err := taskRepo.ListActivePendingAdmissions(ctx)
 	require.NoError(t, err)
 	for _, candidate := range activePending {
 		if candidate.ID == task.ID {
