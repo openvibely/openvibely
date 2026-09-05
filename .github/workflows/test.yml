@@ -151,10 +151,22 @@ jobs:
       - name: Ensure generated files are committed
         run: git diff --exit-code
 
-      - name: Run all tests with coverage
+      - name: Run core tests with coverage
         env:
           OPENVIBELY_SKIP_BROWSER_PERF: "1"
-        run: go test ./... -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage.txt
+        run: go test ./cmd/... ./internal/... -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-core.txt
+
+      - name: Run package and web tests with coverage
+        env:
+          OPENVIBELY_SKIP_BROWSER_PERF: "1"
+        run: go test ./pkg/... ./web/... -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-web.txt
+
+      - name: Merge coverage reports
+        shell: bash
+        run: |
+          head -n 1 coverage-core.txt > coverage.txt
+          tail -n +2 coverage-core.txt >> coverage.txt
+          tail -n +2 coverage-web.txt >> coverage.txt
 
       - name: Compile and test the Linux GTK3 desktop path
         run: go test -tags gtk3 ./cmd/desktop -count=1 -timeout 120s
