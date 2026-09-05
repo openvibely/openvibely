@@ -126,11 +126,14 @@ templ skillsContent(skills []SkillCard, canManage bool, currentProjectID string,
 							data-skill-always-use={ func() string { if skill.AlwaysUse { return "true" } else { return "false" } }() }
 							data-search-card
 							data-skill-scroll-anchor={ skill.Handle }
-							data-search-text={ skillSearchText(skill) }						tabindex="-1"
+						data-search-text={ skillSearchText(skill) }
+						tabindex="-1"
+						if canManage {
 							data-card-select-id={ skill.Scope + ":" + skill.Handle }
 							data-card-select-ref={ `{"handle":"` + skill.Handle + `","scope":"` + skill.Scope + `"}` }
-							data-card-select-eligible={ boolString(canManage) }
-							onclick="editSkillFromData(this)"					>
+							data-card-select-eligible="true"
+						}
+						onclick="editSkillFromData(this)"					>
 						<div class="card-body relative">
 							<div class="absolute top-4 right-4" onclick="event.stopPropagation()">
 								<div class="dropdown dropdown-end">

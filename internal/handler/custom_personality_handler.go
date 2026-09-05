@@ -7,66 +7,32 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
 
-// listPersonalityCardPage returns the bounded custom-card page plus the small
-// fixed set needed to render preset overrides and the selected custom card.
-func (h *Handler) listPersonalityCardPage(ctx context.Context, page cardPageRequest, selected string) ([]models.CustomPersonality, bool, error) {
-	if h.customPersonalityRepo == nil {
-		return nil, false, nil
-	}
-	keys := make([]string, 0, len(service.AllPersonalities())+1)
-	excludedKeys := make([]string, 0, len(service.AllPersonalities())+1)
-	if selected = strings.TrimSpace(selected); selected != "" {
-		keys = append(keys, selected)
-		excludedKeys = append(excludedKeys, selected)
-	}
-	for _, preset := range service.AllPersonalities() {
-		if key := strings.TrimSpace(preset.Key); key != "" {
-			keys = append(keys, key)
-			if key != selected {
-				excludedKeys = append(excludedKeys, key)
-			}
+// listPersonalityCardPage assembles the complete compact Personality collection,
+// applies collection state, and only then slices the requested page.
+func (h *Handler) listPersonalityCardPage(ctx context.Context, page cardPageRequest, selected string) ([]pages.PersonalityListCard, bool, error) {
+	var customs []models.CustomPersonality
+	var err error
+	if h.customPersonalityRepo != nil {
+		customs, err = h.customPersonalityRepo.List(ctx)
+		if err != nil {
+			return nil, false, err
 		}
 	}
-
-	pageItems, err := h.customPersonalityRepo.ListPageExcludingKeysFiltered(ctx, page.PageSize+1, page.Offset, repository.CustomPersonalityPageFilter{
-		Search:   page.Search,
-		Active:   page.PersonalityActive,
-		Selected: selected,
-		Sort:     page.PersonalitySort,
-	}, excludedKeys)
-	if err != nil {
-		return nil, false, err
+	cards := pages.BuildPersonalityListCards(strings.TrimSpace(selected), customs, personalityListState(page))
+	start := page.Offset
+	if start > len(cards) {
+		start = len(cards)
 	}
-	pageItems, hasMore := cardPageItems(pageItems, page.PageSize)
-	fixed, err := h.customPersonalityRepo.ListCardsByKeys(ctx, keys)
-	if err != nil {
-		return nil, false, err
+	end := start + page.PageSize + 1
+	if end > len(cards) {
+		end = len(cards)
 	}
-	merged := make([]models.CustomPersonality, 0, len(pageItems)+len(fixed))
-	seen := make(map[string]struct{}, len(pageItems)+len(fixed))
-	for _, personality := range append(pageItems, fixed...) {
-		isPreset := service.IsPresetPersonality(personality.Key)
-		if page.PersonalityKind == "custom" && isPreset {
-			continue
-		}
-		if page.PersonalityKind == "override" && !isPreset {
-			continue
-		}
-		if page.PersonalityKind == "base" || page.PersonalityKind == "built_in" {
-			continue
-		}
-		if _, ok := seen[personality.Key]; ok {
-			continue
-		}
-		seen[personality.Key] = struct{}{}
-		merged = append(merged, personality)
-	}
-	return merged, hasMore, nil
+	items, hasMore := cardPageItems(cards[start:end], page.PageSize)
+	return items, hasMore, nil
 }
 
 func personalityListState(page cardPageRequest) pages.PersonalityListState {

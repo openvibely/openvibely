@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -3660,6 +3661,47 @@ func TestHandler_ListAgents_RendersAdvancedStateForEditModal(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Fatalf("expected agents page to contain %q for advanced edit hydration; body:\n%s", want, body)
 		}
+	}
+}
+
+func TestHandler_DeleteAgentsBulkReportsCleanupFailureAfterDatabaseDelete(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	agentRepo := repository.NewAgentRepo(db)
+	h.SetAgentRepo(agentRepo)
+	root := t.TempDir()
+	h.SetAgentSkillRoot(root)
+
+	agent := &models.Agent{Name: "Bulk cleanup failure", Key: "bulk_cleanup_failure", Scope: models.AgentScopeGlobal, Model: "inherit", Enabled: true}
+	if err := agentRepo.Create(t.Context(), agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	agentDir := filepath.Join(root, "agents", agent.Key)
+	if err := os.MkdirAll(agentDir, 0o755); err != nil {
+		t.Fatalf("create agent directory: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "agents", "AGENTS.md"), 0o755); err != nil {
+		t.Fatalf("create invalid index path: %v", err)
+	}
+	payload, err := json.Marshal(bulkIDsRequest{IDs: []string{agent.ID}})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodDelete, "/agents/bulk", bytes.NewReader(payload))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected explicit cleanup failure, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "database agents were deleted; filesystem cleanup incomplete") {
+		t.Fatalf("cleanup response did not identify partial cross-store result: %s", rec.Body.String())
+	}
+	stored, err := agentRepo.GetByID(t.Context(), agent.ID)
+	if err != nil {
+		t.Fatalf("reload agent: %v", err)
+	}
+	if stored != nil {
+		t.Fatalf("database agent remained after filesystem cleanup failure: %#v", stored)
 	}
 }
 

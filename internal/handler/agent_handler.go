@@ -1682,6 +1682,10 @@ func (h *Handler) DeleteAgentsBulk(c echo.Context) error {
 		}
 		agents = append(agents, agent)
 	}
+	if err := h.agentRepo.DeleteBulk(c.Request().Context(), ids); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	cleanupFailures := make([]string, 0)
 	for _, agent := range agents {
 		if key := strings.TrimSpace(agent.Key); key != "" && h.agentSkillRoot != "" {
 			root := h.agentSkillRoot
@@ -1691,16 +1695,16 @@ func (h *Handler) DeleteAgentsBulk(c echo.Context) error {
 			if root != "" {
 				dir := filepath.Join(root, "agents", key)
 				if err := os.RemoveAll(dir); err != nil {
-					return echo.NewHTTPError(http.StatusInternalServerError, "agent package cleanup failed; no database agents were deleted")
+					cleanupFailures = append(cleanupFailures, fmt.Sprintf("%s package cleanup failed", key))
 				}
 				if _, err := agentlibrary.RemoveAgentIndexEntry(filepath.Join(root, "agents", "AGENTS.md"), key); err != nil {
-					return echo.NewHTTPError(http.StatusInternalServerError, "agent index cleanup failed; no database agents were deleted")
+					cleanupFailures = append(cleanupFailures, fmt.Sprintf("%s index cleanup failed", key))
 				}
 			}
 		}
 	}
-	if err := h.agentRepo.DeleteBulk(c.Request().Context(), ids); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	if len(cleanupFailures) > 0 {
+		return echo.NewHTTPError(http.StatusInternalServerError, "database agents were deleted; filesystem cleanup incomplete: "+strings.Join(cleanupFailures, "; "))
 	}
 	return c.JSON(http.StatusOK, map[string]int{"deleted": len(ids)})
 }
