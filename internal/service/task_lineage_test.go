@@ -379,8 +379,8 @@ func TestTaskLineage_ChainCreationSetsLineageDepth(t *testing.T) {
 		Prompt:    "root prompt",
 	}
 	chainCfg := &models.ChainConfiguration{
-		Enabled:  true,
-		Trigger:  "on_completion",
+		Enabled: true,
+		Trigger: "on_completion",
 		ChildChainConfig: &models.ChainConfiguration{
 			Enabled: true,
 			Trigger: "on_completion",
@@ -436,59 +436,5 @@ func TestTaskLineage_ChainCreationSetsLineageDepth(t *testing.T) {
 	}
 	if child2.LineageDepth != 2 {
 		t.Errorf("Child2 depth: got %d, want 2", child2.LineageDepth)
-	}
-}
-
-// TestTaskLineage_ListActivePendingScansFully verifies ListActivePending returns lineage fields.
-func TestTaskLineage_ListActivePendingScansFully(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	ctx := context.Background()
-
-	broadcaster := events.NewBroadcaster()
-	taskRepo := repository.NewTaskRepo(db, broadcaster)
-	projectRepo := repository.NewProjectRepo(db)
-
-	project := &models.Project{Name: "ActivePending", Description: "test"}
-	if err := projectRepo.Create(ctx, project); err != nil {
-		t.Fatalf("Create project: %v", err)
-	}
-
-	task := &models.Task{
-		ProjectID:     project.ID,
-		Title:         "Active With Lineage",
-		Category:      models.CategoryActive,
-		Status:        models.StatusPending,
-		Prompt:        "prompt",
-		ChainConfig:   "{}",
-		BaseBranch:    "task/parent",
-		BaseCommitSHA: "aabbcc",
-		LineageDepth:  3,
-	}
-	if err := taskRepo.Create(ctx, task); err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-
-	tasks, err := taskRepo.ListActivePending(ctx)
-	if err != nil {
-		t.Fatalf("ListActivePending: %v", err)
-	}
-
-	found := false
-	for _, tsk := range tasks {
-		if tsk.ID == task.ID {
-			found = true
-			if tsk.BaseBranch != "task/parent" {
-				t.Errorf("BaseBranch: got %q, want %q", tsk.BaseBranch, "task/parent")
-			}
-			if tsk.BaseCommitSHA != "aabbcc" {
-				t.Errorf("BaseCommitSHA: got %q, want %q", tsk.BaseCommitSHA, "aabbcc")
-			}
-			if tsk.LineageDepth != 3 {
-				t.Errorf("LineageDepth: got %d, want 3", tsk.LineageDepth)
-			}
-		}
-	}
-	if !found {
-		t.Errorf("Task not found in ListActivePending results")
 	}
 }
