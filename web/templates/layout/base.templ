@@ -4272,6 +4272,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 								nextInput.setAttribute('data-card-search-initial', activeTerm);
 							}							if (window.htmx) htmx.process(nextContainer);
 							initAllCardSearches(nextContainer);
+							if (typeof window.refreshCardListToolbars === 'function') window.refreshCardListToolbars(nextContainer);
 							if (typeof window.refreshCardPagination === 'function') window.refreshCardPagination(nextContainer);
 							return nextContainer;					}
 
