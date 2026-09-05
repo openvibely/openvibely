@@ -1015,14 +1015,9 @@ func TestScheduleRepo_ListSchedulesForDiscoveryFilteredAndOffsetPathsRemainCorre
 func BenchmarkScheduleDiscoverySelect25kProject(b *testing.B) {
 	db := testutil.NewTestDB(b)
 	seedScheduleDiscoveryFixture(b, db, 5, 5000)
+	repo := NewScheduleRepo(db)
 
-	legacyQuery := scheduleDiscoverySelectSQL(`t.project_id = ?`, false)
 	optimizedQuery := scheduleDiscoverySelectSQL(`t.project_id = ?`, true)
-
-	legacyPlan := explainScheduleDiscoveryQueryPlan(b, db, legacyQuery, scheduleDiscoveryTargetProjectID, 50, 0)
-	if !strings.Contains(legacyPlan, "USE TEMP B-TREE FOR ORDER BY") {
-		b.Fatalf("legacy plan = %s, want temporary ORDER BY sort", legacyPlan)
-	}
 	optimizedPlan := explainScheduleDiscoveryQueryPlan(b, db, optimizedQuery, scheduleDiscoveryTargetProjectID, 50)
 	if strings.Contains(optimizedPlan, "USE TEMP B-TREE FOR ORDER BY") {
 		b.Fatalf("optimized plan = %s, want no temporary ORDER BY sort", optimizedPlan)
@@ -1031,28 +1026,17 @@ func BenchmarkScheduleDiscoverySelect25kProject(b *testing.B) {
 		b.Fatalf("optimized plan = %s, want ordered schedule discovery index", optimizedPlan)
 	}
 
-	b.Run("legacy_join_sort", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			rows, err := db.QueryContext(context.Background(), legacyQuery, scheduleDiscoveryTargetProjectID, 50, 0)
-			if err != nil {
-				b.Fatal(err)
-			}
-			if got := drainScheduleDiscoveryRows(b, rows); got != 50 {
-				b.Fatalf("rows = %d, want 50", got)
-			}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		rows, total, err := repo.ListSchedulesForDiscovery(context.Background(), scheduleDiscoveryTargetProjectID, ScheduleDiscoveryFilter{Limit: 50})
+		if err != nil {
+			b.Fatal(err)
 		}
-	})
-	b.Run("ordered_index_first_page", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			rows, err := db.QueryContext(context.Background(), optimizedQuery, scheduleDiscoveryTargetProjectID, 50)
-			if err != nil {
-				b.Fatal(err)
-			}
-			if got := drainScheduleDiscoveryRows(b, rows); got != 50 {
-				b.Fatalf("rows = %d, want 50", got)
-			}
+		if len(rows) != 50 || total != 25000 {
+			b.Fatalf("rows/total = %d/%d, want 50/25000", len(rows), total)
 		}
-	})
+	}
 }
 
 const scheduleDiscoveryTargetProjectID = "schedule-discovery-target"
@@ -1160,25 +1144,6 @@ func scheduleDiscoveryRowLess(a, b models.Schedule) bool {
 		return a.CreatedAt.After(b.CreatedAt)
 	}
 	return a.ID < b.ID
-}
-
-func drainScheduleDiscoveryRows(tb testing.TB, rows *sql.Rows) int {
-	tb.Helper()
-	defer rows.Close()
-	count := 0
-	for rows.Next() {
-		var row ScheduleDiscoveryRow
-		s := &row.Schedule
-		if err := rows.Scan(&s.ID, &s.TaskID, &s.RunAt, &s.RepeatType, &s.RepeatInterval,
-			&s.Enabled, &s.ClearContextOnStart, &s.NextRun, &s.LastRun, &s.CreatedAt, &s.UpdatedAt, &row.TaskTitle); err != nil {
-			tb.Fatalf("scan schedule discovery row: %v", err)
-		}
-		count++
-	}
-	if err := rows.Err(); err != nil {
-		tb.Fatalf("schedule discovery rows: %v", err)
-	}
-	return count
 }
 
 func TestScheduleRepo_UpdateBatchForProjectUsesCurrentRowsWithoutOverwritingConcurrentChanges(t *testing.T) {
