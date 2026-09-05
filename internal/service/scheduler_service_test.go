@@ -704,19 +704,15 @@ func BenchmarkWorkerSchedulerActivePendingProjection(b *testing.B) {
 			repo := repository.NewTaskRepo(db, nil)
 			seedActivePendingProjectionBenchmark(b, repo, fixture.taskCount, fixture.promptSize, fixture.workflowSize)
 
-			fullRows, fullPayload, fullStatements := measureFullActivePendingProjection(b, repo, counter)
 			admissionRows, admissionPayload, admissionStatements := measureActivePendingAdmissionProjection(b, repo, counter)
-			if fullRows != fixture.taskCount || admissionRows != fixture.taskCount {
-				b.Fatalf("projection row counts differ: full=%d admission=%d want=%d", fullRows, admissionRows, fixture.taskCount)
+			if admissionRows != fixture.taskCount {
+				b.Fatalf("admission projection returned %d rows, want %d", admissionRows, fixture.taskCount)
 			}
-			if fullStatements != 1 || admissionStatements != 1 {
-				b.Fatalf("projection query counts must remain bounded: full=%d admission=%d", fullStatements, admissionStatements)
+			if admissionStatements != 1 {
+				b.Fatalf("admission projection query count = %d, want 1", admissionStatements)
 			}
 
-			b.Run("CurrentFullProjection", func(b *testing.B) {
-				benchmarkFullActivePendingProjection(b, repo, fullPayload, fullRows, fullStatements)
-			})
-			b.Run("AdmissionProjection", func(b *testing.B) {
+			b.Run("Current", func(b *testing.B) {
 				benchmarkActivePendingAdmissionProjection(b, repo, admissionPayload, admissionRows, admissionStatements)
 			})
 		})
@@ -746,18 +742,6 @@ func seedActivePendingProjectionBenchmark(b *testing.B, repo *repository.TaskRep
 	}
 }
 
-func measureFullActivePendingProjection(b *testing.B, repo *repository.TaskRepo, counter *testutil.SQLStatementCounter) (int, int64, int) {
-	b.Helper()
-	counter.Reset()
-	counter.SetEnabled(true)
-	tasks, err := repo.ListActivePending(context.Background())
-	counter.SetEnabled(false)
-	if err != nil {
-		b.Fatalf("measure full active pending projection: %v", err)
-	}
-	return len(tasks), activePendingExecutionPayloadBytes(tasks), len(counter.Statements())
-}
-
 func measureActivePendingAdmissionProjection(b *testing.B, repo *repository.TaskRepo, counter *testutil.SQLStatementCounter) (int, int64, int) {
 	b.Helper()
 	counter.Reset()
@@ -768,28 +752,6 @@ func measureActivePendingAdmissionProjection(b *testing.B, repo *repository.Task
 		b.Fatalf("measure active pending admission projection: %v", err)
 	}
 	return len(admissions), 0, len(counter.Statements())
-}
-
-func benchmarkFullActivePendingProjection(b *testing.B, repo *repository.TaskRepo, selectedPayloadBytes int64, expectedRows, statementCount int) {
-	b.Helper()
-	ctx := context.Background()
-	var rows int
-	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		tasks, err := repo.ListActivePending(ctx)
-		if err != nil {
-			b.Fatalf("list full active pending tasks: %v", err)
-		}
-		rows = len(tasks)
-	}
-	b.StopTimer()
-	if rows != expectedRows {
-		b.Fatalf("full projection returned %d rows, want %d", rows, expectedRows)
-	}
-	b.ReportMetric(float64(rows), "rows/op")
-	b.ReportMetric(float64(selectedPayloadBytes), "selected_payload_bytes/op")
-	b.ReportMetric(float64(statementCount), "sql_statements/op")
 }
 
 func benchmarkActivePendingAdmissionProjection(b *testing.B, repo *repository.TaskRepo, selectedPayloadBytes int64, expectedRows, statementCount int) {
@@ -812,14 +774,6 @@ func benchmarkActivePendingAdmissionProjection(b *testing.B, repo *repository.Ta
 	b.ReportMetric(float64(rows), "rows/op")
 	b.ReportMetric(float64(selectedPayloadBytes), "selected_payload_bytes/op")
 	b.ReportMetric(float64(statementCount), "sql_statements/op")
-}
-
-func activePendingExecutionPayloadBytes(tasks []models.Task) int64 {
-	var total int64
-	for _, task := range tasks {
-		total += int64(len(task.Prompt) + len(task.ChainConfig) + len(task.SwarmConfig))
-	}
-	return total
 }
 
 func TestSchedulerService_CheckActiveTasks(t *testing.T) {
