@@ -1631,37 +1631,23 @@ func BenchmarkVisionModelSelectionSingleConnectionContention(b *testing.B) {
 		return db.QueryRowContext(context.Background(), `SELECT id FROM projects ORDER BY id LIMIT 1`).Scan(&projectID)
 	}
 
-	b.Run("full_list", func(b *testing.B) {
-		benchmarkVisionSelectionWithContention(b, db, counter, 1, func() error {
-			configs, err := repo.List(ctx)
-			if err != nil {
-				return err
-			}
-			if len(configs) != 50 {
-				return fmt.Errorf("full vision selection fixture returned %d configs", len(configs))
-			}
-			return nil
-		}, lightweightLookup)
-	})
-	b.Run("compact_selection_plus_get_by_id", func(b *testing.B) {
-		benchmarkVisionSelectionWithContention(b, db, counter, 2, func() error {
-			options, err := repo.ListVisionSelectionOptions(ctx)
-			if err != nil {
-				return err
-			}
-			if len(options) != 50 || options[0].ID == "" {
-				return fmt.Errorf("compact vision selection fixture returned %d options", len(options))
-			}
-			full, err := repo.GetByID(ctx, selectedID)
-			if err != nil {
-				return err
-			}
-			if full == nil || full.APIKey == "" || full.ExtraBodyJSON == "" || full.MixtureConfigJSON == "" {
-				return fmt.Errorf("selected full vision model was not hydrated")
-			}
-			return nil
-		}, lightweightLookup)
-	})
+	benchmarkVisionSelectionWithContention(b, db, counter, 2, func() error {
+		options, err := repo.ListVisionSelectionOptions(ctx)
+		if err != nil {
+			return err
+		}
+		if len(options) != 50 || options[0].ID == "" {
+			return fmt.Errorf("compact vision selection fixture returned %d options", len(options))
+		}
+		full, err := repo.GetByID(ctx, selectedID)
+		if err != nil {
+			return err
+		}
+		if full == nil || full.APIKey == "" || full.ExtraBodyJSON == "" || full.MixtureConfigJSON == "" {
+			return fmt.Errorf("selected full vision model was not hydrated")
+		}
+		return nil
+	}, lightweightLookup)
 }
 
 func benchmarkVisionSelectionWithContention(b *testing.B, db *sql.DB, counter *testutil.SQLStatementCounter, expectedModelQueryCloses int, lookup func() error, lightweightLookup func() error) {
