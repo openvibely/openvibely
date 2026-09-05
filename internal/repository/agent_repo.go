@@ -369,11 +369,12 @@ func (r *AgentRepo) ListAgentListSummaries(ctx context.Context) ([]AgentListSumm
 // Agents card currently carries its edit metadata, so this method retains the
 // existing row shape while bounding both the result count and response HTML.
 type AgentPageFilter struct {
-	Search  string
-	Enabled *bool
-	Scope   string
-	Origin  string
-	Sort    string
+	ProjectID string
+	Search    string
+	Enabled   *bool
+	Scope     string
+	Origin    string
+	Sort      string
 }
 
 func (r *AgentRepo) ListPage(ctx context.Context, limit, offset int, search string) ([]models.Agent, error) {
@@ -383,7 +384,16 @@ func (r *AgentRepo) ListPage(ctx context.Context, limit, offset int, search stri
 func (r *AgentRepo) ListPageFiltered(ctx context.Context, limit, offset int, filter AgentPageFilter) ([]models.Agent, error) {
 	limit, offset = normalizeCardPageArgs(limit, offset)
 	query := `SELECT ` + agentColumns + ` FROM agents WHERE COALESCE(generated_status, 'user_edited') <> 'archived'`
-	args := make([]any, 0, 3)
+	args := make([]any, 0, 4)
+	if projectID := strings.TrimSpace(filter.ProjectID); projectID != "" {
+		query += ` AND (
+			COALESCE(scope, 'global') <> 'project'
+			OR project_id IS NULL
+			OR project_id = ''
+			OR project_id = ?
+		)`
+		args = append(args, projectID)
+	}
 	if search := strings.TrimSpace(filter.Search); search != "" {
 		query += ` AND INSTR(LOWER(
 			COALESCE(name, '') || ' ' || COALESCE(description, '') || ' ' ||

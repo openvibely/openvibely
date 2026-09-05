@@ -451,6 +451,31 @@ func TestChannelsSearchFiltersFixedCardsOnServer(t *testing.T) {
 	require.Regexp(t, `data-channel-type="slack"[^>]* hidden`, body.String())
 }
 
+func TestAgentsListFiltersForeignProjectRowsBeforePaginationAndSelection(t *testing.T) {
+	tc := NewTestContext(t)
+	repo := repository.NewAgentRepo(tc.db)
+	tc.handler.SetAgentRepo(repo)
+	projectA := tc.CreateProject().WithName("Agent isolation project A").Build()
+	projectB := tc.CreateProject().WithName("Agent isolation project B").Build()
+
+	foreign := &models.Agent{Name: "Isolation marker A foreign", Key: "isolation_marker_a_foreign", Scope: models.AgentScopeProject, ProjectID: projectB.ID, Enabled: true, GeneratedStatus: models.AgentStatusUserEdited}
+	global := &models.Agent{Name: "Isolation marker B global", Key: "isolation_marker_b_global", Scope: models.AgentScopeGlobal, Enabled: true, GeneratedStatus: models.AgentStatusUserEdited}
+	local := &models.Agent{Name: "Isolation marker C local", Key: "isolation_marker_c_local", Scope: models.AgentScopeProject, ProjectID: projectA.ID, Enabled: true, GeneratedStatus: models.AgentStatusUserEdited}
+	for _, agent := range []*models.Agent{foreign, global, local} {
+		require.NoError(t, repo.Create(t.Context(), agent))
+	}
+
+	rec := serveCardPageRequest(t, tc.echo, "/agents?project_id="+projectA.ID+"&search=isolation+marker&page_size=2&card_page=1")
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Equal(t, "false", rec.Header().Get(cardPageHasMoreHeader))
+	for _, agent := range []*models.Agent{global, local} {
+		require.Contains(t, rec.Body.String(), `data-agent-id="`+agent.ID+`"`)
+		require.Contains(t, rec.Body.String(), `data-card-select-id="`+agent.ID+`"`)
+	}
+	require.NotContains(t, rec.Body.String(), `data-agent-id="`+foreign.ID+`"`)
+	require.NotContains(t, rec.Body.String(), `data-card-select-id="`+foreign.ID+`"`)
+}
+
 func TestUnmanagedSkillsRenderNoSelectionUIOrMetadata(t *testing.T) {
 	h, e, _, _ := setupTestHandlerWithDB(t)
 	h.SetAgentSkillRoot("")
