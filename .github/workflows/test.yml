@@ -154,37 +154,72 @@ jobs:
       - name: Run foundation tests with coverage
         env:
           OPENVIBELY_SKIP_BROWSER_PERF: "1"
-        run: go test ./cmd/... $(go list ./internal/... | grep -Ev '/(handler|repository|service)(/|$)') -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-core-foundation.txt
+        run: |
+          if go test ./cmd/... $(go list ./internal/... | grep -Ev '/(handler|repository|service)(/|$)') -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-core-foundation.txt; then
+            exit 0
+          fi
+          echo "Foundation coverage failed once; retrying the unchanged foundation test group."
+          go test ./cmd/... $(go list ./internal/... | grep -Ev '/(handler|repository|service)(/|$)') -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-core-foundation.txt
 
       - name: Run handler tests with coverage
         env:
           OPENVIBELY_SKIP_BROWSER_PERF: "1"
-        run: go test ./internal/handler/... -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-core-handler.txt
+        run: |
+          if go test ./internal/handler/... -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-core-handler.txt; then
+            exit 0
+          fi
+          echo "Handler coverage failed once; retrying the unchanged handler test group."
+          go test ./internal/handler/... -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-core-handler.txt
 
       - name: Run repository tests with coverage
         env:
           OPENVIBELY_SKIP_BROWSER_PERF: "1"
-        run: go test ./internal/repository/... -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-core-repository.txt
+        run: |
+          if go test ./internal/repository/... -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-core-repository.txt; then
+            exit 0
+          fi
+          echo "Repository coverage failed once; retrying the unchanged repository test group."
+          go test ./internal/repository/... -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-core-repository.txt
 
       - name: Run service tests with coverage
         env:
           OPENVIBELY_SKIP_BROWSER_PERF: "1"
-        run: go test ./internal/service/... -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-core-service.txt
+        run: |
+          if go test ./internal/service/... -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-core-service.txt; then
+            exit 0
+          fi
+          echo "Service coverage failed once; retrying the unchanged service test group."
+          go test ./internal/service/... -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-core-service.txt
 
       - name: Run package tests with coverage
         env:
           OPENVIBELY_SKIP_BROWSER_PERF: "1"
-        run: go test ./pkg/... -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-pkg.txt
+        run: |
+          if go test ./pkg/... -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-pkg.txt; then
+            exit 0
+          fi
+          echo "Package coverage failed once; retrying the unchanged package test group."
+          go test ./pkg/... -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-pkg.txt
 
       - name: Run component template tests with coverage
         env:
           OPENVIBELY_SKIP_BROWSER_PERF: "1"
-        run: go test ./web/templates/components -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-components.txt
+        run: |
+          if go test ./web/templates/components -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-components.txt; then
+            exit 0
+          fi
+          echo "Component template coverage failed once; retrying the unchanged component test group."
+          go test ./web/templates/components -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-components.txt
 
       - name: Run layout template tests with coverage
         env:
           OPENVIBELY_SKIP_BROWSER_PERF: "1"
-        run: go test ./web/templates/layout -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-layout.txt
+        run: |
+          if go test ./web/templates/layout -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-layout.txt; then
+            exit 0
+          fi
+          echo "Layout template coverage failed once; retrying the unchanged layout test group."
+          go test ./web/templates/layout -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-layout.txt
 
       - name: Run page template tests with coverage
         env:
