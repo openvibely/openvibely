@@ -2649,6 +2649,49 @@ func TestHandler_WorkersPage_DoesNotContainChatRootSelector(t *testing.T) {
 }
 
 func TestHandler_UpdateWorkerSettings(t *testing.T) {
+	t.Run("accepts global worker limits above ten", func(t *testing.T) {
+		h, e, _ := setupTestHandler(t)
+		ctx := context.Background()
+		h.workerSvc.Start(ctx)
+		defer h.workerSvc.Stop()
+
+		rec := htmxPost(e, "/workers", url.Values{"max_workers": {"25"}})
+		assertCode(t, rec, http.StatusOK)
+		if n := h.workerSvc.NumWorkers(); n != 25 {
+			t.Fatalf("expected worker pool to be resized to 25, got %d", n)
+		}
+		maxWorkers, err := h.workerRepo.GetMaxWorkers(ctx)
+		if err != nil {
+			t.Fatalf("GetMaxWorkers: %v", err)
+		}
+		if maxWorkers != 25 {
+			t.Fatalf("expected max_workers=25 in DB, got %d", maxWorkers)
+		}
+		assertContains(t, rec, `value="25"`)
+		assertNotContains(t, rec, `max="10"`)
+	})
+
+	t.Run("rejects malformed global worker limits", func(t *testing.T) {
+		h, e, _ := setupTestHandler(t)
+		ctx := context.Background()
+		before, err := h.workerRepo.GetMaxWorkers(ctx)
+		if err != nil {
+			t.Fatalf("GetMaxWorkers before: %v", err)
+		}
+		rec := htmxPost(e, "/workers", url.Values{"max_workers": {"-1"}})
+		assertCode(t, rec, http.StatusNoContent)
+		if trigger := rec.Header().Get("HX-Trigger"); !strings.Contains(trigger, "Max concurrent workers") {
+			t.Fatalf("expected malformed-limit toast, got %q", trigger)
+		}
+		maxWorkers, err := h.workerRepo.GetMaxWorkers(ctx)
+		if err != nil {
+			t.Fatalf("GetMaxWorkers after: %v", err)
+		}
+		if maxWorkers != before {
+			t.Fatalf("expected malformed global limit to leave %d unchanged, got %d", before, maxWorkers)
+		}
+	})
+
 	t.Run("regular request redirects", func(t *testing.T) {
 		_, e, _ := setupTestHandler(t)
 		form := url.Values{}
@@ -2792,12 +2835,42 @@ func TestHandler_UpdateProjectWorkerLimit(t *testing.T) {
 			t.Errorf("expected max_workers nil, got %d", *p.MaxWorkers)
 		}
 	})
-	t.Run("enforce max limit of 10", func(t *testing.T) {
+	t.Run("accepts a project worker limit above ten", func(t *testing.T) {
 		rec := postLimit(t, path, "50")
 		assertCode(t, rec, http.StatusOK)
 		p, _ := h.projectSvc.GetByID(ctx, project.ID)
+		if p.MaxWorkers == nil || *p.MaxWorkers != 50 {
+			t.Errorf("expected max_workers=50, got %v", p.MaxWorkers)
+		}
+	})
+	t.Run("project limits respect a finite global limit", func(t *testing.T) {
+		globalRec := htmxPost(e, "/workers", url.Values{"max_workers": {"10"}})
+		assertCode(t, globalRec, http.StatusOK)
+		assertContains(t, globalRec, `max="10"`)
+		assertContains(t, globalRec, "Exceeds global")
+
+		rec := postLimit(t, path, "11")
+		assertCode(t, rec, http.StatusNoContent)
+		if trigger := rec.Header().Get("HX-Trigger"); !strings.Contains(trigger, "global worker limit") {
+			t.Fatalf("expected finite-global validation toast, got %q", trigger)
+		}
+		p, _ := h.projectSvc.GetByID(ctx, project.ID)
+		if p.MaxWorkers == nil || *p.MaxWorkers != 50 {
+			t.Fatalf("expected rejected update to preserve max_workers=50, got %v", p.MaxWorkers)
+		}
+
+		rec = postLimit(t, path, "10")
+		assertCode(t, rec, http.StatusOK)
+		p, _ = h.projectSvc.GetByID(ctx, project.ID)
 		if p.MaxWorkers == nil || *p.MaxWorkers != 10 {
-			t.Errorf("expected max_workers=10, got %v", p.MaxWorkers)
+			t.Fatalf("expected max_workers=10 at global limit, got %v", p.MaxWorkers)
+		}
+
+		rec = postLimit(t, path, "5")
+		assertCode(t, rec, http.StatusOK)
+		p, _ = h.projectSvc.GetByID(ctx, project.ID)
+		if p.MaxWorkers == nil || *p.MaxWorkers != 5 {
+			t.Fatalf("expected max_workers=5 below global limit, got %v", p.MaxWorkers)
 		}
 	})
 	t.Run("project not found returns 404", func(t *testing.T) {

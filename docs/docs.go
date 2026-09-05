@@ -475,7 +475,7 @@ const docTemplate = `{
         },
         "/api/capacity/global": {
             "get": {
-                "description": "Returns global worker pool usage and available slots.",
+                "description": "Returns global worker pool usage and available slots. max_workers=0 means unlimited; any positive value is a finite ceiling without a product-level upper bound.",
                 "produces": [
                     "application/json"
                 ],
@@ -565,7 +565,7 @@ const docTemplate = `{
         },
         "/api/capacity/projects": {
             "get": {
-                "description": "Returns worker capacity and queue information for each project.",
+                "description": "Returns independent per-project worker capacity and queue information. A nil or zero max_workers means the project inherits the global pool; project capacity does not aggregate configured caps across projects.",
                 "produces": [
                     "application/json"
                 ],
@@ -594,7 +594,7 @@ const docTemplate = `{
         },
         "/api/capacity/projects/{projectId}": {
             "get": {
-                "description": "Returns worker capacity and queue information for a specific project.",
+                "description": "Returns independent worker capacity and queue information for a project. max_workers is nil or zero when the project inherits the global pool; runtime admission still enforces actual global usage.",
                 "produces": [
                     "application/json"
                 ],

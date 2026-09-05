@@ -29,6 +29,10 @@ func workerLimitLabel(maxWorkers int) string {
 	return fmt.Sprintf("%d", maxWorkers)
 }
 
+func projectWorkerLimitExceedsGlobal(globalMaxWorkers int, projectMaxWorkers *int) bool {
+	return globalMaxWorkers > 0 && projectMaxWorkers != nil && *projectMaxWorkers > globalMaxWorkers
+}
+
 templ WorkerSettings(projects []models.Project, currentProjectID string, maxWorkers int, runningWorkers int, totalRunning int, queueSize int, projectStats []ProjectWorkerStats, modelStats []ModelWorkerStats) {
 	@layout.Base("Workers", projects, currentProjectID) {
 		@workerSettingsContent(maxWorkers, runningWorkers, totalRunning, queueSize, projectStats, modelStats)
@@ -317,9 +321,9 @@ templ projectStatsTableBody(maxWorkers int, runningWorkers int, totalRunning int
 						id="limit-input-global"
 						value={ fmt.Sprintf("%d", maxWorkers) }
 						min="0"
-						max="10"
+						step="1"
 						class="input input-bordered input-xs w-20 worker-limit-input"
-						title="0 = Unlimited, 1-10 = Max concurrent workers across all projects"
+						title="0 = Unlimited; positive values = Max concurrent workers across all projects"
 						data-project-id="global"
 					/>
 					<button type="submit" class="btn btn-xs btn-primary">Set</button>
@@ -377,22 +381,28 @@ templ projectStatsTableBody(maxWorkers int, runningWorkers int, totalRunning int
 							id={ fmt.Sprintf("limit-input-%s", ps.ID) }
 							value={ fmt.Sprintf("%d", func() int { if ps.MaxWorkers != nil { return *ps.MaxWorkers } else { return 0 } }()) }
 							min="0"
-							max="10"
-							placeholder="No limit"
-							class="input input-bordered input-xs w-20 worker-limit-input"
-							title="0 = No limit, 1-10 = Max concurrent workers"
-							data-project-id={ ps.ID }
-						/>
-						<button type="submit" class="btn btn-xs btn-primary">Set</button>
+							if maxWorkers > 0 {
+								max={ fmt.Sprintf("%d", maxWorkers) }
+							}
+							step="1"
+						placeholder="No limit"
+						class="input input-bordered input-xs w-20 worker-limit-input"
+						title="0 = No limit; positive values must not exceed the global worker limit"
+						data-project-id={ ps.ID }
+					/>						<button type="submit" class="btn btn-xs btn-primary">Set</button>
 					</form>
-					if ps.MaxWorkers == nil {
+					if projectWorkerLimitExceedsGlobal(maxWorkers, ps.MaxWorkers) {
+						<span class="text-xs text-warning mt-1 block" title={ fmt.Sprintf("This project limit exceeds the current global limit of %d", maxWorkers) }>Exceeds global limit; lower this cap</span>
+					} else if ps.MaxWorkers == nil {
 						<span class="text-xs opacity-60 mt-1 block">No limit</span>
 					} else if *ps.MaxWorkers == 0 {
 						<span class="text-xs opacity-60 mt-1 block">No limit</span>
 					}
 				</td>
 				<td>
-					if ps.MaxWorkers != nil && *ps.MaxWorkers > 0 && ps.Running >= *ps.MaxWorkers {
+					if projectWorkerLimitExceedsGlobal(maxWorkers, ps.MaxWorkers) {
+						<span class="badge badge-warning badge-sm" title={ fmt.Sprintf("Current project limit exceeds the global limit of %d; new work remains globally capped", maxWorkers) }>Exceeds global</span>
+					} else if ps.MaxWorkers != nil && *ps.MaxWorkers > 0 && ps.Running >= *ps.MaxWorkers {
 						<span class="badge badge-warning badge-sm" title={ fmt.Sprintf("Project is using all %d allowed workers", *ps.MaxWorkers) }>At capacity</span>
 					} else if ps.Running > 0 {
 						<span class="badge badge-success badge-sm">Active</span>

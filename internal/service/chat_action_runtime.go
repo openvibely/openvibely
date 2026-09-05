@@ -152,8 +152,6 @@ type GitHubProjectCloneProvider interface {
 	CloneProjectRepo(ctx context.Context, projectID, repoURL string) (string, string, error)
 }
 
-const runtimeProjectMaxWorkers = 10
-
 type CreateGitHubProjectRuntimeInput struct {
 	Name                 string `json:"name"`
 	RepoURL              string `json:"repo_url"`
@@ -166,6 +164,7 @@ type CreateGitHubProjectRuntimeInput struct {
 type CreateGitHubProjectRuntimeOptions struct {
 	ProjectSvc                 *ProjectService
 	GitHubSvc                  GitHubProjectCloneProvider
+	WorkerSvc                  *WorkerService
 	MemorySvc                  *MemoryService
 	AgentLibraryMaintenanceSvc *AgentLibraryMaintenanceService
 	SwitchProject              func(context.Context, *models.Project) error
@@ -199,6 +198,7 @@ type UpdateProjectSettingsRuntimeOptions struct {
 	ProjectSvc         *ProjectService
 	ProjectRepo        *repository.ProjectRepo
 	LLMConfigRepo      *repository.LLMConfigRepo
+	WorkerSvc          *WorkerService
 	DispatchQueuedWork func()
 }
 
@@ -767,6 +767,9 @@ func buildChannelProjectActionHandlers(opts channelProjectActionHandlerOptions) 
 		},
 		"create_project": func(ctx context.Context, input json.RawMessage) (string, error) {
 			createOpts := opts.CreateProject
+			if createOpts.WorkerSvc == nil {
+				createOpts.WorkerSvc = opts.WorkerSvc
+			}
 			if createOpts.SwitchProject == nil {
 				createOpts.SwitchProject = opts.SwitchProject
 			}
@@ -783,6 +786,7 @@ func buildChannelProjectActionHandlers(opts channelProjectActionHandlerOptions) 
 				ProjectSvc:         opts.ProjectSvc,
 				ProjectRepo:        opts.ProjectRepo,
 				LLMConfigRepo:      opts.LLMConfigRepo,
+				WorkerSvc:          opts.WorkerSvc,
 				DispatchQueuedWork: dispatch,
 			})
 		},
@@ -1560,6 +1564,13 @@ func matchesChannelProjectTarget(project models.Project, target string) bool {
 	return strings.EqualFold(project.Name, target) || project.ID == target
 }
 
+func runtimeGlobalWorkerLimit(workerSvc *WorkerService) int {
+	if workerSvc == nil {
+		return 0
+	}
+	return workerSvc.NumWorkers()
+}
+
 func ExecuteUpdateProjectSettingsRuntime(ctx context.Context, opts UpdateProjectSettingsRuntimeOptions) (string, error) {
 	respond := func(resp updateProjectSettingsRuntimeResponse) (string, error) {
 		data, err := json.Marshal(resp)
@@ -1632,7 +1643,7 @@ func ExecuteUpdateProjectSettingsRuntime(ctx context.Context, opts UpdateProject
 		updatedFields = append(updatedFields, "default_model")
 	}
 
-	workerChanged, projectLimitIncrease, errMsg := applyProjectWorkerLimitUpdate(&updated, req)
+	workerChanged, projectLimitIncrease, errMsg := applyProjectWorkerLimitUpdate(&updated, req, runtimeGlobalWorkerLimit(opts.WorkerSvc))
 	if errMsg != "" {
 		return fail(errMsg)
 	}
@@ -1756,7 +1767,7 @@ func resolveRuntimeModelByIDOrExactName(ctx context.Context, repo *repository.LL
 	}
 }
 
-func applyProjectWorkerLimitUpdate(project *models.Project, req UpdateProjectSettingsRuntimeInput) (changed bool, shouldDispatch bool, errMsg string) {
+func applyProjectWorkerLimitUpdate(project *models.Project, req UpdateProjectSettingsRuntimeInput, globalMaxWorkers int) (changed bool, shouldDispatch bool, errMsg string) {
 	if req.ClearMaxWorkers {
 		if req.MaxWorkers != nil {
 			return false, false, "clear_max_workers cannot be combined with max_workers"
@@ -1770,8 +1781,13 @@ func applyProjectWorkerLimitUpdate(project *models.Project, req UpdateProjectSet
 		return false, false, ""
 	}
 	maxWorkers := *req.MaxWorkers
-	if maxWorkers < 0 || maxWorkers > runtimeProjectMaxWorkers {
-		return false, false, "max_workers must be 0 or between 1 and 10"
+	if maxWorkers < 0 {
+		return false, false, "max_workers must be 0 or a positive integer"
+	}
+	if maxWorkers > 0 {
+		if err := models.ValidateProjectWorkerLimit(&maxWorkers, globalMaxWorkers); err != nil {
+			return false, false, err.Error()
+		}
 	}
 	var next *int
 	if maxWorkers > 0 {
@@ -1784,21 +1800,24 @@ func applyProjectWorkerLimitUpdate(project *models.Project, req UpdateProjectSet
 	return changed, shouldDispatch, ""
 }
 
-func sameProjectWorkerLimit(a, b *int) bool {
-	if a == nil || b == nil {
-		return a == nil && b == nil
+func normalizedProjectWorkerLimit(limit *int) int {
+	if limit == nil || *limit <= 0 {
+		return 0
 	}
-	return *a == *b
+	return *limit
+}
+
+func sameProjectWorkerLimit(a, b *int) bool {
+	return normalizedProjectWorkerLimit(a) == normalizedProjectWorkerLimit(b)
 }
 
 func isProjectWorkerLimitIncrease(oldLimit, newLimit *int) bool {
-	if oldLimit == nil {
+	oldValue := normalizedProjectWorkerLimit(oldLimit)
+	newValue := normalizedProjectWorkerLimit(newLimit)
+	if oldValue == 0 {
 		return false
 	}
-	if newLimit == nil {
-		return true
-	}
-	return *newLimit > *oldLimit
+	return newValue == 0 || newValue > oldValue
 }
 
 func projectDefaultModelSummary(model *models.LLMConfig) updateProjectSettingsModelSummary {
@@ -1815,10 +1834,11 @@ func projectDefaultModelSummary(model *models.LLMConfig) updateProjectSettingsMo
 }
 
 func projectWorkerLimitSummary(maxWorkers *int) updateProjectSettingsWorkerLimit {
-	if maxWorkers == nil {
+	value := normalizedProjectWorkerLimit(maxWorkers)
+	if value == 0 {
 		return updateProjectSettingsWorkerLimit{Set: false}
 	}
-	return updateProjectSettingsWorkerLimit{Set: true, MaxWorkers: *maxWorkers}
+	return updateProjectSettingsWorkerLimit{Set: true, MaxWorkers: value}
 }
 
 func ExecuteCreateGitHubProjectRuntime(ctx context.Context, input json.RawMessage, opts CreateGitHubProjectRuntimeOptions) (string, error) {
@@ -1859,8 +1879,8 @@ func ExecuteCreateGitHubProjectRuntime(ctx context.Context, input json.RawMessag
 		if *req.MaxWorkers <= 0 {
 			return fail("max_workers must be a positive integer")
 		}
-		if *req.MaxWorkers > runtimeProjectMaxWorkers {
-			return fail(fmt.Sprintf("max_workers must be between 1 and %d", runtimeProjectMaxWorkers))
+		if err := models.ValidateProjectWorkerLimit(req.MaxWorkers, runtimeGlobalWorkerLimit(opts.WorkerSvc)); err != nil {
+			return fail(err.Error())
 		}
 	}
 

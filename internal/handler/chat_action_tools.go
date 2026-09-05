@@ -621,6 +621,7 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 			return service.ExecuteCreateGitHubProjectRuntime(ctx, input, service.CreateGitHubProjectRuntimeOptions{
 				ProjectSvc:                 h.projectSvc,
 				GitHubSvc:                  h.githubSvc,
+				WorkerSvc:                  h.workerSvc,
 				MemorySvc:                  h.memorySvc,
 				AgentLibraryMaintenanceSvc: h.agentLibraryMaintenanceSvc,
 			})
@@ -636,6 +637,7 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 				ProjectSvc:         h.projectSvc,
 				ProjectRepo:        h.projectRepo,
 				LLMConfigRepo:      h.llmConfigRepo,
+				WorkerSvc:          h.workerSvc,
 				DispatchQueuedWork: dispatch,
 			})
 		},

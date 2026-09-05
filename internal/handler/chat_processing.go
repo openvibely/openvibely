@@ -3395,13 +3395,14 @@ func (h *Handler) executeViewSettings(ctx context.Context) string {
 	} else {
 		hasProjectLimits := false
 		for _, p := range projects {
-			if p.MaxWorkers != nil {
-				if !hasProjectLimits {
-					sb.WriteString("- **Per-project worker limits:**\n")
-					hasProjectLimits = true
-				}
-				sb.WriteString(fmt.Sprintf("  - %s: %d\n", p.Name, *p.MaxWorkers))
+			if p.MaxWorkers == nil || *p.MaxWorkers <= 0 {
+				continue
 			}
+			if !hasProjectLimits {
+				sb.WriteString("- **Per-project worker limits:**\n")
+				hasProjectLimits = true
+			}
+			sb.WriteString(fmt.Sprintf("  - %s: %d\n", p.Name, *p.MaxWorkers))
 		}
 		if !hasProjectLimits {
 			sb.WriteString("- **Per-project worker limits:** none configured\n")
