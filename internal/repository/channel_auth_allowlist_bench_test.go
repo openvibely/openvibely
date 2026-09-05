@@ -117,29 +117,6 @@ func seedAuthAllowlistFixture(tb testing.TB, db *sql.DB, rowsPerChannel int) {
 	}
 }
 
-func setAuthAllowlistListIndexes(tb testing.TB, db *sql.DB, candidate bool) {
-	tb.Helper()
-	for _, indexName := range authAllowlistListIndexes {
-		if _, err := db.Exec(`DROP INDEX IF EXISTS ` + indexName); err != nil {
-			tb.Fatalf("drop %s: %v", indexName, err)
-		}
-	}
-	if !candidate {
-		return
-	}
-	statements := []string{
-		`CREATE INDEX IF NOT EXISTS idx_telegram_auth_list_covering ON telegram_authorized_users(added_at, id, project_id, telegram_user_id, telegram_username, display_name, added_by)`,
-		`CREATE INDEX IF NOT EXISTS idx_slack_auth_list_covering ON slack_authorized_users(added_at, id, project_id, slack_user_id, display_name, added_by)`,
-		`CREATE INDEX IF NOT EXISTS idx_discord_auth_list_covering ON discord_authorized_users(added_at, id, project_id, discord_user_id, display_name, added_by)`,
-		`CREATE INDEX IF NOT EXISTS idx_email_auth_list_covering ON email_authorized_senders(added_at, id, project_id, email_address, display_name, added_by)`,
-	}
-	for _, stmt := range statements {
-		if _, err := db.Exec(stmt); err != nil {
-			tb.Fatalf("create auth allowlist list index: %v", err)
-		}
-	}
-}
-
 func authAllowlistExplain(tb testing.TB, db *sql.DB, query string, args ...any) string {
 	tb.Helper()
 	rows, err := db.Query("EXPLAIN QUERY PLAN "+query, args...)
@@ -166,22 +143,13 @@ func TestChannelAuthAllowlistListQueriesUseCoveringOrderIndexes(t *testing.T) {
 	db := newAuthAllowlistBenchDB(t)
 	seedAuthAllowlistFixture(t, db, 1500)
 
-	setAuthAllowlistListIndexes(t, db, false)
-	for channel, query := range authAllowlistListQueries {
-		plan := authAllowlistExplain(t, db, query)
-		if !strings.Contains(plan, "USE TEMP B-TREE FOR ORDER BY") {
-			t.Fatalf("%s baseline plan = %s, want temporary ORDER BY sort", channel, plan)
-		}
-	}
-
-	setAuthAllowlistListIndexes(t, db, true)
 	for channel, query := range authAllowlistListQueries {
 		plan := authAllowlistExplain(t, db, query)
 		if !strings.Contains(plan, "USING COVERING INDEX "+authAllowlistListIndexes[channel]) {
-			t.Fatalf("%s candidate plan = %s, want covering list index %s", channel, plan, authAllowlistListIndexes[channel])
+			t.Fatalf("%s plan = %s, want covering list index %s", channel, plan, authAllowlistListIndexes[channel])
 		}
 		if strings.Contains(plan, "USE TEMP B-TREE FOR ORDER BY") {
-			t.Fatalf("%s candidate plan = %s, want no temporary ORDER BY sort", channel, plan)
+			t.Fatalf("%s plan = %s, want no temporary ORDER BY sort", channel, plan)
 		}
 	}
 
@@ -350,7 +318,6 @@ func BenchmarkChannelStatusMaterializedVsAggregateSummary(b *testing.B) {
 func TestChannelAuthAllowlistIdentityLookupPlansRemainIndexed(t *testing.T) {
 	db := newAuthAllowlistBenchDB(t)
 	seedAuthAllowlistFixture(t, db, 1500)
-	setAuthAllowlistListIndexes(t, db, true)
 
 	lookups := []struct {
 		label string
@@ -483,48 +450,38 @@ func BenchmarkChannelAuthAllowlistSettingsPathListQueries(b *testing.B) {
 		telegram: NewTelegramAuthRepo(db),
 	}
 
-	for _, tc := range []struct {
-		name      string
-		candidate bool
-	}{
-		{"baseline", false},
-		{"candidate", true},
-	} {
-		b.Run(tc.name, func(b *testing.B) {
-			setAuthAllowlistListIndexes(b, db, tc.candidate)
+	b.Run("current", func(b *testing.B) {
+		warm, err := listSettingsAuthAllowlists(ctx, repos.slack, repos.discord, repos.email, repos.telegram)
+		if err != nil {
+			b.Fatalf("warm settings auth allowlist query: %v", err)
+		}
+		if warm != authAllowlistBenchRows*4 {
+			b.Fatalf("warm settings auth allowlist rows = %d, want %d", warm, authAllowlistBenchRows*4)
+		}
 
-			warm, err := listSettingsAuthAllowlists(ctx, repos.slack, repos.discord, repos.email, repos.telegram)
+		durations := make([]time.Duration, 0, b.N)
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			start := time.Now()
+			got, err := listSettingsAuthAllowlists(ctx, repos.slack, repos.discord, repos.email, repos.telegram)
+			elapsed := time.Since(start)
 			if err != nil {
-				b.Fatalf("warm settings auth allowlist query: %v", err)
+				b.Fatalf("settings auth allowlist query: %v", err)
 			}
-			if warm != authAllowlistBenchRows*4 {
-				b.Fatalf("warm settings auth allowlist rows = %d, want %d", warm, authAllowlistBenchRows*4)
+			if got != authAllowlistBenchRows*4 {
+				b.Fatalf("settings auth allowlist rows = %d, want %d", got, authAllowlistBenchRows*4)
 			}
+			durations = append(durations, elapsed)
+		}
+		b.StopTimer()
 
-			durations := make([]time.Duration, 0, b.N)
-			b.ReportAllocs()
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
-				start := time.Now()
-				got, err := listSettingsAuthAllowlists(ctx, repos.slack, repos.discord, repos.email, repos.telegram)
-				elapsed := time.Since(start)
-				if err != nil {
-					b.Fatalf("settings auth allowlist query: %v", err)
-				}
-				if got != authAllowlistBenchRows*4 {
-					b.Fatalf("settings auth allowlist rows = %d, want %d", got, authAllowlistBenchRows*4)
-				}
-				durations = append(durations, elapsed)
-			}
-			b.StopTimer()
-
-			if len(durations) > 0 {
-				sort.Slice(durations, func(i, j int) bool { return durations[i] < durations[j] })
-				median := durations[len(durations)/2]
-				b.ReportMetric(float64(median.Nanoseconds())/1e6, "p50_ms")
-			}
-		})
-	}
+		if len(durations) > 0 {
+			sort.Slice(durations, func(i, j int) bool { return durations[i] < durations[j] })
+			median := durations[len(durations)/2]
+			b.ReportMetric(float64(median.Nanoseconds())/1e6, "p50_ms")
+		}
+	})
 }
 
 func listSettingsAuthAllowlists(ctx context.Context, slack *SlackAuthRepo, discord *DiscordAuthRepo, email *EmailAuthRepo, telegram *TelegramAuthRepo) (int, error) {
