@@ -629,10 +629,12 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 		"update_project_settings": func(ctx context.Context, input json.RawMessage) (string, error) {
 			var dispatch func()
 			if h.workerSvc != nil {
-				dispatch = h.workerSvc.DispatchNext
+				dispatch = func() {
+					h.workerSvc.ReconcilePendingTasks(ctx)
+					h.workerSvc.DispatchNext()
+				}
 			}
-			return service.ExecuteUpdateProjectSettingsRuntime(ctx, service.UpdateProjectSettingsRuntimeOptions{
-				ProjectID:          params.ProjectID,
+			return service.ExecuteUpdateProjectSettingsRuntime(ctx, service.UpdateProjectSettingsRuntimeOptions{ProjectID: params.ProjectID,
 				Input:              input,
 				ProjectSvc:         h.projectSvc,
 				ProjectRepo:        h.projectRepo,

@@ -93,6 +93,31 @@ func TestWorkerSettingsContentSupportsHighLimitsAndReportsStaleProjectCaps(t *te
 	}
 }
 
+func TestWorkerSettingsContentShowsUnlimitedForProjectRunningColumn(t *testing.T) {
+	zero := 0
+	projectStats := []ProjectWorkerStats{
+		{ID: "project-nil", Name: "Inherited Project", Running: 3, MaxWorkers: nil},
+		{ID: "project-zero", Name: "Legacy Zero Project", Running: 4, MaxWorkers: &zero},
+	}
+
+	var buf bytes.Buffer
+	if err := WorkerSettingsContent(0, 0, 0, 0, projectStats, nil).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render worker settings content: %v", err)
+	}
+	html := buf.String()
+
+	for _, want := range []string{"3 / Unlimited", "4 / Unlimited"} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("project running column missing unlimited label %q", want)
+		}
+	}
+	for _, forbidden := range []string{"3 / 0", "4 / 0"} {
+		if strings.Contains(html, forbidden) {
+			t.Fatalf("project running column rendered unlimited project as %q", forbidden)
+		}
+	}
+}
+
 func TestWorkerSettingsManyRowsScrollInMainContentAfterHTMXRefreshInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))

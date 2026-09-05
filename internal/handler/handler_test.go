@@ -2759,6 +2759,149 @@ func TestHandler_UpdateWorkerSettings(t *testing.T) {
 	})
 }
 
+func TestHandler_UnlimitedGlobalAndProjectSettingsAdmitQueuedTask(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+
+	if err := h.workerRepo.SetMaxWorkers(ctx, 1); err != nil {
+		t.Fatalf("set finite global worker limit: %v", err)
+	}
+	h.workerSvc.Resize(1)
+	h.workerSvc.SetProjectRepo(h.projectRepo)
+	h.workerSvc.SetTaskRepo(h.taskRepo)
+	h.workerSvc.SetLLMConfigRepo(llmConfigRepo)
+
+	projectLimit := 1
+	project := &models.Project{Name: "Unlimited Settings Project", MaxWorkers: &projectLimit}
+	if err := h.projectSvc.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	agent := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
+		a.MaxWorkers = 0
+	})
+
+	providerStarted := make(chan struct{})
+	providerRelease := make(chan struct{})
+	mockCaller := testutil.NewMockLLMCaller()
+	mockCaller.OnCall = func(callCtx context.Context, _ testutil.MockLLMCall) {
+		close(providerStarted)
+		select {
+		case <-providerRelease:
+		case <-callCtx.Done():
+		}
+	}
+	h.llmSvc.SetLLMCaller(mockCaller)
+
+	h.workerSvc.Start(ctx)
+	defer h.workerSvc.Stop()
+
+	// Occupy the only global and project slot, then create an active task. The
+	// task service submits it to the real worker queue, where it must wait.
+	if !h.workerSvc.TryAcquireProjectSlot(project.ID) {
+		t.Fatal("expected to occupy the finite global/project slot")
+	}
+	defer h.workerSvc.ReleaseProjectSlot(project.ID)
+
+	task := createTask(t, h, project.ID, "Queued Until Unlimited", func(task *models.Task) {
+		task.AgentID = &agent.ID
+	})
+	require.Eventually(t, func() bool {
+		return h.workerSvc.QueueSize() == 1
+	}, time.Second, 10*time.Millisecond, "task should wait while global and project limits are finite")
+
+	globalRec := htmxPost(e, "/workers", url.Values{"max_workers": {"0"}})
+	assertCode(t, globalRec, http.StatusOK)
+	if got := h.workerSvc.QueueSize(); got != 1 {
+		t.Fatalf("queue size after only global limit became unlimited = %d, want 1", got)
+	}
+
+	projectRec := htmxPost(e, "/workers/projects/"+project.ID+"/limit", url.Values{"max_workers": {"0"}})
+	assertCode(t, projectRec, http.StatusOK)
+
+	select {
+	case <-providerStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("queued task did not reach the provider after global and project limits became unlimited")
+	}
+	close(providerRelease)
+
+	require.Eventually(t, func() bool {
+		return h.workerSvc.QueueSize() == 0 && h.workerSvc.TotalRunning() == 1
+	}, 2*time.Second, 10*time.Millisecond, "admitted task should leave the worker queue while the held slot remains")
+	storedProject, err := h.projectSvc.GetByID(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("reload project: %v", err)
+	}
+	if storedProject.MaxWorkers != nil {
+		t.Fatalf("project unlimited setting persisted as %v, want nil", storedProject.MaxWorkers)
+	}
+	storedTask, err := h.taskSvc.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("reload task: %v", err)
+	}
+	if storedTask.Status == models.StatusPending {
+		t.Fatalf("task remained pending after unlimited settings: %s", storedTask.Status)
+	}
+}
+
+func TestHandler_UnlimitedSettingsReconcileDurablePendingTask(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	h.workerSvc.Start(ctx)
+	defer h.workerSvc.Stop()
+
+	globalRec := htmxPost(e, "/workers", url.Values{"max_workers": {"1"}})
+	assertCode(t, globalRec, http.StatusOK)
+
+	projectLimit := 1
+	project := &models.Project{Name: "Durable Pending Project", MaxWorkers: &projectLimit}
+	require.NoError(t, h.projectSvc.Create(ctx, project))
+	h.workerSvc.SetProjectRepo(h.projectRepo)
+	h.workerSvc.SetTaskRepo(h.taskRepo)
+	h.workerSvc.SetLLMConfigRepo(llmConfigRepo)
+	agent := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
+		a.MaxWorkers = 0
+	})
+
+	providerStarted := make(chan struct{})
+	providerRelease := make(chan struct{})
+	h.llmSvc.SetLLMCaller(llmCallerFunc(func(callCtx context.Context, _ string, _ []models.Attachment, _ models.LLMConfig, _ string, _ string) (string, string, int, error) {
+		close(providerStarted)
+		select {
+		case <-providerRelease:
+		case <-callCtx.Done():
+		}
+		return "durable task completed", "", 1, nil
+	}))
+
+	require.True(t, h.workerSvc.TryAcquireProjectSlot(project.ID))
+	defer h.workerSvc.ReleaseProjectSlot(project.ID)
+
+	// Simulate a task that survived a worker restart or a missed submission: it
+	// is durably runnable but has not yet been offered to WorkerService.Submit.
+	task := &models.Task{
+		ProjectID: project.ID,
+		Title:     "Durable pending task",
+		Prompt:    "run when limits become unlimited",
+		Category:  models.CategoryActive,
+		Status:    models.StatusPending,
+		AgentID:   &agent.ID,
+	}
+	require.NoError(t, h.taskRepo.Create(ctx, task))
+
+	globalRec = htmxPost(e, "/workers", url.Values{"max_workers": {"0"}})
+	assertCode(t, globalRec, http.StatusOK)
+	projectRec := htmxPost(e, "/workers/projects/"+project.ID+"/limit", url.Values{"max_workers": {"0"}})
+	assertCode(t, projectRec, http.StatusOK)
+
+	select {
+	case <-providerStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("durable pending task was not reconciled after global and project limits became unlimited")
+	}
+	close(providerRelease)
+}
+
 func TestHandler_GlobalWorkerStats(t *testing.T) {
 	_, e, _ := setupTestHandler(t)
 	rec := htmxGet(e, "/workers/stats/global")

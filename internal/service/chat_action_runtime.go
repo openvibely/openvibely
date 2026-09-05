@@ -778,10 +778,12 @@ func buildChannelProjectActionHandlers(opts channelProjectActionHandlerOptions) 
 		"update_project_settings": func(ctx context.Context, input json.RawMessage) (string, error) {
 			var dispatch func()
 			if opts.WorkerSvc != nil {
-				dispatch = opts.WorkerSvc.DispatchNext
+				dispatch = func() {
+					opts.WorkerSvc.ReconcilePendingTasks(ctx)
+					opts.WorkerSvc.DispatchNext()
+				}
 			}
-			return ExecuteUpdateProjectSettingsRuntime(ctx, UpdateProjectSettingsRuntimeOptions{
-				ProjectID:          opts.ProjectID,
+			return ExecuteUpdateProjectSettingsRuntime(ctx, UpdateProjectSettingsRuntimeOptions{ProjectID: opts.ProjectID,
 				Input:              input,
 				ProjectSvc:         opts.ProjectSvc,
 				ProjectRepo:        opts.ProjectRepo,

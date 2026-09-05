@@ -29,6 +29,13 @@ func workerLimitLabel(maxWorkers int) string {
 	return fmt.Sprintf("%d", maxWorkers)
 }
 
+func projectWorkerLimitLabel(maxWorkers *int) string {
+	if maxWorkers == nil || *maxWorkers <= 0 {
+		return "Unlimited"
+	}
+	return fmt.Sprintf("%d", *maxWorkers)
+}
+
 func projectWorkerLimitExceedsGlobal(globalMaxWorkers int, projectMaxWorkers *int) bool {
 	return globalMaxWorkers > 0 && projectMaxWorkers != nil && *projectMaxWorkers > globalMaxWorkers
 }
@@ -350,14 +357,14 @@ templ projectStatsTableBody(maxWorkers int, runningWorkers int, totalRunning int
 				<td class="font-medium">{ ps.Name }</td>
 				<td>
 					if ps.MaxWorkers != nil && *ps.MaxWorkers > 0 && ps.Running >= *ps.MaxWorkers {
-						<span class="badge badge-warning badge-sm">{ fmt.Sprintf("%d / %d", ps.Running, *ps.MaxWorkers) }</span>
+						<span class="badge badge-warning badge-sm">{ fmt.Sprintf("%d / %s", ps.Running, projectWorkerLimitLabel(ps.MaxWorkers)) }</span>
 					} else if ps.Running > 0 {
 						<span class="badge badge-success badge-sm">
-							{ fmt.Sprintf("%d / %d", ps.Running, func() int { if ps.MaxWorkers != nil { return *ps.MaxWorkers } else { return 0 } }()) }
+							{ fmt.Sprintf("%d / %s", ps.Running, projectWorkerLimitLabel(ps.MaxWorkers)) }
 						</span>
 					} else {
 						<span class="badge badge-ghost badge-sm">
-							{ fmt.Sprintf("0 / %d", func() int { if ps.MaxWorkers != nil { return *ps.MaxWorkers } else { return 0 } }()) }
+							{ fmt.Sprintf("0 / %s", projectWorkerLimitLabel(ps.MaxWorkers)) }
 						</span>
 					}
 				</td>

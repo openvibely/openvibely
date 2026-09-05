@@ -466,6 +466,7 @@ func (h *Handler) UpdateProject(c echo.Context) error {
 	}
 	applog.Infof("[handler] UpdateProject success id=%s", projectID)
 	if h.workerSvc != nil {
+		h.workerSvc.ReconcilePendingTasks(c.Request().Context())
 		h.workerSvc.DispatchNext()
 	}
 
