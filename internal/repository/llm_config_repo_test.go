@@ -1741,7 +1741,7 @@ func benchmarkVisionSelectionWithContention(b *testing.B, db *sql.DB, counter *t
 		}()
 	}
 	b.StopTimer()
-	b.ReportMetric(float64(totalLightweightWait.Nanoseconds())/float64(b.N), "lightweight_db_wait_after_full_model_path_ns/op")
+	b.ReportMetric(float64(totalLightweightWait.Nanoseconds())/float64(b.N), "lightweight_db_wait_ns/op")
 }
 
 func TestLLMConfigRepo_BrowserChatContextModelLoadingProjectionStaysBoundedOnLargeFixture(t *testing.T) {
