@@ -1273,10 +1273,12 @@ func TestChannelsPageDeleteActionsUseConfirmationDialog(t *testing.T) {
 			t.Fatalf("expected %s channel card to be selectable", tc.channelType)
 		}
 		if tc.channelType != "webhook" {
-			for _, marker := range []string{`data-card-select-id="channel:` + tc.channelType + `"`, `data-card-delete-url="` + tc.url, `data-card-delete-method="` + tc.method + `"`} {
-				if !strings.Contains(card, marker) {
-					t.Fatalf("expected %s selectable channel card to contain %q", tc.channelType, marker)
-				}
+			marker := `data-card-select-id="channel:` + tc.channelType + `"`
+			if !strings.Contains(card, marker) {
+				t.Fatalf("expected %s selectable channel card to contain %q", tc.channelType, marker)
+			}
+			if strings.Contains(card, `data-card-delete-url=`) || strings.Contains(card, `data-card-delete-method=`) {
+				t.Fatalf("did not expect %s card to carry sequential bulk-delete route metadata", tc.channelType)
 			}
 		}
 		if strings.Contains(card, `hx-confirm="Delete this `) {

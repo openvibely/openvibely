@@ -273,7 +273,7 @@ templ settingsContent(view ChannelsSettingsView) {
 					@OutboundTargetsCard(view.CurrentProjectID, view.ChannelTargets, view.SendMessageExplicitTargets)
 				}
 				if view.HasXChannel {
-					<div class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40" data-channel-type="x" data-card-select-id="channel:x" data-card-select-eligible="true" data-card-delete-url={ "/channels/x/remove?project_id=" + view.CurrentProjectID } data-card-delete-method="POST" data-search-card data-search-text="X formerly Twitter mentions posts" onclick="openXConfigModal()" hidden?={ !channelCardMatchesFilters(view, "x", view.XStatus.Configured, view.XStatus.Connected, "X formerly Twitter mentions posts") }>
+					<div class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40" data-channel-type="x" data-card-select-id="channel:x" data-card-select-eligible="true" data-search-card data-search-text="X formerly Twitter mentions posts" onclick="openXConfigModal()" hidden?={ !channelCardMatchesFilters(view, "x", view.XStatus.Configured, view.XStatus.Connected, "X formerly Twitter mentions posts") }>
 						<div class="card-body p-5">
 							<div class="flex items-start justify-between gap-3">
 								<div><h3 class="card-title">X (formerly Twitter)</h3><p class="text-sm opacity-60">Receive authorized mentions and post replies using X API v2.</p></div>
@@ -305,8 +305,6 @@ templ settingsContent(view ChannelsSettingsView) {
 					data-channel-type="github"
 					data-card-select-id="channel:github"
 					data-card-select-eligible="true"
-					data-card-delete-url={ "/channels/github/remove?project_id=" + view.CurrentProjectID }
-					data-card-delete-method="POST"
 					hidden?={ !channelCardMatchesFilters(view, "github", view.GitHubStatus.Configured, view.GitHubStatus.Connected, "GitHub "+githubConnectionBadge(view.GitHubStatus).Label) }
 					data-search-card
 					data-search-text={ "GitHub " + githubConnectionBadge(view.GitHubStatus).Label }
@@ -384,8 +382,6 @@ templ settingsContent(view ChannelsSettingsView) {
 					data-channel-type="slack"
 					data-card-select-id="channel:slack"
 					data-card-select-eligible="true"
-					data-card-delete-url={ "/channels/slack/remove?project_id=" + view.CurrentProjectID }
-					data-card-delete-method="POST"
 					hidden?={ !channelCardMatchesFilters(view, "slack", view.SlackStatus.Configured, view.SlackStatus.Connected, "Slack "+slackConnectionBadge(view.SlackStatus).Label) }
 					data-search-card
 					data-search-text={ "Slack " + slackConnectionBadge(view.SlackStatus).Label }
@@ -466,8 +462,6 @@ templ settingsContent(view ChannelsSettingsView) {
 					data-channel-type="telegram"
 					data-card-select-id="channel:telegram"
 					data-card-select-eligible="true"
-					data-card-delete-url={ "/channels/telegram/remove?project_id=" + view.CurrentProjectID }
-					data-card-delete-method="POST"
 					hidden?={ !channelCardMatchesFilters(view, "telegram", strings.TrimSpace(view.TelegramToken) != "", view.IsBotRunning, "Telegram Bot "+telegramChannelStatusText(view.IsBotRunning)) }
 					data-channel-token={ view.TelegramToken }
 					data-channel-running={ templ.JSONString(view.IsBotRunning) }
@@ -544,8 +538,6 @@ templ settingsContent(view ChannelsSettingsView) {
 						data-channel-type="discord"
 						data-card-select-id="channel:discord"
 						data-card-select-eligible="true"
-						data-card-delete-url={ "/channels/discord/remove?project_id=" + view.CurrentProjectID }
-						data-card-delete-method="POST"
 						hidden?={ !channelCardMatchesFilters(view, "discord", view.DiscordStatus.Configured, view.DiscordStatus.Running, "Discord "+discordConnectionBadge(view.DiscordStatus).Label) }
 						data-search-card
 						data-search-text={ "Discord " + discordConnectionBadge(view.DiscordStatus).Label }
@@ -612,8 +604,6 @@ templ settingsContent(view ChannelsSettingsView) {
 						data-channel-type="email"
 						data-card-select-id="channel:email"
 						data-card-select-eligible="true"
-						data-card-delete-url={ "/channels/email/remove?project_id=" + view.CurrentProjectID }
-						data-card-delete-method="POST"
 						hidden?={ !channelCardMatchesFilters(view, "email", view.EmailStatus.Configured, view.EmailStatus.Running, "Email "+view.EmailStatus.Address) }
 						data-search-card
 						data-search-text={ "Email " + view.EmailStatus.Address }

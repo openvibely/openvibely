@@ -54,6 +54,66 @@ func applyChannelSettingResets(ctx context.Context, settingsRepo *repository.Set
 	return nil
 }
 
+func channelBulkProviderResets(provider string) (map[string]string, bool) {
+	resets := map[string]string{}
+	add := func(key, value string) { resets[key] = value }
+	switch provider {
+	case "github":
+		for _, key := range []string{
+			service.GitHubSettingAppID, service.GitHubSettingAppSlug, service.GitHubSettingAppPrivateKey,
+			service.GitHubSettingPAT, service.GitHubSettingPATUserLogin, service.GitHubSettingAuthMode,
+			service.GitHubSettingAPIEndpoint, "github_app_installation_id", "github_app_account_login",
+			"github_app_account_type", "github_app_connected_at",
+		} {
+			add(key, "")
+		}
+	case "slack":
+		for _, key := range []string{
+			service.SlackSettingClientID, service.SlackSettingClientSecret, service.SlackSettingAppToken,
+			service.SlackSettingBotToken, service.SlackSettingBotTokenOverride, service.SlackSettingBotUserID,
+			service.SlackSettingTeamID, service.SlackSettingTeamName, service.SlackSettingConnectedAt,
+			service.SlackSettingOAuthState, service.SlackSettingSendResponses,
+		} {
+			add(key, "")
+		}
+		add(service.SlackSettingBotTokenSource, service.SlackBotTokenSourceOAuth)
+	case "telegram":
+		add(service.TelegramSettingBotToken, "")
+		add(service.TelegramSettingSendResponses, "")
+		add(service.TelegramSettingRichMessagesV2, "")
+	case "discord":
+		add(service.DiscordSettingBotToken, "")
+		add(service.DiscordSettingBotUserID, "")
+		add(service.DiscordSettingSendResponses, "")
+	case "email":
+		for _, key := range []string{
+			service.EmailSettingProvider, service.EmailSettingAddress, service.EmailSettingPassword,
+			service.EmailSettingIMAPHost, service.EmailSettingIMAPPort, service.EmailSettingSMTPHost,
+			service.EmailSettingSMTPPort, service.EmailSettingPollIntervalSeconds, service.EmailSettingSendResponses,
+			service.EmailSettingSkipAttachments, service.EmailSettingMarkExistingSeenOnStart,
+		} {
+			add(key, "")
+		}
+	case "x":
+		for _, key := range []string{
+			service.XSettingConsumerKey, service.XSettingConsumerSecret, service.XSettingAccessToken,
+			service.XSettingAccessTokenSecret, service.XSettingPollIntervalSeconds, service.XSettingSendResponses,
+			service.XSettingSinceID, service.XSettingAccountID, service.XSettingConfigurationID,
+		} {
+			add(key, "")
+		}
+	default:
+		return nil, false
+	}
+	return resets, true
+}
+
+func mergeChannelSettingResets(target, source map[string]string) {
+	for key, value := range source {
+		target[key] = value
+	}
+}
+
 func triggerChannelsRefresh(c echo.Context) error {
 	c.Response().Header().Set("HX-Trigger", channelsRefreshTrigger)
 	return c.NoContent(http.StatusOK)
@@ -64,6 +124,72 @@ func returnToChannels(c echo.Context) error {
 		return triggerChannelsRefresh(c)
 	}
 	return c.Redirect(http.StatusSeeOther, "/channels")
+}
+
+func (h *Handler) handleChannelsBulkDelete(c echo.Context) error {
+	ids, err := decodeBulkIDs(c.Request().Body)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	projectID, err := h.getCurrentProjectID(c)
+	if err != nil {
+		return err
+	}
+	if h.settingsRepo == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "settings repository not configured")
+	}
+
+	providers := make(map[string]bool)
+	settingResets := make(map[string]string)
+	webhookIDs := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if strings.HasPrefix(id, "channel:") {
+			provider := strings.TrimPrefix(id, "channel:")
+			resets, ok := channelBulkProviderResets(provider)
+			if !ok {
+				return echo.NewHTTPError(http.StatusBadRequest, "unsupported channel selection")
+			}
+			providers[provider] = true
+			mergeChannelSettingResets(settingResets, resets)
+			continue
+		}
+		webhookIDs = append(webhookIDs, id)
+	}
+
+	if providers["x"] {
+		h.xConfigMu.Lock()
+		defer h.xConfigMu.Unlock()
+	}
+	if err := h.settingsRepo.RemoveChannelsBulk(c.Request().Context(), projectID, settingResets, webhookIDs, providers["discord"]); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "all selected channels must be removable from the current project").SetInternal(err)
+	}
+
+	if providers["github"] && h.githubSvc != nil {
+		_ = h.githubSvc.Disconnect(c.Request().Context())
+	}
+	if providers["slack"] && h.slackSvc != nil {
+		_ = h.slackSvc.Disconnect(c.Request().Context())
+	}
+	if providers["telegram"] && h.telegramService != nil && h.telegramService.IsRunning() {
+		h.telegramService.Stop()
+	}
+	if providers["discord"] && h.discordSvc != nil {
+		_ = h.discordSvc.Disconnect(c.Request().Context())
+	}
+	if providers["email"] && h.emailService != nil {
+		h.emailService.Stop()
+	}
+	if providers["x"] {
+		old := h.swapXService(nil)
+		if h.channelMessageRouter != nil {
+			h.channelMessageRouter.SetXService(nil)
+		}
+		if old != nil {
+			old.Stop()
+		}
+	}
+
+	return c.JSON(http.StatusOK, map[string]int{"deleted": len(ids)})
 }
 
 // handleChannels renders the channels (integrations) page

@@ -48,7 +48,7 @@ func TestEveryCollectionBulkRouteRejectsMalformedPayload(t *testing.T) {
 
 	malformedBodies := []string{`{}`, `{`, `{"ids":["a"],"extra":true}`, `{"ids":["a"]} {}`, `{"ids":[]}`, `{"skills":[]}`}
 	for _, path := range []string{
-		"/alerts/bulk", "/automations/bulk", "/agents/bulk", "/skills/bulk", "/models/bulk", "/channels/webhooks/bulk", "/personality/custom/bulk",
+		"/alerts/bulk", "/automations/bulk", "/agents/bulk", "/skills/bulk", "/models/bulk", "/channels/bulk", "/channels/webhooks/bulk", "/personality/custom/bulk",
 	} {
 		t.Run(path, func(t *testing.T) {
 			for _, body := range malformedBodies {
@@ -94,6 +94,60 @@ func TestBulkHandlersPreflightWithoutPartialDeletion(t *testing.T) {
 			require.NoError(t, err)
 			require.NotNil(t, personality)
 		}
+	})
+
+	t.Run("channels", func(t *testing.T) {
+		tc := NewTestContext(t)
+		repo := repository.NewWebhookRepo(tc.db)
+		tc.handler.SetWebhookRepo(repo)
+		firstProject := tc.CreateProject().WithName("Bulk channels first").Build()
+		secondProject := tc.CreateProject().WithName("Bulk channels second").Build()
+		own := &models.WebhookEndpoint{ProjectID: firstProject.ID, Name: "Own mixed webhook", Enabled: true}
+		foreign := &models.WebhookEndpoint{ProjectID: secondProject.ID, Name: "Foreign mixed webhook", Enabled: true}
+		require.NoError(t, repo.Create(t.Context(), own))
+		require.NoError(t, repo.Create(t.Context(), foreign))
+		require.NoError(t, tc.settingsRepo.Set(t.Context(), service.GitHubSettingPAT, "preserve-on-preflight-failure"))
+
+		rec := serveBulkDeleteRequest(t, tc.echo, "/channels/bulk?project_id="+firstProject.ID, bulkIDsRequest{IDs: []string{"channel:github", own.ID, foreign.ID}})
+		require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+		pat, err := tc.settingsRepo.Get(t.Context(), service.GitHubSettingPAT)
+		require.NoError(t, err)
+		require.Equal(t, "preserve-on-preflight-failure", pat)
+		for _, id := range []string{own.ID, foreign.ID} {
+			endpoint, err := repo.GetByID(t.Context(), id)
+			require.NoError(t, err)
+			require.NotNil(t, endpoint)
+		}
+	})
+
+	t.Run("channels mixed success", func(t *testing.T) {
+		tc := NewTestContext(t)
+		repo := repository.NewWebhookRepo(tc.db)
+		tc.handler.SetWebhookRepo(repo)
+		project := tc.CreateProject().WithName("Bulk channels success").Build()
+		webhook := &models.WebhookEndpoint{ProjectID: project.ID, Name: "Mixed webhook", Enabled: true}
+		require.NoError(t, repo.Create(t.Context(), webhook))
+		require.NoError(t, tc.settingsRepo.Set(t.Context(), service.GitHubSettingPAT, "remove-with-webhook"))
+
+		rec := serveBulkDeleteRequest(t, tc.echo, "/channels/bulk?project_id="+project.ID, bulkIDsRequest{IDs: []string{"channel:github", webhook.ID}})
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		require.JSONEq(t, `{"deleted":2}`, rec.Body.String())
+		pat, err := tc.settingsRepo.Get(t.Context(), service.GitHubSettingPAT)
+		require.NoError(t, err)
+		require.Empty(t, pat)
+		removed, err := repo.GetByID(t.Context(), webhook.ID)
+		require.NoError(t, err)
+		require.Nil(t, removed)
+	})
+
+	t.Run("channels reject unsupported provider", func(t *testing.T) {
+		tc := NewTestContext(t)
+		require.NoError(t, tc.settingsRepo.Set(t.Context(), service.GitHubSettingPAT, "preserve-on-invalid-provider"))
+		rec := serveBulkDeleteRequest(t, tc.echo, "/channels/bulk", bulkIDsRequest{IDs: []string{"channel:github", "channel:unknown"}})
+		require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+		pat, err := tc.settingsRepo.Get(t.Context(), service.GitHubSettingPAT)
+		require.NoError(t, err)
+		require.Equal(t, "preserve-on-invalid-provider", pat)
 	})
 
 	t.Run("webhooks", func(t *testing.T) {

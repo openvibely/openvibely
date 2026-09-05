@@ -4437,25 +4437,9 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 								confirm.disabled = true; error.classList.add('hidden');
 								try {
 									var project = new URL(window.location.href).searchParams.get('project_id');
-									if (key === 'channels') {
-										var fixed = selected.filter(function(card) { return !!card.getAttribute('data-card-delete-url'); });
-										for (var i = 0; i < fixed.length; i++) {
-											var fixedEndpoint = new URL(fixed[i].getAttribute('data-card-delete-url'), window.location.href);
-											if (project) fixedEndpoint.searchParams.set('project_id', project);
-											var fixedResponse = await fetch(fixedEndpoint.toString(), {method: fixed[i].getAttribute('data-card-delete-method') || 'POST', credentials: 'same-origin', headers: {'HX-Request': 'true'}});
-											if (!fixedResponse.ok) throw new Error('Failed to delete ' + (fixed[i].getAttribute('data-channel-type') || 'channel'));
-										}
-										var webhookIDs = selected.filter(function(card) { return !card.getAttribute('data-card-delete-url'); }).map(function(card) { return card.getAttribute('data-card-select-id'); });
-										if (webhookIDs.length) {
-											var webhookEndpoint = new URL(toolbar.getAttribute('data-card-bulk-url'), window.location.href); if (project) webhookEndpoint.searchParams.set('project_id', project);
-											var webhookResponse = await fetch(webhookEndpoint.toString(), {method: 'DELETE', credentials: 'same-origin', headers: {'Content-Type': 'application/json', 'Accept': 'application/json'}, body: JSON.stringify({ids: webhookIDs})});
-											if (!webhookResponse.ok) throw new Error('Failed to delete selected webhooks');
-										}
-									} else {
-										var endpoint = new URL(toolbar.getAttribute('data-card-bulk-url'), window.location.href); if (project) endpoint.searchParams.set('project_id', project);
-										var response = await fetch(endpoint.toString(), {method: 'DELETE', credentials: 'same-origin', headers: {'Content-Type': 'application/json', 'Accept': 'application/json'}, body: JSON.stringify(body)});
-										if (!response.ok) { var payload = await response.json().catch(function() { return {}; }); throw new Error(payload.message || 'Bulk deletion failed'); }
-									}
+									var endpoint = new URL(toolbar.getAttribute('data-card-bulk-url'), window.location.href); if (project) endpoint.searchParams.set('project_id', project);
+									var response = await fetch(endpoint.toString(), {method: 'DELETE', credentials: 'same-origin', headers: {'Content-Type': 'application/json', 'Accept': 'application/json'}, body: JSON.stringify(body)});
+									if (!response.ok) { var payload = await response.json().catch(function() { return {}; }); throw new Error(payload.message || 'Bulk deletion failed'); }
 									dialog.close(); clearSelection(); await refreshCollection();
 								} catch (err) { error.textContent = err.message || 'Bulk deletion failed'; error.classList.remove('hidden'); } finally { confirm.disabled = false; }
 							}

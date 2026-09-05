@@ -33,7 +33,7 @@ func TestCollectionSelectionBrowserContractIsShared(t *testing.T) {
 	for _, want := range []string{
 		`checkbox.addEventListener('click'`, `event.stopPropagation()`, `state.last`, `event.key !== 'Escape'`,
 		`data-card-select-mode`, `data-card-mobile-actions`, `data-card-bulk-confirm`, `if (selectLoaded.checked) state.ids[id] = true`, `selectLoaded.indeterminate`, `selectLoaded.checked`, `data-card-filters-popover`, `setCardFilterDropdown(dropdown, false)`,
-		`data-card-query-secondary`, `data-card-selection-actions`, `data-card-mark-read-selected`, `data-card-delete-url`,
+		`data-card-query-secondary`, `data-card-selection-actions`, `data-card-mark-read-selected`,
 		`[data-card-list-toolbar] .dropdown:not(.dropdown-open) > [data-card-filters-popover]`,
 		`absolute left-5 top-8 z-20 hidden md:block`, `card.classList.add('md:pl-8')`, `alignSelectionGutter(card, gutter)`, `_openVibelyInstallSelectionCards`, `if (!existing[id]) delete state.ids[id]`, `focus({preventScroll: true})`} {
 		require.Contains(t, body, want)
@@ -109,8 +109,8 @@ func TestCollectionSelectionProductionBrowserInteractions(t *testing.T) {
 	  function selectedCount() { return document.querySelector('[data-card-selected-count]').textContent.trim(); }
 	  function verifyMixedCollection(key) {
 	    var root=document.createElement('section'); root.setAttribute('data-card-pagination-root','');
-	    var fixedAttributes=key==='channels' ? ' data-card-select-id="channel:github" data-card-select-eligible="true" data-card-delete-url="/channels/github/remove" data-card-delete-method="POST" data-channel-type="github"' : '';
-	    root.innerHTML='<div data-card-list-toolbar="'+key+'" data-card-bulk-url="/'+key+'/bulk" data-card-entity-type="items" data-card-identity-kind="ids"><form data-card-query-form><label data-card-select-loaded-control><input type="checkbox" data-card-select-loaded></label></form><div class="hidden" data-card-selection-actions><strong data-card-selected-count>0 selected</strong></div><dialog data-card-bulk-confirm><span data-card-bulk-confirm-title></span><button data-card-bulk-confirm-delete></button><span data-card-bulk-error></span></dialog></div><article data-search-card'+fixedAttributes+'><h3>Fixed</h3></article><article data-search-card data-card-select-id="eligible" data-card-select-eligible="true"><h3>Eligible</h3></article>';
+		    var fixedAttributes=key==='channels' ? ' data-card-select-id="channel:github" data-card-select-eligible="true" data-channel-type="github"' : '';
+		    root.innerHTML='<div data-card-list-toolbar="'+key+'" data-card-bulk-url="/'+key+'/bulk" data-card-entity-type="items" data-card-identity-kind="ids"><form data-card-query-form><label data-card-select-loaded-control><input type="checkbox" data-card-select-loaded></label></form><div class="hidden" data-card-selection-actions><strong data-card-selected-count>0 selected</strong></div><dialog data-card-bulk-confirm><span data-card-bulk-confirm-title></span><button data-card-bulk-confirm-delete></button><span data-card-bulk-error></span></dialog></div><article data-search-card'+fixedAttributes+'><h3>Fixed</h3></article><article data-search-card data-card-select-id="eligible" data-card-select-eligible="true"><h3>Eligible</h3></article>';
 	    document.querySelector('main').appendChild(root); window.refreshCardListToolbars(root);
 	    var controls=root.querySelectorAll('[data-card-selection-gutter] input'), master=root.querySelector('[data-card-select-loaded]');
 	    if (controls.length!==2 || (key==='channels' ? controls[0].disabled : !controls[0].disabled) || controls[1].disabled) fail(key+' did not distinguish its fixed and eligible cards');
@@ -336,6 +336,9 @@ func TestCollectionCardToolbars(t *testing.T) {
 			}
 			if tt.pageKey == "alerts" && !strings.Contains(body, `data-card-mark-read-selected`) {
 				t.Errorf("expected alerts toolbar to offer Mark as read for selected alerts")
+			}
+			if tt.pageKey == "channels" && !strings.Contains(body, `data-card-bulk-url="/channels/bulk"`) {
+				t.Errorf("expected channels toolbar to use the atomic bulk endpoint")
 			}
 			if got := strings.Contains(body, `id="`+tt.pageKey+`-card-sort"`); got != tt.wantSort {
 				t.Errorf("sort presence = %v, want %v", got, tt.wantSort)
