@@ -7,8 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"gopkg.in/yaml.v3"
 )
 
 func writeSkill(t *testing.T, root, skill, body string) string {
@@ -1013,21 +1011,6 @@ func BenchmarkBuildCatalogProductionShape(b *testing.B) {
 	}
 }
 
-func BenchmarkBuildCatalogLegacyFullBodyDisabledCheckProductionShape(b *testing.B) {
-	root := writeBenchmarkSkillRoot(b)
-	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		cat, err := legacyBuildCatalogFullBodyDisabledCheck("bench", root)
-		if err != nil {
-			b.Fatalf("legacy build catalog: %v", err)
-		}
-		if got := len(cat.Entries()); got != benchmarkSkillCount {
-			b.Fatalf("entries = %d, want %d", got, benchmarkSkillCount)
-		}
-	}
-}
-
 func BenchmarkLifecycleCatalogAndAvailableIndexProductionShape(b *testing.B) {
 	root := writeBenchmarkSkillRoot(b)
 	b.ReportAllocs()
@@ -1041,25 +1024,6 @@ func BenchmarkLifecycleCatalogAndAvailableIndexProductionShape(b *testing.B) {
 			b.Fatalf("entries = %d, want %d", got, benchmarkSkillCount)
 		}
 		out := RenderAvailableSkillsMarkdown(root, "")
-		if !strings.Contains(out, "## skill_000") || !strings.Contains(out, "## skill_199") {
-			b.Fatalf("rendered index missing expected handles")
-		}
-	}
-}
-
-func BenchmarkLifecycleCatalogAndAvailableIndexLegacyFullBodyDisabledCheckProductionShape(b *testing.B) {
-	root := writeBenchmarkSkillRoot(b)
-	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		cat, err := legacyBuildCatalogFullBodyDisabledCheck("bench", root)
-		if err != nil {
-			b.Fatalf("legacy build catalog: %v", err)
-		}
-		if got := len(cat.Entries()); got != benchmarkSkillCount {
-			b.Fatalf("entries = %d, want %d", got, benchmarkSkillCount)
-		}
-		out := legacyRenderAvailableSkillsMarkdownFullBodyDisabledCheck(root)
 		if !strings.Contains(out, "## skill_000") || !strings.Contains(out, "## skill_199") {
 			b.Fatalf("rendered index missing expected handles")
 		}
@@ -1098,106 +1062,4 @@ func appendBenchmarkHeader(b *testing.B, path, header string) {
 	if _, err := f.WriteString("## " + header + "\n\n"); err != nil {
 		b.Fatal(err)
 	}
-}
-
-func legacyBuildCatalogFullBodyDisabledCheck(turnID, root string) (*Catalog, error) {
-	entries, err := legacyLoadSkillIndexEntriesFullBodyDisabledCheck(SkillsIndexPath(root), filepath.Join(root, SkillsDir))
-	if err != nil {
-		return nil, err
-	}
-	return NewCatalog(turnID, entries), nil
-}
-
-func legacyLoadSkillIndexEntriesFullBodyDisabledCheck(indexPath, skillsDir string) ([]Entry, error) {
-	data, err := os.ReadFile(indexPath)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]Entry, 0, benchmarkSkillCount)
-	for _, skill := range extractH2Headers(string(data)) {
-		if strings.Contains(skill, "/") || !isValidSlug(skill) {
-			continue
-		}
-		absPath := filepath.Join(skillsDir, skill, SkillFile)
-		if _, err := os.Stat(absPath); err != nil {
-			continue
-		}
-		if legacySkillDisabledOnDiskFullBody(absPath) {
-			continue
-		}
-		out = append(out, Entry{Handle: skill, Skill: skill, Source: SourceGlobal, AbsolutePath: absPath})
-	}
-	return out, nil
-}
-
-func legacyRenderAvailableSkillsMarkdownFullBodyDisabledCheck(root string) string {
-	body, ok := legacyFilteredIndexBodyFullBodyDisabledCheck(SkillsIndexPath(root), filepath.Join(root, SkillsDir))
-	if !ok {
-		return ""
-	}
-	return body
-}
-
-func legacyFilteredIndexBodyFullBodyDisabledCheck(indexPath, skillsDir string) (string, bool) {
-	data, err := os.ReadFile(indexPath)
-	if err != nil {
-		return "", false
-	}
-	content := string(data)
-	type section struct {
-		body  string
-		skill string
-	}
-	headerLocs := h2HeaderRegexp.FindAllStringIndex(content, -1)
-	headerMatches := h2HeaderRegexp.FindAllStringSubmatch(content, -1)
-	sections := make([]section, 0, len(headerLocs))
-	for i, loc := range headerLocs {
-		skill := strings.TrimSpace(headerMatches[i][1])
-		if strings.Contains(skill, "/") || !isValidSlug(skill) {
-			continue
-		}
-		end := len(content)
-		if i+1 < len(headerLocs) {
-			end = headerLocs[i+1][0]
-		}
-		sections = append(sections, section{body: content[loc[0]:end], skill: skill})
-	}
-	var sb strings.Builder
-	for _, sec := range sections {
-		absPath := filepath.Join(skillsDir, sec.skill, SkillFile)
-		if legacySkillDisabledOnDiskFullBody(absPath) {
-			continue
-		}
-		sb.WriteString(sec.body)
-	}
-	out := sb.String()
-	return out, out != ""
-}
-
-func legacySkillDisabledOnDiskFullBody(path string) bool {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return false
-	}
-	content := string(data)
-	if !strings.HasPrefix(content, "---") {
-		return false
-	}
-	rest := strings.TrimPrefix(content, "---")
-	rest = strings.TrimPrefix(rest, "\r")
-	rest = strings.TrimPrefix(rest, "\n")
-	end := strings.Index(rest, "\n---")
-	if end < 0 {
-		return false
-	}
-	front := rest[:end]
-	var parsed struct {
-		Skill struct {
-			Enabled *bool `yaml:"enabled"`
-		} `yaml:"skill"`
-	}
-	if err := yaml.Unmarshal([]byte(front), &parsed); err != nil {
-		return false
-	}
-	return parsed.Skill.Enabled != nil && !*parsed.Skill.Enabled
 }
