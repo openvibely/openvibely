@@ -653,40 +653,20 @@ func TestGenerateHistoryDoesNotFallbackDuringCoveredQuietGap(t *testing.T) {
 var benchmarkHistoryProjectChanges *models.ProjectChanges
 
 func BenchmarkTaskCommitStatHistoryProjection(b *testing.B) {
-	b.Run("baseline_full_list", func(b *testing.B) {
-		svc, statRepo, projectID, since := setupTaskCommitStatHistoryBenchmarkFixture(b, 1000, 50)
-		_ = svc
-		b.ReportAllocs()
-		b.ReportMetric(1, "sql/op")
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			stats, err := statRepo.ListProducedCommitStats(context.Background(), projectID, since)
-			if err != nil {
-				b.Fatalf("ListProducedCommitStats: %v", err)
-			}
-			pc, _ := buildProjectChangesFromTaskCommitStatsWithFiles(stats)
-			if pc == nil || pc.TotalCommits != 1000 || len(pc.Commits) != 1000 {
-				b.Fatalf("baseline project changes = %#v", pc)
-			}
-			benchmarkHistoryProjectChanges = pc
+	svc, _, projectID, since := setupTaskCommitStatHistoryBenchmarkFixture(b, 1000, 50)
+	b.ReportAllocs()
+	b.ReportMetric(4, "sql/op")
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		pc, _, err := svc.buildProjectChangesFromTaskCommitStats(context.Background(), projectID, since)
+		if err != nil {
+			b.Fatalf("buildProjectChangesFromTaskCommitStats: %v", err)
 		}
-	})
-	b.Run("compact_aggregate_preview", func(b *testing.B) {
-		svc, _, projectID, since := setupTaskCommitStatHistoryBenchmarkFixture(b, 1000, 50)
-		b.ReportAllocs()
-		b.ReportMetric(4, "sql/op")
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			pc, _, err := svc.buildProjectChangesFromTaskCommitStats(context.Background(), projectID, since)
-			if err != nil {
-				b.Fatalf("buildProjectChangesFromTaskCommitStats: %v", err)
-			}
-			if pc == nil || pc.TotalCommits != 1000 || len(pc.Commits) != projectChangeCommitPreviewLimit {
-				b.Fatalf("compact project changes = %#v", pc)
-			}
-			benchmarkHistoryProjectChanges = pc
+		if pc == nil || pc.TotalCommits != 1000 || len(pc.Commits) != projectChangeCommitPreviewLimit {
+			b.Fatalf("compact project changes = %#v", pc)
 		}
-	})
+		benchmarkHistoryProjectChanges = pc
+	}
 }
 
 func setupTaskCommitStatHistoryBenchmarkFixture(tb testing.TB, rows, pathsPerCommit int) (*UpcomingService, *repository.TaskCommitStatRepo, string, time.Time) {
