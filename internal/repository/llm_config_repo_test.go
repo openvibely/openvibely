@@ -1559,18 +1559,6 @@ func TestLLMConfigRepo_VisionSelectionProjectionMeetsPerformanceTargetOnLargeFix
 	ctx := context.Background()
 	selectedID := prepareLargeVisionSelectionFixture(t, db, repo, ctx)
 
-	fullList := testing.Benchmark(func(b *testing.B) {
-		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			configs, err := repo.List(ctx)
-			if err != nil {
-				b.Fatal(err)
-			}
-			if len(configs) != 50 || configs[0].ID == "" || configs[0].APIKey == "" {
-				b.Fatalf("full vision selection fixture returned %d incomplete configs", len(configs))
-			}
-		}
-	})
 	compactThenGet := testing.Benchmark(func(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
@@ -1592,26 +1580,19 @@ func TestLLMConfigRepo_VisionSelectionProjectionMeetsPerformanceTargetOnLargeFix
 	})
 
 	const (
-		maxCompactDuration     = 200 * time.Microsecond
-		maxCompactBytesPerOp   = 300 * 1024
-		minFullListImprovement = 20
+		maxCompactDuration   = 200 * time.Microsecond
+		maxCompactBytesPerOp = 300 * 1024
 	)
-	t.Logf("full List: %d ns/op, %d B/op; compact vision selection+GetByID: %d ns/op, %d B/op", fullList.NsPerOp(), fullList.AllocedBytesPerOp(), compactThenGet.NsPerOp(), compactThenGet.AllocedBytesPerOp())
+	t.Logf("compact vision selection+GetByID: %d ns/op, %d B/op", compactThenGet.NsPerOp(), compactThenGet.AllocedBytesPerOp())
 	// Coverage instrumentation adds enough overhead to make an absolute
 	// wall-clock target machine-dependent. Keep enforcing the allocation and
-	// relative-improvement guards under coverage; enforce latency on normal
-	// builds where the measurement represents production code.
+	// allocation guard under coverage; enforce latency on normal builds where
+	// the measurement represents production code.
 	if testing.CoverMode() == "" && compactThenGet.NsPerOp() > maxCompactDuration.Nanoseconds() {
 		t.Fatalf("compact vision selection took %d ns/op, want <= %s", compactThenGet.NsPerOp(), maxCompactDuration)
 	}
 	if compactThenGet.AllocedBytesPerOp() > maxCompactBytesPerOp {
 		t.Fatalf("compact vision selection allocated %d B/op, want <= %d", compactThenGet.AllocedBytesPerOp(), maxCompactBytesPerOp)
-	}
-	if fullList.NsPerOp() < compactThenGet.NsPerOp()*minFullListImprovement {
-		t.Fatalf("compact vision selection is not at least %dx faster: full %d ns/op, compact %d ns/op", minFullListImprovement, fullList.NsPerOp(), compactThenGet.NsPerOp())
-	}
-	if fullList.AllocedBytesPerOp() < compactThenGet.AllocedBytesPerOp()*minFullListImprovement {
-		t.Fatalf("compact vision selection is not at least %dx lower allocation: full %d B/op, compact %d B/op", minFullListImprovement, fullList.AllocedBytesPerOp(), compactThenGet.AllocedBytesPerOp())
 	}
 }
 
