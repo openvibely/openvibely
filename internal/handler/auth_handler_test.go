@@ -151,10 +151,12 @@ func TestAuthMe_LocalSessionMatrix(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tamperedToken := validToken[:len(validToken)-1] + "A"
-	if tamperedToken == validToken {
-		tamperedToken = validToken[:len(validToken)-1] + "B"
+	tamperedSignature, err := base64.RawURLEncoding.DecodeString(strings.Split(validToken, ".")[1])
+	if err != nil {
+		t.Fatal(err)
 	}
+	tamperedSignature[0] ^= 1
+	tamperedToken := strings.Split(validToken, ".")[0] + "." + base64.RawURLEncoding.EncodeToString(tamperedSignature)
 
 	for _, tt := range []struct {
 		name              string
