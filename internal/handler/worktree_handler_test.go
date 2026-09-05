@@ -2104,6 +2104,62 @@ func TestHandler_MergeTaskBranch_ActiveConflictBlocksDuplicateMerge(t *testing.T
 	}
 }
 
+func TestHandler_MergeTaskBranch_TaskCardFastForwardFailureRefreshesBoardWithToast(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	h.SetWorktreeService(service.NewWorktreeService(h.taskRepo, h.projectRepo, h.settingsRepo))
+	ctx := context.Background()
+	repoDir := createHandlerTestGitRepo(t)
+	targetBranch := service.GetCurrentBranch(repoDir)
+	project := &models.Project{Name: "Card Fast Forward Failure", RepoPath: repoDir, IsDefault: true}
+	if err := h.projectSvc.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	task := &models.Task{
+		ProjectID: project.ID, Title: "Diverged card", Prompt: "test", Category: models.CategoryCompleted,
+		Status: models.StatusCompleted, MergeTargetBranch: targetBranch, MergeStatus: models.MergeStatusPending,
+	}
+	if err := h.taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	worktreePath, branchName, err := h.worktreeSvc.SetupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task.WorktreePath, task.WorktreeBranch = worktreePath, branchName
+	if err := h.taskRepo.UpdateWorktreeInfo(ctx, task.ID, worktreePath, branchName); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(worktreePath, "README.md"), []byte("task conflict\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.CommitWorktreeChanges(worktreePath, "task change"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("target conflict\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repoDir, "add", ".")
+	runGit(t, repoDir, "commit", "-m", "target change")
+	targetTip := runGit(t, repoDir, "rev-parse", targetBranch)
+
+	form := url.Values{"merge_type": {"ff"}, "merge_source": {"task_card"}, "project_id": {project.ID}}
+	req := worktreeFormRequest(http.MethodPost, "/tasks/"+task.ID+"/worktree/merge", form)
+	req.Header.Set("HX-Request", "true")
+	rec := worktreeExecute(e, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("card fast-forward failure status=%d, want swap-safe 200: %s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("HX-Trigger"); !strings.Contains(got, "openvibelyToast") || !strings.Contains(got, "Local merge has conflicts") {
+		t.Fatalf("card fast-forward failure missing toast trigger: %q", got)
+	}
+	if !strings.Contains(rec.Body.String(), `id="kanban-board"`) {
+		t.Fatalf("card fast-forward failure did not return authoritative board: %s", rec.Body.String())
+	}
+	if got := runGit(t, repoDir, "rev-parse", targetBranch); got != targetTip {
+		t.Fatalf("failed fast-forward mutated target from %s to %s", targetTip, got)
+	}
+}
+
 func TestHandler_MergeTaskBranch_ChangesTabFastForwardAdvancesTargetAndRefreshesChanges(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	h.SetWorktreeService(service.NewWorktreeService(h.taskRepo, h.projectRepo, h.settingsRepo))

@@ -633,6 +633,13 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					opacity: 0 !important;
 					pointer-events: none !important;
 				}
+				#kanban-board .kanban-column[data-kanban-menu-column-open="true"] {
+					position: relative;
+					z-index: 999;
+				}
+				#kanban-board [data-kanban-menu-key][data-kanban-menu-open="true"] {
+					z-index: 1000 !important;
+				}
 				#kanban-board [data-kanban-menu-key][data-kanban-menu-open="true"] > [data-kanban-menu-content] {
 					visibility: visible !important;
 					opacity: 1 !important;
@@ -641,14 +648,11 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				#kanban-board [data-task-card-menu-trigger] + [data-kanban-menu-content] {
 					overflow: visible;
 				}
-				#kanban-board [data-task-card-local-submenu] > [data-task-card-submenu-panel] {
-					top: var(--task-card-local-submenu-top, 100%);
-					max-height: var(--task-card-submenu-max-height, calc(100vh - 4rem));
-					overflow-y: auto;
-				}
-				#kanban-board [data-task-card-github-submenu] > [data-task-card-submenu-panel] {
-					top: var(--task-card-github-submenu-top, 100%);
-					max-height: var(--task-card-submenu-max-height, calc(100vh - 4rem));
+				[data-task-card-submenu-portaled="true"] {
+					position: fixed !important;
+					right: auto !important;
+					top: auto;
+					z-index: 1001 !important;
 					overflow-y: auto;
 				}
 				/* Chat actions are explicitly state-driven so focus alone never opens the destructive menu. */
@@ -2748,24 +2752,74 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				return null;
 			}
 
+			function restoreKanbanSubmenu(panel) {
+				if (!panel || panel.getAttribute('data-task-card-submenu-portaled') !== 'true') return;
+				const placeholder = panel.__openVibelySubmenuPlaceholder;
+				if (placeholder && placeholder.parentNode) {
+					placeholder.parentNode.insertBefore(panel, placeholder);
+					placeholder.remove();
+				} else {
+					panel.remove();
+				}
+				panel.removeAttribute('data-task-card-submenu-portaled');
+				panel.style.removeProperty('display');
+				panel.style.removeProperty('left');
+				panel.style.removeProperty('top');
+				panel.style.removeProperty('width');
+				panel.style.removeProperty('max-height');
+				panel.__openVibelySubmenuPlaceholder = null;
+				panel.__openVibelySubmenuDropdown = null;
+			}
+
+			function closeKanbanSubmenus(dropdown, exceptPanel) {
+				document.querySelectorAll('[data-task-card-submenu-portaled="true"]').forEach(function(panel) {
+					if (panel !== exceptPanel && (!dropdown || panel.__openVibelySubmenuDropdown === dropdown)) restoreKanbanSubmenu(panel);
+				});
+			}
+
 			function positionKanbanSubmenu(container) {
 				if (!container || !container.querySelector) return;
 				const panel = container.querySelector(':scope > [data-task-card-submenu-panel]');
 				const dropdown = container.closest('[data-kanban-menu-key]');
-				if (!panel || !dropdown) return;
-				const boundary = closestDropdownScrollBoundary(dropdown);
-				const boundaryRect = boundary ? boundary.getBoundingClientRect() : { top: 0, bottom: window.innerHeight };
-				const visibleTop = Math.max(0, boundaryRect.top);
-				const visibleBottom = Math.min(window.innerHeight, boundaryRect.bottom);
+				const menu = dropdown && dropdown.querySelector(':scope > [data-kanban-menu-content]');
+				if (!panel || !dropdown || !menu) return;
+				closeKanbanSubmenus(dropdown, panel);
+				if (panel.getAttribute('data-task-card-submenu-portaled') !== 'true') {
+					const placeholder = document.createComment('task-card-submenu');
+					panel.parentNode.insertBefore(placeholder, panel);
+					panel.__openVibelySubmenuPlaceholder = placeholder;
+					panel.__openVibelySubmenuDropdown = dropdown;
+					panel.setAttribute('data-task-card-submenu-portaled', 'true');
+					document.body.appendChild(panel);
+				}
+				panel.style.setProperty('display', 'block', 'important');
+				const visibleTop = 0;
+				const visibleBottom = window.innerHeight;
 				const availableHeight = Math.max(0, visibleBottom - visibleTop - 16);
 				const panelHeight = Math.min(panel.scrollHeight || panel.getBoundingClientRect().height || 0, availableHeight);
 				const containerRect = container.getBoundingClientRect();
-				const desiredTop = Math.max(visibleTop + 8, Math.min(containerRect.bottom, visibleBottom - panelHeight - 8));
-				const positionProperty = container.hasAttribute('data-task-card-local-submenu')
-					? '--task-card-local-submenu-top'
-					: '--task-card-github-submenu-top';
-				dropdown.style.setProperty(positionProperty, (desiredTop - containerRect.top) + 'px');
-				dropdown.style.setProperty('--task-card-submenu-max-height', availableHeight + 'px');
+				const menuRect = menu.getBoundingClientRect();
+				const roomLeft = Math.max(0, menuRect.left - 8);
+				const roomRight = Math.max(0, window.innerWidth - menuRect.right - 8);
+				const openRight = roomRight >= roomLeft;
+				const sideRoom = openRight ? roomRight : roomLeft;
+				const panelWidth = Math.min(224, sideRoom);
+				const desiredLeft = openRight ? menuRect.right - 1 : menuRect.left + 1 - panelWidth;
+				const desiredTop = Math.max(visibleTop + 8, Math.min(containerRect.top, visibleBottom - panelHeight - 8));
+				panel.style.left = Math.max(8, Math.min(desiredLeft, window.innerWidth - panelWidth - 8)) + 'px';
+				panel.style.top = desiredTop + 'px';
+				panel.style.width = panelWidth + 'px';
+				panel.style.maxHeight = availableHeight + 'px';
+			}
+
+			function handleKanbanSubmenuKeydown(event, container) {
+				if (!event || (event.key !== 'ArrowRight' && event.key !== 'Enter' && event.key !== ' ' && event.key !== 'Tab')) return;
+				if (event.key === 'Tab' && event.shiftKey) return;
+				event.preventDefault();
+				positionKanbanSubmenu(container);
+				const panel = document.querySelector('[data-task-card-submenu-portaled="true"]');
+				const action = panel && panel.querySelector('button:not([disabled]), a[href]');
+				if (action) action.focus({preventScroll: true});
 			}
 
 			function positionDropdownForViewport(label) {
@@ -2787,9 +2841,6 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					dropdown.classList.add('dropdown-top');
 				} else if (dropdown.dataset.originalDropdownTop !== 'true') {
 					dropdown.classList.remove('dropdown-top');
-				}
-				if (content.querySelectorAll) {
-					content.querySelectorAll('[data-task-card-local-submenu], [data-task-card-github-submenu]').forEach(positionKanbanSubmenu);
 				}
 			}
 
@@ -3398,7 +3449,15 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					if (trigger) trigger.setAttribute('aria-expanded', expanded ? 'true' : 'false');
 					if (dropdown) {
 						if (expanded) dropdown.setAttribute('data-kanban-menu-open', 'true');
-						else dropdown.removeAttribute('data-kanban-menu-open');
+						else {
+							dropdown.removeAttribute('data-kanban-menu-open');
+							closeKanbanSubmenus(dropdown, null);
+						}
+						const column = dropdown.closest('.kanban-column');
+						if (column) {
+							if (expanded) column.setAttribute('data-kanban-menu-column-open', 'true');
+							else column.removeAttribute('data-kanban-menu-column-open');
+						}
 					}
 				}
 
@@ -3537,6 +3596,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						resetKanbanInteractionForNavigation();
 					}
 					if (event.detail.target && event.detail.target.id === 'kanban-board') {
+						closeKanbanSubmenus(null, null);
 						if (!savedKanbanInteraction) snapshotKanbanInteraction(event.detail.target);
 						savedScrollPositions.clear();
 						// Save scroll positions of all scrollable drop zones
