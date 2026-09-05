@@ -395,6 +395,47 @@ func TestChannelsWebhookEnabledFilterAppliesAcrossFixedAndPaginatedCards(t *test
 	}
 }
 
+func TestChannelsCombinedWebhookFiltersAreConjunctiveBeforePagination(t *testing.T) {
+	tc := NewTestContext(t)
+	webhookRepo := repository.NewWebhookRepo(tc.db)
+	tc.handler.SetWebhookRepo(webhookRepo)
+	project := tc.CreateProject().WithName("Channels combined webhook filters").Build()
+	for _, enabled := range []bool{true, false} {
+		for i := 0; i < 2; i++ {
+			require.NoError(t, webhookRepo.Create(t.Context(), &models.WebhookEndpoint{
+				ProjectID: project.ID,
+				Name:      fmt.Sprintf("%t combined webhook %d", enabled, i),
+				Enabled:   enabled,
+			}))
+		}
+	}
+
+	tests := []struct {
+		name            string
+		enabled         bool
+		connectionState string
+		wantCount       int
+		wantHasMore     string
+	}{
+		{name: "enabled and connected", enabled: true, connectionState: "connected", wantCount: 1, wantHasMore: "true"},
+		{name: "disabled and disconnected", enabled: false, connectionState: "disconnected", wantCount: 1, wantHasMore: "true"},
+		{name: "enabled and disconnected", enabled: true, connectionState: "disconnected", wantCount: 0, wantHasMore: "false"},
+		{name: "disabled and connected", enabled: false, connectionState: "connected", wantCount: 0, wantHasMore: "false"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := "/channels?project_id=" + project.ID + "&type=webhook&webhook_enabled=" + strconv.FormatBool(tt.enabled) + "&connection_state=" + tt.connectionState + "&page_size=1&card_page=1"
+			rec := serveCardPageRequest(t, tc.echo, path)
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			require.Equal(t, tt.wantHasMore, rec.Header().Get(cardPageHasMoreHeader))
+			require.Equal(t, tt.wantCount, strings.Count(rec.Body.String(), `data-channel-type="webhook"`))
+			if tt.wantCount > 0 {
+				require.Contains(t, rec.Body.String(), `data-webhook-enabled="`+strconv.FormatBool(tt.enabled)+`"`)
+			}
+		})
+	}
+}
+
 func TestChannelsSearchFiltersFixedCardsOnServer(t *testing.T) {
 	var body bytes.Buffer
 	view := pages.ChannelsSettingsView{

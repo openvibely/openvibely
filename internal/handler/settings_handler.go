@@ -340,15 +340,20 @@ func (h *Handler) handleChannels(c echo.Context) error {
 		channelType := channelTypeFilter
 		connectionState := connectionStateFilter
 		enabled := optionalBoolQuery(c, "webhook_enabled")
-		if enabled == nil && connectionState == "connected" {
+		var connectionEnabled *bool
+		switch connectionState {
+		case "connected":
 			value := true
-			enabled = &value
-		}
-		if enabled == nil && connectionState == "disconnected" {
+			connectionEnabled = &value
+		case "disconnected":
 			value := false
-			enabled = &value
+			connectionEnabled = &value
 		}
-		if channelType == "" || channelType == "webhook" {
+		conflictingEnabledFilters := enabled != nil && connectionEnabled != nil && *enabled != *connectionEnabled
+		if enabled == nil {
+			enabled = connectionEnabled
+		}
+		if !conflictingEnabledFilters && (channelType == "" || channelType == "webhook") {
 			pageItems, err := h.webhookRepo.ListCardsByProjectPageFiltered(ctx, resolvedProjectID, page.PageSize+1, page.Offset, repository.WebhookCardFilter{Search: page.Search, Enabled: enabled})
 			if err != nil {
 				return err
