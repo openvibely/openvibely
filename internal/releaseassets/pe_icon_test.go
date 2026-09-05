@@ -42,6 +42,8 @@ func TestResourcePayloadsFormUsableGroupedIcon(t *testing.T) {
 
 func TestValidateGroupIconRejectsMalformedOrUnlinkedResources(t *testing.T) {
 	icon := testPNG(t, 16, 16)
+	truncatedPNG := icon[:len(icon)/2]
+	headerOnlyDIB := testDIBHeader(16, 16, 32)
 	tests := map[string]struct {
 		group []byte
 		icons map[uint32][][]byte
@@ -50,6 +52,8 @@ func TestValidateGroupIconRejectsMalformedOrUnlinkedResources(t *testing.T) {
 		"missing icon":    {group: testGroupIcon(16, 16, uint32(len(icon)), 5), icons: nil},
 		"wrong size":      {group: testGroupIcon(16, 16, uint32(len(icon))+1, 5), icons: map[uint32][][]byte{5: {icon}}},
 		"invalid icon":    {group: testGroupIcon(16, 16, 4, 5), icons: map[uint32][][]byte{5: {{0, 0, 0, 0}}}},
+		"truncated PNG":   {group: testGroupIcon(16, 16, uint32(len(truncatedPNG)), 5), icons: map[uint32][][]byte{5: {truncatedPNG}}},
+		"header-only DIB": {group: testGroupIcon(16, 16, uint32(len(headerOnlyDIB)), 5), icons: map[uint32][][]byte{5: {headerOnlyDIB}}},
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -57,6 +61,15 @@ func TestValidateGroupIconRejectsMalformedOrUnlinkedResources(t *testing.T) {
 				t.Fatal("invalid grouped icon was accepted")
 			}
 		})
+	}
+}
+
+func TestValidateGroupIconAcceptsCompleteDIB(t *testing.T) {
+	icon := testDIBHeader(16, 16, 32)
+	icon = append(icon, make([]byte, 16*16*4+16*4)...)
+	group := testGroupIcon(16, 16, uint32(len(icon)), 5)
+	if err := validateGroupIcon(group, map[uint32][][]byte{5: {icon}}); err != nil {
+		t.Fatalf("complete DIB rejected: %v", err)
 	}
 }
 
@@ -102,6 +115,16 @@ func testGroupIcon(width, height byte, size uint32, iconID uint16) []byte {
 	binary.LittleEndian.PutUint32(group[14:18], size)
 	binary.LittleEndian.PutUint16(group[18:20], iconID)
 	return group
+}
+
+func testDIBHeader(width, height int32, bitCount uint16) []byte {
+	header := make([]byte, 40)
+	binary.LittleEndian.PutUint32(header[:4], 40)
+	binary.LittleEndian.PutUint32(header[4:8], uint32(width))
+	binary.LittleEndian.PutUint32(header[8:12], uint32(height*2))
+	binary.LittleEndian.PutUint16(header[12:14], 1)
+	binary.LittleEndian.PutUint16(header[14:16], bitCount)
+	return header
 }
 
 func putResourceDirectory(t *testing.T, data []byte, offset uint32, entries [][2]uint32) {

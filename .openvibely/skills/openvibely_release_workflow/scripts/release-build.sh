@@ -382,6 +382,7 @@ ensure_wails_cross_image() {
 
 sign_windows_binary() {
     local binary="$1"
+    local expected_marker="${2:-}"
     log "Authenticode signing and timestamping $(basename "$binary")..."
     if [[ "${DRY_RUN:-0}" == "1" ]]; then
         echo -e "${YELLOW}[DRY-RUN]${NC} $WINDOWS_SIGN_COMMAND $binary"
@@ -394,6 +395,10 @@ sign_windows_binary() {
             AZURE_ACCESS_TOKEN="${AZURE_ACCESS_TOKEN:-}" \
             "$WINDOWS_SIGN_COMMAND" "$binary"
         "$WINDOWS_VERIFY_COMMAND" "$binary"
+        verify_windows_icon_resource "$binary"
+        if [[ -n "$expected_marker" ]]; then
+            verify_desktop_icon_marker "$binary" "$expected_marker"
+        fi
     fi
 }
 
@@ -658,8 +663,8 @@ if [[ "${DRY_RUN:-0}" != "1" && ! -f "$TMP_BIN/desktop_windows_arm64.exe" ]]; th
 elif [[ "${DRY_RUN:-0}" == "1" ]]; then
     echo -e "${YELLOW}[DRY-RUN]${NC} Would build Windows desktop artifacts with Go cross-compilation"
 fi
-sign_windows_binary "$TMP_BIN/desktop_windows_amd64.exe"
-sign_windows_binary "$TMP_BIN/desktop_windows_arm64.exe"
+sign_windows_binary "$TMP_BIN/desktop_windows_amd64.exe" "openvibely-desktop-icon-native-v1"
+sign_windows_binary "$TMP_BIN/desktop_windows_arm64.exe" "openvibely-desktop-icon-native-v1"
 
 build_linux_desktop() {
     local goarch="$1"

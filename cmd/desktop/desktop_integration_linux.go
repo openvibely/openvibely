@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"unicode"
 
 	desktopicons "github.com/openvibely/openvibely/assets/desktop/icons"
 )
@@ -44,6 +45,22 @@ func installLinuxDesktopIntegration() error {
 		sourceExecutable = resolved
 	}
 	destinationExecutable := filepath.Join(binHome, "openvibely-desktop")
+	desktopPath := filepath.Join(dataHome, "applications", "com.openvibely.desktop.desktop")
+	escapedExecutable, err := escapeDesktopExec(destinationExecutable)
+	if err != nil {
+		return fmt.Errorf("prepare application-menu entry: %w", err)
+	}
+	desktopEntry := fmt.Sprintf(`[Desktop Entry]
+Type=Application
+Name=OpenVibely
+Comment=OpenVibely desktop application
+Exec="%s"
+Icon=com.openvibely.desktop
+Terminal=false
+Categories=Development;Utility;
+StartupWMClass=com.openvibely.desktop
+`, escapedExecutable)
+
 	if filepath.Clean(sourceExecutable) != filepath.Clean(destinationExecutable) {
 		if err := copyLinuxDesktopFile(sourceExecutable, destinationExecutable, 0o755); err != nil {
 			return fmt.Errorf("install OpenVibely executable: %w", err)
@@ -61,17 +78,6 @@ func installLinuxDesktopIntegration() error {
 		}
 	}
 
-	desktopPath := filepath.Join(dataHome, "applications", "com.openvibely.desktop.desktop")
-	desktopEntry := fmt.Sprintf(`[Desktop Entry]
-Type=Application
-Name=OpenVibely
-Comment=OpenVibely desktop application
-Exec="%s"
-Icon=com.openvibely.desktop
-Terminal=false
-Categories=Development;Utility;
-StartupWMClass=com.openvibely.desktop
-`, escapeDesktopExec(destinationExecutable))
 	if err := writeLinuxDesktopFile(desktopPath, []byte(desktopEntry), 0o644); err != nil {
 		return fmt.Errorf("install application-menu entry: %w", err)
 	}
@@ -83,9 +89,14 @@ StartupWMClass=com.openvibely.desktop
 	return nil
 }
 
-func escapeDesktopExec(value string) string {
+func escapeDesktopExec(value string) (string, error) {
+	for _, character := range value {
+		if character == '=' || unicode.IsControl(character) {
+			return "", fmt.Errorf("executable path contains unsupported character %q", character)
+		}
+	}
 	replacer := strings.NewReplacer(`\`, `\\\\`, `"`, `\"`, "`", "\\`", `$`, `\\$`, `%`, `%%`)
-	return replacer.Replace(value)
+	return replacer.Replace(value), nil
 }
 
 func copyLinuxDesktopFile(source, destination string, mode os.FileMode) error {

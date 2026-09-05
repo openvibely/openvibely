@@ -311,13 +311,25 @@ for required in OPENVIBELY_MACOS_SIGN_IDENTITY OPENVIBELY_MACOS_NOTARY_PROFILE O
         fail "official build does not require ${required}"
     fi
 done
-for required_call in 'sign-macos.sh' 'notarize-macos-archive.sh' 'xcrun stapler staple' 'notarize_macos_binary_archive' 'clean_macos_bundle_metadata "$app_dir"' 'package_macos_app_zip "$app_dir" "$notary_zip"' 'package_macos_app_zip "$app_dir" "$release_zip"' 'COPYFILE_DISABLE=1 ditto -c -k --norsrc --keepParent' 'assert_clean_tar_archive "${DIST_DIR}/${artifact}"' "grep -E '(^|/)\\._|(^|/)__MACOSX(/|$)|(^|/)\\.DS_Store$'" 'assets/desktop/icons/openvibely.icns' 'CFBundleIconFile' 'verify_desktop_icon_marker' 'verify_windows_icon_resource' 'internal/releaseassets/cmd/verify-pe-icon' 'openvibely-desktop-icon-linux-gtk3-v1' 'openvibely-desktop-icon-native-v1' 'sign_windows_binary "$TMP_BIN/server_windows_amd64.exe"' 'sign_windows_binary "$TMP_BIN/server_windows_arm64.exe"' 'sign_windows_binary "$TMP_BIN/desktop_windows_amd64.exe"' 'sign_windows_binary "$TMP_BIN/desktop_windows_arm64.exe"' 'build_desktop_binary "$TMP_BIN/desktop_windows_amd64.exe" windows amd64 0' 'build_desktop_binary "$TMP_BIN/desktop_windows_arm64.exe" windows arm64 0' 'build_linux_desktop amd64' 'build_linux_desktop arm64' 'package_linux_desktop_tar amd64' 'package_linux_desktop_tar arm64' 'Official releases require a Linux $goarch desktop build' 'linux_amd64_desktop.tar.gz' 'linux_arm64_desktop.tar.gz'; do
+for required_call in 'sign-macos.sh' 'notarize-macos-archive.sh' 'xcrun stapler staple' 'notarize_macos_binary_archive' 'clean_macos_bundle_metadata "$app_dir"' 'package_macos_app_zip "$app_dir" "$notary_zip"' 'package_macos_app_zip "$app_dir" "$release_zip"' 'COPYFILE_DISABLE=1 ditto -c -k --norsrc --keepParent' 'assert_clean_tar_archive "${DIST_DIR}/${artifact}"' "grep -E '(^|/)\\._|(^|/)__MACOSX(/|$)|(^|/)\\.DS_Store$'" 'assets/desktop/icons/openvibely.icns' 'CFBundleIconFile' 'verify_desktop_icon_marker' 'verify_windows_icon_resource' 'internal/releaseassets/cmd/verify-pe-icon' 'openvibely-desktop-icon-linux-gtk3-v1' 'openvibely-desktop-icon-native-v1' 'sign_windows_binary "$TMP_BIN/server_windows_amd64.exe"' 'sign_windows_binary "$TMP_BIN/server_windows_arm64.exe"' 'sign_windows_binary "$TMP_BIN/desktop_windows_amd64.exe" "openvibely-desktop-icon-native-v1"' 'sign_windows_binary "$TMP_BIN/desktop_windows_arm64.exe" "openvibely-desktop-icon-native-v1"' 'build_desktop_binary "$TMP_BIN/desktop_windows_amd64.exe" windows amd64 0' 'build_desktop_binary "$TMP_BIN/desktop_windows_arm64.exe" windows arm64 0' 'build_linux_desktop amd64' 'build_linux_desktop arm64' 'package_linux_desktop_tar amd64' 'package_linux_desktop_tar arm64' 'Official releases require a Linux $goarch desktop build' 'linux_amd64_desktop.tar.gz' 'linux_arm64_desktop.tar.gz'; do
     if grep -Fq "$required_call" "$BUILD_SCRIPT"; then
         pass "release build contains signing step: ${required_call}"
     else
         fail "release build lacks signing step: ${required_call}"
     fi
 done
+if awk '
+    /^sign_windows_binary\(\)/ { in_function = 1 }
+    in_function && /"\$WINDOWS_VERIFY_COMMAND" "\$binary"/ { signature_verified = 1; next }
+    in_function && signature_verified && /verify_windows_icon_resource "\$binary"/ { icon_found = 1 }
+    in_function && signature_verified && /verify_desktop_icon_marker "\$binary" "\$expected_marker"/ { marker_found = 1 }
+    in_function && /^}/ { exit }
+    END { exit(icon_found && marker_found ? 0 : 1) }
+' "$BUILD_SCRIPT"; then
+    pass "release build validates Windows icon resources and desktop identity after signing"
+else
+    fail "release build does not validate Windows icon resources and desktop identity after signing"
+fi
 for required_layout in 'zip -X "$archive" "$(basename "$binary")"' 'zip -X '\''${DIST_DIR}/${artifact}'\'' openvibely.exe' 'zip -X '\''${DIST_DIR}/${artifact}'\'' openvibely-desktop.exe' 'env COPYFILE_DISABLE=1 tar -czf "${DIST_DIR}/${artifact}" -C "$pkg_dir" openvibely' 'env COPYFILE_DISABLE=1 tar -czf "${DIST_DIR}/${artifact}" -C "$linux_pkg" openvibely-desktop'; do
     if grep -Fq "$required_layout" "$BUILD_SCRIPT"; then
         pass "release package preserves flat executable artifact: ${required_layout}"

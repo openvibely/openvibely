@@ -208,27 +208,69 @@ func iconDimension(value byte) int {
 func validIconImage(data []byte, expectedWidth, expectedHeight int) bool {
 	if bytes.HasPrefix(data, []byte("\x89PNG\r\n\x1a\n")) {
 		config, err := png.DecodeConfig(bytes.NewReader(data))
-		return err == nil && config.Width == expectedWidth && config.Height == expectedHeight
+		if err != nil || config.Width != expectedWidth || config.Height != expectedHeight {
+			return false
+		}
+		image, err := png.Decode(bytes.NewReader(data))
+		return err == nil && image.Bounds().Dx() == expectedWidth && image.Bounds().Dy() == expectedHeight
 	}
 	if len(data) < 12 {
 		return false
 	}
 	headerSize := binary.LittleEndian.Uint32(data[:4])
-	var width, doubledHeight int64
+	var width, doubledHeight, planes, bitCount, paletteEntries, paletteEntrySize, extraMaskBytes uint64
 	switch {
 	case headerSize == 12:
-		width = int64(binary.LittleEndian.Uint16(data[4:6]))
-		doubledHeight = int64(binary.LittleEndian.Uint16(data[6:8]))
+		width = uint64(binary.LittleEndian.Uint16(data[4:6]))
+		doubledHeight = uint64(binary.LittleEndian.Uint16(data[6:8]))
+		planes = uint64(binary.LittleEndian.Uint16(data[8:10]))
+		bitCount = uint64(binary.LittleEndian.Uint16(data[10:12]))
+		paletteEntrySize = 3
 	case headerSize >= 40 && uint64(headerSize) <= uint64(len(data)):
-		width = int64(int32(binary.LittleEndian.Uint32(data[4:8])))
-		doubledHeight = int64(int32(binary.LittleEndian.Uint32(data[8:12])))
-		if doubledHeight < 0 {
-			doubledHeight = -doubledHeight
+		signedWidth := int64(int32(binary.LittleEndian.Uint32(data[4:8])))
+		signedHeight := int64(int32(binary.LittleEndian.Uint32(data[8:12])))
+		if signedWidth <= 0 || signedHeight == 0 {
+			return false
+		}
+		if signedHeight < 0 {
+			signedHeight = -signedHeight
+		}
+		width = uint64(signedWidth)
+		doubledHeight = uint64(signedHeight)
+		planes = uint64(binary.LittleEndian.Uint16(data[12:14]))
+		bitCount = uint64(binary.LittleEndian.Uint16(data[14:16]))
+		compression := binary.LittleEndian.Uint32(data[16:20])
+		if compression != 0 && compression != 3 {
+			return false
+		}
+		if compression == 3 && headerSize == 40 {
+			extraMaskBytes = 12
+		}
+		paletteEntries = uint64(binary.LittleEndian.Uint32(data[32:36]))
+		paletteEntrySize = 4
+	default:
+		return false
+	}
+	if planes != 1 || doubledHeight%2 != 0 || width != uint64(expectedWidth) || doubledHeight/2 != uint64(expectedHeight) {
+		return false
+	}
+	switch bitCount {
+	case 1, 4, 8:
+		if paletteEntries == 0 {
+			paletteEntries = uint64(1) << bitCount
+		}
+	case 16, 24, 32:
+		if paletteEntries != 0 {
+			return false
 		}
 	default:
 		return false
 	}
-	return width == int64(expectedWidth) && doubledHeight == int64(expectedHeight*2)
+	pixelHeight := doubledHeight / 2
+	xorRowBytes := ((width*bitCount + 31) / 32) * 4
+	andRowBytes := ((width + 31) / 32) * 4
+	requiredSize := uint64(headerSize) + extraMaskBytes + paletteEntries*paletteEntrySize + (xorRowBytes+andRowBytes)*pixelHeight
+	return requiredSize <= uint64(len(data))
 }
 
 func resourceDirectoryEntries(data []byte, start uint64) ([][8]byte, bool) {
