@@ -1020,8 +1020,8 @@ func TestAutomationBuilderEditUsesSingleCompactAgentValidationPass(t *testing.T)
 	counter.SetEnabled(false)
 	require.Equal(t, http.StatusNoContent, response.Code, response.Body.String())
 	compactAgentQueries, richAgentQueries = countAgentQueries()
-	require.Equal(t, 1, compactAgentQueries, "edit save must reuse preview validation")
-	require.Equal(t, 1, richAgentQueries, "edit save must retain its separate rich Agent materialization read")
+	require.Equal(t, 2, compactAgentQueries, "edit save must perform one compact validation query and one save-scoped compact resolution query")
+	require.Zero(t, richAgentQueries, "edit save must not hydrate the rich Agent catalog during materialization")
 
 	_, err = db.ExecContext(ctx, `UPDATE agents SET enabled = 0 WHERE id = ?`, agent.ID)
 	require.NoError(t, err)
@@ -1035,6 +1035,109 @@ func TestAutomationBuilderEditUsesSingleCompactAgentValidationPass(t *testing.T)
 	require.Empty(t, malformedResponse.Header().Get("HX-Redirect"))
 	require.Contains(t, malformedResponse.Body.String(), "YAML did not parse")
 	require.Contains(t, malformedResponse.Body.String(), "Agent selection is unavailable in this project.")
+}
+
+func TestAutomationBuilderCreateBatchesAgentResolution(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	h, e, _ := setupTestHandlerForDB(t, db)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	project := &models.Project{Name: "Batched builder Agent create"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	agentRepo := repository.NewAgentRepo(db)
+	if _, err := db.ExecContext(ctx, `DELETE FROM agents WHERE id IS NOT NULL`); err != nil {
+		t.Fatalf("clear agents: %v", err)
+	}
+	refs := make([]string, 0, 5)
+	agentIDs := make(map[string]struct{}, 5)
+	for i := 0; i < 5; i++ {
+		agent := &models.Agent{Name: fmt.Sprintf("Builder Agent %02d", i), Key: fmt.Sprintf("builder-agent-%02d", i),
+			SystemPrompt: "private builder Agent prompt", Model: "inherit", Tools: []string{"Read"}, Enabled: true, SelectableAsPrimary: true}
+		require.NoError(t, agentRepo.Create(ctx, agent))
+		refs = append(refs, agent.Key)
+		agentIDs[agent.ID] = struct{}{}
+	}
+	h.SetAgentRepo(agentRepo)
+
+	registry := service.NewAutomationAdapterRegistry()
+	automationRepo := repository.NewAutomationRepo(db)
+	drafts := service.NewAutomationDraftService(automationRepo, registry)
+	capabilities := service.NewAutomationCapabilitySnapshotBuilder(projectRepo, agentRepo, nil, nil)
+	validator := service.NewAutomationSaveValidator(registry, drafts)
+	compiler := service.NewAutomationCompiler(automationRepo, h.taskSvc, h.taskRepo, h.scheduleRepo, validator)
+	h.SetAutomationBuilderServices(drafts, capabilities, validator, compiler, nil, nil)
+
+	candidate := serviceAutomationValidationReferenceCandidateForHandler(refs)
+	raw, err := json.Marshal(candidate)
+	require.NoError(t, err)
+	form := url.Values{"project_id": {project.ID}, "builder_source": {"blank"}, "candidate_json": {string(raw)}, "save_changes": {"true"}}
+	req := httptest.NewRequest(http.MethodPost, "/automations/builder?project_id="+project.ID, strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	response := httptest.NewRecorder()
+	counter.Reset()
+	counter.SetEnabled(true)
+	e.ServeHTTP(response, req)
+	counter.SetEnabled(false)
+	require.Equal(t, http.StatusNoContent, response.Code, response.Body.String())
+	require.NotEmpty(t, response.Header().Get("HX-Redirect"))
+
+	compactAgentQueries, richAgentQueries := 0, 0
+	for _, statement := range counter.Statements() {
+		query := strings.ToLower(strings.Join(strings.Fields(statement), " "))
+		if !strings.Contains(query, "from agents") {
+			continue
+		}
+		projection := strings.SplitN(query, " from agents", 2)[0]
+		if strings.Contains(projection, "system_prompt") {
+			richAgentQueries++
+		} else if strings.Contains(projection, "coalesce(key, '')") && strings.Contains(projection, "coalesce(project_id, '')") {
+			compactAgentQueries++
+		}
+	}
+	require.Equal(t, 2, compactAgentQueries, "builder create should perform one compact validation query and one save-scoped compact resolution query")
+	require.Zero(t, richAgentQueries, "builder create must not hydrate rich Agent rows during Save")
+
+	rows, err := db.QueryContext(ctx, `SELECT agent_definition_id FROM tasks WHERE project_id = ? AND agent_definition_id IS NOT NULL`, project.ID)
+	require.NoError(t, err)
+	defer rows.Close()
+	resolvedIDs := make(map[string]struct{}, 5)
+	for rows.Next() {
+		var agentID string
+		require.NoError(t, rows.Scan(&agentID))
+		resolvedIDs[agentID] = struct{}{}
+	}
+	require.NoError(t, rows.Err())
+	require.Len(t, resolvedIDs, len(agentIDs), "each builder task should retain its selected Agent definition")
+	for agentID := range agentIDs {
+		require.Contains(t, resolvedIDs, agentID)
+	}
+	var taskCount, scheduleCount int
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT COUNT(*) FROM tasks WHERE project_id = ?`, project.ID).Scan(&taskCount))
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT COUNT(*) FROM schedules s JOIN tasks t ON t.id = s.task_id WHERE t.project_id = ?`, project.ID).Scan(&scheduleCount))
+	require.Equal(t, 5, taskCount)
+	require.Equal(t, 2, scheduleCount)
+}
+
+func serviceAutomationValidationReferenceCandidateForHandler(refs []string) models.AutomationDraftCandidate {
+	nodes := make([]models.AutomationDraftNode, 0, len(refs))
+	for i, ref := range refs {
+		nodeType := models.AutomationNodeAgentTask
+		config := map[string]any{"prompt": "Review the requested work.", "category": string(models.CategoryBacklog), "priority": 2, "agent_ref": ref}
+		if i%2 == 1 {
+			nodeType = models.AutomationNodeTrigger
+			config["prompt"] = "Run the scheduled review."
+			config["category"] = string(models.CategoryScheduled)
+			config["run_at"] = "09:00"
+			config["repeat_type"] = string(models.RepeatDaily)
+			config["repeat_interval"] = 1
+			config["enabled"] = true
+		}
+		nodes = append(nodes, models.AutomationDraftNode{Key: fmt.Sprintf("builder-agent-%02d", i), Name: fmt.Sprintf("Builder Agent node %02d", i), Type: nodeType,
+			Role: map[models.AutomationNodeType]string{models.AutomationNodeAgentTask: "task", models.AutomationNodeTrigger: "fixed_schedule"}[nodeType], Config: config})
+	}
+	return models.AutomationDraftCandidate{SchemaVersion: 1, Name: "Batched builder Agent candidate", AutomationType: service.AutomationAdapterCustom,
+		AdapterKey: service.AutomationAdapterCustom, Nodes: nodes}
 }
 
 func TestAutomationBuilderRejectsUnsafeAndUnsupportedYAMLWithoutSideEffects(t *testing.T) {
@@ -2658,11 +2761,18 @@ func TestAutomationChatSaveYAMLPersistsThroughCompilerPipeline(t *testing.T) {
 	registry := service.NewAutomationAdapterRegistry()
 	drafts := service.NewAutomationDraftService(automationRepo, registry)
 	planner := service.NewAutomationSaveValidator(registry, drafts)
+	agentRepo := repository.NewAgentRepo(tc.db)
+	agent := &models.Agent{Name: "Chat Save Agent", Key: "chat-save-agent", SystemPrompt: "private Chat save Agent prompt", Model: "inherit", Tools: []string{"Read"}, Enabled: true, SelectableAsPrimary: true}
+	require.NoError(t, agentRepo.Create(ctx, agent))
+	tc.handler.SetAgentRepo(agentRepo)
+	capabilities := service.NewAutomationCapabilitySnapshotBuilder(tc.projectRepo, agentRepo, tc.taskRepo, tc.settingsRepo)
 	compiler := service.NewAutomationCompiler(automationRepo, tc.handler.taskSvc, tc.taskRepo, tc.scheduleRepo, planner)
 	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
-	tc.handler.SetAutomationBuilderServices(drafts, nil, planner, compiler, nil, service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo))
+	tc.handler.SetAutomationBuilderServices(drafts, capabilities, planner, compiler, nil, service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo))
 
 	candidate := automationChatCustomApprovalCandidate(t, drafts)
+	candidate.Nodes[0].Config["agent_ref"] = agent.Key
+	candidate.Nodes[1].Config["agent_ref"] = agent.Key
 	yamlDocument, err := service.EncodeAutomationDraftYAML(candidate)
 	require.NoError(t, err)
 	payload, err := json.Marshal(map[string]string{"source": "yaml", "automation_yaml": yamlDocument})
@@ -2680,6 +2790,9 @@ func TestAutomationChatSaveYAMLPersistsThroughCompilerPipeline(t *testing.T) {
 	require.Equal(t, 1, tableCountHandler(t, tc, "automations"))
 	require.Equal(t, 2, tableCountHandler(t, tc, "tasks"))
 	require.Equal(t, 1, tableCountHandler(t, tc, "schedules"))
+	var chatAgentTaskCount int
+	require.NoError(t, tc.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM tasks WHERE project_id = ? AND agent_definition_id = ?`, project.ID, agent.ID).Scan(&chatAgentTaskCount))
+	require.Equal(t, 2, chatAgentTaskCount, "Chat save must persist the selected Agent definition on both materialized tasks")
 }
 
 func TestAutomationChatSaveYAMLRejectsCandidateIdentityFieldsWithoutSideEffects(t *testing.T) {

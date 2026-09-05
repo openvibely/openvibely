@@ -7,13 +7,13 @@ import (
 )
 
 templ BreadcrumbSelector(config models.BreadcrumbSelector) {
-	<div class={ "min-w-0", templ.KV("shrink-0", config.CaretOnly) } data-breadcrumb-selector>
+	<div class={ "min-w-0", templ.KV("shrink-0 w-0 overflow-visible", config.CaretOnly) } data-breadcrumb-selector>
 		if config.ContextName != "" {
 			<input type="hidden" name={ config.ContextName } value={ config.ContextValue } data-breadcrumb-selector-context/>
 		}
 		<button
 			id={ config.ID + "-button" }
-			class={ "inline-flex max-w-full items-center rounded-btn py-0 text-left font-bold leading-tight transition-colors hover:bg-base-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary", templ.KV("gap-1 px-1 text-2xl", !config.CaretOnly), templ.KV("h-8 w-7 justify-center px-0", config.CaretOnly) }
+			class={ "inline-flex items-center rounded-btn py-0 text-left font-bold leading-tight transition-colors hover:bg-base-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary", templ.KV("max-w-full gap-1 px-1 text-2xl", !config.CaretOnly), templ.KV("h-8 w-7 justify-center px-0", config.CaretOnly) }
 			type="button"
 			aria-label={ "Switch " + config.Kind }
 			aria-haspopup="dialog"
