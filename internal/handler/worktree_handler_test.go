@@ -148,8 +148,8 @@ func TestHandler_TaskCardMergeOptionsUseAuthoritativeStateAndProjectOwnership(t 
 		t.Fatal(err)
 	}
 	rec = worktreeExecute(e, httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/card/merge-options?project_id="+project.ID, nil))
-	if !taskCardActionDisabled(rec.Body.String(), "rebase") || taskCardActionDisabled(rec.Body.String(), "merge") {
-		t.Fatalf("dirty worktree should disable rebase but retain supported commit merge, body=%s", rec.Body.String())
+	if !taskCardActionDisabled(rec.Body.String(), "rebase") || !taskCardActionDisabled(rec.Body.String(), "ff") || taskCardActionDisabled(rec.Body.String(), "merge") {
+		t.Fatalf("dirty worktree should disable rebase and fast-forward but retain supported commit merge, body=%s", rec.Body.String())
 	}
 	dirtyRebase := worktreeFormRequest(http.MethodPost, "/tasks/"+task.ID+"/worktree/rebase", url.Values{
 		"merge_source": {"task_card"}, "project_id": {project.ID},
@@ -243,6 +243,53 @@ func TestHandler_TaskCardMergeOptionsUseAuthoritativeStateAndProjectOwnership(t 
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("serialized card mutation did not resume after repository lock release")
+	}
+}
+
+func TestHandler_TaskCardMenuUsesRepositoryDefaultMergeTarget(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	h.taskPullRequestRepo = repository.NewTaskPullRequestRepo(db)
+	h.SetGitHubService(&fakeGitHubService{})
+	ctx := context.Background()
+	repoDir := t.TempDir()
+	runGit(t, repoDir, "init", "-b", "develop")
+	runGit(t, repoDir, "config", "user.email", "test@example.com")
+	runGit(t, repoDir, "config", "user.name", "Test User")
+	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("base\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repoDir, "add", "README.md")
+	runGit(t, repoDir, "commit", "-m", "base")
+	runGit(t, repoDir, "checkout", "-b", "task/default-target")
+	if err := os.WriteFile(filepath.Join(repoDir, "feature.txt"), []byte("feature\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repoDir, "add", "feature.txt")
+	runGit(t, repoDir, "commit", "-m", "feature")
+	runGit(t, repoDir, "checkout", "develop")
+	runGit(t, repoDir, "update-ref", "refs/remotes/origin/develop", "refs/heads/develop")
+	runGit(t, repoDir, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/develop")
+
+	project := &models.Project{Name: "Default Target", RepoPath: repoDir, IsDefault: true}
+	if err := h.projectSvc.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	task := &models.Task{
+		ProjectID: project.ID, Title: "Implicit target", Prompt: "test", Category: models.CategoryCompleted,
+		Status: models.StatusCompleted, WorktreeBranch: "task/default-target", MergeStatus: models.MergeStatusPending,
+	}
+	if err := h.taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/tasks?project_id="+project.ID, nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("tasks status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "Rebase onto develop") || strings.Contains(rec.Body.String(), "Rebase onto main") {
+		t.Fatalf("implicit merge target should render repository default branch, body=%s", rec.Body.String())
 	}
 }
 

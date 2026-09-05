@@ -75,7 +75,7 @@ func taskWorktreeMergeIndicatorID(action TaskWorktreeMergeActionDescriptor, surf
 // TaskCardWorktreeMergeAction renders one direct card action from the shared
 // local action descriptor. The server revalidates task and Git state before
 // mutation; HTMX swaps the authoritative board only after a successful action.
-func TaskCardWorktreeMergeAction(task *models.Task, projectID string, action TaskWorktreeMergeActionDescriptor, enabled bool) templ.Component {
+func TaskCardWorktreeMergeAction(task *models.Task, projectID string, targetBranch string, action TaskWorktreeMergeActionDescriptor, enabled bool) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -137,9 +137,9 @@ func TaskCardWorktreeMergeAction(task *models.Task, projectID string, action Tas
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var4 string
-		templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.ResolveAttributeValue(TaskWorktreeMergeTarget(task))
+		templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.ResolveAttributeValue(targetBranch)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_worktree_merge_actions.templ`, Line: 81, Col: 53}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_worktree_merge_actions.templ`, Line: 81, Col: 36}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var4)
 		if templ_7745c5c3_Err != nil {
@@ -189,9 +189,9 @@ func TaskCardWorktreeMergeAction(task *models.Task, projectID string, action Tas
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var8 string
-		templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(action.DisplayLabel(TaskWorktreeMergeTarget(task)))
+		templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(action.DisplayLabel(targetBranch))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_worktree_merge_actions.templ`, Line: 87, Col: 55}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_worktree_merge_actions.templ`, Line: 87, Col: 38}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
 		if templ_7745c5c3_Err != nil {

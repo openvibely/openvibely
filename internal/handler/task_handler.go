@@ -282,12 +282,22 @@ func (h *Handler) taskCardMergeMenuStates(ctx context.Context, tasks []models.Ta
 	for i := range tasks {
 		task := &tasks[i]
 		mergeState, localEligible, _ := h.taskCardMergeEligibilityForProject(ctx, task, project, "merge")
+		fastForwardEligible := false
+		if localEligible {
+			fastForwardEligible, _ = taskCardMergeModeEligibility(task, mergeState, "ff")
+		}
 		pullEligible, _ := h.taskCardPullRequestEligibility(task, project)
+		targetBranch := strings.TrimSpace(task.MergeTargetBranch)
+		if targetBranch == "" && project != nil {
+			targetBranch = service.GetDefaultBranch(project.RepoPath)
+		}
 		states[task.ID] = components.TaskCardMergeMenuState{
-			LocalEligible:  localEligible,
-			RebaseEligible: mergeState.RebaseAvailable,
-			PullEligible:   pullEligible,
-			PullRequest:    openPRs[task.ID],
+			LocalEligible:       localEligible,
+			FastForwardEligible: fastForwardEligible,
+			RebaseEligible:      localEligible && mergeState.RebaseAvailable,
+			PullEligible:        pullEligible,
+			PullRequest:         openPRs[task.ID],
+			TargetBranch:        targetBranch,
 		}
 	}
 	return states

@@ -627,6 +627,19 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					opacity: 1 !important;
 					pointer-events: auto !important;
 				}
+				#kanban-board [data-task-card-menu-trigger] + [data-kanban-menu-content] {
+					overflow: visible;
+				}
+				#kanban-board [data-task-card-local-submenu] > [data-task-card-submenu-panel] {
+					top: var(--task-card-local-submenu-top, 100%);
+					max-height: var(--task-card-submenu-max-height, calc(100vh - 4rem));
+					overflow-y: auto;
+				}
+				#kanban-board [data-task-card-github-submenu] > [data-task-card-submenu-panel] {
+					top: var(--task-card-github-submenu-top, 100%);
+					max-height: var(--task-card-submenu-max-height, calc(100vh - 4rem));
+					overflow-y: auto;
+				}
 				/* Chat actions are explicitly state-driven so focus alone never opens the destructive menu. */
 				#chat-page-root [data-chat-actions-dropdown]:not([data-chat-actions-open="true"]) > .dropdown-content {
 						visibility: hidden !important;
@@ -2724,6 +2737,26 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				return null;
 			}
 
+			function positionKanbanSubmenu(container) {
+				if (!container || !container.querySelector) return;
+				const panel = container.querySelector(':scope > [data-task-card-submenu-panel]');
+				const dropdown = container.closest('[data-kanban-menu-key]');
+				if (!panel || !dropdown) return;
+				const boundary = closestDropdownScrollBoundary(dropdown);
+				const boundaryRect = boundary ? boundary.getBoundingClientRect() : { top: 0, bottom: window.innerHeight };
+				const visibleTop = Math.max(0, boundaryRect.top);
+				const visibleBottom = Math.min(window.innerHeight, boundaryRect.bottom);
+				const availableHeight = Math.max(0, visibleBottom - visibleTop - 16);
+				const panelHeight = Math.min(panel.scrollHeight || panel.getBoundingClientRect().height || 0, availableHeight);
+				const containerRect = container.getBoundingClientRect();
+				const desiredTop = Math.max(visibleTop + 8, Math.min(containerRect.bottom, visibleBottom - panelHeight - 8));
+				const positionProperty = container.hasAttribute('data-task-card-local-submenu')
+					? '--task-card-local-submenu-top'
+					: '--task-card-github-submenu-top';
+				dropdown.style.setProperty(positionProperty, (desiredTop - containerRect.top) + 'px');
+				dropdown.style.setProperty('--task-card-submenu-max-height', availableHeight + 'px');
+			}
+
 			function positionDropdownForViewport(label) {
 				const dropdown = label && label.closest ? label.closest('.dropdown') : null;
 				if (!dropdown) return;
@@ -2743,6 +2776,9 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					dropdown.classList.add('dropdown-top');
 				} else if (dropdown.dataset.originalDropdownTop !== 'true') {
 					dropdown.classList.remove('dropdown-top');
+				}
+				if (content.querySelectorAll) {
+					content.querySelectorAll('[data-task-card-local-submenu], [data-task-card-github-submenu]').forEach(positionKanbanSubmenu);
 				}
 			}
 

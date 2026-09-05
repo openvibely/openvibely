@@ -48,16 +48,21 @@ func (h *Handler) taskCardMergeEligibilityForProject(ctx context.Context, task *
 		}
 		return state, false, reason
 	}
+	eligible, reason := taskCardMergeModeEligibility(task, state, mergeType)
+	return state, eligible, reason
+}
+
+func taskCardMergeModeEligibility(task *models.Task, state taskMergeActionState, mergeType string) (bool, string) {
 	if mergeType == "rebase" && !state.RebaseAvailable {
-		return state, false, "Rebase is not available for the current branch state."
+		return false, "Rebase is not available for the current branch state."
 	}
 	if mergeType == "ff" && task.WorktreePath != "" {
 		status, err := service.GitStatusPorcelain(task.WorktreePath)
 		if err != nil || strings.TrimSpace(status) != "" {
-			return state, false, "Fast-forward requires a clean task worktree."
+			return false, "Fast-forward requires a clean task worktree."
 		}
 	}
-	return state, true, ""
+	return true, ""
 }
 
 func cardMutationSource(c echo.Context) bool {
@@ -117,8 +122,19 @@ func (h *Handler) GetTaskCardMergeOptions(c echo.Context) error {
 	if h.taskPullRequestRepo != nil {
 		taskPR, _ = h.taskPullRequestRepo.GetByTaskID(c.Request().Context(), task.ID)
 	}
+	fastForwardEligible := false
+	if eligible {
+		fastForwardEligible, _ = taskCardMergeModeEligibility(task, state, "ff")
+	}
 	prEligible, _ := h.taskCardPullRequestEligibility(task, project)
-	return render(c, http.StatusOK, components.TaskCardMergeOptions(task, projectID, eligible, state.RebaseAvailable, taskPR, prEligible))
+	return render(c, http.StatusOK, components.TaskCardMergeSubmenus(task, projectID, components.TaskCardMergeMenuState{
+		LocalEligible:       eligible,
+		FastForwardEligible: fastForwardEligible,
+		RebaseEligible:      eligible && state.RebaseAvailable,
+		PullEligible:        prEligible,
+		PullRequest:         taskPR,
+		TargetBranch:        task.MergeTargetBranch,
+	}))
 }
 
 // UpdateTaskAutoMerge toggles auto-merge for a task.
