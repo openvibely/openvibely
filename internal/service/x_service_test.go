@@ -1604,3 +1604,79 @@ func TestXRuntimeCreateTaskExplicitBacklogDoesNotAutoStart(t *testing.T) {
 	default:
 	}
 }
+
+func TestXRuntimeCreateTaskUsesTrustedReplyContext(t *testing.T) {
+	fixture := newXRuntimeWorkerFixture(t)
+	runtime := fixture.xSvc.RuntimeTools("parent-task", fixture.project.ID, "bot", "author", "conversation", "source-tweet", "alice")
+
+	output, handled, isError, err := runtime.Executor(fixture.ctx, "create_task", json.RawMessage(`{
+		"title":"Trusted context task",
+		"prompt":"keep the originating destination",
+		"category":"backlog",
+		"account_id":"attacker-account",
+		"conversation_id":"attacker-conversation",
+		"reply_to_tweet_id":"attacker-tweet",
+		"x_user_id":"attacker-user",
+		"username":"attacker"
+	}`))
+	require.True(t, handled)
+	require.False(t, isError)
+	require.NoError(t, err)
+	require.Contains(t, output, "Trusted context task")
+
+	tasks, err := fixture.taskRepo.ListByProject(fixture.ctx, fixture.project.ID, "")
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
+	meta, err := fixture.xTaskContextRepo.GetByTaskID(fixture.ctx, tasks[0].ID)
+	require.NoError(t, err)
+	require.Equal(t, &models.XTaskContext{
+		TaskID:         tasks[0].ID,
+		ProjectID:      fixture.project.ID,
+		AccountID:      "bot",
+		ConversationID: "conversation",
+		ReplyToTweetID: "source-tweet",
+		XUserID:        "author",
+		Username:       "alice",
+	}, &models.XTaskContext{
+		TaskID:         meta.TaskID,
+		ProjectID:      meta.ProjectID,
+		AccountID:      meta.AccountID,
+		ConversationID: meta.ConversationID,
+		ReplyToTweetID: meta.ReplyToTweetID,
+		XUserID:        meta.XUserID,
+		Username:       meta.Username,
+	})
+}
+
+func TestXRuntimeCreateTaskRejectsInvalidReplyContextBeforeAdmission(t *testing.T) {
+	tests := []struct {
+		name           string
+		accountID      string
+		conversationID string
+		want           string
+	}{
+		{name: "missing conversation", accountID: "bot", want: "X task reply context is incomplete"},
+		{name: "different account", accountID: "other-account", conversationID: "conversation", want: "does not match the authenticated X account"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fixture := newXRuntimeWorkerFixture(t)
+			runtime := fixture.xSvc.RuntimeTools("parent-task", fixture.project.ID, tt.accountID, "author", tt.conversationID, "source-tweet", "alice")
+
+			output, handled, isError, actionErr := runtime.Executor(fixture.ctx, "create_task", json.RawMessage(`{"title":"Invalid context task","prompt":"must not run"}`))
+			require.True(t, handled)
+			require.True(t, isError)
+			require.Error(t, actionErr)
+			require.Contains(t, output, tt.want)
+			require.Contains(t, actionErr.Error(), "no tasks were persisted")
+
+			tasks, err := fixture.taskRepo.ListByProject(fixture.ctx, fixture.project.ID, "")
+			require.NoError(t, err)
+			require.Empty(t, tasks)
+			require.Equal(t, 0, fixture.worker.QueueSize())
+			require.Equal(t, 0, fixture.worker.TotalRunning())
+			require.Empty(t, fixture.api.Posts())
+			require.Equal(t, 0, fixture.mockLLM.CallCount())
+		})
+	}
+}

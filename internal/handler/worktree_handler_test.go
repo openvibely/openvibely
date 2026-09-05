@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -11,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -18,6 +20,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
+	"github.com/openvibely/openvibely/internal/testutil"
 )
 
 func worktreeFormRequest(method, path string, form url.Values) *http.Request {
@@ -30,6 +33,16 @@ func worktreeFormRequest(method, path string, form url.Values) *http.Request {
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	}
 	return req
+}
+
+func taskCardActionDisabled(body, mergeType string) bool {
+	marker := `data-merge-type="` + mergeType + `"`
+	markerIndex := strings.Index(body, marker)
+	if markerIndex < 0 {
+		return false
+	}
+	buttonIndex := strings.LastIndex(body[:markerIndex], "<button")
+	return buttonIndex >= 0 && strings.Contains(body[buttonIndex:markerIndex], " disabled")
 }
 
 func worktreeExecute(e *echo.Echo, req *http.Request) *httptest.ResponseRecorder {
@@ -97,13 +110,17 @@ func TestHandler_TaskCardMergeOptionsUseAuthoritativeStateAndProjectOwnership(t 
 			t.Fatal(err)
 		}
 	}
+	menuState := h.taskCardMergeMenuStates(ctx, []models.Task{*task}, project.ID)[task.ID]
+	if !menuState.LocalEligible || !menuState.RebaseEligible || !menuState.PullEligible || menuState.PullRequest == nil || menuState.PullRequest.PRNumber != 42 {
+		t.Fatalf("board render did not precompute authoritative card menu state: %#v", menuState)
+	}
 
 	req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/card/merge-options?project_id="+project.ID, nil)
 	rec := worktreeExecute(e, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("eligible options status=%d body=%s", rec.Code, rec.Body.String())
 	}
-	for _, want := range []string{"Merge commit", "Fast-forward only", "Rebase onto main", "Squash merge", "View PR #42", `hx-trigger="task-card-menu-open"`} {
+	for _, want := range []string{"Merge commit", "Fast-forward only", "Rebase onto main", "Squash merge", "View PR #42", `data-task-card-local-submenu`, `data-task-card-github-submenu`} {
 		if !strings.Contains(rec.Body.String(), want) {
 			t.Fatalf("eligible options missing %q: %s", want, rec.Body.String())
 		}
@@ -134,8 +151,8 @@ func TestHandler_TaskCardMergeOptionsUseAuthoritativeStateAndProjectOwnership(t 
 		t.Fatal(err)
 	}
 	rec = worktreeExecute(e, httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/card/merge-options?project_id="+project.ID, nil))
-	if strings.Contains(rec.Body.String(), "Rebase onto") || !strings.Contains(rec.Body.String(), "Merge commit") {
-		t.Fatalf("dirty worktree should suppress rebase but retain supported commit merge, body=%s", rec.Body.String())
+	if !taskCardActionDisabled(rec.Body.String(), "rebase") || !taskCardActionDisabled(rec.Body.String(), "ff") || taskCardActionDisabled(rec.Body.String(), "merge") {
+		t.Fatalf("dirty worktree should disable rebase and fast-forward but retain supported commit merge, body=%s", rec.Body.String())
 	}
 	dirtyRebase := worktreeFormRequest(http.MethodPost, "/tasks/"+task.ID+"/worktree/rebase", url.Values{
 		"merge_source": {"task_card"}, "project_id": {project.ID},
@@ -147,9 +164,13 @@ func TestHandler_TaskCardMergeOptionsUseAuthoritativeStateAndProjectOwnership(t 
 		t.Fatal(err)
 	}
 	run("worktree", "lock", worktreePath)
+	lockedState := h.taskCardMergeMenuStates(ctx, []models.Task{*task}, project.ID)[task.ID]
+	if lockedState.LocalEligible || lockedState.PullEligible {
+		t.Fatalf("board lock snapshot exposed locked actions: %#v", lockedState)
+	}
 	rec = worktreeExecute(e, httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/card/merge-options?project_id="+project.ID, nil))
-	if strings.Contains(rec.Body.String(), "Merge unavailable") || strings.Contains(rec.Body.String(), "Create PR unavailable") || strings.Contains(rec.Body.String(), "data-task-card-merge-action") {
-		t.Fatalf("locked worktree should omit unavailable local merge actions, body=%s", rec.Body.String())
+	if strings.Contains(rec.Body.String(), "Merge unavailable") || strings.Contains(rec.Body.String(), "Create PR unavailable") || !taskCardActionDisabled(rec.Body.String(), "merge") || !taskCardActionDisabled(rec.Body.String(), "pr") {
+		t.Fatalf("locked worktree should retain stable disabled local and GitHub actions, body=%s", rec.Body.String())
 	}
 	run("worktree", "unlock", worktreePath)
 
@@ -172,8 +193,8 @@ func TestHandler_TaskCardMergeOptionsUseAuthoritativeStateAndProjectOwnership(t 
 		t.Fatal(err)
 	}
 	rec = worktreeExecute(e, httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/card/merge-options?project_id="+project.ID, nil))
-	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), "Merge unavailable") || strings.Contains(rec.Body.String(), "data-task-card-merge-action") {
-		t.Fatalf("conflict state should omit unavailable local merge actions, status=%d body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), "Merge unavailable") || !taskCardActionDisabled(rec.Body.String(), "merge") {
+		t.Fatalf("conflict state should retain stable disabled local actions, status=%d body=%s", rec.Code, rec.Body.String())
 	}
 	conflictPost := worktreeFormRequest(http.MethodPost, "/tasks/"+task.ID+"/worktree/merge", url.Values{
 		"merge_type": {"merge"}, "merge_source": {"task_card"}, "project_id": {project.ID},
@@ -232,6 +253,686 @@ func TestHandler_TaskCardMergeOptionsUseAuthoritativeStateAndProjectOwnership(t 
 	}
 }
 
+func TestHandler_TaskCardMergeMenuStatesUseConstantDatabaseQueriesForNonMergeableCards(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	h, _, _ := setupTestHandlerForDB(t, db)
+	h.taskPullRequestRepo = repository.NewTaskPullRequestRepo(db)
+	project := &models.Project{Name: "Menu Query Budget", RepoPath: t.TempDir(), IsDefault: true}
+	if err := h.projectSvc.Create(t.Context(), project); err != nil {
+		t.Fatal(err)
+	}
+
+	tasks := make([]models.Task, 100)
+	for i := range tasks {
+		tasks[i] = models.Task{
+			ID:                fmt.Sprintf("pending-card-%03d", i),
+			ProjectID:         project.ID,
+			Title:             fmt.Sprintf("Pending card %03d", i),
+			Category:          models.CategoryBacklog,
+			Status:            models.StatusPending,
+			WorktreeBranch:    fmt.Sprintf("task/pending-card-%03d", i),
+			MergeTargetBranch: "main",
+		}
+	}
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	states := h.taskCardMergeMenuStates(t.Context(), tasks, project.ID)
+	counter.SetEnabled(false)
+	if len(states) != len(tasks) {
+		t.Fatalf("menu states=%d, want %d", len(states), len(tasks))
+	}
+	statements := counter.Statements()
+	if len(statements) != 2 {
+		t.Fatalf("100 non-mergeable cards executed %d database statements, want constant project+PR queries; statements=%v", len(statements), statements)
+	}
+	for _, state := range states {
+		if state.LocalEligible || state.FastForwardEligible || state.RebaseEligible {
+			t.Fatalf("non-mergeable card exposed Local actions: %#v", state)
+		}
+	}
+}
+
+func TestHandler_TaskBoardRecoversMetadataWithoutLocalEligibilityForNonMergeableCards(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	h.taskPullRequestRepo = repository.NewTaskPullRequestRepo(db)
+	ctx := context.Background()
+	repoDir := createHandlerTestGitRepo(t)
+	project := &models.Project{Name: "Recovery Budget", RepoPath: repoDir, IsDefault: true}
+	if err := h.projectSvc.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+
+	pending := &models.Task{
+		ProjectID: project.ID, Title: "Pending recovery", Prompt: "test", Category: models.CategoryBacklog,
+		Status: models.StatusPending, MergeTargetBranch: "main", MergeStatus: models.MergeStatusPending,
+	}
+	completed := &models.Task{
+		ProjectID: project.ID, Title: "Completed recovery", Prompt: "test", Category: models.CategoryCompleted,
+		Status: models.StatusCompleted, MergeTargetBranch: "main", MergeStatus: models.MergeStatusPending,
+	}
+	for _, task := range []*models.Task{pending, completed} {
+		if err := h.taskRepo.Create(ctx, task); err != nil {
+			t.Fatal(err)
+		}
+		branch := expectedTaskBranchName(task)
+		worktreePath := filepath.Join(repoDir, ".worktrees", "task_"+task.ID)
+		runGit(t, repoDir, "worktree", "add", "-b", branch, worktreePath, "main")
+		if err := os.WriteFile(filepath.Join(worktreePath, task.ID+".txt"), []byte("task\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		runGit(t, worktreePath, "add", ".")
+		runGit(t, worktreePath, "commit", "-m", "task change")
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/tasks?project_id="+project.ID, nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("tasks status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	pendingAfter, err := h.taskRepo.GetByID(ctx, pending.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pendingAfter.WorktreePath != "" || pendingAfter.WorktreeBranch != "" {
+		t.Fatalf("board render persisted pending recovery metadata: path=%q branch=%q", pendingAfter.WorktreePath, pendingAfter.WorktreeBranch)
+	}
+	completedAfter, err := h.taskRepo.GetByID(ctx, completed.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if completedAfter.WorktreePath != "" || completedAfter.WorktreeBranch != "" {
+		t.Fatalf("board render persisted completed recovery metadata: %#v", completedAfter)
+	}
+	states := h.taskCardMergeMenuStates(ctx, []models.Task{*pendingAfter, *completedAfter}, project.ID)
+	if states[pending.ID].LocalEligible {
+		t.Fatalf("pending card exposed Local actions: %#v", states[pending.ID])
+	}
+	if !states[completed.ID].LocalEligible {
+		t.Fatalf("completed card lost authoritative Local actions: %#v", states[completed.ID])
+	}
+}
+
+func TestHandler_TaskBoardRelationshipSnapshotSupportsShallowRepositories(t *testing.T) {
+	ctx := context.Background()
+	originDir := createHandlerTestGitRepo(t)
+	for i := 0; i < 4; i++ {
+		if err := os.WriteFile(filepath.Join(originDir, "README.md"), []byte(fmt.Sprintf("base %d\n", i)), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		runGit(t, originDir, "add", "README.md")
+		runGit(t, originDir, "commit", "-m", fmt.Sprintf("base %d", i))
+	}
+
+	repoDir := filepath.Join(t.TempDir(), "shallow")
+	runGit(t, t.TempDir(), "clone", "--depth", "2", "--branch", "main", "file://"+originDir, repoDir)
+	runGit(t, repoDir, "config", "user.email", "test@example.com")
+	runGit(t, repoDir, "config", "user.name", "Test User")
+	worktreePath := filepath.Join(repoDir, ".worktrees", "shallow-task")
+	runGit(t, repoDir, "worktree", "add", "-b", "task/shallow", worktreePath, "main")
+	if err := os.WriteFile(filepath.Join(worktreePath, "feature.txt"), []byte("feature\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, worktreePath, "add", "feature.txt")
+	runGit(t, worktreePath, "commit", "-m", "shallow feature")
+
+	h, e, _, db := setupTestHandlerWithDB(t)
+	h.taskPullRequestRepo = repository.NewTaskPullRequestRepo(db)
+	project := &models.Project{Name: "Shallow Relationship", RepoPath: repoDir, IsDefault: true}
+	if err := h.projectSvc.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	task := &models.Task{
+		ProjectID: project.ID, Title: "Shallow task", Prompt: "test", Category: models.CategoryCompleted,
+		Status: models.StatusCompleted, WorktreePath: worktreePath, WorktreeBranch: "task/shallow",
+		MergeTargetBranch: "main", MergeStatus: models.MergeStatusPending,
+	}
+	if err := h.taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/tasks?project_id="+project.ID, nil)
+	req.Header.Set("HX-Request", "true")
+	req.Header.Set("HX-Target", "kanban-board")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("tasks refresh status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if taskCardActionDisabled(rec.Body.String(), "merge") || taskCardActionDisabled(rec.Body.String(), "ff") {
+		t.Fatalf("shallow repository disabled canonically eligible Local actions: %s", rec.Body.String())
+	}
+	if !taskCardActionDisabled(rec.Body.String(), "rebase") {
+		t.Fatalf("shallow repository exposed Rebase without two-sided divergence: %s", rec.Body.String())
+	}
+}
+
+func TestTaskCardRelationshipSnapshotDoesNotMaterializeLargeHistory(t *testing.T) {
+	repoDir := createHandlerTestGitRepo(t)
+	for i := 0; i < 256; i++ {
+		if err := os.WriteFile(filepath.Join(repoDir, "history.txt"), []byte(fmt.Sprintf("history %d\n", i)), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		runGit(t, repoDir, "add", "history.txt")
+		runGit(t, repoDir, "commit", "-m", fmt.Sprintf("history %d", i))
+	}
+	runGit(t, repoDir, "branch", "target-large", "main")
+	runGit(t, repoDir, "checkout", "-b", "task/large-history")
+	if err := os.WriteFile(filepath.Join(repoDir, "feature.txt"), []byte("feature\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repoDir, "add", "feature.txt")
+	runGit(t, repoDir, "commit", "-m", "large history feature")
+	runGit(t, repoDir, "checkout", "main")
+
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrapperDir := t.TempDir()
+	logPath := filepath.Join(wrapperDir, "git.log")
+	wrapperPath := filepath.Join(wrapperDir, "git")
+	wrapper := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$OPENVIBELY_GIT_LOG\"\nexec \"$OPENVIBELY_REAL_GIT\" \"$@\"\n"
+	if err := os.WriteFile(wrapperPath, []byte(wrapper), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("OPENVIBELY_GIT_LOG", logPath)
+	t.Setenv("OPENVIBELY_REAL_GIT", realGit)
+	t.Setenv("PATH", wrapperDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	snapshot := newTaskCardRepositorySnapshot(t.Context(), &models.Project{RepoPath: repoDir})
+	taskCardLoadBranchRelations(t.Context(), repoDir, []taskCardBranchRelation{{branch: "task/large-history", target: "target-large"}}, snapshot)
+	if !snapshot.relationshipValid("task/large-history", "target-large") || !snapshot.isAncestor("target-large", "task/large-history") {
+		t.Fatal("large-history relationship snapshot lost canonical ancestry")
+	}
+	logData, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commands := string(logData)
+	if strings.Contains(commands, "rev-list --parents") || strings.Contains(commands, "cat-file --batch") {
+		t.Fatalf("relationship snapshot materialized repository history:\n%s", commands)
+	}
+	if strings.Count(commands, "for-each-ref") != 1 {
+		t.Fatalf("relationship snapshot commands=%q, want one bounded for-each-ref query", commands)
+	}
+}
+
+func TestTaskCardRelationshipSnapshotFailsClosedAbovePairLimit(t *testing.T) {
+	snapshot := &taskCardRepositorySnapshot{
+		refs:      make(map[string]string, taskCardRelationshipPairMax+1),
+		ancestors: make(map[string]bool),
+	}
+	requests := make([]taskCardBranchRelation, 0, taskCardRelationshipPairMax+1)
+	for i := 0; i <= taskCardRelationshipPairMax; i++ {
+		branch := fmt.Sprintf("task/pair-%04d", i)
+		target := "main"
+		snapshot.refs[branch] = fmt.Sprintf("%040x", i+1)
+		snapshot.refs[target] = strings.Repeat("f", 40)
+		requests = append(requests, taskCardBranchRelation{branch: branch, target: target})
+	}
+
+	taskCardLoadBranchRelations(t.Context(), t.TempDir(), requests, snapshot)
+	if snapshot.graphValid || snapshot.relationshipValid(requests[0].branch, requests[0].target) {
+		t.Fatal("oversized relationship request did not fail closed")
+	}
+}
+
+func TestHandler_TaskBoardRelationshipSnapshotFailureDisablesLocalActions(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	h.taskPullRequestRepo = repository.NewTaskPullRequestRepo(db)
+	ctx := context.Background()
+	repoDir := createHandlerTestGitRepo(t)
+	worktreePath := filepath.Join(repoDir, ".worktrees", "relationship-failure")
+	runGit(t, repoDir, "worktree", "add", "-b", "task/relationship-failure", worktreePath, "main")
+	if err := os.WriteFile(filepath.Join(worktreePath, "change.txt"), []byte("change\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, worktreePath, "add", ".")
+	runGit(t, worktreePath, "commit", "-m", "task change")
+
+	project := &models.Project{Name: "Relationship Failure", RepoPath: repoDir, IsDefault: true}
+	if err := h.projectSvc.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	task := &models.Task{
+		ProjectID: project.ID, Title: "Relationship failure", Prompt: "test", Category: models.CategoryCompleted,
+		Status: models.StatusCompleted, WorktreePath: worktreePath, WorktreeBranch: "task/relationship-failure",
+		MergeTargetBranch: "main", MergeStatus: models.MergeStatusPending,
+	}
+	if err := h.taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrongTip := runGit(t, repoDir, "rev-parse", "main")
+	wrapperDir := t.TempDir()
+	wrapperPath := filepath.Join(wrapperDir, "git")
+	wrapper := `#!/bin/sh
+case "$*" in
+  *"for-each-ref"*"ahead-behind"*|*"rev-list --parents"*)
+    if [ "$OPENVIBELY_RELATION_FAILURE" = "unsupported" ]; then
+      printf 'unsupported relationship query\n' >&2
+      exit 129
+    fi
+    if [ "$OPENVIBELY_RELATION_FAILURE" = "timeout" ]; then
+      exec sleep 5
+    fi
+    if [ "$OPENVIBELY_RELATION_FAILURE" = "incomplete" ]; then
+      printf '%s\0001 0\n' "$OPENVIBELY_RELATION_WRONG_TIP"
+      exit 0
+    fi
+    printf 'malformed relationship output\n'
+    exit 0
+    ;;
+esac
+exec "$OPENVIBELY_REAL_GIT" "$@"
+`
+	if err := os.WriteFile(wrapperPath, []byte(wrapper), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("OPENVIBELY_REAL_GIT", realGit)
+	t.Setenv("OPENVIBELY_RELATION_WRONG_TIP", wrongTip)
+	t.Setenv("PATH", wrapperDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	for _, failureMode := range []string{"malformed", "unsupported", "incomplete", "timeout"} {
+		t.Run(failureMode, func(t *testing.T) {
+			mergeStatus := models.MergeStatusPending
+			if failureMode == "incomplete" {
+				mergeStatus = models.MergeStatusMerged
+			}
+			if err := h.taskRepo.UpdateMergeStatus(ctx, task.ID, mergeStatus); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("OPENVIBELY_RELATION_FAILURE", failureMode)
+			req := httptest.NewRequest(http.MethodGet, "/tasks?project_id="+project.ID, nil)
+			req.Header.Set("HX-Request", "true")
+			req.Header.Set("HX-Target", "kanban-board")
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("tasks refresh status=%d body=%s", rec.Code, rec.Body.String())
+			}
+			for _, mergeType := range []string{"merge", "ff", "rebase", "squash"} {
+				if !taskCardActionDisabled(rec.Body.String(), mergeType) {
+					t.Fatalf("%s relationship snapshot exposed %s action", failureMode, mergeType)
+				}
+			}
+			if failureMode == "incomplete" {
+				unchanged, err := h.taskRepo.GetByID(ctx, task.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if unchanged.MergeStatus != models.MergeStatusMerged {
+					t.Fatalf("incomplete relationship snapshot reconciled stale metadata to %q", unchanged.MergeStatus)
+				}
+			}
+		})
+	}
+}
+
+func TestHandler_TaskBoardBatchesTerminalCardGitState(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	h.taskPullRequestRepo = repository.NewTaskPullRequestRepo(db)
+	ctx := context.Background()
+	repoDir := createHandlerTestGitRepo(t)
+	project := &models.Project{Name: "Terminal Git Budget", RepoPath: repoDir, IsDefault: true}
+	if err := h.projectSvc.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+
+	const taskCount = 24
+	targets := []string{"target-one", "target-two", "target-three"}
+	tasks := make([]*models.Task, 0, taskCount)
+	for _, target := range targets {
+		runGit(t, repoDir, "branch", target, "main")
+	}
+	for i := 0; i < taskCount; i++ {
+		branch := fmt.Sprintf("task/terminal-%02d", i)
+		target := targets[i%len(targets)]
+		worktreePath := filepath.Join(repoDir, ".worktrees", fmt.Sprintf("terminal-%02d", i))
+		runGit(t, repoDir, "worktree", "add", "-b", branch, worktreePath, target)
+		if err := os.WriteFile(filepath.Join(worktreePath, fmt.Sprintf("terminal-%02d.txt", i)), []byte("task\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		runGit(t, worktreePath, "add", ".")
+		runGit(t, worktreePath, "commit", "-m", fmt.Sprintf("terminal %02d", i))
+		if i == taskCount-1 {
+			if err := os.WriteFile(filepath.Join(worktreePath, "dirty.txt"), []byte("dirty\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		task := &models.Task{
+			ProjectID: project.ID, Title: fmt.Sprintf("Terminal %02d", i), Prompt: "test", Category: models.CategoryCompleted,
+			Status: models.StatusCompleted, WorktreePath: worktreePath, WorktreeBranch: branch, MergeTargetBranch: target, MergeStatus: models.MergeStatusPending,
+		}
+		if err := h.taskRepo.Create(ctx, task); err != nil {
+			t.Fatal(err)
+		}
+		tasks = append(tasks, task)
+	}
+	runGit(t, repoDir, "checkout", "target-two")
+	if err := os.WriteFile(filepath.Join(repoDir, "target-two.txt"), []byte("target advance\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repoDir, "add", ".")
+	runGit(t, repoDir, "commit", "-m", "advance target two")
+	runGit(t, repoDir, "checkout", "main")
+
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrapperDir := t.TempDir()
+	logPath := filepath.Join(wrapperDir, "git.log")
+	wrapperPath := filepath.Join(wrapperDir, "git")
+	wrapper := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$OPENVIBELY_GIT_LOG\"\nexec \"$OPENVIBELY_REAL_GIT\" \"$@\"\n"
+	if err := os.WriteFile(wrapperPath, []byte(wrapper), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("OPENVIBELY_GIT_LOG", logPath)
+	t.Setenv("OPENVIBELY_REAL_GIT", realGit)
+	t.Setenv("PATH", wrapperDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	req := httptest.NewRequest(http.MethodGet, "/tasks?project_id="+project.ID, nil)
+	req.Header.Set("HX-Request", "true")
+	req.Header.Set("HX-Target", "kanban-board")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("tasks refresh status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for i := 0; i < taskCount; i++ {
+		if !strings.Contains(body, fmt.Sprintf("Terminal %02d", i)) {
+			t.Fatalf("terminal card %d missing from board refresh", i)
+		}
+	}
+	enabledMergeActions := 0
+	for searchFrom := 0; ; {
+		markerIndex := strings.Index(body[searchFrom:], `data-merge-type="merge"`)
+		if markerIndex < 0 {
+			break
+		}
+		markerIndex += searchFrom
+		buttonIndex := strings.LastIndex(body[:markerIndex], "<button")
+		if buttonIndex >= 0 && !strings.Contains(body[buttonIndex:markerIndex], " disabled") {
+			enabledMergeActions++
+		}
+		searchFrom = markerIndex + 1
+	}
+	if enabledMergeActions != taskCount {
+		t.Fatalf("enabled terminal merge actions=%d, want %d", enabledMergeActions, taskCount)
+	}
+	for i, task := range tasks {
+		cardStart := strings.Index(body, `id="task-`+task.ID+`"`)
+		if cardStart < 0 {
+			t.Fatalf("terminal card %d missing task id", i)
+		}
+		cardEnd := strings.Index(body[cardStart+1:], `id="task-`)
+		if cardEnd < 0 {
+			cardEnd = len(body) - cardStart
+		} else {
+			cardEnd++
+		}
+		cardBody := body[cardStart : cardStart+cardEnd]
+		ffDisabled := taskCardActionDisabled(cardBody, "ff")
+		rebaseDisabled := taskCardActionDisabled(cardBody, "rebase")
+		if i == taskCount-1 {
+			if !ffDisabled || !rebaseDisabled {
+				t.Fatalf("dirty terminal card retained clean-only actions: %s", cardBody)
+			}
+		} else {
+			if ffDisabled {
+				t.Fatalf("clean terminal card %d lost fast-forward action: %s", i, cardBody)
+			}
+			wantRebase := task.MergeTargetBranch == "target-two"
+			if rebaseDisabled == wantRebase {
+				t.Fatalf("terminal card %d rebase disabled=%v, want %v for target %s", i, rebaseDisabled, !wantRebase, task.MergeTargetBranch)
+			}
+		}
+	}
+	logData, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	invocations := len(strings.FieldsFunc(strings.TrimSpace(string(logData)), func(r rune) bool { return r == '\n' }))
+	if invocations > 5 {
+		t.Fatalf("%d terminal cards across %d targets executed %d git commands, want one five-command repository snapshot; commands:\n%s", taskCount, len(targets), invocations, logData)
+	}
+}
+
+func TestTaskCardRepositorySnapshotBoundsDirtyWorktreeBatch(t *testing.T) {
+	const pathCount = 24
+	paths := make([]string, 0, pathCount+2)
+	root := t.TempDir()
+	for i := 0; i < pathCount; i++ {
+		paths = append(paths, filepath.Join(root, fmt.Sprintf("worktree-%02d", i)))
+	}
+	paths = append(paths, paths[0], paths[1])
+
+	var mu sync.Mutex
+	active := 0
+	maximum := 0
+	calls := 0
+	snapshot := &taskCardRepositorySnapshot{
+		dirty: make(map[string]bool),
+		loadDirty: func(string) bool {
+			mu.Lock()
+			active++
+			calls++
+			if active > maximum {
+				maximum = active
+			}
+			mu.Unlock()
+			time.Sleep(10 * time.Millisecond)
+			mu.Lock()
+			active--
+			mu.Unlock()
+			return false
+		},
+	}
+
+	snapshot.loadDirtyWorktrees(paths)
+	if calls != pathCount {
+		t.Fatalf("dirty loader calls=%d, want %d unique paths", calls, pathCount)
+	}
+	if maximum <= 1 {
+		t.Fatalf("dirty loader maximum concurrency=%d, want batched parallel work", maximum)
+	}
+	if maximum > taskCardDirtyWorkerLimit {
+		t.Fatalf("dirty loader maximum concurrency=%d, exceeds limit %d", maximum, taskCardDirtyWorkerLimit)
+	}
+	if len(snapshot.dirty) != pathCount {
+		t.Fatalf("dirty results=%d, want %d", len(snapshot.dirty), pathCount)
+	}
+}
+
+func TestTaskCardRepositorySnapshotLoadsExactWorktreeDirtyStateInProcess(t *testing.T) {
+	repoDir := createHandlerTestGitRepo(t)
+	worktreePath := filepath.Join(repoDir, ".worktrees", "dirty-state")
+	runGit(t, repoDir, "worktree", "add", "-b", "task/dirty-state", worktreePath, "main")
+	snapshot := &taskCardRepositorySnapshot{dirty: make(map[string]bool)}
+
+	assertDirty := func(want bool) {
+		t.Helper()
+		snapshot.loadDirtyWorktrees([]string{worktreePath})
+		if got := snapshot.worktreeDirty(worktreePath); got != want {
+			t.Fatalf("worktree dirty=%v, want %v", got, want)
+		}
+	}
+	assertDirty(false)
+
+	trackedPath := filepath.Join(worktreePath, "README.md")
+	if err := os.WriteFile(trackedPath, []byte("unstaged\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	assertDirty(true)
+	runGit(t, worktreePath, "reset", "--hard", "HEAD")
+
+	if err := os.WriteFile(filepath.Join(worktreePath, "untracked.txt"), []byte("untracked\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	assertDirty(true)
+	runGit(t, worktreePath, "clean", "-fd")
+
+	if err := os.WriteFile(trackedPath, []byte("staged\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, worktreePath, "add", "README.md")
+	assertDirty(true)
+	runGit(t, worktreePath, "reset", "--hard", "HEAD")
+
+	if err := os.Remove(trackedPath); err != nil {
+		t.Fatal(err)
+	}
+	assertDirty(true)
+
+	missingPath := filepath.Join(repoDir, ".worktrees", "missing")
+	snapshot.loadDirtyWorktrees([]string{missingPath})
+	if !snapshot.worktreeDirty(missingPath) {
+		t.Fatal("invalid worktree status must fail closed as dirty")
+	}
+}
+
+func TestHandler_TaskBoardRecoversPendingAndBlockedBranchesForCreatePR(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	h.taskPullRequestRepo = repository.NewTaskPullRequestRepo(db)
+	prNumber := 90
+	h.SetGitHubService(&fakeGitHubService{
+		resolveRepoFn: func(_ context.Context, _, _ string) (*service.GitHubRepoRef, error) {
+			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely", CloneURL: "https://github.com/openvibely/openvibely.git", HTMLURL: "https://github.com/openvibely/openvibely"}, nil
+		},
+		publishBranchFn: func(_ context.Context, _ *service.GitHubRepoRef, _ service.GitHubPublishBranchRequest) (*service.GitHubPublishBranchResult, error) {
+			return &service.GitHubPublishBranchResult{HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
+		},
+		findPRFn: func(context.Context, *service.GitHubRepoRef, string) (*service.GitHubPullRequest, error) {
+			return nil, nil
+		},
+		createPRFn: func(_ context.Context, _ *service.GitHubRepoRef, req service.GitHubCreatePullRequestRequest) (*service.GitHubPullRequest, error) {
+			prNumber++
+			return &service.GitHubPullRequest{Number: prNumber, URL: fmt.Sprintf("https://github.com/openvibely/openvibely/pull/%d", prNumber), State: "open", HeadRef: req.Head, HeadRepoFullName: "openvibely/openvibely", HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
+		},
+	})
+	ctx := context.Background()
+	repoDir := createHandlerTestGitRepo(t)
+	project := &models.Project{Name: "PR Recovery", RepoPath: repoDir, RepoURL: "https://github.com/openvibely/openvibely", IsDefault: true}
+	if err := h.projectSvc.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+
+	var tasks []*models.Task
+	for _, status := range []models.TaskStatus{models.StatusPending, models.StatusBlocked} {
+		task := &models.Task{
+			ProjectID: project.ID, Title: "Recover " + string(status), Prompt: "test", Category: models.CategoryBacklog,
+			Status: status, MergeTargetBranch: "main", MergeStatus: models.MergeStatusPending,
+		}
+		if err := h.taskRepo.Create(ctx, task); err != nil {
+			t.Fatal(err)
+		}
+		branch := expectedTaskBranchName(task)
+		worktreePath := filepath.Join(repoDir, ".worktrees", "task_"+task.ID)
+		runGit(t, repoDir, "worktree", "add", "-b", branch, worktreePath, "main")
+		tasks = append(tasks, task)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/tasks?project_id="+project.ID, nil)
+	req.Header.Set("HX-Request", "true")
+	req.Header.Set("HX-Target", "kanban-board")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("tasks refresh status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	for _, task := range tasks {
+		updated, err := h.taskRepo.GetByID(ctx, task.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if updated.WorktreePath != "" || updated.WorktreeBranch != "" {
+			t.Fatalf("%s card persisted request-local recovery metadata: %#v", task.Status, updated)
+		}
+		marker := `data-task-id="` + task.ID + `" data-project-id="` + project.ID + `" data-target-branch="main" data-merge-type="pr"`
+		markerIndex := strings.Index(rec.Body.String(), marker)
+		if markerIndex < 0 {
+			t.Fatalf("%s card missing Create PR action", task.Status)
+		}
+		buttonIndex := strings.LastIndex(rec.Body.String()[:markerIndex], "<button")
+		if buttonIndex < 0 || strings.Contains(rec.Body.String()[buttonIndex:markerIndex], " disabled") {
+			t.Fatalf("%s card disabled Create PR after conventional worktree recovery", task.Status)
+		}
+
+		form := url.Values{"merge_source": {"task_card"}, "project_id": {project.ID}}
+		post := httptest.NewRequest(http.MethodPost, "/tasks/"+task.ID+"/worktree/pull-request", strings.NewReader(form.Encode()))
+		post.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		post.Header.Set("HX-Request", "true")
+		postRec := httptest.NewRecorder()
+		e.ServeHTTP(postRec, post)
+		if postRec.Code != http.StatusOK || !strings.Contains(postRec.Body.String(), `id="kanban-board"`) {
+			t.Fatalf("%s recovered Create PR status=%d body=%s trigger=%s", task.Status, postRec.Code, postRec.Body.String(), postRec.Header().Get("HX-Trigger"))
+		}
+		record, err := h.taskPullRequestRepo.GetByTaskID(ctx, task.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if record == nil || record.PRState != "open" {
+			t.Fatalf("%s recovered Create PR did not persist open PR: %#v", task.Status, record)
+		}
+	}
+}
+
+func TestHandler_TaskCardMenuUsesRepositoryDefaultMergeTarget(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	h.taskPullRequestRepo = repository.NewTaskPullRequestRepo(db)
+	h.SetGitHubService(&fakeGitHubService{})
+	ctx := context.Background()
+	repoDir := t.TempDir()
+	runGit(t, repoDir, "init", "-b", "develop")
+	runGit(t, repoDir, "config", "user.email", "test@example.com")
+	runGit(t, repoDir, "config", "user.name", "Test User")
+	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("base\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repoDir, "add", "README.md")
+	runGit(t, repoDir, "commit", "-m", "base")
+	runGit(t, repoDir, "checkout", "-b", "task/default-target")
+	if err := os.WriteFile(filepath.Join(repoDir, "feature.txt"), []byte("feature\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repoDir, "add", "feature.txt")
+	runGit(t, repoDir, "commit", "-m", "feature")
+	runGit(t, repoDir, "checkout", "develop")
+	runGit(t, repoDir, "update-ref", "refs/remotes/origin/develop", "refs/heads/develop")
+	runGit(t, repoDir, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/develop")
+
+	project := &models.Project{Name: "Default Target", RepoPath: repoDir, IsDefault: true}
+	if err := h.projectSvc.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	task := &models.Task{
+		ProjectID: project.ID, Title: "Implicit target", Prompt: "test", Category: models.CategoryCompleted,
+		Status: models.StatusCompleted, WorktreeBranch: "task/default-target", MergeStatus: models.MergeStatusPending,
+	}
+	if err := h.taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/tasks?project_id="+project.ID, nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("tasks status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "Rebase onto develop") || strings.Contains(rec.Body.String(), "Rebase onto main") {
+		t.Fatalf("implicit merge target should render repository default branch, body=%s", rec.Body.String())
+	}
+}
+
 func TestHandler_TaskCardMergeOptionsUseCanonicalMergeEligibility(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -283,11 +984,11 @@ func TestHandler_TaskCardMergeOptionsUseCanonicalMergeEligibility(t *testing.T) 
 			if rec.Code != http.StatusOK {
 				t.Fatalf("options status=%d body=%s", rec.Code, body)
 			}
-			if strings.Contains(body, "data-task-card-merge-action") || strings.Contains(body, "Merge unavailable") {
-				t.Fatalf("ineligible card state exposed local merge controls or an unavailable placeholder: %s", body)
+			if !taskCardActionDisabled(body, "merge") || strings.Contains(body, "Merge unavailable") {
+				t.Fatalf("ineligible card state did not retain a disabled local action without unavailable copy: %s", body)
 			}
-			if got := strings.Contains(body, "data-task-card-pr-action"); got != tt.wantPR {
-				t.Fatalf("PR eligibility changed: got action=%v want=%v body=%s", got, tt.wantPR, body)
+			if got := !taskCardActionDisabled(body, "pr"); got != tt.wantPR {
+				t.Fatalf("PR eligibility changed: got enabled=%v want=%v body=%s", got, tt.wantPR, body)
 			}
 		})
 	}
@@ -320,8 +1021,8 @@ func TestHandler_TaskCardCreatePROptionUsesAuthoritativeEligibility(t *testing.T
 		}
 		return rec.Body.String()
 	}
-	if body := requestOptions(); strings.Contains(body, "data-task-card-pr-action") || strings.Contains(body, "Create PR unavailable") {
-		t.Fatalf("task without branch should omit the unavailable Create PR option: %s", body)
+	if body := requestOptions(); !taskCardActionDisabled(body, "pr") || strings.Contains(body, "Create PR unavailable") {
+		t.Fatalf("task without branch should pre-render a disabled Create PR option: %s", body)
 	}
 
 	task.WorktreeBranch = "task/pr-eligibility"
@@ -329,8 +1030,8 @@ func TestHandler_TaskCardCreatePROptionUsesAuthoritativeEligibility(t *testing.T
 	if err := h.taskRepo.Update(ctx, task); err != nil {
 		t.Fatal(err)
 	}
-	if body := requestOptions(); strings.Contains(body, "data-task-card-pr-action") || strings.Contains(body, "Create PR unavailable") {
-		t.Fatalf("running task should omit the unavailable Create PR option: %s", body)
+	if body := requestOptions(); !taskCardActionDisabled(body, "pr") || strings.Contains(body, "Create PR unavailable") {
+		t.Fatalf("running task should pre-render a disabled Create PR option: %s", body)
 	}
 }
 

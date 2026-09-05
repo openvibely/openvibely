@@ -1456,7 +1456,7 @@ func TestBuildChannelUtilityActionHandlersListChannelsReportsGitHubAppConnection
 	require.True(t, result.GitHub.PATConfigured)
 }
 
-func TestChannelServiceListChannelsIncludesEmailWebhooksAndTargetsSafely(t *testing.T) {
+func TestChannelServiceListChannelsIncludesProviderStatusAndCountsSafely(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 	settingsRepo := repository.NewSettingsRepo(db)
@@ -1466,11 +1466,34 @@ func TestChannelServiceListChannelsIncludesEmailWebhooksAndTargetsSafely(t *test
 	channelTargetRepo := repository.NewChannelTargetRepo(db)
 	project := &models.Project{Name: "Channel Surface Complete Status"}
 	require.NoError(t, projectRepo.Create(ctx, project))
-	require.NoError(t, settingsRepo.Set(ctx, EmailSettingProvider, EmailProviderCustom))
-	require.NoError(t, settingsRepo.Set(ctx, EmailSettingAddress, "bot@example.com"))
-	require.NoError(t, settingsRepo.Set(ctx, EmailSettingPassword, "EMAIL-PASSWORD-MUST-NOT-LEAK"))
-	require.NoError(t, settingsRepo.Set(ctx, EmailSettingIMAPHost, "imap.example.com"))
-	require.NoError(t, settingsRepo.Set(ctx, EmailSettingSMTPHost, "smtp.example.com"))
+	settings := map[string]string{
+		SlackSettingClientID:          "SLACK-CLIENT-ID-MUST-NOT-LEAK",
+		SlackSettingClientSecret:      "SLACK-CLIENT-SECRET-MUST-NOT-LEAK",
+		SlackSettingBotToken:          "SLACK-BOT-TOKEN-MUST-NOT-LEAK",
+		SlackSettingBotTokenSource:    SlackBotTokenSourceOAuth,
+		SlackSettingTeamID:            "T-CHANNEL-STATUS",
+		SlackSettingTeamName:          "Channel Status Team",
+		SlackSettingBotUserID:         "B-CHANNEL-STATUS",
+		SlackSettingSendResponses:     "false",
+		TelegramSettingBotToken:       "TELEGRAM-BOT-TOKEN-MUST-NOT-LEAK",
+		TelegramSettingSendResponses:  "false",
+		TelegramSettingRichMessagesV2: "false",
+		DiscordSettingBotToken:        "DISCORD-BOT-TOKEN-MUST-NOT-LEAK",
+		DiscordSettingSendResponses:   "false",
+		XSettingConsumerKey:           "X-CONSUMER-KEY-MUST-NOT-LEAK",
+		XSettingConsumerSecret:        "X-CONSUMER-SECRET-MUST-NOT-LEAK",
+		XSettingAccessToken:           "X-ACCESS-TOKEN-MUST-NOT-LEAK",
+		XSettingAccessTokenSecret:     "X-ACCESS-TOKEN-SECRET-MUST-NOT-LEAK",
+		EmailSettingProvider:          EmailProviderCustom,
+		EmailSettingAddress:           "bot@example.com",
+		EmailSettingPassword:          "EMAIL-PASSWORD-MUST-NOT-LEAK",
+		EmailSettingIMAPHost:          "imap.example.com",
+		EmailSettingSMTPHost:          "smtp.example.com",
+	}
+	for key, value := range settings {
+		require.NoError(t, settingsRepo.Set(ctx, key, value))
+	}
+	require.NoError(t, settingsRepo.Set(ctx, SendMessageAllowExplicitTargetsSetting+":"+project.ID, "true"))
 	require.NoError(t, emailAuthRepo.Create(ctx, &models.EmailAuthorizedSender{ProjectID: project.ID, EmailAddress: "sender@example.com", DisplayName: "Sender", AddedBy: "test"}))
 	require.NoError(t, webhookRepo.Create(ctx, &models.WebhookEndpoint{ProjectID: project.ID, Name: "Deploy", Enabled: true, PathToken: "WEBHOOK-PATH-TOKEN-MUST-NOT-LEAK", Secret: "WEBHOOK-SECRET-MUST-NOT-LEAK", DefaultPriority: 2}))
 	require.NoError(t, channelTargetRepo.Upsert(ctx, models.ChannelTarget{ID: "target-1", ProjectID: project.ID, Platform: "slack", TargetKind: "channel", Name: "ops", TargetID: "RAW-TARGET-ID-MUST-NOT-LEAK", Home: true}))
@@ -1489,6 +1512,9 @@ func TestChannelServiceListChannelsIncludesEmailWebhooksAndTargetsSafely(t *test
 	discordSvc.SetEmailAuthRepo(emailAuthRepo)
 	discordSvc.SetWebhookRepo(webhookRepo)
 	discordSvc.SetChannelMessageRouter(router)
+	discordSvc.mu.Lock()
+	discordSvc.lastStartError = "gateway unavailable\nsecond line\twith formatting"
+	discordSvc.mu.Unlock()
 	telegramSvc := &TelegramService{settingsRepo: settingsRepo, projectRepo: projectRepo}
 	telegramSvc.SetEmailStatusProvider(emailStatus)
 	telegramSvc.SetEmailAuthRepo(emailAuthRepo)
@@ -1496,21 +1522,50 @@ func TestChannelServiceListChannelsIncludesEmailWebhooksAndTargetsSafely(t *test
 	telegramSvc.SetChannelMessageRouter(router)
 
 	for _, tc := range []struct {
-		name     string
-		handlers map[string]chatcontrol.RuntimeActionHandler
+		name               string
+		handlers           map[string]chatcontrol.RuntimeActionHandler
+		wantSlackConnected bool
+		wantDiscordError   bool
 	}{
-		{name: "slack", handlers: slackSvc.slackActionHandlers(project.ID, slackActionContext{TeamID: "T1", ChannelID: "C1", UserID: "U1"}, nil)},
-		{name: "discord", handlers: discordSvc.discordActionHandlers(project.ID, discordActionContext{ChannelID: "C1", UserID: "U1"}, nil)},
+		{name: "slack", handlers: slackSvc.slackActionHandlers(project.ID, slackActionContext{TeamID: "T1", ChannelID: "C1", UserID: "U1"}, nil), wantSlackConnected: true},
+		{name: "discord", handlers: discordSvc.discordActionHandlers(project.ID, discordActionContext{ChannelID: "C1", UserID: "U1"}, nil), wantDiscordError: true},
 		{name: "telegram", handlers: telegramSvc.telegramActionHandlers(project.ID, 1001, 2002, nil)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			out, err := tc.handlers["list_channels"](ctx, json.RawMessage(`{}`))
 			require.NoError(t, err)
-			for _, secret := range []string{"EMAIL-PASSWORD-MUST-NOT-LEAK", "WEBHOOK-PATH-TOKEN-MUST-NOT-LEAK", "WEBHOOK-SECRET-MUST-NOT-LEAK", "RAW-TARGET-ID-MUST-NOT-LEAK"} {
-				require.NotContains(t, out, secret)
-			}
-
 			var result struct {
+				ConfiguredChannelCount int      `json:"configured_channel_count"`
+				ConfiguredChannels     []string `json:"configured_channels"`
+				NoneConfigured         bool     `json:"none_configured"`
+				Slack                  struct {
+					Configured    bool   `json:"configured"`
+					Connected     bool   `json:"connected"`
+					Status        string `json:"status"`
+					TeamName      string `json:"team_name"`
+					TeamID        string `json:"team_id"`
+					BotUserID     string `json:"bot_user_id"`
+					SendResponses bool   `json:"send_responses"`
+				} `json:"slack"`
+				Telegram struct {
+					Configured     bool   `json:"configured"`
+					Running        bool   `json:"running"`
+					Status         string `json:"status"`
+					SendResponses  bool   `json:"send_responses"`
+					RichMessagesV2 bool   `json:"rich_messages_v2"`
+				} `json:"telegram"`
+				Discord struct {
+					Configured    bool   `json:"configured"`
+					Connected     bool   `json:"connected"`
+					Running       bool   `json:"running"`
+					Status        string `json:"status"`
+					SendResponses bool   `json:"send_responses"`
+					LastError     string `json:"last_error"`
+				} `json:"discord"`
+				X struct {
+					Configured bool   `json:"configured"`
+					Status     string `json:"status"`
+				} `json:"x"`
 				Email struct {
 					Configured            bool   `json:"configured"`
 					Running               bool   `json:"running"`
@@ -1525,6 +1580,7 @@ func TestChannelServiceListChannelsIncludesEmailWebhooksAndTargetsSafely(t *test
 				OutboundTargets struct {
 					Total              int  `json:"total"`
 					Configured         bool `json:"configured"`
+					ExplicitAllowed    bool `json:"explicit_unsaved_targets_allowed"`
 					MessagingAvailable bool `json:"messaging_available"`
 					ByPlatform         map[string]struct {
 						Total int `json:"total"`
@@ -1532,7 +1588,57 @@ func TestChannelServiceListChannelsIncludesEmailWebhooksAndTargetsSafely(t *test
 					} `json:"by_platform"`
 				} `json:"outbound_message_targets"`
 			}
+			for _, secret := range []string{
+				"SLACK-CLIENT-ID-MUST-NOT-LEAK",
+				"SLACK-CLIENT-SECRET-MUST-NOT-LEAK",
+				"SLACK-BOT-TOKEN-MUST-NOT-LEAK",
+				"TELEGRAM-BOT-TOKEN-MUST-NOT-LEAK",
+				"DISCORD-BOT-TOKEN-MUST-NOT-LEAK",
+				"X-CONSUMER-KEY-MUST-NOT-LEAK",
+				"X-CONSUMER-SECRET-MUST-NOT-LEAK",
+				"X-ACCESS-TOKEN-MUST-NOT-LEAK",
+				"X-ACCESS-TOKEN-SECRET-MUST-NOT-LEAK",
+				"EMAIL-PASSWORD-MUST-NOT-LEAK",
+				"WEBHOOK-PATH-TOKEN-MUST-NOT-LEAK",
+				"WEBHOOK-SECRET-MUST-NOT-LEAK",
+				"RAW-TARGET-ID-MUST-NOT-LEAK",
+			} {
+				require.NotContains(t, out, secret)
+			}
 			require.NoError(t, json.Unmarshal([]byte(out), &result))
+			require.Equal(t, 6, result.ConfiguredChannelCount)
+			require.Equal(t, []string{"slack", "telegram", "discord", "x", "email", "webhooks"}, result.ConfiguredChannels)
+			require.False(t, result.NoneConfigured)
+			require.True(t, result.Slack.Configured)
+			require.Equal(t, tc.wantSlackConnected, result.Slack.Connected)
+			if tc.wantSlackConnected {
+				require.Equal(t, "connected", result.Slack.Status)
+			} else {
+				require.Equal(t, "configured_not_connected", result.Slack.Status)
+			}
+			if tc.wantSlackConnected {
+				require.Equal(t, "Channel Status Team", result.Slack.TeamName)
+				require.Equal(t, "T-CHANNEL-STATUS", result.Slack.TeamID)
+				require.Equal(t, "B-CHANNEL-STATUS", result.Slack.BotUserID)
+			}
+			require.False(t, result.Slack.SendResponses)
+			require.True(t, result.Telegram.Configured)
+			require.False(t, result.Telegram.Running)
+			require.Equal(t, "configured_not_running", result.Telegram.Status)
+			require.False(t, result.Telegram.SendResponses)
+			require.False(t, result.Telegram.RichMessagesV2)
+			require.True(t, result.Discord.Configured)
+			require.False(t, result.Discord.Connected)
+			require.False(t, result.Discord.Running)
+			require.Equal(t, "gateway_offline", result.Discord.Status)
+			if tc.wantDiscordError {
+				require.Equal(t, "gateway unavailable second line with formatting", result.Discord.LastError)
+			} else {
+				require.Empty(t, result.Discord.LastError)
+			}
+			require.False(t, result.Discord.SendResponses)
+			require.True(t, result.X.Configured)
+			require.Equal(t, "configured_not_connected", result.X.Status)
 			require.True(t, result.Email.Configured)
 			require.True(t, result.Email.Running)
 			require.Equal(t, "running", result.Email.Status)
@@ -1541,6 +1647,7 @@ func TestChannelServiceListChannelsIncludesEmailWebhooksAndTargetsSafely(t *test
 			require.Equal(t, 1, result.Webhooks.Total)
 			require.Equal(t, 1, result.Webhooks.Active)
 			require.True(t, result.OutboundTargets.Configured)
+			require.True(t, result.OutboundTargets.ExplicitAllowed)
 			require.True(t, result.OutboundTargets.MessagingAvailable)
 			require.Equal(t, 1, result.OutboundTargets.Total)
 			require.Equal(t, 1, result.OutboundTargets.ByPlatform["slack"].Total)
@@ -2985,24 +3092,24 @@ func TestChannelStatusAndAutomationSummaryHelpers(t *testing.T) {
 	repoSummary := channelTargetStatusFromRepoSummary(repository.ChannelTargetProjectSummary{Total: 2, Configured: true, ByPlatform: map[string]repository.ChannelTargetPlatformSummary{"email": {Total: 2, Home: 1, Named: 1, ByKind: map[string]int{"address": 2}}}})
 	require.Equal(t, 2, repoSummary.Total)
 	require.Equal(t, 2, repoSummary.ByPlatform["email"].ByKind["address"])
-	webhookSummary := channelSummarizeWebhooks([]models.WebhookEndpoint{{Enabled: true}, {Enabled: false}, {Enabled: true}})
+	webhookSummary := summarizeChannelStatusWebhooks([]models.WebhookEndpoint{{Enabled: true}, {Enabled: false}, {Enabled: true}})
 	require.Equal(t, 3, webhookSummary.Total)
 	require.Equal(t, 2, webhookSummary.Active)
 	require.Equal(t, 1, webhookSummary.Disabled)
 
-	require.Equal(t, "connected", channelConnectedStatus(true, true))
-	require.Equal(t, "configured_not_connected", channelConnectedStatus(true, false))
-	require.Equal(t, "not_configured", channelConnectedStatus(false, false))
-	require.Equal(t, "running", channelRunningStatus(true, true))
-	require.Equal(t, "configured_not_running", channelRunningStatus(true, false))
-	require.Equal(t, "not_configured", channelRunningStatus(false, false))
-	require.Equal(t, "connected", channelDiscordStatus(DiscordConnectionStatus{Configured: true, Connected: true, Running: true}))
-	require.Equal(t, "gateway_offline", channelDiscordStatus(DiscordConnectionStatus{Configured: true, Connected: false, Running: false}))
-	require.Equal(t, "configured_not_connected", channelDiscordStatus(DiscordConnectionStatus{Configured: true, Connected: false, Running: true}))
-	require.Equal(t, "not_configured", channelDiscordStatus(DiscordConnectionStatus{}))
+	require.Equal(t, "connected", channelStatusConnected(true, true))
+	require.Equal(t, "configured_not_connected", channelStatusConnected(true, false))
+	require.Equal(t, "not_configured", channelStatusConnected(false, false))
+	require.Equal(t, "running", channelStatusRunning(true, true))
+	require.Equal(t, "configured_not_running", channelStatusRunning(true, false))
+	require.Equal(t, "not_configured", channelStatusRunning(false, false))
+	require.Equal(t, "connected", channelStatusDiscord(true, true, true))
+	require.Equal(t, "gateway_offline", channelStatusDiscord(true, false, false))
+	require.Equal(t, "configured_not_connected", channelStatusDiscord(true, false, true))
+	require.Equal(t, "not_configured", channelStatusDiscord(false, false, false))
 	longLine := strings.Repeat("word ", 80)
-	require.LessOrEqual(t, len(channelSafeSingleLine(longLine)), 240)
-	require.Equal(t, "spaced value", channelSafeSingleLine("  spaced\n\tvalue  "))
+	require.LessOrEqual(t, len(channelStatusSafeSingleLine(longLine)), 240)
+	require.Equal(t, "spaced value", channelStatusSafeSingleLine("  spaced\n\tvalue  "))
 
 	nextRun := time.Date(2026, 8, 22, 12, 30, 0, 0, time.FixedZone("offset", -5*3600))
 	lastRun := nextRun.Add(-time.Hour)

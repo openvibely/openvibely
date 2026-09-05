@@ -592,6 +592,40 @@ func mergeSelectedChannelRuntimeActionHandlers(dst, src map[string]chatcontrol.R
 	}
 }
 
+// validateRuntimeTaskContext ensures an X-created task has a usable reply
+// destination and still belongs to the authenticated account. Queued task
+// thread runtimes may be reconstructed while X is disconnected, so an empty
+// current account is allowed and the durable context remains authoritative.
+func (s *XService) validateRuntimeTaskContext(projectID, accountID, userID, conversationID, replyToTweetID string) error {
+	missing := make([]string, 0, 5)
+	fields := []struct {
+		name  string
+		value string
+	}{
+		{name: "project_id", value: projectID},
+		{name: "account_id", value: accountID},
+		{name: "x_user_id", value: userID},
+		{name: "conversation_id", value: conversationID},
+		{name: "reply_to_tweet_id", value: replyToTweetID},
+	}
+	for _, field := range fields {
+		if strings.TrimSpace(field.value) == "" {
+			missing = append(missing, field.name)
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("X task reply context is incomplete: missing %s", strings.Join(missing, ", "))
+	}
+
+	s.mu.RLock()
+	currentAccountID := strings.TrimSpace(s.me.ID)
+	s.mu.RUnlock()
+	if currentAccountID != "" && strings.TrimSpace(accountID) != currentAccountID {
+		return fmt.Errorf("X task reply context account does not match the authenticated X account")
+	}
+	return nil
+}
+
 // RuntimeTools builds the X-identity-sensitive runtime overrides. The Handler
 // composes these ahead of its complete generic runtime so unrelated actions keep
 // their full application dependencies.
@@ -612,6 +646,9 @@ func (s *XService) runtimeTools(callerTaskID, projectID, accountID, userID, conv
 			}
 			if s.taskContextRepo == nil {
 				return fmt.Errorf("X task context repository is not configured")
+			}
+			if err := s.validateRuntimeTaskContext(projectID, accountID, userID, conversationID, replyToTweetID); err != nil {
+				return err
 			}
 			if err := s.taskRepo.UpdateXOriginWithExecutor(ctx, exec, task.ID); err != nil {
 				return err

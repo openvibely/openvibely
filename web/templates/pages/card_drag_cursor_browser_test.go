@@ -218,7 +218,7 @@ window.addEventListener('DOMContentLoaded', function() {
       taskMenuTrigger.focus();
       taskMenuTrigger.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true, detail:1}));
 	      if (taskMenuTrigger.getAttribute('aria-expanded') !== 'true') fail('task menu must expose its open state');
-	      await waitFor(function() { return selectedActiveTask.querySelector('[data-task-card-merge-options] .htmx-indicator') === null; }, 'authoritative task merge options before board refresh');
+	      if (selectedActiveTask.querySelector('[data-task-card-merge-options]')) fail('task menu must not hydrate merge options after opening');
 	      if (document.querySelector('#kanban-board').getAttribute('data-open-kanban-menu-key') !== 'task-task-active-status-drag') fail('task menu open key was not recorded before refresh');      var focusedTaskOption = Array.from(selectedActiveTask.querySelectorAll('[data-kanban-menu-content] a, [data-kanban-menu-content] button')).find(function(option) { return option.textContent.trim() === 'Edit'; });
       if (!focusedTaskOption) fail('task menu must render the pre-refresh Edit option');
       focusedTaskOption.focus();
@@ -346,8 +346,6 @@ window.addEventListener('DOMContentLoaded', function() {
 			page := strings.Replace(out.String(), "https://unpkg.com/htmx.org@2.0.4", "/htmx-2.0.4.min.js", 1)
 			page = strings.Replace(page, "</head>", runner+"</head>", 1)
 			_, _ = w.Write([]byte(page))
-		case "/tasks/task-active-status-drag/card/merge-options":
-			_, _ = w.Write([]byte(`<li data-task-card-merge-options hx-get="/tasks/task-active-status-drag/card/merge-options" hx-trigger="task-card-menu-open" hx-swap="outerHTML"></li>`))
 		case "/refresh-kanban":
 			refreshedTasks := append([]models.Task(nil), tasks...)
 			if r.URL.Query().Get("state") == "removed" {
