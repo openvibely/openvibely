@@ -2500,6 +2500,8 @@ func TestEmailServiceReloadFromSettingsUsesNewPollSnapshot(t *testing.T) {
 
 	var loadCalls atomic.Int32
 	observedAddresses := make(chan string, 4)
+	oldClient := newFakeEmailIMAPClient(testIMAPMessageWithBody(1, "old self", "old@example.com", "old body"))
+	newClient := newFakeEmailIMAPClient(testIMAPMessageWithBody(1, "new self", "new@example.com", "new body"))
 	svc := &EmailService{}
 	svc.configLoader = func(context.Context) (EmailRuntimeConfig, error) {
 		switch loadCalls.Add(1) {
@@ -2513,16 +2515,28 @@ func TestEmailServiceReloadFromSettingsUsesNewPollSnapshot(t *testing.T) {
 	}
 	svc.connectIMAP = func(_ context.Context, cfg EmailRuntimeConfig) (emailIMAPClient, error) {
 		observedAddresses <- cfg.Address
-		return newFakeEmailIMAPClient(), nil
+		switch cfg.Address {
+		case oldConfig.Address:
+			return oldClient, nil
+		case newConfig.Address:
+			return newClient, nil
+		default:
+			return newFakeEmailIMAPClient(), nil
+		}
 	}
 
 	require.NoError(t, svc.Start())
+	defer svc.Stop()
 	select {
 	case address := <-observedAddresses:
 		require.Equal(t, "old@example.com", address)
 	case <-time.After(time.Second):
 		t.Fatal("initial poll did not observe the loaded address")
 	}
+	require.Eventually(t, func() bool {
+		seen := oldClient.seenIDs()
+		return len(seen) == 1 && seen[0] == 1
+	}, time.Second, time.Millisecond, "initial poll must filter using its loaded address snapshot")
 
 	require.NoError(t, svc.ReloadFromSettings(context.Background()))
 	select {
@@ -2531,10 +2545,13 @@ func TestEmailServiceReloadFromSettingsUsesNewPollSnapshot(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("reloaded poll did not observe the new address")
 	}
+	require.Eventually(t, func() bool {
+		seen := newClient.seenIDs()
+		return len(seen) == 1 && seen[0] == 1
+	}, time.Second, time.Millisecond, "reloaded poll must filter using the new address snapshot")
 
 	require.NoError(t, svc.ReloadFromSettings(context.Background()))
 	assert.False(t, svc.IsRunning(), "removing the address must stop the poller instead of retaining the prior snapshot")
-	svc.Stop()
 }
 
 func TestEmailService_CompleteExecutionUsesSharedChatPromotion(t *testing.T) {
