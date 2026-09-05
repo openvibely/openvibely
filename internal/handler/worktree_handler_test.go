@@ -32,6 +32,16 @@ func worktreeFormRequest(method, path string, form url.Values) *http.Request {
 	return req
 }
 
+func taskCardActionDisabled(body, mergeType string) bool {
+	marker := `data-merge-type="` + mergeType + `"`
+	markerIndex := strings.Index(body, marker)
+	if markerIndex < 0 {
+		return false
+	}
+	buttonIndex := strings.LastIndex(body[:markerIndex], "<button")
+	return buttonIndex >= 0 && strings.Contains(body[buttonIndex:markerIndex], " disabled")
+}
+
 func worktreeExecute(e *echo.Echo, req *http.Request) *httptest.ResponseRecorder {
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
@@ -97,13 +107,17 @@ func TestHandler_TaskCardMergeOptionsUseAuthoritativeStateAndProjectOwnership(t 
 			t.Fatal(err)
 		}
 	}
+	menuState := h.taskCardMergeMenuStates(ctx, []models.Task{*task}, project.ID)[task.ID]
+	if !menuState.LocalEligible || !menuState.RebaseEligible || !menuState.PullEligible || menuState.PullRequest == nil || menuState.PullRequest.PRNumber != 42 {
+		t.Fatalf("board render did not precompute authoritative card menu state: %#v", menuState)
+	}
 
 	req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/card/merge-options?project_id="+project.ID, nil)
 	rec := worktreeExecute(e, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("eligible options status=%d body=%s", rec.Code, rec.Body.String())
 	}
-	for _, want := range []string{"Merge commit", "Fast-forward only", "Rebase onto main", "Squash merge", "View PR #42", `hx-trigger="task-card-menu-open"`} {
+	for _, want := range []string{"Merge commit", "Fast-forward only", "Rebase onto main", "Squash merge", "View PR #42", `data-task-card-local-submenu`, `data-task-card-github-submenu`} {
 		if !strings.Contains(rec.Body.String(), want) {
 			t.Fatalf("eligible options missing %q: %s", want, rec.Body.String())
 		}
@@ -134,8 +148,8 @@ func TestHandler_TaskCardMergeOptionsUseAuthoritativeStateAndProjectOwnership(t 
 		t.Fatal(err)
 	}
 	rec = worktreeExecute(e, httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/card/merge-options?project_id="+project.ID, nil))
-	if strings.Contains(rec.Body.String(), "Rebase onto") || !strings.Contains(rec.Body.String(), "Merge commit") {
-		t.Fatalf("dirty worktree should suppress rebase but retain supported commit merge, body=%s", rec.Body.String())
+	if !taskCardActionDisabled(rec.Body.String(), "rebase") || taskCardActionDisabled(rec.Body.String(), "merge") {
+		t.Fatalf("dirty worktree should disable rebase but retain supported commit merge, body=%s", rec.Body.String())
 	}
 	dirtyRebase := worktreeFormRequest(http.MethodPost, "/tasks/"+task.ID+"/worktree/rebase", url.Values{
 		"merge_source": {"task_card"}, "project_id": {project.ID},
@@ -148,8 +162,8 @@ func TestHandler_TaskCardMergeOptionsUseAuthoritativeStateAndProjectOwnership(t 
 	}
 	run("worktree", "lock", worktreePath)
 	rec = worktreeExecute(e, httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/card/merge-options?project_id="+project.ID, nil))
-	if strings.Contains(rec.Body.String(), "Merge unavailable") || strings.Contains(rec.Body.String(), "Create PR unavailable") || strings.Contains(rec.Body.String(), "data-task-card-merge-action") {
-		t.Fatalf("locked worktree should omit unavailable local merge actions, body=%s", rec.Body.String())
+	if strings.Contains(rec.Body.String(), "Merge unavailable") || strings.Contains(rec.Body.String(), "Create PR unavailable") || !taskCardActionDisabled(rec.Body.String(), "merge") || !taskCardActionDisabled(rec.Body.String(), "pr") {
+		t.Fatalf("locked worktree should retain stable disabled local and GitHub actions, body=%s", rec.Body.String())
 	}
 	run("worktree", "unlock", worktreePath)
 
@@ -172,8 +186,8 @@ func TestHandler_TaskCardMergeOptionsUseAuthoritativeStateAndProjectOwnership(t 
 		t.Fatal(err)
 	}
 	rec = worktreeExecute(e, httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/card/merge-options?project_id="+project.ID, nil))
-	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), "Merge unavailable") || strings.Contains(rec.Body.String(), "data-task-card-merge-action") {
-		t.Fatalf("conflict state should omit unavailable local merge actions, status=%d body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), "Merge unavailable") || !taskCardActionDisabled(rec.Body.String(), "merge") {
+		t.Fatalf("conflict state should retain stable disabled local actions, status=%d body=%s", rec.Code, rec.Body.String())
 	}
 	conflictPost := worktreeFormRequest(http.MethodPost, "/tasks/"+task.ID+"/worktree/merge", url.Values{
 		"merge_type": {"merge"}, "merge_source": {"task_card"}, "project_id": {project.ID},
@@ -283,11 +297,11 @@ func TestHandler_TaskCardMergeOptionsUseCanonicalMergeEligibility(t *testing.T) 
 			if rec.Code != http.StatusOK {
 				t.Fatalf("options status=%d body=%s", rec.Code, body)
 			}
-			if strings.Contains(body, "data-task-card-merge-action") || strings.Contains(body, "Merge unavailable") {
-				t.Fatalf("ineligible card state exposed local merge controls or an unavailable placeholder: %s", body)
+			if !taskCardActionDisabled(body, "merge") || strings.Contains(body, "Merge unavailable") {
+				t.Fatalf("ineligible card state did not retain a disabled local action without unavailable copy: %s", body)
 			}
-			if got := strings.Contains(body, "data-task-card-pr-action"); got != tt.wantPR {
-				t.Fatalf("PR eligibility changed: got action=%v want=%v body=%s", got, tt.wantPR, body)
+			if got := !taskCardActionDisabled(body, "pr"); got != tt.wantPR {
+				t.Fatalf("PR eligibility changed: got enabled=%v want=%v body=%s", got, tt.wantPR, body)
 			}
 		})
 	}
@@ -320,8 +334,8 @@ func TestHandler_TaskCardCreatePROptionUsesAuthoritativeEligibility(t *testing.T
 		}
 		return rec.Body.String()
 	}
-	if body := requestOptions(); strings.Contains(body, "data-task-card-pr-action") || strings.Contains(body, "Create PR unavailable") {
-		t.Fatalf("task without branch should omit the unavailable Create PR option: %s", body)
+	if body := requestOptions(); !taskCardActionDisabled(body, "pr") || strings.Contains(body, "Create PR unavailable") {
+		t.Fatalf("task without branch should pre-render a disabled Create PR option: %s", body)
 	}
 
 	task.WorktreeBranch = "task/pr-eligibility"
@@ -329,8 +343,8 @@ func TestHandler_TaskCardCreatePROptionUsesAuthoritativeEligibility(t *testing.T
 	if err := h.taskRepo.Update(ctx, task); err != nil {
 		t.Fatal(err)
 	}
-	if body := requestOptions(); strings.Contains(body, "data-task-card-pr-action") || strings.Contains(body, "Create PR unavailable") {
-		t.Fatalf("running task should omit the unavailable Create PR option: %s", body)
+	if body := requestOptions(); !taskCardActionDisabled(body, "pr") || strings.Contains(body, "Create PR unavailable") {
+		t.Fatalf("running task should pre-render a disabled Create PR option: %s", body)
 	}
 }
 

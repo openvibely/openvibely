@@ -18,11 +18,18 @@ import (
 var errTaskMutationEligibilityChanged = errors.New("task mutation eligibility changed")
 
 func (h *Handler) taskCardMergeEligibility(ctx context.Context, task *models.Task, mergeType string) (taskMergeActionState, bool, string) {
+	if task == nil {
+		return taskMergeActionState{}, false, "Task not found."
+	}
+	project, _ := h.projectRepo.GetByID(ctx, task.ProjectID)
+	return h.taskCardMergeEligibilityForProject(ctx, task, project, mergeType)
+}
+
+func (h *Handler) taskCardMergeEligibilityForProject(ctx context.Context, task *models.Task, project *models.Project, mergeType string) (taskMergeActionState, bool, string) {
 	var state taskMergeActionState
 	if task == nil {
 		return state, false, "Task not found."
 	}
-	project, _ := h.projectRepo.GetByID(ctx, task.ProjectID)
 	if project == nil || project.RepoPath == "" {
 		return state, false, "The project has no repository path."
 	}

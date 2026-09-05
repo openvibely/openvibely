@@ -25,7 +25,7 @@ func getProjectID(project *models.Project, projects []models.Project) string {
 	return ""
 }
 
-func Tasks(projects []models.Project, project *models.Project, tasks []models.Task, agents []models.LLMConfig, agentDefs []models.Agent, backlogSort string, completedSort string) templ.Component {
+func Tasks(projects []models.Project, project *models.Project, tasks []models.Task, agents []models.LLMConfig, agentDefs []models.Agent, backlogSort string, completedSort string, menuStates ...map[string]components.TaskCardMergeMenuState) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -58,7 +58,7 @@ func Tasks(projects []models.Project, project *models.Project, tasks []models.Ta
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = TasksContent(project, tasks, agents, agentDefs, backlogSort, completedSort).Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = TasksContent(project, tasks, agents, agentDefs, backlogSort, completedSort, menuStates...).Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -72,7 +72,7 @@ func Tasks(projects []models.Project, project *models.Project, tasks []models.Ta
 	})
 }
 
-func TasksContent(project *models.Project, tasks []models.Task, agents []models.LLMConfig, agentDefs []models.Agent, backlogSort string, completedSort string) templ.Component {
+func TasksContent(project *models.Project, tasks []models.Task, agents []models.LLMConfig, agentDefs []models.Agent, backlogSort string, completedSort string, menuStates ...map[string]components.TaskCardMergeMenuState) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -123,7 +123,7 @@ func TasksContent(project *models.Project, tasks []models.Task, agents []models.
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = components.KanbanBoard(tasks, project.ID, backlogSort, completedSort, agents, agentDefs).Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = components.KanbanBoard(tasks, project.ID, backlogSort, completedSort, agents, agentDefs, menuStates...).Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
