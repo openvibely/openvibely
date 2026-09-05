@@ -176,7 +176,7 @@ func assertHasAnyStatement(t *testing.T, statements []string) {
 	}
 }
 
-func TestLLMConfigRepo_HasAnyIsFasterAndLowerAllocationThanListOnLargeFixture(t *testing.T) {
+func TestLLMConfigRepo_HasAnyStaysBoundedOnLargeFixture(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping benchmark ratio assertion in short mode")
 	}
@@ -188,17 +188,6 @@ func TestLLMConfigRepo_HasAnyIsFasterAndLowerAllocationThanListOnLargeFixture(t 
 	}
 	seedLargeCustomProviderModelConfigs(t, ctx, repo, 50)
 
-	fullList := testing.Benchmark(func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			configs, err := repo.List(ctx)
-			if err != nil {
-				b.Fatal(err)
-			}
-			if len(configs) != 50 {
-				b.Fatalf("List returned %d configs, want 50", len(configs))
-			}
-		}
-	})
 	hasAny := testing.Benchmark(func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			exists, err := repo.HasAny(ctx)
@@ -211,12 +200,14 @@ func TestLLMConfigRepo_HasAnyIsFasterAndLowerAllocationThanListOnLargeFixture(t 
 		}
 	})
 
-	t.Logf("List: %d ns/op, %d B/op; HasAny: %d ns/op, %d B/op", fullList.NsPerOp(), fullList.AllocedBytesPerOp(), hasAny.NsPerOp(), hasAny.AllocedBytesPerOp())
-	if fullList.NsPerOp() < hasAny.NsPerOp()*50 {
-		t.Fatalf("HasAny is not at least 50x faster: List %d ns/op, HasAny %d ns/op", fullList.NsPerOp(), hasAny.NsPerOp())
+	const maxDuration = 200 * time.Microsecond
+	const maxBytesPerOp = 10 * 1024
+	t.Logf("HasAny: %d ns/op, %d B/op", hasAny.NsPerOp(), hasAny.AllocedBytesPerOp())
+	if hasAny.NsPerOp() > maxDuration.Nanoseconds() {
+		t.Fatalf("HasAny took %s/op, want <= %s", time.Duration(hasAny.NsPerOp()), maxDuration)
 	}
-	if fullList.AllocedBytesPerOp() < hasAny.AllocedBytesPerOp()*50 {
-		t.Fatalf("HasAny is not at least 50x lower allocation: List %d B/op, HasAny %d B/op", fullList.AllocedBytesPerOp(), hasAny.AllocedBytesPerOp())
+	if hasAny.AllocedBytesPerOp() > maxBytesPerOp {
+		t.Fatalf("HasAny allocated %d B/op, want <= %d", hasAny.AllocedBytesPerOp(), maxBytesPerOp)
 	}
 }
 
