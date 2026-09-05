@@ -224,7 +224,7 @@ func seedChannelStatusTargetFixture(tb testing.TB, db *sql.DB, projectID string,
 	}
 }
 
-func BenchmarkChannelStatusMaterializedVsAggregateSummary(b *testing.B) {
+func BenchmarkChannelStatusAggregateSummary(b *testing.B) {
 	db := newAuthAllowlistBenchDB(b)
 	seedAuthAllowlistFixture(b, db, authAllowlistBenchRows)
 	seedChannelStatusTargetFixture(b, db, authAllowlistBenchProjectID, 25000)
@@ -243,76 +243,59 @@ func BenchmarkChannelStatusMaterializedVsAggregateSummary(b *testing.B) {
 		targets:  NewChannelTargetRepo(db),
 	}
 
-	for _, tc := range []struct {
-		name string
-		run  func(context.Context) (int, error)
-	}{
-		{name: "materialized_lists", run: func(ctx context.Context) (int, error) {
-			count, err := listSettingsAuthAllowlists(ctx, repos.slack, repos.discord, repos.email, repos.telegram)
-			if err != nil {
-				return 0, err
-			}
-			targets, err := repos.targets.ListByProject(ctx, authAllowlistBenchProjectID)
-			if err != nil {
-				return 0, err
-			}
-			return count + len(targets), nil
-		}},
-		{name: "aggregate_summary", run: func(ctx context.Context) (int, error) {
-			slack, err := repos.slack.CountByProject(ctx, authAllowlistBenchProjectID)
-			if err != nil {
-				return 0, err
-			}
-			discord, err := repos.discord.CountByProject(ctx, authAllowlistBenchProjectID)
-			if err != nil {
-				return 0, err
-			}
-			email, err := repos.email.CountByProject(ctx, authAllowlistBenchProjectID)
-			if err != nil {
-				return 0, err
-			}
-			telegram, err := repos.telegram.CountByProject(ctx, authAllowlistBenchProjectID)
-			if err != nil {
-				return 0, err
-			}
-			targetSummary, err := repos.targets.SummarizeByProject(ctx, authAllowlistBenchProjectID)
-			if err != nil {
-				return 0, err
-			}
-			return slack + discord + email + telegram + targetSummary.Total, nil
-		}},
-	} {
-		b.Run(tc.name, func(b *testing.B) {
-			warm, err := tc.run(ctx)
-			if err != nil {
-				b.Fatalf("warm channel status summary: %v", err)
-			}
-			if warm != authAllowlistBenchRows*4+25000 {
-				b.Fatalf("warm channel status rows = %d, want %d", warm, authAllowlistBenchRows*4+25000)
-			}
-			durations := make([]time.Duration, 0, b.N)
-			b.ReportAllocs()
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
-				start := time.Now()
-				got, err := tc.run(ctx)
-				elapsed := time.Since(start)
-				if err != nil {
-					b.Fatalf("channel status summary: %v", err)
-				}
-				if got != authAllowlistBenchRows*4+25000 {
-					b.Fatalf("channel status rows = %d, want %d", got, authAllowlistBenchRows*4+25000)
-				}
-				durations = append(durations, elapsed)
-			}
-			b.StopTimer()
-			if len(durations) > 0 {
-				sort.Slice(durations, func(i, j int) bool { return durations[i] < durations[j] })
-				median := durations[len(durations)/2]
-				b.ReportMetric(float64(median.Nanoseconds())/1e6, "p50_ms")
-			}
-		})
+	run := func(ctx context.Context) (int, error) {
+		slack, err := repos.slack.CountByProject(ctx, authAllowlistBenchProjectID)
+		if err != nil {
+			return 0, err
+		}
+		discord, err := repos.discord.CountByProject(ctx, authAllowlistBenchProjectID)
+		if err != nil {
+			return 0, err
+		}
+		email, err := repos.email.CountByProject(ctx, authAllowlistBenchProjectID)
+		if err != nil {
+			return 0, err
+		}
+		telegram, err := repos.telegram.CountByProject(ctx, authAllowlistBenchProjectID)
+		if err != nil {
+			return 0, err
+		}
+		targetSummary, err := repos.targets.SummarizeByProject(ctx, authAllowlistBenchProjectID)
+		if err != nil {
+			return 0, err
+		}
+		return slack + discord + email + telegram + targetSummary.Total, nil
 	}
+	b.Run("current", func(b *testing.B) {
+		warm, err := run(ctx)
+		if err != nil {
+			b.Fatalf("warm channel status summary: %v", err)
+		}
+		if warm != authAllowlistBenchRows*4+25000 {
+			b.Fatalf("warm channel status rows = %d, want %d", warm, authAllowlistBenchRows*4+25000)
+		}
+		durations := make([]time.Duration, 0, b.N)
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			start := time.Now()
+			got, err := run(ctx)
+			elapsed := time.Since(start)
+			if err != nil {
+				b.Fatalf("channel status summary: %v", err)
+			}
+			if got != authAllowlistBenchRows*4+25000 {
+				b.Fatalf("channel status rows = %d, want %d", got, authAllowlistBenchRows*4+25000)
+			}
+			durations = append(durations, elapsed)
+		}
+		b.StopTimer()
+		if len(durations) > 0 {
+			sort.Slice(durations, func(i, j int) bool { return durations[i] < durations[j] })
+			median := durations[len(durations)/2]
+			b.ReportMetric(float64(median.Nanoseconds())/1e6, "p50_ms")
+		}
+	})
 }
 
 func TestChannelAuthAllowlistIdentityLookupPlansRemainIndexed(t *testing.T) {
