@@ -1736,6 +1736,9 @@ func (h *Handler) DeleteAgent(c echo.Context) error {
 	if agent == nil {
 		return echo.NewHTTPError(http.StatusNotFound, "Agent not found")
 	}
+	if err := h.ensureAgentProjectAccess(c, agent); err != nil {
+		return err
+	}
 	if agent.GeneratedStatus == models.AgentStatusProtected {
 		return echo.NewHTTPError(http.StatusForbidden, "protected system agents cannot be deleted")
 	}

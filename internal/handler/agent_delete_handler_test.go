@@ -485,6 +485,69 @@ func truncateBody(s string, max int) string {
 	return s[:max] + "...[truncated]"
 }
 
+func TestHandler_DeleteAgent_RejectsExplicitForeignProject(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	agentRepo := repository.NewAgentRepo(db)
+	h.SetAgentRepo(agentRepo)
+	h.SetAgentSkillRoot(t.TempDir())
+
+	projectA := &models.Project{Name: "Project A", RepoPath: t.TempDir()}
+	if err := h.projectSvc.Create(t.Context(), projectA); err != nil {
+		t.Fatalf("create project A: %v", err)
+	}
+	projectB := &models.Project{Name: "Project B", RepoPath: t.TempDir()}
+	if err := h.projectSvc.Create(t.Context(), projectB); err != nil {
+		t.Fatalf("create project B: %v", err)
+	}
+
+	projectBRoot := filepath.Join(projectB.RepoPath, ".openvibely")
+	writeAgentRootSKILLSmd(t, projectBRoot, "foreign-agent", "Foreign Agent", "project B agent")
+	agentDir := filepath.Join(projectBRoot, "agents", "foreign-agent")
+	agentsIndexPath := filepath.Join(projectBRoot, "agents", "AGENTS.md")
+	indexBefore, err := os.ReadFile(agentsIndexPath)
+	if err != nil {
+		t.Fatalf("read project B index before delete: %v", err)
+	}
+
+	agent := &models.Agent{
+		Name:      "Foreign Agent",
+		Key:       "foreign-agent",
+		Scope:     models.AgentScopeProject,
+		ProjectID: projectB.ID,
+		Model:     "inherit",
+		Tools:     []string{},
+	}
+	if err := agentRepo.Create(t.Context(), agent); err != nil {
+		t.Fatalf("create foreign agent: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodDelete, "/agents/"+agent.ID+"?project_id="+projectA.ID, nil)
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected foreign delete to return 404, got %d: %s", rec.Code, rec.Body.String())
+	}
+	stored, err := agentRepo.GetByID(t.Context(), agent.ID)
+	if err != nil {
+		t.Fatalf("reload foreign agent: %v", err)
+	}
+	if stored == nil {
+		t.Fatal("foreign agent was deleted from the database")
+	}
+	if stat, err := os.Stat(agentDir); err != nil || !stat.IsDir() {
+		t.Fatalf("foreign agent directory changed: stat=%v err=%v", stat, err)
+	}
+	indexAfter, err := os.ReadFile(agentsIndexPath)
+	if err != nil {
+		t.Fatalf("read project B index after delete: %v", err)
+	}
+	if string(indexAfter) != string(indexBefore) {
+		t.Fatalf("foreign agent index changed\nbefore:\n%s\nafter:\n%s", indexBefore, indexAfter)
+	}
+}
+
 // TestHandler_DeleteAgent_ProjectScopedRemovesCorrectProjectDirectory is the
 // key two-project regression test for Bug 1. It creates two projects, places a
 // project-scoped agent in the second project, sends
@@ -671,10 +734,10 @@ func TestHandler_ListAgents_RemovedProjectOverrideDoesNotRematerializeStaleState
 }
 
 // TestHandler_DeleteAgent_ProjectScopedUsesAgentProjectID verifies that when a
-// project-scoped agent has ProjectID set, deleting it without supplying a
-// ?project_id query string still removes the agent directory from the correct
-// project. This covers non-browser callers and older UI requests that omit the
-// project context.
+// project-scoped agent has ProjectID set, deleting it from the selected owning
+// project without supplying a ?project_id query string removes the agent
+// directory from the correct project. This covers non-browser callers and older
+// UI requests that rely on the saved selected-project context.
 func TestHandler_DeleteAgent_ProjectScopedUsesAgentProjectID(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
 	agentRepo := repository.NewAgentRepo(db)
@@ -690,6 +753,9 @@ func TestHandler_DeleteAgent_ProjectScopedUsesAgentProjectID(t *testing.T) {
 	proj := &models.Project{Name: "Project Alpha", RepoPath: projectRepoDir}
 	if err := h.projectSvc.Create(t.Context(), proj); err != nil {
 		t.Fatalf("create project: %v", err)
+	}
+	if err := h.settingsRepo.Set(t.Context(), uiPreferenceSelectedProjectIDKey, proj.ID); err != nil {
+		t.Fatalf("select owning project: %v", err)
 	}
 
 	// Write the agent's SKILLS.md inside the project's .openvibely root.
