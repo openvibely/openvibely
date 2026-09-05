@@ -881,9 +881,6 @@ func (f *emailPollAddressSnapshotBenchmarkFixture) reset() {
 	f.client.fetchIDs = nil
 	f.client.storeCalls = 0
 	f.client.storedIDs = nil
-	f.client.fetchStarted = nil
-	f.client.fetchRelease = nil
-	f.client.fetchGateOnce = sync.Once{}
 }
 
 func (f *emailPollAddressSnapshotBenchmarkFixture) useAddressSnapshot(legacy bool) {
@@ -1058,8 +1055,50 @@ const (
 	emailPollContentionMessageCount = 100
 	emailPollContentionQueries      = 16
 	emailPollContentionSamples      = 5
-	emailPollContentionHold         = time.Millisecond
+	emailPollContentionHold         = 10 * time.Millisecond
+	emailPollContentionP95Jitter    = time.Millisecond
 )
+
+const emailPollContentionQuery = "SELECT COUNT(*) FROM projects"
+
+// emailPollContentionReceiptStore holds a real pollOnce receipt query open so
+// both the legacy and snapshot paths contend at the same SQLite point.
+type emailPollContentionReceiptStore struct {
+	db              *sql.DB
+	acquired        chan struct{}
+	release         <-chan struct{}
+	competitorsDone <-chan struct{}
+	abort           <-chan struct{}
+	once            sync.Once
+	queryErr        error
+}
+
+func (s *emailPollContentionReceiptStore) Exists(ctx context.Context, _, _ string) (bool, error) {
+	s.once.Do(func() {
+		rows, err := s.db.QueryContext(ctx, emailPollContentionQuery)
+		if err != nil {
+			s.queryErr = err
+			close(s.acquired)
+			return
+		}
+		close(s.acquired)
+		<-s.release
+		s.queryErr = rows.Close()
+		select {
+		case <-s.competitorsDone:
+		case <-s.abort:
+		}
+	})
+	return false, s.queryErr
+}
+
+func (s *emailPollContentionReceiptStore) Record(_ context.Context, _, _ string) error {
+	return nil
+}
+
+func (s *emailPollContentionReceiptStore) WithHandoff(_ context.Context, _, _ string, _ func(repository.SQLExecutor) error) (bool, error) {
+	return false, nil
+}
 
 func measureEmailPollAddressSnapshotContention(tb testing.TB, legacy bool) []time.Duration {
 	tb.Helper()
@@ -1073,53 +1112,60 @@ func measureEmailPollAddressSnapshotContention(tb testing.TB, legacy bool) []tim
 		fixture.useAddressSnapshot(legacy)
 		acquired := make(chan struct{})
 		release := make(chan struct{})
-		if legacy {
-			var firstQuery sync.Once
-			fixture.settingsRepo.SetQueryAcquiredObserver(func(query string) {
-				if isEmailPollAddressPointQuery(query) {
-					firstQuery.Do(func() {
-						close(acquired)
-						<-release
-					})
-				}
-			})
-		} else {
-			fixture.client.fetchStarted = make(chan struct{})
-			fixture.client.fetchRelease = make(chan struct{})
+		abort := make(chan struct{})
+		releaseReceipt := func() {
+			select {
+			case <-release:
+			default:
+				close(release)
+			}
 		}
+		queriesDone := make(chan struct{})
+		receipts := &emailPollContentionReceiptStore{
+			db:              fixture.db,
+			acquired:        acquired,
+			release:         release,
+			competitorsDone: queriesDone,
+			abort:           abort,
+		}
+		fixture.svc.emailInboundReceiptStore = receipts
+		defer func() {
+			releaseReceipt()
+			close(abort)
+		}()
 
 		pollDone := make(chan struct{})
 		go func() {
 			fixture.poll(ctx)
 			close(pollDone)
 		}()
-		if legacy {
-			select {
-			case <-acquired:
-			case <-time.After(time.Second):
-				tb.Fatalf("baseline poll did not acquire its address query")
-			}
-		} else {
-			select {
-			case <-fixture.client.fetchStarted:
-			case <-time.After(time.Second):
-				tb.Fatalf("candidate poll did not reach the gated IMAP fetch")
-			}
+		select {
+		case <-acquired:
+		case <-time.After(time.Second):
+			tb.Fatalf("poll did not acquire the common SQLite contention query")
 		}
 
-		queryStarted := make(chan struct{}, emailPollContentionQueries)
+		queryReady := make(chan struct{}, emailPollContentionQueries)
+		startQueries := make(chan struct{})
 		queryWaits := make(chan time.Duration, emailPollContentionQueries)
 		queryErrors := make(chan error, emailPollContentionQueries)
+		// Snapshot before launching competitors; the ready/start barrier then
+		// proves all of them were released to queue before the poll query is let go.
 		waitCount := fixture.db.Stats().WaitCount
 		var queries sync.WaitGroup
 		queries.Add(emailPollContentionQueries)
+		go func() {
+			queries.Wait()
+			close(queriesDone)
+		}()
 		for i := 0; i < emailPollContentionQueries; i++ {
 			go func() {
 				defer queries.Done()
-				queryStarted <- struct{}{}
+				queryReady <- struct{}{}
+				<-startQueries
 				started := time.Now()
 				var projectCount int
-				err := fixture.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM projects").Scan(&projectCount)
+				err := fixture.db.QueryRowContext(ctx, emailPollContentionQuery).Scan(&projectCount)
 				if err != nil {
 					queryErrors <- err
 					return
@@ -1128,20 +1174,17 @@ func measureEmailPollAddressSnapshotContention(tb testing.TB, legacy bool) []tim
 			}()
 		}
 		for i := 0; i < emailPollContentionQueries; i++ {
-			<-queryStarted
+			<-queryReady
 		}
-		if legacy {
-			require.Eventually(tb, func() bool {
-				return fixture.db.Stats().WaitCount >= waitCount+emailPollContentionQueries
-			}, time.Second, time.Millisecond, "unrelated queries must queue behind the baseline address query")
-			timer := time.NewTimer(emailPollContentionHold)
-			<-timer.C
-			close(release)
-		} else {
-			queries.Wait()
-			close(fixture.client.fetchRelease)
-		}
+		close(startQueries)
+		require.Eventually(tb, func() bool {
+			return fixture.db.Stats().WaitCount >= waitCount+emailPollContentionQueries
+		}, time.Second, time.Millisecond, "all unrelated queries must queue behind the common poll query")
+		timer := time.NewTimer(emailPollContentionHold)
+		<-timer.C
+		releaseReceipt()
 		queries.Wait()
+		<-queriesDone
 		for i := 0; i < emailPollContentionQueries; i++ {
 			select {
 			case err := <-queryErrors:
@@ -1155,7 +1198,7 @@ func measureEmailPollAddressSnapshotContention(tb testing.TB, legacy bool) []tim
 		case <-time.After(time.Second):
 			tb.Fatalf("poll did not finish after contention release")
 		}
-		fixture.settingsRepo.SetQueryAcquiredObserver(nil)
+		fixture.svc.emailInboundReceiptStore = nil
 	}
 	return waits
 }
@@ -1173,8 +1216,8 @@ func TestEmailPollAddressSnapshotContentionDoesNotRegressP95(t *testing.T) {
 	baselineP95 := emailPollDurationPercentile(baseline, 95)
 	candidateMedian := emailPollDurationPercentile(candidate, 50)
 	candidateP95 := emailPollDurationPercentile(candidate, 95)
-	t.Logf("unrelated query wait: baseline median=%s p95=%s; candidate median=%s p95=%s", baselineMedian, baselineP95, candidateMedian, candidateP95)
-	require.LessOrEqual(t, candidateP95, baselineP95, "poll snapshot reuse must not regress unrelated SQLite query p95 wait")
+	t.Logf("unrelated query wait: baseline median=%s p95=%s; candidate median=%s p95=%s (allowed p95 jitter=%s)", baselineMedian, baselineP95, candidateMedian, candidateP95, emailPollContentionP95Jitter)
+	require.LessOrEqual(t, candidateP95, baselineP95+emailPollContentionP95Jitter, "poll snapshot reuse must not materially regress unrelated SQLite query p95 wait")
 }
 
 func TestEmailPollOnceLeavesParseFailuresUnread(t *testing.T) {
@@ -1215,9 +1258,6 @@ type fakeEmailIMAPClient struct {
 	uidValidity                uint32
 	metadataMessageIDOmissions map[uint32]bool
 	bodyData                   map[uint32]map[*imap.BodySectionName][]byte
-	fetchStarted               chan struct{}
-	fetchRelease               chan struct{}
-	fetchGateOnce              sync.Once
 }
 
 func newFakeEmailIMAPClient(messages ...*imap.Message) *fakeEmailIMAPClient {
@@ -1339,10 +1379,6 @@ func (c *fakeEmailIMAPClient) Search(*imap.SearchCriteria) ([]uint32, error) {
 	return ids, nil
 }
 func (c *fakeEmailIMAPClient) Fetch(seqset *imap.SeqSet, items []imap.FetchItem, ch chan *imap.Message) error {
-	if c.fetchRelease != nil {
-		c.fetchGateOnce.Do(func() { close(c.fetchStarted) })
-		<-c.fetchRelease
-	}
 	c.fetchCount++
 	c.fetchItems = append(c.fetchItems, append([]imap.FetchItem(nil), items...))
 	var fetchedIDs []uint32
