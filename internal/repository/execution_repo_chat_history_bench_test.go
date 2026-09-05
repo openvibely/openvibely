@@ -24,11 +24,6 @@ func TestExecutionRepo_ListChatHistoryLatestUsesProjectHistoryIndex(t *testing.T
 	repo := NewExecutionRepo(db)
 	ctx := context.Background()
 
-	baseline := explainExecutionQueryPlan(t, db, legacyChatHistorySQL(), chatHistoryBenchTargetProjectID, chatHistoryBenchLimit)
-	if !strings.Contains(baseline, "USE TEMP B-TREE FOR ORDER BY") {
-		t.Fatalf("legacy plan = %s, want temporary ORDER BY sort", baseline)
-	}
-
 	optimizedQuery, optimizedArgs := chatHistoryPageSQL(chatHistoryBenchTargetProjectID, "", chatHistoryBenchLimit)
 	optimized := explainExecutionQueryPlan(t, db, optimizedQuery, optimizedArgs...)
 	if !strings.Contains(optimized, "idx_executions_chat_history_project_started") {
@@ -167,13 +162,8 @@ func BenchmarkExecutionRepoListChatHistory50kProject(b *testing.B) {
 			seedChatHistoryBenchFixture(b, db, tc.targetOlder)
 			repo := NewExecutionRepo(db)
 			ctx := context.Background()
-			legacyQuery := legacyChatHistorySQL()
 			optimizedQuery, optimizedArgs := chatHistoryPageSQL(chatHistoryBenchTargetProjectID, "", chatHistoryBenchLimit)
 
-			legacyPlan := explainExecutionQueryPlan(b, db, legacyQuery, chatHistoryBenchTargetProjectID, chatHistoryBenchLimit)
-			if !strings.Contains(legacyPlan, "USE TEMP B-TREE FOR ORDER BY") {
-				b.Fatalf("legacy plan = %s, want temporary ORDER BY sort", legacyPlan)
-			}
 			optimizedPlan := explainExecutionQueryPlan(b, db, optimizedQuery, optimizedArgs...)
 			if strings.Contains(optimizedPlan, "USE TEMP B-TREE FOR ORDER BY") {
 				b.Fatalf("optimized plan = %s, want no temporary ORDER BY sort", optimizedPlan)
@@ -182,18 +172,7 @@ func BenchmarkExecutionRepoListChatHistory50kProject(b *testing.B) {
 				b.Fatalf("optimized plan = %s, want chat history project/order index", optimizedPlan)
 			}
 
-			b.Run("legacy_join_sort", func(b *testing.B) {
-				for i := 0; i < b.N; i++ {
-					rows, err := db.QueryContext(ctx, legacyQuery, chatHistoryBenchTargetProjectID, chatHistoryBenchLimit)
-					if err != nil {
-						b.Fatal(err)
-					}
-					if got := drainExecutionRows(b, rows); got != chatHistoryBenchLimit {
-						b.Fatalf("rows = %d, want %d", got, chatHistoryBenchLimit)
-					}
-				}
-			})
-			b.Run("optimized_repository", func(b *testing.B) {
+			b.Run("repository", func(b *testing.B) {
 				for i := 0; i < b.N; i++ {
 					history, err := repo.ListChatHistory(ctx, chatHistoryBenchTargetProjectID, chatHistoryBenchLimit)
 					if err != nil {
@@ -260,14 +239,6 @@ func BenchmarkExecutionRepoViewTaskThreadPage(b *testing.B) {
 			}
 		}
 	})
-}
-
-func legacyChatHistorySQL() string {
-	return `SELECT ` + executionSelectColumnsAliasLight + `
-		 FROM executions e
-		 JOIN tasks t ON t.id = e.task_id
-		 WHERE t.project_id = ? AND t.category = 'chat'
-		 ORDER BY e.started_at DESC, e.rowid DESC LIMIT ?`
 }
 
 func seedChatHistoryBenchFixture(tb testing.TB, db *sql.DB, targetOlder bool) {
@@ -407,20 +378,4 @@ func explainExecutionQueryPlan(tb testing.TB, db *sql.DB, query string, args ...
 		tb.Fatalf("explain rows: %v", err)
 	}
 	return strings.Join(details, " | ")
-}
-
-func drainExecutionRows(tb testing.TB, rows *sql.Rows) int {
-	tb.Helper()
-	defer rows.Close()
-	count := 0
-	for rows.Next() {
-		if _, err := scanExecutionRow(rows); err != nil {
-			tb.Fatalf("scan execution row: %v", err)
-		}
-		count++
-	}
-	if err := rows.Err(); err != nil {
-		tb.Fatalf("execution rows: %v", err)
-	}
-	return count
 }
