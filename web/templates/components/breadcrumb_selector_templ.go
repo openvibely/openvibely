@@ -89,7 +89,7 @@ func BreadcrumbSelector(config models.BreadcrumbSelector) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		}
-		var templ_7745c5c3_Var6 = []any{"inline-flex items-center rounded-btn py-0 text-left font-bold leading-tight transition-colors hover:bg-base-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary", templ.KV("max-w-full gap-1 px-1 text-2xl", !config.CaretOnly), templ.KV("h-8 w-7 justify-center px-0", config.CaretOnly)}
+		var templ_7745c5c3_Var6 = []any{"inline-flex items-center rounded-btn py-0 text-left font-bold leading-tight transition-colors hover:bg-base-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary", templ.KV("max-w-full gap-1 px-1 text-2xl", !config.CaretOnly), templ.KV("relative z-10 h-8 w-7 justify-center px-0", config.CaretOnly)}
 		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var6...)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
