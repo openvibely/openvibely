@@ -1310,6 +1310,117 @@ func TestHandler_ChangesMergeEligibilityBlocksUnsafeAndMissingStates(t *testing.
 	}
 }
 
+func TestHandler_TaskCardMutationRejectsProjectChangeDuringRepositoryLease(t *testing.T) {
+	for _, tt := range []struct {
+		name      string
+		route     string
+		mergeType string
+	}{
+		{name: "merge", route: "merge", mergeType: "ff"},
+		{name: "rebase", route: "rebase"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			h, e, _, db := setupTestHandlerWithDB(t)
+			h.SetWorktreeService(service.NewWorktreeService(h.taskRepo, h.projectRepo, h.settingsRepo))
+			ctx := context.Background()
+			repoDir := createHandlerTestGitRepo(t)
+			target := service.GetCurrentBranch(repoDir)
+			project := &models.Project{Name: "Lease ownership " + tt.name, RepoPath: repoDir, IsDefault: true}
+			if err := h.projectSvc.Create(ctx, project); err != nil {
+				t.Fatal(err)
+			}
+			foreignProject := &models.Project{Name: "Foreign lease ownership " + tt.name, RepoPath: repoDir}
+			if err := h.projectSvc.Create(ctx, foreignProject); err != nil {
+				t.Fatal(err)
+			}
+			task := &models.Task{
+				ProjectID: project.ID, Title: "Lease ownership " + tt.name, Prompt: "test", Category: models.CategoryCompleted,
+				Status: models.StatusCompleted, MergeTargetBranch: target, MergeStatus: models.MergeStatusPending,
+			}
+			if err := h.taskRepo.Create(ctx, task); err != nil {
+				t.Fatal(err)
+			}
+			wtPath, branchName, err := h.worktreeSvc.SetupWorktree(ctx, task, repoDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := h.taskRepo.UpdateWorktreeInfo(ctx, task.ID, wtPath, branchName); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(wtPath, "lease-ownership.txt"), []byte("task change\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			runGit(t, wtPath, "add", "lease-ownership.txt")
+			runGit(t, wtPath, "commit", "-m", "task change")
+			if tt.route == "rebase" {
+				if err := os.WriteFile(filepath.Join(repoDir, "target-change.txt"), []byte("target change\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				runGit(t, repoDir, "add", "target-change.txt")
+				runGit(t, repoDir, "commit", "-m", "advance target")
+			}
+
+			beforeTarget := runGit(t, repoDir, "rev-parse", target)
+			beforeTaskBranch := runGit(t, repoDir, "rev-parse", branchName)
+			leaseEntered := make(chan struct{})
+			releaseLease := make(chan struct{})
+			leaseDone := make(chan error, 1)
+			go func() {
+				leaseDone <- h.worktreeSvc.WithRepositoryMutation(repoDir, func() error {
+					close(leaseEntered)
+					<-releaseLease
+					return nil
+				})
+			}()
+			<-leaseEntered
+
+			result := make(chan *httptest.ResponseRecorder, 1)
+			go func() {
+				form := url.Values{"merge_source": {"task_card"}, "project_id": {project.ID}}
+				if tt.mergeType != "" {
+					form.Set("merge_type", tt.mergeType)
+				}
+				req := worktreeFormRequest(http.MethodPost, "/tasks/"+task.ID+"/worktree/"+tt.route, form)
+				req.Header.Set("HX-Request", "true")
+				result <- worktreeExecute(e, req)
+			}()
+			select {
+			case rec := <-result:
+				close(releaseLease)
+				t.Fatalf("card %s bypassed repository lease: %d %s", tt.route, rec.Code, rec.Body.String())
+			case <-time.After(100 * time.Millisecond):
+			}
+
+			if _, err := db.ExecContext(ctx, "UPDATE tasks SET project_id = ? WHERE id = ?", foreignProject.ID, task.ID); err != nil {
+				close(releaseLease)
+				t.Fatal(err)
+			}
+			close(releaseLease)
+			if err := <-leaseDone; err != nil {
+				t.Fatalf("release repository mutation lease: %v", err)
+			}
+
+			select {
+			case rec := <-result:
+				if rec.Code != http.StatusConflict {
+					t.Fatalf("stale card %s returned %d, want 409: %s", tt.route, rec.Code, rec.Body.String())
+				}
+				if !strings.Contains(strings.ToLower(rec.Body.String()), "eligibility") && !strings.Contains(strings.ToLower(rec.Body.String()), "project") {
+					t.Fatalf("stale card %s response did not report changed ownership: %s", tt.route, rec.Body.String())
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatalf("card %s did not resume after repository lease release", tt.route)
+			}
+			if got := runGit(t, repoDir, "rev-parse", target); got != beforeTarget {
+				t.Fatalf("stale card %s mutated target branch: before=%s after=%s", tt.route, beforeTarget, got)
+			}
+			if got := runGit(t, repoDir, "rev-parse", branchName); got != beforeTaskBranch {
+				t.Fatalf("stale card %s mutated task branch: before=%s after=%s", tt.route, beforeTaskBranch, got)
+			}
+		})
+	}
+}
+
 func TestHandler_TaskCardRebaseRevalidatesEligibilityAfterRepositoryLease(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	h.SetWorktreeService(service.NewWorktreeService(h.taskRepo, h.projectRepo, h.settingsRepo))
