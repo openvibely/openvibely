@@ -94,52 +94,23 @@ func TestTaskRepo_GetThreadRenderMetadataQueryPlanUsesTaskID(t *testing.T) {
 }
 
 func BenchmarkTaskRepo_GetThreadRenderMetadataProjection(b *testing.B) {
-	for _, tc := range []struct {
-		name        string
-		run         func(context.Context, *TaskRepo, string) (*models.Task, error)
-		textBytesFn func(*models.Task) int64
-	}{
-		{
-			name: "legacy_full_task",
-			run: func(ctx context.Context, repo *TaskRepo, taskID string) (*models.Task, error) {
-				return repo.GetByID(ctx, taskID)
-			},
-			textBytesFn: func(task *models.Task) int64 {
-				return int64(len(task.Prompt) + len(task.ChainConfig) + len(task.SwarmConfig))
-			},
-		},
-		{
-			name: "compact_thread_metadata",
-			run: func(ctx context.Context, repo *TaskRepo, taskID string) (*models.Task, error) {
-				return repo.GetThreadRenderMetadata(ctx, taskID)
-			},
-			textBytesFn: func(*models.Task) int64 { return 0 },
-		},
-	} {
-		b.Run(tc.name, func(b *testing.B) {
-			db := testutil.NewTestDB(b)
-			repo := NewTaskRepo(db, nil)
-			ctx := context.Background()
-			task := &models.Task{ProjectID: "default", Title: "Thread Metadata Benchmark", Category: models.CategoryActive, Priority: 2, Prompt: strings.Repeat("prompt", 128*1024), Status: models.StatusRunning}
-			if err := repo.Create(ctx, task); err != nil {
-				b.Fatalf("Create: %v", err)
-			}
-			if _, err := db.ExecContext(ctx, `UPDATE tasks SET chain_config = ?, swarm_config = ? WHERE id = ?`, strings.Repeat("chain", 128*1024), strings.Repeat("swarm", 128*1024), task.ID); err != nil {
-				b.Fatalf("seed large configs: %v", err)
-			}
-			warm, err := tc.run(ctx, repo, task.ID)
-			if err != nil {
-				b.Fatalf("warm projection: %v", err)
-			}
-			b.ReportMetric(float64(tc.textBytesFn(warm)), "task_payload_bytes_scanned/op")
-			b.ReportAllocs()
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
-				if _, err := tc.run(ctx, repo, task.ID); err != nil {
-					b.Fatalf("projection: %v", err)
-				}
-			}
-		})
+	db := testutil.NewTestDB(b)
+	repo := NewTaskRepo(db, nil)
+	ctx := context.Background()
+	task := &models.Task{ProjectID: "default", Title: "Thread Metadata Benchmark", Category: models.CategoryActive, Priority: 2, Prompt: strings.Repeat("prompt", 128*1024), Status: models.StatusRunning}
+	if err := repo.Create(ctx, task); err != nil {
+		b.Fatalf("Create: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE tasks SET chain_config = ?, swarm_config = ? WHERE id = ?`, strings.Repeat("chain", 128*1024), strings.Repeat("swarm", 128*1024), task.ID); err != nil {
+		b.Fatalf("seed large configs: %v", err)
+	}
+	b.ReportMetric(0, "task_payload_bytes_scanned/op")
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := repo.GetThreadRenderMetadata(ctx, task.ID); err != nil {
+			b.Fatalf("projection: %v", err)
+		}
 	}
 }
 
