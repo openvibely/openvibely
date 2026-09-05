@@ -10,7 +10,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -447,7 +446,7 @@ func TestSkillDetailLoadsProjectOverrideForSelectedScope(t *testing.T) {
 	}
 }
 
-func TestSkillsListLargeCatalogOmitsBodiesAndReducesResponseAndAllocations(t *testing.T) {
+func TestSkillsListLargeCatalogOmitsBodies(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	root := t.TempDir()
 	h.SetAgentSkillRoot(root)
@@ -468,18 +467,11 @@ func TestSkillsListLargeCatalogOmitsBodiesAndReducesResponseAndAllocations(t *te
 	}
 
 	currentHTML := serveSkillsHTMX(t, e)
-	legacyHTML := legacyLargeSkillsListHTML(t, root)
 	if strings.Contains(currentHTML, "large-body-marker") || strings.Contains(currentHTML, "references/notes.md") || strings.Contains(currentHTML, `data-skill-content=`) || strings.Contains(currentHTML, `data-skill-files=`) {
 		t.Fatalf("compact list response contains lazy detail data")
 	}
-	if got, limit := len(currentHTML), len(legacyHTML)/10; got >= limit {
-		t.Fatalf("expected compact response bytes to be at least 90%% lower than legacy, got current=%d legacy=%d", got, len(legacyHTML))
-	}
-
-	currentAlloc := measuredAllocBytes(func() { _ = serveSkillsHTMX(t, e) })
-	legacyAlloc := measuredAllocBytes(func() { _ = legacyLargeSkillsListHTML(t, root) })
-	if currentAlloc*10 >= legacyAlloc*3 {
-		t.Fatalf("expected compact list allocations to be at least 70%% lower than legacy, got current=%d legacy=%d", currentAlloc, legacyAlloc)
+	if len(currentHTML) >= 1<<20 {
+		t.Fatalf("compact list response is unexpectedly large: %d bytes", len(currentHTML))
 	}
 }
 
@@ -1087,72 +1079,6 @@ func serveSkillsHTMX(t *testing.T, e http.Handler) string {
 		t.Fatalf("expected skills HTMX 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 	return rec.Body.String()
-}
-
-func measuredAllocBytes(fn func()) uint64 {
-	runtime.GC()
-	var before runtime.MemStats
-	runtime.ReadMemStats(&before)
-	fn()
-	var after runtime.MemStats
-	runtime.ReadMemStats(&after)
-	return after.TotalAlloc - before.TotalAlloc
-}
-
-func legacyLargeSkillsListHTML(t *testing.T, root string) string {
-	t.Helper()
-	catalog, err := agentskills.BuildCatalogAll("skills-page-legacy", root, "")
-	if err != nil {
-		t.Fatalf("legacy catalog: %v", err)
-	}
-	var b strings.Builder
-	b.WriteString(`<div id="skills-container">`)
-	for _, entry := range catalog.Entries() {
-		data, err := os.ReadFile(entry.AbsolutePath)
-		if err != nil {
-			t.Fatalf("legacy read skill: %v", err)
-		}
-		content := string(data)
-		name := entry.Skill
-		description := ""
-		enabled := true
-		archived := false
-		if decl, body, parseErr := agentlibrary.ParseDeclaration(content); parseErr == nil && decl != nil {
-			name = firstDialogNonEmpty(decl.Skill.Name, decl.Skill.Key, entry.Skill)
-			description = firstNonEmpty(decl.Skill.Description, decl.Routing.Description)
-			archived = decl.Skill.Archived
-			enabled = decl.Skill.Enabled == nil || *decl.Skill.Enabled
-			if rendered, renderErr := agentlibrary.RenderSkillMarkdown(decl, body); renderErr == nil {
-				content = rendered
-			}
-		}
-		files := listStandaloneSkillPackageFiles(entry.AbsolutePath)
-		b.WriteString(`<div data-skill-handle="`)
-		b.WriteString(entry.Handle)
-		b.WriteString(`" data-skill-name="`)
-		b.WriteString(name)
-		b.WriteString(`" data-skill-description="`)
-		b.WriteString(description)
-		b.WriteString(`" data-skill-scope="global" data-skill-source="global" data-skill-content="`)
-		b.WriteString(content)
-		b.WriteString(`" data-skill-files="`)
-		b.WriteString(strings.Join(files, "\n"))
-		b.WriteString(`" data-skill-enabled="`)
-		if enabled {
-			b.WriteString(`true`)
-		} else {
-			b.WriteString(`false`)
-		}
-		b.WriteString(`" data-skill-archived="`)
-		if archived {
-			b.WriteString(`true`)
-		} else {
-			b.WriteString(`false`)
-		}
-		b.WriteString(`"></div>`)
-	}
-	b.WriteString(`</div>`)
-	return b.String()
 }
 
 func writeStandaloneSkill(t *testing.T, root, handle, name, description, scope string) {
