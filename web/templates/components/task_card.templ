@@ -349,42 +349,86 @@ templ taskCardStateIcon(task models.Task) {
 	</span>
 }
 
-templ TaskCardMergeOptions(task *models.Task, projectID string, eligible bool, rebaseAvailable bool, taskPR *models.TaskPullRequest, prEligible bool) {
-	<li
-		data-task-card-merge-options
-		data-task-id={ task.ID }
-		hx-get={ fmt.Sprintf("/tasks/%s/card/merge-options?project_id=%s", task.ID, projectID) }
-		hx-trigger="task-card-menu-open"
-		hx-swap="outerHTML"
-	>
-		if eligible {
+type TaskCardMergeMenuState struct {
+	LocalEligible   bool
+	RebaseEligible  bool
+	PullEligible    bool
+	PullRequest     *models.TaskPullRequest
+}
+
+func taskCardMergeMenuStateMap(states []map[string]TaskCardMergeMenuState) map[string]TaskCardMergeMenuState {
+	if len(states) == 0 {
+		return nil
+	}
+	return states[0]
+}
+
+func taskCardMergeMenuState(taskID string, states []map[string]TaskCardMergeMenuState) TaskCardMergeMenuState {
+	if len(states) == 0 || states[0] == nil {
+		return TaskCardMergeMenuState{}
+	}
+	return states[0][taskID]
+}
+
+templ TaskCardMergeSubmenus(task *models.Task, projectID string, state TaskCardMergeMenuState) {
+	<li class="group relative" data-task-card-local-submenu>
+		<button type="button" class="text-sm min-h-11 justify-between">
+			<span>Local</span>
+			<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m9 18 6-6-6-6"></path>
+			</svg>
+		</button>
+		<ul tabindex="-1" class="menu menu-sm absolute right-0 top-full z-[110] hidden w-56 max-w-[calc(100vw-2rem)] border border-base-300 bg-base-100 p-2 shadow rounded-box group-hover:block group-focus-within:block">
+			<li class="menu-title"><span>Local</span></li>
 			for _, action := range TaskWorktreeMergeActions() {
-				if !action.RequiresRebaseEligibility || rebaseAvailable {
-					@TaskCardWorktreeMergeAction(task, projectID, action)
-				}
+				@TaskCardWorktreeMergeAction(task, projectID, action, state.LocalEligible && (!action.RequiresRebaseEligibility || state.RebaseEligible))
 			}
-		}
-		if taskPR != nil && taskPR.PRURL != "" && strings.EqualFold(strings.TrimSpace(taskPR.PRState), "open") {
-			<a class="text-sm min-h-11" href={ templ.SafeURL(taskPR.PRURL) } target="_blank" rel="noopener noreferrer">View PR #{ fmt.Sprintf("%d", taskPR.PRNumber) }</a>
-		} else if prEligible {
-			<button
-				type="button"
-				class="text-sm min-h-11"
-				data-task-card-pr-action
-				data-task-id={ task.ID }
-				data-project-id={ projectID }
-				data-task-title={ task.Title }
-				data-target-branch={ TaskWorktreeMergeTarget(task) }
-				data-merge-type="pr"
-				data-merge-label="Create PR"
-				data-merge-endpoint="pull-request"
-				onclick="runTaskCardAction(this)"
-			>Create PR</button>
-		}
+		</ul>
+	</li>
+	<li class="group relative" data-task-card-github-submenu>
+		<button type="button" class="text-sm min-h-11 justify-between">
+			<span>GitHub</span>
+			<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m9 18 6-6-6-6"></path>
+			</svg>
+		</button>
+		<ul tabindex="-1" class="menu menu-sm absolute right-0 top-full z-[110] hidden w-56 max-w-[calc(100vw-2rem)] border border-base-300 bg-base-100 p-2 shadow rounded-box group-hover:block group-focus-within:block">
+			<li class="menu-title"><span>GitHub</span></li>
+			<li>
+				if state.PullRequest != nil && state.PullRequest.PRURL != "" && strings.EqualFold(strings.TrimSpace(state.PullRequest.PRState), "open") {
+					<a class="text-sm min-h-11" href={ templ.SafeURL(state.PullRequest.PRURL) } target="_blank" rel="noopener noreferrer">View PR #{ fmt.Sprintf("%d", state.PullRequest.PRNumber) }</a>
+				} else {
+					<button
+						type="button"
+						class="text-sm min-h-11"
+						if !state.PullEligible {
+							disabled
+						}
+						data-task-card-pr-action
+						data-task-id={ task.ID }
+						data-project-id={ projectID }
+						data-target-branch={ TaskWorktreeMergeTarget(task) }
+						data-merge-type="pr"
+						data-merge-label="Create PR"
+						data-merge-endpoint="pull-request"
+						onclick="runTaskCardAction(this)"
+					>Create PR</button>
+				}
+			</li>
+		</ul>
 	</li>
 }
 
-templ TaskCard(task models.Task, projectID string, viewingCategory string, llmModels []models.LLMConfig, agentDefs []models.Agent) {
+templ TaskCardMergeOptions(task *models.Task, projectID string, eligible bool, rebaseAvailable bool, taskPR *models.TaskPullRequest, prEligible bool) {
+	@TaskCardMergeSubmenus(task, projectID, TaskCardMergeMenuState{
+		LocalEligible: eligible,
+		RebaseEligible: rebaseAvailable,
+		PullEligible: prEligible,
+		PullRequest: taskPR,
+	})
+}
+
+templ TaskCard(task models.Task, projectID string, viewingCategory string, llmModels []models.LLMConfig, agentDefs []models.Agent, menuStates ...map[string]TaskCardMergeMenuState) {
 	<div
 		id={ fmt.Sprintf("task-%s", task.ID) }
 		class="card bg-base-100 shadow-sm border border-base-300 hover:border-primary/40 hover:shadow-md transition-all mb-2 cursor-grab active:cursor-grabbing drag-cursor-surface relative min-w-0 overflow-visible"
@@ -402,7 +446,7 @@ templ TaskCard(task models.Task, projectID string, viewingCategory string, llmMo
 					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
 				</svg>
 			</label>
-			<ul tabindex="0" class="dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-32 max-w-[calc(100vw-2rem)] border border-base-300" data-kanban-menu-content>
+			<ul tabindex="0" class="dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-52 max-w-[calc(100vw-2rem)] translate-x-4 border border-base-300" data-kanban-menu-content>
 				<!-- Run option (hide in Active column) -->
 				if viewingCategory != "active" {
 					<li>
@@ -445,14 +489,7 @@ templ TaskCard(task models.Task, projectID string, viewingCategory string, llmMo
 						</a>
 					</li>
 				}
-				<li
-					data-task-card-merge-options
-					hx-get={ fmt.Sprintf("/tasks/%s/card/merge-options?project_id=%s", task.ID, projectID) }
-					hx-trigger="task-card-menu-open"
-					hx-swap="outerHTML"
-				>
-					<span class="text-sm min-h-11 opacity-60"><span class="loading loading-spinner loading-xs htmx-indicator"></span> Merge options</span>
-				</li>
+				@TaskCardMergeSubmenus(&task, projectID, taskCardMergeMenuState(task.ID, menuStates))
 			</ul>
 		</div>
 		<!-- X button in top right corner -->

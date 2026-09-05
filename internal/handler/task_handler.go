@@ -268,10 +268,36 @@ func (h *Handler) resolvePrimaryAgentDefinition(ctx context.Context, projectID, 
 	return &agent.ID, nil
 }
 
+func (h *Handler) taskCardMergeMenuStates(ctx context.Context, tasks []models.Task, projectID string) map[string]components.TaskCardMergeMenuState {
+	states := make(map[string]components.TaskCardMergeMenuState, len(tasks))
+	project, _ := h.projectRepo.GetByID(ctx, projectID)
+	openPRs := make(map[string]*models.TaskPullRequest)
+	if h.taskPullRequestRepo != nil {
+		if prs, err := h.taskPullRequestRepo.ListOpenByProjectID(ctx, projectID); err == nil {
+			for i := range prs {
+				openPRs[prs[i].TaskID] = &prs[i]
+			}
+		}
+	}
+	for i := range tasks {
+		task := &tasks[i]
+		mergeState, localEligible, _ := h.taskCardMergeEligibilityForProject(ctx, task, project, "merge")
+		pullEligible, _ := h.taskCardPullRequestEligibility(task, project)
+		states[task.ID] = components.TaskCardMergeMenuState{
+			LocalEligible:  localEligible,
+			RebaseEligible: mergeState.RebaseAvailable,
+			PullEligible:   pullEligible,
+			PullRequest:    openPRs[task.ID],
+		}
+	}
+	return states
+}
+
 func (h *Handler) renderKanbanBoard(c echo.Context, tasks []models.Task, projectID string, sortPrefs taskSortPreferences, llmModels []models.LLMConfig) error {
 	tasks = service.AttachSwarmChildren(tasks)
 	agentDefs := h.listAgentDefinitions(c.Request().Context())
-	return render(c, http.StatusOK, components.KanbanBoard(tasks, projectID, sortPrefs.Backlog, sortPrefs.Completed, llmModels, agentDefs))
+	menuStates := h.taskCardMergeMenuStates(c.Request().Context(), tasks, projectID)
+	return render(c, http.StatusOK, components.KanbanBoard(tasks, projectID, sortPrefs.Backlog, sortPrefs.Completed, llmModels, agentDefs, menuStates))
 }
 
 func (h *Handler) renderTaskBoardRefresh(c echo.Context, projectID string, adjustSort func(*taskSortPreferences)) error {
@@ -341,12 +367,13 @@ func (h *Handler) ListTasks(c echo.Context) error {
 	project, _ := h.projectSvc.GetByID(c.Request().Context(), projectID)
 	agents, _ := h.llmConfigRepo.ListBadgeOptions(c.Request().Context())
 	agentDefs := h.listTaskFormAgentDefinitions(c.Request().Context(), projectID, nil)
+	menuStates := h.taskCardMergeMenuStates(c.Request().Context(), tasks, projectID)
 
 	if isHTMX {
-		return render(c, http.StatusOK, pages.TasksContent(project, tasks, agents, agentDefs, sortPrefs.Backlog, sortPrefs.Completed))
+		return render(c, http.StatusOK, pages.TasksContent(project, tasks, agents, agentDefs, sortPrefs.Backlog, sortPrefs.Completed, menuStates))
 	}
 
-	return render(c, http.StatusOK, pages.Tasks(projects, project, tasks, agents, agentDefs, sortPrefs.Backlog, sortPrefs.Completed))
+	return render(c, http.StatusOK, pages.Tasks(projects, project, tasks, agents, agentDefs, sortPrefs.Backlog, sortPrefs.Completed, menuStates))
 }
 
 func isSwarmTaskForm(c echo.Context) bool {
