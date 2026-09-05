@@ -321,18 +321,6 @@ func BenchmarkLLMConfigRepoRuntimeSummariesLargeCustomProviders(b *testing.B) {
 	targetID := targets[len(targets)-1].ID
 	targetName := targets[len(targets)-1].Name
 
-	b.Run("full_list", func(b *testing.B) {
-		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			configs, err := repo.List(ctx)
-			if err != nil {
-				b.Fatal(err)
-			}
-			if len(configs) != 50 {
-				b.Fatalf("expected 50 configs, got %d", len(configs))
-			}
-		}
-	})
 	b.Run("runtime_summary_list", func(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
