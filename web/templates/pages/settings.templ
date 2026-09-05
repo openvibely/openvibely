@@ -24,6 +24,9 @@ type channelStatusBadgeOptions struct {
 }
 
 func channelCardMatchesFilters(view ChannelsSettingsView, channelType string, configured, connected bool, searchText string) bool {
+	if view.WebhookEnabledFilter != "" && channelType != "webhook" {
+		return false
+	}
 	if search := strings.ToLower(strings.TrimSpace(view.WebhooksSearch)); search != "" && !strings.Contains(strings.ToLower(searchText), search) {
 		return false
 	}
