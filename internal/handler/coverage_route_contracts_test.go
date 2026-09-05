@@ -155,6 +155,96 @@ func TestTaskBoardMutationRoutesValidateAndPersistExpectedState(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, invalidReorder.Code)
 }
 
+func TestBatchUpdateTaskCategoryRejectsForeignMixedAndMissingIDsBeforeMutation(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	projectA := tc.CreateProject().WithName("Batch category project A").Build()
+	projectB := tc.CreateProject().WithName("Batch category project B").Build()
+	projectATask := tc.CreateTask(projectA.ID).WithTitle("Project A task").WithCategory(models.CategoryBacklog).Build()
+	projectASecondTask := tc.CreateTask(projectA.ID).WithTitle("Project A second task").WithCategory(models.CategoryBacklog).Build()
+	projectBTask := tc.CreateTask(projectB.ID).WithTitle("Project B task").WithCategory(models.CategoryBacklog).Build()
+
+	assertUnchanged := func(task *models.Task) {
+		t.Helper()
+		loaded, err := tc.taskRepo.GetByID(ctx, task.ID)
+		require.NoError(t, err)
+		require.Equal(t, task.Category, loaded.Category)
+		require.Equal(t, task.Status, loaded.Status)
+		require.Equal(t, task.DisplayOrder, loaded.DisplayOrder)
+	}
+
+	foreign := tc.HTTP().Patch("/tasks/batch-category").WithForm(url.Values{
+		"project_id": {projectA.ID},
+		"task_ids":   {projectBTask.ID},
+		"category":   {string(models.CategoryCompleted)},
+	}).Execute()
+	require.Equal(t, http.StatusBadRequest, foreign.Code, foreign.Body.String())
+	assertUnchanged(projectATask)
+	assertUnchanged(projectASecondTask)
+	assertUnchanged(projectBTask)
+
+	mixed := tc.HTTP().Patch("/tasks/batch-category").WithForm(url.Values{
+		"project_id": {projectA.ID},
+		"task_ids":   {projectATask.ID + "," + projectBTask.ID},
+		"category":   {string(models.CategoryCompleted)},
+	}).Execute()
+	require.Equal(t, http.StatusBadRequest, mixed.Code, mixed.Body.String())
+	assertUnchanged(projectATask)
+	assertUnchanged(projectBTask)
+
+	missing := tc.HTTP().Patch("/tasks/batch-category").WithForm(url.Values{
+		"project_id": {projectA.ID},
+		"task_ids":   {projectASecondTask.ID + ",missing-task-id"},
+		"category":   {string(models.CategoryCompleted)},
+	}).Execute()
+	require.Equal(t, http.StatusBadRequest, missing.Code, missing.Body.String())
+	assertUnchanged(projectASecondTask)
+}
+
+func TestBatchUpdateTaskCategoryPreservesSameProjectHTMXAndActiveSubmission(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().WithName("Batch category success project").Build()
+	model := tc.CreateLLMConfig().WithName("Batch category model").WithProvider(models.ProviderTest).WithModel("test-model").AsDefault().Build()
+	first := tc.CreateTask(project.ID).WithTitle("First same-project task").WithCategory(models.CategoryBacklog).Build()
+	second := tc.CreateTask(project.ID).WithTitle("Second same-project task").WithCategory(models.CategoryBacklog).Build()
+
+	completed := tc.HTMX().Patch("/tasks/batch-category").WithForm(url.Values{
+		"project_id": {project.ID},
+		"task_ids":   {first.ID + "," + second.ID},
+		"category":   {string(models.CategoryCompleted)},
+	}).Execute()
+	require.Equal(t, http.StatusOK, completed.Code, completed.Body.String())
+	require.Contains(t, completed.Body.String(), `id="kanban-board"`)
+	for _, task := range []*models.Task{first, second} {
+		loaded, err := tc.taskRepo.GetByID(ctx, task.ID)
+		require.NoError(t, err)
+		require.Equal(t, models.CategoryCompleted, loaded.Category)
+	}
+
+	active := tc.CreateTask(project.ID).WithTitle("Active same-project task").WithCategory(models.CategoryBacklog).Build()
+	active.AgentID = &model.ID
+	require.NoError(t, tc.taskRepo.Update(ctx, active))
+
+	activated := tc.HTMX().Patch("/tasks/batch-category").WithForm(url.Values{
+		"project_id": {project.ID},
+		"task_ids":   {active.ID},
+		"category":   {string(models.CategoryActive)},
+	}).Execute()
+	require.Equal(t, http.StatusOK, activated.Code, activated.Body.String())
+	require.Contains(t, activated.Body.String(), `id="kanban-board"`)
+	loaded, err := tc.taskRepo.GetByID(ctx, active.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.CategoryActive, loaded.Category)
+	require.Equal(t, models.StatusPending, loaded.Status)
+	select {
+	case submitted := <-tc.handler.workerSvc.Submitted():
+		require.Equal(t, active.ID, submitted.ID)
+	case <-time.After(time.Second):
+		t.Fatal("active batch task was not submitted to the worker")
+	}
+}
+
 func TestUpdateTaskChainConfigCreatesAndRemovesBlockedChild(t *testing.T) {
 	tc := NewTestContext(t)
 	ctx := context.Background()

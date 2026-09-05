@@ -338,6 +338,13 @@ func (r *TaskRepo) GetByID(ctx context.Context, id string) (*models.Task, error)
 			 FROM tasks WHERE id = ?`, id)
 }
 
+// GetByIDForProject returns a task only when it belongs to the requested project.
+func (r *TaskRepo) GetByIDForProject(ctx context.Context, projectID, id string) (*models.Task, error) {
+	return r.getOne(ctx,
+		`SELECT `+taskSelectColumns+`
+			 FROM tasks WHERE project_id = ? AND id = ?`, projectID, id)
+}
+
 // GetThreadRenderMetadata returns the compact task fields needed by recurring
 // task-thread polling. The returned Task is intentionally incomplete and must
 // not be used for full detail/edit rendering or full-record persistence.
