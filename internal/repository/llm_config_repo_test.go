@@ -1412,7 +1412,7 @@ func TestLLMConfigRepo_TaskCreationSelectionProjectionStaysBoundedOnLargeFixture
 	}
 }
 
-func BenchmarkTaskCreationModelSelectionFullListVsCompactProjection(b *testing.B) {
+func BenchmarkTaskCreationModelSelectionProjection(b *testing.B) {
 	db := testutil.NewTestDB(b)
 	repo := NewLLMConfigRepo(db)
 	ctx := context.Background()
@@ -1421,30 +1421,16 @@ func BenchmarkTaskCreationModelSelectionFullListVsCompactProjection(b *testing.B
 	}
 	seedLargeCustomProviderModelConfigs(b, ctx, repo, 50)
 
-	b.Run("full_list", func(b *testing.B) {
-		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			configs, err := repo.List(ctx)
-			if err != nil {
-				b.Fatal(err)
-			}
-			if len(configs) != 50 || configs[0].ID == "" {
-				b.Fatalf("full task creation fixture returned %d configs", len(configs))
-			}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		configs, err := repo.ListTaskCreationSelectionOptions(ctx)
+		if err != nil {
+			b.Fatal(err)
 		}
-	})
-	b.Run("compact_task_creation_selection", func(b *testing.B) {
-		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			configs, err := repo.ListTaskCreationSelectionOptions(ctx)
-			if err != nil {
-				b.Fatal(err)
-			}
-			if len(configs) != 50 || configs[0].ID == "" {
-				b.Fatalf("compact task creation fixture returned %d configs", len(configs))
-			}
+		if len(configs) != 50 || configs[0].ID == "" {
+			b.Fatalf("task creation fixture returned %d configs", len(configs))
 		}
-	})
+	}
 }
 
 func assertTaskCreationSelectionProjectionOmitsConfigBlobs(tb testing.TB, cfg models.LLMConfig) {
