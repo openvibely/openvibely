@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -18,6 +19,28 @@ import (
 	"github.com/coder/websocket"
 	"github.com/openvibely/openvibely/internal/models"
 )
+
+func TestBreadcrumbSelectorCaretOnlyUsesRealTriggerDimensions(t *testing.T) {
+	var out bytes.Buffer
+	if err := BreadcrumbSelector(models.BreadcrumbSelector{
+		ID: "automation-resource-selector", Kind: "Automation", CurrentID: "automation-1",
+		CurrentName: "Editable Automation", SearchURL: "/breadcrumb-selectors/automations", CaretOnly: true,
+	}).Render(context.Background(), &out); err != nil {
+		t.Fatal(err)
+	}
+	body := out.String()
+	buttonMatch := regexp.MustCompile(`<button[^>]*class="([^"]*)"[^>]*data-breadcrumb-selector-caret-only`).FindStringSubmatch(body)
+	if len(buttonMatch) != 2 {
+		t.Fatalf("caret-only selector button not found: %s", body)
+	}
+	classes := buttonMatch[1]
+	if !strings.Contains(classes, `h-8 w-7 justify-center px-0`) {
+		t.Fatalf("caret-only selector is missing its explicit trigger dimensions: %q", classes)
+	}
+	if strings.Contains(classes, `max-w-full gap-1 px-1 text-2xl`) {
+		t.Fatal("caret-only selector rendered the normal constrained trigger classes")
+	}
+}
 
 func TestBreadcrumbSelectorRendersAccessibleBoundedDialog(t *testing.T) {
 	var out bytes.Buffer
