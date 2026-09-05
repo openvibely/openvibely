@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -18,6 +19,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
+	"github.com/openvibely/openvibely/internal/testutil"
 )
 
 func worktreeFormRequest(method, path string, form url.Values) *http.Request {
@@ -161,6 +163,10 @@ func TestHandler_TaskCardMergeOptionsUseAuthoritativeStateAndProjectOwnership(t 
 		t.Fatal(err)
 	}
 	run("worktree", "lock", worktreePath)
+	lockedState := h.taskCardMergeMenuStates(ctx, []models.Task{*task}, project.ID)[task.ID]
+	if lockedState.LocalEligible || lockedState.PullEligible {
+		t.Fatalf("board lock snapshot exposed locked actions: %#v", lockedState)
+	}
 	rec = worktreeExecute(e, httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/card/merge-options?project_id="+project.ID, nil))
 	if strings.Contains(rec.Body.String(), "Merge unavailable") || strings.Contains(rec.Body.String(), "Create PR unavailable") || !taskCardActionDisabled(rec.Body.String(), "merge") || !taskCardActionDisabled(rec.Body.String(), "pr") {
 		t.Fatalf("locked worktree should retain stable disabled local and GitHub actions, body=%s", rec.Body.String())
@@ -243,6 +249,108 @@ func TestHandler_TaskCardMergeOptionsUseAuthoritativeStateAndProjectOwnership(t 
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("serialized card mutation did not resume after repository lock release")
+	}
+}
+
+func TestHandler_TaskCardMergeMenuStatesUseConstantDatabaseQueriesForNonMergeableCards(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	h, _, _ := setupTestHandlerForDB(t, db)
+	h.taskPullRequestRepo = repository.NewTaskPullRequestRepo(db)
+	project := &models.Project{Name: "Menu Query Budget", RepoPath: t.TempDir(), IsDefault: true}
+	if err := h.projectSvc.Create(t.Context(), project); err != nil {
+		t.Fatal(err)
+	}
+
+	tasks := make([]models.Task, 100)
+	for i := range tasks {
+		tasks[i] = models.Task{
+			ID:                fmt.Sprintf("pending-card-%03d", i),
+			ProjectID:         project.ID,
+			Title:             fmt.Sprintf("Pending card %03d", i),
+			Category:          models.CategoryBacklog,
+			Status:            models.StatusPending,
+			WorktreeBranch:    fmt.Sprintf("task/pending-card-%03d", i),
+			MergeTargetBranch: "main",
+		}
+	}
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	states := h.taskCardMergeMenuStates(t.Context(), tasks, project.ID)
+	counter.SetEnabled(false)
+	if len(states) != len(tasks) {
+		t.Fatalf("menu states=%d, want %d", len(states), len(tasks))
+	}
+	statements := counter.Statements()
+	if len(statements) != 2 {
+		t.Fatalf("100 non-mergeable cards executed %d database statements, want constant project+PR queries; statements=%v", len(statements), statements)
+	}
+	for _, state := range states {
+		if state.LocalEligible || state.FastForwardEligible || state.RebaseEligible {
+			t.Fatalf("non-mergeable card exposed Local actions: %#v", state)
+		}
+	}
+}
+
+func TestHandler_TaskBoardSkipsLocalRecoveryForNonMergeableCards(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	h.taskPullRequestRepo = repository.NewTaskPullRequestRepo(db)
+	ctx := context.Background()
+	repoDir := createHandlerTestGitRepo(t)
+	project := &models.Project{Name: "Recovery Budget", RepoPath: repoDir, IsDefault: true}
+	if err := h.projectSvc.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+
+	pending := &models.Task{
+		ProjectID: project.ID, Title: "Pending recovery", Prompt: "test", Category: models.CategoryBacklog,
+		Status: models.StatusPending, MergeTargetBranch: "main", MergeStatus: models.MergeStatusPending,
+	}
+	completed := &models.Task{
+		ProjectID: project.ID, Title: "Completed recovery", Prompt: "test", Category: models.CategoryCompleted,
+		Status: models.StatusCompleted, MergeTargetBranch: "main", MergeStatus: models.MergeStatusPending,
+	}
+	for _, task := range []*models.Task{pending, completed} {
+		if err := h.taskRepo.Create(ctx, task); err != nil {
+			t.Fatal(err)
+		}
+		branch := expectedTaskBranchName(task)
+		worktreePath := filepath.Join(repoDir, ".worktrees", "task_"+task.ID)
+		runGit(t, repoDir, "worktree", "add", "-b", branch, worktreePath, "main")
+		if err := os.WriteFile(filepath.Join(worktreePath, task.ID+".txt"), []byte("task\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		runGit(t, worktreePath, "add", ".")
+		runGit(t, worktreePath, "commit", "-m", "task change")
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/tasks?project_id="+project.ID, nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("tasks status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	pendingAfter, err := h.taskRepo.GetByID(ctx, pending.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pendingAfter.WorktreePath != "" || pendingAfter.WorktreeBranch != "" {
+		t.Fatalf("non-mergeable card performed worktree recovery: path=%q branch=%q", pendingAfter.WorktreePath, pendingAfter.WorktreeBranch)
+	}
+	completedAfter, err := h.taskRepo.GetByID(ctx, completed.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if completedAfter.WorktreePath == "" || completedAfter.WorktreeBranch == "" {
+		t.Fatalf("mergeable card skipped authoritative worktree recovery: %#v", completedAfter)
+	}
+	states := h.taskCardMergeMenuStates(ctx, []models.Task{*pendingAfter, *completedAfter}, project.ID)
+	if states[pending.ID].LocalEligible {
+		t.Fatalf("pending card exposed Local actions: %#v", states[pending.ID])
+	}
+	if !states[completed.ID].LocalEligible {
+		t.Fatalf("completed card lost authoritative Local actions: %#v", states[completed.ID])
 	}
 }
 

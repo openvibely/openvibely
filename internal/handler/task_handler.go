@@ -268,9 +268,62 @@ func (h *Handler) resolvePrimaryAgentDefinition(ctx context.Context, projectID, 
 	return &agent.ID, nil
 }
 
+func taskCardWorktreePath(path string) string {
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		return resolved
+	}
+	return filepath.Clean(path)
+}
+
+func taskCardWorktreeLocks(ctx context.Context, project *models.Project) map[string]bool {
+	locks := make(map[string]bool)
+	if project == nil || strings.TrimSpace(project.RepoPath) == "" {
+		return locks
+	}
+	worktrees, err := service.ListGitWorktreesContext(ctx, project.RepoPath)
+	if err != nil {
+		return locks
+	}
+	for _, worktree := range worktrees {
+		locks[taskCardWorktreePath(worktree.Path)] = worktree.Locked
+	}
+	return locks
+}
+
+func taskCardWorktreeLocked(project *models.Project, task *models.Task, locks map[string]bool) bool {
+	if task == nil || strings.TrimSpace(task.WorktreePath) == "" {
+		return false
+	}
+	if locks != nil {
+		return locks[taskCardWorktreePath(task.WorktreePath)]
+	}
+	if project == nil {
+		return false
+	}
+	return service.IsGitWorktreeLocked(project.RepoPath, task.WorktreePath)
+}
+
+func taskStatusMayMerge(status models.TaskStatus) bool {
+	switch status {
+	case models.StatusCompleted, models.StatusFailed, models.StatusCancelled:
+		return true
+	default:
+		return false
+	}
+}
+
 func (h *Handler) taskCardMergeMenuStates(ctx context.Context, tasks []models.Task, projectID string) map[string]components.TaskCardMergeMenuState {
 	states := make(map[string]components.TaskCardMergeMenuState, len(tasks))
 	project, _ := h.projectRepo.GetByID(ctx, projectID)
+	defaultTargetBranch := ""
+	if project != nil && strings.TrimSpace(project.RepoPath) != "" {
+		for i := range tasks {
+			if strings.TrimSpace(tasks[i].MergeTargetBranch) == "" {
+				defaultTargetBranch = service.GetDefaultBranchContext(ctx, project.RepoPath)
+				break
+			}
+		}
+	}
 	openPRs := make(map[string]*models.TaskPullRequest)
 	if h.taskPullRequestRepo != nil {
 		if prs, err := h.taskPullRequestRepo.ListOpenByProjectID(ctx, projectID); err == nil {
@@ -279,18 +332,24 @@ func (h *Handler) taskCardMergeMenuStates(ctx context.Context, tasks []models.Ta
 			}
 		}
 	}
+	worktreeLocks := taskCardWorktreeLocks(ctx, project)
 	for i := range tasks {
 		task := &tasks[i]
-		mergeState, localEligible, _ := h.taskCardMergeEligibilityForProject(ctx, task, project, "merge")
-		fastForwardEligible := false
-		if localEligible {
-			fastForwardEligible, _ = taskCardMergeModeEligibility(task, mergeState, "ff")
-		}
-		pullEligible, _ := h.taskCardPullRequestEligibility(task, project)
 		targetBranch := strings.TrimSpace(task.MergeTargetBranch)
-		if targetBranch == "" && project != nil {
-			targetBranch = service.GetDefaultBranch(project.RepoPath)
+		if targetBranch == "" {
+			targetBranch = defaultTargetBranch
+			task.MergeTargetBranch = targetBranch
 		}
+		var mergeState taskMergeActionState
+		localEligible := false
+		fastForwardEligible := false
+		if taskStatusMayMerge(task.Status) {
+			mergeState, localEligible, _ = h.taskCardMergeEligibilityForProjectWithLocks(ctx, task, project, "merge", worktreeLocks)
+			if localEligible {
+				fastForwardEligible, _ = taskCardMergeModeEligibility(task, mergeState, "ff")
+			}
+		}
+		pullEligible, _ := h.taskCardPullRequestEligibilityWithLocks(task, project, worktreeLocks)
 		states[task.ID] = components.TaskCardMergeMenuState{
 			LocalEligible:       localEligible,
 			FastForwardEligible: fastForwardEligible,
@@ -872,13 +931,17 @@ func (h *Handler) recoverTaskWorktreeState(ctx context.Context, task *models.Tas
 // Active tasks (running/queued) are skipped because their worktree is in use
 // and the branch may legitimately match the target tip mid-execution.
 func (h *Handler) taskRebaseAvailable(task *models.Task, project *models.Project, branchAlreadyMerged bool) bool {
+	return h.taskRebaseAvailableWithLocks(task, project, branchAlreadyMerged, nil)
+}
+
+func (h *Handler) taskRebaseAvailableWithLocks(task *models.Task, project *models.Project, branchAlreadyMerged bool, worktreeLocks map[string]bool) bool {
 	if task == nil || project == nil || project.RepoPath == "" || task.WorktreeBranch == "" || task.WorktreePath == "" {
 		return false
 	}
 	if branchAlreadyMerged || task.MergeStatus == models.MergeStatusMerged || task.MergeStatus == models.MergeStatusConflict {
 		return false
 	}
-	if len(service.ActiveConflictFiles(project.RepoPath)) > 0 || service.IsGitWorktreeLocked(project.RepoPath, task.WorktreePath) {
+	if len(service.ActiveConflictFiles(project.RepoPath)) > 0 || taskCardWorktreeLocked(project, task, worktreeLocks) {
 		return false
 	}
 	if status, err := service.GitStatusPorcelain(task.WorktreePath); err != nil || strings.TrimSpace(status) != "" {
@@ -894,19 +957,13 @@ func (h *Handler) taskRebaseAvailable(task *models.Task, project *models.Project
 	return service.IsBranchDivergedFromTarget(project.RepoPath, task.WorktreeBranch, targetBranch)
 }
 
-func (h *Handler) reconcileAlreadyMergedBranch(ctx context.Context, task *models.Task) bool {
-	if task == nil || task.WorktreeBranch == "" {
+func taskBranchAlreadyMergedForProject(task *models.Task, project *models.Project) bool {
+	if task == nil || task.WorktreeBranch == "" || project == nil || project.RepoPath == "" {
 		return false
 	}
 	if task.Status == models.StatusRunning || task.Status == models.StatusQueued {
 		return false
 	}
-
-	project, err := h.projectRepo.GetByID(ctx, task.ProjectID)
-	if err != nil || project == nil || project.RepoPath == "" {
-		return false
-	}
-	h.recoverTaskWorktreeState(ctx, task, project)
 	if task.WorktreePath != "" {
 		if statusOut, statusErr := service.GitStatusPorcelain(task.WorktreePath); statusErr == nil && strings.TrimSpace(statusOut) != "" {
 			return false
@@ -920,8 +977,19 @@ func (h *Handler) reconcileAlreadyMergedBranch(ctx context.Context, task *models
 	if targetBranch == "" {
 		return false
 	}
-
 	return service.IsBranchTipMergedInto(project.RepoPath, task.WorktreeBranch, targetBranch)
+}
+
+func (h *Handler) reconcileAlreadyMergedBranch(ctx context.Context, task *models.Task) bool {
+	if task == nil || task.WorktreeBranch == "" {
+		return false
+	}
+	project, err := h.projectRepo.GetByID(ctx, task.ProjectID)
+	if err != nil || project == nil || project.RepoPath == "" {
+		return false
+	}
+	h.recoverTaskWorktreeState(ctx, task, project)
+	return taskBranchAlreadyMergedForProject(task, project)
 }
 
 type taskMergeActionState struct {
@@ -930,20 +998,31 @@ type taskMergeActionState struct {
 	RebaseAvailable     bool
 }
 
-func (h *Handler) resolveTaskMergeActionState(ctx context.Context, task *models.Task) taskMergeActionState {
+func (h *Handler) resolveTaskMergeActionStateForProject(ctx context.Context, task *models.Task, project *models.Project) taskMergeActionState {
+	return h.resolveTaskMergeActionStateForProjectWithLocks(ctx, task, project, nil)
+}
+
+func (h *Handler) resolveTaskMergeActionStateForProjectWithLocks(ctx context.Context, task *models.Task, project *models.Project, worktreeLocks map[string]bool) taskMergeActionState {
 	var state taskMergeActionState
 	if task == nil {
 		return state
 	}
-	project, _ := h.projectRepo.GetByID(ctx, task.ProjectID)
 	h.recoverTaskWorktreeState(ctx, task, project)
 	if task.WorktreeBranch == "" {
 		return state
 	}
 	state.UseWorktreeContent = true
-	state.BranchAlreadyMerged = h.reconcileAlreadyMergedBranch(ctx, task)
-	state.RebaseAvailable = h.taskRebaseAvailable(task, project, state.BranchAlreadyMerged)
+	state.BranchAlreadyMerged = taskBranchAlreadyMergedForProject(task, project)
+	state.RebaseAvailable = h.taskRebaseAvailableWithLocks(task, project, state.BranchAlreadyMerged, worktreeLocks)
 	return state
+}
+
+func (h *Handler) resolveTaskMergeActionState(ctx context.Context, task *models.Task) taskMergeActionState {
+	if task == nil {
+		return taskMergeActionState{}
+	}
+	project, _ := h.projectRepo.GetByID(ctx, task.ProjectID)
+	return h.resolveTaskMergeActionStateForProject(ctx, task, project)
 }
 
 type taskChangesWorktreeState struct {
@@ -993,26 +1072,22 @@ func (h *Handler) resolveTaskMergeEligibility(ctx context.Context, task *models.
 	}
 
 	if task.MergeStatus == models.MergeStatusConflict {
-		switch task.Status {
-		case models.StatusCompleted, models.StatusFailed, models.StatusCancelled:
-			if err := h.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusPending); err != nil {
-				result.Reason = "merge conflict status could not be refreshed"
-				return result
-			}
-			task.MergeStatus = models.MergeStatusPending
-		default:
+		if !taskStatusMayMerge(task.Status) {
 			result.Reason = "task conflict recovery is not ready"
 			return result
 		}
+		if err := h.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusPending); err != nil {
+			result.Reason = "merge conflict status could not be refreshed"
+			return result
+		}
+		task.MergeStatus = models.MergeStatusPending
 	}
 
 	if branchAlreadyMerged || task.MergeStatus == models.MergeStatusMerged {
 		result.Reason = "task branch is already merged"
 		return result
 	}
-	switch task.Status {
-	case models.StatusCompleted, models.StatusFailed, models.StatusCancelled:
-	default:
+	if !taskStatusMayMerge(task.Status) {
 		result.Reason = fmt.Sprintf("task status %s is not mergeable", task.Status)
 		return result
 	}
