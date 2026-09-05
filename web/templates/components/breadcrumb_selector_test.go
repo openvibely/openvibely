@@ -64,13 +64,20 @@ func TestBreadcrumbSelectorKeyboardFocusAndContainmentInChrome(t *testing.T) {
 	    button.click(); await waitFor(function(){ return dialog.open; });
 	    var box=dialog.querySelector('.modal-box').getBoundingClientRect();
 	    if(box.left < 15 || box.right > innerWidth-15 || box.bottom > innerHeight-15) throw new Error('selector escaped viewport: '+JSON.stringify(box));
-	    document.documentElement.setAttribute('data-theme','light');
-	    if(!dialog.querySelector('.bg-base-100') || !dialog.querySelector('.border-base-300')) throw new Error('theme semantic classes missing');
-	    document.body.setAttribute('data-test-result','pass');
+		    document.documentElement.setAttribute('data-theme','light');
+		    var themeBox=dialog.querySelector('.modal-box'), lightStyle=getComputedStyle(themeBox);
+		    var light=[lightStyle.backgroundColor,lightStyle.borderColor,lightStyle.color].join('|');
+		    document.documentElement.setAttribute('data-theme','dark');
+		    var darkStyle=getComputedStyle(themeBox), dark=[darkStyle.backgroundColor,darkStyle.borderColor,darkStyle.color].join('|');
+		    if(light===dark) throw new Error('semantic colors did not respond to dark theme');
+		    document.documentElement.setAttribute('data-theme','imported-contrast');
+		    var contrastStyle=getComputedStyle(themeBox);
+		    if(contrastStyle.backgroundColor!=='rgb(0, 0, 0)' || contrastStyle.color!=='rgb(255, 255, 255)' || contrastStyle.borderColor!=='rgb(255, 255, 255)') throw new Error('imported high-contrast variables were not honored: '+[contrastStyle.backgroundColor,contrastStyle.color,contrastStyle.borderColor].join('|'));
+		    if(!dialog.querySelector('.bg-base-100') || !dialog.querySelector('.border-base-300')) throw new Error('theme semantic classes missing');	    document.body.setAttribute('data-test-result','pass');
 	  })().catch(function(error){ document.body.setAttribute('data-test-result','fail'); document.body.setAttribute('data-test-error',String(error.stack||error)); });
 	});
 	</script>`
-	page := `<!doctype html><html><head><meta name="viewport" content="width=device-width"><style>dialog{border:0;background:transparent}.modal-box{box-sizing:border-box}.w-\[28rem\]{width:28rem}.max-w-\[calc\(100vw-2rem\)\]{max-width:calc(100vw - 2rem)}.max-h-\[min\(32rem\,calc\(100dvh-2rem\)\)\]{max-height:min(32rem,calc(100dvh - 2rem))}</style><script src="/htmx.js"></script></head><body data-test-result="pending">` + selector.String() + runner + `</body></html>`
+	page := `<!doctype html><html data-theme="light"><head><meta name="viewport" content="width=device-width"><style>dialog{border:0;background:transparent}.modal-box{box-sizing:border-box;color:var(--fixture-content)}.w-\[28rem\]{width:28rem}.max-w-\[calc\(100vw-2rem\)\]{max-width:calc(100vw - 2rem)}.max-h-\[min\(32rem\,calc\(100dvh-2rem\)\)\]{max-height:min(32rem,calc(100dvh - 2rem))}.bg-base-100{background-color:var(--fixture-base)}.border-base-300{border-color:var(--fixture-border)}[data-theme="light"]{--fixture-base:rgb(255,255,255);--fixture-border:rgb(210,210,210);--fixture-content:rgb(20,20,20)}[data-theme="dark"]{--fixture-base:rgb(24,24,27);--fixture-border:rgb(82,82,91);--fixture-content:rgb(244,244,245)}[data-theme="imported-contrast"]{--fixture-base:rgb(0,0,0);--fixture-border:rgb(255,255,255);--fixture-content:rgb(255,255,255)}</style><script src="/htmx.js"></script></head><body data-test-result="pending">` + selector.String() + runner + `</body></html>`
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/":
