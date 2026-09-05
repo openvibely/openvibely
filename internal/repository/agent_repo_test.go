@@ -2,11 +2,99 @@ package repository
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
+
+func TestAgentRepo_ListSelectableReferencesForProjectUsesCompactBoundedProjection(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	repo := NewAgentRepo(db)
+	ctx := context.Background()
+	projectRepo := NewProjectRepo(db)
+	project := &models.Project{Name: "Agent reference project"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	foreignProject := &models.Project{Name: "Foreign Agent reference project"}
+	if err := projectRepo.Create(ctx, foreignProject); err != nil {
+		t.Fatalf("create foreign project: %v", err)
+	}
+	projectID := project.ID
+	foreignProjectID := foreignProject.ID
+	if _, err := db.ExecContext(ctx, `DELETE FROM agents`); err != nil {
+		t.Fatalf("clear agents: %v", err)
+	}
+
+	create := func(name, key, scopedProjectID string) *models.Agent {
+		t.Helper()
+		agent := &models.Agent{Name: name, Key: key, ProjectID: scopedProjectID, SystemPrompt: "private prompt that must not be loaded", Model: "inherit", Tools: []string{"Read"}, Enabled: true, SelectableAsPrimary: true}
+		if err := repo.Create(ctx, agent); err != nil {
+			t.Fatalf("create agent %q: %v", name, err)
+		}
+		return agent
+	}
+
+	global := create("001 Global selectable", "global-selectable", "")
+	scoped := create("002 Project selectable", "project-selectable", projectID)
+	create("000 Foreign project", "foreign-selectable", foreignProjectID)
+	blankKey := create("003 Blank key", "", "")
+	disabled := create("004 Disabled", "disabled", "")
+	if _, err := db.ExecContext(ctx, `UPDATE agents SET enabled = 0 WHERE id = ?`, disabled.ID); err != nil {
+		t.Fatalf("disable agent: %v", err)
+	}
+	archived := create("005 Archived", "archived", "")
+	if _, err := db.ExecContext(ctx, `UPDATE agents SET archived_at = datetime('now') WHERE id = ?`, archived.ID); err != nil {
+		t.Fatalf("archive agent: %v", err)
+	}
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	limited, err := repo.ListSelectableReferencesForProject(ctx, projectID, 2)
+	counter.SetEnabled(false)
+	if err != nil {
+		t.Fatalf("list limited selectable references: %v", err)
+	}
+	if len(limited) != 2 || limited[0].ID != global.ID || limited[1].ID != scoped.ID {
+		t.Fatalf("limited references = %+v, want global then project Agent", limited)
+	}
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	references, err := repo.ListSelectableReferencesForProject(ctx, projectID, 50)
+	counter.SetEnabled(false)
+	if err != nil {
+		t.Fatalf("list selectable references: %v", err)
+	}
+	if len(references) != 3 {
+		t.Fatalf("references = %+v, want three eligible global/project rows", references)
+	}
+	if references[0].ID != global.ID || references[1].ID != scoped.ID || references[2].ID != blankKey.ID {
+		t.Fatalf("references are not deterministically ordered: %+v", references)
+	}
+	if references[0].ProjectID != "" || references[1].ProjectID != projectID || references[2].Key != "" {
+		t.Fatalf("reference scope/key values = %+v", references)
+	}
+
+	statements := counter.Statements()
+	if len(statements) != 1 {
+		t.Fatalf("statements = %#v, want one query", statements)
+	}
+	query := strings.ToLower(strings.Join(strings.Fields(statements[0]), " "))
+	projection := strings.TrimSpace(strings.SplitN(query, " from agents", 2)[0])
+	for _, required := range []string{"select id", "coalesce(key, '')", "coalesce(project_id, '')"} {
+		if !strings.Contains(projection, required) {
+			t.Fatalf("compact projection = %q, missing %q", projection, required)
+		}
+	}
+	for _, forbidden := range []string{"name", "description", "system_prompt", "model", "tools", "tool_config", "plugins", "mcp_servers", "skills", "created_at", "updated_at"} {
+		if strings.Contains(projection, forbidden) {
+			t.Fatalf("compact projection selected rich column %q: %s", forbidden, statements[0])
+		}
+	}
+}
 
 func TestAgentRepo_CreateAndReadWithoutColorColumn(t *testing.T) {
 	db := testutil.NewTestDB(t)
