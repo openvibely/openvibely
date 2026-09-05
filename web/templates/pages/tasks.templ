@@ -124,6 +124,12 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 
 			if (!window._taskCardActionHandlerAttached) {
 				window._taskCardActionHandlerAttached = true;
+				document.body.addEventListener('click', function(event) {
+					var button = event.target && event.target.closest ? event.target.closest('[data-task-card-merge-action], [data-task-card-pr-action]') : null;
+					if (!button || button.disabled) return;
+					event.preventDefault();
+					runTaskCardAction(button);
+				}, true);
 				document.body.addEventListener('htmx:afterRequest', function(event) {
 					var request = window._taskCardActionRequest;
 					var config = event.detail && event.detail.requestConfig;
