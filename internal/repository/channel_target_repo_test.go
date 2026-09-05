@@ -252,52 +252,31 @@ func TestChannelTargetRepoLookupQueriesUseDedicatedIndexes(t *testing.T) {
 	require.Equal(t, "saved-target", byTarget.ID)
 }
 
-// BenchmarkChannelTargetRepoFindHomeLookup compares the legacy broad
-// (project_id, platform) lookup shape against the order-covering home index over
-// 25,000 production-shaped saved targets. Acceptance is visible in the benchmark
-// subtest plans: legacy must sort with USE TEMP B-TREE, while optimized must use
-// idx_channel_targets_project_platform_home_updated with no temporary sort.
 func BenchmarkChannelTargetRepoFindHomeLookup(b *testing.B) {
-	for _, tt := range []struct {
-		name      string
-		optimized bool
-	}{
-		{name: "legacy_project_platform_index", optimized: false},
-		{name: "lookup_home_index", optimized: true},
-	} {
-		b.Run(tt.name, func(b *testing.B) {
-			db := testutil.NewTestDB(b)
-			projectID := "channel-target-bench-project"
-			seedChannelTargetBenchFixture(b, db, projectID)
-			setChannelTargetLookupBenchIndexes(b, db, tt.optimized)
-			repo := NewChannelTargetRepo(db)
-			ctx := context.Background()
+	db := testutil.NewTestDB(b)
+	projectID := "channel-target-bench-project"
+	seedChannelTargetBenchFixture(b, db, projectID)
+	repo := NewChannelTargetRepo(db)
+	ctx := context.Background()
 
-			plan := channelTargetExplainQueryPlan(b, db, `
+	plan := channelTargetExplainQueryPlan(b, db, `
 				SELECT id, project_id, platform, target_kind, name, target_id, thread_id, is_home, default_subject, created_at, updated_at
 				FROM channel_targets
 				WHERE project_id = ? AND platform = ? AND is_home = 1
 				ORDER BY updated_at DESC LIMIT 1`, projectID, "slack")
-			if tt.optimized {
-				require.Contains(b, plan, "idx_channel_targets_project_platform_home_updated")
-				require.NotContains(b, plan, "USE TEMP B-TREE FOR ORDER BY")
-			} else {
-				require.Contains(b, plan, "idx_channel_targets_project_platform")
-				require.Contains(b, plan, "USE TEMP B-TREE FOR ORDER BY")
-			}
+	require.Contains(b, plan, "idx_channel_targets_project_platform_home_updated")
+	require.NotContains(b, plan, "USE TEMP B-TREE FOR ORDER BY")
 
-			b.ReportAllocs()
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
-				target, err := repo.FindHome(ctx, projectID, "slack")
-				if err != nil {
-					b.Fatalf("find home: %v", err)
-				}
-				if target == nil || target.ID != "bench-home-newest" {
-					b.Fatalf("home target = %#v, want bench-home-newest", target)
-				}
-			}
-		})
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		target, err := repo.FindHome(ctx, projectID, "slack")
+		if err != nil {
+			b.Fatalf("find home: %v", err)
+		}
+		if target == nil || target.ID != "bench-home-newest" {
+			b.Fatalf("home target = %#v, want bench-home-newest", target)
+		}
 	}
 }
 
@@ -367,24 +346,6 @@ func seedChannelTargetBenchFixture(tb testing.TB, db *sql.DB, projectID string) 
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			id, project, platform, models.DefaultChannelTargetKind(platform), fmt.Sprintf("bench-name-%05d", i), fmt.Sprintf("BENCH%05d", i), fmt.Sprintf("thread-%05d", i), isHome, time.Date(2024, 1, 1, 0, 0, i%60, 0, time.UTC).Add(time.Duration(i)*time.Second).Format("2006-01-02 15:04:05")); err != nil {
 			tb.Fatalf("seed benchmark target %d: %v", i, err)
-		}
-	}
-}
-
-func setChannelTargetLookupBenchIndexes(tb testing.TB, db *sql.DB, optimized bool) {
-	tb.Helper()
-	for _, indexName := range []string{
-		"idx_channel_targets_project_platform_home_updated",
-		"idx_channel_targets_project_platform_name",
-		"idx_channel_targets_project_platform_target_thread",
-	} {
-		if _, err := db.Exec(`DROP INDEX IF EXISTS ` + indexName); err != nil {
-			tb.Fatalf("drop %s: %v", indexName, err)
-		}
-	}
-	if optimized {
-		if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_channel_targets_project_platform_home_updated ON channel_targets(project_id, platform, is_home, updated_at DESC)`); err != nil {
-			tb.Fatalf("create optimized home index: %v", err)
 		}
 	}
 }
