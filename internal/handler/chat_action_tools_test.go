@@ -412,9 +412,8 @@ func TestListChannelsPlanModeReturnsPromptSafeStatus(t *testing.T) {
 		return service.SlackConnectionStatus{Configured: true, Connected: true, Running: true, TeamName: "OpenVibely", TeamID: "TSAFE", BotUserID: "BSAFE", BotTokenSource: service.SlackBotTokenSourceOAuth}, nil
 	}})
 	h.SetDiscordService(&fakeDiscordService{statusFn: func(ctx context.Context) (service.DiscordConnectionStatus, error) {
-		return service.DiscordConnectionStatus{Configured: true, Connected: false, Running: false, HasBotToken: true, BotUserID: "bot-safe", SendResponses: true, LastError: "gateway unavailable"}, nil
+		return service.DiscordConnectionStatus{Configured: true, Connected: false, Running: false, HasBotToken: true, BotUserID: "bot-safe", SendResponses: true, LastError: "gateway unavailable\nsecond line"}, nil
 	}})
-
 	secretValues := []string{
 		"ghp_secret_pat_should_not_appear",
 		"private-key-secret-should-not-appear",
@@ -487,7 +486,7 @@ func TestListChannelsPlanModeReturnsPromptSafeStatus(t *testing.T) {
 	require.Equal(t, "configured_not_running", summary.Telegram.Status)
 	require.Equal(t, 1, summary.Telegram.AuthorizedUserCount)
 	require.Equal(t, "gateway_offline", summary.Discord.Status)
-	require.Equal(t, "gateway unavailable", summary.Discord.LastError)
+	require.Equal(t, "gateway unavailable second line", summary.Discord.LastError)
 	require.Equal(t, 1, summary.Email.AuthorizedSenderCount)
 	require.Equal(t, "alerts@example.com", summary.Email.Address)
 	require.Equal(t, 2, summary.Webhooks.Total)
@@ -2849,4 +2848,77 @@ func TestCreateAgentRuntimeTool_PlanModeDoesNotExposeWriteAction(t *testing.T) {
 	require.True(t, handled)
 	require.True(t, isErr)
 	require.Contains(t, out, "not available")
+}
+
+func TestListChannelsWithoutProjectReturnsEmptySafeSummary(t *testing.T) {
+	h, _, _, _ := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	rt := h.buildChatActionToolRuntimeFromDefs(
+		streamingResponseParams{ChatMode: models.ChatModePlan},
+		nil,
+		chatcontrol.ToolDefsForContext(models.ChatModePlan, chatcontrol.SurfaceWeb, false),
+		models.ChatModePlan,
+		chatcontrol.SurfaceWeb,
+	)
+	out, handled, isErr, err := rt.Executor(ctx, "list_channels", json.RawMessage(`{}`))
+	require.True(t, handled)
+	require.False(t, isErr)
+	require.NoError(t, err)
+
+	var got channelStatusToolResponse
+	require.NoError(t, json.Unmarshal([]byte(out), &got))
+	require.False(t, got.OK)
+	require.Empty(t, got.ProjectID)
+	require.Empty(t, got.ConfiguredChannels)
+	require.Zero(t, got.ConfiguredChannelCount)
+	require.True(t, got.NoneConfigured)
+	require.NotNil(t, got.OutboundTargets.ByPlatform)
+	require.Empty(t, got.OutboundTargets.ByPlatform)
+}
+
+func TestListChannelsDirectGitHubAppConfiguredNotConnected(t *testing.T) {
+	h, _, _, _ := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	project := createProject(t, h, "Direct GitHub App Status")
+	for key, value := range map[string]string{
+		service.GitHubSettingAuthMode:      service.GitHubAuthModeApp,
+		service.GitHubSettingAppID:         "12345",
+		service.GitHubSettingAppSlug:       "openvibely-app",
+		service.GitHubSettingAppPrivateKey: "PRIVATE-KEY-MUST-NOT-LEAK",
+	} {
+		require.NoError(t, h.settingsRepo.Set(ctx, key, value))
+	}
+	h.SetGitHubService(&fakeGitHubService{statusFn: func(context.Context) (service.GitHubConnectionStatus, error) {
+		return service.GitHubConnectionStatus{
+			Configured:    true,
+			AuthMode:      service.GitHubAuthModeApp,
+			AppConfigured: true,
+			AccountLogin:  "app-account",
+			AccountType:   "Organization",
+		}, nil
+	}})
+
+	rt := h.buildChatActionToolRuntimeFromDefs(
+		streamingResponseParams{ProjectID: project.ID, ChatMode: models.ChatModePlan},
+		nil,
+		chatcontrol.ToolDefsForContext(models.ChatModePlan, chatcontrol.SurfaceWeb, false),
+		models.ChatModePlan,
+		chatcontrol.SurfaceWeb,
+	)
+	out, handled, isErr, err := rt.Executor(ctx, "list_channels", json.RawMessage(`{}`))
+	require.True(t, handled)
+	require.False(t, isErr)
+	require.NoError(t, err)
+	require.NotContains(t, out, "PRIVATE-KEY-MUST-NOT-LEAK")
+
+	var summary channelStatusToolResponse
+	require.NoError(t, json.Unmarshal([]byte(out), &summary))
+	require.True(t, summary.GitHub.Configured)
+	require.False(t, summary.GitHub.Connected)
+	require.Equal(t, "configured_not_connected", summary.GitHub.Status)
+	require.Equal(t, service.GitHubAuthModeApp, summary.GitHub.AuthMode)
+	require.Equal(t, "app-account", summary.GitHub.AccountLogin)
+	require.Equal(t, "Organization", summary.GitHub.AccountType)
+	require.True(t, summary.GitHub.AppConfigured)
+	require.False(t, summary.GitHub.PATConfigured)
 }
