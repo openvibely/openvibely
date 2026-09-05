@@ -45,6 +45,150 @@ func TestSidebar_ThemeToggleInFooter(t *testing.T) {
 	}
 }
 
+func TestSidebar_ProjectSelectorSearchableAndIdentityOnly(t *testing.T) {
+	projects := []models.Project{
+		{ID: "default", Name: "Default", IsDefault: true, Description: "private description", RepoPath: "private-repo-path", RepoURL: "https://private.example/repo"},
+		{ID: "payments-api", Name: "Payments API"},
+		{ID: "payments-web", Name: "Payments Web"},
+		{ID: "payments-web-copy", Name: "Payments Web"},
+	}
+
+	var buf bytes.Buffer
+	if err := Sidebar(projects, "default").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("failed to render Sidebar: %v", err)
+	}
+	html := buf.String()
+
+	for _, required := range []string{
+		`data-project-selector`,
+		`id="project-selector"`,
+		`class="sr-only"`,
+		`aria-hidden="true"`,
+		`data-project-selector-value`,
+		`id="project-selector-trigger"`,
+		`aria-haspopup="dialog"`,
+		`aria-expanded="false"`,
+		`aria-controls="project-selector-dialog"`,
+		`fixed inset-0 m-auto`,
+		`id="project-selector-dialog"`, `role="dialog"`,
+		`aria-modal="true"`,
+		`id="project-selector-search"`,
+		`type="search"`,
+		`placeholder="Search projects"`,
+		`aria-autocomplete="list"`,
+		`data-project-selector-clear`,
+		`role="listbox"`,
+		`data-project-selector-option`,
+		`data-project-id="payments-api"`,
+		`data-project-name="Payments API"`,
+		`aria-selected="true"`,
+		`data-project-selector-current`,
+		`Current`,
+		`data-project-selector-no-match`,
+		`No projects match your search.`,
+		`search.addEventListener('input', applyFilter)`,
+		`return String(value || '').trim().toLowerCase();`,
+		`option.hidden = !(isMatch || (query && isCurrent));`,
+		`search.focus();`,
+		`search.select();`,
+		`event.key === 'ArrowDown'`,
+		`event.key === 'ArrowUp'`,
+		`event.key === 'Escape'`,
+		`window.openVibelyProjectSelectorInstalled`,
+		`window.openVibelyProjectSelectorChangeInstalled`,
+		`sel.dispatchEvent(new Event('change', { bubbles: true }))`, `persistSelectedProject(newProjectId)`,
+		`window.openVibelyNavigate(newUrl)`,
+	} {
+		if !strings.Contains(html, required) {
+			t.Fatalf("searchable project selector missing %q", required)
+		}
+	}
+
+	if strings.Contains(html, "private description") || strings.Contains(html, "private-repo-path") || strings.Contains(html, "https://private.example/repo") {
+		t.Fatal("sidebar project selector must render identity fields only")
+	}
+
+	resultsStart := strings.Index(html, `data-project-selector-results`)
+	if resultsStart < 0 {
+		t.Fatal("project selector results container is missing")
+	}
+	defaultIndex := strings.Index(html[resultsStart:], `data-project-id="default"`)
+	apiIndex := strings.Index(html[resultsStart:], `data-project-id="payments-api"`)
+	if defaultIndex < 0 || apiIndex < 0 || defaultIndex > apiIndex {
+		t.Fatal("project selector must preserve the supplied default-first ordering")
+	}
+}
+
+func TestSidebar_ProjectSelectorEmptyWorkspaceFallback(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Sidebar(nil, "").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("failed to render empty Sidebar: %v", err)
+	}
+	html := buf.String()
+	for _, required := range []string{
+		`id="project-selector-trigger"`,
+		`No projects available`,
+		`data-project-selector-no-projects`,
+		`aria-controls="project-selector-dialog" disabled>`,
+	} {
+		if !strings.Contains(html, required) {
+			t.Fatalf("empty project selector missing %q", required)
+		}
+	}
+	markupEnd := strings.Index(html, "<script>")
+	if markupEnd < 0 {
+		t.Fatal("sidebar project selector script is missing")
+	}
+	if strings.Contains(html[:markupEnd], `data-project-selector-option`) {
+		t.Fatal("empty project selector must not render a result option")
+	}
+}
+
+func TestSidebar_ProjectSelectorPreservesRouteMappingAndConfirmation(t *testing.T) {
+	projects := []models.Project{{ID: "default", Name: "Default"}, {ID: "other", Name: "Other"}}
+	var buf bytes.Buffer
+	if err := Sidebar(projects, "default").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("failed to render Sidebar: %v", err)
+	}
+	html := buf.String()
+
+	for _, path := range []string{
+		"/automations",
+		"/schedule",
+		"/agents",
+		"/skills",
+		"/models",
+		"/chat",
+		"/upcoming",
+		"/history",
+		"/analytics",
+		"/alerts",
+		"/workers",
+		"/insights",
+		"/channels",
+		"/personality",
+	} {
+		if !strings.Contains(html, "currentPath.includes('"+path+"')") {
+			t.Fatalf("project selector route mapping missing %s", path)
+		}
+	}
+	for _, required := range []string{
+		`if (!confirm('You may have unsaved changes. Switch project anyway?'))`,
+		`var previousProjectID = sel.value;`,
+		`sel.value = previousProjectID;`,
+		`openModals.forEach(m => m.close());`,
+		`document.addEventListener('htmx:beforeSwap'`,
+		`target.id === 'main-content'`,
+		`document.addEventListener('htmx:afterSwap'`,
+		`document.addEventListener('htmx:historyRestore'`,
+		`window.addEventListener('popstate'`,
+	} {
+		if !strings.Contains(html, required) {
+			t.Fatalf("project selector switch lifecycle missing %q", required)
+		}
+	}
+}
+
 func TestSidebar_NavigationHeadingHiddenAndLinksPreserved(t *testing.T) {
 	projects := []models.Project{{
 		ID:   "project-1",
