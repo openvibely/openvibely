@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -356,6 +357,42 @@ func TestPersonalityFilteringAndSortingPrecedePagination(t *testing.T) {
 	matches := regexp.MustCompile(`data-personality-name="([^"]+)"`).FindAllStringSubmatch(ascending.Body.String(), -1)
 	require.Len(t, matches, 2)
 	require.LessOrEqual(t, strings.ToLower(matches[0][1]), strings.ToLower(matches[1][1]))
+}
+
+func TestChannelsWebhookEnabledFilterAppliesAcrossFixedAndPaginatedCards(t *testing.T) {
+	tc := NewTestContext(t)
+	webhookRepo := repository.NewWebhookRepo(tc.db)
+	tc.handler.SetWebhookRepo(webhookRepo)
+	project := tc.CreateProject().WithName("Channels webhook enabled filter").Build()
+	require.NoError(t, tc.settingsRepo.Set(t.Context(), service.GitHubSettingPAT, "configured-test-pat"))
+	for _, enabled := range []bool{true, false} {
+		for i := 0; i < 2; i++ {
+			require.NoError(t, webhookRepo.Create(t.Context(), &models.WebhookEndpoint{
+				ProjectID: project.ID,
+				Name:      fmt.Sprintf("%t webhook %d", enabled, i),
+				Enabled:   enabled,
+			}))
+		}
+	}
+
+	for _, enabled := range []bool{true, false} {
+		t.Run(strconv.FormatBool(enabled), func(t *testing.T) {
+			rec := serveCardPageRequest(t, tc.echo, "/channels?project_id="+project.ID+"&webhook_enabled="+strconv.FormatBool(enabled)+"&page_size=1&card_page=1")
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			require.Equal(t, "true", rec.Header().Get(cardPageHasMoreHeader))
+			html := rec.Body.String()
+			githubMarker := `data-channel-type="github"`
+			githubStart := strings.Index(html, githubMarker)
+			require.NotEqual(t, -1, githubStart)
+			githubTagEnd := strings.Index(html[githubStart:], ">")
+			require.NotEqual(t, -1, githubTagEnd)
+			require.Contains(t, html[githubStart:githubStart+githubTagEnd], " hidden")
+			require.NotContains(t, html, `data-channel-type="outbound-targets"`)
+			require.Equal(t, 1, strings.Count(html, `data-channel-type="webhook"`))
+			require.Contains(t, html, `data-webhook-enabled="`+strconv.FormatBool(enabled)+`"`)
+			require.NotContains(t, html, `data-webhook-enabled="`+strconv.FormatBool(!enabled)+`"`)
+		})
+	}
 }
 
 func TestChannelsSearchFiltersFixedCardsOnServer(t *testing.T) {
