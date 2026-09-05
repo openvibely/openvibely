@@ -164,6 +164,9 @@ window.addEventListener('DOMContentLoaded', function() {
 
     await window.openVibelyNavigate('/automations/auto-one/builder?project_id=project-browser');
     await waitFor(function(){ return route('automation-edit', 'auto-one'); }, 'Automation Edit');
+    var editName=document.querySelector('[data-automation-name]');
+    if(!editName || editName.nextElementSibling!==selector()) fail('Automation Edit selector caret is not attached after the editable name');
+    if(!button().hasAttribute('data-breadcrumb-selector-caret-only') || button().textContent.trim()!=='') fail('Automation Edit selector must render only the caret trigger');
     htmx.process(selector());
     button().click();
     await waitFor(function(){ return dialog().open && options().length>0; }, 'Automation Edit selector');
