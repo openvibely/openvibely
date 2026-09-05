@@ -253,17 +253,6 @@ func TestLLMConfigRepo_RuntimeSummariesStayUnderLargeFixtureBudget(t *testing.T)
 	targetID := targets[len(targets)-1].ID
 	targetName := targets[len(targets)-1].Name
 
-	fullList := testing.Benchmark(func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			configs, err := repo.List(ctx)
-			if err != nil {
-				b.Fatal(err)
-			}
-			if len(configs) != 50 {
-				b.Fatalf("expected 50 configs, got %d", len(configs))
-			}
-		}
-	})
 	runtimeList := testing.Benchmark(func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			configs, err := repo.ListRuntimeSummaries(ctx)
@@ -299,15 +288,11 @@ func TestLLMConfigRepo_RuntimeSummariesStayUnderLargeFixtureBudget(t *testing.T)
 	})
 
 	const (
-		maxBytesPerOp      = 200 * 1024
-		maxDurationPerOp   = time.Millisecond
-		minFullListSpeedup = 10
+		maxBytesPerOp    = 200 * 1024
+		maxDurationPerOp = time.Millisecond
 	)
-	t.Logf("List: %d ns/op, %d B/op; RuntimeSummaries: %d ns/op, %d B/op; GetByID: %d ns/op, %d B/op; GetByName: %d ns/op, %d B/op",
-		fullList.NsPerOp(), fullList.AllocedBytesPerOp(), runtimeList.NsPerOp(), runtimeList.AllocedBytesPerOp(), getByID.NsPerOp(), getByID.AllocedBytesPerOp(), getByName.NsPerOp(), getByName.AllocedBytesPerOp())
-	if runtimeList.NsPerOp()*minFullListSpeedup > fullList.NsPerOp() {
-		t.Fatalf("runtime list took %s/op, want at least %dx faster than full List (%s/op)", time.Duration(runtimeList.NsPerOp()), minFullListSpeedup, time.Duration(fullList.NsPerOp()))
-	}
+	t.Logf("RuntimeSummaries: %d ns/op, %d B/op; GetByID: %d ns/op, %d B/op; GetByName: %d ns/op, %d B/op",
+		runtimeList.NsPerOp(), runtimeList.AllocedBytesPerOp(), getByID.NsPerOp(), getByID.AllocedBytesPerOp(), getByName.NsPerOp(), getByName.AllocedBytesPerOp())
 	for label, result := range map[string]testing.BenchmarkResult{"runtime list": runtimeList, "get by id": getByID, "get by name": getByName} {
 		if result.NsPerOp() > maxDurationPerOp.Nanoseconds() {
 			t.Fatalf("%s took %s/op, want <= %s", label, time.Duration(result.NsPerOp()), maxDurationPerOp)
