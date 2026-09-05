@@ -288,11 +288,13 @@ func (h *Handler) MergeTaskBranch(c echo.Context) error {
 		if isHTMX(c) {
 			setHTMXToast(c, errMessage, "failed")
 		}
-		// The Changes tab owns an authoritative fragment. A recoverable merge
-		// refusal persists merge_status=failed, so re-render from fresh task/Git
-		// state instead of leaving the menu in its in-flight or stale state. The
-		// toast carries the failure while a 200 response lets HTMX apply the
-		// refreshed retry/recovery actions. Other callers retain the error status.
+		// Card and Changes surfaces own authoritative retry fragments. Recoverable
+		// merge failures return a swap-safe response so HTMX applies both the
+		// refreshed controls and the failure toast. Stale eligibility failures above
+		// retain their non-success status.
+		if fromTaskCard && mergeType == "ff" && result != nil {
+			return h.renderTaskBoardRefresh(c, task.ProjectID, nil)
+		}
 		if fromChangesTab {
 			task, _ = h.taskSvc.GetByID(c.Request().Context(), taskID)
 			return h.GetTaskChanges(c)
@@ -304,8 +306,11 @@ func (h *Handler) MergeTaskBranch(c echo.Context) error {
 		if isHTMX(c) {
 			setHTMXToast(c, "Local merge has conflicts. Resolve conflicts or abort merge.", "failed")
 		}
-		// Conflicts detected - refresh the view to show conflict status
+		// Conflicts detected - refresh the owning surface to show current retry state.
 		task, _ = h.taskSvc.GetByID(c.Request().Context(), taskID)
+		if fromTaskCard && mergeType == "ff" {
+			return h.renderTaskBoardRefresh(c, task.ProjectID, nil)
+		}
 		if fromTaskCard {
 			return c.String(http.StatusConflict, "Local merge has conflicts. Resolve conflicts or abort merge.")
 		}

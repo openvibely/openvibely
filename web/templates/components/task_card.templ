@@ -393,7 +393,7 @@ func taskCardMergeMenuState(taskID string, states []map[string]TaskCardMergeMenu
 templ TaskCardMergeSubmenus(task *models.Task, projectID string, state TaskCardMergeMenuState) {
 	{{ targetBranch := taskCardMergeTarget(task, state) }}
 	<li class="group relative" data-task-card-local-submenu onmouseenter="positionKanbanSubmenu(this)">
-		<button type="button" class="text-sm min-h-11 justify-between" onfocus="positionKanbanSubmenu(this.parentElement)">
+		<button type="button" class="text-sm min-h-11 justify-between" onfocus="positionKanbanSubmenu(this.parentElement)" onkeydown="handleKanbanSubmenuKeydown(event, this.parentElement)">
 			<span>Local</span>
 			<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
 				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m9 18 6-6-6-6"></path>
@@ -407,7 +407,7 @@ templ TaskCardMergeSubmenus(task *models.Task, projectID string, state TaskCardM
 		</ul>
 	</li>
 	<li class="group relative" data-task-card-github-submenu onmouseenter="positionKanbanSubmenu(this)">
-		<button type="button" class="text-sm min-h-11 justify-between" onfocus="positionKanbanSubmenu(this.parentElement)">
+		<button type="button" class="text-sm min-h-11 justify-between" onfocus="positionKanbanSubmenu(this.parentElement)" onkeydown="handleKanbanSubmenuKeydown(event, this.parentElement)">
 			<span>GitHub</span>
 			<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
 				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m9 18 6-6-6-6"></path>
