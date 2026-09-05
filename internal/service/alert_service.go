@@ -209,6 +209,14 @@ func (s *AlertService) MarkRead(ctx context.Context, projectID, id string) error
 	return nil
 }
 
+func (s *AlertService) MarkReadBulk(ctx context.Context, projectID string, ids []string) error {
+	if err := s.alertRepo.MarkReadBulk(ctx, projectID, ids); err != nil {
+		return err
+	}
+	s.publishProjectAlert(projectID, "")
+	return nil
+}
+
 func (s *AlertService) MarkAllRead(ctx context.Context, projectID string) error {
 	if err := s.alertRepo.MarkAllRead(ctx, projectID); err != nil {
 		return err

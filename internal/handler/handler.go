@@ -1029,6 +1029,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.POST("/alerts/:id/reject", h.RejectAlert)
 	e.POST("/alerts/:id/dismiss", h.DismissAlert)
 	e.POST("/alerts/read-all", h.MarkAllAlertsRead)
+	e.POST("/alerts/read-bulk", h.MarkAlertsReadBulk)
 	e.DELETE("/alerts/bulk", h.DeleteAlertsBulk)
 	e.DELETE("/alerts/:id", h.DeleteAlert)
 	e.DELETE("/alerts", h.DeleteAllAlerts)

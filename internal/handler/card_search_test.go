@@ -32,7 +32,9 @@ func TestCollectionSelectionBrowserContractIsShared(t *testing.T) {
 	body := rec.Body.String()
 	for _, want := range []string{
 		`checkbox.addEventListener('click'`, `event.stopPropagation()`, `state.last`, `event.key !== 'Escape'`,
-		`data-card-select-mode`, `data-card-mobile-actions`, `data-card-bulk-confirm`, `if (selectLoaded.checked) state.ids[id] = true`, `selectLoaded.indeterminate`, `selectLoaded.checked`, `data-card-filters-popover`, `dropdown.classList.remove('dropdown-open')`,
+		`data-card-select-mode`, `data-card-mobile-actions`, `data-card-bulk-confirm`, `if (selectLoaded.checked) state.ids[id] = true`, `selectLoaded.indeterminate`, `selectLoaded.checked`, `data-card-filters-popover`, `setCardFilterDropdown(dropdown, false)`,
+		`data-card-query-secondary`, `data-card-selection-actions`, `data-card-mark-read-selected`, `data-card-delete-url`,
+		`[data-card-list-toolbar] .dropdown:not(.dropdown-open) > [data-card-filters-popover]`,
 		`absolute left-5 top-8 z-20 hidden md:block`, `card.classList.add('md:pl-8')`, `alignSelectionGutter(card, gutter)`, `_openVibelyInstallSelectionCards`, `if (!existing[id]) delete state.ids[id]`, `focus({preventScroll: true})`} {
 		require.Contains(t, body, want)
 	}
@@ -107,13 +109,15 @@ func TestCollectionSelectionProductionBrowserInteractions(t *testing.T) {
 	  function selectedCount() { return document.querySelector('[data-card-selected-count]').textContent.trim(); }
 	  function verifyMixedCollection(key) {
 	    var root=document.createElement('section'); root.setAttribute('data-card-pagination-root','');
-	    root.innerHTML='<div data-card-list-toolbar="'+key+'" data-card-bulk-url="/'+key+'/bulk" data-card-entity-type="items" data-card-identity-kind="ids"><form data-card-query-form><label data-card-select-loaded-control><input type="checkbox" data-card-select-loaded></label></form><div class="hidden" data-card-selection-actions><strong data-card-selected-count>0 selected</strong></div><dialog data-card-bulk-confirm><span data-card-bulk-confirm-title></span><button data-card-bulk-confirm-delete></button><span data-card-bulk-error></span></dialog></div><article data-search-card><h3>Fixed</h3></article><article data-search-card data-card-select-id="eligible" data-card-select-eligible="true"><h3>Eligible</h3></article>';
+	    var fixedAttributes=key==='channels' ? ' data-card-select-id="channel:github" data-card-select-eligible="true" data-card-delete-url="/channels/github/remove" data-card-delete-method="POST" data-channel-type="github"' : '';
+	    root.innerHTML='<div data-card-list-toolbar="'+key+'" data-card-bulk-url="/'+key+'/bulk" data-card-entity-type="items" data-card-identity-kind="ids"><form data-card-query-form><label data-card-select-loaded-control><input type="checkbox" data-card-select-loaded></label></form><div class="hidden" data-card-selection-actions><strong data-card-selected-count>0 selected</strong></div><dialog data-card-bulk-confirm><span data-card-bulk-confirm-title></span><button data-card-bulk-confirm-delete></button><span data-card-bulk-error></span></dialog></div><article data-search-card'+fixedAttributes+'><h3>Fixed</h3></article><article data-search-card data-card-select-id="eligible" data-card-select-eligible="true"><h3>Eligible</h3></article>';
 	    document.querySelector('main').appendChild(root); window.refreshCardListToolbars(root);
 	    var controls=root.querySelectorAll('[data-card-selection-gutter] input'), master=root.querySelector('[data-card-select-loaded]');
-	    if (controls.length!==2 || !controls[0].disabled || controls[1].disabled) fail(key+' did not distinguish fixed and eligible cards');
-	    if (!controls[0].title || controls[0].title.toLowerCase().indexOf(key==='channels'?'webhook':'custom personalities')<0) fail(key+' fixed card lacks the page-specific selection explanation');
+	    if (controls.length!==2 || (key==='channels' ? controls[0].disabled : !controls[0].disabled) || controls[1].disabled) fail(key+' did not distinguish its fixed and eligible cards');
+	    if (key!=='channels' && (!controls[0].title || controls[0].title.toLowerCase().indexOf('custom personalities')<0)) fail(key+' fixed card lacks the page-specific selection explanation');
 	    master.click();
-	    if (!master.checked || !controls[1].checked || root.querySelector('[data-card-selected-count]').textContent.trim()!=='1 selected') fail(key+' master checkbox did not select its loaded eligible card');
+	    var expectedCount=key==='channels' ? '2 selected' : '1 selected';
+	    if (!master.checked || !controls[1].checked || root.querySelector('[data-card-selected-count]').textContent.trim()!==expectedCount) fail(key+' master checkbox did not select its loaded eligible cards');
 	    root.remove();
 	  }
 	  async function run() {    await wait(100);
@@ -126,6 +130,10 @@ func TestCollectionSelectionProductionBrowserInteractions(t *testing.T) {
 	    if (!filterDropdown.classList.contains('dropdown-open') || filterButton.getAttribute('aria-expanded') !== 'true') fail('Filters did not open accessibly');
 	    document.body.dispatchEvent(new MouseEvent('click', {bubbles:true}));
 	    if (filterDropdown.classList.contains('dropdown-open') || filterButton.getAttribute('aria-expanded') !== 'false') fail('outside click did not close Filters');
+	    filterButton.click();
+	    filterButton.click();
+	    var filterPopover=filterDropdown.querySelector('[data-card-filters-popover]'), closedSelector='[data-card-list-toolbar] .dropdown:not(.dropdown-open) > [data-card-filters-popover]';
+	    if (filterDropdown.classList.contains('dropdown-open') || filterButton.getAttribute('aria-expanded') !== 'false' || getComputedStyle(filterPopover).visibility !== 'hidden') fail('second Filters click did not close the popover: class='+filterDropdown.className+' expanded='+filterButton.getAttribute('aria-expanded')+' matches='+filterPopover.matches(closedSelector)+' visibility='+getComputedStyle(filterPopover).visibility);
 	    var desktopSelect=document.querySelector('[data-card-select-loaded]'), mobileSelect=document.querySelector('[data-card-select-mode]');
 	    if (!desktopSelect || desktopSelect.tagName !== 'INPUT' || desktopSelect.type !== 'checkbox' || !desktopSelect.getAttribute('aria-label')) fail('loaded-card control is not an accessible checkbox');
 	    var alignedCard=card('a'), alignedTitle=alignedCard.querySelector('h3'), alignedGutter=alignedCard.querySelector('[data-card-selection-gutter]');
@@ -141,7 +149,15 @@ func TestCollectionSelectionProductionBrowserInteractions(t *testing.T) {
 	    document.dispatchEvent(new KeyboardEvent('keydown', {key:'Escape', bubbles:true}));
 	    if (selectedCount() !== '0 selected' || checkbox('a').checked || desktopSelect.checked || desktopSelect.indeterminate) fail('Escape did not clear selection');
 	    desktopSelect.click();
-	    if (selectedCount() !== '3 selected' || checkbox('default').checked || !desktopSelect.checked || desktopSelect.indeterminate) fail('master checkbox included an ineligible card or missed eligible cards');    var disabled=checkbox('default'), help=document.getElementById(disabled.getAttribute('aria-describedby'));
+	    if (selectedCount() !== '3 selected' || checkbox('default').checked || !desktopSelect.checked || desktopSelect.indeterminate) fail('master checkbox included an ineligible card or missed eligible cards');
+	    var queryForm=document.querySelector('[data-card-query-form]'), search=document.querySelector('[data-card-search]'), secondary=document.querySelector('[data-card-query-secondary]'), selectedActions=document.querySelector('[data-card-selection-actions]');
+	    if (queryForm.classList.contains('hidden') || !search || search.offsetParent===null) fail('selection hid the master checkbox or search');
+	    if (!secondary.classList.contains('hidden') || selectedActions.classList.contains('hidden')) fail('selection did not replace filters and sort with bulk actions');
+	    desktopSelect.click();
+	    if (selectedCount()!=='0 selected' || desktopSelect.checked || secondary.classList.contains('hidden') || !selectedActions.classList.contains('hidden')) fail('unchecking the master did not clear selection and restore filters and sort');
+	    desktopSelect.click();
+	    if (selectedCount()!=='3 selected' || !desktopSelect.checked || !secondary.classList.contains('hidden') || selectedActions.classList.contains('hidden')) fail('rechecking the master did not restore selection actions');
+	    var disabled=checkbox('default'), help=document.getElementById(disabled.getAttribute('aria-describedby'));
     if (!disabled.disabled || !help || !help.textContent.trim()) fail('disabled selection control lacks an accessible explanation');
     window.openVibelyNavigate=function(path){window.selectionNavigation=path;};
     var provider=document.querySelector('[name="provider"]'); provider.value='openai'; provider.form.requestSubmit();
@@ -317,6 +333,9 @@ func TestCollectionCardToolbars(t *testing.T) {
 			}
 			if strings.Contains(body, ">Select loaded<") {
 				t.Errorf("expected %s toolbar to use a master checkbox without visible Select loaded text", tt.name)
+			}
+			if tt.pageKey == "alerts" && !strings.Contains(body, `data-card-mark-read-selected`) {
+				t.Errorf("expected alerts toolbar to offer Mark as read for selected alerts")
 			}
 			if got := strings.Contains(body, `id="`+tt.pageKey+`-card-sort"`); got != tt.wantSort {
 				t.Errorf("sort presence = %v, want %v", got, tt.wantSort)

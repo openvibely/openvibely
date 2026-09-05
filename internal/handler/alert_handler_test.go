@@ -600,6 +600,39 @@ func TestHandler_MarkAllAlertsRead(t *testing.T) {
 	})
 }
 
+func TestHandler_MarkAlertsReadBulkPreflightsProject(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	project := createProject(t, h, "Bulk read alerts")
+	foreignProject := createProject(t, h, "Foreign bulk read alerts")
+	own := &models.Alert{ProjectID: project.ID, Type: models.AlertCustom, Severity: models.SeverityInfo, Title: "own"}
+	foreign := &models.Alert{ProjectID: foreignProject.ID, Type: models.AlertCustom, Severity: models.SeverityInfo, Title: "foreign"}
+	require.NoError(t, h.alertSvc.Create(context.Background(), own))
+	require.NoError(t, h.alertSvc.Create(context.Background(), foreign))
+
+	request := func(ids ...string) *httptest.ResponseRecorder {
+		payload, err := json.Marshal(bulkIDsRequest{IDs: ids})
+		require.NoError(t, err)
+		req := httptest.NewRequest(http.MethodPost, "/alerts/read-bulk?project_id="+project.ID, strings.NewReader(string(payload)))
+		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		return rec
+	}
+
+	rec := request(own.ID, foreign.ID)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	unchanged, err := h.alertSvc.GetByIDAdmin(context.Background(), own.ID)
+	require.NoError(t, err)
+	require.False(t, unchanged.IsRead)
+
+	rec = request(own.ID, own.ID)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.JSONEq(t, `{"updated":1}`, rec.Body.String())
+	updated, err := h.alertSvc.GetByIDAdmin(context.Background(), own.ID)
+	require.NoError(t, err)
+	require.True(t, updated.IsRead)
+}
+
 func TestHandler_DeleteAlertsBulkDeduplicatesAndPreflightsProject(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	project := createProject(t, h, "Bulk alerts")

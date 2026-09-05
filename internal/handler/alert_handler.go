@@ -243,6 +243,21 @@ func (h *Handler) MarkAlertRead(c echo.Context) error {
 	return h.renderAlertListRefresh(c, currentProjectID, nil, nil)
 }
 
+func (h *Handler) MarkAlertsReadBulk(c echo.Context) error {
+	ids, err := decodeBulkIDs(c.Request().Body)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	projectID, err := h.getCurrentProjectID(c)
+	if err != nil {
+		return err
+	}
+	if err := h.alertSvc.MarkReadBulk(c.Request().Context(), projectID, ids); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "all selected alerts must belong to the current project")
+	}
+	return c.JSON(http.StatusOK, map[string]int{"updated": len(ids)})
+}
+
 func (h *Handler) MarkAllAlertsRead(c echo.Context) error {
 	ctx := c.Request().Context()
 
