@@ -26,6 +26,10 @@ func (h *Handler) taskCardMergeEligibility(ctx context.Context, task *models.Tas
 }
 
 func (h *Handler) taskCardMergeEligibilityForProject(ctx context.Context, task *models.Task, project *models.Project, mergeType string) (taskMergeActionState, bool, string) {
+	return h.taskCardMergeEligibilityForProjectWithLocks(ctx, task, project, mergeType, nil)
+}
+
+func (h *Handler) taskCardMergeEligibilityForProjectWithLocks(ctx context.Context, task *models.Task, project *models.Project, mergeType string, worktreeLocks map[string]bool) (taskMergeActionState, bool, string) {
 	var state taskMergeActionState
 	if task == nil {
 		return state, false, "Task not found."
@@ -33,8 +37,8 @@ func (h *Handler) taskCardMergeEligibilityForProject(ctx context.Context, task *
 	if project == nil || project.RepoPath == "" {
 		return state, false, "The project has no repository path."
 	}
-	state = h.resolveTaskMergeActionState(ctx, task)
-	if service.IsGitWorktreeLocked(project.RepoPath, task.WorktreePath) {
+	state = h.resolveTaskMergeActionStateForProjectWithLocks(ctx, task, project, worktreeLocks)
+	if taskCardWorktreeLocked(project, task, worktreeLocks) {
 		return state, false, "The task worktree is locked."
 	}
 	eligibility := h.resolveTaskMergeEligibility(ctx, task, project, state.BranchAlreadyMerged)
@@ -77,6 +81,10 @@ func rejectTaskCardMutation(c echo.Context, message string) error {
 }
 
 func (h *Handler) taskCardPullRequestEligibility(task *models.Task, project *models.Project) (bool, string) {
+	return h.taskCardPullRequestEligibilityWithLocks(task, project, nil)
+}
+
+func (h *Handler) taskCardPullRequestEligibilityWithLocks(task *models.Task, project *models.Project, worktreeLocks map[string]bool) (bool, string) {
 	if task == nil || strings.TrimSpace(task.WorktreeBranch) == "" {
 		return false, "A task worktree branch is required."
 	}
@@ -86,7 +94,7 @@ func (h *Handler) taskCardPullRequestEligibility(task *models.Task, project *mod
 	if task.Status == models.StatusRunning || task.Status == models.StatusQueued {
 		return false, "The task worktree is currently in use."
 	}
-	if service.IsGitWorktreeLocked(project.RepoPath, task.WorktreePath) {
+	if taskCardWorktreeLocked(project, task, worktreeLocks) {
 		return false, "The task worktree is locked."
 	}
 	if h.githubSvc == nil {
