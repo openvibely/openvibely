@@ -6,7 +6,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	htmlstd "html"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -8529,76 +8528,26 @@ func TestHandler_RerunSwarmReviewerRejectsActiveRoleExecution(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), "already running")
 }
 
-func newHistoricalModelsBenchmarkEcho(h *Handler, repo *repository.LLMConfigRepo) *echo.Echo {
-	e := echo.New()
-	e.GET("/models", func(c echo.Context) error {
-		c.Response().Header().Set("Cache-Control", "no-store")
-		agents, err := repo.List(c.Request().Context())
-		if err != nil {
-			return err
-		}
-		stats := make(map[string]int, len(agents))
-		for _, agent := range agents {
-			stats[agent.ID] = h.workerSvc.ModelRunning(agent.ID)
-		}
-		if err := render(c, http.StatusOK, pages.ModelsContent(agents, stats, h.desktopMode)); err != nil {
-			return err
-		}
-		// Reproduce the historical eager edit attributes inside the complete
-		// handler path. extra_body_json dominates the acceptance fixture, while
-		// these fields also retain the former secret and request-JSON payload.
-		for _, agent := range agents {
-			_, err := fmt.Fprintf(c.Response(), `<div data-model-api-key="%s" data-model-extra-headers-json="%s" data-model-extra-body-json="%s"></div>`,
-				htmlstd.EscapeString(agent.APIKey),
-				htmlstd.EscapeString(agent.ExtraHeadersJSON),
-				htmlstd.EscapeString(agent.ExtraBodyJSON),
-			)
-			if err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-	return e
-}
-
-func TestModelsBenchmarkHandlersUseCompleteHTMXRoutes(t *testing.T) {
-	h, candidate, repo := setupTestHandler(t)
+func TestModelsListOmitsEagerEditConfiguration(t *testing.T) {
+	_, e, repo := setupTestHandler(t)
 	cfg := &models.LLMConfig{
-		Name: "Historical Eager Config", Provider: models.ProviderOpenAICompatible,
+		Name: "Large Edit Config", Provider: models.ProviderOpenAICompatible,
 		Model: "custom-model", PresetSlug: "custom", ExtraBodyJSON: `{"eager":"payload"}`,
 	}
-	if err := repo.Create(context.Background(), cfg); err != nil {
-		t.Fatal(err)
-	}
-	baseline := newHistoricalModelsBenchmarkEcho(h, repo)
+	require.NoError(t, repo.Create(context.Background(), cfg))
 
-	for name, server := range map[string]*echo.Echo{"baseline": baseline, "candidate": candidate} {
-		t.Run(name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, "/models", nil)
-			req.Header.Set("HX-Request", "true")
-			rec := httptest.NewRecorder()
-			server.ServeHTTP(rec, req)
-			if rec.Code != http.StatusOK {
-				t.Fatalf("GET /models status = %d", rec.Code)
-			}
-			if !strings.Contains(rec.Body.String(), "Historical Eager Config") {
-				t.Fatal("GET /models did not render the configured model")
-			}
-			if name == "baseline" && !strings.Contains(rec.Body.String(), htmlstd.EscapeString(cfg.ExtraBodyJSON)) {
-				t.Fatal("historical GET /models did not eagerly serialize extra_body_json")
-			}
-			if name == "candidate" && strings.Contains(rec.Body.String(), cfg.ExtraBodyJSON) {
-				t.Fatal("candidate GET /models eagerly serialized extra_body_json")
-			}
-		})
-	}
+	req := httptest.NewRequest(http.MethodGet, "/models", nil)
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), "Large Edit Config")
+	assert.NotContains(t, rec.Body.String(), cfg.ExtraBodyJSON)
 }
 
 func BenchmarkHandlerListModelsHTMXLargeEditConfig(b *testing.B) {
-	h, candidate, _, db := setupTestHandlerWithDB(b)
-	baselineRepo := repository.NewLLMConfigRepo(db)
-	baseline := newHistoricalModelsBenchmarkEcho(h, baselineRepo)
+	_, e, _, db := setupTestHandlerWithDB(b)
 	if _, err := db.Exec(`DELETE FROM agent_configs`); err != nil {
 		b.Fatal(err)
 	}
@@ -8618,39 +8567,17 @@ func BenchmarkHandlerListModelsHTMXLargeEditConfig(b *testing.B) {
 		}
 	}
 
-	b.Run("baseline_full_projection", func(b *testing.B) {
-		b.ReportAllocs()
-		var responseBytes int64
-		for i := 0; i < b.N; i++ {
-			req := httptest.NewRequest(http.MethodGet, "/models", nil)
-			req.Header.Set("HX-Request", "true")
-			rec := httptest.NewRecorder()
-			b.StartTimer()
-			baseline.ServeHTTP(rec, req)
-			b.StopTimer()
-			if rec.Code != http.StatusOK {
-				b.Fatalf("status = %d", rec.Code)
-			}
-			responseBytes += int64(rec.Body.Len())
+	b.ReportAllocs()
+	var responseBytes int64
+	for i := 0; i < b.N; i++ {
+		req := httptest.NewRequest(http.MethodGet, "/models", nil)
+		req.Header.Set("HX-Request", "true")
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			b.Fatalf("status = %d", rec.Code)
 		}
-		b.ReportMetric(float64(responseBytes)/float64(b.N), "response_bytes")
-	})
-
-	b.Run("candidate_lazy_edit_details", func(b *testing.B) {
-		b.ReportAllocs()
-		var responseBytes int64
-		for i := 0; i < b.N; i++ {
-			req := httptest.NewRequest(http.MethodGet, "/models", nil)
-			req.Header.Set("HX-Request", "true")
-			rec := httptest.NewRecorder()
-			b.StartTimer()
-			candidate.ServeHTTP(rec, req)
-			b.StopTimer()
-			if rec.Code != http.StatusOK {
-				b.Fatalf("status = %d", rec.Code)
-			}
-			responseBytes += int64(rec.Body.Len())
-		}
-		b.ReportMetric(float64(responseBytes)/float64(b.N), "response_bytes")
-	})
+		responseBytes += int64(rec.Body.Len())
+	}
+	b.ReportMetric(float64(responseBytes)/float64(b.N), "response_bytes")
 }
