@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -413,6 +415,9 @@ func taskCardLoadBranchRelations(ctx context.Context, repoPath string, refs []st
 				return
 			}
 		}
+		if _, duplicate := parents[fields[0]]; duplicate {
+			return
+		}
 		parents[fields[0]] = append([]string(nil), fields[1:]...)
 	}
 	for _, tip := range tips {
@@ -420,8 +425,81 @@ func taskCardLoadBranchRelations(ctx context.Context, repoPath string, refs []st
 			return
 		}
 	}
+	if !taskCardGraphMatchesRepository(ctx, repoPath, parents) {
+		return
+	}
 	snapshot.parents = parents
 	snapshot.graphValid = true
+}
+
+func taskCardGraphMatchesRepository(ctx context.Context, repoPath string, parents map[string][]string) bool {
+	commits := make([]string, 0, len(parents))
+	for commit := range parents {
+		commits = append(commits, commit)
+	}
+	sort.Strings(commits)
+	if len(commits) == 0 {
+		return false
+	}
+
+	cmd := exec.CommandContext(ctx, "git", "cat-file", "--batch")
+	cmd.Dir = repoPath
+	cmd.Stdin = strings.NewReader(strings.Join(commits, "\n") + "\n")
+	output, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	reader := bufio.NewReader(bytes.NewReader(output))
+	for _, commit := range commits {
+		header, err := reader.ReadString('\n')
+		if err != nil {
+			return false
+		}
+		fields := strings.Fields(header)
+		if len(fields) != 3 || !strings.EqualFold(fields[0], commit) || fields[1] != "commit" {
+			return false
+		}
+		size, err := strconv.Atoi(fields[2])
+		if err != nil || size < 0 || size > len(output) {
+			return false
+		}
+		body := make([]byte, size)
+		if _, err := io.ReadFull(reader, body); err != nil {
+			return false
+		}
+		terminator, err := reader.ReadByte()
+		if err != nil || terminator != '\n' {
+			return false
+		}
+
+		actualParents := make([]string, 0)
+		for _, line := range strings.Split(string(body), "\n") {
+			if line == "" {
+				break
+			}
+			if strings.HasPrefix(line, "parent ") {
+				parent := strings.TrimSpace(strings.TrimPrefix(line, "parent "))
+				if !taskCardValidObjectID(parent) {
+					return false
+				}
+				actualParents = append(actualParents, parent)
+			}
+		}
+		parsedParents := parents[commit]
+		if len(actualParents) != len(parsedParents) {
+			return false
+		}
+		for i, parent := range actualParents {
+			if !strings.EqualFold(parent, parsedParents[i]) {
+				return false
+			}
+			if _, ok := parents[parsedParents[i]]; !ok {
+				return false
+			}
+		}
+	}
+	_, err = reader.Peek(1)
+	return errors.Is(err, io.EOF)
 }
 
 func taskCardValidObjectID(value string) bool {

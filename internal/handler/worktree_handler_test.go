@@ -394,6 +394,12 @@ case "$*" in
       printf 'unsupported relationship query\n' >&2
       exit 129
     fi
+    if [ "$OPENVIBELY_RELATION_FAILURE" = "incomplete" ]; then
+      while IFS= read -r tip; do
+        [ -n "$tip" ] && printf '%s\n' "$tip"
+      done
+      exit 0
+    fi
     printf 'malformed relationship output\n'
     exit 0
     ;;
@@ -406,8 +412,15 @@ exec "$OPENVIBELY_REAL_GIT" "$@"
 	t.Setenv("OPENVIBELY_REAL_GIT", realGit)
 	t.Setenv("PATH", wrapperDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	for _, failureMode := range []string{"malformed", "unsupported"} {
+	for _, failureMode := range []string{"malformed", "unsupported", "incomplete"} {
 		t.Run(failureMode, func(t *testing.T) {
+			mergeStatus := models.MergeStatusPending
+			if failureMode == "incomplete" {
+				mergeStatus = models.MergeStatusMerged
+			}
+			if err := h.taskRepo.UpdateMergeStatus(ctx, task.ID, mergeStatus); err != nil {
+				t.Fatal(err)
+			}
 			t.Setenv("OPENVIBELY_RELATION_FAILURE", failureMode)
 			req := httptest.NewRequest(http.MethodGet, "/tasks?project_id="+project.ID, nil)
 			req.Header.Set("HX-Request", "true")
@@ -420,6 +433,15 @@ exec "$OPENVIBELY_REAL_GIT" "$@"
 			for _, mergeType := range []string{"merge", "ff", "rebase", "squash"} {
 				if !taskCardActionDisabled(rec.Body.String(), mergeType) {
 					t.Fatalf("%s relationship snapshot exposed %s action", failureMode, mergeType)
+				}
+			}
+			if failureMode == "incomplete" {
+				unchanged, err := h.taskRepo.GetByID(ctx, task.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if unchanged.MergeStatus != models.MergeStatusMerged {
+					t.Fatalf("incomplete relationship snapshot reconciled stale metadata to %q", unchanged.MergeStatus)
 				}
 			}
 		})
@@ -552,8 +574,8 @@ func TestHandler_TaskBoardBatchesTerminalCardGitState(t *testing.T) {
 		t.Fatal(err)
 	}
 	invocations := len(strings.FieldsFunc(strings.TrimSpace(string(logData)), func(r rune) bool { return r == '\n' }))
-	if invocations > 5 {
-		t.Fatalf("%d terminal cards across %d targets executed %d git commands, want one five-command repository snapshot; commands:\n%s", taskCount, len(targets), invocations, logData)
+	if invocations > 6 {
+		t.Fatalf("%d terminal cards across %d targets executed %d git commands, want one six-command repository snapshot; commands:\n%s", taskCount, len(targets), invocations, logData)
 	}
 }
 
@@ -653,10 +675,25 @@ func TestTaskCardRepositorySnapshotLoadsExactWorktreeDirtyStateInProcess(t *test
 func TestHandler_TaskBoardRecoversPendingAndBlockedBranchesForCreatePR(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
 	h.taskPullRequestRepo = repository.NewTaskPullRequestRepo(db)
-	h.SetGitHubService(&fakeGitHubService{})
+	prNumber := 90
+	h.SetGitHubService(&fakeGitHubService{
+		resolveRepoFn: func(_ context.Context, _, _ string) (*service.GitHubRepoRef, error) {
+			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely", CloneURL: "https://github.com/openvibely/openvibely.git", HTMLURL: "https://github.com/openvibely/openvibely"}, nil
+		},
+		publishBranchFn: func(_ context.Context, _ *service.GitHubRepoRef, _ service.GitHubPublishBranchRequest) (*service.GitHubPublishBranchResult, error) {
+			return &service.GitHubPublishBranchResult{HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
+		},
+		findPRFn: func(context.Context, *service.GitHubRepoRef, string) (*service.GitHubPullRequest, error) {
+			return nil, nil
+		},
+		createPRFn: func(_ context.Context, _ *service.GitHubRepoRef, req service.GitHubCreatePullRequestRequest) (*service.GitHubPullRequest, error) {
+			prNumber++
+			return &service.GitHubPullRequest{Number: prNumber, URL: fmt.Sprintf("https://github.com/openvibely/openvibely/pull/%d", prNumber), State: "open", HeadRef: req.Head, HeadRepoFullName: "openvibely/openvibely", HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
+		},
+	})
 	ctx := context.Background()
 	repoDir := createHandlerTestGitRepo(t)
-	project := &models.Project{Name: "PR Recovery", RepoPath: repoDir, IsDefault: true}
+	project := &models.Project{Name: "PR Recovery", RepoPath: repoDir, RepoURL: "https://github.com/openvibely/openvibely", IsDefault: true}
 	if err := h.projectSvc.Create(ctx, project); err != nil {
 		t.Fatal(err)
 	}
@@ -700,6 +737,23 @@ func TestHandler_TaskBoardRecoversPendingAndBlockedBranchesForCreatePR(t *testin
 		buttonIndex := strings.LastIndex(rec.Body.String()[:markerIndex], "<button")
 		if buttonIndex < 0 || strings.Contains(rec.Body.String()[buttonIndex:markerIndex], " disabled") {
 			t.Fatalf("%s card disabled Create PR after conventional worktree recovery", task.Status)
+		}
+
+		form := url.Values{"merge_source": {"task_card"}, "project_id": {project.ID}}
+		post := httptest.NewRequest(http.MethodPost, "/tasks/"+task.ID+"/worktree/pull-request", strings.NewReader(form.Encode()))
+		post.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		post.Header.Set("HX-Request", "true")
+		postRec := httptest.NewRecorder()
+		e.ServeHTTP(postRec, post)
+		if postRec.Code != http.StatusOK || !strings.Contains(postRec.Body.String(), `id="kanban-board"`) {
+			t.Fatalf("%s recovered Create PR status=%d body=%s trigger=%s", task.Status, postRec.Code, postRec.Body.String(), postRec.Header().Get("HX-Trigger"))
+		}
+		record, err := h.taskPullRequestRepo.GetByTaskID(ctx, task.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if record == nil || record.PRState != "open" {
+			t.Fatalf("%s recovered Create PR did not persist open PR: %#v", task.Status, record)
 		}
 	}
 }

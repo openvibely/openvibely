@@ -507,6 +507,11 @@ func (h *Handler) CreateTaskPullRequest(c echo.Context) error {
 			return taskCardPullRequestNotFound(c)
 		}
 	}
+	project, err := h.projectRepo.GetByID(c.Request().Context(), task.ProjectID)
+	if err != nil || project == nil || project.RepoPath == "" {
+		return taskPullRequestFailure(c, fromTaskCard, "Project has no repository path configured")
+	}
+	h.recoverTaskWorktreeState(c.Request().Context(), task, project)
 	if task.WorktreeBranch == "" {
 		return taskPullRequestFailure(c, fromTaskCard, "Task has no worktree branch")
 	}
@@ -521,10 +526,6 @@ func (h *Handler) CreateTaskPullRequest(c echo.Context) error {
 		return taskPullRequestFailure(c, fromTaskCard, "Task pull request repository not available")
 	}
 
-	project, err := h.projectRepo.GetByID(c.Request().Context(), task.ProjectID)
-	if err != nil || project == nil || project.RepoPath == "" {
-		return taskPullRequestFailure(c, fromTaskCard, "Project has no repository path configured")
-	}
 	var eligibilityReason string
 	result, mutationErr := h.newTaskPullRequestService().OpenForTaskValidated(c.Request().Context(), project, task, service.OpenTaskPullRequestOptions{
 		CommitMessage: h.buildPullRequestPrepCommitMessage(c.Request().Context(), task),
@@ -534,6 +535,7 @@ func (h *Handler) CreateTaskPullRequest(c echo.Context) error {
 			eligibilityReason = "Task not found."
 			return nil, errTaskMutationEligibilityChanged
 		}
+		h.recoverTaskWorktreeState(c.Request().Context(), currentTask, project)
 		if fromTaskCard {
 			if eligible, reason := h.taskCardPullRequestEligibility(currentTask, project); !eligible {
 				eligibilityReason = reason
