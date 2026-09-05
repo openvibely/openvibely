@@ -4330,7 +4330,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 								if (window.openVibelyNavigate) window.openVibelyNavigate(path); else window.location.assign(path);
 							});
 
-							function cards() { return Array.prototype.slice.call(root.querySelectorAll('[data-search-card]')); }
+							function cards() { return Array.prototype.slice.call(root.querySelectorAll('[data-search-card]:not([data-search-empty-state])')); }
 							function eligible(card) { return card.getAttribute('data-card-select-eligible') === 'true' && visible(card); }
 							function eligibleCards() { return cards().filter(eligible); }
 							function selectedCards() { return eligibleCards().filter(function(card) { return !!state.ids[card.getAttribute('data-card-select-id')]; }); }
