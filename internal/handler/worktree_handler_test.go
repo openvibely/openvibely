@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -354,6 +355,77 @@ func TestHandler_TaskBoardRecoversMetadataWithoutLocalEligibilityForNonMergeable
 	}
 }
 
+func TestHandler_TaskBoardRelationshipSnapshotFailureDisablesLocalActions(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	h.taskPullRequestRepo = repository.NewTaskPullRequestRepo(db)
+	ctx := context.Background()
+	repoDir := createHandlerTestGitRepo(t)
+	worktreePath := filepath.Join(repoDir, ".worktrees", "relationship-failure")
+	runGit(t, repoDir, "worktree", "add", "-b", "task/relationship-failure", worktreePath, "main")
+	if err := os.WriteFile(filepath.Join(worktreePath, "change.txt"), []byte("change\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, worktreePath, "add", ".")
+	runGit(t, worktreePath, "commit", "-m", "task change")
+
+	project := &models.Project{Name: "Relationship Failure", RepoPath: repoDir, IsDefault: true}
+	if err := h.projectSvc.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	task := &models.Task{
+		ProjectID: project.ID, Title: "Relationship failure", Prompt: "test", Category: models.CategoryCompleted,
+		Status: models.StatusCompleted, WorktreePath: worktreePath, WorktreeBranch: "task/relationship-failure",
+		MergeTargetBranch: "main", MergeStatus: models.MergeStatusPending,
+	}
+	if err := h.taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrapperDir := t.TempDir()
+	wrapperPath := filepath.Join(wrapperDir, "git")
+	wrapper := `#!/bin/sh
+case "$*" in
+  *"for-each-ref"*"ahead-behind"*|*"rev-list --parents"*)
+    if [ "$OPENVIBELY_RELATION_FAILURE" = "unsupported" ]; then
+      printf 'unsupported relationship query\n' >&2
+      exit 129
+    fi
+    printf 'malformed relationship output\n'
+    exit 0
+    ;;
+esac
+exec "$OPENVIBELY_REAL_GIT" "$@"
+`
+	if err := os.WriteFile(wrapperPath, []byte(wrapper), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("OPENVIBELY_REAL_GIT", realGit)
+	t.Setenv("PATH", wrapperDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	for _, failureMode := range []string{"malformed", "unsupported"} {
+		t.Run(failureMode, func(t *testing.T) {
+			t.Setenv("OPENVIBELY_RELATION_FAILURE", failureMode)
+			req := httptest.NewRequest(http.MethodGet, "/tasks?project_id="+project.ID, nil)
+			req.Header.Set("HX-Request", "true")
+			req.Header.Set("HX-Target", "kanban-board")
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("tasks refresh status=%d body=%s", rec.Code, rec.Body.String())
+			}
+			for _, mergeType := range []string{"merge", "ff", "rebase", "squash"} {
+				if !taskCardActionDisabled(rec.Body.String(), mergeType) {
+					t.Fatalf("%s relationship snapshot exposed %s action", failureMode, mergeType)
+				}
+			}
+		})
+	}
+}
+
 func TestHandler_TaskBoardBatchesTerminalCardGitState(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
 	h.taskPullRequestRepo = repository.NewTaskPullRequestRepo(db)
@@ -364,7 +436,7 @@ func TestHandler_TaskBoardBatchesTerminalCardGitState(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	const taskCount = 8
+	const taskCount = 24
 	targets := []string{"target-one", "target-two", "target-three"}
 	tasks := make([]*models.Task, 0, taskCount)
 	for _, target := range targets {
@@ -482,6 +554,52 @@ func TestHandler_TaskBoardBatchesTerminalCardGitState(t *testing.T) {
 	invocations := len(strings.FieldsFunc(strings.TrimSpace(string(logData)), func(r rune) bool { return r == '\n' }))
 	if invocations > 5 {
 		t.Fatalf("%d terminal cards across %d targets executed %d git commands, want one five-command repository snapshot; commands:\n%s", taskCount, len(targets), invocations, logData)
+	}
+}
+
+func TestTaskCardRepositorySnapshotBoundsDirtyWorktreeBatch(t *testing.T) {
+	const pathCount = 24
+	paths := make([]string, 0, pathCount+2)
+	root := t.TempDir()
+	for i := 0; i < pathCount; i++ {
+		paths = append(paths, filepath.Join(root, fmt.Sprintf("worktree-%02d", i)))
+	}
+	paths = append(paths, paths[0], paths[1])
+
+	var mu sync.Mutex
+	active := 0
+	maximum := 0
+	calls := 0
+	snapshot := &taskCardRepositorySnapshot{
+		dirty: make(map[string]bool),
+		loadDirty: func(string) bool {
+			mu.Lock()
+			active++
+			calls++
+			if active > maximum {
+				maximum = active
+			}
+			mu.Unlock()
+			time.Sleep(10 * time.Millisecond)
+			mu.Lock()
+			active--
+			mu.Unlock()
+			return false
+		},
+	}
+
+	snapshot.loadDirtyWorktrees(paths)
+	if calls != pathCount {
+		t.Fatalf("dirty loader calls=%d, want %d unique paths", calls, pathCount)
+	}
+	if maximum <= 1 {
+		t.Fatalf("dirty loader maximum concurrency=%d, want batched parallel work", maximum)
+	}
+	if maximum > taskCardDirtyWorkerLimit {
+		t.Fatalf("dirty loader maximum concurrency=%d, exceeds limit %d", maximum, taskCardDirtyWorkerLimit)
+	}
+	if len(snapshot.dirty) != pathCount {
+		t.Fatalf("dirty results=%d, want %d", len(snapshot.dirty), pathCount)
 	}
 }
 

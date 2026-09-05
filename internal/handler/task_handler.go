@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/a-h/templ"
 	git "github.com/go-git/go-git/v5"
@@ -319,24 +320,23 @@ type taskCardRepositorySnapshot struct {
 	valid           bool
 	worktreesByPath map[string]service.WorktreeInfo
 	refs            map[string]string
-	mergedByTarget  map[string]map[string]bool
-	containsTarget  map[string]map[string]bool
-	relationsValid  map[string]bool
+	parents         map[string][]string
+	graphValid      bool
 	activeMerge     bool
 	mergeHead       string
 	activeConflicts bool
 	dirty           map[string]bool
+	loadDirty       func(string) bool
 }
 
-func newTaskCardRepositorySnapshot(ctx context.Context, project *models.Project, targets []string) *taskCardRepositorySnapshot {
+func newTaskCardRepositorySnapshot(ctx context.Context, project *models.Project) *taskCardRepositorySnapshot {
 	snapshot := &taskCardRepositorySnapshot{
 		project:         project,
 		worktreesByPath: make(map[string]service.WorktreeInfo),
 		refs:            make(map[string]string),
-		mergedByTarget:  make(map[string]map[string]bool),
-		containsTarget:  make(map[string]map[string]bool),
-		relationsValid:  make(map[string]bool),
+		parents:         make(map[string][]string),
 		dirty:           make(map[string]bool),
+		loadDirty:       taskCardWorktreeDirty,
 	}
 	if project == nil || strings.TrimSpace(project.RepoPath) == "" {
 		return snapshot
@@ -360,7 +360,6 @@ func newTaskCardRepositorySnapshot(ctx context.Context, project *models.Project,
 			}
 		}
 	}
-	taskCardLoadBranchRelations(ctx, project.RepoPath, targets, snapshot)
 	snapshot.activeMerge = service.HasActiveMerge(project.RepoPath)
 	if snapshot.activeMerge {
 		mergeHeadCmd := exec.CommandContext(ctx, "git", "rev-parse", "--verify", "MERGE_HEAD")
@@ -373,82 +372,68 @@ func newTaskCardRepositorySnapshot(ctx context.Context, project *models.Project,
 	return snapshot
 }
 
-func taskCardLoadBranchRelations(ctx context.Context, repoPath string, targets []string, snapshot *taskCardRepositorySnapshot) {
+func taskCardLoadBranchRelations(ctx context.Context, repoPath string, refs []string, snapshot *taskCardRepositorySnapshot) {
 	if snapshot == nil {
 		return
 	}
-	targetsByTip := make(map[string][]string)
-	for _, target := range targets {
-		target = strings.TrimPrefix(strings.TrimSpace(target), "refs/heads/")
-		tip := snapshot.refTip(target)
-		if target == "" || tip == "" {
-			continue
-		}
-		if snapshot.mergedByTarget[target] == nil {
-			snapshot.mergedByTarget[target] = make(map[string]bool)
-			snapshot.containsTarget[target] = make(map[string]bool)
-			targetsByTip[tip] = append(targetsByTip[tip], target)
-		}
+	snapshot.graphValid = false
+	snapshot.parents = make(map[string][]string)
+	if len(refs) == 0 {
+		return
 	}
-	tips := make([]string, 0, len(targetsByTip))
-	for tip := range targetsByTip {
-		tips = append(tips, tip)
+	tips := make([]string, 0, len(refs))
+	seen := make(map[string]bool, len(refs))
+	for _, ref := range refs {
+		tip := snapshot.refTip(ref)
+		if tip != "" && !seen[tip] {
+			seen[tip] = true
+			tips = append(tips, tip)
+		}
 	}
 	sort.Strings(tips)
 	if len(tips) == 0 {
 		return
 	}
 
-	format := "%(refname:short)"
-	for _, tip := range tips {
-		format += "%00%(ahead-behind:" + tip + ")"
-	}
-	cmd := exec.CommandContext(ctx, "git", "for-each-ref", "--format="+format, "refs/heads")
+	cmd := exec.CommandContext(ctx, "git", "rev-list", "--parents", "--stdin")
 	cmd.Dir = repoPath
+	cmd.Stdin = strings.NewReader(strings.Join(tips, "\n") + "\n")
 	output, err := cmd.Output()
 	if err != nil {
 		return
 	}
-	valid := true
+	parents := make(map[string][]string)
 	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
-		fields := strings.Split(line, "\x00")
-		if len(fields) != len(tips)+1 {
-			valid = false
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
 			continue
 		}
-		branch := strings.TrimPrefix(fields[0], "refs/heads/")
-		for i, tip := range tips {
-			counts := strings.Fields(fields[i+1])
-			if len(counts) != 2 {
-				valid = false
-				continue
-			}
-			ahead, aheadErr := strconv.Atoi(counts[0])
-			behind, behindErr := strconv.Atoi(counts[1])
-			if aheadErr != nil || behindErr != nil {
-				valid = false
-				continue
-			}
-			for _, target := range targetsByTip[tip] {
-				snapshot.mergedByTarget[target][branch] = ahead == 0
-				snapshot.containsTarget[target][branch] = behind == 0
+		for _, field := range fields {
+			if !taskCardValidObjectID(field) {
+				return
 			}
 		}
+		parents[fields[0]] = append([]string(nil), fields[1:]...)
 	}
-	if !valid {
-		for _, targetNames := range targetsByTip {
-			for _, target := range targetNames {
-				delete(snapshot.mergedByTarget, target)
-				delete(snapshot.containsTarget, target)
-			}
-		}
-		return
-	}
-	for _, targetNames := range targetsByTip {
-		for _, target := range targetNames {
-			snapshot.relationsValid[target] = true
+	for _, tip := range tips {
+		if _, ok := parents[tip]; !ok {
+			return
 		}
 	}
+	snapshot.parents = parents
+	snapshot.graphValid = true
+}
+
+func taskCardValidObjectID(value string) bool {
+	if len(value) != 40 && len(value) != 64 {
+		return false
+	}
+	for _, char := range value {
+		if !((char >= '0' && char <= '9') || (char >= 'a' && char <= 'f') || (char >= 'A' && char <= 'F')) {
+			return false
+		}
+	}
+	return true
 }
 
 func (snapshot *taskCardRepositorySnapshot) worktree(path string) (service.WorktreeInfo, bool) {
@@ -466,35 +451,72 @@ func (snapshot *taskCardRepositorySnapshot) refTip(ref string) string {
 	return snapshot.refs[strings.TrimPrefix(strings.TrimSpace(ref), "refs/heads/")]
 }
 
+func (snapshot *taskCardRepositorySnapshot) relationshipValid(branch, target string) bool {
+	return snapshot != nil && snapshot.graphValid && snapshot.refTip(branch) != "" && snapshot.refTip(target) != ""
+}
+
 func (snapshot *taskCardRepositorySnapshot) isAncestor(ancestorRef, descendantRef string) bool {
-	ancestor := strings.TrimPrefix(strings.TrimSpace(ancestorRef), "refs/heads/")
-	descendant := strings.TrimPrefix(strings.TrimSpace(descendantRef), "refs/heads/")
-	ancestorTip := snapshot.refTip(ancestor)
-	descendantTip := snapshot.refTip(descendant)
-	if ancestorTip == "" || descendantTip == "" {
+	if !snapshot.relationshipValid(ancestorRef, descendantRef) {
 		return false
 	}
-	if ancestorTip == descendantTip {
-		return true
-	}
-	if merged := snapshot.mergedByTarget[descendant]; merged != nil {
-		return merged[ancestor]
-	}
-	if containing := snapshot.containsTarget[ancestor]; containing != nil {
-		return containing[descendant]
+	ancestor := snapshot.refTip(ancestorRef)
+	descendant := snapshot.refTip(descendantRef)
+	seen := make(map[string]bool)
+	stack := []string{descendant}
+	for len(stack) > 0 {
+		commit := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		if commit == ancestor {
+			return true
+		}
+		if seen[commit] {
+			continue
+		}
+		seen[commit] = true
+		stack = append(stack, snapshot.parents[commit]...)
 	}
 	return false
 }
 
 func (snapshot *taskCardRepositorySnapshot) diverged(branch, target string) bool {
-	target = strings.TrimPrefix(strings.TrimSpace(target), "refs/heads/")
-	return snapshot.relationsValid[target] && snapshot.refTip(branch) != "" && snapshot.refTip(target) != "" &&
+	return snapshot.relationshipValid(branch, target) &&
 		!snapshot.isAncestor(branch, target) && !snapshot.isAncestor(target, branch)
+}
+
+const taskCardDirtyWorkerLimit = 8
+
+type taskCardDirtyResult struct {
+	key   string
+	path  string
+	dirty bool
+}
+
+func taskCardWorktreeDirty(path string) bool {
+	if info, err := os.Stat(path); err != nil || !info.IsDir() {
+		return true
+	}
+	repo, err := git.PlainOpenWithOptions(path, &git.PlainOpenOptions{DetectDotGit: false, EnableDotGitCommonDir: true})
+	if err != nil {
+		return true
+	}
+	worktree, err := repo.Worktree()
+	if err != nil {
+		return true
+	}
+	status, err := worktree.StatusWithOptions(git.StatusOptions{Strategy: git.Preload})
+	return err != nil || !status.IsClean()
 }
 
 func (snapshot *taskCardRepositorySnapshot) loadDirtyWorktrees(paths []string) {
 	if snapshot == nil || len(paths) == 0 {
 		return
+	}
+	if snapshot.dirty == nil {
+		snapshot.dirty = make(map[string]bool)
+	}
+	loader := snapshot.loadDirty
+	if loader == nil {
+		loader = taskCardWorktreeDirty
 	}
 	unique := make(map[string]string)
 	for _, path := range paths {
@@ -502,21 +524,37 @@ func (snapshot *taskCardRepositorySnapshot) loadDirtyWorktrees(paths []string) {
 			unique[taskCardWorktreePath(path)] = path
 		}
 	}
-	for key, path := range unique {
-		dirty := true
-		if info, statErr := os.Stat(path); statErr != nil || !info.IsDir() {
-			snapshot.dirty[key] = dirty
-			continue
-		}
-		repo, err := git.PlainOpenWithOptions(path, &git.PlainOpenOptions{DetectDotGit: false, EnableDotGitCommonDir: true})
-		if err == nil {
-			if worktree, worktreeErr := repo.Worktree(); worktreeErr == nil {
-				if status, statusErr := worktree.StatusWithOptions(git.StatusOptions{Strategy: git.Preload}); statusErr == nil {
-					dirty = !status.IsClean()
-				}
+	if len(unique) == 0 {
+		return
+	}
+
+	workers := taskCardDirtyWorkerLimit
+	if len(unique) < workers {
+		workers = len(unique)
+	}
+	jobs := make(chan taskCardDirtyResult)
+	results := make(chan taskCardDirtyResult)
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for job := range jobs {
+				job.dirty = loader(job.path)
+				results <- job
 			}
+		}()
+	}
+	go func() {
+		for key, path := range unique {
+			jobs <- taskCardDirtyResult{key: key, path: path}
 		}
-		snapshot.dirty[key] = dirty
+		close(jobs)
+		wg.Wait()
+		close(results)
+	}()
+	for result := range results {
+		snapshot.dirty[result.key] = result.dirty
 	}
 }
 
@@ -554,7 +592,8 @@ func recoverTaskCardMetadata(task *models.Task, snapshot *taskCardRepositorySnap
 }
 
 func reconcileTaskCardMergeStatus(task *models.Task, snapshot *taskCardRepositorySnapshot, targetBranch string) bool {
-	if task == nil || snapshot == nil || task.WorktreeBranch == "" || !taskStatusMayMerge(task.Status) {
+	if task == nil || snapshot == nil || task.WorktreeBranch == "" || !taskStatusMayMerge(task.Status) ||
+		!snapshot.relationshipValid(task.WorktreeBranch, targetBranch) {
 		return false
 	}
 	merged := snapshot.isAncestor(task.WorktreeBranch, targetBranch) && !snapshot.worktreeDirty(task.WorktreePath)
@@ -587,23 +626,39 @@ func (h *Handler) taskCardMergeMenuStates(ctx context.Context, tasks []models.Ta
 		}
 	}
 
-	targets := make([]string, 0, len(tasks))
 	for i := range tasks {
 		if tasks[i].MergeTargetBranch == "" {
 			tasks[i].MergeTargetBranch = defaultTargetBranch
 		}
-		targets = append(targets, tasks[i].MergeTargetBranch)
 	}
-	snapshot := newTaskCardRepositorySnapshot(ctx, project, targets)
+	snapshot := newTaskCardRepositorySnapshot(ctx, project)
+	repoPath := ""
+	if project != nil {
+		repoPath = project.RepoPath
+	}
 	terminalPaths := make([]string, 0)
+	relationRefs := make([]string, 0)
 	for i := range tasks {
 		task := &tasks[i]
 		recoverTaskCardMetadata(task, snapshot)
-		if taskStatusMayMerge(task.Status) && task.WorktreePath != "" {
-			terminalPaths = append(terminalPaths, task.WorktreePath)
+		if taskStatusMayMerge(task.Status) {
+			if task.WorktreePath != "" {
+				terminalPaths = append(terminalPaths, task.WorktreePath)
+			}
+			relationRefs = append(relationRefs, task.WorktreeBranch, task.MergeTargetBranch)
 		}
 	}
-	snapshot.loadDirtyWorktrees(terminalPaths)
+	var snapshotWG sync.WaitGroup
+	snapshotWG.Add(2)
+	go func() {
+		defer snapshotWG.Done()
+		snapshot.loadDirtyWorktrees(terminalPaths)
+	}()
+	go func() {
+		defer snapshotWG.Done()
+		taskCardLoadBranchRelations(ctx, repoPath, relationRefs, snapshot)
+	}()
+	snapshotWG.Wait()
 
 	for i := range tasks {
 		task := &tasks[i]
@@ -612,10 +667,11 @@ func (h *Handler) taskCardMergeMenuStates(ctx context.Context, tasks []models.Ta
 		locked := snapshot.worktreeLocked(task.WorktreePath)
 		ownsConflict := (snapshot.activeMerge && snapshot.mergeHead != "" && snapshot.mergeHead == snapshot.refTip(task.WorktreeBranch)) ||
 			(!snapshot.activeMerge && task.MergeStatus == models.MergeStatusConflict && snapshot.activeConflicts)
-		localEligible := taskStatusMayMerge(task.Status) && snapshot.valid && !locked && !ownsConflict &&
+		relationsValid := snapshot.relationshipValid(task.WorktreeBranch, targetBranch)
+		localEligible := taskStatusMayMerge(task.Status) && snapshot.valid && relationsValid && !locked && !ownsConflict &&
 			!snapshot.activeMerge && !snapshot.activeConflicts && !branchAlreadyMerged && task.MergeStatus != models.MergeStatusMerged &&
 			snapshot.refTip(task.WorktreeBranch) != "" && snapshot.refTip(targetBranch) != ""
-		if task.MergeStatus == models.MergeStatusConflict && !snapshot.activeMerge && !snapshot.activeConflicts && taskStatusMayMerge(task.Status) {
+		if task.MergeStatus == models.MergeStatusConflict && !snapshot.activeMerge && !snapshot.activeConflicts && taskStatusMayMerge(task.Status) && relationsValid {
 			task.MergeStatus = models.MergeStatusPending
 			localEligible = snapshot.refTip(task.WorktreeBranch) != "" && snapshot.refTip(targetBranch) != "" && !locked && !branchAlreadyMerged
 		}
