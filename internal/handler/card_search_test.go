@@ -78,6 +78,10 @@ func TestCollectionSelectionProductionBrowserInteractions(t *testing.T) {
 	require.NoError(t, pages.AlertsContentPageWithState(nil, "project", 0, false, "", "", pages.CardListState{ProjectID: "project", Filters: map[string]string{}}).Render(t.Context(), &rejectedAlerts))
 	rejectedAlertsJSON, err := json.Marshal(rejectedAlerts.String())
 	require.NoError(t, err)
+	var emptyChannels bytes.Buffer
+	require.NoError(t, pages.SettingsContent(pages.ChannelsSettingsView{CurrentProjectID: "project"}).Render(t.Context(), &emptyChannels))
+	emptyChannelsJSON, err := json.Marshal(emptyChannels.String())
+	require.NoError(t, err)
 
 	var base bytes.Buffer
 	require.NoError(t, layout.Base("Collection selection browser", nil, "").Render(t.Context(), &base))
@@ -182,12 +186,18 @@ func TestCollectionSelectionProductionBrowserInteractions(t *testing.T) {
 	    window.refreshCardListToolbars(alertsRoot);
 	    if (alertsRoot.querySelector('[data-card-filter-chip="source"]') || alertsRoot.querySelector('[name="source"]').value) fail('raw rejected Alert source was reactivated by client hydration');
 	    if ((alertsRoot.getAttribute('data-card-pagination-url') || '').includes('source=')) fail('rejected Alert source contaminated authoritative root state');
-	    verifyMixedCollection('personality'); verifyMixedCollection('channels');
-	    result('pass','selection interactions passed');
+		    verifyMixedCollection('personality'); verifyMixedCollection('channels');
+		    var emptyChannelsParsed=new DOMParser().parseFromString(EMPTY_CHANNELS_HTML, 'text/html'), emptyChannelsRoot=emptyChannelsParsed.getElementById('channels-container');
+		    emptyChannelsRoot=document.querySelector('main').appendChild(document.importNode(emptyChannelsRoot, true)); window.refreshCardListToolbars(emptyChannelsRoot);
+		    var emptyState=emptyChannelsRoot.querySelector('[data-search-empty-state]'), emptyMaster=emptyChannelsRoot.querySelector('[data-card-select-loaded]');
+		    if (!emptyState || emptyState.querySelector('[data-card-selection-gutter]') || emptyState.classList.contains('md:pl-8')) fail('actual Channels empty state received selection UI or padding');
+		    if (!emptyMaster || !emptyMaster.disabled) fail('empty Channels master checkbox was not disabled');
+		    result('pass','selection interactions passed');
 	  }
 	  var REPLACEMENT_HTML=` + string(replacementJSON) + `;
 	  var UNMANAGED_SKILLS_HTML=` + string(unmanagedSkillsJSON) + `;
-	  var REJECTED_ALERTS_HTML=` + string(rejectedAlertsJSON) + `;  window.addEventListener('load', function(){run().catch(function(error){result('fail', String(error&&error.stack||error));});});
+	  var REJECTED_ALERTS_HTML=` + string(rejectedAlertsJSON) + `;
+	  var EMPTY_CHANNELS_HTML=` + string(emptyChannelsJSON) + `;  window.addEventListener('load', function(){run().catch(function(error){result('fail', String(error&&error.stack||error));});});
 })();
 </script>`
 	page = strings.Replace(page, "</body>", runner+"</body>", 1)
