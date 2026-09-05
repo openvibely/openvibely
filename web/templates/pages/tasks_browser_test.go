@@ -1077,11 +1077,12 @@ func TestTaskCardMergeMenuDirectActionConflictRetryAndBoardRefreshInChrome(t *te
 		defer mu.Unlock()
 		return map[string]components.TaskCardMergeMenuState{
 			task.ID: {
-				LocalEligible:  task.MergeStatus != models.MergeStatusMerged && !lockedWorktree,
-				RebaseEligible: task.MergeStatus != models.MergeStatusMerged && !dirtyWorktree && !lockedWorktree,
-				PullEligible:   !lockedWorktree,
-			},
-		}
+				LocalEligible:       task.MergeStatus != models.MergeStatusMerged && !lockedWorktree,
+				FastForwardEligible: task.MergeStatus != models.MergeStatusMerged && !dirtyWorktree && !lockedWorktree,
+				RebaseEligible:      task.MergeStatus != models.MergeStatusMerged && !dirtyWorktree && !lockedWorktree,
+				PullEligible:        !lockedWorktree,
+				TargetBranch:        "main",
+			}}
 	}
 	fixtureCSS := `<style>
 		#kanban-board{display:grid;grid-template-columns:1fr;height:420px;overflow-y:auto}.kanban-column{min-width:0}.card{position:relative;min-height:120px}.dropdown{position:relative}.card>.dropdown{position:absolute}.dropdown-content{display:none;position:absolute;right:0;top:100%;width:210px;background:white;border:1px solid #333;z-index:100}.dropdown:focus-within>.dropdown-content{display:block}[data-kanban-menu-open="true"]>.dropdown-content{display:block}[data-task-card-local-submenu]>ul,[data-task-card-github-submenu]>ul{display:none;position:absolute;right:0;width:224px;background:white;border:1px solid #333;z-index:110}[data-task-card-local-submenu]:hover>ul,[data-task-card-local-submenu]:focus-within>ul,[data-task-card-github-submenu]:hover>ul,[data-task-card-github-submenu]:focus-within>ul{display:block!important}.modal{display:none}.modal[open]{display:grid;position:fixed;inset:0;z-index:999;background:rgba(0,0,0,.2)}.modal-box{margin:auto;background:white;padding:16px;max-width:340px}.hidden{display:none!important}.task-selected{outline:3px solid blue}.btn{min-height:32px}</style>`
@@ -1113,7 +1114,7 @@ func TestTaskCardMergeMenuDirectActionConflictRetryAndBoardRefreshInChrome(t *te
 			clickTrigger(trigger);await waitFor(function(){return document.getElementById('kanban-board')!==boardBefore},'deferred board refresh after close');
 			card=document.getElementById('task-merge-browser-task');trigger=card.querySelector('[data-task-card-menu-trigger]');menu=card.querySelector('[data-kanban-menu-content]');
 			await fetch('/dirty-worktree',{method:'POST'});var dirtyBoard=document.getElementById('kanban-board');var refresher=document.createElement('button');refresher.setAttribute('hx-get','/board-refresh');refresher.setAttribute('hx-trigger','refresh');refresher.setAttribute('hx-target','#kanban-board');refresher.setAttribute('hx-swap','outerHTML');document.body.appendChild(refresher);htmx.process(refresher);htmx.trigger(refresher,'refresh');await waitFor(function(){return document.getElementById('kanban-board')!==dirtyBoard},'dirty board refresh');
-			card=document.getElementById('task-merge-browser-task');trigger=card.querySelector('[data-task-card-menu-trigger]');clickTrigger(trigger);await frame();localPanel=card.querySelector('[data-task-card-local-submenu] > ul');merge=localPanel.querySelector('[data-merge-type="merge"]');rebase=localPanel.querySelector('[data-merge-type="rebase"]');if(merge.disabled||!rebase.disabled)fail('dirty precomputed state did not disable only Rebase');
+			card=document.getElementById('task-merge-browser-task');trigger=card.querySelector('[data-task-card-menu-trigger]');clickTrigger(trigger);await frame();localPanel=card.querySelector('[data-task-card-local-submenu] > ul');merge=localPanel.querySelector('[data-merge-type="merge"]');var fastForward=localPanel.querySelector('[data-merge-type="ff"]');rebase=localPanel.querySelector('[data-merge-type="rebase"]');if(merge.disabled||!fastForward.disabled||!rebase.disabled)fail('dirty precomputed state did not disable Fast-forward and Rebase');
 			clickTrigger(trigger);await fetch('/clean-worktree',{method:'POST'});dirtyBoard=document.getElementById('kanban-board');htmx.trigger(refresher,'refresh');await waitFor(function(){return document.getElementById('kanban-board')!==dirtyBoard},'clean board refresh');
 			card=document.getElementById('task-merge-browser-task');trigger=card.querySelector('[data-task-card-menu-trigger]');clickTrigger(trigger);merge=card.querySelector('[data-merge-type="merge"]');var oldBoard=document.getElementById('kanban-board');merge.click();merge.click();await new Promise(function(r){setTimeout(r,300)});var count=(await fetch('/post-count').then(function(r){return r.text()})).trim();if(count!=='1')fail('duplicate direct merge was not blocked, posts='+count);if(document.getElementById('new_task_modal').open)fail('merge conflict opened New Task modal');merge.click();await waitFor(function(){return document.getElementById('kanban-board')!==oldBoard},'successful merge retry');
 			card=document.getElementById('task-merge-browser-task');trigger=card.querySelector('[data-task-card-menu-trigger]');clickTrigger(trigger);await frame();var mergedLocal=card.querySelector('[data-task-card-local-submenu] > ul');if(Array.from(mergedLocal.querySelectorAll('[data-task-card-merge-action]')).some(function(action){return !action.disabled}))fail('merged card retained an enabled Local action');if(card.querySelector('[data-kanban-menu-content]').innerHTML.includes('unavailable'))fail('disabled submenus use unavailable copy');
@@ -1294,8 +1295,14 @@ func TestTaskCardKebabMenuEscapesCardAndRepositionsAtDropZoneBottomInChrome(t *t
 	.card-body { padding: 12px; padding-top: 48px; }
 	.dropdown { position: relative; display: inline-block; }
 	.card > .dropdown { position: absolute; top: 8px; right: 32px; z-index: 30; }
-		.dropdown-content { display: none; position: absolute; top: 100%; right: 0; width: 208px; min-height: 120px; padding: 4px; transform: translateX(16px); background: white; border: 1px solid #333; border-radius: 6px; z-index: 100; }	.dropdown:focus-within > .dropdown-content { display: block; }
-	.dropdown.dropdown-top > .dropdown-content { top: auto; bottom: 100%; }
+		.dropdown-content { display: none; position: absolute; top: 100%; right: 0; width: 208px; min-height: 120px; padding: 4px; transform: translateX(16px); background: white; border: 1px solid #333; border-radius: 6px; z-index: 100; }
+		.dropdown:focus-within > .dropdown-content { display: block; }
+		.dropdown.dropdown-top > .dropdown-content { top: auto; bottom: 100%; }
+		[data-task-card-menu-trigger] + [data-kanban-menu-content] { overflow: visible; }
+		[data-task-card-local-submenu] > ul, [data-task-card-github-submenu] > ul { display: none; position: absolute; right: 0; top: 100%; width: 224px; height: 220px; padding: 4px; background: white; border: 1px solid #333; z-index: 110; }
+		[data-task-card-local-submenu] > ul { top: var(--task-card-local-submenu-top, 100%); max-height: var(--task-card-submenu-max-height, none); }
+		[data-task-card-github-submenu] > ul { top: var(--task-card-github-submenu-top, 100%); max-height: var(--task-card-submenu-max-height, none); }
+		[data-task-card-local-submenu]:focus-within > ul, [data-task-card-github-submenu]:focus-within > ul { display: block; }
 	.btn { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; }
 	</style>`
 	runner := `<script>
@@ -1328,9 +1335,22 @@ func TestTaskCardKebabMenuEscapesCardAndRepositionsAtDropZoneBottomInChrome(t *t
 	    if (menuRect.top >= cardRect.top) fail('menu did not render outside the card above its top edge');
 		    var hitY = Math.min(menuRect.bottom - 8, cardRect.top - 8, zoneRect.bottom - 8);
 		    if (hitY <= Math.max(menuRect.top, zoneRect.top)) fail('menu has no visible area outside the card');
-		    var hit = document.elementFromPoint(menuRect.left + 12, hitY);		    if (!hit || !menu.contains(hit)) fail('menu is not hit-testable outside the card bounds; geometry=' + JSON.stringify({menu:{left:menuRect.left,top:menuRect.top,right:menuRect.right,bottom:menuRect.bottom},zone:{left:zoneRect.left,top:zoneRect.top,right:zoneRect.right,bottom:zoneRect.bottom},card:{left:cardRect.left,top:cardRect.top,right:cardRect.right,bottom:cardRect.bottom},hitY:hitY}) + ' hit=' + (hit && hit.outerHTML));
-	    await report('pass', '');
-	  })().catch(function(error) { report('fail', String(error && error.stack || error)); });
+		    var hit = document.elementFromPoint(menuRect.left + 12, hitY);
+		    if (!hit || !menu.contains(hit)) fail('menu is not hit-testable outside the card bounds; geometry=' + JSON.stringify({menu:{left:menuRect.left,top:menuRect.top,right:menuRect.right,bottom:menuRect.bottom},zone:{left:zoneRect.left,top:zoneRect.top,right:zoneRect.right,bottom:zoneRect.bottom},card:{left:cardRect.left,top:cardRect.top,right:cardRect.right,bottom:cardRect.bottom},hitY:hitY}) + ' hit=' + (hit && hit.outerHTML));
+		    var local = menu.querySelector('[data-task-card-local-submenu]');
+		    var localTrigger = local && local.querySelector(':scope > button');
+		    var localPanel = local && local.querySelector(':scope > ul');
+		    if (!localTrigger || !localPanel) fail('missing Local submenu controls');
+		    localTrigger.focus();
+		    await frame();
+		    var localRect = localPanel.getBoundingClientRect();
+		    if (localRect.top < zoneRect.top - 1 || localRect.bottom > zoneRect.bottom + 1) fail('Local submenu is clipped by the task scroll boundary: submenu=' + JSON.stringify({top:localRect.top,bottom:localRect.bottom}) + ' zone=' + JSON.stringify({top:zoneRect.top,bottom:zoneRect.bottom}));
+		    var localAction = localPanel.querySelector('[data-task-card-merge-action]:not([disabled])');
+		    if (!localAction) fail('missing enabled Local action for hit test');
+		    var actionRect = localAction.getBoundingClientRect();
+		    var localHit = document.elementFromPoint(actionRect.left + actionRect.width / 2, actionRect.top + actionRect.height / 2);
+		    if (!localHit || !localAction.contains(localHit)) fail('Local submenu action is not hit-testable inside the task scroll boundary; submenu=' + JSON.stringify({left:localRect.left,top:localRect.top,right:localRect.right,bottom:localRect.bottom}) + ' action=' + JSON.stringify({left:actionRect.left,top:actionRect.top,right:actionRect.right,bottom:actionRect.bottom}) + ' hit=' + (localHit && localHit.outerHTML));
+		    await report('pass', '');	  })().catch(function(error) { report('fail', String(error && error.stack || error)); });
 	});
 	</script>`
 
@@ -1343,7 +1363,10 @@ func TestTaskCardKebabMenuEscapesCardAndRepositionsAtDropZoneBottomInChrome(t *t
 			_, _ = w.Write(htmxJS)
 		case "/tasks":
 			var out bytes.Buffer
-			if err := Tasks([]models.Project{project}, &project, tasks, nil, nil, "created_asc", "completed_desc").Render(context.Background(), &out); err != nil {
+			menuStates := map[string]components.TaskCardMergeMenuState{
+				"edge-last": {LocalEligible: true, FastForwardEligible: true, RebaseEligible: true, PullEligible: true, TargetBranch: "main"},
+			}
+			if err := Tasks([]models.Project{project}, &project, tasks, nil, nil, "created_asc", "completed_desc", menuStates).Render(context.Background(), &out); err != nil {
 				t.Fatalf("render Tasks page: %v", err)
 			}
 			page := strings.Replace(out.String(), "https://unpkg.com/htmx.org@2.0.4", "/htmx-2.0.4.min.js", 1)
