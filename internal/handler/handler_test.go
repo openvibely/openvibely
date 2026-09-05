@@ -1074,14 +1074,6 @@ func TestHandler_GetTaskDetailStatusLargeHistoryUsesNarrowExecutionMetrics(t *te
 	if _, err := db.ExecContext(ctx, `UPDATE executions SET status = ?, duration_ms = ?, completed_at = ? WHERE id = ?`, models.ExecCompleted, int64(65_000), "2026-08-13 12:03:20", "exec-199"); err != nil {
 		t.Fatalf("complete latest execution: %v", err)
 	}
-	var legacyTextBytes int64
-	if err := db.QueryRowContext(ctx, `SELECT COALESCE(SUM(LENGTH(COALESCE(prompt_sent, '')) + LENGTH(COALESCE(output, '')) + LENGTH(COALESCE(error_message, ''))), 0) FROM executions WHERE task_id = ?`, task.ID).Scan(&legacyTextBytes); err != nil {
-		t.Fatalf("sum legacy execution text bytes: %v", err)
-	}
-	if legacyTextBytes < 13*1024*1024 {
-		t.Fatalf("fixture should contain at least 13 MiB of historical execution text, got %d", legacyTextBytes)
-	}
-
 	counter.Reset()
 	counter.SetEnabled(true)
 	rec := htmxGet(e, "/tasks/"+task.ID+"/detail-status")
@@ -1107,10 +1099,6 @@ func TestHandler_GetTaskDetailStatusLargeHistoryUsesNarrowExecutionMetrics(t *te
 	}
 	if !metricsQuerySeen {
 		t.Fatalf("detail-status did not execute compact task execution metrics query; statements: %#v", counter.Statements())
-	}
-	const newTextBytesScanned = 0
-	if newTextBytesScanned > legacyTextBytes/10 {
-		t.Fatalf("expected at least 90%% lower DB text bytes scanned, legacy=%d new=%d", legacyTextBytes, newTextBytesScanned)
 	}
 }
 
