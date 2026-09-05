@@ -2,9 +2,9 @@
 name: automation_graphs
 type: project
 created: 2026-07-18
-updated: 2026-09-04
+updated: 2026-09-05
 source: after_complete
-source_id: c40d4c53c4ceffef788e76b12207674c
+source_id: 9eb94751d53348ab8ed63fcc24e9eb68
 confidence: high
 title: Automation Graphs
 ---
@@ -22,7 +22,7 @@ Authoring and persistence:
 
 Builder and topology:
 - Web creation supports Template, Describe, and Custom; Custom is the runnable blank builder. Native SDLC and GitHub SDLC are maintained starting templates; Vision Driver is internal reconstruction support.
-- Templates load embedded canonical YAML without resource creation. Builder YAML remains browser-local until Save; Graph selection runs non-persisting PreviewSave. Live and Builder share Graph/Details/YAML views; Live retains the selected view only for the same Automation.
+- Templates load embedded canonical YAML without resource creation. Builder YAML remains browser-local until Save; Graph selection runs non-persisting PreviewSave. Live and Builder share Graph/Details/YAML views; Live retains the selected view only for the same Automation. Automation Live and Edit breadcrumb selectors must preserve the pre-selector name origin: the Live display-name text edge aligns with the Edit name input text edge, the editable input remains a direct breadcrumb flex child with its original topology, and the following caret wrapper consumes zero layout width while retaining an approximately 28×32px pointer/focus hit area above adjacent input content. Chromium coverage compares the rendered geometry, not only selector markup.
 - Add Node offers Custom capabilities and Restore choices for deleted canonical nodes. User nodes use Custom validation/materialization; canonical nodes retain maintained behavior. Canvas mutations update YAML, unsaved YAML is preserved, and generated YAML remains readable. Maintained templates are starting graphs rather than fixed schemas: valid reduced graphs save, and new templates contain Vision Suggestions, Bug Finder, Optimization Finder, Redundancy Finder, and Native/GitHub inbox roles, not Loop Auditor.
 - The retained graph is authoritative for capability readiness/authorization. Producers without action edges can be valid; deleting a node removes owned schedules/resources and incident edges while preserving valid shared targets/tasks. Re-add may reclaim only a unique unbound unscheduled same-project task with exact `automation:<automation-id>:<node-key>` origin.
 - Custom Native topology is `Schedule/Task -> Create notification -> Human approval -> Approved inbox -> Implementation projection -> Outcome`. Custom GitHub topology is `Schedule/Task -> Create GitHub issue -> Human assignment -> GitHub inbox -> Task projection -> Open pull request -> Human review -> Outcome`. Native/GitHub mailbox stages cannot mix; unsafe configuration, executable cycles, duplicate targets, self-edges, dangling endpoints, and arbitrary execution fail closed.

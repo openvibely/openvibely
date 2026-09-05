@@ -2,9 +2,9 @@
 name: chat_thread_system
 type: project
 created: 2026-05-09
-updated: 2026-09-03
-source: consolidation
-source_id: memory_consolidation_2026-09-03
+updated: 2026-09-05
+source: after_complete
+source_id: 75035b7e0912ae51801aafc9d750ba85:409a759416f2fcd4
 confidence: high
 title: Chat and Task-Thread Behavior
 ---
@@ -25,7 +25,7 @@ Admission, lifecycle, and history:
 - Startup reclaims interrupted follow-ups and promotes recoverable inputs through stable keyset pages with per-task FIFO and exactly-once promotion. Chat recovery and update-drain reopening use sparse indexed keyset paging, promote each eligible project once per page, skip active Chat executions, and filter guarded terminal executions.
 - After-complete hooks receive only the latest normalized input/response; prior provider history can influence the answer but is not copied into lifecycle transcript. Future provider history is rebuilt from `executions.PromptSent` and cleaned `Output` as plain turns, with at most 20 prior task-thread turns after filtering the current execution.
 - HTTP send/acceptance stays lightweight; full context setup runs after durable acceptance. Deferred setup failures still perform terminal cleanup and can promote queued input. Thread pagination renders execution history, not an unrecorded `tasks.prompt`. Runtime `view_task_thread` uses repository count/page projections and the existing 80 KiB transcript budget without hydrating payloads unnecessarily.
-- Open issue `#981` records demonstrated duplication between Execution History and Task Thread pagination: `ListByTaskHistoryPage` and the no-cursor branch of `listTaskExecutionPage` repeat the same light execution projection, task filter, descending timestamp/rowid order, and limit, while each handler reimplements the `limit+1` sentinel, cursor handling, and older-page detection. The intended consolidation is limited to the shared page-fetch/has-more contract; newest-first history reversal and chronological thread rendering remain local adapters.
+- Issue `#981` identified duplication between Execution History and Task Thread pagination: the history path and the no-cursor task-thread path repeated the same light execution projection, task filter, descending timestamp/rowid order, limit-plus-one sentinel, cursor handling, and older-page detection. The implementation in PR `#1003` consolidates that contract into one handler loader and canonical repository page query; Execution History reverses the shared chronological result for newest-first cards while Task Thread retains chronological rendering. Regression coverage protects route boundaries, cursor adjacency, equal-start-time rowid tie-breaking, invalid/default limits, empty/short/exact histories, and active polling. The PR remains open and unmerged as of 2026-09-05.
 - Lifecycle activity belongs in the Lifecycle tab; task-thread follow-ups still run normal lifecycle routing before the model call. Canonical lifecycle and ownership details are in `agent_lifecycle_and_skills.md` and `openvibely_architecture.md`.
 
 Composer and realtime behavior:
