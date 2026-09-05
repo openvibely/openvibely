@@ -628,7 +628,7 @@ templ skillsContent(skills []SkillCard, canManage bool, currentProjectID string,
 						if (document.activeElement && modal.contains(document.activeElement)) document.activeElement.blur();
 						modal.close();
 					}
-					htmx.ajax('DELETE', skillsRefreshURL('/skills/' + encodeURIComponent(deleteSkillHandle) + '?scope=' + encodeURIComponent(deleteSkillScope) + currentSkillsProjectQuery().replace(/^\?/, '&')), {
+					htmx.ajax('DELETE', skillsRefreshURL('/skills/' + encodeURIComponent(deleteSkillHandle) + '?target_scope=' + encodeURIComponent(deleteSkillScope) + currentSkillsProjectQuery().replace(/^\?/, '&')), {
 						target: '#skills-container',
 						swap: 'outerHTML show:none'
 					}).catch(function(xhr) {

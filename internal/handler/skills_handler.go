@@ -388,7 +388,11 @@ func (h *Handler) DeleteSkill(c echo.Context) error {
 	if !validDialogSkillKey(handle) {
 		return echo.NewHTTPError(http.StatusBadRequest, "skill handle must be a slug")
 	}
-	scope := h.dialogStandaloneSkillScope(c, c.QueryParam("scope"))
+	requestedScope := c.QueryParam("target_scope")
+	if requestedScope == "" {
+		requestedScope = c.QueryParam("scope")
+	}
+	scope := h.dialogStandaloneSkillScope(c, requestedScope)
 	root, err := h.rootForDialogScope(c, scope)
 	if err != nil {
 		return err
