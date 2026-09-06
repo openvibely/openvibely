@@ -1437,8 +1437,9 @@ func TestTaskCardKebabMenuEscapesCardAndRepositionsAtDropZoneBottomInChrome(t *t
 		    if (!card.classList.contains('overflow-visible')) fail('task card root does not opt out of overflow clipping');
 		    label.focus();
 		    label.click();
-			    var firstVisibleRect = null;
-			    var firstVisibleMotion = null;
+		    if (dropdown.getAttribute('data-kanban-menu-positioning') === 'true' && getComputedStyle(menu).visibility !== 'hidden') fail('first-open positioning phase painted a transparent menu layer');
+		    var firstVisibleRect = null;
+		    var firstVisibleMotion = null;
 			    for (var revealFrame = 0; revealFrame < 12 && !firstVisibleRect; revealFrame++) {
 			      if (dropdown.getAttribute('data-kanban-menu-positioning') !== 'true' && getComputedStyle(menu).visibility !== 'hidden' && parseFloat(getComputedStyle(menu).opacity) > 0) {
 			        var visibleRect = menu.getBoundingClientRect();
