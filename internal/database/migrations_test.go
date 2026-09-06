@@ -1389,7 +1389,7 @@ func TestMigration175BackfillsDurableAlertImplementationTaskHistory(t *testing.T
 			('21212121212121212121212121212121', '11111111111111111111111111111111', 'Batched historical deleted task', 'approved', 'completed', '33333333333333333333333333333333', ''),
 			('66666666666666666666666666666666', '11111111111111111111111111111111', 'Message only', 'approved', 'completed', '33333333333333333333333333333333', 'Created and linked implementation task aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.'),
 			('77777777777777777777777777777777', '11111111111111111111111111111111', 'Failed tool result', 'approved', 'completed', '33333333333333333333333333333333', 'Failed to create linked implementation task.'),
-			('88888888888888888888888888888888', '11111111111111111111111111111111', 'Wrong caller result', 'approved', 'completed', '33333333333333333333333333333333', ''),
+			('88888888888888888888888888888888', '11111111111111111111111111111111', 'Wrong claimant topology', 'approved', 'completed', '44444444444444444444444444444444', ''),
 			('99999999999999999999999999999999', '11111111111111111111111111111111', 'Uncorroborated task result', 'approved', 'completed', '33333333333333333333333333333333', ''),
 			('19191919191919191919191919191919', '11111111111111111111111111111111', 'Forged result marker', 'approved', 'completed', '33333333333333333333333333333333', ''),
 			('16161616161616161616161616161616', '11111111111111111111111111111111', 'Historical linked state', 'approved', 'implementation_task_linked', '33333333333333333333333333333333', ''),
@@ -1406,7 +1406,7 @@ func TestMigration175BackfillsDurableAlertImplementationTaskHistory(t *testing.T
 			('12121212121212121212121212121212', '33333333333333333333333333333333', '11111111111111111111111111111111', 'completed',
 			 '[Using tool: create_alert_implementation_task]' || char(10) || '[Tool create_alert_implementation_task done]' || char(10) || '{"alert_id":"99999999999999999999999999999999","implementation_task_id":"cccccccccccccccccccccccccccccccc","task":{"id":"cccccccccccccccccccccccccccccccc","project_id":"11111111111111111111111111111111"}}' || char(10) || '[/Tool]' || char(10)),
 			('20202020202020202020202020202020', '33333333333333333333333333333333', '11111111111111111111111111111111', 'completed',
-			 '[Tool create_alert_implementation_task done]' || char(10) || '{"alert_id":"19191919191919191919191919191919","implementation_task_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","task":{"id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","project_id":"11111111111111111111111111111111"}}' || char(10) || '[/Tool]' || char(10));
+				 '[Using tool: create_alert_implementation_task]' || char(10) || '[Tool create_alert_implementation_task done]' || char(10) || '{"alert_id":"19191919191919191919191919191919","implementation_task_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","task":{"id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","project_id":"11111111111111111111111111111111"}}' || char(10) || '[/Tool]' || char(10));
 		INSERT INTO llm_usage_events(id, provider, project_id, chat_thread_id) VALUES
 			('13131313131313131313131313131313', 'test', '11111111111111111111111111111111', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'),
 			('24242424242424242424242424242424', 'test', '11111111111111111111111111111111', '23232323232323232323232323232323'),
@@ -1416,8 +1416,17 @@ func TestMigration175BackfillsDurableAlertImplementationTaskHistory(t *testing.T
 		INSERT INTO automation_versions (id, project_id, automation_id, version, state, source, adapter_key)
 			VALUES ('migration-175-version', '11111111111111111111111111111111', 'migration-175-automation', 1, 'published', 'manual', 'custom');
 		UPDATE automations SET published_version_id = 'migration-175-version' WHERE id = 'migration-175-automation';
-		INSERT INTO automation_nodes (id, project_id, automation_id, version_id, node_key, name, node_type, role)
-			VALUES ('migration-175-node', '11111111111111111111111111111111', 'migration-175-automation', 'migration-175-version', 'implementation', 'Implementation', 'agent_task', 'implementation');
+		INSERT INTO automation_nodes (id, project_id, automation_id, version_id, node_key, name, node_type, role) VALUES
+			('migration-175-inbox-node', '11111111111111111111111111111111', 'migration-175-automation', 'migration-175-version', 'inbox', 'Approved inbox', 'agent_task', 'native_inbox'),
+			('migration-175-node', '11111111111111111111111111111111', 'migration-175-automation', 'migration-175-version', 'implementation', 'Implementation', 'agent_task', 'implementation');
+		INSERT INTO automation_edges (id, project_id, automation_id, version_id, source_node_id, target_node_id, edge_key)
+			VALUES ('migration-175-edge', '11111111111111111111111111111111', 'migration-175-automation', 'migration-175-version', 'migration-175-inbox-node', 'migration-175-node', 'inbox-to-implementation');
+		INSERT INTO automation_definition_resources (id, project_id, automation_id, version_id, node_id, resource_type, resource_id)
+			VALUES ('migration-175-inbox-resource', '11111111111111111111111111111111', 'migration-175-automation', 'migration-175-version', 'migration-175-inbox-node', 'task', '33333333333333333333333333333333');
+		INSERT INTO automation_artifact_mailbox_owners (project_id, automation_id, artifact_type, artifact_id, producer_node_key, action_node_key, gate_node_key, mailbox_node_key) VALUES
+			('11111111111111111111111111111111', 'migration-175-automation', 'alert', '55555555555555555555555555555555', 'producer', 'action', 'gate', 'inbox'),
+			('11111111111111111111111111111111', 'migration-175-automation', 'alert', '21212121212121212121212121212121', 'producer', 'action', 'gate', 'inbox'),
+			('11111111111111111111111111111111', 'migration-175-automation', 'alert', '88888888888888888888888888888888', 'producer', 'action', 'gate', 'inbox');
 		INSERT INTO automation_work_items (id, project_id, automation_id, origin_version_id, work_item_key)
 			VALUES ('migration-175-work', '11111111111111111111111111111111', 'migration-175-automation', 'migration-175-version', 'migration-175-work');
 		INSERT INTO automation_activities (id, project_id, automation_id, version_id, node_id, work_item_id, activity_key, activity_type, status)
