@@ -125,6 +125,7 @@ func composeRuntimeToolExecutor(base func(context.Context, string, json.RawMessa
 		return base
 	}
 	return func(ctx context.Context, name string, input json.RawMessage) (string, bool, error) {
+		input = rt.NormalizeToolInput(name, input)
 		if output, handled, isError, err := rt.Executor(ctx, name, input); handled || err != nil {
 			return output, isError, err
 		}

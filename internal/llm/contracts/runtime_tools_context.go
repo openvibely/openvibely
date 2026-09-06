@@ -74,6 +74,58 @@ func (rt *RuntimeTools) DefinitionNames() []string {
 	return names
 }
 
+// NormalizeToolInput removes provider-materialized null values for optional
+// top-level schema properties before dispatch. Non-null values, including false
+// and numeric zero, are always preserved as explicit caller input.
+func (rt *RuntimeTools) NormalizeToolInput(name string, input json.RawMessage) json.RawMessage {
+	if rt == nil || len(input) == 0 {
+		return input
+	}
+	var definition *RuntimeToolDefinition
+	for i := range rt.Definitions {
+		if strings.EqualFold(strings.TrimSpace(rt.Definitions[i].Name), strings.TrimSpace(name)) {
+			definition = &rt.Definitions[i]
+			break
+		}
+	}
+	if definition == nil {
+		return input
+	}
+	var schema struct {
+		Properties map[string]json.RawMessage `json:"properties"`
+		Required   []string                   `json:"required"`
+	}
+	var object map[string]json.RawMessage
+	if json.Unmarshal(definition.Parameters, &schema) != nil || json.Unmarshal(input, &object) != nil {
+		return input
+	}
+	required := make(map[string]bool, len(schema.Required))
+	for _, field := range schema.Required {
+		required[strings.ToLower(field)] = true
+	}
+	changed := false
+	for inputKey, value := range object {
+		if string(value) != "null" || required[strings.ToLower(inputKey)] {
+			continue
+		}
+		for property := range schema.Properties {
+			if strings.EqualFold(property, inputKey) {
+				delete(object, inputKey)
+				changed = true
+				break
+			}
+		}
+	}
+	if !changed {
+		return input
+	}
+	normalized, err := json.Marshal(object)
+	if err != nil {
+		return input
+	}
+	return normalized
+}
+
 type runtimeToolsContextKey struct{}
 
 // WithRuntimeTools annotates context with request-scoped tool definitions/executor.

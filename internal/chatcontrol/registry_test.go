@@ -855,9 +855,10 @@ func TestRegistry_AlertFlowActions(t *testing.T) {
 	var schema struct {
 		Required   []string `json:"required"`
 		Properties map[string]struct {
-			Type        any    `json:"type"`
-			Enum        []any  `json:"enum"`
-			Description string `json:"description"`
+			Type        any             `json:"type"`
+			Enum        []any           `json:"enum"`
+			Default     json.RawMessage `json:"default"`
+			Description string          `json:"description"`
 		} `json:"properties"`
 	}
 	if err := json.Unmarshal(Get("list_alerts").Parameters, &schema); err != nil {
@@ -876,6 +877,9 @@ func TestRegistry_AlertFlowActions(t *testing.T) {
 		}
 		if len(definition.Enum) > 0 && !slices.Contains(definition.Enum, nil) {
 			t.Fatalf("list_alerts optional enum filter %s must accept null, got enum %#v", property, definition.Enum)
+		}
+		if string(definition.Default) != "null" {
+			t.Fatalf("list_alerts optional filter %s must default omission to null, got %s", property, definition.Default)
 		}
 	}
 	if description := schema.Properties["project_id"].Description; !strings.Contains(description, "Omit") || !strings.Contains(description, "persisted caller task") {

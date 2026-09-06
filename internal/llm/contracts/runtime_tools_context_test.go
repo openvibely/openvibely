@@ -158,6 +158,35 @@ func TestRuntimeToolsHelpersCoverNilAndTrimmedNames(t *testing.T) {
 	}
 }
 
+func TestRuntimeToolsNormalizeToolInput(t *testing.T) {
+	rt := &RuntimeTools{Definitions: []RuntimeToolDefinition{{
+		Name:       "list_alerts",
+		Parameters: json.RawMessage(`{"type":"object","properties":{"processing_state":{"type":["null","string"]},"read":{"type":["null","boolean"]},"limit":{"type":["null","integer"]},"required_value":{"type":["null","string"]}},"required":["required_value"]}`),
+	}}}
+
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "omitted stays omitted", input: `{"limit":50}`, want: `{"limit":50}`},
+		{name: "optional nulls become absent", input: `{"processing_state":null,"read":null,"limit":null}`, want: `{}`},
+		{name: "case insensitive property", input: `{"READ":null}`, want: `{}`},
+		{name: "explicit values stay present", input: `{"processing_state":"not_applicable","read":false,"limit":0}`, want: `{"processing_state":"not_applicable","read":false,"limit":0}`},
+		{name: "required null stays present", input: `{"required_value":null}`, want: `{"required_value":null}`},
+		{name: "unknown null stays present", input: `{"unknown":null}`, want: `{"unknown":null}`},
+		{name: "malformed stays unchanged", input: `{`, want: `{`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := rt.NormalizeToolInput("LIST_ALERTS", json.RawMessage(tt.input))
+			if string(got) != tt.want {
+				t.Fatalf("NormalizeToolInput() = %s, want %s", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestRuntimeToolsDefinitionNames(t *testing.T) {
 	if got := (*RuntimeTools)(nil).DefinitionNames(); got != nil {
 		t.Fatalf("nil RuntimeTools DefinitionNames = %#v, want nil", got)
