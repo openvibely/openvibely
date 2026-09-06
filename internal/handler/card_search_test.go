@@ -93,21 +93,20 @@ func TestCollectionSelectionGutterDoesNotShiftCardContent(t *testing.T) {
 	}))
 	defer fixture.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, chrome, "--headless=new", "--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage", "--disable-background-networking", "--disable-extensions", "--no-first-run", "--user-data-dir="+filepath.Join(t.TempDir(), "chrome-profile"), "--window-size=1024,768", fixture.URL)
-	require.NoError(t, cmd.Start())
-	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
+	cmd := exec.Command(chrome, "--headless=new", "--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage", "--disable-background-networking", "--disable-extensions", "--no-first-run", "--user-data-dir="+filepath.Join(t.TempDir(), "chrome-profile"), "--window-size=1024,768", fixture.URL)
+	require.NoError(t, startHandlerBrowserProcess(cmd))
+	stopped := false
+	defer func() {
+		if !stopped {
+			stopHandlerBrowserProcess(cmd)
+		}
+	}()
 	select {
 	case got := <-result:
-		cancel()
-		<-done
+		stopHandlerBrowserProcess(cmd)
+		stopped = true
 		require.Equal(t, "pass", strings.SplitN(got, ":", 2)[0], got)
-	case err := <-done:
-		require.NoError(t, err)
-		t.Fatal("browser exited before reporting selection gutter position")
-	case <-ctx.Done():
+	case <-time.After(30 * time.Second):
 		t.Fatal("selection gutter browser regression timed out")
 	}
 }
@@ -345,24 +344,23 @@ func TestCollectionSelectionProductionBrowserInteractions(t *testing.T) {
 	defer fixture.Close()
 	page = strings.Replace(page, "for (var i=0;i<80 && !window.bulkFinished;i++) await wait(25);", "for (var i=0;i<80 && !window.bulkFinished;i++){ window.bulkFinished=(await fetch('/bulk-finished').then(function(r){return r.text();}))==='true'; if(!window.bulkFinished) await wait(25); }", 1)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, chrome, "--headless=new", "--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage", "--disable-background-networking", "--disable-extensions", "--no-first-run", "--user-data-dir="+filepath.Join(t.TempDir(), "chrome-profile"), "--window-size=390,844", fixture.URL+"?provider=openai")
+	cmd := exec.Command(chrome, "--headless=new", "--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage", "--disable-background-networking", "--disable-extensions", "--no-first-run", "--user-data-dir="+filepath.Join(t.TempDir(), "chrome-profile"), "--window-size=390,844", fixture.URL+"?provider=openai")
 	var chromeOutput bytes.Buffer
 	cmd.Stdout = &chromeOutput
 	cmd.Stderr = &chromeOutput
-	require.NoError(t, cmd.Start())
-	chromeDone := make(chan error, 1)
-	go func() { chromeDone <- cmd.Wait() }()
+	require.NoError(t, startHandlerBrowserProcess(cmd))
+	stopped := false
+	defer func() {
+		if !stopped {
+			stopHandlerBrowserProcess(cmd)
+		}
+	}()
 	var browser browserResult
 	select {
 	case browser = <-browserResults:
-		cancel()
-		<-chromeDone
-	case err := <-chromeDone:
-		require.NoError(t, err, "Chrome exited before reporting a result: %s", chromeOutput.String())
-		t.Fatal("selection browser regression did not report a result")
-	case <-ctx.Done():
+		stopHandlerBrowserProcess(cmd)
+		stopped = true
+	case <-time.After(45 * time.Second):
 		t.Fatalf("selection browser regression timed out: %s", chromeOutput.String())
 	}
 	require.Equal(t, "pass", browser.status, "selection browser regression failed: %s\nChrome output: %s", browser.message, chromeOutput.String())
