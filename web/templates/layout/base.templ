@@ -654,7 +654,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					pointer-events: auto !important;
 				}
 				#kanban-board [data-kanban-menu-key][data-kanban-menu-positioning="true"] > [data-kanban-menu-content] {
-					visibility: visible !important;
+					visibility: hidden !important;
 					opacity: 0 !important;
 					pointer-events: none !important;
 				}
@@ -2248,11 +2248,10 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						}
 						return new Promise(function(resolve) {
 							var worker = new Worker(window._codeRangeWorkerURL);
-							var state = { worker: worker, resolve: resolve, fallbackTimer: null, finished: false, finish: null };
+							var state = { worker: worker, resolve: resolve, finished: false, finish: null };
 							function finish(ranges) {
 								if (state.finished) return;
 								state.finished = true;
-								if (state.fallbackTimer) clearTimeout(state.fallbackTimer);
 								worker.terminate();
 								if (owner && owner._codeRangeWorkerState === state) owner._codeRangeWorkerState = null;
 								resolve(ranges);
@@ -2263,7 +2262,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 								finish(event.data && !event.data.error ? event.data.ranges : null);
 							};
 							worker.onerror = function() { finish(null); };
-							state.fallbackTimer = setTimeout(function() { finish(null); }, window._chatCodeRangeWorkerTimeoutMS || 3000);
+							// Slow work remains off the UI thread. The owning render deadline
+							// cancels this worker if it never completes.
 							worker.postMessage(text);
 						});
 					} catch (err) {
@@ -2886,8 +2886,21 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				}
 			}
 
+			function finishKanbanMenuPosition(dropdown, label) {
+				if (!dropdown || !label) return;
+				dropdown.__openVibelyPositionGeneration = (dropdown.__openVibelyPositionGeneration || 0) + 1;
+				positionDropdownForViewport(label);
+				const pendingFocus = dropdown.__openVibelyPendingMenuFocus;
+				dropdown.__openVibelyPendingMenuFocus = null;
+				dropdown.removeAttribute('data-kanban-menu-positioning');
+				if (pendingFocus && pendingFocus.isConnected && dropdown.contains(pendingFocus)) {
+					pendingFocus.focus({preventScroll: true});
+				}
+			}
+
 			function prepareKanbanMenuPosition(dropdown, label) {
 				if (!dropdown || !label) return;
+				dropdown.__openVibelyPendingMenuFocus = null;
 				const generation = (dropdown.__openVibelyPositionGeneration || 0) + 1;
 				dropdown.__openVibelyPositionGeneration = generation;
 				dropdown.setAttribute('data-kanban-menu-positioning', 'true');
@@ -2905,7 +2918,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					else stableFrames = 0;
 					previousRect = rect ? {left: rect.left, top: rect.top} : null;
 					if (stableFrames >= 1 || frameCount >= 8) {
-						dropdown.removeAttribute('data-kanban-menu-positioning');
+						finishKanbanMenuPosition(dropdown, label);
 						return;
 					}
 					requestAnimationFrame(settlePosition);
@@ -3524,6 +3537,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						else {
 							dropdown.removeAttribute('data-kanban-menu-open');
 							dropdown.removeAttribute('data-kanban-menu-positioning');
+							dropdown.__openVibelyPendingMenuFocus = null;
 							closeKanbanSubmenus(dropdown, null);
 						}
 						const column = dropdown.closest('.kanban-column');
@@ -3610,9 +3624,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					if (trigger && dropdown.getAttribute('data-kanban-menu-open') !== 'true') {
 						prepareKanbanMenuPosition(dropdown, trigger);
 					} else if (trigger && event.target !== trigger && dropdown.getAttribute('data-kanban-menu-positioning') === 'true') {
-						dropdown.__openVibelyPositionGeneration = (dropdown.__openVibelyPositionGeneration || 0) + 1;
-						positionDropdownForViewport(trigger);
-						dropdown.removeAttribute('data-kanban-menu-positioning');
+						finishKanbanMenuPosition(dropdown, trigger);
 					}
 					openKanbanMenuKey = dropdown.getAttribute('data-kanban-menu-key');
 					const board = dropdown.closest('#kanban-board');
@@ -3639,6 +3651,16 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						}
 					}
 					if (event.key === 'Tab') {
+						const dropdown = kanbanDropdownForTarget(event.target);
+						const trigger = dropdown && dropdown.querySelector('[data-kanban-menu-trigger]');
+						if (dropdown && event.target === trigger && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey && dropdown.getAttribute('data-kanban-menu-open') === 'true' && dropdown.getAttribute('data-kanban-menu-positioning') === 'true') {
+							const content = dropdown.querySelector(':scope > [data-kanban-menu-content]');
+							const firstAction = content && content.querySelector('a[href]:not([aria-disabled="true"]), button:not([disabled]), [tabindex]:not([tabindex="-1"])');
+							if (firstAction) {
+								event.preventDefault();
+								dropdown.__openVibelyPendingMenuFocus = firstAction;
+							}
+						}
 						setTimeout(function() {
 							if (!kanbanDropdownForTarget(document.activeElement)) {
 								closeKanbanMenu(null, false);

@@ -4239,12 +4239,18 @@ templ ChatAutoScrollScript() {
 								}
 							}
 							if (showFallback && next.container.isConnected) {
+								var fallbackCommitted = false;
 								try {
 									var fallback = window.renderChatMarkdownLargeFallback ? window.renderChatMarkdownLargeFallback(next.text) : null;
 									next.container.replaceChildren(fallback || document.createTextNode(next.text));
+									fallbackCommitted = true;
 								} catch (ignored) {
-									try { next.container.textContent = next.text; } catch (ignoredAgain) {}
+									try {
+										next.container.textContent = next.text;
+										fallbackCommitted = true;
+									} catch (ignoredAgain) {}
 								}
+								if (fallbackCommitted) result = true;
 							}
 							next.container._activeScheduledChatRender = null;
 						}
@@ -4380,6 +4386,9 @@ templ ChatAutoScrollScript() {
 			window.scheduleChatElementRender = function(container, raw, yieldBetweenBatches) {
 				if (!container || !raw) return Promise.resolve(false);
 				var renderRevision = container.getAttribute('data-raw-revision') || raw || '';
+				var renderedRevision = container._renderedRevision || container.getAttribute('data-rendered-revision') || '';
+				var hasRenderedContent = !!(container.textContent && container.textContent.trim()) || !!(container.querySelector && container.querySelector('*'));
+				if (renderedRevision === renderRevision && hasRenderedContent) return Promise.resolve(true);
 				if (container._renderingRevision === renderRevision && container._chatElementRenderPromise) return container._chatElementRenderPromise;
 				container._renderingRevision = renderRevision;
 				var promise = window.scheduleChatContentRender(container, raw, yieldBetweenBatches).then(function(rendered) {
@@ -4527,9 +4536,10 @@ templ ChatAutoScrollScript() {
 						function prepareInitialCodeRanges() {
 							if (shouldYieldPreparation && window.codeRangesAsync) {
 								return window.codeRangesAsync(textBuffer, container).then(function(result) {
-									// A worker is an optimization only. Falling back to raw Markdown
-									// would expose tool protocol markers instead of rendering cards.
-									rawCodeRanges = result !== null ? result : (window.codeRanges ? window.codeRanges(textBuffer) : []);
+									// Never repeat a failed multi-megabyte worker scan on the UI thread.
+									// Reject into the queued renderer's escaped plaintext fallback.
+									if (result === null) throw new Error('code-range worker unavailable');
+									rawCodeRanges = result;
 									return true;
 								});
 							}
@@ -4539,8 +4549,8 @@ templ ChatAutoScrollScript() {
 						function prepareCodeRanges() {
 							if (shouldYieldPreparation && window.codeRangesAsync) {
 								return window.codeRangesAsync(textBuffer, container).then(function(result) {
-									// Keep structured rendering intact if worker preparation is unavailable.
-									codeRanges = excludeToolBlockCodeRanges(result !== null ? result : (window.codeRanges ? window.codeRanges(textBuffer) : []));
+									if (result === null) throw new Error('code-range worker unavailable');
+									codeRanges = excludeToolBlockCodeRanges(result);
 									return true;
 								});
 							}
