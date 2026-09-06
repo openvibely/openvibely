@@ -140,6 +140,17 @@ window.addEventListener('DOMContentLoaded', function() {
     results.scrollTop = 48;
     if (results.scrollTop <= 0) fail('constrained project results pane did not accept scrolling');
 
+    typeSearch(search, '  pAyMeNtS wEb  ');
+    await wait(0);
+    dialogRect = dialog.getBoundingClientRect();
+    if (Math.abs(dialogRect.bottom - (triggerRect.top - 4)) > 2) fail('filtered upward selector detached from its trigger');
+    if (visibleOptions().length !== 3) fail('filtering after upward placement did not update project results');
+    clear.click();
+    await wait(0);
+    dialogRect = dialog.getBoundingClientRect();
+    if (Math.abs(dialogRect.bottom - (triggerRect.top - 4)) > 2) fail('cleared upward selector detached from its trigger');
+    if (visibleOptions().length !== 28) fail('clearing after upward placement did not restore project results');
+
     key(search, 'ArrowDown');
     if (document.activeElement.dataset.projectId !== 'default') fail('ArrowDown did not focus the first project result');
     key(document.activeElement, 'ArrowDown');

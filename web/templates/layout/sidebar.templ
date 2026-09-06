@@ -201,6 +201,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 						if (clear) clear.hidden = !query;
 						var status = root.querySelector('[data-project-selector-status]');
 						if (status) status.textContent = query && matchCount === 0 ? 'No projects match your search.' : (query ? 'Matching projects updated.' : 'All projects shown.');
+						positionSelector();
 					}
 
 					function syncCurrentProject(projectID) {
@@ -219,7 +220,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 
 					function positionSelector() {
 						if (!dialog.open) return;
-					var margin = 8, gap = 4, triggerRect = trigger.getBoundingClientRect();
+						var margin = 8, gap = 4, triggerRect = trigger.getBoundingClientRect();
 						var anchorLeft = triggerRect.left;
 						dialog.style.maxHeight = '';
 						var width = dialog.offsetWidth, height = dialog.offsetHeight;
