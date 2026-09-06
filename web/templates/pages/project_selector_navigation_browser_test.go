@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/openvibely/openvibely/web/templates/layout"
 )
 
@@ -48,6 +49,18 @@ func TestSidebarProjectSelectorSearchAndSwitchInChrome(t *testing.T) {
 	if !strings.Contains(selectorScripts.String(), "Project selector behavior") || !strings.Contains(selectorScripts.String(), "function persistSelectedProject") {
 		t.Fatal("could not isolate the production project selector scripts")
 	}
+	var breadcrumbRendered bytes.Buffer
+	if err := components.BreadcrumbSelector(models.BreadcrumbSelector{
+		ID: "task-selector", Kind: "Task", CurrentID: "task-current", CurrentName: "Current Task", SearchURL: "/tasks/select",
+	}).Render(context.Background(), &breadcrumbRendered); err != nil {
+		t.Fatalf("render BreadcrumbSelector: %v", err)
+	}
+	var breadcrumbResults bytes.Buffer
+	if err := components.BreadcrumbSelectorResults("Task", "task-current", []models.BreadcrumbSelectorItem{{ID: "task-current", Name: "Current Task", URL: "/tasks/task-current"}}, false).Render(context.Background(), &breadcrumbResults); err != nil {
+		t.Fatalf("render BreadcrumbSelectorResults: %v", err)
+	}
+	breadcrumbHTML := scriptPattern.ReplaceAllString(breadcrumbRendered.String(), "") + `<div data-parity-breadcrumb-results>` + breadcrumbResults.String() + `</div>`
+
 	markup := scriptPattern.ReplaceAllString(sidebarHTML, "")
 
 	runner := `<script>
@@ -80,6 +93,29 @@ window.addEventListener('DOMContentLoaded', function() {
     main.id = 'main-content';
     document.body.appendChild(main);
     if (!root || !trigger || !dialog || !search || !select || !clear || !noMatch) fail('project selector fixture is incomplete');
+    var taskDialog = document.querySelector('[data-breadcrumb-selector-dialog]');
+    var taskPanel = taskDialog && taskDialog.firstElementChild;
+    var projectPanel = dialog.firstElementChild;
+    var taskHeader = taskDialog && taskDialog.querySelector('[data-breadcrumb-selector-close]').parentElement;
+    var projectHeader = dialog.querySelector('[data-project-selector-close]').parentElement;
+    var taskSearch = taskDialog && taskDialog.querySelector('[data-breadcrumb-selector-search]');
+    var taskResults = taskDialog && taskDialog.querySelector('[data-breadcrumb-selector-results]');
+    var taskMenu = document.querySelector('[data-parity-breadcrumb-results] [role="listbox"]');
+    var taskOption = document.querySelector('[data-parity-breadcrumb-results] [data-breadcrumb-selector-option]');
+    var projectMenu = dialog.querySelector('[role="listbox"]');
+    var projectOption = dialog.querySelector('[data-project-selector-option]');
+    function assertSameClasses(projectNode, taskNode, label) {
+      if (!projectNode || !taskNode || projectNode.className !== taskNode.className) fail('project selector ' + label + ' styling differs from the task selector');
+    }
+    assertSameClasses(dialog, taskDialog, 'dialog');
+    assertSameClasses(projectPanel, taskPanel, 'panel');
+    assertSameClasses(projectHeader, taskHeader, 'header');
+    assertSameClasses(dialog.querySelector('[data-project-selector-close]'), taskDialog.querySelector('[data-breadcrumb-selector-close]'), 'close button');
+    assertSameClasses(search, taskSearch, 'search');
+    assertSameClasses(dialog.querySelector('[data-project-selector-results]'), taskResults, 'results');
+    assertSameClasses(projectMenu, taskMenu, 'menu');
+    assertSameClasses(projectOption, taskOption, 'option');
+    if (projectPanel.parentElement !== dialog) fail('project selector panel is not directly attached to its dialog like the task selector');
     if (trigger.textContent.trim() !== 'Default') fail('current project label is not rendered');
     ['select', 'select-bordered', 'select-sm', 'w-full', 'sidebar-project-select'].forEach(function(className) {
       if (!trigger.classList.contains(className)) fail('collapsed selector lost its prior visual class: ' + className);
@@ -114,6 +150,14 @@ window.addEventListener('DOMContentLoaded', function() {
     clear.click();
     if (search.value !== '' || !noMatch.hidden || visibleOptions().length !== 28) fail('clearing search did not restore all projects: value=' + JSON.stringify(search.value) + ', noMatchHidden=' + noMatch.hidden + ', visible=' + visibleOptions().length + ', hidden=' + Array.prototype.slice.call(document.querySelectorAll('[data-project-selector-option]')).map(function(option) { return option.dataset.projectId + ':' + option.hidden; }).join(','));
 
+    var replacementSearch = search.cloneNode(true);
+    search.replaceWith(replacementSearch);
+    search = replacementSearch;
+    typeSearch(search, 'payments api');
+    if (visibleOptions().length !== 2 || !visibleOptions().some(function(option) { return option.dataset.projectId === 'payments-api'; })) fail('typing in the live replacement project search did not filter results');
+    clear.click();
+    if (visibleOptions().length !== 28) fail('clearing after live search replacement did not restore results');
+
     root.style.position = 'fixed';
     root.style.left = '16px';
     root.style.top = '0';
@@ -127,15 +171,13 @@ window.addEventListener('DOMContentLoaded', function() {
     await wait(0);
     triggerRect = trigger.getBoundingClientRect();
     dialogRect = dialog.getBoundingClientRect();
-    var modalBox = dialog.querySelector('.modal-box');
-    var panel = modalBox && modalBox.firstElementChild;
+    var panel = dialog.firstElementChild;
     var results = document.querySelector('[data-project-selector-results]');
     if (dialogRect.bottom > triggerRect.top - 2) fail('constrained selector did not open upward above its trigger');
     if (dialogRect.top < 7 || dialogRect.height > triggerRect.top - 10) fail('upward selector escaped its available viewport height');
-    if (!modalBox || !panel || !results) fail('constrained selector sizing fixture is incomplete');
-    if (modalBox.getBoundingClientRect().height > dialogRect.height + 1 || panel.getBoundingClientRect().height > dialogRect.height + 1) fail('selector wrapper does not inherit the dialog dynamic max height');
-    if (getComputedStyle(modalBox).maxHeight !== getComputedStyle(dialog).maxHeight) fail('selector wrapper computed max height diverges from the dialog dynamic max height');
-    if (getComputedStyle(modalBox).overflowY !== 'hidden' || getComputedStyle(results).overflowY !== 'auto') fail('selector results pane is not the constrained popup scroll owner');
+    if (!panel || !results) fail('constrained selector sizing fixture is incomplete');
+    if (panel.getBoundingClientRect().height > dialogRect.height + 1) fail('shared selector panel exceeded the dialog dynamic max height');
+    if (getComputedStyle(results).overflowY !== 'auto') fail('selector results pane is not the constrained popup scroll owner');
     if (results.scrollHeight <= results.clientHeight) fail('large constrained project results are not scrollable');
     results.scrollTop = 48;
     if (results.scrollTop <= 0) fail('constrained project results pane did not accept scrolling');
@@ -219,7 +261,7 @@ window.addEventListener('DOMContentLoaded', function() {
 	page := `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">` +
 		`<style>[hidden]{display:none!important} dialog[open]{display:block;position:fixed;box-sizing:border-box;width:448px;max-width:calc(100vw - 16px);max-height:calc(100vh - 16px);margin:0;padding:0;overflow:hidden} .modal-box{box-sizing:border-box;width:91.666667%;max-width:32rem;max-height:calc(100vh - 5em);overflow-y:auto} [class~="max-h-[inherit]"]{max-height:inherit}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}.flex{display:flex}.flex-1{flex:1 1 0%}.flex-col{flex-direction:column}.min-h-0{min-height:0}.w-full{width:100%}.max-w-none{max-width:none}.min-w-0{min-width:0}.overflow-hidden{overflow:hidden}.overflow-y-auto{overflow-y:auto}.truncate{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.sidebar-aside{width:256px}.sidebar-inner{padding:16px}.sidebar-project-select{box-sizing:border-box;height:32px}</style>` +
 		`<script>window._tabVisibility={dispatchSSEEvent:function(){},registerSSE:function(){return {close:function(){}}}};window.htmx={process:function(){},trigger:function(){},ajax:function(){return Promise.resolve();}};window.toggleTheme=function(){};window.openVibelyNavigate=function(){return Promise.resolve();};</script></head><body>` +
-		markup + selectorScripts.String() + runner + `</body></html>`
+		markup + breadcrumbHTML + selectorScripts.String() + runner + `</body></html>`
 
 	browserResult := make(chan string, 4)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
