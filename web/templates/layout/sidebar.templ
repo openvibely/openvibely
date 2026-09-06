@@ -86,7 +86,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 				</select>
 				<button
 					id="project-selector-trigger"
-					class="sidebar-project-trigger btn btn-ghost btn-sm w-full min-w-0 justify-between gap-2 border border-base-300 px-3 normal-case font-normal"
+					class="select select-bordered select-sm w-full sidebar-project-select flex min-w-0 items-center justify-between gap-2 bg-none text-left font-normal"
 					type="button"
 					aria-label="Switch project"
 					aria-haspopup="dialog"
@@ -95,9 +95,9 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 					disabled?={ len(projects) == 0 }
 				>
 					<span id="project-selector-current-label" class="min-w-0 truncate">{ sidebarProjectDisplayName(projects, currentProjectID) }</span>
-					<svg class="h-4 w-4 shrink-0 opacity-60" width="16" height="16" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-.02-1.06z" clip-rule="evenodd"></path></svg>
+					<svg class="h-4 w-4 shrink-0 opacity-60" width="16" height="16" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" data-project-selector-caret><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-.02-1.06z" clip-rule="evenodd"></path></svg>
 				</button>
-				<dialog id="project-selector-dialog" class="sidebar-project-dialog fixed inset-0 m-auto max-h-[min(32rem,calc(100dvh-1rem))] w-[28rem] max-w-[calc(100vw-1rem)] overflow-hidden rounded-box border border-base-300 bg-base-100 p-0 text-base-content shadow-xl backdrop:bg-transparent" role="dialog" aria-modal="true" aria-labelledby="project-selector-heading" data-project-selector-dialog>
+				<dialog id="project-selector-dialog" class="sidebar-project-dialog fixed m-0 max-h-[min(32rem,calc(100dvh-1rem))] w-[28rem] max-w-[calc(100vw-1rem)] overflow-hidden rounded-box border border-base-300 bg-base-100 p-0 text-base-content shadow-xl backdrop:bg-transparent" role="dialog" aria-modal="true" aria-labelledby="project-selector-heading" data-project-selector-dialog>
 					<div class="modal-box flex w-full max-w-none max-h-[inherit] min-h-0 flex-col overflow-hidden rounded-none bg-transparent p-0 shadow-none">
 						<div class="flex items-center justify-between gap-3 border-b border-base-300 px-4 py-3">
 							<h2 id="project-selector-heading" class="min-w-0 truncate text-base font-bold">Switch project</h2>
@@ -151,13 +151,13 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 				// Project selector behavior is installed once so full-page and HTMX paths share one controller.
 				(function() {
 					if (window.openVibelyProjectSelectorInstalled) return;
-					window.openVibelyProjectSelectorInstalled = true;
 					var root = document.querySelector('[data-project-selector]');
 					var sel = document.getElementById('project-selector');
 					var trigger = document.getElementById('project-selector-trigger');
 					var dialog = document.getElementById('project-selector-dialog');
 					var search = document.getElementById('project-selector-search');
 					if (!root || !sel || !trigger || !dialog || !search) return;
+					window.openVibelyProjectSelectorInstalled = true;
 
 					function normalize(value) {
 						return String(value || '').trim().toLowerCase();
@@ -205,6 +205,25 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 						applyFilter();
 					}
 
+					function positionSelector() {
+						if (!dialog.open) return;
+						var margin = 8, gap = 4, triggerRect = trigger.getBoundingClientRect();
+						var caret = trigger.querySelector('[data-project-selector-caret]');
+						var anchorLeft = caret ? caret.getBoundingClientRect().left : triggerRect.left;
+						dialog.style.maxHeight = '';
+						var width = dialog.offsetWidth, height = dialog.offsetHeight;
+						var left = Math.max(margin, Math.min(anchorLeft, window.innerWidth - width - margin));
+						var belowTop = triggerRect.bottom + gap, below = window.innerHeight - belowTop - margin, above = triggerRect.top - gap - margin;
+						var top = belowTop, available = below;
+						if (below < Math.min(height, 160) && above > below) {
+							available = above;
+							top = Math.max(margin, triggerRect.top - gap - Math.min(height, available));
+						}
+						dialog.style.left = left + 'px';
+						dialog.style.top = top + 'px';
+						dialog.style.maxHeight = Math.max(0, available) + 'px';
+					}
+
 					function closeSelector(restoreFocus) {
 						if (dialog.open) dialog.close();
 						trigger.setAttribute('aria-expanded', 'false');
@@ -216,6 +235,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 						dialog.showModal();
 						trigger.setAttribute('aria-expanded', 'true');
 						syncCurrentProject(sel.value);
+						positionSelector();
 						search.focus();
 						search.select();
 					}
@@ -231,7 +251,12 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 					projectOptions().forEach(function(option) {
 						option.addEventListener('click', function() { selectProject(option.getAttribute('data-project-id')); });
 					});
-					search.addEventListener('input', applyFilter);
+					document.addEventListener('input', function(event) {
+						if (event.target === search) applyFilter();
+					});
+					document.addEventListener('search', function(event) {
+						if (event.target === search) applyFilter();
+					});
 					var clear = root.querySelector('[data-project-selector-clear]');
 					if (clear) clear.addEventListener('click', function() { search.value = ''; applyFilter(); search.focus(); });
 					var closeButton = root.querySelector('[data-project-selector-close]');
@@ -278,6 +303,11 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 					});
 					document.addEventListener('htmx:historyRestore', function() { closeSelector(false); });
 					window.addEventListener('popstate', function() { closeSelector(false); });
+					window.addEventListener('resize', positionSelector);
+					document.addEventListener('scroll', function(event) {
+						if (event.target && event.target.closest && event.target.closest('[data-project-selector-dialog]')) return;
+						positionSelector();
+					}, true);
 					window.openVibelyProjectSelectorSync = syncCurrentProject;
 					syncCurrentProject(sel.value);
 				})();
@@ -1054,23 +1084,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 			[data-theme="dark"] .theme-collapsed-moon {
 				display: block;
 			}
-			/* Project selector trigger: keep a single visible focus ring and border. */
-			.sidebar-project-trigger,
-			.sidebar-project-trigger:hover,
-			.sidebar-project-trigger:focus,
-			.sidebar-project-trigger:active {
-				outline: none;
-				box-shadow: none;
-				--tw-ring-shadow: 0 0 #0000;
-			}
-			.sidebar-project-trigger:focus-visible {
-				outline: none;
-				box-shadow: 0 0 0 2px hsl(var(--p) / 0.28);
-			}
-			[data-theme="dark"] .sidebar-project-trigger:focus-visible {
-				box-shadow: 0 0 0 2px hsl(var(--bc) / 0.35);
-			}
-			.sidebar-project-dialog {
+				.sidebar-project-dialog {
 				box-sizing: border-box;
 			}
 			.sidebar-project-dialog::backdrop {
