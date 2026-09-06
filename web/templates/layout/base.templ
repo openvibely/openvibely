@@ -2248,11 +2248,10 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						}
 						return new Promise(function(resolve) {
 							var worker = new Worker(window._codeRangeWorkerURL);
-							var state = { worker: worker, resolve: resolve, fallbackTimer: null, finished: false, finish: null };
+							var state = { worker: worker, resolve: resolve, finished: false, finish: null };
 							function finish(ranges) {
 								if (state.finished) return;
 								state.finished = true;
-								if (state.fallbackTimer) clearTimeout(state.fallbackTimer);
 								worker.terminate();
 								if (owner && owner._codeRangeWorkerState === state) owner._codeRangeWorkerState = null;
 								resolve(ranges);
@@ -2263,7 +2262,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 								finish(event.data && !event.data.error ? event.data.ranges : null);
 							};
 							worker.onerror = function() { finish(null); };
-							state.fallbackTimer = setTimeout(function() { finish(null); }, window._chatCodeRangeWorkerTimeoutMS || 3000);
+							// Slow work remains off the UI thread. The owning render deadline
+							// cancels this worker if it never completes.
 							worker.postMessage(text);
 						});
 					} catch (err) {
