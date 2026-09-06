@@ -473,6 +473,11 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 							var runRender = function() {
 							var sourceLength = textBuffer.length;
 							var renderText = textBuffer;
+							if (Object.prototype.hasOwnProperty.call(container, '_authoritativeTerminalContent')) {
+								renderText = String(container._authoritativeTerminalContent || '');
+								textBuffer = renderText;
+								sourceLength = renderText.length;
+							}
 							if (!force && sourceLength === lastRenderedSourceLength) return;
 						// Refresh tracker against the live messages element. If a morph
 						// swap replaced the container mid-stream, the old tracker would
@@ -964,6 +969,11 @@ templ ChatStreamingResumeInitScript() {
 						var runRender = function() {
 							var sourceLength = cumulativeContent.length;
 							var renderText = cumulativeContent;
+							if (Object.prototype.hasOwnProperty.call(container, '_authoritativeTerminalContent')) {
+								renderText = String(container._authoritativeTerminalContent || '');
+								cumulativeContent = renderText;
+								sourceLength = renderText.length;
+							}
 							if (!force && sourceLength === lastRenderedSourceLength) return;
 						// Refresh tracker against the live messages element in case a
 						// morph swap replaced the container while streaming.

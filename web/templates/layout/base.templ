@@ -648,6 +648,13 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				#kanban-board [data-task-card-menu-trigger] + [data-kanban-menu-content] {
 					overflow: visible;
 				}
+				#kanban-board [data-kanban-menu-key][data-kanban-menu-fixed="true"] > [data-task-card-menu-trigger] + [data-kanban-menu-content] {
+					position: fixed !important;
+					right: auto !important;
+					bottom: auto !important;
+					transform: none !important;
+					z-index: 1001 !important;
+				}
 				[data-task-card-submenu-portaled="true"] {
 					position: fixed !important;
 					right: auto !important;
@@ -2843,6 +2850,26 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					dropdown.classList.add('dropdown-top');
 				} else if (dropdown.dataset.originalDropdownTop !== 'true') {
 					dropdown.classList.remove('dropdown-top');
+				}
+				// Task-card menus live inside a vertically scrolling drop zone. A menu
+				// can be painted beyond its card there yet remain excluded from browser
+				// hit testing. Fixed coordinates keep the real menu node interactive
+				// while retaining its event handlers and owning dropdown relationship.
+				const boundaryIsVisible = boundaryRect.bottom > 0 && boundaryRect.top < window.innerHeight;
+				const isTaskCardMenu = label.matches && label.matches('[data-task-card-menu-trigger]');
+				if (isTaskCardMenu && boundaryIsVisible) {
+					dropdown.setAttribute('data-kanban-menu-fixed', 'true');
+					const menuWidth = content.getBoundingClientRect().width || content.offsetWidth || 208;
+					const desiredLeft = labelRect.right - menuWidth + 16;
+					const desiredTop = shouldOpenUp ? labelRect.top - menuHeight : labelRect.bottom;
+					const maxLeft = Math.max(8, window.innerWidth - menuWidth - 8);
+					const maxTop = Math.max(visibleTop + 8, visibleBottom - menuHeight - 8);
+					content.style.left = Math.max(8, Math.min(desiredLeft, maxLeft)) + 'px';
+					content.style.top = Math.max(visibleTop + 8, Math.min(desiredTop, maxTop)) + 'px';
+				} else if (isTaskCardMenu) {
+					dropdown.removeAttribute('data-kanban-menu-fixed');
+					content.style.removeProperty('left');
+					content.style.removeProperty('top');
 				}
 			}
 
