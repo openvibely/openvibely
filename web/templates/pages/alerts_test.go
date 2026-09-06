@@ -291,6 +291,30 @@ func TestAlertDetail_EmptyAlertOmitsCopyControl(t *testing.T) {
 	}
 }
 
+func TestAlertsToolbar_DoesNotDuplicateImplementationTaskFilter(t *testing.T) {
+	config := collectionToolbarConfig("alerts", "project-1", "")
+	var processing, implementationTask *CardListFilter
+	for i := range config.Filters {
+		switch config.Filters[i].Key {
+		case "processing_state":
+			processing = &config.Filters[i]
+		case "implementation_task_linked":
+			implementationTask = &config.Filters[i]
+		}
+	}
+	if processing == nil || implementationTask == nil {
+		t.Fatal("Alerts toolbar must expose processing state and implementation task filters")
+	}
+	for _, option := range processing.Options {
+		if option.Value == "implementation_task_linked" {
+			t.Fatal("processing state must not duplicate the dedicated implementation task filter")
+		}
+	}
+	if len(implementationTask.Options) != 2 || implementationTask.Options[0].Value != "true" || implementationTask.Options[1].Value != "false" {
+		t.Fatalf("unexpected implementation task options: %#v", implementationTask.Options)
+	}
+}
+
 func TestAlertsContent_DecisionFilterRendersSelectedStateAndSearchState(t *testing.T) {
 	var filtered bytes.Buffer
 	if err := AlertsContentPageWithFiltersAndSearch(nil, "project-1", 4, false, models.AlertDecisionPending, models.AlertProcessingFailed, "needle").Render(context.Background(), &filtered); err != nil {

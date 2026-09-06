@@ -127,7 +127,7 @@ func collectionToolbarConfig(pageKey, projectID, search string) CardListToolbarC
 			{Key: "read", Label: "Read", Options: cardListOptions("read", "Read", "unread", "Unread")},
 			{Key: "severity", Label: "Severity", Options: cardListOptions("info", "Info", "warning", "Warning", "error", "Error")},
 			{Key: "decision_state", Label: "Decision state", Options: cardListOptions("not_required", "Not required", "pending", "Pending", "approved", "Approved", "rejected", "Rejected", "dismissed", "Dismissed")},
-			{Key: "processing_state", Label: "Processing state", Options: cardListOptions("not_applicable", "Not applicable", "unclaimed", "Unclaimed", "claimed", "Claimed", "implementation_task_linked", "Implementation task linked", "completed", "Completed", "failed", "Failed")},
+			{Key: "processing_state", Label: "Processing state", Options: cardListOptions("not_applicable", "Not applicable", "unclaimed", "Unclaimed", "claimed", "Claimed", "completed", "Completed", "failed", "Failed")},
 			{Key: "implementation_task_linked", Label: "Implementation task", Options: cardListOptions("true", "Linked", "false", "Not linked")},
 			{Key: "type", Label: "Type", Options: cardListOptions("task_failed", "Task failed", "task_needs_followup", "Task needs follow-up", "custom", "Custom")},
 			{Key: "source", Label: "Source", Text: true},
