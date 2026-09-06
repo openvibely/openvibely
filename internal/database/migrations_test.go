@@ -1360,7 +1360,7 @@ func TestMigration175BackfillsDurableAlertImplementationTaskHistory(t *testing.T
 		t.Fatal(err)
 	}
 	if err := goose.UpTo(db, ".", 174); err != nil {
-		t.Fatalf("migrate to reported alert history baseline 174: %v", err)
+		t.Fatalf("migrate to public alert history baseline 174: %v", err)
 	}
 
 	const (
@@ -1386,8 +1386,8 @@ func TestMigration175BackfillsDurableAlertImplementationTaskHistory(t *testing.T
 			('44444444444444444444444444444444', '11111111111111111111111111111111', 'Other inbox', 'scheduled', 'pending'),
 			('18181818181818181818181818181818', '11111111111111111111111111111111', 'Live implementation', 'completed', 'completed');
 		INSERT INTO alerts(id, project_id, title, decision_state, processing_state, claimant, processing_error) VALUES
-			('55555555555555555555555555555555', '11111111111111111111111111111111', 'Historical deleted task', 'approved', 'completed', '33333333333333333333333333333333', 'Created and linked implementation task.'),
-			('21212121212121212121212121212121', '11111111111111111111111111111111', 'Batched historical deleted task', 'approved', 'completed', '33333333333333333333333333333333', ''),
+			('55555555555555555555555555555555', '11111111111111111111111111111111', 'Completed without durable link evidence', 'approved', 'completed', '33333333333333333333333333333333', 'Created and linked implementation task.'),
+			('21212121212121212121212121212121', '11111111111111111111111111111111', 'Eligible topology without link event', 'approved', 'completed', '33333333333333333333333333333333', ''),
 			('66666666666666666666666666666666', '11111111111111111111111111111111', 'Message only', 'approved', 'completed', '33333333333333333333333333333333', 'Created and linked implementation task aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.'),
 			('77777777777777777777777777777777', '11111111111111111111111111111111', 'Failed tool result', 'approved', 'completed', '33333333333333333333333333333333', 'Failed to create linked implementation task.'),
 			('88888888888888888888888888888888', '11111111111111111111111111111111', 'Wrong claimant topology', 'approved', 'completed', '44444444444444444444444444444444', ''),
