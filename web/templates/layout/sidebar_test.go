@@ -71,6 +71,7 @@ func TestSidebar_ProjectSelectorSearchableAndIdentityOnly(t *testing.T) {
 		`aria-expanded="false"`,
 		`aria-controls="project-selector-dialog"`,
 		`fixed m-0`,
+		`class="modal-box w-full max-w-none max-h-[inherit] min-h-0 overflow-hidden rounded-none bg-transparent p-0 shadow-none"`,
 		`id="project-selector-dialog"`, `role="dialog"`,
 		`aria-modal="true"`,
 		`id="project-selector-search"`,

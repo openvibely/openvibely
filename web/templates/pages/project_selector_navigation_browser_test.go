@@ -3,6 +3,7 @@ package pages
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -24,6 +25,9 @@ func TestSidebarProjectSelectorSearchAndSwitchInChrome(t *testing.T) {
 		{ID: "payments-api", Name: "Payments API"},
 		{ID: "payments-web", Name: "Payments Web"},
 		{ID: "payments-web-copy", Name: "Payments Web"},
+	}
+	for i := 0; i < 24; i++ {
+		projects = append(projects, models.Project{ID: fmt.Sprintf("project-%02d", i), Name: fmt.Sprintf("Project %02d", i)})
 	}
 
 	var rendered bytes.Buffer
@@ -65,6 +69,7 @@ window.addEventListener('DOMContentLoaded', function() {
   }
   function wait(ms) { return new Promise(function(resolve) { setTimeout(resolve, ms); }); }
   (async function() {
+    var root = document.querySelector('[data-project-selector]');
     var trigger = document.getElementById('project-selector-trigger');
     var dialog = document.getElementById('project-selector-dialog');
     var search = document.getElementById('project-selector-search');
@@ -74,13 +79,13 @@ window.addEventListener('DOMContentLoaded', function() {
     var main = document.createElement('main');
     main.id = 'main-content';
     document.body.appendChild(main);
-    if (!trigger || !dialog || !search || !select || !clear || !noMatch) fail('project selector fixture is incomplete');
+    if (!root || !trigger || !dialog || !search || !select || !clear || !noMatch) fail('project selector fixture is incomplete');
     if (trigger.textContent.trim() !== 'Default') fail('current project label is not rendered');
     ['select', 'select-bordered', 'select-sm', 'w-full', 'sidebar-project-select'].forEach(function(className) {
       if (!trigger.classList.contains(className)) fail('collapsed selector lost its prior visual class: ' + className);
     });
     if (trigger.querySelector('svg') || trigger.hasAttribute('data-project-selector-caret') || trigger.classList.contains('bg-none')) fail('collapsed selector replaced the original select arrow');
-    if (document.querySelectorAll('[data-project-selector-option]').length !== 4) fail('all identity-only project options are not rendered');
+    if (document.querySelectorAll('[data-project-selector-option]').length !== 28) fail('all identity-only project options are not rendered');
 
     trigger.focus();
     if (document.activeElement !== trigger) fail('project selector trigger could not receive focus: active=' + (document.activeElement && document.activeElement.outerHTML));
@@ -90,9 +95,11 @@ window.addEventListener('DOMContentLoaded', function() {
     var triggerRect = trigger.getBoundingClientRect();
     var dialogRect = dialog.getBoundingClientRect();
     if (dialogRect.right > window.innerWidth + 1 || dialogRect.left < -1) fail('selector is not contained on the mobile viewport');
-    if (Math.abs(dialogRect.top - (triggerRect.bottom + 4)) > 2) fail('selector popup is not attached below its trigger');
+    var attachedBelow = Math.abs(dialogRect.top - (triggerRect.bottom + 4));
+    var attachedAbove = Math.abs(dialogRect.bottom - (triggerRect.top - 4));
+    if (Math.min(attachedBelow, attachedAbove) > 2) fail('selector popup is not attached to its trigger');
     if (Math.abs(dialogRect.left - triggerRect.left) > 2) fail('selector popup is not aligned underneath its trigger');
-    if (visibleOptions().length !== 4) fail('initial project options are not all visible');
+    if (visibleOptions().length !== 28) fail('initial project options are not all visible');
 
     typeSearch(search, '  pAyMeNtS wEb  ');
     var filtered = visibleOptions();
@@ -105,7 +112,33 @@ window.addEventListener('DOMContentLoaded', function() {
     if (visibleOptions().length !== 1 || visibleOptions()[0].dataset.projectId !== 'default') fail('no-match filtering did not retain only the current project');
     if (noMatch.hidden || noMatch.textContent.indexOf('No projects match') === -1) fail('no-match state is not clear');
     clear.click();
-    if (search.value !== '' || !noMatch.hidden || visibleOptions().length !== 4) fail('clearing search did not restore all projects: value=' + JSON.stringify(search.value) + ', noMatchHidden=' + noMatch.hidden + ', visible=' + visibleOptions().length + ', hidden=' + Array.prototype.slice.call(document.querySelectorAll('[data-project-selector-option]')).map(function(option) { return option.dataset.projectId + ':' + option.hidden; }).join(','));
+    if (search.value !== '' || !noMatch.hidden || visibleOptions().length !== 28) fail('clearing search did not restore all projects: value=' + JSON.stringify(search.value) + ', noMatchHidden=' + noMatch.hidden + ', visible=' + visibleOptions().length + ', hidden=' + Array.prototype.slice.call(document.querySelectorAll('[data-project-selector-option]')).map(function(option) { return option.dataset.projectId + ':' + option.hidden; }).join(','));
+
+    root.style.position = 'fixed';
+    root.style.left = '16px';
+    root.style.top = '0';
+    root.style.width = '224px';
+    var rootRect = root.getBoundingClientRect();
+    var unconstrainedTriggerRect = trigger.getBoundingClientRect();
+    var triggerOffset = unconstrainedTriggerRect.top - rootRect.top;
+    var desiredTriggerTop = window.innerHeight - 80 - unconstrainedTriggerRect.height;
+    root.style.top = Math.max(8, desiredTriggerTop - triggerOffset) + 'px';
+    window.dispatchEvent(new Event('resize'));
+    await wait(0);
+    triggerRect = trigger.getBoundingClientRect();
+    dialogRect = dialog.getBoundingClientRect();
+    var modalBox = dialog.querySelector('.modal-box');
+    var panel = modalBox && modalBox.firstElementChild;
+    var results = document.querySelector('[data-project-selector-results]');
+    if (dialogRect.bottom > triggerRect.top - 2) fail('constrained selector did not open upward above its trigger');
+    if (dialogRect.top < 7 || dialogRect.height > triggerRect.top - 10) fail('upward selector escaped its available viewport height');
+    if (!modalBox || !panel || !results) fail('constrained selector sizing fixture is incomplete');
+    if (modalBox.getBoundingClientRect().height > dialogRect.height + 1 || panel.getBoundingClientRect().height > dialogRect.height + 1) fail('selector wrapper does not inherit the dialog dynamic max height');
+    if (getComputedStyle(modalBox).maxHeight !== getComputedStyle(dialog).maxHeight) fail('selector wrapper computed max height diverges from the dialog dynamic max height');
+    if (getComputedStyle(modalBox).overflowY !== 'hidden' || getComputedStyle(results).overflowY !== 'auto') fail('selector results pane is not the constrained popup scroll owner');
+    if (results.scrollHeight <= results.clientHeight) fail('large constrained project results are not scrollable');
+    results.scrollTop = 48;
+    if (results.scrollTop <= 0) fail('constrained project results pane did not accept scrolling');
 
     key(search, 'ArrowDown');
     if (document.activeElement.dataset.projectId !== 'default') fail('ArrowDown did not focus the first project result');
@@ -173,7 +206,7 @@ window.addEventListener('DOMContentLoaded', function() {
 </script>`
 
 	page := `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">` +
-		`<style>[hidden]{display:none!important} dialog[open]{display:block;position:fixed;box-sizing:border-box;width:448px;max-width:calc(100vw - 16px);max-height:calc(100vh - 16px);margin:0;padding:0} .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0} .flex{display:flex}.w-full{width:100%}.min-w-0{min-width:0}.truncate{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.sidebar-aside{width:256px}.sidebar-inner{padding:16px}.sidebar-project-select{box-sizing:border-box;height:32px}</style>` +
+		`<style>[hidden]{display:none!important} dialog[open]{display:block;position:fixed;box-sizing:border-box;width:448px;max-width:calc(100vw - 16px);max-height:calc(100vh - 16px);margin:0;padding:0;overflow:hidden} .modal-box{box-sizing:border-box;width:91.666667%;max-width:32rem;max-height:calc(100vh - 5em);overflow-y:auto} [class~="max-h-[inherit]"]{max-height:inherit}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}.flex{display:flex}.flex-1{flex:1 1 0%}.flex-col{flex-direction:column}.min-h-0{min-height:0}.w-full{width:100%}.max-w-none{max-width:none}.min-w-0{min-width:0}.overflow-hidden{overflow:hidden}.overflow-y-auto{overflow-y:auto}.truncate{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.sidebar-aside{width:256px}.sidebar-inner{padding:16px}.sidebar-project-select{box-sizing:border-box;height:32px}</style>` +
 		`<script>window._tabVisibility={dispatchSSEEvent:function(){},registerSSE:function(){return {close:function(){}}}};window.htmx={process:function(){},trigger:function(){},ajax:function(){return Promise.resolve();}};window.toggleTheme=function(){};window.openVibelyNavigate=function(){return Promise.resolve();};</script></head><body>` +
 		markup + selectorScripts.String() + runner + `</body></html>`
 
@@ -203,7 +236,7 @@ window.addEventListener('DOMContentLoaded', function() {
 	cmd := exec.Command(chrome,
 		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
 		"--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling",
-		"--no-first-run", "--no-default-browser-check", "--window-size=390,844",
+		"--no-first-run", "--no-default-browser-check", "--window-size=390,360",
 		"--user-data-dir="+profileDir, server.URL+"/analytics?project_id=default",
 	)
 	cmd.Stderr = stderrFile
