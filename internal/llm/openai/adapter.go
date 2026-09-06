@@ -114,7 +114,7 @@ func runtimeOpenAITools(rt *llmcontracts.RuntimeTools) []openaiclient.ToolDefini
 			Type:        "function",
 			Name:        name,
 			Description: strings.TrimSpace(def.Description),
-			Parameters:  rt.ProviderParameters(name),
+			Parameters:  def.Parameters,
 		})
 	}
 	return out
@@ -125,7 +125,6 @@ func composeRuntimeToolExecutor(base func(context.Context, string, json.RawMessa
 		return base
 	}
 	return func(ctx context.Context, name string, input json.RawMessage) (string, bool, error) {
-		input = rt.NormalizeToolInput(name, input)
 		if output, handled, isError, err := rt.Executor(ctx, name, input); handled || err != nil {
 			return output, isError, err
 		}

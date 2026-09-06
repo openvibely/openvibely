@@ -598,7 +598,7 @@ func runtimeTools(ctx context.Context) []openaiclient.ToolDefinition {
 		if name == "" {
 			continue
 		}
-		out = append(out, openaiclient.ToolDefinition{Type: "function", Name: name, Description: strings.TrimSpace(def.Description), Parameters: rt.ProviderParameters(name)})
+		out = append(out, openaiclient.ToolDefinition{Type: "function", Name: name, Description: strings.TrimSpace(def.Description), Parameters: def.Parameters})
 	}
 	return out
 }
@@ -607,7 +607,6 @@ func toolExecutor(ctx context.Context, workDir string) func(context.Context, str
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)
 	return func(execCtx context.Context, name string, input json.RawMessage) (string, bool, error) {
 		if rt != nil && rt.Executor != nil {
-			input = rt.NormalizeToolInput(name, input)
 			if output, handled, isError, err := rt.Executor(execCtx, name, input); handled || err != nil {
 				return output, isError, err
 			}

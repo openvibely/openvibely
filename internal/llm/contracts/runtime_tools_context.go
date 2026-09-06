@@ -3,7 +3,6 @@ package contracts
 import (
 	"context"
 	"encoding/json"
-	"reflect"
 	"strings"
 )
 
@@ -73,103 +72,6 @@ func (rt *RuntimeTools) DefinitionNames() []string {
 		}
 	}
 	return names
-}
-
-func (rt *RuntimeTools) ProviderParameters(name string) json.RawMessage {
-	if rt == nil {
-		return nil
-	}
-	for _, definition := range rt.Definitions {
-		if !strings.EqualFold(strings.TrimSpace(definition.Name), strings.TrimSpace(name)) {
-			continue
-		}
-		var schema map[string]any
-		if json.Unmarshal(definition.Parameters, &schema) != nil {
-			return definition.Parameters
-		}
-		properties, _ := schema["properties"].(map[string]any)
-		changed := false
-		for _, rawProperty := range properties {
-			property, _ := rawProperty.(map[string]any)
-			if _, ok := property["x-openvibely-omit-value"]; ok {
-				delete(property, "x-openvibely-omit-value")
-				changed = true
-			}
-		}
-		if !changed {
-			return definition.Parameters
-		}
-		encoded, err := json.Marshal(schema)
-		if err != nil {
-			return definition.Parameters
-		}
-		return encoded
-	}
-	return nil
-}
-
-// NormalizeToolInput preserves optional-argument presence at provider boundaries.
-// It removes optional nulls and schema-declared non-semantic omission sentinels
-// before dispatch. Every other value remains explicit caller input.
-func (rt *RuntimeTools) NormalizeToolInput(name string, input json.RawMessage) json.RawMessage {
-	if rt == nil || len(input) == 0 {
-		return input
-	}
-	var definition *RuntimeToolDefinition
-	for i := range rt.Definitions {
-		if strings.EqualFold(strings.TrimSpace(rt.Definitions[i].Name), strings.TrimSpace(name)) {
-			definition = &rt.Definitions[i]
-			break
-		}
-	}
-	if definition == nil {
-		return input
-	}
-	var schema struct {
-		Properties map[string]struct {
-			OmitValue json.RawMessage `json:"x-openvibely-omit-value"`
-		} `json:"properties"`
-		Required []string `json:"required"`
-	}
-	var object map[string]json.RawMessage
-	if json.Unmarshal(definition.Parameters, &schema) != nil || json.Unmarshal(input, &object) != nil {
-		return input
-	}
-	required := make(map[string]bool, len(schema.Required))
-	for _, field := range schema.Required {
-		required[strings.ToLower(field)] = true
-	}
-	changed := false
-	for inputKey, value := range object {
-		for property, propertySchema := range schema.Properties {
-			if !strings.EqualFold(property, inputKey) {
-				continue
-			}
-			optionalNull := string(value) == "null" && !required[strings.ToLower(inputKey)]
-			omitSentinel := len(propertySchema.OmitValue) > 0 && jsonEqual(value, propertySchema.OmitValue)
-			if optionalNull || omitSentinel {
-				delete(object, inputKey)
-				changed = true
-			}
-			break
-		}
-	}
-	if !changed {
-		return input
-	}
-	normalized, err := json.Marshal(object)
-	if err != nil {
-		return input
-	}
-	return normalized
-}
-
-func jsonEqual(left, right json.RawMessage) bool {
-	var leftValue, rightValue any
-	if json.Unmarshal(left, &leftValue) != nil || json.Unmarshal(right, &rightValue) != nil {
-		return false
-	}
-	return reflect.DeepEqual(leftValue, rightValue)
 }
 
 type runtimeToolsContextKey struct{}
