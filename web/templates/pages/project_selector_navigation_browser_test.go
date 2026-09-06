@@ -56,7 +56,12 @@ window.addEventListener('DOMContentLoaded', function() {
     target.dispatchEvent(new KeyboardEvent('keydown', {key: value, bubbles: true, cancelable: true}));
   }
   function visibleOptions() {
-    return Array.prototype.slice.call(document.querySelectorAll('[data-project-selector-option]')).filter(function(option) { return !option.hidden; });
+    return Array.prototype.slice.call(document.querySelectorAll('[data-project-selector-option]')).filter(function(option) { return option.getClientRects().length > 0; });
+  }
+  function typeSearch(input, value) {
+    input.focus();
+    input.select();
+    if (!document.execCommand('insertText', false, value)) fail('browser text insertion was not supported');
   }
   function wait(ms) { return new Promise(function(resolve) { setTimeout(resolve, ms); }); }
   (async function() {
@@ -71,6 +76,9 @@ window.addEventListener('DOMContentLoaded', function() {
     document.body.appendChild(main);
     if (!trigger || !dialog || !search || !select || !clear || !noMatch) fail('project selector fixture is incomplete');
     if (trigger.textContent.trim() !== 'Default') fail('current project label is not rendered');
+    ['select', 'select-bordered', 'select-sm', 'w-full', 'sidebar-project-select'].forEach(function(className) {
+      if (!trigger.classList.contains(className)) fail('collapsed selector lost its prior visual class: ' + className);
+    });
     if (document.querySelectorAll('[data-project-selector-option]').length !== 4) fail('all identity-only project options are not rendered');
 
     trigger.focus();
@@ -78,19 +86,21 @@ window.addEventListener('DOMContentLoaded', function() {
     key(trigger, 'Enter');
     if (!dialog.open) fail('Enter did not open the project selector');
     if (document.activeElement !== search) fail('opening the selector did not focus search');
-    if (dialog.getBoundingClientRect().right > window.innerWidth + 1 || dialog.getBoundingClientRect().left < -1) fail('selector is not contained on the mobile viewport');
+    var triggerRect = trigger.getBoundingClientRect();
+    var dialogRect = dialog.getBoundingClientRect();
+    if (dialogRect.right > window.innerWidth + 1 || dialogRect.left < -1) fail('selector is not contained on the mobile viewport');
+    if (Math.abs(dialogRect.top - (triggerRect.bottom + 4)) > 2) fail('selector popup is not attached below its trigger');
+    if (dialogRect.right < triggerRect.left || dialogRect.left > triggerRect.right) fail('selector popup does not overlap its trigger horizontally');
     if (visibleOptions().length !== 4) fail('initial project options are not all visible');
 
-    search.value = '  pAyMeNtS wEb  ';
-    search.dispatchEvent(new Event('input', {bubbles: true}));
+    typeSearch(search, '  pAyMeNtS wEb  ');
     var filtered = visibleOptions();
     if (filtered.length !== 3) fail('trimmed case-insensitive search did not retain the current project and duplicate matches');
     if (!filtered.some(function(option) { return option.dataset.projectId === 'default' && option.getAttribute('aria-selected') === 'true'; })) fail('current project is not identifiable while searching');
     if (filtered.filter(function(option) { return option.dataset.projectName === 'Payments Web'; }).length !== 2) fail('duplicate project names were not independently searchable');
     if (clear.hidden) fail('clear control stayed hidden after searching');
 
-    search.value = '  does-not-exist  ';
-    search.dispatchEvent(new Event('input', {bubbles: true}));
+    typeSearch(search, '  does-not-exist  ');
     if (visibleOptions().length !== 1 || visibleOptions()[0].dataset.projectId !== 'default') fail('no-match filtering did not retain only the current project');
     if (noMatch.hidden || noMatch.textContent.indexOf('No projects match') === -1) fail('no-match state is not clear');
     clear.click();
@@ -162,7 +172,7 @@ window.addEventListener('DOMContentLoaded', function() {
 </script>`
 
 	page := `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">` +
-		`<style>[hidden]{display:none!important} dialog[open]{display:block;position:fixed;box-sizing:border-box;width:448px;max-width:calc(100vw - 16px);max-height:calc(100vh - 16px);margin:0;padding:0} .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0} .flex{display:flex}.w-full{width:100%}.min-w-0{min-width:0}.truncate{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.sidebar-project-dialog{left:8px;top:8px}</style>` +
+		`<style>[hidden]{display:none!important} dialog[open]{display:block;position:fixed;box-sizing:border-box;width:448px;max-width:calc(100vw - 16px);max-height:calc(100vh - 16px);margin:0;padding:0} .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0} .flex{display:flex}.w-full{width:100%}.min-w-0{min-width:0}.truncate{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.sidebar-aside{width:256px}.sidebar-inner{padding:16px}.sidebar-project-select{box-sizing:border-box;height:32px}</style>` +
 		`<script>window._tabVisibility={dispatchSSEEvent:function(){},registerSSE:function(){return {close:function(){}}}};window.htmx={process:function(){},trigger:function(){},ajax:function(){return Promise.resolve();}};window.toggleTheme=function(){};window.openVibelyNavigate=function(){return Promise.resolve();};</script></head><body>` +
 		markup + selectorScripts.String() + runner + `</body></html>`
 
