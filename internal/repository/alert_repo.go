@@ -349,11 +349,8 @@ func buildAlertListQuery(columns, projectID string, filter models.AlertListFilte
 		args = append(args, *filter.Read)
 	}
 	if filter.ImplementationTaskLinked != nil {
-		if *filter.ImplementationTaskLinked {
-			query += ` AND implementation_task_id IS NOT NULL`
-		} else {
-			query += ` AND implementation_task_id IS NULL`
-		}
+		query += ` AND implementation_task_was_linked = ?`
+		args = append(args, *filter.ImplementationTaskLinked)
 	}
 	if strings.TrimSpace(filter.Search) != "" {
 		query += ` AND INSTR(LOWER(
@@ -639,8 +636,8 @@ func (r *AlertRepo) ReleaseClaim(ctx context.Context, projectID, id, claimant st
 
 func (r *AlertRepo) LinkImplementationTask(ctx context.Context, projectID, id, claimant, taskID string) error {
 	return r.withImmediateAlertMutation(ctx, func(conn *sql.Conn) error {
-		result, err := conn.ExecContext(ctx, `UPDATE alerts SET implementation_task_id = ?, processing_state = 'implementation_task_linked',
-			claim_expires_at = NULL, updated_at = CURRENT_TIMESTAMP
+		result, err := conn.ExecContext(ctx, `UPDATE alerts SET implementation_task_id = ?, implementation_task_was_linked = 1,
+			processing_state = 'implementation_task_linked', claim_expires_at = NULL, updated_at = CURRENT_TIMESTAMP
 			WHERE project_id = ? AND id = ? AND processing_state = 'claimed' AND claimant = ?
 			AND EXISTS (SELECT 1 FROM tasks WHERE id = ? AND project_id = ?)`, taskID, projectID, id, claimant, taskID, projectID)
 		if err != nil {
@@ -719,8 +716,8 @@ func (r *AlertRepo) CreateImplementationTask(ctx context.Context, projectID, ale
 				return err
 			}
 		}
-		if _, err := conn.ExecContext(ctx, `UPDATE alerts SET implementation_task_id = ?, processing_state = 'implementation_task_linked',
-			claim_expires_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE project_id = ? AND id = ?`, taskID, projectID, alertID); err != nil {
+		if _, err := conn.ExecContext(ctx, `UPDATE alerts SET implementation_task_id = ?, implementation_task_was_linked = 1,
+				processing_state = 'implementation_task_linked', claim_expires_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE project_id = ? AND id = ?`, taskID, projectID, alertID); err != nil {
 			return err
 		}
 		if r.automationRepo != nil {

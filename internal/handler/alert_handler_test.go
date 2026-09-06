@@ -395,7 +395,7 @@ func TestHandler_ListAlertsSupportsWorkflowFiltersAndRefreshPreservation(t *test
 	unlinkedCompleted := createFilteredAlert(project.ID, "Completed without implementation task", models.AlertDecisionApproved, models.AlertProcessingCompleted, "cleanup target")
 	implementationTask := &models.Task{ProjectID: project.ID, Title: "Implemented notification", Category: models.CategoryBacklog, Priority: 2, Status: models.StatusCompleted, Prompt: "Implemented", ChainConfig: "{}", SwarmConfig: "{}"}
 	require.NoError(t, repository.NewTaskRepo(db, nil).Create(t.Context(), implementationTask))
-	_, err := db.ExecContext(t.Context(), `UPDATE alerts SET implementation_task_id = ? WHERE id = ? AND project_id = ?`, implementationTask.ID, linkedCompleted.ID, project.ID)
+	_, err := db.ExecContext(t.Context(), `UPDATE alerts SET implementation_task_id = ?, implementation_task_was_linked = 1 WHERE id = ? AND project_id = ?`, implementationTask.ID, linkedCompleted.ID, project.ID)
 	require.NoError(t, err)
 	createFilteredAlert(project.ID, "Operational excluded", models.AlertDecisionNotRequired, models.AlertProcessingNotApplicable, "other")
 	foreignAlert := createFilteredAlert(foreign.ID, "Foreign pending match", models.AlertDecisionPending, models.AlertProcessingFailed, "needle")
