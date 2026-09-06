@@ -163,7 +163,10 @@ func TestAutomationClaimsRefreshCapacityQueuedBoardThroughLiveEventsInChrome(t *
 			var outcome string
 			select {
 			case outcome = <-browserResult:
-			case <-time.After(20 * time.Second):
+			// A saturated hosted runner can spend close to 20 seconds starting
+			// Chrome and establishing the shared SSE connection. The in-page
+			// waits retain tighter behavioral deadlines once the browser is ready.
+			case <-time.After(45 * time.Second):
 				outcome = "fail:timed out waiting for browser result"
 			}
 			stopHandlerBrowserProcess(cmd)
