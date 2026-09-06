@@ -114,7 +114,7 @@ func runtimeOpenAITools(rt *llmcontracts.RuntimeTools) []openaiclient.ToolDefini
 			Type:        "function",
 			Name:        name,
 			Description: strings.TrimSpace(def.Description),
-			Parameters:  def.Parameters,
+			Parameters:  rt.ProviderParameters(name),
 		})
 	}
 	return out
