@@ -1397,7 +1397,7 @@ func TestTaskCardMergeMenuDirectActionConflictRetryAndBoardRefreshInChrome(t *te
 	}
 }
 
-func TestTaskCardKebabMenuEscapesCardAndRepositionsAtDropZoneBottomInChrome(t *testing.T) {
+func TestTaskAndAutomationCardKebabMenuRowHeightParityAndDropZoneGeometryInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))
 	if err != nil {
@@ -1405,6 +1405,9 @@ func TestTaskCardKebabMenuEscapesCardAndRepositionsAtDropZoneBottomInChrome(t *t
 	}
 
 	project := models.Project{ID: "project-task-menu-browser", Name: "Task Menu Browser"}
+	automationCards := []models.AutomationCard{{
+		Automation: models.Automation{ID: "automation-menu-height-reference", Name: "Automation Menu Height Reference", LifecycleState: models.AutomationActive},
+	}}
 	base := time.Date(2026, time.January, 1, 12, 0, 0, 0, time.UTC)
 	tasks := make([]models.Task, 0, 7)
 	for i := 0; i < 7; i++ {
@@ -1504,12 +1507,33 @@ func TestTaskCardKebabMenuEscapesCardAndRepositionsAtDropZoneBottomInChrome(t *t
 		    if (!localPanel) fail('Local submenu did not create a portaled interaction panel');
 		    var localRect = localPanel.getBoundingClientRect();
 		    if (localRect.top < zoneRect.top - 1 || localRect.bottom > zoneRect.bottom + 1) fail('Local submenu is clipped by the task scroll boundary: submenu=' + JSON.stringify({top:localRect.top,bottom:localRect.bottom}) + ' zone=' + JSON.stringify({top:zoneRect.top,bottom:zoneRect.bottom}));
-		    var localAction = localPanel.querySelector('[data-task-card-merge-action]:not([disabled])');
-		    if (!localAction) fail('missing enabled Local action for hit test');
-		    var actionRect = localAction.getBoundingClientRect();
-		    var localHit = document.elementFromPoint(actionRect.left + actionRect.width / 2, actionRect.top + actionRect.height / 2);
-			    if (!localHit || !localAction.contains(localHit)) fail('Local submenu action is not hit-testable inside the task scroll boundary; submenu=' + JSON.stringify({left:localRect.left,top:localRect.top,right:localRect.right,bottom:localRect.bottom}) + ' action=' + JSON.stringify({left:actionRect.left,top:actionRect.top,right:actionRect.right,bottom:actionRect.bottom}) + ' columnZ=' + getComputedStyle(card.closest('.kanban-column')).zIndex + ' columnOpen=' + card.closest('.kanban-column').getAttribute('data-kanban-menu-column-open') + ' panelZ=' + getComputedStyle(localPanel).zIndex + ' hit=' + (localHit && localHit.outerHTML));		    await report('pass', '');	  })().catch(function(error) { report('fail', String(error && error.stack || error)); });
-	});
+			    var localAction = localPanel.querySelector('[data-task-card-merge-action]:not([disabled])');
+			    if (!localAction) fail('missing enabled Local action for hit test');
+			    var actionRect = localAction.getBoundingClientRect();
+			    var localHit = document.elementFromPoint(actionRect.left + actionRect.width / 2, actionRect.top + actionRect.height / 2);
+			    if (!localHit || !localAction.contains(localHit)) fail('Local submenu action is not hit-testable inside the task scroll boundary; submenu=' + JSON.stringify({left:localRect.left,top:localRect.top,right:localRect.right,bottom:localRect.bottom}) + ' action=' + JSON.stringify({left:actionRect.left,top:actionRect.top,right:actionRect.right,bottom:actionRect.bottom}) + ' columnZ=' + getComputedStyle(card.closest('.kanban-column')).zIndex + ' columnOpen=' + card.closest('.kanban-column').getAttribute('data-kanban-menu-column-open') + ' panelZ=' + getComputedStyle(localPanel).zIndex + ' hit=' + (localHit && localHit.outerHTML));
+			    var taskEdit = menu.querySelector(':scope > li > a[hx-get]');
+			    var github = menu.querySelector('[data-task-card-github-submenu]');
+			    var githubTrigger = github && github.querySelector(':scope > button');
+			    if (!taskEdit || !githubTrigger) fail('missing task menu rows for automation height parity');
+			    var taskHeights = {edit:taskEdit.getBoundingClientRect().height,local:localTrigger.getBoundingClientRect().height,github:githubTrigger.getBoundingClientRect().height,merge:localAction.getBoundingClientRect().height};
+			    githubTrigger.focus();
+			    await frame();
+			    var githubPanel = Array.from(document.querySelectorAll('[data-task-card-submenu-portaled="true"]')).find(function(panel){return !!panel.querySelector('[data-task-card-pr-action]')});
+			    var prAction = githubPanel && githubPanel.querySelector('[data-task-card-pr-action]');
+			    if (!prAction) fail('missing task PR action for automation height parity');
+			    taskHeights.pr = prAction.getBoundingClientRect().height;
+			    var automationEdit = document.querySelector('[data-automation-card-edit="automation-menu-height-reference"]');
+			    var automationDropdown = automationEdit && automationEdit.closest('.dropdown');
+			    var automationTrigger = automationDropdown && automationDropdown.querySelector(':scope > label');
+			    if (!automationEdit || !automationTrigger) fail('missing rendered automation menu reference action');
+			    automationTrigger.focus();
+			    automationTrigger.click();
+			    await frame();
+			    var automationHeight = automationEdit.getBoundingClientRect().height;
+			    Object.keys(taskHeights).forEach(function(key){if(Math.abs(taskHeights[key]-automationHeight)>1)fail('task '+key+' row height '+taskHeights[key]+' does not match automation row height '+automationHeight)});
+			    await report('pass', '');
+		  })().catch(function(error) { report('fail', String(error && error.stack || error)); });	});
 	</script>`
 
 	browserResult := make(chan string, 2)
@@ -1527,7 +1551,12 @@ func TestTaskCardKebabMenuEscapesCardAndRepositionsAtDropZoneBottomInChrome(t *t
 			if err := Tasks([]models.Project{project}, &project, tasks, nil, nil, "created_asc", "completed_desc", menuStates).Render(context.Background(), &out); err != nil {
 				t.Fatalf("render Tasks page: %v", err)
 			}
+			var automationOut bytes.Buffer
+			if err := AutomationsContent(automationCards, project.ID).Render(context.Background(), &automationOut); err != nil {
+				t.Fatalf("render Automation menu height reference: %v", err)
+			}
 			page := strings.Replace(out.String(), "https://unpkg.com/htmx.org@2.0.4", "/htmx-2.0.4.min.js", 1)
+			page = strings.Replace(page, "</body>", automationOut.String()+"</body>", 1)
 			page = strings.Replace(page, "</head>", fixtureCSS+runner+"</head>", 1)
 			_, _ = w.Write([]byte(page))
 		case "/browser-result":
