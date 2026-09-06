@@ -271,15 +271,45 @@ jobs:
           echo "Task detail and thread page coverage failed once; retrying the unchanged test group."
           go test ./web/templates/pages -run '^(TestTaskDetail|TestTaskThread)' -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-pages-detail.txt
 
-      - name: Run task, worker, and project page tests with coverage
+      - name: Run task, backlog, and capacity page tests with coverage
         env:
           OPENVIBELY_SKIP_BROWSER_PERF: "1"
         run: |
-          if go test ./web/templates/pages -run '^(TestTasks|TestBacklog|TestCapacity|TestWorker|TestSSE|TestProjectSelector|TestTaskRunningIcon|TestTaskCard|TestTaskBoard|TestUpcomingTask)' -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-pages-tasks.txt; then
+          if go test ./web/templates/pages -run '^(TestTasks|TestBacklog|TestCapacity)' -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-pages-task-list.txt; then
             exit 0
           fi
-          echo "Task, worker, and project page coverage failed once; retrying the unchanged test group."
-          go test ./web/templates/pages -run '^(TestTasks|TestBacklog|TestCapacity|TestWorker|TestSSE|TestProjectSelector|TestTaskRunningIcon|TestTaskCard|TestTaskBoard|TestUpcomingTask)' -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-pages-tasks.txt
+          echo "Task, backlog, and capacity page coverage failed once; retrying the unchanged test group."
+          go test ./web/templates/pages -run '^(TestTasks|TestBacklog|TestCapacity)' -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-pages-task-list.txt
+
+      - name: Run worker and project page tests with coverage
+        env:
+          OPENVIBELY_SKIP_BROWSER_PERF: "1"
+        run: |
+          if go test ./web/templates/pages -run '^(TestWorker|TestSSE|TestProjectSelector)' -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-pages-worker-project.txt; then
+            exit 0
+          fi
+          echo "Worker and project page coverage failed once; retrying the unchanged test group."
+          go test ./web/templates/pages -run '^(TestWorker|TestSSE|TestProjectSelector)' -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-pages-worker-project.txt
+
+      - name: Run task card page tests with coverage
+        env:
+          OPENVIBELY_SKIP_BROWSER_PERF: "1"
+        run: |
+          if go test ./web/templates/pages -run '^(TestTaskRunningIcon|TestTaskCard|TestTaskBoard)' -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-pages-task-card.txt; then
+            exit 0
+          fi
+          echo "Task card page coverage failed once; retrying the unchanged test group."
+          go test ./web/templates/pages -run '^(TestTaskRunningIcon|TestTaskCard|TestTaskBoard)' -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-pages-task-card.txt
+
+      - name: Run upcoming task page tests with coverage
+        env:
+          OPENVIBELY_SKIP_BROWSER_PERF: "1"
+        run: |
+          if go test ./web/templates/pages -run '^TestUpcomingTask' -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-pages-upcoming-task.txt; then
+            exit 0
+          fi
+          echo "Upcoming task page coverage failed once; retrying the unchanged test group."
+          go test ./web/templates/pages -run '^TestUpcomingTask' -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-pages-upcoming-task.txt
 
       - name: Run Changes and worktree page tests with coverage
         env:
@@ -310,7 +340,10 @@ jobs:
               "coverage-pages-execution.txt",
               "coverage-pages-schedule.txt",
               "coverage-pages-detail.txt",
-              "coverage-pages-tasks.txt",
+              "coverage-pages-task-list.txt",
+              "coverage-pages-worker-project.txt",
+              "coverage-pages-task-card.txt",
+              "coverage-pages-upcoming-task.txt",
               "coverage-pages-changes.txt",
           ]
           mode = None
