@@ -307,9 +307,12 @@ func TestAlertsContent_DecisionFilterRendersSelectedStateAndSearchState(t *testi
 		`data-card-filter-group="decision_state"`,
 		`name="decision_state"`,
 		`data-card-filter-chip="decision_state"`,
-		`Filters (1)`,
-		`data-card-pagination-preserve-params="read,severity,decision_state,processing_state,type,source,sort,search"`,
-		`type="hidden" name="processing_state" value="failed"`,
+		`data-card-filter-group="processing_state"`,
+		`name="processing_state"`,
+		`data-card-filter-chip="processing_state"`,
+		`Filters (2)`,
+		`data-card-pagination-preserve-params="read,severity,decision_state,processing_state,implementation_task_linked,type,source,sort,search"`,
+		`value="failed" selected`,
 		`data-card-pagination-url="/alerts?decision_state=pending&amp;processing_state=failed&amp;project_id=project-1&amp;search=needle"`,
 		`hx-get="/alerts?decision_state=pending&amp;processing_state=failed&amp;project_id=project-1&amp;search=needle"`,
 		`value="pending" selected`,
@@ -317,14 +320,6 @@ func TestAlertsContent_DecisionFilterRendersSelectedStateAndSearchState(t *testi
 	} {
 		if !strings.Contains(filteredHTML, required) {
 			t.Fatalf("filtered Alerts markup missing %q", required)
-		}
-	}
-	for _, removed := range []string{
-		`aria-label="Filter by processing state"`,
-		`All processing states`,
-	} {
-		if strings.Contains(filteredHTML, removed) {
-			t.Fatalf("Alerts markup should not contain the removed processing selector %q", removed)
 		}
 	}
 	if strings.Contains(filteredHTML, "No alerts. You're all clear!") {
