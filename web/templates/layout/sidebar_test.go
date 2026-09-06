@@ -70,7 +70,6 @@ func TestSidebar_ProjectSelectorSearchableAndIdentityOnly(t *testing.T) {
 		`aria-haspopup="dialog"`,
 		`aria-expanded="false"`,
 		`aria-controls="project-selector-dialog"`,
-		`data-project-selector-caret`,
 		`fixed m-0`,
 		`id="project-selector-dialog"`, `role="dialog"`,
 		`aria-modal="true"`,
@@ -91,7 +90,7 @@ func TestSidebar_ProjectSelectorSearchableAndIdentityOnly(t *testing.T) {
 		`document.addEventListener('input', function(event)`,
 		`if (event.target === search) applyFilter();`,
 		`function positionSelector()`,
-		`var anchorLeft = caret ? caret.getBoundingClientRect().left : triggerRect.left;`,
+		`var anchorLeft = triggerRect.left;`,
 		`dialog.style.top = top + 'px';`,
 		`return String(value || '').trim().toLowerCase();`,
 		`option.hidden = !(isMatch || (query && isCurrent));`,
@@ -110,6 +109,9 @@ func TestSidebar_ProjectSelectorSearchableAndIdentityOnly(t *testing.T) {
 		}
 	}
 
+	if strings.Contains(html, `data-project-selector-caret`) || strings.Contains(html, `bg-none`) {
+		t.Fatal("project selector must use the original select background arrow without a custom caret")
+	}
 	if strings.Contains(html, "private description") || strings.Contains(html, "private-repo-path") || strings.Contains(html, "https://private.example/repo") {
 		t.Fatal("sidebar project selector must render identity fields only")
 	}
