@@ -4387,7 +4387,8 @@ templ ChatAutoScrollScript() {
 				if (!container || !raw) return Promise.resolve(false);
 				var renderRevision = container.getAttribute('data-raw-revision') || raw || '';
 				var renderedRevision = container._renderedRevision || container.getAttribute('data-rendered-revision') || '';
-				if (renderedRevision === renderRevision) return Promise.resolve(true);
+				var hasRenderedContent = !!(container.textContent && container.textContent.trim()) || !!(container.querySelector && container.querySelector('*'));
+				if (renderedRevision === renderRevision && hasRenderedContent) return Promise.resolve(true);
 				if (container._renderingRevision === renderRevision && container._chatElementRenderPromise) return container._chatElementRenderPromise;
 				container._renderingRevision = renderRevision;
 				var promise = window.scheduleChatContentRender(container, raw, yieldBetweenBatches).then(function(rendered) {
