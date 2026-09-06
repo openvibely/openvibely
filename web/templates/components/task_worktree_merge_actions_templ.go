@@ -96,7 +96,7 @@ func TaskCardWorktreeMergeAction(task *models.Task, projectID string, targetBran
 			templ_7745c5c3_Var1 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<li><button type=\"button\" class=\"text-sm min-h-11\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<li><button type=\"button\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -113,7 +113,7 @@ func TaskCardWorktreeMergeAction(task *models.Task, projectID string, targetBran
 		var templ_7745c5c3_Var2 string
 		templ_7745c5c3_Var2, templ_7745c5c3_Err = templ.ResolveAttributeValue(task.ID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_worktree_merge_actions.templ`, Line: 79, Col: 25}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_worktree_merge_actions.templ`, Line: 78, Col: 25}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var2)
 		if templ_7745c5c3_Err != nil {
@@ -126,7 +126,7 @@ func TaskCardWorktreeMergeAction(task *models.Task, projectID string, targetBran
 		var templ_7745c5c3_Var3 string
 		templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.ResolveAttributeValue(projectID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_worktree_merge_actions.templ`, Line: 80, Col: 30}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_worktree_merge_actions.templ`, Line: 79, Col: 30}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var3)
 		if templ_7745c5c3_Err != nil {
@@ -139,7 +139,7 @@ func TaskCardWorktreeMergeAction(task *models.Task, projectID string, targetBran
 		var templ_7745c5c3_Var4 string
 		templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.ResolveAttributeValue(targetBranch)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_worktree_merge_actions.templ`, Line: 81, Col: 36}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_worktree_merge_actions.templ`, Line: 80, Col: 36}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var4)
 		if templ_7745c5c3_Err != nil {
@@ -152,7 +152,7 @@ func TaskCardWorktreeMergeAction(task *models.Task, projectID string, targetBran
 		var templ_7745c5c3_Var5 string
 		templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.ResolveAttributeValue(action.MergeType)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_worktree_merge_actions.templ`, Line: 82, Col: 37}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_worktree_merge_actions.templ`, Line: 81, Col: 37}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var5)
 		if templ_7745c5c3_Err != nil {
@@ -165,7 +165,7 @@ func TaskCardWorktreeMergeAction(task *models.Task, projectID string, targetBran
 		var templ_7745c5c3_Var6 string
 		templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.ResolveAttributeValue(action.Label)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_worktree_merge_actions.templ`, Line: 83, Col: 34}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_worktree_merge_actions.templ`, Line: 82, Col: 34}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var6)
 		if templ_7745c5c3_Err != nil {
@@ -178,7 +178,7 @@ func TaskCardWorktreeMergeAction(task *models.Task, projectID string, targetBran
 		var templ_7745c5c3_Var7 string
 		templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.ResolveAttributeValue(action.Endpoint)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_worktree_merge_actions.templ`, Line: 84, Col: 40}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_worktree_merge_actions.templ`, Line: 83, Col: 40}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var7)
 		if templ_7745c5c3_Err != nil {
@@ -191,7 +191,7 @@ func TaskCardWorktreeMergeAction(task *models.Task, projectID string, targetBran
 		var templ_7745c5c3_Var8 string
 		templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(action.DisplayLabel(targetBranch))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_worktree_merge_actions.templ`, Line: 87, Col: 38}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_worktree_merge_actions.templ`, Line: 86, Col: 38}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
 		if templ_7745c5c3_Err != nil {
@@ -246,7 +246,7 @@ func TaskWorktreeMergeActionItem(task *models.Task, action TaskWorktreeMergeActi
 		var templ_7745c5c3_Var10 string
 		templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.ResolveAttributeValue(action.MergeType)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_worktree_merge_actions.templ`, Line: 103, Col: 37}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_worktree_merge_actions.templ`, Line: 102, Col: 37}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var10)
 		if templ_7745c5c3_Err != nil {
@@ -259,7 +259,7 @@ func TaskWorktreeMergeActionItem(task *models.Task, action TaskWorktreeMergeActi
 		var templ_7745c5c3_Var11 string
 		templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.ResolveAttributeValue(action.Label)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_worktree_merge_actions.templ`, Line: 104, Col: 34}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_worktree_merge_actions.templ`, Line: 103, Col: 34}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var11)
 		if templ_7745c5c3_Err != nil {
@@ -272,7 +272,7 @@ func TaskWorktreeMergeActionItem(task *models.Task, action TaskWorktreeMergeActi
 		var templ_7745c5c3_Var12 string
 		templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.ResolveAttributeValue(action.Endpoint)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_worktree_merge_actions.templ`, Line: 105, Col: 40}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_worktree_merge_actions.templ`, Line: 104, Col: 40}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var12)
 		if templ_7745c5c3_Err != nil {
@@ -285,7 +285,7 @@ func TaskWorktreeMergeActionItem(task *models.Task, action TaskWorktreeMergeActi
 		var templ_7745c5c3_Var13 string
 		templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s/worktree/%s", task.ID, action.Endpoint))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_worktree_merge_actions.templ`, Line: 106, Col: 75}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_worktree_merge_actions.templ`, Line: 105, Col: 75}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var13)
 		if templ_7745c5c3_Err != nil {
@@ -298,7 +298,7 @@ func TaskWorktreeMergeActionItem(task *models.Task, action TaskWorktreeMergeActi
 		var templ_7745c5c3_Var14 string
 		templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.ResolveAttributeValue(hxTarget)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_worktree_merge_actions.templ`, Line: 107, Col: 23}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_worktree_merge_actions.templ`, Line: 106, Col: 23}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var14)
 		if templ_7745c5c3_Err != nil {
@@ -311,7 +311,7 @@ func TaskWorktreeMergeActionItem(task *models.Task, action TaskWorktreeMergeActi
 		var templ_7745c5c3_Var15 string
 		templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.ResolveAttributeValue(hxSwap)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_worktree_merge_actions.templ`, Line: 108, Col: 19}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_worktree_merge_actions.templ`, Line: 107, Col: 19}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var15)
 		if templ_7745c5c3_Err != nil {
@@ -329,7 +329,7 @@ func TaskWorktreeMergeActionItem(task *models.Task, action TaskWorktreeMergeActi
 			var templ_7745c5c3_Var16 string
 			templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.ResolveAttributeValue(hxDisabledElt)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_worktree_merge_actions.templ`, Line: 110, Col: 35}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_worktree_merge_actions.templ`, Line: 109, Col: 35}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var16)
 			if templ_7745c5c3_Err != nil {
@@ -348,7 +348,7 @@ func TaskWorktreeMergeActionItem(task *models.Task, action TaskWorktreeMergeActi
 			var templ_7745c5c3_Var17 string
 			templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.ResolveAttributeValue(taskWorktreeMergeActionValues(action, mergeSource))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_worktree_merge_actions.templ`, Line: 113, Col: 64}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_worktree_merge_actions.templ`, Line: 112, Col: 64}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var17)
 			if templ_7745c5c3_Err != nil {
@@ -366,7 +366,7 @@ func TaskWorktreeMergeActionItem(task *models.Task, action TaskWorktreeMergeActi
 		var templ_7745c5c3_Var18 string
 		templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.ResolveAttributeValue(taskWorktreeMergeIndicatorID(action, surface))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_worktree_merge_actions.templ`, Line: 116, Col: 82}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_worktree_merge_actions.templ`, Line: 115, Col: 82}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var18)
 		if templ_7745c5c3_Err != nil {
@@ -379,7 +379,7 @@ func TaskWorktreeMergeActionItem(task *models.Task, action TaskWorktreeMergeActi
 		var templ_7745c5c3_Var19 string
 		templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.JoinStringErrs(action.DisplayLabel(TaskWorktreeMergeTarget(task)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_worktree_merge_actions.templ`, Line: 119, Col: 55}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_worktree_merge_actions.templ`, Line: 118, Col: 55}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var19))
 		if templ_7745c5c3_Err != nil {

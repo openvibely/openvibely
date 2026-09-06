@@ -45,6 +45,35 @@ func TestSidebar_ThemeToggleInFooter(t *testing.T) {
 	}
 }
 
+func TestSidebar_ProjectSelectorUsesSharedSearchableSelectorImplementation(t *testing.T) {
+	projects := []models.Project{{ID: "default", Name: "Default", IsDefault: true}, {ID: "other", Name: "Other"}}
+	var buf bytes.Buffer
+	if err := Sidebar(projects, "default").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("failed to render Sidebar: %v", err)
+	}
+	html := buf.String()
+
+	for _, required := range []string{
+		`data-searchable-selector`,
+		`data-searchable-selector-trigger`,
+		`data-searchable-selector-dialog`,
+		`data-searchable-selector-search`,
+		`data-searchable-selector-option`,
+		`window.openVibelySearchableSelectorInstalled`,
+		`window.openVibelySearchableSelectorController`,
+		`previousController.abort.abort()`,
+		`var abortController = new AbortController();`,
+		`config.signal = abortController.signal`,
+	} {
+		if !strings.Contains(html, required) {
+			t.Fatalf("project selector missing shared searchable selector contract %q", required)
+		}
+	}
+	if strings.Contains(html, `window.openVibelyProjectSelectorInstalled`) {
+		t.Fatal("project selector must not install a separate searchable selector controller")
+	}
+}
+
 func TestSidebar_ProjectSelectorSearchableAndIdentityOnly(t *testing.T) {
 	projects := []models.Project{
 		{ID: "default", Name: "Default", IsDefault: true, Description: "private description", RepoPath: "private-repo-path", RepoURL: "https://private.example/repo"},
@@ -76,11 +105,13 @@ func TestSidebar_ProjectSelectorSearchableAndIdentityOnly(t *testing.T) {
 		`id="project-selector-search"`,
 		`type="search"`,
 		`placeholder="Search projects"`,
+		`data-searchable-selector-search-shell`,
+		`class="card border border-base-300 bg-base-100 shadow-sm"`,
+		`class="w-full border-0 bg-transparent px-4 py-2 text-sm focus:outline-none focus:ring-0"`,
 		`aria-autocomplete="list"`,
-		`data-project-selector-clear`,
 		`class="menu w-full gap-1 p-0"`,
-		`class="flex min-h-11 min-w-0 items-center gap-2 rounded-btn px-3 py-2 hover:bg-base-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"`,
-		`class="w-4 shrink-0" aria-hidden="true" data-project-selector-current>✓</span>`,
+		`class="flex min-w-0 items-center gap-2 rounded-btn px-4 py-2 hover:bg-base-content/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"`,
+		`class="w-4 shrink-0" aria-hidden="true" data-project-selector-current data-searchable-selector-current>✓</span>`,
 		`role="listbox"`,
 		`data-project-selector-option`,
 		`data-project-id="payments-api"`,
@@ -89,21 +120,24 @@ func TestSidebar_ProjectSelectorSearchableAndIdentityOnly(t *testing.T) {
 		`data-project-selector-current`,
 		`data-project-selector-no-match`,
 		`No projects match your search.`,
-		`document.addEventListener('input', function(event)`,
-		`if (event.target === search) applyFilter();`,
-		`function positionSelector()`,
-		`var anchorLeft = triggerRect.left;`,
+		`oninput="window.openVibelySearchableSelector && window.openVibelySearchableSelector.filter(this.closest('[data-searchable-selector]'))"`,
+		`onsearch="window.openVibelySearchableSelector && window.openVibelySearchableSelector.filter(this.closest('[data-searchable-selector]'))"`,
+		`event.target.matches('[data-searchable-selector-search]')`,
+		`function position(root)`,
+		`var anchorLeft = root.hasAttribute('data-searchable-selector-left-anchor') ? trigger.left`,
 		`dialog.style.top = top + 'px';`,
-		`return String(value || '').trim().toLowerCase();`,
-		`option.hidden = !(isMatch || (query && isCurrent));`,
-		`search.focus();`,
-		`search.select();`,
+		`String(state.search.value || '').trim().toLowerCase()`,
+		`var hidden = !match;`,
+		`if (!hidden) matchCount++;`,
+		`option.hidden = hidden;`,
+		`option.classList.toggle('hidden', hidden);`,
+		`state.search.focus(); state.search.select();`,
 		`event.key === 'ArrowDown'`,
 		`event.key === 'ArrowUp'`,
 		`event.key === 'Escape'`,
-		`window.openVibelyProjectSelectorInstalled`,
+		`window.openVibelySearchableSelectorInstalled`,
 		`window.openVibelyProjectSelectorChangeInstalled`,
-		`sel.dispatchEvent(new Event('change', { bubbles: true }))`, `persistSelectedProject(newProjectId)`,
+		`state.value.dispatchEvent(new Event('change', {bubbles: true}))`, `persistSelectedProject(newProjectId)`,
 		`window.openVibelyNavigate(newUrl)`,
 	} {
 		if !strings.Contains(html, required) {
@@ -111,6 +145,25 @@ func TestSidebar_ProjectSelectorSearchableAndIdentityOnly(t *testing.T) {
 		}
 	}
 
+	markupEnd := strings.Index(html, "<script>")
+	if markupEnd < 0 {
+		t.Fatal("project selector shared controller script is missing")
+	}
+	if strings.Contains(html[:markupEnd], `data-project-selector-clear`) {
+		t.Fatal("project selector must use the same native search clear affordance as the breadcrumb selector")
+	}
+	if strings.Contains(html, `listen(document, 'input'`) || strings.Contains(html, `listen(document, 'search'`) {
+		t.Fatal("local project search must use one direct shared-component event path, not duplicate delegated filtering")
+	}
+	if strings.Contains(html, `min-h-11`) || strings.Contains(html, `hover:bg-base-200`) {
+		t.Fatal("selector options must match Automation card kebab menu row height and highlight treatment")
+	}
+	if strings.Contains(html, `class="relative border-b border-base-300"`) {
+		t.Fatal("selector search border must be inset in a rounded shell rather than touching the popup border")
+	}
+	if strings.Contains(html, `class="modal-box`) {
+		t.Fatal("project selector must use the same direct shared panel structure as the breadcrumb selector")
+	}
 	if strings.Contains(html, `data-project-selector-caret`) || strings.Contains(html, `bg-none`) {
 		t.Fatal("project selector must use the original select background arrow without a custom caret")
 	}
@@ -142,7 +195,8 @@ func TestSidebar_ProjectSelectorEmptyWorkspaceFallback(t *testing.T) {
 		`id="project-selector-trigger"`,
 		`No projects available`,
 		`data-project-selector-no-projects`,
-		`aria-controls="project-selector-dialog" disabled>`,
+		`aria-controls="project-selector-dialog"`,
+		`data-searchable-selector-trigger disabled`,
 	} {
 		if !strings.Contains(html, required) {
 			t.Fatalf("empty project selector missing %q", required)
@@ -190,7 +244,7 @@ func TestSidebar_ProjectSelectorPreservesRouteMappingAndConfirmation(t *testing.
 		`var previousProjectID = sel.value;`,
 		`sel.value = previousProjectID;`,
 		`openModals.forEach(m => m.close());`,
-		`document.addEventListener('htmx:beforeSwap'`,
+		`listen(document, 'htmx:beforeSwap'`,
 		`target.id === 'main-content'`,
 		`document.addEventListener('htmx:afterSwap'`,
 		`document.addEventListener('htmx:historyRestore'`,

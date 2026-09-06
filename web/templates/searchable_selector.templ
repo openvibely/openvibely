@@ -1,0 +1,238 @@
+package templates
+
+templ SearchableSelector(config SearchableSelectorConfig) {
+	<dialog
+		id={ config.ID + "-dialog" }
+		class={ SearchableSelectorDialogClass }
+		role="dialog"
+		aria-modal="true"
+		aria-labelledby={ config.ID + "-heading" }
+		data-searchable-selector-dialog
+		data-project-selector-dialog?={ config.Local }
+		data-breadcrumb-selector-dialog?={ !config.Local }
+	>
+		<div class={ SearchableSelectorPanelClass } data-searchable-selector-panel>
+			<div class={ SearchableSelectorHeaderClass } data-searchable-selector-header>
+				<h2 id={ config.ID + "-heading" } class="min-w-0 truncate text-base font-bold">Switch { config.Kind }</h2>
+				<button
+					class="btn btn-ghost btn-sm btn-square shrink-0"
+					type="button"
+					aria-label={ "Close " + config.Kind + " selector" }
+					title={ "Close " + config.Kind + " selector" }
+					data-searchable-selector-close
+					data-project-selector-close?={ config.Local }
+					data-breadcrumb-selector-close?={ !config.Local }
+				>✕</button>
+			</div>
+			<div class="p-2">
+				<div class={ SearchableSelectorSearchShellClass } data-searchable-selector-search-shell>
+					<div class="relative">
+						<label class="sr-only" for={ config.ID + "-search" }>Search { config.Kind }s</label>
+						if config.Local {
+						<input
+							id={ config.ID + "-search" }
+							class={ SearchableSelectorSearchClass }
+							type="search"
+							name="search"
+							placeholder={ "Search " + config.Kind + "s" }
+							autocomplete="off"
+							aria-controls={ config.ID + "-results" }
+							aria-autocomplete="list"
+							oninput="window.openVibelySearchableSelector && window.openVibelySearchableSelector.filter(this.closest('[data-searchable-selector]'))"
+							onsearch="window.openVibelySearchableSelector && window.openVibelySearchableSelector.filter(this.closest('[data-searchable-selector]'))"
+							data-searchable-selector-search
+							data-project-selector-search
+						/>
+					} else {
+						<input
+							id={ config.ID + "-search" }
+							class={ SearchableSelectorSearchClass }
+							type="search"
+							name="search"
+							placeholder={ "Search " + config.Kind + "s" }
+							autocomplete="off"
+							aria-controls={ config.ID + "-results" }
+							aria-autocomplete="list"
+							hx-get={ config.SearchURL }
+							hx-include="closest [data-breadcrumb-selector]"
+							hx-trigger="input changed delay:200ms, search"
+							hx-target={ "#" + config.ID + "-results" }
+							hx-swap="innerHTML"
+							hx-sync="this:replace"
+							hx-indicator={ "#" + config.ID + "-loading" }
+							data-searchable-selector-search
+							data-breadcrumb-selector-search
+						/>
+					}
+						if !config.Local {
+							<span id={ config.ID + "-loading" } class="loading loading-spinner loading-xs htmx-indicator pointer-events-none absolute right-3 top-1/2 -translate-y-1/2" aria-hidden="true"></span>
+						}
+					</div>
+				</div>
+			</div>
+			<div
+				id={ config.ID + "-results" }
+				class={ SearchableSelectorResultsClass }
+				data-searchable-selector-results
+				data-project-selector-results?={ config.Local }
+				data-breadcrumb-selector-results?={ !config.Local }
+			>
+				{ children... }
+			</div>
+			<span class="sr-only" role="status" aria-live="polite" data-searchable-selector-status data-project-selector-status?={ config.Local } data-breadcrumb-selector-status?={ !config.Local }>{ config.InitialStatus }</span>
+		</div>
+	</dialog>
+	@searchableSelectorScript()
+}
+
+templ searchableSelectorScript() {
+	<script>
+		(function() {
+			var controllerVersion = 6;
+			var previousController = window.openVibelySearchableSelectorController;
+			document.querySelectorAll('[data-project-selector-clear]').forEach(function(control) { control.remove(); });
+			if (previousController && previousController.version === controllerVersion) return;
+			if (previousController && previousController.abort) {
+				previousController.abort.abort();
+			} else if (window.openVibelySearchableSelectorInstalled) {
+				if (!window.openVibelySearchableSelectorReloading) {
+					window.openVibelySearchableSelectorReloading = true;
+					window.location.reload();
+				}
+				return;
+			}
+			var abortController = new AbortController();
+			function listen(target, type, handler, options) {
+				var config = typeof options === 'boolean' ? {capture: options} : Object.assign({}, options || {});
+				config.signal = abortController.signal;
+				target.addEventListener(type, handler, config);
+			}
+			window.openVibelySearchableSelectorInstalled = true;
+			window.openVibelySearchableSelectorVersion = controllerVersion;
+			window.openVibelySearchableSelectorController = {version: controllerVersion, abort: abortController};
+			function rootFor(node) { return node && node.closest ? node.closest('[data-searchable-selector]') : null; }
+			function nodes(root) {
+				return {
+					root: root,
+					button: root && root.querySelector('[data-searchable-selector-trigger]'),
+					dialog: root && root.querySelector('[data-searchable-selector-dialog]'),
+					search: root && root.querySelector('[data-searchable-selector-search]'),
+					value: root && root.querySelector('[data-searchable-selector-value]')
+				};
+			}
+			function options(root) { return root ? Array.prototype.slice.call(root.querySelectorAll('[data-searchable-selector-option]')) : []; }
+			function visibleOptions(root) { return options(root).filter(function(option) { return !option.hidden && !option.classList.contains('hidden'); }); }
+			function position(root) {
+				var state = nodes(root), dialog = state.dialog, button = state.button;
+				if (!dialog || !dialog.open || !button) return;
+				var margin = 8, gap = 4, trigger = button.getBoundingClientRect();
+				var caret = button.querySelector('[data-searchable-selector-caret]');
+				var anchorLeft = root.hasAttribute('data-searchable-selector-left-anchor') ? trigger.left : (caret ? caret.getBoundingClientRect().left : trigger.right);
+				dialog.style.maxHeight = '';
+				var width = dialog.offsetWidth, height = dialog.offsetHeight;
+				var left = Math.max(margin, Math.min(anchorLeft, window.innerWidth - width - margin));
+				var belowTop = trigger.bottom + gap, below = window.innerHeight - belowTop - margin, above = trigger.top - gap - margin;
+				var top = belowTop, available = below;
+				if (below < Math.min(height, 160) && above > below) {
+					available = above;
+					top = Math.max(margin, trigger.top - gap - Math.min(height, available));
+				}
+				dialog.style.left = left + 'px';
+				dialog.style.top = top + 'px';
+				dialog.style.maxHeight = Math.max(0, available) + 'px';
+			}
+			function applyLocalFilter(root) {
+				if (!root || !root.hasAttribute('data-searchable-selector-local')) return;
+				var state = nodes(root); if (!state.search || !state.value) return;
+				var query = String(state.search.value || '').trim().toLowerCase(), matchCount = 0;
+				options(root).forEach(function(option) {
+					var match = !query || String(option.getAttribute('data-searchable-selector-name') || '').trim().toLowerCase().indexOf(query) !== -1;
+					var hidden = !match;
+					if (!hidden) matchCount++;
+					option.hidden = hidden;
+					option.classList.toggle('hidden', hidden);
+					option.setAttribute('aria-hidden', hidden ? 'true' : 'false');
+					option.tabIndex = hidden ? -1 : 0;
+				});
+				var empty = root.querySelector('[data-searchable-selector-no-match]'); if (empty) empty.hidden = !query || matchCount > 0;
+				var status = root.querySelector('[data-searchable-selector-status]');
+				if (status) status.textContent = query && matchCount === 0 ? 'No ' + root.getAttribute('data-searchable-selector-kind') + 's match your search.' : (query ? 'Matching results updated.' : 'All results shown.');
+				position(root);
+			}
+			function syncLocal(root, value) {
+				if (!root) return;
+				var name = '';
+				options(root).forEach(function(option) {
+					var current = option.getAttribute('data-searchable-selector-id') === value;
+					option.setAttribute('aria-selected', current ? 'true' : 'false');
+					var marker = option.querySelector('[data-searchable-selector-current]'); if (marker) marker.textContent = current ? '✓' : '';
+					if (current) name = option.getAttribute('data-searchable-selector-name') || '';
+				});
+				var label = root.querySelector('[data-searchable-selector-current-label]'); if (label && name) label.textContent = name;
+				applyLocalFilter(root);
+			}
+			function close(root, restore) {
+				var state = nodes(root); if (state.dialog && state.dialog.open) state.dialog.close();
+				if (state.button) state.button.setAttribute('aria-expanded', 'false');
+				if (restore && state.button && state.button.isConnected) state.button.focus({preventScroll: true});
+			}
+			function open(root) {
+				var state = nodes(root); if (!state.button || !state.dialog || !state.search || state.button.disabled || state.dialog.open) return;
+				state.dialog.showModal(); state.button.setAttribute('aria-expanded', 'true');
+				if (root.hasAttribute('data-searchable-selector-local')) syncLocal(root, state.value && state.value.value);
+				position(root); state.search.focus(); state.search.select();
+				if (!root.hasAttribute('data-searchable-selector-local') && window.htmx) htmx.trigger(state.search, 'search');
+			}
+			listen(document, 'click', function(event) {
+				var root = rootFor(event.target); if (!root) return;
+				var trigger = event.target.closest && event.target.closest('[data-searchable-selector-trigger]'); if (trigger) { open(root); return; }
+				var option = event.target.closest && event.target.closest('[data-searchable-selector-option]');
+				if (option) {
+					if (root.hasAttribute('data-searchable-selector-local')) {
+						var state = nodes(root), id = option.getAttribute('data-searchable-selector-id'); close(root, true);
+						if (state.value && id && id !== state.value.value) { state.value.value = id; state.value.dispatchEvent(new Event('change', {bubbles: true})); }
+					} else if (option.matches('a[href]')) {
+						event.preventDefault(); close(root, false); window.openVibelyNavigate(option.getAttribute('href'));
+					}
+					return;
+				}
+				var dismiss = event.target.closest && event.target.closest('[data-searchable-selector-close]'); if (dismiss) { close(root, true); return; }
+				if (event.target === nodes(root).dialog) close(root, true);
+			});
+			listen(document, 'keydown', function(event) {
+				var root = rootFor(event.target); if (!root) return; var state = nodes(root);
+				if (event.target === state.button && (event.key === 'Enter' || event.key === ' ' || event.key === 'ArrowDown')) { event.preventDefault(); open(root); return; }
+				if (!state.dialog || !state.dialog.open) return;
+				if (event.key === 'Escape') { event.preventDefault(); close(root, true); return; }
+				var list = visibleOptions(root);
+				if (event.target.matches('[data-searchable-selector-search]') && (event.key === 'ArrowDown' || event.key === 'ArrowUp') && list.length) { event.preventDefault(); list[event.key === 'ArrowDown' ? 0 : list.length - 1].focus(); return; }
+				var index = list.indexOf(event.target);
+				if (index >= 0 && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); event.target.click(); return; }
+				if (index >= 0 && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) { event.preventDefault(); list[(index + (event.key === 'ArrowDown' ? 1 : list.length - 1)) % list.length].focus(); }
+			});
+			listen(document, 'cancel', function(event) { var root = rootFor(event.target); if (!root || event.target !== nodes(root).dialog) return; event.preventDefault(); close(root, true); }, true);
+			listen(document, 'close', function(event) { var root = rootFor(event.target), button = nodes(root).button; if (button) button.setAttribute('aria-expanded', 'false'); }, true);
+			listen(document, 'htmx:responseError', function(event) {
+				var root = rootFor(event.detail && event.detail.elt); if (!root || root.hasAttribute('data-searchable-selector-local')) return;
+				var results = root.querySelector('[data-searchable-selector-results]'), status = root.querySelector('[data-searchable-selector-status]');
+				if (results) results.innerHTML = '<div class="px-3 py-8 text-center"><p class="font-medium">Could not load results</p><p class="mt-1 text-sm opacity-60">Try searching again.</p></div>';
+				if (status) status.textContent = 'Could not load results.';
+			});
+			listen(document, 'htmx:afterSwap', function(event) {
+				var root = rootFor(event.detail && event.detail.target); if (!root) return;
+				var status = root.querySelector('[data-searchable-selector-status]');
+				if (status && !root.hasAttribute('data-searchable-selector-local')) status.textContent = root.querySelector('[data-searchable-selector-empty]') ? 'No results.' : 'Search results updated.';
+				position(root);
+			});
+			listen(document, 'htmx:beforeSwap', function(event) {
+				var target = event.detail && event.detail.target; if (!target || rootFor(target) || target.id !== 'main-content') return;
+				document.querySelectorAll('[data-searchable-selector-dialog][open]').forEach(function(dialog) { close(rootFor(dialog), false); });
+			});
+			listen(document, 'htmx:historyRestore', function() { document.querySelectorAll('[data-searchable-selector-dialog][open]').forEach(function(dialog) { close(rootFor(dialog), false); }); });
+			listen(window, 'resize', function() { document.querySelectorAll('[data-searchable-selector]').forEach(position); });
+			listen(document, 'scroll', function(event) { if (rootFor(event.target) && event.target.closest('[data-searchable-selector-dialog]')) return; document.querySelectorAll('[data-searchable-selector]').forEach(position); }, true);
+			listen(window, 'popstate', function() { document.querySelectorAll('[data-searchable-selector-dialog][open]').forEach(function(dialog) { close(rootFor(dialog), false); }); });
+			window.openVibelySearchableSelector = { sync: syncLocal, filter: applyLocalFilter, position: position, close: close };
+		})();
+	</script>
+}

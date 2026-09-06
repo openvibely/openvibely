@@ -356,7 +356,7 @@ func TestNativeSDLCTemplateUsesAutomationOwnedPromptsMatchingBootstrapContract(t
 	inboxNode := automationDraftNodeByKey(t, candidate, "inbox")
 	inboxPrompt, _ := inboxNode.Config["prompt"].(string)
 	for _, required := range []string{
-		"decision_state=approved", "implementation_task_linked=false", "get_alert", "claim_alert",
+		"processing_state=unclaimed", "get_alert", "claim_alert",
 		"create_alert_implementation_task", "complete_alert_processing", "fail_alert_processing", "release_alert_claim",
 	} {
 		require.Contains(t, inboxPrompt, required)
@@ -370,12 +370,12 @@ func TestNativeSDLCTemplateUsesAutomationOwnedPromptsMatchingBootstrapContract(t
 	require.Contains(t, inboxPrompt, "must not create or look for another implementation task")
 	require.Contains(t, inboxPrompt, "must not run notification intake or call get_alert")
 	require.NotContains(t, inboxPrompt, "implementation approval")
-	require.Contains(t, inboxPrompt, "Call list_alerts without project_id")
+	require.Contains(t, inboxPrompt, "Call list_alerts without project_id, using decision_state=approved, processing_state=unclaimed, implementation_task_linked=false")
 	require.Contains(t, inboxPrompt, "Before calling claim_alert, collect every eligible result from all pages")
 	require.Contains(t, inboxPrompt, "Do not claim, link, or process any notification while paginating")
 	require.Contains(t, inboxPrompt, "Only after the complete paginated snapshot is collected")
-	require.Contains(t, inboxPrompt, "Do not pass the read filter")
-	require.Contains(t, inboxPrompt, "both read and unread approved notifications")
+	require.Contains(t, inboxPrompt, "Do not pass read, type, or source")
+	require.Contains(t, inboxPrompt, "both read states")
 	require.Contains(t, inboxPrompt, "call execute_tasks with that exact implementation task ID")
 	require.Contains(t, inboxPrompt, "Only after execute_tasks succeeds")
 	require.Contains(t, inboxPrompt, "Never reuse a project ID from prior messages, examples, memory, or tool output")

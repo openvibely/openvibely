@@ -28,6 +28,7 @@ func TestBreadcrumbSelectorTaskResultsAreProjectScopedAndPreserveAllowlistedTab(
 	require.Equal(t, http.StatusOK, rec.Code)
 	body := rec.Body.String()
 	require.Contains(t, body, current.Title)
+	require.Contains(t, body, `aria-selected="true"`)
 	require.Contains(t, body, other.Title)
 	require.Contains(t, body, "/tasks/"+other.ID+"?project_id="+owning.ID+"&amp;tab=changes")
 	require.NotContains(t, body, secret.Title)
@@ -115,6 +116,7 @@ func TestBreadcrumbSelectorAutomationResultsAreProjectScopedBoundedAndPreserveVi
 			body := rec.Body.String()
 			require.Equal(t, 20, strings.Count(body, `data-breadcrumb-selector-option`), "Automation results must stay bounded")
 			require.Contains(t, body, `aria-selected="true"`)
+			require.Contains(t, body, "Selector Automation 23")
 			require.Contains(t, body, test.wantURL)
 			if test.forbiddenURL != "" {
 				require.NotContains(t, body, test.forbiddenURL)

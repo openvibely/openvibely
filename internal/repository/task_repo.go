@@ -103,11 +103,11 @@ func (r *TaskRepo) ListBreadcrumbSelector(ctx context.Context, projectID, search
 				AND (? = FALSE OR EXISTS (
 					SELECT 1 FROM schedules WHERE schedules.task_id = tasks.id
 				))
-				AND (? = '' OR INSTR(LOWER(title), ?) > 0 OR id = ?)
+					AND (? = '' OR INSTR(LOWER(title), ?) > 0)
 			ORDER BY CASE WHEN id = ? THEN 0 ELSE 1 END,
 				CASE WHEN LOWER(title) = ? THEN 0 WHEN LOWER(title) LIKE ? || '%' THEN 1 ELSE 2 END,
 				updated_at DESC, id ASC
-			LIMIT ?`, projectID, scheduleOnly, search, search, currentID, currentID, search, search, limit)
+			LIMIT ?`, projectID, scheduleOnly, search, search, currentID, search, search, limit)
 	if err != nil {
 		return nil, fmt.Errorf("listing task breadcrumb selector: %w", err)
 	}

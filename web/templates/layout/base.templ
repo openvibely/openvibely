@@ -58,7 +58,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 		<head>
 			<meta charset="UTF-8"/>
 			<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-			<link rel="icon" type="image/png" href="/favicon.png"/>
+			<link rel="icon" type="image/png" sizes="32x32" href="/favicon.png?v=2"/>
 			<title>{ documentTitle(title) }</title>
 			<!-- Theme init: must run before any CSS to prevent flash -->
 			<script>
@@ -610,6 +610,11 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							overflow-y: auto !important;
 						}
 					}
+					@media (min-width: 768px) {
+						[data-card-pagination-root]:has([data-card-list-toolbar]) [data-search-card]:not([data-search-empty-state]) {
+							padding-left: 2rem;
+						}
+					}
 					/* Collection Filters are class-driven so trigger focus cannot reopen a dismissed popover. */
 					[data-card-list-toolbar] .dropdown:not(.dropdown-open) > [data-card-filters-popover] {
 						visibility: hidden !important;
@@ -628,6 +633,9 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					}
 				/* Kanban dropdowns are explicitly state-driven so dismissal can
 				   return focus to the trigger without focus reopening the menu. */
+				#kanban-board [data-kanban-menu-key] > [data-kanban-menu-content] {
+					transition: none !important;
+				}
 				#kanban-board [data-kanban-menu-key]:not([data-kanban-menu-open="true"]) > [data-kanban-menu-content] {
 					visibility: hidden !important;
 					opacity: 0 !important;
@@ -644,6 +652,11 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					visibility: visible !important;
 					opacity: 1 !important;
 					pointer-events: auto !important;
+				}
+				#kanban-board [data-kanban-menu-key][data-kanban-menu-positioning="true"] > [data-kanban-menu-content] {
+					visibility: hidden !important;
+					opacity: 0 !important;
+					pointer-events: none !important;
 				}
 				#kanban-board [data-task-card-menu-trigger] + [data-kanban-menu-content] {
 					overflow: visible;
@@ -2235,11 +2248,10 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						}
 						return new Promise(function(resolve) {
 							var worker = new Worker(window._codeRangeWorkerURL);
-							var state = { worker: worker, resolve: resolve, fallbackTimer: null, finished: false, finish: null };
+							var state = { worker: worker, resolve: resolve, finished: false, finish: null };
 							function finish(ranges) {
 								if (state.finished) return;
 								state.finished = true;
-								if (state.fallbackTimer) clearTimeout(state.fallbackTimer);
 								worker.terminate();
 								if (owner && owner._codeRangeWorkerState === state) owner._codeRangeWorkerState = null;
 								resolve(ranges);
@@ -2250,7 +2262,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 								finish(event.data && !event.data.error ? event.data.ranges : null);
 							};
 							worker.onerror = function() { finish(null); };
-							state.fallbackTimer = setTimeout(function() { finish(null); }, window._chatCodeRangeWorkerTimeoutMS || 3000);
+							// Slow work remains off the UI thread. The owning render deadline
+							// cancels this worker if it never completes.
 							worker.postMessage(text);
 						});
 					} catch (err) {
@@ -2741,12 +2754,19 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 			// do not invert first-click behavior.
 			let focusedBeforeClick = null;
 			let kanbanMenuWasOpenBeforeClick = false;
+			let pointerFocusedKanbanTrigger = null;
 
 			document.addEventListener('mousedown', function(e) {
-				// Record state before this interaction starts.
+				// Record state before this interaction starts. Pointer focus on a
+				// Kanban trigger must not open it before the matching click toggles it.
 				focusedBeforeClick = document.activeElement;
 				const kanbanDropdown = kanbanDropdownForTarget(e.target);
+				const kanbanTrigger = e.target && e.target.closest ? e.target.closest('[data-kanban-menu-trigger]') : null;
+				pointerFocusedKanbanTrigger = kanbanTrigger && kanbanDropdown && kanbanDropdown.contains(kanbanTrigger) ? kanbanTrigger : null;
 				kanbanMenuWasOpenBeforeClick = !!(kanbanDropdown && kanbanDropdown.getAttribute('data-kanban-menu-open') === 'true');
+			}, true);
+			document.addEventListener('mouseup', function() {
+				setTimeout(function() { pointerFocusedKanbanTrigger = null; }, 0);
 			}, true);
 			function closestDropdownScrollBoundary(element) {
 				let current = element ? element.parentElement : null;
@@ -2873,9 +2893,50 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				}
 			}
 
+			function finishKanbanMenuPosition(dropdown, label) {
+				if (!dropdown || !label) return;
+				dropdown.__openVibelyPositionGeneration = (dropdown.__openVibelyPositionGeneration || 0) + 1;
+				positionDropdownForViewport(label);
+				const pendingFocus = dropdown.__openVibelyPendingMenuFocus;
+				dropdown.__openVibelyPendingMenuFocus = null;
+				dropdown.removeAttribute('data-kanban-menu-positioning');
+				if (pendingFocus && pendingFocus.isConnected && dropdown.contains(pendingFocus)) {
+					pendingFocus.focus({preventScroll: true});
+				}
+			}
+
+			function prepareKanbanMenuPosition(dropdown, label) {
+				if (!dropdown || !label) return;
+				dropdown.__openVibelyPendingMenuFocus = null;
+				const generation = (dropdown.__openVibelyPositionGeneration || 0) + 1;
+				dropdown.__openVibelyPositionGeneration = generation;
+				dropdown.setAttribute('data-kanban-menu-positioning', 'true');
+				positionDropdownForViewport(label);
+				let previousRect = null;
+				let stableFrames = 0;
+				let frameCount = 0;
+				function settlePosition() {
+					if (dropdown.__openVibelyPositionGeneration !== generation || dropdown.getAttribute('data-kanban-menu-open') !== 'true') return;
+					positionDropdownForViewport(label);
+					const content = dropdown.querySelector(':scope > [data-kanban-menu-content]');
+					const rect = content && content.getBoundingClientRect();
+					frameCount++;
+					if (rect && previousRect && Math.abs(rect.left - previousRect.left) <= 0.5 && Math.abs(rect.top - previousRect.top) <= 0.5) stableFrames++;
+					else stableFrames = 0;
+					previousRect = rect ? {left: rect.left, top: rect.top} : null;
+					if (stableFrames >= 1 || frameCount >= 8) {
+						finishKanbanMenuPosition(dropdown, label);
+						return;
+					}
+					requestAnimationFrame(settlePosition);
+				}
+				requestAnimationFrame(settlePosition);
+			}
+
 			function handleDropdownToggle(event) {
 				event.stopPropagation(); // Prevent event from bubbling to parent handlers
 				const label = event.currentTarget;
+				if (pointerFocusedKanbanTrigger === label) pointerFocusedKanbanTrigger = null;
 				const dropdown = label && label.closest ? label.closest('[data-chat-actions-dropdown]') : null;
 				const kanbanDropdown = label && label.closest ? label.closest('[data-kanban-menu-key]') : null;
 				const desktopChatStartupFocus = dropdown && document.documentElement.getAttribute('data-openvibely-runtime') === 'desktop' && dropdown.getAttribute('data-chat-actions-open') !== 'true';
@@ -2893,15 +2954,21 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						return;
 					}
 
-					// Otherwise, open the dropdown explicitly, then place it in the visible viewport/scrollport.
+					// Otherwise, keep the Kanban dropdown hidden while its pre-rendered,
+					// measurable content settles into fixed viewport coordinates, then reveal it.
 					if (kanbanDropdown) {
+						document.querySelectorAll('[data-kanban-menu-key]').forEach(function(candidate) {
+							if (candidate !== kanbanDropdown) setKanbanMenuExpanded(candidate, false);
+						});
+						prepareKanbanMenuPosition(kanbanDropdown, label);
 						openKanbanMenuKey = kanbanDropdown.getAttribute('data-kanban-menu-key') || '';
 						const board = kanbanDropdown.closest('#kanban-board');
 						if (board && openKanbanMenuKey) board.setAttribute('data-open-kanban-menu-key', openKanbanMenuKey);
 						setKanbanMenuExpanded(kanbanDropdown, true);
 						window.dispatchEvent(new CustomEvent('kanban-menu-opened'));
+					} else {
+						requestAnimationFrame(function() { positionDropdownForViewport(label); });
 					}
-					requestAnimationFrame(function() { positionDropdownForViewport(label); });
 				}
 
 				function handleTaskSelect(event) {
@@ -3480,6 +3547,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						if (expanded) dropdown.setAttribute('data-kanban-menu-open', 'true');
 						else {
 							dropdown.removeAttribute('data-kanban-menu-open');
+							dropdown.removeAttribute('data-kanban-menu-positioning');
+							dropdown.__openVibelyPendingMenuFocus = null;
 							closeKanbanSubmenus(dropdown, null);
 						}
 						const column = dropdown.closest('.kanban-column');
@@ -3562,6 +3631,13 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				document.addEventListener('focusin', function(event) {
 					const dropdown = kanbanDropdownForTarget(event.target);
 					if (!dropdown || suppressKanbanMenuFocusOpen) return;
+					const trigger = dropdown.querySelector('[data-kanban-menu-trigger]');
+					if (event.target === trigger && pointerFocusedKanbanTrigger === trigger) return;
+					if (trigger && dropdown.getAttribute('data-kanban-menu-open') !== 'true') {
+						prepareKanbanMenuPosition(dropdown, trigger);
+					} else if (trigger && event.target !== trigger && dropdown.getAttribute('data-kanban-menu-positioning') === 'true') {
+						finishKanbanMenuPosition(dropdown, trigger);
+					}
 					openKanbanMenuKey = dropdown.getAttribute('data-kanban-menu-key');
 					const board = dropdown.closest('#kanban-board');
 					if (board) {
@@ -3587,6 +3663,16 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						}
 					}
 					if (event.key === 'Tab') {
+						const dropdown = kanbanDropdownForTarget(event.target);
+						const trigger = dropdown && dropdown.querySelector('[data-kanban-menu-trigger]');
+						if (dropdown && event.target === trigger && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey && dropdown.getAttribute('data-kanban-menu-open') === 'true' && dropdown.getAttribute('data-kanban-menu-positioning') === 'true') {
+							const content = dropdown.querySelector(':scope > [data-kanban-menu-content]');
+							const firstAction = content && content.querySelector('a[href]:not([aria-disabled="true"]), button:not([disabled]), [tabindex]:not([tabindex="-1"])');
+							if (firstAction) {
+								event.preventDefault();
+								dropdown.__openVibelyPendingMenuFocus = firstAction;
+							}
+						}
 						setTimeout(function() {
 							if (!kanbanDropdownForTarget(document.activeElement)) {
 								closeKanbanMenu(null, false);
@@ -4498,7 +4584,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 									}
 									checkbox.addEventListener('click', function(event) { checkbox._openVibelyShift = !!event.shiftKey; event.stopPropagation(); });
 									checkbox.addEventListener('change', function(event) { event.stopPropagation(); toggle(card, checkbox.checked, !!checkbox._openVibelyShift); checkbox._openVibelyShift = false; });
-									gutter.appendChild(checkbox); card.insertBefore(gutter, card.firstChild); card.classList.add('md:pl-8'); alignSelectionGutter(card, gutter);
+									gutter.appendChild(checkbox); card.insertBefore(gutter, card.firstChild); alignSelectionGutter(card, gutter);
 									if (state.mobile) gutter.classList.remove('hidden');
 								});
 								render();
@@ -4583,6 +4669,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							if (target && target.closest && target.closest('[data-card-filters-button], [data-card-filters-popover]')) return;
 							document.querySelectorAll('[data-card-filters-button]').forEach(function(button) { closeCardFilterDropdown(button.closest('.dropdown')); });
 						});
+						window.setCardFilterDropdownState = setCardFilterDropdown;
 						window.refreshCardListToolbars = function(scope) { (scope || document).querySelectorAll('[data-card-list-toolbar]').forEach(initToolbar); };
 						document.addEventListener('keydown', function(event) {
 							if (event.key !== 'Escape') return;

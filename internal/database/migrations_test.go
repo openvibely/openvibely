@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -1191,8 +1192,8 @@ func TestMigration100_RepairsSkippedChannelTargetsWhenOldLocalDiscordUsed099(t *
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 174 {
-		t.Fatalf("max goose version = %d, want 174", maxVersion)
+	if maxVersion != 175 {
+		t.Fatalf("max goose version = %d, want 175", maxVersion)
 	}
 }
 
@@ -1349,6 +1350,156 @@ func TestMigration173AddsXAuthorizedUserLookupIndex(t *testing.T) {
 		t.Fatalf("roll back X authorized-user lookup index migration: %v", err)
 	}
 	assertIndex(false)
+}
+
+func TestMigration175BackfillsDurableAlertImplementationTaskHistory(t *testing.T) {
+	db := openMigrationTestDB(t, filepath.Join(t.TempDir(), "alert-implementation-history-175.db"))
+	goose.SetBaseFS(migrations.FS)
+	defer goose.SetBaseFS(nil)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 174); err != nil {
+		t.Fatalf("migrate to public alert history baseline 174: %v", err)
+	}
+
+	const (
+		projectID              = "11111111111111111111111111111111"
+		completedWithoutLinkID = "55555555555555555555555555555555"
+		eligibleWithoutLinkID  = "21212121212121212121212121212121"
+		messageOnlyAlertID     = "66666666666666666666666666666666"
+		failedResultAlertID    = "77777777777777777777777777777777"
+		wrongCallerAlertID     = "88888888888888888888888888888888"
+		uncorroboratedAlertID  = "99999999999999999999999999999999"
+		forgedResultAlertID    = "19191919191919191919191919191919"
+		liveTaskAlertID        = "15151515151515151515151515151515"
+		linkedStateAlertID     = "16161616161616161616161616161616"
+		projectionAlertID      = "17171717171717171717171717171717"
+		pendingActivityAlertID = "25252525252525252525252525252525"
+	)
+	if _, err := db.Exec(`
+		INSERT INTO projects(id, name, description, repo_path) VALUES
+			('11111111111111111111111111111111', 'Reported project', '', ''),
+			('22222222222222222222222222222222', 'Other project', '', '');
+		INSERT INTO tasks(id, project_id, title, category, status) VALUES
+			('33333333333333333333333333333333', '11111111111111111111111111111111', 'Approved inbox', 'scheduled', 'pending'),
+			('44444444444444444444444444444444', '11111111111111111111111111111111', 'Other inbox', 'scheduled', 'pending'),
+			('18181818181818181818181818181818', '11111111111111111111111111111111', 'Live implementation', 'completed', 'completed');
+		INSERT INTO alerts(id, project_id, title, decision_state, processing_state, claimant, processing_error) VALUES
+			('55555555555555555555555555555555', '11111111111111111111111111111111', 'Completed without durable link evidence', 'approved', 'completed', '33333333333333333333333333333333', 'Created and linked implementation task.'),
+			('21212121212121212121212121212121', '11111111111111111111111111111111', 'Eligible topology without link event', 'approved', 'completed', '33333333333333333333333333333333', ''),
+			('66666666666666666666666666666666', '11111111111111111111111111111111', 'Message only', 'approved', 'completed', '33333333333333333333333333333333', 'Created and linked implementation task aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.'),
+			('77777777777777777777777777777777', '11111111111111111111111111111111', 'Failed tool result', 'approved', 'completed', '33333333333333333333333333333333', 'Failed to create linked implementation task.'),
+			('88888888888888888888888888888888', '11111111111111111111111111111111', 'Wrong claimant topology', 'approved', 'completed', '44444444444444444444444444444444', ''),
+			('99999999999999999999999999999999', '11111111111111111111111111111111', 'Uncorroborated task result', 'approved', 'completed', '33333333333333333333333333333333', ''),
+			('19191919191919191919191919191919', '11111111111111111111111111111111', 'Forged result marker', 'approved', 'completed', '33333333333333333333333333333333', ''),
+			('16161616161616161616161616161616', '11111111111111111111111111111111', 'Historical linked state', 'approved', 'implementation_task_linked', '33333333333333333333333333333333', ''),
+			('17171717171717171717171717171717', '11111111111111111111111111111111', 'Automation projection', 'approved', 'completed', '33333333333333333333333333333333', ''),
+			('25252525252525252525252525252525', '11111111111111111111111111111111', 'Pending task creation activity', 'approved', 'completed', '33333333333333333333333333333333', '');
+		INSERT INTO alerts(id, project_id, title, decision_state, processing_state, claimant, implementation_task_id) VALUES
+			('15151515151515151515151515151515', '11111111111111111111111111111111', 'Live implementation task', 'approved', 'failed', '33333333333333333333333333333333', '18181818181818181818181818181818');
+		INSERT INTO executions(id, task_id, task_project_id, status, output) VALUES
+			('dddddddddddddddddddddddddddddddd', '33333333333333333333333333333333', '11111111111111111111111111111111', 'completed',
+			 '[Using tool: create_alert_implementation_task]' || char(10) || '[Using tool: create_alert_implementation_task]' || char(10) || '[Tool create_alert_implementation_task done]' || char(10) || '{"alert_id":"55555555555555555555555555555555","implementation_task_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","task":{"id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","project_id":"11111111111111111111111111111111"}}' || char(10) || '[/Tool]' || char(10) || '[Tool create_alert_implementation_task done]' || char(10) || '{"alert_id":"21212121212121212121212121212121","implementation_task_id":"23232323232323232323232323232323","task":{"id":"23232323232323232323232323232323","project_id":"11111111111111111111111111111111"}}' || char(10) || '[/Tool]' || char(10)),
+			('eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', '33333333333333333333333333333333', '11111111111111111111111111111111', 'completed',
+			 '[Using tool: create_alert_implementation_task]' || char(10) || '[Tool create_alert_implementation_task error]' || char(10) || '{"alert_id":"77777777777777777777777777777777","implementation_task_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}' || char(10) || '[/Tool]' || char(10)),
+			('ffffffffffffffffffffffffffffffff', '44444444444444444444444444444444', '11111111111111111111111111111111', 'completed',
+			 '[Using tool: create_alert_implementation_task]' || char(10) || '[Tool create_alert_implementation_task done]' || char(10) || '{"alert_id":"88888888888888888888888888888888","implementation_task_id":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","task":{"id":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","project_id":"11111111111111111111111111111111"}}' || char(10) || '[/Tool]' || char(10)),
+			('12121212121212121212121212121212', '33333333333333333333333333333333', '11111111111111111111111111111111', 'completed',
+			 '[Using tool: create_alert_implementation_task]' || char(10) || '[Tool create_alert_implementation_task done]' || char(10) || '{"alert_id":"99999999999999999999999999999999","implementation_task_id":"cccccccccccccccccccccccccccccccc","task":{"id":"cccccccccccccccccccccccccccccccc","project_id":"11111111111111111111111111111111"}}' || char(10) || '[/Tool]' || char(10)),
+			('20202020202020202020202020202020', '33333333333333333333333333333333', '11111111111111111111111111111111', 'completed',
+				 '[Using tool: create_alert_implementation_task]' || char(10) || '[Tool create_alert_implementation_task done]' || char(10) || '{"alert_id":"19191919191919191919191919191919","implementation_task_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","task":{"id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","project_id":"11111111111111111111111111111111"}}' || char(10) || '[/Tool]' || char(10));
+		INSERT INTO llm_usage_events(id, provider, project_id, chat_thread_id) VALUES
+			('13131313131313131313131313131313', 'test', '11111111111111111111111111111111', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'),
+			('24242424242424242424242424242424', 'test', '11111111111111111111111111111111', '23232323232323232323232323232323'),
+			('14141414141414141414141414141414', 'test', '22222222222222222222222222222222', 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
+		INSERT INTO automations (id, project_id, stable_key, name, automation_type, lifecycle_state)
+			VALUES ('migration-175-automation', '11111111111111111111111111111111', 'migration-175', 'Migration history', 'custom', 'active');
+		INSERT INTO automation_versions (id, project_id, automation_id, version, state, source, adapter_key)
+			VALUES ('migration-175-version', '11111111111111111111111111111111', 'migration-175-automation', 1, 'published', 'manual', 'custom');
+		UPDATE automations SET published_version_id = 'migration-175-version' WHERE id = 'migration-175-automation';
+		INSERT INTO automation_nodes (id, project_id, automation_id, version_id, node_key, name, node_type, role) VALUES
+			('migration-175-inbox-node', '11111111111111111111111111111111', 'migration-175-automation', 'migration-175-version', 'inbox', 'Approved inbox', 'agent_task', 'native_inbox'),
+			('migration-175-node', '11111111111111111111111111111111', 'migration-175-automation', 'migration-175-version', 'implementation', 'Implementation', 'agent_task', 'implementation');
+		INSERT INTO automation_edges (id, project_id, automation_id, version_id, source_node_id, target_node_id, edge_key)
+			VALUES ('migration-175-edge', '11111111111111111111111111111111', 'migration-175-automation', 'migration-175-version', 'migration-175-inbox-node', 'migration-175-node', 'inbox-to-implementation');
+		INSERT INTO automation_definition_resources (id, project_id, automation_id, version_id, node_id, resource_type, resource_id)
+			VALUES ('migration-175-inbox-resource', '11111111111111111111111111111111', 'migration-175-automation', 'migration-175-version', 'migration-175-inbox-node', 'task', '33333333333333333333333333333333');
+		INSERT INTO automation_artifact_mailbox_owners (project_id, automation_id, artifact_type, artifact_id, producer_node_key, action_node_key, gate_node_key, mailbox_node_key) VALUES
+			('11111111111111111111111111111111', 'migration-175-automation', 'alert', '55555555555555555555555555555555', 'producer', 'action', 'gate', 'inbox'),
+			('11111111111111111111111111111111', 'migration-175-automation', 'alert', '21212121212121212121212121212121', 'producer', 'action', 'gate', 'inbox'),
+			('11111111111111111111111111111111', 'migration-175-automation', 'alert', '88888888888888888888888888888888', 'producer', 'action', 'gate', 'inbox');
+		INSERT INTO automation_work_items (id, project_id, automation_id, origin_version_id, work_item_key)
+			VALUES ('migration-175-work', '11111111111111111111111111111111', 'migration-175-automation', 'migration-175-version', 'migration-175-work');
+		INSERT INTO automation_activities (id, project_id, automation_id, version_id, node_id, work_item_id, activity_key, activity_type, status) VALUES
+			('migration-175-activity', '11111111111111111111111111111111', 'migration-175-automation', 'migration-175-version', 'migration-175-node', 'migration-175-work', 'migration-175-activity', 'create_implementation_task', 'completed'),
+			('migration-175-pending-activity', '11111111111111111111111111111111', 'migration-175-automation', 'migration-175-version', 'migration-175-node', 'migration-175-work', 'migration-175-pending-activity', 'create_implementation_task', 'running');
+		INSERT INTO automation_activity_resources (activity_id, resource_type, resource_id) VALUES
+			('migration-175-activity', 'alert', '17171717171717171717171717171717'),
+			('migration-175-activity', 'task', 'deleted-migration-175-task'),
+			('migration-175-pending-activity', 'alert', '25252525252525252525252525252525'),
+			('migration-175-pending-activity', 'task', 'pending-migration-175-task');
+	`); err != nil {
+		t.Fatalf("seed schema-174 alert task history: %v", err)
+	}
+
+	readHistory := func() map[string]int {
+		t.Helper()
+		rows, err := db.Query(`SELECT id, implementation_task_was_linked FROM alerts WHERE project_id = ? ORDER BY id`, projectID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		got := map[string]int{}
+		for rows.Next() {
+			var id string
+			var linked int
+			if err := rows.Scan(&id, &linked); err != nil {
+				t.Fatal(err)
+			}
+			got[id] = linked
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	want := map[string]int{
+		completedWithoutLinkID: 0,
+		eligibleWithoutLinkID:  0,
+		messageOnlyAlertID:     0,
+		failedResultAlertID:    0,
+		wrongCallerAlertID:     0,
+		uncorroboratedAlertID:  0,
+		forgedResultAlertID:    0,
+		liveTaskAlertID:        1,
+		linkedStateAlertID:     1,
+		projectionAlertID:      1,
+		pendingActivityAlertID: 0,
+	}
+
+	if err := goose.UpTo(db, ".", 175); err != nil {
+		t.Fatalf("upgrade schema-174 alert history through migration 175: %v", err)
+	}
+	if got := readHistory(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("restored implementation task history = %#v, want %#v", got, want)
+	}
+	if err := goose.DownTo(db, ".", 174); err != nil {
+		t.Fatalf("roll back alert implementation task history: %v", err)
+	}
+	var historyColumnCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('alerts') WHERE name = 'implementation_task_was_linked'`).Scan(&historyColumnCount); err != nil {
+		t.Fatal(err)
+	}
+	if historyColumnCount != 0 {
+		t.Fatalf("implementation task history columns after rollback = %d, want 0", historyColumnCount)
+	}
+	if err := goose.UpTo(db, ".", 175); err != nil {
+		t.Fatalf("reapply alert implementation task history: %v", err)
+	}
+	if got := readHistory(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("reapplied implementation task history = %#v, want %#v", got, want)
+	}
 }
 
 func TestMigration174UsesOrderedTaskDiscoveryAccessPath(t *testing.T) {
@@ -1597,8 +1748,8 @@ func TestMigration107_AllowsLocalDatabaseWithOldSwarmVersion106(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 174 {
-		t.Fatalf("max goose version = %d, want 174", maxVersion)
+	if maxVersion != 175 {
+		t.Fatalf("max goose version = %d, want 175", maxVersion)
 	}
 }
 
@@ -2046,8 +2197,8 @@ func TestMigration082_SkipsWhenLocalDevDBAlreadyApplied082(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 174 {
-		t.Fatalf("max goose version = %d, want 174", maxVersion)
+	if maxVersion != 175 {
+		t.Fatalf("max goose version = %d, want 175", maxVersion)
 	}
 }
 
@@ -2382,8 +2533,8 @@ func TestMigration091_LocalDevAlreadyAppliedUsageChainStillMigrates(t *testing.T
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 174 {
-		t.Fatalf("max goose version = %d, want 174", maxVersion)
+	if maxVersion != 175 {
+		t.Fatalf("max goose version = %d, want 175", maxVersion)
 	}
 }
 

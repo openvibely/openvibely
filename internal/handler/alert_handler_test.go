@@ -366,7 +366,7 @@ func TestHandler_ListAlerts(t *testing.T) {
 }
 
 func TestHandler_ListAlertsSupportsWorkflowFiltersAndRefreshPreservation(t *testing.T) {
-	h, e, _ := setupTestHandler(t)
+	h, e, _, db := setupTestHandlerWithDB(t)
 	project := createProject(t, h, "Alert filter project")
 	foreign := createProject(t, h, "Foreign alert filter project")
 
@@ -391,8 +391,39 @@ func TestHandler_ListAlertsSupportsWorkflowFiltersAndRefreshPreservation(t *test
 	pendingFailedFirst := createFilteredAlert(project.ID, "Pending failed first", models.AlertDecisionPending, models.AlertProcessingFailed, "needle")
 	pendingFailedSecond := createFilteredAlert(project.ID, "Pending failed second", models.AlertDecisionPending, models.AlertProcessingFailed, "needle")
 	approvedFailed := createFilteredAlert(project.ID, "Approved failed excluded", models.AlertDecisionApproved, models.AlertProcessingFailed, "needle")
+	linkedCompleted := createFilteredAlert(project.ID, "Completed with implementation task", models.AlertDecisionApproved, models.AlertProcessingCompleted, "cleanup target")
+	unlinkedCompleted := createFilteredAlert(project.ID, "Completed without implementation task", models.AlertDecisionApproved, models.AlertProcessingCompleted, "cleanup target")
+	implementationTask := &models.Task{ProjectID: project.ID, Title: "Implemented notification", Category: models.CategoryBacklog, Priority: 2, Status: models.StatusCompleted, Prompt: "Implemented", ChainConfig: "{}", SwarmConfig: "{}"}
+	require.NoError(t, repository.NewTaskRepo(db, nil).Create(t.Context(), implementationTask))
+	_, err := db.ExecContext(t.Context(), `UPDATE alerts SET implementation_task_id = ?, implementation_task_was_linked = 1 WHERE id = ? AND project_id = ?`, implementationTask.ID, linkedCompleted.ID, project.ID)
+	require.NoError(t, err)
 	createFilteredAlert(project.ID, "Operational excluded", models.AlertDecisionNotRequired, models.AlertProcessingNotApplicable, "other")
 	foreignAlert := createFilteredAlert(foreign.ID, "Foreign pending match", models.AlertDecisionPending, models.AlertProcessingFailed, "needle")
+
+	t.Run("completed notifications can be filtered by implementation task linkage", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/alerts?project_id="+project.ID+"&processing_state=completed&implementation_task_linked=true", nil)
+		rec := httptest.NewRecorder()
+		require.NoError(t, h.ListAlerts(e.NewContext(req, rec)))
+		require.Equal(t, http.StatusOK, rec.Code)
+		body := rec.Body.String()
+		require.Contains(t, body, linkedCompleted.Title)
+		require.NotContains(t, body, unlinkedCompleted.Title)
+		for _, want := range []string{
+			`data-card-filter-group="processing_state"`,
+			`name="processing_state"`,
+			`value="completed" selected`,
+			`data-card-filter-chip="processing_state"`,
+			`data-card-filter-group="implementation_task_linked"`,
+			`name="implementation_task_linked"`,
+			`value="true" selected`,
+			`data-card-filter-chip="implementation_task_linked"`,
+			`data-card-pagination-preserve-params="read,severity,decision_state,processing_state,implementation_task_linked,type,source,sort,search"`,
+			`/alerts?implementation_task_linked=true&amp;processing_state=completed&amp;project_id=` + project.ID,
+			`data-delete-url="/alerts/` + linkedCompleted.ID + `?implementation_task_linked=true&amp;processing_state=completed&amp;project_id=` + project.ID + `"`,
+		} {
+			require.Contains(t, body, want)
+		}
+	})
 
 	t.Run("combined filters and search are project scoped", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/alerts?project_id="+project.ID+"&decision_state=pending&processing_state=failed&search=needle", nil)
@@ -400,11 +431,8 @@ func TestHandler_ListAlertsSupportsWorkflowFiltersAndRefreshPreservation(t *test
 		require.NoError(t, h.ListAlerts(e.NewContext(req, rec)))
 		require.Equal(t, http.StatusOK, rec.Code)
 		body := rec.Body.String()
-		for _, want := range []string{pendingFailedFirst.Title, pendingFailedSecond.Title, `data-card-pagination-preserve-params="read,severity,decision_state,processing_state,type,source,sort,search"`, `value="pending" selected`, `value="needle"`, `data-card-search-initial="needle"`, `type="hidden" name="processing_state" value="failed"`, "5 unread"} {
+		for _, want := range []string{pendingFailedFirst.Title, pendingFailedSecond.Title, `data-card-pagination-preserve-params="read,severity,decision_state,processing_state,implementation_task_linked,type,source,sort,search"`, `value="pending" selected`, `value="failed" selected`, `value="needle"`, `data-card-search-initial="needle"`, `data-card-filter-group="processing_state"`, "7 unread"} {
 			require.Contains(t, body, want)
-		}
-		for _, removed := range []string{`aria-label="Filter by processing state"`, `All processing states`} {
-			require.NotContains(t, body, removed)
 		}
 		for _, excluded := range []string{pendingUnclaimed.Title, approvedFailed.Title, foreignAlert.Title, "Operational excluded"} {
 			require.NotContains(t, body, excluded)
@@ -445,8 +473,8 @@ func TestHandler_ListAlertsSupportsWorkflowFiltersAndRefreshPreservation(t *test
 		require.Contains(t, body, `value="pending" selected`)
 		require.Contains(t, body, `value="needle"`)
 		require.Contains(t, body, `data-card-search-initial="needle"`)
-		require.Contains(t, body, `type="hidden" name="processing_state" value="unclaimed"`)
-		require.NotContains(t, body, `aria-label="Filter by processing state"`)
+		require.Contains(t, body, `value="unclaimed" selected`)
+		require.Contains(t, body, `data-card-filter-group="processing_state"`)
 		require.Contains(t, body, "/alerts?decision_state=pending&amp;processing_state=unclaimed&amp;project_id="+project.ID+"&amp;search=needle")
 	})
 
@@ -463,7 +491,7 @@ func TestHandler_ListAlertsSupportsWorkflowFiltersAndRefreshPreservation(t *test
 	})
 
 	t.Run("invalid values fall back to unfiltered project list", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/alerts?project_id="+project.ID+"&decision_state=unknown&processing_state=unknown", nil)
+		req := httptest.NewRequest(http.MethodGet, "/alerts?project_id="+project.ID+"&decision_state=unknown&processing_state=unknown&implementation_task_linked=unknown", nil)
 		rec := httptest.NewRecorder()
 		require.NoError(t, h.ListAlerts(e.NewContext(req, rec)))
 		body := rec.Body.String()
@@ -475,6 +503,7 @@ func TestHandler_ListAlertsSupportsWorkflowFiltersAndRefreshPreservation(t *test
 		require.Contains(t, body, `<option value="">All</option>`)
 		require.NotContains(t, body, `data-card-filter-chip="decision_state"`)
 		require.NotContains(t, body, `data-card-filter-chip="processing_state"`)
+		require.NotContains(t, body, `data-card-filter-chip="implementation_task_linked"`)
 	})
 }
 

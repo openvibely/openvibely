@@ -35,9 +35,79 @@ func TestCollectionSelectionBrowserContractIsShared(t *testing.T) {
 		`data-card-select-mode`, `data-card-mobile-actions`, `data-card-bulk-confirm`, `if (selectLoaded.checked) state.ids[id] = true`, `selectLoaded.indeterminate`, `selectLoaded.checked`, `data-card-filters-popover`, `setCardFilterDropdown(dropdown, false)`,
 		`data-card-query-secondary`, `data-card-selection-actions`, `data-card-mark-read-selected`,
 		`[data-card-list-toolbar] .dropdown:not(.dropdown-open) > [data-card-filters-popover]`,
-		`absolute left-5 top-8 z-20 hidden md:block`, `card.classList.add('md:pl-8')`, `alignSelectionGutter(card, gutter)`, `_openVibelyInstallSelectionCards`, `if (!existing[id]) delete state.ids[id]`, `focus({preventScroll: true})`,
+		`absolute left-5 top-8 z-20 hidden md:block`, `[data-card-pagination-root]:has([data-card-list-toolbar]) [data-search-card]:not([data-search-empty-state])`, `padding-left: 2rem`, `alignSelectionGutter(card, gutter)`, `_openVibelyInstallSelectionCards`, `if (!existing[id]) delete state.ids[id]`, `focus({preventScroll: true})`,
 		`window.refreshCardListToolbars(nextContainer)`} {
 		require.Contains(t, body, want)
+	}
+	require.NotContains(t, body, `card.classList.add('md:pl-8')`)
+}
+
+func TestCollectionSelectionGutterDoesNotShiftCardContent(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping browser regression in short mode")
+	}
+	chrome := findChromeForBrowserTest(t)
+	if chrome == "" {
+		t.Skip("Chrome/Chromium executable not found")
+	}
+
+	cards := []models.LLMConfig{{ID: "stable", Name: "Stable", Provider: models.ProviderTest, Model: "stable"}}
+	var content bytes.Buffer
+	require.NoError(t, pages.ModelsContentPageWithPaginationAndState(cards, cards, map[string]int{}, false, false, pages.CardListState{}).Render(t.Context(), &content))
+	var base bytes.Buffer
+	require.NoError(t, layout.Base("Stable selection gutter", nil, "").Render(t.Context(), &base))
+	var local []string
+	for _, line := range strings.Split(base.String(), "\n") {
+		if strings.Contains(line, "<script src=") || strings.Contains(line, "<link href=") || strings.Contains(line, `<link rel="stylesheet" href=`) {
+			continue
+		}
+		local = append(local, line)
+	}
+	page := strings.Replace(strings.Join(local, "\n"), "</head>", `<style>.card{position:relative}.card-body{padding:2rem}@media (min-width:768px){.md\:pl-8{padding-left:2rem!important}}</style></head>`, 1)
+	page = strings.Replace(page, "</main>", content.String()+"</main>", 1)
+	page = strings.Replace(page, "</body>", `<script>
+	(function() {
+		var title=document.querySelector('[data-model-id="stable"] h3');
+		var initialLeft=title.getBoundingClientRect().left;
+		requestAnimationFrame(function(){ requestAnimationFrame(function(){
+			var finalLeft=title.getBoundingClientRect().left;
+			var status=Math.abs(finalLeft-initialLeft)<0.5?'pass':'fail';
+			fetch('/browser-result',{method:'POST',headers:{'X-Browser-Status':status},body:'initial='+initialLeft+' final='+finalLeft,keepalive:true});
+		}); });
+	})();
+	</script></body>`, 1)
+
+	result := make(chan string, 1)
+	fixture := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/browser-result" {
+			body, _ := io.ReadAll(io.LimitReader(r.Body, 1024))
+			select {
+			case result <- r.Header.Get("X-Browser-Status") + ": " + string(body):
+			default:
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(page))
+	}))
+	defer fixture.Close()
+
+	cmd := exec.Command(chrome, "--headless=new", "--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage", "--disable-background-networking", "--disable-extensions", "--no-first-run", "--user-data-dir="+filepath.Join(t.TempDir(), "chrome-profile"), "--window-size=1024,768", fixture.URL)
+	require.NoError(t, startHandlerBrowserProcess(cmd))
+	stopped := false
+	defer func() {
+		if !stopped {
+			stopHandlerBrowserProcess(cmd)
+		}
+	}()
+	select {
+	case got := <-result:
+		stopHandlerBrowserProcess(cmd)
+		stopped = true
+		require.Equal(t, "pass", strings.SplitN(got, ":", 2)[0], got)
+	case <-time.After(30 * time.Second):
+		t.Fatal("selection gutter browser regression timed out")
 	}
 }
 
@@ -274,24 +344,23 @@ func TestCollectionSelectionProductionBrowserInteractions(t *testing.T) {
 	defer fixture.Close()
 	page = strings.Replace(page, "for (var i=0;i<80 && !window.bulkFinished;i++) await wait(25);", "for (var i=0;i<80 && !window.bulkFinished;i++){ window.bulkFinished=(await fetch('/bulk-finished').then(function(r){return r.text();}))==='true'; if(!window.bulkFinished) await wait(25); }", 1)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, chrome, "--headless=new", "--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage", "--disable-background-networking", "--disable-extensions", "--no-first-run", "--user-data-dir="+filepath.Join(t.TempDir(), "chrome-profile"), "--window-size=390,844", fixture.URL+"?provider=openai")
+	cmd := exec.Command(chrome, "--headless=new", "--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage", "--disable-background-networking", "--disable-extensions", "--no-first-run", "--user-data-dir="+filepath.Join(t.TempDir(), "chrome-profile"), "--window-size=390,844", fixture.URL+"?provider=openai")
 	var chromeOutput bytes.Buffer
 	cmd.Stdout = &chromeOutput
 	cmd.Stderr = &chromeOutput
-	require.NoError(t, cmd.Start())
-	chromeDone := make(chan error, 1)
-	go func() { chromeDone <- cmd.Wait() }()
+	require.NoError(t, startHandlerBrowserProcess(cmd))
+	stopped := false
+	defer func() {
+		if !stopped {
+			stopHandlerBrowserProcess(cmd)
+		}
+	}()
 	var browser browserResult
 	select {
 	case browser = <-browserResults:
-		cancel()
-		<-chromeDone
-	case err := <-chromeDone:
-		require.NoError(t, err, "Chrome exited before reporting a result: %s", chromeOutput.String())
-		t.Fatal("selection browser regression did not report a result")
-	case <-ctx.Done():
+		stopHandlerBrowserProcess(cmd)
+		stopped = true
+	case <-time.After(45 * time.Second):
 		t.Fatalf("selection browser regression timed out: %s", chromeOutput.String())
 	}
 	require.Equal(t, "pass", browser.status, "selection browser regression failed: %s\nChrome output: %s", browser.message, chromeOutput.String())

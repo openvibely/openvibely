@@ -31,7 +31,11 @@ func TestTemplateDialogsHaveConsistentCloseControls(t *testing.T) {
 			dialogCount++
 			dialogID := match[1]
 			dialogMarkup := match[0]
+			sharedSearchableSelector := strings.Contains(dialogMarkup, "data-searchable-selector-dialog")
 			closeCount := strings.Count(dialogMarkup, "ov-modal-close") + strings.Count(dialogMarkup, "@ModalCloseButton")
+			if sharedSearchableSelector {
+				closeCount += strings.Count(dialogMarkup, "data-searchable-selector-close")
+			}
 			if closeCount != 1 {
 				t.Errorf("%s dialog %q should have exactly one modal close button, found %d", path, dialogID, closeCount)
 			}
@@ -49,8 +53,11 @@ func TestTemplateDialogsHaveConsistentCloseControls(t *testing.T) {
 					break
 				}
 			}
-			if !modalBoxWithClose {
-				t.Errorf("%s dialog %q close button should be inside a modal-box", path, dialogID)
+			sharedSelectorWithClose := sharedSearchableSelector &&
+				strings.Contains(dialogMarkup, `class={ SearchableSelectorPanelClass }`) &&
+				strings.Contains(dialogMarkup, "data-searchable-selector-close")
+			if !modalBoxWithClose && !sharedSelectorWithClose {
+				t.Errorf("%s dialog %q close button should be inside a modal-box or direct shared selector panel", path, dialogID)
 			}
 		}
 		return nil

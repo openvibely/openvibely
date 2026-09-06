@@ -62,7 +62,8 @@ func TestBreadcrumbSelectorRendersAccessibleBoundedDialog(t *testing.T) {
 		`hx-trigger="input changed delay:200ms, search"`, `hx-sync="this:replace"`,
 		`hx-include="closest [data-breadcrumb-selector]"`, `name="tab" value="changes"`,
 		`name="from" value="schedule" data-breadcrumb-selector-origin`, `max-w-[calc(100vw-1rem)]`, `overflow-hidden`, `data-breadcrumb-selector-status`,
-		`class="w-full min-w-0 border-0 bg-transparent px-4 py-2 pr-10 text-sm focus:outline-none focus:ring-0"`,
+		`data-searchable-selector-search-shell`, `class="card border border-base-300 bg-base-100 shadow-sm"`,
+		`class="w-full border-0 bg-transparent px-4 py-2 text-sm focus:outline-none focus:ring-0"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("missing %q in selector markup", want)

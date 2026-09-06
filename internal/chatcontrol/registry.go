@@ -558,13 +558,13 @@ var registry = []ActionDef{
 	// --- Alerts and actionable notifications domain ---
 	{
 		Name:         "list_alerts",
-		Description:  "List project-scoped alerts and actionable notifications with stable pagination and lifecycle filters.",
+		Description:  "List project-scoped alerts and actionable notifications with stable pagination and conjunctive lifecycle filters. Native Approved Inbox callers use decision_state=approved, processing_state=unclaimed, and implementation_task_linked=false and omit read, type, and source so eligible waiting work is not excluded.",
 		Domain:       DomainAlerts,
 		Access:       AccessRead,
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: bothModes(),
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{"project_id":{"type":"string","description":"Optional same-project assertion. Omit it to use the persisted caller task's project context; never discover or reuse a project ID."},"decision_state":{"type":"string","enum":["not_required","pending","approved","rejected","dismissed"]},"processing_state":{"type":"string","enum":["not_applicable","unclaimed","claimed","implementation_task_linked","completed","failed"]},"type":{"type":"string"},"source":{"type":"string"},"read":{"type":"boolean","description":"Optional read-state filter. Omit it to include both read and unread alerts."},"implementation_task_linked":{"type":"boolean"},"limit":{"type":"integer","minimum":1,"maximum":100},"offset":{"type":"integer","minimum":0}},"additionalProperties":false}`),
+		Parameters:   json.RawMessage(`{"type":"object","properties":{"project_id":{"type":"string","description":"Optional same-project assertion. Omit it to use the persisted caller task's project context; never discover or reuse a project ID."},"decision_state":{"type":"string","enum":["not_required","pending","approved","rejected","dismissed"]},"processing_state":{"type":"string","enum":["not_applicable","unclaimed","claimed","implementation_task_linked","completed","failed"],"description":"Optional processing-state filter. Omit it to include all processing states."},"type":{"type":"string","description":"Optional notification-type filter. Omit it to include all types."},"source":{"type":"string","description":"Optional notification-source filter. Omit it to include all sources."},"read":{"type":"boolean","description":"Optional read-state filter. Omit it to include both read and unread alerts."},"implementation_task_linked":{"type":"boolean"},"limit":{"type":"integer","minimum":1,"maximum":100},"offset":{"type":"integer","minimum":0}},"additionalProperties":false}`),
 	},
 	{
 		Name:         "get_alert",

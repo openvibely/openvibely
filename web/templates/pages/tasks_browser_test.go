@@ -1071,7 +1071,7 @@ func TestTaskCardMergeMenuDirectActionConflictRetryAndBoardRefreshInChrome(t *te
 	var boardRefreshStarted bool
 	var releaseBoardRefresh = make(chan struct{}, 1)
 	var mu sync.Mutex
-	result := make(chan string, 4)
+	result := make(chan string, 5)
 	menuStates := func() map[string]components.TaskCardMergeMenuState {
 		mu.Lock()
 		defer mu.Unlock()
@@ -1087,15 +1087,16 @@ func TestTaskCardMergeMenuDirectActionConflictRetryAndBoardRefreshInChrome(t *te
 	fixtureCSS := `<style>
 		#kanban-board{display:grid;grid-template-columns:1fr;height:420px;overflow-y:auto}.kanban-column{min-width:0}.card{position:relative;min-height:120px}.dropdown{position:relative}.card>.dropdown{position:absolute}.dropdown-content{display:none;position:absolute;right:0;top:100%;width:210px;background:white;border:1px solid #333;z-index:100}.dropdown:focus-within>.dropdown-content{display:block}[data-kanban-menu-open="true"]>.dropdown-content{display:block}[data-task-card-local-submenu]>ul,[data-task-card-github-submenu]>ul{display:none;position:absolute;right:0;width:224px;background:white;border:1px solid #333;z-index:110}[data-task-card-local-submenu]:hover>ul,[data-task-card-local-submenu]:focus-within>ul,[data-task-card-github-submenu]:hover>ul,[data-task-card-github-submenu]:focus-within>ul{display:block!important}.modal{display:none}.modal[open]{display:grid;position:fixed;inset:0;z-index:999;background:rgba(0,0,0,.2)}.modal-box{margin:auto;background:white;padding:16px;max-width:340px}.hidden{display:none!important}.task-selected{outline:3px solid blue}.btn{min-height:32px}</style>`
 	runner := `<script>window.addEventListener('DOMContentLoaded',function(){
+		var nativeRequestAnimationFrame=window.requestAnimationFrame.bind(window),heldPositionFrames=[],nativeTabObserved=false;window.requestAnimationFrame=function(callback){if(callback&&callback.name==='settlePosition'){heldPositionFrames.push(callback);return -heldPositionFrames.length}return nativeRequestAnimationFrame(callback)};function releasePositionFrames(){window.requestAnimationFrame=nativeRequestAnimationFrame;var held=heldPositionFrames.splice(0);held.forEach(function(callback){nativeRequestAnimationFrame(callback)})}document.addEventListener('keydown',function(event){if(event.key==='Tab')nativeTabObserved=true},true);
 		function report(s,m){return fetch('/browser-result?status='+encodeURIComponent(s)+'&message='+encodeURIComponent(m||''),{method:'POST'})}function fail(m){throw new Error(m)}function waitFor(fn,label){return new Promise(function(resolve,reject){var end=Date.now()+4000;(function poll(){if(fn())return resolve();if(Date.now()>end)return reject(new Error('timeout '+label));setTimeout(poll,20)})()})}function frame(){return new Promise(function(r){requestAnimationFrame(function(){requestAnimationFrame(r)})})}function clickTrigger(el){el.dispatchEvent(new MouseEvent('mousedown',{bubbles:true,cancelable:true,detail:1}));el.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true,detail:1}))}
 		(async function(){
 			await frame();
 			var card=document.getElementById('task-merge-browser-task');
 			handleTaskSelect({currentTarget:card,target:card,metaKey:true,ctrlKey:false,preventDefault:function(){},stopPropagation:function(){}});
 			if(!card.classList.contains('task-selected'))fail('card selection was not established');
-			var trigger=card.querySelector('[data-task-card-menu-trigger]'),menu=card.querySelector('[data-kanban-menu-content]');
+			var trigger=card.querySelector('[data-task-card-menu-trigger]'),menu=card.querySelector('[data-kanban-menu-content]'),dropdown=menu.closest('[data-kanban-menu-key]'),nativeOpenWrites=0,nativePositioningWrites=0;new MutationObserver(function(records){records.forEach(function(record){if(record.attributeName==='data-kanban-menu-open')nativeOpenWrites++;if(record.attributeName==='data-kanban-menu-positioning')nativePositioningWrites++})}).observe(dropdown,{attributes:true,attributeFilter:['data-kanban-menu-open','data-kanban-menu-positioning']});
 			trigger.scrollIntoView({block:'center',inline:'center'});await frame();var menuHTML=menu.innerHTML,triggerRect=trigger.getBoundingClientRect(),triggerX=triggerRect.left+triggerRect.width/2,triggerY=triggerRect.top+triggerRect.height/2,triggerHit=document.elementFromPoint(triggerX,triggerY);if(!trigger.contains(triggerHit)&&trigger!==triggerHit)fail('kebab trigger is not hit-testable at its center: '+(triggerHit&&triggerHit.outerHTML||'none')+' rect='+JSON.stringify({left:triggerRect.left,top:triggerRect.top,right:triggerRect.right,bottom:triggerRect.bottom}));
-			await report('trigger-ready',JSON.stringify({x:triggerX,y:triggerY}));await waitFor(function(){return menu.closest('[data-kanban-menu-key]').getAttribute('data-kanban-menu-open')==='true'},'browser-generated kebab activation');await frame();var menuRectBefore=menu.getBoundingClientRect(),menuWidth=menuRectBefore.width,menuHeight=menuRectBefore.height;
+			trigger.addEventListener('mousedown',function(){setTimeout(function(){if(dropdown.getAttribute('data-kanban-menu-open')==='true'||dropdown.getAttribute('data-kanban-menu-positioning')==='true')fail('held native mousedown opened the kebab before click');report('release-ready','')},150)},{once:true});await report('trigger-ready',JSON.stringify({x:triggerX,y:triggerY}));await waitFor(function(){return document.activeElement===trigger&&dropdown.getAttribute('data-kanban-menu-open')==='true'&&dropdown.getAttribute('data-kanban-menu-positioning')==='true'&&getComputedStyle(menu).visibility==='hidden'},'browser-generated kebab activation during hidden positioning');await new Promise(function(resolve){setTimeout(resolve,0)});if(nativeOpenWrites!==1||nativePositioningWrites!==1)fail('one native kebab click restarted menu opening: openWrites='+nativeOpenWrites+' positioningWrites='+nativePositioningWrites);await report('tab-ready','');await waitFor(function(){return nativeTabObserved},'browser-generated Tab dispatch');if(document.activeElement!==trigger)fail('native Tab transferred focus before menu geometry stabilized');if(dropdown.getAttribute('data-kanban-menu-positioning')!=='true'||getComputedStyle(menu).visibility!=='hidden')fail('native Tab revealed menu before geometry stabilized');releasePositionFrames();var firstKeyboardVisibleRect=null;for(var keyboardRevealFrame=0;keyboardRevealFrame<12&&!firstKeyboardVisibleRect;keyboardRevealFrame++){if(dropdown.getAttribute('data-kanban-menu-positioning')!=='true'&&getComputedStyle(menu).visibility!=='hidden'){var keyboardVisibleRect=menu.getBoundingClientRect();firstKeyboardVisibleRect={left:keyboardVisibleRect.left,top:keyboardVisibleRect.top,right:keyboardVisibleRect.right,bottom:keyboardVisibleRect.bottom};break}await new Promise(function(resolve){nativeRequestAnimationFrame(resolve)})}if(!firstKeyboardVisibleRect)fail('native Tab did not reveal menu after stable geometry');if(!menu.contains(document.activeElement)||document.activeElement===menu)fail('native Tab did not transfer focus after stable geometry');if(dropdown.getAttribute('data-kanban-menu-open')!=='true')fail('native Tab closed the first-open menu');await frame();var menuRectBefore=menu.getBoundingClientRect();if(Math.abs(firstKeyboardVisibleRect.left-menuRectBefore.left)>1||Math.abs(firstKeyboardVisibleRect.top-menuRectBefore.top)>1||Math.abs(firstKeyboardVisibleRect.right-menuRectBefore.right)>1||Math.abs(firstKeyboardVisibleRect.bottom-menuRectBefore.bottom)>1)fail('native Tab first-visible menu jumped from '+JSON.stringify(firstKeyboardVisibleRect)+' to '+JSON.stringify({left:menuRectBefore.left,top:menuRectBefore.top,right:menuRectBefore.right,bottom:menuRectBefore.bottom}));var menuWidth=menuRectBefore.width,menuHeight=menuRectBefore.height;
 			if(menu.innerHTML!==menuHTML)fail('opening the kebab changed its pre-rendered contents');
 			if(menuWidth<190)fail('kebab was too narrow: '+menuWidth);
 			if(parseInt(await fetch('/option-count').then(function(r){return r.text()}),10)!==0)fail('opening the kebab fetched merge options');
@@ -1110,8 +1111,8 @@ func TestTaskCardMergeMenuDirectActionConflictRetryAndBoardRefreshInChrome(t *te
 				if(!merge||merge.disabled||!rebase||rebase.disabled)fail('eligible Local actions were not precomputed');
 				localTrigger.focus();localTrigger.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true,cancelable:true}));if(!localPanel.contains(document.activeElement))fail('keyboard could not enter portaled Local submenu');
 				var focusedLocalAction=document.activeElement;focusedLocalAction.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));await frame();if(menu.closest('[data-kanban-menu-key]').getAttribute('data-kanban-menu-open')==='true'||document.querySelector('[data-task-card-submenu-portaled="true"]'))fail('Escape inside portaled submenu did not close its owning menu');if(document.activeElement!==trigger)fail('Escape inside portaled submenu did not restore trigger focus');
-				clickTrigger(trigger);await frame();var github=menu.querySelector('[data-task-card-github-submenu]'),githubTrigger=github.querySelector(':scope > button'),githubPanel=github.querySelector(':scope > ul');
-				githubTrigger.focus();await frame();githubPanel=document.querySelector('[data-task-card-submenu-portaled="true"]');if(!githubPanel||getComputedStyle(githubPanel).display==='none'||!githubPanel.querySelector('[data-task-card-pr-action]')||githubPanel.querySelector('[data-task-card-pr-action]').disabled)fail('eligible GitHub submenu was not precomputed');
+				clickTrigger(trigger);await waitFor(function(){var dropdown=menu.closest('[data-kanban-menu-key]');return dropdown.getAttribute('data-kanban-menu-open')==='true'&&dropdown.getAttribute('data-kanban-menu-positioning')!=='true'},'stable GitHub menu reveal');var github=menu.querySelector('[data-task-card-github-submenu]'),githubTrigger=github.querySelector(':scope > button'),githubPanel=github.querySelector(':scope > ul');
+				githubTrigger.focus();githubPanel=Array.from(document.querySelectorAll('[data-task-card-submenu-portaled="true"]')).find(function(panel){return !!panel.querySelector('[data-task-card-pr-action]')});if(!githubPanel||getComputedStyle(githubPanel).display==='none'||githubPanel.querySelector('[data-task-card-pr-action]').disabled)fail('eligible GitHub submenu was not precomputed');
 				document.body.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,cancelable:true,pointerId:2,pointerType:'mouse',isPrimary:true}));await frame();if(menu.closest('[data-kanban-menu-key]').getAttribute('data-kanban-menu-open')==='true'||document.querySelector('[data-task-card-submenu-portaled="true"]'))fail('outside pointerdown did not dismiss the owning menu');clickTrigger(trigger);await frame();			var boardBefore=document.getElementById('kanban-board');window.dispatchEvent(new CustomEvent('sse-task-event',{detail:{type:'task_updated',project_id:'project-card-merge-browser'}}));await new Promise(function(r){setTimeout(r,700)});
 			if(document.getElementById('kanban-board')!==boardBefore)fail('SSE replaced board while kebab was open');
 			clickTrigger(trigger);await waitFor(function(){return document.getElementById('kanban-board')!==boardBefore},'deferred board refresh after close');
@@ -1310,14 +1311,10 @@ func TestTaskCardMergeMenuDirectActionConflictRetryAndBoardRefreshInChrome(t *te
 	}
 	defer conn.CloseNow()
 	nextID := 0
-	dispatch := func(eventType string, extra map[string]any) {
+	dispatchCommand := func(method string, params map[string]any) {
 		t.Helper()
 		nextID++
-		params := map[string]any{"type": eventType, "x": point.X, "y": point.Y, "button": "left", "clickCount": 1}
-		for key, value := range extra {
-			params[key] = value
-		}
-		request, err := json.Marshal(map[string]any{"id": nextID, "method": "Input.dispatchMouseEvent", "params": params})
+		request, err := json.Marshal(map[string]any{"id": nextID, "method": method, "params": params})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1337,17 +1334,49 @@ func TestTaskCardMergeMenuDirectActionConflictRetryAndBoardRefreshInChrome(t *te
 				continue
 			}
 			if len(response.Error) > 0 {
-				t.Fatalf("CDP Input.dispatchMouseEvent error: %s", response.Error)
+				t.Fatalf("CDP %s error: %s", method, response.Error)
 			}
 			return
 		}
 	}
-	clickPoint := func() {
-		dispatch("mouseMoved", map[string]any{"button": "none", "clickCount": 0})
-		dispatch("mousePressed", map[string]any{})
-		dispatch("mouseReleased", map[string]any{})
+	dispatchMouse := func(eventType string, extra map[string]any) {
+		t.Helper()
+		params := map[string]any{"type": eventType, "x": point.X, "y": point.Y, "button": "left", "clickCount": 1}
+		for key, value := range extra {
+			params[key] = value
+		}
+		dispatchCommand("Input.dispatchMouseEvent", params)
 	}
-	clickPoint()
+	clickPoint := func() {
+		dispatchMouse("mouseMoved", map[string]any{"button": "none", "clickCount": 0})
+		dispatchMouse("mousePressed", map[string]any{})
+		dispatchMouse("mouseReleased", map[string]any{})
+	}
+	dispatchMouse("mouseMoved", map[string]any{"button": "none", "clickCount": 0})
+	dispatchMouse("mousePressed", map[string]any{})
+	var releaseReady string
+	select {
+	case releaseReady = <-result:
+	case <-time.After(15 * time.Second):
+		releaseReady = "fail:timeout waiting for held-mousedown release boundary"
+	}
+	if releaseReady != "release-ready:" {
+		data, _ := os.ReadFile(stderrPath)
+		t.Fatalf("task card merge browser did not preserve closed state during native mousedown: %s\n%s", releaseReady, data)
+	}
+	dispatchMouse("mouseReleased", map[string]any{})
+	var tabReady string
+	select {
+	case tabReady = <-result:
+	case <-time.After(15 * time.Second):
+		tabReady = "fail:timeout waiting for hidden-positioning Tab boundary"
+	}
+	if tabReady != "tab-ready:" {
+		data, _ := os.ReadFile(stderrPath)
+		t.Fatalf("task card merge browser did not reach native Tab boundary: %s\n%s", tabReady, data)
+	}
+	dispatchCommand("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Tab", "code": "Tab", "windowsVirtualKeyCode": 9, "nativeVirtualKeyCode": 9})
+	dispatchCommand("Input.dispatchKeyEvent", map[string]any{"type": "keyUp", "key": "Tab", "code": "Tab", "windowsVirtualKeyCode": 9, "nativeVirtualKeyCode": 9})
 	point = readClickPoint("local-ready")
 	clickPoint()
 	point = readClickPoint("click-ready")
@@ -1368,7 +1397,7 @@ func TestTaskCardMergeMenuDirectActionConflictRetryAndBoardRefreshInChrome(t *te
 	}
 }
 
-func TestTaskCardKebabMenuEscapesCardAndRepositionsAtDropZoneBottomInChrome(t *testing.T) {
+func TestTaskAndAutomationCardKebabMenuRowHeightParityAndDropZoneGeometryInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))
 	if err != nil {
@@ -1376,6 +1405,9 @@ func TestTaskCardKebabMenuEscapesCardAndRepositionsAtDropZoneBottomInChrome(t *t
 	}
 
 	project := models.Project{ID: "project-task-menu-browser", Name: "Task Menu Browser"}
+	automationCards := []models.AutomationCard{{
+		Automation: models.Automation{ID: "automation-menu-height-reference", Name: "Automation Menu Height Reference", LifecycleState: models.AutomationActive},
+	}}
 	base := time.Date(2026, time.January, 1, 12, 0, 0, 0, time.UTC)
 	tasks := make([]models.Task, 0, 7)
 	for i := 0; i < 7; i++ {
@@ -1430,17 +1462,33 @@ func TestTaskCardKebabMenuEscapesCardAndRepositionsAtDropZoneBottomInChrome(t *t
 	    if (!zone) fail('missing task drop zone');
 	    zone.scrollTop = zone.scrollHeight;
 	    await frame();
-	    var dropdown = card.querySelector('.dropdown');
-	    var label = dropdown && dropdown.querySelector('label');
-	    var menu = dropdown && dropdown.querySelector('.dropdown-content');
-	    if (!dropdown || !label || !menu) fail('missing task card dropdown controls');
-	    if (!card.classList.contains('overflow-visible')) fail('task card root does not opt out of overflow clipping');
-	    label.focus();
-	    label.click();
-	    await frame();
-	    var zoneRect = zone.getBoundingClientRect();
-	    var cardRect = card.getBoundingClientRect();
-	    var menuRect = menu.getBoundingClientRect();
+		    var dropdown = card.querySelector('.dropdown');
+		    var label = dropdown && dropdown.querySelector('label');
+		    var menu = dropdown && dropdown.querySelector('.dropdown-content');
+		    if (!dropdown || !label || !menu) fail('missing task card dropdown controls');
+		    if (!card.classList.contains('overflow-visible')) fail('task card root does not opt out of overflow clipping');
+		    label.focus();
+		    label.click();
+		    if (dropdown.getAttribute('data-kanban-menu-positioning') === 'true' && getComputedStyle(menu).visibility !== 'hidden') fail('first-open positioning phase painted a transparent menu layer');
+		    var firstVisibleRect = null;
+		    var firstVisibleMotion = null;
+			    for (var revealFrame = 0; revealFrame < 12 && !firstVisibleRect; revealFrame++) {
+			      if (dropdown.getAttribute('data-kanban-menu-positioning') !== 'true' && getComputedStyle(menu).visibility !== 'hidden' && parseFloat(getComputedStyle(menu).opacity) > 0) {
+			        var visibleRect = menu.getBoundingClientRect();
+			        var visibleStyle = getComputedStyle(menu);
+			        firstVisibleRect = {left:visibleRect.left, top:visibleRect.top, right:visibleRect.right, bottom:visibleRect.bottom};
+			        firstVisibleMotion = {animationName:visibleStyle.animationName, animationDuration:visibleStyle.animationDuration, transitionProperty:visibleStyle.transitionProperty, transitionDuration:visibleStyle.transitionDuration, activeAnimations:menu.getAnimations().filter(function(animation) { return animation.playState === 'running' || animation.playState === 'pending'; }).length};
+			        break;
+			      }
+			      await new Promise(function(resolve) { requestAnimationFrame(resolve); });
+			    }
+		    await frame();
+		    var zoneRect = zone.getBoundingClientRect();
+		    var cardRect = card.getBoundingClientRect();
+		    var menuRect = menu.getBoundingClientRect();
+			    if (!firstVisibleRect) fail('menu open event did not expose initial geometry');
+			    if (!firstVisibleMotion || firstVisibleMotion.animationName !== 'none' || firstVisibleMotion.activeAnimations !== 0 || firstVisibleMotion.transitionDuration.split(',').some(function(duration) { return parseFloat(duration) > 0; })) fail('first-open menu retained slide/fade motion: '+JSON.stringify(firstVisibleMotion));
+			    if (Math.abs(firstVisibleRect.left-menuRect.left)>1 || Math.abs(firstVisibleRect.top-menuRect.top)>1) fail('first-open menu jumped from '+JSON.stringify(firstVisibleRect)+' to '+JSON.stringify({left:menuRect.left,top:menuRect.top,right:menuRect.right,bottom:menuRect.bottom}));
 	    var visibleBottom = Math.min(window.innerHeight, zoneRect.bottom);
 	    if (!dropdown.classList.contains('dropdown-top')) fail('bottom-edge dropdown did not switch to dropdown-top');
 	    if (menuRect.bottom > visibleBottom + 1) fail('menu bottom is clipped by visible scroll boundary: menu=' + JSON.stringify({top:menuRect.top,bottom:menuRect.bottom}) + ' zone=' + JSON.stringify({top:zoneRect.top,bottom:zoneRect.bottom}));
@@ -1459,12 +1507,33 @@ func TestTaskCardKebabMenuEscapesCardAndRepositionsAtDropZoneBottomInChrome(t *t
 		    if (!localPanel) fail('Local submenu did not create a portaled interaction panel');
 		    var localRect = localPanel.getBoundingClientRect();
 		    if (localRect.top < zoneRect.top - 1 || localRect.bottom > zoneRect.bottom + 1) fail('Local submenu is clipped by the task scroll boundary: submenu=' + JSON.stringify({top:localRect.top,bottom:localRect.bottom}) + ' zone=' + JSON.stringify({top:zoneRect.top,bottom:zoneRect.bottom}));
-		    var localAction = localPanel.querySelector('[data-task-card-merge-action]:not([disabled])');
-		    if (!localAction) fail('missing enabled Local action for hit test');
-		    var actionRect = localAction.getBoundingClientRect();
-		    var localHit = document.elementFromPoint(actionRect.left + actionRect.width / 2, actionRect.top + actionRect.height / 2);
-			    if (!localHit || !localAction.contains(localHit)) fail('Local submenu action is not hit-testable inside the task scroll boundary; submenu=' + JSON.stringify({left:localRect.left,top:localRect.top,right:localRect.right,bottom:localRect.bottom}) + ' action=' + JSON.stringify({left:actionRect.left,top:actionRect.top,right:actionRect.right,bottom:actionRect.bottom}) + ' columnZ=' + getComputedStyle(card.closest('.kanban-column')).zIndex + ' columnOpen=' + card.closest('.kanban-column').getAttribute('data-kanban-menu-column-open') + ' panelZ=' + getComputedStyle(localPanel).zIndex + ' hit=' + (localHit && localHit.outerHTML));		    await report('pass', '');	  })().catch(function(error) { report('fail', String(error && error.stack || error)); });
-	});
+			    var localAction = localPanel.querySelector('[data-task-card-merge-action]:not([disabled])');
+			    if (!localAction) fail('missing enabled Local action for hit test');
+			    var actionRect = localAction.getBoundingClientRect();
+			    var localHit = document.elementFromPoint(actionRect.left + actionRect.width / 2, actionRect.top + actionRect.height / 2);
+			    if (!localHit || !localAction.contains(localHit)) fail('Local submenu action is not hit-testable inside the task scroll boundary; submenu=' + JSON.stringify({left:localRect.left,top:localRect.top,right:localRect.right,bottom:localRect.bottom}) + ' action=' + JSON.stringify({left:actionRect.left,top:actionRect.top,right:actionRect.right,bottom:actionRect.bottom}) + ' columnZ=' + getComputedStyle(card.closest('.kanban-column')).zIndex + ' columnOpen=' + card.closest('.kanban-column').getAttribute('data-kanban-menu-column-open') + ' panelZ=' + getComputedStyle(localPanel).zIndex + ' hit=' + (localHit && localHit.outerHTML));
+			    var taskEdit = menu.querySelector(':scope > li > a[hx-get]');
+			    var github = menu.querySelector('[data-task-card-github-submenu]');
+			    var githubTrigger = github && github.querySelector(':scope > button');
+			    if (!taskEdit || !githubTrigger) fail('missing task menu rows for automation height parity');
+			    var taskHeights = {edit:taskEdit.getBoundingClientRect().height,local:localTrigger.getBoundingClientRect().height,github:githubTrigger.getBoundingClientRect().height,merge:localAction.getBoundingClientRect().height};
+			    githubTrigger.focus();
+			    await frame();
+			    var githubPanel = Array.from(document.querySelectorAll('[data-task-card-submenu-portaled="true"]')).find(function(panel){return !!panel.querySelector('[data-task-card-pr-action]')});
+			    var prAction = githubPanel && githubPanel.querySelector('[data-task-card-pr-action]');
+			    if (!prAction) fail('missing task PR action for automation height parity');
+			    taskHeights.pr = prAction.getBoundingClientRect().height;
+			    var automationEdit = document.querySelector('[data-automation-card-edit="automation-menu-height-reference"]');
+			    var automationDropdown = automationEdit && automationEdit.closest('.dropdown');
+			    var automationTrigger = automationDropdown && automationDropdown.querySelector(':scope > label');
+			    if (!automationEdit || !automationTrigger) fail('missing rendered automation menu reference action');
+			    automationTrigger.focus();
+			    automationTrigger.click();
+			    await frame();
+			    var automationHeight = automationEdit.getBoundingClientRect().height;
+			    Object.keys(taskHeights).forEach(function(key){if(Math.abs(taskHeights[key]-automationHeight)>1)fail('task '+key+' row height '+taskHeights[key]+' does not match automation row height '+automationHeight)});
+			    await report('pass', '');
+		  })().catch(function(error) { report('fail', String(error && error.stack || error)); });	});
 	</script>`
 
 	browserResult := make(chan string, 2)
@@ -1482,7 +1551,12 @@ func TestTaskCardKebabMenuEscapesCardAndRepositionsAtDropZoneBottomInChrome(t *t
 			if err := Tasks([]models.Project{project}, &project, tasks, nil, nil, "created_asc", "completed_desc", menuStates).Render(context.Background(), &out); err != nil {
 				t.Fatalf("render Tasks page: %v", err)
 			}
+			var automationOut bytes.Buffer
+			if err := AutomationsContent(automationCards, project.ID).Render(context.Background(), &automationOut); err != nil {
+				t.Fatalf("render Automation menu height reference: %v", err)
+			}
 			page := strings.Replace(out.String(), "https://unpkg.com/htmx.org@2.0.4", "/htmx-2.0.4.min.js", 1)
+			page = strings.Replace(page, "</body>", automationOut.String()+"</body>", 1)
 			page = strings.Replace(page, "</head>", fixtureCSS+runner+"</head>", 1)
 			_, _ = w.Write([]byte(page))
 		case "/browser-result":

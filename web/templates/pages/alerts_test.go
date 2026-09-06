@@ -291,6 +291,30 @@ func TestAlertDetail_EmptyAlertOmitsCopyControl(t *testing.T) {
 	}
 }
 
+func TestAlertsToolbar_DoesNotDuplicateImplementationTaskFilter(t *testing.T) {
+	config := collectionToolbarConfig("alerts", "project-1", "")
+	var processing, implementationTask *CardListFilter
+	for i := range config.Filters {
+		switch config.Filters[i].Key {
+		case "processing_state":
+			processing = &config.Filters[i]
+		case "implementation_task_linked":
+			implementationTask = &config.Filters[i]
+		}
+	}
+	if processing == nil || implementationTask == nil {
+		t.Fatal("Alerts toolbar must expose processing state and implementation task filters")
+	}
+	for _, option := range processing.Options {
+		if option.Value == "implementation_task_linked" {
+			t.Fatal("processing state must not duplicate the dedicated implementation task filter")
+		}
+	}
+	if len(implementationTask.Options) != 2 || implementationTask.Options[0].Value != "true" || implementationTask.Options[1].Value != "false" {
+		t.Fatalf("unexpected implementation task options: %#v", implementationTask.Options)
+	}
+}
+
 func TestAlertsContent_DecisionFilterRendersSelectedStateAndSearchState(t *testing.T) {
 	var filtered bytes.Buffer
 	if err := AlertsContentPageWithFiltersAndSearch(nil, "project-1", 4, false, models.AlertDecisionPending, models.AlertProcessingFailed, "needle").Render(context.Background(), &filtered); err != nil {
@@ -307,24 +331,24 @@ func TestAlertsContent_DecisionFilterRendersSelectedStateAndSearchState(t *testi
 		`data-card-filter-group="decision_state"`,
 		`name="decision_state"`,
 		`data-card-filter-chip="decision_state"`,
-		`Filters (1)`,
-		`data-card-pagination-preserve-params="read,severity,decision_state,processing_state,type,source,sort,search"`,
-		`type="hidden" name="processing_state" value="failed"`,
+		`data-card-filter-group="processing_state"`,
+		`name="processing_state"`,
+		`data-card-filter-chip="processing_state"`,
+		`Filters (2)`,
+		`data-card-pagination-preserve-params="read,severity,decision_state,processing_state,implementation_task_linked,type,source,sort,search"`,
+		`value="failed" selected`,
 		`data-card-pagination-url="/alerts?decision_state=pending&amp;processing_state=failed&amp;project_id=project-1&amp;search=needle"`,
 		`hx-get="/alerts?decision_state=pending&amp;processing_state=failed&amp;project_id=project-1&amp;search=needle"`,
+		`hx-target="#alerts-live-results"`,
+		`hx-select="#alerts-live-results"`,
+		`hx-select-oob="#alerts-page-header"`,
+		`id="alerts-page-header"`,
+		`id="alerts-live-results" data-card-pagination-has-more="false"`,
 		`value="pending" selected`,
 		`No alerts match the selected filters.`,
 	} {
 		if !strings.Contains(filteredHTML, required) {
 			t.Fatalf("filtered Alerts markup missing %q", required)
-		}
-	}
-	for _, removed := range []string{
-		`aria-label="Filter by processing state"`,
-		`All processing states`,
-	} {
-		if strings.Contains(filteredHTML, removed) {
-			t.Fatalf("Alerts markup should not contain the removed processing selector %q", removed)
 		}
 	}
 	if strings.Contains(filteredHTML, "No alerts. You're all clear!") {

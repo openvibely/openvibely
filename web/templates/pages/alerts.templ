@@ -11,11 +11,10 @@ import (
 )
 
 func alertCardListState(projectID string, decisionState models.AlertDecisionState, processingState models.AlertProcessingState, search string) CardListState {
-	state := CardListState{ProjectID: projectID, Search: search, Filters: map[string]string{"decision_state": string(decisionState)}}
-	if processingState != "" {
-		state.Preserved = []CardListQueryValue{{Key: "processing_state", Value: string(processingState)}}
-	}
-	return state
+	return CardListState{ProjectID: projectID, Search: search, Filters: map[string]string{
+		"decision_state":   string(decisionState),
+		"processing_state": string(processingState),
+	}}
 }
 
 templ Alerts(projects []models.Project, currentProjectID string, alerts []models.AlertSummary, unreadCount int) {
@@ -88,16 +87,17 @@ func alertListStateIsFiltered(state CardListState) bool {
 }
 
 templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unreadCount int, hasMore bool, decisionState models.AlertDecisionState, processingState models.AlertProcessingState, search string, state CardListState) {
-		<div id="alerts-container" class="h-full overflow-y-auto overflow-x-hidden max-w-full min-w-0" data-search-container data-card-pagination-root data-card-pagination-replacement-managed="true" data-card-pagination-url={ CardListURL("alerts", state) } data-card-pagination-preserve-params="read,severity,decision_state,processing_state,type,source,sort,search" data-card-pagination-list="#alerts-card-list" data-card-pagination-card-selector="[data-alert-id]" data-card-pagination-key="data-alert-id" data-card-pagination-page-size="20" data-card-pagination-has-more={ cardPaginationHasMoreAttribute(hasMore) }>
+		<div id="alerts-container" class="h-full overflow-y-auto overflow-x-hidden max-w-full min-w-0" data-search-container data-card-pagination-root data-card-pagination-replacement-managed="true" data-card-pagination-url={ CardListURL("alerts", state) } data-card-pagination-preserve-params="read,severity,decision_state,processing_state,implementation_task_linked,type,source,sort,search" data-card-pagination-list="#alerts-card-list" data-card-pagination-card-selector="[data-alert-id]" data-card-pagination-key="data-alert-id" data-card-pagination-page-size="20" data-card-pagination-has-more={ cardPaginationHasMoreAttribute(hasMore) }>
 		<div id="alerts-content"
 			hx-get={ CardListURL("alerts", state) }
 			hx-trigger="alertUpdate from:body"
-			hx-target="this"
-			hx-select="#alerts-content"
+			hx-target="#alerts-live-results"
+			hx-select="#alerts-live-results"
+			hx-select-oob="#alerts-page-header"
 			hx-swap="outerHTML show:none"
 		>
 		@layout.PageTitle("Alerts")
-		<div class="flex items-center justify-between mb-6">
+			<div id="alerts-page-header" class="flex items-center justify-between mb-6">
 			<h2 class="text-2xl font-bold">
 				Alerts
 				if unreadCount > 0 {
@@ -163,9 +163,10 @@ templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unrea
 			</div>
 			<div class="mb-4 rounded-box bg-base-200/60 px-4 py-3 text-sm text-base-content/70">			Showing notifications for the selected project only. Approval permits creation of an implementation task; it does not authorize merge, release, or deployment.
 		</div>
-			@CardListToolbar(collectionToolbarConfigWithState("alerts", state))
-			<div id="alerts-card-list" data-card-pagination-list>
-				if len(alerts) == 0 {
+				@CardListToolbar(collectionToolbarConfigWithState("alerts", state))
+				<div id="alerts-live-results" data-card-pagination-has-more={ cardPaginationHasMoreAttribute(hasMore) }>
+					<div id="alerts-card-list" data-card-pagination-list>
+						if len(alerts) == 0 {
 					<div class="text-center py-12" data-search-empty-state>
 						<svg xmlns="http://www.w3.org/2000/svg" class="h-16 w-16 mx-auto opacity-30 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"></path>
@@ -184,8 +185,9 @@ templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unrea
 					</div>
 				}
 			</div>
-			@CardPaginationStatusWithBoundary(hasMore)
-		</div>
+					@CardPaginationStatusWithBoundary(hasMore)
+				</div>
+			</div>
 		<!-- Task Detail Dialog Container -->	<script>
 		function renderSystemUpdateCard(data) {
 				var card = document.getElementById('system-update-card');
@@ -379,7 +381,7 @@ templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unrea
 			document.body.addEventListener('htmx:beforeSwap', function(event) {
 				var target = event.detail && event.detail.target;
 				var root = document.getElementById('alerts-container');
-				if (!target || target.id !== 'alerts-content' || !root) return;
+				if (!target || (target.id !== 'alerts-content' && target.id !== 'alerts-live-results') || !root) return;
 
 				var rows = alertRows(root);
 				var rootRect = root.getBoundingClientRect();
@@ -410,6 +412,7 @@ templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unrea
 						rootScrollTop: root.scrollTop,
 						windowScrollY: window.scrollY,
 						search: (root.querySelector('[data-card-search]') || {}).value || '',
+						filtersOpen: !!root.querySelector('[data-card-filters-button][aria-expanded="true"]'),
 						focusIDs: focusCandidates(rows, focusID)
 					};				state.pendingFocusID = '';
 			});
@@ -418,10 +421,13 @@ templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unrea
 				var swappedTarget = event.detail && event.detail.target;
 				var root = document.getElementById('alerts-container');
 				var saved = state.swap;
-				if (!swappedTarget || swappedTarget.id !== 'alerts-content' || !root || !saved) return;
+				if (!swappedTarget || (swappedTarget.id !== 'alerts-content' && swappedTarget.id !== 'alerts-live-results') || !root || !saved) return;
 				state.swap = null;
 				swappedTarget.openVibelyAlertsViewportSwap = saved;
 
+					if (swappedTarget.id === 'alerts-live-results') {
+						root.setAttribute('data-card-pagination-has-more', swappedTarget.getAttribute('data-card-pagination-has-more') || 'false');
+					}
 					var replacementSearch = root.querySelector('[data-card-search]');
 					if (replacementSearch) {
 						replacementSearch.value = saved.search || '';
@@ -429,6 +435,13 @@ templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unrea
 					}
 					if (typeof window.refreshCardSearches === 'function') {
 						window.refreshCardSearches(root);
+					}
+					if (typeof root._openVibelyInstallSelectionCards === 'function') {
+						root._openVibelyInstallSelectionCards();
+					}
+					if (saved.filtersOpen && typeof window.setCardFilterDropdownState === 'function') {
+						var filterButton = root.querySelector('[data-card-filters-button]');
+						window.setCardFilterDropdownState(filterButton && filterButton.closest('.dropdown'), true);
 					}				root.scrollTop = saved.rootScrollTop;
 				var anchor = null;
 				var savedAnchor = null;
@@ -451,7 +464,7 @@ templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unrea
 				var settledTarget = event.detail && event.detail.target;
 				var root = document.getElementById('alerts-container');
 				var saved = settledTarget && settledTarget.openVibelyAlertsViewportSwap;
-				if (!settledTarget || settledTarget.id !== 'alerts-content' || !root || !saved) return;
+				if (!settledTarget || (settledTarget.id !== 'alerts-content' && settledTarget.id !== 'alerts-live-results') || !root || !saved) return;
 					delete settledTarget.openVibelyAlertsViewportSwap;
 
 					var focusTarget = null;				for (var j = 0; j < saved.focusIDs.length; j++) {
