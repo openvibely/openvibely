@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/openvibely/openvibely/internal/models"
+	templateui "github.com/openvibely/openvibely/web/templates"
 )
 
 templ BreadcrumbSelector(config models.BreadcrumbSelector) {
@@ -30,9 +31,9 @@ templ BreadcrumbSelector(config models.BreadcrumbSelector) {
 			}
 			<svg class="h-4 w-4 shrink-0 opacity-60" width="16" height="16" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" data-breadcrumb-selector-caret><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd"></path></svg>
 		</button>
-		<dialog id={ config.ID + "-dialog" } class="fixed m-0 max-h-[min(32rem,calc(100dvh-1rem))] w-[28rem] max-w-[calc(100vw-1rem)] overflow-hidden rounded-box border border-base-300 bg-base-100 p-0 text-base-content shadow-xl backdrop:bg-transparent" role="dialog" aria-modal="true" aria-labelledby={ config.ID + "-heading" } data-breadcrumb-selector-dialog>
-			<div class="flex max-h-[inherit] min-h-0 flex-col overflow-hidden">
-				<div class="flex items-center justify-between gap-3 border-b border-base-300 px-4 py-3">
+		<dialog id={ config.ID + "-dialog" } class={ templateui.SearchableSelectorDialogClass } role="dialog" aria-modal="true" aria-labelledby={ config.ID + "-heading" } data-breadcrumb-selector-dialog>
+			<div class={ templateui.SearchableSelectorPanelClass }>
+				<div class={ templateui.SearchableSelectorHeaderClass }>
 					<h2 id={ config.ID + "-heading" } class="min-w-0 truncate text-base font-bold">Switch { config.Kind }</h2>
 					<button class="btn btn-ghost btn-sm btn-square shrink-0" type="button" aria-label={ "Close " + config.Kind + " selector" } data-breadcrumb-selector-close>✕</button>
 				</div>
@@ -40,7 +41,7 @@ templ BreadcrumbSelector(config models.BreadcrumbSelector) {
 					<label class="sr-only" for={ config.ID + "-search" }>Search { config.Kind }s</label>
 					<input
 						id={ config.ID + "-search" }
-						class="w-full min-w-0 border-0 bg-transparent px-4 py-2 pr-10 text-sm focus:outline-none focus:ring-0"
+						class={ templateui.SearchableSelectorSearchClass }
 						type="search"
 						name="search"
 						placeholder={ "Search " + config.Kind + "s" }
@@ -56,7 +57,7 @@ templ BreadcrumbSelector(config models.BreadcrumbSelector) {
 					/>
 					<span id={ config.ID + "-loading" } class="loading loading-spinner loading-xs htmx-indicator pointer-events-none absolute right-3 top-1/2 -translate-y-1/2" aria-hidden="true"></span>
 				</div>
-				<div id={ config.ID + "-results" } class="min-h-0 flex-1 overflow-y-auto overscroll-contain p-2" data-breadcrumb-selector-results>
+				<div id={ config.ID + "-results" } class={ templateui.SearchableSelectorResultsClass } data-breadcrumb-selector-results>
 					<p class="px-3 py-6 text-center text-sm text-base-content/60">Loading { config.Kind }s…</p>
 				</div>
 				<span class="sr-only" role="status" aria-live="polite" data-breadcrumb-selector-status>Search results update as you type.</span>
@@ -73,10 +74,10 @@ templ BreadcrumbSelectorResults(kind string, currentID string, items []models.Br
 			<p class="mt-1 text-sm text-base-content/60">Try a different search.</p>
 		</div>
 	} else {
-		<div role="listbox" aria-label={ kind + "s" } class="menu w-full gap-1 p-0">
+		<div role="listbox" aria-label={ kind + "s" } class={ templateui.SearchableSelectorMenuClass }>
 			for _, item := range items {
 				<a
-					class="flex min-h-11 min-w-0 items-center gap-2 rounded-btn px-3 py-2 hover:bg-base-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+					class={ templateui.SearchableSelectorOptionClass }
 					href={ templ.URL(item.URL) }
 					role="option"
 					aria-selected={ fmt.Sprintf("%t", item.ID == currentID) }
