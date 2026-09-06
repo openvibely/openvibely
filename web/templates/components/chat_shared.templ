@@ -4527,9 +4527,10 @@ templ ChatAutoScrollScript() {
 						function prepareInitialCodeRanges() {
 							if (shouldYieldPreparation && window.codeRangesAsync) {
 								return window.codeRangesAsync(textBuffer, container).then(function(result) {
-									// A worker is an optimization only. Falling back to raw Markdown
-									// would expose tool protocol markers instead of rendering cards.
-									rawCodeRanges = result !== null ? result : (window.codeRanges ? window.codeRanges(textBuffer) : []);
+									// Never repeat a failed multi-megabyte worker scan on the UI thread.
+									// Reject into the queued renderer's escaped plaintext fallback.
+									if (result === null) throw new Error('code-range worker unavailable');
+									rawCodeRanges = result;
 									return true;
 								});
 							}
@@ -4539,8 +4540,8 @@ templ ChatAutoScrollScript() {
 						function prepareCodeRanges() {
 							if (shouldYieldPreparation && window.codeRangesAsync) {
 								return window.codeRangesAsync(textBuffer, container).then(function(result) {
-									// Keep structured rendering intact if worker preparation is unavailable.
-									codeRanges = excludeToolBlockCodeRanges(result !== null ? result : (window.codeRanges ? window.codeRanges(textBuffer) : []));
+									if (result === null) throw new Error('code-range worker unavailable');
+									codeRanges = excludeToolBlockCodeRanges(result);
 									return true;
 								});
 							}

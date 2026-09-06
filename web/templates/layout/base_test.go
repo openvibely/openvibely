@@ -525,6 +525,9 @@ func TestChatMarkdownRendererUsesSharedCodeRangesAndEscapesRawHTML(t *testing.T)
 			t.Fatalf("generated base template missing Markdown safety snippet %q", snippet)
 		}
 	}
+	if strings.Contains(string(generated), "window._chatCodeRangeWorkerTimeoutMS") {
+		t.Fatal("slow code-range workers must remain asynchronous until their owning render is cancelled")
+	}
 	if strings.Contains(string(generated), "worker.onerror = function() { finish(window.renderChatMarkdown(text))") {
 		t.Fatal("large Markdown worker failures must not synchronously parse the full document")
 	}
@@ -574,7 +577,8 @@ func TestLargeMarkdownAndCodeRangeWorkersCancelAndComplete(t *testing.T) {
 		"if (!firstMarkdownWorker.terminated) throw new Error('superseded Markdown worker was not terminated');\n" +
 		"secondMarkdownWorker.onmessage({ data: { html: '<ol><li>whole document</li></ol>' } });\n" +
 		"window._chatCodeRangeWorkerTimeoutMS = 5; const timeoutOwner = {}; const timedCode = window.codeRangesAsync(large + 'timeout', timeoutOwner); const timedCodeWorker = workers[workers.length - 1];\n" +
-		"Promise.all([firstCode, secondCode, firstMarkdown, secondMarkdown, threadResult, timedCode]).then(function(values) { if (values[0] !== null || values[1].length !== 1 || values[2] !== null || !values[3] || typeof values[3] !== 'object' || values[4] !== true || values[5] !== null || !timedCodeWorker.terminated || codeOwner._codeRangeWorkerState !== null || timeoutOwner._codeRangeWorkerState !== null || markdownOwner._markdownWorkerState !== null) process.exit(1); }, function(err) { console.error(err); process.exit(2); });\n"
+		"const finishSlowWorker = new Promise(function(resolve, reject) { setTimeout(function() { if (timedCodeWorker.terminated || timeoutOwner._codeRangeWorkerState === null) { reject(new Error('slow code-range worker was terminated')); return; } timedCodeWorker.onmessage({ data: { ranges: [{ start: 3, end: 4 }] } }); resolve(true); }, 15); });\n" +
+		"Promise.all([firstCode, secondCode, firstMarkdown, secondMarkdown, threadResult, timedCode, finishSlowWorker]).then(function(values) { if (values[0] !== null || values[1].length !== 1 || values[2] !== null || !values[3] || typeof values[3] !== 'object' || values[4] !== true || values[5].length !== 1 || values[5][0].start !== 3 || !values[6] || !timedCodeWorker.terminated || codeOwner._codeRangeWorkerState !== null || timeoutOwner._codeRangeWorkerState !== null || markdownOwner._markdownWorkerState !== null) process.exit(1); }, function(err) { console.error(err); process.exit(2); });\n"
 	if output, err := exec.Command(node, "-e", script).CombinedOutput(); err != nil {
 		t.Fatalf("large Markdown/code-range worker lifecycle failed: %v\n%s", err, output)
 	}

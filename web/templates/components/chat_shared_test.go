@@ -2908,8 +2908,11 @@ func TestCleanTranscriptControls_PreservesCodeExamples(t *testing.T) {
 		t.Fatal("rendered script must define transcript normalization and cleaning helpers")
 	}
 	codeHelpers := renderedBaseMarkdownCodeHelpers(t)
-	if strings.Count(content, "window.codeRanges(textBuffer)") != 4 {
-		t.Fatal("streaming renderer must calculate code ranges before and after marker normalization, including worker fallbacks")
+	if strings.Count(content, "window.codeRanges(textBuffer)") != 2 {
+		t.Fatal("streaming renderer must synchronously calculate code ranges only for small inputs")
+	}
+	if strings.Contains(content, "result !== null ? result : (window.codeRanges") {
+		t.Fatal("streaming renderer must not repeat failed large worker scans on the UI thread")
 	}
 	if strings.Count(content, "window.isInsideCodeRanges(codeRanges, match.index, match.index + match[0].length)") != 4 {
 		t.Fatal("streaming renderer must not convert inline or fenced-code thinking/tool use/result examples into control cards")
@@ -3157,8 +3160,10 @@ func TestCleanTranscriptControls_PreservesCodeExamples(t *testing.T) {
 		"    if (!toolCommitted || !pre || pre.children.length < 3) throw new Error('large tool output was not appended in chunks');\n" +
 		"  const unavailableRangeStream = element('div'); unavailableRangeStream.id = 'large-tool-without-range-worker';\n" +
 		"  window.codeRangesAsync = function() { return Promise.resolve(null); };\n" +
-		"  return window.renderStreamingContent(unavailableRangeStream, largeTool, true).then(function(unavailableCommitted) {\n" +
-		"    if (!unavailableCommitted || !unavailableRangeStream.children.some(function(child) { return child.className.indexOf('stream-tool') !== -1; })) throw new Error('unavailable code-range worker exposed raw tool transcript');\n" +
+		"  let unavailableRejected = false;\n" +
+		"  return window.renderStreamingContent(unavailableRangeStream, largeTool, true).then(function() { throw new Error('unavailable code-range worker retried synchronously'); }, function() { unavailableRejected = true; }).then(function() {\n" +
+		"    if (!unavailableRejected || unavailableRangeStream.children.length !== 0) throw new Error('unavailable code-range worker must reject before rendering raw tool transcript');\n" +
+		"    window.codeRangesAsync = function(text) { return Promise.resolve(window.codeRanges(text)); };\n" +
 		"    const failing = element('div'); failing.id = 'failing-large-render'; failing.replaceChildren = function() { throw new Error('commit failed'); };\n" +
 		"    const manyTools = ('[Using tool: bash]\\n[Tool bash done]\\nx\\n[/Tool]\\n').repeat(80) + 'tail '.repeat(22000);\n" +
 		"    return window.renderStreamingContent(failing, manyTools, true).then(function() { process.exit(56); }, function(err) { if (!err || err.message !== 'commit failed') process.exit(57); });\n" +
@@ -3215,8 +3220,11 @@ func TestTranscriptCodeProtectionGeneratedParity(t *testing.T) {
 	if strings.Contains(string(generated), "function addInlineRanges(start, end)") || strings.Contains(string(generated), "window.isInsideCode = function") {
 		t.Fatal("generated Chat component must use the base layout's shared Markdown helpers instead of defining duplicates")
 	}
-	if strings.Count(content, "window.codeRanges(textBuffer)") != 4 {
-		t.Fatal("generated streaming renderer must retain pre/post normalization code-range scans and worker fallbacks")
+	if strings.Count(content, "window.codeRanges(textBuffer)") != 2 {
+		t.Fatal("generated streaming renderer must synchronously scan only small inputs")
+	}
+	if strings.Contains(content, "result !== null ? result : (window.codeRanges") {
+		t.Fatal("large worker failure must not repeat the code-range scan on the UI thread")
 	}
 	if strings.Count(content, "window.isInsideCodeRanges(codeRanges, match.index, match.index + match[0].length)") != 4 {
 		t.Fatal("generated streaming renderer must protect thinking, tool-use, and both tool-result controls inside Markdown code")
