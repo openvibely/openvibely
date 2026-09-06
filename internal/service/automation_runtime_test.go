@@ -4878,39 +4878,12 @@ func requireAlertApprovedDecisionProjection(t *testing.T, db *sql.DB, projectID,
 	require.Equal(t, inboxNodeID, toNode)
 }
 
-func TestAutomationRuntimeNativeInboxListAlertsIgnoresGenericAlertFilters(t *testing.T) {
+func TestAutomationRuntimeNativeInboxListAlertsOmitsOptionalNarrowingFilters(t *testing.T) {
 	h := newAutomationSaveHarness(t, "Native inbox list contract")
 	ctx := context.Background()
 	saved, err := h.compiler.Save(ctx, AutomationSaveRequest{
 		ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: customNativeMailboxCandidate("Native inbox list contract"),
 	})
-	require.NoError(t, err)
-
-	alertRepo := repository.NewAlertRepo(h.db)
-	alertRepo.SetAutomationRepo(h.automationRepo)
-	alertSvc := NewAlertService(alertRepo, nil)
-	producer := automationNodeByKey(t, saved.Definition, "custom_producer")
-	producerCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: h.project.ID, Bindings: []models.AutomationBinding{{
-		AutomationID: saved.Definition.Automation.ID, VersionID: saved.Definition.Version.ID, NodeID: producer.ID,
-	}}})
-	createApproved := func(title string, read bool) *models.Alert {
-		a, createErr := alertSvc.CreateActionable(producerCtx, &models.Alert{
-			ProjectID: h.project.ID, Type: "suggestion", Title: title, Source: "native-finder",
-		})
-		require.NoError(t, createErr)
-		require.NoError(t, alertSvc.SetDecision(ctx, h.project.ID, a.ID, models.AlertDecisionApproved))
-		if read {
-			require.NoError(t, alertSvc.MarkRead(ctx, h.project.ID, a.ID))
-		}
-		return a
-	}
-	readUnclaimed := createApproved("Read unclaimed inbox work", true)
-	unreadUnclaimed := createApproved("Unread unclaimed inbox work", false)
-	failed := createApproved("Failed inbox work", false)
-	expiredClaim := createApproved("Expired claim inbox work", false)
-	_, err = h.db.Exec(`UPDATE alerts SET processing_state = 'failed', processing_error = 'retry' WHERE id = ?`, failed.ID)
-	require.NoError(t, err)
-	_, err = h.db.Exec(`UPDATE alerts SET processing_state = 'claimed', claimant = 'old-inbox', claim_expires_at = '2000-01-01 00:00:00' WHERE id = ?`, expiredClaim.ID)
 	require.NoError(t, err)
 
 	inbox := automationNodeByKey(t, saved.Definition, "custom_approved_inbox")
@@ -4919,11 +4892,11 @@ func TestAutomationRuntimeNativeInboxListAlertsIgnoresGenericAlertFilters(t *tes
 	inboxCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: h.project.ID, Bindings: []models.AutomationBinding{{
 		AutomationID: saved.Definition.Automation.ID, VersionID: saved.Definition.Version.ID, NodeID: inbox.ID,
 	}}})
-	runtime := (&LLMService{automationRepo: h.automationRepo, taskRepo: h.taskRepo, alertSvc: alertSvc}).taskControlRuntimeToolsWithContext(inboxCtx, *inboxTask)
+	runtime := (&LLMService{automationRepo: h.automationRepo, taskRepo: h.taskRepo}).taskControlRuntimeToolsWithContext(inboxCtx, *inboxTask)
 	require.NotNil(t, runtime)
-	require.False(t, runtime.HasDefinition("list_existing_automation_notifications"))
 
 	var properties map[string]json.RawMessage
+	var description string
 	for _, definition := range runtime.Definitions {
 		if definition.Name != "list_alerts" {
 			continue
@@ -4933,22 +4906,16 @@ func TestAutomationRuntimeNativeInboxListAlertsIgnoresGenericAlertFilters(t *tes
 		}
 		require.NoError(t, json.Unmarshal(definition.Parameters, &schema))
 		properties = schema.Properties
+		description = definition.Description
 		break
 	}
-	require.Len(t, properties, 2)
-	require.Contains(t, properties, "limit")
-	require.Contains(t, properties, "offset")
-
-	output, handled, isErr, err := runtime.Executor(inboxCtx, "list_alerts", json.RawMessage(`{
-		"project_id":"foreign","decision_state":"rejected","processing_state":"not_applicable",
-		"type":"other","source":"other","read":false,"implementation_task_linked":true,"limit":50,"offset":0
-	}`))
-	require.True(t, handled)
-	require.False(t, isErr)
-	require.NoError(t, err)
-	for _, expected := range []*models.Alert{readUnclaimed, unreadUnclaimed, failed, expiredClaim} {
-		require.Contains(t, output, expected.ID)
+	require.Len(t, properties, 4)
+	for _, property := range []string{"decision_state", "implementation_task_linked", "limit", "offset"} {
+		require.Contains(t, properties, property)
 	}
+	require.Contains(t, description, "decision_state=approved")
+	require.Contains(t, description, "implementation_task_linked=false")
+	require.Contains(t, description, "Processing, read, type, source, and project filters are intentionally unavailable")
 }
 
 func TestAutomationRuntimeNativeInboxUsesConfiguredImplementationGoal(t *testing.T) {

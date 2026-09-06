@@ -398,14 +398,39 @@ func (s *LLMService) taskControlRuntimeTools(task models.Task) *llmcontracts.Run
 	return s.taskControlRuntimeToolsWithContext(context.Background(), task)
 }
 
+func (s *LLMService) isCurrentNativeInboxTask(ctx context.Context, task models.Task) bool {
+	if s == nil || s.automationRepo == nil {
+		return false
+	}
+	automationContext, ok := AutomationContextFromContext(ctx)
+	if !ok || automationContext.ProjectID != task.ProjectID {
+		return false
+	}
+	origin := strings.SplitN(strings.TrimSpace(task.CreatedVia), ":", 3)
+	if len(origin) != 3 || origin[0] != "automation" {
+		return false
+	}
+	for _, binding := range automationContext.Bindings {
+		if binding.AutomationID != origin[1] {
+			continue
+		}
+		current, err := s.automationRepo.IsCurrentActiveBinding(ctx, task.ProjectID, binding)
+		if err != nil || !current {
+			continue
+		}
+		node, err := s.automationRepo.GetNodeByKey(ctx, task.ProjectID, binding.AutomationID, binding.VersionID, origin[2])
+		if err == nil && node != nil && node.ID == binding.NodeID && node.Role == "native_inbox" {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *LLMService) taskControlRuntimeToolsWithContext(ctx context.Context, task models.Task) *llmcontracts.RuntimeTools {
 	if s == nil || strings.TrimSpace(task.ProjectID) == "" {
 		return nil
 	}
-	nativeInbox := false
-	if s.alertSvc != nil {
-		nativeInbox, _ = s.alertSvc.IsCurrentNativeInboxRuntime(ctx, task.ProjectID)
-	}
+	nativeInbox := s.isCurrentNativeInboxTask(ctx, task)
 	defs := chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true)
 	filtered := make([]llmcontracts.RuntimeToolDefinition, 0, 5)
 	allowed := map[string]bool{
@@ -449,16 +474,13 @@ func (s *LLMService) taskControlRuntimeToolsWithContext(ctx context.Context, tas
 		if !allowed[name] {
 			continue
 		}
-		if nativeInbox && name == "list_existing_automation_notifications" {
-			continue
-		}
 		if name == "list_alerts" && (nativeInbox || task.Category == models.CategoryScheduled) {
 			var schema map[string]json.RawMessage
 			var properties map[string]json.RawMessage
 			if json.Unmarshal(def.Parameters, &schema) == nil && json.Unmarshal(schema["properties"], &properties) == nil {
 				if nativeInbox {
 					for property := range properties {
-						if property != "limit" && property != "offset" {
+						if property != "decision_state" && property != "implementation_task_linked" && property != "limit" && property != "offset" {
 							delete(properties, property)
 						}
 					}
@@ -474,7 +496,7 @@ func (s *LLMService) taskControlRuntimeToolsWithContext(ctx context.Context, tas
 				}
 			}
 			if nativeInbox {
-				def.Description = "List every approved, unlinked notification owned by this Native Approved Inbox. The runtime enforces project, ownership, decision, linkage, read-state, and recovery eligibility; use only stable pagination."
+				def.Description = "List notifications owned by this Native Approved Inbox. Use decision_state=approved and implementation_task_linked=false, plus stable pagination. Processing, read, type, source, and project filters are intentionally unavailable."
 			} else {
 				def.Description += " Uses the persisted caller task's project and includes both read and unread alerts."
 			}
