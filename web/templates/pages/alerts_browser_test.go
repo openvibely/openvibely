@@ -262,10 +262,12 @@ window.addEventListener('DOMContentLoaded', function() {
     var initialRow = detailRow('markdown-detail-1');
     if (initialRow.querySelector('[data-raw-content]')) fail('initial compact summary embedded full Markdown body');
 
-    var initialContent = document.getElementById('alerts-content');
-    htmx.process(document.body);
-    htmx.trigger(document.body, 'alertUpdate');
-    await waitFor(function() { return document.getElementById('alerts-content') !== initialContent; }, 'HTMX Alerts refresh');
+	    var initialContent = document.getElementById('alerts-content');
+	    var initialResults = document.getElementById('alerts-live-results');
+	    htmx.process(document.body);
+	    htmx.trigger(document.body, 'alertUpdate');
+	    await waitFor(function() { return document.getElementById('alerts-live-results') !== initialResults; }, 'HTMX Alerts results refresh');
+	    if (document.getElementById('alerts-content') !== initialContent) fail('live refresh replaced persistent Alerts controls');
     var row = detailRow('markdown-detail-1');
     if (!row || row.querySelector('[data-raw-content]')) fail('HTMX compact summary embedded full Markdown body');
 
@@ -681,8 +683,9 @@ func TestAlertsLiveRefreshAndSingleDeletePreserveViewportInChrome(t *testing.T) 
 		    if (transientTopJump) fail('live operational alert painted the Alerts scrollport at the top before restoration');
 		    assertNear(row('item-14').getBoundingClientRect().top, liveAnchorTop, 'live operational alert visible anchor');
 		    if (root.scrollTop < 100) fail('live operational alert reset the Alerts scrollport');
-		    if (row('live-operational').contains(document.activeElement)) fail('live operational alert received focus');
-		    var liveSearch = document.querySelector('input[data-card-search="alerts"]');
+			    if (row('live-operational').contains(document.activeElement)) fail('live operational alert received focus');
+
+			    var liveSearch = document.querySelector('input[data-card-search="alerts"]');
 		    liveSearch.value = 'notification';
 		    liveSearch.dispatchEvent(new Event('input', {bubbles:true}));
 		    await wait(50);
@@ -763,8 +766,35 @@ func TestAlertsLiveRefreshAndSingleDeletePreserveViewportInChrome(t *testing.T) 
 	    await remove('item-11');
 	    await wait(250);
 		    assertNear(row('item-08').getBoundingClientRect().top, filteredTop, 'filtered delete nearest surviving visible anchor');	    if (document.activeElement !== row('item-14').querySelector('[data-alert-delete]')) fail('filtered delete did not focus the next visible delete control');
-	    if (getComputedStyle(row('item-12')).display !== 'none') fail('persisted card search was not reapplied after deletion');
-	    await report('pass', '');
+		    if (getComputedStyle(row('item-12')).display !== 'none') fail('persisted card search was not reapplied after deletion');
+
+		    var filterButton = document.querySelector('[data-card-filters-button]');
+		    if (!filterButton) fail('missing Alerts filter button');
+		    filterButton.click();
+		    var filterDropdown = filterButton.closest('.dropdown');
+		    if (!filterDropdown || !filterDropdown.classList.contains('dropdown-open')) fail('Alerts filter menu did not open');
+		    var headerBeforeLiveRefresh = document.getElementById('alerts-page-header').textContent;
+		    await fetch('/browser-add?kind=filter-open', {method:'POST'});
+		    htmx.trigger(document.body, 'alertUpdate');
+		    await waitFor(function() { return !!row('live-filter-open'); }, 'live refresh while Filters is open');
+		    filterButton = document.querySelector('[data-card-filters-button]');
+		    filterDropdown = filterButton && filterButton.closest('.dropdown');
+		    if (!filterDropdown || !filterDropdown.classList.contains('dropdown-open')) fail('live refresh closed the Alerts filter menu');
+		    if (filterButton.getAttribute('aria-expanded') !== 'true') fail('restored Alerts filter menu is not exposed as expanded');
+		    if (document.getElementById('alerts-page-header').textContent === headerBeforeLiveRefresh) fail('live refresh left the Alerts page unread count stale');
+		    filterButton.click();
+
+		    var sort = document.querySelector('[data-card-sort]');
+		    if (!sort) fail('missing Alerts sort control');
+		    sort.focus();
+		    if (document.activeElement !== sort) fail('Alerts sort control did not receive focus before live refresh');
+		    await fetch('/browser-add?kind=sort-open', {method:'POST'});
+		    htmx.trigger(document.body, 'alertUpdate');
+		    await waitFor(function() { return !!row('live-sort-open'); }, 'live refresh while Sort is open');
+		    if (!sort.isConnected || document.activeElement !== sort) fail('live refresh closed the active Alerts sort menu');
+		    if (document.querySelectorAll('[data-alert-scroll-anchor="live-sort-open"]').length !== 1) fail('Alerts live refresh rendered the new alert more than once');
+		    if (document.getElementById('alerts-container').getAttribute('data-card-pagination-has-more') !== document.getElementById('alerts-live-results').getAttribute('data-card-pagination-has-more')) fail('Alerts live refresh did not synchronize pagination state');
+		    await report('pass', '');
 	  })().catch(function(error) { report('fail', String(error && error.stack || error)); });
 	});
 	</script>`

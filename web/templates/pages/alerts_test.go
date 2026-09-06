@@ -339,6 +339,11 @@ func TestAlertsContent_DecisionFilterRendersSelectedStateAndSearchState(t *testi
 		`value="failed" selected`,
 		`data-card-pagination-url="/alerts?decision_state=pending&amp;processing_state=failed&amp;project_id=project-1&amp;search=needle"`,
 		`hx-get="/alerts?decision_state=pending&amp;processing_state=failed&amp;project_id=project-1&amp;search=needle"`,
+		`hx-target="#alerts-live-results"`,
+		`hx-select="#alerts-live-results"`,
+		`hx-select-oob="#alerts-page-header"`,
+		`id="alerts-page-header"`,
+		`id="alerts-live-results" data-card-pagination-has-more="false"`,
 		`value="pending" selected`,
 		`No alerts match the selected filters.`,
 	} {

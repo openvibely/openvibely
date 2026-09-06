@@ -4657,6 +4657,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							if (target && target.closest && target.closest('[data-card-filters-button], [data-card-filters-popover]')) return;
 							document.querySelectorAll('[data-card-filters-button]').forEach(function(button) { closeCardFilterDropdown(button.closest('.dropdown')); });
 						});
+						window.setCardFilterDropdownState = setCardFilterDropdown;
 						window.refreshCardListToolbars = function(scope) { (scope || document).querySelectorAll('[data-card-list-toolbar]').forEach(initToolbar); };
 						document.addEventListener('keydown', function(event) {
 							if (event.key !== 'Escape') return;
