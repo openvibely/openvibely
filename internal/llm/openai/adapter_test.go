@@ -21,6 +21,41 @@ import (
 	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 )
 
+func TestRuntimeToolExecutorPreservesOptionalArgumentPresence(t *testing.T) {
+	const schema = `{"type":"object","properties":{"decision_state":{"type":"string"},"processing_state":{"type":["null","string"],"default":null},"read":{"type":["null","boolean"],"default":null},"implementation_task_linked":{"type":"boolean"}},"required":["decision_state","implementation_task_linked"],"additionalProperties":false}`
+	var inputs []json.RawMessage
+	runtime := &llmcontracts.RuntimeTools{
+		Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "list_alerts", Parameters: json.RawMessage(schema)}},
+		Executor: func(_ context.Context, _ string, input json.RawMessage) (string, bool, bool, error) {
+			inputs = append(inputs, append(json.RawMessage(nil), input...))
+			return `{}`, true, false, nil
+		},
+	}
+	executor := composeRuntimeToolExecutor(nil, runtime)
+
+	for _, input := range []json.RawMessage{
+		json.RawMessage(`{"decision_state":"approved","implementation_task_linked":false}`),
+		json.RawMessage(`{"decision_state":"approved","processing_state":null,"read":null,"implementation_task_linked":false}`),
+		json.RawMessage(`{"decision_state":"approved","processing_state":"not_applicable","read":false,"implementation_task_linked":false}`),
+	} {
+		_, _, err := executor(context.Background(), "list_alerts", input)
+		if err != nil {
+			t.Fatalf("execute list_alerts: %v", err)
+		}
+	}
+
+	const omitted = `{"decision_state":"approved","implementation_task_linked":false}`
+	if got := string(inputs[0]); got != omitted {
+		t.Fatalf("omitted input changed: %s", got)
+	}
+	if got := string(inputs[1]); got != omitted {
+		t.Fatalf("provider-materialized nulls reached handler: %s", got)
+	}
+	if got := string(inputs[2]); got != `{"decision_state":"approved","processing_state":"not_applicable","read":false,"implementation_task_linked":false}` {
+		t.Fatalf("explicit filter values changed: %s", got)
+	}
+}
+
 func TestRuntimeToolHelperMappingFilteringAndExecution(t *testing.T) {
 	if got := applyOpenAIOAuthSystemPrompt("base", models.LLMConfig{Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey}); got != "base" {
 		t.Fatalf("non-OAuth prompt changed: %q", got)

@@ -26,6 +26,25 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
+func TestToolExecutorRemovesOptionalNulls(t *testing.T) {
+	var got json.RawMessage
+	runtime := &llmcontracts.RuntimeTools{
+		Definitions: []llmcontracts.RuntimeToolDefinition{{
+			Name:       "list_alerts",
+			Parameters: json.RawMessage(`{"type":"object","properties":{"processing_state":{"type":["null","string"]},"read":{"type":["null","boolean"]}}}`),
+		}},
+		Executor: func(_ context.Context, _ string, input json.RawMessage) (string, bool, bool, error) {
+			got = append(json.RawMessage(nil), input...)
+			return `{}`, true, false, nil
+		},
+	}
+	ctx := llmcontracts.WithRuntimeTools(context.Background(), runtime)
+
+	_, _, err := toolExecutor(ctx, "")(context.Background(), "list_alerts", json.RawMessage(`{"processing_state":null,"read":false}`))
+	require.NoError(t, err)
+	require.JSONEq(t, `{"read":false}`, string(got))
+}
+
 func TestAdapterCallDirectUsesConfiguredChatCompletionsEndpoint(t *testing.T) {
 	var gotPath string
 	var gotAuth string
