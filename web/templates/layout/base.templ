@@ -633,6 +633,9 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					}
 				/* Kanban dropdowns are explicitly state-driven so dismissal can
 				   return focus to the trigger without focus reopening the menu. */
+				#kanban-board [data-kanban-menu-key] > [data-kanban-menu-content] {
+					transition: none !important;
+				}
 				#kanban-board [data-kanban-menu-key]:not([data-kanban-menu-open="true"]) > [data-kanban-menu-content] {
 					visibility: hidden !important;
 					opacity: 0 !important;

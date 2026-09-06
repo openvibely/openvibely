@@ -1437,21 +1437,25 @@ func TestTaskCardKebabMenuEscapesCardAndRepositionsAtDropZoneBottomInChrome(t *t
 		    if (!card.classList.contains('overflow-visible')) fail('task card root does not opt out of overflow clipping');
 		    label.focus();
 		    label.click();
-		    var firstVisibleRect = null;
-		    for (var revealFrame = 0; revealFrame < 12 && !firstVisibleRect; revealFrame++) {
-		      if (dropdown.getAttribute('data-kanban-menu-positioning') !== 'true' && getComputedStyle(menu).visibility !== 'hidden' && parseFloat(getComputedStyle(menu).opacity) > 0) {
-		        var visibleRect = menu.getBoundingClientRect();
-		        firstVisibleRect = {left:visibleRect.left, top:visibleRect.top, right:visibleRect.right, bottom:visibleRect.bottom};
-		        break;
-		      }
-		      await new Promise(function(resolve) { requestAnimationFrame(resolve); });
-		    }
+			    var firstVisibleRect = null;
+			    var firstVisibleMotion = null;
+			    for (var revealFrame = 0; revealFrame < 12 && !firstVisibleRect; revealFrame++) {
+			      if (dropdown.getAttribute('data-kanban-menu-positioning') !== 'true' && getComputedStyle(menu).visibility !== 'hidden' && parseFloat(getComputedStyle(menu).opacity) > 0) {
+			        var visibleRect = menu.getBoundingClientRect();
+			        var visibleStyle = getComputedStyle(menu);
+			        firstVisibleRect = {left:visibleRect.left, top:visibleRect.top, right:visibleRect.right, bottom:visibleRect.bottom};
+			        firstVisibleMotion = {animationName:visibleStyle.animationName, animationDuration:visibleStyle.animationDuration, transitionProperty:visibleStyle.transitionProperty, transitionDuration:visibleStyle.transitionDuration, activeAnimations:menu.getAnimations().filter(function(animation) { return animation.playState === 'running' || animation.playState === 'pending'; }).length};
+			        break;
+			      }
+			      await new Promise(function(resolve) { requestAnimationFrame(resolve); });
+			    }
 		    await frame();
 		    var zoneRect = zone.getBoundingClientRect();
 		    var cardRect = card.getBoundingClientRect();
 		    var menuRect = menu.getBoundingClientRect();
-		    if (!firstVisibleRect) fail('menu open event did not expose initial geometry');
-		    if (Math.abs(firstVisibleRect.left-menuRect.left)>1 || Math.abs(firstVisibleRect.top-menuRect.top)>1) fail('first-open menu jumped from '+JSON.stringify(firstVisibleRect)+' to '+JSON.stringify({left:menuRect.left,top:menuRect.top,right:menuRect.right,bottom:menuRect.bottom}));
+			    if (!firstVisibleRect) fail('menu open event did not expose initial geometry');
+			    if (!firstVisibleMotion || firstVisibleMotion.animationName !== 'none' || firstVisibleMotion.activeAnimations !== 0 || firstVisibleMotion.transitionDuration.split(',').some(function(duration) { return parseFloat(duration) > 0; })) fail('first-open menu retained slide/fade motion: '+JSON.stringify(firstVisibleMotion));
+			    if (Math.abs(firstVisibleRect.left-menuRect.left)>1 || Math.abs(firstVisibleRect.top-menuRect.top)>1) fail('first-open menu jumped from '+JSON.stringify(firstVisibleRect)+' to '+JSON.stringify({left:menuRect.left,top:menuRect.top,right:menuRect.right,bottom:menuRect.bottom}));
 	    var visibleBottom = Math.min(window.innerHeight, zoneRect.bottom);
 	    if (!dropdown.classList.contains('dropdown-top')) fail('bottom-edge dropdown did not switch to dropdown-top');
 	    if (menuRect.bottom > visibleBottom + 1) fail('menu bottom is clipped by visible scroll boundary: menu=' + JSON.stringify({top:menuRect.top,bottom:menuRect.bottom}) + ' zone=' + JSON.stringify({top:zoneRect.top,bottom:zoneRect.bottom}));
