@@ -765,36 +765,64 @@ func TestAlertsLiveRefreshAndSingleDeletePreserveViewportInChrome(t *testing.T) 
 	    var filteredTop = row('item-08').getBoundingClientRect().top;
 	    await remove('item-11');
 	    await wait(250);
-		    assertNear(row('item-08').getBoundingClientRect().top, filteredTop, 'filtered delete nearest surviving visible anchor');	    if (document.activeElement !== row('item-14').querySelector('[data-alert-delete]')) fail('filtered delete did not focus the next visible delete control');
-		    if (getComputedStyle(row('item-12')).display !== 'none') fail('persisted card search was not reapplied after deletion');
+	    assertNear(row('item-08').getBoundingClientRect().top, filteredTop, 'filtered delete nearest surviving visible anchor');
+	    if (document.activeElement !== row('item-14').querySelector('[data-alert-delete]')) fail('filtered delete did not focus the next visible delete control');
+	    if (getComputedStyle(row('item-12')).display !== 'none') fail('persisted card search was not reapplied after deletion');
+	    search = document.querySelector('input[data-card-search="alerts"]');
+	    search.value = '';
+	    search.dispatchEvent(new Event('input', {bubbles:true}));
+	    await waitFor(function() { return !new URL(window.location.href).searchParams.has('search'); }, 'selection search URL clear');
+	    await wait(50);
 
-		    var filterButton = document.querySelector('[data-card-filters-button]');
-		    if (!filterButton) fail('missing Alerts filter button');
-		    filterButton.click();
-		    var filterDropdown = filterButton.closest('.dropdown');
-		    if (!filterDropdown || !filterDropdown.classList.contains('dropdown-open')) fail('Alerts filter menu did not open');
-		    var headerBeforeLiveRefresh = document.getElementById('alerts-page-header').textContent;
-		    await fetch('/browser-add?kind=filter-open', {method:'POST'});
-		    htmx.trigger(document.body, 'alertUpdate');
-		    await waitFor(function() { return !!row('live-filter-open'); }, 'live refresh while Filters is open');
-		    filterButton = document.querySelector('[data-card-filters-button]');
-		    filterDropdown = filterButton && filterButton.closest('.dropdown');
-		    if (!filterDropdown || !filterDropdown.classList.contains('dropdown-open')) fail('live refresh closed the Alerts filter menu');
-		    if (filterButton.getAttribute('aria-expanded') !== 'true') fail('restored Alerts filter menu is not exposed as expanded');
-		    if (document.getElementById('alerts-page-header').textContent === headerBeforeLiveRefresh) fail('live refresh left the Alerts page unread count stale');
-		    filterButton.click();
+	    var staleSelection = row('item-09').querySelector('[data-card-selection-gutter] input');
+	    var survivingSelection = row('item-14').querySelector('[data-card-selection-gutter] input');
+	    if (!staleSelection || !survivingSelection) fail('missing initial Alerts selection controls');
+	    staleSelection.click();
+	    survivingSelection.click();
+	    var selectedCount = document.querySelector('[data-card-selected-count]');
+	    if (!selectedCount || selectedCount.textContent.trim() !== '2 selected') fail('initial Alerts selection count was not updated');
 
-		    var sort = document.querySelector('[data-card-sort]');
-		    if (!sort) fail('missing Alerts sort control');
-		    sort.focus();
-		    if (document.activeElement !== sort) fail('Alerts sort control did not receive focus before live refresh');
-		    await fetch('/browser-add?kind=sort-open', {method:'POST'});
-		    htmx.trigger(document.body, 'alertUpdate');
-		    await waitFor(function() { return !!row('live-sort-open'); }, 'live refresh while Sort is open');
-		    if (!sort.isConnected || document.activeElement !== sort) fail('live refresh closed the active Alerts sort menu');
-		    if (document.querySelectorAll('[data-alert-scroll-anchor="live-sort-open"]').length !== 1) fail('Alerts live refresh rendered the new alert more than once');
-		    if (document.getElementById('alerts-container').getAttribute('data-card-pagination-has-more') !== document.getElementById('alerts-live-results').getAttribute('data-card-pagination-has-more')) fail('Alerts live refresh did not synchronize pagination state');
-		    await report('pass', '');
+	    var filterButton = document.querySelector('[data-card-filters-button]');
+	    if (!filterButton) fail('missing Alerts filter button');
+	    filterButton.click();
+	    var filterDropdown = filterButton.closest('.dropdown');
+	    if (!filterDropdown || !filterDropdown.classList.contains('dropdown-open')) fail('Alerts filter menu did not open');
+	    var headerBeforeLiveRefresh = document.getElementById('alerts-page-header').textContent;
+	    await fetch('/browser-add?kind=filter-open&remove=item-09', {method:'POST'});
+	    htmx.trigger(document.body, 'alertUpdate');
+	    await waitFor(function() { return !!row('live-filter-open'); }, 'live refresh while Filters is open');
+	    if (row('item-09')) fail('live refresh retained an alert removed by authoritative state');
+	    var newSelection = row('live-filter-open').querySelector('[data-card-selection-gutter] input');
+	    survivingSelection = row('item-14').querySelector('[data-card-selection-gutter] input');
+	    if (!newSelection || newSelection.disabled) fail('live refresh did not install selection on the new alert');
+	    if (!survivingSelection || !survivingSelection.checked) fail('live refresh did not restore surviving alert selection');
+	    selectedCount = document.querySelector('[data-card-selected-count]');
+	    if (!selectedCount || selectedCount.textContent.trim() !== '1 selected') fail('live refresh did not remove stale selected alert IDs');
+	    var selectLoaded = document.querySelector('[data-card-select-loaded]');
+	    if (!selectLoaded || !selectLoaded.indeterminate) fail('live refresh did not reconcile the loaded selection master');
+	    newSelection.click();
+	    if (selectedCount.textContent.trim() !== '2 selected') fail('new alert selection control is not functional after live refresh');
+	    newSelection.click();
+	    filterButton = document.querySelector('[data-card-filters-button]');
+	    filterDropdown = filterButton && filterButton.closest('.dropdown');
+	    if (!filterDropdown || !filterDropdown.classList.contains('dropdown-open')) fail('live refresh closed the Alerts filter menu');
+	    if (filterButton.getAttribute('aria-expanded') !== 'true') fail('restored Alerts filter menu is not exposed as expanded');
+	    if (document.getElementById('alerts-page-header').textContent === headerBeforeLiveRefresh) fail('live refresh left the Alerts page unread count stale');
+	    filterButton.click();
+	    survivingSelection.click();
+	    if (selectedCount.textContent.trim() !== '0 selected') fail('surviving Alerts selection could not be cleared after live refresh');
+
+	    var sort = document.querySelector('[data-card-sort]');
+	    if (!sort) fail('missing Alerts sort control');
+	    sort.focus();
+	    if (document.activeElement !== sort) fail('Alerts sort control did not receive focus before live refresh');
+	    await fetch('/browser-add?kind=sort-open', {method:'POST'});
+	    htmx.trigger(document.body, 'alertUpdate');
+	    await waitFor(function() { return !!row('live-sort-open'); }, 'live refresh while Sort is open');
+	    if (!sort.isConnected || document.activeElement !== sort) fail('live refresh closed the active Alerts sort menu');
+	    if (document.querySelectorAll('[data-alert-scroll-anchor="live-sort-open"]').length !== 1) fail('Alerts live refresh rendered the new alert more than once');
+	    if (document.getElementById('alerts-container').getAttribute('data-card-pagination-has-more') !== document.getElementById('alerts-live-results').getAttribute('data-card-pagination-has-more')) fail('Alerts live refresh did not synchronize pagination state');
+	    await report('pass', '');
 	  })().catch(function(error) { report('fail', String(error && error.stack || error)); });
 	});
 	</script>`
@@ -824,6 +852,9 @@ func TestAlertsLiveRefreshAndSingleDeletePreserveViewportInChrome(t *testing.T) 
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"current_version":"0.3.0","state":"available","distribution":"standalone","channel":"stable","manual":false,"staged":true,"release":{"metadata":{"version":"0.4.0"},"target":{"image_ref":""},"apply_supported":true},"drain":{"active":{}}}`))
 		case r.URL.Path == "/browser-add" && r.Method == http.MethodPost:
+			if id := r.URL.Query().Get("remove"); id != "" {
+				deleteAlert(id)
+			}
 			prependAlert(r.URL.Query().Get("kind"))
 			w.WriteHeader(http.StatusNoContent)
 		case strings.HasPrefix(r.URL.Path, "/alerts/item-") && r.Method == http.MethodDelete:
