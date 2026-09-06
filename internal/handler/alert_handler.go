@@ -24,15 +24,14 @@ func alertCardListState(projectID string, filter models.AlertListFilter) pages.C
 		Search:    filter.Search,
 		Sort:      filter.Sort,
 		Filters: map[string]string{
-			"read":           read,
-			"severity":       string(filter.Severity),
-			"decision_state": string(filter.DecisionState),
-			"type":           string(filter.Type),
-			"source":         filter.Source,
+			"read":                       read,
+			"severity":                   string(filter.Severity),
+			"decision_state":             string(filter.DecisionState),
+			"processing_state":           string(filter.ProcessingState),
+			"implementation_task_linked": optionalBoolString(filter.ImplementationTaskLinked),
+			"type":                       string(filter.Type),
+			"source":                     filter.Source,
 		},
-	}
-	if filter.ProcessingState != "" {
-		state.Preserved = []pages.CardListQueryValue{{Key: "processing_state", Value: string(filter.ProcessingState)}}
 	}
 	return state
 }
@@ -83,16 +82,17 @@ func alertListFilter(c echo.Context, page cardPageRequest) models.AlertListFilte
 		source = ""
 	}
 	return models.AlertListFilter{
-		DecisionState:   parseAlertDecisionState(c.QueryParam("decision_state")),
-		ProcessingState: parseAlertProcessingState(c.QueryParam("processing_state")),
-		Type:            models.AlertType(allowlistedQuery(c, "type", "", string(models.AlertTaskFailed), string(models.AlertTaskNeedsFollowup), string(models.AlertCustom))),
-		Severity:        models.AlertSeverity(allowlistedQuery(c, "severity", "", string(models.SeverityInfo), string(models.SeverityWarning), string(models.SeverityError))),
-		Source:          source,
-		Read:            parseAlertRead(c.QueryParam("read")),
-		Sort:            allowlistedQuery(c, "sort", "newest", "newest", "oldest", "severity", "unread_first"),
-		Limit:           page.PageSize + 1,
-		Offset:          page.Offset,
-		Search:          page.Search,
+		DecisionState:            parseAlertDecisionState(c.QueryParam("decision_state")),
+		ProcessingState:          parseAlertProcessingState(c.QueryParam("processing_state")),
+		Type:                     models.AlertType(allowlistedQuery(c, "type", "", string(models.AlertTaskFailed), string(models.AlertTaskNeedsFollowup), string(models.AlertCustom))),
+		Severity:                 models.AlertSeverity(allowlistedQuery(c, "severity", "", string(models.SeverityInfo), string(models.SeverityWarning), string(models.SeverityError))),
+		Source:                   source,
+		Read:                     parseAlertRead(c.QueryParam("read")),
+		ImplementationTaskLinked: parseAlertImplementationTaskLinked(c.QueryParam("implementation_task_linked")),
+		Sort:                     allowlistedQuery(c, "sort", "newest", "newest", "oldest", "severity", "unread_first"),
+		Limit:                    page.PageSize + 1,
+		Offset:                   page.Offset,
+		Search:                   page.Search,
 	}
 }
 
@@ -104,6 +104,19 @@ func parseAlertRead(value string) *bool {
 	case "unread":
 		read := false
 		return &read
+	default:
+		return nil
+	}
+}
+
+func parseAlertImplementationTaskLinked(value string) *bool {
+	switch strings.TrimSpace(value) {
+	case "true":
+		linked := true
+		return &linked
+	case "false":
+		linked := false
+		return &linked
 	default:
 		return nil
 	}
