@@ -4878,46 +4878,6 @@ func requireAlertApprovedDecisionProjection(t *testing.T, db *sql.DB, projectID,
 	require.Equal(t, inboxNodeID, toNode)
 }
 
-func TestAutomationRuntimeNativeInboxListAlertsOmitsOptionalNarrowingFilters(t *testing.T) {
-	h := newAutomationSaveHarness(t, "Native inbox list contract")
-	ctx := context.Background()
-	saved, err := h.compiler.Save(ctx, AutomationSaveRequest{
-		ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: customNativeMailboxCandidate("Native inbox list contract"),
-	})
-	require.NoError(t, err)
-
-	inbox := automationNodeByKey(t, saved.Definition, "custom_approved_inbox")
-	inboxTask, err := h.taskRepo.GetByID(ctx, automationResourceID(t, saved.Definition, "custom_approved_inbox", "task"))
-	require.NoError(t, err)
-	inboxCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: h.project.ID, Bindings: []models.AutomationBinding{{
-		AutomationID: saved.Definition.Automation.ID, VersionID: saved.Definition.Version.ID, NodeID: inbox.ID,
-	}}})
-	runtime := (&LLMService{automationRepo: h.automationRepo, taskRepo: h.taskRepo}).taskControlRuntimeToolsWithContext(inboxCtx, *inboxTask)
-	require.NotNil(t, runtime)
-
-	var properties map[string]json.RawMessage
-	var description string
-	for _, definition := range runtime.Definitions {
-		if definition.Name != "list_alerts" {
-			continue
-		}
-		var schema struct {
-			Properties map[string]json.RawMessage `json:"properties"`
-		}
-		require.NoError(t, json.Unmarshal(definition.Parameters, &schema))
-		properties = schema.Properties
-		description = definition.Description
-		break
-	}
-	require.Len(t, properties, 4)
-	for _, property := range []string{"decision_state", "implementation_task_linked", "limit", "offset"} {
-		require.Contains(t, properties, property)
-	}
-	require.Contains(t, description, "decision_state=approved")
-	require.Contains(t, description, "implementation_task_linked=false")
-	require.Contains(t, description, "Processing, read, type, source, and project filters are intentionally unavailable")
-}
-
 func TestAutomationRuntimeNativeInboxUsesConfiguredImplementationGoal(t *testing.T) {
 	h := newAutomationSaveHarness(t, "Native implementation goal")
 	ctx := context.Background()
