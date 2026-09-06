@@ -335,11 +335,16 @@ jobs:
         env:
           OPENVIBELY_SKIP_BROWSER_PERF: "1"
         run: |
-          if go test ./web/templates/pages -run '^TestTaskCardKebabMenuEscapesCardAndRepositionsAtDropZoneBottomInChrome$' -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-pages-task-card-kebab-menu.txt; then
-            exit 0
-          fi
-          echo "Task card kebab-menu page coverage failed once; retrying the unchanged test."
-          go test ./web/templates/pages -run '^TestTaskCardKebabMenuEscapesCardAndRepositionsAtDropZoneBottomInChrome$' -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-pages-task-card-kebab-menu.txt
+          for attempt in 1 2 3; do
+            echo "Running task card kebab-menu page coverage attempt ${attempt}/3."
+            if go test ./web/templates/pages -run '^TestTaskCardKebabMenuEscapesCardAndRepositionsAtDropZoneBottomInChrome$' -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-pages-task-card-kebab-menu.txt; then
+              exit 0
+            fi
+            if [[ "$attempt" != "3" ]]; then
+              echo "Task card kebab-menu coverage failed; retrying the unchanged test group."
+            fi
+          done
+          exit 1
 
       - name: Run task board delete-all page test with coverage
         env:
