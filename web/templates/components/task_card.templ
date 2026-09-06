@@ -427,11 +427,12 @@ templ TaskCardMergeSubmenus(task *models.Task, projectID string, state TaskCardM
 						data-task-card-pr-action
 						data-task-id={ task.ID }
 						data-project-id={ projectID }
+						data-task-action-title={ task.Title }
 						data-target-branch={ targetBranch }
 						data-merge-type="pr"
 						data-merge-label="Create PR"
 						data-merge-endpoint="pull-request"
-						onclick="runTaskCardAction(this)"
+						onclick="openTaskCardMergeConfirm(this)"
 					>Create PR</button>
 				}
 			</li>

@@ -1000,22 +1000,23 @@ func TestTaskCardStateIconStaysVisibleWithLongTitleAtMobileWidthInChrome(t *test
 	}
 }
 
-func TestTasksRendersDirectTaskCardMergeActionsWithoutConfirmation(t *testing.T) {
+func TestTasksRendersTaskCardMergeConfirmation(t *testing.T) {
 	project := models.Project{ID: "project-merge", Name: "Merge Project"}
 	var out bytes.Buffer
 	if err := Tasks([]models.Project{project}, &project, nil, nil, nil, "", "").Render(context.Background(), &out); err != nil {
 		t.Fatal(err)
 	}
 	body := out.String()
-	for _, forbidden := range []string{
+	for _, required := range []string{
 		`id="task_card_merge_confirm_modal"`,
 		`id="task_card_merge_confirm_button"`,
 		`id="task_card_merge_error"`,
+		`data-task-card-merge-spinner`,
 		`openTaskCardMergeConfirm`,
 		`confirmTaskCardMerge`,
 	} {
-		if strings.Contains(body, forbidden) {
-			t.Fatalf("direct task-card actions must omit confirmation contract %q", forbidden)
+		if !strings.Contains(body, required) {
+			t.Fatalf("task-card confirmation contract missing %q", required)
 		}
 	}
 	for _, want := range []string{
@@ -1028,34 +1029,37 @@ func TestTasksRendersDirectTaskCardMergeActionsWithoutConfirmation(t *testing.T)
 	}
 }
 
-func TestTaskCardActionsOwnDirectRequestMetadata(t *testing.T) {
+func TestTaskCardActionsOwnConfirmationMetadata(t *testing.T) {
 	task := models.Task{ID: "task-direct", ProjectID: "project-merge", Title: "Direct", WorktreeBranch: "task/direct", MergeTargetBranch: "main"}
 	var out bytes.Buffer
 	if err := components.TaskCardMergeOptions(&task, task.ProjectID, true, true, nil, true).Render(context.Background(), &out); err != nil {
 		t.Fatal(err)
 	}
 	body := out.String()
-	for _, forbidden := range []string{"openTaskCardMergeConfirm", "confirmTaskCardMerge"} {
-		if strings.Contains(body, forbidden) {
-			t.Fatalf("direct card action must omit confirmation hook %q", forbidden)
-		}
-	}
 	for _, required := range []string{
-		`onclick="runTaskCardAction(this)"`,
+		`onclick="openTaskCardMergeConfirm(this)"`,
+		`data-task-action-title="Direct"`,
+		`data-target-branch="main"`,
 		`data-merge-endpoint="merge"`,
 		`data-merge-endpoint="rebase"`,
 		`data-merge-endpoint="pull-request"`,
 		`data-merge-type="merge"`,
+		`data-merge-type="ff"`,
+		`data-merge-type="rebase"`,
+		`data-merge-type="squash"`,
 		`data-merge-type="pr"`,
 		`data-project-id="project-merge"`,
 	} {
 		if !strings.Contains(body, required) {
-			t.Fatalf("direct task-card action contract missing %q: %s", required, body)
+			t.Fatalf("task-card confirmation metadata missing %q: %s", required, body)
 		}
+	}
+	if got := strings.Count(body, `onclick="openTaskCardMergeConfirm(this)"`); got != 5 {
+		t.Fatalf("confirmation hook count = %d, want 5 actions", got)
 	}
 }
 
-func TestTaskCardMergeMenuDirectActionConflictRetryAndBoardRefreshInChrome(t *testing.T) {
+func TestTaskCardMergeMenuConfirmationFailureRetryAndBoardRefreshInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))
 	if err != nil {
@@ -1120,7 +1124,10 @@ func TestTaskCardMergeMenuDirectActionConflictRetryAndBoardRefreshInChrome(t *te
 			await fetch('/dirty-worktree',{method:'POST'});var dirtyBoard=document.getElementById('kanban-board');var refresher=document.createElement('button');refresher.setAttribute('hx-get','/board-refresh');refresher.setAttribute('hx-trigger','refresh');refresher.setAttribute('hx-target','#kanban-board');refresher.setAttribute('hx-swap','outerHTML');document.body.appendChild(refresher);htmx.process(refresher);htmx.trigger(refresher,'refresh');await waitFor(function(){return document.getElementById('kanban-board')!==dirtyBoard},'dirty board refresh');
 			card=document.getElementById('task-merge-browser-task');trigger=card.querySelector('[data-task-card-menu-trigger]');clickTrigger(trigger);await frame();localPanel=card.querySelector('[data-task-card-local-submenu] > ul');merge=localPanel.querySelector('[data-merge-type="merge"]');var fastForward=localPanel.querySelector('[data-merge-type="ff"]');rebase=localPanel.querySelector('[data-merge-type="rebase"]');if(merge.disabled||!fastForward.disabled||!rebase.disabled)fail('dirty precomputed state did not disable Fast-forward and Rebase');
 			clickTrigger(trigger);await fetch('/clean-worktree',{method:'POST'});dirtyBoard=document.getElementById('kanban-board');htmx.trigger(refresher,'refresh');await waitFor(function(){return document.getElementById('kanban-board')!==dirtyBoard},'clean board refresh');
-				card=document.getElementById('task-merge-browser-task');trigger=card.querySelector('[data-task-card-menu-trigger]');clickTrigger(trigger);await frame();var actionLocal=card.querySelector('[data-task-card-local-submenu]');actionLocal.dispatchEvent(new MouseEvent('mouseenter',{bubbles:false}));await frame();var fastForwardRetry=document.querySelector('[data-task-card-submenu-portaled="true"] [data-merge-type="ff"]');if(!fastForwardRetry)fail('Fast-forward action was not portaled for pointer interaction');var oldBoard=document.getElementById('kanban-board'),actionRect=fastForwardRetry.getBoundingClientRect();await report('click-ready',JSON.stringify({x:actionRect.left+actionRect.width/2,y:actionRect.top+actionRect.height/2}));await waitFor(function(){return !!window._taskCardActionRequest},'browser-generated Fast-forward activation');fastForwardRetry.click();await waitFor(function(){return document.getElementById('kanban-board')!==oldBoard},'failed Fast-forward board refresh');if(document.querySelector('[data-task-card-submenu-portaled="true"]'))fail('board refresh left an orphaned submenu portal');var count=(await fetch('/post-count').then(function(r){return r.text()})).trim();if(count!=='1')fail('duplicate direct fast-forward was not blocked, posts='+count);var failureToast=Array.from(document.querySelectorAll('.toast-notification:not(.toast-dismiss)')).find(function(toast){return toast.textContent.includes('Fast-forward only failed')});if(!failureToast)fail('failed Fast-forward did not show an error toast');if(document.getElementById('new_task_modal').open)fail('merge conflict opened New Task modal');oldBoard=document.getElementById('kanban-board');card=document.getElementById('task-merge-browser-task');fastForwardRetry=card.querySelector('[data-merge-type="ff"]');fastForwardRetry.click();await waitFor(function(){return document.getElementById('kanban-board')!==oldBoard},'successful merge retry');			card=document.getElementById('task-merge-browser-task');trigger=card.querySelector('[data-task-card-menu-trigger]');clickTrigger(trigger);await frame();var mergedLocal=card.querySelector('[data-task-card-local-submenu] > ul');if(Array.from(mergedLocal.querySelectorAll('[data-task-card-merge-action]')).some(function(action){return !action.disabled}))fail('merged card retained an enabled Local action');if(card.querySelector('[data-kanban-menu-content]').innerHTML.includes('unavailable'))fail('disabled submenus use unavailable copy');			count=(await fetch('/post-count').then(function(r){return r.text()})).trim();if(count!=='2')fail('retry did not issue exactly one additional request, posts='+count);
+				card=document.getElementById('task-merge-browser-task');trigger=card.querySelector('[data-task-card-menu-trigger]');clickTrigger(trigger);await frame();var actionLocal=card.querySelector('[data-task-card-local-submenu]');actionLocal.dispatchEvent(new MouseEvent('mouseenter',{bubbles:false}));await frame();var fastForwardRetry=document.querySelector('[data-task-card-submenu-portaled="true"] [data-merge-type="ff"]');if(!fastForwardRetry)fail('Fast-forward action was not portaled for pointer interaction');var oldBoard=document.getElementById('kanban-board'),actionRect=fastForwardRetry.getBoundingClientRect();await report('click-ready',JSON.stringify({x:actionRect.left+actionRect.width/2,y:actionRect.top+actionRect.height/2}));
+				var mergeModal=document.getElementById('task_card_merge_confirm_modal');await waitFor(function(){return mergeModal.open},'Fast-forward confirmation modal');var confirmMessage=document.getElementById('task_card_merge_confirm_message').textContent;if(!confirmMessage.includes('Fast-forward only')||!confirmMessage.includes('Merge Browser Task')||!confirmMessage.includes('main'))fail('confirmation did not identify action, task, and target: '+confirmMessage);var confirmButton=document.getElementById('task_card_merge_confirm_button'),confirmRect=confirmButton.getBoundingClientRect();if(document.activeElement!==confirmButton)fail('confirmation did not focus its primary action');await report('confirm-ready',JSON.stringify({x:confirmRect.left+confirmRect.width/2,y:confirmRect.top+confirmRect.height/2}));
+				await waitFor(function(){return !!window._taskCardActionRequest&&confirmButton.disabled&&!confirmButton.querySelector('[data-task-card-merge-spinner]').classList.contains('hidden')},'visible busy confirmation state');confirmButton.click();await waitFor(function(){return document.getElementById('kanban-board')!==oldBoard},'failed Fast-forward board refresh');if(!mergeModal.open)fail('failed Fast-forward closed confirmation modal');var mergeError=document.getElementById('task_card_merge_error');if(mergeError.classList.contains('hidden')||!mergeError.textContent.includes('Fast-forward only failed'))fail('failed Fast-forward did not expose retry feedback');if(confirmButton.disabled||confirmButton.querySelector('[data-task-card-merge-spinner]').classList.contains('hidden')===false)fail('failed Fast-forward did not restore retry controls');if(document.activeElement!==confirmButton)fail('failed Fast-forward did not return focus to retry action');var count=(await fetch('/post-count').then(function(r){return r.text()})).trim();if(count!=='1')fail('duplicate confirmed Fast-forward was not blocked, posts='+count);confirmRect=confirmButton.getBoundingClientRect();oldBoard=document.getElementById('kanban-board');await report('retry-ready',JSON.stringify({x:confirmRect.left+confirmRect.width/2,y:confirmRect.top+confirmRect.height/2}));
+				await waitFor(function(){return document.getElementById('kanban-board')!==oldBoard},'successful confirmed Fast-forward board refresh');await waitFor(function(){var liveCard=document.getElementById('task-merge-browser-task'),liveTrigger=liveCard&&liveCard.querySelector('[data-task-card-menu-trigger]');return !mergeModal.open&&document.activeElement===liveTrigger},'successful confirmation close and live trigger focus');if(document.querySelector('[data-task-card-submenu-portaled="true"]'))fail('board refresh left an orphaned submenu portal');card=document.getElementById('task-merge-browser-task');trigger=card.querySelector('[data-task-card-menu-trigger]');clickTrigger(trigger);await frame();var mergedLocal=card.querySelector('[data-task-card-local-submenu] > ul');if(Array.from(mergedLocal.querySelectorAll('[data-task-card-merge-action]')).some(function(action){return !action.disabled}))fail('merged card retained an enabled Local action');if(card.querySelector('[data-kanban-menu-content]').innerHTML.includes('unavailable'))fail('disabled submenus use unavailable copy');count=(await fetch('/post-count').then(function(r){return r.text()})).trim();if(count!=='2')fail('retry did not issue exactly one additional request, posts='+count);
 			await report('pass','');
 		})().catch(function(e){report('fail',String(e&&e.stack||e))})});</script>`
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1380,6 +1387,10 @@ func TestTaskCardMergeMenuDirectActionConflictRetryAndBoardRefreshInChrome(t *te
 	point = readClickPoint("local-ready")
 	clickPoint()
 	point = readClickPoint("click-ready")
+	clickPoint()
+	point = readClickPoint("confirm-ready")
+	clickPoint()
+	point = readClickPoint("retry-ready")
 	clickPoint()
 
 	var outcome string
