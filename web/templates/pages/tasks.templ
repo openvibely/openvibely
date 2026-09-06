@@ -102,10 +102,15 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 
 	<!-- Task Card Merge Confirmation Dialog -->
 	if project != nil {
-		<dialog id="task_card_merge_confirm_modal" class="modal">
+		<dialog
+			id="task_card_merge_confirm_modal"
+			class="modal"
+			aria-labelledby="task_card_merge_confirm_title"
+			aria-describedby="task_card_merge_confirm_message"
+		>
 			<div class="modal-box max-w-md">
 				@ModalCloseButton("task_card_merge_confirm_modal", "Close task action confirmation")
-				<h3 class="font-bold text-lg pr-10">Confirm task action</h3>
+				<h3 id="task_card_merge_confirm_title" class="font-bold text-lg pr-10">Confirm task action</h3>
 				<p id="task_card_merge_confirm_message" class="py-4 break-words"></p>
 				<p id="task_card_merge_error" class="hidden text-sm text-error mb-3" role="alert"></p>
 				<div class="modal-action">
@@ -206,7 +211,6 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 				var trigger = card && card.querySelector('[data-task-card-menu-trigger]');
 				if (!trigger) return;
 				taskCardMergePendingFocusTaskID = '';
-				trigger.focus({preventScroll: true});
 				if (window.closeKanbanMenu) window.closeKanbanMenu(trigger.closest('[data-kanban-menu-key]'), true);
 			}
 
@@ -223,7 +227,7 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 					requestAnimationFrame(function() {
 						var card = document.getElementById('task-' + taskID);
 						var trigger = card && card.querySelector('[data-task-card-menu-trigger]');
-						if (trigger) trigger.focus({preventScroll: true});
+						if (trigger && window.closeKanbanMenu) window.closeKanbanMenu(trigger.closest('[data-kanban-menu-key]'), true);
 					});
 				});
 			}
