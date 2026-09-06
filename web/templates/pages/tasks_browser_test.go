@@ -1095,14 +1095,15 @@ func TestTaskCardMergeMenuDirectActionConflictRetryAndBoardRefreshInChrome(t *te
 			if(!card.classList.contains('task-selected'))fail('card selection was not established');
 			var trigger=card.querySelector('[data-task-card-menu-trigger]'),menu=card.querySelector('[data-kanban-menu-content]');
 			var menuHTML=menu.innerHTML;
-			clickTrigger(trigger);await frame();var menuWidth=menu.getBoundingClientRect().width;
+			clickTrigger(trigger);await frame();var menuRectBefore=menu.getBoundingClientRect(),menuWidth=menuRectBefore.width,menuHeight=menuRectBefore.height;
 			if(menu.innerHTML!==menuHTML)fail('opening the kebab changed its pre-rendered contents');
 			if(menuWidth<190)fail('kebab was too narrow: '+menuWidth);
 			if(parseInt(await fetch('/option-count').then(function(r){return r.text()}),10)!==0)fail('opening the kebab fetched merge options');
 			if(menu.querySelector('details')||menu.querySelector('summary'))fail('kebab contains an expand/collapse control');
 			var local=menu.querySelector('[data-task-card-local-submenu]'),localTrigger=local.querySelector(':scope > button'),localPanel=local.querySelector(':scope > ul');
 				localTrigger.scrollIntoView({block:'center'});await frame();local.dispatchEvent(new MouseEvent('mouseenter',{bubbles:false}));await frame();
-				if(getComputedStyle(localPanel).display==='none')fail('Local submenu did not open on hover');				var localRect=localPanel.getBoundingClientRect(),menuRect=menu.getBoundingClientRect(),localTriggerRect=localTrigger.getBoundingClientRect();if(localRect.left<0||localRect.right>window.innerWidth+1)fail('Local submenu escaped viewport');
+				if(localPanel.parentElement!==local)fail('opening Local submenu moved its source panel out of the main menu');var portaledLocalPanel=document.querySelector('[data-task-card-submenu-portaled="true"]');if(!portaledLocalPanel)fail('Local submenu did not create a portaled interaction panel');localPanel=portaledLocalPanel;
+				if(getComputedStyle(localPanel).display==='none')fail('Local submenu did not open on hover');				var menuRectAfter=menu.getBoundingClientRect();if(Math.abs(menuRectAfter.width-menuWidth)>1||Math.abs(menuRectAfter.height-menuHeight)>1)fail('opening Local submenu resized the main menu from '+menuWidth+'x'+menuHeight+' to '+menuRectAfter.width+'x'+menuRectAfter.height);var localRect=localPanel.getBoundingClientRect(),menuRect=menuRectAfter,localTriggerRect=localTrigger.getBoundingClientRect();if(localRect.left<0||localRect.right>window.innerWidth+1)fail('Local submenu escaped viewport');
 				var horizontalOverlap=Math.min(localRect.right,menuRect.right)-Math.max(localRect.left,menuRect.left);if(horizontalOverlap>3)fail('Local submenu covers the main menu: overlap='+horizontalOverlap+' local='+JSON.stringify({left:localRect.left,right:localRect.right})+' menu='+JSON.stringify({left:menuRect.left,right:menuRect.right}));
 				if(localRect.top>localTriggerRect.bottom+1||localRect.bottom<localTriggerRect.top-1)fail('Local submenu has no continuous pointer corridor from its parent row; local='+JSON.stringify({top:localRect.top,bottom:localRect.bottom})+' trigger='+JSON.stringify({top:localTriggerRect.top,bottom:localTriggerRect.bottom}));
 				var merge=localPanel.querySelector('[data-merge-type="merge"]'),rebase=localPanel.querySelector('[data-merge-type="rebase"]');
@@ -1110,7 +1111,7 @@ func TestTaskCardMergeMenuDirectActionConflictRetryAndBoardRefreshInChrome(t *te
 				localTrigger.focus();localTrigger.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true,cancelable:true}));if(!localPanel.contains(document.activeElement))fail('keyboard could not enter portaled Local submenu');
 				var focusedLocalAction=document.activeElement;focusedLocalAction.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));await frame();if(menu.closest('[data-kanban-menu-key]').getAttribute('data-kanban-menu-open')==='true'||document.querySelector('[data-task-card-submenu-portaled="true"]'))fail('Escape inside portaled submenu did not close its owning menu');if(document.activeElement!==trigger)fail('Escape inside portaled submenu did not restore trigger focus');
 				clickTrigger(trigger);await frame();var github=menu.querySelector('[data-task-card-github-submenu]'),githubTrigger=github.querySelector(':scope > button'),githubPanel=github.querySelector(':scope > ul');
-				githubTrigger.focus();await frame();if(getComputedStyle(githubPanel).display==='none'||!githubPanel.querySelector('[data-task-card-pr-action]')||githubPanel.querySelector('[data-task-card-pr-action]').disabled)fail('eligible GitHub submenu was not precomputed');
+				githubTrigger.focus();await frame();githubPanel=document.querySelector('[data-task-card-submenu-portaled="true"]');if(!githubPanel||getComputedStyle(githubPanel).display==='none'||!githubPanel.querySelector('[data-task-card-pr-action]')||githubPanel.querySelector('[data-task-card-pr-action]').disabled)fail('eligible GitHub submenu was not precomputed');
 				document.body.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,cancelable:true,pointerId:2,pointerType:'mouse',isPrimary:true}));await frame();if(menu.closest('[data-kanban-menu-key]').getAttribute('data-kanban-menu-open')==='true'||document.querySelector('[data-task-card-submenu-portaled="true"]'))fail('outside pointerdown did not dismiss the owning menu');clickTrigger(trigger);await frame();			var boardBefore=document.getElementById('kanban-board');window.dispatchEvent(new CustomEvent('sse-task-event',{detail:{type:'task_updated',project_id:'project-card-merge-browser'}}));await new Promise(function(r){setTimeout(r,700)});
 			if(document.getElementById('kanban-board')!==boardBefore)fail('SSE replaced board while kebab was open');
 			clickTrigger(trigger);await waitFor(function(){return document.getElementById('kanban-board')!==boardBefore},'deferred board refresh after close');
@@ -1118,7 +1119,7 @@ func TestTaskCardMergeMenuDirectActionConflictRetryAndBoardRefreshInChrome(t *te
 			await fetch('/dirty-worktree',{method:'POST'});var dirtyBoard=document.getElementById('kanban-board');var refresher=document.createElement('button');refresher.setAttribute('hx-get','/board-refresh');refresher.setAttribute('hx-trigger','refresh');refresher.setAttribute('hx-target','#kanban-board');refresher.setAttribute('hx-swap','outerHTML');document.body.appendChild(refresher);htmx.process(refresher);htmx.trigger(refresher,'refresh');await waitFor(function(){return document.getElementById('kanban-board')!==dirtyBoard},'dirty board refresh');
 			card=document.getElementById('task-merge-browser-task');trigger=card.querySelector('[data-task-card-menu-trigger]');clickTrigger(trigger);await frame();localPanel=card.querySelector('[data-task-card-local-submenu] > ul');merge=localPanel.querySelector('[data-merge-type="merge"]');var fastForward=localPanel.querySelector('[data-merge-type="ff"]');rebase=localPanel.querySelector('[data-merge-type="rebase"]');if(merge.disabled||!fastForward.disabled||!rebase.disabled)fail('dirty precomputed state did not disable Fast-forward and Rebase');
 			clickTrigger(trigger);await fetch('/clean-worktree',{method:'POST'});dirtyBoard=document.getElementById('kanban-board');htmx.trigger(refresher,'refresh');await waitFor(function(){return document.getElementById('kanban-board')!==dirtyBoard},'clean board refresh');
-				card=document.getElementById('task-merge-browser-task');trigger=card.querySelector('[data-task-card-menu-trigger]');clickTrigger(trigger);await frame();var actionLocal=card.querySelector('[data-task-card-local-submenu]');actionLocal.dispatchEvent(new MouseEvent('mouseenter',{bubbles:false}));await frame();var fastForwardRetry=document.querySelector('[data-task-card-submenu-portaled="true"] [data-merge-type="ff"]');if(!fastForwardRetry)fail('Fast-forward action was not portaled for pointer interaction');var oldBoard=document.getElementById('kanban-board');fastForwardRetry.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,cancelable:true,pointerId:1,pointerType:'mouse',isPrimary:true}));if(!fastForwardRetry.isConnected||fastForwardRetry.closest('[data-task-card-submenu-portaled="true"]')===null)fail('pointerdown inside portaled submenu closed or moved the action before click completion');fastForwardRetry.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,cancelable:true,pointerId:1,pointerType:'mouse',isPrimary:true}));fastForwardRetry.click();fastForwardRetry.click();await waitFor(function(){return document.getElementById('kanban-board')!==oldBoard},'failed Fast-forward board refresh');if(document.querySelector('[data-task-card-submenu-portaled="true"]'))fail('board refresh left an orphaned submenu portal');var count=(await fetch('/post-count').then(function(r){return r.text()})).trim();if(count!=='1')fail('duplicate direct fast-forward was not blocked, posts='+count);var failureToast=Array.from(document.querySelectorAll('.toast-notification:not(.toast-dismiss)')).find(function(toast){return toast.textContent.includes('Fast-forward only failed')});if(!failureToast)fail('failed Fast-forward did not show an error toast');if(document.getElementById('new_task_modal').open)fail('merge conflict opened New Task modal');oldBoard=document.getElementById('kanban-board');card=document.getElementById('task-merge-browser-task');fastForwardRetry=card.querySelector('[data-merge-type="ff"]');fastForwardRetry.click();await waitFor(function(){return document.getElementById('kanban-board')!==oldBoard},'successful merge retry');			card=document.getElementById('task-merge-browser-task');trigger=card.querySelector('[data-task-card-menu-trigger]');clickTrigger(trigger);await frame();var mergedLocal=card.querySelector('[data-task-card-local-submenu] > ul');if(Array.from(mergedLocal.querySelectorAll('[data-task-card-merge-action]')).some(function(action){return !action.disabled}))fail('merged card retained an enabled Local action');if(card.querySelector('[data-kanban-menu-content]').innerHTML.includes('unavailable'))fail('disabled submenus use unavailable copy');			count=(await fetch('/post-count').then(function(r){return r.text()})).trim();if(count!=='2')fail('retry did not issue exactly one additional request, posts='+count);
+				card=document.getElementById('task-merge-browser-task');trigger=card.querySelector('[data-task-card-menu-trigger]');clickTrigger(trigger);await frame();var actionLocal=card.querySelector('[data-task-card-local-submenu]');actionLocal.dispatchEvent(new MouseEvent('mouseenter',{bubbles:false}));await frame();var fastForwardRetry=document.querySelector('[data-task-card-submenu-portaled="true"] [data-merge-type="ff"]');if(!fastForwardRetry)fail('Fast-forward action was not portaled for pointer interaction');var oldBoard=document.getElementById('kanban-board'),actionRect=fastForwardRetry.getBoundingClientRect();await report('click-ready',JSON.stringify({x:actionRect.left+actionRect.width/2,y:actionRect.top+actionRect.height/2}));await waitFor(function(){return !!window._taskCardActionRequest},'browser-generated Fast-forward activation');fastForwardRetry.click();await waitFor(function(){return document.getElementById('kanban-board')!==oldBoard},'failed Fast-forward board refresh');if(document.querySelector('[data-task-card-submenu-portaled="true"]'))fail('board refresh left an orphaned submenu portal');var count=(await fetch('/post-count').then(function(r){return r.text()})).trim();if(count!=='1')fail('duplicate direct fast-forward was not blocked, posts='+count);var failureToast=Array.from(document.querySelectorAll('.toast-notification:not(.toast-dismiss)')).find(function(toast){return toast.textContent.includes('Fast-forward only failed')});if(!failureToast)fail('failed Fast-forward did not show an error toast');if(document.getElementById('new_task_modal').open)fail('merge conflict opened New Task modal');oldBoard=document.getElementById('kanban-board');card=document.getElementById('task-merge-browser-task');fastForwardRetry=card.querySelector('[data-merge-type="ff"]');fastForwardRetry.click();await waitFor(function(){return document.getElementById('kanban-board')!==oldBoard},'successful merge retry');			card=document.getElementById('task-merge-browser-task');trigger=card.querySelector('[data-task-card-menu-trigger]');clickTrigger(trigger);await frame();var mergedLocal=card.querySelector('[data-task-card-local-submenu] > ul');if(Array.from(mergedLocal.querySelectorAll('[data-task-card-merge-action]')).some(function(action){return !action.disabled}))fail('merged card retained an enabled Local action');if(card.querySelector('[data-kanban-menu-content]').innerHTML.includes('unavailable'))fail('disabled submenus use unavailable copy');			count=(await fetch('/post-count').then(function(r){return r.text()})).trim();if(count!=='2')fail('retry did not issue exactly one additional request, posts='+count);
 			await report('pass','');
 		})().catch(function(e){report('fail',String(e&&e.stack||e))})});</script>`
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1232,21 +1233,120 @@ func TestTaskCardMergeMenuDirectActionConflictRetryAndBoardRefreshInChrome(t *te
 		default:
 		}
 	}()
+	debugListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve Chrome debugging port: %v", err)
+	}
+	debugPort := debugListener.Addr().(*net.TCPAddr).Port
+	_ = debugListener.Close()
+
 	stderrPath := filepath.Join(t.TempDir(), "task-card-merge-browser.stderr")
 	stderr, _ := os.Create(stderrPath)
 	defer stderr.Close()
-	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--disable-background-networking", "--window-size=390,760", "--user-data-dir="+filepath.Join(t.TempDir(), "profile"), server.URL+"/tasks?project_id="+project.ID)
+	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--disable-background-networking", fmt.Sprintf("--remote-debugging-port=%d", debugPort), "--window-size=390,760", "--user-data-dir="+filepath.Join(t.TempDir(), "profile"), server.URL+"/tasks?project_id="+project.ID)
 	cmd.Stderr = stderr
 	if err := startBrowserProcess(cmd); err != nil {
 		t.Fatal(err)
 	}
+	defer stopBrowserProcess(cmd)
+
+	var ready string
+	select {
+	case ready = <-result:
+	case <-time.After(15 * time.Second):
+		ready = "fail:timeout waiting for browser click coordinates"
+	}
+	if !strings.HasPrefix(ready, "click-ready:") {
+		data, _ := os.ReadFile(stderrPath)
+		t.Fatalf("task card merge browser did not reach native click boundary: %s\n%s", ready, data)
+	}
+	var point struct {
+		X float64 `json:"x"`
+		Y float64 `json:"y"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimPrefix(ready, "click-ready:")), &point); err != nil {
+		t.Fatalf("decode native click coordinates from %q: %v", ready, err)
+	}
+
+	type debugTarget struct {
+		URL                  string `json:"url"`
+		WebSocketDebuggerURL string `json:"webSocketDebuggerUrl"`
+	}
+	var target debugTarget
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		resp, requestErr := http.Get(fmt.Sprintf("http://127.0.0.1:%d/json/list", debugPort))
+		if requestErr == nil {
+			var targets []debugTarget
+			decodeErr := json.NewDecoder(resp.Body).Decode(&targets)
+			_ = resp.Body.Close()
+			if decodeErr == nil {
+				for _, candidate := range targets {
+					if strings.HasPrefix(candidate.URL, server.URL+"/tasks") && candidate.WebSocketDebuggerURL != "" {
+						target = candidate
+						break
+					}
+				}
+			}
+		}
+		if target.WebSocketDebuggerURL != "" {
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	if target.WebSocketDebuggerURL == "" {
+		t.Fatalf("find Chrome debugging target for %s", server.URL)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	conn, _, err := websocket.Dial(ctx, target.WebSocketDebuggerURL, nil)
+	if err != nil {
+		t.Fatalf("connect to Chrome debugging target: %v", err)
+	}
+	defer conn.CloseNow()
+	nextID := 0
+	dispatch := func(eventType string, extra map[string]any) {
+		t.Helper()
+		nextID++
+		params := map[string]any{"type": eventType, "x": point.X, "y": point.Y, "button": "left", "clickCount": 1}
+		for key, value := range extra {
+			params[key] = value
+		}
+		request, err := json.Marshal(map[string]any{"id": nextID, "method": "Input.dispatchMouseEvent", "params": params})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := conn.Write(ctx, websocket.MessageText, request); err != nil {
+			t.Fatal(err)
+		}
+		for {
+			_, message, err := conn.Read(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var response struct {
+				ID    int             `json:"id"`
+				Error json.RawMessage `json:"error"`
+			}
+			if err := json.Unmarshal(message, &response); err != nil || response.ID != nextID {
+				continue
+			}
+			if len(response.Error) > 0 {
+				t.Fatalf("CDP Input.dispatchMouseEvent error: %s", response.Error)
+			}
+			return
+		}
+	}
+	dispatch("mouseMoved", map[string]any{"button": "none", "clickCount": 0})
+	dispatch("mousePressed", map[string]any{})
+	dispatch("mouseReleased", map[string]any{})
+
 	var outcome string
 	select {
 	case outcome = <-result:
 	case <-time.After(15 * time.Second):
 		outcome = "fail:timeout"
 	}
-	stopBrowserProcess(cmd)
 	if !strings.HasPrefix(outcome, "pass:") {
 		data, _ := os.ReadFile(stderrPath)
 		mu.Lock()
@@ -1343,6 +1443,8 @@ func TestTaskCardKebabMenuEscapesCardAndRepositionsAtDropZoneBottomInChrome(t *t
 		    if (!localTrigger || !localPanel) fail('missing Local submenu controls');
 		    localTrigger.focus();
 		    await frame();
+		    localPanel = document.querySelector('[data-task-card-submenu-portaled="true"]');
+		    if (!localPanel) fail('Local submenu did not create a portaled interaction panel');
 		    var localRect = localPanel.getBoundingClientRect();
 		    if (localRect.top < zoneRect.top - 1 || localRect.bottom > zoneRect.bottom + 1) fail('Local submenu is clipped by the task scroll boundary: submenu=' + JSON.stringify({top:localRect.top,bottom:localRect.bottom}) + ' zone=' + JSON.stringify({top:zoneRect.top,bottom:zoneRect.bottom}));
 		    var localAction = localPanel.querySelector('[data-task-card-merge-action]:not([disabled])');

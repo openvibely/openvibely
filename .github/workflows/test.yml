@@ -291,15 +291,75 @@ jobs:
           echo "Worker and project page coverage failed once; retrying the unchanged test group."
           go test ./web/templates/pages -run '^(TestWorker|TestSSE|TestProjectSelector)' -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-pages-worker-project.txt
 
-      - name: Run task card page tests with coverage
+      - name: Run task running-icon page test with coverage
         env:
           OPENVIBELY_SKIP_BROWSER_PERF: "1"
         run: |
-          if go test ./web/templates/pages -run '^(TestTaskRunningIcon|TestTaskCard|TestTaskBoard)' -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-pages-task-card.txt; then
+          if go test ./web/templates/pages -run '^TestTaskRunningIconSharesThemeAwareSendColorWithoutSuppressingHoverInChrome$' -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-pages-task-running-icon.txt; then
             exit 0
           fi
-          echo "Task card page coverage failed once; retrying the unchanged test group."
-          go test ./web/templates/pages -run '^(TestTaskRunningIcon|TestTaskCard|TestTaskBoard)' -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-pages-task-card.txt
+          echo "Task running-icon page coverage failed once; retrying the unchanged test."
+          go test ./web/templates/pages -run '^TestTaskRunningIconSharesThemeAwareSendColorWithoutSuppressingHoverInChrome$' -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-pages-task-running-icon.txt
+
+      - name: Run task card state-icon page test with coverage
+        env:
+          OPENVIBELY_SKIP_BROWSER_PERF: "1"
+        run: |
+          if go test ./web/templates/pages -run '^TestTaskCardStateIconStaysVisibleWithLongTitleAtMobileWidthInChrome$' -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-pages-task-card-state-icon.txt; then
+            exit 0
+          fi
+          echo "Task card state-icon page coverage failed once; retrying the unchanged test."
+          go test ./web/templates/pages -run '^TestTaskCardStateIconStaysVisibleWithLongTitleAtMobileWidthInChrome$' -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-pages-task-card-state-icon.txt
+
+      - name: Run task card request-metadata page test with coverage
+        env:
+          OPENVIBELY_SKIP_BROWSER_PERF: "1"
+        run: |
+          if go test ./web/templates/pages -run '^TestTaskCardActionsOwnDirectRequestMetadata$' -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-pages-task-card-request-metadata.txt; then
+            exit 0
+          fi
+          echo "Task card request-metadata page coverage failed once; retrying the unchanged test."
+          go test ./web/templates/pages -run '^TestTaskCardActionsOwnDirectRequestMetadata$' -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-pages-task-card-request-metadata.txt
+
+      - name: Run task card merge-menu page test with coverage
+        env:
+          OPENVIBELY_SKIP_BROWSER_PERF: "1"
+        run: |
+          if go test ./web/templates/pages -run '^TestTaskCardMergeMenuDirectActionConflictRetryAndBoardRefreshInChrome$' -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-pages-task-card-merge-menu.txt; then
+            exit 0
+          fi
+          echo "Task card merge-menu page coverage failed once; retrying the unchanged test."
+          go test ./web/templates/pages -run '^TestTaskCardMergeMenuDirectActionConflictRetryAndBoardRefreshInChrome$' -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-pages-task-card-merge-menu.txt
+
+      - name: Run task card kebab-menu page test with coverage
+        env:
+          OPENVIBELY_SKIP_BROWSER_PERF: "1"
+        run: |
+          if go test ./web/templates/pages -run '^TestTaskCardKebabMenuEscapesCardAndRepositionsAtDropZoneBottomInChrome$' -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-pages-task-card-kebab-menu.txt; then
+            exit 0
+          fi
+          echo "Task card kebab-menu page coverage failed once; retrying the unchanged test."
+          go test ./web/templates/pages -run '^TestTaskCardKebabMenuEscapesCardAndRepositionsAtDropZoneBottomInChrome$' -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-pages-task-card-kebab-menu.txt
+
+      - name: Run task board delete-all page test with coverage
+        env:
+          OPENVIBELY_SKIP_BROWSER_PERF: "1"
+        run: |
+          if go test ./web/templates/pages -run '^TestTaskBoardDeleteAllConfirmationFlowInChrome$' -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-pages-task-board-delete-all.txt; then
+            exit 0
+          fi
+          echo "Task board delete-all page coverage failed once; retrying the unchanged test."
+          go test ./web/templates/pages -run '^TestTaskBoardDeleteAllConfirmationFlowInChrome$' -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-pages-task-board-delete-all.txt
+
+      - name: Run responsive task board delete-all page test with coverage
+        env:
+          OPENVIBELY_SKIP_BROWSER_PERF: "1"
+        run: |
+          if go test ./web/templates/pages -run '^TestTaskBoardDeleteAllConfirmationResponsiveInChrome$' -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-pages-task-board-delete-all-responsive.txt; then
+            exit 0
+          fi
+          echo "Responsive task board delete-all page coverage failed once; retrying the unchanged test."
+          go test ./web/templates/pages -run '^TestTaskBoardDeleteAllConfirmationResponsiveInChrome$' -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-pages-task-board-delete-all-responsive.txt
 
       - name: Run upcoming task page tests with coverage
         env:
@@ -342,7 +402,13 @@ jobs:
               "coverage-pages-detail.txt",
               "coverage-pages-task-list.txt",
               "coverage-pages-worker-project.txt",
-              "coverage-pages-task-card.txt",
+              "coverage-pages-task-running-icon.txt",
+              "coverage-pages-task-card-state-icon.txt",
+              "coverage-pages-task-card-request-metadata.txt",
+              "coverage-pages-task-card-merge-menu.txt",
+              "coverage-pages-task-card-kebab-menu.txt",
+              "coverage-pages-task-board-delete-all.txt",
+              "coverage-pages-task-board-delete-all-responsive.txt",
               "coverage-pages-upcoming-task.txt",
               "coverage-pages-changes.txt",
           ]

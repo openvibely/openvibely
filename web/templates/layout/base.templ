@@ -2763,20 +2763,10 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 
 			function restoreKanbanSubmenu(panel) {
 				if (!panel || panel.getAttribute('data-task-card-submenu-portaled') !== 'true') return;
-				const placeholder = panel.__openVibelySubmenuPlaceholder;
-				if (placeholder && placeholder.parentNode) {
-					placeholder.parentNode.insertBefore(panel, placeholder);
-					placeholder.remove();
-				} else {
-					panel.remove();
-				}
-				panel.removeAttribute('data-task-card-submenu-portaled');
-				panel.style.removeProperty('display');
-				panel.style.removeProperty('left');
-				panel.style.removeProperty('top');
-				panel.style.removeProperty('width');
-				panel.style.removeProperty('max-height');
-				panel.__openVibelySubmenuPlaceholder = null;
+				const sourcePanel = panel.__openVibelySubmenuSourcePanel;
+				if (sourcePanel) sourcePanel.style.removeProperty('display');
+				panel.remove();
+				panel.__openVibelySubmenuSourcePanel = null;
 				panel.__openVibelySubmenuDropdown = null;
 			}
 
@@ -2788,17 +2778,20 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 
 			function positionKanbanSubmenu(container) {
 				if (!container || !container.querySelector) return;
-				const panel = container.querySelector(':scope > [data-task-card-submenu-panel]');
+				const sourcePanel = container.querySelector(':scope > [data-task-card-submenu-panel]');
 				const dropdown = container.closest('[data-kanban-menu-key]');
 				const menu = dropdown && dropdown.querySelector(':scope > [data-kanban-menu-content]');
-				if (!panel || !dropdown || !menu) return;
+				if (!sourcePanel || !dropdown || !menu) return;
+				let panel = Array.from(document.querySelectorAll('[data-task-card-submenu-portaled="true"]')).find(function(candidate) {
+					return candidate.__openVibelySubmenuSourcePanel === sourcePanel;
+				}) || null;
 				closeKanbanSubmenus(dropdown, panel);
-				if (panel.getAttribute('data-task-card-submenu-portaled') !== 'true') {
-					const placeholder = document.createComment('task-card-submenu');
-					panel.parentNode.insertBefore(placeholder, panel);
-					panel.__openVibelySubmenuPlaceholder = placeholder;
+				if (!panel) {
+					panel = sourcePanel.cloneNode(true);
+					panel.__openVibelySubmenuSourcePanel = sourcePanel;
 					panel.__openVibelySubmenuDropdown = dropdown;
 					panel.setAttribute('data-task-card-submenu-portaled', 'true');
+					sourcePanel.style.setProperty('display', 'none', 'important');
 					document.body.appendChild(panel);
 				}
 				panel.style.setProperty('display', 'block', 'important');
