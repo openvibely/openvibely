@@ -127,7 +127,7 @@ func TestSidebar_ProjectSelectorSearchableAndIdentityOnly(t *testing.T) {
 		`var anchorLeft = root.hasAttribute('data-searchable-selector-left-anchor') ? trigger.left`,
 		`dialog.style.top = top + 'px';`,
 		`String(state.search.value || '').trim().toLowerCase()`,
-		`var hidden = query ? (!match || current) : false;`,
+		`var hidden = !match;`,
 		`if (!hidden) matchCount++;`,
 		`option.hidden = hidden;`,
 		`option.classList.toggle('hidden', hidden);`,

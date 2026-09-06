@@ -46,7 +46,15 @@ func TestTaskRepo_BreadcrumbSelectorIsProjectScopedAndBounded(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	items, err := tasks.ListBreadcrumbSelector(ctx, "default", "selector", currentID, false, 20)
+	items, err := tasks.ListBreadcrumbSelector(ctx, "default", "task 24", currentID, false, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].ID != currentID {
+		t.Fatalf("search matching current task must return it selected, got %#v", items)
+	}
+
+	items, err = tasks.ListBreadcrumbSelector(ctx, "default", "selector", currentID, false, 20)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,9 +62,6 @@ func TestTaskRepo_BreadcrumbSelectorIsProjectScopedAndBounded(t *testing.T) {
 		t.Fatalf("got %d items, want bounded 20", len(items))
 	}
 	for _, item := range items {
-		if item.ID == currentID {
-			t.Fatalf("active search retained the current task: %#v", item)
-		}
 		if item.ID == foreign.ID || strings.Contains(item.Name, "foreign secret") {
 			t.Fatalf("foreign task leaked: %#v", item)
 		}
@@ -114,8 +119,15 @@ func TestTaskRepo_BreadcrumbSelectorScheduleScopeRequiresScheduleRow(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
+	if len(items) != 1 || items[0].ID != live.ID {
+		t.Fatalf("search matching current scheduled task must return it: %#v", items)
+	}
+	items, err = tasks.ListBreadcrumbSelector(ctx, "default", "missing", live.ID, true, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(items) != 0 {
-		t.Fatalf("Searched schedule-scoped selector retained current task: %#v", items)
+		t.Fatalf("nonmatching schedule search retained current task: %#v", items)
 	}
 }
 
