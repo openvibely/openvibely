@@ -402,12 +402,16 @@ func taskCardLoadBranchRelations(ctx context.Context, repoPath string, requests 
 	for _, request := range requests {
 		request.branch = strings.TrimSpace(request.branch)
 		request.target = strings.TrimSpace(request.target)
-		if request.branch == "" || request.target == "" {
-			return
+		if request.branch == "" || request.target == "" || snapshot.refTip(request.branch) == "" || snapshot.refTip(request.target) == "" {
+			continue
 		}
 		uniqueRequests[request.branch+"\x00"+request.target] = request
 	}
-	if len(uniqueRequests) == 0 || len(uniqueRequests) > taskCardRelationshipPairMax {
+	if len(uniqueRequests) == 0 {
+		snapshot.graphValid = true
+		return
+	}
+	if len(uniqueRequests) > taskCardRelationshipPairMax {
 		return
 	}
 	requests = requests[:0]

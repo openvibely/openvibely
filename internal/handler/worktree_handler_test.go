@@ -355,6 +355,40 @@ func TestHandler_TaskBoardRecoversMetadataWithoutLocalEligibilityForNonMergeable
 	}
 }
 
+func TestHandler_TaskBoardInvalidBranchDoesNotDisableValidCardActions(t *testing.T) {
+	ctx := context.Background()
+	h, _, _, db := setupTestHandlerWithDB(t)
+	h.taskPullRequestRepo = repository.NewTaskPullRequestRepo(db)
+	repoDir := createHandlerTestGitRepo(t)
+	project := &models.Project{Name: "Mixed relationship cards", RepoPath: repoDir, IsDefault: true}
+	if err := h.projectSvc.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+
+	valid := models.Task{
+		ID: "valid-card", ProjectID: project.ID, Title: "Valid card", Category: models.CategoryCompleted,
+		Status: models.StatusCompleted, WorktreeBranch: "task/valid-card", MergeTargetBranch: "main", MergeStatus: models.MergeStatusPending,
+	}
+	stale := models.Task{
+		ID: "stale-card", ProjectID: project.ID, Title: "Stale card", Category: models.CategoryCompleted,
+		Status: models.StatusCompleted, WorktreeBranch: "task/missing-card", MergeTargetBranch: "main", MergeStatus: models.MergeStatusPending,
+	}
+	runGit(t, repoDir, "checkout", "-b", valid.WorktreeBranch)
+	if err := os.WriteFile(filepath.Join(repoDir, "valid-card.txt"), []byte("valid\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repoDir, "add", "valid-card.txt")
+	runGit(t, repoDir, "commit", "-m", "valid card change")
+	runGit(t, repoDir, "checkout", "main")
+	states := h.taskCardMergeMenuStates(ctx, []models.Task{valid, stale}, project.ID)
+	if !states[valid.ID].LocalEligible || !states[valid.ID].FastForwardEligible {
+		t.Fatalf("stale task ref disabled valid card actions: %#v", states[valid.ID])
+	}
+	if states[stale.ID].LocalEligible || states[stale.ID].FastForwardEligible || states[stale.ID].RebaseEligible {
+		t.Fatalf("stale task ref exposed Local actions: %#v", states[stale.ID])
+	}
+}
+
 func TestHandler_TaskBoardRelationshipSnapshotSupportsShallowRepositories(t *testing.T) {
 	ctx := context.Background()
 	originDir := createHandlerTestGitRepo(t)
