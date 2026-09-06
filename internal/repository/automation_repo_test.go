@@ -62,13 +62,13 @@ func TestAutomationRepoPublishRegisteredAndQuerySurfaces(t *testing.T) {
 	if err != nil || len(listed) != 1 || listed[0].ID != definition.Automation.ID {
 		t.Fatalf("ListByProject = %#v, %v", listed, err)
 	}
-	selectorItems, err := repo.ListBreadcrumbSelector(ctx, projectID, "night", definition.Automation.ID, 20)
+	selectorItems, err := repo.ListBreadcrumbSelector(ctx, projectID, "", definition.Automation.ID, 20)
 	if err != nil || len(selectorItems) != 1 || selectorItems[0].ID != definition.Automation.ID || selectorItems[0].Name != publication.Name {
 		t.Fatalf("ListBreadcrumbSelector = %#v, %v", selectorItems, err)
 	}
-	selectorItems, err = repo.ListBreadcrumbSelector(ctx, projectID, "no name matches this", definition.Automation.ID, 20)
-	if err != nil || len(selectorItems) != 1 || selectorItems[0].ID != definition.Automation.ID {
-		t.Fatalf("ListBreadcrumbSelector must retain current Automation while filtering = %#v, %v", selectorItems, err)
+	selectorItems, err = repo.ListBreadcrumbSelector(ctx, projectID, "night", definition.Automation.ID, 20)
+	if err != nil || len(selectorItems) != 0 {
+		t.Fatalf("active search must not retain the current Automation = %#v, %v", selectorItems, err)
 	}
 	saved, err := repo.ListSavedByProject(ctx, projectID)
 	if err != nil || len(saved) != 1 || saved[0].PublishedVersionID == nil {

@@ -26,6 +26,7 @@ func TestSidebarProjectSelectorSearchAndSwitchInChrome(t *testing.T) {
 		{ID: "payments-api", Name: "Payments API"},
 		{ID: "payments-web", Name: "Payments Web"},
 		{ID: "payments-web-copy", Name: "Payments Web"},
+		{ID: "swarm-workspace", Name: "Swarm Workspace"},
 	}
 	for i := 0; i < 24; i++ {
 		projects = append(projects, models.Project{ID: fmt.Sprintf("project-%02d", i), Name: fmt.Sprintf("Project %02d", i)})
@@ -40,13 +41,13 @@ func TestSidebarProjectSelectorSearchAndSwitchInChrome(t *testing.T) {
 	var selectorScripts strings.Builder
 	for _, match := range scriptPattern.FindAllStringSubmatch(sidebarHTML, -1) {
 		body := match[1]
-		if strings.Contains(body, "Project selector behavior") || strings.Contains(body, "function persistSelectedProject") {
+		if strings.Contains(body, "window.openVibelySearchableSelectorInstalled") || strings.Contains(body, "function persistSelectedProject") {
 			selectorScripts.WriteString("<script>")
 			selectorScripts.WriteString(body)
 			selectorScripts.WriteString("</script>")
 		}
 	}
-	if !strings.Contains(selectorScripts.String(), "Project selector behavior") || !strings.Contains(selectorScripts.String(), "function persistSelectedProject") {
+	if !strings.Contains(selectorScripts.String(), "window.openVibelySearchableSelectorInstalled") || !strings.Contains(selectorScripts.String(), "function persistSelectedProject") {
 		t.Fatal("could not isolate the production project selector scripts")
 	}
 	var breadcrumbRendered bytes.Buffer
@@ -80,6 +81,10 @@ window.addEventListener('DOMContentLoaded', function() {
     input.select();
     if (!document.execCommand('insertText', false, value)) fail('browser text insertion was not supported');
   }
+  function clearSearch(input) {
+    input.value = '';
+    input.dispatchEvent(new Event('search', {bubbles: true}));
+  }
   function wait(ms) { return new Promise(function(resolve) { setTimeout(resolve, ms); }); }
   (async function() {
     var root = document.querySelector('[data-project-selector]');
@@ -87,12 +92,13 @@ window.addEventListener('DOMContentLoaded', function() {
     var dialog = document.getElementById('project-selector-dialog');
     var search = document.getElementById('project-selector-search');
     var select = document.getElementById('project-selector');
-    var clear = document.querySelector('[data-project-selector-clear]');
     var noMatch = document.querySelector('[data-project-selector-no-match]');
     var main = document.createElement('main');
     main.id = 'main-content';
     document.body.appendChild(main);
-    if (!root || !trigger || !dialog || !search || !select || !clear || !noMatch) fail('project selector fixture is incomplete');
+    if (!root || !trigger || !dialog || !search || !select || !noMatch) fail('project selector fixture is incomplete');
+    if (typeof search.oninput !== 'function' || typeof search.onsearch !== 'function') fail('project search is not directly wired like the breadcrumb search input');
+    if (document.querySelector('[data-project-selector-clear]')) fail('project selector renders a second clear control beside the native search clear affordance');
     var taskDialog = document.querySelector('[data-breadcrumb-selector-dialog]');
     var taskPanel = taskDialog && taskDialog.firstElementChild;
     var projectPanel = dialog.firstElementChild;
@@ -121,7 +127,7 @@ window.addEventListener('DOMContentLoaded', function() {
       if (!trigger.classList.contains(className)) fail('collapsed selector lost its prior visual class: ' + className);
     });
     if (trigger.querySelector('svg') || trigger.hasAttribute('data-project-selector-caret') || trigger.classList.contains('bg-none')) fail('collapsed selector replaced the original select arrow');
-    if (document.querySelectorAll('[data-project-selector-option]').length !== 28) fail('all identity-only project options are not rendered');
+    if (document.querySelectorAll('[data-project-selector-option]').length !== 29) fail('all identity-only project options are not rendered');
 
     trigger.focus();
     if (document.activeElement !== trigger) fail('project selector trigger could not receive focus: active=' + (document.activeElement && document.activeElement.outerHTML));
@@ -135,28 +141,36 @@ window.addEventListener('DOMContentLoaded', function() {
     var attachedAbove = Math.abs(dialogRect.bottom - (triggerRect.top - 4));
     if (Math.min(attachedBelow, attachedAbove) > 2) fail('selector popup is not attached to its trigger');
     if (Math.abs(dialogRect.left - triggerRect.left) > 2) fail('selector popup is not aligned underneath its trigger');
-    if (visibleOptions().length !== 28) fail('initial project options are not all visible');
+    if (visibleOptions().length !== 29) fail('initial project options are not all visible');
+
+    if (!window.staleSearchableSelectorSignal || !window.staleSearchableSelectorSignal.aborted) fail('shared selector upgrade did not abort the stale controller');
+    window.staleSearchableSelectorEvents = 0;
+    typeSearch(search, 'swarm');
+    if (window.staleSearchableSelectorEvents !== 0) fail('stale searchable selector listener remained active after controller upgrade');
+    var swarmFiltered = visibleOptions();
+    if (swarmFiltered.length !== 1 || swarmFiltered[0].dataset.projectId !== 'swarm-workspace') fail('typing a project name did not show only the matching non-current project');
+    clearSearch(search);
+    if (visibleOptions().length !== 29) fail('clearing the project-name search did not restore all projects');
 
     typeSearch(search, '  pAyMeNtS wEb  ');
     var filtered = visibleOptions();
-    if (filtered.length !== 3) fail('trimmed case-insensitive search did not retain the current project and duplicate matches');
-    if (!filtered.some(function(option) { return option.dataset.projectId === 'default' && option.getAttribute('aria-selected') === 'true'; })) fail('current project is not identifiable while searching');
+    if (filtered.length !== 2) fail('trimmed case-insensitive search did not show only duplicate matches');
+    if (filtered.some(function(option) { return option.dataset.projectId === 'default'; })) fail('current project remained visible while searching');
     if (filtered.filter(function(option) { return option.dataset.projectName === 'Payments Web'; }).length !== 2) fail('duplicate project names were not independently searchable');
-    if (clear.hidden) fail('clear control stayed hidden after searching');
 
     typeSearch(search, '  does-not-exist  ');
-    if (visibleOptions().length !== 1 || visibleOptions()[0].dataset.projectId !== 'default') fail('no-match filtering did not retain only the current project');
+    if (visibleOptions().length !== 0) fail('no-match filtering retained a project');
     if (noMatch.hidden || noMatch.textContent.indexOf('No projects match') === -1) fail('no-match state is not clear');
-    clear.click();
-    if (search.value !== '' || !noMatch.hidden || visibleOptions().length !== 28) fail('clearing search did not restore all projects: value=' + JSON.stringify(search.value) + ', noMatchHidden=' + noMatch.hidden + ', visible=' + visibleOptions().length + ', hidden=' + Array.prototype.slice.call(document.querySelectorAll('[data-project-selector-option]')).map(function(option) { return option.dataset.projectId + ':' + option.hidden; }).join(','));
+    clearSearch(search);
+    if (search.value !== '' || !noMatch.hidden || visibleOptions().length !== 29) fail('clearing search did not restore all projects: value=' + JSON.stringify(search.value) + ', noMatchHidden=' + noMatch.hidden + ', visible=' + visibleOptions().length + ', hidden=' + Array.prototype.slice.call(document.querySelectorAll('[data-project-selector-option]')).map(function(option) { return option.dataset.projectId + ':' + option.hidden; }).join(','));
 
     var replacementSearch = search.cloneNode(true);
     search.replaceWith(replacementSearch);
     search = replacementSearch;
     typeSearch(search, 'payments api');
-    if (visibleOptions().length !== 2 || !visibleOptions().some(function(option) { return option.dataset.projectId === 'payments-api'; })) fail('typing in the live replacement project search did not filter results');
-    clear.click();
-    if (visibleOptions().length !== 28) fail('clearing after live search replacement did not restore results');
+    if (visibleOptions().length !== 1 || visibleOptions()[0].dataset.projectId !== 'payments-api') fail('typing in the live replacement project search did not filter results');
+    clearSearch(search);
+    if (visibleOptions().length !== 29) fail('clearing after live search replacement did not restore results');
 
     root.style.position = 'fixed';
     root.style.left = '16px';
@@ -186,12 +200,12 @@ window.addEventListener('DOMContentLoaded', function() {
     await wait(0);
     dialogRect = dialog.getBoundingClientRect();
     if (Math.abs(dialogRect.bottom - (triggerRect.top - 4)) > 2) fail('filtered upward selector detached from its trigger');
-    if (visibleOptions().length !== 3) fail('filtering after upward placement did not update project results');
-    clear.click();
+    if (visibleOptions().length !== 2) fail('filtering after upward placement did not update project results');
+    clearSearch(search);
     await wait(0);
     dialogRect = dialog.getBoundingClientRect();
     if (Math.abs(dialogRect.bottom - (triggerRect.top - 4)) > 2) fail('cleared upward selector detached from its trigger');
-    if (visibleOptions().length !== 28) fail('clearing after upward placement did not restore project results');
+    if (visibleOptions().length !== 29) fail('clearing after upward placement did not restore project results');
 
     key(search, 'ArrowDown');
     if (document.activeElement.dataset.projectId !== 'default') fail('ArrowDown did not focus the first project result');
@@ -248,6 +262,12 @@ window.addEventListener('DOMContentLoaded', function() {
     document.dispatchEvent(new CustomEvent('htmx:afterSwap', {bubbles: true, detail: {target: main}}));
     if (select.value !== 'payments-web-copy' || trigger.textContent.trim() !== 'Payments Web') fail('HTMX route synchronization did not update the project selector');
 
+    window.openVibelySearchableSelectorController.abort.abort();
+    search.value = 'swarm';
+    search.dispatchEvent(new InputEvent('input', {bubbles: true, inputType: 'insertText', data: 'swarm'}));
+    var directlyFiltered = Array.prototype.slice.call(document.querySelectorAll('[data-project-selector-option]')).filter(function(option) { return !option.hidden && !option.classList.contains('hidden'); });
+    if (directlyFiltered.length !== 1 || directlyFiltered[0].dataset.projectId !== 'swarm-workspace') fail('project search depended on the delegated document listener instead of its direct shared-component input hook');
+
     document.body.setAttribute('data-test-result', 'pass');
     await report('pass', '');
   })().catch(async function(error) {
@@ -259,9 +279,9 @@ window.addEventListener('DOMContentLoaded', function() {
 </script>`
 
 	page := `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">` +
-		`<style>[hidden]{display:none!important} dialog[open]{display:block;position:fixed;box-sizing:border-box;width:448px;max-width:calc(100vw - 16px);max-height:calc(100vh - 16px);margin:0;padding:0;overflow:hidden} .modal-box{box-sizing:border-box;width:91.666667%;max-width:32rem;max-height:calc(100vh - 5em);overflow-y:auto} [class~="max-h-[inherit]"]{max-height:inherit}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}.flex{display:flex}.flex-1{flex:1 1 0%}.flex-col{flex-direction:column}.min-h-0{min-height:0}.w-full{width:100%}.max-w-none{max-width:none}.min-w-0{min-width:0}.overflow-hidden{overflow:hidden}.overflow-y-auto{overflow-y:auto}.truncate{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.sidebar-aside{width:256px}.sidebar-inner{padding:16px}.sidebar-project-select{box-sizing:border-box;height:32px}</style>` +
-		`<script>window._tabVisibility={dispatchSSEEvent:function(){},registerSSE:function(){return {close:function(){}}}};window.htmx={process:function(){},trigger:function(){},ajax:function(){return Promise.resolve();}};window.toggleTheme=function(){};window.openVibelyNavigate=function(){return Promise.resolve();};</script></head><body>` +
-		markup + breadcrumbHTML + selectorScripts.String() + runner + `</body></html>`
+		`<style>dialog[open]{display:block;position:fixed;box-sizing:border-box;width:448px;max-width:calc(100vw - 16px);max-height:calc(100vh - 16px);margin:0;padding:0;overflow:hidden} .modal-box{box-sizing:border-box;width:91.666667%;max-width:32rem;max-height:calc(100vh - 5em);overflow-y:auto} [class~="max-h-[inherit]"]{max-height:inherit}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}.flex{display:flex}.hidden{display:none!important}.flex-1{flex:1 1 0%}.flex-col{flex-direction:column}.min-h-0{min-height:0}.w-full{width:100%}.max-w-none{max-width:none}.min-w-0{min-width:0}.overflow-hidden{overflow:hidden}.overflow-y-auto{overflow-y:auto}.truncate{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.sidebar-aside{width:256px}.sidebar-inner{padding:16px}.sidebar-project-select{box-sizing:border-box;height:32px}</style>` +
+		`<script>(function(){var staleAbort=new AbortController();window.staleSearchableSelectorSignal=staleAbort.signal;window.openVibelySearchableSelectorInstalled=true;window.openVibelySearchableSelectorVersion=1;window.openVibelySearchableSelectorController={version:1,abort:staleAbort};window.staleSearchableSelectorEvents=0;document.addEventListener('input',function(event){if(event.target.matches&&event.target.matches('[data-searchable-selector-search]'))window.staleSearchableSelectorEvents++;},{signal:staleAbort.signal});window._tabVisibility={dispatchSSEEvent:function(){},registerSSE:function(){return {close:function(){}}}};window.htmx={process:function(){},trigger:function(){},ajax:function(){return Promise.resolve();}};window.toggleTheme=function(){};window.openVibelyNavigate=function(){return Promise.resolve();};})();</script></head><body>` +
+		markup + `<script>(function(){var search=document.querySelector('[data-project-selector-search]');var legacy=document.createElement('button');legacy.type='button';legacy.setAttribute('data-project-selector-clear','');legacy.textContent='✕';search.parentElement.appendChild(legacy);})();</script>` + breadcrumbHTML + selectorScripts.String() + runner + `</body></html>`
 
 	browserResult := make(chan string, 4)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
