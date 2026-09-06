@@ -102,8 +102,6 @@ window.addEventListener('DOMContentLoaded', function() {
     var taskDialog = document.querySelector('[data-breadcrumb-selector-dialog]');
     var taskPanel = taskDialog && taskDialog.firstElementChild;
     var projectPanel = dialog.firstElementChild;
-    var taskHeader = taskDialog && taskDialog.querySelector('[data-breadcrumb-selector-close]').parentElement;
-    var projectHeader = dialog.querySelector('[data-project-selector-close]').parentElement;
     var taskSearch = taskDialog && taskDialog.querySelector('[data-breadcrumb-selector-search]');
     var taskResults = taskDialog && taskDialog.querySelector('[data-breadcrumb-selector-results]');
     var taskMenu = document.querySelector('[data-parity-breadcrumb-results] [role="listbox"]');
@@ -115,8 +113,7 @@ window.addEventListener('DOMContentLoaded', function() {
     }
     assertSameClasses(dialog, taskDialog, 'dialog');
     assertSameClasses(projectPanel, taskPanel, 'panel');
-    assertSameClasses(projectHeader, taskHeader, 'header');
-    assertSameClasses(dialog.querySelector('[data-project-selector-close]'), taskDialog.querySelector('[data-breadcrumb-selector-close]'), 'close button');
+    if (dialog.querySelector('[data-searchable-selector-header], [data-searchable-selector-close]') || taskDialog.querySelector('[data-searchable-selector-header], [data-searchable-selector-close]')) fail('shared selectors must begin with search and render no header or close button');
     assertSameClasses(search, taskSearch, 'search');
     assertSameClasses(dialog.querySelector('[data-project-selector-results]'), taskResults, 'results');
     assertSameClasses(projectMenu, taskMenu, 'menu');

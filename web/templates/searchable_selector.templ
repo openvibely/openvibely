@@ -6,24 +6,12 @@ templ SearchableSelector(config SearchableSelectorConfig) {
 		class={ SearchableSelectorDialogClass }
 		role="dialog"
 		aria-modal="true"
-		aria-labelledby={ config.ID + "-heading" }
+		aria-label={ "Select " + config.Kind }
 		data-searchable-selector-dialog
 		data-project-selector-dialog?={ config.Local }
 		data-breadcrumb-selector-dialog?={ !config.Local }
 	>
 		<div class={ SearchableSelectorPanelClass } data-searchable-selector-panel>
-			<div class={ SearchableSelectorHeaderClass } data-searchable-selector-header>
-				<h2 id={ config.ID + "-heading" } class="min-w-0 truncate text-base font-bold">Switch { config.Kind }</h2>
-				<button
-					class="btn btn-ghost btn-sm btn-square shrink-0"
-					type="button"
-					aria-label={ "Close " + config.Kind + " selector" }
-					title={ "Close " + config.Kind + " selector" }
-					data-searchable-selector-close
-					data-project-selector-close?={ config.Local }
-					data-breadcrumb-selector-close?={ !config.Local }
-				>✕</button>
-			</div>
 			<div class="p-2">
 				<div class={ SearchableSelectorSearchShellClass } data-searchable-selector-search-shell>
 					<div class="relative">
@@ -196,7 +184,6 @@ templ searchableSelectorScript() {
 					}
 					return;
 				}
-				var dismiss = event.target.closest && event.target.closest('[data-searchable-selector-close]'); if (dismiss) { close(root, true); return; }
 				if (event.target === nodes(root).dialog) close(root, true);
 			});
 			listen(document, 'keydown', function(event) {
