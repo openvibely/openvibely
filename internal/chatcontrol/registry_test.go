@@ -885,7 +885,7 @@ func TestRegistry_AlertFlowActions(t *testing.T) {
 	if description := schema.Properties["processing_state"].Description; !strings.Contains(description, "Omit") || !strings.Contains(description, "all processing states") {
 		t.Fatalf("processing-state omission contract missing from list_alerts schema: %q", description)
 	}
-	if description := Get("list_alerts").Description; !strings.Contains(description, "Native Approved Inbox") || !strings.Contains(description, "implementation_task_linked=false") || !strings.Contains(description, "omit processing_state") {
+	if description := Get("list_alerts").Description; !strings.Contains(description, "Native Approved Inbox") || !strings.Contains(description, "processing_state=unclaimed") || !strings.Contains(description, "implementation_task_linked=false") || !strings.Contains(description, "omit read, type, and source") {
 		t.Fatalf("Native inbox filter contract missing from list_alerts description: %q", description)
 	}
 }
