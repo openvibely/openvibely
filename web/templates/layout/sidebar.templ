@@ -2,7 +2,9 @@ package layout
 
 import (
 	"fmt"
+
 	"github.com/openvibely/openvibely/internal/models"
+	templateui "github.com/openvibely/openvibely/web/templates"
 )
 
 func sidebarProjectDisplayName(projects []models.Project, currentProjectID string) string {
@@ -15,6 +17,13 @@ func sidebarProjectDisplayName(projects []models.Project, currentProjectID strin
 		return projects[0].Name
 	}
 	return "No projects available"
+}
+
+func sidebarProjectCheck(current bool) string {
+	if current {
+		return "✓"
+	}
+	return ""
 }
 
 templ Sidebar(projects []models.Project, currentProjectID string) {
@@ -94,10 +103,12 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 					aria-controls="project-selector-dialog"
 					disabled?={ len(projects) == 0 }
 				>
-				<span id="project-selector-current-label" class="min-w-0 truncate">{ sidebarProjectDisplayName(projects, currentProjectID) }</span>
-			</button>				<dialog id="project-selector-dialog" class="sidebar-project-dialog fixed m-0 max-h-[min(32rem,calc(100dvh-1rem))] w-[28rem] max-w-[calc(100vw-1rem)] overflow-hidden rounded-box border border-base-300 bg-base-100 p-0 text-base-content shadow-xl backdrop:bg-transparent" role="dialog" aria-modal="true" aria-labelledby="project-selector-heading" data-project-selector-dialog>
-					<div class="modal-box flex w-full max-w-none max-h-[inherit] min-h-0 flex-col overflow-hidden rounded-none bg-transparent p-0 shadow-none">
-						<div class="flex items-center justify-between gap-3 border-b border-base-300 px-4 py-3">
+					<span id="project-selector-current-label" class="min-w-0 truncate">{ sidebarProjectDisplayName(projects, currentProjectID) }</span>
+				</button>
+				<dialog id="project-selector-dialog" class={ templateui.SearchableSelectorDialogClass } role="dialog" aria-modal="true" aria-labelledby="project-selector-heading" data-project-selector-dialog>
+					<div class="modal-box w-full max-w-none rounded-none bg-transparent p-0 shadow-none">
+						<div class={ templateui.SearchableSelectorPanelClass }>
+							<div class={ templateui.SearchableSelectorHeaderClass }>
 							<h2 id="project-selector-heading" class="min-w-0 truncate text-base font-bold">Switch project</h2>
 							<button class="btn btn-ghost btn-sm btn-square ov-modal-close shrink-0" type="button" aria-label="Close project selector" title="Close project selector" data-project-selector-close>✕</button>
 						</div>
@@ -105,7 +116,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 							<label class="sr-only" for="project-selector-search">Search projects</label>
 							<input
 								id="project-selector-search"
-								class="w-full min-w-0 border-0 bg-transparent px-4 py-2 pr-10 text-sm focus:outline-none focus:ring-0"
+								class={ templateui.SearchableSelectorSearchClass }
 								type="search"
 								name="search"
 								placeholder="Search projects"
@@ -114,34 +125,37 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 								aria-autocomplete="list"
 								data-project-selector-search
 							/>
-							<button class="btn btn-ghost btn-xs absolute right-1 top-1/2 -translate-y-1/2" type="button" aria-label="Clear project search" data-project-selector-clear hidden>Clear</button>
+							<button class="btn btn-ghost btn-sm btn-square absolute right-1 top-1/2 -translate-y-1/2" type="button" aria-label="Clear project search" title="Clear project search" data-project-selector-clear hidden>✕</button>
 						</div>
-						<div id="project-selector-results" class="min-h-0 flex-1 overflow-y-auto overscroll-contain p-2" role="listbox" aria-label="Projects" data-project-selector-results>
+						<div id="project-selector-results" class={ templateui.SearchableSelectorResultsClass } data-project-selector-results>
 							if len(projects) == 0 {
 								<div class="px-3 py-8 text-center text-sm text-base-content/60" data-project-selector-no-projects>No projects available.</div>
 							} else {
-								for _, p := range projects {
-									<button
-										class="flex min-h-11 w-full min-w-0 items-center justify-between gap-3 rounded-btn px-3 py-2 text-left hover:bg-base-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
-										type="button"
-										role="option"
-										aria-selected={ fmt.Sprintf("%t", p.ID == currentProjectID) }
-										tabindex="-1"
-										data-project-selector-option
-										data-project-id={ p.ID }
-										data-project-name={ p.Name }
-									>
-										<span class="min-w-0 break-words">{ p.Name }</span>
-										<span class="badge badge-sm badge-outline shrink-0" data-project-selector-current hidden?={ p.ID != currentProjectID }>Current</span>
-									</button>
-								}
+								<div role="listbox" aria-label="Projects" class={ templateui.SearchableSelectorMenuClass }>
+									for _, p := range projects {
+										<button
+											class={ templateui.SearchableSelectorOptionClass }
+											type="button"
+											role="option"
+											aria-selected={ fmt.Sprintf("%t", p.ID == currentProjectID) }
+											tabindex="-1"
+											data-project-selector-option
+											data-project-id={ p.ID }
+											data-project-name={ p.Name }
+										>
+											<span class="w-4 shrink-0" aria-hidden="true" data-project-selector-current>{ sidebarProjectCheck(p.ID == currentProjectID) }</span>
+											<span class="min-w-0 break-words">{ p.Name }</span>
+										</button>
+									}
+								</div>
 								<div class="px-3 py-8 text-center" data-project-selector-no-match hidden>
 									<p class="font-medium">No projects match your search.</p>
 									<p class="mt-1 text-sm text-base-content/60">Try a different name.</p>
 								</div>
 							}
 						</div>
-						<span class="sr-only" role="status" aria-live="polite" data-project-selector-status>All projects shown.</span>
+							<span class="sr-only" role="status" aria-live="polite" data-project-selector-status>All projects shown.</span>
+						</div>
 					</div>
 				</dialog>
 			</div>
@@ -195,7 +209,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 							var isCurrent = option.getAttribute('data-project-id') === projectID;
 							option.setAttribute('aria-selected', isCurrent ? 'true' : 'false');
 							var marker = option.querySelector('[data-project-selector-current]');
-							if (marker) marker.hidden = !isCurrent;
+							if (marker) marker.textContent = isCurrent ? '✓' : '';
 							if (isCurrent) currentName = option.getAttribute('data-project-name') || '';
 						});
 						var label = root.querySelector('#project-selector-current-label');
@@ -206,7 +220,8 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 					function positionSelector() {
 						if (!dialog.open) return;
 					var margin = 8, gap = 4, triggerRect = trigger.getBoundingClientRect();
-					var anchorLeft = triggerRect.left;						dialog.style.maxHeight = '';
+						var anchorLeft = triggerRect.left;
+						dialog.style.maxHeight = '';
 						var width = dialog.offsetWidth, height = dialog.offsetHeight;
 						var left = Math.max(margin, Math.min(anchorLeft, window.innerWidth - width - margin));
 						var belowTop = triggerRect.bottom + gap, below = window.innerHeight - belowTop - margin, above = triggerRect.top - gap - margin;
@@ -1079,12 +1094,6 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 			}
 			[data-theme="dark"] .theme-collapsed-moon {
 				display: block;
-			}
-				.sidebar-project-dialog {
-				box-sizing: border-box;
-			}
-			.sidebar-project-dialog::backdrop {
-				background: transparent;
 			}
 		</style>
 

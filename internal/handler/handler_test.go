@@ -5792,7 +5792,7 @@ func TestSidebar_ProjectSelectorSearchTriggerAndFocusVisible(t *testing.T) {
 		`aria-haspopup="dialog"`,
 		`aria-controls="project-selector-dialog"`,
 		`id="project-selector-dialog"`,
-		`class="sidebar-project-dialog fixed m-0`,
+		`class="fixed m-0`,
 		`id="project-selector-search"`,
 		`type="search"`,
 		`placeholder="Search projects"`,
