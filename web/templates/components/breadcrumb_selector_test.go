@@ -58,7 +58,7 @@ func TestBreadcrumbSelectorRendersAccessibleBoundedDialog(t *testing.T) {
 	body := out.String()
 	for _, want := range []string{
 		`data-breadcrumb-selector`, `aria-expanded="false"`, `aria-haspopup="dialog"`,
-		`role="dialog"`, `aria-modal="true"`, `Switch Task`, `Search Tasks`,
+		`role="dialog"`, `aria-modal="true"`, `aria-label="Select Task"`, `Search Tasks`,
 		`hx-trigger="input changed delay:200ms, search"`, `hx-sync="this:replace"`,
 		`hx-include="closest [data-breadcrumb-selector]"`, `name="tab" value="changes"`,
 		`name="from" value="schedule" data-breadcrumb-selector-origin`, `max-w-[calc(100vw-1rem)]`, `overflow-hidden`, `data-breadcrumb-selector-status`,
@@ -69,7 +69,7 @@ func TestBreadcrumbSelectorRendersAccessibleBoundedDialog(t *testing.T) {
 			t.Errorf("missing %q in selector markup", want)
 		}
 	}
-	for _, forbidden := range []string{`class="modal p-4"`, `class="input input-bordered`, `min-h-8 items-center border-t`, `1 result.`, `2 results.`} {
+	for _, forbidden := range []string{`data-searchable-selector-header`, `data-searchable-selector-close`, `aria-labelledby="task-resource-selector-heading"`, `class="modal p-4"`, `class="input input-bordered`, `min-h-8 items-center border-t`, `1 result.`, `2 results.`} {
 		if strings.Contains(body, forbidden) {
 			t.Errorf("selector markup should not contain %q", forbidden)
 		}
