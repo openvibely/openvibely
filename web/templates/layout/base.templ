@@ -2890,11 +2890,17 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				if (!dropdown || !label) return;
 				dropdown.__openVibelyPositionGeneration = (dropdown.__openVibelyPositionGeneration || 0) + 1;
 				positionDropdownForViewport(label);
+				const pendingFocus = dropdown.__openVibelyPendingMenuFocus;
+				dropdown.__openVibelyPendingMenuFocus = null;
 				dropdown.removeAttribute('data-kanban-menu-positioning');
+				if (pendingFocus && pendingFocus.isConnected && dropdown.contains(pendingFocus)) {
+					pendingFocus.focus({preventScroll: true});
+				}
 			}
 
 			function prepareKanbanMenuPosition(dropdown, label) {
 				if (!dropdown || !label) return;
+				dropdown.__openVibelyPendingMenuFocus = null;
 				const generation = (dropdown.__openVibelyPositionGeneration || 0) + 1;
 				dropdown.__openVibelyPositionGeneration = generation;
 				dropdown.setAttribute('data-kanban-menu-positioning', 'true');
@@ -3531,6 +3537,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						else {
 							dropdown.removeAttribute('data-kanban-menu-open');
 							dropdown.removeAttribute('data-kanban-menu-positioning');
+							dropdown.__openVibelyPendingMenuFocus = null;
 							closeKanbanSubmenus(dropdown, null);
 						}
 						const column = dropdown.closest('.kanban-column');
@@ -3651,8 +3658,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							const firstAction = content && content.querySelector('a[href]:not([aria-disabled="true"]), button:not([disabled]), [tabindex]:not([tabindex="-1"])');
 							if (firstAction) {
 								event.preventDefault();
-								finishKanbanMenuPosition(dropdown, trigger);
-								firstAction.focus({preventScroll: true});
+								dropdown.__openVibelyPendingMenuFocus = firstAction;
 							}
 						}
 						setTimeout(function() {
