@@ -306,6 +306,69 @@ func TestAlertRepo_ProjectIsolationAndActionableLifecycle(t *testing.T) {
 	}
 }
 
+func TestAlertRepo_ImplementationTaskLinkedFilterSurvivesTaskDeletion(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewAlertRepo(db)
+	project := createTestProject(t, NewProjectRepo(db))
+	ctx := context.Background()
+
+	alert := &models.Alert{
+		ProjectID:       project.ID,
+		Scope:           models.AlertScopeProject,
+		Type:            models.AlertType("suggestion"),
+		Severity:        models.SeverityInfo,
+		Title:           "Historically linked implementation",
+		DecisionState:   models.AlertDecisionPending,
+		ProcessingState: models.AlertProcessingUnclaimed,
+	}
+	if _, err := repo.CreateIdempotent(ctx, alert); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.SetDecision(ctx, project.ID, alert.ID, models.AlertDecisionApproved); err != nil {
+		t.Fatal(err)
+	}
+	const claimant = "scheduled-inbox"
+	if _, err := repo.ClaimApproved(ctx, project.ID, alert.ID, claimant, time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	implementationTask, err := repo.CreateImplementationTask(ctx, project.ID, alert.ID, claimant, models.AlertImplementationTaskInput{
+		Title: "Implement historical alert", Prompt: "Implement the approved notification.", Priority: 2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.MarkProcessing(ctx, project.ID, alert.ID, claimant, models.AlertProcessingFailed, "execution failed after linkage"); err != nil {
+		t.Fatal(err)
+	}
+	if err := NewTaskRepo(db, nil).Delete(ctx, implementationTask.ID); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := repo.GetByIDForProject(ctx, project.ID, alert.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.ImplementationTaskID != nil {
+		t.Fatalf("task deletion retained live implementation task ID %v", *stored.ImplementationTaskID)
+	}
+
+	linked := true
+	linkedAlerts, err := repo.ListFilteredSummaries(ctx, project.ID, models.AlertListFilter{ImplementationTaskLinked: &linked, Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(linkedAlerts) != 1 || linkedAlerts[0].ID != alert.ID {
+		t.Fatalf("historically linked alerts = %#v, want %s", linkedAlerts, alert.ID)
+	}
+	linked = false
+	unlinkedAlerts, err := repo.ListFilteredSummaries(ctx, project.ID, models.AlertListFilter{ImplementationTaskLinked: &linked, Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(unlinkedAlerts) != 0 {
+		t.Fatalf("not-linked filter returned historically linked alerts: %#v", unlinkedAlerts)
+	}
+}
+
 func TestAlertRepo_ClaimCreatesImplementationTaskIdempotently(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewAlertRepo(db)

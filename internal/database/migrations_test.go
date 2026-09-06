@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -1191,8 +1192,8 @@ func TestMigration100_RepairsSkippedChannelTargetsWhenOldLocalDiscordUsed099(t *
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 174 {
-		t.Fatalf("max goose version = %d, want 174", maxVersion)
+	if maxVersion != 175 {
+		t.Fatalf("max goose version = %d, want 175", maxVersion)
 	}
 }
 
@@ -1349,6 +1350,62 @@ func TestMigration173AddsXAuthorizedUserLookupIndex(t *testing.T) {
 		t.Fatalf("roll back X authorized-user lookup index migration: %v", err)
 	}
 	assertIndex(false)
+}
+
+func TestMigration175BackfillsAlertImplementationTaskHistory(t *testing.T) {
+	db := openMigrationTestDB(t, filepath.Join(t.TempDir(), "alert-implementation-history-175.db"))
+	goose.SetBaseFS(migrations.FS)
+	defer goose.SetBaseFS(nil)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 174); err != nil {
+		t.Fatalf("migrate to alert history baseline 174: %v", err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO projects(id, name, description, repo_path)
+		VALUES('alert-history-project-175', 'Alert history', '', '');
+		INSERT INTO tasks(id, project_id, title, category, status)
+		VALUES('alert-history-task-175', 'alert-history-project-175', 'Implementation', 'completed', 'completed');
+		INSERT INTO alerts(id, project_id, title, decision_state, processing_state)
+		VALUES
+			('alert-history-completed-175', 'alert-history-project-175', 'Completed historical task', 'approved', 'completed'),
+			('alert-history-unlinked-175', 'alert-history-project-175', 'Never linked', 'pending', 'unclaimed');
+		INSERT INTO alerts(id, project_id, title, decision_state, processing_state, implementation_task_id)
+		VALUES('alert-history-live-175', 'alert-history-project-175', 'Live task', 'approved', 'failed', 'alert-history-task-175');
+	`); err != nil {
+		t.Fatalf("seed alert implementation history: %v", err)
+	}
+
+	if err := goose.UpTo(db, ".", 175); err != nil {
+		t.Fatalf("apply alert implementation history migration: %v", err)
+	}
+	rows, err := db.Query(`SELECT id, implementation_task_was_linked FROM alerts
+		WHERE project_id = 'alert-history-project-175' ORDER BY id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	got := map[string]int{}
+	for rows.Next() {
+		var id string
+		var linked int
+		if err := rows.Scan(&id, &linked); err != nil {
+			t.Fatal(err)
+		}
+		got[id] = linked
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]int{
+		"alert-history-completed-175": 1,
+		"alert-history-live-175":      1,
+		"alert-history-unlinked-175":  0,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("implementation task history = %#v, want %#v", got, want)
+	}
 }
 
 func TestMigration174UsesOrderedTaskDiscoveryAccessPath(t *testing.T) {
@@ -1597,8 +1654,8 @@ func TestMigration107_AllowsLocalDatabaseWithOldSwarmVersion106(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 174 {
-		t.Fatalf("max goose version = %d, want 174", maxVersion)
+	if maxVersion != 175 {
+		t.Fatalf("max goose version = %d, want 175", maxVersion)
 	}
 }
 
@@ -2046,8 +2103,8 @@ func TestMigration082_SkipsWhenLocalDevDBAlreadyApplied082(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 174 {
-		t.Fatalf("max goose version = %d, want 174", maxVersion)
+	if maxVersion != 175 {
+		t.Fatalf("max goose version = %d, want 175", maxVersion)
 	}
 }
 
@@ -2382,8 +2439,8 @@ func TestMigration091_LocalDevAlreadyAppliedUsageChainStillMigrates(t *testing.T
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 174 {
-		t.Fatalf("max goose version = %d, want 174", maxVersion)
+	if maxVersion != 175 {
+		t.Fatalf("max goose version = %d, want 175", maxVersion)
 	}
 }
 
