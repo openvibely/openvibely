@@ -723,11 +723,13 @@ func TestTaskCard_HasMobileSafeActionsAndReadableText(t *testing.T) {
 		"lg:h-6",
 		"lg:w-6",
 		"max-w-[calc(100vw-2rem)]",
-		`class="text-sm min-h-11"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("expected mobile-safe task card markup to contain %q, got %s", want, body)
 		}
+	}
+	if count := strings.Count(body, "min-h-11"); count != 2 {
+		t.Fatalf("task card must reserve min-h-11 for its two mobile card controls, not kebab rows; got %d occurrences in %s", count, body)
 	}
 }
 

@@ -393,7 +393,7 @@ func taskCardMergeMenuState(taskID string, states []map[string]TaskCardMergeMenu
 templ TaskCardMergeSubmenus(task *models.Task, projectID string, state TaskCardMergeMenuState) {
 	{{ targetBranch := taskCardMergeTarget(task, state) }}
 	<li class="group relative" data-task-card-local-submenu onmouseenter="positionKanbanSubmenu(this)">
-		<button type="button" class="text-sm min-h-11 justify-between" onfocus="positionKanbanSubmenu(this.parentElement)" onkeydown="handleKanbanSubmenuKeydown(event, this.parentElement)">
+		<button type="button" class="text-sm justify-between" onfocus="positionKanbanSubmenu(this.parentElement)" onkeydown="handleKanbanSubmenuKeydown(event, this.parentElement)">
 			<span>Local</span>
 			<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
 				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m9 18 6-6-6-6"></path>
@@ -407,7 +407,7 @@ templ TaskCardMergeSubmenus(task *models.Task, projectID string, state TaskCardM
 		</ul>
 	</li>
 	<li class="group relative" data-task-card-github-submenu onmouseenter="positionKanbanSubmenu(this)">
-		<button type="button" class="text-sm min-h-11 justify-between" onfocus="positionKanbanSubmenu(this.parentElement)" onkeydown="handleKanbanSubmenuKeydown(event, this.parentElement)">
+		<button type="button" class="text-sm justify-between" onfocus="positionKanbanSubmenu(this.parentElement)" onkeydown="handleKanbanSubmenuKeydown(event, this.parentElement)">
 			<span>GitHub</span>
 			<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
 				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m9 18 6-6-6-6"></path>
@@ -417,11 +417,11 @@ templ TaskCardMergeSubmenus(task *models.Task, projectID string, state TaskCardM
 			<li class="menu-title"><span>GitHub</span></li>
 			<li>
 				if state.PullRequest != nil && state.PullRequest.PRURL != "" && strings.EqualFold(strings.TrimSpace(state.PullRequest.PRState), "open") {
-					<a class="text-sm min-h-11" href={ templ.SafeURL(state.PullRequest.PRURL) } target="_blank" rel="noopener noreferrer">View PR #{ fmt.Sprintf("%d", state.PullRequest.PRNumber) }</a>
+					<a class="text-sm" href={ templ.SafeURL(state.PullRequest.PRURL) } target="_blank" rel="noopener noreferrer">View PR #{ fmt.Sprintf("%d", state.PullRequest.PRNumber) }</a>
 				} else {
 					<button
 						type="button"
-						class="text-sm min-h-11"
+						class="text-sm"
 						if !state.PullEligible {
 							disabled
 						}
@@ -474,7 +474,7 @@ templ TaskCard(task models.Task, projectID string, viewingCategory string, llmMo
 				if viewingCategory != "active" {
 					<li>
 						<button
-							class="text-sm min-h-11"
+							class="text-sm"
 							hx-post={ fmt.Sprintf("/tasks/%s/run", task.ID) }
 							hx-target="#kanban-board"
 							hx-swap="outerHTML"
@@ -487,7 +487,7 @@ templ TaskCard(task models.Task, projectID string, viewingCategory string, llmMo
 				if task.Status == models.StatusRunning {
 					<li>
 						<button
-							class="text-sm text-error min-h-11"
+							class="text-sm text-error"
 							hx-post={ fmt.Sprintf("/tasks/%s/cancel", task.ID) }
 							hx-target="#kanban-board"
 							hx-swap="outerHTML"
@@ -501,7 +501,7 @@ templ TaskCard(task models.Task, projectID string, viewingCategory string, llmMo
 				if task.Status != models.StatusRunning {
 					<li>
 						<a
-							class="text-sm min-h-11"
+							class="text-sm"
 							href={ templ.SafeURL(fmt.Sprintf("/tasks/%s?tab=details&from=tasks", task.ID)) }
 							hx-get={ fmt.Sprintf("/tasks/%s?tab=details&from=tasks", task.ID) }
 							hx-target="#main-content"

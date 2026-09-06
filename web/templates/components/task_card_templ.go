@@ -494,7 +494,7 @@ func TaskCardMergeSubmenus(task *models.Task, projectID string, state TaskCardMe
 		}
 		ctx = templ.ClearChildren(ctx)
 		targetBranch := taskCardMergeTarget(task, state)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "<li class=\"group relative\" data-task-card-local-submenu onmouseenter=\"positionKanbanSubmenu(this)\"><button type=\"button\" class=\"text-sm min-h-11 justify-between\" onfocus=\"positionKanbanSubmenu(this.parentElement)\" onkeydown=\"handleKanbanSubmenuKeydown(event, this.parentElement)\"><span>Local</span> <svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"m9 18 6-6-6-6\"></path></svg></button><ul tabindex=\"-1\" data-task-card-submenu-panel class=\"menu menu-sm absolute right-0 top-full z-[110] hidden w-56 max-w-[calc(100vw-2rem)] border border-base-300 bg-base-100 p-2 shadow rounded-box group-hover:block group-focus-within:block\"><li class=\"menu-title\"><span>Local</span></li>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "<li class=\"group relative\" data-task-card-local-submenu onmouseenter=\"positionKanbanSubmenu(this)\"><button type=\"button\" class=\"text-sm justify-between\" onfocus=\"positionKanbanSubmenu(this.parentElement)\" onkeydown=\"handleKanbanSubmenuKeydown(event, this.parentElement)\"><span>Local</span> <svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"m9 18 6-6-6-6\"></path></svg></button><ul tabindex=\"-1\" data-task-card-submenu-panel class=\"menu menu-sm absolute right-0 top-full z-[110] hidden w-56 max-w-[calc(100vw-2rem)] border border-base-300 bg-base-100 p-2 shadow rounded-box group-hover:block group-focus-within:block\"><li class=\"menu-title\"><span>Local</span></li>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -504,19 +504,19 @@ func TaskCardMergeSubmenus(task *models.Task, projectID string, state TaskCardMe
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "</ul></li><li class=\"group relative\" data-task-card-github-submenu onmouseenter=\"positionKanbanSubmenu(this)\"><button type=\"button\" class=\"text-sm min-h-11 justify-between\" onfocus=\"positionKanbanSubmenu(this.parentElement)\" onkeydown=\"handleKanbanSubmenuKeydown(event, this.parentElement)\"><span>GitHub</span> <svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"m9 18 6-6-6-6\"></path></svg></button><ul tabindex=\"-1\" data-task-card-submenu-panel class=\"menu menu-sm absolute right-0 top-full z-[110] hidden w-56 max-w-[calc(100vw-2rem)] border border-base-300 bg-base-100 p-2 shadow rounded-box group-hover:block group-focus-within:block\"><li class=\"menu-title\"><span>GitHub</span></li><li>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "</ul></li><li class=\"group relative\" data-task-card-github-submenu onmouseenter=\"positionKanbanSubmenu(this)\"><button type=\"button\" class=\"text-sm justify-between\" onfocus=\"positionKanbanSubmenu(this.parentElement)\" onkeydown=\"handleKanbanSubmenuKeydown(event, this.parentElement)\"><span>GitHub</span> <svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"m9 18 6-6-6-6\"></path></svg></button><ul tabindex=\"-1\" data-task-card-submenu-panel class=\"menu menu-sm absolute right-0 top-full z-[110] hidden w-56 max-w-[calc(100vw-2rem)] border border-base-300 bg-base-100 p-2 shadow rounded-box group-hover:block group-focus-within:block\"><li class=\"menu-title\"><span>GitHub</span></li><li>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if state.PullRequest != nil && state.PullRequest.PRURL != "" && strings.EqualFold(strings.TrimSpace(state.PullRequest.PRState), "open") {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "<a class=\"text-sm min-h-11\" href=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "<a class=\"text-sm\" href=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var8 templ.SafeURL
 			templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(state.PullRequest.PRURL))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 420, Col: 78}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 420, Col: 69}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
 			if templ_7745c5c3_Err != nil {
@@ -529,7 +529,7 @@ func TaskCardMergeSubmenus(task *models.Task, projectID string, state TaskCardMe
 			var templ_7745c5c3_Var9 string
 			templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", state.PullRequest.PRNumber))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 420, Col: 179}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 420, Col: 170}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var9))
 			if templ_7745c5c3_Err != nil {
@@ -540,7 +540,7 @@ func TaskCardMergeSubmenus(task *models.Task, projectID string, state TaskCardMe
 				return templ_7745c5c3_Err
 			}
 		} else {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "<button type=\"button\" class=\"text-sm min-h-11\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "<button type=\"button\" class=\"text-sm\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -755,7 +755,7 @@ func TaskCard(task models.Task, projectID string, viewingCategory string, llmMod
 			return templ_7745c5c3_Err
 		}
 		if viewingCategory != "active" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "<li><button class=\"text-sm min-h-11\" hx-post=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "<li><button class=\"text-sm\" hx-post=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -778,7 +778,7 @@ func TaskCard(task models.Task, projectID string, viewingCategory string, llmMod
 			return templ_7745c5c3_Err
 		}
 		if task.Status == models.StatusRunning {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "<li><button class=\"text-sm text-error min-h-11\" hx-post=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "<li><button class=\"text-sm text-error\" hx-post=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -801,7 +801,7 @@ func TaskCard(task models.Task, projectID string, viewingCategory string, llmMod
 			return templ_7745c5c3_Err
 		}
 		if task.Status != models.StatusRunning {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "<li><a class=\"text-sm min-h-11\" href=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "<li><a class=\"text-sm\" href=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
