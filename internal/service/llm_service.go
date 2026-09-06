@@ -257,7 +257,7 @@ func (s *LLMService) taskActionRuntimeTools(ctx context.Context, task models.Tas
 		AfterPRFeedbackForwarded: s.promoteQueuedTaskThreadAfterCompletion,
 		SuppressIssueComments:    automationBound,
 	})
-	return llmcontracts.CompositeRuntimeTools(s.taskSendMessageRuntimeTools(task), s.taskControlRuntimeTools(task), githubTools, s.automationBootstrapRuntimeTools(ctx, task))
+	return llmcontracts.CompositeRuntimeTools(s.taskSendMessageRuntimeTools(task), s.taskControlRuntimeToolsWithContext(ctx, task), githubTools, s.automationBootstrapRuntimeTools(ctx, task))
 }
 
 func (s *LLMService) AutomationGitHubRuntimeTools(ctx context.Context, task models.Task, defs []llmcontracts.RuntimeToolDefinition) *llmcontracts.RuntimeTools {
@@ -395,8 +395,16 @@ func (s *LLMService) automationBootstrapRuntimeTools(ctx context.Context, task m
 }
 
 func (s *LLMService) taskControlRuntimeTools(task models.Task) *llmcontracts.RuntimeTools {
+	return s.taskControlRuntimeToolsWithContext(context.Background(), task)
+}
+
+func (s *LLMService) taskControlRuntimeToolsWithContext(ctx context.Context, task models.Task) *llmcontracts.RuntimeTools {
 	if s == nil || strings.TrimSpace(task.ProjectID) == "" {
 		return nil
+	}
+	nativeInbox := false
+	if s.alertSvc != nil {
+		nativeInbox, _ = s.alertSvc.IsCurrentNativeInboxRuntime(ctx, task.ProjectID)
 	}
 	defs := chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true)
 	filtered := make([]llmcontracts.RuntimeToolDefinition, 0, 5)
@@ -441,12 +449,23 @@ func (s *LLMService) taskControlRuntimeTools(task models.Task) *llmcontracts.Run
 		if !allowed[name] {
 			continue
 		}
-		if name == "list_alerts" && task.Category == models.CategoryScheduled {
+		if nativeInbox && name == "list_existing_automation_notifications" {
+			continue
+		}
+		if name == "list_alerts" && (nativeInbox || task.Category == models.CategoryScheduled) {
 			var schema map[string]json.RawMessage
 			var properties map[string]json.RawMessage
 			if json.Unmarshal(def.Parameters, &schema) == nil && json.Unmarshal(schema["properties"], &properties) == nil {
-				delete(properties, "project_id")
-				delete(properties, "read")
+				if nativeInbox {
+					for property := range properties {
+						if property != "limit" && property != "offset" {
+							delete(properties, property)
+						}
+					}
+				} else {
+					delete(properties, "project_id")
+					delete(properties, "read")
+				}
 				if encodedProperties, err := json.Marshal(properties); err == nil {
 					schema["properties"] = encodedProperties
 					if encodedSchema, err := json.Marshal(schema); err == nil {
@@ -454,7 +473,11 @@ func (s *LLMService) taskControlRuntimeTools(task models.Task) *llmcontracts.Run
 					}
 				}
 			}
-			def.Description += " Uses the persisted caller task's project and includes both read and unread alerts."
+			if nativeInbox {
+				def.Description = "List every approved, unlinked notification owned by this Native Approved Inbox. The runtime enforces project, ownership, decision, linkage, read-state, and recovery eligibility; use only stable pagination."
+			} else {
+				def.Description += " Uses the persisted caller task's project and includes both read and unread alerts."
+			}
 		}
 		filtered = append(filtered, def)
 	}
