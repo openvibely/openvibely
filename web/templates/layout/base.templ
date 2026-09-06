@@ -610,6 +610,11 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							overflow-y: auto !important;
 						}
 					}
+					@media (min-width: 768px) {
+						[data-card-pagination-root]:has([data-card-list-toolbar]) [data-search-card]:not([data-search-empty-state]) {
+							padding-left: 2rem;
+						}
+					}
 					/* Collection Filters are class-driven so trigger focus cannot reopen a dismissed popover. */
 					[data-card-list-toolbar] .dropdown:not(.dropdown-open) > [data-card-filters-popover] {
 						visibility: hidden !important;
@@ -4498,7 +4503,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 									}
 									checkbox.addEventListener('click', function(event) { checkbox._openVibelyShift = !!event.shiftKey; event.stopPropagation(); });
 									checkbox.addEventListener('change', function(event) { event.stopPropagation(); toggle(card, checkbox.checked, !!checkbox._openVibelyShift); checkbox._openVibelyShift = false; });
-									gutter.appendChild(checkbox); card.insertBefore(gutter, card.firstChild); card.classList.add('md:pl-8'); alignSelectionGutter(card, gutter);
+									gutter.appendChild(checkbox); card.insertBefore(gutter, card.firstChild); alignSelectionGutter(card, gutter);
 									if (state.mobile) gutter.classList.remove('hidden');
 								});
 								render();
