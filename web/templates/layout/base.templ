@@ -650,6 +650,11 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					opacity: 1 !important;
 					pointer-events: auto !important;
 				}
+				#kanban-board [data-kanban-menu-key][data-kanban-menu-positioning="true"] > [data-kanban-menu-content] {
+					visibility: visible !important;
+					opacity: 0 !important;
+					pointer-events: none !important;
+				}
 				#kanban-board [data-task-card-menu-trigger] + [data-kanban-menu-content] {
 					overflow: visible;
 				}
@@ -2878,6 +2883,33 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				}
 			}
 
+			function prepareKanbanMenuPosition(dropdown, label) {
+				if (!dropdown || !label) return;
+				const generation = (dropdown.__openVibelyPositionGeneration || 0) + 1;
+				dropdown.__openVibelyPositionGeneration = generation;
+				dropdown.setAttribute('data-kanban-menu-positioning', 'true');
+				positionDropdownForViewport(label);
+				let previousRect = null;
+				let stableFrames = 0;
+				let frameCount = 0;
+				function settlePosition() {
+					if (dropdown.__openVibelyPositionGeneration !== generation || dropdown.getAttribute('data-kanban-menu-open') !== 'true') return;
+					positionDropdownForViewport(label);
+					const content = dropdown.querySelector(':scope > [data-kanban-menu-content]');
+					const rect = content && content.getBoundingClientRect();
+					frameCount++;
+					if (rect && previousRect && Math.abs(rect.left - previousRect.left) <= 0.5 && Math.abs(rect.top - previousRect.top) <= 0.5) stableFrames++;
+					else stableFrames = 0;
+					previousRect = rect ? {left: rect.left, top: rect.top} : null;
+					if (stableFrames >= 1 || frameCount >= 8) {
+						dropdown.removeAttribute('data-kanban-menu-positioning');
+						return;
+					}
+					requestAnimationFrame(settlePosition);
+				}
+				requestAnimationFrame(settlePosition);
+			}
+
 			function handleDropdownToggle(event) {
 				event.stopPropagation(); // Prevent event from bubbling to parent handlers
 				const label = event.currentTarget;
@@ -2898,15 +2930,18 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						return;
 					}
 
-					// Otherwise, open the dropdown explicitly, then place it in the visible viewport/scrollport.
+					// Otherwise, keep the Kanban dropdown hidden while its pre-rendered,
+					// measurable content settles into fixed viewport coordinates, then reveal it.
 					if (kanbanDropdown) {
+						prepareKanbanMenuPosition(kanbanDropdown, label);
 						openKanbanMenuKey = kanbanDropdown.getAttribute('data-kanban-menu-key') || '';
 						const board = kanbanDropdown.closest('#kanban-board');
 						if (board && openKanbanMenuKey) board.setAttribute('data-open-kanban-menu-key', openKanbanMenuKey);
 						setKanbanMenuExpanded(kanbanDropdown, true);
 						window.dispatchEvent(new CustomEvent('kanban-menu-opened'));
+					} else {
+						requestAnimationFrame(function() { positionDropdownForViewport(label); });
 					}
-					requestAnimationFrame(function() { positionDropdownForViewport(label); });
 				}
 
 				function handleTaskSelect(event) {
@@ -3485,6 +3520,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						if (expanded) dropdown.setAttribute('data-kanban-menu-open', 'true');
 						else {
 							dropdown.removeAttribute('data-kanban-menu-open');
+							dropdown.removeAttribute('data-kanban-menu-positioning');
 							closeKanbanSubmenus(dropdown, null);
 						}
 						const column = dropdown.closest('.kanban-column');
@@ -3567,6 +3603,14 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				document.addEventListener('focusin', function(event) {
 					const dropdown = kanbanDropdownForTarget(event.target);
 					if (!dropdown || suppressKanbanMenuFocusOpen) return;
+					const trigger = dropdown.querySelector('[data-kanban-menu-trigger]');
+					if (trigger && dropdown.getAttribute('data-kanban-menu-open') !== 'true') {
+						prepareKanbanMenuPosition(dropdown, trigger);
+					} else if (trigger && event.target !== trigger && dropdown.getAttribute('data-kanban-menu-positioning') === 'true') {
+						dropdown.__openVibelyPositionGeneration = (dropdown.__openVibelyPositionGeneration || 0) + 1;
+						positionDropdownForViewport(trigger);
+						dropdown.removeAttribute('data-kanban-menu-positioning');
+					}
 					openKanbanMenuKey = dropdown.getAttribute('data-kanban-menu-key');
 					const board = dropdown.closest('#kanban-board');
 					if (board) {
