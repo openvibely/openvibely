@@ -870,6 +870,30 @@ type ModelCapacityResponse struct {
 	AvailableSlots int    `json:"available_slots"`
 }
 
+func (h *Handler) projectCapacityResponse(project *models.Project, queueSize int) ProjectCapacityResponse {
+	running := h.workerSvc.ProjectRunning(project.ID)
+	hasCapacity := h.workerSvc.HasProjectCapacity(project.ID)
+
+	var availableSlots *int
+	if project.MaxWorkers != nil && *project.MaxWorkers > 0 {
+		slots := *project.MaxWorkers - running
+		if slots < 0 {
+			slots = 0
+		}
+		availableSlots = &slots
+	}
+
+	return ProjectCapacityResponse{
+		ID:             project.ID,
+		Name:           project.Name,
+		Running:        running,
+		QueueSize:      queueSize,
+		MaxWorkers:     project.MaxWorkers,
+		HasCapacity:    hasCapacity,
+		AvailableSlots: availableSlots,
+	}
+}
+
 func modelCapacityResponse(agent *models.LLMConfig, running int, hasCapacity bool) ModelCapacityResponse {
 	availableSlots := 0
 	if agent.MaxWorkers > 0 {
@@ -944,28 +968,8 @@ func (h *Handler) GetProjectCapacities(c echo.Context) error {
 	}
 
 	capacities := make([]ProjectCapacityResponse, len(projects))
-	for i, p := range projects {
-		running := h.workerSvc.ProjectRunning(p.ID)
-		hasCapacity := h.workerSvc.HasProjectCapacity(p.ID)
-
-		var availableSlots *int
-		if p.MaxWorkers != nil && *p.MaxWorkers > 0 {
-			slots := *p.MaxWorkers - running
-			if slots < 0 {
-				slots = 0
-			}
-			availableSlots = &slots
-		}
-
-		capacities[i] = ProjectCapacityResponse{
-			ID:             p.ID,
-			Name:           p.Name,
-			Running:        running,
-			QueueSize:      pendingCounts[p.ID],
-			MaxWorkers:     p.MaxWorkers,
-			HasCapacity:    hasCapacity,
-			AvailableSlots: availableSlots,
-		}
+	for i := range projects {
+		capacities[i] = h.projectCapacityResponse(&projects[i], pendingCounts[projects[i].ID])
 	}
 
 	return c.JSON(http.StatusOK, capacities)
@@ -993,33 +997,13 @@ func (h *Handler) GetProjectCapacity(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, "project not found")
 	}
 
-	running := h.workerSvc.ProjectRunning(project.ID)
-	hasCapacity := h.workerSvc.HasProjectCapacity(project.ID)
-
 	pendingCounts, err := h.taskRepo.CountPendingByProject(c.Request().Context())
 	if err != nil {
 		applog.Infof("[handler] GetProjectCapacity error counting pending tasks: %v", err)
 		pendingCounts = make(map[string]int)
 	}
 
-	var availableSlots *int
-	if project.MaxWorkers != nil && *project.MaxWorkers > 0 {
-		slots := *project.MaxWorkers - running
-		if slots < 0 {
-			slots = 0
-		}
-		availableSlots = &slots
-	}
-
-	resp := ProjectCapacityResponse{
-		ID:             project.ID,
-		Name:           project.Name,
-		Running:        running,
-		QueueSize:      pendingCounts[project.ID],
-		MaxWorkers:     project.MaxWorkers,
-		HasCapacity:    hasCapacity,
-		AvailableSlots: availableSlots,
-	}
+	resp := h.projectCapacityResponse(project, pendingCounts[project.ID])
 
 	return c.JSON(http.StatusOK, resp)
 }
