@@ -306,6 +306,45 @@ func TestAlertRepo_ProjectIsolationAndActionableLifecycle(t *testing.T) {
 	}
 }
 
+func TestAlertRepo_CompletedProcessingRequiresImplementationTaskHistory(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewAlertRepo(db)
+	project := createTestProject(t, NewProjectRepo(db))
+	ctx := context.Background()
+	alert := &models.Alert{
+		ProjectID:       project.ID,
+		Title:           "Completion requires implementation",
+		DecisionState:   models.AlertDecisionPending,
+		ProcessingState: models.AlertProcessingUnclaimed,
+	}
+	if _, err := repo.CreateIdempotent(ctx, alert); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.SetDecision(ctx, project.ID, alert.ID, models.AlertDecisionApproved); err != nil {
+		t.Fatal(err)
+	}
+	const claimant = "scheduled-inbox"
+	if _, err := repo.ClaimApproved(ctx, project.ID, alert.ID, claimant, time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.MarkProcessing(ctx, project.ID, alert.ID, claimant, models.AlertProcessingCompleted, "done without implementation"); err == nil {
+		t.Fatal("completed processing without an implementation task unexpectedly succeeded")
+	}
+	if err := repo.MarkProcessing(ctx, project.ID, alert.ID, claimant, models.AlertProcessingFailed, "implementation creation failed"); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.MarkProcessing(ctx, project.ID, alert.ID, claimant, models.AlertProcessingCompleted, "done after pre-link failure"); err == nil {
+		t.Fatal("failed processing without an implementation task was completed")
+	}
+	stored, err := repo.GetByIDForProject(ctx, project.ID, alert.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.ProcessingState != models.AlertProcessingFailed || stored.ImplementationTaskID != nil {
+		t.Fatalf("stored alert = %#v, want failed with no implementation task", stored)
+	}
+}
+
 func TestAlertRepo_ImplementationTaskLinkedFilterSurvivesTaskDeletion(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewAlertRepo(db)

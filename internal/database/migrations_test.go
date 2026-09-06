@@ -1192,8 +1192,8 @@ func TestMigration100_RepairsSkippedChannelTargetsWhenOldLocalDiscordUsed099(t *
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 175 {
-		t.Fatalf("max goose version = %d, want 175", maxVersion)
+	if maxVersion != 176 {
+		t.Fatalf("max goose version = %d, want 176", maxVersion)
 	}
 }
 
@@ -1405,6 +1405,107 @@ func TestMigration175BackfillsAlertImplementationTaskHistory(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("implementation task history = %#v, want %#v", got, want)
+	}
+}
+
+func TestMigration176CorrectsAlertImplementationTaskHistory(t *testing.T) {
+	db := openMigrationTestDB(t, filepath.Join(t.TempDir(), "alert-implementation-history-176.db"))
+	goose.SetBaseFS(migrations.FS)
+	defer goose.SetBaseFS(nil)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 175); err != nil {
+		t.Fatalf("migrate to overbroad alert history 175: %v", err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO projects(id, name, description, repo_path)
+		VALUES('alert-history-project-176', 'Alert history repair', '', '');
+		INSERT INTO tasks(id, project_id, title, category, status)
+		VALUES
+			('alert-history-live-task-176', 'alert-history-project-176', 'Live implementation', 'completed', 'completed'),
+			('alert-history-state-task-176', 'alert-history-project-176', 'Linked-state implementation', 'completed', 'completed');
+		INSERT INTO alerts(id, project_id, title, decision_state, processing_state, processing_error, implementation_task_id, implementation_task_was_linked)
+		VALUES
+			('alert-history-false-completed-176', 'alert-history-project-176', 'Completed without task', 'approved', 'completed', 'done', NULL, 1),
+			('alert-history-false-message-176', 'alert-history-project-176', 'Completed without created task', 'approved', 'completed', 'implementation task was not created', NULL, 1),
+			('alert-history-message-176', 'alert-history-project-176', 'Legacy linked completion', 'approved', 'completed', 'Linked and started implementation task abc123.', NULL, 1),
+			('alert-history-projection-176', 'alert-history-project-176', 'Projected linked completion', 'approved', 'completed', 'done', NULL, 1),
+			('alert-history-live-176', 'alert-history-project-176', 'Live task', 'approved', 'failed', '', 'alert-history-live-task-176', 1),
+			('alert-history-state-176', 'alert-history-project-176', 'Linked state', 'approved', 'implementation_task_linked', '', 'alert-history-state-task-176', 1);
+		INSERT INTO automations (id, project_id, stable_key, name, automation_type, lifecycle_state)
+		VALUES ('alert-history-automation-176', 'alert-history-project-176', 'alert-history-176', 'Alert history', 'custom', 'active');
+		INSERT INTO automation_versions (id, project_id, automation_id, version, state, source, adapter_key)
+		VALUES ('alert-history-version-176', 'alert-history-project-176', 'alert-history-automation-176', 1, 'published', 'manual', 'custom');
+		UPDATE automations SET published_version_id = 'alert-history-version-176' WHERE id = 'alert-history-automation-176';
+		INSERT INTO automation_nodes (id, project_id, automation_id, version_id, node_key, name, node_type, role)
+		VALUES ('alert-history-node-176', 'alert-history-project-176', 'alert-history-automation-176', 'alert-history-version-176', 'implementation', 'Implementation', 'agent_task', 'implementation');
+		INSERT INTO automation_work_items (id, project_id, automation_id, origin_version_id, work_item_key)
+		VALUES ('alert-history-work-176', 'alert-history-project-176', 'alert-history-automation-176', 'alert-history-version-176', 'alert-history-work-176');
+		INSERT INTO automation_activities (id, project_id, automation_id, version_id, node_id, work_item_id, activity_key, activity_type, status)
+		VALUES ('alert-history-activity-176', 'alert-history-project-176', 'alert-history-automation-176', 'alert-history-version-176', 'alert-history-node-176', 'alert-history-work-176', 'alert-history-activity-176', 'create_implementation_task', 'completed');
+		INSERT INTO automation_activity_resources (activity_id, resource_type, resource_id)
+		VALUES
+			('alert-history-activity-176', 'alert', 'alert-history-projection-176'),
+			('alert-history-activity-176', 'task', 'deleted-alert-history-task-176');
+	`); err != nil {
+		t.Fatalf("seed alert implementation history repair: %v", err)
+	}
+
+	if err := goose.UpTo(db, ".", 176); err != nil {
+		t.Fatalf("apply alert implementation history repair: %v", err)
+	}
+	rows, err := db.Query(`SELECT id, implementation_task_was_linked FROM alerts
+		WHERE project_id = 'alert-history-project-176' ORDER BY id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	got := map[string]int{}
+	for rows.Next() {
+		var id string
+		var linked int
+		if err := rows.Scan(&id, &linked); err != nil {
+			t.Fatal(err)
+		}
+		got[id] = linked
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]int{
+		"alert-history-false-completed-176": 0,
+		"alert-history-false-message-176":   0,
+		"alert-history-live-176":            1,
+		"alert-history-message-176":         1,
+		"alert-history-projection-176":      1,
+		"alert-history-state-176":           1,
+	}
+	if err := rows.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("corrected implementation task history = %#v, want %#v", got, want)
+	}
+	if err := goose.DownTo(db, ".", 175); err != nil {
+		t.Fatalf("roll back alert implementation history repair: %v", err)
+	}
+	var linkedAfterDown int
+	if err := db.QueryRow(`SELECT implementation_task_was_linked FROM alerts WHERE id = 'alert-history-false-completed-176'`).Scan(&linkedAfterDown); err != nil {
+		t.Fatal(err)
+	}
+	if linkedAfterDown != 1 {
+		t.Fatalf("rolled-back completed history = %d, want 1", linkedAfterDown)
+	}
+	if err := goose.UpTo(db, ".", 176); err != nil {
+		t.Fatalf("reapply alert implementation history repair: %v", err)
+	}
+	var linkedAfterReapply int
+	if err := db.QueryRow(`SELECT implementation_task_was_linked FROM alerts WHERE id = 'alert-history-false-completed-176'`).Scan(&linkedAfterReapply); err != nil {
+		t.Fatal(err)
+	}
+	if linkedAfterReapply != 0 {
+		t.Fatalf("reapplied completed history = %d, want 0", linkedAfterReapply)
 	}
 }
 
@@ -1654,8 +1755,8 @@ func TestMigration107_AllowsLocalDatabaseWithOldSwarmVersion106(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 175 {
-		t.Fatalf("max goose version = %d, want 175", maxVersion)
+	if maxVersion != 176 {
+		t.Fatalf("max goose version = %d, want 176", maxVersion)
 	}
 }
 
@@ -2103,8 +2204,8 @@ func TestMigration082_SkipsWhenLocalDevDBAlreadyApplied082(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 175 {
-		t.Fatalf("max goose version = %d, want 175", maxVersion)
+	if maxVersion != 176 {
+		t.Fatalf("max goose version = %d, want 176", maxVersion)
 	}
 }
 
@@ -2439,8 +2540,8 @@ func TestMigration091_LocalDevAlreadyAppliedUsageChainStillMigrates(t *testing.T
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 175 {
-		t.Fatalf("max goose version = %d, want 175", maxVersion)
+	if maxVersion != 176 {
+		t.Fatalf("max goose version = %d, want 176", maxVersion)
 	}
 }
 
