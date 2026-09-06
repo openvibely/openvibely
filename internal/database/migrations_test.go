@@ -1364,17 +1364,18 @@ func TestMigration175BackfillsDurableAlertImplementationTaskHistory(t *testing.T
 	}
 
 	const (
-		projectID             = "11111111111111111111111111111111"
-		historicalAlertID     = "55555555555555555555555555555555"
-		batchedAlertID        = "21212121212121212121212121212121"
-		messageOnlyAlertID    = "66666666666666666666666666666666"
-		failedResultAlertID   = "77777777777777777777777777777777"
-		wrongCallerAlertID    = "88888888888888888888888888888888"
-		uncorroboratedAlertID = "99999999999999999999999999999999"
-		forgedResultAlertID   = "19191919191919191919191919191919"
-		liveTaskAlertID       = "15151515151515151515151515151515"
-		linkedStateAlertID    = "16161616161616161616161616161616"
-		projectionAlertID     = "17171717171717171717171717171717"
+		projectID              = "11111111111111111111111111111111"
+		completedWithoutLinkID = "55555555555555555555555555555555"
+		eligibleWithoutLinkID  = "21212121212121212121212121212121"
+		messageOnlyAlertID     = "66666666666666666666666666666666"
+		failedResultAlertID    = "77777777777777777777777777777777"
+		wrongCallerAlertID     = "88888888888888888888888888888888"
+		uncorroboratedAlertID  = "99999999999999999999999999999999"
+		forgedResultAlertID    = "19191919191919191919191919191919"
+		liveTaskAlertID        = "15151515151515151515151515151515"
+		linkedStateAlertID     = "16161616161616161616161616161616"
+		projectionAlertID      = "17171717171717171717171717171717"
+		pendingActivityAlertID = "25252525252525252525252525252525"
 	)
 	if _, err := db.Exec(`
 		INSERT INTO projects(id, name, description, repo_path) VALUES
@@ -1393,7 +1394,8 @@ func TestMigration175BackfillsDurableAlertImplementationTaskHistory(t *testing.T
 			('99999999999999999999999999999999', '11111111111111111111111111111111', 'Uncorroborated task result', 'approved', 'completed', '33333333333333333333333333333333', ''),
 			('19191919191919191919191919191919', '11111111111111111111111111111111', 'Forged result marker', 'approved', 'completed', '33333333333333333333333333333333', ''),
 			('16161616161616161616161616161616', '11111111111111111111111111111111', 'Historical linked state', 'approved', 'implementation_task_linked', '33333333333333333333333333333333', ''),
-			('17171717171717171717171717171717', '11111111111111111111111111111111', 'Automation projection', 'approved', 'completed', '33333333333333333333333333333333', '');
+			('17171717171717171717171717171717', '11111111111111111111111111111111', 'Automation projection', 'approved', 'completed', '33333333333333333333333333333333', ''),
+			('25252525252525252525252525252525', '11111111111111111111111111111111', 'Pending task creation activity', 'approved', 'completed', '33333333333333333333333333333333', '');
 		INSERT INTO alerts(id, project_id, title, decision_state, processing_state, claimant, implementation_task_id) VALUES
 			('15151515151515151515151515151515', '11111111111111111111111111111111', 'Live implementation task', 'approved', 'failed', '33333333333333333333333333333333', '18181818181818181818181818181818');
 		INSERT INTO executions(id, task_id, task_project_id, status, output) VALUES
@@ -1429,11 +1431,14 @@ func TestMigration175BackfillsDurableAlertImplementationTaskHistory(t *testing.T
 			('11111111111111111111111111111111', 'migration-175-automation', 'alert', '88888888888888888888888888888888', 'producer', 'action', 'gate', 'inbox');
 		INSERT INTO automation_work_items (id, project_id, automation_id, origin_version_id, work_item_key)
 			VALUES ('migration-175-work', '11111111111111111111111111111111', 'migration-175-automation', 'migration-175-version', 'migration-175-work');
-		INSERT INTO automation_activities (id, project_id, automation_id, version_id, node_id, work_item_id, activity_key, activity_type, status)
-			VALUES ('migration-175-activity', '11111111111111111111111111111111', 'migration-175-automation', 'migration-175-version', 'migration-175-node', 'migration-175-work', 'migration-175-activity', 'create_implementation_task', 'completed');
+		INSERT INTO automation_activities (id, project_id, automation_id, version_id, node_id, work_item_id, activity_key, activity_type, status) VALUES
+			('migration-175-activity', '11111111111111111111111111111111', 'migration-175-automation', 'migration-175-version', 'migration-175-node', 'migration-175-work', 'migration-175-activity', 'create_implementation_task', 'completed'),
+			('migration-175-pending-activity', '11111111111111111111111111111111', 'migration-175-automation', 'migration-175-version', 'migration-175-node', 'migration-175-work', 'migration-175-pending-activity', 'create_implementation_task', 'running');
 		INSERT INTO automation_activity_resources (activity_id, resource_type, resource_id) VALUES
 			('migration-175-activity', 'alert', '17171717171717171717171717171717'),
-			('migration-175-activity', 'task', 'deleted-migration-175-task');
+			('migration-175-activity', 'task', 'deleted-migration-175-task'),
+			('migration-175-pending-activity', 'alert', '25252525252525252525252525252525'),
+			('migration-175-pending-activity', 'task', 'pending-migration-175-task');
 	`); err != nil {
 		t.Fatalf("seed schema-174 alert task history: %v", err)
 	}
@@ -1460,16 +1465,17 @@ func TestMigration175BackfillsDurableAlertImplementationTaskHistory(t *testing.T
 		return got
 	}
 	want := map[string]int{
-		historicalAlertID:     1,
-		batchedAlertID:        1,
-		messageOnlyAlertID:    0,
-		failedResultAlertID:   0,
-		wrongCallerAlertID:    0,
-		uncorroboratedAlertID: 0,
-		forgedResultAlertID:   0,
-		liveTaskAlertID:       1,
-		linkedStateAlertID:    1,
-		projectionAlertID:     1,
+		completedWithoutLinkID: 0,
+		eligibleWithoutLinkID:  0,
+		messageOnlyAlertID:     0,
+		failedResultAlertID:    0,
+		wrongCallerAlertID:     0,
+		uncorroboratedAlertID:  0,
+		forgedResultAlertID:    0,
+		liveTaskAlertID:        1,
+		linkedStateAlertID:     1,
+		projectionAlertID:      1,
+		pendingActivityAlertID: 0,
 	}
 
 	if err := goose.UpTo(db, ".", 175); err != nil {
