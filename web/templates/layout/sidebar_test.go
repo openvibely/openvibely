@@ -71,7 +71,6 @@ func TestSidebar_ProjectSelectorSearchableAndIdentityOnly(t *testing.T) {
 		`aria-expanded="false"`,
 		`aria-controls="project-selector-dialog"`,
 		`fixed m-0`,
-		`class="modal-box w-full max-w-none max-h-[inherit] min-h-0 overflow-hidden rounded-none bg-transparent p-0 shadow-none"`,
 		`id="project-selector-dialog"`, `role="dialog"`,
 		`aria-modal="true"`,
 		`id="project-selector-search"`,
@@ -91,8 +90,8 @@ func TestSidebar_ProjectSelectorSearchableAndIdentityOnly(t *testing.T) {
 		`data-project-selector-no-match`,
 		`No projects match your search.`,
 		`document.addEventListener('input', function(event)`,
-		`if (event.target === search) applyFilter();`,
-		`function positionSelector()`,
+		`event.target.matches('[data-project-selector-search]')`,
+		`function positionSelector(root)`,
 		`var anchorLeft = triggerRect.left;`,
 		`dialog.style.top = top + 'px';`,
 		`return String(value || '').trim().toLowerCase();`,
@@ -112,6 +111,9 @@ func TestSidebar_ProjectSelectorSearchableAndIdentityOnly(t *testing.T) {
 		}
 	}
 
+	if strings.Contains(html, `class="modal-box`) {
+		t.Fatal("project selector must use the same direct shared panel structure as the breadcrumb selector")
+	}
 	if strings.Contains(html, `data-project-selector-caret`) || strings.Contains(html, `bg-none`) {
 		t.Fatal("project selector must use the original select background arrow without a custom caret")
 	}

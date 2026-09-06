@@ -5799,9 +5799,9 @@ func TestSidebar_ProjectSelectorSearchTriggerAndFocusVisible(t *testing.T) {
 		`role="listbox"`,
 		`data-project-selector-option`,
 		`data-project-selector-clear`,
-		`function positionSelector()`,
+		`function positionSelector(root)`,
 		`document.addEventListener('input', function(event)`,
-		`if (event.target === search) applyFilter();`,
+		`event.target.matches('[data-project-selector-search]')`,
 	}
 	for _, snippet := range required {
 		if !strings.Contains(body, snippet) {
