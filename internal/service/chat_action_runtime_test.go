@@ -658,6 +658,10 @@ func TestAlertRuntimeFiltersPaginationAuthorizationAndRecovery(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, approvedAcrossReadStates, first.ID, "omitting read must keep a read approved notification eligible")
 
+	approvedWithNullOptionalFilters, err := handlers["list_alerts"](ctx, json.RawMessage(`{"project_id":null,"decision_state":"approved","processing_state":null,"type":null,"source":null,"read":null,"implementation_task_linked":false}`))
+	require.NoError(t, err)
+	require.Contains(t, approvedWithNullOptionalFilters, first.ID, "null optional filters must behave as omitted")
+
 	pageOne, err := handlers["list_alerts"](ctx, json.RawMessage(`{"limit":2,"offset":0}`))
 	require.NoError(t, err)
 	pageTwo, err := handlers["list_alerts"](ctx, json.RawMessage(`{"limit":2,"offset":2}`))
