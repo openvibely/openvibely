@@ -2754,12 +2754,19 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 			// do not invert first-click behavior.
 			let focusedBeforeClick = null;
 			let kanbanMenuWasOpenBeforeClick = false;
+			let pointerFocusedKanbanTrigger = null;
 
 			document.addEventListener('mousedown', function(e) {
-				// Record state before this interaction starts.
+				// Record state before this interaction starts. Pointer focus on a
+				// Kanban trigger must not open it before the matching click toggles it.
 				focusedBeforeClick = document.activeElement;
 				const kanbanDropdown = kanbanDropdownForTarget(e.target);
+				const kanbanTrigger = e.target && e.target.closest ? e.target.closest('[data-kanban-menu-trigger]') : null;
+				pointerFocusedKanbanTrigger = kanbanTrigger && kanbanDropdown && kanbanDropdown.contains(kanbanTrigger) ? kanbanTrigger : null;
 				kanbanMenuWasOpenBeforeClick = !!(kanbanDropdown && kanbanDropdown.getAttribute('data-kanban-menu-open') === 'true');
+			}, true);
+			document.addEventListener('mouseup', function() {
+				setTimeout(function() { pointerFocusedKanbanTrigger = null; }, 0);
 			}, true);
 			function closestDropdownScrollBoundary(element) {
 				let current = element ? element.parentElement : null;
@@ -2929,6 +2936,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 			function handleDropdownToggle(event) {
 				event.stopPropagation(); // Prevent event from bubbling to parent handlers
 				const label = event.currentTarget;
+				if (pointerFocusedKanbanTrigger === label) pointerFocusedKanbanTrigger = null;
 				const dropdown = label && label.closest ? label.closest('[data-chat-actions-dropdown]') : null;
 				const kanbanDropdown = label && label.closest ? label.closest('[data-kanban-menu-key]') : null;
 				const desktopChatStartupFocus = dropdown && document.documentElement.getAttribute('data-openvibely-runtime') === 'desktop' && dropdown.getAttribute('data-chat-actions-open') !== 'true';
@@ -2949,6 +2957,9 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					// Otherwise, keep the Kanban dropdown hidden while its pre-rendered,
 					// measurable content settles into fixed viewport coordinates, then reveal it.
 					if (kanbanDropdown) {
+						document.querySelectorAll('[data-kanban-menu-key]').forEach(function(candidate) {
+							if (candidate !== kanbanDropdown) setKanbanMenuExpanded(candidate, false);
+						});
 						prepareKanbanMenuPosition(kanbanDropdown, label);
 						openKanbanMenuKey = kanbanDropdown.getAttribute('data-kanban-menu-key') || '';
 						const board = kanbanDropdown.closest('#kanban-board');
@@ -3621,6 +3632,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					const dropdown = kanbanDropdownForTarget(event.target);
 					if (!dropdown || suppressKanbanMenuFocusOpen) return;
 					const trigger = dropdown.querySelector('[data-kanban-menu-trigger]');
+					if (event.target === trigger && pointerFocusedKanbanTrigger === trigger) return;
 					if (trigger && dropdown.getAttribute('data-kanban-menu-open') !== 'true') {
 						prepareKanbanMenuPosition(dropdown, trigger);
 					} else if (trigger && event.target !== trigger && dropdown.getAttribute('data-kanban-menu-positioning') === 'true') {
