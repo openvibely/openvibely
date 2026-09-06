@@ -880,6 +880,124 @@ func TestCompletedBubbleSharedHydrationInChrome(t *testing.T) {
 	}
 }
 
+func TestCodeRangeWorkerCanCompleteAfterFormerTimeoutInChrome(t *testing.T) {
+	chrome := testChromePath(t)
+	type slowWorkerResult struct {
+		status      string
+		error       string
+		elapsed     string
+		maxLongTask string
+	}
+	results := make(chan slowWorkerResult, 1)
+	html := `<!doctype html><html><head><meta charset="utf-8"></head><body><main id="fixture-root"></main><script>` + renderedBaseMarkdownCodeHelpers(t) + `</script><script>
+	window.addEventListener('DOMContentLoaded', function() {
+	  var root = document.getElementById('fixture-root');
+	  function report(status, error, elapsed, maxLongTask) {
+	    root.setAttribute('data-test-result', status);
+	    if (error) root.setAttribute('data-test-error', error);
+	    fetch('/result?status=' + encodeURIComponent(status) + '&error=' + encodeURIComponent(error || '') + '&elapsed=' + encodeURIComponent(elapsed || '') + '&max_long_task=' + encodeURIComponent(maxLongTask || ''), {cache: 'no-store'});
+	  }
+	  var longTasks = [];
+	  if (window.PerformanceObserver) {
+	    try {
+	      var observer = new PerformanceObserver(function(list) {
+	        list.getEntries().forEach(function(entry) { longTasks.push(entry.duration); });
+	      });
+	      observer.observe({entryTypes: ['longtask']});
+	    } catch (_) {}
+	  }
+	  var workerSource = "self.onmessage=function(){var started=Date.now();while(Date.now()-started<3500){}self.postMessage({ranges:[{start:1,end:2}]});};";
+	  window._codeRangeWorkerURL = window.URL.createObjectURL(new Blob([workerSource], {type: 'text/javascript'}));
+	  var owner = {};
+	  var source = Array(25001).fill('ordinary line').join('\n');
+	  var started = performance.now();
+	  window.codeRangesAsync(source, owner).then(function(ranges) {
+	    setTimeout(function() {
+	      var elapsed = performance.now() - started;
+	      var maxLongTask = longTasks.length ? Math.max.apply(Math, longTasks) : 0;
+	      if (!Array.isArray(ranges) || ranges.length !== 1) {
+	        report('fail', 'native worker result was not retained');
+	        return;
+	      }
+	      if (elapsed < 3400) {
+	        report('fail', 'worker completed before former timeout was exercised');
+	        return;
+	      }
+	      if (owner._codeRangeWorkerState !== null) {
+	        report('fail', 'worker state was not released');
+	        return;
+	      }
+	      if (maxLongTask > 75) {
+	        report('fail', 'main-thread long task: ' + maxLongTask.toFixed(1));
+	        return;
+	      }
+	      report('pass', '', elapsed.toFixed(1), maxLongTask.toFixed(1));
+	    }, 0);
+	  }).catch(function(error) {
+	    report('fail', String(error && error.stack || error));
+	  });
+	});
+	</script></body></html>`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/result" {
+			query := r.URL.Query()
+			select {
+			case results <- slowWorkerResult{
+				status:      query.Get("status"),
+				error:       query.Get("error"),
+				elapsed:     query.Get("elapsed"),
+				maxLongTask: query.Get("max_long_task"),
+			}:
+			default:
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(html))
+	}))
+	defer server.Close()
+
+	stderrPath := filepath.Join(t.TempDir(), "chrome-slow-code-range-worker.log")
+	stderrFile, err := os.Create(stderrPath)
+	if err != nil {
+		t.Fatalf("create Chrome stderr: %v", err)
+	}
+	defer stderrFile.Close()
+	cmd := exec.Command(chrome,
+		"--headless=new",
+		"--no-sandbox",
+		"--disable-gpu",
+		"--disable-dev-shm-usage",
+		"--disable-background-networking",
+		"--disable-background-timer-throttling",
+		"--run-all-compositor-stages-before-draw",
+		"--no-first-run",
+		"--no-default-browser-check",
+		"--user-data-dir="+filepath.Join(t.TempDir(), "chrome-slow-code-range-worker-profile"),
+		server.URL,
+	)
+	cmd.Stderr = stderrFile
+	configureTestBrowserProcess(cmd)
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start Chrome slow-worker fixture: %v", err)
+	}
+	var result slowWorkerResult
+	select {
+	case result = <-results:
+	case <-time.After(15 * time.Second):
+		stopTestBrowserProcess(cmd)
+		stderr, _ := os.ReadFile(stderrPath)
+		t.Fatalf("timed out waiting for slow code-range worker browser result\nChrome stderr: %s", stderr)
+	}
+	stopTestBrowserProcess(cmd)
+	if result.status != "pass" {
+		stderr, _ := os.ReadFile(stderrPath)
+		t.Fatalf("slow code-range worker browser fixture failed: %s\nChrome stderr: %s", result.error, stderr)
+	}
+	t.Logf("slow native code-range worker completed in %s ms; max main-thread task %s ms", result.elapsed, result.maxLongTask)
+}
+
 func TestChatContentRenderSchedulerSerializesAndRecovers(t *testing.T) {
 	var buf bytes.Buffer
 	if err := ChatAutoScrollScript().Render(context.Background(), &buf); err != nil {
@@ -911,10 +1029,10 @@ func TestChatContentRenderSchedulerSerializesAndRecovers(t *testing.T) {
 		"  const first = container(true), second = container(true); const p1 = window.scheduleChatContentRender(first, 'first'), p2 = window.scheduleChatContentRender(second, 'second');\n" +
 		"  await delay(10); if (calls.join(',') !== 'first') throw new Error('renders were not serialized'); controls[0].resolve(true);\n" +
 		"  await delay(10); if (calls.join(',') !== 'first,second') throw new Error('second render did not drain'); controls[1].reject(new Error('failed'));\n" +
-		"  const initial = await Promise.all([p1, p2]); if (!initial[0] || initial[1] || !second.replacements[0] || second.replacements[0].safe !== 'second') throw new Error('rejection did not use safe fallback');\n" +
-		"  window.renderStreamingContent = function(c, text) { if (text === 'hydrate-fail') return Promise.reject(new Error('hydrate failed')); return Promise.resolve(true); };\n" +
+		"  const initial = await Promise.all([p1, p2]); if (!initial[0] || !initial[1] || !second.replacements[0] || second.replacements[0].safe !== 'second') throw new Error('rejection did not commit safe fallback');\n" +
+		"  let failedHydrationAttempts = 0; window.renderStreamingContent = function(c, text) { if (text === 'hydrate-fail') { failedHydrationAttempts++; return Promise.reject(new Error('hydrate failed')); } return Promise.resolve(true); };\n" +
 		"  const hydrated = container(true, 'hydrate-ok'); if (!await window.scheduleChatElementRender(hydrated, 'hydrate-ok') || hydrated._renderedRevision !== 'hydrate-ok' || hydrated._renderingRevision) throw new Error('successful hydration signature was not committed');\n" +
-		"  const failedHydration = container(true, 'hydrate-fail'); if (await window.scheduleChatElementRender(failedHydration, 'hydrate-fail') || failedHydration._renderedRevision || failedHydration._renderingRevision) throw new Error('failed hydration signature was retained');\n" +
+		"  const failedHydration = container(true, 'hydrate-fail'); if (!await window.scheduleChatElementRender(failedHydration, 'hydrate-fail') || failedHydration._renderedRevision !== 'hydrate-fail' || failedHydration._renderingRevision || !failedHydration.replacements[0] || failedHydration.replacements[0].safe !== 'hydrate-fail') throw new Error('safe fallback hydration signature was not retained'); if (!await window.scheduleChatElementRender(failedHydration, 'hydrate-fail') || failedHydrationAttempts !== 1) throw new Error('unchanged safe fallback was retried');\n" +
 		"  const orderingOwner = container(true, 'snapshot-a'); if (!await window.renderLiveChatContent(orderingOwner, 'snapshot-a') || orderingOwner._renderedRevision !== 'snapshot-a') throw new Error('live snapshot was not authoritative'); orderingOwner.raw = 'snapshot-b'; if (!await window.scheduleChatElementRender(orderingOwner, 'snapshot-b') || orderingOwner._renderedRevision !== 'snapshot-b') throw new Error('scheduled snapshot did not replace live snapshot'); orderingOwner.raw = 'snapshot-a'; if (orderingOwner._renderedRevision === orderingOwner.raw) throw new Error('A-B-A ordering falsely treated stale DOM as current');\n" +
 		"  window._chatLiveRenderQuietMS = 5; let liveResolve = null, completedAttempts = 0; window.renderStreamingContent = function(c, text) { calls.push(text); if (text === 'completed-hung' && ++completedAttempts === 1) return new Promise(function() {}); if (text === 'live-hung') return new Promise(function(resolve) { liveResolve = resolve; }); return Promise.resolve(true); };\n" +
 		"  const completedDuringLive = container(true); const completedResult = window.scheduleChatContentRender(completedDuringLive, 'completed-hung'); await delay(10); const liveResult = window.renderLiveChatContent(container(true), 'live-now'); if (!await liveResult || await completedResult || completedDuringLive.replacements.length !== 0) throw new Error('live render dumped interrupted completed output into the DOM'); await delay(15); if (completedAttempts !== 2) throw new Error('interrupted completed render was not requeued after live work');\n" +
@@ -932,7 +1050,7 @@ func TestChatContentRenderSchedulerSerializesAndRecovers(t *testing.T) {
 		"  window._chatContentRenderTimeoutMS = 5;\n" +
 		"  window.renderStreamingContent = function(c, text) { calls.push(text); if (text === 'hung') return new Promise(function() {}); return Promise.resolve(true); };\n" +
 		"  const hung = container(true), after = container(true); const hungResult = window.scheduleChatContentRender(hung, 'hung'); const afterResult = window.scheduleChatContentRender(after, 'after');\n" +
-		"  const recovered = await Promise.all([hungResult, afterResult]); if (recovered[0] || !recovered[1] || !hung.replacements[0] || calls.indexOf('after') === -1) throw new Error('timeout did not release queue');\n" +
+		"  const recovered = await Promise.all([hungResult, afterResult]); if (!recovered[0] || !recovered[1] || !hung.replacements[0] || calls.indexOf('after') === -1) throw new Error('timeout fallback did not release queue');\n" +
 		"  const disconnected = container(false); if (await window.scheduleChatContentRender(disconnected, 'gone')) throw new Error('disconnected render succeeded'); if (calls.indexOf('gone') !== -1) throw new Error('disconnected render ran');\n" +
 		"})().catch(function(err) { console.error(err && err.stack || err); process.exit(1); });\n"
 	if output, err := exec.Command(node, "-e", script).CombinedOutput(); err != nil {
