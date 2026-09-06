@@ -1530,10 +1530,21 @@ func TestTaskAndAutomationCardKebabMenuRowHeightParityAndDropZoneGeometryInChrom
 			    automationTrigger.focus();
 			    automationTrigger.click();
 			    await frame();
-			    var automationHeight = automationEdit.getBoundingClientRect().height;
-			    Object.keys(taskHeights).forEach(function(key){if(Math.abs(taskHeights[key]-automationHeight)>1)fail('task '+key+' row height '+taskHeights[key]+' does not match automation row height '+automationHeight)});
-			    await report('pass', '');
-		  })().catch(function(error) { report('fail', String(error && error.stack || error)); });	});
+				    var automationHeight = automationEdit.getBoundingClientRect().height;
+				    Object.keys(taskHeights).forEach(function(key){if(Math.abs(taskHeights[key]-automationHeight)>1)fail('task '+key+' row height '+taskHeights[key]+' does not match automation row height '+automationHeight)});
+				    for (var columnKey of ['column-backlog','column-completed']) {
+				      var columnDropdown = document.querySelector('[data-kanban-menu-key="'+columnKey+'"]');
+				      var columnTrigger = columnDropdown && columnDropdown.querySelector(':scope > [data-kanban-menu-trigger]');
+				      var columnMenu = columnDropdown && columnDropdown.querySelector(':scope > [data-kanban-menu-content]');
+				      if (!columnTrigger || !columnMenu) fail('missing '+columnKey+' drop-zone menu');
+				      columnTrigger.focus();
+				      columnTrigger.click();
+				      await frame();
+				      var columnActions = Array.from(columnMenu.querySelectorAll(':scope > li > button'));
+				      if (!columnActions.length) fail('missing '+columnKey+' drop-zone actions');
+				      columnActions.forEach(function(action){var height=action.getBoundingClientRect().height;if(Math.abs(height-automationHeight)>1)fail(columnKey+' row "'+action.textContent.trim()+'" height '+height+' does not match automation row height '+automationHeight)});
+				    }
+				    await report('pass', '');		  })().catch(function(error) { report('fail', String(error && error.stack || error)); });	});
 	</script>`
 
 	browserResult := make(chan string, 2)
