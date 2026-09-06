@@ -436,6 +436,9 @@ templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unrea
 					if (typeof window.refreshCardSearches === 'function') {
 						window.refreshCardSearches(root);
 					}
+					if (typeof root._openVibelyInstallSelectionCards === 'function') {
+						root._openVibelyInstallSelectionCards();
+					}
 					if (saved.filtersOpen && typeof window.setCardFilterDropdownState === 'function') {
 						var filterButton = root.querySelector('[data-card-filters-button]');
 						window.setCardFilterDropdownState(filterButton && filterButton.closest('.dropdown'), true);
