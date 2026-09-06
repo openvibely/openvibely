@@ -71,6 +71,38 @@ func TestTaskRepo_BreadcrumbSelectorIsProjectScopedAndBounded(t *testing.T) {
 	}
 }
 
+func TestTaskRepo_BreadcrumbSelectorScheduleScopeRequiresScheduleRow(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	tasks := NewTaskRepo(db, nil)
+	schedules := NewScheduleRepo(db)
+
+	stale := &models.Task{ProjectID: "default", Title: "Stale scheduled selector task", Category: models.CategoryScheduled, Priority: 2, Status: models.StatusCompleted}
+	if err := tasks.Create(ctx, stale); err != nil {
+		t.Fatal(err)
+	}
+	live := &models.Task{ProjectID: "default", Title: "Live scheduled selector task", Category: models.CategoryActive, Priority: 2, Status: models.StatusPending}
+	if err := tasks.Create(ctx, live); err != nil {
+		t.Fatal(err)
+	}
+	runAt := time.Now().UTC().Add(time.Hour)
+	if err := schedules.Create(ctx, &models.Schedule{TaskID: live.ID, RunAt: runAt, RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: true, NextRun: &runAt}); err != nil {
+		t.Fatal(err)
+	}
+	ordinary := &models.Task{ProjectID: "default", Title: "Ordinary selector task", Category: models.CategoryBacklog, Priority: 2, Status: models.StatusPending}
+	if err := tasks.Create(ctx, ordinary); err != nil {
+		t.Fatal(err)
+	}
+
+	items, err := tasks.ListBreadcrumbSelector(ctx, "default", "selector", live.ID, true, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].ID != live.ID {
+		t.Fatalf("Schedule-scoped selector = %#v, want only task with a live schedule row", items)
+	}
+}
+
 func TestTaskRepo_GetThreadRenderMetadataUsesCompactProjection(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewTaskRepo(db, nil)
