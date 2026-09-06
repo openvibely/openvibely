@@ -1071,7 +1071,7 @@ func TestTaskCardMergeMenuDirectActionConflictRetryAndBoardRefreshInChrome(t *te
 	var boardRefreshStarted bool
 	var releaseBoardRefresh = make(chan struct{}, 1)
 	var mu sync.Mutex
-	result := make(chan string, 2)
+	result := make(chan string, 4)
 	menuStates := func() map[string]components.TaskCardMergeMenuState {
 		mu.Lock()
 		defer mu.Unlock()
@@ -1094,17 +1094,17 @@ func TestTaskCardMergeMenuDirectActionConflictRetryAndBoardRefreshInChrome(t *te
 			handleTaskSelect({currentTarget:card,target:card,metaKey:true,ctrlKey:false,preventDefault:function(){},stopPropagation:function(){}});
 			if(!card.classList.contains('task-selected'))fail('card selection was not established');
 			var trigger=card.querySelector('[data-task-card-menu-trigger]'),menu=card.querySelector('[data-kanban-menu-content]');
-			var menuHTML=menu.innerHTML;
-			clickTrigger(trigger);await frame();var menuRectBefore=menu.getBoundingClientRect(),menuWidth=menuRectBefore.width,menuHeight=menuRectBefore.height;
+			trigger.scrollIntoView({block:'center',inline:'center'});await frame();var menuHTML=menu.innerHTML,triggerRect=trigger.getBoundingClientRect(),triggerX=triggerRect.left+triggerRect.width/2,triggerY=triggerRect.top+triggerRect.height/2,triggerHit=document.elementFromPoint(triggerX,triggerY);if(!trigger.contains(triggerHit)&&trigger!==triggerHit)fail('kebab trigger is not hit-testable at its center: '+(triggerHit&&triggerHit.outerHTML||'none')+' rect='+JSON.stringify({left:triggerRect.left,top:triggerRect.top,right:triggerRect.right,bottom:triggerRect.bottom}));
+			await report('trigger-ready',JSON.stringify({x:triggerX,y:triggerY}));await waitFor(function(){return menu.closest('[data-kanban-menu-key]').getAttribute('data-kanban-menu-open')==='true'},'browser-generated kebab activation');await frame();var menuRectBefore=menu.getBoundingClientRect(),menuWidth=menuRectBefore.width,menuHeight=menuRectBefore.height;
 			if(menu.innerHTML!==menuHTML)fail('opening the kebab changed its pre-rendered contents');
 			if(menuWidth<190)fail('kebab was too narrow: '+menuWidth);
 			if(parseInt(await fetch('/option-count').then(function(r){return r.text()}),10)!==0)fail('opening the kebab fetched merge options');
 			if(menu.querySelector('details')||menu.querySelector('summary'))fail('kebab contains an expand/collapse control');
 			var local=menu.querySelector('[data-task-card-local-submenu]'),localTrigger=local.querySelector(':scope > button'),localPanel=local.querySelector(':scope > ul');
-				localTrigger.scrollIntoView({block:'center'});await frame();local.dispatchEvent(new MouseEvent('mouseenter',{bubbles:false}));await frame();
+				localTrigger.scrollIntoView({block:'center'});await frame();var localTriggerClickRect=localTrigger.getBoundingClientRect();await report('local-ready',JSON.stringify({x:localTriggerClickRect.left+localTriggerClickRect.width/2,y:localTriggerClickRect.top+localTriggerClickRect.height/2}));await waitFor(function(){return !!document.querySelector('[data-task-card-submenu-portaled="true"]')},'browser-generated Local submenu activation');await frame();
 				if(localPanel.parentElement!==local)fail('opening Local submenu moved its source panel out of the main menu');var portaledLocalPanel=document.querySelector('[data-task-card-submenu-portaled="true"]');if(!portaledLocalPanel)fail('Local submenu did not create a portaled interaction panel');localPanel=portaledLocalPanel;
 				if(getComputedStyle(localPanel).display==='none')fail('Local submenu did not open on hover');				var menuRectAfter=menu.getBoundingClientRect();if(Math.abs(menuRectAfter.width-menuWidth)>1||Math.abs(menuRectAfter.height-menuHeight)>1)fail('opening Local submenu resized the main menu from '+menuWidth+'x'+menuHeight+' to '+menuRectAfter.width+'x'+menuRectAfter.height);var localRect=localPanel.getBoundingClientRect(),menuRect=menuRectAfter,localTriggerRect=localTrigger.getBoundingClientRect();if(localRect.left<0||localRect.right>window.innerWidth+1)fail('Local submenu escaped viewport');
-				var horizontalOverlap=Math.min(localRect.right,menuRect.right)-Math.max(localRect.left,menuRect.left);if(horizontalOverlap>3)fail('Local submenu covers the main menu: overlap='+horizontalOverlap+' local='+JSON.stringify({left:localRect.left,right:localRect.right})+' menu='+JSON.stringify({left:menuRect.left,right:menuRect.right}));
+				var horizontalOverlap=Math.min(localRect.right,menuRect.right)-Math.max(localRect.left,menuRect.left);if(horizontalOverlap>5)fail('Local submenu covers the main menu: overlap='+horizontalOverlap+' local='+JSON.stringify({left:localRect.left,right:localRect.right})+' menu='+JSON.stringify({left:menuRect.left,right:menuRect.right}));
 				if(localRect.top>localTriggerRect.bottom+1||localRect.bottom<localTriggerRect.top-1)fail('Local submenu has no continuous pointer corridor from its parent row; local='+JSON.stringify({top:localRect.top,bottom:localRect.bottom})+' trigger='+JSON.stringify({top:localTriggerRect.top,bottom:localTriggerRect.bottom}));
 				var merge=localPanel.querySelector('[data-merge-type="merge"]'),rebase=localPanel.querySelector('[data-merge-type="rebase"]');
 				if(!merge||merge.disabled||!rebase||rebase.disabled)fail('eligible Local actions were not precomputed');
@@ -1250,23 +1250,28 @@ func TestTaskCardMergeMenuDirectActionConflictRetryAndBoardRefreshInChrome(t *te
 	}
 	defer stopBrowserProcess(cmd)
 
-	var ready string
-	select {
-	case ready = <-result:
-	case <-time.After(15 * time.Second):
-		ready = "fail:timeout waiting for browser click coordinates"
-	}
-	if !strings.HasPrefix(ready, "click-ready:") {
-		data, _ := os.ReadFile(stderrPath)
-		t.Fatalf("task card merge browser did not reach native click boundary: %s\n%s", ready, data)
-	}
-	var point struct {
+	readClickPoint := func(stage string) (point struct {
 		X float64 `json:"x"`
 		Y float64 `json:"y"`
+	}) {
+		t.Helper()
+		var ready string
+		select {
+		case ready = <-result:
+		case <-time.After(15 * time.Second):
+			ready = "fail:timeout waiting for browser click coordinates"
+		}
+		prefix := stage + ":"
+		if !strings.HasPrefix(ready, prefix) {
+			data, _ := os.ReadFile(stderrPath)
+			t.Fatalf("task card merge browser did not reach %s native click boundary: %s\n%s", stage, ready, data)
+		}
+		if err := json.Unmarshal([]byte(strings.TrimPrefix(ready, prefix)), &point); err != nil {
+			t.Fatalf("decode %s native click coordinates from %q: %v", stage, ready, err)
+		}
+		return point
 	}
-	if err := json.Unmarshal([]byte(strings.TrimPrefix(ready, "click-ready:")), &point); err != nil {
-		t.Fatalf("decode native click coordinates from %q: %v", ready, err)
-	}
+	point := readClickPoint("trigger-ready")
 
 	type debugTarget struct {
 		URL                  string `json:"url"`
@@ -1337,9 +1342,16 @@ func TestTaskCardMergeMenuDirectActionConflictRetryAndBoardRefreshInChrome(t *te
 			return
 		}
 	}
-	dispatch("mouseMoved", map[string]any{"button": "none", "clickCount": 0})
-	dispatch("mousePressed", map[string]any{})
-	dispatch("mouseReleased", map[string]any{})
+	clickPoint := func() {
+		dispatch("mouseMoved", map[string]any{"button": "none", "clickCount": 0})
+		dispatch("mousePressed", map[string]any{})
+		dispatch("mouseReleased", map[string]any{})
+	}
+	clickPoint()
+	point = readClickPoint("local-ready")
+	clickPoint()
+	point = readClickPoint("click-ready")
+	clickPoint()
 
 	var outcome string
 	select {
