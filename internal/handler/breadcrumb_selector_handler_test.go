@@ -40,30 +40,37 @@ func TestBreadcrumbSelectorTaskResultsAreProjectScopedAndPreserveAllowlistedTab(
 	require.NotContains(t, rec.Body.String(), secret.Title)
 }
 
-func TestBreadcrumbSelectorScheduleOriginShowsOnlyScheduleCalendarTasks(t *testing.T) {
+func TestBreadcrumbSelectorScheduleOriginShowsOnlyTasksWithScheduleRows(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	project := createProject(t, h, "Schedule selector project")
-	scheduledCategory := createTask(t, h, project.ID, "Scheduled category selector task", func(task *models.Task) {
+	staleScheduledCategory := createTask(t, h, project.ID, "Stale scheduled category selector task", func(task *models.Task) {
 		task.Category = models.CategoryScheduled
 	})
 	activeWithSchedule := createTask(t, h, project.ID, "Active scheduled selector task")
 	createSchedule(t, h, activeWithSchedule.ID, time.Now().UTC().Add(time.Hour))
+	scheduledWithSchedule := createTask(t, h, project.ID, "Scheduled selector task with row", func(task *models.Task) {
+		task.Category = models.CategoryScheduled
+	})
+	createSchedule(t, h, scheduledWithSchedule.ID, time.Now().UTC().Add(2*time.Hour))
 	ordinary := createTask(t, h, project.ID, "Ordinary selector task")
 	foreignProject := createProject(t, h, "Foreign schedule selector project")
 	foreignScheduled := createTask(t, h, foreignProject.ID, "Foreign scheduled selector secret", func(task *models.Task) {
 		task.Category = models.CategoryScheduled
 	})
+	createSchedule(t, h, foreignScheduled.ID, time.Now().UTC().Add(time.Hour))
 
-	req := httptest.NewRequest(http.MethodGet, "/breadcrumb-selectors/tasks?project_id="+project.ID+"&current_id="+scheduledCategory.ID+"&search=selector&tab=schedules&from=schedule", nil)
+	req := httptest.NewRequest(http.MethodGet, "/breadcrumb-selectors/tasks?project_id="+project.ID+"&current_id="+activeWithSchedule.ID+"&search=selector&tab=schedules&from=schedule", nil)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	body := rec.Body.String()
-	require.Contains(t, body, scheduledCategory.Title)
 	require.Contains(t, body, activeWithSchedule.Title)
+	require.Contains(t, body, scheduledWithSchedule.Title)
+	require.Contains(t, body, `aria-selected="true"`)
+	require.NotContains(t, body, staleScheduledCategory.Title)
 	require.NotContains(t, body, ordinary.Title)
 	require.NotContains(t, body, foreignScheduled.Title)
-	require.Contains(t, body, "/tasks/"+activeWithSchedule.ID+"?from=schedule&amp;project_id="+project.ID+"&amp;tab=schedules")
+	require.Contains(t, body, "/tasks/"+scheduledWithSchedule.ID+"?from=schedule&amp;project_id="+project.ID+"&amp;tab=schedules")
 }
 
 func TestBreadcrumbSelectorAutomationResultsAreProjectScopedBoundedAndPreserveViews(t *testing.T) {
