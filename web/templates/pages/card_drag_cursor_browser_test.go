@@ -219,7 +219,9 @@ window.addEventListener('DOMContentLoaded', function() {
       taskMenuTrigger.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true, detail:1}));
 	      if (taskMenuTrigger.getAttribute('aria-expanded') !== 'true') fail('task menu must expose its open state');
 	      if (selectedActiveTask.querySelector('[data-task-card-merge-options]')) fail('task menu must not hydrate merge options after opening');
-	      if (document.querySelector('#kanban-board').getAttribute('data-open-kanban-menu-key') !== 'task-task-active-status-drag') fail('task menu open key was not recorded before refresh');      var focusedTaskOption = Array.from(selectedActiveTask.querySelectorAll('[data-kanban-menu-content] a, [data-kanban-menu-content] button')).find(function(option) { return option.textContent.trim() === 'Edit'; });
+	      if (document.querySelector('#kanban-board').getAttribute('data-open-kanban-menu-key') !== 'task-task-active-status-drag') fail('task menu open key was not recorded before refresh');
+	      await waitFor(function() { return taskMenuTrigger.closest('[data-kanban-menu-key]').getAttribute('data-kanban-menu-positioning') !== 'true'; }, 'task menu stable reveal before option focus');
+	      var focusedTaskOption = Array.from(selectedActiveTask.querySelectorAll('[data-kanban-menu-content] a, [data-kanban-menu-content] button')).find(function(option) { return option.textContent.trim() === 'Edit'; });
       if (!focusedTaskOption) fail('task menu must render the pre-refresh Edit option');
       focusedTaskOption.focus();
       if (document.activeElement !== focusedTaskOption) fail('task menu option did not receive focus before refresh');
@@ -235,6 +237,7 @@ window.addEventListener('DOMContentLoaded', function() {
       columnMenuTrigger.dispatchEvent(new MouseEvent('mousedown', {bubbles:true, cancelable:true}));
       columnMenuTrigger.focus();
       columnMenuTrigger.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true, detail:1}));
+      await waitFor(function() { return columnMenu.getAttribute('data-kanban-menu-positioning') !== 'true'; }, 'dropzone menu stable reveal before option focus');
       var focusedColumnOption = columnMenu.querySelector('[data-kanban-menu-content] button[hx-post]');
       focusedColumnOption.focus();
       if (document.activeElement !== focusedColumnOption) fail('dropzone menu option is not keyboard focusable before refresh');
