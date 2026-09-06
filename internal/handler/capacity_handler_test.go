@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -294,6 +295,168 @@ func TestHandler_GetProjectCapacity_NoLimit(t *testing.T) {
 	assert.Nil(t, resp.MaxWorkers)
 	assert.True(t, resp.HasCapacity) // No limit = always has capacity
 	assert.Nil(t, resp.AvailableSlots)
+}
+
+func TestHandler_ProjectCapacityCollectionAndDetailUseIdenticalMapping(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+
+	maxWorkers := 2
+	project := &models.Project{Name: "Shared Mapping", MaxWorkers: &maxWorkers}
+	require.NoError(t, h.projectSvc.Create(ctx, project))
+	h.workerSvc.SetProjectRepo(h.projectRepo)
+	createTask(t, h, project.ID, "Queued task", func(task *models.Task) {
+		task.Status = models.StatusPending
+		task.AgentID = &agent.ID
+	})
+
+	assertMatchingResponses := func(wantCapacity bool, wantSlots int) {
+		t.Helper()
+
+		collectionReq := httptest.NewRequest(http.MethodGet, "/api/capacity/projects", nil)
+		collectionRec := httptest.NewRecorder()
+		e.ServeHTTP(collectionRec, collectionReq)
+		require.Equal(t, http.StatusOK, collectionRec.Code)
+
+		var collection []ProjectCapacityResponse
+		require.NoError(t, json.Unmarshal(collectionRec.Body.Bytes(), &collection))
+		var listed *ProjectCapacityResponse
+		for i := range collection {
+			if collection[i].ID == project.ID {
+				listed = &collection[i]
+				break
+			}
+		}
+		require.NotNil(t, listed)
+
+		detailReq := httptest.NewRequest(http.MethodGet, "/api/capacity/projects/"+project.ID, nil)
+		detailRec := httptest.NewRecorder()
+		e.ServeHTTP(detailRec, detailReq)
+		require.Equal(t, http.StatusOK, detailRec.Code)
+
+		var detail ProjectCapacityResponse
+		require.NoError(t, json.Unmarshal(detailRec.Body.Bytes(), &detail))
+		assert.Equal(t, *listed, detail)
+		assert.Equal(t, 1, detail.QueueSize)
+		assert.Equal(t, wantCapacity, detail.HasCapacity)
+		require.NotNil(t, detail.AvailableSlots)
+		assert.Equal(t, wantSlots, *detail.AvailableSlots)
+	}
+
+	require.True(t, h.workerSvc.TryAcquireProjectSlot(project.ID))
+	defer h.workerSvc.ReleaseProjectSlot(project.ID)
+	assertMatchingResponses(true, 1)
+
+	require.True(t, h.workerSvc.TryAcquireProjectSlot(project.ID))
+	defer h.workerSvc.ReleaseProjectSlot(project.ID)
+	assertMatchingResponses(false, 0)
+}
+
+func TestHandler_GetProjectCapacity_ZeroLimitOmitsAvailableSlots(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	ctx := context.Background()
+
+	project := &models.Project{Name: "Inherited Limit"}
+	require.NoError(t, h.projectSvc.Create(ctx, project))
+	zero := 0
+	project.MaxWorkers = &zero
+	require.NoError(t, h.projectRepo.Update(ctx, project))
+	h.workerSvc.SetProjectRepo(h.projectRepo)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/capacity/projects/"+project.ID, nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var raw map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &raw))
+	assert.JSONEq(t, "0", string(raw["max_workers"]))
+	assert.NotContains(t, raw, "available_slots")
+}
+
+func TestHandler_ProjectCapacityRepositoryErrors(t *testing.T) {
+	t.Run("collection list", func(t *testing.T) {
+		_, e, _, db := setupTestHandlerWithDB(t)
+		require.NoError(t, db.Close())
+
+		req := httptest.NewRequest(http.MethodGet, "/api/capacity/projects", nil)
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	})
+
+	t.Run("detail lookup", func(t *testing.T) {
+		_, e, _, db := setupTestHandlerWithDB(t)
+		require.NoError(t, db.Close())
+
+		req := httptest.NewRequest(http.MethodGet, "/api/capacity/projects/project-id", nil)
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	})
+}
+
+func TestHandler_ProjectCapacityPendingCountFailureFallsBackToEmptyCounts(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	ctx := context.Background()
+
+	maxWorkers := 2
+	project := &models.Project{Name: "Pending Fallback", MaxWorkers: &maxWorkers}
+	require.NoError(t, h.projectSvc.Create(ctx, project))
+	h.workerSvc.SetProjectRepo(h.projectRepo)
+
+	closedDB := testutil.NewTestDB(t)
+	require.NoError(t, closedDB.Close())
+	h.taskRepo = repository.NewTaskRepo(closedDB, nil)
+
+	collectionReq := httptest.NewRequest(http.MethodGet, "/api/capacity/projects", nil)
+	collectionRec := httptest.NewRecorder()
+	e.ServeHTTP(collectionRec, collectionReq)
+	require.Equal(t, http.StatusOK, collectionRec.Code)
+
+	var collection []ProjectCapacityResponse
+	require.NoError(t, json.Unmarshal(collectionRec.Body.Bytes(), &collection))
+	var listed *ProjectCapacityResponse
+	for i := range collection {
+		if collection[i].ID == project.ID {
+			listed = &collection[i]
+			break
+		}
+	}
+	require.NotNil(t, listed)
+	assert.Zero(t, listed.QueueSize)
+
+	detailReq := httptest.NewRequest(http.MethodGet, "/api/capacity/projects/"+project.ID, nil)
+	detailRec := httptest.NewRecorder()
+	e.ServeHTTP(detailRec, detailReq)
+	require.Equal(t, http.StatusOK, detailRec.Code)
+
+	var detail ProjectCapacityResponse
+	require.NoError(t, json.Unmarshal(detailRec.Body.Bytes(), &detail))
+	assert.Zero(t, detail.QueueSize)
+	assert.Equal(t, *listed, detail)
+}
+
+func TestProjectCapacityResponse(t *testing.T) {
+	h, _, _ := setupTestHandler(t)
+	ctx := context.Background()
+	maxWorkers := 1
+	project := &models.Project{Name: "Canonical Builder", MaxWorkers: &maxWorkers}
+	require.NoError(t, h.projectSvc.Create(ctx, project))
+	h.workerSvc.SetProjectRepo(h.projectRepo)
+	require.True(t, h.workerSvc.TryAcquireProjectSlot(project.ID))
+	defer h.workerSvc.ReleaseProjectSlot(project.ID)
+
+	resp := h.projectCapacityResponse(project, 4)
+	assert.Equal(t, project.ID, resp.ID)
+	assert.Equal(t, project.Name, resp.Name)
+	assert.Equal(t, 1, resp.Running)
+	assert.Equal(t, 4, resp.QueueSize)
+	assert.Equal(t, project.MaxWorkers, resp.MaxWorkers)
+	assert.False(t, resp.HasCapacity)
+	require.NotNil(t, resp.AvailableSlots)
+	assert.Zero(t, *resp.AvailableSlots)
 }
 
 func TestHandler_GetModelCapacities(t *testing.T) {
