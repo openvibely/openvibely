@@ -897,6 +897,13 @@ func TestCodeRangeWorkerCanCompleteAfterFormerTimeoutInChrome(t *testing.T) {
 	    if (error) root.setAttribute('data-test-error', error);
 	    fetch('/result?status=' + encodeURIComponent(status) + '&error=' + encodeURIComponent(error || '') + '&elapsed=' + encodeURIComponent(elapsed || '') + '&max_long_task=' + encodeURIComponent(maxLongTask || ''), {cache: 'no-store'});
 	  }
+	  var line = 'ordinary production-shaped transcript line '.padEnd(56, 'x');
+	  var fence = String.fromCharCode(96).repeat(3);
+	  var source = Array(100001).fill(line).join('\n') + '\n' + fence + 'text\nliteral code\n' + fence;
+	  if (source.length < 5 * 1024 * 1024) {
+	    report('fail', 'fixture did not exceed 5 MiB');
+	    return;
+	  }
 	  var longTasks = [];
 	  if (window.PerformanceObserver) {
 	    try {
@@ -906,19 +913,18 @@ func TestCodeRangeWorkerCanCompleteAfterFormerTimeoutInChrome(t *testing.T) {
 	      observer.observe({entryTypes: ['longtask']});
 	    } catch (_) {}
 	  }
-	  var workerSource = "self.onmessage=function(){var started=Date.now();while(Date.now()-started<3500){}self.postMessage({ranges:[{start:1,end:2}]});};";
+	  var workerSource = "var window=self;window.markdownLineRanges=" + window.markdownLineRanges.toString() + ";window.codeRanges=" + window.codeRanges.toString() + ";self.onmessage=function(event){setTimeout(function(){try{self.postMessage({ranges:window.codeRanges(event.data)});}catch(err){self.postMessage({error:String(err&&err.message||err)});}},3500);};";
 	  window._codeRangeWorkerURL = window.URL.createObjectURL(new Blob([workerSource], {type: 'text/javascript'}));
 	  var owner = {};
-	  var source = Array(25001).fill('ordinary line').join('\n');
 	  var started = performance.now();
 	  window.codeRangesAsync(source, owner).then(function(ranges) {
 	    setTimeout(function() {
 	      var elapsed = performance.now() - started;
 	      var maxLongTask = longTasks.length ? Math.max.apply(Math, longTasks) : 0;
-	      if (!Array.isArray(ranges) || ranges.length !== 1) {
-	        report('fail', 'native worker result was not retained');
-	        return;
-	      }
+		      if (!Array.isArray(ranges) || ranges.length !== 1 || source.substring(ranges[0].start, ranges[0].end).indexOf(fence + 'text') !== 0) {
+		        report('fail', 'production code-range scanner result was not retained');
+		        return;
+		      }
 	      if (elapsed < 3400) {
 	        report('fail', 'worker completed before former timeout was exercised');
 	        return;
@@ -1021,8 +1027,7 @@ func TestChatContentRenderSchedulerSerializesAndRecovers(t *testing.T) {
 	}
 	script := "global.window = { _chatContentRenderTimeoutMS: 50 }; global.document = { createTextNode: function(text) { return { text: text }; } };\n" +
 		"window.renderChatMarkdownLargeFallback = function(text) { return { safe: text }; };\n" +
-		"function container(connected, raw) { return { isConnected: connected, hasRaw: raw !== undefined, raw: raw || '', attributes: {}, dataset: new Proxy({}, { set: function() { throw new Error('render cache must not create data attributes'); } }), replacements: [], hasAttribute: function(name) { return name === 'data-raw-content' && this.hasRaw; }, getAttribute: function(name) { if (name === 'data-raw-content' && this.hasRaw) return this.raw; return this.attributes[name] || null; }, setAttribute: function(name, value) { this.attributes[name] = String(value); }, removeAttribute: function(name) { delete this.attributes[name]; }, replaceChildren: function(value) { this.replacements.push(value); } }; }\n" +
-		scheduler + "\n" +
+		"function container(connected, raw) { return { isConnected: connected, hasRaw: raw !== undefined, raw: raw || '', textContent: '', attributes: {}, dataset: new Proxy({}, { set: function() { throw new Error('render cache must not create data attributes'); } }), replacements: [], hasAttribute: function(name) { return name === 'data-raw-content' && this.hasRaw; }, getAttribute: function(name) { if (name === 'data-raw-content' && this.hasRaw) return this.raw; return this.attributes[name] || null; }, setAttribute: function(name, value) { this.attributes[name] = String(value); }, removeAttribute: function(name) { delete this.attributes[name]; }, querySelector: function() { return null; }, replaceChildren: function(value) { this.replacements.push(value); this.textContent = value && value.safe ? value.safe : ''; } }; }\n" + scheduler + "\n" +
 		"const delay = ms => new Promise(resolve => setTimeout(resolve, ms));\n" +
 		"(async function() {\n" +
 		"  const calls = [], controls = []; window.renderStreamingContent = function(c, text) { calls.push(text); return new Promise(function(resolve, reject) { controls.push({ resolve: resolve, reject: reject }); }); };\n" +
@@ -1032,8 +1037,7 @@ func TestChatContentRenderSchedulerSerializesAndRecovers(t *testing.T) {
 		"  const initial = await Promise.all([p1, p2]); if (!initial[0] || !initial[1] || !second.replacements[0] || second.replacements[0].safe !== 'second') throw new Error('rejection did not commit safe fallback');\n" +
 		"  let failedHydrationAttempts = 0; window.renderStreamingContent = function(c, text) { if (text === 'hydrate-fail') { failedHydrationAttempts++; return Promise.reject(new Error('hydrate failed')); } return Promise.resolve(true); };\n" +
 		"  const hydrated = container(true, 'hydrate-ok'); if (!await window.scheduleChatElementRender(hydrated, 'hydrate-ok') || hydrated._renderedRevision !== 'hydrate-ok' || hydrated._renderingRevision) throw new Error('successful hydration signature was not committed');\n" +
-		"  const failedHydration = container(true, 'hydrate-fail'); if (!await window.scheduleChatElementRender(failedHydration, 'hydrate-fail') || failedHydration._renderedRevision !== 'hydrate-fail' || failedHydration._renderingRevision || !failedHydration.replacements[0] || failedHydration.replacements[0].safe !== 'hydrate-fail') throw new Error('safe fallback hydration signature was not retained'); if (!await window.scheduleChatElementRender(failedHydration, 'hydrate-fail') || failedHydrationAttempts !== 1) throw new Error('unchanged safe fallback was retried');\n" +
-		"  const orderingOwner = container(true, 'snapshot-a'); if (!await window.renderLiveChatContent(orderingOwner, 'snapshot-a') || orderingOwner._renderedRevision !== 'snapshot-a') throw new Error('live snapshot was not authoritative'); orderingOwner.raw = 'snapshot-b'; if (!await window.scheduleChatElementRender(orderingOwner, 'snapshot-b') || orderingOwner._renderedRevision !== 'snapshot-b') throw new Error('scheduled snapshot did not replace live snapshot'); orderingOwner.raw = 'snapshot-a'; if (orderingOwner._renderedRevision === orderingOwner.raw) throw new Error('A-B-A ordering falsely treated stale DOM as current');\n" +
+		"  const failedHydration = container(true, 'hydrate-fail'); if (!await window.scheduleChatElementRender(failedHydration, 'hydrate-fail') || failedHydration._renderedRevision !== 'hydrate-fail' || failedHydration._renderingRevision || !failedHydration.replacements[0] || failedHydration.replacements[0].safe !== 'hydrate-fail') throw new Error('safe fallback hydration signature was not retained'); if (!await window.scheduleChatElementRender(failedHydration, 'hydrate-fail') || failedHydrationAttempts !== 1) throw new Error('unchanged visible safe fallback was retried'); failedHydration.textContent = ''; if (!await window.scheduleChatElementRender(failedHydration, 'hydrate-fail') || failedHydrationAttempts !== 2 || !failedHydration.textContent) throw new Error('matching revision with missing DOM was not recovered');\n" + "  const orderingOwner = container(true, 'snapshot-a'); if (!await window.renderLiveChatContent(orderingOwner, 'snapshot-a') || orderingOwner._renderedRevision !== 'snapshot-a') throw new Error('live snapshot was not authoritative'); orderingOwner.raw = 'snapshot-b'; if (!await window.scheduleChatElementRender(orderingOwner, 'snapshot-b') || orderingOwner._renderedRevision !== 'snapshot-b') throw new Error('scheduled snapshot did not replace live snapshot'); orderingOwner.raw = 'snapshot-a'; if (orderingOwner._renderedRevision === orderingOwner.raw) throw new Error('A-B-A ordering falsely treated stale DOM as current');\n" +
 		"  window._chatLiveRenderQuietMS = 5; let liveResolve = null, completedAttempts = 0; window.renderStreamingContent = function(c, text) { calls.push(text); if (text === 'completed-hung' && ++completedAttempts === 1) return new Promise(function() {}); if (text === 'live-hung') return new Promise(function(resolve) { liveResolve = resolve; }); return Promise.resolve(true); };\n" +
 		"  const completedDuringLive = container(true); const completedResult = window.scheduleChatContentRender(completedDuringLive, 'completed-hung'); await delay(10); const liveResult = window.renderLiveChatContent(container(true), 'live-now'); if (!await liveResult || await completedResult || completedDuringLive.replacements.length !== 0) throw new Error('live render dumped interrupted completed output into the DOM'); await delay(15); if (completedAttempts !== 2) throw new Error('interrupted completed render was not requeued after live work');\n" +
 		"  const livePending = window.renderLiveChatContent(container(true), 'live-hung'); await delay(1); const queuedAfterLive = window.scheduleChatContentRender(container(true), 'queued-after-live'); await delay(2); if (calls.indexOf('queued-after-live') !== -1) throw new Error('completed render ran concurrently with live render'); liveResolve(true); await livePending; if (!await queuedAfterLive || calls.indexOf('queued-after-live') === -1) throw new Error('completed queue did not resume after live render');\n" +
