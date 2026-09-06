@@ -5798,15 +5798,22 @@ func TestSidebar_ProjectSelectorSearchTriggerAndFocusVisible(t *testing.T) {
 		`placeholder="Search projects"`,
 		`role="listbox"`,
 		`data-project-selector-option`,
-		`data-project-selector-clear`,
-		`function positionSelector(root)`,
-		`document.addEventListener('input', function(event)`,
-		`event.target.matches('[data-project-selector-search]')`,
+		`window.openVibelySearchableSelectorInstalled`,
+		`window.openVibelySearchableSelectorController`,
+		`previousController.abort.abort()`,
+		`config.signal = abortController.signal`,
+		`function position(root)`,
+		`oninput="window.openVibelySearchableSelector && window.openVibelySearchableSelector.filter(this.closest('[data-searchable-selector]'))"`,
+		`onsearch="window.openVibelySearchableSelector && window.openVibelySearchableSelector.filter(this.closest('[data-searchable-selector]'))"`,
+		`event.target.matches('[data-searchable-selector-search]')`,
 	}
 	for _, snippet := range required {
 		if !strings.Contains(body, snippet) {
 			t.Fatalf("sidebar searchable project selector missing snippet: %s", snippet)
 		}
+	}
+	if strings.Contains(body, `listen(document, 'input'`) || strings.Contains(body, `listen(document, 'search'`) {
+		t.Fatal("sidebar project search must not run duplicate delegated filtering")
 	}
 	if strings.Contains(body, `class="select select-bordered select-sm w-full sidebar-project-select"`) {
 		t.Fatal("sidebar project selector must not expose the old native dropdown")
