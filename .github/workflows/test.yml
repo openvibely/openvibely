@@ -221,23 +221,130 @@ jobs:
           echo "Layout template coverage failed once; retrying the unchanged layout test group."
           go test ./web/templates/layout -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-layout.txt
 
-      - name: Run page template tests with coverage
+      - name: Run alert, analytics, and automation page tests with coverage
         env:
           OPENVIBELY_SKIP_BROWSER_PERF: "1"
         run: |
-          if go test ./web/templates/pages -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-pages.txt; then
+          if go test ./web/templates/pages -run '^(TestAlerts|TestAlertDetail|TestSystemUpdate|TestAnalytics|TestAutomation)' -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-pages-alerts.txt; then
             exit 0
           fi
-          echo "Page template coverage failed once; retrying the unchanged page test group."
-          go test ./web/templates/pages -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-pages.txt
+          echo "Alert, analytics, and automation page coverage failed once; retrying the unchanged test group."
+          go test ./web/templates/pages -run '^(TestAlerts|TestAlertDetail|TestSystemUpdate|TestAnalytics|TestAutomation)' -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-pages-alerts.txt
+
+      - name: Run navigation, drag, and Chat page tests with coverage
+        env:
+          OPENVIBELY_SKIP_BROWSER_PERF: "1"
+        run: |
+          if go test ./web/templates/pages -run '^(TestBreadcrumb|TestTaskAndScheduleCards|TestScheduleCards|TestChat)' -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-pages-navigation.txt; then
+            exit 0
+          fi
+          echo "Navigation, drag, and Chat page coverage failed once; retrying the unchanged test group."
+          go test ./web/templates/pages -run '^(TestBreadcrumb|TestTaskAndScheduleCards|TestScheduleCards|TestChat)' -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-pages-navigation.txt
+
+      - name: Run execution, insights, models, and navigation page tests with coverage
+        env:
+          OPENVIBELY_SKIP_BROWSER_PERF: "1"
+        run: |
+          if go test ./web/templates/pages -run '^(TestExecution|TestInsight|TestInsights|TestCardPagination|TestModels|TestPrimary|TestSidebar|TestReconnect)' -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-pages-execution.txt; then
+            exit 0
+          fi
+          echo "Execution, insights, models, and navigation page coverage failed once; retrying the unchanged test group."
+          go test ./web/templates/pages -run '^(TestExecution|TestInsight|TestInsights|TestCardPagination|TestModels|TestPrimary|TestSidebar|TestReconnect)' -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-pages-execution.txt
+
+      - name: Run schedule and settings page tests with coverage
+        env:
+          OPENVIBELY_SKIP_BROWSER_PERF: "1"
+        run: |
+          if go test ./web/templates/pages -run '^(TestScheduleContent|TestScheduleCalendar|TestBuildTaskOccurrenceMap|TestGetScheduleID|TestSettings|TestChannel)' -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-pages-schedule.txt; then
+            exit 0
+          fi
+          echo "Schedule and settings page coverage failed once; retrying the unchanged test group."
+          go test ./web/templates/pages -run '^(TestScheduleContent|TestScheduleCalendar|TestBuildTaskOccurrenceMap|TestGetScheduleID|TestSettings|TestChannel)' -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-pages-schedule.txt
+
+      - name: Run task detail and thread page tests with coverage
+        env:
+          OPENVIBELY_SKIP_BROWSER_PERF: "1"
+        run: |
+          if go test ./web/templates/pages -run '^(TestTaskDetail|TestTaskThread)' -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-pages-detail.txt; then
+            exit 0
+          fi
+          echo "Task detail and thread page coverage failed once; retrying the unchanged test group."
+          go test ./web/templates/pages -run '^(TestTaskDetail|TestTaskThread)' -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-pages-detail.txt
+
+      - name: Run task, worker, and project page tests with coverage
+        env:
+          OPENVIBELY_SKIP_BROWSER_PERF: "1"
+        run: |
+          if go test ./web/templates/pages -run '^(TestTasks|TestBacklog|TestCapacity|TestWorker|TestSSE|TestProjectSelector|TestTaskRunningIcon|TestTaskCard|TestTaskBoard|TestUpcomingTask)' -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-pages-tasks.txt; then
+            exit 0
+          fi
+          echo "Task, worker, and project page coverage failed once; retrying the unchanged test group."
+          go test ./web/templates/pages -run '^(TestTasks|TestBacklog|TestCapacity|TestWorker|TestSSE|TestProjectSelector|TestTaskRunningIcon|TestTaskCard|TestTaskBoard|TestUpcomingTask)' -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-pages-tasks.txt
+
+      - name: Run Changes and worktree page tests with coverage
+        env:
+          OPENVIBELY_SKIP_BROWSER_PERF: "1"
+        run: |
+          if go test ./web/templates/pages -run '^(TestTaskChanges|TestTaskWorktree|TestWorktree)' -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-pages-changes.txt; then
+            exit 0
+          fi
+          echo "Changes and worktree page coverage failed once; retrying the unchanged test group."
+          go test ./web/templates/pages -run '^(TestTaskChanges|TestTaskWorktree|TestWorktree)' -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage-pages-changes.txt
 
       - name: Merge coverage reports
         shell: bash
         run: |
-          head -n 1 coverage-core-foundation.txt > coverage.txt
-          for profile in coverage-core-handler.txt coverage-core-repository.txt coverage-core-service.txt coverage-pkg.txt coverage-components.txt coverage-layout.txt coverage-pages.txt; do
-            tail -n +2 "$profile" >> coverage.txt
-          done
+          python3 - <<'PY'
+          from pathlib import Path
+
+          profiles = [
+              "coverage-core-foundation.txt",
+              "coverage-core-handler.txt",
+              "coverage-core-repository.txt",
+              "coverage-core-service.txt",
+              "coverage-pkg.txt",
+              "coverage-components.txt",
+              "coverage-layout.txt",
+              "coverage-pages-alerts.txt",
+              "coverage-pages-navigation.txt",
+              "coverage-pages-execution.txt",
+              "coverage-pages-schedule.txt",
+              "coverage-pages-detail.txt",
+              "coverage-pages-tasks.txt",
+              "coverage-pages-changes.txt",
+          ]
+          mode = None
+          order = []
+          counts = {}
+          for profile in profiles:
+              for line in Path(profile).read_text().splitlines():
+                  if not line:
+                      continue
+                  if line.startswith("mode:"):
+                      current_mode = line.split(":", 1)[1].strip()
+                      if mode is None:
+                          mode = current_mode
+                      elif current_mode != mode:
+                          raise SystemExit(f"coverage mode mismatch in {profile}")
+                      continue
+                  location, statements, count = line.split()
+                  key = (location, statements)
+                  if key not in counts:
+                      order.append(key)
+                      counts[key] = 0
+                  value = int(count)
+                  if mode == "set":
+                      counts[key] = max(counts[key], value)
+                  else:
+                      counts[key] += value
+
+          if mode is None:
+              raise SystemExit("coverage profiles are empty")
+          with Path("coverage.txt").open("w") as output:
+              output.write(f"mode: {mode}\n")
+              for location, statements in order:
+                  output.write(f"{location} {statements} {counts[(location, statements)]}\n")
+          PY
 
       - name: Compile and test the Linux GTK3 desktop path
         run: go test -tags gtk3 ./cmd/desktop -count=1 -timeout 120s
