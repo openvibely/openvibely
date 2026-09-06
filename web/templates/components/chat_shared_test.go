@@ -904,44 +904,48 @@ func TestCodeRangeWorkerCanCompleteAfterFormerTimeoutInChrome(t *testing.T) {
 	    report('fail', 'fixture did not exceed 5 MiB');
 	    return;
 	  }
-	  var longTasks = [];
-	  if (window.PerformanceObserver) {
-	    try {
-	      var observer = new PerformanceObserver(function(list) {
-	        list.getEntries().forEach(function(entry) { longTasks.push(entry.duration); });
-	      });
-	      observer.observe({entryTypes: ['longtask']});
-	    } catch (_) {}
-	  }
-	  var workerSource = "var window=self;window.markdownLineRanges=" + window.markdownLineRanges.toString() + ";window.codeRanges=" + window.codeRanges.toString() + ";self.onmessage=function(event){setTimeout(function(){try{self.postMessage({ranges:window.codeRanges(event.data)});}catch(err){self.postMessage({error:String(err&&err.message||err)});}},3500);};";
-	  window._codeRangeWorkerURL = window.URL.createObjectURL(new Blob([workerSource], {type: 'text/javascript'}));
-	  var owner = {};
-	  var started = performance.now();
-	  window.codeRangesAsync(source, owner).then(function(ranges) {
-	    setTimeout(function() {
-	      var elapsed = performance.now() - started;
-	      var maxLongTask = longTasks.length ? Math.max.apply(Math, longTasks) : 0;
-		      if (!Array.isArray(ranges) || ranges.length !== 1 || source.substring(ranges[0].start, ranges[0].end).indexOf(fence + 'text') !== 0) {
-		        report('fail', 'production code-range scanner result was not retained');
-		        return;
-		      }
-	      if (elapsed < 3400) {
-	        report('fail', 'worker completed before former timeout was exercised');
-	        return;
-	      }
-	      if (owner._codeRangeWorkerState !== null) {
-	        report('fail', 'worker state was not released');
-	        return;
-	      }
-	      if (maxLongTask > 75) {
-	        report('fail', 'main-thread long task: ' + maxLongTask.toFixed(1));
-	        return;
-	      }
-	      report('pass', '', elapsed.toFixed(1), maxLongTask.toFixed(1));
-	    }, 0);
-	  }).catch(function(error) {
-	    report('fail', String(error && error.stack || error));
-	  });
+	  // Start observing in a fresh task so constructing the multi-megabyte test
+	  // fixture is not attributed to the worker operation under measurement.
+	  setTimeout(function() {
+	    var longTasks = [];
+	    if (window.PerformanceObserver) {
+	      try {
+	        var observer = new PerformanceObserver(function(list) {
+	          list.getEntries().forEach(function(entry) { longTasks.push(entry.duration); });
+	        });
+	        observer.observe({entryTypes: ['longtask']});
+	      } catch (_) {}
+	    }
+	    var workerSource = "var window=self;window.markdownLineRanges=" + window.markdownLineRanges.toString() + ";window.codeRanges=" + window.codeRanges.toString() + ";self.onmessage=function(event){setTimeout(function(){try{self.postMessage({ranges:window.codeRanges(event.data)});}catch(err){self.postMessage({error:String(err&&err.message||err)});}},3500);};";
+	    window._codeRangeWorkerURL = window.URL.createObjectURL(new Blob([workerSource], {type: 'text/javascript'}));
+	    var owner = {};
+	    var started = performance.now();
+	    window.codeRangesAsync(source, owner).then(function(ranges) {
+	      setTimeout(function() {
+	        var elapsed = performance.now() - started;
+	        var maxLongTask = longTasks.length ? Math.max.apply(Math, longTasks) : 0;
+	        if (!Array.isArray(ranges) || ranges.length !== 1 || source.substring(ranges[0].start, ranges[0].end).indexOf(fence + 'text') !== 0) {
+	          report('fail', 'production code-range scanner result was not retained');
+	          return;
+	        }
+	        if (elapsed < 3400) {
+	          report('fail', 'worker completed before former timeout was exercised');
+	          return;
+	        }
+	        if (owner._codeRangeWorkerState !== null) {
+	          report('fail', 'worker state was not released');
+	          return;
+	        }
+	        if (maxLongTask > 75) {
+	          report('fail', 'main-thread long task: ' + maxLongTask.toFixed(1));
+	          return;
+	        }
+	        report('pass', '', elapsed.toFixed(1), maxLongTask.toFixed(1));
+	      }, 0);
+	    }).catch(function(error) {
+	      report('fail', String(error && error.stack || error));
+	    });
+	  }, 0);
 	});
 	</script></body></html>`
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
