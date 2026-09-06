@@ -78,13 +78,15 @@ func TestSidebar_ProjectSelectorSearchableAndIdentityOnly(t *testing.T) {
 		`placeholder="Search projects"`,
 		`aria-autocomplete="list"`,
 		`data-project-selector-clear`,
+		`class="menu w-full gap-1 p-0"`,
+		`class="flex min-h-11 min-w-0 items-center gap-2 rounded-btn px-3 py-2 hover:bg-base-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"`,
+		`class="w-4 shrink-0" aria-hidden="true" data-project-selector-current>✓</span>`,
 		`role="listbox"`,
 		`data-project-selector-option`,
 		`data-project-id="payments-api"`,
 		`data-project-name="Payments API"`,
 		`aria-selected="true"`,
 		`data-project-selector-current`,
-		`Current`,
 		`data-project-selector-no-match`,
 		`No projects match your search.`,
 		`document.addEventListener('input', function(event)`,
@@ -111,6 +113,9 @@ func TestSidebar_ProjectSelectorSearchableAndIdentityOnly(t *testing.T) {
 
 	if strings.Contains(html, `data-project-selector-caret`) || strings.Contains(html, `bg-none`) {
 		t.Fatal("project selector must use the original select background arrow without a custom caret")
+	}
+	if strings.Contains(html, `class="badge badge-sm badge-outline shrink-0"`) {
+		t.Fatal("project selector must use the breadcrumb selector check-column treatment, not a project-only Current badge")
 	}
 	if strings.Contains(html, "private description") || strings.Contains(html, "private-repo-path") || strings.Contains(html, "https://private.example/repo") {
 		t.Fatal("sidebar project selector must render identity fields only")

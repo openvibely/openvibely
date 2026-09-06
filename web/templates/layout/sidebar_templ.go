@@ -10,7 +10,9 @@ import templruntime "github.com/a-h/templ/runtime"
 
 import (
 	"fmt"
+
 	"github.com/openvibely/openvibely/internal/models"
+	templateui "github.com/openvibely/openvibely/web/templates"
 )
 
 func sidebarProjectDisplayName(projects []models.Project, currentProjectID string) string {
@@ -23,6 +25,13 @@ func sidebarProjectDisplayName(projects []models.Project, currentProjectID strin
 		return projects[0].Name
 	}
 	return "No projects available"
+}
+
+func sidebarProjectCheck(current bool) string {
+	if current {
+		return "✓"
+	}
+	return ""
 }
 
 func Sidebar(projects []models.Project, currentProjectID string) templ.Component {
@@ -58,7 +67,7 @@ func Sidebar(projects []models.Project, currentProjectID string) templ.Component
 			var templ_7745c5c3_Var2 string
 			templ_7745c5c3_Var2, templ_7745c5c3_Err = templ.ResolveAttributeValue(p.ID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 80, Col: 19}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 89, Col: 19}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var2)
 			if templ_7745c5c3_Err != nil {
@@ -81,7 +90,7 @@ func Sidebar(projects []models.Project, currentProjectID string) templ.Component
 			var templ_7745c5c3_Var3 string
 			templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.JoinStringErrs(p.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 83, Col: 15}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 92, Col: 15}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var3))
 			if templ_7745c5c3_Err != nil {
@@ -109,261 +118,258 @@ func Sidebar(projects []models.Project, currentProjectID string) templ.Component
 		var templ_7745c5c3_Var4 string
 		templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(sidebarProjectDisplayName(projects, currentProjectID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 97, Col: 126}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 106, Col: 127}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "</span></button> <dialog id=\"project-selector-dialog\" class=\"sidebar-project-dialog fixed m-0 max-h-[min(32rem,calc(100dvh-1rem))] w-[28rem] max-w-[calc(100vw-1rem)] overflow-hidden rounded-box border border-base-300 bg-base-100 p-0 text-base-content shadow-xl backdrop:bg-transparent\" role=\"dialog\" aria-modal=\"true\" aria-labelledby=\"project-selector-heading\" data-project-selector-dialog><div class=\"modal-box flex w-full max-w-none max-h-[inherit] min-h-0 flex-col overflow-hidden rounded-none bg-transparent p-0 shadow-none\"><div class=\"flex items-center justify-between gap-3 border-b border-base-300 px-4 py-3\"><h2 id=\"project-selector-heading\" class=\"min-w-0 truncate text-base font-bold\">Switch project</h2><button class=\"btn btn-ghost btn-sm btn-square ov-modal-close shrink-0\" type=\"button\" aria-label=\"Close project selector\" title=\"Close project selector\" data-project-selector-close>✕</button></div><div class=\"relative border-b border-base-300\"><label class=\"sr-only\" for=\"project-selector-search\">Search projects</label> <input id=\"project-selector-search\" class=\"w-full min-w-0 border-0 bg-transparent px-4 py-2 pr-10 text-sm focus:outline-none focus:ring-0\" type=\"search\" name=\"search\" placeholder=\"Search projects\" autocomplete=\"off\" aria-controls=\"project-selector-results\" aria-autocomplete=\"list\" data-project-selector-search> <button class=\"btn btn-ghost btn-xs absolute right-1 top-1/2 -translate-y-1/2\" type=\"button\" aria-label=\"Clear project search\" data-project-selector-clear hidden>Clear</button></div><div id=\"project-selector-results\" class=\"min-h-0 flex-1 overflow-y-auto overscroll-contain p-2\" role=\"listbox\" aria-label=\"Projects\" data-project-selector-results>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "</span></button> ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		if len(projects) == 0 {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "<div class=\"px-3 py-8 text-center text-sm text-base-content/60\" data-project-selector-no-projects>No projects available.</div>")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-		} else {
-			for _, p := range projects {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "<button class=\"flex min-h-11 w-full min-w-0 items-center justify-between gap-3 rounded-btn px-3 py-2 text-left hover:bg-base-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary\" type=\"button\" role=\"option\" aria-selected=\"")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				var templ_7745c5c3_Var5 string
-				templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%t", p.ID == currentProjectID))
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 128, Col: 69}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var5)
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "\" tabindex=\"-1\" data-project-selector-option data-project-id=\"")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				var templ_7745c5c3_Var6 string
-				templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.ResolveAttributeValue(p.ID)
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 131, Col: 32}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var6)
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "\" data-project-name=\"")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				var templ_7745c5c3_Var7 string
-				templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.ResolveAttributeValue(p.Name)
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 132, Col: 36}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var7)
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "\"><span class=\"min-w-0 break-words\">")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				var templ_7745c5c3_Var8 string
-				templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(p.Name)
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 134, Col: 52}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "</span> <span class=\"badge badge-sm badge-outline shrink-0\" data-project-selector-current")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				if p.ID != currentProjectID {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, " hidden")
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, ">Current</span></button>")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, " <div class=\"px-3 py-8 text-center\" data-project-selector-no-match hidden><p class=\"font-medium\">No projects match your search.</p><p class=\"mt-1 text-sm text-base-content/60\">Try a different name.</p></div>")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "</div><span class=\"sr-only\" role=\"status\" aria-live=\"polite\" data-project-selector-status>All projects shown.</span></div></dialog></div><script>\n\t\t\t\t// Project selector behavior is installed once so full-page and HTMX paths share one controller.\n\t\t\t\t(function() {\n\t\t\t\t\tif (window.openVibelyProjectSelectorInstalled) return;\n\t\t\t\t\tvar root = document.querySelector('[data-project-selector]');\n\t\t\t\t\tvar sel = document.getElementById('project-selector');\n\t\t\t\t\tvar trigger = document.getElementById('project-selector-trigger');\n\t\t\t\t\tvar dialog = document.getElementById('project-selector-dialog');\n\t\t\t\t\tvar search = document.getElementById('project-selector-search');\n\t\t\t\t\tif (!root || !sel || !trigger || !dialog || !search) return;\n\t\t\t\t\twindow.openVibelyProjectSelectorInstalled = true;\n\n\t\t\t\t\tfunction normalize(value) {\n\t\t\t\t\t\treturn String(value || '').trim().toLowerCase();\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction projectOptions() {\n\t\t\t\t\t\treturn Array.prototype.slice.call(root.querySelectorAll('[data-project-selector-option]'));\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction visibleProjectOptions() {\n\t\t\t\t\t\treturn projectOptions().filter(function(option) { return !option.hidden; });\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction applyFilter() {\n\t\t\t\t\t\tvar query = normalize(search.value);\n\t\t\t\t\t\tvar matchCount = 0;\n\t\t\t\t\t\tvar currentProjectID = sel.value;\n\t\t\t\t\t\tprojectOptions().forEach(function(option) {\n\t\t\t\t\t\t\tvar isMatch = !query || normalize(option.getAttribute('data-project-name')).indexOf(query) !== -1;\n\t\t\t\t\t\t\tvar isCurrent = option.getAttribute('data-project-id') === currentProjectID;\n\t\t\t\t\t\t\tif (isMatch) matchCount++;\n\t\t\t\t\t\t\toption.hidden = !(isMatch || (query && isCurrent));\n\t\t\t\t\t\t\toption.setAttribute('aria-hidden', option.hidden ? 'true' : 'false');\n\t\t\t\t\t\t\toption.tabIndex = option.hidden ? -1 : 0;\n\t\t\t\t\t\t});\n\t\t\t\t\t\tvar noMatch = root.querySelector('[data-project-selector-no-match]');\n\t\t\t\t\t\tif (noMatch) noMatch.hidden = !query || matchCount > 0;\n\t\t\t\t\t\tvar clear = root.querySelector('[data-project-selector-clear]');\n\t\t\t\t\t\tif (clear) clear.hidden = !query;\n\t\t\t\t\t\tvar status = root.querySelector('[data-project-selector-status]');\n\t\t\t\t\t\tif (status) status.textContent = query && matchCount === 0 ? 'No projects match your search.' : (query ? 'Matching projects updated.' : 'All projects shown.');\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction syncCurrentProject(projectID) {\n\t\t\t\t\t\tvar currentName = '';\n\t\t\t\t\t\tprojectOptions().forEach(function(option) {\n\t\t\t\t\t\t\tvar isCurrent = option.getAttribute('data-project-id') === projectID;\n\t\t\t\t\t\t\toption.setAttribute('aria-selected', isCurrent ? 'true' : 'false');\n\t\t\t\t\t\t\tvar marker = option.querySelector('[data-project-selector-current]');\n\t\t\t\t\t\t\tif (marker) marker.hidden = !isCurrent;\n\t\t\t\t\t\t\tif (isCurrent) currentName = option.getAttribute('data-project-name') || '';\n\t\t\t\t\t\t});\n\t\t\t\t\t\tvar label = root.querySelector('#project-selector-current-label');\n\t\t\t\t\t\tif (label && currentName) label.textContent = currentName;\n\t\t\t\t\t\tapplyFilter();\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction positionSelector() {\n\t\t\t\t\t\tif (!dialog.open) return;\n\t\t\t\t\tvar margin = 8, gap = 4, triggerRect = trigger.getBoundingClientRect();\n\t\t\t\t\tvar anchorLeft = triggerRect.left;\t\t\t\t\t\tdialog.style.maxHeight = '';\n\t\t\t\t\t\tvar width = dialog.offsetWidth, height = dialog.offsetHeight;\n\t\t\t\t\t\tvar left = Math.max(margin, Math.min(anchorLeft, window.innerWidth - width - margin));\n\t\t\t\t\t\tvar belowTop = triggerRect.bottom + gap, below = window.innerHeight - belowTop - margin, above = triggerRect.top - gap - margin;\n\t\t\t\t\t\tvar top = belowTop, available = below;\n\t\t\t\t\t\tif (below < Math.min(height, 160) && above > below) {\n\t\t\t\t\t\t\tavailable = above;\n\t\t\t\t\t\t\ttop = Math.max(margin, triggerRect.top - gap - Math.min(height, available));\n\t\t\t\t\t\t}\n\t\t\t\t\t\tdialog.style.left = left + 'px';\n\t\t\t\t\t\tdialog.style.top = top + 'px';\n\t\t\t\t\t\tdialog.style.maxHeight = Math.max(0, available) + 'px';\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction closeSelector(restoreFocus) {\n\t\t\t\t\t\tif (dialog.open) dialog.close();\n\t\t\t\t\t\ttrigger.setAttribute('aria-expanded', 'false');\n\t\t\t\t\t\tif (restoreFocus && trigger.isConnected) trigger.focus({preventScroll: true});\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction openSelector() {\n\t\t\t\t\t\tif (trigger.disabled || dialog.open) return;\n\t\t\t\t\t\tdialog.showModal();\n\t\t\t\t\t\ttrigger.setAttribute('aria-expanded', 'true');\n\t\t\t\t\t\tsyncCurrentProject(sel.value);\n\t\t\t\t\t\tpositionSelector();\n\t\t\t\t\t\tsearch.focus();\n\t\t\t\t\t\tsearch.select();\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction selectProject(projectID) {\n\t\t\t\t\t\tif (!projectID) return;\n\t\t\t\t\t\tcloseSelector(true);\n\t\t\t\t\t\tif (projectID === sel.value) return;\n\t\t\t\t\t\tsel.value = projectID;\n\t\t\t\t\t\tsel.dispatchEvent(new Event('change', { bubbles: true }));\n\t\t\t\t\t}\n\n\t\t\t\t\tprojectOptions().forEach(function(option) {\n\t\t\t\t\t\toption.addEventListener('click', function() { selectProject(option.getAttribute('data-project-id')); });\n\t\t\t\t\t});\n\t\t\t\t\tdocument.addEventListener('input', function(event) {\n\t\t\t\t\t\tif (event.target === search) applyFilter();\n\t\t\t\t\t});\n\t\t\t\t\tdocument.addEventListener('search', function(event) {\n\t\t\t\t\t\tif (event.target === search) applyFilter();\n\t\t\t\t\t});\n\t\t\t\t\tvar clear = root.querySelector('[data-project-selector-clear]');\n\t\t\t\t\tif (clear) clear.addEventListener('click', function() { search.value = ''; applyFilter(); search.focus(); });\n\t\t\t\t\tvar closeButton = root.querySelector('[data-project-selector-close]');\n\t\t\t\t\tif (closeButton) closeButton.addEventListener('click', function() { closeSelector(true); });\n\t\t\t\t\ttrigger.addEventListener('click', openSelector);\n\t\t\t\t\tdialog.addEventListener('click', function(event) { if (event.target === dialog) closeSelector(true); });\n\t\t\t\t\tdialog.addEventListener('cancel', function(event) { event.preventDefault(); closeSelector(true); });\n\t\t\t\t\tdialog.addEventListener('close', function() { trigger.setAttribute('aria-expanded', 'false'); });\n\n\t\t\t\t\tdocument.addEventListener('keydown', function(event) {\n\t\t\t\t\t\tif (event.target === trigger && (event.key === 'Enter' || event.key === ' ' || event.key === 'ArrowDown')) {\n\t\t\t\t\t\t\tevent.preventDefault();\n\t\t\t\t\t\t\topenSelector();\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tif (!dialog.open) return;\n\t\t\t\t\t\tif (event.key === 'Escape') {\n\t\t\t\t\t\t\tevent.preventDefault();\n\t\t\t\t\t\t\tcloseSelector(true);\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tvar options = visibleProjectOptions();\n\t\t\t\t\t\tif (event.target === search && (event.key === 'ArrowDown' || event.key === 'ArrowUp') && options.length) {\n\t\t\t\t\t\t\tevent.preventDefault();\n\t\t\t\t\t\t\t(options[event.key === 'ArrowDown' ? 0 : options.length - 1]).focus();\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tvar index = options.indexOf(event.target);\n\t\t\t\t\t\tif (index < 0) return;\n\t\t\t\t\t\tif (event.key === 'Enter' || event.key === ' ') {\n\t\t\t\t\t\t\tevent.preventDefault();\n\t\t\t\t\t\t\tevent.target.click();\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tif (event.key === 'ArrowDown' || event.key === 'ArrowUp') {\n\t\t\t\t\t\t\tevent.preventDefault();\n\t\t\t\t\t\t\toptions[(index + (event.key === 'ArrowDown' ? 1 : options.length - 1)) % options.length].focus();\n\t\t\t\t\t\t}\n\t\t\t\t\t});\n\n\t\t\t\t\tdocument.addEventListener('htmx:beforeSwap', function(event) {\n\t\t\t\t\t\tvar target = event.detail && event.detail.target;\n\t\t\t\t\t\tif (target && target.id === 'main-content') closeSelector(false);\n\t\t\t\t\t});\n\t\t\t\t\tdocument.addEventListener('htmx:historyRestore', function() { closeSelector(false); });\n\t\t\t\t\twindow.addEventListener('popstate', function() { closeSelector(false); });\n\t\t\t\t\twindow.addEventListener('resize', positionSelector);\n\t\t\t\t\tdocument.addEventListener('scroll', function(event) {\n\t\t\t\t\t\tif (event.target && event.target.closest && event.target.closest('[data-project-selector-dialog]')) return;\n\t\t\t\t\t\tpositionSelector();\n\t\t\t\t\t}, true);\n\t\t\t\t\twindow.openVibelyProjectSelectorSync = syncCurrentProject;\n\t\t\t\t\tsyncCurrentProject(sel.value);\n\t\t\t\t})();\n\t\t\t</script><script>\n\t\t\t\t(function() {\n\t\t\t\t\tif (window.openVibelyProjectSelectorChangeInstalled) return;\n\t\t\t\t\twindow.openVibelyProjectSelectorChangeInstalled = true;\n\t\t\t\t\tconst sel = document.getElementById('project-selector');\n\t\t\t\t\tif (!sel) return;\n\n\t\t\t\t\tfunction persistSelectedProject(projectID) {\n\t\t\t\t\t\ttry {\n\t\t\t\t\t\t\tfetch('/ui/preferences', {\n\t\t\t\t\t\t\t\tmethod: 'POST',\n\t\t\t\t\t\t\t\theaders: { 'Content-Type': 'application/json' },\n\t\t\t\t\t\t\t\tbody: JSON.stringify({ project_id: projectID }),\n\t\t\t\t\t\t\t\tkeepalive: true\n\t\t\t\t\t\t\t}).catch(function() {});\n\t\t\t\t\t\t} catch (_) {}\n\t\t\t\t\t}\n\n\t\t\t\t\tvar previousProjectID = sel.value;\n\t\t\t\t\tfunction syncProjectSelector() {\n\t\t\t\t\t\tif (typeof window.openVibelyProjectSelectorSync === 'function') {\n\t\t\t\t\t\t\twindow.openVibelyProjectSelectorSync(sel.value);\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\n\t\t\t\t\tsel.addEventListener('change', function() {\n\t\t\t\t\t\tconst newProjectId = sel.value;\n\t\t\t\t\t\tif (!newProjectId || newProjectId === previousProjectID) {\n\t\t\t\t\t\t\tsyncProjectSelector();\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\t// Check for open modals with unsaved changes\n\t\t\t\t\t\tconst openModals = document.querySelectorAll('dialog[open]');\n\t\t\t\t\t\tif (openModals.length > 0) {\n\t\t\t\t\t\t\tif (!confirm('You may have unsaved changes. Switch project anyway?')) {\n\t\t\t\t\t\t\t\t// Revert selector to the last confirmed value.\n\t\t\t\t\t\t\t\tsel.value = previousProjectID;\n\t\t\t\t\t\t\t\tsyncProjectSelector();\n\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\topenModals.forEach(m => m.close());\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\tpreviousProjectID = newProjectId;\n\t\t\t\t\t\tsyncProjectSelector();\n\n\t\t\t\t\t\t// Update all sidebar nav links with new project_id\n\t\t\t\t\t\tdocument.querySelectorAll('[data-nav-base]').forEach(function(link) {\n\t\t\t\t\t\t\tconst base = link.getAttribute('data-nav-base');\n\t\t\t\t\t\t\tconst newUrl = base + '?project_id=' + encodeURIComponent(newProjectId);\n\t\t\t\t\t\t\tlink.setAttribute('href', newUrl);\n\t\t\t\t\t\t\tlink.setAttribute('hx-get', newUrl);\n\t\t\t\t\t\t\thtmx.process(link);\n\t\t\t\t\t\t});\n\n\t\t\t\t\t\t// Update alert badge polling URL\n\t\t\t\t\t\tconst alertBadge = document.getElementById('alert-badge');\n\t\t\t\t\t\tif (alertBadge) {\n\t\t\t\t\t\t\talertBadge.setAttribute('hx-get', '/alerts/unread-count?project_id=' + encodeURIComponent(newProjectId));\n\t\t\t\t\t\t\thtmx.process(alertBadge);\n\t\t\t\t\t\t\thtmx.trigger(alertBadge, 'load');\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\t// Determine which page to load based on current URL\n\t\t\t\t\t\tconst currentPath = window.location.pathname;\n\t\t\t\t\t\tlet newUrl;\n\t\t\t\t\t\tif (currentPath.includes('/automations')) {\n\t\t\t\t\t\t\tnewUrl = '/automations?project_id=' + encodeURIComponent(newProjectId);\n\t\t\t\t\t\t} else if (currentPath.includes('/schedule')) {\n\t\t\t\t\t\t\tnewUrl = '/schedule?project_id=' + encodeURIComponent(newProjectId);\n\t\t\t\t\t\t} else if (currentPath.includes('/agents')) {\n\t\t\t\t\t\t\tnewUrl = '/agents?project_id=' + encodeURIComponent(newProjectId);\n\t\t\t\t\t\t} else if (currentPath.includes('/skills')) {\n\t\t\t\t\t\t\tnewUrl = '/skills?project_id=' + encodeURIComponent(newProjectId);\n\t\t\t\t\t\t} else if (currentPath.includes('/models')) {\n\t\t\t\t\t\t\tnewUrl = '/models?project_id=' + encodeURIComponent(newProjectId);\n\t\t\t\t\t\t} else if (currentPath.includes('/chat')) {\n\t\t\t\t\t\t\tnewUrl = '/chat?project_id=' + encodeURIComponent(newProjectId);\n\t\t\t\t\t\t} else if (currentPath.includes('/upcoming')) {\n\t\t\t\t\t\t\tnewUrl = '/upcoming?project_id=' + encodeURIComponent(newProjectId);\n\t\t\t\t\t\t} else if (currentPath.includes('/history')) {\n\t\t\t\t\t\t\tnewUrl = '/history?project_id=' + encodeURIComponent(newProjectId);\n\t\t\t\t\t\t} else if (currentPath.includes('/analytics')) {\n\t\t\t\t\t\t\tnewUrl = '/analytics?project_id=' + encodeURIComponent(newProjectId);\n\t\t\t\t\t\t} else if (currentPath.includes('/alerts')) {\n\t\t\t\t\t\t\tnewUrl = '/alerts?project_id=' + encodeURIComponent(newProjectId);\n\t\t\t\t\t\t} else if (currentPath.includes('/workers')) {\n\t\t\t\t\t\t\tnewUrl = '/workers?project_id=' + encodeURIComponent(newProjectId);\n\t\t\t\t\t\t} else if (currentPath.includes('/insights')) {\n\t\t\t\t\t\t\tnewUrl = '/insights?project_id=' + encodeURIComponent(newProjectId);\n\t\t\t\t\t\t} else if (currentPath.includes('/channels')) {\n\t\t\t\t\t\t\tnewUrl = '/channels?project_id=' + encodeURIComponent(newProjectId);\n\t\t\t\t\t\t} else if (currentPath.includes('/personality')) {\n\t\t\t\t\t\t\tnewUrl = '/personality?project_id=' + encodeURIComponent(newProjectId);\n\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\tnewUrl = '/tasks?project_id=' + encodeURIComponent(newProjectId);\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\tpersistSelectedProject(newProjectId);\n\n\t\t\t\t\t\t// HTMX owns the content swap, URL update, and history cache.\n\t\t\t\t\t\twindow.openVibelyNavigate(newUrl);\n\t\t\t\t\t});\n\n\t\t\t\t\tfunction syncProjectSelectorFromURL() {\n\t\t\t\t\t\tvar projectID = new URLSearchParams(window.location.search).get('project_id');\n\t\t\t\t\t\tif (!projectID) return;\n\t\t\t\t\t\tvar option = Array.prototype.slice.call(sel.options).find(function(candidate) { return candidate.value === projectID; });\n\t\t\t\t\t\tif (!option || sel.value === projectID) return;\n\t\t\t\t\t\tsel.value = projectID;\n\t\t\t\t\t\tpreviousProjectID = projectID;\n\t\t\t\t\t\tsyncProjectSelector();\n\t\t\t\t\t}\n\t\t\t\t\tdocument.addEventListener('htmx:afterSwap', function(event) {\n\t\t\t\t\t\tvar target = event.detail && event.detail.target;\n\t\t\t\t\t\tif (target && target.id === 'main-content') syncProjectSelectorFromURL();\n\t\t\t\t\t});\n\t\t\t\t\tdocument.addEventListener('htmx:historyRestore', syncProjectSelectorFromURL);\n\t\t\t\t\twindow.addEventListener('popstate', syncProjectSelectorFromURL);\n\t\t\t\t})();\n\n\t\t\t\t// Setup Server-Sent Events for real-time alert badge updates and toast notifications\n\t\t\t\t// Uses one shared live stream (tasks + chat + file changes) per tab.\n\t\t\t\t(function() {\n\t\t\t\t\tconst projectSelector = document.getElementById('project-selector');\n\t\t\t\t\tlet liveSSEHasConnected = false;\n\n\t\t\t\t\tfunction handleLiveEvent(event) {\n\t\t\t\t\t\ttry {\n\t\t\t\t\t\t\tconst data = JSON.parse(event.data);\n\t\t\t\t\t\t\tconst eventType = data.type || event.type;\n\t\t\t\t\t\t\tif (!eventType) return;\n\n\t\t\t\t\t\t\tif (eventType === 'task_board_updated' || eventType === 'task_status_changed' || eventType === 'task_category_changed' || eventType === 'task_thread_execution_started' || eventType === 'task_lifecycle_execution_changed' || eventType === 'task_thread_input_applied' || eventType === 'task_thread_input_queued' || eventType === 'task_thread_input_steered' || eventType === 'task_thread_input_cancelled' || eventType === 'alert_created' || eventType.indexOf('automation_') === 0) {\n\t\t\t\t\t\t\t\twindow._tabVisibility.dispatchSSEEvent('sse-task-event', data);\n\t\t\t\t\t\t\t\tif (eventType.indexOf('automation_') === 0) {\n\t\t\t\t\t\t\t\t\twindow._tabVisibility.dispatchSSEEvent('sse-automation-event', data);\n\t\t\t\t\t\t\t\t}\n\n\t\t\t\t\t\t\t\t// Only refresh alert badge if this is an alert_created event for the current project.\n\t\t\t\t\t\t\t\tif (eventType === 'alert_created' && projectSelector) {\n\t\t\t\t\t\t\t\t\tconst currentProjectID = projectSelector.value;\n\t\t\t\t\t\t\t\t\tif (data.project_id === currentProjectID) {\n\t\t\t\t\t\t\t\t\t\tconsole.log('[SSE-Alerts] Alert created, refreshing badge');\n\t\t\t\t\t\t\t\t\t\thtmx.trigger('body', 'alertUpdate');\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t}\n\n\t\t\t\t\t\t\t\t\t// Show toast notifications for task completion events (current project only).\n\t\t\t\t\t\t\t\t\t// Skip chat tasks — chat responses appear inline in the chat UI.\n\t\t\t\t\t\t\t\t\tif (eventType === 'task_status_changed' && projectSelector && data.category !== 'chat') {\n\t\t\t\t\t\t\t\t\t\tconst currentProjectID = projectSelector.value;\n\t\t\t\t\t\t\t\t\t\tif (data.project_id === currentProjectID) {\n\t\t\t\t\t\t\t\t\t\t\tconst terminalStatuses = ['completed', 'failed', 'cancelled'];\n\t\t\t\t\t\t\t\t\t\t\tif (terminalStatuses.includes(data.status) && typeof window.showToast === 'function') {\n\t\t\t\t\t\t\t\t\t\t\t\tconst taskName = data.task_name || 'Task';\n\t\t\t\t\t\t\t\t\t\t\t\twindow.showToast(taskName, data.status, data.task_id);\n\t\t\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t}\n\n\t\t\t\t\t\t\t\t\tif (eventType === 'automation_invocation_started' && projectSelector && typeof window.showToast === 'function') {\n\t\t\t\t\t\t\t\t\t\tconst currentProjectID = projectSelector.value;\n\t\t\t\t\t\t\t\t\t\tif (data.project_id === currentProjectID) {\n\t\t\t\t\t\t\t\t\t\t\tconst automationName = data.task_name || 'Automation';\n\t\t\t\t\t\t\t\t\t\t\tconst invocationId = data.invocation_id || data.automation_id || '';\n\t\t\t\t\t\t\t\t\t\t\tconst automationUrl = '/automations/' + encodeURIComponent(data.automation_id || '') + '?project_id=' + encodeURIComponent(currentProjectID);\n\t\t\t\t\t\t\t\t\t\t\twindow.showToast(automationName + ' is now running.', 'info', '', { toastKey: 'automation:' + invocationId, clickURL: automationUrl });\n\t\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t\t}\n\n\t\t\t\t\t\t\tif (eventType === 'chat_new_message' || eventType === 'chat_response_done' || eventType === 'chat_turn_steered' || eventType === 'chat_thread_input_applied' || eventType === 'chat_thread_input_cancelled' || eventType === 'mixture_progress') {\n\t\t\t\t\t\t\t\twindow._tabVisibility.dispatchSSEEvent('sse-chat-live-event', data);\n\t\t\t\t\t\t\t\tif (eventType === 'mixture_progress') {\n\t\t\t\t\t\t\t\t\twindow._tabVisibility.dispatchSSEEvent('sse-task-event', data);\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t}\n\n\t\t\t\t\t\t\tif (eventType === 'diff_snapshot' || eventType === 'file_modified' || eventType === 'file_deleted') {\n\t\t\t\t\t\t\t\twindow._tabVisibility.dispatchSSEEvent('sse-file-change-event', data);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t} catch (err) {\n\t\t\t\t\t\t\tconsole.error('[SSE-Live] Error parsing event:', err);\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\n\t\t\t\t\twindow._sidebarSSE = window._tabVisibility.registerSSE('live-events', '/events/live', {\n\t\t\t\t\t\tonopen: function() {\n\t\t\t\t\t\t\tconsole.log('[SSE-Live] Connected to shared live events');\n\t\t\t\t\t\t\twindow._tabVisibility.dispatchSSEEvent('sse-live-connected', {\n\t\t\t\t\t\t\t\treconnected: liveSSEHasConnected\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\tliveSSEHasConnected = true;\n\t\t\t\t\t\t},\n\t\t\t\t\t\tonerror: function(err) {\n\t\t\t\t\t\t\tconsole.error('[SSE-Live] Connection error:', err);\n\t\t\t\t\t\t},\n\t\t\t\t\t\tlisteners: {\n\t\t\t\t\t\t\t'task_board_updated': handleLiveEvent,\n\t\t\t\t\t\t\t'task_status_changed': handleLiveEvent,\n\t\t\t\t\t\t\t'task_category_changed': handleLiveEvent,\n\t\t\t\t\t\t\t'task_thread_execution_started': handleLiveEvent,\n\t\t\t\t\t\t\t'task_lifecycle_execution_changed': handleLiveEvent,\n\t\t\t\t\t\t\t'task_thread_input_applied': handleLiveEvent,\n\t\t\t\t\t\t\t'task_thread_input_queued': handleLiveEvent,\n\t\t\t\t\t\t\t'task_thread_input_steered': handleLiveEvent,\n\t\t\t\t\t\t\t'task_thread_input_cancelled': handleLiveEvent,\n\t\t\t\t\t\t\t'alert_created': handleLiveEvent,\n\t\t\t\t\t\t\t'automation_definition_updated': handleLiveEvent,\n\t\t\t\t\t\t\t'automation_invocation_started': handleLiveEvent,\n\t\t\t\t\t\t\t'automation_invocation_updated': handleLiveEvent,\n\t\t\t\t\t\t\t'automation_work_item_updated': handleLiveEvent,\n\t\t\t\t\t\t\t'automation_transition_created': handleLiveEvent,\n\t\t\t\t\t\t\t'automation_resource_linked': handleLiveEvent,\n\t\t\t\t\t\t\t'chat_new_message': handleLiveEvent,\n\t\t\t\t\t\t\t'chat_response_done': handleLiveEvent,\n\t\t\t\t\t\t\t'chat_turn_steered': handleLiveEvent,\n\t\t\t\t\t\t\t'chat_thread_input_applied': handleLiveEvent,\n\t\t\t\t\t\t\t'chat_thread_input_cancelled': handleLiveEvent,\n\t\t\t\t\t\t\t'mixture_progress': handleLiveEvent,\n\t\t\t\t\t\t\t'file_modified': handleLiveEvent,\n\t\t\t\t\t\t\t'file_deleted': handleLiveEvent,\n\t\t\t\t\t\t\t'diff_snapshot': handleLiveEvent\n\t\t\t\t\t\t}\n\t\t\t\t\t});\n\n\t\t\t\t\t// Clean up on page unload\n\t\t\t\t\twindow.addEventListener('beforeunload', function() {\n\t\t\t\t\t\tif (window._sidebarSSE) {\n\t\t\t\t\t\t\twindow._sidebarSSE.close();\n\t\t\t\t\t\t}\n\t\t\t\t\t});\n\t\t\t\t})();\n\n\t\t\t\t// Prevent re-navigation when clicking the nav link for the current page.\n\t\t\t\t// Without this, clicking e.g. \"Chat\" while already on /chat triggers a\n\t\t\t\t// full HTMX content swap (tearing down SSE connections, resetting scroll, etc.)\n\t\t\t\t// which looks like a page reload.\n\t\t\t\t//\n\t\t\t\t// Also aborts in-flight HTMX polling requests within main-content when\n\t\t\t\t// navigating away, preventing expensive morph operations (e.g. thread\n\t\t\t\t// view's every-3s morph:outerHTML) from blocking sidebar navigation.\n\t\t\t\t(function() {\n\t\t\t\t\tfunction closeMobileDrawer() {\n\t\t\t\t\t\tvar sidebarToggle = document.getElementById('sidebar-toggle');\n\t\t\t\t\t\tif (sidebarToggle) sidebarToggle.checked = false;\n\t\t\t\t\t}\n\n\t\t\t\t\t// Early navigation signal: set flag on capture-phase pointerdown (fires\n\t\t\t\t\t// before bubble handlers and before click) so stale morph swaps can be\n\t\t\t\t\t// suppressed even when the main thread is busy with thread polling work.\n\t\t\t\t\tdocument.body.addEventListener('pointerdown', function(event) {\n\t\t\t\t\t\tvar link = event.target.closest('[data-nav-base]');\n\t\t\t\t\t\tif (!link) return;\n\t\t\t\t\t\tvar navBase = link.getAttribute('data-nav-base');\n\t\t\t\t\t\tif (window.location.pathname === navBase) return;\n\t\t\t\t\t\twindow._sidebarNavigating = true;\n\t\t\t\t\t\t// Safety: clear flag if navigation doesn't complete within 3s\n\t\t\t\t\t\t// (e.g., drag-off, cancelled click, or network failure)\n\t\t\t\t\t\tclearTimeout(window._sidebarNavTimeout);\n\t\t\t\t\t\twindow._sidebarNavTimeout = setTimeout(function() {\n\t\t\t\t\t\t\twindow._sidebarNavigating = false;\n\t\t\t\t\t\t}, 3000);\n\t\t\t\t\t}, true);\n\n\t\t\t\t\tdocument.body.addEventListener('htmx:beforeRequest', function(event) {\n\t\t\t\t\t\tvar elt = event.detail.elt;\n\t\t\t\t\t\tif (elt && elt.hasAttribute('data-nav-base')) {\n\t\t\t\t\t\t\tvar navBase = elt.getAttribute('data-nav-base');\n\t\t\t\t\t\t\tif (window.location.pathname === navBase) {\n\t\t\t\t\t\t\t\tcloseMobileDrawer();\n\t\t\t\t\t\t\t\tevent.preventDefault();\n\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t// Abort in-flight polling to prevent morph from blocking navigation\n\t\t\t\t\t\t\twindow._sidebarNavigating = true;\n\t\t\t\t\t\t\tvar mainContent = document.getElementById('main-content');\n\t\t\t\t\t\t\tif (mainContent) {\n\t\t\t\t\t\t\t\tmainContent.querySelectorAll('[hx-trigger*=\"every\"]').forEach(function(el) {\n\t\t\t\t\t\t\t\t\thtmx.trigger(el, 'htmx:abort');\n\t\t\t\t\t\t\t\t\tel.removeAttribute('hx-trigger');\n\t\t\t\t\t\t\t\t\thtmx.process(el);\n\t\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t// Clean up thread streaming state\n\t\t\t\t\t\t\twindow._taskThreadStreamingActive = false;\n\t\t\t\t\t\t\t// Close thread EventSource connections\n\t\t\t\t\t\t\tif (window._threadEventSources) {\n\t\t\t\t\t\t\t\twindow._threadEventSources.forEach(function(es) {\n\t\t\t\t\t\t\t\t\ttry { es.close(); } catch(e) {}\n\t\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\t\twindow._threadEventSources = [];\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\t\t\t\t\t});\n\n\t\t\t\t\tdocument.body.addEventListener('htmx:beforeSend', function(event) {\n\t\t\t\t\t\tvar elt = event.detail.elt;\n\t\t\t\t\t\tif (elt && elt.hasAttribute('data-nav-base')) {\n\t\t\t\t\t\t\tcloseMobileDrawer();\n\t\t\t\t\t\t}\n\t\t\t\t\t});\n\n\t\t\t\t\t\t// Suppress stale polling morph responses during sidebar navigation.\n\t\t\t\t\t\t// If a polling response arrives after we started navigating, skip its swap\n\t\t\t\t\t\t// to avoid expensive DOM work that would block the page change.\n\t\t\t\t\tdocument.body.addEventListener('htmx:beforeSwap', function(event) {\n\t\t\t\t\t\tvar target = event.detail.target;\n\t\t\t\t\t\tif (event.detail.shouldSwap !== false && target && target.id === 'main-content' && window.cancelChatContentRenders) window.cancelChatContentRenders();\n\t\t\t\t\t\tif (!window._sidebarNavigating) return;\n\t\t\t\t\t\tif (!target) return;\n\t\t\t\t\t\tif (target.id === 'main-content') {\n\t\t\t\t\t\t\t// This is the sidebar navigation swap — allow it and clear flag\n\t\t\t\t\t\t\twindow._sidebarNavigating = false;\n\t\t\t\t\t\t\tclearTimeout(window._sidebarNavTimeout);\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\t// Suppress swap for any polling element inside main-content\n\t\t\t\t\t\tif (target.closest && target.closest('#main-content')) {\n\t\t\t\t\t\t\tevent.detail.shouldSwap = false;\n\t\t\t\t\t\t}\n\t\t\t\t\t});\n\t\t\t\t})();\n\n\t\t\t\t\t// Sidebar collapse/expand toggle with localStorage persistence\n\t\t\t\t\t(function() {\n\t\t\t\t\t\tvar sidebar = document.getElementById('sidebar');\n\t\t\t\t\t\tvar btn = document.getElementById('sidebar-collapse-btn');\n\t\t\t\t\t\tif (!sidebar || !btn) return;\n\n\t\t\t\t\tfunction persistSidebarPreference(isCollapsed) {\n\t\t\t\t\t\ttry {\n\t\t\t\t\t\t\tfetch('/ui/preferences', {\n\t\t\t\t\t\t\t\tmethod: 'POST',\n\t\t\t\t\t\t\t\theaders: { 'Content-Type': 'application/json' },\n\t\t\t\t\t\t\t\tbody: JSON.stringify({ sidebar_collapsed: isCollapsed }),\n\t\t\t\t\t\t\t\tkeepalive: true\n\t\t\t\t\t\t\t}).catch(function() {});\n\t\t\t\t\t\t} catch (_) {}\n\t\t\t\t\t}\n\n\t\t\t\t\t// Update accessibility attributes based on collapsed state\n\t\t\t\t\tfunction updateSidebarToggleA11y(isCollapsed) {\n\t\t\t\t\t\tbtn.setAttribute('aria-expanded', isCollapsed ? 'false' : 'true');\n\t\t\t\t\t\tbtn.setAttribute('aria-label', isCollapsed ? 'Expand sidebar (Ctrl+B)' : 'Collapse sidebar (Ctrl+B)');\n\t\t\t\t\t\tbtn.setAttribute('title', isCollapsed ? 'Expand sidebar (Ctrl+B)' : 'Collapse sidebar (Ctrl+B)');\n\t\t\t\t\t\tbtn.setAttribute('data-tip', isCollapsed ? 'Expand sidebar' : 'Collapse sidebar');\n\t\t\t\t\t\tif (document.body) document.body.classList.toggle('sidebar-collapsed-pending', isCollapsed);\n\t\t\t\t\t}\n\n\t\t\t\t\t\t// Restore saved state\n\t\t\t\t\t\t\tvar collapsed = document.documentElement.getAttribute('data-ui-sidebar-collapsed') === 'true';\n\t\t\t\t\t\tif (collapsed) {\n\t\t\t\t\t\t\tsidebar.classList.add('sidebar-collapsed');\n\t\t\t\t\t\t}\n\t\t\t\t\t\tupdateSidebarToggleA11y(collapsed);\n\n\t\t\t\t\tfunction toggleSidebarCollapsed() {\n\t\t\t\t\t\tsidebar.classList.toggle('sidebar-collapsed');\n\t\t\t\t\t\tvar isCollapsed = sidebar.classList.contains('sidebar-collapsed');\n\t\t\t\t\t\ttry { localStorage.setItem('sidebar-collapsed', isCollapsed); } catch (_) {}\n\t\t\t\t\t\tpersistSidebarPreference(isCollapsed);\n\t\t\t\t\t\tupdateSidebarToggleA11y(isCollapsed);\n\t\t\t\t\t}\n\n\t\t\t\t\tbtn.addEventListener('click', function(e) {\n\t\t\t\t\t\te.preventDefault();\n\t\t\t\t\t\ttoggleSidebarCollapsed();\n\t\t\t\t\t});\n\n\t\t\t\t\t// Keyboard shortcut: Ctrl+B or Cmd+B to toggle sidebar\n\t\t\t\t\tdocument.addEventListener('keydown', function(e) {\n\t\t\t\t\t\tif ((e.ctrlKey || e.metaKey) && e.key === 'b') {\n\t\t\t\t\t\t\t// Don't toggle if user is typing in an input/textarea\n\t\t\t\t\t\t\tvar tag = document.activeElement && document.activeElement.tagName;\n\t\t\t\t\t\t\tif (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;\n\t\t\t\t\t\t\te.preventDefault();\n\t\t\t\t\t\t\ttoggleSidebarCollapsed();\n\t\t\t\t\t\t}\n\t\t\t\t\t});\n\t\t\t\t})();\n\t\t\t</script><!-- Sidebar navigation links --><ul class=\"menu menu-sm gap-1\" aria-label=\"Main navigation\"><!-- Workspace Section: core orchestration tools --><li class=\"menu-title sidebar-hide-collapsed\"><span class=\"text-xs uppercase tracking-wider opacity-50 font-semibold\">Workspace</span></li><li><a data-nav-base=\"/chat\" data-tip=\"Chat\" href=\"")
+		var templ_7745c5c3_Var5 = []any{templateui.SearchableSelectorDialogClass}
+		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var5...)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var9 templ.SafeURL
-		templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/chat?project_id=%s", currentProjectID)))
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 708, Col: 80}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var9))
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "<dialog id=\"project-selector-dialog\" class=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "\" hx-get=\"")
+		var templ_7745c5c3_Var6 string
+		templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var5).String())
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 1, Col: 0}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var6)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "\" role=\"dialog\" aria-modal=\"true\" aria-labelledby=\"project-selector-heading\" data-project-selector-dialog><div class=\"modal-box w-full max-w-none rounded-none bg-transparent p-0 shadow-none\">")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var7 = []any{templateui.SearchableSelectorPanelClass}
+		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var7...)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "<div class=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var8 string
+		templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var7).String())
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 1, Col: 0}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var8)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "\">")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var9 = []any{templateui.SearchableSelectorHeaderClass}
+		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var9...)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "<div class=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var10 string
-		templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/chat?project_id=%s", currentProjectID))
+		templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var9).String())
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 709, Col: 67}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 1, Col: 0}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var10)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "\" hx-target=\"#main-content\" hx-push-url=\"true\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z\"></path></svg> <span class=\"sidebar-text\">Chat</span></a></li><li><a data-nav-base=\"/tasks\" data-tip=\"Tasks\" href=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "\"><h2 id=\"project-selector-heading\" class=\"min-w-0 truncate text-base font-bold\">Switch project</h2><button class=\"btn btn-ghost btn-sm btn-square ov-modal-close shrink-0\" type=\"button\" aria-label=\"Close project selector\" title=\"Close project selector\" data-project-selector-close>✕</button></div><div class=\"relative border-b border-base-300\"><label class=\"sr-only\" for=\"project-selector-search\">Search projects</label> ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var11 templ.SafeURL
-		templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/tasks?project_id=%s", currentProjectID)))
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 723, Col: 81}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var11))
+		var templ_7745c5c3_Var11 = []any{templateui.SearchableSelectorSearchClass}
+		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var11...)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "\" hx-get=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "<input id=\"project-selector-search\" class=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var12 string
-		templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks?project_id=%s", currentProjectID))
+		templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var11).String())
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 724, Col: 68}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 1, Col: 0}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var12)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "\" hx-target=\"#main-content\" hx-push-url=\"true\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2\"></path></svg> <span class=\"sidebar-text\">Tasks</span></a></li><li><a data-nav-base=\"/automations\" data-tip=\"Automations\" href=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "\" type=\"search\" name=\"search\" placeholder=\"Search projects\" autocomplete=\"off\" aria-controls=\"project-selector-results\" aria-autocomplete=\"list\" data-project-selector-search> <button class=\"btn btn-ghost btn-sm btn-square absolute right-1 top-1/2 -translate-y-1/2\" type=\"button\" aria-label=\"Clear project search\" title=\"Clear project search\" data-project-selector-clear hidden>✕</button></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var13 templ.SafeURL
-		templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/automations?project_id=%s", currentProjectID)))
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 738, Col: 88}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var13))
+		var templ_7745c5c3_Var13 = []any{templateui.SearchableSelectorResultsClass}
+		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var13...)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "\" hx-get=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "<div id=\"project-selector-results\" class=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var14 string
-		templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/automations?project_id=%s", currentProjectID))
+		templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var13).String())
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 739, Col: 75}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 1, Col: 0}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var14)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "\" hx-target=\"#main-content\" hx-push-url=\"true\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13 2 3 14h9l-1 8 10-12h-9l1-8z\"></path></svg> <span class=\"sidebar-text\">Automations</span></a></li><li><a data-nav-base=\"/schedule\" data-tip=\"Schedule\" href=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "\" data-project-selector-results>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var15 templ.SafeURL
-		templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/schedule?project_id=%s", currentProjectID)))
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 750, Col: 84}
+		if len(projects) == 0 {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "<div class=\"px-3 py-8 text-center text-sm text-base-content/60\" data-project-selector-no-projects>No projects available.</div>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		} else {
+			var templ_7745c5c3_Var15 = []any{templateui.SearchableSelectorMenuClass}
+			templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var15...)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "<div role=\"listbox\" aria-label=\"Projects\" class=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var16 string
+			templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var15).String())
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 1, Col: 0}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var16)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "\">")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			for _, p := range projects {
+				var templ_7745c5c3_Var17 = []any{templateui.SearchableSelectorOptionClass}
+				templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var17...)
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "<button class=\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var18 string
+				templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var17).String())
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 1, Col: 0}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var18)
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "\" type=\"button\" role=\"option\" aria-selected=\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var19 string
+				templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%t", p.ID == currentProjectID))
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 140, Col: 70}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var19)
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "\" tabindex=\"-1\" data-project-selector-option data-project-id=\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var20 string
+				templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.ResolveAttributeValue(p.ID)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 143, Col: 33}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var20)
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "\" data-project-name=\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var21 string
+				templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.ResolveAttributeValue(p.Name)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 144, Col: 37}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var21)
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "\"><span class=\"w-4 shrink-0\" aria-hidden=\"true\" data-project-selector-current>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var22 string
+				templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.JoinStringErrs(sidebarProjectCheck(p.ID == currentProjectID))
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 146, Col: 134}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var22))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, "</span> <span class=\"min-w-0 break-words\">")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var23 string
+				templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.JoinStringErrs(p.Name)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 147, Col: 53}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var23))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, "</span></button>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "</div><div class=\"px-3 py-8 text-center\" data-project-selector-no-match hidden><p class=\"font-medium\">No projects match your search.</p><p class=\"mt-1 text-sm text-base-content/60\">Try a different name.</p></div>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var15))
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "</div><span class=\"sr-only\" role=\"status\" aria-live=\"polite\" data-project-selector-status>All projects shown.</span></div></div></dialog></div><script>\n\t\t\t\t// Project selector behavior is installed once so full-page and HTMX paths share one controller.\n\t\t\t\t(function() {\n\t\t\t\t\tif (window.openVibelyProjectSelectorInstalled) return;\n\t\t\t\t\tvar root = document.querySelector('[data-project-selector]');\n\t\t\t\t\tvar sel = document.getElementById('project-selector');\n\t\t\t\t\tvar trigger = document.getElementById('project-selector-trigger');\n\t\t\t\t\tvar dialog = document.getElementById('project-selector-dialog');\n\t\t\t\t\tvar search = document.getElementById('project-selector-search');\n\t\t\t\t\tif (!root || !sel || !trigger || !dialog || !search) return;\n\t\t\t\t\twindow.openVibelyProjectSelectorInstalled = true;\n\n\t\t\t\t\tfunction normalize(value) {\n\t\t\t\t\t\treturn String(value || '').trim().toLowerCase();\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction projectOptions() {\n\t\t\t\t\t\treturn Array.prototype.slice.call(root.querySelectorAll('[data-project-selector-option]'));\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction visibleProjectOptions() {\n\t\t\t\t\t\treturn projectOptions().filter(function(option) { return !option.hidden; });\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction applyFilter() {\n\t\t\t\t\t\tvar query = normalize(search.value);\n\t\t\t\t\t\tvar matchCount = 0;\n\t\t\t\t\t\tvar currentProjectID = sel.value;\n\t\t\t\t\t\tprojectOptions().forEach(function(option) {\n\t\t\t\t\t\t\tvar isMatch = !query || normalize(option.getAttribute('data-project-name')).indexOf(query) !== -1;\n\t\t\t\t\t\t\tvar isCurrent = option.getAttribute('data-project-id') === currentProjectID;\n\t\t\t\t\t\t\tif (isMatch) matchCount++;\n\t\t\t\t\t\t\toption.hidden = !(isMatch || (query && isCurrent));\n\t\t\t\t\t\t\toption.setAttribute('aria-hidden', option.hidden ? 'true' : 'false');\n\t\t\t\t\t\t\toption.tabIndex = option.hidden ? -1 : 0;\n\t\t\t\t\t\t});\n\t\t\t\t\t\tvar noMatch = root.querySelector('[data-project-selector-no-match]');\n\t\t\t\t\t\tif (noMatch) noMatch.hidden = !query || matchCount > 0;\n\t\t\t\t\t\tvar clear = root.querySelector('[data-project-selector-clear]');\n\t\t\t\t\t\tif (clear) clear.hidden = !query;\n\t\t\t\t\t\tvar status = root.querySelector('[data-project-selector-status]');\n\t\t\t\t\t\tif (status) status.textContent = query && matchCount === 0 ? 'No projects match your search.' : (query ? 'Matching projects updated.' : 'All projects shown.');\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction syncCurrentProject(projectID) {\n\t\t\t\t\t\tvar currentName = '';\n\t\t\t\t\t\tprojectOptions().forEach(function(option) {\n\t\t\t\t\t\t\tvar isCurrent = option.getAttribute('data-project-id') === projectID;\n\t\t\t\t\t\t\toption.setAttribute('aria-selected', isCurrent ? 'true' : 'false');\n\t\t\t\t\t\t\tvar marker = option.querySelector('[data-project-selector-current]');\n\t\t\t\t\t\t\tif (marker) marker.textContent = isCurrent ? '✓' : '';\n\t\t\t\t\t\t\tif (isCurrent) currentName = option.getAttribute('data-project-name') || '';\n\t\t\t\t\t\t});\n\t\t\t\t\t\tvar label = root.querySelector('#project-selector-current-label');\n\t\t\t\t\t\tif (label && currentName) label.textContent = currentName;\n\t\t\t\t\t\tapplyFilter();\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction positionSelector() {\n\t\t\t\t\t\tif (!dialog.open) return;\n\t\t\t\t\tvar margin = 8, gap = 4, triggerRect = trigger.getBoundingClientRect();\n\t\t\t\t\t\tvar anchorLeft = triggerRect.left;\n\t\t\t\t\t\tdialog.style.maxHeight = '';\n\t\t\t\t\t\tvar width = dialog.offsetWidth, height = dialog.offsetHeight;\n\t\t\t\t\t\tvar left = Math.max(margin, Math.min(anchorLeft, window.innerWidth - width - margin));\n\t\t\t\t\t\tvar belowTop = triggerRect.bottom + gap, below = window.innerHeight - belowTop - margin, above = triggerRect.top - gap - margin;\n\t\t\t\t\t\tvar top = belowTop, available = below;\n\t\t\t\t\t\tif (below < Math.min(height, 160) && above > below) {\n\t\t\t\t\t\t\tavailable = above;\n\t\t\t\t\t\t\ttop = Math.max(margin, triggerRect.top - gap - Math.min(height, available));\n\t\t\t\t\t\t}\n\t\t\t\t\t\tdialog.style.left = left + 'px';\n\t\t\t\t\t\tdialog.style.top = top + 'px';\n\t\t\t\t\t\tdialog.style.maxHeight = Math.max(0, available) + 'px';\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction closeSelector(restoreFocus) {\n\t\t\t\t\t\tif (dialog.open) dialog.close();\n\t\t\t\t\t\ttrigger.setAttribute('aria-expanded', 'false');\n\t\t\t\t\t\tif (restoreFocus && trigger.isConnected) trigger.focus({preventScroll: true});\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction openSelector() {\n\t\t\t\t\t\tif (trigger.disabled || dialog.open) return;\n\t\t\t\t\t\tdialog.showModal();\n\t\t\t\t\t\ttrigger.setAttribute('aria-expanded', 'true');\n\t\t\t\t\t\tsyncCurrentProject(sel.value);\n\t\t\t\t\t\tpositionSelector();\n\t\t\t\t\t\tsearch.focus();\n\t\t\t\t\t\tsearch.select();\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction selectProject(projectID) {\n\t\t\t\t\t\tif (!projectID) return;\n\t\t\t\t\t\tcloseSelector(true);\n\t\t\t\t\t\tif (projectID === sel.value) return;\n\t\t\t\t\t\tsel.value = projectID;\n\t\t\t\t\t\tsel.dispatchEvent(new Event('change', { bubbles: true }));\n\t\t\t\t\t}\n\n\t\t\t\t\tprojectOptions().forEach(function(option) {\n\t\t\t\t\t\toption.addEventListener('click', function() { selectProject(option.getAttribute('data-project-id')); });\n\t\t\t\t\t});\n\t\t\t\t\tdocument.addEventListener('input', function(event) {\n\t\t\t\t\t\tif (event.target === search) applyFilter();\n\t\t\t\t\t});\n\t\t\t\t\tdocument.addEventListener('search', function(event) {\n\t\t\t\t\t\tif (event.target === search) applyFilter();\n\t\t\t\t\t});\n\t\t\t\t\tvar clear = root.querySelector('[data-project-selector-clear]');\n\t\t\t\t\tif (clear) clear.addEventListener('click', function() { search.value = ''; applyFilter(); search.focus(); });\n\t\t\t\t\tvar closeButton = root.querySelector('[data-project-selector-close]');\n\t\t\t\t\tif (closeButton) closeButton.addEventListener('click', function() { closeSelector(true); });\n\t\t\t\t\ttrigger.addEventListener('click', openSelector);\n\t\t\t\t\tdialog.addEventListener('click', function(event) { if (event.target === dialog) closeSelector(true); });\n\t\t\t\t\tdialog.addEventListener('cancel', function(event) { event.preventDefault(); closeSelector(true); });\n\t\t\t\t\tdialog.addEventListener('close', function() { trigger.setAttribute('aria-expanded', 'false'); });\n\n\t\t\t\t\tdocument.addEventListener('keydown', function(event) {\n\t\t\t\t\t\tif (event.target === trigger && (event.key === 'Enter' || event.key === ' ' || event.key === 'ArrowDown')) {\n\t\t\t\t\t\t\tevent.preventDefault();\n\t\t\t\t\t\t\topenSelector();\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tif (!dialog.open) return;\n\t\t\t\t\t\tif (event.key === 'Escape') {\n\t\t\t\t\t\t\tevent.preventDefault();\n\t\t\t\t\t\t\tcloseSelector(true);\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tvar options = visibleProjectOptions();\n\t\t\t\t\t\tif (event.target === search && (event.key === 'ArrowDown' || event.key === 'ArrowUp') && options.length) {\n\t\t\t\t\t\t\tevent.preventDefault();\n\t\t\t\t\t\t\t(options[event.key === 'ArrowDown' ? 0 : options.length - 1]).focus();\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tvar index = options.indexOf(event.target);\n\t\t\t\t\t\tif (index < 0) return;\n\t\t\t\t\t\tif (event.key === 'Enter' || event.key === ' ') {\n\t\t\t\t\t\t\tevent.preventDefault();\n\t\t\t\t\t\t\tevent.target.click();\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tif (event.key === 'ArrowDown' || event.key === 'ArrowUp') {\n\t\t\t\t\t\t\tevent.preventDefault();\n\t\t\t\t\t\t\toptions[(index + (event.key === 'ArrowDown' ? 1 : options.length - 1)) % options.length].focus();\n\t\t\t\t\t\t}\n\t\t\t\t\t});\n\n\t\t\t\t\tdocument.addEventListener('htmx:beforeSwap', function(event) {\n\t\t\t\t\t\tvar target = event.detail && event.detail.target;\n\t\t\t\t\t\tif (target && target.id === 'main-content') closeSelector(false);\n\t\t\t\t\t});\n\t\t\t\t\tdocument.addEventListener('htmx:historyRestore', function() { closeSelector(false); });\n\t\t\t\t\twindow.addEventListener('popstate', function() { closeSelector(false); });\n\t\t\t\t\twindow.addEventListener('resize', positionSelector);\n\t\t\t\t\tdocument.addEventListener('scroll', function(event) {\n\t\t\t\t\t\tif (event.target && event.target.closest && event.target.closest('[data-project-selector-dialog]')) return;\n\t\t\t\t\t\tpositionSelector();\n\t\t\t\t\t}, true);\n\t\t\t\t\twindow.openVibelyProjectSelectorSync = syncCurrentProject;\n\t\t\t\t\tsyncCurrentProject(sel.value);\n\t\t\t\t})();\n\t\t\t</script><script>\n\t\t\t\t(function() {\n\t\t\t\t\tif (window.openVibelyProjectSelectorChangeInstalled) return;\n\t\t\t\t\twindow.openVibelyProjectSelectorChangeInstalled = true;\n\t\t\t\t\tconst sel = document.getElementById('project-selector');\n\t\t\t\t\tif (!sel) return;\n\n\t\t\t\t\tfunction persistSelectedProject(projectID) {\n\t\t\t\t\t\ttry {\n\t\t\t\t\t\t\tfetch('/ui/preferences', {\n\t\t\t\t\t\t\t\tmethod: 'POST',\n\t\t\t\t\t\t\t\theaders: { 'Content-Type': 'application/json' },\n\t\t\t\t\t\t\t\tbody: JSON.stringify({ project_id: projectID }),\n\t\t\t\t\t\t\t\tkeepalive: true\n\t\t\t\t\t\t\t}).catch(function() {});\n\t\t\t\t\t\t} catch (_) {}\n\t\t\t\t\t}\n\n\t\t\t\t\tvar previousProjectID = sel.value;\n\t\t\t\t\tfunction syncProjectSelector() {\n\t\t\t\t\t\tif (typeof window.openVibelyProjectSelectorSync === 'function') {\n\t\t\t\t\t\t\twindow.openVibelyProjectSelectorSync(sel.value);\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\n\t\t\t\t\tsel.addEventListener('change', function() {\n\t\t\t\t\t\tconst newProjectId = sel.value;\n\t\t\t\t\t\tif (!newProjectId || newProjectId === previousProjectID) {\n\t\t\t\t\t\t\tsyncProjectSelector();\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\t// Check for open modals with unsaved changes\n\t\t\t\t\t\tconst openModals = document.querySelectorAll('dialog[open]');\n\t\t\t\t\t\tif (openModals.length > 0) {\n\t\t\t\t\t\t\tif (!confirm('You may have unsaved changes. Switch project anyway?')) {\n\t\t\t\t\t\t\t\t// Revert selector to the last confirmed value.\n\t\t\t\t\t\t\t\tsel.value = previousProjectID;\n\t\t\t\t\t\t\t\tsyncProjectSelector();\n\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\topenModals.forEach(m => m.close());\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\tpreviousProjectID = newProjectId;\n\t\t\t\t\t\tsyncProjectSelector();\n\n\t\t\t\t\t\t// Update all sidebar nav links with new project_id\n\t\t\t\t\t\tdocument.querySelectorAll('[data-nav-base]').forEach(function(link) {\n\t\t\t\t\t\t\tconst base = link.getAttribute('data-nav-base');\n\t\t\t\t\t\t\tconst newUrl = base + '?project_id=' + encodeURIComponent(newProjectId);\n\t\t\t\t\t\t\tlink.setAttribute('href', newUrl);\n\t\t\t\t\t\t\tlink.setAttribute('hx-get', newUrl);\n\t\t\t\t\t\t\thtmx.process(link);\n\t\t\t\t\t\t});\n\n\t\t\t\t\t\t// Update alert badge polling URL\n\t\t\t\t\t\tconst alertBadge = document.getElementById('alert-badge');\n\t\t\t\t\t\tif (alertBadge) {\n\t\t\t\t\t\t\talertBadge.setAttribute('hx-get', '/alerts/unread-count?project_id=' + encodeURIComponent(newProjectId));\n\t\t\t\t\t\t\thtmx.process(alertBadge);\n\t\t\t\t\t\t\thtmx.trigger(alertBadge, 'load');\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\t// Determine which page to load based on current URL\n\t\t\t\t\t\tconst currentPath = window.location.pathname;\n\t\t\t\t\t\tlet newUrl;\n\t\t\t\t\t\tif (currentPath.includes('/automations')) {\n\t\t\t\t\t\t\tnewUrl = '/automations?project_id=' + encodeURIComponent(newProjectId);\n\t\t\t\t\t\t} else if (currentPath.includes('/schedule')) {\n\t\t\t\t\t\t\tnewUrl = '/schedule?project_id=' + encodeURIComponent(newProjectId);\n\t\t\t\t\t\t} else if (currentPath.includes('/agents')) {\n\t\t\t\t\t\t\tnewUrl = '/agents?project_id=' + encodeURIComponent(newProjectId);\n\t\t\t\t\t\t} else if (currentPath.includes('/skills')) {\n\t\t\t\t\t\t\tnewUrl = '/skills?project_id=' + encodeURIComponent(newProjectId);\n\t\t\t\t\t\t} else if (currentPath.includes('/models')) {\n\t\t\t\t\t\t\tnewUrl = '/models?project_id=' + encodeURIComponent(newProjectId);\n\t\t\t\t\t\t} else if (currentPath.includes('/chat')) {\n\t\t\t\t\t\t\tnewUrl = '/chat?project_id=' + encodeURIComponent(newProjectId);\n\t\t\t\t\t\t} else if (currentPath.includes('/upcoming')) {\n\t\t\t\t\t\t\tnewUrl = '/upcoming?project_id=' + encodeURIComponent(newProjectId);\n\t\t\t\t\t\t} else if (currentPath.includes('/history')) {\n\t\t\t\t\t\t\tnewUrl = '/history?project_id=' + encodeURIComponent(newProjectId);\n\t\t\t\t\t\t} else if (currentPath.includes('/analytics')) {\n\t\t\t\t\t\t\tnewUrl = '/analytics?project_id=' + encodeURIComponent(newProjectId);\n\t\t\t\t\t\t} else if (currentPath.includes('/alerts')) {\n\t\t\t\t\t\t\tnewUrl = '/alerts?project_id=' + encodeURIComponent(newProjectId);\n\t\t\t\t\t\t} else if (currentPath.includes('/workers')) {\n\t\t\t\t\t\t\tnewUrl = '/workers?project_id=' + encodeURIComponent(newProjectId);\n\t\t\t\t\t\t} else if (currentPath.includes('/insights')) {\n\t\t\t\t\t\t\tnewUrl = '/insights?project_id=' + encodeURIComponent(newProjectId);\n\t\t\t\t\t\t} else if (currentPath.includes('/channels')) {\n\t\t\t\t\t\t\tnewUrl = '/channels?project_id=' + encodeURIComponent(newProjectId);\n\t\t\t\t\t\t} else if (currentPath.includes('/personality')) {\n\t\t\t\t\t\t\tnewUrl = '/personality?project_id=' + encodeURIComponent(newProjectId);\n\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\tnewUrl = '/tasks?project_id=' + encodeURIComponent(newProjectId);\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\tpersistSelectedProject(newProjectId);\n\n\t\t\t\t\t\t// HTMX owns the content swap, URL update, and history cache.\n\t\t\t\t\t\twindow.openVibelyNavigate(newUrl);\n\t\t\t\t\t});\n\n\t\t\t\t\tfunction syncProjectSelectorFromURL() {\n\t\t\t\t\t\tvar projectID = new URLSearchParams(window.location.search).get('project_id');\n\t\t\t\t\t\tif (!projectID) return;\n\t\t\t\t\t\tvar option = Array.prototype.slice.call(sel.options).find(function(candidate) { return candidate.value === projectID; });\n\t\t\t\t\t\tif (!option || sel.value === projectID) return;\n\t\t\t\t\t\tsel.value = projectID;\n\t\t\t\t\t\tpreviousProjectID = projectID;\n\t\t\t\t\t\tsyncProjectSelector();\n\t\t\t\t\t}\n\t\t\t\t\tdocument.addEventListener('htmx:afterSwap', function(event) {\n\t\t\t\t\t\tvar target = event.detail && event.detail.target;\n\t\t\t\t\t\tif (target && target.id === 'main-content') syncProjectSelectorFromURL();\n\t\t\t\t\t});\n\t\t\t\t\tdocument.addEventListener('htmx:historyRestore', syncProjectSelectorFromURL);\n\t\t\t\t\twindow.addEventListener('popstate', syncProjectSelectorFromURL);\n\t\t\t\t})();\n\n\t\t\t\t// Setup Server-Sent Events for real-time alert badge updates and toast notifications\n\t\t\t\t// Uses one shared live stream (tasks + chat + file changes) per tab.\n\t\t\t\t(function() {\n\t\t\t\t\tconst projectSelector = document.getElementById('project-selector');\n\t\t\t\t\tlet liveSSEHasConnected = false;\n\n\t\t\t\t\tfunction handleLiveEvent(event) {\n\t\t\t\t\t\ttry {\n\t\t\t\t\t\t\tconst data = JSON.parse(event.data);\n\t\t\t\t\t\t\tconst eventType = data.type || event.type;\n\t\t\t\t\t\t\tif (!eventType) return;\n\n\t\t\t\t\t\t\tif (eventType === 'task_board_updated' || eventType === 'task_status_changed' || eventType === 'task_category_changed' || eventType === 'task_thread_execution_started' || eventType === 'task_lifecycle_execution_changed' || eventType === 'task_thread_input_applied' || eventType === 'task_thread_input_queued' || eventType === 'task_thread_input_steered' || eventType === 'task_thread_input_cancelled' || eventType === 'alert_created' || eventType.indexOf('automation_') === 0) {\n\t\t\t\t\t\t\t\twindow._tabVisibility.dispatchSSEEvent('sse-task-event', data);\n\t\t\t\t\t\t\t\tif (eventType.indexOf('automation_') === 0) {\n\t\t\t\t\t\t\t\t\twindow._tabVisibility.dispatchSSEEvent('sse-automation-event', data);\n\t\t\t\t\t\t\t\t}\n\n\t\t\t\t\t\t\t\t// Only refresh alert badge if this is an alert_created event for the current project.\n\t\t\t\t\t\t\t\tif (eventType === 'alert_created' && projectSelector) {\n\t\t\t\t\t\t\t\t\tconst currentProjectID = projectSelector.value;\n\t\t\t\t\t\t\t\t\tif (data.project_id === currentProjectID) {\n\t\t\t\t\t\t\t\t\t\tconsole.log('[SSE-Alerts] Alert created, refreshing badge');\n\t\t\t\t\t\t\t\t\t\thtmx.trigger('body', 'alertUpdate');\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t}\n\n\t\t\t\t\t\t\t\t\t// Show toast notifications for task completion events (current project only).\n\t\t\t\t\t\t\t\t\t// Skip chat tasks — chat responses appear inline in the chat UI.\n\t\t\t\t\t\t\t\t\tif (eventType === 'task_status_changed' && projectSelector && data.category !== 'chat') {\n\t\t\t\t\t\t\t\t\t\tconst currentProjectID = projectSelector.value;\n\t\t\t\t\t\t\t\t\t\tif (data.project_id === currentProjectID) {\n\t\t\t\t\t\t\t\t\t\t\tconst terminalStatuses = ['completed', 'failed', 'cancelled'];\n\t\t\t\t\t\t\t\t\t\t\tif (terminalStatuses.includes(data.status) && typeof window.showToast === 'function') {\n\t\t\t\t\t\t\t\t\t\t\t\tconst taskName = data.task_name || 'Task';\n\t\t\t\t\t\t\t\t\t\t\t\twindow.showToast(taskName, data.status, data.task_id);\n\t\t\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t}\n\n\t\t\t\t\t\t\t\t\tif (eventType === 'automation_invocation_started' && projectSelector && typeof window.showToast === 'function') {\n\t\t\t\t\t\t\t\t\t\tconst currentProjectID = projectSelector.value;\n\t\t\t\t\t\t\t\t\t\tif (data.project_id === currentProjectID) {\n\t\t\t\t\t\t\t\t\t\t\tconst automationName = data.task_name || 'Automation';\n\t\t\t\t\t\t\t\t\t\t\tconst invocationId = data.invocation_id || data.automation_id || '';\n\t\t\t\t\t\t\t\t\t\t\tconst automationUrl = '/automations/' + encodeURIComponent(data.automation_id || '') + '?project_id=' + encodeURIComponent(currentProjectID);\n\t\t\t\t\t\t\t\t\t\t\twindow.showToast(automationName + ' is now running.', 'info', '', { toastKey: 'automation:' + invocationId, clickURL: automationUrl });\n\t\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t\t}\n\n\t\t\t\t\t\t\tif (eventType === 'chat_new_message' || eventType === 'chat_response_done' || eventType === 'chat_turn_steered' || eventType === 'chat_thread_input_applied' || eventType === 'chat_thread_input_cancelled' || eventType === 'mixture_progress') {\n\t\t\t\t\t\t\t\twindow._tabVisibility.dispatchSSEEvent('sse-chat-live-event', data);\n\t\t\t\t\t\t\t\tif (eventType === 'mixture_progress') {\n\t\t\t\t\t\t\t\t\twindow._tabVisibility.dispatchSSEEvent('sse-task-event', data);\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t}\n\n\t\t\t\t\t\t\tif (eventType === 'diff_snapshot' || eventType === 'file_modified' || eventType === 'file_deleted') {\n\t\t\t\t\t\t\t\twindow._tabVisibility.dispatchSSEEvent('sse-file-change-event', data);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t} catch (err) {\n\t\t\t\t\t\t\tconsole.error('[SSE-Live] Error parsing event:', err);\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\n\t\t\t\t\twindow._sidebarSSE = window._tabVisibility.registerSSE('live-events', '/events/live', {\n\t\t\t\t\t\tonopen: function() {\n\t\t\t\t\t\t\tconsole.log('[SSE-Live] Connected to shared live events');\n\t\t\t\t\t\t\twindow._tabVisibility.dispatchSSEEvent('sse-live-connected', {\n\t\t\t\t\t\t\t\treconnected: liveSSEHasConnected\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\tliveSSEHasConnected = true;\n\t\t\t\t\t\t},\n\t\t\t\t\t\tonerror: function(err) {\n\t\t\t\t\t\t\tconsole.error('[SSE-Live] Connection error:', err);\n\t\t\t\t\t\t},\n\t\t\t\t\t\tlisteners: {\n\t\t\t\t\t\t\t'task_board_updated': handleLiveEvent,\n\t\t\t\t\t\t\t'task_status_changed': handleLiveEvent,\n\t\t\t\t\t\t\t'task_category_changed': handleLiveEvent,\n\t\t\t\t\t\t\t'task_thread_execution_started': handleLiveEvent,\n\t\t\t\t\t\t\t'task_lifecycle_execution_changed': handleLiveEvent,\n\t\t\t\t\t\t\t'task_thread_input_applied': handleLiveEvent,\n\t\t\t\t\t\t\t'task_thread_input_queued': handleLiveEvent,\n\t\t\t\t\t\t\t'task_thread_input_steered': handleLiveEvent,\n\t\t\t\t\t\t\t'task_thread_input_cancelled': handleLiveEvent,\n\t\t\t\t\t\t\t'alert_created': handleLiveEvent,\n\t\t\t\t\t\t\t'automation_definition_updated': handleLiveEvent,\n\t\t\t\t\t\t\t'automation_invocation_started': handleLiveEvent,\n\t\t\t\t\t\t\t'automation_invocation_updated': handleLiveEvent,\n\t\t\t\t\t\t\t'automation_work_item_updated': handleLiveEvent,\n\t\t\t\t\t\t\t'automation_transition_created': handleLiveEvent,\n\t\t\t\t\t\t\t'automation_resource_linked': handleLiveEvent,\n\t\t\t\t\t\t\t'chat_new_message': handleLiveEvent,\n\t\t\t\t\t\t\t'chat_response_done': handleLiveEvent,\n\t\t\t\t\t\t\t'chat_turn_steered': handleLiveEvent,\n\t\t\t\t\t\t\t'chat_thread_input_applied': handleLiveEvent,\n\t\t\t\t\t\t\t'chat_thread_input_cancelled': handleLiveEvent,\n\t\t\t\t\t\t\t'mixture_progress': handleLiveEvent,\n\t\t\t\t\t\t\t'file_modified': handleLiveEvent,\n\t\t\t\t\t\t\t'file_deleted': handleLiveEvent,\n\t\t\t\t\t\t\t'diff_snapshot': handleLiveEvent\n\t\t\t\t\t\t}\n\t\t\t\t\t});\n\n\t\t\t\t\t// Clean up on page unload\n\t\t\t\t\twindow.addEventListener('beforeunload', function() {\n\t\t\t\t\t\tif (window._sidebarSSE) {\n\t\t\t\t\t\t\twindow._sidebarSSE.close();\n\t\t\t\t\t\t}\n\t\t\t\t\t});\n\t\t\t\t})();\n\n\t\t\t\t// Prevent re-navigation when clicking the nav link for the current page.\n\t\t\t\t// Without this, clicking e.g. \"Chat\" while already on /chat triggers a\n\t\t\t\t// full HTMX content swap (tearing down SSE connections, resetting scroll, etc.)\n\t\t\t\t// which looks like a page reload.\n\t\t\t\t//\n\t\t\t\t// Also aborts in-flight HTMX polling requests within main-content when\n\t\t\t\t// navigating away, preventing expensive morph operations (e.g. thread\n\t\t\t\t// view's every-3s morph:outerHTML) from blocking sidebar navigation.\n\t\t\t\t(function() {\n\t\t\t\t\tfunction closeMobileDrawer() {\n\t\t\t\t\t\tvar sidebarToggle = document.getElementById('sidebar-toggle');\n\t\t\t\t\t\tif (sidebarToggle) sidebarToggle.checked = false;\n\t\t\t\t\t}\n\n\t\t\t\t\t// Early navigation signal: set flag on capture-phase pointerdown (fires\n\t\t\t\t\t// before bubble handlers and before click) so stale morph swaps can be\n\t\t\t\t\t// suppressed even when the main thread is busy with thread polling work.\n\t\t\t\t\tdocument.body.addEventListener('pointerdown', function(event) {\n\t\t\t\t\t\tvar link = event.target.closest('[data-nav-base]');\n\t\t\t\t\t\tif (!link) return;\n\t\t\t\t\t\tvar navBase = link.getAttribute('data-nav-base');\n\t\t\t\t\t\tif (window.location.pathname === navBase) return;\n\t\t\t\t\t\twindow._sidebarNavigating = true;\n\t\t\t\t\t\t// Safety: clear flag if navigation doesn't complete within 3s\n\t\t\t\t\t\t// (e.g., drag-off, cancelled click, or network failure)\n\t\t\t\t\t\tclearTimeout(window._sidebarNavTimeout);\n\t\t\t\t\t\twindow._sidebarNavTimeout = setTimeout(function() {\n\t\t\t\t\t\t\twindow._sidebarNavigating = false;\n\t\t\t\t\t\t}, 3000);\n\t\t\t\t\t}, true);\n\n\t\t\t\t\tdocument.body.addEventListener('htmx:beforeRequest', function(event) {\n\t\t\t\t\t\tvar elt = event.detail.elt;\n\t\t\t\t\t\tif (elt && elt.hasAttribute('data-nav-base')) {\n\t\t\t\t\t\t\tvar navBase = elt.getAttribute('data-nav-base');\n\t\t\t\t\t\t\tif (window.location.pathname === navBase) {\n\t\t\t\t\t\t\t\tcloseMobileDrawer();\n\t\t\t\t\t\t\t\tevent.preventDefault();\n\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t// Abort in-flight polling to prevent morph from blocking navigation\n\t\t\t\t\t\t\twindow._sidebarNavigating = true;\n\t\t\t\t\t\t\tvar mainContent = document.getElementById('main-content');\n\t\t\t\t\t\t\tif (mainContent) {\n\t\t\t\t\t\t\t\tmainContent.querySelectorAll('[hx-trigger*=\"every\"]').forEach(function(el) {\n\t\t\t\t\t\t\t\t\thtmx.trigger(el, 'htmx:abort');\n\t\t\t\t\t\t\t\t\tel.removeAttribute('hx-trigger');\n\t\t\t\t\t\t\t\t\thtmx.process(el);\n\t\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t// Clean up thread streaming state\n\t\t\t\t\t\t\twindow._taskThreadStreamingActive = false;\n\t\t\t\t\t\t\t// Close thread EventSource connections\n\t\t\t\t\t\t\tif (window._threadEventSources) {\n\t\t\t\t\t\t\t\twindow._threadEventSources.forEach(function(es) {\n\t\t\t\t\t\t\t\t\ttry { es.close(); } catch(e) {}\n\t\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\t\twindow._threadEventSources = [];\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\t\t\t\t\t});\n\n\t\t\t\t\tdocument.body.addEventListener('htmx:beforeSend', function(event) {\n\t\t\t\t\t\tvar elt = event.detail.elt;\n\t\t\t\t\t\tif (elt && elt.hasAttribute('data-nav-base')) {\n\t\t\t\t\t\t\tcloseMobileDrawer();\n\t\t\t\t\t\t}\n\t\t\t\t\t});\n\n\t\t\t\t\t\t// Suppress stale polling morph responses during sidebar navigation.\n\t\t\t\t\t\t// If a polling response arrives after we started navigating, skip its swap\n\t\t\t\t\t\t// to avoid expensive DOM work that would block the page change.\n\t\t\t\t\tdocument.body.addEventListener('htmx:beforeSwap', function(event) {\n\t\t\t\t\t\tvar target = event.detail.target;\n\t\t\t\t\t\tif (event.detail.shouldSwap !== false && target && target.id === 'main-content' && window.cancelChatContentRenders) window.cancelChatContentRenders();\n\t\t\t\t\t\tif (!window._sidebarNavigating) return;\n\t\t\t\t\t\tif (!target) return;\n\t\t\t\t\t\tif (target.id === 'main-content') {\n\t\t\t\t\t\t\t// This is the sidebar navigation swap — allow it and clear flag\n\t\t\t\t\t\t\twindow._sidebarNavigating = false;\n\t\t\t\t\t\t\tclearTimeout(window._sidebarNavTimeout);\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\t// Suppress swap for any polling element inside main-content\n\t\t\t\t\t\tif (target.closest && target.closest('#main-content')) {\n\t\t\t\t\t\t\tevent.detail.shouldSwap = false;\n\t\t\t\t\t\t}\n\t\t\t\t\t});\n\t\t\t\t})();\n\n\t\t\t\t\t// Sidebar collapse/expand toggle with localStorage persistence\n\t\t\t\t\t(function() {\n\t\t\t\t\t\tvar sidebar = document.getElementById('sidebar');\n\t\t\t\t\t\tvar btn = document.getElementById('sidebar-collapse-btn');\n\t\t\t\t\t\tif (!sidebar || !btn) return;\n\n\t\t\t\t\tfunction persistSidebarPreference(isCollapsed) {\n\t\t\t\t\t\ttry {\n\t\t\t\t\t\t\tfetch('/ui/preferences', {\n\t\t\t\t\t\t\t\tmethod: 'POST',\n\t\t\t\t\t\t\t\theaders: { 'Content-Type': 'application/json' },\n\t\t\t\t\t\t\t\tbody: JSON.stringify({ sidebar_collapsed: isCollapsed }),\n\t\t\t\t\t\t\t\tkeepalive: true\n\t\t\t\t\t\t\t}).catch(function() {});\n\t\t\t\t\t\t} catch (_) {}\n\t\t\t\t\t}\n\n\t\t\t\t\t// Update accessibility attributes based on collapsed state\n\t\t\t\t\tfunction updateSidebarToggleA11y(isCollapsed) {\n\t\t\t\t\t\tbtn.setAttribute('aria-expanded', isCollapsed ? 'false' : 'true');\n\t\t\t\t\t\tbtn.setAttribute('aria-label', isCollapsed ? 'Expand sidebar (Ctrl+B)' : 'Collapse sidebar (Ctrl+B)');\n\t\t\t\t\t\tbtn.setAttribute('title', isCollapsed ? 'Expand sidebar (Ctrl+B)' : 'Collapse sidebar (Ctrl+B)');\n\t\t\t\t\t\tbtn.setAttribute('data-tip', isCollapsed ? 'Expand sidebar' : 'Collapse sidebar');\n\t\t\t\t\t\tif (document.body) document.body.classList.toggle('sidebar-collapsed-pending', isCollapsed);\n\t\t\t\t\t}\n\n\t\t\t\t\t\t// Restore saved state\n\t\t\t\t\t\t\tvar collapsed = document.documentElement.getAttribute('data-ui-sidebar-collapsed') === 'true';\n\t\t\t\t\t\tif (collapsed) {\n\t\t\t\t\t\t\tsidebar.classList.add('sidebar-collapsed');\n\t\t\t\t\t\t}\n\t\t\t\t\t\tupdateSidebarToggleA11y(collapsed);\n\n\t\t\t\t\tfunction toggleSidebarCollapsed() {\n\t\t\t\t\t\tsidebar.classList.toggle('sidebar-collapsed');\n\t\t\t\t\t\tvar isCollapsed = sidebar.classList.contains('sidebar-collapsed');\n\t\t\t\t\t\ttry { localStorage.setItem('sidebar-collapsed', isCollapsed); } catch (_) {}\n\t\t\t\t\t\tpersistSidebarPreference(isCollapsed);\n\t\t\t\t\t\tupdateSidebarToggleA11y(isCollapsed);\n\t\t\t\t\t}\n\n\t\t\t\t\tbtn.addEventListener('click', function(e) {\n\t\t\t\t\t\te.preventDefault();\n\t\t\t\t\t\ttoggleSidebarCollapsed();\n\t\t\t\t\t});\n\n\t\t\t\t\t// Keyboard shortcut: Ctrl+B or Cmd+B to toggle sidebar\n\t\t\t\t\tdocument.addEventListener('keydown', function(e) {\n\t\t\t\t\t\tif ((e.ctrlKey || e.metaKey) && e.key === 'b') {\n\t\t\t\t\t\t\t// Don't toggle if user is typing in an input/textarea\n\t\t\t\t\t\t\tvar tag = document.activeElement && document.activeElement.tagName;\n\t\t\t\t\t\t\tif (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;\n\t\t\t\t\t\t\te.preventDefault();\n\t\t\t\t\t\t\ttoggleSidebarCollapsed();\n\t\t\t\t\t\t}\n\t\t\t\t\t});\n\t\t\t\t})();\n\t\t\t</script><!-- Sidebar navigation links --><ul class=\"menu menu-sm gap-1\" aria-label=\"Main navigation\"><!-- Workspace Section: core orchestration tools --><li class=\"menu-title sidebar-hide-collapsed\"><span class=\"text-xs uppercase tracking-wider opacity-50 font-semibold\">Workspace</span></li><li><a data-nav-base=\"/chat\" data-tip=\"Chat\" href=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "\" hx-get=\"")
+		var templ_7745c5c3_Var24 templ.SafeURL
+		templ_7745c5c3_Var24, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/chat?project_id=%s", currentProjectID)))
 		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 723, Col: 80}
 		}
-		var templ_7745c5c3_Var16 string
-		templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/schedule?project_id=%s", currentProjectID))
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 751, Col: 71}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var16)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "\" hx-target=\"#main-content\" hx-push-url=\"true\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z\"></path></svg> <span class=\"sidebar-text\">Schedule</span></a></li><!-- Divider --><li class=\"my-1 sidebar-divider\"><hr class=\"border-base-300 opacity-30\"></li><!-- Insights Section --><li class=\"menu-title sidebar-hide-collapsed\"><span class=\"text-xs uppercase tracking-wider opacity-50 font-semibold\">Insights</span></li><li><a data-nav-base=\"/insights\" data-tip=\"Grades\" href=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var17 templ.SafeURL
-		templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/insights?project_id=%s", currentProjectID)))
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 773, Col: 84}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var17))
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, "\" hx-get=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var18 string
-		templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/insights?project_id=%s", currentProjectID))
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 774, Col: 71}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var18)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, "\" hx-target=\"#main-content\" hx-push-url=\"true\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z\"></path></svg> <span class=\"sidebar-text\">Grades</span></a></li><li><a data-nav-base=\"/upcoming\" data-tip=\"Pulse\" href=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var19 templ.SafeURL
-		templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/upcoming?project_id=%s", currentProjectID)))
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 788, Col: 84}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var19))
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "\" hx-get=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var20 string
-		templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/upcoming?project_id=%s", currentProjectID))
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 789, Col: 71}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var20)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "\" hx-target=\"#main-content\" hx-push-url=\"true\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01\"></path></svg> <span class=\"sidebar-text\">Pulse</span></a></li><li><a data-nav-base=\"/history\" data-tip=\"Reflection\" href=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var21 templ.SafeURL
-		templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/history?project_id=%s", currentProjectID)))
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 803, Col: 83}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var21))
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var24))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -371,25 +377,25 @@ func Sidebar(projects []models.Project, currentProjectID string) templ.Component
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var22 string
-		templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/history?project_id=%s", currentProjectID))
+		var templ_7745c5c3_Var25 string
+		templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/chat?project_id=%s", currentProjectID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 804, Col: 70}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 724, Col: 67}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var22)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "\" hx-target=\"#main-content\" hx-push-url=\"true\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5M12 7v5l3 2\"></path></svg> <span class=\"sidebar-text\">Reflection</span></a></li><li><a data-nav-base=\"/analytics\" data-tip=\"Analytics\" href=\"")
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var25)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var23 templ.SafeURL
-		templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/analytics?project_id=%s", currentProjectID)))
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "\" hx-target=\"#main-content\" hx-push-url=\"true\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z\"></path></svg> <span class=\"sidebar-text\">Chat</span></a></li><li><a data-nav-base=\"/tasks\" data-tip=\"Tasks\" href=\"")
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 818, Col: 85}
+			return templ_7745c5c3_Err
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var23))
+		var templ_7745c5c3_Var26 templ.SafeURL
+		templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/tasks?project_id=%s", currentProjectID)))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 738, Col: 81}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var26))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -397,25 +403,25 @@ func Sidebar(projects []models.Project, currentProjectID string) templ.Component
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var24 string
-		templ_7745c5c3_Var24, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/analytics?project_id=%s", currentProjectID))
+		var templ_7745c5c3_Var27 string
+		templ_7745c5c3_Var27, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks?project_id=%s", currentProjectID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 819, Col: 72}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 739, Col: 68}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var24)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "\" hx-target=\"#main-content\" hx-push-url=\"true\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z\"></path></svg> <span class=\"sidebar-text\">Analytics</span></a></li><!-- Divider --><li class=\"my-1 sidebar-divider\"><hr class=\"border-base-300 opacity-30\"></li><!-- System Section: configuration and infrastructure --><li class=\"menu-title sidebar-hide-collapsed\"><span class=\"text-xs uppercase tracking-wider opacity-50 font-semibold\">System</span></li><li><a data-nav-base=\"/alerts\" data-tip=\"Alerts\" href=\"")
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var27)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var25 templ.SafeURL
-		templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/alerts?project_id=%s", currentProjectID)))
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "\" hx-target=\"#main-content\" hx-push-url=\"true\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2\"></path></svg> <span class=\"sidebar-text\">Tasks</span></a></li><li><a data-nav-base=\"/automations\" data-tip=\"Automations\" href=\"")
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 841, Col: 82}
+			return templ_7745c5c3_Err
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var25))
+		var templ_7745c5c3_Var28 templ.SafeURL
+		templ_7745c5c3_Var28, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/automations?project_id=%s", currentProjectID)))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 753, Col: 88}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var28))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -423,185 +429,341 @@ func Sidebar(projects []models.Project, currentProjectID string) templ.Component
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var26 string
-		templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/alerts?project_id=%s", currentProjectID))
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 842, Col: 69}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var26)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "\" hx-target=\"#main-content\" hx-push-url=\"true\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9\"></path></svg> <span class=\"sidebar-text\">Alerts</span> <span class=\"sidebar-alert-indicators sidebar-text\"><span id=\"alert-badge\" hx-get=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var27 string
-		templ_7745c5c3_Var27, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/alerts/unread-count?project_id=%s", currentProjectID))
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 853, Col: 84}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var27)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "\" hx-trigger=\"load, every 30s, alertUpdate from:body\" hx-swap=\"innerHTML\" hx-target=\"this\" hx-push-url=\"false\"></span> <span id=\"system-update-nav-badge\" class=\"badge badge-sm badge-primary badge-outline inline-flex items-center sidebar-update-badge hidden\" aria-label=\"System update available\">Update</span></span></a></li><li><a data-nav-base=\"/models\" data-tip=\"Models\" href=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var28 templ.SafeURL
-		templ_7745c5c3_Var28, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/models?project_id=%s", currentProjectID)))
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 871, Col: 82}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var28))
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "\" hx-get=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
 		var templ_7745c5c3_Var29 string
-		templ_7745c5c3_Var29, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/models?project_id=%s", currentProjectID))
+		templ_7745c5c3_Var29, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/automations?project_id=%s", currentProjectID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 872, Col: 69}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 754, Col: 75}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var29)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, "\" hx-target=\"#main-content\" hx-push-url=\"true\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z\"></path></svg> <span class=\"sidebar-text\">Models</span></a></li><li><a data-nav-base=\"/agents\" data-tip=\"Agents\" href=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "\" hx-target=\"#main-content\" hx-push-url=\"true\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13 2 3 14h9l-1 8 10-12h-9l1-8z\"></path></svg> <span class=\"sidebar-text\">Automations</span></a></li><li><a data-nav-base=\"/schedule\" data-tip=\"Schedule\" href=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var30 templ.SafeURL
-		templ_7745c5c3_Var30, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/agents?project_id=%s", currentProjectID)))
+		templ_7745c5c3_Var30, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/schedule?project_id=%s", currentProjectID)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 886, Col: 82}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 765, Col: 84}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var30))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "\" hx-get=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "\" hx-get=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var31 string
-		templ_7745c5c3_Var31, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/agents?project_id=%s", currentProjectID))
+		templ_7745c5c3_Var31, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/schedule?project_id=%s", currentProjectID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 887, Col: 69}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 766, Col: 71}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var31)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "\" hx-target=\"#main-content\" hx-push-url=\"true\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z\"></path></svg> <span class=\"sidebar-text\">Agents</span></a></li><li><a data-nav-base=\"/skills\" data-tip=\"Skills\" href=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "\" hx-target=\"#main-content\" hx-push-url=\"true\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z\"></path></svg> <span class=\"sidebar-text\">Schedule</span></a></li><!-- Divider --><li class=\"my-1 sidebar-divider\"><hr class=\"border-base-300 opacity-30\"></li><!-- Insights Section --><li class=\"menu-title sidebar-hide-collapsed\"><span class=\"text-xs uppercase tracking-wider opacity-50 font-semibold\">Insights</span></li><li><a data-nav-base=\"/insights\" data-tip=\"Grades\" href=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var32 templ.SafeURL
-		templ_7745c5c3_Var32, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/skills?project_id=%s", currentProjectID)))
+		templ_7745c5c3_Var32, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/insights?project_id=%s", currentProjectID)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 901, Col: 83}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 788, Col: 84}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var32))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "\" hx-get=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, "\" hx-get=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var33 string
-		templ_7745c5c3_Var33, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/skills?project_id=%s", currentProjectID))
+		templ_7745c5c3_Var33, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/insights?project_id=%s", currentProjectID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 902, Col: 70}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 789, Col: 71}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var33)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "\" hx-target=\"#main-content\" hx-push-url=\"true\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.746 0 3.332.477 4.5 1.253v13C19.832 18.477 18.246 18 16.5 18c-1.746 0-3.332.477-4.5 1.253\"></path></svg> <span class=\"sidebar-text\">Skills</span></a></li><li><a data-nav-base=\"/workers\" data-tip=\"Workers\" href=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "\" hx-target=\"#main-content\" hx-push-url=\"true\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z\"></path></svg> <span class=\"sidebar-text\">Grades</span></a></li><li><a data-nav-base=\"/upcoming\" data-tip=\"Pulse\" href=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var34 templ.SafeURL
-		templ_7745c5c3_Var34, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/workers?project_id=%s", currentProjectID)))
+		templ_7745c5c3_Var34, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/upcoming?project_id=%s", currentProjectID)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 915, Col: 108}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 803, Col: 84}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var34))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, "\" hx-get=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "\" hx-get=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var35 string
-		templ_7745c5c3_Var35, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/workers?project_id=%s", currentProjectID))
+		templ_7745c5c3_Var35, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/upcoming?project_id=%s", currentProjectID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 916, Col: 70}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 804, Col: 71}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var35)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "\" hx-target=\"#main-content\" hx-push-url=\"true\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.11 2.37-2.37.996.608 2.296.07 2.572-1.065z\"></path> <path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M15 12a3 3 0 11-6 0 3 3 0 016 0z\"></path></svg> <span class=\"sidebar-text\">Workers</span></a></li><li><a data-nav-base=\"/channels\" data-tip=\"Channels\" href=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "\" hx-target=\"#main-content\" hx-push-url=\"true\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01\"></path></svg> <span class=\"sidebar-text\">Pulse</span></a></li><li><a data-nav-base=\"/history\" data-tip=\"Reflection\" href=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var36 templ.SafeURL
-		templ_7745c5c3_Var36, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/channels?project_id=%s", currentProjectID)))
+		templ_7745c5c3_Var36, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/history?project_id=%s", currentProjectID)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 931, Col: 84}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 818, Col: 83}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var36))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "\" hx-get=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "\" hx-get=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var37 string
-		templ_7745c5c3_Var37, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/channels?project_id=%s", currentProjectID))
+		templ_7745c5c3_Var37, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/history?project_id=%s", currentProjectID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 932, Col: 71}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 819, Col: 70}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var37)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, "\" hx-target=\"#main-content\" hx-push-url=\"true\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1\"></path></svg> <span class=\"sidebar-text\">Channels</span></a></li><li><a data-nav-base=\"/personality\" data-tip=\"Personality\" href=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, "\" hx-target=\"#main-content\" hx-push-url=\"true\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5M12 7v5l3 2\"></path></svg> <span class=\"sidebar-text\">Reflection</span></a></li><li><a data-nav-base=\"/analytics\" data-tip=\"Analytics\" href=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var38 templ.SafeURL
-		templ_7745c5c3_Var38, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/personality?project_id=%s", currentProjectID)))
+		templ_7745c5c3_Var38, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/analytics?project_id=%s", currentProjectID)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 946, Col: 87}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 833, Col: 85}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var38))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 50, "\" hx-get=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "\" hx-get=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var39 string
-		templ_7745c5c3_Var39, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/personality?project_id=%s", currentProjectID))
+		templ_7745c5c3_Var39, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/analytics?project_id=%s", currentProjectID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 947, Col: 74}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 834, Col: 72}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var39)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 51, "\" hx-target=\"#main-content\" hx-push-url=\"true\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0\"></path></svg> <span class=\"sidebar-text\">Personality</span></a></li></ul></div><!-- Footer: user info + theme toggle pinned to bottom of sidebar --><div class=\"sidebar-theme-toggle-container border-t border-base-300 p-3 flex items-center justify-end gap-2\"><div id=\"sidebar-auth-user\" class=\"hidden min-w-0 flex-1 flex items-center self-center sidebar-hide-collapsed mr-auto\"><div class=\"dropdown dropdown-top w-full\"><button id=\"sidebar-user-menu-trigger\" type=\"button\" class=\"sidebar-user-trigger btn btn-ghost w-full justify-start items-center gap-2 normal-case\" aria-haspopup=\"menu\" aria-label=\"Open user menu\"><div class=\"avatar placeholder\"><div class=\"bg-base-300 text-base-content rounded-full w-6 flex items-center justify-center\"><span id=\"sidebar-auth-avatar\" class=\"text-xs font-semibold leading-none\">U</span></div></div><div id=\"sidebar-auth-name\" class=\"text-xs font-medium truncate leading-none\">User</div></button><ul id=\"sidebar-user-menu\" tabindex=\"0\" class=\"dropdown-content menu p-2 shadow bg-base-100 rounded-box w-44 z-[120] border border-base-300\" role=\"menu\" aria-label=\"User menu\"><li role=\"none\"><form method=\"POST\" action=\"/logout\" class=\"w-full\" role=\"none\"><button id=\"sidebar-logout-label\" type=\"submit\" class=\"text-sm\" role=\"menuitem\">Logout</button></form></li></ul></div></div><label class=\"theme-toggle-pill sidebar-hide-collapsed\" title=\"Toggle light/dark mode\" onclick=\"window.toggleTheme()\"><span class=\"theme-toggle-icon theme-toggle-sun\"><svg xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" stroke-width=\"2\" width=\"11\" height=\"11\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" d=\"M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z\"></path></svg></span> <span class=\"theme-toggle-icon theme-toggle-moon\"><svg xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" stroke-width=\"2\" width=\"11\" height=\"11\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" d=\"M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z\"></path></svg></span> <span class=\"theme-toggle-thumb\"></span></label> <a class=\"theme-toggle-collapsed-btn\" data-tip=\"Toggle theme\" onclick=\"window.toggleTheme(); return false;\" href=\"#\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0 theme-collapsed-sun\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" stroke-width=\"2\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" d=\"M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z\"></path></svg> <svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0 theme-collapsed-moon\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" stroke-width=\"2\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" d=\"M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z\"></path></svg></a></div><style>\n\t\t\t/* Sidebar collapse toggle button */\n\t\t\t.sidebar-toggle-btn {\n\t\t\t\topacity: 0.7;\n\t\t\t\ttransition: opacity 0.15s, background-color 0.15s;\n\t\t\t}\n\t\t\t\t.sidebar-toggle-btn:hover {\n\t\t\t\t\topacity: 1;\n\t\t\t\t\tbackground-color: hsl(var(--b2));\n\t\t\t\t}\n\t\t\t\n\t\t\t.sidebar-theme-toggle-container {\n\t\t\t\tflex-shrink: 0;\n\t\t\t\tmin-height: 3.25rem;\n\t\t\t\talign-items: center;\n\t\t\t}\n\t\t\t.sidebar-user-trigger {\n\t\t\t\theight: 24px !important;\n\t\t\t\tmin-height: 24px !important;\n\t\t\t\tmax-height: 24px !important;\n\t\t\t\tdisplay: flex !important;\n\t\t\t\talign-items: center !important;\n\t\t\t\tpadding: 0 0.5rem !important;\n\t\t\t\tpadding-top: 0 !important;\n\t\t\t\tpadding-bottom: 0 !important;\n\t\t\t\tmargin: 0 !important;\n\t\t\t\tborder: 0 !important;\n\t\t\t\tborder-radius: 0.5rem;\n\t\t\t\tline-height: 1 !important;\n\t\t\t\tflex-shrink: 0;\n\t\t\t}\n\t\t\t.sidebar-user-trigger .avatar,\n\t\t\t.sidebar-user-trigger #sidebar-auth-name {\n\t\t\t\tmargin: 0 !important;\n\t\t\t}\n\t\t\t.sidebar-user-trigger:hover {\n\t\t\t\tbackground-color: transparent !important;\n\t\t\t}\n\t\t\t.sidebar-user-trigger:focus-visible,\n\t\t\t[data-theme=\"dark\"] .sidebar-user-trigger:focus-visible {\n\t\t\t\tbox-shadow: 0 0 0 2px hsl(var(--bc) / 0.4);\n\t\t\t}\n\t\t\t/* Collapsed-only theme toggle icon button */\n\t\t\t.theme-toggle-collapsed-btn {\n\t\t\t\tdisplay: none;  /* Hidden by default in expanded sidebar */\n\t\t\t\talign-items: center;\n\t\t\t\tjustify-content: center;\n\t\t\t\twidth: 2rem;\n\t\t\t\theight: 2rem;\n\t\t\t\tborder-radius: 0.375rem;\n\t\t\t\tcursor: pointer;\n\t\t\t\topacity: 0.6;\n\t\t\t\ttransition: opacity 0.15s, background-color 0.15s;\n\t\t\t}\n\t\t\t.theme-toggle-collapsed-btn:hover {\n\t\t\t\topacity: 1;\n\t\t\t}\n\t\t\t.sidebar-collapsed .theme-toggle-collapsed-btn {\n\t\t\t\tdisplay: flex;\n\t\t\t}\n\t\t\t/* Light mode: show sun, hide moon */\n\t\t\t.theme-collapsed-moon {\n\t\t\t\tdisplay: none;\n\t\t\t}\n\t\t\t.theme-collapsed-sun {\n\t\t\t\tdisplay: block;\n\t\t\t}\n\t\t\t/* Dark mode: show moon, hide sun */\n\t\t\t[data-theme=\"dark\"] .theme-collapsed-sun {\n\t\t\t\tdisplay: none;\n\t\t\t}\n\t\t\t[data-theme=\"dark\"] .theme-collapsed-moon {\n\t\t\t\tdisplay: block;\n\t\t\t}\n\t\t\t\t.sidebar-project-dialog {\n\t\t\t\tbox-sizing: border-box;\n\t\t\t}\n\t\t\t.sidebar-project-dialog::backdrop {\n\t\t\t\tbackground: transparent;\n\t\t\t}\n\t\t</style><!-- New Project Dialog Container (loaded via HTMX) --><div id=\"new-project-container\"></div><script>\n\t\t\t\t(function() {\n\t\t\t\t\tfetch('/auth/me', { credentials: 'same-origin' })\t\t\t\t\t\t.then(function(resp) {\n\t\t\t\t\t\t\tif (!resp.ok) return null;\n\t\t\t\t\t\t\treturn resp.json();\n\t\t\t\t\t\t})\n\t\t\t\t\t\t.then(function(data) {\n\t\t\t\t\t\t\tif (!data || !data.authenticated || !data.username) return;\n\t\t\t\t\t\t\tvar user = document.getElementById('sidebar-auth-user');\n\t\t\t\t\t\t\tvar userCollapsed = document.getElementById('sidebar-auth-user-collapsed');\n\t\t\t\t\t\t\tvar name = document.getElementById('sidebar-auth-name');\n\t\t\t\t\t\t\tvar avatar = document.getElementById('sidebar-auth-avatar');\n\t\t\t\t\t\t\tvar avatarCollapsed = document.getElementById('sidebar-auth-avatar-collapsed');\n\t\t\t\t\t\t\tvar logoutLabel = document.getElementById('sidebar-logout-label');\n\t\t\t\t\t\t\tif (user) user.classList.remove('hidden');\n\t\t\t\t\t\t\tif (userCollapsed) userCollapsed.classList.remove('hidden');\n\t\t\t\t\t\t\tif (name) name.textContent = data.display || data.username;\n\t\t\t\t\t\t\tvar initial = ((data.display || data.username || 'U').trim().charAt(0) || 'U').toUpperCase();\n\t\t\t\t\t\t\tif (avatar) avatar.textContent = initial;\n\t\t\t\t\t\t\tif (avatarCollapsed) avatarCollapsed.textContent = initial;\n\t\t\t\t\t\t\tif (logoutLabel && data.auth_source === 'hosted_sso') logoutLabel.textContent = 'Log out of this workspace';\n\t\t\t\t\t\t})\n\t\t\t\t\t\t.catch(function() {});\n\t\t\t\t})();\n\n\t\t\t\t(function() {\n\t\t\t\t\tvar btn = document.getElementById('new-project-btn');\n\t\t\t\t\tif (!btn) return;\n\t\t\t\t\tbtn.addEventListener('click', function(e) {\n\t\t\t\t\t\te.preventDefault();\n\t\t\t\t\t\tvar container = document.getElementById('new-project-container');\n\t\t\t\t\t\thtmx.ajax('GET', '/projects/new', {\n\t\t\t\t\t\t\ttarget: container,\n\t\t\t\t\t\t\tswap: 'innerHTML'\n\t\t\t\t\t\t});\n\t\t\t\t\t});\n\t\t\t\t})();\t\t</script><!-- Project Settings Dialog Container (loaded via HTMX) --><div id=\"project-settings-container\"></div><script>\n\t\t\t(function() {\n\t\t\t\tconst btn = document.getElementById('project-settings-btn');\n\t\t\t\tif (!btn) return;\n\t\t\t\tbtn.addEventListener('click', function(e) {\n\t\t\t\t\te.preventDefault();\n\t\t\t\t\tconst sel = document.getElementById('project-selector');\n\t\t\t\t\tif (!sel || !sel.value) return;\n\t\t\t\t\tconst container = document.getElementById('project-settings-container');\n\t\t\t\t\thtmx.ajax('GET', '/projects/' + sel.value + '/edit', {\n\t\t\t\t\t\ttarget: container,\n\t\t\t\t\t\tswap: 'innerHTML'\n\t\t\t\t\t});\n\t\t\t\t});\n\t\t\t})();\n\t\t</script></aside>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "\" hx-target=\"#main-content\" hx-push-url=\"true\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z\"></path></svg> <span class=\"sidebar-text\">Analytics</span></a></li><!-- Divider --><li class=\"my-1 sidebar-divider\"><hr class=\"border-base-300 opacity-30\"></li><!-- System Section: configuration and infrastructure --><li class=\"menu-title sidebar-hide-collapsed\"><span class=\"text-xs uppercase tracking-wider opacity-50 font-semibold\">System</span></li><li><a data-nav-base=\"/alerts\" data-tip=\"Alerts\" href=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var40 templ.SafeURL
+		templ_7745c5c3_Var40, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/alerts?project_id=%s", currentProjectID)))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 856, Col: 82}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var40))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, "\" hx-get=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var41 string
+		templ_7745c5c3_Var41, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/alerts?project_id=%s", currentProjectID))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 857, Col: 69}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var41)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 50, "\" hx-target=\"#main-content\" hx-push-url=\"true\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9\"></path></svg> <span class=\"sidebar-text\">Alerts</span> <span class=\"sidebar-alert-indicators sidebar-text\"><span id=\"alert-badge\" hx-get=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var42 string
+		templ_7745c5c3_Var42, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/alerts/unread-count?project_id=%s", currentProjectID))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 868, Col: 84}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var42)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 51, "\" hx-trigger=\"load, every 30s, alertUpdate from:body\" hx-swap=\"innerHTML\" hx-target=\"this\" hx-push-url=\"false\"></span> <span id=\"system-update-nav-badge\" class=\"badge badge-sm badge-primary badge-outline inline-flex items-center sidebar-update-badge hidden\" aria-label=\"System update available\">Update</span></span></a></li><li><a data-nav-base=\"/models\" data-tip=\"Models\" href=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var43 templ.SafeURL
+		templ_7745c5c3_Var43, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/models?project_id=%s", currentProjectID)))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 886, Col: 82}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var43))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 52, "\" hx-get=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var44 string
+		templ_7745c5c3_Var44, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/models?project_id=%s", currentProjectID))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 887, Col: 69}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var44)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 53, "\" hx-target=\"#main-content\" hx-push-url=\"true\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z\"></path></svg> <span class=\"sidebar-text\">Models</span></a></li><li><a data-nav-base=\"/agents\" data-tip=\"Agents\" href=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var45 templ.SafeURL
+		templ_7745c5c3_Var45, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/agents?project_id=%s", currentProjectID)))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 901, Col: 82}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var45))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 54, "\" hx-get=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var46 string
+		templ_7745c5c3_Var46, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/agents?project_id=%s", currentProjectID))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 902, Col: 69}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var46)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 55, "\" hx-target=\"#main-content\" hx-push-url=\"true\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z\"></path></svg> <span class=\"sidebar-text\">Agents</span></a></li><li><a data-nav-base=\"/skills\" data-tip=\"Skills\" href=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var47 templ.SafeURL
+		templ_7745c5c3_Var47, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/skills?project_id=%s", currentProjectID)))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 916, Col: 83}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var47))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 56, "\" hx-get=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var48 string
+		templ_7745c5c3_Var48, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/skills?project_id=%s", currentProjectID))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 917, Col: 70}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var48)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 57, "\" hx-target=\"#main-content\" hx-push-url=\"true\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.746 0 3.332.477 4.5 1.253v13C19.832 18.477 18.246 18 16.5 18c-1.746 0-3.332.477-4.5 1.253\"></path></svg> <span class=\"sidebar-text\">Skills</span></a></li><li><a data-nav-base=\"/workers\" data-tip=\"Workers\" href=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var49 templ.SafeURL
+		templ_7745c5c3_Var49, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/workers?project_id=%s", currentProjectID)))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 930, Col: 108}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var49))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 58, "\" hx-get=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var50 string
+		templ_7745c5c3_Var50, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/workers?project_id=%s", currentProjectID))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 931, Col: 70}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var50)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 59, "\" hx-target=\"#main-content\" hx-push-url=\"true\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.11 2.37-2.37.996.608 2.296.07 2.572-1.065z\"></path> <path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M15 12a3 3 0 11-6 0 3 3 0 016 0z\"></path></svg> <span class=\"sidebar-text\">Workers</span></a></li><li><a data-nav-base=\"/channels\" data-tip=\"Channels\" href=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var51 templ.SafeURL
+		templ_7745c5c3_Var51, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/channels?project_id=%s", currentProjectID)))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 946, Col: 84}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var51))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 60, "\" hx-get=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var52 string
+		templ_7745c5c3_Var52, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/channels?project_id=%s", currentProjectID))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 947, Col: 71}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var52)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 61, "\" hx-target=\"#main-content\" hx-push-url=\"true\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1\"></path></svg> <span class=\"sidebar-text\">Channels</span></a></li><li><a data-nav-base=\"/personality\" data-tip=\"Personality\" href=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var53 templ.SafeURL
+		templ_7745c5c3_Var53, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/personality?project_id=%s", currentProjectID)))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 961, Col: 87}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var53))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 62, "\" hx-get=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var54 string
+		templ_7745c5c3_Var54, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/personality?project_id=%s", currentProjectID))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 962, Col: 74}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var54)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 63, "\" hx-target=\"#main-content\" hx-push-url=\"true\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0\"></path></svg> <span class=\"sidebar-text\">Personality</span></a></li></ul></div><!-- Footer: user info + theme toggle pinned to bottom of sidebar --><div class=\"sidebar-theme-toggle-container border-t border-base-300 p-3 flex items-center justify-end gap-2\"><div id=\"sidebar-auth-user\" class=\"hidden min-w-0 flex-1 flex items-center self-center sidebar-hide-collapsed mr-auto\"><div class=\"dropdown dropdown-top w-full\"><button id=\"sidebar-user-menu-trigger\" type=\"button\" class=\"sidebar-user-trigger btn btn-ghost w-full justify-start items-center gap-2 normal-case\" aria-haspopup=\"menu\" aria-label=\"Open user menu\"><div class=\"avatar placeholder\"><div class=\"bg-base-300 text-base-content rounded-full w-6 flex items-center justify-center\"><span id=\"sidebar-auth-avatar\" class=\"text-xs font-semibold leading-none\">U</span></div></div><div id=\"sidebar-auth-name\" class=\"text-xs font-medium truncate leading-none\">User</div></button><ul id=\"sidebar-user-menu\" tabindex=\"0\" class=\"dropdown-content menu p-2 shadow bg-base-100 rounded-box w-44 z-[120] border border-base-300\" role=\"menu\" aria-label=\"User menu\"><li role=\"none\"><form method=\"POST\" action=\"/logout\" class=\"w-full\" role=\"none\"><button id=\"sidebar-logout-label\" type=\"submit\" class=\"text-sm\" role=\"menuitem\">Logout</button></form></li></ul></div></div><label class=\"theme-toggle-pill sidebar-hide-collapsed\" title=\"Toggle light/dark mode\" onclick=\"window.toggleTheme()\"><span class=\"theme-toggle-icon theme-toggle-sun\"><svg xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" stroke-width=\"2\" width=\"11\" height=\"11\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" d=\"M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z\"></path></svg></span> <span class=\"theme-toggle-icon theme-toggle-moon\"><svg xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" stroke-width=\"2\" width=\"11\" height=\"11\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" d=\"M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z\"></path></svg></span> <span class=\"theme-toggle-thumb\"></span></label> <a class=\"theme-toggle-collapsed-btn\" data-tip=\"Toggle theme\" onclick=\"window.toggleTheme(); return false;\" href=\"#\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0 theme-collapsed-sun\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" stroke-width=\"2\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" d=\"M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z\"></path></svg> <svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0 theme-collapsed-moon\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" stroke-width=\"2\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" d=\"M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z\"></path></svg></a></div><style>\n\t\t\t/* Sidebar collapse toggle button */\n\t\t\t.sidebar-toggle-btn {\n\t\t\t\topacity: 0.7;\n\t\t\t\ttransition: opacity 0.15s, background-color 0.15s;\n\t\t\t}\n\t\t\t\t.sidebar-toggle-btn:hover {\n\t\t\t\t\topacity: 1;\n\t\t\t\t\tbackground-color: hsl(var(--b2));\n\t\t\t\t}\n\t\t\t\n\t\t\t.sidebar-theme-toggle-container {\n\t\t\t\tflex-shrink: 0;\n\t\t\t\tmin-height: 3.25rem;\n\t\t\t\talign-items: center;\n\t\t\t}\n\t\t\t.sidebar-user-trigger {\n\t\t\t\theight: 24px !important;\n\t\t\t\tmin-height: 24px !important;\n\t\t\t\tmax-height: 24px !important;\n\t\t\t\tdisplay: flex !important;\n\t\t\t\talign-items: center !important;\n\t\t\t\tpadding: 0 0.5rem !important;\n\t\t\t\tpadding-top: 0 !important;\n\t\t\t\tpadding-bottom: 0 !important;\n\t\t\t\tmargin: 0 !important;\n\t\t\t\tborder: 0 !important;\n\t\t\t\tborder-radius: 0.5rem;\n\t\t\t\tline-height: 1 !important;\n\t\t\t\tflex-shrink: 0;\n\t\t\t}\n\t\t\t.sidebar-user-trigger .avatar,\n\t\t\t.sidebar-user-trigger #sidebar-auth-name {\n\t\t\t\tmargin: 0 !important;\n\t\t\t}\n\t\t\t.sidebar-user-trigger:hover {\n\t\t\t\tbackground-color: transparent !important;\n\t\t\t}\n\t\t\t.sidebar-user-trigger:focus-visible,\n\t\t\t[data-theme=\"dark\"] .sidebar-user-trigger:focus-visible {\n\t\t\t\tbox-shadow: 0 0 0 2px hsl(var(--bc) / 0.4);\n\t\t\t}\n\t\t\t/* Collapsed-only theme toggle icon button */\n\t\t\t.theme-toggle-collapsed-btn {\n\t\t\t\tdisplay: none;  /* Hidden by default in expanded sidebar */\n\t\t\t\talign-items: center;\n\t\t\t\tjustify-content: center;\n\t\t\t\twidth: 2rem;\n\t\t\t\theight: 2rem;\n\t\t\t\tborder-radius: 0.375rem;\n\t\t\t\tcursor: pointer;\n\t\t\t\topacity: 0.6;\n\t\t\t\ttransition: opacity 0.15s, background-color 0.15s;\n\t\t\t}\n\t\t\t.theme-toggle-collapsed-btn:hover {\n\t\t\t\topacity: 1;\n\t\t\t}\n\t\t\t.sidebar-collapsed .theme-toggle-collapsed-btn {\n\t\t\t\tdisplay: flex;\n\t\t\t}\n\t\t\t/* Light mode: show sun, hide moon */\n\t\t\t.theme-collapsed-moon {\n\t\t\t\tdisplay: none;\n\t\t\t}\n\t\t\t.theme-collapsed-sun {\n\t\t\t\tdisplay: block;\n\t\t\t}\n\t\t\t/* Dark mode: show moon, hide sun */\n\t\t\t[data-theme=\"dark\"] .theme-collapsed-sun {\n\t\t\t\tdisplay: none;\n\t\t\t}\n\t\t\t[data-theme=\"dark\"] .theme-collapsed-moon {\n\t\t\t\tdisplay: block;\n\t\t\t}\n\t\t</style><!-- New Project Dialog Container (loaded via HTMX) --><div id=\"new-project-container\"></div><script>\n\t\t\t\t(function() {\n\t\t\t\t\tfetch('/auth/me', { credentials: 'same-origin' })\t\t\t\t\t\t.then(function(resp) {\n\t\t\t\t\t\t\tif (!resp.ok) return null;\n\t\t\t\t\t\t\treturn resp.json();\n\t\t\t\t\t\t})\n\t\t\t\t\t\t.then(function(data) {\n\t\t\t\t\t\t\tif (!data || !data.authenticated || !data.username) return;\n\t\t\t\t\t\t\tvar user = document.getElementById('sidebar-auth-user');\n\t\t\t\t\t\t\tvar userCollapsed = document.getElementById('sidebar-auth-user-collapsed');\n\t\t\t\t\t\t\tvar name = document.getElementById('sidebar-auth-name');\n\t\t\t\t\t\t\tvar avatar = document.getElementById('sidebar-auth-avatar');\n\t\t\t\t\t\t\tvar avatarCollapsed = document.getElementById('sidebar-auth-avatar-collapsed');\n\t\t\t\t\t\t\tvar logoutLabel = document.getElementById('sidebar-logout-label');\n\t\t\t\t\t\t\tif (user) user.classList.remove('hidden');\n\t\t\t\t\t\t\tif (userCollapsed) userCollapsed.classList.remove('hidden');\n\t\t\t\t\t\t\tif (name) name.textContent = data.display || data.username;\n\t\t\t\t\t\t\tvar initial = ((data.display || data.username || 'U').trim().charAt(0) || 'U').toUpperCase();\n\t\t\t\t\t\t\tif (avatar) avatar.textContent = initial;\n\t\t\t\t\t\t\tif (avatarCollapsed) avatarCollapsed.textContent = initial;\n\t\t\t\t\t\t\tif (logoutLabel && data.auth_source === 'hosted_sso') logoutLabel.textContent = 'Log out of this workspace';\n\t\t\t\t\t\t})\n\t\t\t\t\t\t.catch(function() {});\n\t\t\t\t})();\n\n\t\t\t\t(function() {\n\t\t\t\t\tvar btn = document.getElementById('new-project-btn');\n\t\t\t\t\tif (!btn) return;\n\t\t\t\t\tbtn.addEventListener('click', function(e) {\n\t\t\t\t\t\te.preventDefault();\n\t\t\t\t\t\tvar container = document.getElementById('new-project-container');\n\t\t\t\t\t\thtmx.ajax('GET', '/projects/new', {\n\t\t\t\t\t\t\ttarget: container,\n\t\t\t\t\t\t\tswap: 'innerHTML'\n\t\t\t\t\t\t});\n\t\t\t\t\t});\n\t\t\t\t})();\t\t</script><!-- Project Settings Dialog Container (loaded via HTMX) --><div id=\"project-settings-container\"></div><script>\n\t\t\t(function() {\n\t\t\t\tconst btn = document.getElementById('project-settings-btn');\n\t\t\t\tif (!btn) return;\n\t\t\t\tbtn.addEventListener('click', function(e) {\n\t\t\t\t\te.preventDefault();\n\t\t\t\t\tconst sel = document.getElementById('project-selector');\n\t\t\t\t\tif (!sel || !sel.value) return;\n\t\t\t\t\tconst container = document.getElementById('project-settings-container');\n\t\t\t\t\thtmx.ajax('GET', '/projects/' + sel.value + '/edit', {\n\t\t\t\t\t\ttarget: container,\n\t\t\t\t\t\tswap: 'innerHTML'\n\t\t\t\t\t});\n\t\t\t\t});\n\t\t\t})();\n\t\t</script></aside>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
