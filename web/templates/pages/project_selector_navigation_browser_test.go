@@ -145,10 +145,16 @@ window.addEventListener('DOMContentLoaded', function() {
 
     if (!window.staleSearchableSelectorSignal || !window.staleSearchableSelectorSignal.aborted) fail('shared selector upgrade did not abort the stale controller');
     window.staleSearchableSelectorEvents = 0;
+    typeSearch(search, 'default');
+    var currentFiltered = visibleOptions();
+    if (currentFiltered.length !== 1 || currentFiltered[0].dataset.projectId !== 'default') fail('searching for the current project did not show it as the sole match');
+    if (currentFiltered[0].getAttribute('aria-selected') !== 'true' || currentFiltered[0].querySelector('[data-project-selector-current]').textContent.trim() !== '✓') fail('matching current project was not shown as selected');
+
     typeSearch(search, 'swarm');
     if (window.staleSearchableSelectorEvents !== 0) fail('stale searchable selector listener remained active after controller upgrade');
     var swarmFiltered = visibleOptions();
     if (swarmFiltered.length !== 1 || swarmFiltered[0].dataset.projectId !== 'swarm-workspace') fail('typing a project name did not show only the matching non-current project');
+    if (swarmFiltered.some(function(option) { return option.dataset.projectId === 'default'; })) fail('nonmatching current project remained visible while searching');
     clearSearch(search);
     if (visibleOptions().length !== 29) fail('clearing the project-name search did not restore all projects');
 

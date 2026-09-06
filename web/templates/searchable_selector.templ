@@ -88,7 +88,7 @@ templ SearchableSelector(config SearchableSelectorConfig) {
 templ searchableSelectorScript() {
 	<script>
 		(function() {
-			var controllerVersion = 5;
+			var controllerVersion = 6;
 			var previousController = window.openVibelySearchableSelectorController;
 			document.querySelectorAll('[data-project-selector-clear]').forEach(function(control) { control.remove(); });
 			if (previousController && previousController.version === controllerVersion) return;
@@ -144,11 +144,10 @@ templ searchableSelectorScript() {
 			function applyLocalFilter(root) {
 				if (!root || !root.hasAttribute('data-searchable-selector-local')) return;
 				var state = nodes(root); if (!state.search || !state.value) return;
-				var query = String(state.search.value || '').trim().toLowerCase(), matchCount = 0, currentID = state.value.value;
+				var query = String(state.search.value || '').trim().toLowerCase(), matchCount = 0;
 				options(root).forEach(function(option) {
 					var match = !query || String(option.getAttribute('data-searchable-selector-name') || '').trim().toLowerCase().indexOf(query) !== -1;
-					var current = option.getAttribute('data-searchable-selector-id') === currentID;
-					var hidden = query ? (!match || current) : false;
+					var hidden = !match;
 					if (!hidden) matchCount++;
 					option.hidden = hidden;
 					option.classList.toggle('hidden', hidden);

@@ -67,8 +67,12 @@ func TestAutomationRepoPublishRegisteredAndQuerySurfaces(t *testing.T) {
 		t.Fatalf("ListBreadcrumbSelector = %#v, %v", selectorItems, err)
 	}
 	selectorItems, err = repo.ListBreadcrumbSelector(ctx, projectID, "night", definition.Automation.ID, 20)
+	if err != nil || len(selectorItems) != 1 || selectorItems[0].ID != definition.Automation.ID {
+		t.Fatalf("search matching current Automation must return it selected = %#v, %v", selectorItems, err)
+	}
+	selectorItems, err = repo.ListBreadcrumbSelector(ctx, projectID, "missing", definition.Automation.ID, 20)
 	if err != nil || len(selectorItems) != 0 {
-		t.Fatalf("active search must not retain the current Automation = %#v, %v", selectorItems, err)
+		t.Fatalf("nonmatching search retained current Automation = %#v, %v", selectorItems, err)
 	}
 	saved, err := repo.ListSavedByProject(ctx, projectID)
 	if err != nil || len(saved) != 1 || saved[0].PublishedVersionID == nil {

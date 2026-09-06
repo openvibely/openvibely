@@ -51,9 +51,16 @@ func TestProjectSelectorSearchesOnProductionRenderedPageInChrome(t *testing.T) {
 			if (!trigger || !dialog || !search) fail('production project selector markup is incomplete');
 			trigger.click();
 			if (!dialog.open || document.activeElement !== search) fail('production project selector did not open and focus search');
-			if (!document.execCommand('insertText', false, 'swarm')) fail('browser text insertion was not supported');
+			if (!document.execCommand('insertText', false, 'default')) fail('browser text insertion was not supported');
 			await new Promise(function(resolve) { requestAnimationFrame(function() { requestAnimationFrame(resolve); }); });
 			var visible = visibleOptions();
+			if (visible.length !== 1 || visible[0].dataset.projectId !== 'default') fail('production project search did not paint only the matching current project');
+			if (visible[0].getAttribute('aria-selected') !== 'true' || visible[0].querySelector('[data-project-selector-current]').textContent.trim() !== '✓') fail('production matching current project was not shown as selected');
+			search.value = '';
+			search.dispatchEvent(new Event('input', {bubbles:true}));
+			if (!document.execCommand('insertText', false, 'swarm')) fail('browser text insertion was not supported');
+			await new Promise(function(resolve) { requestAnimationFrame(function() { requestAnimationFrame(resolve); }); });
+			visible = visibleOptions();
 			if (search.value !== 'swarm') fail('production project search did not receive typed text');
 			if (visible.length !== 1) fail('production project search painted ' + visible.length + ' rows instead of the sole match');
 			if (visible[0].dataset.projectName !== 'Swarm Workspace') fail('production project search did not paint only Swarm Workspace: ' + visible.map(function(option) { return option.dataset.projectName; }).join(','));
