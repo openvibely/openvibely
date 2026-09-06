@@ -12,7 +12,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/openvibely/openvibely/internal/chatcontrol"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
 	"github.com/openvibely/openvibely/internal/models"
@@ -25,25 +24,6 @@ import (
 func TestMain(m *testing.M) {
 	_ = os.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
 	os.Exit(m.Run())
-}
-
-func TestToolExecutorRemovesOptionalNulls(t *testing.T) {
-	var got json.RawMessage
-	runtime := &llmcontracts.RuntimeTools{
-		Definitions: []llmcontracts.RuntimeToolDefinition{{
-			Name:       "list_alerts",
-			Parameters: json.RawMessage(`{"type":"object","properties":{"processing_state":{"type":"string","x-openvibely-omit-value":"all"},"read":{"type":"string","x-openvibely-omit-value":"all"}}}`),
-		}},
-		Executor: func(_ context.Context, _ string, input json.RawMessage) (string, bool, bool, error) {
-			got = append(json.RawMessage(nil), input...)
-			return `{}`, true, false, nil
-		},
-	}
-	ctx := llmcontracts.WithRuntimeTools(context.Background(), runtime)
-
-	_, _, err := toolExecutor(ctx, "")(context.Background(), "list_alerts", json.RawMessage(`{"processing_state":"all","read":"unread"}`))
-	require.NoError(t, err)
-	require.JSONEq(t, `{"read":"unread"}`, string(got))
 }
 
 func TestAdapterCallDirectUsesConfiguredChatCompletionsEndpoint(t *testing.T) {
@@ -521,69 +501,6 @@ func TestAdapterTaskWithoutRuntimeActionsDoesNotAdvertiseLegacyMutationMarkers(t
 	require.Contains(t, content, llmprompt.ChatActionUnavailableInstructions)
 	require.NotContains(t, content, "[CREATE_TASK]")
 	require.NotContains(t, content, "TASK CREATION TOOL MODE")
-}
-
-func TestAdapterListAlertsPresenceSurvivesProviderRoundTrip(t *testing.T) {
-	var requests int
-	var handlerInputs []map[string]any
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requests++
-		body, _ := io.ReadAll(r.Body)
-		if requests == 1 {
-			for _, want := range []string{`"processing_state"`, `"default":"all"`} {
-				if !strings.Contains(string(body), want) {
-					t.Fatalf("provider request schema missing %s: %s", want, body)
-				}
-			}
-			if strings.Contains(string(body), "x-openvibely-omit-value") {
-				t.Fatalf("provider request leaked internal schema metadata: %s", body)
-			}
-		}
-		w.Header().Set("Content-Type", "text/event-stream")
-		if requests <= 3 {
-			arguments := `{"decision_state":"approved","implementation_task_linked":"unlinked","limit":50,"offset":0}`
-			if requests == 2 {
-				arguments = `{"project_id":"","decision_state":"approved","processing_state":"all","type":"","source":"","read":"all","implementation_task_linked":"unlinked","limit":50,"offset":0}`
-			}
-			if requests == 3 {
-				arguments = `{"decision_state":"approved","processing_state":"not_applicable","read":"unread","implementation_task_linked":"linked"}`
-			}
-			encoded, _ := json.Marshal(arguments)
-			_, _ = fmt.Fprintf(w, "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_%d\",\"type\":\"function\",\"function\":{\"name\":\"list_alerts\",\"arguments\":%s}}]},\"finish_reason\":\"tool_calls\"}]}\n\ndata: [DONE]\n\n", requests, encoded)
-			return
-		}
-		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"done\"}}]}\n\ndata: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"))
-	}))
-	defer srv.Close()
-
-	definition := chatcontrol.Get("list_alerts")
-	runtime := &llmcontracts.RuntimeTools{
-		Definitions: []llmcontracts.RuntimeToolDefinition{{Name: definition.Name, Description: definition.Description, Parameters: definition.Parameters, Access: llmcontracts.RuntimeToolAccessRead}},
-		Executor: func(_ context.Context, _ string, input json.RawMessage) (string, bool, bool, error) {
-			var decoded map[string]any
-			if err := chatcontrol.DecodeRuntimeToolInput(input, &decoded); err != nil {
-				return "", true, true, err
-			}
-			handlerInputs = append(handlerInputs, decoded)
-			return `{}`, true, false, nil
-		},
-	}
-	ctx := llmcontracts.WithRuntimeTools(context.Background(), runtime)
-	adapter := New(nil, nil)
-	_, err := adapter.Call(ctx, llmcontracts.AgentRequest{Ctx: ctx, Operation: llmcontracts.OperationDirect, Message: "scan", Agent: models.LLMConfig{Name: "Compatible", Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodAPIKey, Model: "provider/model", APIKey: "test", BaseURL: srv.URL + "/v1/", PresetSlug: "vllm", Transport: "chat_completions"}}, ".")
-	require.NoError(t, err)
-	require.Len(t, handlerInputs, 3)
-	for _, index := range []int{0, 1} {
-		for _, omitted := range []string{"project_id", "processing_state", "type", "source", "read"} {
-			_, ok := handlerInputs[index][omitted]
-			require.Falsef(t, ok, "omitted field %q reached handler in case %d: %#v", omitted, index, handlerInputs[index])
-		}
-	}
-	require.Equal(t, "approved", handlerInputs[0]["decision_state"])
-	require.Equal(t, "unlinked", handlerInputs[0]["implementation_task_linked"])
-	require.Equal(t, "not_applicable", handlerInputs[2]["processing_state"])
-	require.Equal(t, "unread", handlerInputs[2]["read"])
-	require.Equal(t, "linked", handlerInputs[2]["implementation_task_linked"])
 }
 
 func TestAdapterToolCallReplaysToolResult(t *testing.T) {

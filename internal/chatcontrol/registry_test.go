@@ -855,40 +855,37 @@ func TestRegistry_AlertFlowActions(t *testing.T) {
 		Required   []string `json:"required"`
 		Properties map[string]struct {
 			Type        any             `json:"type"`
-			Enum        []any           `json:"enum"`
 			Default     json.RawMessage `json:"default"`
-			OmitValue   json.RawMessage `json:"x-openvibely-omit-value"`
 			Description string          `json:"description"`
 		} `json:"properties"`
 	}
 	if err := json.Unmarshal(Get("list_alerts").Parameters, &schema); err != nil {
 		t.Fatalf("decode list_alerts schema: %v", err)
 	}
-	for _, required := range schema.Required {
-		if required == "project_id" || required == "read" {
-			t.Fatalf("list_alerts must leave %s optional", required)
+	if len(schema.Required) != 0 {
+		t.Fatalf("list_alerts filters must remain optional, got required=%v", schema.Required)
+	}
+	for _, property := range []string{"project_id", "decision_state", "processing_state", "type", "source", "read", "implementation_task_linked"} {
+		if definition := schema.Properties[property]; len(definition.Default) != 0 {
+			t.Fatalf("list_alerts optional filter %s must not have a default, got %s", property, definition.Default)
 		}
 	}
-	wantOmission := map[string]string{
-		"project_id": `""`, "decision_state": `"all"`, "processing_state": `"all"`,
-		"type": `""`, "source": `""`, "read": `"all"`, "implementation_task_linked": `"all"`,
+	if got := schema.Properties["read"].Type; got != "boolean" {
+		t.Fatalf("list_alerts read filter type = %#v, want boolean", got)
 	}
-	for property, want := range wantOmission {
-		definition := schema.Properties[property]
-		if string(definition.Default) != want || string(definition.OmitValue) != want {
-			t.Fatalf("list_alerts filter %s omission contract default=%s sentinel=%s, want %s", property, definition.Default, definition.OmitValue, want)
-		}
+	if got := schema.Properties["implementation_task_linked"].Type; got != "boolean" {
+		t.Fatalf("list_alerts linkage filter type = %#v, want boolean", got)
 	}
-	if description := schema.Properties["project_id"].Description; !strings.Contains(description, "empty") || !strings.Contains(description, "persisted caller task") {
+	if description := schema.Properties["project_id"].Description; !strings.Contains(description, "Omit") || !strings.Contains(description, "persisted caller task") {
 		t.Fatalf("project_id omission contract missing from list_alerts schema: %q", description)
 	}
-	if description := schema.Properties["read"].Description; !strings.Contains(description, "all") || !strings.Contains(description, "both read and unread") {
+	if description := schema.Properties["read"].Description; !strings.Contains(description, "Omit") || !strings.Contains(description, "both read and unread") {
 		t.Fatalf("read omission contract missing from list_alerts schema: %q", description)
 	}
-	if description := schema.Properties["processing_state"].Description; !strings.Contains(description, "all") || !strings.Contains(description, "no processing-state filter") {
+	if description := schema.Properties["processing_state"].Description; !strings.Contains(description, "Omit") || !strings.Contains(description, "all processing states") {
 		t.Fatalf("processing-state omission contract missing from list_alerts schema: %q", description)
 	}
-	if description := Get("list_alerts").Description; !strings.Contains(description, "Native Approved Inbox") || !strings.Contains(description, "implementation_task_linked=unlinked") || !strings.Contains(description, "omission sentinel") {
+	if description := Get("list_alerts").Description; !strings.Contains(description, "Native Approved Inbox") || !strings.Contains(description, "implementation_task_linked=false") || !strings.Contains(description, "omit processing_state") {
 		t.Fatalf("Native inbox filter contract missing from list_alerts description: %q", description)
 	}
 }

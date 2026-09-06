@@ -658,21 +658,6 @@ func TestAlertRuntimeFiltersPaginationAuthorizationAndRecovery(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, approvedAcrossReadStates, first.ID, "omitting read must keep a read approved notification eligible")
 
-	definition := chatcontrol.Get("list_alerts")
-	runtime := &llmcontracts.RuntimeTools{Definitions: []llmcontracts.RuntimeToolDefinition{{Name: definition.Name, Parameters: definition.Parameters}}}
-	providerMaterialized := json.RawMessage(`{"project_id":"","decision_state":"approved","processing_state":"all","type":"","source":"","read":"all","implementation_task_linked":"unlinked","limit":50,"offset":0}`)
-	normalized := runtime.NormalizeToolInput("list_alerts", providerMaterialized)
-	for _, omitted := range []string{`"project_id"`, `"processing_state"`, `"type"`, `"source"`, `"read"`} {
-		require.NotContains(t, string(normalized), omitted, "provider omission sentinel must be absent before runtime handler")
-	}
-	approvedFromProviderBoundary, err := handlers["list_alerts"](ctx, normalized)
-	require.NoError(t, err)
-	require.Contains(t, approvedFromProviderBoundary, first.ID, "provider omission sentinels must not narrow the approved inbox query")
-
-	approvedWithNullOptionalFilters, err := handlers["list_alerts"](ctx, json.RawMessage(`{"project_id":null,"decision_state":"approved","processing_state":null,"type":null,"source":null,"read":null,"implementation_task_linked":false}`))
-	require.NoError(t, err)
-	require.Contains(t, approvedWithNullOptionalFilters, first.ID, "null optional filters must behave as omitted")
-
 	pageOne, err := handlers["list_alerts"](ctx, json.RawMessage(`{"limit":2,"offset":0}`))
 	require.NoError(t, err)
 	pageTwo, err := handlers["list_alerts"](ctx, json.RawMessage(`{"limit":2,"offset":2}`))
@@ -685,7 +670,7 @@ func TestAlertRuntimeFiltersPaginationAuthorizationAndRecovery(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, pageOne, repeated)
 
-	filtered, err := handlers["list_alerts"](ctx, json.RawMessage(`{"decision_state":"pending","processing_state":"unclaimed","type":"product","source":"agent-a","read":"unread","implementation_task_linked":"unlinked"}`))
+	filtered, err := handlers["list_alerts"](ctx, json.RawMessage(`{"decision_state":"pending","processing_state":"unclaimed","type":"product","source":"agent-a","read":false,"implementation_task_linked":false}`))
 	require.NoError(t, err)
 	require.Contains(t, filtered, third.ID)
 	require.NotContains(t, filtered, first.ID)

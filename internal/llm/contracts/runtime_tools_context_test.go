@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
-	"strings"
 	"testing"
 	"time"
 )
@@ -156,50 +155,6 @@ func TestRuntimeToolsHelpersCoverNilAndTrimmedNames(t *testing.T) {
 	}
 	if WithRuntimeTools(nil, nil) == nil || WithoutRuntimeTools(nil) == nil {
 		t.Fatal("nil-safe context helpers should return contexts")
-	}
-}
-
-func TestRuntimeToolsProviderParametersStripsInternalOmissionMetadata(t *testing.T) {
-	rt := &RuntimeTools{Definitions: []RuntimeToolDefinition{{
-		Name:       "list_alerts",
-		Parameters: json.RawMessage(`{"type":"object","properties":{"processing_state":{"type":"string","default":"all","x-openvibely-omit-value":"all"}}}`),
-	}}}
-	parameters := rt.ProviderParameters("LIST_ALERTS")
-	if strings.Contains(string(parameters), "x-openvibely-omit-value") {
-		t.Fatalf("provider parameters leaked internal metadata: %s", parameters)
-	}
-	if !strings.Contains(string(parameters), `"default":"all"`) {
-		t.Fatalf("provider parameters lost omission default: %s", parameters)
-	}
-}
-
-func TestRuntimeToolsNormalizeToolInput(t *testing.T) {
-	rt := &RuntimeTools{Definitions: []RuntimeToolDefinition{{
-		Name:       "list_alerts",
-		Parameters: json.RawMessage(`{"type":"object","properties":{"processing_state":{"type":"string","x-openvibely-omit-value":"all"},"read":{"type":"string","x-openvibely-omit-value":"all"},"limit":{"type":["null","integer"]},"required_value":{"type":["null","string"]}},"required":["required_value"]}`),
-	}}}
-
-	tests := []struct {
-		name  string
-		input string
-		want  string
-	}{
-		{name: "omitted stays omitted", input: `{"limit":50}`, want: `{"limit":50}`},
-		{name: "optional nulls become absent", input: `{"limit":null}`, want: `{}`},
-		{name: "provider omission sentinels become absent", input: `{"processing_state":"all","read":"all"}`, want: `{}`},
-		{name: "case insensitive property", input: `{"READ":"all"}`, want: `{}`},
-		{name: "explicit values stay present", input: `{"processing_state":"not_applicable","read":"unread","limit":0}`, want: `{"processing_state":"not_applicable","read":"unread","limit":0}`},
-		{name: "required null stays present", input: `{"required_value":null}`, want: `{"required_value":null}`},
-		{name: "unknown null stays present", input: `{"unknown":null}`, want: `{"unknown":null}`},
-		{name: "malformed stays unchanged", input: `{`, want: `{`},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := rt.NormalizeToolInput("LIST_ALERTS", json.RawMessage(tt.input))
-			if string(got) != tt.want {
-				t.Fatalf("NormalizeToolInput() = %s, want %s", got, tt.want)
-			}
-		})
 	}
 }
 

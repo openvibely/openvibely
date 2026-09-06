@@ -32,28 +32,6 @@ func TestRuntimeAnthropicToolsAliasesSkillsListWireName(t *testing.T) {
 	}
 }
 
-func TestComposeRuntimeToolExecutorRemovesOptionalNulls(t *testing.T) {
-	var got json.RawMessage
-	rt := &llmcontracts.RuntimeTools{
-		Definitions: []llmcontracts.RuntimeToolDefinition{{
-			Name:       "list_alerts",
-			Parameters: json.RawMessage(`{"type":"object","properties":{"processing_state":{"type":"string","x-openvibely-omit-value":"all"},"read":{"type":"string","x-openvibely-omit-value":"all"}}}`),
-		}},
-		Executor: func(_ context.Context, _ string, input json.RawMessage) (string, bool, bool, error) {
-			got = append(json.RawMessage(nil), input...)
-			return `{}`, true, false, nil
-		},
-	}
-
-	_, _, err := composeRuntimeToolExecutor(nil, rt)(context.Background(), "list_alerts", json.RawMessage(`{"processing_state":"all","read":"unread"}`))
-	if err != nil {
-		t.Fatalf("execute list_alerts: %v", err)
-	}
-	if string(got) != `{"read":"unread"}` {
-		t.Fatalf("runtime input = %s, want explicit unread only", got)
-	}
-}
-
 func TestComposeRuntimeToolExecutorCanonicalizesAnthropicSkillListAlias(t *testing.T) {
 	rt := &llmcontracts.RuntimeTools{
 		Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "skills_list"}},

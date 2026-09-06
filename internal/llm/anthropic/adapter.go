@@ -200,7 +200,7 @@ func runtimeAnthropicTools(rt *llmcontracts.RuntimeTools) []anthropicclient.Tool
 		out = append(out, anthropicclient.ToolDefinition{
 			Name:        anthropicRuntimeToolWireName(name),
 			Description: strings.TrimSpace(def.Description),
-			InputSchema: rt.ProviderParameters(name),
+			InputSchema: def.Parameters,
 		})
 	}
 	return out
@@ -227,7 +227,6 @@ func composeRuntimeToolExecutor(base func(context.Context, string, json.RawMessa
 	}
 	return func(ctx context.Context, name string, input json.RawMessage) (string, bool, error) {
 		canonicalName := anthropicRuntimeToolCanonicalName(name)
-		input = rt.NormalizeToolInput(canonicalName, input)
 		if output, handled, isError, err := rt.Executor(ctx, canonicalName, input); handled || err != nil {
 			return output, isError, err
 		}

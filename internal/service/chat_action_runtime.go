@@ -2936,32 +2936,6 @@ func channelProjectInfoResult(ctx context.Context, projectRepo *repository.Proje
 	return strings.TrimSpace(sb.String())
 }
 
-func decodeAlertBooleanFilter(raw json.RawMessage, trueValue, falseValue string) (*bool, error) {
-	if len(raw) == 0 || string(raw) == "null" {
-		return nil, nil
-	}
-	var legacy bool
-	if json.Unmarshal(raw, &legacy) == nil {
-		return &legacy, nil
-	}
-	var value string
-	if err := json.Unmarshal(raw, &value); err != nil {
-		return nil, errors.New("must be a supported string or boolean")
-	}
-	switch value {
-	case "", "all":
-		return nil, nil
-	case trueValue:
-		value := true
-		return &value, nil
-	case falseValue:
-		value := false
-		return &value, nil
-	default:
-		return nil, fmt.Errorf("must be all, %s, or %s", trueValue, falseValue)
-	}
-}
-
 func BuildAlertRuntimeActionHandlers(opts AlertRuntimeOptions) map[string]chatcontrol.RuntimeActionHandler {
 	resultJSON := func(value any) (string, error) {
 		data, err := json.Marshal(value)
@@ -3140,15 +3114,15 @@ func BuildAlertRuntimeActionHandlers(opts AlertRuntimeOptions) map[string]chatco
 		},
 		"list_alerts": func(ctx context.Context, input json.RawMessage) (string, error) {
 			var req struct {
-				ProjectID                string          `json:"project_id"`
-				DecisionState            string          `json:"decision_state"`
-				ProcessingState          string          `json:"processing_state"`
-				Type                     string          `json:"type"`
-				Source                   string          `json:"source"`
-				Read                     json.RawMessage `json:"read"`
-				ImplementationTaskLinked json.RawMessage `json:"implementation_task_linked"`
-				Limit                    int             `json:"limit"`
-				Offset                   int             `json:"offset"`
+				ProjectID                string `json:"project_id"`
+				DecisionState            string `json:"decision_state"`
+				ProcessingState          string `json:"processing_state"`
+				Type                     string `json:"type"`
+				Source                   string `json:"source"`
+				Read                     *bool  `json:"read"`
+				ImplementationTaskLinked *bool  `json:"implementation_task_linked"`
+				Limit                    int    `json:"limit"`
+				Offset                   int    `json:"offset"`
 			}
 			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 				return "", err
@@ -3171,18 +3145,10 @@ func BuildAlertRuntimeActionHandlers(opts AlertRuntimeOptions) map[string]chatco
 			if req.ProcessingState != "" && req.ProcessingState != string(models.AlertProcessingNotApplicable) && req.ProcessingState != string(models.AlertProcessingUnclaimed) && req.ProcessingState != string(models.AlertProcessingClaimed) && req.ProcessingState != string(models.AlertProcessingImplementationTaskLinked) && req.ProcessingState != string(models.AlertProcessingCompleted) && req.ProcessingState != string(models.AlertProcessingFailed) {
 				return "", fmt.Errorf("invalid processing_state %q", req.ProcessingState)
 			}
-			read, err := decodeAlertBooleanFilter(req.Read, "read", "unread")
-			if err != nil {
-				return "", fmt.Errorf("invalid read filter: %w", err)
-			}
-			linked, err := decodeAlertBooleanFilter(req.ImplementationTaskLinked, "linked", "unlinked")
-			if err != nil {
-				return "", fmt.Errorf("invalid implementation_task_linked filter: %w", err)
-			}
 			alerts, err := opts.AlertSvc.ListFilteredSummariesForRuntime(ctx, opts.ProjectID, models.AlertListFilter{
 				DecisionState: models.AlertDecisionState(req.DecisionState), ProcessingState: models.AlertProcessingState(req.ProcessingState),
-				Type: models.AlertType(req.Type), Source: req.Source, Read: read,
-				ImplementationTaskLinked: linked, Limit: req.Limit, Offset: req.Offset,
+				Type: models.AlertType(req.Type), Source: req.Source, Read: req.Read,
+				ImplementationTaskLinked: req.ImplementationTaskLinked, Limit: req.Limit, Offset: req.Offset,
 			})
 			if err != nil {
 				return "", err
