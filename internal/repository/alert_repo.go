@@ -744,8 +744,9 @@ func (r *AlertRepo) MarkProcessing(ctx context.Context, projectID, id, claimant 
 	return r.withImmediateAlertMutation(ctx, func(conn *sql.Conn) error {
 		result, err := conn.ExecContext(ctx, `UPDATE alerts SET processing_state = ?, processing_error = ?,
 			claim_expires_at = NULL, updated_at = CURRENT_TIMESTAMP
-			WHERE project_id = ? AND id = ? AND claimant = ? AND processing_state IN ('claimed', 'implementation_task_linked', 'failed')`,
-			state, strings.TrimSpace(message), projectID, id, claimant)
+			WHERE project_id = ? AND id = ? AND claimant = ? AND processing_state IN ('claimed', 'implementation_task_linked', 'failed')
+			AND (? <> 'completed' OR implementation_task_was_linked = 1)`,
+			state, strings.TrimSpace(message), projectID, id, claimant, state)
 		if err != nil {
 			return fmt.Errorf("marking alert processing: %w", err)
 		}
