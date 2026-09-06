@@ -1514,9 +1514,9 @@ func TestAutomationRuntimeCancellationDuringAdmittedModelTransferTerminalizesDis
 			Scan(&taskStatus, &executionStatus)
 		return err == nil && taskStatus == string(models.StatusRunning) && executionStatus == string(models.ExecRunning)
 	}, 5*time.Second, 20*time.Millisecond)
-	require.Equal(t, 1, worker.TotalRunning())
 	require.Eventually(t, func() bool {
-		return worker.ModelRunning(originalAgent.ID) == 0 && worker.ModelRunning(blockedAgent.ID) == 1
+		return worker.TotalRunning() == 0 && worker.ProjectRunning(fixture.task.ProjectID) == 0 &&
+			worker.ModelRunning(originalAgent.ID) == 0 && worker.ModelRunning(blockedAgent.ID) == 1
 	}, 5*time.Second, 20*time.Millisecond, "stale model reservation must be released before transfer wait")
 
 	require.True(t, worker.CancelRunningTask(fixture.task.ID))
