@@ -1071,7 +1071,7 @@ func TestTaskCardMergeMenuDirectActionConflictRetryAndBoardRefreshInChrome(t *te
 	var boardRefreshStarted bool
 	var releaseBoardRefresh = make(chan struct{}, 1)
 	var mu sync.Mutex
-	result := make(chan string, 4)
+	result := make(chan string, 5)
 	menuStates := func() map[string]components.TaskCardMergeMenuState {
 		mu.Lock()
 		defer mu.Unlock()
@@ -1087,6 +1087,7 @@ func TestTaskCardMergeMenuDirectActionConflictRetryAndBoardRefreshInChrome(t *te
 	fixtureCSS := `<style>
 		#kanban-board{display:grid;grid-template-columns:1fr;height:420px;overflow-y:auto}.kanban-column{min-width:0}.card{position:relative;min-height:120px}.dropdown{position:relative}.card>.dropdown{position:absolute}.dropdown-content{display:none;position:absolute;right:0;top:100%;width:210px;background:white;border:1px solid #333;z-index:100}.dropdown:focus-within>.dropdown-content{display:block}[data-kanban-menu-open="true"]>.dropdown-content{display:block}[data-task-card-local-submenu]>ul,[data-task-card-github-submenu]>ul{display:none;position:absolute;right:0;width:224px;background:white;border:1px solid #333;z-index:110}[data-task-card-local-submenu]:hover>ul,[data-task-card-local-submenu]:focus-within>ul,[data-task-card-github-submenu]:hover>ul,[data-task-card-github-submenu]:focus-within>ul{display:block!important}.modal{display:none}.modal[open]{display:grid;position:fixed;inset:0;z-index:999;background:rgba(0,0,0,.2)}.modal-box{margin:auto;background:white;padding:16px;max-width:340px}.hidden{display:none!important}.task-selected{outline:3px solid blue}.btn{min-height:32px}</style>`
 	runner := `<script>window.addEventListener('DOMContentLoaded',function(){
+		var nativeRequestAnimationFrame=window.requestAnimationFrame.bind(window),heldPositionFrames=[],nativeTabObserved=false;window.requestAnimationFrame=function(callback){if(callback&&callback.name==='settlePosition'){heldPositionFrames.push(callback);return -heldPositionFrames.length}return nativeRequestAnimationFrame(callback)};function releasePositionFrames(){window.requestAnimationFrame=nativeRequestAnimationFrame;var held=heldPositionFrames.splice(0);held.forEach(function(callback){nativeRequestAnimationFrame(callback)})}document.addEventListener('keydown',function(event){if(event.key==='Tab')nativeTabObserved=true},true);
 		function report(s,m){return fetch('/browser-result?status='+encodeURIComponent(s)+'&message='+encodeURIComponent(m||''),{method:'POST'})}function fail(m){throw new Error(m)}function waitFor(fn,label){return new Promise(function(resolve,reject){var end=Date.now()+4000;(function poll(){if(fn())return resolve();if(Date.now()>end)return reject(new Error('timeout '+label));setTimeout(poll,20)})()})}function frame(){return new Promise(function(r){requestAnimationFrame(function(){requestAnimationFrame(r)})})}function clickTrigger(el){el.dispatchEvent(new MouseEvent('mousedown',{bubbles:true,cancelable:true,detail:1}));el.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true,detail:1}))}
 		(async function(){
 			await frame();
@@ -1095,7 +1096,7 @@ func TestTaskCardMergeMenuDirectActionConflictRetryAndBoardRefreshInChrome(t *te
 			if(!card.classList.contains('task-selected'))fail('card selection was not established');
 			var trigger=card.querySelector('[data-task-card-menu-trigger]'),menu=card.querySelector('[data-kanban-menu-content]');
 			trigger.scrollIntoView({block:'center',inline:'center'});await frame();var menuHTML=menu.innerHTML,triggerRect=trigger.getBoundingClientRect(),triggerX=triggerRect.left+triggerRect.width/2,triggerY=triggerRect.top+triggerRect.height/2,triggerHit=document.elementFromPoint(triggerX,triggerY);if(!trigger.contains(triggerHit)&&trigger!==triggerHit)fail('kebab trigger is not hit-testable at its center: '+(triggerHit&&triggerHit.outerHTML||'none')+' rect='+JSON.stringify({left:triggerRect.left,top:triggerRect.top,right:triggerRect.right,bottom:triggerRect.bottom}));
-			await report('trigger-ready',JSON.stringify({x:triggerX,y:triggerY}));await waitFor(function(){var dropdown=menu.closest('[data-kanban-menu-key]');return dropdown.getAttribute('data-kanban-menu-open')==='true'&&dropdown.getAttribute('data-kanban-menu-positioning')!=='true'&&getComputedStyle(menu).visibility!=='hidden'},'browser-generated kebab activation and stable reveal');await frame();var menuRectBefore=menu.getBoundingClientRect(),menuWidth=menuRectBefore.width,menuHeight=menuRectBefore.height;
+			await report('trigger-ready',JSON.stringify({x:triggerX,y:triggerY}));await waitFor(function(){var dropdown=menu.closest('[data-kanban-menu-key]');return document.activeElement===trigger&&dropdown.getAttribute('data-kanban-menu-open')==='true'&&dropdown.getAttribute('data-kanban-menu-positioning')==='true'&&getComputedStyle(menu).visibility==='hidden'},'browser-generated kebab activation during hidden positioning');await report('tab-ready','');await waitFor(function(){return nativeTabObserved},'browser-generated Tab dispatch');if(document.activeElement!==trigger)fail('native Tab transferred focus before menu geometry stabilized');if(menu.closest('[data-kanban-menu-key]').getAttribute('data-kanban-menu-positioning')!=='true'||getComputedStyle(menu).visibility!=='hidden')fail('native Tab revealed menu before geometry stabilized');releasePositionFrames();var firstKeyboardVisibleRect=null;for(var keyboardRevealFrame=0;keyboardRevealFrame<12&&!firstKeyboardVisibleRect;keyboardRevealFrame++){var keyboardDropdown=menu.closest('[data-kanban-menu-key]');if(keyboardDropdown.getAttribute('data-kanban-menu-positioning')!=='true'&&getComputedStyle(menu).visibility!=='hidden'){var keyboardVisibleRect=menu.getBoundingClientRect();firstKeyboardVisibleRect={left:keyboardVisibleRect.left,top:keyboardVisibleRect.top,right:keyboardVisibleRect.right,bottom:keyboardVisibleRect.bottom};break}await new Promise(function(resolve){nativeRequestAnimationFrame(resolve)})}if(!firstKeyboardVisibleRect)fail('native Tab did not reveal menu after stable geometry');if(!menu.contains(document.activeElement)||document.activeElement===menu)fail('native Tab did not transfer focus after stable geometry');if(menu.closest('[data-kanban-menu-key]').getAttribute('data-kanban-menu-open')!=='true')fail('native Tab closed the first-open menu');await frame();var menuRectBefore=menu.getBoundingClientRect();if(Math.abs(firstKeyboardVisibleRect.left-menuRectBefore.left)>1||Math.abs(firstKeyboardVisibleRect.top-menuRectBefore.top)>1||Math.abs(firstKeyboardVisibleRect.right-menuRectBefore.right)>1||Math.abs(firstKeyboardVisibleRect.bottom-menuRectBefore.bottom)>1)fail('native Tab first-visible menu jumped from '+JSON.stringify(firstKeyboardVisibleRect)+' to '+JSON.stringify({left:menuRectBefore.left,top:menuRectBefore.top,right:menuRectBefore.right,bottom:menuRectBefore.bottom}));var menuWidth=menuRectBefore.width,menuHeight=menuRectBefore.height;
 			if(menu.innerHTML!==menuHTML)fail('opening the kebab changed its pre-rendered contents');
 			if(menuWidth<190)fail('kebab was too narrow: '+menuWidth);
 			if(parseInt(await fetch('/option-count').then(function(r){return r.text()}),10)!==0)fail('opening the kebab fetched merge options');
@@ -1310,14 +1311,10 @@ func TestTaskCardMergeMenuDirectActionConflictRetryAndBoardRefreshInChrome(t *te
 	}
 	defer conn.CloseNow()
 	nextID := 0
-	dispatch := func(eventType string, extra map[string]any) {
+	dispatchCommand := func(method string, params map[string]any) {
 		t.Helper()
 		nextID++
-		params := map[string]any{"type": eventType, "x": point.X, "y": point.Y, "button": "left", "clickCount": 1}
-		for key, value := range extra {
-			params[key] = value
-		}
-		request, err := json.Marshal(map[string]any{"id": nextID, "method": "Input.dispatchMouseEvent", "params": params})
+		request, err := json.Marshal(map[string]any{"id": nextID, "method": method, "params": params})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1337,17 +1334,37 @@ func TestTaskCardMergeMenuDirectActionConflictRetryAndBoardRefreshInChrome(t *te
 				continue
 			}
 			if len(response.Error) > 0 {
-				t.Fatalf("CDP Input.dispatchMouseEvent error: %s", response.Error)
+				t.Fatalf("CDP %s error: %s", method, response.Error)
 			}
 			return
 		}
 	}
+	dispatchMouse := func(eventType string, extra map[string]any) {
+		t.Helper()
+		params := map[string]any{"type": eventType, "x": point.X, "y": point.Y, "button": "left", "clickCount": 1}
+		for key, value := range extra {
+			params[key] = value
+		}
+		dispatchCommand("Input.dispatchMouseEvent", params)
+	}
 	clickPoint := func() {
-		dispatch("mouseMoved", map[string]any{"button": "none", "clickCount": 0})
-		dispatch("mousePressed", map[string]any{})
-		dispatch("mouseReleased", map[string]any{})
+		dispatchMouse("mouseMoved", map[string]any{"button": "none", "clickCount": 0})
+		dispatchMouse("mousePressed", map[string]any{})
+		dispatchMouse("mouseReleased", map[string]any{})
 	}
 	clickPoint()
+	var tabReady string
+	select {
+	case tabReady = <-result:
+	case <-time.After(15 * time.Second):
+		tabReady = "fail:timeout waiting for hidden-positioning Tab boundary"
+	}
+	if tabReady != "tab-ready:" {
+		data, _ := os.ReadFile(stderrPath)
+		t.Fatalf("task card merge browser did not reach native Tab boundary: %s\n%s", tabReady, data)
+	}
+	dispatchCommand("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Tab", "code": "Tab", "windowsVirtualKeyCode": 9, "nativeVirtualKeyCode": 9})
+	dispatchCommand("Input.dispatchKeyEvent", map[string]any{"type": "keyUp", "key": "Tab", "code": "Tab", "windowsVirtualKeyCode": 9, "nativeVirtualKeyCode": 9})
 	point = readClickPoint("local-ready")
 	clickPoint()
 	point = readClickPoint("click-ready")
@@ -1437,8 +1454,9 @@ func TestTaskCardKebabMenuEscapesCardAndRepositionsAtDropZoneBottomInChrome(t *t
 		    if (!card.classList.contains('overflow-visible')) fail('task card root does not opt out of overflow clipping');
 		    label.focus();
 		    label.click();
-			    var firstVisibleRect = null;
-			    var firstVisibleMotion = null;
+		    if (dropdown.getAttribute('data-kanban-menu-positioning') === 'true' && getComputedStyle(menu).visibility !== 'hidden') fail('first-open positioning phase painted a transparent menu layer');
+		    var firstVisibleRect = null;
+		    var firstVisibleMotion = null;
 			    for (var revealFrame = 0; revealFrame < 12 && !firstVisibleRect; revealFrame++) {
 			      if (dropdown.getAttribute('data-kanban-menu-positioning') !== 'true' && getComputedStyle(menu).visibility !== 'hidden' && parseFloat(getComputedStyle(menu).opacity) > 0) {
 			        var visibleRect = menu.getBoundingClientRect();

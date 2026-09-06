@@ -558,7 +558,7 @@ var registry = []ActionDef{
 	// --- Alerts and actionable notifications domain ---
 	{
 		Name:         "list_alerts",
-		Description:  "List project-scoped alerts and actionable notifications with stable pagination and conjunctive lifecycle filters. Native Approved Inbox callers use decision_state=approved and implementation_task_linked=false and omit processing_state, read, type, and source so eligible work is not excluded.",
+		Description:  "List project-scoped alerts and actionable notifications with stable pagination and conjunctive lifecycle filters. Native Approved Inbox callers use decision_state=approved, processing_state=unclaimed, and implementation_task_linked=false and omit read, type, and source so eligible waiting work is not excluded.",
 		Domain:       DomainAlerts,
 		Access:       AccessRead,
 		Sensitivity:  SensitivityNormal,
