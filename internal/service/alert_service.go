@@ -106,24 +106,6 @@ func (s *AlertService) ListFiltered(ctx context.Context, projectID string, filte
 	return s.alertRepo.ListFiltered(ctx, projectID, filter)
 }
 
-func (s *AlertService) IsCurrentNativeInboxRuntime(ctx context.Context, projectID string) (bool, error) {
-	if s == nil || s.alertRepo == nil {
-		return false, nil
-	}
-	automationContext, automationBound := AutomationContextFromContext(ctx)
-	if !automationBound {
-		return false, nil
-	}
-	if automationContext.ProjectID != projectID {
-		return false, fmt.Errorf("alert Automation project mismatch")
-	}
-	bindings, err := s.alertRepo.NativeInboxBindings(ctx, automationContext)
-	if err != nil {
-		return false, err
-	}
-	return len(bindings) > 0, nil
-}
-
 func (s *AlertService) ListFilteredSummariesForRuntime(ctx context.Context, projectID string, filter models.AlertListFilter) ([]models.AlertSummary, error) {
 	automationContext, automationBound := AutomationContextFromContext(ctx)
 	if !automationBound {
@@ -137,15 +119,8 @@ func (s *AlertService) ListFilteredSummariesForRuntime(ctx context.Context, proj
 		return nil, err
 	}
 	if len(bindings) == 0 {
-		return nil, fmt.Errorf("current Automation context is not a Native inbox")
+		return s.alertRepo.ListFilteredSummaries(ctx, projectID, filter)
 	}
-	unlinked := false
-	filter.DecisionState = models.AlertDecisionApproved
-	filter.ProcessingState = ""
-	filter.Type = ""
-	filter.Source = ""
-	filter.Read = nil
-	filter.ImplementationTaskLinked = &unlinked
 	filter.AutomationInboxBindings = bindings
 	return s.alertRepo.ListFilteredSummaries(ctx, projectID, filter)
 }
