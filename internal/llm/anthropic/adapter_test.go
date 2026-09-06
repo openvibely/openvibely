@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/openvibely/openvibely/internal/chatcontrol"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
 	"github.com/openvibely/openvibely/internal/models"
@@ -543,6 +544,78 @@ func TestCallDirectLifecycleHookDropsCodingAgentFraming(t *testing.T) {
 	tools, _ := json.Marshal(gotBody["tools"])
 	if strings.Contains(string(tools), "web_search") || strings.Contains(string(tools), "web_fetch") {
 		t.Fatalf("lifecycle hook must not receive provider web tools, got %s", tools)
+	}
+}
+
+func TestCallStreamingPreservesListAlertsPresenceAcrossProviderBoundary(t *testing.T) {
+	var turn int
+	var handlerInputs []map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		turn++
+		body, _ := io.ReadAll(r.Body)
+		if turn == 1 {
+			for _, want := range []string{`"processing_state"`, `"default":"all"`} {
+				if !strings.Contains(string(body), want) {
+					t.Fatalf("provider request schema missing %s: %s", want, body)
+				}
+			}
+			if strings.Contains(string(body), "x-openvibely-omit-value") {
+				t.Fatalf("provider request leaked internal schema metadata: %s", body)
+			}
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintf(w, "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_%d\",\"model\":\"claude-opus-5\",\"usage\":{\"input_tokens\":1}}}\n\n", turn)
+		if turn <= 3 {
+			input := `{"decision_state":"approved","implementation_task_linked":"unlinked","limit":50,"offset":0}`
+			if turn == 2 {
+				input = `{"project_id":"","decision_state":"approved","processing_state":"all","type":"","source":"","read":"all","implementation_task_linked":"unlinked","limit":50,"offset":0}`
+			}
+			if turn == 3 {
+				input = `{"decision_state":"approved","processing_state":"not_applicable","read":"unread","implementation_task_linked":"linked"}`
+			}
+			fmt.Fprintf(w, "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_%d\",\"name\":\"list_alerts\",\"input\":%s}}\n\n", turn, input)
+			_, _ = w.Write([]byte("data: {\"type\":\"content_block_stop\",\"index\":0}\n\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\"},\"usage\":{\"output_tokens\":1}}\n\ndata: {\"type\":\"message_stop\"}\n\n"))
+			return
+		}
+		_, _ = w.Write([]byte("data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"done\"}}\n\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":1}}\n\ndata: {\"type\":\"message_stop\"}\n\n"))
+	}))
+	defer server.Close()
+
+	origHost := anthropicclient.AnthropicAPIHost
+	anthropicclient.AnthropicAPIHost = server.URL
+	defer func() { anthropicclient.AnthropicAPIHost = origHost }()
+	definition := chatcontrol.Get("list_alerts")
+	runtime := &llmcontracts.RuntimeTools{
+		Definitions: []llmcontracts.RuntimeToolDefinition{{Name: definition.Name, Description: definition.Description, Parameters: definition.Parameters, Access: llmcontracts.RuntimeToolAccessRead}},
+		Executor: func(_ context.Context, _ string, input json.RawMessage) (string, bool, bool, error) {
+			var decoded map[string]any
+			if err := chatcontrol.DecodeRuntimeToolInput(input, &decoded); err != nil {
+				return "", true, true, err
+			}
+			handlerInputs = append(handlerInputs, decoded)
+			return `{}`, true, false, nil
+		},
+		SkipDefaultTools: true,
+	}
+	ctx := llmcontracts.WithRuntimeTools(context.Background(), runtime)
+	adapter := New(nil, nil, nil)
+	_, _, _, err := adapter.callStreaming(ctx, "scan", nil, models.LLMConfig{Name: "Claude", Provider: models.ProviderAnthropic, Model: "claude-opus-5", AuthMethod: models.AuthMethodAPIKey, APIKey: "test"}, "exec", ".", "", nil, nil, nil, false)
+	if err != nil {
+		t.Fatalf("callStreaming: %v", err)
+	}
+	if len(handlerInputs) != 3 {
+		t.Fatalf("handler inputs = %d, want 3", len(handlerInputs))
+	}
+	for _, index := range []int{0, 1} {
+		for _, omitted := range []string{"project_id", "processing_state", "type", "source", "read"} {
+			if _, ok := handlerInputs[index][omitted]; ok {
+				t.Fatalf("omitted field %q reached handler in case %d: %#v", omitted, index, handlerInputs[index])
+			}
+		}
+	}
+	if handlerInputs[2]["processing_state"] != "not_applicable" || handlerInputs[2]["read"] != "unread" || handlerInputs[2]["implementation_task_linked"] != "linked" {
+		t.Fatalf("explicit filters changed: %#v", handlerInputs[2])
 	}
 }
 

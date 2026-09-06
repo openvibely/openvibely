@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/openvibely/openvibely/internal/chatcontrol"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
 	"github.com/openvibely/openvibely/internal/models"
@@ -21,8 +22,86 @@ import (
 	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 )
 
+func TestCallChatStreamingPreservesListAlertsPresenceAcrossProviderBoundary(t *testing.T) {
+	var turn int
+	var handlerInputs []map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		turn++
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if turn == 1 {
+			encoded, _ := json.Marshal(body["tools"])
+			for _, want := range []string{`"processing_state"`, `"default":"all"`} {
+				if !strings.Contains(string(encoded), want) {
+					t.Fatalf("provider request schema missing %s: %s", want, encoded)
+				}
+			}
+			if strings.Contains(string(encoded), "x-openvibely-omit-value") {
+				t.Fatalf("provider request leaked internal schema metadata: %s", encoded)
+			}
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		if turn <= 3 {
+			arguments := `{"decision_state":"approved","implementation_task_linked":"unlinked","limit":50,"offset":0}`
+			if turn == 2 {
+				arguments = `{"project_id":"","decision_state":"approved","processing_state":"all","type":"","source":"","read":"all","implementation_task_linked":"unlinked","limit":50,"offset":0}`
+			}
+			if turn == 3 {
+				arguments = `{"decision_state":"approved","processing_state":"not_applicable","read":"unread","implementation_task_linked":"linked","limit":25,"offset":0}`
+			}
+			encodedArguments, _ := json.Marshal(arguments)
+			_, _ = fmt.Fprintf(w, "data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"function_call\",\"call_id\":\"call_%d\",\"name\":\"list_alerts\"}}\n\n", turn)
+			_, _ = fmt.Fprintf(w, "data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"function_call\",\"call_id\":\"call_%d\",\"name\":\"list_alerts\",\"arguments\":%s}}\n\n", turn, encodedArguments)
+			_, _ = fmt.Fprintf(w, "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_%d\",\"status\":\"completed\",\"model\":\"gpt-test\"}}\n\n", turn)
+			return
+		}
+		_, _ = w.Write([]byte("data: {\"type\":\"response.output_text.delta\",\"delta\":\"done\"}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_4\",\"status\":\"completed\",\"model\":\"gpt-test\"}}\n\n"))
+	}))
+	defer srv.Close()
+
+	oldBaseURL := openaiclient.OpenAIAPIBaseURL
+	openaiclient.OpenAIAPIBaseURL = srv.URL + "/v1/"
+	defer func() { openaiclient.OpenAIAPIBaseURL = oldBaseURL }()
+	definition := chatcontrol.Get("list_alerts")
+	runtime := &llmcontracts.RuntimeTools{
+		Definitions: []llmcontracts.RuntimeToolDefinition{{Name: definition.Name, Description: definition.Description, Parameters: definition.Parameters, Access: llmcontracts.RuntimeToolAccessRead}},
+		Executor: func(_ context.Context, _ string, input json.RawMessage) (string, bool, bool, error) {
+			var decoded map[string]any
+			if err := chatcontrol.DecodeRuntimeToolInput(input, &decoded); err != nil {
+				return "", true, true, err
+			}
+			handlerInputs = append(handlerInputs, decoded)
+			return `{}`, true, false, nil
+		},
+	}
+	ctx := llmcontracts.WithRuntimeTools(context.Background(), runtime)
+	adapter := New(nil, nil, nil)
+	_, _, err := adapter.CallChatStreaming(ctx, "scan", nil, models.LLMConfig{Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-test", APIKey: "test"}, "exec", "scope", nil, "", false, models.ChatModeOrchestrate, "", nil)
+	if err != nil {
+		t.Fatalf("CallChatStreaming: %v", err)
+	}
+	if len(handlerInputs) != 3 {
+		t.Fatalf("handler inputs = %d, want 3", len(handlerInputs))
+	}
+	for _, index := range []int{0, 1} {
+		for _, omitted := range []string{"project_id", "processing_state", "type", "source", "read"} {
+			if _, ok := handlerInputs[index][omitted]; ok {
+				t.Fatalf("omitted field %q reached handler in case %d: %#v", omitted, index, handlerInputs[index])
+			}
+		}
+	}
+	if handlerInputs[0]["decision_state"] != "approved" || handlerInputs[0]["implementation_task_linked"] != "unlinked" {
+		t.Fatalf("intentional filters lost: %#v", handlerInputs[0])
+	}
+	if handlerInputs[2]["processing_state"] != "not_applicable" || handlerInputs[2]["read"] != "unread" || handlerInputs[2]["implementation_task_linked"] != "linked" {
+		t.Fatalf("explicit filters changed: %#v", handlerInputs[2])
+	}
+}
+
 func TestRuntimeToolExecutorPreservesOptionalArgumentPresence(t *testing.T) {
-	const schema = `{"type":"object","properties":{"decision_state":{"type":"string"},"processing_state":{"type":["null","string"],"default":null},"read":{"type":["null","boolean"],"default":null},"implementation_task_linked":{"type":"boolean"}},"required":["decision_state","implementation_task_linked"],"additionalProperties":false}`
+	const schema = `{"type":"object","properties":{"decision_state":{"type":"string"},"processing_state":{"type":"string","default":"all","x-openvibely-omit-value":"all"},"read":{"type":"string","default":"all","x-openvibely-omit-value":"all"},"implementation_task_linked":{"type":"string"}},"required":["decision_state","implementation_task_linked"],"additionalProperties":false}`
 	var inputs []json.RawMessage
 	runtime := &llmcontracts.RuntimeTools{
 		Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "list_alerts", Parameters: json.RawMessage(schema)}},
@@ -35,8 +114,8 @@ func TestRuntimeToolExecutorPreservesOptionalArgumentPresence(t *testing.T) {
 
 	for _, input := range []json.RawMessage{
 		json.RawMessage(`{"decision_state":"approved","implementation_task_linked":false}`),
-		json.RawMessage(`{"decision_state":"approved","processing_state":null,"read":null,"implementation_task_linked":false}`),
-		json.RawMessage(`{"decision_state":"approved","processing_state":"not_applicable","read":false,"implementation_task_linked":false}`),
+		json.RawMessage(`{"decision_state":"approved","processing_state":"all","read":"all","implementation_task_linked":"unlinked"}`),
+		json.RawMessage(`{"decision_state":"approved","processing_state":"not_applicable","read":"unread","implementation_task_linked":"unlinked"}`),
 	} {
 		_, _, err := executor(context.Background(), "list_alerts", input)
 		if err != nil {
@@ -48,10 +127,10 @@ func TestRuntimeToolExecutorPreservesOptionalArgumentPresence(t *testing.T) {
 	if got := string(inputs[0]); got != omitted {
 		t.Fatalf("omitted input changed: %s", got)
 	}
-	if got := string(inputs[1]); got != omitted {
-		t.Fatalf("provider-materialized nulls reached handler: %s", got)
+	if got := string(inputs[1]); got != `{"decision_state":"approved","implementation_task_linked":"unlinked"}` {
+		t.Fatalf("provider omission sentinels reached handler: %s", got)
 	}
-	if got := string(inputs[2]); got != `{"decision_state":"approved","processing_state":"not_applicable","read":false,"implementation_task_linked":false}` {
+	if got := string(inputs[2]); got != `{"decision_state":"approved","processing_state":"not_applicable","read":"unread","implementation_task_linked":"unlinked"}` {
 		t.Fatalf("explicit filter values changed: %s", got)
 	}
 }

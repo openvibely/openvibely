@@ -200,7 +200,7 @@ func runtimeAnthropicTools(rt *llmcontracts.RuntimeTools) []anthropicclient.Tool
 		out = append(out, anthropicclient.ToolDefinition{
 			Name:        anthropicRuntimeToolWireName(name),
 			Description: strings.TrimSpace(def.Description),
-			InputSchema: def.Parameters,
+			InputSchema: rt.ProviderParameters(name),
 		})
 	}
 	return out
