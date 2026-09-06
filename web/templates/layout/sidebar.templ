@@ -86,7 +86,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 				</select>
 				<button
 					id="project-selector-trigger"
-					class="select select-bordered select-sm w-full sidebar-project-select flex min-w-0 items-center justify-between gap-2 bg-none text-left font-normal"
+					class="select select-bordered select-sm w-full sidebar-project-select flex min-w-0 items-center text-left"
 					type="button"
 					aria-label="Switch project"
 					aria-haspopup="dialog"
@@ -94,10 +94,8 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 					aria-controls="project-selector-dialog"
 					disabled?={ len(projects) == 0 }
 				>
-					<span id="project-selector-current-label" class="min-w-0 truncate">{ sidebarProjectDisplayName(projects, currentProjectID) }</span>
-					<svg class="h-4 w-4 shrink-0 opacity-60" width="16" height="16" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" data-project-selector-caret><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-.02-1.06z" clip-rule="evenodd"></path></svg>
-				</button>
-				<dialog id="project-selector-dialog" class="sidebar-project-dialog fixed m-0 max-h-[min(32rem,calc(100dvh-1rem))] w-[28rem] max-w-[calc(100vw-1rem)] overflow-hidden rounded-box border border-base-300 bg-base-100 p-0 text-base-content shadow-xl backdrop:bg-transparent" role="dialog" aria-modal="true" aria-labelledby="project-selector-heading" data-project-selector-dialog>
+				<span id="project-selector-current-label" class="min-w-0 truncate">{ sidebarProjectDisplayName(projects, currentProjectID) }</span>
+			</button>				<dialog id="project-selector-dialog" class="sidebar-project-dialog fixed m-0 max-h-[min(32rem,calc(100dvh-1rem))] w-[28rem] max-w-[calc(100vw-1rem)] overflow-hidden rounded-box border border-base-300 bg-base-100 p-0 text-base-content shadow-xl backdrop:bg-transparent" role="dialog" aria-modal="true" aria-labelledby="project-selector-heading" data-project-selector-dialog>
 					<div class="modal-box flex w-full max-w-none max-h-[inherit] min-h-0 flex-col overflow-hidden rounded-none bg-transparent p-0 shadow-none">
 						<div class="flex items-center justify-between gap-3 border-b border-base-300 px-4 py-3">
 							<h2 id="project-selector-heading" class="min-w-0 truncate text-base font-bold">Switch project</h2>
@@ -207,10 +205,8 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 
 					function positionSelector() {
 						if (!dialog.open) return;
-						var margin = 8, gap = 4, triggerRect = trigger.getBoundingClientRect();
-						var caret = trigger.querySelector('[data-project-selector-caret]');
-						var anchorLeft = caret ? caret.getBoundingClientRect().left : triggerRect.left;
-						dialog.style.maxHeight = '';
+					var margin = 8, gap = 4, triggerRect = trigger.getBoundingClientRect();
+					var anchorLeft = triggerRect.left;						dialog.style.maxHeight = '';
 						var width = dialog.offsetWidth, height = dialog.offsetHeight;
 						var left = Math.max(margin, Math.min(anchorLeft, window.innerWidth - width - margin));
 						var belowTop = triggerRect.bottom + gap, below = window.innerHeight - belowTop - margin, above = triggerRect.top - gap - margin;

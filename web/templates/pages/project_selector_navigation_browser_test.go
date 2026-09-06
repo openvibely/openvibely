@@ -79,6 +79,7 @@ window.addEventListener('DOMContentLoaded', function() {
     ['select', 'select-bordered', 'select-sm', 'w-full', 'sidebar-project-select'].forEach(function(className) {
       if (!trigger.classList.contains(className)) fail('collapsed selector lost its prior visual class: ' + className);
     });
+    if (trigger.querySelector('svg') || trigger.hasAttribute('data-project-selector-caret') || trigger.classList.contains('bg-none')) fail('collapsed selector replaced the original select arrow');
     if (document.querySelectorAll('[data-project-selector-option]').length !== 4) fail('all identity-only project options are not rendered');
 
     trigger.focus();
@@ -90,7 +91,7 @@ window.addEventListener('DOMContentLoaded', function() {
     var dialogRect = dialog.getBoundingClientRect();
     if (dialogRect.right > window.innerWidth + 1 || dialogRect.left < -1) fail('selector is not contained on the mobile viewport');
     if (Math.abs(dialogRect.top - (triggerRect.bottom + 4)) > 2) fail('selector popup is not attached below its trigger');
-    if (dialogRect.right < triggerRect.left || dialogRect.left > triggerRect.right) fail('selector popup does not overlap its trigger horizontally');
+    if (Math.abs(dialogRect.left - triggerRect.left) > 2) fail('selector popup is not aligned underneath its trigger');
     if (visibleOptions().length !== 4) fail('initial project options are not all visible');
 
     typeSearch(search, '  pAyMeNtS wEb  ');
