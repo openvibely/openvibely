@@ -295,7 +295,7 @@ func renderCollectionPageScripts(t *testing.T) string {
 }
 
 func TestAlertsEmptyStateRecognizesEveryActiveFilter(t *testing.T) {
-	for _, filter := range []struct{ key, value string }{{"read", "unread"}, {"severity", "error"}, {"decision_state", "pending"}, {"type", "custom"}, {"source", "native"}} {
+	for _, filter := range []struct{ key, value string }{{"read", "unread"}, {"severity", "error"}, {"decision_state", "pending"}, {"processing_state", "completed"}, {"implementation_task_linked", "true"}, {"type", "custom"}, {"source", "native"}} {
 		t.Run(filter.key, func(t *testing.T) {
 			state := pages.CardListState{Filters: map[string]string{filter.key: filter.value}}
 			var body bytes.Buffer
@@ -375,7 +375,7 @@ func TestCollectionHandlersRenderValidatedToolbarState(t *testing.T) {
 		{name: "skills", path: "/skills?project_id=" + project.ID + "&enabled=true&scope=global&always_use=false&archived=false&source=global&sort=scope", contains: []string{`data-card-filter-chip="enabled"`, `data-card-filter-chip="scope"`, `data-card-filter-chip="always_use"`, `data-card-filter-chip="archived"`, `data-card-filter-chip="source"`, `<option value="scope" selected`}},
 		{name: "channels", path: "/channels?project_id=" + project.ID + "&type=webhook&connection_state=configured&webhook_enabled=true", contains: []string{`data-card-filter-chip="type"`, `data-card-filter-chip="connection_state"`, `data-card-filter-chip="webhook_enabled"`}},
 		{name: "personality", path: "/personality?project_id=" + project.ID + "&kind=custom&active=false&sort=name_desc", contains: []string{`data-card-filter-chip="kind"`, `data-card-filter-chip="active"`, `project_id=` + project.ID, `<option value="name_desc" selected`}},
-		{name: "alerts", path: "/alerts?project_id=" + project.ID + "&read=unread&severity=error&decision_state=pending&type=custom&source=native&processing_state=failed&sort=severity", contains: []string{`data-card-filter-chip="read"`, `data-card-filter-chip="severity"`, `data-card-filter-chip="decision_state"`, `data-card-filter-chip="type"`, `data-card-filter-chip="source"`, `<option value="severity" selected`, `processing_state=failed`}},
+		{name: "alerts", path: "/alerts?project_id=" + project.ID + "&read=unread&severity=error&decision_state=pending&type=custom&source=native&processing_state=failed&implementation_task_linked=false&sort=severity", contains: []string{`data-card-filter-chip="read"`, `data-card-filter-chip="severity"`, `data-card-filter-chip="decision_state"`, `data-card-filter-chip="processing_state"`, `data-card-filter-chip="implementation_task_linked"`, `data-card-filter-chip="type"`, `data-card-filter-chip="source"`, `<option value="severity" selected`}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -562,6 +562,7 @@ func TestEveryCollectionPageAcceptsAndRejectsItsFilterAndSortValues(t *testing.T
 	specs := map[string]pageSpec{
 		"alerts": {path: "/alerts?project_id=" + project.ID, filters: map[string][]string{
 			"read": {"read", "unread"}, "severity": {"info", "warning", "error"}, "decision_state": {"not_required", "pending", "approved", "rejected", "dismissed"},
+			"processing_state": {"not_applicable", "unclaimed", "claimed", "implementation_task_linked", "completed", "failed"}, "implementation_task_linked": {"true", "false"},
 			"type": {"task_failed", "task_needs_followup", "custom"}, "source": {"native"},
 		}, sorts: []string{"newest", "oldest", "severity", "unread_first"}, fallback: "newest"},
 		"automations": {path: "/automations?project_id=" + project.ID, filters: map[string][]string{
@@ -671,22 +672,27 @@ func TestBulkIDsRequestValidation(t *testing.T) {
 
 func TestAlertListFilterAllowlistedValues(t *testing.T) {
 	e := echo.New()
-	accepted := "/alerts?read=unread&severity=error&decision_state=approved&type=custom&source=native&sort=severity"
+	accepted := "/alerts?read=unread&severity=error&decision_state=approved&processing_state=completed&implementation_task_linked=true&type=custom&source=native&sort=severity"
 	ctx := e.NewContext(httptest.NewRequest(http.MethodGet, accepted, nil), httptest.NewRecorder())
 	filter := alertListFilter(ctx, parseCardPageRequest(ctx))
 	require.NotNil(t, filter.Read)
 	require.False(t, *filter.Read)
 	require.Equal(t, models.SeverityError, filter.Severity)
 	require.Equal(t, models.AlertDecisionApproved, filter.DecisionState)
+	require.Equal(t, models.AlertProcessingCompleted, filter.ProcessingState)
+	require.NotNil(t, filter.ImplementationTaskLinked)
+	require.True(t, *filter.ImplementationTaskLinked)
 	require.Equal(t, models.AlertCustom, filter.Type)
 	require.Equal(t, "native", filter.Source)
 	require.Equal(t, "severity", filter.Sort)
 
-	rejected := e.NewContext(httptest.NewRequest(http.MethodGet, "/alerts?read=maybe&severity=fatal&decision_state=queued&type=other&sort=title", nil), httptest.NewRecorder())
+	rejected := e.NewContext(httptest.NewRequest(http.MethodGet, "/alerts?read=maybe&severity=fatal&decision_state=queued&processing_state=queued&implementation_task_linked=maybe&type=other&sort=title", nil), httptest.NewRecorder())
 	filter = alertListFilter(rejected, parseCardPageRequest(rejected))
 	require.Nil(t, filter.Read)
 	require.Empty(t, filter.Severity)
 	require.Empty(t, filter.DecisionState)
+	require.Empty(t, filter.ProcessingState)
+	require.Nil(t, filter.ImplementationTaskLinked)
 	require.Empty(t, filter.Type)
 	require.Equal(t, "newest", filter.Sort)
 }
