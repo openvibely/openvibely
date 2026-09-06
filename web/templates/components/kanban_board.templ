@@ -187,7 +187,7 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 								hx-post={ fmt.Sprintf("/tasks/completed/sort?project_id=%s&sort=title_asc", projectID) }
 								hx-target="#kanban-board"
 								hx-swap="outerHTML"
-								class={ "text-sm min-h-11", isSortActive(completedSort, "title_asc") }
+								class={ isSortActive(completedSort, "title_asc") }
 							>
 								<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12"></path>
@@ -200,7 +200,7 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 								hx-post={ fmt.Sprintf("/tasks/completed/sort?project_id=%s&sort=title_desc", projectID) }
 								hx-target="#kanban-board"
 								hx-swap="outerHTML"
-								class={ "text-sm min-h-11", isSortActive(completedSort, "title_desc") }
+								class={ isSortActive(completedSort, "title_desc") }
 							>
 								<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12"></path>
@@ -213,7 +213,7 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 								hx-post={ fmt.Sprintf("/tasks/completed/sort?project_id=%s&sort=completed_desc", projectID) }
 								hx-target="#kanban-board"
 								hx-swap="outerHTML"
-								class={ "text-sm min-h-11", isSortActive(completedSort, "completed_desc") }
+								class={ isSortActive(completedSort, "completed_desc") }
 							>
 								<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
@@ -226,7 +226,7 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 								hx-post={ fmt.Sprintf("/tasks/completed/sort?project_id=%s&sort=completed_asc", projectID) }
 								hx-target="#kanban-board"
 								hx-swap="outerHTML"
-								class={ "text-sm min-h-11", isSortActive(completedSort, "completed_asc") }
+								class={ isSortActive(completedSort, "completed_asc") }
 							>
 								<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
@@ -239,7 +239,7 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 								hx-post={ fmt.Sprintf("/tasks/completed/sort?project_id=%s&sort=priority_desc", projectID) }
 								hx-target="#kanban-board"
 								hx-swap="outerHTML"
-								class={ "text-sm min-h-11", isSortActive(completedSort, "priority_desc") }
+								class={ isSortActive(completedSort, "priority_desc") }
 							>
 								<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"></path>
@@ -252,7 +252,7 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 								hx-post={ fmt.Sprintf("/tasks/completed/sort?project_id=%s&sort=priority_asc", projectID) }
 								hx-target="#kanban-board"
 								hx-swap="outerHTML"
-								class={ "text-sm min-h-11", isSortActive(completedSort, "priority_asc") }
+								class={ isSortActive(completedSort, "priority_asc") }
 							>
 								<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"></path>
@@ -270,7 +270,7 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 									data-project-id={ projectID }
 									aria-label="Delete all completed tasks"
 									onclick="openDeleteAllTasksConfirm(this)"
-									class="text-error min-h-11"
+									class="text-error"
 								>
 									<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
@@ -296,7 +296,7 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 								hx-post={ fmt.Sprintf("/tasks/backlog/sort?project_id=%s&sort=title_asc", projectID) }
 								hx-target="#kanban-board"
 								hx-swap="outerHTML"
-								class={ "text-sm min-h-11", isSortActive(backlogSort, "title_asc") }
+								class={ isSortActive(backlogSort, "title_asc") }
 							>
 								<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12"></path>
@@ -309,7 +309,7 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 								hx-post={ fmt.Sprintf("/tasks/backlog/sort?project_id=%s&sort=title_desc", projectID) }
 								hx-target="#kanban-board"
 								hx-swap="outerHTML"
-								class={ "text-sm min-h-11", isSortActive(backlogSort, "title_desc") }
+								class={ isSortActive(backlogSort, "title_desc") }
 							>
 								<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12"></path>
@@ -322,7 +322,7 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 								hx-post={ fmt.Sprintf("/tasks/backlog/sort?project_id=%s&sort=created_desc", projectID) }
 								hx-target="#kanban-board"
 								hx-swap="outerHTML"
-								class={ "text-sm min-h-11", isSortActive(backlogSort, "created_desc") }
+								class={ isSortActive(backlogSort, "created_desc") }
 							>
 								<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
@@ -335,7 +335,7 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 								hx-post={ fmt.Sprintf("/tasks/backlog/sort?project_id=%s&sort=created_asc", projectID) }
 								hx-target="#kanban-board"
 								hx-swap="outerHTML"
-								class={ "text-sm min-h-11", isSortActive(backlogSort, "created_asc") }
+								class={ isSortActive(backlogSort, "created_asc") }
 							>
 								<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
@@ -348,7 +348,7 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 								hx-post={ fmt.Sprintf("/tasks/backlog/sort?project_id=%s&sort=priority_desc", projectID) }
 								hx-target="#kanban-board"
 								hx-swap="outerHTML"
-								class={ "text-sm min-h-11", isSortActive(backlogSort, "priority_desc") }
+								class={ isSortActive(backlogSort, "priority_desc") }
 							>
 								<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"></path>
@@ -361,7 +361,7 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 								hx-post={ fmt.Sprintf("/tasks/backlog/sort?project_id=%s&sort=priority_asc", projectID) }
 								hx-target="#kanban-board"
 								hx-swap="outerHTML"
-								class={ "text-sm min-h-11", isSortActive(backlogSort, "priority_asc") }
+								class={ isSortActive(backlogSort, "priority_asc") }
 							>
 								<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"></path>
@@ -377,7 +377,6 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 										hx-post={ fmt.Sprintf("/tasks/backlog/execute?project_id=%s", projectID) }
 										hx-target="#kanban-board"
 										hx-swap="outerHTML"
-										class="text-sm min-h-11"
 									>
 										<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path>
@@ -394,7 +393,7 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 												hx-target="#kanban-board"
 												hx-swap="outerHTML"
 												hx-confirm={ fmt.Sprintf("Execute %d %s priority backlog tasks?", count, strings.ToLower(PriorityLabel(priority))) }
-												class="text-sm pl-8 min-h-11"
+												class="pl-8"
 											>
 												{ fmt.Sprintf("Execute %s (%d)", PriorityLabel(priority), count) }
 											</button>
@@ -410,7 +409,7 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 									data-project-id={ projectID }
 									aria-label="Delete all backlog tasks"
 									onclick="openDeleteAllTasksConfirm(this)"
-									class="text-error min-h-11"
+									class="text-error"
 								>
 									<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>

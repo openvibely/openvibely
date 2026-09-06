@@ -91,9 +91,8 @@ func TestKanbanColumnHasMobileSafeWidthAndTouchMenu(t *testing.T) {
 		"h-11",
 		"w-11",
 		"max-w-[calc(100vw-2rem)]",
-		`class="text-sm min-h-11`,
 		`/tasks/backlog/execute?project_id=project-1`,
-		`class="text-sm pl-8 min-h-11`,
+		`class="pl-8"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("expected responsive kanban column markup to contain %q, got %s", want, body)
@@ -117,8 +116,8 @@ func TestKanbanColumnHasMobileSafeWidthAndTouchMenu(t *testing.T) {
 	if len(executeSnippet) > 500 {
 		executeSnippet = executeSnippet[:500]
 	}
-	if !strings.Contains(executeSnippet, `class="text-sm min-h-11"`) {
-		t.Fatalf("expected backlog Execute All action to have touch-friendly min height, got %s", executeSnippet)
+	if strings.Contains(executeSnippet, "min-h-11") || strings.Contains(executeSnippet, "text-sm") {
+		t.Fatalf("backlog menu actions must use standard compact menu-row sizing, got %s", executeSnippet)
 	}
 	if strings.Contains(executeSnippet, "hx-confirm") {
 		t.Fatalf("expected backlog Execute All action to submit without confirmation, got %s", executeSnippet)
