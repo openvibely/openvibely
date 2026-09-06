@@ -257,7 +257,7 @@ func (s *LLMService) taskActionRuntimeTools(ctx context.Context, task models.Tas
 		AfterPRFeedbackForwarded: s.promoteQueuedTaskThreadAfterCompletion,
 		SuppressIssueComments:    automationBound,
 	})
-	return llmcontracts.CompositeRuntimeTools(s.taskSendMessageRuntimeTools(task), s.taskControlRuntimeToolsWithContext(ctx, task), githubTools, s.automationBootstrapRuntimeTools(ctx, task))
+	return llmcontracts.CompositeRuntimeTools(s.taskSendMessageRuntimeTools(task), s.taskControlRuntimeTools(task), githubTools, s.automationBootstrapRuntimeTools(ctx, task))
 }
 
 func (s *LLMService) AutomationGitHubRuntimeTools(ctx context.Context, task models.Task, defs []llmcontracts.RuntimeToolDefinition) *llmcontracts.RuntimeTools {
@@ -395,42 +395,9 @@ func (s *LLMService) automationBootstrapRuntimeTools(ctx context.Context, task m
 }
 
 func (s *LLMService) taskControlRuntimeTools(task models.Task) *llmcontracts.RuntimeTools {
-	return s.taskControlRuntimeToolsWithContext(context.Background(), task)
-}
-
-func (s *LLMService) isCurrentNativeInboxTask(ctx context.Context, task models.Task) bool {
-	if s == nil || s.automationRepo == nil {
-		return false
-	}
-	automationContext, ok := AutomationContextFromContext(ctx)
-	if !ok || automationContext.ProjectID != task.ProjectID {
-		return false
-	}
-	origin := strings.SplitN(strings.TrimSpace(task.CreatedVia), ":", 3)
-	if len(origin) != 3 || origin[0] != "automation" {
-		return false
-	}
-	for _, binding := range automationContext.Bindings {
-		if binding.AutomationID != origin[1] {
-			continue
-		}
-		current, err := s.automationRepo.IsCurrentActiveBinding(ctx, task.ProjectID, binding)
-		if err != nil || !current {
-			continue
-		}
-		node, err := s.automationRepo.GetNodeByKey(ctx, task.ProjectID, binding.AutomationID, binding.VersionID, origin[2])
-		if err == nil && node != nil && node.ID == binding.NodeID && node.Role == "native_inbox" {
-			return true
-		}
-	}
-	return false
-}
-
-func (s *LLMService) taskControlRuntimeToolsWithContext(ctx context.Context, task models.Task) *llmcontracts.RuntimeTools {
 	if s == nil || strings.TrimSpace(task.ProjectID) == "" {
 		return nil
 	}
-	nativeInbox := s.isCurrentNativeInboxTask(ctx, task)
 	defs := chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true)
 	filtered := make([]llmcontracts.RuntimeToolDefinition, 0, 5)
 	allowed := map[string]bool{
@@ -474,20 +441,12 @@ func (s *LLMService) taskControlRuntimeToolsWithContext(ctx context.Context, tas
 		if !allowed[name] {
 			continue
 		}
-		if name == "list_alerts" && (nativeInbox || task.Category == models.CategoryScheduled) {
+		if name == "list_alerts" && task.Category == models.CategoryScheduled {
 			var schema map[string]json.RawMessage
 			var properties map[string]json.RawMessage
 			if json.Unmarshal(def.Parameters, &schema) == nil && json.Unmarshal(schema["properties"], &properties) == nil {
-				if nativeInbox {
-					for property := range properties {
-						if property != "decision_state" && property != "implementation_task_linked" && property != "limit" && property != "offset" {
-							delete(properties, property)
-						}
-					}
-				} else {
-					delete(properties, "project_id")
-					delete(properties, "read")
-				}
+				delete(properties, "project_id")
+				delete(properties, "read")
 				if encodedProperties, err := json.Marshal(properties); err == nil {
 					schema["properties"] = encodedProperties
 					if encodedSchema, err := json.Marshal(schema); err == nil {
@@ -495,11 +454,7 @@ func (s *LLMService) taskControlRuntimeToolsWithContext(ctx context.Context, tas
 					}
 				}
 			}
-			if nativeInbox {
-				def.Description = "List notifications owned by this Native Approved Inbox. Use decision_state=approved and implementation_task_linked=false, plus stable pagination. Processing, read, type, source, and project filters are intentionally unavailable."
-			} else {
-				def.Description += " Uses the persisted caller task's project and includes both read and unread alerts."
-			}
+			def.Description += " Uses the persisted caller task's project and includes both read and unread alerts."
 		}
 		filtered = append(filtered, def)
 	}
