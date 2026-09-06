@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -854,6 +855,8 @@ func TestRegistry_AlertFlowActions(t *testing.T) {
 	var schema struct {
 		Required   []string `json:"required"`
 		Properties map[string]struct {
+			Type        any    `json:"type"`
+			Enum        []any  `json:"enum"`
 			Description string `json:"description"`
 		} `json:"properties"`
 	}
@@ -865,6 +868,16 @@ func TestRegistry_AlertFlowActions(t *testing.T) {
 			t.Fatalf("list_alerts must leave %s optional", required)
 		}
 	}
+	for _, property := range []string{"project_id", "decision_state", "processing_state", "type", "source", "read", "implementation_task_linked"} {
+		definition := schema.Properties[property]
+		types, ok := definition.Type.([]any)
+		if !ok || !slices.Contains(types, any("null")) {
+			t.Fatalf("list_alerts optional filter %s must accept null, got type %#v", property, definition.Type)
+		}
+		if len(definition.Enum) > 0 && !slices.Contains(definition.Enum, nil) {
+			t.Fatalf("list_alerts optional enum filter %s must accept null, got enum %#v", property, definition.Enum)
+		}
+	}
 	if description := schema.Properties["project_id"].Description; !strings.Contains(description, "Omit") || !strings.Contains(description, "persisted caller task") {
 		t.Fatalf("project_id omission contract missing from list_alerts schema: %q", description)
 	}
@@ -874,7 +887,7 @@ func TestRegistry_AlertFlowActions(t *testing.T) {
 	if description := schema.Properties["processing_state"].Description; !strings.Contains(description, "Omit") || !strings.Contains(description, "all processing states") {
 		t.Fatalf("processing-state omission contract missing from list_alerts schema: %q", description)
 	}
-	if description := Get("list_alerts").Description; !strings.Contains(description, "Native Approved Inbox") || !strings.Contains(description, "implementation_task_linked=false") || !strings.Contains(description, "omit processing_state") {
+	if description := Get("list_alerts").Description; !strings.Contains(description, "Native Approved Inbox") || !strings.Contains(description, "implementation_task_linked=false") || !strings.Contains(description, "omit or pass null for processing_state") {
 		t.Fatalf("Native inbox filter contract missing from list_alerts description: %q", description)
 	}
 }
