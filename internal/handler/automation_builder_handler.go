@@ -158,7 +158,6 @@ func (h *Handler) DuplicateAutomationBuilder(c echo.Context) error {
 
 func automationDuplicateName(name string) string {
 	const maxAutomationNameBytes = 200
-	sourceName := name
 	name = strings.TrimSpace(name)
 	withPrefix := func(prefix string) string {
 		truncated := name
@@ -168,10 +167,10 @@ func automationDuplicateName(name string) string {
 				truncated = truncated[:len(truncated)-1]
 			}
 		}
-		return prefix + truncated
+		return strings.TrimSpace(prefix + truncated)
 	}
 	duplicateName := withPrefix("Copy of ")
-	if duplicateName == sourceName || duplicateName == name {
+	if duplicateName == name {
 		return withPrefix("Copy 2 of ")
 	}
 	return duplicateName
