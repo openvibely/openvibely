@@ -18,6 +18,7 @@ import (
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/config"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/web/templates/layout"
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
@@ -434,18 +435,32 @@ func (h *Handler) UpdateProject(c echo.Context) error {
 		return h.projectErrorResponse(c, http.StatusBadRequest, err.Error())
 	}
 
+	recloneGitHubRepo := settings.RepoSource == "github"
+	if recloneGitHubRepo {
+		submittedRepo, err := service.ParseGitHubRepoURL(settings.RepoURL)
+		if err != nil {
+			return h.projectGitHubCloneErrorResponse(c, http.StatusBadRequest, err)
+		}
+		if p.RepoURL != "" {
+			if currentRepo, err := service.ParseGitHubRepoURL(p.RepoURL); err == nil {
+				recloneGitHubRepo = !strings.EqualFold(currentRepo.HTMLURL, submittedRepo.HTMLURL)
+			}
+		}
+	}
+
 	p.Name = settings.Name
 	p.Description = settings.Description
 	p.DefaultAgentConfigID = settings.DefaultAgentConfigID
 	p.MaxWorkers = settings.MaxWorkers
-	if settings.RepoSource == "github" {
-		p.RepoURL = settings.RepoURL
-		reclonedPath, normalizedURL, err := h.githubSvc.RecloneProjectRepo(c.Request().Context(), p.ID, currentRepoPath, p.RepoURL)
+	if recloneGitHubRepo {
+		reclonedPath, normalizedURL, err := h.githubSvc.RecloneProjectRepo(c.Request().Context(), p.ID, currentRepoPath, settings.RepoURL)
 		if err != nil {
 			return h.projectGitHubCloneErrorResponse(c, http.StatusBadRequest, err)
 		}
 		p.RepoPath = reclonedPath
 		p.RepoURL = normalizedURL
+	} else if settings.RepoSource == "github" {
+		p.RepoPath = currentRepoPath
 	} else if settings.PreserveLegacyLocalProject {
 		// Preserve existing local-path configuration for legacy projects when local paths
 		// are disabled in this environment.
