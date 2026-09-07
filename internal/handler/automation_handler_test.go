@@ -1971,6 +1971,35 @@ func TestAutomationBrowserRejectsForgedNewVisionDriverCandidateAndAllowsExisting
 	require.Equal(t, candidate.Description, stored.Automation.Description)
 }
 
+func TestAutomationDuplicateRejectsSavedVisionDriver(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().WithName("Vision Driver duplicate eligibility").Build()
+	automationRepo := repository.NewAutomationRepo(tc.db)
+	registry := service.NewAutomationAdapterRegistry()
+	drafts := service.NewAutomationDraftService(automationRepo, registry)
+	validator := service.NewAutomationSaveValidator(registry, drafts)
+	compiler := service.NewAutomationCompiler(automationRepo, tc.handler.taskSvc, tc.taskRepo, tc.scheduleRepo, validator)
+	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
+	tc.handler.SetAutomationBuilderServices(drafts, nil, validator, compiler, nil, service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo))
+
+	candidate, err := drafts.TemplateCandidate(service.AutomationAdapterVisionDriver)
+	require.NoError(t, err)
+	existing := seedExistingVisionDriverForHandler(t, tc, automationRepo, project.ID, candidate)
+
+	portfolio := tc.HTTP().Get("/automations?project_id=" + project.ID).Execute()
+	require.Equal(t, http.StatusOK, portfolio.Code, portfolio.Body.String())
+	require.NotContains(t, portfolio.Body.String(), `data-automation-card-duplicate="`+existing.Automation.ID+`"`)
+
+	live := tc.HTTP().Get(fmt.Sprintf("/automations/%s?project_id=%s", existing.Automation.ID, project.ID)).Execute()
+	require.Equal(t, http.StatusOK, live.Code, live.Body.String())
+	require.NotContains(t, live.Body.String(), `data-automation-live-duplicate`)
+
+	duplicate := tc.HTTP().Get(fmt.Sprintf("/automations/%s/duplicate?project_id=%s", existing.Automation.ID, project.ID)).Execute()
+	require.Equal(t, http.StatusNotFound, duplicate.Code, duplicate.Body.String())
+	require.NotContains(t, duplicate.Body.String(), candidate.Name)
+	require.NotContains(t, duplicate.Body.String(), candidate.Description)
+}
+
 func seedExistingVisionDriverForHandler(t *testing.T, tc *TestContext, automationRepo *repository.AutomationRepo, projectID string, candidate models.AutomationDraftCandidate) *models.AutomationDefinition {
 	t.Helper()
 	ctx := context.Background()
