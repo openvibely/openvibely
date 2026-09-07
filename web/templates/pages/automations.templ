@@ -107,7 +107,7 @@ templ automationsContent(cards []models.AutomationCard, currentProjectID string,
 													data-project-id={ currentProjectID }
 													onclick="event.stopPropagation(); openAutomationCardEdit(this)"
 												>Edit</button>
-											</li>											@automationCardDuplicateAction(card.Automation.ID, currentProjectID)
+										</li>											@automationCardDuplicateAction(card.Automation.ID, currentProjectID, card.Version.AdapterKey)
 											if card.TemplateUpdateAvailable {
 												<li>
 													<button
@@ -2266,7 +2266,7 @@ templ automationLiveMoreActions(graph models.AutomationLiveGraph, currentProject
 				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
 			</svg>
 		</label>
-			<ul tabindex="0" class="dropdown-content z-[100] menu w-48 rounded-box border border-base-300 bg-base-100 p-2 shadow">				@automationLiveDuplicateAction(graph.Automation.ID, currentProjectID)
+			<ul tabindex="0" class="dropdown-content z-[100] menu w-48 rounded-box border border-base-300 bg-base-100 p-2 shadow">				@automationLiveDuplicateAction(graph.Automation.ID, currentProjectID, graph.Version.AdapterKey)
 				if graph.TemplateUpdateAvailable {
 					<li><button type="button" data-automation-live-update-template onclick="document.getElementById('update-automation-template-modal').showModal()">Update to latest template</button></li>
 				}
@@ -2352,10 +2352,14 @@ templ automationEditableBreadcrumb(currentProjectID string, automationID string,
 	</nav>
 }
 
-templ automationCardDuplicateAction(automationID string, currentProjectID string) {
-	<li><a href={ templ.URL(fmt.Sprintf("/automations/%s/duplicate?project_id=%s", automationID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s/duplicate?project_id=%s", automationID, currentProjectID) } hx-target="#main-content" hx-push-url="true" data-automation-card-duplicate={ automationID } onclick="event.stopPropagation(); event.preventDefault(); window.openVibelyNavigate(this.getAttribute('href')); return false;">Duplicate</a></li>
+templ automationCardDuplicateAction(automationID string, currentProjectID string, adapterKey string) {
+	if adapterKey != "vision_driver" {
+		<li><a href={ templ.URL(fmt.Sprintf("/automations/%s/duplicate?project_id=%s", automationID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s/duplicate?project_id=%s", automationID, currentProjectID) } hx-target="#main-content" hx-push-url="true" data-automation-card-duplicate={ automationID } onclick="event.stopPropagation(); event.preventDefault(); window.openVibelyNavigate(this.getAttribute('href')); return false;">Duplicate</a></li>
+	}
 }
 
-templ automationLiveDuplicateAction(automationID string, currentProjectID string) {
-	<li><a href={ templ.URL(fmt.Sprintf("/automations/%s/duplicate?project_id=%s", automationID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s/duplicate?project_id=%s", automationID, currentProjectID) } hx-target="#main-content" hx-push-url="true" data-automation-live-duplicate onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;">Duplicate</a></li>
+templ automationLiveDuplicateAction(automationID string, currentProjectID string, adapterKey string) {
+	if adapterKey != "vision_driver" {
+		<li><a href={ templ.URL(fmt.Sprintf("/automations/%s/duplicate?project_id=%s", automationID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s/duplicate?project_id=%s", automationID, currentProjectID) } hx-target="#main-content" hx-push-url="true" data-automation-live-duplicate onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;">Duplicate</a></li>
+	}
 }
