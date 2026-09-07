@@ -157,16 +157,24 @@ func (h *Handler) DuplicateAutomationBuilder(c echo.Context) error {
 }
 
 func automationDuplicateName(name string) string {
-	const prefix = "Copy of "
 	const maxAutomationNameBytes = 200
+	sourceName := name
 	name = strings.TrimSpace(name)
-	if len(name) > maxAutomationNameBytes-len(prefix) {
-		name = name[:maxAutomationNameBytes-len(prefix)]
-		for !utf8.ValidString(name) {
-			name = name[:len(name)-1]
+	withPrefix := func(prefix string) string {
+		truncated := name
+		if len(truncated) > maxAutomationNameBytes-len(prefix) {
+			truncated = truncated[:maxAutomationNameBytes-len(prefix)]
+			for !utf8.ValidString(truncated) {
+				truncated = truncated[:len(truncated)-1]
+			}
 		}
+		return prefix + truncated
 	}
-	return prefix + name
+	duplicateName := withPrefix("Copy of ")
+	if duplicateName == sourceName || duplicateName == name {
+		return withPrefix("Copy 2 of ")
+	}
+	return duplicateName
 }
 
 func (h *Handler) EditAutomationBuilder(c echo.Context) error {
