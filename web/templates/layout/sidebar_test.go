@@ -103,7 +103,7 @@ func TestSidebar_ProjectSelectorSearchableAndIdentityOnly(t *testing.T) {
 		`id="project-selector-dialog"`, `role="dialog"`,
 		`aria-modal="true"`,
 		`id="project-selector-search"`,
-		`type="search"`,
+		`type="text"`,
 		`placeholder="Search projects"`,
 		`data-searchable-selector-search-shell`,
 		`class="card border border-base-300 bg-base-100 shadow-sm"`,
@@ -149,8 +149,8 @@ func TestSidebar_ProjectSelectorSearchableAndIdentityOnly(t *testing.T) {
 	if markupEnd < 0 {
 		t.Fatal("project selector shared controller script is missing")
 	}
-	if strings.Contains(html[:markupEnd], `data-project-selector-clear`) {
-		t.Fatal("project selector must use the same native search clear affordance as the breadcrumb selector")
+	if strings.Contains(html[:markupEnd], `data-project-selector-clear`) || strings.Contains(html[:markupEnd], `type="search"`) {
+		t.Fatal("project selector must not render a search clear affordance")
 	}
 	if strings.Contains(html, `listen(document, 'input'`) || strings.Contains(html, `listen(document, 'search'`) {
 		t.Fatal("local project search must use one direct shared-component event path, not duplicate delegated filtering")

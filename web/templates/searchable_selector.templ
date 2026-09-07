@@ -20,7 +20,7 @@ templ SearchableSelector(config SearchableSelectorConfig) {
 						<input
 							id={ config.ID + "-search" }
 							class={ SearchableSelectorSearchClass }
-							type="search"
+							type="text"
 							name="search"
 							placeholder={ "Search " + config.Kind + "s" }
 							autocomplete="off"
@@ -35,7 +35,7 @@ templ SearchableSelector(config SearchableSelectorConfig) {
 						<input
 							id={ config.ID + "-search" }
 							class={ SearchableSelectorSearchClass }
-							type="search"
+							type="text"
 							name="search"
 							placeholder={ "Search " + config.Kind + "s" }
 							autocomplete="off"
@@ -76,8 +76,9 @@ templ SearchableSelector(config SearchableSelectorConfig) {
 templ searchableSelectorScript() {
 	<script>
 		(function() {
-			var controllerVersion = 6;
+			var controllerVersion = 7;
 			var previousController = window.openVibelySearchableSelectorController;
+			document.querySelectorAll('[data-searchable-selector-search]').forEach(function(input) { input.type = 'text'; });
 			document.querySelectorAll('[data-project-selector-clear]').forEach(function(control) { control.remove(); });
 			if (previousController && previousController.version === controllerVersion) return;
 			if (previousController && previousController.abort) {

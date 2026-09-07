@@ -83,7 +83,7 @@ window.addEventListener('DOMContentLoaded', function() {
   }
   function clearSearch(input) {
     input.value = '';
-    input.dispatchEvent(new Event('search', {bubbles: true}));
+    input.dispatchEvent(new Event('input', {bubbles: true}));
   }
   function wait(ms) { return new Promise(function(resolve) { setTimeout(resolve, ms); }); }
   (async function() {
@@ -98,7 +98,8 @@ window.addEventListener('DOMContentLoaded', function() {
     document.body.appendChild(main);
     if (!root || !trigger || !dialog || !search || !select || !noMatch) fail('project selector fixture is incomplete');
     if (typeof search.oninput !== 'function' || typeof search.onsearch !== 'function') fail('project search is not directly wired like the breadcrumb search input');
-    if (document.querySelector('[data-project-selector-clear]')) fail('project selector renders a second clear control beside the native search clear affordance');
+    if (search.type !== 'text') fail('project selector search exposes a browser clear affordance');
+    if (document.querySelector('[data-project-selector-clear]')) fail('project selector renders a custom clear control');
     var taskDialog = document.querySelector('[data-breadcrumb-selector-dialog]');
     var taskPanel = taskDialog && taskDialog.firstElementChild;
     var projectPanel = dialog.firstElementChild;
