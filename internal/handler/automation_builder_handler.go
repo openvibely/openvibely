@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
@@ -125,6 +126,44 @@ func (h *Handler) BuildAutomationWeb(c echo.Context) error {
 
 func (h *Handler) applyAutomationTemplateDefaultModel(_ context.Context, _ string, candidate *models.AutomationDraftCandidate) {
 	service.ApplyAutomationTemplateDefaultModel(candidate)
+}
+
+func (h *Handler) DuplicateAutomationBuilder(c echo.Context) error {
+	if h.automationDraftSvc == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "automation builder unavailable")
+	}
+	ctx := c.Request().Context()
+	projectID, err := h.getCurrentProjectID(c)
+	if err != nil {
+		return err
+	}
+	opened, err := h.automationDraftSvc.LoadCurrentCandidate(ctx, projectID, c.Param("automationId"))
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "not found") {
+			return echo.NewHTTPError(http.StatusNotFound, "automation not found")
+		}
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	candidate := opened.Candidate
+	candidate.Name = automationDuplicateName(candidate.Name)
+	result, err := h.previewAutomationBuilderCandidate(ctx, projectID, candidate, nil)
+	if err != nil {
+		return err
+	}
+	return h.renderAutomationBuilder(c, models.AutomationBuilderPage{Result: *result, Source: "blank"})
+}
+
+func automationDuplicateName(name string) string {
+	const prefix = "Copy of "
+	const maxAutomationNameBytes = 200
+	name = strings.TrimSpace(name)
+	if len(name) > maxAutomationNameBytes-len(prefix) {
+		name = name[:maxAutomationNameBytes-len(prefix)]
+		for !utf8.ValidString(name) {
+			name = name[:len(name)-1]
+		}
+	}
+	return prefix + name
 }
 
 func (h *Handler) EditAutomationBuilder(c echo.Context) error {
