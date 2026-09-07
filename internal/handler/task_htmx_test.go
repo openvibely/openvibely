@@ -306,15 +306,20 @@ func TestHandler_SetBacklogSort_HTMXRouteRendersSortedBoard(t *testing.T) {
 
 func assertSortControlActive(t *testing.T, body string, sortQuery string) {
 	t.Helper()
-	start := strings.Index(body, sortQuery)
-	if start == -1 {
+	queryPosition := strings.Index(body, sortQuery)
+	if queryPosition == -1 {
 		t.Fatalf("sort control %q not found", sortQuery)
 	}
-	end := strings.Index(body[start:], "</a>")
-	if end == -1 {
-		t.Fatalf("sort control %q has no closing anchor", sortQuery)
+	start := strings.LastIndex(body[:queryPosition], "<button")
+	if start == -1 {
+		t.Fatalf("sort control %q has no opening button", sortQuery)
 	}
-	if control := body[start : start+end]; !strings.Contains(control, `class="text-sm min-h-11 active font-semibold"`) {
+	end := strings.Index(body[queryPosition:], "</button>")
+	if end == -1 {
+		t.Fatalf("sort control %q has no closing button", sortQuery)
+	}
+	control := body[start : queryPosition+end]
+	if !strings.Contains(control, `class="active font-semibold"`) {
 		t.Fatalf("sort control %q is not rendered active: %s", sortQuery, control)
 	}
 }
