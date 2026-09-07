@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -99,26 +98,25 @@ func TestProjectSelectorSearchesOnProductionRenderedPageInChrome(t *testing.T) {
 	}))
 	defer server.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, chrome,
+	cmd := exec.Command(chrome,
 		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
 		"--disable-dev-shm-usage", "--disable-extensions", "--no-first-run", "--no-default-browser-check",
 		"--user-data-dir="+filepath.Join(t.TempDir(), "project-selector-production-page-profile"),
 		"--window-size=1024,768", server.URL+"/tasks?project_id=default",
 	)
-	require.NoError(t, cmd.Start())
-	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
+	require.NoError(t, startHandlerBrowserProcess(cmd))
+	stopped := false
+	defer func() {
+		if !stopped {
+			stopHandlerBrowserProcess(cmd)
+		}
+	}()
 	select {
 	case outcome := <-result:
-		cancel()
-		<-done
+		stopHandlerBrowserProcess(cmd)
+		stopped = true
 		require.True(t, strings.HasPrefix(outcome, "pass:"), outcome)
-	case err := <-done:
-		require.NoError(t, err)
-		t.Fatal("Chrome exited before reporting production project search result")
-	case <-ctx.Done():
+	case <-time.After(45 * time.Second):
 		t.Fatal("production project search browser regression timed out")
 	}
 }

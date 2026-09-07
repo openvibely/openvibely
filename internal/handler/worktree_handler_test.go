@@ -891,13 +891,17 @@ func TestHandler_TaskBoardRecoversPendingAndBlockedBranchesForCreatePR(t *testin
 		if updated.WorktreePath != "" || updated.WorktreeBranch != "" {
 			t.Fatalf("%s card persisted request-local recovery metadata: %#v", task.Status, updated)
 		}
-		marker := `data-task-id="` + task.ID + `" data-project-id="` + project.ID + `" data-target-branch="main" data-merge-type="pr"`
-		markerIndex := strings.Index(rec.Body.String(), marker)
-		if markerIndex < 0 {
+		button := findButtonWithAttributes(rec.Body.String(),
+			`data-task-card-pr-action`,
+			`data-task-id="`+task.ID+`"`,
+			`data-project-id="`+project.ID+`"`,
+			`data-target-branch="main"`,
+			`data-merge-type="pr"`,
+		)
+		if button == "" {
 			t.Fatalf("%s card missing Create PR action", task.Status)
 		}
-		buttonIndex := strings.LastIndex(rec.Body.String()[:markerIndex], "<button")
-		if buttonIndex < 0 || strings.Contains(rec.Body.String()[buttonIndex:markerIndex], " disabled") {
+		if strings.Contains(button, " disabled") {
 			t.Fatalf("%s card disabled Create PR after conventional worktree recovery", task.Status)
 		}
 
@@ -917,6 +921,32 @@ func TestHandler_TaskBoardRecoversPendingAndBlockedBranchesForCreatePR(t *testin
 		if record == nil || record.PRState != "open" {
 			t.Fatalf("%s recovered Create PR did not persist open PR: %#v", task.Status, record)
 		}
+	}
+}
+
+func findButtonWithAttributes(body string, attributes ...string) string {
+	for remaining := body; ; {
+		start := strings.Index(remaining, "<button")
+		if start == -1 {
+			return ""
+		}
+		remaining = remaining[start:]
+		end := strings.Index(remaining, "</button>")
+		if end == -1 {
+			return ""
+		}
+		button := remaining[:end]
+		matches := true
+		for _, attribute := range attributes {
+			if !strings.Contains(button, attribute) {
+				matches = false
+				break
+			}
+		}
+		if matches {
+			return button
+		}
+		remaining = remaining[end+len("</button>"):]
 	}
 }
 
