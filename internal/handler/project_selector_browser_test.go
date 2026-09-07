@@ -65,9 +65,9 @@ func TestProjectSelectorSearchesOnProductionRenderedPageInChrome(t *testing.T) {
 			if (visible[0].dataset.projectName !== 'Swarm Workspace') fail('production project search did not paint only Swarm Workspace: ' + visible.map(function(option) { return option.dataset.projectName; }).join(','));
 			if (visible.some(function(option) { return option.dataset.projectName === 'Unrelated Workspace'; })) fail('production project search retained an unrelated row');
 			search.value = '';
-			search.dispatchEvent(new Event('search', {bubbles:true}));
+			search.dispatchEvent(new Event('input', {bubbles:true}));
 			await new Promise(function(resolve) { requestAnimationFrame(resolve); });
-			if (visibleOptions().length !== document.querySelectorAll('[data-project-selector-option]').length) fail('production native search clear did not restore every project');
+			if (visibleOptions().length !== document.querySelectorAll('[data-project-selector-option]').length) fail('production manual search clearing did not restore every project');
 			await report('pass', 'production project search filtered painted rows');
 		} catch (error) {
 			await report('fail', String(error && error.stack || error));
