@@ -13,6 +13,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/lifecycle"
@@ -654,6 +655,31 @@ func TestAutomationDuplicateOpensUnsavedDraftAndSavesIndependentCopy(t *testing.
 		require.Equal(t, http.StatusNotFound, response.Code, response.Body.String())
 		require.NotContains(t, response.Body.String(), sourceCandidate.Name)
 		require.NotContains(t, response.Body.String(), sourceCandidate.Description)
+	}
+}
+
+func TestAutomationDuplicateNameIsAlwaysDistinct(t *testing.T) {
+	const maxAutomationNameBytes = 200
+
+	tests := []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{name: "ordinary name", source: "Daily review", want: "Copy of Daily review"},
+		{name: "full length copy prefix collision", source: strings.Repeat("Copy of ", 25)},
+		{name: "multibyte truncation", source: strings.Repeat("界", 70)},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := automationDuplicateName(test.source)
+			if test.want != "" {
+				require.Equal(t, test.want, got)
+			}
+			require.NotEqual(t, test.source, got)
+			require.LessOrEqual(t, len(got), maxAutomationNameBytes)
+			require.True(t, utf8.ValidString(got))
+		})
 	}
 }
 
