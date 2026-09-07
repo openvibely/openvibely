@@ -351,28 +351,65 @@ func TestHandler_ProjectCapacityCollectionAndDetailUseIdenticalMapping(t *testin
 	require.True(t, h.workerSvc.TryAcquireProjectSlot(project.ID))
 	defer h.workerSvc.ReleaseProjectSlot(project.ID)
 	assertMatchingResponses(false, 0)
+
+	maxWorkers = 1
+	require.NoError(t, h.projectRepo.Update(ctx, project))
+	assertMatchingResponses(false, 0)
 }
 
-func TestHandler_GetProjectCapacity_ZeroLimitOmitsAvailableSlots(t *testing.T) {
-	h, e, _ := setupTestHandler(t)
-	ctx := context.Background()
+func TestHandler_ProjectCapacityInheritedLimitsOmitAvailableSlots(t *testing.T) {
+	tests := []struct {
+		name       string
+		maxWorkers *int
+		wantMax    string
+	}{
+		{name: "nil limit", maxWorkers: nil, wantMax: "null"},
+		{name: "zero limit", maxWorkers: func() *int { zero := 0; return &zero }(), wantMax: "0"},
+	}
 
-	project := &models.Project{Name: "Inherited Limit"}
-	require.NoError(t, h.projectSvc.Create(ctx, project))
-	zero := 0
-	project.MaxWorkers = &zero
-	require.NoError(t, h.projectRepo.Update(ctx, project))
-	h.workerSvc.SetProjectRepo(h.projectRepo)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h, e, _ := setupTestHandler(t)
+			ctx := context.Background()
 
-	req := httptest.NewRequest(http.MethodGet, "/api/capacity/projects/"+project.ID, nil)
-	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-	require.Equal(t, http.StatusOK, rec.Code)
+			project := &models.Project{Name: "Inherited Limit"}
+			require.NoError(t, h.projectSvc.Create(ctx, project))
+			if tt.maxWorkers != nil {
+				project.MaxWorkers = tt.maxWorkers
+				require.NoError(t, h.projectRepo.Update(ctx, project))
+			}
+			h.workerSvc.SetProjectRepo(h.projectRepo)
 
-	var raw map[string]json.RawMessage
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &raw))
-	assert.JSONEq(t, "0", string(raw["max_workers"]))
-	assert.NotContains(t, raw, "available_slots")
+			collectionReq := httptest.NewRequest(http.MethodGet, "/api/capacity/projects", nil)
+			collectionRec := httptest.NewRecorder()
+			e.ServeHTTP(collectionRec, collectionReq)
+			require.Equal(t, http.StatusOK, collectionRec.Code)
+
+			var collection []map[string]json.RawMessage
+			require.NoError(t, json.Unmarshal(collectionRec.Body.Bytes(), &collection))
+			var listed map[string]json.RawMessage
+			for _, candidate := range collection {
+				if string(candidate["id"]) == `"`+project.ID+`"` {
+					listed = candidate
+					break
+				}
+			}
+			require.NotNil(t, listed)
+			assert.JSONEq(t, tt.wantMax, string(listed["max_workers"]))
+			assert.NotContains(t, listed, "available_slots")
+
+			detailReq := httptest.NewRequest(http.MethodGet, "/api/capacity/projects/"+project.ID, nil)
+			detailRec := httptest.NewRecorder()
+			e.ServeHTTP(detailRec, detailReq)
+			require.Equal(t, http.StatusOK, detailRec.Code)
+
+			var detail map[string]json.RawMessage
+			require.NoError(t, json.Unmarshal(detailRec.Body.Bytes(), &detail))
+			assert.JSONEq(t, tt.wantMax, string(detail["max_workers"]))
+			assert.NotContains(t, detail, "available_slots")
+			assert.JSONEq(t, string(listed["has_capacity"]), string(detail["has_capacity"]))
+		})
+	}
 }
 
 func TestHandler_ProjectCapacityRepositoryErrors(t *testing.T) {
