@@ -658,6 +658,48 @@ func TestAutomationDuplicateOpensUnsavedDraftAndSavesIndependentCopy(t *testing.
 	}
 }
 
+func TestAutomationDuplicateNameRemainsDistinctAfterPreviewNormalization(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().WithName("Duplicate name boundary project").Build()
+	automationRepo := repository.NewAutomationRepo(tc.db)
+	registry := service.NewAutomationAdapterRegistry()
+	drafts := service.NewAutomationDraftService(automationRepo, registry)
+	validator := service.NewAutomationSaveValidator(registry, drafts)
+	compiler := service.NewAutomationCompiler(automationRepo, tc.handler.taskSvc, tc.taskRepo, tc.scheduleRepo, validator)
+	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
+	tc.handler.SetAutomationBuilderServices(drafts, nil, validator, compiler, nil, service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo))
+
+	sourceName := strings.TrimSpace(strings.Repeat("Copy of ", 25))
+	require.Len(t, sourceName, 199)
+	sourceCandidate := models.AutomationDraftCandidate{
+		SchemaVersion:  1,
+		Name:           sourceName,
+		AutomationType: "custom",
+		AdapterKey:     service.AutomationAdapterCustom,
+		Nodes: []models.AutomationDraftNode{{
+			Key: "schedule", Name: "Daily schedule", Type: models.AutomationNodeTrigger, Role: "fixed_schedule",
+			Config: map[string]any{"prompt": "Review one focused area.", "category": "scheduled", "priority": 2, "run_at": "09:00", "repeat_type": "daily", "repeat_interval": 1, "enabled": true},
+		}},
+	}
+	rawSource, err := json.Marshal(sourceCandidate)
+	require.NoError(t, err)
+	savedSource := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(url.Values{
+		"project_id": {project.ID}, "builder_source": {"blank"}, "candidate_json": {string(rawSource)}, "save_changes": {"true"},
+	}).Execute()
+	require.Equal(t, http.StatusNoContent, savedSource.Code, savedSource.Body.String())
+
+	var sourceAutomationID string
+	require.NoError(t, tc.db.QueryRow(`SELECT id FROM automations WHERE project_id = ? AND name = ?`, project.ID, sourceName).Scan(&sourceAutomationID))
+	opened := tc.HTMX().Get(fmt.Sprintf("/automations/%s/duplicate?project_id=%s", sourceAutomationID, project.ID)).Execute()
+	require.Equal(t, http.StatusOK, opened.Code, opened.Body.String())
+	duplicateName := automationCandidateFromResponse(t, opened).Name
+	require.NotEqual(t, sourceName, duplicateName)
+	require.True(t, strings.HasPrefix(duplicateName, "Copy 2 of "))
+	require.Equal(t, strings.TrimSpace(duplicateName), duplicateName)
+	require.LessOrEqual(t, len(duplicateName), 200)
+	require.True(t, utf8.ValidString(duplicateName))
+}
+
 func TestAutomationDuplicateNameIsAlwaysDistinct(t *testing.T) {
 	const maxAutomationNameBytes = 200
 
