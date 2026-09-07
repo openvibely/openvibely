@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -82,6 +84,111 @@ func TestCreateProject_GitHubImportRequiresService(t *testing.T) {
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected status 400, got %d", rec.Code)
+	}
+}
+
+func TestUpdateProject_GitHubImportPreservesUnchangedCheckout(t *testing.T) {
+	for _, repoURL := range []string{
+		"https://github.com/openvibely/openvibely",
+		"https://github.com/openvibely/openvibely/",
+		"https://github.com/openvibely/openvibely.git",
+	} {
+		t.Run(repoURL, func(t *testing.T) {
+			h, e, _ := setupTestHandler(t)
+			repoPath := t.TempDir()
+			markerPath := filepath.Join(repoPath, "untracked-marker")
+			if err := os.WriteFile(markerPath, []byte("preserve me"), 0o600); err != nil {
+				t.Fatalf("write checkout marker: %v", err)
+			}
+			project := &models.Project{
+				Name:        "Existing GitHub Project",
+				Description: "old description",
+				RepoPath:    repoPath,
+				RepoURL:     "https://github.com/openvibely/openvibely",
+			}
+			if err := h.projectSvc.Create(context.Background(), project); err != nil {
+				t.Fatalf("create project: %v", err)
+			}
+			h.SetGitHubService(&fakeGitHubService{
+				recloneFn: func(context.Context, string, string, string) (string, string, error) {
+					t.Fatal("unchanged GitHub repository must not be re-cloned")
+					return "", "", fmt.Errorf("cloning unavailable")
+				},
+			})
+
+			form := url.Values{}
+			form.Set("name", project.Name)
+			form.Set("description", "new description")
+			form.Set("repo_source", "github")
+			form.Set("repo_url", repoURL)
+			req := httptest.NewRequest(http.MethodPut, "/projects/"+project.ID, strings.NewReader(form.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusSeeOther {
+				t.Fatalf("expected status 303, got %d (%s)", rec.Code, rec.Body.String())
+			}
+			updated, err := h.projectSvc.GetByID(context.Background(), project.ID)
+			if err != nil {
+				t.Fatalf("fetch updated project: %v", err)
+			}
+			if updated.Description != "new description" {
+				t.Fatalf("expected description update, got %q", updated.Description)
+			}
+			if updated.RepoPath != repoPath || updated.RepoURL != project.RepoURL {
+				t.Fatalf("expected repository fields preserved, got path=%q url=%q", updated.RepoPath, updated.RepoURL)
+			}
+			if contents, err := os.ReadFile(markerPath); err != nil || string(contents) != "preserve me" {
+				t.Fatalf("expected checkout marker preserved, contents=%q err=%v", contents, err)
+			}
+		})
+	}
+}
+
+func TestUpdateProject_GitHubImportReclonesChangedRepository(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	project := &models.Project{
+		Name:     "Existing GitHub Project",
+		RepoPath: "/tmp/repos/existing",
+		RepoURL:  "https://github.com/openvibely/openvibely",
+	}
+	if err := h.projectSvc.Create(context.Background(), project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	calls := 0
+	h.SetGitHubService(&fakeGitHubService{
+		recloneFn: func(_ context.Context, projectID, currentRepoPath, repoURL string) (string, string, error) {
+			calls++
+			if projectID != project.ID || currentRepoPath != project.RepoPath || repoURL != "https://github.com/openvibely/other.git" {
+				t.Fatalf("unexpected re-clone arguments: id=%q path=%q url=%q", projectID, currentRepoPath, repoURL)
+			}
+			return "/tmp/repos/normalized", "https://github.com/openvibely/other", nil
+		},
+	})
+
+	form := url.Values{}
+	form.Set("name", project.Name)
+	form.Set("repo_source", "github")
+	form.Set("repo_url", "https://github.com/openvibely/other.git")
+	req := httptest.NewRequest(http.MethodPut, "/projects/"+project.ID, strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected status 303, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	if calls != 1 {
+		t.Fatalf("expected one re-clone, got %d", calls)
+	}
+	updated, err := h.projectSvc.GetByID(context.Background(), project.ID)
+	if err != nil {
+		t.Fatalf("fetch updated project: %v", err)
+	}
+	if updated.RepoPath != "/tmp/repos/normalized" || updated.RepoURL != "https://github.com/openvibely/other" {
+		t.Fatalf("expected normalized repository fields, got path=%q url=%q", updated.RepoPath, updated.RepoURL)
 	}
 }
 
