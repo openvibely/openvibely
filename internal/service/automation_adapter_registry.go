@@ -56,6 +56,10 @@ func CurrentAutomationTemplateRevision(adapterKey string) int {
 	}
 }
 
+func AutomationAdapterCanCreate(adapterKey string) bool {
+	return adapterKey != AutomationAdapterVisionDriver
+}
+
 func NewAutomationAdapterRegistry() *AutomationAdapterRegistry {
 	registry := &AutomationAdapterRegistry{adapters: make(map[string]AutomationAdapter)}
 	for _, adapter := range []AutomationAdapter{customAutomationAdapter(), nativeSDLCAdapter(), githubSDLCAdapter(), visionDriverAdapter()} {

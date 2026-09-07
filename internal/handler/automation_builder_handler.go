@@ -145,6 +145,9 @@ func (h *Handler) DuplicateAutomationBuilder(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	candidate := opened.Candidate
+	if !service.AutomationAdapterCanCreate(candidate.AdapterKey) {
+		return echo.NewHTTPError(http.StatusNotFound, "automation not found")
+	}
 	candidate.Name = automationDuplicateName(candidate.Name)
 	result, err := h.previewAutomationBuilderCandidate(ctx, projectID, candidate, nil)
 	if err != nil {
