@@ -519,6 +519,144 @@ func TestAutomationWebBuilderKeepsUnsavedChangesBrowserLocal(t *testing.T) {
 	require.Equal(t, "Review using the replacement instructions.", savedTaskPrompt)
 }
 
+func TestAutomationDuplicateOpensUnsavedDraftAndSavesIndependentCopy(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().WithName("Duplicate Automation Project").Build()
+	foreignProject := tc.CreateProject().WithName("Foreign Duplicate Project").Build()
+	automationRepo := repository.NewAutomationRepo(tc.db)
+	registry := service.NewAutomationAdapterRegistry()
+	drafts := service.NewAutomationDraftService(automationRepo, registry)
+	validator := service.NewAutomationSaveValidator(registry, drafts)
+	compiler := service.NewAutomationCompiler(automationRepo, tc.handler.taskSvc, tc.taskRepo, tc.scheduleRepo, validator)
+	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
+	tc.handler.SetAutomationBuilderServices(drafts, nil, validator, compiler, nil, service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo))
+
+	sourceCandidate := models.AutomationDraftCandidate{
+		SchemaVersion:  1,
+		Name:           "Daily review",
+		Description:    "Review the project every day.",
+		AutomationType: "custom",
+		AdapterKey:     service.AutomationAdapterCustom,
+		Nodes: []models.AutomationDraftNode{{
+			Key: "schedule", Name: "Daily schedule", Type: models.AutomationNodeTrigger, Role: "fixed_schedule",
+			Config:   map[string]any{"prompt": "Review one focused area.", "category": "scheduled", "priority": 2, "run_at": "09:00", "repeat_type": "daily", "repeat_interval": 1, "enabled": true},
+			Position: &models.AutomationDraftPoint{X: 24, Y: 48},
+		}},
+	}
+	rawSource, err := json.Marshal(sourceCandidate)
+	require.NoError(t, err)
+	savedSource := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(url.Values{
+		"project_id": {project.ID}, "builder_source": {"blank"}, "candidate_json": {string(rawSource)}, "save_changes": {"true"},
+	}).Execute()
+	require.Equal(t, http.StatusNoContent, savedSource.Code, savedSource.Body.String())
+
+	var sourceAutomationID, sourceVersionID, sourceNodeID, sourceTaskID, sourceScheduleID string
+	require.NoError(t, tc.db.QueryRow(`SELECT a.id, a.published_version_id, n.id
+		FROM automations a JOIN automation_nodes n ON n.version_id = a.published_version_id
+		WHERE a.project_id = ? AND n.node_key = 'schedule'`, project.ID).Scan(&sourceAutomationID, &sourceVersionID, &sourceNodeID))
+	require.NoError(t, tc.db.QueryRow(`SELECT resource_id FROM automation_definition_resources
+		WHERE automation_id = ? AND resource_type = 'task'`, sourceAutomationID).Scan(&sourceTaskID))
+	require.NoError(t, tc.db.QueryRow(`SELECT resource_id FROM automation_definition_resources
+		WHERE automation_id = ? AND resource_type = 'schedule'`, sourceAutomationID).Scan(&sourceScheduleID))
+	_, err = tc.db.Exec(`INSERT INTO automation_invocations
+		(project_id, automation_id, version_id, trigger_node_id, trigger_resource_type, trigger_resource_id, occurrence_key, status)
+		VALUES (?, ?, ?, ?, 'schedule', ?, 'duplicate-source-history', 'completed')`,
+		project.ID, sourceAutomationID, sourceVersionID, sourceNodeID, sourceScheduleID)
+	require.NoError(t, err)
+	sourceBefore, err := drafts.LoadCurrentCandidate(context.Background(), project.ID, sourceAutomationID)
+	require.NoError(t, err)
+
+	portfolio := tc.HTTP().Get("/automations?project_id=" + project.ID).Execute()
+	require.Equal(t, http.StatusOK, portfolio.Code, portfolio.Body.String())
+	require.Contains(t, portfolio.Body.String(), fmt.Sprintf(`data-automation-card-duplicate="%s"`, sourceAutomationID))
+	require.Contains(t, portfolio.Body.String(), fmt.Sprintf(`/automations/%s/duplicate?project_id=%s`, sourceAutomationID, project.ID))
+	live := tc.HTTP().Get(fmt.Sprintf("/automations/%s?project_id=%s", sourceAutomationID, project.ID)).Execute()
+	require.Equal(t, http.StatusOK, live.Code, live.Body.String())
+	require.Contains(t, live.Body.String(), `data-automation-live-duplicate`)
+
+	beforeCounts := map[string]int{}
+	for _, table := range []string{"automations", "automation_versions", "automation_definition_resources", "tasks", "schedules", "automation_invocations", "automation_work_items", "automation_activities"} {
+		beforeCounts[table] = tableCountHandler(t, tc, table)
+	}
+	duplicateURL := fmt.Sprintf("/automations/%s/duplicate?project_id=%s", sourceAutomationID, project.ID)
+	opened := tc.HTMX().Get(duplicateURL).Execute()
+	require.Equal(t, http.StatusOK, opened.Code, opened.Body.String())
+	require.Contains(t, opened.Body.String(), `hx-post="/automations/builder?project_id=`+project.ID+`"`)
+	require.NotContains(t, opened.Body.String(), `data-delete-automation-open`)
+	duplicateCandidate := automationCandidateFromResponse(t, opened)
+	require.Equal(t, "Copy of Daily review", duplicateCandidate.Name)
+	expectedDuplicate := sourceBefore.Candidate
+	expectedDuplicate.Name = "Copy of Daily review"
+	_, expectedDuplicate, err = compiler.PreviewSave(context.Background(), project.ID, expectedDuplicate)
+	require.NoError(t, err)
+	if expectedDuplicate.Edges == nil {
+		expectedDuplicate.Edges = []models.AutomationDraftEdge{}
+	}
+	rawExpectedDuplicate, err := json.Marshal(expectedDuplicate)
+	require.NoError(t, err)
+	rawOpenedDuplicate, err := json.Marshal(duplicateCandidate)
+	require.NoError(t, err)
+	require.JSONEq(t, string(rawExpectedDuplicate), string(rawOpenedDuplicate))
+	for table, count := range beforeCounts {
+		require.Equal(t, count, tableCountHandler(t, tc, table), "opening a duplicate must not change %s", table)
+	}
+
+	refreshed := tc.HTTP().Get(duplicateURL).Execute()
+	require.Equal(t, http.StatusOK, refreshed.Code, refreshed.Body.String())
+	require.Equal(t, duplicateCandidate, automationCandidateFromResponse(t, refreshed))
+	for table, count := range beforeCounts {
+		require.Equal(t, count, tableCountHandler(t, tc, table), "refreshing a duplicate must not change %s", table)
+	}
+
+	invalidCandidate := duplicateCandidate
+	invalidCandidate.Nodes = nil
+	rawInvalid, err := json.Marshal(invalidCandidate)
+	require.NoError(t, err)
+	invalidSave := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(url.Values{
+		"project_id": {project.ID}, "builder_source": {"blank"}, "candidate_json": {string(rawInvalid)}, "save_changes": {"true"},
+	}).Execute()
+	require.Equal(t, http.StatusOK, invalidSave.Code, invalidSave.Body.String())
+	require.Empty(t, invalidSave.Header().Get("HX-Redirect"))
+	for table, count := range beforeCounts {
+		require.Equal(t, count, tableCountHandler(t, tc, table), "invalid duplicate Save must not change %s", table)
+	}
+
+	rawDuplicate, err := json.Marshal(duplicateCandidate)
+	require.NoError(t, err)
+	savedDuplicate := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(url.Values{
+		"project_id": {project.ID}, "builder_source": {"blank"}, "candidate_json": {string(rawDuplicate)}, "save_changes": {"true"},
+	}).Execute()
+	require.Equal(t, http.StatusNoContent, savedDuplicate.Code, savedDuplicate.Body.String())
+
+	var duplicateAutomationID, duplicateTaskID, duplicateScheduleID string
+	require.NoError(t, tc.db.QueryRow(`SELECT id FROM automations WHERE project_id = ? AND name = ?`, project.ID, duplicateCandidate.Name).Scan(&duplicateAutomationID))
+	require.NotEqual(t, sourceAutomationID, duplicateAutomationID)
+	require.NoError(t, tc.db.QueryRow(`SELECT resource_id FROM automation_definition_resources
+		WHERE automation_id = ? AND resource_type = 'task'`, duplicateAutomationID).Scan(&duplicateTaskID))
+	require.NoError(t, tc.db.QueryRow(`SELECT resource_id FROM automation_definition_resources
+		WHERE automation_id = ? AND resource_type = 'schedule'`, duplicateAutomationID).Scan(&duplicateScheduleID))
+	require.NotEqual(t, sourceTaskID, duplicateTaskID)
+	require.NotEqual(t, sourceScheduleID, duplicateScheduleID)
+
+	sourceAfter, err := drafts.LoadCurrentCandidate(context.Background(), project.ID, sourceAutomationID)
+	require.NoError(t, err)
+	require.Equal(t, sourceBefore.Candidate, sourceAfter.Candidate)
+	var sourceInvocationCount, duplicateInvocationCount int
+	require.NoError(t, tc.db.QueryRow(`SELECT COUNT(*) FROM automation_invocations WHERE automation_id = ?`, sourceAutomationID).Scan(&sourceInvocationCount))
+	require.Equal(t, 1, sourceInvocationCount)
+	require.NoError(t, tc.db.QueryRow(`SELECT COUNT(*) FROM automation_invocations WHERE automation_id = ?`, duplicateAutomationID).Scan(&duplicateInvocationCount))
+	require.Zero(t, duplicateInvocationCount)
+
+	for _, response := range []*httptest.ResponseRecorder{
+		tc.HTTP().Get(fmt.Sprintf("/automations/%s/duplicate?project_id=%s", sourceAutomationID, foreignProject.ID)).Execute(),
+		tc.HTTP().Get(fmt.Sprintf("/automations/%s/duplicate?project_id=%s", "missing-automation", project.ID)).Execute(),
+	} {
+		require.Equal(t, http.StatusNotFound, response.Code, response.Body.String())
+		require.NotContains(t, response.Body.String(), sourceCandidate.Name)
+		require.NotContains(t, response.Body.String(), sourceCandidate.Description)
+	}
+}
+
 func TestAutomationTemplateBuilderAddsAndSavesCustomNodes(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("Template Custom Nodes Project").Build()

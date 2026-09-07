@@ -14,6 +14,8 @@ Open `/automations`, select `New Automation`, and choose a starting point.
 
 All three paths use the same builder and validation rules. Nothing becomes active until Save succeeds. Refreshing or navigating away discards unsaved edits.
 
+To reuse a saved design, open its card or Live actions menu and select `Duplicate`. Duplicate opens the same builder with the complete saved graph, an editable `Copy of <name>` default name, and no saved Automation identity. Opening, refreshing, or abandoning this draft creates nothing. Save validates and atomically creates a new Automation with independently owned Tasks and Schedules while leaving the source Automation and its lifecycle, resources, and history unchanged.
+
 ## Build The Graph
 
 The builder has three synchronized views.
