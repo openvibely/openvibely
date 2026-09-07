@@ -5794,7 +5794,7 @@ func TestSidebar_ProjectSelectorSearchTriggerAndFocusVisible(t *testing.T) {
 		`id="project-selector-dialog"`,
 		`class="fixed m-0`,
 		`id="project-selector-search"`,
-		`type="search"`,
+		`type="text"`,
 		`placeholder="Search projects"`,
 		`role="listbox"`,
 		`data-project-selector-option`,
