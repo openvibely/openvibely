@@ -84,6 +84,7 @@ func TestLLMHookInvoker_RenderAndCall(t *testing.T) {
 	in := HookInput{
 		TaskID:    "t1",
 		TaskRunID: "r1",
+		ProjectID: "project-1",
 		WorkDir:   "/repo",
 		SkillBody: "Recall memory then return context_block.",
 	}
@@ -114,6 +115,9 @@ func TestLLMHookInvoker_RenderAndCall(t *testing.T) {
 	}
 	if caller.lastWorkDir != "/repo" {
 		t.Fatalf("expected hook workDir to be passed to caller, got %q", caller.lastWorkDir)
+	}
+	if got := llmcontracts.DirectUsageProjectFromContext(caller.lastContext); got != "project-1" {
+		t.Fatalf("direct usage project = %q, want project-1", got)
 	}
 	// Validate the raw payload against the contract for sanity.
 	if err := ValidateOutput(hook.OutputContract, raw); err != nil {

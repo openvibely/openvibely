@@ -104,6 +104,7 @@ func (i *LLMHookInvoker) Invoke(ctx context.Context, hook models.AgentLifecycleH
 		return nil, err
 	}
 	callCtx := contextWithHookRuntimeTools(ctx, hook, agentDef)
+	callCtx = llmcontracts.WithDirectUsageProject(callCtx, input.ProjectID)
 	callCtx = llmcontracts.WithLifecycleHookCall(callCtx)
 	executionError, _ := input.Extras[ExecutionErrorKey].(string)
 	callCtx = WithHookAgent(callCtx, HookAgent{AgentID: hook.AgentID, SystemKind: systemKindForHookAgent(agentDef), Tools: hookAgentTools(agentDef), TaskID: input.TaskID, TaskRunID: input.TaskRunID, ExecutionError: executionError})
