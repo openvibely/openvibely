@@ -4859,28 +4859,28 @@ func createAlert(t *testing.T, h *Handler, projectID, title string) *models.Aler
 	return a
 }
 
-func assertAlertUpdate(t *testing.T, rec *httptest.ResponseRecorder) {
+func assertAlertBadgeUpdate(t *testing.T, rec *httptest.ResponseRecorder) {
 	t.Helper()
-	if hx := rec.Header().Get("HX-Trigger"); hx != "alertUpdate" {
-		t.Errorf("expected HX-Trigger 'alertUpdate', got %q", hx)
+	if hx := rec.Header().Get("HX-Trigger"); hx != "alertBadgeUpdate" {
+		t.Errorf("expected HX-Trigger 'alertBadgeUpdate', got %q", hx)
 	}
 }
 
-func TestHandler_MarkAlertRead_TriggersAlertUpdate(t *testing.T) {
+func TestHandler_MarkAlertRead_TriggersAlertBadgeUpdate(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	project := createProject(t, h, "Test Project")
 	alert := createAlert(t, h, project.ID, "Test Alert")
 
 	rec := htmxPost(e, "/alerts/"+alert.ID+"/read?project_id="+project.ID, nil)
 	assertCode(t, rec, http.StatusOK)
-	assertAlertUpdate(t, rec)
+	assertAlertBadgeUpdate(t, rec)
 	alerts, _ := h.alertSvc.ListByProject(context.Background(), project.ID, 100)
 	if len(alerts) != 1 || !alerts[0].IsRead {
 		t.Error("expected alert to be marked as read")
 	}
 }
 
-func TestHandler_MarkAllAlertsRead_TriggersAlertUpdate(t *testing.T) {
+func TestHandler_MarkAllAlertsRead_TriggersAlertBadgeUpdate(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	project := createProject(t, h, "Test Project")
 	for i := 1; i <= 3; i++ {
@@ -4889,14 +4889,14 @@ func TestHandler_MarkAllAlertsRead_TriggersAlertUpdate(t *testing.T) {
 
 	rec := htmxPost(e, "/alerts/read-all?project_id="+project.ID, nil)
 	assertCode(t, rec, http.StatusOK)
-	assertAlertUpdate(t, rec)
+	assertAlertBadgeUpdate(t, rec)
 	count, _ := h.alertSvc.CountUnread(context.Background(), project.ID)
 	if count != 0 {
 		t.Errorf("expected 0 unread, got %d", count)
 	}
 }
 
-func TestHandler_DeleteAlert_TriggersAlertUpdate(t *testing.T) {
+func TestHandler_DeleteAlert_TriggersAlertBadgeUpdate(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	ctx := context.Background()
 	project := createProject(t, h, "Test Project")
@@ -4906,7 +4906,7 @@ func TestHandler_DeleteAlert_TriggersAlertUpdate(t *testing.T) {
 	// Delete first alert
 	rec := htmxDelete(e, "/alerts/"+a1.ID+"?project_id="+project.ID)
 	assertCode(t, rec, http.StatusOK)
-	assertAlertUpdate(t, rec)
+	assertAlertBadgeUpdate(t, rec)
 	assertContains(t, rec, "Test Alert 2")
 	assertNotContains(t, rec, "Test Alert 1")
 	alerts, _ := h.alertSvc.ListByProject(ctx, project.ID, 100)
@@ -4924,7 +4924,7 @@ func TestHandler_DeleteAlert_TriggersAlertUpdate(t *testing.T) {
 	}
 }
 
-func TestHandler_DeleteAllAlerts_TriggersAlertUpdate(t *testing.T) {
+func TestHandler_DeleteAllAlerts_TriggersAlertBadgeUpdate(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	ctx := context.Background()
 	project := createProject(t, h, "Test Project")
@@ -4934,7 +4934,7 @@ func TestHandler_DeleteAllAlerts_TriggersAlertUpdate(t *testing.T) {
 
 	rec := htmxDelete(e, "/alerts?project_id="+project.ID)
 	assertCode(t, rec, http.StatusOK)
-	assertAlertUpdate(t, rec)
+	assertAlertBadgeUpdate(t, rec)
 	alerts, _ := h.alertSvc.ListByProject(ctx, project.ID, 100)
 	if len(alerts) != 0 {
 		t.Errorf("expected 0 alerts, got %d", len(alerts))
@@ -5960,7 +5960,7 @@ func TestSidebar_AlertsGroupedUnderSystem(t *testing.T) {
 		`hx-get="/alerts?project_id=`,
 		`id="alert-badge"`,
 		`hx-get="/alerts/unread-count?project_id=`,
-		`hx-trigger="load, every 30s, alertUpdate from:body"`,
+		`hx-trigger="load, every 30s, alertUpdate from:body, alertBadgeUpdate from:body"`,
 	}
 	for _, snippet := range requiredAlertsSnippets {
 		if !strings.Contains(body, snippet) {
