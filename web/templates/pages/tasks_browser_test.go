@@ -921,12 +921,13 @@ func TestThemeAwarePrimaryAndSecondaryActionColorsInChrome(t *testing.T) {
 		mode       string
 		id         string
 		wantHover  string
+		wantText   string
 		wantActive string
 	}{
-		{name: "native dark exact", mode: "dark", id: "openvibely-dark", wantHover: "rgb(212, 73, 175)"},
-		{name: "native dark server-rendered", mode: "dark", wantHover: "rgb(212, 73, 175)"},
-		{name: "native light exact", mode: "light", id: "openvibely-light", wantHover: "rgb(204, 204, 204)"},
-		{name: "native light server-rendered", mode: "light", wantHover: "rgb(204, 204, 204)"},
+		{name: "native dark exact", mode: "dark", id: "openvibely-dark", wantHover: "rgb(201, 208, 219)", wantText: "rgb(31, 41, 55)"},
+		{name: "native dark server-rendered", mode: "dark", wantHover: "rgb(201, 208, 219)", wantText: "rgb(31, 41, 55)"},
+		{name: "native light exact", mode: "light", id: "openvibely-light", wantHover: "rgb(204, 204, 204)", wantText: "rgb(59, 59, 59)"},
+		{name: "native light server-rendered", mode: "light", wantHover: "rgb(204, 204, 204)", wantText: "rgb(59, 59, 59)"},
 		{name: "imported", mode: "dark", id: "vscode-test", wantHover: "rgb(7, 8, 9)"},
 	}
 	secondarySelectors := []struct {
@@ -959,9 +960,10 @@ func TestThemeAwarePrimaryAndSecondaryActionColorsInChrome(t *testing.T) {
 				var hovered struct {
 					Background string `json:"background"`
 					Border     string `json:"border"`
+					Color      string `json:"color"`
 					Hovered    bool   `json:"hovered"`
 				}
-				if err := json.Unmarshal([]byte(evaluate(t, fmt.Sprintf(`JSON.stringify((function(){var b=document.querySelector(%q),s=getComputedStyle(b);return {background:s.backgroundColor,border:s.borderColor,hovered:b.matches(':hover')};})())`, control.selector))), &hovered); err != nil {
+				if err := json.Unmarshal([]byte(evaluate(t, fmt.Sprintf(`JSON.stringify((function(){var b=document.querySelector(%q),s=getComputedStyle(b);return {background:s.backgroundColor,border:s.borderColor,color:s.color,hovered:b.matches(':hover')};})())`, control.selector))), &hovered); err != nil {
 					t.Fatalf("decode hovered secondary-action styles: %v", err)
 				}
 				if !hovered.Hovered {
@@ -969,6 +971,9 @@ func TestThemeAwarePrimaryAndSecondaryActionColorsInChrome(t *testing.T) {
 				}
 				if hovered.Background != tc.wantHover || hovered.Border != tc.wantHover {
 					t.Fatalf("hover background/border = %s/%s, want historical %s", hovered.Background, hovered.Border, tc.wantHover)
+				}
+				if tc.wantText != "" && hovered.Color != tc.wantText {
+					t.Fatalf("hover text color = %s, want historical %s", hovered.Color, tc.wantText)
 				}
 				if tc.wantActive != "" {
 					call(t, "Input.dispatchMouseEvent", map[string]any{"type": "mousePressed", "x": normal.Center[0], "y": normal.Center[1], "button": "left", "clickCount": 1}, nil)

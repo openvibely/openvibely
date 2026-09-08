@@ -1389,12 +1389,12 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						background-color: #e24949;
 						border-color: #e24949;
 					}
-					/* Edit and equivalent secondary actions retain DaisyUI 4.12.14's
-					   historical native treatment. Exact imported themes own their states. */
+					/* Edit and equivalent secondary actions retain the historical native
+					   outlined treatment. Exact imported themes own their states. */
 					html[data-theme="dark"]:not([data-color-theme^="vscode-"]) .btn.ov-secondary-action:hover:where(:not(:disabled):not(.btn-disabled)) {
-						/* color-mix(in oklab, oklch(var(--s)) 90%, black) for the native dark palette. */
-						background-color: #d449af !important;
-						border-color: #d449af !important;
+						background-color: #c9d0db !important;
+						border-color: #c9d0db !important;
+						color: #1f2937 !important;
 					}
 					html[data-theme="light"]:not([data-color-theme^="vscode-"]) .btn.ov-secondary-action:hover:where(:not(:disabled):not(.btn-disabled)) {
 						background-color: var(--ov-l-border-contrast) !important;
