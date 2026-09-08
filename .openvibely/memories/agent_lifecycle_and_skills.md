@@ -4,7 +4,7 @@ type: project
 created: 2026-05-24
 updated: 2026-09-03
 source: after_complete
-source_id: 0b9f36d750a5cc527977c8a6f123ab95:f81ebdf834334c5a
+source_id: d06503a3e9b632d05f3d4e2e79c070f9:4b43c212ed868761
 confidence: high
 title: Agent Lifecycle and Skills
 ---
@@ -21,7 +21,7 @@ Agents and skill catalog:
 - Lifecycle model-facing `agent_list` uses a repository-owned compact summary projection with identity/filter fields and SQL-derived ordered skill names; it does not hydrate full prompt/tool/plugin/MCP/permission/model/source JSON. `InspectAgent`, `agent_view`, and configuration paths retain full detail reads.
 - Import normalization materializes YAML frontmatter with `name`, `description`, `kind: skill`, and `enabled: true` without clobbering valid fields. Browser dialog-to-declaration conversion is centralized; standalone saves reject agent-root declarations and agent-owned saves validate `agent.key` scope. `skill_import` is a write capability for skill/curation agents, not ordinary turns.
 - Bundled GitHub/Native autonomous-SDLC bootstrap skills are disabled by default and startup sync overwrites stale enabled copies. Their prompts remain available for deliberate management; maintained Automation owns its own prompt snapshots. Per-agent materialization uses the Agent's recorded `ProjectID`, including warm-cache refreshes, and must not create a project-B tree under project A.
-- Open gaps include duplicated plugin MCP resolution (`#806`), protected-agent plugin-install mutation bypass (`#846`), failed plugin materialization leaving cache directories discoverable as installed (`#937`), and marketplace import accepting manifest-controlled names that can escape the marketplace/plugin storage root and delete or overwrite unrelated plugin data (`#980`). Focused plugin and handler tests cover ordinary marketplace names but not malformed or path-like manifest names.
+- Open gaps include duplicated plugin MCP resolution (`#806`), protected-agent plugin-install mutation bypass (`#846`), failed plugin materialization leaving cache directories discoverable as installed (`#937`), marketplace import accepting manifest-controlled names that can escape the marketplace/plugin storage root and delete or overwrite unrelated plugin data (`#980`), and Agent deletion impact preview (`#1024`). Agent deletion currently clears the Agent reference from every associated queued, active, scheduled, and historical task before removing the profile; single and bulk confirmations do not show affected-task counts, status breakdowns, or examples. Focused plugin and handler tests cover ordinary marketplace names but not malformed or path-like manifest names.
 
 Project guidance and Skill Curator:
 - OpenVibely's required root `AGENTS.md`, `CLAUDE.md`, `PRACTICES.md`, and `guardrails.md` artifacts were removed. Static project guidance belongs in `.openvibely/skills/openvibely_project_guidance/SKILL.md`, indexed by `.openvibely/skills/SKILLS.md`, and selected through top-level `always_use` rather than hardcoded routing.

@@ -2,9 +2,9 @@
 name: openvibely_architecture
 type: project
 created: 2026-05-09
-updated: 2026-09-03
-source: consolidation
-source_id: memory_consolidation_2026-09-03
+updated: 2026-09-07
+source: after_complete
+source_id: b93ad900893a42ca145b13f60695032e:c822a46750a4e5c8
 confidence: high
 title: OpenVibely Architecture
 ---
@@ -25,6 +25,7 @@ SQLite and runtime state:
 
 Workers, tasks, and schedules:
 - `worker_settings.max_workers=0` means unlimited and the API/UI display `Unlimited`. Global, project, and model reservations are atomic and released on completion, failure, cancellation, claim failure, or panic. Project limits may be any positive integer, must not exceed a finite global limit, and are independent caps rather than a sum constraint; malformed, negative, nonnumeric, or out-of-range inputs fail before side effects. Empty/zero clears a project cap and an increase triggers dispatch; lowering the global limit does not cancel running work, but blocks new admissions at the actual global ceiling and flags stale project caps in the Workers UI. There is no environment override.
+- The project-capacity list/detail API handlers share one canonical project response mapper for project identity, running workers, capacity status, zero-clamped available slots, and queue count. Endpoint-specific project list/lookup errors and pending-count empty-map fallbacks remain local.
 - Repeat intervals are positive `1..365` for every recurrence unit across browser, repository, Automation, runtime, and channel paths. Direct schedule-handler coercion of malformed/overflow intervals or unsupported recurrence types remains open as `#116`.
 - Scheduled-task creation has an open orphan risk in `#947`: invalid or missing `run_at` can escape the expected HTTP-error path and persist a scheduled task without a schedule row. Validation must reject before task persistence and cover both no-task and no-schedule side effects. This is distinct from `#116`, `#169`, and `#357`.
 - Schedule timing belongs to schedule rows; execution assignment belongs to linked tasks. `tasks.agent_definition_id` is the primary Agent and `tasks.agent_id` is the model config. `clear_context_on_start` is schedule-owned and non-destructive; new schedules default true. `ScheduleActionService.CreateForTask` is the normalization boundary. One-time scheduling resets a terminal task to pending unless running and initially uses `NextRun=RunAt`, including past recurring run times.
@@ -41,12 +42,14 @@ OAuth, hosted deployment, and Docker:
 Reflection, ownership, and handlers:
 - Reflection `hour`, `day`, and `week` are rolling windows; `day` means the last 24 hours. Change statistics prefer app-produced `task_commit_stats` and use Git only for the true pre-stats range. Shared bounded numstat parsing covers task output, safety, dirty-worktree, merge/squash, conflict, rebase, and GitHub publication commits; fast-forward merges add no extra row, and generated artifacts later absent from the maintained branch are pollution.
 - `internal/handler` is the Echo boundary: `handler.go` owns dependencies/routes while feature files own task, project, chat, model, auth, integration, SSE, worktree, HTMX, and API behavior.
+- GitHub-backed project update fix PR `#1031` is open for issue `#1022`, pending human review. The handler normalizes and compares repository identity before side effects: unchanged identities, including trailing-slash and `.git` spellings, preserve the managed checkout plus stored canonical URL/path without calling `RecloneProjectRepo`; genuinely different repositories and local-to-GitHub transitions still re-clone and persist normalized values. Handler regressions cover clone-service unavailability, equivalent URLs, changed repositories, transitions, and filesystem marker preservation. A separate strict read-only audit on 2026-09-07 reviewed published PR head `f5fdcca47aab6b6433eb9a4368a35649351073fe` and found no material bugs, regressions, or missing acceptance requirements; tests were intentionally not rerun during the audit.
 - Compact project-aware projections are used for polling, metrics, detail lists, upcoming work, and the Schedule primary-Agent selector. The selector returns only `id`, `name`, and `model` after SQL filters enabled/selectable/non-archived/generated/project-or-global availability; full Agent reads remain for Task Detail/configuration.
 - Scheduler active admission uses compact `TaskRepo.ListActivePendingAdmissions` metadata and leaves authoritative full hydration to `WorkerService.dispatchNext`, preserving exclusions, ordering, swarm-parent routing, and claim semantics. `UpcomingRepo` shares canonical projections and a bounded helper across running, pending, and scheduled lists without changing response shapes.
 - Browser execution, review, lifecycle, goal, Insights, and configuration endpoints enforce project ownership before reading or mutating data and return controlled non-success responses without leaking prompts, outputs, skills, memory, events, goals, or analytics. Task-goal browser routes require an explicit non-empty `project_id` or selected-project boundary.
+- Project-scoped batch task category updates preflight the complete submitted ID set against the requested project before schedule/model-availability checks, worker submission, or mutation; foreign, missing, and mixed-project IDs fail without partial lifecycle, category, or display-order changes, while valid same-project Active and HTMX behavior remains unchanged.
 - Explicit task ID/title resolution is centralized in `internal/service/task_reference_resolver.go`; web/channel `current` normalization remains adapter-owned. Lifecycle activity is project-scoped and prompt-safe; realtime details belong in `realtime_and_frontend_patterns.md`.
 
 Diagnostics and development:
-- The repository targets Go `1.27.0`, canonicalized by `go.mod` and CI. Air is pinned to `v1.67.4`; `make dev` delegates to Air, and templ/Tailwind changes require their generators/watchers. `make build`, `make build-desktop`, and `make run` share conservative generated-output freshness checks, including Swagger inputs.
+- The repository targets Go `1.27.1`, canonicalized by `go.mod` and CI. Docker build/dev images and the README source-build requirement use the same patch version. Air is pinned to `v1.67.4`; `make dev` delegates to Air, and templ/Tailwind changes require their generators/watchers. `make build`, `make build-desktop`, and `make run` share conservative generated-output freshness checks, including Swagger inputs.
 - Uncached broad suites have recurring baseline failures, including server-bootstrap protected-agent/read-only-database setup and a clean-main schedule viewport test. Report exact failures with the narrower passing scope rather than claiming the broad suite passed.
 - `internal/applog` uses `Infof` for operational events and debug-gated `Debugf` for raw LLM/user content and high-frequency stream/SSE/diff/poll/provider traces. `internal/util/json.go` centralizes fenced/balanced JSON candidate extraction; callers retain schema validation and repair.
