@@ -739,7 +739,7 @@ func TestChatAutoScrollScript_RehydratesAssistantRawContentViaStreamingRenderer(
 	}
 	if !strings.Contains(content, "window.scheduleChatContentRender = function(container, textBuffer, yieldBetweenBatches)") ||
 		!strings.Contains(content, "if (window._chatContentRenderActive >= 1) return") ||
-		!strings.Contains(content, "while (next && (next.container._scheduledChatRender !== next || !next.container.isConnected))") {
+		!strings.Contains(content, "while (next && !isCurrentRequest(next))") {
 		t.Error("completed transcript hydration must serialize expensive renders")
 	}
 	if !strings.Contains(content, "window.scheduleChatElementRender(el, raw);") {
@@ -1048,6 +1048,7 @@ func TestChatContentRenderSchedulerSerializesAndRecovers(t *testing.T) {
 		"const delay = ms => new Promise(resolve => setTimeout(resolve, ms));\n" +
 		"(async function() {\n" +
 		"  const calls = [], controls = []; window.renderStreamingContent = function(c, text) { calls.push(text); return new Promise(function(resolve, reject) { controls.push({ resolve: resolve, reject: reject }); }); };\n" +
+		"  for (const versioned of [false, true]) { const stale = container(true, 'partial'); if (versioned) stale.setAttribute('data-raw-revision', 'old'); const pending = window.scheduleChatContentRender(stale, 'partial'); stale.raw = 'authoritative'; if (versioned) stale.setAttribute('data-raw-revision', 'new'); if (await pending !== false || calls.length || stale._scheduledChatRender) throw new Error('stale source render was not discarded: versioned=' + versioned); }\n" +
 		"  const first = container(true), second = container(true); const p1 = window.scheduleChatContentRender(first, 'first'), p2 = window.scheduleChatContentRender(second, 'second');\n" +
 		"  await delay(10); if (calls.join(',') !== 'first') throw new Error('renders were not serialized'); controls[0].resolve(true);\n" +
 		"  await delay(10); if (calls.join(',') !== 'first,second') throw new Error('second render did not drain'); controls[1].reject(new Error('failed'));\n" +
