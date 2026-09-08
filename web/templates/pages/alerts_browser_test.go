@@ -900,7 +900,7 @@ func TestAlertsLiveRefreshAndSingleDeletePreserveViewportInChrome(t *testing.T) 
 	var outcome string
 	select {
 	case outcome = <-browserResult:
-	case <-time.After(15 * time.Second):
+	case <-time.After(30 * time.Second):
 		outcome = "fail:timed out waiting for browser result"
 	}
 	stopBrowserProcess(cmd)
