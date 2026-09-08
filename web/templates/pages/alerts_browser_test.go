@@ -650,6 +650,16 @@ func TestAlertsLiveRefreshAndSingleDeletePreserveViewportInChrome(t *testing.T) 
 	  var transientTopJump = false;
 	  var stealSortFocusDuringRequest = false;
 	  var stealSortFocusAfterSwap = false;
+	  var focusTrace = [];
+	  ['focusin', 'focusout', 'htmx:beforeRequest', 'htmx:beforeSwap', 'htmx:afterSwap', 'htmx:afterSettle'].forEach(function(name) {
+	    document.addEventListener(name, function(event) {
+	      var state = window.openVibelyAlertsViewport || {};
+	      var saved = state.swap || state.settlingSwap;
+	      function describe(el) { return el && (el.id || el.tagName); }
+	      focusTrace.push({event:name, target:describe(event.target), active:describe(document.activeElement), saved:describe(saved && saved.persistentFocus), secondary:(document.querySelector('[data-card-query-secondary]') || {}).className});
+	      if (focusTrace.length > 40) focusTrace.shift();
+	    });
+	  });
 	  document.body.addEventListener('htmx:beforeRequest', function(event) {
 	    var target = event.detail && event.detail.target;
 	    if (stealSortFocusDuringRequest && target && target.id === 'alerts-live-results' && document.activeElement) {
@@ -794,6 +804,8 @@ func TestAlertsLiveRefreshAndSingleDeletePreserveViewportInChrome(t *testing.T) 
 	    if (!selectedCount || selectedCount.textContent.trim() !== '2 selected') fail('initial Alerts selection count was not updated');
 
 	    var filterButton = document.querySelector('[data-card-filters-button]');
+	    // Leave time to focus Sort after the swap but before the previous refresh settles.
+	    htmx.config.defaultSettleDelay = 200;
 	    if (!filterButton) fail('missing Alerts filter button');
 	    filterButton.click();
 	    var filterDropdown = filterButton.closest('.dropdown');
@@ -827,13 +839,17 @@ func TestAlertsLiveRefreshAndSingleDeletePreserveViewportInChrome(t *testing.T) 
 	    if (!sort) fail('missing Alerts sort control');
 	    sort.focus();
 	    if (document.activeElement !== sort) fail('Alerts sort control did not receive focus before live refresh');
+	    if (!window.openVibelyAlertsViewport.settlingSwap) fail('fixture missed the pending refresh settle');
+	    await waitFor(function() { return !window.openVibelyAlertsViewport.settlingSwap; }, 'previous Alerts refresh settle');
+	    if (document.activeElement !== sort) fail('previous Alerts refresh stole newly assigned Sort focus: ' + JSON.stringify(focusTrace));
 	    await fetch('/browser-add?kind=sort-open', {method:'POST'});
 	    stealSortFocusDuringRequest = true;
 	    stealSortFocusAfterSwap = true;
 	    htmx.trigger(document.body, 'alertUpdate');
 	    await waitFor(function() { return !!row('live-sort-open'); }, 'live refresh while Sort is open');
 	    if (!sort.isConnected) fail('live refresh replaced the active Alerts sort menu');
-	    await waitFor(function() { return document.activeElement === sort; }, 'active Alerts sort focus restoration');
+	    try { await waitFor(function() { return document.activeElement === sort; }, 'active Alerts sort focus restoration'); }
+	    catch (error) { fail(error.message + '\nFocus trace: ' + JSON.stringify(focusTrace)); }
 	    stealSortFocusDuringRequest = false;
 	    stealSortFocusAfterSwap = false;
 	    if (document.querySelectorAll('[data-alert-scroll-anchor="live-sort-open"]').length !== 1) fail('Alerts live refresh rendered the new alert more than once');
@@ -844,6 +860,7 @@ func TestAlertsLiveRefreshAndSingleDeletePreserveViewportInChrome(t *testing.T) 
 	</script>`
 	style := `<style>
 	body { margin: 0; }
+	.hidden { display: none !important; }
 	#alerts-container { box-sizing: border-box; height: 420px !important; overflow-y: auto !important; padding: 12px; }
 	[data-alert-scroll-anchor] { box-sizing: border-box; min-height: 132px; margin-bottom: 16px; }
 	</style>`
