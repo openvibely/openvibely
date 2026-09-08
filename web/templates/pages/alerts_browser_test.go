@@ -859,7 +859,7 @@ func TestAlertsLiveRefreshAndSingleDeletePreserveViewportInChrome(t *testing.T) 
 			w.WriteHeader(http.StatusNoContent)
 		case strings.HasPrefix(r.URL.Path, "/alerts/item-") && r.Method == http.MethodDelete:
 			deleteAlert(strings.TrimPrefix(r.URL.Path, "/alerts/"))
-			w.Header().Set("HX-Trigger", "alertUpdate")
+			w.Header().Set("HX-Trigger", "alertBadgeUpdate")
 			_, _ = w.Write([]byte(renderAlerts()))
 		case r.URL.Path == "/alerts/unread-count":
 			mu.Lock()

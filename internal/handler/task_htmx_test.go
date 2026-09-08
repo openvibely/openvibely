@@ -319,7 +319,25 @@ func assertSortControlActive(t *testing.T, body string, sortQuery string) {
 		t.Fatalf("sort control %q has no closing button", sortQuery)
 	}
 	control := body[start : queryPosition+end]
-	if !strings.Contains(control, `class="active font-semibold"`) {
+	classStart := strings.Index(control, `class="`)
+	if classStart == -1 {
+		t.Fatalf("sort control %q has no class attribute: %s", sortQuery, control)
+	}
+	classStart += len(`class="`)
+	classEnd := strings.Index(control[classStart:], `"`)
+	if classEnd == -1 {
+		t.Fatalf("sort control %q has an unterminated class attribute: %s", sortQuery, control)
+	}
+	classes := strings.Fields(control[classStart : classStart+classEnd])
+	hasClass := func(want string) bool {
+		for _, class := range classes {
+			if class == want {
+				return true
+			}
+		}
+		return false
+	}
+	if !hasClass("active") || !hasClass("font-semibold") {
 		t.Fatalf("sort control %q is not rendered active: %s", sortQuery, control)
 	}
 }
