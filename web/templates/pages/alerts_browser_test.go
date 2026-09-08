@@ -648,7 +648,14 @@ func TestAlertsLiveRefreshAndSingleDeletePreserveViewportInChrome(t *testing.T) 
 	  }
 	  var detectTransientTopJump = false;
 	  var transientTopJump = false;
+	  var stealSortFocusDuringRequest = false;
 	  var stealSortFocusAfterSwap = false;
+	  document.body.addEventListener('htmx:beforeRequest', function(event) {
+	    var target = event.detail && event.detail.target;
+	    if (stealSortFocusDuringRequest && target && target.id === 'alerts-live-results' && document.activeElement) {
+	      document.activeElement.blur();
+	    }
+	  });
 	  document.body.addEventListener('htmx:afterSwap', function(event) {
 	    var target = event.detail && event.detail.target;
 	    if (stealSortFocusAfterSwap && target && target.id === 'alerts-live-results' && document.activeElement) {
@@ -821,11 +828,13 @@ func TestAlertsLiveRefreshAndSingleDeletePreserveViewportInChrome(t *testing.T) 
 	    sort.focus();
 	    if (document.activeElement !== sort) fail('Alerts sort control did not receive focus before live refresh');
 	    await fetch('/browser-add?kind=sort-open', {method:'POST'});
+	    stealSortFocusDuringRequest = true;
 	    stealSortFocusAfterSwap = true;
 	    htmx.trigger(document.body, 'alertUpdate');
 	    await waitFor(function() { return !!row('live-sort-open'); }, 'live refresh while Sort is open');
 	    if (!sort.isConnected) fail('live refresh replaced the active Alerts sort menu');
 	    await waitFor(function() { return document.activeElement === sort; }, 'active Alerts sort focus restoration');
+	    stealSortFocusDuringRequest = false;
 	    stealSortFocusAfterSwap = false;
 	    if (document.querySelectorAll('[data-alert-scroll-anchor="live-sort-open"]').length !== 1) fail('Alerts live refresh rendered the new alert more than once');
 	    if (document.getElementById('alerts-container').getAttribute('data-card-pagination-has-more') !== document.getElementById('alerts-live-results').getAttribute('data-card-pagination-has-more')) fail('Alerts live refresh did not synchronize pagination state');

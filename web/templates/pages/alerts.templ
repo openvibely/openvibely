@@ -378,11 +378,20 @@ templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unrea
 				return candidates;
 			}
 
+			document.body.addEventListener('htmx:beforeRequest', function(event) {
+				var detail = event.detail || {};
+				var target = detail.target;
+				if (!target || (target.id !== 'alerts-content' && target.id !== 'alerts-live-results')) return;
+				state.requestFocus = {xhr: detail.xhr, control: document.activeElement};
+			});
+
 			document.body.addEventListener('htmx:beforeSwap', function(event) {
 				var target = event.detail && event.detail.target;
 				var root = document.getElementById('alerts-container');
 				if (!target || (target.id !== 'alerts-content' && target.id !== 'alerts-live-results') || !root) return;
-				var activeControl = document.activeElement;
+				var requestFocus = state.requestFocus;
+				var activeControl = requestFocus && requestFocus.xhr === event.detail.xhr ? requestFocus.control : document.activeElement;
+				state.requestFocus = null;
 
 				var rows = alertRows(root);
 				var rootRect = root.getBoundingClientRect();
