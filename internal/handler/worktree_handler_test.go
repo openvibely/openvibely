@@ -445,6 +445,11 @@ func TestHandler_TaskBoardRelationshipSnapshotSupportsShallowRepositories(t *tes
 
 func TestTaskCardRelationshipSnapshotDoesNotMaterializeLargeHistory(t *testing.T) {
 	repoDir := createHandlerTestGitRepo(t)
+	// This test creates enough loose objects to trigger Git's detached automatic
+	// maintenance on newer versions. Keep all repository writers synchronous so
+	// TempDir cleanup cannot race a background maintenance process.
+	runGit(t, repoDir, "config", "maintenance.auto", "false")
+	runGit(t, repoDir, "config", "gc.auto", "0")
 	for i := 0; i < 256; i++ {
 		if err := os.WriteFile(filepath.Join(repoDir, "history.txt"), []byte(fmt.Sprintf("history %d\n", i)), 0o644); err != nil {
 			t.Fatal(err)
