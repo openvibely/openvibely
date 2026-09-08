@@ -54,8 +54,11 @@ You can drag scheduled items to another day/time slot.
 
 - Drop updates the task's schedule time.
 - Clicking a scheduled item opens task detail.
+- To move several schedules together, Command-click on macOS or Ctrl-click on Windows/Linux to select the scheduled items, then drag any selected item to the new slot.
 
 Only tasks with valid schedules can be dragged between time slots.
+
+Multi-select moves every selected schedule by the same date and time offset, preserving the spacing between them. Selection clears after the move completes.
 
 This is the fastest way to rebalance timing after priorities change.
 

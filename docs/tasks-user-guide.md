@@ -71,6 +71,7 @@ From each task card menu:
 - `Run` (when applicable)
 - `Cancel` (running tasks)
 - `Edit`
+- `Local` merge/rebase options and `GitHub` pull request actions for eligible worktree-backed tasks
 
 You can also delete directly from the card.
 
@@ -79,6 +80,8 @@ When to use:
 - `Run`: execute immediately.
 - `Cancel`: stop a long/incorrect run.
 - `Edit`: adjust prompt/model/priority before re-running.
+
+For an eligible worktree-backed task, open `Local` to choose a merge commit, fast-forward-only merge, rebase onto the target branch, or squash merge. Use `GitHub` to create or open the task's pull request. OpenVibely revalidates the task branch, target branch, worktree, and pull request state before applying an action. If the task is stale or conflicts, use the offered rebase or recovery action and review the refreshed state before retrying.
 
 ## Backlog and Completed Bulk Actions
 
