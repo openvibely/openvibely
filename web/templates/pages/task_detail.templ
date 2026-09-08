@@ -2466,7 +2466,8 @@ templ TaskDetailActions(task *models.Task) {
 		}
 		if task.Status != models.StatusRunning {
 			<button
-				class="btn btn-secondary btn-sm"
+				class="btn btn-secondary btn-sm ov-secondary-action"
+				data-task-detail-edit
 				onclick="document.getElementById('task-detail-view').classList.add('hidden'); document.getElementById('task-detail-edit').classList.remove('hidden')"
 			>
 				Edit
