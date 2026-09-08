@@ -476,6 +476,101 @@ func TestXCreatedViaCompletionWithoutAvailableServiceUsesStoredReplyContext(t *t
 	require.Len(t, alerts, 1)
 }
 
+func TestXCompletionPreOutboxFailureCreatesBoundaryAlert(t *testing.T) {
+	h, _, _, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	project := createProject(t, h, "X pre-outbox failure")
+	agent := &models.LLMConfig{Name: "X pre-outbox agent", Provider: models.ProviderTest, Model: "test"}
+	require.NoError(t, h.llmConfigRepo.Create(ctx, agent))
+	task := &models.Task{ProjectID: project.ID, Title: "Completed X task", Prompt: "work", Category: models.CategoryCompleted, Status: models.StatusCompleted, Priority: 2, AgentID: &agent.ID}
+	require.NoError(t, h.taskRepo.Create(ctx, task))
+	execution := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecCompleted, PromptSent: "work"}
+	require.NoError(t, h.execRepo.Create(ctx, execution))
+
+	api := &readyXSettingsAPI{accountID: "bot"}
+	svc := service.NewXService(service.XCredentials{ConsumerKey: "a", ConsumerSecret: "b", AccessToken: "c", AccessTokenSecret: "d"}, h.settingsRepo, h.projectRepo, h.llmConfigRepo, h.taskRepo, h.execRepo, h.scheduleRepo, h.taskSvc)
+	svc.SetAPI(api)
+	svc.SetRepositories(repository.NewXAuthRepo(db), repository.NewXUserProjectRepo(db), repository.NewXTaskContextRepo(db), repository.NewXInboundReceiptRepo(db), h.threadInputRepo)
+	require.NoError(t, svc.StartVerified(service.XUser{ID: "bot", Username: "openvibely"}))
+	t.Cleanup(svc.Stop)
+	h.SetXService(svc)
+	require.NoError(t, func() error {
+		_, err := db.Exec(`CREATE TRIGGER fail_x_reply_create BEFORE INSERT ON x_reply_deliveries
+			BEGIN SELECT RAISE(ABORT, 'forced outbox failure'); END`)
+		return err
+	}())
+	reply := service.ChannelReplyContext{Source: models.TaskOriginX, XAccountID: "bot", XReplyToTweetID: "origin-tweet"}
+
+	h.sendChannelResponse(ctx, execution.ID, task, reply, "completed response", "", 0)
+	h.sendChannelResponse(ctx, execution.ID, task, reply, "completed response", "", 0)
+	require.Empty(t, api.posted)
+	alerts, err := h.alertSvc.ListByProject(ctx, project.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, alerts, 1, "pre-outbox boundary alerts must be deduplicated")
+	require.Equal(t, "x_reply_delivery", alerts[0].Source)
+	require.Contains(t, alerts[0].Message, "forced outbox failure")
+}
+
+func TestXCreatedViaCompletionContextFailureCreatesBoundaryAlert(t *testing.T) {
+	h, _, _, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	project := createProject(t, h, "X context failure")
+	agent := &models.LLMConfig{Name: "X context failure agent", Provider: models.ProviderTest, Model: "test"}
+	require.NoError(t, h.llmConfigRepo.Create(ctx, agent))
+	task := &models.Task{ProjectID: project.ID, Title: "Completed X task", Prompt: "work", Category: models.CategoryCompleted, Status: models.StatusCompleted, Priority: 2, AgentID: &agent.ID, CreatedVia: models.TaskOriginX}
+	require.NoError(t, h.taskRepo.Create(ctx, task))
+	execution := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecCompleted, PromptSent: "work"}
+	require.NoError(t, h.execRepo.Create(ctx, execution))
+
+	api := &readyXSettingsAPI{accountID: "bot"}
+	svc := service.NewXService(service.XCredentials{ConsumerKey: "a", ConsumerSecret: "b", AccessToken: "c", AccessTokenSecret: "d"}, h.settingsRepo, h.projectRepo, h.llmConfigRepo, h.taskRepo, h.execRepo, h.scheduleRepo, h.taskSvc)
+	svc.SetAPI(api)
+	svc.SetRepositories(repository.NewXAuthRepo(db), repository.NewXUserProjectRepo(db), nil, repository.NewXInboundReceiptRepo(db), h.threadInputRepo)
+	require.NoError(t, svc.StartVerified(service.XUser{ID: "bot", Username: "openvibely"}))
+	t.Cleanup(svc.Stop)
+	h.SetXService(svc)
+
+	h.sendChannelResponse(ctx, execution.ID, task, service.ChannelReplyContext{}, "completed response", "", 0)
+	h.sendChannelResponse(ctx, execution.ID, task, service.ChannelReplyContext{}, "completed response", "", 0)
+	require.Empty(t, api.posted)
+	alerts, err := h.alertSvc.ListByProject(ctx, project.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, alerts, 1, "context boundary alerts must be deduplicated")
+	require.Equal(t, "x_reply_delivery", alerts[0].Source)
+	require.Contains(t, alerts[0].Message, "context persistence is not configured")
+}
+
+func TestXCompletionIntentionalNoSendDoesNotCreateBoundaryAlert(t *testing.T) {
+	h, _, _, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	project := createProject(t, h, "X intentional no-send")
+	agent := &models.LLMConfig{Name: "X no-send agent", Provider: models.ProviderTest, Model: "test"}
+	require.NoError(t, h.llmConfigRepo.Create(ctx, agent))
+	task := &models.Task{ProjectID: project.ID, Title: "Completed X task", Prompt: "work", Category: models.CategoryCompleted, Status: models.StatusCompleted, Priority: 2, AgentID: &agent.ID}
+	require.NoError(t, h.taskRepo.Create(ctx, task))
+	execution := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecCompleted, PromptSent: "work"}
+	require.NoError(t, h.execRepo.Create(ctx, execution))
+
+	api := &readyXSettingsAPI{accountID: "bot"}
+	svc := service.NewXService(service.XCredentials{ConsumerKey: "a", ConsumerSecret: "b", AccessToken: "c", AccessTokenSecret: "d"}, h.settingsRepo, h.projectRepo, h.llmConfigRepo, h.taskRepo, h.execRepo, h.scheduleRepo, h.taskSvc)
+	svc.SetAPI(api)
+	svc.SetRepositories(repository.NewXAuthRepo(db), repository.NewXUserProjectRepo(db), repository.NewXTaskContextRepo(db), repository.NewXInboundReceiptRepo(db), h.threadInputRepo)
+	require.NoError(t, svc.StartVerified(service.XUser{ID: "bot", Username: "openvibely"}))
+	t.Cleanup(svc.Stop)
+	h.SetXService(svc)
+
+	h.sendChannelResponse(ctx, execution.ID, task, service.ChannelReplyContext{Source: models.TaskOriginX, XAccountID: "other", XReplyToTweetID: "mismatch"}, "response", "", 0)
+	require.NoError(t, h.settingsRepo.Set(ctx, service.XSettingSendResponses, "false"))
+	h.sendChannelResponse(ctx, execution.ID, task, service.ChannelReplyContext{Source: models.TaskOriginX, XAccountID: "bot", XReplyToTweetID: "disabled"}, "response", "", 0)
+	require.NoError(t, h.settingsRepo.Set(ctx, service.XSettingSendResponses, "true"))
+	h.sendChannelResponse(ctx, execution.ID, task, service.ChannelReplyContext{Source: models.TaskOriginX, XAccountID: "bot", XReplyToTweetID: "empty"}, "  \t\n", "", 0)
+
+	require.Empty(t, api.posted)
+	alerts, err := h.alertSvc.ListByProject(ctx, project.ID, 10)
+	require.NoError(t, err)
+	require.Empty(t, alerts)
+}
+
 func TestXCompletionDeliveryFailureCreatesActionableRetryState(t *testing.T) {
 	h, _, _, db := setupTestHandlerWithDB(t)
 	ctx := context.Background()

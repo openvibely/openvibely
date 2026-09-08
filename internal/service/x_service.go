@@ -956,6 +956,8 @@ func CreateXCompletionBoundaryAlert(ctx context.Context, alertSvc *AlertService,
 	if alertSvc == nil || strings.TrimSpace(reply.ProjectID) == "" || strings.TrimSpace(reply.TaskID) == "" || strings.TrimSpace(reply.ExecutionID) == "" {
 		return
 	}
+	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
 	reason := fmt.Sprintf("X could not preserve or deliver the completed task reply. Delivery requires attention and the completed task will not be rerun automatically: %v", deliveryErr)
 	alert := &models.Alert{
 		ProjectID: reply.ProjectID, TaskID: &reply.TaskID, ExecutionID: &reply.ExecutionID, SourceTaskID: &reply.TaskID,
@@ -963,7 +965,7 @@ func CreateXCompletionBoundaryAlert(ctx context.Context, alertSvc *AlertService,
 		Message: reason, Body: reason, Source: "x_reply_delivery", IdempotencyKey: "x-reply-delivery-boundary:" + reply.ExecutionID + ":" + reply.ReplyToTweetID,
 		Metadata: map[string]any{"reply_to_tweet_id": reply.ReplyToTweetID},
 	}
-	if _, err := alertSvc.CreateActionable(ctx, alert); err != nil {
+	if _, err := alertSvc.CreateActionable(persistCtx, alert); err != nil {
 		applog.Infof("[x] failed to create completion boundary alert: %v", err)
 	}
 }
@@ -1538,7 +1540,7 @@ func xTextEntityRanges(text string) []xTextRange {
 // SendTaskCompletionNotification sends a completed active-task result to the
 // X conversation that created it. Chat tasks use SendChatResponse through the
 // interactive streaming path and must not be notified a second time here.
-func (s *XService) SendTaskCompletionNotification(ctx context.Context, task models.Task, output, errMsg string) {
+func (s *XService) SendTaskCompletionNotification(ctx context.Context, task models.Task, output, errMsg string) XReplyResult {
 	if task.CreatedVia != models.TaskOriginX && task.ID != "" && s.taskRepo != nil {
 		loaded, err := s.taskRepo.GetByID(ctx, task.ID)
 		if err == nil && loaded != nil {
@@ -1546,9 +1548,9 @@ func (s *XService) SendTaskCompletionNotification(ctx context.Context, task mode
 		}
 	}
 	if task.CreatedVia != models.TaskOriginX || task.Category == models.CategoryChat {
-		return
+		return XReplyResult{}
 	}
-	s.SendChatResponse(ctx, task, output, errMsg)
+	return s.SendChatResponse(ctx, task, output, errMsg)
 }
 
 func truncateXPost(v string) string {

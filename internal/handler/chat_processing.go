@@ -2153,14 +2153,19 @@ func (h *Handler) completeWithCancellation(execID, taskID, output string, tokens
 	h.sendChannelResponse(ctx, execID, task, reply, output, "cancelled", telegramMessageID)
 }
 
+func (h *Handler) handleXCompletionResult(ctx context.Context, reply service.XCompletionReply, result service.XReplyResult) {
+	if result.Err == nil {
+		return
+	}
+	if result.DeliveryID == "" {
+		service.CreateXCompletionBoundaryAlert(ctx, h.alertSvc, reply, result.Err)
+	}
+	applog.Infof("[handler] X completion reply delivery failed task=%s execution=%s: %v", reply.TaskID, reply.ExecutionID, result.Err)
+}
+
 func (h *Handler) preserveUnavailableXCompletion(ctx context.Context, reply service.XCompletionReply) {
 	result := service.PreserveUnavailableXCompletionReply(ctx, h.settingsRepo, h.xReplyDeliveryRepo, h.alertSvc, reply)
-	if result.Err != nil {
-		if result.DeliveryID == "" {
-			service.CreateXCompletionBoundaryAlert(ctx, h.alertSvc, reply, result.Err)
-		}
-		applog.Infof("[handler] X completion reply deferred task=%s execution=%s: %v", reply.TaskID, reply.ExecutionID, result.Err)
-	}
+	h.handleXCompletionResult(ctx, reply, result)
 }
 
 func (h *Handler) preserveUnavailableXTaskCompletion(ctx context.Context, execID string, task *models.Task, output, errMsg string) {
@@ -2224,9 +2229,7 @@ func (h *Handler) sendChannelResponse(ctx context.Context, execID string, task *
 		}
 		if xService := h.getXService(); xService != nil && xService.Status().Running {
 			result := xService.SendCompletionReply(ctx, completion)
-			if result.Err != nil {
-				applog.Infof("[handler] X completion reply delivery failed task=%s execution=%s: %v", task.ID, execID, result.Err)
-			}
+			h.handleXCompletionResult(ctx, completion, result)
 		} else {
 			h.preserveUnavailableXCompletion(ctx, completion)
 		}
@@ -2265,11 +2268,14 @@ func (h *Handler) sendChannelResponse(ctx context.Context, execID string, task *
 		}
 	case models.TaskOriginX:
 		if xService := h.getXService(); xService != nil && xService.Status().Running {
+			completion := service.XCompletionReply{TaskID: task.ID, ExecutionID: execID, ProjectID: task.ProjectID}
+			var result service.XReplyResult
 			if task.Category == models.CategoryChat {
-				xService.SendChatResponse(ctx, *task, output, errMsg)
+				result = xService.SendChatResponse(ctx, *task, output, errMsg)
 			} else {
-				xService.SendTaskCompletionNotification(ctx, *task, output, errMsg)
+				result = xService.SendTaskCompletionNotification(ctx, *task, output, errMsg)
 			}
+			h.handleXCompletionResult(ctx, completion, result)
 		} else {
 			h.preserveUnavailableXTaskCompletion(ctx, execID, task, output, errMsg)
 		}

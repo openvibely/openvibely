@@ -141,9 +141,24 @@ func (s *LLMService) sendXTaskCompletionNotification(ctx context.Context, task m
 	s.xServiceMu.RLock()
 	xSvc := s.xSvc
 	s.xServiceMu.RUnlock()
-	if xSvc != nil {
-		xSvc.SendTaskCompletionNotification(ctx, task, output, errMsg)
+	if xSvc == nil {
+		return
 	}
+	result := xSvc.SendTaskCompletionNotification(ctx, task, output, errMsg)
+	if result.Err == nil {
+		return
+	}
+	if result.DeliveryID == "" && s.execRepo != nil {
+		persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		execution, err := s.execRepo.GetLatestTerminalByTask(persistCtx, task.ID)
+		if err == nil && execution != nil {
+			CreateXCompletionBoundaryAlert(persistCtx, s.alertSvc, XCompletionReply{
+				TaskID: task.ID, ExecutionID: execution.ID, ProjectID: task.ProjectID,
+			}, result.Err)
+		}
+	}
+	applog.Infof("[llm-svc] X completion reply delivery failed task=%s: %v", task.ID, result.Err)
 }
 
 // SetFileChangeBroadcaster sets the file change broadcaster for real-time file change updates.
