@@ -1209,16 +1209,54 @@ func TestBuildChannelUtilityActionHandlersUpdateAutomationTemplate(t *testing.T)
 		AutomationDraftSvc: drafts,
 		AutomationCompiler: compiler,
 	})
+	assertAutomationSummary := func(output, field string) {
+		t.Helper()
+		cards, err := graphSvc.List(ctx, project.ID)
+		require.NoError(t, err)
+		require.Len(t, cards, 1)
+		expectedJSON, err := json.Marshal(AutomationCardSummary(cards[0]))
+		require.NoError(t, err)
+		var expected map[string]any
+		require.NoError(t, json.Unmarshal(expectedJSON, &expected))
+
+		var response map[string]any
+		require.NoError(t, json.Unmarshal([]byte(output), &response))
+		if field == "automations" {
+			automations, _ := response[field].([]any)
+			require.Len(t, automations, 1)
+			actual, _ := automations[0].(map[string]any)
+			require.Equal(t, expected, actual)
+			return
+		}
+		actual, _ := response[field].(map[string]any)
+		require.Equal(t, expected, actual)
+	}
+
+	emptyOut, err := channelListAutomationsResult(ctx, graphSvc, foreign.ID, nil)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"automations":[]}`, emptyOut)
+	unknownOut, err := handlers["get_automation"](ctx, json.RawMessage(`{"automation_id":"unknown"}`))
+	require.NoError(t, err)
+	var unknown map[string]any
+	require.NoError(t, json.Unmarshal([]byte(unknownOut), &unknown))
+	require.False(t, unknown["found"].(bool))
+	require.Contains(t, unknown["error"], `automation "unknown" not found in project `+project.ID)
+
 	listOut, err := handlers["list_automations"](ctx, nil)
 	require.NoError(t, err)
 	require.Contains(t, listOut, `"template_update_available":true`)
 	require.Contains(t, listOut, fmt.Sprintf(`"current_template_revision":%d`, currentRevision))
+	assertAutomationSummary(listOut, "automations")
+	getOut, err := handlers["get_automation"](ctx, json.RawMessage(fmt.Sprintf(`{"automation_id":%q}`, automationID)))
+	require.NoError(t, err)
+	assertAutomationSummary(getOut, "automation")
 
 	beforeGraphID := channelAutomationPublishedGraphID(t, db, automationID)
 	updateOut, err := handlers["update_automation_template"](ctx, json.RawMessage(`{"name":"Channel Native SDLC"}`))
 	require.NoError(t, err)
 	require.Contains(t, updateOut, `"applied":true`)
 	require.Contains(t, updateOut, fmt.Sprintf(`"template_revision":%d`, currentRevision))
+	assertAutomationSummary(updateOut, "automation")
 	afterGraphID := channelAutomationPublishedGraphID(t, db, automationID)
 	require.NotEqual(t, beforeGraphID, afterGraphID)
 
@@ -1226,6 +1264,7 @@ func TestBuildChannelUtilityActionHandlersUpdateAutomationTemplate(t *testing.T)
 	require.NoError(t, err)
 	require.Contains(t, currentOut, `"applied":false`)
 	require.Contains(t, currentOut, `"reason":"already_current"`)
+	assertAutomationSummary(currentOut, "automation")
 	require.Equal(t, afterGraphID, channelAutomationPublishedGraphID(t, db, automationID))
 
 	foreignCandidate := candidate
@@ -3218,6 +3257,53 @@ func TestChannelAlertResultHelpersPersistAndFormatAlerts(t *testing.T) {
 	require.Equal(t, models.AlertTaskFailed, alertType)
 }
 
+func TestAutomationCardSummaryPreservesPromptSafeContract(t *testing.T) {
+	templateRevision := 10
+	nextRun := time.Date(2026, 8, 22, 12, 30, 0, 0, time.FixedZone("offset", -5*3600))
+	lastRun := nextRun.Add(-time.Hour)
+	card := models.AutomationCard{
+		Automation:              models.Automation{ID: "auto-1", Name: "Nightly", LifecycleState: models.AutomationActive, TemplateRevision: &templateRevision},
+		Version:                 models.AutomationVersion{AdapterKey: AutomationAdapterNativeSDLC},
+		Counts:                  models.AutomationNodeCounts{Running: 2, Waiting: 3, Blocked: 1, Failed: 4, CompletedRecently: 5},
+		TemplateUpdateAvailable: true,
+		NextRun:                 &nextRun,
+		LastRun:                 &lastRun,
+	}
+
+	summary := AutomationCardSummary(card)
+	require.Equal(t, "auto-1", summary["id"])
+	require.Equal(t, "Nightly", summary["name"])
+	require.Equal(t, string(models.AutomationActive), summary["status"])
+	require.False(t, summary["paused"].(bool))
+	require.Equal(t, AutomationAdapterNativeSDLC, summary["adapter_key"])
+	require.True(t, summary["template_update_available"].(bool))
+	require.Equal(t, 15, summary["node_count"])
+	require.Equal(t, map[string]int{
+		"running":            2,
+		"waiting":            3,
+		"blocked":            1,
+		"failed":             4,
+		"completed_recently": 5,
+	}, summary["counts"])
+	require.Equal(t, templateRevision, summary["template_revision"])
+	require.Equal(t, CurrentAutomationTemplateRevision(AutomationAdapterNativeSDLC), summary["current_template_revision"])
+	require.Equal(t, "2026-08-22T17:30:00Z", summary["next_run"])
+	require.Equal(t, "2026-08-22T16:30:00Z", summary["last_run"])
+
+	paused := models.AutomationCard{
+		Automation: models.Automation{ID: "auto-2", LifecycleState: models.AutomationPaused},
+		Version:    models.AutomationVersion{AdapterKey: AutomationAdapterCustom},
+	}
+	pausedSummary := AutomationCardSummary(paused)
+	require.Equal(t, string(models.AutomationPaused), pausedSummary["status"])
+	require.True(t, pausedSummary["paused"].(bool))
+	require.False(t, pausedSummary["template_update_available"].(bool))
+	require.NotContains(t, pausedSummary, "template_revision")
+	require.NotContains(t, pausedSummary, "current_template_revision")
+	require.NotContains(t, pausedSummary, "next_run")
+	require.NotContains(t, pausedSummary, "last_run")
+}
+
 func TestChannelStatusAndAutomationSummaryHelpers(t *testing.T) {
 	targets := []models.ChannelTarget{
 		{Platform: " Slack ", TargetKind: "channel", Name: "alerts", Home: true},
@@ -3264,7 +3350,7 @@ func TestChannelStatusAndAutomationSummaryHelpers(t *testing.T) {
 		NextRun:    &nextRun,
 		LastRun:    &lastRun,
 	}
-	cardSummary := channelAutomationCardSummary(card)
+	cardSummary := AutomationCardSummary(card)
 	require.Equal(t, "auto-1", cardSummary["id"])
 	require.Equal(t, true, cardSummary["paused"])
 	require.Equal(t, "native", cardSummary["adapter_key"])
