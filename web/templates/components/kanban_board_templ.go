@@ -153,9 +153,9 @@ func hasEligibleBacklogTasks(tasks []models.Task) bool {
 
 func isSortActive(sortBy, option string) string {
 	if sortBy == option {
-		return "active font-semibold"
+		return "whitespace-nowrap active font-semibold"
 	}
-	return ""
+	return "whitespace-nowrap"
 }
 
 func KanbanBoard(tasks []models.Task, projectID string, backlogSort string, completedSort string, llmModels []models.LLMConfig, agentDefs []models.Agent, menuStates ...map[string]TaskCardMergeMenuState) templ.Component {
