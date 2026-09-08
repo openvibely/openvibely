@@ -127,7 +127,7 @@ func TestHandler_AlertMutationHTMXRefreshContract(t *testing.T) {
 		}
 		require.NoError(t, invoke(c))
 		assertCode(t, rec, http.StatusOK)
-		assertAlertUpdate(t, rec)
+		assertAlertBadgeUpdate(t, rec)
 		require.Contains(t, rec.Body.String(), `id="alerts-content"`)
 		return rec
 	}
@@ -523,7 +523,7 @@ func TestHandler_MarkAlertRead(t *testing.T) {
 		err := h.MarkAlertRead(c)
 		require.NoError(t, err)
 		assertCode(t, rec, http.StatusOK)
-		assertAlertUpdate(t, rec)
+		assertAlertBadgeUpdate(t, rec)
 
 		// Verify alert is marked as read
 		updatedAlert, err := h.alertSvc.GetByIDAdmin(context.Background(), alert.ID)
@@ -566,7 +566,7 @@ func TestHandler_MarkAlertRead(t *testing.T) {
 
 		err := h.MarkAlertRead(c)
 		require.NoError(t, err)
-		assertAlertUpdate(t, rec)
+		assertAlertBadgeUpdate(t, rec)
 	})
 }
 
@@ -588,7 +588,7 @@ func TestHandler_MarkAllAlertsRead(t *testing.T) {
 		err := h.MarkAllAlertsRead(c)
 		require.NoError(t, err)
 		assertCode(t, rec, http.StatusOK)
-		assertAlertUpdate(t, rec)
+		assertAlertBadgeUpdate(t, rec)
 		assertNotContains(t, rec, "badge-error badge-sm ml-2")
 
 		// Verify all alerts are marked as read
@@ -729,7 +729,7 @@ func TestHandler_DeleteAlert(t *testing.T) {
 		err := h.DeleteAlert(c)
 		require.NoError(t, err)
 		assertCode(t, rec, http.StatusOK)
-		assertAlertUpdate(t, rec)
+		assertAlertBadgeUpdate(t, rec)
 
 		// Response should contain updated list without deleted alert
 		assertNotContains(t, rec, alert1.Title)
@@ -750,7 +750,7 @@ func TestHandler_DeleteAlert(t *testing.T) {
 
 		err := h.DeleteAlert(c)
 		require.NoError(t, err)
-		assertAlertUpdate(t, rec)
+		assertAlertBadgeUpdate(t, rec)
 	})
 }
 
@@ -811,7 +811,7 @@ func TestHandler_DeleteAllAlerts(t *testing.T) {
 		err := h.DeleteAllAlerts(c)
 		require.NoError(t, err)
 		assertCode(t, rec, http.StatusOK)
-		assertAlertUpdate(t, rec)
+		assertAlertBadgeUpdate(t, rec)
 		assertContains(t, rec, "No alerts. You're all clear!")
 
 		// Verify all alerts are deleted
