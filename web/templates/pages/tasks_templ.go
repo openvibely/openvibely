@@ -169,7 +169,7 @@ func TasksContent(project *models.Project, tasks []models.Task, agents []models.
 			return templ_7745c5c3_Err
 		}
 		if project != nil {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "<div id=\"task_card_action_status\" class=\"hidden fixed bottom-4 right-4 z-[1000] alert alert-info w-auto max-w-[calc(100vw-2rem)] shadow-lg\" role=\"status\" aria-live=\"polite\" aria-atomic=\"true\"><span class=\"loading loading-spinner loading-sm\" data-task-card-action-spinner aria-hidden=\"true\"></span> <span data-task-card-action-status-label>Task action in progress…</span></div><script>\n\t\t\tfunction setTaskCardActionBusy(request) {\n\t\t\t\tvar status = document.getElementById('task_card_action_status');\n\t\t\t\tvar board = document.getElementById('kanban-board');\n\t\t\t\tif (board) {\n\t\t\t\t\tif (request) board.setAttribute('aria-busy', 'true');\n\t\t\t\t\telse board.removeAttribute('aria-busy');\n\t\t\t\t}\n\t\t\t\tif (!status) return;\n\t\t\t\tvar label = status.querySelector('[data-task-card-action-status-label]');\n\t\t\t\tif (label && request) label.textContent = (request.label || 'Task action') + ' in progress…';\n\t\t\t\tstatus.classList.toggle('hidden', !request);\n\t\t\t}\n\n\t\t\tfunction taskCardActionResponseHasToast(xhr) {\n\t\t\t\tif (!xhr || !xhr.getResponseHeader) return false;\n\t\t\t\treturn ['HX-Trigger', 'HX-Trigger-After-Swap', 'HX-Trigger-After-Settle'].some(function(header) {\n\t\t\t\t\tvar value = xhr.getResponseHeader(header);\n\t\t\t\t\tif (!value) return false;\n\t\t\t\t\ttry {\n\t\t\t\t\t\tvar payload = JSON.parse(value);\n\t\t\t\t\t\treturn !!(payload && Object.prototype.hasOwnProperty.call(payload, 'openvibelyToast'));\n\t\t\t\t\t} catch (_) {\n\t\t\t\t\t\treturn value.split(',').some(function(eventName) { return eventName.trim() === 'openvibelyToast'; });\n\t\t\t\t\t}\n\t\t\t\t});\n\t\t\t}\n\n\t\t\tfunction showTaskCardActionFallbackFailure(request, xhr) {\n\t\t\t\tvar status = xhr && xhr.status || 0;\n\t\t\t\tif (status >= 200 && status < 300) return;\n\t\t\t\tif (taskCardActionResponseHasToast(xhr) || !window.showToast) return;\n\t\t\t\tvar label = request.label || 'Task action';\n\t\t\t\twindow.showToast(label + ' could not be completed. Review the latest task state and try again.', 'failed', '', {\n\t\t\t\t\ttoastKey: 'task-card-action-failure-' + request.taskID + '-' + request.path\n\t\t\t\t});\n\t\t\t}\n\n\t\t\tfunction restoreTaskCardActionFocus(taskID) {\n\t\t\t\tvar card = document.getElementById('task-' + taskID);\n\t\t\t\tvar trigger = card && card.querySelector('[data-task-card-menu-trigger]');\n\t\t\t\tvar dropdown = trigger && trigger.closest('[data-kanban-menu-key]');\n\t\t\t\tif (window.closeKanbanMenu) window.closeKanbanMenu(dropdown, !!trigger);\n\t\t\t}\n\n\t\t\tfunction runTaskCardAction(button) {\n\t\t\t\tif (!button || !window.htmx || window._taskCardActionRequest) return;\n\t\t\t\tif (!button.hasAttribute('data-task-card-merge-action') && !button.hasAttribute('data-task-card-pr-action')) return;\n\t\t\t\tvar taskID = button.dataset.taskId || '';\n\t\t\t\tvar projectID = button.dataset.projectId || '';\n\t\t\t\tvar mode = button.dataset.mergeType || '';\n\t\t\t\tvar endpoint = button.dataset.mergeEndpoint || '';\n\t\t\t\tif (!taskID || !projectID || !mode || !endpoint) return;\n\t\t\t\tvar path = '/tasks/' + encodeURIComponent(taskID) + '/worktree/' + endpoint;\n\t\t\t\tvar dropdown = window.kanbanDropdownForTarget ? window.kanbanDropdownForTarget(button) : button.closest('[data-kanban-menu-key]');\n\t\t\t\twindow._taskCardActionRequest = {path: path, taskID: taskID, label: button.dataset.mergeLabel || 'Task action'};\n\t\t\t\tsetTaskCardActionBusy(window._taskCardActionRequest);\n\t\t\t\tif (window.closeKanbanMenu) window.closeKanbanMenu(dropdown, false);\n\t\t\t\thtmx.ajax('POST', path, {\n\t\t\t\t\ttarget: '#kanban-board',\n\t\t\t\t\tswap: 'outerHTML',\n\t\t\t\t\tvalues: {merge_type: mode, merge_source: 'task_card', project_id: projectID}\n\t\t\t\t});\n\t\t\t}\n\n\t\t\tif (!window._taskCardActionHandlerAttached) {\n\t\t\t\twindow._taskCardActionHandlerAttached = true;\n\t\t\t\tdocument.body.addEventListener('click', function(event) {\n\t\t\t\t\tvar button = event.target && event.target.closest ? event.target.closest('[data-task-card-merge-action], [data-task-card-pr-action]') : null;\n\t\t\t\t\tif (!button || button.disabled) return;\n\t\t\t\t\tevent.preventDefault();\n\t\t\t\t\trunTaskCardAction(button);\n\t\t\t\t}, true);\n\t\t\t\tdocument.body.addEventListener('htmx:afterRequest', function(event) {\n\t\t\t\t\tvar request = window._taskCardActionRequest;\n\t\t\t\t\tvar config = event.detail && event.detail.requestConfig;\n\t\t\t\t\tif (!request || !config || config.path !== request.path) return;\n\t\t\t\t\twindow._taskCardActionRequest = null;\n\t\t\t\t\tsetTaskCardActionBusy(null);\n\t\t\t\t\tshowTaskCardActionFallbackFailure(request, event.detail && event.detail.xhr);\n\t\t\t\t\twindow.dispatchEvent(new CustomEvent('kanban-refresh-unblocked'));\n\t\t\t\t\trestoreTaskCardActionFocus(request.taskID);\n\t\t\t\t});\n\t\t\t}\n\t\t</script>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "<script>\n\t\t\tfunction setTaskCardActionBoardBusy(busy) {\n\t\t\t\tvar board = document.getElementById('kanban-board');\n\t\t\t\tif (!board) return;\n\t\t\t\tif (busy) board.setAttribute('aria-busy', 'true');\n\t\t\t\telse board.removeAttribute('aria-busy');\n\t\t\t}\n\n\t\t\tfunction taskCardActionResponseHasToast(xhr) {\n\t\t\t\tif (!xhr || !xhr.getResponseHeader) return false;\n\t\t\t\treturn ['HX-Trigger', 'HX-Trigger-After-Swap', 'HX-Trigger-After-Settle'].some(function(header) {\n\t\t\t\t\tvar value = xhr.getResponseHeader(header);\n\t\t\t\t\tif (!value) return false;\n\t\t\t\t\ttry {\n\t\t\t\t\t\tvar payload = JSON.parse(value);\n\t\t\t\t\t\treturn !!(payload && Object.prototype.hasOwnProperty.call(payload, 'openvibelyToast'));\n\t\t\t\t\t} catch (_) {\n\t\t\t\t\t\treturn value.split(',').some(function(eventName) { return eventName.trim() === 'openvibelyToast'; });\n\t\t\t\t\t}\n\t\t\t\t});\n\t\t\t}\n\n\t\t\tfunction showTaskCardActionFallbackFailure(request, xhr) {\n\t\t\t\tvar status = xhr && xhr.status || 0;\n\t\t\t\tif (status >= 200 && status < 300) return;\n\t\t\t\tif (taskCardActionResponseHasToast(xhr) || !window.showToast) return;\n\t\t\t\tvar label = request.label || 'Task action';\n\t\t\t\twindow.showToast(label + ' could not be completed. Review the latest task state and try again.', 'failed', '', {\n\t\t\t\t\ttoastKey: 'task-card-action-failure-' + request.taskID + '-' + request.path\n\t\t\t\t});\n\t\t\t}\n\n\t\t\tfunction restoreTaskCardActionFocus(taskID) {\n\t\t\t\tvar card = document.getElementById('task-' + taskID);\n\t\t\t\tvar trigger = card && card.querySelector('[data-task-card-menu-trigger]');\n\t\t\t\tvar dropdown = trigger && trigger.closest('[data-kanban-menu-key]');\n\t\t\t\tif (window.closeKanbanMenu) window.closeKanbanMenu(dropdown, !!trigger);\n\t\t\t}\n\n\t\t\tfunction runTaskCardAction(button) {\n\t\t\t\tif (!button || !window.htmx || window._taskCardActionRequest) return;\n\t\t\t\tif (!button.hasAttribute('data-task-card-merge-action') && !button.hasAttribute('data-task-card-pr-action')) return;\n\t\t\t\tvar taskID = button.dataset.taskId || '';\n\t\t\t\tvar projectID = button.dataset.projectId || '';\n\t\t\t\tvar mode = button.dataset.mergeType || '';\n\t\t\t\tvar endpoint = button.dataset.mergeEndpoint || '';\n\t\t\t\tif (!taskID || !projectID || !mode || !endpoint) return;\n\t\t\t\tvar path = '/tasks/' + encodeURIComponent(taskID) + '/worktree/' + endpoint;\n\t\t\t\tvar dropdown = window.kanbanDropdownForTarget ? window.kanbanDropdownForTarget(button) : button.closest('[data-kanban-menu-key]');\n\t\t\t\twindow._taskCardActionRequest = {path: path, taskID: taskID, label: button.dataset.mergeLabel || 'Task action'};\n\t\t\t\tsetTaskCardActionBoardBusy(true);\n\t\t\t\tif (window.closeKanbanMenu) window.closeKanbanMenu(dropdown, false);\n\t\t\t\thtmx.ajax('POST', path, {\n\t\t\t\t\ttarget: '#kanban-board',\n\t\t\t\t\tswap: 'outerHTML',\n\t\t\t\t\tvalues: {merge_type: mode, merge_source: 'task_card', project_id: projectID}\n\t\t\t\t});\n\t\t\t}\n\n\t\t\tif (!window._taskCardActionHandlerAttached) {\n\t\t\t\twindow._taskCardActionHandlerAttached = true;\n\t\t\t\tdocument.body.addEventListener('click', function(event) {\n\t\t\t\t\tvar button = event.target && event.target.closest ? event.target.closest('[data-task-card-merge-action], [data-task-card-pr-action]') : null;\n\t\t\t\t\tif (!button || button.disabled) return;\n\t\t\t\t\tevent.preventDefault();\n\t\t\t\t\trunTaskCardAction(button);\n\t\t\t\t}, true);\n\t\t\t\tdocument.body.addEventListener('htmx:afterRequest', function(event) {\n\t\t\t\t\tvar request = window._taskCardActionRequest;\n\t\t\t\t\tvar config = event.detail && event.detail.requestConfig;\n\t\t\t\t\tif (!request || !config || config.path !== request.path) return;\n\t\t\t\t\twindow._taskCardActionRequest = null;\n\t\t\t\t\tsetTaskCardActionBoardBusy(false);\n\t\t\t\t\tshowTaskCardActionFallbackFailure(request, event.detail && event.detail.xhr);\n\t\t\t\t\twindow.dispatchEvent(new CustomEvent('kanban-refresh-unblocked'));\n\t\t\t\t\trestoreTaskCardActionFocus(request.taskID);\n\t\t\t\t});\n\t\t\t}\n\t\t</script>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -194,7 +194,7 @@ func TasksContent(project *models.Project, tasks []models.Task, agents []models.
 			var templ_7745c5c3_Var6 string
 			templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks?project_id=%s", project.ID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 211, Col: 63}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 195, Col: 63}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var6)
 			if templ_7745c5c3_Err != nil {
@@ -212,7 +212,7 @@ func TasksContent(project *models.Project, tasks []models.Task, agents []models.
 				var templ_7745c5c3_Var7 string
 				templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.ResolveAttributeValue(agent.ID)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 238, Col: 33}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 222, Col: 33}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var7)
 				if templ_7745c5c3_Err != nil {
@@ -225,7 +225,7 @@ func TasksContent(project *models.Project, tasks []models.Task, agents []models.
 				var templ_7745c5c3_Var8 string
 				templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(agent.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 239, Col: 22}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 223, Col: 22}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
 				if templ_7745c5c3_Err != nil {
@@ -263,7 +263,7 @@ func TasksContent(project *models.Project, tasks []models.Task, agents []models.
 					var templ_7745c5c3_Var9 string
 					templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.ResolveAttributeValue(ad.ID)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 253, Col: 31}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 237, Col: 31}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var9)
 					if templ_7745c5c3_Err != nil {
@@ -276,7 +276,7 @@ func TasksContent(project *models.Project, tasks []models.Task, agents []models.
 					var templ_7745c5c3_Var10 string
 					templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.ResolveAttributeValue(ad.Model)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 253, Col: 61}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 237, Col: 61}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var10)
 					if templ_7745c5c3_Err != nil {
@@ -289,7 +289,7 @@ func TasksContent(project *models.Project, tasks []models.Task, agents []models.
 					var templ_7745c5c3_Var11 string
 					templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.JoinStringErrs(ad.Name)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 254, Col: 20}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 238, Col: 20}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var11))
 					if templ_7745c5c3_Err != nil {
@@ -307,7 +307,7 @@ func TasksContent(project *models.Project, tasks []models.Task, agents []models.
 						var templ_7745c5c3_Var12 string
 						templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.JoinStringErrs(ad.Model)
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 256, Col: 23}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 240, Col: 23}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var12))
 						if templ_7745c5c3_Err != nil {
@@ -340,7 +340,7 @@ func TasksContent(project *models.Project, tasks []models.Task, agents []models.
 				var templ_7745c5c3_Var13 string
 				templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.ResolveAttributeValue(string(cat))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 267, Col: 37}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 251, Col: 37}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var13)
 				if templ_7745c5c3_Err != nil {
@@ -353,7 +353,7 @@ func TasksContent(project *models.Project, tasks []models.Task, agents []models.
 				var templ_7745c5c3_Var14 string
 				templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.JoinStringErrs(string(cat))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 268, Col: 24}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 252, Col: 24}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var14))
 				if templ_7745c5c3_Err != nil {
