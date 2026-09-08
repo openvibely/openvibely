@@ -888,7 +888,7 @@ func TestCodeRangeWorkerCanCompleteAfterFormerTimeoutInChrome(t *testing.T) {
 		elapsed     string
 		maxLongTask string
 	}
-	results := make(chan slowWorkerResult, 1)
+	results := make(chan slowWorkerResult, 8)
 	html := `<!doctype html><html><head><meta charset="utf-8"></head><body><main id="fixture-root"></main><script>` + renderedBaseMarkdownCodeHelpers(t) + `</script><script>
 	window.addEventListener('DOMContentLoaded', function() {
 	  var root = document.getElementById('fixture-root');
@@ -897,6 +897,9 @@ func TestCodeRangeWorkerCanCompleteAfterFormerTimeoutInChrome(t *testing.T) {
 	    if (error) root.setAttribute('data-test-error', error);
 	    fetch('/result?status=' + encodeURIComponent(status) + '&error=' + encodeURIComponent(error || '') + '&elapsed=' + encodeURIComponent(elapsed || '') + '&max_long_task=' + encodeURIComponent(maxLongTask || ''), {cache: 'no-store'});
 	  }
+	  window.addEventListener('error', function(event) { report('fail', event.message); });
+	  window.addEventListener('unhandledrejection', function(event) { report('fail', String(event.reason)); });
+	  report('progress', 'DOM ready; constructing fixture');
 	  var line = 'ordinary production-shaped transcript line '.padEnd(56, 'x');
 	  var fence = String.fromCharCode(96).repeat(3);
 	  var source = Array(100001).fill(line).join('\n') + '\n' + fence + 'text\nliteral code\n' + fence;
@@ -922,6 +925,7 @@ func TestCodeRangeWorkerCanCompleteAfterFormerTimeoutInChrome(t *testing.T) {
 	    window.codeRanges = function() { throw new Error('code-range scanner ran on the main thread'); };
 	    var owner = {};
 	    var started = performance.now();
+	    report('progress', 'dispatching delayed worker');
 	    window.codeRangesAsync(source, owner).then(function(ranges) {
 	      setTimeout(function() {
 	        var elapsed = performance.now() - started;
@@ -991,12 +995,23 @@ func TestCodeRangeWorkerCanCompleteAfterFormerTimeoutInChrome(t *testing.T) {
 		t.Fatalf("start Chrome slow-worker fixture: %v", err)
 	}
 	var result slowWorkerResult
-	select {
-	case result = <-results:
-	case <-time.After(15 * time.Second):
-		stopTestBrowserProcess(cmd)
-		stderr, _ := os.ReadFile(stderrPath)
-		t.Fatalf("timed out waiting for slow code-range worker browser result\nChrome stderr: %s", stderr)
+	// This includes Chrome startup and fixture construction, not just the 3.5s worker delay.
+	deadline := time.NewTimer(30 * time.Second)
+	defer deadline.Stop()
+	lastProgress := "waiting for DOM ready"
+	for {
+		select {
+		case result = <-results:
+			if result.status == "progress" {
+				lastProgress = result.error
+				continue
+			}
+		case <-deadline.C:
+			stopTestBrowserProcess(cmd)
+			stderr, _ := os.ReadFile(stderrPath)
+			t.Fatalf("timed out waiting for slow code-range worker browser result (last progress: %s)\nChrome stderr: %s", lastProgress, stderr)
+		}
+		break
 	}
 	stopTestBrowserProcess(cmd)
 	if result.status != "pass" {
