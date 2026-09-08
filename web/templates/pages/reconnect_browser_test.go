@@ -755,9 +755,15 @@ window.addEventListener('DOMContentLoaded', async function() {
     window.__phase = 'terminal';
     var sharedEvent = ` + terminalEvent + `;
     if (` + fmt.Sprintf("%t", sharedEventFirst) + `) {
+      // Hold an old transcript render until after authoritative terminal output arrives.
+      window._chatLiveRenderQuietUntil = Date.now() + 1000;
+      var staleRender = window.scheduleChatContentRender(pair.querySelector('[data-raw-content]'), 'partial');
       window.dispatchEvent(new CustomEvent('sse-chat-live-event', {detail: sharedEvent}));
       await window.__wait(20);
       stream.emit('` + streamEvent + `', '` + streamData + `');
+      window._chatLiveRenderQuietUntil = 0;
+      window._drainChatContentRenderQueue();
+      if (await staleRender !== false) fail('Chat committed a stale queued render after authoritative terminal output');
     } else {
       stream.emit('` + streamEvent + `', '` + streamData + `');
       await window.__wait(20);
@@ -860,11 +866,17 @@ window.addEventListener('DOMContentLoaded', async function() {
     window.__phase = 'terminal';
     var sharedEvent = ` + terminalEvent + `;
     if (` + fmt.Sprintf("%t", sharedEventFirst) + `) {
+      // Hold an old transcript render until after authoritative terminal output arrives.
+      window._chatLiveRenderQuietUntil = Date.now() + 1000;
+      var staleRender = window.scheduleChatContentRender(pair.querySelector('[data-raw-content]'), 'partial');
       window.dispatchEvent(new CustomEvent('sse-chat-live-event', {detail: sharedEvent}));
       await window.__wait(20);
       var markedOutput = pair.querySelector('[data-raw-content]');
       if (!markedOutput || markedOutput.getAttribute('data-authoritative-terminal-content') !== 'true' || markedOutput._authoritativeTerminalContent !== 'partial authoritative') fail('Task Thread shared terminal snapshot was not installed before stream terminal: marker=' + (markedOutput && markedOutput.getAttribute('data-authoritative-terminal-content')) + ' authoritative=' + (markedOutput && markedOutput._authoritativeTerminalContent) + ' raw=' + (markedOutput && markedOutput.getAttribute('data-raw-content')));
       stream.emit('` + streamEvent + `', '` + streamData + `');
+      window._chatLiveRenderQuietUntil = 0;
+      window._drainChatContentRenderQueue();
+      if (await staleRender !== false) fail('Task Thread committed a stale queued render after authoritative terminal output');
     } else {
       stream.emit('` + streamEvent + `', '` + streamData + `');
       await window.__wait(20);

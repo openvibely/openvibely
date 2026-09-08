@@ -4180,6 +4180,13 @@ templ ChatAutoScrollScript() {
 				var activeRequest = window._activeChatContentRender;
 				if (activeRequest && !activeRequest.container.isConnected && activeRequest.finish) activeRequest.finish(false, false, true);
 				var request = { container: container, text: textBuffer || '', yield: yieldBetweenBatches, resolve: null, finished: false, timeout: null, enqueuedAt: Date.now() };
+				// Live/terminal output can advance while a hydration render is queued,
+				// without scheduling a replacement hydration request for this element.
+				request.sourceRevision = container.getAttribute('data-raw-revision') || container.getAttribute('data-raw-content');
+				function isCurrentRequest(queued) {
+					return queued.container._scheduledChatRender === queued && queued.container.isConnected &&
+						queued.sourceRevision === (queued.container.getAttribute('data-raw-revision') || queued.container.getAttribute('data-raw-content'));
+				}
 				container._scheduledChatRender = request;
 				var promise = new Promise(function(resolve) { request.resolve = resolve; });
 					window._chatContentRenderQueue.push(request);
@@ -4187,8 +4194,9 @@ templ ChatAutoScrollScript() {
 						if (window._chatContentRenderActive >= 1) return;
 						while (window._chatContentRenderQueue.length > 0) {
 							var queuedRequest = window._chatContentRenderQueue[0];
-							if (queuedRequest.container._scheduledChatRender === queuedRequest && queuedRequest.container.isConnected) break;
+							if (isCurrentRequest(queuedRequest)) break;
 							window._chatContentRenderQueue.shift();
+							if (queuedRequest.container._scheduledChatRender === queuedRequest) queuedRequest.container._scheduledChatRender = null;
 							queuedRequest.finished = true;
 							queuedRequest.resolve(false);
 						}
@@ -4211,7 +4219,8 @@ templ ChatAutoScrollScript() {
 						return;
 					}
 					var next = window._chatContentRenderQueue.shift();
-					while (next && (next.container._scheduledChatRender !== next || !next.container.isConnected)) {
+					while (next && !isCurrentRequest(next)) {
+						if (next.container._scheduledChatRender === next) next.container._scheduledChatRender = null;
 						next.finished = true;
 						next.resolve(false);
 						next = window._chatContentRenderQueue.shift();
