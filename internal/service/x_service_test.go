@@ -826,6 +826,45 @@ func TestXCompletionReplyProviderFailureIsDurableAndRetriesWithoutRerunningTask(
 	require.Len(t, alerts, 1)
 }
 
+func TestXCompletionReplyPostingStateIsActionableAndNeverAutomaticallyRetried(t *testing.T) {
+	ctx, svc, _, _, _, project, _ := setupXServiceTest(t)
+	api := &fakeXAPI{}
+	svc.setAPI(api)
+	svc.me = XUser{ID: "bot", Username: "openvibely"}
+	agent := &models.LLMConfig{Name: "X interrupted delivery agent", Provider: models.ProviderTest, Model: "test"}
+	require.NoError(t, svc.llmConfigRepo.Create(ctx, agent))
+	task := &models.Task{ProjectID: project.ID, Title: "X interrupted delivery task", Prompt: "work", Category: models.CategoryCompleted, Status: models.StatusCompleted, Priority: 2, AgentID: &agent.ID}
+	require.NoError(t, svc.taskRepo.Create(ctx, task))
+	execution := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecCompleted, PromptSent: "work"}
+	require.NoError(t, svc.execRepo.Create(ctx, execution))
+	delivery, err := svc.replyDeliveryRepo.CreatePending(ctx, &models.XReplyDelivery{
+		TaskID: task.ID, ExecutionID: execution.ID, ProjectID: project.ID, AccountID: "bot",
+		ReplyToTweetID: "tweet", Text: "possibly posted response",
+	})
+	require.NoError(t, err)
+	_, err = svc.replyDeliveryRepo.ClaimPending(ctx, delivery.ID, "bot")
+	require.NoError(t, err)
+
+	require.NoError(t, svc.StartVerified(XUser{ID: "bot", Username: "openvibely"}))
+	t.Cleanup(svc.Stop)
+	alerts, err := svc.alertSvc.ListByProject(ctx, project.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, alerts, 1)
+	require.Contains(t, alerts[0].Message, "ambiguous")
+	require.Empty(t, api.Posts())
+
+	result := svc.SendCompletionReply(ctx, XCompletionReply{
+		TaskID: task.ID, ExecutionID: execution.ID, ProjectID: project.ID, AccountID: "bot",
+		ReplyToTweetID: "tweet", Output: "possibly posted response",
+	})
+	require.Equal(t, XReplyPersistenceFailed, result.Status)
+	require.NoError(t, svc.RetryPendingReplies(ctx))
+	require.Empty(t, api.Posts(), "ambiguous posting rows must never be automatically reposted")
+	alerts, err = svc.alertSvc.ListByProject(ctx, project.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, alerts, 1, "repeated dispatch must reuse the ambiguous-delivery alert")
+}
+
 func TestXCompletionReplyProviderSuccessWithSentPersistenceFailureIsNotRetried(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx, svc, _, _, _, project, _ := setupXServiceTestWithDB(t, db)

@@ -2153,6 +2153,38 @@ func (h *Handler) completeWithCancellation(execID, taskID, output string, tokens
 	h.sendChannelResponse(ctx, execID, task, reply, output, "cancelled", telegramMessageID)
 }
 
+func (h *Handler) preserveUnavailableXCompletion(ctx context.Context, reply service.XCompletionReply) {
+	result := service.PreserveUnavailableXCompletionReply(ctx, h.settingsRepo, h.xReplyDeliveryRepo, h.alertSvc, reply)
+	if result.Err != nil {
+		if result.DeliveryID == "" {
+			service.CreateXCompletionBoundaryAlert(ctx, h.alertSvc, reply, result.Err)
+		}
+		applog.Infof("[handler] X completion reply deferred task=%s execution=%s: %v", reply.TaskID, reply.ExecutionID, result.Err)
+	}
+}
+
+func (h *Handler) preserveUnavailableXTaskCompletion(ctx context.Context, execID string, task *models.Task, output, errMsg string) {
+	if h.xTaskContextRepo == nil {
+		err := fmt.Errorf("X task context repository is not configured")
+		service.CreateXCompletionBoundaryAlert(ctx, h.alertSvc, service.XCompletionReply{TaskID: task.ID, ExecutionID: execID, ProjectID: task.ProjectID}, err)
+		applog.Infof("[handler] X completion reply delivery failed task=%s execution=%s: %v", task.ID, execID, err)
+		return
+	}
+	meta, err := h.xTaskContextRepo.GetByTaskID(ctx, task.ID)
+	if err != nil || meta == nil {
+		if err == nil {
+			err = fmt.Errorf("X task context is missing")
+		}
+		service.CreateXCompletionBoundaryAlert(ctx, h.alertSvc, service.XCompletionReply{TaskID: task.ID, ExecutionID: execID, ProjectID: task.ProjectID}, err)
+		applog.Infof("[handler] X completion reply delivery failed task=%s execution=%s: load X task context: %v", task.ID, execID, err)
+		return
+	}
+	h.preserveUnavailableXCompletion(ctx, service.XCompletionReply{
+		TaskID: task.ID, ExecutionID: execID, ProjectID: meta.ProjectID, AccountID: meta.AccountID,
+		ReplyToTweetID: meta.ReplyToTweetID, Output: output, ErrorMessage: errMsg,
+	})
+}
+
 func (h *Handler) sendChannelResponse(ctx context.Context, execID string, task *models.Task, reply service.ChannelReplyContext, output, errMsg string, telegramMessageID int) {
 	if task == nil {
 		return
@@ -2186,14 +2218,17 @@ func (h *Handler) sendChannelResponse(ctx context.Context, execID string, task *
 		return
 	}
 	if reply.Source == models.TaskOriginX && reply.XReplyToTweetID != "" {
+		completion := service.XCompletionReply{
+			TaskID: task.ID, ExecutionID: execID, ProjectID: task.ProjectID, AccountID: reply.XAccountID,
+			ReplyToTweetID: reply.XReplyToTweetID, Output: output, ErrorMessage: errMsg,
+		}
 		if xService := h.getXService(); xService != nil {
-			result := xService.SendCompletionReply(ctx, service.XCompletionReply{
-				TaskID: task.ID, ExecutionID: execID, ProjectID: task.ProjectID, AccountID: reply.XAccountID,
-				ReplyToTweetID: reply.XReplyToTweetID, Output: output, ErrorMessage: errMsg,
-			})
+			result := xService.SendCompletionReply(ctx, completion)
 			if result.Err != nil {
 				applog.Infof("[handler] X completion reply delivery failed task=%s execution=%s: %v", task.ID, execID, result.Err)
 			}
+		} else {
+			h.preserveUnavailableXCompletion(ctx, completion)
 		}
 		return
 	}
@@ -2235,6 +2270,8 @@ func (h *Handler) sendChannelResponse(ctx context.Context, execID string, task *
 			} else {
 				xService.SendTaskCompletionNotification(ctx, *task, output, errMsg)
 			}
+		} else {
+			h.preserveUnavailableXTaskCompletion(ctx, execID, task, output, errMsg)
 		}
 	case models.TaskOriginDiscord:
 		if task.Category == models.CategoryChat {

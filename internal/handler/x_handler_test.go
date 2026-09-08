@@ -382,6 +382,97 @@ func TestXCompletionUsesOnlyOriginatingAccount(t *testing.T) {
 	require.Equal(t, []string{"new-tweet|done"}, api.posted)
 }
 
+func TestXCompletionWithoutAvailableServiceCreatesDurableRetryState(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		stopFirst   bool
+		failedStart bool
+		clearSetup  bool
+	}{
+		{name: "never installed"},
+		{name: "stopped", stopFirst: true},
+		{name: "failed startup", failedStart: true},
+		{name: "removed settings", clearSetup: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, _, _, db := setupTestHandlerWithDB(t)
+			ctx := context.Background()
+			project := createProject(t, h, "Unavailable X completion")
+			agent := &models.LLMConfig{Name: "Unavailable X agent", Provider: models.ProviderTest, Model: "test"}
+			require.NoError(t, h.llmConfigRepo.Create(ctx, agent))
+			task := &models.Task{ProjectID: project.ID, Title: "Completed X task", Prompt: "work", Category: models.CategoryCompleted, Status: models.StatusCompleted, Priority: 2, AgentID: &agent.ID}
+			require.NoError(t, h.taskRepo.Create(ctx, task))
+			execution := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecCompleted, PromptSent: "work"}
+			require.NoError(t, h.execRepo.Create(ctx, execution))
+			require.NoError(t, h.settingsRepo.SetMany(ctx, map[string]string{
+				service.XSettingAccountID: "bot", service.XSettingSendResponses: "true",
+			}))
+
+			if tc.stopFirst {
+				svc := service.NewXService(service.XCredentials{ConsumerKey: "a", ConsumerSecret: "b", AccessToken: "c", AccessTokenSecret: "d"}, h.settingsRepo, h.projectRepo, h.llmConfigRepo, h.taskRepo, h.execRepo, h.scheduleRepo, h.taskSvc)
+				svc.SetRepositories(repository.NewXAuthRepo(db), repository.NewXUserProjectRepo(db), repository.NewXTaskContextRepo(db), repository.NewXInboundReceiptRepo(db), h.threadInputRepo)
+				h.SetXService(svc)
+				h.StopXService()
+			}
+			if tc.failedStart {
+				svc := service.NewXService(service.XCredentials{}, h.settingsRepo, h.projectRepo, h.llmConfigRepo, h.taskRepo, h.execRepo, h.scheduleRepo, h.taskSvc)
+				require.Error(t, svc.StartVerified(service.XUser{ID: "bot", Username: "openvibely"}))
+				require.Nil(t, h.getXService())
+			}
+			if tc.clearSetup {
+				require.NoError(t, h.settingsRepo.SetMany(ctx, map[string]string{
+					service.XSettingAccountID: "", service.XSettingSendResponses: "",
+				}))
+			}
+
+			reply := service.ChannelReplyContext{Source: models.TaskOriginX, XAccountID: "bot", XReplyToTweetID: "origin-tweet"}
+			h.sendChannelResponse(ctx, execution.ID, task, reply, "completed response", "", 0)
+			delivery, err := h.xReplyDeliveryRepo.GetByExecution(ctx, execution.ID, "origin-tweet")
+			require.NoError(t, err)
+			require.Equal(t, "pending", delivery.Status)
+			require.Equal(t, "completed response", delivery.Text)
+			alerts, err := h.alertSvc.ListByProject(ctx, project.ID, 10)
+			require.NoError(t, err)
+			require.Len(t, alerts, 1)
+			require.Equal(t, "x_reply_delivery", alerts[0].Source)
+
+			h.sendChannelResponse(ctx, execution.ID, task, reply, "completed response", "", 0)
+			alerts, err = h.alertSvc.ListByProject(ctx, project.ID, 10)
+			require.NoError(t, err)
+			require.Len(t, alerts, 1, "unavailable-service alerts must be deduplicated")
+		})
+	}
+}
+
+func TestXCreatedViaCompletionWithoutAvailableServiceUsesStoredReplyContext(t *testing.T) {
+	h, _, _, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	project := createProject(t, h, "Unavailable stored X completion")
+	agent := &models.LLMConfig{Name: "Stored X agent", Provider: models.ProviderTest, Model: "test"}
+	require.NoError(t, h.llmConfigRepo.Create(ctx, agent))
+	task := &models.Task{ProjectID: project.ID, Title: "Completed stored X task", Prompt: "work", Category: models.CategoryCompleted, Status: models.StatusCompleted, Priority: 2, AgentID: &agent.ID, CreatedVia: models.TaskOriginX}
+	require.NoError(t, h.taskRepo.Create(ctx, task))
+	execution := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecCompleted, PromptSent: "work"}
+	require.NoError(t, h.execRepo.Create(ctx, execution))
+	contexts := repository.NewXTaskContextRepo(db)
+	h.SetXRepositories(repository.NewXAuthRepo(db), repository.NewXUserProjectRepo(db), contexts, repository.NewXInboundReceiptRepo(db))
+	require.NoError(t, contexts.Upsert(ctx, &models.XTaskContext{
+		TaskID: task.ID, ProjectID: project.ID, AccountID: "bot", ReplyToTweetID: "stored-origin-tweet",
+	}))
+	require.NoError(t, h.settingsRepo.SetMany(ctx, map[string]string{
+		service.XSettingAccountID: "bot", service.XSettingSendResponses: "true",
+	}))
+
+	h.sendChannelResponse(ctx, execution.ID, task, service.ChannelReplyContext{}, "stored completion response", "", 0)
+	delivery, err := h.xReplyDeliveryRepo.GetByExecution(ctx, execution.ID, "stored-origin-tweet")
+	require.NoError(t, err)
+	require.Equal(t, "pending", delivery.Status)
+	require.Equal(t, "stored completion response", delivery.Text)
+	alerts, err := h.alertSvc.ListByProject(ctx, project.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, alerts, 1)
+}
+
 func TestXCompletionDeliveryFailureCreatesActionableRetryState(t *testing.T) {
 	h, _, _, db := setupTestHandlerWithDB(t)
 	ctx := context.Background()

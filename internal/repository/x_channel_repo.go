@@ -228,6 +228,27 @@ func (r *XReplyDeliveryRepo) ListPendingForAccount(ctx context.Context, accountI
 	return deliveries, rows.Err()
 }
 
+func (r *XReplyDeliveryRepo) ListPostingForAccount(ctx context.Context, accountID string, limit int) ([]models.XReplyDelivery, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+	rows, err := r.db.QueryContext(ctx, `SELECT `+xReplyDeliveryColumns+` FROM x_reply_deliveries
+		WHERE account_id=? AND status='posting' ORDER BY updated_at, id LIMIT ?`, accountID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list ambiguous X replies: %w", err)
+	}
+	defer rows.Close()
+	var deliveries []models.XReplyDelivery
+	for rows.Next() {
+		delivery, err := scanXReplyDelivery(rows)
+		if err != nil {
+			return nil, err
+		}
+		deliveries = append(deliveries, *delivery)
+	}
+	return deliveries, rows.Err()
+}
+
 func (r *XReplyDeliveryRepo) GetByExecution(ctx context.Context, executionID, replyToTweetID string) (*models.XReplyDelivery, error) {
 	delivery, err := scanXReplyDelivery(r.db.QueryRowContext(ctx, `SELECT `+xReplyDeliveryColumns+` FROM x_reply_deliveries WHERE execution_id=? AND reply_to_tweet_id=?`, executionID, replyToTweetID))
 	if err != nil {

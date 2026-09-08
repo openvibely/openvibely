@@ -50,12 +50,13 @@ var errXReceiptActive = errors.New("X mention receipt is actively leased")
 type XReplyStatus string
 
 const (
-	XReplyDelivered         XReplyStatus = "delivered"
-	XReplyAccountMismatch   XReplyStatus = "account_mismatch"
-	XReplyDisabled          XReplyStatus = "disabled"
-	XReplyEmpty             XReplyStatus = "empty"
-	XReplyProviderFailed    XReplyStatus = "provider_failed"
-	XReplyPersistenceFailed XReplyStatus = "persistence_failed"
+	XReplyDelivered          XReplyStatus = "delivered"
+	XReplyAccountMismatch    XReplyStatus = "account_mismatch"
+	XReplyDisabled           XReplyStatus = "disabled"
+	XReplyEmpty              XReplyStatus = "empty"
+	XReplyProviderFailed     XReplyStatus = "provider_failed"
+	XReplyServiceUnavailable XReplyStatus = "service_unavailable"
+	XReplyPersistenceFailed  XReplyStatus = "persistence_failed"
 )
 
 type XReplyResult struct {
@@ -226,14 +227,16 @@ func (s *XService) Start() error {
 // without a second verification race.
 func (s *XService) StartVerified(me XUser) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.running {
+		s.mu.Unlock()
 		return nil
 	}
 	if !s.credentials.Ready() {
+		s.mu.Unlock()
 		return fmt.Errorf("X OAuth 1.0a credentials are incomplete")
 	}
 	if strings.TrimSpace(me.ID) == "" {
+		s.mu.Unlock()
 		return fmt.Errorf("X authenticated user is required")
 	}
 	s.me = me
@@ -241,7 +244,12 @@ func (s *XService) StartVerified(me XUser) error {
 	s.lastError = ""
 	s.running = true
 	s.runDone = make(chan struct{})
-	go s.poll(s.ctx, s.runDone)
+	runDone := s.runDone
+	go s.poll(s.ctx, runDone)
+	s.mu.Unlock()
+	if err := s.ReconcileAmbiguousReplies(s.ctx); err != nil {
+		applog.Infof("[x] failed to reconcile ambiguous completion replies: %v", err)
+	}
 	return nil
 }
 func (s *XService) Stop() {
@@ -786,11 +794,11 @@ func (s *XService) SendOutboundMessage(ctx context.Context, targetID, threadID, 
 	}
 	return SendMessageResult{OK: true, Platform: "x", Target: "x:" + targetID, MessageID: id}
 }
-func (s *XService) prepareReply(ctx context.Context, output, errMsg string) xPreparedReply {
-	if s.settingsRepo == nil {
+func prepareXReply(ctx context.Context, settingsRepo *repository.SettingsRepo, output, errMsg string) xPreparedReply {
+	if settingsRepo == nil {
 		return xPreparedReply{status: XReplyPersistenceFailed, err: fmt.Errorf("X settings repository is not configured")}
 	}
-	enabled, err := s.settingsRepo.Get(ctx, XSettingSendResponses)
+	enabled, err := settingsRepo.Get(ctx, XSettingSendResponses)
 	if err != nil {
 		return xPreparedReply{status: XReplyPersistenceFailed, err: fmt.Errorf("load X response setting: %w", err)}
 	}
@@ -806,6 +814,10 @@ func (s *XService) prepareReply(ctx context.Context, output, errMsg string) xPre
 		return xPreparedReply{status: XReplyEmpty}
 	}
 	return xPreparedReply{status: XReplyDelivered, text: text}
+}
+
+func (s *XService) prepareReply(ctx context.Context, output, errMsg string) xPreparedReply {
+	return prepareXReply(ctx, s.settingsRepo, output, errMsg)
 }
 
 func (s *XService) SendReplyForAccount(ctx context.Context, accountID, replyTo, output, errMsg string) XReplyResult {
@@ -827,6 +839,49 @@ func (s *XService) SendReply(ctx context.Context, replyTo, output, errMsg string
 		return XReplyResult{Status: XReplyProviderFailed, Err: err}
 	}
 	return XReplyResult{Status: XReplyDelivered}
+}
+
+// PreserveUnavailableXCompletionReply stores a provider-bound completion while
+// no X service is installed. A later matching service can retry the pending row
+// without rerunning the completed task.
+func PreserveUnavailableXCompletionReply(ctx context.Context, settingsRepo *repository.SettingsRepo, deliveryRepo *repository.XReplyDeliveryRepo, alertSvc *AlertService, reply XCompletionReply) XReplyResult {
+	if settingsRepo == nil {
+		return XReplyResult{Status: XReplyPersistenceFailed, Err: fmt.Errorf("X settings repository is not configured")}
+	}
+	configuredAccountID, err := settingsRepo.Get(ctx, XSettingAccountID)
+	if err != nil {
+		return XReplyResult{Status: XReplyPersistenceFailed, Err: fmt.Errorf("load configured X account: %w", err)}
+	}
+	if configuredAccountID = strings.TrimSpace(configuredAccountID); configuredAccountID != "" && configuredAccountID != strings.TrimSpace(reply.AccountID) {
+		return XReplyResult{Status: XReplyAccountMismatch}
+	}
+	prepared := prepareXReply(ctx, settingsRepo, reply.Output, reply.ErrorMessage)
+	if prepared.status != XReplyDelivered {
+		return XReplyResult{Status: prepared.status, Err: prepared.err}
+	}
+	if deliveryRepo == nil {
+		return XReplyResult{Status: XReplyPersistenceFailed, Err: fmt.Errorf("X reply delivery repository is not configured")}
+	}
+	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	delivery, err := deliveryRepo.CreatePending(persistCtx, &models.XReplyDelivery{
+		TaskID: reply.TaskID, ExecutionID: reply.ExecutionID, ProjectID: reply.ProjectID, AccountID: reply.AccountID,
+		ReplyToTweetID: reply.ReplyToTweetID, Text: prepared.text,
+	})
+	if err != nil {
+		return XReplyResult{Status: XReplyPersistenceFailed, Err: err}
+	}
+	if delivery.Status == "sent" {
+		return XReplyResult{Status: XReplyDelivered, DeliveryID: delivery.ID}
+	}
+	if delivery.Status == "posting" {
+		ambiguousErr := fmt.Errorf("X reply delivery has an ambiguous provider result")
+		createXReplyFailureAlert(persistCtx, alertSvc, delivery, ambiguousErr)
+		return XReplyResult{Status: XReplyPersistenceFailed, DeliveryID: delivery.ID, Err: ambiguousErr}
+	}
+	unavailableErr := fmt.Errorf("X service is unavailable; the completion reply is stored for retry")
+	createXReplyFailureAlert(persistCtx, alertSvc, delivery, unavailableErr)
+	return XReplyResult{Status: XReplyServiceUnavailable, DeliveryID: delivery.ID, Err: unavailableErr}
 }
 
 // SendCompletionReply persists the exact completion payload before posting it.
@@ -858,7 +913,9 @@ func (s *XService) SendCompletionReply(ctx context.Context, reply XCompletionRep
 		return XReplyResult{Status: XReplyDelivered, DeliveryID: delivery.ID}
 	}
 	if delivery.Status == "posting" {
-		return XReplyResult{Status: XReplyPersistenceFailed, DeliveryID: delivery.ID, Err: fmt.Errorf("X reply delivery has an ambiguous provider result")}
+		ambiguousErr := fmt.Errorf("X reply delivery has an ambiguous provider result")
+		s.createReplyFailureAlert(persistCtx, delivery, ambiguousErr)
+		return XReplyResult{Status: XReplyPersistenceFailed, DeliveryID: delivery.ID, Err: ambiguousErr}
 	}
 	return s.deliverPendingReply(ctx, delivery)
 }
@@ -892,20 +949,59 @@ func (s *XService) deliverPendingReply(ctx context.Context, delivery *models.XRe
 	return XReplyResult{Status: XReplyDelivered, DeliveryID: claimed.ID}
 }
 
-func (s *XService) createReplyFailureAlert(ctx context.Context, delivery *models.XReplyDelivery, deliveryErr error) {
-	if s.alertSvc == nil || delivery == nil {
+func CreateXCompletionBoundaryAlert(ctx context.Context, alertSvc *AlertService, reply XCompletionReply, deliveryErr error) {
+	if alertSvc == nil || strings.TrimSpace(reply.ProjectID) == "" || strings.TrimSpace(reply.TaskID) == "" || strings.TrimSpace(reply.ExecutionID) == "" {
 		return
 	}
-	reason := fmt.Sprintf("X could not confirm delivery of the completed task reply. The stored delivery requires attention and the completed task will not be rerun automatically: %v", deliveryErr)
+	reason := fmt.Sprintf("X could not preserve or deliver the completed task reply. Delivery requires attention and the completed task will not be rerun automatically: %v", deliveryErr)
+	alert := &models.Alert{
+		ProjectID: reply.ProjectID, TaskID: &reply.TaskID, ExecutionID: &reply.ExecutionID, SourceTaskID: &reply.TaskID,
+		Type: models.AlertTaskNeedsFollowup, Severity: models.SeverityWarning, Title: "X completion reply delivery failed",
+		Message: reason, Body: reason, Source: "x_reply_delivery", IdempotencyKey: "x-reply-delivery-boundary:" + reply.ExecutionID + ":" + reply.ReplyToTweetID,
+		Metadata: map[string]any{"reply_to_tweet_id": reply.ReplyToTweetID},
+	}
+	if _, err := alertSvc.CreateActionable(ctx, alert); err != nil {
+		applog.Infof("[x] failed to create completion boundary alert: %v", err)
+	}
+}
+
+func createXReplyFailureAlert(ctx context.Context, alertSvc *AlertService, delivery *models.XReplyDelivery, deliveryErr error) {
+	if alertSvc == nil || delivery == nil {
+		return
+	}
+	reason := fmt.Sprintf("X could not confirm delivery of the completed task reply. The stored delivery is pending or ambiguous and requires attention; the completed task will not be rerun automatically: %v", deliveryErr)
 	alert := &models.Alert{
 		ProjectID: delivery.ProjectID, TaskID: &delivery.TaskID, ExecutionID: &delivery.ExecutionID, SourceTaskID: &delivery.TaskID,
 		Type: models.AlertTaskNeedsFollowup, Severity: models.SeverityWarning, Title: "X completion reply delivery failed",
 		Message: reason, Body: reason, Source: "x_reply_delivery", IdempotencyKey: "x-reply-delivery:" + delivery.ID,
 		Metadata: map[string]any{"delivery_id": delivery.ID},
 	}
-	if _, err := s.alertSvc.CreateActionable(ctx, alert); err != nil {
+	if _, err := alertSvc.CreateActionable(ctx, alert); err != nil {
 		applog.Infof("[x] failed to create reply delivery alert: %v", err)
 	}
+}
+
+func (s *XService) createReplyFailureAlert(ctx context.Context, delivery *models.XReplyDelivery, deliveryErr error) {
+	createXReplyFailureAlert(ctx, s.alertSvc, delivery, deliveryErr)
+}
+
+// ReconcileAmbiguousReplies makes interrupted posting claims visible without
+// reposting them, because X create-post requests have no idempotency guarantee.
+func (s *XService) ReconcileAmbiguousReplies(ctx context.Context) error {
+	if s.replyDeliveryRepo == nil {
+		return nil
+	}
+	s.mu.RLock()
+	accountID := s.me.ID
+	s.mu.RUnlock()
+	deliveries, err := s.replyDeliveryRepo.ListPostingForAccount(ctx, accountID, 100)
+	if err != nil {
+		return err
+	}
+	for i := range deliveries {
+		s.createReplyFailureAlert(ctx, &deliveries[i], fmt.Errorf("X reply delivery has an ambiguous provider result after an interrupted posting attempt"))
+	}
+	return nil
 }
 
 // RetryPendingReplies retries stored payloads only; it never invokes task execution.
