@@ -662,7 +662,7 @@ data: {"type":"task_board_updated","project_id":"` + project.ID + `","task_id":"
 	}
 }
 
-func TestTaskRunningIconSharesThemeAwareSendColorWithoutSuppressingHoverInChrome(t *testing.T) {
+func TestThemeAwarePrimaryAndSecondaryActionColorsInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	var page bytes.Buffer
 	if err := layout.Base("Primary action color", nil, "").Render(context.Background(), &page); err != nil {
@@ -695,8 +695,9 @@ func TestTaskRunningIconSharesThemeAwareSendColorWithoutSuppressingHoverInChrome
 	importedCSS := `<style>
 	[data-color-theme="vscode-test"][data-theme="dark"] { --p: 0.7 0.12 190; }
 	[data-color-theme="vscode-test"][data-theme="dark"] .btn-primary:hover { background-color: rgb(4, 5, 6); border-color: rgb(4, 5, 6); }
+	[data-color-theme="vscode-test"][data-theme="dark"] .btn.ov-secondary-action:hover:not(:disabled):not(.btn-disabled) { background-color: rgb(7, 8, 9); border-color: rgb(7, 8, 9); }
 	</style>`
-	fixture := `<button class="btn btn-primary chat-send-button" style="position:fixed;left:20px;top:20px;width:100px;transform:none;transition:none;z-index:2147483647" data-test-send>Send</button><span class="task-state-running" style="position:fixed;left:20px;top:80px;z-index:2147483647" data-test-running>Running</span>`
+	fixture := `<button class="btn btn-primary chat-send-button" style="position:fixed;left:20px;top:20px;width:100px;transform:none;transition:none;z-index:2147483647" data-test-send>Send</button><span class="task-state-running" style="position:fixed;left:20px;top:80px;z-index:2147483647" data-test-running>Running</span><button class="btn btn-outline btn-sm ov-secondary-action" style="position:fixed;left:20px;top:120px;width:100px;transform:none;transition:none;z-index:2147483647" data-automation-live-edit>Automation Edit</button><button class="btn btn-secondary btn-sm ov-secondary-action" style="position:fixed;left:20px;top:180px;width:100px;transform:none;transition:none;z-index:2147483647" data-task-detail-edit>Task Edit</button>`
 	html := `<!doctype html><html data-theme="dark" data-color-theme="openvibely-dark"><head><meta charset="utf-8">` + inlineStyles.String() + importedCSS + `</head><body>` + fixture + `</body></html>`
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -835,14 +836,14 @@ func TestTaskRunningIconSharesThemeAwareSendColorWithoutSuppressingHoverInChrome
 	pageReadyDeadline := time.Now().Add(10 * time.Second)
 	pageState := ""
 	for time.Now().Before(pageReadyDeadline) {
-		pageState = evaluate(t, `document.readyState + ':' + Boolean(document.querySelector('[data-test-send]')) + ':' + Boolean(document.querySelector('[data-test-running]'))`)
-		if pageState == "complete:true:true" {
+		pageState = evaluate(t, `document.readyState + ':' + Boolean(document.querySelector('[data-test-send]')) + ':' + Boolean(document.querySelector('[data-test-running]')) + ':' + Boolean(document.querySelector('[data-automation-live-edit]')) + ':' + Boolean(document.querySelector('[data-task-detail-edit]'))`)
+		if pageState == "complete:true:true:true:true" {
 			break
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
-	if pageState != "complete:true:true" {
-		t.Fatalf("Chrome page did not finish loading the primary-action fixture; final state %q", pageState)
+	if pageState != "complete:true:true:true:true" {
+		t.Fatalf("Chrome page did not finish loading the action-color fixture; final state %q", pageState)
 	}
 	type themeCase struct {
 		name      string
@@ -895,6 +896,75 @@ func TestTaskRunningIconSharesThemeAwareSendColorWithoutSuppressingHoverInChrome
 				t.Fatalf("hover changed running icon color from %s to %s", normal.Running, hovered.Running)
 			}
 		})
+	}
+
+	secondaryCases := []struct {
+		name       string
+		mode       string
+		id         string
+		wantHover  string
+		wantActive string
+	}{
+		{name: "native dark", mode: "dark", id: "openvibely-dark", wantHover: "rgb(47, 53, 64)", wantActive: "rgb(39, 49, 64)"},
+		{name: "native light", mode: "light", id: "openvibely-light", wantHover: "rgb(204, 204, 204)", wantActive: "rgb(232, 232, 232)"},
+		{name: "imported", mode: "dark", id: "vscode-test", wantHover: "rgb(7, 8, 9)"},
+	}
+	secondarySelectors := []struct {
+		name     string
+		selector string
+	}{
+		{name: "Automation Edit", selector: "[data-automation-live-edit]"},
+		{name: "Task Edit", selector: "[data-task-detail-edit]"},
+	}
+	for _, tc := range secondaryCases {
+		for _, control := range secondarySelectors {
+			t.Run(tc.name+" "+control.name, func(t *testing.T) {
+				movePointer(t, 1000, 1000)
+				evaluate(t, fmt.Sprintf(`document.documentElement.setAttribute('data-theme', %q); document.documentElement.setAttribute('data-color-theme', %q); var b=document.querySelector(%q); b.disabled=false; ''`, tc.mode, tc.id, control.selector))
+				time.Sleep(100 * time.Millisecond)
+				var normal struct {
+					Background string     `json:"background"`
+					Border     string     `json:"border"`
+					Center     [2]float64 `json:"center"`
+				}
+				if err := json.Unmarshal([]byte(evaluate(t, fmt.Sprintf(`JSON.stringify((function(){var b=document.querySelector(%q),s=getComputedStyle(b),r=b.getBoundingClientRect();return {background:s.backgroundColor,border:s.borderColor,center:[r.left+r.width/2,r.top+r.height/2]};})())`, control.selector))), &normal); err != nil {
+					t.Fatalf("decode normal secondary-action styles: %v", err)
+				}
+				movePointer(t, normal.Center[0], normal.Center[1])
+				time.Sleep(100 * time.Millisecond)
+				var hovered struct {
+					Background string `json:"background"`
+					Border     string `json:"border"`
+					Hovered    bool   `json:"hovered"`
+				}
+				if err := json.Unmarshal([]byte(evaluate(t, fmt.Sprintf(`JSON.stringify((function(){var b=document.querySelector(%q),s=getComputedStyle(b);return {background:s.backgroundColor,border:s.borderColor,hovered:b.matches(':hover')};})())`, control.selector))), &hovered); err != nil {
+					t.Fatalf("decode hovered secondary-action styles: %v", err)
+				}
+				if !hovered.Hovered {
+					t.Fatal("Chrome pointer did not activate the secondary action :hover state")
+				}
+				if hovered.Background != tc.wantHover || hovered.Border != tc.wantHover {
+					t.Fatalf("hover background/border = %s/%s, want historical %s", hovered.Background, hovered.Border, tc.wantHover)
+				}
+				if tc.wantActive != "" {
+					call(t, "Input.dispatchMouseEvent", map[string]any{"type": "mousePressed", "x": normal.Center[0], "y": normal.Center[1], "button": "left", "clickCount": 1}, nil)
+					active := evaluate(t, fmt.Sprintf(`getComputedStyle(document.querySelector(%q)).backgroundColor`, control.selector))
+					call(t, "Input.dispatchMouseEvent", map[string]any{"type": "mouseReleased", "x": normal.Center[0], "y": normal.Center[1], "button": "left", "clickCount": 1}, nil)
+					if active != tc.wantActive || active == hovered.Background {
+						t.Fatalf("active background = %s, want distinct %s", active, tc.wantActive)
+					}
+				}
+				evaluate(t, fmt.Sprintf(`document.querySelector(%q).disabled=true; ''`, control.selector))
+				movePointer(t, 1000, 1000)
+				disabledNormal := evaluate(t, fmt.Sprintf(`getComputedStyle(document.querySelector(%q)).backgroundColor`, control.selector))
+				movePointer(t, normal.Center[0], normal.Center[1])
+				time.Sleep(100 * time.Millisecond)
+				disabledHover := evaluate(t, fmt.Sprintf(`getComputedStyle(document.querySelector(%q)).backgroundColor`, control.selector))
+				if disabledHover != disabledNormal {
+					t.Fatalf("disabled hover changed background from %s to %s", disabledNormal, disabledHover)
+				}
+			})
+		}
 	}
 }
 
