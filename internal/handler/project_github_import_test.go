@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -96,6 +97,23 @@ func TestUpdateProject_GitHubImportPreservesUnchangedCheckout(t *testing.T) {
 		t.Run(repoURL, func(t *testing.T) {
 			h, e, _ := setupTestHandler(t)
 			repoPath := t.TempDir()
+			runGit := func(args ...string) string {
+				t.Helper()
+				cmd := exec.Command("git", append([]string{"-C", repoPath}, args...)...)
+				output, err := cmd.CombinedOutput()
+				if err != nil {
+					t.Fatalf("git %v: %v (%s)", args, err, output)
+				}
+				return strings.TrimSpace(string(output))
+			}
+			runGit("init")
+			trackedPath := filepath.Join(repoPath, "tracked-file")
+			if err := os.WriteFile(trackedPath, []byte("tracked"), 0o600); err != nil {
+				t.Fatalf("write tracked file: %v", err)
+			}
+			runGit("add", "tracked-file")
+			runGit("-c", "user.name=Test User", "-c", "user.email=test@example.com", "commit", "-m", "initial")
+			runGit("checkout", "-b", "local-only")
 			markerPath := filepath.Join(repoPath, "untracked-marker")
 			if err := os.WriteFile(markerPath, []byte("preserve me"), 0o600); err != nil {
 				t.Fatalf("write checkout marker: %v", err)
@@ -141,6 +159,9 @@ func TestUpdateProject_GitHubImportPreservesUnchangedCheckout(t *testing.T) {
 			}
 			if contents, err := os.ReadFile(markerPath); err != nil || string(contents) != "preserve me" {
 				t.Fatalf("expected checkout marker preserved, contents=%q err=%v", contents, err)
+			}
+			if branch := runGit("branch", "--show-current"); branch != "local-only" {
+				t.Fatalf("expected local-only branch preserved, got %q", branch)
 			}
 		})
 	}
