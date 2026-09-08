@@ -8,6 +8,11 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
+type ProjectRepoRoot struct {
+	ID       string
+	RepoPath string
+}
+
 type ProjectRepo struct {
 	db *sql.DB
 }
@@ -34,6 +39,39 @@ func (r *ProjectRepo) List(ctx context.Context) ([]models.Project, error) {
 		projects = append(projects, p)
 	}
 	return projects, rows.Err()
+}
+
+const projectRepoRootsQuery = `SELECT id, repo_path FROM projects`
+
+// ForEachRepoRoot scans the compact unordered repository-root projection and
+// invokes visit once per project without materializing a full result slice.
+func (r *ProjectRepo) ForEachRepoRoot(ctx context.Context, visit func(ProjectRepoRoot)) error {
+	rows, err := r.db.QueryContext(ctx, projectRepoRootsQuery)
+	if err != nil {
+		return fmt.Errorf("listing project repository roots: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var p ProjectRepoRoot
+		if err := rows.Scan(&p.ID, &p.RepoPath); err != nil {
+			return fmt.Errorf("scanning project repository root: %w", err)
+		}
+		visit(p)
+	}
+	return rows.Err()
+}
+
+// ListRepoRoots returns only project identity and repository roots for
+// work-directory attribution. The result is intentionally unordered.
+func (r *ProjectRepo) ListRepoRoots(ctx context.Context) ([]ProjectRepoRoot, error) {
+	projects := make([]ProjectRepoRoot, 0, 64)
+	if err := r.ForEachRepoRoot(ctx, func(project ProjectRepoRoot) {
+		projects = append(projects, project)
+	}); err != nil {
+		return nil, err
+	}
+	return projects, nil
 }
 
 // ListSelectorOptions returns a compact projection for the shared sidebar

@@ -2363,7 +2363,7 @@ func (h *Handler) captureTaskDiffOutput(ctx context.Context, task *models.Task, 
 			if exec != nil {
 				commitCtx.TurnIntent = exec.PromptSent
 				if h.llmSvc != nil {
-					commitCtx.DiffSummary = h.llmSvc.SummarizeWorktreeCommitDiffForAgentID(ctx, workDir, exec.AgentConfigID, commitCtx)
+					commitCtx.DiffSummary = h.llmSvc.SummarizeWorktreeCommitDiffForAgentID(service.WithDirectUsageProject(ctx, task.ProjectID), workDir, exec.AgentConfigID, commitCtx)
 				}
 			}
 			commitErr := service.WithRepositoryMutation(repoDir, func() error {

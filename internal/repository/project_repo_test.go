@@ -2,11 +2,93 @@ package repository
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
+
+func TestProjectRepo_ListRepoRootsUsesCompactUnorderedProjection(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	repo := NewProjectRepo(db)
+	ctx := context.Background()
+
+	project := &models.Project{
+		Name:        "Compact Root",
+		Description: strings.Repeat("d", 16<<10),
+		RepoPath:    "/repos/compact",
+		RepoURL:     "https://example.test/" + strings.Repeat("u", 2<<10),
+	}
+	if err := repo.Create(ctx, project); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	roots, err := repo.ListRepoRoots(ctx)
+	counter.SetEnabled(false)
+	if err != nil {
+		t.Fatalf("ListRepoRoots: %v", err)
+	}
+	if len(roots) == 0 {
+		t.Fatal("expected repository roots")
+	}
+	var found bool
+	for _, root := range roots {
+		if root.ID == project.ID {
+			found = true
+			if root.RepoPath != project.RepoPath {
+				t.Fatalf("RepoPath = %q, want %q", root.RepoPath, project.RepoPath)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("project %q not returned", project.ID)
+	}
+	full, err := repo.GetByID(ctx, project.ID)
+	if err != nil || full == nil {
+		t.Fatalf("GetByID: project=%v err=%v", full, err)
+	}
+	if full.Description != project.Description || full.RepoURL != project.RepoURL {
+		t.Fatal("full project read did not retain rich metadata")
+	}
+
+	statements := counter.Statements()
+	if len(statements) != 1 {
+		t.Fatalf("statements = %d, want 1: %v", len(statements), statements)
+	}
+	query := strings.ToLower(strings.Join(strings.Fields(statements[0]), " "))
+	if query != "select id, repo_path from projects" {
+		t.Fatalf("unexpected compact query: %s", statements[0])
+	}
+
+	rows, err := db.QueryContext(ctx, "EXPLAIN QUERY PLAN "+statements[0])
+	if err != nil {
+		t.Fatalf("EXPLAIN QUERY PLAN: %v", err)
+	}
+	defer rows.Close()
+	var plan strings.Builder
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatalf("scan query plan: %v", err)
+		}
+		plan.WriteString(detail)
+		plan.WriteByte('\n')
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("query plan rows: %v", err)
+	}
+	planText := strings.ToUpper(plan.String())
+	if strings.Contains(planText, "USE TEMP B-TREE FOR ORDER BY") {
+		t.Fatalf("compact query uses temporary ORDER BY sort:\n%s", plan.String())
+	}
+	if !strings.Contains(planText, "COVERING INDEX IDX_PROJECTS_REPO_ROOTS") {
+		t.Fatalf("compact query does not use repository-root covering index:\n%s", plan.String())
+	}
+}
 
 func TestProjectRepo_CreateAndGetByID(t *testing.T) {
 	db := testutil.NewTestDB(t)

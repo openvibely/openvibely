@@ -733,7 +733,7 @@ func (h *Handler) buildPullRequestPrepCommitMessage(ctx context.Context, task *m
 		TaskTitle: task.Title,
 	}
 	if h.llmSvc != nil && task.AgentID != nil {
-		commitCtx.DiffSummary = h.llmSvc.SummarizeWorktreeCommitDiffForAgentID(ctx, task.WorktreePath, *task.AgentID, commitCtx)
+		commitCtx.DiffSummary = h.llmSvc.SummarizeWorktreeCommitDiffForAgentID(service.WithDirectUsageProject(ctx, task.ProjectID), task.WorktreePath, *task.AgentID, commitCtx)
 	}
 	return service.BuildWorktreeCommitMessage(task.WorktreePath, commitCtx)
 }

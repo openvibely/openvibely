@@ -745,6 +745,56 @@ func TestLLMService_CallAgentDirect_TestProviderUsesMockCaller(t *testing.T) {
 	}
 }
 
+func TestLLMService_CallAgentDirect_ExplicitProjectBypassesRootDiscoveryOnSuccessAndFailure(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	usageRepo := repository.NewUsageRepo(db)
+	ctx := context.Background()
+
+	project := &models.Project{Name: "Explicit Usage Project", RepoPath: t.TempDir()}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("Create project: %v", err)
+	}
+
+	svc := NewLLMService(nil, nil, nil, projectRepo, nil, nil)
+	svc.SetUsageRepo(usageRepo)
+	call := 0
+	svc.providerAdapters[models.ProviderAnthropic] = providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+		call++
+		result := llmcontracts.AgentResult{Output: "result", Usage: llmcontracts.Usage{InputTokens: 3, OutputTokens: 4, TotalTokens: 7}}
+		if call == 2 {
+			return result, fmt.Errorf("provider failed after reporting usage")
+		}
+		return result, nil
+	})
+	agent := models.LLMConfig{Name: "Usage Agent", Provider: models.ProviderAnthropic, Model: "claude-test", APIKey: "sk-test"}
+	callCtx := WithDirectUsageProject(ctx, project.ID)
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	if _, _, err := svc.CallAgentDirect(callCtx, "success", nil, agent, filepath.Join(project.RepoPath, "missing")); err != nil {
+		t.Fatalf("successful direct call: %v", err)
+	}
+	if _, _, err := svc.CallAgentDirect(callCtx, "failure", nil, agent, filepath.Join(project.RepoPath, "missing")); err == nil {
+		t.Fatal("expected provider failure")
+	}
+	counter.SetEnabled(false)
+
+	for _, statement := range counter.Statements() {
+		normalized := strings.ToLower(strings.Join(strings.Fields(statement), " "))
+		if strings.Contains(normalized, " from projects") {
+			t.Fatalf("explicit project performed root discovery: %s", statement)
+		}
+	}
+	totals, err := usageRepo.GetUsageTotals(ctx, repository.UsageFilter{ProjectID: project.ID})
+	if err != nil {
+		t.Fatalf("GetUsageTotals: %v", err)
+	}
+	if totals.CallCount != 2 || totals.TotalTokens != 14 {
+		t.Fatalf("usage totals = calls %d tokens %d, want calls 2 tokens 14", totals.CallCount, totals.TotalTokens)
+	}
+}
+
 func TestLLMService_CallAgentDirect_RecordsUsageForProjectWorktree(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	projectRepo := repository.NewProjectRepo(db)

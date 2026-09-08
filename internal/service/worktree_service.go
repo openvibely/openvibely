@@ -1233,7 +1233,7 @@ func (ws *WorktreeService) mergeBranchLocked(ctx context.Context, task *models.T
 			TaskTitle: task.Title,
 		}
 		if ws.llmSvc != nil && task.AgentID != nil {
-			commitCtx.DiffSummary = ws.llmSvc.SummarizeWorktreeCommitDiffForAgentID(ctx, task.WorktreePath, *task.AgentID, commitCtx)
+			commitCtx.DiffSummary = ws.llmSvc.SummarizeWorktreeCommitDiffForAgentID(WithDirectUsageProject(ctx, task.ProjectID), task.WorktreePath, *task.AgentID, commitCtx)
 		}
 		message := BuildWorktreeCommitMessage(task.WorktreePath, commitCtx)
 		var err error
@@ -2630,7 +2630,7 @@ func (ws *WorktreeService) HandlePostExecution(ctx context.Context, task *models
 		TaskTitle: task.Title,
 	}
 	if ws.llmSvc != nil && task.AgentID != nil {
-		commitCtx.DiffSummary = ws.llmSvc.SummarizeWorktreeCommitDiffForAgentID(ctx, task.WorktreePath, *task.AgentID, commitCtx)
+		commitCtx.DiffSummary = ws.llmSvc.SummarizeWorktreeCommitDiffForAgentID(WithDirectUsageProject(ctx, task.ProjectID), task.WorktreePath, *task.AgentID, commitCtx)
 	}
 	msg := BuildWorktreeCommitMessage(task.WorktreePath, commitCtx)
 	commitErr := ws.WithRepositoryMutation(repoDir, func() error {

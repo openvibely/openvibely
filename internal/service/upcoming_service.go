@@ -683,7 +683,7 @@ Respond with ONLY the summary text, no formatting or labels.`, sb.String())
 		}
 	}
 
-	output, _, err := s.llmSvc.CallAgentDirect(ctx, prompt, nil, *agent, workDir)
+	output, _, err := s.llmSvc.CallAgentDirect(WithDirectUsageProject(ctx, projectID), prompt, nil, *agent, workDir)
 	if err != nil {
 		return "", fmt.Errorf("AI summary generation failed: %w", err)
 	}
@@ -762,7 +762,7 @@ Respond with ONLY the summary text, no formatting or labels.`, sb.String())
 		}
 	}
 
-	output, _, err := s.llmSvc.CallAgentDirect(ctx, prompt, nil, *agent, workDir)
+	output, _, err := s.llmSvc.CallAgentDirect(WithDirectUsageProject(ctx, projectID), prompt, nil, *agent, workDir)
 	if err != nil {
 		return "", fmt.Errorf("AI summary generation failed: %w", err)
 	}

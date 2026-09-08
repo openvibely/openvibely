@@ -2024,7 +2024,7 @@ func (s *LLMService) captureWorktreeDiffAfterExecutionUnlocked(ctx context.Conte
 		TurnIntent: exec.PromptSent,
 		Summary:    outputSummary,
 	}
-	commitCtx.DiffSummary = s.SummarizeWorktreeCommitDiff(ctx, task.WorktreePath, agent, commitCtx)
+	commitCtx.DiffSummary = s.SummarizeWorktreeCommitDiff(WithDirectUsageProject(ctx, task.ProjectID), task.WorktreePath, agent, commitCtx)
 	commitMessage := BuildWorktreeCommitMessage(task.WorktreePath, commitCtx)
 	if err := s.CommitTaskWorktreeChanges(ctx, task, exec, task.WorktreePath, commitMessage); err != nil {
 		applog.Infof("[agent-svc] ExecuteTaskWithAgent error committing worktree changes task=%s worktree=%s branch=%s: %v", task.ID, task.WorktreePath, worktreeBranch, err)
@@ -2124,18 +2124,12 @@ func (s *LLMService) CallAgentRawDirectNoTools(ctx context.Context, message stri
 	return s.callAgentDirectWithDefinitionMode(ctx, message, attachments, agent, workDir, nil, true, true)
 }
 
-type directUsageProjectContextKey struct{}
-
 func WithDirectUsageProject(ctx context.Context, projectID string) context.Context {
-	return context.WithValue(ctx, directUsageProjectContextKey{}, strings.TrimSpace(projectID))
+	return llmcontracts.WithDirectUsageProject(ctx, projectID)
 }
 
 func directUsageProjectFromContext(ctx context.Context) string {
-	if ctx == nil {
-		return ""
-	}
-	value, _ := ctx.Value(directUsageProjectContextKey{}).(string)
-	return strings.TrimSpace(value)
+	return llmcontracts.DirectUsageProjectFromContext(ctx)
 }
 
 // CallAgentDirectNoTools calls the agent directly and explicitly suppresses
@@ -2222,25 +2216,33 @@ func (s *LLMService) projectIDForWorkDir(ctx context.Context, workDir string) st
 	if s == nil || s.projectRepo == nil || strings.TrimSpace(workDir) == "" {
 		return ""
 	}
-	want := filepath.Clean(workDir)
-	projects, err := s.projectRepo.List(ctx)
-	if err != nil {
-		applog.Infof("[usage] error resolving project for workDir=%s: %v", workDir, err)
-		return ""
-	}
+	want := cleanProjectUsagePath(workDir)
 	bestProjectID := ""
 	bestRepoLen := -1
-	for _, project := range projects {
-		if !projectWorkDirMatches(project.RepoPath, want) {
-			continue
+	err := s.projectRepo.ForEachRepoRoot(ctx, func(project repository.ProjectRepoRoot) {
+		if strings.TrimSpace(project.RepoPath) == "" {
+			return
 		}
-		repoLen := len(filepath.Clean(project.RepoPath))
+		repoPath := cleanProjectUsagePath(project.RepoPath)
+		if !cleanProjectWorkDirMatches(repoPath, want) {
+			return
+		}
+		repoLen := len(repoPath)
 		if repoLen > bestRepoLen {
 			bestProjectID = project.ID
 			bestRepoLen = repoLen
 		}
+	})
+	if err != nil {
+		applog.Infof("[usage] error resolving project for workDir=%s: %v", workDir, err)
+		return ""
 	}
 	return bestProjectID
+}
+
+func cleanProjectUsagePath(path string) string {
+	path = strings.ReplaceAll(strings.TrimSpace(path), `\`, "/")
+	return filepath.Clean(filepath.FromSlash(path))
 }
 
 func projectWorkDirMatches(repoPath string, workDir string) bool {
@@ -2248,19 +2250,26 @@ func projectWorkDirMatches(repoPath string, workDir string) bool {
 	if repo == "" || strings.TrimSpace(workDir) == "" {
 		return false
 	}
-	repo = filepath.Clean(repo)
-	want := filepath.Clean(workDir)
-	if repo == want {
+	repo = cleanProjectUsagePath(repo)
+	want := cleanProjectUsagePath(workDir)
+	return cleanProjectWorkDirMatches(repo, want)
+}
+
+func cleanProjectWorkDirMatches(repo string, workDir string) bool {
+	if repo == workDir {
 		return true
 	}
-	if rel, err := filepath.Rel(repo, want); err == nil && rel != "." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && rel != ".." {
+	if repo == "." {
+		rel, err := filepath.Rel(repo, workDir)
+		return err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+	}
+	if !strings.HasPrefix(workDir, repo) {
+		return false
+	}
+	if os.IsPathSeparator(repo[len(repo)-1]) {
 		return true
 	}
-	worktreesDir := filepath.Join(repo, ".worktrees")
-	if rel, err := filepath.Rel(worktreesDir, want); err == nil && rel != "." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && rel != ".." {
-		return true
-	}
-	return false
+	return os.IsPathSeparator(workDir[len(repo)])
 }
 
 func (s *LLMService) directScopedFilesRuntime(ctx context.Context, agentDef *models.Agent, workDir string) (string, *llmcontracts.RuntimeTools, error) {

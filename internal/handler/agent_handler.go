@@ -19,6 +19,7 @@ import (
 	"github.com/openvibely/openvibely/internal/agentplugins"
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/httpretry"
+	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/mcpconfig"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
@@ -1208,7 +1209,16 @@ func (h *Handler) GenerateAgent(c echo.Context) error {
 	}
 	selectedPlugins = validatedPlugins
 
+	callCtx := c.Request().Context()
 	workDir, _ := os.Getwd()
+	if projectID, err := h.getCurrentProjectID(c); err == nil && projectID != "" {
+		callCtx = llmcontracts.WithDirectUsageProject(callCtx, projectID)
+		if h.projectSvc != nil {
+			if project, getErr := h.projectSvc.GetByID(callCtx, projectID); getErr == nil && project != nil && strings.TrimSpace(project.RepoPath) != "" {
+				workDir = project.RepoPath
+			}
+		}
+	}
 	discoveredMCP := discoverLocalMCPServers(workDir)
 	generated := fallbackGeneratedAgent(description, discoveredMCP)
 	generated.GenerationMode = "fallback"
@@ -1244,7 +1254,7 @@ func (h *Handler) GenerateAgent(c echo.Context) error {
 
 	prompt := buildAgentGenerationPrompt(description)
 	startedAt := time.Now()
-	llmGenerated, err := h.generateAgentWithLLM(c.Request().Context(), prompt, *defaultModel, workDir)
+	llmGenerated, err := h.generateAgentWithLLM(callCtx, prompt, *defaultModel, workDir)
 	duration := time.Since(startedAt)
 	if err != nil {
 		generated.GenerationError = buildGenerateAgentUserError(defaultModel.Name, err)
