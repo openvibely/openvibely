@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"fmt"
+	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -11,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
@@ -202,6 +205,28 @@ func TestLLMService_projectIDForWorkDir_EmptyWorkDirSkipsLookup(t *testing.T) {
 
 var directAttributionBenchmarkSink string
 
+type directAttributionBenchmarkProvider struct{}
+
+func (directAttributionBenchmarkProvider) Call(llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+	return llmcontracts.AgentResult{
+		Output:         "attributed",
+		TextOnlyOutput: "attributed",
+		Usage:          llmcontracts.Usage{InputTokens: 7, OutputTokens: 4, TotalTokens: 11},
+	}, nil
+}
+
+var directAttributionBenchmarkAgent = models.LLMConfig{
+	Name:     "Attribution Benchmark",
+	Provider: models.ProviderTest,
+	Model:    "test-model",
+}
+
+func callDirectAttributionPath(ctx context.Context, svc *LLMService, workDir string) error {
+	output, _, err := svc.CallAgentDirect(ctx, "attribute usage", nil, directAttributionBenchmarkAgent, workDir)
+	directAttributionBenchmarkSink = output
+	return err
+}
+
 func setupDirectAttributionFixture(tb testing.TB, projectCount int) (*LLMService, *repository.ProjectRepo, *testutil.SQLStatementCounter, string, string) {
 	tb.Helper()
 	db, counter := testutil.NewStatementCountingTestDB(tb)
@@ -233,6 +258,7 @@ func setupDirectAttributionFixture(tb testing.TB, projectCount int) (*LLMService
 	}
 
 	svc := NewLLMService(nil, nil, nil, repo, nil, nil)
+	svc.providerAdapters[models.ProviderTest] = directAttributionBenchmarkProvider{}
 	workDir := filepath.Join(root, fmt.Sprintf("project-%04d", projectCount-1), ".worktrees", "task", "internal")
 	return svc, repo, counter, workDir, targetID
 }
@@ -275,24 +301,38 @@ func legacyProjectWorkDirMatches(repoPath string, workDir string) bool {
 	return false
 }
 
+func legacyDirectModelUsageCall(ctx context.Context, svc *LLMService, repo *repository.ProjectRepo, workDir string) error {
+	// The explicit context prevents the current fallback from running before the
+	// benchmark applies the former full-list attribution after provider return.
+	if err := callDirectAttributionPath(WithDirectUsageProject(ctx, "legacy-baseline"), svc, workDir); err != nil {
+		return err
+	}
+	return legacyDirectAttribution(ctx, repo, workDir)
+}
+
 func BenchmarkDirectModelUsageAttribution(b *testing.B) {
+	originalLogOutput := log.Writer()
+	log.SetOutput(io.Discard)
+	b.Cleanup(func() { log.SetOutput(originalLogOutput) })
+
 	for _, projectCount := range []int{1, 50, 500} {
 		b.Run(fmt.Sprintf("projects=%d", projectCount), func(b *testing.B) {
 			svc, repo, counter, workDir, projectID := setupDirectAttributionFixture(b, projectCount)
 			ctx := context.Background()
 			explicitCtx := WithDirectUsageProject(ctx, projectID)
 			cases := []struct {
-				name string
-				call func() error
+				name             string
+				wantProjectReads int
+				call             func() error
 			}{
-				{name: "legacy-full-list", call: func() error { return legacyDirectAttribution(ctx, repo, workDir) }},
-				{name: "fallback-repo-roots", call: func() error {
-					directAttributionBenchmarkSink = svc.projectIDForWorkDir(ctx, workDir)
-					return nil
+				{name: "legacy-full-list", wantProjectReads: 1, call: func() error {
+					return legacyDirectModelUsageCall(ctx, svc, repo, workDir)
 				}},
-				{name: "explicit-project", call: func() error {
-					directAttributionBenchmarkSink = directUsageProjectFromContext(explicitCtx)
-					return nil
+				{name: "fallback-repo-roots", wantProjectReads: 1, call: func() error {
+					return callDirectAttributionPath(ctx, svc, workDir)
+				}},
+				{name: "explicit-project", wantProjectReads: 0, call: func() error {
+					return callDirectAttributionPath(explicitCtx, svc, workDir)
 				}},
 			}
 			for _, benchmarkCase := range cases {
@@ -300,15 +340,18 @@ func BenchmarkDirectModelUsageAttribution(b *testing.B) {
 					counter.Reset()
 					counter.SetEnabled(true)
 					if err := benchmarkCase.call(); err != nil {
-						b.Fatalf("instrumented attribution: %v", err)
+						b.Fatalf("instrumented direct call: %v", err)
 					}
 					counter.SetEnabled(false)
 					statementCount := len(counter.Statements())
+					if statementCount != benchmarkCase.wantProjectReads {
+						b.Fatalf("project lookup statements = %d, want %d: %v", statementCount, benchmarkCase.wantProjectReads, counter.Statements())
+					}
 					b.ReportAllocs()
 					b.ResetTimer()
 					for i := 0; i < b.N; i++ {
 						if err := benchmarkCase.call(); err != nil {
-							b.Fatalf("attribution: %v", err)
+							b.Fatalf("direct call: %v", err)
 						}
 					}
 					b.ReportMetric(float64(statementCount), "sql-statements/op")
@@ -363,13 +406,34 @@ func allocatedBytesPerDirectAttribution(t *testing.T, runs int, call func() erro
 }
 
 func TestDirectModelUsageFallbackPerformanceReductionAt500Projects(t *testing.T) {
-	svc, repo, _, workDir, _ := setupDirectAttributionFixture(t, 500)
+	originalLogOutput := log.Writer()
+	log.SetOutput(io.Discard)
+	t.Cleanup(func() { log.SetOutput(originalLogOutput) })
+
+	svc, repo, counter, workDir, projectID := setupDirectAttributionFixture(t, 500)
 	ctx := context.Background()
-	baseline := func() error { return legacyDirectAttribution(ctx, repo, workDir) }
-	candidate := func() error {
-		directAttributionBenchmarkSink = svc.projectIDForWorkDir(ctx, workDir)
-		return nil
+	baseline := func() error { return legacyDirectModelUsageCall(ctx, svc, repo, workDir) }
+	candidate := func() error { return callDirectAttributionPath(ctx, svc, workDir) }
+	explicit := func() error {
+		return callDirectAttributionPath(WithDirectUsageProject(ctx, projectID), svc, workDir)
 	}
+	assertProjectStatements := func(name string, call func() error, want int) {
+		t.Helper()
+		counter.Reset()
+		counter.SetEnabled(true)
+		if err := call(); err != nil {
+			counter.SetEnabled(false)
+			t.Fatalf("%s instrumented direct call: %v", name, err)
+		}
+		counter.SetEnabled(false)
+		if statements := counter.Statements(); len(statements) != want {
+			t.Fatalf("%s project lookup statements = %d, want %d: %v", name, len(statements), want, statements)
+		}
+	}
+	assertProjectStatements("legacy baseline", baseline, 1)
+	assertProjectStatements("fallback", candidate, 1)
+	assertProjectStatements("explicit project", explicit, 0)
+
 	if err := baseline(); err != nil {
 		t.Fatalf("warm baseline: %v", err)
 	}
@@ -386,7 +450,7 @@ func TestDirectModelUsageFallbackPerformanceReductionAt500Projects(t *testing.T)
 	if candidateBytes*20 > baselineBytes {
 		t.Fatalf("fallback allocated bytes/op %d must be at least 95%% below full-list baseline %d", candidateBytes, baselineBytes)
 	}
-	t.Logf("500 projects: median baseline=%s fallback=%s reduction=%.1f%%; bytes/op baseline=%d fallback=%d reduction=%.1f%%",
+	t.Logf("500 projects real direct calls: median baseline=%s fallback=%s reduction=%.1f%%; bytes/op baseline=%d fallback=%d reduction=%.1f%%",
 		baselineMedian, candidateMedian, 100*(1-float64(candidateMedian)/float64(baselineMedian)),
 		baselineBytes, candidateBytes, 100*(1-float64(candidateBytes)/float64(baselineBytes)))
 }
