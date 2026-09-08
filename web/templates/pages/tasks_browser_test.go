@@ -905,8 +905,10 @@ func TestThemeAwarePrimaryAndSecondaryActionColorsInChrome(t *testing.T) {
 		wantHover  string
 		wantActive string
 	}{
-		{name: "native dark", mode: "dark", id: "openvibely-dark", wantHover: "rgb(47, 53, 64)", wantActive: "rgb(39, 49, 64)"},
-		{name: "native light", mode: "light", id: "openvibely-light", wantHover: "rgb(204, 204, 204)", wantActive: "rgb(232, 232, 232)"},
+		{name: "native dark exact", mode: "dark", id: "openvibely-dark", wantHover: "rgb(47, 53, 64)", wantActive: "rgb(39, 49, 64)"},
+		{name: "native dark server-rendered", mode: "dark", wantHover: "rgb(47, 53, 64)", wantActive: "rgb(39, 49, 64)"},
+		{name: "native light exact", mode: "light", id: "openvibely-light", wantHover: "rgb(204, 204, 204)", wantActive: "rgb(232, 232, 232)"},
+		{name: "native light server-rendered", mode: "light", wantHover: "rgb(204, 204, 204)", wantActive: "rgb(232, 232, 232)"},
 		{name: "imported", mode: "dark", id: "vscode-test", wantHover: "rgb(7, 8, 9)"},
 	}
 	secondarySelectors := []struct {
@@ -920,7 +922,11 @@ func TestThemeAwarePrimaryAndSecondaryActionColorsInChrome(t *testing.T) {
 		for _, control := range secondarySelectors {
 			t.Run(tc.name+" "+control.name, func(t *testing.T) {
 				movePointer(t, 1000, 1000)
-				evaluate(t, fmt.Sprintf(`document.documentElement.setAttribute('data-theme', %q); document.documentElement.setAttribute('data-color-theme', %q); var b=document.querySelector(%q); b.disabled=false; ''`, tc.mode, tc.id, control.selector))
+				if tc.id == "" {
+					evaluate(t, fmt.Sprintf(`document.documentElement.setAttribute('data-theme', %q); document.documentElement.removeAttribute('data-color-theme'); var b=document.querySelector(%q); b.disabled=false; ''`, tc.mode, control.selector))
+				} else {
+					evaluate(t, fmt.Sprintf(`document.documentElement.setAttribute('data-theme', %q); document.documentElement.setAttribute('data-color-theme', %q); var b=document.querySelector(%q); b.disabled=false; ''`, tc.mode, tc.id, control.selector))
+				}
 				time.Sleep(100 * time.Millisecond)
 				var normal struct {
 					Background string     `json:"background"`
