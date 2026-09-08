@@ -2598,6 +2598,52 @@ func TestAutomationChatChannelRuntimePlanModePreviewOnly(t *testing.T) {
 	require.Zero(t, countRowsForProject(t, tc, "automations", project.ID))
 }
 
+func TestAutomationChatReadToolsPreserveSharedSummaryEnvelope(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().WithName("Automation Chat reads").Build()
+	configureAutomationChatRuntimeTestServices(t, tc)
+	params := streamingResponseParams{ProjectID: project.ID, PrincipalID: "alice"}
+	runtime := tc.handler.buildChatActionToolRuntimeFromDefs(params, newChatActionSummaryCollector(), chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true), models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
+	execute := func(name string, input json.RawMessage) map[string]any {
+		t.Helper()
+		output, handled, isError, err := runtime.Executor(ctx, name, input)
+		require.NoError(t, err)
+		require.True(t, handled)
+		require.False(t, isError, output)
+		var result map[string]any
+		require.NoError(t, json.Unmarshal([]byte(output), &result))
+		return result
+	}
+
+	empty := execute("list_automations", nil)
+	require.Equal(t, []any{}, empty["automations"])
+	unknown := execute("get_automation", json.RawMessage(`{"automation_id":"unknown"}`))
+	require.False(t, unknown["found"].(bool))
+	require.Contains(t, unknown["error"], `automation "unknown" not found in project `+project.ID)
+
+	saved := execute("save_automation", json.RawMessage(`{"source":"template","template_key":"native_sdlc"}`))
+	automationID, _ := saved["automation_id"].(string)
+	require.NotEmpty(t, automationID)
+	cards, err := tc.handler.automationGraphSvc.List(ctx, project.ID)
+	require.NoError(t, err)
+	require.Len(t, cards, 1)
+	expectedJSON, err := json.Marshal(service.AutomationCardSummary(cards[0]))
+	require.NoError(t, err)
+	var expected map[string]any
+	require.NoError(t, json.Unmarshal(expectedJSON, &expected))
+
+	listed := execute("list_automations", nil)
+	automations, _ := listed["automations"].([]any)
+	require.Len(t, automations, 1)
+	listedAutomation, _ := automations[0].(map[string]any)
+	require.Equal(t, expected, listedAutomation)
+
+	got := execute("get_automation", json.RawMessage(fmt.Sprintf(`{"automation_id":%q}`, automationID)))
+	gotAutomation, _ := got["automation"].(map[string]any)
+	require.Equal(t, expected, gotAutomation)
+}
+
 func TestAutomationChatLifecycleActionsRunPauseAndResumeSavedAutomation(t *testing.T) {
 	tc := NewTestContext(t)
 	ctx := context.Background()
