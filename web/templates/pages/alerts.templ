@@ -425,7 +425,7 @@ templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unrea
 				var saved = state.swap;
 				if (!swappedTarget || (swappedTarget.id !== 'alerts-content' && swappedTarget.id !== 'alerts-live-results') || !root || !saved) return;
 				state.swap = null;
-				swappedTarget.openVibelyAlertsViewportSwap = saved;
+				state.settlingSwap = saved;
 
 					if (swappedTarget.id === 'alerts-live-results') {
 						root.setAttribute('data-card-pagination-has-more', swappedTarget.getAttribute('data-card-pagination-has-more') || 'false');
@@ -469,9 +469,9 @@ templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unrea
 			document.body.addEventListener('htmx:afterSettle', function(event) {
 				var settledTarget = event.detail && event.detail.target;
 				var root = document.getElementById('alerts-container');
-				var saved = settledTarget && settledTarget.openVibelyAlertsViewportSwap;
+				var saved = state.settlingSwap;
 				if (!settledTarget || (settledTarget.id !== 'alerts-content' && settledTarget.id !== 'alerts-live-results') || !root || !saved) return;
-				delete settledTarget.openVibelyAlertsViewportSwap;
+				state.settlingSwap = null;
 				if (saved.persistentFocus && saved.persistentFocus.isConnected && document.activeElement !== saved.persistentFocus) {
 					saved.persistentFocus.focus({preventScroll: true});
 				}
