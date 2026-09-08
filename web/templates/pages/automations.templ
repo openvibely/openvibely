@@ -521,7 +521,7 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 					}
 				</div>
 				<div class="flex shrink-0 flex-wrap items-center justify-end gap-2" data-automation-live-header-actions>
-						<button class="btn btn-outline btn-sm ov-secondary-action" type="submit" form="automation-live-edit-form" data-automation-live-edit>Edit</button>
+						<button class="btn btn-secondary btn-sm ov-secondary-action" type="submit" form="automation-live-edit-form" data-automation-live-edit>Edit</button>
 						if graph.Automation.LifecycleState == models.AutomationActive {
 							<button class="btn btn-primary btn-sm" type="submit" form="automation-live-run-now-form" data-automation-live-run-now={ graph.Automation.ID }>Run</button>					}
 					@automationLiveMoreActions(graph, currentProjectID, deleteAvailable)

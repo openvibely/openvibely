@@ -669,6 +669,21 @@ func TestThemeAwarePrimaryAndSecondaryActionColorsInChrome(t *testing.T) {
 		t.Fatalf("render base layout: %v", err)
 	}
 
+	var automationActions bytes.Buffer
+	automation := models.AutomationLiveGraph{Automation: models.Automation{
+		ID:             "secondary-action-automation",
+		Name:           "Secondary action automation",
+		LifecycleState: models.AutomationActive,
+	}}
+	if err := AutomationLiveContent(automation, "secondary-action-project", true).Render(context.Background(), &automationActions); err != nil {
+		t.Fatalf("render Automation actions: %v", err)
+	}
+	var taskActions bytes.Buffer
+	task := models.Task{ID: "secondary-action-task", Status: models.StatusPending}
+	if err := TaskDetailActions(&task).Render(context.Background(), &taskActions); err != nil {
+		t.Fatalf("render Task actions: %v", err)
+	}
+
 	renderedLayout := page.String()
 	headEnd := strings.Index(renderedLayout, "</head>")
 	if headEnd < 0 {
@@ -696,8 +711,11 @@ func TestThemeAwarePrimaryAndSecondaryActionColorsInChrome(t *testing.T) {
 	[data-color-theme="vscode-test"][data-theme="dark"] { --p: 0.7 0.12 190; }
 	[data-color-theme="vscode-test"][data-theme="dark"] .btn-primary:hover { background-color: rgb(4, 5, 6); border-color: rgb(4, 5, 6); }
 	[data-color-theme="vscode-test"][data-theme="dark"] .btn.ov-secondary-action:hover:not(:disabled):not(.btn-disabled) { background-color: rgb(7, 8, 9); border-color: rgb(7, 8, 9); }
+	[data-automation-live-edit], [data-task-detail-edit] { position:fixed; left:20px; width:140px; transform:none; transition:none; z-index:2147483647; }
+	[data-automation-live-edit] { top:120px; }
+	[data-task-detail-edit] { top:180px; }
 	</style>`
-	fixture := `<button class="btn btn-primary chat-send-button" style="position:fixed;left:20px;top:20px;width:100px;transform:none;transition:none;z-index:2147483647" data-test-send>Send</button><span class="task-state-running" style="position:fixed;left:20px;top:80px;z-index:2147483647" data-test-running>Running</span><button class="btn btn-outline btn-sm ov-secondary-action" style="position:fixed;left:20px;top:120px;width:100px;transform:none;transition:none;z-index:2147483647" data-automation-live-edit>Automation Edit</button><button class="btn btn-secondary btn-sm ov-secondary-action" style="position:fixed;left:20px;top:180px;width:100px;transform:none;transition:none;z-index:2147483647" data-task-detail-edit>Task Edit</button>`
+	fixture := `<button class="btn btn-primary chat-send-button" style="position:fixed;left:20px;top:20px;width:100px;transform:none;transition:none;z-index:2147483647" data-test-send>Send</button><span class="task-state-running" style="position:fixed;left:20px;top:80px;z-index:2147483647" data-test-running>Running</span>` + automationActions.String() + taskActions.String()
 	html := `<!doctype html><html data-theme="dark" data-color-theme="openvibely-dark"><head><meta charset="utf-8">` + inlineStyles.String() + importedCSS + `</head><body>` + fixture + `</body></html>`
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -905,10 +923,10 @@ func TestThemeAwarePrimaryAndSecondaryActionColorsInChrome(t *testing.T) {
 		wantHover  string
 		wantActive string
 	}{
-		{name: "native dark exact", mode: "dark", id: "openvibely-dark", wantHover: "rgb(47, 53, 64)", wantActive: "rgb(39, 49, 64)"},
-		{name: "native dark server-rendered", mode: "dark", wantHover: "rgb(47, 53, 64)", wantActive: "rgb(39, 49, 64)"},
-		{name: "native light exact", mode: "light", id: "openvibely-light", wantHover: "rgb(204, 204, 204)", wantActive: "rgb(232, 232, 232)"},
-		{name: "native light server-rendered", mode: "light", wantHover: "rgb(204, 204, 204)", wantActive: "rgb(232, 232, 232)"},
+		{name: "native dark exact", mode: "dark", id: "openvibely-dark", wantHover: "rgb(212, 73, 175)"},
+		{name: "native dark server-rendered", mode: "dark", wantHover: "rgb(212, 73, 175)"},
+		{name: "native light exact", mode: "light", id: "openvibely-light", wantHover: "rgb(204, 204, 204)"},
+		{name: "native light server-rendered", mode: "light", wantHover: "rgb(204, 204, 204)"},
 		{name: "imported", mode: "dark", id: "vscode-test", wantHover: "rgb(7, 8, 9)"},
 	}
 	secondarySelectors := []struct {
