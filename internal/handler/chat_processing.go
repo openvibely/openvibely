@@ -1553,6 +1553,7 @@ func (h *Handler) xRuntimeToolsForThreadInput(taskID string, input models.Thread
 		// remains authorized and persisted even while outbound X is disconnected.
 		svc = service.NewXService(service.XCredentials{}, h.settingsRepo, h.projectRepo, h.llmConfigRepo, h.taskRepo, h.execRepo, h.scheduleRepo, h.taskSvc)
 		svc.SetRepositories(h.xAuthRepo, h.xUserProjectRepo, h.xTaskContextRepo, h.xInboundReceiptRepo, h.threadInputRepo)
+		svc.SetReplyDeliveryRepository(h.xReplyDeliveryRepo)
 		svc.SetRuntime(h.agentRepo, h.customPersonalityRepo, h.chatBroadcaster, h.executionStreamHub, h.StartChannelChatRun, h.StartChannelTaskRun, h.PromoteQueuedChatInput, h.PromoteQueuedTaskThreadInput, h.channelMessageRouter)
 	}
 	return svc.RuntimeTools(taskID, input.ProjectID, input.XAccountID, input.XUserID, input.XConversationID, input.XReplyToTweetID, input.XUsername)
@@ -2187,7 +2188,8 @@ func (h *Handler) sendChannelResponse(ctx context.Context, task *models.Task, re
 	}
 	if reply.Source == models.TaskOriginX && reply.XReplyToTweetID != "" {
 		if xService := h.getXService(); xService != nil {
-			xService.SendReplyForAccount(ctx, reply.XAccountID, reply.XReplyToTweetID, output, errMsg)
+			result := xService.DeliverTaskReply(ctx, *task, reply.XAccountID, reply.XReplyToTweetID, output, errMsg)
+			h.recordXReplyDeliveryFailure(ctx, task, reply.XReplyToTweetID, result)
 		}
 		return
 	}
@@ -2224,11 +2226,8 @@ func (h *Handler) sendChannelResponse(ctx context.Context, task *models.Task, re
 		}
 	case models.TaskOriginX:
 		if xService := h.getXService(); xService != nil {
-			if task.Category == models.CategoryChat {
-				xService.SendChatResponse(ctx, *task, output, errMsg)
-			} else {
-				xService.SendTaskCompletionNotification(ctx, *task, output, errMsg)
-			}
+			result := xService.SendChatResponse(ctx, *task, output, errMsg)
+			h.recordXReplyDeliveryFailure(ctx, task, task.ID, result)
 		}
 	case models.TaskOriginDiscord:
 		if task.Category == models.CategoryChat {
@@ -2242,6 +2241,25 @@ func (h *Handler) sendChannelResponse(ctx context.Context, task *models.Task, re
 		}); ok {
 			svc.SendTaskCompletionNotification(ctx, *task, output, errMsg)
 		}
+	}
+}
+
+func (h *Handler) recordXReplyDeliveryFailure(ctx context.Context, task *models.Task, replyToTweetID string, result service.XReplyResult) {
+	if task == nil || result.Err == nil || h.alertSvc == nil || strings.TrimSpace(task.ProjectID) == "" {
+		return
+	}
+	message := fmt.Sprintf("X could not deliver the completed reply: %v", result.Err)
+	if result.Outcome == service.XReplyProviderFailure {
+		message = fmt.Sprintf("X could not deliver the completed reply and retained it for retry: %v", result.Err)
+	}
+	alert := &models.Alert{
+		ProjectID: task.ProjectID, TaskID: &task.ID, SourceTaskID: &task.ID,
+		Type: models.AlertTaskNeedsFollowup, Severity: models.SeverityWarning,
+		Title: "X reply delivery failed: " + task.Title, Message: message, Body: message,
+		Source: "x_reply_delivery", IdempotencyKey: "x-reply-delivery:" + task.ID + ":" + replyToTweetID,
+	}
+	if err := h.alertSvc.Create(ctx, alert); err != nil {
+		applog.Infof("[handler] task=%s failed to create X reply delivery alert: %v", task.ID, err)
 	}
 }
 

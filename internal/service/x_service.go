@@ -35,6 +35,7 @@ const (
 	XSettingAccountID           = "x_account_id"
 	XSettingConfigurationID     = "x_configuration_id"
 	xProcessTimeout             = 5 * time.Minute
+	xDeliveryPersistenceTimeout = 5 * time.Second
 	xReceiptLease               = 10 * time.Minute
 	xMaxMentionPages            = 10
 	xMaxWeightedPostLength      = 280
@@ -61,6 +62,7 @@ type XAPI interface {
 
 type XService struct {
 	mu                       sync.RWMutex
+	deliveryMu               sync.Mutex
 	api                      XAPI
 	credentials              XCredentials
 	settingsRepo             *repository.SettingsRepo
@@ -73,6 +75,7 @@ type XService struct {
 	authRepo                 *repository.XAuthRepo
 	userProjectRepo          *repository.XUserProjectRepo
 	taskContextRepo          *repository.XTaskContextRepo
+	replyDeliveryRepo        *repository.XReplyDeliveryRepo
 	receiptRepo              *repository.XInboundReceiptRepo
 	taskSvc                  *TaskService
 	customPersonalityRepo    *repository.CustomPersonalityRepo
@@ -106,6 +109,9 @@ func (s *XService) SetRepositories(auth *repository.XAuthRepo, selections *repos
 	s.taskContextRepo = contexts
 	s.receiptRepo = receipts
 	s.threadInputRepo = inputs
+}
+func (s *XService) SetReplyDeliveryRepository(deliveries *repository.XReplyDeliveryRepo) {
+	s.replyDeliveryRepo = deliveries
 }
 func (s *XService) SetRuntime(agent *repository.AgentRepo, personalities *repository.CustomPersonalityRepo, broadcaster *events.ChatBroadcaster, hub *events.ExecutionStreamHub, chatRunner ChannelChatRunner, taskRunner ChannelTaskRunner, chatPromoter, taskPromoter func(string), router *ChannelMessageRouter) {
 	s.agentRepo = agent
@@ -263,6 +269,9 @@ func (s *XService) poll(ctx context.Context, done chan struct{}) {
 			timer.Stop()
 			return
 		case <-timer.C:
+			if err := s.RetryPendingReplies(ctx); err != nil && ctx.Err() == nil {
+				applog.Infof("[x] retry pending replies failed: %v", err)
+			}
 		}
 	}
 }
@@ -741,24 +750,35 @@ func (s *XService) SendOutboundMessage(ctx context.Context, targetID, threadID, 
 	}
 	return SendMessageResult{OK: true, Platform: "x", Target: "x:" + targetID, MessageID: id}
 }
-func (s *XService) SendReplyForAccount(ctx context.Context, accountID, replyTo, output, errMsg string) bool {
-	s.mu.RLock()
-	matches := strings.TrimSpace(accountID) != "" && accountID == s.me.ID
-	s.mu.RUnlock()
-	if !matches {
-		return false
-	}
-	s.SendReply(ctx, replyTo, output, errMsg)
-	return true
+
+type XReplyOutcome string
+
+const (
+	XReplySent               XReplyOutcome = "sent"
+	XReplyAlreadySent        XReplyOutcome = "already_sent"
+	XReplyAccountMismatch    XReplyOutcome = "account_mismatch"
+	XReplyDisabled           XReplyOutcome = "disabled"
+	XReplyEmpty              XReplyOutcome = "empty"
+	XReplyProviderFailure    XReplyOutcome = "provider_failure"
+	XReplyPersistenceFailure XReplyOutcome = "persistence_failure"
+)
+
+type XReplyResult struct {
+	Outcome XReplyOutcome
+	Err     error
 }
 
-func (s *XService) SendReply(ctx context.Context, replyTo, output, errMsg string) {
+func (s *XService) prepareReply(ctx context.Context, output, errMsg string) (string, XReplyResult) {
 	if s.settingsRepo == nil {
-		return
+		err := fmt.Errorf("X settings repository is not configured")
+		return "", XReplyResult{Outcome: XReplyPersistenceFailure, Err: err}
 	}
 	enabled, err := s.settingsRepo.Get(ctx, XSettingSendResponses)
-	if err != nil || strings.EqualFold(strings.TrimSpace(enabled), "false") {
-		return
+	if err != nil {
+		return "", XReplyResult{Outcome: XReplyPersistenceFailure, Err: fmt.Errorf("load X response setting: %w", err)}
+	}
+	if strings.EqualFold(strings.TrimSpace(enabled), "false") {
+		return "", XReplyResult{Outcome: XReplyDisabled}
 	}
 	text := strings.TrimSpace(output)
 	if errMsg != "" {
@@ -766,21 +786,156 @@ func (s *XService) SendReply(ctx context.Context, replyTo, output, errMsg string
 	}
 	text = truncateXPost(text)
 	if text == "" {
-		return
+		return "", XReplyResult{Outcome: XReplyEmpty}
+	}
+	return text, XReplyResult{}
+}
+
+func (s *XService) SendReplyForAccount(ctx context.Context, accountID, replyTo, output, errMsg string) XReplyResult {
+	s.mu.RLock()
+	matches := strings.TrimSpace(accountID) != "" && accountID == s.me.ID
+	s.mu.RUnlock()
+	if !matches {
+		return XReplyResult{Outcome: XReplyAccountMismatch}
+	}
+	return s.SendReply(ctx, replyTo, output, errMsg)
+}
+
+func (s *XService) SendReply(ctx context.Context, replyTo, output, errMsg string) XReplyResult {
+	text, result := s.prepareReply(ctx, output, errMsg)
+	if result.Outcome != "" {
+		return result
 	}
 	if _, err := s.api.Post(ctx, text, replyTo); err != nil {
 		applog.Infof("[x] failed to send reply: %v", err)
+		return XReplyResult{Outcome: XReplyProviderFailure, Err: err}
 	}
+	return XReplyResult{Outcome: XReplySent}
 }
-func (s *XService) SendChatResponse(ctx context.Context, task models.Task, output, errMsg string) {
+
+// DeliverTaskReply persists a valid completion reply before posting it. A row is
+// marked sent only after provider confirmation, so retrying delivery is independent
+// of task execution and repeated dispatch after success cannot duplicate the reply.
+func (s *XService) DeliverTaskReply(ctx context.Context, task models.Task, accountID, replyTo, output, errMsg string) XReplyResult {
+	s.mu.RLock()
+	matches := strings.TrimSpace(accountID) != "" && accountID == s.me.ID
+	s.mu.RUnlock()
+	if !matches {
+		return XReplyResult{Outcome: XReplyAccountMismatch}
+	}
+	text, result := s.prepareReply(ctx, output, errMsg)
+	if result.Outcome != "" {
+		return result
+	}
+	if s.replyDeliveryRepo == nil {
+		err := fmt.Errorf("X reply delivery repository is not configured")
+		return XReplyResult{Outcome: XReplyPersistenceFailure, Err: err}
+	}
+	s.deliveryMu.Lock()
+	defer s.deliveryMu.Unlock()
+	delivery, err := s.replyDeliveryRepo.EnsurePending(ctx, &models.XReplyDelivery{
+		TaskID: task.ID, ProjectID: task.ProjectID, AccountID: accountID, ReplyToTweetID: replyTo, ResponseText: text,
+	})
+	if err != nil {
+		return XReplyResult{Outcome: XReplyPersistenceFailure, Err: err}
+	}
+	if delivery.Status == models.XReplyDeliverySent {
+		return XReplyResult{Outcome: XReplyAlreadySent}
+	}
+	if delivery.Status == models.XReplyDeliveryPosting {
+		return XReplyResult{Outcome: XReplyPersistenceFailure, Err: fmt.Errorf("X reply delivery outcome requires review")}
+	}
+	claimed, err := s.replyDeliveryRepo.BeginAttempt(ctx, delivery.ID)
+	if err != nil {
+		return XReplyResult{Outcome: XReplyPersistenceFailure, Err: fmt.Errorf("claim X reply delivery: %w", err)}
+	}
+	if !claimed {
+		return XReplyResult{Outcome: XReplyPersistenceFailure, Err: fmt.Errorf("X reply delivery is already being attempted")}
+	}
+	postID, err := s.api.Post(ctx, delivery.ResponseText, delivery.ReplyToTweetID)
+	persistCtx, cancelPersist := context.WithTimeout(context.WithoutCancel(ctx), xDeliveryPersistenceTimeout)
+	defer cancelPersist()
+	if err != nil {
+		if persistErr := s.replyDeliveryRepo.MarkFailed(persistCtx, delivery.ID, err); persistErr != nil {
+			return XReplyResult{Outcome: XReplyPersistenceFailure, Err: fmt.Errorf("post X reply: %v; record failure: %w", err, persistErr)}
+		}
+		applog.Infof("[x] failed to send durable reply task=%s: %v", task.ID, err)
+		return XReplyResult{Outcome: XReplyProviderFailure, Err: err}
+	}
+	if err := s.replyDeliveryRepo.MarkSent(persistCtx, delivery.ID, postID); err != nil {
+		return XReplyResult{Outcome: XReplyPersistenceFailure, Err: fmt.Errorf("record delivered X reply: %w", err)}
+	}
+	return XReplyResult{Outcome: XReplySent}
+}
+
+// RetryPendingReplies retries only persisted reply payloads; it never invokes task
+// execution. Confirmed deliveries are excluded by the repository query.
+func (s *XService) RetryPendingReplies(ctx context.Context) error {
+	if s.replyDeliveryRepo == nil {
+		return nil
+	}
+	s.mu.RLock()
+	accountID := strings.TrimSpace(s.me.ID)
+	s.mu.RUnlock()
+	if accountID == "" {
+		return nil
+	}
+	enabled, err := s.settingsRepo.Get(ctx, XSettingSendResponses)
+	if err != nil {
+		return fmt.Errorf("load X response setting for retry: %w", err)
+	}
+	if strings.EqualFold(strings.TrimSpace(enabled), "false") {
+		return nil
+	}
+
+	s.deliveryMu.Lock()
+	defer s.deliveryMu.Unlock()
+	deliveries, err := s.replyDeliveryRepo.ListPendingByAccount(ctx, accountID, 20)
+	if err != nil {
+		return fmt.Errorf("list pending X replies: %w", err)
+	}
+	var retryErr error
+	for i := range deliveries {
+		delivery := deliveries[i]
+		claimed, claimErr := s.replyDeliveryRepo.BeginAttempt(ctx, delivery.ID)
+		if claimErr != nil {
+			retryErr = errors.Join(retryErr, fmt.Errorf("claim pending X reply %s: %w", delivery.ID, claimErr))
+			continue
+		}
+		if !claimed {
+			continue
+		}
+		postID, postErr := s.api.Post(ctx, delivery.ResponseText, delivery.ReplyToTweetID)
+		persistCtx, cancelPersist := context.WithTimeout(context.WithoutCancel(ctx), xDeliveryPersistenceTimeout)
+		if postErr != nil {
+			if markErr := s.replyDeliveryRepo.MarkFailed(persistCtx, delivery.ID, postErr); markErr != nil {
+				retryErr = errors.Join(retryErr, fmt.Errorf("retry X reply %s: %v; record failure: %w", delivery.ID, postErr, markErr))
+			} else {
+				retryErr = errors.Join(retryErr, fmt.Errorf("retry X reply %s: %w", delivery.ID, postErr))
+			}
+			cancelPersist()
+			continue
+		}
+		if err := s.replyDeliveryRepo.MarkSent(persistCtx, delivery.ID, postID); err != nil {
+			retryErr = errors.Join(retryErr, fmt.Errorf("record retried X reply %s: %w", delivery.ID, err))
+		}
+		cancelPersist()
+	}
+	return retryErr
+}
+
+func (s *XService) SendChatResponse(ctx context.Context, task models.Task, output, errMsg string) XReplyResult {
 	if s.taskContextRepo == nil {
-		return
+		return XReplyResult{Outcome: XReplyPersistenceFailure, Err: fmt.Errorf("X task context repository is not configured")}
 	}
 	meta, err := s.taskContextRepo.GetByTaskID(ctx, task.ID)
 	if err != nil || meta == nil {
-		return
+		if err == nil {
+			err = fmt.Errorf("X task reply context was not found")
+		}
+		return XReplyResult{Outcome: XReplyPersistenceFailure, Err: err}
 	}
-	s.SendReplyForAccount(ctx, meta.AccountID, meta.ReplyToTweetID, output, errMsg)
+	return s.DeliverTaskReply(ctx, task, meta.AccountID, meta.ReplyToTweetID, output, errMsg)
 }
 
 type xTextRange struct {

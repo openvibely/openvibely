@@ -72,6 +72,7 @@ type Handler struct {
 	xAuthRepo                  *repository.XAuthRepo
 	xUserProjectRepo           *repository.XUserProjectRepo
 	xTaskContextRepo           *repository.XTaskContextRepo
+	xReplyDeliveryRepo         *repository.XReplyDeliveryRepo
 	xInboundReceiptRepo        *repository.XInboundReceiptRepo
 	emailTaskContextRepo       *repository.EmailTaskContextRepo
 	slackTaskContextRepo       *repository.SlackTaskContextRepo
@@ -501,6 +502,10 @@ func (h *Handler) SetXRepositories(auth *repository.XAuthRepo, selections *repos
 	h.xUserProjectRepo = selections
 	h.xTaskContextRepo = contexts
 	h.xInboundReceiptRepo = receipts
+}
+
+func (h *Handler) SetXReplyDeliveryRepository(deliveries *repository.XReplyDeliveryRepo) {
+	h.xReplyDeliveryRepo = deliveries
 }
 
 func (h *Handler) SetXService(svc *service.XService) {

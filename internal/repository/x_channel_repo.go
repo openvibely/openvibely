@@ -135,6 +135,101 @@ func (r *XTaskContextRepo) GetByTaskID(ctx context.Context, taskID string) (*mod
 	return xTaskContextLifecycle.GetByTaskID(ctx, r.db, taskID)
 }
 
+type XReplyDeliveryRepo struct{ db *sql.DB }
+
+func NewXReplyDeliveryRepo(db *sql.DB) *XReplyDeliveryRepo { return &XReplyDeliveryRepo{db: db} }
+
+func scanXReplyDelivery(row taskContextScanner) (*models.XReplyDelivery, error) {
+	var delivery models.XReplyDelivery
+	if err := row.Scan(&delivery.ID, &delivery.TaskID, &delivery.ProjectID, &delivery.AccountID, &delivery.ReplyToTweetID,
+		&delivery.ResponseText, &delivery.Status, &delivery.ProviderPostID, &delivery.Attempts, &delivery.LastError,
+		&delivery.CreatedAt, &delivery.UpdatedAt); err != nil {
+		return nil, err
+	}
+	return &delivery, nil
+}
+
+const xReplyDeliveryColumns = `id, task_id, project_id, account_id, reply_to_tweet_id, response_text, status, provider_post_id, attempts, last_error, created_at, updated_at`
+
+// EnsurePending records a valid reply before provider delivery and returns an existing
+// sent row unchanged, making repeated completion dispatch idempotent after success.
+func (r *XReplyDeliveryRepo) EnsurePending(ctx context.Context, delivery *models.XReplyDelivery) (*models.XReplyDelivery, error) {
+	if delivery == nil || strings.TrimSpace(delivery.TaskID) == "" || strings.TrimSpace(delivery.ProjectID) == "" || strings.TrimSpace(delivery.AccountID) == "" || strings.TrimSpace(delivery.ReplyToTweetID) == "" || strings.TrimSpace(delivery.ResponseText) == "" {
+		return nil, fmt.Errorf("complete X reply delivery context is required")
+	}
+	if delivery.ID == "" {
+		delivery.ID = NewID()
+	}
+	var stored *models.XReplyDelivery
+	err := withImmediateTx(ctx, r.db, func(tx SQLExecutor) error {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO x_reply_deliveries(id, task_id, project_id, account_id, reply_to_tweet_id, response_text)
+			VALUES(?, ?, ?, ?, ?, ?) ON CONFLICT(task_id, reply_to_tweet_id) DO NOTHING`, delivery.ID, delivery.TaskID, delivery.ProjectID, delivery.AccountID, delivery.ReplyToTweetID, delivery.ResponseText); err != nil {
+			return fmt.Errorf("record X reply delivery: %w", err)
+		}
+		var err error
+		stored, err = scanXReplyDelivery(tx.QueryRowContext(ctx, `SELECT `+xReplyDeliveryColumns+` FROM x_reply_deliveries WHERE task_id = ? AND reply_to_tweet_id = ?`, delivery.TaskID, delivery.ReplyToTweetID))
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return stored, nil
+}
+
+// BeginAttempt atomically moves one retryable delivery out of the pending set
+// before provider delivery. A posting row is never automatically retried because
+// the provider may already have accepted its post.
+func (r *XReplyDeliveryRepo) BeginAttempt(ctx context.Context, id string) (bool, error) {
+	res, err := execBoundSQLite(ctx, r.db, `UPDATE x_reply_deliveries SET status='posting', attempts=attempts+1, last_error='', updated_at=datetime('now') WHERE id=? AND status='pending'`, id)
+	if err != nil {
+		return false, err
+	}
+	rows, err := res.RowsAffected()
+	return rows == 1, err
+}
+
+func (r *XReplyDeliveryRepo) MarkFailed(ctx context.Context, id string, deliveryErr error) error {
+	message := ""
+	if deliveryErr != nil {
+		message = deliveryErr.Error()
+	}
+	_, err := execBoundSQLite(ctx, r.db, `UPDATE x_reply_deliveries SET status='pending', last_error=?, updated_at=datetime('now') WHERE id=? AND status='posting'`, message, id)
+	return err
+}
+
+func (r *XReplyDeliveryRepo) MarkSent(ctx context.Context, id, providerPostID string) error {
+	_, err := execBoundSQLite(ctx, r.db, `UPDATE x_reply_deliveries SET status='sent', provider_post_id=?, last_error='', updated_at=datetime('now') WHERE id=? AND status='posting'`, providerPostID, id)
+	return err
+}
+
+func (r *XReplyDeliveryRepo) ListPendingByAccount(ctx context.Context, accountID string, limit int) ([]models.XReplyDelivery, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+	rows, err := r.db.QueryContext(ctx, `SELECT `+xReplyDeliveryColumns+` FROM x_reply_deliveries WHERE account_id=? AND status='pending' ORDER BY created_at, id LIMIT ?`, strings.TrimSpace(accountID), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	deliveries := make([]models.XReplyDelivery, 0)
+	for rows.Next() {
+		delivery, err := scanXReplyDelivery(rows)
+		if err != nil {
+			return nil, err
+		}
+		deliveries = append(deliveries, *delivery)
+	}
+	return deliveries, rows.Err()
+}
+
+func (r *XReplyDeliveryRepo) Get(ctx context.Context, taskID, replyToTweetID string) (*models.XReplyDelivery, error) {
+	delivery, err := scanXReplyDelivery(r.db.QueryRowContext(ctx, `SELECT `+xReplyDeliveryColumns+` FROM x_reply_deliveries WHERE task_id=? AND reply_to_tweet_id=?`, taskID, replyToTweetID))
+	if err != nil {
+		return nil, err
+	}
+	return delivery, nil
+}
+
 type XReceiptClaimResult string
 
 const (

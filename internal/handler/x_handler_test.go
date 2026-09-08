@@ -34,6 +34,7 @@ type readyXSettingsAPI struct {
 	accountID string
 	newest    string
 	posted    []string
+	postErr   error
 }
 
 func (f *readyXSettingsAPI) Me(context.Context) (service.XUser, error) {
@@ -50,7 +51,7 @@ func (f *readyXSettingsAPI) Mentions(context.Context, string, string, string) (s
 }
 func (f *readyXSettingsAPI) Post(_ context.Context, text, reply string) (string, error) {
 	f.posted = append(f.posted, reply+"|"+text)
-	return "tweet", nil
+	return "tweet", f.postErr
 }
 
 type cancelAwareXAPI struct {
@@ -363,16 +364,66 @@ func TestXStopServiceStopsDynamicallyInstalledPoller(t *testing.T) {
 	require.Nil(t, h.getXService())
 }
 
+func TestXCompletionProviderFailureIsDurableAlertedAndRetryDoesNotRerun(t *testing.T) {
+	h, _, _, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	project := createProject(t, h, "X Delivery Retry")
+	task := &models.Task{ProjectID: project.ID, Title: "Completed work", Prompt: "work", Category: models.CategoryActive, Status: models.StatusCompleted, Priority: 2, CreatedVia: models.TaskOriginX}
+	require.NoError(t, h.taskRepo.Create(ctx, task))
+
+	api := &readyXSettingsAPI{accountID: "bot", postErr: errors.New("X returned 429")}
+	deliveries := repository.NewXReplyDeliveryRepo(db)
+	svc := service.NewXService(service.XCredentials{ConsumerKey: "a", ConsumerSecret: "b", AccessToken: "c", AccessTokenSecret: "d"}, h.settingsRepo, h.projectRepo, h.llmConfigRepo, h.taskRepo, h.execRepo, h.scheduleRepo, h.taskSvc)
+	svc.SetAPI(api)
+	svc.SetReplyDeliveryRepository(deliveries)
+	require.NoError(t, svc.StartVerified(service.XUser{ID: "bot", Username: "openvibely"}))
+	t.Cleanup(svc.Stop)
+	h.SetXService(svc)
+	reply := service.ChannelReplyContext{Source: models.TaskOriginX, XAccountID: "bot", XReplyToTweetID: "source-tweet"}
+
+	h.sendChannelResponse(ctx, task, reply, "finished result", "", 0)
+	delivery, err := deliveries.Get(ctx, task.ID, "source-tweet")
+	require.NoError(t, err)
+	require.Equal(t, models.XReplyDeliveryPending, delivery.Status)
+	require.Contains(t, delivery.LastError, "429")
+	alerts, err := h.alertSvc.ListByProject(ctx, project.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, alerts, 1)
+	require.Contains(t, alerts[0].Message, "429")
+	var executionsBefore int
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT COUNT(*) FROM executions WHERE task_id = ?`, task.ID).Scan(&executionsBefore))
+
+	api.postErr = nil
+	require.NoError(t, svc.RetryPendingReplies(ctx))
+	delivery, err = deliveries.Get(ctx, task.ID, "source-tweet")
+	require.NoError(t, err)
+	require.Equal(t, models.XReplyDeliverySent, delivery.Status)
+	require.Len(t, api.posted, 2)
+	var executionsAfter int
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT COUNT(*) FROM executions WHERE task_id = ?`, task.ID).Scan(&executionsAfter))
+	require.Equal(t, executionsBefore, executionsAfter)
+
+	h.sendChannelResponse(ctx, task, reply, "finished result", "", 0)
+	require.Len(t, api.posted, 2, "confirmed delivery must not be posted again")
+	alerts, err = h.alertSvc.ListByProject(ctx, project.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, alerts, 1, "delivery alerts must be idempotent")
+}
+
 func TestXCompletionUsesOnlyOriginatingAccount(t *testing.T) {
 	h, _, _, db := setupTestHandlerWithDB(t)
 	api := &readyXSettingsAPI{accountID: "new-account"}
 	svc := service.NewXService(service.XCredentials{ConsumerKey: "a", ConsumerSecret: "b", AccessToken: "c", AccessTokenSecret: "d"}, h.settingsRepo, h.projectRepo, h.llmConfigRepo, h.taskRepo, h.execRepo, h.scheduleRepo, h.taskSvc)
 	svc.SetAPI(api)
 	svc.SetRepositories(repository.NewXAuthRepo(db), repository.NewXUserProjectRepo(db), repository.NewXTaskContextRepo(db), repository.NewXInboundReceiptRepo(db), h.threadInputRepo)
+	deliveries := repository.NewXReplyDeliveryRepo(db)
+	svc.SetReplyDeliveryRepository(deliveries)
 	require.NoError(t, svc.StartVerified(service.XUser{ID: "new-account", Username: "new"}))
 	t.Cleanup(svc.Stop)
 	h.SetXService(svc)
-	task := &models.Task{ID: "task", Category: models.CategoryActive, CreatedVia: models.TaskOriginX}
+	project := createProject(t, h, "X Origin Account")
+	task := &models.Task{ProjectID: project.ID, Title: "Origin account completion", Prompt: "work", Category: models.CategoryActive, Status: models.StatusCompleted, Priority: 2, CreatedVia: models.TaskOriginX}
+	require.NoError(t, h.taskRepo.Create(context.Background(), task))
 
 	h.sendChannelResponse(context.Background(), task, service.ChannelReplyContext{Source: models.TaskOriginX, XAccountID: "old-account", XReplyToTweetID: "old-tweet"}, "done", "", 0)
 	require.Empty(t, api.posted)

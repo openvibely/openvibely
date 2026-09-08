@@ -704,6 +704,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	xAuthRepo := repository.NewXAuthRepo(db)
 	xUserProjectRepo := repository.NewXUserProjectRepo(db)
 	xTaskContextRepo := repository.NewXTaskContextRepo(db)
+	xReplyDeliveryRepo := repository.NewXReplyDeliveryRepo(db)
 	xInboundReceiptRepo := repository.NewXInboundReceiptRepo(db)
 	channelTargetRepo := repository.NewChannelTargetRepo(db)
 
@@ -808,6 +809,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	xCredentials := service.XCredentials{ConsumerKey: xSettingValues[service.XSettingConsumerKey], ConsumerSecret: xSettingValues[service.XSettingConsumerSecret], AccessToken: xSettingValues[service.XSettingAccessToken], AccessTokenSecret: xSettingValues[service.XSettingAccessTokenSecret]}
 	xSvc := service.NewXService(xCredentials, settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, scheduleRepo, taskSvc)
 	xSvc.SetRepositories(xAuthRepo, xUserProjectRepo, xTaskContextRepo, xInboundReceiptRepo, repository.NewThreadInputRepo(db))
+	xSvc.SetReplyDeliveryRepository(xReplyDeliveryRepo)
 	if seconds, err := strconv.Atoi(strings.TrimSpace(xSettingValues[service.XSettingPollIntervalSeconds])); err == nil {
 		xSvc.SetPollInterval(time.Duration(seconds) * time.Second)
 	}
@@ -1134,6 +1136,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	h.SetDiscordAuthRepo(discordAuthRepo)
 	h.SetDiscordTaskContextRepo(discordTaskContextRepo)
 	h.SetXRepositories(xAuthRepo, xUserProjectRepo, xTaskContextRepo, xInboundReceiptRepo)
+	h.SetXReplyDeliveryRepository(xReplyDeliveryRepo)
 	h.SetXService(xSvc)
 	h.SetReviewCommentRepo(reviewCommentRepo)
 	h.SetCustomPersonalityRepo(customPersonalityRepo)
