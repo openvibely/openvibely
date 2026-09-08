@@ -409,6 +409,7 @@ templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unrea
 						anchors = [{id: previousID, top: previous.getBoundingClientRect().top}].concat(anchors.filter(function(anchor) { return anchor.id !== previousID; }));
 					}
 					state.swap = {
+						xhr: event.detail && event.detail.xhr,
 						anchors: anchors,
 						rootScrollTop: root.scrollTop,
 						windowScrollY: window.scrollY,
@@ -467,10 +468,9 @@ templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unrea
 			});
 
 			document.body.addEventListener('htmx:afterSettle', function(event) {
-				var settledTarget = event.detail && event.detail.target;
 				var root = document.getElementById('alerts-container');
 				var saved = state.settlingSwap;
-				if (!settledTarget || (settledTarget.id !== 'alerts-content' && settledTarget.id !== 'alerts-live-results') || !root || !saved) return;
+				if (!root || !saved || !event.detail || event.detail.xhr !== saved.xhr) return;
 				state.settlingSwap = null;
 				if (saved.persistentFocus && saved.persistentFocus.isConnected && document.activeElement !== saved.persistentFocus) {
 					saved.persistentFocus.focus({preventScroll: true});
