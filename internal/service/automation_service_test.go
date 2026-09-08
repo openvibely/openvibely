@@ -34,6 +34,14 @@ func (r automationEnterpriseRepoResolver) GlobalAPIEndpoint(context.Context) str
 	return r.endpoint
 }
 
+func TestAutomationAdapterCanCreateRejectsInternalAndUnsupportedAdapters(t *testing.T) {
+	require.True(t, AutomationAdapterCanCreate(AutomationAdapterCustom))
+	require.True(t, AutomationAdapterCanCreate(AutomationAdapterNativeSDLC))
+	require.True(t, AutomationAdapterCanCreate(AutomationAdapterGitHubSDLC))
+	require.False(t, AutomationAdapterCanCreate(AutomationAdapterVisionDriver))
+	require.False(t, AutomationAdapterCanCreate("unsupported_saved_adapter"))
+}
+
 func TestCurrentAutomationTemplateRevisionTracksMaintainedTemplateChanges(t *testing.T) {
 	require.Equal(t, 11, CurrentAutomationTemplateRevision(AutomationAdapterNativeSDLC))
 	require.Equal(t, 15, CurrentAutomationTemplateRevision(AutomationAdapterGitHubSDLC))

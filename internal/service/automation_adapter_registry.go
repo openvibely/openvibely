@@ -57,7 +57,12 @@ func CurrentAutomationTemplateRevision(adapterKey string) int {
 }
 
 func AutomationAdapterCanCreate(adapterKey string) bool {
-	return adapterKey != AutomationAdapterVisionDriver
+	switch adapterKey {
+	case AutomationAdapterCustom, AutomationAdapterNativeSDLC, AutomationAdapterGitHubSDLC:
+		return true
+	default:
+		return false
+	}
 }
 
 func NewAutomationAdapterRegistry() *AutomationAdapterRegistry {

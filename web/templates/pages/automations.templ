@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/openvibely/openvibely/web/templates/layout"
 )
@@ -2353,13 +2354,13 @@ templ automationEditableBreadcrumb(currentProjectID string, automationID string,
 }
 
 templ automationCardDuplicateAction(automationID string, currentProjectID string, adapterKey string) {
-	if adapterKey != "vision_driver" {
+	if service.AutomationAdapterCanCreate(adapterKey) {
 		<li><a href={ templ.URL(fmt.Sprintf("/automations/%s/duplicate?project_id=%s", automationID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s/duplicate?project_id=%s", automationID, currentProjectID) } hx-target="#main-content" hx-push-url="true" data-automation-card-duplicate={ automationID } onclick="event.stopPropagation(); event.preventDefault(); window.openVibelyNavigate(this.getAttribute('href')); return false;">Duplicate</a></li>
 	}
 }
 
 templ automationLiveDuplicateAction(automationID string, currentProjectID string, adapterKey string) {
-	if adapterKey != "vision_driver" {
+	if service.AutomationAdapterCanCreate(adapterKey) {
 		<li><a href={ templ.URL(fmt.Sprintf("/automations/%s/duplicate?project_id=%s", automationID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s/duplicate?project_id=%s", automationID, currentProjectID) } hx-target="#main-content" hx-push-url="true" data-automation-live-duplicate onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;">Duplicate</a></li>
 	}
 }

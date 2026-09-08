@@ -16,7 +16,40 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/service"
 )
+
+func TestAutomationDuplicateActionsFollowAdapterCreationEligibility(t *testing.T) {
+	tests := []struct {
+		adapterKey string
+		want       bool
+	}{
+		{adapterKey: service.AutomationAdapterCustom, want: true},
+		{adapterKey: service.AutomationAdapterNativeSDLC, want: true},
+		{adapterKey: service.AutomationAdapterGitHubSDLC, want: true},
+		{adapterKey: service.AutomationAdapterVisionDriver, want: false},
+		{adapterKey: "unsupported_saved_adapter", want: false},
+	}
+
+	for _, test := range tests {
+		t.Run(test.adapterKey, func(t *testing.T) {
+			var card, live bytes.Buffer
+			if err := automationCardDuplicateAction("automation-id", "project-id", test.adapterKey).Render(context.Background(), &card); err != nil {
+				t.Fatalf("render card Duplicate action: %v", err)
+			}
+			if err := automationLiveDuplicateAction("automation-id", "project-id", test.adapterKey).Render(context.Background(), &live); err != nil {
+				t.Fatalf("render Live Duplicate action: %v", err)
+			}
+
+			if got := strings.Contains(card.String(), "Duplicate"); got != test.want {
+				t.Fatalf("card Duplicate visibility = %v, want %v; body=%q", got, test.want, card.String())
+			}
+			if got := strings.Contains(live.String(), "Duplicate"); got != test.want {
+				t.Fatalf("Live Duplicate visibility = %v, want %v; body=%q", got, test.want, live.String())
+			}
+		})
+	}
+}
 
 func TestAutomationPortfolioUsesSearchableSingleColumnCards(t *testing.T) {
 	cards := []models.AutomationCard{
