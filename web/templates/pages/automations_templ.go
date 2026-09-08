@@ -1834,7 +1834,7 @@ func automationLiveContent(graph models.AutomationLiveGraph, currentProjectID st
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 113, "</div><div class=\"flex shrink-0 flex-wrap items-center justify-end gap-2\" data-automation-live-header-actions><button class=\"btn btn-secondary btn-sm ov-secondary-action\" type=\"submit\" form=\"automation-live-edit-form\" data-automation-live-edit>Edit</button> ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 113, "</div><div class=\"flex shrink-0 flex-wrap items-center justify-end gap-2\" data-automation-live-header-actions><button class=\"btn btn-outline btn-sm ov-secondary-action\" type=\"submit\" form=\"automation-live-edit-form\" data-automation-live-edit>Edit</button> ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
