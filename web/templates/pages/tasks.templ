@@ -126,6 +126,30 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 				status.classList.toggle('hidden', !request);
 			}
 
+			function taskCardActionResponseHasToast(xhr) {
+				if (!xhr || !xhr.getResponseHeader) return false;
+				return ['HX-Trigger', 'HX-Trigger-After-Swap', 'HX-Trigger-After-Settle'].some(function(header) {
+					var value = xhr.getResponseHeader(header);
+					if (!value) return false;
+					try {
+						var payload = JSON.parse(value);
+						return !!(payload && Object.prototype.hasOwnProperty.call(payload, 'openvibelyToast'));
+					} catch (_) {
+						return value.split(',').some(function(eventName) { return eventName.trim() === 'openvibelyToast'; });
+					}
+				});
+			}
+
+			function showTaskCardActionFallbackFailure(request, xhr) {
+				var status = xhr && xhr.status || 0;
+				if (status >= 200 && status < 300) return;
+				if (taskCardActionResponseHasToast(xhr) || !window.showToast) return;
+				var label = request.label || 'Task action';
+				window.showToast(label + ' could not be completed. Review the latest task state and try again.', 'failed', '', {
+					toastKey: 'task-card-action-failure-' + request.taskID + '-' + request.path
+				});
+			}
+
 			function restoreTaskCardActionFocus(taskID) {
 				var card = document.getElementById('task-' + taskID);
 				var trigger = card && card.querySelector('[data-task-card-menu-trigger]');
@@ -167,6 +191,7 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 					if (!request || !config || config.path !== request.path) return;
 					window._taskCardActionRequest = null;
 					setTaskCardActionBusy(null);
+					showTaskCardActionFallbackFailure(request, event.detail && event.detail.xhr);
 					window.dispatchEvent(new CustomEvent('kanban-refresh-unblocked'));
 					restoreTaskCardActionFocus(request.taskID);
 				});
