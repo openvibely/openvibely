@@ -88,6 +88,23 @@ window.addEventListener('DOMContentLoaded', function() {
   function report(status, message) { return fetch('/browser-result?status=' + encodeURIComponent(status) + '&message=' + encodeURIComponent(message || ''), {method:'POST'}); }
   function fail(message) { throw new Error(message); }
 	  function waitFor(check, label) { return new Promise(function(resolve, reject) { var started = performance.now(); (function poll() { try { if (check()) return resolve(); } catch (error) { return reject(error); } if (performance.now() - started > 15000) return reject(new Error('timed out waiting for ' + label)); setTimeout(poll, 20); })(); }); }
+	  function submitAndWaitForChannelsRefresh(form, label) {
+	    return new Promise(function(resolve, reject) {
+	      var timer = setTimeout(function() {
+	        document.body.removeEventListener('htmx:afterSettle', onSettle);
+	        reject(new Error('timed out waiting for ' + label));
+	      }, 15000);
+	      function onSettle(event) {
+	        var target = event.detail && event.detail.target;
+	        if (!target || target.id !== 'channels-container') return;
+	        document.body.removeEventListener('htmx:afterSettle', onSettle);
+	        clearTimeout(timer);
+	        resolve();
+	      }
+	      document.body.addEventListener('htmx:afterSettle', onSettle);
+	      form.requestSubmit();
+	    });
+	  }
 	  function refreshChannels(projectID, label) {
 	    return new Promise(function(resolve, reject) {
 	      var timer = setTimeout(function() { reject(new Error('timed out waiting for ' + label + ' request')); }, 15000);
@@ -120,7 +137,7 @@ window.addEventListener('DOMContentLoaded', function() {
     var form = modal.querySelector('form[action="/channels/x/configure"]');
     ['x_consumer_key','x_consumer_secret','x_access_token','x_access_token_secret'].forEach(function(name) { form.elements[name].value = name + '-value'; });
     form.elements.x_poll_interval_seconds.value = '300';
-    form.requestSubmit();
+	await submitAndWaitForChannelsRefresh(form, 'production configure refresh');
     await waitFor(function() { return document.querySelector('[data-channel-type="x"]') && document.body.textContent.indexOf('Connected') >= 0; }, 'production configure refresh');
 
     document.querySelector('[data-channel-type="x"]').click();
@@ -136,7 +153,7 @@ window.addEventListener('DOMContentLoaded', function() {
     var authForm = modal.querySelector('form[action="/channels/x/authorized-users"]');
     authForm.elements.x_user_id.value = '123';
     authForm.elements.x_username.value = 'alice';
-    authForm.requestSubmit();
+	await submitAndWaitForChannelsRefresh(authForm, 'production authorized-user refresh');
     await waitFor(function() { return document.body.textContent.indexOf('@alice') >= 0; }, 'production authorized-user refresh');
 
 	    await refreshChannels('` + projectTwo.ID + `', 'production project-two refresh');
