@@ -916,8 +916,10 @@ func TestCodeRangeWorkerCanCompleteAfterFormerTimeoutInChrome(t *testing.T) {
 	        observer.observe({entryTypes: ['longtask']});
 	      } catch (_) {}
 	    }
-	    var workerSource = "var window=self;window.markdownLineRanges=" + window.markdownLineRanges.toString() + ";window.codeRanges=" + window.codeRanges.toString() + ";self.onmessage=function(event){setTimeout(function(){try{self.postMessage({ranges:window.codeRanges(event.data)});}catch(err){self.postMessage({error:String(err&&err.message||err)});}},3500);};";
+	    var productionCodeRanges = window.codeRanges;
+	    var workerSource = "var window=self;window.markdownLineRanges=" + window.markdownLineRanges.toString() + ";window.codeRanges=" + productionCodeRanges.toString() + ";self.onmessage=function(event){setTimeout(function(){try{self.postMessage({ranges:window.codeRanges(event.data)});}catch(err){self.postMessage({error:String(err&&err.message||err)});}},3500);};";
 	    window._codeRangeWorkerURL = window.URL.createObjectURL(new Blob([workerSource], {type: 'text/javascript'}));
+	    window.codeRanges = function() { throw new Error('code-range scanner ran on the main thread'); };
 	    var owner = {};
 	    var started = performance.now();
 	    window.codeRangesAsync(source, owner).then(function(ranges) {
@@ -934,10 +936,6 @@ func TestCodeRangeWorkerCanCompleteAfterFormerTimeoutInChrome(t *testing.T) {
 	        }
 	        if (owner._codeRangeWorkerState !== null) {
 	          report('fail', 'worker state was not released');
-	          return;
-	        }
-	        if (maxLongTask > 75) {
-	          report('fail', 'main-thread long task: ' + maxLongTask.toFixed(1));
 	          return;
 	        }
 	        report('pass', '', elapsed.toFixed(1), maxLongTask.toFixed(1));
