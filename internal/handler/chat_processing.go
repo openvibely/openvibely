@@ -2222,7 +2222,7 @@ func (h *Handler) sendChannelResponse(ctx context.Context, execID string, task *
 			TaskID: task.ID, ExecutionID: execID, ProjectID: task.ProjectID, AccountID: reply.XAccountID,
 			ReplyToTweetID: reply.XReplyToTweetID, Output: output, ErrorMessage: errMsg,
 		}
-		if xService := h.getXService(); xService != nil {
+		if xService := h.getXService(); xService != nil && xService.Status().Running {
 			result := xService.SendCompletionReply(ctx, completion)
 			if result.Err != nil {
 				applog.Infof("[handler] X completion reply delivery failed task=%s execution=%s: %v", task.ID, execID, result.Err)
@@ -2264,7 +2264,7 @@ func (h *Handler) sendChannelResponse(ctx context.Context, execID string, task *
 			h.emailService.SendTaskCompletionNotification(ctx, *task, output, errMsg)
 		}
 	case models.TaskOriginX:
-		if xService := h.getXService(); xService != nil {
+		if xService := h.getXService(); xService != nil && xService.Status().Running {
 			if task.Category == models.CategoryChat {
 				xService.SendChatResponse(ctx, *task, output, errMsg)
 			} else {

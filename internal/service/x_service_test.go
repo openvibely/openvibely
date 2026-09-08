@@ -21,6 +21,7 @@ import (
 type fakeXAPI struct {
 	mu           sync.Mutex
 	me           XUser
+	meErr        error
 	mentions     xMentionsResponse
 	mentionsErr  error
 	mentionsFunc func(context.Context, string, string, string) (xMentionsResponse, error)
@@ -28,7 +29,7 @@ type fakeXAPI struct {
 	postErr      error
 }
 
-func (f *fakeXAPI) Me(context.Context) (XUser, error) { return f.me, nil }
+func (f *fakeXAPI) Me(context.Context) (XUser, error) { return f.me, f.meErr }
 func (f *fakeXAPI) Mentions(ctx context.Context, userID, sinceID, pagination string) (xMentionsResponse, error) {
 	if f.mentionsFunc != nil {
 		return f.mentionsFunc(ctx, userID, sinceID, pagination)
@@ -824,6 +825,64 @@ func TestXCompletionReplyProviderFailureIsDurableAndRetriesWithoutRerunningTask(
 	alerts, err = svc.alertSvc.ListByProject(ctx, project.ID, 10)
 	require.NoError(t, err)
 	require.Len(t, alerts, 1)
+}
+
+func TestXCompletionReplyPostingStateIsActionableWhenProviderStartupFails(t *testing.T) {
+	ctx, svc, _, _, _, project, _ := setupXServiceTest(t)
+	api := &fakeXAPI{meErr: errors.New("provider unavailable")}
+	svc.setAPI(api)
+	agent := &models.LLMConfig{Name: "X failed-start reconciliation agent", Provider: models.ProviderTest, Model: "test"}
+	require.NoError(t, svc.llmConfigRepo.Create(ctx, agent))
+	task := &models.Task{ProjectID: project.ID, Title: "X failed-start reconciliation task", Prompt: "work", Category: models.CategoryCompleted, Status: models.StatusCompleted, Priority: 2, AgentID: &agent.ID}
+	require.NoError(t, svc.taskRepo.Create(ctx, task))
+	execution := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecCompleted, PromptSent: "work"}
+	require.NoError(t, svc.execRepo.Create(ctx, execution))
+	delivery, err := svc.replyDeliveryRepo.CreatePending(ctx, &models.XReplyDelivery{
+		TaskID: task.ID, ExecutionID: execution.ID, ProjectID: project.ID, AccountID: "bot",
+		ReplyToTweetID: "tweet", Text: "possibly posted response",
+	})
+	require.NoError(t, err)
+	_, err = svc.replyDeliveryRepo.ClaimPending(ctx, delivery.ID, "bot")
+	require.NoError(t, err)
+
+	require.ErrorContains(t, svc.Start(), "provider unavailable")
+	alerts, err := svc.alertSvc.ListByProject(ctx, project.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, alerts, 1)
+	require.Contains(t, alerts[0].Message, "ambiguous")
+	require.Empty(t, api.Posts(), "failed-start reconciliation must never repost ambiguous deliveries")
+
+	require.ErrorContains(t, svc.Start(), "provider unavailable")
+	alerts, err = svc.alertSvc.ListByProject(ctx, project.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, alerts, 1, "failed-start reconciliation alerts must be deduplicated")
+}
+
+func TestXCompletionReplyPostingStateIsActionableWhenCredentialsAreMissing(t *testing.T) {
+	ctx, svc, _, _, _, project, _ := setupXServiceTest(t)
+	svc.credentials = XCredentials{}
+	api := &fakeXAPI{}
+	svc.setAPI(api)
+	agent := &models.LLMConfig{Name: "X missing-credentials reconciliation agent", Provider: models.ProviderTest, Model: "test"}
+	require.NoError(t, svc.llmConfigRepo.Create(ctx, agent))
+	task := &models.Task{ProjectID: project.ID, Title: "X missing-credentials reconciliation task", Prompt: "work", Category: models.CategoryCompleted, Status: models.StatusCompleted, Priority: 2, AgentID: &agent.ID}
+	require.NoError(t, svc.taskRepo.Create(ctx, task))
+	execution := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecCompleted, PromptSent: "work"}
+	require.NoError(t, svc.execRepo.Create(ctx, execution))
+	delivery, err := svc.replyDeliveryRepo.CreatePending(ctx, &models.XReplyDelivery{
+		TaskID: task.ID, ExecutionID: execution.ID, ProjectID: project.ID, AccountID: "bot",
+		ReplyToTweetID: "tweet", Text: "possibly posted response",
+	})
+	require.NoError(t, err)
+	_, err = svc.replyDeliveryRepo.ClaimPending(ctx, delivery.ID, "bot")
+	require.NoError(t, err)
+
+	require.ErrorContains(t, svc.Start(), "credentials are incomplete")
+	alerts, err := svc.alertSvc.ListByProject(ctx, project.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, alerts, 1)
+	require.Contains(t, alerts[0].Message, "ambiguous")
+	require.Empty(t, api.Posts(), "missing-credential reconciliation must never repost ambiguous deliveries")
 }
 
 func TestXCompletionReplyPostingStateIsActionableAndNeverAutomaticallyRetried(t *testing.T) {

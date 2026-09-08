@@ -1137,7 +1137,6 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	h.SetDiscordTaskContextRepo(discordTaskContextRepo)
 	h.SetXRepositories(xAuthRepo, xUserProjectRepo, xTaskContextRepo, xInboundReceiptRepo)
 	h.SetXReplyDeliveryRepo(xReplyDeliveryRepo)
-	h.SetXService(xSvc)
 	h.SetReviewCommentRepo(reviewCommentRepo)
 	h.SetCustomPersonalityRepo(customPersonalityRepo)
 	h.SetWorktreeService(worktreeSvc)
@@ -1165,10 +1164,14 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	discordSvc.SetChannelChatRunner(h.StartChannelChatRun)
 	discordSvc.SetChannelTaskRunner(h.StartChannelTaskRun)
 	xSvc.SetRuntime(agentRepo, customPersonalityRepo, chatBroadcaster, executionStreamHub, h.StartChannelChatRun, h.StartChannelTaskRun, h.PromoteQueuedChatInput, h.PromoteQueuedTaskThreadInput, channelMessageRouter)
+	if err := xSvc.ReconcileAmbiguousReplies(context.Background()); err != nil {
+		applog.Infof("[x] failed to reconcile ambiguous completion replies during bootstrap: %v", err)
+	}
 	if xCredentials.Ready() {
 		if err := xSvc.Start(); err != nil {
 			applog.Infof("warning: failed to start X mention polling: %v", err)
 		} else {
+			h.SetXService(xSvc)
 			channelMessageRouter.SetXService(xSvc)
 		}
 	}

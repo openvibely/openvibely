@@ -415,9 +415,12 @@ func TestXCompletionWithoutAvailableServiceCreatesDurableRetryState(t *testing.T
 				h.StopXService()
 			}
 			if tc.failedStart {
-				svc := service.NewXService(service.XCredentials{}, h.settingsRepo, h.projectRepo, h.llmConfigRepo, h.taskRepo, h.execRepo, h.scheduleRepo, h.taskSvc)
-				require.Error(t, svc.StartVerified(service.XUser{ID: "bot", Username: "openvibely"}))
-				require.Nil(t, h.getXService())
+				svc := service.NewXService(service.XCredentials{ConsumerKey: "a", ConsumerSecret: "b", AccessToken: "c", AccessTokenSecret: "d"}, h.settingsRepo, h.projectRepo, h.llmConfigRepo, h.taskRepo, h.execRepo, h.scheduleRepo, h.taskSvc)
+				svc.SetAPI(failingXSettingsAPI{err: errors.New("provider unavailable")})
+				svc.SetRepositories(repository.NewXAuthRepo(db), repository.NewXUserProjectRepo(db), repository.NewXTaskContextRepo(db), repository.NewXInboundReceiptRepo(db), h.threadInputRepo)
+				require.Error(t, svc.Start())
+				h.SetXService(svc)
+				require.Same(t, svc, h.getXService(), "regression requires the failed service to remain installed")
 			}
 			if tc.clearSetup {
 				require.NoError(t, h.settingsRepo.SetMany(ctx, map[string]string{

@@ -190,6 +190,9 @@ func (s *XService) PrepareConnection(ctx context.Context) (XUser, string, error)
 }
 
 func (s *XService) Start() error {
+	if err := s.ReconcileAmbiguousReplies(s.ctx); err != nil {
+		applog.Infof("[x] failed to reconcile ambiguous completion replies before startup: %v", err)
+	}
 	me, _, err := s.PrepareConnection(s.ctx)
 	if err != nil {
 		s.mu.Lock()
@@ -987,14 +990,13 @@ func (s *XService) createReplyFailureAlert(ctx context.Context, delivery *models
 
 // ReconcileAmbiguousReplies makes interrupted posting claims visible without
 // reposting them, because X create-post requests have no idempotency guarantee.
+// It intentionally does not depend on provider credentials or authenticated
+// account state, so crash-interrupted deliveries remain visible during outages.
 func (s *XService) ReconcileAmbiguousReplies(ctx context.Context) error {
 	if s.replyDeliveryRepo == nil {
 		return nil
 	}
-	s.mu.RLock()
-	accountID := s.me.ID
-	s.mu.RUnlock()
-	deliveries, err := s.replyDeliveryRepo.ListPostingForAccount(ctx, accountID, 100)
+	deliveries, err := s.replyDeliveryRepo.ListPosting(ctx)
 	if err != nil {
 		return err
 	}

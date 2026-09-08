@@ -228,12 +228,9 @@ func (r *XReplyDeliveryRepo) ListPendingForAccount(ctx context.Context, accountI
 	return deliveries, rows.Err()
 }
 
-func (r *XReplyDeliveryRepo) ListPostingForAccount(ctx context.Context, accountID string, limit int) ([]models.XReplyDelivery, error) {
-	if limit <= 0 || limit > 100 {
-		limit = 20
-	}
+func (r *XReplyDeliveryRepo) ListPosting(ctx context.Context) ([]models.XReplyDelivery, error) {
 	rows, err := r.db.QueryContext(ctx, `SELECT `+xReplyDeliveryColumns+` FROM x_reply_deliveries
-		WHERE account_id=? AND status='posting' ORDER BY updated_at, id LIMIT ?`, accountID, limit)
+		WHERE status='posting' ORDER BY updated_at, id`)
 	if err != nil {
 		return nil, fmt.Errorf("list ambiguous X replies: %w", err)
 	}
