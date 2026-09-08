@@ -4992,10 +4992,12 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 									focusTag: '',
 									focusText: '',
 									focusAriaLabel: '',
+									activeElement: null,
 									anchorKey: null,
 									anchorTop: null
 								};
 								var active = document.activeElement;
+								snapshot.activeElement = active;
 								var keyAttribute = state.root.getAttribute('data-card-pagination-key') || '';
 								var cards = replacementCardsFor(state.list, state.root);
 								for (var cardIndex = 0; cardIndex < cards.length; cardIndex++) {
@@ -5083,7 +5085,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 									else if (scrollTarget) scrollTarget.scrollTop += delta;
 								}
 							}
-							var focusTarget = replacementFocusTarget(state, snapshot);
+							var focusTarget = snapshot.restoreFocus !== false ? replacementFocusTarget(state, snapshot) : null;
 							if (focusTarget && typeof focusTarget.focus === 'function') focusTarget.focus({preventScroll: true});
 						}
 
@@ -5200,6 +5202,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 								var selector = state.root.getAttribute('data-card-pagination-list');
 								var incomingList = parseResponse(payload.html, selector);
 								var received = cardsFor(incomingList, state.root).length;
+								var replacementSnapshot = state.replaceSnapshot;
+								if (replacementSnapshot) replacementSnapshot.restoreFocus = document.activeElement === replacementSnapshot.activeElement;
 									if (replace) {
 										state.list.innerHTML = incomingList.innerHTML;
 										rememberCards(state, cardsFor(state.list, state.root), true);
@@ -5216,7 +5220,6 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 									state.controller = null;
 									delete state.requestedPages[page];
 
-									var replacementSnapshot = state.replaceSnapshot;
 									state.replaceSnapshot = null;
 									restoreReplacementState(state, replacementSnapshot);
 									setStatus(state, 'idle');								connectTrigger(state);

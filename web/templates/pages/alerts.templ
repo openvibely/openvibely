@@ -382,6 +382,7 @@ templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unrea
 				var target = event.detail && event.detail.target;
 				var root = document.getElementById('alerts-container');
 				if (!target || (target.id !== 'alerts-content' && target.id !== 'alerts-live-results') || !root) return;
+				var activeControl = document.activeElement;
 
 				var rows = alertRows(root);
 				var rootRect = root.getBoundingClientRect();
@@ -413,6 +414,7 @@ templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unrea
 						windowScrollY: window.scrollY,
 						search: (root.querySelector('[data-card-search]') || {}).value || '',
 						filtersOpen: !!root.querySelector('[data-card-filters-button][aria-expanded="true"]'),
+						persistentFocus: target.id === 'alerts-live-results' && activeControl && !target.contains(activeControl) ? activeControl : null,
 						focusIDs: focusCandidates(rows, focusID)
 					};				state.pendingFocusID = '';
 			});
@@ -442,7 +444,11 @@ templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unrea
 					if (saved.filtersOpen && typeof window.setCardFilterDropdownState === 'function') {
 						var filterButton = root.querySelector('[data-card-filters-button]');
 						window.setCardFilterDropdownState(filterButton && filterButton.closest('.dropdown'), true);
-					}				root.scrollTop = saved.rootScrollTop;
+					}
+					if (saved.persistentFocus && saved.persistentFocus.isConnected && document.activeElement !== saved.persistentFocus) {
+						saved.persistentFocus.focus({preventScroll: true});
+					}
+					root.scrollTop = saved.rootScrollTop;
 				var anchor = null;
 				var savedAnchor = null;
 				for (var i = 0; i < saved.anchors.length; i++) {
@@ -465,7 +471,10 @@ templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unrea
 				var root = document.getElementById('alerts-container');
 				var saved = settledTarget && settledTarget.openVibelyAlertsViewportSwap;
 				if (!settledTarget || (settledTarget.id !== 'alerts-content' && settledTarget.id !== 'alerts-live-results') || !root || !saved) return;
-					delete settledTarget.openVibelyAlertsViewportSwap;
+				delete settledTarget.openVibelyAlertsViewportSwap;
+				if (saved.persistentFocus && saved.persistentFocus.isConnected && document.activeElement !== saved.persistentFocus) {
+					saved.persistentFocus.focus({preventScroll: true});
+				}
 
 					var focusTarget = null;				for (var j = 0; j < saved.focusIDs.length; j++) {
 					focusTarget = root.querySelector('[data-alert-scroll-anchor="' + CSS.escape(saved.focusIDs[j]) + '"] [data-alert-delete]');
