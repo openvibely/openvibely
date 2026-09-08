@@ -102,28 +102,12 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 
 	<!-- Task card merge, rebase, and pull request actions execute directly. -->
 	if project != nil {
-		<div
-			id="task_card_action_status"
-			class="hidden fixed bottom-4 right-4 z-[1000] alert alert-info w-auto max-w-[calc(100vw-2rem)] shadow-lg"
-			role="status"
-			aria-live="polite"
-			aria-atomic="true"
-		>
-			<span class="loading loading-spinner loading-sm" data-task-card-action-spinner aria-hidden="true"></span>
-			<span data-task-card-action-status-label>Task action in progress…</span>
-		</div>
 		<script>
-			function setTaskCardActionBusy(request) {
-				var status = document.getElementById('task_card_action_status');
+			function setTaskCardActionBoardBusy(busy) {
 				var board = document.getElementById('kanban-board');
-				if (board) {
-					if (request) board.setAttribute('aria-busy', 'true');
-					else board.removeAttribute('aria-busy');
-				}
-				if (!status) return;
-				var label = status.querySelector('[data-task-card-action-status-label]');
-				if (label && request) label.textContent = (request.label || 'Task action') + ' in progress…';
-				status.classList.toggle('hidden', !request);
+				if (!board) return;
+				if (busy) board.setAttribute('aria-busy', 'true');
+				else board.removeAttribute('aria-busy');
 			}
 
 			function taskCardActionResponseHasToast(xhr) {
@@ -168,7 +152,7 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 				var path = '/tasks/' + encodeURIComponent(taskID) + '/worktree/' + endpoint;
 				var dropdown = window.kanbanDropdownForTarget ? window.kanbanDropdownForTarget(button) : button.closest('[data-kanban-menu-key]');
 				window._taskCardActionRequest = {path: path, taskID: taskID, label: button.dataset.mergeLabel || 'Task action'};
-				setTaskCardActionBusy(window._taskCardActionRequest);
+				setTaskCardActionBoardBusy(true);
 				if (window.closeKanbanMenu) window.closeKanbanMenu(dropdown, false);
 				htmx.ajax('POST', path, {
 					target: '#kanban-board',
@@ -190,7 +174,7 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 					var config = event.detail && event.detail.requestConfig;
 					if (!request || !config || config.path !== request.path) return;
 					window._taskCardActionRequest = null;
-					setTaskCardActionBusy(null);
+					setTaskCardActionBoardBusy(false);
 					showTaskCardActionFallbackFailure(request, event.detail && event.detail.xhr);
 					window.dispatchEvent(new CustomEvent('kanban-refresh-unblocked'));
 					restoreTaskCardActionFocus(request.taskID);
