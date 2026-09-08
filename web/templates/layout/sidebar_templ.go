@@ -546,7 +546,7 @@ func Sidebar(projects []models.Project, currentProjectID string) templ.Component
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "\" hx-trigger=\"load, every 30s, alertUpdate from:body\" hx-swap=\"innerHTML\" hx-target=\"this\" hx-push-url=\"false\"></span> <span id=\"system-update-nav-badge\" class=\"badge badge-sm badge-primary badge-outline inline-flex items-center sidebar-update-badge hidden\" aria-label=\"System update available\">Update</span></span></a></li><li><a data-nav-base=\"/models\" data-tip=\"Models\" href=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "\" hx-trigger=\"load, every 30s, alertUpdate from:body, alertBadgeUpdate from:body\" hx-swap=\"innerHTML\" hx-target=\"this\" hx-push-url=\"false\"></span> <span id=\"system-update-nav-badge\" class=\"badge badge-sm badge-primary badge-outline inline-flex items-center sidebar-update-badge hidden\" aria-label=\"System update available\">Update</span></span></a></li><li><a data-nav-base=\"/models\" data-tip=\"Models\" href=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

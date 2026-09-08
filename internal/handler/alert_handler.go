@@ -214,7 +214,10 @@ func (h *Handler) renderAlertListRefresh(c echo.Context, projectID string, alert
 	} else {
 		unreadCount, _ = h.alertSvc.CountUnread(ctx, projectID)
 	}
-	c.Response().Header().Set("HX-Trigger", "alertUpdate")
+	// The response already contains the authoritative Alerts list. Refresh only
+	// the navigation badge; broadcasting alertUpdate here would make the newly
+	// swapped list immediately request and swap itself a second time.
+	c.Response().Header().Set("HX-Trigger", "alertBadgeUpdate")
 	return render(c, http.StatusOK, pages.AlertsContentPageWithState(alerts, projectID, unreadCount, hasMore, filter.DecisionState, filter.ProcessingState, alertCardListState(projectID, filter)))
 }
 
