@@ -135,6 +135,107 @@ func (r *XTaskContextRepo) GetByTaskID(ctx context.Context, taskID string) (*mod
 	return xTaskContextLifecycle.GetByTaskID(ctx, r.db, taskID)
 }
 
+type XReplyDeliveryRepo struct{ db *sql.DB }
+
+func NewXReplyDeliveryRepo(db *sql.DB) *XReplyDeliveryRepo { return &XReplyDeliveryRepo{db: db} }
+
+func scanXReplyDelivery(row taskContextScanner) (*models.XReplyDelivery, error) {
+	var delivery models.XReplyDelivery
+	err := row.Scan(&delivery.ID, &delivery.TaskID, &delivery.ExecutionID, &delivery.ProjectID, &delivery.AccountID,
+		&delivery.ReplyToTweetID, &delivery.Text, &delivery.Status, &delivery.ProviderPostID, &delivery.LastError,
+		&delivery.AttemptCount, &delivery.CreatedAt, &delivery.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return &delivery, nil
+}
+
+const xReplyDeliveryColumns = `id, task_id, execution_id, project_id, account_id, reply_to_tweet_id, text,
+	status, provider_post_id, last_error, attempt_count, created_at, updated_at`
+
+// CreatePending idempotently persists the exact provider-bound payload before posting.
+func (r *XReplyDeliveryRepo) CreatePending(ctx context.Context, delivery *models.XReplyDelivery) (*models.XReplyDelivery, error) {
+	if delivery == nil || strings.TrimSpace(delivery.ExecutionID) == "" || strings.TrimSpace(delivery.ProjectID) == "" ||
+		strings.TrimSpace(delivery.AccountID) == "" || strings.TrimSpace(delivery.ReplyToTweetID) == "" || strings.TrimSpace(delivery.Text) == "" {
+		return nil, fmt.Errorf("complete X reply delivery metadata is required")
+	}
+	created, err := scanXReplyDelivery(queryRowBoundSQLite(ctx, r.db, `INSERT INTO x_reply_deliveries
+		(task_id, execution_id, project_id, account_id, reply_to_tweet_id, text)
+		VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT(execution_id, reply_to_tweet_id) DO UPDATE SET execution_id=excluded.execution_id
+		RETURNING `+xReplyDeliveryColumns, delivery.TaskID, delivery.ExecutionID, delivery.ProjectID,
+		delivery.AccountID, delivery.ReplyToTweetID, delivery.Text))
+	if err != nil {
+		return nil, fmt.Errorf("persist X reply delivery: %w", err)
+	}
+	return created, nil
+}
+
+// ClaimPending durably moves one retryable delivery out of the retry set before
+// calling X, preventing overlapping service instances from knowingly reposting it.
+func (r *XReplyDeliveryRepo) ClaimPending(ctx context.Context, id, accountID string) (*models.XReplyDelivery, error) {
+	delivery, err := scanXReplyDelivery(queryRowBoundSQLite(ctx, r.db, `UPDATE x_reply_deliveries
+		SET status='posting', attempt_count=attempt_count+1, last_error='', updated_at=datetime('now')
+		WHERE id=? AND account_id=? AND status='pending' RETURNING `+xReplyDeliveryColumns, id, accountID))
+	if err != nil {
+		return nil, err
+	}
+	return delivery, nil
+}
+
+func (r *XReplyDeliveryRepo) MarkProviderFailed(ctx context.Context, id, reason string) error {
+	res, err := execBoundSQLite(ctx, r.db, `UPDATE x_reply_deliveries SET status='pending', last_error=?, updated_at=datetime('now') WHERE id=? AND status='posting'`, reason, id)
+	if err != nil {
+		return fmt.Errorf("record X reply provider failure: %w", err)
+	}
+	changed, _ := res.RowsAffected()
+	if changed != 1 {
+		return fmt.Errorf("X reply delivery is no longer posting")
+	}
+	return nil
+}
+
+func (r *XReplyDeliveryRepo) MarkSent(ctx context.Context, id, providerPostID string) error {
+	res, err := execBoundSQLite(ctx, r.db, `UPDATE x_reply_deliveries SET status='sent', provider_post_id=?, last_error='', updated_at=datetime('now') WHERE id=? AND status='posting'`, providerPostID, id)
+	if err != nil {
+		return fmt.Errorf("record sent X reply: %w", err)
+	}
+	changed, _ := res.RowsAffected()
+	if changed != 1 {
+		return fmt.Errorf("X reply delivery is no longer posting")
+	}
+	return nil
+}
+
+func (r *XReplyDeliveryRepo) ListPendingForAccount(ctx context.Context, accountID string, limit int) ([]models.XReplyDelivery, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+	rows, err := r.db.QueryContext(ctx, `SELECT `+xReplyDeliveryColumns+` FROM x_reply_deliveries
+		WHERE account_id=? AND status='pending' ORDER BY created_at, id LIMIT ?`, accountID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list pending X replies: %w", err)
+	}
+	defer rows.Close()
+	var deliveries []models.XReplyDelivery
+	for rows.Next() {
+		delivery, err := scanXReplyDelivery(rows)
+		if err != nil {
+			return nil, err
+		}
+		deliveries = append(deliveries, *delivery)
+	}
+	return deliveries, rows.Err()
+}
+
+func (r *XReplyDeliveryRepo) GetByExecution(ctx context.Context, executionID, replyToTweetID string) (*models.XReplyDelivery, error) {
+	delivery, err := scanXReplyDelivery(r.db.QueryRowContext(ctx, `SELECT `+xReplyDeliveryColumns+` FROM x_reply_deliveries WHERE execution_id=? AND reply_to_tweet_id=?`, executionID, replyToTweetID))
+	if err != nil {
+		return nil, err
+	}
+	return delivery, nil
+}
+
 type XReceiptClaimResult string
 
 const (

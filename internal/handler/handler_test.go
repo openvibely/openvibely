@@ -81,6 +81,7 @@ func setupTestHandlerForDB(t testing.TB, db *sql.DB) (*Handler, *echo.Echo, *rep
 	h.SetEmailTaskContextRepo(emailTaskContextRepo)
 	h.SetDiscordAuthRepo(discordAuthRepo)
 	h.SetDiscordTaskContextRepo(discordTaskContextRepo)
+	h.SetXReplyDeliveryRepo(repository.NewXReplyDeliveryRepo(db))
 	h.SetLocalRepoPathEnabled(true)
 
 	e := echo.New()
@@ -135,6 +136,7 @@ func setupTestHandlerWithDB(t testing.TB) (*Handler, *echo.Echo, *repository.LLM
 	h.SetEmailTaskContextRepo(emailTaskContextRepo)
 	h.SetDiscordAuthRepo(discordAuthRepo)
 	h.SetDiscordTaskContextRepo(discordTaskContextRepo)
+	h.SetXReplyDeliveryRepo(repository.NewXReplyDeliveryRepo(db))
 	h.SetLocalRepoPathEnabled(true)
 
 	e := echo.New()

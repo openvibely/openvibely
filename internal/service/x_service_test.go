@@ -74,6 +74,7 @@ func setupXServiceTestWithDB(t testing.TB, db *sql.DB) (context.Context, *XServi
 		nil,
 	)
 	svc.SetRepositories(auth, selections, repository.NewXTaskContextRepo(db), repository.NewXInboundReceiptRepo(db), repository.NewThreadInputRepo(db))
+	svc.SetReplyDelivery(repository.NewXReplyDeliveryRepo(db), NewAlertService(repository.NewAlertRepo(db), nil))
 	return ctx, svc, settings, auth, selections, p1, p2
 }
 
@@ -165,7 +166,7 @@ func TestXPollUsesOneConfigurationSnapshotPerBatch(t *testing.T) {
 
 			require.Equal(t, 1, countXSettingsSnapshots(statements), "X polling should load one settings snapshot per batch")
 			if mentions == 100 {
-				require.Equal(t, 1108, len(statements), "the 100-mention batch should use the bounded SQL operation count")
+				require.Equal(t, 1109, len(statements), "the 100-mention batch should include one bounded pending-delivery lookup")
 			}
 			require.Equal(t, wantCursor, cursor)
 		})
@@ -749,10 +750,115 @@ func TestXReplyRequiresOriginatingAccount(t *testing.T) {
 	svc.setAPI(api)
 	svc.me = XUser{ID: "new-account", Username: "new"}
 
-	require.False(t, svc.SendReplyForAccount(ctx, "old-account", "tweet", "response", ""))
+	result := svc.SendReplyForAccount(ctx, "old-account", "tweet", "response", "")
+	require.Equal(t, XReplyAccountMismatch, result.Status)
 	require.Empty(t, api.posted)
-	require.True(t, svc.SendReplyForAccount(ctx, "new-account", "tweet", "response", ""))
+	result = svc.SendReplyForAccount(ctx, "new-account", "tweet", "response", "")
+	require.Equal(t, XReplyDelivered, result.Status)
 	require.Equal(t, []string{"tweet|response"}, api.posted)
+}
+
+func TestXReplyProviderFailureIsNotReportedAsDelivered(t *testing.T) {
+	ctx, svc, _, _, _, _, _ := setupXServiceTest(t)
+	providerErr := errors.New("X rate limited")
+	api := &fakeXAPI{postErr: providerErr}
+	svc.setAPI(api)
+	svc.me = XUser{ID: "bot", Username: "openvibely"}
+
+	result := svc.SendReplyForAccount(ctx, "bot", "tweet", "valid short response", "")
+	require.Equal(t, XReplyProviderFailed, result.Status)
+	require.ErrorIs(t, result.Err, providerErr)
+	require.False(t, result.Delivered())
+	require.Equal(t, []string{"tweet|valid short response"}, api.Posts())
+}
+
+func TestXCompletionReplyProviderFailureIsDurableAndRetriesWithoutRerunningTask(t *testing.T) {
+	ctx, svc, _, _, _, project, _ := setupXServiceTest(t)
+	providerErr := errors.New("temporary X outage")
+	api := &fakeXAPI{postErr: providerErr}
+	svc.setAPI(api)
+	svc.me = XUser{ID: "bot", Username: "openvibely"}
+	agent := &models.LLMConfig{Name: "X delivery agent", Provider: models.ProviderTest, Model: "test"}
+	require.NoError(t, svc.llmConfigRepo.Create(ctx, agent))
+	task := &models.Task{ProjectID: project.ID, Title: "X delivery task", Prompt: "work", Category: models.CategoryCompleted, Status: models.StatusCompleted, Priority: 2, AgentID: &agent.ID}
+	require.NoError(t, svc.taskRepo.Create(ctx, task))
+	execution := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecCompleted, PromptSent: "work"}
+	require.NoError(t, svc.execRepo.Create(ctx, execution))
+
+	result := svc.SendCompletionReply(ctx, XCompletionReply{
+		TaskID: task.ID, ExecutionID: execution.ID, ProjectID: project.ID, AccountID: "bot",
+		ReplyToTweetID: "tweet", Output: "valid short response",
+	})
+	require.Equal(t, XReplyProviderFailed, result.Status)
+	require.ErrorIs(t, result.Err, providerErr)
+	delivery, err := svc.replyDeliveryRepo.GetByExecution(ctx, execution.ID, "tweet")
+	require.NoError(t, err)
+	require.Equal(t, "pending", delivery.Status)
+	require.Equal(t, "valid short response", delivery.Text)
+	require.Equal(t, 1, delivery.AttemptCount)
+
+	alerts, err := svc.alertSvc.ListByProject(ctx, project.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, alerts, 1)
+	require.Equal(t, "x_reply_delivery", alerts[0].Source)
+	require.Equal(t, models.AlertProcessingUnclaimed, alerts[0].ProcessingState)
+
+	runs := 0
+	svc.channelTaskRunner = func(context.Context, ChannelTaskRunRequest) { runs++ }
+	api.postErr = nil
+	require.NoError(t, svc.RetryPendingReplies(ctx))
+	require.Zero(t, runs, "delivery retry must not rerun task execution")
+	delivery, err = svc.replyDeliveryRepo.GetByExecution(ctx, execution.ID, "tweet")
+	require.NoError(t, err)
+	require.Equal(t, "sent", delivery.Status)
+	require.Equal(t, 2, delivery.AttemptCount)
+	require.Equal(t, []string{"tweet|valid short response", "tweet|valid short response"}, api.Posts())
+
+	result = svc.SendCompletionReply(ctx, XCompletionReply{
+		TaskID: task.ID, ExecutionID: execution.ID, ProjectID: project.ID, AccountID: "bot",
+		ReplyToTweetID: "tweet", Output: "valid short response",
+	})
+	require.True(t, result.Delivered())
+	require.NoError(t, svc.RetryPendingReplies(ctx))
+	require.Len(t, api.Posts(), 2)
+	alerts, err = svc.alertSvc.ListByProject(ctx, project.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, alerts, 1)
+}
+
+func TestXCompletionReplyProviderSuccessWithSentPersistenceFailureIsNotRetried(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx, svc, _, _, _, project, _ := setupXServiceTestWithDB(t, db)
+	api := &fakeXAPI{}
+	svc.setAPI(api)
+	svc.me = XUser{ID: "bot", Username: "openvibely"}
+	agent := &models.LLMConfig{Name: "X ambiguous delivery agent", Provider: models.ProviderTest, Model: "test"}
+	require.NoError(t, svc.llmConfigRepo.Create(ctx, agent))
+	task := &models.Task{ProjectID: project.ID, Title: "X ambiguous delivery task", Prompt: "work", Category: models.CategoryCompleted, Status: models.StatusCompleted, Priority: 2, AgentID: &agent.ID}
+	require.NoError(t, svc.taskRepo.Create(ctx, task))
+	execution := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecCompleted, PromptSent: "work"}
+	require.NoError(t, svc.execRepo.Create(ctx, execution))
+	require.NoError(t, func() error {
+		_, err := db.Exec(`CREATE TRIGGER fail_x_reply_sent BEFORE UPDATE OF status ON x_reply_deliveries
+			WHEN NEW.status = 'sent' BEGIN SELECT RAISE(ABORT, 'forced sent persistence failure'); END`)
+		return err
+	}())
+
+	result := svc.SendCompletionReply(ctx, XCompletionReply{
+		TaskID: task.ID, ExecutionID: execution.ID, ProjectID: project.ID, AccountID: "bot",
+		ReplyToTweetID: "tweet", Output: "provider accepted this",
+	})
+	require.Equal(t, XReplyPersistenceFailed, result.Status)
+	require.ErrorContains(t, result.Err, "forced sent persistence failure")
+	delivery, err := svc.replyDeliveryRepo.GetByExecution(ctx, execution.ID, "tweet")
+	require.NoError(t, err)
+	require.Equal(t, "posting", delivery.Status)
+	require.Equal(t, []string{"tweet|provider accepted this"}, api.Posts())
+
+	_, err = db.Exec(`DROP TRIGGER fail_x_reply_sent`)
+	require.NoError(t, err)
+	require.NoError(t, svc.RetryPendingReplies(ctx))
+	require.Equal(t, []string{"tweet|provider accepted this"}, api.Posts(), "ambiguous provider success must not be posted again")
 }
 
 func TestXPollActiveReceiptLeaseDoesNotAdvanceCursorOrDegradeReplacementHealth(t *testing.T) {
@@ -1272,11 +1378,13 @@ func TestXReplyDisabledOrEmptyDoesNotPost(t *testing.T) {
 	svc.setAPI(api)
 
 	require.NoError(t, settings.Set(ctx, XSettingSendResponses, "false"))
-	svc.SendReply(ctx, "tweet", "disabled", "")
+	result := svc.SendReply(ctx, "tweet", "disabled", "")
+	require.Equal(t, XReplyDisabled, result.Status)
 	require.Empty(t, api.posted)
 
 	require.NoError(t, settings.Set(ctx, XSettingSendResponses, "true"))
-	svc.SendReply(ctx, "tweet", "  \t\n", "")
+	result = svc.SendReply(ctx, "tweet", "  \t\n", "")
+	require.Equal(t, XReplyEmpty, result.Status)
 	require.Empty(t, api.posted)
 }
 
@@ -1359,6 +1467,7 @@ func TestXRuntimeCreateTaskPersistsReplyContextBeforeWorkerSubmission(t *testing
 		taskSvc,
 	)
 	xSvc.SetRepositories(repository.NewXAuthRepo(db), repository.NewXUserProjectRepo(db), xTaskContextRepo, repository.NewXInboundReceiptRepo(db), repository.NewThreadInputRepo(db))
+	xSvc.SetReplyDelivery(repository.NewXReplyDeliveryRepo(db), NewAlertService(repository.NewAlertRepo(db), nil))
 	xSvc.me = XUser{ID: "bot", Username: "openvibely"}
 	xSvc.setAPI(&fakeXAPI{me: xSvc.me})
 
@@ -1466,6 +1575,7 @@ func newXRuntimeWorkerFixture(t *testing.T) *xRuntimeWorkerFixture {
 		taskSvc,
 	)
 	xSvc.SetRepositories(repository.NewXAuthRepo(db), repository.NewXUserProjectRepo(db), xTaskContextRepo, repository.NewXInboundReceiptRepo(db), repository.NewThreadInputRepo(db))
+	xSvc.SetReplyDelivery(repository.NewXReplyDeliveryRepo(db), NewAlertService(repository.NewAlertRepo(db), nil))
 	xSvc.me = XUser{ID: "bot", Username: "openvibely"}
 	api := &fakeXAPI{me: xSvc.me}
 	xSvc.setAPI(api)

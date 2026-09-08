@@ -34,6 +34,7 @@ type readyXSettingsAPI struct {
 	accountID string
 	newest    string
 	posted    []string
+	postErr   error
 }
 
 func (f *readyXSettingsAPI) Me(context.Context) (service.XUser, error) {
@@ -50,7 +51,7 @@ func (f *readyXSettingsAPI) Mentions(context.Context, string, string, string) (s
 }
 func (f *readyXSettingsAPI) Post(_ context.Context, text, reply string) (string, error) {
 	f.posted = append(f.posted, reply+"|"+text)
-	return "tweet", nil
+	return "tweet", f.postErr
 }
 
 type cancelAwareXAPI struct {
@@ -372,12 +373,53 @@ func TestXCompletionUsesOnlyOriginatingAccount(t *testing.T) {
 	require.NoError(t, svc.StartVerified(service.XUser{ID: "new-account", Username: "new"}))
 	t.Cleanup(svc.Stop)
 	h.SetXService(svc)
-	task := &models.Task{ID: "task", Category: models.CategoryActive, CreatedVia: models.TaskOriginX}
+	project := createProject(t, h, "X completion delivery")
+	task := &models.Task{ID: "task", ProjectID: project.ID, Category: models.CategoryActive, CreatedVia: models.TaskOriginX}
 
-	h.sendChannelResponse(context.Background(), task, service.ChannelReplyContext{Source: models.TaskOriginX, XAccountID: "old-account", XReplyToTweetID: "old-tweet"}, "done", "", 0)
+	h.sendChannelResponse(context.Background(), "exec", task, service.ChannelReplyContext{Source: models.TaskOriginX, XAccountID: "old-account", XReplyToTweetID: "old-tweet"}, "done", "", 0)
 	require.Empty(t, api.posted)
-	h.sendChannelResponse(context.Background(), task, service.ChannelReplyContext{Source: models.TaskOriginX, XAccountID: "new-account", XReplyToTweetID: "new-tweet"}, "done", "", 0)
+	h.sendChannelResponse(context.Background(), "exec", task, service.ChannelReplyContext{Source: models.TaskOriginX, XAccountID: "new-account", XReplyToTweetID: "new-tweet"}, "done", "", 0)
 	require.Equal(t, []string{"new-tweet|done"}, api.posted)
+}
+
+func TestXCompletionDeliveryFailureCreatesActionableRetryState(t *testing.T) {
+	h, _, _, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	project := createProject(t, h, "X retry delivery")
+	agent := &models.LLMConfig{Name: "X completion agent", Provider: models.ProviderTest, Model: "test"}
+	require.NoError(t, h.llmConfigRepo.Create(ctx, agent))
+	task := &models.Task{ProjectID: project.ID, Title: "Completed X task", Prompt: "work", Category: models.CategoryCompleted, Status: models.StatusCompleted, Priority: 2, AgentID: &agent.ID}
+	require.NoError(t, h.taskRepo.Create(ctx, task))
+	execution := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecCompleted, PromptSent: "work"}
+	require.NoError(t, h.execRepo.Create(ctx, execution))
+
+	api := &readyXSettingsAPI{accountID: "bot", postErr: errors.New("temporary provider failure")}
+	svc := service.NewXService(service.XCredentials{ConsumerKey: "a", ConsumerSecret: "b", AccessToken: "c", AccessTokenSecret: "d"}, h.settingsRepo, h.projectRepo, h.llmConfigRepo, h.taskRepo, h.execRepo, h.scheduleRepo, h.taskSvc)
+	svc.SetAPI(api)
+	svc.SetRepositories(repository.NewXAuthRepo(db), repository.NewXUserProjectRepo(db), repository.NewXTaskContextRepo(db), repository.NewXInboundReceiptRepo(db), h.threadInputRepo)
+	require.NoError(t, svc.StartVerified(service.XUser{ID: "bot", Username: "openvibely"}))
+	t.Cleanup(svc.Stop)
+	h.SetXService(svc)
+	reply := service.ChannelReplyContext{Source: models.TaskOriginX, XAccountID: "bot", XReplyToTweetID: "origin-tweet"}
+
+	h.sendChannelResponse(ctx, execution.ID, task, reply, "completed response", "", 0)
+	delivery, err := h.xReplyDeliveryRepo.GetByExecution(ctx, execution.ID, "origin-tweet")
+	require.NoError(t, err)
+	require.Equal(t, "pending", delivery.Status)
+	alerts, err := h.alertSvc.ListByProject(ctx, project.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, alerts, 1)
+	require.Equal(t, models.AlertProcessingUnclaimed, alerts[0].ProcessingState)
+
+	api.postErr = nil
+	require.NoError(t, svc.RetryPendingReplies(ctx))
+	unchanged, err := h.execRepo.GetByID(ctx, execution.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.ExecCompleted, unchanged.Status)
+	require.Equal(t, []string{"origin-tweet|completed response", "origin-tweet|completed response"}, api.posted)
+
+	h.sendChannelResponse(ctx, execution.ID, task, reply, "completed response", "", 0)
+	require.Len(t, api.posted, 2)
 }
 
 func TestXQueuedInputRuntimePreservesAuthorizedProjectSwitchPersistence(t *testing.T) {

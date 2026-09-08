@@ -1956,7 +1956,7 @@ func (h *Handler) completeWithSuccess(ctx context.Context, execID, taskID, outpu
 				applog.Infof("[handler] completeWithSuccess task=%s error moving missing GitHub SDLC PR failure to backlog: %v", taskID, err)
 			}
 		}
-		h.sendChannelResponse(ctx, task, channelReply, output, reason, telegramMessageID)
+		h.sendChannelResponse(ctx, execID, task, channelReply, output, reason, telegramMessageID)
 		if task != nil && h.alertSvc != nil {
 			if err := h.alertSvc.CreateTaskFailedAlert(ctx, task.ProjectID, taskID, execID, task.Title, reason); err != nil {
 				applog.Infof("[handler] completeWithSuccess task=%s error creating missing GitHub SDLC PR failure alert: %v", taskID, err)
@@ -1977,7 +1977,7 @@ func (h *Handler) completeWithSuccess(ctx context.Context, execID, taskID, outpu
 	h.publishExecutionTerminal(execID, models.ExecCompleted, "")
 
 	// Move active tasks to the completed category so they appear in the right column
-	h.sendChannelResponse(ctx, task, channelReply, output, "", telegramMessageID)
+	h.sendChannelResponse(ctx, execID, task, channelReply, output, "", telegramMessageID)
 	if task != nil && task.Category == models.CategoryActive {
 		if err := h.taskRepo.UpdateCategory(ctx, taskID, models.CategoryCompleted); err != nil {
 			applog.Infof("[handler] completeWithSuccess task=%s error moving to completed category: %v", taskID, err)
@@ -2150,10 +2150,10 @@ func (h *Handler) completeWithCancellation(execID, taskID, output string, tokens
 		reply = channelReply[0]
 	}
 	h.notifySwarmChildTerminal(ctx, taskID)
-	h.sendChannelResponse(ctx, task, reply, output, "cancelled", telegramMessageID)
+	h.sendChannelResponse(ctx, execID, task, reply, output, "cancelled", telegramMessageID)
 }
 
-func (h *Handler) sendChannelResponse(ctx context.Context, task *models.Task, reply service.ChannelReplyContext, output, errMsg string, telegramMessageID int) {
+func (h *Handler) sendChannelResponse(ctx context.Context, execID string, task *models.Task, reply service.ChannelReplyContext, output, errMsg string, telegramMessageID int) {
 	if task == nil {
 		return
 	}
@@ -2187,7 +2187,13 @@ func (h *Handler) sendChannelResponse(ctx context.Context, task *models.Task, re
 	}
 	if reply.Source == models.TaskOriginX && reply.XReplyToTweetID != "" {
 		if xService := h.getXService(); xService != nil {
-			xService.SendReplyForAccount(ctx, reply.XAccountID, reply.XReplyToTweetID, output, errMsg)
+			result := xService.SendCompletionReply(ctx, service.XCompletionReply{
+				TaskID: task.ID, ExecutionID: execID, ProjectID: task.ProjectID, AccountID: reply.XAccountID,
+				ReplyToTweetID: reply.XReplyToTweetID, Output: output, ErrorMessage: errMsg,
+			})
+			if result.Err != nil {
+				applog.Infof("[handler] X completion reply delivery failed task=%s execution=%s: %v", task.ID, execID, result.Err)
+			}
 		}
 		return
 	}
@@ -2409,7 +2415,7 @@ func (h *Handler) completeWithFailure(_ context.Context, execID, taskID, errorMe
 		applog.Infof("[handler] completeWithFailure task=%s error getting task: %v", taskID, err)
 		return
 	}
-	h.sendChannelResponse(ctx, task, channelReply, "", errorMessage, telegramMessageID)
+	h.sendChannelResponse(ctx, execID, task, channelReply, "", errorMessage, telegramMessageID)
 	if task != nil && (task.Category == models.CategoryActive || task.Category == models.CategoryCompleted) {
 		if err := h.taskRepo.UpdateCategory(ctx, taskID, models.CategoryBacklog); err != nil {
 			applog.Infof("[handler] completeWithFailure task=%s error moving to backlog: %v", taskID, err)
@@ -2450,7 +2456,7 @@ func (h *Handler) completeWithFailureAndOutput(_ context.Context, execID, taskID
 		applog.Infof("[handler] completeWithFailureAndOutput task=%s error getting task: %v", taskID, err)
 		return
 	}
-	h.sendChannelResponse(ctx, task, channelReply, output, errorMessage, telegramMessageID)
+	h.sendChannelResponse(ctx, execID, task, channelReply, output, errorMessage, telegramMessageID)
 	if task != nil && (task.Category == models.CategoryActive || task.Category == models.CategoryCompleted) {
 		if err := h.taskRepo.UpdateCategory(ctx, taskID, models.CategoryBacklog); err != nil {
 			applog.Infof("[handler] completeWithFailureAndOutput task=%s error moving to backlog: %v", taskID, err)

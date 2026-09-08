@@ -73,6 +73,7 @@ func (h *Handler) handleXConfigure(c echo.Context) error {
 	svc := service.NewXService(creds, h.settingsRepo, h.projectRepo, h.llmConfigRepo, h.taskRepo, h.execRepo, h.scheduleRepo, h.taskSvc)
 	svc.SetAPI(api)
 	svc.SetRepositories(h.xAuthRepo, h.xUserProjectRepo, h.xTaskContextRepo, h.xInboundReceiptRepo, h.threadInputRepo)
+	svc.SetReplyDelivery(h.xReplyDeliveryRepo, h.alertSvc)
 	svc.SetRuntime(h.agentRepo, h.customPersonalityRepo, h.chatBroadcaster, h.executionStreamHub, h.StartChannelChatRun, h.StartChannelTaskRun, h.PromoteQueuedChatInput, h.PromoteQueuedTaskThreadInput, h.channelMessageRouter)
 	svc.SetPollInterval(time.Duration(pollSeconds) * time.Second)
 	me, baselineCursor, err := svc.PrepareConnection(ctx)

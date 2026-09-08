@@ -246,6 +246,21 @@ func (r *ExecutionRepo) GetLatestCompletedByTask(ctx context.Context, taskID str
 	return &e, nil
 }
 
+func (r *ExecutionRepo) GetLatestTerminalByTask(ctx context.Context, taskID string) (*models.Execution, error) {
+	e, err := scanExecutionRow(r.db.QueryRowContext(ctx,
+		`SELECT `+executionSelectColumns+` FROM executions
+		 WHERE task_id = ? AND status IN (?, ?, ?)
+		 ORDER BY COALESCE(completed_at, started_at) DESC, rowid DESC LIMIT 1`,
+		taskID, models.ExecCompleted, models.ExecFailed, models.ExecCancelled))
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("getting latest terminal execution: %w", err)
+	}
+	return &e, nil
+}
+
 func (r *ExecutionRepo) Create(ctx context.Context, e *models.Execution) error {
 	return withBoundSQLiteConn(ctx, r.db, func(conn *sql.Conn) error {
 		return r.CreateWithExecutor(ctx, conn, e)
