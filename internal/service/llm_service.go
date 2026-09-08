@@ -48,6 +48,9 @@ type LLMService struct {
 	discordSvc                *DiscordService
 	xServiceMu                sync.RWMutex
 	xSvc                      *XService
+	xCompletionSettingsRepo   *repository.SettingsRepo
+	xTaskContextRepo          *repository.XTaskContextRepo
+	xReplyDeliveryRepo        *repository.XReplyDeliveryRepo
 	llmCaller                 LLMCaller
 	providerAdapters          map[models.LLMProvider]ProviderAdapter
 	routing                   *agentRoutingStrategy
@@ -137,28 +140,55 @@ func (s *LLMService) SetXService(xSvc *XService) {
 	s.xServiceMu.Unlock()
 }
 
-func (s *LLMService) sendXTaskCompletionNotification(ctx context.Context, task models.Task, output, errMsg string) {
-	s.xServiceMu.RLock()
-	xSvc := s.xSvc
-	s.xServiceMu.RUnlock()
-	if xSvc == nil {
+// SetXCompletionDelivery keeps durable X completion dependencies available
+// even when no provider service is installed or running.
+func (s *LLMService) SetXCompletionDelivery(settings *repository.SettingsRepo, contexts *repository.XTaskContextRepo, deliveries *repository.XReplyDeliveryRepo) {
+	s.xServiceMu.Lock()
+	s.xCompletionSettingsRepo = settings
+	s.xTaskContextRepo = contexts
+	s.xReplyDeliveryRepo = deliveries
+	s.xServiceMu.Unlock()
+}
+
+func (s *LLMService) sendXTaskCompletionNotification(ctx context.Context, task models.Task, executionID, output, errMsg string) {
+	if task.CreatedVia != models.TaskOriginX || task.Category == models.CategoryChat {
 		return
 	}
-	result := xSvc.SendTaskCompletionNotification(ctx, task, output, errMsg)
+	s.xServiceMu.RLock()
+	xSvc := s.xSvc
+	settingsRepo := s.xCompletionSettingsRepo
+	taskContextRepo := s.xTaskContextRepo
+	replyDeliveryRepo := s.xReplyDeliveryRepo
+	s.xServiceMu.RUnlock()
+
+	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	reply := XCompletionReply{TaskID: task.ID, ExecutionID: executionID, ProjectID: task.ProjectID, Output: output, ErrorMessage: errMsg}
+	var result XReplyResult
+	if xSvc != nil && xSvc.Status().Running {
+		result = xSvc.SendTaskCompletionNotification(ctx, task, output, errMsg)
+	} else if taskContextRepo == nil {
+		result = XReplyResult{Status: XReplyPersistenceFailed, Err: fmt.Errorf("X task context repository is not configured")}
+	} else {
+		meta, err := taskContextRepo.GetByTaskID(persistCtx, task.ID)
+		if err != nil {
+			result = XReplyResult{Status: XReplyPersistenceFailed, Err: fmt.Errorf("load X task context: %w", err)}
+		} else if meta == nil {
+			result = XReplyResult{Status: XReplyPersistenceFailed, Err: fmt.Errorf("X task context is missing")}
+		} else {
+			reply.ProjectID = meta.ProjectID
+			reply.AccountID = meta.AccountID
+			reply.ReplyToTweetID = meta.ReplyToTweetID
+			result = PreserveUnavailableXCompletionReply(persistCtx, settingsRepo, replyDeliveryRepo, s.alertSvc, reply)
+		}
+	}
 	if result.Err == nil {
 		return
 	}
-	if result.DeliveryID == "" && s.execRepo != nil {
-		persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		defer cancel()
-		execution, err := s.execRepo.GetLatestTerminalByTask(persistCtx, task.ID)
-		if err == nil && execution != nil {
-			CreateXCompletionBoundaryAlert(persistCtx, s.alertSvc, XCompletionReply{
-				TaskID: task.ID, ExecutionID: execution.ID, ProjectID: task.ProjectID,
-			}, result.Err)
-		}
+	if result.DeliveryID == "" {
+		CreateXCompletionBoundaryAlert(persistCtx, s.alertSvc, reply, result.Err)
 	}
-	applog.Infof("[llm-svc] X completion reply delivery failed task=%s: %v", task.ID, result.Err)
+	applog.Infof("[llm-svc] X completion reply delivery failed task=%s execution=%s: %v", task.ID, executionID, result.Err)
 }
 
 // SetFileChangeBroadcaster sets the file change broadcaster for real-time file change updates.
@@ -1342,7 +1372,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 					if s.discordSvc != nil {
 						s.discordSvc.SendTaskCompletionNotification(finalizeCtx, task, "", syncErr.Error())
 					}
-					s.sendXTaskCompletionNotification(finalizeCtx, task, "", syncErr.Error())
+					s.sendXTaskCompletionNotification(finalizeCtx, task, exec.ID, "", syncErr.Error())
 					s.promoteQueuedTaskThreadAfterCompletion(task.ID)
 					return exec, llmcontracts.ChatContext{}, fmt.Errorf("startup worktree auto-merge failed: %w", syncErr)
 				}
@@ -1540,7 +1570,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 		if s.discordSvc != nil {
 			s.discordSvc.SendTaskCompletionNotification(bgCtx, task, "", err.Error())
 		}
-		s.sendXTaskCompletionNotification(bgCtx, task, "", err.Error())
+		s.sendXTaskCompletionNotification(bgCtx, task, exec.ID, "", err.Error())
 		s.promoteQueuedTaskThreadAfterCompletion(task.ID)
 		return exec, result.ChatContext, fmt.Errorf("calling LLM: %w", err)
 	}
@@ -1644,7 +1674,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 		if s.discordSvc != nil {
 			s.discordSvc.SendTaskCompletionNotification(finalizeCtx, task, "", reason)
 		}
-		s.sendXTaskCompletionNotification(finalizeCtx, task, "", reason)
+		s.sendXTaskCompletionNotification(finalizeCtx, task, exec.ID, "", reason)
 		s.promoteQueuedTaskThreadAfterCompletion(task.ID)
 		return exec, result.ChatContext, nil
 	}
@@ -1753,7 +1783,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	if s.discordSvc != nil {
 		s.discordSvc.SendTaskCompletionNotification(finalizeCtx, task, output, "")
 	}
-	s.sendXTaskCompletionNotification(finalizeCtx, task, output, "")
+	s.sendXTaskCompletionNotification(finalizeCtx, task, exec.ID, output, "")
 	s.promoteQueuedTaskThreadAfterCompletion(task.ID)
 
 	return exec, result.ChatContext, nil

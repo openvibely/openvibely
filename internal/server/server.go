@@ -712,6 +712,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	customPersonalityRepo := repository.NewCustomPersonalityRepo(db)
 
 	settingsRepo := repository.NewSettingsRepo(db)
+	llmSvc.SetXCompletionDelivery(settingsRepo, xTaskContextRepo, xReplyDeliveryRepo)
 	automationDraftSvc := service.NewAutomationDraftService(automationRepo, automationRegistry)
 	automationCapabilitySvc := service.NewAutomationCapabilitySnapshotBuilder(projectRepo, agentRepo, taskRepo, settingsRepo)
 	automationCapabilitySvc.SetLLMConfigRepository(llmConfigRepo)

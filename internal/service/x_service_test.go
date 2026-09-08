@@ -1613,15 +1613,20 @@ func TestXRuntimeCreateTaskPersistsReplyContextBeforeWorkerSubmission(t *testing
 }
 
 type xRuntimeWorkerFixture struct {
-	ctx              context.Context
-	db               *sql.DB
-	project          *models.Project
-	taskRepo         *repository.TaskRepo
-	xTaskContextRepo *repository.XTaskContextRepo
-	worker           *WorkerService
-	xSvc             *XService
-	api              *fakeXAPI
-	mockLLM          *testutil.MockLLMCaller
+	ctx                context.Context
+	db                 *sql.DB
+	project            *models.Project
+	agent              *models.LLMConfig
+	taskRepo           *repository.TaskRepo
+	execRepo           *repository.ExecutionRepo
+	xTaskContextRepo   *repository.XTaskContextRepo
+	xReplyDeliveryRepo *repository.XReplyDeliveryRepo
+	alertSvc           *AlertService
+	llmSvc             *LLMService
+	worker             *WorkerService
+	xSvc               *XService
+	api                *fakeXAPI
+	mockLLM            *testutil.MockLLMCaller
 }
 
 func newXRuntimeWorkerFixture(t *testing.T) *xRuntimeWorkerFixture {
@@ -1662,6 +1667,9 @@ func newXRuntimeWorkerFixture(t *testing.T) *xRuntimeWorkerFixture {
 	llmSvc.SetTaskService(taskSvc)
 
 	xTaskContextRepo := repository.NewXTaskContextRepo(db)
+	xReplyDeliveryRepo := repository.NewXReplyDeliveryRepo(db)
+	alertSvc := NewAlertService(repository.NewAlertRepo(db), nil)
+	llmSvc.SetAlertService(alertSvc)
 	xSvc := NewXService(
 		XCredentials{ConsumerKey: "a", ConsumerSecret: "b", AccessToken: "c", AccessTokenSecret: "d"},
 		settingsRepo,
@@ -1673,24 +1681,30 @@ func newXRuntimeWorkerFixture(t *testing.T) *xRuntimeWorkerFixture {
 		taskSvc,
 	)
 	xSvc.SetRepositories(repository.NewXAuthRepo(db), repository.NewXUserProjectRepo(db), xTaskContextRepo, repository.NewXInboundReceiptRepo(db), repository.NewThreadInputRepo(db))
-	xSvc.SetReplyDelivery(repository.NewXReplyDeliveryRepo(db), NewAlertService(repository.NewAlertRepo(db), nil))
-	xSvc.me = XUser{ID: "bot", Username: "openvibely"}
-	api := &fakeXAPI{me: xSvc.me}
+	xSvc.SetReplyDelivery(xReplyDeliveryRepo, alertSvc)
+	api := &fakeXAPI{me: XUser{ID: "bot", Username: "openvibely"}}
 	xSvc.setAPI(api)
+	require.NoError(t, xSvc.StartVerified(api.me))
+	t.Cleanup(xSvc.Stop)
 	llmSvc.SetXService(xSvc)
 
 	worker.Start(ctx)
 	t.Cleanup(worker.Stop)
 	return &xRuntimeWorkerFixture{
-		ctx:              ctx,
-		db:               db,
-		project:          project,
-		taskRepo:         taskRepo,
-		xTaskContextRepo: xTaskContextRepo,
-		worker:           worker,
-		xSvc:             xSvc,
-		api:              api,
-		mockLLM:          mockLLM,
+		ctx:                ctx,
+		db:                 db,
+		project:            project,
+		agent:              agent,
+		taskRepo:           taskRepo,
+		execRepo:           execRepo,
+		xTaskContextRepo:   xTaskContextRepo,
+		xReplyDeliveryRepo: xReplyDeliveryRepo,
+		alertSvc:           alertSvc,
+		llmSvc:             llmSvc,
+		worker:             worker,
+		xSvc:               xSvc,
+		api:                api,
+		mockLLM:            mockLLM,
 	}
 }
 
@@ -1699,6 +1713,49 @@ type xRuntimeTaskAdmissionObservation struct {
 	stored *models.Task
 	meta   *models.XTaskContext
 	err    error
+}
+
+func TestXRuntimeWorkerCompletionWithoutAvailableServiceCreatesDurableRetryState(t *testing.T) {
+	fixture := newXRuntimeWorkerFixture(t)
+	fixture.llmSvc.SetXCompletionDelivery(fixture.xSvc.settingsRepo, fixture.xTaskContextRepo, fixture.xReplyDeliveryRepo)
+	fixture.llmSvc.SetXService(nil)
+	require.NoError(t, fixture.xSvc.settingsRepo.Set(fixture.ctx, XSettingAccountID, "bot"))
+
+	task := &models.Task{
+		ProjectID: fixture.project.ID, Title: "Unavailable X worker completion", Prompt: "complete through worker",
+		Category: models.CategoryActive, Status: models.StatusPending, Priority: 2, AgentID: &fixture.agent.ID,
+		CreatedVia: models.TaskOriginX,
+	}
+	require.NoError(t, fixture.taskRepo.Create(fixture.ctx, task))
+	require.NoError(t, fixture.xTaskContextRepo.Upsert(fixture.ctx, &models.XTaskContext{
+		TaskID: task.ID, ProjectID: fixture.project.ID, AccountID: "bot", ConversationID: "conversation",
+		ReplyToTweetID: "source-tweet", XUserID: "author", Username: "alice",
+	}))
+
+	fixture.worker.Submit(*task)
+	require.Eventually(t, func() bool {
+		execution, err := fixture.execRepo.GetLatestTerminalByTask(fixture.ctx, task.ID)
+		if err != nil || execution == nil {
+			return false
+		}
+		delivery, err := fixture.xReplyDeliveryRepo.GetByExecution(fixture.ctx, execution.ID, "source-tweet")
+		return err == nil && delivery.Status == "pending" && delivery.Text == "child completed"
+	}, 2*time.Second, 10*time.Millisecond)
+	require.Empty(t, fixture.api.Posts())
+	require.Equal(t, 1, fixture.mockLLM.CallCount(), "preserving delivery must not rerun task execution")
+	alerts, err := fixture.alertSvc.ListByProject(fixture.ctx, fixture.project.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, alerts, 1)
+	require.Equal(t, "x_reply_delivery", alerts[0].Source)
+
+	execution, err := fixture.execRepo.GetLatestTerminalByTask(fixture.ctx, task.ID)
+	require.NoError(t, err)
+	require.NotNil(t, execution)
+	fixture.llmSvc.sendXTaskCompletionNotification(fixture.ctx, *task, execution.ID, "child completed", "")
+	alerts, err = fixture.alertSvc.ListByProject(fixture.ctx, fixture.project.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, alerts, 1, "unavailable worker completion alerts must be deduplicated")
+	require.Equal(t, 1, fixture.mockLLM.CallCount())
 }
 
 func TestXRuntimeCreateTaskCompletesWithExactlyOneReply(t *testing.T) {
