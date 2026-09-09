@@ -78,10 +78,11 @@ type WorkerService struct {
 	taskGoalSvc                      *TaskGoalService
 	automationRepo                   *repository.AutomationRepo
 	afterCompleteRuntimeToolProvider func(context.Context, models.Task) *llmcontracts.RuntimeTools
-	beforeOrdinaryTaskClaim          func(models.Task) // deterministic pre-claim test barrier
-	afterOrdinaryTaskClaim           func(models.Task) // deterministic persisted-claim test barrier
-	beforeQueuedAutomationTaskClaim  func(models.Task) // deterministic prepared-dispatch test barrier
-	currentCatalog                   atomic.Value      // stores *agentskills.Catalog for hook skill resolution
+	beforeOrdinaryTaskClaim          func(models.Task)       // deterministic pre-claim test barrier
+	afterOrdinaryTaskClaim           func(models.Task)       // deterministic persisted-claim test barrier
+	beforeReservedTaskClaim          func(models.Task) error // deterministic reserved-claim retry test barrier
+	beforeQueuedAutomationTaskClaim  func(models.Task)       // deterministic prepared-dispatch test barrier
+	currentCatalog                   atomic.Value            // stores *agentskills.Catalog for hook skill resolution
 	admissionOpen                    func() bool
 	updateTracker                    *update.WorkTracker
 }
@@ -246,6 +247,25 @@ func (w *WorkerService) ReconcileReservedTasks(ctx context.Context) {
 	for _, admission := range admissions {
 		w.SubmitReserved(admission.Task, admission.ExecutionID)
 	}
+}
+
+func (w *WorkerService) retryReservedAdmission(task models.Task, executionID string) {
+	w.mu.Lock()
+	ctx := w.ctx
+	w.mu.Unlock()
+	if ctx == nil || executionID == "" {
+		return
+	}
+	go func() {
+		timer := time.NewTimer(100 * time.Millisecond)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			return
+		case <-timer.C:
+			w.SubmitReserved(task, executionID)
+		}
+	}()
 }
 
 func (w *WorkerService) Start(ctx context.Context) {
@@ -502,6 +522,7 @@ func (w *WorkerService) executeTask(task models.Task, agentConfigID string, prep
 	var preparedTerminalStatus models.ExecutionStatus
 	var preparedTerminalMessage string
 	ordinaryReserved := reservedExecutionID != ""
+	retryReserved := false
 	claimed := w.taskRepo == nil || ordinaryReserved || (isPrepared && prepared.ExecutionID != "")
 	completionAttempted := w.taskRepo == nil || ordinaryReserved || (isPrepared && prepared.ExecutionID != "")
 	logOutcome := true
@@ -542,6 +563,9 @@ func (w *WorkerService) executeTask(task models.Task, agentConfigID string, prep
 			w.releaseProjectSlot(task.ProjectID)
 			w.releaseModelSlot(agentConfigID)
 			capacityAcquired = false
+		}
+		if retryReserved {
+			w.retryReservedAdmission(task, reservedExecutionID)
 		}
 
 		if isPrepared && prepared.ExecutionID != "" && w.automationRepo != nil {
@@ -659,9 +683,20 @@ func (w *WorkerService) executeTask(task models.Task, agentConfigID string, prep
 		}
 	}
 	if w.taskRepo != nil && ordinaryReserved {
+		if w.beforeReservedTaskClaim != nil {
+			if claimErr := w.beforeReservedTaskClaim(task); claimErr != nil {
+				applog.Infof("[worker] reserved task=%s pre-claim failed: %v", task.ID, claimErr)
+				retryReserved = taskCtx.Err() == nil
+				claimed = false
+				completionAttempted = false
+				logOutcome = false
+				return
+			}
+		}
 		dispatchClaim, admitted, claimErr := w.taskRepo.ClaimReservedTaskForDispatch(taskCtx, task.ID, reservedExecutionID)
 		if claimErr != nil {
 			applog.Infof("[worker] reserved task=%s validation failed: %v", task.ID, claimErr)
+			retryReserved = taskCtx.Err() == nil
 			claimed = false
 			completionAttempted = false
 			logOutcome = false

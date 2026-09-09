@@ -2243,7 +2243,7 @@ func (h *Handler) UpdateTaskCategory(c echo.Context) error {
 		}
 		if err := h.taskSvc.MoveTasksToActiveLane(c.Request().Context(), task.ProjectID, moves, targetStatus); err != nil {
 			applog.Infof("[handler] UpdateTaskCategory active lane error: %v", err)
-			if errors.Is(err, repository.ErrActiveLaneTaskChanged) || errors.Is(err, repository.ErrActiveLaneLifecycleOwned) {
+			if errors.Is(err, repository.ErrActiveLaneTaskChanged) || errors.Is(err, repository.ErrActiveLaneLifecycleOwned) || errors.Is(err, service.ErrActiveLaneLifecycleRouted) {
 				return echo.NewHTTPError(http.StatusConflict, "task lifecycle changed before the move completed")
 			}
 			return err
@@ -2374,7 +2374,7 @@ func (h *Handler) BatchUpdateTaskCategory(c echo.Context) error {
 		}
 		if err := h.taskSvc.MoveTasksToActiveLane(c.Request().Context(), projectID, moves, targetStatus); err != nil {
 			applog.Infof("[handler] BatchUpdateTaskCategory active lane error: %v", err)
-			if errors.Is(err, repository.ErrActiveLaneTaskChanged) || errors.Is(err, repository.ErrActiveLaneLifecycleOwned) {
+			if errors.Is(err, repository.ErrActiveLaneTaskChanged) || errors.Is(err, repository.ErrActiveLaneLifecycleOwned) || errors.Is(err, service.ErrActiveLaneLifecycleRouted) {
 				return echo.NewHTTPError(http.StatusConflict, "one or more selected tasks changed before the move completed")
 			}
 			return err

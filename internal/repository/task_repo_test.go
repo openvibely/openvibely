@@ -857,6 +857,49 @@ func TestTaskRepo_MoveTasksToActiveLaneReservationOwnsLaterFollowup(t *testing.T
 	}
 }
 
+func TestTaskRepo_ClaimReservedTaskRefreshesAuthoritativeExecutionMetadata(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	taskRepo := NewTaskRepo(db, nil)
+	modelRepo := NewLLMConfigRepo(db)
+	firstModel := &models.LLMConfig{Name: "Reserved original model", Provider: models.ProviderTest, Model: "original-model"}
+	secondModel := &models.LLMConfig{Name: "Reserved current model", Provider: models.ProviderTest, Model: "current-model"}
+	if err := modelRepo.Create(ctx, firstModel); err != nil {
+		t.Fatal(err)
+	}
+	if err := modelRepo.Create(ctx, secondModel); err != nil {
+		t.Fatal(err)
+	}
+	task := &models.Task{ProjectID: "default", Title: "Reserved metadata refresh", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "original prompt", AgentID: &firstModel.ID}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	admissions, err := taskRepo.MoveTasksToActiveLane(ctx, "default", []ActiveLaneTaskMove{{ID: task.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending}}, models.StatusRunning)
+	if err != nil || len(admissions) != 1 {
+		t.Fatalf("lane reservation = %#v, %v", admissions, err)
+	}
+	current, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current.Prompt = "current prompt"
+	current.AgentID = &secondModel.ID
+	if err := taskRepo.Update(ctx, current); err != nil {
+		t.Fatal(err)
+	}
+	claim, admitted, err := taskRepo.ClaimReservedTaskForDispatch(ctx, task.ID, admissions[0].ExecutionID)
+	if err != nil || !admitted || claim == nil {
+		t.Fatalf("claim = %#v admitted=%v err=%v", claim, admitted, err)
+	}
+	var prompt, agentID string
+	if err := db.QueryRowContext(ctx, `SELECT prompt_sent, COALESCE(agent_config_id, '') FROM executions WHERE id = ?`, admissions[0].ExecutionID).Scan(&prompt, &agentID); err != nil {
+		t.Fatal(err)
+	}
+	if prompt != current.Prompt || agentID != secondModel.ID {
+		t.Fatalf("reserved execution metadata = prompt %q agent %q, want %q %q", prompt, agentID, current.Prompt, secondModel.ID)
+	}
+}
+
 func TestTaskRepo_ResetOrphanedRunningPreservesDurableActiveLaneReservation(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)

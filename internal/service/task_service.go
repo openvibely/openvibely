@@ -20,6 +20,7 @@ var ErrTaskTitleRequired = errors.New("task title is required")
 var ErrTaskPromptRequired = errors.New("task prompt is required")
 var ErrInvalidTaskPriority = errors.New("task priority must be between 1 and 4")
 var ErrTaskNotFoundInProject = errors.New("task not found in project")
+var ErrActiveLaneLifecycleRouted = errors.New("task activation was routed to its lifecycle owner")
 
 type TaskService struct {
 	repo                              *repository.TaskRepo
@@ -346,6 +347,18 @@ func (s *TaskService) MoveTasksToActiveLane(ctx context.Context, projectID strin
 		return errors.New("worker service unavailable")
 	}
 	admissions, err := s.repo.MoveTasksToActiveLane(ctx, projectID, moves, status)
+	if errors.Is(err, repository.ErrActiveLaneLifecycleOwned) && len(moves) == 1 {
+		var routeErr error
+		if moves[0].ExpectedCategory == models.CategoryActive {
+			routeErr = s.RunTask(ctx, moves[0].ID)
+		} else {
+			routeErr = s.UpdateCategory(ctx, moves[0].ID, models.CategoryActive)
+		}
+		if routeErr != nil {
+			return routeErr
+		}
+		return ErrActiveLaneLifecycleRouted
+	}
 	if err != nil {
 		return err
 	}

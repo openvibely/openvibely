@@ -295,6 +295,36 @@ func TestBatchUpdateTaskCategoryActiveLaneRejectsStaleBrowserStateAtomically(t *
 	}
 }
 
+func TestUpdateTaskCategoryRunningLaneRoutesQueuedFollowupAndReturnsConflict(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().WithName("Lifecycle routed Active lane project").Build()
+	model := tc.CreateLLMConfig().WithName("Lifecycle routed lane model").WithProvider(models.ProviderTest).WithModel("test-model").AsDefault().Build()
+	task := tc.CreateTask(project.ID).WithTitle("Lifecycle routed lane task").WithCategory(models.CategoryBacklog).Build()
+	task.AgentID = &model.ID
+	require.NoError(t, tc.taskRepo.Update(ctx, task))
+	threadRepo := repository.NewThreadInputRepo(tc.db)
+	require.NoError(t, threadRepo.CreateQueued(ctx, &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, AgentConfigID: model.ID, InputMode: models.ThreadInputModeQueued, InputStatus: models.ThreadInputPending, Content: "queued followup"}))
+	expected, err := json.Marshal([]repository.ActiveLaneTaskMove{{ID: task.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending}})
+	require.NoError(t, err)
+
+	response := tc.HTMX().Patch("/tasks/" + task.ID + "/category").WithForm(url.Values{
+		"category":        {string(models.CategoryActive)},
+		"target_status":   {string(models.StatusRunning)},
+		"expected_states": {string(expected)},
+	}).Execute()
+	require.Equal(t, http.StatusConflict, response.Code, response.Body.String())
+	loaded, err := tc.taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.CategoryActive, loaded.Category)
+	require.Equal(t, models.StatusQueued, loaded.Status)
+	executions, err := tc.execRepo.ListByTaskChronological(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, executions, 1)
+	require.True(t, executions[0].IsFollowup)
+	require.Equal(t, "queued followup", executions[0].PromptSent)
+}
+
 func TestUpdateTaskCategoryQueuedToRunningRejectsStaleTerminalState(t *testing.T) {
 	tc := NewTestContext(t)
 	ctx := context.Background()
