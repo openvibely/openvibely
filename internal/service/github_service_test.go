@@ -2924,6 +2924,36 @@ func TestCollectGitHubBranchChangesPreservesModesDeletesRenamesAndOrdering(t *te
 	}
 }
 
+func TestCollectGitHubBranchChangesUsesMergeBaseAcrossLocalMainAdvancesAndFollowupSync(t *testing.T) {
+	ctx := context.Background()
+	repoDir := createGitHubBranchCollectionFixture(t, 0, 0)
+	runGitHubBranchFixtureGit(t, repoDir, "switch", "-c", "task/issue")
+	writeGitHubBranchFixtureFile(t, repoDir, "task-change.txt", []byte("task change\n"), 0o644)
+	runGitHubBranchFixtureGit(t, repoDir, "add", "task-change.txt")
+	runGitHubBranchFixtureGit(t, repoDir, "commit", "-m", "task change")
+
+	runGitHubBranchFixtureGit(t, repoDir, "switch", "main")
+	writeGitHubBranchFixtureFile(t, repoDir, "main-only.txt", []byte("main change\n"), 0o644)
+	runGitHubBranchFixtureGit(t, repoDir, "add", "main-only.txt")
+	runGitHubBranchFixtureGit(t, repoDir, "commit", "-m", "advance main")
+	runGitHubBranchFixtureGit(t, repoDir, "switch", "task/issue")
+
+	assertOnlyTaskChange := func(phase string) {
+		t.Helper()
+		changes, err := collectGitHubBranchChanges(ctx, repoDir, "main")
+		if err != nil {
+			t.Fatalf("%s collectGitHubBranchChanges: %v", phase, err)
+		}
+		if len(changes) != 1 || changes[0].Path != "task-change.txt" || changes[0].Delete || string(changes[0].Content) != "task change\n" {
+			t.Fatalf("%s changes = %#v, want only task-authored addition", phase, changes)
+		}
+	}
+
+	assertOnlyTaskChange("before follow-up sync")
+	runGitHubBranchFixtureGit(t, repoDir, "merge", "--no-edit", "main")
+	assertOnlyTaskChange("after follow-up sync")
+}
+
 func TestCollectGitHubBranchChangesLargeFixtureUsesBatchedModeLookup(t *testing.T) {
 	ctx := context.Background()
 	repoDir := createGitHubBranchCollectionFixture(t, 1000, 1000)

@@ -1188,7 +1188,19 @@ func collectGitHubBranchChangesWithGit(ctx context.Context, dir, baseBranch stri
 }
 
 func collectTrackedGitHubBranchChanges(ctx context.Context, dir, baseBranch string, runGit runGitFunc) ([]githubBranchChange, error) {
-	out, err := runGit(ctx, dir, nil, "diff", "--name-status", "-z", baseBranch)
+	// Compare from the immutable point where the task and local base diverged.
+	// Comparing their current trees directly makes changes added only to a moving
+	// local base look like task-authored deletions. Those false deletions can then
+	// be rejected when the patch is applied to an older remote base tree.
+	mergeBaseOut, err := runGit(ctx, dir, nil, "merge-base", baseBranch, "HEAD")
+	if err != nil {
+		return nil, fmt.Errorf("resolving task merge base with %q: %w: %s", baseBranch, err, strings.TrimSpace(string(mergeBaseOut)))
+	}
+	mergeBase := strings.TrimSpace(string(mergeBaseOut))
+	if mergeBase == "" {
+		return nil, fmt.Errorf("resolving task merge base with %q returned an empty revision", baseBranch)
+	}
+	out, err := runGit(ctx, dir, nil, "diff", "--name-status", "-z", mergeBase)
 	if err != nil {
 		return nil, fmt.Errorf("checking changed files: %w: %s", err, strings.TrimSpace(string(out)))
 	}
