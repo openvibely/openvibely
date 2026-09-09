@@ -2066,7 +2066,7 @@ func TestPublishBranchUsesGitHubAPIWithoutGitPush(t *testing.T) {
 	}
 }
 
-func TestPublishBranchFiltersDeletionMissingFromRemoteBaseTree(t *testing.T) {
+func TestPublishBranchFiltersDeletionMissingFromTruncatedRemoteBaseTree(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	settingsRepo := repository.NewSettingsRepo(db)
 	ctx := context.Background()
@@ -2081,7 +2081,13 @@ func TestPublishBranchFiltersDeletionMissingFromRemoteBaseTree(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(repoDir, "local-main-only.txt"), []byte("not on remote main\n"), 0o644); err != nil {
 		t.Fatalf("write local-main-only.txt: %v", err)
 	}
-	runGitHubBranchFixtureGit(t, repoDir, "add", "local-main-only.txt")
+	if err := os.MkdirAll(filepath.Join(repoDir, "nested"), 0o755); err != nil {
+		t.Fatalf("create nested directory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "nested", "remote.txt"), []byte("on remote main\n"), 0o644); err != nil {
+		t.Fatalf("write nested/remote.txt: %v", err)
+	}
+	runGitHubBranchFixtureGit(t, repoDir, "add", "local-main-only.txt", "nested/remote.txt")
 	runGitHubBranchFixtureGit(t, repoDir, "commit", "-m", "advance local main")
 	runGitHubBranchFixtureGit(t, repoDir, "switch", "-c", "task/api-publish")
 	if err := os.Remove(filepath.Join(repoDir, "local-main-only.txt")); err != nil {
@@ -2089,6 +2095,9 @@ func TestPublishBranchFiltersDeletionMissingFromRemoteBaseTree(t *testing.T) {
 	}
 	if err := os.Remove(filepath.Join(repoDir, "README.md")); err != nil {
 		t.Fatalf("remove README.md: %v", err)
+	}
+	if err := os.Remove(filepath.Join(repoDir, "nested", "remote.txt")); err != nil {
+		t.Fatalf("remove nested/remote.txt: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(repoDir, "task-change.txt"), []byte("task change\n"), 0o644); err != nil {
 		t.Fatalf("write task-change.txt: %v", err)
@@ -2109,10 +2118,16 @@ func TestPublishBranchFiltersDeletionMissingFromRemoteBaseTree(t *testing.T) {
 		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/git/commits/"+remoteBaseSHA:
 			fmt.Fprint(w, `{"tree":{"sha":"base-tree"}}`)
 		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/git/trees/base-tree":
-			if r.URL.Query().Get("recursive") != "1" {
-				t.Fatalf("expected recursive base tree request, got %s", r.URL.String())
+			if r.URL.Query().Get("recursive") == "1" {
+				fmt.Fprint(w, `{"tree":[{"path":"README.md","type":"blob"}],"truncated":true}`)
+			} else {
+				fmt.Fprint(w, `{"tree":[{"path":"README.md","type":"blob"},{"path":"nested","type":"tree","sha":"nested-tree"}],"truncated":false}`)
 			}
-			fmt.Fprint(w, `{"tree":[{"path":"README.md","type":"blob"}],"truncated":false}`)
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/git/trees/nested-tree":
+			if r.URL.Query().Has("recursive") {
+				t.Fatalf("expected non-recursive nested tree request, got %s", r.URL.String())
+			}
+			fmt.Fprint(w, `{"tree":[{"path":"remote.txt","type":"blob"}],"truncated":false}`)
 		case r.Method == http.MethodPost && r.URL.Path == "/repos/openvibely/openvibely/git/blobs":
 			fmt.Fprint(w, `{"sha":"task-blob"}`)
 		case r.Method == http.MethodPost && r.URL.Path == "/repos/openvibely/openvibely/git/trees":
@@ -2142,8 +2157,8 @@ func TestPublishBranchFiltersDeletionMissingFromRemoteBaseTree(t *testing.T) {
 		t.Fatalf("PublishBranch returned error: %v", err)
 	}
 	entries := decodeTreePayload(t, treePayload)
-	if len(entries) != 2 || entries[0]["path"] != "README.md" || entries[0]["sha"] != nil || entries[1]["path"] != "task-change.txt" {
-		t.Fatalf("expected remote README deletion and task-change.txt addition only, got %s", treePayload)
+	if len(entries) != 3 || entries[0]["path"] != "README.md" || entries[0]["sha"] != nil || entries[1]["path"] != "nested/remote.txt" || entries[1]["sha"] != nil || entries[2]["path"] != "task-change.txt" {
+		t.Fatalf("expected remote deletions and task-change.txt addition only, got %s", treePayload)
 	}
 }
 
