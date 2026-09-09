@@ -281,6 +281,8 @@ window.addEventListener('DOMContentLoaded', function() {
 		    var rollbackAuthoritativeSwapped = false;
 		    var postMoveStaleProtected = false;
 		    var postMoveStaleDiagnostic = '';
+		    var successReconciliationAuthoritative = false;
+		    var successReconciliationDiagnostic = '';
 		    var delayedSuccessReconciliation = null;
 		    var originalKanbanAjax = htmx.ajax.bind(htmx);
 		    htmx.ajax = function(method, path, options) {
@@ -294,6 +296,14 @@ window.addEventListener('DOMContentLoaded', function() {
 		    };
 		    document.addEventListener('htmx:beforeSwap', function(event) {
 		      var detail = event.detail || {}, requestConfig = detail.requestConfig || {};
+		      if (currentMovePhase === 'success' && requestConfig.path.indexOf('refresh_source=move') >= 0) {
+		        var authoritativeResponse = new DOMParser().parseFromString(detail.serverResponse || '', 'text/html');
+		        var authoritativeCard = authoritativeResponse.getElementById('task-active-move');
+		        var authoritativeZone = authoritativeCard && authoritativeCard.closest('.category-drop-zone[data-category="completed"]');
+		        var authoritativeIDs = authoritativeZone && Array.from(authoritativeZone.querySelectorAll(':scope > [data-task-id]')).map(function(card) { return card.getAttribute('data-task-id'); });
+		        successReconciliationAuthoritative = !!(authoritativeCard && authoritativeIDs && authoritativeIDs[0] === 'active-move' && !authoritativeCard.hasAttribute('data-kanban-move-generation'));
+		        successReconciliationDiagnostic = 'order=' + (authoritativeIDs && authoritativeIDs.join(',')) + ', generation=' + (authoritativeCard && authoritativeCard.getAttribute('data-kanban-move-generation'));
+		      }
 		      if (requestConfig.path !== '/post-move-stale-board') return;
 		      var response = new DOMParser().parseFromString(detail.serverResponse || '', 'text/html');
 		      var responseCard = response.getElementById('task-active-move');
@@ -361,6 +371,7 @@ window.addEventListener('DOMContentLoaded', function() {
 	        await waitFor(function() { var moved = document.getElementById('task-' + id); return cardIn('completed', id) && moved && !moved.hasAttribute('data-kanban-move-generation') && !(window.hasPendingKanbanMoves && window.hasPendingKanbanMoves()); }, phase + ' authoritative success');
 		        observing = false;
 		        if (!postMoveStaleProtected) fail('post-move pre-commit stale board response was not protected before paint: ' + postMoveStaleDiagnostic);
+		        if (!successReconciliationAuthoritative) fail('matching reconciliation did not preserve authoritative ordering and attributes: ' + successReconciliationDiagnostic);
 		        if (sourceFlash) fail(phase + ' flashed back into its source column during successful reconciliation');
 		      } else {
 	        await waitFor(function() { var moved = document.getElementById('task-' + id); return rollbackAuthoritativeSwapped && moved && moved.closest('.task-drop-zone[data-category="active"][data-status="pending"]') && !(window.hasPendingKanbanMoves && window.hasPendingKanbanMoves()); }, phase + ' authoritative rollback');

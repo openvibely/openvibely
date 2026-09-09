@@ -3293,10 +3293,11 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						return root.querySelector('.category-drop-zone[data-category="' + escapedCategory + '"]:not([data-drop-type="status"])');
 					}
 
-					function applyPendingKanbanMoves(root) {
+					function applyPendingKanbanMoves(root, excludedGeneration) {
 						if (!root) return;
 						const touchedZones = new Set();
 						pendingKanbanMoves.forEach(function(move, taskID) {
+							if (excludedGeneration && move.generation === excludedGeneration) return;
 							const card = root.querySelector('#task-' + (window.CSS && CSS.escape ? CSS.escape(taskID) : taskID));
 							const zone = kanbanMoveZone(root, move);
 							if (!card || !zone) return;
@@ -3313,12 +3314,12 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						});
 					}
 
-					function applyPendingKanbanMovesToResponse(detail) {
+					function applyPendingKanbanMovesToResponse(detail, excludedGeneration) {
 						if (!detail || typeof detail.serverResponse !== 'string' || pendingKanbanMoves.size === 0) return;
 						const documentFragment = new DOMParser().parseFromString(detail.serverResponse, 'text/html');
 						const responseBoard = documentFragment.getElementById('kanban-board');
 						if (!responseBoard) return;
-						applyPendingKanbanMoves(responseBoard);
+						applyPendingKanbanMoves(responseBoard, excludedGeneration);
 						detail.serverResponse = responseBoard.outerHTML;
 					}
 
@@ -3848,7 +3849,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 								event.detail.shouldSwap = false;
 								return;
 							}
-							applyPendingKanbanMovesToResponse(event.detail);
+							applyPendingKanbanMovesToResponse(event.detail, reconciliationGeneration);
 							closeKanbanSubmenus(null, null);
 							if (!savedKanbanInteraction) snapshotKanbanInteraction(event.detail.target);
 							savedScrollPositions.clear();

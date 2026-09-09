@@ -34,6 +34,8 @@ func TestBaseKanbanMoveTransactionsPreventVisibleRollback(t *testing.T) {
 		"__openVibelyKanbanReconciliationAccepted",
 		"retryKanbanReconciliation",
 		"clearKanbanMoveProjection",
+		"if (excludedGeneration && move.generation === excludedGeneration) return",
+		"applyPendingKanbanMovesToResponse(event.detail, reconciliationGeneration)",
 		"if (!successful) clearKanbanMoveProjection(generation, transaction.taskIDs)",
 		"if (reconciliation) clearKanbanMoveProjection(generation, reconciliation.taskIDs)",
 		"htmx:beforeSwap",
