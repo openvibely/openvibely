@@ -782,21 +782,27 @@ func (s *GitHubService) PublishBranch(ctx context.Context, repo *GitHubRepoRef, 
 		}
 	}
 	if len(changes) == 0 {
-		if remoteBranchSHA != "" {
+		if remoteBranchSHA == remoteBaseSHA {
 			return &GitHubPublishBranchResult{HeadSHA: remoteBranchSHA}, nil
 		}
-		publishedSHA := remoteBaseSHA
-		if err := s.publishExistingLocalCommitWithToken(ctx, token, repo, branch, remoteBaseSHA, false); err != nil {
-			if !isGitHubRefAlreadyExistsError(err) {
-				return nil, err
+		if remoteBranchSHA == "" {
+			if err := s.publishExistingLocalCommitWithToken(ctx, token, repo, branch, remoteBaseSHA, false); err != nil {
+				if !isGitHubRefAlreadyExistsError(err) && !isGitHubNonFastForwardError(err) {
+					return nil, err
+				}
+				concurrentSHA, refErr := s.githubBranchCommitSHA(ctx, token, repo, branch)
+				if refErr != nil {
+					return nil, fmt.Errorf("confirming concurrently created remote publish branch %q: %w", branch, refErr)
+				}
+				remoteBranchSHA = concurrentSHA
+				parentSHA = concurrentSHA
+			} else {
+				return &GitHubPublishBranchResult{HeadSHA: remoteBaseSHA}, nil
 			}
-			concurrentSHA, refErr := s.githubBranchCommitSHA(ctx, token, repo, branch)
-			if refErr != nil {
-				return nil, fmt.Errorf("confirming concurrently created remote publish branch %q: %w", branch, refErr)
+			if remoteBranchSHA == remoteBaseSHA {
+				return &GitHubPublishBranchResult{HeadSHA: remoteBranchSHA}, nil
 			}
-			publishedSHA = concurrentSHA
 		}
-		return &GitHubPublishBranchResult{HeadSHA: publishedSHA}, nil
 	}
 	if baseTreeSHA == "" {
 		baseTreeSHA, err = s.githubCommitTreeSHA(ctx, token, repo, remoteBaseSHA)
@@ -804,9 +810,12 @@ func (s *GitHubService) PublishBranch(ctx context.Context, repo *GitHubRepoRef, 
 			return nil, err
 		}
 	}
-	treeSHA, err := s.createGitHubTree(ctx, token, repo, baseTreeSHA, changes)
-	if err != nil {
-		return nil, err
+	treeSHA := baseTreeSHA
+	if len(changes) > 0 {
+		treeSHA, err = s.createGitHubTree(ctx, token, repo, baseTreeSHA, changes)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if remoteBranchSHA != "" {
 		remoteBranchTreeSHA, treeErr := s.githubCommitTreeSHA(ctx, token, repo, remoteBranchSHA)
