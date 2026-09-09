@@ -15,7 +15,7 @@ const (
 type UpcomingTask struct {
 	Task      Task
 	AgentName string
-	NextRun   *time.Time // From schedule, nil if active-pending
+	NextRun   *time.Time // From schedule, nil if active waiting work
 	Schedule  *Schedule
 }
 
@@ -32,6 +32,7 @@ type TaskSummary struct {
 
 	// Counts by status
 	PendingCount   int
+	QueuedCount    int
 	RunningCount   int
 	CompletedCount int
 	FailedCount    int
@@ -52,7 +53,9 @@ type Upcoming struct {
 	ProjectID      string
 	GeneratedAt    time.Time
 	RunningTasks   []UpcomingTask // Currently executing
+	WaitingTasks   []UpcomingTask // Active category, pending or queued status in priority/display order
 	PendingTasks   []UpcomingTask // Active category, pending status
+	QueuedTasks    []UpcomingTask // Active category, queued status
 	ScheduledTasks []UpcomingTask // Scheduled with upcoming next_run
 	TaskSummary    *TaskSummary   // High-level task metrics
 	AISummary      string         // AI-generated 10,000 foot view
