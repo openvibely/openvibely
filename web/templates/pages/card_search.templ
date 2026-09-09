@@ -43,8 +43,9 @@ type CardListToolbarConfig struct {
 	SortOptions   []CardListOption
 	Preserved     []CardListQueryValue
 	EntityType    string
-	BulkDeleteURL string
-	IdentityKind  string
+	BulkDeleteURL         string
+	BulkDeleteDescription string
+	IdentityKind          string
 	CanSelect     bool
 }
 
@@ -127,6 +128,7 @@ func collectionToolbarConfig(pageKey, projectID, search string) CardListToolbarC
 		config.Sort, config.SortOptions = "newest", cardListOptions("newest", "Newest", "oldest", "Oldest", "severity", "Severity", "unread_first", "Unread first")
 	case "automations":
 		config.Action, config.Placeholder, config.EntityType, config.BulkDeleteURL = "/automations", "Search automations...", "automations", "/automations/bulk"
+		config.BulkDeleteDescription = "Automation-owned trigger tasks and schedules will be deleted. Implementation, outcome, issue-created, and other independent tasks remain. This cannot be undone."
 		config.Filters = []CardListFilter{
 			{Key: "lifecycle_state", Label: "Lifecycle", Options: cardListOptions("active", "Active", "paused", "Paused", "draft", "Draft", "archived", "Archived")},
 			{Key: "health_state", Label: "Health", Options: cardListOptions("unknown", "Unknown", "healthy", "Healthy", "degraded", "Degraded", "unhealthy", "Unhealthy")},
@@ -304,7 +306,11 @@ templ CardListToolbar(config CardListToolbarConfig) {
 			<dialog class="modal" data-card-bulk-confirm aria-labelledby={ config.PageKey + "-bulk-title" } aria-describedby={ config.PageKey + "-bulk-description" }>
 				<div class="modal-box">
 					<h3 id={ config.PageKey + "-bulk-title" } class="text-lg font-bold text-error" data-card-bulk-confirm-title>Delete selected?</h3>
+					if config.BulkDeleteDescription != "" {
+					<p id={ config.PageKey + "-bulk-description" } class="py-4">{ config.BulkDeleteDescription }</p>
+				} else {
 					<p id={ config.PageKey + "-bulk-description" } class="py-4">This action cannot be undone.</p>
+				}
 					<p class="hidden text-sm text-error" data-card-bulk-error role="alert"></p>
 					<div class="modal-action"><button type="button" class="btn" data-card-bulk-confirm-cancel autofocus>Cancel</button><button type="button" class="btn btn-error" data-card-bulk-confirm-delete>Delete selected</button></div>
 				</div>
