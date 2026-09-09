@@ -3262,12 +3262,20 @@ func TestReplaceBranchHeadUsesAtomicForceWithLease(t *testing.T) {
 	}
 
 	expected := strings.Repeat("a", 40)
-	if err := svc.ReplaceBranchHead(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubReplaceBranchHeadRequest{
+	localHead, err := defaultRunGit(ctx, repoDir, nil, "rev-parse", "HEAD^{commit}")
+	if err != nil {
+		t.Fatalf("resolve local replacement head: %v", err)
+	}
+	headSHA, err := svc.ReplaceBranchHead(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubReplaceBranchHeadRequest{
 		WorktreePath: repoDir,
 		Branch:       "task/clean-history",
 		ExpectedHead: expected,
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatalf("ReplaceBranchHead returned error: %v", err)
+	}
+	if headSHA != strings.TrimSpace(string(localHead)) {
+		t.Fatalf("ReplaceBranchHead returned head SHA %q, want local replacement head %q", headSHA, strings.TrimSpace(string(localHead)))
 	}
 
 	wantArgs := []string{
@@ -3303,7 +3311,7 @@ func TestReplaceBranchHeadRefusesDirtyWorktree(t *testing.T) {
 		return defaultRunGit(ctx, dir, extraEnv, args...)
 	}
 
-	err := svc.ReplaceBranchHead(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubReplaceBranchHeadRequest{
+	_, err := svc.ReplaceBranchHead(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubReplaceBranchHeadRequest{
 		WorktreePath: repoDir,
 		Branch:       "task/clean-history",
 		ExpectedHead: strings.Repeat("a", 40),
@@ -3324,7 +3332,7 @@ func TestReplaceBranchHeadRefusesMismatchedWorktreeBranch(t *testing.T) {
 		return defaultRunGit(ctx, dir, extraEnv, args...)
 	}
 
-	err := svc.ReplaceBranchHead(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubReplaceBranchHeadRequest{
+	_, err := svc.ReplaceBranchHead(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubReplaceBranchHeadRequest{
 		WorktreePath: repoDir,
 		Branch:       "task/clean-history",
 		ExpectedHead: strings.Repeat("a", 40),
@@ -3363,7 +3371,7 @@ func TestReplaceBranchHeadDoesNotBypassFailedLease(t *testing.T) {
 		return defaultRunGit(ctx, dir, extraEnv, args...)
 	}
 
-	err := svc.ReplaceBranchHead(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubReplaceBranchHeadRequest{
+	_, err := svc.ReplaceBranchHead(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubReplaceBranchHeadRequest{
 		WorktreePath: repoDir,
 		Branch:       "task/clean-history",
 		ExpectedHead: strings.Repeat("a", 40),
