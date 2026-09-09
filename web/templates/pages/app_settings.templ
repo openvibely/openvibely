@@ -146,33 +146,14 @@ func BuildPersonalityListCards(personality string, customPersonalities []models.
 		filtered = append(filtered, card)
 	}
 	sort.SliceStable(filtered, func(i, j int) bool {
-		if state.Sort == "name_asc" || state.Sort == "name_desc" {
-			left, right := strings.ToLower(filtered[i].Name), strings.ToLower(filtered[j].Name)
-			if left == right {
-				left, right = filtered[i].Key, filtered[j].Key
-			}
-			if state.Sort == "name_desc" {
-				return left > right
-			}
-			return left < right
+		left, right := strings.ToLower(filtered[i].Name), strings.ToLower(filtered[j].Name)
+		if left == right {
+			left, right = filtered[i].Key, filtered[j].Key
 		}
-		rank := func(card PersonalityListCard) int {
-			if card.IsActive {
-				return 0
-			}
-			if card.Base {
-				return 1
-			}
-			if card.Preset != nil {
-				return 2
-			}
-			return 3
+		if state.Sort == "name_desc" {
+			return left > right
 		}
-		left, right := rank(filtered[i]), rank(filtered[j])
-		if left != right {
-			return left < right
-		}
-		return filtered[i].Key < filtered[j].Key
+		return left < right
 	})
 	return filtered
 }
@@ -188,7 +169,7 @@ func personalityCardListState(state PersonalityListState) CardListState {
 
 func personalityToolbarConfig(state PersonalityListState) CardListToolbarConfig {
 	config := collectionToolbarConfigWithState("personality", personalityCardListState(state))
-	if config.Sort == "" { config.Sort = "curated" }
+	if config.Sort == "" { config.Sort = "name_asc" }
 	return config
 }
 

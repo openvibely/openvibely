@@ -72,7 +72,7 @@ func parseCardPageRequest(c echo.Context) cardPageRequest {
 		IsFragment:        isFragment,
 		PersonalityActive: optionalBoolQuery(c, "active"),
 		PersonalityKind:   allowlistedQuery(c, "kind", "", "base", "built_in", "custom", "override"),
-		PersonalitySort:   allowlistedQuery(c, "sort", "curated", "curated", "name_asc", "name_desc"),
+		PersonalitySort:   allowlistedQuery(c, "sort", "name_asc", "name_asc", "name_desc"),
 	}
 }
 

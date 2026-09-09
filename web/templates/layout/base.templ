@@ -436,7 +436,14 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				dialog.modal #toast-container {
 					z-index: 1302;
 				}
+				.card-sort-control {
+					width: 11rem;
+					max-width: 100%;
+				}
 				@media (max-width: 640px) {
+					.card-sort-control {
+						width: min(11rem, 100%);
+					}
 					#toast-container {
 						top: 8px;
 						right: 8px;
@@ -4733,6 +4740,10 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							state.signature = signature;
 
 							var form = toolbar.querySelector('[data-card-query-form]');
+							var sortControl = toolbar.querySelector('[data-card-sort]');
+							if (sortControl) sortControl.addEventListener('change', function() {
+								root.setAttribute('data-card-sort-navigation', 'true');
+							});
 							var filterButton = toolbar.querySelector('[data-card-filters-button]');
 							if (filterButton) filterButton.addEventListener('click', function(event) {
 								event.stopPropagation();
@@ -4742,6 +4753,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							});
 							if (form) form.addEventListener('submit', function(event) {
 								event.preventDefault();
+								if (sortControl && document.activeElement === sortControl) root.setAttribute('data-card-sort-navigation', 'true');
 								var target;
 								try { target = new URL(window.location.href); } catch (_) { return; }
 								form.querySelectorAll('[name]').forEach(function(control) {
@@ -5232,11 +5244,15 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 									focusText: '',
 									focusAriaLabel: '',
 									activeElement: null,
-									anchorKey: null,
-									anchorTop: null
-								};
-								var active = document.activeElement;
-								snapshot.activeElement = active;
+								anchorKey: null,
+								anchorTop: null,
+								sortTransition: state.root.getAttribute('data-card-sort-navigation') === 'true',
+								focusControl: ''
+							};
+							var active = document.activeElement;
+							if (active === state.root.querySelector('[data-card-sort]')) snapshot.focusControl = 'sort';
+							else if (active === state.root.querySelector('input[data-card-search]')) snapshot.focusControl = 'search';
+							snapshot.activeElement = active;
 								var keyAttribute = state.root.getAttribute('data-card-pagination-key') || '';
 								var cards = replacementCardsFor(state.list, state.root);
 								for (var cardIndex = 0; cardIndex < cards.length; cardIndex++) {
@@ -5316,7 +5332,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							var scrollTarget = snapshot.scrollTargetIsRoot ? state.root : snapshot.scrollTarget;
 							if (scrollTarget === window) window.scrollTo(0, snapshot.scrollTop);
 							else if (scrollTarget) scrollTarget.scrollTop = snapshot.scrollTop;
-							var anchor = findCardByKey(state, snapshot.anchorKey);
+							var anchor = snapshot.sortTransition ? null : findCardByKey(state, snapshot.anchorKey);
 							if (anchor && snapshot.anchorTop !== null) {
 								var delta = anchor.getBoundingClientRect().top - snapshot.anchorTop;
 								if (Math.abs(delta) > 0.5) {
@@ -5324,8 +5340,16 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 									else if (scrollTarget) scrollTarget.scrollTop += delta;
 								}
 							}
-							var focusTarget = snapshot.restoreFocus !== false ? replacementFocusTarget(state, snapshot) : null;
-							if (focusTarget && typeof focusTarget.focus === 'function') focusTarget.focus({preventScroll: true});
+							var focusTarget = null;
+							if (snapshot.restoreFocus !== false && snapshot.focusControl === 'sort') focusTarget = state.root.querySelector('[data-card-sort]');
+							else if (snapshot.restoreFocus !== false && snapshot.focusControl === 'search') focusTarget = state.root.querySelector('input[data-card-search]');
+							else if (snapshot.restoreFocus !== false) focusTarget = replacementFocusTarget(state, snapshot);
+							if (focusTarget && typeof focusTarget.focus === 'function') {
+								if (snapshot.focusControl === 'sort' || snapshot.focusControl === 'search') setTimeout(function() {
+									if (focusTarget.isConnected && !focusTarget.disabled) focusTarget.focus({preventScroll: true});
+								}, 0);
+								else if (visibleEnabledFocusTarget(focusTarget)) focusTarget.focus({preventScroll: true});
+							}
 						}
 
 						function resetSearch(state, term) {

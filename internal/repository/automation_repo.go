@@ -174,7 +174,7 @@ func (r *AutomationRepo) ListPortfolioCardsPageFiltered(ctx context.Context, pro
 	case "name_desc":
 		query += ` ORDER BY a.name DESC, a.id DESC`
 	default:
-		query += ` ORDER BY a.updated_at DESC, a.id ASC`
+		query += ` ORDER BY a.name ASC, a.id ASC`
 	}
 	query += ` LIMIT ? OFFSET ?`
 	args = append(args, limit, offset)

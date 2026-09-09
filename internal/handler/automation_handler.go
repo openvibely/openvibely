@@ -83,7 +83,7 @@ func automationCardListFilter(c echo.Context, page cardPageRequest) repository.A
 		HealthState:    allowlistedQuery(c, "health_state", "", "unknown", "healthy", "degraded", "unhealthy"),
 		AutomationType: allowlistedQuery(c, "automation_type", "", "custom", "native_sdlc", "github_sdlc", "vision_driver", "scheduled"),
 		Adapter:        allowlistedQuery(c, "adapter", "", "custom", "native_sdlc", "github_sdlc", "vision_driver"),
-		Sort:           allowlistedQuery(c, "sort", "updated_desc", "updated_desc", "updated_asc", "name_asc", "name_desc"),
+		Sort:           allowlistedQuery(c, "sort", "name_asc", "name_asc", "name_desc", "updated_desc", "updated_asc"),
 	}
 }
 
