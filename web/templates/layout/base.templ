@@ -2647,7 +2647,6 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					let latestAcceptedKanbanMoveGeneration = 0;
 					let kanbanBoardRequestGeneration = 0;
 					let latestAcceptedKanbanBoardRequestGeneration = 0;
-					let latestAcceptedKanbanReconciliationGeneration = 0;
 
 					window.hasPendingKanbanMoves = function() { return pendingKanbanMoves.size > 0 || pendingKanbanReconciliations.size > 0; };
 
@@ -3293,11 +3292,11 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						return root.querySelector('.category-drop-zone[data-category="' + escapedCategory + '"]:not([data-drop-type="status"])');
 					}
 
-					function applyPendingKanbanMoves(root, excludedGeneration) {
+					function applyPendingKanbanMoves(root, excludedGenerations) {
 						if (!root) return;
 						const touchedZones = new Set();
 						pendingKanbanMoves.forEach(function(move, taskID) {
-							if (excludedGeneration && move.generation === excludedGeneration) return;
+							if (excludedGenerations && excludedGenerations.has(move.generation)) return;
 							const card = root.querySelector('#task-' + (window.CSS && CSS.escape ? CSS.escape(taskID) : taskID));
 							const zone = kanbanMoveZone(root, move);
 							if (!card || !zone) return;
@@ -3314,12 +3313,12 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						});
 					}
 
-					function applyPendingKanbanMovesToResponse(detail, excludedGeneration) {
+					function applyPendingKanbanMovesToResponse(detail, excludedGenerations) {
 						if (!detail || typeof detail.serverResponse !== 'string' || pendingKanbanMoves.size === 0) return;
 						const documentFragment = new DOMParser().parseFromString(detail.serverResponse, 'text/html');
 						const responseBoard = documentFragment.getElementById('kanban-board');
 						if (!responseBoard) return;
-						applyPendingKanbanMoves(responseBoard, excludedGeneration);
+						applyPendingKanbanMoves(responseBoard, excludedGenerations);
 						detail.serverResponse = responseBoard.outerHTML;
 					}
 
@@ -3340,9 +3339,11 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							return;
 						}
 						reconciliation.inFlight = true;
+						const coveredGenerations = Array.from(pendingKanbanReconciliations.keys()).sort(function(a, b) { return a - b; });
 						const source = document.createElement('span');
 						source.hidden = true;
 						source.setAttribute('data-kanban-reconciliation-generation', String(generation));
+						source.setAttribute('data-kanban-reconciliation-generations', coveredGenerations.join(','));
 						document.body.appendChild(source);
 						htmx.ajax('GET', '/tasks?project_id=' + encodeURIComponent(projectID) + '&refresh_source=move', {
 							source: source,
@@ -3803,10 +3804,14 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					}
 				});
 
+					function kanbanReconciliationGenerations(source) {
+						const value = source && source.getAttribute('data-kanban-reconciliation-generations') || '';
+						return value.split(',').map(function(item) { return parseInt(item, 10); }).filter(function(generation) { return generation > 0; });
+					}
+
 					// Retain compatibility with request paths that do not emit configRequest.
 					document.addEventListener('htmx:beforeRequest', function(event) {
-						const source = event.detail && event.detail.elt;
-						const target = event.detail && event.detail.target;
+						const source = event.detail && event.detail.elt;						const target = event.detail && event.detail.target;
 						const xhr = event.detail && event.detail.xhr;
 						if (target && target.id === 'kanban-board' && xhr) {
 							xhr.__openVibelyKanbanRequestGeneration = ++kanbanBoardRequestGeneration;
@@ -3814,7 +3819,10 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							const moveGeneration = source && parseInt(source.getAttribute('data-kanban-move-generation') || '', 10);
 							const reconciliationGeneration = source && parseInt(source.getAttribute('data-kanban-reconciliation-generation') || '', 10);
 							if (moveGeneration) xhr.__openVibelyKanbanMoveGeneration = moveGeneration;
-							if (reconciliationGeneration) xhr.__openVibelyKanbanReconciliationGeneration = reconciliationGeneration;
+							if (reconciliationGeneration) {
+								xhr.__openVibelyKanbanReconciliationGeneration = reconciliationGeneration;
+								xhr.__openVibelyKanbanReconciliationGenerations = kanbanReconciliationGenerations(source);
+							}
 						}
 						const sourceDropdown = kanbanDropdownForTarget(source);
 						if (sourceDropdown) closeKanbanMenu(sourceDropdown, false);
@@ -3832,7 +3840,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							const xhr = event.detail && event.detail.xhr;
 							const responseRequestGeneration = xhr && xhr.__openVibelyKanbanRequestGeneration || 0;
 							const responseMoveGeneration = xhr && xhr.__openVibelyKanbanMoveGeneration || 0;
-							const reconciliationGeneration = xhr && xhr.__openVibelyKanbanReconciliationGeneration || 0;
+							const reconciliationGenerations = xhr && xhr.__openVibelyKanbanReconciliationGenerations || [];
 							if (responseRequestGeneration && responseRequestGeneration < latestAcceptedKanbanBoardRequestGeneration) {
 								event.detail.shouldSwap = false;
 								return;
@@ -3841,15 +3849,11 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 								event.detail.shouldSwap = false;
 								return;
 							}
-							if (reconciliationGeneration && reconciliationGeneration < latestAcceptedKanbanReconciliationGeneration) {
-								event.detail.shouldSwap = false;
-								return;
-							}
 							if (!responseMoveGeneration && xhr && xhr.__openVibelyKanbanMoveGenerationAtStart < kanbanMoveGeneration) {
 								event.detail.shouldSwap = false;
 								return;
 							}
-							applyPendingKanbanMovesToResponse(event.detail, reconciliationGeneration);
+							applyPendingKanbanMovesToResponse(event.detail, new Set(reconciliationGenerations));
 							closeKanbanSubmenus(null, null);
 							if (!savedKanbanInteraction) snapshotKanbanInteraction(event.detail.target);
 							savedScrollPositions.clear();
@@ -3879,7 +3883,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							if (!reconciliation) return;
 							reconciliation.inFlight = false;
 							const accepted = !!(detail.successful && xhr && xhr.status >= 200 && xhr.status < 300 && xhr.__openVibelyKanbanReconciliationAccepted);
-							if (accepted || reconciliationGeneration < latestAcceptedKanbanReconciliationGeneration) {
+							if (accepted) {
 								finishKanbanReconciliation(reconciliationGeneration);
 							} else {
 								retryKanbanReconciliation(reconciliationGeneration);
@@ -3900,11 +3904,12 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							const responseRequestGeneration = xhr && xhr.__openVibelyKanbanRequestGeneration || 0;
 							const responseMoveGeneration = xhr && xhr.__openVibelyKanbanMoveGeneration || 0;
 							const reconciliationGeneration = xhr && xhr.__openVibelyKanbanReconciliationGeneration || 0;
+							const reconciliationGenerations = xhr && xhr.__openVibelyKanbanReconciliationGenerations || [];
 							if (responseRequestGeneration) latestAcceptedKanbanBoardRequestGeneration = Math.max(latestAcceptedKanbanBoardRequestGeneration, responseRequestGeneration);
 							if (responseMoveGeneration) latestAcceptedKanbanMoveGeneration = Math.max(latestAcceptedKanbanMoveGeneration, responseMoveGeneration);
 							if (reconciliationGeneration) {
-								latestAcceptedKanbanReconciliationGeneration = Math.max(latestAcceptedKanbanReconciliationGeneration, reconciliationGeneration);
 								xhr.__openVibelyKanbanReconciliationAccepted = true;
+								reconciliationGenerations.forEach(finishKanbanReconciliation);
 							}
 							const liveBoard = document.getElementById('kanban-board');
 						if (liveBoard) restoreKanbanInteraction(liveBoard);
