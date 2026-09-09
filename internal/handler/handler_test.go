@@ -3407,6 +3407,33 @@ func TestHandler_UpdateTask_DetailCategoryTransitionsRefreshCompletedAt(t *testi
 	assert.Equal(t, task.ID, completedTasks[0].ID, "recompleted task should sort ahead of older completions")
 }
 
+func TestHandler_UpdateTask_AppendsMetadataMoveToActiveOrder(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	ctx := context.Background()
+	existing := createTask(t, h, "default", "Existing Active Tail", func(task *models.Task) {
+		task.Category = models.CategoryActive
+		task.Status = models.StatusPending
+	})
+	moving := createTask(t, h, "default", "Metadata Move To Active", func(task *models.Task) {
+		task.Category = models.CategoryBacklog
+		task.Status = models.StatusPending
+	})
+
+	form := url.Values{}
+	form.Set("title", moving.Title)
+	form.Set("category", string(models.CategoryActive))
+	form.Set("priority", strconv.Itoa(moving.Priority))
+	form.Set("prompt", moving.Prompt)
+	rec := htmxPut(e, "/tasks/"+moving.ID, form)
+	assertCode(t, rec, http.StatusOK)
+
+	updated, err := h.taskSvc.GetByID(ctx, moving.ID)
+	require.NoError(t, err)
+	require.NotNil(t, updated)
+	assert.Equal(t, models.CategoryActive, updated.Category)
+	assert.Greater(t, updated.DisplayOrder, existing.DisplayOrder)
+}
+
 func TestHandler_UpdateTask_NonRunningOnly(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	ctx := context.Background()

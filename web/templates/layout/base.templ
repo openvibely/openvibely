@@ -3400,9 +3400,26 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						forceKanbanAuthoritativeRefresh(generation);
 					}
 
+					function orderKanbanTaskIDs(taskIDs, root) {
+						const seen = new Set();
+						const ids = taskIDs.filter(function(taskID) {
+							if (!taskID || seen.has(taskID)) return false;
+							seen.add(taskID);
+							return true;
+						});
+						if (!root) return ids;
+						return ids.sort(function(a, b) {
+							const aCard = root.querySelector('#task-' + (window.CSS && CSS.escape ? CSS.escape(a) : a));
+							const bCard = root.querySelector('#task-' + (window.CSS && CSS.escape ? CSS.escape(b) : b));
+							if (!aCard || !bCard || aCard === bCard) return 0;
+							return aCard.compareDocumentPosition(bCard) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1;
+						});
+					}
+
 					function beginKanbanMove(taskIDs, destination, method, path, values, failureMessage) {
-						const ids = taskIDs.filter(function(taskID) { return !!taskID; });
+						const ids = orderKanbanTaskIDs(taskIDs, document.getElementById('kanban-board'));
 						if (!ids.length || ids.some(function(taskID) { return pendingKanbanMoves.has(taskID); })) return false;
+						if (values && Object.prototype.hasOwnProperty.call(values, 'task_ids')) values.task_ids = ids.join(',');
 						const generation = ++kanbanMoveGeneration;
 						const transaction = {generation: generation, taskIDs: ids.slice(), path: path, failureMessage: failureMessage};
 						kanbanMoveTransactions.set(generation, transaction);

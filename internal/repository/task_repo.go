@@ -574,86 +574,125 @@ func (r *TaskRepo) Update(ctx context.Context, t *models.Task) error {
 }
 
 func (r *TaskRepo) UpdateCategory(ctx context.Context, id string, category models.TaskCategory) error {
-	// Get the task first to know the old category and project ID
-	task, err := r.GetByID(ctx, id)
+	var task *models.Task
+	err := withImmediateTx(ctx, r.db, func(exec sqlExecutor) error {
+		var err error
+		task, err = getTaskWithExecutor(ctx, exec, `SELECT `+taskSelectColumns+` FROM tasks WHERE id = ?`, id)
+		if err != nil {
+			return fmt.Errorf("getting task before category update: %w", err)
+		}
+		if task == nil {
+			return fmt.Errorf("task not found: %s", id)
+		}
+		if task.Category == category {
+			return nil
+		}
+
+		var displayOrder int
+		if err := exec.QueryRowContext(ctx,
+			`SELECT COALESCE(MAX(display_order), -1) + 1 FROM tasks WHERE project_id = ? AND category = ?`,
+			task.ProjectID, category).Scan(&displayOrder); err != nil {
+			return fmt.Errorf("getting next display_order: %w", err)
+		}
+		if _, err := exec.ExecContext(ctx,
+			`UPDATE tasks SET category = ?, display_order = ?, updated_at = datetime('now'), completed_at = CASE WHEN ? = 'completed' THEN datetime('now') ELSE NULL END WHERE id = ?`,
+			category, displayOrder, string(category), id); err != nil {
+			return fmt.Errorf("updating task category: %w", err)
+		}
+		return nil
+	})
 	if err != nil {
-		return fmt.Errorf("getting task before category update: %w", err)
-	}
-	if task == nil {
-		return fmt.Errorf("task not found: %s", id)
+		return err
 	}
 
-	oldCategory := task.Category
-
-	// Get the max display_order in the new category and add 1
-	var maxOrder sql.NullInt64
-	err = r.db.QueryRowContext(ctx,
-		`SELECT MAX(display_order) FROM tasks WHERE project_id = ? AND category = ?`,
-		task.ProjectID, category).Scan(&maxOrder)
-	if err != nil && err != sql.ErrNoRows {
-		return fmt.Errorf("getting max display_order: %w", err)
-	}
-
-	displayOrder := 0
-	if maxOrder.Valid {
-		displayOrder = int(maxOrder.Int64) + 1
-	}
-
-	_, err = execBoundSQLite(ctx, r.db,
-		`UPDATE tasks SET category = ?, display_order = ?, updated_at = datetime('now'), completed_at = CASE WHEN ? = 'completed' THEN datetime('now') ELSE NULL END WHERE id = ?`,
-		category, displayOrder, string(category), id)
-	if err != nil {
-		return fmt.Errorf("updating task category: %w", err)
-	}
-
-	// Publish event if broadcaster is available
-	if r.broadcaster != nil && oldCategory != category {
+	if r.broadcaster != nil && task.Category != category {
 		r.broadcaster.Publish(events.TaskEvent{
 			Type:        events.TaskCategoryChanged,
 			TaskID:      id,
 			TaskName:    task.Title,
 			ProjectID:   task.ProjectID,
 			Category:    string(category),
-			OldCategory: string(oldCategory),
+			OldCategory: string(task.Category),
 		})
 	}
+	return nil
+}
 
+func (r *TaskRepo) RestoreBoardState(ctx context.Context, task models.Task) error {
+	_, err := execBoundSQLite(ctx, r.db,
+		`UPDATE tasks SET category = ?, status = ?, display_order = ?, completed_at = ?, updated_at = datetime('now') WHERE id = ?`,
+		task.Category, task.Status, task.DisplayOrder, task.CompletedAt, task.ID)
+	if err != nil {
+		return fmt.Errorf("restoring task board state: %w", err)
+	}
+	if r.broadcaster != nil {
+		r.broadcaster.Publish(events.TaskEvent{
+			Type:      events.TaskBoardUpdated,
+			TaskID:    task.ID,
+			TaskName:  task.Title,
+			ProjectID: task.ProjectID,
+			Category:  string(task.Category),
+			Status:    string(task.Status),
+		})
+	}
 	return nil
 }
 
 func (r *TaskRepo) UpdateStatus(ctx context.Context, id string, status models.TaskStatus) error {
-	// Get the task first to know the old status and project ID
-	task, err := r.GetByID(ctx, id)
+	var task *models.Task
+	err := withImmediateTx(ctx, r.db, func(exec sqlExecutor) error {
+		var err error
+		task, err = getTaskWithExecutor(ctx, exec, `SELECT `+taskSelectColumns+` FROM tasks WHERE id = ?`, id)
+		if err != nil {
+			return fmt.Errorf("getting task before status update: %w", err)
+		}
+		if task == nil {
+			return fmt.Errorf("task not found: %s", id)
+		}
+		if task.Status == status {
+			return nil
+		}
+
+		displayOrder := task.DisplayOrder
+		if task.Category == models.CategoryActive && isActiveBoardStatus(status) {
+			if err := exec.QueryRowContext(ctx,
+				`SELECT COALESCE(MAX(display_order), -1) + 1 FROM tasks WHERE project_id = ? AND category = 'active'`,
+				task.ProjectID).Scan(&displayOrder); err != nil {
+				return fmt.Errorf("getting next active display_order: %w", err)
+			}
+		}
+		if _, err := exec.ExecContext(ctx,
+			`UPDATE tasks SET status = ?, display_order = ?, updated_at = datetime('now') WHERE id = ?`,
+			status, displayOrder, id); err != nil {
+			return fmt.Errorf("updating task status: %w", err)
+		}
+		return nil
+	})
 	if err != nil {
-		return fmt.Errorf("getting task before status update: %w", err)
-	}
-	if task == nil {
-		return fmt.Errorf("task not found: %s", id)
+		return err
 	}
 
-	oldStatus := task.Status
-
-	_, err = execBoundSQLite(ctx, r.db,
-		`UPDATE tasks SET status = ?, updated_at = datetime('now') WHERE id = ?`,
-		status, id)
-	if err != nil {
-		return fmt.Errorf("updating task status: %w", err)
-	}
-
-	// Publish event if broadcaster is available
-	if r.broadcaster != nil && oldStatus != status {
+	if r.broadcaster != nil && task.Status != status {
 		r.broadcaster.Publish(events.TaskEvent{
 			Type:      events.TaskStatusChanged,
 			TaskID:    id,
 			TaskName:  task.Title,
 			ProjectID: task.ProjectID,
 			Status:    string(status),
-			OldStatus: string(oldStatus),
+			OldStatus: string(task.Status),
 			Category:  string(task.Category),
 		})
 	}
-
 	return nil
+}
+
+func isActiveBoardStatus(status models.TaskStatus) bool {
+	switch status {
+	case models.StatusPending, models.StatusQueued, models.StatusRunning, models.StatusBlocked:
+		return true
+	default:
+		return false
+	}
 }
 
 // SetPendingIfNotRunningOrQueued atomically sets status to pending
@@ -669,7 +708,12 @@ func (r *TaskRepo) SetPendingIfNotRunningOrQueued(ctx context.Context, id string
 	}
 
 	result, err := execBoundSQLite(ctx, r.db,
-		`UPDATE tasks SET status = 'pending', updated_at = datetime('now')
+		`UPDATE tasks SET
+			status = 'pending',
+			display_order = CASE WHEN category = 'active' AND status <> 'pending' THEN
+				(SELECT COALESCE(MAX(peer.display_order), -1) + 1 FROM tasks peer WHERE peer.project_id = tasks.project_id AND peer.category = 'active')
+				ELSE display_order END,
+			updated_at = datetime('now')
 		 WHERE id = ? AND status NOT IN ('running', 'queued')`,
 		id)
 	if err != nil {
@@ -711,7 +755,12 @@ func (r *TaskRepo) SetPendingIfNotRunningOrQueuedForEnabledSchedule(ctx context.
 	}
 
 	result, err := execBoundSQLite(ctx, r.db,
-		`UPDATE tasks SET status = 'pending', updated_at = datetime('now')
+		`UPDATE tasks SET
+			status = 'pending',
+			display_order = CASE WHEN category = 'active' AND status <> 'pending' THEN
+				(SELECT COALESCE(MAX(peer.display_order), -1) + 1 FROM tasks peer WHERE peer.project_id = tasks.project_id AND peer.category = 'active')
+				ELSE display_order END,
+			updated_at = datetime('now')
 			 WHERE id = ? AND status NOT IN ('running', 'queued')
 			   AND EXISTS (
 					SELECT 1 FROM schedules
@@ -768,7 +817,12 @@ func (r *TaskRepo) ClaimTask(ctx context.Context, id string) (bool, error) {
 	}
 
 	result, err := tx.ExecContext(ctx,
-		`UPDATE tasks SET status = 'running', updated_at = datetime('now')
+		`UPDATE tasks SET
+			status = 'running',
+			display_order = CASE WHEN category = 'active' THEN
+				(SELECT COALESCE(MAX(peer.display_order), -1) + 1 FROM tasks peer WHERE peer.project_id = tasks.project_id AND peer.category = 'active')
+				ELSE display_order END,
+			updated_at = datetime('now')
 		 WHERE id = ? AND status = 'pending'
 		   AND NOT EXISTS (SELECT 1 FROM automation_task_run_reservations r WHERE r.task_id = tasks.id)
 		   AND NOT EXISTS (SELECT 1 FROM executions e WHERE e.task_id = tasks.id AND e.status = 'running')
@@ -890,7 +944,12 @@ func (r *TaskRepo) ClaimTaskForDispatch(ctx context.Context, id string) (*TaskDi
 		}
 		return &TaskDispatchClaim{Task: *task, AutomationContext: automationContext}, false, nil
 	}
-	result, err := conn.ExecContext(ctx, `UPDATE tasks SET status = 'running', updated_at = datetime('now')
+	result, err := conn.ExecContext(ctx, `UPDATE tasks SET
+		status = 'running',
+		display_order = CASE WHEN category = 'active' THEN
+			(SELECT COALESCE(MAX(peer.display_order), -1) + 1 FROM tasks peer WHERE peer.project_id = tasks.project_id AND peer.category = 'active')
+			ELSE display_order END,
+		updated_at = datetime('now')
 		WHERE id = ? AND status = 'pending' AND category IN ('active','scheduled')
 		  AND NOT EXISTS (SELECT 1 FROM automation_task_run_reservations r WHERE r.task_id = tasks.id)
 		  AND NOT EXISTS (SELECT 1 FROM executions e WHERE e.task_id = tasks.id AND e.status = 'running')
@@ -907,6 +966,9 @@ func (r *TaskRepo) ClaimTaskForDispatch(ctx context.Context, id string) (*TaskDi
 			return nil, false, err
 		}
 		return &TaskDispatchClaim{Task: *task}, false, nil
+	}
+	if err := conn.QueryRowContext(ctx, `SELECT display_order FROM tasks WHERE id = ?`, id).Scan(&task.DisplayOrder); err != nil {
+		return nil, false, fmt.Errorf("loading claimed task display order: %w", err)
 	}
 	task.Status = models.StatusRunning
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {

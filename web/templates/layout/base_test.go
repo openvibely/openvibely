@@ -22,6 +22,9 @@ func TestBaseKanbanMoveTransactionsPreventVisibleRollback(t *testing.T) {
 	for _, want := range []string{
 		"pendingKanbanMoves",
 		"beginKanbanMove",
+		"orderKanbanTaskIDs",
+		"compareDocumentPosition",
+		"values.task_ids = ids.join(',')",
 		"applyPendingKanbanMoves",
 		"settleKanbanMove",
 		"data-kanban-move-generation",

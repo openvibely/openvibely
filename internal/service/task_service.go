@@ -355,11 +355,8 @@ func (s *TaskService) UpdateCategory(ctx context.Context, id string, category mo
 			return activationErr
 		}
 		rollbackCtx := context.WithoutCancel(ctx)
-		if err := s.repo.UpdateCategory(rollbackCtx, id, previousTask.Category); err != nil {
-			return errors.Join(activationErr, fmt.Errorf("rolling back task category to %s: %w", previousTask.Category, err))
-		}
-		if err := s.repo.UpdateStatus(rollbackCtx, id, previousTask.Status); err != nil {
-			return errors.Join(activationErr, fmt.Errorf("rolling back task status to %s: %w", previousTask.Status, err))
+		if err := s.repo.RestoreBoardState(rollbackCtx, *previousTask); err != nil {
+			return errors.Join(activationErr, fmt.Errorf("restoring task board state: %w", err))
 		}
 		applog.Infof("[task-svc] UpdateCategory rolled back failed activation id=%s category=%s status=%s", id, previousTask.Category, previousTask.Status)
 		return activationErr

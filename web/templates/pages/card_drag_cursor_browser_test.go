@@ -116,7 +116,7 @@ func driveNativeGroupedTaskDrags(debugPort int, serverURL string, ready <-chan n
 				result <- fmt.Errorf("native grouped drag phase = %q, want %q", coordinates.phase, expectedPhase)
 				return
 			}
-			for _, point := range [][2]float64{{coordinates.firstX, coordinates.firstY}, {coordinates.secondX, coordinates.secondY}} {
+			for _, point := range [][2]float64{{coordinates.secondX, coordinates.secondY}, {coordinates.firstX, coordinates.firstY}} {
 				for _, params := range []map[string]any{
 					{"type": "mouseMoved", "x": point[0], "y": point[1], "modifiers": modifier},
 					{"type": "mousePressed", "x": point[0], "y": point[1], "button": "left", "buttons": 1, "clickCount": 1, "modifiers": modifier},
@@ -514,6 +514,7 @@ window.addEventListener('DOMContentLoaded', function() {
 	nativeGroupedMotionObserved := make(chan string, 2)
 	var requestMu sync.Mutex
 	var requests []string
+	var groupedTaskOrders []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestMu.Lock()
 		requests = append(requests, r.Method+" "+r.URL.Path)
@@ -587,6 +588,12 @@ window.addEventListener('DOMContentLoaded', function() {
 			if r.Method != http.MethodPatch {
 				t.Fatalf("expected grouped task category move to use PATCH, got %s", r.Method)
 			}
+			if err := r.ParseForm(); err != nil {
+				t.Errorf("parse grouped task category move: %v", err)
+			}
+			requestMu.Lock()
+			groupedTaskOrders = append(groupedTaskOrders, r.FormValue("task_ids"))
+			requestMu.Unlock()
 			var out bytes.Buffer
 			if err := components.KanbanBoard(tasks, project.ID, "created_desc", "completed_desc", nil, nil).Render(context.Background(), &out); err != nil {
 				t.Fatalf("render grouped task drop response: %v", err)
@@ -664,6 +671,7 @@ window.addEventListener('DOMContentLoaded', function() {
 	stopBrowserProcess(cmd)
 	requestMu.Lock()
 	requestList := strings.Join(requests, "\n")
+	gotGroupedTaskOrders := append([]string(nil), groupedTaskOrders...)
 	requestMu.Unlock()
 	if !strings.HasPrefix(outcome, "pass:") {
 		stderr, _ := os.ReadFile(stderrPath)
@@ -681,6 +689,10 @@ window.addEventListener('DOMContentLoaded', function() {
 	}
 	if strings.Contains(requestList, "PATCH /tasks/task-active-status-drag/reorder") {
 		t.Fatalf("Active status-lane drag must not be routed as a reorder:\n%s", requestList)
+	}
+	wantGroupedOrder := "task-drag-cursor,task-active-status-drag"
+	if len(gotGroupedTaskOrders) != 2 || gotGroupedTaskOrders[0] != wantGroupedOrder || gotGroupedTaskOrders[1] != wantGroupedOrder {
+		t.Fatalf("grouped category and Active drops must preserve board order %q despite reverse selection, got %v", wantGroupedOrder, gotGroupedTaskOrders)
 	}
 }
 
