@@ -1141,6 +1141,31 @@ func TestChatAutoScrollScript_ToolHeaderUsesTextNodesNotInnerHTML(t *testing.T) 
 	}
 }
 
+func TestChatInputForm_AutoFocusUsesSharedLifecycleContract(t *testing.T) {
+	var buf bytes.Buffer
+	if err := ChatInputForm(ChatInputFormConfig{
+		FormID:       "chat-form",
+		InputID:      "message-input",
+		PostEndpoint: "/chat",
+		TargetID:     "chat-messages",
+	}).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render ChatInputForm: %v", err)
+	}
+
+	content := buf.String()
+	for _, want := range []string{
+		`data-composer-auto-focus="true"`,
+		`window.openVibelyRequestComposerFocus`,
+		`htmx:afterSettle`,
+		`htmx:historyRestore`,
+		`focus({ preventScroll: true })`,
+	} {
+		if !strings.Contains(content, want) {
+			t.Errorf("shared composer autofocus contract missing %q", want)
+		}
+	}
+}
+
 func TestChatInputForm_SendButtonUsesSharedPrimaryActionColorClass(t *testing.T) {
 	var buf bytes.Buffer
 	if err := ChatInputForm(ChatInputFormConfig{
