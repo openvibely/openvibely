@@ -172,25 +172,119 @@ func (r *ProjectRepo) HasTasks(ctx context.Context, id string) (bool, error) {
 }
 
 func (r *ProjectRepo) Delete(ctx context.Context, id string) error {
+	_, _, err := r.DeleteWithCleanupManifest(ctx, id, nil)
+	return err
+}
+
+// DeleteWithCleanupManifest removes a project and all project-owned relational
+// state in one transaction while preserving the filesystem cleanup information
+// that database cascades would otherwise discard.
+func (r *ProjectRepo) DeleteWithCleanupManifest(ctx context.Context, id string, beforeDelete func(TaskDeletionManifest) error) (manifest TaskDeletionManifest, deleted bool, err error) {
 	tx, cleanup, err := beginImmediateTx(ctx, r.db)
 	if err != nil {
-		return fmt.Errorf("beginning transaction: %w", err)
+		return manifest, false, fmt.Errorf("beginning project deletion: %w", err)
 	}
 	defer cleanup()
 
-	// Delete the project (related live tables use ON DELETE CASCADE)
+	var isDefault bool
+	if err = tx.QueryRowContext(ctx, `SELECT is_default FROM projects WHERE id = ?`, id).Scan(&isDefault); err != nil {
+		if err == sql.ErrNoRows {
+			return manifest, false, fmt.Errorf("project not found or is the default project")
+		}
+		return manifest, false, fmt.Errorf("checking project for deletion: %w", err)
+	}
+	if isDefault {
+		return manifest, false, fmt.Errorf("project not found or is the default project")
+	}
+
+	readStrings := func(query string, destination *[]string, args ...any) error {
+		rows, queryErr := tx.QueryContext(ctx, query, args...)
+		if queryErr != nil {
+			return queryErr
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var value string
+			if scanErr := rows.Scan(&value); scanErr != nil {
+				return scanErr
+			}
+			*destination = append(*destination, value)
+		}
+		return rows.Err()
+	}
+	if err = readStrings(`SELECT id FROM tasks WHERE project_id = ? ORDER BY created_at, id`, &manifest.TaskIDs, id); err != nil {
+		return manifest, false, fmt.Errorf("listing project tasks for deletion: %w", err)
+	}
+	if err = readStrings(`
+		SELECT DISTINCT ta.file_path
+		FROM task_attachments ta
+		JOIN tasks t ON t.id = ta.task_id
+		WHERE t.project_id = ?
+		  AND NOT EXISTS (
+			SELECT 1 FROM task_attachments other
+			JOIN tasks other_task ON other_task.id = other.task_id
+			WHERE other.file_path = ta.file_path AND other_task.project_id <> t.project_id
+		  )`, &manifest.TaskAttachmentPaths, id); err != nil {
+		return manifest, false, fmt.Errorf("listing project task attachments for deletion: %w", err)
+	}
+	if err = readStrings(`
+		SELECT DISTINCT ca.file_path
+		FROM chat_attachments ca
+		JOIN executions e ON e.id = ca.execution_id
+		JOIN tasks t ON t.id = e.task_id
+		WHERE t.project_id = ?
+		  AND NOT EXISTS (
+			SELECT 1 FROM chat_attachments other
+			JOIN executions other_execution ON other_execution.id = other.execution_id
+			JOIN tasks other_task ON other_task.id = other_execution.task_id
+			WHERE other.file_path = ca.file_path AND other_task.project_id <> t.project_id
+		  )`, &manifest.ExecutionAttachmentPaths, id); err != nil {
+		return manifest, false, fmt.Errorf("listing project execution attachments for deletion: %w", err)
+	}
+	if err = readStrings(`
+		SELECT DISTINCT attachment_session_id
+		FROM thread_inputs owned
+		WHERE owned.project_id = ?
+		  AND owned.attachment_session_id IS NOT NULL AND owned.attachment_session_id <> ''
+		  AND NOT EXISTS (
+			SELECT 1 FROM thread_inputs other
+			WHERE other.attachment_session_id = owned.attachment_session_id
+			  AND other.project_id <> owned.project_id
+		  )`, &manifest.PendingUploadSessionIDs, id); err != nil {
+		return manifest, false, fmt.Errorf("listing project pending upload sessions for deletion: %w", err)
+	}
+	for _, sessionID := range manifest.PendingUploadSessionIDs {
+		if !isTaskDeletionUploadSessionID(sessionID) {
+			return manifest, false, fmt.Errorf("invalid pending attachment session for project deletion: %q", sessionID)
+		}
+		if _, err = tx.ExecContext(ctx, `INSERT INTO retired_attachment_sessions(session_id) VALUES (?)`, sessionID); err != nil {
+			return manifest, false, fmt.Errorf("retiring pending attachment session for project deletion: %w", err)
+		}
+	}
+	if beforeDelete != nil {
+		if err = beforeDelete(manifest); err != nil {
+			return manifest, false, err
+		}
+	}
+
+	// Project-scoped Agents use SET NULL so task deletion can preserve global
+	// profiles. A project deletion owns these profiles and must remove them.
+	if _, err = tx.ExecContext(ctx, `DELETE FROM agents WHERE project_id = ?`, id); err != nil {
+		return manifest, false, fmt.Errorf("deleting project agents: %w", err)
+	}
 	result, err := tx.ExecContext(ctx, `DELETE FROM projects WHERE id = ? AND is_default = 0`, id)
 	if err != nil {
-		return fmt.Errorf("deleting project: %w", err)
+		return manifest, false, fmt.Errorf("deleting project: %w", err)
 	}
-
 	rows, err := result.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("checking rows affected: %w", err)
+		return manifest, false, fmt.Errorf("checking rows affected: %w", err)
 	}
 	if rows == 0 {
-		return fmt.Errorf("project not found or is the default project")
+		return manifest, false, fmt.Errorf("project not found or is the default project")
 	}
-
-	return tx.Commit()
+	if err = tx.Commit(); err != nil {
+		return manifest, false, fmt.Errorf("committing project deletion: %w", err)
+	}
+	return manifest, true, nil
 }
