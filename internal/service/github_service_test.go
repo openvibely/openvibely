@@ -2269,8 +2269,8 @@ func TestPublishBranchPublishesCleanCommittedLocalBranchChanges(t *testing.T) {
 			sawCommit = true
 			body, _ := io.ReadAll(r.Body)
 			text := string(body)
-			if !strings.Contains(text, remoteBranchSHA) || strings.Contains(text, remoteBaseSHA) {
-				t.Fatalf("expected existing remote branch parent for committed local changes, got %s", text)
+			if !strings.Contains(text, `"parents":["`+remoteBranchSHA+`","`+remoteBaseSHA+`"]`) {
+				t.Fatalf("expected task branch and remote base parents for committed local changes, got %s", text)
 			}
 			_, _ = w.Write([]byte(`{"sha":"new-commit"}`))
 		case r.Method == http.MethodPatch && r.URL.Path == "/repos/openvibely/openvibely/git/refs/heads/task/api-publish":
@@ -2354,8 +2354,8 @@ func TestPublishBranchParentsExistingRemoteTaskBranch(t *testing.T) {
 		case r.Method == http.MethodPost && r.URL.Path == "/repos/openvibely/openvibely/git/commits":
 			body, _ := io.ReadAll(r.Body)
 			commitPayload = string(body)
-			if !strings.Contains(commitPayload, remoteBranchSHA) || strings.Contains(commitPayload, remoteBaseSHA) {
-				t.Fatalf("expected existing remote branch parent, got commit payload: %s", commitPayload)
+			if !strings.Contains(commitPayload, `"parents":["`+remoteBranchSHA+`","`+remoteBaseSHA+`"]`) {
+				t.Fatalf("expected task branch and remote base parents, got commit payload: %s", commitPayload)
 			}
 			_, _ = w.Write([]byte(`{"sha":"new-commit"}`))
 		case r.Method == http.MethodPatch && r.URL.Path == "/repos/openvibely/openvibely/git/refs/heads/task/api-publish":
@@ -2421,6 +2421,8 @@ func TestPublishBranchNoOpsWhenDesiredTreeMatchesRemoteTaskBranch(t *testing.T) 
 			_, _ = w.Write([]byte(`{"tree":{"sha":"base-tree"}}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/git/commits/"+remoteBranchSHA:
 			_, _ = w.Write([]byte(`{"tree":{"sha":"desired-tree"}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/compare/"+remoteBaseSHA+"..."+remoteBranchSHA:
+			_, _ = w.Write([]byte(`{"status":"ahead"}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/repos/openvibely/openvibely/git/blobs":
 			_, _ = w.Write([]byte(`{"sha":"blob-readme"}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/repos/openvibely/openvibely/git/trees":
@@ -2480,7 +2482,7 @@ func TestPublishBranchRestoresRemoteTaskBranchToBaseWhenNoChanges(t *testing.T) 
 		case r.Method == http.MethodPost && r.URL.Path == "/repos/openvibely/openvibely/git/commits":
 			body, _ := io.ReadAll(r.Body)
 			commitPayload = string(body)
-			if !strings.Contains(commitPayload, `"tree":"base-tree"`) || !strings.Contains(commitPayload, `"parents":["`+remoteBranchSHA+`"]`) {
+			if !strings.Contains(commitPayload, `"tree":"base-tree"`) || !strings.Contains(commitPayload, `"parents":["`+remoteBranchSHA+`","`+remoteBaseSHA+`"]`) {
 				t.Fatalf("expected restoration commit based on stale task branch, got %s", commitPayload)
 			}
 			_, _ = w.Write([]byte(`{"sha":"restored-commit"}`))
@@ -2627,6 +2629,8 @@ func TestPublishBranchNoChangesConcurrentBranchCreationSucceeds(t *testing.T) {
 			_, _ = w.Write([]byte(`{"tree":{"sha":"base-tree"}}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/git/commits/"+concurrentBranchSHA:
 			_, _ = w.Write([]byte(`{"tree":{"sha":"base-tree"}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/compare/"+remoteBaseSHA+"..."+concurrentBranchSHA:
+			_, _ = w.Write([]byte(`{"status":"ahead"}`))
 		case r.Method == http.MethodPatch && r.URL.Path == "/repos/openvibely/openvibely/git/refs/heads/task/api-publish":
 			patches++
 			body, _ := io.ReadAll(r.Body)
@@ -2693,8 +2697,16 @@ func TestPublishBranchNoChangesConcurrentBranchCreationBeforePatchSucceeds(t *te
 			fmt.Fprintf(w, `{"object":{"sha":%q}}`, concurrentBranchSHA)
 		case r.Method == http.MethodPatch && r.URL.Path == "/repos/openvibely/openvibely/git/refs/heads/task/api-publish":
 			patches++
-			w.WriteHeader(http.StatusUnprocessableEntity)
-			fmt.Fprint(w, `{"message":"Update is not a fast forward"}`)
+			if patches == 1 {
+				w.WriteHeader(http.StatusUnprocessableEntity)
+				fmt.Fprint(w, `{"message":"Update is not a fast forward"}`)
+				return
+			}
+			body, _ := io.ReadAll(r.Body)
+			if !strings.Contains(string(body), `"sha":"ancestry-commit"`) || !strings.Contains(string(body), `"force":false`) {
+				t.Fatalf("unexpected ancestry ref update: %s", body)
+			}
+			fmt.Fprint(w, `{"ref":"refs/heads/task/api-publish","object":{"sha":"ancestry-commit"}}`)
 		case r.Method == http.MethodPost && r.URL.Path == "/repos/openvibely/openvibely/git/refs":
 			createRefs++
 			t.Fatal("non-fast-forward update must reconcile without creating the existing ref")
@@ -2702,6 +2714,15 @@ func TestPublishBranchNoChangesConcurrentBranchCreationBeforePatchSucceeds(t *te
 			fmt.Fprint(w, `{"tree":{"sha":"base-tree"}}`)
 		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/git/commits/"+concurrentBranchSHA:
 			fmt.Fprint(w, `{"tree":{"sha":"base-tree"}}`)
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/compare/"+remoteBaseSHA+"..."+concurrentBranchSHA:
+			fmt.Fprint(w, `{"status":"diverged"}`)
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/openvibely/openvibely/git/commits":
+			body, _ := io.ReadAll(r.Body)
+			text := string(body)
+			if !strings.Contains(text, `"tree":"base-tree"`) || !strings.Contains(text, `"parents":["`+concurrentBranchSHA+`","`+remoteBaseSHA+`"]`) {
+				t.Fatalf("unexpected ancestry commit: %s", text)
+			}
+			fmt.Fprint(w, `{"sha":"ancestry-commit"}`)
 		default:
 			t.Fatalf("unexpected GitHub API request: %s %s", r.Method, r.URL.String())
 		}
@@ -2719,10 +2740,10 @@ func TestPublishBranchNoChangesConcurrentBranchCreationBeforePatchSucceeds(t *te
 	if err != nil {
 		t.Fatalf("PublishBranch returned error: %v", err)
 	}
-	if result.HeadSHA != concurrentBranchSHA {
-		t.Fatalf("expected reconciled head %q, got %#v", concurrentBranchSHA, result)
+	if result.HeadSHA != "ancestry-commit" || !result.CreatedCommit || result.ParentSHA != concurrentBranchSHA {
+		t.Fatalf("expected ancestry merge result, got %#v", result)
 	}
-	if branchGets != 2 || patches != 1 || createRefs != 0 {
+	if branchGets != 2 || patches != 2 || createRefs != 0 {
 		t.Fatalf("expected pre-patch creation reconciliation, got branchGets=%d patches=%d createRefs=%d", branchGets, patches, createRefs)
 	}
 }
@@ -2778,10 +2799,10 @@ func TestPublishBranchRetriesWithLatestRemoteBranchParentOnNonFastForward(t *tes
 			commitPosts++
 			body, _ := io.ReadAll(r.Body)
 			text := string(body)
-			if commitPosts == 1 && (!strings.Contains(text, staleBranchSHA) || strings.Contains(text, latestBranchSHA)) {
+			if commitPosts == 1 && (!strings.Contains(text, `"parents":["`+staleBranchSHA+`","`+remoteBaseSHA+`"]`) || strings.Contains(text, latestBranchSHA)) {
 				t.Fatalf("expected first commit to parent stale branch, got: %s", text)
 			}
-			if commitPosts == 2 && (!strings.Contains(text, latestBranchSHA) || strings.Contains(text, staleBranchSHA)) {
+			if commitPosts == 2 && (!strings.Contains(text, `"parents":["`+latestBranchSHA+`","`+remoteBaseSHA+`"]`) || strings.Contains(text, staleBranchSHA)) {
 				t.Fatalf("expected retry commit to parent latest branch, got: %s", text)
 			}
 			_, _ = w.Write([]byte(fmt.Sprintf(`{"sha":"new-commit-%d"}`, commitPosts)))
@@ -2878,7 +2899,7 @@ func TestPublishBranchRetriesAfterConcurrentBranchCreation(t *testing.T) {
 			if commitPosts == 1 && (!strings.Contains(text, remoteBaseSHA) || strings.Contains(text, concurrentBranchSHA)) {
 				t.Fatalf("expected first commit to parent remote base, got: %s", text)
 			}
-			if commitPosts == 2 && (!strings.Contains(text, concurrentBranchSHA) || strings.Contains(text, remoteBaseSHA)) {
+			if commitPosts == 2 && !strings.Contains(text, `"parents":["`+concurrentBranchSHA+`","`+remoteBaseSHA+`"]`) {
 				t.Fatalf("expected retry commit to parent concurrently created branch, got: %s", text)
 			}
 			_, _ = w.Write([]byte(fmt.Sprintf(`{"sha":"new-commit-%d"}`, commitPosts)))
@@ -2962,6 +2983,8 @@ func TestPublishBranchConcurrentBranchCreationNoOpsWhenDesiredTreeMatches(t *tes
 			_, _ = w.Write([]byte(`{"tree":{"sha":"base-tree"}}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/git/commits/"+concurrentBranchSHA:
 			_, _ = w.Write([]byte(`{"tree":{"sha":"desired-tree"}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/compare/"+remoteBaseSHA+"..."+concurrentBranchSHA:
+			_, _ = w.Write([]byte(`{"status":"ahead"}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/repos/openvibely/openvibely/git/blobs":
 			_, _ = w.Write([]byte(`{"sha":"blob-readme"}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/repos/openvibely/openvibely/git/trees":
@@ -3041,6 +3064,8 @@ func TestPublishBranchRaceNoOpsWhenLatestRemoteTreeMatchesDesiredTree(t *testing
 			_, _ = w.Write([]byte(`{"tree":{"sha":"old-remote-tree"}}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/git/commits/"+latestBranchSHA:
 			_, _ = w.Write([]byte(`{"tree":{"sha":"desired-tree"}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/compare/"+remoteBaseSHA+"..."+latestBranchSHA:
+			_, _ = w.Write([]byte(`{"status":"ahead"}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/repos/openvibely/openvibely/git/blobs":
 			_, _ = w.Write([]byte(`{"sha":"blob-readme"}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/repos/openvibely/openvibely/git/trees":
