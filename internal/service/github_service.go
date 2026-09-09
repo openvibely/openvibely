@@ -1004,44 +1004,103 @@ func hasGitHubBranchDeletions(changes []githubBranchChange) bool {
 	return false
 }
 
+type githubTreeEntry struct {
+	Path string `json:"path"`
+	Type string `json:"type"`
+	SHA  string `json:"sha"`
+}
+
 func (s *GitHubService) filterNoOpGitHubTreeDeletions(ctx context.Context, token string, repo *GitHubRepoRef, baseTreeSHA string, changes []githubBranchChange) ([]githubBranchChange, error) {
 	if !hasGitHubBranchDeletions(changes) {
 		return changes, nil
 	}
 
-	endpoint := fmt.Sprintf("%s/repos/%s/%s/git/trees/%s?recursive=1", githubAPIBaseURLForRepo(repo, s.apiBaseURL), url.PathEscape(repo.Owner), url.PathEscape(repo.Name), url.PathEscape(baseTreeSHA))
+	entries, truncated, err := s.githubTreeEntries(ctx, token, repo, baseTreeSHA, true)
+	if err != nil {
+		return nil, fmt.Errorf("reading remote base tree: %w", err)
+	}
+	remotePaths := make(map[string]struct{}, len(entries))
+	for _, entry := range entries {
+		remotePaths[entry.Path] = struct{}{}
+	}
+
+	treeCache := make(map[string]map[string]githubTreeEntry)
+	filtered := make([]githubBranchChange, 0, len(changes))
+	for _, change := range changes {
+		if !change.Delete {
+			filtered = append(filtered, change)
+			continue
+		}
+		if _, exists := remotePaths[change.Path]; exists {
+			filtered = append(filtered, change)
+			continue
+		}
+		if !truncated {
+			continue
+		}
+		exists, err := s.githubTreePathExists(ctx, token, repo, baseTreeSHA, change.Path, treeCache)
+		if err != nil {
+			return nil, fmt.Errorf("checking remote base tree path %q: %w", change.Path, err)
+		}
+		if exists {
+			filtered = append(filtered, change)
+		}
+	}
+	return filtered, nil
+}
+
+func (s *GitHubService) githubTreeEntries(ctx context.Context, token string, repo *GitHubRepoRef, treeSHA string, recursive bool) ([]githubTreeEntry, bool, error) {
+	endpoint := fmt.Sprintf("%s/repos/%s/%s/git/trees/%s", githubAPIBaseURLForRepo(repo, s.apiBaseURL), url.PathEscape(repo.Owner), url.PathEscape(repo.Name), url.PathEscape(treeSHA))
+	if recursive {
+		endpoint += "?recursive=1"
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	s.applyGitHubHeaders(req, token)
 	var payload struct {
-		Tree []struct {
-			Path string `json:"path"`
-		} `json:"tree"`
-		Truncated bool `json:"truncated"`
+		Tree      []githubTreeEntry `json:"tree"`
+		Truncated bool              `json:"truncated"`
 	}
 	if err := s.doGitHubJSON(req, &payload); err != nil {
-		return nil, fmt.Errorf("reading remote base tree: %w", err)
+		return nil, false, err
 	}
-	if payload.Truncated {
-		return nil, fmt.Errorf("reading remote base tree: recursive tree response was truncated")
-	}
+	return payload.Tree, payload.Truncated, nil
+}
 
-	remotePaths := make(map[string]struct{}, len(payload.Tree))
-	for _, entry := range payload.Tree {
-		remotePaths[entry.Path] = struct{}{}
-	}
-	filtered := make([]githubBranchChange, 0, len(changes))
-	for _, change := range changes {
-		if change.Delete {
-			if _, exists := remotePaths[change.Path]; !exists {
-				continue
+func (s *GitHubService) githubTreePathExists(ctx context.Context, token string, repo *GitHubRepoRef, baseTreeSHA, treePath string, cache map[string]map[string]githubTreeEntry) (bool, error) {
+	currentTreeSHA := baseTreeSHA
+	parts := strings.Split(treePath, "/")
+	for i, part := range parts {
+		entries, ok := cache[currentTreeSHA]
+		if !ok {
+			fetched, truncated, err := s.githubTreeEntries(ctx, token, repo, currentTreeSHA, false)
+			if err != nil {
+				return false, err
 			}
+			if truncated {
+				return false, fmt.Errorf("non-recursive tree response for %q was truncated", currentTreeSHA)
+			}
+			entries = make(map[string]githubTreeEntry, len(fetched))
+			for _, entry := range fetched {
+				entries[entry.Path] = entry
+			}
+			cache[currentTreeSHA] = entries
 		}
-		filtered = append(filtered, change)
+		entry, exists := entries[part]
+		if !exists {
+			return false, nil
+		}
+		if i == len(parts)-1 {
+			return true, nil
+		}
+		if entry.Type != "tree" || strings.TrimSpace(entry.SHA) == "" {
+			return false, nil
+		}
+		currentTreeSHA = entry.SHA
 	}
-	return filtered, nil
+	return false, nil
 }
 
 func (s *GitHubService) createGitHubTree(ctx context.Context, token string, repo *GitHubRepoRef, baseTreeSHA string, changes []githubBranchChange) (string, error) {
