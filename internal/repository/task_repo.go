@@ -1231,7 +1231,10 @@ func (r *TaskRepo) ClaimReservedTaskForDispatch(ctx context.Context, id, executi
 		}
 		return &TaskDispatchClaim{Task: *task, AutomationContext: automationContext}, false, nil
 	}
-	if _, err := conn.ExecContext(ctx, `UPDATE executions SET status = 'running', started_at = datetime('now') WHERE id = ? AND task_id = ? AND status = 'queued'`, executionID, id); err != nil {
+	if _, err := conn.ExecContext(ctx, `UPDATE executions SET status = 'running', started_at = datetime('now'),
+		prompt_sent = ?, agent_config_id = ?, starts_new_context = ?
+		WHERE id = ? AND task_id = ? AND status = 'queued'`,
+		task.Prompt, task.AgentID, task.StartsNewContext, executionID, id); err != nil {
 		return nil, false, fmt.Errorf("claiming reserved task execution: %w", err)
 	}
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
