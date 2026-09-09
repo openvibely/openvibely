@@ -582,6 +582,27 @@ type ActiveLaneTaskMove struct {
 	ExpectedStatus   models.TaskStatus   `json:"status"`
 }
 
+type activeLaneExpectedStateKey struct{}
+
+// WithActiveLaneExpectedState carries a browser-observed state fence into a
+// lifecycle owner's first durable mutation.
+func WithActiveLaneExpectedState(ctx context.Context, move ActiveLaneTaskMove) context.Context {
+	return context.WithValue(ctx, activeLaneExpectedStateKey{}, move)
+}
+
+func activeLaneExpectedState(ctx context.Context, taskID string) (ActiveLaneTaskMove, bool) {
+	if ctx == nil {
+		return ActiveLaneTaskMove{}, false
+	}
+	move, ok := ctx.Value(activeLaneExpectedStateKey{}).(ActiveLaneTaskMove)
+	return move, ok && move.ID == taskID && move.ExpectedCategory != "" && move.ExpectedStatus != ""
+}
+
+// ActiveLaneExpectedState exposes the guarded move to lifecycle-owning services.
+func ActiveLaneExpectedState(ctx context.Context, taskID string) (ActiveLaneTaskMove, bool) {
+	return activeLaneExpectedState(ctx, taskID)
+}
+
 type ActiveLaneTaskAdmission struct {
 	Task        models.Task
 	ExecutionID string
@@ -2172,6 +2193,44 @@ func (r *TaskRepo) ActivateAllBacklog(ctx context.Context, projectID string) (in
 		}
 	}
 	return len(activated), nil
+}
+
+// PrepareSwarmParentForActiveLane atomically fences and transitions a
+// lifecycle-owned parent before planner submission.
+func (r *TaskRepo) PrepareSwarmParentForActiveLane(ctx context.Context, id string) error {
+	expected, guarded := activeLaneExpectedState(ctx, id)
+	if !guarded {
+		return fmt.Errorf("%w: %s", ErrActiveLaneTaskChanged, id)
+	}
+	var task *models.Task
+	err := withImmediateTx(ctx, r.db, func(exec sqlExecutor) error {
+		var err error
+		task, err = getTaskWithExecutor(ctx, exec, `SELECT `+taskSelectColumns+` FROM tasks WHERE id = ?`, id)
+		if err != nil {
+			return err
+		}
+		if task == nil || task.Category != expected.ExpectedCategory || task.Status != expected.ExpectedStatus || task.SwarmRole != models.SwarmRoleParent {
+			return fmt.Errorf("%w: %s", ErrActiveLaneTaskChanged, id)
+		}
+		var displayOrder int
+		if err := exec.QueryRowContext(ctx, `SELECT COALESCE(MAX(display_order), -1) + 1 FROM tasks WHERE project_id = ? AND category = 'active'`, task.ProjectID).Scan(&displayOrder); err != nil {
+			return err
+		}
+		if _, err := exec.ExecContext(ctx, `UPDATE tasks SET category = 'active', status = 'blocked', display_order = ?, completed_at = NULL, updated_at = datetime('now') WHERE id = ?`, displayOrder, id); err != nil {
+			return err
+		}
+		task.Category = models.CategoryActive
+		task.Status = models.StatusBlocked
+		task.DisplayOrder = displayOrder
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if r.broadcaster != nil {
+		r.broadcaster.Publish(events.TaskEvent{Type: events.TaskBoardUpdated, TaskID: task.ID, TaskName: task.Title, ProjectID: task.ProjectID, Category: string(task.Category), Status: string(task.Status)})
+	}
+	return nil
 }
 
 // ReorderTask moves a task to a new position within its category.

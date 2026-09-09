@@ -733,12 +733,18 @@ func (r *ThreadInputRepo) ClaimQueuedForTaskExecution(ctx context.Context, input
 	return withImmediateTx(ctx, r.db, func(dbexec SQLExecutor) error {
 		promoted, err := scanThreadInput(dbexec.QueryRowContext(ctx, `SELECT `+threadInputSelectColumns+` FROM thread_inputs WHERE id = ?`, inputID))
 		if err == sql.ErrNoRows {
+			if _, guarded := activeLaneExpectedState(ctx, exec.TaskID); guarded {
+				return fmt.Errorf("%w: %s", ErrActiveLaneTaskChanged, exec.TaskID)
+			}
 			return ErrInputNotPending
 		}
 		if err != nil {
 			return fmt.Errorf("loading queued input before claim: %w", err)
 		}
 		if promoted.Scope != models.ThreadInputScopeTask || promoted.TaskID != exec.TaskID || promoted.InputMode != models.ThreadInputModeQueued || promoted.InputStatus != models.ThreadInputPending {
+			if _, guarded := activeLaneExpectedState(ctx, exec.TaskID); guarded {
+				return fmt.Errorf("%w: %s", ErrActiveLaneTaskChanged, exec.TaskID)
+			}
 			return ErrInputNotPending
 		}
 		if exec.TaskID == "" {
@@ -759,14 +765,26 @@ func (r *ThreadInputRepo) ClaimQueuedForTaskExecution(ctx context.Context, input
 			return fmt.Errorf("checking active task execution before queued claim: %w", err)
 		}
 		if activeCount > 0 {
+			if _, guarded := activeLaneExpectedState(ctx, exec.TaskID); guarded {
+				return fmt.Errorf("%w: %s", ErrActiveLaneTaskChanged, exec.TaskID)
+			}
 			return ErrActiveTurnChanged
+		}
+		var taskAdmissionPredicate = `status NOT IN ('running', 'queued')`
+		args := []any{exec.TaskID}
+		if expected, guarded := activeLaneExpectedState(ctx, exec.TaskID); guarded {
+			taskAdmissionPredicate = `category = ? AND status = ?`
+			args = append(args, expected.ExpectedCategory, expected.ExpectedStatus)
 		}
 		if err := dbexec.QueryRowContext(ctx, `
 			SELECT 1
 			FROM tasks
-			WHERE id = ? AND status NOT IN ('running', 'queued')
-			  AND NOT EXISTS (SELECT 1 FROM automation_task_run_reservations r WHERE r.task_id = tasks.id)`, exec.TaskID).Scan(&surfaceOK); err != nil {
+			WHERE id = ? AND `+taskAdmissionPredicate+`
+			  AND NOT EXISTS (SELECT 1 FROM automation_task_run_reservations r WHERE r.task_id = tasks.id)`, args...).Scan(&surfaceOK); err != nil {
 			if err == sql.ErrNoRows {
+				if _, guarded := activeLaneExpectedState(ctx, exec.TaskID); guarded {
+					return fmt.Errorf("%w: %s", ErrActiveLaneTaskChanged, exec.TaskID)
+				}
 				return ErrInputNotPending
 			}
 			return fmt.Errorf("checking task admission before queued claim: %w", err)
