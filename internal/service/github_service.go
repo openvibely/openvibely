@@ -770,6 +770,17 @@ func (s *GitHubService) PublishBranch(ctx context.Context, repo *GitHubRepoRef, 
 	} else if !isGitHubRefMissingError(err) {
 		return nil, fmt.Errorf("resolving remote publish branch %q: %w", branch, err)
 	}
+	baseTreeSHA := ""
+	if hasGitHubBranchDeletions(changes) {
+		baseTreeSHA, err = s.githubCommitTreeSHA(ctx, token, repo, remoteBaseSHA)
+		if err != nil {
+			return nil, err
+		}
+		changes, err = s.filterNoOpGitHubTreeDeletions(ctx, token, repo, baseTreeSHA, changes)
+		if err != nil {
+			return nil, err
+		}
+	}
 	if len(changes) == 0 {
 		if remoteBranchSHA != "" {
 			return &GitHubPublishBranchResult{HeadSHA: remoteBranchSHA}, nil
@@ -787,9 +798,11 @@ func (s *GitHubService) PublishBranch(ctx context.Context, repo *GitHubRepoRef, 
 		}
 		return &GitHubPublishBranchResult{HeadSHA: publishedSHA}, nil
 	}
-	baseTreeSHA, err := s.githubCommitTreeSHA(ctx, token, repo, remoteBaseSHA)
-	if err != nil {
-		return nil, err
+	if baseTreeSHA == "" {
+		baseTreeSHA, err = s.githubCommitTreeSHA(ctx, token, repo, remoteBaseSHA)
+		if err != nil {
+			return nil, err
+		}
 	}
 	treeSHA, err := s.createGitHubTree(ctx, token, repo, baseTreeSHA, changes)
 	if err != nil {
@@ -982,6 +995,143 @@ func (s *GitHubService) githubCommitTreeSHA(ctx context.Context, token string, r
 // avoid overwhelming the GitHub API while still overlapping independent uploads.
 const githubTreeBlobUploadConcurrency = 4
 
+func hasGitHubBranchDeletions(changes []githubBranchChange) bool {
+	for _, change := range changes {
+		if change.Delete {
+			return true
+		}
+	}
+	return false
+}
+
+type githubTreeEntry struct {
+	Path string `json:"path"`
+	Mode string `json:"mode"`
+	Type string `json:"type"`
+	SHA  string `json:"sha"`
+}
+
+func (s *GitHubService) filterNoOpGitHubTreeDeletions(ctx context.Context, token string, repo *GitHubRepoRef, baseTreeSHA string, changes []githubBranchChange) ([]githubBranchChange, error) {
+	if !hasGitHubBranchDeletions(changes) {
+		return changes, nil
+	}
+
+	entries, truncated, err := s.githubTreeEntries(ctx, token, repo, baseTreeSHA, true)
+	if err != nil {
+		return nil, fmt.Errorf("reading remote base tree: %w", err)
+	}
+	remotePaths := make(map[string]githubTreeEntry, len(entries))
+	for _, entry := range entries {
+		remotePaths[entry.Path] = entry
+	}
+
+	treeCache := make(map[string]map[string]githubTreeEntry)
+	filtered := make([]githubBranchChange, 0, len(changes))
+	for _, change := range changes {
+		if !change.Delete {
+			filtered = append(filtered, change)
+			continue
+		}
+		if entry, exists := remotePaths[change.Path]; exists {
+			if updated, compatible := compatibleGitHubTreeDeletion(change, entry); compatible {
+				filtered = append(filtered, updated)
+			}
+			continue
+		}
+		if !truncated {
+			continue
+		}
+		entry, exists, err := s.githubTreePathEntry(ctx, token, repo, baseTreeSHA, change.Path, treeCache)
+		if err != nil {
+			return nil, fmt.Errorf("checking remote base tree path %q: %w", change.Path, err)
+		}
+		if exists {
+			if updated, compatible := compatibleGitHubTreeDeletion(change, entry); compatible {
+				filtered = append(filtered, updated)
+			}
+		}
+	}
+	return filtered, nil
+}
+
+func (s *GitHubService) githubTreeEntries(ctx context.Context, token string, repo *GitHubRepoRef, treeSHA string, recursive bool) ([]githubTreeEntry, bool, error) {
+	endpoint := fmt.Sprintf("%s/repos/%s/%s/git/trees/%s", githubAPIBaseURLForRepo(repo, s.apiBaseURL), url.PathEscape(repo.Owner), url.PathEscape(repo.Name), url.PathEscape(treeSHA))
+	if recursive {
+		endpoint += "?recursive=1"
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, false, err
+	}
+	s.applyGitHubHeaders(req, token)
+	var payload struct {
+		Tree      []githubTreeEntry `json:"tree"`
+		Truncated bool              `json:"truncated"`
+	}
+	if err := s.doGitHubJSON(req, &payload); err != nil {
+		return nil, false, err
+	}
+	return payload.Tree, payload.Truncated, nil
+}
+
+func compatibleGitHubTreeDeletion(change githubBranchChange, entry githubTreeEntry) (githubBranchChange, bool) {
+	localType := githubTreeTypeForMode(change.Mode)
+	if entry.Type != localType {
+		return change, false
+	}
+	if localType == "blob" && (change.Mode == "120000") != (entry.Mode == "120000") {
+		return change, false
+	}
+	if strings.TrimSpace(entry.Mode) != "" {
+		change.Mode = entry.Mode
+	}
+	return change, true
+}
+
+func githubTreeTypeForMode(mode string) string {
+	if mode == "160000" {
+		return "commit"
+	}
+	if mode == "040000" {
+		return "tree"
+	}
+	return "blob"
+}
+
+func (s *GitHubService) githubTreePathEntry(ctx context.Context, token string, repo *GitHubRepoRef, baseTreeSHA, treePath string, cache map[string]map[string]githubTreeEntry) (githubTreeEntry, bool, error) {
+	currentTreeSHA := baseTreeSHA
+	parts := strings.Split(treePath, "/")
+	for i, part := range parts {
+		entries, ok := cache[currentTreeSHA]
+		if !ok {
+			fetched, truncated, err := s.githubTreeEntries(ctx, token, repo, currentTreeSHA, false)
+			if err != nil {
+				return githubTreeEntry{}, false, err
+			}
+			if truncated {
+				return githubTreeEntry{}, false, fmt.Errorf("non-recursive tree response for %q was truncated", currentTreeSHA)
+			}
+			entries = make(map[string]githubTreeEntry, len(fetched))
+			for _, entry := range fetched {
+				entries[entry.Path] = entry
+			}
+			cache[currentTreeSHA] = entries
+		}
+		entry, exists := entries[part]
+		if !exists {
+			return githubTreeEntry{}, false, nil
+		}
+		if i == len(parts)-1 {
+			return entry, true, nil
+		}
+		if entry.Type != "tree" || strings.TrimSpace(entry.SHA) == "" {
+			return githubTreeEntry{}, false, nil
+		}
+		currentTreeSHA = entry.SHA
+	}
+	return githubTreeEntry{}, false, nil
+}
+
 func (s *GitHubService) createGitHubTree(ctx context.Context, token string, repo *GitHubRepoRef, baseTreeSHA string, changes []githubBranchChange) (string, error) {
 	// Preserve deterministic original ordering of the tree entries. Each blob
 	// SHA is written back into the entry at its original index, so parallel
@@ -989,7 +1139,11 @@ func (s *GitHubService) createGitHubTree(ctx context.Context, token string, repo
 	tree := make([]map[string]any, len(changes))
 	blobIndexes := make([]int, 0, len(changes))
 	for i, change := range changes {
-		entry := map[string]any{"path": change.Path, "mode": change.Mode, "type": "blob"}
+		entryType := "blob"
+		if change.Delete {
+			entryType = githubTreeTypeForMode(change.Mode)
+		}
+		entry := map[string]any{"path": change.Path, "mode": change.Mode, "type": entryType}
 		if change.Delete {
 			entry["sha"] = nil
 		} else {
@@ -1254,10 +1408,24 @@ func collectTrackedGitHubBranchChanges(ctx context.Context, dir, baseBranch stri
 	if err != nil {
 		return nil, err
 	}
+	deletionPaths := make([]string, 0)
+	for _, parsedChange := range parsed {
+		if parsedChange.delete {
+			deletionPaths = append(deletionPaths, parsedChange.path)
+		}
+	}
+	deletionModes, err := gitHubTreeModesAtRef(ctx, dir, mergeBase, deletionPaths, runGit)
+	if err != nil {
+		return nil, err
+	}
 	changes := make([]githubBranchChange, 0, len(parsed))
 	for _, parsedChange := range parsed {
 		if parsedChange.delete {
-			changes = append(changes, githubBranchChange{Path: parsedChange.path, Mode: "100644", Delete: true})
+			mode := deletionModes[parsedChange.path]
+			if mode == "" {
+				mode = "100644"
+			}
+			changes = append(changes, githubBranchChange{Path: parsedChange.path, Mode: mode, Delete: true})
 			continue
 		}
 		mode := trackedGitHubTreeMode(dir, parsedChange.path, modes[parsedChange.path])
@@ -1359,6 +1527,38 @@ func gitHubTreeModes(ctx context.Context, dir string, relPaths []string, runGit 
 			case "100755", "120000":
 				modes[path] = mode
 			case "100644":
+				modes[path] = mode
+			}
+		}
+	}
+	return modes, nil
+}
+
+func gitHubTreeModesAtRef(ctx context.Context, dir, ref string, relPaths []string, runGit runGitFunc) (map[string]string, error) {
+	modes := make(map[string]string, len(relPaths))
+	for _, chunk := range chunkGitHubModeLookupPaths(relPaths) {
+		args := make([]string, 0, len(chunk)+4)
+		args = append(args, "ls-tree", "-z", ref, "--")
+		args = append(args, chunk...)
+		out, err := runGit(ctx, dir, nil, args...)
+		if err != nil {
+			return nil, fmt.Errorf("checking base tree modes: %w: %s", err, strings.TrimSpace(string(out)))
+		}
+		for _, record := range strings.Split(string(out), "\x00") {
+			if record == "" {
+				continue
+			}
+			tab := strings.IndexByte(record, '\t')
+			if tab < 0 {
+				continue
+			}
+			meta := strings.Fields(record[:tab])
+			path := cleanGitHubTreePath(record[tab+1:])
+			if len(meta) < 2 || path == "" {
+				continue
+			}
+			switch mode := meta[0]; mode {
+			case "100644", "100755", "120000", "160000":
 				modes[path] = mode
 			}
 		}
