@@ -1033,9 +1033,11 @@ func (s *GitHubService) filterNoOpGitHubTreeDeletions(ctx context.Context, token
 			continue
 		}
 		if entry, exists := remotePaths[change.Path]; exists {
-			if updated, compatible := compatibleGitHubTreeDeletion(change, entry); compatible {
-				filtered = append(filtered, updated)
+			updated, compatible := compatibleGitHubTreeDeletion(change, entry)
+			if !compatible {
+				return nil, incompatibleGitHubTreeDeletionError(change, entry)
 			}
+			filtered = append(filtered, updated)
 			continue
 		}
 		if !truncated {
@@ -1046,9 +1048,11 @@ func (s *GitHubService) filterNoOpGitHubTreeDeletions(ctx context.Context, token
 			return nil, fmt.Errorf("checking remote base tree path %q: %w", change.Path, err)
 		}
 		if exists {
-			if updated, compatible := compatibleGitHubTreeDeletion(change, entry); compatible {
-				filtered = append(filtered, updated)
+			updated, compatible := compatibleGitHubTreeDeletion(change, entry)
+			if !compatible {
+				return nil, incompatibleGitHubTreeDeletionError(change, entry)
 			}
+			filtered = append(filtered, updated)
 		}
 	}
 	return filtered, nil
@@ -1086,6 +1090,10 @@ func compatibleGitHubTreeDeletion(change githubBranchChange, entry githubTreeEnt
 		change.Mode = entry.Mode
 	}
 	return change, true
+}
+
+func incompatibleGitHubTreeDeletionError(change githubBranchChange, entry githubTreeEntry) error {
+	return fmt.Errorf("remote base tree path %q has type %q mode %q, incompatible with task deletion type %q mode %q", change.Path, entry.Type, entry.Mode, githubTreeTypeForMode(change.Mode), change.Mode)
 }
 
 func githubTreeTypeForMode(mode string) string {
