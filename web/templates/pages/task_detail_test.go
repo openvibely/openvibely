@@ -430,6 +430,25 @@ func TestTaskDetailMetrics_ShowsMissingTagModelAndAgentClearly(t *testing.T) {
 	}
 }
 
+func TestTaskDetailContent_ThreadTabRequestsSharedComposerFocus(t *testing.T) {
+	task := &models.Task{ID: "task-focus", ProjectID: "project-focus", Title: "Focus task"}
+	var buf bytes.Buffer
+	if err := TaskDetailContent(task, nil, nil, nil, nil, nil, nil, "details", nil).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render task detail: %v", err)
+	}
+	output := buf.String()
+	for _, want := range []string{
+		"window.openVibelyRequestComposerFocus",
+		"reason: 'task-thread-tab'",
+		"trigger: trigger",
+		"_focusTaskThreadComposer(tab)",
+	} {
+		if !strings.Contains(output, want) {
+			t.Errorf("task Thread tab shared focus handoff missing %q", want)
+		}
+	}
+}
+
 func TestTaskDetailContent_ThreadTabLazyLoadsOnDemand(t *testing.T) {
 	task := &models.Task{
 		ID:        "task-thread-1",

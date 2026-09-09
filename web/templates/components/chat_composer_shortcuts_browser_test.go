@@ -194,6 +194,126 @@ func TestChatComposerShortcutsInChrome(t *testing.T) {
 	}
 }
 
+func TestChatComposerAutoFocusLifecycleInChrome(t *testing.T) {
+	chrome := testChromePath(t)
+
+	renderForm := func(config ChatInputFormConfig) string {
+		var buf bytes.Buffer
+		if err := ChatInputForm(config).Render(context.Background(), &buf); err != nil {
+			t.Fatalf("render composer: %v", err)
+		}
+		return buf.String()
+	}
+	chat := renderForm(ChatInputFormConfig{FormID: "chat-form", InputID: "message-input", PostEndpoint: "/chat/send", TargetID: "chat-messages"})
+	thread := renderForm(ChatInputFormConfig{FormID: "task-thread-form", InputID: "task-message-input", PostEndpoint: "/tasks/task-1/thread", TargetID: "task-thread-messages", TaskID: "task-1"})
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/htmx.js":
+			w.Header().Set("Content-Type", "text/javascript")
+			_, _ = w.Write(htmx204)
+		case "/direct-thread":
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			body := `<!doctype html><html><body data-test-result="pending"><script src="/htmx.js"></script><div id="task-thread-view"><div id="task-thread-messages"></div>` + thread + `</div><div id="browser-result">pending</div><script>
+(function poll(started) {
+  var input = document.getElementById('task-message-input');
+  if (document.activeElement === input) {
+    input.setRangeText('direct thread', input.selectionStart, input.selectionEnd, 'end');
+    if (input.value === 'direct thread' && input.selectionStart === input.value.length) {
+      document.getElementById('browser-result').textContent = 'PASS';
+      document.body.setAttribute('data-test-result', 'pass');
+      return;
+    }
+  }
+  if (performance.now() - started > 2500) {
+    document.getElementById('browser-result').textContent = 'FAIL:direct task Thread did not focus';
+    document.body.setAttribute('data-test-result', 'fail');
+    return;
+  }
+  setTimeout(function() { poll(started); }, 10);
+})(performance.now());
+</script></body></html>`
+			_, _ = w.Write([]byte(body))
+		case "/":
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			body := `<!doctype html><html><body data-test-result="pending">
+<script src="/htmx.js"></script>
+<button id="meaningful-control" type="button">Other control</button>
+<dialog id="active-dialog"><button>Dialog action</button></dialog>
+<div id="main-content"><div id="chat-page-root"><div id="chat-messages"></div>` + chat + `</div></div>
+<template id="chat-fragment"><div id="chat-page-root"><div id="chat-messages"></div>` + chat + `</div></template>
+<template id="thread-fragment"><div id="task-thread-view"><div id="task-thread-messages"></div>` + thread + `</div></template>
+<div id="browser-result">pending</div>
+<script>
+(async function() {
+  function fail(message) { document.body.setAttribute('data-test-result', 'fail'); document.body.setAttribute('data-test-error', message); document.getElementById('browser-result').textContent = 'FAIL:' + message; throw new Error(message); }
+  function waitFor(check, message) { return new Promise(function(resolve) { var started = performance.now(); (function poll() { if (check()) return resolve(); if (performance.now() - started > 2500) return fail(message + ':active=' + (document.activeElement && (document.activeElement.id || document.activeElement.tagName)) + ':manager=' + typeof window.openVibelyRequestComposerFocus + ':state=' + JSON.stringify(window._openVibelyComposerFocusState) + ':overlay=' + !!document.querySelector('dialog[open], [role="dialog"][aria-modal="true"], [data-chat-actions-open="true"], [aria-haspopup][aria-expanded="true"]')); setTimeout(poll, 10); })(); }); }
+  function settle(root) { document.dispatchEvent(new CustomEvent('htmx:afterSettle', {detail:{target:root}})); }
+  function mount(templateID) {
+    var main = document.getElementById('main-content');
+    main.innerHTML = document.getElementById(templateID).innerHTML;
+    main.querySelectorAll('script').forEach(function(oldScript) { var script = document.createElement('script'); script.textContent = oldScript.textContent; oldScript.replaceWith(script); });
+    settle(main);
+    return main;
+  }
+  function typeImmediately(input, text) {
+    input.setSelectionRange(input.value.length, input.value.length);
+    if (!document.execCommand('insertText', false, text)) {
+      input.setRangeText(text, input.selectionStart, input.selectionEnd, 'end');
+      input.dispatchEvent(new InputEvent('input', {bubbles:true, inputType:'insertText', data:text}));
+    }
+  }
+
+  await waitFor(function() { return document.activeElement && document.activeElement.id === 'message-input'; }, 'direct Chat did not focus');
+  var directChat = document.getElementById('message-input');
+  typeImmediately(directChat, 'direct chat');
+  if (directChat.value !== 'direct chat' || directChat.selectionStart !== directChat.value.length) fail('direct Chat was not immediately editable');
+
+  var other = document.getElementById('meaningful-control');
+  other.focus();
+  settle(document.getElementById('main-content'));
+  await new Promise(function(resolve) { setTimeout(resolve, 80); });
+  if (document.activeElement !== other) fail('HTMX settle stole focus from another control');
+
+  other.blur();
+  mount('thread-fragment');
+  await waitFor(function() { return document.activeElement && document.activeElement.id === 'task-message-input'; }, 'HTMX/lazy Thread did not focus');
+  var taskInput = document.getElementById('task-message-input');
+  typeImmediately(taskInput, 'task thread');
+  if (taskInput.value !== 'task thread' || taskInput.selectionStart !== taskInput.value.length) fail('task Thread was not immediately editable');
+
+  window.openVibelyRequestComposerFocus({root:document.getElementById('task-thread-form'), force:true});
+  mount('chat-fragment');
+  await waitFor(function() { return document.activeElement && document.activeElement.id === 'message-input'; }, 'returning to Chat did not focus live textarea');
+  if (document.activeElement === taskInput || taskInput.isConnected) fail('detached task textarea retained focus');
+
+  var dialog = document.getElementById('active-dialog');
+  dialog.showModal();
+  window.openVibelyRequestComposerFocus({root:document.getElementById('chat-form'), force:true});
+  await new Promise(function(resolve) { setTimeout(resolve, 80); });
+  if (document.activeElement.id === 'message-input') fail('open dialog lost focus to composer');
+  dialog.close();
+
+  other.focus();
+  document.dispatchEvent(new CustomEvent('htmx:historyRestore', {detail:{target:document.getElementById('main-content')}}));
+  await new Promise(function(resolve) { setTimeout(resolve, 80); });
+  if (document.activeElement !== other) fail('history restoration focus was overridden');
+
+  document.getElementById('browser-result').textContent = 'PASS';
+  document.body.setAttribute('data-test-result', 'pass');
+})();
+</script></body></html>`
+			_, _ = w.Write([]byte(body))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	runHeadlessChromeFixture(t, chrome, server.URL+"/", "Chat and task Thread autofocus lifecycle", 8000, 25*time.Second)
+	runHeadlessChromeFixture(t, chrome, server.URL+"/direct-thread", "direct task Thread autofocus", 5000, 20*time.Second)
+}
+
 func TestChatComposerIOSShortcutHintAndModifierInChrome(t *testing.T) {
 	chrome := testChromePath(t)
 

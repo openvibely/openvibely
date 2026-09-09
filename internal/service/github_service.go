@@ -817,16 +817,26 @@ func (s *GitHubService) PublishBranch(ctx context.Context, repo *GitHubRepoRef, 
 			return nil, err
 		}
 	}
+	comparisonStatus := githubComparisonIdentical
 	if remoteBranchSHA != "" {
 		remoteBranchTreeSHA, treeErr := s.githubCommitTreeSHA(ctx, token, repo, remoteBranchSHA)
 		if treeErr != nil {
 			return nil, fmt.Errorf("resolving remote publish branch tree %q: %w", branch, treeErr)
 		}
+		if remoteBranchSHA != remoteBaseSHA {
+			comparisonStatus, err = s.githubCommitComparison(ctx, token, repo, remoteBaseSHA, remoteBranchSHA)
+			if err != nil {
+				return nil, fmt.Errorf("checking remote publish branch ancestry %q: %w", branch, err)
+			}
+		}
 		if remoteBranchTreeSHA == treeSHA {
-			return &GitHubPublishBranchResult{HeadSHA: remoteBranchSHA}, nil
+			if githubBaseIsAncestor(comparisonStatus) {
+				return &GitHubPublishBranchResult{HeadSHA: remoteBranchSHA}, nil
+			}
 		}
 	}
-	commitSHA, err := s.createGitHubCommit(ctx, token, repo, message, treeSHA, parentSHA, publishReq.CommitterName, publishReq.CommitterEmail)
+	commitParents := githubPublishCommitParents(parentSHA, remoteBaseSHA, comparisonStatus)
+	commitSHA, err := s.createGitHubCommit(ctx, token, repo, message, treeSHA, commitParents, publishReq.CommitterName, publishReq.CommitterEmail)
 	if err != nil {
 		return nil, err
 	}
@@ -846,19 +856,29 @@ func (s *GitHubService) PublishBranch(ctx context.Context, repo *GitHubRepoRef, 
 		if treeErr != nil {
 			return nil, fmt.Errorf("resolving refreshed remote publish branch tree %q: %w", branch, treeErr)
 		}
-		if latestBranchTreeSHA == treeSHA {
-			return &GitHubPublishBranchResult{HeadSHA: latestBranchSHA}, nil
+		latestComparisonStatus := githubComparisonIdentical
+		if latestBranchSHA != remoteBaseSHA {
+			latestComparisonStatus, refErr = s.githubCommitComparison(ctx, token, repo, remoteBaseSHA, latestBranchSHA)
+			if refErr != nil {
+				return nil, fmt.Errorf("checking refreshed remote publish branch ancestry %q: %w", branch, refErr)
+			}
 		}
-		retryCommitSHA, retryErr := s.createGitHubCommit(ctx, token, repo, message, treeSHA, latestBranchSHA, publishReq.CommitterName, publishReq.CommitterEmail)
+		if latestBranchTreeSHA == treeSHA {
+			if githubBaseIsAncestor(latestComparisonStatus) {
+				return &GitHubPublishBranchResult{HeadSHA: latestBranchSHA}, nil
+			}
+		}
+		retryCommitParents := githubPublishCommitParents(latestBranchSHA, remoteBaseSHA, latestComparisonStatus)
+		retryCommitSHA, retryErr := s.createGitHubCommit(ctx, token, repo, message, treeSHA, retryCommitParents, publishReq.CommitterName, publishReq.CommitterEmail)
 		if retryErr != nil {
 			return nil, retryErr
 		}
 		if err := s.publishExistingLocalCommitWithToken(ctx, token, repo, branch, retryCommitSHA, false); err != nil {
 			return nil, err
 		}
-		return s.createdGitHubPublishBranchResult(ctx, token, repo, retryCommitSHA, latestBranchSHA), nil
+		return s.createdGitHubPublishBranchResult(ctx, token, repo, retryCommitSHA, retryCommitParents[0]), nil
 	}
-	return s.createdGitHubPublishBranchResult(ctx, token, repo, commitSHA, parentSHA), nil
+	return s.createdGitHubPublishBranchResult(ctx, token, repo, commitSHA, commitParents[0]), nil
 }
 
 func (s *GitHubService) createdGitHubPublishBranchResult(ctx context.Context, token string, repo *GitHubRepoRef, commitSHA, parentSHA string) *GitHubPublishBranchResult {
@@ -997,6 +1017,39 @@ func (s *GitHubService) githubCommitTreeSHA(ctx context.Context, token string, r
 		return "", fmt.Errorf("base commit tree sha is empty")
 	}
 	return strings.TrimSpace(payload.Tree.SHA), nil
+}
+
+const (
+	githubComparisonAhead     = "ahead"
+	githubComparisonBehind    = "behind"
+	githubComparisonDiverged  = "diverged"
+	githubComparisonIdentical = "identical"
+)
+
+func (s *GitHubService) githubCommitComparison(ctx context.Context, token string, repo *GitHubRepoRef, baseSHA, headSHA string) (string, error) {
+	endpoint := fmt.Sprintf("%s/repos/%s/%s/compare/%s...%s", githubAPIBaseURLForRepo(repo, s.apiBaseURL), url.PathEscape(repo.Owner), url.PathEscape(repo.Name), url.PathEscape(baseSHA), url.PathEscape(headSHA))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return "", err
+	}
+	s.applyGitHubHeaders(req, token)
+	var payload struct {
+		Status string `json:"status"`
+	}
+	if err := s.doGitHubJSON(req, &payload); err != nil {
+		return "", err
+	}
+	status := strings.ToLower(strings.TrimSpace(payload.Status))
+	switch status {
+	case githubComparisonAhead, githubComparisonBehind, githubComparisonDiverged, githubComparisonIdentical:
+		return status, nil
+	default:
+		return "", fmt.Errorf("GitHub comparison returned unknown status %q", payload.Status)
+	}
+}
+
+func githubBaseIsAncestor(comparisonStatus string) bool {
+	return comparisonStatus == githubComparisonAhead || comparisonStatus == githubComparisonIdentical
 }
 
 // githubTreeBlobUploadConcurrency bounds how many independent blob uploads run
@@ -1233,8 +1286,24 @@ func (s *GitHubService) createGitHubBlob(ctx context.Context, token string, repo
 	return strings.TrimSpace(created.SHA), nil
 }
 
-func (s *GitHubService) createGitHubCommit(ctx context.Context, token string, repo *GitHubRepoRef, message, treeSHA, parentSHA, committerName, committerEmail string) (string, error) {
-	payload := map[string]any{"message": message, "tree": treeSHA, "parents": []string{parentSHA}}
+func githubPublishCommitParents(primaryParentSHA, baseSHA, comparisonStatus string) []string {
+	primaryParentSHA = strings.TrimSpace(primaryParentSHA)
+	baseSHA = strings.TrimSpace(baseSHA)
+	if comparisonStatus == githubComparisonBehind && baseSHA != "" {
+		return []string{baseSHA}
+	}
+	parents := make([]string, 0, 2)
+	if primaryParentSHA != "" {
+		parents = append(parents, primaryParentSHA)
+	}
+	if baseSHA != "" && baseSHA != primaryParentSHA && comparisonStatus == githubComparisonDiverged {
+		parents = append(parents, baseSHA)
+	}
+	return parents
+}
+
+func (s *GitHubService) createGitHubCommit(ctx context.Context, token string, repo *GitHubRepoRef, message, treeSHA string, parentSHAs []string, committerName, committerEmail string) (string, error) {
+	payload := map[string]any{"message": message, "tree": treeSHA, "parents": parentSHAs}
 	if strings.TrimSpace(committerName) != "" && strings.TrimSpace(committerEmail) != "" {
 		payload["committer"] = map[string]string{"name": strings.TrimSpace(committerName), "email": strings.TrimSpace(committerEmail)}
 	}

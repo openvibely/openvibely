@@ -1461,6 +1461,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 			data-message-history-key={ chatMessageHistoryStorageKey(config) }
 			data-attachment-state-key={ chatAttachmentStateKey(config) }
 			data-steer-endpoint={ config.SteerEndpoint }
+			data-composer-auto-focus="true"
 			if config.TaskID != "" {
 				data-scroll-intent-scope={ config.TaskID }
 				data-model-select-endpoint={ "/tasks/" + config.TaskID + "/thread/model" }
@@ -1594,9 +1595,118 @@ templ ChatInputForm(config ChatInputFormConfig) {
 		</form>
 	</div>
 	<!-- Shared input form scripts: Enter key, file upload, drag-and-drop -->
-	<script type="text/javascript">
-		// Global portal-style custom select implementation.
-		// Positioned with getBoundingClientRect() + position:fixed so it always
+		<script type="text/javascript">
+			// Shared, swap-safe composer focus lifecycle for Chat and task Threads.
+			if (!window._openVibelyComposerFocusReady) {
+				window._openVibelyComposerFocusReady = true;
+				window._openVibelyComposerFocusState = { token: 0, timer: 0, historyTimer: 0, interaction: 0 };
+				var _composerFocusState = window._openVibelyComposerFocusState;
+
+				function _cancelComposerFocus() {
+					_composerFocusState.token++;
+					if (_composerFocusState.timer) window.clearTimeout(_composerFocusState.timer);
+					if (_composerFocusState.historyTimer) window.clearTimeout(_composerFocusState.historyTimer);
+					_composerFocusState.timer = 0;
+					_composerFocusState.historyTimer = 0;
+				}
+
+				function _composerFocusInteraction() {
+					_composerFocusState.interaction++;
+					_cancelComposerFocus();
+				}
+
+				function _composerFocusVisible(element) {
+					if (!element || !element.isConnected || element.disabled || element.hidden) return false;
+					if (element.closest('[hidden], [inert], .hidden, dialog:not([open])')) return false;
+					var style = window.getComputedStyle ? window.getComputedStyle(element) : null;
+					return !style || (style.display !== 'none' && style.visibility !== 'hidden');
+				}
+
+				function _composerFocusOverlayActive() {
+					var overlays = document.querySelectorAll('dialog[open], [role="dialog"][aria-modal="true"], [data-chat-actions-open="true"], [aria-haspopup][aria-expanded="true"], [data-openvibely-menu-open="true"]');
+					for (var i = 0; i < overlays.length; i++) {
+						var overlay = overlays[i];
+						if (overlay.tagName === 'DIALOG' && !overlay.open) continue;
+						if (_composerFocusVisible(overlay)) return true;
+					}
+					return false;
+				}
+
+				function _composerFocusMeaningful(element) {
+					if (!element || element === document.body || element === document.documentElement) return false;
+					return _composerFocusVisible(element) && element.matches('input, textarea, select, button, a[href], [contenteditable="true"], [tabindex]:not([tabindex="-1"])');
+				}
+
+				function _cancelComposerFocusForSwap(event) {
+					var target = event.detail && (event.detail.target || event.detail.elt);
+					var withinComposerSurface = target && target.closest && target.closest('#main-content, form[data-composer-auto-focus="true"]');
+					var containsComposer = target && target.querySelector && target.querySelector('form[data-composer-auto-focus="true"]');
+					if (!target || target.id === 'main-content' || withinComposerSurface || containsComposer) {
+						_cancelComposerFocus();
+					}
+				}
+
+				window.openVibelyCancelComposerFocus = _cancelComposerFocus;
+				window.openVibelyRequestComposerFocus = function(options) {
+					options = options || {};
+					var root = options.root || document;
+					var form = root.matches && root.matches('form[data-composer-auto-focus="true"]')
+						? root
+						: root.querySelector && root.querySelector('form[data-composer-auto-focus="true"]');
+					if (!form || !_composerFocusVisible(form)) return false;
+					var textarea = form.querySelector('textarea[name="message"]');
+					if (!textarea || !_composerFocusVisible(textarea)) return false;
+					if (!options.force && textarea.dataset.composerFocusInitialized === 'true') return false;
+					textarea.dataset.composerFocusInitialized = 'true';
+
+					_cancelComposerFocus();
+					var token = _composerFocusState.token;
+					var interaction = _composerFocusState.interaction;
+					var trigger = options.trigger || null;
+					_composerFocusState.timer = window.setTimeout(function() {
+						_composerFocusState.timer = window.setTimeout(function() {
+							_composerFocusState.timer = 0;
+							if (token !== _composerFocusState.token || interaction !== _composerFocusState.interaction) return;
+							var liveForm = document.getElementById(form.id);
+							var liveTextarea = liveForm && liveForm.querySelector('textarea[name="message"]');
+							if (liveForm !== form || liveTextarea !== textarea || !_composerFocusVisible(liveTextarea)) return;
+							if (_composerFocusOverlayActive()) return;
+							var active = document.activeElement;
+							if (_composerFocusMeaningful(active) && active !== liveTextarea && active !== trigger) return;
+							liveTextarea.focus({ preventScroll: true });
+						}, 0);
+					}, 0);
+					return true;
+				};
+
+				document.addEventListener('pointerdown', _composerFocusInteraction, true);
+				document.addEventListener('keydown', _composerFocusInteraction, true);
+				document.addEventListener('focusin', function(event) {
+					if (event.target && event.target.matches && event.target.matches('textarea[data-composer-focus-initialized="true"]')) return;
+					_composerFocusInteraction();
+				}, true);
+				document.addEventListener('htmx:beforeSwap', _cancelComposerFocusForSwap);
+				document.addEventListener('htmx:beforeHistorySave', _cancelComposerFocus);
+				document.addEventListener('htmx:afterSettle', function(event) {
+					var target = event.detail && (event.detail.target || event.detail.elt);
+					window.openVibelyRequestComposerFocus({ root: target || document, reason: 'htmx-settle' });
+				});
+				document.addEventListener('htmx:historyRestore', function(event) {
+					_cancelComposerFocus();
+					var token = _composerFocusState.token;
+					var interaction = _composerFocusState.interaction;
+					var target = event.detail && (event.detail.target || event.detail.elt);
+					_composerFocusState.historyTimer = window.setTimeout(function() {
+						_composerFocusState.historyTimer = 0;
+						if (token !== _composerFocusState.token || interaction !== _composerFocusState.interaction) return;
+						window.openVibelyRequestComposerFocus({ root: target || document, reason: 'history-restore', force: true });
+					}, 0);
+				});
+				window.addEventListener('pagehide', _cancelComposerFocus);
+			}
+
+			// Global portal-style custom select implementation.
+			// Positioned with getBoundingClientRect() + position:fixed so it always
 		// anchors near the trigger button regardless of scroll within overflow:auto
 		// containers — fixing the mobile Chrome popup displacement bug.
 		// Guard ensures this runs only once even when multiple ChatInputForms exist.
@@ -1777,6 +1887,14 @@ templ ChatInputForm(config ChatInputFormConfig) {
 			var formId = form.id;
 			var inputId = form.querySelector('textarea[name="message"]').id;
 			var messageInput = document.getElementById(inputId);
+			if (window.openVibelyRequestComposerFocus) {
+				var requestInitialComposerFocus = function() {
+					var liveForm = document.getElementById(formId);
+					if (liveForm === form) window.openVibelyRequestComposerFocus({ root: form, reason: 'fragment-init' });
+				};
+				if (document.readyState === 'loading') window.addEventListener('load', requestInitialComposerFocus, { once: true });
+				else requestInitialComposerFocus();
+			}
 			var sessionInput = form.querySelector('input[name="attachment_session_id"]');
 			var fileInput = form.querySelector('input[type="file"]');
 			var preview = form.querySelector('[id$="-attachments-preview"]');
