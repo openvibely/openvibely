@@ -156,7 +156,11 @@ func (h *Handler) listAgentDefinitions(ctx context.Context) []repository.AgentTa
 	if h.agentRepo == nil {
 		return nil
 	}
-	agentDefs, err := h.agentRepo.ListTaskUIOptions(ctx)
+	loader := h.taskUIAgentOptionsLoader
+	if loader == nil {
+		loader = h.agentRepo.ListTaskUIOptions
+	}
+	agentDefs, err := loader(ctx)
 	if err != nil {
 		applog.Infof("[handler] listAgentDefinitions error: %v", err)
 		return nil

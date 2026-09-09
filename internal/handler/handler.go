@@ -79,6 +79,8 @@ type Handler struct {
 	reviewCommentRepo          *repository.ReviewCommentRepo
 	customPersonalityRepo      *repository.CustomPersonalityRepo
 	agentRepo                  *repository.AgentRepo
+	// taskUIAgentOptionsLoader is a test seam; production uses agentRepo.ListTaskUIOptions.
+	taskUIAgentOptionsLoader   func(context.Context) ([]repository.AgentTaskUIOption, error)
 	lifecycleRepo              *repository.LifecycleRepo
 	worktreeSvc                *service.WorktreeService
 	taskPullRequestRepo        *repository.TaskPullRequestRepo
