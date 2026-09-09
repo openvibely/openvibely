@@ -647,46 +647,51 @@ func (s *GitHubService) DefaultBranch(ctx context.Context, repo *GitHubRepoRef) 
 	return strings.TrimSpace(payload.DefaultBranch), nil
 }
 
-func (s *GitHubService) ReplaceBranchHead(ctx context.Context, repo *GitHubRepoRef, req GitHubReplaceBranchHeadRequest) error {
+func (s *GitHubService) ReplaceBranchHead(ctx context.Context, repo *GitHubRepoRef, req GitHubReplaceBranchHeadRequest) (string, error) {
 	if repo == nil {
-		return fmt.Errorf("repository reference is required")
+		return "", fmt.Errorf("repository reference is required")
 	}
 	dir := strings.TrimSpace(req.WorktreePath)
 	if dir == "" {
-		return fmt.Errorf("worktree path is required")
+		return "", fmt.Errorf("worktree path is required")
 	}
 	branch := strings.TrimSpace(req.Branch)
 	if branch == "" {
-		return fmt.Errorf("branch is required")
+		return "", fmt.Errorf("branch is required")
 	}
 	expectedHead := strings.ToLower(strings.TrimSpace(req.ExpectedHead))
 	if !isGitHubCommitSHA(expectedHead) {
-		return fmt.Errorf("expected remote head must be a 40-character GitHub commit SHA")
+		return "", fmt.Errorf("expected remote head must be a 40-character GitHub commit SHA")
 	}
 	if _, err := s.runGit(ctx, dir, nil, "check-ref-format", "refs/heads/"+branch); err != nil {
-		return fmt.Errorf("invalid replacement branch %q: %w", branch, err)
+		return "", fmt.Errorf("invalid replacement branch %q: %w", branch, err)
 	}
 	currentBranch, err := s.runGit(ctx, dir, nil, "symbolic-ref", "--quiet", "--short", "HEAD")
 	if err != nil {
-		return fmt.Errorf("resolving replacement worktree branch: %w", err)
+		return "", fmt.Errorf("resolving replacement worktree branch: %w", err)
 	}
 	if strings.TrimSpace(string(currentBranch)) != branch {
-		return fmt.Errorf("worktree must be checked out on task branch %q before replacing pull request history", branch)
+		return "", fmt.Errorf("worktree must be checked out on task branch %q before replacing pull request history", branch)
 	}
 	status, err := s.runGit(ctx, dir, nil, "status", "--porcelain", "--untracked-files=all")
 	if err != nil {
-		return fmt.Errorf("checking replacement worktree: %w", err)
+		return "", fmt.Errorf("checking replacement worktree: %w", err)
 	}
 	if strings.TrimSpace(string(status)) != "" {
-		return fmt.Errorf("worktree must be clean before replacing pull request branch history")
+		return "", fmt.Errorf("worktree must be clean before replacing pull request branch history")
 	}
-	if _, err := s.runGit(ctx, dir, nil, "rev-parse", "--verify", "HEAD^{commit}"); err != nil {
-		return fmt.Errorf("resolving replacement worktree HEAD: %w", err)
+	head, err := s.runGit(ctx, dir, nil, "rev-parse", "--verify", "HEAD^{commit}")
+	if err != nil {
+		return "", fmt.Errorf("resolving replacement worktree HEAD: %w", err)
+	}
+	headSHA := strings.TrimSpace(string(head))
+	if !isGitHubCommitSHA(headSHA) {
+		return "", fmt.Errorf("replacement worktree HEAD is not a GitHub commit SHA")
 	}
 
 	token, err := s.createOperationAccessToken(ctx, githubAPIBaseURLForRepo(repo, s.apiBaseURL))
 	if err != nil {
-		return err
+		return "", err
 	}
 	remoteURL := strings.TrimSpace(repo.CloneURL)
 	if remoteURL == "" && strings.TrimSpace(repo.HTMLURL) != "" {
@@ -698,9 +703,9 @@ func (s *GitHubService) ReplaceBranchHead(ctx context.Context, repo *GitHubRepoR
 	lease := fmt.Sprintf("--force-with-lease=refs/heads/%s:%s", branch, expectedHead)
 	refspec := fmt.Sprintf("HEAD:refs/heads/%s", branch)
 	if _, err := s.runGit(ctx, dir, gitHubTokenEnvForURL(token, remoteURL), "push", lease, remoteURL, refspec); err != nil {
-		return fmt.Errorf("lease-guarded branch replacement failed; remote head may have changed: %w", err)
+		return "", fmt.Errorf("lease-guarded branch replacement failed; remote head may have changed: %w", err)
 	}
-	return nil
+	return headSHA, nil
 }
 
 func isGitHubCommitSHA(value string) bool {

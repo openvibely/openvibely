@@ -5871,7 +5871,7 @@ func TestCompleteWithSuccess_GitHubSDLCImplementationWithoutPullRequestFailsTask
 	require.Equal(t, models.CategoryBacklog, updatedTask.Category)
 }
 
-func TestCompleteWithSuccess_GitHubSDLCImplementationWithPullRequestCompletesTask(t *testing.T) {
+func TestCompleteWithSuccess_GitHubSDLCImplementationWithSuccessfullyReplacedPullRequestCompletesTask(t *testing.T) {
 	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
 	ctx := context.Background()
 	prRepo := repository.NewTaskPullRequestRepo(db)
@@ -5883,25 +5883,39 @@ func TestCompleteWithSuccess_GitHubSDLCImplementationWithPullRequestCompletesTas
 	require.NoError(t, llmConfigRepo.Create(ctx, agent))
 	project := &models.Project{Name: "GitHub SDLC PR published", RepoURL: "https://github.com/openvibely/openvibely", RepoPath: t.TempDir()}
 	require.NoError(t, h.projectSvc.Create(ctx, project))
+	previousHead := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	replacementHead := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	liveHead := previousHead
 	h.SetGitHubService(&fakeGitHubService{
 		resolveRepoFn: func(context.Context, string, string) (*service.GitHubRepoRef, error) {
 			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely", HTMLURL: "https://github.com/openvibely/openvibely"}, nil
 		},
 		getPullRequestFn: func(context.Context, *service.GitHubRepoRef, int) (*service.GitHubPullRequest, error) {
-			return &service.GitHubPullRequest{Number: 123, URL: "https://github.com/openvibely/openvibely/pull/123", State: "open", HeadRef: "task/issue-42", HeadRepoFullName: "openvibely/openvibely", HeadSHA: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}, nil
+			return &service.GitHubPullRequest{Number: 123, URL: "https://github.com/openvibely/openvibely/pull/123", State: "open", HeadRef: "task/issue-42", HeadRepoFullName: "openvibely/openvibely", HeadSHA: liveHead}, nil
+		},
+		replaceBranchHeadFn: func(context.Context, *service.GitHubRepoRef, service.GitHubReplaceBranchHeadRequest) (string, error) {
+			liveHead = replacementHead
+			return replacementHead, nil
 		},
 	})
 	_, err := db.ExecContext(ctx, `INSERT INTO automations (id, project_id, stable_key, name, automation_type, lifecycle_state, created_via)
 		VALUES ('github-sdlc-completion-automation', ?, 'github-sdlc-completion', 'GitHub SDLC', 'custom', 'active', 'test')`, project.ID)
 	require.NoError(t, err)
 
-	task := &models.Task{ProjectID: project.ID, Title: "Implement GitHub issue #42", Category: models.CategoryActive, Priority: 2, Prompt: "Test", Status: models.StatusRunning, WorktreeBranch: "task/issue-42", CreatedVia: "automation:github-sdlc-completion-automation:implementation"}
+	task := &models.Task{ProjectID: project.ID, Title: "Implement GitHub issue #42", Category: models.CategoryActive, Priority: 2, Prompt: "Test", Status: models.StatusRunning, WorktreePath: t.TempDir(), WorktreeBranch: "task/issue-42", CreatedVia: "automation:github-sdlc-completion-automation:implementation"}
 	require.NoError(t, h.taskSvc.Create(ctx, task))
 	_, err = db.ExecContext(ctx, `INSERT INTO automation_github_issue_task_provenance
 		(project_id, automation_id, task_id, issue_resource_id, implementation_node_key)
 		VALUES (?, 'github-sdlc-completion-automation', ?, 'github_issue:openvibely/openvibely:42', 'implementation')`, project.ID, task.ID)
 	require.NoError(t, err)
-	require.NoError(t, prRepo.Upsert(ctx, &models.TaskPullRequest{TaskID: task.ID, PRNumber: 123, PRURL: "https://github.com/openvibely/openvibely/pull/123", PRState: "open", PublishedHeadSHA: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}))
+	require.NoError(t, prRepo.Upsert(ctx, &models.TaskPullRequest{TaskID: task.ID, PRNumber: 123, PRURL: "https://github.com/openvibely/openvibely/pull/123", PRState: "open", PublishedHeadSHA: previousHead}))
+
+	replaced, err := h.newTaskPullRequestService().ReplaceBranchHeadForTask(ctx, project, task, previousHead)
+	require.NoError(t, err)
+	require.Equal(t, replacementHead, replaced.PublishedHeadSHA)
+	persisted, err := prRepo.GetByTaskID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, replacementHead, persisted.PublishedHeadSHA)
 
 	exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "Test"}
 	require.NoError(t, h.execRepo.Create(ctx, exec))

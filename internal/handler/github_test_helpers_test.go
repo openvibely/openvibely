@@ -17,7 +17,7 @@ type fakeGitHubService struct {
 	resolveRepoFn          func(ctx context.Context, repoURL, repoPath string) (*service.GitHubRepoRef, error)
 	defaultBranchFn        func(ctx context.Context, repo *service.GitHubRepoRef) (string, error)
 	publishBranchFn        func(ctx context.Context, repo *service.GitHubRepoRef, publishReq service.GitHubPublishBranchRequest) (*service.GitHubPublishBranchResult, error)
-	replaceBranchHeadFn    func(ctx context.Context, repo *service.GitHubRepoRef, req service.GitHubReplaceBranchHeadRequest) error
+	replaceBranchHeadFn    func(ctx context.Context, repo *service.GitHubRepoRef, req service.GitHubReplaceBranchHeadRequest) (string, error)
 	getPullRequestFn       func(ctx context.Context, repo *service.GitHubRepoRef, number int) (*service.GitHubPullRequest, error)
 	findPRFn               func(ctx context.Context, repo *service.GitHubRepoRef, branch string) (*service.GitHubPullRequest, error)
 	createPRFn             func(ctx context.Context, repo *service.GitHubRepoRef, createReq service.GitHubCreatePullRequestRequest) (*service.GitHubPullRequest, error)
@@ -99,11 +99,11 @@ func (f *fakeGitHubService) PublishBranch(ctx context.Context, repo *service.Git
 	return &service.GitHubPublishBranchResult{HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
 }
 
-func (f *fakeGitHubService) ReplaceBranchHead(ctx context.Context, repo *service.GitHubRepoRef, req service.GitHubReplaceBranchHeadRequest) error {
+func (f *fakeGitHubService) ReplaceBranchHead(ctx context.Context, repo *service.GitHubRepoRef, req service.GitHubReplaceBranchHeadRequest) (string, error) {
 	if f != nil && f.replaceBranchHeadFn != nil {
 		return f.replaceBranchHeadFn(ctx, repo, req)
 	}
-	return nil
+	return "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", nil
 }
 
 func (f *fakeGitHubService) GetPullRequest(ctx context.Context, repo *service.GitHubRepoRef, number int) (*service.GitHubPullRequest, error) {
