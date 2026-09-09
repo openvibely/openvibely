@@ -2642,11 +2642,14 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					let draggedTaskIds = [];
 					let pendingKanbanMoves = new Map();
 					let kanbanMoveTransactions = new Map();
+					let pendingKanbanReconciliations = new Map();
 					let kanbanMoveGeneration = 0;
 					let latestAcceptedKanbanMoveGeneration = 0;
 					let kanbanBoardRequestGeneration = 0;
+					let latestAcceptedKanbanBoardRequestGeneration = 0;
+					let latestAcceptedKanbanReconciliationGeneration = 0;
 
-					window.hasPendingKanbanMoves = function() { return pendingKanbanMoves.size > 0; };
+					window.hasPendingKanbanMoves = function() { return pendingKanbanMoves.size > 0 || pendingKanbanReconciliations.size > 0; };
 
 				window.isDragging = false;
 				let autoScrollInterval = null;
@@ -3319,20 +3322,48 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						detail.serverResponse = responseBoard.outerHTML;
 					}
 
-					function forceKanbanAuthoritativeRefresh() {
+					function forceKanbanAuthoritativeRefresh(generation) {
+						const reconciliation = pendingKanbanReconciliations.get(generation);
+						if (!reconciliation || reconciliation.inFlight) return;
 						const page = document.getElementById('tasks-page');
 						const projectID = page && page.getAttribute('data-project-id');
-						if (!projectID || !window.htmx) return;
+						if (!projectID || !window.htmx) {
+							pendingKanbanReconciliations.delete(generation);
+							return;
+						}
+						reconciliation.inFlight = true;
+						const source = document.createElement('span');
+						source.hidden = true;
+						source.setAttribute('data-kanban-reconciliation-generation', String(generation));
+						document.body.appendChild(source);
 						htmx.ajax('GET', '/tasks?project_id=' + encodeURIComponent(projectID) + '&refresh_source=move', {
+							source: source,
 							target: '#kanban-board',
 							swap: 'outerHTML'
 						});
+					}
+
+					function finishKanbanReconciliation(generation) {
+						const reconciliation = pendingKanbanReconciliations.get(generation);
+						if (reconciliation && reconciliation.timer) clearTimeout(reconciliation.timer);
+						pendingKanbanReconciliations.delete(generation);
+						window.dispatchEvent(new CustomEvent('kanban-refresh-unblocked'));
+					}
+
+					function retryKanbanReconciliation(generation) {
+						const reconciliation = pendingKanbanReconciliations.get(generation);
+						if (!reconciliation || reconciliation.timer) return;
+						reconciliation.timer = setTimeout(function() {
+							reconciliation.timer = null;
+							forceKanbanAuthoritativeRefresh(generation);
+						}, 100);
 					}
 
 					function settleKanbanMove(generation, successful, xhr) {
 						const transaction = kanbanMoveTransactions.get(generation);
 						if (!transaction) return;
 						kanbanMoveTransactions.delete(generation);
+						pendingKanbanReconciliations.set(generation, {inFlight: false, timer: null});
 						transaction.taskIDs.forEach(function(taskID) {
 							const pending = pendingKanbanMoves.get(taskID);
 							if (pending && pending.generation === generation) pendingKanbanMoves.delete(taskID);
@@ -3340,8 +3371,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						if (!successful && xhr && xhr.status === 400) {
 							alert(xhr.responseText || transaction.failureMessage);
 						}
-						forceKanbanAuthoritativeRefresh();
-						window.dispatchEvent(new CustomEvent('kanban-refresh-unblocked'));
+						forceKanbanAuthoritativeRefresh(generation);
 					}
 
 					function beginKanbanMove(taskIDs, destination, method, path, values, failureMessage) {
@@ -3767,7 +3797,9 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							xhr.__openVibelyKanbanRequestGeneration = ++kanbanBoardRequestGeneration;
 							xhr.__openVibelyKanbanMoveGenerationAtStart = kanbanMoveGeneration;
 							const moveGeneration = source && parseInt(source.getAttribute('data-kanban-move-generation') || '', 10);
+							const reconciliationGeneration = source && parseInt(source.getAttribute('data-kanban-reconciliation-generation') || '', 10);
 							if (moveGeneration) xhr.__openVibelyKanbanMoveGeneration = moveGeneration;
+							if (reconciliationGeneration) xhr.__openVibelyKanbanReconciliationGeneration = reconciliationGeneration;
 						}
 						const sourceDropdown = kanbanDropdownForTarget(source);
 						if (sourceDropdown) closeKanbanMenu(sourceDropdown, false);
@@ -3784,12 +3816,17 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						if (event.detail.target && event.detail.target.id === 'kanban-board') {
 							const xhr = event.detail && event.detail.xhr;
 							const responseRequestGeneration = xhr && xhr.__openVibelyKanbanRequestGeneration || 0;
-							if (responseRequestGeneration && responseRequestGeneration < kanbanBoardRequestGeneration) {
+							const responseMoveGeneration = xhr && xhr.__openVibelyKanbanMoveGeneration || 0;
+							const reconciliationGeneration = xhr && xhr.__openVibelyKanbanReconciliationGeneration || 0;
+							if (responseRequestGeneration && responseRequestGeneration < latestAcceptedKanbanBoardRequestGeneration) {
 								event.detail.shouldSwap = false;
 								return;
 							}
-							const responseMoveGeneration = xhr && xhr.__openVibelyKanbanMoveGeneration || 0;
 							if (responseMoveGeneration && responseMoveGeneration < latestAcceptedKanbanMoveGeneration) {
+								event.detail.shouldSwap = false;
+								return;
+							}
+							if (reconciliationGeneration && reconciliationGeneration < latestAcceptedKanbanReconciliationGeneration) {
 								event.detail.shouldSwap = false;
 								return;
 							}
@@ -3797,7 +3834,6 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 								event.detail.shouldSwap = false;
 								return;
 							}
-							if (responseMoveGeneration) latestAcceptedKanbanMoveGeneration = Math.max(latestAcceptedKanbanMoveGeneration, responseMoveGeneration);
 							applyPendingKanbanMovesToResponse(event.detail);
 							closeKanbanSubmenus(null, null);
 							if (!savedKanbanInteraction) snapshotKanbanInteraction(event.detail.target);
@@ -3820,17 +3856,42 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					document.addEventListener('htmx:afterRequest', function(event) {
 						const detail = event.detail || {};
 						const source = detail.elt;
+						const xhr = detail.xhr;
+						const reconciliationGeneration = source && parseInt(source.getAttribute('data-kanban-reconciliation-generation') || '', 10);
+						if (reconciliationGeneration) {
+							if (source.remove) source.remove();
+							const reconciliation = pendingKanbanReconciliations.get(reconciliationGeneration);
+							if (!reconciliation) return;
+							reconciliation.inFlight = false;
+							const accepted = !!(detail.successful && xhr && xhr.status >= 200 && xhr.status < 300 && xhr.__openVibelyKanbanReconciliationAccepted);
+							if (accepted || reconciliationGeneration < latestAcceptedKanbanReconciliationGeneration) {
+								finishKanbanReconciliation(reconciliationGeneration);
+							} else {
+								retryKanbanReconciliation(reconciliationGeneration);
+							}
+							return;
+						}
 						const generation = source && parseInt(source.getAttribute('data-kanban-move-generation') || '', 10);
 						if (!generation) return;
 						if (source.remove) source.remove();
-						const xhr = detail.xhr;
 						const successful = !!(detail.successful && xhr && xhr.status >= 200 && xhr.status < 300);
 						settleKanbanMove(generation, successful, xhr);
 					});
 
 					// Restore surviving selections, menu focus, and scroll after authoritative board replacement.
 					document.addEventListener('htmx:afterSwap', function(event) {
-						if (event.detail.target && event.detail.target.id === 'kanban-board') {						const liveBoard = document.getElementById('kanban-board');
+						if (event.detail.target && event.detail.target.id === 'kanban-board') {
+							const xhr = event.detail && event.detail.xhr;
+							const responseRequestGeneration = xhr && xhr.__openVibelyKanbanRequestGeneration || 0;
+							const responseMoveGeneration = xhr && xhr.__openVibelyKanbanMoveGeneration || 0;
+							const reconciliationGeneration = xhr && xhr.__openVibelyKanbanReconciliationGeneration || 0;
+							if (responseRequestGeneration) latestAcceptedKanbanBoardRequestGeneration = Math.max(latestAcceptedKanbanBoardRequestGeneration, responseRequestGeneration);
+							if (responseMoveGeneration) latestAcceptedKanbanMoveGeneration = Math.max(latestAcceptedKanbanMoveGeneration, responseMoveGeneration);
+							if (reconciliationGeneration) {
+								latestAcceptedKanbanReconciliationGeneration = Math.max(latestAcceptedKanbanReconciliationGeneration, reconciliationGeneration);
+								xhr.__openVibelyKanbanReconciliationAccepted = true;
+							}
+							const liveBoard = document.getElementById('kanban-board');
 						if (liveBoard) restoreKanbanInteraction(liveBoard);
 
 
