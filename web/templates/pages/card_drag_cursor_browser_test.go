@@ -141,6 +141,14 @@ window.addEventListener('DOMContentLoaded', function() {
     card.dispatchEvent(new PointerEvent('pointermove', {bubbles:true, cancelable:true, pointerId:pointerId, pointerType:'mouse', buttons:1, clientX:edgeX, clientY:edgeY}));
     if (!card.classList.contains('dragging')) fail(label + ': pointer movement should mark the card as dragging');
     if (getComputedStyle(card).position !== 'fixed' || getComputedStyle(card).transform === 'none') fail(label + ': real card should visibly move during auto-scroll');
+    var selectedTaskCards = containerSelector === '#kanban-board' ? Array.from(container.querySelectorAll('.task-selected')) : [];
+    if (selectedTaskCards.length > 1) {
+      selectedTaskCards.forEach(function(selectedCard) {
+        if (!selectedCard.classList.contains('dragging')) fail(label + ': every selected task should enter dragging state');
+        if (getComputedStyle(selectedCard).position !== 'fixed' || getComputedStyle(selectedCard).transform === 'none') fail(label + ': every selected task should visibly move with the pointer');
+      });
+      if (container.querySelectorAll('[data-pointer-drag-placeholder]').length !== selectedTaskCards.length) fail(label + ': every selected task should retain its source placeholder');
+    }
     if (!document.querySelector('[data-pointer-drag-placeholder]')) fail(label + ': source slot should retain its placeholder during auto-scroll');
     var dropX = edgeX;
     var dropY = edgeY;
@@ -166,7 +174,8 @@ window.addEventListener('DOMContentLoaded', function() {
     if (getComputedStyle(card).cursor !== 'grabbing') fail(label + ': auto-scroll should preserve grabbing cursor');
     card.dispatchEvent(new PointerEvent('pointerup', {bubbles:true, cancelable:true, pointerId:pointerId, pointerType:'mouse', button:0, buttons:0, clientX:dropX, clientY:dropY}));
     await waitFor(function() { return !card.classList.contains('dragging'); }, label + ' auto-scroll drop cleanup');
-    if (card.style.transform || document.querySelector('[data-pointer-drag-placeholder]')) fail(label + ': release should restore card layout');
+    if (selectedTaskCards.some(function(selectedCard) { return selectedCard.style.transform || selectedCard.classList.contains('dragging'); }) || document.querySelector('[data-pointer-drag-placeholder]')) fail(label + ': release should restore every selected card layout');
+    if (card.style.transform) fail(label + ': release should restore card transform');
     if (getComputedStyle(card).cursor !== 'grab') fail(label + ': release should restore grab cursor');
     if (originalContainerStyle === null) container.removeAttribute('style');
     else container.setAttribute('style', originalContainerStyle);
