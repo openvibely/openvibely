@@ -313,7 +313,15 @@ func (r *ExecutionRepo) CreateDirectTaskFollowupOrQueue(ctx context.Context, e *
 	err := withImmediateTx(ctx, r.db, func(dbexec SQLExecutor) error {
 		var status models.TaskStatus
 		var projectID string
-		if err := dbexec.QueryRowContext(ctx, `SELECT status, project_id FROM tasks WHERE id = ?`, e.TaskID).Scan(&status, &projectID); err != nil {
+		if expected, guarded := activeLaneExpectedState(ctx, e.TaskID); guarded {
+			var category models.TaskCategory
+			if err := dbexec.QueryRowContext(ctx, `SELECT category, status, project_id FROM tasks WHERE id = ?`, e.TaskID).Scan(&category, &status, &projectID); err != nil {
+				return fmt.Errorf("loading task for guarded follow-up admission: %w", err)
+			}
+			if category != expected.ExpectedCategory || status != expected.ExpectedStatus {
+				return fmt.Errorf("%w: %s", ErrActiveLaneTaskChanged, e.TaskID)
+			}
+		} else if err := dbexec.QueryRowContext(ctx, `SELECT status, project_id FROM tasks WHERE id = ?`, e.TaskID).Scan(&status, &projectID); err != nil {
 			return fmt.Errorf("loading task for follow-up admission: %w", err)
 		}
 		var protected int

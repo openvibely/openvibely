@@ -202,6 +202,15 @@ func (s *SwarmService) startPlanner(ctx context.Context, parentTaskID string, st
 	if err != nil || parent == nil {
 		return fmt.Errorf("loading swarm parent: %w", err)
 	}
+	if _, guarded := repository.ActiveLaneExpectedState(ctx, parentTaskID); guarded {
+		if err := s.taskRepo.PrepareSwarmParentForActiveLane(ctx, parentTaskID); err != nil {
+			return err
+		}
+		parent, err = s.taskRepo.GetByID(ctx, parentTaskID)
+		if err != nil || parent == nil {
+			return fmt.Errorf("reloading guarded swarm parent: %w", err)
+		}
+	}
 	if s.workerSvc != nil {
 		s.workerSvc.ClearCancellationRequested(parent.ID)
 	}

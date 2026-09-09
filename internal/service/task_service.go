@@ -33,6 +33,7 @@ type TaskService struct {
 	failedTaskThreadFollowupRetryHook func(context.Context, string) (bool, error)
 	updateCategoryTaskLoader          func(context.Context, string) (*models.Task, error)
 	beforePendingSessionRemoval       func(string)
+	beforeActiveLaneLifecycleRoute    func()
 }
 
 func NewTaskService(repo *repository.TaskRepo, _ *repository.AttachmentRepo, workerSvc *WorkerService) *TaskService {
@@ -348,11 +349,16 @@ func (s *TaskService) MoveTasksToActiveLane(ctx context.Context, projectID strin
 	}
 	admissions, err := s.repo.MoveTasksToActiveLane(ctx, projectID, moves, status)
 	if errors.Is(err, repository.ErrActiveLaneLifecycleOwned) && len(moves) == 1 {
+		move := moves[0]
+		routeCtx := repository.WithActiveLaneExpectedState(ctx, move)
+		if s.beforeActiveLaneLifecycleRoute != nil {
+			s.beforeActiveLaneLifecycleRoute()
+		}
 		var routeErr error
-		if moves[0].ExpectedCategory == models.CategoryActive {
-			routeErr = s.RunTask(ctx, moves[0].ID)
+		if move.ExpectedCategory == models.CategoryActive || move.ExpectedStatus == models.StatusFailed {
+			routeErr = s.RunTask(routeCtx, move.ID)
 		} else {
-			routeErr = s.UpdateCategory(ctx, moves[0].ID, models.CategoryActive)
+			routeErr = s.UpdateCategory(routeCtx, move.ID, models.CategoryActive)
 		}
 		if routeErr != nil {
 			return routeErr
@@ -383,6 +389,39 @@ func (s *TaskService) UpdateCategory(ctx context.Context, id string, category mo
 	if err != nil {
 		applog.Infof("[task-svc] UpdateCategory error fetching previous task state: %v", err)
 		return err
+	}
+	if _, guarded := repository.ActiveLaneExpectedState(ctx, id); guarded && category == models.CategoryActive {
+		if previousTask == nil {
+			return fmt.Errorf("%w: %s", repository.ErrActiveLaneTaskChanged, id)
+		}
+		if s.queuedTaskThreadFollowupHook != nil {
+			handled, hookErr := s.queuedTaskThreadFollowupHook(ctx, id)
+			if hookErr != nil {
+				return hookErr
+			}
+			if handled {
+				s.resumeGoalStoppedByUser(ctx, id, "user")
+				return nil
+			}
+		}
+		if s.failedTaskThreadFollowupRetryHook != nil {
+			handled, hookErr := s.failedTaskThreadFollowupRetryHook(ctx, id)
+			if hookErr != nil {
+				return hookErr
+			}
+			if handled {
+				s.resumeGoalStoppedByUser(ctx, id, "user")
+				return nil
+			}
+		}
+		if previousTask.SwarmRole == models.SwarmRoleParent && s.swarmSvc != nil {
+			if startErr := s.swarmSvc.StartPlanner(ctx, id); startErr != nil {
+				return startErr
+			}
+			s.resumeGoalStoppedByUser(ctx, id, "user")
+			return nil
+		}
+		return fmt.Errorf("%w: %s", repository.ErrActiveLaneTaskChanged, id)
 	}
 	rollbackActivation := func(activationErr error) error {
 		if category != models.CategoryActive || previousTask == nil {
@@ -656,6 +695,36 @@ func (s *TaskService) RunTask(ctx context.Context, id string) error {
 	if task == nil {
 		applog.Infof("[task-svc] RunTask not found id=%s", id)
 		return fmt.Errorf("task not found: %s", id)
+	}
+	if _, guarded := repository.ActiveLaneExpectedState(ctx, id); guarded {
+		if s.queuedTaskThreadFollowupHook != nil {
+			handled, hookErr := s.queuedTaskThreadFollowupHook(ctx, id)
+			if hookErr != nil {
+				return hookErr
+			}
+			if handled {
+				s.resumeGoalStoppedByUser(ctx, id, "user")
+				return nil
+			}
+		}
+		if s.failedTaskThreadFollowupRetryHook != nil {
+			handled, hookErr := s.failedTaskThreadFollowupRetryHook(ctx, id)
+			if hookErr != nil {
+				return hookErr
+			}
+			if handled {
+				s.resumeGoalStoppedByUser(ctx, id, "user")
+				return nil
+			}
+		}
+		if task.SwarmRole == models.SwarmRoleParent && s.swarmSvc != nil {
+			if startErr := s.swarmSvc.StartPlanner(ctx, id); startErr != nil {
+				return startErr
+			}
+			s.resumeGoalStoppedByUser(ctx, id, "user")
+			return nil
+		}
+		return fmt.Errorf("%w: %s", repository.ErrActiveLaneTaskChanged, id)
 	}
 	s.resumeGoalStoppedByUser(ctx, id, "user")
 
