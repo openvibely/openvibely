@@ -817,22 +817,25 @@ func (s *GitHubService) PublishBranch(ctx context.Context, repo *GitHubRepoRef, 
 			return nil, err
 		}
 	}
+	baseIsAncestor := parentSHA == remoteBaseSHA
 	if remoteBranchSHA != "" {
 		remoteBranchTreeSHA, treeErr := s.githubCommitTreeSHA(ctx, token, repo, remoteBranchSHA)
 		if treeErr != nil {
 			return nil, fmt.Errorf("resolving remote publish branch tree %q: %w", branch, treeErr)
 		}
-		if remoteBranchTreeSHA == treeSHA {
-			baseIsAncestor, ancestryErr := s.githubCommitDescendsFrom(ctx, token, repo, remoteBaseSHA, remoteBranchSHA)
-			if ancestryErr != nil {
-				return nil, fmt.Errorf("checking remote publish branch ancestry %q: %w", branch, ancestryErr)
+		if !baseIsAncestor {
+			baseIsAncestor, err = s.githubCommitDescendsFrom(ctx, token, repo, remoteBaseSHA, remoteBranchSHA)
+			if err != nil {
+				return nil, fmt.Errorf("checking remote publish branch ancestry %q: %w", branch, err)
 			}
+		}
+		if remoteBranchTreeSHA == treeSHA {
 			if baseIsAncestor {
 				return &GitHubPublishBranchResult{HeadSHA: remoteBranchSHA}, nil
 			}
 		}
 	}
-	commitSHA, err := s.createGitHubCommit(ctx, token, repo, message, treeSHA, githubPublishCommitParents(parentSHA, remoteBaseSHA), publishReq.CommitterName, publishReq.CommitterEmail)
+	commitSHA, err := s.createGitHubCommit(ctx, token, repo, message, treeSHA, githubPublishCommitParents(parentSHA, remoteBaseSHA, baseIsAncestor), publishReq.CommitterName, publishReq.CommitterEmail)
 	if err != nil {
 		return nil, err
 	}
@@ -852,16 +855,19 @@ func (s *GitHubService) PublishBranch(ctx context.Context, repo *GitHubRepoRef, 
 		if treeErr != nil {
 			return nil, fmt.Errorf("resolving refreshed remote publish branch tree %q: %w", branch, treeErr)
 		}
-		if latestBranchTreeSHA == treeSHA {
-			baseIsAncestor, ancestryErr := s.githubCommitDescendsFrom(ctx, token, repo, remoteBaseSHA, latestBranchSHA)
-			if ancestryErr != nil {
-				return nil, fmt.Errorf("checking refreshed remote publish branch ancestry %q: %w", branch, ancestryErr)
+		latestBaseIsAncestor := latestBranchSHA == remoteBaseSHA
+		if !latestBaseIsAncestor {
+			latestBaseIsAncestor, refErr = s.githubCommitDescendsFrom(ctx, token, repo, remoteBaseSHA, latestBranchSHA)
+			if refErr != nil {
+				return nil, fmt.Errorf("checking refreshed remote publish branch ancestry %q: %w", branch, refErr)
 			}
-			if baseIsAncestor {
+		}
+		if latestBranchTreeSHA == treeSHA {
+			if latestBaseIsAncestor {
 				return &GitHubPublishBranchResult{HeadSHA: latestBranchSHA}, nil
 			}
 		}
-		retryCommitSHA, retryErr := s.createGitHubCommit(ctx, token, repo, message, treeSHA, githubPublishCommitParents(latestBranchSHA, remoteBaseSHA), publishReq.CommitterName, publishReq.CommitterEmail)
+		retryCommitSHA, retryErr := s.createGitHubCommit(ctx, token, repo, message, treeSHA, githubPublishCommitParents(latestBranchSHA, remoteBaseSHA, latestBaseIsAncestor), publishReq.CommitterName, publishReq.CommitterEmail)
 		if retryErr != nil {
 			return nil, retryErr
 		}
@@ -1268,14 +1274,14 @@ func (s *GitHubService) createGitHubBlob(ctx context.Context, token string, repo
 	return strings.TrimSpace(created.SHA), nil
 }
 
-func githubPublishCommitParents(primaryParentSHA, baseSHA string) []string {
+func githubPublishCommitParents(primaryParentSHA, baseSHA string, baseIsAncestor bool) []string {
 	primaryParentSHA = strings.TrimSpace(primaryParentSHA)
 	baseSHA = strings.TrimSpace(baseSHA)
 	parents := make([]string, 0, 2)
 	if primaryParentSHA != "" {
 		parents = append(parents, primaryParentSHA)
 	}
-	if baseSHA != "" && baseSHA != primaryParentSHA {
+	if baseSHA != "" && baseSHA != primaryParentSHA && !baseIsAncestor {
 		parents = append(parents, baseSHA)
 	}
 	return parents
