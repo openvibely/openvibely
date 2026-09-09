@@ -28,7 +28,10 @@ Use this to plan load across days/hours instead of crowding everything into one 
 
 1. Click `+ New Scheduled Task`.
 2. Fill task fields (`Title`, `Prompt`, optional model, priority, tag).
-3. Optional: enable `Auto-merge to target branch on completion` for worktree changes that should merge automatically after the task completes. Leave it unchecked to keep the existing manual-merge behavior. This task-level option does not change the schedule cadence.
+3. Optional: configure either independent, default-off worktree merge trigger:
+   - `Auto-merge to target branch on successful completion` merges after a task run completes successfully.
+   - `Auto-merge to target branch when goal is achieved` merges after the task's stored goal reaches the achieved state, including when the Goal Agent marks it achieved after lifecycle review.
+   Enable either or both as needed. Neither option changes the schedule cadence, and leaving both unchecked keeps manual-merge behavior.
 4. Set schedule fields:
    - `Run At`
    - `Repeat` (`Once`, `Every N Seconds`, `Every N Minutes`, `Every N Hours`, `Daily`, `Weekly`, `Monthly`)

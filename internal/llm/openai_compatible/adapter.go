@@ -291,14 +291,14 @@ func (a *Adapter) callDirect(ctx context.Context, req llmcontracts.AgentRequest,
 		System:           systemPrompt,
 		WorkDir:          effectiveWorkDir(workDir),
 		DisableTools:     req.DisableTools,
-		SkipDefaultTools: llmcontracts.RuntimeSkipDefaultTools(llmcontracts.RuntimeToolsFromContext(ctx)),
+		SkipDefaultTools: taskSkipDefaultTools(ctx, req.AgentDefinition),
 		Attachments:      attachments,
 		ExtraTools:       runtimeTools(ctx),
 		ExtraHeaders:     extraHeaders,
 		FinalizeRequest:  finalizeRequest,
 		ExtraBody:        extraBody,
 		ToolExecutor:     toolExecutor(ctx, workDir),
-		ToolFilter:       toolFilter(ctx, true, models.ChatModeOrchestrate),
+		ToolFilter:       toolFilter(ctx, true, models.ChatModeOrchestrate, req.AgentDefinition),
 	})
 	err = a.persistReasoningContent(ctx, req.ExecID, req.Agent, client, err)
 	if err != nil {
@@ -338,14 +338,14 @@ func (a *Adapter) callTaskStreaming(ctx context.Context, req llmcontracts.AgentR
 		System:           llmprompt.BuildAgentSystemPrompt(req.ProjectInstructions, effectiveWorkDir(workDir)),
 		WorkDir:          effectiveWorkDir(workDir),
 		DisableTools:     req.DisableTools,
-		SkipDefaultTools: llmcontracts.RuntimeSkipDefaultTools(llmcontracts.RuntimeToolsFromContext(ctx)),
+		SkipDefaultTools: taskSkipDefaultTools(ctx, req.AgentDefinition),
 		Attachments:      attachments,
 		ExtraTools:       runtimeTools(ctx),
 		ExtraHeaders:     extraHeaders,
 		FinalizeRequest:  finalizeRequest,
 		ExtraBody:        extraBody,
 		ToolExecutor:     toolExecutor(ctx, workDir),
-		ToolFilter:       toolFilter(ctx, true, models.ChatModeOrchestrate),
+		ToolFilter:       toolFilter(ctx, true, models.ChatModeOrchestrate, req.AgentDefinition),
 		OnText:           streamText(sw),
 		OnToolUse:        streamToolUse(sw),
 		OnToolResult:     streamToolResult(sw),
@@ -396,14 +396,14 @@ func (a *Adapter) callChatStreaming(ctx context.Context, req llmcontracts.AgentR
 		System:           systemPrompt,
 		WorkDir:          effectiveWorkDir(workDir),
 		DisableTools:     disableTools,
-		SkipDefaultTools: chatSkipDefaultTools(ctx, req.Followup, req.ChatMode),
+		SkipDefaultTools: chatSkipDefaultTools(ctx, req.Followup, req.ChatMode, req.AgentDefinition),
 		Attachments:      attachments,
 		ExtraTools:       runtimeTools(ctx),
 		ExtraHeaders:     extraHeaders,
 		FinalizeRequest:  finalizeRequest,
 		ExtraBody:        extraBody,
 		ToolExecutor:     toolExecutor(ctx, workDir),
-		ToolFilter:       toolFilter(ctx, req.Followup, req.ChatMode),
+		ToolFilter:       toolFilter(ctx, req.Followup, req.ChatMode, req.AgentDefinition),
 		OnText:           streamText(sw),
 		OnToolUse:        streamToolUse(sw),
 		OnToolResult:     streamToolResult(sw),
@@ -596,6 +596,47 @@ func runtimeTools(ctx context.Context) []openaiclient.ToolDefinition {
 	return out
 }
 
+func mapBuiltInToolName(name string) string {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "read_file":
+		return "Read"
+	case "write_file":
+		return "Write"
+	case "edit_file":
+		return "Edit"
+	case "bash":
+		return "Bash"
+	case "list_files":
+		return "Glob"
+	case "grep_search":
+		return "Grep"
+	case "web_search", "web_search_preview":
+		return "WebSearch"
+	default:
+		return ""
+	}
+}
+
+func agentSkipDefaultTools(agentDef *models.Agent) bool {
+	return agentDef != nil && agentDef.ToolConfig.SkipDefaultTools
+}
+
+func agentAllowsBuiltInTool(agentDef *models.Agent, toolName string) bool {
+	var configuredTools []string
+	if agentDef != nil {
+		configuredTools = agentDef.Tools
+	}
+	return llmcontracts.AllowsBuiltInTool(toolName, llmcontracts.BuiltInToolPolicyOptions{
+		SkipDefaultTools: agentSkipDefaultTools(agentDef),
+		ConfiguredTools:  configuredTools,
+		MapToolName:      mapBuiltInToolName,
+	})
+}
+
+func taskSkipDefaultTools(ctx context.Context, agentDef *models.Agent) bool {
+	return agentSkipDefaultTools(agentDef) || llmcontracts.RuntimeSkipDefaultTools(llmcontracts.RuntimeToolsFromContext(ctx))
+}
+
 func toolExecutor(ctx context.Context, workDir string) func(context.Context, string, json.RawMessage) (string, bool, error) {
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)
 	return func(execCtx context.Context, name string, input json.RawMessage) (string, bool, error) {
@@ -609,15 +650,21 @@ func toolExecutor(ctx context.Context, workDir string) func(context.Context, str
 	}
 }
 
-func chatSkipDefaultTools(ctx context.Context, isTaskFollowup bool, chatMode models.ChatMode) bool {
+func chatSkipDefaultTools(ctx context.Context, isTaskFollowup bool, chatMode models.ChatMode, agentDef *models.Agent) bool {
+	if agentSkipDefaultTools(agentDef) {
+		return true
+	}
 	if isTaskFollowup || chatMode == models.ChatModePlan {
 		return llmcontracts.RuntimeSkipDefaultTools(llmcontracts.RuntimeToolsFromContext(ctx))
 	}
 	return true
 }
 
-func toolFilter(ctx context.Context, isTaskFollowup bool, chatMode models.ChatMode) func(string) bool {
-	return llmcontracts.ComposeRuntimeToolFilter(nil, llmcontracts.RuntimeToolsFromContext(ctx), llmcontracts.RuntimeToolPolicyOptions{
+func toolFilter(ctx context.Context, isTaskFollowup bool, chatMode models.ChatMode, agentDef *models.Agent) func(string) bool {
+	base := func(name string) bool {
+		return agentAllowsBuiltInTool(agentDef, name)
+	}
+	return llmcontracts.ComposeRuntimeToolFilter(base, llmcontracts.RuntimeToolsFromContext(ctx), llmcontracts.RuntimeToolPolicyOptions{
 		IsTaskFollowup:     isTaskFollowup,
 		ChatMode:           chatMode,
 		AllowsReadOnlyTool: llmcontracts.DefaultPlanModeAllowsReadOnlyTool,
