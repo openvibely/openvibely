@@ -1842,41 +1842,72 @@ func (r *TaskRepo) ListRunningChatTaskIDs(ctx context.Context, projectID string)
 	return ids, rows.Err()
 }
 
-// ActivateAllBacklog moves all tasks in the 'backlog' category to 'active' category
-// with status 'pending'. Returns the number of tasks updated.
+// ActivateAllBacklog moves all eligible backlog tasks to Active in their existing
+// manual board order, appending the group after the current Active tail.
 func (r *TaskRepo) ActivateAllBacklog(ctx context.Context, projectID string) (int, error) {
-	result, err := execBoundSQLite(ctx, r.db,
-		`UPDATE tasks SET category = 'active', status = 'pending'
-		 WHERE category = 'backlog'
-		   AND project_id = ?
-		   AND (status != 'blocked' OR swarm_role = 'swarm_parent')`, projectID)
+	var activated []models.Task
+	err := withImmediateTx(ctx, r.db, func(exec sqlExecutor) error {
+		rows, err := exec.QueryContext(ctx, `SELECT id, project_id, title, status, display_order FROM tasks
+			WHERE category = 'backlog' AND project_id = ?
+			  AND (status != 'blocked' OR swarm_role = 'swarm_parent')
+			ORDER BY display_order ASC, created_at ASC, id ASC`, projectID)
+		if err != nil {
+			return fmt.Errorf("listing backlog tasks for activation: %w", err)
+		}
+		for rows.Next() {
+			var task models.Task
+			if err := rows.Scan(&task.ID, &task.ProjectID, &task.Title, &task.Status, &task.DisplayOrder); err != nil {
+				rows.Close()
+				return fmt.Errorf("scanning backlog task for activation: %w", err)
+			}
+			activated = append(activated, task)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return err
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+		if len(activated) == 0 {
+			return nil
+		}
+
+		var nextOrder int
+		if err := exec.QueryRowContext(ctx, `SELECT COALESCE(MAX(display_order), -1) + 1 FROM tasks
+			WHERE project_id = ? AND category = 'active'`, projectID).Scan(&nextOrder); err != nil {
+			return fmt.Errorf("getting active tail order: %w", err)
+		}
+		for i := range activated {
+			if _, err := exec.ExecContext(ctx, `UPDATE tasks
+				SET category = 'active', status = 'pending', display_order = ?, completed_at = NULL, updated_at = datetime('now')
+				WHERE id = ? AND project_id = ? AND category = 'backlog'`, nextOrder+i, activated[i].ID, projectID); err != nil {
+				return fmt.Errorf("activating backlog task %s: %w", activated[i].ID, err)
+			}
+			activated[i].Category = models.CategoryActive
+			activated[i].Status = models.StatusPending
+			activated[i].DisplayOrder = nextOrder + i
+			activated[i].CompletedAt = nil
+		}
+		return nil
+	})
 	if err != nil {
 		return 0, fmt.Errorf("activating backlog tasks: %w", err)
 	}
-	rows, err := result.RowsAffected()
-	if err != nil {
-		return 0, fmt.Errorf("getting rows affected: %w", err)
-	}
 
-	// Emit task updated events for each activated task
-	if r.broadcaster != nil && rows > 0 {
-		// Get the updated tasks to emit events
-		tasks, err := r.ListByProject(ctx, projectID, string(models.CategoryActive))
-		if err == nil {
-			for _, task := range tasks {
-				r.broadcaster.Publish(events.TaskEvent{
-					Type:      events.TaskCategoryChanged,
-					TaskID:    task.ID,
-					TaskName:  task.Title,
-					ProjectID: task.ProjectID,
-					Category:  string(task.Category),
-					Status:    string(task.Status),
-				})
-			}
+	if r.broadcaster != nil {
+		for _, task := range activated {
+			r.broadcaster.Publish(events.TaskEvent{
+				Type:      events.TaskCategoryChanged,
+				TaskID:    task.ID,
+				TaskName:  task.Title,
+				ProjectID: task.ProjectID,
+				Category:  string(task.Category),
+				Status:    string(task.Status),
+			})
 		}
 	}
-
-	return int(rows), nil
+	return len(activated), nil
 }
 
 // ReorderTask moves a task to a new position within its category.

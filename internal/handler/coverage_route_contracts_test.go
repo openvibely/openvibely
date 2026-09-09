@@ -225,24 +225,40 @@ func TestBatchUpdateTaskCategoryPreservesSameProjectHTMXAndActiveSubmission(t *t
 	active := tc.CreateTask(project.ID).WithTitle("Active same-project task").WithCategory(models.CategoryBacklog).Build()
 	active.AgentID = &model.ID
 	require.NoError(t, tc.taskRepo.Update(ctx, active))
+	laneMove := &models.Task{ProjectID: project.ID, Title: "Existing Active lane move", Category: models.CategoryActive, Status: models.StatusRunning, Prompt: "move lane", Priority: 2, AgentID: &model.ID}
+	require.NoError(t, tc.taskRepo.Create(ctx, laneMove))
+	existingTail := &models.Task{ProjectID: project.ID, Title: "Existing Active tail", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "tail", Priority: 2}
+	require.NoError(t, tc.taskRepo.Create(ctx, existingTail))
 
 	activated := tc.HTMX().Patch("/tasks/batch-category").WithForm(url.Values{
-		"project_id": {project.ID},
-		"task_ids":   {active.ID},
-		"category":   {string(models.CategoryActive)},
+		"project_id":    {project.ID},
+		"task_ids":      {laneMove.ID + "," + active.ID},
+		"category":      {string(models.CategoryActive)},
+		"target_status": {string(models.StatusPending)},
 	}).Execute()
 	require.Equal(t, http.StatusOK, activated.Code, activated.Body.String())
 	require.Contains(t, activated.Body.String(), `id="kanban-board"`)
+	movedLane, err := tc.taskRepo.GetByID(ctx, laneMove.ID)
+	require.NoError(t, err)
 	loaded, err := tc.taskRepo.GetByID(ctx, active.ID)
 	require.NoError(t, err)
+	require.Equal(t, models.CategoryActive, movedLane.Category)
+	require.Equal(t, models.StatusPending, movedLane.Status)
 	require.Equal(t, models.CategoryActive, loaded.Category)
 	require.Equal(t, models.StatusPending, loaded.Status)
-	select {
-	case submitted := <-tc.handler.workerSvc.Submitted():
-		require.Equal(t, active.ID, submitted.ID)
-	case <-time.After(time.Second):
-		t.Fatal("active batch task was not submitted to the worker")
+	require.Greater(t, movedLane.DisplayOrder, existingTail.DisplayOrder)
+	require.Greater(t, loaded.DisplayOrder, movedLane.DisplayOrder)
+	require.Less(t, strings.Index(activated.Body.String(), `id="task-`+laneMove.ID+`"`), strings.Index(activated.Body.String(), `id="task-`+active.ID+`"`))
+	submittedIDs := map[string]bool{}
+	for range 2 {
+		select {
+		case submitted := <-tc.handler.workerSvc.Submitted():
+			submittedIDs[submitted.ID] = true
+		case <-time.After(time.Second):
+			t.Fatal("active batch tasks were not submitted to the worker")
+		}
 	}
+	require.Equal(t, map[string]bool{laneMove.ID: true, active.ID: true}, submittedIDs)
 }
 
 func TestUpdateTaskChainConfigCreatesAndRemovesBlockedChild(t *testing.T) {

@@ -3567,7 +3567,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						// request hooks snapshot the board, while retaining the payload IDs.
 						const batchTaskIDs = draggedTaskIds.slice();
 						clearSelection();
-							beginKanbanMove(batchTaskIDs, {category: 'active', status: targetStatus}, 'PATCH', `/tasks/batch-category`, { task_ids: batchTaskIDs.join(','), category: 'active', project_id: projectID }, 'Cannot move tasks to Active category');
+							beginKanbanMove(batchTaskIDs, {category: 'active', status: targetStatus}, 'PATCH', `/tasks/batch-category`, { task_ids: batchTaskIDs.join(','), category: 'active', target_status: targetStatus, project_id: projectID }, 'Cannot move tasks to Active category');
 						}
 
 					clearSelection();

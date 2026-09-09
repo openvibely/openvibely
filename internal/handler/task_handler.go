@@ -2259,7 +2259,13 @@ func (h *Handler) BatchUpdateTaskCategory(c echo.Context) error {
 	projectID := c.FormValue("project_id")
 	taskIDsValue := c.FormValue("task_ids")
 	category := models.TaskCategory(c.FormValue("category"))
-	applog.Infof("[handler] BatchUpdateTaskCategory project=%s category=%s task_ids=%s", projectID, category, taskIDsValue)
+	targetStatus := models.TaskStatus(strings.TrimSpace(c.FormValue("target_status")))
+	if targetStatus != "" {
+		if category != models.CategoryActive || (targetStatus != models.StatusPending && targetStatus != models.StatusRunning) {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid Active target status")
+		}
+	}
+	applog.Infof("[handler] BatchUpdateTaskCategory project=%s category=%s target_status=%s task_ids=%s", projectID, category, targetStatus, taskIDsValue)
 
 	taskIDs := make([]string, 0)
 	for _, rawID := range strings.Split(taskIDsValue, ",") {
@@ -2307,6 +2313,17 @@ func (h *Handler) BatchUpdateTaskCategory(c echo.Context) error {
 	}
 
 	for _, id := range taskIDs {
+		task, err := h.taskSvc.GetByID(c.Request().Context(), id)
+		if err != nil {
+			return err
+		}
+		if task != nil && task.Category == models.CategoryActive && category == models.CategoryActive && targetStatus != "" && task.Status != targetStatus {
+			if err := h.taskSvc.UpdateStatus(c.Request().Context(), id, targetStatus); err != nil {
+				applog.Infof("[handler] BatchUpdateTaskCategory status error task=%s: %v", id, err)
+				return err
+			}
+			continue
+		}
 		if err := h.taskSvc.UpdateCategory(c.Request().Context(), id, category); err != nil {
 			applog.Infof("[handler] BatchUpdateTaskCategory error task=%s: %v", id, err)
 			return err
