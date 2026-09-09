@@ -1158,6 +1158,9 @@ func TestChatInputForm_AutoFocusUsesSharedLifecycleContract(t *testing.T) {
 		`window.openVibelyRequestComposerFocus`,
 		`htmx:afterSettle`,
 		`htmx:historyRestore`,
+		`historyTimer: 0`,
+		`if (_composerFocusState.historyTimer) window.clearTimeout(_composerFocusState.historyTimer)`,
+		`if (token !== _composerFocusState.token || interaction !== _composerFocusState.interaction) return`,
 		`focus({ preventScroll: true })`,
 	} {
 		if !strings.Contains(content, want) {

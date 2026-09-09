@@ -99,7 +99,7 @@ func (c *composerFocusCDP) waitFor(label, expression, want string) {
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
-	diagnostic := c.evaluate(`JSON.stringify({ready:document.readyState,active:document.activeElement&&{name:document.activeElement.id||document.activeElement.tagName,html:document.activeElement.outerHTML.slice(0,180),dialog:document.activeElement.closest('dialog')&&document.activeElement.closest('dialog').id},input:!!document.getElementById('message-input'),taskInput:!!document.getElementById('task-message-input'),thread:document.getElementById('thread-content')&&{loaded:document.getElementById('thread-content').dataset.loaded,loading:document.getElementById('thread-content').dataset.loading,text:document.getElementById('thread-content').textContent.slice(0,100)},manager:typeof window.openVibelyRequestComposerFocus,state:window._openVibelyComposerFocusState,overlays:Array.from(document.querySelectorAll('dialog[open], [role="dialog"][aria-modal="true"], [data-chat-actions-open="true"], [aria-haspopup][aria-expanded="true"]')).map(function(el){return el.id||el.outerHTML.slice(0,120)})})`)
+	diagnostic := c.evaluate(`JSON.stringify({ready:document.readyState,active:document.activeElement&&{name:document.activeElement.id||document.activeElement.tagName,html:document.activeElement.outerHTML.slice(0,180),dialog:document.activeElement.closest('dialog')&&document.activeElement.closest('dialog').id},input:!!document.getElementById('message-input'),taskInput:!!document.getElementById('task-message-input'),thread:document.getElementById('thread-content')&&{loaded:document.getElementById('thread-content').dataset.loaded,loading:document.getElementById('thread-content').dataset.loading,text:document.getElementById('thread-content').textContent.slice(0,100)},manager:typeof window.openVibelyRequestComposerFocus,state:window._openVibelyComposerFocusState,historyRequests:window._historyRestoreFocusRequests,overlays:Array.from(document.querySelectorAll('dialog[open], [role="dialog"][aria-modal="true"], [data-chat-actions-open="true"], [aria-haspopup][aria-expanded="true"]')).map(function(el){return el.id||el.outerHTML.slice(0,120)})})`)
 	c.t.Fatalf("timed out waiting for %s: got %q, want %q; state=%s", label, got, want, diagnostic)
 }
 
@@ -137,6 +137,22 @@ func (c *composerFocusCDP) typeText(text string) {
 		c.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": key, "text": key, "unmodifiedText": key}, nil)
 		c.call("Input.dispatchKeyEvent", map[string]any{"type": "keyUp", "key": key}, nil)
 	}
+}
+
+func (c *composerFocusCDP) navigateHistory(delta int) {
+	c.t.Helper()
+	var history struct {
+		CurrentIndex int `json:"currentIndex"`
+		Entries      []struct {
+			ID int `json:"id"`
+		} `json:"entries"`
+	}
+	c.call("Page.getNavigationHistory", map[string]any{}, &history)
+	target := history.CurrentIndex + delta
+	if target < 0 || target >= len(history.Entries) {
+		c.t.Fatalf("history delta %d from index %d is outside %d entries", delta, history.CurrentIndex, len(history.Entries))
+	}
+	c.call("Page.navigateToHistoryEntry", map[string]any{"entryId": history.Entries[target].ID}, nil)
 }
 
 func runComposerFocusCDP(t *testing.T, chrome, targetURL, profileName string, run func(*composerFocusCDP)) {
@@ -313,6 +329,18 @@ func TestComposerAutoFocusProductionNavigationInChrome(t *testing.T) {
 		browser.waitFor("HTMX return to Chat focus", `location.pathname+':'+(document.activeElement&&document.activeElement.id)`, "/chat:message-input")
 		browser.typeText("return chat")
 		browser.waitFor("native returned Chat typing with restored draft", `document.getElementById('message-input').value`, "direct chatreturn chat")
+
+		if got := browser.evaluate(`(function(){var requestFocus=window.openVibelyRequestComposerFocus;window._historyRestoreFocusRequests=0;window.openVibelyRequestComposerFocus=function(options){if(options&&options.reason==='history-restore')window._historyRestoreFocusRequests++;return requestFocus.apply(this,arguments);};document.addEventListener('htmx:historyRestore',function(){document.getElementById('focus-guard').focus();},{once:true});return 'ready';})()`); got != "ready" {
+			t.Fatalf("install history restoration focus guard: %s", got)
+		}
+		browser.navigateHistory(-1)
+		browser.waitFor("real Back history restoration", `location.pathname+':'+Boolean(document.getElementById('task-detail-content'))`, "/tasks/task-focus:true")
+		browser.waitFor("cancelled history focus callback", `(function(){var state=window._openVibelyComposerFocusState;return (document.activeElement&&document.activeElement.id)+':'+window._historyRestoreFocusRequests+':'+Boolean(state&&state.historyTimer)+':'+Boolean(state&&state.timer)})()`, "focus-guard:0:false:false")
+		browser.navigateHistory(1)
+		browser.waitFor("real Forward history composer focus", `location.pathname+':'+(document.activeElement&&document.activeElement.id)+':'+window._historyRestoreFocusRequests`, "/chat:message-input:1")
+		expectedHistoryDraft := browser.evaluate(`(function(){var input=document.getElementById('message-input');return input.value.slice(0,input.selectionStart)+' history'+input.value.slice(input.selectionEnd);})()`)
+		browser.typeText(" history")
+		browser.waitFor("native typing after Forward history", `document.getElementById('message-input').value`, expectedHistoryDraft)
 
 		browser.click("#to-task")
 		browser.waitFor("second Task Detail navigation", `location.pathname+':'+Boolean(document.getElementById('task-detail-content'))`, "/tasks/task-focus:true")
