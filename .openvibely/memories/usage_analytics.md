@@ -3,8 +3,8 @@ name: usage_analytics
 type: project
 created: 2026-06-03
 updated: 2026-09-08
-source: after_complete
-source_id: 3471e3a20a10c09bf005d9ce83146593:518a1aca827f3e61
+source: consolidation
+source_id: memory_consolidation_2026-09-08
 confidence: high
 title: Usage Analytics
 ---
@@ -31,7 +31,7 @@ Surfaces and isolation:
 - Dashboard labels are `Token Usage`, `Model Breakdown by Tokens`, and `Model Breakdown by Executions`. Skill chart `Skill Activity Over Time` has `Used` (selected+loaded+viewed), `Created`, and `Edited` lines; filters default to all/hidden and least-active enabled skills remain visible.
 
 Known gaps and ownership:
-- Issue `#1025` / PR `#1033` implements authoritative project context for Agent generation/repair, lifecycle, Insights, Pulse/Reflection, memory, and task worktree commit-summary direct calls, plus an unordered `id` + `repo_path` fallback projection backed by `(repo_path, id)`. The matching contract preserves exact roots, nested directories, `.worktrees/<task>`, longest nested-root precedence, Windows separators, sibling boundaries, deleted/empty repositories, and provider-failure attribution. The post-provider benchmark exercises the real public `CallAgentDirect` path with an in-process provider adapter at 1/50/500 projects and reports SQL statements, `ns/op`, `B/op`, and `allocs/op`; the executable 500-project gate retains latency/allocation reductions and asserts one compact fallback lookup versus zero explicit-context project lookups. On 2026-09-07, the 500-project benchmark measured about `3.056 ms / 10.08 MB` for the legacy full-list path and `0.155 ms / 112.5 KB` for fallback. A fresh strict read-only audit on 2026-09-08 found no separate material implementation or scope defect: current merge-forward worktree `38fde32c6d8780cfb82da7e159dac20d34f1a50d` has the same 16 task-file blobs as focused published PR head `24d8e3523319ce48654ebc763d32a387637d67bd`, and unrelated mainline reclone/template changes are outside the task/PR diff. Completion remains blocked because the required exact-head `Main test suite (ubuntu-latest)` check failed in `Run all tests with coverage` with exit code 1; public logs were unavailable (`403`), so the failure could not be classified as baseline or unrelated, and several packaged-update checks were still running at audit time.
+- Issue `#1025` / PR `#1033` covers authoritative project context for Agent generation/repair, lifecycle, Insights, Pulse/Reflection, memory, and task-worktree commit-summary direct calls. Work-directory fallback uses an unordered compact `id`/`repo_path` projection backed by `(repo_path, id)` and preserves exact roots, nested directories, `.worktrees/<task>`, longest nested-root precedence, Windows separators, sibling boundaries, deleted/empty repositories, and provider-failure attribution. Explicit project context must remain query-free; fallback performance evidence uses the real public direct-call path at representative project counts and asserts one compact lookup rather than full project hydration. Completion remains gated on exact-head hosted checks and live publication evidence.
 - Project memory recall effectiveness/follow-through is not yet shown beside skill analytics (`#85`). Task-result analytics lack project-scoped links to task details (`#841`).
 - Failed-task patterns and Insights should share latest-error query/projection semantics. Insights list methods duplicate projection/query/scan assembly (`#913`); status/delete/link behavior remains project-scoped and preserves `resolved_at`.
 - Chat does not expose compact OAuth connected/expired/not-connected status shown on model cards (`#695`). Account cards must never expose account IDs, emails, tokens, JWTs, auth headers, fingerprints, or provider identity fields.

@@ -2,9 +2,9 @@
 name: worktree_and_lineage
 type: project
 created: 2026-05-09
-updated: 2026-09-06
-source: consolidation
-source_id: memory_consolidation_2026-09-06
+updated: 2026-09-08
+source: after_complete
+source_id: 83bca08cc7fe25c6e95e8bfab4351982:fdc96b74316d3732
 confidence: high
 title: Worktree and Lineage
 ---
@@ -30,12 +30,12 @@ Git mutation and recovery:
 - `MERGE_HEAD` and unmerged files identify the task that owns recovery. Squash conflicts without `MERGE_HEAD` restore only paths introduced by the squash/conflict, preserving unrelated staged work. NUL-delimited Git output preserves unusual filenames.
 - A task remains non-terminal until managed post-execution diff capture/commit finishes. Conflict recovery and status persistence occur under the same lease. Recoverable failures return authoritative refreshed fragments; genuine conflicts show Resolve/Abort and hide ordinary merge actions.
 - Task-card merge/PR actions reload ownership and repository scope and rerun live eligibility inside the mutation lease. The batched relationship snapshot skips stale refs per card rather than disabling valid cards. Fast-forward operation failures return a swap-safe authoritative board refresh and failure toast; missing and foreign PR requests are indistinguishable.
-- Merge and Rebase share operation-parameterized preflight in `internal/handler/worktree_handler.go`; operation-specific validation, result types, wording, and conflict behavior remain separate.
+- Merge and Rebase share operation-parameterized preflight in `internal/handler/worktree_handler.go`. Resolve and Abort should share the initial task/project/repository/recovery/eligibility context while keeping Resolve's worktree-service availability check local immediately after task existence is established, before project lookup, worktree recovery, or eligibility reconciliation. Both recovery operations retain final lease-held revalidation before mutation; operation-specific result types, wording, and conflict behavior remain separate.
 
 Commits, lineage, and publication:
 - Auto-commit and GitHub publication subjects come from actual diff facts, not task title/prompt/output. Use concise capitalized imperative language without provider/tool/status boilerplate or generated file lists. Never follow untracked symlinks while collecting snippets.
 - Manual merge conflicts are handled outcomes. Fast-forward skips needless rebase when ancestry permits. Rebase-only preparation changes the task branch onto the current local target and leaves `main` untouched; verify ancestry, clean status, and absence of a task-side merge commit.
-- A local commit, task record, clean worktree, or matching filenames does not prove publication. Verify remote configuration, task tip, live PR head/base, exact tree/blob set, file list, checks, issue linkage, review state, and `task_pull_requests.published_head_sha`.
+- A local commit, task record, clean worktree, or matching filenames does not prove publication. Verify remote configuration, task tip, live PR head/base, exact tree/blob set, file list, checks, issue linkage, review state, and `task_pull_requests.published_head_sha`. After a successful force-with-lease PR branch replacement, persist the verified replacement `HEAD` as that publication SHA before returning; all pre-push validation or push failures preserve the prior snapshot.
 - Startup synchronization can pollute an already-published task branch when local `main` advances. Preserve polluted/pre-rewrite tips in clearly named backup refs, restore the exact published candidate, and recheck the target after long validation because concurrent lifecycle work can advance it again.
 - A strict read-only audit is a separate post-repair turn. It inspects exact worktree/lineage, implementation scope, live refs, PR body/files/checks, issue linkage, and review state; it performs no mutating validation and discloses skipped checks.
 
