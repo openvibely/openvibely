@@ -346,7 +346,7 @@ func (r *InsightsRepo) GetFailedTaskPatterns(ctx context.Context, projectID stri
 
 func (r *InsightsRepo) GetCompletedBugFixes(ctx context.Context, projectID string, limit int) ([]models.Task, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, project_id, title, prompt, category, status, priority, tag, COALESCE(agent_id, ''), display_order, parent_task_id, chain_config, worktree_path, worktree_branch, auto_merge, merge_target_branch, merge_status, created_via, telegram_chat_id, created_at, updated_at
+		SELECT id, project_id, title, prompt, category, status, priority, tag, COALESCE(agent_id, ''), display_order, parent_task_id, chain_config, worktree_path, worktree_branch, auto_merge, auto_merge_on_goal_achieved, merge_target_branch, merge_status, created_via, telegram_chat_id, created_at, updated_at
 		FROM tasks
 		WHERE project_id = ? AND tag = 'bug' AND status = 'completed'
 		ORDER BY updated_at DESC LIMIT ?`, projectID, limit,
@@ -360,7 +360,7 @@ func (r *InsightsRepo) GetCompletedBugFixes(ctx context.Context, projectID strin
 	for rows.Next() {
 		var t models.Task
 		var agentID string
-		if err := rows.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Prompt, &t.Category, &t.Status, &t.Priority, &t.Tag, &agentID, &t.DisplayOrder, &t.ParentTaskID, &t.ChainConfig, &t.WorktreePath, &t.WorktreeBranch, &t.AutoMerge, &t.MergeTargetBranch, &t.MergeStatus, &t.CreatedVia, &t.TelegramChatID, &t.CreatedAt, &t.UpdatedAt); err != nil {
+		if err := rows.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Prompt, &t.Category, &t.Status, &t.Priority, &t.Tag, &agentID, &t.DisplayOrder, &t.ParentTaskID, &t.ChainConfig, &t.WorktreePath, &t.WorktreeBranch, &t.AutoMerge, &t.AutoMergeOnGoalAchieved, &t.MergeTargetBranch, &t.MergeStatus, &t.CreatedVia, &t.TelegramChatID, &t.CreatedAt, &t.UpdatedAt); err != nil {
 			return nil, err
 		}
 		if agentID != "" {

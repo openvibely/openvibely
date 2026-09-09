@@ -40,7 +40,7 @@ You can drag cards between categories and active sub-lanes to change where work 
    - Optional attachments
 3. Click `Create Task`.
 
-Optional: enable `Auto-merge to target branch on completion` for git worktree flow.
+Optional: enable `Auto-merge to target branch on successful completion` to merge after a successful task run, or independently enable `Auto-merge to target branch when goal is achieved` to merge only when the stored Task Goal reaches `achieved`. Both options are off by default.
 
 ## Swarm Tasks
 
@@ -126,7 +126,7 @@ When a follow-up is queued and the task thread shows a pending input row, a **St
 
 A Task Goal is a persistent objective that the built-in Goal Agent evaluates after each execution turn. When a goal is set, the agent automatically queues continuation follow-ups until the objective is achieved, blocked, or cleared — without manual follow-up messages.
 
-Set a goal in the task edit dialog (Goal section). The goal panel on the task detail page shows the objective, current status (`active`, `paused`, `achieved`, `blocked`, `cleared`, `failed`), the agent's last evaluation reason, and when it was last checked. Clear the objective text and save to remove the goal.
+Set a goal in the task edit dialog (Goal section). The goal panel on the task detail page shows the objective, current status (`active`, `paused`, `achieved`, `blocked`, `cleared`, `failed`), the agent's last evaluation reason, and when it was last checked. Clear the objective text and save to remove the goal. The separate `Auto-merge to target branch when goal is achieved` option uses the same guarded worktree merge flow when the Goal Agent marks the stored goal achieved; paused, blocked, cleared, and failed goals do not trigger it.
 
 In Chat Orchestrate mode, you can create a task and set a goal on it in the same turn using `set_task_goal`.
 

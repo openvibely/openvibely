@@ -2048,6 +2048,9 @@ const docTemplate = `{
                 "auto_merge": {
                     "type": "boolean"
                 },
+                "auto_merge_on_goal_achieved": {
+                    "type": "boolean"
+                },
                 "base_branch": {
                     "description": "Git branch this task should base its worktree on (from parent lineage)",
                     "type": "string"

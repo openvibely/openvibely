@@ -936,14 +936,15 @@ func (h *Handler) CreateTask(c echo.Context) error {
 	}
 
 	t := &models.Task{
-		ProjectID:         projectID,
-		Title:             c.FormValue("title"),
-		Category:          category,
-		Priority:          priority,
-		Prompt:            c.FormValue("prompt"),
-		Tag:               models.TaskTag(c.FormValue("tag")),
-		AutoMerge:         c.FormValue("auto_merge") == "on" || c.FormValue("auto_merge") == "true",
-		MergeTargetBranch: c.FormValue("merge_target_branch"),
+		ProjectID:               projectID,
+		Title:                   c.FormValue("title"),
+		Category:                category,
+		Priority:                priority,
+		Prompt:                  c.FormValue("prompt"),
+		Tag:                     models.TaskTag(c.FormValue("tag")),
+		AutoMerge:               c.FormValue("auto_merge") == "on" || c.FormValue("auto_merge") == "true",
+		AutoMergeOnGoalAchieved: c.FormValue("auto_merge_on_goal_achieved") == "on" || c.FormValue("auto_merge_on_goal_achieved") == "true",
+		MergeTargetBranch:       c.FormValue("merge_target_branch"),
 	}
 
 	// Handle optional agent (LLM config) selection
@@ -966,7 +967,7 @@ func (h *Handler) CreateTask(c echo.Context) error {
 			return echo.NewHTTPError(http.StatusInternalServerError, "swarm service unavailable")
 		}
 		maxWorkers, _ := strconv.Atoi(c.FormValue("swarm_max_workers"))
-		parent, err := h.swarmSvc.CreateSwarmTask(c.Request().Context(), service.CreateSwarmTaskRequest{ProjectID: projectID, Title: t.Title, Prompt: t.Prompt, Goal: c.FormValue("goal"), Category: category, Priority: priority, AgentID: t.AgentID, AgentDefinitionID: t.AgentDefinitionID, Tag: t.Tag, MaxWorkers: maxWorkers, WorkerIsolation: c.FormValue("swarm_worker_isolation"), ReviewerEnabled: formBoolEnabled(c, "swarm_reviewer_enabled", true), MergerEnabled: swarmMergerEnabledFormValue(c), MergeTargetBranch: t.MergeTargetBranch})
+		parent, err := h.swarmSvc.CreateSwarmTask(c.Request().Context(), service.CreateSwarmTaskRequest{ProjectID: projectID, Title: t.Title, Prompt: t.Prompt, Goal: c.FormValue("goal"), Category: category, Priority: priority, AgentID: t.AgentID, AgentDefinitionID: t.AgentDefinitionID, Tag: t.Tag, MaxWorkers: maxWorkers, WorkerIsolation: c.FormValue("swarm_worker_isolation"), ReviewerEnabled: formBoolEnabled(c, "swarm_reviewer_enabled", true), MergerEnabled: swarmMergerEnabledFormValue(c), AutoMerge: t.AutoMerge, AutoMergeOnGoalAchieved: t.AutoMergeOnGoalAchieved, MergeTargetBranch: t.MergeTargetBranch})
 		if err != nil {
 			if errors.Is(err, service.ErrDuplicateTask) {
 				return echo.NewHTTPError(http.StatusConflict, "A task with this name already exists in this project")
@@ -1897,6 +1898,9 @@ func (h *Handler) UpdateTask(c echo.Context) error {
 	// was submitted and we always update (unchecked checkbox sends no value).
 	if c.FormValue("auto_merge_present") != "" {
 		task.AutoMerge = c.FormValue("auto_merge") == "on" || c.FormValue("auto_merge") == "true"
+	}
+	if c.FormValue("auto_merge_on_goal_achieved_present") != "" {
+		task.AutoMergeOnGoalAchieved = c.FormValue("auto_merge_on_goal_achieved") == "on" || c.FormValue("auto_merge_on_goal_achieved") == "true"
 	}
 	if targetBranch := c.FormValue("merge_target_branch"); targetBranch != "" {
 		task.MergeTargetBranch = targetBranch

@@ -148,6 +148,40 @@ func TestExecuteTaskCreations_ActiveTaskWaitsForWorkerAdmissionAtCapacity(t *tes
 	}
 }
 
+func TestExecuteTaskCreations_PersistsIndependentAutoMergeOptions(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	project := &models.Project{Name: "Runtime auto-merge project"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	taskSvc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), NewWorkerService(nil, 0, nil))
+	created, summary := ExecuteTaskCreationsWithReturn(ctx, []TaskCreationRequest{{Title: "Runtime merge task", Prompt: "work", Priority: 2, AutoMerge: true, AutoMergeOnGoalAchieved: true, MergeTargetBranch: "develop"}}, project.ID, taskSvc)
+	if len(created) != 1 {
+		t.Fatalf("created len=%d summary=%s", len(created), summary)
+	}
+	stored, err := taskRepo.GetByID(ctx, created[0].ID)
+	if err != nil {
+		t.Fatalf("reload task: %v", err)
+	}
+	if !stored.AutoMerge || !stored.AutoMergeOnGoalAchieved || stored.MergeTargetBranch != "develop" {
+		t.Fatalf("runtime auto-merge settings not persisted: %+v", stored)
+	}
+
+	disabled := false
+	target := "release"
+	summary = ExecuteTaskEdits(ctx, []TaskEditRequest{{ID: stored.ID, AutoMerge: &disabled, MergeTargetBranch: &target}}, project.ID, taskSvc, nil, "")
+	stored, err = taskRepo.GetByID(ctx, stored.ID)
+	if err != nil {
+		t.Fatalf("reload edited task: %v", err)
+	}
+	if stored.AutoMerge || !stored.AutoMergeOnGoalAchieved || stored.MergeTargetBranch != "release" {
+		t.Fatalf("runtime edit did not preserve independent goal option: %+v summary=%s", stored, summary)
+	}
+}
+
 func TestExecuteTaskCreations_Empty(t *testing.T) {
 	summary := ExecuteTaskCreations(context.Background(), nil, "proj1", nil)
 	if summary != "" {
