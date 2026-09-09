@@ -1638,6 +1638,47 @@ func TestHandler_RebaseTaskBranchRejectsForgedIneligibleRequests(t *testing.T) {
 	}
 }
 
+func TestHandler_ConflictRecoveryPreflightRejectsMissingTaskAndProjectRepository(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	ctx := context.Background()
+
+	assertRecoveryStatus := func(t *testing.T, taskID string, wantStatus int) {
+		t.Helper()
+		for _, operation := range []string{"resolve", "abort"} {
+			rec := worktreeExecute(e, worktreeFormRequest(http.MethodPost, "/tasks/"+taskID+"/worktree/"+operation, nil))
+			if rec.Code != wantStatus {
+				t.Fatalf("%s recovery status = %d, want %d: %s", operation, rec.Code, wantStatus, rec.Body.String())
+			}
+		}
+	}
+
+	if _, err := h.preflightTaskConflictRecovery(ctx, "missing-task", true); err == nil {
+		t.Fatal("missing task preflight succeeded")
+	} else if httpErr, ok := err.(*echo.HTTPError); !ok || httpErr.Code != http.StatusNotFound {
+		t.Fatalf("missing task preflight error = %v, want 404", err)
+	}
+	assertRecoveryStatus(t, "missing-task", http.StatusNotFound)
+
+	project := &models.Project{Name: "Conflict recovery without repository", IsDefault: true}
+	if err := h.projectSvc.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	task := &models.Task{
+		ProjectID: project.ID, Title: "Missing conflict repository", Prompt: "test", Category: models.CategoryCompleted,
+		Status: models.StatusCompleted, MergeStatus: models.MergeStatusConflict,
+	}
+	if err := h.taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := h.preflightTaskConflictRecovery(ctx, task.ID, false); err == nil {
+		t.Fatal("missing project repository preflight succeeded")
+	} else if httpErr, ok := err.(*echo.HTTPError); !ok || httpErr.Code != http.StatusBadRequest {
+		t.Fatalf("missing project repository preflight error = %v, want 400", err)
+	}
+	assertRecoveryStatus(t, task.ID, http.StatusBadRequest)
+}
+
 func TestHandler_StaleTerminalConflictRecoversChangesAndRecoveryPosts(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	h.SetWorktreeService(service.NewWorktreeService(h.taskRepo, h.projectRepo, h.settingsRepo))
