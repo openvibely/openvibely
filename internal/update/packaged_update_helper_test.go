@@ -39,6 +39,35 @@ func TestReadPackagedUpdateHelperStateFileDoesNotRetryMissingState(t *testing.T)
 	}
 }
 
+func TestDecodePackagedUpdateRelaunchMetadataContracts(t *testing.T) {
+	root := t.TempDir()
+	metadataJSON := `{"arguments":["openvibely","serve"],"working_directory":"` + root + `","executable_relative":"Contents/MacOS/OpenVibely"}`
+
+	metadata, err := decodePackagedUpdateRelaunchMetadata(strings.NewReader(metadataJSON))
+	if err != nil {
+		t.Fatalf("decodePackagedUpdateRelaunchMetadata: %v", err)
+	}
+	if len(metadata.Arguments) != 2 || metadata.Arguments[1] != "serve" || metadata.WorkingDirectory != root || metadata.ExecutableRelative != "Contents/MacOS/OpenVibely" {
+		t.Fatalf("metadata = %#v", metadata)
+	}
+
+	if _, err := decodePackagedUpdateRelaunchMetadata(nil); err == nil {
+		t.Fatal("nil relaunch reader unexpectedly succeeded")
+	}
+	for _, input := range []string{
+		`{"arguments":[],"working_directory":"/tmp"}`,
+		`{"arguments":["openvibely"],"working_directory":""}`,
+		`{"arguments":["openvibely"],"working_directory":"relative"}`,
+		`{"arguments":["openvibely"],"working_directory":"/tmp","extra":true}`,
+		`not-json`,
+		`{"arguments":["` + strings.Repeat("x", packagedUpdateRelaunchMetadataMaxSize) + `"],"working_directory":"` + root + `"}`,
+	} {
+		if _, err := decodePackagedUpdateRelaunchMetadata(strings.NewReader(input)); err == nil {
+			t.Fatalf("decodePackagedUpdateRelaunchMetadata(%q) unexpectedly succeeded", input[:min(len(input), 80)])
+		}
+	}
+}
+
 func TestExecutableUpdateHelperArgumentAndRelaunchParsingContracts(t *testing.T) {
 	root := t.TempDir()
 	current := filepath.Join(root, "openvibely")
