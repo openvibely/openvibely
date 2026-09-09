@@ -143,11 +143,6 @@ func TestCallStreamingTaskIncludesWorktreeRootContext(t *testing.T) {
 	if !strings.Contains(systemPrompt, "PROJECT_RULES_SENTINEL") {
 		t.Fatalf("task system prompt dropped project instructions: %q", systemPrompt)
 	}
-	if len(doer.request.Messages) < 2 ||
-		!strings.Contains(doer.request.Messages[1].Content, "If you recovered and completed the requested outcome, report success") ||
-		!strings.Contains(doer.request.Messages[1].Content, "[STATUS: FAILED | <describe what prevented completion>]") {
-		t.Fatalf("task user prompt missing provider-neutral outcome status contract: %#v", doer.request.Messages)
-	}
 }
 
 func TestCallStreamingZeroHistoryFollowupUsesChatAssembly(t *testing.T) {

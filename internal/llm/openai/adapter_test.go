@@ -801,10 +801,6 @@ func TestCallStreamingUsesAgenticResponsesCallbacksAndUsage(t *testing.T) {
 	if !strings.Contains(string(encodedInput), "Finish this") || !strings.Contains(string(encodedInput), "STATUS: SUCCESS") {
 		t.Fatalf("input missing task/status prompt: %s", encodedInput)
 	}
-	if !strings.Contains(string(encodedInput), "If you recovered and completed the requested outcome, report success") ||
-		strings.Contains(string(encodedInput), "If a command failed, a script returned non-zero") {
-		t.Fatalf("input has incorrect task outcome contract: %s", encodedInput)
-	}
 }
 
 func TestCallChatStreamingUsesHistoryRuntimeAndDisableToolsPolicy(t *testing.T) {

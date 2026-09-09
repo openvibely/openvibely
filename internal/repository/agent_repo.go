@@ -59,6 +59,21 @@ type AgentScheduleOption struct {
 	Model string
 }
 
+// AgentTaskUIOption is the compact Agent projection shared by Task board badges
+// and Task create/edit selectors. It preserves scalar availability state without
+// hydrating private prompt, tool, plugin, MCP, skill, or default configuration.
+type AgentTaskUIOption struct {
+	ID                  string
+	Name                string
+	Model               string
+	Scope               models.AgentScope
+	ProjectID           string
+	SelectableAsPrimary bool
+	Enabled             bool
+	GeneratedStatus     models.AgentGeneratedStatus
+	ArchivedAt          *time.Time
+}
+
 // AgentSelectableReference is the compact identity and project-scope projection
 // used when validating Automation Agent references.
 type AgentSelectableReference struct {
@@ -93,7 +108,34 @@ type AgentListSummary struct {
 }
 
 const agentScheduleOptionColumns = `id, name, model`
+const agentTaskUIOptionColumns = `id, name, model, COALESCE(scope, 'global'), COALESCE(project_id, ''), ` +
+	`COALESCE(selectable_as_primary, 1), COALESCE(enabled, 1), ` +
+	`COALESCE(generated_status, 'user_edited'), archived_at`
 const agentSelectableReferenceColumns = `id, COALESCE(key, ''), COALESCE(project_id, '')`
+
+func scanAgentTaskUIOption(row interface{ Scan(dest ...any) error }) (*AgentTaskUIOption, error) {
+	var option AgentTaskUIOption
+	var (
+		scope, generatedStatus    string
+		selectableInt, enabledInt int
+		archivedAt                sql.NullTime
+	)
+	if err := row.Scan(
+		&option.ID, &option.Name, &option.Model, &scope, &option.ProjectID,
+		&selectableInt, &enabledInt, &generatedStatus, &archivedAt,
+	); err != nil {
+		return nil, err
+	}
+	option.Scope = models.AgentScope(scope)
+	option.SelectableAsPrimary = selectableInt != 0
+	option.Enabled = enabledInt != 0
+	option.GeneratedStatus = models.AgentGeneratedStatus(generatedStatus)
+	if archivedAt.Valid {
+		t := archivedAt.Time
+		option.ArchivedAt = &t
+	}
+	return &option, nil
+}
 
 func scanAgentScheduleOption(row interface{ Scan(dest ...any) error }) (*AgentScheduleOption, error) {
 	var option AgentScheduleOption
@@ -313,6 +355,29 @@ func normalizeAgentToolConfig(a *models.Agent) {
 
 func (r *AgentRepo) List(ctx context.Context) ([]models.Agent, error) {
 	return r.list(ctx, `SELECT `+agentColumns+` FROM agents WHERE COALESCE(generated_status, 'user_edited') <> 'archived' ORDER BY name ASC`)
+}
+
+// ListTaskUIOptions returns the scalar Agent catalog needed by Task board and
+// Task create/edit renders. It intentionally retains disabled, non-selectable,
+// and archived-at rows so handlers can preserve current-assignment semantics.
+func (r *AgentRepo) ListTaskUIOptions(ctx context.Context) ([]AgentTaskUIOption, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT `+agentTaskUIOptionColumns+` FROM agents
+		WHERE COALESCE(generated_status, 'user_edited') <> 'archived'
+		ORDER BY name ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("listing task UI agent options: %w", err)
+	}
+	defer rows.Close()
+
+	var options []AgentTaskUIOption
+	for rows.Next() {
+		option, err := scanAgentTaskUIOption(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scanning task UI agent option: %w", err)
+		}
+		options = append(options, *option)
+	}
+	return options, rows.Err()
 }
 
 // ListScheduleOptions returns active primary-Agent options available to a

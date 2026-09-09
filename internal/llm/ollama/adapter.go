@@ -222,8 +222,7 @@ func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments 
 	systemPrompt := llmprompt.BuildAgentSystemPrompt(projectInstructions, workDir)
 	messages = append(messages, chatMessage{Role: "system", Content: systemPrompt})
 
-	fullPrompt := llmprompt.ApplyTaskCreationToolMode(prompt, nil) + llmprompt.BuildTaskStatusInstructions()
-	userMsg := chatMessage{Role: "user", Content: fullPrompt}
+	userMsg := chatMessage{Role: "user", Content: llmprompt.ApplyTaskCreationToolMode(prompt, nil)}
 	if images := encodeImageAttachments(attachments); len(images) > 0 {
 		userMsg.Images = images
 	}

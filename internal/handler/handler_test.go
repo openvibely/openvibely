@@ -1078,16 +1078,7 @@ func TestHandler_GetTaskDetailStatusPreservesAgentAvailabilityAndTaskStates(t *t
 	fullPage := htmxGet(e, "/tasks/"+fullDetailTask.ID)
 	counter.SetEnabled(false)
 	assertCode(t, fullPage, http.StatusOK)
-	fullProjectionSeen := false
-	for _, statement := range counter.Statements() {
-		if strings.Contains(strings.ToLower(statement), "from agents") && strings.Contains(strings.ToLower(statement), "system_prompt") {
-			fullProjectionSeen = true
-			break
-		}
-	}
-	if !fullProjectionSeen {
-		t.Fatalf("initial Task Detail no longer used the full Agent projection; statements: %#v", counter.Statements())
-	}
+	assertTaskUIAgentProjectionQuery(t, counter)
 }
 
 func TestHandler_GetTaskDetailStatus(t *testing.T) {
