@@ -276,16 +276,46 @@ window.addEventListener('DOMContentLoaded', function() {
     assertStateIconBeforeTitle('completed-new', 'goal-met');
 
 	    function cardIn(category, id) { var target = zone(category); return !!(target && target.contains(document.getElementById('task-' + id))); }
+	    var currentMovePhase = '';
+	    var rollbackOrderingInjected = false;
+	    var rollbackAuthoritativeSwapped = false;
+	    document.body.addEventListener('htmx:afterSwap', function(event) {
+	      var detail = event.detail || {}, requestConfig = detail.requestConfig || {};
+	      if (currentMovePhase === 'failure' && requestConfig.path.indexOf('refresh_source=move') >= 0) rollbackAuthoritativeSwapped = true;
+	    });
+	    document.body.addEventListener('htmx:afterRequest', function(event) {
+	      var detail = event.detail || {}, requestConfig = detail.requestConfig || {};
+	      if (requestConfig.path !== '/failed-newer-refresh') return;
+	      var source = document.createElement('span');
+	      document.body.appendChild(source);
+	      htmx.ajax('GET', '/aborted-newer-refresh', {source:source, target:'#kanban-board', swap:'outerHTML'});
+	    });
+	    document.body.addEventListener('htmx:beforeRequest', function(event) {
+	      var detail = event.detail || {}, requestConfig = detail.requestConfig || {};
+	      if (requestConfig.path === '/aborted-newer-refresh') {
+	        setTimeout(function() { if (detail.xhr) detail.xhr.abort(); }, 10);
+	        return;
+	      }
+	      if (currentMovePhase !== 'failure' || rollbackOrderingInjected || requestConfig.path.indexOf('refresh_source=move') < 0) return;
+	      rollbackOrderingInjected = true;
+	      setTimeout(function() {
+	        var source = document.createElement('span');
+	        document.body.appendChild(source);
+	        htmx.ajax('GET', '/failed-newer-refresh', {source:source, target:'#kanban-board', swap:'outerHTML'});
+	      }, 0);
+	    });
 	    async function nativeMove(id, phase, expectSuccess) {
+	      currentMovePhase = phase;
 	      var card = document.getElementById('task-' + id), completedZone = zone('completed');
 	      var cardRect = card.getBoundingClientRect(), zoneRect = completedZone.getBoundingClientRect();
 	      var startX = cardRect.left + 10, startY = cardRect.top + 10;
 	      var dropX = zoneRect.left + zoneRect.width / 2, dropY = zoneRect.top + 10;
-	      var released = false, sourceFlash = false;
+	      var released = false, observing = true, sourceFlash = false, sampledFrames = 0;
 	      function sample() {
 	        if (!released) return requestAnimationFrame(sample);
+	        sampledFrames++;
 	        if (expectSuccess && !cardIn('completed', id)) sourceFlash = true;
-	        if (window.hasPendingKanbanMoves && window.hasPendingKanbanMoves()) requestAnimationFrame(sample);
+	        if (observing) requestAnimationFrame(sample);
 	      }
 	      document.addEventListener('pointerup', function onPointerUp() {
 	        document.removeEventListener('pointerup', onPointerUp, true);
@@ -297,10 +327,15 @@ window.addEventListener('DOMContentLoaded', function() {
 	      await waitFor(function() { return released; }, phase + ' native pointer release');
 	      if (expectSuccess) {
 	        await waitFor(function() { var moved = document.getElementById('task-' + id); return cardIn('completed', id) && moved && !moved.hasAttribute('data-kanban-move-generation') && !(window.hasPendingKanbanMoves && window.hasPendingKanbanMoves()); }, phase + ' authoritative success');
+	        observing = false;
 	        if (sourceFlash) fail(phase + ' flashed back into its source column during successful reconciliation');
 	      } else {
-	        await waitFor(function() { var moved = document.getElementById('task-' + id); return moved && moved.closest('.task-drop-zone[data-category="active"][data-status="pending"]') && !(window.hasPendingKanbanMoves && window.hasPendingKanbanMoves()); }, phase + ' authoritative rollback');
+	        await waitFor(function() { var moved = document.getElementById('task-' + id); return rollbackAuthoritativeSwapped && moved && moved.closest('.task-drop-zone[data-category="active"][data-status="pending"]') && !(window.hasPendingKanbanMoves && window.hasPendingKanbanMoves()); }, phase + ' authoritative rollback');
+	        observing = false;
+	        if (!rollbackOrderingInjected) fail('failed move did not exercise newer failed and aborted refresh ordering');
 	      }
+	      if (sampledFrames < 2) fail(phase + ' did not observe intermediate reconciliation frames');
+	      currentMovePhase = '';
 	    }
 
 	    htmx.ajax('GET', '/stale-board', {target:'#kanban-board', swap:'outerHTML'});
@@ -326,6 +361,8 @@ window.addEventListener('DOMContentLoaded', function() {
 
 	browserResult := make(chan string, 8)
 	dragReady := make(chan taskDragCoordinates, 2)
+	moveRefreshes := 0
+	newerRefreshStarted := make(chan struct{}, 2)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestMu.Lock()
 		requestLog = append(requestLog, r.Method+" "+r.URL.RequestURI()+" HX="+r.Header.Get("HX-Request"))
@@ -337,6 +374,20 @@ window.addEventListener('DOMContentLoaded', function() {
 			_, _ = w.Write(htmxJS)
 		case r.URL.Path == "/tasks" && r.Method == http.MethodGet:
 			if r.Header.Get("HX-Request") == "true" {
+				if r.URL.Query().Get("refresh_source") == "move" {
+					requestMu.Lock()
+					moveRefreshes++
+					refreshNumber := moveRefreshes
+					requestMu.Unlock()
+					if refreshNumber == 2 {
+						for range 2 {
+							select {
+							case <-newerRefreshStarted:
+							case <-time.After(time.Second):
+							}
+						}
+					}
+				}
 				_, _ = w.Write([]byte(renderBoard(r)))
 				return
 			}
@@ -390,6 +441,13 @@ window.addEventListener('DOMContentLoaded', function() {
 			time.Sleep(250 * time.Millisecond)
 			w.WriteHeader(http.StatusBadRequest)
 			_, _ = w.Write([]byte("move rejected"))
+		case r.URL.Path == "/failed-newer-refresh" && r.Method == http.MethodGet:
+			newerRefreshStarted <- struct{}{}
+			time.Sleep(50 * time.Millisecond)
+			w.WriteHeader(http.StatusInternalServerError)
+		case r.URL.Path == "/aborted-newer-refresh" && r.Method == http.MethodGet:
+			newerRefreshStarted <- struct{}{}
+			<-r.Context().Done()
 		case r.URL.Path == "/browser-add" && r.Method == http.MethodPost:
 			mu.Lock()
 			clock = clock.Add(time.Minute)
@@ -468,11 +526,14 @@ window.addEventListener('DOMContentLoaded', function() {
 		outcome = "fail:timed out waiting for browser result"
 	}
 	stopBrowserProcess(cmd)
+	requestMu.Lock()
+	requests := strings.Join(requestLog, "\n")
+	requestMu.Unlock()
+	if !strings.Contains(requests, "GET /failed-newer-refresh") || !strings.Contains(requests, "GET /aborted-newer-refresh") {
+		t.Fatalf("Tasks browser regression did not start newer failed and aborted refreshes; requests:\n%s", requests)
+	}
 	if !strings.HasPrefix(outcome, "pass:") {
 		stderr, _ := os.ReadFile(stderrPath)
-		requestMu.Lock()
-		requests := strings.Join(requestLog, "\n")
-		requestMu.Unlock()
 		t.Fatalf("Tasks browser regression failed: %s\nRequests:\n%s\nChrome:\n%s", outcome, requests, strings.TrimSpace(string(stderr)))
 	}
 }
