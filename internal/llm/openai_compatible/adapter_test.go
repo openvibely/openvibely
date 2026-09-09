@@ -465,6 +465,8 @@ func TestAdapterTaskWithRuntimeActionsUsesToolModePrompt(t *testing.T) {
 	content, _ := user["content"].(string)
 	require.Contains(t, content, "TASK CREATION TOOL MODE")
 	require.Contains(t, content, "Available runtime task tools: create_task")
+	require.Contains(t, content, "If you recovered and completed the requested outcome, report success")
+	require.NotContains(t, content, "If a command failed, a script returned non-zero")
 	require.NotContains(t, content, "This is the ONLY way to create a task")
 	require.NotContains(t, content, "To create a task, output this format")
 }

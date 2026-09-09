@@ -126,6 +126,18 @@ func BuildTaskPromptHeader() string {
 	return "IMPORTANT: Do not use plan mode. Take direct action immediately. Do not ask for approval or create plans — execute the task directly.\n\n"
 }
 
+// BuildTaskStatusInstructions returns the provider-neutral task outcome contract.
+// Tool and command errors are evidence available to the agent, not task outcomes:
+// an agent may recover from them and still complete the requested work.
+func BuildTaskStatusInstructions() string {
+	return "\n\n---\nTASK OUTCOME STATUS: You MUST end your final response with exactly one of these status lines:\n" +
+		"- If the requested task outcome was completed successfully, including when you recovered from intermediate command or tool errors: [STATUS: SUCCESS]\n" +
+		"- Only if the requested task outcome could not be completed after reasonable recovery attempts: [STATUS: FAILED | <describe what prevented completion>]\n" +
+		"- If the task completed but something needs human attention: [STATUS: NEEDS_FOLLOWUP | <describe what needs attention>]\n" +
+		"Do not report task failure solely because a command, script, or tool returned an error or non-zero exit code. If you recovered and completed the requested outcome, report success.\n" +
+		"Replace the angle-bracketed text with your actual description. This status line is mandatory and must be the very last line of your response."
+}
+
 // BuildAttachmentInstructions builds the text block that tells text-only model
 // calls about attached files with their absolute paths. Returns an empty string
 // if there are no attachments.

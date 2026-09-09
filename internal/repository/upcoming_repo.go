@@ -70,6 +70,13 @@ const upcomingRunningTasksQuery = `SELECT ` + upcomingTaskListColumns + `,
  WHERE t.project_id = ? AND t.status = 'running' AND t.category != 'chat'
  ORDER BY t.updated_at DESC`
 
+const upcomingWaitingActiveTasksQuery = `SELECT ` + upcomingTaskListColumns + `,
+	` + upcomingTaskListWithoutScheduleColumns + `
+ FROM tasks t
+ LEFT JOIN agent_configs ac ON ac.id = t.agent_id
+ WHERE t.project_id = ? AND t.category = 'active' AND t.status IN ('pending', 'queued')
+ ORDER BY t.priority DESC, t.display_order ASC`
+
 const upcomingPendingActiveTasksQuery = `SELECT ` + upcomingTaskListColumns + `,
 	` + upcomingTaskListWithoutScheduleColumns + `
  FROM tasks t
@@ -94,7 +101,18 @@ func (r *UpcomingRepo) ListRunningTasks(ctx context.Context, projectID string) (
 	return tasks, nil
 }
 
-// ListPendingActiveTasks returns active tasks with pending status (queued for execution)
+// ListWaitingActiveTasks returns active work waiting for execution in the
+// existing priority/display order. It is a read-only projection of pending and
+// queued tasks; task admission and queue behavior remain elsewhere.
+func (r *UpcomingRepo) ListWaitingActiveTasks(ctx context.Context, projectID string) ([]models.UpcomingTask, error) {
+	tasks, err := r.listUpcomingTasks(ctx, upcomingWaitingActiveTasksQuery, upcomingTaskPromptPreviewLen, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("listing waiting active tasks: %w", err)
+	}
+	return tasks, nil
+}
+
+// ListPendingActiveTasks returns active tasks with pending status.
 func (r *UpcomingRepo) ListPendingActiveTasks(ctx context.Context, projectID string) ([]models.UpcomingTask, error) {
 	tasks, err := r.listUpcomingTasks(ctx, upcomingPendingActiveTasksQuery, upcomingTaskPromptPreviewLen, projectID)
 	if err != nil {
@@ -220,6 +238,8 @@ func (r *UpcomingRepo) GetTaskSummary(ctx context.Context, projectID string, now
 		switch models.TaskStatus(status) {
 		case models.StatusPending:
 			s.PendingCount = count
+		case models.StatusQueued:
+			s.QueuedCount = count
 		case models.StatusRunning:
 			s.RunningCount = count
 		case models.StatusCompleted:

@@ -72,9 +72,9 @@ templ upcomingContent(upcoming *models.Upcoming, currentProjectID string) {
 				<div class="stat-desc">Currently executing</div>
 			</div>
 			<div class="stat">
-				<div class="stat-title">Queued</div>
-				<div class="stat-value text-xl">{ fmt.Sprintf("%d", len(upcoming.PendingTasks)) }</div>
-				<div class="stat-desc">Waiting to execute</div>
+				<div class="stat-title">Waiting</div>
+				<div class="stat-value text-xl">{ fmt.Sprintf("%d", len(upcoming.WaitingTasks)) }</div>
+				<div class="stat-desc">{ fmt.Sprintf("%d pending · %d queued", len(upcoming.PendingTasks), len(upcoming.QueuedTasks)) }</div>
 			</div>
 			<div class="stat">
 				<div class="stat-title">Scheduled</div>
@@ -135,13 +135,20 @@ templ upcomingContent(upcoming *models.Upcoming, currentProjectID string) {
 									</div>
 									<span class="font-mono font-semibold">{ fmt.Sprintf("%d", upcoming.TaskSummary.PendingCount) }</span>
 								</div>
-								<div class="flex items-center justify-between text-sm">
-									<div class="flex items-center gap-2">
-										<span class="w-2 h-2 rounded-full bg-primary inline-block"></span>
-										<span>Running</span>
+									<div class="flex items-center justify-between text-sm">
+										<div class="flex items-center gap-2">
+											<span class="w-2 h-2 rounded-full bg-secondary inline-block"></span>
+											<span>Queued</span>
+										</div>
+										<span class="font-mono font-semibold">{ fmt.Sprintf("%d", upcoming.TaskSummary.QueuedCount) }</span>
 									</div>
-									<span class="font-mono font-semibold">{ fmt.Sprintf("%d", upcoming.TaskSummary.RunningCount) }</span>
-								</div>
+									<div class="flex items-center justify-between text-sm">
+										<div class="flex items-center gap-2">
+											<span class="w-2 h-2 rounded-full bg-primary inline-block"></span>
+											<span>Running</span>
+										</div>
+										<span class="font-mono font-semibold">{ fmt.Sprintf("%d", upcoming.TaskSummary.RunningCount) }</span>
+									</div>
 								<div class="flex items-center justify-between text-sm">
 									<div class="flex items-center gap-2">
 										<span class="w-2 h-2 rounded-full bg-success inline-block"></span>
@@ -233,28 +240,28 @@ templ upcomingContent(upcoming *models.Upcoming, currentProjectID string) {
 				</h3>
 				<div class="space-y-2">
 					for _, bt := range upcoming.RunningTasks {
-						@upcomingTaskCard(bt, "running", currentProjectID)
+							@upcomingTaskCard(bt, currentProjectID)
 					}
 				</div>
 			</div>
 		}
 
-		<!-- Pending/Queued Tasks -->
-		if len(upcoming.PendingTasks) > 0 {
-			<div class="mb-6">
-				<h3 class="text-lg font-semibold mb-3 flex items-center gap-2">
-					<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-warning" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-					</svg>
-					Queued for Execution
-				</h3>
-				<div class="space-y-2">
-					for i, bt := range upcoming.PendingTasks {
-						@upcomingTaskCardWithOrder(bt, "pending", currentProjectID, i+1)
-					}
+			<!-- Waiting Tasks -->
+			if len(upcoming.WaitingTasks) > 0 {
+				<div class="mb-6">
+					<h3 class="text-lg font-semibold mb-3 flex items-center gap-2">
+						<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-warning" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+						</svg>
+						Waiting for Execution
+					</h3>
+					<div class="space-y-2">
+						for i, bt := range upcoming.WaitingTasks {
+							@upcomingTaskCardWithOrder(bt, currentProjectID, i+1)
+						}
+					</div>
 				</div>
-			</div>
-		}
+			}
 
 		<!-- Scheduled Tasks -->
 		if len(upcoming.ScheduledTasks) > 0 {
@@ -274,7 +281,7 @@ templ upcomingContent(upcoming *models.Upcoming, currentProjectID string) {
 		}
 
 		<!-- Empty State -->
-		if len(upcoming.RunningTasks) == 0 && len(upcoming.PendingTasks) == 0 && len(upcoming.ScheduledTasks) == 0 {
+			if len(upcoming.RunningTasks) == 0 && len(upcoming.WaitingTasks) == 0 && len(upcoming.ScheduledTasks) == 0 {
 			<div class="text-center py-12">
 				<svg xmlns="http://www.w3.org/2000/svg" class="h-16 w-16 mx-auto opacity-30 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"></path>
@@ -286,11 +293,11 @@ templ upcomingContent(upcoming *models.Upcoming, currentProjectID string) {
 
 }
 
-templ upcomingTaskCard(bt models.UpcomingTask, status string, currentProjectID string) {
-	@upcomingTaskCardWithOrder(bt, status, currentProjectID, 0)
+templ upcomingTaskCard(bt models.UpcomingTask, currentProjectID string) {
+	@upcomingTaskCardWithOrder(bt, currentProjectID, 0)
 }
 
-templ upcomingTaskCardWithOrder(bt models.UpcomingTask, status string, currentProjectID string, order int) {
+templ upcomingTaskCardWithOrder(bt models.UpcomingTask, currentProjectID string, order int) {
 	<div class="card bg-base-100 shadow-sm border border-base-300 hover:shadow-md transition-shadow cursor-pointer"
 		onclick={ openUpcomingTaskDialog(bt.Task.ID) }
 	>
@@ -300,11 +307,13 @@ templ upcomingTaskCardWithOrder(bt models.UpcomingTask, status string, currentPr
 					if order > 0 {
 						<span class="badge badge-outline badge-sm font-mono">{ fmt.Sprintf("#%d", order) }</span>
 					}
-					if status == "running" {
-						<span class="badge badge-primary badge-sm">Running</span>
-					} else {
-						<span class="badge badge-warning badge-sm badge-outline">Pending</span>
-					}
+						if bt.Task.Status == models.StatusRunning {
+							<span class="badge badge-primary badge-sm">Running</span>
+						} else if bt.Task.Status == models.StatusQueued {
+							<span class="badge badge-secondary badge-sm badge-outline">Queued</span>
+						} else {
+							<span class="badge badge-warning badge-sm badge-outline">Pending</span>
+						}
 					<span class="font-medium text-sm truncate">{ bt.Task.Title }</span>
 				</div>
 				<div class="flex items-center gap-2 flex-shrink-0">

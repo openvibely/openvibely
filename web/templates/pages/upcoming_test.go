@@ -56,6 +56,47 @@ func TestUpcomingTaskTagsMatchTaskCardBadgeMapping(t *testing.T) {
 	}
 }
 
+func TestUpcomingContentRendersQueuedTaskAsQueued(t *testing.T) {
+	upcoming := &models.Upcoming{
+		GeneratedAt: time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC),
+		WaitingTasks: []models.UpcomingTask{{
+			Task: models.Task{
+				ID:        "queued-task",
+				ProjectID: "project-1",
+				Title:     "Queued follow-up",
+				Category:  models.CategoryActive,
+				Status:    models.StatusQueued,
+			},
+			AgentName: "Test Agent",
+		}},
+		QueuedTasks: []models.UpcomingTask{{
+			Task: models.Task{
+				ID:        "queued-task",
+				ProjectID: "project-1",
+				Title:     "Queued follow-up",
+				Category:  models.CategoryActive,
+				Status:    models.StatusQueued,
+			},
+			AgentName: "Test Agent",
+		}},
+	}
+
+	var pulse bytes.Buffer
+	if err := UpcomingContent(upcoming, "project-1").Render(context.Background(), &pulse); err != nil {
+		t.Fatalf("render upcoming content: %v", err)
+	}
+	body := pulse.String()
+	if !strings.Contains(body, ">Queued</span>") {
+		t.Fatalf("queued task must expose its persisted queued status: %s", body)
+	}
+	if !strings.Contains(body, "0 pending · 1 queued") {
+		t.Fatalf("queued-only agenda must expose a truthful waiting breakdown: %s", body)
+	}
+	if strings.Contains(body, "No active work right now") {
+		t.Fatalf("queued-only agenda must not render the empty state: %s", body)
+	}
+}
+
 func TestUpcomingTaskWithoutTagRendersNoTagBadge(t *testing.T) {
 	upcoming := &models.Upcoming{
 		GeneratedAt: time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC),

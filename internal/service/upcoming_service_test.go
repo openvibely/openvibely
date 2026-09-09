@@ -52,6 +52,12 @@ func TestUpcomingService_GenerateUpcoming_Empty(t *testing.T) {
 	if len(brief.PendingTasks) != 0 {
 		t.Fatalf("expected 0 pending tasks, got %d", len(brief.PendingTasks))
 	}
+	if len(brief.QueuedTasks) != 0 {
+		t.Fatalf("expected 0 queued tasks, got %d", len(brief.QueuedTasks))
+	}
+	if len(brief.WaitingTasks) != 0 {
+		t.Fatalf("expected 0 waiting tasks, got %d", len(brief.WaitingTasks))
+	}
 	if len(brief.ScheduledTasks) != 0 {
 		t.Fatalf("expected 0 scheduled tasks, got %d", len(brief.ScheduledTasks))
 	}
@@ -89,6 +95,18 @@ func TestUpcomingService_GenerateUpcoming_WithTasks(t *testing.T) {
 		}
 	}
 
+	// Create a queued active task.
+	queued := &models.Task{
+		ProjectID: projectID,
+		Title:     "Queued follow-up",
+		Category:  models.CategoryActive,
+		Status:    models.StatusQueued,
+		Prompt:    "Wait for capacity",
+	}
+	if err := taskRepo.Create(context.Background(), queued); err != nil {
+		t.Fatalf("creating queued task: %v", err)
+	}
+
 	brief, err := upcomingSvc.GenerateUpcoming(context.Background(), projectID)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -98,6 +116,15 @@ func TestUpcomingService_GenerateUpcoming_WithTasks(t *testing.T) {
 	}
 	if len(brief.PendingTasks) != 3 {
 		t.Fatalf("expected 3 pending tasks, got %d", len(brief.PendingTasks))
+	}
+	if len(brief.QueuedTasks) != 1 || brief.QueuedTasks[0].Task.ID != queued.ID || brief.QueuedTasks[0].Task.Status != models.StatusQueued {
+		t.Fatalf("queued tasks = %#v, want queued task %q with queued status", brief.QueuedTasks, queued.ID)
+	}
+	if len(brief.WaitingTasks) != 4 {
+		t.Fatalf("expected 4 waiting tasks, got %d", len(brief.WaitingTasks))
+	}
+	if brief.TaskSummary == nil || brief.TaskSummary.QueuedCount != 1 {
+		t.Fatalf("queued summary count = %#v, want 1", brief.TaskSummary)
 	}
 }
 
@@ -223,6 +250,9 @@ func TestUpcomingService_AISummariesBuildPromptsAndTrimOutput(t *testing.T) {
 		PendingTasks: []models.UpcomingTask{{
 			Task: models.Task{Title: "Review rollout", Priority: 3},
 		}},
+		QueuedTasks: []models.UpcomingTask{{
+			Task: models.Task{Title: "Queued deployment", Priority: 2},
+		}},
 		ScheduledTasks: []models.UpcomingTask{{
 			Task:    models.Task{Title: "Nightly smoke"},
 			NextRun: &nextRun,
@@ -239,7 +269,7 @@ func TestUpcomingService_AISummariesBuildPromptsAndTrimOutput(t *testing.T) {
 		t.Fatalf("pulse summary = %q", pulse)
 	}
 	pulseCall := mock.LastCall()
-	for _, want := range []string{"Running tasks: 1", "Run migration", "Pending tasks: 1", "Nightly smoke", "Task summary: 5 pending total"} {
+	for _, want := range []string{"Running tasks: 1", "Run migration", "Pending tasks: 1", "Queued tasks: 1", "Queued deployment", "Nightly smoke", "Task summary: 5 pending total"} {
 		if !strings.Contains(pulseCall.Prompt, want) {
 			t.Fatalf("pulse prompt missing %q:\n%s", want, pulseCall.Prompt)
 		}
