@@ -228,7 +228,7 @@ type usageAnalyticsActionInput struct {
 	GroupBy           string `json:"group_by"`
 	DateFrom          string `json:"date_from"`
 	DateTo            string `json:"date_to"`
-	TopLimit          int    `json:"top_limit"`
+	TopLimit          *int   `json:"top_limit"`
 	RecentBucketLimit *int   `json:"recent_bucket_limit"`
 }
 
@@ -300,6 +300,12 @@ func ExecuteViewUsageAnalyticsTool(ctx context.Context, usageAnalyticsSvc *Usage
 	if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 		return "", err
 	}
+	if req.TopLimit != nil && (*req.TopLimit < 1 || *req.TopLimit > 10) {
+		return "", fmt.Errorf("top_limit must be between 1 and 10")
+	}
+	if req.RecentBucketLimit != nil && (*req.RecentBucketLimit < 0 || *req.RecentBucketLimit > 24) {
+		return "", fmt.Errorf("recent_bucket_limit must be between 0 and 24")
+	}
 	filter, filterSummary := usageAnalyticsActionFilterFromInput(projectID, req)
 	view, err := usageAnalyticsSvc.BuildLocalAnalyticsUsage(ctx, filter)
 	if err != nil {
@@ -330,22 +336,14 @@ func usageAnalyticsActionFilterFromInput(projectID string, req usageAnalyticsAct
 	return filter, summary
 }
 
-func compactUsageAnalyticsActionResponse(projectID string, filter usageAnalyticsActionFilter, view *models.AnalyticsUsageViewModel, topLimit int, recentLimit *int) usageAnalyticsActionResponse {
-	if topLimit <= 0 {
-		topLimit = 5
-	}
-	if topLimit > 10 {
-		topLimit = 10
+func compactUsageAnalyticsActionResponse(projectID string, filter usageAnalyticsActionFilter, view *models.AnalyticsUsageViewModel, topLimit *int, recentLimit *int) usageAnalyticsActionResponse {
+	resolvedTopLimit := 5
+	if topLimit != nil {
+		resolvedTopLimit = *topLimit
 	}
 	bucketLimit := 8
 	if recentLimit != nil {
 		bucketLimit = *recentLimit
-	}
-	if bucketLimit < 0 {
-		bucketLimit = 0
-	}
-	if bucketLimit > 24 {
-		bucketLimit = 24
 	}
 	costStatus := usageAnalyticsActionCostStatus(view.Totals, view.ModelBreakdown)
 	response := usageAnalyticsActionResponse{
@@ -354,8 +352,8 @@ func compactUsageAnalyticsActionResponse(projectID string, filter usageAnalytics
 		Filter:             filter,
 		Totals:             view.Totals,
 		Cost:               usageAnalyticsActionCost{Available: view.Totals.CostAvailable, Status: costStatus, TotalUSD: view.Totals.CostUSD},
-		TopModels:          firstUsageAnalyticsModelRows(view.ModelBreakdown, topLimit),
-		TopProviders:       topUsageAnalyticsProviderRows(view.ModelBreakdown, topLimit),
+		TopModels:          firstUsageAnalyticsModelRows(view.ModelBreakdown, resolvedTopLimit),
+		TopProviders:       topUsageAnalyticsProviderRows(view.ModelBreakdown, resolvedTopLimit),
 		RecentBuckets:      lastUsageAnalyticsRateRows(view.UsageRate, bucketLimit),
 		AccountLimits:      compactUsageAnalyticsAccountRows(view.AccountLimits),
 		LocalOnly:          true,
