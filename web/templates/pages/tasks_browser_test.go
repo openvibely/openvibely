@@ -97,7 +97,7 @@ func driveNativeTaskDrags(debugPort int, serverURL string, dragReady <-chan task
 				return nil
 			}
 		}
-		for _, expectedPhase := range []string{"success", "failure"} {
+		for _, expectedPhase := range []string{"success", "concurrent-old", "concurrent-new", "failure"} {
 			var coordinates taskDragCoordinates
 			select {
 			case coordinates = <-dragReady:
@@ -148,6 +148,8 @@ func TestTasksDefaultAndPersistedSortsAcrossLiveRefreshAndDragInChrome(t *testin
 		{ID: "completed-new", ProjectID: project.ID, Title: "Zulu Completed", Category: models.CategoryCompleted, Status: models.StatusCompleted, CreatedAt: base, UpdatedAt: base, CompletedAt: &completedNew, DisplayOrder: 2},
 		{ID: "active-move", ProjectID: project.ID, Title: "Delta Moved", Category: models.CategoryActive, Status: models.StatusPending, CreatedAt: base.Add(5 * time.Minute), UpdatedAt: base.Add(5 * time.Minute), DisplayOrder: 0},
 		{ID: "active-fail", ProjectID: project.ID, Title: "Echo Failed Move", Category: models.CategoryActive, Status: models.StatusPending, CreatedAt: base.Add(6 * time.Minute), UpdatedAt: base.Add(6 * time.Minute), DisplayOrder: 1},
+		{ID: "active-concurrent-old", ProjectID: project.ID, Title: "Foxtrot Concurrent Old", Category: models.CategoryActive, Status: models.StatusPending, CreatedAt: base.Add(7 * time.Minute), UpdatedAt: base.Add(7 * time.Minute), DisplayOrder: 2},
+		{ID: "active-concurrent-new", ProjectID: project.ID, Title: "Golf Concurrent New", Category: models.CategoryActive, Status: models.StatusPending, CreatedAt: base.Add(8 * time.Minute), UpdatedAt: base.Add(8 * time.Minute), DisplayOrder: 3},
 	}
 	clock := base.Add(40 * time.Minute)
 
@@ -283,11 +285,19 @@ window.addEventListener('DOMContentLoaded', function() {
 		    var postMoveStaleDiagnostic = '';
 		    var successReconciliationAuthoritative = false;
 		    var successReconciliationDiagnostic = '';
-		    var delayedSuccessReconciliation = null;
-		    var originalKanbanAjax = htmx.ajax.bind(htmx);
-		    htmx.ajax = function(method, path, options) {
-		      if (currentMovePhase === 'success' && !delayedSuccessReconciliation && String(path).indexOf('refresh_source=move') >= 0) {
-		        fetch('/release-post-move-stale', {method:'POST'});
+			    var delayedSuccessReconciliation = null;
+			    var concurrentReconciliations = [];
+			    var originalKanbanAjax = htmx.ajax.bind(htmx);
+			    htmx.ajax = function(method, path, options) {
+			      if (currentMovePhase === 'concurrent' && String(path).indexOf('refresh_source=move') >= 0) {
+			        var xhr = {status:200};
+			        document.dispatchEvent(new CustomEvent('htmx:beforeRequest', {detail:{elt:options.source, target:document.getElementById('kanban-board'), xhr:xhr, requestConfig:{path:String(path)}}}));
+			        concurrentReconciliations.push({source:options.source, xhr:xhr, path:String(path)});
+			        window.__concurrentReconciliationStarts++;
+			        return Promise.resolve();
+			      }
+			      if (currentMovePhase === 'success' && !delayedSuccessReconciliation && String(path).indexOf('refresh_source=move') >= 0) {
+			        fetch('/release-post-move-stale', {method:'POST'});
 		        return new Promise(function(resolve, reject) {
 		          delayedSuccessReconciliation = function() { originalKanbanAjax(method, path, options).then(resolve, reject); };
 		        });
@@ -327,10 +337,10 @@ window.addEventListener('DOMContentLoaded', function() {
 	      document.body.appendChild(source);
 	      htmx.ajax('GET', '/aborted-newer-refresh', {source:source, target:'#kanban-board', swap:'outerHTML'});
 	    });
-	    document.body.addEventListener('htmx:beforeRequest', function(event) {
-	      var detail = event.detail || {}, requestConfig = detail.requestConfig || {};
-	      if (requestConfig.path === '/aborted-newer-refresh') {
-	        setTimeout(function() { if (detail.xhr) detail.xhr.abort(); }, 10);
+		    document.body.addEventListener('htmx:beforeRequest', function(event) {
+		      var detail = event.detail || {}, requestConfig = detail.requestConfig || {};
+		      if (requestConfig.path === '/aborted-newer-refresh') {
+		        setTimeout(function() { if (detail.xhr) detail.xhr.abort(); }, 10);
 	        return;
 	      }
 	      if (currentMovePhase !== 'failure' || rollbackOrderingInjected || requestConfig.path.indexOf('refresh_source=move') < 0) return;
@@ -382,22 +392,60 @@ window.addEventListener('DOMContentLoaded', function() {
 	      currentMovePhase = '';
 	    }
 
-	    htmx.ajax('GET', '/stale-board', {target:'#kanban-board', swap:'outerHTML'});
-	    await nativeMove('active-move', 'success', true);
-	    assertOrder('completed', ['active-move', 'completed-live', 'completed-new', 'completed-legacy', 'completed-old'], 'dragged task completion order');
-	    await nativeMove('active-fail', 'failure', false);
-	    if (!window.__taskMoveAlerts || window.__taskMoveAlerts.indexOf('move rejected') < 0) fail('failed move did not preserve existing error feedback');
+		    async function commitConcurrentReconciliation(record, responseHTML) {
+		      var board = document.getElementById('kanban-board');
+		      var beforeSwapDetail = {elt:record.source, target:board, xhr:record.xhr, requestConfig:{path:record.path}, serverResponse:responseHTML, shouldSwap:true};
+		      document.dispatchEvent(new CustomEvent('htmx:beforeSwap', {detail:beforeSwapDetail}));
+		      if (beforeSwapDetail.shouldSwap !== false) {
+		        board.outerHTML = beforeSwapDetail.serverResponse;
+		        document.dispatchEvent(new CustomEvent('htmx:afterSwap', {detail:{elt:record.source, target:document.getElementById('kanban-board'), xhr:record.xhr, requestConfig:{path:record.path}}}));
+		      }
+		      document.dispatchEvent(new CustomEvent('htmx:afterRequest', {detail:{elt:record.source, target:document.getElementById('kanban-board'), xhr:record.xhr, requestConfig:{path:record.path}, successful:true}}));
+		    }
+
+		    async function releaseConcurrentNativeMove(id, phase, expectedReconciliationCount) {
+		      currentMovePhase = 'concurrent';
+		      var card = document.getElementById('task-' + id), completedZone = zone('completed');
+		      var cardRect = card.getBoundingClientRect(), zoneRect = completedZone.getBoundingClientRect();
+		      var released = false;
+		      document.addEventListener('pointerup', function onPointerUp() {
+		        document.removeEventListener('pointerup', onPointerUp, true);
+		        released = true;
+		      }, true);
+		      await fetch('/browser-drag-ready?phase=' + phase + '&start_x=' + (cardRect.left + 10) + '&start_y=' + (cardRect.top + 10) + '&drop_x=' + (zoneRect.left + zoneRect.width / 2) + '&drop_y=' + (zoneRect.top + 10), {method:'POST'});
+		      await waitFor(function() { return released; }, phase + ' native pointer release');
+		      await waitFor(function() { return window.__concurrentReconciliationStarts >= expectedReconciliationCount; }, phase + ' reconciliation start');
+		    }
+
+		    htmx.ajax('GET', '/stale-board', {target:'#kanban-board', swap:'outerHTML'});
+		    await nativeMove('active-move', 'success', true);
+		    assertOrder('completed', ['active-move', 'completed-live', 'completed-new', 'completed-legacy', 'completed-old'], 'dragged task completion order');
+		    window.__concurrentReconciliationStarts = 0;
+		    await releaseConcurrentNativeMove('active-concurrent-old', 'concurrent-old', 1);
+		    await releaseConcurrentNativeMove('active-concurrent-new', 'concurrent-new', 2);
+		    var concurrentAuthoritativeHTML = await fetch('/concurrent-authoritative-board').then(function(response) { return response.text(); });
+		    await commitConcurrentReconciliation(concurrentReconciliations[1], concurrentAuthoritativeHTML);
+		    await commitConcurrentReconciliation(concurrentReconciliations[0], concurrentAuthoritativeHTML);
+		    await waitFor(function() { return !(window.hasPendingKanbanMoves && window.hasPendingKanbanMoves()); }, 'reverse-order concurrent reconciliations');
+		    var concurrentOld = document.getElementById('task-active-concurrent-old');
+		    var concurrentNew = document.getElementById('task-active-concurrent-new');
+		    var concurrentCompleted = ids('completed');
+		    if (concurrentCompleted[0] !== 'active-concurrent-new' || concurrentCompleted[1] !== 'active-concurrent-old') fail('reverse-order reconciliations lost authoritative ordering: ' + concurrentCompleted.join(','));
+		    if (!concurrentOld || !concurrentNew || concurrentOld.getAttribute('data-task-category') !== 'completed' || concurrentNew.getAttribute('data-task-category') !== 'completed') fail('reverse-order reconciliations lost authoritative category state');
+		    if (concurrentOld.hasAttribute('data-kanban-move-generation') || concurrentNew.hasAttribute('data-kanban-move-generation')) fail('reverse-order reconciliations retained optimistic markers');
+		    currentMovePhase = '';
+		    await nativeMove('active-fail', 'failure', false);
+		    if (!window.__taskMoveAlerts || window.__taskMoveAlerts.indexOf('move rejected') < 0) fail('failed move did not preserve existing error feedback');
     await clickSort('backlog', 'title_asc');
     await clickSort('completed', 'title_asc');
     assertOrder('backlog', ['backlog-old', 'backlog-live', 'backlog-new'], 'explicit Backlog title order');
-    assertOrder('completed', ['completed-old', 'active-move', 'completed-legacy', 'completed-live', 'completed-new'], 'explicit Completed title order');
-
+	    assertOrder('completed', ['completed-old', 'active-move', 'active-concurrent-old', 'active-concurrent-new', 'completed-legacy', 'completed-live', 'completed-new'], 'explicit Completed title order');
     await fetch('/browser-add?phase=persisted', {method:'POST'});
     window.dispatchEvent(new CustomEvent('sse-task-event', {detail:{type:'task_updated', project_id:'project-tasks-browser'}}));
     await waitFor(function() { return document.getElementById('task-backlog-persisted'); }, 'persisted live refresh');
     assertOrder('backlog', ['backlog-old', 'backlog-live', 'backlog-persisted', 'backlog-new'], 'persisted Backlog title order');
-    assertOrder('completed', ['completed-old', 'active-move', 'completed-legacy', 'completed-live', 'completed-persisted', 'completed-new'], 'persisted Completed title order');
-    if (!activeSort('backlog', 'title_asc') || !activeSort('completed', 'title_asc')) fail('explicit sorts were not preserved after live refresh');
+	    assertOrder('completed', ['completed-old', 'active-move', 'active-concurrent-old', 'active-concurrent-new', 'completed-legacy', 'completed-live', 'completed-persisted', 'completed-new'], 'persisted Completed title order');
+	    if (!activeSort('backlog', 'title_asc') || !activeSort('completed', 'title_asc')) fail('explicit sorts were not preserved after live refresh');
     await report('pass', '');
   })().catch(function(error) { report('fail', String(error && error.stack || error)); });
 });
@@ -470,6 +518,8 @@ window.addEventListener('DOMContentLoaded', function() {
 		case r.URL.Path == "/release-post-move-stale" && r.Method == http.MethodPost:
 			close(releasePostMoveStale)
 			w.WriteHeader(http.StatusNoContent)
+		case r.URL.Path == "/concurrent-authoritative-board" && r.Method == http.MethodGet:
+			_, _ = w.Write([]byte(renderBoard(r)))
 		case r.URL.Path == "/browser-drag-ready" && r.Method == http.MethodPost:
 			parse := func(key string) float64 {
 				value, _ := strconv.ParseFloat(r.URL.Query().Get(key), 64)
@@ -488,6 +538,20 @@ window.addEventListener('DOMContentLoaded', function() {
 			clock = clock.Add(time.Minute)
 			for i := range tasks {
 				if tasks[i].ID == "active-move" {
+					tasks[i].Category = models.CategoryCompleted
+					tasks[i].CompletedAt = new(time.Time)
+					*tasks[i].CompletedAt = clock
+					tasks[i].UpdatedAt = clock
+				}
+			}
+			mu.Unlock()
+			w.WriteHeader(http.StatusNoContent)
+		case (r.URL.Path == "/tasks/active-concurrent-old/category" || r.URL.Path == "/tasks/active-concurrent-new/category") && r.Method == http.MethodPatch:
+			taskID := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/tasks/"), "/category")
+			mu.Lock()
+			clock = clock.Add(time.Minute)
+			for i := range tasks {
+				if tasks[i].ID == taskID {
 					tasks[i].Category = models.CategoryCompleted
 					tasks[i].CompletedAt = new(time.Time)
 					*tasks[i].CompletedAt = clock
@@ -590,6 +654,9 @@ window.addEventListener('DOMContentLoaded', function() {
 	requestMu.Unlock()
 	if !strings.Contains(requests, "GET /post-move-stale-board") {
 		t.Fatalf("Tasks browser regression did not start the post-move pre-commit stale board request; requests:\n%s", requests)
+	}
+	if !strings.Contains(requests, "POST /browser-drag-ready?phase=concurrent-old") || !strings.Contains(requests, "POST /browser-drag-ready?phase=concurrent-new") || !strings.Contains(requests, "GET /concurrent-authoritative-board") {
+		t.Fatalf("Tasks browser regression did not exercise native concurrent moves and reverse reconciliation; requests:\n%s", requests)
 	}
 	if !strings.Contains(requests, "GET /failed-newer-refresh") || !strings.Contains(requests, "GET /aborted-newer-refresh") {
 		t.Fatalf("Tasks browser regression did not start newer failed and aborted refreshes; requests:\n%s", requests)
