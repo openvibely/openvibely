@@ -767,6 +767,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 		cfg.GitHubAppPrivateKey,
 		cfg.ProjectRepoRoot,
 	)
+	projectSvc.SetManagedProjectRepoResolver(githubSvc)
 	automationExternalStateSvc := service.NewAutomationExternalStateService(automationRepo, taskPullRequestRepo, projectRepo, githubSvc)
 	automationLiveViewTracker := service.NewAutomationLiveViewTracker()
 	automationReconciler.SetAutomationExternalStateService(automationExternalStateSvc)

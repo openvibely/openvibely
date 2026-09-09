@@ -2,18 +2,42 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/applog"
+	"github.com/openvibely/openvibely/internal/attachmentsession"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 )
 
+type ManagedProjectRepoResolver interface {
+	IsManagedProjectRepo(ctx context.Context, projectID, repoPath string) (bool, error)
+}
+
 type ProjectService struct {
-	repo       *repository.ProjectRepo
-	taskSvc    *TaskService
-	workerRepo *repository.WorkerRepo
+	repo                *repository.ProjectRepo
+	taskSvc             *TaskService
+	workerRepo          *repository.WorkerRepo
+	managedRepoResolver ManagedProjectRepoResolver
+}
+
+type projectDeletionMove struct {
+	source     string
+	quarantine string
+}
+
+type projectDeletionFileStage struct {
+	moves          []projectDeletionMove
+	branches       []string
+	sessionUnlocks []func()
+	localRepoPath  string
+	pruneWorktrees bool
 }
 
 type ProjectDeletionCleanupError struct {
@@ -34,6 +58,10 @@ func NewProjectService(repo *repository.ProjectRepo) *ProjectService {
 
 func (s *ProjectService) SetTaskService(taskSvc *TaskService) {
 	s.taskSvc = taskSvc
+}
+
+func (s *ProjectService) SetManagedProjectRepoResolver(resolver ManagedProjectRepoResolver) {
+	s.managedRepoResolver = resolver
 }
 
 func (s *ProjectService) SetWorkerRepo(workerRepo *repository.WorkerRepo) {
@@ -114,24 +142,261 @@ func (s *ProjectService) Delete(ctx context.Context, id string) error {
 		return fmt.Errorf("project not found or is the default project")
 	}
 
-	manifest, _, err := s.repo.DeleteWithCleanupManifest(ctx, id, func(manifest repository.TaskDeletionManifest) error {
-		if len(manifest.TaskIDs) == 0 {
-			return nil
+	managedRepo := false
+	if strings.TrimSpace(project.RepoURL) != "" && strings.TrimSpace(project.RepoPath) != "" {
+		if s.managedRepoResolver == nil {
+			return errors.New("managed repository cleanup is unavailable for project deletion")
 		}
-		if s.taskSvc == nil {
+		managedRepo, err = s.managedRepoResolver.IsManagedProjectRepo(ctx, project.ID, project.RepoPath)
+		if err != nil {
+			return fmt.Errorf("checking managed project repository ownership: %w", err)
+		}
+		if !managedRepo {
+			return fmt.Errorf("refusing to delete unrecognized managed project repository %q", project.RepoPath)
+		}
+	}
+
+	var stage *projectDeletionFileStage
+	deleteRelational := func() error {
+		var preview repository.TaskDeletionManifest
+		previewComplete := errors.New("project deletion manifest preview complete")
+		_, _, previewErr := s.repo.DeleteWithCleanupManifest(ctx, id, func(manifest repository.TaskDeletionManifest) error {
+			preview = manifest
+			return previewComplete
+		})
+		if !errors.Is(previewErr, previewComplete) {
+			return previewErr
+		}
+		if len(preview.TaskIDs) > 0 && s.taskSvc == nil {
 			return fmt.Errorf("task service is unavailable for project deletion")
 		}
-		return s.taskSvc.prepareDeletion(manifest, manifest.TaskIDs)
-	})
-	if err != nil {
-		return err
+		if s.taskSvc != nil {
+			if validateErr := s.taskSvc.validateDeletion(preview); validateErr != nil {
+				return validateErr
+			}
+		}
+		stage, err = s.stageProjectDeletionFiles(ctx, project, preview, managedRepo)
+		if err != nil {
+			return err
+		}
+
+		manifest, _, deleteErr := s.repo.DeleteWithCleanupManifest(ctx, id, func(manifest repository.TaskDeletionManifest) error {
+			if !projectDeletionManifestsEqual(preview, manifest) {
+				return errors.New("project-owned tasks or files changed during deletion")
+			}
+			return nil
+		})
+		if deleteErr != nil {
+			if stage != nil {
+				if rollbackErr := stage.rollback(); rollbackErr != nil {
+					return errors.Join(deleteErr, fmt.Errorf("restoring staged project files: %w", rollbackErr))
+				}
+			}
+			return deleteErr
+		}
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cleanupCancel()
+		var cleanupErrors []error
+		if s.taskSvc != nil {
+			if runtimeErr := s.taskSvc.cleanupDeletedProjectRuntime(cleanupCtx, manifest.TaskIDs); runtimeErr != nil {
+				cleanupErrors = append(cleanupErrors, runtimeErr)
+			}
+		}
+		if stage != nil {
+			if finalizeErr := stage.finalize(cleanupCtx); finalizeErr != nil {
+				cleanupErrors = append(cleanupErrors, finalizeErr)
+			}
+		}
+		if cleanupErr := errors.Join(cleanupErrors...); cleanupErr != nil {
+			return &ProjectDeletionCleanupError{Err: cleanupErr}
+		}
+		return nil
 	}
+	if strings.TrimSpace(project.RepoPath) != "" {
+		return WithRepositoryMutation(project.RepoPath, deleteRelational)
+	}
+	return deleteRelational()
+}
+
+func projectDeletionManifestsEqual(a, b repository.TaskDeletionManifest) bool {
+	stringSetEqual := func(left, right []string) bool {
+		if len(left) != len(right) {
+			return false
+		}
+		counts := make(map[string]int, len(left))
+		for _, value := range left {
+			counts[value]++
+		}
+		for _, value := range right {
+			counts[value]--
+			if counts[value] < 0 {
+				return false
+			}
+		}
+		return true
+	}
+	worktreeSet := func(values []repository.TaskWorktreeCleanup) []string {
+		keys := make([]string, 0, len(values))
+		for _, value := range values {
+			keys = append(keys, fmt.Sprintf("%s\x00%s\x00%s\x00%t", value.TaskID, value.WorktreePath, value.WorktreeBranch, value.DeleteBranch))
+		}
+		return keys
+	}
+	return stringSetEqual(a.TaskIDs, b.TaskIDs) &&
+		stringSetEqual(worktreeSet(a.TaskWorktrees), worktreeSet(b.TaskWorktrees)) &&
+		stringSetEqual(a.TaskAttachmentPaths, b.TaskAttachmentPaths) &&
+		stringSetEqual(a.ExecutionAttachmentPaths, b.ExecutionAttachmentPaths) &&
+		stringSetEqual(a.PendingUploadSessionIDs, b.PendingUploadSessionIDs)
+}
+
+func (s *ProjectService) stageProjectDeletionFiles(ctx context.Context, project *models.Project, manifest repository.TaskDeletionManifest, managedRepo bool) (*projectDeletionFileStage, error) {
+	stage := &projectDeletionFileStage{}
+	fail := func(err error) (*projectDeletionFileStage, error) {
+		if rollbackErr := stage.rollback(); rollbackErr != nil {
+			return nil, errors.Join(err, fmt.Errorf("restoring staged project files: %w", rollbackErr))
+		}
+		return nil, err
+	}
+	stagePath := func(path, kind string, wantDirectory bool) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		info, err := os.Lstat(path)
+		if os.IsNotExist(err) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("inspecting %s %s: %w", kind, path, err)
+		}
+		if wantDirectory != info.IsDir() {
+			return fmt.Errorf("refusing to stage %s with unexpected file type: %s", kind, path)
+		}
+		quarantine := path + ".openvibely-delete-" + repository.NewID()
+		if err := os.Rename(path, quarantine); err != nil {
+			return fmt.Errorf("staging %s %s: %w", kind, path, err)
+		}
+		stage.moves = append(stage.moves, projectDeletionMove{source: path, quarantine: quarantine})
+		return nil
+	}
+
+	if managedRepo {
+		if err := stagePath(project.RepoPath, "managed project repository", true); err != nil {
+			return fail(err)
+		}
+	} else if strings.TrimSpace(project.RepoPath) != "" {
+		worktreeRoot := filepath.Join(project.RepoPath, ".worktrees")
+		for _, worktree := range manifest.TaskWorktrees {
+			worktreePath := worktree.WorktreePath
+			if !filepath.IsAbs(worktreePath) {
+				worktreePath = filepath.Join(project.RepoPath, worktreePath)
+			}
+			rel, err := filepath.Rel(worktreeRoot, worktreePath)
+			if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || strings.Contains(rel, string(filepath.Separator)) {
+				return fail(fmt.Errorf("refusing to delete task worktree outside managed worktree root: %q", worktree.WorktreePath))
+			}
+			base := filepath.Base(worktreePath)
+			expected := "task_" + worktree.TaskID
+			if base != expected && !strings.HasPrefix(base, expected+"_followup_") {
+				return fail(fmt.Errorf("refusing to delete unrecognized task worktree %q", worktree.WorktreePath))
+			}
+			if err := stagePath(worktreePath, "task worktree", true); err != nil {
+				return fail(err)
+			}
+			if worktree.DeleteBranch && worktree.WorktreeBranch != "" {
+				taskPrefix := worktree.TaskID
+				if len(taskPrefix) > 8 {
+					taskPrefix = taskPrefix[:8]
+				}
+				if strings.HasPrefix(worktree.WorktreeBranch, "task/"+taskPrefix+"-") {
+					stage.branches = append(stage.branches, worktree.WorktreeBranch)
+				}
+			}
+			stage.pruneWorktrees = true
+		}
+		stage.localRepoPath = project.RepoPath
+	}
+
 	if s.taskSvc != nil {
-		if err := s.taskSvc.cleanupDeletionFiles(manifest); err != nil {
-			return &ProjectDeletionCleanupError{Err: err}
+		for _, path := range append(append([]string{}, manifest.TaskAttachmentPaths...), manifest.ExecutionAttachmentPaths...) {
+			if managedRepo && pathWithin(project.RepoPath, path) {
+				continue
+			}
+			if err := stagePath(path, "attachment", false); err != nil {
+				return fail(err)
+			}
+		}
+		for _, sessionID := range manifest.PendingUploadSessionIDs {
+			unlock := attachmentsession.Lock(sessionID)
+			stage.sessionUnlocks = append(stage.sessionUnlocks, unlock)
+			path := filepath.Join(s.taskSvc.uploadsDir, "chat", "pending", sessionID)
+			if err := stagePath(path, "pending upload session", true); err != nil {
+				return fail(err)
+			}
 		}
 	}
-	return nil
+	return stage, nil
+}
+
+func pathWithin(base, candidate string) bool {
+	baseAbs, err := filepath.Abs(base)
+	if err != nil {
+		return false
+	}
+	candidateAbs, err := filepath.Abs(candidate)
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(baseAbs, candidateAbs)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+func (s *projectDeletionFileStage) releaseSessions() {
+	for i := len(s.sessionUnlocks) - 1; i >= 0; i-- {
+		s.sessionUnlocks[i]()
+	}
+	s.sessionUnlocks = nil
+}
+
+func (s *projectDeletionFileStage) rollback() error {
+	defer s.releaseSessions()
+	var rollbackErrors []error
+	for i := len(s.moves) - 1; i >= 0; i-- {
+		move := s.moves[i]
+		if err := os.Rename(move.quarantine, move.source); err != nil {
+			rollbackErrors = append(rollbackErrors, fmt.Errorf("restoring %s: %w", move.source, err))
+		}
+	}
+	return errors.Join(rollbackErrors...)
+}
+
+func (s *projectDeletionFileStage) finalize(ctx context.Context) error {
+	defer s.releaseSessions()
+	var cleanupErrors []error
+	if s.pruneWorktrees {
+		cmd := exec.CommandContext(ctx, "git", "worktree", "prune")
+		cmd.Dir = s.localRepoPath
+		if out, err := cmd.CombinedOutput(); err != nil {
+			cleanupErrors = append(cleanupErrors, fmt.Errorf("pruning deleted task worktrees: %w: %s", err, strings.TrimSpace(string(out))))
+		}
+	}
+	seenBranches := make(map[string]struct{}, len(s.branches))
+	for _, branch := range s.branches {
+		if _, seen := seenBranches[branch]; seen {
+			continue
+		}
+		seenBranches[branch] = struct{}{}
+		cmd := exec.CommandContext(ctx, "git", "branch", "-D", branch)
+		cmd.Dir = s.localRepoPath
+		if out, err := cmd.CombinedOutput(); err != nil {
+			cleanupErrors = append(cleanupErrors, fmt.Errorf("deleting project task branch %s: %w: %s", branch, err, strings.TrimSpace(string(out))))
+		}
+	}
+	for _, move := range s.moves {
+		if err := os.RemoveAll(move.quarantine); err != nil {
+			cleanupErrors = append(cleanupErrors, fmt.Errorf("removing staged project file %s: %w", move.quarantine, err))
+		}
+	}
+	return errors.Join(cleanupErrors...)
 }
 
 // ValidateRepoPaths checks all projects with configured repo_path values and

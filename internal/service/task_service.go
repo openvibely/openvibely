@@ -517,15 +517,40 @@ func (s *TaskService) DeleteProjectTasks(ctx context.Context, projectID string) 
 	}
 }
 
-func (s *TaskService) prepareDeletion(manifest repository.TaskDeletionManifest, taskIDs []string) error {
+func (s *TaskService) validateDeletion(manifest repository.TaskDeletionManifest) error {
 	if len(manifest.PendingUploadSessionIDs) > 0 && strings.TrimSpace(s.uploadsDir) == "" {
 		return errors.New("uploads directory is not configured for pending upload cleanup")
 	}
+	return nil
+}
+
+func (s *TaskService) cancelDeletionTasks(taskIDs []string) {
 	if s.workerSvc != nil {
 		for _, taskID := range taskIDs {
 			s.workerSvc.CancelRunningTask(taskID)
 		}
 	}
+}
+
+func (s *TaskService) cleanupDeletedProjectRuntime(ctx context.Context, taskIDs []string) error {
+	if s.workerSvc == nil {
+		return nil
+	}
+	var cleanupErrors []error
+	for _, taskID := range taskIDs {
+		s.workerSvc.CancelRunningTask(taskID)
+		if err := s.workerSvc.CancelQueuedTask(context.WithoutCancel(ctx), taskID, "Project deleted"); err != nil {
+			cleanupErrors = append(cleanupErrors, fmt.Errorf("canceling queued task %s after project deletion: %w", taskID, err))
+		}
+	}
+	return errors.Join(cleanupErrors...)
+}
+
+func (s *TaskService) prepareDeletion(manifest repository.TaskDeletionManifest, taskIDs []string) error {
+	if err := s.validateDeletion(manifest); err != nil {
+		return err
+	}
+	s.cancelDeletionTasks(taskIDs)
 	return nil
 }
 
