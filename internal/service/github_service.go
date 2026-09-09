@@ -787,7 +787,7 @@ func (s *GitHubService) PublishBranch(ctx context.Context, repo *GitHubRepoRef, 
 		}
 		if remoteBranchSHA == "" {
 			if err := s.publishExistingLocalCommitWithToken(ctx, token, repo, branch, remoteBaseSHA, false); err != nil {
-				if !isGitHubRefAlreadyExistsError(err) {
+				if !isGitHubRefAlreadyExistsError(err) && !isGitHubNonFastForwardError(err) {
 					return nil, err
 				}
 				concurrentSHA, refErr := s.githubBranchCommitSHA(ctx, token, repo, branch)

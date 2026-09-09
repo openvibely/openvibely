@@ -2661,6 +2661,72 @@ func TestPublishBranchNoChangesConcurrentBranchCreationSucceeds(t *testing.T) {
 	}
 }
 
+func TestPublishBranchNoChangesConcurrentBranchCreationBeforePatchSucceeds(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
+		t.Fatalf("set auth mode: %v", err)
+	}
+	if err := settingsRepo.Set(ctx, GitHubSettingPAT, "ghp_test"); err != nil {
+		t.Fatalf("set pat: %v", err)
+	}
+
+	repoDir := createTestGitRepo(t)
+	remoteBaseSHA := "1111111111111111111111111111111111111111"
+	concurrentBranchSHA := "2222222222222222222222222222222222222222"
+	branchGets := 0
+	patches := 0
+	createRefs := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/git/ref/heads/main":
+			fmt.Fprintf(w, `{"object":{"sha":%q}}`, remoteBaseSHA)
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/git/ref/heads/task/api-publish":
+			branchGets++
+			if branchGets == 1 {
+				w.WriteHeader(http.StatusNotFound)
+				fmt.Fprint(w, `{"message":"Reference does not exist"}`)
+				return
+			}
+			fmt.Fprintf(w, `{"object":{"sha":%q}}`, concurrentBranchSHA)
+		case r.Method == http.MethodPatch && r.URL.Path == "/repos/openvibely/openvibely/git/refs/heads/task/api-publish":
+			patches++
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			fmt.Fprint(w, `{"message":"Update is not a fast forward"}`)
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/openvibely/openvibely/git/refs":
+			createRefs++
+			t.Fatal("non-fast-forward update must reconcile without creating the existing ref")
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/git/commits/"+remoteBaseSHA:
+			fmt.Fprint(w, `{"tree":{"sha":"base-tree"}}`)
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/git/commits/"+concurrentBranchSHA:
+			fmt.Fprint(w, `{"tree":{"sha":"base-tree"}}`)
+		default:
+			t.Fatalf("unexpected GitHub API request: %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer server.Close()
+
+	svc := NewGitHubService(settingsRepo, "", "", "", "")
+	svc.apiBaseURL = server.URL
+	result, err := svc.PublishBranch(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubPublishBranchRequest{
+		RepoPath:      repoDir,
+		Branch:        "task/api-publish",
+		BaseBranch:    "main",
+		CommitMessage: "Reconcile concurrently created branch",
+	})
+	if err != nil {
+		t.Fatalf("PublishBranch returned error: %v", err)
+	}
+	if result.HeadSHA != concurrentBranchSHA {
+		t.Fatalf("expected reconciled head %q, got %#v", concurrentBranchSHA, result)
+	}
+	if branchGets != 2 || patches != 1 || createRefs != 0 {
+		t.Fatalf("expected pre-patch creation reconciliation, got branchGets=%d patches=%d createRefs=%d", branchGets, patches, createRefs)
+	}
+}
+
 func TestPublishBranchRetriesWithLatestRemoteBranchParentOnNonFastForward(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	settingsRepo := repository.NewSettingsRepo(db)
