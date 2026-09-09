@@ -4270,6 +4270,19 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					}
 				};
 
+				(function showProjectCleanupWarningAfterRedirect() {
+					var currentURL = new URL(window.location.href);
+					if (currentURL.searchParams.get('project_cleanup_warning') !== '1') return;
+					currentURL.searchParams.delete('project_cleanup_warning');
+					window.history.replaceState(window.history.state, '', currentURL.pathname + currentURL.search + currentURL.hash);
+					window.showToast(
+						'Project deleted, but some staged filesystem or runtime cleanup could not be completed.',
+						'cancelled',
+						'',
+						{toastKey: 'project-cleanup-warning', sticky: true}
+					);
+				})();
+
 				// Bridge HTMX-triggered toast events into the global toast renderer.
 				// Handlers can emit: {"openvibelyToast":{"message":"...", "status":"failed"}}
 				if (!window._openvibelyToastBridgeRegistered) {
