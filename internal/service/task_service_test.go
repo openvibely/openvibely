@@ -21,6 +21,8 @@ func newTestWorkerService(t *testing.T) *WorkerService {
 	// Create a worker service with no actual agent service (won't process tasks)
 	ws := &WorkerService{
 		pending:     make(map[string]bool),
+		reserved:    make(map[string]string),
+		prepared:    make(map[string]preparedAutomationDispatch),
 		numWorkers:  0,
 		submitted:   make(chan models.Task, 100),
 		cancelFuncs: make(map[string]context.CancelFunc),
@@ -730,7 +732,7 @@ func TestTaskService_UpdateCategory_PromotesQueuedTaskThreadFollowupBeforeOrigin
 	}
 }
 
-func TestTaskService_MoveTasksToActiveLaneRoutesSingleQueuedFollowupThroughLifecycleOwner(t *testing.T) {
+func TestTaskService_MoveTasksToActiveLaneRejectsSingleQueuedFollowupWithoutChangingLane(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
 	taskRepo := repository.NewTaskRepo(db, nil)
@@ -741,30 +743,23 @@ func TestTaskService_MoveTasksToActiveLaneRoutesSingleQueuedFollowupThroughLifec
 	require.NoError(t, taskRepo.Create(ctx, task))
 	input := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: "default", TaskID: task.ID, InputMode: models.ThreadInputModeQueued, InputStatus: models.ThreadInputPending, Content: "queued followup"}
 	require.NoError(t, threadRepo.CreateQueued(ctx, input))
-	called := 0
-	svc.SetQueuedTaskThreadFollowupHook(func(ctx context.Context, taskID string) (bool, error) {
-		called++
-		require.Equal(t, task.ID, taskID)
-		require.NoError(t, taskRepo.UpdateCategory(ctx, taskID, models.CategoryActive))
-		require.NoError(t, taskRepo.UpdateStatus(ctx, taskID, models.StatusQueued))
-		return true, nil
-	})
-
 	err := svc.MoveTasksToActiveLane(ctx, "default", []repository.ActiveLaneTaskMove{{ID: task.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending}}, models.StatusRunning)
-	require.NoError(t, err)
-	require.Equal(t, 1, called)
+	require.ErrorIs(t, err, repository.ErrActiveLaneLifecycleOwned)
 	loaded, err := taskRepo.GetByID(ctx, task.ID)
 	require.NoError(t, err)
-	require.Equal(t, models.CategoryActive, loaded.Category)
-	require.Equal(t, models.StatusQueued, loaded.Status)
+	require.Equal(t, models.CategoryBacklog, loaded.Category)
+	require.Equal(t, models.StatusPending, loaded.Status)
+	pending, err := threadRepo.FindOldestQueuedForTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.NotNil(t, pending)
 	select {
 	case submitted := <-worker.Submitted():
-		t.Fatalf("original task prompt was submitted instead of queued followup: %s", submitted.ID)
+		t.Fatalf("original task prompt was submitted instead of preserving queued followup: %s", submitted.ID)
 	default:
 	}
 }
 
-func TestTaskService_MoveTasksToActiveLaneRoutesSingleFailedFollowupThroughRetryOwner(t *testing.T) {
+func TestTaskService_MoveTasksToActiveLaneRejectsSingleFailedFollowupWithoutChangingLane(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
 	taskRepo := repository.NewTaskRepo(db, nil)
@@ -774,24 +769,15 @@ func TestTaskService_MoveTasksToActiveLaneRoutesSingleFailedFollowupThroughRetry
 	task := &models.Task{ProjectID: "default", Title: "Failed followup lane move", Category: models.CategoryBacklog, Status: models.StatusFailed, Prompt: "original prompt"}
 	require.NoError(t, taskRepo.Create(ctx, task))
 	require.NoError(t, execRepo.Create(ctx, &models.Execution{TaskID: task.ID, Status: models.ExecFailed, PromptSent: "failed followup", IsFollowup: true}))
-	called := 0
-	svc.SetFailedTaskThreadFollowupRetryHook(func(ctx context.Context, taskID string) (bool, error) {
-		called++
-		require.Equal(t, task.ID, taskID)
-		require.NoError(t, taskRepo.UpdateCategory(ctx, taskID, models.CategoryActive))
-		require.NoError(t, taskRepo.UpdateStatus(ctx, taskID, models.StatusQueued))
-		return true, nil
-	})
-
 	err := svc.MoveTasksToActiveLane(ctx, "default", []repository.ActiveLaneTaskMove{{ID: task.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusFailed}}, models.StatusRunning)
-	require.NoError(t, err)
-	require.Equal(t, 1, called)
+	require.ErrorIs(t, err, repository.ErrActiveLaneLifecycleOwned)
 	loaded, err := taskRepo.GetByID(ctx, task.ID)
 	require.NoError(t, err)
-	require.Equal(t, models.StatusQueued, loaded.Status)
+	require.Equal(t, models.CategoryBacklog, loaded.Category)
+	require.Equal(t, models.StatusFailed, loaded.Status)
 	select {
 	case submitted := <-worker.Submitted():
-		t.Fatalf("original task prompt was submitted instead of failed followup retry: %s", submitted.ID)
+		t.Fatalf("original task prompt was submitted instead of preserving failed followup: %s", submitted.ID)
 	default:
 	}
 }
@@ -3527,32 +3513,72 @@ func TestWorkerService_ProjectConcurrency_MultipleProjects(t *testing.T) {
 	}
 }
 
-func TestWorkerService_SubmitPreclaimedDoesNotMarkAlreadyExecutingTask(t *testing.T) {
+func TestWorkerService_SubmitReservedUpgradesExistingQueuedTask(t *testing.T) {
 	ws := NewWorkerService(nil, 1, nil)
-	task := models.Task{ID: "already-executing", ProjectID: "default", Category: models.CategoryActive, Status: models.StatusRunning}
-	ws.pending[task.ID] = true
-
-	ws.SubmitPreclaimed(task)
-
-	ws.mu.Lock()
-	if ws.preclaimed[task.ID] {
-		ws.mu.Unlock()
-		t.Fatal("already-executing task acquired a stale preclaimed marker")
-	}
-	if len(ws.queue) != 0 {
-		ws.mu.Unlock()
-		t.Fatalf("already-executing task was requeued: %#v", ws.queue)
-	}
-	delete(ws.pending, task.ID) // simulate execution completion
-	ws.mu.Unlock()
-
-	task.Status = models.StatusPending
+	task := models.Task{ID: "already-queued", ProjectID: "default", Category: models.CategoryActive, Status: models.StatusPending}
 	ws.Submit(task)
+	task.Status = models.StatusRunning
+	ws.SubmitReserved(task, "durable-execution")
+
 	ws.mu.Lock()
 	defer ws.mu.Unlock()
-	if ws.preclaimed[task.ID] || !ws.pending[task.ID] || len(ws.queue) != 1 {
-		t.Fatalf("later ordinary rerun was corrupted: preclaimed=%v pending=%v queue=%#v", ws.preclaimed[task.ID], ws.pending[task.ID], ws.queue)
+	if ws.reserved[task.ID] != "durable-execution" || len(ws.queue) != 1 || ws.queue[0].Status != models.StatusRunning {
+		t.Fatalf("queued task was not upgraded atomically: reserved=%q queue=%#v", ws.reserved[task.ID], ws.queue)
 	}
+}
+
+func TestWorkerService_StartReconcilesDurableActiveLaneReservationWhileCapacityFull(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	task := &models.Task{ProjectID: "default", Title: "Restart reserved worker task", Category: models.CategoryBacklog, Status: models.StatusPending}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	admissions, err := taskRepo.MoveTasksToActiveLane(ctx, "default", []repository.ActiveLaneTaskMove{{ID: task.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending}}, models.StatusRunning)
+	require.NoError(t, err)
+	require.Len(t, admissions, 1)
+
+	worker := NewWorkerService(nil, 1, nil)
+	worker.SetTaskRepo(taskRepo)
+	require.True(t, worker.TryAcquireProjectSlot("occupied-project"))
+	defer worker.ReleaseProjectSlot("occupied-project")
+	worker.Start(ctx)
+	defer worker.Stop()
+	worker.mu.Lock()
+	defer worker.mu.Unlock()
+	require.True(t, worker.pending[task.ID])
+	require.Equal(t, admissions[0].ExecutionID, worker.reserved[task.ID])
+	require.Len(t, worker.queue, 1)
+	var status models.ExecutionStatus
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT status FROM executions WHERE id = ?`, admissions[0].ExecutionID).Scan(&status))
+	require.Equal(t, models.ExecQueued, status)
+}
+
+func TestWorkerService_PrunesAndCancelsStaleDurableReservation(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	execRepo := repository.NewExecutionRepo(db)
+	task := &models.Task{ProjectID: "default", Title: "Cancelled reserved worker task", Category: models.CategoryBacklog, Status: models.StatusPending}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	admissions, err := taskRepo.MoveTasksToActiveLane(ctx, "default", []repository.ActiveLaneTaskMove{{ID: task.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending}}, models.StatusRunning)
+	require.NoError(t, err)
+	_, err = db.ExecContext(ctx, `UPDATE tasks SET status = 'cancelled' WHERE id = ?`, task.ID)
+	require.NoError(t, err)
+
+	worker := NewWorkerService(nil, 1, nil)
+	worker.SetTaskRepo(taskRepo)
+	worker.SetExecutionRepo(execRepo)
+	worker.Start(ctx)
+	defer worker.Stop()
+	worker.SubmitReserved(admissions[0].Task, admissions[0].ExecutionID)
+	worker.mu.Lock()
+	require.False(t, worker.pending[task.ID])
+	require.Empty(t, worker.reserved[task.ID])
+	worker.mu.Unlock()
+	execution, err := execRepo.GetByID(ctx, admissions[0].ExecutionID)
+	require.NoError(t, err)
+	require.Equal(t, models.ExecCancelled, execution.Status)
 }
 
 func TestWorkerService_DispatchPrunesNonPendingTasks(t *testing.T) {
@@ -3662,7 +3688,7 @@ func TestWorkerService_DispatchPrunesNonActiveCategoryTasks(t *testing.T) {
 		t.Errorf("expected empty queue after pruning, got %d", queueLen)
 	}
 }
-func TestTaskService_MoveTasksToActiveLaneStartsSingleSwarmPlanner(t *testing.T) {
+func TestTaskService_MoveTasksToActiveLaneRejectsSingleSwarmParentWithoutChangingLane(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	taskRepo := repository.NewTaskRepo(db, nil)
 	workerSvc := newTestWorkerService(t)
@@ -3675,8 +3701,15 @@ func TestTaskService_MoveTasksToActiveLaneStartsSingleSwarmPlanner(t *testing.T)
 	require.NoError(t, err)
 
 	err = taskSvc.MoveTasksToActiveLane(ctx, "default", []repository.ActiveLaneTaskMove{{ID: parent.ID, ExpectedCategory: parent.Category, ExpectedStatus: parent.Status}}, models.StatusRunning)
+	require.ErrorIs(t, err, repository.ErrActiveLaneLifecycleOwned)
+	loaded, err := taskRepo.GetByID(ctx, parent.ID)
 	require.NoError(t, err)
-	assertPlannerSubmittedForParent(t, taskRepo, workerSvc, parent.ID)
+	require.Equal(t, models.CategoryBacklog, loaded.Category)
+	select {
+	case submitted := <-workerSvc.Submitted():
+		t.Fatalf("swarm planner submitted after rejected lane move: %s", submitted.ID)
+	default:
+	}
 }
 
 func TestTaskService_ActivateAllBacklogStartsSwarmPlanner(t *testing.T) {

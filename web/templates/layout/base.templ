@@ -3559,8 +3559,13 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							// Moving from different category to active
 							beginKanbanMove([taskID], {category: 'active', status: targetStatus}, 'PATCH', `/tasks/${taskID}/category`, { category: 'active', target_status: targetStatus }, 'Cannot move task to Active category');
 						} else if (currentStatus !== targetStatus) {
-							// Same category, different status
-							beginKanbanMove([taskID], {category: 'active', status: targetStatus}, 'PATCH', `/tasks/${taskID}/status`, { status: targetStatus }, 'Cannot change task status');
+							// Queued-to-running uses the same durable, stale-fenced admission as
+							// cross-category Active moves. Other status changes retain their owner.
+							if (targetStatus === 'running') {
+								beginKanbanMove([taskID], {category: 'active', status: targetStatus}, 'PATCH', `/tasks/${taskID}/category`, { category: 'active', target_status: targetStatus }, 'Cannot start task in this lane');
+							} else {
+								beginKanbanMove([taskID], {category: 'active', status: targetStatus}, 'PATCH', `/tasks/${taskID}/status`, { status: targetStatus }, 'Cannot change task status');
+							}
 						} else if (dropPosition !== null) {
 							// Same category, same status - just reorder
 							htmx.ajax('PATCH', `/tasks/${taskID}/reorder`, {

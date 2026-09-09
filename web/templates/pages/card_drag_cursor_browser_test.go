@@ -658,9 +658,15 @@ window.addEventListener('DOMContentLoaded', function() {
 				t.Fatalf("expected task category move to use PATCH, got %s", r.Method)
 			}
 			w.WriteHeader(http.StatusNoContent)
-		case "/tasks/task-active-status-drag/status":
+		case "/tasks/task-active-status-drag/category":
 			if r.Method != http.MethodPatch {
-				t.Fatalf("expected Active lane status move to use PATCH, got %s", r.Method)
+				t.Fatalf("expected Active lane start to use PATCH, got %s", r.Method)
+			}
+			if err := r.ParseForm(); err != nil {
+				t.Fatalf("parse Active lane start: %v", err)
+			}
+			if r.FormValue("category") != string(models.CategoryActive) || r.FormValue("target_status") != string(models.StatusRunning) || r.FormValue("expected_states") == "" {
+				t.Fatalf("Active lane start form = %#v", r.Form)
 			}
 			w.WriteHeader(http.StatusNoContent)
 		case "/tasks/task-active-status-drag/reorder":
@@ -736,7 +742,7 @@ window.addEventListener('DOMContentLoaded', function() {
 	for _, want := range []string{
 		"PATCH /tasks/batch-category",
 		"PATCH /tasks/task-drag-cursor/category",
-		"PATCH /tasks/task-active-status-drag/status",
+		"PATCH /tasks/task-active-status-drag/category",
 		"PATCH /schedules/schedule-drag-cursor/reschedule",
 	} {
 		if !strings.Contains(requestList, want) {

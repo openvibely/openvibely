@@ -705,6 +705,13 @@ func TestTaskRepo_MoveTasksToActiveLaneRunningDestinationNoOp(t *testing.T) {
 	if len(moved) != 0 {
 		t.Fatalf("already-running destination card returned as newly moved: %#v", moved)
 	}
+	var reservations int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM executions WHERE task_id = ? AND status = 'queued' AND is_followup = 0`, task.ID).Scan(&reservations); err != nil {
+		t.Fatal(err)
+	}
+	if reservations != 0 {
+		t.Fatalf("already-running destination card created %d reservations", reservations)
+	}
 	loaded, loadErr := repo.GetByID(ctx, task.ID)
 	if loadErr != nil {
 		t.Fatal(loadErr)
@@ -757,6 +764,13 @@ func TestTaskRepo_MoveTasksToActiveLaneRollsBackLaterFailure(t *testing.T) {
 			t.Fatalf("task %s after rollback = category %s status %s order %d, want %s %s %d", expected.ID, loaded.Category, loaded.Status, loaded.DisplayOrder, expected.Category, expected.Status, expected.DisplayOrder)
 		}
 	}
+	var reservations int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM executions WHERE task_id IN (?, ?) AND status = 'queued' AND is_followup = 0`, first.ID, second.ID).Scan(&reservations); err != nil {
+		t.Fatal(err)
+	}
+	if reservations != 0 {
+		t.Fatalf("rollback left %d durable execution reservations", reservations)
+	}
 }
 
 func TestTaskRepo_MoveTasksToActiveLaneAppendsSubmittedOrder(t *testing.T) {
@@ -779,11 +793,96 @@ func TestTaskRepo_MoveTasksToActiveLaneAppendsSubmittedOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(moved) != 2 || moved[0].ID != second.ID || moved[1].ID != first.ID {
+	if len(moved) != 2 || moved[0].Task.ID != second.ID || moved[1].Task.ID != first.ID {
 		t.Fatalf("moved order = %#v", moved)
 	}
-	if moved[0].Status != models.StatusRunning || moved[0].DisplayOrder <= tail.DisplayOrder || moved[1].DisplayOrder != moved[0].DisplayOrder+1 {
+	if moved[0].Task.Status != models.StatusRunning || moved[0].Task.DisplayOrder <= tail.DisplayOrder || moved[1].Task.DisplayOrder != moved[0].Task.DisplayOrder+1 {
 		t.Fatalf("moved state = %#v", moved)
+	}
+	for _, admission := range moved {
+		if admission.ExecutionID == "" {
+			t.Fatalf("running admission has no durable execution owner: %#v", admission)
+		}
+		var status models.ExecutionStatus
+		var followup bool
+		if err := db.QueryRowContext(ctx, `SELECT status, is_followup FROM executions WHERE id = ? AND task_id = ?`, admission.ExecutionID, admission.Task.ID).Scan(&status, &followup); err != nil {
+			t.Fatal(err)
+		}
+		if status != models.ExecQueued || followup {
+			t.Fatalf("reservation %s = status %s followup %v", admission.ExecutionID, status, followup)
+		}
+	}
+}
+
+func TestTaskRepo_MoveTasksToActiveLaneReservationOwnsLaterFollowup(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	taskRepo := NewTaskRepo(db, nil)
+	execRepo := NewExecutionRepo(db)
+	task := &models.Task{ProjectID: "default", Title: "Reserved before later followup", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "original"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	admissions, err := taskRepo.MoveTasksToActiveLane(ctx, "default", []ActiveLaneTaskMove{{ID: task.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending}}, models.StatusRunning)
+	if err != nil || len(admissions) != 1 || admissions[0].ExecutionID == "" {
+		t.Fatalf("reserved lane move = %#v, %v", admissions, err)
+	}
+	followup := &models.Execution{TaskID: task.ID, Status: models.ExecQueued, PromptSent: "later", IsFollowup: true}
+	input := &models.ThreadInput{Content: "later"}
+	started, err := execRepo.CreateDirectTaskFollowupOrQueue(ctx, followup, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if started {
+		t.Fatal("later followup started ahead of durable lane reservation")
+	}
+	pending, err := NewThreadInputRepo(db).FindOldestQueuedForTask(ctx, task.ID)
+	if err != nil || pending == nil || pending.Content != "later" {
+		t.Fatalf("queued later followup = %#v, %v", pending, err)
+	}
+	claim, admitted, err := taskRepo.ClaimReservedTaskForDispatch(ctx, task.ID, admissions[0].ExecutionID)
+	if err != nil || !admitted || claim == nil {
+		t.Fatalf("claim with later followup = %#v admitted=%v err=%v", claim, admitted, err)
+	}
+	var reservedStatus models.ExecutionStatus
+	if err := db.QueryRowContext(ctx, `SELECT status FROM executions WHERE id = ?`, admissions[0].ExecutionID).Scan(&reservedStatus); err != nil {
+		t.Fatal(err)
+	}
+	if reservedStatus != models.ExecRunning {
+		t.Fatalf("reserved execution status = %s, want running", reservedStatus)
+	}
+	pending, err = NewThreadInputRepo(db).FindOldestQueuedForTask(ctx, task.ID)
+	if err != nil || pending == nil {
+		t.Fatalf("later followup lost during reserved claim: %#v, %v", pending, err)
+	}
+}
+
+func TestTaskRepo_ResetOrphanedRunningPreservesDurableActiveLaneReservation(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	repo := NewTaskRepo(db, nil)
+	task := &models.Task{ProjectID: "default", Title: "Reserved across restart", Category: models.CategoryBacklog, Status: models.StatusPending}
+	if err := repo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	admissions, err := repo.MoveTasksToActiveLane(ctx, "default", []ActiveLaneTaskMove{{ID: task.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending}}, models.StatusRunning)
+	if err != nil || len(admissions) != 1 {
+		t.Fatalf("lane reservation = %#v, %v", admissions, err)
+	}
+	reset, err := repo.ResetOrphanedRunning(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reset != 0 {
+		t.Fatalf("reset %d durably reserved tasks", reset)
+	}
+	loaded, err := repo.GetByID(ctx, task.ID)
+	if err != nil || loaded.Status != models.StatusRunning {
+		t.Fatalf("reserved task after restart reset = %#v, %v", loaded, err)
+	}
+	queued, err := repo.ListReservedActiveLaneAdmissions(ctx)
+	if err != nil || len(queued) != 1 || queued[0].ExecutionID != admissions[0].ExecutionID {
+		t.Fatalf("restart admissions = %#v, %v", queued, err)
 	}
 }
 
