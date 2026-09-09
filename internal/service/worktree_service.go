@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -17,8 +18,10 @@ import (
 	"unicode/utf8"
 
 	"github.com/openvibely/openvibely/internal/applog"
+	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/pkg/agenttools"
 )
 
 // ErrMergeInProgress is returned when another repository merge, rebase, or
@@ -1907,6 +1910,129 @@ func (ws *WorktreeService) resolveConflictsWithAIValidated(ctx context.Context, 
 	return ws.resolveConflictsWithAILocked(ctx, task, repoDir, validateBeforeCommit)
 }
 
+func automaticConflictResolutionRuntime(repoDir string, conflictFiles []string) *llmcontracts.RuntimeTools {
+	allowed := make(map[string]struct{}, len(conflictFiles))
+	for _, conflictFile := range conflictFiles {
+		if normalized, err := canonicalConflictToolPath(conflictFile); err == nil {
+			allowed[normalized] = struct{}{}
+		}
+	}
+	definitions := make([]llmcontracts.RuntimeToolDefinition, 0, 3)
+	for _, definition := range scopedFilesToolDefinitions() {
+		switch definition.Name {
+		case "read_file", "write_file", "edit_file":
+			definitions = append(definitions, definition)
+		}
+	}
+	return &llmcontracts.RuntimeTools{
+		Definitions:      definitions,
+		SkipDefaultTools: true,
+		Filter: func(name string) (bool, bool) {
+			switch strings.ToLower(strings.TrimSpace(name)) {
+			case "read_file", "write_file", "edit_file":
+				return true, true
+			default:
+				return false, true
+			}
+		},
+		Executor: func(ctx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
+			canonicalName := strings.ToLower(strings.TrimSpace(name))
+			switch canonicalName {
+			case "read_file", "write_file", "edit_file":
+			default:
+				return "tool is not available during automatic conflict resolution", true, true, nil
+			}
+			var request struct {
+				FilePath string `json:"file_path"`
+			}
+			if err := json.Unmarshal(input, &request); err != nil {
+				return "", true, true, fmt.Errorf("parse input: %w", err)
+			}
+			path, err := validateConflictToolPath(repoDir, request.FilePath, allowed)
+			if err != nil {
+				return "", true, true, err
+			}
+			request.FilePath = path
+			rewritten, err := rewriteToolFilePath(input, path)
+			if err != nil {
+				return "", true, true, err
+			}
+			out, err := agenttools.Execute(ctx, repoDir, canonicalName, rewritten, agenttools.BashPolicy{})
+			return out, true, err != nil, err
+		},
+	}
+}
+
+func rewriteToolFilePath(input json.RawMessage, path string) (json.RawMessage, error) {
+	var request map[string]any
+	if err := json.Unmarshal(input, &request); err != nil {
+		return nil, fmt.Errorf("parse input: %w", err)
+	}
+	request["file_path"] = path
+	rewritten, err := json.Marshal(request)
+	if err != nil {
+		return nil, fmt.Errorf("encode restricted file input: %w", err)
+	}
+	return rewritten, nil
+}
+
+func canonicalConflictToolPath(path string) (string, error) {
+	if path == "" || filepath.IsAbs(path) || filepath.VolumeName(path) != "" || strings.Contains(path, `\`) {
+		return "", fmt.Errorf("automatic conflict resolution requires a repository-relative conflict path")
+	}
+	clean := filepath.ToSlash(filepath.Clean(filepath.FromSlash(path)))
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") || clean != path {
+		return "", fmt.Errorf("automatic conflict resolution requires an exact canonical conflict path")
+	}
+	if clean == ".git" || strings.HasPrefix(clean, ".git/") {
+		return "", fmt.Errorf("automatic conflict resolution cannot access Git metadata")
+	}
+	return clean, nil
+}
+
+func validateConflictToolPath(repoDir, requested string, allowed map[string]struct{}) (string, error) {
+	path, err := canonicalConflictToolPath(requested)
+	if err != nil {
+		return "", err
+	}
+	if _, ok := allowed[path]; !ok {
+		return "", fmt.Errorf("automatic conflict resolution may access only active conflict files")
+	}
+	root, err := filepath.Abs(repoDir)
+	if err != nil {
+		return "", fmt.Errorf("resolve repository root: %w", err)
+	}
+	root, err = filepath.EvalSymlinks(root)
+	if err != nil {
+		return "", fmt.Errorf("resolve repository root: %w", err)
+	}
+	candidate := filepath.Join(root, filepath.FromSlash(path))
+	rel, err := filepath.Rel(root, candidate)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return "", fmt.Errorf("automatic conflict resolution path escapes the repository")
+	}
+	current := root
+	for _, component := range strings.Split(filepath.FromSlash(path), string(filepath.Separator)) {
+		current = filepath.Join(current, component)
+		info, statErr := os.Lstat(current)
+		if statErr != nil {
+			return "", fmt.Errorf("inspect conflict path: %w", statErr)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return "", fmt.Errorf("automatic conflict resolution rejects symlink paths")
+		}
+	}
+	resolved, err := filepath.EvalSymlinks(candidate)
+	if err != nil {
+		return "", fmt.Errorf("resolve conflict path: %w", err)
+	}
+	resolvedRel, err := filepath.Rel(root, resolved)
+	if err != nil || resolvedRel == ".." || strings.HasPrefix(resolvedRel, ".."+string(filepath.Separator)) || filepath.IsAbs(resolvedRel) {
+		return "", fmt.Errorf("automatic conflict resolution path escapes the repository")
+	}
+	return path, nil
+}
+
 func containsGitConflictMarkers(content string) bool {
 	for _, line := range strings.Split(content, "\n") {
 		line = strings.TrimSuffix(line, "\r")
@@ -1928,11 +2054,24 @@ func (ws *WorktreeService) resolveConflictsWithAILocked(ctx context.Context, tas
 		return &MergeResult{ErrorMessage: "no active merge conflicts found"}, fmt.Errorf("no active merge conflicts found")
 	}
 
-	// Build a prompt describing the conflicts
+	allowedConflictPaths := make(map[string]struct{}, len(conflictFiles))
+	for _, conflictFile := range conflictFiles {
+		normalized, pathErr := canonicalConflictToolPath(conflictFile)
+		if pathErr != nil {
+			return nil, fmt.Errorf("unsafe conflict path: %w", pathErr)
+		}
+		allowedConflictPaths[normalized] = struct{}{}
+	}
+
+	// Build a prompt describing the conflicts only after each Git-reported path is
+	// proven to be an ordinary file contained by the repository.
 	var conflictDetails strings.Builder
 	conflictDetails.WriteString("Please resolve the following merge conflicts. For each file, output the resolved content.\n\n")
 
 	for _, file := range conflictFiles {
+		if _, pathErr := validateConflictToolPath(repoDir, file, allowedConflictPaths); pathErr != nil {
+			return nil, fmt.Errorf("unsafe conflict path: %w", pathErr)
+		}
 		content, err := os.ReadFile(filepath.Join(repoDir, file))
 		if err != nil {
 			continue
@@ -1955,7 +2094,8 @@ func (ws *WorktreeService) resolveConflictsWithAILocked(ctx context.Context, tas
 		Name:  "Automatic conflict resolver",
 		Tools: []string{"Read", "Write", "Edit"},
 	}
-	_, _, _, err = ws.llmSvc.callLLM(ctx, conflictDetails.String(), nil, *agent, "", repoDir, "", resolutionAgent)
+	resolutionCtx := llmcontracts.WithRuntimeTools(llmcontracts.WithoutRuntimeTools(ctx), automaticConflictResolutionRuntime(repoDir, conflictFiles))
+	_, _, _, err = ws.llmSvc.callLLM(resolutionCtx, conflictDetails.String(), nil, *agent, "", repoDir, "", resolutionAgent)
 	if err != nil {
 		return nil, fmt.Errorf("AI conflict resolution failed: %w", err)
 	}
@@ -1966,6 +2106,9 @@ func (ws *WorktreeService) resolveConflictsWithAILocked(ctx context.Context, tas
 	resolvedFiles := make([]string, 0, len(conflictFiles))
 	unresolvedFiles := make([]string, 0, len(conflictFiles))
 	for _, conflictFile := range conflictFiles {
+		if _, pathErr := validateConflictToolPath(repoDir, conflictFile, allowedConflictPaths); pathErr != nil {
+			return nil, fmt.Errorf("unsafe conflict path after model resolution: %w", pathErr)
+		}
 		content, readErr := os.ReadFile(filepath.Join(repoDir, conflictFile))
 		if readErr != nil || containsGitConflictMarkers(string(content)) {
 			unresolvedFiles = append(unresolvedFiles, conflictFile)

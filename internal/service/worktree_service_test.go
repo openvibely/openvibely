@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
@@ -4297,6 +4299,73 @@ func TestGoalAchievedAutoMergeUsesCanonicalFlowAndIsIdempotentWithCompletion(t *
 	}
 }
 
+func TestAutomaticConflictResolutionRuntimeRestrictsPathsToExactConflictFiles(t *testing.T) {
+	repoDir := createTestGitRepo(t)
+	conflictPath := "conflicted.txt"
+	if err := os.WriteFile(filepath.Join(repoDir, conflictPath), []byte("conflict\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	outsideDir := t.TempDir()
+	outsideFile := filepath.Join(outsideDir, "outside.txt")
+	if err := os.WriteFile(outsideFile, []byte("outside\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	symlinkPath := "linked-conflict.txt"
+	if err := os.Symlink(outsideFile, filepath.Join(repoDir, symlinkPath)); err != nil {
+		t.Skipf("symlink fixture unavailable: %v", err)
+	}
+	symlinkDir := filepath.Join(repoDir, "linked-dir")
+	if err := os.Symlink(outsideDir, symlinkDir); err != nil {
+		t.Skipf("symlink directory fixture unavailable: %v", err)
+	}
+	symlinkChildPath := "linked-dir/outside.txt"
+	hookPath := filepath.Join(repoDir, ".git", "hooks", "pre-commit")
+	if err := os.WriteFile(hookPath, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	beforeHook, err := os.ReadFile(hookPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	runtimeTools := automaticConflictResolutionRuntime(repoDir, []string{conflictPath, symlinkPath, symlinkChildPath})
+	if runtimeTools == nil || runtimeTools.Executor == nil || !runtimeTools.SkipDefaultTools {
+		t.Fatal("automatic conflict runtime is not a closed request-scoped tool boundary")
+	}
+	allowedInput, _ := json.Marshal(map[string]string{"file_path": conflictPath, "content": "resolved\n"})
+	if _, handled, isError, err := runtimeTools.Executor(context.Background(), "write_file", allowedInput); err != nil || !handled || isError {
+		t.Fatalf("allowed conflict write: handled=%v isError=%v err=%v", handled, isError, err)
+	}
+	if got, err := os.ReadFile(filepath.Join(repoDir, conflictPath)); err != nil || string(got) != "resolved\n" {
+		t.Fatalf("allowed conflict file was not written: content=%q err=%v", got, err)
+	}
+
+	attempts := []struct {
+		name     string
+		filePath string
+	}{
+		{name: "git hook", filePath: ".git/hooks/pre-commit"},
+		{name: "absolute outside", filePath: outsideFile},
+		{name: "traversal outside", filePath: "../" + filepath.Base(outsideDir) + "/outside.txt"},
+		{name: "allowlisted symlink escape", filePath: symlinkPath},
+		{name: "allowlisted symlink directory escape", filePath: symlinkChildPath},
+	}
+	for _, attempt := range attempts {
+		t.Run(attempt.name, func(t *testing.T) {
+			input, _ := json.Marshal(map[string]string{"file_path": attempt.filePath, "content": "MUTATED\n"})
+			if _, handled, isError, err := runtimeTools.Executor(context.Background(), "write_file", input); err == nil || !handled || !isError {
+				t.Fatalf("escape write: handled=%v isError=%v err=%v", handled, isError, err)
+			}
+		})
+	}
+	if got, err := os.ReadFile(outsideFile); err != nil || string(got) != "outside\n" {
+		t.Fatalf("outside file mutated: content=%q err=%v", got, err)
+	}
+	if got, err := os.ReadFile(hookPath); err != nil || string(got) != string(beforeHook) {
+		t.Fatalf("git hook mutated: content=%q err=%v", got, err)
+	}
+}
+
 func TestGoalAutoMergeConflictRecoveryRevalidatesLifecycleBeforeCommit(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -4373,7 +4442,17 @@ func TestGoalAutoMergeConflictRecoveryRevalidatesLifecycleBeforeCommit(t *testin
 			llmSvc := NewLLMService(llmConfigRepo, nil, nil, nil, nil, nil)
 			mock := &testutil.MockLLMCaller{Response: "resolved"}
 			var mutationErr error
-			mock.OnCall = func(_ context.Context, _ testutil.MockLLMCall) {
+			mock.OnCall = func(callCtx context.Context, _ testutil.MockLLMCall) {
+				runtimeTools := llmcontracts.RuntimeToolsFromContext(callCtx)
+				if runtimeTools == nil || runtimeTools.Executor == nil || !runtimeTools.SkipDefaultTools {
+					mutationErr = fmt.Errorf("automatic conflict call omitted its restricted runtime")
+					return
+				}
+				maliciousInput, _ := json.Marshal(map[string]string{"file_path": ".git/hooks/pre-commit", "content": "#!/bin/sh\nexit 1\n"})
+				if _, handled, isError, execErr := runtimeTools.Executor(callCtx, "write_file", maliciousInput); execErr == nil || !handled || !isError {
+					mutationErr = fmt.Errorf("restricted runtime accepted Git metadata write: handled=%v isError=%v err=%v", handled, isError, execErr)
+					return
+				}
 				if err := os.WriteFile(filepath.Join(repoDir, "goal-conflict.txt"), []byte("resolved\n"), 0o644); err != nil {
 					mutationErr = err
 					return
