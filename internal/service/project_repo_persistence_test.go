@@ -74,7 +74,7 @@ func TestProjectService_DeleteRollsBackTasksWhenLegacyConstraintFails(t *testing
 	}
 }
 
-func TestProjectService_DeleteRollbackDoesNotCancelRunningTask(t *testing.T) {
+func TestProjectService_DeleteRollbackDoesNotCancelOrMoveRunningTaskWorktree(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 	projectRepo := repository.NewProjectRepo(db)
@@ -83,12 +83,40 @@ func TestProjectService_DeleteRollbackDoesNotCancelRunningTask(t *testing.T) {
 	projectSvc := NewProjectService(projectRepo)
 	projectSvc.SetTaskService(NewTaskService(taskRepo, repository.NewAttachmentRepo(db), workerSvc))
 
-	project := &models.Project{Name: "Running rollback project"}
+	repoDir := filepath.Join(t.TempDir(), "running-repository")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGit := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repoDir
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.com", "GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.com")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+		}
+	}
+	runGit("init", "-b", "main")
+	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("running\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit("add", "README.md")
+	runGit("commit", "-m", "Initial commit")
+
+	project := &models.Project{Name: "Running rollback project", RepoPath: repoDir}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatal(err)
 	}
 	task := &models.Task{ProjectID: project.ID, Title: "Running task", Prompt: "test", Category: models.CategoryActive, Status: models.StatusRunning}
 	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	worktreePath := filepath.Join(repoDir, ".worktrees", "task_"+task.ID)
+	if err := os.MkdirAll(filepath.Dir(worktreePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGit("worktree", "add", "-b", "task/"+task.ID[:8]+"-running", worktreePath)
+	if _, err := db.ExecContext(ctx, `UPDATE tasks SET worktree_path = ? WHERE id = ?`, worktreePath, task.ID); err != nil {
 		t.Fatal(err)
 	}
 	runCtx, cancel := context.WithCancel(context.Background())
@@ -114,13 +142,16 @@ func TestProjectService_DeleteRollbackDoesNotCancelRunningTask(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := projectSvc.Delete(ctx, project.ID); err == nil {
-		t.Fatal("expected forced project deletion failure")
+	if err := projectSvc.Delete(ctx, project.ID); err == nil || !strings.Contains(err.Error(), "no such table: main.memory_consolidation_runs") {
+		t.Fatalf("forced project deletion error = %v, want relational failure before repository cleanup", err)
 	}
 	select {
 	case <-runCtx.Done():
 		t.Fatal("database rollback canceled the running task")
 	case <-time.After(50 * time.Millisecond):
+	}
+	if _, err := os.Stat(filepath.Join(worktreePath, "README.md")); err != nil {
+		t.Fatalf("database rollback moved or removed the running task worktree: %v", err)
 	}
 }
 
@@ -208,12 +239,13 @@ func TestProjectService_DeleteCleansLocalTaskWorktreeAndMutationHistory(t *testi
 	}
 }
 
-func TestProjectService_DeleteCleansManagedCloneAndRejectsUnownedGitHubPath(t *testing.T) {
+func TestProjectService_DeleteCleansManagedCloneAndPreservesUserOwnedGitHubCheckout(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
 	projectSvc := NewProjectService(projectRepo)
-	projectSvc.SetTaskService(NewTaskService(repository.NewTaskRepo(db, nil), repository.NewAttachmentRepo(db), nil))
+	projectSvc.SetTaskService(NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil))
 	managedRoot := filepath.Join(t.TempDir(), "managed-repositories")
 	projectSvc.SetManagedProjectRepoResolver(NewGitHubService(repository.NewSettingsRepo(db), "", "", "", managedRoot))
 
@@ -242,18 +274,54 @@ func TestProjectService_DeleteCleansManagedCloneAndRejectsUnownedGitHubPath(t *t
 	if err := os.MkdirAll(unownedPath, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	runGit := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = unownedPath
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.com", "GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.com")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+		}
+	}
+	runGit("init", "-b", "main")
+	if err := os.WriteFile(filepath.Join(unownedPath, "README.md"), []byte("user-owned\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit("add", "README.md")
+	runGit("commit", "-m", "Initial commit")
 	unowned := &models.Project{Name: "Unowned GitHub path", RepoPath: unownedPath, RepoURL: "https://github.com/example/unowned"}
 	if err := projectRepo.Create(ctx, unowned); err != nil {
 		t.Fatal(err)
 	}
-	if err := projectSvc.Delete(ctx, unowned.ID); err == nil || !strings.Contains(err.Error(), "refusing to delete unrecognized managed project repository") {
-		t.Fatalf("unowned GitHub path deletion error = %v", err)
+	unownedTask := &models.Task{ProjectID: unowned.ID, Title: "User checkout worktree", Prompt: "test", Category: models.CategoryBacklog, Status: models.StatusPending}
+	if err := taskRepo.Create(ctx, unownedTask); err != nil {
+		t.Fatal(err)
 	}
-	if stored, err := projectRepo.GetByID(ctx, unowned.ID); err != nil || stored == nil {
-		t.Fatalf("unowned project was deleted: project=%#v err=%v", stored, err)
+	unownedWorktree := filepath.Join(unownedPath, ".worktrees", "task_"+unownedTask.ID)
+	if err := os.MkdirAll(filepath.Dir(unownedWorktree), 0o755); err != nil {
+		t.Fatal(err)
 	}
-	if _, err := os.Stat(unownedPath); err != nil {
-		t.Fatalf("unowned repository path was removed: %v", err)
+	unownedBranch := "task/" + unownedTask.ID[:8] + "-cleanup"
+	runGit("worktree", "add", "-b", unownedBranch, unownedWorktree)
+	if _, err := db.ExecContext(ctx, `UPDATE tasks SET worktree_path = ?, worktree_branch = ? WHERE id = ?`, unownedWorktree, unownedBranch, unownedTask.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := projectSvc.Delete(ctx, unowned.ID); err != nil {
+		t.Fatalf("deleting project with user-owned GitHub checkout: %v", err)
+	}
+	if stored, err := projectRepo.GetByID(ctx, unowned.ID); err != nil || stored != nil {
+		t.Fatalf("project using user-owned GitHub checkout was retained: project=%#v err=%v", stored, err)
+	}
+	if _, err := os.Stat(filepath.Join(unownedPath, "README.md")); err != nil {
+		t.Fatalf("user-owned GitHub checkout was removed: %v", err)
+	}
+	if _, err := os.Stat(unownedWorktree); !os.IsNotExist(err) {
+		t.Fatalf("OpenVibely-owned worktree in user GitHub checkout was retained: %v", err)
+	}
+	branchCheck := exec.Command("git", "show-ref", "--verify", "--quiet", "refs/heads/"+unownedBranch)
+	branchCheck.Dir = unownedPath
+	if err := branchCheck.Run(); err == nil {
+		t.Fatalf("OpenVibely-owned branch %q in user GitHub checkout was retained", unownedBranch)
 	}
 }
 

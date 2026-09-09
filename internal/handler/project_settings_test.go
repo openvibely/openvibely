@@ -1241,6 +1241,69 @@ func TestDeleteProject(t *testing.T) {
 		}
 	})
 
+	t.Run("CleanupWarningSurvivesHTMXRedirect", func(t *testing.T) {
+		repoPath := filepath.Join(t.TempDir(), "non-git-user-checkout")
+		worktreePath := filepath.Join(repoPath, ".worktrees", "task_cleanup-warning")
+		if err := os.MkdirAll(worktreePath, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		project := &models.Project{Name: "Cleanup Warning", RepoPath: repoPath}
+		if err := projectSvc.Create(ctx, project); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.ExecContext(ctx, `
+			INSERT INTO tasks (id, project_id, title, prompt, worktree_path)
+			VALUES ('cleanup-warning', ?, 'Cleanup warning task', 'test', ?)`, project.ID, worktreePath); err != nil {
+			t.Fatal(err)
+		}
+
+		req := httptest.NewRequest(http.MethodDelete, "/projects/"+project.ID, nil)
+		req.Header.Set("HX-Request", "true")
+		rec := httptest.NewRecorder()
+		c := e.NewContext(req, rec)
+		c.SetParamNames("id")
+		c.SetParamValues(project.ID)
+		if err := h.DeleteProject(c); err != nil {
+			t.Fatal(err)
+		}
+		redirect := rec.Header().Get("HX-Redirect")
+		if !strings.Contains(redirect, "project_cleanup_warning=1") {
+			t.Fatalf("cleanup warning redirect = %q, want durable warning flag", redirect)
+		}
+		if trigger := rec.Header().Get("HX-Trigger"); strings.Contains(trigger, "openvibelyToast") {
+			t.Fatalf("cleanup warning used pre-navigation toast: %q", trigger)
+		}
+	})
+
+	t.Run("CleanupWarningSurvivesNonHTMXRedirect", func(t *testing.T) {
+		repoPath := filepath.Join(t.TempDir(), "non-git-user-checkout")
+		worktreePath := filepath.Join(repoPath, ".worktrees", "task_cleanup-warning-http")
+		if err := os.MkdirAll(worktreePath, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		project := &models.Project{Name: "Cleanup Warning HTTP", RepoPath: repoPath}
+		if err := projectSvc.Create(ctx, project); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.ExecContext(ctx, `
+			INSERT INTO tasks (id, project_id, title, prompt, worktree_path)
+			VALUES ('cleanup-warning-http', ?, 'Cleanup warning task', 'test', ?)`, project.ID, worktreePath); err != nil {
+			t.Fatal(err)
+		}
+
+		req := httptest.NewRequest(http.MethodDelete, "/projects/"+project.ID, nil)
+		rec := httptest.NewRecorder()
+		c := e.NewContext(req, rec)
+		c.SetParamNames("id")
+		c.SetParamValues(project.ID)
+		if err := h.DeleteProject(c); err != nil {
+			t.Fatal(err)
+		}
+		if location := rec.Header().Get("Location"); !strings.Contains(location, "project_cleanup_warning=1") {
+			t.Fatalf("cleanup warning redirect = %q, want durable warning flag", location)
+		}
+	})
+
 	t.Run("DeleteProjectCleansPendingAttachmentSessionAndRejectsLateUpload", func(t *testing.T) {
 		project := &models.Project{
 			Name:        "Attachment Cleanup Project",

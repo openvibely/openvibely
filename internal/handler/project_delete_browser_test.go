@@ -16,6 +16,84 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestProjectCleanupWarningSurvivesRedirectInChrome(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping browser regression in short mode")
+	}
+	chrome := findChromeForBrowserTest(t)
+	if chrome == "" {
+		t.Skip("Chrome/Chromium executable not found")
+	}
+
+	_, app, _, _ := setupTestHandlerWithDB(t)
+	result := make(chan string, 1)
+	runner := `<script>
+	(async function() {
+		function report(status, message) {
+			return fetch('/browser-result', {method:'POST', headers:{'X-Browser-Status':status}, body:message || status, keepalive:true});
+		}
+		try {
+			var deadline = Date.now() + 10000;
+			var toast = null;
+			while (!toast && Date.now() < deadline) {
+				toast = document.querySelector('.toast-notification[data-toast-key="project-cleanup-warning"]');
+				if (!toast) await new Promise(function(resolve) { setTimeout(resolve, 25); });
+			}
+			if (!toast || !toast.textContent.includes('Project deleted') || !toast.textContent.includes('cleanup could not be completed')) throw new Error('redirect warning toast was not visible');
+			if (new URL(window.location.href).searchParams.has('project_cleanup_warning')) throw new Error('redirect warning flag was not consumed');
+			await report('pass', 'cleanup warning survived redirect');
+		} catch (error) {
+			await report('fail', String(error && error.stack || error));
+		}
+	})();
+	</script>`
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/browser-result" {
+			body, _ := io.ReadAll(io.LimitReader(r.Body, 4096))
+			select {
+			case result <- r.Header.Get("X-Browser-Status") + ":" + string(body):
+			default:
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		recorder := httptest.NewRecorder()
+		app.ServeHTTP(recorder, r)
+		for key, values := range recorder.Header() {
+			for _, value := range values {
+				w.Header().Add(key, value)
+			}
+		}
+		w.WriteHeader(recorder.Code)
+		body := strings.Replace(recorder.Body.String(), "</body>", runner+"</body>", 1)
+		_, _ = io.WriteString(w, body)
+	}))
+	defer server.Close()
+
+	cmd := exec.Command(chrome,
+		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
+		"--disable-dev-shm-usage", "--disable-extensions", "--no-first-run", "--no-default-browser-check",
+		"--user-data-dir="+filepath.Join(t.TempDir(), "project-cleanup-warning-profile"),
+		"--window-size=1024,768", server.URL+"/tasks?project_id=default&project_cleanup_warning=1",
+	)
+	require.NoError(t, startHandlerBrowserProcess(cmd))
+	stopped := false
+	defer func() {
+		if !stopped {
+			stopHandlerBrowserProcess(cmd)
+		}
+	}()
+	select {
+	case outcome := <-result:
+		stopHandlerBrowserProcess(cmd)
+		stopped = true
+		require.True(t, strings.HasPrefix(outcome, "pass:"), outcome)
+	case <-time.After(45 * time.Second):
+		t.Fatal("project cleanup warning browser regression timed out")
+	}
+}
+
 func TestProjectDeletionConfirmationAndSuccessfulFlowInChrome(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping browser regression in short mode")
