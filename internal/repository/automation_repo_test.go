@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
@@ -271,6 +272,214 @@ func TestAutomationRepoLifecyclePauseResumeArchiveAndDelete(t *testing.T) {
 	}
 	if err := repo.DeleteAutomation(ctx, projectID, definition.Automation.ID); err == nil || !strings.Contains(err.Error(), "automation not found") {
 		t.Fatalf("expected delete missing error, got %v", err)
+	}
+}
+
+func TestAutomationRepoDeleteGitHubSDLCTriggerOwnershipBoundaries(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectID := "automation-delete-github-sdlc"
+	if _, err := db.ExecContext(ctx, `INSERT INTO projects (id, name, description, repo_path) VALUES (?, 'GitHub SDLC delete', '', '')`, projectID); err != nil {
+		t.Fatal(err)
+	}
+	taskRepo := NewTaskRepo(db, nil)
+	scheduleRepo := NewScheduleRepo(db)
+	repo := NewAutomationRepo(db)
+	broadcaster := events.NewBroadcaster()
+	repo.SetBroadcaster(broadcaster)
+	subscriber, err := broadcaster.Subscribe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer broadcaster.Unsubscribe(subscriber)
+
+	triggerNames := []string{"Vision Suggestions", "Bug Finder", "Optimization Finder", "Redundancy Finder", "Dev Inbox"}
+	nodes := make([]models.AutomationNodeSpec, 0, len(triggerNames))
+	resources := make([]models.AutomationResourceBinding, 0, len(triggerNames)*2)
+	triggerTasks := make([]*models.Task, 0, len(triggerNames))
+	for i, name := range triggerNames {
+		task := createAutomationDeleteTask(t, ctx, taskRepo, projectID, name)
+		schedule := createAutomationDeleteSchedule(t, ctx, scheduleRepo, task.ID, time.Duration(i+1)*time.Hour)
+		nodeKey := strings.ReplaceAll(strings.ToLower(name), " ", "_")
+		nodes = append(nodes, models.AutomationNodeSpec{Key: nodeKey, Name: name, Type: models.AutomationNodeTrigger, Role: "scheduled_task"})
+		resources = append(resources,
+			models.AutomationResourceBinding{NodeKey: nodeKey, ResourceType: "schedule", ResourceID: schedule.ID, Relation: "owned"},
+			models.AutomationResourceBinding{NodeKey: nodeKey, ResourceType: "task", ResourceID: task.ID, Relation: "owned"})
+		triggerTasks = append(triggerTasks, task)
+	}
+	definition, _, err := repo.PublishRegistered(ctx, models.AutomationRegisteredPublication{
+		ProjectID: projectID, StableKey: "github-sdlc/delete", Name: "GitHub SDLC", AutomationType: "github_sdlc", AdapterKey: "github_sdlc",
+		Nodes: nodes, Resources: resources,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sharedSchedule := createAutomationDeleteSchedule(t, ctx, scheduleRepo, triggerTasks[1].ID, 12*time.Hour)
+	survivorTrigger := createAutomationDeleteTask(t, ctx, taskRepo, projectID, "Surviving Automation trigger")
+	survivorSchedule := createAutomationDeleteSchedule(t, ctx, scheduleRepo, survivorTrigger.ID, 13*time.Hour)
+	survivor, _, err := repo.PublishRegistered(ctx, models.AutomationRegisteredPublication{
+		ProjectID: projectID, StableKey: "survivor", Name: "Survivor", AutomationType: "custom", AdapterKey: "custom",
+		Nodes: []models.AutomationNodeSpec{
+			{Key: "trigger", Name: "Trigger", Type: models.AutomationNodeTrigger, Role: "scheduled_task"},
+			{Key: "shared", Name: "Shared", Type: models.AutomationNodeAgentTask, Role: "task"},
+		},
+		Resources: []models.AutomationResourceBinding{
+			{NodeKey: "trigger", ResourceType: "schedule", ResourceID: survivorSchedule.ID, Relation: "owned"},
+			{NodeKey: "trigger", ResourceType: "task", ResourceID: survivorTrigger.ID, Relation: "owned"},
+			{NodeKey: "shared", ResourceType: "task", ResourceID: triggerTasks[2].ID, Relation: "shared"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	implementation := createAutomationDeleteTask(t, ctx, taskRepo, projectID, "Generated implementation")
+	outcome := createAutomationDeleteTask(t, ctx, taskRepo, projectID, "Generated outcome")
+	unrelated := createAutomationDeleteTask(t, ctx, taskRepo, projectID, "Unrelated domain task")
+	for {
+		select {
+		case <-subscriber:
+			continue
+		default:
+		}
+		break
+	}
+
+	if err := repo.DeleteAutomation(ctx, projectID, definition.Automation.ID); err != nil {
+		t.Fatal(err)
+	}
+	assertRowMissing(t, db, "automations", definition.Automation.ID)
+	for _, index := range []int{0, 3, 4} {
+		assertRowMissing(t, db, "tasks", triggerTasks[index].ID)
+	}
+	for _, taskID := range []string{triggerTasks[1].ID, triggerTasks[2].ID, survivorTrigger.ID, implementation.ID, outcome.ID, unrelated.ID} {
+		assertRowPresent(t, db, "tasks", taskID)
+	}
+	assertRowPresent(t, db, "schedules", sharedSchedule.ID)
+	assertRowPresent(t, db, "automations", survivor.Automation.ID)
+
+	var automationInvalidation, taskInvalidations int
+	for i := 0; i < 4; i++ {
+		event := <-subscriber
+		switch event.Type {
+		case events.AutomationDefinitionUpdated:
+			automationInvalidation++
+		case events.TaskBoardUpdated:
+			taskInvalidations++
+		}
+	}
+	if automationInvalidation != 1 || taskInvalidations != 3 {
+		t.Fatalf("invalidations automation=%d task=%d, want 1 and 3", automationInvalidation, taskInvalidations)
+	}
+}
+
+func TestAutomationRepoDeleteBulkMatchesSingleAndRollsBackFailures(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectID := "automation-delete-bulk"
+	foreignProjectID := "automation-delete-bulk-foreign"
+	for _, id := range []string{projectID, foreignProjectID} {
+		if _, err := db.ExecContext(ctx, `INSERT INTO projects (id, name, description, repo_path) VALUES (?, ?, '', '')`, id, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	taskRepo := NewTaskRepo(db, nil)
+	scheduleRepo := NewScheduleRepo(db)
+	repo := NewAutomationRepo(db)
+	firstAutomationID, firstTaskID, firstScheduleID := createOwnedTriggerAutomation(t, ctx, repo, taskRepo, scheduleRepo, projectID, "bulk-first")
+	secondAutomationID, secondTaskID, secondScheduleID := createOwnedTriggerAutomation(t, ctx, repo, taskRepo, scheduleRepo, projectID, "bulk-second")
+
+	if err := repo.DeleteAutomations(ctx, foreignProjectID, []string{firstAutomationID}); err == nil {
+		t.Fatal("foreign-project delete should fail")
+	}
+	for _, row := range []struct{ table, id string }{{"automations", firstAutomationID}, {"tasks", firstTaskID}, {"schedules", firstScheduleID}} {
+		assertRowPresent(t, db, row.table, row.id)
+	}
+
+	if _, err := db.ExecContext(ctx, `CREATE TRIGGER fail_automation_delete BEFORE DELETE ON automations WHEN OLD.id = '`+firstAutomationID+`' BEGIN SELECT RAISE(ABORT, 'forced delete failure'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.DeleteAutomations(ctx, projectID, []string{firstAutomationID, secondAutomationID}); err == nil {
+		t.Fatal("forced transaction failure should be returned")
+	}
+	for _, row := range []struct{ table, id string }{
+		{"automations", firstAutomationID}, {"tasks", firstTaskID}, {"schedules", firstScheduleID},
+		{"automations", secondAutomationID}, {"tasks", secondTaskID}, {"schedules", secondScheduleID},
+	} {
+		assertRowPresent(t, db, row.table, row.id)
+	}
+	if _, err := db.ExecContext(ctx, `DROP TRIGGER fail_automation_delete`); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := repo.DeleteAutomations(ctx, projectID, []string{firstAutomationID, secondAutomationID}); err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range []struct{ table, id string }{
+		{"automations", firstAutomationID}, {"tasks", firstTaskID}, {"schedules", firstScheduleID},
+		{"automations", secondAutomationID}, {"tasks", secondTaskID}, {"schedules", secondScheduleID},
+	} {
+		assertRowMissing(t, db, row.table, row.id)
+	}
+}
+
+func createOwnedTriggerAutomation(t *testing.T, ctx context.Context, repo *AutomationRepo, taskRepo *TaskRepo, scheduleRepo *ScheduleRepo, projectID, key string) (string, string, string) {
+	t.Helper()
+	task := createAutomationDeleteTask(t, ctx, taskRepo, projectID, key)
+	schedule := createAutomationDeleteSchedule(t, ctx, scheduleRepo, task.ID, time.Hour)
+	definition, _, err := repo.PublishRegistered(ctx, models.AutomationRegisteredPublication{
+		ProjectID: projectID, StableKey: key, Name: key, AutomationType: "custom", AdapterKey: "custom",
+		Nodes: []models.AutomationNodeSpec{{Key: "trigger", Name: "Trigger", Type: models.AutomationNodeTrigger, Role: "scheduled_task"}},
+		Resources: []models.AutomationResourceBinding{
+			{NodeKey: "trigger", ResourceType: "schedule", ResourceID: schedule.ID, Relation: "owned"},
+			{NodeKey: "trigger", ResourceType: "task", ResourceID: task.ID, Relation: "owned"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return definition.Automation.ID, task.ID, schedule.ID
+}
+
+func createAutomationDeleteTask(t *testing.T, ctx context.Context, repo *TaskRepo, projectID, title string) *models.Task {
+	t.Helper()
+	task := &models.Task{ProjectID: projectID, Title: title, Prompt: title, Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 1}
+	if err := repo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	return task
+}
+
+func createAutomationDeleteSchedule(t *testing.T, ctx context.Context, repo *ScheduleRepo, taskID string, offset time.Duration) *models.Schedule {
+	t.Helper()
+	runAt := time.Date(2026, 9, 8, 12, 0, 0, 0, time.UTC).Add(offset)
+	schedule := &models.Schedule{TaskID: taskID, RunAt: runAt, NextRun: &runAt, RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: true}
+	if err := repo.Create(ctx, schedule); err != nil {
+		t.Fatal(err)
+	}
+	return schedule
+}
+
+func assertRowPresent(t *testing.T, db *sql.DB, table, id string) {
+	t.Helper()
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM `+table+` WHERE id = ?`, id).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("%s %s should be present", table, id)
+	}
+}
+
+func assertRowMissing(t *testing.T, db *sql.DB, table, id string) {
+	t.Helper()
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM `+table+` WHERE id = ?`, id).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("%s %s should be missing", table, id)
 	}
 }
 

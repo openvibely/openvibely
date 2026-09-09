@@ -349,12 +349,29 @@ func (r *AutomationRepo) SetAutomationLifecycle(ctx context.Context, projectID, 
 }
 
 func (r *AutomationRepo) DeleteAutomations(ctx context.Context, projectID string, automationIDs []string) error {
+	versions, deletedTasks, err := r.deleteAutomations(ctx, projectID, automationIDs)
+	if err != nil {
+		return err
+	}
+	for _, id := range automationIDs {
+		r.PublishInvalidation(events.AutomationDefinitionUpdated, projectID, models.AutomationBinding{AutomationID: id, VersionID: versions[id]})
+	}
+	r.publishDeletedAutomationTasks(projectID, deletedTasks)
+	return nil
+}
+
+type deletedAutomationTask struct {
+	id    string
+	title string
+}
+
+func (r *AutomationRepo) deleteAutomations(ctx context.Context, projectID string, automationIDs []string) (map[string]string, []deletedAutomationTask, error) {
 	if len(automationIDs) == 0 {
-		return errors.New("at least one automation is required")
+		return nil, nil, errors.New("at least one automation is required")
 	}
 	conn, finishImmediate, err := beginImmediateConn(ctx, r.db)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 	defer finishImmediate()
 	placeholders := strings.TrimRight(strings.Repeat("?,", len(automationIDs)), ",")
@@ -362,21 +379,28 @@ func (r *AutomationRepo) DeleteAutomations(ctx context.Context, projectID string
 	for _, id := range automationIDs {
 		args = append(args, id)
 	}
-	var count int
-	if err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM automations WHERE project_id = ? AND id IN (`+placeholders+`)`, args...).Scan(&count); err != nil {
-		return err
+
+	rows, err := conn.QueryContext(ctx, `SELECT id, COALESCE(published_version_id, '') FROM automations WHERE project_id = ? AND id IN (`+placeholders+`)`, args...)
+	if err != nil {
+		return nil, nil, err
 	}
-	if count != len(automationIDs) {
-		return errors.New("automation not found")
+	versions := make(map[string]string, len(automationIDs))
+	for rows.Next() {
+		var id, versionID string
+		if err := rows.Scan(&id, &versionID); err != nil {
+			rows.Close()
+			return nil, nil, err
+		}
+		versions[id] = versionID
 	}
-	flightArgs := []any{projectID}
-	for _, id := range automationIDs {
-		flightArgs = append(flightArgs, id)
+	if err := rows.Close(); err != nil {
+		return nil, nil, err
 	}
-	flightArgs = append(flightArgs, projectID)
-	for _, id := range automationIDs {
-		flightArgs = append(flightArgs, id)
+	if len(versions) != len(automationIDs) {
+		return nil, nil, errors.New("automation not found")
 	}
+
+	flightArgs := append(append([]any(nil), args...), args...)
 	var inFlight int
 	if err := conn.QueryRowContext(ctx, `SELECT CASE WHEN EXISTS (
 		SELECT 1 FROM automation_invocations i LEFT JOIN automation_dispatch_outbox d ON d.invocation_id = i.id
@@ -385,83 +409,103 @@ func (r *AutomationRepo) DeleteAutomations(ctx context.Context, projectID string
 		SELECT 1 FROM automation_activities a JOIN automation_activity_resources ar ON ar.activity_id = a.id AND ar.resource_type = 'execution' JOIN executions e ON e.id = ar.resource_id
 		WHERE a.project_id = ? AND a.automation_id IN (`+placeholders+`) AND e.status = 'running'
 	) THEN 1 ELSE 0 END`, flightArgs...).Scan(&inFlight); err != nil {
-		return err
+		return nil, nil, err
 	}
 	if inFlight > 0 {
-		return ErrAutomationDispatchInFlight
+		return nil, nil, ErrAutomationDispatchInFlight
 	}
+
+	taskRows, err := conn.QueryContext(ctx, `SELECT DISTINCT schedule.task_id
+		FROM automation_trigger_owners owner
+		JOIN schedules schedule ON schedule.id = owner.schedule_id
+		JOIN tasks task ON task.id = schedule.task_id AND task.project_id = owner.project_id
+		WHERE owner.project_id = ? AND owner.automation_id IN (`+placeholders+`)`, args...)
+	if err != nil {
+		return nil, nil, err
+	}
+	var triggerTaskIDs []string
+	for taskRows.Next() {
+		var taskID string
+		if err := taskRows.Scan(&taskID); err != nil {
+			taskRows.Close()
+			return nil, nil, err
+		}
+		triggerTaskIDs = append(triggerTaskIDs, taskID)
+	}
+	if err := taskRows.Close(); err != nil {
+		return nil, nil, err
+	}
+
 	if _, err := conn.ExecContext(ctx, `DELETE FROM schedules WHERE id IN (SELECT schedule_id FROM automation_trigger_owners WHERE project_id = ? AND automation_id IN (`+placeholders+`))`, args...); err != nil {
-		return err
+		return nil, nil, err
 	}
+
+	var deletedTasks []deletedAutomationTask
+	if len(triggerTaskIDs) > 0 {
+		taskPlaceholders := strings.TrimRight(strings.Repeat("?,", len(triggerTaskIDs)), ",")
+		deleteArgs := []any{projectID}
+		for _, taskID := range triggerTaskIDs {
+			deleteArgs = append(deleteArgs, taskID)
+		}
+		deleteArgs = append(deleteArgs, projectID)
+		for _, id := range automationIDs {
+			deleteArgs = append(deleteArgs, id)
+		}
+		deletedRows, err := conn.QueryContext(ctx, `DELETE FROM tasks AS task
+			WHERE task.project_id = ? AND task.id IN (`+taskPlaceholders+`)
+			  AND NOT EXISTS (SELECT 1 FROM schedules schedule WHERE schedule.task_id = task.id)
+			  AND NOT EXISTS (
+				SELECT 1 FROM automation_definition_resources resource
+				WHERE resource.project_id = ? AND resource.resource_type = 'task' AND resource.resource_id = task.id
+				  AND resource.automation_id NOT IN (`+placeholders+`)
+			  )
+			RETURNING id, title`, deleteArgs...)
+		if err != nil {
+			return nil, nil, err
+		}
+		for deletedRows.Next() {
+			var task deletedAutomationTask
+			if err := deletedRows.Scan(&task.id, &task.title); err != nil {
+				deletedRows.Close()
+				return nil, nil, err
+			}
+			deletedTasks = append(deletedTasks, task)
+		}
+		if err := deletedRows.Close(); err != nil {
+			return nil, nil, err
+		}
+	}
+
 	if _, err := conn.ExecContext(ctx, `DELETE FROM automations WHERE project_id = ? AND id IN (`+placeholders+`)`, args...); err != nil {
-		return err
+		return nil, nil, err
 	}
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
-		return err
+		return nil, nil, err
 	}
-	for _, id := range automationIDs {
-		r.PublishInvalidation(events.AutomationDefinitionUpdated, projectID, models.AutomationBinding{AutomationID: id})
-	}
-	return nil
+	return versions, deletedTasks, nil
 }
 
-// DeleteAutomation permanently removes one project-scoped Automation definition and
-// its Automation-owned metadata. Existing domain tasks remain authoritative;
-// trigger schedules exclusively owned by the Automation are deleted before metadata cascades.
-func (r *AutomationRepo) DeleteAutomation(ctx context.Context, projectID, automationID string) error {
-	conn, finishImmediate, err := beginImmediateConn(ctx, r.db)
-	if err != nil {
-		return err
+func (r *AutomationRepo) publishDeletedAutomationTasks(projectID string, tasks []deletedAutomationTask) {
+	if r.broadcaster == nil {
+		return
 	}
-	defer finishImmediate()
+	for _, task := range tasks {
+		r.broadcaster.Publish(events.TaskEvent{Type: events.TaskBoardUpdated, TaskID: task.id, TaskName: task.title, ProjectID: projectID})
+	}
+}
 
-	var versionID sql.NullString
-	if err := conn.QueryRowContext(ctx, `SELECT published_version_id FROM automations WHERE project_id = ? AND id = ?`, projectID, automationID).Scan(&versionID); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return errors.New("automation not found")
-		}
-		return err
-	}
-	var inFlight int
-	if err := conn.QueryRowContext(ctx, `SELECT CASE WHEN EXISTS (
-		SELECT 1
-		FROM automation_invocations i
-		LEFT JOIN automation_dispatch_outbox d ON d.invocation_id = i.id
-		WHERE i.project_id = ? AND i.automation_id = ?
-		  AND ((i.status IN ('claimed','dispatched','running') AND d.id IS NOT NULL)
-		    OR d.status IN ('pending','processing','submitted')
-		    OR EXISTS (SELECT 1 FROM executions e WHERE e.dispatch_id = d.id AND e.status = 'running'))
-	) OR EXISTS (
-		SELECT 1
-		FROM automation_activities a
-		JOIN automation_activity_resources ar ON ar.activity_id = a.id AND ar.resource_type = 'execution'
-		JOIN executions e ON e.id = ar.resource_id
-		WHERE a.project_id = ? AND a.automation_id = ? AND e.status = 'running'
-	) THEN 1 ELSE 0 END`, projectID, automationID, projectID, automationID).Scan(&inFlight); err != nil {
-		return err
-	}
-	if inFlight > 0 {
-		return ErrAutomationDispatchInFlight
-	}
-	if _, err := conn.ExecContext(ctx, `DELETE FROM schedules
-		WHERE id IN (SELECT schedule_id FROM automation_trigger_owners WHERE project_id = ? AND automation_id = ?)`, projectID, automationID); err != nil {
-		return err
-	}
-	result, err := conn.ExecContext(ctx, `DELETE FROM automations WHERE project_id = ? AND id = ?`, projectID, automationID)
+// DeleteAutomation permanently removes one project-scoped Automation definition,
+// its Automation-owned trigger schedules, and trigger tasks that have no surviving owner.
+func (r *AutomationRepo) DeleteAutomation(ctx context.Context, projectID, automationID string) error {
+	versions, deletedTasks, err := r.deleteAutomations(ctx, projectID, []string{automationID})
 	if err != nil {
 		return err
 	}
-	if affected, err := result.RowsAffected(); err != nil {
-		return err
-	} else if affected != 1 {
-		return errors.New("automation not found")
-	}
-	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
-		return err
-	}
+	versionID := versions[automationID]
 	automationobs.Event("automation.lifecycle.deleted",
 		automationobs.String("project_id", projectID), automationobs.String("automation_id", automationID),
-		automationobs.String("version_id", versionID.String), automationobs.String("state", "deleted"))
-	r.PublishInvalidation(events.AutomationDefinitionUpdated, projectID, models.AutomationBinding{AutomationID: automationID, VersionID: versionID.String})
+		automationobs.String("version_id", versionID), automationobs.String("state", "deleted"))
+	r.PublishInvalidation(events.AutomationDefinitionUpdated, projectID, models.AutomationBinding{AutomationID: automationID, VersionID: versionID})
+	r.publishDeletedAutomationTasks(projectID, deletedTasks)
 	return nil
 }
