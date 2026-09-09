@@ -21,10 +21,11 @@ type ManagedProjectRepoResolver interface {
 }
 
 type ProjectService struct {
-	repo                *repository.ProjectRepo
-	taskSvc             *TaskService
-	workerRepo          *repository.WorkerRepo
-	managedRepoResolver ManagedProjectRepoResolver
+	repo                          *repository.ProjectRepo
+	taskSvc                       *TaskService
+	workerRepo                    *repository.WorkerRepo
+	managedRepoResolver           ManagedProjectRepoResolver
+	beforeRelationalDeleteForTest func()
 }
 
 type projectDeletionMove struct {
@@ -174,6 +175,9 @@ func (s *ProjectService) Delete(ctx context.Context, id string) error {
 			return err
 		}
 
+		if s.beforeRelationalDeleteForTest != nil {
+			s.beforeRelationalDeleteForTest()
+		}
 		manifest, _, deleteErr := s.repo.DeleteWithCleanupManifest(ctx, id, func(manifest repository.TaskDeletionManifest) error {
 			if !projectDeletionManifestsEqual(preview, manifest) {
 				return errors.New("project-owned tasks or files changed during deletion")
@@ -205,7 +209,9 @@ func (s *ProjectService) Delete(ctx context.Context, id string) error {
 			}
 		}
 		if stage != nil {
-			if finalizeErr := stage.finalize(cleanupCtx); finalizeErr != nil {
+			if attachmentStageErr := s.stageProjectDeletionFilesAfterCommit(cleanupCtx, project, manifest, managedRepo, stage); attachmentStageErr != nil {
+				cleanupErrors = append(cleanupErrors, attachmentStageErr)
+			} else if finalizeErr := stage.finalize(cleanupCtx); finalizeErr != nil {
 				cleanupErrors = append(cleanupErrors, finalizeErr)
 			}
 		}
@@ -251,12 +257,13 @@ func projectDeletionManifestsEqual(a, b repository.TaskDeletionManifest) bool {
 		stringSetEqual(a.PendingUploadSessionIDs, b.PendingUploadSessionIDs)
 }
 
+// stageProjectDeletionFiles performs read-only path validation while acquiring
+// pending-session locks in the same order used by upload and retirement flows.
+// It deliberately does not rename any path before the relational delete commits.
 func (s *ProjectService) stageProjectDeletionFiles(ctx context.Context, project *models.Project, manifest repository.TaskDeletionManifest, managedRepo bool) (*projectDeletionFileStage, error) {
 	stage := &projectDeletionFileStage{}
 	fail := func(err error) (*projectDeletionFileStage, error) {
-		if rollbackErr := stage.rollback(); rollbackErr != nil {
-			return nil, errors.Join(err, fmt.Errorf("restoring staged project files: %w", rollbackErr))
-		}
+		stage.releaseSessions()
 		return nil, err
 	}
 
@@ -265,7 +272,7 @@ func (s *ProjectService) stageProjectDeletionFiles(ctx context.Context, project 
 			if managedRepo && pathWithin(project.RepoPath, path) {
 				continue
 			}
-			if err := stage.stagePath(ctx, path, "attachment", false); err != nil {
+			if err := validateProjectDeletionPath(ctx, path, "attachment", false); err != nil {
 				return fail(err)
 			}
 		}
@@ -273,12 +280,38 @@ func (s *ProjectService) stageProjectDeletionFiles(ctx context.Context, project 
 			unlock := attachmentsession.Lock(sessionID)
 			stage.sessionUnlocks = append(stage.sessionUnlocks, unlock)
 			path := filepath.Join(s.taskSvc.uploadsDir, "chat", "pending", sessionID)
-			if err := stage.stagePath(ctx, path, "pending upload session", true); err != nil {
+			if err := validateProjectDeletionPath(ctx, path, "pending upload session", true); err != nil {
 				return fail(err)
 			}
 		}
 	}
 	return stage, nil
+}
+
+// stageProjectDeletionFilesAfterCommit quarantines attachment paths only after
+// the relational delete has committed and task runtime cancellation has begun.
+func (s *ProjectService) stageProjectDeletionFilesAfterCommit(ctx context.Context, project *models.Project, manifest repository.TaskDeletionManifest, managedRepo bool, stage *projectDeletionFileStage) error {
+	fail := func(err error) error {
+		if rollbackErr := stage.rollback(); rollbackErr != nil {
+			return errors.Join(err, fmt.Errorf("restoring staged project files: %w", rollbackErr))
+		}
+		return err
+	}
+	for _, path := range append(append([]string{}, manifest.TaskAttachmentPaths...), manifest.ExecutionAttachmentPaths...) {
+		if managedRepo && pathWithin(project.RepoPath, path) {
+			continue
+		}
+		if err := stage.stagePath(ctx, path, "attachment", false); err != nil {
+			return fail(err)
+		}
+	}
+	for _, sessionID := range manifest.PendingUploadSessionIDs {
+		path := filepath.Join(s.taskSvc.uploadsDir, "chat", "pending", sessionID)
+		if err := stage.stagePath(ctx, path, "pending upload session", true); err != nil {
+			return fail(err)
+		}
+	}
+	return nil
 }
 
 func (s *ProjectService) stageProjectRepositoryFiles(ctx context.Context, project *models.Project, manifest repository.TaskDeletionManifest, managedRepo bool) (*projectDeletionFileStage, error) {
@@ -332,7 +365,7 @@ func (s *ProjectService) stageProjectRepositoryFiles(ctx context.Context, projec
 	return stage, nil
 }
 
-func (s *projectDeletionFileStage) stagePath(ctx context.Context, path, kind string, wantDirectory bool) error {
+func validateProjectDeletionPath(ctx context.Context, path, kind string, wantDirectory bool) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -345,6 +378,18 @@ func (s *projectDeletionFileStage) stagePath(ctx context.Context, path, kind str
 	}
 	if wantDirectory != info.IsDir() {
 		return fmt.Errorf("refusing to stage %s with unexpected file type: %s", kind, path)
+	}
+	return nil
+}
+
+func (s *projectDeletionFileStage) stagePath(ctx context.Context, path, kind string, wantDirectory bool) error {
+	if err := validateProjectDeletionPath(ctx, path, kind, wantDirectory); err != nil {
+		return err
+	}
+	if _, err := os.Lstat(path); os.IsNotExist(err) {
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("inspecting %s %s: %w", kind, path, err)
 	}
 	quarantine := path + ".openvibely-delete-" + repository.NewID()
 	if err := os.Rename(path, quarantine); err != nil {

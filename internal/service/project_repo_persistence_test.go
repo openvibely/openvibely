@@ -27,7 +27,7 @@ func TestProjectService_DeleteRollsBackTasksWhenLegacyConstraintFails(t *testing
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatal(err)
 	}
-	task := &models.Task{ProjectID: project.ID, Title: "Must survive rollback", Prompt: "test", Category: models.CategoryBacklog, Status: models.StatusPending}
+	task := &models.Task{ProjectID: project.ID, Title: "Must survive rollback", Prompt: "test", Category: models.CategoryActive, Status: models.StatusRunning}
 	if err := taskRepo.Create(ctx, task); err != nil {
 		t.Fatal(err)
 	}
@@ -57,6 +57,14 @@ func TestProjectService_DeleteRollsBackTasksWhenLegacyConstraintFails(t *testing
 		t.Fatal(err)
 	}
 
+	attachmentReadableBeforeRelationalDelete := false
+	projectSvc.beforeRelationalDeleteForTest = func() {
+		content, readErr := os.ReadFile(attachmentPath)
+		if readErr == nil && string(content) == "must survive" {
+			attachmentReadableBeforeRelationalDelete = true
+		}
+	}
+
 	err := projectSvc.Delete(ctx, project.ID)
 	if err == nil || !strings.Contains(err.Error(), "no such table: main.memory_consolidation_runs") {
 		t.Fatalf("Delete error = %v, want missing memory_consolidation_runs", err)
@@ -68,6 +76,9 @@ func TestProjectService_DeleteRollsBackTasksWhenLegacyConstraintFails(t *testing
 	storedTask, getErr := taskRepo.GetByID(ctx, task.ID)
 	if getErr != nil || storedTask == nil {
 		t.Fatalf("task after failed deletion = %#v, err=%v", storedTask, getErr)
+	}
+	if !attachmentReadableBeforeRelationalDelete {
+		t.Fatal("active task attachment was unavailable before relational deletion completed")
 	}
 	if content, readErr := os.ReadFile(attachmentPath); readErr != nil || string(content) != "must survive" {
 		t.Fatalf("attachment after failed deletion = %q, err=%v", content, readErr)
