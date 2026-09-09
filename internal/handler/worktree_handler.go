@@ -747,10 +747,17 @@ type taskConflictRecoveryPreflight struct {
 
 // preflightTaskConflictRecovery loads the shared initial context for task-owned
 // conflict recovery before Resolve and Abort perform their distinct mutations.
-func (h *Handler) preflightTaskConflictRecovery(ctx context.Context, taskID string, fromChangesTab bool) (*taskConflictRecoveryPreflight, error) {
+// afterTaskLoad preserves any operation-specific checks that must run after a
+// task is found but before repository recovery begins.
+func (h *Handler) preflightTaskConflictRecovery(ctx context.Context, taskID string, fromChangesTab bool, afterTaskLoad func(*models.Task) error) (*taskConflictRecoveryPreflight, error) {
 	task, err := h.taskSvc.GetByID(ctx, taskID)
 	if err != nil || task == nil {
 		return nil, echo.NewHTTPError(http.StatusNotFound, "task not found")
+	}
+	if afterTaskLoad != nil {
+		if err := afterTaskLoad(task); err != nil {
+			return nil, err
+		}
 	}
 
 	project, err := h.projectRepo.GetByID(ctx, task.ProjectID)
@@ -792,13 +799,14 @@ func (h *Handler) revalidateTaskConflictRecovery(ctx context.Context, taskID str
 // ResolveTaskConflicts triggers AI-assisted conflict resolution.
 func (h *Handler) ResolveTaskConflicts(c echo.Context) error {
 	taskID := c.Param("taskId")
-	preflight, err := h.preflightTaskConflictRecovery(c.Request().Context(), taskID, c.FormValue("merge_source") == "changes_tab")
+	preflight, err := h.preflightTaskConflictRecovery(c.Request().Context(), taskID, c.FormValue("merge_source") == "changes_tab", func(*models.Task) error {
+		if h.worktreeSvc == nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, "worktree service not available")
+		}
+		return nil
+	})
 	if err != nil {
 		return err
-	}
-
-	if h.worktreeSvc == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "worktree service not available")
 	}
 
 	task := preflight.task
@@ -865,7 +873,7 @@ func (h *Handler) ResolveTaskConflicts(c echo.Context) error {
 // AbortTaskMerge aborts an in-progress merge for a task.
 func (h *Handler) AbortTaskMerge(c echo.Context) error {
 	taskID := c.Param("taskId")
-	preflight, err := h.preflightTaskConflictRecovery(c.Request().Context(), taskID, c.FormValue("merge_source") == "changes_tab")
+	preflight, err := h.preflightTaskConflictRecovery(c.Request().Context(), taskID, c.FormValue("merge_source") == "changes_tab", nil)
 	if err != nil {
 		return err
 	}

@@ -1642,22 +1642,22 @@ func TestHandler_ConflictRecoveryPreflightRejectsMissingTaskAndProjectRepository
 	h, e, _ := setupTestHandler(t)
 	ctx := context.Background()
 
-	assertRecoveryStatus := func(t *testing.T, taskID string, wantStatus int) {
+	assertRecoveryStatus := func(t *testing.T, taskID, operation string, wantStatus int) {
 		t.Helper()
-		for _, operation := range []string{"resolve", "abort"} {
-			rec := worktreeExecute(e, worktreeFormRequest(http.MethodPost, "/tasks/"+taskID+"/worktree/"+operation, nil))
-			if rec.Code != wantStatus {
-				t.Fatalf("%s recovery status = %d, want %d: %s", operation, rec.Code, wantStatus, rec.Body.String())
-			}
+		rec := worktreeExecute(e, worktreeFormRequest(http.MethodPost, "/tasks/"+taskID+"/worktree/"+operation, nil))
+		if rec.Code != wantStatus {
+			t.Fatalf("%s recovery status = %d, want %d: %s", operation, rec.Code, wantStatus, rec.Body.String())
 		}
 	}
 
-	if _, err := h.preflightTaskConflictRecovery(ctx, "missing-task", true); err == nil {
+	if _, err := h.preflightTaskConflictRecovery(ctx, "missing-task", true, nil); err == nil {
 		t.Fatal("missing task preflight succeeded")
 	} else if httpErr, ok := err.(*echo.HTTPError); !ok || httpErr.Code != http.StatusNotFound {
 		t.Fatalf("missing task preflight error = %v, want 404", err)
 	}
-	assertRecoveryStatus(t, "missing-task", http.StatusNotFound)
+	for _, operation := range []string{"resolve", "abort"} {
+		assertRecoveryStatus(t, "missing-task", operation, http.StatusNotFound)
+	}
 
 	project := &models.Project{Name: "Conflict recovery without repository", IsDefault: true}
 	if err := h.projectSvc.Create(ctx, project); err != nil {
@@ -1671,12 +1671,157 @@ func TestHandler_ConflictRecoveryPreflightRejectsMissingTaskAndProjectRepository
 		t.Fatal(err)
 	}
 
-	if _, err := h.preflightTaskConflictRecovery(ctx, task.ID, false); err == nil {
+	if _, err := h.preflightTaskConflictRecovery(ctx, task.ID, false, nil); err == nil {
 		t.Fatal("missing project repository preflight succeeded")
 	} else if httpErr, ok := err.(*echo.HTTPError); !ok || httpErr.Code != http.StatusBadRequest {
 		t.Fatalf("missing project repository preflight error = %v, want 400", err)
 	}
-	assertRecoveryStatus(t, task.ID, http.StatusBadRequest)
+	assertRecoveryStatus(t, task.ID, "resolve", http.StatusInternalServerError)
+	assertRecoveryStatus(t, task.ID, "abort", http.StatusBadRequest)
+
+	h.SetWorktreeService(service.NewWorktreeService(h.taskRepo, h.projectRepo, h.settingsRepo))
+	for _, operation := range []string{"resolve", "abort"} {
+		assertRecoveryStatus(t, task.ID, operation, http.StatusBadRequest)
+	}
+}
+
+func TestHandler_ResolveTaskConflicts_ResponsePaths(t *testing.T) {
+	newFixture := func(t *testing.T) (*Handler, *echo.Echo, *models.Task, string, string, *testutil.MockLLMCaller) {
+		t.Helper()
+		h, e, llmConfigRepo := setupTestHandler(t)
+		mock := testutil.NewMockLLMCaller()
+		h.llmSvc.SetLLMCaller(mock)
+		createAgent(t, llmConfigRepo)
+
+		worktreeSvc := service.NewWorktreeService(h.taskRepo, h.projectRepo, h.settingsRepo)
+		worktreeSvc.SetLLMService(h.llmSvc)
+		h.SetWorktreeService(worktreeSvc)
+
+		ctx := context.Background()
+		repoDir := createHandlerTestGitRepo(t)
+		targetBranch := service.GetCurrentBranch(repoDir)
+		conflictName := "resolve-conflict.txt"
+		conflictPath := filepath.Join(repoDir, conflictName)
+		if err := os.WriteFile(conflictPath, []byte("base\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		runGit(t, repoDir, "add", conflictName)
+		runGit(t, repoDir, "commit", "-m", "resolve conflict base")
+
+		branchName := "task/resolve-conflict"
+		runGit(t, repoDir, "checkout", "-b", branchName)
+		if err := os.WriteFile(conflictPath, []byte("task branch\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		runGit(t, repoDir, "add", conflictName)
+		runGit(t, repoDir, "commit", "-m", "resolve task change")
+		runGit(t, repoDir, "checkout", targetBranch)
+		if err := os.WriteFile(conflictPath, []byte("target branch\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		runGit(t, repoDir, "add", conflictName)
+		runGit(t, repoDir, "commit", "-m", "resolve target change")
+		mergeCmd := exec.Command("git", "merge", "--no-ff", branchName)
+		mergeCmd.Dir = repoDir
+		if out, err := mergeCmd.CombinedOutput(); err == nil {
+			t.Fatalf("expected fixture merge conflict, got success: %s", out)
+		}
+
+		project := &models.Project{Name: "Resolve conflict responses", RepoPath: repoDir, IsDefault: true}
+		if err := h.projectSvc.Create(ctx, project); err != nil {
+			t.Fatal(err)
+		}
+		task := &models.Task{
+			ProjectID: project.ID, Title: "Resolve conflict response", Prompt: "test", Category: models.CategoryCompleted,
+			Status: models.StatusCompleted, WorktreeBranch: branchName, MergeTargetBranch: targetBranch, MergeStatus: models.MergeStatusPending,
+		}
+		if err := h.taskRepo.Create(ctx, task); err != nil {
+			t.Fatal(err)
+		}
+		return h, e, task, repoDir, conflictPath, mock
+	}
+
+	t.Run("success", func(t *testing.T) {
+		h, e, task, repoDir, conflictPath, mock := newFixture(t)
+		mock.OnCall = func(_ context.Context, call testutil.MockLLMCall) {
+			if call.WorkDir != repoDir {
+				t.Fatalf("AI work directory = %q, want %q", call.WorkDir, repoDir)
+			}
+			if err := os.WriteFile(conflictPath, []byte("resolved\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			runGit(t, repoDir, "add", filepath.Base(conflictPath))
+		}
+
+		rec := worktreeExecute(e, worktreeFormRequest(http.MethodPost, "/tasks/"+task.ID+"/worktree/resolve", nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("successful Resolve returned %d: %s", rec.Code, rec.Body.String())
+		}
+		if mock.CallCount() != 1 {
+			t.Fatalf("AI call count = %d, want 1", mock.CallCount())
+		}
+		if service.HasActiveMerge(repoDir) || len(service.ActiveConflictFiles(repoDir)) != 0 {
+			t.Fatal("successful Resolve left active Git conflict state")
+		}
+		updated, err := h.taskRepo.GetByID(context.Background(), task.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if updated.MergeStatus != models.MergeStatusMerged {
+			t.Fatalf("successful Resolve persisted status = %q, want merged", updated.MergeStatus)
+		}
+	})
+
+	t.Run("partial resolution", func(t *testing.T) {
+		_, e, task, repoDir, _, mock := newFixture(t)
+		req := worktreeFormRequest(http.MethodPost, "/tasks/"+task.ID+"/worktree/resolve", url.Values{"merge_source": {"changes_tab"}})
+		req.Header.Set("HX-Request", "true")
+		rec := worktreeExecute(e, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("partial Resolve returned %d: %s", rec.Code, rec.Body.String())
+		}
+		if mock.CallCount() != 1 {
+			t.Fatalf("AI call count = %d, want 1", mock.CallCount())
+		}
+		if !service.HasActiveMerge(repoDir) || len(service.ActiveConflictFiles(repoDir)) == 0 {
+			t.Fatal("partial Resolve cleared active Git conflict state")
+		}
+		if trigger := rec.Header().Get("HX-Trigger"); !strings.Contains(trigger, "AI could not resolve all conflicts") {
+			t.Fatalf("partial Resolve toast = %q, want partial-resolution message", trigger)
+		}
+		body := rec.Body.String()
+		for _, want := range []string{"/tasks/" + task.ID + "/worktree/resolve", "/tasks/" + task.ID + "/worktree/abort"} {
+			if !strings.Contains(body, want) {
+				t.Fatalf("partial Resolve did not preserve conflict recovery action %q: %s", want, body)
+			}
+		}
+	})
+
+	t.Run("AI error", func(t *testing.T) {
+		h, e, task, repoDir, _, mock := newFixture(t)
+		mock.Err = errors.New("resolution provider unavailable")
+
+		rec := worktreeExecute(e, worktreeFormRequest(http.MethodPost, "/tasks/"+task.ID+"/worktree/resolve", nil))
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("Resolve AI error returned %d, want 400: %s", rec.Code, rec.Body.String())
+		}
+		if mock.CallCount() != 1 {
+			t.Fatalf("AI call count = %d, want 1", mock.CallCount())
+		}
+		if !strings.Contains(rec.Body.String(), "AI conflict resolution failed: resolution provider unavailable") {
+			t.Fatalf("Resolve AI error response lost operation-specific message: %s", rec.Body.String())
+		}
+		if !service.HasActiveMerge(repoDir) || len(service.ActiveConflictFiles(repoDir)) == 0 {
+			t.Fatal("Resolve AI error cleared active Git conflict state")
+		}
+		updated, err := h.taskRepo.GetByID(context.Background(), task.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if updated.MergeStatus == models.MergeStatusMerged {
+			t.Fatalf("Resolve AI error persisted merged status")
+		}
+	})
 }
 
 func TestHandler_StaleTerminalConflictRecoversChangesAndRecoveryPosts(t *testing.T) {
