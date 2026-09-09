@@ -616,6 +616,10 @@ func TestCallStreamingUsesAgenticStreamCallbacksAndRuntimeTools(t *testing.T) {
 	if !strings.Contains(payload, "Finish task") || !strings.Contains(payload, "project rules") || !strings.Contains(payload, "create_task") {
 		t.Fatalf("request body missing prompt/system/runtime tools: %#v", gotBody)
 	}
+	if !strings.Contains(payload, "If you recovered and completed the requested outcome, report success") ||
+		!strings.Contains(payload, "[STATUS: FAILED | <describe what prevented completion>]") {
+		t.Fatalf("task request missing provider-neutral outcome status contract: %#v", gotBody["messages"])
+	}
 	if strings.Contains(payload, "Bash") {
 		t.Fatalf("SkipDefaultTools should omit default tools, got %#v", gotBody["tools"])
 	}
