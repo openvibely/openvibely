@@ -626,6 +626,134 @@ func TestTaskRepo_ListByCategory_WithChainConfig(t *testing.T) {
 	}
 }
 
+func TestTaskRepo_UpdateStatusAppendsActiveTaskToDestinationLane(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewTaskRepo(db, nil)
+	ctx := context.Background()
+
+	firstRunning := &models.Task{ProjectID: "default", Title: "First Running", Category: models.CategoryActive, Status: models.StatusRunning, Prompt: "p"}
+	moving := &models.Task{ProjectID: "default", Title: "Moving", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "p"}
+	lastRunning := &models.Task{ProjectID: "default", Title: "Last Running", Category: models.CategoryActive, Status: models.StatusRunning, Prompt: "p"}
+	for _, task := range []*models.Task{firstRunning, moving, lastRunning} {
+		if err := repo.Create(ctx, task); err != nil {
+			t.Fatalf("Create(%s): %v", task.Title, err)
+		}
+	}
+
+	if err := repo.UpdateStatus(ctx, moving.ID, models.StatusRunning); err != nil {
+		t.Fatalf("UpdateStatus: %v", err)
+	}
+
+	tasks, err := repo.ListByProjectWithCategorySorts(ctx, "default", string(models.CategoryActive), "", "")
+	if err != nil {
+		t.Fatalf("ListByProjectWithCategorySorts: %v", err)
+	}
+	var running []string
+	for _, task := range tasks {
+		if task.Status == models.StatusRunning {
+			running = append(running, task.ID)
+		}
+	}
+	want := []string{firstRunning.ID, lastRunning.ID, moving.ID}
+	if !reflect.DeepEqual(running, want) {
+		t.Fatalf("running lane order = %v, want %v", running, want)
+	}
+}
+
+func TestTaskRepo_UpdateCategoryAppendsTaskToActiveOrder(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewTaskRepo(db, nil)
+	ctx := context.Background()
+
+	first := &models.Task{ProjectID: "default", Title: "First Active", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "p"}
+	moving := &models.Task{ProjectID: "default", Title: "Moving From Backlog", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "p"}
+	last := &models.Task{ProjectID: "default", Title: "Last Active", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "p"}
+	for _, task := range []*models.Task{first, moving, last} {
+		if err := repo.Create(ctx, task); err != nil {
+			t.Fatalf("Create(%s): %v", task.Title, err)
+		}
+	}
+
+	if err := repo.UpdateCategory(ctx, moving.ID, models.CategoryActive); err != nil {
+		t.Fatalf("UpdateCategory: %v", err)
+	}
+
+	tasks, err := repo.ListByProjectWithCategorySorts(ctx, "default", string(models.CategoryActive), "", "")
+	if err != nil {
+		t.Fatalf("ListByProjectWithCategorySorts: %v", err)
+	}
+	got := make([]string, 0, len(tasks))
+	for _, task := range tasks {
+		got = append(got, task.ID)
+	}
+	want := []string{first.ID, last.ID, moving.ID}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("active order = %v, want %v", got, want)
+	}
+}
+
+func TestTaskRepo_ClaimTaskAppendsToActiveRunningLane(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewTaskRepo(db, nil)
+	ctx := context.Background()
+
+	moving := &models.Task{ProjectID: "default", Title: "Claim Moving", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "p"}
+	running := &models.Task{ProjectID: "default", Title: "Claim Existing Running", Category: models.CategoryActive, Status: models.StatusRunning, Prompt: "p"}
+	for _, task := range []*models.Task{moving, running} {
+		if err := repo.Create(ctx, task); err != nil {
+			t.Fatalf("Create(%s): %v", task.Title, err)
+		}
+	}
+
+	claimed, err := repo.ClaimTask(ctx, moving.ID)
+	if err != nil {
+		t.Fatalf("ClaimTask: %v", err)
+	}
+	if !claimed {
+		t.Fatal("ClaimTask returned false")
+	}
+	loaded, err := repo.GetByID(ctx, moving.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if loaded.DisplayOrder <= running.DisplayOrder {
+		t.Fatalf("claimed display order = %d, want greater than existing running order %d", loaded.DisplayOrder, running.DisplayOrder)
+	}
+}
+
+func TestTaskRepo_RestoreBoardStatePreservesRollbackPosition(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewTaskRepo(db, nil)
+	ctx := context.Background()
+
+	first := &models.Task{ProjectID: "default", Title: "Rollback First", Category: models.CategoryBacklog, Status: models.StatusFailed, Prompt: "p"}
+	moving := &models.Task{ProjectID: "default", Title: "Rollback Moving", Category: models.CategoryBacklog, Status: models.StatusFailed, Prompt: "p"}
+	last := &models.Task{ProjectID: "default", Title: "Rollback Last", Category: models.CategoryBacklog, Status: models.StatusFailed, Prompt: "p"}
+	for _, task := range []*models.Task{first, moving, last} {
+		if err := repo.Create(ctx, task); err != nil {
+			t.Fatalf("Create(%s): %v", task.Title, err)
+		}
+	}
+	original := *moving
+	if err := repo.UpdateCategory(ctx, moving.ID, models.CategoryActive); err != nil {
+		t.Fatalf("UpdateCategory: %v", err)
+	}
+	if err := repo.UpdateStatus(ctx, moving.ID, models.StatusPending); err != nil {
+		t.Fatalf("UpdateStatus: %v", err)
+	}
+	if err := repo.RestoreBoardState(ctx, original); err != nil {
+		t.Fatalf("RestoreBoardState: %v", err)
+	}
+
+	loaded, err := repo.GetByID(ctx, moving.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if loaded.Category != original.Category || loaded.Status != original.Status || loaded.DisplayOrder != original.DisplayOrder {
+		t.Fatalf("restored board state = category %s status %s order %d, want category %s status %s order %d", loaded.Category, loaded.Status, loaded.DisplayOrder, original.Category, original.Status, original.DisplayOrder)
+	}
+}
+
 func TestTaskRepo_UpdateStatus(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewTaskRepo(db, nil)
