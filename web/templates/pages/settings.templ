@@ -49,6 +49,7 @@ func channelCardListState(view ChannelsSettingsView) CardListState {
 	return CardListState{
 		ProjectID: view.CurrentProjectID,
 		Search: view.WebhooksSearch,
+		Sort:   view.Sort,
 		Filters: map[string]string{
 			"type": view.ChannelTypeFilter,
 			"connection_state": view.ConnectionStateFilter,

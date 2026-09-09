@@ -166,6 +166,7 @@ func (r *WebhookRepo) ListCardsByProject(ctx context.Context, projectID string) 
 type WebhookCardFilter struct {
 	Search  string
 	Enabled *bool
+	Sort    string
 }
 
 func (r *WebhookRepo) ListCardsByProjectPage(ctx context.Context, projectID string, limit, offset int, search string) ([]models.WebhookEndpoint, error) {
@@ -184,7 +185,12 @@ func (r *WebhookRepo) ListCardsByProjectPageFiltered(ctx context.Context, projec
 		query += ` AND enabled = ?`
 		args = append(args, *filter.Enabled)
 	}
-	query += ` ORDER BY name ASC, id ASC LIMIT ? OFFSET ?`
+	if filter.Sort == "name_desc" {
+		query += ` ORDER BY name DESC, id DESC`
+	} else {
+		query += ` ORDER BY name ASC, id ASC`
+	}
+	query += ` LIMIT ? OFFSET ?`
 	args = append(args, limit, offset)
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {

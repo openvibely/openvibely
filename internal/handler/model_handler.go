@@ -41,7 +41,7 @@ func modelCardListFilter(c echo.Context, page cardPageRequest) repository.ModelC
 		Default:    optionalBoolQuery(c, "default"),
 		AuthStatus: allowlistedQuery(c, "auth_status", "", "connected", "not_connected", "not_required"),
 		Kind:       allowlistedQuery(c, "kind", "", "direct", "mixture"),
-		Sort:       allowlistedQuery(c, "sort", "default_name", "default_name", "name_asc", "name_desc", "provider"),
+		Sort:       allowlistedQuery(c, "sort", "name_asc", "name_asc", "name_desc", "provider"),
 	}
 }
 

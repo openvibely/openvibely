@@ -244,7 +244,7 @@ func TestCollectionHandlersNormalizeRejectedToolbarState(t *testing.T) {
 		"/agents?project_id=" + project.ID + "&enabled=bad&scope=bad&origin=bad&sort=bad",
 		"/skills?project_id=" + project.ID + "&enabled=bad&scope=bad&always_use=bad&archived=bad&source=bad&sort=bad",
 		"/models?project_id=" + project.ID + "&provider=bad&default=bad&auth_status=bad&kind=bad&sort=bad",
-		"/channels?project_id=" + project.ID + "&type=bad&connection_state=bad&webhook_enabled=bad",
+		"/channels?project_id=" + project.ID + "&type=bad&connection_state=bad&webhook_enabled=bad&sort=bad",
 		"/personality?project_id=" + project.ID + "&kind=bad&active=bad&sort=bad",
 	} {
 		rec := serveCardPageRequest(t, tc.echo, path)
@@ -373,8 +373,7 @@ func TestCollectionHandlersRenderValidatedToolbarState(t *testing.T) {
 		{name: "models", path: "/models?provider=openai&default=false&auth_status=not_connected&kind=direct&sort=name_desc", contains: []string{`data-card-filter-chip="provider"`, `data-card-filter-chip="default"`, `data-card-filter-chip="auth_status"`, `data-card-filter-chip="kind"`, `<option value="name_desc" selected`}},
 		{name: "agents", path: "/agents?enabled=true&scope=global&origin=custom&sort=updated_desc", contains: []string{`data-card-filter-chip="enabled"`, `data-card-filter-chip="scope"`, `data-card-filter-chip="origin"`, `<option value="updated_desc" selected`}},
 		{name: "skills", path: "/skills?project_id=" + project.ID + "&enabled=true&scope=global&always_use=false&archived=false&source=global&sort=scope", contains: []string{`data-card-filter-chip="enabled"`, `data-card-filter-chip="scope"`, `data-card-filter-chip="always_use"`, `data-card-filter-chip="archived"`, `data-card-filter-chip="source"`, `<option value="scope" selected`}},
-		{name: "channels", path: "/channels?project_id=" + project.ID + "&type=webhook&connection_state=configured&webhook_enabled=true", contains: []string{`data-card-filter-chip="type"`, `data-card-filter-chip="connection_state"`, `data-card-filter-chip="webhook_enabled"`}},
-		{name: "personality", path: "/personality?project_id=" + project.ID + "&kind=custom&active=false&sort=name_desc", contains: []string{`data-card-filter-chip="kind"`, `data-card-filter-chip="active"`, `project_id=` + project.ID, `<option value="name_desc" selected`}},
+		{name: "channels", path: "/channels?project_id=" + project.ID + "&type=webhook&connection_state=configured&webhook_enabled=true&sort=name_desc", contains: []string{`data-card-filter-chip="type"`, `data-card-filter-chip="connection_state"`, `data-card-filter-chip="webhook_enabled"`, `<option value="name_desc" selected`}}, {name: "personality", path: "/personality?project_id=" + project.ID + "&kind=custom&active=false&sort=name_desc", contains: []string{`data-card-filter-chip="kind"`, `data-card-filter-chip="active"`, `project_id=` + project.ID, `<option value="name_desc" selected`}},
 		{name: "alerts", path: "/alerts?project_id=" + project.ID + "&read=unread&severity=error&decision_state=pending&type=custom&source=native&processing_state=failed&implementation_task_linked=false&sort=severity", contains: []string{`data-card-filter-chip="read"`, `data-card-filter-chip="severity"`, `data-card-filter-chip="decision_state"`, `data-card-filter-chip="processing_state"`, `data-card-filter-chip="implementation_task_linked"`, `data-card-filter-chip="type"`, `data-card-filter-chip="source"`, `<option value="severity" selected`}},
 	}
 	for _, tt := range tests {
@@ -383,6 +382,36 @@ func TestCollectionHandlersRenderValidatedToolbarState(t *testing.T) {
 			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 			for _, expected := range tt.contains {
 				require.Contains(t, rec.Body.String(), expected)
+			}
+		})
+	}
+}
+
+func TestCollectionSortMenusUseConsistentDefaultsAndOptions(t *testing.T) {
+	tc := NewTestContext(t)
+	tc.handler.SetWebhookRepo(repository.NewWebhookRepo(tc.db))
+	tc.handler.SetCustomPersonalityRepo(repository.NewCustomPersonalityRepo(tc.db))
+	tc.handler.SetAutomationServices(service.NewAutomationGraphService(repository.NewAutomationRepo(tc.db)), nil)
+	project := tc.CreateProject().WithName("Sort menu contract").Build()
+
+	for _, test := range []struct {
+		name      string
+		path      string
+		forbidden []string
+	}{
+		{name: "channels", path: "/channels?project_id=" + project.ID},
+		{name: "automations", path: "/automations?project_id=" + project.ID},
+		{name: "models", path: "/models?project_id=" + project.ID, forbidden: []string{`value="default_name"`, `>Default then name<`, `<option value="name">Name</option>`}},
+		{name: "personality", path: "/personality?project_id=" + project.ID, forbidden: []string{`value="curated"`, `>Curated<`}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			rec := serveCardPageRequest(t, tc.echo, test.path)
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			body := rec.Body.String()
+			require.Contains(t, body, `<select id="`+test.name+`-card-sort" class="select select-bordered select-sm card-sort-control"`)
+			require.Contains(t, body, `<option value="name_asc" selected>Name A–Z</option>`)
+			for _, value := range test.forbidden {
+				require.NotContains(t, body, value)
 			}
 		})
 	}
@@ -568,8 +597,7 @@ func TestEveryCollectionPageAcceptsAndRejectsItsFilterAndSortValues(t *testing.T
 		"automations": {path: "/automations?project_id=" + project.ID, filters: map[string][]string{
 			"lifecycle_state": {"active", "paused", "draft", "archived"}, "health_state": {"unknown", "healthy", "degraded", "unhealthy"},
 			"automation_type": {"custom", "native_sdlc", "github_sdlc", "vision_driver", "scheduled"}, "adapter": {"custom", "native_sdlc", "github_sdlc", "vision_driver"},
-		}, sorts: []string{"updated_desc", "updated_asc", "name_asc", "name_desc"}, fallback: "updated_desc"},
-		"agents": {path: "/agents?project_id=" + project.ID, filters: map[string][]string{
+		}, sorts: []string{"updated_desc", "updated_asc", "name_asc", "name_desc"}, fallback: "name_asc"}, "agents": {path: "/agents?project_id=" + project.ID, filters: map[string][]string{
 			"enabled": {"true", "false"}, "scope": {"global", "project"}, "origin": {"custom", "generated", "protected"},
 		}, sorts: []string{"name_asc", "name_desc", "updated_desc", "created_desc"}, fallback: "name_asc"},
 		"skills": {path: "/skills?project_id=" + project.ID, filters: map[string][]string{
@@ -577,14 +605,10 @@ func TestEveryCollectionPageAcceptsAndRejectsItsFilterAndSortValues(t *testing.T
 		}, sorts: []string{"name_asc", "name_desc", "scope", "source"}, fallback: "name_asc"},
 		"models": {path: "/models?project_id=" + project.ID, filters: map[string][]string{
 			"provider": {"openai", "anthropic", "ollama", "openai_compatible", "mixture"}, "default": {"true", "false"}, "auth_status": {"connected", "not_connected", "not_required"}, "kind": {"direct", "mixture"},
-		}, sorts: []string{"default_name", "name_asc", "name_desc", "provider"}, fallback: "default_name"},
-		"channels": {path: "/channels?project_id=" + project.ID, filters: map[string][]string{
+		}, sorts: []string{"name_asc", "name_desc", "provider"}, fallback: "name_asc"}, "channels": {path: "/channels?project_id=" + project.ID, filters: map[string][]string{
 			"type": {"github", "slack", "telegram", "discord", "x", "email", "webhook", "outbound_targets"}, "connection_state": {"connected", "configured", "disconnected"}, "webhook_enabled": {"true", "false"},
-		}},
-		"personality": {path: "/personality?project_id=" + project.ID, filters: map[string][]string{
-			"kind": {"base", "built_in", "custom", "override"}, "active": {"true", "false"},
-		}, sorts: []string{"curated", "name_asc", "name_desc"}, fallback: "curated"},
-	}
+		}, sorts: []string{"name_asc", "name_desc"}, fallback: "name_asc"},
+		"personality": {path: "/personality?project_id=" + project.ID, filters: map[string][]string{"kind": {"base", "built_in", "custom", "override"}, "active": {"true", "false"}}, sorts: []string{"name_asc", "name_desc"}, fallback: "name_asc"}}
 
 	for pageName, spec := range specs {
 		t.Run(pageName, func(t *testing.T) {
@@ -1027,15 +1051,14 @@ func TestCardPaginationPersonalityHandlerKeepsMatchingActiveCardOutsidePageWindo
 	first := serveCardPageRequest(t, e, "/personality?page=0&page_size=20&search=paged+custom&card_page=1")
 	require.Equal(t, http.StatusOK, first.Code)
 	require.Equal(t, "true", first.Header().Get(cardPageHasMoreHeader))
-	require.Contains(t, first.Body.String(), `data-personality-key="paged_custom_21"`)
+	require.NotContains(t, first.Body.String(), `data-personality-key="paged_custom_21"`)
 	require.NotContains(t, first.Body.String(), `data-personality-key="`+presets[1].Key+`"`)
 	require.NotContains(t, first.Body.String(), `data-personality-name="Overridden preset"`)
 	require.Equal(t, 20, strings.Count(first.Body.String(), `data-personality-pagination-card="true"`))
 	require.NotContains(t, first.Body.String(), `data-personality-pagination-card="false"`)
-	for i := 0; i < 19; i++ {
+	for i := 0; i < 20; i++ {
 		require.Contains(t, first.Body.String(), fmt.Sprintf(`data-personality-key="paged_custom_%02d"`, i))
 	}
-	require.NotContains(t, first.Body.String(), `data-personality-key="paged_custom_19"`)
 	require.NotContains(t, first.Body.String(), `data-personality-key="paged_custom_20"`)
 
 	continuationOffset := strings.Count(first.Body.String(), `data-personality-pagination-card="true"`)
@@ -1043,9 +1066,9 @@ func TestCardPaginationPersonalityHandlerKeepsMatchingActiveCardOutsidePageWindo
 	require.Equal(t, http.StatusOK, continuation.Code)
 	require.Equal(t, "false", continuation.Header().Get(cardPageHasMoreHeader))
 	require.Equal(t, 2, strings.Count(continuation.Body.String(), `data-personality-pagination-card="true"`))
-	require.Contains(t, continuation.Body.String(), `data-personality-key="paged_custom_19"`)
 	require.Contains(t, continuation.Body.String(), `data-personality-key="paged_custom_20"`)
-	require.NotContains(t, continuation.Body.String(), `data-personality-key="paged_custom_21"`)
+	require.Contains(t, continuation.Body.String(), `data-personality-key="paged_custom_21"`)
+	require.Contains(t, continuation.Body.String(), `data-personality-key="paged_custom_21" data-personality-name="Paged custom 21"`)
 }
 
 func TestCardPaginationProductionBrowserLoadsSequentialPagesAndResetsSearch(t *testing.T) {

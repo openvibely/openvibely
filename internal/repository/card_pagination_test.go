@@ -117,6 +117,14 @@ func TestCollectionFiltersAndSortsApplyBeforePagination(t *testing.T) {
 	require.Len(t, automationsPage, 1)
 	require.Equal(t, "Zulu paused", automationsPage[0].Automation.Name)
 
+	automationsDefault, err := automationsRepo.ListPortfolioCardsPageFiltered(ctx, project.ID, 10, 0, AutomationCardListFilter{})
+	require.NoError(t, err)
+	require.Equal(t, []string{"Alpha paused", "Beta active", "Zulu paused"}, []string{
+		automationsDefault[0].Automation.Name,
+		automationsDefault[1].Automation.Name,
+		automationsDefault[2].Automation.Name,
+	})
+
 	webhookRepo := NewWebhookRepo(db)
 	for _, endpoint := range []*models.WebhookEndpoint{{ProjectID: project.ID, Name: "A disabled", Enabled: false}, {ProjectID: project.ID, Name: "B enabled", Enabled: true}, {ProjectID: project.ID, Name: "C enabled", Enabled: true}} {
 		require.NoError(t, webhookRepo.Create(ctx, endpoint))
@@ -125,6 +133,9 @@ func TestCollectionFiltersAndSortsApplyBeforePagination(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, hooks, 1)
 	require.Equal(t, "C enabled", hooks[0].Name)
+	descendingHooks, err := webhookRepo.ListCardsByProjectPageFiltered(ctx, project.ID, 2, 0, WebhookCardFilter{Enabled: &enabled, Sort: "name_desc"})
+	require.NoError(t, err)
+	require.Equal(t, []string{"C enabled", "B enabled"}, []string{descendingHooks[0].Name, descendingHooks[1].Name})
 }
 
 func TestModelAuthStatusFilterMatchesOAuthValidityRule(t *testing.T) {
