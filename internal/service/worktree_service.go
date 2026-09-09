@@ -2919,6 +2919,28 @@ func (ws *WorktreeService) validateAutomaticMerge(ctx context.Context, taskID st
 	return nil
 }
 
+func (ws *WorktreeService) recoverAutomaticMergeConflict(ctx context.Context, task *models.Task, repoDir string, project *models.Project, trigger automaticMergeTrigger) bool {
+	validateConflictOwner := func() error {
+		return ws.validateAutoConflictRecovery(ctx, task, repoDir, project, trigger, true)
+	}
+	validateBeforeCommit := func() error {
+		return ws.validateAutoConflictRecovery(ctx, task, repoDir, project, trigger, false)
+	}
+	aiResult, aiErr := ws.resolveConflictsWithAIValidated(ctx, task, repoDir, validateConflictOwner, validateBeforeCommit)
+	if errors.Is(aiErr, ErrMergeInProgress) {
+		// The achieved goal and task metadata remain the durable retry record. Do
+		// not attempt an abort through the same busy lease; periodic reconciliation
+		// will resume this exact task-owned conflict after the writer releases it.
+		return false
+	}
+	if aiErr != nil || aiResult == nil || !aiResult.Success {
+		applog.Infof("[worktree] AI conflict resolution failed for task %s, aborting merge", task.ID)
+		ws.abortAutomaticMergeConflict(ctx, task, repoDir, project, trigger)
+		return false
+	}
+	return true
+}
+
 func (ws *WorktreeService) autoMergeTask(ctx context.Context, taskID string, trigger automaticMergeTrigger) {
 	if ws.taskRepo == nil || ws.projectRepo == nil {
 		return
@@ -2940,6 +2962,13 @@ func (ws *WorktreeService) autoMergeTask(ctx context.Context, taskID string, tri
 	if trigger.goalTriggered {
 		triggerName = "goal achievement"
 	}
+	if HasActiveMerge(repoDir) {
+		applog.Infof("[worktree] resuming active auto-merge conflict for task %s after %s", task.ID, triggerName)
+		if ws.recoverAutomaticMergeConflict(ctx, task, repoDir, project, trigger) {
+			ws.reconcileVerifiedMergedTask(ctx, taskID, project.ID, repoDir)
+		}
+		return
+	}
 	applog.Infof("[worktree] auto-merging task %s after %s: %s -> %s", task.ID, triggerName, task.WorktreeBranch, task.MergeTargetBranch)
 	result, mergeErr := ws.MergeBranchValidated(ctx, task, repoDir, "merge", validate)
 	if errors.Is(mergeErr, errAutomaticBranchAlreadyMerged) {
@@ -2954,16 +2983,7 @@ func (ws *WorktreeService) autoMergeTask(ctx context.Context, taskID string, tri
 	}
 	if !result.Success && len(result.ConflictFiles) > 0 {
 		applog.Infof("[worktree] auto-merge has conflicts for task %s, attempting AI resolution", task.ID)
-		validateConflictOwner := func() error {
-			return ws.validateAutoConflictRecovery(ctx, task, repoDir, project, trigger, true)
-		}
-		validateBeforeCommit := func() error {
-			return ws.validateAutoConflictRecovery(ctx, task, repoDir, project, trigger, false)
-		}
-		aiResult, aiErr := ws.resolveConflictsWithAIValidated(ctx, task, repoDir, validateConflictOwner, validateBeforeCommit)
-		if aiErr != nil || (aiResult != nil && !aiResult.Success) {
-			applog.Infof("[worktree] AI conflict resolution failed for task %s, aborting merge", task.ID)
-			ws.abortAutomaticMergeConflict(ctx, task, repoDir, project, trigger)
+		if !ws.recoverAutomaticMergeConflict(ctx, task, repoDir, project, trigger) {
 			return
 		}
 	}
