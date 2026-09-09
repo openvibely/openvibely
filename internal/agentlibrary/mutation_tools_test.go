@@ -792,6 +792,574 @@ func TestSkillImportTool_ImportsInlineRawSkillAndIndexesCatalog(t *testing.T) {
 	}
 }
 
+func TestSkillImportTool_RejectsInvalidInlineSupportPathsWithoutChanges(t *testing.T) {
+	content := "# Partial Import\n\nThis content must not be persisted.\n"
+
+	for _, invalidPath := range []string{"../outside.md", "/outside.md", "unsupported/guide.md", "references/foo..bar.md", "references/foo\x00bar.md"} {
+		t.Run(invalidPath, func(t *testing.T) {
+			imp, _, rec, projectRoot := buildTools(t)
+			tools := SkillMutationTools(imp, rec)
+			params, _ := json.Marshal(map[string]any{
+				"content":      content,
+				"package_name": "partial_import",
+				"scope":        "project",
+				"files": []map[string]any{
+					{"path": "references/valid.md", "content": "valid"},
+					{"path": invalidPath, "content": "invalid"},
+				},
+			})
+
+			out, handled, isErr, err := tools.Executor(context.Background(), "skill_import", params)
+			if err != nil || !handled || !isErr {
+				t.Fatalf("skill_import should reject invalid support path: output=%s handled=%v isErr=%v err=%v", out, handled, isErr, err)
+			}
+			if _, err := os.Stat(filepath.Join(projectRoot, "skills", "partial_import")); !os.IsNotExist(err) {
+				t.Fatalf("rejected import created skill directory: %v", err)
+			}
+			if _, err := os.Stat(filepath.Join(projectRoot, "skills", "SKILLS.md")); !os.IsNotExist(err) {
+				t.Fatalf("rejected import created skill index: %v", err)
+			}
+			if len(rec.rows) != 1 || rec.rows[0].applied {
+				t.Fatalf("rejected mutation should be recorded as unapplied: %+v", rec.rows)
+			}
+		})
+	}
+
+	for _, invalidPath := range []string{"references/foo..bar.md", "references/foo\x00bar.md"} {
+		t.Run("existing skill/"+strings.ReplaceAll(invalidPath, "\x00", "\\x00"), func(t *testing.T) {
+			imp, _, rec, projectRoot := buildTools(t)
+			tools := SkillMutationTools(imp, rec)
+			if _, err := imp.ImportSkillPackage(context.Background(), "# Existing Import\n", "partial_import", "project", []SkillPackageFile{{Path: "references/original.md", Content: []byte("original")}}); err != nil {
+				t.Fatalf("seed existing skill: %v", err)
+			}
+
+			skillPath := filepath.Join(projectRoot, "skills", "partial_import", "SKILL.md")
+			indexPath := filepath.Join(projectRoot, "skills", "SKILLS.md")
+			supportPath := filepath.Join(projectRoot, "skills", "partial_import", "references", "original.md")
+			beforeSkill, err := os.ReadFile(skillPath)
+			if err != nil {
+				t.Fatalf("read seeded skill: %v", err)
+			}
+			beforeIndex, err := os.ReadFile(indexPath)
+			if err != nil {
+				t.Fatalf("read seeded index: %v", err)
+			}
+			beforeSupport, err := os.ReadFile(supportPath)
+			if err != nil {
+				t.Fatalf("read seeded support file: %v", err)
+			}
+
+			params, _ := json.Marshal(map[string]any{
+				"content":      content,
+				"package_name": "partial_import",
+				"scope":        "project",
+				"files": []map[string]any{
+					{"path": "references/new.md", "content": "new"},
+					{"path": invalidPath, "content": "invalid"},
+				},
+			})
+			out, handled, isErr, err := tools.Executor(context.Background(), "skill_import", params)
+			if err != nil || !handled || !isErr {
+				t.Fatalf("skill_import should reject invalid support path: output=%s handled=%v isErr=%v err=%v", out, handled, isErr, err)
+			}
+			for _, file := range []struct {
+				path string
+				want []byte
+			}{
+				{skillPath, beforeSkill},
+				{indexPath, beforeIndex},
+				{supportPath, beforeSupport},
+			} {
+				got, err := os.ReadFile(file.path)
+				if err != nil || string(got) != string(file.want) {
+					t.Fatalf("rejected import changed %s: got=%q err=%v want=%q", file.path, got, err, file.want)
+				}
+			}
+			if _, err := os.Stat(filepath.Join(projectRoot, "skills", "partial_import", "references", "new.md")); !os.IsNotExist(err) {
+				t.Fatalf("rejected import created earlier valid support file: %v", err)
+			}
+			if len(rec.rows) != 1 || rec.rows[0].applied {
+				t.Fatalf("rejected mutation should be recorded as unapplied: %+v", rec.rows)
+			}
+		})
+	}
+}
+
+func TestSkillImportTool_RollsBackInlineSupportWriteFailure(t *testing.T) {
+	content := "# Write Failure\n\nThis content must not be persisted.\n"
+
+	for _, tc := range []struct {
+		name string
+		seed bool
+	}{
+		{name: "new package", seed: false},
+		{name: "existing skill", seed: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			imp, _, rec, projectRoot := buildTools(t)
+			tools := SkillMutationTools(imp, rec)
+			if tc.seed {
+				if _, err := imp.ImportSkillPackage(context.Background(), "# Existing Write Failure\n", "write_failure", "project", []SkillPackageFile{{Path: "references/original.md", Content: []byte("original")}}); err != nil {
+					t.Fatalf("seed existing skill: %v", err)
+				}
+			}
+
+			skillDir := filepath.Join(projectRoot, "skills", "write_failure")
+			conflictPath := filepath.Join(skillDir, "references", "conflict.md")
+			if err := os.MkdirAll(conflictPath, 0o755); err != nil {
+				t.Fatalf("create support path conflict: %v", err)
+			}
+			conflictFile := filepath.Join(conflictPath, "keep.md")
+			if err := os.WriteFile(conflictFile, []byte("keep"), 0o644); err != nil {
+				t.Fatalf("seed conflict directory: %v", err)
+			}
+
+			skillPath := filepath.Join(skillDir, "SKILL.md")
+			indexPath := filepath.Join(projectRoot, "skills", "SKILLS.md")
+			beforeSkill, skillErr := os.ReadFile(skillPath)
+			beforeIndex, indexErr := os.ReadFile(indexPath)
+			beforeOriginal, originalErr := os.ReadFile(filepath.Join(skillDir, "references", "original.md"))
+			beforeConflict, err := os.ReadFile(conflictFile)
+			if err != nil {
+				t.Fatalf("read conflict sentinel: %v", err)
+			}
+
+			params, _ := json.Marshal(map[string]any{
+				"content":      content,
+				"package_name": "write_failure",
+				"scope":        "project",
+				"files": []map[string]any{
+					{"path": "references/new.md", "content": "new"},
+					{"path": "references/conflict.md", "content": "invalid"},
+				},
+			})
+			out, handled, isErr, err := tools.Executor(context.Background(), "skill_import", params)
+			if err != nil || !handled || !isErr {
+				t.Fatalf("skill_import should reject support write failure: output=%s handled=%v isErr=%v err=%v", out, handled, isErr, err)
+			}
+
+			for _, file := range []struct {
+				path string
+				data []byte
+				err  error
+			}{
+				{skillPath, beforeSkill, skillErr},
+				{indexPath, beforeIndex, indexErr},
+				{filepath.Join(skillDir, "references", "original.md"), beforeOriginal, originalErr},
+				{conflictFile, beforeConflict, nil},
+			} {
+				got, err := os.ReadFile(file.path)
+				if errors.Is(file.err, os.ErrNotExist) {
+					if !errors.Is(err, os.ErrNotExist) {
+						t.Fatalf("rejected import created %s: got=%q err=%v", file.path, got, err)
+					}
+					continue
+				}
+				if err != nil || string(got) != string(file.data) {
+					t.Fatalf("rejected import changed %s: got=%q err=%v want=%q", file.path, got, err, file.data)
+				}
+			}
+			if info, err := os.Stat(conflictPath); err != nil || !info.IsDir() {
+				t.Fatalf("rejected import changed support path conflict: info=%v err=%v", info, err)
+			}
+			if _, err := os.Stat(filepath.Join(skillDir, "references", "new.md")); !os.IsNotExist(err) {
+				t.Fatalf("rejected import created earlier valid support file: %v", err)
+			}
+			if len(rec.rows) != 1 || rec.rows[0].applied {
+				t.Fatalf("rejected mutation should be recorded as unapplied: %+v", rec.rows)
+			}
+		})
+	}
+}
+
+func TestSkillImportTool_ContainsHardLinkedInlineTargetsOnRollback(t *testing.T) {
+	const (
+		key             = "hard_link_import"
+		originalContent = "# Existing Hard Link\n\nOriginal package content.\n"
+		updatedContent  = "# Updated Hard Link\n\nUpdated package content.\n"
+	)
+
+	for _, target := range []struct {
+		name       string
+		targetPath func(skillPath, indexPath, supportPath string) string
+		files      []map[string]any
+	}{
+		{
+			name: "skill file",
+			targetPath: func(skillPath, _, _ string) string {
+				return skillPath
+			},
+			files: []map[string]any{{"path": "references/new.md", "content": "new"}},
+		},
+		{
+			name: "catalog index",
+			targetPath: func(_, indexPath, _ string) string {
+				return indexPath
+			},
+			files: []map[string]any{{"path": "references/new.md", "content": "new"}},
+		},
+		{
+			name: "support file",
+			targetPath: func(_, _, supportPath string) string {
+				return supportPath
+			},
+			files: []map[string]any{{"path": "references/original.md", "content": "updated"}},
+		},
+	} {
+		t.Run(target.name, func(t *testing.T) {
+			imp, _, rec, projectRoot := buildTools(t)
+			tools := SkillMutationTools(imp, rec)
+			if _, err := imp.ImportSkillPackage(context.Background(), originalContent, key, "project", []SkillPackageFile{{Path: "references/original.md", Content: []byte("original")}}); err != nil {
+				t.Fatalf("seed existing skill: %v", err)
+			}
+
+			skillDir := filepath.Join(projectRoot, "skills", key)
+			skillPath := filepath.Join(skillDir, "SKILL.md")
+			indexPath := filepath.Join(projectRoot, "skills", "SKILLS.md")
+			supportPath := filepath.Join(skillDir, "references", "original.md")
+			localTarget := target.targetPath(skillPath, indexPath, supportPath)
+			externalTarget := filepath.Join(t.TempDir(), strings.ReplaceAll(target.name, " ", "_")+".md")
+			localData, err := os.ReadFile(localTarget)
+			if err != nil {
+				t.Fatalf("read local hard-link target: %v", err)
+			}
+			if err := os.WriteFile(externalTarget, localData, 0o644); err != nil {
+				t.Fatalf("seed external hard-link target: %v", err)
+			}
+			if err := os.Remove(localTarget); err != nil {
+				t.Fatalf("remove local hard-link target: %v", err)
+			}
+			if err := os.Link(externalTarget, localTarget); err != nil {
+				t.Skipf("hard links unavailable: %v", err)
+			}
+
+			conflictPath := filepath.Join(skillDir, "references", "conflict.md")
+			if err := os.Mkdir(conflictPath, 0o755); err != nil {
+				t.Fatalf("create support conflict: %v", err)
+			}
+			conflictFile := filepath.Join(conflictPath, "keep.md")
+			if err := os.WriteFile(conflictFile, []byte("keep"), 0o644); err != nil {
+				t.Fatalf("seed support conflict: %v", err)
+			}
+
+			beforeSkill, err := os.ReadFile(skillPath)
+			if err != nil {
+				t.Fatalf("read skill before import: %v", err)
+			}
+			beforeIndex, err := os.ReadFile(indexPath)
+			if err != nil {
+				t.Fatalf("read index before import: %v", err)
+			}
+			beforeSupport, err := os.ReadFile(supportPath)
+			if err != nil {
+				t.Fatalf("read support before import: %v", err)
+			}
+			beforeExternal, err := os.ReadFile(externalTarget)
+			if err != nil {
+				t.Fatalf("read external hard-link target: %v", err)
+			}
+			beforeConflict, err := os.ReadFile(conflictFile)
+			if err != nil {
+				t.Fatalf("read support conflict: %v", err)
+			}
+
+			files := append([]map[string]any(nil), target.files...)
+			files = append(files, map[string]any{"path": "references/conflict.md", "content": "invalid"})
+			params, _ := json.Marshal(map[string]any{
+				"content":      updatedContent,
+				"package_name": key,
+				"scope":        "project",
+				"files":        files,
+			})
+			out, handled, isErr, err := tools.Executor(context.Background(), "skill_import", params)
+			if err != nil || !handled || !isErr {
+				t.Fatalf("skill_import should reject support write failure: output=%s handled=%v isErr=%v err=%v", out, handled, isErr, err)
+			}
+
+			for _, file := range []struct {
+				path string
+				want []byte
+			}{
+				{skillPath, beforeSkill},
+				{indexPath, beforeIndex},
+				{supportPath, beforeSupport},
+				{conflictFile, beforeConflict},
+				{externalTarget, beforeExternal},
+			} {
+				got, err := os.ReadFile(file.path)
+				if err != nil || string(got) != string(file.want) {
+					t.Fatalf("rejected import changed %s: got=%q err=%v want=%q", file.path, got, err, file.want)
+				}
+			}
+			if _, err := os.Stat(filepath.Join(skillDir, "references", "new.md")); !os.IsNotExist(err) {
+				t.Fatalf("rejected import created earlier valid support file: %v", err)
+			}
+			if len(rec.rows) != 1 || rec.rows[0].applied {
+				t.Fatalf("rejected mutation should be recorded as unapplied: %+v", rec.rows)
+			}
+		})
+	}
+}
+
+func TestSkillImportTool_RejectsSymlinkedInlineSupportPathWithoutChanges(t *testing.T) {
+	content := "# Symlinked Support Path\n\nThis content must not be persisted.\n"
+
+	for _, tc := range []struct {
+		name string
+		seed bool
+	}{
+		{name: "unindexed package", seed: false},
+		{name: "existing skill", seed: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			imp, _, rec, projectRoot := buildTools(t)
+			tools := SkillMutationTools(imp, rec)
+			if tc.seed {
+				if _, err := imp.ImportSkillPackage(context.Background(), "# Existing Symlink\n", "symlinked_support", "project", []SkillPackageFile{{Path: "references/original.md", Content: []byte("original")}}); err != nil {
+					t.Fatalf("seed existing skill: %v", err)
+				}
+			}
+
+			skillDir := filepath.Join(projectRoot, "skills", "symlinked_support")
+			if err := os.MkdirAll(filepath.Join(skillDir, "references"), 0o755); err != nil {
+				t.Fatalf("create support directory: %v", err)
+			}
+			externalDir := t.TempDir()
+			linkPath := filepath.Join(skillDir, "references", "leak")
+			if err := os.Symlink(externalDir, linkPath); err != nil {
+				t.Skipf("symlink unavailable: %v", err)
+			}
+
+			skillPath := filepath.Join(skillDir, "SKILL.md")
+			indexPath := filepath.Join(projectRoot, "skills", "SKILLS.md")
+			originalPath := filepath.Join(skillDir, "references", "original.md")
+			beforeSkill, skillErr := os.ReadFile(skillPath)
+			beforeIndex, indexErr := os.ReadFile(indexPath)
+			beforeOriginal, originalErr := os.ReadFile(originalPath)
+			beforeLink, err := os.Readlink(linkPath)
+			if err != nil {
+				t.Fatalf("read support link: %v", err)
+			}
+
+			params, _ := json.Marshal(map[string]any{
+				"content":      content,
+				"package_name": "symlinked_support",
+				"scope":        "project",
+				"files": []map[string]any{
+					{"path": "references/new.md", "content": "new"},
+					{"path": "references/leak/external.md", "content": "external"},
+				},
+			})
+			out, handled, isErr, err := tools.Executor(context.Background(), "skill_import", params)
+			if err != nil || !handled || !isErr {
+				t.Fatalf("skill_import should reject symlinked support path: output=%s handled=%v isErr=%v err=%v", out, handled, isErr, err)
+			}
+
+			for _, file := range []struct {
+				path string
+				data []byte
+				err  error
+			}{
+				{skillPath, beforeSkill, skillErr},
+				{indexPath, beforeIndex, indexErr},
+				{originalPath, beforeOriginal, originalErr},
+			} {
+				got, err := os.ReadFile(file.path)
+				if errors.Is(file.err, os.ErrNotExist) {
+					if !errors.Is(err, os.ErrNotExist) {
+						t.Fatalf("rejected import created %s: got=%q err=%v", file.path, got, err)
+					}
+					continue
+				}
+				if err != nil || string(got) != string(file.data) {
+					t.Fatalf("rejected import changed %s: got=%q err=%v want=%q", file.path, got, err, file.data)
+				}
+			}
+			if target, err := os.Readlink(linkPath); err != nil || target != beforeLink {
+				t.Fatalf("rejected import changed support link: target=%q err=%v want=%q", target, err, beforeLink)
+			}
+			if _, err := os.Stat(filepath.Join(skillDir, "references", "new.md")); !os.IsNotExist(err) {
+				t.Fatalf("rejected import created earlier valid support file: %v", err)
+			}
+			if _, err := os.Stat(filepath.Join(externalDir, "external.md")); !os.IsNotExist(err) {
+				t.Fatalf("rejected import wrote through support link: %v", err)
+			}
+			if len(rec.rows) != 1 || rec.rows[0].applied {
+				t.Fatalf("rejected mutation should be recorded as unapplied: %+v", rec.rows)
+			}
+		})
+	}
+}
+
+func TestSkillImportTool_RejectsSymlinkedInlineSkillFileWithoutChanges(t *testing.T) {
+	imp, _, rec, projectRoot := buildTools(t)
+	tools := SkillMutationTools(imp, rec)
+
+	skillDir := filepath.Join(projectRoot, "skills", "symlinked_main")
+	if err := os.MkdirAll(filepath.Join(skillDir, "references"), 0o755); err != nil {
+		t.Fatalf("create skill package: %v", err)
+	}
+	externalDir := t.TempDir()
+	externalSkill := filepath.Join(externalDir, "SKILL.md")
+	if err := os.WriteFile(externalSkill, []byte("# External skill\n"), 0o644); err != nil {
+		t.Fatalf("seed external skill: %v", err)
+	}
+	skillPath := filepath.Join(skillDir, "SKILL.md")
+	if err := os.Symlink(externalSkill, skillPath); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	indexPath := filepath.Join(projectRoot, "skills", "SKILLS.md")
+	if err := os.WriteFile(indexPath, []byte("# Existing catalog\n"), 0o644); err != nil {
+		t.Fatalf("seed index: %v", err)
+	}
+	originalPath := filepath.Join(skillDir, "references", "original.md")
+	if err := os.WriteFile(originalPath, []byte("original"), 0o644); err != nil {
+		t.Fatalf("seed original support: %v", err)
+	}
+	conflictPath := filepath.Join(skillDir, "references", "conflict.md")
+	if err := os.Mkdir(conflictPath, 0o755); err != nil {
+		t.Fatalf("create support conflict: %v", err)
+	}
+	conflictFile := filepath.Join(conflictPath, "keep.md")
+	if err := os.WriteFile(conflictFile, []byte("keep"), 0o644); err != nil {
+		t.Fatalf("seed support conflict: %v", err)
+	}
+
+	beforeExternalSkill, err := os.ReadFile(externalSkill)
+	if err != nil {
+		t.Fatalf("read external skill: %v", err)
+	}
+	beforeIndex, err := os.ReadFile(indexPath)
+	if err != nil {
+		t.Fatalf("read index: %v", err)
+	}
+	beforeOriginal, err := os.ReadFile(originalPath)
+	if err != nil {
+		t.Fatalf("read original support: %v", err)
+	}
+	beforeConflict, err := os.ReadFile(conflictFile)
+	if err != nil {
+		t.Fatalf("read support conflict: %v", err)
+	}
+	beforeLink, err := os.Readlink(skillPath)
+	if err != nil {
+		t.Fatalf("read skill link: %v", err)
+	}
+
+	params, _ := json.Marshal(map[string]any{
+		"content":      "# Unsafe main skill link\n",
+		"package_name": "symlinked_main",
+		"scope":        "project",
+		"files": []map[string]any{
+			{"path": "references/new.md", "content": "new"},
+			{"path": "references/conflict.md", "content": "invalid"},
+		},
+	})
+	out, handled, isErr, err := tools.Executor(context.Background(), "skill_import", params)
+	if err != nil || !handled || !isErr {
+		t.Fatalf("skill_import should reject symlinked main skill: output=%s handled=%v isErr=%v err=%v", out, handled, isErr, err)
+	}
+
+	for _, file := range []struct {
+		path string
+		want []byte
+	}{
+		{externalSkill, beforeExternalSkill},
+		{indexPath, beforeIndex},
+		{originalPath, beforeOriginal},
+		{conflictFile, beforeConflict},
+	} {
+		got, err := os.ReadFile(file.path)
+		if err != nil || string(got) != string(file.want) {
+			t.Fatalf("rejected import changed %s: got=%q err=%v want=%q", file.path, got, err, file.want)
+		}
+	}
+	if target, err := os.Readlink(skillPath); err != nil || target != beforeLink {
+		t.Fatalf("rejected import changed skill link: target=%q err=%v want=%q", target, err, beforeLink)
+	}
+	if _, err := os.Stat(filepath.Join(skillDir, "references", "new.md")); !os.IsNotExist(err) {
+		t.Fatalf("rejected import created earlier valid support file: %v", err)
+	}
+	if len(rec.rows) != 1 || rec.rows[0].applied {
+		t.Fatalf("rejected mutation should be recorded as unapplied: %+v", rec.rows)
+	}
+}
+
+func TestSkillImportTool_RejectsConfiguredSkillsDirectorySymlinkWithoutChanges(t *testing.T) {
+	imp, _, rec, projectRoot := buildTools(t)
+	tools := SkillMutationTools(imp, rec)
+	externalSkills := t.TempDir()
+	externalIndex := filepath.Join(externalSkills, "SKILLS.md")
+	if err := os.WriteFile(externalIndex, []byte("# External catalog\n"), 0o644); err != nil {
+		t.Fatalf("seed external index: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(externalSkills, "library_escape", "references"), 0o755); err != nil {
+		t.Fatalf("seed external package: %v", err)
+	}
+	externalSkill := filepath.Join(externalSkills, "library_escape", "SKILL.md")
+	if err := os.WriteFile(externalSkill, []byte("# External skill\n"), 0o644); err != nil {
+		t.Fatalf("seed external skill: %v", err)
+	}
+	externalSupport := filepath.Join(externalSkills, "library_escape", "references", "original.md")
+	if err := os.WriteFile(externalSupport, []byte("original"), 0o644); err != nil {
+		t.Fatalf("seed external support: %v", err)
+	}
+	if err := os.MkdirAll(projectRoot, 0o755); err != nil {
+		t.Fatalf("create project root: %v", err)
+	}
+	if err := os.Symlink(externalSkills, filepath.Join(projectRoot, "skills")); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+
+	beforeIndex, err := os.ReadFile(externalIndex)
+	if err != nil {
+		t.Fatalf("read external index: %v", err)
+	}
+	beforeSkill, err := os.ReadFile(externalSkill)
+	if err != nil {
+		t.Fatalf("read external skill: %v", err)
+	}
+	beforeSupport, err := os.ReadFile(externalSupport)
+	if err != nil {
+		t.Fatalf("read external support: %v", err)
+	}
+	params, _ := json.Marshal(map[string]any{
+		"content":      "# Library Escape\n",
+		"package_name": "library_escape",
+		"scope":        "project",
+		"files": []map[string]any{{
+			"path":    "references/new.md",
+			"content": "new",
+		}},
+	})
+	out, handled, isErr, err := tools.Executor(context.Background(), "skill_import", params)
+	if err != nil || !handled || !isErr {
+		t.Fatalf("skill_import should reject configured skills symlink: output=%s handled=%v isErr=%v err=%v", out, handled, isErr, err)
+	}
+	for _, file := range []struct {
+		path string
+		want []byte
+	}{
+		{externalIndex, beforeIndex},
+		{externalSkill, beforeSkill},
+		{externalSupport, beforeSupport},
+	} {
+		got, err := os.ReadFile(file.path)
+		if err != nil || string(got) != string(file.want) {
+			t.Fatalf("rejected import changed external file %s: got=%q err=%v want=%q", file.path, got, err, file.want)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(externalSkills, "library_escape", "references", "new.md")); !os.IsNotExist(err) {
+		t.Fatalf("rejected import wrote external support file: %v", err)
+	}
+	if target, err := os.Readlink(filepath.Join(projectRoot, "skills")); err != nil || target != externalSkills {
+		t.Fatalf("rejected import changed configured skills link: target=%q err=%v want=%q", target, err, externalSkills)
+	}
+	if len(rec.rows) != 1 || rec.rows[0].applied {
+		t.Fatalf("rejected mutation should be recorded as unapplied: %+v", rec.rows)
+	}
+}
+
 func TestSkillImportTool_ImportsDirectorySource(t *testing.T) {
 	imp, _, _, projectRoot := buildTools(t)
 	source := filepath.Join(t.TempDir(), "dir_skill")

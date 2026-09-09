@@ -178,24 +178,240 @@ func (i *Importer) ImportSkillPackage(ctx context.Context, content, packageName,
 	}
 	decl.Agent.Key = ""
 	decl.Skill.Scope = scope
+	type normalizedFile struct {
+		kind    SupportFileKind
+		relPath string
+		content []byte
+	}
+	normalizedFiles := make([]normalizedFile, 0, len(files))
+	for _, file := range files {
+		kind, relPath, err := splitPackageSupportPath(file.Path)
+		if err != nil {
+			return nil, err
+		}
+		normalizedFiles = append(normalizedFiles, normalizedFile{kind: kind, relPath: relPath, content: file.Content})
+	}
+	if i == nil {
+		return nil, errors.New("importer: nil")
+	}
+	if err := decl.Validate(); err != nil {
+		return nil, err
+	}
+	root := i.roots.RootForScope(decl.Skill.Scope)
+	if root == "" {
+		return nil, fmt.Errorf("importer: no root configured for scope %q", decl.Skill.Scope)
+	}
+	skillDir, err := SkillDir(root, decl.Skill.Key)
+	if err != nil {
+		return nil, err
+	}
+	if err := rejectSymlinkedSkillMainFile(skillDir); err != nil {
+		return nil, err
+	}
+	for _, file := range normalizedFiles {
+		if err := rejectSymlinkedSupportPath(skillDir, file.kind, file.relPath); err != nil {
+			return nil, err
+		}
+	}
+	snapshot, err := newSkillPackageImportSnapshot(root, decl.Skill.Key)
+	if err != nil {
+		return nil, err
+	}
+	defer snapshot.cleanup()
+	rollback := func(cause error) (*ImportResult, error) {
+		if restoreErr := snapshot.restore(); restoreErr != nil {
+			return nil, fmt.Errorf("%w (skill_import rollback failed: %v)", cause, restoreErr)
+		}
+		return nil, cause
+	}
+
 	res, err := i.WriteSkill(ctx, decl, body)
 	if err != nil {
-		return res, err
+		return rollback(err)
 	}
-	for _, file := range files {
-		kind, rel, err := splitPackageSupportPath(file.Path)
+	for _, file := range normalizedFiles {
+		fileRes, err := i.WriteSupportFile(ctx, decl.Skill.Scope, decl.Skill.Key, file.kind, file.relPath, file.content)
 		if err != nil {
-			return res, err
-		}
-		fileRes, err := i.WriteSupportFile(ctx, decl.Skill.Scope, decl.Skill.Key, kind, rel, file.Content)
-		if err != nil {
-			return res, err
+			return rollback(err)
 		}
 		res.ChangedPaths = append(res.ChangedPaths, fileRes.ChangedPaths...)
 		res.Created = append(res.Created, fileRes.Created...)
 		res.Updated = append(res.Updated, fileRes.Updated...)
 	}
 	return res, nil
+}
+
+type skillImportPathSnapshot struct {
+	path      string
+	backupDir string
+	exists    bool
+	mode      os.FileMode
+}
+
+type skillPackageImportSnapshot struct {
+	packageDir       skillImportPathSnapshot
+	index            skillImportPathSnapshot
+	skillsDir        string
+	skillsDirExisted bool
+}
+
+func newSkillPackageImportSnapshot(root, key string) (*skillPackageImportSnapshot, error) {
+	skillDir, err := SkillDir(root, key)
+	if err != nil {
+		return nil, err
+	}
+	skillsDir := filepath.Dir(skillDir)
+	info, err := os.Lstat(skillsDir)
+	skillsDirExisted := err == nil
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("skill_import: stat %s: %w", skillsDir, err)
+	}
+	if err == nil && info.Mode()&os.ModeSymlink != 0 {
+		return nil, fmt.Errorf("skill_import: skills directory %s is a symlink", skillsDir)
+	}
+	if err == nil && !info.IsDir() {
+		return nil, fmt.Errorf("skill_import: skills path %s is not a directory", skillsDir)
+	}
+
+	packageDir, err := snapshotSkillImportPath(skillDir)
+	if err != nil {
+		return nil, err
+	}
+	if packageDir.exists && !packageDir.mode.IsDir() {
+		packageDir.cleanup()
+		return nil, fmt.Errorf("skill_import: skill path %s is not a directory", skillDir)
+	}
+	index, err := snapshotSkillImportPath(filepath.Join(skillsDir, "SKILLS.md"))
+	if err != nil {
+		packageDir.cleanup()
+		return nil, err
+	}
+	if index.exists && !index.mode.IsRegular() {
+		packageDir.cleanup()
+		index.cleanup()
+		return nil, fmt.Errorf("skill_import: skills index %s is not a regular file", index.path)
+	}
+	return &skillPackageImportSnapshot{
+		packageDir:       packageDir,
+		index:            index,
+		skillsDir:        skillsDir,
+		skillsDirExisted: skillsDirExisted,
+	}, nil
+}
+
+func snapshotSkillImportPath(path string) (skillImportPathSnapshot, error) {
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return skillImportPathSnapshot{path: path}, nil
+	}
+	if err != nil {
+		return skillImportPathSnapshot{}, fmt.Errorf("skill_import: stat %s: %w", path, err)
+	}
+	backupDir, err := os.MkdirTemp("", "openvibely-skill-import-")
+	if err != nil {
+		return skillImportPathSnapshot{}, fmt.Errorf("skill_import: create backup: %w", err)
+	}
+	snapshot := skillImportPathSnapshot{
+		path:      path,
+		backupDir: backupDir,
+		exists:    true,
+		mode:      info.Mode(),
+	}
+	if err := copySkillImportPath(path, filepath.Join(backupDir, "snapshot")); err != nil {
+		snapshot.cleanup()
+		return skillImportPathSnapshot{}, err
+	}
+	return snapshot, nil
+}
+
+func (s skillImportPathSnapshot) restore() error {
+	if err := os.RemoveAll(s.path); err != nil {
+		return fmt.Errorf("skill_import: remove %s during rollback: %w", s.path, err)
+	}
+	if !s.exists {
+		return nil
+	}
+	if err := copySkillImportPath(filepath.Join(s.backupDir, "snapshot"), s.path); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s skillImportPathSnapshot) cleanup() {
+	if s.backupDir != "" {
+		_ = os.RemoveAll(s.backupDir)
+	}
+}
+
+func (s skillPackageImportSnapshot) restore() error {
+	var errs []error
+	if err := s.packageDir.restore(); err != nil {
+		errs = append(errs, err)
+	}
+	if err := s.index.restore(); err != nil {
+		errs = append(errs, err)
+	}
+	if !s.skillsDirExisted {
+		if err := os.Remove(s.skillsDir); err != nil && !errors.Is(err, os.ErrNotExist) {
+			errs = append(errs, fmt.Errorf("skill_import: remove %s during rollback: %w", s.skillsDir, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func (s skillPackageImportSnapshot) cleanup() {
+	s.packageDir.cleanup()
+	s.index.cleanup()
+}
+
+func copySkillImportPath(source, destination string) error {
+	info, err := os.Lstat(source)
+	if err != nil {
+		return fmt.Errorf("skill_import: stat %s: %w", source, err)
+	}
+	if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
+		return fmt.Errorf("skill_import: mkdir %s: %w", filepath.Dir(destination), err)
+	}
+	switch {
+	case info.Mode()&os.ModeSymlink != 0:
+		target, err := os.Readlink(source)
+		if err != nil {
+			return fmt.Errorf("skill_import: readlink %s: %w", source, err)
+		}
+		if err := os.Symlink(target, destination); err != nil {
+			return fmt.Errorf("skill_import: symlink %s: %w", destination, err)
+		}
+	case info.IsDir():
+		if err := os.Mkdir(destination, info.Mode().Perm()); err != nil {
+			return fmt.Errorf("skill_import: mkdir %s: %w", destination, err)
+		}
+		entries, err := os.ReadDir(source)
+		if err != nil {
+			return fmt.Errorf("skill_import: read %s: %w", source, err)
+		}
+		for _, entry := range entries {
+			if err := copySkillImportPath(filepath.Join(source, entry.Name()), filepath.Join(destination, entry.Name())); err != nil {
+				return err
+			}
+		}
+		if err := os.Chmod(destination, info.Mode().Perm()); err != nil {
+			return fmt.Errorf("skill_import: chmod %s: %w", destination, err)
+		}
+	case info.Mode().IsRegular():
+		content, err := os.ReadFile(source)
+		if err != nil {
+			return fmt.Errorf("skill_import: read %s: %w", source, err)
+		}
+		if err := os.WriteFile(destination, content, info.Mode().Perm()); err != nil {
+			return fmt.Errorf("skill_import: write %s: %w", destination, err)
+		}
+		if err := os.Chmod(destination, info.Mode().Perm()); err != nil {
+			return fmt.Errorf("skill_import: chmod %s: %w", destination, err)
+		}
+	default:
+		return fmt.Errorf("skill_import: unsupported file type at %s", source)
+	}
+	return nil
 }
 
 // ReadSkillPackageFromPath reads a package source from a SKILL.md file or a
@@ -283,6 +499,9 @@ func readSkillPackageSupportFiles(baseDir string) ([]SkillPackageFile, error) {
 }
 
 func splitPackageSupportPath(path string) (SupportFileKind, string, error) {
+	if strings.ContainsRune(path, 0) {
+		return "", "", fmt.Errorf("skill_import: support file path %q is not allowed", path)
+	}
 	rel := filepath.ToSlash(filepath.Clean(strings.TrimSpace(path)))
 	if rel == "" || rel == "." || rel == ".." || strings.HasPrefix(rel, "../") || strings.Contains(rel, "/../") || filepath.IsAbs(rel) {
 		return "", "", fmt.Errorf("skill_import: support file path %q is not allowed", path)
@@ -296,7 +515,7 @@ func splitPackageSupportPath(path string) (SupportFileKind, string, error) {
 		return "", "", fmt.Errorf("skill_import: support directory %q is not allowed", parts[0])
 	}
 	supportRel := filepath.ToSlash(filepath.Clean(parts[1]))
-	if supportRel == "." || supportRel == ".." || strings.HasPrefix(supportRel, "../") || strings.Contains(supportRel, "/../") || strings.HasPrefix(filepath.Base(supportRel), ".") {
+	if supportRel == "." || supportRel == ".." || strings.HasPrefix(supportRel, "../") || strings.Contains(supportRel, "/../") || strings.Contains(supportRel, "..") || strings.HasPrefix(filepath.Base(supportRel), ".") {
 		return "", "", fmt.Errorf("skill_import: support file path %q is not allowed", path)
 	}
 	return kind, supportRel, nil
@@ -466,7 +685,7 @@ func (i *Importer) WriteSkill(ctx context.Context, decl *SkillDeclaration, body 
 	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
 		created = true
 	}
-	if err := os.WriteFile(path, []byte(rendered), 0o644); err != nil {
+	if err := writeFileReplacing(path, []byte(rendered), 0o644); err != nil {
 		return nil, fmt.Errorf("importer: write %s: %w", path, err)
 	}
 	result := &ImportResult{
@@ -701,7 +920,7 @@ func writeResolvedSupportFile(abs string, kind SupportFileKind, content []byte, 
 	if kind == SupportScripts {
 		perm = 0o755
 	}
-	if err := os.WriteFile(abs, content, perm); err != nil {
+	if err := writeFileReplacing(abs, content, perm); err != nil {
 		return nil, fmt.Errorf("importer: write %s: %w", abs, err)
 	}
 	if kind == SupportScripts {
@@ -818,7 +1037,72 @@ func (i *Importer) resolveSupportFilePath(ctx context.Context, scope, handle str
 	if !strings.HasPrefix(absResolved, skillDirAbs+string(filepath.Separator)) && absResolved != skillDirAbs {
 		return "", "", fmt.Errorf("importer: support path %q escapes skill folder", relPath)
 	}
+	if err := rejectSymlinkedSupportPath(skillDir, kind, rel); err != nil {
+		return "", "", err
+	}
 	return abs, rel, nil
+}
+
+func rejectSymlinkedSkillMainFile(skillDir string) error {
+	path := filepath.Join(skillDir, "SKILL.md")
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("importer: stat skill file %s: %w", path, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("importer: skill file %s is a symlink", path)
+	}
+	return nil
+}
+
+func rejectSymlinkedSupportPath(skillDir string, kind SupportFileKind, relPath string) error {
+	info, err := os.Lstat(skillDir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("importer: stat skill folder %s: %w", skillDir, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("importer: support file path %q contains a symlinked component", relPath)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("importer: skill folder %s is not a directory", skillDir)
+	}
+
+	abs := filepath.Join(skillDir, string(kind), relPath)
+	rel, err := filepath.Rel(skillDir, abs)
+	if err != nil {
+		return fmt.Errorf("importer: resolve support file path %q: %w", relPath, err)
+	}
+	if rel == "." || filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("importer: support path %q escapes skill folder", relPath)
+	}
+	parts := strings.Split(rel, string(filepath.Separator))
+	current := skillDir
+	for index, part := range parts {
+		if part == "" || part == "." {
+			continue
+		}
+		current = filepath.Join(current, part)
+		info, err := os.Lstat(current)
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("importer: stat support path %s: %w", current, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("importer: support file path %q contains a symlinked component", relPath)
+		}
+		if index < len(parts)-1 && !info.IsDir() {
+			return fmt.Errorf("importer: support file path %q has a non-directory component", relPath)
+		}
+	}
+	return nil
 }
 
 // ArchiveSkill marks a standalone skill archived on disk. Filesystem files are
@@ -1132,10 +1416,40 @@ func (i *Importer) ensureStandaloneSkillIndexEntry(root string, decl *SkillDecla
 	if strings.TrimSpace(merged) == strings.TrimSpace(body) && err == nil {
 		return path, false, nil
 	}
-	if err := os.WriteFile(path, []byte(merged), 0o644); err != nil {
+	if err := writeFileReplacing(path, []byte(merged), 0o644); err != nil {
 		return path, false, fmt.Errorf("importer: write %s: %w", path, err)
 	}
 	return path, true, nil
+}
+
+func writeFileReplacing(path string, content []byte, perm os.FileMode) error {
+	if info, err := os.Lstat(path); err == nil && info.Mode().IsRegular() {
+		perm = info.Mode().Perm()
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("stat %s: %w", path, err)
+	}
+
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".openvibely-skill-write-")
+	if err != nil {
+		return fmt.Errorf("create temporary file for %s: %w", path, err)
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if err := tmp.Chmod(perm); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("chmod temporary file for %s: %w", path, err)
+	}
+	if _, err := tmp.Write(content); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("write temporary file for %s: %w", path, err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close temporary file for %s: %w", path, err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("replace %s: %w", path, err)
+	}
+	return nil
 }
 
 func mergeRootSkillIndexBodies(agentKey, existingBody, newBody string) string {
