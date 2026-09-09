@@ -1907,6 +1907,16 @@ func (ws *WorktreeService) resolveConflictsWithAIValidated(ctx context.Context, 
 	return ws.resolveConflictsWithAILocked(ctx, task, repoDir, validateBeforeCommit)
 }
 
+func containsGitConflictMarkers(content string) bool {
+	for _, line := range strings.Split(content, "\n") {
+		line = strings.TrimSuffix(line, "\r")
+		if strings.HasPrefix(line, "<<<<<<< ") || line == "=======" || strings.HasPrefix(line, ">>>>>>> ") || strings.HasPrefix(line, "||||||| ") {
+			return true
+		}
+	}
+	return false
+}
+
 func (ws *WorktreeService) resolveConflictsWithAILocked(ctx context.Context, task *models.Task, repoDir string, validateBeforeCommit func() error) (*MergeResult, error) {
 	if ws.llmSvc == nil {
 		return nil, fmt.Errorf("LLM service not available for conflict resolution")
@@ -1931,40 +1941,73 @@ func (ws *WorktreeService) resolveConflictsWithAILocked(ctx context.Context, tas
 	}
 
 	conflictDetails.WriteString("\nResolve each conflict by choosing the appropriate changes or combining them intelligently. ")
-	conflictDetails.WriteString("After resolving, stage the files with `git add` and commit with a descriptive message.")
+	conflictDetails.WriteString("Edit only the conflicted files. Do not stage files, commit changes, or run Git commands; OpenVibely will validate and commit the resolution.")
 
-	// Execute resolution via the agent in the repo directory
 	agent, err := ws.llmSvc.getDefaultAgentForTask(ctx, task.ProjectID)
 	if err != nil || agent == nil {
 		return nil, fmt.Errorf("no agent available for conflict resolution")
 	}
 
-	_, _, _, err = ws.llmSvc.callLLM(ctx, conflictDetails.String(), nil, *agent, "", repoDir, "")
+	// Conflict resolution deliberately exposes only file-editing tools. Git state
+	// remains exclusively application-owned so trigger eligibility can be checked
+	// at the final mutation boundary before an integration commit is created.
+	resolutionAgent := &models.Agent{
+		Name:  "Automatic conflict resolver",
+		Tools: []string{"Read", "Write", "Edit"},
+	}
+	_, _, _, err = ws.llmSvc.callLLM(ctx, conflictDetails.String(), nil, *agent, "", repoDir, "", resolutionAgent)
 	if err != nil {
 		return nil, fmt.Errorf("AI conflict resolution failed: %w", err)
 	}
-	if validateBeforeCommit != nil {
-		if err := validateBeforeCommit(); err != nil {
-			return &MergeResult{ErrorMessage: err.Error()}, err
+
+	// Stage only marker-free paths owned by this conflict attempt. Resolved paths
+	// can advance independently while unresolved paths remain in Git's unmerged
+	// index so manual or automatic recovery can retry them safely.
+	resolvedFiles := make([]string, 0, len(conflictFiles))
+	unresolvedFiles := make([]string, 0, len(conflictFiles))
+	for _, conflictFile := range conflictFiles {
+		content, readErr := os.ReadFile(filepath.Join(repoDir, conflictFile))
+		if readErr != nil || containsGitConflictMarkers(string(content)) {
+			unresolvedFiles = append(unresolvedFiles, conflictFile)
+			continue
+		}
+		resolvedFiles = append(resolvedFiles, conflictFile)
+	}
+	if len(resolvedFiles) > 0 {
+		addArgs := append([]string{"add", "--"}, resolvedFiles...)
+		addCmd := exec.Command("git", addArgs...)
+		addCmd.Dir = repoDir
+		if out, err := addCmd.CombinedOutput(); err != nil {
+			_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusFailed)
+			return &MergeResult{ErrorMessage: fmt.Sprintf("staging resolved conflicts failed: %s", strings.TrimSpace(string(out)))}, fmt.Errorf("staging resolved conflicts: %w", err)
 		}
 	}
+	if len(unresolvedFiles) > 0 {
+		return &MergeResult{
+			ConflictFiles: unresolvedFiles,
+			ErrorMessage:  "AI could not resolve all conflicts",
+		}, nil
+	}
 
-	// Check if conflicts are resolved
-	remainingConflicts := detectConflicts(repoDir)
-	if len(remainingConflicts) > 0 {
+	// Git also rejects malformed marker-like staged content and unsafe whitespace
+	// before considering the conflict resolved or allowing the final commit.
+	checkCmd := exec.Command("git", "diff", "--cached", "--check")
+	checkCmd.Dir = repoDir
+	if out, err := checkCmd.CombinedOutput(); err != nil {
+		return &MergeResult{ConflictFiles: conflictFiles, ErrorMessage: strings.TrimSpace(string(out))}, nil
+	}
+	if remainingConflicts := detectConflicts(repoDir); len(remainingConflicts) > 0 {
 		return &MergeResult{
 			ConflictFiles: remainingConflicts,
 			ErrorMessage:  "AI could not resolve all conflicts",
 		}, nil
 	}
 
-	// Commit the resolution. Both staging and committing must succeed before the
-	// task can be considered merged.
-	addCmd := exec.Command("git", "add", "-A")
-	addCmd.Dir = repoDir
-	if out, err := addCmd.CombinedOutput(); err != nil {
-		_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusFailed)
-		return &MergeResult{ErrorMessage: fmt.Sprintf("staging resolved conflicts failed: %s", strings.TrimSpace(string(out)))}, fmt.Errorf("staging resolved conflicts: %w", err)
+	// Revalidate after application-owned staging and immediately before commit.
+	if validateBeforeCommit != nil {
+		if err := validateBeforeCommit(); err != nil {
+			return &MergeResult{ErrorMessage: err.Error()}, err
+		}
 	}
 
 	commitCmd := exec.Command("git", "commit", "--no-edit")
@@ -2719,7 +2762,16 @@ func (ws *WorktreeService) validateAutomaticMerge(ctx context.Context, taskID st
 	}
 	*task = *fresh
 	if ws.isBranchTipMergedIntoTarget(repoDir, fresh.WorktreeBranch, fresh.MergeTargetBranch) {
-		return errAutomaticBranchAlreadyMerged
+		status, statusErr := GitStatusPorcelain(fresh.WorktreePath)
+		if statusErr != nil {
+			return fmt.Errorf("%w: task worktree status is unavailable", ErrMergeEligibilityChanged)
+		}
+		// A reachable branch with live worktree changes is not already merged.
+		// Continue through MergeBranchValidated so the canonical path commits and
+		// integrates those changes before status reconciliation or cleanup.
+		if strings.TrimSpace(status) == "" {
+			return errAutomaticBranchAlreadyMerged
+		}
 	}
 	return nil
 }
