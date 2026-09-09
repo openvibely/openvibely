@@ -944,6 +944,29 @@ func TestCardPaginationAutomationHandlerReturnsProjectScopedPages(t *testing.T) 
 	require.Contains(t, last.Body.String(), later[0].Automation.Name)
 	require.NotContains(t, first.Body.String(), `data-automation-url="/automations/`+later[0].Automation.ID)
 
+	updatedAtByName := map[string]time.Time{
+		"Paged automation 00": time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC),
+		"Paged automation 01": time.Date(2026, time.January, 3, 0, 0, 0, 0, time.UTC),
+		"Paged automation 02": time.Date(2026, time.January, 2, 0, 0, 0, 0, time.UTC),
+	}
+	for name, updatedAt := range updatedAtByName {
+		_, err = db.ExecContext(ctx, `UPDATE automations SET updated_at = ? WHERE project_id = ? AND name = ?`, updatedAt, project.ID, name)
+		require.NoError(t, err)
+	}
+	recentFirst := serveCardPageRequest(t, e, "/automations?project_id="+project.ID+"&page=0&page_size=2&search=paged+automation&sort=updated_desc&card_page=1")
+	require.Equal(t, http.StatusOK, recentFirst.Code)
+	require.Equal(t, "true", recentFirst.Header().Get(cardPageHasMoreHeader))
+	require.Contains(t, recentFirst.Body.String(), "Paged automation 01")
+	require.Contains(t, recentFirst.Body.String(), "Paged automation 02")
+	require.Less(t, strings.Index(recentFirst.Body.String(), "Paged automation 01"), strings.Index(recentFirst.Body.String(), "Paged automation 02"))
+	require.NotContains(t, recentFirst.Body.String(), "Paged automation 00")
+	recentLast := serveCardPageRequest(t, e, "/automations?project_id="+project.ID+"&page=1&page_size=2&search=paged+automation&sort=updated_desc&card_page=1")
+	require.Equal(t, http.StatusOK, recentLast.Code)
+	require.Equal(t, "false", recentLast.Header().Get(cardPageHasMoreHeader))
+	require.Contains(t, recentLast.Body.String(), "Paged automation 00")
+	require.NotContains(t, recentLast.Body.String(), "Paged automation 01")
+	require.Contains(t, recentLast.Body.String(), `<option value="updated_desc" selected>Recently updated</option>`)
+
 	foreignTask := &models.Task{
 		ProjectID: other.ID, Title: "Foreign automation task", Prompt: "run",
 		Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 1,

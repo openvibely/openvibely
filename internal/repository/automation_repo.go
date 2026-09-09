@@ -167,6 +167,8 @@ func (r *AutomationRepo) ListPortfolioCardsPageFiltered(ctx context.Context, pro
 		}
 	}
 	switch filter.Sort {
+	case "updated_desc":
+		query += ` ORDER BY a.updated_at DESC, a.id ASC`
 	case "updated_asc":
 		query += ` ORDER BY a.updated_at ASC, a.id ASC`
 	case "name_asc":
