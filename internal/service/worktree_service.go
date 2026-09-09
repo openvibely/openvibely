@@ -1732,6 +1732,13 @@ func ActiveMergeMatchesBranch(repoDir, branchName string) bool {
 	return mergeErr == nil && branchErr == nil && mergeHead != "" && mergeHead == branchHead
 }
 
+func activeMergeMatchesBranchAndTarget(repoDir, branchName, targetBranch string) bool {
+	if targetBranch == "" {
+		targetBranch = GetDefaultBranch(repoDir)
+	}
+	return targetBranch != "" && ActiveMergeMatchesBranch(repoDir, branchName) && GetCurrentBranch(repoDir) == targetBranch
+}
+
 // ActiveConflictFiles returns files with active merge conflicts in the given repository.
 func ActiveConflictFiles(repoDir string) []string {
 	return detectConflicts(repoDir)
@@ -1829,8 +1836,8 @@ func (ws *WorktreeService) validateAutoConflictRecovery(ctx context.Context, tas
 	if fresh.WorktreePath != task.WorktreePath || fresh.WorktreeBranch == "" || fresh.WorktreeBranch != task.WorktreeBranch || freshTarget == "" || freshTarget != expectedTarget {
 		return fmt.Errorf("%w: task conflict metadata changed", ErrMergeEligibilityChanged)
 	}
-	if !ActiveMergeMatchesBranch(repoDir, fresh.WorktreeBranch) || (requireConflicts && len(detectConflicts(repoDir)) == 0) {
-		return fmt.Errorf("%w: active conflict no longer belongs to this task", ErrMergeEligibilityChanged)
+	if !activeMergeMatchesBranchAndTarget(repoDir, fresh.WorktreeBranch, freshTarget) || (requireConflicts && len(detectConflicts(repoDir)) == 0) {
+		return fmt.Errorf("%w: active conflict no longer belongs to this task and target", ErrMergeEligibilityChanged)
 	}
 	*task = *fresh
 	return nil
@@ -1854,8 +1861,12 @@ func (ws *WorktreeService) abortAutomaticMergeConflict(ctx context.Context, task
 		if err != nil || fresh == nil || fresh.WorktreeBranch != task.WorktreeBranch || fresh.WorktreePath != task.WorktreePath {
 			return fmt.Errorf("%w: task conflict metadata changed", ErrMergeEligibilityChanged)
 		}
-		if !ActiveMergeMatchesBranch(repoDir, fresh.WorktreeBranch) {
-			return fmt.Errorf("%w: active conflict no longer belongs to this task", ErrMergeEligibilityChanged)
+		freshTarget := fresh.MergeTargetBranch
+		if freshTarget == "" {
+			freshTarget = GetDefaultBranch(repoDir)
+		}
+		if !activeMergeMatchesBranchAndTarget(repoDir, fresh.WorktreeBranch, freshTarget) {
+			return fmt.Errorf("%w: active conflict no longer belongs to this task and target", ErrMergeEligibilityChanged)
 		}
 		return nil
 	}
