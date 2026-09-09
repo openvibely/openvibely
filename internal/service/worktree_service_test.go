@@ -4366,6 +4366,94 @@ func TestAutomaticConflictResolutionRuntimeRestrictsPathsToExactConflictFiles(t 
 	}
 }
 
+func TestGoalAutoMergeReconciliationRejectsOwnedSourceConflictOnWrongTarget(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	repoDir := createTestGitRepo(t)
+	target := GetDefaultBranch(repoDir)
+	writeAndCommitTestFile(t, repoDir, "wrong-target-conflict.txt", "base\n", "Add wrong-target conflict base")
+	project := &models.Project{Name: "Wrong target conflict project", RepoPath: repoDir}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Wrong target conflict", Category: models.CategoryCompleted, Status: models.StatusCompleted, Priority: 2, AutoMergeOnGoalAchieved: true, MergeTargetBranch: target}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	ws := NewWorktreeService(taskRepo, projectRepo, settingsRepo)
+	worktreePath, branch, err := ws.SetupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(worktreePath, "wrong-target-conflict.txt"), []byte("task\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := CommitWorktreeChanges(worktreePath, "Change wrong-target conflict on task"); err != nil {
+		t.Fatal(err)
+	}
+
+	runGitTest(t, repoDir, "checkout", "-b", "wrong-target")
+	writeAndCommitTestFile(t, repoDir, "wrong-target-conflict.txt", "wrong target\n", "Change conflict on wrong target")
+	wrongTargetBefore := strings.TrimSpace(string(runGitTest(t, repoDir, "rev-parse", "HEAD")))
+	mergeCmd := exec.Command("git", "merge", "--no-ff", branch)
+	mergeCmd.Dir = repoDir
+	if out, err := mergeCmd.CombinedOutput(); err == nil || len(ActiveConflictFiles(repoDir)) == 0 {
+		t.Fatalf("creating wrong-target conflict: err=%v out=%s", err, out)
+	}
+	if !ActiveMergeMatchesBranch(repoDir, branch) || GetCurrentBranch(repoDir) != "wrong-target" {
+		t.Fatalf("wrong-target conflict ownership fixture is invalid: source=%v target=%q", ActiveMergeMatchesBranch(repoDir, branch), GetCurrentBranch(repoDir))
+	}
+
+	goalSvc := NewTaskGoalService(repository.NewTaskGoalRepo(db), taskRepo, nil)
+	ws.SetTaskGoalService(goalSvc)
+	goal, err := goalSvc.SetGoal(ctx, task.ID, "do not recover into wrong target", GoalOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := goalSvc.MarkAchieved(ctx, task.ID, goal.GoalID, "verified"); err != nil {
+		t.Fatal(err)
+	}
+	agent := &models.LLMConfig{Name: "Wrong target resolver", Provider: models.ProviderTest, Model: "test", IsDefault: true}
+	if err := llmConfigRepo.Create(ctx, agent); err != nil {
+		t.Fatal(err)
+	}
+	llmSvc := NewLLMService(llmConfigRepo, nil, nil, nil, nil, nil)
+	mock := &testutil.MockLLMCaller{Response: "must not run"}
+	mock.OnCall = func(_ context.Context, _ testutil.MockLLMCall) {
+		if err := os.WriteFile(filepath.Join(repoDir, "wrong-target-conflict.txt"), []byte("incorrectly resolved\n"), 0o644); err != nil {
+			t.Error(err)
+		}
+	}
+	llmSvc.SetLLMCaller(mock)
+	ws.SetLLMService(llmSvc)
+
+	ws.ReconcileGoalAutoMerge(ctx, task.ID)
+
+	if mock.CallCount() != 0 {
+		t.Fatalf("wrong-target conflict invoked resolver %d times, want 0", mock.CallCount())
+	}
+	if !HasActiveMerge(repoDir) || !ActiveMergeMatchesBranch(repoDir, branch) || GetCurrentBranch(repoDir) != "wrong-target" {
+		t.Fatal("wrong-target conflict was aborted or ownership state changed")
+	}
+	if after := strings.TrimSpace(string(runGitTest(t, repoDir, "rev-parse", "HEAD"))); after != wrongTargetBefore {
+		t.Fatalf("wrong-target recovery committed: before=%s after=%s", wrongTargetBefore, after)
+	}
+	persisted, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.MergeStatus == models.MergeStatusMerged {
+		t.Fatal("wrong-target conflict was marked merged")
+	}
+	if IsBranchMerged(repoDir, branch, target) {
+		t.Fatal("wrong-target conflict changed configured-target ancestry")
+	}
+}
+
 func TestGoalAutoMergeReconciliationResumesOwnedConflictAfterBusyLease(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
