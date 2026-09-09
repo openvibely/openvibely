@@ -341,6 +341,26 @@ func (s *TaskService) cancelActiveTaskWork(ctx context.Context, id string) error
 	return nil
 }
 
+func (s *TaskService) MoveTasksToActiveLane(ctx context.Context, projectID string, taskIDs []string, status models.TaskStatus) error {
+	if s.workerSvc == nil {
+		return errors.New("worker service unavailable")
+	}
+	moved, err := s.repo.MoveTasksToActiveLane(ctx, projectID, taskIDs, status)
+	if err != nil {
+		return err
+	}
+	for _, task := range moved {
+		s.workerSvc.ClearCancellationRequested(task.ID)
+		s.resumeGoalStoppedByUser(ctx, task.ID, "user")
+		if status == models.StatusRunning {
+			s.workerSvc.SubmitPreclaimed(task)
+		} else {
+			s.workerSvc.Submit(task)
+		}
+	}
+	return nil
+}
+
 func (s *TaskService) UpdateCategory(ctx context.Context, id string, category models.TaskCategory) error {
 	applog.Infof("[task-svc] UpdateCategory id=%s -> %s", id, category)
 	var previousTask *models.Task

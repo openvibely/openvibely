@@ -626,6 +626,73 @@ func TestTaskRepo_ListByCategory_WithChainConfig(t *testing.T) {
 	}
 }
 
+func TestTaskRepo_MoveTasksToActiveLaneRollsBackLaterFailure(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	repo := NewTaskRepo(db, nil)
+	tail := &models.Task{ProjectID: "default", Title: "Existing active tail", Category: models.CategoryActive, Status: models.StatusPending, DisplayOrder: 7}
+	first := &models.Task{ProjectID: "default", Title: "First batch move", Category: models.CategoryBacklog, Status: models.StatusPending, DisplayOrder: 2}
+	second := &models.Task{ProjectID: "default", Title: "Second batch move", Category: models.CategoryBacklog, Status: models.StatusPending, DisplayOrder: 3}
+	for _, task := range []*models.Task{tail, first, second} {
+		if err := repo.Create(ctx, task); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, item := range []struct {
+		task  *models.Task
+		order int
+	}{{tail, 7}, {first, 2}, {second, 3}} {
+		if _, err := execBoundSQLite(ctx, db, `UPDATE tasks SET display_order = ? WHERE id = ?`, item.order, item.task.ID); err != nil {
+			t.Fatal(err)
+		}
+		item.task.DisplayOrder = item.order
+	}
+	if _, err := execBoundSQLite(ctx, db, `CREATE TRIGGER fail_second_active_lane_move BEFORE UPDATE ON tasks
+		WHEN OLD.id = '`+second.ID+`' AND NEW.category = 'active'
+		BEGIN SELECT RAISE(FAIL, 'forced later move failure'); END`); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := repo.MoveTasksToActiveLane(ctx, "default", []string{first.ID, second.ID}, models.StatusRunning)
+	if err == nil || !strings.Contains(err.Error(), "forced later move failure") {
+		t.Fatalf("MoveTasksToActiveLane error = %v", err)
+	}
+	for _, expected := range []*models.Task{first, second} {
+		loaded, loadErr := repo.GetByID(ctx, expected.ID)
+		if loadErr != nil {
+			t.Fatal(loadErr)
+		}
+		if loaded.Category != expected.Category || loaded.Status != expected.Status || loaded.DisplayOrder != expected.DisplayOrder {
+			t.Fatalf("task %s after rollback = category %s status %s order %d, want %s %s %d", expected.ID, loaded.Category, loaded.Status, loaded.DisplayOrder, expected.Category, expected.Status, expected.DisplayOrder)
+		}
+	}
+}
+
+func TestTaskRepo_MoveTasksToActiveLaneAppendsSubmittedOrder(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	repo := NewTaskRepo(db, nil)
+	tail := &models.Task{ProjectID: "default", Title: "Active tail for batch", Category: models.CategoryActive, Status: models.StatusRunning}
+	first := &models.Task{ProjectID: "default", Title: "First submitted batch card", Category: models.CategoryBacklog, Status: models.StatusPending}
+	second := &models.Task{ProjectID: "default", Title: "Second submitted batch card", Category: models.CategoryBacklog, Status: models.StatusPending}
+	for _, task := range []*models.Task{tail, first, second} {
+		if err := repo.Create(ctx, task); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	moved, err := repo.MoveTasksToActiveLane(ctx, "default", []string{second.ID, first.ID}, models.StatusRunning)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(moved) != 2 || moved[0].ID != second.ID || moved[1].ID != first.ID {
+		t.Fatalf("moved order = %#v", moved)
+	}
+	if moved[0].Status != models.StatusRunning || moved[0].DisplayOrder <= tail.DisplayOrder || moved[1].DisplayOrder != moved[0].DisplayOrder+1 {
+		t.Fatalf("moved state = %#v", moved)
+	}
+}
+
 func TestTaskRepo_UpdateStatusAppendsActiveTaskToDestinationLane(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewTaskRepo(db, nil)

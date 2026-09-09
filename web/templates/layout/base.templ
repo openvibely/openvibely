@@ -3550,7 +3550,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 
 						if (currentCategory !== 'active') {
 							// Moving from different category to active
-							beginKanbanMove([taskID], {category: 'active', status: targetStatus}, 'PATCH', `/tasks/${taskID}/category`, { category: 'active' }, 'Cannot move task to Active category');
+							beginKanbanMove([taskID], {category: 'active', status: targetStatus}, 'PATCH', `/tasks/${taskID}/category`, { category: 'active', target_status: targetStatus }, 'Cannot move task to Active category');
 						} else if (currentStatus !== targetStatus) {
 							// Same category, different status
 							beginKanbanMove([taskID], {category: 'active', status: targetStatus}, 'PATCH', `/tasks/${taskID}/status`, { status: targetStatus }, 'Cannot change task status');

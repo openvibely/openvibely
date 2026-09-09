@@ -2167,7 +2167,11 @@ func (h *Handler) CancelTask(c echo.Context) error {
 func (h *Handler) UpdateTaskCategory(c echo.Context) error {
 	taskID := c.Param("taskId")
 	category := models.TaskCategory(c.FormValue("category"))
-	applog.Infof("[handler] UpdateTaskCategory task=%s newCategory=%s", taskID, category)
+	targetStatus := models.TaskStatus(strings.TrimSpace(c.FormValue("target_status")))
+	if targetStatus != "" && (category != models.CategoryActive || (targetStatus != models.StatusPending && targetStatus != models.StatusRunning)) {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid Active target status")
+	}
+	applog.Infof("[handler] UpdateTaskCategory task=%s newCategory=%s target_status=%s", taskID, category, targetStatus)
 
 	// Validate: cannot move to scheduled category unless the task has a schedule
 	if category == models.CategoryScheduled {
@@ -2193,7 +2197,19 @@ func (h *Handler) UpdateTaskCategory(c echo.Context) error {
 		}
 	}
 
-	if err := h.taskSvc.UpdateCategory(c.Request().Context(), taskID, category); err != nil {
+	if category == models.CategoryActive && targetStatus != "" {
+		task, err := h.taskSvc.GetByID(c.Request().Context(), taskID)
+		if err != nil {
+			return err
+		}
+		if task == nil {
+			return echo.NewHTTPError(http.StatusNotFound, "task not found")
+		}
+		if err := h.taskSvc.MoveTasksToActiveLane(c.Request().Context(), task.ProjectID, []string{taskID}, targetStatus); err != nil {
+			applog.Infof("[handler] UpdateTaskCategory active lane error: %v", err)
+			return err
+		}
+	} else if err := h.taskSvc.UpdateCategory(c.Request().Context(), taskID, category); err != nil {
 		applog.Infof("[handler] UpdateTaskCategory error: %v", err)
 		return err
 	}
@@ -2312,21 +2328,17 @@ func (h *Handler) BatchUpdateTaskCategory(c echo.Context) error {
 		}
 	}
 
-	for _, id := range taskIDs {
-		task, err := h.taskSvc.GetByID(c.Request().Context(), id)
-		if err != nil {
+	if category == models.CategoryActive && targetStatus != "" {
+		if err := h.taskSvc.MoveTasksToActiveLane(c.Request().Context(), projectID, taskIDs, targetStatus); err != nil {
+			applog.Infof("[handler] BatchUpdateTaskCategory active lane error: %v", err)
 			return err
 		}
-		if task != nil && task.Category == models.CategoryActive && category == models.CategoryActive && targetStatus != "" && task.Status != targetStatus {
-			if err := h.taskSvc.UpdateStatus(c.Request().Context(), id, targetStatus); err != nil {
-				applog.Infof("[handler] BatchUpdateTaskCategory status error task=%s: %v", id, err)
+	} else {
+		for _, id := range taskIDs {
+			if err := h.taskSvc.UpdateCategory(c.Request().Context(), id, category); err != nil {
+				applog.Infof("[handler] BatchUpdateTaskCategory error task=%s: %v", id, err)
 				return err
 			}
-			continue
-		}
-		if err := h.taskSvc.UpdateCategory(c.Request().Context(), id, category); err != nil {
-			applog.Infof("[handler] BatchUpdateTaskCategory error task=%s: %v", id, err)
-			return err
 		}
 	}
 	applog.Infof("[handler] BatchUpdateTaskCategory success")

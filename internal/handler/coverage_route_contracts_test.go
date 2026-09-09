@@ -234,7 +234,7 @@ func TestBatchUpdateTaskCategoryPreservesSameProjectHTMXAndActiveSubmission(t *t
 		"project_id":    {project.ID},
 		"task_ids":      {laneMove.ID + "," + active.ID},
 		"category":      {string(models.CategoryActive)},
-		"target_status": {string(models.StatusPending)},
+		"target_status": {string(models.StatusRunning)},
 	}).Execute()
 	require.Equal(t, http.StatusOK, activated.Code, activated.Body.String())
 	require.Contains(t, activated.Body.String(), `id="kanban-board"`)
@@ -243,9 +243,9 @@ func TestBatchUpdateTaskCategoryPreservesSameProjectHTMXAndActiveSubmission(t *t
 	loaded, err := tc.taskRepo.GetByID(ctx, active.ID)
 	require.NoError(t, err)
 	require.Equal(t, models.CategoryActive, movedLane.Category)
-	require.Equal(t, models.StatusPending, movedLane.Status)
+	require.Equal(t, models.StatusRunning, movedLane.Status)
 	require.Equal(t, models.CategoryActive, loaded.Category)
-	require.Equal(t, models.StatusPending, loaded.Status)
+	require.Equal(t, models.StatusRunning, loaded.Status)
 	require.Greater(t, movedLane.DisplayOrder, existingTail.DisplayOrder)
 	require.Greater(t, loaded.DisplayOrder, movedLane.DisplayOrder)
 	require.Less(t, strings.Index(activated.Body.String(), `id="task-`+laneMove.ID+`"`), strings.Index(activated.Body.String(), `id="task-`+active.ID+`"`))
@@ -259,6 +259,44 @@ func TestBatchUpdateTaskCategoryPreservesSameProjectHTMXAndActiveSubmission(t *t
 		}
 	}
 	require.Equal(t, map[string]bool{laneMove.ID: true, active.ID: true}, submittedIDs)
+}
+
+func TestBatchUpdateTaskCategoryActiveLaneRollsBackLaterWriteFailure(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().WithName("Atomic Active lane rollback project").Build()
+	tc.CreateLLMConfig().WithName("Atomic lane model").WithProvider(models.ProviderTest).WithModel("test-model").AsDefault().Build()
+	first := tc.CreateTask(project.ID).WithTitle("Atomic lane first").WithCategory(models.CategoryBacklog).Build()
+	second := tc.CreateTask(project.ID).WithTitle("Atomic lane second").WithCategory(models.CategoryBacklog).Build()
+	firstBefore, err := tc.taskRepo.GetByID(ctx, first.ID)
+	require.NoError(t, err)
+	secondBefore, err := tc.taskRepo.GetByID(ctx, second.ID)
+	require.NoError(t, err)
+	_, err = tc.db.ExecContext(ctx, `CREATE TRIGGER fail_handler_second_active_lane BEFORE UPDATE ON tasks
+		WHEN OLD.id = '`+second.ID+`' AND NEW.category = 'active'
+		BEGIN SELECT RAISE(FAIL, 'forced handler later move failure'); END`)
+	require.NoError(t, err)
+
+	response := tc.HTMX().Patch("/tasks/batch-category").WithForm(url.Values{
+		"project_id":    {project.ID},
+		"task_ids":      {first.ID + "," + second.ID},
+		"category":      {string(models.CategoryActive)},
+		"target_status": {string(models.StatusRunning)},
+	}).Execute()
+	require.Equal(t, http.StatusInternalServerError, response.Code, response.Body.String())
+	for _, before := range []*models.Task{firstBefore, secondBefore} {
+		after, loadErr := tc.taskRepo.GetByID(ctx, before.ID)
+		require.NoError(t, loadErr)
+		require.Equal(t, before.Category, after.Category)
+		require.Equal(t, before.Status, after.Status)
+		require.Equal(t, before.DisplayOrder, after.DisplayOrder)
+		require.Equal(t, before.CompletedAt, after.CompletedAt)
+	}
+	select {
+	case submitted := <-tc.handler.workerSvc.Submitted():
+		t.Fatalf("failed atomic batch submitted task %s", submitted.ID)
+	default:
+	}
 }
 
 func TestUpdateTaskChainConfigCreatesAndRemovesBlockedChild(t *testing.T) {
