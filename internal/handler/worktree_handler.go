@@ -738,6 +738,36 @@ func (h *Handler) buildPullRequestPrepCommitMessage(ctx context.Context, task *m
 	return service.BuildWorktreeCommitMessage(task.WorktreePath, commitCtx)
 }
 
+type taskConflictRecoveryPreflight struct {
+	task           *models.Task
+	project        *models.Project
+	eligibility    taskMergeEligibility
+	fromChangesTab bool
+}
+
+// preflightTaskConflictRecovery loads the shared initial context for task-owned
+// conflict recovery before Resolve and Abort perform their distinct mutations.
+func (h *Handler) preflightTaskConflictRecovery(ctx context.Context, taskID string, fromChangesTab bool) (*taskConflictRecoveryPreflight, error) {
+	task, err := h.taskSvc.GetByID(ctx, taskID)
+	if err != nil || task == nil {
+		return nil, echo.NewHTTPError(http.StatusNotFound, "task not found")
+	}
+
+	project, err := h.projectRepo.GetByID(ctx, task.ProjectID)
+	if err != nil || project == nil || project.RepoPath == "" {
+		return nil, echo.NewHTTPError(http.StatusBadRequest, "project has no repo path")
+	}
+	h.recoverTaskWorktreeState(ctx, task, project)
+	eligibility := h.resolveTaskMergeEligibility(ctx, task, project, h.reconcileAlreadyMergedBranch(ctx, task))
+
+	return &taskConflictRecoveryPreflight{
+		task:           task,
+		project:        project,
+		eligibility:    eligibility,
+		fromChangesTab: fromChangesTab,
+	}, nil
+}
+
 // revalidateTaskConflictRecovery reloads task and Git state while the canonical
 // repository mutation lease is held. Recovery must only mutate a conflict that
 // still belongs to this task branch.
@@ -762,22 +792,19 @@ func (h *Handler) revalidateTaskConflictRecovery(ctx context.Context, taskID str
 // ResolveTaskConflicts triggers AI-assisted conflict resolution.
 func (h *Handler) ResolveTaskConflicts(c echo.Context) error {
 	taskID := c.Param("taskId")
-	task, err := h.taskSvc.GetByID(c.Request().Context(), taskID)
-	if err != nil || task == nil {
-		return echo.NewHTTPError(http.StatusNotFound, "task not found")
+	preflight, err := h.preflightTaskConflictRecovery(c.Request().Context(), taskID, c.FormValue("merge_source") == "changes_tab")
+	if err != nil {
+		return err
 	}
 
 	if h.worktreeSvc == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "worktree service not available")
 	}
 
-	project, err := h.projectRepo.GetByID(c.Request().Context(), task.ProjectID)
-	if err != nil || project == nil || project.RepoPath == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "project has no repo path")
-	}
-	h.recoverTaskWorktreeState(c.Request().Context(), task, project)
-	eligibility := h.resolveTaskMergeEligibility(c.Request().Context(), task, project, h.reconcileAlreadyMergedBranch(c.Request().Context(), task))
-	fromChangesTab := c.FormValue("merge_source") == "changes_tab"
+	task := preflight.task
+	project := preflight.project
+	eligibility := preflight.eligibility
+	fromChangesTab := preflight.fromChangesTab
 	if !eligibility.ConflictRecovery {
 		msg := "No active merge conflicts remain. Merge actions have been refreshed."
 		if isHTMX(c) {
@@ -829,7 +856,7 @@ func (h *Handler) ResolveTaskConflicts(c echo.Context) error {
 	}
 
 	task, _ = h.taskSvc.GetByID(c.Request().Context(), taskID)
-	if c.FormValue("merge_source") == "changes_tab" {
+	if fromChangesTab {
 		return h.GetTaskChanges(c)
 	}
 	return h.renderWorktreeInfo(c, task)
@@ -838,18 +865,15 @@ func (h *Handler) ResolveTaskConflicts(c echo.Context) error {
 // AbortTaskMerge aborts an in-progress merge for a task.
 func (h *Handler) AbortTaskMerge(c echo.Context) error {
 	taskID := c.Param("taskId")
-	task, err := h.taskSvc.GetByID(c.Request().Context(), taskID)
-	if err != nil || task == nil {
-		return echo.NewHTTPError(http.StatusNotFound, "task not found")
+	preflight, err := h.preflightTaskConflictRecovery(c.Request().Context(), taskID, c.FormValue("merge_source") == "changes_tab")
+	if err != nil {
+		return err
 	}
 
-	project, err := h.projectRepo.GetByID(c.Request().Context(), task.ProjectID)
-	if err != nil || project == nil || project.RepoPath == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "project has no repo path")
-	}
-	h.recoverTaskWorktreeState(c.Request().Context(), task, project)
-	eligibility := h.resolveTaskMergeEligibility(c.Request().Context(), task, project, h.reconcileAlreadyMergedBranch(c.Request().Context(), task))
-	fromChangesTab := c.FormValue("merge_source") == "changes_tab"
+	task := preflight.task
+	project := preflight.project
+	eligibility := preflight.eligibility
+	fromChangesTab := preflight.fromChangesTab
 	if !eligibility.ConflictRecovery {
 		msg := "No active merge remains. Merge actions have been refreshed."
 		if isHTMX(c) {
@@ -895,7 +919,7 @@ func (h *Handler) AbortTaskMerge(c echo.Context) error {
 	}
 
 	task, _ = h.taskSvc.GetByID(c.Request().Context(), taskID)
-	if c.FormValue("merge_source") == "changes_tab" {
+	if fromChangesTab {
 		return h.GetTaskChanges(c)
 	}
 	return h.renderWorktreeInfo(c, task)
