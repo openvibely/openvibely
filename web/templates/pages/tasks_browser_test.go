@@ -277,12 +277,39 @@ window.addEventListener('DOMContentLoaded', function() {
 
 	    function cardIn(category, id) { var target = zone(category); return !!(target && target.contains(document.getElementById('task-' + id))); }
 	    var currentMovePhase = '';
-	    var rollbackOrderingInjected = false;
-	    var rollbackAuthoritativeSwapped = false;
-	    document.body.addEventListener('htmx:afterSwap', function(event) {
-	      var detail = event.detail || {}, requestConfig = detail.requestConfig || {};
-	      if (currentMovePhase === 'failure' && requestConfig.path.indexOf('refresh_source=move') >= 0) rollbackAuthoritativeSwapped = true;
-	    });
+		    var rollbackOrderingInjected = false;
+		    var rollbackAuthoritativeSwapped = false;
+		    var postMoveStaleProtected = false;
+		    var postMoveStaleDiagnostic = '';
+		    var delayedSuccessReconciliation = null;
+		    var originalKanbanAjax = htmx.ajax.bind(htmx);
+		    htmx.ajax = function(method, path, options) {
+		      if (currentMovePhase === 'success' && !delayedSuccessReconciliation && String(path).indexOf('refresh_source=move') >= 0) {
+		        fetch('/release-post-move-stale', {method:'POST'});
+		        return new Promise(function(resolve, reject) {
+		          delayedSuccessReconciliation = function() { originalKanbanAjax(method, path, options).then(resolve, reject); };
+		        });
+		      }
+		      return originalKanbanAjax(method, path, options);
+		    };
+		    document.addEventListener('htmx:beforeSwap', function(event) {
+		      var detail = event.detail || {}, requestConfig = detail.requestConfig || {};
+		      if (requestConfig.path !== '/post-move-stale-board') return;
+		      var response = new DOMParser().parseFromString(detail.serverResponse || '', 'text/html');
+		      var responseCard = response.getElementById('task-active-move');
+		      var responseZone = responseCard && responseCard.closest('.category-drop-zone[data-category="completed"]');
+		      postMoveStaleProtected = !!responseZone;
+		      postMoveStaleDiagnostic = 'card=' + !!responseCard + ', category=' + (responseCard && responseCard.getAttribute('data-task-category')) + ', generation=' + (responseCard && responseCard.getAttribute('data-kanban-move-generation')) + ', parent=' + (responseCard && responseCard.parentElement && responseCard.parentElement.outerHTML.slice(0, 200));
+		      if (delayedSuccessReconciliation) {
+		        var launchReconciliation = delayedSuccessReconciliation;
+		        delayedSuccessReconciliation = null;
+		        requestAnimationFrame(function() { requestAnimationFrame(launchReconciliation); });
+		      }
+		    });
+		    document.body.addEventListener('htmx:afterSwap', function(event) {
+		      var detail = event.detail || {}, requestConfig = detail.requestConfig || {};
+		      if (currentMovePhase === 'failure' && requestConfig.path.indexOf('refresh_source=move') >= 0) rollbackAuthoritativeSwapped = true;
+		    });
 	    document.body.addEventListener('htmx:afterRequest', function(event) {
 	      var detail = event.detail || {}, requestConfig = detail.requestConfig || {};
 	      if (requestConfig.path !== '/failed-newer-refresh') return;
@@ -317,19 +344,25 @@ window.addEventListener('DOMContentLoaded', function() {
 	        if (expectSuccess && !cardIn('completed', id)) sourceFlash = true;
 	        if (observing) requestAnimationFrame(sample);
 	      }
-	      document.addEventListener('pointerup', function onPointerUp() {
-	        document.removeEventListener('pointerup', onPointerUp, true);
-	        released = true;
-	        requestAnimationFrame(sample);
-	        window.dispatchEvent(new CustomEvent('sse-task-event', {detail:{type:'task_updated', project_id:'project-tasks-browser'}}));
-	      }, true);
-	      await fetch('/browser-drag-ready?phase=' + phase + '&start_x=' + startX + '&start_y=' + startY + '&drop_x=' + dropX + '&drop_y=' + dropY, {method:'POST'});
+		      document.addEventListener('pointerup', function onPointerUp() {
+		        document.removeEventListener('pointerup', onPointerUp, true);
+		        released = true;
+		        requestAnimationFrame(sample);
+		        if (expectSuccess) {
+		          var staleSource = document.createElement('span');
+		          document.body.appendChild(staleSource);
+		          htmx.ajax('GET', '/post-move-stale-board', {source:staleSource, target:'#kanban-board', swap:'outerHTML'});
+		        }
+		        window.dispatchEvent(new CustomEvent('sse-task-event', {detail:{type:'task_updated', project_id:'project-tasks-browser'}}));
+		      }, true);
+		      await fetch('/browser-drag-ready?phase=' + phase + '&start_x=' + startX + '&start_y=' + startY + '&drop_x=' + dropX + '&drop_y=' + dropY, {method:'POST'});
 	      await waitFor(function() { return released; }, phase + ' native pointer release');
 	      if (expectSuccess) {
 	        await waitFor(function() { var moved = document.getElementById('task-' + id); return cardIn('completed', id) && moved && !moved.hasAttribute('data-kanban-move-generation') && !(window.hasPendingKanbanMoves && window.hasPendingKanbanMoves()); }, phase + ' authoritative success');
-	        observing = false;
-	        if (sourceFlash) fail(phase + ' flashed back into its source column during successful reconciliation');
-	      } else {
+		        observing = false;
+		        if (!postMoveStaleProtected) fail('post-move pre-commit stale board response was not protected before paint: ' + postMoveStaleDiagnostic);
+		        if (sourceFlash) fail(phase + ' flashed back into its source column during successful reconciliation');
+		      } else {
 	        await waitFor(function() { var moved = document.getElementById('task-' + id); return rollbackAuthoritativeSwapped && moved && moved.closest('.task-drop-zone[data-category="active"][data-status="pending"]') && !(window.hasPendingKanbanMoves && window.hasPendingKanbanMoves()); }, phase + ' authoritative rollback');
 	        observing = false;
 	        if (!rollbackOrderingInjected) fail('failed move did not exercise newer failed and aborted refresh ordering');
@@ -361,6 +394,8 @@ window.addEventListener('DOMContentLoaded', function() {
 
 	browserResult := make(chan string, 8)
 	dragReady := make(chan taskDragCoordinates, 2)
+	postMoveStaleCaptured := make(chan struct{}, 1)
+	releasePostMoveStale := make(chan struct{})
 	moveRefreshes := 0
 	newerRefreshStarted := make(chan struct{}, 2)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -416,6 +451,14 @@ window.addEventListener('DOMContentLoaded', function() {
 			stale := renderBoard(r)
 			time.Sleep(250 * time.Millisecond)
 			_, _ = w.Write([]byte(stale))
+		case r.URL.Path == "/post-move-stale-board" && r.Method == http.MethodGet:
+			stale := renderBoard(r)
+			postMoveStaleCaptured <- struct{}{}
+			<-releasePostMoveStale
+			_, _ = w.Write([]byte(stale))
+		case r.URL.Path == "/release-post-move-stale" && r.Method == http.MethodPost:
+			close(releasePostMoveStale)
+			w.WriteHeader(http.StatusNoContent)
 		case r.URL.Path == "/browser-drag-ready" && r.Method == http.MethodPost:
 			parse := func(key string) float64 {
 				value, _ := strconv.ParseFloat(r.URL.Query().Get(key), 64)
@@ -424,7 +467,12 @@ window.addEventListener('DOMContentLoaded', function() {
 			dragReady <- taskDragCoordinates{phase: r.URL.Query().Get("phase"), startX: parse("start_x"), startY: parse("start_y"), dropX: parse("drop_x"), dropY: parse("drop_y")}
 			w.WriteHeader(http.StatusNoContent)
 		case r.URL.Path == "/tasks/active-move/category" && r.Method == http.MethodPatch:
-			time.Sleep(350 * time.Millisecond)
+			select {
+			case <-postMoveStaleCaptured:
+			case <-time.After(time.Second):
+				t.Fatal("post-move stale board was not captured before persistence")
+			}
+			time.Sleep(100 * time.Millisecond)
 			mu.Lock()
 			clock = clock.Add(time.Minute)
 			for i := range tasks {
@@ -436,7 +484,7 @@ window.addEventListener('DOMContentLoaded', function() {
 				}
 			}
 			mu.Unlock()
-			_, _ = w.Write([]byte(renderBoard(r)))
+			w.WriteHeader(http.StatusNoContent)
 		case r.URL.Path == "/tasks/active-fail/category" && r.Method == http.MethodPatch:
 			time.Sleep(250 * time.Millisecond)
 			w.WriteHeader(http.StatusBadRequest)
@@ -529,6 +577,9 @@ window.addEventListener('DOMContentLoaded', function() {
 	requestMu.Lock()
 	requests := strings.Join(requestLog, "\n")
 	requestMu.Unlock()
+	if !strings.Contains(requests, "GET /post-move-stale-board") {
+		t.Fatalf("Tasks browser regression did not start the post-move pre-commit stale board request; requests:\n%s", requests)
+	}
 	if !strings.Contains(requests, "GET /failed-newer-refresh") || !strings.Contains(requests, "GET /aborted-newer-refresh") {
 		t.Fatalf("Tasks browser regression did not start newer failed and aborted refreshes; requests:\n%s", requests)
 	}

@@ -3322,13 +3322,20 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						detail.serverResponse = responseBoard.outerHTML;
 					}
 
+					function clearKanbanMoveProjection(generation, taskIDs) {
+						taskIDs.forEach(function(taskID) {
+							const pending = pendingKanbanMoves.get(taskID);
+							if (pending && pending.generation === generation) pendingKanbanMoves.delete(taskID);
+						});
+					}
+
 					function forceKanbanAuthoritativeRefresh(generation) {
 						const reconciliation = pendingKanbanReconciliations.get(generation);
 						if (!reconciliation || reconciliation.inFlight) return;
 						const page = document.getElementById('tasks-page');
 						const projectID = page && page.getAttribute('data-project-id');
 						if (!projectID || !window.htmx) {
-							pendingKanbanReconciliations.delete(generation);
+							finishKanbanReconciliation(generation);
 							return;
 						}
 						reconciliation.inFlight = true;
@@ -3346,6 +3353,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					function finishKanbanReconciliation(generation) {
 						const reconciliation = pendingKanbanReconciliations.get(generation);
 						if (reconciliation && reconciliation.timer) clearTimeout(reconciliation.timer);
+						if (reconciliation) clearKanbanMoveProjection(generation, reconciliation.taskIDs);
 						pendingKanbanReconciliations.delete(generation);
 						window.dispatchEvent(new CustomEvent('kanban-refresh-unblocked'));
 					}
@@ -3363,11 +3371,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						const transaction = kanbanMoveTransactions.get(generation);
 						if (!transaction) return;
 						kanbanMoveTransactions.delete(generation);
-						pendingKanbanReconciliations.set(generation, {inFlight: false, timer: null});
-						transaction.taskIDs.forEach(function(taskID) {
-							const pending = pendingKanbanMoves.get(taskID);
-							if (pending && pending.generation === generation) pendingKanbanMoves.delete(taskID);
-						});
+						pendingKanbanReconciliations.set(generation, {inFlight: false, timer: null, taskIDs: transaction.taskIDs.slice()});
+						if (!successful) clearKanbanMoveProjection(generation, transaction.taskIDs);
 						if (!successful && xhr && xhr.status === 400) {
 							alert(xhr.responseText || transaction.failureMessage);
 						}
@@ -3678,6 +3683,15 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				function resetKanbanInteractionForNavigation() {
 					clearSelection();
 					closeKanbanMenu(null, false);
+					pendingKanbanReconciliations.forEach(function(reconciliation) {
+						if (reconciliation.timer) clearTimeout(reconciliation.timer);
+					});
+					pendingKanbanReconciliations.clear();
+					pendingKanbanMoves.clear();
+					kanbanMoveTransactions.clear();
+					document.querySelectorAll('[data-kanban-move-generation], [data-kanban-reconciliation-generation]').forEach(function(source) {
+						if (!source.hasAttribute('data-task-id')) source.remove();
+					});
 					document.querySelectorAll('#kanban-board .task-selected').forEach(function(card) {
 						card.classList.remove('task-selected');
 					});
