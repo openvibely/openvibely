@@ -2044,6 +2044,13 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 								}
 								_refreshActiveThreadContent(taskId, true, '', 0);
 							};
+					function _focusTaskThreadComposer(trigger) {
+						if (!window.openVibelyRequestComposerFocus) return;
+						var threadForm = document.getElementById('task-thread-form');
+						if (!threadForm) return;
+						window.openVibelyRequestComposerFocus({ root: threadForm, reason: 'task-thread-tab', trigger: trigger, force: true });
+					}
+
 					function switchTaskTab(tabName) {
 					var container = document.getElementById('task-detail-content');
 					if (!container) return;
@@ -2069,17 +2076,18 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 					if (selectorContext) selectorContext.value = tabName;
 
 					// Auto-scroll thread to bottom when switching to thread tab
-						if (tabName === 'chat') {
-							var threadContent = document.getElementById('thread-content');
-							var taskId = (threadContent && threadContent.dataset.taskId) || _currentTaskIdFromPath();
-							if (taskId) {
-								_loadThreadContent(taskId).then(function() {
-										_restoreThreadScrollOrBottom(taskId, false);
-									});
-								} else {
-									_restoreThreadScrollOrBottom(taskId, false);
-								}					}
-
+					if (tabName === 'chat') {
+						var threadContent = document.getElementById('thread-content');
+						var taskId = (threadContent && threadContent.dataset.taskId) || _currentTaskIdFromPath();
+						if (taskId) {
+							_loadThreadContent(taskId).then(function() {
+								_restoreThreadScrollOrBottom(taskId, false);
+								_focusTaskThreadComposer(tab);
+							});
+						} else {
+							_restoreThreadScrollOrBottom(taskId, false);
+						}
+					}
 				// Reload changes content and start SSE when switching to changes tab
 				if (tabName === 'changes') {
 					var taskIdMatch = window.location.pathname.match(/\/tasks\/([^\/]+)/);
