@@ -2066,6 +2066,87 @@ func TestPublishBranchUsesGitHubAPIWithoutGitPush(t *testing.T) {
 	}
 }
 
+func TestPublishBranchFiltersDeletionMissingFromRemoteBaseTree(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
+		t.Fatalf("set auth mode: %v", err)
+	}
+	if err := settingsRepo.Set(ctx, GitHubSettingPAT, "ghp_test"); err != nil {
+		t.Fatalf("set pat: %v", err)
+	}
+
+	repoDir := createTestGitRepo(t)
+	if err := os.WriteFile(filepath.Join(repoDir, "local-main-only.txt"), []byte("not on remote main\n"), 0o644); err != nil {
+		t.Fatalf("write local-main-only.txt: %v", err)
+	}
+	runGitHubBranchFixtureGit(t, repoDir, "add", "local-main-only.txt")
+	runGitHubBranchFixtureGit(t, repoDir, "commit", "-m", "advance local main")
+	runGitHubBranchFixtureGit(t, repoDir, "switch", "-c", "task/api-publish")
+	if err := os.Remove(filepath.Join(repoDir, "local-main-only.txt")); err != nil {
+		t.Fatalf("remove local-main-only.txt: %v", err)
+	}
+	if err := os.Remove(filepath.Join(repoDir, "README.md")); err != nil {
+		t.Fatalf("remove README.md: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "task-change.txt"), []byte("task change\n"), 0o644); err != nil {
+		t.Fatalf("write task-change.txt: %v", err)
+	}
+	runGitHubBranchFixtureGit(t, repoDir, "add", "-A")
+	runGitHubBranchFixtureGit(t, repoDir, "commit", "-m", "task change")
+
+	remoteBaseSHA := "1111111111111111111111111111111111111111"
+	var treePayload []byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/git/ref/heads/main":
+			fmt.Fprintf(w, `{"object":{"sha":%q}}`, remoteBaseSHA)
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/git/ref/heads/task/api-publish":
+			w.WriteHeader(http.StatusNotFound)
+			fmt.Fprint(w, `{"message":"Reference does not exist"}`)
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/git/commits/"+remoteBaseSHA:
+			fmt.Fprint(w, `{"tree":{"sha":"base-tree"}}`)
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/git/trees/base-tree":
+			if r.URL.Query().Get("recursive") != "1" {
+				t.Fatalf("expected recursive base tree request, got %s", r.URL.String())
+			}
+			fmt.Fprint(w, `{"tree":[{"path":"README.md","type":"blob"}],"truncated":false}`)
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/openvibely/openvibely/git/blobs":
+			fmt.Fprint(w, `{"sha":"task-blob"}`)
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/openvibely/openvibely/git/trees":
+			treePayload, _ = io.ReadAll(r.Body)
+			fmt.Fprint(w, `{"sha":"new-tree"}`)
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/openvibely/openvibely/git/commits":
+			fmt.Fprint(w, `{"sha":"new-commit"}`)
+		case r.Method == http.MethodPatch && r.URL.Path == "/repos/openvibely/openvibely/git/refs/heads/task/api-publish":
+			w.WriteHeader(http.StatusNotFound)
+			fmt.Fprint(w, `{"message":"Reference does not exist"}`)
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/openvibely/openvibely/git/refs":
+			fmt.Fprint(w, `{"ref":"refs/heads/task/api-publish","object":{"sha":"new-commit"}}`)
+		default:
+			t.Fatalf("unexpected GitHub API request: %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer server.Close()
+
+	svc := NewGitHubService(settingsRepo, "", "", "", "")
+	svc.apiBaseURL = server.URL
+	if _, err := svc.PublishBranch(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubPublishBranchRequest{
+		RepoPath:      repoDir,
+		Branch:        "task/api-publish",
+		BaseBranch:    "main",
+		CommitMessage: "Publish task change",
+	}); err != nil {
+		t.Fatalf("PublishBranch returned error: %v", err)
+	}
+	entries := decodeTreePayload(t, treePayload)
+	if len(entries) != 2 || entries[0]["path"] != "README.md" || entries[0]["sha"] != nil || entries[1]["path"] != "task-change.txt" {
+		t.Fatalf("expected remote README deletion and task-change.txt addition only, got %s", treePayload)
+	}
+}
+
 func TestPublishBranchPublishesCleanCommittedLocalBranchChanges(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	settingsRepo := repository.NewSettingsRepo(db)
