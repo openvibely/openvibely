@@ -2,9 +2,9 @@
 name: openvibely_update_system
 type: project
 created: 2026-08-02
-updated: 2026-09-03
-source: consolidation
-source_id: memory_consolidation_2026-09-03
+updated: 2026-09-05
+source: after_complete
+source_id: fd37f46bb8f14052236f06e2550dd109:d807938b2d9f87bd
 confidence: high
 title: OpenVibely Update System
 ---
@@ -24,7 +24,7 @@ Distribution and recovery:
 - The copied helper retains the original executable's OS signature. Helper handoff and coordinator cancellation are one atomic-winner transition under a shared lease; a prepared private journal is atomically renamed to the active journal before the coordinator can observe it.
 - Native install units are a complete macOS `.app` or the signed Windows/Linux desktop executable. Helpers journal phases, use native atomic publication, independently validate health/version, stop failed successors before rollback, and reconcile interrupted phases after restart.
 - Stage/apply/recovery protect app data, database, project root, desktop config, plugin root, custom trust files, and all updater live/backup/staging/temp/failed-install/Wails backup/helper/journal/atomic-temp/lease paths, including symlink-resolved placement.
-- Platform-specific code is limited to helper creation, waiting for parent exit, atomic replacement, relaunch, and stopping a failed successor. Shared helper lifecycle assembly should remain consolidated while preserving distribution-specific metadata and error context.
+- Platform-specific code is limited to helper creation, waiting for parent exit, atomic replacement, relaunch, and stopping a failed successor. Shared helper lifecycle assembly should remain consolidated while preserving distribution-specific metadata and error context. The identical bounded JSON relaunch-metadata decode/validation in the executable and app-bundle helpers is tracked for minimal shared-decoder consolidation in GitHub issue `#1047`; the app-bundle-only executable-relative path remains adapter-specific.
 - Git source keeps daily metric-only no-op behavior. Hosted and ordinary Docker replacement is externally controlled. Manual Docker users may approve through `POST /api/system/update/apply`; that path may drain and reach `StateReady` without a local artifact, while other accepted updates require staging.
 
 Trust and policy:

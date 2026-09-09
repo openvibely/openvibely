@@ -2,9 +2,9 @@
 name: ui_theming
 type: project
 created: 2026-08-11
-updated: 2026-09-03
+updated: 2026-09-08
 source: consolidation
-source_id: memory_consolidation_2026-09-03
+source_id: memory_consolidation_2026-09-08
 confidence: high
 title: UI Theming
 ---
@@ -30,4 +30,5 @@ Native palettes and imported styling:
 Contrast and shared action colors:
 - Generated graph/YAML roles `automationNodeBorder`, `automationEdge`, and `yamlIndentRail` are derived against their actual surfaces with minimum contrast targets of `1.5`, `3.0`, and `1.5` respectively. Graph strokes/edges use full-opacity semantic variables; inline active-rail colors can win because imported rail CSS is not `!important`.
 - `--ov-primary-action-color` is the shared normal color for `.chat-send-button` and `.task-state-running`. Native dark normal is `#7480ff` and native light has its corresponding native value; imported themes derive the token from their selected primary channel. Native generic/primary rules are scoped to native IDs so imported primary and hover behavior remains authoritative, and shared Send rules do not suppress hover.
+- Automation and Task Edit controls share `.ov-secondary-action` and the historical outlined `btn-outline` construction. Native dark hover is light gray `#c9d0db` with border matched and dark text `#1f2937`; native light hover is neutral `#CCCCCC` with dark text. Rules must support server-rendered compatibility state where `data-theme` exists before JavaScript adds `data-color-theme`, while excluding imported VS Code themes. A prior pink-hover regression came from changing Automation Edit to `btn-secondary` and broad dark-theme secondary overrides; real-pointer browser coverage protects native IDs, compatibility state, disabled behavior, primary-action preservation, and imported-theme authority.
 - Native light Alert inspection inline code uses `--ov-l-surface-active` and `--ov-l-text-strong` under `[data-theme="light"] [data-alert-markdown] :not(pre) > code`; fenced code and shared Chat/task-thread styling are unaffected. Browser coverage protects at least 4.5:1 computed contrast after detail hydration.

@@ -16,6 +16,24 @@ func TestBuildTaskPromptHeader(t *testing.T) {
 	}
 }
 
+func TestBuildTaskStatusInstructionsClassifiesOutcomeNotIntermediateErrors(t *testing.T) {
+	instructions := BuildTaskStatusInstructions()
+	for _, want := range []string{
+		"[STATUS: SUCCESS]",
+		"[STATUS: FAILED | <describe what prevented completion>]",
+		"[STATUS: NEEDS_FOLLOWUP | <describe what needs attention>]",
+		"Do not report task failure solely because a command, script, or tool returned an error or non-zero exit code",
+		"If you recovered and completed the requested outcome, report success",
+	} {
+		if !strings.Contains(instructions, want) {
+			t.Errorf("task status instructions missing %q: %q", want, instructions)
+		}
+	}
+	if strings.Contains(instructions, "If a command failed, a script returned non-zero") {
+		t.Fatalf("task status instructions retain command-level failure contract: %q", instructions)
+	}
+}
+
 func TestBuildAttachmentInstructions_Empty(t *testing.T) {
 	result := BuildAttachmentInstructions(nil)
 	if result != "" {

@@ -2,9 +2,9 @@
 name: testing_coverage_and_performance
 type: project
 created: 2026-06-07
-updated: 2026-09-06
-source: consolidation
-source_id: memory_consolidation_2026-09-06
+updated: 2026-09-08
+source: after_complete
+source_id: bc64fff57e407d951847a98b2011a12c:dd7b0a624133416b
 confidence: high
 title: Testing Coverage and Performance
 ---
@@ -38,6 +38,7 @@ Established projection patterns:
 
 Validation conventions:
 - Prefer `make test`, `make test-cover`, or `go test ./... -count=1 -timeout 120s`; use readiness polling instead of fixed sleeps and `testing.Short()` for timing-sensitive cases.
+- Default to ordinary tests. Use `go test -race` only for a concrete race-sensitive invariant changed in production (or an explicit user/issue/CI requirement), and keep that run to the smallest deterministic functional regression; concurrent-load evidence alone does not justify it, and performance or allocation gates must not run under the detector.
 - The primary Actions coverage/compile gate is `OPENVIBELY_SKIP_BROWSER_PERF=1 go test ./... -count=1 -timeout 240s -coverpkg=./... -coverprofile=coverage.txt`, including `cmd/server`. Codecov acceptance uses hosted `line_coverage` for the exact commit.
 - Preserve generated-file cleanliness, templ coverage exclusions, packaged-update native/E2E matrices, Linux cache identity/action pins, untrusted-cache handling, setup timing artifacts, and Windows rollback-helper cleanup.
 - Distinguish touched-scope defects from environment or known baseline failures. Report the narrow passing scope and exact broad failure; exact-head hosted checks and live publication evidence cannot be replaced by local success.
@@ -45,5 +46,6 @@ Validation conventions:
 
 Current gaps:
 - Projection/indexing work remains across Backlog, Insights, Automation history/live, swarms, Chat context, skills/plugins, task boards, review, Email receipts, Models, and Channels. Keep ownership in the most specific topic rather than accumulating task-by-task benchmark history here.
-- Tracked performance gaps include Schedule calendar sorting (`#867`), unnecessary Air templ generation (`#903`), scoped-file no-match grep materialization (`#936`), duplicate Automation Live graph loading (`#985`), repeated startup Memory Curator reconciliation (`#1007`), per-schedule Automation ownership lookup fan-out during due-schedule dispatch (`#1018`), and repeated full remote GitHub issue-history scans before local discovery pagination (`#1028`).
+- Tracked performance gaps include Schedule calendar sorting (`#867`), unnecessary Air templ generation (`#903`), scoped-file no-match grep materialization (`#936`), duplicate Automation Live graph loading (`#985`), repeated startup Memory Curator reconciliation (`#1007`), per-schedule Automation ownership lookup fan-out during due-schedule dispatch (`#1018`), repeated full remote GitHub issue-history scans before local discovery pagination (`#1028`), unbounded `view_pulse` agenda rows inflating model context (`#1036`), and global live-SSE subscription fan-out before project/task filtering (`#1049`).
+- Issue `#1042`'s compact Task-UI Agent catalog is implemented locally: Task board badges, Task create/edit selectors, board-only and post-action renders, and initial Task Detail use scalar Agent rows rather than rich configuration hydration. Completion remains blocked until its published PR `#1052` is republished from current `main` without its unrelated stale LLM provider/task-status changes and its 1,000-rich-Agent acceptance evidence measures actual full/main-content/board-only/detail handler renders under file-backed `1W + 1R` SQLite, including latency, allocated bytes and count, response HTML bytes, Agent-query counts, and comparable concurrent-read wait.
 - Timing-sensitive tests can fail under combined package load while passing in isolation; reproduce in isolation before classifying a product regression, but never use that as clearance for an unresolved exact-head hosted check.
