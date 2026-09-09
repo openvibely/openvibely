@@ -4366,6 +4366,103 @@ func TestAutomaticConflictResolutionRuntimeRestrictsPathsToExactConflictFiles(t 
 	}
 }
 
+func TestGoalAutoMergeReconciliationResumesOwnedConflictAfterBusyLease(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	repoDir := createTestGitRepo(t)
+	target := GetDefaultBranch(repoDir)
+	writeAndCommitTestFile(t, repoDir, "handoff-conflict.txt", "base\n", "Add handoff conflict base")
+	project := &models.Project{Name: "Conflict handoff project", RepoPath: repoDir}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Conflict handoff", Category: models.CategoryCompleted, Status: models.StatusCompleted, Priority: 2, AutoMergeOnGoalAchieved: true, MergeTargetBranch: target}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	ws := NewWorktreeService(taskRepo, projectRepo, settingsRepo)
+	worktreePath, branch, err := ws.SetupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(worktreePath, "handoff-conflict.txt"), []byte("task\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := CommitWorktreeChanges(worktreePath, "Change handoff conflict on task"); err != nil {
+		t.Fatal(err)
+	}
+	writeAndCommitTestFile(t, repoDir, "handoff-conflict.txt", "target\n", "Change handoff conflict on target")
+	targetBefore := strings.TrimSpace(string(runGitTest(t, repoDir, "rev-parse", target)))
+
+	goalSvc := NewTaskGoalService(repository.NewTaskGoalRepo(db), taskRepo, nil)
+	ws.SetTaskGoalService(goalSvc)
+	goal, err := goalSvc.SetGoal(ctx, task.ID, "resolve durable conflict", GoalOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := goalSvc.MarkAchieved(ctx, task.ID, goal.GoalID, "verified"); err != nil {
+		t.Fatal(err)
+	}
+	trigger := automaticMergeTrigger{goalTriggered: true, goalID: goal.GoalID}
+	result, err := ws.MergeBranchValidated(ctx, task, repoDir, "merge", func() error {
+		return ws.validateAutomaticMerge(ctx, task.ID, project, repoDir, trigger, task)
+	})
+	if err != nil || result == nil || len(result.ConflictFiles) == 0 || !ActiveMergeMatchesBranch(repoDir, branch) {
+		t.Fatalf("creating owned conflict: result=%+v err=%v", result, err)
+	}
+
+	agent := &models.LLMConfig{Name: "Handoff resolver", Provider: models.ProviderTest, Model: "test", IsDefault: true}
+	if err := llmConfigRepo.Create(ctx, agent); err != nil {
+		t.Fatal(err)
+	}
+	llmSvc := NewLLMService(llmConfigRepo, nil, nil, nil, nil, nil)
+	mock := &testutil.MockLLMCaller{Response: "resolved"}
+	mock.OnCall = func(_ context.Context, _ testutil.MockLLMCall) {
+		if err := os.WriteFile(filepath.Join(repoDir, "handoff-conflict.txt"), []byte("resolved\n"), 0o644); err != nil {
+			t.Error(err)
+		}
+	}
+	llmSvc.SetLLMCaller(mock)
+	ws.SetLLMService(llmSvc)
+
+	leaseKey, acquired := beginRepositoryMutation(repoDir)
+	if !acquired {
+		t.Fatal("failed to hold repository mutation lease")
+	}
+	ws.ReconcileGoalAutoMerge(ctx, task.ID)
+	endRepositoryMutation(leaseKey)
+	if mock.CallCount() != 0 || !ActiveMergeMatchesBranch(repoDir, branch) {
+		t.Fatalf("busy reconciliation mutated owned conflict: calls=%d active=%v", mock.CallCount(), ActiveMergeMatchesBranch(repoDir, branch))
+	}
+
+	ws.ReconcileGoalAutoMerge(ctx, task.ID)
+	if mock.CallCount() != 1 {
+		t.Fatalf("reconciled resolver calls = %d, want 1", mock.CallCount())
+	}
+	if HasActiveMerge(repoDir) || len(ActiveConflictFiles(repoDir)) != 0 {
+		t.Fatal("durable reconciliation left active merge state")
+	}
+	persisted, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.MergeStatus != models.MergeStatusMerged || !IsBranchMerged(repoDir, branch, target) {
+		t.Fatalf("durable reconciliation did not merge owned conflict: task=%+v", persisted)
+	}
+	targetAfter := strings.TrimSpace(string(runGitTest(t, repoDir, "rev-parse", target)))
+	if targetAfter == targetBefore {
+		t.Fatal("durable reconciliation did not create integration commit")
+	}
+	ws.ReconcileGoalAutoMerge(ctx, task.ID)
+	if afterReplay := strings.TrimSpace(string(runGitTest(t, repoDir, "rev-parse", target))); afterReplay != targetAfter || mock.CallCount() != 1 {
+		t.Fatalf("replayed reconciliation duplicated integration: before=%s after=%s calls=%d", targetAfter, afterReplay, mock.CallCount())
+	}
+}
+
 func TestGoalAutoMergeConflictRecoveryRevalidatesLifecycleBeforeCommit(t *testing.T) {
 	tests := []struct {
 		name   string
