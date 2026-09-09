@@ -324,14 +324,7 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 		llmprompt.BuildAttachmentInstructions(attachments) +
 		prompt
 	fullPrompt = llmprompt.ApplyTaskCreationToolMode(fullPrompt, rt.DefinitionNames())
-	fullPrompt += "\n\n---\nRESPONSE FORMAT REQUIREMENT: You MUST end your final response with exactly one of these status lines:\n" +
-		"- If the task completed successfully: [STATUS: SUCCESS]\n" +
-		"- If a command failed, a script returned non-zero, or the task could not be completed: [STATUS: FAILED | <describe what went wrong>]\n" +
-		"- If the task completed but something needs human attention: [STATUS: NEEDS_FOLLOWUP | <describe what needs attention>]\n" +
-		"Example: [STATUS: FAILED | fail.sh returned exit code 1]\n" +
-		"Example: [STATUS: NEEDS_FOLLOWUP | tests pass but 3 warnings need review]\n" +
-		"Replace <describe what went wrong> or <describe what needs attention> with your actual description.\n" +
-		"This status line is MANDATORY. Always include it as the very last line of your response."
+	fullPrompt += llmprompt.BuildTaskStatusInstructions()
 
 	oaAttachments, err := convertAttachments(attachments)
 	if err != nil {
@@ -548,14 +541,7 @@ func (a *Adapter) CallCompletionsStreaming(ctx context.Context, prompt string, a
 		llmprompt.BuildAttachmentInstructions(attachments) +
 		prompt
 	fullPrompt = llmprompt.ApplyTaskCreationToolMode(fullPrompt, rt.DefinitionNames())
-	fullPrompt += "\n\n---\nRESPONSE FORMAT REQUIREMENT: You MUST end your final response with exactly one of these status lines:\n" +
-		"- If the task completed successfully: [STATUS: SUCCESS]\n" +
-		"- If a command failed, a script returned non-zero, or the task could not be completed: [STATUS: FAILED | <describe what went wrong>]\n" +
-		"- If the task completed but something needs human attention: [STATUS: NEEDS_FOLLOWUP | <describe what needs attention>]\n" +
-		"Example: [STATUS: FAILED | fail.sh returned exit code 1]\n" +
-		"Example: [STATUS: NEEDS_FOLLOWUP | tests pass but 3 warnings need review]\n" +
-		"Replace <describe what went wrong> or <describe what needs attention> with your actual description.\n" +
-		"This status line is MANDATORY. Always include it as the very last line of your response."
+	fullPrompt += llmprompt.BuildTaskStatusInstructions()
 
 	oaAttachments, err := convertAttachments(attachments)
 	if err != nil {

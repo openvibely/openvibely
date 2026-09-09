@@ -1638,8 +1638,9 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	// codes and fail the task. Provider agentic paths handle tool errors internally:
 	// the model sees the error,
 	// can retry or fix the issue, and continues working. Intermediate command failures
-	// should not kill the task. The model uses [STATUS: FAILED | reason] to explicitly
-	// report task failure when it determines the task cannot be completed.
+	// should not kill the task. The provider-neutral task outcome contract tells the
+	// model to use [STATUS: FAILED | reason] only when the requested outcome remains
+	// incomplete after reasonable recovery attempts.
 
 	// Record success
 	completedExecution := false
