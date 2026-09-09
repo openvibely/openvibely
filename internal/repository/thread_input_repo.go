@@ -895,9 +895,13 @@ func (r *ThreadInputRepo) ClaimQueuedForChatExecution(ctx context.Context, input
 		if task.AutoMerge {
 			autoMerge = 1
 		}
+		autoMergeOnGoalAchieved := 0
+		if task.AutoMergeOnGoalAchieved {
+			autoMergeOnGoalAchieved = 1
+		}
 		if err := tx.QueryRowContext(ctx, `
-				INSERT INTO tasks (id, project_id, title, category, priority, status, prompt, agent_id, agent_definition_id, tag, display_order, parent_task_id, chain_config, swarm_role, swarm_status, swarm_config, swarm_sequence, worktree_path, worktree_branch, auto_merge, merge_target_branch, merge_status, base_branch, base_commit_sha, lineage_depth, created_via, telegram_chat_id)
-					VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)			RETURNING id, created_at, updated_at`, task.ProjectID, task.Title, task.Category, task.Priority, task.Status, task.Prompt, task.AgentID, task.AgentDefinitionID, task.Tag, displayOrder, task.ParentTaskID, task.ChainConfig, task.SwarmRole, task.SwarmStatus, defaultThreadTaskJSON(task.SwarmConfig), task.SwarmSequence, task.WorktreePath, task.WorktreeBranch, autoMerge, task.MergeTargetBranch, task.MergeStatus, task.BaseBranch, task.BaseCommitSHA, task.LineageDepth, task.CreatedVia, task.TelegramChatID).Scan(&task.ID, &task.CreatedAt, &task.UpdatedAt); err != nil {
+				INSERT INTO tasks (id, project_id, title, category, priority, status, prompt, agent_id, agent_definition_id, tag, display_order, parent_task_id, chain_config, swarm_role, swarm_status, swarm_config, swarm_sequence, worktree_path, worktree_branch, auto_merge, auto_merge_on_goal_achieved, merge_target_branch, merge_status, base_branch, base_commit_sha, lineage_depth, created_via, telegram_chat_id)
+					VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)			RETURNING id, created_at, updated_at`, task.ProjectID, task.Title, task.Category, task.Priority, task.Status, task.Prompt, task.AgentID, task.AgentDefinitionID, task.Tag, displayOrder, task.ParentTaskID, task.ChainConfig, task.SwarmRole, task.SwarmStatus, defaultThreadTaskJSON(task.SwarmConfig), task.SwarmSequence, task.WorktreePath, task.WorktreeBranch, autoMerge, autoMergeOnGoalAchieved, task.MergeTargetBranch, task.MergeStatus, task.BaseBranch, task.BaseCommitSHA, task.LineageDepth, task.CreatedVia, task.TelegramChatID).Scan(&task.ID, &task.CreatedAt, &task.UpdatedAt); err != nil {
 			return fmt.Errorf("creating queued chat task: %w", err)
 		}
 		task.DisplayOrder = displayOrder

@@ -28,6 +28,9 @@ type TaskCreationRequest struct {
 	AgentDefinitionID       string                     `json:"agent_definition_id"` // Optional: known agent definition ID
 	Agent                   string                     `json:"agent"`               // Optional: agent definition name (resolved to AgentDefinitionID)
 	Chain                   *models.ChainConfiguration `json:"chain,omitempty"`     // Optional: chain config for sequential task execution
+	AutoMerge               bool                       `json:"auto_merge,omitempty"`
+	AutoMergeOnGoalAchieved bool                       `json:"auto_merge_on_goal_achieved,omitempty"`
+	MergeTargetBranch       string                     `json:"merge_target_branch,omitempty"`
 	SourceGitHubIssueNumber int                        `json:"source_github_issue_number,omitempty"`
 	SourceGitHubRepoURL     string                     `json:"source_github_repo_url,omitempty"`
 }
@@ -150,14 +153,16 @@ func ExecuteTaskCreationsWithIndexedReturnAndPersistence(ctx context.Context, re
 		}
 
 		task := &models.Task{
-			ProjectID: projectID,
-			Title:     req.Title,
-			Prompt:    req.Prompt,
-			Status:    models.StatusPending,
-			Category:  category,
-			Priority:  req.Priority,
+			ProjectID:               projectID,
+			Title:                   req.Title,
+			Prompt:                  req.Prompt,
+			Status:                  models.StatusPending,
+			Category:                category,
+			Priority:                req.Priority,
+			AutoMerge:               req.AutoMerge,
+			AutoMergeOnGoalAchieved: req.AutoMergeOnGoalAchieved,
+			MergeTargetBranch:       strings.TrimSpace(req.MergeTargetBranch),
 		}
-
 		// Apply chain configuration if provided
 		if req.Chain != nil {
 			if err := task.SetChainConfig(req.Chain); err != nil {
@@ -288,20 +293,23 @@ func resolveTaskCreationAgentDefinition(ctx context.Context, req TaskCreationReq
 
 // TaskEditRequest represents a typed task edit action request.
 type TaskEditRequest struct {
-	ID                   string                     `json:"id"`                               // Required: task ID to edit
-	Title                string                     `json:"title,omitempty"`                  // Optional: new title
-	Prompt               string                     `json:"prompt,omitempty"`                 // Optional: new prompt
-	Category             string                     `json:"category,omitempty"`               // Optional: new category
-	Priority             int                        `json:"priority,omitempty"`               // Optional: new priority (1-4)
-	PrioritySet          bool                       `json:"-"`                                // Internal: true when JSON explicitly supplied priority
-	Tag                  string                     `json:"tag,omitempty"`                    // Optional: new tag ("feature", "bug", "")
-	AgentID              string                     `json:"agent_id,omitempty"`               // Optional: new model config ID (empty = leave unchanged)
-	AgentConfigID        string                     `json:"agent_config_id,omitempty"`        // Optional: alias for agent_id (for compatibility)
-	AgentDefinitionID    string                     `json:"agent_definition_id,omitempty"`    // Optional: known primary Agent definition ID
-	Agent                string                     `json:"agent,omitempty"`                  // Optional: exact primary Agent definition name
-	ClearAgentDefinition bool                       `json:"clear_agent_definition,omitempty"` // Optional: explicitly clear the primary Agent definition
-	Chain                *models.ChainConfiguration `json:"chain,omitempty"`                  // Optional: chain config for sequential task execution
-	Attachments          []string                   `json:"attachments,omitempty"`            // Optional: file paths to attach to the task
+	ID                      string                     `json:"id"`                                    // Required: task ID to edit
+	Title                   string                     `json:"title,omitempty"`                       // Optional: new title
+	Prompt                  string                     `json:"prompt,omitempty"`                      // Optional: new prompt
+	Category                string                     `json:"category,omitempty"`                    // Optional: new category
+	Priority                int                        `json:"priority,omitempty"`                    // Optional: new priority (1-4)
+	PrioritySet             bool                       `json:"-"`                                     // Internal: true when JSON explicitly supplied priority
+	Tag                     string                     `json:"tag,omitempty"`                         // Optional: new tag ("feature", "bug", "")
+	AgentID                 string                     `json:"agent_id,omitempty"`                    // Optional: new model config ID (empty = leave unchanged)
+	AgentConfigID           string                     `json:"agent_config_id,omitempty"`             // Optional: alias for agent_id (for compatibility)
+	AgentDefinitionID       string                     `json:"agent_definition_id,omitempty"`         // Optional: known primary Agent definition ID
+	Agent                   string                     `json:"agent,omitempty"`                       // Optional: exact primary Agent definition name
+	ClearAgentDefinition    bool                       `json:"clear_agent_definition,omitempty"`      // Optional: explicitly clear the primary Agent definition
+	Chain                   *models.ChainConfiguration `json:"chain,omitempty"`                       // Optional: chain config for sequential task execution
+	AutoMerge               *bool                      `json:"auto_merge,omitempty"`                  // Optional: merge after successful execution completion
+	AutoMergeOnGoalAchieved *bool                      `json:"auto_merge_on_goal_achieved,omitempty"` // Optional: merge when the stored goal becomes achieved
+	MergeTargetBranch       *string                    `json:"merge_target_branch,omitempty"`         // Optional: replacement merge target branch
+	Attachments             []string                   `json:"attachments,omitempty"`                 // Optional: file paths to attach to the task
 }
 
 func (r *TaskEditRequest) UnmarshalJSON(data []byte) error {
@@ -390,6 +398,21 @@ func ExecuteTaskEdits(ctx context.Context, requests []TaskEditRequest, projectID
 			if newTag != task.Tag {
 				task.Tag = newTag
 				changes = append(changes, "tag")
+			}
+		}
+		if req.AutoMerge != nil && task.AutoMerge != *req.AutoMerge {
+			task.AutoMerge = *req.AutoMerge
+			changes = append(changes, "auto_merge")
+		}
+		if req.AutoMergeOnGoalAchieved != nil && task.AutoMergeOnGoalAchieved != *req.AutoMergeOnGoalAchieved {
+			task.AutoMergeOnGoalAchieved = *req.AutoMergeOnGoalAchieved
+			changes = append(changes, "auto_merge_on_goal_achieved")
+		}
+		if req.MergeTargetBranch != nil {
+			target := strings.TrimSpace(*req.MergeTargetBranch)
+			if task.MergeTargetBranch != target {
+				task.MergeTargetBranch = target
+				changes = append(changes, "merge_target_branch")
 			}
 		}
 		// Handle agent assignment - support both agent_id and agent_config_id for compatibility

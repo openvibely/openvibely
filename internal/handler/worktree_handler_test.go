@@ -1119,13 +1119,14 @@ func TestHandler_UpdateTask_UnchecksAutoMerge(t *testing.T) {
 
 	// Create task with auto_merge enabled
 	task := &models.Task{
-		ProjectID:         project.ID,
-		Title:             "Auto Merge Test",
-		Prompt:            "do something",
-		Category:          models.CategoryActive,
-		Status:            models.StatusPending,
-		AutoMerge:         true,
-		MergeTargetBranch: "main",
+		ProjectID:               project.ID,
+		Title:                   "Auto Merge Test",
+		Prompt:                  "do something",
+		Category:                models.CategoryActive,
+		Status:                  models.StatusPending,
+		AutoMerge:               true,
+		AutoMergeOnGoalAchieved: true,
+		MergeTargetBranch:       "main",
 	}
 	if err := h.taskRepo.Create(ctx, task); err != nil {
 		t.Fatal(err)
@@ -1141,12 +1142,13 @@ func TestHandler_UpdateTask_UnchecksAutoMerge(t *testing.T) {
 	// The hidden sentinel field auto_merge_present=1 tells the handler
 	// that the edit form was submitted, so it should set auto_merge=false.
 	form := url.Values{
-		"title":              {"Auto Merge Test"},
-		"prompt":             {"do something"},
-		"category":           {"active"},
-		"priority":           {"2"},
-		"auto_merge_present": {"1"},
-		// Note: no "auto_merge" key — this is what happens when checkbox is unchecked
+		"title":                               {"Auto Merge Test"},
+		"prompt":                              {"do something"},
+		"category":                            {"active"},
+		"priority":                            {"2"},
+		"auto_merge_present":                  {"1"},
+		"auto_merge_on_goal_achieved_present": {"1"},
+		// Unchecked checkboxes send no value; both independent sentinels clear them.
 	}
 
 	req := worktreeFormRequest(http.MethodPut, "/tasks/"+task.ID, form)
@@ -1161,6 +1163,9 @@ func TestHandler_UpdateTask_UnchecksAutoMerge(t *testing.T) {
 	updated, _ := h.taskSvc.GetByID(ctx, task.ID)
 	if updated.AutoMerge {
 		t.Error("expected auto_merge=false after unchecking, but got true")
+	}
+	if updated.AutoMergeOnGoalAchieved {
+		t.Error("expected auto_merge_on_goal_achieved=false after unchecking, but got true")
 	}
 }
 

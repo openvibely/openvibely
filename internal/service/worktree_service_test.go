@@ -4188,6 +4188,109 @@ func TestCleanupWorktree(t *testing.T) {
 	}
 }
 
+func TestGoalAchievedAutoMergeUsesCanonicalFlowAndIsIdempotentWithCompletion(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	repoDir := createTestGitRepo(t)
+	target := GetDefaultBranch(repoDir)
+	project := &models.Project{Name: "Goal merge project", RepoPath: repoDir}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	ws := NewWorktreeService(taskRepo, projectRepo, settingsRepo)
+	goalSvc := NewTaskGoalService(repository.NewTaskGoalRepo(db), taskRepo, nil)
+	ws.SetTaskGoalService(goalSvc)
+	goalSvc.SetGoalAchievedHandler(ws.AutoMergeOnGoalAchieved)
+
+	task := &models.Task{ProjectID: project.ID, Title: "Goal merge", Category: models.CategoryActive, Status: models.StatusPending, Priority: 2, AutoMerge: true, AutoMergeOnGoalAchieved: true, MergeTargetBranch: target}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	worktreePath, branch, err := ws.SetupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatalf("setup worktree: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(worktreePath, "goal-merge.txt"), []byte("achieved\n"), 0o644); err != nil {
+		t.Fatalf("write task change: %v", err)
+	}
+	if err := CommitWorktreeChanges(worktreePath, "Add goal merge fixture"); err != nil {
+		t.Fatalf("commit task change: %v", err)
+	}
+	if err := taskRepo.UpdateStatus(ctx, task.ID, models.StatusCompleted); err != nil {
+		t.Fatalf("complete task: %v", err)
+	}
+	goal, err := goalSvc.SetGoal(ctx, task.ID, "merge when achieved", GoalOptions{})
+	if err != nil {
+		t.Fatalf("set goal: %v", err)
+	}
+	start := make(chan struct{})
+	achievementErr := make(chan error, 1)
+	completionDone := make(chan struct{})
+	go func() {
+		<-start
+		_, markErr := goalSvc.MarkAchieved(ctx, task.ID, goal.GoalID, "verified")
+		achievementErr <- markErr
+	}()
+	go func() {
+		<-start
+		ws.autoMergeTask(ctx, task.ID, "", false)
+		close(completionDone)
+	}()
+	close(start)
+	if err := <-achievementErr; err != nil {
+		t.Fatalf("mark achieved: %v", err)
+	}
+	<-completionDone
+	merged, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("reload merged task: %v", err)
+	}
+	if merged.MergeStatus != models.MergeStatusMerged || !IsBranchMerged(repoDir, branch, target) {
+		t.Fatalf("goal achievement did not merge branch: task=%+v", merged)
+	}
+	before := strings.TrimSpace(string(runGitTest(t, repoDir, "rev-parse", target)))
+	ws.autoMergeTask(ctx, task.ID, "", false)
+	after := strings.TrimSpace(string(runGitTest(t, repoDir, "rev-parse", target)))
+	if after != before {
+		t.Fatalf("completion trigger duplicated achieved-goal merge: before=%s after=%s", before, after)
+	}
+
+	failed := &models.Task{ProjectID: project.ID, Title: "Failed goal merge", Category: models.CategoryActive, Status: models.StatusPending, Priority: 2, AutoMergeOnGoalAchieved: true, MergeTargetBranch: target}
+	if err := taskRepo.Create(ctx, failed); err != nil {
+		t.Fatalf("create failed task: %v", err)
+	}
+	failedWorktree, failedBranch, err := ws.SetupWorktree(ctx, failed, repoDir)
+	if err != nil {
+		t.Fatalf("setup failed task worktree: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(failedWorktree, "failed-goal-merge.txt"), []byte("do not merge\n"), 0o644); err != nil {
+		t.Fatalf("write failed task change: %v", err)
+	}
+	if err := CommitWorktreeChanges(failedWorktree, "Add failed goal fixture"); err != nil {
+		t.Fatalf("commit failed task change: %v", err)
+	}
+	if err := taskRepo.UpdateStatus(ctx, failed.ID, models.StatusFailed); err != nil {
+		t.Fatalf("fail task: %v", err)
+	}
+	failedGoal, err := goalSvc.SetGoal(ctx, failed.ID, "must not merge", GoalOptions{})
+	if err != nil {
+		t.Fatalf("set failed task goal: %v", err)
+	}
+	if _, err := goalSvc.MarkAchieved(ctx, failed.ID, failedGoal.GoalID, "audit said achieved"); err != nil {
+		t.Fatalf("mark failed task goal achieved: %v", err)
+	}
+	failedReloaded, err := taskRepo.GetByID(ctx, failed.ID)
+	if err != nil {
+		t.Fatalf("reload failed task: %v", err)
+	}
+	if failedReloaded.MergeStatus == models.MergeStatusMerged || IsBranchMerged(repoDir, failedBranch, target) {
+		t.Fatal("failed task was merged by goal achievement")
+	}
+}
+
 func TestCreateTaskWithAutoMerge(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := repository.NewTaskRepo(db, nil)

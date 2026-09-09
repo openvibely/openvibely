@@ -399,8 +399,8 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 									</select>
 								</div>
 							}
-							<!-- Git Worktree: Auto-merge -->
-							<div class="form-control mb-4">
+							<!-- Git Worktree: Automatic merge triggers -->
+							<div class="form-control mb-2">
 								<label class="label cursor-pointer justify-start gap-2">
 									<input type="hidden" name="auto_merge_present" value="1"/>
 									<input
@@ -411,7 +411,21 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 											checked
 										}
 									/>
-									<span class="label-text">Auto-merge to target branch on completion</span>
+									<span class="label-text">Auto-merge to target branch on successful completion</span>
+								</label>
+							</div>
+							<div class="form-control mb-4">
+								<label class="label cursor-pointer justify-start gap-2">
+									<input type="hidden" name="auto_merge_on_goal_achieved_present" value="1"/>
+									<input
+										type="checkbox"
+										name="auto_merge_on_goal_achieved"
+										class="toggle toggle-sm toggle-primary"
+										if task.AutoMergeOnGoalAchieved {
+											checked
+										}
+									/>
+									<span class="label-text">Auto-merge to target branch when goal is achieved</span>
 								</label>
 							</div>
 							<!-- Attachments Section -->

@@ -323,18 +323,20 @@ func TestTaskDetailContent_LifecycleTabFillsRemainingHeight(t *testing.T) {
 
 func TestTaskDetailContent_DetailsTabRendersScrollableMatchedSectionCards(t *testing.T) {
 	task := &models.Task{
-		ID:                "task-layout-1",
-		Title:             "Task",
-		ProjectID:         "project-1",
-		Status:            models.StatusCompleted,
-		Category:          models.CategoryCompleted,
-		Prompt:            "Do the thing",
-		AgentID:           stringPtr("model-1"),
-		AgentDefinitionID: stringPtr("agent-1"),
-		Tag:               models.TagFeature,
-		WorktreeBranch:    "task/layout",
-		WorktreePath:      "/tmp/worktree",
-		MergeTargetBranch: "main",
+		ID:                      "task-layout-1",
+		Title:                   "Task",
+		ProjectID:               "project-1",
+		Status:                  models.StatusCompleted,
+		Category:                models.CategoryCompleted,
+		Prompt:                  "Do the thing",
+		AgentID:                 stringPtr("model-1"),
+		AgentDefinitionID:       stringPtr("agent-1"),
+		Tag:                     models.TagFeature,
+		WorktreeBranch:          "task/layout",
+		WorktreePath:            "/tmp/worktree",
+		MergeTargetBranch:       "main",
+		AutoMerge:               true,
+		AutoMergeOnGoalAchieved: true,
 	}
 	goal := &models.TaskGoal{
 		GoalID:    "goal-1",
@@ -380,7 +382,7 @@ func TestTaskDetailContent_DetailsTabRendersScrollableMatchedSectionCards(t *tes
 	if strings.Contains(output, `<pre class="p-4 bg-base-100/60 border border-base-300 rounded-lg text-sm`) {
 		t.Fatal("prompt should not render with the old monospace pre styling")
 	}
-	for _, required := range []string{"Model One", "Agent One", "Feature", `name="goal"`, `name="goal_active"`, `name="auto_merge"`, `>active</span>`} {
+	for _, required := range []string{"Model One", "Agent One", "Feature", `name="goal"`, `name="goal_active"`, `name="auto_merge"`, `name="auto_merge_on_goal_achieved"`, "on successful completion", "when goal is achieved", `>active</span>`} {
 		if !strings.Contains(output, required) {
 			t.Fatalf("expected task details/edit markup to include %q", required)
 		}
@@ -394,7 +396,7 @@ func TestTaskDetailContent_DetailsTabRendersScrollableMatchedSectionCards(t *tes
 		t.Fatal("expected task detail view before edit form")
 	}
 	viewOnly := output[viewStart:editStart]
-	for _, forbidden := range []string{"Add goal", "Pause", "Resume", "Clear", "Auto-merge on completion", `name="auto_merge"`} {
+	for _, forbidden := range []string{"Add goal", "Pause", "Resume", "Clear", "Auto-merge to target branch on successful completion", "Auto-merge to target branch when goal is achieved", `name="auto_merge"`, `name="auto_merge_on_goal_achieved"`} {
 		if strings.Contains(viewOnly, forbidden) {
 			t.Fatalf("read-only details view should not include edit/configuration control %q", forbidden)
 		}

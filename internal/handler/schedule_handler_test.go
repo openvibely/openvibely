@@ -900,7 +900,9 @@ func TestViewSchedule_AutoMergeOptionRendered(t *testing.T) {
 	modal := body[modalStart:]
 	for _, want := range []string{
 		`type="checkbox" name="auto_merge"`,
-		`Auto-merge to target branch on completion`,
+		`Auto-merge to target branch on successful completion`,
+		`type="checkbox" name="auto_merge_on_goal_achieved"`,
+		`Auto-merge to target branch when goal is achieved`,
 	} {
 		if !strings.Contains(modal, want) {
 			t.Fatalf("scheduled task modal missing %q", want)
@@ -910,13 +912,14 @@ func TestViewSchedule_AutoMergeOptionRendered(t *testing.T) {
 
 func TestCreateScheduledTask_AutoMergeIntent(t *testing.T) {
 	for _, tcse := range []struct {
-		name       string
-		htmx       bool
-		autoMerge  bool
-		wantStatus int
+		name                    string
+		htmx                    bool
+		autoMerge               bool
+		autoMergeOnGoalAchieved bool
+		wantStatus              int
 	}{
-		{name: "HTMX enabled", htmx: true, autoMerge: true, wantStatus: http.StatusOK},
-		{name: "native enabled", autoMerge: true, wantStatus: http.StatusSeeOther},
+		{name: "HTMX both enabled", htmx: true, autoMerge: true, autoMergeOnGoalAchieved: true, wantStatus: http.StatusOK},
+		{name: "native goal enabled", autoMergeOnGoalAchieved: true, wantStatus: http.StatusSeeOther},
 		{name: "HTMX omitted", htmx: true, wantStatus: http.StatusOK},
 		{name: "native omitted", wantStatus: http.StatusSeeOther},
 	} {
@@ -935,6 +938,9 @@ func TestCreateScheduledTask_AutoMergeIntent(t *testing.T) {
 			}
 			if tcse.autoMerge {
 				form.Set("auto_merge", "on")
+			}
+			if tcse.autoMergeOnGoalAchieved {
+				form.Set("auto_merge_on_goal_achieved", "on")
 			}
 
 			path := "/tasks?project_id=" + project.ID + "&from=schedule"
@@ -958,6 +964,9 @@ func TestCreateScheduledTask_AutoMergeIntent(t *testing.T) {
 			created := tasks[0]
 			if created.AutoMerge != tcse.autoMerge {
 				t.Fatalf("AutoMerge = %t, want %t", created.AutoMerge, tcse.autoMerge)
+			}
+			if created.AutoMergeOnGoalAchieved != tcse.autoMergeOnGoalAchieved {
+				t.Fatalf("AutoMergeOnGoalAchieved = %t, want %t", created.AutoMergeOnGoalAchieved, tcse.autoMergeOnGoalAchieved)
 			}
 
 			schedules, err := tc.scheduleRepo.ListByTask(context.Background(), created.ID)
