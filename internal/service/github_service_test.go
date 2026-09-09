@@ -2447,7 +2447,7 @@ func TestPublishBranchNoOpsWhenDesiredTreeMatchesRemoteTaskBranch(t *testing.T) 
 	}
 }
 
-func TestPublishBranchNoOpsWhenNoChangesAndRemoteTaskBranchExists(t *testing.T) {
+func TestPublishBranchRestoresRemoteTaskBranchToBaseWhenNoChanges(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	settingsRepo := repository.NewSettingsRepo(db)
 	ctx := context.Background()
@@ -2461,6 +2461,8 @@ func TestPublishBranchNoOpsWhenNoChangesAndRemoteTaskBranchExists(t *testing.T) 
 	repoDir := createTestGitRepo(t)
 	remoteBaseSHA := "1111111111111111111111111111111111111111"
 	remoteBranchSHA := "2222222222222222222222222222222222222222"
+	var commitPayload string
+	var refPayload string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Authorization"); got != "Bearer ghp_test" {
 			t.Fatalf("expected PAT bearer auth, got %q", got)
@@ -2471,8 +2473,26 @@ func TestPublishBranchNoOpsWhenNoChangesAndRemoteTaskBranchExists(t *testing.T) 
 			_, _ = w.Write([]byte(`{"object":{"sha":"` + remoteBaseSHA + `"}}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/git/ref/heads/task/api-publish":
 			_, _ = w.Write([]byte(`{"object":{"sha":"` + remoteBranchSHA + `"}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/git/commits/"+remoteBaseSHA:
+			_, _ = w.Write([]byte(`{"tree":{"sha":"base-tree"}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/git/commits/"+remoteBranchSHA:
+			_, _ = w.Write([]byte(`{"tree":{"sha":"stale-task-tree"}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/openvibely/openvibely/git/commits":
+			body, _ := io.ReadAll(r.Body)
+			commitPayload = string(body)
+			if !strings.Contains(commitPayload, `"tree":"base-tree"`) || !strings.Contains(commitPayload, `"parents":["`+remoteBranchSHA+`"]`) {
+				t.Fatalf("expected restoration commit based on stale task branch, got %s", commitPayload)
+			}
+			_, _ = w.Write([]byte(`{"sha":"restored-commit"}`))
+		case r.Method == http.MethodPatch && r.URL.Path == "/repos/openvibely/openvibely/git/refs/heads/task/api-publish":
+			body, _ := io.ReadAll(r.Body)
+			refPayload = string(body)
+			if !strings.Contains(refPayload, `"sha":"restored-commit"`) || !strings.Contains(refPayload, `"force":false`) {
+				t.Fatalf("unexpected restoration ref payload: %s", refPayload)
+			}
+			_, _ = w.Write([]byte(`{"ref":"refs/heads/task/api-publish","object":{"sha":"restored-commit"}}`))
 		default:
-			t.Fatalf("unexpected GitHub API request for no-op publish: %s %s", r.Method, r.URL.String())
+			t.Fatalf("unexpected GitHub API request for restoration publish: %s %s", r.Method, r.URL.String())
 		}
 	}))
 	defer server.Close()
@@ -2485,13 +2505,20 @@ func TestPublishBranchNoOpsWhenNoChangesAndRemoteTaskBranchExists(t *testing.T) 
 		}
 		return defaultRunGit(ctx, dir, extraEnv, args...)
 	}
-	if _, err := svc.PublishBranch(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubPublishBranchRequest{
+	result, err := svc.PublishBranch(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubPublishBranchRequest{
 		RepoPath:      repoDir,
 		Branch:        "task/api-publish",
 		BaseBranch:    "main",
-		CommitMessage: "No-op publish via API",
-	}); err != nil {
+		CommitMessage: "Restore task branch via API",
+	})
+	if err != nil {
 		t.Fatalf("PublishBranch returned error: %v", err)
+	}
+	if result.HeadSHA != "restored-commit" || !result.CreatedCommit || result.ParentSHA != remoteBranchSHA {
+		t.Fatalf("unexpected restoration result: %#v", result)
+	}
+	if commitPayload == "" || refPayload == "" {
+		t.Fatal("expected restoration commit and ref update")
 	}
 }
 
@@ -2596,6 +2623,10 @@ func TestPublishBranchNoChangesConcurrentBranchCreationSucceeds(t *testing.T) {
 				return
 			}
 			_, _ = w.Write([]byte(`{"object":{"sha":"` + concurrentBranchSHA + `"}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/git/commits/"+remoteBaseSHA:
+			_, _ = w.Write([]byte(`{"tree":{"sha":"base-tree"}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/git/commits/"+concurrentBranchSHA:
+			_, _ = w.Write([]byte(`{"tree":{"sha":"base-tree"}}`))
 		case r.Method == http.MethodPatch && r.URL.Path == "/repos/openvibely/openvibely/git/refs/heads/task/api-publish":
 			patches++
 			body, _ := io.ReadAll(r.Body)
