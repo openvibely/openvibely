@@ -170,7 +170,8 @@ func TestAppBundleUpdateHelperArgumentAndRelaunchParsingContracts(t *testing.T) 
 	}
 
 	var relaunch AppBundleUpdateHelperConfig
-	metadataBytes, err := json.Marshal(packagedUpdateRelaunchMetadata{Arguments: []string{"OpenVibely", "--flag"}, WorkingDirectory: t.TempDir(), ExecutableRelative: "Contents/MacOS/OpenVibely"})
+	workingDirectory := t.TempDir()
+	metadataBytes, err := json.Marshal(packagedUpdateRelaunchMetadata{Arguments: []string{"OpenVibely", "--flag"}, WorkingDirectory: workingDirectory, ExecutableRelative: "Contents/MacOS/OpenVibely"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +179,7 @@ func TestAppBundleUpdateHelperArgumentAndRelaunchParsingContracts(t *testing.T) 
 	if err := LoadAppBundleUpdateHelperRelaunch(strings.NewReader(metadata), &relaunch); err != nil {
 		t.Fatalf("LoadAppBundleUpdateHelperRelaunch: %v", err)
 	}
-	if len(relaunch.Arguments) != 2 || relaunch.Arguments[1] != "--flag" || relaunch.ExecutableRelative == "" {
+	if len(relaunch.Arguments) != 2 || relaunch.Arguments[1] != "--flag" || relaunch.WorkingDirectory != workingDirectory || relaunch.ExecutableRelative == "" {
 		t.Fatalf("relaunch config = %#v", relaunch)
 	}
 	for _, input := range []string{
