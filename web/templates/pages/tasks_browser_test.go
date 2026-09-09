@@ -24,6 +24,108 @@ import (
 	"github.com/openvibely/openvibely/web/templates/layout"
 )
 
+type taskDragCoordinates struct {
+	phase          string
+	startX, startY float64
+	dropX, dropY   float64
+}
+
+func driveNativeTaskDrags(debugPort int, serverURL string, dragReady <-chan taskDragCoordinates) <-chan error {
+	result := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		type debugTarget struct {
+			URL                  string `json:"url"`
+			WebSocketDebuggerURL string `json:"webSocketDebuggerUrl"`
+		}
+		var target debugTarget
+		for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline) && target.WebSocketDebuggerURL == ""; {
+			resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/json/list", debugPort))
+			if err == nil {
+				var targets []debugTarget
+				decodeErr := json.NewDecoder(resp.Body).Decode(&targets)
+				_ = resp.Body.Close()
+				if decodeErr == nil {
+					for _, candidate := range targets {
+						if strings.HasPrefix(candidate.URL, serverURL) && candidate.WebSocketDebuggerURL != "" {
+							target = candidate
+							break
+						}
+					}
+				}
+			}
+			if target.WebSocketDebuggerURL == "" {
+				time.Sleep(25 * time.Millisecond)
+			}
+		}
+		if target.WebSocketDebuggerURL == "" {
+			result <- fmt.Errorf("find Chrome debugging target for %s", serverURL)
+			return
+		}
+		conn, _, err := websocket.Dial(ctx, target.WebSocketDebuggerURL, nil)
+		if err != nil {
+			result <- err
+			return
+		}
+		defer conn.CloseNow()
+		nextID := 0
+		dispatch := func(params map[string]any) error {
+			nextID++
+			payload, err := json.Marshal(map[string]any{"id": nextID, "method": "Input.dispatchMouseEvent", "params": params})
+			if err != nil {
+				return err
+			}
+			if err = conn.Write(ctx, websocket.MessageText, payload); err != nil {
+				return err
+			}
+			for {
+				_, message, err := conn.Read(ctx)
+				if err != nil {
+					return err
+				}
+				var response struct {
+					ID    int             `json:"id"`
+					Error json.RawMessage `json:"error"`
+				}
+				if json.Unmarshal(message, &response) != nil || response.ID != nextID {
+					continue
+				}
+				if len(response.Error) > 0 {
+					return fmt.Errorf("CDP Input.dispatchMouseEvent: %s", response.Error)
+				}
+				return nil
+			}
+		}
+		for _, expectedPhase := range []string{"success", "failure"} {
+			var coordinates taskDragCoordinates
+			select {
+			case coordinates = <-dragReady:
+			case <-ctx.Done():
+				result <- ctx.Err()
+				return
+			}
+			if coordinates.phase != expectedPhase {
+				result <- fmt.Errorf("native drag phase = %q, want %q", coordinates.phase, expectedPhase)
+				return
+			}
+			for _, params := range []map[string]any{
+				{"type": "mouseMoved", "x": coordinates.startX, "y": coordinates.startY},
+				{"type": "mousePressed", "x": coordinates.startX, "y": coordinates.startY, "button": "left", "buttons": 1, "clickCount": 1},
+				{"type": "mouseMoved", "x": coordinates.dropX, "y": coordinates.dropY, "button": "left", "buttons": 1},
+				{"type": "mouseReleased", "x": coordinates.dropX, "y": coordinates.dropY, "button": "left", "buttons": 0, "clickCount": 1},
+			} {
+				if err := dispatch(params); err != nil {
+					result <- err
+					return
+				}
+			}
+		}
+		result <- nil
+	}()
+	return result
+}
+
 func TestTasksDefaultAndPersistedSortsAcrossLiveRefreshAndDragInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))
@@ -45,6 +147,7 @@ func TestTasksDefaultAndPersistedSortsAcrossLiveRefreshAndDragInChrome(t *testin
 		{ID: "completed-legacy", ProjectID: project.ID, Title: "Mike Legacy Completed", Category: models.CategoryCompleted, Status: models.StatusCompleted, CreatedAt: base.Add(50 * time.Minute), UpdatedAt: base.Add(20 * time.Minute), CompletedAt: nil, DisplayOrder: 1},
 		{ID: "completed-new", ProjectID: project.ID, Title: "Zulu Completed", Category: models.CategoryCompleted, Status: models.StatusCompleted, CreatedAt: base, UpdatedAt: base, CompletedAt: &completedNew, DisplayOrder: 2},
 		{ID: "active-move", ProjectID: project.ID, Title: "Delta Moved", Category: models.CategoryActive, Status: models.StatusPending, CreatedAt: base.Add(5 * time.Minute), UpdatedAt: base.Add(5 * time.Minute), DisplayOrder: 0},
+		{ID: "active-fail", ProjectID: project.ID, Title: "Echo Failed Move", Category: models.CategoryActive, Status: models.StatusPending, CreatedAt: base.Add(6 * time.Minute), UpdatedAt: base.Add(6 * time.Minute), DisplayOrder: 1},
 	}
 	clock := base.Add(40 * time.Minute)
 
@@ -107,6 +210,8 @@ func TestTasksDefaultAndPersistedSortsAcrossLiveRefreshAndDragInChrome(t *testin
 window.addEventListener('DOMContentLoaded', function() {
   function report(status, message) { return fetch('/browser-result?status=' + encodeURIComponent(status) + '&message=' + encodeURIComponent(message || ''), {method:'POST'}); }
   function fail(message) { throw new Error(message); }
+  window.__taskMoveAlerts = [];
+  window.alert = function(message) { window.__taskMoveAlerts.push(String(message)); };
   function waitFor(check, label) {
     var started = performance.now();
     return new Promise(function(resolve, reject) {
@@ -170,18 +275,39 @@ window.addEventListener('DOMContentLoaded', function() {
     assertStateIconBeforeTitle('completed-old', 'merged');
     assertStateIconBeforeTitle('completed-new', 'goal-met');
 
-    var card = document.getElementById('task-active-move');
-    var completedZone = zone('completed');
-    var cardRect = card.getBoundingClientRect();
-    var zoneRect = completedZone.getBoundingClientRect();
-    var startX = cardRect.left + 10, startY = cardRect.top + 10;
-    var dropX = zoneRect.left + zoneRect.width / 2, dropY = zoneRect.top + 10;
-    card.dispatchEvent(new PointerEvent('pointerdown', {bubbles:true, pointerId:9, pointerType:'mouse', button:0, buttons:1, clientX:startX, clientY:startY}));
-    window.dispatchEvent(new PointerEvent('pointermove', {bubbles:true, cancelable:true, pointerId:9, pointerType:'mouse', buttons:1, clientX:dropX, clientY:dropY}));
-    window.dispatchEvent(new PointerEvent('pointerup', {bubbles:true, pointerId:9, pointerType:'mouse', button:0, clientX:dropX, clientY:dropY}));
-    await waitFor(function() { return ids('completed')[0] === 'active-move'; }, 'drag into Completed');
-    assertOrder('completed', ['active-move', 'completed-live', 'completed-new', 'completed-legacy', 'completed-old'], 'dragged task completion order');
+	    function cardIn(category, id) { var target = zone(category); return !!(target && target.contains(document.getElementById('task-' + id))); }
+	    async function nativeMove(id, phase, expectSuccess) {
+	      var card = document.getElementById('task-' + id), completedZone = zone('completed');
+	      var cardRect = card.getBoundingClientRect(), zoneRect = completedZone.getBoundingClientRect();
+	      var startX = cardRect.left + 10, startY = cardRect.top + 10;
+	      var dropX = zoneRect.left + zoneRect.width / 2, dropY = zoneRect.top + 10;
+	      var released = false, sourceFlash = false;
+	      function sample() {
+	        if (!released) return requestAnimationFrame(sample);
+	        if (expectSuccess && !cardIn('completed', id)) sourceFlash = true;
+	        if (window.hasPendingKanbanMoves && window.hasPendingKanbanMoves()) requestAnimationFrame(sample);
+	      }
+	      document.addEventListener('pointerup', function onPointerUp() {
+	        document.removeEventListener('pointerup', onPointerUp, true);
+	        released = true;
+	        requestAnimationFrame(sample);
+	        window.dispatchEvent(new CustomEvent('sse-task-event', {detail:{type:'task_updated', project_id:'project-tasks-browser'}}));
+	      }, true);
+	      await fetch('/browser-drag-ready?phase=' + phase + '&start_x=' + startX + '&start_y=' + startY + '&drop_x=' + dropX + '&drop_y=' + dropY, {method:'POST'});
+	      await waitFor(function() { return released; }, phase + ' native pointer release');
+	      if (expectSuccess) {
+	        await waitFor(function() { var moved = document.getElementById('task-' + id); return cardIn('completed', id) && moved && !moved.hasAttribute('data-kanban-move-generation') && !(window.hasPendingKanbanMoves && window.hasPendingKanbanMoves()); }, phase + ' authoritative success');
+	        if (sourceFlash) fail(phase + ' flashed back into its source column during successful reconciliation');
+	      } else {
+	        await waitFor(function() { var moved = document.getElementById('task-' + id); return moved && moved.closest('.task-drop-zone[data-category="active"][data-status="pending"]') && !(window.hasPendingKanbanMoves && window.hasPendingKanbanMoves()); }, phase + ' authoritative rollback');
+	      }
+	    }
 
+	    htmx.ajax('GET', '/stale-board', {target:'#kanban-board', swap:'outerHTML'});
+	    await nativeMove('active-move', 'success', true);
+	    assertOrder('completed', ['active-move', 'completed-live', 'completed-new', 'completed-legacy', 'completed-old'], 'dragged task completion order');
+	    await nativeMove('active-fail', 'failure', false);
+	    if (!window.__taskMoveAlerts || window.__taskMoveAlerts.indexOf('move rejected') < 0) fail('failed move did not preserve existing error feedback');
     await clickSort('backlog', 'title_asc');
     await clickSort('completed', 'title_asc');
     assertOrder('backlog', ['backlog-old', 'backlog-live', 'backlog-new'], 'explicit Backlog title order');
@@ -199,6 +325,7 @@ window.addEventListener('DOMContentLoaded', function() {
 </script>`
 
 	browserResult := make(chan string, 8)
+	dragReady := make(chan taskDragCoordinates, 2)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestMu.Lock()
 		requestLog = append(requestLog, r.Method+" "+r.URL.RequestURI()+" HX="+r.Header.Get("HX-Request"))
@@ -234,7 +361,19 @@ window.addEventListener('DOMContentLoaded', function() {
 				completedSort = sortBy
 			}
 			_, _ = w.Write([]byte(renderBoardWithSorts(backlogSort, completedSort)))
+		case r.URL.Path == "/stale-board" && r.Method == http.MethodGet:
+			stale := renderBoard(r)
+			time.Sleep(250 * time.Millisecond)
+			_, _ = w.Write([]byte(stale))
+		case r.URL.Path == "/browser-drag-ready" && r.Method == http.MethodPost:
+			parse := func(key string) float64 {
+				value, _ := strconv.ParseFloat(r.URL.Query().Get(key), 64)
+				return value
+			}
+			dragReady <- taskDragCoordinates{phase: r.URL.Query().Get("phase"), startX: parse("start_x"), startY: parse("start_y"), dropX: parse("drop_x"), dropY: parse("drop_y")}
+			w.WriteHeader(http.StatusNoContent)
 		case r.URL.Path == "/tasks/active-move/category" && r.Method == http.MethodPatch:
+			time.Sleep(350 * time.Millisecond)
 			mu.Lock()
 			clock = clock.Add(time.Minute)
 			for i := range tasks {
@@ -247,6 +386,10 @@ window.addEventListener('DOMContentLoaded', function() {
 			}
 			mu.Unlock()
 			_, _ = w.Write([]byte(renderBoard(r)))
+		case r.URL.Path == "/tasks/active-fail/category" && r.Method == http.MethodPatch:
+			time.Sleep(250 * time.Millisecond)
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte("move rejected"))
 		case r.URL.Path == "/browser-add" && r.Method == http.MethodPost:
 			mu.Lock()
 			clock = clock.Add(time.Minute)
@@ -284,6 +427,13 @@ window.addEventListener('DOMContentLoaded', function() {
 	}))
 	defer server.Close()
 
+	debugListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve Chrome debugging port: %v", err)
+	}
+	debugPort := debugListener.Addr().(*net.TCPAddr).Port
+	_ = debugListener.Close()
+
 	stderrPath := filepath.Join(t.TempDir(), "tasks-browser.stderr")
 	stderrFile, err := os.Create(stderrPath)
 	if err != nil {
@@ -293,16 +443,27 @@ window.addEventListener('DOMContentLoaded', function() {
 	cmd := exec.Command(chrome,
 		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
 		"--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling",
-		"--no-first-run", "--no-default-browser-check", "--window-size=1280,900", "--user-data-dir="+filepath.Join(t.TempDir(), "tasks-browser-profile"),
+		"--no-first-run", "--no-default-browser-check", "--window-size=1280,900", fmt.Sprintf("--remote-debugging-port=%d", debugPort), "--user-data-dir="+filepath.Join(t.TempDir(), "tasks-browser-profile"),
 		server.URL+"/tasks?project_id="+project.ID,
 	)
 	cmd.Stderr = stderrFile
 	if err := startBrowserProcess(cmd); err != nil {
 		t.Fatalf("start Chrome: %v", err)
 	}
+	inputErr := driveNativeTaskDrags(debugPort, server.URL, dragReady)
 	var outcome string
 	select {
 	case outcome = <-browserResult:
+	case err := <-inputErr:
+		if err != nil {
+			outcome = "fail:native Chromium input: " + err.Error()
+		} else {
+			select {
+			case outcome = <-browserResult:
+			case <-time.After(10 * time.Second):
+				outcome = "fail:timed out after native Chromium input"
+			}
+		}
 	case <-time.After(20 * time.Second):
 		outcome = "fail:timed out waiting for browser result"
 	}

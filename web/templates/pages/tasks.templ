@@ -480,10 +480,10 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 					// interaction cannot replace the board during that interaction.
 					let pendingRefresh = false;
 
-					function isRefreshBlocked() {
-						if (window.isDragging) return 'drag';
-						if (document.hidden) return 'hidden';
-						if (window._taskCardActionRequest) return 'task action';
+						function isRefreshBlocked() {
+							if (window.isDragging) return 'drag';
+							if (window.hasPendingKanbanMoves && window.hasPendingKanbanMoves()) return 'task move';
+							if (document.hidden) return 'hidden';						if (window._taskCardActionRequest) return 'task action';
 						const board = document.getElementById('kanban-board');
 						if (board && board.getAttribute('data-open-kanban-menu-key')) return 'task menu';
 						const openModals = document.querySelectorAll('dialog[open]');
@@ -504,9 +504,16 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 						if (isBackgroundRefreshEvent(event) && event.detail.xhr === backgroundRefreshXHR) backgroundRefreshXHR = null;
 					}
 
-					function handleKanbanMenuOpened() {
-						if (!backgroundRefreshXHR) return;
-						pendingRefresh = true;
+						function handleKanbanMoveStarted() {
+							if (!backgroundRefreshXHR) return;
+							pendingRefresh = true;
+							const xhr = backgroundRefreshXHR;
+							backgroundRefreshXHR = null;
+							xhr.abort();
+						}
+
+						function handleKanbanMenuOpened() {
+							if (!backgroundRefreshXHR) return;						pendingRefresh = true;
 						const xhr = backgroundRefreshXHR;
 						backgroundRefreshXHR = null;
 						xhr.abort();
@@ -604,10 +611,10 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 					// Listen to events dispatched by the sidebar's shared SSE connection
 					window.addEventListener('sse-task-event', handleTaskEvent);
 					window.addEventListener('sse-live-connected', handleSSEReconnected);
-					window.addEventListener('kanban-menu-opened', handleKanbanMenuOpened);
-					window.addEventListener('kanban-refresh-unblocked', flushPendingRefresh);
-					document.body.addEventListener('htmx:beforeRequest', handleBackgroundRefreshBeforeRequest);
-					document.body.addEventListener('htmx:afterRequest', handleBackgroundRefreshAfterRequest);
+						window.addEventListener('kanban-menu-opened', handleKanbanMenuOpened);
+						window.addEventListener('kanban-move-started', handleKanbanMoveStarted);
+						window.addEventListener('kanban-refresh-unblocked', flushPendingRefresh);
+						document.body.addEventListener('htmx:beforeRequest', handleBackgroundRefreshBeforeRequest);					document.body.addEventListener('htmx:afterRequest', handleBackgroundRefreshAfterRequest);
 					document.body.addEventListener('htmx:beforeSwap', handleBackgroundRefreshBeforeSwap);
 					document.addEventListener('visibilitychange', handleVisibilityChange);
 						document.addEventListener('dragend', handleDragEnd, true);
@@ -620,10 +627,10 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 						if (event.detail.target && event.detail.target.id === 'main-content') {
 							window.removeEventListener('sse-task-event', handleTaskEvent);
 							window.removeEventListener('sse-live-connected', handleSSEReconnected);
-							window.removeEventListener('kanban-menu-opened', handleKanbanMenuOpened);
-							window.removeEventListener('kanban-refresh-unblocked', flushPendingRefresh);
-							document.body.removeEventListener('htmx:beforeRequest', handleBackgroundRefreshBeforeRequest);
-							document.body.removeEventListener('htmx:afterRequest', handleBackgroundRefreshAfterRequest);
+								window.removeEventListener('kanban-menu-opened', handleKanbanMenuOpened);
+								window.removeEventListener('kanban-move-started', handleKanbanMoveStarted);
+								window.removeEventListener('kanban-refresh-unblocked', flushPendingRefresh);
+								document.body.removeEventListener('htmx:beforeRequest', handleBackgroundRefreshBeforeRequest);							document.body.removeEventListener('htmx:afterRequest', handleBackgroundRefreshAfterRequest);
 							document.body.removeEventListener('htmx:beforeSwap', handleBackgroundRefreshBeforeSwap);
 							document.removeEventListener('visibilitychange', handleVisibilityChange);
 							document.removeEventListener('dragend', handleDragEnd, true);
