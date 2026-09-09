@@ -51,7 +51,7 @@ type taskDetailContentData struct {
 	executionMetrics models.TaskExecutionMetrics
 	schedules        []models.Schedule
 	agents           []models.LLMConfig
-	agentDefs        []models.Agent
+	agentDefs        []repository.AgentTaskUIOption
 	attachments      []models.Attachment
 	reviewComments   []models.ReviewComment
 }
@@ -152,11 +152,11 @@ func setTaskSortCookie(c echo.Context, cookieName string, sortBy string) {
 	})
 }
 
-func (h *Handler) listAgentDefinitions(ctx context.Context) []models.Agent {
+func (h *Handler) listAgentDefinitions(ctx context.Context) []repository.AgentTaskUIOption {
 	if h.agentRepo == nil {
 		return nil
 	}
-	agentDefs, err := h.agentRepo.List(ctx)
+	agentDefs, err := h.agentRepo.ListTaskUIOptions(ctx)
 	if err != nil {
 		applog.Infof("[handler] listAgentDefinitions error: %v", err)
 		return nil
@@ -176,7 +176,7 @@ func (h *Handler) loadTaskGoal(ctx context.Context, taskID string) *models.TaskG
 	return goal
 }
 
-func (h *Handler) listTaskFormAgentDefinitions(ctx context.Context, projectID string, currentAgentID *string) []models.Agent {
+func (h *Handler) listTaskFormAgentDefinitions(ctx context.Context, projectID string, currentAgentID *string) []repository.AgentTaskUIOption {
 	agentDefs := h.listAgentDefinitions(ctx)
 	out := selectableTaskAgentDefinitionsForProject(agentDefs, projectID)
 	if currentAgentID == nil || *currentAgentID == "" {
@@ -188,8 +188,8 @@ func (h *Handler) listTaskFormAgentDefinitions(ctx context.Context, projectID st
 		}
 	}
 	for _, agent := range agentDefs {
-		if agent.ID == *currentAgentID && agentDefinitionAvailableToProject(agent, projectID) && agent.GeneratedStatus != models.AgentStatusArchived && agent.ArchivedAt == nil {
-			return append([]models.Agent{agent}, out...)
+		if agent.ID == *currentAgentID && agentTaskUIOptionAvailableToProject(agent, projectID) && agent.GeneratedStatus != models.AgentStatusArchived && agent.ArchivedAt == nil {
+			return append([]repository.AgentTaskUIOption{agent}, out...)
 		}
 	}
 	return out
@@ -233,10 +233,21 @@ func selectablePrimaryAgentDefinition(agent models.Agent) bool {
 	return agent.Enabled && agent.SelectableAsPrimary && agent.GeneratedStatus != models.AgentStatusArchived && agent.ArchivedAt == nil
 }
 
-func selectableTaskAgentDefinitionsForProject(agentDefs []models.Agent, projectID string) []models.Agent {
-	out := make([]models.Agent, 0, len(agentDefs))
+func agentTaskUIOptionAvailableToProject(agent repository.AgentTaskUIOption, projectID string) bool {
+	if agent.Scope == models.AgentScopeProject {
+		return agent.ProjectID != "" && agent.ProjectID == projectID
+	}
+	return true
+}
+
+func selectableTaskUIAgentOption(agent repository.AgentTaskUIOption) bool {
+	return agent.Enabled && agent.SelectableAsPrimary && agent.GeneratedStatus != models.AgentStatusArchived && agent.ArchivedAt == nil
+}
+
+func selectableTaskAgentDefinitionsForProject(agentDefs []repository.AgentTaskUIOption, projectID string) []repository.AgentTaskUIOption {
+	out := make([]repository.AgentTaskUIOption, 0, len(agentDefs))
 	for _, agent := range agentDefs {
-		if !selectablePrimaryAgentDefinition(agent) || !agentDefinitionAvailableToProject(agent, projectID) {
+		if !selectableTaskUIAgentOption(agent) || !agentTaskUIOptionAvailableToProject(agent, projectID) {
 			continue
 		}
 		out = append(out, agent)
@@ -244,10 +255,10 @@ func selectableTaskAgentDefinitionsForProject(agentDefs []models.Agent, projectI
 	return out
 }
 
-func selectableTaskAgentDefinitions(agentDefs []models.Agent) []models.Agent {
-	out := make([]models.Agent, 0, len(agentDefs))
+func selectableTaskAgentDefinitions(agentDefs []repository.AgentTaskUIOption) []repository.AgentTaskUIOption {
+	out := make([]repository.AgentTaskUIOption, 0, len(agentDefs))
 	for _, agent := range agentDefs {
-		if selectablePrimaryAgentDefinition(agent) {
+		if selectableTaskUIAgentOption(agent) {
 			out = append(out, agent)
 		}
 	}

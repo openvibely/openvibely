@@ -417,11 +417,11 @@ func buildWeekData(tasks []repository.TaskWithSchedule, weekOffset int) WeekData
 	}
 }
 
-func schedulePrimaryAgentSelectable(agent models.Agent) bool {
+func schedulePrimaryAgentSelectable(agent repository.AgentTaskUIOption) bool {
 	return agent.Enabled && agent.SelectableAsPrimary && agent.GeneratedStatus != models.AgentStatusArchived && agent.ArchivedAt == nil
 }
 
-func schedulePrimaryAgentSelectionEditable(selected *string, agentDefs []models.Agent) bool {
+func schedulePrimaryAgentSelectionEditable(selected *string, agentDefs []repository.AgentTaskUIOption) bool {
 	if selected == nil || *selected == "" {
 		return true
 	}
@@ -433,7 +433,7 @@ func schedulePrimaryAgentSelectionEditable(selected *string, agentDefs []models.
 	return false
 }
 
-func SchedulePrimaryAgentSelector(selected *string, agentDefs []models.Agent, selectClass string) templ.Component {
+func SchedulePrimaryAgentSelector(selected *string, agentDefs []repository.AgentTaskUIOption, selectClass string) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {

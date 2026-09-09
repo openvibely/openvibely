@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/repository"
 )
 
 func findModelByID(models []models.LLMConfig, agentID *string) *models.LLMConfig {
@@ -32,7 +33,7 @@ func getModelDisplayName(model *models.LLMConfig) string {
 	return model.Name
 }
 
-func findAgentDefinitionByID(agentDefs []models.Agent, agentDefinitionID *string) *models.Agent {
+func findAgentDefinitionByID(agentDefs []repository.AgentTaskUIOption, agentDefinitionID *string) *repository.AgentTaskUIOption {
 	if agentDefinitionID == nil {
 		return nil
 	}
@@ -450,7 +451,7 @@ templ TaskCardMergeOptions(task *models.Task, projectID string, eligible bool, r
 	})
 }
 
-templ TaskCard(task models.Task, projectID string, viewingCategory string, llmModels []models.LLMConfig, agentDefs []models.Agent, menuStates ...map[string]TaskCardMergeMenuState) {
+templ TaskCard(task models.Task, projectID string, viewingCategory string, llmModels []models.LLMConfig, agentDefs []repository.AgentTaskUIOption, menuStates ...map[string]TaskCardMergeMenuState) {
 	<div
 		id={ fmt.Sprintf("task-%s", task.ID) }
 		class="card bg-base-100 shadow-sm border border-base-300 hover:border-primary/40 hover:shadow-md transition-all mb-2 cursor-grab active:cursor-grabbing drag-cursor-surface relative min-w-0 overflow-visible"
