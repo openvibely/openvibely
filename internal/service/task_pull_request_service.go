@@ -26,7 +26,7 @@ type taskPullRequestBodyUpdater interface {
 
 type taskPullRequestBranchReplacer interface {
 	GetPullRequest(ctx context.Context, repo *GitHubRepoRef, number int) (*GitHubPullRequest, error)
-	ReplaceBranchHead(ctx context.Context, repo *GitHubRepoRef, req GitHubReplaceBranchHeadRequest) error
+	ReplaceBranchHead(ctx context.Context, repo *GitHubRepoRef, req GitHubReplaceBranchHeadRequest) (string, error)
 }
 
 type TaskPullRequestService struct {
@@ -212,12 +212,21 @@ func (s *TaskPullRequestService) replaceBranchHeadForTask(ctx context.Context, p
 	if strings.TrimSpace(linkedPR.HeadRef) != strings.TrimSpace(task.WorktreeBranch) {
 		return nil, fmt.Errorf("linked pull request #%d head branch %q does not match task worktree branch %q", existingPR.PRNumber, linkedPR.HeadRef, task.WorktreeBranch)
 	}
-	if err := replacer.ReplaceBranchHead(ctx, repoRef, GitHubReplaceBranchHeadRequest{
+	replacementHead, err := replacer.ReplaceBranchHead(ctx, repoRef, GitHubReplaceBranchHeadRequest{
 		WorktreePath: task.WorktreePath,
 		Branch:       task.WorktreeBranch,
 		ExpectedHead: expectedHead,
-	}); err != nil {
+	})
+	if err != nil {
 		return nil, fmt.Errorf("replacing pull request branch head: %w", err)
+	}
+	replacementHead = strings.TrimSpace(replacementHead)
+	if !isGitHubCommitSHA(replacementHead) {
+		return nil, fmt.Errorf("replacement pull request branch head is unavailable")
+	}
+	existingPR.PublishedHeadSHA = replacementHead
+	if err := s.repo.Upsert(ctx, existingPR); err != nil {
+		return nil, fmt.Errorf("recording replacement pull request branch head: %w", err)
 	}
 	return existingPR, nil
 }
