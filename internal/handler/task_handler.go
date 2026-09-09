@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -935,14 +936,15 @@ func (h *Handler) CreateTask(c echo.Context) error {
 	}
 
 	t := &models.Task{
-		ProjectID:         projectID,
-		Title:             c.FormValue("title"),
-		Category:          category,
-		Priority:          priority,
-		Prompt:            c.FormValue("prompt"),
-		Tag:               models.TaskTag(c.FormValue("tag")),
-		AutoMerge:         c.FormValue("auto_merge") == "on" || c.FormValue("auto_merge") == "true",
-		MergeTargetBranch: c.FormValue("merge_target_branch"),
+		ProjectID:               projectID,
+		Title:                   c.FormValue("title"),
+		Category:                category,
+		Priority:                priority,
+		Prompt:                  c.FormValue("prompt"),
+		Tag:                     models.TaskTag(c.FormValue("tag")),
+		AutoMerge:               c.FormValue("auto_merge") == "on" || c.FormValue("auto_merge") == "true",
+		AutoMergeOnGoalAchieved: c.FormValue("auto_merge_on_goal_achieved") == "on" || c.FormValue("auto_merge_on_goal_achieved") == "true",
+		MergeTargetBranch:       c.FormValue("merge_target_branch"),
 	}
 
 	// Handle optional agent (LLM config) selection
@@ -965,7 +967,7 @@ func (h *Handler) CreateTask(c echo.Context) error {
 			return echo.NewHTTPError(http.StatusInternalServerError, "swarm service unavailable")
 		}
 		maxWorkers, _ := strconv.Atoi(c.FormValue("swarm_max_workers"))
-		parent, err := h.swarmSvc.CreateSwarmTask(c.Request().Context(), service.CreateSwarmTaskRequest{ProjectID: projectID, Title: t.Title, Prompt: t.Prompt, Goal: c.FormValue("goal"), Category: category, Priority: priority, AgentID: t.AgentID, AgentDefinitionID: t.AgentDefinitionID, Tag: t.Tag, MaxWorkers: maxWorkers, WorkerIsolation: c.FormValue("swarm_worker_isolation"), ReviewerEnabled: formBoolEnabled(c, "swarm_reviewer_enabled", true), MergerEnabled: swarmMergerEnabledFormValue(c), MergeTargetBranch: t.MergeTargetBranch})
+		parent, err := h.swarmSvc.CreateSwarmTask(c.Request().Context(), service.CreateSwarmTaskRequest{ProjectID: projectID, Title: t.Title, Prompt: t.Prompt, Goal: c.FormValue("goal"), Category: category, Priority: priority, AgentID: t.AgentID, AgentDefinitionID: t.AgentDefinitionID, Tag: t.Tag, MaxWorkers: maxWorkers, WorkerIsolation: c.FormValue("swarm_worker_isolation"), ReviewerEnabled: formBoolEnabled(c, "swarm_reviewer_enabled", true), MergerEnabled: swarmMergerEnabledFormValue(c), AutoMerge: t.AutoMerge, AutoMergeOnGoalAchieved: t.AutoMergeOnGoalAchieved, MergeTargetBranch: t.MergeTargetBranch})
 		if err != nil {
 			if errors.Is(err, service.ErrDuplicateTask) {
 				return echo.NewHTTPError(http.StatusConflict, "A task with this name already exists in this project")
@@ -1897,6 +1899,9 @@ func (h *Handler) UpdateTask(c echo.Context) error {
 	if c.FormValue("auto_merge_present") != "" {
 		task.AutoMerge = c.FormValue("auto_merge") == "on" || c.FormValue("auto_merge") == "true"
 	}
+	if c.FormValue("auto_merge_on_goal_achieved_present") != "" {
+		task.AutoMergeOnGoalAchieved = c.FormValue("auto_merge_on_goal_achieved") == "on" || c.FormValue("auto_merge_on_goal_achieved") == "true"
+	}
 	if targetBranch := c.FormValue("merge_target_branch"); targetBranch != "" {
 		task.MergeTargetBranch = targetBranch
 	}
@@ -2164,10 +2169,45 @@ func (h *Handler) CancelTask(c echo.Context) error {
 	return c.Redirect(http.StatusSeeOther, "/tasks/"+taskID)
 }
 
+func (h *Handler) activeLaneTaskMoves(ctx context.Context, taskIDs []string, encoded string) ([]repository.ActiveLaneTaskMove, error) {
+	moves := make([]repository.ActiveLaneTaskMove, 0, len(taskIDs))
+	if strings.TrimSpace(encoded) != "" {
+		if err := json.Unmarshal([]byte(encoded), &moves); err != nil {
+			return nil, echo.NewHTTPError(http.StatusBadRequest, "invalid Active lane task state")
+		}
+		if len(moves) != len(taskIDs) {
+			return nil, echo.NewHTTPError(http.StatusBadRequest, "invalid Active lane task state")
+		}
+		for i, move := range moves {
+			if move.ID != taskIDs[i] || move.ExpectedCategory == "" || move.ExpectedStatus == "" {
+				return nil, echo.NewHTTPError(http.StatusBadRequest, "invalid Active lane task state")
+			}
+		}
+		return moves, nil
+	}
+	// Non-browser callers may omit the optimistic snapshot. Preserve their API
+	// behavior while browser drag/drop always supplies a stale-state fence.
+	for _, taskID := range taskIDs {
+		task, err := h.taskSvc.GetByID(ctx, taskID)
+		if err != nil {
+			return nil, err
+		}
+		if task == nil {
+			return nil, echo.NewHTTPError(http.StatusNotFound, "task not found")
+		}
+		moves = append(moves, repository.ActiveLaneTaskMove{ID: taskID, ExpectedCategory: task.Category, ExpectedStatus: task.Status})
+	}
+	return moves, nil
+}
+
 func (h *Handler) UpdateTaskCategory(c echo.Context) error {
 	taskID := c.Param("taskId")
 	category := models.TaskCategory(c.FormValue("category"))
-	applog.Infof("[handler] UpdateTaskCategory task=%s newCategory=%s", taskID, category)
+	targetStatus := models.TaskStatus(strings.TrimSpace(c.FormValue("target_status")))
+	if targetStatus != "" && (category != models.CategoryActive || (targetStatus != models.StatusPending && targetStatus != models.StatusRunning)) {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid Active target status")
+	}
+	applog.Infof("[handler] UpdateTaskCategory task=%s newCategory=%s target_status=%s", taskID, category, targetStatus)
 
 	// Validate: cannot move to scheduled category unless the task has a schedule
 	if category == models.CategoryScheduled {
@@ -2193,7 +2233,26 @@ func (h *Handler) UpdateTaskCategory(c echo.Context) error {
 		}
 	}
 
-	if err := h.taskSvc.UpdateCategory(c.Request().Context(), taskID, category); err != nil {
+	if category == models.CategoryActive && targetStatus != "" {
+		task, err := h.taskSvc.GetByID(c.Request().Context(), taskID)
+		if err != nil {
+			return err
+		}
+		if task == nil {
+			return echo.NewHTTPError(http.StatusNotFound, "task not found")
+		}
+		moves, err := h.activeLaneTaskMoves(c.Request().Context(), []string{taskID}, c.FormValue("expected_states"))
+		if err != nil {
+			return err
+		}
+		if err := h.taskSvc.MoveTasksToActiveLane(c.Request().Context(), task.ProjectID, moves, targetStatus); err != nil {
+			applog.Infof("[handler] UpdateTaskCategory active lane error: %v", err)
+			if errors.Is(err, repository.ErrActiveLaneTaskChanged) || errors.Is(err, repository.ErrActiveLaneLifecycleOwned) || errors.Is(err, service.ErrActiveLaneLifecycleRouted) {
+				return echo.NewHTTPError(http.StatusConflict, "task lifecycle changed before the move completed")
+			}
+			return err
+		}
+	} else if err := h.taskSvc.UpdateCategory(c.Request().Context(), taskID, category); err != nil {
 		applog.Infof("[handler] UpdateTaskCategory error: %v", err)
 		return err
 	}
@@ -2259,7 +2318,13 @@ func (h *Handler) BatchUpdateTaskCategory(c echo.Context) error {
 	projectID := c.FormValue("project_id")
 	taskIDsValue := c.FormValue("task_ids")
 	category := models.TaskCategory(c.FormValue("category"))
-	applog.Infof("[handler] BatchUpdateTaskCategory project=%s category=%s task_ids=%s", projectID, category, taskIDsValue)
+	targetStatus := models.TaskStatus(strings.TrimSpace(c.FormValue("target_status")))
+	if targetStatus != "" {
+		if category != models.CategoryActive || (targetStatus != models.StatusPending && targetStatus != models.StatusRunning) {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid Active target status")
+		}
+	}
+	applog.Infof("[handler] BatchUpdateTaskCategory project=%s category=%s target_status=%s task_ids=%s", projectID, category, targetStatus, taskIDsValue)
 
 	taskIDs := make([]string, 0)
 	for _, rawID := range strings.Split(taskIDsValue, ",") {
@@ -2306,10 +2371,24 @@ func (h *Handler) BatchUpdateTaskCategory(c echo.Context) error {
 		}
 	}
 
-	for _, id := range taskIDs {
-		if err := h.taskSvc.UpdateCategory(c.Request().Context(), id, category); err != nil {
-			applog.Infof("[handler] BatchUpdateTaskCategory error task=%s: %v", id, err)
+	if category == models.CategoryActive && targetStatus != "" {
+		moves, err := h.activeLaneTaskMoves(c.Request().Context(), taskIDs, c.FormValue("expected_states"))
+		if err != nil {
 			return err
+		}
+		if err := h.taskSvc.MoveTasksToActiveLane(c.Request().Context(), projectID, moves, targetStatus); err != nil {
+			applog.Infof("[handler] BatchUpdateTaskCategory active lane error: %v", err)
+			if errors.Is(err, repository.ErrActiveLaneTaskChanged) || errors.Is(err, repository.ErrActiveLaneLifecycleOwned) || errors.Is(err, service.ErrActiveLaneLifecycleRouted) {
+				return echo.NewHTTPError(http.StatusConflict, "one or more selected tasks changed before the move completed")
+			}
+			return err
+		}
+	} else {
+		for _, id := range taskIDs {
+			if err := h.taskSvc.UpdateCategory(c.Request().Context(), id, category); err != nil {
+				applog.Infof("[handler] BatchUpdateTaskCategory error task=%s: %v", id, err)
+				return err
+			}
 		}
 	}
 	applog.Infof("[handler] BatchUpdateTaskCategory success")

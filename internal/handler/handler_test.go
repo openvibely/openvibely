@@ -3407,6 +3407,33 @@ func TestHandler_UpdateTask_DetailCategoryTransitionsRefreshCompletedAt(t *testi
 	assert.Equal(t, task.ID, completedTasks[0].ID, "recompleted task should sort ahead of older completions")
 }
 
+func TestHandler_UpdateTask_AppendsMetadataMoveToActiveOrder(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	ctx := context.Background()
+	existing := createTask(t, h, "default", "Existing Active Tail", func(task *models.Task) {
+		task.Category = models.CategoryActive
+		task.Status = models.StatusPending
+	})
+	moving := createTask(t, h, "default", "Metadata Move To Active", func(task *models.Task) {
+		task.Category = models.CategoryBacklog
+		task.Status = models.StatusPending
+	})
+
+	form := url.Values{}
+	form.Set("title", moving.Title)
+	form.Set("category", string(models.CategoryActive))
+	form.Set("priority", strconv.Itoa(moving.Priority))
+	form.Set("prompt", moving.Prompt)
+	rec := htmxPut(e, "/tasks/"+moving.ID, form)
+	assertCode(t, rec, http.StatusOK)
+
+	updated, err := h.taskSvc.GetByID(ctx, moving.ID)
+	require.NoError(t, err)
+	require.NotNil(t, updated)
+	assert.Equal(t, models.CategoryActive, updated.Category)
+	assert.Greater(t, updated.DisplayOrder, existing.DisplayOrder)
+}
+
 func TestHandler_UpdateTask_NonRunningOnly(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	ctx := context.Background()
@@ -3514,6 +3541,30 @@ func TestHandler_ListTasks_DoesNotRenderBlockedSwarmParentAsActiveQueuedWhenNoCh
 	assert.Contains(t, backlogColumn, `data-task-id="`+parent.ID+`"`)
 	assert.NotContains(t, body, `data-task-id="`+completedWorker.ID+`"`, "swarm child should be attached to parent, not rendered as a top-level card")
 	assert.NotContains(t, body, `data-task-id="`+cancelledReviewer.ID+`"`, "swarm child should be attached to parent, not rendered as a top-level card")
+}
+
+func TestHandler_UpdateTaskCategory_BacklogToRunningLanePersistsRequestedStatus(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().WithName("Single running lane project").Build()
+	model := tc.CreateLLMConfig().WithName("Single running lane model").WithProvider(models.ProviderTest).WithModel("test-model").AsDefault().Build()
+	tail := tc.CreateTask(project.ID).WithTitle("Single running lane tail").WithCategory(models.CategoryActive).WithStatus(models.StatusRunning).Build()
+	moving := tc.CreateTask(project.ID).WithTitle("Single running lane move").WithCategory(models.CategoryBacklog).Build()
+	moving.AgentID = &model.ID
+	require.NoError(t, tc.taskRepo.Update(ctx, moving))
+
+	response := tc.HTMX().Patch("/tasks/" + moving.ID + "/category").WithForm(url.Values{
+		"category":      {string(models.CategoryActive)},
+		"target_status": {string(models.StatusRunning)},
+	}).Execute()
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	loaded, err := tc.taskRepo.GetByID(ctx, moving.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.CategoryActive, loaded.Category)
+	require.Equal(t, models.StatusRunning, loaded.Status)
+	require.Greater(t, loaded.DisplayOrder, tail.DisplayOrder)
+	require.Contains(t, response.Body.String(), `data-task-id="`+moving.ID+`"`)
+	require.Contains(t, response.Body.String(), `data-task-status="running"`)
 }
 
 func TestHandler_UpdateTaskCategory_AttachesSwarmChildrenForKanbanRefresh(t *testing.T) {

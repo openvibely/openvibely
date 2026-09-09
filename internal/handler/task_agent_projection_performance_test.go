@@ -21,12 +21,13 @@ import (
 const taskUIAgentPerformanceSamples = 5
 
 type taskUIAgentRenderFixture struct {
-	connections *database.Connections
-	h           *Handler
-	e           http.Handler
-	agentRepo   *repository.AgentRepo
-	projectID   string
-	detailTask  string
+	connections       *database.Connections
+	h                 *Handler
+	e                 http.Handler
+	agentRepo         *repository.AgentRepo
+	projectID         string
+	detailTask        string
+	noAgentDetailTask string
 }
 
 type taskUIAgentRenderCase struct {
@@ -173,16 +174,28 @@ func newTaskUIAgentRenderFixture(tb testing.TB) *taskUIAgentRenderFixture {
 	if err := writerTaskRepo.Create(ctx, detailTask); err != nil {
 		tb.Fatalf("create Task UI detail task: %v", err)
 	}
+	noAgentDetailTask := &models.Task{
+		ProjectID: "default",
+		Title:     "Task UI Performance Detail No Agent",
+		Category:  models.CategoryBacklog,
+		Priority:  2,
+		Status:    models.StatusPending,
+		Prompt:    "render compact no-Agent selector",
+	}
+	if err := writerTaskRepo.Create(ctx, noAgentDetailTask); err != nil {
+		tb.Fatalf("create Task UI no-Agent detail task: %v", err)
+	}
 
 	h, e, _ := setupTestHandlerForDB(tb, connections.Reader)
 	h.SetAgentRepo(repository.NewAgentRepo(connections.Reader))
 	return &taskUIAgentRenderFixture{
-		connections: connections,
-		h:           h,
-		e:           e,
-		agentRepo:   repository.NewAgentRepo(connections.Reader),
-		projectID:   "default",
-		detailTask:  detailTask.ID,
+		connections:       connections,
+		h:                 h,
+		e:                 e,
+		agentRepo:         repository.NewAgentRepo(connections.Reader),
+		projectID:         "default",
+		detailTask:        detailTask.ID,
+		noAgentDetailTask: noAgentDetailTask.ID,
 	}
 }
 
@@ -261,6 +274,12 @@ func taskUIAgentRenderCases() []taskUIAgentRenderCase {
 			name: "initial Task Detail",
 			request: func(fixture *taskUIAgentRenderFixture) *http.Request {
 				return httptest.NewRequest(http.MethodGet, "/tasks/"+fixture.detailTask, nil)
+			},
+		},
+		{
+			name: "initial Task Detail without assigned Agent",
+			request: func(fixture *taskUIAgentRenderFixture) *http.Request {
+				return httptest.NewRequest(http.MethodGet, "/tasks/"+fixture.noAgentDetailTask, nil)
 			},
 		},
 	}

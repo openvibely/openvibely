@@ -1119,13 +1119,14 @@ func TestHandler_UpdateTask_UnchecksAutoMerge(t *testing.T) {
 
 	// Create task with auto_merge enabled
 	task := &models.Task{
-		ProjectID:         project.ID,
-		Title:             "Auto Merge Test",
-		Prompt:            "do something",
-		Category:          models.CategoryActive,
-		Status:            models.StatusPending,
-		AutoMerge:         true,
-		MergeTargetBranch: "main",
+		ProjectID:               project.ID,
+		Title:                   "Auto Merge Test",
+		Prompt:                  "do something",
+		Category:                models.CategoryActive,
+		Status:                  models.StatusPending,
+		AutoMerge:               true,
+		AutoMergeOnGoalAchieved: true,
+		MergeTargetBranch:       "main",
 	}
 	if err := h.taskRepo.Create(ctx, task); err != nil {
 		t.Fatal(err)
@@ -1141,12 +1142,13 @@ func TestHandler_UpdateTask_UnchecksAutoMerge(t *testing.T) {
 	// The hidden sentinel field auto_merge_present=1 tells the handler
 	// that the edit form was submitted, so it should set auto_merge=false.
 	form := url.Values{
-		"title":              {"Auto Merge Test"},
-		"prompt":             {"do something"},
-		"category":           {"active"},
-		"priority":           {"2"},
-		"auto_merge_present": {"1"},
-		// Note: no "auto_merge" key — this is what happens when checkbox is unchecked
+		"title":                               {"Auto Merge Test"},
+		"prompt":                              {"do something"},
+		"category":                            {"active"},
+		"priority":                            {"2"},
+		"auto_merge_present":                  {"1"},
+		"auto_merge_on_goal_achieved_present": {"1"},
+		// Unchecked checkboxes send no value; both independent sentinels clear them.
 	}
 
 	req := worktreeFormRequest(http.MethodPut, "/tasks/"+task.ID, form)
@@ -1162,6 +1164,9 @@ func TestHandler_UpdateTask_UnchecksAutoMerge(t *testing.T) {
 	if updated.AutoMerge {
 		t.Error("expected auto_merge=false after unchecking, but got true")
 	}
+	if updated.AutoMergeOnGoalAchieved {
+		t.Error("expected auto_merge_on_goal_achieved=false after unchecking, but got true")
+	}
 }
 
 func TestHandler_UpdateTaskAutoMerge_Toggle(t *testing.T) {
@@ -1176,13 +1181,14 @@ func TestHandler_UpdateTaskAutoMerge_Toggle(t *testing.T) {
 	}
 
 	task := &models.Task{
-		ProjectID:         project.ID,
-		Title:             "Worktree Auto-merge Toggle",
-		Prompt:            "test",
-		Category:          models.CategoryActive,
-		Status:            models.StatusPending,
-		AutoMerge:         false,
-		MergeTargetBranch: "",
+		ProjectID:               project.ID,
+		Title:                   "Worktree Auto-merge Toggle",
+		Prompt:                  "test",
+		Category:                models.CategoryActive,
+		Status:                  models.StatusPending,
+		AutoMerge:               false,
+		AutoMergeOnGoalAchieved: false,
+		MergeTargetBranch:       "",
 	}
 	if err := h.taskRepo.Create(ctx, task); err != nil {
 		t.Fatal(err)
@@ -1190,8 +1196,9 @@ func TestHandler_UpdateTaskAutoMerge_Toggle(t *testing.T) {
 
 	// Enable auto-merge via the worktree panel endpoint
 	form := url.Values{
-		"auto_merge":          {"on"},
-		"merge_target_branch": {"develop"},
+		"auto_merge":                  {"on"},
+		"auto_merge_on_goal_achieved": {"on"},
+		"merge_target_branch":         {"develop"},
 	}
 	req := worktreeFormRequest(http.MethodPost, "/tasks/"+task.ID+"/worktree/auto-merge", form)
 	req.Header.Set("HX-Request", "true")
@@ -1205,8 +1212,36 @@ func TestHandler_UpdateTaskAutoMerge_Toggle(t *testing.T) {
 	if !updated.AutoMerge {
 		t.Error("expected auto_merge=true after toggle on")
 	}
+	if !updated.AutoMergeOnGoalAchieved {
+		t.Error("expected auto_merge_on_goal_achieved=true after toggle on")
+	}
 	if updated.MergeTargetBranch != "develop" {
 		t.Errorf("expected merge_target_branch=develop, got %q", updated.MergeTargetBranch)
+	}
+
+	legacyReq := worktreeFormRequest(http.MethodPost, "/tasks/"+task.ID+"/worktree/auto-merge", url.Values{
+		"merge_target_branch": {"develop"},
+	})
+	legacyReq.Header.Set("HX-Request", "true")
+	if legacyRec := worktreeExecute(e, legacyReq); legacyRec.Code != http.StatusOK {
+		t.Fatalf("legacy update expected 200, got %d: %s", legacyRec.Code, legacyRec.Body.String())
+	}
+	updated, _ = h.taskSvc.GetByID(ctx, task.ID)
+	if updated.AutoMerge || !updated.AutoMergeOnGoalAchieved {
+		t.Fatalf("legacy update did not independently preserve goal setting: completion=%v goal=%v", updated.AutoMerge, updated.AutoMergeOnGoalAchieved)
+	}
+
+	disableReq := worktreeFormRequest(http.MethodPost, "/tasks/"+task.ID+"/worktree/auto-merge", url.Values{
+		"auto_merge_on_goal_achieved_present": {"1"},
+		"merge_target_branch":                 {"develop"},
+	})
+	disableReq.Header.Set("HX-Request", "true")
+	if disableRec := worktreeExecute(e, disableReq); disableRec.Code != http.StatusOK {
+		t.Fatalf("disable update expected 200, got %d: %s", disableRec.Code, disableRec.Body.String())
+	}
+	updated, _ = h.taskSvc.GetByID(ctx, task.ID)
+	if updated.AutoMergeOnGoalAchieved {
+		t.Fatal("dedicated update surface did not disable goal auto-merge")
 	}
 }
 

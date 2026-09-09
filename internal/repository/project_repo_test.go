@@ -2,12 +2,61 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
+
+func TestProjectRepo_DeleteWithCleanupManifestRollsBackBeforeDeleteFailure(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := NewProjectRepo(db)
+	project := &models.Project{Name: "Atomic project deletion"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO tasks (id, project_id, title, prompt) VALUES ('atomic-project-task', ?, 'Atomic task', 'test')`, project.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	injected := errors.New("injected pre-delete failure")
+	manifest, deleted, err := projectRepo.DeleteWithCleanupManifest(ctx, project.ID, func(manifest TaskDeletionManifest) error {
+		if len(manifest.TaskIDs) != 1 || manifest.TaskIDs[0] != "atomic-project-task" {
+			t.Fatalf("captured task IDs = %v", manifest.TaskIDs)
+		}
+		return injected
+	})
+	if !errors.Is(err, injected) || deleted {
+		t.Fatalf("DeleteWithCleanupManifest = manifest=%+v deleted=%v err=%v", manifest, deleted, err)
+	}
+	var projectCount, taskCount int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM projects WHERE id = ?`, project.ID).Scan(&projectCount); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM tasks WHERE id = 'atomic-project-task'`).Scan(&taskCount); err != nil {
+		t.Fatal(err)
+	}
+	if projectCount != 1 || taskCount != 1 {
+		t.Fatalf("rollback retained project=%d task=%d, want 1/1", projectCount, taskCount)
+	}
+
+	manifest, deleted, err = projectRepo.DeleteWithCleanupManifest(ctx, project.ID, nil)
+	if err != nil || !deleted || len(manifest.TaskIDs) != 1 {
+		t.Fatalf("successful DeleteWithCleanupManifest = manifest=%+v deleted=%v err=%v", manifest, deleted, err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM projects WHERE id = ?`, project.ID).Scan(&projectCount); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM tasks WHERE id = 'atomic-project-task'`).Scan(&taskCount); err != nil {
+		t.Fatal(err)
+	}
+	if projectCount != 0 || taskCount != 0 {
+		t.Fatalf("successful deletion retained project=%d task=%d, want 0/0", projectCount, taskCount)
+	}
+}
 
 func TestProjectRepo_ListRepoRootsUsesCompactUnorderedProjection(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)

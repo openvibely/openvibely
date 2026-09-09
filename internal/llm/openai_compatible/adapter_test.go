@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -469,6 +470,65 @@ func TestAdapterTaskWithRuntimeActionsUsesToolModePrompt(t *testing.T) {
 	require.NotContains(t, content, "If a command failed, a script returned non-zero")
 	require.NotContains(t, content, "This is the ONLY way to create a task")
 	require.NotContains(t, content, "To create a task, output this format")
+}
+
+func TestAdapterTaskAgentDefinitionRestrictsAdvertisedAndExecutedTools(t *testing.T) {
+	requests := 0
+	var firstBody map[string]any
+	var secondBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		var body map[string]any
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		if requests == 1 {
+			firstBody = body
+		} else {
+			secondBody = body
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		if requests == 1 {
+			_, _ = w.Write([]byte(
+				"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_bash\",\"type\":\"function\",\"function\":{\"name\":\"bash\",\"arguments\":\"{\\\"command\\\":\\\"touch denied\\\"}\"}}]}}]}\n\n" +
+					"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n" +
+					"data: [DONE]\n\n",
+			))
+			return
+		}
+		_, _ = w.Write([]byte(
+			"data: {\"choices\":[{\"delta\":{\"content\":\"Denied.\\n[STATUS: SUCCESS]\"}}]}\n\n" +
+				"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+				"data: [DONE]\n\n",
+		))
+	}))
+	defer srv.Close()
+
+	workDir := t.TempDir()
+	adapter := New(nil, nil)
+	_, err := adapter.Call(context.Background(), llmcontracts.AgentRequest{
+		Operation: llmcontracts.OperationTask,
+		Message:   "Resolve files only",
+		Agent: models.LLMConfig{
+			Name: "Compatible", Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodAPIKey,
+			Model: "provider/model", APIKey: "sk-compatible", BaseURL: srv.URL + "/v1/", PresetSlug: "vllm", Transport: "chat_completions",
+		},
+		AgentDefinition: &models.Agent{Name: "Restricted", Tools: []string{"Read", "Write", "Edit"}},
+	}, workDir)
+	require.NoError(t, err)
+	require.Equal(t, 2, requests)
+
+	var advertised []string
+	for _, raw := range firstBody["tools"].([]any) {
+		tool := raw.(map[string]any)
+		fn := tool["function"].(map[string]any)
+		advertised = append(advertised, fn["name"].(string))
+	}
+	require.ElementsMatch(t, []string{"read_file", "write_file", "edit_file"}, advertised)
+	messages := secondBody["messages"].([]any)
+	toolResult := messages[len(messages)-1].(map[string]any)
+	require.Equal(t, "tool", toolResult["role"])
+	require.Contains(t, toolResult["content"], "tool bash is not allowed by this agent")
+	_, statErr := os.Stat(filepath.Join(workDir, "denied"))
+	require.ErrorIs(t, statErr, os.ErrNotExist)
 }
 
 func TestAdapterTaskWithoutRuntimeActionsDoesNotAdvertiseLegacyMutationMarkers(t *testing.T) {

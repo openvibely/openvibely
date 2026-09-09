@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/testutil"
@@ -117,6 +118,35 @@ func TestCollectionFiltersAndSortsApplyBeforePagination(t *testing.T) {
 	require.Len(t, automationsPage, 1)
 	require.Equal(t, "Zulu paused", automationsPage[0].Automation.Name)
 
+	automationsDefault, err := automationsRepo.ListPortfolioCardsPageFiltered(ctx, project.ID, 10, 0, AutomationCardListFilter{})
+	require.NoError(t, err)
+	require.Equal(t, []string{"Alpha paused", "Beta active", "Zulu paused"}, []string{
+		automationsDefault[0].Automation.Name,
+		automationsDefault[1].Automation.Name,
+		automationsDefault[2].Automation.Name,
+	})
+
+	updatedAtByName := map[string]time.Time{
+		"Alpha paused": time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC),
+		"Beta active":  time.Date(2026, time.January, 3, 0, 0, 0, 0, time.UTC),
+		"Zulu paused":  time.Date(2026, time.January, 2, 0, 0, 0, 0, time.UTC),
+	}
+	for name, updatedAt := range updatedAtByName {
+		_, err = db.ExecContext(ctx, `UPDATE automations SET updated_at = ? WHERE project_id = ? AND name = ?`, updatedAt, project.ID, name)
+		require.NoError(t, err)
+	}
+	automationsRecentlyUpdated, err := automationsRepo.ListPortfolioCardsPageFiltered(ctx, project.ID, 2, 0, AutomationCardListFilter{Sort: "updated_desc"})
+	require.NoError(t, err)
+	require.Len(t, automationsRecentlyUpdated, 2)
+	require.Equal(t, []string{"Beta active", "Zulu paused"}, []string{
+		automationsRecentlyUpdated[0].Automation.Name,
+		automationsRecentlyUpdated[1].Automation.Name,
+	})
+	automationsRecentlyUpdatedNextPage, err := automationsRepo.ListPortfolioCardsPageFiltered(ctx, project.ID, 2, 2, AutomationCardListFilter{Sort: "updated_desc"})
+	require.NoError(t, err)
+	require.Len(t, automationsRecentlyUpdatedNextPage, 1)
+	require.Equal(t, "Alpha paused", automationsRecentlyUpdatedNextPage[0].Automation.Name)
+
 	webhookRepo := NewWebhookRepo(db)
 	for _, endpoint := range []*models.WebhookEndpoint{{ProjectID: project.ID, Name: "A disabled", Enabled: false}, {ProjectID: project.ID, Name: "B enabled", Enabled: true}, {ProjectID: project.ID, Name: "C enabled", Enabled: true}} {
 		require.NoError(t, webhookRepo.Create(ctx, endpoint))
@@ -125,6 +155,9 @@ func TestCollectionFiltersAndSortsApplyBeforePagination(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, hooks, 1)
 	require.Equal(t, "C enabled", hooks[0].Name)
+	descendingHooks, err := webhookRepo.ListCardsByProjectPageFiltered(ctx, project.ID, 2, 0, WebhookCardFilter{Enabled: &enabled, Sort: "name_desc"})
+	require.NoError(t, err)
+	require.Equal(t, []string{"C enabled", "B enabled"}, []string{descendingHooks[0].Name, descendingHooks[1].Name})
 }
 
 func TestModelAuthStatusFilterMatchesOAuthValidityRule(t *testing.T) {

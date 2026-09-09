@@ -646,7 +646,7 @@ func TestHandler_PersonalityPage_SharedCardRenderingPreservesBuiltinVariants(t *
 	body = renderPersonalityPageBody(t, h, e)
 	pirateCard = personalityCardHTML(t, body, "pirate_captain")
 	baseCard := basePersonalityCardHTML(t, body)
-	assert.Less(t, strings.Index(body, `data-personality-key="pirate_captain"`), strings.Index(body, `data-personality-is-default-card="true"`))
+	assert.Greater(t, strings.Index(body, `data-personality-key="pirate_captain"`), strings.Index(body, `data-personality-is-default-card="true"`))
 	assert.Contains(t, pirateCard, `badge badge-sm ml-2 ov-badge-default">Active</span>`)
 	assert.Contains(t, pirateCard, `badge badge-warning badge-sm ml-1">Override</span>`)
 	assert.NotContains(t, pirateCard, `hx-post="/personality/save?personality=pirate_captain"`)
@@ -683,7 +683,7 @@ func TestHandler_PersonalityPage_SharedCardRenderingPreservesCustomVariantsAndRe
 	require.NoError(t, settingsRepo.Set(ctx, "personality", "custom_reviewer"))
 	body = renderPersonalityPageBody(t, h, e)
 	customCard = personalityCardHTML(t, body, "custom_reviewer")
-	assert.Less(t, strings.Index(body, `data-personality-key="custom_reviewer"`), strings.Index(body, `data-personality-is-default-card="true"`))
+	assert.Greater(t, strings.Index(body, `data-personality-key="custom_reviewer"`), strings.Index(body, `data-personality-is-default-card="true"`))
 	assert.Contains(t, customCard, `badge badge-sm ml-2 ov-badge-default">Active</span>`)
 	assert.Contains(t, customCard, `badge badge-ghost badge-sm ml-1">Custom</span>`)
 	assert.Contains(t, customCard, `hx-delete="/personality/custom/custom_reviewer"`)
@@ -932,11 +932,11 @@ func TestHandler_PersonalityPage_ActiveBadgesUseCanonicalClass(t *testing.T) {
 	assert.NotContains(t, bodyCustom, `badge badge-primary badge-sm ml-2">Active</span>`)
 }
 
-func TestHandler_PersonalityPage_SelectedDefaultCardRendersFirst(t *testing.T) {
+func TestHandler_PersonalityPage_SelectedCardKeepsAlphabeticalPosition(t *testing.T) {
 	h, e, _, settingsRepo := setupCustomPersonalityHandler(t)
 	ctx := context.Background()
 
-	// Built-in selected default should render before Base card.
+	// Built-in active metadata does not override Name A-Z ordering.
 	require.NoError(t, settingsRepo.Set(ctx, "personality", "zen_debugger"))
 	recBuiltIn := httptest.NewRecorder()
 	cBuiltIn := e.NewContext(httptest.NewRequest(http.MethodGet, "/personality", nil), recBuiltIn)
@@ -947,9 +947,9 @@ func TestHandler_PersonalityPage_SelectedDefaultCardRendersFirst(t *testing.T) {
 	baseIdx := strings.Index(bodyBuiltIn, `data-personality-is-default-card="true"`)
 	require.Greater(t, builtInIdx, 0)
 	require.Greater(t, baseIdx, 0)
-	assert.Less(t, builtInIdx, baseIdx)
+	assert.Greater(t, builtInIdx, baseIdx)
 
-	// Custom selected default should render before Base card too.
+	// Custom active metadata does not override Name A-Z ordering.
 	p := &models.CustomPersonality{
 		Name:         "Custom First",
 		Key:          "custom_first",
@@ -967,7 +967,7 @@ func TestHandler_PersonalityPage_SelectedDefaultCardRendersFirst(t *testing.T) {
 	baseIdx = strings.Index(bodyCustom, `data-personality-is-default-card="true"`)
 	require.Greater(t, customIdx, 0)
 	require.Greater(t, baseIdx, 0)
-	assert.Less(t, customIdx, baseIdx)
+	assert.Greater(t, customIdx, baseIdx)
 }
 
 func TestHandler_PersonalityPage_BaseCardNeverHighlighted(t *testing.T) {

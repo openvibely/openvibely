@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -251,6 +252,37 @@ func TestAutomationRepoLifecyclePauseResumeArchiveAndDelete(t *testing.T) {
 	assertScheduleEnabled(t, db, schedule.ID, true)
 	assertTriggerOwnerState(t, db, schedule.ID, "active")
 	assertTaskCategory(t, db, task.ID, models.CategoryBacklog)
+
+	candidateJSON, err := json.Marshal(models.AutomationDraftCandidate{Nodes: []models.AutomationDraftNode{
+		{Key: "trigger", Type: models.AutomationNodeTrigger, Role: "trigger", Config: map[string]any{}},
+		{Key: "task", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"category": string(models.CategoryActive)}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO automation_graph_metadata
+		(version_id, project_id, automation_id, candidate_json, assumptions_json, warnings_json, validation_json)
+		VALUES (?, ?, ?, ?, '[]', '[]', '[]')`, definition.Version.ID, projectID, definition.Automation.ID, string(candidateJSON)); err != nil {
+		t.Fatalf("insert candidate metadata: %v", err)
+	}
+	if err := repo.SetAutomationLifecycle(ctx, projectID, definition.Automation.ID, models.AutomationPaused); err != nil {
+		t.Fatalf("pause candidate-backed automation: %v", err)
+	}
+	activeTail := &models.Task{ProjectID: projectID, Title: "Existing active resume tail", Prompt: "tail", Category: models.CategoryActive, Status: models.StatusPending, Priority: 1}
+	if err := NewTaskRepo(db, nil).Create(ctx, activeTail); err != nil {
+		t.Fatalf("create active resume tail: %v", err)
+	}
+	admitted, err = repo.ResumeAutomation(ctx, projectID, definition.Automation.ID)
+	if err != nil {
+		t.Fatalf("resume candidate-backed automation: %v", err)
+	}
+	if len(admitted) != 1 || admitted[0].ID != task.ID || admitted[0].DisplayOrder <= activeTail.DisplayOrder {
+		t.Fatalf("admitted tasks = %#v, want lifecycle task appended after active tail order %d", admitted, activeTail.DisplayOrder)
+	}
+	storedTask, err := NewTaskRepo(db, nil).GetByID(ctx, task.ID)
+	if err != nil || storedTask == nil || storedTask.Category != models.CategoryActive || storedTask.DisplayOrder != admitted[0].DisplayOrder {
+		t.Fatalf("stored admitted task = %#v, err=%v", storedTask, err)
+	}
 
 	if err := repo.SetAutomationLifecycle(ctx, projectID, definition.Automation.ID, models.AutomationArchived); err != nil {
 		t.Fatalf("archive automation: %v", err)

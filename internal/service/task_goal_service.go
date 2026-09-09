@@ -29,13 +29,19 @@ type GoalOptions struct {
 }
 
 type TaskGoalService struct {
-	repo        *repository.TaskGoalRepo
-	taskRepo    *repository.TaskRepo
-	broadcaster *events.Broadcaster
+	repo                *repository.TaskGoalRepo
+	taskRepo            *repository.TaskRepo
+	broadcaster         *events.Broadcaster
+	goalAchievedHandler func(context.Context, string, string)
 }
 
 func NewTaskGoalService(repo *repository.TaskGoalRepo, taskRepo *repository.TaskRepo, broadcaster *events.Broadcaster) *TaskGoalService {
 	return &TaskGoalService{repo: repo, taskRepo: taskRepo, broadcaster: broadcaster}
+}
+
+// SetGoalAchievedHandler registers the post-transition action for achieved goals.
+func (s *TaskGoalService) SetGoalAchievedHandler(handler func(context.Context, string, string)) {
+	s.goalAchievedHandler = handler
 }
 
 func (s *TaskGoalService) SetGoal(ctx context.Context, taskID string, objective string, opts GoalOptions) (*models.TaskGoal, error) {
@@ -191,6 +197,9 @@ func (s *TaskGoalService) MarkAchieved(ctx context.Context, taskID string, goalI
 		return nil, ErrTaskGoalStaleUpdate
 	}
 	s.publishGoalEvent(events.TaskGoalEvaluated, goal)
+	if s.goalAchievedHandler != nil {
+		s.goalAchievedHandler(ctx, taskID, goal.GoalID)
+	}
 	return goal, nil
 }
 

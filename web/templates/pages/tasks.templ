@@ -310,11 +310,15 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 										</div>
 									</div>
 								</div>
-								<!-- Git Worktree: Auto-merge -->
-								<div class="form-control mt-3">
+								<!-- Git Worktree: Automatic merge triggers -->
+								<div class="form-control mt-3 space-y-2">
 									<label class="label cursor-pointer justify-start gap-2">
 										<input type="checkbox" name="auto_merge" class="toggle toggle-sm toggle-primary"/>
-										<span class="label-text">Auto-merge to target branch on completion</span>
+										<span class="label-text">Auto-merge to target branch on successful completion</span>
+									</label>
+									<label class="label cursor-pointer justify-start gap-2">
+										<input type="checkbox" name="auto_merge_on_goal_achieved" class="toggle toggle-sm toggle-primary"/>
+										<span class="label-text">Auto-merge to target branch when goal is achieved</span>
 									</label>
 								</div>
 								<!-- Attachment field -->

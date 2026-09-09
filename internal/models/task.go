@@ -209,6 +209,7 @@ type Task struct {
 	WorktreePath             string       `json:"worktree_path"`
 	WorktreeBranch           string       `json:"worktree_branch"`
 	AutoMerge                bool         `json:"auto_merge"`
+	AutoMergeOnGoalAchieved  bool         `json:"auto_merge_on_goal_achieved"`
 	MergeTargetBranch        string       `json:"merge_target_branch"`
 	MergeStatus              MergeStatus  `json:"merge_status"`
 	BaseBranch               string       `json:"base_branch"`        // Git branch this task should base its worktree on (from parent lineage)

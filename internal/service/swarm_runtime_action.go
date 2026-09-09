@@ -11,22 +11,24 @@ import (
 // SwarmTaskRuntimeInput is the canonical Go input shape for the advertised
 // create_swarm_task runtime tool schema.
 type SwarmTaskRuntimeInput struct {
-	Title             string `json:"title"`
-	Prompt            string `json:"prompt"`
-	Goal              string `json:"goal"`
-	ProjectID         string `json:"project_id"`
-	Category          string `json:"category"`
-	Priority          int    `json:"priority"`
-	AgentID           string `json:"agent_id"`
-	AgentDefinitionID string `json:"agent_definition_id"`
-	Agent             string `json:"agent"`
-	Tag               string `json:"tag"`
-	MaxWorkers        int    `json:"max_workers"`
-	WorkerIsolation   string `json:"worker_isolation"`
-	ReviewerEnabled   *bool  `json:"reviewer_enabled"`
-	MergerEnabled     *bool  `json:"merger_enabled"`
-	StartImmediately  *bool  `json:"start_immediately"`
-	MergeTargetBranch string `json:"merge_target_branch"`
+	Title                   string `json:"title"`
+	Prompt                  string `json:"prompt"`
+	Goal                    string `json:"goal"`
+	ProjectID               string `json:"project_id"`
+	Category                string `json:"category"`
+	Priority                int    `json:"priority"`
+	AgentID                 string `json:"agent_id"`
+	AgentDefinitionID       string `json:"agent_definition_id"`
+	Agent                   string `json:"agent"`
+	Tag                     string `json:"tag"`
+	MaxWorkers              int    `json:"max_workers"`
+	WorkerIsolation         string `json:"worker_isolation"`
+	ReviewerEnabled         *bool  `json:"reviewer_enabled"`
+	MergerEnabled           *bool  `json:"merger_enabled"`
+	StartImmediately        *bool  `json:"start_immediately"`
+	AutoMerge               bool   `json:"auto_merge"`
+	AutoMergeOnGoalAchieved bool   `json:"auto_merge_on_goal_achieved"`
+	MergeTargetBranch       string `json:"merge_target_branch"`
 }
 
 type CreateSwarmTaskRuntimeOptions struct {
@@ -94,21 +96,23 @@ func ExecuteCreateSwarmTaskRuntime(ctx context.Context, opts CreateSwarmTaskRunt
 	}
 
 	parent, err := swarmSvc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{
-		ProjectID:         projectID,
-		Title:             req.Title,
-		Prompt:            req.Prompt,
-		Goal:              req.Goal,
-		Category:          category,
-		Priority:          priority,
-		AgentID:           agentID,
-		AgentDefinitionID: agentDefinitionID,
-		Tag:               tag,
-		MaxWorkers:        req.MaxWorkers,
-		WorkerIsolation:   req.WorkerIsolation,
-		ReviewerEnabled:   reviewerEnabled,
-		MergerEnabled:     mergerEnabled,
-		StartImmediately:  req.StartImmediately,
-		MergeTargetBranch: req.MergeTargetBranch,
+		ProjectID:               projectID,
+		Title:                   req.Title,
+		Prompt:                  req.Prompt,
+		Goal:                    req.Goal,
+		Category:                category,
+		Priority:                priority,
+		AgentID:                 agentID,
+		AgentDefinitionID:       agentDefinitionID,
+		Tag:                     tag,
+		MaxWorkers:              req.MaxWorkers,
+		WorkerIsolation:         req.WorkerIsolation,
+		ReviewerEnabled:         reviewerEnabled,
+		MergerEnabled:           mergerEnabled,
+		StartImmediately:        req.StartImmediately,
+		AutoMerge:               req.AutoMerge,
+		AutoMergeOnGoalAchieved: req.AutoMergeOnGoalAchieved,
+		MergeTargetBranch:       req.MergeTargetBranch,
 	})
 	if err != nil {
 		return nil, "", err

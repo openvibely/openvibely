@@ -28,6 +28,7 @@ const (
 	githubPATSetupLinkURL               = "/channels"
 	githubPATSetupLinkText              = "Open Channels"
 	projectMaxWorkersMin                = 1
+	projectCleanupWarningParam          = "project_cleanup_warning"
 )
 
 func (h *Handler) Home(c echo.Context) error {
@@ -571,9 +572,15 @@ func (h *Handler) DeleteProject(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "cannot delete the default project")
 	}
 
+	cleanupWarning := false
 	if err := h.projectSvc.Delete(ctx, projectID); err != nil {
-		applog.Infof("[handler] DeleteProject error: %v", err)
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to delete project")
+		var cleanupErr *service.ProjectDeletionCleanupError
+		if !errors.As(err, &cleanupErr) {
+			applog.Infof("[handler] DeleteProject error: %v", err)
+			return echo.NewHTTPError(http.StatusInternalServerError, "could not delete this project; its data was kept")
+		}
+		cleanupWarning = true
+		applog.Infof("[handler] DeleteProject filesystem cleanup warning: %v", cleanupErr)
 	}
 
 	applog.Infof("[handler] DeleteProject success id=%s", projectID)
@@ -585,11 +592,15 @@ func (h *Handler) DeleteProject(c echo.Context) error {
 		redirectID = projects[0].ID
 	}
 
+	redirectURL := "/tasks?project_id=" + url.QueryEscape(redirectID)
+	if cleanupWarning {
+		redirectURL += "&" + projectCleanupWarningParam + "=1"
+	}
 	if isHTMX(c) {
-		c.Response().Header().Set("HX-Redirect", "/tasks?project_id="+redirectID)
+		c.Response().Header().Set("HX-Redirect", redirectURL)
 		return c.NoContent(http.StatusOK)
 	}
-	return c.Redirect(http.StatusSeeOther, "/tasks?project_id="+redirectID)
+	return c.Redirect(http.StatusSeeOther, redirectURL)
 }
 
 func (h *Handler) ViewSchedule(c echo.Context) error {

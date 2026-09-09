@@ -87,7 +87,7 @@ func assertSwarmChildProjectionColumns(t *testing.T) {
 			t.Fatalf("swarm child projection must not select unused payload column %q: %s", forbidden, swarmChildTaskSelectColumns)
 		}
 	}
-	for _, required := range []string{"id", "project_id", "title", "category", "priority", "status", "agent_id", "agent_definition_id", "tag", "display_order", "parent_task_id", "swarm_role", "swarm_status", "swarm_config", "swarm_sequence", "worktree_path", "worktree_branch", "auto_merge", "merge_target_branch", "merge_status", "base_branch", "base_commit_sha", "lineage_depth", "created_via", "telegram_chat_id", "created_at", "updated_at", "completed_at"} {
+	for _, required := range []string{"id", "project_id", "title", "category", "priority", "status", "agent_id", "agent_definition_id", "tag", "display_order", "parent_task_id", "swarm_role", "swarm_status", "swarm_config", "swarm_sequence", "worktree_path", "worktree_branch", "auto_merge", "auto_merge_on_goal_achieved", "merge_target_branch", "merge_status", "base_branch", "base_commit_sha", "lineage_depth", "created_via", "telegram_chat_id", "created_at", "updated_at", "completed_at"} {
 		if !projectionContainsColumn(swarmChildTaskSelectColumns, required) {
 			t.Fatalf("swarm child projection missing required column %q: %s", required, swarmChildTaskSelectColumns)
 		}

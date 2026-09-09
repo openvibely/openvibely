@@ -8,6 +8,7 @@ import (
 
 type automationContextKey struct{}
 type preparedAutomationExecutionKey struct{}
+type preparedTaskExecutionKey struct{}
 type automationExecutionKey struct{}
 
 type automationExecutionIdentity struct {
@@ -58,5 +59,17 @@ func preparedAutomationExecutionID(ctx context.Context) string {
 		return ""
 	}
 	value, _ := ctx.Value(preparedAutomationExecutionKey{}).(string)
+	return value
+}
+
+func withPreparedTaskExecution(ctx context.Context, executionID string) context.Context {
+	return context.WithValue(ctx, preparedTaskExecutionKey{}, executionID)
+}
+
+func preparedTaskExecutionID(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	value, _ := ctx.Value(preparedTaskExecutionKey{}).(string)
 	return value
 }

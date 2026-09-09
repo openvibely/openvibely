@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"sort"
 	"strings"
 	"time"
 
@@ -1315,7 +1314,7 @@ func ExecuteAutomationTemplateUpdateRuntime(ctx context.Context, opts Automation
 	if err := chatcontrol.DecodeRuntimeToolInput(opts.Input, &req); err != nil {
 		return "", err
 	}
-	card, err := resolveAutomationTemplateUpdateTarget(ctx, opts.AutomationGraphSvc, projectID, req)
+	card, err := opts.AutomationGraphSvc.ResolveAutomationCard(ctx, projectID, req.AutomationID, req.Name)
 	if err != nil {
 		return "", fmt.Errorf("update_automation_template: %w", err)
 	}
@@ -1348,7 +1347,7 @@ func ExecuteAutomationTemplateUpdateRuntime(ctx context.Context, opts Automation
 	}); err != nil {
 		return "", err
 	}
-	fresh, err := automationCardByIDForTemplateUpdate(ctx, opts.AutomationGraphSvc, projectID, card.Automation.ID)
+	fresh, err := opts.AutomationGraphSvc.AutomationCardByID(ctx, projectID, card.Automation.ID)
 	if err != nil {
 		return "", err
 	}
@@ -1361,61 +1360,6 @@ func ExecuteAutomationTemplateUpdateRuntime(ctx context.Context, opts Automation
 	result["message"] = fmt.Sprintf("Automation %q was updated to the latest maintained template", fresh.Automation.Name)
 	result["automation"] = AutomationCardSummary(*fresh)
 	return marshalChannelAutomationResult(result)
-}
-
-func resolveAutomationTemplateUpdateTarget(ctx context.Context, graphSvc *AutomationGraphService, projectID string, req AutomationTemplateUpdateRuntimeInput) (models.AutomationCard, error) {
-	cards, err := graphSvc.List(ctx, projectID)
-	if err != nil {
-		return models.AutomationCard{}, err
-	}
-	automationID := strings.TrimSpace(req.AutomationID)
-	name := strings.TrimSpace(req.Name)
-	if automationID == "" && name == "" {
-		return models.AutomationCard{}, errors.New("automation_id or name is required")
-	}
-	if automationID != "" {
-		for _, card := range cards {
-			if card.Automation.ID == automationID {
-				if name != "" && !strings.EqualFold(strings.TrimSpace(card.Automation.Name), name) {
-					return models.AutomationCard{}, fmt.Errorf("automation_id %q is named %q, not %q", automationID, card.Automation.Name, name)
-				}
-				return card, nil
-			}
-		}
-		return models.AutomationCard{}, fmt.Errorf("automation %q not found in current project", automationID)
-	}
-	var matches []models.AutomationCard
-	for _, card := range cards {
-		if strings.EqualFold(strings.TrimSpace(card.Automation.Name), name) {
-			matches = append(matches, card)
-		}
-	}
-	switch len(matches) {
-	case 0:
-		return models.AutomationCard{}, fmt.Errorf("automation named %q not found in current project", name)
-	case 1:
-		return matches[0], nil
-	default:
-		ids := make([]string, 0, len(matches))
-		for _, match := range matches {
-			ids = append(ids, match.Automation.ID)
-		}
-		sort.Strings(ids)
-		return models.AutomationCard{}, fmt.Errorf("automation name %q is ambiguous in current project; use automation_id (%s)", name, strings.Join(ids, ", "))
-	}
-}
-
-func automationCardByIDForTemplateUpdate(ctx context.Context, graphSvc *AutomationGraphService, projectID, automationID string) (*models.AutomationCard, error) {
-	cards, err := graphSvc.List(ctx, projectID)
-	if err != nil {
-		return nil, err
-	}
-	for _, card := range cards {
-		if card.Automation.ID == automationID {
-			return &card, nil
-		}
-	}
-	return nil, nil
 }
 
 func automationTemplateUpdateNoopResult(projectID string, card models.AutomationCard, reason, message string) map[string]any {

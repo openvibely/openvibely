@@ -17,21 +17,23 @@ import (
 )
 
 type CreateSwarmTaskRequest struct {
-	ProjectID         string
-	Title             string
-	Prompt            string
-	Goal              string
-	Category          models.TaskCategory
-	Priority          int
-	AgentID           *string
-	AgentDefinitionID *string
-	Tag               models.TaskTag
-	MaxWorkers        int
-	WorkerIsolation   string
-	ReviewerEnabled   bool
-	MergerEnabled     bool
-	StartImmediately  *bool
-	MergeTargetBranch string
+	ProjectID               string
+	Title                   string
+	Prompt                  string
+	Goal                    string
+	Category                models.TaskCategory
+	Priority                int
+	AgentID                 *string
+	AgentDefinitionID       *string
+	Tag                     models.TaskTag
+	MaxWorkers              int
+	WorkerIsolation         string
+	ReviewerEnabled         bool
+	MergerEnabled           bool
+	StartImmediately        *bool
+	AutoMerge               bool
+	AutoMergeOnGoalAchieved bool
+	MergeTargetBranch       string
 }
 
 type PlannerOutput struct {
@@ -156,19 +158,21 @@ func (s *SwarmService) CreateSwarmTask(ctx context.Context, req CreateSwarmTaskR
 		return nil, err
 	}
 	parent := &models.Task{
-		ProjectID:         req.ProjectID,
-		Title:             req.Title,
-		Prompt:            req.Prompt,
-		Category:          req.Category,
-		Priority:          req.Priority,
-		Status:            models.StatusBlocked,
-		AgentID:           req.AgentID,
-		AgentDefinitionID: req.AgentDefinitionID,
-		Tag:               req.Tag,
-		MergeTargetBranch: req.MergeTargetBranch,
-		SwarmRole:         models.SwarmRoleParent,
-		SwarmStatus:       "planning",
-		SwarmConfig:       cfgJSON,
+		ProjectID:               req.ProjectID,
+		Title:                   req.Title,
+		Prompt:                  req.Prompt,
+		Category:                req.Category,
+		Priority:                req.Priority,
+		Status:                  models.StatusBlocked,
+		AgentID:                 req.AgentID,
+		AgentDefinitionID:       req.AgentDefinitionID,
+		Tag:                     req.Tag,
+		AutoMerge:               req.AutoMerge,
+		AutoMergeOnGoalAchieved: req.AutoMergeOnGoalAchieved,
+		MergeTargetBranch:       req.MergeTargetBranch,
+		SwarmRole:               models.SwarmRoleParent,
+		SwarmStatus:             "planning",
+		SwarmConfig:             cfgJSON,
 	}
 	if err := s.taskSvc.CreateWithGoal(ctx, parent, req.Goal); err != nil {
 		return nil, err
@@ -201,6 +205,15 @@ func (s *SwarmService) startPlanner(ctx context.Context, parentTaskID string, st
 	parent, err := s.taskRepo.GetByID(ctx, parentTaskID)
 	if err != nil || parent == nil {
 		return fmt.Errorf("loading swarm parent: %w", err)
+	}
+	if _, guarded := repository.ActiveLaneExpectedState(ctx, parentTaskID); guarded {
+		if err := s.taskRepo.PrepareSwarmParentForActiveLane(ctx, parentTaskID); err != nil {
+			return err
+		}
+		parent, err = s.taskRepo.GetByID(ctx, parentTaskID)
+		if err != nil || parent == nil {
+			return fmt.Errorf("reloading guarded swarm parent: %w", err)
+		}
 	}
 	if s.workerSvc != nil {
 		s.workerSvc.ClearCancellationRequested(parent.ID)

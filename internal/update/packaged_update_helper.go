@@ -1076,20 +1076,35 @@ type packagedUpdateRelaunchMetadata struct {
 	ExecutableRelative string   `json:"executable_relative,omitempty"`
 }
 
-func LoadExecutableUpdateHelperRelaunch(reader io.Reader, cfg *ExecutableUpdateHelperConfig) error {
-	if reader == nil || cfg == nil {
-		return errors.New("executable update helper relaunch metadata is unavailable")
+const packagedUpdateRelaunchMetadataMaxSize = 1024 * 1024
+
+func decodePackagedUpdateRelaunchMetadata(reader io.Reader) (packagedUpdateRelaunchMetadata, error) {
+	if reader == nil {
+		return packagedUpdateRelaunchMetadata{}, errors.New("packaged update relaunch metadata is unavailable")
 	}
+
 	var metadata packagedUpdateRelaunchMetadata
-	decoder := json.NewDecoder(io.LimitReader(reader, 1024*1024))
+	decoder := json.NewDecoder(io.LimitReader(reader, packagedUpdateRelaunchMetadataMaxSize))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&metadata); err != nil {
+		return packagedUpdateRelaunchMetadata{}, fmt.Errorf("decode packaged update relaunch metadata: %w", err)
+	}
+	if len(metadata.Arguments) == 0 || !filepath.IsAbs(metadata.WorkingDirectory) {
+		return packagedUpdateRelaunchMetadata{}, errors.New("packaged update relaunch metadata is incomplete")
+	}
+	metadata.Arguments = append([]string(nil), metadata.Arguments...)
+	return metadata, nil
+}
+
+func LoadExecutableUpdateHelperRelaunch(reader io.Reader, cfg *ExecutableUpdateHelperConfig) error {
+	if cfg == nil {
+		return errors.New("executable update helper relaunch metadata is unavailable")
+	}
+	metadata, err := decodePackagedUpdateRelaunchMetadata(reader)
+	if err != nil {
 		return fmt.Errorf("decode executable update helper relaunch metadata: %w", err)
 	}
-	if len(metadata.Arguments) == 0 || metadata.WorkingDirectory == "" || !filepath.IsAbs(metadata.WorkingDirectory) {
-		return errors.New("executable update helper relaunch metadata is incomplete")
-	}
-	cfg.Arguments = append([]string(nil), metadata.Arguments...)
+	cfg.Arguments = metadata.Arguments
 	cfg.WorkingDirectory = metadata.WorkingDirectory
 	return nil
 }

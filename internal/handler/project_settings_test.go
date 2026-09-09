@@ -1241,6 +1241,69 @@ func TestDeleteProject(t *testing.T) {
 		}
 	})
 
+	t.Run("CleanupWarningSurvivesHTMXRedirect", func(t *testing.T) {
+		repoPath := filepath.Join(t.TempDir(), "non-git-user-checkout")
+		worktreePath := filepath.Join(repoPath, ".worktrees", "task_cleanup-warning")
+		if err := os.MkdirAll(worktreePath, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		project := &models.Project{Name: "Cleanup Warning", RepoPath: repoPath}
+		if err := projectSvc.Create(ctx, project); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.ExecContext(ctx, `
+			INSERT INTO tasks (id, project_id, title, prompt, worktree_path)
+			VALUES ('cleanup-warning', ?, 'Cleanup warning task', 'test', ?)`, project.ID, worktreePath); err != nil {
+			t.Fatal(err)
+		}
+
+		req := httptest.NewRequest(http.MethodDelete, "/projects/"+project.ID, nil)
+		req.Header.Set("HX-Request", "true")
+		rec := httptest.NewRecorder()
+		c := e.NewContext(req, rec)
+		c.SetParamNames("id")
+		c.SetParamValues(project.ID)
+		if err := h.DeleteProject(c); err != nil {
+			t.Fatal(err)
+		}
+		redirect := rec.Header().Get("HX-Redirect")
+		if !strings.Contains(redirect, "project_cleanup_warning=1") {
+			t.Fatalf("cleanup warning redirect = %q, want durable warning flag", redirect)
+		}
+		if trigger := rec.Header().Get("HX-Trigger"); strings.Contains(trigger, "openvibelyToast") {
+			t.Fatalf("cleanup warning used pre-navigation toast: %q", trigger)
+		}
+	})
+
+	t.Run("CleanupWarningSurvivesNonHTMXRedirect", func(t *testing.T) {
+		repoPath := filepath.Join(t.TempDir(), "non-git-user-checkout")
+		worktreePath := filepath.Join(repoPath, ".worktrees", "task_cleanup-warning-http")
+		if err := os.MkdirAll(worktreePath, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		project := &models.Project{Name: "Cleanup Warning HTTP", RepoPath: repoPath}
+		if err := projectSvc.Create(ctx, project); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.ExecContext(ctx, `
+			INSERT INTO tasks (id, project_id, title, prompt, worktree_path)
+			VALUES ('cleanup-warning-http', ?, 'Cleanup warning task', 'test', ?)`, project.ID, worktreePath); err != nil {
+			t.Fatal(err)
+		}
+
+		req := httptest.NewRequest(http.MethodDelete, "/projects/"+project.ID, nil)
+		rec := httptest.NewRecorder()
+		c := e.NewContext(req, rec)
+		c.SetParamNames("id")
+		c.SetParamValues(project.ID)
+		if err := h.DeleteProject(c); err != nil {
+			t.Fatal(err)
+		}
+		if location := rec.Header().Get("Location"); !strings.Contains(location, "project_cleanup_warning=1") {
+			t.Fatalf("cleanup warning redirect = %q, want durable warning flag", location)
+		}
+	})
+
 	t.Run("DeleteProjectCleansPendingAttachmentSessionAndRejectsLateUpload", func(t *testing.T) {
 		project := &models.Project{
 			Name:        "Attachment Cleanup Project",
@@ -1374,6 +1437,58 @@ func TestDeleteProject(t *testing.T) {
 		}
 	})
 
+	t.Run("LegacyMemoryConstraintReturnsClearFailureWithoutPartialDeletion", func(t *testing.T) {
+		project := &models.Project{Name: "Suggestion Engine Fixture"}
+		if err := projectSvc.Create(ctx, project); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.ExecContext(ctx, `INSERT INTO tasks (id, project_id, title, prompt) VALUES ('legacy-delete-task', ?, 'Retained task', 'test')`, project.ID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.ExecContext(ctx, `
+			CREATE TABLE memory_consolidation_runs (id TEXT PRIMARY KEY);
+			CREATE TABLE memory_consolidation_schedules (
+				project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+				last_run_id TEXT REFERENCES memory_consolidation_runs(id) ON DELETE SET NULL
+			);
+			INSERT INTO memory_consolidation_schedules(project_id) VALUES (?)`, project.ID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.ExecContext(ctx, `PRAGMA foreign_keys=OFF`); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.ExecContext(ctx, `DROP TABLE memory_consolidation_runs`); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.ExecContext(ctx, `PRAGMA foreign_keys=ON`); err != nil {
+			t.Fatal(err)
+		}
+
+		req := httptest.NewRequest(http.MethodDelete, "/projects/"+project.ID, nil)
+		req.Header.Set("HX-Request", "true")
+		rec := httptest.NewRecorder()
+		c := e.NewContext(req, rec)
+		c.SetParamNames("id")
+		c.SetParamValues(project.ID)
+		err := h.DeleteProject(c)
+		httpErr, ok := err.(*echo.HTTPError)
+		if !ok || httpErr.Code != http.StatusInternalServerError || httpErr.Message != "could not delete this project; its data was kept" {
+			t.Fatalf("DeleteProject error = %#v, want clear 500", err)
+		}
+		if stored, getErr := projectRepo.GetByID(ctx, project.ID); getErr != nil || stored == nil {
+			t.Fatalf("project after failed handler deletion = %#v, err=%v", stored, getErr)
+		}
+		if stored, getErr := taskRepo.GetByID(ctx, "legacy-delete-task"); getErr != nil || stored == nil {
+			t.Fatalf("task after failed handler deletion = %#v, err=%v", stored, getErr)
+		}
+		if _, dropErr := db.ExecContext(ctx, `DROP TABLE memory_consolidation_schedules`); dropErr != nil {
+			t.Fatal(dropErr)
+		}
+		if err := projectSvc.Delete(ctx, project.ID); err != nil {
+			t.Fatal(err)
+		}
+	})
+
 	t.Run("CannotDeleteDefaultProject", func(t *testing.T) {
 		// The default project has id 'default' from migrations
 		req := httptest.NewRequest(http.MethodDelete, "/projects/default", nil)
@@ -1492,8 +1607,10 @@ func TestDeleteProject(t *testing.T) {
 			`onclick="delete_project_confirm_modal.close()"`,
 			`Delete Permanently`,
 			`var editModal = document.getElementById('edit_project_modal');`,
-			`htmx.ajax('DELETE', '/projects/' + projectID, {target: 'body', swap: 'none'});`,
-		} {
+			`var requestPath = '/projects/' + projectID;`,
+			`confirmModal.dataset.deletePending = 'true';`,
+			`htmx.ajax('DELETE', requestPath, {target: 'body', swap: 'none'});`,
+			`id="delete_project_error"`} {
 			if !strings.Contains(body, want) {
 				t.Errorf("edit dialog for non-default project should contain %q", want)
 			}

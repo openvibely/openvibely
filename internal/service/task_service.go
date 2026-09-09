@@ -20,6 +20,7 @@ var ErrTaskTitleRequired = errors.New("task title is required")
 var ErrTaskPromptRequired = errors.New("task prompt is required")
 var ErrInvalidTaskPriority = errors.New("task priority must be between 1 and 4")
 var ErrTaskNotFoundInProject = errors.New("task not found in project")
+var ErrActiveLaneLifecycleRouted = errors.New("task activation was routed to its lifecycle owner")
 
 type TaskService struct {
 	repo                              *repository.TaskRepo
@@ -32,6 +33,7 @@ type TaskService struct {
 	failedTaskThreadFollowupRetryHook func(context.Context, string) (bool, error)
 	updateCategoryTaskLoader          func(context.Context, string) (*models.Task, error)
 	beforePendingSessionRemoval       func(string)
+	beforeActiveLaneLifecycleRoute    func()
 }
 
 func NewTaskService(repo *repository.TaskRepo, _ *repository.AttachmentRepo, workerSvc *WorkerService) *TaskService {
@@ -341,6 +343,44 @@ func (s *TaskService) cancelActiveTaskWork(ctx context.Context, id string) error
 	return nil
 }
 
+func (s *TaskService) MoveTasksToActiveLane(ctx context.Context, projectID string, moves []repository.ActiveLaneTaskMove, status models.TaskStatus) error {
+	if s.workerSvc == nil {
+		return errors.New("worker service unavailable")
+	}
+	admissions, err := s.repo.MoveTasksToActiveLane(ctx, projectID, moves, status)
+	if errors.Is(err, repository.ErrActiveLaneLifecycleOwned) && len(moves) == 1 {
+		move := moves[0]
+		routeCtx := repository.WithActiveLaneExpectedState(ctx, move)
+		if s.beforeActiveLaneLifecycleRoute != nil {
+			s.beforeActiveLaneLifecycleRoute()
+		}
+		var routeErr error
+		if move.ExpectedCategory == models.CategoryActive || move.ExpectedStatus == models.StatusFailed {
+			routeErr = s.RunTask(routeCtx, move.ID)
+		} else {
+			routeErr = s.UpdateCategory(routeCtx, move.ID, models.CategoryActive)
+		}
+		if routeErr != nil {
+			return routeErr
+		}
+		return ErrActiveLaneLifecycleRouted
+	}
+	if err != nil {
+		return err
+	}
+	for _, admission := range admissions {
+		task := admission.Task
+		s.workerSvc.ClearCancellationRequested(task.ID)
+		s.resumeGoalStoppedByUser(ctx, task.ID, "user")
+		if status == models.StatusRunning {
+			s.workerSvc.SubmitReserved(task, admission.ExecutionID)
+		} else {
+			s.workerSvc.Submit(task)
+		}
+	}
+	return nil
+}
+
 func (s *TaskService) UpdateCategory(ctx context.Context, id string, category models.TaskCategory) error {
 	applog.Infof("[task-svc] UpdateCategory id=%s -> %s", id, category)
 	var previousTask *models.Task
@@ -350,16 +390,46 @@ func (s *TaskService) UpdateCategory(ctx context.Context, id string, category mo
 		applog.Infof("[task-svc] UpdateCategory error fetching previous task state: %v", err)
 		return err
 	}
+	if _, guarded := repository.ActiveLaneExpectedState(ctx, id); guarded && category == models.CategoryActive {
+		if previousTask == nil {
+			return fmt.Errorf("%w: %s", repository.ErrActiveLaneTaskChanged, id)
+		}
+		if s.queuedTaskThreadFollowupHook != nil {
+			handled, hookErr := s.queuedTaskThreadFollowupHook(ctx, id)
+			if hookErr != nil {
+				return hookErr
+			}
+			if handled {
+				s.resumeGoalStoppedByUser(ctx, id, "user")
+				return nil
+			}
+		}
+		if s.failedTaskThreadFollowupRetryHook != nil {
+			handled, hookErr := s.failedTaskThreadFollowupRetryHook(ctx, id)
+			if hookErr != nil {
+				return hookErr
+			}
+			if handled {
+				s.resumeGoalStoppedByUser(ctx, id, "user")
+				return nil
+			}
+		}
+		if previousTask.SwarmRole == models.SwarmRoleParent && s.swarmSvc != nil {
+			if startErr := s.swarmSvc.StartPlanner(ctx, id); startErr != nil {
+				return startErr
+			}
+			s.resumeGoalStoppedByUser(ctx, id, "user")
+			return nil
+		}
+		return fmt.Errorf("%w: %s", repository.ErrActiveLaneTaskChanged, id)
+	}
 	rollbackActivation := func(activationErr error) error {
 		if category != models.CategoryActive || previousTask == nil {
 			return activationErr
 		}
 		rollbackCtx := context.WithoutCancel(ctx)
-		if err := s.repo.UpdateCategory(rollbackCtx, id, previousTask.Category); err != nil {
-			return errors.Join(activationErr, fmt.Errorf("rolling back task category to %s: %w", previousTask.Category, err))
-		}
-		if err := s.repo.UpdateStatus(rollbackCtx, id, previousTask.Status); err != nil {
-			return errors.Join(activationErr, fmt.Errorf("rolling back task status to %s: %w", previousTask.Status, err))
+		if err := s.repo.RestoreBoardState(rollbackCtx, *previousTask); err != nil {
+			return errors.Join(activationErr, fmt.Errorf("restoring task board state: %w", err))
 		}
 		applog.Infof("[task-svc] UpdateCategory rolled back failed activation id=%s category=%s status=%s", id, previousTask.Category, previousTask.Status)
 		return activationErr
@@ -517,18 +587,77 @@ func (s *TaskService) DeleteProjectTasks(ctx context.Context, projectID string) 
 	}
 }
 
+func (s *TaskService) validateDeletion(manifest repository.TaskDeletionManifest) error {
+	if len(manifest.PendingUploadSessionIDs) > 0 && strings.TrimSpace(s.uploadsDir) == "" {
+		return errors.New("uploads directory is not configured for pending upload cleanup")
+	}
+	return nil
+}
+
+func (s *TaskService) cancelDeletionTasks(taskIDs []string) {
+	if s.workerSvc != nil {
+		for _, taskID := range taskIDs {
+			s.workerSvc.CancelRunningTask(taskID)
+		}
+	}
+}
+
+func (s *TaskService) cleanupDeletedProjectRuntime(ctx context.Context, taskIDs []string) error {
+	if s.workerSvc == nil {
+		return nil
+	}
+	var cleanupErrors []error
+	for _, taskID := range taskIDs {
+		s.workerSvc.CancelRunningTask(taskID)
+		if err := s.workerSvc.CancelQueuedTask(context.WithoutCancel(ctx), taskID, "Project deleted"); err != nil {
+			cleanupErrors = append(cleanupErrors, fmt.Errorf("canceling queued task %s after project deletion: %w", taskID, err))
+		}
+	}
+	return errors.Join(cleanupErrors...)
+}
+
+func (s *TaskService) prepareDeletion(manifest repository.TaskDeletionManifest, taskIDs []string) error {
+	if err := s.validateDeletion(manifest); err != nil {
+		return err
+	}
+	s.cancelDeletionTasks(taskIDs)
+	return nil
+}
+
+func (s *TaskService) cleanupDeletionFiles(manifest repository.TaskDeletionManifest) error {
+	var cleanupErrors []error
+	removeFile := func(kind, path string) {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			applog.Infof("[task-svc] deletion cleanup error removing %s %s: %v", kind, path, err)
+			cleanupErrors = append(cleanupErrors, fmt.Errorf("removing %s %s: %w", kind, path, err))
+		}
+	}
+	for _, path := range manifest.TaskAttachmentPaths {
+		removeFile("attachment", path)
+	}
+	for _, path := range manifest.ExecutionAttachmentPaths {
+		removeFile("execution attachment", path)
+	}
+	for _, sessionID := range manifest.PendingUploadSessionIDs {
+		path := filepath.Join(s.uploadsDir, "chat", "pending", sessionID)
+		unlockSession := attachmentsession.Lock(sessionID)
+		if s.beforePendingSessionRemoval != nil {
+			s.beforePendingSessionRemoval(sessionID)
+		}
+		removeErr := os.RemoveAll(path)
+		unlockSession()
+		if removeErr != nil {
+			applog.Infof("[task-svc] deletion cleanup error removing pending uploads %s: %v", path, removeErr)
+			cleanupErrors = append(cleanupErrors, fmt.Errorf("removing pending uploads %s: %w", path, removeErr))
+		}
+	}
+	return errors.Join(cleanupErrors...)
+}
+
 func (s *TaskService) deleteTask(ctx context.Context, id, projectID string, category models.TaskCategory) (bool, error) {
 	prepareDelete := func(manifest repository.TaskDeletionManifest) error {
-		if len(manifest.PendingUploadSessionIDs) > 0 && strings.TrimSpace(s.uploadsDir) == "" {
-			return errors.New("uploads directory is not configured for pending upload cleanup")
-		}
-		if s.workerSvc != nil {
-			s.workerSvc.CancelRunningTask(id)
-			for _, childID := range manifest.SwarmChildTaskIDs {
-				s.workerSvc.CancelRunningTask(childID)
-			}
-		}
-		return nil
+		taskIDs := append([]string{id}, manifest.SwarmChildTaskIDs...)
+		return s.prepareDeletion(manifest, taskIDs)
 	}
 	var (
 		manifest repository.TaskDeletionManifest
@@ -548,34 +677,8 @@ func (s *TaskService) deleteTask(ctx context.Context, id, projectID string, cate
 	// through deletion. A concurrent upload metadata write therefore either lands
 	// in the manifest first or fails after the task rows disappear and rolls back
 	// its newly published file. Filesystem and git work remain outside SQLite.
-	var cleanupErrors []error
-	removeFile := func(kind, path string) {
-		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-			applog.Infof("[task-svc] Delete error removing %s %s after durable deletion: %v", kind, path, err)
-			cleanupErrors = append(cleanupErrors, fmt.Errorf("task deleted but removing %s %s: %w", kind, path, err))
-		}
-	}
-	for _, path := range manifest.TaskAttachmentPaths {
-		removeFile("attachment", path)
-	}
-	for _, path := range manifest.ExecutionAttachmentPaths {
-		removeFile("execution attachment", path)
-	}
-	for _, sessionID := range manifest.PendingUploadSessionIDs {
-		path := filepath.Join(s.uploadsDir, "chat", "pending", sessionID)
-		unlockSession := attachmentsession.Lock(sessionID)
-		if s.beforePendingSessionRemoval != nil {
-			s.beforePendingSessionRemoval(sessionID)
-		}
-		removeErr := os.RemoveAll(path)
-		unlockSession()
-		if removeErr != nil {
-			applog.Infof("[task-svc] Delete error removing pending uploads %s after durable deletion: %v", path, removeErr)
-			cleanupErrors = append(cleanupErrors, fmt.Errorf("task deleted but removing pending uploads %s: %w", path, removeErr))
-		}
-	}
-	if err := errors.Join(cleanupErrors...); err != nil {
-		return true, err
+	if err := s.cleanupDeletionFiles(manifest); err != nil {
+		return true, fmt.Errorf("task deleted but %w", err)
 	}
 
 	applog.Infof("[task-svc] Delete success id=%s (deleted %d task attachments, %d execution attachments, %d pending upload sessions)", id, len(manifest.TaskAttachmentPaths), len(manifest.ExecutionAttachmentPaths), len(manifest.PendingUploadSessionIDs))
@@ -592,6 +695,36 @@ func (s *TaskService) RunTask(ctx context.Context, id string) error {
 	if task == nil {
 		applog.Infof("[task-svc] RunTask not found id=%s", id)
 		return fmt.Errorf("task not found: %s", id)
+	}
+	if _, guarded := repository.ActiveLaneExpectedState(ctx, id); guarded {
+		if s.queuedTaskThreadFollowupHook != nil {
+			handled, hookErr := s.queuedTaskThreadFollowupHook(ctx, id)
+			if hookErr != nil {
+				return hookErr
+			}
+			if handled {
+				s.resumeGoalStoppedByUser(ctx, id, "user")
+				return nil
+			}
+		}
+		if s.failedTaskThreadFollowupRetryHook != nil {
+			handled, hookErr := s.failedTaskThreadFollowupRetryHook(ctx, id)
+			if hookErr != nil {
+				return hookErr
+			}
+			if handled {
+				s.resumeGoalStoppedByUser(ctx, id, "user")
+				return nil
+			}
+		}
+		if task.SwarmRole == models.SwarmRoleParent && s.swarmSvc != nil {
+			if startErr := s.swarmSvc.StartPlanner(ctx, id); startErr != nil {
+				return startErr
+			}
+			s.resumeGoalStoppedByUser(ctx, id, "user")
+			return nil
+		}
+		return fmt.Errorf("%w: %s", repository.ErrActiveLaneTaskChanged, id)
 	}
 	s.resumeGoalStoppedByUser(ctx, id, "user")
 

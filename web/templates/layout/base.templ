@@ -436,7 +436,14 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				dialog.modal #toast-container {
 					z-index: 1302;
 				}
+				.card-sort-control {
+					width: 11rem;
+					max-width: 100%;
+				}
 				@media (max-width: 640px) {
+					.card-sort-control {
+						width: min(11rem, 100%);
+					}
 					#toast-container {
 						top: 8px;
 						right: 8px;
@@ -3400,9 +3407,33 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						forceKanbanAuthoritativeRefresh(generation);
 					}
 
+					function orderKanbanTaskIDs(taskIDs, root) {
+						const seen = new Set();
+						const ids = taskIDs.filter(function(taskID) {
+							if (!taskID || seen.has(taskID)) return false;
+							seen.add(taskID);
+							return true;
+						});
+						if (!root) return ids;
+						return ids.sort(function(a, b) {
+							const aCard = root.querySelector('#task-' + (window.CSS && CSS.escape ? CSS.escape(a) : a));
+							const bCard = root.querySelector('#task-' + (window.CSS && CSS.escape ? CSS.escape(b) : b));
+							if (!aCard || !bCard || aCard === bCard) return 0;
+							return aCard.compareDocumentPosition(bCard) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1;
+						});
+					}
+
 					function beginKanbanMove(taskIDs, destination, method, path, values, failureMessage) {
-						const ids = taskIDs.filter(function(taskID) { return !!taskID; });
+						const board = document.getElementById('kanban-board');
+						const ids = orderKanbanTaskIDs(taskIDs, board);
 						if (!ids.length || ids.some(function(taskID) { return pendingKanbanMoves.has(taskID); })) return false;
+						if (values && Object.prototype.hasOwnProperty.call(values, 'task_ids')) values.task_ids = ids.join(',');
+						if (values && destination.category === 'active') {
+							values.expected_states = JSON.stringify(ids.map(function(taskID) {
+								const card = board && board.querySelector('#task-' + (window.CSS && CSS.escape ? CSS.escape(taskID) : taskID));
+								return {id: taskID, category: card ? card.getAttribute('data-task-category') : '', status: card ? card.getAttribute('data-task-status') : ''};
+							}));
+						}
 						const generation = ++kanbanMoveGeneration;
 						const transaction = {generation: generation, taskIDs: ids.slice(), path: path, failureMessage: failureMessage};
 						kanbanMoveTransactions.set(generation, transaction);
@@ -3533,10 +3564,15 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 
 						if (currentCategory !== 'active') {
 							// Moving from different category to active
-							beginKanbanMove([taskID], {category: 'active', status: targetStatus}, 'PATCH', `/tasks/${taskID}/category`, { category: 'active' }, 'Cannot move task to Active category');
+							beginKanbanMove([taskID], {category: 'active', status: targetStatus}, 'PATCH', `/tasks/${taskID}/category`, { category: 'active', target_status: targetStatus }, 'Cannot move task to Active category');
 						} else if (currentStatus !== targetStatus) {
-							// Same category, different status
-							beginKanbanMove([taskID], {category: 'active', status: targetStatus}, 'PATCH', `/tasks/${taskID}/status`, { status: targetStatus }, 'Cannot change task status');
+							// Queued-to-running uses the same durable, stale-fenced admission as
+							// cross-category Active moves. Other status changes retain their owner.
+							if (targetStatus === 'running') {
+								beginKanbanMove([taskID], {category: 'active', status: targetStatus}, 'PATCH', `/tasks/${taskID}/category`, { category: 'active', target_status: targetStatus }, 'Cannot start task in this lane');
+							} else {
+								beginKanbanMove([taskID], {category: 'active', status: targetStatus}, 'PATCH', `/tasks/${taskID}/status`, { status: targetStatus }, 'Cannot change task status');
+							}
 						} else if (dropPosition !== null) {
 							// Same category, same status - just reorder
 							htmx.ajax('PATCH', `/tasks/${taskID}/reorder`, {
@@ -3550,7 +3586,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						// request hooks snapshot the board, while retaining the payload IDs.
 						const batchTaskIDs = draggedTaskIds.slice();
 						clearSelection();
-							beginKanbanMove(batchTaskIDs, {category: 'active', status: targetStatus}, 'PATCH', `/tasks/batch-category`, { task_ids: batchTaskIDs.join(','), category: 'active', project_id: projectID }, 'Cannot move tasks to Active category');
+							beginKanbanMove(batchTaskIDs, {category: 'active', status: targetStatus}, 'PATCH', `/tasks/batch-category`, { task_ids: batchTaskIDs.join(','), category: 'active', target_status: targetStatus, project_id: projectID }, 'Cannot move tasks to Active category');
 						}
 
 					clearSelection();
@@ -4270,6 +4306,19 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					}
 				};
 
+				(function showProjectCleanupWarningAfterRedirect() {
+					var currentURL = new URL(window.location.href);
+					if (currentURL.searchParams.get('project_cleanup_warning') !== '1') return;
+					currentURL.searchParams.delete('project_cleanup_warning');
+					window.history.replaceState(window.history.state, '', currentURL.pathname + currentURL.search + currentURL.hash);
+					window.showToast(
+						'Project deleted, but some staged filesystem or runtime cleanup could not be completed.',
+						'cancelled',
+						'',
+						{toastKey: 'project-cleanup-warning', sticky: true}
+					);
+				})();
+
 				// Bridge HTMX-triggered toast events into the global toast renderer.
 				// Handlers can emit: {"openvibelyToast":{"message":"...", "status":"failed"}}
 				if (!window._openvibelyToastBridgeRegistered) {
@@ -4691,6 +4740,10 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							state.signature = signature;
 
 							var form = toolbar.querySelector('[data-card-query-form]');
+							var sortControl = toolbar.querySelector('[data-card-sort]');
+							if (sortControl) sortControl.addEventListener('change', function() {
+								root.setAttribute('data-card-sort-navigation', 'true');
+							});
 							var filterButton = toolbar.querySelector('[data-card-filters-button]');
 							if (filterButton) filterButton.addEventListener('click', function(event) {
 								event.stopPropagation();
@@ -4700,16 +4753,18 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							});
 							if (form) form.addEventListener('submit', function(event) {
 								event.preventDefault();
+								if (sortControl && document.activeElement === sortControl) root.setAttribute('data-card-sort-navigation', 'true');
 								var target;
 								try { target = new URL(window.location.href); } catch (_) { return; }
 								form.querySelectorAll('[name]').forEach(function(control) {
 									if (!control.name || control.disabled) return;
 									var value = (control.value || '').trim(); if (value) target.searchParams.set(control.name, value); else target.searchParams.delete(control.name);
 								});
-								target.searchParams.delete('page'); target.searchParams.delete('offset'); target.searchParams.delete('card_page'); target.searchParams.delete('card_window');
+								target.searchParams.delete('page'); target.searchParams.delete('page_size'); target.searchParams.delete('offset'); target.searchParams.delete('card_page'); target.searchParams.delete('card_window');
 								state.ids = Object.create(null); state.last = '';
 								var path = target.pathname + target.search + target.hash;
-								if (window.openVibelyNavigate) window.openVibelyNavigate(path); else window.location.assign(path);
+								var requestPath = key === 'models' && root.getAttribute('data-card-sort-navigation') === 'true' && window.cardPaginationRefreshURL ? window.cardPaginationRefreshURL(root, path) : path;
+								if (window.openVibelyNavigate) window.openVibelyNavigate(requestPath, path); else window.location.assign(path);
 							});
 
 							function cards() { return Array.prototype.slice.call(root.querySelectorAll('[data-search-card]:not([data-search-empty-state])')); }
@@ -5190,11 +5245,15 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 									focusText: '',
 									focusAriaLabel: '',
 									activeElement: null,
-									anchorKey: null,
-									anchorTop: null
-								};
-								var active = document.activeElement;
-								snapshot.activeElement = active;
+								anchorKey: null,
+								anchorTop: null,
+								sortTransition: state.root.getAttribute('data-card-sort-navigation') === 'true',
+								focusControl: ''
+							};
+							var active = document.activeElement;
+							if (active === state.root.querySelector('[data-card-sort]')) snapshot.focusControl = 'sort';
+							else if (active === state.root.querySelector('input[data-card-search]')) snapshot.focusControl = 'search';
+							snapshot.activeElement = active;
 								var keyAttribute = state.root.getAttribute('data-card-pagination-key') || '';
 								var cards = replacementCardsFor(state.list, state.root);
 								for (var cardIndex = 0; cardIndex < cards.length; cardIndex++) {
@@ -5274,7 +5333,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							var scrollTarget = snapshot.scrollTargetIsRoot ? state.root : snapshot.scrollTarget;
 							if (scrollTarget === window) window.scrollTo(0, snapshot.scrollTop);
 							else if (scrollTarget) scrollTarget.scrollTop = snapshot.scrollTop;
-							var anchor = findCardByKey(state, snapshot.anchorKey);
+							var anchor = snapshot.sortTransition ? null : findCardByKey(state, snapshot.anchorKey);
 							if (anchor && snapshot.anchorTop !== null) {
 								var delta = anchor.getBoundingClientRect().top - snapshot.anchorTop;
 								if (Math.abs(delta) > 0.5) {
@@ -5282,8 +5341,16 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 									else if (scrollTarget) scrollTarget.scrollTop += delta;
 								}
 							}
-							var focusTarget = snapshot.restoreFocus !== false ? replacementFocusTarget(state, snapshot) : null;
-							if (focusTarget && typeof focusTarget.focus === 'function') focusTarget.focus({preventScroll: true});
+							var focusTarget = null;
+							if (snapshot.restoreFocus !== false && snapshot.focusControl === 'sort') focusTarget = state.root.querySelector('[data-card-sort]');
+							else if (snapshot.restoreFocus !== false && snapshot.focusControl === 'search') focusTarget = state.root.querySelector('input[data-card-search]');
+							else if (snapshot.restoreFocus !== false) focusTarget = replacementFocusTarget(state, snapshot);
+							if (focusTarget && typeof focusTarget.focus === 'function') {
+								if (snapshot.focusControl === 'sort' || snapshot.focusControl === 'search') setTimeout(function() {
+									if (focusTarget.isConnected && !focusTarget.disabled) focusTarget.focus({preventScroll: true});
+								}, 0);
+								else if (visibleEnabledFocusTarget(focusTarget)) focusTarget.focus({preventScroll: true});
+							}
 						}
 
 						function resetSearch(state, term) {

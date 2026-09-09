@@ -25,10 +25,38 @@ func projectRepoSource(project *models.Project) string {
 
 script deleteProjectAction(projectID string) {
 	var confirmModal = document.getElementById('delete_project_confirm_modal');
-	if (confirmModal) confirmModal.close();
-	var editModal = document.getElementById('edit_project_modal');
-	if (editModal) editModal.close();
-	htmx.ajax('DELETE', '/projects/' + projectID, {target: 'body', swap: 'none'});
+	if (!confirmModal || confirmModal.dataset.deletePending === 'true') return;
+	var confirmButton = confirmModal.querySelector('.modal-action .btn-error');
+	var errorMessage = document.getElementById('delete_project_error');
+	var requestPath = '/projects/' + projectID;
+	confirmModal.dataset.deletePending = 'true';
+	confirmModal.setAttribute('aria-busy', 'true');
+	if (confirmButton) confirmButton.disabled = true;
+	if (errorMessage) {
+		errorMessage.textContent = '';
+		errorMessage.classList.add('hidden');
+	}
+	var afterRequest = function(event) {
+		var detail = event.detail || {};
+		var requestConfig = detail.requestConfig || {};
+		if (requestConfig.path !== requestPath) return;
+		document.body.removeEventListener('htmx:afterRequest', afterRequest);
+		delete confirmModal.dataset.deletePending;
+		confirmModal.removeAttribute('aria-busy');
+		if (detail.successful) {
+			confirmModal.close();
+			var editModal = document.getElementById('edit_project_modal');
+			if (editModal) editModal.close();
+			return;
+		}
+		if (confirmButton) confirmButton.disabled = false;
+		if (errorMessage) {
+			errorMessage.textContent = 'Could not delete this project. Its data was kept. Please retry.';
+			errorMessage.classList.remove('hidden');
+		}
+	};
+	document.body.addEventListener('htmx:afterRequest', afterRequest);
+	htmx.ajax('DELETE', requestPath, {target: 'body', swap: 'none'});
 }
 
 templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, localRepoPathEnabled bool, globalMaxWorkers int) {
@@ -172,15 +200,16 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
 		</form>
 	</dialog>
 	if !project.IsDefault {
-			@DestructiveConfirmDialog("delete_project_confirm_modal", "Close delete project confirmation", "Delete Project", "Are you sure you want to delete ", "", project.Name, "? This action cannot be undone.", templ.ComponentScript{Call: "delete_project_confirm_modal.close()"}, deleteProjectAction(project.ID)) {
-				<p class="font-medium mb-1">The following data will be permanently deleted:</p>
-				<ul class="list-disc list-inside space-y-1">
-					<li>All tasks and their execution history</li>
-					<li>All scheduled runs</li>
-					<li>Chat history for this project</li>
-					<li>Project-specific settings and configurations</li>
-				</ul>
-			}
+		@DestructiveConfirmDialog("delete_project_confirm_modal", "Close delete project confirmation", "Delete Project", "Are you sure you want to delete ", "", project.Name, "? This action cannot be undone.", templ.ComponentScript{Call: "delete_project_confirm_modal.close()"}, deleteProjectAction(project.ID)) {
+			<p class="font-medium mb-1">The following data will be permanently deleted:</p>
+			<ul class="list-disc list-inside space-y-1">
+				<li>All tasks and their execution history</li>
+				<li>All scheduled runs</li>
+				<li>Chat history for this project</li>
+				<li>Project-specific settings and configurations</li>
+			</ul>
+			<p id="delete_project_error" class="hidden text-error mt-3" role="alert"></p>
+		}
 	}
 	<script>
 		(function() {

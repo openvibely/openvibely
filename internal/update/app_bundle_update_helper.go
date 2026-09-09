@@ -2,7 +2,6 @@ package update
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -360,19 +359,14 @@ func RunAppBundleUpdateHelper(ctx context.Context, cfg AppBundleUpdateHelperConf
 }
 
 func LoadAppBundleUpdateHelperRelaunch(reader io.Reader, cfg *AppBundleUpdateHelperConfig) error {
-	if reader == nil || cfg == nil {
+	if cfg == nil {
 		return errors.New("app-bundle update helper relaunch metadata is unavailable")
 	}
-	var metadata packagedUpdateRelaunchMetadata
-	decoder := json.NewDecoder(io.LimitReader(reader, 1024*1024))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&metadata); err != nil {
-		return err
+	metadata, err := decodePackagedUpdateRelaunchMetadata(reader)
+	if err != nil {
+		return fmt.Errorf("decode app-bundle update helper relaunch metadata: %w", err)
 	}
-	if len(metadata.Arguments) == 0 || !filepath.IsAbs(metadata.WorkingDirectory) {
-		return errors.New("app-bundle update helper relaunch metadata is incomplete")
-	}
-	cfg.Arguments = append([]string(nil), metadata.Arguments...)
+	cfg.Arguments = metadata.Arguments
 	cfg.WorkingDirectory = metadata.WorkingDirectory
 	cfg.ExecutableRelative = metadata.ExecutableRelative
 	return nil

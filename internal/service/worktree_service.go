@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -17,8 +18,10 @@ import (
 	"unicode/utf8"
 
 	"github.com/openvibely/openvibely/internal/applog"
+	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/pkg/agenttools"
 )
 
 // ErrMergeInProgress is returned when another repository merge, rebase, or
@@ -55,6 +58,7 @@ type WorktreeService struct {
 	projectRepo  *repository.ProjectRepo
 	settingsRepo *repository.SettingsRepo
 	llmSvc       *LLMService
+	taskGoalSvc  *TaskGoalService
 }
 
 // repositoryMutationLeases is process-wide because handler, worker, and
@@ -73,6 +77,11 @@ func NewWorktreeService(taskRepo *repository.TaskRepo, projectRepo *repository.P
 // SetLLMService sets the LLM service for AI-assisted conflict resolution.
 func (ws *WorktreeService) SetLLMService(llmSvc *LLMService) {
 	ws.llmSvc = llmSvc
+}
+
+// SetTaskGoalService enables lease-held goal-state validation for goal-triggered merges.
+func (ws *WorktreeService) SetTaskGoalService(taskGoalSvc *TaskGoalService) {
+	ws.taskGoalSvc = taskGoalSvc
 }
 
 // slugify creates a branch-name-safe slug from a string.
@@ -1723,6 +1732,13 @@ func ActiveMergeMatchesBranch(repoDir, branchName string) bool {
 	return mergeErr == nil && branchErr == nil && mergeHead != "" && mergeHead == branchHead
 }
 
+func activeMergeMatchesBranchAndTarget(repoDir, branchName, targetBranch string) bool {
+	if targetBranch == "" {
+		targetBranch = GetDefaultBranch(repoDir)
+	}
+	return targetBranch != "" && ActiveMergeMatchesBranch(repoDir, branchName) && GetCurrentBranch(repoDir) == targetBranch
+}
+
 // ActiveConflictFiles returns files with active merge conflicts in the given repository.
 func ActiveConflictFiles(repoDir string) []string {
 	return detectConflicts(repoDir)
@@ -1801,13 +1817,13 @@ func (ws *WorktreeService) AbortMergeForTaskValidated(ctx context.Context, taskI
 	return ws.taskRepo.UpdateMergeStatus(ctx, taskID, status)
 }
 
-func (ws *WorktreeService) validateAutoConflictRecovery(ctx context.Context, task *models.Task, repoDir string) error {
-	if ws.taskRepo == nil || task == nil || task.ID == "" {
+func (ws *WorktreeService) validateAutoConflictRecovery(ctx context.Context, task *models.Task, repoDir string, project *models.Project, trigger automaticMergeTrigger, requireConflicts bool) error {
+	if ws.taskRepo == nil || task == nil || task.ID == "" || project == nil {
 		return fmt.Errorf("%w: task conflict metadata is unavailable", ErrMergeEligibilityChanged)
 	}
-	fresh, err := ws.taskRepo.GetByID(ctx, task.ID)
-	if err != nil || fresh == nil {
-		return fmt.Errorf("%w: task could not be refreshed", ErrMergeEligibilityChanged)
+	fresh := &models.Task{}
+	if err := ws.validateAutomaticMerge(ctx, task.ID, project, repoDir, trigger, fresh); err != nil && !errors.Is(err, errAutomaticBranchAlreadyMerged) {
+		return err
 	}
 	freshTarget := fresh.MergeTargetBranch
 	if freshTarget == "" {
@@ -1817,14 +1833,46 @@ func (ws *WorktreeService) validateAutoConflictRecovery(ctx context.Context, tas
 	if expectedTarget == "" {
 		expectedTarget = GetDefaultBranch(repoDir)
 	}
-	if fresh.WorktreeBranch == "" || fresh.WorktreeBranch != task.WorktreeBranch || freshTarget == "" || freshTarget != expectedTarget {
+	if fresh.WorktreePath != task.WorktreePath || fresh.WorktreeBranch == "" || fresh.WorktreeBranch != task.WorktreeBranch || freshTarget == "" || freshTarget != expectedTarget {
 		return fmt.Errorf("%w: task conflict metadata changed", ErrMergeEligibilityChanged)
 	}
-	if !ActiveMergeMatchesBranch(repoDir, fresh.WorktreeBranch) || len(detectConflicts(repoDir)) == 0 {
-		return fmt.Errorf("%w: active conflict no longer belongs to this task", ErrMergeEligibilityChanged)
+	if !activeMergeMatchesBranchAndTarget(repoDir, fresh.WorktreeBranch, freshTarget) || (requireConflicts && len(detectConflicts(repoDir)) == 0) {
+		return fmt.Errorf("%w: active conflict no longer belongs to this task and target", ErrMergeEligibilityChanged)
 	}
 	*task = *fresh
 	return nil
+}
+
+func (ws *WorktreeService) abortAutomaticMergeConflict(ctx context.Context, task *models.Task, repoDir string, project *models.Project, trigger automaticMergeTrigger) {
+	// Recheck the automatic trigger inside the abort lease. If it changed, the
+	// merge must not continue, but task-owned Git conflict state still needs an
+	// ownership-validated abort so it cannot strand the repository.
+	targetBranch := task.MergeTargetBranch
+	if targetBranch == "" {
+		targetBranch = GetDefaultBranch(repoDir)
+	}
+	var eligibilityErr error
+	validateOwner := func() error {
+		eligibilityErr = ws.validateAutoConflictRecovery(ctx, task, repoDir, project, trigger, false)
+		if eligibilityErr == nil {
+			return nil
+		}
+		fresh, err := ws.taskRepo.GetByID(ctx, task.ID)
+		if err != nil || fresh == nil || fresh.WorktreeBranch != task.WorktreeBranch || fresh.WorktreePath != task.WorktreePath {
+			return fmt.Errorf("%w: task conflict metadata changed", ErrMergeEligibilityChanged)
+		}
+		freshTarget := fresh.MergeTargetBranch
+		if freshTarget == "" {
+			freshTarget = GetDefaultBranch(repoDir)
+		}
+		if !activeMergeMatchesBranchAndTarget(repoDir, fresh.WorktreeBranch, freshTarget) {
+			return fmt.Errorf("%w: active conflict no longer belongs to this task and target", ErrMergeEligibilityChanged)
+		}
+		return nil
+	}
+	if abortErr := ws.AbortMergeForTaskValidated(ctx, task.ID, repoDir, task.WorktreeBranch, targetBranch, models.MergeStatusPending, validateOwner); abortErr != nil {
+		applog.Infof("[worktree] failed to abort unresolved auto-merge for task %s (eligibility=%v): %v", task.ID, eligibilityErr, abortErr)
+	}
 }
 
 func abortMergeForTaskLocked(repoDir, branchName, targetBranch string) error {
@@ -1856,6 +1904,10 @@ func (ws *WorktreeService) ResolveConflictsWithAI(ctx context.Context, task *mod
 // repository mutation and validates live conflict ownership while the canonical
 // repository lease is held.
 func (ws *WorktreeService) ResolveConflictsWithAIValidated(ctx context.Context, task *models.Task, repoDir string, validate func() error) (*MergeResult, error) {
+	return ws.resolveConflictsWithAIValidated(ctx, task, repoDir, validate, nil)
+}
+
+func (ws *WorktreeService) resolveConflictsWithAIValidated(ctx context.Context, task *models.Task, repoDir string, validate func() error, validateBeforeCommit func() error) (*MergeResult, error) {
 	leaseKey, acquired := beginRepositoryMutation(repoDir)
 	if !acquired {
 		return &MergeResult{ErrorMessage: ErrMergeInProgress.Error()}, ErrMergeInProgress
@@ -1866,10 +1918,143 @@ func (ws *WorktreeService) ResolveConflictsWithAIValidated(ctx context.Context, 
 			return &MergeResult{ErrorMessage: err.Error()}, err
 		}
 	}
-	return ws.resolveConflictsWithAILocked(ctx, task, repoDir)
+	return ws.resolveConflictsWithAILocked(ctx, task, repoDir, validateBeforeCommit)
 }
 
-func (ws *WorktreeService) resolveConflictsWithAILocked(ctx context.Context, task *models.Task, repoDir string) (*MergeResult, error) {
+func automaticConflictResolutionRuntime(repoDir string, conflictFiles []string) *llmcontracts.RuntimeTools {
+	allowed := make(map[string]struct{}, len(conflictFiles))
+	for _, conflictFile := range conflictFiles {
+		if normalized, err := canonicalConflictToolPath(conflictFile); err == nil {
+			allowed[normalized] = struct{}{}
+		}
+	}
+	definitions := make([]llmcontracts.RuntimeToolDefinition, 0, 3)
+	for _, definition := range scopedFilesToolDefinitions() {
+		switch definition.Name {
+		case "read_file", "write_file", "edit_file":
+			definitions = append(definitions, definition)
+		}
+	}
+	return &llmcontracts.RuntimeTools{
+		Definitions:      definitions,
+		SkipDefaultTools: true,
+		Filter: func(name string) (bool, bool) {
+			switch strings.ToLower(strings.TrimSpace(name)) {
+			case "read_file", "write_file", "edit_file":
+				return true, true
+			default:
+				return false, true
+			}
+		},
+		Executor: func(ctx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
+			canonicalName := strings.ToLower(strings.TrimSpace(name))
+			switch canonicalName {
+			case "read_file", "write_file", "edit_file":
+			default:
+				return "tool is not available during automatic conflict resolution", true, true, nil
+			}
+			var request struct {
+				FilePath string `json:"file_path"`
+			}
+			if err := json.Unmarshal(input, &request); err != nil {
+				return "", true, true, fmt.Errorf("parse input: %w", err)
+			}
+			path, err := validateConflictToolPath(repoDir, request.FilePath, allowed)
+			if err != nil {
+				return "", true, true, err
+			}
+			request.FilePath = path
+			rewritten, err := rewriteToolFilePath(input, path)
+			if err != nil {
+				return "", true, true, err
+			}
+			out, err := agenttools.Execute(ctx, repoDir, canonicalName, rewritten, agenttools.BashPolicy{})
+			return out, true, err != nil, err
+		},
+	}
+}
+
+func rewriteToolFilePath(input json.RawMessage, path string) (json.RawMessage, error) {
+	var request map[string]any
+	if err := json.Unmarshal(input, &request); err != nil {
+		return nil, fmt.Errorf("parse input: %w", err)
+	}
+	request["file_path"] = path
+	rewritten, err := json.Marshal(request)
+	if err != nil {
+		return nil, fmt.Errorf("encode restricted file input: %w", err)
+	}
+	return rewritten, nil
+}
+
+func canonicalConflictToolPath(path string) (string, error) {
+	if path == "" || filepath.IsAbs(path) || filepath.VolumeName(path) != "" || strings.Contains(path, `\`) {
+		return "", fmt.Errorf("automatic conflict resolution requires a repository-relative conflict path")
+	}
+	clean := filepath.ToSlash(filepath.Clean(filepath.FromSlash(path)))
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") || clean != path {
+		return "", fmt.Errorf("automatic conflict resolution requires an exact canonical conflict path")
+	}
+	if clean == ".git" || strings.HasPrefix(clean, ".git/") {
+		return "", fmt.Errorf("automatic conflict resolution cannot access Git metadata")
+	}
+	return clean, nil
+}
+
+func validateConflictToolPath(repoDir, requested string, allowed map[string]struct{}) (string, error) {
+	path, err := canonicalConflictToolPath(requested)
+	if err != nil {
+		return "", err
+	}
+	if _, ok := allowed[path]; !ok {
+		return "", fmt.Errorf("automatic conflict resolution may access only active conflict files")
+	}
+	root, err := filepath.Abs(repoDir)
+	if err != nil {
+		return "", fmt.Errorf("resolve repository root: %w", err)
+	}
+	root, err = filepath.EvalSymlinks(root)
+	if err != nil {
+		return "", fmt.Errorf("resolve repository root: %w", err)
+	}
+	candidate := filepath.Join(root, filepath.FromSlash(path))
+	rel, err := filepath.Rel(root, candidate)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return "", fmt.Errorf("automatic conflict resolution path escapes the repository")
+	}
+	current := root
+	for _, component := range strings.Split(filepath.FromSlash(path), string(filepath.Separator)) {
+		current = filepath.Join(current, component)
+		info, statErr := os.Lstat(current)
+		if statErr != nil {
+			return "", fmt.Errorf("inspect conflict path: %w", statErr)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return "", fmt.Errorf("automatic conflict resolution rejects symlink paths")
+		}
+	}
+	resolved, err := filepath.EvalSymlinks(candidate)
+	if err != nil {
+		return "", fmt.Errorf("resolve conflict path: %w", err)
+	}
+	resolvedRel, err := filepath.Rel(root, resolved)
+	if err != nil || resolvedRel == ".." || strings.HasPrefix(resolvedRel, ".."+string(filepath.Separator)) || filepath.IsAbs(resolvedRel) {
+		return "", fmt.Errorf("automatic conflict resolution path escapes the repository")
+	}
+	return path, nil
+}
+
+func containsGitConflictMarkers(content string) bool {
+	for _, line := range strings.Split(content, "\n") {
+		line = strings.TrimSuffix(line, "\r")
+		if strings.HasPrefix(line, "<<<<<<< ") || line == "=======" || strings.HasPrefix(line, ">>>>>>> ") || strings.HasPrefix(line, "||||||| ") {
+			return true
+		}
+	}
+	return false
+}
+
+func (ws *WorktreeService) resolveConflictsWithAILocked(ctx context.Context, task *models.Task, repoDir string, validateBeforeCommit func() error) (*MergeResult, error) {
 	if ws.llmSvc == nil {
 		return nil, fmt.Errorf("LLM service not available for conflict resolution")
 	}
@@ -1880,11 +2065,24 @@ func (ws *WorktreeService) resolveConflictsWithAILocked(ctx context.Context, tas
 		return &MergeResult{ErrorMessage: "no active merge conflicts found"}, fmt.Errorf("no active merge conflicts found")
 	}
 
-	// Build a prompt describing the conflicts
+	allowedConflictPaths := make(map[string]struct{}, len(conflictFiles))
+	for _, conflictFile := range conflictFiles {
+		normalized, pathErr := canonicalConflictToolPath(conflictFile)
+		if pathErr != nil {
+			return nil, fmt.Errorf("unsafe conflict path: %w", pathErr)
+		}
+		allowedConflictPaths[normalized] = struct{}{}
+	}
+
+	// Build a prompt describing the conflicts only after each Git-reported path is
+	// proven to be an ordinary file contained by the repository.
 	var conflictDetails strings.Builder
 	conflictDetails.WriteString("Please resolve the following merge conflicts. For each file, output the resolved content.\n\n")
 
 	for _, file := range conflictFiles {
+		if _, pathErr := validateConflictToolPath(repoDir, file, allowedConflictPaths); pathErr != nil {
+			return nil, fmt.Errorf("unsafe conflict path: %w", pathErr)
+		}
 		content, err := os.ReadFile(filepath.Join(repoDir, file))
 		if err != nil {
 			continue
@@ -1893,35 +2091,77 @@ func (ws *WorktreeService) resolveConflictsWithAILocked(ctx context.Context, tas
 	}
 
 	conflictDetails.WriteString("\nResolve each conflict by choosing the appropriate changes or combining them intelligently. ")
-	conflictDetails.WriteString("After resolving, stage the files with `git add` and commit with a descriptive message.")
+	conflictDetails.WriteString("Edit only the conflicted files. Do not stage files, commit changes, or run Git commands; OpenVibely will validate and commit the resolution.")
 
-	// Execute resolution via the agent in the repo directory
 	agent, err := ws.llmSvc.getDefaultAgentForTask(ctx, task.ProjectID)
 	if err != nil || agent == nil {
 		return nil, fmt.Errorf("no agent available for conflict resolution")
 	}
 
-	_, _, _, err = ws.llmSvc.callLLM(ctx, conflictDetails.String(), nil, *agent, "", repoDir, "")
+	// Conflict resolution deliberately exposes only file-editing tools. Git state
+	// remains exclusively application-owned so trigger eligibility can be checked
+	// at the final mutation boundary before an integration commit is created.
+	resolutionAgent := &models.Agent{
+		Name:  "Automatic conflict resolver",
+		Tools: []string{"Read", "Write", "Edit"},
+	}
+	resolutionCtx := llmcontracts.WithRuntimeTools(llmcontracts.WithoutRuntimeTools(ctx), automaticConflictResolutionRuntime(repoDir, conflictFiles))
+	_, _, _, err = ws.llmSvc.callLLM(resolutionCtx, conflictDetails.String(), nil, *agent, "", repoDir, "", resolutionAgent)
 	if err != nil {
 		return nil, fmt.Errorf("AI conflict resolution failed: %w", err)
 	}
 
-	// Check if conflicts are resolved
-	remainingConflicts := detectConflicts(repoDir)
-	if len(remainingConflicts) > 0 {
+	// Stage only marker-free paths owned by this conflict attempt. Resolved paths
+	// can advance independently while unresolved paths remain in Git's unmerged
+	// index so manual or automatic recovery can retry them safely.
+	resolvedFiles := make([]string, 0, len(conflictFiles))
+	unresolvedFiles := make([]string, 0, len(conflictFiles))
+	for _, conflictFile := range conflictFiles {
+		if _, pathErr := validateConflictToolPath(repoDir, conflictFile, allowedConflictPaths); pathErr != nil {
+			return nil, fmt.Errorf("unsafe conflict path after model resolution: %w", pathErr)
+		}
+		content, readErr := os.ReadFile(filepath.Join(repoDir, conflictFile))
+		if readErr != nil || containsGitConflictMarkers(string(content)) {
+			unresolvedFiles = append(unresolvedFiles, conflictFile)
+			continue
+		}
+		resolvedFiles = append(resolvedFiles, conflictFile)
+	}
+	if len(resolvedFiles) > 0 {
+		addArgs := append([]string{"add", "--"}, resolvedFiles...)
+		addCmd := exec.Command("git", addArgs...)
+		addCmd.Dir = repoDir
+		if out, err := addCmd.CombinedOutput(); err != nil {
+			_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusFailed)
+			return &MergeResult{ErrorMessage: fmt.Sprintf("staging resolved conflicts failed: %s", strings.TrimSpace(string(out)))}, fmt.Errorf("staging resolved conflicts: %w", err)
+		}
+	}
+	if len(unresolvedFiles) > 0 {
+		return &MergeResult{
+			ConflictFiles: unresolvedFiles,
+			ErrorMessage:  "AI could not resolve all conflicts",
+		}, nil
+	}
+
+	// Git also rejects malformed marker-like staged content and unsafe whitespace
+	// before considering the conflict resolved or allowing the final commit.
+	checkCmd := exec.Command("git", "diff", "--cached", "--check")
+	checkCmd.Dir = repoDir
+	if out, err := checkCmd.CombinedOutput(); err != nil {
+		return &MergeResult{ConflictFiles: conflictFiles, ErrorMessage: strings.TrimSpace(string(out))}, nil
+	}
+	if remainingConflicts := detectConflicts(repoDir); len(remainingConflicts) > 0 {
 		return &MergeResult{
 			ConflictFiles: remainingConflicts,
 			ErrorMessage:  "AI could not resolve all conflicts",
 		}, nil
 	}
 
-	// Commit the resolution. Both staging and committing must succeed before the
-	// task can be considered merged.
-	addCmd := exec.Command("git", "add", "-A")
-	addCmd.Dir = repoDir
-	if out, err := addCmd.CombinedOutput(); err != nil {
-		_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusFailed)
-		return &MergeResult{ErrorMessage: fmt.Sprintf("staging resolved conflicts failed: %s", strings.TrimSpace(string(out)))}, fmt.Errorf("staging resolved conflicts: %w", err)
+	// Revalidate after application-owned staging and immediately before commit.
+	if validateBeforeCommit != nil {
+		if err := validateBeforeCommit(); err != nil {
+			return &MergeResult{ErrorMessage: err.Error()}, err
+		}
 	}
 
 	commitCmd := exec.Command("git", "commit", "--no-edit")
@@ -2615,6 +2855,175 @@ func IsBranchDivergedFromTarget(repoDir string, branchName string, targetBranch 
 	return targetOnly > 0 && branchOnly > 0
 }
 
+var (
+	errAutomaticMergeNotNeeded      = errors.New("automatic merge is no longer needed")
+	errAutomaticBranchAlreadyMerged = errors.New("automatic merge branch is already merged")
+)
+
+type automaticMergeTrigger struct {
+	goalTriggered bool
+	goalID        string
+}
+
+// AutoMergeOnGoalAchieved runs the canonical automatic merge flow after an
+// exact active goal transitions to achieved. If finalization or another Git
+// writer is still active, the persisted achieved goal is reconciled later.
+func (ws *WorktreeService) AutoMergeOnGoalAchieved(ctx context.Context, taskID, goalID string) {
+	ws.autoMergeTask(ctx, taskID, automaticMergeTrigger{goalTriggered: true, goalID: goalID})
+}
+
+// ReconcileGoalAutoMerge retries the durable current achieved goal. It is safe
+// to call after task finalization and from periodic worktree maintenance.
+func (ws *WorktreeService) ReconcileGoalAutoMerge(ctx context.Context, taskID string) {
+	if ws.taskGoalSvc == nil {
+		return
+	}
+	goal, err := ws.taskGoalSvc.GetGoal(ctx, taskID)
+	if err != nil || goal == nil || goal.Status != models.TaskGoalStatusAchieved {
+		return
+	}
+	ws.autoMergeTask(ctx, taskID, automaticMergeTrigger{goalTriggered: true, goalID: goal.GoalID})
+}
+
+func (ws *WorktreeService) validateAutomaticMerge(ctx context.Context, taskID string, project *models.Project, repoDir string, trigger automaticMergeTrigger, task *models.Task) error {
+	fresh, err := ws.taskRepo.GetByID(ctx, taskID)
+	if err != nil || fresh == nil {
+		return fmt.Errorf("%w: task could not be refreshed", ErrMergeEligibilityChanged)
+	}
+	if fresh.ProjectID != project.ID || fresh.Status == models.StatusFailed || fresh.Status == models.StatusCancelled {
+		return errAutomaticMergeNotNeeded
+	}
+	if trigger.goalTriggered {
+		if fresh.Status != models.StatusCompleted || !fresh.AutoMergeOnGoalAchieved || ws.taskGoalSvc == nil {
+			return errAutomaticMergeNotNeeded
+		}
+		goal, goalErr := ws.taskGoalSvc.GetGoal(ctx, taskID)
+		if goalErr != nil || goal == nil || goal.GoalID != trigger.goalID || goal.Status != models.TaskGoalStatusAchieved {
+			return errAutomaticMergeNotNeeded
+		}
+	} else if (fresh.Status != models.StatusRunning && fresh.Status != models.StatusCompleted) || !fresh.AutoMerge {
+		return errAutomaticMergeNotNeeded
+	}
+	if fresh.MergeStatus == models.MergeStatusMerged && fresh.WorktreePath == "" && fresh.WorktreeBranch == "" {
+		return errAutomaticMergeNotNeeded
+	}
+	if fresh.WorktreePath == "" || fresh.WorktreeBranch == "" {
+		return fmt.Errorf("%w: task worktree is unavailable", ErrMergeEligibilityChanged)
+	}
+	freshProject, projectErr := ws.projectRepo.GetByID(ctx, fresh.ProjectID)
+	if projectErr != nil || freshProject == nil || freshProject.RepoPath != repoDir {
+		return fmt.Errorf("%w: project repository changed", ErrMergeEligibilityChanged)
+	}
+	*task = *fresh
+	if ws.isBranchTipMergedIntoTarget(repoDir, fresh.WorktreeBranch, fresh.MergeTargetBranch) {
+		status, statusErr := GitStatusPorcelain(fresh.WorktreePath)
+		if statusErr != nil {
+			return fmt.Errorf("%w: task worktree status is unavailable", ErrMergeEligibilityChanged)
+		}
+		// A reachable branch with live worktree changes is not already merged.
+		// Continue through MergeBranchValidated so the canonical path commits and
+		// integrates those changes before status reconciliation or cleanup.
+		if strings.TrimSpace(status) == "" {
+			return errAutomaticBranchAlreadyMerged
+		}
+	}
+	return nil
+}
+
+func (ws *WorktreeService) recoverAutomaticMergeConflict(ctx context.Context, task *models.Task, repoDir string, project *models.Project, trigger automaticMergeTrigger) bool {
+	validateConflictOwner := func() error {
+		return ws.validateAutoConflictRecovery(ctx, task, repoDir, project, trigger, true)
+	}
+	validateBeforeCommit := func() error {
+		return ws.validateAutoConflictRecovery(ctx, task, repoDir, project, trigger, false)
+	}
+	aiResult, aiErr := ws.resolveConflictsWithAIValidated(ctx, task, repoDir, validateConflictOwner, validateBeforeCommit)
+	if errors.Is(aiErr, ErrMergeInProgress) {
+		// The achieved goal and task metadata remain the durable retry record. Do
+		// not attempt an abort through the same busy lease; periodic reconciliation
+		// will resume this exact task-owned conflict after the writer releases it.
+		return false
+	}
+	if aiErr != nil || aiResult == nil || !aiResult.Success {
+		applog.Infof("[worktree] AI conflict resolution failed for task %s, aborting merge", task.ID)
+		ws.abortAutomaticMergeConflict(ctx, task, repoDir, project, trigger)
+		return false
+	}
+	return true
+}
+
+func (ws *WorktreeService) autoMergeTask(ctx context.Context, taskID string, trigger automaticMergeTrigger) {
+	if ws.taskRepo == nil || ws.projectRepo == nil {
+		return
+	}
+	task, err := ws.taskRepo.GetByID(ctx, taskID)
+	if err != nil || task == nil || (task.MergeStatus == models.MergeStatusMerged && task.WorktreePath == "" && task.WorktreeBranch == "") {
+		return
+	}
+	project, err := ws.projectRepo.GetByID(ctx, task.ProjectID)
+	if err != nil || project == nil || strings.TrimSpace(project.RepoPath) == "" {
+		return
+	}
+	repoDir := project.RepoPath
+	validate := func() error {
+		return ws.validateAutomaticMerge(ctx, taskID, project, repoDir, trigger, task)
+	}
+
+	triggerName := "completion"
+	if trigger.goalTriggered {
+		triggerName = "goal achievement"
+	}
+	if HasActiveMerge(repoDir) {
+		applog.Infof("[worktree] resuming active auto-merge conflict for task %s after %s", task.ID, triggerName)
+		if ws.recoverAutomaticMergeConflict(ctx, task, repoDir, project, trigger) {
+			ws.reconcileVerifiedMergedTask(ctx, taskID, project.ID, repoDir)
+		}
+		return
+	}
+	applog.Infof("[worktree] auto-merging task %s after %s: %s -> %s", task.ID, triggerName, task.WorktreeBranch, task.MergeTargetBranch)
+	result, mergeErr := ws.MergeBranchValidated(ctx, task, repoDir, "merge", validate)
+	if errors.Is(mergeErr, errAutomaticBranchAlreadyMerged) {
+		ws.reconcileVerifiedMergedTask(ctx, taskID, project.ID, repoDir)
+		return
+	}
+	if mergeErr != nil {
+		if !errors.Is(mergeErr, errAutomaticMergeNotNeeded) && !errors.Is(mergeErr, ErrMergeInProgress) {
+			applog.Infof("[worktree] auto-merge failed for task %s after %s: %v", task.ID, triggerName, mergeErr)
+		}
+		return
+	}
+	if !result.Success && len(result.ConflictFiles) > 0 {
+		applog.Infof("[worktree] auto-merge has conflicts for task %s, attempting AI resolution", task.ID)
+		if !ws.recoverAutomaticMergeConflict(ctx, task, repoDir, project, trigger) {
+			return
+		}
+	}
+	ws.reconcileVerifiedMergedTask(ctx, taskID, project.ID, repoDir)
+}
+
+func (ws *WorktreeService) reconcileVerifiedMergedTask(ctx context.Context, taskID, projectID, repoDir string) {
+	_ = ws.WithRepositoryMutation(repoDir, func() error {
+		fresh, err := ws.taskRepo.GetByID(ctx, taskID)
+		if err != nil || fresh == nil || fresh.ProjectID != projectID || fresh.WorktreeBranch == "" {
+			return errAutomaticMergeNotNeeded
+		}
+		project, err := ws.projectRepo.GetByID(ctx, projectID)
+		if err != nil || project == nil || project.RepoPath != repoDir {
+			return fmt.Errorf("%w: project repository changed", ErrMergeEligibilityChanged)
+		}
+		if !ws.isBranchTipMergedIntoTarget(repoDir, fresh.WorktreeBranch, fresh.MergeTargetBranch) {
+			return fmt.Errorf("%w: task branch is not merged", ErrMergeEligibilityChanged)
+		}
+		if err := ws.taskRepo.UpdateMergeStatus(ctx, taskID, models.MergeStatusMerged); err != nil {
+			return err
+		}
+		if ws.GetCleanupPolicy(ctx) != "after_merge" {
+			return nil
+		}
+		return ws.cleanupWorktreeUnlocked(ctx, fresh, repoDir, true)
+	})
+}
+
 // HandlePostExecution handles worktree operations after task execution completes.
 // Called by the LLM service after a task finishes successfully.
 func (ws *WorktreeService) HandlePostExecution(ctx context.Context, task *models.Task, execModel *models.Execution, repoDir string) {
@@ -2647,43 +3056,34 @@ func (ws *WorktreeService) HandlePostExecution(ctx context.Context, task *models
 		return
 	}
 
-	// Auto-merge if enabled
+	// Preserve the completion-triggered option as a distinct lifecycle event.
 	if task.AutoMerge {
-		applog.Infof("[worktree] auto-merging task %s branch %s -> %s", task.ID, task.WorktreeBranch, task.MergeTargetBranch)
-		result, err := ws.MergeBranch(ctx, task, repoDir, "merge")
-		if err != nil {
-			applog.Infof("[worktree] auto-merge failed for task %s: %v", task.ID, err)
-			return
-		}
-		if !result.Success && len(result.ConflictFiles) > 0 {
-			applog.Infof("[worktree] auto-merge has conflicts for task %s, attempting AI resolution", task.ID)
-			validateConflictOwner := func() error {
-				return ws.validateAutoConflictRecovery(ctx, task, repoDir)
-			}
-			aiResult, aiErr := ws.ResolveConflictsWithAIValidated(ctx, task, repoDir, validateConflictOwner)
-			if aiErr != nil || (aiResult != nil && !aiResult.Success) {
-				applog.Infof("[worktree] AI conflict resolution failed for task %s, aborting merge", task.ID)
-				targetBranch := task.MergeTargetBranch
-				if targetBranch == "" {
-					targetBranch = GetDefaultBranch(repoDir)
-				}
-				if abortErr := ws.AbortMergeForTaskValidated(ctx, task.ID, repoDir, task.WorktreeBranch, targetBranch, models.MergeStatusConflict, validateConflictOwner); abortErr != nil {
-					applog.Infof("[worktree] failed to abort unresolved auto-merge for task %s: %v", task.ID, abortErr)
-				}
-				return
-			}
-		}
-		// Cleanup after successful merge if policy says so
-		policy := ws.GetCleanupPolicy(ctx)
-		if policy == "after_merge" {
-			if cleanErr := ws.CleanupWorktree(ctx, task, repoDir, true); cleanErr != nil {
-				applog.Infof("[worktree] cleanup after merge failed: %v", cleanErr)
-			}
-		}
+		ws.autoMergeTask(ctx, task.ID, automaticMergeTrigger{})
 	} else {
-		// Set merge status to pending for manual merge
+		// Set merge status to pending for manual merge.
 		_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusPending)
 	}
+}
+
+// ReconcileGoalAutoMerges retries completed tasks whose durable achieved goals
+// still require automatic integration. This also recovers across process restarts.
+func (ws *WorktreeService) ReconcileGoalAutoMerges(ctx context.Context) error {
+	if ws.taskRepo == nil || ws.taskGoalSvc == nil {
+		return nil
+	}
+	tasks, err := ws.taskRepo.ListWithWorktrees(ctx)
+	if err != nil {
+		return fmt.Errorf("listing goal auto-merge tasks: %w", err)
+	}
+	for i := range tasks {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if tasks[i].Status == models.StatusCompleted && tasks[i].AutoMergeOnGoalAchieved {
+			ws.ReconcileGoalAutoMerge(ctx, tasks[i].ID)
+		}
+	}
+	return nil
 }
 
 // CleanupMergedWorktrees scans all tasks with worktrees and cleans up those
@@ -2691,6 +3091,9 @@ func (ws *WorktreeService) HandlePostExecution(ctx context.Context, task *models
 // Called periodically by the scheduler to detect manual merges.
 func (ws *WorktreeService) CleanupMergedWorktrees(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := ws.ReconcileGoalAutoMerges(ctx); err != nil {
 		return err
 	}
 	// Get cleanup policy

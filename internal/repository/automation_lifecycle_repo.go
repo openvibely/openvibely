@@ -138,10 +138,6 @@ func (r *AutomationRepo) ResumeAutomation(ctx context.Context, projectID, automa
 		if err != nil {
 			return nil, err
 		}
-		if _, err := conn.ExecContext(ctx, `UPDATE tasks SET category = 'active', updated_at = CURRENT_TIMESTAMP
-			WHERE id = ? AND project_id = ? AND category = 'backlog' AND status = 'pending'`, taskID, projectID); err != nil {
-			return nil, err
-		}
 		if !admittedTaskSet[taskID] {
 			admittedTaskSet[taskID] = true
 			admittedTaskIDs = append(admittedTaskIDs, taskID)
@@ -176,14 +172,60 @@ func (r *AutomationRepo) ResumeAutomation(ctx context.Context, projectID, automa
 		return nil, err
 	}
 	for _, taskID := range activityTaskIDs {
-		result, err := conn.ExecContext(ctx, `UPDATE tasks SET category = 'active', updated_at = CURRENT_TIMESTAMP
-			WHERE id = ? AND project_id = ? AND category = 'backlog' AND status = 'pending'`, taskID, projectID)
+		if !admittedTaskSet[taskID] {
+			admittedTaskSet[taskID] = true
+			admittedTaskIDs = append(admittedTaskIDs, taskID)
+		}
+	}
+	if len(admittedTaskIDs) > 0 {
+		args := make([]any, 0, len(admittedTaskIDs)+1)
+		args = append(args, projectID)
+		placeholders := make([]string, 0, len(admittedTaskIDs))
+		for _, taskID := range admittedTaskIDs {
+			placeholders = append(placeholders, "?")
+			args = append(args, taskID)
+		}
+		orderedRows, err := conn.QueryContext(ctx, `SELECT id FROM tasks
+			WHERE project_id = ? AND category = 'backlog' AND status = 'pending'
+			  AND id IN (`+strings.Join(placeholders, ",")+`)
+			ORDER BY display_order ASC, created_at ASC, id ASC`, args...)
 		if err != nil {
 			return nil, err
 		}
-		if affected, _ := result.RowsAffected(); affected == 1 && !admittedTaskSet[taskID] {
-			admittedTaskSet[taskID] = true
-			admittedTaskIDs = append(admittedTaskIDs, taskID)
+		orderedTaskIDs := make([]string, 0, len(admittedTaskIDs))
+		for orderedRows.Next() {
+			var taskID string
+			if err := orderedRows.Scan(&taskID); err != nil {
+				orderedRows.Close()
+				return nil, err
+			}
+			orderedTaskIDs = append(orderedTaskIDs, taskID)
+		}
+		if err := orderedRows.Err(); err != nil {
+			orderedRows.Close()
+			return nil, err
+		}
+		if err := orderedRows.Close(); err != nil {
+			return nil, err
+		}
+
+		var nextOrder int
+		if err := conn.QueryRowContext(ctx, `SELECT COALESCE(MAX(display_order), -1) + 1 FROM tasks
+			WHERE project_id = ? AND category = 'active'`, projectID).Scan(&nextOrder); err != nil {
+			return nil, err
+		}
+		admittedTaskIDs = admittedTaskIDs[:0]
+		for _, taskID := range orderedTaskIDs {
+			result, err := conn.ExecContext(ctx, `UPDATE tasks
+				SET category = 'active', display_order = ?, completed_at = NULL, updated_at = CURRENT_TIMESTAMP
+				WHERE id = ? AND project_id = ? AND category = 'backlog' AND status = 'pending'`, nextOrder, taskID, projectID)
+			if err != nil {
+				return nil, err
+			}
+			if affected, _ := result.RowsAffected(); affected == 1 {
+				admittedTaskIDs = append(admittedTaskIDs, taskID)
+				nextOrder++
+			}
 		}
 	}
 	if _, err := conn.ExecContext(ctx, `DELETE FROM automation_paused_task_admissions
