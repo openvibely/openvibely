@@ -314,6 +314,53 @@ func TestBasePurgesSensitiveHTMXHistoryBeforeHTMXLoads(t *testing.T) {
 	}
 }
 
+func TestTabVisibilityManager_RetargetsSSEWithoutDuplicateConnections(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Base("Test", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("failed to render Base: %v", err)
+	}
+	html := buf.String()
+	start := strings.Index(html, "window._tabVisibility = (function() {")
+	end := strings.Index(html[start:], "// Track which element was focused before mousedown")
+	if start < 0 || end < 0 {
+		t.Fatal("tab visibility manager boundaries are missing")
+	}
+	manager := html[start : start+end]
+
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is required to execute the rendered SSE visibility manager")
+	}
+	script := `
+const listeners = {};
+const instances = [];
+global.window = {};
+global.document = {
+  hidden: false,
+  addEventListener: function(name, handler) { listeners[name] = handler; },
+  querySelectorAll: function() { return []; }
+};
+global.EventSource = function(url) {
+  this.url = url;
+  this.closed = false;
+  this.close = function() { this.closed = true; };
+  this.addEventListener = function() {};
+  instances.push(this);
+};
+` + manager + `
+const connection = window._tabVisibility.registerSSE('live-events', '/events/live?project_id=old', {});
+if (instances.length !== 1) throw new Error('expected one initial EventSource');
+window._tabVisibility.retargetSSE('live-events', '/events/live?project_id=new');
+if (!instances[0].closed) throw new Error('retarget did not close the old EventSource');
+if (instances.length !== 2 || instances[1].url !== '/events/live?project_id=new') throw new Error('retarget did not create exactly one new scoped EventSource');
+connection.close();
+if (instances.length !== 2 || !instances[1].closed) throw new Error('connection close did not close the retargeted EventSource');
+`
+	if output, err := exec.Command(node, "-e", script).CombinedOutput(); err != nil {
+		t.Fatalf("rendered SSE visibility manager failed: %v\n%s", err, output)
+	}
+}
+
 func TestTabVisibilityManager_DoesNotTreatBlurOrFocusAsTranscriptRefresh(t *testing.T) {
 	var buf bytes.Buffer
 	if err := Base("Test", []models.Project{}, "").Render(context.Background(), &buf); err != nil {

@@ -187,12 +187,14 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 							openModals.forEach(m => m.close());
 						}
 
-						previousProjectID = newProjectId;
-						syncProjectSelector();
+							previousProjectID = newProjectId;
+							syncProjectSelector();
+							if (typeof window.openVibelyRetargetLiveEvents === 'function') {
+								window.openVibelyRetargetLiveEvents(newProjectId, '');
+							}
 
-						// Update all sidebar nav links with new project_id
-						document.querySelectorAll('[data-nav-base]').forEach(function(link) {
-							const base = link.getAttribute('data-nav-base');
+							// Update all sidebar nav links with new project_id
+							document.querySelectorAll('[data-nav-base]').forEach(function(link) {							const base = link.getAttribute('data-nav-base');
 							const newUrl = base + '?project_id=' + encodeURIComponent(newProjectId);
 							link.setAttribute('href', newUrl);
 							link.setAttribute('hx-get', newUrl);
@@ -333,46 +335,89 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 						}
 					}
 
-					window._sidebarSSE = window._tabVisibility.registerSSE('live-events', '/events/live', {
-						onopen: function() {
-							console.log('[SSE-Live] Connected to shared live events');
-							window._tabVisibility.dispatchSSEEvent('sse-live-connected', {
-								reconnected: liveSSEHasConnected
-							});
-							liveSSEHasConnected = true;
-						},
-						onerror: function(err) {
-							console.error('[SSE-Live] Connection error:', err);
-						},
-						listeners: {
-							'task_board_updated': handleLiveEvent,
-							'task_status_changed': handleLiveEvent,
-							'task_category_changed': handleLiveEvent,
-							'task_thread_execution_started': handleLiveEvent,
-							'task_lifecycle_execution_changed': handleLiveEvent,
-							'task_thread_input_applied': handleLiveEvent,
-							'task_thread_input_queued': handleLiveEvent,
-							'task_thread_input_steered': handleLiveEvent,
-							'task_thread_input_cancelled': handleLiveEvent,
-							'alert_created': handleLiveEvent,
-							'automation_definition_updated': handleLiveEvent,
-							'automation_invocation_started': handleLiveEvent,
-							'automation_invocation_updated': handleLiveEvent,
-							'automation_work_item_updated': handleLiveEvent,
-							'automation_transition_created': handleLiveEvent,
-							'automation_resource_linked': handleLiveEvent,
-							'chat_new_message': handleLiveEvent,
-							'chat_response_done': handleLiveEvent,
-							'chat_turn_steered': handleLiveEvent,
-							'chat_thread_input_applied': handleLiveEvent,
-							'chat_thread_input_cancelled': handleLiveEvent,
-							'mixture_progress': handleLiveEvent,
-							'file_modified': handleLiveEvent,
-							'file_deleted': handleLiveEvent,
-							'diff_snapshot': handleLiveEvent
+						function currentTaskID() {
+							var match = window.location.pathname.match(/^\/tasks\/([^\/]+)/);
+							if (!match || !match[1]) return '';
+							try {
+								return decodeURIComponent(match[1]);
+							} catch (_) {
+								return '';
+							}
 						}
-					});
 
+						function liveEventsURL(projectID, taskID) {
+							var params = new URLSearchParams();
+							params.set('project_id', projectID);
+							if (taskID) params.set('task_id', taskID);
+							return '/events/live?' + params.toString();
+						}
+
+						var liveSSEHandlers = {
+							onopen: function() {
+								console.log('[SSE-Live] Connected to shared live events');
+								window._tabVisibility.dispatchSSEEvent('sse-live-connected', {
+									reconnected: liveSSEHasConnected
+								});
+								liveSSEHasConnected = true;
+							},
+							onerror: function(err) {
+								console.error('[SSE-Live] Connection error:', err);
+							},
+							listeners: {
+								'task_board_updated': handleLiveEvent,
+								'task_status_changed': handleLiveEvent,
+								'task_category_changed': handleLiveEvent,
+								'task_thread_execution_started': handleLiveEvent,
+								'task_lifecycle_execution_changed': handleLiveEvent,
+								'task_thread_input_applied': handleLiveEvent,
+								'task_thread_input_queued': handleLiveEvent,
+								'task_thread_input_steered': handleLiveEvent,
+								'task_thread_input_cancelled': handleLiveEvent,
+								'alert_created': handleLiveEvent,
+								'automation_definition_updated': handleLiveEvent,
+								'automation_invocation_started': handleLiveEvent,
+								'automation_invocation_updated': handleLiveEvent,
+								'automation_work_item_updated': handleLiveEvent,
+								'automation_transition_created': handleLiveEvent,
+								'automation_resource_linked': handleLiveEvent,
+								'chat_new_message': handleLiveEvent,
+								'chat_response_done': handleLiveEvent,
+								'chat_turn_steered': handleLiveEvent,
+								'chat_thread_input_applied': handleLiveEvent,
+								'chat_thread_input_cancelled': handleLiveEvent,
+								'mixture_progress': handleLiveEvent,
+								'file_modified': handleLiveEvent,
+								'file_deleted': handleLiveEvent,
+								'diff_snapshot': handleLiveEvent
+							}
+						};
+
+						function retargetLiveEvents(projectID, taskID) {
+							if (!projectID) {
+								if (window._sidebarSSE) window._sidebarSSE.close();
+								window._sidebarSSE = null;
+								return;
+							}
+							var url = liveEventsURL(projectID, taskID);
+							if (window._sidebarSSE) {
+								window._tabVisibility.retargetSSE('live-events', url);
+								return;
+							}
+							window._sidebarSSE = window._tabVisibility.registerSSE('live-events', url, liveSSEHandlers);
+						}
+
+						function retargetLiveEventsForCurrentLocation() {
+							retargetLiveEvents(projectSelector && projectSelector.value, currentTaskID());
+						}
+
+						window.openVibelyRetargetLiveEvents = retargetLiveEvents;
+						retargetLiveEventsForCurrentLocation();
+						document.addEventListener('htmx:afterSwap', function(event) {
+							var target = event.detail && event.detail.target;
+							if (target && target.id === 'main-content') retargetLiveEventsForCurrentLocation();
+						});
+						document.addEventListener('htmx:historyRestore', retargetLiveEventsForCurrentLocation);
+						window.addEventListener('popstate', retargetLiveEventsForCurrentLocation);
 					// Clean up on page unload
 					window.addEventListener('beforeunload', function() {
 						if (window._sidebarSSE) {

@@ -92,14 +92,25 @@ func (b *Broadcaster) Subscribe() (Subscriber, error) {
 	return b.core.Subscribe()
 }
 
+// SubscribeProject adds a subscriber that receives events for one project.
+// Returns ErrMaxSubscribers if the subscriber limit has been reached.
+func (b *Broadcaster) SubscribeProject(projectID string) (Subscriber, error) {
+	return b.core.SubscribeScoped(projectID)
+}
+
 // Unsubscribe removes a subscriber and closes its channel.
 func (b *Broadcaster) Unsubscribe(sub Subscriber) {
 	b.core.Unsubscribe(sub)
 }
 
-// Publish sends an event to all subscribers.
+// Publish sends an event to global subscribers and subscribers for the event project.
 func (b *Broadcaster) Publish(event TaskEvent) {
-	b.core.Publish(event)
+	b.core.PublishScoped(event.ProjectID, event)
+}
+
+// DeliveryAttempts returns the total number of subscriber delivery attempts.
+func (b *Broadcaster) DeliveryAttempts() uint64 {
+	return b.core.DeliveryAttempts()
 }
 
 // SubscriberCount returns the current number of subscribers.

@@ -43,14 +43,25 @@ func (b *FileChangeBroadcaster) Subscribe() (FileChangeSubscriber, error) {
 	return b.core.Subscribe()
 }
 
+// SubscribeTask adds a subscriber that receives events for one task.
+// Returns ErrMaxSubscribers if the subscriber limit has been reached.
+func (b *FileChangeBroadcaster) SubscribeTask(taskID string) (FileChangeSubscriber, error) {
+	return b.core.SubscribeScoped(taskID)
+}
+
 // Unsubscribe removes a subscriber and closes its channel.
 func (b *FileChangeBroadcaster) Unsubscribe(sub FileChangeSubscriber) {
 	b.core.Unsubscribe(sub)
 }
 
-// Publish sends an event to all subscribers.
+// Publish sends an event to global subscribers and subscribers for the event task.
 func (b *FileChangeBroadcaster) Publish(event FileChangeEvent) {
-	b.core.Publish(event)
+	b.core.PublishScoped(event.TaskID, event)
+}
+
+// DeliveryAttempts returns the total number of subscriber delivery attempts.
+func (b *FileChangeBroadcaster) DeliveryAttempts() uint64 {
+	return b.core.DeliveryAttempts()
 }
 
 // SubscriberCount returns the current number of subscribers.

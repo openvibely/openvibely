@@ -11,6 +11,51 @@ type broadcasterCoreTestEvent struct {
 
 type broadcasterCoreTestSubscriber chan broadcasterCoreTestEvent
 
+func TestBroadcasterCore_ScopedPublishOnlyOffersMatchingAndGlobalSubscribers(t *testing.T) {
+	b := newBroadcaster[broadcasterCoreTestEvent, broadcasterCoreTestSubscriber](1)
+
+	global, err := b.Subscribe()
+	if err != nil {
+		t.Fatalf("Subscribe global: %v", err)
+	}
+	matching, err := b.SubscribeScoped("project-1")
+	if err != nil {
+		t.Fatalf("SubscribeScoped matching: %v", err)
+	}
+	nonMatching, err := b.SubscribeScoped("project-2")
+	if err != nil {
+		t.Fatalf("SubscribeScoped nonmatching: %v", err)
+	}
+	defer b.Unsubscribe(global)
+	defer b.Unsubscribe(matching)
+	defer b.Unsubscribe(nonMatching)
+
+	b.PublishScoped("project-1", broadcasterCoreTestEvent{Value: 1})
+
+	for name, sub := range map[string]broadcasterCoreTestSubscriber{
+		"global":   global,
+		"matching": matching,
+	} {
+		select {
+		case event := <-sub:
+			if event.Value != 1 {
+				t.Fatalf("%s event value = %d, want 1", name, event.Value)
+			}
+		default:
+			t.Fatalf("%s subscriber did not receive matching scoped event", name)
+		}
+	}
+	select {
+	case event := <-nonMatching:
+		t.Fatalf("nonmatching subscriber received event: %#v", event)
+	default:
+	}
+
+	if got := b.DeliveryAttempts(); got != 2 {
+		t.Fatalf("delivery attempts = %d, want 2", got)
+	}
+}
+
 func TestBroadcasterCore_Lifecycle(t *testing.T) {
 	b := newBroadcaster[broadcasterCoreTestEvent, broadcasterCoreTestSubscriber](2)
 

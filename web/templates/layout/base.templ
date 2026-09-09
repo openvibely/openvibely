@@ -2748,9 +2748,20 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 									entry.instance.close();
 									entry.instance = null;
 								}
-								delete sseConnections[name];
+								if (sseConnections[name] === entry) delete sseConnections[name];
 							}
 						};
+					},
+					// Replace a managed stream's URL while preserving its registered handlers.
+					retargetSSE: function(name, url) {
+						var entry = sseConnections[name];
+						if (!entry || entry.url === url) return;
+						entry.url = url;
+						if (entry.instance) {
+							entry.instance.close();
+							entry.instance = null;
+						}
+						if (!hidden) createSSE(name, entry);
 					},
 					// Unregister and close an SSE connection
 					unregisterSSE: function(name) {
@@ -2767,8 +2778,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						window.dispatchEvent(new CustomEvent(eventName, { detail: data }));
 					},
 					isHidden: function() { return hidden; }
-				};
-			})();
+				};			})();
 
 			// Track which element was focused before mousedown to properly detect dropdown toggle.
 			// Also record whether a Kanban menu was open so focus changes during the click

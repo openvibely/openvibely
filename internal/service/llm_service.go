@@ -1384,7 +1384,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	}
 
 	// Call the LLM
-	callCtx := ctx
+	callCtx := llmcontracts.WithDirectUsageProject(ctx, task.ProjectID)
 	var preparedSteering []models.ThreadInput
 	if s.threadInputRepo != nil {
 		callCtx = llmcontracts.WithSteeringCallback(callCtx, func(callbackCtx context.Context) (string, error) {
@@ -2320,6 +2320,7 @@ func (s *LLMService) CallAgentDirectStreamingDetailed(ctx context.Context, messa
 		Attachments:       attachments,
 		Agent:             agent,
 		ExecID:            execID,
+		ProjectID:         directUsageProjectFromContext(ctx),
 		TransportScope:    llmcontracts.TransportScopeFromContext(ctx),
 		ChatHistory:       chatHistory,
 		ChatMode:          chatMode,
@@ -2409,6 +2410,7 @@ func (s *LLMService) callLLMDetailed(ctx context.Context, prompt string, attachm
 		Attachments:         attachments,
 		Agent:               agent,
 		ExecID:              execID,
+		ProjectID:           directUsageProjectFromContext(ctx),
 		WorkDir:             workDir,
 		ProjectInstructions: projectInstructions,
 		AgentDefinition:     ad,
