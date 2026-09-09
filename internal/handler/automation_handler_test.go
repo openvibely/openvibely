@@ -3643,9 +3643,9 @@ func TestReplacedAutomationOriginTaskGitHubMutationsRemainFailClosed(t *testing.
 			pullRequestCalls++
 			return &service.GitHubPullRequest{Number: 1}, nil
 		},
-		replaceBranchHeadFn: func(_ context.Context, _ *service.GitHubRepoRef, _ service.GitHubReplaceBranchHeadRequest) error {
+		replaceBranchHeadFn: func(_ context.Context, _ *service.GitHubRepoRef, _ service.GitHubReplaceBranchHeadRequest) (string, error) {
 			branchReplacementCalls++
-			return nil
+			return "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", nil
 		},
 	}
 	graphSvc := service.NewAutomationGraphService(automationRepo)
