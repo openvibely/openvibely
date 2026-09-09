@@ -269,6 +269,15 @@ func (r *ExecutionRepo) CreateWithExecutor(ctx context.Context, exec SQLExecutor
 	return nil
 }
 
+func (r *ExecutionRepo) CancelQueuedOrdinaryByTask(ctx context.Context, taskID, message string) error {
+	_, err := execBoundSQLite(ctx, r.db, `UPDATE executions SET status = 'cancelled', error_message = ?, completed_at = datetime('now')
+		WHERE task_id = ? AND status = 'queued' AND is_followup = 0 AND dispatch_id IS NULL`, message, taskID)
+	if err != nil {
+		return fmt.Errorf("cancelling queued ordinary task execution: %w", err)
+	}
+	return nil
+}
+
 func (r *ExecutionRepo) MarkRunning(ctx context.Context, id string) error {
 	if ctx == nil {
 		ctx = context.Background()

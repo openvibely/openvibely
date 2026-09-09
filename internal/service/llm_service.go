@@ -1118,27 +1118,31 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 		PromptSent:       task.Prompt,
 		StartsNewContext: task.StartsNewContext,
 	}
-	if preparedID := preparedAutomationExecutionID(ctx); preparedID != "" {
+	preparedID := preparedAutomationExecutionID(ctx)
+	preparedAutomation := preparedID != ""
+	if preparedID == "" {
+		preparedID = preparedTaskExecutionID(ctx)
+	}
+	if preparedID != "" {
 		prepared, getErr := s.execRepo.GetByID(ctx, preparedID)
 		if getErr != nil {
-			return nil, llmcontracts.ChatContext{}, fmt.Errorf("loading prepared automation execution: %w", getErr)
+			return nil, llmcontracts.ChatContext{}, fmt.Errorf("loading prepared execution: %w", getErr)
 		}
-		if prepared == nil || prepared.TaskID != task.ID || prepared.Status != models.ExecRunning || prepared.DispatchID == "" {
-			return nil, llmcontracts.ChatContext{}, fmt.Errorf("prepared automation execution is invalid")
+		if prepared == nil || prepared.TaskID != task.ID || prepared.Status != models.ExecRunning || (preparedAutomation && prepared.DispatchID == "") || (!preparedAutomation && (prepared.DispatchID != "" || prepared.IsFollowup)) {
+			return nil, llmcontracts.ChatContext{}, fmt.Errorf("prepared execution is invalid")
 		}
 		exec = prepared
 		if err := s.execRepo.SetAgentConfigIfEmpty(ctx, exec.ID, agent.ID); err != nil {
-			return nil, llmcontracts.ChatContext{}, fmt.Errorf("updating prepared automation execution agent: %w", err)
+			return nil, llmcontracts.ChatContext{}, fmt.Errorf("updating prepared execution agent: %w", err)
 		}
 		exec.AgentConfigID = agent.ID
 	} else if err := s.execRepo.Create(ctx, exec); err != nil {
 		applog.Infof("[agent-svc] ExecuteTaskWithAgent error creating execution: %v", err)
 		return nil, llmcontracts.ChatContext{}, fmt.Errorf("creating execution: %w", err)
 	}
-	preparedExecution := preparedAutomationExecutionID(ctx) != ""
 	ctx = withAutomationExecution(ctx, task.ID, exec.ID)
 	finalizeCtx = context.WithoutCancel(ctx)
-	if s.automationRepo != nil && !preparedExecution {
+	if s.automationRepo != nil && !preparedAutomation {
 		if automationContext, ok := AutomationContextFromContext(ctx); ok && automationContext.ProjectID == task.ProjectID {
 			for i, binding := range automationContext.Bindings {
 				projection := repository.AutomationProjectionEvent{

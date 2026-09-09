@@ -582,11 +582,16 @@ type ActiveLaneTaskMove struct {
 	ExpectedStatus   models.TaskStatus   `json:"status"`
 }
 
-func (r *TaskRepo) MoveTasksToActiveLane(ctx context.Context, projectID string, moves []ActiveLaneTaskMove, status models.TaskStatus) ([]models.Task, error) {
+type ActiveLaneTaskAdmission struct {
+	Task        models.Task
+	ExecutionID string
+}
+
+func (r *TaskRepo) MoveTasksToActiveLane(ctx context.Context, projectID string, moves []ActiveLaneTaskMove, status models.TaskStatus) ([]ActiveLaneTaskAdmission, error) {
 	if status != models.StatusPending && status != models.StatusRunning {
 		return nil, fmt.Errorf("invalid active lane status: %s", status)
 	}
-	moved := make([]models.Task, 0, len(moves))
+	admissions := make([]ActiveLaneTaskAdmission, 0, len(moves))
 	err := withImmediateTx(ctx, r.db, func(exec sqlExecutor) error {
 		seen := make(map[string]struct{}, len(moves))
 		candidates := make([]models.Task, 0, len(moves))
@@ -643,7 +648,19 @@ func (r *TaskRepo) MoveTasksToActiveLane(ctx context.Context, projectID string, 
 			candidates[i].Status = status
 			candidates[i].DisplayOrder = nextOrder + i
 			candidates[i].CompletedAt = nil
-			moved = append(moved, candidates[i])
+			admission := ActiveLaneTaskAdmission{Task: candidates[i]}
+			if status == models.StatusRunning {
+				agentID := ""
+				if candidates[i].AgentID != nil {
+					agentID = *candidates[i].AgentID
+				}
+				execution := &models.Execution{TaskID: candidates[i].ID, AgentConfigID: agentID, Status: models.ExecQueued, PromptSent: candidates[i].Prompt, StartsNewContext: candidates[i].StartsNewContext}
+				if err := NewExecutionRepo(r.db).CreateWithExecutor(ctx, exec, execution); err != nil {
+					return fmt.Errorf("reserving active lane execution for %s: %w", candidates[i].ID, err)
+				}
+				admission.ExecutionID = execution.ID
+			}
+			admissions = append(admissions, admission)
 		}
 		return nil
 	})
@@ -651,11 +668,12 @@ func (r *TaskRepo) MoveTasksToActiveLane(ctx context.Context, projectID string, 
 		return nil, err
 	}
 	if r.broadcaster != nil {
-		for _, task := range moved {
+		for _, admission := range admissions {
+			task := admission.Task
 			r.broadcaster.Publish(events.TaskEvent{Type: events.TaskBoardUpdated, TaskID: task.ID, TaskName: task.Title, ProjectID: task.ProjectID, Category: string(task.Category), Status: string(task.Status)})
 		}
 	}
-	return moved, nil
+	return admissions, nil
 }
 
 func (r *TaskRepo) UpdateCategory(ctx context.Context, id string, category models.TaskCategory) error {
@@ -683,6 +701,12 @@ func (r *TaskRepo) UpdateCategory(ctx context.Context, id string, category model
 			`UPDATE tasks SET category = ?, display_order = ?, updated_at = datetime('now'), completed_at = CASE WHEN ? = 'completed' THEN datetime('now') ELSE NULL END WHERE id = ?`,
 			category, displayOrder, string(category), id); err != nil {
 			return fmt.Errorf("updating task category: %w", err)
+		}
+		if category != models.CategoryActive {
+			if _, err := exec.ExecContext(ctx, `UPDATE executions SET status = 'cancelled', error_message = 'Task left the reserved running lane', completed_at = datetime('now')
+				WHERE task_id = ? AND status = 'queued' AND is_followup = 0 AND dispatch_id IS NULL`, id); err != nil {
+				return fmt.Errorf("cancelling reserved task execution: %w", err)
+			}
 		}
 		return nil
 	})
@@ -750,6 +774,12 @@ func (r *TaskRepo) UpdateStatus(ctx context.Context, id string, status models.Ta
 			`UPDATE tasks SET status = ?, display_order = ?, updated_at = datetime('now') WHERE id = ?`,
 			status, displayOrder, id); err != nil {
 			return fmt.Errorf("updating task status: %w", err)
+		}
+		if status != models.StatusRunning {
+			if _, err := exec.ExecContext(ctx, `UPDATE executions SET status = 'cancelled', error_message = 'Task left the reserved running lane', completed_at = datetime('now')
+				WHERE task_id = ? AND status = 'queued' AND is_followup = 0 AND dispatch_id IS NULL`, id); err != nil {
+				return fmt.Errorf("cancelling reserved task execution: %w", err)
+			}
 		}
 		return nil
 	})
@@ -1068,10 +1098,45 @@ func (r *TaskRepo) ClaimTaskForDispatch(ctx context.Context, id string) (*TaskDi
 	return &TaskDispatchClaim{Task: *task, AutomationContext: automationContext}, true, nil
 }
 
-// LoadPreclaimedTaskForDispatch validates a board move that already persisted
-// running status and loads the same authoritative Task/Automation projection used
-// by ordinary dispatch claims. It never promotes a pending task.
-func (r *TaskRepo) LoadPreclaimedTaskForDispatch(ctx context.Context, id string) (*TaskDispatchClaim, bool, error) {
+func (r *TaskRepo) ListReservedActiveLaneAdmissions(ctx context.Context) ([]ActiveLaneTaskAdmission, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT t.id, e.id FROM tasks t JOIN executions e ON e.task_id = t.id
+		WHERE t.category = 'active' AND t.status = 'running' AND e.status = 'queued' AND e.is_followup = 0 AND e.dispatch_id IS NULL
+		ORDER BY t.display_order ASC, e.started_at ASC, e.rowid ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("listing reserved active lane admissions: %w", err)
+	}
+	var refs []struct{ taskID, executionID string }
+	for rows.Next() {
+		var ref struct{ taskID, executionID string }
+		if err := rows.Scan(&ref.taskID, &ref.executionID); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		refs = append(refs, ref)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	admissions := make([]ActiveLaneTaskAdmission, 0, len(refs))
+	for _, ref := range refs {
+		task, err := r.GetByID(ctx, ref.taskID)
+		if err != nil {
+			return nil, err
+		}
+		if task != nil {
+			admissions = append(admissions, ActiveLaneTaskAdmission{Task: *task, ExecutionID: ref.executionID})
+		}
+	}
+	return admissions, nil
+}
+
+// ClaimReservedTaskForDispatch atomically validates and starts the durable queued
+// ordinary execution created by a running-lane board move.
+func (r *TaskRepo) ClaimReservedTaskForDispatch(ctx context.Context, id, executionID string) (*TaskDispatchClaim, bool, error) {
 	conn, finishImmediate, err := beginImmediateConn(ctx, r.db)
 	if err != nil {
 		return nil, false, err
@@ -1084,15 +1149,25 @@ func (r *TaskRepo) LoadPreclaimedTaskForDispatch(ctx context.Context, id string)
 	if task == nil {
 		return nil, false, fmt.Errorf("task not found: %s", id)
 	}
+	var reserved int
+	if err := conn.QueryRowContext(ctx, `SELECT EXISTS (
+		SELECT 1 FROM executions e WHERE e.id = ? AND e.task_id = ? AND e.status = 'queued' AND e.is_followup = 0 AND e.dispatch_id IS NULL
+	)`, executionID, id).Scan(&reserved); err != nil {
+		return nil, false, fmt.Errorf("validating reserved task execution: %w", err)
+	}
 	var blocked int
 	if err := conn.QueryRowContext(ctx, `SELECT EXISTS (
 		SELECT 1 FROM automation_task_run_reservations r WHERE r.task_id = ?
-		UNION ALL SELECT 1 FROM executions e WHERE e.task_id = ? AND e.status IN ('queued','running')
-		UNION ALL SELECT 1 FROM thread_inputs i WHERE i.scope = 'task_thread' AND i.task_id = ? AND i.input_status = 'pending'
-	)`, id, id, id).Scan(&blocked); err != nil {
-		return nil, false, fmt.Errorf("validating preclaimed task admission: %w", err)
+		UNION ALL SELECT 1 FROM executions e WHERE e.task_id = ? AND e.id <> ? AND e.status IN ('queued','running')
+	)`, id, id, executionID).Scan(&blocked); err != nil {
+		return nil, false, fmt.Errorf("validating reserved task admission: %w", err)
 	}
-	if task.Status != models.StatusRunning || task.Category != models.CategoryActive || blocked != 0 {
+	if task.Status != models.StatusRunning || task.Category != models.CategoryActive || reserved == 0 || blocked != 0 {
+		if reserved != 0 {
+			if _, err := conn.ExecContext(ctx, `UPDATE executions SET status = 'cancelled', error_message = 'Reserved task admission was superseded', completed_at = datetime('now') WHERE id = ? AND status = 'queued'`, executionID); err != nil {
+				return nil, false, err
+			}
+		}
 		if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 			return nil, false, err
 		}
@@ -1143,6 +1218,9 @@ func (r *TaskRepo) LoadPreclaimedTaskForDispatch(ctx context.Context, id string)
 				return nil, false, fmt.Errorf("removing archived preclaimed Automation admission: %w", err)
 			}
 		}
+		if _, err := conn.ExecContext(ctx, `UPDATE executions SET status = 'cancelled', error_message = 'Automation is not active', completed_at = datetime('now') WHERE id = ? AND status = 'queued'`, executionID); err != nil {
+			return nil, false, err
+		}
 		if _, err := conn.ExecContext(ctx, `UPDATE tasks SET status = 'pending', category = 'backlog', updated_at = datetime('now') WHERE id = ? AND status = 'running'`, task.ID); err != nil {
 			return nil, false, err
 		}
@@ -1152,6 +1230,9 @@ func (r *TaskRepo) LoadPreclaimedTaskForDispatch(ctx context.Context, id string)
 			return nil, false, err
 		}
 		return &TaskDispatchClaim{Task: *task, AutomationContext: automationContext}, false, nil
+	}
+	if _, err := conn.ExecContext(ctx, `UPDATE executions SET status = 'running', started_at = datetime('now') WHERE id = ? AND task_id = ? AND status = 'queued'`, executionID, id); err != nil {
+		return nil, false, fmt.Errorf("claiming reserved task execution: %w", err)
 	}
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 		return nil, false, err
@@ -1896,6 +1977,10 @@ func (r *TaskRepo) ResetOrphanedRunning(ctx context.Context) (int, error) {
 		       THEN 'backlog' ELSE category END,
 		     updated_at = datetime('now')
 		 WHERE status = 'running'
+		   AND NOT EXISTS (
+		     SELECT 1 FROM executions queued
+		     WHERE queued.task_id = tasks.id AND queued.status = 'queued' AND queued.is_followup = 0 AND queued.dispatch_id IS NULL
+		   )
 		   AND NOT EXISTS (
 		     SELECT 1 FROM automation_task_run_reservations r
 		     JOIN automation_dispatch_outbox d ON d.id = r.dispatch_id
