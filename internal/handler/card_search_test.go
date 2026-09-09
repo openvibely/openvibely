@@ -382,7 +382,7 @@ func TestCollectionCardToolbars(t *testing.T) {
 		{name: "agents", path: "/agents?project_id=default", pageKey: "agents", wantSort: true},
 		{name: "skills", path: "/skills?project_id=default", pageKey: "skills", wantSort: true},
 		{name: "models", path: "/models?project_id=default", pageKey: "models", wantSort: true},
-		{name: "channels", path: "/channels?project_id=default", pageKey: "channels", wantSort: false},
+		{name: "channels", path: "/channels?project_id=default", pageKey: "channels", wantSort: true},
 		{name: "personality", path: "/personality?project_id=default", pageKey: "personality", wantSort: true},
 	}
 	for _, tt := range tests {

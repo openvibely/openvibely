@@ -66,6 +66,7 @@ type ChannelsSettingsView struct {
 	ChannelTypeFilter            string
 	ConnectionStateFilter        string
 	WebhookEnabledFilter         string
+	Sort                         string
 	WebhooksHasMore              bool
 	AgentPickerOptions           []repository.AgentPickerOption
 	WebhookAgents                map[string][]models.WebhookEndpointAgent

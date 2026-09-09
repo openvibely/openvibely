@@ -116,7 +116,7 @@ func driveNativeGroupedTaskDrags(debugPort int, serverURL string, ready <-chan n
 				result <- fmt.Errorf("native grouped drag phase = %q, want %q", coordinates.phase, expectedPhase)
 				return
 			}
-			for _, point := range [][2]float64{{coordinates.firstX, coordinates.firstY}, {coordinates.secondX, coordinates.secondY}} {
+			for _, point := range [][2]float64{{coordinates.secondX, coordinates.secondY}, {coordinates.firstX, coordinates.firstY}} {
 				for _, params := range []map[string]any{
 					{"type": "mouseMoved", "x": point[0], "y": point[1], "modifiers": modifier},
 					{"type": "mousePressed", "x": point[0], "y": point[1], "button": "left", "buttons": 1, "clickCount": 1, "modifiers": modifier},
@@ -372,8 +372,19 @@ window.addEventListener('DOMContentLoaded', function() {
       if (groupedDrag === 'category' || groupedDrag === 'active') {
         var groupedTarget = groupedDrag === 'active' ? '.task-drop-zone[data-status="running"]' : '.category-drop-zone[data-category="completed"]';
         await exerciseNativeGroupedDrop(groupedDrag, groupedTarget);
-        location.href = groupedDrag === 'category'
-          ? '/tasks?project_id=project-card-drag-cursor&grouped_drag=active'
+	      if (groupedDrag === 'active') {
+	        await waitFor(function() {
+	          var zone = document.querySelector('.task-drop-zone[data-status="running"]');
+	          var ids = zone && Array.from(zone.querySelectorAll(':scope > [data-task-id]')).map(function(card) { return card.dataset.taskId; });
+	          return ids && ids.slice(-2).join(',') === 'task-drag-cursor,task-active-status-drag' &&
+	            ids.every(function(id) { return document.getElementById('task-' + id).dataset.taskStatus === 'running'; });
+	        }, 'persisted grouped Active tail after reconciliation');
+	        await htmx.ajax('GET', '/refresh-kanban?state=persisted', {target:'#kanban-board', swap:'outerHTML'});
+	        var persistedZone = document.querySelector('.task-drop-zone[data-status="running"]');
+	        var persistedIDs = Array.from(persistedZone.querySelectorAll(':scope > [data-task-id]')).map(function(card) { return card.dataset.taskId; });
+	        if (persistedIDs.slice(-2).join(',') !== 'task-drag-cursor,task-active-status-drag') fail('grouped Active order did not survive authoritative reload');
+	      }
+	      location.href = groupedDrag === 'category'          ? '/tasks?project_id=project-card-drag-cursor&grouped_drag=active'
           : '/tasks?project_id=project-card-drag-cursor&drag_only=1';
         return;
       }
@@ -514,6 +525,10 @@ window.addEventListener('DOMContentLoaded', function() {
 	nativeGroupedMotionObserved := make(chan string, 2)
 	var requestMu sync.Mutex
 	var requests []string
+	var groupedTaskOrders []string
+	var groupedTargetStatuses []string
+	var groupedExpectedStates []string
+	var dragOnlyMode bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestMu.Lock()
 		requests = append(requests, r.Method+" "+r.URL.Path)
@@ -524,18 +539,33 @@ window.addEventListener('DOMContentLoaded', function() {
 			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 			_, _ = w.Write(htmxJS)
 		case "/tasks":
+			requestMu.Lock()
+			if r.URL.Query().Get("drag_only") == "1" {
+				dragOnlyMode = true
+			}
+			persistedTasks := append([]models.Task(nil), tasks...)
+			isDragOnlyMode := dragOnlyMode
+			requestMu.Unlock()
+			if isDragOnlyMode {
+				persistedTasks[0].Category = models.CategoryBacklog
+				persistedTasks[0].Status = models.StatusPending
+				persistedTasks[1].Category = models.CategoryActive
+				persistedTasks[1].Status = models.StatusPending
+			}
 			var out bytes.Buffer
-			if err := Tasks([]models.Project{project}, &project, tasks, nil, nil, "created_desc", "completed_desc").Render(context.Background(), &out); err != nil {
+			if err := Tasks([]models.Project{project}, &project, persistedTasks, nil, nil, "created_desc", "completed_desc").Render(context.Background(), &out); err != nil {
 				t.Fatalf("render Tasks page: %v", err)
 			}
 			page := strings.Replace(out.String(), "https://unpkg.com/htmx.org@2.0.4", "/htmx-2.0.4.min.js", 1)
 			page = strings.Replace(page, "</head>", runner+"</head>", 1)
 			_, _ = w.Write([]byte(page))
 		case "/refresh-kanban":
+			requestMu.Lock()
 			refreshedTasks := append([]models.Task(nil), tasks...)
+			requestMu.Unlock()
 			if r.URL.Query().Get("state") == "removed" {
 				refreshedTasks = refreshedTasks[:1]
-			} else {
+			} else if r.URL.Query().Get("state") != "persisted" {
 				refreshedTasks[1].Status = models.StatusRunning
 			}
 			var out bytes.Buffer
@@ -587,8 +617,39 @@ window.addEventListener('DOMContentLoaded', function() {
 			if r.Method != http.MethodPatch {
 				t.Fatalf("expected grouped task category move to use PATCH, got %s", r.Method)
 			}
+			if err := r.ParseForm(); err != nil {
+				t.Errorf("parse grouped task category move: %v", err)
+			}
+			requestMu.Lock()
+			groupedTaskOrders = append(groupedTaskOrders, r.FormValue("task_ids"))
+			groupedTargetStatuses = append(groupedTargetStatuses, r.FormValue("target_status"))
+			groupedExpectedStates = append(groupedExpectedStates, r.FormValue("expected_states"))
+			ids := strings.Split(r.FormValue("task_ids"), ",")
+			category := models.TaskCategory(r.FormValue("category"))
+			targetStatus := models.TaskStatus(r.FormValue("target_status"))
+			nextOrder := 0
+			for _, task := range tasks {
+				if task.Category == category && task.DisplayOrder >= nextOrder {
+					nextOrder = task.DisplayOrder + 1
+				}
+			}
+			for _, id := range ids {
+				for i := range tasks {
+					if tasks[i].ID != id {
+						continue
+					}
+					tasks[i].Category = category
+					tasks[i].DisplayOrder = nextOrder
+					nextOrder++
+					if category == models.CategoryActive && targetStatus != "" {
+						tasks[i].Status = targetStatus
+					}
+				}
+			}
+			persistedTasks := append([]models.Task(nil), tasks...)
+			requestMu.Unlock()
 			var out bytes.Buffer
-			if err := components.KanbanBoard(tasks, project.ID, "created_desc", "completed_desc", nil, nil).Render(context.Background(), &out); err != nil {
+			if err := components.KanbanBoard(persistedTasks, project.ID, "created_desc", "completed_desc", nil, nil).Render(context.Background(), &out); err != nil {
 				t.Fatalf("render grouped task drop response: %v", err)
 			}
 			_, _ = w.Write(out.Bytes())
@@ -597,9 +658,15 @@ window.addEventListener('DOMContentLoaded', function() {
 				t.Fatalf("expected task category move to use PATCH, got %s", r.Method)
 			}
 			w.WriteHeader(http.StatusNoContent)
-		case "/tasks/task-active-status-drag/status":
+		case "/tasks/task-active-status-drag/category":
 			if r.Method != http.MethodPatch {
-				t.Fatalf("expected Active lane status move to use PATCH, got %s", r.Method)
+				t.Fatalf("expected Active lane start to use PATCH, got %s", r.Method)
+			}
+			if err := r.ParseForm(); err != nil {
+				t.Fatalf("parse Active lane start: %v", err)
+			}
+			if r.FormValue("category") != string(models.CategoryActive) || r.FormValue("target_status") != string(models.StatusRunning) || r.FormValue("expected_states") == "" {
+				t.Fatalf("Active lane start form = %#v", r.Form)
 			}
 			w.WriteHeader(http.StatusNoContent)
 		case "/tasks/task-active-status-drag/reorder":
@@ -664,6 +731,9 @@ window.addEventListener('DOMContentLoaded', function() {
 	stopBrowserProcess(cmd)
 	requestMu.Lock()
 	requestList := strings.Join(requests, "\n")
+	gotGroupedTaskOrders := append([]string(nil), groupedTaskOrders...)
+	gotGroupedTargetStatuses := append([]string(nil), groupedTargetStatuses...)
+	gotGroupedExpectedStates := append([]string(nil), groupedExpectedStates...)
 	requestMu.Unlock()
 	if !strings.HasPrefix(outcome, "pass:") {
 		stderr, _ := os.ReadFile(stderrPath)
@@ -672,7 +742,7 @@ window.addEventListener('DOMContentLoaded', function() {
 	for _, want := range []string{
 		"PATCH /tasks/batch-category",
 		"PATCH /tasks/task-drag-cursor/category",
-		"PATCH /tasks/task-active-status-drag/status",
+		"PATCH /tasks/task-active-status-drag/category",
 		"PATCH /schedules/schedule-drag-cursor/reschedule",
 	} {
 		if !strings.Contains(requestList, want) {
@@ -681,6 +751,23 @@ window.addEventListener('DOMContentLoaded', function() {
 	}
 	if strings.Contains(requestList, "PATCH /tasks/task-active-status-drag/reorder") {
 		t.Fatalf("Active status-lane drag must not be routed as a reorder:\n%s", requestList)
+	}
+	wantGroupedOrder := "task-drag-cursor,task-active-status-drag"
+	if len(gotGroupedTaskOrders) != 2 || gotGroupedTaskOrders[0] != wantGroupedOrder || gotGroupedTaskOrders[1] != wantGroupedOrder {
+		t.Fatalf("grouped category and Active drops must preserve board order %q despite reverse selection, got %v", wantGroupedOrder, gotGroupedTaskOrders)
+	}
+	if len(gotGroupedTargetStatuses) != 2 || gotGroupedTargetStatuses[0] != "" || gotGroupedTargetStatuses[1] != string(models.StatusRunning) {
+		t.Fatalf("grouped Active drop target statuses = %v, want category-only then running", gotGroupedTargetStatuses)
+	}
+	if len(gotGroupedExpectedStates) != 2 || gotGroupedExpectedStates[0] != "" {
+		t.Fatalf("grouped expected-state payloads = %v", gotGroupedExpectedStates)
+	}
+	var expectedMoves []repository.ActiveLaneTaskMove
+	if err := json.Unmarshal([]byte(gotGroupedExpectedStates[1]), &expectedMoves); err != nil {
+		t.Fatalf("decode grouped Active expected states: %v", err)
+	}
+	if len(expectedMoves) != 2 || expectedMoves[0].ID != "task-drag-cursor" || expectedMoves[0].ExpectedCategory != models.CategoryCompleted || expectedMoves[1].ID != "task-active-status-drag" || expectedMoves[1].ExpectedCategory != models.CategoryCompleted {
+		t.Fatalf("grouped Active expected states did not preserve pre-move DOM state: %#v", expectedMoves)
 	}
 }
 

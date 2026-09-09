@@ -135,7 +135,7 @@ func collectionToolbarConfig(pageKey, projectID, search string) CardListToolbarC
 			{Key: "automation_type", Label: "Automation type", Options: cardListOptions("custom", "Custom", "native_sdlc", "Native SDLC", "github_sdlc", "GitHub SDLC", "vision_driver", "Vision driver", "scheduled", "Scheduled")},
 			{Key: "adapter", Label: "Adapter", Options: cardListOptions("custom", "Custom", "native_sdlc", "Native SDLC", "github_sdlc", "GitHub SDLC", "vision_driver", "Vision driver")},
 		}
-		config.Sort, config.SortOptions = "updated_desc", cardListOptions("updated_desc", "Recently updated", "updated_asc", "Least recently updated", "name_asc", "Name A–Z", "name_desc", "Name Z–A")
+		config.Sort, config.SortOptions = "name_asc", cardListOptions("name_asc", "Name A–Z", "name_desc", "Name Z–A", "updated_desc", "Recently updated", "updated_asc", "Least recently updated")
 	case "agents":
 		config.Action, config.Placeholder, config.EntityType, config.BulkDeleteURL = "/agents", "Search agents...", "agents", "/agents/bulk"
 		config.Filters = []CardListFilter{{Key: "enabled", Label: "Enabled", Options: cardListOptions("true", "Enabled", "false", "Disabled")}, {Key: "scope", Label: "Scope", Options: cardListOptions("global", "Global", "project", "Project")}, {Key: "origin", Label: "Origin", Options: cardListOptions("custom", "Custom", "generated", "Generated", "protected", "Protected")}}
@@ -147,14 +147,15 @@ func collectionToolbarConfig(pageKey, projectID, search string) CardListToolbarC
 	case "models":
 		config.Action, config.Placeholder, config.EntityType, config.BulkDeleteURL = "/models", "Search models...", "models", "/models/bulk"
 		config.Filters = []CardListFilter{{Key: "provider", Label: "Provider", Options: cardListOptions("openai", "OpenAI", "anthropic", "Anthropic", "ollama", "Ollama", "openai_compatible", "OpenAI-compatible", "mixture", "Mixture")}, {Key: "default", Label: "Default", Options: cardListOptions("true", "Default", "false", "Non-default")}, {Key: "auth_status", Label: "Authentication", Options: cardListOptions("connected", "Connected", "not_connected", "Not connected", "not_required", "Not required")}, {Key: "kind", Label: "Kind", Options: cardListOptions("direct", "Direct", "mixture", "Mixture")}}
-		config.Sort, config.SortOptions = "default_name", cardListOptions("default_name", "Default then name", "name_asc", "Name A–Z", "name_desc", "Name Z–A", "provider", "Provider")
+		config.Sort, config.SortOptions = "name_asc", cardListOptions("name_asc", "Name A–Z", "name_desc", "Name Z–A", "provider", "Provider")
 	case "channels":
 		config.Action, config.Placeholder, config.EntityType, config.BulkDeleteURL = "/channels", "Search channels...", "channels", "/channels/bulk"
 		config.Filters = []CardListFilter{{Key: "type", Label: "Type", Options: cardListOptions("github", "GitHub", "slack", "Slack", "telegram", "Telegram", "discord", "Discord", "x", "X", "email", "Email", "webhook", "Webhook", "outbound_targets", "Outbound targets")}, {Key: "connection_state", Label: "Connection", Options: cardListOptions("connected", "Connected", "configured", "Configured", "disconnected", "Disconnected")}, {Key: "webhook_enabled", Label: "Webhook", Options: cardListOptions("true", "Enabled", "false", "Disabled")}}
+		config.Sort, config.SortOptions = "name_asc", cardListOptions("name_asc", "Webhooks A–Z", "name_desc", "Webhooks Z–A")
 	case "personality":
 		config.Action, config.Placeholder, config.EntityType, config.BulkDeleteURL = "/personality", "Search personalities...", "personalities", "/personality/custom/bulk"
 		config.Filters = []CardListFilter{{Key: "kind", Label: "Kind", Options: cardListOptions("base", "Base", "built_in", "Built-in", "custom", "Custom", "override", "Override")}, {Key: "active", Label: "Status", Options: cardListOptions("true", "Active", "false", "Inactive")}}
-		config.Sort, config.SortOptions = "curated", cardListOptions("curated", "Curated", "name_asc", "Name A–Z", "name_desc", "Name Z–A")
+		config.Sort, config.SortOptions = "name_asc", cardListOptions("name_asc", "Name A–Z", "name_desc", "Name Z–A")
 	}
 	return config
 }
@@ -283,7 +284,7 @@ templ CardListToolbar(config CardListToolbarConfig) {
 				</div>
 				if len(config.SortOptions) > 0 {
 					<label class="sr-only" for={ config.PageKey + "-card-sort" }>Sort</label>
-					<select id={ config.PageKey + "-card-sort" } class="select select-bordered select-sm" name="sort" data-card-sort onchange="this.form.requestSubmit()">
+					<select id={ config.PageKey + "-card-sort" } class="select select-bordered select-sm card-sort-control" name="sort" data-card-sort onchange="this.form.requestSubmit()">
 						for _, option := range config.SortOptions {
 							<option value={ option.Value } selected?={ option.Value == config.Sort }>{ option.Label }</option>
 						}

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +18,23 @@ import (
 func localKey(t time.Time) string {
 	local := t.Local()
 	return fmt.Sprintf("%s-%02d", local.Format("2006-01-02"), local.Hour())
+}
+
+func TestScheduleUserGuideDocumentsIndependentAutoMergeTriggers(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join("..", "..", "..", "docs", "schedule-user-guide.md"))
+	if err != nil {
+		t.Fatalf("read schedule user guide: %v", err)
+	}
+	guide := string(body)
+	for _, want := range []string{
+		"Auto-merge to target branch on successful completion",
+		"Auto-merge to target branch when goal is achieved",
+		"independent",
+	} {
+		if !strings.Contains(guide, want) {
+			t.Fatalf("schedule user guide does not document %q", want)
+		}
+	}
 }
 
 func TestScheduleContent_EnabledCardsUseGrabCursorForDrag(t *testing.T) {

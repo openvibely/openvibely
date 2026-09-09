@@ -269,6 +269,15 @@ func (r *ExecutionRepo) CreateWithExecutor(ctx context.Context, exec SQLExecutor
 	return nil
 }
 
+func (r *ExecutionRepo) CancelQueuedOrdinaryByTask(ctx context.Context, taskID, message string) error {
+	_, err := execBoundSQLite(ctx, r.db, `UPDATE executions SET status = 'cancelled', error_message = ?, completed_at = datetime('now')
+		WHERE task_id = ? AND status = 'queued' AND is_followup = 0 AND dispatch_id IS NULL`, message, taskID)
+	if err != nil {
+		return fmt.Errorf("cancelling queued ordinary task execution: %w", err)
+	}
+	return nil
+}
+
 func (r *ExecutionRepo) MarkRunning(ctx context.Context, id string) error {
 	if ctx == nil {
 		ctx = context.Background()
@@ -304,7 +313,15 @@ func (r *ExecutionRepo) CreateDirectTaskFollowupOrQueue(ctx context.Context, e *
 	err := withImmediateTx(ctx, r.db, func(dbexec SQLExecutor) error {
 		var status models.TaskStatus
 		var projectID string
-		if err := dbexec.QueryRowContext(ctx, `SELECT status, project_id FROM tasks WHERE id = ?`, e.TaskID).Scan(&status, &projectID); err != nil {
+		if expected, guarded := activeLaneExpectedState(ctx, e.TaskID); guarded {
+			var category models.TaskCategory
+			if err := dbexec.QueryRowContext(ctx, `SELECT category, status, project_id FROM tasks WHERE id = ?`, e.TaskID).Scan(&category, &status, &projectID); err != nil {
+				return fmt.Errorf("loading task for guarded follow-up admission: %w", err)
+			}
+			if category != expected.ExpectedCategory || status != expected.ExpectedStatus {
+				return fmt.Errorf("%w: %s", ErrActiveLaneTaskChanged, e.TaskID)
+			}
+		} else if err := dbexec.QueryRowContext(ctx, `SELECT status, project_id FROM tasks WHERE id = ?`, e.TaskID).Scan(&status, &projectID); err != nil {
 			return fmt.Errorf("loading task for follow-up admission: %w", err)
 		}
 		var protected int
@@ -325,7 +342,9 @@ func (r *ExecutionRepo) CreateDirectTaskFollowupOrQueue(ctx context.Context, e *
 			return threadRepo.CreateQueuedWithExecutor(ctx, dbexec, input)
 		}
 		if _, err := dbexec.ExecContext(ctx, `UPDATE tasks
-			SET status = 'queued', category = 'active', updated_at = datetime('now') WHERE id = ?`, e.TaskID); err != nil {
+			SET status = 'queued', category = 'active',
+				display_order = (SELECT COALESCE(MAX(peer.display_order), -1) + 1 FROM tasks peer WHERE peer.project_id = tasks.project_id AND peer.category = 'active'),
+				updated_at = datetime('now') WHERE id = ?`, e.TaskID); err != nil {
 			return fmt.Errorf("reactivating task for direct follow-up: %w", err)
 		}
 		isFollowup := 0

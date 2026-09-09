@@ -418,7 +418,7 @@ func TestChannelsPageOutboundTargetsRenderAsPermanentTopEditCard(t *testing.T) {
 	if !strings.Contains(body, `id="outbound-targets-draft-fields" class="hidden"`) {
 		t.Fatal("expected hidden outbound target draft fields to stay out of the footer flex layout")
 	}
-	if strings.Contains(body, `onchange="this.form.requestSubmit()"`) {
+	if strings.Contains(body, `name="enabled" value="true" class="toggle toggle-primary toggle-sm" onchange=`) {
 		t.Fatal("explicit-target toggle should not autosubmit and append refreshed cards into the modal")
 	}
 

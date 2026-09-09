@@ -767,6 +767,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 		cfg.GitHubAppPrivateKey,
 		cfg.ProjectRepoRoot,
 	)
+	projectSvc.SetManagedProjectRepoResolver(githubSvc)
 	automationExternalStateSvc := service.NewAutomationExternalStateService(automationRepo, taskPullRequestRepo, projectRepo, githubSvc)
 	automationLiveViewTracker := service.NewAutomationLiveViewTracker()
 	automationReconciler.SetAutomationExternalStateService(automationExternalStateSvc)
@@ -859,6 +860,8 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	worktreeSvc := service.NewWorktreeService(taskRepo, projectRepo, settingsRepo)
 	llmSvc.SetWorktreeService(worktreeSvc)
 	worktreeSvc.SetLLMService(llmSvc)
+	worktreeSvc.SetTaskGoalService(taskGoalSvc)
+	taskGoalSvc.SetGoalAchievedHandler(worktreeSvc.AutoMergeOnGoalAchieved)
 	schedulerSvc.SetWorktreeService(worktreeSvc)
 
 	// Lifecycle runner: dispatches route_task/before_run/after_complete hook

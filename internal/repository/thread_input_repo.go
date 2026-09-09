@@ -733,12 +733,18 @@ func (r *ThreadInputRepo) ClaimQueuedForTaskExecution(ctx context.Context, input
 	return withImmediateTx(ctx, r.db, func(dbexec SQLExecutor) error {
 		promoted, err := scanThreadInput(dbexec.QueryRowContext(ctx, `SELECT `+threadInputSelectColumns+` FROM thread_inputs WHERE id = ?`, inputID))
 		if err == sql.ErrNoRows {
+			if _, guarded := activeLaneExpectedState(ctx, exec.TaskID); guarded {
+				return fmt.Errorf("%w: %s", ErrActiveLaneTaskChanged, exec.TaskID)
+			}
 			return ErrInputNotPending
 		}
 		if err != nil {
 			return fmt.Errorf("loading queued input before claim: %w", err)
 		}
 		if promoted.Scope != models.ThreadInputScopeTask || promoted.TaskID != exec.TaskID || promoted.InputMode != models.ThreadInputModeQueued || promoted.InputStatus != models.ThreadInputPending {
+			if _, guarded := activeLaneExpectedState(ctx, exec.TaskID); guarded {
+				return fmt.Errorf("%w: %s", ErrActiveLaneTaskChanged, exec.TaskID)
+			}
 			return ErrInputNotPending
 		}
 		if exec.TaskID == "" {
@@ -759,14 +765,26 @@ func (r *ThreadInputRepo) ClaimQueuedForTaskExecution(ctx context.Context, input
 			return fmt.Errorf("checking active task execution before queued claim: %w", err)
 		}
 		if activeCount > 0 {
+			if _, guarded := activeLaneExpectedState(ctx, exec.TaskID); guarded {
+				return fmt.Errorf("%w: %s", ErrActiveLaneTaskChanged, exec.TaskID)
+			}
 			return ErrActiveTurnChanged
+		}
+		var taskAdmissionPredicate = `status NOT IN ('running', 'queued')`
+		args := []any{exec.TaskID}
+		if expected, guarded := activeLaneExpectedState(ctx, exec.TaskID); guarded {
+			taskAdmissionPredicate = `category = ? AND status = ?`
+			args = append(args, expected.ExpectedCategory, expected.ExpectedStatus)
 		}
 		if err := dbexec.QueryRowContext(ctx, `
 			SELECT 1
 			FROM tasks
-			WHERE id = ? AND status NOT IN ('running', 'queued')
-			  AND NOT EXISTS (SELECT 1 FROM automation_task_run_reservations r WHERE r.task_id = tasks.id)`, exec.TaskID).Scan(&surfaceOK); err != nil {
+			WHERE id = ? AND `+taskAdmissionPredicate+`
+			  AND NOT EXISTS (SELECT 1 FROM automation_task_run_reservations r WHERE r.task_id = tasks.id)`, args...).Scan(&surfaceOK); err != nil {
 			if err == sql.ErrNoRows {
+				if _, guarded := activeLaneExpectedState(ctx, exec.TaskID); guarded {
+					return fmt.Errorf("%w: %s", ErrActiveLaneTaskChanged, exec.TaskID)
+				}
 				return ErrInputNotPending
 			}
 			return fmt.Errorf("checking task admission before queued claim: %w", err)
@@ -784,7 +802,9 @@ func (r *ThreadInputRepo) ClaimQueuedForTaskExecution(ctx context.Context, input
 		}
 		if _, err := dbexec.ExecContext(ctx, `
 				UPDATE tasks
-				SET status = 'queued', category = 'active', updated_at = datetime('now')
+				SET status = 'queued', category = 'active',
+					display_order = (SELECT COALESCE(MAX(peer.display_order), -1) + 1 FROM tasks peer WHERE peer.project_id = tasks.project_id AND peer.category = 'active'),
+					updated_at = datetime('now')
 				WHERE id = ?`, exec.TaskID); err != nil {
 			return fmt.Errorf("reactivating task for queued input: %w", err)
 		}
@@ -875,9 +895,13 @@ func (r *ThreadInputRepo) ClaimQueuedForChatExecution(ctx context.Context, input
 		if task.AutoMerge {
 			autoMerge = 1
 		}
+		autoMergeOnGoalAchieved := 0
+		if task.AutoMergeOnGoalAchieved {
+			autoMergeOnGoalAchieved = 1
+		}
 		if err := tx.QueryRowContext(ctx, `
-				INSERT INTO tasks (id, project_id, title, category, priority, status, prompt, agent_id, agent_definition_id, tag, display_order, parent_task_id, chain_config, swarm_role, swarm_status, swarm_config, swarm_sequence, worktree_path, worktree_branch, auto_merge, merge_target_branch, merge_status, base_branch, base_commit_sha, lineage_depth, created_via, telegram_chat_id)
-					VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)			RETURNING id, created_at, updated_at`, task.ProjectID, task.Title, task.Category, task.Priority, task.Status, task.Prompt, task.AgentID, task.AgentDefinitionID, task.Tag, displayOrder, task.ParentTaskID, task.ChainConfig, task.SwarmRole, task.SwarmStatus, defaultThreadTaskJSON(task.SwarmConfig), task.SwarmSequence, task.WorktreePath, task.WorktreeBranch, autoMerge, task.MergeTargetBranch, task.MergeStatus, task.BaseBranch, task.BaseCommitSHA, task.LineageDepth, task.CreatedVia, task.TelegramChatID).Scan(&task.ID, &task.CreatedAt, &task.UpdatedAt); err != nil {
+				INSERT INTO tasks (id, project_id, title, category, priority, status, prompt, agent_id, agent_definition_id, tag, display_order, parent_task_id, chain_config, swarm_role, swarm_status, swarm_config, swarm_sequence, worktree_path, worktree_branch, auto_merge, auto_merge_on_goal_achieved, merge_target_branch, merge_status, base_branch, base_commit_sha, lineage_depth, created_via, telegram_chat_id)
+					VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)			RETURNING id, created_at, updated_at`, task.ProjectID, task.Title, task.Category, task.Priority, task.Status, task.Prompt, task.AgentID, task.AgentDefinitionID, task.Tag, displayOrder, task.ParentTaskID, task.ChainConfig, task.SwarmRole, task.SwarmStatus, defaultThreadTaskJSON(task.SwarmConfig), task.SwarmSequence, task.WorktreePath, task.WorktreeBranch, autoMerge, autoMergeOnGoalAchieved, task.MergeTargetBranch, task.MergeStatus, task.BaseBranch, task.BaseCommitSHA, task.LineageDepth, task.CreatedVia, task.TelegramChatID).Scan(&task.ID, &task.CreatedAt, &task.UpdatedAt); err != nil {
 			return fmt.Errorf("creating queued chat task: %w", err)
 		}
 		task.DisplayOrder = displayOrder

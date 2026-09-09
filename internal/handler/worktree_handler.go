@@ -154,17 +154,26 @@ func (h *Handler) UpdateTaskAutoMerge(c echo.Context) error {
 	}
 
 	autoMerge := c.FormValue("auto_merge") == "on" || c.FormValue("auto_merge") == "true"
+	var autoMergeOnGoalAchieved *bool
+	goalValue := c.FormValue("auto_merge_on_goal_achieved")
+	if goalValue != "" || c.FormValue("auto_merge_on_goal_achieved_present") != "" {
+		enabled := goalValue == "on" || goalValue == "true"
+		autoMergeOnGoalAchieved = &enabled
+	}
 	targetBranch := c.FormValue("merge_target_branch")
 	if targetBranch == "" {
 		targetBranch = task.MergeTargetBranch
 	}
 
-	if err := h.taskRepo.UpdateAutoMerge(c.Request().Context(), taskID, autoMerge, targetBranch); err != nil {
+	if err := h.taskRepo.UpdateAutoMergeSettings(c.Request().Context(), taskID, autoMerge, autoMergeOnGoalAchieved, targetBranch); err != nil {
 		applog.Infof("[handler] UpdateTaskAutoMerge error: %v", err)
 		return err
 	}
 
 	task.AutoMerge = autoMerge
+	if autoMergeOnGoalAchieved != nil {
+		task.AutoMergeOnGoalAchieved = *autoMergeOnGoalAchieved
+	}
 	task.MergeTargetBranch = targetBranch
 
 	// Re-fetch and return the worktree info fragment

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
@@ -2527,9 +2529,13 @@ func TestAutoConflictRecoveryValidationRejectsForeignMergeHead(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 	taskRepo := repository.NewTaskRepo(db, nil)
-	ws := NewWorktreeService(taskRepo, repository.NewProjectRepo(db), repository.NewSettingsRepo(db))
+	projectRepo := repository.NewProjectRepo(db)
+	ws := NewWorktreeService(taskRepo, projectRepo, repository.NewSettingsRepo(db))
 	repoDir := createTestGitRepo(t)
-
+	project := &models.Project{Name: "Auto recovery owner project", RepoPath: repoDir}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
 	writeAndCommitTestFile(t, repoDir, "foreign-conflict.txt", "base\n", "foreign conflict base")
 	runGitTest(t, repoDir, "branch", "task/auto-owner")
 	runGitTest(t, repoDir, "checkout", "-b", "task/foreign-owner")
@@ -2543,13 +2549,15 @@ func TestAutoConflictRecoveryValidationRejectsForeignMergeHead(t *testing.T) {
 	}
 
 	task := &models.Task{
-		ProjectID: "default", Title: "Auto recovery owner", Category: models.CategoryCompleted,
-		Status: models.StatusCompleted, WorktreeBranch: "task/auto-owner", MergeTargetBranch: "main", MergeStatus: models.MergeStatusConflict,
+		ProjectID: project.ID, Title: "Auto recovery owner", Category: models.CategoryCompleted,
+		Status: models.StatusCompleted, AutoMerge: true, WorktreeBranch: "task/auto-owner", MergeTargetBranch: "main", MergeStatus: models.MergeStatusConflict,
 	}
 	if err := taskRepo.Create(ctx, task); err != nil {
 		t.Fatal(err)
 	}
-	validateOwner := func() error { return ws.validateAutoConflictRecovery(ctx, task, repoDir) }
+	validateOwner := func() error {
+		return ws.validateAutoConflictRecovery(ctx, task, repoDir, project, automaticMergeTrigger{}, true)
+	}
 	if _, err := ws.ResolveConflictsWithAIValidated(ctx, task, repoDir, validateOwner); !errors.Is(err, ErrMergeEligibilityChanged) {
 		t.Fatalf("foreign active conflict Resolve validation = %v, want ErrMergeEligibilityChanged", err)
 	}
@@ -4185,6 +4193,814 @@ func TestCleanupWorktree(t *testing.T) {
 	}
 	if dbTask.WorktreeBranch != "" {
 		t.Error("expected worktree_branch to be cleared in DB")
+	}
+}
+
+func TestGoalAchievedAutoMergeUsesCanonicalFlowAndIsIdempotentWithCompletion(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	repoDir := createTestGitRepo(t)
+	target := GetDefaultBranch(repoDir)
+	project := &models.Project{Name: "Goal merge project", RepoPath: repoDir}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	ws := NewWorktreeService(taskRepo, projectRepo, settingsRepo)
+	goalSvc := NewTaskGoalService(repository.NewTaskGoalRepo(db), taskRepo, nil)
+	ws.SetTaskGoalService(goalSvc)
+	goalSvc.SetGoalAchievedHandler(ws.AutoMergeOnGoalAchieved)
+
+	task := &models.Task{ProjectID: project.ID, Title: "Goal merge", Category: models.CategoryActive, Status: models.StatusPending, Priority: 2, AutoMerge: true, AutoMergeOnGoalAchieved: true, MergeTargetBranch: target}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	worktreePath, branch, err := ws.SetupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatalf("setup worktree: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(worktreePath, "goal-merge.txt"), []byte("achieved\n"), 0o644); err != nil {
+		t.Fatalf("write task change: %v", err)
+	}
+	if err := CommitWorktreeChanges(worktreePath, "Add goal merge fixture"); err != nil {
+		t.Fatalf("commit task change: %v", err)
+	}
+	if err := taskRepo.UpdateStatus(ctx, task.ID, models.StatusCompleted); err != nil {
+		t.Fatalf("complete task: %v", err)
+	}
+	goal, err := goalSvc.SetGoal(ctx, task.ID, "merge when achieved", GoalOptions{})
+	if err != nil {
+		t.Fatalf("set goal: %v", err)
+	}
+	start := make(chan struct{})
+	achievementErr := make(chan error, 1)
+	completionDone := make(chan struct{})
+	go func() {
+		<-start
+		_, markErr := goalSvc.MarkAchieved(ctx, task.ID, goal.GoalID, "verified")
+		achievementErr <- markErr
+	}()
+	go func() {
+		<-start
+		ws.autoMergeTask(ctx, task.ID, automaticMergeTrigger{})
+		close(completionDone)
+	}()
+	close(start)
+	if err := <-achievementErr; err != nil {
+		t.Fatalf("mark achieved: %v", err)
+	}
+	<-completionDone
+	merged, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("reload merged task: %v", err)
+	}
+	if merged.MergeStatus != models.MergeStatusMerged || !IsBranchMerged(repoDir, branch, target) {
+		t.Fatalf("goal achievement did not merge branch: task=%+v", merged)
+	}
+	before := strings.TrimSpace(string(runGitTest(t, repoDir, "rev-parse", target)))
+	ws.autoMergeTask(ctx, task.ID, automaticMergeTrigger{})
+	after := strings.TrimSpace(string(runGitTest(t, repoDir, "rev-parse", target)))
+	if after != before {
+		t.Fatalf("completion trigger duplicated achieved-goal merge: before=%s after=%s", before, after)
+	}
+
+	failed := &models.Task{ProjectID: project.ID, Title: "Failed goal merge", Category: models.CategoryActive, Status: models.StatusPending, Priority: 2, AutoMergeOnGoalAchieved: true, MergeTargetBranch: target}
+	if err := taskRepo.Create(ctx, failed); err != nil {
+		t.Fatalf("create failed task: %v", err)
+	}
+	failedWorktree, failedBranch, err := ws.SetupWorktree(ctx, failed, repoDir)
+	if err != nil {
+		t.Fatalf("setup failed task worktree: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(failedWorktree, "failed-goal-merge.txt"), []byte("do not merge\n"), 0o644); err != nil {
+		t.Fatalf("write failed task change: %v", err)
+	}
+	if err := CommitWorktreeChanges(failedWorktree, "Add failed goal fixture"); err != nil {
+		t.Fatalf("commit failed task change: %v", err)
+	}
+	if err := taskRepo.UpdateStatus(ctx, failed.ID, models.StatusFailed); err != nil {
+		t.Fatalf("fail task: %v", err)
+	}
+	failedGoal, err := goalSvc.SetGoal(ctx, failed.ID, "must not merge", GoalOptions{})
+	if err != nil {
+		t.Fatalf("set failed task goal: %v", err)
+	}
+	if _, err := goalSvc.MarkAchieved(ctx, failed.ID, failedGoal.GoalID, "audit said achieved"); err != nil {
+		t.Fatalf("mark failed task goal achieved: %v", err)
+	}
+	failedReloaded, err := taskRepo.GetByID(ctx, failed.ID)
+	if err != nil {
+		t.Fatalf("reload failed task: %v", err)
+	}
+	if failedReloaded.MergeStatus == models.MergeStatusMerged || IsBranchMerged(repoDir, failedBranch, target) {
+		t.Fatal("failed task was merged by goal achievement")
+	}
+}
+
+func TestAutomaticConflictResolutionRuntimeRestrictsPathsToExactConflictFiles(t *testing.T) {
+	repoDir := createTestGitRepo(t)
+	conflictPath := "conflicted.txt"
+	if err := os.WriteFile(filepath.Join(repoDir, conflictPath), []byte("conflict\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	outsideDir := t.TempDir()
+	outsideFile := filepath.Join(outsideDir, "outside.txt")
+	if err := os.WriteFile(outsideFile, []byte("outside\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	symlinkPath := "linked-conflict.txt"
+	if err := os.Symlink(outsideFile, filepath.Join(repoDir, symlinkPath)); err != nil {
+		t.Skipf("symlink fixture unavailable: %v", err)
+	}
+	symlinkDir := filepath.Join(repoDir, "linked-dir")
+	if err := os.Symlink(outsideDir, symlinkDir); err != nil {
+		t.Skipf("symlink directory fixture unavailable: %v", err)
+	}
+	symlinkChildPath := "linked-dir/outside.txt"
+	hookPath := filepath.Join(repoDir, ".git", "hooks", "pre-commit")
+	if err := os.WriteFile(hookPath, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	beforeHook, err := os.ReadFile(hookPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	runtimeTools := automaticConflictResolutionRuntime(repoDir, []string{conflictPath, symlinkPath, symlinkChildPath})
+	if runtimeTools == nil || runtimeTools.Executor == nil || !runtimeTools.SkipDefaultTools {
+		t.Fatal("automatic conflict runtime is not a closed request-scoped tool boundary")
+	}
+	allowedInput, _ := json.Marshal(map[string]string{"file_path": conflictPath, "content": "resolved\n"})
+	if _, handled, isError, err := runtimeTools.Executor(context.Background(), "write_file", allowedInput); err != nil || !handled || isError {
+		t.Fatalf("allowed conflict write: handled=%v isError=%v err=%v", handled, isError, err)
+	}
+	if got, err := os.ReadFile(filepath.Join(repoDir, conflictPath)); err != nil || string(got) != "resolved\n" {
+		t.Fatalf("allowed conflict file was not written: content=%q err=%v", got, err)
+	}
+
+	attempts := []struct {
+		name     string
+		filePath string
+	}{
+		{name: "git hook", filePath: ".git/hooks/pre-commit"},
+		{name: "absolute outside", filePath: outsideFile},
+		{name: "traversal outside", filePath: "../" + filepath.Base(outsideDir) + "/outside.txt"},
+		{name: "allowlisted symlink escape", filePath: symlinkPath},
+		{name: "allowlisted symlink directory escape", filePath: symlinkChildPath},
+	}
+	for _, attempt := range attempts {
+		t.Run(attempt.name, func(t *testing.T) {
+			input, _ := json.Marshal(map[string]string{"file_path": attempt.filePath, "content": "MUTATED\n"})
+			if _, handled, isError, err := runtimeTools.Executor(context.Background(), "write_file", input); err == nil || !handled || !isError {
+				t.Fatalf("escape write: handled=%v isError=%v err=%v", handled, isError, err)
+			}
+		})
+	}
+	if got, err := os.ReadFile(outsideFile); err != nil || string(got) != "outside\n" {
+		t.Fatalf("outside file mutated: content=%q err=%v", got, err)
+	}
+	if got, err := os.ReadFile(hookPath); err != nil || string(got) != string(beforeHook) {
+		t.Fatalf("git hook mutated: content=%q err=%v", got, err)
+	}
+}
+
+func TestGoalAutoMergeReconciliationRejectsOwnedSourceConflictOnWrongTarget(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	repoDir := createTestGitRepo(t)
+	target := GetDefaultBranch(repoDir)
+	writeAndCommitTestFile(t, repoDir, "wrong-target-conflict.txt", "base\n", "Add wrong-target conflict base")
+	project := &models.Project{Name: "Wrong target conflict project", RepoPath: repoDir}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Wrong target conflict", Category: models.CategoryCompleted, Status: models.StatusCompleted, Priority: 2, AutoMergeOnGoalAchieved: true, MergeTargetBranch: target}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	ws := NewWorktreeService(taskRepo, projectRepo, settingsRepo)
+	worktreePath, branch, err := ws.SetupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(worktreePath, "wrong-target-conflict.txt"), []byte("task\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := CommitWorktreeChanges(worktreePath, "Change wrong-target conflict on task"); err != nil {
+		t.Fatal(err)
+	}
+
+	runGitTest(t, repoDir, "checkout", "-b", "wrong-target")
+	writeAndCommitTestFile(t, repoDir, "wrong-target-conflict.txt", "wrong target\n", "Change conflict on wrong target")
+	wrongTargetBefore := strings.TrimSpace(string(runGitTest(t, repoDir, "rev-parse", "HEAD")))
+	mergeCmd := exec.Command("git", "merge", "--no-ff", branch)
+	mergeCmd.Dir = repoDir
+	if out, err := mergeCmd.CombinedOutput(); err == nil || len(ActiveConflictFiles(repoDir)) == 0 {
+		t.Fatalf("creating wrong-target conflict: err=%v out=%s", err, out)
+	}
+	if !ActiveMergeMatchesBranch(repoDir, branch) || GetCurrentBranch(repoDir) != "wrong-target" {
+		t.Fatalf("wrong-target conflict ownership fixture is invalid: source=%v target=%q", ActiveMergeMatchesBranch(repoDir, branch), GetCurrentBranch(repoDir))
+	}
+
+	goalSvc := NewTaskGoalService(repository.NewTaskGoalRepo(db), taskRepo, nil)
+	ws.SetTaskGoalService(goalSvc)
+	goal, err := goalSvc.SetGoal(ctx, task.ID, "do not recover into wrong target", GoalOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := goalSvc.MarkAchieved(ctx, task.ID, goal.GoalID, "verified"); err != nil {
+		t.Fatal(err)
+	}
+	agent := &models.LLMConfig{Name: "Wrong target resolver", Provider: models.ProviderTest, Model: "test", IsDefault: true}
+	if err := llmConfigRepo.Create(ctx, agent); err != nil {
+		t.Fatal(err)
+	}
+	llmSvc := NewLLMService(llmConfigRepo, nil, nil, nil, nil, nil)
+	mock := &testutil.MockLLMCaller{Response: "must not run"}
+	mock.OnCall = func(_ context.Context, _ testutil.MockLLMCall) {
+		if err := os.WriteFile(filepath.Join(repoDir, "wrong-target-conflict.txt"), []byte("incorrectly resolved\n"), 0o644); err != nil {
+			t.Error(err)
+		}
+	}
+	llmSvc.SetLLMCaller(mock)
+	ws.SetLLMService(llmSvc)
+
+	ws.ReconcileGoalAutoMerge(ctx, task.ID)
+
+	if mock.CallCount() != 0 {
+		t.Fatalf("wrong-target conflict invoked resolver %d times, want 0", mock.CallCount())
+	}
+	if !HasActiveMerge(repoDir) || !ActiveMergeMatchesBranch(repoDir, branch) || GetCurrentBranch(repoDir) != "wrong-target" {
+		t.Fatal("wrong-target conflict was aborted or ownership state changed")
+	}
+	if after := strings.TrimSpace(string(runGitTest(t, repoDir, "rev-parse", "HEAD"))); after != wrongTargetBefore {
+		t.Fatalf("wrong-target recovery committed: before=%s after=%s", wrongTargetBefore, after)
+	}
+	persisted, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.MergeStatus == models.MergeStatusMerged {
+		t.Fatal("wrong-target conflict was marked merged")
+	}
+	if IsBranchMerged(repoDir, branch, target) {
+		t.Fatal("wrong-target conflict changed configured-target ancestry")
+	}
+}
+
+func TestGoalAutoMergeReconciliationResumesOwnedConflictAfterBusyLease(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	repoDir := createTestGitRepo(t)
+	target := GetDefaultBranch(repoDir)
+	writeAndCommitTestFile(t, repoDir, "handoff-conflict.txt", "base\n", "Add handoff conflict base")
+	project := &models.Project{Name: "Conflict handoff project", RepoPath: repoDir}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Conflict handoff", Category: models.CategoryCompleted, Status: models.StatusCompleted, Priority: 2, AutoMergeOnGoalAchieved: true, MergeTargetBranch: target}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	ws := NewWorktreeService(taskRepo, projectRepo, settingsRepo)
+	worktreePath, branch, err := ws.SetupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(worktreePath, "handoff-conflict.txt"), []byte("task\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := CommitWorktreeChanges(worktreePath, "Change handoff conflict on task"); err != nil {
+		t.Fatal(err)
+	}
+	writeAndCommitTestFile(t, repoDir, "handoff-conflict.txt", "target\n", "Change handoff conflict on target")
+	targetBefore := strings.TrimSpace(string(runGitTest(t, repoDir, "rev-parse", target)))
+
+	goalSvc := NewTaskGoalService(repository.NewTaskGoalRepo(db), taskRepo, nil)
+	ws.SetTaskGoalService(goalSvc)
+	goal, err := goalSvc.SetGoal(ctx, task.ID, "resolve durable conflict", GoalOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := goalSvc.MarkAchieved(ctx, task.ID, goal.GoalID, "verified"); err != nil {
+		t.Fatal(err)
+	}
+	trigger := automaticMergeTrigger{goalTriggered: true, goalID: goal.GoalID}
+	result, err := ws.MergeBranchValidated(ctx, task, repoDir, "merge", func() error {
+		return ws.validateAutomaticMerge(ctx, task.ID, project, repoDir, trigger, task)
+	})
+	if err != nil || result == nil || len(result.ConflictFiles) == 0 || !ActiveMergeMatchesBranch(repoDir, branch) {
+		t.Fatalf("creating owned conflict: result=%+v err=%v", result, err)
+	}
+
+	agent := &models.LLMConfig{Name: "Handoff resolver", Provider: models.ProviderTest, Model: "test", IsDefault: true}
+	if err := llmConfigRepo.Create(ctx, agent); err != nil {
+		t.Fatal(err)
+	}
+	llmSvc := NewLLMService(llmConfigRepo, nil, nil, nil, nil, nil)
+	mock := &testutil.MockLLMCaller{Response: "resolved"}
+	mock.OnCall = func(_ context.Context, _ testutil.MockLLMCall) {
+		if err := os.WriteFile(filepath.Join(repoDir, "handoff-conflict.txt"), []byte("resolved\n"), 0o644); err != nil {
+			t.Error(err)
+		}
+	}
+	llmSvc.SetLLMCaller(mock)
+	ws.SetLLMService(llmSvc)
+
+	leaseKey, acquired := beginRepositoryMutation(repoDir)
+	if !acquired {
+		t.Fatal("failed to hold repository mutation lease")
+	}
+	ws.ReconcileGoalAutoMerge(ctx, task.ID)
+	endRepositoryMutation(leaseKey)
+	if mock.CallCount() != 0 || !ActiveMergeMatchesBranch(repoDir, branch) {
+		t.Fatalf("busy reconciliation mutated owned conflict: calls=%d active=%v", mock.CallCount(), ActiveMergeMatchesBranch(repoDir, branch))
+	}
+
+	ws.ReconcileGoalAutoMerge(ctx, task.ID)
+	if mock.CallCount() != 1 {
+		t.Fatalf("reconciled resolver calls = %d, want 1", mock.CallCount())
+	}
+	if HasActiveMerge(repoDir) || len(ActiveConflictFiles(repoDir)) != 0 {
+		t.Fatal("durable reconciliation left active merge state")
+	}
+	persisted, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.MergeStatus != models.MergeStatusMerged || !IsBranchMerged(repoDir, branch, target) {
+		t.Fatalf("durable reconciliation did not merge owned conflict: task=%+v", persisted)
+	}
+	targetAfter := strings.TrimSpace(string(runGitTest(t, repoDir, "rev-parse", target)))
+	if targetAfter == targetBefore {
+		t.Fatal("durable reconciliation did not create integration commit")
+	}
+	ws.ReconcileGoalAutoMerge(ctx, task.ID)
+	if afterReplay := strings.TrimSpace(string(runGitTest(t, repoDir, "rev-parse", target))); afterReplay != targetAfter || mock.CallCount() != 1 {
+		t.Fatalf("replayed reconciliation duplicated integration: before=%s after=%s calls=%d", targetAfter, afterReplay, mock.CallCount())
+	}
+}
+
+func TestGoalAutoMergeConflictRecoveryRevalidatesLifecycleBeforeCommit(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(context.Context, *repository.TaskRepo, *TaskGoalService, *models.Task) error
+	}{
+		{
+			name: "task cancelled",
+			mutate: func(ctx context.Context, taskRepo *repository.TaskRepo, _ *TaskGoalService, task *models.Task) error {
+				return taskRepo.UpdateStatus(ctx, task.ID, models.StatusCancelled)
+			},
+		},
+		{
+			name: "goal auto merge disabled",
+			mutate: func(ctx context.Context, taskRepo *repository.TaskRepo, _ *TaskGoalService, task *models.Task) error {
+				fresh, err := taskRepo.GetByID(ctx, task.ID)
+				if err != nil {
+					return err
+				}
+				fresh.AutoMergeOnGoalAchieved = false
+				return taskRepo.Update(ctx, fresh)
+			},
+		},
+		{
+			name: "goal replaced",
+			mutate: func(ctx context.Context, _ *repository.TaskRepo, goalSvc *TaskGoalService, task *models.Task) error {
+				_, err := goalSvc.SetGoal(ctx, task.ID, "replacement goal", GoalOptions{})
+				return err
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := testutil.NewTestDB(t)
+			ctx := context.Background()
+			taskRepo := repository.NewTaskRepo(db, nil)
+			projectRepo := repository.NewProjectRepo(db)
+			settingsRepo := repository.NewSettingsRepo(db)
+			llmConfigRepo := repository.NewLLMConfigRepo(db)
+			repoDir := createTestGitRepo(t)
+			target := GetDefaultBranch(repoDir)
+			writeAndCommitTestFile(t, repoDir, "goal-conflict.txt", "base\n", "goal conflict base")
+			project := &models.Project{Name: "Goal conflict project " + tt.name, RepoPath: repoDir}
+			if err := projectRepo.Create(ctx, project); err != nil {
+				t.Fatal(err)
+			}
+			task := &models.Task{ProjectID: project.ID, Title: "Goal conflict " + tt.name, Category: models.CategoryCompleted, Status: models.StatusCompleted, Priority: 2, AutoMergeOnGoalAchieved: true, MergeTargetBranch: target}
+			if err := taskRepo.Create(ctx, task); err != nil {
+				t.Fatal(err)
+			}
+			worktreePath, branch, err := NewWorktreeService(taskRepo, projectRepo, settingsRepo).SetupWorktree(ctx, task, repoDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			task.WorktreePath = worktreePath
+			task.WorktreeBranch = branch
+			if err := os.WriteFile(filepath.Join(worktreePath, "goal-conflict.txt"), []byte("task\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := CommitWorktreeChanges(worktreePath, "Change goal conflict on task"); err != nil {
+				t.Fatal(err)
+			}
+			writeAndCommitTestFile(t, repoDir, "goal-conflict.txt", "target\n", "change goal conflict on target")
+			targetBefore := strings.TrimSpace(string(runGitTest(t, repoDir, "rev-parse", target)))
+
+			goalSvc := NewTaskGoalService(repository.NewTaskGoalRepo(db), taskRepo, nil)
+			ws := NewWorktreeService(taskRepo, projectRepo, settingsRepo)
+			ws.SetTaskGoalService(goalSvc)
+			goalSvc.SetGoalAchievedHandler(ws.AutoMergeOnGoalAchieved)
+			agent := &models.LLMConfig{Name: "Goal conflict resolver", Provider: models.ProviderTest, Model: "test", IsDefault: true}
+			if err := llmConfigRepo.Create(ctx, agent); err != nil {
+				t.Fatal(err)
+			}
+			llmSvc := NewLLMService(llmConfigRepo, nil, nil, nil, nil, nil)
+			mock := &testutil.MockLLMCaller{Response: "resolved"}
+			var mutationErr error
+			mock.OnCall = func(callCtx context.Context, _ testutil.MockLLMCall) {
+				runtimeTools := llmcontracts.RuntimeToolsFromContext(callCtx)
+				if runtimeTools == nil || runtimeTools.Executor == nil || !runtimeTools.SkipDefaultTools {
+					mutationErr = fmt.Errorf("automatic conflict call omitted its restricted runtime")
+					return
+				}
+				maliciousInput, _ := json.Marshal(map[string]string{"file_path": ".git/hooks/pre-commit", "content": "#!/bin/sh\nexit 1\n"})
+				if _, handled, isError, execErr := runtimeTools.Executor(callCtx, "write_file", maliciousInput); execErr == nil || !handled || !isError {
+					mutationErr = fmt.Errorf("restricted runtime accepted Git metadata write: handled=%v isError=%v err=%v", handled, isError, execErr)
+					return
+				}
+				if err := os.WriteFile(filepath.Join(repoDir, "goal-conflict.txt"), []byte("resolved\n"), 0o644); err != nil {
+					mutationErr = err
+					return
+				}
+				mutationErr = tt.mutate(ctx, taskRepo, goalSvc, task)
+			}
+			llmSvc.SetLLMCaller(mock)
+			ws.SetLLMService(llmSvc)
+			goal, err := goalSvc.SetGoal(ctx, task.ID, "merge exact achieved goal", GoalOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if _, err := goalSvc.MarkAchieved(ctx, task.ID, goal.GoalID, "verified"); err != nil {
+				t.Fatal(err)
+			}
+			if mutationErr != nil {
+				t.Fatalf("mutation during AI recovery: %v", mutationErr)
+			}
+			if mock.CallCount() != 1 {
+				t.Fatalf("AI call count = %d, want 1", mock.CallCount())
+			}
+			request := mock.LastAgentRequest()
+			if request.AgentDefinition == nil {
+				t.Fatal("automatic conflict recovery did not restrict the model tool set")
+			}
+			if got, want := strings.Join(request.AgentDefinition.Tools, ","), "Read,Write,Edit"; got != want {
+				t.Fatalf("automatic conflict recovery tools = %q, want %q", got, want)
+			}
+			prompt := strings.ToLower(request.Message)
+			if strings.Contains(prompt, "stage the files") || strings.Contains(prompt, "commit with") {
+				t.Fatalf("automatic conflict recovery instructed the model to stage or commit: %q", request.Message)
+			}
+			if HasActiveMerge(repoDir) || len(ActiveConflictFiles(repoDir)) != 0 {
+				t.Fatal("ineligible automatic conflict recovery left active conflict state")
+			}
+			targetAfter := strings.TrimSpace(string(runGitTest(t, repoDir, "rev-parse", target)))
+			if targetAfter != targetBefore || IsBranchMerged(repoDir, branch, target) {
+				t.Fatalf("ineligible recovery integrated task branch: before=%s after=%s", targetBefore, targetAfter)
+			}
+			persisted, err := taskRepo.GetByID(ctx, task.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if persisted.MergeStatus == models.MergeStatusMerged || persisted.MergeStatus == models.MergeStatusConflict {
+				t.Fatalf("ineligible recovery merge status = %q, want accurate non-conflict non-merged state", persisted.MergeStatus)
+			}
+		})
+	}
+}
+
+func TestAutomaticConflictRecoveryRevalidatesAfterApplicationStaging(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	repoDir := createTestGitRepo(t)
+	target := GetDefaultBranch(repoDir)
+	writeAndCommitTestFile(t, repoDir, "staged-conflict.txt", "base\n", "staged conflict base")
+	project := &models.Project{Name: "Post-stage validation project", RepoPath: repoDir}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Post-stage validation", Category: models.CategoryCompleted, Status: models.StatusCompleted, Priority: 2, AutoMergeOnGoalAchieved: true, MergeTargetBranch: target}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	setupSvc := NewWorktreeService(taskRepo, projectRepo, settingsRepo)
+	worktreePath, branch, err := setupSvc.SetupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task.WorktreePath = worktreePath
+	task.WorktreeBranch = branch
+	if err := os.WriteFile(filepath.Join(worktreePath, "staged-conflict.txt"), []byte("task\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := CommitWorktreeChanges(worktreePath, "Change staged conflict on task"); err != nil {
+		t.Fatal(err)
+	}
+	writeAndCommitTestFile(t, repoDir, "staged-conflict.txt", "target\n", "Change staged conflict on target")
+	targetBefore := strings.TrimSpace(string(runGitTest(t, repoDir, "rev-parse", target)))
+
+	goalSvc := NewTaskGoalService(repository.NewTaskGoalRepo(db), taskRepo, nil)
+	ws := NewWorktreeService(taskRepo, projectRepo, settingsRepo)
+	ws.SetTaskGoalService(goalSvc)
+	agent := &models.LLMConfig{Name: "Post-stage resolver", Provider: models.ProviderTest, Model: "test", IsDefault: true}
+	if err := llmConfigRepo.Create(ctx, agent); err != nil {
+		t.Fatal(err)
+	}
+	llmSvc := NewLLMService(llmConfigRepo, nil, nil, nil, nil, nil)
+	mock := &testutil.MockLLMCaller{Response: "resolved"}
+	mock.OnCall = func(_ context.Context, _ testutil.MockLLMCall) {
+		if err := os.WriteFile(filepath.Join(repoDir, "staged-conflict.txt"), []byte("resolved\n"), 0o644); err != nil {
+			t.Error(err)
+		}
+	}
+	llmSvc.SetLLMCaller(mock)
+	ws.SetLLMService(llmSvc)
+	goal, err := goalSvc.SetGoal(ctx, task.ID, "validate after staging", GoalOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := goalSvc.MarkAchieved(ctx, task.ID, goal.GoalID, "verified"); err != nil {
+		t.Fatal(err)
+	}
+	trigger := automaticMergeTrigger{goalTriggered: true, goalID: goal.GoalID}
+	result, err := ws.MergeBranchValidated(ctx, task, repoDir, "merge", func() error {
+		return ws.validateAutomaticMerge(ctx, task.ID, project, repoDir, trigger, task)
+	})
+	if err != nil || result == nil || len(result.ConflictFiles) == 0 {
+		t.Fatalf("creating conflict: result=%+v err=%v", result, err)
+	}
+	validatedAfterStage := false
+	_, err = ws.resolveConflictsWithAIValidated(ctx, task, repoDir,
+		func() error { return ws.validateAutoConflictRecovery(ctx, task, repoDir, project, trigger, true) },
+		func() error {
+			unmerged := strings.TrimSpace(string(runGitTest(t, repoDir, "ls-files", "-u")))
+			staged := strings.TrimSpace(string(runGitTest(t, repoDir, "diff", "--cached", "--name-only")))
+			if unmerged != "" || staged != "staged-conflict.txt" {
+				t.Fatalf("lifecycle validation ran before application staging: unmerged=%q staged=%q", unmerged, staged)
+			}
+			validatedAfterStage = true
+			if err := taskRepo.UpdateStatus(ctx, task.ID, models.StatusCancelled); err != nil {
+				return err
+			}
+			return ws.validateAutoConflictRecovery(ctx, task, repoDir, project, trigger, false)
+		})
+	if !errors.Is(err, errAutomaticMergeNotNeeded) {
+		t.Fatalf("post-stage eligibility error = %v, want automatic merge not needed", err)
+	}
+	if !validatedAfterStage {
+		t.Fatal("post-stage lifecycle validation did not run")
+	}
+	ws.abortAutomaticMergeConflict(ctx, task, repoDir, project, trigger)
+	if HasActiveMerge(repoDir) || len(ActiveConflictFiles(repoDir)) != 0 {
+		t.Fatal("post-stage rejection left active merge state")
+	}
+	if after := strings.TrimSpace(string(runGitTest(t, repoDir, "rev-parse", target))); after != targetBefore {
+		t.Fatalf("post-stage revocation created integration commit: before=%s after=%s", targetBefore, after)
+	}
+}
+
+func TestGoalAutoMergeIntegratesDirtyAlreadyReachableWorktreeBeforeReconciliation(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ws := NewWorktreeService(taskRepo, projectRepo, settingsRepo)
+	goalSvc := NewTaskGoalService(repository.NewTaskGoalRepo(db), taskRepo, nil)
+	ws.SetTaskGoalService(goalSvc)
+	goalSvc.SetGoalAchievedHandler(ws.AutoMergeOnGoalAchieved)
+	repoDir := createTestGitRepo(t)
+	target := GetDefaultBranch(repoDir)
+	project := &models.Project{Name: "Dirty reachable project", RepoPath: repoDir}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Dirty reachable goal", Category: models.CategoryCompleted, Status: models.StatusCompleted, Priority: 2, AutoMergeOnGoalAchieved: true, MergeTargetBranch: target}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	worktreePath, branch, err := ws.SetupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(worktreePath, "dirty-unmerged.txt"), []byte("not integrated\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusPending); err != nil {
+		t.Fatal(err)
+	}
+	if err := settingsRepo.Set(ctx, "worktree_cleanup_policy", "after_merge"); err != nil {
+		t.Fatal(err)
+	}
+	goal, err := goalSvc.SetGoal(ctx, task.ID, "preserve dirty work", GoalOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := goalSvc.MarkAchieved(ctx, task.ID, goal.GoalID, "verified"); err != nil {
+		t.Fatal(err)
+	}
+	persisted, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.MergeStatus != models.MergeStatusMerged {
+		t.Fatalf("dirty already-reachable worktree status = %q, want merged after canonical integration", persisted.MergeStatus)
+	}
+	if persisted.WorktreePath != "" || persisted.WorktreeBranch != "" {
+		t.Fatalf("integrated dirty already-reachable worktree was not cleaned: %+v", persisted)
+	}
+	content, err := os.ReadFile(filepath.Join(repoDir, "dirty-unmerged.txt"))
+	if err != nil || string(content) != "not integrated\n" {
+		t.Fatalf("dirty worktree content was not integrated before cleanup: content=%q err=%v", content, err)
+	}
+	if !IsBranchMerged(repoDir, branch, target) {
+		t.Fatal("dirty already-reachable branch was not merged through canonical flow")
+	}
+}
+
+func TestHandlePostExecutionAutoMergeUsesRunningFinalizationState(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	ws := NewWorktreeService(taskRepo, projectRepo, repository.NewSettingsRepo(db))
+	repoDir := createTestGitRepo(t)
+	target := GetDefaultBranch(repoDir)
+	project := &models.Project{Name: "Completion merge project", RepoPath: repoDir}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Completion merge", Category: models.CategoryActive, Status: models.StatusRunning, Priority: 2, AutoMerge: true, MergeTargetBranch: target}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	worktreePath, branch, err := ws.SetupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task.WorktreePath = worktreePath
+	task.WorktreeBranch = branch
+	if err := os.WriteFile(filepath.Join(worktreePath, "completion-merge.txt"), []byte("merged\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ws.HandlePostExecution(ctx, task, &models.Execution{}, repoDir)
+
+	persisted, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Status != models.StatusRunning {
+		t.Fatalf("HandlePostExecution changed status = %q, want running until caller finalizes", persisted.Status)
+	}
+	if persisted.MergeStatus != models.MergeStatusMerged || !IsBranchMerged(repoDir, branch, target) {
+		t.Fatalf("completion auto-merge did not run before terminal status: task=%+v", persisted)
+	}
+}
+
+func TestGoalAchievedAutoMergeReconcilesAfterBusyPreCompletionEvent(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	ws := NewWorktreeService(taskRepo, projectRepo, repository.NewSettingsRepo(db))
+	goalSvc := NewTaskGoalService(repository.NewTaskGoalRepo(db), taskRepo, nil)
+	ws.SetTaskGoalService(goalSvc)
+	goalSvc.SetGoalAchievedHandler(ws.AutoMergeOnGoalAchieved)
+	repoDir := createTestGitRepo(t)
+	target := GetDefaultBranch(repoDir)
+	project := &models.Project{Name: "Deferred goal merge project", RepoPath: repoDir}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Deferred goal merge", Category: models.CategoryActive, Status: models.StatusRunning, Priority: 2, AutoMergeOnGoalAchieved: true, MergeTargetBranch: target}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	worktreePath, branch, err := ws.SetupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(worktreePath, "deferred-goal.txt"), []byte("achieved\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := CommitWorktreeChanges(worktreePath, "Add deferred goal fixture"); err != nil {
+		t.Fatal(err)
+	}
+	goal, err := goalSvc.SetGoal(ctx, task.ID, "merge after completion", GoalOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaseKey, acquired := beginRepositoryMutation(repoDir)
+	if !acquired {
+		t.Fatal("failed to hold repository mutation lease")
+	}
+	if _, err := goalSvc.MarkAchieved(ctx, task.ID, goal.GoalID, "verified early"); err != nil {
+		endRepositoryMutation(leaseKey)
+		t.Fatal(err)
+	}
+	endRepositoryMutation(leaseKey)
+	if IsBranchMerged(repoDir, branch, target) {
+		t.Fatal("goal branch merged before task completion")
+	}
+	if err := taskRepo.UpdateStatus(ctx, task.ID, models.StatusCompleted); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ws.ReconcileGoalAutoMerges(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	persisted, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.MergeStatus != models.MergeStatusMerged || !IsBranchMerged(repoDir, branch, target) {
+		t.Fatalf("deferred achieved goal was not reconciled: task=%+v", persisted)
+	}
+}
+
+func TestGoalAchievedAutoMergeReconcilesAlreadyMergedStateAndCleanup(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ws := NewWorktreeService(taskRepo, projectRepo, settingsRepo)
+	goalSvc := NewTaskGoalService(repository.NewTaskGoalRepo(db), taskRepo, nil)
+	ws.SetTaskGoalService(goalSvc)
+	goalSvc.SetGoalAchievedHandler(ws.AutoMergeOnGoalAchieved)
+	repoDir := createTestGitRepo(t)
+	target := GetDefaultBranch(repoDir)
+	project := &models.Project{Name: "Already merged goal project", RepoPath: repoDir}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Already merged goal", Category: models.CategoryCompleted, Status: models.StatusCompleted, Priority: 2, AutoMergeOnGoalAchieved: true, MergeTargetBranch: target}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	worktreePath, branch, err := ws.SetupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(worktreePath, "already-merged-goal.txt"), []byte("merged elsewhere\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := CommitWorktreeChanges(worktreePath, "Add already merged fixture"); err != nil {
+		t.Fatal(err)
+	}
+	runGitTest(t, repoDir, "merge", "--no-ff", "-m", "external merge", branch)
+	if err := taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusPending); err != nil {
+		t.Fatal(err)
+	}
+	if err := settingsRepo.Set(ctx, "worktree_cleanup_policy", "after_merge"); err != nil {
+		t.Fatal(err)
+	}
+	goal, err := goalSvc.SetGoal(ctx, task.ID, "recognize merged branch", GoalOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := goalSvc.MarkAchieved(ctx, task.ID, goal.GoalID, "verified"); err != nil {
+		t.Fatal(err)
+	}
+
+	persisted, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.MergeStatus != models.MergeStatusMerged {
+		t.Fatalf("already-merged task status = %q, want merged", persisted.MergeStatus)
+	}
+	if persisted.WorktreePath != "" || persisted.WorktreeBranch != "" {
+		t.Fatalf("verified already-merged worktree was not cleaned up: %+v", persisted)
+	}
+	if _, err := os.Stat(worktreePath); !os.IsNotExist(err) {
+		t.Fatalf("already-merged worktree still exists: %v", err)
 	}
 }
 

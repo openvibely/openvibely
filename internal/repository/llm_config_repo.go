@@ -267,7 +267,7 @@ func (r *LLMConfigRepo) ListCardsPageFiltered(ctx context.Context, limit, offset
 	case "provider":
 		query += ` ORDER BY provider ASC, name ASC, id ASC`
 	default:
-		query += ` ORDER BY is_default DESC, name ASC, id ASC`
+		query += ` ORDER BY name ASC, id ASC`
 	}
 	query += ` LIMIT ? OFFSET ?`
 	args = append(args, limit, offset)

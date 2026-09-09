@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"reflect"
 	"sort"
@@ -623,6 +624,436 @@ func TestTaskRepo_ListByCategory_WithChainConfig(t *testing.T) {
 	}
 	if tasks[0].ChainConfig != `{"enabled":true,"trigger":"on_completion"}` {
 		t.Errorf("expected ChainConfig preserved, got %q", tasks[0].ChainConfig)
+	}
+}
+
+func TestTaskRepo_MoveTasksToActiveLaneRejectsStaleLifecycleState(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	repo := NewTaskRepo(db, nil)
+	first := &models.Task{ProjectID: "default", Title: "Stale first card", Category: models.CategoryBacklog, Status: models.StatusPending}
+	second := &models.Task{ProjectID: "default", Title: "Stale second card", Category: models.CategoryBacklog, Status: models.StatusPending}
+	for _, task := range []*models.Task{first, second} {
+		if err := repo.Create(ctx, task); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := repo.UpdateStatus(ctx, second.ID, models.StatusCompleted); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := repo.MoveTasksToActiveLane(ctx, "default", []ActiveLaneTaskMove{
+		{ID: first.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending},
+		{ID: second.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending},
+	}, models.StatusRunning)
+	if !errors.Is(err, ErrActiveLaneTaskChanged) {
+		t.Fatalf("MoveTasksToActiveLane error = %v, want ErrActiveLaneTaskChanged", err)
+	}
+	loaded, loadErr := repo.GetByID(ctx, first.ID)
+	if loadErr != nil {
+		t.Fatal(loadErr)
+	}
+	if loaded.Category != models.CategoryBacklog || loaded.Status != models.StatusPending {
+		t.Fatalf("first task changed despite stale second task: %#v", loaded)
+	}
+}
+
+func TestTaskRepo_MoveTasksToActiveLaneRejectsGroupedLifecycleOwnedTask(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	repo := NewTaskRepo(db, nil)
+	ordinary := &models.Task{ProjectID: "default", Title: "Ordinary grouped card", Category: models.CategoryBacklog, Status: models.StatusPending}
+	parent := &models.Task{ProjectID: "default", Title: "Swarm parent grouped card", Category: models.CategoryBacklog, Status: models.StatusPending, SwarmRole: models.SwarmRoleParent}
+	for _, task := range []*models.Task{ordinary, parent} {
+		if err := repo.Create(ctx, task); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	_, err := repo.MoveTasksToActiveLane(ctx, "default", []ActiveLaneTaskMove{
+		{ID: ordinary.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending},
+		{ID: parent.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending},
+	}, models.StatusRunning)
+	if !errors.Is(err, ErrActiveLaneLifecycleOwned) {
+		t.Fatalf("MoveTasksToActiveLane error = %v, want ErrActiveLaneLifecycleOwned", err)
+	}
+	loaded, loadErr := repo.GetByID(ctx, ordinary.ID)
+	if loadErr != nil {
+		t.Fatal(loadErr)
+	}
+	if loaded.Category != models.CategoryBacklog || loaded.Status != models.StatusPending {
+		t.Fatalf("ordinary task changed despite lifecycle-owned group member: %#v", loaded)
+	}
+}
+
+func TestTaskRepo_MoveTasksToActiveLaneRunningDestinationNoOp(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	repo := NewTaskRepo(db, nil)
+	task := &models.Task{ProjectID: "default", Title: "Already running destination card", Category: models.CategoryActive, Status: models.StatusRunning, DisplayOrder: 4}
+	if err := repo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := execBoundSQLite(ctx, db, `UPDATE tasks SET display_order = 4 WHERE id = ?`, task.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	moved, err := repo.MoveTasksToActiveLane(ctx, "default", []ActiveLaneTaskMove{{ID: task.ID, ExpectedCategory: models.CategoryActive, ExpectedStatus: models.StatusRunning}}, models.StatusRunning)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(moved) != 0 {
+		t.Fatalf("already-running destination card returned as newly moved: %#v", moved)
+	}
+	var reservations int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM executions WHERE task_id = ? AND status = 'queued' AND is_followup = 0`, task.ID).Scan(&reservations); err != nil {
+		t.Fatal(err)
+	}
+	if reservations != 0 {
+		t.Fatalf("already-running destination card created %d reservations", reservations)
+	}
+	loaded, loadErr := repo.GetByID(ctx, task.ID)
+	if loadErr != nil {
+		t.Fatal(loadErr)
+	}
+	if loaded.DisplayOrder != 4 {
+		t.Fatalf("already-running destination card reordered to %d", loaded.DisplayOrder)
+	}
+}
+
+func TestTaskRepo_MoveTasksToActiveLaneRollsBackLaterFailure(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	repo := NewTaskRepo(db, nil)
+	tail := &models.Task{ProjectID: "default", Title: "Existing active tail", Category: models.CategoryActive, Status: models.StatusPending, DisplayOrder: 7}
+	first := &models.Task{ProjectID: "default", Title: "First batch move", Category: models.CategoryBacklog, Status: models.StatusPending, DisplayOrder: 2}
+	second := &models.Task{ProjectID: "default", Title: "Second batch move", Category: models.CategoryBacklog, Status: models.StatusPending, DisplayOrder: 3}
+	for _, task := range []*models.Task{tail, first, second} {
+		if err := repo.Create(ctx, task); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, item := range []struct {
+		task  *models.Task
+		order int
+	}{{tail, 7}, {first, 2}, {second, 3}} {
+		if _, err := execBoundSQLite(ctx, db, `UPDATE tasks SET display_order = ? WHERE id = ?`, item.order, item.task.ID); err != nil {
+			t.Fatal(err)
+		}
+		item.task.DisplayOrder = item.order
+	}
+	if _, err := execBoundSQLite(ctx, db, `CREATE TRIGGER fail_second_active_lane_move BEFORE UPDATE ON tasks
+		WHEN OLD.id = '`+second.ID+`' AND NEW.category = 'active'
+		BEGIN SELECT RAISE(FAIL, 'forced later move failure'); END`); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := repo.MoveTasksToActiveLane(ctx, "default", []ActiveLaneTaskMove{
+		{ID: first.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending},
+		{ID: second.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending},
+	}, models.StatusRunning)
+	if err == nil || !strings.Contains(err.Error(), "forced later move failure") {
+		t.Fatalf("MoveTasksToActiveLane error = %v", err)
+	}
+	for _, expected := range []*models.Task{first, second} {
+		loaded, loadErr := repo.GetByID(ctx, expected.ID)
+		if loadErr != nil {
+			t.Fatal(loadErr)
+		}
+		if loaded.Category != expected.Category || loaded.Status != expected.Status || loaded.DisplayOrder != expected.DisplayOrder {
+			t.Fatalf("task %s after rollback = category %s status %s order %d, want %s %s %d", expected.ID, loaded.Category, loaded.Status, loaded.DisplayOrder, expected.Category, expected.Status, expected.DisplayOrder)
+		}
+	}
+	var reservations int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM executions WHERE task_id IN (?, ?) AND status = 'queued' AND is_followup = 0`, first.ID, second.ID).Scan(&reservations); err != nil {
+		t.Fatal(err)
+	}
+	if reservations != 0 {
+		t.Fatalf("rollback left %d durable execution reservations", reservations)
+	}
+}
+
+func TestTaskRepo_MoveTasksToActiveLaneAppendsSubmittedOrder(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	repo := NewTaskRepo(db, nil)
+	tail := &models.Task{ProjectID: "default", Title: "Active tail for batch", Category: models.CategoryActive, Status: models.StatusRunning}
+	first := &models.Task{ProjectID: "default", Title: "First submitted batch card", Category: models.CategoryBacklog, Status: models.StatusPending}
+	second := &models.Task{ProjectID: "default", Title: "Second submitted batch card", Category: models.CategoryBacklog, Status: models.StatusPending}
+	for _, task := range []*models.Task{tail, first, second} {
+		if err := repo.Create(ctx, task); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	moved, err := repo.MoveTasksToActiveLane(ctx, "default", []ActiveLaneTaskMove{
+		{ID: second.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending},
+		{ID: first.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending},
+	}, models.StatusRunning)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(moved) != 2 || moved[0].Task.ID != second.ID || moved[1].Task.ID != first.ID {
+		t.Fatalf("moved order = %#v", moved)
+	}
+	if moved[0].Task.Status != models.StatusRunning || moved[0].Task.DisplayOrder <= tail.DisplayOrder || moved[1].Task.DisplayOrder != moved[0].Task.DisplayOrder+1 {
+		t.Fatalf("moved state = %#v", moved)
+	}
+	for _, admission := range moved {
+		if admission.ExecutionID == "" {
+			t.Fatalf("running admission has no durable execution owner: %#v", admission)
+		}
+		var status models.ExecutionStatus
+		var followup bool
+		if err := db.QueryRowContext(ctx, `SELECT status, is_followup FROM executions WHERE id = ? AND task_id = ?`, admission.ExecutionID, admission.Task.ID).Scan(&status, &followup); err != nil {
+			t.Fatal(err)
+		}
+		if status != models.ExecQueued || followup {
+			t.Fatalf("reservation %s = status %s followup %v", admission.ExecutionID, status, followup)
+		}
+	}
+}
+
+func TestTaskRepo_MoveTasksToActiveLaneReservationOwnsLaterFollowup(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	taskRepo := NewTaskRepo(db, nil)
+	execRepo := NewExecutionRepo(db)
+	task := &models.Task{ProjectID: "default", Title: "Reserved before later followup", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "original"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	admissions, err := taskRepo.MoveTasksToActiveLane(ctx, "default", []ActiveLaneTaskMove{{ID: task.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending}}, models.StatusRunning)
+	if err != nil || len(admissions) != 1 || admissions[0].ExecutionID == "" {
+		t.Fatalf("reserved lane move = %#v, %v", admissions, err)
+	}
+	followup := &models.Execution{TaskID: task.ID, Status: models.ExecQueued, PromptSent: "later", IsFollowup: true}
+	input := &models.ThreadInput{Content: "later"}
+	started, err := execRepo.CreateDirectTaskFollowupOrQueue(ctx, followup, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if started {
+		t.Fatal("later followup started ahead of durable lane reservation")
+	}
+	pending, err := NewThreadInputRepo(db).FindOldestQueuedForTask(ctx, task.ID)
+	if err != nil || pending == nil || pending.Content != "later" {
+		t.Fatalf("queued later followup = %#v, %v", pending, err)
+	}
+	claim, admitted, err := taskRepo.ClaimReservedTaskForDispatch(ctx, task.ID, admissions[0].ExecutionID)
+	if err != nil || !admitted || claim == nil {
+		t.Fatalf("claim with later followup = %#v admitted=%v err=%v", claim, admitted, err)
+	}
+	var reservedStatus models.ExecutionStatus
+	if err := db.QueryRowContext(ctx, `SELECT status FROM executions WHERE id = ?`, admissions[0].ExecutionID).Scan(&reservedStatus); err != nil {
+		t.Fatal(err)
+	}
+	if reservedStatus != models.ExecRunning {
+		t.Fatalf("reserved execution status = %s, want running", reservedStatus)
+	}
+	pending, err = NewThreadInputRepo(db).FindOldestQueuedForTask(ctx, task.ID)
+	if err != nil || pending == nil {
+		t.Fatalf("later followup lost during reserved claim: %#v, %v", pending, err)
+	}
+}
+
+func TestTaskRepo_ClaimReservedTaskRefreshesAuthoritativeExecutionMetadata(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	taskRepo := NewTaskRepo(db, nil)
+	modelRepo := NewLLMConfigRepo(db)
+	firstModel := &models.LLMConfig{Name: "Reserved original model", Provider: models.ProviderTest, Model: "original-model"}
+	secondModel := &models.LLMConfig{Name: "Reserved current model", Provider: models.ProviderTest, Model: "current-model"}
+	if err := modelRepo.Create(ctx, firstModel); err != nil {
+		t.Fatal(err)
+	}
+	if err := modelRepo.Create(ctx, secondModel); err != nil {
+		t.Fatal(err)
+	}
+	task := &models.Task{ProjectID: "default", Title: "Reserved metadata refresh", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "original prompt", AgentID: &firstModel.ID}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	admissions, err := taskRepo.MoveTasksToActiveLane(ctx, "default", []ActiveLaneTaskMove{{ID: task.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending}}, models.StatusRunning)
+	if err != nil || len(admissions) != 1 {
+		t.Fatalf("lane reservation = %#v, %v", admissions, err)
+	}
+	current, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current.Prompt = "current prompt"
+	current.AgentID = &secondModel.ID
+	if err := taskRepo.Update(ctx, current); err != nil {
+		t.Fatal(err)
+	}
+	claim, admitted, err := taskRepo.ClaimReservedTaskForDispatch(ctx, task.ID, admissions[0].ExecutionID)
+	if err != nil || !admitted || claim == nil {
+		t.Fatalf("claim = %#v admitted=%v err=%v", claim, admitted, err)
+	}
+	var prompt, agentID string
+	if err := db.QueryRowContext(ctx, `SELECT prompt_sent, COALESCE(agent_config_id, '') FROM executions WHERE id = ?`, admissions[0].ExecutionID).Scan(&prompt, &agentID); err != nil {
+		t.Fatal(err)
+	}
+	if prompt != current.Prompt || agentID != secondModel.ID {
+		t.Fatalf("reserved execution metadata = prompt %q agent %q, want %q %q", prompt, agentID, current.Prompt, secondModel.ID)
+	}
+}
+
+func TestTaskRepo_ResetOrphanedRunningPreservesDurableActiveLaneReservation(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	repo := NewTaskRepo(db, nil)
+	task := &models.Task{ProjectID: "default", Title: "Reserved across restart", Category: models.CategoryBacklog, Status: models.StatusPending}
+	if err := repo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	admissions, err := repo.MoveTasksToActiveLane(ctx, "default", []ActiveLaneTaskMove{{ID: task.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending}}, models.StatusRunning)
+	if err != nil || len(admissions) != 1 {
+		t.Fatalf("lane reservation = %#v, %v", admissions, err)
+	}
+	reset, err := repo.ResetOrphanedRunning(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reset != 0 {
+		t.Fatalf("reset %d durably reserved tasks", reset)
+	}
+	loaded, err := repo.GetByID(ctx, task.ID)
+	if err != nil || loaded.Status != models.StatusRunning {
+		t.Fatalf("reserved task after restart reset = %#v, %v", loaded, err)
+	}
+	queued, err := repo.ListReservedActiveLaneAdmissions(ctx)
+	if err != nil || len(queued) != 1 || queued[0].ExecutionID != admissions[0].ExecutionID {
+		t.Fatalf("restart admissions = %#v, %v", queued, err)
+	}
+}
+
+func TestTaskRepo_UpdateStatusAppendsActiveTaskToDestinationLane(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewTaskRepo(db, nil)
+	ctx := context.Background()
+
+	firstRunning := &models.Task{ProjectID: "default", Title: "First Running", Category: models.CategoryActive, Status: models.StatusRunning, Prompt: "p"}
+	moving := &models.Task{ProjectID: "default", Title: "Moving", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "p"}
+	lastRunning := &models.Task{ProjectID: "default", Title: "Last Running", Category: models.CategoryActive, Status: models.StatusRunning, Prompt: "p"}
+	for _, task := range []*models.Task{firstRunning, moving, lastRunning} {
+		if err := repo.Create(ctx, task); err != nil {
+			t.Fatalf("Create(%s): %v", task.Title, err)
+		}
+	}
+
+	if err := repo.UpdateStatus(ctx, moving.ID, models.StatusRunning); err != nil {
+		t.Fatalf("UpdateStatus: %v", err)
+	}
+
+	tasks, err := repo.ListByProjectWithCategorySorts(ctx, "default", string(models.CategoryActive), "", "")
+	if err != nil {
+		t.Fatalf("ListByProjectWithCategorySorts: %v", err)
+	}
+	var running []string
+	for _, task := range tasks {
+		if task.Status == models.StatusRunning {
+			running = append(running, task.ID)
+		}
+	}
+	want := []string{firstRunning.ID, lastRunning.ID, moving.ID}
+	if !reflect.DeepEqual(running, want) {
+		t.Fatalf("running lane order = %v, want %v", running, want)
+	}
+}
+
+func TestTaskRepo_UpdateCategoryAppendsTaskToActiveOrder(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewTaskRepo(db, nil)
+	ctx := context.Background()
+
+	first := &models.Task{ProjectID: "default", Title: "First Active", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "p"}
+	moving := &models.Task{ProjectID: "default", Title: "Moving From Backlog", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "p"}
+	last := &models.Task{ProjectID: "default", Title: "Last Active", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "p"}
+	for _, task := range []*models.Task{first, moving, last} {
+		if err := repo.Create(ctx, task); err != nil {
+			t.Fatalf("Create(%s): %v", task.Title, err)
+		}
+	}
+
+	if err := repo.UpdateCategory(ctx, moving.ID, models.CategoryActive); err != nil {
+		t.Fatalf("UpdateCategory: %v", err)
+	}
+
+	tasks, err := repo.ListByProjectWithCategorySorts(ctx, "default", string(models.CategoryActive), "", "")
+	if err != nil {
+		t.Fatalf("ListByProjectWithCategorySorts: %v", err)
+	}
+	got := make([]string, 0, len(tasks))
+	for _, task := range tasks {
+		got = append(got, task.ID)
+	}
+	want := []string{first.ID, last.ID, moving.ID}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("active order = %v, want %v", got, want)
+	}
+}
+
+func TestTaskRepo_ClaimTaskAppendsToActiveRunningLane(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewTaskRepo(db, nil)
+	ctx := context.Background()
+
+	moving := &models.Task{ProjectID: "default", Title: "Claim Moving", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "p"}
+	running := &models.Task{ProjectID: "default", Title: "Claim Existing Running", Category: models.CategoryActive, Status: models.StatusRunning, Prompt: "p"}
+	for _, task := range []*models.Task{moving, running} {
+		if err := repo.Create(ctx, task); err != nil {
+			t.Fatalf("Create(%s): %v", task.Title, err)
+		}
+	}
+
+	claimed, err := repo.ClaimTask(ctx, moving.ID)
+	if err != nil {
+		t.Fatalf("ClaimTask: %v", err)
+	}
+	if !claimed {
+		t.Fatal("ClaimTask returned false")
+	}
+	loaded, err := repo.GetByID(ctx, moving.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if loaded.DisplayOrder <= running.DisplayOrder {
+		t.Fatalf("claimed display order = %d, want greater than existing running order %d", loaded.DisplayOrder, running.DisplayOrder)
+	}
+}
+
+func TestTaskRepo_RestoreBoardStatePreservesRollbackPosition(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewTaskRepo(db, nil)
+	ctx := context.Background()
+
+	first := &models.Task{ProjectID: "default", Title: "Rollback First", Category: models.CategoryBacklog, Status: models.StatusFailed, Prompt: "p"}
+	moving := &models.Task{ProjectID: "default", Title: "Rollback Moving", Category: models.CategoryBacklog, Status: models.StatusFailed, Prompt: "p"}
+	last := &models.Task{ProjectID: "default", Title: "Rollback Last", Category: models.CategoryBacklog, Status: models.StatusFailed, Prompt: "p"}
+	for _, task := range []*models.Task{first, moving, last} {
+		if err := repo.Create(ctx, task); err != nil {
+			t.Fatalf("Create(%s): %v", task.Title, err)
+		}
+	}
+	original := *moving
+	if err := repo.UpdateCategory(ctx, moving.ID, models.CategoryActive); err != nil {
+		t.Fatalf("UpdateCategory: %v", err)
+	}
+	if err := repo.UpdateStatus(ctx, moving.ID, models.StatusPending); err != nil {
+		t.Fatalf("UpdateStatus: %v", err)
+	}
+	if err := repo.RestoreBoardState(ctx, original); err != nil {
+		t.Fatalf("RestoreBoardState: %v", err)
+	}
+
+	loaded, err := repo.GetByID(ctx, moving.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if loaded.Category != original.Category || loaded.Status != original.Status || loaded.DisplayOrder != original.DisplayOrder {
+		t.Fatalf("restored board state = category %s status %s order %d, want category %s status %s order %d", loaded.Category, loaded.Status, loaded.DisplayOrder, original.Category, original.Status, original.DisplayOrder)
 	}
 }
 
@@ -1323,6 +1754,11 @@ func TestTaskRepo_ActivateAllBacklog(t *testing.T) {
 		t.Fatalf("failed to create project2: %v", err)
 	}
 
+	activeTail := &models.Task{ProjectID: project1.ID, Title: "Existing Active Tail", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "p"}
+	if err := repo.Create(ctx, activeTail); err != nil {
+		t.Fatalf("failed to create active tail: %v", err)
+	}
+
 	// Create backlog tasks for project1
 	backlogTask1 := &models.Task{
 		ProjectID: project1.ID,
@@ -1367,30 +1803,40 @@ func TestTaskRepo_ActivateAllBacklog(t *testing.T) {
 	}
 
 	// Verify backlog tasks from project1 are now active with pending status
-	task, _ := repo.GetByID(ctx, backlogTask1.ID)
-	if task == nil {
+	loadedTask1, _ := repo.GetByID(ctx, backlogTask1.ID)
+	if loadedTask1 == nil {
 		t.Fatal("expected backlog task 1 from project1 to exist")
 	}
-	if task.Category != models.CategoryActive {
-		t.Errorf("expected task 1 category to be active, got %s", task.Category)
+	if loadedTask1.Category != models.CategoryActive {
+		t.Errorf("expected task 1 category to be active, got %s", loadedTask1.Category)
 	}
-	if task.Status != models.StatusPending {
-		t.Errorf("expected task 1 status to be pending, got %s", task.Status)
+	if loadedTask1.Status != models.StatusPending {
+		t.Errorf("expected task 1 status to be pending, got %s", loadedTask1.Status)
 	}
 
-	task, _ = repo.GetByID(ctx, backlogTask2.ID)
-	if task == nil {
+	loadedTask2, _ := repo.GetByID(ctx, backlogTask2.ID)
+	if loadedTask2 == nil {
 		t.Fatal("expected backlog task 2 from project1 to exist")
 	}
-	if task.Category != models.CategoryActive {
-		t.Errorf("expected task 2 category to be active, got %s", task.Category)
+	if loadedTask2.Category != models.CategoryActive {
+		t.Errorf("expected task 2 category to be active, got %s", loadedTask2.Category)
 	}
-	if task.Status != models.StatusPending {
-		t.Errorf("expected task 2 status to be pending (reset from completed), got %s", task.Status)
+	if loadedTask2.Status != models.StatusPending {
+		t.Errorf("expected task 2 status to be pending (reset from completed), got %s", loadedTask2.Status)
+	}
+	if loadedTask1.DisplayOrder <= activeTail.DisplayOrder || loadedTask2.DisplayOrder <= loadedTask1.DisplayOrder {
+		t.Fatalf("activated order = tail:%d first:%d second:%d, want existing tail then backlog source order", activeTail.DisplayOrder, loadedTask1.DisplayOrder, loadedTask2.DisplayOrder)
+	}
+	ordered, err := repo.ListByProject(ctx, project1.ID, string(models.CategoryActive))
+	if err != nil {
+		t.Fatalf("list active tasks after activation: %v", err)
+	}
+	if len(ordered) != 3 || ordered[0].ID != activeTail.ID || ordered[1].ID != backlogTask1.ID || ordered[2].ID != backlogTask2.ID {
+		t.Fatalf("active order after reload = %#v, want existing tail then activated tasks", ordered)
 	}
 
 	// Verify backlog task from project2 is still backlog
-	task, _ = repo.GetByID(ctx, backlogTask3.ID)
+	task, _ := repo.GetByID(ctx, backlogTask3.ID)
 	if task == nil {
 		t.Fatal("expected backlog task from project2 to exist")
 	}
@@ -2501,28 +2947,28 @@ func TestTaskRepo_ListBoardByProjectWithCategorySorts_PreservesOrderingAndMetada
 
 	tasks := []*models.Task{
 		{
-			ProjectID:         "default",
-			Title:             "Zulu backlog",
-			Category:          models.CategoryBacklog,
-			Status:            models.StatusPending,
-			Prompt:            strings.Repeat("z", BoardPromptPreviewCodePoints+50),
-			Priority:          4,
-			Tag:               models.TagBug,
-			ChainConfig:       `{"enabled":true,"trigger":"on_completion"}`,
-			SwarmRole:         models.SwarmRoleParent,
-			SwarmStatus:       "planning",
-			SwarmConfig:       `{"mode":"autonomous","max_workers":2}`,
-			SwarmSequence:     3,
-			WorktreePath:      "/tmp/worktree",
-			WorktreeBranch:    "task/branch",
-			AutoMerge:         true,
-			MergeTargetBranch: "main",
-			MergeStatus:       models.MergeStatusPending,
-			BaseBranch:        "main",
-			BaseCommitSHA:     strings.Repeat("a", 40),
-			LineageDepth:      2,
-			CreatedVia:        models.TaskOriginSlack,
-			TelegramChatID:    42,
+			ProjectID:               "default",
+			Title:                   "Zulu backlog",
+			Category:                models.CategoryBacklog,
+			Status:                  models.StatusPending,
+			Prompt:                  strings.Repeat("z", BoardPromptPreviewCodePoints+50),
+			Priority:                4,
+			Tag:                     models.TagBug,
+			ChainConfig:             `{"enabled":true,"trigger":"on_completion"}`,
+			SwarmRole:               models.SwarmRoleParent,
+			SwarmStatus:             "planning",
+			SwarmConfig:             `{"mode":"autonomous","max_workers":2}`,
+			SwarmSequence:           3,
+			WorktreePath:            "/tmp/worktree",
+			WorktreeBranch:          "task/branch",
+			AutoMerge:               true,
+			AutoMergeOnGoalAchieved: true,
+			MergeTargetBranch:       "main", MergeStatus: models.MergeStatusPending,
+			BaseBranch:     "main",
+			BaseCommitSHA:  strings.Repeat("a", 40),
+			LineageDepth:   2,
+			CreatedVia:     models.TaskOriginSlack,
+			TelegramChatID: 42,
 		},
 		{ProjectID: "default", Title: "Alpha backlog", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "short backlog", Priority: 1},
 		{ProjectID: "default", Title: "Zulu completed", Category: models.CategoryCompleted, Status: models.StatusCompleted, Prompt: "short completed", Priority: 2},

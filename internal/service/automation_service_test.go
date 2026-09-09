@@ -34,6 +34,55 @@ func (r automationEnterpriseRepoResolver) GlobalAPIEndpoint(context.Context) str
 	return r.endpoint
 }
 
+func TestAutomationGraphServiceResolveAutomationCardPreservesChatTargetContract(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	project := automationTestProject(t, projectRepo, "Automation card resolution")
+	foreign := automationTestProject(t, projectRepo, "Foreign Automation card resolution")
+	graphSvc := NewAutomationGraphService(repository.NewAutomationRepo(db))
+
+	insertAutomation := func(projectID, automationID, name string) {
+		t.Helper()
+		versionID := automationID + "-version"
+		_, err := db.ExecContext(ctx, `INSERT INTO automations
+			(id, project_id, stable_key, name, description, automation_type, lifecycle_state)
+			VALUES (?, ?, ?, ?, '', 'custom', 'active')`, automationID, projectID, "chat/"+automationID, name)
+		require.NoError(t, err)
+		_, err = db.ExecContext(ctx, `INSERT INTO automation_versions
+			(id, project_id, automation_id, version, state, source, adapter_key, published_at)
+			VALUES (?, ?, ?, 1, 'published', 'manual', 'custom', CURRENT_TIMESTAMP)`, versionID, projectID, automationID)
+		require.NoError(t, err)
+		_, err = db.ExecContext(ctx, `UPDATE automations SET published_version_id = ? WHERE id = ? AND project_id = ?`, versionID, automationID, projectID)
+		require.NoError(t, err)
+	}
+
+	insertAutomation(project.ID, "primary-id", "Nightly Review")
+	insertAutomation(project.ID, "duplicate-z", "Duplicate Review")
+	insertAutomation(project.ID, "duplicate-a", "Duplicate Review")
+	insertAutomation(foreign.ID, "foreign-id", "Foreign Review")
+
+	card, err := graphSvc.ResolveAutomationCard(ctx, project.ID, " primary-id ", " nightly review ")
+	require.NoError(t, err)
+	require.Equal(t, "primary-id", card.Automation.ID)
+
+	card, err = graphSvc.ResolveAutomationCard(ctx, project.ID, "", " NIGHTLY REVIEW ")
+	require.NoError(t, err)
+	require.Equal(t, "primary-id", card.Automation.ID)
+
+	_, err = graphSvc.ResolveAutomationCard(ctx, project.ID, "", "")
+	require.EqualError(t, err, "automation_id or name is required")
+
+	_, err = graphSvc.ResolveAutomationCard(ctx, project.ID, "primary-id", "Other Review")
+	require.EqualError(t, err, `automation_id "primary-id" is named "Nightly Review", not "Other Review"`)
+
+	_, err = graphSvc.ResolveAutomationCard(ctx, project.ID, "foreign-id", "")
+	require.EqualError(t, err, `automation "foreign-id" not found in current project`)
+
+	_, err = graphSvc.ResolveAutomationCard(ctx, project.ID, "", "duplicate review")
+	require.EqualError(t, err, `automation name "duplicate review" is ambiguous in current project; use automation_id (duplicate-a, duplicate-z)`)
+}
+
 func TestCurrentAutomationTemplateRevisionTracksMaintainedTemplateChanges(t *testing.T) {
 	require.Equal(t, 11, CurrentAutomationTemplateRevision(AutomationAdapterNativeSDLC))
 	require.Equal(t, 15, CurrentAutomationTemplateRevision(AutomationAdapterGitHubSDLC))

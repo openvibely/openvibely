@@ -207,6 +207,7 @@ func (h *Handler) handleChannels(c echo.Context) error {
 	channelTypeFilter := allowlistedQuery(c, "type", "", "github", "slack", "telegram", "discord", "x", "email", "webhook", "outbound_targets")
 	connectionStateFilter := allowlistedQuery(c, "connection_state", "", "connected", "configured", "disconnected")
 	webhookEnabledFilter := allowlistedQuery(c, "webhook_enabled", "", "true", "false")
+	channelSort := allowlistedQuery(c, "sort", "name_asc", "name_asc", "name_desc")
 	resolvedProjectID := projectID
 	if id, err := h.getCurrentProjectID(c); err == nil && id != "" {
 		resolvedProjectID = id
@@ -480,7 +481,7 @@ func (h *Handler) handleChannels(c echo.Context) error {
 			enabled = connectionEnabled
 		}
 		if !conflictingEnabledFilters && (channelType == "" || channelType == "webhook") {
-			pageItems, err := h.webhookRepo.ListCardsByProjectPageFiltered(ctx, resolvedProjectID, page.PageSize+1, page.Offset, repository.WebhookCardFilter{Search: page.Search, Enabled: enabled})
+			pageItems, err := h.webhookRepo.ListCardsByProjectPageFiltered(ctx, resolvedProjectID, page.PageSize+1, page.Offset, repository.WebhookCardFilter{Search: page.Search, Enabled: enabled, Sort: channelSort})
 			if err != nil {
 				return err
 			}
@@ -556,6 +557,7 @@ func (h *Handler) handleChannels(c echo.Context) error {
 		ChannelTypeFilter:            channelTypeFilter,
 		ConnectionStateFilter:        connectionStateFilter,
 		WebhookEnabledFilter:         webhookEnabledFilter,
+		Sort:                         channelSort,
 		WebhooksHasMore:              webhooksHasMore,
 		AgentPickerOptions:           agentPickerOptions,
 		WebhookAgents:                webhookAgents,

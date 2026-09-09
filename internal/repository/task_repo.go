@@ -15,7 +15,7 @@ import (
 
 var ErrDuplicateTask = errors.New("task with this name already exists in this project")
 
-const taskSelectColumns = `id, project_id, title, category, priority, status, prompt, agent_id, agent_definition_id, tag, display_order, parent_task_id, chain_config, swarm_role, swarm_status, swarm_config, swarm_sequence, worktree_path, worktree_branch, auto_merge, merge_target_branch, merge_status, base_branch, base_commit_sha, lineage_depth, created_via, telegram_chat_id, created_at, updated_at, completed_at`
+const taskSelectColumns = `id, project_id, title, category, priority, status, prompt, agent_id, agent_definition_id, tag, display_order, parent_task_id, chain_config, swarm_role, swarm_status, swarm_config, swarm_sequence, worktree_path, worktree_branch, auto_merge, auto_merge_on_goal_achieved, merge_target_branch, merge_status, base_branch, base_commit_sha, lineage_depth, created_via, telegram_chat_id, created_at, updated_at, completed_at`
 
 // activeTaskAdmissionSelectColumns contains only the task fields needed by the
 // scheduler to order, log, route, and enqueue active pending work. Full task
@@ -24,9 +24,9 @@ const activeTaskAdmissionSelectColumns = `id, project_id, title, category, prior
 
 const taskThreadRenderMetadataColumns = `id, project_id, category, status, agent_id, agent_definition_id`
 
-const worktreeCleanupTaskSelectColumns = `id, project_id, status, worktree_path, worktree_branch, merge_target_branch, merge_status`
+const worktreeCleanupTaskSelectColumns = `id, project_id, status, worktree_path, worktree_branch, auto_merge_on_goal_achieved, merge_target_branch, merge_status`
 
-const swarmChildTaskSelectColumns = `id, project_id, title, category, priority, status, agent_id, agent_definition_id, tag, display_order, parent_task_id, swarm_role, swarm_status, swarm_config, swarm_sequence, worktree_path, worktree_branch, auto_merge, merge_target_branch, merge_status, base_branch, base_commit_sha, lineage_depth, created_via, telegram_chat_id, created_at, updated_at, completed_at`
+const swarmChildTaskSelectColumns = `id, project_id, title, category, priority, status, agent_id, agent_definition_id, tag, display_order, parent_task_id, swarm_role, swarm_status, swarm_config, swarm_sequence, worktree_path, worktree_branch, auto_merge, auto_merge_on_goal_achieved, merge_target_branch, merge_status, base_branch, base_commit_sha, lineage_depth, created_via, telegram_chat_id, created_at, updated_at, completed_at`
 
 const scheduleCalendarTaskSelectColumns = `t.id, t.project_id, t.title, t.category, t.status`
 
@@ -42,7 +42,7 @@ const scheduleCalendarQuery = `SELECT ` + scheduleCalendarTaskSelectColumns + `,
 			AND automation_node.project_id = automation_owner.project_id
 		 WHERE t.project_id = ? AND (t.category = 'scheduled' OR s.id IS NOT NULL)`
 
-const taskSelectColumnsWithGoal = `t.id, t.project_id, t.title, t.category, t.priority, t.status, t.prompt, t.agent_id, t.agent_definition_id, t.tag, t.display_order, t.parent_task_id, t.chain_config, t.swarm_role, t.swarm_status, t.swarm_config, t.swarm_sequence, t.worktree_path, t.worktree_branch, t.auto_merge, t.merge_target_branch, t.merge_status, t.base_branch, t.base_commit_sha, t.lineage_depth, t.created_via, t.telegram_chat_id,
+const taskSelectColumnsWithGoal = `t.id, t.project_id, t.title, t.category, t.priority, t.status, t.prompt, t.agent_id, t.agent_definition_id, t.tag, t.display_order, t.parent_task_id, t.chain_config, t.swarm_role, t.swarm_status, t.swarm_config, t.swarm_sequence, t.worktree_path, t.worktree_branch, t.auto_merge, t.auto_merge_on_goal_achieved, t.merge_target_branch, t.merge_status, t.base_branch, t.base_commit_sha, t.lineage_depth, t.created_via, t.telegram_chat_id,
 				EXISTS(SELECT 1 FROM task_goals g WHERE g.task_id = t.id AND g.status != 'cleared') AS has_goal,
 				EXISTS(SELECT 1 FROM task_goals g WHERE g.task_id = t.id AND g.status = 'achieved') AS goal_met,
 				0 AS automation_capacity_queued,
@@ -50,7 +50,7 @@ const taskSelectColumnsWithGoal = `t.id, t.project_id, t.title, t.category, t.pr
 
 const BoardPromptPreviewCodePoints = 300
 
-var taskBoardSelectColumnsWithGoal = fmt.Sprintf(`t.id, t.project_id, t.title, t.category, t.priority, t.status, substr(t.prompt, 1, %d), t.agent_id, t.agent_definition_id, t.tag, t.display_order, t.parent_task_id, t.chain_config, t.swarm_role, t.swarm_status, t.swarm_config, t.swarm_sequence, t.worktree_path, t.worktree_branch, t.auto_merge, t.merge_target_branch, t.merge_status, t.base_branch, t.base_commit_sha, t.lineage_depth, t.created_via, t.telegram_chat_id,
+var taskBoardSelectColumnsWithGoal = fmt.Sprintf(`t.id, t.project_id, t.title, t.category, t.priority, t.status, substr(t.prompt, 1, %d), t.agent_id, t.agent_definition_id, t.tag, t.display_order, t.parent_task_id, t.chain_config, t.swarm_role, t.swarm_status, t.swarm_config, t.swarm_sequence, t.worktree_path, t.worktree_branch, t.auto_merge, t.auto_merge_on_goal_achieved, t.merge_target_branch, t.merge_status, t.base_branch, t.base_commit_sha, t.lineage_depth, t.created_via, t.telegram_chat_id,
 				EXISTS(SELECT 1 FROM task_goals g WHERE g.task_id = t.id AND g.status != 'cleared') AS has_goal,
 				EXISTS(SELECT 1 FROM task_goals g WHERE g.task_id = t.id AND g.status = 'achieved') AS goal_met,
 				EXISTS(SELECT 1 FROM automation_dispatch_outbox d
@@ -193,7 +193,7 @@ func (r *TaskRepo) listByProjectWithCategorySorts(ctx context.Context, selectCol
 	for rows.Next() {
 		var t models.Task
 		if err := rows.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Category,
-			&t.Priority, &t.Status, &t.Prompt, &t.AgentID, &t.AgentDefinitionID, &t.Tag, &t.DisplayOrder, &t.ParentTaskID, &t.ChainConfig, &t.SwarmRole, &t.SwarmStatus, &t.SwarmConfig, &t.SwarmSequence, &t.WorktreePath, &t.WorktreeBranch, &t.AutoMerge, &t.MergeTargetBranch, &t.MergeStatus, &t.BaseBranch, &t.BaseCommitSHA, &t.LineageDepth, &t.CreatedVia, &t.TelegramChatID, &t.HasGoal, &t.GoalMet, &t.AutomationCapacityQueued, &t.CreatedAt, &t.UpdatedAt, &t.CompletedAt); err != nil {
+			&t.Priority, &t.Status, &t.Prompt, &t.AgentID, &t.AgentDefinitionID, &t.Tag, &t.DisplayOrder, &t.ParentTaskID, &t.ChainConfig, &t.SwarmRole, &t.SwarmStatus, &t.SwarmConfig, &t.SwarmSequence, &t.WorktreePath, &t.WorktreeBranch, &t.AutoMerge, &t.AutoMergeOnGoalAchieved, &t.MergeTargetBranch, &t.MergeStatus, &t.BaseBranch, &t.BaseCommitSHA, &t.LineageDepth, &t.CreatedVia, &t.TelegramChatID, &t.HasGoal, &t.GoalMet, &t.AutomationCapacityQueued, &t.CreatedAt, &t.UpdatedAt, &t.CompletedAt); err != nil {
 			return nil, fmt.Errorf("scanning task: %w", err)
 		}
 		tasks = append(tasks, t)
@@ -420,7 +420,7 @@ func getTaskWithExecutor(ctx context.Context, exec sqlExecutor, query string, ar
 	var t models.Task
 	err := exec.QueryRowContext(ctx, query, args...).
 		Scan(&t.ID, &t.ProjectID, &t.Title, &t.Category,
-			&t.Priority, &t.Status, &t.Prompt, &t.AgentID, &t.AgentDefinitionID, &t.Tag, &t.DisplayOrder, &t.ParentTaskID, &t.ChainConfig, &t.SwarmRole, &t.SwarmStatus, &t.SwarmConfig, &t.SwarmSequence, &t.WorktreePath, &t.WorktreeBranch, &t.AutoMerge, &t.MergeTargetBranch, &t.MergeStatus, &t.BaseBranch, &t.BaseCommitSHA, &t.LineageDepth, &t.CreatedVia, &t.TelegramChatID, &t.CreatedAt, &t.UpdatedAt, &t.CompletedAt)
+			&t.Priority, &t.Status, &t.Prompt, &t.AgentID, &t.AgentDefinitionID, &t.Tag, &t.DisplayOrder, &t.ParentTaskID, &t.ChainConfig, &t.SwarmRole, &t.SwarmStatus, &t.SwarmConfig, &t.SwarmSequence, &t.WorktreePath, &t.WorktreeBranch, &t.AutoMerge, &t.AutoMergeOnGoalAchieved, &t.MergeTargetBranch, &t.MergeStatus, &t.BaseBranch, &t.BaseCommitSHA, &t.LineageDepth, &t.CreatedVia, &t.TelegramChatID, &t.CreatedAt, &t.UpdatedAt, &t.CompletedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -537,11 +537,15 @@ func (r *TaskRepo) createWithExecutor(ctx context.Context, exec sqlExecutor, t *
 	if t.AutoMerge {
 		autoMerge = 1
 	}
+	autoMergeOnGoalAchieved := 0
+	if t.AutoMergeOnGoalAchieved {
+		autoMergeOnGoalAchieved = 1
+	}
 	err = exec.QueryRowContext(ctx,
-		`INSERT INTO tasks (id, project_id, title, category, priority, status, prompt, agent_id, agent_definition_id, tag, display_order, parent_task_id, chain_config, swarm_role, swarm_status, swarm_config, swarm_sequence, worktree_path, worktree_branch, auto_merge, merge_target_branch, merge_status, base_branch, base_commit_sha, lineage_depth, created_via, telegram_chat_id)
-			 VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`INSERT INTO tasks (id, project_id, title, category, priority, status, prompt, agent_id, agent_definition_id, tag, display_order, parent_task_id, chain_config, swarm_role, swarm_status, swarm_config, swarm_sequence, worktree_path, worktree_branch, auto_merge, auto_merge_on_goal_achieved, merge_target_branch, merge_status, base_branch, base_commit_sha, lineage_depth, created_via, telegram_chat_id)
+			 VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			 RETURNING id, created_at, updated_at, completed_at`,
-		t.ProjectID, t.Title, t.Category, t.Priority, t.Status, t.Prompt, t.AgentID, t.AgentDefinitionID, t.Tag, displayOrder, t.ParentTaskID, t.ChainConfig, t.SwarmRole, t.SwarmStatus, defaultJSON(t.SwarmConfig), t.SwarmSequence, t.WorktreePath, t.WorktreeBranch, autoMerge, t.MergeTargetBranch, t.MergeStatus, t.BaseBranch, t.BaseCommitSHA, t.LineageDepth, t.CreatedVia, t.TelegramChatID).
+		t.ProjectID, t.Title, t.Category, t.Priority, t.Status, t.Prompt, t.AgentID, t.AgentDefinitionID, t.Tag, displayOrder, t.ParentTaskID, t.ChainConfig, t.SwarmRole, t.SwarmStatus, defaultJSON(t.SwarmConfig), t.SwarmSequence, t.WorktreePath, t.WorktreeBranch, autoMerge, autoMergeOnGoalAchieved, t.MergeTargetBranch, t.MergeStatus, t.BaseBranch, t.BaseCommitSHA, t.LineageDepth, t.CreatedVia, t.TelegramChatID).
 		Scan(&t.ID, &t.CreatedAt, &t.UpdatedAt, &t.CompletedAt)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint failed: tasks.project_id, tasks.title") {
@@ -558,12 +562,16 @@ func (r *TaskRepo) Update(ctx context.Context, t *models.Task) error {
 	if t.AutoMerge {
 		autoMerge = 1
 	}
+	autoMergeOnGoalAchieved := 0
+	if t.AutoMergeOnGoalAchieved {
+		autoMergeOnGoalAchieved = 1
+	}
 	_, err := execBoundSQLite(ctx, r.db,
 		`UPDATE tasks SET title = ?, category = ?, priority = ?, status = ?,
 			 prompt = ?, agent_id = ?, agent_definition_id = ?, tag = ?, display_order = ?, parent_task_id = ?, chain_config = ?,
-			 swarm_role = ?, swarm_status = ?, swarm_config = ?, swarm_sequence = ?, auto_merge = ?, merge_target_branch = ?, base_branch = ?, base_commit_sha = ?, lineage_depth = ?, updated_at = datetime('now')
+			 swarm_role = ?, swarm_status = ?, swarm_config = ?, swarm_sequence = ?, auto_merge = ?, auto_merge_on_goal_achieved = ?, merge_target_branch = ?, base_branch = ?, base_commit_sha = ?, lineage_depth = ?, updated_at = datetime('now')
 			 WHERE id = ?`,
-		t.Title, t.Category, t.Priority, t.Status, t.Prompt, t.AgentID, t.AgentDefinitionID, t.Tag, t.DisplayOrder, t.ParentTaskID, t.ChainConfig, t.SwarmRole, t.SwarmStatus, defaultJSON(t.SwarmConfig), t.SwarmSequence, autoMerge, t.MergeTargetBranch, t.BaseBranch, t.BaseCommitSHA, t.LineageDepth, t.ID)
+		t.Title, t.Category, t.Priority, t.Status, t.Prompt, t.AgentID, t.AgentDefinitionID, t.Tag, t.DisplayOrder, t.ParentTaskID, t.ChainConfig, t.SwarmRole, t.SwarmStatus, defaultJSON(t.SwarmConfig), t.SwarmSequence, autoMerge, autoMergeOnGoalAchieved, t.MergeTargetBranch, t.BaseBranch, t.BaseCommitSHA, t.LineageDepth, t.ID)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint failed: tasks.project_id, tasks.title") {
 			return ErrDuplicateTask
@@ -573,87 +581,262 @@ func (r *TaskRepo) Update(ctx context.Context, t *models.Task) error {
 	return nil
 }
 
+var ErrActiveLaneTaskChanged = errors.New("active lane task changed")
+var ErrActiveLaneLifecycleOwned = errors.New("active lane task requires lifecycle-owned activation")
+
+type ActiveLaneTaskMove struct {
+	ID               string              `json:"id"`
+	ExpectedCategory models.TaskCategory `json:"category"`
+	ExpectedStatus   models.TaskStatus   `json:"status"`
+}
+
+type activeLaneExpectedStateKey struct{}
+
+// WithActiveLaneExpectedState carries a browser-observed state fence into a
+// lifecycle owner's first durable mutation.
+func WithActiveLaneExpectedState(ctx context.Context, move ActiveLaneTaskMove) context.Context {
+	return context.WithValue(ctx, activeLaneExpectedStateKey{}, move)
+}
+
+func activeLaneExpectedState(ctx context.Context, taskID string) (ActiveLaneTaskMove, bool) {
+	if ctx == nil {
+		return ActiveLaneTaskMove{}, false
+	}
+	move, ok := ctx.Value(activeLaneExpectedStateKey{}).(ActiveLaneTaskMove)
+	return move, ok && move.ID == taskID && move.ExpectedCategory != "" && move.ExpectedStatus != ""
+}
+
+// ActiveLaneExpectedState exposes the guarded move to lifecycle-owning services.
+func ActiveLaneExpectedState(ctx context.Context, taskID string) (ActiveLaneTaskMove, bool) {
+	return activeLaneExpectedState(ctx, taskID)
+}
+
+type ActiveLaneTaskAdmission struct {
+	Task        models.Task
+	ExecutionID string
+}
+
+func (r *TaskRepo) MoveTasksToActiveLane(ctx context.Context, projectID string, moves []ActiveLaneTaskMove, status models.TaskStatus) ([]ActiveLaneTaskAdmission, error) {
+	if status != models.StatusPending && status != models.StatusRunning {
+		return nil, fmt.Errorf("invalid active lane status: %s", status)
+	}
+	admissions := make([]ActiveLaneTaskAdmission, 0, len(moves))
+	err := withImmediateTx(ctx, r.db, func(exec sqlExecutor) error {
+		seen := make(map[string]struct{}, len(moves))
+		candidates := make([]models.Task, 0, len(moves))
+		for _, move := range moves {
+			if _, duplicate := seen[move.ID]; duplicate {
+				return fmt.Errorf("duplicate task in active lane move: %s", move.ID)
+			}
+			seen[move.ID] = struct{}{}
+			task, err := getTaskWithExecutor(ctx, exec, `SELECT `+taskSelectColumns+` FROM tasks WHERE id = ? AND project_id = ?`, move.ID, projectID)
+			if err != nil {
+				return fmt.Errorf("loading active lane task %s: %w", move.ID, err)
+			}
+			if task == nil {
+				return fmt.Errorf("task not found in project: %s", move.ID)
+			}
+			if task.Category != move.ExpectedCategory || task.Status != move.ExpectedStatus {
+				return fmt.Errorf("%w: %s", ErrActiveLaneTaskChanged, move.ID)
+			}
+			if task.Category == models.CategoryActive && task.Status == status {
+				continue
+			}
+			var lifecycleOwned int
+			if err := exec.QueryRowContext(ctx, `SELECT EXISTS (
+				SELECT 1 FROM thread_inputs i
+				WHERE i.scope = 'task_thread' AND i.task_id = ? AND i.input_status = 'pending'
+				UNION ALL SELECT 1 FROM executions e
+				WHERE e.rowid = (SELECT latest.rowid FROM executions latest WHERE latest.task_id = ? ORDER BY latest.started_at DESC, latest.rowid DESC LIMIT 1)
+				  AND e.is_followup = 1 AND e.status = 'failed' AND TRIM(e.prompt_sent) <> ''
+				UNION ALL SELECT 1 FROM executions e
+				WHERE e.task_id = ? AND e.status IN ('queued','running')
+				UNION ALL SELECT 1 FROM automation_task_run_reservations r WHERE r.task_id = ?
+			)`, task.ID, task.ID, task.ID, task.ID).Scan(&lifecycleOwned); err != nil {
+				return fmt.Errorf("checking active lane lifecycle ownership for %s: %w", task.ID, err)
+			}
+			if task.SwarmRole == models.SwarmRoleParent || lifecycleOwned != 0 || task.Status == models.StatusQueued || task.Status == models.StatusRunning {
+				return fmt.Errorf("%w: %s", ErrActiveLaneLifecycleOwned, task.ID)
+			}
+			candidates = append(candidates, *task)
+		}
+		if len(candidates) == 0 {
+			return nil
+		}
+		var nextOrder int
+		if err := exec.QueryRowContext(ctx, `SELECT COALESCE(MAX(display_order), -1) + 1 FROM tasks WHERE project_id = ? AND category = 'active'`, projectID).Scan(&nextOrder); err != nil {
+			return fmt.Errorf("getting active tail order: %w", err)
+		}
+		for i := range candidates {
+			if _, err := exec.ExecContext(ctx, `UPDATE tasks
+				SET category = 'active', status = ?, display_order = ?, completed_at = NULL, updated_at = datetime('now')
+				WHERE id = ? AND project_id = ?`, status, nextOrder+i, candidates[i].ID, projectID); err != nil {
+				return fmt.Errorf("moving task %s to active lane: %w", candidates[i].ID, err)
+			}
+			candidates[i].Category = models.CategoryActive
+			candidates[i].Status = status
+			candidates[i].DisplayOrder = nextOrder + i
+			candidates[i].CompletedAt = nil
+			admission := ActiveLaneTaskAdmission{Task: candidates[i]}
+			if status == models.StatusRunning {
+				agentID := ""
+				if candidates[i].AgentID != nil {
+					agentID = *candidates[i].AgentID
+				}
+				execution := &models.Execution{TaskID: candidates[i].ID, AgentConfigID: agentID, Status: models.ExecQueued, PromptSent: candidates[i].Prompt, StartsNewContext: candidates[i].StartsNewContext}
+				if err := NewExecutionRepo(r.db).CreateWithExecutor(ctx, exec, execution); err != nil {
+					return fmt.Errorf("reserving active lane execution for %s: %w", candidates[i].ID, err)
+				}
+				admission.ExecutionID = execution.ID
+			}
+			admissions = append(admissions, admission)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if r.broadcaster != nil {
+		for _, admission := range admissions {
+			task := admission.Task
+			r.broadcaster.Publish(events.TaskEvent{Type: events.TaskBoardUpdated, TaskID: task.ID, TaskName: task.Title, ProjectID: task.ProjectID, Category: string(task.Category), Status: string(task.Status)})
+		}
+	}
+	return admissions, nil
+}
+
 func (r *TaskRepo) UpdateCategory(ctx context.Context, id string, category models.TaskCategory) error {
-	// Get the task first to know the old category and project ID
-	task, err := r.GetByID(ctx, id)
+	var task *models.Task
+	err := withImmediateTx(ctx, r.db, func(exec sqlExecutor) error {
+		var err error
+		task, err = getTaskWithExecutor(ctx, exec, `SELECT `+taskSelectColumns+` FROM tasks WHERE id = ?`, id)
+		if err != nil {
+			return fmt.Errorf("getting task before category update: %w", err)
+		}
+		if task == nil {
+			return fmt.Errorf("task not found: %s", id)
+		}
+		if task.Category == category {
+			return nil
+		}
+
+		var displayOrder int
+		if err := exec.QueryRowContext(ctx,
+			`SELECT COALESCE(MAX(display_order), -1) + 1 FROM tasks WHERE project_id = ? AND category = ?`,
+			task.ProjectID, category).Scan(&displayOrder); err != nil {
+			return fmt.Errorf("getting next display_order: %w", err)
+		}
+		if _, err := exec.ExecContext(ctx,
+			`UPDATE tasks SET category = ?, display_order = ?, updated_at = datetime('now'), completed_at = CASE WHEN ? = 'completed' THEN datetime('now') ELSE NULL END WHERE id = ?`,
+			category, displayOrder, string(category), id); err != nil {
+			return fmt.Errorf("updating task category: %w", err)
+		}
+		if category != models.CategoryActive {
+			if _, err := exec.ExecContext(ctx, `UPDATE executions SET status = 'cancelled', error_message = 'Task left the reserved running lane', completed_at = datetime('now')
+				WHERE task_id = ? AND status = 'queued' AND is_followup = 0 AND dispatch_id IS NULL`, id); err != nil {
+				return fmt.Errorf("cancelling reserved task execution: %w", err)
+			}
+		}
+		return nil
+	})
 	if err != nil {
-		return fmt.Errorf("getting task before category update: %w", err)
-	}
-	if task == nil {
-		return fmt.Errorf("task not found: %s", id)
+		return err
 	}
 
-	oldCategory := task.Category
-
-	// Get the max display_order in the new category and add 1
-	var maxOrder sql.NullInt64
-	err = r.db.QueryRowContext(ctx,
-		`SELECT MAX(display_order) FROM tasks WHERE project_id = ? AND category = ?`,
-		task.ProjectID, category).Scan(&maxOrder)
-	if err != nil && err != sql.ErrNoRows {
-		return fmt.Errorf("getting max display_order: %w", err)
-	}
-
-	displayOrder := 0
-	if maxOrder.Valid {
-		displayOrder = int(maxOrder.Int64) + 1
-	}
-
-	_, err = execBoundSQLite(ctx, r.db,
-		`UPDATE tasks SET category = ?, display_order = ?, updated_at = datetime('now'), completed_at = CASE WHEN ? = 'completed' THEN datetime('now') ELSE NULL END WHERE id = ?`,
-		category, displayOrder, string(category), id)
-	if err != nil {
-		return fmt.Errorf("updating task category: %w", err)
-	}
-
-	// Publish event if broadcaster is available
-	if r.broadcaster != nil && oldCategory != category {
+	if r.broadcaster != nil && task.Category != category {
 		r.broadcaster.Publish(events.TaskEvent{
 			Type:        events.TaskCategoryChanged,
 			TaskID:      id,
 			TaskName:    task.Title,
 			ProjectID:   task.ProjectID,
 			Category:    string(category),
-			OldCategory: string(oldCategory),
+			OldCategory: string(task.Category),
 		})
 	}
+	return nil
+}
 
+func (r *TaskRepo) RestoreBoardState(ctx context.Context, task models.Task) error {
+	_, err := execBoundSQLite(ctx, r.db,
+		`UPDATE tasks SET category = ?, status = ?, display_order = ?, completed_at = ?, updated_at = datetime('now') WHERE id = ?`,
+		task.Category, task.Status, task.DisplayOrder, task.CompletedAt, task.ID)
+	if err != nil {
+		return fmt.Errorf("restoring task board state: %w", err)
+	}
+	if r.broadcaster != nil {
+		r.broadcaster.Publish(events.TaskEvent{
+			Type:      events.TaskBoardUpdated,
+			TaskID:    task.ID,
+			TaskName:  task.Title,
+			ProjectID: task.ProjectID,
+			Category:  string(task.Category),
+			Status:    string(task.Status),
+		})
+	}
 	return nil
 }
 
 func (r *TaskRepo) UpdateStatus(ctx context.Context, id string, status models.TaskStatus) error {
-	// Get the task first to know the old status and project ID
-	task, err := r.GetByID(ctx, id)
+	var task *models.Task
+	err := withImmediateTx(ctx, r.db, func(exec sqlExecutor) error {
+		var err error
+		task, err = getTaskWithExecutor(ctx, exec, `SELECT `+taskSelectColumns+` FROM tasks WHERE id = ?`, id)
+		if err != nil {
+			return fmt.Errorf("getting task before status update: %w", err)
+		}
+		if task == nil {
+			return fmt.Errorf("task not found: %s", id)
+		}
+		if task.Status == status {
+			return nil
+		}
+
+		displayOrder := task.DisplayOrder
+		if task.Category == models.CategoryActive && isActiveBoardStatus(status) {
+			if err := exec.QueryRowContext(ctx,
+				`SELECT COALESCE(MAX(display_order), -1) + 1 FROM tasks WHERE project_id = ? AND category = 'active'`,
+				task.ProjectID).Scan(&displayOrder); err != nil {
+				return fmt.Errorf("getting next active display_order: %w", err)
+			}
+		}
+		if _, err := exec.ExecContext(ctx,
+			`UPDATE tasks SET status = ?, display_order = ?, updated_at = datetime('now') WHERE id = ?`,
+			status, displayOrder, id); err != nil {
+			return fmt.Errorf("updating task status: %w", err)
+		}
+		if status != models.StatusRunning {
+			if _, err := exec.ExecContext(ctx, `UPDATE executions SET status = 'cancelled', error_message = 'Task left the reserved running lane', completed_at = datetime('now')
+				WHERE task_id = ? AND status = 'queued' AND is_followup = 0 AND dispatch_id IS NULL`, id); err != nil {
+				return fmt.Errorf("cancelling reserved task execution: %w", err)
+			}
+		}
+		return nil
+	})
 	if err != nil {
-		return fmt.Errorf("getting task before status update: %w", err)
-	}
-	if task == nil {
-		return fmt.Errorf("task not found: %s", id)
+		return err
 	}
 
-	oldStatus := task.Status
-
-	_, err = execBoundSQLite(ctx, r.db,
-		`UPDATE tasks SET status = ?, updated_at = datetime('now') WHERE id = ?`,
-		status, id)
-	if err != nil {
-		return fmt.Errorf("updating task status: %w", err)
-	}
-
-	// Publish event if broadcaster is available
-	if r.broadcaster != nil && oldStatus != status {
+	if r.broadcaster != nil && task.Status != status {
 		r.broadcaster.Publish(events.TaskEvent{
 			Type:      events.TaskStatusChanged,
 			TaskID:    id,
 			TaskName:  task.Title,
 			ProjectID: task.ProjectID,
 			Status:    string(status),
-			OldStatus: string(oldStatus),
+			OldStatus: string(task.Status),
 			Category:  string(task.Category),
 		})
 	}
-
 	return nil
+}
+
+func isActiveBoardStatus(status models.TaskStatus) bool {
+	switch status {
+	case models.StatusPending, models.StatusQueued, models.StatusRunning, models.StatusBlocked:
+		return true
+	default:
+		return false
+	}
 }
 
 // SetPendingIfNotRunningOrQueued atomically sets status to pending
@@ -669,7 +852,12 @@ func (r *TaskRepo) SetPendingIfNotRunningOrQueued(ctx context.Context, id string
 	}
 
 	result, err := execBoundSQLite(ctx, r.db,
-		`UPDATE tasks SET status = 'pending', updated_at = datetime('now')
+		`UPDATE tasks SET
+			status = 'pending',
+			display_order = CASE WHEN category = 'active' AND status <> 'pending' THEN
+				(SELECT COALESCE(MAX(peer.display_order), -1) + 1 FROM tasks peer WHERE peer.project_id = tasks.project_id AND peer.category = 'active')
+				ELSE display_order END,
+			updated_at = datetime('now')
 		 WHERE id = ? AND status NOT IN ('running', 'queued')`,
 		id)
 	if err != nil {
@@ -711,7 +899,12 @@ func (r *TaskRepo) SetPendingIfNotRunningOrQueuedForEnabledSchedule(ctx context.
 	}
 
 	result, err := execBoundSQLite(ctx, r.db,
-		`UPDATE tasks SET status = 'pending', updated_at = datetime('now')
+		`UPDATE tasks SET
+			status = 'pending',
+			display_order = CASE WHEN category = 'active' AND status <> 'pending' THEN
+				(SELECT COALESCE(MAX(peer.display_order), -1) + 1 FROM tasks peer WHERE peer.project_id = tasks.project_id AND peer.category = 'active')
+				ELSE display_order END,
+			updated_at = datetime('now')
 			 WHERE id = ? AND status NOT IN ('running', 'queued')
 			   AND EXISTS (
 					SELECT 1 FROM schedules
@@ -768,7 +961,12 @@ func (r *TaskRepo) ClaimTask(ctx context.Context, id string) (bool, error) {
 	}
 
 	result, err := tx.ExecContext(ctx,
-		`UPDATE tasks SET status = 'running', updated_at = datetime('now')
+		`UPDATE tasks SET
+			status = 'running',
+			display_order = CASE WHEN category = 'active' THEN
+				(SELECT COALESCE(MAX(peer.display_order), -1) + 1 FROM tasks peer WHERE peer.project_id = tasks.project_id AND peer.category = 'active')
+				ELSE display_order END,
+			updated_at = datetime('now')
 		 WHERE id = ? AND status = 'pending'
 		   AND NOT EXISTS (SELECT 1 FROM automation_task_run_reservations r WHERE r.task_id = tasks.id)
 		   AND NOT EXISTS (SELECT 1 FROM executions e WHERE e.task_id = tasks.id AND e.status = 'running')
@@ -890,7 +1088,12 @@ func (r *TaskRepo) ClaimTaskForDispatch(ctx context.Context, id string) (*TaskDi
 		}
 		return &TaskDispatchClaim{Task: *task, AutomationContext: automationContext}, false, nil
 	}
-	result, err := conn.ExecContext(ctx, `UPDATE tasks SET status = 'running', updated_at = datetime('now')
+	result, err := conn.ExecContext(ctx, `UPDATE tasks SET
+		status = 'running',
+		display_order = CASE WHEN category = 'active' THEN
+			(SELECT COALESCE(MAX(peer.display_order), -1) + 1 FROM tasks peer WHERE peer.project_id = tasks.project_id AND peer.category = 'active')
+			ELSE display_order END,
+		updated_at = datetime('now')
 		WHERE id = ? AND status = 'pending' AND category IN ('active','scheduled')
 		  AND NOT EXISTS (SELECT 1 FROM automation_task_run_reservations r WHERE r.task_id = tasks.id)
 		  AND NOT EXISTS (SELECT 1 FROM executions e WHERE e.task_id = tasks.id AND e.status = 'running')
@@ -908,6 +1111,9 @@ func (r *TaskRepo) ClaimTaskForDispatch(ctx context.Context, id string) (*TaskDi
 		}
 		return &TaskDispatchClaim{Task: *task}, false, nil
 	}
+	if err := conn.QueryRowContext(ctx, `SELECT display_order FROM tasks WHERE id = ?`, id).Scan(&task.DisplayOrder); err != nil {
+		return nil, false, fmt.Errorf("loading claimed task display order: %w", err)
+	}
 	task.Status = models.StatusRunning
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 		return nil, false, err
@@ -917,6 +1123,151 @@ func (r *TaskRepo) ClaimTaskForDispatch(ctx context.Context, id string) (*TaskDi
 		r.broadcaster.Publish(events.TaskEvent{Type: events.TaskStatusChanged, TaskID: task.ID, TaskName: task.Title,
 			ProjectID: task.ProjectID, Status: string(models.StatusRunning), OldStatus: string(models.StatusPending),
 			Category: string(task.Category)})
+	}
+	return &TaskDispatchClaim{Task: *task, AutomationContext: automationContext}, true, nil
+}
+
+func (r *TaskRepo) ListReservedActiveLaneAdmissions(ctx context.Context) ([]ActiveLaneTaskAdmission, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT t.id, e.id FROM tasks t JOIN executions e ON e.task_id = t.id
+		WHERE t.category = 'active' AND t.status = 'running' AND e.status = 'queued' AND e.is_followup = 0 AND e.dispatch_id IS NULL
+		ORDER BY t.display_order ASC, e.started_at ASC, e.rowid ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("listing reserved active lane admissions: %w", err)
+	}
+	var refs []struct{ taskID, executionID string }
+	for rows.Next() {
+		var ref struct{ taskID, executionID string }
+		if err := rows.Scan(&ref.taskID, &ref.executionID); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		refs = append(refs, ref)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	admissions := make([]ActiveLaneTaskAdmission, 0, len(refs))
+	for _, ref := range refs {
+		task, err := r.GetByID(ctx, ref.taskID)
+		if err != nil {
+			return nil, err
+		}
+		if task != nil {
+			admissions = append(admissions, ActiveLaneTaskAdmission{Task: *task, ExecutionID: ref.executionID})
+		}
+	}
+	return admissions, nil
+}
+
+// ClaimReservedTaskForDispatch atomically validates and starts the durable queued
+// ordinary execution created by a running-lane board move.
+func (r *TaskRepo) ClaimReservedTaskForDispatch(ctx context.Context, id, executionID string) (*TaskDispatchClaim, bool, error) {
+	conn, finishImmediate, err := beginImmediateConn(ctx, r.db)
+	if err != nil {
+		return nil, false, err
+	}
+	defer finishImmediate()
+	task, err := getTaskWithExecutor(ctx, conn, `SELECT `+taskSelectColumns+` FROM tasks WHERE id = ?`, id)
+	if err != nil {
+		return nil, false, fmt.Errorf("loading preclaimed task for dispatch: %w", err)
+	}
+	if task == nil {
+		return nil, false, fmt.Errorf("task not found: %s", id)
+	}
+	var reserved int
+	if err := conn.QueryRowContext(ctx, `SELECT EXISTS (
+		SELECT 1 FROM executions e WHERE e.id = ? AND e.task_id = ? AND e.status = 'queued' AND e.is_followup = 0 AND e.dispatch_id IS NULL
+	)`, executionID, id).Scan(&reserved); err != nil {
+		return nil, false, fmt.Errorf("validating reserved task execution: %w", err)
+	}
+	var blocked int
+	if err := conn.QueryRowContext(ctx, `SELECT EXISTS (
+		SELECT 1 FROM automation_task_run_reservations r WHERE r.task_id = ?
+		UNION ALL SELECT 1 FROM executions e WHERE e.task_id = ? AND e.id <> ? AND e.status IN ('queued','running')
+	)`, id, id, executionID).Scan(&blocked); err != nil {
+		return nil, false, fmt.Errorf("validating reserved task admission: %w", err)
+	}
+	if task.Status != models.StatusRunning || task.Category != models.CategoryActive || reserved == 0 || blocked != 0 {
+		if reserved != 0 {
+			if _, err := conn.ExecContext(ctx, `UPDATE executions SET status = 'cancelled', error_message = 'Reserved task admission was superseded', completed_at = datetime('now') WHERE id = ? AND status = 'queued'`, executionID); err != nil {
+				return nil, false, err
+			}
+		}
+		if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+			return nil, false, err
+		}
+		return &TaskDispatchClaim{Task: *task}, false, nil
+	}
+	automationContext, err := contextForTaskWithExecutor(ctx, conn, task.ProjectID, task.ID)
+	if err != nil {
+		return nil, false, fmt.Errorf("loading preclaimed task Automation context: %w", err)
+	}
+	if IsAutomationTaskCreatedVia(task.CreatedVia) {
+		automationContext.ProjectID = task.ProjectID
+		automationContext.OriginTask = true
+	}
+	checkedBindings := map[string]bool{}
+	for _, binding := range automationContext.Bindings {
+		bindingKey := binding.AutomationID + "\x00" + binding.VersionID
+		if checkedBindings[bindingKey] {
+			continue
+		}
+		checkedBindings[bindingKey] = true
+		var lifecycle models.AutomationLifecycleState
+		err := conn.QueryRowContext(ctx, `SELECT lifecycle_state FROM automations
+			WHERE project_id = ? AND id = ? AND published_version_id = ?`, task.ProjectID, binding.AutomationID, binding.VersionID).Scan(&lifecycle)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return nil, false, fmt.Errorf("loading preclaimed Automation lifecycle: %w", err)
+		}
+		if lifecycle == models.AutomationActive {
+			continue
+		}
+		if lifecycle == models.AutomationPaused {
+			if _, err := conn.ExecContext(ctx, `INSERT INTO automation_paused_task_admissions
+				(task_id, project_id, automation_id, version_id)
+				SELECT ?, ?, ?, ? WHERE EXISTS (
+					SELECT 1 FROM automation_activity_resources resource
+					JOIN automation_activities activity ON activity.id = resource.activity_id
+					WHERE resource.resource_type = 'task' AND resource.resource_id = ? AND resource.relation = 'child'
+						AND activity.project_id = ? AND activity.automation_id = ? AND activity.version_id = ?
+						AND activity.activity_type = 'create_task')
+				ON CONFLICT(task_id) DO NOTHING`, task.ID, task.ProjectID, binding.AutomationID, binding.VersionID,
+				task.ID, task.ProjectID, binding.AutomationID, binding.VersionID); err != nil {
+				return nil, false, fmt.Errorf("preserving paused preclaimed Automation admission: %w", err)
+			}
+		} else if lifecycle == models.AutomationArchived {
+			if _, err := conn.ExecContext(ctx, `DELETE FROM automation_paused_task_admissions WHERE task_id = ?`, task.ID); err != nil {
+				return nil, false, fmt.Errorf("removing archived preclaimed Automation admission: %w", err)
+			}
+		}
+		if _, err := conn.ExecContext(ctx, `UPDATE executions SET status = 'cancelled', error_message = 'Automation is not active', completed_at = datetime('now') WHERE id = ? AND status = 'queued'`, executionID); err != nil {
+			return nil, false, err
+		}
+		if _, err := conn.ExecContext(ctx, `UPDATE tasks SET status = 'pending', category = 'backlog', updated_at = datetime('now') WHERE id = ? AND status = 'running'`, task.ID); err != nil {
+			return nil, false, err
+		}
+		task.Status = models.StatusPending
+		task.Category = models.CategoryBacklog
+		if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+			return nil, false, err
+		}
+		return &TaskDispatchClaim{Task: *task, AutomationContext: automationContext}, false, nil
+	}
+	if _, err := conn.ExecContext(ctx, `UPDATE executions SET status = 'running', started_at = datetime('now'),
+		prompt_sent = ?, agent_config_id = ?, starts_new_context = ?
+		WHERE id = ? AND task_id = ? AND status = 'queued'`,
+		task.Prompt, task.AgentID, task.StartsNewContext, executionID, id); err != nil {
+		return nil, false, fmt.Errorf("claiming reserved task execution: %w", err)
+	}
+	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+		return nil, false, err
 	}
 	return &TaskDispatchClaim{Task: *task, AutomationContext: automationContext}, true, nil
 }
@@ -944,7 +1295,7 @@ func (r *TaskRepo) SearchByTitle(ctx context.Context, projectID string, titleQue
 	for rows.Next() {
 		var t models.Task
 		if err := rows.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Category,
-			&t.Priority, &t.Status, &t.Prompt, &t.AgentID, &t.AgentDefinitionID, &t.Tag, &t.DisplayOrder, &t.ParentTaskID, &t.ChainConfig, &t.SwarmRole, &t.SwarmStatus, &t.SwarmConfig, &t.SwarmSequence, &t.WorktreePath, &t.WorktreeBranch, &t.AutoMerge, &t.MergeTargetBranch, &t.MergeStatus, &t.BaseBranch, &t.BaseCommitSHA, &t.LineageDepth, &t.CreatedVia, &t.TelegramChatID, &t.CreatedAt, &t.UpdatedAt, &t.CompletedAt); err != nil {
+			&t.Priority, &t.Status, &t.Prompt, &t.AgentID, &t.AgentDefinitionID, &t.Tag, &t.DisplayOrder, &t.ParentTaskID, &t.ChainConfig, &t.SwarmRole, &t.SwarmStatus, &t.SwarmConfig, &t.SwarmSequence, &t.WorktreePath, &t.WorktreeBranch, &t.AutoMerge, &t.AutoMergeOnGoalAchieved, &t.MergeTargetBranch, &t.MergeStatus, &t.BaseBranch, &t.BaseCommitSHA, &t.LineageDepth, &t.CreatedVia, &t.TelegramChatID, &t.CreatedAt, &t.UpdatedAt, &t.CompletedAt); err != nil {
 			return nil, fmt.Errorf("scanning task: %w", err)
 		}
 		tasks = append(tasks, t)
@@ -1144,7 +1495,16 @@ func scanSwarmInspectionTask(scan func(dest ...any) error) (models.Task, error) 
 	return t, err
 }
 
+type TaskWorktreeCleanup struct {
+	TaskID         string
+	WorktreePath   string
+	WorktreeBranch string
+	DeleteBranch   bool
+}
+
 type TaskDeletionManifest struct {
+	TaskIDs                  []string
+	TaskWorktrees            []TaskWorktreeCleanup
 	TaskAttachmentPaths      []string
 	ExecutionAttachmentPaths []string
 	PendingUploadSessionIDs  []string
@@ -1349,7 +1709,7 @@ func (r *TaskRepo) FindBlockedChildByParent(ctx context.Context, parentTaskID st
 
 	var t models.Task
 	if err := row.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Category,
-		&t.Priority, &t.Status, &t.Prompt, &t.AgentID, &t.AgentDefinitionID, &t.Tag, &t.DisplayOrder, &t.ParentTaskID, &t.ChainConfig, &t.SwarmRole, &t.SwarmStatus, &t.SwarmConfig, &t.SwarmSequence, &t.WorktreePath, &t.WorktreeBranch, &t.AutoMerge, &t.MergeTargetBranch, &t.MergeStatus, &t.BaseBranch, &t.BaseCommitSHA, &t.LineageDepth, &t.CreatedVia, &t.TelegramChatID, &t.CreatedAt, &t.UpdatedAt, &t.CompletedAt); err != nil {
+		&t.Priority, &t.Status, &t.Prompt, &t.AgentID, &t.AgentDefinitionID, &t.Tag, &t.DisplayOrder, &t.ParentTaskID, &t.ChainConfig, &t.SwarmRole, &t.SwarmStatus, &t.SwarmConfig, &t.SwarmSequence, &t.WorktreePath, &t.WorktreeBranch, &t.AutoMerge, &t.AutoMergeOnGoalAchieved, &t.MergeTargetBranch, &t.MergeStatus, &t.BaseBranch, &t.BaseCommitSHA, &t.LineageDepth, &t.CreatedVia, &t.TelegramChatID, &t.CreatedAt, &t.UpdatedAt, &t.CompletedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
@@ -1424,7 +1784,7 @@ func (r *TaskRepo) getOneSwarmChild(ctx context.Context, query string, args ...a
 func scanSwarmChildTask(scan func(dest ...any) error) (models.Task, error) {
 	var t models.Task
 	err := scan(&t.ID, &t.ProjectID, &t.Title, &t.Category,
-		&t.Priority, &t.Status, &t.AgentID, &t.AgentDefinitionID, &t.Tag, &t.DisplayOrder, &t.ParentTaskID, &t.SwarmRole, &t.SwarmStatus, &t.SwarmConfig, &t.SwarmSequence, &t.WorktreePath, &t.WorktreeBranch, &t.AutoMerge, &t.MergeTargetBranch, &t.MergeStatus, &t.BaseBranch, &t.BaseCommitSHA, &t.LineageDepth, &t.CreatedVia, &t.TelegramChatID, &t.CreatedAt, &t.UpdatedAt, &t.CompletedAt)
+		&t.Priority, &t.Status, &t.AgentID, &t.AgentDefinitionID, &t.Tag, &t.DisplayOrder, &t.ParentTaskID, &t.SwarmRole, &t.SwarmStatus, &t.SwarmConfig, &t.SwarmSequence, &t.WorktreePath, &t.WorktreeBranch, &t.AutoMerge, &t.AutoMergeOnGoalAchieved, &t.MergeTargetBranch, &t.MergeStatus, &t.BaseBranch, &t.BaseCommitSHA, &t.LineageDepth, &t.CreatedVia, &t.TelegramChatID, &t.CreatedAt, &t.UpdatedAt, &t.CompletedAt)
 	return t, err
 }
 
@@ -1493,7 +1853,7 @@ func (r *TaskRepo) ListStaleQueuedTasks(ctx context.Context, staleDuration time.
 	for rows.Next() {
 		var t models.Task
 		if err := rows.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Category,
-			&t.Priority, &t.Status, &t.Prompt, &t.AgentID, &t.AgentDefinitionID, &t.Tag, &t.DisplayOrder, &t.ParentTaskID, &t.ChainConfig, &t.SwarmRole, &t.SwarmStatus, &t.SwarmConfig, &t.SwarmSequence, &t.WorktreePath, &t.WorktreeBranch, &t.AutoMerge, &t.MergeTargetBranch, &t.MergeStatus, &t.BaseBranch, &t.BaseCommitSHA, &t.LineageDepth, &t.CreatedVia, &t.TelegramChatID, &t.CreatedAt, &t.UpdatedAt, &t.CompletedAt); err != nil {
+			&t.Priority, &t.Status, &t.Prompt, &t.AgentID, &t.AgentDefinitionID, &t.Tag, &t.DisplayOrder, &t.ParentTaskID, &t.ChainConfig, &t.SwarmRole, &t.SwarmStatus, &t.SwarmConfig, &t.SwarmSequence, &t.WorktreePath, &t.WorktreeBranch, &t.AutoMerge, &t.AutoMergeOnGoalAchieved, &t.MergeTargetBranch, &t.MergeStatus, &t.BaseBranch, &t.BaseCommitSHA, &t.LineageDepth, &t.CreatedVia, &t.TelegramChatID, &t.CreatedAt, &t.UpdatedAt, &t.CompletedAt); err != nil {
 			return nil, fmt.Errorf("scanning task: %w", err)
 		}
 		tasks = append(tasks, t)
@@ -1650,6 +2010,10 @@ func (r *TaskRepo) ResetOrphanedRunning(ctx context.Context) (int, error) {
 		     updated_at = datetime('now')
 		 WHERE status = 'running'
 		   AND NOT EXISTS (
+		     SELECT 1 FROM executions queued
+		     WHERE queued.task_id = tasks.id AND queued.status = 'queued' AND queued.is_followup = 0 AND queued.dispatch_id IS NULL
+		   )
+		   AND NOT EXISTS (
 		     SELECT 1 FROM automation_task_run_reservations r
 		     JOIN automation_dispatch_outbox d ON d.id = r.dispatch_id
 		     JOIN executions e ON e.dispatch_id = d.id AND e.task_id = tasks.id
@@ -1697,7 +2061,7 @@ func (r *TaskRepo) ListByCategory(ctx context.Context, category models.TaskCateg
 	for rows.Next() {
 		var t models.Task
 		if err := rows.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Category,
-			&t.Priority, &t.Status, &t.Prompt, &t.AgentID, &t.AgentDefinitionID, &t.Tag, &t.DisplayOrder, &t.ParentTaskID, &t.ChainConfig, &t.SwarmRole, &t.SwarmStatus, &t.SwarmConfig, &t.SwarmSequence, &t.WorktreePath, &t.WorktreeBranch, &t.AutoMerge, &t.MergeTargetBranch, &t.MergeStatus, &t.BaseBranch, &t.BaseCommitSHA, &t.LineageDepth, &t.CreatedVia, &t.TelegramChatID, &t.CreatedAt, &t.UpdatedAt, &t.CompletedAt); err != nil {
+			&t.Priority, &t.Status, &t.Prompt, &t.AgentID, &t.AgentDefinitionID, &t.Tag, &t.DisplayOrder, &t.ParentTaskID, &t.ChainConfig, &t.SwarmRole, &t.SwarmStatus, &t.SwarmConfig, &t.SwarmSequence, &t.WorktreePath, &t.WorktreeBranch, &t.AutoMerge, &t.AutoMergeOnGoalAchieved, &t.MergeTargetBranch, &t.MergeStatus, &t.BaseBranch, &t.BaseCommitSHA, &t.LineageDepth, &t.CreatedVia, &t.TelegramChatID, &t.CreatedAt, &t.UpdatedAt, &t.CompletedAt); err != nil {
 			return nil, fmt.Errorf("scanning task: %w", err)
 		}
 		tasks = append(tasks, t)
@@ -1771,41 +2135,110 @@ func (r *TaskRepo) ListRunningChatTaskIDs(ctx context.Context, projectID string)
 	return ids, rows.Err()
 }
 
-// ActivateAllBacklog moves all tasks in the 'backlog' category to 'active' category
-// with status 'pending'. Returns the number of tasks updated.
+// ActivateAllBacklog moves all eligible backlog tasks to Active in their existing
+// manual board order, appending the group after the current Active tail.
 func (r *TaskRepo) ActivateAllBacklog(ctx context.Context, projectID string) (int, error) {
-	result, err := execBoundSQLite(ctx, r.db,
-		`UPDATE tasks SET category = 'active', status = 'pending'
-		 WHERE category = 'backlog'
-		   AND project_id = ?
-		   AND (status != 'blocked' OR swarm_role = 'swarm_parent')`, projectID)
+	var activated []models.Task
+	err := withImmediateTx(ctx, r.db, func(exec sqlExecutor) error {
+		rows, err := exec.QueryContext(ctx, `SELECT id, project_id, title, status, display_order FROM tasks
+			WHERE category = 'backlog' AND project_id = ?
+			  AND (status != 'blocked' OR swarm_role = 'swarm_parent')
+			ORDER BY display_order ASC, created_at ASC, id ASC`, projectID)
+		if err != nil {
+			return fmt.Errorf("listing backlog tasks for activation: %w", err)
+		}
+		for rows.Next() {
+			var task models.Task
+			if err := rows.Scan(&task.ID, &task.ProjectID, &task.Title, &task.Status, &task.DisplayOrder); err != nil {
+				rows.Close()
+				return fmt.Errorf("scanning backlog task for activation: %w", err)
+			}
+			activated = append(activated, task)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return err
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+		if len(activated) == 0 {
+			return nil
+		}
+
+		var nextOrder int
+		if err := exec.QueryRowContext(ctx, `SELECT COALESCE(MAX(display_order), -1) + 1 FROM tasks
+			WHERE project_id = ? AND category = 'active'`, projectID).Scan(&nextOrder); err != nil {
+			return fmt.Errorf("getting active tail order: %w", err)
+		}
+		for i := range activated {
+			if _, err := exec.ExecContext(ctx, `UPDATE tasks
+				SET category = 'active', status = 'pending', display_order = ?, completed_at = NULL, updated_at = datetime('now')
+				WHERE id = ? AND project_id = ? AND category = 'backlog'`, nextOrder+i, activated[i].ID, projectID); err != nil {
+				return fmt.Errorf("activating backlog task %s: %w", activated[i].ID, err)
+			}
+			activated[i].Category = models.CategoryActive
+			activated[i].Status = models.StatusPending
+			activated[i].DisplayOrder = nextOrder + i
+			activated[i].CompletedAt = nil
+		}
+		return nil
+	})
 	if err != nil {
 		return 0, fmt.Errorf("activating backlog tasks: %w", err)
 	}
-	rows, err := result.RowsAffected()
-	if err != nil {
-		return 0, fmt.Errorf("getting rows affected: %w", err)
-	}
 
-	// Emit task updated events for each activated task
-	if r.broadcaster != nil && rows > 0 {
-		// Get the updated tasks to emit events
-		tasks, err := r.ListByProject(ctx, projectID, string(models.CategoryActive))
-		if err == nil {
-			for _, task := range tasks {
-				r.broadcaster.Publish(events.TaskEvent{
-					Type:      events.TaskCategoryChanged,
-					TaskID:    task.ID,
-					TaskName:  task.Title,
-					ProjectID: task.ProjectID,
-					Category:  string(task.Category),
-					Status:    string(task.Status),
-				})
-			}
+	if r.broadcaster != nil {
+		for _, task := range activated {
+			r.broadcaster.Publish(events.TaskEvent{
+				Type:      events.TaskCategoryChanged,
+				TaskID:    task.ID,
+				TaskName:  task.Title,
+				ProjectID: task.ProjectID,
+				Category:  string(task.Category),
+				Status:    string(task.Status),
+			})
 		}
 	}
+	return len(activated), nil
+}
 
-	return int(rows), nil
+// PrepareSwarmParentForActiveLane atomically fences and transitions a
+// lifecycle-owned parent before planner submission.
+func (r *TaskRepo) PrepareSwarmParentForActiveLane(ctx context.Context, id string) error {
+	expected, guarded := activeLaneExpectedState(ctx, id)
+	if !guarded {
+		return fmt.Errorf("%w: %s", ErrActiveLaneTaskChanged, id)
+	}
+	var task *models.Task
+	err := withImmediateTx(ctx, r.db, func(exec sqlExecutor) error {
+		var err error
+		task, err = getTaskWithExecutor(ctx, exec, `SELECT `+taskSelectColumns+` FROM tasks WHERE id = ?`, id)
+		if err != nil {
+			return err
+		}
+		if task == nil || task.Category != expected.ExpectedCategory || task.Status != expected.ExpectedStatus || task.SwarmRole != models.SwarmRoleParent {
+			return fmt.Errorf("%w: %s", ErrActiveLaneTaskChanged, id)
+		}
+		var displayOrder int
+		if err := exec.QueryRowContext(ctx, `SELECT COALESCE(MAX(display_order), -1) + 1 FROM tasks WHERE project_id = ? AND category = 'active'`, task.ProjectID).Scan(&displayOrder); err != nil {
+			return err
+		}
+		if _, err := exec.ExecContext(ctx, `UPDATE tasks SET category = 'active', status = 'blocked', display_order = ?, completed_at = NULL, updated_at = datetime('now') WHERE id = ?`, displayOrder, id); err != nil {
+			return err
+		}
+		task.Category = models.CategoryActive
+		task.Status = models.StatusBlocked
+		task.DisplayOrder = displayOrder
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if r.broadcaster != nil {
+		r.broadcaster.Publish(events.TaskEvent{Type: events.TaskBoardUpdated, TaskID: task.ID, TaskName: task.Title, ProjectID: task.ProjectID, Category: string(task.Category), Status: string(task.Status)})
+	}
+	return nil
 }
 
 // ReorderTask moves a task to a new position within its category.
@@ -1885,7 +2318,7 @@ func (r *TaskRepo) ListBacklogByPriority(ctx context.Context, projectID string, 
 	for rows.Next() {
 		var t models.Task
 		if err := rows.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Category,
-			&t.Priority, &t.Status, &t.Prompt, &t.AgentID, &t.AgentDefinitionID, &t.Tag, &t.DisplayOrder, &t.ParentTaskID, &t.ChainConfig, &t.SwarmRole, &t.SwarmStatus, &t.SwarmConfig, &t.SwarmSequence, &t.WorktreePath, &t.WorktreeBranch, &t.AutoMerge, &t.MergeTargetBranch, &t.MergeStatus, &t.BaseBranch, &t.BaseCommitSHA, &t.LineageDepth, &t.CreatedVia, &t.TelegramChatID, &t.CreatedAt, &t.UpdatedAt, &t.CompletedAt); err != nil {
+			&t.Priority, &t.Status, &t.Prompt, &t.AgentID, &t.AgentDefinitionID, &t.Tag, &t.DisplayOrder, &t.ParentTaskID, &t.ChainConfig, &t.SwarmRole, &t.SwarmStatus, &t.SwarmConfig, &t.SwarmSequence, &t.WorktreePath, &t.WorktreeBranch, &t.AutoMerge, &t.AutoMergeOnGoalAchieved, &t.MergeTargetBranch, &t.MergeStatus, &t.BaseBranch, &t.BaseCommitSHA, &t.LineageDepth, &t.CreatedVia, &t.TelegramChatID, &t.CreatedAt, &t.UpdatedAt, &t.CompletedAt); err != nil {
 			return nil, fmt.Errorf("scanning task: %w", err)
 		}
 		tasks = append(tasks, t)
@@ -1968,7 +2401,7 @@ func (r *TaskRepo) ListByTags(ctx context.Context, tags []models.TaskTag, projec
 	for rows.Next() {
 		var t models.Task
 		if err := rows.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Category,
-			&t.Priority, &t.Status, &t.Prompt, &t.AgentID, &t.AgentDefinitionID, &t.Tag, &t.DisplayOrder, &t.ParentTaskID, &t.ChainConfig, &t.SwarmRole, &t.SwarmStatus, &t.SwarmConfig, &t.SwarmSequence, &t.WorktreePath, &t.WorktreeBranch, &t.AutoMerge, &t.MergeTargetBranch, &t.MergeStatus, &t.BaseBranch, &t.BaseCommitSHA, &t.LineageDepth, &t.CreatedVia, &t.TelegramChatID, &t.CreatedAt, &t.UpdatedAt, &t.CompletedAt); err != nil {
+			&t.Priority, &t.Status, &t.Prompt, &t.AgentID, &t.AgentDefinitionID, &t.Tag, &t.DisplayOrder, &t.ParentTaskID, &t.ChainConfig, &t.SwarmRole, &t.SwarmStatus, &t.SwarmConfig, &t.SwarmSequence, &t.WorktreePath, &t.WorktreeBranch, &t.AutoMerge, &t.AutoMergeOnGoalAchieved, &t.MergeTargetBranch, &t.MergeStatus, &t.BaseBranch, &t.BaseCommitSHA, &t.LineageDepth, &t.CreatedVia, &t.TelegramChatID, &t.CreatedAt, &t.UpdatedAt, &t.CompletedAt); err != nil {
 			return nil, fmt.Errorf("scanning task: %w", err)
 		}
 		tasks = append(tasks, t)
@@ -2017,17 +2450,37 @@ func (r *TaskRepo) UpdateMergeStatus(ctx context.Context, id string, status mode
 	return nil
 }
 
-// UpdateAutoMerge sets the auto_merge flag and merge target branch for a task.
+// UpdateAutoMerge sets the completion auto-merge flag and merge target branch.
+// Callers that expose both task settings should use UpdateAutoMergeSettings.
 func (r *TaskRepo) UpdateAutoMerge(ctx context.Context, id string, autoMerge bool, targetBranch string) error {
+	return r.UpdateAutoMergeSettings(ctx, id, autoMerge, nil, targetBranch)
+}
+
+// UpdateAutoMergeSettings updates both independent automatic merge settings.
+// A nil goal setting preserves its current value for backward-compatible callers.
+func (r *TaskRepo) UpdateAutoMergeSettings(ctx context.Context, id string, autoMerge bool, autoMergeOnGoalAchieved *bool, targetBranch string) error {
 	am := 0
 	if autoMerge {
 		am = 1
 	}
+	if autoMergeOnGoalAchieved == nil {
+		_, err := execBoundSQLite(ctx, r.db,
+			`UPDATE tasks SET auto_merge = ?, merge_target_branch = ?, updated_at = datetime('now') WHERE id = ?`,
+			am, targetBranch, id)
+		if err != nil {
+			return fmt.Errorf("updating auto merge: %w", err)
+		}
+		return nil
+	}
+	goalAM := 0
+	if *autoMergeOnGoalAchieved {
+		goalAM = 1
+	}
 	_, err := execBoundSQLite(ctx, r.db,
-		`UPDATE tasks SET auto_merge = ?, merge_target_branch = ?, updated_at = datetime('now') WHERE id = ?`,
-		am, targetBranch, id)
+		`UPDATE tasks SET auto_merge = ?, auto_merge_on_goal_achieved = ?, merge_target_branch = ?, updated_at = datetime('now') WHERE id = ?`,
+		am, goalAM, targetBranch, id)
 	if err != nil {
-		return fmt.Errorf("updating auto merge: %w", err)
+		return fmt.Errorf("updating auto merge settings: %w", err)
 	}
 	return nil
 }
@@ -2059,7 +2512,7 @@ func (r *TaskRepo) ListWithWorktrees(ctx context.Context) ([]models.Task, error)
 	var tasks []models.Task
 	for rows.Next() {
 		var t models.Task
-		if err := rows.Scan(&t.ID, &t.ProjectID, &t.Status, &t.WorktreePath, &t.WorktreeBranch, &t.MergeTargetBranch, &t.MergeStatus); err != nil {
+		if err := rows.Scan(&t.ID, &t.ProjectID, &t.Status, &t.WorktreePath, &t.WorktreeBranch, &t.AutoMergeOnGoalAchieved, &t.MergeTargetBranch, &t.MergeStatus); err != nil {
 			return nil, fmt.Errorf("scanning task worktree cleanup row: %w", err)
 		}
 		tasks = append(tasks, t)

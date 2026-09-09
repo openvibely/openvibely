@@ -34,6 +34,56 @@ func openMigrationTestDB(tb testing.TB, dbPath string) *sql.DB {
 	return db
 }
 
+func TestMigration177DropsLegacyMemoryScheduleThatBlocksProjectDeletion(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "legacy-memory-schedule-177.db")
+	db := openMigrationTestDB(t, dbPath)
+
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 176); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+		CREATE TABLE memory_consolidation_runs (id TEXT PRIMARY KEY);
+		CREATE TABLE memory_consolidation_schedules (
+			project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+			last_run_id TEXT REFERENCES memory_consolidation_runs(id) ON DELETE SET NULL
+		);
+		INSERT INTO projects(id, name) VALUES ('suggestion-engine-fixture', 'Suggestion Engine');
+		INSERT INTO memory_consolidation_schedules(project_id) VALUES ('suggestion-engine-fixture');
+	`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`PRAGMA foreign_keys=OFF`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`DROP TABLE memory_consolidation_runs`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`PRAGMA foreign_keys=ON`); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := db.Exec(`DELETE FROM projects WHERE id = 'suggestion-engine-fixture'`); err == nil || !strings.Contains(err.Error(), "no such table: main.memory_consolidation_runs") {
+		t.Fatalf("legacy project deletion error = %v, want missing memory_consolidation_runs", err)
+	}
+	if err := goose.UpTo(db, ".", 177); err != nil {
+		t.Fatal(err)
+	}
+	var legacyTableCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'memory_consolidation_schedules'`).Scan(&legacyTableCount); err != nil {
+		t.Fatal(err)
+	}
+	if legacyTableCount != 0 {
+		t.Fatalf("legacy memory schedule table count = %d, want 0", legacyTableCount)
+	}
+	if _, err := db.Exec(`DELETE FROM projects WHERE id = 'suggestion-engine-fixture'`); err != nil {
+		t.Fatalf("project deletion after migration 177: %v", err)
+	}
+}
+
 func TestMigration153TelegramUsernameOnlyLookupIndexDownDropsOnlyNewIndex(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "telegram-username-index-153.db")
 	db := openMigrationTestDB(t, dbPath)
@@ -1192,8 +1242,8 @@ func TestMigration100_RepairsSkippedChannelTargetsWhenOldLocalDiscordUsed099(t *
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 176 {
-		t.Fatalf("max goose version = %d, want 176", maxVersion)
+	if maxVersion != 178 {
+		t.Fatalf("max goose version = %d, want 178", maxVersion)
 	}
 }
 
@@ -1748,8 +1798,8 @@ func TestMigration107_AllowsLocalDatabaseWithOldSwarmVersion106(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 176 {
-		t.Fatalf("max goose version = %d, want 176", maxVersion)
+	if maxVersion != 178 {
+		t.Fatalf("max goose version = %d, want 178", maxVersion)
 	}
 }
 
@@ -2197,8 +2247,8 @@ func TestMigration082_SkipsWhenLocalDevDBAlreadyApplied082(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 176 {
-		t.Fatalf("max goose version = %d, want 176", maxVersion)
+	if maxVersion != 178 {
+		t.Fatalf("max goose version = %d, want 178", maxVersion)
 	}
 }
 
@@ -2533,8 +2583,8 @@ func TestMigration091_LocalDevAlreadyAppliedUsageChainStillMigrates(t *testing.T
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 176 {
-		t.Fatalf("max goose version = %d, want 176", maxVersion)
+	if maxVersion != 178 {
+		t.Fatalf("max goose version = %d, want 178", maxVersion)
 	}
 }
 

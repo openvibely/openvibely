@@ -3016,6 +3016,31 @@ func gitHubTokenEnvForURL(token, rawURL string) []string {
 	}
 }
 
+func (s *GitHubService) IsManagedProjectRepo(ctx context.Context, projectID, repoPath string) (bool, error) {
+	root := strings.TrimSpace(s.projectRepoRoot)
+	if s.settingsRepo != nil {
+		settingRoot, err := s.settingsRepo.Get(ctx, GitHubSettingProjectRepoRoot)
+		if err != nil {
+			return false, err
+		}
+		if strings.TrimSpace(settingRoot) != "" {
+			root = strings.TrimSpace(settingRoot)
+		}
+	}
+	if root == "" {
+		root = "./repos"
+	}
+	rootAbs, err := filepath.Abs(root)
+	if err != nil {
+		return false, err
+	}
+	repoAbs, err := filepath.Abs(strings.TrimSpace(repoPath))
+	if err != nil {
+		return false, err
+	}
+	return repoAbs == filepath.Join(rootAbs, projectID), nil
+}
+
 func (s *GitHubService) ensureRepoRoot(ctx context.Context) (string, error) {
 	root := strings.TrimSpace(s.projectRepoRoot)
 	if s.settingsRepo != nil {

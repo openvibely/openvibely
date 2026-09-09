@@ -21,6 +21,50 @@ func createServiceGoalTestProject(t *testing.T, ctx context.Context, db *sql.DB)
 	return project
 }
 
+func TestTaskGoalService_MarkAchievedTriggersOnlySuccessfulTransition(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	project := createServiceGoalTestProject(t, ctx, db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	task := &models.Task{ProjectID: project.ID, Title: "Goal achieved callback", Category: models.CategoryCompleted, Status: models.StatusCompleted, Prompt: "prompt", Priority: 2}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	svc := NewTaskGoalService(repository.NewTaskGoalRepo(db), taskRepo, nil)
+	calls := 0
+	svc.SetGoalAchievedHandler(func(gotCtx context.Context, taskID, goalID string) {
+		if gotCtx != ctx || taskID != task.ID {
+			t.Errorf("callback = (%v, %q), want original context and %q", gotCtx, taskID, task.ID)
+		}
+		if goalID == "" {
+			t.Error("callback goal ID is empty")
+		}
+		calls++
+	})
+	goal, err := svc.SetGoal(ctx, task.ID, "finish", GoalOptions{})
+	if err != nil {
+		t.Fatalf("set goal: %v", err)
+	}
+	if _, err := svc.MarkAchieved(ctx, task.ID, "stale", "not yet"); !errors.Is(err, ErrTaskGoalStaleUpdate) {
+		t.Fatalf("stale MarkAchieved error = %v", err)
+	}
+	if calls != 0 {
+		t.Fatalf("callback calls after stale transition = %d, want 0", calls)
+	}
+	if _, err := svc.MarkAchieved(ctx, task.ID, goal.GoalID, "done"); err != nil {
+		t.Fatalf("MarkAchieved: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("callback calls after achievement = %d, want 1", calls)
+	}
+	if _, err := svc.MarkAchieved(ctx, task.ID, goal.GoalID, "duplicate"); !errors.Is(err, ErrTaskGoalStaleUpdate) {
+		t.Fatalf("duplicate MarkAchieved error = %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("callback calls after duplicate transition = %d, want 1", calls)
+	}
+}
+
 func TestTaskGoalService_ValidationPauseResumeClear(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
