@@ -2,9 +2,9 @@
 name: openvibely_architecture
 type: project
 created: 2026-05-09
-updated: 2026-09-07
-source: after_complete
-source_id: b93ad900893a42ca145b13f60695032e:c822a46750a4e5c8
+updated: 2026-09-08
+source: consolidation
+source_id: memory_consolidation_2026-09-08
 confidence: high
 title: OpenVibely Architecture
 ---
@@ -42,8 +42,8 @@ OAuth, hosted deployment, and Docker:
 Reflection, ownership, and handlers:
 - Reflection `hour`, `day`, and `week` are rolling windows; `day` means the last 24 hours. Change statistics prefer app-produced `task_commit_stats` and use Git only for the true pre-stats range. Shared bounded numstat parsing covers task output, safety, dirty-worktree, merge/squash, conflict, rebase, and GitHub publication commits; fast-forward merges add no extra row, and generated artifacts later absent from the maintained branch are pollution.
 - `internal/handler` is the Echo boundary: `handler.go` owns dependencies/routes while feature files own task, project, chat, model, auth, integration, SSE, worktree, HTMX, and API behavior.
-- GitHub-backed project update fix PR `#1031` is open for issue `#1022`, pending human review. The handler normalizes and compares repository identity before side effects: unchanged identities, including trailing-slash and `.git` spellings, preserve the managed checkout plus stored canonical URL/path without calling `RecloneProjectRepo`; genuinely different repositories and local-to-GitHub transitions still re-clone and persist normalized values. Handler regressions cover clone-service unavailability, equivalent URLs, changed repositories, transitions, and filesystem marker preservation. A separate strict read-only audit on 2026-09-07 reviewed published PR head `f5fdcca47aab6b6433eb9a4368a35649351073fe` and found no material bugs, regressions, or missing acceptance requirements; tests were intentionally not rerun during the audit.
-- Compact project-aware projections are used for polling, metrics, detail lists, upcoming work, and the Schedule primary-Agent selector. The selector returns only `id`, `name`, and `model` after SQL filters enabled/selectable/non-archived/generated/project-or-global availability; full Agent reads remain for Task Detail/configuration.
+- GitHub-backed project updates normalize and compare repository identity before side effects. Equivalent URLs, including trailing-slash and `.git` spellings, preserve the managed checkout and canonical stored URL/path without recloning; genuinely different repositories and local-to-GitHub transitions re-clone and persist normalized values. Handler coverage protects clone-service unavailability, equivalent URLs, changed repositories, transitions, and filesystem preservation of both untracked files and local-only branches. Issue `#1022` is implemented by the guard tracked in PR `#1031`, with strengthened checkout-state regression coverage in PR `#1038`.
+- Compact project-aware projections are used for polling, metrics, detail lists, upcoming work, the Schedule primary-Agent selector, and Task UI. Task board cards need Agent ID/name; New Task and Task Detail/edit selectors use a request-scoped scalar catalog (`id`, `name`, `model`, scope/project, selectable/enabled/generated/archive state) rather than rich configuration hydration. SQL preserves project-or-global availability, ordering, `No Agent`, and an assigned disabled/non-selectable but non-archived Agent fallback. Full Agent reads remain limited to deliberate Agent detail/configuration, execution, lifecycle, skills, plugins, MCP, and management paths.
 - Scheduler active admission uses compact `TaskRepo.ListActivePendingAdmissions` metadata and leaves authoritative full hydration to `WorkerService.dispatchNext`, preserving exclusions, ordering, swarm-parent routing, and claim semantics. `UpcomingRepo` shares canonical projections and a bounded helper across running, pending, and scheduled lists without changing response shapes.
 - Browser execution, review, lifecycle, goal, Insights, and configuration endpoints enforce project ownership before reading or mutating data and return controlled non-success responses without leaking prompts, outputs, skills, memory, events, goals, or analytics. Task-goal browser routes require an explicit non-empty `project_id` or selected-project boundary.
 - Project-scoped batch task category updates preflight the complete submitted ID set against the requested project before schedule/model-availability checks, worker submission, or mutation; foreign, missing, and mixed-project IDs fail without partial lifecycle, category, or display-order changes, while valid same-project Active and HTMX behavior remains unchanged.
