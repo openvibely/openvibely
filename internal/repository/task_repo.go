@@ -1144,8 +1144,16 @@ func scanSwarmInspectionTask(scan func(dest ...any) error) (models.Task, error) 
 	return t, err
 }
 
+type TaskWorktreeCleanup struct {
+	TaskID         string
+	WorktreePath   string
+	WorktreeBranch string
+	DeleteBranch   bool
+}
+
 type TaskDeletionManifest struct {
 	TaskIDs                  []string
+	TaskWorktrees            []TaskWorktreeCleanup
 	TaskAttachmentPaths      []string
 	ExecutionAttachmentPaths []string
 	PendingUploadSessionIDs  []string

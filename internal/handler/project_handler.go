@@ -579,7 +579,7 @@ func (h *Handler) DeleteProject(c echo.Context) error {
 		}
 		applog.Infof("[handler] DeleteProject filesystem cleanup warning: %v", cleanupErr)
 		if isHTMX(c) {
-			setHTMXToast(c, "Project deleted, but some attachment files could not be removed.", "warning")
+			setHTMXToast(c, "Project deleted, but some staged filesystem or runtime cleanup could not be completed.", "warning")
 		}
 	}
 

@@ -215,6 +215,34 @@ func (r *ProjectRepo) DeleteWithCleanupManifest(ctx context.Context, id string, 
 	if err = readStrings(`SELECT id FROM tasks WHERE project_id = ? ORDER BY created_at, id`, &manifest.TaskIDs, id); err != nil {
 		return manifest, false, fmt.Errorf("listing project tasks for deletion: %w", err)
 	}
+	worktreeRows, queryErr := tx.QueryContext(ctx, `
+		SELECT t.id, t.worktree_path, t.worktree_branch,
+		       t.worktree_branch <> '' AND NOT EXISTS (
+		           SELECT 1 FROM tasks other
+		           WHERE other.project_id <> t.project_id
+		             AND other.worktree_branch = t.worktree_branch
+		       )
+		FROM tasks t
+		WHERE t.project_id = ? AND t.worktree_path <> ''
+		ORDER BY t.created_at, t.id`, id)
+	if queryErr != nil {
+		return manifest, false, fmt.Errorf("listing project task worktrees for deletion: %w", queryErr)
+	}
+	for worktreeRows.Next() {
+		var worktree TaskWorktreeCleanup
+		if scanErr := worktreeRows.Scan(&worktree.TaskID, &worktree.WorktreePath, &worktree.WorktreeBranch, &worktree.DeleteBranch); scanErr != nil {
+			_ = worktreeRows.Close()
+			return manifest, false, fmt.Errorf("scanning project task worktree for deletion: %w", scanErr)
+		}
+		manifest.TaskWorktrees = append(manifest.TaskWorktrees, worktree)
+	}
+	if rowsErr := worktreeRows.Err(); rowsErr != nil {
+		_ = worktreeRows.Close()
+		return manifest, false, fmt.Errorf("listing project task worktrees for deletion: %w", rowsErr)
+	}
+	if closeErr := worktreeRows.Close(); closeErr != nil {
+		return manifest, false, fmt.Errorf("closing project task worktrees for deletion: %w", closeErr)
+	}
 	if err = readStrings(`
 		SELECT DISTINCT ta.file_path
 		FROM task_attachments ta
@@ -265,6 +293,12 @@ func (r *ProjectRepo) DeleteWithCleanupManifest(ctx context.Context, id string, 
 		if err = beforeDelete(manifest); err != nil {
 			return manifest, false, err
 		}
+	}
+
+	// Mutation history stores project ownership as a historical scalar rather than
+	// a foreign key, so it must participate explicitly in project deletion.
+	if _, err = tx.ExecContext(ctx, `DELETE FROM agent_config_mutations WHERE project_id = ?`, id); err != nil {
+		return manifest, false, fmt.Errorf("deleting project agent mutation history: %w", err)
 	}
 
 	// Project-scoped Agents use SET NULL so task deletion can preserve global
