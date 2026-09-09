@@ -60,6 +60,7 @@ type Handler struct {
 	chatBroadcaster            *events.ChatBroadcaster
 	fileChangeBroadcaster      *events.FileChangeBroadcaster
 	executionStreamHub         *events.ExecutionStreamHub
+	liveSSEWriteObserver       func(int) // test seam invoked after a live SSE event is written
 	telegramService            *service.TelegramService
 	xService                   *service.XService
 	xServiceMu                 sync.RWMutex

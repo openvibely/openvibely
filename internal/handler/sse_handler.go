@@ -11,23 +11,42 @@ import (
 )
 
 func writeSSEEvent(w http.ResponseWriter, eventType string, payload any) error {
+	_, err := writeSSEEventWithBytes(w, eventType, payload)
+	return err
+}
+
+func writeSSEEventWithBytes(w http.ResponseWriter, eventType string, payload any) (int, error) {
 	data, err := json.Marshal(payload)
 	if err != nil {
-		return err
+		return 0, err
 	}
+
+	written := 0
 	if eventType != "" {
-		if _, err := fmt.Fprintf(w, "event: %s\n", eventType); err != nil {
-			return err
+		n, err := fmt.Fprintf(w, "event: %s\n", eventType)
+		written += n
+		if err != nil {
+			return written, err
 		}
 	}
-	_, err = fmt.Fprintf(w, "data: %s\n\n", string(data))
+	n, err := fmt.Fprintf(w, "data: %s\n\n", string(data))
+	written += n
+	return written, err
+}
+
+func (h *Handler) writeLiveSSEEvent(w http.ResponseWriter, eventType string, payload any) error {
+	written, err := writeSSEEventWithBytes(w, eventType, payload)
+	if err == nil && h.liveSSEWriteObserver != nil {
+		h.liveSSEWriteObserver(written)
+	}
 	return err
 }
 
 // LiveEventsSSE handles a single multiplexed SSE stream for task, chat, and file-change events.
 // Optional filters:
-// - project_id: limits task/chat events to one project
-// - task_id: limits file-change events to one task
+//   - project_id: limits task/chat events to one project
+//   - task_id: limits file-change events to one task; project-only streams do not
+//     subscribe to file changes because they cannot be routed by project.
 func (h *Handler) LiveEventsSSE(c echo.Context) error {
 	projectID := c.QueryParam("project_id")
 	taskID := c.QueryParam("task_id")
@@ -35,7 +54,13 @@ func (h *Handler) LiveEventsSSE(c echo.Context) error {
 	var taskSub events.Subscriber
 	var taskCount int
 	if h.broadcaster != nil {
-		sub, err := h.broadcaster.Subscribe()
+		var sub events.Subscriber
+		var err error
+		if projectID == "" {
+			sub, err = h.broadcaster.Subscribe()
+		} else {
+			sub, err = h.broadcaster.SubscribeProject(projectID)
+		}
 		if err == events.ErrMaxSubscribers {
 			applog.Infof("[sse-live] task subscriber limit reached, rejecting connection")
 			return c.String(http.StatusServiceUnavailable, "Too many SSE connections")
@@ -52,7 +77,13 @@ func (h *Handler) LiveEventsSSE(c echo.Context) error {
 	var chatSub events.ChatSubscriber
 	var chatCount int
 	if h.chatBroadcaster != nil {
-		sub, err := h.chatBroadcaster.Subscribe()
+		var sub events.ChatSubscriber
+		var err error
+		if projectID == "" {
+			sub, err = h.chatBroadcaster.Subscribe()
+		} else {
+			sub, err = h.chatBroadcaster.SubscribeProject(projectID)
+		}
 		if err == events.ErrMaxSubscribers {
 			applog.Infof("[sse-live] chat subscriber limit reached, rejecting connection")
 			return c.String(http.StatusServiceUnavailable, "Too many SSE connections")
@@ -68,8 +99,14 @@ func (h *Handler) LiveEventsSSE(c echo.Context) error {
 
 	var fileSub events.FileChangeSubscriber
 	var fileCount int
-	if h.fileChangeBroadcaster != nil {
-		sub, err := h.fileChangeBroadcaster.Subscribe()
+	if h.fileChangeBroadcaster != nil && (projectID == "" || taskID != "") {
+		var sub events.FileChangeSubscriber
+		var err error
+		if taskID == "" {
+			sub, err = h.fileChangeBroadcaster.Subscribe()
+		} else {
+			sub, err = h.fileChangeBroadcaster.SubscribeTask(taskID)
+		}
 		if err == events.ErrMaxSubscribers {
 			applog.Infof("[sse-live] file subscriber limit reached, rejecting connection")
 			return c.String(http.StatusServiceUnavailable, "Too many SSE connections")
@@ -116,7 +153,7 @@ func (h *Handler) LiveEventsSSE(c echo.Context) error {
 			if projectID != "" && event.ProjectID != projectID {
 				continue
 			}
-			if err := writeSSEEvent(c.Response(), string(event.Type), event); err != nil {
+			if err := h.writeLiveSSEEvent(c.Response(), string(event.Type), event); err != nil {
 				applog.Infof("[sse-live] error sending task event: %v", err)
 				return err
 			}
@@ -125,7 +162,7 @@ func (h *Handler) LiveEventsSSE(c echo.Context) error {
 			if projectID != "" && event.ProjectID != projectID {
 				continue
 			}
-			if err := writeSSEEvent(c.Response(), string(event.Type), event); err != nil {
+			if err := h.writeLiveSSEEvent(c.Response(), string(event.Type), event); err != nil {
 				applog.Infof("[sse-live] error sending chat event: %v", err)
 				return err
 			}
@@ -134,7 +171,7 @@ func (h *Handler) LiveEventsSSE(c echo.Context) error {
 			if taskID != "" && event.TaskID != taskID {
 				continue
 			}
-			if err := writeSSEEvent(c.Response(), string(event.Type), event); err != nil {
+			if err := h.writeLiveSSEEvent(c.Response(), string(event.Type), event); err != nil {
 				applog.Infof("[sse-live] error sending file event: %v", err)
 				return err
 			}
