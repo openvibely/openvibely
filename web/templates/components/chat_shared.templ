@@ -1615,18 +1615,24 @@ templ ChatInputForm(config ChatInputFormConfig) {
 
 				function _composerFocusVisible(element) {
 					if (!element || !element.isConnected || element.disabled || element.hidden) return false;
-					if (element.closest('[hidden], [inert], .hidden')) return false;
+					if (element.closest('[hidden], [inert], .hidden, dialog:not([open])')) return false;
 					var style = window.getComputedStyle ? window.getComputedStyle(element) : null;
 					return !style || (style.display !== 'none' && style.visibility !== 'hidden');
 				}
 
 				function _composerFocusOverlayActive() {
-					return !!document.querySelector('dialog[open], [role="dialog"][aria-modal="true"], [data-chat-actions-open="true"], [aria-haspopup][aria-expanded="true"], [data-openvibely-menu-open="true"]');
+					var overlays = document.querySelectorAll('dialog[open], [role="dialog"][aria-modal="true"], [data-chat-actions-open="true"], [aria-haspopup][aria-expanded="true"], [data-openvibely-menu-open="true"]');
+					for (var i = 0; i < overlays.length; i++) {
+						var overlay = overlays[i];
+						if (overlay.tagName === 'DIALOG' && !overlay.open) continue;
+						if (_composerFocusVisible(overlay)) return true;
+					}
+					return false;
 				}
 
 				function _composerFocusMeaningful(element) {
 					if (!element || element === document.body || element === document.documentElement) return false;
-					return element.matches('input, textarea, select, button, a[href], [contenteditable="true"], [tabindex]:not([tabindex="-1"])');
+					return _composerFocusVisible(element) && element.matches('input, textarea, select, button, a[href], [contenteditable="true"], [tabindex]:not([tabindex="-1"])');
 				}
 
 				window.openVibelyCancelComposerFocus = _cancelComposerFocus;
