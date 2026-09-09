@@ -266,6 +266,43 @@ func (s *AutomationGraphService) List(ctx context.Context, projectID string) ([]
 	return cards, nil
 }
 
+// AutomationCardSummary converts an AutomationCard to the compact prompt-safe
+// shape exposed by Chat Automation read and maintained-template update actions.
+// It intentionally omits YAML and graph content.
+func AutomationCardSummary(card models.AutomationCard) map[string]any {
+	paused := card.Automation.LifecycleState == models.AutomationPaused
+	summary := map[string]any{
+		"id":                        card.Automation.ID,
+		"name":                      card.Automation.Name,
+		"status":                    string(card.Automation.LifecycleState),
+		"paused":                    paused,
+		"adapter_key":               card.Version.AdapterKey,
+		"template_update_available": card.TemplateUpdateAvailable,
+		"node_count": card.Counts.Running + card.Counts.Waiting +
+			card.Counts.Blocked + card.Counts.Failed + card.Counts.CompletedRecently,
+		"counts": map[string]int{
+			"running":            card.Counts.Running,
+			"waiting":            card.Counts.Waiting,
+			"blocked":            card.Counts.Blocked,
+			"failed":             card.Counts.Failed,
+			"completed_recently": card.Counts.CompletedRecently,
+		},
+	}
+	if card.Automation.TemplateRevision != nil {
+		summary["template_revision"] = *card.Automation.TemplateRevision
+	}
+	if current := CurrentAutomationTemplateRevision(card.Version.AdapterKey); current > 0 {
+		summary["current_template_revision"] = current
+	}
+	if card.NextRun != nil {
+		summary["next_run"] = card.NextRun.UTC().Format("2006-01-02T15:04:05Z")
+	}
+	if card.LastRun != nil {
+		summary["last_run"] = card.LastRun.UTC().Format("2006-01-02T15:04:05Z")
+	}
+	return summary
+}
+
 // ListPage returns one bounded portfolio page while keeping template revision
 // enrichment identical to the full portfolio path.
 func (s *AutomationGraphService) ListPage(ctx context.Context, projectID string, limit, offset int, search string) ([]models.AutomationCard, error) {

@@ -1270,7 +1270,7 @@ func channelListAutomationsResult(ctx context.Context, graphSvc *AutomationGraph
 	}
 	summaries := make([]map[string]any, 0, len(cards))
 	for _, card := range cards {
-		summaries = append(summaries, channelAutomationCardSummary(card))
+		summaries = append(summaries, AutomationCardSummary(card))
 	}
 	return marshalChannelAutomationResult(map[string]any{"automations": summaries})
 }
@@ -1297,7 +1297,7 @@ func channelGetAutomationResult(ctx context.Context, graphSvc *AutomationGraphSe
 	}
 	for _, card := range cards {
 		if card.Automation.ID == automationID {
-			return marshalChannelAutomationResult(map[string]any{"automation": channelAutomationCardSummary(card)})
+			return marshalChannelAutomationResult(map[string]any{"automation": AutomationCardSummary(card)})
 		}
 	}
 	return marshalChannelAutomationResult(map[string]any{"error": fmt.Sprintf("automation %q not found in project %s", automationID, projectID), "found": false})
@@ -1359,7 +1359,7 @@ func ExecuteAutomationTemplateUpdateRuntime(ctx context.Context, opts Automation
 	result["ok"] = true
 	result["applied"] = true
 	result["message"] = fmt.Sprintf("Automation %q was updated to the latest maintained template", fresh.Automation.Name)
-	result["automation"] = channelAutomationCardSummary(*fresh)
+	result["automation"] = AutomationCardSummary(*fresh)
 	return marshalChannelAutomationResult(result)
 }
 
@@ -1424,7 +1424,7 @@ func automationTemplateUpdateNoopResult(projectID string, card models.Automation
 	result["applied"] = false
 	result["reason"] = reason
 	result["message"] = message
-	result["automation"] = channelAutomationCardSummary(card)
+	result["automation"] = AutomationCardSummary(card)
 	return result
 }
 
@@ -1456,40 +1456,6 @@ func resolveChannelAutomationProjectID(currentProjectID, requestedProjectID, too
 		return "", fmt.Errorf("project_id %q is outside the caller's authorized project context", requestedProjectID)
 	}
 	return currentProjectID, nil
-}
-
-func channelAutomationCardSummary(card models.AutomationCard) map[string]any {
-	paused := card.Automation.LifecycleState == models.AutomationPaused
-	summary := map[string]any{
-		"id":                        card.Automation.ID,
-		"name":                      card.Automation.Name,
-		"status":                    string(card.Automation.LifecycleState),
-		"paused":                    paused,
-		"adapter_key":               card.Version.AdapterKey,
-		"template_update_available": card.TemplateUpdateAvailable,
-		"node_count": card.Counts.Running + card.Counts.Waiting +
-			card.Counts.Blocked + card.Counts.Failed + card.Counts.CompletedRecently,
-		"counts": map[string]int{
-			"running":            card.Counts.Running,
-			"waiting":            card.Counts.Waiting,
-			"blocked":            card.Counts.Blocked,
-			"failed":             card.Counts.Failed,
-			"completed_recently": card.Counts.CompletedRecently,
-		},
-	}
-	if card.Automation.TemplateRevision != nil {
-		summary["template_revision"] = *card.Automation.TemplateRevision
-	}
-	if current := CurrentAutomationTemplateRevision(card.Version.AdapterKey); current > 0 {
-		summary["current_template_revision"] = current
-	}
-	if card.NextRun != nil {
-		summary["next_run"] = card.NextRun.UTC().Format("2006-01-02T15:04:05Z")
-	}
-	if card.LastRun != nil {
-		summary["last_run"] = card.LastRun.UTC().Format("2006-01-02T15:04:05Z")
-	}
-	return summary
 }
 
 func marshalChannelAutomationResult(value any) (string, error) {

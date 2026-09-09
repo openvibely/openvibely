@@ -1117,7 +1117,7 @@ func automationsContent(cards []models.AutomationCard, currentProjectID string, 
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 70, "<h3 class=\"pr-10 text-lg font-bold text-error\">Delete automation</h3><p class=\"py-4\">Delete <strong id=\"delete-automation-card-name\"></strong>? This permanently deletes the saved Automation graph and Automation record.</p><div class=\"rounded-lg bg-base-200 p-3 text-sm text-base-content/70\">Existing tasks remain. Automation-owned trigger schedules will be deleted. This cannot be undone.</div><div class=\"modal-action\"><button class=\"btn\" type=\"button\" onclick=\"document.getElementById('delete-automation-card-modal').close()\">Cancel</button><form id=\"delete-automation-card-form\" method=\"post\" action=\"\" onsubmit=\"event.preventDefault(); event.stopImmediatePropagation(); window.openVibelySubmitNavigate(this); return false;\"><input type=\"hidden\" name=\"project_id\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 70, "<h3 class=\"pr-10 text-lg font-bold text-error\">Delete automation</h3><p class=\"py-4\">Delete <strong id=\"delete-automation-card-name\"></strong>? This permanently deletes the saved Automation graph and Automation record.</p><div class=\"rounded-lg bg-base-200 p-3 text-sm text-base-content/70\">Automation-owned trigger tasks and schedules will be deleted. Implementation, outcome, issue-created, and other independent tasks remain. This cannot be undone.</div><div class=\"modal-action\"><button class=\"btn\" type=\"button\" onclick=\"document.getElementById('delete-automation-card-modal').close()\">Cancel</button><form id=\"delete-automation-card-form\" method=\"post\" action=\"\" onsubmit=\"event.preventDefault(); event.stopImmediatePropagation(); window.openVibelySubmitNavigate(this); return false;\"><input type=\"hidden\" name=\"project_id\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -2343,7 +2343,7 @@ func automationLiveContent(graph models.AutomationLiveGraph, currentProjectID st
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 159, "</strong>? This permanently deletes the saved Automation graph and Automation record.</p><div class=\"rounded-lg bg-base-200 p-3 text-sm text-base-content/70\">Existing tasks remain. Automation-owned trigger schedules will be deleted. This cannot be undone.</div><div class=\"modal-action\"><button class=\"btn\" type=\"button\" onclick=\"document.getElementById('delete-automation-modal').close()\">Cancel</button><form method=\"post\" action=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 159, "</strong>? This permanently deletes the saved Automation graph and Automation record.</p><div class=\"rounded-lg bg-base-200 p-3 text-sm text-base-content/70\">Automation-owned trigger tasks and schedules will be deleted. Implementation, outcome, issue-created, and other independent tasks remain. This cannot be undone.</div><div class=\"modal-action\"><button class=\"btn\" type=\"button\" onclick=\"document.getElementById('delete-automation-modal').close()\">Cancel</button><form method=\"post\" action=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -4124,7 +4124,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 320, "</strong>? This permanently deletes this Automation graph and its saved design.</p><div class=\"rounded-lg bg-base-200 p-3 text-sm text-base-content/70\">Existing tasks remain. Any Automation-owned trigger schedules will be deleted. This cannot be undone.</div><div class=\"modal-action\"><button class=\"btn\" type=\"button\" onclick=\"document.getElementById('delete-automation-modal').close()\">Cancel</button><form method=\"post\" action=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 320, "</strong>? This permanently deletes this Automation graph and its saved design.</p><div class=\"rounded-lg bg-base-200 p-3 text-sm text-base-content/70\">Automation-owned trigger tasks and schedules will be deleted. Implementation, outcome, issue-created, and other independent tasks remain. This cannot be undone.</div><div class=\"modal-action\"><button class=\"btn\" type=\"button\" onclick=\"document.getElementById('delete-automation-modal').close()\">Cancel</button><form method=\"post\" action=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

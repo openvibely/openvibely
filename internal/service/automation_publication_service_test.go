@@ -1782,7 +1782,7 @@ func TestAutomationPauseOrArchiveAfterChildActivationPreventsSubmission(t *testi
 	}
 }
 
-func TestAutomationDeleteRemovesOwnedScheduleAndPreservesTask(t *testing.T) {
+func TestAutomationDeleteRemovesOwnedScheduleAndTriggerTask(t *testing.T) {
 	h := newAutomationSaveHarness(t, "Atomic delete")
 	ctx := context.Background()
 	candidate, err := h.drafts.TemplateCandidate(AutomationAdapterNativeSDLC)
@@ -1794,7 +1794,7 @@ func TestAutomationDeleteRemovesOwnedScheduleAndPreservesTask(t *testing.T) {
 	require.NoError(t, h.lifecycle.Delete(ctx, h.project.ID, saved.Definition.Automation.ID))
 	task, err := h.taskRepo.GetByID(ctx, taskID)
 	require.NoError(t, err)
-	require.NotNil(t, task)
+	require.Nil(t, task)
 	schedule, err := h.scheduleRepo.GetByID(ctx, scheduleID)
 	require.NoError(t, err)
 	require.Nil(t, schedule)

@@ -173,6 +173,8 @@ func TestAutomationPagesRenderRegisteredDefinitionsAndEnforceProject(t *testing.
 	require.Contains(t, portfolio.Body.String(), fmt.Sprintf(`data-automation-delete-url="/automations/%s/delete?project_id=%s"`, definition.Automation.ID, project.ID))
 	require.NotContains(t, portfolio.Body.String(), "Published autonomous processes")
 	require.Contains(t, portfolio.Body.String(), `data-card-search="automations"`)
+	require.Contains(t, portfolio.Body.String(), "Automation-owned trigger tasks and schedules will be deleted")
+	require.Contains(t, portfolio.Body.String(), "Implementation, outcome, issue-created, and other independent tasks remain")
 	require.Contains(t, portfolio.Body.String(), `class="card-body relative"`)
 	require.NotContains(t, portfolio.Body.String(), "Register Existing")
 
@@ -225,7 +227,8 @@ func TestAutomationPagesRenderRegisteredDefinitionsAndEnforceProject(t *testing.
 	require.NotContains(t, mainContent[:mainContentEnd], `aria-selected="true"`)
 	require.Contains(t, detail.Body.String(), `id="delete-automation-modal"`)
 	require.Contains(t, detail.Body.String(), "Delete automation")
-	require.Contains(t, detail.Body.String(), "owned trigger schedules will be deleted")
+	require.Contains(t, detail.Body.String(), "Automation-owned trigger tasks and schedules will be deleted")
+	require.Contains(t, detail.Body.String(), "Implementation, outcome, issue-created, and other independent tasks remain")
 	require.NotContains(t, detail.Body.String(), ">Archive<")
 	require.NotContains(t, detail.Body.String(), "/archive?")
 	require.Contains(t, detail.Body.String(), `data-automation-view-yaml`)
@@ -2252,7 +2255,7 @@ func TestAutomationBuilderWebSaveIsBrowserLocalUntilAtomicSaveAndProjectScoped(t
 	gone, err := automationRepo.GetDefinition(context.Background(), project.ID, automationID)
 	require.NoError(t, err)
 	require.Nil(t, gone)
-	require.Equal(t, taskCountBeforeDelete, tableCountHandler(t, tc, "tasks"), "deleting an Automation must preserve existing tasks")
+	require.Equal(t, taskCountBeforeDelete-ownedScheduleCount, tableCountHandler(t, tc, "tasks"), "deleting an Automation must delete its owned trigger tasks")
 	require.Equal(t, scheduleCountBeforeDelete-ownedScheduleCount, tableCountHandler(t, tc, "schedules"), "deleting an Automation must delete its owned trigger schedules")
 	ownedSchedule, err := tc.scheduleRepo.GetByID(context.Background(), ownedScheduleID)
 	require.NoError(t, err)
@@ -2598,6 +2601,52 @@ func TestAutomationChatChannelRuntimePlanModePreviewOnly(t *testing.T) {
 	require.Zero(t, countRowsForProject(t, tc, "automations", project.ID))
 }
 
+func TestAutomationChatReadToolsPreserveSharedSummaryEnvelope(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().WithName("Automation Chat reads").Build()
+	configureAutomationChatRuntimeTestServices(t, tc)
+	params := streamingResponseParams{ProjectID: project.ID, PrincipalID: "alice"}
+	runtime := tc.handler.buildChatActionToolRuntimeFromDefs(params, newChatActionSummaryCollector(), chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true), models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
+	execute := func(name string, input json.RawMessage) map[string]any {
+		t.Helper()
+		output, handled, isError, err := runtime.Executor(ctx, name, input)
+		require.NoError(t, err)
+		require.True(t, handled)
+		require.False(t, isError, output)
+		var result map[string]any
+		require.NoError(t, json.Unmarshal([]byte(output), &result))
+		return result
+	}
+
+	empty := execute("list_automations", nil)
+	require.Equal(t, []any{}, empty["automations"])
+	unknown := execute("get_automation", json.RawMessage(`{"automation_id":"unknown"}`))
+	require.False(t, unknown["found"].(bool))
+	require.Contains(t, unknown["error"], `automation "unknown" not found in project `+project.ID)
+
+	saved := execute("save_automation", json.RawMessage(`{"source":"template","template_key":"native_sdlc"}`))
+	automationID, _ := saved["automation_id"].(string)
+	require.NotEmpty(t, automationID)
+	cards, err := tc.handler.automationGraphSvc.List(ctx, project.ID)
+	require.NoError(t, err)
+	require.Len(t, cards, 1)
+	expectedJSON, err := json.Marshal(service.AutomationCardSummary(cards[0]))
+	require.NoError(t, err)
+	var expected map[string]any
+	require.NoError(t, json.Unmarshal(expectedJSON, &expected))
+
+	listed := execute("list_automations", nil)
+	automations, _ := listed["automations"].([]any)
+	require.Len(t, automations, 1)
+	listedAutomation, _ := automations[0].(map[string]any)
+	require.Equal(t, expected, listedAutomation)
+
+	got := execute("get_automation", json.RawMessage(fmt.Sprintf(`{"automation_id":%q}`, automationID)))
+	gotAutomation, _ := got["automation"].(map[string]any)
+	require.Equal(t, expected, gotAutomation)
+}
+
 func TestAutomationChatLifecycleActionsRunPauseAndResumeSavedAutomation(t *testing.T) {
 	tc := NewTestContext(t)
 	ctx := context.Background()
@@ -2727,7 +2776,7 @@ func TestAutomationChatDeleteAutomationByIDAndExactNamePreservesDomainTasks(t *t
 	require.NoError(t, err)
 	require.Nil(t, secondSchedule)
 
-	require.Equal(t, taskCountBeforeDelete, countRowsForProject(t, tc, "tasks", project.ID), "deleting Automations must preserve existing domain and Automation-created tasks")
+	require.Equal(t, taskCountBeforeDelete-2, countRowsForProject(t, tc, "tasks", project.ID), "deleting Automations must remove only their Automation-owned trigger tasks")
 	require.Equal(t, scheduleCountBeforeDelete-2, countRowsForProject(t, tc, "schedules", project.ID), "deleting Automations must remove only their owned trigger schedules")
 	retainedDomainTask, err := tc.taskRepo.GetByID(ctx, domainTask.ID)
 	require.NoError(t, err)
@@ -2829,6 +2878,8 @@ func TestAutomationChatDeleteAutomationRejectsInFlightDispatch(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(output), &saved))
 	automationID, _ := saved["automation_id"].(string)
 	require.NotEmpty(t, automationID)
+	taskCountBeforeDelete := countRowsForProject(t, tc, "tasks", project.ID)
+	scheduleCountBeforeDelete := countRowsForProject(t, tc, "schedules", project.ID)
 
 	runOutput, handled, isError, err := runtime.Executor(ctx, "run_automation_now", json.RawMessage(fmt.Sprintf(`{"automation_id":%q}`, automationID)))
 	require.NoError(t, err)
@@ -2842,6 +2893,8 @@ func TestAutomationChatDeleteAutomationRejectsInFlightDispatch(t *testing.T) {
 	definition, err := automationRepo.GetDefinition(ctx, project.ID, automationID)
 	require.NoError(t, err)
 	require.NotNil(t, definition)
+	require.Equal(t, taskCountBeforeDelete, countRowsForProject(t, tc, "tasks", project.ID))
+	require.Equal(t, scheduleCountBeforeDelete, countRowsForProject(t, tc, "schedules", project.ID))
 }
 
 func TestAutomationChatUpdateTemplateAppliesNoopsAndRejectsUnsupportedTargets(t *testing.T) {

@@ -195,42 +195,6 @@ type automationLifecycleActionInput struct {
 	Name         string `json:"name"`
 }
 
-// automationCardSummary converts an AutomationCard to the compact prompt-safe shape
-// exposed by list_automations and get_automation. It intentionally omits YAML/graph content.
-func automationCardSummary(card models.AutomationCard) map[string]any {
-	paused := card.Automation.LifecycleState == models.AutomationPaused
-	summary := map[string]any{
-		"id":                        card.Automation.ID,
-		"name":                      card.Automation.Name,
-		"status":                    string(card.Automation.LifecycleState),
-		"paused":                    paused,
-		"adapter_key":               card.Version.AdapterKey,
-		"template_update_available": card.TemplateUpdateAvailable,
-		"node_count": card.Counts.Running + card.Counts.Waiting +
-			card.Counts.Blocked + card.Counts.Failed + card.Counts.CompletedRecently,
-		"counts": map[string]int{
-			"running":            card.Counts.Running,
-			"waiting":            card.Counts.Waiting,
-			"blocked":            card.Counts.Blocked,
-			"failed":             card.Counts.Failed,
-			"completed_recently": card.Counts.CompletedRecently,
-		},
-	}
-	if card.Automation.TemplateRevision != nil {
-		summary["template_revision"] = *card.Automation.TemplateRevision
-	}
-	if current := service.CurrentAutomationTemplateRevision(card.Version.AdapterKey); current > 0 {
-		summary["current_template_revision"] = current
-	}
-	if card.NextRun != nil {
-		summary["next_run"] = card.NextRun.UTC().Format("2006-01-02T15:04:05Z")
-	}
-	if card.LastRun != nil {
-		summary["last_run"] = card.LastRun.UTC().Format("2006-01-02T15:04:05Z")
-	}
-	return summary
-}
-
 func (h *Handler) executeListAutomationsTool(ctx context.Context, params streamingResponseParams, input json.RawMessage) (string, error) {
 	if h.automationGraphSvc == nil {
 		return marshalAutomationActionResult(map[string]any{"automations": []any{}})
@@ -252,7 +216,7 @@ func (h *Handler) executeListAutomationsTool(ctx context.Context, params streami
 	}
 	summaries := make([]map[string]any, 0, len(cards))
 	for _, card := range cards {
-		summaries = append(summaries, automationCardSummary(card))
+		summaries = append(summaries, service.AutomationCardSummary(card))
 	}
 	return marshalAutomationActionResult(map[string]any{"automations": summaries})
 }
@@ -282,7 +246,7 @@ func (h *Handler) executeGetAutomationTool(ctx context.Context, params streaming
 	}
 	for _, card := range cards {
 		if card.Automation.ID == automationID {
-			return marshalAutomationActionResult(map[string]any{"automation": automationCardSummary(card)})
+			return marshalAutomationActionResult(map[string]any{"automation": service.AutomationCardSummary(card)})
 		}
 	}
 	return marshalAutomationActionResult(map[string]any{"error": fmt.Sprintf("automation %q not found in project %s", automationID, projectID), "found": false})
