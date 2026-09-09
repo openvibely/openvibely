@@ -181,6 +181,56 @@ func TestUpcomingRepo_ListPendingActiveTasks(t *testing.T) {
 	}
 }
 
+func TestUpcomingRepo_ListWaitingActiveTasksIncludesPendingAndQueuedOnly(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	upcomingRepo := NewUpcomingRepo(db)
+	projectRepo := NewProjectRepo(db)
+	taskRepo := NewTaskRepo(db, nil)
+	ctx := context.Background()
+
+	project := createTestProject(t, projectRepo)
+	foreignProject := createTestProject(t, projectRepo)
+	longPrompt := strings.Repeat("q", 300)
+
+	queuedUrgent := &models.Task{ProjectID: project.ID, Title: "Queued urgent", Category: models.CategoryActive, Status: models.StatusQueued, Priority: 4, Prompt: longPrompt}
+	queuedHigh := &models.Task{ProjectID: project.ID, Title: "Queued high", Category: models.CategoryActive, Status: models.StatusQueued, Priority: 3, Prompt: "queued high prompt"}
+	pendingHigh := &models.Task{ProjectID: project.ID, Title: "Pending high", Category: models.CategoryActive, Status: models.StatusPending, Priority: 3, Prompt: "pending high prompt"}
+	excluded := []*models.Task{
+		{ProjectID: foreignProject.ID, Title: "Foreign queued", Category: models.CategoryActive, Status: models.StatusQueued, Priority: 4, Prompt: "foreign"},
+		{ProjectID: project.ID, Title: "Chat queued", Category: models.CategoryChat, Status: models.StatusQueued, Priority: 4, Prompt: "chat"},
+		{ProjectID: project.ID, Title: "Completed terminal", Category: models.CategoryActive, Status: models.StatusCompleted, Priority: 4, Prompt: "terminal"},
+		{ProjectID: project.ID, Title: "Blocked placeholder", Category: models.CategoryActive, Status: models.StatusBlocked, Priority: 4, Prompt: "blocked"},
+	}
+	for _, task := range append([]*models.Task{queuedUrgent, queuedHigh, pendingHigh}, excluded...) {
+		if err := taskRepo.Create(ctx, task); err != nil {
+			t.Fatalf("creating task %q: %v", task.Title, err)
+		}
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE tasks SET display_order = CASE id WHEN ? THEN 2 WHEN ? THEN 1 WHEN ? THEN 3 END WHERE id IN (?, ?, ?)`, queuedUrgent.ID, queuedHigh.ID, pendingHigh.ID, queuedUrgent.ID, queuedHigh.ID, pendingHigh.ID); err != nil {
+		t.Fatalf("setting display order: %v", err)
+	}
+
+	results, err := upcomingRepo.ListWaitingActiveTasks(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("listing waiting active tasks: %v", err)
+	}
+	if len(results) != 3 {
+		t.Fatalf("expected 3 active pending/queued tasks, got %d", len(results))
+	}
+	wantIDs := []string{queuedUrgent.ID, queuedHigh.ID, pendingHigh.ID}
+	for i, wantID := range wantIDs {
+		if results[i].Task.ID != wantID {
+			t.Fatalf("result %d task ID = %q, want %q", i, results[i].Task.ID, wantID)
+		}
+	}
+	if results[0].Task.Status != models.StatusQueued || results[1].Task.Status != models.StatusQueued || results[2].Task.Status != models.StatusPending {
+		t.Fatalf("waiting statuses = [%q %q %q], want [queued queued pending]", results[0].Task.Status, results[1].Task.Status, results[2].Task.Status)
+	}
+	if got, want := results[0].Task.Prompt, longPrompt[:upcomingTaskPromptPreviewLen]; got != want {
+		t.Fatalf("queued prompt preview = %q, want %q", got, want)
+	}
+}
+
 func TestUpcomingRepo_ListRunningTasks_PromptPreviewBounded(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	upcomingRepo := NewUpcomingRepo(db)
