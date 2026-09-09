@@ -266,6 +266,70 @@ func (s *AutomationGraphService) List(ctx context.Context, projectID string) ([]
 	return cards, nil
 }
 
+type automationCardNotFoundError string
+
+func (err automationCardNotFoundError) Error() string {
+	return string(err)
+}
+
+// ResolveAutomationCard selects a saved Automation card in a project by exact
+// ID or an unambiguous case-insensitive name.
+func (s *AutomationGraphService) ResolveAutomationCard(ctx context.Context, projectID, automationID, name string) (models.AutomationCard, error) {
+	cards, err := s.List(ctx, projectID)
+	if err != nil {
+		return models.AutomationCard{}, err
+	}
+	automationID = strings.TrimSpace(automationID)
+	name = strings.TrimSpace(name)
+	if automationID == "" && name == "" {
+		return models.AutomationCard{}, errors.New("automation_id or name is required")
+	}
+	if automationID != "" {
+		for _, card := range cards {
+			if card.Automation.ID == automationID {
+				if name != "" && !strings.EqualFold(strings.TrimSpace(card.Automation.Name), name) {
+					return models.AutomationCard{}, fmt.Errorf("automation_id %q is named %q, not %q", automationID, card.Automation.Name, name)
+				}
+				return card, nil
+			}
+		}
+		return models.AutomationCard{}, automationCardNotFoundError(fmt.Sprintf("automation %q not found in current project", automationID))
+	}
+
+	matches := make([]models.AutomationCard, 0, 1)
+	for _, card := range cards {
+		if strings.EqualFold(strings.TrimSpace(card.Automation.Name), name) {
+			matches = append(matches, card)
+		}
+	}
+	switch len(matches) {
+	case 0:
+		return models.AutomationCard{}, automationCardNotFoundError(fmt.Sprintf("automation named %q not found in current project", name))
+	case 1:
+		return matches[0], nil
+	default:
+		ids := make([]string, 0, len(matches))
+		for _, match := range matches {
+			ids = append(ids, match.Automation.ID)
+		}
+		sort.Strings(ids)
+		return models.AutomationCard{}, fmt.Errorf("automation name %q is ambiguous in current project; use automation_id (%s)", name, strings.Join(ids, ", "))
+	}
+}
+
+// AutomationCardByID returns the current card for an exact Automation ID.
+func (s *AutomationGraphService) AutomationCardByID(ctx context.Context, projectID, automationID string) (*models.AutomationCard, error) {
+	card, err := s.ResolveAutomationCard(ctx, projectID, automationID, "")
+	if err != nil {
+		var notFound automationCardNotFoundError
+		if errors.As(err, &notFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &card, nil
+}
+
 // AutomationCardSummary converts an AutomationCard to the compact prompt-safe
 // shape exposed by Chat Automation read and maintained-template update actions.
 // It intentionally omits YAML and graph content.

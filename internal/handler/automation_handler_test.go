@@ -2676,7 +2676,7 @@ func TestAutomationChatLifecycleActionsRunPauseAndResumeSavedAutomation(t *testi
 	require.NotEmpty(t, automationID)
 	require.True(t, saved["active"].(bool))
 
-	runNow := executeOK("run_automation_now", json.RawMessage(`{"name":"Nightly review loop"}`))
+	runNow := executeOK("run_automation_now", json.RawMessage(`{"name":" nightly REVIEW LOOP "}`))
 	require.Equal(t, automationID, runNow["automation_id"])
 	require.Equal(t, "Nightly review loop", runNow["name"])
 	require.Equal(t, string(models.AutomationActive), runNow["lifecycle_state"])
@@ -2684,7 +2684,7 @@ func TestAutomationChatLifecycleActionsRunPauseAndResumeSavedAutomation(t *testi
 	require.True(t, runNow["started"].(bool))
 	require.NotEmpty(t, runNow["started_invocation_ids"])
 
-	pause := executeOK("pause_automation", json.RawMessage(fmt.Sprintf(`{"automation_id":%q}`, automationID)))
+	pause := executeOK("pause_automation", json.RawMessage(fmt.Sprintf(`{"automation_id":%q,"name":" NIGHTLY REVIEW LOOP "}`, automationID)))
 	require.Equal(t, string(models.AutomationPaused), pause["lifecycle_state"])
 	var enabled bool
 	require.NoError(t, tc.db.QueryRow(`SELECT enabled FROM schedules WHERE id IN (SELECT schedule_id FROM automation_trigger_owners WHERE automation_id = ?)`, automationID).Scan(&enabled))
