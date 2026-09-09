@@ -1758,6 +1758,10 @@ func TestViewUsageAnalyticsRuntimeTool_NoUsageDataReturnsZeroSummary(t *testing.
 	require.False(t, got.ProviderRefreshed)
 	require.NotContains(t, out, "oauth-token-that-must-not-be-used")
 	require.NotContains(t, out, "acct-secret-empty")
+
+	out, err = handler(ctx, json.RawMessage(`{"range":"all","top_limit":0}`))
+	require.Empty(t, out)
+	require.ErrorContains(t, err, "top_limit must be between 1 and 10")
 }
 
 func TestViewUsageAnalyticsRuntimeTool_MultipleModelsProviderFilterAndCostAvailability(t *testing.T) {

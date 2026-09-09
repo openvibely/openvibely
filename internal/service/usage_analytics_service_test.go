@@ -138,6 +138,99 @@ func TestUsageAnalyticsActionFilterFromInput_UsesNormalizedSummary(t *testing.T)
 		t.Fatalf("action filter summary omitted fallback bounds: %+v", summary)
 	}
 }
+
+func TestExecuteViewUsageAnalyticsTool_ValidatesResultLimitsAndPreservesDefaults(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	usageRepo := repository.NewUsageRepo(db)
+	svc := NewUsageAnalyticsService(usageRepo, repository.NewLLMConfigRepo(db))
+	project := &models.Project{Name: "Usage Analytics Tool Project"}
+	if err := repository.NewProjectRepo(db).Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	projectID := project.ID
+
+	for i := 0; i < 12; i++ {
+		if err := usageRepo.RecordUsageEvent(ctx, &models.LLMUsageEvent{
+			Provider:    fmt.Sprintf("provider-%02d", i),
+			ProjectID:   projectID,
+			Model:       fmt.Sprintf("model-%02d", i),
+			Operation:   "chat",
+			Status:      "completed",
+			InputTokens: 100 + i,
+			OccurredAt:  time.Now().UTC().AddDate(0, 0, -i),
+		}); err != nil {
+			t.Fatalf("seed usage event %d: %v", i, err)
+		}
+	}
+
+	for _, input := range []struct {
+		name    string
+		payload string
+		wantErr string
+	}{
+		{name: "top limit zero", payload: `{"range":"all","top_limit":0}`, wantErr: "top_limit must be between 1 and 10"},
+		{name: "top limit above maximum", payload: `{"range":"all","top_limit":11}`, wantErr: "top_limit must be between 1 and 10"},
+		{name: "recent limit below minimum", payload: `{"range":"all","recent_bucket_limit":-1}`, wantErr: "recent_bucket_limit must be between 0 and 24"},
+		{name: "recent limit above maximum", payload: `{"range":"all","recent_bucket_limit":25}`, wantErr: "recent_bucket_limit must be between 0 and 24"},
+	} {
+		t.Run(input.name, func(t *testing.T) {
+			out, err := ExecuteViewUsageAnalyticsTool(ctx, svc, projectID, json.RawMessage(input.payload))
+			if err == nil || !strings.Contains(err.Error(), input.wantErr) {
+				t.Fatalf("ExecuteViewUsageAnalyticsTool() error = %v, want %q", err, input.wantErr)
+			}
+			if out != "" {
+				t.Fatalf("ExecuteViewUsageAnalyticsTool() output = %q, want empty on input error", out)
+			}
+		})
+	}
+
+	channelHandler := buildChannelUtilityActionHandlers(channelUtilityActionHandlerOptions{
+		ProjectID:         projectID,
+		UsageAnalyticsSvc: svc,
+	})["view_usage_analytics"]
+	if channelHandler == nil {
+		t.Fatal("channel view_usage_analytics handler missing")
+	}
+	out, err := channelHandler(ctx, json.RawMessage(`{"range":"all","top_limit":0}`))
+	if err == nil || !strings.Contains(err.Error(), "top_limit must be between 1 and 10") {
+		t.Fatalf("channel view_usage_analytics error = %v, want top_limit input error", err)
+	}
+	if out != "" {
+		t.Fatalf("channel view_usage_analytics output = %q, want empty on input error", out)
+	}
+
+	decode := func(t *testing.T, payload string) usageAnalyticsActionResponse {
+		t.Helper()
+		out, err := ExecuteViewUsageAnalyticsTool(ctx, svc, projectID, json.RawMessage(payload))
+		if err != nil {
+			t.Fatalf("ExecuteViewUsageAnalyticsTool(%s): %v", payload, err)
+		}
+		var response usageAnalyticsActionResponse
+		if err := json.Unmarshal([]byte(out), &response); err != nil {
+			t.Fatalf("decode action response: %v", err)
+		}
+		return response
+	}
+
+	defaults := decode(t, `{"range":"all"}`)
+	if len(defaults.TopModels) != 5 || len(defaults.TopProviders) != 5 || len(defaults.RecentBuckets) != 8 {
+		t.Fatalf("default result limits = models:%d providers:%d recent:%d, want 5, 5, 8", len(defaults.TopModels), len(defaults.TopProviders), len(defaults.RecentBuckets))
+	}
+	one := decode(t, `{"range":"all","top_limit":1}`)
+	if len(one.TopModels) != 1 || len(one.TopProviders) != 1 {
+		t.Fatalf("top_limit 1 result limits = models:%d providers:%d, want 1, 1", len(one.TopModels), len(one.TopProviders))
+	}
+	ten := decode(t, `{"range":"all","top_limit":10}`)
+	if len(ten.TopModels) != 10 || len(ten.TopProviders) != 10 {
+		t.Fatalf("top_limit 10 result limits = models:%d providers:%d, want 10, 10", len(ten.TopModels), len(ten.TopProviders))
+	}
+	withoutRecent := decode(t, `{"range":"all","recent_bucket_limit":0}`)
+	if len(withoutRecent.RecentBuckets) != 0 {
+		t.Fatalf("recent_bucket_limit 0 returned %d buckets, want none", len(withoutRecent.RecentBuckets))
+	}
+}
+
 func TestRecordUsageFromResult_PersistsOpenAICompatibleUsageAndAggregates(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := repository.NewUsageRepo(db)
