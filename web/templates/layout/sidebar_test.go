@@ -717,6 +717,32 @@ func TestSidebar_FooterAlignmentAndAccessibleHitTargets(t *testing.T) {
 	}
 }
 
+func TestSidebar_ScopesAndRetargetsLiveEvents(t *testing.T) {
+	projects := []models.Project{{ID: "p1", Name: "One"}, {ID: "p2", Name: "Two"}}
+	var buf bytes.Buffer
+	if err := Sidebar(projects, "p1").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("failed to render Sidebar: %v", err)
+	}
+	html := buf.String()
+
+	for _, want := range []string{
+		"function liveEventsURL(projectID, taskID)",
+		"params.set('project_id', projectID);",
+		"if (taskID) params.set('task_id', taskID);",
+		"function currentTaskID()",
+		"window._tabVisibility.retargetSSE('live-events', url);",
+		"window.openVibelyRetargetLiveEvents(newProjectId, '');",
+		"if (target && target.id === 'main-content') retargetLiveEventsForCurrentLocation();",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("sidebar scoped live SSE behavior missing %q", want)
+		}
+	}
+	if strings.Contains(html, "registerSSE('live-events', '/events/live',") {
+		t.Fatal("ordinary sidebar stream must not register an unfiltered /events/live URL")
+	}
+}
+
 func TestSidebar_ForwardsChatTurnSteeredEvents(t *testing.T) {
 	projects := []models.Project{{ID: "p1", Name: "Test"}}
 

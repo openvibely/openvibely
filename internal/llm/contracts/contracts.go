@@ -23,6 +23,7 @@ type AgentRequest struct {
 	Attachments         []models.Attachment
 	Agent               models.LLMConfig
 	ExecID              string
+	ProjectID           string // Authoritative project scope for provider-side live events and attribution
 	TransportScope      string // Stable provider transport identity (for example task:<id> or chat:project:<id>)
 	ChatHistory         []models.Execution
 	ChatMode            models.ChatMode

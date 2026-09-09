@@ -255,13 +255,19 @@ func TestMixtureProviderAdapterPublishesProgressWithoutExecutionOutput(t *testin
 	recorder.responses[ref2.ID] = llmcontracts.AgentResult{Output: "advice two"}
 	recorder.responses[ref3.ID] = llmcontracts.AgentResult{Output: "advice three"}
 	recorder.responses[agg.ID] = llmcontracts.AgentResult{Output: "final"}
-	sub, err := svc.broadcaster.Subscribe()
+	matching, err := svc.broadcaster.SubscribeProject("project-progress")
 	if err != nil {
-		t.Fatalf("Subscribe: %v", err)
+		t.Fatalf("SubscribeProject matching: %v", err)
 	}
-	defer svc.broadcaster.Unsubscribe(sub)
+	defer svc.broadcaster.Unsubscribe(matching)
+	unrelated, err := svc.broadcaster.SubscribeProject("other-project")
+	if err != nil {
+		t.Fatalf("SubscribeProject unrelated: %v", err)
+	}
+	defer svc.broadcaster.Unsubscribe(unrelated)
 	mixtureCfg := models.LLMConfig{Provider: models.ProviderMixture, MixtureConfigJSON: `{"enabled":true,"max_reference_workers":3,"reference_models":[{"agent_config_id":"` + ref1.ID + `"},{"agent_config_id":"` + ref2.ID + `"},{"agent_config_id":"` + ref3.ID + `"}],"aggregator":{"agent_config_id":"` + agg.ID + `"}}`}
-	_, err = svc.providerAdapters[models.ProviderMixture].Call(llmcontracts.AgentRequest{Ctx: context.Background(), Operation: llmcontracts.OperationTask, Message: "run", Agent: mixtureCfg, ExecID: "exec-progress"})
+	ctx := WithDirectUsageProject(context.Background(), "project-progress")
+	_, err = svc.CallAgentDirectStreamingDetailed(ctx, "run", nil, mixtureCfg, "exec-progress", nil, "", "", nil)
 	if err != nil {
 		t.Fatalf("mixture call: %v", err)
 	}
@@ -270,8 +276,11 @@ func TestMixtureProviderAdapterPublishesProgressWithoutExecutionOutput(t *testin
 	deadline := time.After(500 * time.Millisecond)
 	for {
 		select {
-		case ev := <-sub:
+		case ev := <-matching:
 			if ev.Type == events.MixtureProgress && ev.ExecID == "exec-progress" {
+				if ev.ProjectID != "project-progress" {
+					t.Fatalf("progress project = %q, want project-progress", ev.ProjectID)
+				}
 				phases = append(phases, ev.Phase)
 				if ev.Phase == "reference_complete" {
 					completed = append(completed, ev.CompletedReferences)
@@ -287,9 +296,16 @@ func TestMixtureProviderAdapterPublishesProgressWithoutExecutionOutput(t *testin
 					if len(completed) != 3 || completed[0] != 1 || completed[1] != 2 || completed[2] != 3 {
 						t.Fatalf("completed reference counts = %v, want [1 2 3]", completed)
 					}
+					select {
+					case ev := <-unrelated:
+						t.Fatalf("unrelated project received progress: %+v", ev)
+					default:
+					}
 					return
 				}
 			}
+		case ev := <-unrelated:
+			t.Fatalf("unrelated project received progress: %+v", ev)
 		case <-deadline:
 			t.Fatalf("missing aggregator_starting progress event, phases=%v completed=%v", phases, completed)
 		}

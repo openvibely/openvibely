@@ -421,6 +421,7 @@ func (a *mixtureProviderAdapter) publishMixtureProgress(req llmcontracts.AgentRe
 	}
 	a.svc.broadcaster.Publish(events.TaskEvent{
 		Type:                events.MixtureProgress,
+		ProjectID:           req.ProjectID,
 		ExecID:              req.ExecID,
 		Phase:               phase,
 		TotalReferences:     total,

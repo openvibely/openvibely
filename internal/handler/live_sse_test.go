@@ -250,7 +250,7 @@ func TestLiveEventsSSE_AppliesProjectAndTaskFilters(t *testing.T) {
 	}
 }
 
-func waitForLiveSubscriberCount(t *testing.T, name string, count func() int, want int) {
+func waitForLiveSubscriberCount(t testing.TB, name string, count func() int, want int) {
 	t.Helper()
 
 	ticker := time.NewTicker(time.Millisecond)
