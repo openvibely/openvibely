@@ -399,7 +399,7 @@ func TestCollectionSortMenusUseConsistentDefaultsAndOptions(t *testing.T) {
 		path      string
 		forbidden []string
 	}{
-		{name: "channels", path: "/channels?project_id=" + project.ID},
+		{name: "channels", path: "/channels?project_id=" + project.ID, forbidden: []string{`>Name A–Z<`, `>Name Z–A<`}},
 		{name: "automations", path: "/automations?project_id=" + project.ID},
 		{name: "models", path: "/models?project_id=" + project.ID, forbidden: []string{`value="default_name"`, `>Default then name<`, `<option value="name">Name</option>`}},
 		{name: "personality", path: "/personality?project_id=" + project.ID, forbidden: []string{`value="curated"`, `>Curated<`}},
@@ -409,7 +409,12 @@ func TestCollectionSortMenusUseConsistentDefaultsAndOptions(t *testing.T) {
 			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 			body := rec.Body.String()
 			require.Contains(t, body, `<select id="`+test.name+`-card-sort" class="select select-bordered select-sm card-sort-control"`)
-			require.Contains(t, body, `<option value="name_asc" selected>Name A–Z</option>`)
+			if test.name == "channels" {
+				require.Contains(t, body, `<option value="name_asc" selected>Webhooks A–Z</option>`)
+				require.Contains(t, body, `<option value="name_desc">Webhooks Z–A</option>`)
+			} else {
+				require.Contains(t, body, `<option value="name_asc" selected>Name A–Z</option>`)
+			}
 			for _, value := range test.forbidden {
 				require.NotContains(t, body, value)
 			}
@@ -440,6 +445,41 @@ func TestPersonalityFilteringAndSortingPrecedePagination(t *testing.T) {
 	matches := regexp.MustCompile(`data-personality-name="([^"]+)"`).FindAllStringSubmatch(ascending.Body.String(), -1)
 	require.Len(t, matches, 2)
 	require.LessOrEqual(t, strings.ToLower(matches[0][1]), strings.ToLower(matches[1][1]))
+}
+
+func TestChannelsSortContractKeepsFixedCardsStableAndOrdersWebhookSubset(t *testing.T) {
+	var body bytes.Buffer
+	view := pages.ChannelsSettingsView{
+		CurrentProjectID: "project-channels-sort",
+		HasGitHubChannel: true,
+		HasSlackChannel:  true,
+		HasXChannel:      true,
+		HasEmailChannel:  true,
+		Sort:             "name_desc",
+		Webhooks: []models.WebhookEndpoint{
+			{ID: "zulu-hook", Name: "Zulu webhook", Enabled: true},
+			{ID: "alpha-hook", Name: "Alpha webhook", Enabled: true},
+		},
+	}
+	require.NoError(t, pages.SettingsContent(view).Render(t.Context(), &body))
+	html := body.String()
+	require.Contains(t, html, `<option value="name_asc">Webhooks A–Z</option>`)
+	require.Contains(t, html, `<option value="name_desc" selected>Webhooks Z–A</option>`)
+	require.NotContains(t, html, `>Name A–Z<`)
+	require.NotContains(t, html, `>Name Z–A<`)
+	for _, pair := range [][2]string{
+		{`data-channel-type="outbound-targets"`, `data-channel-type="x"`},
+		{`data-channel-type="x"`, `data-channel-type="github"`},
+		{`data-channel-type="github"`, `data-channel-type="slack"`},
+		{`data-channel-type="slack"`, `data-channel-type="email"`},
+		{`data-channel-type="email"`, `data-webhook-id="zulu-hook"`},
+		{`data-webhook-id="zulu-hook"`, `data-webhook-id="alpha-hook"`},
+	} {
+		left, right := strings.Index(html, pair[0]), strings.Index(html, pair[1])
+		require.NotEqual(t, -1, left, "missing %s", pair[0])
+		require.NotEqual(t, -1, right, "missing %s", pair[1])
+		require.Less(t, left, right, "%s must precede %s", pair[0], pair[1])
+	}
 }
 
 func TestChannelsWebhookEnabledFilterAppliesAcrossFixedAndPaginatedCards(t *testing.T) {

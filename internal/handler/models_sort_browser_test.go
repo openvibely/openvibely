@@ -27,28 +27,29 @@ func TestModelsSortBrowserPreservesViewportFocusStateAndSharedGeometry(t *testin
 		t.Skip("Chrome/Chromium executable not found")
 	}
 
-	configs := make([]models.LLMConfig, 40)
-	for i := range configs {
-		configs[i] = models.LLMConfig{
-			ID:       fmt.Sprintf("model-%02d", i),
-			Name:     fmt.Sprintf("Model %02d", i),
+	tc := NewTestContext(t)
+	project := tc.CreateProject().WithName("Models sort browser").Build()
+	for i := 0; i < 40; i++ {
+		config := &models.LLMConfig{
+			Name:     fmt.Sprintf("Window Model %02d", i),
 			Provider: models.ProviderTest,
-			Model:    fmt.Sprintf("test-%02d", i),
+			Model:    fmt.Sprintf("window-test-%02d", i),
+		}
+		if err := tc.llmConfigRepo.Create(t.Context(), config); err != nil {
+			t.Fatalf("create browser model %d: %v", i, err)
 		}
 	}
-	initial := renderModelsSortBrowserContent(t, configs, "name_asc")
-	reversed := append([]models.LLMConfig(nil), configs...)
-	for left, right := 0, len(reversed)-1; left < right; left, right = left+1, right-1 {
-		reversed[left], reversed[right] = reversed[right], reversed[left]
+	query := "project_id=" + project.ID + "&search=Window+Model&kind=direct"
+	initialRec := serveCardPageRequest(t, tc.echo, "/models?"+query+"&sort=name_asc")
+	if initialRec.Code != http.StatusOK {
+		t.Fatalf("render initial Models window: %d %s", initialRec.Code, initialRec.Body.String())
 	}
-	replacement := renderModelsSortBrowserContent(t, reversed, "name_desc")
-	replacementJSON, err := json.Marshal(replacement)
-	if err != nil {
-		t.Fatalf("marshal replacement: %v", err)
+	initial := initialRec.Body.String()
+	if count := strings.Count(initial, `data-model-provider=`); count != 20 {
+		t.Fatalf("expected initial Models request to render the first 20 cards, got %d", count)
 	}
-
 	var base bytes.Buffer
-	if err := layout.Base("Models sort browser", nil, "project-1").Render(context.Background(), &base); err != nil {
+	if err := layout.Base("Models sort browser", nil, project.ID).Render(context.Background(), &base); err != nil {
 		t.Fatalf("render base: %v", err)
 	}
 	var local []string
@@ -69,10 +70,21 @@ func TestModelsSortBrowserPreservesViewportFocusStateAndSharedGeometry(t *testin
 		.card-sort-control { width: 11rem !important; max-width: 100%; }
 		[data-geometry-toolbar] { display: inline-block; margin-right: 8px; }
 	</style></head>`, 1)
-	page = strings.Replace(page, "</main>", initial+geometryToolbarFixture(t)+"</main>", 1)
+	page = strings.Replace(page, "</main>", initial+"</main>", 1)
+	page = strings.Replace(page, "</body>", geometryToolbarFixture(t)+"</body>", 1)
+	publicPath := "/models?" + query + "&sort=name_asc"
+	publicPathJSON, err := json.Marshal(publicPath)
+	if err != nil {
+		t.Fatalf("marshal public path: %v", err)
+	}
+	projectIDJSON, err := json.Marshal(project.ID)
+	if err != nil {
+		t.Fatalf("marshal project ID: %v", err)
+	}
 	runner := `<script>
 	(function() {
-		var replacementHTML = ` + string(replacementJSON) + `;
+		var publicPath = ` + string(publicPathJSON) + `;
+		var projectID = ` + string(projectIDJSON) + `;
 		function finish(status, message) {
 			var result = document.createElement('div');
 			result.id = 'browser-result';
@@ -87,19 +99,41 @@ func TestModelsSortBrowserPreservesViewportFocusStateAndSharedGeometry(t *testin
 					setTimeout(run, 25);
 					return;
 				}
-				history.replaceState({}, '', '/models?project_id=project-1&search=Model&kind=direct&page=3&offset=60');
-			window.openVibelyNavigate = function(path) {
-				window._modelsSortPath = path;
-				window._modelsActiveBeforeSwap = document.activeElement && (document.activeElement.id || document.activeElement.tagName);					history.replaceState({}, '', path);
-					var oldRoot = document.getElementById('models-container');
-					document.body.dispatchEvent(new CustomEvent('htmx:beforeSwap', {detail: {target: oldRoot}}));
-					oldRoot.outerHTML = replacementHTML;
-					var next = document.getElementById('models-container');
-					document.body.dispatchEvent(new CustomEvent('htmx:afterSwap', {detail: {target: next, elt: next}}));
-					document.body.dispatchEvent(new CustomEvent('htmx:afterSettle', {detail: {target: next, elt: next}}));
+				var root = initializedRoot;
+				var initialCards = root.querySelectorAll('[data-search-card]');
+				if (initialCards.length < 40) {
+					window._modelsLoadAttempts = (window._modelsLoadAttempts || 0) + 1;
+					if (window._modelsLoadAttempts > 80) {
+						finish('fail', 'timed out loading Models window; cards=' + initialCards.length);
+						return;
+					}
+					window.scrollTo(0, document.documentElement.scrollHeight);
+					window.dispatchEvent(new Event('scroll'));
+					setTimeout(run, 25);
+					return;
+				}
+				history.replaceState({}, '', publicPath);
+				window.openVibelyNavigate = function(requestPath, historyPath) {
+					window._modelsSortRequestPath = requestPath;
+					window._modelsSortHistoryPath = historyPath || requestPath;
+					return fetch(requestPath, {headers: {'HX-Request': 'true'}}).then(function(response) {
+						if (!response.ok) throw new Error('Models sort request failed: ' + response.status);
+						return response.text();
+					}).then(function(fragment) {
+						history.replaceState({}, '', historyPath || requestPath);
+						var main = document.getElementById('main-content');
+						document.body.dispatchEvent(new CustomEvent('htmx:beforeSwap', {detail: {target: main}}));
+						main.innerHTML = fragment;
+						document.body.dispatchEvent(new CustomEvent('htmx:afterSwap', {detail: {target: main, elt: main}}));
+						document.body.dispatchEvent(new CustomEvent('htmx:afterSettle', {detail: {target: main, elt: main}}));
+					});
 				};
-				var root = document.getElementById('models-container');
-				var anchor = root.querySelector('[data-model-id="model-12"]');
+				initialCards = root.querySelectorAll('[data-search-card]');
+				var anchor = initialCards[30];
+				if (!anchor) {
+					finish('fail', 'initial card count=' + initialCards.length + ' modelIDs=' + root.querySelectorAll('[data-model-id]').length + ' list=' + !!root.querySelector('#models-card-list'));
+					return;
+				}
 				anchor.scrollIntoView();
 				window.scrollBy(0, -140);
 				var before = window.scrollY;
@@ -109,20 +143,25 @@ func TestModelsSortBrowserPreservesViewportFocusStateAndSharedGeometry(t *testin
 				sort.dispatchEvent(new Event('change', {bubbles: true}));
 				setTimeout(function() {
 					try {
-						var nextSort = document.querySelector('#models-container [data-card-sort]');
+						var nextRoot = document.getElementById('models-container');
+						var nextSort = nextRoot && nextRoot.querySelector('[data-card-sort]');
 						var after = window.scrollY;
-						var parsed = new URL(window._modelsSortPath || '', window.location.href);
-						var stateOK = parsed.searchParams.get('project_id') === 'project-1' && parsed.searchParams.get('search') === 'Model' && parsed.searchParams.get('kind') === 'direct' && parsed.searchParams.get('sort') === 'name_desc' && !parsed.searchParams.has('page') && !parsed.searchParams.has('offset');
+						var requestURL = new URL(window._modelsSortRequestPath || '', window.location.href);
+						var historyURL = new URL(window._modelsSortHistoryPath || '', window.location.href);
+						var requestOK = requestURL.searchParams.get('card_window') === '1' && requestURL.searchParams.get('page_size') === '40' && requestURL.searchParams.get('page') === '0' && requestURL.searchParams.get('sort') === 'name_desc';
+						var stateOK = historyURL.searchParams.get('project_id') === projectID && historyURL.searchParams.get('search') === 'Window Model' && historyURL.searchParams.get('kind') === 'direct' && historyURL.searchParams.get('sort') === 'name_desc' && !historyURL.searchParams.has('card_window') && !historyURL.searchParams.has('page_size') && !historyURL.searchParams.has('page') && !historyURL.searchParams.has('offset');
+						var windowOK = nextRoot && nextRoot.querySelectorAll('[data-search-card]').length === 40;
 						var controls = Array.prototype.slice.call(document.querySelectorAll('.card-sort-control'));
 						var widths = controls.map(function(control) { return control.getBoundingClientRect().width; });
 						var geometryOK = widths.length === 4 && widths.every(function(width) { return Math.abs(width - widths[0]) < 0.5 && width <= window.innerWidth; });
 						var labelsFit = controls.every(function(control) { return control.scrollWidth <= control.clientWidth + 1; });
 						var scrollOK = Math.abs(after - before) <= 2;
-				var focusOK = document.activeElement === nextSort;
-				var selectedOK = nextSort && nextSort.value === 'name_desc';						if (scrollOK && focusOK && selectedOK && stateOK && geometryOK && labelsFit) finish('pass', 'scroll=' + before + '/' + after + ' width=' + widths.join(','));
-						else finish('fail', 'scrollOK=' + scrollOK + ' focusOK=' + focusOK + ' selectedOK=' + selectedOK + ' stateOK=' + stateOK + ' geometryOK=' + geometryOK + ' labelsFit=' + labelsFit + ' activeBefore=' + (window._modelsActiveBeforeSwap || '') + ' active=' + (document.activeElement && (document.activeElement.id || document.activeElement.tagName)) + ' before=' + before + ' after=' + after + ' widths=' + widths.join(',') + ' path=' + (window._modelsSortPath || ''));
+						var focusOK = document.activeElement === nextSort;
+						var selectedOK = nextSort && nextSort.value === 'name_desc';
+						if (scrollOK && focusOK && selectedOK && stateOK && requestOK && windowOK && geometryOK && labelsFit) finish('pass', 'scroll=' + before + '/' + after + ' width=' + widths.join(','));
+						else finish('fail', 'scrollOK=' + scrollOK + ' focusOK=' + focusOK + ' selectedOK=' + selectedOK + ' stateOK=' + stateOK + ' requestOK=' + requestOK + ' windowOK=' + windowOK + ' geometryOK=' + geometryOK + ' labelsFit=' + labelsFit + ' before=' + before + ' after=' + after + ' count=' + (nextRoot ? nextRoot.querySelectorAll('[data-search-card]').length : -1) + ' request=' + (window._modelsSortRequestPath || '') + ' history=' + (window._modelsSortHistoryPath || ''));
 					} catch (error) { finish('fail', error && error.stack ? error.stack : String(error)); }
-				}, 50);
+				}, 150);
 			} catch (error) { finish('fail', error && error.stack ? error.stack : String(error)); }
 		}
 		setTimeout(run, 50);
@@ -130,7 +169,11 @@ func TestModelsSortBrowserPreservesViewportFocusStateAndSharedGeometry(t *testin
 	</script>`
 	page = strings.Replace(page, "</body>", runner+"</body>", 1)
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/models" {
+			tc.echo.ServeHTTP(w, r)
+			return
+		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write([]byte(page))
 	}))
@@ -154,7 +197,7 @@ func TestModelsSortBrowserPreservesViewportFocusStateAndSharedGeometry(t *testin
 	if !strings.Contains(dom, `id="browser-result" data-status="pass"`) {
 		idx := strings.Index(dom, `id="browser-result"`)
 		if idx >= 0 {
-			end := idx + 700
+			end := idx + 900
 			if end > len(dom) {
 				end = len(dom)
 			}
@@ -164,21 +207,11 @@ func TestModelsSortBrowserPreservesViewportFocusStateAndSharedGeometry(t *testin
 	}
 }
 
-func renderModelsSortBrowserContent(t *testing.T, configs []models.LLMConfig, sortValue string) string {
-	t.Helper()
-	var buf bytes.Buffer
-	state := pages.CardListState{ProjectID: "project-1", Search: "Model", Sort: sortValue, Filters: map[string]string{"kind": "direct"}}
-	if err := pages.ModelsContentPageWithPaginationAndState(configs, configs, map[string]int{}, false, false, state).Render(context.Background(), &buf); err != nil {
-		t.Fatalf("render models content: %v", err)
-	}
-	return buf.String()
-}
-
 func geometryToolbarFixture(t *testing.T) string {
 	t.Helper()
 	var buf bytes.Buffer
 	for _, config := range []pages.CardListToolbarConfig{
-		{PageKey: "channels-geometry", Sort: "name_asc", SortOptions: []pages.CardListOption{{Value: "name_asc", Label: "Name A–Z"}, {Value: "name_desc", Label: "Name Z–A"}}},
+		{PageKey: "channels-geometry", Sort: "name_asc", SortOptions: []pages.CardListOption{{Value: "name_asc", Label: "Webhooks A–Z"}, {Value: "name_desc", Label: "Webhooks Z–A"}}},
 		{PageKey: "automations-geometry", Sort: "updated_asc", SortOptions: []pages.CardListOption{{Value: "name_asc", Label: "Name A–Z"}, {Value: "updated_asc", Label: "Least recently updated"}}},
 		{PageKey: "personality-geometry", Sort: "name_desc", SortOptions: []pages.CardListOption{{Value: "name_asc", Label: "Name A–Z"}, {Value: "name_desc", Label: "Name Z–A"}}},
 	} {
