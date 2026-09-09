@@ -741,7 +741,9 @@ type testPulseToolResponse struct {
 	ProjectID      string               `json:"project_id"`
 	LookaheadDays  int                  `json:"lookahead_days"`
 	RunningTasks   []testPulseTaskEntry `json:"running_tasks"`
+	WaitingCount   int                  `json:"waiting_count"`
 	PendingTasks   []testPulseTaskEntry `json:"pending_tasks"`
+	QueuedTasks    []testPulseTaskEntry `json:"queued_tasks"`
 	ScheduledTasks []testPulseTaskEntry `json:"scheduled_tasks"`
 	TaskSummary    struct {
 		TotalPending int `json:"total_pending"`
@@ -753,6 +755,7 @@ type testPulseToolResponse struct {
 		} `json:"priority"`
 		Status struct {
 			Pending   int `json:"pending"`
+			Queued    int `json:"queued"`
 			Running   int `json:"running"`
 			Completed int `json:"completed"`
 			Failed    int `json:"failed"`
@@ -794,8 +797,12 @@ func TestViewPulseRuntimeToolReturnsUpcomingAgenda(t *testing.T) {
 
 	running := &models.Task{ProjectID: project.ID, Title: "Running implementation", Prompt: longPrompt, Category: models.CategoryActive, Status: models.StatusRunning, Priority: 4, AgentID: &agent.ID}
 	require.NoError(t, h.taskRepo.Create(ctx, running))
-	pending := &models.Task{ProjectID: project.ID, Title: "Queued follow-up", Prompt: "short prompt", Category: models.CategoryActive, Status: models.StatusPending, Priority: 3}
+	pending := &models.Task{ProjectID: project.ID, Title: "Pending follow-up", Prompt: "short prompt", Category: models.CategoryActive, Status: models.StatusPending, Priority: 3}
 	require.NoError(t, h.taskRepo.Create(ctx, pending))
+	queued := &models.Task{ProjectID: project.ID, Title: "Queued follow-up", Prompt: "queued prompt", Category: models.CategoryActive, Status: models.StatusQueued, Priority: 3}
+	require.NoError(t, h.taskRepo.Create(ctx, queued))
+	chatQueued := &models.Task{ProjectID: project.ID, Title: "Chat queued", Prompt: "chat prompt", Category: models.CategoryChat, Status: models.StatusQueued, Priority: 4}
+	require.NoError(t, h.taskRepo.Create(ctx, chatQueued))
 	scheduledTask := &models.Task{ProjectID: project.ID, Title: "Scheduled today", Prompt: "scheduled prompt", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
 	require.NoError(t, h.taskRepo.Create(ctx, scheduledTask))
 	futureTask := &models.Task{ProjectID: project.ID, Title: "Scheduled later", Prompt: "future prompt", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 1}
@@ -825,6 +832,7 @@ func TestViewPulseRuntimeToolReturnsUpcomingAgenda(t *testing.T) {
 	require.NoError(t, err)
 	require.NotContains(t, out, strings.Repeat("x", 250), "full prompts must not be exposed")
 	require.NotContains(t, out, foreignTask.ID)
+	require.NotContains(t, out, chatQueued.ID)
 	require.NotContains(t, out, future.ID)
 
 	var got testPulseToolResponse
@@ -838,19 +846,25 @@ func TestViewPulseRuntimeToolReturnsUpcomingAgenda(t *testing.T) {
 	require.LessOrEqual(t, len(got.RunningTasks[0].PromptPreview), 200)
 	require.Len(t, got.PendingTasks, 1)
 	require.Equal(t, pending.ID, got.PendingTasks[0].TaskID)
+	require.Equal(t, string(models.StatusPending), got.PendingTasks[0].Status)
+	require.Len(t, got.QueuedTasks, 1)
+	require.Equal(t, queued.ID, got.QueuedTasks[0].TaskID)
+	require.Equal(t, string(models.StatusQueued), got.QueuedTasks[0].Status)
+	require.Equal(t, 2, got.WaitingCount)
 	require.Len(t, got.ScheduledTasks, 1)
 	require.Equal(t, scheduledTask.ID, got.ScheduledTasks[0].TaskID)
 	require.Equal(t, scheduled.ID, got.ScheduledTasks[0].ScheduleID)
 	require.Equal(t, "daily", got.ScheduledTasks[0].RepeatLabel)
 	require.NotNil(t, got.ScheduledTasks[0].NextRun)
-	require.Equal(t, 4, got.TaskSummary.TotalPending)
+	require.Equal(t, 5, got.TaskSummary.TotalPending)
 	require.Equal(t, 1, got.TaskSummary.Priority.Urgent)
-	require.Equal(t, 1, got.TaskSummary.Priority.High)
+	require.Equal(t, 2, got.TaskSummary.Priority.High)
 	require.Equal(t, 1, got.TaskSummary.Priority.Normal)
 	require.Equal(t, 1, got.TaskSummary.Priority.Low)
 	require.Equal(t, 3, got.TaskSummary.Status.Pending)
+	require.Equal(t, 1, got.TaskSummary.Status.Queued)
 	require.Equal(t, 1, got.TaskSummary.Status.Running)
-	require.Equal(t, 2, got.TaskSummary.Category.Active)
+	require.Equal(t, 3, got.TaskSummary.Category.Active)
 	require.Equal(t, 2, got.TaskSummary.Category.Scheduled)
 	require.GreaterOrEqual(t, got.TaskSummary.Scheduled.Overdue, 0)
 	require.GreaterOrEqual(t, got.TaskSummary.Scheduled.DueToday, 0)
@@ -878,11 +892,43 @@ func TestViewPulseRuntimeToolEmptyProjectReturnsZeroAgenda(t *testing.T) {
 	require.True(t, got.OK)
 	require.Empty(t, got.RunningTasks)
 	require.Empty(t, got.PendingTasks)
+	require.Empty(t, got.QueuedTasks)
+	require.Zero(t, got.WaitingCount)
 	require.Empty(t, got.ScheduledTasks)
 	require.Zero(t, got.TaskSummary.TotalPending)
 	require.Zero(t, got.TaskSummary.Scheduled.Overdue)
 	require.Zero(t, got.TaskSummary.Scheduled.DueToday)
 	require.Zero(t, got.TaskSummary.Scheduled.DueThisWeek)
+}
+
+func TestViewPulseRuntimeToolQueuedOnlyAgenda(t *testing.T) {
+	h, _, _, _ := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	project := createProject(t, h, "Queued-only Pulse Project")
+	queued := &models.Task{ProjectID: project.ID, Title: "Queued work", Prompt: "wait for capacity", Category: models.CategoryActive, Status: models.StatusQueued, Priority: 2}
+	require.NoError(t, h.taskRepo.Create(ctx, queued))
+
+	rt := h.buildChatActionToolRuntimeFromDefs(
+		streamingResponseParams{ProjectID: project.ID, ChatMode: models.ChatModePlan},
+		nil,
+		chatcontrol.ToolDefsForContext(models.ChatModePlan, chatcontrol.SurfaceWeb, false),
+		models.ChatModePlan,
+		chatcontrol.SurfaceWeb,
+	)
+	out, handled, isErr, err := rt.Executor(ctx, "view_pulse", json.RawMessage(`{}`))
+	require.True(t, handled)
+	require.False(t, isErr)
+	require.NoError(t, err)
+
+	var got testPulseToolResponse
+	require.NoError(t, json.Unmarshal([]byte(out), &got))
+	require.Empty(t, got.RunningTasks)
+	require.Empty(t, got.PendingTasks)
+	require.Len(t, got.QueuedTasks, 1)
+	require.Equal(t, queued.ID, got.QueuedTasks[0].TaskID)
+	require.Equal(t, string(models.StatusQueued), got.QueuedTasks[0].Status)
+	require.Equal(t, 1, got.WaitingCount)
+	require.Equal(t, 1, got.TaskSummary.Status.Queued)
 }
 
 // TestViewTaskThreadResolvesCurrentTaskID reproduces the incident where an
