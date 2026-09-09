@@ -2638,8 +2638,15 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 
 				let draggedElement = null;
 
-				let selectedTasks = new Set();
-				let draggedTaskIds = [];
+					let selectedTasks = new Set();
+					let draggedTaskIds = [];
+					let pendingKanbanMoves = new Map();
+					let kanbanMoveTransactions = new Map();
+					let kanbanMoveGeneration = 0;
+					let latestAcceptedKanbanMoveGeneration = 0;
+					let kanbanBoardRequestGeneration = 0;
+
+					window.hasPendingKanbanMoves = function() { return pendingKanbanMoves.size > 0; };
 
 				window.isDragging = false;
 				let autoScrollInterval = null;
@@ -3270,11 +3277,97 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					stopAutoScroll();
 				}
 
-				window.handlePointerAutoScroll = handlePointerAutoScroll;
-				window.stopPointerAutoScroll = stopAutoScroll;
+					window.handlePointerAutoScroll = handlePointerAutoScroll;
+					window.stopPointerAutoScroll = stopAutoScroll;
 
-				// Drop handler for non-Active category columns (category change + reordering)
-				function handleCategoryDrop(event) {
+					function kanbanMoveZone(root, move) {
+						if (!root || !move) return null;
+						const escapedCategory = window.CSS && CSS.escape ? CSS.escape(move.category) : move.category;
+						if (move.category === 'active' && move.status) {
+							const escapedStatus = window.CSS && CSS.escape ? CSS.escape(move.status) : move.status;
+							return root.querySelector('.task-drop-zone[data-category="' + escapedCategory + '"][data-status="' + escapedStatus + '"]');
+						}
+						return root.querySelector('.category-drop-zone[data-category="' + escapedCategory + '"]:not([data-drop-type="status"])');
+					}
+
+					function applyPendingKanbanMoves(root) {
+						if (!root) return;
+						const touchedZones = new Set();
+						pendingKanbanMoves.forEach(function(move, taskID) {
+							const card = root.querySelector('#task-' + (window.CSS && CSS.escape ? CSS.escape(taskID) : taskID));
+							const zone = kanbanMoveZone(root, move);
+							if (!card || !zone) return;
+							zone.appendChild(card);
+							card.setAttribute('data-task-category', move.category);
+							if (move.status) card.setAttribute('data-task-status', move.status);
+							card.setAttribute('data-kanban-move-generation', String(move.generation));
+							touchedZones.add(zone);
+						});
+						touchedZones.forEach(function(zone) {
+							Array.from(zone.children).forEach(function(child) {
+								if (!child.hasAttribute('data-task-id') && child.classList.contains('text-center')) child.remove();
+							});
+						});
+					}
+
+					function applyPendingKanbanMovesToResponse(detail) {
+						if (!detail || typeof detail.serverResponse !== 'string' || pendingKanbanMoves.size === 0) return;
+						const documentFragment = new DOMParser().parseFromString(detail.serverResponse, 'text/html');
+						const responseBoard = documentFragment.getElementById('kanban-board');
+						if (!responseBoard) return;
+						applyPendingKanbanMoves(responseBoard);
+						detail.serverResponse = responseBoard.outerHTML;
+					}
+
+					function forceKanbanAuthoritativeRefresh() {
+						const page = document.getElementById('tasks-page');
+						const projectID = page && page.getAttribute('data-project-id');
+						if (!projectID || !window.htmx) return;
+						htmx.ajax('GET', '/tasks?project_id=' + encodeURIComponent(projectID) + '&refresh_source=move', {
+							target: '#kanban-board',
+							swap: 'outerHTML'
+						});
+					}
+
+					function settleKanbanMove(generation, successful, xhr) {
+						const transaction = kanbanMoveTransactions.get(generation);
+						if (!transaction) return;
+						kanbanMoveTransactions.delete(generation);
+						transaction.taskIDs.forEach(function(taskID) {
+							const pending = pendingKanbanMoves.get(taskID);
+							if (pending && pending.generation === generation) pendingKanbanMoves.delete(taskID);
+						});
+						if (!successful && xhr && xhr.status === 400) {
+							alert(xhr.responseText || transaction.failureMessage);
+						}
+						forceKanbanAuthoritativeRefresh();
+						window.dispatchEvent(new CustomEvent('kanban-refresh-unblocked'));
+					}
+
+					function beginKanbanMove(taskIDs, destination, method, path, values, failureMessage) {
+						const ids = taskIDs.filter(function(taskID) { return !!taskID; });
+						if (!ids.length || ids.some(function(taskID) { return pendingKanbanMoves.has(taskID); })) return false;
+						const generation = ++kanbanMoveGeneration;
+						const transaction = {generation: generation, taskIDs: ids.slice(), path: path, failureMessage: failureMessage};
+						kanbanMoveTransactions.set(generation, transaction);
+						ids.forEach(function(taskID) {
+							pendingKanbanMoves.set(taskID, {category: destination.category, status: destination.status || '', generation: generation});
+						});
+						applyPendingKanbanMoves(document.getElementById('kanban-board'));
+						window.dispatchEvent(new CustomEvent('kanban-move-started'));
+						const source = document.createElement('span');
+						source.hidden = true;
+						source.setAttribute('data-kanban-move-generation', String(generation));
+						document.body.appendChild(source);
+						htmx.ajax(method, path, {source: source, target: '#kanban-board', swap: 'outerHTML', values: values});
+						return true;
+					}
+
+					window.beginKanbanMove = beginKanbanMove;
+					window.applyPendingKanbanMoves = applyPendingKanbanMoves;
+
+					// Drop handler for non-Active category columns (category change + reordering)
+					function handleCategoryDrop(event) {
 					event.stopPropagation();
 					event.preventDefault();
 					stopAutoScroll();
@@ -3307,35 +3400,15 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							}
 						} else {
 							// Different category - change category (which will auto-assign new position)
-							htmx.ajax('PATCH', `/tasks/${taskID}/category`, {
-								target: '#kanban-board',
-								swap: 'outerHTML',
-								values: { category: targetCategory }
-							}).catch(function(err) {
-								console.error('[drag] Category change failed:', err);
-								// Show error message to user
-								if (err.xhr && err.xhr.status === 400) {
-									alert(err.xhr.responseText || 'Cannot move task to this category');
-								}
-							});
-						}
-					} else {
+								beginKanbanMove([taskID], {category: targetCategory}, 'PATCH', `/tasks/${taskID}/category`, { category: targetCategory }, 'Cannot move task to this category');
+							}
+						} else {
 						// Multi-select batch category change. Clear selection before HTMX
 						// request hooks snapshot the board, while retaining the payload IDs.
 						const batchTaskIDs = draggedTaskIds.slice();
 						clearSelection();
-						htmx.ajax('PATCH', `/tasks/batch-category`, {
-							target: '#kanban-board',
-							swap: 'outerHTML',
-							values: { task_ids: batchTaskIDs.join(','), category: targetCategory, project_id: projectID }
-						}).catch(function(err) {
-							console.error('[drag] Batch category change failed:', err);
-							// Show error message to user
-							if (err.xhr && err.xhr.status === 400) {
-								alert(err.xhr.responseText || 'Cannot move tasks to this category');
-							}
-						});
-					}
+							beginKanbanMove(batchTaskIDs, {category: targetCategory}, 'PATCH', `/tasks/batch-category`, { task_ids: batchTaskIDs.join(','), category: targetCategory, project_id: projectID }, 'Cannot move tasks to this category');
+						}
 
 					clearSelection();
 				}
@@ -3404,23 +3477,10 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 
 						if (currentCategory !== 'active') {
 							// Moving from different category to active
-							htmx.ajax('PATCH', `/tasks/${taskID}/category`, {
-								target: '#kanban-board',
-								swap: 'outerHTML',
-								values: { category: 'active' }
-							}).catch(function(err) {
-								console.error('[drag] Category change to active failed:', err);
-								if (err.xhr && err.xhr.status === 400) {
-									alert(err.xhr.responseText || 'Cannot move task to Active category');
-								}
-							});
+							beginKanbanMove([taskID], {category: 'active', status: targetStatus}, 'PATCH', `/tasks/${taskID}/category`, { category: 'active' }, 'Cannot move task to Active category');
 						} else if (currentStatus !== targetStatus) {
 							// Same category, different status
-							htmx.ajax('PATCH', `/tasks/${taskID}/status`, {
-								target: '#kanban-board',
-								swap: 'outerHTML',
-								values: { status: targetStatus }
-							});
+							beginKanbanMove([taskID], {category: 'active', status: targetStatus}, 'PATCH', `/tasks/${taskID}/status`, { status: targetStatus }, 'Cannot change task status');
 						} else if (dropPosition !== null) {
 							// Same category, same status - just reorder
 							htmx.ajax('PATCH', `/tasks/${taskID}/reorder`, {
@@ -3434,17 +3494,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						// request hooks snapshot the board, while retaining the payload IDs.
 						const batchTaskIDs = draggedTaskIds.slice();
 						clearSelection();
-						htmx.ajax('PATCH', `/tasks/batch-category`, {
-							target: '#kanban-board',
-							swap: 'outerHTML',
-							values: { task_ids: batchTaskIDs.join(','), category: 'active', project_id: projectID }
-						}).catch(function(err) {
-							console.error('[drag] Batch category change to active failed:', err);
-							if (err.xhr && err.xhr.status === 400) {
-								alert(err.xhr.responseText || 'Cannot move tasks to Active category');
-							}
-						});
-					}
+							beginKanbanMove(batchTaskIDs, {category: 'active', status: targetStatus}, 'PATCH', `/tasks/batch-category`, { task_ids: batchTaskIDs.join(','), category: 'active', project_id: projectID }, 'Cannot move tasks to Active category');
+						}
 
 					clearSelection();
 				}
@@ -3707,45 +3758,79 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					}
 				});
 
-				// Retain compatibility with request paths that do not emit configRequest.
-				document.addEventListener('htmx:beforeRequest', function(event) {
-					const source = event.detail && event.detail.elt;
-					const sourceDropdown = kanbanDropdownForTarget(source);
-					if (sourceDropdown) closeKanbanMenu(sourceDropdown, false);
-					if (event.detail.target && event.detail.target.id === 'kanban-board' && !savedKanbanInteraction) {
-						snapshotKanbanInteraction(event.detail.target);
-					}
-				});
+					// Retain compatibility with request paths that do not emit configRequest.
+					document.addEventListener('htmx:beforeRequest', function(event) {
+						const source = event.detail && event.detail.elt;
+						const target = event.detail && event.detail.target;
+						const xhr = event.detail && event.detail.xhr;
+						if (target && target.id === 'kanban-board' && xhr) {
+							xhr.__openVibelyKanbanRequestGeneration = ++kanbanBoardRequestGeneration;
+							xhr.__openVibelyKanbanMoveGenerationAtStart = kanbanMoveGeneration;
+							const moveGeneration = source && parseInt(source.getAttribute('data-kanban-move-generation') || '', 10);
+							if (moveGeneration) xhr.__openVibelyKanbanMoveGeneration = moveGeneration;
+						}
+						const sourceDropdown = kanbanDropdownForTarget(source);
+						if (sourceDropdown) closeKanbanMenu(sourceDropdown, false);
+						if (target && target.id === 'kanban-board' && !savedKanbanInteraction) {
+							snapshotKanbanInteraction(target);
+						}
+					});
 
-				// Save scroll positions and provide a fallback snapshot for direct swaps.
-				document.addEventListener('htmx:beforeSwap', function(event) {
-					if (event.detail.target && event.detail.target.id === 'main-content') {
-						resetKanbanInteractionForNavigation();
-					}
-					if (event.detail.target && event.detail.target.id === 'kanban-board') {
-						closeKanbanSubmenus(null, null);
-						if (!savedKanbanInteraction) snapshotKanbanInteraction(event.detail.target);
-						savedScrollPositions.clear();
-						// Save scroll positions of all scrollable drop zones
-						const dropZones = document.querySelectorAll('.category-drop-zone, .task-drop-zone');
-						dropZones.forEach(function(zone, index) {
-							if (zone.scrollTop > 0) {
-								// Use category/status as key if available, otherwise use index
-								const category = zone.getAttribute('data-category');
-								const status = zone.getAttribute('data-status');
-								const key = category || (status ? 'active-' + status : 'zone-' + index);
-								savedScrollPositions.set(key, zone.scrollTop);
-								console.log('[scroll] SAVE ' + key + ' = ' + zone.scrollTop);
+					// Save scroll positions and provide a fallback snapshot for direct swaps.
+					document.addEventListener('htmx:beforeSwap', function(event) {
+						if (event.detail.target && event.detail.target.id === 'main-content') {
+							resetKanbanInteractionForNavigation();
+						}
+						if (event.detail.target && event.detail.target.id === 'kanban-board') {
+							const xhr = event.detail && event.detail.xhr;
+							const responseRequestGeneration = xhr && xhr.__openVibelyKanbanRequestGeneration || 0;
+							if (responseRequestGeneration && responseRequestGeneration < kanbanBoardRequestGeneration) {
+								event.detail.shouldSwap = false;
+								return;
 							}
-						});
-					}
-				});
+							const responseMoveGeneration = xhr && xhr.__openVibelyKanbanMoveGeneration || 0;
+							if (responseMoveGeneration && responseMoveGeneration < latestAcceptedKanbanMoveGeneration) {
+								event.detail.shouldSwap = false;
+								return;
+							}
+							if (!responseMoveGeneration && xhr && xhr.__openVibelyKanbanMoveGenerationAtStart < kanbanMoveGeneration) {
+								event.detail.shouldSwap = false;
+								return;
+							}
+							if (responseMoveGeneration) latestAcceptedKanbanMoveGeneration = Math.max(latestAcceptedKanbanMoveGeneration, responseMoveGeneration);
+							applyPendingKanbanMovesToResponse(event.detail);
+							closeKanbanSubmenus(null, null);
+							if (!savedKanbanInteraction) snapshotKanbanInteraction(event.detail.target);
+							savedScrollPositions.clear();
+							// Save scroll positions of all scrollable drop zones
+							const dropZones = document.querySelectorAll('.category-drop-zone, .task-drop-zone');
+							dropZones.forEach(function(zone, index) {
+								if (zone.scrollTop > 0) {
+									// Use category/status as key if available, otherwise use index
+									const category = zone.getAttribute('data-category');
+									const status = zone.getAttribute('data-status');
+									const key = category || (status ? 'active-' + status : 'zone-' + index);
+									savedScrollPositions.set(key, zone.scrollTop);
+									console.log('[scroll] SAVE ' + key + ' = ' + zone.scrollTop);
+								}
+							});
+						}
+					});
 
+					document.addEventListener('htmx:afterRequest', function(event) {
+						const detail = event.detail || {};
+						const source = detail.elt;
+						const generation = source && parseInt(source.getAttribute('data-kanban-move-generation') || '', 10);
+						if (!generation) return;
+						if (source.remove) source.remove();
+						const xhr = detail.xhr;
+						const successful = !!(detail.successful && xhr && xhr.status >= 200 && xhr.status < 300);
+						settleKanbanMove(generation, successful, xhr);
+					});
 
-				// Restore surviving selections, menu focus, and scroll after authoritative board replacement.
-				document.addEventListener('htmx:afterSwap', function(event) {
-					if (event.detail.target && event.detail.target.id === 'kanban-board') {
-						const liveBoard = document.getElementById('kanban-board');
+					// Restore surviving selections, menu focus, and scroll after authoritative board replacement.
+					document.addEventListener('htmx:afterSwap', function(event) {
+						if (event.detail.target && event.detail.target.id === 'kanban-board') {						const liveBoard = document.getElementById('kanban-board');
 						if (liveBoard) restoreKanbanInteraction(liveBoard);
 
 
