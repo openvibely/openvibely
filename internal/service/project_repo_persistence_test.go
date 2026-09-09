@@ -4,12 +4,63 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
+
+func TestProjectService_DeleteRollsBackTasksWhenLegacyConstraintFails(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	projectSvc := NewProjectService(projectRepo)
+	projectSvc.SetTaskService(NewTaskService(taskRepo, attachmentRepo, nil))
+
+	project := &models.Project{Name: "Suggestion Engine"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Must survive rollback", Prompt: "test", Category: models.CategoryBacklog, Status: models.StatusPending}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE memory_consolidation_runs (id TEXT PRIMARY KEY);
+		CREATE TABLE memory_consolidation_schedules (
+			project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+			last_run_id TEXT REFERENCES memory_consolidation_runs(id) ON DELETE SET NULL
+		);
+		INSERT INTO memory_consolidation_schedules(project_id) VALUES (?)`, project.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `PRAGMA foreign_keys=OFF`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `DROP TABLE memory_consolidation_runs`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `PRAGMA foreign_keys=ON`); err != nil {
+		t.Fatal(err)
+	}
+
+	err := projectSvc.Delete(ctx, project.ID)
+	if err == nil || !strings.Contains(err.Error(), "no such table: main.memory_consolidation_runs") {
+		t.Fatalf("Delete error = %v, want missing memory_consolidation_runs", err)
+	}
+	storedProject, getErr := projectRepo.GetByID(ctx, project.ID)
+	if getErr != nil || storedProject == nil {
+		t.Fatalf("project after failed deletion = %#v, err=%v", storedProject, getErr)
+	}
+	storedTask, getErr := taskRepo.GetByID(ctx, task.ID)
+	if getErr != nil || storedTask == nil {
+		t.Fatalf("task after failed deletion = %#v, err=%v", storedTask, getErr)
+	}
+}
 
 // TestValidateRepoPaths_DetectsMissingRepoPath verifies that startup validation
 // catches project repo paths that no longer exist on disk — the core of the

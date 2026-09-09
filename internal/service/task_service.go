@@ -517,18 +517,52 @@ func (s *TaskService) DeleteProjectTasks(ctx context.Context, projectID string) 
 	}
 }
 
+func (s *TaskService) prepareDeletion(manifest repository.TaskDeletionManifest, taskIDs []string) error {
+	if len(manifest.PendingUploadSessionIDs) > 0 && strings.TrimSpace(s.uploadsDir) == "" {
+		return errors.New("uploads directory is not configured for pending upload cleanup")
+	}
+	if s.workerSvc != nil {
+		for _, taskID := range taskIDs {
+			s.workerSvc.CancelRunningTask(taskID)
+		}
+	}
+	return nil
+}
+
+func (s *TaskService) cleanupDeletionFiles(manifest repository.TaskDeletionManifest) error {
+	var cleanupErrors []error
+	removeFile := func(kind, path string) {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			applog.Infof("[task-svc] deletion cleanup error removing %s %s: %v", kind, path, err)
+			cleanupErrors = append(cleanupErrors, fmt.Errorf("removing %s %s: %w", kind, path, err))
+		}
+	}
+	for _, path := range manifest.TaskAttachmentPaths {
+		removeFile("attachment", path)
+	}
+	for _, path := range manifest.ExecutionAttachmentPaths {
+		removeFile("execution attachment", path)
+	}
+	for _, sessionID := range manifest.PendingUploadSessionIDs {
+		path := filepath.Join(s.uploadsDir, "chat", "pending", sessionID)
+		unlockSession := attachmentsession.Lock(sessionID)
+		if s.beforePendingSessionRemoval != nil {
+			s.beforePendingSessionRemoval(sessionID)
+		}
+		removeErr := os.RemoveAll(path)
+		unlockSession()
+		if removeErr != nil {
+			applog.Infof("[task-svc] deletion cleanup error removing pending uploads %s: %v", path, removeErr)
+			cleanupErrors = append(cleanupErrors, fmt.Errorf("removing pending uploads %s: %w", path, removeErr))
+		}
+	}
+	return errors.Join(cleanupErrors...)
+}
+
 func (s *TaskService) deleteTask(ctx context.Context, id, projectID string, category models.TaskCategory) (bool, error) {
 	prepareDelete := func(manifest repository.TaskDeletionManifest) error {
-		if len(manifest.PendingUploadSessionIDs) > 0 && strings.TrimSpace(s.uploadsDir) == "" {
-			return errors.New("uploads directory is not configured for pending upload cleanup")
-		}
-		if s.workerSvc != nil {
-			s.workerSvc.CancelRunningTask(id)
-			for _, childID := range manifest.SwarmChildTaskIDs {
-				s.workerSvc.CancelRunningTask(childID)
-			}
-		}
-		return nil
+		taskIDs := append([]string{id}, manifest.SwarmChildTaskIDs...)
+		return s.prepareDeletion(manifest, taskIDs)
 	}
 	var (
 		manifest repository.TaskDeletionManifest
@@ -548,34 +582,8 @@ func (s *TaskService) deleteTask(ctx context.Context, id, projectID string, cate
 	// through deletion. A concurrent upload metadata write therefore either lands
 	// in the manifest first or fails after the task rows disappear and rolls back
 	// its newly published file. Filesystem and git work remain outside SQLite.
-	var cleanupErrors []error
-	removeFile := func(kind, path string) {
-		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-			applog.Infof("[task-svc] Delete error removing %s %s after durable deletion: %v", kind, path, err)
-			cleanupErrors = append(cleanupErrors, fmt.Errorf("task deleted but removing %s %s: %w", kind, path, err))
-		}
-	}
-	for _, path := range manifest.TaskAttachmentPaths {
-		removeFile("attachment", path)
-	}
-	for _, path := range manifest.ExecutionAttachmentPaths {
-		removeFile("execution attachment", path)
-	}
-	for _, sessionID := range manifest.PendingUploadSessionIDs {
-		path := filepath.Join(s.uploadsDir, "chat", "pending", sessionID)
-		unlockSession := attachmentsession.Lock(sessionID)
-		if s.beforePendingSessionRemoval != nil {
-			s.beforePendingSessionRemoval(sessionID)
-		}
-		removeErr := os.RemoveAll(path)
-		unlockSession()
-		if removeErr != nil {
-			applog.Infof("[task-svc] Delete error removing pending uploads %s after durable deletion: %v", path, removeErr)
-			cleanupErrors = append(cleanupErrors, fmt.Errorf("task deleted but removing pending uploads %s: %w", path, removeErr))
-		}
-	}
-	if err := errors.Join(cleanupErrors...); err != nil {
-		return true, err
+	if err := s.cleanupDeletionFiles(manifest); err != nil {
+		return true, fmt.Errorf("task deleted but %w", err)
 	}
 
 	applog.Infof("[task-svc] Delete success id=%s (deleted %d task attachments, %d execution attachments, %d pending upload sessions)", id, len(manifest.TaskAttachmentPaths), len(manifest.ExecutionAttachmentPaths), len(manifest.PendingUploadSessionIDs))

@@ -572,8 +572,15 @@ func (h *Handler) DeleteProject(c echo.Context) error {
 	}
 
 	if err := h.projectSvc.Delete(ctx, projectID); err != nil {
-		applog.Infof("[handler] DeleteProject error: %v", err)
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to delete project")
+		var cleanupErr *service.ProjectDeletionCleanupError
+		if !errors.As(err, &cleanupErr) {
+			applog.Infof("[handler] DeleteProject error: %v", err)
+			return echo.NewHTTPError(http.StatusInternalServerError, "could not delete this project; its data was kept")
+		}
+		applog.Infof("[handler] DeleteProject filesystem cleanup warning: %v", cleanupErr)
+		if isHTMX(c) {
+			setHTMXToast(c, "Project deleted, but some attachment files could not be removed.", "warning")
+		}
 	}
 
 	applog.Infof("[handler] DeleteProject success id=%s", projectID)

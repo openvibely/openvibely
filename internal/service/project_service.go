@@ -16,6 +16,18 @@ type ProjectService struct {
 	workerRepo *repository.WorkerRepo
 }
 
+type ProjectDeletionCleanupError struct {
+	Err error
+}
+
+func (e *ProjectDeletionCleanupError) Error() string {
+	return fmt.Sprintf("project deleted but filesystem cleanup failed: %v", e.Err)
+}
+
+func (e *ProjectDeletionCleanupError) Unwrap() error {
+	return e.Err
+}
+
 func NewProjectService(repo *repository.ProjectRepo) *ProjectService {
 	return &ProjectService{repo: repo}
 }
@@ -101,19 +113,25 @@ func (s *ProjectService) Delete(ctx context.Context, id string) error {
 	if project == nil || project.IsDefault {
 		return fmt.Errorf("project not found or is the default project")
 	}
-	hasTasks, err := s.repo.HasTasks(ctx, id)
-	if err != nil {
-		return err
-	}
-	if hasTasks {
+
+	manifest, _, err := s.repo.DeleteWithCleanupManifest(ctx, id, func(manifest repository.TaskDeletionManifest) error {
+		if len(manifest.TaskIDs) == 0 {
+			return nil
+		}
 		if s.taskSvc == nil {
 			return fmt.Errorf("task service is unavailable for project deletion")
 		}
-		if err := s.taskSvc.DeleteProjectTasks(ctx, id); err != nil {
-			return err
+		return s.taskSvc.prepareDeletion(manifest, manifest.TaskIDs)
+	})
+	if err != nil {
+		return err
+	}
+	if s.taskSvc != nil {
+		if err := s.taskSvc.cleanupDeletionFiles(manifest); err != nil {
+			return &ProjectDeletionCleanupError{Err: err}
 		}
 	}
-	return s.repo.Delete(ctx, id)
+	return nil
 }
 
 // ValidateRepoPaths checks all projects with configured repo_path values and

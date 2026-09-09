@@ -1145,6 +1145,7 @@ func scanSwarmInspectionTask(scan func(dest ...any) error) (models.Task, error) 
 }
 
 type TaskDeletionManifest struct {
+	TaskIDs                  []string
 	TaskAttachmentPaths      []string
 	ExecutionAttachmentPaths []string
 	PendingUploadSessionIDs  []string
