@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -1252,7 +1253,7 @@ func TestBuildChannelUtilityActionHandlersUpdateAutomationTemplate(t *testing.T)
 	assertAutomationSummary(getOut, "automation")
 
 	beforeGraphID := channelAutomationPublishedGraphID(t, db, automationID)
-	updateOut, err := handlers["update_automation_template"](ctx, json.RawMessage(`{"name":"Channel Native SDLC"}`))
+	updateOut, err := handlers["update_automation_template"](ctx, json.RawMessage(`{"name":" channel native sdlc "}`))
 	require.NoError(t, err)
 	require.Contains(t, updateOut, `"applied":true`)
 	require.Contains(t, updateOut, fmt.Sprintf(`"template_revision":%d`, currentRevision))
@@ -1266,6 +1267,25 @@ func TestBuildChannelUtilityActionHandlersUpdateAutomationTemplate(t *testing.T)
 	require.Contains(t, currentOut, `"reason":"already_current"`)
 	assertAutomationSummary(currentOut, "automation")
 	require.Equal(t, afterGraphID, channelAutomationPublishedGraphID(t, db, automationID))
+
+	duplicateCandidate, err := drafts.TemplateCandidate(AutomationAdapterNativeSDLC)
+	require.NoError(t, err)
+	ApplyAutomationTemplateDefaultModel(&duplicateCandidate)
+	duplicateCandidate.Name = "Duplicate Channel Review"
+	firstDuplicate, err := compiler.Save(ctx, AutomationSaveRequest{ProjectID: project.ID, Source: "template", CreatedVia: "chat", Candidate: duplicateCandidate})
+	require.NoError(t, err)
+	secondDuplicate, err := compiler.Save(ctx, AutomationSaveRequest{ProjectID: project.ID, Source: "template", CreatedVia: "chat", Candidate: duplicateCandidate})
+	require.NoError(t, err)
+	firstDuplicateID := firstDuplicate.Definition.Automation.ID
+	secondDuplicateID := secondDuplicate.Definition.Automation.ID
+	firstDuplicateGraphID := channelAutomationPublishedGraphID(t, db, firstDuplicateID)
+	secondDuplicateGraphID := channelAutomationPublishedGraphID(t, db, secondDuplicateID)
+	duplicateIDs := []string{firstDuplicateID, secondDuplicateID}
+	sort.Strings(duplicateIDs)
+	_, err = handlers["update_automation_template"](ctx, json.RawMessage(`{"name":" duplicate channel review "}`))
+	require.EqualError(t, err, fmt.Sprintf("update_automation_template: automation name %q is ambiguous in current project; use automation_id (%s)", "duplicate channel review", strings.Join(duplicateIDs, ", ")))
+	require.Equal(t, firstDuplicateGraphID, channelAutomationPublishedGraphID(t, db, firstDuplicateID), "ambiguous name must not mutate the first Automation")
+	require.Equal(t, secondDuplicateGraphID, channelAutomationPublishedGraphID(t, db, secondDuplicateID), "ambiguous name must not mutate the second Automation")
 
 	foreignCandidate := candidate
 	foreignCandidate.Name = "Foreign Channel Native SDLC"

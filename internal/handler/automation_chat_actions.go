@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"sort"
 	"strings"
 
 	"github.com/openvibely/openvibely/internal/chatcontrol"
@@ -293,7 +292,7 @@ func (h *Handler) executeAutomationLifecycleAction(ctx context.Context, params s
 	if projectID == "" {
 		return "", fmt.Errorf("%s: no current project", action)
 	}
-	card, err := h.resolveAutomationLifecycleTarget(ctx, projectID, req)
+	card, err := h.automationGraphSvc.ResolveAutomationCard(ctx, projectID, req.AutomationID, req.Name)
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", action, err)
 	}
@@ -325,66 +324,11 @@ func (h *Handler) executeAutomationLifecycleAction(ctx context.Context, params s
 		})
 	}
 
-	fresh, err := h.automationCardByID(ctx, projectID, card.Automation.ID)
+	fresh, err := h.automationGraphSvc.AutomationCardByID(ctx, projectID, card.Automation.ID)
 	if err == nil && fresh != nil {
 		card = *fresh
 	}
 	return marshalAutomationActionResult(automationLifecycleActionResult(action, projectID, card, invocations))
-}
-
-func (h *Handler) resolveAutomationLifecycleTarget(ctx context.Context, projectID string, req automationLifecycleActionInput) (models.AutomationCard, error) {
-	cards, err := h.automationGraphSvc.List(ctx, projectID)
-	if err != nil {
-		return models.AutomationCard{}, err
-	}
-	automationID := strings.TrimSpace(req.AutomationID)
-	name := strings.TrimSpace(req.Name)
-	if automationID == "" && name == "" {
-		return models.AutomationCard{}, errors.New("automation_id or name is required")
-	}
-	if automationID != "" {
-		for _, card := range cards {
-			if card.Automation.ID == automationID {
-				if name != "" && !strings.EqualFold(strings.TrimSpace(card.Automation.Name), name) {
-					return models.AutomationCard{}, fmt.Errorf("automation_id %q is named %q, not %q", automationID, card.Automation.Name, name)
-				}
-				return card, nil
-			}
-		}
-		return models.AutomationCard{}, fmt.Errorf("automation %q not found in current project", automationID)
-	}
-	var matches []models.AutomationCard
-	for _, card := range cards {
-		if strings.EqualFold(strings.TrimSpace(card.Automation.Name), name) {
-			matches = append(matches, card)
-		}
-	}
-	switch len(matches) {
-	case 0:
-		return models.AutomationCard{}, fmt.Errorf("automation named %q not found in current project", name)
-	case 1:
-		return matches[0], nil
-	default:
-		ids := make([]string, 0, len(matches))
-		for _, match := range matches {
-			ids = append(ids, match.Automation.ID)
-		}
-		sort.Strings(ids)
-		return models.AutomationCard{}, fmt.Errorf("automation name %q is ambiguous in current project; use automation_id (%s)", name, strings.Join(ids, ", "))
-	}
-}
-
-func (h *Handler) automationCardByID(ctx context.Context, projectID, automationID string) (*models.AutomationCard, error) {
-	cards, err := h.automationGraphSvc.List(ctx, projectID)
-	if err != nil {
-		return nil, err
-	}
-	for _, card := range cards {
-		if card.Automation.ID == automationID {
-			return &card, nil
-		}
-	}
-	return nil, nil
 }
 
 func automationLifecycleActionResult(action, projectID string, card models.AutomationCard, invocations []models.AutomationInvocation) map[string]any {
