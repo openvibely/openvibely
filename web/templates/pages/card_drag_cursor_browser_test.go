@@ -3,21 +3,160 @@ package pages
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/coder/websocket"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/web/templates/components"
 )
+
+type nativeGroupedDragCoordinates struct {
+	phase                  string
+	firstX, firstY         float64
+	secondX, secondY       float64
+	dragStartX, dragStartY float64
+	dropX, dropY           float64
+}
+
+func driveNativeGroupedTaskDrags(debugPort int, serverURL string, ready <-chan nativeGroupedDragCoordinates, motionObserved <-chan string) <-chan error {
+	result := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		type debugTarget struct {
+			URL                  string `json:"url"`
+			WebSocketDebuggerURL string `json:"webSocketDebuggerUrl"`
+		}
+		var target debugTarget
+		for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline) && target.WebSocketDebuggerURL == ""; {
+			resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/json/list", debugPort))
+			if err == nil {
+				var targets []debugTarget
+				decodeErr := json.NewDecoder(resp.Body).Decode(&targets)
+				_ = resp.Body.Close()
+				if decodeErr == nil {
+					for _, candidate := range targets {
+						if strings.HasPrefix(candidate.URL, serverURL) && candidate.WebSocketDebuggerURL != "" {
+							target = candidate
+							break
+						}
+					}
+				}
+			}
+			if target.WebSocketDebuggerURL == "" {
+				time.Sleep(25 * time.Millisecond)
+			}
+		}
+		if target.WebSocketDebuggerURL == "" {
+			result <- fmt.Errorf("find Chrome debugging target for %s", serverURL)
+			return
+		}
+		conn, _, err := websocket.Dial(ctx, target.WebSocketDebuggerURL, nil)
+		if err != nil {
+			result <- err
+			return
+		}
+		defer conn.CloseNow()
+		nextID := 0
+		dispatch := func(params map[string]any) error {
+			nextID++
+			payload, err := json.Marshal(map[string]any{"id": nextID, "method": "Input.dispatchMouseEvent", "params": params})
+			if err != nil {
+				return err
+			}
+			if err = conn.Write(ctx, websocket.MessageText, payload); err != nil {
+				return err
+			}
+			for {
+				_, message, err := conn.Read(ctx)
+				if err != nil {
+					return err
+				}
+				var response struct {
+					ID    int             `json:"id"`
+					Error json.RawMessage `json:"error"`
+				}
+				if json.Unmarshal(message, &response) != nil || response.ID != nextID {
+					continue
+				}
+				if len(response.Error) > 0 {
+					return fmt.Errorf("CDP Input.dispatchMouseEvent: %s", response.Error)
+				}
+				return nil
+			}
+		}
+		modifier := 2
+		if runtime.GOOS == "darwin" {
+			modifier = 4
+		}
+		for _, expectedPhase := range []string{"category", "active"} {
+			var coordinates nativeGroupedDragCoordinates
+			select {
+			case coordinates = <-ready:
+			case <-ctx.Done():
+				result <- ctx.Err()
+				return
+			}
+			if coordinates.phase != expectedPhase {
+				result <- fmt.Errorf("native grouped drag phase = %q, want %q", coordinates.phase, expectedPhase)
+				return
+			}
+			for _, point := range [][2]float64{{coordinates.firstX, coordinates.firstY}, {coordinates.secondX, coordinates.secondY}} {
+				for _, params := range []map[string]any{
+					{"type": "mouseMoved", "x": point[0], "y": point[1], "modifiers": modifier},
+					{"type": "mousePressed", "x": point[0], "y": point[1], "button": "left", "buttons": 1, "clickCount": 1, "modifiers": modifier},
+					{"type": "mouseReleased", "x": point[0], "y": point[1], "button": "left", "buttons": 0, "clickCount": 1, "modifiers": modifier},
+				} {
+					if err := dispatch(params); err != nil {
+						result <- err
+						return
+					}
+				}
+			}
+			for _, params := range []map[string]any{
+				{"type": "mouseMoved", "x": coordinates.dragStartX, "y": coordinates.dragStartY},
+				{"type": "mousePressed", "x": coordinates.dragStartX, "y": coordinates.dragStartY, "button": "left", "buttons": 1, "clickCount": 1},
+				{"type": "mouseMoved", "x": coordinates.dropX, "y": coordinates.dropY, "button": "left", "buttons": 1},
+			} {
+				if err := dispatch(params); err != nil {
+					result <- err
+					return
+				}
+			}
+			select {
+			case phase := <-motionObserved:
+				if phase != expectedPhase {
+					result <- fmt.Errorf("observed native grouped drag phase = %q, want %q", phase, expectedPhase)
+					return
+				}
+			case <-ctx.Done():
+				result <- ctx.Err()
+				return
+			}
+			if err := dispatch(map[string]any{"type": "mouseReleased", "x": coordinates.dropX, "y": coordinates.dropY, "button": "left", "buttons": 0, "clickCount": 1}); err != nil {
+				result <- err
+				return
+			}
+		}
+		result <- nil
+	}()
+	return result
+}
 
 func TestTaskAndScheduleCardsUsePointerDragWithGrabCursor(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
@@ -141,6 +280,14 @@ window.addEventListener('DOMContentLoaded', function() {
     card.dispatchEvent(new PointerEvent('pointermove', {bubbles:true, cancelable:true, pointerId:pointerId, pointerType:'mouse', buttons:1, clientX:edgeX, clientY:edgeY}));
     if (!card.classList.contains('dragging')) fail(label + ': pointer movement should mark the card as dragging');
     if (getComputedStyle(card).position !== 'fixed' || getComputedStyle(card).transform === 'none') fail(label + ': real card should visibly move during auto-scroll');
+    var selectedTaskCards = containerSelector === '#kanban-board' ? Array.from(container.querySelectorAll('.task-selected')) : [];
+    if (selectedTaskCards.length > 1) {
+      selectedTaskCards.forEach(function(selectedCard) {
+        if (!selectedCard.classList.contains('dragging')) fail(label + ': every selected task should enter dragging state');
+        if (getComputedStyle(selectedCard).position !== 'fixed' || getComputedStyle(selectedCard).transform === 'none') fail(label + ': every selected task should visibly move with the pointer');
+      });
+      if (container.querySelectorAll('[data-pointer-drag-placeholder]').length !== selectedTaskCards.length) fail(label + ': every selected task should retain its source placeholder');
+    }
     if (!document.querySelector('[data-pointer-drag-placeholder]')) fail(label + ': source slot should retain its placeholder during auto-scroll');
     var dropX = edgeX;
     var dropY = edgeY;
@@ -166,7 +313,8 @@ window.addEventListener('DOMContentLoaded', function() {
     if (getComputedStyle(card).cursor !== 'grabbing') fail(label + ': auto-scroll should preserve grabbing cursor');
     card.dispatchEvent(new PointerEvent('pointerup', {bubbles:true, cancelable:true, pointerId:pointerId, pointerType:'mouse', button:0, buttons:0, clientX:dropX, clientY:dropY}));
     await waitFor(function() { return !card.classList.contains('dragging'); }, label + ' auto-scroll drop cleanup');
-    if (card.style.transform || document.querySelector('[data-pointer-drag-placeholder]')) fail(label + ': release should restore card layout');
+    if (selectedTaskCards.some(function(selectedCard) { return selectedCard.style.transform || selectedCard.classList.contains('dragging'); }) || document.querySelector('[data-pointer-drag-placeholder]')) fail(label + ': release should restore every selected card layout');
+    if (card.style.transform) fail(label + ': release should restore card transform');
     if (getComputedStyle(card).cursor !== 'grab') fail(label + ': release should restore grab cursor');
     if (originalContainerStyle === null) container.removeAttribute('style');
     else container.setAttribute('style', originalContainerStyle);
@@ -176,22 +324,54 @@ window.addEventListener('DOMContentLoaded', function() {
     });
     await new Promise(function(resolve) { setTimeout(resolve, 100); });
   }
+  async function exerciseNativeGroupedDrop(phase, targetSelector) {
+    await waitFor(function() {
+      return document.querySelector('#task-task-drag-cursor') && document.querySelector('#task-task-active-status-drag') && document.querySelector(targetSelector);
+    }, 'native grouped ' + phase + ' ready');
+    var first = document.querySelector('#task-task-drag-cursor');
+    var second = document.querySelector('#task-task-active-status-drag');
+    var target = document.querySelector(targetSelector);
+    first.scrollIntoView({block:'center', inline:'center'});
+    await new Promise(function(resolve) { requestAnimationFrame(function() { requestAnimationFrame(resolve); }); });
+    var firstRect = first.getBoundingClientRect();
+    var secondRect = second.getBoundingClientRect();
+    var targetRect = target.getBoundingClientRect();
+    var params = new URLSearchParams({
+      phase: phase,
+      first_x: firstRect.left + 12,
+      first_y: firstRect.top + 12,
+      second_x: secondRect.left + 12,
+      second_y: secondRect.top + 12,
+      drag_start_x: firstRect.left + 12,
+      drag_start_y: firstRect.top + 12,
+      drop_x: targetRect.left + targetRect.width / 2,
+      drop_y: targetRect.top + Math.min(20, targetRect.height / 2)
+    });
+    await fetch('/browser-native-grouped-ready?' + params.toString(), {method:'POST'});
+    await waitFor(function() { return first.classList.contains('task-selected') && second.classList.contains('task-selected'); }, 'native modifier selection for grouped ' + phase);
+    await waitFor(function() {
+      return first.classList.contains('dragging') && second.classList.contains('dragging') &&
+        getComputedStyle(first).position === 'fixed' && getComputedStyle(second).position === 'fixed' &&
+        getComputedStyle(first).transform !== 'none' && getComputedStyle(second).transform !== 'none' &&
+        document.querySelectorAll('#kanban-board [data-pointer-drag-placeholder]').length === 2;
+    }, 'all selected cards moving during native grouped ' + phase);
+    await fetch('/browser-native-grouped-motion?phase=' + encodeURIComponent(phase), {method:'POST'});
+    await waitFor(function() {
+      return !first.classList.contains('dragging') && !second.classList.contains('dragging') &&
+        getComputedStyle(first).position !== 'fixed' && getComputedStyle(second).position !== 'fixed' &&
+        !first.style.transform && !second.style.transform &&
+        document.querySelectorAll('#kanban-board [data-pointer-drag-placeholder]').length === 0;
+    }, 'native grouped ' + phase + ' cleanup');
+    await waitFor(function() { return document.querySelectorAll('#kanban-board .task-selected').length === 0; }, 'native grouped ' + phase + ' selection cleanup');
+  }
   window.addEventListener('error', function(event) { report('fail', String(event.error && event.error.stack || event.message)); });
   (async function() {
     if (location.pathname === '/tasks') {
       if (document.getElementById('selection-counter')) fail('tasks page must not render a selection counter');
       var groupedDrag = new URLSearchParams(location.search).get('grouped_drag');
       if (groupedDrag === 'category' || groupedDrag === 'active') {
-        var groupedBacklogTask = document.querySelector('#task-task-drag-cursor');
-        var groupedActiveTask = document.querySelector('#task-task-active-status-drag');
-        groupedBacklogTask.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true, ctrlKey:true}));
-        groupedActiveTask.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true, ctrlKey:true}));
-        if (!groupedBacklogTask.classList.contains('task-selected') || !groupedActiveTask.classList.contains('task-selected')) fail('grouped drag setup must select both task cards');
         var groupedTarget = groupedDrag === 'active' ? '.task-drop-zone[data-status="running"]' : '.category-drop-zone[data-category="completed"]';
-        await exerciseOuterAutoScrollDrop('#task-task-drag-cursor', '#kanban-board', 'y', groupedTarget, 'grouped task ' + groupedDrag + ' cards', groupedDrag === 'active' ? 12 : 8);
-        await waitFor(function() {
-          return document.querySelectorAll('#kanban-board .task-selected').length === 0;
-        }, 'grouped task ' + groupedDrag + ' selection cleanup after authoritative swap');
+        await exerciseNativeGroupedDrop(groupedDrag, groupedTarget);
         location.href = groupedDrag === 'category'
           ? '/tasks?project_id=project-card-drag-cursor&grouped_drag=active'
           : '/tasks?project_id=project-card-drag-cursor&drag_only=1';
@@ -330,6 +510,8 @@ window.addEventListener('DOMContentLoaded', function() {
 </script>`
 
 	browserResult := make(chan string, 4)
+	nativeGroupedReady := make(chan nativeGroupedDragCoordinates, 2)
+	nativeGroupedMotionObserved := make(chan string, 2)
 	var requestMu sync.Mutex
 	var requests []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -378,6 +560,26 @@ window.addEventListener('DOMContentLoaded', function() {
 			page := strings.Replace(out.String(), "https://unpkg.com/htmx.org@2.0.4", "/htmx-2.0.4.min.js", 1)
 			page = strings.Replace(page, "</head>", runner+"</head>", 1)
 			_, _ = w.Write([]byte(page))
+		case "/browser-native-grouped-ready":
+			parse := func(key string) float64 {
+				value, _ := strconv.ParseFloat(r.URL.Query().Get(key), 64)
+				return value
+			}
+			nativeGroupedReady <- nativeGroupedDragCoordinates{
+				phase:      r.URL.Query().Get("phase"),
+				firstX:     parse("first_x"),
+				firstY:     parse("first_y"),
+				secondX:    parse("second_x"),
+				secondY:    parse("second_y"),
+				dragStartX: parse("drag_start_x"),
+				dragStartY: parse("drag_start_y"),
+				dropX:      parse("drop_x"),
+				dropY:      parse("drop_y"),
+			}
+			w.WriteHeader(http.StatusNoContent)
+		case "/browser-native-grouped-motion":
+			nativeGroupedMotionObserved <- r.URL.Query().Get("phase")
+			w.WriteHeader(http.StatusNoContent)
 		case "/browser-result":
 			browserResult <- r.URL.Query().Get("status") + ":" + r.URL.Query().Get("message")
 			w.WriteHeader(http.StatusNoContent)
@@ -418,6 +620,13 @@ window.addEventListener('DOMContentLoaded', function() {
 	}))
 	defer server.Close()
 
+	debugListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve Chrome debugging port: %v", err)
+	}
+	debugPort := debugListener.Addr().(*net.TCPAddr).Port
+	_ = debugListener.Close()
+
 	stderrPath := filepath.Join(t.TempDir(), "card-drag-cursor-browser.stderr")
 	stderrFile, err := os.Create(stderrPath)
 	if err != nil {
@@ -427,7 +636,7 @@ window.addEventListener('DOMContentLoaded', function() {
 	cmd := exec.Command(chrome,
 		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
 		"--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling",
-		"--no-first-run", "--no-default-browser-check", "--window-size=1280,900",
+		"--no-first-run", "--no-default-browser-check", "--window-size=1280,900", fmt.Sprintf("--remote-debugging-port=%d", debugPort),
 		"--user-data-dir="+filepath.Join(t.TempDir(), "card-drag-cursor-browser-profile"),
 		server.URL+"/tasks?project_id="+project.ID,
 	)
@@ -435,9 +644,20 @@ window.addEventListener('DOMContentLoaded', function() {
 	if err := startBrowserProcess(cmd); err != nil {
 		t.Fatalf("start Chrome: %v", err)
 	}
+	nativeInputErr := driveNativeGroupedTaskDrags(debugPort, server.URL, nativeGroupedReady, nativeGroupedMotionObserved)
 	var outcome string
 	select {
 	case outcome = <-browserResult:
+	case err := <-nativeInputErr:
+		if err != nil {
+			outcome = "fail:native grouped Chromium input: " + err.Error()
+		} else {
+			select {
+			case outcome = <-browserResult:
+			case <-time.After(10 * time.Second):
+				outcome = "fail:timed out after native grouped Chromium input"
+			}
+		}
 	case <-time.After(20 * time.Second):
 		outcome = "fail:timed out waiting for browser result"
 	}

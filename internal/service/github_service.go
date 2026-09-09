@@ -782,21 +782,27 @@ func (s *GitHubService) PublishBranch(ctx context.Context, repo *GitHubRepoRef, 
 		}
 	}
 	if len(changes) == 0 {
-		if remoteBranchSHA != "" {
+		if remoteBranchSHA == remoteBaseSHA {
 			return &GitHubPublishBranchResult{HeadSHA: remoteBranchSHA}, nil
 		}
-		publishedSHA := remoteBaseSHA
-		if err := s.publishExistingLocalCommitWithToken(ctx, token, repo, branch, remoteBaseSHA, false); err != nil {
-			if !isGitHubRefAlreadyExistsError(err) {
-				return nil, err
+		if remoteBranchSHA == "" {
+			if err := s.publishExistingLocalCommitWithToken(ctx, token, repo, branch, remoteBaseSHA, false); err != nil {
+				if !isGitHubRefAlreadyExistsError(err) {
+					return nil, err
+				}
+				concurrentSHA, refErr := s.githubBranchCommitSHA(ctx, token, repo, branch)
+				if refErr != nil {
+					return nil, fmt.Errorf("confirming concurrently created remote publish branch %q: %w", branch, refErr)
+				}
+				remoteBranchSHA = concurrentSHA
+				parentSHA = concurrentSHA
+			} else {
+				return &GitHubPublishBranchResult{HeadSHA: remoteBaseSHA}, nil
 			}
-			concurrentSHA, refErr := s.githubBranchCommitSHA(ctx, token, repo, branch)
-			if refErr != nil {
-				return nil, fmt.Errorf("confirming concurrently created remote publish branch %q: %w", branch, refErr)
+			if remoteBranchSHA == remoteBaseSHA {
+				return &GitHubPublishBranchResult{HeadSHA: remoteBranchSHA}, nil
 			}
-			publishedSHA = concurrentSHA
 		}
-		return &GitHubPublishBranchResult{HeadSHA: publishedSHA}, nil
 	}
 	if baseTreeSHA == "" {
 		baseTreeSHA, err = s.githubCommitTreeSHA(ctx, token, repo, remoteBaseSHA)
@@ -804,9 +810,12 @@ func (s *GitHubService) PublishBranch(ctx context.Context, repo *GitHubRepoRef, 
 			return nil, err
 		}
 	}
-	treeSHA, err := s.createGitHubTree(ctx, token, repo, baseTreeSHA, changes)
-	if err != nil {
-		return nil, err
+	treeSHA := baseTreeSHA
+	if len(changes) > 0 {
+		treeSHA, err = s.createGitHubTree(ctx, token, repo, baseTreeSHA, changes)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if remoteBranchSHA != "" {
 		remoteBranchTreeSHA, treeErr := s.githubCommitTreeSHA(ctx, token, repo, remoteBranchSHA)
@@ -1033,9 +1042,11 @@ func (s *GitHubService) filterNoOpGitHubTreeDeletions(ctx context.Context, token
 			continue
 		}
 		if entry, exists := remotePaths[change.Path]; exists {
-			if updated, compatible := compatibleGitHubTreeDeletion(change, entry); compatible {
-				filtered = append(filtered, updated)
+			updated, compatible := compatibleGitHubTreeDeletion(change, entry)
+			if !compatible {
+				return nil, incompatibleGitHubTreeDeletionError(change, entry)
 			}
+			filtered = append(filtered, updated)
 			continue
 		}
 		if !truncated {
@@ -1046,9 +1057,11 @@ func (s *GitHubService) filterNoOpGitHubTreeDeletions(ctx context.Context, token
 			return nil, fmt.Errorf("checking remote base tree path %q: %w", change.Path, err)
 		}
 		if exists {
-			if updated, compatible := compatibleGitHubTreeDeletion(change, entry); compatible {
-				filtered = append(filtered, updated)
+			updated, compatible := compatibleGitHubTreeDeletion(change, entry)
+			if !compatible {
+				return nil, incompatibleGitHubTreeDeletionError(change, entry)
 			}
+			filtered = append(filtered, updated)
 		}
 	}
 	return filtered, nil
@@ -1086,6 +1099,10 @@ func compatibleGitHubTreeDeletion(change githubBranchChange, entry githubTreeEnt
 		change.Mode = entry.Mode
 	}
 	return change, true
+}
+
+func incompatibleGitHubTreeDeletionError(change githubBranchChange, entry githubTreeEntry) error {
+	return fmt.Errorf("remote base tree path %q has type %q mode %q, incompatible with task deletion type %q mode %q", change.Path, entry.Type, entry.Mode, githubTreeTypeForMode(change.Mode), change.Mode)
 }
 
 func githubTreeTypeForMode(mode string) string {

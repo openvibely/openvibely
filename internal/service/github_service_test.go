@@ -2081,23 +2081,17 @@ func TestPublishBranchFiltersDeletionMissingFromTruncatedRemoteBaseTree(t *testi
 	if err := os.WriteFile(filepath.Join(repoDir, "local-main-only.txt"), []byte("not on remote main\n"), 0o644); err != nil {
 		t.Fatalf("write local-main-only.txt: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(repoDir, "remote-type-conflict"), []byte("local file\n"), 0o644); err != nil {
-		t.Fatalf("write remote-type-conflict: %v", err)
-	}
 	if err := os.MkdirAll(filepath.Join(repoDir, "nested"), 0o755); err != nil {
 		t.Fatalf("create nested directory: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(repoDir, "nested", "remote.txt"), []byte("on remote main\n"), 0o644); err != nil {
 		t.Fatalf("write nested/remote.txt: %v", err)
 	}
-	runGitHubBranchFixtureGit(t, repoDir, "add", "local-main-only.txt", "remote-type-conflict", "nested/remote.txt")
+	runGitHubBranchFixtureGit(t, repoDir, "add", "local-main-only.txt", "nested/remote.txt")
 	runGitHubBranchFixtureGit(t, repoDir, "commit", "-m", "advance local main")
 	runGitHubBranchFixtureGit(t, repoDir, "switch", "-c", "task/api-publish")
 	if err := os.Remove(filepath.Join(repoDir, "local-main-only.txt")); err != nil {
 		t.Fatalf("remove local-main-only.txt: %v", err)
-	}
-	if err := os.Remove(filepath.Join(repoDir, "remote-type-conflict")); err != nil {
-		t.Fatalf("remove remote-type-conflict: %v", err)
 	}
 	if err := os.Remove(filepath.Join(repoDir, "README.md")); err != nil {
 		t.Fatalf("remove README.md: %v", err)
@@ -2125,9 +2119,9 @@ func TestPublishBranchFiltersDeletionMissingFromTruncatedRemoteBaseTree(t *testi
 			fmt.Fprint(w, `{"tree":{"sha":"base-tree"}}`)
 		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/git/trees/base-tree":
 			if r.URL.Query().Get("recursive") == "1" {
-				fmt.Fprint(w, `{"tree":[{"path":"README.md","mode":"100644","type":"blob"},{"path":"remote-type-conflict","mode":"040000","type":"tree"}],"truncated":true}`)
+				fmt.Fprint(w, `{"tree":[{"path":"README.md","mode":"100644","type":"blob"}],"truncated":true}`)
 			} else {
-				fmt.Fprint(w, `{"tree":[{"path":"README.md","mode":"100644","type":"blob"},{"path":"remote-type-conflict","mode":"040000","type":"tree"},{"path":"nested","mode":"040000","type":"tree","sha":"nested-tree"}],"truncated":false}`)
+				fmt.Fprint(w, `{"tree":[{"path":"README.md","mode":"100644","type":"blob"},{"path":"nested","mode":"040000","type":"tree","sha":"nested-tree"}],"truncated":false}`)
 			}
 		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/git/trees/nested-tree":
 			if r.URL.Query().Has("recursive") {
@@ -2165,6 +2159,34 @@ func TestPublishBranchFiltersDeletionMissingFromTruncatedRemoteBaseTree(t *testi
 	entries := decodeTreePayload(t, treePayload)
 	if len(entries) != 3 || entries[0]["path"] != "README.md" || entries[0]["sha"] != nil || entries[1]["path"] != "nested/remote.txt" || entries[1]["sha"] != nil || entries[2]["path"] != "task-change.txt" {
 		t.Fatalf("expected remote deletions and task-change.txt addition only, got %s", treePayload)
+	}
+}
+
+func TestFilterNoOpGitHubTreeDeletionsRejectsTypeConflict(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/repos/openvibely/openvibely/git/trees/base-tree" || r.URL.Query().Get("recursive") != "1" {
+			t.Fatalf("unexpected GitHub API request: %s %s", r.Method, r.URL.String())
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"tree":[{"path":"conflict","mode":"040000","type":"tree","sha":"subtree"}],"truncated":false}`)
+	}))
+	defer server.Close()
+
+	svc := newTreeTestGitHubService(server.URL)
+	_, err := svc.filterNoOpGitHubTreeDeletions(
+		context.Background(),
+		"token",
+		&GitHubRepoRef{Owner: "openvibely", Name: "openvibely"},
+		"base-tree",
+		[]githubBranchChange{{Path: "conflict", Mode: "100644", Delete: true}},
+	)
+	if err == nil {
+		t.Fatal("expected incompatible deletion to fail")
+	}
+	for _, detail := range []string{`path "conflict"`, `type "tree"`, `task deletion type "blob"`} {
+		if !strings.Contains(err.Error(), detail) {
+			t.Fatalf("expected conflict error to contain %q, got %v", detail, err)
+		}
 	}
 }
 
@@ -2425,7 +2447,7 @@ func TestPublishBranchNoOpsWhenDesiredTreeMatchesRemoteTaskBranch(t *testing.T) 
 	}
 }
 
-func TestPublishBranchNoOpsWhenNoChangesAndRemoteTaskBranchExists(t *testing.T) {
+func TestPublishBranchRestoresRemoteTaskBranchToBaseWhenNoChanges(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	settingsRepo := repository.NewSettingsRepo(db)
 	ctx := context.Background()
@@ -2439,6 +2461,8 @@ func TestPublishBranchNoOpsWhenNoChangesAndRemoteTaskBranchExists(t *testing.T) 
 	repoDir := createTestGitRepo(t)
 	remoteBaseSHA := "1111111111111111111111111111111111111111"
 	remoteBranchSHA := "2222222222222222222222222222222222222222"
+	var commitPayload string
+	var refPayload string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Authorization"); got != "Bearer ghp_test" {
 			t.Fatalf("expected PAT bearer auth, got %q", got)
@@ -2449,8 +2473,26 @@ func TestPublishBranchNoOpsWhenNoChangesAndRemoteTaskBranchExists(t *testing.T) 
 			_, _ = w.Write([]byte(`{"object":{"sha":"` + remoteBaseSHA + `"}}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/git/ref/heads/task/api-publish":
 			_, _ = w.Write([]byte(`{"object":{"sha":"` + remoteBranchSHA + `"}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/git/commits/"+remoteBaseSHA:
+			_, _ = w.Write([]byte(`{"tree":{"sha":"base-tree"}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/git/commits/"+remoteBranchSHA:
+			_, _ = w.Write([]byte(`{"tree":{"sha":"stale-task-tree"}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/openvibely/openvibely/git/commits":
+			body, _ := io.ReadAll(r.Body)
+			commitPayload = string(body)
+			if !strings.Contains(commitPayload, `"tree":"base-tree"`) || !strings.Contains(commitPayload, `"parents":["`+remoteBranchSHA+`"]`) {
+				t.Fatalf("expected restoration commit based on stale task branch, got %s", commitPayload)
+			}
+			_, _ = w.Write([]byte(`{"sha":"restored-commit"}`))
+		case r.Method == http.MethodPatch && r.URL.Path == "/repos/openvibely/openvibely/git/refs/heads/task/api-publish":
+			body, _ := io.ReadAll(r.Body)
+			refPayload = string(body)
+			if !strings.Contains(refPayload, `"sha":"restored-commit"`) || !strings.Contains(refPayload, `"force":false`) {
+				t.Fatalf("unexpected restoration ref payload: %s", refPayload)
+			}
+			_, _ = w.Write([]byte(`{"ref":"refs/heads/task/api-publish","object":{"sha":"restored-commit"}}`))
 		default:
-			t.Fatalf("unexpected GitHub API request for no-op publish: %s %s", r.Method, r.URL.String())
+			t.Fatalf("unexpected GitHub API request for restoration publish: %s %s", r.Method, r.URL.String())
 		}
 	}))
 	defer server.Close()
@@ -2463,13 +2505,20 @@ func TestPublishBranchNoOpsWhenNoChangesAndRemoteTaskBranchExists(t *testing.T) 
 		}
 		return defaultRunGit(ctx, dir, extraEnv, args...)
 	}
-	if _, err := svc.PublishBranch(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubPublishBranchRequest{
+	result, err := svc.PublishBranch(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubPublishBranchRequest{
 		RepoPath:      repoDir,
 		Branch:        "task/api-publish",
 		BaseBranch:    "main",
-		CommitMessage: "No-op publish via API",
-	}); err != nil {
+		CommitMessage: "Restore task branch via API",
+	})
+	if err != nil {
 		t.Fatalf("PublishBranch returned error: %v", err)
+	}
+	if result.HeadSHA != "restored-commit" || !result.CreatedCommit || result.ParentSHA != remoteBranchSHA {
+		t.Fatalf("unexpected restoration result: %#v", result)
+	}
+	if commitPayload == "" || refPayload == "" {
+		t.Fatal("expected restoration commit and ref update")
 	}
 }
 
@@ -2574,6 +2623,10 @@ func TestPublishBranchNoChangesConcurrentBranchCreationSucceeds(t *testing.T) {
 				return
 			}
 			_, _ = w.Write([]byte(`{"object":{"sha":"` + concurrentBranchSHA + `"}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/git/commits/"+remoteBaseSHA:
+			_, _ = w.Write([]byte(`{"tree":{"sha":"base-tree"}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/git/commits/"+concurrentBranchSHA:
+			_, _ = w.Write([]byte(`{"tree":{"sha":"base-tree"}}`))
 		case r.Method == http.MethodPatch && r.URL.Path == "/repos/openvibely/openvibely/git/refs/heads/task/api-publish":
 			patches++
 			body, _ := io.ReadAll(r.Body)

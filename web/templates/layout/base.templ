@@ -3107,13 +3107,15 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						clearSelection();
 						draggedTaskIds = [taskID];
 					}
-					draggedTaskIds.forEach(id => {
-						const card = document.getElementById('task-' + id);
-						if (card) card.classList.add('dragging');
-					});
-					state.motion = beginPointerCardMotion(state.card);
-				}
-
+						state.dragCards = draggedTaskIds.map(function(id) {
+							return document.getElementById('task-' + id);
+						}).filter(Boolean);
+						state.motions = state.dragCards.map(function(card) {
+							card.classList.add('dragging');
+							return beginPointerCardMotion(card);
+						});
+						state.motion = state.motions[state.dragCards.indexOf(state.card)];
+					}
 				function refreshTaskPointerDropZone(clientX, clientY) {
 					const state = taskPointerDrag;
 					if (!state || !state.started) return null;
@@ -3141,20 +3143,27 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					const deltaY = event.clientY - state.startY;
 					if (!state.started && Math.hypot(deltaX, deltaY) < 4) return;
 					beginTaskPointerDrag(event);
-					event.preventDefault();
-					movePointerCard(state.motion, deltaX, deltaY);
-					updateTaskPointerDropZone(event);
-				}
-
+						event.preventDefault();
+						state.motions.forEach(function(motion) {
+							movePointerCard(motion, deltaX, deltaY);
+						});
+						updateTaskPointerDropZone(event);
+					}
 				function cleanupTaskPointerDrag() {
 					const state = taskPointerDrag;
 					stopAutoScroll();
-					if (state && state.dropZone) state.dropZone.classList.remove('drag-over');
-					if (state) endPointerCardMotion(state.motion);
-					document.querySelectorAll('.dragging').forEach(card => {
-						card.classList.remove('dragging');
-					});
-					document.documentElement.classList.remove('drag-cursor-active');
+						if (state && state.dropZone) state.dropZone.classList.remove('drag-over');
+						if (state && state.motions) {
+							state.motions.forEach(function(motion) {
+								endPointerCardMotion(motion);
+								motion.card.classList.remove('dragging');
+							});
+						} else if (state) {
+							endPointerCardMotion(state.motion);
+						}
+						document.querySelectorAll('.dragging').forEach(card => {
+							card.classList.remove('dragging');
+						});					document.documentElement.classList.remove('drag-cursor-active');
 					document.body.classList.remove('drag-cursor-active');
 					window.removeEventListener('pointermove', handleTaskPointerMove, true);
 					window.removeEventListener('pointerup', handleTaskPointerUp, true);
