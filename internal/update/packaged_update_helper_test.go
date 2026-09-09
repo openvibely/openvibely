@@ -41,9 +41,23 @@ func TestReadPackagedUpdateHelperStateFileDoesNotRetryMissingState(t *testing.T)
 
 func TestDecodePackagedUpdateRelaunchMetadataContracts(t *testing.T) {
 	root := t.TempDir()
-	metadataJSON := `{"arguments":["openvibely","serve"],"working_directory":"` + root + `","executable_relative":"Contents/MacOS/OpenVibely"}`
+	metadataJSON, err := json.Marshal(packagedUpdateRelaunchMetadata{
+		Arguments:          []string{"openvibely", "serve"},
+		WorkingDirectory:   root,
+		ExecutableRelative: "Contents/MacOS/OpenVibely",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	oversizedMetadataJSON, err := json.Marshal(packagedUpdateRelaunchMetadata{
+		Arguments:        []string{strings.Repeat("x", packagedUpdateRelaunchMetadataMaxSize)},
+		WorkingDirectory: root,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	metadata, err := decodePackagedUpdateRelaunchMetadata(strings.NewReader(metadataJSON))
+	metadata, err := decodePackagedUpdateRelaunchMetadata(strings.NewReader(string(metadataJSON)))
 	if err != nil {
 		t.Fatalf("decodePackagedUpdateRelaunchMetadata: %v", err)
 	}
@@ -63,7 +77,7 @@ func TestDecodePackagedUpdateRelaunchMetadataContracts(t *testing.T) {
 		{name: "relative working directory", input: `{"arguments":["openvibely"],"working_directory":"relative"}`},
 		{name: "unknown field", input: `{"arguments":["openvibely"],"working_directory":"/tmp","extra":true}`},
 		{name: "malformed JSON", input: `not-json`},
-		{name: "exceeds input limit", input: `{"arguments":["` + strings.Repeat("x", packagedUpdateRelaunchMetadataMaxSize) + `"],"working_directory":"` + root + `"}`},
+		{name: "exceeds input limit", input: string(oversizedMetadataJSON)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := decodePackagedUpdateRelaunchMetadata(strings.NewReader(tc.input)); err == nil {
