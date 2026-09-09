@@ -573,6 +573,54 @@ func (r *TaskRepo) Update(ctx context.Context, t *models.Task) error {
 	return nil
 }
 
+func (r *TaskRepo) MoveTasksToActiveLane(ctx context.Context, projectID string, taskIDs []string, status models.TaskStatus) ([]models.Task, error) {
+	if status != models.StatusPending && status != models.StatusRunning {
+		return nil, fmt.Errorf("invalid active lane status: %s", status)
+	}
+	moved := make([]models.Task, 0, len(taskIDs))
+	err := withImmediateTx(ctx, r.db, func(exec sqlExecutor) error {
+		seen := make(map[string]struct{}, len(taskIDs))
+		var nextOrder int
+		if err := exec.QueryRowContext(ctx, `SELECT COALESCE(MAX(display_order), -1) + 1 FROM tasks WHERE project_id = ? AND category = 'active'`, projectID).Scan(&nextOrder); err != nil {
+			return fmt.Errorf("getting active tail order: %w", err)
+		}
+		for _, id := range taskIDs {
+			if _, duplicate := seen[id]; duplicate {
+				return fmt.Errorf("duplicate task in active lane move: %s", id)
+			}
+			seen[id] = struct{}{}
+			task, err := getTaskWithExecutor(ctx, exec, `SELECT `+taskSelectColumns+` FROM tasks WHERE id = ? AND project_id = ?`, id, projectID)
+			if err != nil {
+				return fmt.Errorf("loading active lane task %s: %w", id, err)
+			}
+			if task == nil {
+				return fmt.Errorf("task not found in project: %s", id)
+			}
+			if _, err := exec.ExecContext(ctx, `UPDATE tasks
+				SET category = 'active', status = ?, display_order = ?, completed_at = NULL, updated_at = datetime('now')
+				WHERE id = ? AND project_id = ?`, status, nextOrder, id, projectID); err != nil {
+				return fmt.Errorf("moving task %s to active lane: %w", id, err)
+			}
+			task.Category = models.CategoryActive
+			task.Status = status
+			task.DisplayOrder = nextOrder
+			task.CompletedAt = nil
+			moved = append(moved, *task)
+			nextOrder++
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if r.broadcaster != nil {
+		for _, task := range moved {
+			r.broadcaster.Publish(events.TaskEvent{Type: events.TaskBoardUpdated, TaskID: task.ID, TaskName: task.Title, ProjectID: task.ProjectID, Category: string(task.Category), Status: string(task.Status)})
+		}
+	}
+	return moved, nil
+}
+
 func (r *TaskRepo) UpdateCategory(ctx context.Context, id string, category models.TaskCategory) error {
 	var task *models.Task
 	err := withImmediateTx(ctx, r.db, func(exec sqlExecutor) error {

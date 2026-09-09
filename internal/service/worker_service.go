@@ -38,6 +38,7 @@ type WorkerService struct {
 	numWorkers int                                   // max parallel tasks (global limit)
 	queue      []models.Task                         // FIFO task queue
 	pending    map[string]bool                       // task IDs in queue or running (dedup)
+	preclaimed map[string]bool                       // ordinary tasks durably moved to running before queue admission
 	prepared   map[string]preparedAutomationDispatch // prepared Automation dispatches keyed by task ID
 	ctx        context.Context
 	cancel     context.CancelFunc
@@ -161,6 +162,7 @@ func NewWorkerService(llmSvc *LLMService, numWorkers int, projectRepo *repositor
 		projectRepo:           projectRepo,
 		numWorkers:            numWorkers,
 		pending:               make(map[string]bool),
+		preclaimed:            make(map[string]bool),
 		prepared:              make(map[string]preparedAutomationDispatch),
 		cancelFuncs:           make(map[string]context.CancelFunc),
 		cancellationRequested: make(map[string]bool),
@@ -294,6 +296,33 @@ func (w *WorkerService) Submit(task models.Task) {
 	w.dispatchNext()
 }
 
+func (w *WorkerService) SubmitPreclaimed(task models.Task) {
+	if task.Category == models.CategoryChat {
+		return
+	}
+	w.mu.Lock()
+	if w.pending[task.ID] {
+		w.preclaimed[task.ID] = true
+		for i := range w.queue {
+			if w.queue[i].ID == task.ID {
+				w.queue[i] = task
+			}
+		}
+		w.mu.Unlock()
+		w.dispatchNext()
+		return
+	}
+	w.pending[task.ID] = true
+	w.preclaimed[task.ID] = true
+	w.queue = append(w.queue, task)
+	w.mu.Unlock()
+	select {
+	case w.submitted <- task:
+	default:
+	}
+	w.dispatchNext()
+}
+
 // SubmitPrepared adapts a durably claimed Automation dispatch into the existing
 // worker queue. It owns no execution, capacity, lifecycle, or completion path of
 // its own; those remain in WorkerService and LLMService.
@@ -331,13 +360,14 @@ func (w *WorkerService) dispatchNext() {
 	for i < len(w.queue) {
 		task := w.queue[i]
 		prepared, isPrepared := w.prepared[task.ID]
+		ordinaryPreclaimed := w.preclaimed[task.ID]
 
 		// Prune stale tasks before checking capacity. A full global pool must not
 		// keep cancelled, demoted, or otherwise invalid queue entries alive forever.
 		if w.taskRepo != nil {
 			dbTask, err := w.taskRepo.GetByID(context.Background(), task.ID)
 			validStatus := dbTask != nil && dbTask.Status == models.StatusPending
-			if isPrepared && prepared.ExecutionID != "" {
+			if ordinaryPreclaimed || (isPrepared && prepared.ExecutionID != "") {
 				validStatus = dbTask != nil && dbTask.Status == models.StatusRunning
 			}
 			if err != nil || dbTask == nil || !validStatus ||
@@ -349,6 +379,7 @@ func (w *WorkerService) dispatchNext() {
 					}
 				}
 				delete(w.pending, task.ID)
+				delete(w.preclaimed, task.ID)
 				delete(w.prepared, task.ID)
 				applog.Infof("[worker] pruned stale task=%s %q from queue", task.ID, task.Title)
 				continue
@@ -406,15 +437,16 @@ func (w *WorkerService) dispatchNext() {
 
 		// Remove from queue (shift remaining)
 		w.queue = append(w.queue[:i], w.queue[i+1:]...)
+		delete(w.preclaimed, task.ID)
 		delete(w.prepared, task.ID)
 
 		// Dispatch
 		w.wg.Add(1)
-		go w.executeTask(task, agentConfigID, prepared, isPrepared, workDone)
+		go w.executeTask(task, agentConfigID, prepared, isPrepared, ordinaryPreclaimed, workDone)
 	}
 }
 
-func (w *WorkerService) executeTask(task models.Task, agentConfigID string, prepared preparedAutomationDispatch, isPrepared bool, workDone func()) {
+func (w *WorkerService) executeTask(task models.Task, agentConfigID string, prepared preparedAutomationDispatch, isPrepared, ordinaryPreclaimed bool, workDone func()) {
 	defer w.wg.Done()
 	defer workDone()
 
@@ -433,8 +465,8 @@ func (w *WorkerService) executeTask(task models.Task, agentConfigID string, prep
 	var executionErr error
 	var preparedTerminalStatus models.ExecutionStatus
 	var preparedTerminalMessage string
-	claimed := w.taskRepo == nil || (isPrepared && prepared.ExecutionID != "")
-	completionAttempted := w.taskRepo == nil || (isPrepared && prepared.ExecutionID != "")
+	claimed := w.taskRepo == nil || ordinaryPreclaimed || (isPrepared && prepared.ExecutionID != "")
+	completionAttempted := w.taskRepo == nil || ordinaryPreclaimed || (isPrepared && prepared.ExecutionID != "")
 	logOutcome := true
 	capacityAcquired := true
 
@@ -589,7 +621,7 @@ func (w *WorkerService) executeTask(task models.Task, agentConfigID string, prep
 			capacityAcquired = true
 		}
 	}
-	if w.taskRepo != nil && !isPrepared {
+	if w.taskRepo != nil && !isPrepared && !ordinaryPreclaimed {
 		if w.beforeOrdinaryTaskClaim != nil {
 			w.beforeOrdinaryTaskClaim(task)
 		}
@@ -639,6 +671,8 @@ func (w *WorkerService) executeTask(task models.Task, agentConfigID string, prep
 		}
 		// Tag the context so executeTaskWithAgent knows the task has
 		// already been claimed and won't skip it as "already running".
+		taskCtx = withTaskPreClaimed(taskCtx)
+	} else if ordinaryPreclaimed {
 		taskCtx = withTaskPreClaimed(taskCtx)
 	} else if isPrepared {
 		task.Status = models.StatusRunning
@@ -981,6 +1015,7 @@ func (w *WorkerService) CancelQueuedTask(ctx context.Context, taskID, message st
 	}
 	if removed {
 		delete(w.pending, taskID)
+		delete(w.preclaimed, taskID)
 		delete(w.prepared, taskID)
 	}
 	w.mu.Unlock()

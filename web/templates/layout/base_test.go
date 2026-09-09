@@ -26,6 +26,7 @@ func TestBaseKanbanMoveTransactionsPreventVisibleRollback(t *testing.T) {
 		"compareDocumentPosition",
 		"values.task_ids = ids.join(',')",
 		"target_status: targetStatus",
+		"{ category: 'active', target_status: targetStatus }",
 		"applyPendingKanbanMoves",
 		"settleKanbanMove",
 		"data-kanban-move-generation",
