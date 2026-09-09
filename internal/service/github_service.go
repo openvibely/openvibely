@@ -770,6 +770,17 @@ func (s *GitHubService) PublishBranch(ctx context.Context, repo *GitHubRepoRef, 
 	} else if !isGitHubRefMissingError(err) {
 		return nil, fmt.Errorf("resolving remote publish branch %q: %w", branch, err)
 	}
+	baseTreeSHA := ""
+	if hasGitHubBranchDeletions(changes) {
+		baseTreeSHA, err = s.githubCommitTreeSHA(ctx, token, repo, remoteBaseSHA)
+		if err != nil {
+			return nil, err
+		}
+		changes, err = s.filterNoOpGitHubTreeDeletions(ctx, token, repo, baseTreeSHA, changes)
+		if err != nil {
+			return nil, err
+		}
+	}
 	if len(changes) == 0 {
 		if remoteBranchSHA != "" {
 			return &GitHubPublishBranchResult{HeadSHA: remoteBranchSHA}, nil
@@ -787,9 +798,11 @@ func (s *GitHubService) PublishBranch(ctx context.Context, repo *GitHubRepoRef, 
 		}
 		return &GitHubPublishBranchResult{HeadSHA: publishedSHA}, nil
 	}
-	baseTreeSHA, err := s.githubCommitTreeSHA(ctx, token, repo, remoteBaseSHA)
-	if err != nil {
-		return nil, err
+	if baseTreeSHA == "" {
+		baseTreeSHA, err = s.githubCommitTreeSHA(ctx, token, repo, remoteBaseSHA)
+		if err != nil {
+			return nil, err
+		}
 	}
 	treeSHA, err := s.createGitHubTree(ctx, token, repo, baseTreeSHA, changes)
 	if err != nil {
@@ -981,6 +994,55 @@ func (s *GitHubService) githubCommitTreeSHA(ctx context.Context, token string, r
 // in parallel during branch publication. It is intentionally conservative to
 // avoid overwhelming the GitHub API while still overlapping independent uploads.
 const githubTreeBlobUploadConcurrency = 4
+
+func hasGitHubBranchDeletions(changes []githubBranchChange) bool {
+	for _, change := range changes {
+		if change.Delete {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *GitHubService) filterNoOpGitHubTreeDeletions(ctx context.Context, token string, repo *GitHubRepoRef, baseTreeSHA string, changes []githubBranchChange) ([]githubBranchChange, error) {
+	if !hasGitHubBranchDeletions(changes) {
+		return changes, nil
+	}
+
+	endpoint := fmt.Sprintf("%s/repos/%s/%s/git/trees/%s?recursive=1", githubAPIBaseURLForRepo(repo, s.apiBaseURL), url.PathEscape(repo.Owner), url.PathEscape(repo.Name), url.PathEscape(baseTreeSHA))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	s.applyGitHubHeaders(req, token)
+	var payload struct {
+		Tree []struct {
+			Path string `json:"path"`
+		} `json:"tree"`
+		Truncated bool `json:"truncated"`
+	}
+	if err := s.doGitHubJSON(req, &payload); err != nil {
+		return nil, fmt.Errorf("reading remote base tree: %w", err)
+	}
+	if payload.Truncated {
+		return nil, fmt.Errorf("reading remote base tree: recursive tree response was truncated")
+	}
+
+	remotePaths := make(map[string]struct{}, len(payload.Tree))
+	for _, entry := range payload.Tree {
+		remotePaths[entry.Path] = struct{}{}
+	}
+	filtered := make([]githubBranchChange, 0, len(changes))
+	for _, change := range changes {
+		if change.Delete {
+			if _, exists := remotePaths[change.Path]; !exists {
+				continue
+			}
+		}
+		filtered = append(filtered, change)
+	}
+	return filtered, nil
+}
 
 func (s *GitHubService) createGitHubTree(ctx context.Context, token string, repo *GitHubRepoRef, baseTreeSHA string, changes []githubBranchChange) (string, error) {
 	// Preserve deterministic original ordering of the tree entries. Each blob
