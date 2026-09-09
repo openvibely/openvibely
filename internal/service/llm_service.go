@@ -1685,6 +1685,10 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	// Card/manual actions gate on this status and cannot enter finalization early.
 	if statusErr := s.taskRepo.UpdateStatus(finalizeCtx, task.ID, models.StatusCompleted); statusErr != nil {
 		applog.Infof("[agent-svc] ExecuteTaskWithAgent error updating task status to completed: %v", statusErr)
+	} else if managedWorktree && s.worktreeSvc != nil {
+		// An achieved goal may have arrived while finalization held the repository
+		// lease or while the task was intentionally still non-terminal.
+		s.worktreeSvc.ReconcileGoalAutoMerge(finalizeCtx, task.ID)
 	}
 	if completedExecution {
 		s.publishExecutionTerminal(exec.ID, models.ExecCompleted, "")
