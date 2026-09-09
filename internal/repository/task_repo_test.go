@@ -1451,6 +1451,11 @@ func TestTaskRepo_ActivateAllBacklog(t *testing.T) {
 		t.Fatalf("failed to create project2: %v", err)
 	}
 
+	activeTail := &models.Task{ProjectID: project1.ID, Title: "Existing Active Tail", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "p"}
+	if err := repo.Create(ctx, activeTail); err != nil {
+		t.Fatalf("failed to create active tail: %v", err)
+	}
+
 	// Create backlog tasks for project1
 	backlogTask1 := &models.Task{
 		ProjectID: project1.ID,
@@ -1495,30 +1500,40 @@ func TestTaskRepo_ActivateAllBacklog(t *testing.T) {
 	}
 
 	// Verify backlog tasks from project1 are now active with pending status
-	task, _ := repo.GetByID(ctx, backlogTask1.ID)
-	if task == nil {
+	loadedTask1, _ := repo.GetByID(ctx, backlogTask1.ID)
+	if loadedTask1 == nil {
 		t.Fatal("expected backlog task 1 from project1 to exist")
 	}
-	if task.Category != models.CategoryActive {
-		t.Errorf("expected task 1 category to be active, got %s", task.Category)
+	if loadedTask1.Category != models.CategoryActive {
+		t.Errorf("expected task 1 category to be active, got %s", loadedTask1.Category)
 	}
-	if task.Status != models.StatusPending {
-		t.Errorf("expected task 1 status to be pending, got %s", task.Status)
+	if loadedTask1.Status != models.StatusPending {
+		t.Errorf("expected task 1 status to be pending, got %s", loadedTask1.Status)
 	}
 
-	task, _ = repo.GetByID(ctx, backlogTask2.ID)
-	if task == nil {
+	loadedTask2, _ := repo.GetByID(ctx, backlogTask2.ID)
+	if loadedTask2 == nil {
 		t.Fatal("expected backlog task 2 from project1 to exist")
 	}
-	if task.Category != models.CategoryActive {
-		t.Errorf("expected task 2 category to be active, got %s", task.Category)
+	if loadedTask2.Category != models.CategoryActive {
+		t.Errorf("expected task 2 category to be active, got %s", loadedTask2.Category)
 	}
-	if task.Status != models.StatusPending {
-		t.Errorf("expected task 2 status to be pending (reset from completed), got %s", task.Status)
+	if loadedTask2.Status != models.StatusPending {
+		t.Errorf("expected task 2 status to be pending (reset from completed), got %s", loadedTask2.Status)
+	}
+	if loadedTask1.DisplayOrder <= activeTail.DisplayOrder || loadedTask2.DisplayOrder <= loadedTask1.DisplayOrder {
+		t.Fatalf("activated order = tail:%d first:%d second:%d, want existing tail then backlog source order", activeTail.DisplayOrder, loadedTask1.DisplayOrder, loadedTask2.DisplayOrder)
+	}
+	ordered, err := repo.ListByProject(ctx, project1.ID, string(models.CategoryActive))
+	if err != nil {
+		t.Fatalf("list active tasks after activation: %v", err)
+	}
+	if len(ordered) != 3 || ordered[0].ID != activeTail.ID || ordered[1].ID != backlogTask1.ID || ordered[2].ID != backlogTask2.ID {
+		t.Fatalf("active order after reload = %#v, want existing tail then activated tasks", ordered)
 	}
 
 	// Verify backlog task from project2 is still backlog
-	task, _ = repo.GetByID(ctx, backlogTask3.ID)
+	task, _ := repo.GetByID(ctx, backlogTask3.ID)
 	if task == nil {
 		t.Fatal("expected backlog task from project2 to exist")
 	}
