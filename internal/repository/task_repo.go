@@ -24,7 +24,7 @@ const activeTaskAdmissionSelectColumns = `id, project_id, title, category, prior
 
 const taskThreadRenderMetadataColumns = `id, project_id, category, status, agent_id, agent_definition_id`
 
-const worktreeCleanupTaskSelectColumns = `id, project_id, status, worktree_path, worktree_branch, merge_target_branch, merge_status`
+const worktreeCleanupTaskSelectColumns = `id, project_id, status, worktree_path, worktree_branch, auto_merge_on_goal_achieved, merge_target_branch, merge_status`
 
 const swarmChildTaskSelectColumns = `id, project_id, title, category, priority, status, agent_id, agent_definition_id, tag, display_order, parent_task_id, swarm_role, swarm_status, swarm_config, swarm_sequence, worktree_path, worktree_branch, auto_merge, auto_merge_on_goal_achieved, merge_target_branch, merge_status, base_branch, base_commit_sha, lineage_depth, created_via, telegram_chat_id, created_at, updated_at, completed_at`
 
@@ -2450,17 +2450,37 @@ func (r *TaskRepo) UpdateMergeStatus(ctx context.Context, id string, status mode
 	return nil
 }
 
-// UpdateAutoMerge sets the auto_merge flag and merge target branch for a task.
+// UpdateAutoMerge sets the completion auto-merge flag and merge target branch.
+// Callers that expose both task settings should use UpdateAutoMergeSettings.
 func (r *TaskRepo) UpdateAutoMerge(ctx context.Context, id string, autoMerge bool, targetBranch string) error {
+	return r.UpdateAutoMergeSettings(ctx, id, autoMerge, nil, targetBranch)
+}
+
+// UpdateAutoMergeSettings updates both independent automatic merge settings.
+// A nil goal setting preserves its current value for backward-compatible callers.
+func (r *TaskRepo) UpdateAutoMergeSettings(ctx context.Context, id string, autoMerge bool, autoMergeOnGoalAchieved *bool, targetBranch string) error {
 	am := 0
 	if autoMerge {
 		am = 1
 	}
+	if autoMergeOnGoalAchieved == nil {
+		_, err := execBoundSQLite(ctx, r.db,
+			`UPDATE tasks SET auto_merge = ?, merge_target_branch = ?, updated_at = datetime('now') WHERE id = ?`,
+			am, targetBranch, id)
+		if err != nil {
+			return fmt.Errorf("updating auto merge: %w", err)
+		}
+		return nil
+	}
+	goalAM := 0
+	if *autoMergeOnGoalAchieved {
+		goalAM = 1
+	}
 	_, err := execBoundSQLite(ctx, r.db,
-		`UPDATE tasks SET auto_merge = ?, merge_target_branch = ?, updated_at = datetime('now') WHERE id = ?`,
-		am, targetBranch, id)
+		`UPDATE tasks SET auto_merge = ?, auto_merge_on_goal_achieved = ?, merge_target_branch = ?, updated_at = datetime('now') WHERE id = ?`,
+		am, goalAM, targetBranch, id)
 	if err != nil {
-		return fmt.Errorf("updating auto merge: %w", err)
+		return fmt.Errorf("updating auto merge settings: %w", err)
 	}
 	return nil
 }
@@ -2492,7 +2512,7 @@ func (r *TaskRepo) ListWithWorktrees(ctx context.Context) ([]models.Task, error)
 	var tasks []models.Task
 	for rows.Next() {
 		var t models.Task
-		if err := rows.Scan(&t.ID, &t.ProjectID, &t.Status, &t.WorktreePath, &t.WorktreeBranch, &t.MergeTargetBranch, &t.MergeStatus); err != nil {
+		if err := rows.Scan(&t.ID, &t.ProjectID, &t.Status, &t.WorktreePath, &t.WorktreeBranch, &t.AutoMergeOnGoalAchieved, &t.MergeTargetBranch, &t.MergeStatus); err != nil {
 			return nil, fmt.Errorf("scanning task worktree cleanup row: %w", err)
 		}
 		tasks = append(tasks, t)

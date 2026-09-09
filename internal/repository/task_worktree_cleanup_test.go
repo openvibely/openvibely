@@ -12,7 +12,7 @@ import (
 )
 
 func TestTaskRepoListWithWorktreesUsesCleanupProjection(t *testing.T) {
-	if got, want := worktreeCleanupTaskSelectColumns, "id, project_id, status, worktree_path, worktree_branch, merge_target_branch, merge_status"; got != want {
+	if got, want := worktreeCleanupTaskSelectColumns, "id, project_id, status, worktree_path, worktree_branch, auto_merge_on_goal_achieved, merge_target_branch, merge_status"; got != want {
 		t.Fatalf("cleanup projection changed: got %q, want %q", got, want)
 	}
 	for _, forbidden := range []string{"prompt", "chain_config", "swarm_config", "agent_id", "title", "created_at", "updated_at"} {
@@ -26,6 +26,10 @@ func TestTaskRepoListWithWorktreesUsesCleanupProjection(t *testing.T) {
 	ctx := context.Background()
 
 	withTarget := createWorktreeProjectionTask(t, ctx, repo, "with target", models.StatusCompleted, "/tmp/worktree-with-target", "task/with-target", "main", models.MergeStatusPending)
+	withTarget.AutoMergeOnGoalAchieved = true
+	if err := repo.Update(ctx, withTarget); err != nil {
+		t.Fatalf("enable goal auto-merge fixture: %v", err)
+	}
 	withoutTarget := createWorktreeProjectionTask(t, ctx, repo, "without target", models.StatusFailed, "/tmp/worktree-without-target", "task/without-target", "", models.MergeStatusMerged)
 	_ = createWorktreeProjectionTask(t, ctx, repo, "without worktree", models.StatusCompleted, "", "", "main", models.MergeStatusPending)
 
@@ -46,6 +50,9 @@ func TestTaskRepoListWithWorktreesUsesCleanupProjection(t *testing.T) {
 	}
 
 	assertWorktreeCleanupTask(t, got[withTarget.ID], withTarget.ID, "default", models.StatusCompleted, "/tmp/worktree-with-target", "task/with-target", "main", models.MergeStatusPending)
+	if !got[withTarget.ID].AutoMergeOnGoalAchieved {
+		t.Fatal("cleanup projection omitted auto_merge_on_goal_achieved needed for durable reconciliation")
+	}
 	assertWorktreeCleanupTask(t, got[withoutTarget.ID], withoutTarget.ID, "default", models.StatusFailed, "/tmp/worktree-without-target", "task/without-target", "", models.MergeStatusMerged)
 }
 
